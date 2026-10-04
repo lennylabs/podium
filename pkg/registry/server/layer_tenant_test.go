@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -366,10 +368,13 @@ func TestLayerEndpoint_EffectiveCapReadsRequestTenant(t *testing.T) {
 	}
 }
 
-// Spec: §8.5, §4.7.1 — erasure on a multi-tenant registry is refused with
-// 403 auth.forbidden for every caller, routed or not, before the admin check
-// and before any layer is read or purged.
-func TestLayerEndpoint_MultiTenantEraseRefused(t *testing.T) {
+// Spec: §8.5, §8.6, §6.3.1 — erasure on a multi-tenant registry acts in the
+// routed tenant: it purges that tenant's layers, redacts only records labeled
+// with that tenant, leaves other tenants' and unlabeled records unchanged,
+// labels user.erased with the tenant, and runs the re-anchor hook. An unrouted
+// request is refused with 403 auth.forbidden before the admin check, any
+// layer read, or any audit rewrite.
+func TestLayerEndpoint_MultiTenantEraseScoped(t *testing.T) {
 	t.Parallel()
 	for _, tenantID := range []string{"acme", ""} {
 		f := newTenantFixture(t)
@@ -380,22 +385,110 @@ func TestLayerEndpoint_MultiTenantEraseRefused(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("PutLayerConfig: %v", err)
 		}
-		rec := serveLayer(f.ep.EraseHandler(), http.MethodPost, "/v1/admin/erase",
+		sink := seedEraseLog(t, "acme", "globex", "")
+		before := readFile(t, sink.Path())
+		hooks := 0
+		h := f.ep.WithEraseSink(sink).WithAfterErase(func(context.Context) { hooks++ }).EraseHandler()
+		rec := serveLayer(h, http.MethodPost, "/v1/admin/erase",
 			map[string]any{"user_id": "alice@acme.com", "salt": "s"}, tenantID)
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("tenant %q: status = %d, want 403", tenantID, rec.Code)
+		if tenantID == "" {
+			assertUnroutedEraseRefused(t, f, rec, hooks, before, readFile(t, sink.Path()))
+			continue
 		}
-		env := decodeEnvelope(t, rec)
-		if env.Code != "auth.forbidden" || env.Message != "erasure is not available on a multi-tenant registry" {
-			t.Errorf("tenant %q: envelope = %s %q", tenantID, env.Code, env.Message)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
 		}
-		if f.adminCalls != 0 {
-			t.Errorf("tenant %q: admin callback ran %d times, want 0", tenantID, f.adminCalls)
+		if _, ok := layerIDs(t, f.st, "acme")["alice-personal"]; ok {
+			t.Errorf("alice-personal survived the erase")
 		}
-		if _, ok := layerIDs(t, f.st, "acme")["alice-personal"]; !ok {
-			t.Errorf("tenant %q: alice-personal was purged", tenantID)
+		if hooks != 1 {
+			t.Errorf("afterErase ran %d times, want 1", hooks)
+		}
+		assertScopedErase(t, sink, "acme")
+	}
+}
+
+// assertUnroutedEraseRefused checks the fail-closed refusal of an unrouted
+// multi-tenant erase: 403 auth.forbidden, no admin call, no purge, no hook,
+// and a byte-identical audit file.
+func assertUnroutedEraseRefused(t *testing.T, f *tenantFixture, rec *httptest.ResponseRecorder, hooks int, before, after []byte) {
+	t.Helper()
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("unrouted: status = %d, want 403", rec.Code)
+	}
+	if env := decodeEnvelope(t, rec); env.Code != "auth.forbidden" {
+		t.Errorf("unrouted: code = %s, want auth.forbidden", env.Code)
+	}
+	if f.adminCalls != 0 || hooks != 0 {
+		t.Errorf("unrouted: admin calls = %d, hooks = %d, want 0 and 0", f.adminCalls, hooks)
+	}
+	if _, ok := layerIDs(t, f.st, "acme")["alice-personal"]; !ok {
+		t.Errorf("unrouted: alice-personal was purged")
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("unrouted: audit file changed")
+	}
+}
+
+// seedEraseLog writes one alice record per tenant label into a fresh file
+// sink. An empty label seeds an unlabeled record.
+func seedEraseLog(t *testing.T, tenants ...string) *audit.FileSink {
+	t.Helper()
+	sink, err := audit.NewFileSink(filepath.Join(t.TempDir(), "audit.log"))
+	if err != nil {
+		t.Fatalf("NewFileSink: %v", err)
+	}
+	for _, tenant := range tenants {
+		if err := sink.Append(context.Background(), audit.Event{
+			Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Target: "skill/x",
+			Tenant: tenant, Timestamp: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("Append: %v", err)
 		}
 	}
+	return sink
+}
+
+// assertScopedErase checks that only the records labeled tenant lost alice,
+// that user.erased names the tenant and the superseded head, and that the
+// rewritten chain verifies.
+func assertScopedErase(t *testing.T, sink *audit.FileSink, tenant string) {
+	t.Helper()
+	var erased map[string]any
+	for _, line := range bytes.Split(bytes.TrimSpace(readFile(t, sink.Path())), []byte("\n")) {
+		var ev map[string]any
+		if err := json.Unmarshal(line, &ev); err != nil {
+			t.Fatalf("parse %s: %v", line, err)
+		}
+		label, _ := ev["tenant"].(string)
+		if ev["type"] == string(audit.EventUserErased) {
+			erased = ev
+			continue
+		}
+		hasAlice := bytes.Contains(line, []byte("alice@acme.com"))
+		if hasAlice == (label == tenant) {
+			t.Errorf("record labeled %q: alice present = %v; %s", label, hasAlice, line)
+		}
+	}
+	if erased == nil {
+		t.Fatalf("no user.erased record")
+	}
+	ctxVals, _ := erased["context"].(map[string]any)
+	if erased["tenant"] != tenant || ctxVals["transformed"] != "1" || ctxVals["superseded_head"] == nil {
+		t.Errorf("user.erased = %v, want tenant %q, transformed 1, superseded_head set", erased, tenant)
+	}
+	if err := sink.Verify(context.Background()); err != nil {
+		t.Errorf("Verify after erase: %v", err)
+	}
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return b
 }
 
 // Spec: §7.3.4, §7.3.1 (Tenant selection) — manage_any_layer is evaluated in

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -208,5 +209,78 @@ func TestErase_MissingUserID(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// failingSink is an audit.Sink whose Append always fails, standing in for an
+// unreachable external endpoint.
+type failingSink struct{ audit.Sink }
+
+func (failingSink) Append(context.Context, audit.Event) error {
+	return errors.New("endpoint unreachable")
+}
+
+// endpointSinkErase builds a single-tenant endpoint redirected to an external
+// audit sink (no local file to rewrite) with an afterErase hook counter.
+func endpointSinkErase(t *testing.T, sink audit.Sink, hooks *int) *httptest.Server {
+	t.Helper()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	admin := layer.Identity{Sub: "carol@acme.com", IsAuthenticated: true}
+	ep := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
+		WithAudit(sink).
+		WithEraseSink(nil).
+		WithAfterErase(func(context.Context) { *hooks++ }).
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) { return admin, nil }).
+		WithAdminAuth(func(*http.Request) error { return nil })
+	ts := httptest.NewServer(ep.EraseHandler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// Spec: §8.5, §8.6 — with an external endpoint sink the registry rewrites no
+// record, appends a tenant-labeled user.erased naming the admin, and runs no
+// re-anchor because no local chain changed.
+func TestErase_EndpointSinkRecordsUserErased(t *testing.T) {
+	t.Parallel()
+	sink := audit.NewMemory()
+	hooks := 0
+	ts := endpointSinkErase(t, sink, &hooks)
+	resp := postErase(t, ts.URL, map[string]any{"user_id": "alice@acme.com", "salt": "s"})
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	events := sink.Events()
+	if len(events) != 1 {
+		t.Fatalf("events = %+v, want one user.erased", events)
+	}
+	ev := events[0]
+	if ev.Type != audit.EventUserErased || ev.Tenant != "t" || ev.Caller != "carol@acme.com" || ev.Context["transformed"] != "0" {
+		t.Errorf("user.erased = %+v, want tenant t, caller carol, transformed 0", ev)
+	}
+	if _, ok := ev.Context["superseded_head"]; ok {
+		t.Errorf("superseded_head recorded with no chain rewrite")
+	}
+	if hooks != 0 {
+		t.Errorf("afterErase ran %d times with no file sink, want 0", hooks)
+	}
+}
+
+// Spec: §8.5 — a failed user.erased delivery to the endpoint sink is reported
+// as 500 registry.unavailable rather than dropped.
+func TestErase_EndpointSinkAppendFailure(t *testing.T) {
+	t.Parallel()
+	hooks := 0
+	ts := endpointSinkErase(t, failingSink{}, &hooks)
+	resp := postErase(t, ts.URL, map[string]any{"user_id": "alice@acme.com", "salt": "s"})
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+	if env := decodeEnvelope(t, resp); env.Code != "registry.unavailable" || !strings.Contains(env.Message, "user.erased") {
+		t.Errorf("envelope = %s %q, want registry.unavailable naming user.erased", env.Code, env.Message)
 	}
 }

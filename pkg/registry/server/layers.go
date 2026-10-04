@@ -114,6 +114,10 @@ type LayerEndpoint struct {
 	// configured PODIUM_NOTIFICATION_PROVIDER. Nil leaves the failure path
 	// notification-free (the de facto standalone default unless a provider is set).
 	notify NotificationFunc
+	// afterErase runs after an erasure rewrites the file-backed audit chain.
+	// serverboot wires the §8.6 re-anchor so the rewritten head is anchored
+	// immediately rather than at the next periodic tick. Nil skips it.
+	afterErase func(context.Context)
 }
 
 // NotificationFunc delivers one §9.1 operational notification. It mirrors
@@ -220,9 +224,10 @@ func (e *LayerEndpoint) WithAdminAuth(fn func(*http.Request) error) *LayerEndpoi
 // registry routes each request to a tenant by §6.3.1 and attaches it with
 // core.ContextWithTenant, and the endpoint acts in that tenant alone. A request
 // carrying no routed tenant is unrouted: list returns no layers, every write
-// is refused, and erasure is refused for every caller.
+// is refused, and erasure acts in the routed tenant and refuses an unrouted
+// request.
 //
-// Spec: §6.3.1, §7.3.1 (Tenant selection)
+// Spec: §6.3.1, §7.3.1 (Tenant selection), §8.5
 func (e *LayerEndpoint) WithTenantRouting() *LayerEndpoint {
 	e.multiTenant = true
 	return e
@@ -460,10 +465,22 @@ func (e *LayerEndpoint) WithEventPublisher(fn ingest.EventEmitter) *LayerEndpoin
 // WithEraseSink installs the file-backed sink the §8.5 erasure flow
 // rewrites in place. Pass the same file sink given to WithAudit when the
 // registry writes a local log; pass nil when redirected to an external
-// endpoint, in which case the erase endpoint purges layers but performs no
-// local-log redaction (the aggregator owns the shipped stream).
+// endpoint, in which case the erase endpoint purges layers, performs no
+// local-log redaction (the aggregator owns the shipped stream), and appends
+// user.erased to the WithAudit sink.
 func (e *LayerEndpoint) WithEraseSink(file *audit.FileSink) *LayerEndpoint {
 	e.auditFile = file
+	return e
+}
+
+// WithAfterErase installs the §8.6 re-anchor seam: fn runs with the request
+// context after an erasure rewrites the file-backed audit chain, so the new
+// chain head is anchored immediately. It does not run when the registry is
+// redirected to an external endpoint, because no local chain is rewritten.
+//
+// Spec: §8.6
+func (e *LayerEndpoint) WithAfterErase(fn func(context.Context)) *LayerEndpoint {
+	e.afterErase = fn
 	return e
 }
 
@@ -969,15 +986,21 @@ type eraseRequest struct {
 	Salt   string `json:"salt"`
 }
 
-// erase performs the §8.5 GDPR right-to-erasure for user_id. It (1)
-// unregisters and soft-deletes every user-defined layer the user owns and
-// the artifacts ingested from them, (2) redacts the user identity across the
-// registry audit stream, and (3) appends a registry-sourced user.erased
-// event naming the invoking admin (§8.1). Admin-only; rejected in read-only
-// mode because it mutates catalogue state.
+// erase performs the §8.5 GDPR right-to-erasure for user_id in the tenant
+// the request acts in. It (1) unregisters and soft-deletes every user-defined
+// layer the user owns in that tenant and the artifacts ingested from them,
+// (2) redacts the user identity in that tenant's audit records, and (3)
+// appends a registry-sourced user.erased event naming the invoking admin
+// and the tenant (§8.1). On a multi-tenant registry the redaction reaches
+// only records labeled with the routed tenant; unlabeled records stay
+// unchanged and the response reports nothing about them. On a single-tenant
+// registry it reaches the bound tenant's records and unlabeled records.
+// Admin-only; rejected in read-only mode because it mutates catalogue state.
 //
 // The layer-purge events are emitted before the redaction pass so the erased
 // owner is itself redacted out of those layer.user_registered records.
+//
+// Spec: §8.5, §8.6, §4.7.2, §6.3.1
 func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
@@ -987,16 +1010,14 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 	if rejectIfReadOnly(w, e.mode) {
 		return
 	}
-	// Spec: §8.5, §4.7.1 — the registry keeps one audit file for every
-	// tenant, while each tenant owns its own audit stream, so a redaction
-	// would rewrite records outside the caller's tenant. The refusal runs
+	// Spec: §8.5, §6.3.1 — an unrouted multi-tenant request is refused
 	// before the admin callback, which admits every caller on a public-mode
 	// or no-provider registry, and before any store access or audit rewrite.
-	if e.multiTenant {
-		writeError(w, http.StatusForbidden, "auth.forbidden", "erasure is not available on a multi-tenant registry")
+	// The admin check then runs in the routed tenant (§4.7.2).
+	tenantID, ok := e.requireTenant(w, r)
+	if !ok {
 		return
 	}
-	tenantID, _ := e.tenant(r.Context())
 	if err := e.authAdmin(r); err != nil {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 		return
@@ -1036,28 +1057,51 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 		e.emitLayerEvent(r, store.LayerConfig{}, l, "erase")
 		purged = append(purged, l.ID)
 	}
-	// spec §8.5: redact the user identity across the registry audit
-	// stream and append the registry-sourced user.erased event naming the
-	// invoking admin. The registry's §8.3 file sink is the same log
-	// the retention and anchor schedulers operate on, so the redaction lands
-	// on the authoritative stream. When the registry is redirected to an
-	// external endpoint (no local file) there is no on-disk chain to
-	// rewrite: the layers are still purged and the aggregator owns redaction
-	// of the shipped stream.
-	admin := callerIdentityString(e.caller(r))
-	redacted := 0
-	if e.auditFile != nil {
-		redacted, err = audit.EraseUser(r.Context(), e.auditFile, body.UserID, body.Salt, admin)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
-			return
-		}
+	redacted, err := e.eraseAudit(r, body, tenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"erased":                body.UserID,
 		"layers_purged":         purged,
 		"audit_events_redacted": redacted,
 	})
+}
+
+// eraseAudit applies the §8.5 audit half of an erasure and returns the number
+// of records it redacted. With a file sink it rewrites the chain over the
+// records in the request's erase scope, appends user.erased there, and runs
+// the §8.6 re-anchor hook. With an external endpoint sink there is no on-disk
+// chain to rewrite and the receiving system owns redaction of the shipped
+// stream, so it appends only the tenant-labeled user.erased. A failed append
+// is reported rather than dropped, because §8.5 requires the erasure itself
+// to be logged.
+//
+// Spec: §8.5, §8.6
+func (e *LayerEndpoint) eraseAudit(r *http.Request, body eraseRequest, tenantID string) (int, error) {
+	admin := callerIdentityString(e.caller(r))
+	if e.auditFile != nil {
+		// A multi-tenant registry keeps one audit file for every tenant, so
+		// the scope excludes unlabeled records there: no tenant owns them.
+		scope := audit.EraseScope{Tenant: tenantID, Unlabeled: !e.multiTenant}
+		redacted, err := audit.EraseUser(r.Context(), e.auditFile, body.UserID, body.Salt, admin, scope)
+		if err != nil {
+			return 0, err
+		}
+		if e.afterErase != nil {
+			e.afterErase(r.Context())
+		}
+		return redacted, nil
+	}
+	if e.auditSink == nil {
+		return 0, nil
+	}
+	ev := audit.UserErasedEvent(body.UserID, body.Salt, admin, tenantID, 0, "")
+	if err := e.auditSink.Append(r.Context(), ev); err != nil {
+		return 0, fmt.Errorf("record user.erased: %w", err)
+	}
+	return 0, nil
 }
 
 // WebhookHandler returns the handler for the §7.3.1 inbound Git-provider

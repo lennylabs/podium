@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -173,7 +174,7 @@ func TestEraseUser_ReplacesIdentifiersAndAppendsTombstone(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 	})
 	transformed, err := audit.EraseUser(context.Background(), sink,
-		"joan@example.com", "tenant-salt", "carol@acme.com")
+		"joan@example.com", "tenant-salt", "carol@acme.com", audit.EraseScope{Unlabeled: true})
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -222,7 +223,7 @@ func TestEraseUser_RedactsEmailAndGroups(t *testing.T) {
 			Timestamp:    time.Now().UTC(),
 		})
 	}
-	transformed, err := audit.EraseUser(context.Background(), sink, sub, "tenant-salt", "carol@acme.com")
+	transformed, err := audit.EraseUser(context.Background(), sink, sub, "tenant-salt", "carol@acme.com", audit.EraseScope{Unlabeled: true})
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -291,7 +292,7 @@ func TestEraseUser_EmailInputErasesSubClaimAndContext(t *testing.T) {
 		Type: audit.EventArtifactLoaded, Caller: "auth0|bob", CallerEmail: "bob@acme.com",
 		Target: "skill/y", Timestamp: time.Now().UTC(),
 	})
-	transformed, err := audit.EraseUser(ctx, sink, email, "tenant-salt", "carol@acme.com")
+	transformed, err := audit.EraseUser(ctx, sink, email, "tenant-salt", "carol@acme.com", audit.EraseScope{Unlabeled: true})
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -328,7 +329,7 @@ func TestEraseUser_ContextMatchPreservesDistinctCaller(t *testing.T) {
 		Context: map[string]string{"owner": aliceSub, "action": "erase"},
 		Target:  "alice-personal", Timestamp: time.Now().UTC(),
 	})
-	transformed, err := audit.EraseUser(ctx, sink, aliceSub, "salt", "carol@acme.com")
+	transformed, err := audit.EraseUser(ctx, sink, aliceSub, "salt", "carol@acme.com", audit.EraseScope{Unlabeled: true})
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -383,10 +384,12 @@ func parseFullEvents(t *testing.T, path string) []fullEvent {
 // tests inspect. The caller identity is nested under "caller" per §8.1
 // (caller.identity), so Caller is the unpacked identity string.
 type parsedEvent struct {
-	Type    string
-	Caller  string
-	Target  string
-	Context map[string]string
+	Type        string
+	Caller      string
+	CallerEmail string
+	Target      string
+	Tenant      string
+	Context     map[string]string
 }
 
 // parseEvents parses the file-backed sink and returns its events. Used to
@@ -406,14 +409,19 @@ func parseEvents(t *testing.T, path string) []parsedEvent {
 			Type   string `json:"type"`
 			Caller struct {
 				Identity string `json:"identity"`
+				Email    string `json:"email"`
 			} `json:"caller"`
 			Target  string            `json:"target"`
+			Tenant  string            `json:"tenant"`
 			Context map[string]string `json:"context"`
 		}
 		if err := json.Unmarshal(line, &e); err != nil {
 			t.Fatalf("parse event: %v", err)
 		}
-		out = append(out, parsedEvent{Type: e.Type, Caller: e.Caller.Identity, Target: e.Target, Context: e.Context})
+		out = append(out, parsedEvent{
+			Type: e.Type, Caller: e.Caller.Identity, CallerEmail: e.Caller.Email,
+			Target: e.Target, Tenant: e.Tenant, Context: e.Context,
+		})
 	}
 	return out
 }
@@ -429,7 +437,7 @@ func TestEraseUser_TombstoneFormatMatchesSpec(t *testing.T) {
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
 	})
-	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "tenant-salt", "carol@acme.com"); err != nil {
+	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "tenant-salt", "carol@acme.com", audit.EraseScope{Unlabeled: true}); err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
 	want := func() string {
@@ -466,7 +474,7 @@ func TestEraseUser_EmptySaltRejected(t *testing.T) {
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
 	})
-	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "", "carol@acme.com"); err == nil {
+	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "", "carol@acme.com", audit.EraseScope{Unlabeled: true}); err == nil {
 		t.Fatalf("EraseUser with empty salt: want error, got nil")
 	}
 	// The log must be untouched: the original identity still present, no
@@ -489,7 +497,7 @@ func TestEraseUser_RecordsInvokingAdmin(t *testing.T) {
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
 	})
-	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com"); err != nil {
+	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com", audit.EraseScope{Unlabeled: true}); err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
 	events := parseEvents(t, path)
@@ -508,6 +516,89 @@ func TestEraseUser_RecordsInvokingAdmin(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no user.erased event appended")
+	}
+}
+
+// Spec: §8.5 — the zero EraseScope is refused with ErrEraseScope before the
+// file is read, so a caller that forgot the tenant cannot erase across
+// tenants.
+func TestEraseUser_ZeroScopeRefused(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	_ = sink.Append(context.Background(), audit.Event{
+		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Tenant: "acme", Timestamp: time.Now().UTC(),
+	})
+	before, _ := readSinkBytes(path)
+	_, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com", audit.EraseScope{})
+	if !errors.Is(err, audit.ErrEraseScope) {
+		t.Fatalf("EraseUser(zero scope) err = %v, want ErrEraseScope", err)
+	}
+	if after, _ := readSinkBytes(path); !bytes.Equal(before, after) {
+		t.Errorf("audit file changed despite the refused scope")
+	}
+}
+
+// Spec: §8.5 — a tenant scope redacts only records labeled with that tenant,
+// and an alias seen only in another tenant's records does not drive
+// redaction. user.erased carries the tenant and, per §8.6, the superseded
+// chain head.
+func TestEraseUser_TenantScope(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	now := time.Now().UTC()
+	for _, ev := range []audit.Event{
+		// The sub-claim alias is visible only in globex's record.
+		{Type: audit.EventArtifactLoaded, Caller: "sub-alice", CallerEmail: "alice@acme.com", Tenant: "globex", Timestamp: now},
+		{Type: audit.EventLayerUserRegistered, Caller: "carol@acme.com", Tenant: "acme", Timestamp: now, Context: map[string]string{"owner": "sub-alice"}},
+		{Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Tenant: "acme", Timestamp: now},
+		{Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: now},
+	} {
+		if err := sink.Append(context.Background(), ev); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	head := chainHeadFromFile(t, path)
+	n, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com", audit.EraseScope{Tenant: "acme"})
+	if err != nil {
+		t.Fatalf("EraseUser: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("transformed = %d, want 1", n)
+	}
+	events := parseEvents(t, path)
+	if events[0].CallerEmail != "alice@acme.com" || events[1].Context["owner"] != "sub-alice" || events[3].Caller != "alice@acme.com" {
+		t.Errorf("out-of-scope records or foreign-only aliases were redacted: %+v", events[:4])
+	}
+	if events[2].Caller == "alice@acme.com" {
+		t.Errorf("in-scope record kept alice")
+	}
+	erased := events[len(events)-1]
+	if erased.Tenant != "acme" || erased.Context["superseded_head"] != head {
+		t.Errorf("user.erased tenant = %q superseded_head = %q, want acme and %q", erased.Tenant, erased.Context["superseded_head"], head)
+	}
+	if err := sink.Verify(context.Background()); err != nil {
+		t.Errorf("Verify: %v", err)
+	}
+}
+
+// Spec: §8.5, §8.6 — UserErasedEvent falls back to system:retention with no
+// admin and omits the admin and superseded_head keys when they are empty.
+func TestUserErasedEvent_OptionalKeys(t *testing.T) {
+	t.Parallel()
+	ev := audit.UserErasedEvent("alice@acme.com", "salt", "", "acme", 0, "")
+	if ev.Type != audit.EventUserErased || ev.Caller != "system:retention" || ev.Tenant != "acme" || ev.Timestamp.IsZero() {
+		t.Errorf("event = %+v", ev)
+	}
+	if _, ok := ev.Context["admin"]; ok {
+		t.Errorf("admin key present with no admin")
+	}
+	if _, ok := ev.Context["superseded_head"]; ok {
+		t.Errorf("superseded_head key present with no head")
+	}
+	if ev.Context["transformed"] != "0" {
+		t.Errorf("transformed = %q, want 0", ev.Context["transformed"])
 	}
 }
 

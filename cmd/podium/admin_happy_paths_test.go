@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/lennylabs/podium/pkg/audit"
 )
 
 // admin grant POSTs to /v1/admin/grants. The body shape here reflects
@@ -143,6 +148,41 @@ func TestAdminEraseCmd_LocalHappyPath(t *testing.T) {
 			t.Errorf("adminEraseCmd = %d", code)
 		}
 	})
+}
+
+// Spec: §8.5 — the offline erasure form reaches every record in the file
+// whatever its tenant label and records a user.erased event that names no
+// tenant.
+func TestAdminEraseCmd_OfflineReachesEveryTenant(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, err := audit.NewFileSink(path)
+	if err != nil {
+		t.Fatalf("NewFileSink: %v", err)
+	}
+	for _, tenant := range []string{"acme", "globex", ""} {
+		if err := sink.Append(context.Background(), audit.Event{
+			Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Tenant: tenant, Timestamp: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	withStderr(t, func() {
+		if code := adminEraseCmd([]string{"--audit-path", path, "--salt", "pepper", "--operator", "carol@acme.com", "alice@acme.com"}); code != 0 {
+			t.Errorf("adminEraseCmd = %d", code)
+		}
+	})
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(data), `"alice@acme.com"`) {
+		t.Errorf("alice survived the offline erase:\n%s", data)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, `"user.erased"`) || strings.Contains(last, `"tenant"`) || !strings.Contains(last, `"transformed":"3"`) {
+		t.Errorf("user.erased = %s, want no tenant and transformed 3", last)
+	}
 }
 
 // spec: §8.5 — the local-log erase rejects an empty salt.
