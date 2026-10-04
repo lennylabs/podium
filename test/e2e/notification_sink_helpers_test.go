@@ -312,6 +312,24 @@ func withSink(t testing.TB, s *notificationSink) bootOption {
 	}
 }
 
+// trustEnv returns the subprocess environment that lets the worker deliver to
+// the collected TLS sinks: PODIUM_WEBHOOK_ALLOWED_TARGETS naming the sink hosts
+// and SSL_CERT_FILE naming a bundle of their certificates. Each entry is
+// omitted when there is nothing to allowlist or trust. A boot helper that
+// cannot take a bootOption, such as msStartStandardServerEnv, appends the
+// entries to its extra environment.
+func (b webhookBoot) trustEnv(t testing.TB) []string {
+	t.Helper()
+	var env []string
+	if hosts := dedupeHosts(b.allowHosts); len(hosts) > 0 {
+		env = append(env, "PODIUM_WEBHOOK_ALLOWED_TARGETS="+joinComma(hosts))
+	}
+	if path := writeCABundle(t, b.caPEMs); path != "" {
+		env = append(env, "SSL_CERT_FILE="+path)
+	}
+	return env
+}
+
 // startWebhookAdminServer boots a standalone server whose §7.3.2 receiver CRUD
 // is reachable by a minted admin Bearer token, ingesting registry. The receiver
 // CRUD is admin-gated (s.requireAdmin -> core.AdminAuthorize), so the server
@@ -363,12 +381,7 @@ func bootWebhookAdminServer(t *testing.T, registry string, opts ...bootOption) (
 		// only meaningful when the auto-disable cap is exercised.
 		env = append(env, "PODIUM_WEBHOOK_RETRY_BACKOFF=1ms")
 	}
-	if hosts := dedupeHosts(b.allowHosts); len(hosts) > 0 {
-		env = append(env, "PODIUM_WEBHOOK_ALLOWED_TARGETS="+joinComma(hosts))
-	}
-	if path := writeCABundle(t, b.caPEMs); path != "" {
-		env = append(env, "SSL_CERT_FILE="+path)
-	}
+	env = append(env, b.trustEnv(t)...)
 	args := []string{"serve", "--standalone"}
 	if registry != "" {
 		args = append(args, "--layer-path", registry)
