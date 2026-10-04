@@ -298,7 +298,10 @@ func TestWebhookReceivers_MultiTenantCRUDIsolation(t *testing.T) {
 // globex-<suffix>, and only sink B receives that one. Personal-layer
 // registration publishes layer.user_registered rather than
 // layer.config_changed, so each reorder is the only layer.config_changed that
-// names its layers. The deliveries are matched by the per-run layer IDs.
+// names its layers. Sink B must hold no delivery at all after carol's phase,
+// because no other test subscribes to globex-<suffix>. Sink A is matched by
+// the per-run layer IDs in bob's phase, because other tests on the shared
+// database publish default-tenant events.
 func TestWebhookReceivers_MultiTenantDeliveryIsolation(t *testing.T) {
 	t.Parallel()
 	f := wtiSetup(t)
@@ -306,6 +309,13 @@ func TestWebhookReceivers_MultiTenantDeliveryIsolation(t *testing.T) {
 	requireSubprocessTLSTrust(t)
 	carolA, carolB := wtiReorder(t, f, f.carolH(), "carol", "wti")
 	wtiWantOneChanged(t, f, f.sinkA, f.sinkB, "sink A (default receiver)", "sink B (globex receiver)", carolA, carolB)
+	// Nothing in the run subscribes to globex-<suffix> except sink B, and bob
+	// has not acted yet, so any delivery sink B holds is a default-tenant
+	// event (carol's layer.user_registered or her reorder) delivered to the
+	// wrong tenant.
+	if n := f.sinkB.count(); n != 0 {
+		t.Errorf("sink B (globex receiver) received %d deliveries before bob acted, want none: %+v", n, f.sinkB.all())
+	}
 
 	bobA, bobB := wtiReorder(t, f, f.bobH(), "bob", "wti-globex")
 	wtiWantOneChanged(t, f, f.sinkB, f.sinkA, "sink B (globex receiver)", "sink A (default receiver)", bobA, bobB)
