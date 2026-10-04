@@ -21,11 +21,11 @@ const routedBootTenant = "poison-p"
 
 // routedResolver maps org-a to tenant-a and resolves every other organization
 // to no tenant, mirroring the server-boot resolver over provisioned tenants.
-func routedResolver(_ context.Context, org string) (string, bool) {
+func routedResolver(_ context.Context, org string) (store.Tenant, bool) {
 	if org == "org-a" {
-		return "tenant-a", true
+		return store.Tenant{ID: "tenant-a"}, true
 	}
-	return "", false
+	return store.Tenant{}, false
 }
 
 // headerVerifier is a stub §6.3.2 verifier: X-Test-Fail selects a

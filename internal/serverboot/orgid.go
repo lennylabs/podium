@@ -16,24 +16,27 @@ import (
 const multiTenantUnrouted = "podium:unrouted"
 
 // tenantResolver maps a caller's organization value (an org ID or an org-name
-// alias, §4.7.1) to a provisioned tenant ID, reporting false when no active
-// tenant exists for it. A deactivated tenant (§4.7.1) is treated as
+// alias, §4.7.1) to the record of a provisioned tenant, reporting false when no
+// active tenant exists for it. A deactivated tenant (§4.7.1) is treated as
 // unprovisioned, so a request naming it no longer resolves. It tries the value
 // as a direct org ID first, then as an alias resolved through orgIDForName.
-func tenantResolver(st store.Store) func(context.Context, string) (string, bool) {
-	return func(ctx context.Context, orgValue string) (string, bool) {
+// The returned record's Quota is the request's §4.7.8 quota source, so the
+// limiter resolves the tenant's limits without reading the record again.
+//
+// Spec: §4.7.8, §6.3.1
+func tenantResolver(st store.Store) func(context.Context, string) (store.Tenant, bool) {
+	return func(ctx context.Context, orgValue string) (store.Tenant, bool) {
 		orgValue = strings.TrimSpace(orgValue)
 		if orgValue == "" {
-			return "", false
+			return store.Tenant{}, false
 		}
 		if t, err := st.GetTenant(ctx, orgValue); err == nil && t.Active {
-			return orgValue, true
+			return t, true
 		}
-		id := orgIDForName(orgValue)
-		if t, err := st.GetTenant(ctx, id); err == nil && t.Active {
-			return id, true
+		if t, err := st.GetTenant(ctx, orgIDForName(orgValue)); err == nil && t.Active {
+			return t, true
 		}
-		return "", false
+		return store.Tenant{}, false
 	}
 }
 

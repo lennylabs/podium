@@ -630,8 +630,10 @@ export function unregisterLayer(id: string): Promise<unknown> {
 
 /** QuotaEnvelope is the §4.7.8 quota read. The limits carry the §7.2.1
  * control-plane names, which are the names the §7.3.3 tenant object reports
- * for the same five numbers. The account menu reads one of them, the
- * per-identity cap on user-defined layers. */
+ * for the same five numbers. The search QPS, materialization rate, and audit
+ * volume limits are the values the registry enforces against the caller's
+ * tenant, so they can differ from the stored tenant values. The account menu
+ * reads one of the limits, the per-identity cap on user-defined layers. */
 export interface QuotaEnvelope {
   tenant_id?: string;
   limits?: {

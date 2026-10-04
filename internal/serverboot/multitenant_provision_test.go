@@ -38,12 +38,12 @@ func TestTenantResolver(t *testing.T) {
 	resolve := tenantResolver(st)
 
 	// An org-name alias resolves to its deterministic org ID.
-	if id, ok := resolve(t.Context(), "acme"); !ok || id != acme {
-		t.Errorf("resolve(\"acme\") = %q,%v want %q,true", id, ok, acme)
+	if got, ok := resolve(t.Context(), "acme"); !ok || got.ID != acme {
+		t.Errorf("resolve(\"acme\") = %q,%v want %q,true", got.ID, ok, acme)
 	}
 	// A direct org ID resolves to itself.
-	if id, ok := resolve(t.Context(), acme); !ok || id != acme {
-		t.Errorf("resolve(<id>) = %q,%v want %q,true", id, ok, acme)
+	if got, ok := resolve(t.Context(), acme); !ok || got.ID != acme {
+		t.Errorf("resolve(<id>) = %q,%v want %q,true", got.ID, ok, acme)
 	}
 	// Surrounding whitespace is trimmed.
 	if _, ok := resolve(t.Context(), "  acme  "); !ok {

@@ -80,7 +80,10 @@ func (t Tenant) ScopePreviewEnabled() bool {
 // Quota is the per-tenant resource budget (§4.7.8). The JSON tags carry
 // the §7.2.1 control-plane names, which are the names the §7.3.3 tenant
 // object already uses for the same five numbers, so GET /v1/quota and
-// GET /v1/admin/tenants report them identically.
+// GET /v1/admin/tenants share the field names. GET /v1/quota reports the
+// enforced search_qps, materialize_rate, and audit_volume_per_day, which
+// resolve a zero stored value to the deployment default and a negative one to
+// 0, so they can differ from the stored values GET /v1/admin/tenants reports.
 type Quota struct {
 	StorageBytes      int64 `json:"storage_bytes"`
 	SearchQPS         int   `json:"search_qps"`

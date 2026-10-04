@@ -21,7 +21,7 @@ import (
 // signature integrity. This drives the real serverboot audit wiring — the
 // PODIUM_AUDIT_SAMPLE_RATES sampler, the §4.7.8 audit-volume meter, the §8.3
 // file sink, the §8.6 anchor signer, and the §8.4 retention sweep — through the
-// same composition Run() builds (auditEmitterFor + auditVolumeEmitter +
+// same composition Run() builds (auditEmitterFor + wrapAuditVolume +
 // audit.Anchor + audit.Enforce), at a volume the parse-only and single-event
 // unit tests do not exercise.
 //
@@ -86,12 +86,12 @@ func TestAuditScale_SamplingAlwaysRecordedRetentionAndVolume(t *testing.T) {
 	// operation consults Allow() before proceeding.
 	const tenant = "default"
 	const volumeCap = 5000
-	meter := server.NewAuditVolumeMeter(volumeCap)
+	meter := server.NewAuditVolumeMeter()
 
 	// Build the production emitter composition: sampler-aware file emitter,
 	// wrapped by the volume recorder. No PII scrubber needed for this volume.
 	base := auditEmitterFor(sink, audit.NewPIIScrubber(), sampler)
-	emit := auditVolumeEmitter(meter, tenant, base)
+	emit := wrapAuditVolume(meter, func(context.Context) string { return tenant }, base)
 	ctx := context.Background()
 
 	// ---- 1. high-frequency sampled events ---------------------------------
@@ -143,19 +143,19 @@ func TestAuditScale_SamplingAlwaysRecordedRetentionAndVolume(t *testing.T) {
 
 	// ---- 3. the volume quota caps total writes ----------------------------
 	// The meter recorded one tick per emit() above (sampled-out reads still
-	// count: auditVolumeEmitter.Record runs before the sampler drop, matching
+	// count: wrapAuditVolume's Record runs before the sampler drop, matching
 	// Run()'s wrapping order). The total emit() count far exceeds volumeCap, so
 	// the budget is spent and the write gate the reingest path consults refuses.
 	totalEmits := perType*2 + ingestN*2 + grantN
 	if totalEmits <= volumeCap {
 		t.Fatalf("test misconfigured: %d emits <= cap %d, budget would not be spent", totalEmits, volumeCap)
 	}
-	if meter.Allow(tenant) {
+	if meter.Allow(tenant, volumeCap) {
 		t.Errorf("audit-volume budget of %d not enforced after %d recorded events; Allow() still true", volumeCap, totalEmits)
 	}
 	// A different tenant with no recorded events is still allowed: the cap is
 	// per-tenant, not global.
-	if !meter.Allow("globex") {
+	if !meter.Allow("globex", volumeCap) {
 		t.Errorf("per-tenant audit-volume budget leaked across tenants; globex refused with no recorded events")
 	}
 

@@ -318,15 +318,15 @@ func (f *trFixture) build(t *testing.T, opts trOptions) {
 // resolve mirrors serverboot's tenantResolver: an organization value naming
 // an active provisioned tenant routes to it. P is excluded, so no request
 // routes to the boot tenant.
-func (f *trFixture) resolve(ctx context.Context, org string) (string, bool) {
+func (f *trFixture) resolve(ctx context.Context, org string) (store.Tenant, bool) {
 	org = strings.TrimSpace(org)
 	if org == "" || org == trPoison {
-		return "", false
+		return store.Tenant{}, false
 	}
 	if tn, err := f.st.GetTenant(ctx, org); err == nil && tn.Active {
-		return org, true
+		return tn, true
 	}
-	return "", false
+	return store.Tenant{}, false
 }
 
 // publish records each §7.6 event scope and fails on one under P.

@@ -7,29 +7,29 @@ import (
 
 // AuditVolumeMeter enforces the §4.7.8 per-tenant audit-volume quota. It counts
 // audit events emitted per tenant within the current UTC calendar day and
-// reports when a tenant has reached its configured daily budget. The audit
-// emitter calls Record for every event it writes; an auditable write operation
-// calls Allow before proceeding and is refused with quota.audit_volume_exceeded
-// once the budget is spent. Reads still emit (and count) audit events but are
+// reports whether a tenant has reached a daily limit its caller resolves. The
+// audit emitter calls Record for every event it writes, keyed on the emitting
+// request's tenant; an auditable write operation resolves the tenant's limit
+// under the §4.7.8 precedence (EffectiveLimits), calls Allow with it before
+// proceeding, and is refused with quota.audit_volume_exceeded once the budget
+// is spent. Reads still emit (and count) audit events but are
 // not gated, so a spent budget bounds write-driven audit growth without
 // dropping events or blocking discovery.
 //
-// The count resets at the UTC day boundary. A limit of zero disables the quota
-// (Allow always returns true) while Record still maintains the count, so a
-// deployment can observe volume without enforcing a cap.
+// The count resets at the UTC day boundary. Record counts whether or not a
+// limit applies, so a tenant whose limit is raised from zero is gated on the
+// events it already emitted that day.
 type AuditVolumeMeter struct {
 	mu    sync.Mutex
-	limit int64
 	day   string
 	count map[string]int64
 	now   func() time.Time
 }
 
-// NewAuditVolumeMeter returns a meter enforcing limit audit events per tenant
-// per UTC day. A non-positive limit disables enforcement.
-func NewAuditVolumeMeter(limit int64) *AuditVolumeMeter {
+// NewAuditVolumeMeter returns a meter counting audit events per tenant per UTC
+// day.
+func NewAuditVolumeMeter() *AuditVolumeMeter {
 	return &AuditVolumeMeter{
-		limit: limit,
 		count: map[string]int64{},
 		now:   time.Now,
 	}
@@ -56,15 +56,18 @@ func (m *AuditVolumeMeter) Record(tenant string) {
 	m.count[tenant]++
 }
 
-// Allow reports whether the tenant may perform another auditable write. It is
-// true when enforcement is disabled (limit <= 0) or the tenant's current-day
-// count is below the limit.
-func (m *AuditVolumeMeter) Allow(tenant string) bool {
-	if m == nil || m.limit <= 0 {
+// Allow reports whether the tenant may perform another auditable write under
+// limit, the tenant's resolved daily cap. It is true for a nil meter, for a
+// limit of zero or less (unenforced), or when the tenant's current-day count
+// is below limit.
+//
+// Spec: §4.7.8
+func (m *AuditVolumeMeter) Allow(tenant string, limit int64) bool {
+	if m == nil || limit <= 0 {
 		return true
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.rollover()
-	return m.count[tenant] < m.limit
+	return m.count[tenant] < limit
 }

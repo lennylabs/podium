@@ -394,17 +394,17 @@ func TestNewBucket_DisabledAndEnabled(t *testing.T) {
 	// A fresh bucket starts full, so it allows exactly capacity calls before
 	// it drains.
 	for i := 0; i < 3; i++ {
-		if !b.allow() {
+		if !b.allow(3) {
 			t.Errorf("call %d denied; a fresh bucket should start full", i)
 		}
 	}
-	if b.allow() {
+	if b.allow(3) {
 		t.Errorf("call past capacity allowed; bucket should be drained")
 	}
 
 	// A nil bucket (the disabled case) always allows.
 	var nilBucket *rateBucket
-	if !nilBucket.allow() {
+	if !nilBucket.allow(3) {
 		t.Errorf("nil bucket should always allow")
 	}
 }
