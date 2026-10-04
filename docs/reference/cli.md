@@ -549,9 +549,9 @@ podium admin tenant deactivate <id> --registry <url>
 | Flag | Effect |
 |:--|:--|
 | `--storage-bytes N` | Per-tenant storage budget in bytes. `0` disables the budget. |
-| `--search-qps N` | Per-tenant search QPS budget. `0` disables the budget. |
-| `--materialize-rate N` | Per-tenant materialization rate budget. `0` disables the budget. |
-| `--audit-volume-per-day N` | Per-tenant audit-volume budget per day. `0` disables the budget. |
+| `--search-qps N` | Per-tenant search QPS budget. `0` selects the deployment default (`PODIUM_QUOTA_SEARCH_QPS`); a negative value disables the budget for the tenant. |
+| `--materialize-rate N` | Per-tenant materialization rate budget. `0` selects the deployment default (`PODIUM_QUOTA_MATERIALIZE_RATE`); a negative value disables the budget for the tenant. |
+| `--audit-volume-per-day N` | Per-tenant audit-volume budget per day. `0` selects the deployment default (`PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY`); a negative value disables the budget for the tenant. |
 | `--max-user-layers N` | Per-identity cap on user-defined layers. `0` selects the deployment default; a negative value disables the cap. |
 | `--expose-scope-preview true\|false` | Whether the tenant exposes aggregate scope-preview counts. |
 | `--active true\|false` | `update` only. Sets the tenant's active state. |
@@ -807,7 +807,7 @@ When the cache directory holds no marks, the command prints `cache: no revision 
 
 ### `podium quota`
 
-Shows current usage and limits per quota type.
+Shows current usage and limits per quota type. The search QPS, materialization rate, and audit volume limits are the values the registry enforces against the caller's tenant, after the deployment default replaces a zero tenant value.
 
 ```
 podium quota [--registry <url>]
@@ -875,5 +875,8 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 | `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` | Registry-process boot setting, environment only and no config-file key. Interval in seconds between local chain-head anchors. `0`, the default, disables anchoring, and a negative or non-integer value is treated as `0`. Anchoring runs only when the registry audit sink named by `PODIUM_AUDIT_LOG_PATH` is a file path or unset. An `http(s)` value disables anchoring with a startup warning. A file sink the registry cannot open aborts startup with `config.audit_sink_unavailable` while anchoring is enabled, and is logged as a warning while it is disabled. `PODIUM_AUDIT_SINK` does not affect anchoring. |
 | `PODIUM_AUDIT_SIGNING_KEY_PATH` | Registry-process boot setting, environment only and no config-file key. Path to the anchor key file, default `~/.podium/standalone/audit.key`, generated when anchoring runs and the file is absent. Read only when anchoring runs. A file that cannot be read, parsed, or generated aborts startup with `config.audit_anchor_key_unavailable`. While registry signing is on (`PODIUM_SIGN` or `podium serve --sign` resolves to `registry-key`), an anchor key that the `PODIUM_SIGN_KEY_PATH` file also carries as its `public:` key or a `verify:` key aborts startup with `config.audit_anchor_key_shared`. |
 | `PODIUM_OPERATOR_ADMINS` | Registry-process boot setting. Comma-separated identities granted the instance-operator role at boot. The operator role authorizes the `podium admin tenant` commands and the `/v1/admin/tenants` endpoints; it confers no per-tenant `admin` rights. Distinct from `PODIUM_BOOTSTRAP_ADMINS`, which seeds per-tenant `admin` grants. |
+| `PODIUM_QUOTA_SEARCH_QPS` | Registry-process boot setting, environment only and no config-file key. Deployment default for the search QPS limit. It applies to every tenant whose own `search_qps` is zero, and on a multi-tenant registry to requests that resolve to no tenant. A request over the limit is refused with `quota.search_qps_exceeded`. `0`, the default, sets no deployment default, and a negative or non-integer value is treated as `0`. On a single-tenant registry it is the search QPS limit. |
+| `PODIUM_QUOTA_MATERIALIZE_RATE` | Registry-process boot setting, environment only and no config-file key. Deployment default for the materialization rate limit. It applies to every tenant whose own `materialize_rate` is zero, and on a multi-tenant registry to requests that resolve to no tenant. A request over the limit is refused with `quota.materialize_rate_exceeded`. `0`, the default, sets no deployment default, and a negative or non-integer value is treated as `0`. On a single-tenant registry it is the materialization rate limit. |
+| `PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY` | Registry-process boot setting, environment only and no config-file key. Deployment default for the daily audit-event cap. It applies to every tenant whose own `audit_volume_per_day` is zero. Once a tenant's count for the current UTC day reaches the limit, new ingest writes to that tenant's layers are refused with `quota.audit_volume_exceeded`, and reads continue to serve. `0`, the default, sets no deployment default, and a negative or non-integer value is treated as `0`. On a single-tenant registry it is the audit volume limit. |
 
 Server-side backend selection variables (`PODIUM_VECTOR_BACKEND`, `PODIUM_EMBEDDING_PROVIDER`, etc.) are documented alongside the corresponding backend in [Extending](../deployment/extending).
