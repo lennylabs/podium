@@ -15,21 +15,17 @@ import (
 // cwd; with none found, or with cwd empty, only the home file is read, and an
 // empty home skips the home file. It returns the first non-empty value with
 // the path of the file that carried it, or two empty strings when no scope
-// sets it. An absent file contributes nothing. A file that exists but cannot
-// be read or parsed is an error, because skipping it could let a lower scope's
-// never disable verification that the unreadable file would have kept on.
-// LoadMergedConfig is not reused because it merges no verify_signatures and
+// sets it. A file that is absent, cannot be read, or does not parse
+// contributes nothing, as in the podium-mcp resolution this ports, and err is
+// therefore always nil today. LoadMergedConfig is not reused because it merges no verify_signatures and
 // reports no per-key scope, which the stale-never warning and the
 // invalid-policy error name.
 //
 // Spec: §4.7.9, §7.5.2
 func VerifySignaturesSetting(cwd, home string) (value, path string, err error) {
 	for _, p := range verifySignaturesScopes(cwd, home) {
-		cfg, err := ReadConfigFile(p)
-		if err != nil {
-			return "", "", fmt.Errorf("defaults.verify_signatures: %w", err)
-		}
-		if cfg == nil || cfg.Defaults.VerifySignatures == "" {
+		cfg, rerr := ReadConfigFile(p)
+		if rerr != nil || cfg == nil || cfg.Defaults.VerifySignatures == "" {
 			continue
 		}
 		return cfg.Defaults.VerifySignatures, p, nil

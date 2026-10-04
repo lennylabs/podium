@@ -116,11 +116,10 @@ func TestResolveVerifyPolicy_StaleNeverWarning(t *testing.T) {
 }
 
 // Spec: §4.7.9, §6.2 — an invalid value refuses with the must be never |
-// always message, naming the file when a sync.yaml supplied it, and an
-// unparseable scope file is an error rather than a skipped scope.
+// always message, naming the file when a sync.yaml supplied it.
 func TestResolveVerifyPolicy_Refusals(t *testing.T) {
 	t.Parallel()
-	start, home, _, shared, global := verifyScopes(t)
+	start, home, _, _, global := verifyScopes(t)
 	_, _, _, err := podsync.ResolveVerifyPolicy("medium-and-above", start, home)
 	if err == nil || err.Error() != `PODIUM_VERIFY_SIGNATURES must be never | always, got "medium-and-above"` {
 		t.Errorf("env invalid = %v", err)
@@ -130,11 +129,23 @@ func TestResolveVerifyPolicy_Refusals(t *testing.T) {
 	if err == nil || err.Error() != `PODIUM_VERIFY_SIGNATURES must be never | always, got "bogus" from defaults.verify_signatures in `+global {
 		t.Errorf("sync.yaml invalid = %v", err)
 	}
-	if err := os.WriteFile(shared, []byte("defaults: [\n"), 0o644); err != nil {
+}
+
+// Spec: §7.5.2 — a scope file that does not parse contributes nothing, so
+// resolution falls through to the next scope that sets the key.
+func TestResolveVerifyPolicy_UnparseableScopeSkipped(t *testing.T) {
+	t.Parallel()
+	start, home, local, shared, global := verifyScopes(t)
+	if err := os.WriteFile(local, []byte("defaults: [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err = podsync.ResolveVerifyPolicy("", start, home); err == nil || !strings.Contains(err.Error(), shared) {
-		t.Errorf("unparseable scope = %v, want an error naming %s", err, shared)
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeVerifySyncFile(t, global, "never")
+	policy, source, _, err := podsync.ResolveVerifyPolicy("", start, home)
+	if err != nil || policy != sign.PolicyNever || source != global {
+		t.Errorf("unparseable and unreadable scopes = %q from %q, %v; want never from %s", policy, source, err, global)
 	}
 }
 
