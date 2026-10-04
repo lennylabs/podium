@@ -683,10 +683,7 @@ These routes are authorized by the instance-operator role rather than the per-te
 
 ## Outbound webhooks
 
-The registry emits outbound webhooks for change events. Configure receivers per org (URL + HMAC secret). Layer visibility does not narrow receiver delivery. A receiver receives every event its event filter matches, whatever layer the event names, and it carries no layer scope.
-
-> [!NOTE]
-> On a multi-tenant registry, every routed tenant shares one receiver pool: a receiver registered by one tenant's admin receives the events of every tenant.
+The registry emits outbound webhooks for change events. Configure receivers per org (URL + HMAC secret). Each receiver belongs to the tenant whose admin registered it. The receiver CRUD routes read and write only the receivers of the tenant the request resolves to, and the registry delivers an event only to the receivers of the event's tenant. An event with no tenant reaches no receiver. On a multi-tenant registry, layer and ingest events belong to the bootstrap `default` tenant, so only that tenant's receivers receive them. Layer visibility does not narrow receiver delivery. A receiver receives every event of its tenant that its event filter matches, whatever layer the event names, and it carries no layer scope.
 
 | Event | When |
 |:--|:--|
@@ -722,7 +719,9 @@ DELETE /v1/webhooks/{id}       remove one receiver
 
 Every method on these routes requires the per-tenant admin role and returns `auth.forbidden` for a non-admin caller, because a receiver is an org-level configuration. The mutating methods are also rejected in read-only mode with `registry.read_only`. A standalone or no-auth deployment follows the same authorization path as the admin-grant endpoints: receiver registration requires an admin grant plus a token rather than remaining open.
 
-`POST` accepts `{ "url": "...", "secret": "...", "event_filter": ["..."], "debounce": "30s", "disabled": false }` and returns `201 Created` with the receiver including its secret, so the operator can record it. The registry generates a secret when the body omits one. `url` is required. `PUT` accepts the same fields and applies the ones present; re-enabling a receiver (`disabled: false`) clears its failure counter. `GET` and `DELETE` of a single receiver address it by `id`. The list response returns the receivers under the `receivers` key. List, single-read, and `PUT` responses mask the secret as `***`. `DELETE` returns `204 No Content`. The registry wires the outbound webhook worker at startup, so these routes are mounted on every deployment. Receivers are held in memory unless `PODIUM_WEBHOOK_STORE_PATH` names a file, in which case the store reloads them on restart.
+On a multi-tenant registry, a request routed to no provisioned tenant is refused before any receiver is read. Under `oidc-jwt`, a token whose `org_id` names no provisioned tenant returns `401 auth.tenant_unknown`. A token without an `org_id`, and any request under `trusted-headers` whose organization resolves to no tenant, returns `403 auth.forbidden`. A single-tenant registry does not consult the organization value and serves every request against its sole tenant. A `GET` or `PUT` of another tenant's receiver `id` returns `404 registry.not_found`, and a `DELETE` of one returns `204 No Content` and leaves the receiver in place.
+
+`POST` accepts `{ "url": "...", "secret": "...", "event_filter": ["..."], "debounce": "30s", "disabled": false }` and returns `201 Created` with the receiver including its secret, so the operator can record it. The registry generates a secret when the body omits one. `url` is required. `PUT` accepts the same fields and applies the ones present; re-enabling a receiver (`disabled: false`) clears its failure counter. `GET` and `DELETE` of a single receiver address it by `id`. The list response returns the receivers under the `receivers` key. List, single-read, and `PUT` responses mask the secret as `***`. `DELETE` returns `204 No Content`. The registry wires the outbound webhook worker at startup, so these routes are mounted on every deployment. Receivers are held in memory unless `PODIUM_WEBHOOK_STORE_PATH` names a file, in which case the store reloads them on restart. The file stores each receiver under the ID of the tenant that registered it. The registry loads a row that carries no tenant ID and neither lists it nor delivers to it.
 
 **The receiver object.** Every method that returns a receiver returns the same object, with lower snake_case field names:
 
