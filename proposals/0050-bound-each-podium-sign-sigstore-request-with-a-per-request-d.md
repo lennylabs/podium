@@ -1,7 +1,7 @@
 # Proposal 0050: Bound each podium sign Sigstore request with a per-request deadline set by PODIUM_SIGSTORE_REQUEST_TIMEOUT
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-04), signed off under the overnight authorization. Signed off as staged. OQ-1: no retry, including for the TSA request; the operator reruns podium sign. OQ-2: keep the 60s default, overridable by PODIUM_SIGSTORE_REQUEST_TIMEOUT.
+- Status: Applied to spec (2026-10-04). Signed off under the overnight authorization. Signed off as staged. OQ-1: no retry, including for the TSA request; the operator reruns podium sign. OQ-2: keep the 60s default, overridable by PODIUM_SIGSTORE_REQUEST_TIMEOUT.
 - Date: 2026-10-04
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
