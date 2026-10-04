@@ -15,13 +15,18 @@ type LayerCapabilities struct {
 	ManageAnyLayer bool `json:"manage_any_layer"`
 }
 
-// Capabilities evaluates the caller's layer capabilities from the same
-// authAdmin callback authorizeLocalSource takes its admin arm from, so the
+// Capabilities evaluates the caller's layer capabilities from the same tenant
+// resolver and the same authAdmin callback the layer writes read, so the
 // value a client renders on and the gate this endpoint applies are one
-// expression.
+// expression. On a multi-tenant endpoint a request routed to no tenant reports
+// every member false, because requireTenant refuses that request on every
+// write before the admin callback runs.
 //
-// Spec: §7.3.4
+// Spec: §7.3.4, §7.3.1 (Tenant selection)
 func (e *LayerEndpoint) Capabilities(r *http.Request) LayerCapabilities {
+	if _, routed := e.tenant(r.Context()); !routed {
+		return LayerCapabilities{}
+	}
 	return LayerCapabilities{ManageAnyLayer: e.authAdmin(r) == nil}
 }
 

@@ -43,9 +43,15 @@ const DefaultMaxUserLayers = 3
 // (UserDefined=true) are registered by any authenticated caller and
 // implicitly visible only to the registrant.
 type LayerEndpoint struct {
-	store    store.Store
+	store store.Store
+	// tenantID is the tenant a single-tenant endpoint serves. A multi-tenant
+	// endpoint never reads it, because the tenant there is the one §6.3.1
+	// routes each request to; tenant is its only reader.
 	tenantID string
-	mode     *ModeTracker
+	// multiTenant makes the endpoint resolve its tenant from the request
+	// context. WithTenantRouting sets it and nothing clears it.
+	multiTenant bool
+	mode        *ModeTracker
 	// authAdmin returns nil when the caller is permitted to mutate
 	// admin-defined layers. Tests inject a no-op; production wires
 	// the registry's AdminAuthorize.
@@ -200,6 +206,48 @@ func (e *LayerEndpoint) WithAdminAuth(fn func(*http.Request) error) *LayerEndpoi
 	return e
 }
 
+// WithTenantRouting marks the endpoint as serving a multi-tenant registry. The
+// registry routes each request to a tenant by §6.3.1 and attaches it with
+// core.ContextWithTenant, and the endpoint acts in that tenant alone. A request
+// carrying no routed tenant is unrouted: list returns no layers, every write
+// is refused, and erasure is refused for every caller.
+//
+// Spec: §6.3.1, §7.3.1 (Tenant selection)
+func (e *LayerEndpoint) WithTenantRouting() *LayerEndpoint {
+	e.multiTenant = true
+	return e
+}
+
+// tenant resolves the tenant a request acts in. A single-tenant endpoint
+// always serves its bound tenant. A multi-tenant endpoint serves the tenant
+// the request was routed to and reports false when there is none. It never
+// falls back to the bound tenant there, because the bound tenant is a
+// provisioned tenant, and the fallback would hand a caller whose organization
+// names no tenant that tenant's layers.
+//
+// Spec: §7.3.1 (Tenant selection)
+func (e *LayerEndpoint) tenant(ctx context.Context) (string, bool) {
+	if !e.multiTenant {
+		return e.tenantID, true
+	}
+	return core.TenantFromContext(ctx)
+}
+
+// requireTenant resolves the request's tenant for a layer write and refuses an
+// unrouted request with 403 auth.forbidden. Callers run it before the admin
+// callback, because on a registry started in public mode or with no identity
+// provider that callback admits every caller, and no store refuses a write
+// under a tenant that was never provisioned.
+//
+// Spec: §7.3.1 (Tenant selection)
+func (e *LayerEndpoint) requireTenant(w http.ResponseWriter, r *http.Request) (string, bool) {
+	tenantID, ok := e.tenant(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "auth.forbidden", "request resolves to no tenant")
+	}
+	return tenantID, ok
+}
+
 // WithIdentityResolver installs the caller-identity resolver used to
 // derive a user-defined layer's owner from the authenticated registrant and
 // to resolve the §7.3.1 layer read. A resolver that reports a verification
@@ -347,15 +395,15 @@ func (e *LayerEndpoint) authorizeLayerWrite(r *http.Request, cfg store.LayerConf
 // refuses on update and admits on register.
 //
 // Spec: §7.3.1, §8.4
-func (e *LayerEndpoint) lookupLayerForWrite(ctx context.Context, id string) (store.LayerConfig, bool, error) {
-	cfg, err := e.store.GetLayerConfig(ctx, e.tenantID, id)
+func (e *LayerEndpoint) lookupLayerForWrite(ctx context.Context, tenantID, id string) (store.LayerConfig, bool, error) {
+	cfg, err := e.store.GetLayerConfig(ctx, tenantID, id)
 	if err == nil {
 		return cfg, true, nil
 	}
 	if !errors.Is(err, store.ErrNotFound) {
 		return store.LayerConfig{}, false, fmt.Errorf("layers: look up %s: %w", id, err)
 	}
-	deleted, err := e.store.ListDeletedLayerConfigs(ctx, e.tenantID)
+	deleted, err := e.store.ListDeletedLayerConfigs(ctx, tenantID)
 	if err != nil {
 		return store.LayerConfig{}, false, fmt.Errorf("layers: scan tombstoned layers for %s: %w", id, err)
 	}
@@ -436,7 +484,7 @@ func (e *LayerEndpoint) emitLayerEvent(r *http.Request, before, cfg store.LayerC
 	// a change the re-resolve can observe, so an ingest-credential change
 	// records its audit event and wakes nothing.
 	if typ == audit.EventLayerConfigChanged && wakesWatchers(before, cfg) {
-		e.publishConfigChanged(r.Context(), e.layerEventScope(before, cfg, action), cfg.ID, action)
+		e.publishConfigChanged(r.Context(), layerEventScope(before, cfg, action), cfg.ID, action)
 	}
 }
 
@@ -448,9 +496,13 @@ func (e *LayerEndpoint) emitLayerEvent(r *http.Request, before, cfg store.LayerC
 // record on an unregister. A register and a restore carry no prior
 // visibility, and neither does an update that read no prior record.
 //
+// The tenant is the one the record is stored under, which every store read
+// fills. On a routed request it equals the request tenant, and on the inbound
+// webhook, which carries no routed context, it is the only tenant available.
+//
 // Spec: §7.6
-func (e *LayerEndpoint) layerEventScope(before, cfg store.LayerConfig, action string) core.EventScope {
-	scope := core.EventScope{TenantID: e.tenantID, Layers: []string{cfg.ID}}
+func layerEventScope(before, cfg store.LayerConfig, action string) core.EventScope {
+	scope := core.EventScope{TenantID: cfg.TenantID, Layers: []string{cfg.ID}}
 	switch {
 	case action == "unregister":
 		v := core.VisibilityOf(cfg)
@@ -574,16 +626,16 @@ func boolString(b bool) string {
 }
 
 // effectiveLayerCap resolves the §7.3.1 user-defined-layer cap for the
-// endpoint's tenant. Precedence: an explicit WithMaxUserLayers override,
+// request's tenant. Precedence: an explicit WithMaxUserLayers override,
 // then the per-tenant store.Quota.MaxUserLayers, then
 // DefaultMaxUserLayers. A non-zero value at any level wins (a negative
 // value disables the cap). The resolved value is never zero, so the
 // caller treats `cap > 0` as "enforce" and `cap < 0` as "unlimited".
-func (e *LayerEndpoint) effectiveLayerCap(ctx context.Context) int {
+func (e *LayerEndpoint) effectiveLayerCap(ctx context.Context, tenantID string) int {
 	if e.maxUserLayers != 0 {
 		return e.maxUserLayers
 	}
-	if t, err := e.store.GetTenant(ctx, e.tenantID); err == nil && t.Quota.MaxUserLayers != 0 {
+	if t, err := e.store.GetTenant(ctx, tenantID); err == nil && t.Quota.MaxUserLayers != 0 {
 		return t.Quota.MaxUserLayers
 	}
 	return DefaultMaxUserLayers
@@ -899,6 +951,16 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 	if rejectIfReadOnly(w, e.mode) {
 		return
 	}
+	// Spec: §8.5, §4.7.1 — the registry keeps one audit file for every
+	// tenant, while each tenant owns its own audit stream, so a redaction
+	// would rewrite records outside the caller's tenant. The refusal runs
+	// before the admin callback, which admits every caller on a public-mode
+	// or no-provider registry, and before any store access or audit rewrite.
+	if e.multiTenant {
+		writeError(w, http.StatusForbidden, "auth.forbidden", "erasure is not available on a multi-tenant registry")
+		return
+	}
+	tenantID, _ := e.tenant(r.Context())
 	if err := e.authAdmin(r); err != nil {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 		return
@@ -921,7 +983,7 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 	// spec §8.5: unregister and soft-delete every user-defined
 	// layer the user owns. DeleteLayerConfig tombstones the layer and the
 	// artifacts ingested from it (recoverable within the §8.4 30-day window).
-	layers, err := e.store.ListLayerConfigs(r.Context(), e.tenantID)
+	layers, err := e.store.ListLayerConfigs(r.Context(), tenantID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
@@ -931,7 +993,7 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 		if !l.UserDefined || l.Owner != body.UserID {
 			continue
 		}
-		if err := e.store.DeleteLayerConfig(r.Context(), e.tenantID, l.ID); err != nil {
+		if err := e.store.DeleteLayerConfig(r.Context(), tenantID, l.ID); err != nil {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 			return
 		}
@@ -997,12 +1059,16 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	if rejectIfReadOnly(w, e.mode) {
 		return
 	}
+	tenantID, ok := e.requireTenant(w, r)
+	if !ok {
+		return
+	}
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id query param is required")
 		return
 	}
-	cfg, err := e.store.GetLayerConfig(r.Context(), e.tenantID, id)
+	cfg, err := e.store.GetLayerConfig(r.Context(), tenantID, id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "registry.not_found", err.Error())
 		return
@@ -1150,6 +1216,10 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	if rejectIfReadOnly(w, e.mode) {
 		return
 	}
+	tenantID, ok := e.requireTenant(w, r)
+	if !ok {
+		return
+	}
 	var req LayerRegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
@@ -1190,7 +1260,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// last-writer-wins, which is the shipped upsert's behavior accepted
 	// unchanged; the decision and its reason live in proposal 0013, "The
 	// layer-ownership defect".
-	stored, exists, err := e.lookupLayerForWrite(r.Context(), req.ID)
+	stored, exists, err := e.lookupLayerForWrite(r.Context(), tenantID, req.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
@@ -1259,7 +1329,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := store.LayerConfig{
-		TenantID:        e.tenantID,
+		TenantID:        tenantID,
 		ID:              req.ID,
 		SourceType:      req.SourceType,
 		Repo:            req.Repo,
@@ -1309,8 +1379,8 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// would exceed the cap. Re-registering an already-owned layer (same
 	// id) is an update and does not count as an additional layer.
 	if cfg.UserDefined {
-		if capN := e.effectiveLayerCap(r.Context()); capN > 0 {
-			existing, err := e.store.ListLayerConfigs(r.Context(), e.tenantID)
+		if capN := e.effectiveLayerCap(r.Context(), tenantID); capN > 0 {
+			existing, err := e.store.ListLayerConfigs(r.Context(), tenantID)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 				return
@@ -1363,7 +1433,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pick a default order: the highest existing ord + 10.
-	if existing, err := e.store.ListLayerConfigs(r.Context(), e.tenantID); err == nil && len(existing) > 0 {
+	if existing, err := e.store.ListLayerConfigs(r.Context(), tenantID); err == nil && len(existing) > 0 {
 		cfg.Order = existing[len(existing)-1].Order + 10
 	} else {
 		cfg.Order = 10
@@ -1404,17 +1474,27 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 // and both narrow what they return to the caller's §7.3.1 read scope, so the
 // soft-deleted arm discloses no more than the live one.
 //
-// Spec: §4.6, §6.10, §7.3.1
+// A request a multi-tenant registry routes to no tenant acts in a tenant that
+// holds no layers, so it reads an empty list on either arm. The check runs
+// after the credential refusal, which takes precedence, and before the
+// whole-list admission readableBy grants on a public-mode registry.
+//
+// Spec: §4.6, §6.10, §7.3.1 (Tenant selection)
 func (e *LayerEndpoint) list(w http.ResponseWriter, r *http.Request) {
 	caller, ok := e.verifiedCaller(w, r)
 	if !ok {
+		return
+	}
+	tenantID, routed := e.tenant(r.Context())
+	if !routed {
+		writeJSON(w, http.StatusOK, map[string]any{"layers": []store.LayerConfig{}})
 		return
 	}
 	fetch := e.store.ListLayerConfigs
 	if r.URL.Query().Get("deleted") == "true" {
 		fetch = e.store.ListDeletedLayerConfigs
 	}
-	layers, err := fetch(r.Context(), e.tenantID)
+	layers, err := fetch(r.Context(), tenantID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
@@ -1436,6 +1516,10 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 	if rejectIfReadOnly(w, e.mode) {
 		return
 	}
+	tenantID, ok := e.requireTenant(w, r)
+	if !ok {
+		return
+	}
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id query param required")
@@ -1444,7 +1528,7 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 	// Locate the soft-deleted layer so authorization and the audit record
 	// see its UserDefined / Owner attributes (a restored layer is hidden
 	// from GetLayerConfig until the tombstone is cleared).
-	deleted, err := e.store.ListDeletedLayerConfigs(r.Context(), e.tenantID)
+	deleted, err := e.store.ListDeletedLayerConfigs(r.Context(), tenantID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
@@ -1473,7 +1557,7 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.Repo) {
 		return
 	}
-	if err := e.store.RestoreLayerConfig(r.Context(), e.tenantID, id); err != nil {
+	if err := e.store.RestoreLayerConfig(r.Context(), tenantID, id); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "registry.not_found", "no recoverable layer: "+id)
 			return
@@ -1490,12 +1574,16 @@ func (e *LayerEndpoint) unregister(w http.ResponseWriter, r *http.Request) {
 	if rejectIfReadOnly(w, e.mode) {
 		return
 	}
+	tenantID, ok := e.requireTenant(w, r)
+	if !ok {
+		return
+	}
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id query param required")
 		return
 	}
-	cfg, err := e.store.GetLayerConfig(r.Context(), e.tenantID, id)
+	cfg, err := e.store.GetLayerConfig(r.Context(), tenantID, id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "registry.not_found", "no such layer: "+id)
@@ -1509,7 +1597,7 @@ func (e *LayerEndpoint) unregister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 		return
 	}
-	if err := e.store.DeleteLayerConfig(r.Context(), e.tenantID, id); err != nil {
+	if err := e.store.DeleteLayerConfig(r.Context(), tenantID, id); err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
@@ -1540,6 +1628,10 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	if rejectIfReadOnly(w, e.mode) {
 		return
 	}
+	tenantID, ok := e.requireTenant(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
 		Order []string `json:"order"`
 	}
@@ -1547,7 +1639,7 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
 		return
 	}
-	layers, err := e.store.ListLayerConfigs(r.Context(), e.tenantID)
+	layers, err := e.store.ListLayerConfigs(r.Context(), tenantID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
@@ -1578,7 +1670,7 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	updated, _ := e.store.ListLayerConfigs(r.Context(), e.tenantID)
+	updated, _ := e.store.ListLayerConfigs(r.Context(), tenantID)
 	sort.Slice(updated, func(i, j int) bool { return updated[i].Order < updated[j].Order })
 	// spec §8.1, §7.3.1: a reorder records one layer.config_changed on the
 	// identifiers it named, whatever the class of the layers it names, where
@@ -1593,7 +1685,7 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 		// Spec: §7.6 — the scope names every reordered layer, in request
 		// order, so the stream delivers the event to a subscriber who can
 		// see at least one of them and rewrites `layer` to that subset.
-		scope := core.EventScope{TenantID: e.tenantID, Layers: req.Order}
+		scope := core.EventScope{TenantID: tenantID, Layers: req.Order}
 		e.publishConfigChanged(r.Context(), scope, strings.Join(req.Order, ","), "reorder")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"layers": e.readableBy(r, caller, updated)})
@@ -1623,6 +1715,10 @@ func (e *LayerEndpoint) reingest(w http.ResponseWriter, r *http.Request) {
 	if rejectIfReadOnly(w, e.mode) {
 		return
 	}
+	tenantID, ok := e.requireTenant(w, r)
+	if !ok {
+		return
+	}
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id query param required")
@@ -1649,7 +1745,7 @@ func (e *LayerEndpoint) reingest(w http.ResponseWriter, r *http.Request) {
 		}
 		bg = &BreakGlass{Justification: body.Justification, Approvers: body.Approvers}
 	}
-	cfg, err := e.store.GetLayerConfig(r.Context(), e.tenantID, id)
+	cfg, err := e.store.GetLayerConfig(r.Context(), tenantID, id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "registry.not_found", "no such layer: "+id)
@@ -1691,7 +1787,7 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		// spec §9: fire a §9.1 operational notification on an ingest-failure so a
 		// configured NotificationProvider alerts the operator. Delivery is
 		// best-effort; the structured error envelope is written regardless.
-		e.notifyIngestFailure(r.Context(), cfg.ID, err)
+		e.notifyIngestFailure(r.Context(), cfg, err)
 		writeReingestError(w, err)
 		return
 	}
@@ -1823,15 +1919,20 @@ func writeReingestError(w http.ResponseWriter, err error) {
 // reingest. The severity is error, the title names the failing layer, and the
 // body carries the ingest-pipeline error; a layer tag lets a receiver route on
 // the layer id. A nil notifier (no configured provider) makes this a no-op.
+//
+// The tenant tag is the one the layer is stored under. The inbound webhook
+// reaches this path with no routed context, so the stored record is the only
+// tenant source that holds on every trigger.
+//
 // spec: §9 — "Delivery for ingest-failure and operational notifications."
-func (e *LayerEndpoint) notifyIngestFailure(ctx context.Context, layerID string, err error) {
+func (e *LayerEndpoint) notifyIngestFailure(ctx context.Context, cfg store.LayerConfig, err error) {
 	if e.notify == nil {
 		return
 	}
 	e.notify(ctx, "error",
-		fmt.Sprintf("ingest failed for layer %s", layerID),
+		fmt.Sprintf("ingest failed for layer %s", cfg.ID),
 		err.Error(),
-		map[string]string{"layer": layerID, "tenant": e.tenantID})
+		map[string]string{"layer": cfg.ID, "tenant": cfg.TenantID})
 }
 
 // generateSecret returns a 32-byte hex-encoded HMAC secret for git

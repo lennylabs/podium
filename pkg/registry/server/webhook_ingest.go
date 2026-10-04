@@ -43,7 +43,8 @@ func (e *LayerEndpoint) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "layer id required")
 		return
 	}
-	cfg, err := e.store.GetLayerConfig(r.Context(), e.tenantID, id)
+	tenantID, _ := e.tenant(r.Context())
+	cfg, err := e.store.GetLayerConfig(r.Context(), tenantID, id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "registry.not_found", "no such layer: "+id)

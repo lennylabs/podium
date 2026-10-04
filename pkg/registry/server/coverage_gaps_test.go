@@ -215,7 +215,7 @@ func TestNotifyIngestFailure_FiresInstalledNotifier(t *testing.T) {
 	t.Run("nil_notifier_is_noop", func(t *testing.T) {
 		e := NewLayerEndpoint(store.NewMemory(), "t", NewModeTracker())
 		// No WithNotifier: the call must not panic and must do nothing.
-		e.notifyIngestFailure(context.Background(), "team-shared", errors.New("boom"))
+		e.notifyIngestFailure(context.Background(), store.LayerConfig{TenantID: "t", ID: "team-shared"}, errors.New("boom"))
 	})
 
 	t.Run("installed_notifier_receives_event", func(t *testing.T) {
@@ -226,7 +226,9 @@ func TestNotifyIngestFailure_FiresInstalledNotifier(t *testing.T) {
 			gotTags     map[string]string
 			calls       int
 		)
-		e := NewLayerEndpoint(store.NewMemory(), "acme", NewModeTracker())
+		// The endpoint's bound tenant differs from the record's, so the
+		// tenant tag shows it is read from the stored layer record.
+		e := NewLayerEndpoint(store.NewMemory(), "boot", NewModeTracker())
 		ret := e.WithNotifier(func(_ context.Context, severity, title, body string, tags map[string]string) {
 			calls++
 			gotSeverity, gotTitle, gotBody, gotTags = severity, title, body, tags
@@ -235,7 +237,7 @@ func TestNotifyIngestFailure_FiresInstalledNotifier(t *testing.T) {
 			t.Errorf("WithNotifier should return the endpoint for chaining")
 		}
 
-		e.notifyIngestFailure(context.Background(), "team-shared", errors.New("source unreachable"))
+		e.notifyIngestFailure(context.Background(), store.LayerConfig{TenantID: "acme", ID: "team-shared"}, errors.New("source unreachable"))
 		if calls != 1 {
 			t.Fatalf("notifier called %d times, want 1", calls)
 		}
