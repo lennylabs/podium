@@ -210,8 +210,8 @@ func TestDeliverLoadArtifact_RuntimeGateRunsAfterVerification(t *testing.T) {
 // no local artifact.loaded event.
 func TestDeliverLoadArtifact_NoAuditEventOnResourceFetchFailure(t *testing.T) {
 	t.Parallel()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("tampered"))
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
 	}))
 	t.Cleanup(ts.Close)
 	s, path := orderServer(t, &config{harness: "none", verifyPolicy: sign.PolicyNever})
@@ -255,20 +255,6 @@ func TestVerifyServedArtifact_ManifestBodyFetchFailure(t *testing.T) {
 	err := s.verifyServedArtifact(&resp, deliverOpts{})
 	if err == nil || !strings.HasPrefix(err.Error(), "materialize.fetch_failed") {
 		t.Errorf("err = %v, want materialize.fetch_failed", err)
-	}
-}
-
-// Spec: §6.6 step 1 — an inline resource flagged base64 that does not decode
-// fails the verification with its own code.
-func TestVerifyServedArtifact_InvalidBase64(t *testing.T) {
-	t.Parallel()
-	s := newTestServer(t, &config{verifyPolicy: sign.PolicyNever})
-	resp := fixtureResp("team/x", "---\ntype: context\n---\n")
-	resp.Resources = map[string]string{"a.txt": "!!not base64!!"}
-	resp.ResourcesB64 = true
-	err := s.verifyServedArtifact(&resp, deliverOpts{})
-	if err == nil || !strings.HasPrefix(err.Error(), "materialize.invalid_base64") {
-		t.Errorf("err = %v, want materialize.invalid_base64", err)
 	}
 }
 

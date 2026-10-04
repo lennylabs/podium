@@ -2,19 +2,12 @@ package main
 
 import (
 	"bytes"
-	"context"
-	"crypto/ed25519"
-	crand "crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/lennylabs/podium/pkg/sign"
 )
 
 func TestEnvDefault(t *testing.T) {
@@ -470,50 +463,6 @@ func TestProxyGet_UnreachableRegistryReturnsOfflineStatus(t *testing.T) {
 	}
 	if _, has := m["error"]; has {
 		t.Errorf("offline result must not carry an error key: %v", m)
-	}
-}
-
-// resolveVerifier for registry-managed under always loads the verification
-// key set from PODIUM_SIGNATURE_VERIFY_KEY (comma-separated base64 Ed25519), so
-// the resulting provider verifies a real envelope under either listed key. A
-// malformed entry refuses the start with config.signature_provider_unavailable. Not parallel: it mutates env. The home
-// is hermetic so the malformed-variable arm runs against a home with no key
-// file rather than the developer's own.
-//
-// Spec: §4.7.9, §6.2.
-func TestResolveVerifier_RegistryManagedVerifyKey(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("PODIUM_SIGN_KEY_PATH", "")
-	pub, priv, err := ed25519.GenerateKey(crand.Reader)
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
-	}
-	pub2, priv2, err := ed25519.GenerateKey(crand.Reader)
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
-	}
-	hash := "sha256:" + hex.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
-
-	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pub)+","+base64.StdEncoding.EncodeToString(pub2))
-	p, err := resolveVerifier(sign.PolicyAlways, "registry-managed")
-	if err != nil {
-		t.Fatalf("resolveVerifier(always, registry-managed) = %v", err)
-	}
-	for i, k := range []ed25519.PrivateKey{priv, priv2} {
-		envelope, err := sign.RegistryManagedKey{PrivateKey: k}.Sign(context.Background(), hash)
-		if err != nil {
-			t.Fatalf("Sign: %v", err)
-		}
-		if err := p.Verify(context.Background(), hash, envelope); err != nil {
-			t.Errorf("verify under listed key %d: %v", i+1, err)
-		}
-	}
-
-	// A malformed entry is a startup refusal naming the variable.
-	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pub)+",!!!not base64")
-	_, err = resolveVerifier(sign.PolicyAlways, "registry-managed")
-	if err == nil || !strings.HasPrefix(err.Error(), "config.signature_provider_unavailable:") || !strings.Contains(err.Error(), "PODIUM_SIGNATURE_VERIFY_KEY") {
-		t.Errorf("malformed PODIUM_SIGNATURE_VERIFY_KEY = %v, want config.signature_provider_unavailable naming the variable", err)
 	}
 }
 

@@ -224,8 +224,8 @@ func TestLoadArtifactFromCache_RecoversBytes(t *testing.T) {
 	if got.ArtifactRevision != cachedRevision {
 		t.Errorf("ArtifactRevision = %q, want the served %q", got.ArtifactRevision, cachedRevision)
 	}
-	if err := verifyDeliveryHash(*got); err != nil {
-		t.Errorf("verifyDeliveryHash on the cache-served record: %v", err)
+	if err := checkDeliveryHash(*got); err != nil {
+		t.Errorf("delivery check on the cache-served record: %v", err)
 	}
 }
 
@@ -254,8 +254,8 @@ func TestLoadArtifactFromCache_SkillRawRoundTrip(t *testing.T) {
 	if got.SkillRaw != skillRaw {
 		t.Errorf("SkillRaw not restored from cache:\n got %q\nwant %q", got.SkillRaw, skillRaw)
 	}
-	if err := verifyDeliveryHash(*got); err != nil {
-		t.Errorf("verifyDeliveryHash on cache-served skill: %v", err)
+	if err := checkDeliveryHash(*got); err != nil {
+		t.Errorf("delivery check on cache-served skill: %v", err)
 	}
 	if md := synthesizeSkillMD(*got); md != skillRaw {
 		t.Errorf("synthesizeSkillMD = %q, want authored skill_raw %q", md, skillRaw)
@@ -289,7 +289,7 @@ func TestVerifyDeliveryHash_CacheServedSkillWithoutSkillRawFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadArtifactFromCache: %v", err)
 	}
-	if err := verifyDeliveryHash(*got); err == nil || !strings.Contains(err.Error(), "content_hash_mismatch") {
+	if err := checkDeliveryHash(*got); err == nil || !strings.Contains(err.Error(), "content_hash_mismatch") {
 		t.Errorf("err = %v, want content_hash_mismatch for a skill cached without skill_raw", err)
 	}
 }

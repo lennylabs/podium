@@ -144,10 +144,10 @@ func TestResources_ReadReconstitutesAPresignedBody(t *testing.T) {
 	}
 }
 
-// Spec: §5.0, §6.6 — the mirror decodes inline resources and fetches large
+// Spec: §5.0, §6.6, §4.7.10 — the mirror decodes inline resources and fetches large
 // resources before it recomputes the delivery hash, because the record frames
-// every bundled resource. A linked body whose bytes were altered is refused
-// with materialize.fetch_failed.
+// every bundled resource. A linked body whose bytes were altered fails the
+// §4.7.10 step 6 check and is refused with materialize.content_hash_mismatch.
 func TestResources_ReadVerifiesOverBundledResources(t *testing.T) {
 	t.Parallel()
 	fm := []byte("---\ntype: context\nversion: 1.0.0\n---\nbody\n")
@@ -189,8 +189,8 @@ func TestResources_ReadVerifiesOverBundledResources(t *testing.T) {
 
 	tampered := newMirrorRegistry(t, build([]byte("altered resource bytes")))
 	text, errMsg = readMirror(t, tampered.ts.URL, sign.PolicyNever, "docs/res")
-	if !strings.HasPrefix(errMsg, "materialize.fetch_failed") {
-		t.Errorf("error = %q (text %q), want materialize.fetch_failed", errMsg, text)
+	if !strings.HasPrefix(errMsg, "materialize.content_hash_mismatch") {
+		t.Errorf("error = %q (text %q), want materialize.content_hash_mismatch", errMsg, text)
 	}
 }
 
@@ -220,5 +220,31 @@ func TestResources_ReadRefusesAForgedManifestBody(t *testing.T) {
 	text, errMsg = readMirror(t, serve("forged instructions\n").ts.URL, sign.PolicyNever, "docs/x")
 	if !strings.HasPrefix(errMsg, "materialize.content_hash_mismatch") || text != "" {
 		t.Errorf("forged read = %q / %q, want materialize.content_hash_mismatch and no text", text, errMsg)
+	}
+}
+
+// Spec: §5.0, §4.7.10 — the mirror decodes the body by the same steps
+// load_artifact applies, so a body with a leading byte order mark (step 1)
+// and a body whose resources_base64 value is not canonical are refused with
+// materialize.content_hash_mismatch and return no text.
+func TestResources_ReadRefusesBodiesTheProcedureRefuses(t *testing.T) {
+	t.Parallel()
+	raw := []byte{0x00, 0x01, 0x02, 0xff}
+	cases := map[string]string{
+		"leading byte order mark": "\ufeff" + base64Body(t, raw, base64.StdEncoding.EncodeToString(raw), nil),
+		"non-canonical base64":    base64Body(t, raw, "AAEC/x==", nil),
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			text, errMsg := readMirror(t, rawRegistry(t, body), sign.PolicyNever, "team/x")
+			if !strings.HasPrefix(errMsg, "materialize.content_hash_mismatch") || text != "" {
+				t.Errorf("read = %q / %q, want materialize.content_hash_mismatch and no text", text, errMsg)
+			}
+		})
+	}
+	text, errMsg := readMirror(t, rawRegistry(t, base64Body(t, raw, base64.StdEncoding.EncodeToString(raw), nil)), sign.PolicyNever, "team/x")
+	if errMsg != "" || !strings.Contains(text, "type: context") {
+		t.Errorf("canonical read = %q / %q, want the served text", text, errMsg)
 	}
 }

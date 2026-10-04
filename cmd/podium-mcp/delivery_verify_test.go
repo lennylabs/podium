@@ -223,8 +223,8 @@ func TestDeliverLoadArtifact_SignatureOverAnotherDeliveryHashRefused(t *testing.
 // Spec: §4.7.10, §6.6 — a large resource contributes the content hash its link
 // carries. A link whose hash was blanked, and one altered together with the
 // object bytes so the fetch check passes, fail the delivery comparison. Bytes
-// that do not match an unaltered link fail at the fetch with
-// materialize.fetch_failed before any hook runs.
+// that do not match an unaltered link fail the §4.7.10 step 6 check at the
+// fetch with materialize.content_hash_mismatch before any hook runs.
 func TestDeliverLoadArtifact_LargeResourceLinkIsFramed(t *testing.T) {
 	t.Parallel()
 	served, forged := []byte("served large bytes"), []byte("forged large bytes")
@@ -250,7 +250,7 @@ func TestDeliverLoadArtifact_LargeResourceLinkIsFramed(t *testing.T) {
 		}, "materialize.content_hash_mismatch"},
 		"bytes altered under an unaltered link": {func(r *loadArtifactResponse) {
 			r.LargeResources["data/big.bin"] = largeResourceLink{URL: serveBytes(forged), ContentHash: sha256Hex(served)}
-		}, "materialize.fetch_failed"},
+		}, "materialize.content_hash_mismatch"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -3,10 +3,13 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 func mbHash(b []byte) string {
@@ -83,8 +86,8 @@ func TestFetchManifestBody_HashMismatchAborts(t *testing.T) {
 		ManifestBodyURL: &largeResourceLink{URL: mbServe(t, []byte("tampered")), ContentHash: "sha256:" + strings.Repeat("a", 64)},
 	}
 	err := srv.fetchManifestBody(&resp, nil)
-	if err == nil || !strings.Contains(err.Error(), "content hash mismatch") {
-		t.Errorf("err = %v, want hash-mismatch refusal", err)
+	if !errors.Is(err, version.ErrLinkedHashMismatch) {
+		t.Errorf("err = %v, want version.ErrLinkedHashMismatch", err)
 	}
 }
 
@@ -99,5 +102,29 @@ func TestFetchManifestBody_NoURLNoop(t *testing.T) {
 	}
 	if resp.Frontmatter != "FM" || resp.ManifestBody != "B" {
 		t.Errorf("inline fields must be untouched: %+v", resp)
+	}
+}
+
+// Spec: §4.7.10 — fetchManifestBody derives the body by the delimiter rule
+// through manifest.ManifestBodyOf and parses no YAML, so a document whose
+// frontmatter does not parse still yields the bytes after the closing
+// delimiter, with leading CR and LF removed, as every other consumer derives
+// them.
+func TestFetchManifestBody_DerivesBodyByDelimiterRule(t *testing.T) {
+	t.Parallel()
+	doc := []byte("---\ntype: [unclosed\n---\r\n\nDelimited body.\n")
+	srv := &mcpServer{cfg: &config{}, http: &http.Client{}}
+	resp := loadArtifactResponse{
+		ID: "x", Type: "context",
+		ManifestBodyURL: &largeResourceLink{URL: mbServe(t, doc), ContentHash: mbHash(doc)},
+	}
+	if err := srv.fetchManifestBody(&resp, nil); err != nil {
+		t.Fatalf("fetchManifestBody: %v", err)
+	}
+	if resp.ManifestBody != "Delimited body.\n" {
+		t.Errorf("manifest_body = %q, want %q", resp.ManifestBody, "Delimited body.\n")
+	}
+	if resp.Frontmatter != string(doc) {
+		t.Errorf("frontmatter = %q, want the fetched document", resp.Frontmatter)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/hook"
 	"github.com/lennylabs/podium/pkg/sign"
@@ -416,23 +417,16 @@ func TestAbsMaterializeRoot(t *testing.T) {
 
 // ----- resources_base64 -------------------------------------------
 
-// Spec: §6.6 — when the registry flags inline resources base64, the
-// MCP decodes them to raw bytes before the delivery check and materialization.
+// Spec: §6.6, §4.7.10 — when the registry flags inline resources base64,
+// deliverFreshLoad decodes them to raw bytes through version.ParseLoadResponse
+// before the delivery check, and materialization writes the decoded bytes.
 func TestDeliver_Base64InlineResourceDecoded(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
 	raw := []byte{0x00, 0x01, 0x02, 0xff} // binary payload
-	enc := base64.StdEncoding.EncodeToString(raw)
-	fm := "---\ntype: context\n---\nbody"
-	resp := loadArtifactResponse{
-		ID: "team/x", Type: "context", Version: "1.0.0", Frontmatter: fm,
-		Resources:    map[string]string{"bin/blob": enc},
-		ResourcesB64: true,
-		// content_hash is over the DECODED bytes, matching the registry.
-		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{"bin/blob": raw}),
-	}
-	out := s.deliverLoadArtifact(sealDelivery(resp), deliverOpts{harness: "none", destination: dest})
+	body := base64Body(t, raw, base64.StdEncoding.EncodeToString(raw), nil)
+	out := s.deliverFreshLoad([]byte(body), map[string]any{"id": "team/x", "destination": dest}, time.Now())
 	m := out.(map[string]any)
 	if _, isErr := m["error"]; isErr {
 		t.Fatalf("base64 delivery failed: %v", m)
@@ -443,26 +437,6 @@ func TestDeliver_Base64InlineResourceDecoded(t *testing.T) {
 	}
 	if string(got) != string(raw) {
 		t.Errorf("decoded resource = %v, want %v", got, raw)
-	}
-}
-
-// Spec: §6.6 — an inline value that does not base64-decode fails the
-// call rather than writing the base64 text to disk.
-func TestDeliver_InvalidBase64Rejected(t *testing.T) {
-	t.Parallel()
-	dest := t.TempDir()
-	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
-	resp := loadArtifactResponse{
-		ID: "team/x", Type: "context", Version: "1.0.0",
-		Frontmatter:  "---\ntype: context\n---\n",
-		Resources:    map[string]string{"bin/blob": "not!base64!"},
-		ResourcesB64: true,
-		ContentHash:  "sha256:" + strings.Repeat("0", 64),
-	}
-	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
-	m := out.(map[string]any)
-	if code, _ := m["code"].(string); code != "materialize.invalid_base64" {
-		t.Errorf("code = %v, want materialize.invalid_base64", m["code"])
 	}
 }
 

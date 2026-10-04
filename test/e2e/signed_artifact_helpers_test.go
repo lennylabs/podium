@@ -12,8 +12,9 @@ package e2e
 // The delivery hash is composed with the shared version.DeliveryHash, and the
 // delivery signature is produced by the real sign.RegistryManagedKey.Sign over
 // it, so the pair is byte-identical to what the registry's read path serves.
-// The verifier is the real podium-mcp path (verifyDeliveryHash, then
-// enforceSignaturePolicy -> sign.EnforceVerification), configured via
+// The verifier is the real podium-mcp path (sign.DeliveryCheck.Verify, which
+// compares the delivery hash and then calls sign.EnforceVerification),
+// configured via
 // PODIUM_SIGNATURE_PROVIDER=registry-managed plus PODIUM_SIGNATURE_VERIFY_KEY
 // (the offline keypair's base64 public key) and an enforcing
 // PODIUM_VERIFY_SIGNATURES. Driving the shipped binary keeps the fixture

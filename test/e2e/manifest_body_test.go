@@ -29,18 +29,26 @@ import (
 // serve, anything else to simulate a failure).
 func mbStubRegistry(t *testing.T, id, artifactMD string, status int) (*httptest.Server, *int32) {
 	t.Helper()
+	return mbStubRegistryServing(t, id, artifactMD, artifactMD, status)
+}
+
+// mbStubRegistryServing is mbStubRegistry with the /objects route serving
+// served in place of artifactMD, while the link and the delivery hash still
+// name artifactMD, so a test can serve a tampered document.
+func mbStubRegistryServing(t *testing.T, id, artifactMD, served string, status int) (*httptest.Server, *int32) {
+	t.Helper()
 	sum := sha256.Sum256([]byte(artifactMD))
 	key := hex.EncodeToString(sum[:])
 	contentHash := "sha256:" + version.CanonicalContentHash([]byte(artifactMD), nil, nil)
 	// The delivery record frames the document and the body the bridge
 	// reconstitutes from the link, not the cleared inline fields.
-	art, err := manifest.ParseArtifact([]byte(artifactMD))
+	derived, err := manifest.ManifestBodyOf([]byte(artifactMD))
 	if err != nil {
-		t.Fatalf("ParseArtifact: %v", err)
+		t.Fatalf("ManifestBodyOf: %v", err)
 	}
 	deliveryHash := version.DeliveryHash(version.DeliveryRecord{
 		ID: id, Version: "1.0.0", Type: "context", ContentHash: contentHash,
-		ArtifactRevision: epochArtifactRevision, Frontmatter: artifactMD, ManifestBody: art.Body,
+		ArtifactRevision: epochArtifactRevision, Frontmatter: artifactMD, ManifestBody: derived,
 	})
 	var bodyHits int32
 
@@ -52,7 +60,7 @@ func mbStubRegistry(t *testing.T, id, artifactMD string, status int) (*httptest.
 			return
 		}
 		w.Header().Set("Content-Type", "text/markdown")
-		_, _ = w.Write([]byte(artifactMD))
+		_, _ = w.Write([]byte(served))
 	})
 	mux.HandleFunc("/v1/load_artifact", func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{
@@ -145,5 +153,35 @@ func TestManifestBody_BridgeFetchFailureAborts(t *testing.T) {
 	}
 	if files := readTreeAll(t, mat); len(files) != 0 {
 		t.Errorf("a failed body fetch must not materialize anything, wrote: %v", keysOf(files))
+	}
+}
+
+// Spec: §4.7.10, §6.6 step 1 — a fetched manifest document that does not match
+// its link's content_hash fails the §4.7.10 step 6 check. The bridge refuses
+// the load with materialize.content_hash_mismatch and writes nothing.
+func TestManifestBody_BridgeRefusesATamperedDocument(t *testing.T) {
+	t.Parallel()
+	id := "finance/glossary"
+	artifactMD := "---\ntype: context\nversion: 1.0.0\ndescription: Glossary.\n---\n\nGlossary entry line.\n"
+	tampered := strings.Replace(artifactMD, "Glossary entry line.", "Forged entry line.", 1)
+	ts, bodyHits := mbStubRegistryServing(t, id, artifactMD, tampered, http.StatusOK)
+
+	mat := t.TempDir()
+	env := []string{
+		"PODIUM_VERIFY_SIGNATURES=never",
+		"PODIUM_REGISTRY=" + ts.URL, "PODIUM_CACHE_DIR=" + t.TempDir(),
+		"HOME=" + t.TempDir(), "PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT=" + mat,
+	}
+	res := mcpExec(t, env, toolCall(1, "load_artifact", map[string]any{"id": id}))
+	result := rpcResult(t, res.Stdout, 1)
+	errStr, _ := result["error"].(string)
+	if !strings.HasPrefix(errStr, "materialize.content_hash_mismatch") {
+		t.Errorf("expected materialize.content_hash_mismatch, got result=%v", result)
+	}
+	if atomic.LoadInt32(bodyHits) == 0 {
+		t.Error("bridge never fetched the presigned manifest-body URL")
+	}
+	if files := readTreeAll(t, mat); len(files) != 0 {
+		t.Errorf("a tampered document must not materialize anything, wrote: %v", keysOf(files))
 	}
 }

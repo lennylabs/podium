@@ -3,21 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
-
-	"github.com/lennylabs/podium/pkg/sign"
 )
-
-// enforceSignaturePolicy passes when the policy is never.
-func TestEnforceSignaturePolicy_PolicyNeverSucceeds(t *testing.T) {
-	t.Parallel()
-	s := &mcpServer{cfg: &config{
-		signatureProvider: "noop",
-		verifyPolicy:      sign.PolicyNever,
-	}}
-	if err := s.enforceSignaturePolicy(loadArtifactResponse{}); err != nil {
-		t.Errorf("err = %v", err)
-	}
-}
 
 // enforceSandboxPolicy with malformed frontmatter refuses (fail-closed).
 func TestEnforceSandboxPolicy_MalformedFrontmatter(t *testing.T) {
