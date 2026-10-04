@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/sign"
 )
@@ -452,5 +453,81 @@ func TestSignCmd_EnvelopeCarriesKeyID(t *testing.T) {
 	}
 	if want := sign.KeyIDFor(pub); env.KeyID != want {
 		t.Errorf("envelope key_id = %q, want %q", env.KeyID, want)
+	}
+}
+
+// Spec: §6.2
+// Matrix: §6.10 (config.invalid)
+// TestSigstoreRequestTimeout pins how podium sign reads
+// PODIUM_SIGSTORE_REQUEST_TIMEOUT: an unset or blank value takes
+// sign.DefaultRequestTimeout, a positive duration is used after trimming, and
+// any other value is refused with config.invalid naming the variable. The
+// cases use t.Setenv, so they cannot run in parallel.
+func TestSigstoreRequestTimeout(t *testing.T) {
+	const unset = "<unset>"
+	cases := []struct {
+		value   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{value: unset, want: sign.DefaultRequestTimeout},
+		{value: "", want: sign.DefaultRequestTimeout},
+		{value: "  ", want: sign.DefaultRequestTimeout},
+		{value: "5s", want: 5 * time.Second},
+		{value: " 5s ", want: 5 * time.Second},
+		{value: "abc", wantErr: true},
+		{value: "0", wantErr: true},
+		{value: "0s", wantErr: true},
+		{value: "-1s", wantErr: true},
+		{value: "60", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.value, func(t *testing.T) {
+			t.Setenv("PODIUM_SIGSTORE_REQUEST_TIMEOUT", tc.value)
+			if tc.value == unset {
+				if err := os.Unsetenv("PODIUM_SIGSTORE_REQUEST_TIMEOUT"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := sigstoreRequestTimeout()
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "config.invalid") || !strings.Contains(err.Error(), "PODIUM_SIGSTORE_REQUEST_TIMEOUT") {
+					t.Fatalf("sigstoreRequestTimeout() = %v, %v; want a config.invalid error naming PODIUM_SIGSTORE_REQUEST_TIMEOUT", got, err)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("sigstoreRequestTimeout() = %v, %v; want %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// Spec: §6.2
+// Matrix: §6.10 (config.invalid)
+// TestLoadSignatureProvider_SigstoreVerifyIgnoresRequestTimeout pins that
+// only the sign use reads PODIUM_SIGSTORE_REQUEST_TIMEOUT. Verification is
+// offline, so an invalid value must not break podium verify, while podium sign
+// refuses it and carries a valid value into SigstoreKeyless.RequestTimeout.
+func TestLoadSignatureProvider_SigstoreVerifyIgnoresRequestTimeout(t *testing.T) {
+	t.Setenv("PODIUM_SIGSTORE_REQUEST_TIMEOUT", "abc")
+	if _, err := loadSignatureProvider("sigstore-keyless", keyForVerify); err != nil {
+		t.Errorf("verify use with an invalid timeout: err = %v, want nil", err)
+	}
+	if _, err := loadSignatureProvider("sigstore-keyless", keyForSign); err == nil || !strings.Contains(err.Error(), "config.invalid") {
+		t.Errorf("sign use with an invalid timeout: err = %v, want config.invalid", err)
+	}
+
+	t.Setenv("PODIUM_SIGSTORE_REQUEST_TIMEOUT", "5s")
+	p, err := loadSignatureProvider("sigstore-keyless", keyForSign)
+	if err != nil {
+		t.Fatalf("sign use with 5s: %v", err)
+	}
+	ks, ok := p.(sign.SigstoreKeyless)
+	if !ok {
+		t.Fatalf("provider = %T, want sign.SigstoreKeyless", p)
+	}
+	if ks.RequestTimeout != 5*time.Second {
+		t.Errorf("RequestTimeout = %v, want 5s", ks.RequestTimeout)
 	}
 }
