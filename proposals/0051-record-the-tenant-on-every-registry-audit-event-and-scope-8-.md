@@ -1,7 +1,7 @@
 # Proposal 0051: Record the tenant on every registry audit event and scope §8.5 erasure to the requesting tenant on a multi-tenant registry
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-04) by the maintainer. OQ-1: one shared chain with a tenant attribute (Decision 1). OQ-2: unlabeled records are untouched by a tenant-scoped erase and not reported (Decision 7). OQ-3: operator tenant.managed events record no tenant (Decision 4). OQ-4: keep all three fixes in this proposal as drafted: the post-erase re-anchor (SPEC-3), the superseded_head key, and the endpoint-sink user.erased emission.
+- Status: Applied to spec (2026-10-04). OQ-1: one shared chain with a tenant attribute (Decision 1). OQ-2: unlabeled records are untouched by a tenant-scoped erase and not reported (Decision 7). OQ-3: operator tenant.managed events record no tenant (Decision 4). OQ-4: keep all three fixes in this proposal as drafted: the post-erase re-anchor (SPEC-3), the superseded_head key, and the endpoint-sink user.erased emission.
 - Date: 2026-10-04
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
