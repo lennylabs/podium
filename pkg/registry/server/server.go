@@ -446,6 +446,8 @@ func (s *Server) Handler() http.Handler {
 // trusted-headers (an empty view via the registry's bound no-data tenant). When
 // no tenant router is installed the registry is single-tenant and this is a
 // pass-through.
+//
+// Spec: §6.3.1, §7.3.1
 func (s *Server) withTenantRouting(next http.Handler) http.Handler {
 	if s.tenantRouter == nil {
 		return next
@@ -464,20 +466,105 @@ func (s *Server) withTenantRouting(next http.Handler) http.Handler {
 			return
 		}
 		id := s.identity(r)
-		if id.IsAuthenticated && id.OrgID != "" {
-			if tenantID, ok := s.tenantRouter(r.Context(), id.OrgID); ok {
-				next.ServeHTTP(w, r.WithContext(core.ContextWithTenant(r.Context(), tenantID)))
-				return
-			}
-			if s.rejectUnknownTenant {
-				writeErrorDetails(w, http.StatusUnauthorized, "auth.tenant_unknown",
-					"Verified token names organization '"+id.OrgID+"' which is not a provisioned tenant.",
-					map[string]any{"token_org_id": id.OrgID})
-				return
-			}
+		ctx, reject := s.routeTenant(r, id)
+		if reject {
+			writeTenantUnknown(w, id.OrgID)
+			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// routeTenant is the single §6.3.1 tenant-selection rule shared by the
+// meta-tool chain and the layer routes. An authenticated caller whose
+// organization resolves to a provisioned tenant gets a context scoped to that
+// tenant. An organization that resolves to none is rejected (reject=true) when
+// the provider verifies the organization claim, and otherwise leaves the
+// request unrouted. Every other request keeps r.Context() unchanged. The
+// caller must check that a tenant router is installed.
+//
+// Spec: §6.3.1, §7.3.1
+func (s *Server) routeTenant(r *http.Request, id layer.Identity) (ctx context.Context, reject bool) {
+	if !id.IsAuthenticated || id.OrgID == "" {
+		return r.Context(), false
+	}
+	if tenantID, ok := s.tenantRouter(r.Context(), id.OrgID); ok {
+		return core.ContextWithTenant(r.Context(), tenantID), false
+	}
+	return r.Context(), s.rejectUnknownTenant
+}
+
+// writeTenantUnknown writes the §6.10 auth.tenant_unknown envelope for a
+// verified caller whose organization names no provisioned tenant.
+func writeTenantUnknown(w http.ResponseWriter, orgID string) {
+	writeErrorDetails(w, http.StatusUnauthorized, "auth.tenant_unknown",
+		"Verified token names organization '"+orgID+"' which is not a provisioned tenant.",
+		map[string]any{"token_org_id": orgID})
+}
+
+// TenantRouted scopes a handler mounted outside Handler (the §7.3.1 layer
+// routes) to the request's §6.3.1 tenant. With no tenant router installed the
+// registry is single-tenant and next is returned unchanged. Otherwise the
+// caller is resolved through the installed identity verifier, routed with the
+// same rule as the meta-tool chain, and refused with auth.tenant_unknown when
+// a verified organization names no provisioned tenant.
+//
+// It does not reuse withIdentityVerification, because that middleware refuses
+// a failed credential with auth.untrusted_runtime or auth.token_expired before
+// the handler runs, while §7.3.1 fixes 403 auth.forbidden for a failed
+// credential on the layer writes. A verification error, or no installed
+// verifier, therefore yields the zero Identity: the request stays unrouted and
+// the endpoint refuses the credential itself.
+//
+// Spec: §6.3.1, §7.3.1
+func (s *Server) TenantRouted(next http.Handler) http.Handler {
+	return s.tenantRouted(next, true)
+}
+
+// TenantRoutedNoReject behaves as TenantRouted except that it never refuses a
+// request: an organization that resolves to no tenant leaves the request
+// unrouted. It serves the posture read, which §7.3.4 says refuses no request,
+// so that read reports manage_any_layer false where the layer endpoints answer
+// 401 auth.tenant_unknown.
+//
+// Spec: §7.3.4, §6.3.1
+func (s *Server) TenantRoutedNoReject(next http.Handler) http.Handler {
+	return s.tenantRouted(next, false)
+}
+
+// tenantRouted implements TenantRouted and TenantRoutedNoReject; refuse
+// selects whether a rejected organization answers auth.tenant_unknown.
+func (s *Server) tenantRouted(next http.Handler, refuse bool) http.Handler {
+	if s.tenantRouter == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := s.verifiedCallerOrZero(r)
+		ctx, reject := s.routeTenant(r, id)
+		if reject {
+			if refuse {
+				writeTenantUnknown(w, id.OrgID)
+				return
+			}
+			ctx = r.Context()
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// verifiedCallerOrZero returns the identity the installed verifier resolves
+// for r, or the zero Identity when no verifier is installed or verification
+// fails, so the request stays unrouted rather than adopting an unverified
+// organization claim.
+func (s *Server) verifiedCallerOrZero(r *http.Request) layer.Identity {
+	if s.idVerifier == nil {
+		return layer.Identity{}
+	}
+	id, err := s.idVerifier(r)
+	if err != nil {
+		return layer.Identity{}
+	}
+	return id
 }
 
 // withReadOnlyHeaders wraps the route mux so every response
