@@ -1,7 +1,7 @@
 # Proposal 0041: Verify the §4.7.10 delivery record in server-source podium sync and in both language SDKs, and specify the raw-HTTP verification procedure
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-03), signed off under the overnight authorization after three redesigns (against 0040's /2 record and 0043's provider set). Signed off as staged. OQ-1: accept the optional extra podium-sdk[verify]. OD-1, OD-2, OD-4, OD-5: accept the defaults. OD-3: accept the default (sync and the SDKs read no provider name), which overrides the earlier instruction to read PODIUM_SIGNATURE_PROVIDER: the stated requirement (same policy and key set as podium-mcp) holds, and reading the variable would only add refusals, including exit 2 for a shell that exports sigstore-keyless for podium verify.
+- Status: Applied to spec (2026-10-03). The proposal was approved on the same date and signed off as staged under the overnight authorization, after three redesigns against 0040's /2 record and 0043's provider set. OQ-1: accept the optional extra podium-sdk[verify]. OD-1, OD-2, OD-4, OD-5: accept the defaults. OD-3: accept the default (sync and the SDKs read no provider name), which overrides the earlier instruction to read PODIUM_SIGNATURE_PROVIDER: the stated requirement (same policy and key set as podium-mcp) holds, and reading the variable would only add refusals, including exit 2 for a shell that exports sigstore-keyless for podium verify.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
