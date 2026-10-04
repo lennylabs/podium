@@ -1545,9 +1545,14 @@ func run(ctx context.Context, stop func()) error {
 	// auth.untrusted_* where §7.3.1 fixes 403 auth.forbidden. A routed erase
 	// therefore verifies its credential twice, once in TenantRouted and once
 	// in the endpoint's resolver, and the stateless verifiers observe the
-	// same result both times. A request that resolves to no provisioned
-	// tenant reaches the handler unrouted, and its tenant check answers 403
-	// auth.forbidden before the admin check runs.
+	// same result both times. Under oidc-jwt, a verified organization that
+	// names no provisioned tenant is refused by TenantRouted with 401
+	// auth.tenant_unknown and never reaches the handler. Any other request
+	// that resolves to no tenant reaches the handler unrouted: no credential,
+	// a failed verification, trusted-headers with an unknown organization,
+	// public mode, or no identity provider. The handler's requireTenant
+	// check answers that request with 403 auth.forbidden before authAdmin
+	// runs.
 	mux.Handle("/v1/admin/erase", srv.TenantRouted(layers.EraseHandler()))
 	if cfg.webUI {
 		mux.Handle("/app/", http.StripPrefix("/app/", http.FileServer(http.FS(web.Assets()))))
