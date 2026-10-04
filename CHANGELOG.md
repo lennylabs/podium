@@ -236,6 +236,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   records the content hash, the signature, and the certificate. The certificate
   is checked at the timestamp's time, so an envelope keeps verifying after its
   Fulcio certificate expires. Verification makes no network call.
+- **Search, materialization, and audit-volume quotas are charged per tenant**
+  (§4.7.8): on a multi-tenant registry, each `search_domains`,
+  `search_artifacts`, and `load_artifact` request is charged to the tenant the
+  request resolves to, under that tenant's own `search_qps` and
+  `materialize_rate`, and each audit event counts against the daily budget of
+  the tenant its request resolves to. Previously every tenant shared one search
+  bucket and one materialization bucket at the `PODIUM_QUOTA_*` values, and the
+  per-tenant values set through `/v1/admin/tenants` had no effect. When
+  `PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY` was set, every tenant also shared one
+  daily audit budget, so one tenant's traffic could block every tenant's
+  reingest. `GET /v1/quota` now reports the search QPS, materialization rate,
+  and audit-volume limits the registry enforces.
 
 ### Changed
 
@@ -911,6 +923,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` names Sigstore's `trusted_root.json`, and
   its certificate authorities, transparency-log keys, and timestamp authorities
   apply only within their validity windows.
+- A tenant quota value of zero for `search_qps`, `materialize_rate`, or
+  `audit_volume_per_day` no longer disables the budget (§4.7.8). It takes the
+  deployment default from `PODIUM_QUOTA_SEARCH_QPS`,
+  `PODIUM_QUOTA_MATERIALIZE_RATE`, or `PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY`, so a
+  tenant set to 0 is throttled whenever the matching variable is positive. Set
+  the tenant value to a negative number to exempt that tenant. A single-tenant
+  registry keeps its limits from these variables and does not read its tenant
+  record's values for these budgets. On a multi-tenant registry, requests that
+  resolve to no tenant share one budget at the deployment defaults.
 
 ### Removed
 
@@ -955,6 +976,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   registry-managed (§4.7.10), so the provider verified no load, and it accepted
   a keyless envelope from any OIDC identity. `podium sign` and `podium verify`
   keep `sigstore-keyless`.
+- `server.WithTenant` removed (library API).
 
 ### Documentation
 
@@ -963,8 +985,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   posture member, and the change-event stream's delivery of public-layer events
   to a caller with no verified subject.
 - Deployment pages: the per-tenant layer model, the tenant-qualified webhook
-  URL, the pre-release layer rows left in the default tenant, and the
-  deployment-wide audit-volume budget on a multi-tenant registry.
+  URL, and the pre-release layer rows left in the default tenant.
 - **Embedding-model switch on managed vector backends** (§4.7): per-row model
   versioning, query-time model filtering, and the stale-row purge apply to the
   collocated stores, pgvector and sqlite-vec. The vector-backends page gives the
@@ -1020,6 +1041,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   that the stream applies no per-caller filtering, and
   `docs/reference/http-api.md` describes the filtered stream and the receiver
   delivery scope.
+- §4.7.8 states which tenant each search, load, and audit event is charged to,
+  how unrouted requests are charged, and how a tenant value relates to the
+  deployment default. §13.12 documents `PODIUM_QUOTA_SEARCH_QPS`,
+  `PODIUM_QUOTA_MATERIALIZE_RATE`, and `PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY`.
+  `docs/reference/http-api.md`, `docs/reference/cli.md` (the `podium quota`
+  description, the `podium admin tenant` flag table, and the
+  environment-variable table), `docs/reference/error-codes.md`, and
+  `docs/deployment/clustered.md` follow, and the `podium admin tenant` flag help
+  in `cmd/podium/admin_tenant.go` states the same zero and negative rule.
 
 ## [0.4.0] - 2026-09-05
 
