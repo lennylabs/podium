@@ -1,7 +1,7 @@
 # Proposal 0048: Charge the §4.7.8 search, materialization, and audit-volume quotas to the request's tenant under that tenant's limits
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-03). The proposal was approved on 2026-10-03, decided on the user's behalf under the overnight authorization. Redesigned so routing carries the tenant record on the request context (no second store read), with bucket charge and rebuild made atomic. Signed off as staged. OQ-2 (max_user_layers precedence) and OQ-3 (charging the §7.6.2 bulk load) are recorded as follow-ups outside this proposal.
+- Status: Implemented (2026-10-03). The proposal was approved on 2026-10-03, decided on the user's behalf under the overnight authorization. Redesigned so routing carries the tenant record on the request context (no second store read), with bucket charge and rebuild made atomic. Signed off as staged. OQ-2 (max_user_layers precedence) and OQ-3 (charging the §7.6.2 bulk load) are recorded as follow-ups outside this proposal.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -48,23 +48,23 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2. §4.7.8 states per-tenant charging, the unrouted budget, the zero and negative precedence, and the reported limits, and §13.12 gains the `### Quotas` table. Bundled because the §13.12 rows depend on the amended §4.7.8 zero rule, and either half alone leaves the spec contradicting itself.
+- [x] **S1 · spec** — SPEC-1, SPEC-2. §4.7.8 states per-tenant charging, the unrouted budget, the zero and negative precedence, and the reported limits, and §13.12 gains the `### Quotas` table. Bundled because the §13.12 rows depend on the amended §4.7.8 zero rule, and either half alone leaves the spec contradicting itself.
       Levels: —. Depends on: —
-- [ ] **S2 · code** — CODE-1, CODE-2, CODE-3, CODE-5. `EffectiveLimits`, the tenant record carried on the request context, the tenant-keyed limiter and meter, the handler and quota-read changes, the comments on `store.Quota`, `QuotaEnvelope` (with the `web/bundle` rebuild check), and the serverboot `Config` quota fields, the serverboot wiring, and the `podium admin tenant` flag help land together, with the existing tests' call-site updates and the tenant-router stub updates, including the stubs proposals 0046 and 0047 add. CODE-5 rides along so no build ships help text that contradicts the enforced rule. Bundled because the router, limiter, meter, and runner signatures change across `pkg/registry/server` and `internal/serverboot`, the router stubs in `cmd/podium` tests follow the router signature, and none of these compiles against the others in parts.
+- [x] **S2 · code** — CODE-1, CODE-2, CODE-3, CODE-5. `EffectiveLimits`, the tenant record carried on the request context, the tenant-keyed limiter and meter, the handler and quota-read changes, the comments on `store.Quota`, `QuotaEnvelope` (with the `web/bundle` rebuild check), and the serverboot `Config` quota fields, the serverboot wiring, and the `podium admin tenant` flag help land together, with the existing tests' call-site updates and the tenant-router stub updates, including the stubs proposals 0046 and 0047 add. CODE-5 rides along so no build ships help text that contradicts the enforced rule. Bundled because the router, limiter, meter, and runner signatures change across `pkg/registry/server` and `internal/serverboot`, the router stubs in `cmd/podium` tests follow the router signature, and none of these compiles against the others in parts.
       Levels: unit, integration, e2e. Depends on: S1
-- [ ] **S3 · code** — CODE-4. Remove `Server.tenant`, its `New` initializer, `WithTenant`, and the `options_test.go:29` call.
+- [x] **S3 · code** — CODE-4. Remove `Server.tenant`, its `New` initializer, `WithTenant`, and the `options_test.go:29` call.
       Levels: unit, integration, e2e. Depends on: S2
-- [ ] **S4 · test** — TEST-1. Unit tests for the `EffectiveLimits` precedence, the context carrier, the per-tenant buckets, the in-place bucket retune with token carry-over, the no-replacement invariant, the concurrent rate-change admission bound, and the meter's explicit-limit `Allow`.
+- [x] **S4 · test** — TEST-1. Unit tests for the `EffectiveLimits` precedence, the context carrier, the per-tenant buckets, the in-place bucket retune with token carry-over, the no-replacement invariant, the concurrent rate-change admission bound, and the meter's explicit-limit `Allow`.
       Levels: unit. Depends on: S2
-- [ ] **S5 · test** — TEST-2. In-process integration test with one server, one limiter, and a tenant router, the comment correction in the existing cross-tenant integration test, and the rewrite of `TestQuota_LimitNamesMatchTheTenantObject` so it no longer asserts that the quota read and the tenant object carry the same numbers.
+- [x] **S5 · test** — TEST-2. In-process integration test with one server, one limiter, and a tenant router, the comment correction in the existing cross-tenant integration test, and the rewrite of `TestQuota_LimitNamesMatchTheTenantObject` so it no longer asserts that the quota read and the tenant object carry the same numbers.
       Levels: integration. Depends on: S2
-- [ ] **S6 · test** — TEST-3. Serverboot tests for per-tenant audit recording, the reingest key and limit resolution, the reingest refusal on a tenant read fault or a missing tenant record, the single-tenant gate that reads no record, unconditional meter installation, and the tenant record `tenantResolver` returns.
+- [x] **S6 · test** — TEST-3. Serverboot tests for per-tenant audit recording, the reingest key and limit resolution, the reingest refusal on a tenant read fault or a missing tenant record, the single-tenant gate that reads no record, unconditional meter installation, and the tenant record `tenantResolver` returns.
       Levels: unit, integration. Depends on: S2
-- [ ] **S7 · test** — TEST-4. End-to-end multi-tenant quota isolation on the binary against the standard stack, including the per-tenant audit-volume gate, and the standalone `GET /v1/quota` report of the deployment defaults.
+- [x] **S7 · test** — TEST-4. End-to-end multi-tenant quota isolation on the binary against the standard stack, including the per-tenant audit-volume gate, and the standalone `GET /v1/quota` report of the deployment defaults.
       Levels: e2e. Depends on: S2
-- [ ] **S8 · docs** — DOC-1. The HTTP API, CLI (including the `podium admin tenant` flag table), clustered deployment, and error-code references describe per-tenant charging and the deployment defaults. Land S8 in the same pull request as S2 so no released build documents behavior it lacks.
+- [x] **S8 · docs** — DOC-1. The HTTP API, CLI (including the `podium admin tenant` flag table), clustered deployment, and error-code references describe per-tenant charging and the deployment defaults. Land S8 in the same pull request as S2 so no released build documents behavior it lacks.
       Levels: —. Depends on: S2
-- [ ] **S9 · docs** — CL-1. The `[Unreleased]` `Fixed`, `Changed`, `Documentation`, and `Removed` entries, and the strike of the audit-volume clause from proposal 0047's unreleased `Documentation` entry.
+- [x] **S9 · docs** — CL-1. The `[Unreleased]` `Fixed`, `Changed`, `Documentation`, and `Removed` entries, and the strike of the audit-volume clause from proposal 0047's unreleased `Documentation` entry.
       Levels: —. Depends on: S3, S8
 
 **Ordering constraints.** S1 lands the rule every later step cites. S2 changes every signature the tests use, so S4 to S7 follow it and may proceed in parallel. S3 follows S2 because CODE-2 removes the last reads of `s.tenant`. S9 follows S3 and S8 because the `Removed` entry records CODE-4 and the `Documentation` entry records DOC-1. S1 starts only after proposals 0046 and 0047 are implemented.
