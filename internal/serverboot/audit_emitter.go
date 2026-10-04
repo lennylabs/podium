@@ -55,14 +55,17 @@ func auditEmitterFor(sink audit.Sink, scrubber *audit.PIIScrubber, sampler *audi
 	}
 }
 
-// auditVolumeEmitter wraps next so every emitted audit event counts against the
-// tenant's §4.7.8 daily audit-volume budget. It records first, then delegates
+// wrapAuditVolume wraps next so every emitted audit event counts against the
+// §4.7.8 daily audit-volume budget of the emitting request's tenant, which
+// tenantOf resolves from the call's context. It records first, then delegates
 // to next (which may be nil when no sink is configured, in which case the event
 // is counted and dropped). The recorded count is what the §7.3.1 reingest path
 // consults to refuse new writes with quota.audit_volume_exceeded.
-func auditVolumeEmitter(meter *server.AuditVolumeMeter, tenant string, next core.AuditEmitter) core.AuditEmitter {
+//
+// Spec: §4.7.8
+func wrapAuditVolume(meter *server.AuditVolumeMeter, tenantOf func(context.Context) string, next core.AuditEmitter) core.AuditEmitter {
 	return func(ctx context.Context, e core.AuditEvent) {
-		meter.Record(tenant)
+		meter.Record(tenantOf(ctx))
 		if next != nil {
 			next(ctx, e)
 		}

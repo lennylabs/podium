@@ -246,13 +246,13 @@ func TestIngestAuditEmitter_NilScrubberStillEmits(t *testing.T) {
 func TestBuildReingestRunner_UnknownSourceTypeIsInvalidConfig(t *testing.T) {
 	t.Parallel()
 	mreg := metrics.New()
-	meter := server.NewAuditVolumeMeter(0) // disabled budget: pass the gate
+	meter := server.NewAuditVolumeMeter() // disabled budget: pass the gate
 
 	runner := buildReingestRunner(
 		store.NewMemory(), nil, &Config{}, nil, nil, nil, nil, mreg, meter,
-		"default", false, collocatedVectorIngest{},
+		false, collocatedVectorIngest{},
 	)
-	_, err := runner(context.Background(), store.LayerConfig{SourceType: "svn"}, nil)
+	_, err := runner(context.Background(), store.LayerConfig{TenantID: "default", SourceType: "svn"}, nil)
 	if !errors.Is(err, source.ErrInvalidConfig) {
 		t.Fatalf("err = %v, want ErrInvalidConfig", err)
 	}
@@ -266,14 +266,14 @@ func TestBuildReingestRunner_UnknownSourceTypeIsInvalidConfig(t *testing.T) {
 func TestBuildReingestRunner_BudgetRejectionCounted(t *testing.T) {
 	t.Parallel()
 	mreg := metrics.New()
-	meter := server.NewAuditVolumeMeter(1)
+	meter := server.NewAuditVolumeMeter()
 	meter.Record("default") // spend the single-event budget
 
 	runner := buildReingestRunner(
-		store.NewMemory(), nil, &Config{}, nil, nil, nil, nil, mreg, meter,
-		"default", false, collocatedVectorIngest{},
+		store.NewMemory(), nil, &Config{auditVolumePerDay: 1}, nil, nil, nil, nil, mreg, meter,
+		false, collocatedVectorIngest{},
 	)
-	if _, err := runner(context.Background(), store.LayerConfig{SourceType: "git"}, nil); !errors.Is(err, ingest.ErrAuditVolumeExceeded) {
+	if _, err := runner(context.Background(), store.LayerConfig{TenantID: "default", SourceType: "git"}, nil); !errors.Is(err, ingest.ErrAuditVolumeExceeded) {
 		t.Fatalf("err = %v, want ErrAuditVolumeExceeded", err)
 	}
 	if body := scrapeMetrics(t, mreg); !strings.Contains(body, `podium_ingest_failure_total 1`) {

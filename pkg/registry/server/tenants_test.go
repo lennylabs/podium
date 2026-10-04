@@ -33,7 +33,7 @@ func bootTenantServer(t *testing.T, id layer.Identity, multiTenant bool, opts ..
 	}
 	if multiTenant {
 		options = append(options, server.WithTenantRouter(
-			func(context.Context, string) (string, bool) { return "default", true }, true))
+			func(context.Context, string) (store.Tenant, bool) { return store.Tenant{ID: "default"}, true }, true))
 	}
 	options = append(options, opts...)
 	srv := server.New(core.New(st, "default", nil), options...)

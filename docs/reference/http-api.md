@@ -577,7 +577,7 @@ Gated by tenant config (`tenant.expose_scope_preview`). When `false`, returns `4
 GET /v1/quota
 ```
 
-Returns the calling tenant's configured limits and current usage. Read-only and not admin-gated, since quota visibility is informational.
+Returns the limits the registry enforces against the calling tenant and the tenant's current usage. Read-only and not admin-gated, since quota visibility is informational.
 
 ```json
 {
@@ -593,7 +593,7 @@ Returns the calling tenant's configured limits and current usage. Read-only and 
 }
 ```
 
-`limits` reports the tenant's configured budget under the same five field names `GET /v1/admin/tenants` reports for the same numbers. A zero `max_user_layers` selects the deployment-configured cap, which is 3 unless the deployment sets one, and a negative value disables the cap. A deployment that configures the cap explicitly applies it ahead of this per-tenant value, so the enforced cap on such a deployment is the configured one whatever this field reports.
+`limits` uses the five field names `GET /v1/admin/tenants` uses. For `search_qps`, `materialize_rate`, and `audit_volume_per_day`, it reports the limit the registry enforces against the calling tenant. A zero tenant value is replaced by the deployment default (`PODIUM_QUOTA_SEARCH_QPS`, `PODIUM_QUOTA_MATERIALIZE_RATE`, or `PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY`), and a negative tenant value disables the budget for that tenant. A `0` in these three fields means the budget is not enforced, so they can differ from the stored values that `GET /v1/admin/tenants` reports. `storage_bytes` and `max_user_layers` report the stored values. A change made through `PATCH /v1/admin/tenants/{id}` applies from the tenant's next request, and a changed rate does not refill the tenant's unspent allowance. The bulk load `POST /v1/artifacts:batchLoad` is not charged against the materialization rate. A zero `max_user_layers` selects the deployment-configured cap, which is 3 unless the deployment sets one, and a negative value disables the cap. A deployment that configures the cap explicitly applies it ahead of this per-tenant value, so the enforced cap on such a deployment is the configured one whatever this field reports.
 
 ---
 

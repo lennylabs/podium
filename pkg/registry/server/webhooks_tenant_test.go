@@ -122,9 +122,12 @@ func newTenantWebhookFixture(t *testing.T, bound string, admins, routes map[stri
 		}),
 	}
 	if routes != nil {
-		opts = append(opts, server.WithTenantRouter(func(_ context.Context, org string) (string, bool) {
+		opts = append(opts, server.WithTenantRouter(func(_ context.Context, org string) (store.Tenant, bool) {
 			tenant, ok := routes[org]
-			return tenant, ok
+			if !ok {
+				return store.Tenant{}, false
+			}
+			return store.Tenant{ID: tenant}, true
 		}, rejectUnknown))
 	}
 	srv := server.New(core.New(st, bound, nil), opts...)

@@ -34,7 +34,7 @@ func bootFaultTenantServer(t *testing.T) (*httptest.Server, *storetest.FaultStor
 	fault := storetest.NewFaultStore(mem)
 	srv := server.New(core.New(fault, "default", nil),
 		server.WithIdentityResolver(func(*http.Request) layer.Identity { return operatorCaller }),
-		server.WithTenantRouter(func(context.Context, string) (string, bool) { return "default", true }, true),
+		server.WithTenantRouter(func(context.Context, string) (store.Tenant, bool) { return store.Tenant{ID: "default"}, true }, true),
 	)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

@@ -26,7 +26,7 @@ func bootTenantCLIServer(t *testing.T) (*httptest.Server, store.Store) {
 	}
 	srv := server.New(core.New(st, "default", nil),
 		server.WithIdentityResolver(func(*http.Request) layer.Identity { return op }),
-		server.WithTenantRouter(func(context.Context, string) (string, bool) { return "default", true }, true),
+		server.WithTenantRouter(func(context.Context, string) (store.Tenant, bool) { return store.Tenant{ID: "default"}, true }, true),
 	)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

@@ -52,12 +52,16 @@ func memberOf(t *testing.T, raw []byte, name string) json.RawMessage {
 }
 
 // Spec: §7.2.1, §4.7.8, §7.3.3 — GET /v1/quota and GET /v1/admin/tenants
-// report the same five limits, so they name them identically. The two
-// endpoints disagreed before store.Quota took its tags: the quota read
-// emitted the Go field names while the tenant object emitted the
-// snake_case ones. Each endpoint keeps the tenant identifier §7.2.1
-// permits, because the tenant is the subject of the record that carries
-// it.
+// name the five quota fields identically. The two endpoints disagreed before
+// store.Quota took its tags: the quota read emitted the Go field names while
+// the tenant object emitted the snake_case ones. storage_bytes and
+// max_user_layers carry the stored values on both reads. GET /v1/quota
+// reports the enforced search_qps, materialize_rate, and audit_volume_per_day
+// (§4.7.8), which can differ from the stored ones, so this test compares only
+// the two stored fields; quota_tenant_routing_test.go and the end-to-end
+// quota tests pin the enforced values. Each endpoint keeps the tenant
+// identifier §7.2.1 permits, because the tenant is the subject of the record
+// that carries it.
 func TestQuota_LimitNamesMatchTheTenantObject(t *testing.T) {
 	t.Parallel()
 	ts, st := bootTenantServer(t, operatorCaller, true)
@@ -115,9 +119,8 @@ func TestQuota_LimitNamesMatchTheTenantObject(t *testing.T) {
 		t.Errorf("GET /v1/quota tenant_id = %s, want \"default\"", got)
 	}
 
-	// The values under the shared names are the same five numbers, so the
-	// key-set equality is an agreement about the same record rather than a
-	// coincidence of two unrelated shapes.
+	// The stored fields carry the same values on both reads, so the name
+	// agreement is about one record rather than two unrelated objects.
 	var limits map[string]int64
 	if err := json.Unmarshal(quotaLimits, &limits); err != nil {
 		t.Fatalf("decode limits: %v", err)
@@ -126,8 +129,10 @@ func TestQuota_LimitNamesMatchTheTenantObject(t *testing.T) {
 	if err := json.Unmarshal(memberOf(t, tenants.Tenants[0], "quota"), &tenantQuota); err != nil {
 		t.Fatalf("decode tenant quota: %v", err)
 	}
-	if !reflect.DeepEqual(limits, tenantQuota) {
-		t.Errorf("limits = %v, tenant quota = %v, want the same numbers", limits, tenantQuota)
+	for _, name := range []string{"storage_bytes", "max_user_layers"} {
+		if limits[name] != tenantQuota[name] {
+			t.Errorf("%s: quota read = %d, tenant object = %d, want equal", name, limits[name], tenantQuota[name])
+		}
 	}
 	if limits["max_user_layers"] != 7 {
 		t.Errorf("max_user_layers = %d, want 7", limits["max_user_layers"])

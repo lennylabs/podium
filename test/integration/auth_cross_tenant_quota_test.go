@@ -12,13 +12,16 @@ package integration
 //
 // Two registries are stood up over one shared Postgres database, one pinned to
 // org acme and one to org globex, each behind the injected-session-token
-// verifier and each with its own §4.7.8 search-QPS limiter. The §4.7.8 limiter
-// keys a leaky token bucket per tenant, so exhausting acme's bucket must not
-// touch globex's. The journey asserts:
+// verifier and each with its own §4.7.8 search-QPS limiter. Because each
+// server owns its limiter, the quota section checks only per-server
+// throttling: two limiters cannot share a bucket, so it cannot detect a
+// limiter that charges every tenant to one bucket. Shared-limiter isolation
+// is pinned by pkg/registry/server/quota_tenant_routing_test.go and by the
+// end-to-end quota_tenant_isolation_test.go. The journey asserts:
 //
 //   - acme is throttled with quota.search_qps_exceeded once its budget is
-//     spent, while globex, searching in budget against its own limiter, stays
-//     served (HTTP 200);
+//     spent, while globex, searching in budget against its own server's
+//     limiter, stays served (HTTP 200);
 //   - acme reading globex's dependency edges sees an org-scoped empty set (no
 //     globex edge leaks into acme's schema) while each org sees its own edge;
 //   - acme's scope-preview counts only acme's artifacts, never globex's; and
@@ -194,10 +197,11 @@ func TestAuthCrossTenantQuota_NonInterferenceOverSharedPostgres(t *testing.T) {
 	if st, _ := orgisoGet(t, acmeSrv.URL+"/v1/search_artifacts?query=policy", acmeToken); st != http.StatusTooManyRequests {
 		t.Errorf("acme follow-up search = %d, want 429 (budget still spent)", st)
 	}
-	// globex, searching in budget against its own separate limiter, stays served
-	// even while acme is throttled. globex's bucket was never touched by acme's
-	// burst, so a small number of in-budget globex searches all succeed. A
-	// shared (cross-tenant) limiter would have rejected these.
+	// globex, searching in budget against its own server's limiter, stays
+	// served while acme is throttled. The two servers do not share a limiter,
+	// so this checks per-server throttling only; quota_tenant_routing_test.go
+	// in pkg/registry/server and the end-to-end quota tests pin per-tenant
+	// isolation within one shared limiter.
 	for i := 0; i < searchQPS; i++ {
 		if gst, gbody := orgisoGet(t, globexSrv.URL+"/v1/search_artifacts?query=policy", globexToken); gst != http.StatusOK {
 			t.Fatalf("globex in-budget search #%d while acme throttled = %d, want 200 (cross-tenant quota leak)\nbody: %s", i, gst, gbody)

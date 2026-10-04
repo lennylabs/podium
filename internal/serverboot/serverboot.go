@@ -1289,17 +1289,18 @@ func run(ctx context.Context, stop func()) error {
 		bootOpts = append(bootOpts, server.WithSCIM(scimHandler))
 		log.Printf("SCIM 2.0 receiver mounted at /scim/v2/")
 	}
-	// §4.7.8 rate limits per tenant. Zero values disable per
-	// dimension; the limiter still mounts so multi-tenant
-	// deployments can enable a single dimension at a time.
+	// §4.7.8 and §13.12 deployment defaults. The limiter charges each request
+	// against the tenant record routing carried on it, and a tenant whose own
+	// value is zero (or a request that carries no record) takes these values.
+	// The limiter always mounts, because a tenant record can carry a limit
+	// while the deployment default is zero.
 	quotaLimits := server.QuotaLimits{
-		SearchQPS:       cfg.searchQPSLimit,
-		MaterializeRate: cfg.materializeRateLimit,
+		SearchQPS:         cfg.searchQPSLimit,
+		MaterializeRate:   cfg.materializeRateLimit,
+		AuditVolumePerDay: cfg.auditVolumePerDay,
 	}
-	if quotaLimits.SearchQPS > 0 || quotaLimits.MaterializeRate > 0 {
-		log.Printf("rate limits: search_qps=%d materialize_rate=%d",
-			quotaLimits.SearchQPS, quotaLimits.MaterializeRate)
-	}
+	log.Printf("quota deployment defaults: search_qps=%d materialize_rate=%d audit_volume_per_day=%d",
+		quotaLimits.SearchQPS, quotaLimits.MaterializeRate, quotaLimits.AuditVolumePerDay)
 	bootOpts = append(bootOpts, server.WithQuotaLimiter(server.NewQuotaLimiter(quotaLimits)))
 
 	// §7.1 latency SLO surface and §13.8 request metrics share the single
@@ -1629,13 +1630,12 @@ func run(ctx context.Context, stop func()) error {
 		baseEmitter = auditEmitterFor(auditSink, scrubber, auditSampler)
 	}
 	// §4.7.8 audit-volume quota: count every emitted audit event against the
-	// tenant's daily budget so the §7.3.1 reingest path can refuse new writes
-	// once it is spent. The recorder is added only when enforcement is on.
-	auditMeter := server.NewAuditVolumeMeter(cfg.auditVolumePerDay)
-	emitter := baseEmitter
-	if cfg.auditVolumePerDay > 0 {
-		emitter = auditVolumeEmitter(auditMeter, tenantID, emitter)
-	}
+	// emitting request's tenant so the §7.3.1 reingest path can refuse new
+	// writes to that tenant's layers once its daily budget is spent. The
+	// recorder is installed whatever the deployment default is, because a
+	// tenant record can carry its own cap.
+	auditMeter := server.NewAuditVolumeMeter()
+	emitter := wrapAuditVolume(auditMeter, registry.TenantFor, baseEmitter)
 	// §13.8: the visibility-denial metric is driven from the registry audit
 	// stream, so wrap the emitter (which may be nil) when metrics are on. This
 	// installs an emitter even with no sink, so the counter still moves.
@@ -1663,7 +1663,7 @@ func run(ctx context.Context, stop func()) error {
 	// lint, hash, store, publish events) instead of only recording intent.
 	// It carries the §4.7.2 freeze windows so an active window blocks ingest
 	// unless the manual reingest passes break-glass.
-	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg, auditMeter, tenantID, useVectorOutbox, collocatedVec))
+	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg, auditMeter, useVectorOutbox, collocatedVec))
 
 	// §9: fire a §9.1 operational notification when the reingest path above fails
 	// to ingest a layer. Reuses the same NotificationProvider wired into the
@@ -2090,13 +2090,17 @@ type Config struct {
 	// §8.2 query-text PII scrub config. Default-on (Enabled nil); sourced
 	// from PODIUM_PII_REDACTION and registry.yaml's pii_redaction block.
 	piiRedaction audit.PIIRedactionConfig
-	// §4.7.8 rate limits.
+	// §4.7.8 and §13.12 deployment defaults for the search QPS and
+	// materialization rate limits; a tenant whose own value is zero takes
+	// them, and 0 sets no deployment default.
 	searchQPSLimit       int
 	materializeRateLimit int
 	// §4.7.8 audit-volume quota: the per-tenant maximum number of audit
 	// events per UTC day. When exceeded, new auditable writes (reingest /
-	// inbound webhook) are refused with quota.audit_volume_exceeded. Zero
-	// disables enforcement.
+	// inbound webhook) are refused with quota.audit_volume_exceeded. This is
+	// the §4.7.8 and §13.12 deployment default, which applies to a tenant
+	// whose own audit_volume_per_day is zero. 0 sets no deployment default,
+	// and a tenant's positive value is still enforced.
 	auditVolumePerDay int64
 	// §4.7.2 vector-outbox drain worker tuning (external backends only).
 	vectorOutboxInterval int // poll interval seconds (default 5)

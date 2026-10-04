@@ -345,11 +345,11 @@ func TestEvents_ScopesNarrowArtifactEvents(t *testing.T) {
 // under "t" is withheld and one recorded under "B" is delivered.
 func TestEvents_MultiTenantRoutesSubscriberTenant(t *testing.T) {
 	t.Parallel()
-	router := server.WithTenantRouter(func(_ context.Context, org string) (string, bool) {
+	router := server.WithTenantRouter(func(_ context.Context, org string) (store.Tenant, bool) {
 		if org == "orgB" {
-			return "B", true
+			return store.Tenant{ID: "B"}, true
 		}
-		return "", false
+		return store.Tenant{}, false
 	}, false)
 	srv, ts, _ := newEventsRegistry(t, withEventsIdentities(), router)
 	erin := openEventStream(t, ts.URL, "erin")

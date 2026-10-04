@@ -62,8 +62,10 @@ type Server struct {
 	// organization value (§6.3.1). When set, the registry runs in multi-tenant
 	// mode: it is bound to a no-data tenant, and every request resolves its
 	// tenant from the authenticated identity. Nil leaves the server
-	// single-tenant, so every request resolves against the bound tenant.
-	tenantRouter func(ctx context.Context, orgValue string) (string, bool)
+	// single-tenant, so every request resolves against the bound tenant. It
+	// returns the tenant record it read, whose Quota the §4.7.8 charges and
+	// the quota read resolve against.
+	tenantRouter func(ctx context.Context, orgValue string) (store.Tenant, bool)
 	// rejectUnknownTenant selects the response when the organization resolves
 	// to no provisioned tenant: true (verified providers) rejects with
 	// auth.tenant_unknown; false (trusted-headers) leaves the caller in no
@@ -89,11 +91,6 @@ type Server struct {
 	// scim is the §6.3.1 SCIM 2.0 receiver. When set, the registry
 	// mounts /scim/v2/ to accept user/group push from an IdP.
 	scim *scim.Handler
-	// tenant is the key the §4.7.8 quota limiter charges search and
-	// materialize calls to. Webhook receivers do not read it: receiver CRUD
-	// keys on the request's routed tenant and delivery on the event's scope
-	// tenant (§7.3.2).
-	tenant string
 	// quota is the §4.7.8 rate limiter. When non-nil, search /
 	// load_artifact handlers consult it before doing real work.
 	quota *QuotaLimiter
@@ -216,8 +213,10 @@ func WithIdentityVerifier(fn func(*http.Request) (layer.Identity, error)) Option
 // the organization resolves to no tenant: true rejects a verified caller with
 // auth.tenant_unknown; false (trusted-headers) leaves the caller in no tenant.
 // The registry must be bound to a no-data tenant (so an unrouted request sees an
-// empty view), which the server-boot path does in multi-tenant mode.
-func WithTenantRouter(resolve func(ctx context.Context, orgValue string) (string, bool), rejectUnknown bool) Option {
+// empty view), which the server-boot path does in multi-tenant mode. resolve
+// returns the tenant record it read; the request carries its Quota so the
+// §4.7.8 charges resolve the tenant's limits without reading the record again.
+func WithTenantRouter(resolve func(ctx context.Context, orgValue string) (store.Tenant, bool), rejectUnknown bool) Option {
 	return func(s *Server) {
 		s.tenantRouter = resolve
 		s.rejectUnknownTenant = rejectUnknown
@@ -264,11 +263,6 @@ func WithWebhooks(w *webhook.Worker) Option {
 	return func(s *Server) { s.webhooks = w }
 }
 
-// WithTenant sets the key the §4.7.8 quota limiter charges.
-func WithTenant(t string) Option {
-	return func(s *Server) { s.tenant = t }
-}
-
 // WithAudit installs the §8.3 audit sink used to record HTTP-boundary
 // events (admin.granted). The same sink backs the core read-event emitter
 // so both streams stay on one §8.6 hash chain.
@@ -278,7 +272,7 @@ func WithAudit(sink audit.Sink) Option {
 
 // New returns a Server backed by the given core.Registry.
 func New(r *core.Registry, opts ...Option) *Server {
-	s := &Server{core: r, events: newEventBus(), tenant: "default"}
+	s := &Server{core: r, events: newEventBus()}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -488,8 +482,11 @@ func (s *Server) routeTenant(r *http.Request, id layer.Identity) (ctx context.Co
 	if !id.IsAuthenticated || id.OrgID == "" {
 		return r.Context(), false
 	}
-	if tenantID, ok := s.tenantRouter(r.Context(), id.OrgID); ok {
-		return core.ContextWithTenant(r.Context(), tenantID), false
+	// The tenant's quota rides on the context with its ID, so the limiter
+	// and the quota read make no second read of the record routing read.
+	// Spec: §4.7.8, §6.3.1
+	if t, ok := s.tenantRouter(r.Context(), id.OrgID); ok {
+		return contextWithRoutedTenant(r.Context(), t), false
 	}
 	return r.Context(), s.rejectUnknownTenant
 }
@@ -899,7 +896,10 @@ func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSearchDomains(w http.ResponseWriter, r *http.Request) {
-	if !s.quota.AllowSearch(s.tenant) {
+	// Charge the request's tenant under the record routing carried; an
+	// unrouted request carries none and is charged at the deployment defaults.
+	// Spec: §4.7.8, §6.3.1
+	if !s.quota.AllowSearch(s.core.TenantFor(r.Context()), tenantQuotaFrom(r.Context())) {
 		writeQuotaError(w, "quota.search_qps_exceeded", "tenant search QPS budget exhausted")
 		return
 	}
@@ -924,7 +924,7 @@ func (s *Server) handleSearchDomains(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSearchArtifacts(w http.ResponseWriter, r *http.Request) {
-	if !s.quota.AllowSearch(s.tenant) {
+	if !s.quota.AllowSearch(s.core.TenantFor(r.Context()), tenantQuotaFrom(r.Context())) {
 		writeQuotaError(w, "quota.search_qps_exceeded", "tenant search QPS budget exhausted")
 		return
 	}
@@ -1099,7 +1099,7 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "registry.method_not_allowed", "method not allowed: "+r.Method)
 		return
 	}
-	if !s.quota.AllowMaterialize(s.tenant) {
+	if !s.quota.AllowMaterialize(s.core.TenantFor(r.Context()), tenantQuotaFrom(r.Context())) {
 		writeQuotaError(w, "quota.materialize_rate_exceeded", "tenant materialize budget exhausted")
 		return
 	}

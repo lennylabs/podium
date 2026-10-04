@@ -76,9 +76,9 @@ func parseBoolFlag(name, s string) (bool, int) {
 // set, so an omitted quota field is left out of the request.
 func tenantQuotaFlags(fs *flag.FlagSet) func(set map[string]bool) map[string]any {
 	storageBytes := fs.Int64("storage-bytes", 0, "storage quota in bytes (0 disables the limit)")
-	searchQPS := fs.Int("search-qps", 0, "search QPS quota (0 disables the limit)")
-	materializeRate := fs.Int("materialize-rate", 0, "materialize rate quota (0 disables the limit)")
-	auditVolume := fs.Int64("audit-volume-per-day", 0, "audit volume per day quota (0 disables the limit)")
+	searchQPS := fs.Int("search-qps", 0, "search QPS quota (0 selects the deployment default; a negative value disables the limit)")
+	materializeRate := fs.Int("materialize-rate", 0, "materialize rate quota (0 selects the deployment default; a negative value disables the limit)")
+	auditVolume := fs.Int64("audit-volume-per-day", 0, "audit volume per day quota (0 selects the deployment default; a negative value disables the limit)")
 	maxUserLayers := fs.Int("max-user-layers", 0, "per-identity user-defined-layer cap (0 selects the default)")
 	return func(set map[string]bool) map[string]any {
 		quota := map[string]any{}

@@ -29,16 +29,24 @@ func buildReingestRunner(
 	signer ingest.SignerFunc,
 	mreg *metrics.Registry,
 	auditMeter *server.AuditVolumeMeter,
-	tenantID string,
 	useVectorOutbox bool,
 	collocatedVec collocatedVectorIngest,
 ) server.ReingestRunner {
 	return func(ctx context.Context, lc store.LayerConfig, bg *server.BreakGlass) (*ingest.Result, error) {
-		// §4.7.8: refuse a new auditable write once the tenant has spent its
-		// daily audit-volume budget. The budget rolls over at the UTC day
-		// boundary; reads still serve.
-		if !auditMeter.Allow(tenantID) {
-			err := fmt.Errorf("%w: tenant %s exceeded its daily audit-volume budget", ingest.ErrAuditVolumeExceeded, tenantID)
+		// §4.7.8: refuse a new auditable write once the layer's tenant has
+		// spent its daily audit-volume budget. The budget rolls over at the
+		// UTC day boundary; reads still serve. The key is the stored layer's
+		// tenant: the request's routed tenant on the manual trigger (§7.3.1
+		// Tenant selection) and the tenant the URL names on the webhook
+		// trigger, which in both cases is the key the emitter records that
+		// tenant's events under.
+		limit, err := auditVolumeLimit(ctx, st, cfg, lc.TenantID)
+		if err != nil {
+			countIngest(mreg, err)
+			return nil, err
+		}
+		if !auditMeter.Allow(lc.TenantID, limit) {
+			err := fmt.Errorf("%w: tenant %s exceeded its daily audit-volume budget", ingest.ErrAuditVolumeExceeded, lc.TenantID)
 			countIngest(mreg, err)
 			return nil, err
 		}
@@ -85,6 +93,26 @@ func buildReingestRunner(
 		countIngest(mreg, err)
 		return res, err
 	}
+}
+
+// auditVolumeLimit resolves the daily audit-volume cap enforced against
+// tenantID. A single-tenant registry reads no record and enforces the
+// deployment default. A multi-tenant registry reads the tenant's record once
+// per reingest, because the runner serves both the routed /v1/layers/reingest
+// route and the inbound webhook, which carries no routed record, and both
+// triggers resolve the limit the same way. Any read error, a missing record
+// included, refuses the reingest.
+//
+// Spec: §4.7.8, §13.12
+func auditVolumeLimit(ctx context.Context, st store.Store, cfg *Config, tenantID string) (int64, error) {
+	if !cfg.multiTenant {
+		return cfg.auditVolumePerDay, nil
+	}
+	t, err := st.GetTenant(ctx, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("audit volume: read tenant %s: %w", tenantID, err)
+	}
+	return server.EffectiveLimits(t.Quota, server.QuotaLimits{AuditVolumePerDay: cfg.auditVolumePerDay}).AuditVolumePerDay, nil
 }
 
 // countIngest records one §13.8 ingest outcome: a non-nil error increments

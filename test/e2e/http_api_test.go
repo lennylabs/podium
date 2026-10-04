@@ -1492,6 +1492,86 @@ func TestHTTPAPI_MaterializeRateQuota(t *testing.T) {
 	}
 }
 
+// apiQuotaLimits returns the limits object the registry's GET /v1/quota
+// reports for an anonymous caller.
+func apiQuotaLimits(t *testing.T, srv *serverProc) map[string]any {
+	t.Helper()
+	st, body := getRaw(t, srv.BaseURL+"/v1/quota")
+	apiWantStatus(t, st, 200, "quota", body)
+	limits, _ := apiJSONObj(t, body)["limits"].(map[string]any)
+	if limits == nil {
+		t.Fatalf("quota carries no limits: %s", body)
+	}
+	return limits
+}
+
+// apiWantLimits fails the test unless each named limit holds its wanted value.
+func apiWantLimits(t *testing.T, limits map[string]any, want map[string]float64) {
+	t.Helper()
+	for name, w := range want {
+		if got, _ := limits[name].(float64); got != w {
+			t.Errorf("limits.%s=%v, want %v (limits %v)", name, limits[name], w, limits)
+		}
+	}
+}
+
+// Spec: §4.7.8, §13.12 — a single-tenant registry takes its search,
+// materialization, and audit-volume limits from the PODIUM_QUOTA_* deployment
+// defaults alone, and GET /v1/quota reports those enforced values. Unset
+// variables report 0, the unenforced budget. A positive search_qps stored on
+// the bootstrap tenant's record, such as one written under multi-tenant mode,
+// is ignored by both the report and the limiter. The stale-record boot sets
+// PODIUM_SIGN=none because a SQLite store outside HOME refuses a signing key
+// generated under HOME.
+func TestHTTPAPI_QuotaReportsDeploymentDefaults(t *testing.T) {
+	reg := apiReg(t)
+	t.Run("set", func(t *testing.T) {
+		srv := startServerArgs(t, []string{"HOME=" + t.TempDir(),
+			"PODIUM_QUOTA_SEARCH_QPS=4", "PODIUM_QUOTA_MATERIALIZE_RATE=5", "PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY=6"},
+			"serve", "--standalone", "--layer-path", reg)
+		apiWantLimits(t, apiQuotaLimits(t, srv),
+			map[string]float64{"search_qps": 4, "materialize_rate": 5, "audit_volume_per_day": 6})
+	})
+	t.Run("unset", func(t *testing.T) {
+		srv := startServerArgs(t, []string{"HOME=" + t.TempDir()},
+			"serve", "--standalone", "--layer-path", reg)
+		apiWantLimits(t, apiQuotaLimits(t, srv),
+			map[string]float64{"search_qps": 0, "materialize_rate": 0, "audit_volume_per_day": 0})
+	})
+	t.Run("stale_bootstrap_record_ignored", func(t *testing.T) {
+		home := t.TempDir()
+		dbPath := filepath.Join(home, "podium.db")
+		apiSeedBootstrapQuota(t, dbPath, store.Quota{SearchQPS: 50})
+		srv := startServerArgs(t, []string{"HOME=" + home, "PODIUM_SQLITE_PATH=" + dbPath, "PODIUM_SIGN=none", "PODIUM_QUOTA_SEARCH_QPS=1"},
+			"serve", "--standalone", "--layer-path", reg)
+		apiWantLimits(t, apiQuotaLimits(t, srv), map[string]float64{"search_qps": 1})
+		for i := 0; i < 20; i++ {
+			st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=test")
+			if st == 429 && apiJSONObj(t, body)["code"] == "quota.search_qps_exceeded" {
+				return
+			}
+		}
+		t.Fatalf("20 immediate searches never returned quota.search_qps_exceeded; the limiter read the stored search_qps 50")
+	})
+}
+
+// apiSeedBootstrapQuota creates the bootstrap tenant in the SQLite file at
+// path with quota, before the binary boots over it. Boot's bootstrap is
+// idempotent, so the record survives.
+func apiSeedBootstrapQuota(t *testing.T, path string, quota store.Quota) {
+	t.Helper()
+	st, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("open sqlite %s: %v", path, err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateTenant(context.Background(), store.Tenant{
+		ID: core.OrgIDForName("default"), Name: "default", Quota: quota,
+	}); err != nil {
+		t.Fatalf("create bootstrap tenant: %v", err)
+	}
+}
+
 // ===== Undocumented endpoints & SLOs ============
 
 // spec: http-api.md (domain analyze not explicitly documented).
