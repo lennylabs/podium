@@ -7811,11 +7811,16 @@ registry signs by default, the bridge verifies under its `always` default, and
 both resolve the same key file.
 
 **Covers.** §4.7.9 key resolution, the §6.2 consumer defaults, the §13.10
-signing default, and the standalone bootstrap of `~/.podium/sync.yaml`.
+signing default, the standalone bootstrap of `~/.podium/sync.yaml`, the
+§4.7.10 delivery check in server-source `podium sync` and the Python SDK, and
+§7.6.3.
 
 **Why by hand.** The automated suites set the verification key explicitly in
 their fixtures, so they pass when the consumer defaults ship without the
 producer default or without the shared key resolution.
+The SDK suites run against stub registries, so they pass even if the delivery
+records a real registry serves, on a single load or in a batch, do not verify
+in Python, for example because the batch entry omits `sensitivity`.
 
 **Steps.**
 
@@ -7859,6 +7864,70 @@ producer default or without the shared key resolution.
    `config.signature_provider_unavailable` means the bridge did not resolve the
    key file the registry wrote, and `materialize.signature_missing` means the
    registry did not sign at ingest.
+
+4. Sync the workspace with no policy, provider, or key variable set.
+
+   ```bash
+   mkdir -p "$WORK/ws" && cd "$WORK/ws"
+   env -u PODIUM_VERIFY_SIGNATURES -u PODIUM_SIGNATURE_VERIFY_KEY -u PODIUM_SIGN_KEY_PATH \
+     podium sync --target "$WORK/out"; echo "exit=$?"
+   ls "$WORK/out"
+   ```
+
+   **Expect.** `exit=0` and the `first-run` artifact under `$WORK/out`. An
+   exit of 2 naming `config.signature_provider_unavailable` means sync did not
+   resolve the key file that `podium-mcp` resolved in step 3.
+
+5. Load the artifact through the Python SDK with no key, then with the
+   registry's public key.
+
+   ```bash
+   python3 -m venv "$WORK/venv"
+   "$WORK/venv/bin/pip" install -q -e "$REAL_HOME/projects/podium/sdks/podium-py[verify]"
+   PUB=$(sed -n 's/^public: *//p' "$HOME/.podium/standalone/registry-signing.key")
+   cat > "$WORK/sdk.py" <<'PY'
+   from podium import Client
+   c = Client(registry="http://127.0.0.1:8165")
+   print("POLICY", c.verify_signatures)
+   print("LOAD", c.load_artifact("first-run").id)
+   print("BATCH", [r.status for r in c.load_artifacts(ids=["first-run", "first-run"])])
+   PY
+   (export HOME="$WORK/empty-home"; mkdir -p "$HOME"; "$WORK/venv/bin/python" "$WORK/sdk.py")
+   (export HOME="$WORK/empty-home"; PODIUM_SIGNATURE_VERIFY_KEY="$PUB" "$WORK/venv/bin/python" "$WORK/sdk.py")
+   ```
+
+   **Expect.** The first run prints `POLICY never`, `LOAD first-run`, and
+   `BATCH ['ok', 'ok']`. The second prints `POLICY always`, `LOAD first-run`,
+   and `BATCH ['ok', 'ok']`. A `materialize.content_hash_mismatch` on a batch
+   entry only means the registry did not serve `sensitivity` on batch entries.
+   A `materialize.signature_invalid` in the second run means the SDK's
+   envelope verification disagrees with the registry's signing.
+
+6. Sync from a home that holds no key file, first with no key variable and
+   then with an unrelated verification key.
+
+   ```bash
+   mkdir -p "$WORK/empty-home" "$WORK/ws2" && cd "$WORK/ws2"
+   OTHER=$("$WORK/venv/bin/python" -c 'import base64
+   from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+   from cryptography.hazmat.primitives import serialization as s
+   k = Ed25519PrivateKey.generate().public_key()
+   print(base64.b64encode(k.public_bytes(s.Encoding.Raw, s.PublicFormat.Raw)).decode())')
+   (export HOME="$WORK/empty-home"
+    env -u PODIUM_VERIFY_SIGNATURES -u PODIUM_SIGNATURE_VERIFY_KEY -u PODIUM_SIGN_KEY_PATH -u PODIUM_SIGNATURE_PROVIDER \
+      podium sync --registry http://127.0.0.1:8165 --target "$WORK/out2"; echo "exit=$?")
+   (export HOME="$WORK/empty-home"
+    env -u PODIUM_VERIFY_SIGNATURES -u PODIUM_SIGN_KEY_PATH -u PODIUM_SIGNATURE_PROVIDER PODIUM_SIGNATURE_VERIFY_KEY="$OTHER" \
+      podium sync --registry http://127.0.0.1:8165 --target "$WORK/out3"; echo "exit=$?")
+   find "$WORK/out2" "$WORK/out3" -type f 2>/dev/null
+   ```
+
+   **Expect.** The first sync prints `exit=2` and its stderr names
+   `config.signature_provider_unavailable`. This is the refusal a sync on a
+   machine other than the registry's meets with no key configured. The second
+   sync prints `exit=1` and its stderr names `materialize.signature_invalid`.
+   `find` prints nothing, because neither sync writes an artifact file or a
+   `sync.lock`.
 
 **Cleanup.** `kill "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.
 
