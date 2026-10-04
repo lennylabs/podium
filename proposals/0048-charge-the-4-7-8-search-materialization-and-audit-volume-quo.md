@@ -1,7 +1,7 @@
 # Proposal 0048: Charge the §4.7.8 search, materialization, and audit-volume quotas to the request's tenant under that tenant's limits
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-03), decided on the user's behalf under the overnight authorization. Redesigned so routing carries the tenant record on the request context (no second store read), with bucket charge and rebuild made atomic. Signed off as staged. OQ-2 (max_user_layers precedence) and OQ-3 (charging the §7.6.2 bulk load) are recorded as follow-ups outside this proposal.
+- Status: Applied to spec (2026-10-03). The proposal was approved on 2026-10-03, decided on the user's behalf under the overnight authorization. Redesigned so routing carries the tenant record on the request context (no second store read), with bucket charge and rebuild made atomic. Signed off as staged. OQ-2 (max_user_layers precedence) and OQ-3 (charging the §7.6.2 bulk load) are recorded as follow-ups outside this proposal.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
