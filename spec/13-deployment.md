@@ -421,12 +421,12 @@ Selected via `PODIUM_OBJECT_STORE` (`s3` | `filesystem`).
 | `PODIUM_PRESIGN_TTL_SECONDS`                              | TTL for S3 presigned URLs                                              | 3600                                         |
 | `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT`                    | Deadline on each object-storage read the first-start stored-value rewrite, the `sign-stored-rows` command, and the stored-row admission check make (§13.4), as a duration. Environment only; no config-file key. | `30s`                                        |
 
-**URL mechanism by backend.** Both backends return `large_resources[*].url` values that the consumer follows to fetch bytes; the URL's authentication mechanism differs:
+**URL mechanism by backend.** Both backends return `large_resources[*].presigned_url` values that the consumer follows to fetch bytes; the URL's authentication mechanism differs:
 
 - **S3 backend.** URLs are presigned with AWS Signature V4. The URL is self-validating: any caller that holds the URL can fetch until the signature expires (`PODIUM_PRESIGN_TTL_SECONDS`). Consumers do not send credentials when following the URL.
 - **Filesystem backend.** URLs point at the registry's authenticated `/objects/{content_hash}` route. There is no embedded signature or expiry; the consumer sends the same session token it used for `load_artifact`. The registry validates the token, confirms that the caller can see an artifact that owns the content hash, and serves the bytes. A bundled resource is owned by each artifact that bundles it. A §6.6 presigned manifest document is owned by each artifact that serves it through that channel. For a skill that document is its `SKILL.md`, which a child declaring `extends:` serves as its own stored `SKILL.md`. For every other type it is the served `ARTIFACT.md`, which for a child declaring `extends:` is the merged document (§4.6) rather than the stored one, so the stored pre-merge document of such a child has no owner. A key the caller can see no owner of is answered exactly as a key that does not exist. The URL has no useful TTL of its own — it is bound to the caller's session, not to a clock.
 
-The choice of backend is transparent to the response shape: both produce `{url, content_hash, size, content_type}` records and the consumer verifies `sha256(bytes) == content_hash` after fetch in both cases. Hosts that share a `large_resources` URL with another caller cannot grant access to bytes the other caller is not entitled to read on either backend.
+The choice of backend is transparent to the response shape: both produce `{presigned_url, content_hash, size, content_type}` records and the consumer verifies `sha256(bytes) == content_hash` after fetch in both cases. Hosts that share a `large_resources` URL with another caller cannot grant access to bytes the other caller is not entitled to read on either backend.
 
 ### Vector backend
 
