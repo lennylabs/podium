@@ -700,21 +700,16 @@ func TestLayerTenantRouting_RoutedWritesAndEraseRefusal(t *testing.T) {
 		}
 	})
 
-	t.Run("erase refused for a routed admin", func(t *testing.T) {
-		rowsA, rowsB := trTenantRows(t, f.st, trTenantA), trTenantRows(t, f.st, trTenantB)
-		logBefore := trReadFile(t, f.auditPath)
-		f.adminCalls.Store(0)
-		f.expect(t, trDave, http.MethodPost, "/v1/admin/erase",
-			map[string]any{"user_id": trCarol.user, "salt": "s"}, http.StatusForbidden, "auth.forbidden")
-		if n := f.adminCalls.Load(); n != 0 {
-			t.Errorf("admin callback ran %d times on a refused erase", n)
-		}
-		if !reflect.DeepEqual(rowsA, trTenantRows(t, f.st, trTenantA)) || !reflect.DeepEqual(rowsB, trTenantRows(t, f.st, trTenantB)) {
-			t.Errorf("refused erase changed tenant rows")
-		}
-		if !bytes.Equal(logBefore, trReadFile(t, f.auditPath)) {
-			t.Errorf("refused erase rewrote the audit file")
-		}
+	// The erased user owns layers in A and B, so a refused erase that ran in
+	// either tenant would purge a row the assertions read.
+	eraseSeeds := append(slices.Clone(seeds), trUserLayer(trTenantB, "carol-b", trCarol.user, 50))
+	t.Run("erase refused for a B admin", func(t *testing.T) {
+		g := newTenantRoutingFixture(t, trOptions{grants: map[string][]string{trTenantB: {trDave.user}}, layers: eraseSeeds})
+		g.assertEraseRefused(t, trDave, trCarol.user)
+	})
+	t.Run("erase refused under an always-admit callback", func(t *testing.T) {
+		g := newTenantRoutingFixture(t, trOptions{alwaysAdmit: true, layers: eraseSeeds})
+		g.assertEraseRefused(t, trDave, trCarol.user)
 	})
 
 	t.Run("erase refused for an unknown org under a rejecting provider", func(t *testing.T) {
@@ -731,6 +726,48 @@ func TestLayerTenantRouting_RoutedWritesAndEraseRefusal(t *testing.T) {
 	})
 
 	t.Run("single-tenant erase control", trSingleTenantEraseControl)
+}
+
+// assertEraseRefused sends an erase of user as caller and checks the case 2
+// refusal: 403 auth.forbidden with no admin-callback call, the user's A and B
+// layers still live, every A and B row unchanged, and a byte-identical audit
+// file.
+//
+// Spec: §8.5, §6.3.1
+func (f *trFixture) assertEraseRefused(t *testing.T, caller trCaller, user string) {
+	t.Helper()
+	owned := func() []string {
+		var ids []string
+		for _, tenantID := range []string{trTenantA, trTenantB} {
+			for _, lc := range trTenantRows(t, f.st, tenantID)[0] {
+				if lc.Owner == user {
+					ids = append(ids, tenantID+"/"+lc.ID)
+				}
+			}
+		}
+		return ids
+	}
+	ownedBefore := owned()
+	if !slices.Contains(ownedBefore, trTenantA+"/carol-1") || !slices.Contains(ownedBefore, trTenantB+"/carol-b") {
+		t.Fatalf("erase target %s owns %v, want layers in both A and B", user, ownedBefore)
+	}
+	rowsA, rowsB := trTenantRows(t, f.st, trTenantA), trTenantRows(t, f.st, trTenantB)
+	logBefore := trReadFile(t, f.auditPath)
+	f.adminCalls.Store(0)
+	f.expect(t, caller, http.MethodPost, "/v1/admin/erase",
+		map[string]any{"user_id": user, "salt": "s"}, http.StatusForbidden, "auth.forbidden")
+	if n := f.adminCalls.Load(); n != 0 {
+		t.Errorf("admin callback ran %d times on a refused erase", n)
+	}
+	if after := owned(); !slices.Equal(ownedBefore, after) {
+		t.Errorf("refused erase changed %s's layers: before %v, after %v", user, ownedBefore, after)
+	}
+	if !reflect.DeepEqual(rowsA, trTenantRows(t, f.st, trTenantA)) || !reflect.DeepEqual(rowsB, trTenantRows(t, f.st, trTenantB)) {
+		t.Errorf("refused erase changed tenant rows")
+	}
+	if !bytes.Equal(logBefore, trReadFile(t, f.auditPath)) {
+		t.Errorf("refused erase rewrote the audit file")
+	}
 }
 
 // trSingleTenantEraseControl is the control for case 2: a router-less endpoint
