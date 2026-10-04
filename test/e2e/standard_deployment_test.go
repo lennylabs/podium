@@ -54,7 +54,9 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -68,6 +70,8 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
+	"github.com/lennylabs/podium/pkg/audit"
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
@@ -171,17 +175,110 @@ func orgMustRegisterLayer(t *testing.T, srvURL, id, localPath string, extraArgs 
 	return r
 }
 
-// orgWriteAuditLog writes a minimal JSONL audit log with one event attributed
-// to the given user and returns the path.
-func orgWriteAuditLog(t *testing.T, userID string) string {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "audit.log")
-	line := fmt.Sprintf(`{"event":"artifact.read","identity":%q,"ts":"2024-01-01T00:00:00Z"}`, userID)
-	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
-		t.Fatalf("write audit log: %v", err)
+// auditRecord is the part of one §8.1 audit line, as the file sink writes
+// it, that the erase cases assert. Tenant is a pointer so a case can tell an
+// absent tenant key from an empty one.
+type auditRecord struct {
+	Type   string `json:"type"`
+	Caller struct {
+		Identity string `json:"identity"`
+		Email    string `json:"email"`
+	} `json:"caller"`
+	Target  string            `json:"target"`
+	Context map[string]string `json:"context"`
+	Tenant  *string           `json:"tenant"`
+	Hash    string            `json:"hash"`
+}
+
+// names reports whether the record carries id as its caller's identity or
+// email, or as a context value, which are the fields a §8.5 erasure redacts.
+func (r auditRecord) names(id string) bool {
+	if r.Caller.Identity == id || r.Caller.Email == id {
+		return true
 	}
-	return path
+	for _, v := range r.Context {
+		if v == id {
+			return true
+		}
+	}
+	return false
+}
+
+// tenant returns the record's tenant, or "" when the line carries no key.
+func (r auditRecord) tenant() string {
+	if r.Tenant == nil {
+		return ""
+	}
+	return *r.Tenant
+}
+
+// auditSeed writes events to a new audit log at path through the audit
+// package's file sink, so every line carries the hash chain a later
+// FileSink.Verify checks.
+func auditSeed(t *testing.T, path string, events ...audit.Event) {
+	t.Helper()
+	sink, err := audit.NewFileSink(path)
+	if err != nil {
+		t.Fatalf("open audit log %s: %v", path, err)
+	}
+	for _, ev := range events {
+		if err := sink.Append(context.Background(), ev); err != nil {
+			t.Fatalf("seed audit event %s: %v", ev.Type, err)
+		}
+	}
+}
+
+// auditReadRecords decodes every line of the audit log at path.
+func auditReadRecords(t *testing.T, path string) []auditRecord {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read audit log: %v", err)
+	}
+	var out []auditRecord
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec auditRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("decode audit line %q: %v", line, err)
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
+// auditVerifyChain fails the test unless the hash chain of the audit log at
+// path verifies under FileSink.Verify (§8.6).
+func auditVerifyChain(t *testing.T, path string) {
+	t.Helper()
+	sink, err := audit.NewFileSink(path)
+	if err != nil {
+		t.Fatalf("open audit log for verification: %v", err)
+	}
+	if err := sink.Verify(context.Background()); err != nil {
+		t.Errorf("audit chain does not verify after the erase: %v\nlog:\n%s", err, brReadOrEmpty(path))
+	}
+}
+
+// auditTombstone is the §8.5 redaction value redacted-<sha256(user_id+salt)>.
+func auditTombstone(userID, salt string) string {
+	h := sha256.Sum256([]byte(userID + salt))
+	return "redacted-" + hex.EncodeToString(h[:])
+}
+
+// auditFindType returns the first record of type typ, failing the test when
+// the log holds none.
+func auditFindType(t *testing.T, recs []auditRecord, typ string) auditRecord {
+	t.Helper()
+	for _, r := range recs {
+		if r.Type == typ {
+			return r
+		}
+	}
+	t.Fatalf("audit log holds no %s record", typ)
+	return auditRecord{}
 }
 
 // orgOIDCStub starts an httptest server that serves a minimal OIDC device-code
@@ -827,16 +924,28 @@ func TestStandardDeploy_RevokeMissingRegistry(t *testing.T) {
 }
 
 // -- `podium admin erase` redacts a user's identity from the audit log.
+//
+// Spec: §8.5 — the offline --audit-path form rewrites the whole file: it
+// redacts the user in every record whatever its tenant, and its user.erased
+// record carries no tenant. The registry is not running, so the rewrite
+// races no live append.
 func TestStandardDeploy_AdminErase(t *testing.T) {
 	t.Parallel()
-	auditPath := orgWriteAuditLog(t, "alice@acme.com")
+	const user, salt = "alice@acme.com", "tenant-salt"
+	auditPath := filepath.Join(t.TempDir(), "audit.log")
+	now := time.Now().UTC()
+	auditSeed(t, auditPath,
+		audit.Event{Type: audit.EventArtifactLoaded, Timestamp: now, Caller: user, Target: "finance/a", Tenant: core.OrgIDForName("acme")},
+		audit.Event{Type: audit.EventArtifactLoaded, Timestamp: now, Caller: user, Target: "finance/b", Tenant: core.OrgIDForName("globex")},
+		audit.Event{Type: audit.EventArtifactLoaded, Timestamp: now, Caller: user, Target: "finance/legacy"},
+	)
 
 	res := runPodium(t, "", nil,
 		"admin", "erase",
 		"--audit-path", auditPath,
-		"--salt", "tenant-salt",
+		"--salt", salt,
 		"--operator", "carol@acme.com",
-		"alice@acme.com",
+		user,
 	)
 	if res.Exit != 0 {
 		t.Fatalf("admin erase exit=%d stderr=%s stdout=%s", res.Exit, res.Stderr, res.Stdout)
@@ -847,25 +956,45 @@ func TestStandardDeploy_AdminErase(t *testing.T) {
 	if !strings.Contains(res.Stdout, "audit events; tombstone written") {
 		t.Errorf("stdout missing 'audit events; tombstone written': %s", res.Stdout)
 	}
-	// The plaintext identity should no longer appear in affected events.
-	content, err := os.ReadFile(auditPath)
-	if err != nil {
-		t.Fatalf("read audit log: %v", err)
+
+	tombstone := auditTombstone(user, salt)
+	recs := auditReadRecords(t, auditPath)
+	redacted := 0
+	for _, r := range recs {
+		if r.names(user) {
+			t.Errorf("%s record (tenant %q) still names %s after the offline erase", r.Type, r.tenant(), user)
+		}
+		if r.Type == string(audit.EventArtifactLoaded) && r.Caller.Identity == tombstone {
+			redacted++
+		}
 	}
-	// Tombstone line may include the user id, but at minimum the raw identity
-	// in audit events should be gone (redacted/hashed).
-	// We verify the erasure ran successfully via stdout; full redaction
-	// verification requires knowledge of the internal storage format.
-	_ = content
+	if redacted != 3 {
+		t.Errorf("tombstoned artifact.loaded records = %d, want all 3 seeded ones\nlog:\n%s", redacted, brReadOrEmpty(auditPath))
+	}
+	if erased := auditFindType(t, recs, string(audit.EventUserErased)); erased.Tenant != nil {
+		t.Errorf("offline user.erased carries tenant %q, want no tenant key", *erased.Tenant)
+	}
+	auditVerifyChain(t, auditPath)
 }
 
-// spec: §8.5 -- the default `podium admin erase` form drives the
+// Spec: §8.5 — the default `podium admin erase` form drives the
 // registry's /v1/admin/erase endpoint, which purges the user's owned layers
 // and redacts the registry audit stream. Exercises the route end-to-end
 // against a live standalone server.
+// Spec: §8.1 — on a single-tenant registry a request event records the
+// bound tenant, and user.erased records the tenant the erase acted in. The
+// two come from different serverboot wiring (the core's bound tenant and the
+// layer endpoint's tenant ID), and only the binary wires both, so this case
+// pins that they agree; a mismatch would leave every labeled record outside
+// the erase scope.
 func TestStandardDeploy_AdminEraseRegistry(t *testing.T) {
 	t.Parallel()
 	srv, auditPath := brStartAuditServer(t, t.TempDir())
+	getJSON(t, srv.BaseURL+"/v1/search_artifacts?query=ledger", nil)
+	if !brPollContains(auditPath, "artifacts.searched", 5*time.Second) {
+		t.Fatalf("audit log missing artifacts.searched:\n%s", brReadOrEmpty(auditPath))
+	}
+
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=" + srv.BaseURL},
 		"admin", "erase", "--salt", "tenant-salt", "alice@acme.com")
 	if res.Exit != 0 {
@@ -877,7 +1006,16 @@ func TestStandardDeploy_AdminEraseRegistry(t *testing.T) {
 	// The registry-sourced user.erased event lands on the registry audit
 	// stream (the same file the server writes).
 	if !brPollContains(auditPath, "user.erased", 3*time.Second) {
-		t.Errorf("registry audit stream missing user.erased:\n%s", brReadOrEmpty(auditPath))
+		t.Fatalf("registry audit stream missing user.erased:\n%s", brReadOrEmpty(auditPath))
+	}
+
+	recs := auditReadRecords(t, auditPath)
+	searched := auditFindType(t, recs, string(audit.EventArtifactsSearched)).tenant()
+	if searched == "" {
+		t.Errorf("artifacts.searched carries no tenant on a single-tenant registry\nlog:\n%s", brReadOrEmpty(auditPath))
+	}
+	if erased := auditFindType(t, recs, string(audit.EventUserErased)).tenant(); erased != searched {
+		t.Errorf("user.erased tenant = %q, want the request-event tenant %q", erased, searched)
 	}
 }
 
