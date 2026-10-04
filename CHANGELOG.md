@@ -264,6 +264,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   caller that `load_artifact` refused could keep loading through it. A client
   that loads above its tenant's rate now receives these per-item errors; back
   off and retry the refused items, or raise the tenant's `materialize_rate`.
+- **`podium sign --provider sigstore-keyless` no longer hangs on an
+  unresponsive Sigstore endpoint** (§4.7.9, §6.2): each Fulcio,
+  timestamp-authority, and Rekor request has its own deadline, 60 seconds by
+  default and set by `PODIUM_SIGSTORE_REQUEST_TIMEOUT`. A request that misses
+  it fails the command, and the message names the endpoint. An invalid value
+  is refused with `config.invalid`. No request is retried.
 
 ### Changed
 

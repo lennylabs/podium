@@ -189,6 +189,7 @@ func assertKeylessEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PODIUM_SIGSTORE_TRUSTED_ROOT_FILE", root)
+	t.Setenv("PODIUM_SIGSTORE_REQUEST_TIMEOUT", "")
 	keys := []string{"PODIUM_SIGSTORE_FULCIO_URL", "PODIUM_SIGSTORE_REKOR_URL", "PODIUM_SIGSTORE_TSA_URL"}
 	defaults := [3]string{
 		"https://fulcio.sigstore.dev",
