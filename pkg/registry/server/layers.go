@@ -26,9 +26,10 @@ import (
 
 // DefaultMaxUserLayers is the §7.3.1 / §1.4 default cap on
 // user-defined layers per identity: "Default cap: 3 user-defined
-// layers per identity, configurable per tenant." A per-tenant
-// store.Quota.MaxUserLayers (or WithMaxUserLayers) overrides it; a
-// negative override disables the cap.
+// layers per identity, configurable per tenant." A non-zero per-tenant
+// store.Quota.MaxUserLayers overrides it, and a zero tenant value selects
+// the WithMaxUserLayers deployment default when that is non-zero, else
+// this value (§4.7.8).
 const DefaultMaxUserLayers = 3
 
 // LayerEndpoint serves the §7.3.1 layer-management HTTP surface:
@@ -73,10 +74,10 @@ type LayerEndpoint struct {
 	// time when an admin-defined layer arrives with no explicit
 	// visibility. One of "public" | "organization" | "private".
 	defaultLayerVisibility string
-	// maxUserLayers overrides the §7.3.1 per-identity user-defined-layer
-	// cap. Zero leaves resolution to the tenant quota then
-	// DefaultMaxUserLayers; a negative value disables the cap. See
-	// effectiveLayerCap.
+	// maxUserLayers is the §4.7.8 deployment default for the per-identity
+	// user-defined-layer cap. It applies to a tenant whose max_user_layers
+	// is zero. Zero selects DefaultMaxUserLayers, and a negative value
+	// disables the cap for zero-valued tenants. See effectiveLayerCap.
 	maxUserLayers int
 	// auditSink records §8.1 layer.config_changed (admin-defined) and
 	// layer.user_registered (personal) events on register, unregister, and
@@ -424,10 +425,13 @@ func (e *LayerEndpoint) lookupLayerForWrite(ctx context.Context, tenantID, id st
 	return store.LayerConfig{}, false, nil
 }
 
-// WithMaxUserLayers overrides the §7.3.1 per-identity cap on
-// user-defined layers. A positive value caps at that count; zero
-// leaves the tenant-quota/DefaultMaxUserLayers resolution in place; a
-// negative value disables the cap.
+// WithMaxUserLayers sets the deployment default for the §7.3.1
+// per-identity cap on user-defined layers. A tenant's non-zero
+// max_user_layers is enforced ahead of it. For a zero-valued tenant, a
+// positive value caps at that count, zero leaves DefaultMaxUserLayers in
+// place, and a negative value disables the cap. Serverboot never passes
+// a negative value, because envInt clamps PODIUM_MAX_USER_LAYERS to 0 or
+// more.
 func (e *LayerEndpoint) WithMaxUserLayers(n int) *LayerEndpoint {
 	e.maxUserLayers = n
 	return e
@@ -634,18 +638,24 @@ func boolString(b bool) string {
 	return "false"
 }
 
-// effectiveLayerCap resolves the §7.3.1 user-defined-layer cap for the
-// request's tenant. Precedence: an explicit WithMaxUserLayers override,
-// then the per-tenant store.Quota.MaxUserLayers, then
-// DefaultMaxUserLayers. A non-zero value at any level wins (a negative
-// value disables the cap). The resolved value is never zero, so the
-// caller treats `cap > 0` as "enforce" and `cap < 0` as "unlimited".
+// effectiveLayerCap resolves the §7.3.1 user-defined-layer cap for
+// tenantID in the §4.7.8 order. A non-zero tenant
+// store.Quota.MaxUserLayers wins (a negative value disables the cap).
+// A zero tenant value, a missing record, or a GetTenant error selects
+// the deployment default: the WithMaxUserLayers value when non-zero,
+// else DefaultMaxUserLayers. A read fault can therefore apply a default
+// looser than the tenant's own cap; this is accepted because register's
+// owned-layer count reads the same store, so a sustained fault refuses
+// the request before the cap matters. The resolved value is never zero,
+// so the caller treats cap > 0 as "enforce" and cap < 0 as "unlimited".
+//
+// Spec: §4.7.8, §7.3.1
 func (e *LayerEndpoint) effectiveLayerCap(ctx context.Context, tenantID string) int {
-	if e.maxUserLayers != 0 {
-		return e.maxUserLayers
-	}
 	if t, err := e.store.GetTenant(ctx, tenantID); err == nil && t.Quota.MaxUserLayers != 0 {
 		return t.Quota.MaxUserLayers
+	}
+	if e.maxUserLayers != 0 {
+		return e.maxUserLayers
 	}
 	return DefaultMaxUserLayers
 }
