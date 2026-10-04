@@ -64,15 +64,31 @@ type SigstoreKeyless struct {
 	Identity IdentityPolicy
 	// Client overrides the HTTP client Sign uses for Fulcio, Rekor, and
 	// the timestamp authority. Production leaves it nil to use
-	// http.DefaultClient.
+	// http.DefaultClient. The per-request context deadline bounds each
+	// call, including calls made through an injected Client.
 	Client *http.Client
+	// RequestTimeout is the deadline on each request Sign makes. It covers
+	// sending the request and reading the whole response. Zero or a negative
+	// value means DefaultRequestTimeout, so no value leaves a request unbounded.
+	// When the caller's own context is cancelled or reaches its own deadline
+	// first, Sign returns that error unchanged, without the "(no response
+	// within D)" suffix that marks a missed per-request deadline.
+	RequestTimeout time.Duration
 }
+
+// DefaultRequestTimeout is the deadline on each Fulcio, timestamp-authority,
+// and Rekor request Sign makes when RequestTimeout is not positive.
+//
+// Spec: §4.7.9, §6.2.
+const DefaultRequestTimeout = 60 * time.Second
 
 // ID returns "sigstore-keyless".
 func (SigstoreKeyless) ID() string { return "sigstore-keyless" }
 
 // httpClient returns the configured HTTP client, defaulting to
-// http.DefaultClient.
+// http.DefaultClient. The client carries no Timeout of its own: post
+// bounds each call with a per-request context deadline, which also
+// applies to an injected Client.
 func (s SigstoreKeyless) httpClient() *http.Client {
 	if s.Client != nil {
 		return s.Client
@@ -80,9 +96,40 @@ func (s SigstoreKeyless) httpClient() *http.Client {
 	return http.DefaultClient
 }
 
-// post sends req with the configured client and returns the body of a
-// 2xx response.
+// requestTimeout returns the per-request deadline, falling back to
+// DefaultRequestTimeout when RequestTimeout is zero or negative.
+func (s SigstoreKeyless) requestTimeout() time.Duration {
+	if s.RequestTimeout > 0 {
+		return s.RequestTimeout
+	}
+	return DefaultRequestTimeout
+}
+
+// post sends req once with the configured client under a per-request
+// deadline derived from req's context, and returns the body of a 2xx
+// response. The deadline covers sending the request and reading the
+// whole body, so cancel fires on return, after the read. A missed
+// per-request deadline gains a "(no response within D)" suffix; a
+// cancellation or deadline on the caller's own context does not, so the
+// caller can tell the two apart.
+//
+// Spec: §4.7.9, §6.2.
 func (s SigstoreKeyless) post(req *http.Request) ([]byte, error) {
+	parent := req.Context()
+	timeout := s.requestTimeout()
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	body, err := s.roundTrip(req.WithContext(ctx))
+	if err != nil && errors.Is(err, context.DeadlineExceeded) && parent.Err() == nil {
+		return nil, fmt.Errorf("%w (no response within %s)", err, timeout)
+	}
+	return body, err
+}
+
+// roundTrip performs one request and returns the body of a 2xx response.
+// A Do error is returned unchanged because it is a *url.Error that already
+// names the URL; the read and status errors name it explicitly.
+func (s SigstoreKeyless) roundTrip(req *http.Request) ([]byte, error) {
 	resp, err := s.httpClient().Do(req)
 	if err != nil {
 		return nil, err
@@ -90,15 +137,16 @@ func (s SigstoreKeyless) post(req *http.Request) ([]byte, error) {
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+		return nil, fmt.Errorf("read response from %s: %w", req.URL, err)
 	}
 	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, body)
+		return nil, fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, req.URL, body)
 	}
 	return body, nil
 }
 
-// maxResponseBytes bounds a Rekor or timestamp-authority response body.
+// maxResponseBytes bounds a Fulcio, Rekor, or timestamp-authority
+// response body.
 // A genuine response is a few kilobytes.
 const maxResponseBytes = 4 << 20
 

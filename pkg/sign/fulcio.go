@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -98,19 +97,13 @@ func (s SigstoreKeyless) mintCert(ctx context.Context, priv *ecdsa.PrivateKey) (
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := s.httpClient().Do(req)
+	raw, err := s.post(req)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode/100 != 2 {
-		buf, _ := io.ReadAll(resp.Body)
-		return nil, nil, fmt.Errorf("fulcio: HTTP %d: %s", resp.StatusCode, string(buf))
-	}
-
 	var parsed fulcioCertResponse
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return nil, nil, fmt.Errorf("decode fulcio response: %w", err)
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, nil, fmt.Errorf("decode response from %s: %w", req.URL, err)
 	}
 	chain := parsed.SignedCertificateEmbeddedSct
 	if chain == nil {
