@@ -312,19 +312,33 @@ func withSink(t testing.TB, s *notificationSink) bootOption {
 	}
 }
 
-// trustEnv returns the subprocess environment that lets the worker deliver to
-// the collected TLS sinks: PODIUM_WEBHOOK_ALLOWED_TARGETS naming the sink hosts
-// and SSL_CERT_FILE naming a bundle of their certificates. Each entry is
-// omitted when there is nothing to allowlist or trust. A boot helper that
-// cannot take a bootOption, such as msStartStandardServerEnv, appends the
-// entries to its extra environment.
-func (b webhookBoot) trustEnv(t testing.TB) []string {
+// sinkTrustEnv returns the subprocess environment that lets the worker deliver
+// to the given TLS sinks. A boot helper that cannot take a bootOption, such as
+// msStartStandardServerEnv, appends the entries to its extra environment.
+func sinkTrustEnv(t testing.TB, sinks ...*notificationSink) []string {
+	t.Helper()
+	var hosts []string
+	var pems [][]byte
+	for _, s := range sinks {
+		hosts = append(hosts, sinkHost(t, s.URL()))
+		if ca := s.caPEM(); len(ca) > 0 {
+			pems = append(pems, ca)
+		}
+	}
+	return trustEnv(t, hosts, pems)
+}
+
+// trustEnv returns PODIUM_WEBHOOK_ALLOWED_TARGETS naming hosts and
+// SSL_CERT_FILE naming a bundle of pems, the two entries a subprocess worker
+// needs to deliver to a TLS sink. Each entry is omitted when there is nothing
+// to allowlist or trust.
+func trustEnv(t testing.TB, hosts []string, pems [][]byte) []string {
 	t.Helper()
 	var env []string
-	if hosts := dedupeHosts(b.allowHosts); len(hosts) > 0 {
+	if hosts := dedupeHosts(hosts); len(hosts) > 0 {
 		env = append(env, "PODIUM_WEBHOOK_ALLOWED_TARGETS="+joinComma(hosts))
 	}
-	if path := writeCABundle(t, b.caPEMs); path != "" {
+	if path := writeCABundle(t, pems); path != "" {
 		env = append(env, "SSL_CERT_FILE="+path)
 	}
 	return env
@@ -381,7 +395,7 @@ func bootWebhookAdminServer(t *testing.T, registry string, opts ...bootOption) (
 		// only meaningful when the auto-disable cap is exercised.
 		env = append(env, "PODIUM_WEBHOOK_RETRY_BACKOFF=1ms")
 	}
-	env = append(env, b.trustEnv(t)...)
+	env = append(env, trustEnv(t, b.allowHosts, b.caPEMs)...)
 	args := []string{"serve", "--standalone"}
 	if registry != "" {
 		args = append(args, "--layer-path", registry)

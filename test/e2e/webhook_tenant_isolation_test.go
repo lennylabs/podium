@@ -61,13 +61,6 @@ func wtiSetup(t *testing.T) *wtiFixture {
 	f.sinkA = newNotificationSink(t, withSinkTLS(), withSinkSecret(f.sinkSecret))
 	f.sinkB = newNotificationSink(t, withSinkTLS(), withSinkSecret(f.sinkSecret))
 
-	// The standard-stack boot takes extra environment rather than a
-	// bootOption, so the sinks' allowlist and trust entries are collected
-	// through withSink and appended as plain environment.
-	var trust webhookBoot
-	for _, s := range []*notificationSink{f.sinkA, f.sinkB} {
-		withSink(t, s)(&trust)
-	}
 	dave := "dave-" + suffix + "@acme.com"
 	_, pemPath := injKeyPair(t)
 	env := append([]string{
@@ -76,7 +69,7 @@ func wtiSetup(t *testing.T) *wtiFixture {
 		"PODIUM_TRUSTED_PROXY_SECRET=" + f.proxySecret,
 		"PODIUM_BOOTSTRAP_ADMINS=" + f.carol,
 		"PODIUM_OPERATOR_ADMINS=" + dave,
-	}, trust.trustEnv(t)...)
+	}, sinkTrustEnv(t, f.sinkA, f.sinkB)...)
 	f.srv = msStartStandardServerEnv(t, dsn, bucket, region, pemPath, env...)
 
 	orgID := wtiProvisionTenant(t, f, dave)
