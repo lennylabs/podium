@@ -1,7 +1,7 @@
 # Proposal 0046: Key webhook receivers per tenant: receiver CRUD on the request's routed tenant and delivery on the event's scope tenant (§7.3.2)
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-03). The approval was decided on the user's behalf under the overnight authorization, and the staged edits were signed off as written. OQ-1: accept the documented re-registration on upgrade for every deployment that sets PODIUM_WEBHOOK_STORE_PATH, single-tenant included; a load-time rewrite of "default" rows would be a migration path that code-best-practices.md disallows pre-1.0, and the operator action is stated in the CHANGELOG.
+- Status: Implemented (2026-10-03). The approval was decided on the user's behalf under the overnight authorization, and the staged edits were signed off as written. OQ-1: accept the documented re-registration on upgrade for every deployment that sets PODIUM_WEBHOOK_STORE_PATH, single-tenant included; a load-time rewrite of "default" rows would be a migration path that code-best-practices.md disallows pre-1.0, and the operator action is stated in the CHANGELOG.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -42,23 +42,23 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §7.3.2 states per-tenant receiver ownership, CRUD and delivery confinement, and the no-tenant delivery rule.
+- [x] **S1 · spec** — SPEC-1. §7.3.2 states per-tenant receiver ownership, CRUD and delivery confinement, and the no-tenant delivery rule.
       Levels: —. Depends on: —
-- [ ] **S2 · code** — CODE-1, TEST-1. `Worker.Deliver` refuses an empty tenant, `FileStore.Put` validates like `MemoryStore.Put`, and the unit tests and the repaired fixtures land with them. Bundled because TEST-1(4) repairs fixtures that CODE-1 breaks, and both touch `pkg/webhook` for one reviewer.
+- [x] **S2 · code** — CODE-1, TEST-1. `Worker.Deliver` refuses an empty tenant, `FileStore.Put` validates like `MemoryStore.Put`, and the unit tests and the repaired fixtures land with them. Bundled because TEST-1(4) repairs fixtures that CODE-1 breaks, and both touch `pkg/webhook` for one reviewer.
       Levels: unit. Depends on: S1
-- [ ] **S3 · code** — CODE-2, CODE-3. Receiver CRUD keys on the routed tenant and delivery on the event's scope tenant. Bundled because either change alone breaks delivery on every deployment.
+- [x] **S3 · code** — CODE-2, CODE-3. Receiver CRUD keys on the routed tenant and delivery on the event's scope tenant. Bundled because either change alone breaks delivery on every deployment.
       Levels: unit, integration, e2e. Depends on: S2
-- [ ] **S4 · code** — CODE-4. The `tenant` field and `WithTenant` comments name the quota limiter, and the webhook fixtures drop `WithTenant`.
+- [x] **S4 · code** — CODE-4. The `tenant` field and `WithTenant` comments name the quota limiter, and the webhook fixtures drop `WithTenant`.
       Levels: unit, integration, e2e. Depends on: S3
-- [ ] **S5 · test** — TEST-2. In-process two-tenant HTTP integration suite for receiver CRUD and delivery.
+- [x] **S5 · test** — TEST-2. In-process two-tenant HTTP integration suite for receiver CRUD and delivery.
       Levels: integration. Depends on: S3
-- [ ] **S6 · test** — TEST-3. Multi-tenant standard-stack end-to-end suite on the binary.
+- [x] **S6 · test** — TEST-3. Multi-tenant standard-stack end-to-end suite on the binary.
       Levels: e2e. Depends on: S3
-- [ ] **S7 · docs** — DOC-1. The HTTP API reference drops the shared-pool note and describes per-tenant receivers, and `docs/consuming/custom-via-sdk.md` confines the receiver-narrowing sentence to the event's tenant. Land it in the same pull request as S3 so no released build documents behavior it lacks.
+- [x] **S7 · docs** — DOC-1. The HTTP API reference drops the shared-pool note and describes per-tenant receivers, and `docs/consuming/custom-via-sdk.md` confines the receiver-narrowing sentence to the event's tenant. Land it in the same pull request as S3 so no released build documents behavior it lacks.
       Levels: —. Depends on: S3
-- [ ] **S8 · docs** — CL-1. The `[Unreleased]` `Fixed` and `Changed` entries.
+- [x] **S8 · docs** — CL-1. The `[Unreleased]` `Fixed` and `Changed` entries.
       Levels: —. Depends on: S3
-- [ ] **S9 · docs** — MV-1. Manual-validation scenario S86.
+- [x] **S9 · docs** — MV-1. Manual-validation scenario S86.
       Levels: —. Depends on: S3
 
 **Ordering constraints.** S1 lands the rule every later step cites. S2 precedes S3 so the empty-tenant guard is in place before delivery starts keying on a value that a future publisher could leave empty. S4, S5, and S6 need the wiring from S3 and may proceed in parallel.
