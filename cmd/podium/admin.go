@@ -226,17 +226,21 @@ func adminReembedCmd(args []string) int {
 
 // adminEraseCmd runs the §8.5 GDPR right-to-erasure. By default it calls the
 // registry-side endpoint, which unregisters and purges the user's owned
-// layers and redacts the registry audit stream (the authenticated session
-// identifies the invoking admin). The --local / --audit-path form instead
-// redacts the MCP local audit sink directly; that path records the invoking
-// admin from --operator.
+// layers in the requesting tenant and redacts that tenant's audit records
+// (the authenticated session identifies the invoking admin). The --local /
+// --audit-path form is the offline erasure form: it rewrites any FileSink log
+// in full, whatever the tenant of each record, which is the MCP local sink by
+// default or the registry's PODIUM_AUDIT_LOG_PATH file, and records
+// --operator on a user.erased event that names no tenant.
+//
+// Spec: §8.5
 func adminEraseCmd(args []string) int {
 	fs := flag.NewFlagSet("admin erase", flag.ContinueOnError)
 	setUsage(fs, "GDPR right-to-erasure: purge a user's layers and redact their audit identity.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
-	auditPath := fs.String("audit-path", "", "local MCP audit log path (default ~/.podium/audit.log); selects the local-log form")
-	local := fs.Bool("local", false, "redact the local MCP audit log instead of the registry")
-	salt := fs.String("salt", "", "salt for the GDPR erasure tombstone (per tenant, required)")
+	auditPath := fs.String("audit-path", "", "audit log file to rewrite (default ~/.podium/audit.log; pass the registry's PODIUM_AUDIT_LOG_PATH only while the registry is stopped)")
+	local := fs.Bool("local", false, "rewrite an audit log file directly instead of calling the registry")
+	salt := fs.String("salt", "", "salt for the GDPR erasure tombstone (required; the offline form applies it to every record it rewrites)")
 	operator := fs.String("operator", "", "invoking admin identity recorded on user.erased (required for the local-log form)")
 	fs.SetOutput(os.Stderr)
 	userID, nargs, err := parsePositional(fs, args)
@@ -252,7 +256,8 @@ func adminEraseCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --salt is required (an empty salt yields a guessable tombstone)")
 		return 2
 	}
-	// Local MCP-sink form: redact the local audit log directly.
+	// Offline form: rewrite the audit log file directly, whatever the tenant
+	// of each record.
 	if *local || *auditPath != "" {
 		// spec §8.5: record the invoking admin for accountability.
 		if *operator == "" {
@@ -264,7 +269,11 @@ func adminEraseCmd(args []string) int {
 			fmt.Fprintf(os.Stderr, "open audit log: %v\n", err)
 			return 1
 		}
-		transformed, err := audit.EraseUser(context.Background(), sink, userID, *salt, *operator)
+		// The registry that writes this file must be stopped: FileSink chains
+		// off an in-process lastHash and the rewrite renames a re-hashed file
+		// into place, so a live registry's next append would carry a stale
+		// prev_hash and raise audit.gap_detected.
+		transformed, err := audit.EraseUser(context.Background(), sink, userID, *salt, *operator, audit.EraseScope{Unlabeled: true})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "erase failed: %v\n", err)
 			return 1

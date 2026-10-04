@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -138,6 +139,7 @@ func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy
 		if len(events) > 0 {
 			supersededHead = events[len(events)-1].Hash
 		}
+		// Spec: §8.1: audit.retention_enforced describes the registry as a whole, so it records no tenant.
 		kept = append(kept, Event{
 			Type:      EventRetentionEnforced,
 			Timestamp: now,
@@ -160,47 +162,84 @@ func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy
 	return dropped, nil
 }
 
-// EraseUser implements the §8.5 GDPR right-to-be-forgotten flow: every
-// directly-identifying field of the erased user (the sub-claim Caller, the
-// attached CallerEmail, the CallerGroups membership, and any userID-bearing
-// Context value) is replaced with the salted tombstone
-// redacted-<sha256(user_id+salt)> or, for group membership, cleared. The
-// chain is then rewritten over the transformed events. The salted tombstone
-// preserves cross-event correlation for SIEM consumers that know the salt
-// while removing the original identifier.
+// EraseScope selects the records an erasure reads and rewrites. A record is
+// in scope when it carries a tenant label and Tenant is empty or equal to that
+// label, or when it carries no label and Unlabeled is set. A multi-tenant
+// registry passes {Tenant: routed}, a single-tenant registry passes
+// {Tenant: bound, Unlabeled: true}, and the offline CLI form passes
+// {Unlabeled: true}, which reaches every record.
+//
+// Spec: §8.5
+type EraseScope struct {
+	// Tenant selects records labeled with this tenant. An empty Tenant
+	// matches every tenant label, which only the offline whole-file form uses.
+	Tenant string
+	// Unlabeled also selects records that carry no tenant.
+	Unlabeled bool
+}
+
+// ErrEraseScope reports an EraseScope that selects nothing coherent. The zero
+// value is refused so a caller that forgot the tenant cannot erase across
+// tenants.
+var ErrEraseScope = errors.New("audit: erase scope names no tenant and excludes unlabeled records")
+
+// includes reports whether a record carrying the tenant label recTenant is
+// in scope.
+func (s EraseScope) includes(recTenant string) bool {
+	if recTenant == "" {
+		return s.Unlabeled
+	}
+	return s.Tenant == "" || s.Tenant == recTenant
+}
+
+// EraseUser implements the §8.5 GDPR right-to-be-forgotten flow over the
+// records scope selects: every directly-identifying field of the erased user
+// (the sub-claim Caller, the attached CallerEmail, the CallerGroups
+// membership, and any userID-bearing Context value) is replaced with the
+// salted tombstone redacted-<sha256(user_id+salt)> or, for group membership,
+// cleared. The chain is then rewritten over every record, so out-of-scope
+// records keep their content and receive new hash and prev_hash values. The
+// salted tombstone preserves cross-event correlation for SIEM consumers that
+// know the salt while removing the original identifier.
 //
 // §8.5 takes a single <user_id> argument without fixing which identity field
 // it denotes. §8.1 records a read event's caller as the OAuth sub-claim
 // (Caller) with the email attached separately (CallerEmail), so the value a
 // human knows for a GDPR request is usually the email while the sub-claim is
 // what appears in the layer-owner context. EraseUser therefore
-// first discovers every alias of the user by scanning for events whose Caller
-// or CallerEmail matches the passed userID and collecting both fields, so
-// passing either the email or the sub-claim erases the complete identity. The
-// redaction pass then removes the email and group membership, not
+// first discovers every alias of the user by scanning in-scope events whose
+// Caller or CallerEmail matches the passed userID and collecting both fields,
+// so passing either the email or the sub-claim erases the complete identity.
+// The alias set comes from in-scope records only: an alias seen only in
+// another tenant's records must not drive redaction in the requesting tenant.
+// The redaction pass then removes the email and group membership, not
 // just the sub-claim, so the persisted record no longer carries the user's
 // PII. Public-mode CallerNetwork attributes (source IP, X-Forwarded-User)
 // describe the request path of a system:public call rather than the erased
 // user's account identity and are left intact.
 //
-// EraseUser appends a user.erased audit event to the rewritten log,
-// recording the invoking admin (§8.1: "Admin invoked the GDPR erasure
-// command") as the event Caller and in the admin context field. Pass a
-// unique salt per tenant; the same userID with two salts produces two
+// EraseUser appends a user.erased audit event built by UserErasedEvent,
+// labeled with scope.Tenant and recording the invoking admin and the chain
+// head the rewrite superseded. The same userID with two salts produces two
 // unrelated tombstones, which is the desired property.
 //
 // salt must be non-empty (§8.5): an empty salt reduces the
 // tombstone to sha256(user_id), which is reversible by brute force or
-// dictionary over candidate user IDs and defeats de-identification.
+// dictionary over candidate user IDs and defeats de-identification. The zero
+// scope is refused with ErrEraseScope before the file is read.
 //
-// Returns the number of events transformed (excludes the appended
-// user.erased event).
-func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string) (int, error) {
+// Returns the number of in-scope events transformed (excludes the appended
+// user.erased event). The count covers nothing outside the scope, so it
+// carries no information about other tenants' records.
+func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string, scope EraseScope) (int, error) {
 	if userID == "" {
 		return 0, fmt.Errorf("audit.erase: userID is required")
 	}
 	if salt == "" {
 		return 0, fmt.Errorf("audit.erase: salt is required (an empty salt yields a guessable tombstone)")
+	}
+	if scope == (EraseScope{}) {
+		return 0, fmt.Errorf("audit.erase: %w", ErrEraseScope)
 	}
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
@@ -208,15 +247,44 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string) (i
 	if err != nil {
 		return 0, err
 	}
-	// Alias-discovery pass (§8.5): an event belongs to the erased
-	// user when the passed userID matches its sub-claim or its email. Collect
-	// both identifiers from every such event so passing one form (e.g. the
-	// email) also redacts records that carry the other (e.g. the sub-claim in
-	// the layer-owner context). The empty string is never an alias, so events
-	// with an empty Caller or CallerEmail do not poison the set.
+	aliases := eraseAliases(events, userID, scope)
+	tombstone := tombstoneFor(userID, salt)
+	transformed := 0
+	for i := range events {
+		if !scope.includes(events[i].Tenant) {
+			continue
+		}
+		if redactEvent(&events[i], aliases, tombstone) {
+			transformed++
+		}
+	}
+	// Spec: §8.6: the user.erased record names the head this rewrite
+	// supersedes so a verifier holding an anchor of it can reconcile.
+	supersededHead := ""
+	if len(events) > 0 {
+		supersededHead = events[len(events)-1].Hash
+	}
+	events = append(events, UserErasedEvent(userID, salt, admin, scope.Tenant, transformed, supersededHead))
+	if err := rewriteWithChain(sink.path, events); err != nil {
+		return 0, err
+	}
+	sink.lastHash = events[len(events)-1].Hash
+	return transformed, nil
+}
+
+// eraseAliases is the §8.5 alias-discovery pass: an in-scope event belongs
+// to the erased user when the passed userID matches its sub-claim or its
+// email. Both identifiers are collected from every such event so passing one
+// form (e.g. the email) also redacts records that carry the other (e.g. the
+// sub-claim in the layer-owner context). The empty string is never an alias,
+// so events with an empty Caller or CallerEmail do not poison the set.
+func eraseAliases(events []Event, userID string, scope EraseScope) map[string]bool {
 	aliases := map[string]bool{userID: true}
 	for i := range events {
 		ev := &events[i]
+		if !scope.includes(ev.Tenant) {
+			continue
+		}
 		if ev.Caller == userID || ev.CallerEmail == userID {
 			if ev.Caller != "" {
 				aliases[ev.Caller] = true
@@ -226,67 +294,72 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string) (i
 			}
 		}
 	}
-	tombstone := tombstoneFor(userID, salt)
-	transformed := 0
-	for i := range events {
-		ev := &events[i]
-		mutated := false
-		// Redact the full caller identity when either identity field
-		// is an alias of the erased user: the sub-claim, the attached email,
-		// and the group membership. Group names are quasi-identifiers, so the
-		// membership is cleared rather than tombstoned.
-		if aliases[ev.Caller] || aliases[ev.CallerEmail] {
-			if ev.Caller != "" {
-				ev.Caller = tombstone
-			}
-			if ev.CallerEmail != "" {
-				ev.CallerEmail = tombstone
-			}
-			if len(ev.CallerGroups) > 0 {
-				ev.CallerGroups = nil
-			}
+	return aliases
+}
+
+// redactEvent replaces every alias in ev with the tombstone and reports
+// whether anything changed.
+func redactEvent(ev *Event, aliases map[string]bool, tombstone string) bool {
+	mutated := false
+	// Redact the full caller identity when either identity field
+	// is an alias of the erased user: the sub-claim, the attached email,
+	// and the group membership. Group names are quasi-identifiers, so the
+	// membership is cleared rather than tombstoned.
+	if aliases[ev.Caller] || aliases[ev.CallerEmail] {
+		if ev.Caller != "" {
+			ev.Caller = tombstone
+		}
+		if ev.CallerEmail != "" {
+			ev.CallerEmail = tombstone
+		}
+		if len(ev.CallerGroups) > 0 {
+			ev.CallerGroups = nil
+		}
+		mutated = true
+	}
+	// The erased user can also appear as a context value (e.g. the owner of
+	// a registered layer). Redact only the matching value; the surrounding
+	// caller may be a different principal, such as an admin acting on the
+	// user's layer.
+	for k, v := range ev.Context {
+		if aliases[v] {
+			ev.Context[k] = tombstone
 			mutated = true
 		}
-		// The erased user can also appear as a context value (e.g. the owner of
-		// a registered layer). Redact only the matching value; the surrounding
-		// caller may be a different principal, such as an admin acting on the
-		// user's layer.
-		for k, v := range ev.Context {
-			if aliases[v] {
-				ev.Context[k] = tombstone
-				mutated = true
-			}
-		}
-		if mutated {
-			transformed++
-		}
 	}
-	// Append the user.erased record so the action is itself audited. §8.1/
-	// §8.5: the invoking admin is recorded as the event Caller and
-	// in the admin context field for accountability; with no admin supplied
-	// (an internal call) it falls back to system:retention.
+	return mutated
+}
+
+// UserErasedEvent builds the §8.5 user.erased record. EraseUser and the
+// registry's endpoint-sink path both call it, so the tombstone and the
+// context layout are defined once. The invoking admin is recorded as the
+// event Caller and in the admin context field (§8.1: "Admin invoked the GDPR
+// erasure command"); with no admin (an internal call) the Caller falls back
+// to system:retention. supersededHead is the chain head the rewrite
+// replaced, recorded as superseded_head when non-empty; an endpoint-sink
+// erase rewrites no chain and passes "".
+//
+// Spec: §8.5, §8.6
+func UserErasedEvent(userID, salt, admin, tenant string, transformed int, supersededHead string) Event {
 	caller := admin
 	if caller == "" {
 		caller = "system:retention"
 	}
-	erasedCtx := map[string]string{"transformed": fmt.Sprintf("%d", transformed)}
+	ctx := map[string]string{"transformed": fmt.Sprintf("%d", transformed)}
 	if admin != "" {
-		erasedCtx["admin"] = admin
+		ctx["admin"] = admin
 	}
-	events = append(events, Event{
+	if supersededHead != "" {
+		ctx["superseded_head"] = supersededHead
+	}
+	return Event{
 		Type:      EventUserErased,
 		Timestamp: time.Now().UTC(),
 		Caller:    caller,
-		Target:    tombstone,
-		Context:   erasedCtx,
-	})
-	if err := rewriteWithChain(sink.path, events); err != nil {
-		return 0, err
+		Target:    tombstoneFor(userID, salt),
+		Tenant:    tenant,
+		Context:   ctx,
 	}
-	if len(events) > 0 {
-		sink.lastHash = events[len(events)-1].Hash
-	}
-	return transformed, nil
 }
 
 // tombstoneFor returns the §8.5 audit redaction value

@@ -41,6 +41,7 @@ func Anchor(ctx context.Context, sink *FileSink, signer sign.Provider) (int64, e
 	}
 	logIndex := extractRekorLogIndex(envelope)
 	now := time.Now().UTC()
+	// Spec: §8.1: audit.anchored describes the registry as a whole, so it records no tenant.
 	if err := sink.Append(ctx, Event{
 		Type:      EventAuditAnchored,
 		Timestamp: now,

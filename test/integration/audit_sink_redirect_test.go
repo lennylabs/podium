@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -18,11 +19,13 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §8.3 — when the registry sink is redirected to an external
+// Spec: §8.3, §8.5 — when the registry sink is redirected to an external
 // endpoint, the §8.5 erase endpoint still purges the user's layers and
 // forwards the lifecycle events to the endpoint. The on-disk redaction pass
 // is skipped because there is no local log to rewrite; the receiving
-// aggregator owns redaction of the shipped stream.
+// aggregator owns redaction of the shipped stream. The endpoint also receives
+// user.erased labeled with the tenant, naming the admin as caller, with a
+// transformed count of 0.
 func TestErase_EndpointRedirectPurgesAndForwards(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -117,4 +120,35 @@ func TestErase_EndpointRedirectPurgesAndForwards(t *testing.T) {
 		mu.Unlock()
 		t.Errorf("endpoint did not receive a forwarded layer lifecycle event; got:\n%s", got)
 	}
+	mu.Lock()
+	forwarded := slices.Clone(received)
+	mu.Unlock()
+	assertForwardedUserErased(t, forwarded, "t", "carol@acme.com")
+}
+
+// assertForwardedUserErased finds the user.erased record among the bodies the
+// endpoint received and checks its tenant, its caller, and its transformed
+// count of 0, since a redirected registry rewrites no local record.
+//
+// Spec: §8.5
+func assertForwardedUserErased(t *testing.T, bodies []string, tenant, admin string) {
+	t.Helper()
+	for _, b := range bodies {
+		var ev struct {
+			Type   string `json:"type"`
+			Tenant string `json:"tenant"`
+			Caller struct {
+				Identity string `json:"identity"`
+			} `json:"caller"`
+			Context map[string]string `json:"context"`
+		}
+		if err := json.Unmarshal([]byte(b), &ev); err != nil || ev.Type != string(audit.EventUserErased) {
+			continue
+		}
+		if ev.Tenant != tenant || ev.Caller.Identity != admin || ev.Context["transformed"] != "0" {
+			t.Errorf("user.erased = %s, want tenant %q, caller %q, transformed 0", b, tenant, admin)
+		}
+		return
+	}
+	t.Errorf("endpoint did not receive user.erased; got:\n%s", strings.Join(bodies, "\n"))
 }

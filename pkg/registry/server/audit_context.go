@@ -10,6 +10,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/registry/core"
 )
 
 // auditMetaKey is the context key under which per-request audit metadata
@@ -20,7 +21,8 @@ type auditMetaKey struct{}
 // identity contract requires but that only exist at the HTTP boundary:
 // the W3C trace id, the structured caller identity (email and groups for
 // authenticated callers), and the public-mode network attributes (source
-// IP and any upstream X-Forwarded-User). The serverboot audit adapter and
+// IP and any upstream X-Forwarded-User), and the tenant whose audit stream
+// the event belongs to (empty when the request resolves to no tenant). The serverboot audit adapter and
 // the server's own write handlers read it from the request context to
 // populate the persisted audit event.
 //
@@ -32,6 +34,29 @@ type AuditMeta struct {
 	PublicMode    bool
 	SourceIP      string
 	ForwardedUser string
+	// Tenant is the §8.1 tenant label, resolved by auditTenant. It is empty
+	// for an unrouted request on a multi-tenant registry and never holds the
+	// podium:unrouted binding.
+	Tenant string
+}
+
+// auditTenant resolves the §8.1 tenant label for a request-scoped event. On a
+// multi-tenant registry it is the §6.3.1-routed tenant, or "" when the request
+// resolves to no provisioned tenant. On a single-tenant registry it is bound.
+//
+// The rule keys on multi-tenant mode rather than on router presence: a
+// multi-tenant registry with no identity verifier, or in public mode, installs
+// no tenant router, and its bound tenant is the podium:unrouted no-data
+// binding, which must never reach a record. For the same reason the
+// multi-tenant arm ignores bound, so a caller may pass a TenantFor result.
+//
+// Spec: §8.1, §6.3.1
+func auditTenant(ctx context.Context, multiTenant bool, bound string) string {
+	if !multiTenant {
+		return bound
+	}
+	t, _ := core.TenantFromContext(ctx)
+	return t
 }
 
 // withAuditMeta returns ctx carrying m so downstream emit paths can
@@ -144,10 +169,14 @@ func callerIdentityString(id layer.Identity) string {
 // withAuditMetaMiddleware wraps next so every request carries the §8.1
 // per-request audit metadata (the W3C trace id and the structured caller
 // identity) in its context. The core read-event emitter and the HTTP
-// write handlers recover it to populate the persisted audit event.
+// write handlers recover it to populate the persisted audit event. It sits
+// inside withTenantRouting, so the routed tenant is on the context when the
+// §8.1 tenant label is resolved.
 func (s *Server) withAuditMetaMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := withAuditMeta(r.Context(), auditMetaFrom(r, s.identity(r)))
+		m := auditMetaFrom(r, s.identity(r))
+		m.Tenant = auditTenant(r.Context(), s.multiTenant, s.core.TenantFor(r.Context()))
+		ctx := withAuditMeta(r.Context(), m)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -157,7 +186,8 @@ func (s *Server) withAuditMetaMiddleware(next http.Handler) http.Handler {
 // metadata from the context when the identity middleware attached it and
 // otherwise derives it from the request directly, so write handlers that
 // are not behind the middleware still record a trace id and caller
-// network. A nil sink is a no-op.
+// network. The §8.1 tenant label comes from the metadata, so a request with
+// no attached metadata records no tenant. A nil sink is a no-op.
 func emitAuditEvent(sink audit.Sink, r *http.Request, id layer.Identity, typ audit.EventType, target string, fields map[string]string) {
 	if sink == nil {
 		return
@@ -173,6 +203,7 @@ func emitAuditEvent(sink audit.Sink, r *http.Request, id layer.Identity, typ aud
 		Target:     target,
 		Context:    fields,
 		PublicMode: m.PublicMode,
+		Tenant:     m.Tenant,
 	}
 	if m.PublicMode {
 		ev.CallerNetwork = &audit.CallerNetwork{SourceIP: m.SourceIP, ForwardedUser: m.ForwardedUser}

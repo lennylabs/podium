@@ -236,6 +236,7 @@ rm -rf "$WORK"
 | S85 | Sigstore-keyless sign and verify against the staging instance | none | none | none | Sigstore staging instance, an OIDC token it accepts |
 | S86 | Webhook receivers are isolated per tenant on a multi-tenant registry | standard | none | none | Postgres, S3 |
 | S87 | Layer operations act in the caller's tenant on a multi-tenant registry | standard | none | none | Postgres, S3 |
+| S88 | Erasure on a multi-tenant registry redacts only the requesting tenant's audit records | standard | none | none | Postgres, S3 |
 
 ---
 
@@ -10878,6 +10879,147 @@ without the stack.
 
 **Cleanup.** Delete `team-<pid>` and `dave-<pid>` with `DELETE /v1/layers?id=...`
 as carol and dave, stop the server, `rm -rf "$WORK"`, and
+`(cd "$REAL_HOME/projects/podium" && make services-down)` when finished with the
+standard-mode scenarios.
+
+---
+
+## S88: Erasure on a multi-tenant registry redacts only the requesting tenant's audit records
+
+**Goal.** Validate that `POST /v1/admin/erase` on a multi-tenant registry
+purges and redacts only in the caller's tenant, leaves other tenants' records
+and unlabeled records unchanged, re-anchors the chain, and that the offline form then redacts the remainder with a chain that
+still verifies.
+
+**Covers.** §8.5 tenant-scoped erasure, the §8.1 `tenant` attribute, and the
+§8.6 re-anchor after an erasure, over §6.3.1 routing, through the compiled
+binary under `trusted-headers`.
+
+**Why by hand.** An operator reads the raw audit log across tenants. A globex
+record carrying dave's tombstone after carol's erase, a record carrying
+`"tenant":"podium:unrouted"`, a `user.erased` with no `tenant`, or an
+`audit.gap_detected` after the restart is the defect this scenario catches.
+The standard-stack end-to-end test skips silently on macOS.
+
+**Prerequisites.** Local Postgres and MinIO from `make services-up`, plus
+`test.env`. Skip if either is absent.
+
+**Steps.**
+
+1. Run S87 step 1 with these additions before `podium serve`. Leave
+   `PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS` unset, so the verify scheduler runs
+   at its default interval and verifies once at start.
+
+   ```bash
+   export PODIUM_AUDIT_LOG_PATH="$WORK/audit.log"
+   export PODIUM_AUDIT_SIGNING_KEY_PATH="$WORK/anchor.key"
+   export PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS=3600
+   ```
+
+   **Expect.** `server_alive` reports the server running. The step makes no
+   claim about `$WORK/audit.log`, which `FileSink` creates on its first
+   append; step 3 creates it if nothing has yet.
+
+2. Run S87 step 2 to provision `globex-$S` as olivia.
+
+   **Expect.** `$GLOBEX` is a UUID.
+
+3. Create unlabeled records attributed to dave. Stop the registry, append one
+   record with an empty tenant, and restart it.
+
+   ```bash
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   cat > "$WORK/seed.go" <<'EOF'
+   package main
+
+   import (
+       "context"
+       "os"
+       "time"
+
+       "github.com/lennylabs/podium/pkg/audit"
+   )
+
+   func main() {
+       s, err := audit.NewFileSink(os.Args[1])
+       if err != nil { panic(err) }
+       if err := s.Append(context.Background(), audit.Event{Type: "artifact.loaded", Caller: "dave@acme.com", Target: "legacy", Timestamp: time.Now().UTC()}); err != nil { panic(err) }
+   }
+   EOF
+   go -C "$REAL_HOME/projects/podium" run "$WORK/seed.go" "$PODIUM_AUDIT_LOG_PATH"
+   podium serve --no-embeddings --bind 127.0.0.1:8188 >> "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null "$URL/healthz"
+   jq -c 'select(.target=="legacy") | {caller: .caller.identity, tenant}' "$PODIUM_AUDIT_LOG_PATH"
+   ```
+
+   **Expect.** One line, `{"caller":"dave@acme.com","tenant":null}`.
+
+4. As dave, register a user layer in `default` and one in `globex-$S`.
+
+   ```bash
+   for org in default "globex-$S"; do
+     as dave@acme.com "$org" -s -o /dev/null -w "%{http_code}\n" -X POST -H 'Content-Type: application/json' \
+       -d "{\"id\":\"dave-$org-$S\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/dave/notes.git\",\"ref\":\"main\"}" "$URL/v1/layers"
+   done
+   jq -r 'select(.caller.identity=="dave@acme.com") | .tenant // "-"' "$PODIUM_AUDIT_LOG_PATH" | sort | uniq -c
+   ```
+
+   **Expect.** Two `201` codes. The tenant counts list the `default` tenant ID,
+   `$GLOBEX`, and `-` (the seeded record). No line reads `podium:unrouted`.
+
+5. As carol, the `default` admin, erase dave.
+
+   ```bash
+   as carol@acme.com default -X POST -H 'Content-Type: application/json' \
+     -d '{"user_id":"dave@acme.com","salt":"s88-salt"}' "$URL/v1/admin/erase" | tee "$WORK/erase.json"
+   ```
+
+   **Expect.** HTTP 200. `layers_purged` lists only `dave-default-<pid>`, and
+   the body carries only `erased`, `layers_purged`, and
+   `audit_events_redacted`.
+
+6. Inspect the log.
+
+   ```bash
+   jq -c 'select(.caller.identity=="dave@acme.com") | {type, tenant}' "$PODIUM_AUDIT_LOG_PATH"
+   jq -c 'select(.type=="user.erased") | {tenant, context}' "$PODIUM_AUDIT_LOG_PATH"
+   jq -r '.type' "$PODIUM_AUDIT_LOG_PATH" | awk '/user.erased/{e=1} e && /audit.anchored/{print "anchored after erase"; exit}'
+   ```
+
+   **Expect.** No remaining dave record carries the `default` tenant ID; the
+   remaining ones carry `$GLOBEX` or no tenant. `user.erased` carries the
+   `default` tenant ID and a non-empty `superseded_head`. The last command
+   prints `anchored after erase`.
+
+7. Stop the registry and run the offline form against its file.
+
+   ```bash
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   podium admin erase dave@acme.com --local --audit-path "$PODIUM_AUDIT_LOG_PATH" \
+     --operator olivia@acme.com --salt s88-salt
+   jq -c 'select(.caller.identity=="dave@acme.com")' "$PODIUM_AUDIT_LOG_PATH" | wc -l
+   ```
+
+   **Expect.** The command reports a redacted count of 1 or more, and the
+   final count is `0`: the globex and unlabeled records now carry the
+   tombstone.
+
+8. Restart the registry and check the chain.
+
+   ```bash
+   podium serve --no-embeddings --bind 127.0.0.1:8188 >> "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null "$URL/healthz"
+   jq -r 'select(.type=="audit.gap_detected") | .type' "$PODIUM_AUDIT_LOG_PATH" | wc -l
+   grep -c "gap" "$WORK/srv.log"
+   ```
+
+   **Expect.** Both counts are `0`. The verify scheduler checks the chain at
+   start, so a non-zero count means the rewritten chain does not verify.
+
+**Cleanup.** Delete `dave-globex-$S-<pid>` with `DELETE /v1/layers?id=...` as
+dave, stop the server, `rm -rf "$WORK"`, and
 `(cd "$REAL_HOME/projects/podium" && make services-down)` when finished with the
 standard-mode scenarios.
 

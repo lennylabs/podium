@@ -174,6 +174,7 @@ type jsonEvent struct {
 	Caller         *jsonCaller       `json:"caller,omitempty"`
 	Target         string            `json:"target,omitempty"`
 	Context        map[string]string `json:"context,omitempty"`
+	Tenant         string            `json:"tenant,omitempty"`
 	ResolvedLayers []string          `json:"resolved_layers,omitempty"`
 	ResultSize     int               `json:"result_size,omitempty"`
 	Hash           string            `json:"hash"`
@@ -209,6 +210,7 @@ func eventForJSON(e Event) jsonEvent {
 		Caller:         callerForJSON(e),
 		Target:         e.Target,
 		Context:        e.Context,
+		Tenant:         e.Tenant,
 		ResolvedLayers: e.ResolvedLayers,
 		ResultSize:     e.ResultSize,
 		Hash:           e.Hash,
@@ -241,6 +243,7 @@ func eventFromJSON(je jsonEvent) Event {
 		TraceID:        je.TraceID,
 		Target:         je.Target,
 		Context:        je.Context,
+		Tenant:         je.Tenant,
 		ResolvedLayers: je.ResolvedLayers,
 		ResultSize:     je.ResultSize,
 		Hash:           je.Hash,

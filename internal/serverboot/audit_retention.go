@@ -19,7 +19,7 @@ import (
 //
 // The scheduler is best-effort: rewrite failures log a warning;
 // the next tick retries.
-func startRetentionScheduler(ctx context.Context, cfg *Config, sink *audit.FileSink, reAnchor func()) {
+func startRetentionScheduler(ctx context.Context, cfg *Config, sink *audit.FileSink, reAnchor func(context.Context)) {
 	if sink == nil {
 		log.Printf("warning: audit retention disabled (no sink)")
 		return
@@ -53,7 +53,7 @@ func startRetentionScheduler(ctx context.Context, cfg *Config, sink *audit.FileS
 		cfg.auditRetentionInterval, cfg.auditRetentionMaxAgeDays)
 }
 
-func runRetentionOnce(ctx context.Context, sink *audit.FileSink, policies []audit.Policy, reAnchor func()) {
+func runRetentionOnce(ctx context.Context, sink *audit.FileSink, policies []audit.Policy, reAnchor func(context.Context)) {
 	// §8.4 query-text window (placeholder at 7d, drop at 30d) runs in the
 	// same pass so the query field ages out independently of the event
 	// metadata kept under the per-type policies.
@@ -67,7 +67,7 @@ func runRetentionOnce(ctx context.Context, sink *audit.FileSink, policies []audi
 		// §8.6: dropping events rebuilt the hash chain, so any
 		// prior anchor of the old head is stale. Re-anchor the new head.
 		if reAnchor != nil {
-			reAnchor()
+			reAnchor(ctx)
 		}
 	}
 }

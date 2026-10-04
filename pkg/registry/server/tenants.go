@@ -168,6 +168,10 @@ func (s *Server) handleTenantCreate(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status, action = http.StatusCreated, "create"
 	}
+	// Spec: §8.1 — tenant.managed records no tenant (Decision 4 of proposal
+	// 0051). withTenantRouting passes /v1/admin/tenants through unrouted, so
+	// the shared label rule yields "" even when the operator's org names a
+	// provisioned tenant.
 	emitAuditEvent(s.auditSink, r, s.identity(r), audit.EventTenantManaged, t.ID,
 		map[string]string{"action": action, "name": t.Name})
 	writeJSON(w, status, tenantToWire(t))
@@ -226,6 +230,10 @@ func (s *Server) handleTenantUpdate(w http.ResponseWriter, r *http.Request) {
 		s.writeTenantLookupError(w, id, err)
 		return
 	}
+	// Spec: §8.1 — tenant.managed records no tenant (Decision 4 of proposal
+	// 0051). withTenantRouting passes /v1/admin/tenants through unrouted, so
+	// the shared label rule yields "" even when the operator's org names a
+	// provisioned tenant.
 	emitAuditEvent(s.auditSink, r, s.identity(r), audit.EventTenantManaged, id,
 		map[string]string{"action": "update"})
 	writeJSON(w, http.StatusOK, tenantToWire(merged))
@@ -245,6 +253,10 @@ func (s *Server) handleTenantDeactivate(w http.ResponseWriter, r *http.Request) 
 		s.writeTenantLookupError(w, id, err)
 		return
 	}
+	// Spec: §8.1 — tenant.managed records no tenant (Decision 4 of proposal
+	// 0051). withTenantRouting passes /v1/admin/tenants through unrouted, so
+	// the shared label rule yields "" even when the operator's org names a
+	// provisioned tenant.
 	emitAuditEvent(s.auditSink, r, s.identity(r), audit.EventTenantManaged, id,
 		map[string]string{"action": "deactivate"})
 	w.WriteHeader(http.StatusNoContent)

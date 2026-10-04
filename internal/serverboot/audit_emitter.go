@@ -13,7 +13,9 @@ import (
 // every meta-tool call surfaces in the audit log. It carries the §8.1
 // trace id and structured caller attributes (email, groups, public-mode
 // network, and the public_mode flag) from the per-request audit metadata
-// the server's identity middleware attached to the context.
+// the server's identity middleware attached to the context, together with the
+// §8.1 tenant label the middleware resolved. A context with no metadata
+// records no tenant.
 //
 // Before each write it applies the two §8.2 redaction surfaces: manifest-
 // declared field redaction (RedactFields keyed by the event's RedactKeys)
@@ -44,6 +46,7 @@ func auditEmitterFor(sink audit.Sink, scrubber *audit.PIIScrubber, sampler *audi
 		if m, ok := server.AuditMetaFromContext(ctx); ok {
 			ev.TraceID = m.TraceID
 			ev.PublicMode = m.PublicMode
+			ev.Tenant = m.Tenant
 			if m.PublicMode {
 				ev.CallerNetwork = &audit.CallerNetwork{SourceIP: m.SourceIP, ForwardedUser: m.ForwardedUser}
 			} else {

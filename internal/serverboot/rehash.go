@@ -631,13 +631,15 @@ func (a *rehashApplier) recordSigned(ctx context.Context, row rehashRow, signatu
 
 // appendSignedEvent emits the §8.1 artifact.signed event for one re-signed row,
 // through the §8.2 manifest-declared redaction ingest applies to that event and
-// through the §8.2 query-text scrubber.
+// through the §8.2 query-text scrubber. The event records the tenant that owns
+// the artifact (§8.1).
 func appendSignedEvent(ctx context.Context, d rehashDeps, row rehashRow) error {
 	redact := ingest.ArtifactEventRedactor(row.rec)
 	ev := audit.Event{
 		Type:   audit.EventArtifactSigned,
 		Caller: "system",
 		Target: row.rec.ArtifactID,
+		Tenant: row.rec.TenantID,
 		Context: redact(map[string]string{
 			"version":      row.rec.Version,
 			"content_hash": row.newHash,

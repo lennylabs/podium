@@ -32,7 +32,7 @@ func TestRunRetentionOnce_DropsOldEvents(t *testing.T) {
 
 	policies := defaultRetentionPolicies(365 * 24 * time.Hour)
 	anchored := 0
-	runRetentionOnce(context.Background(), sink, policies, func() { anchored++ })
+	runRetentionOnce(context.Background(), sink, policies, func(context.Context) { anchored++ })
 
 	if err := sink.Verify(context.Background()); err != nil {
 		t.Errorf("Verify after retention: %v", err)
@@ -60,7 +60,7 @@ func TestRunRetentionOnce_NoReAnchorWhenNothingDropped(t *testing.T) {
 	}
 	anchored := 0
 	runRetentionOnce(context.Background(), sink,
-		defaultRetentionPolicies(365*24*time.Hour), func() { anchored++ })
+		defaultRetentionPolicies(365*24*time.Hour), func(context.Context) { anchored++ })
 	if anchored != 0 {
 		t.Errorf("reAnchor invoked %d times, want 0 when nothing dropped", anchored)
 	}

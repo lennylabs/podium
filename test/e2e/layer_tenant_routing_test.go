@@ -3,11 +3,14 @@ package e2e
 // End-to-end coverage of §7.3.1 Tenant selection on the compiled binary. A
 // multi-tenant registry serves each §7.3.1 layer request in the tenant §6.3.1
 // selects for it, advertises a tenant-qualified webhook URL, refuses a layer
-// write that resolves to no tenant, refuses §8.5 erasure outright, and reports
-// the §7.3.4 manage_any_layer posture member in the routed tenant. These cases
-// drive the serverboot mount site, which no in-process test reaches; the
-// in-process suite in pkg/registry/server pins the routing logic on every
-// platform.
+// write that resolves to no tenant, erases a user in the routed tenant alone
+// (§8.5), and reports the §7.3.4 manage_any_layer posture member in the
+// routed tenant. The erase reads the audit file back: each record carries the
+// §8.1 tenant it belongs to, the erase rewrites only the routed tenant's
+// records, and the rewritten chain verifies and is re-anchored at once
+// (§8.6). These cases drive the serverboot mount site, which no in-process
+// test reaches; the in-process suite in pkg/registry/server pins the routing
+// logic on every platform.
 //
 // Every case runs on the standard stack and skips through msSkipIfNoStack
 // without Postgres and S3. Subjects, tenant names, and layer IDs carry a
@@ -18,12 +21,15 @@ package e2e
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/registry/core"
 )
 
@@ -32,10 +38,11 @@ import (
 const ltrRouterLog = "multi-tenant mode: routing requests by organization"
 
 // ltrFixture is the multi-tenant trusted-headers registry the routing case
-// boots: the server, the per-run proxy secret and suffix, and the per-run
-// subjects and tenant name.
+// boots: the server, its audit log, the per-run proxy secret and suffix, and
+// the per-run subjects and tenant name.
 type ltrFixture struct {
 	srv                       *serverProc
+	auditPath                 string
 	secret, suffix            string
 	carol, olivia, dave, erin string
 	globex, globexID, initech string
@@ -53,7 +60,11 @@ func (f *ltrFixture) as(sub, org string) http.Header {
 
 // ltrSetup boots the multi-tenant trusted-headers registry with the web UI
 // posture read mounted, carol-<s> as the bootstrap tenant's admin, and
-// olivia-<s> as the instance operator.
+// olivia-<s> as the instance operator. The audit log is a file seeded with
+// one unlabeled record naming dave-<s>, the kind of record written before
+// §8.1 carried a tenant, and chain-head anchoring is on with an hourly
+// interval, so the only anchor after the boot-time one is the §8.6 re-anchor
+// an erase triggers.
 func ltrSetup(t *testing.T) *ltrFixture {
 	t.Helper()
 	dsn, bucket, region := msSkipIfNoStack(t)
@@ -68,6 +79,14 @@ func ltrSetup(t *testing.T) *ltrFixture {
 		globex:  "globex-" + suffix,
 		initech: "initech-" + suffix,
 	}
+	dir := t.TempDir()
+	f.auditPath = filepath.Join(dir, "audit.log")
+	auditSeed(t, f.auditPath, audit.Event{
+		Type:      audit.EventArtifactLoaded,
+		Timestamp: time.Now().UTC(),
+		Caller:    f.dave,
+		Target:    "legacy/ltr-" + suffix,
+	})
 	_, pemPath := injKeyPair(t)
 	f.srv = msStartStandardServerEnv(t, dsn, bucket, region, pemPath,
 		"PODIUM_IDENTITY_PROVIDER=trusted-headers",
@@ -76,6 +95,9 @@ func ltrSetup(t *testing.T) *ltrFixture {
 		"PODIUM_TRUSTED_PROXY_SECRET="+f.secret,
 		"PODIUM_BOOTSTRAP_ADMINS="+f.carol,
 		"PODIUM_OPERATOR_ADMINS="+f.olivia,
+		"PODIUM_AUDIT_LOG_PATH="+f.auditPath,
+		"PODIUM_AUDIT_SIGNING_KEY_PATH="+filepath.Join(dir, "audit.key"),
+		"PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS=3600",
 	)
 	return f
 }
@@ -147,14 +169,23 @@ func ltrEraseBody(userID string) map[string]any {
 	return map[string]any{"user_id": userID, "salt": "ltr-salt-" + randHex(4)}
 }
 
+// ltrDefaultID is the org ID of the bootstrap tenant, whose name is default.
+var ltrDefaultID = core.OrgIDForName("default")
+
 // Spec: §6.3.1 — a multi-tenant registry selects the tenant of each request
 // from the caller's organization.
 // Spec: §7.3.1 — the layer endpoints serve the tenant §6.3.1 selects per
 // request (Tenant selection), a layer write that resolves to no tenant is
 // refused with 403 auth.forbidden, and the webhook URL names the tenant ID.
 // Spec: §7.3.4 — manage_any_layer is evaluated in the routed tenant.
-// Spec: §8.5 — erasure on a multi-tenant registry is refused with 403
-// auth.forbidden.
+// Spec: §8.5 — erasure on a multi-tenant registry acts in the routed tenant:
+// it purges the user's layers there and redacts only the audit records
+// labeled with that tenant, leaving other tenants' records and unlabeled
+// records unchanged.
+// Spec: §8.1 — each audit record carries the tenant it belongs to, and
+// user.erased records the tenant the erase acted in.
+// Spec: §8.6 — an erase that rewrites the chain records the superseded head,
+// the rewritten chain verifies, and the new head is anchored at once.
 // Spec: §7.6 — a stream receives only the events of the tenant it resolves to.
 func TestLayerEndpoint_MultiTenantRouting(t *testing.T) {
 	t.Parallel()
@@ -177,16 +208,196 @@ func TestLayerEndpoint_MultiTenantRouting(t *testing.T) {
 	apiWantCodeAs(t, f.srv, http.MethodPost, "/v1/layers", erinH, ltrGitLayer("ltr-erin-"+f.suffix),
 		http.StatusForbidden, "auth.forbidden", "erin registers a layer")
 
-	// Step 7: the posture member follows the routed tenant, and erasure is
-	// refused for the bootstrap tenant's admin without touching dave's rows.
+	// Step 7: the posture member follows the routed tenant, and the
+	// bootstrap tenant's admin erases dave in the bootstrap tenant alone.
 	ltrWantManage(t, f.srv, carolH, "carol", true)
 	ltrWantManage(t, f.srv, daveH, "dave", false)
 	ltrWantManage(t, f.srv, erinH, "erin", false)
-	apiWantCodeAs(t, f.srv, http.MethodPost, "/v1/admin/erase", carolH, ltrEraseBody(f.dave),
-		http.StatusForbidden, "auth.forbidden", "carol erases dave")
+	daveDefault := "ltr-dave-d-" + f.suffix
+	evRegisterUserLayer(t, f.srv, f.as(f.dave, "default"), daveDefault)
+	ltrEraseInDefault(t, f, carolH, daveDefault)
 	if ids := ltrListIDs(t, f.srv, daveH, "dave after the erase"); !ids[daveA] || !ids[daveB] {
-		t.Errorf("dave's list after the refused erase = %v, want %s and %s", ids, daveA, daveB)
+		t.Errorf("dave's globex list after the default-tenant erase = %v, want %s and %s", ids, daveA, daveB)
 	}
+}
+
+// ltrEraseInDefault is the erase of step 7: carol erases dave in the
+// bootstrap tenant, which purges only daveDefault, tombstones only the
+// bootstrap tenant's records, and leaves dave's globex records and the
+// seeded unlabeled record unchanged. The rewritten chain verifies, and the
+// re-anchor after the erase anchors a head at or after user.erased.
+func ltrEraseInDefault(t *testing.T, f *ltrFixture, carolH http.Header, daveDefault string) {
+	t.Helper()
+	if ltrCountNaming(auditReadRecords(t, f.auditPath), f.globexID, f.dave) == 0 {
+		t.Fatalf("no globex audit record names %s before the erase\nlog:\n%s", f.dave, brReadOrEmpty(f.auditPath))
+	}
+	outOfScope := ltrOutOfScopeBodies(t, f.auditPath, f.globexID)
+	salt := "ltr-salt-" + randHex(4)
+	st, body := apiDoAs(t, http.MethodPost, f.srv.BaseURL+"/v1/admin/erase", carolH,
+		map[string]any{"user_id": f.dave, "salt": salt})
+	apiWantStatus(t, st, http.StatusOK, "carol erases dave", body)
+	ltrWantEraseBody(t, body, daveDefault)
+
+	tombstone := auditTombstone(f.dave, salt)
+	recs := auditReadRecords(t, f.auditPath)
+	if n := ltrCountNaming(recs, ltrDefaultID, f.dave); n != 0 {
+		t.Errorf("%d default-tenant records still name %s after the erase", n, f.dave)
+	}
+	if ltrCountNaming(recs, ltrDefaultID, tombstone) == 0 {
+		t.Errorf("no default-tenant record carries the tombstone %s", tombstone)
+	}
+	if n := ltrCountNaming(recs, f.globexID, tombstone) + ltrCountNaming(recs, "", tombstone); n != 0 {
+		t.Errorf("%d globex or unlabeled records carry the tombstone %s", n, tombstone)
+	}
+	ltrWantUnchanged(t, outOfScope, ltrOutOfScopeBodies(t, f.auditPath, f.globexID))
+	erased := auditFindType(t, recs, string(audit.EventUserErased))
+	if erased.tenant() != ltrDefaultID {
+		t.Errorf("user.erased tenant = %q, want the default org ID %q", erased.tenant(), ltrDefaultID)
+	}
+	if erased.Context["superseded_head"] == "" {
+		t.Errorf("user.erased carries no superseded_head; context = %v", erased.Context)
+	}
+	auditVerifyChain(t, f.auditPath)
+	ltrWantReAnchor(t, f.auditPath)
+}
+
+// ltrWantEraseBody asserts that the erase response carries exactly the
+// erased, layers_purged, and audit_events_redacted members, and that
+// layers_purged names only the bootstrap-tenant layer.
+func ltrWantEraseBody(t *testing.T, body []byte, daveDefault string) {
+	t.Helper()
+	var resp map[string]json.RawMessage
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode erase response: %v\nbody: %s", err, body)
+	}
+	for _, k := range []string{"erased", "layers_purged", "audit_events_redacted"} {
+		if _, ok := resp[k]; !ok {
+			t.Errorf("erase response lacks %s\nbody: %s", k, body)
+		}
+	}
+	if len(resp) != 3 {
+		t.Errorf("erase response carries %d members, want 3\nbody: %s", len(resp), body)
+	}
+	var purged []string
+	if err := json.Unmarshal(resp["layers_purged"], &purged); err != nil || len(purged) != 1 || purged[0] != daveDefault {
+		t.Errorf("layers_purged = %s (decode error %v), want [%q]", resp["layers_purged"], err, daveDefault)
+	}
+}
+
+// ltrOutOfScopeBodies returns, in log order, every globex-labeled and
+// unlabeled line of the audit log at path with its hash and prev_hash keys
+// removed. A default-tenant erase rewrites the chain, so those two keys change
+// on every record; the rest of an out-of-scope record stays byte-identical
+// under §8.5, including the caller fields a partial redaction would alter
+// without changing whether the record still names the user.
+func ltrOutOfScopeBodies(t *testing.T, path, globexID string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read audit log: %v", err)
+	}
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var rec map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("decode audit line %q: %v", line, err)
+		}
+		var tenant string
+		if v, ok := rec["tenant"]; ok {
+			if err := json.Unmarshal(v, &tenant); err != nil {
+				t.Fatalf("decode tenant of audit line %q: %v", line, err)
+			}
+		}
+		if tenant != "" && tenant != globexID {
+			continue
+		}
+		delete(rec, "hash")
+		delete(rec, "prev_hash")
+		body, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatalf("encode audit line %q: %v", line, err)
+		}
+		out = append(out, string(body))
+	}
+	return out
+}
+
+// ltrWantUnchanged asserts that every out-of-scope record present before the
+// erase is still present, in order and with the same content, after it. The
+// erase and its re-anchor append unlabeled deployment-wide records such as
+// audit.anchored, so after may extend before but must not alter it.
+func ltrWantUnchanged(t *testing.T, before, after []string) {
+	t.Helper()
+	if len(after) < len(before) {
+		t.Fatalf("%d globex or unlabeled records after the erase, want at least the %d before it", len(after), len(before))
+	}
+	for i, b := range before {
+		if after[i] != b {
+			t.Errorf("out-of-scope record %d changed across the erase\nbefore: %s\nafter:  %s", i, b, after[i])
+		}
+	}
+}
+
+// ltrCountNaming counts the audit records labeled with tenant ("" for an
+// unlabeled record) that name id.
+func ltrCountNaming(recs []auditRecord, tenant, id string) int {
+	n := 0
+	for _, r := range recs {
+		if r.tenant() == tenant && r.names(id) {
+			n++
+		}
+	}
+	return n
+}
+
+// ltrWantReAnchor polls the audit log at path until an audit.anchored record
+// follows user.erased, and asserts that it anchors the hash of a record at or
+// after user.erased. The anchor interval is an hour, so that record comes
+// from the §8.6 re-anchor the erase triggers.
+func ltrWantReAnchor(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		recs := auditReadRecords(t, path)
+		if target, ok := ltrAnchorAfterErase(recs); ok {
+			if !ltrHashAtOrAfterErase(recs, target) {
+				t.Errorf("the re-anchor names %s, which is no record at or after user.erased\nlog:\n%s", target, brReadOrEmpty(path))
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no audit.anchored record follows user.erased\nlog:\n%s", brReadOrEmpty(path))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// ltrAnchorAfterErase returns the Target of the first audit.anchored record
+// after user.erased.
+func ltrAnchorAfterErase(recs []auditRecord) (string, bool) {
+	seen := false
+	for _, r := range recs {
+		switch {
+		case r.Type == string(audit.EventUserErased):
+			seen = true
+		case seen && r.Type == string(audit.EventAuditAnchored):
+			return r.Target, true
+		}
+	}
+	return "", false
+}
+
+// ltrHashAtOrAfterErase reports whether hash is the hash of user.erased or of
+// a record after it.
+func ltrHashAtOrAfterErase(recs []auditRecord, hash string) bool {
+	seen := false
+	for _, r := range recs {
+		seen = seen || r.Type == string(audit.EventUserErased)
+		if seen && r.Hash == hash {
+			return true
+		}
+	}
+	return false
 }
 
 // ltrProvisionGlobex is step 1: olivia provisions globex-<s>, and the
@@ -313,9 +524,13 @@ func ltrStreamIsolation(t *testing.T, f *ltrFixture, carolH, daveH http.Header, 
 // Spec: §7.3.1 — Tenant selection: an unrouted list is empty and an unrouted
 // layer write is refused with 403 auth.forbidden, which overrides the
 // no-provider admission.
-// Spec: §8.5 — erasure on a multi-tenant registry is refused with 403
-// auth.forbidden.
+// Spec: §8.5 — an erase that resolves to no tenant is refused with 403
+// auth.forbidden before the admin check, which admits every caller on a
+// registry with no identity provider.
 // Spec: §7.3.4 — manage_any_layer is false for an unrouted request.
+// Spec: §8.1 — an unrouted request event records no tenant, and the
+// podium:unrouted binding reaches no record. The boot installs no tenant
+// router, so this pins the serverboot multi-tenant label wiring.
 //
 // IMPLEMENTOR'S CHOICE (proposal 0047, TEST-3): the boot clears the
 // identity provider msStandardEnv selects with an overriding empty
@@ -327,10 +542,12 @@ func TestLayerEndpoint_MultiTenantNoRouter(t *testing.T) {
 	dsn, bucket, region := msSkipIfNoStack(t)
 	suffix := randHex(6)
 	_, pemPath := injKeyPair(t)
+	auditPath := filepath.Join(t.TempDir(), "audit.log")
 	srv := msStartStandardServerEnv(t, dsn, bucket, region, pemPath,
 		"PODIUM_IDENTITY_PROVIDER=",
 		"PODIUM_MULTI_TENANT=true",
 		"PODIUM_WEB_UI=true",
+		"PODIUM_AUDIT_LOG_PATH="+auditPath,
 	)
 	if strings.Contains(srv.log(), ltrRouterLog) {
 		t.Fatalf("the boot log carries %q with no identity provider\nlog:\n%s", ltrRouterLog, srv.log())
@@ -347,6 +564,39 @@ func TestLayerEndpoint_MultiTenantNoRouter(t *testing.T) {
 		t.Errorf("the unrouted list after the refusals = %v, want none", ids)
 	}
 	ltrWantManage(t, srv, nil, "anonymous", false)
+
+	// The read's status is not asserted: the Postgres store refuses the
+	// podium:unrouted binding as a schema name, so the unrouted search
+	// answers 500. The core emits artifacts.searched on every return path,
+	// so the record exists either way, and its label is what this pins.
+	_, _ = apiDo(t, http.MethodGet, srv.BaseURL+"/v1/search_artifacts?query=ltr-nr-"+suffix, nil)
+	ltrWantUnlabeledSearch(t, auditPath)
+}
+
+// ltrWantUnlabeledSearch waits for an artifacts.searched record in the audit
+// file at path and asserts that it carries no tenant and that no record in
+// the file carries the podium:unrouted binding.
+func ltrWantUnlabeledSearch(t *testing.T, path string) {
+	t.Helper()
+	if !brPollContains(path, `"type":"artifacts.searched"`, 5*time.Second) {
+		t.Fatalf("audit log missing artifacts.searched:\n%s", brReadOrEmpty(path))
+	}
+	raw := brReadOrEmpty(path)
+	if strings.Contains(raw, "podium:unrouted") {
+		t.Errorf("an audit record carries podium:unrouted:\n%s", raw)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		var rec struct {
+			Type   string  `json:"type"`
+			Tenant *string `json:"tenant"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("decode audit line %q: %v", line, err)
+		}
+		if rec.Type == "artifacts.searched" && rec.Tenant != nil {
+			t.Errorf("artifacts.searched carries tenant %q, want none", *rec.Tenant)
+		}
+	}
 }
 
 // ltrBearer is the Authorization header of an oidc-jwt token the test IdP
@@ -370,8 +620,8 @@ func ltrBearer(t *testing.T, idp *oidcTestIdP, sub, org string) http.Header {
 // provisioned tenant is refused with 401 auth.tenant_unknown, and
 // details.token_org_id names the organization.
 // Spec: §7.3.1 — the layer routes are tenant-routed (Tenant selection).
-// Spec: §8.5 — the erase route is not tenant-routed, so every caller of a
-// multi-tenant registry gets 403 auth.forbidden.
+// Spec: §8.5 — the erase route is tenant-routed, so an erase whose token
+// names an unprovisioned organization is refused like a layer request.
 // Spec: §7.3.4 — the posture read refuses no request and reports
 // manage_any_layer false for a caller that resolves to no tenant.
 //
@@ -413,10 +663,11 @@ func TestLayerEndpoint_MultiTenantUnknownOrgRejected(t *testing.T) {
 		t.Errorf("auth.tenant_unknown details = %v (decode error %v), want token_org_id %q\nbody: %s", env.Details, err, initech, body)
 	}
 
-	// Step 3: the erase route is not tenant-routed. A 401 here means it was
-	// mounted through TenantRouted.
+	// Step 3: the erase route is tenant-routed, so the unknown org is
+	// refused before the handler runs. A 403 here means it was mounted
+	// outside TenantRouted and reached the handler's tenant check.
 	apiWantCodeAs(t, srv, http.MethodPost, "/v1/admin/erase", frank, ltrEraseBody(frankID),
-		http.StatusForbidden, "auth.forbidden", "frank erases")
+		http.StatusUnauthorized, "auth.tenant_unknown", "frank erases")
 
 	// Step 4: the posture read refuses no request. A 401 here means it was
 	// mounted through TenantRouted.

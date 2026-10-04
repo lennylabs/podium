@@ -139,6 +139,13 @@ type Event struct {
 	Target        string
 	Context       map[string]string
 
+	// Tenant is the §4.7.1 org ID whose audit stream the event belongs to;
+	// empty for deployment-wide events and for records written before the
+	// attribute existed.
+	//
+	// Spec: §8.1
+	Tenant string
+
 	// ResolvedLayers is the ordered layer composition of the caller's
 	// effective view, recorded on read events per §4.7.5. Empty for
 	// events that are not reads or when no layer list is configured.
@@ -185,6 +192,11 @@ func (e Event) canonicalBody() []byte {
 	parts = append(parts, "caller_public_mode="+strconv.FormatBool(e.PublicMode))
 	if e.CallerNetwork != nil {
 		parts = append(parts, "caller_network="+e.CallerNetwork.SourceIP+"|"+e.CallerNetwork.ForwardedUser)
+	}
+	// An empty tenant contributes nothing, so a record written before the
+	// attribute existed keeps its hash and an existing log still verifies.
+	if e.Tenant != "" {
+		parts = append(parts, "tenant="+e.Tenant)
 	}
 	out := []byte{}
 	for _, p := range parts {

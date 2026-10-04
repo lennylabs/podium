@@ -4,16 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -209,4 +213,371 @@ func TestErase_MissingUserID(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
+}
+
+// failingSink is an audit.Sink whose Append always fails, standing in for an
+// unreachable external endpoint.
+type failingSink struct{ audit.Sink }
+
+func (failingSink) Append(context.Context, audit.Event) error {
+	return errors.New("endpoint unreachable")
+}
+
+// endpointSinkErase builds a single-tenant endpoint redirected to an external
+// audit sink (no local file to rewrite) with an afterErase hook counter.
+func endpointSinkErase(t *testing.T, sink audit.Sink, hooks *int) *httptest.Server {
+	t.Helper()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	admin := layer.Identity{Sub: "carol@acme.com", IsAuthenticated: true}
+	ep := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
+		WithAudit(sink).
+		WithEraseSink(nil).
+		WithAfterErase(func(context.Context) { *hooks++ }).
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) { return admin, nil }).
+		WithAdminAuth(func(*http.Request) error { return nil })
+	ts := httptest.NewServer(ep.EraseHandler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// Spec: §8.5, §8.6 — with an external endpoint sink the registry rewrites no
+// record, appends a tenant-labeled user.erased naming the admin, and runs no
+// re-anchor because no local chain changed.
+func TestErase_EndpointSinkRecordsUserErased(t *testing.T) {
+	t.Parallel()
+	sink := audit.NewMemory()
+	hooks := 0
+	ts := endpointSinkErase(t, sink, &hooks)
+	resp := postErase(t, ts.URL, map[string]any{"user_id": "alice@acme.com", "salt": "s"})
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	events := sink.Events()
+	if len(events) != 1 {
+		t.Fatalf("events = %+v, want one user.erased", events)
+	}
+	ev := events[0]
+	if ev.Type != audit.EventUserErased || ev.Tenant != "t" || ev.Caller != "carol@acme.com" || ev.Context["transformed"] != "0" {
+		t.Errorf("user.erased = %+v, want tenant t, caller carol, transformed 0", ev)
+	}
+	if _, ok := ev.Context["superseded_head"]; ok {
+		t.Errorf("superseded_head recorded with no chain rewrite")
+	}
+	if hooks != 0 {
+		t.Errorf("afterErase ran %d times with no file sink, want 0", hooks)
+	}
+}
+
+// Spec: §8.5 — a failed user.erased delivery to the endpoint sink is reported
+// as 500 registry.unavailable rather than dropped.
+func TestErase_EndpointSinkAppendFailure(t *testing.T) {
+	t.Parallel()
+	hooks := 0
+	ts := endpointSinkErase(t, failingSink{}, &hooks)
+	resp := postErase(t, ts.URL, map[string]any{"user_id": "alice@acme.com", "salt": "s"})
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+	if env := decodeEnvelope(t, resp); env.Code != "registry.unavailable" || !strings.Contains(env.Message, "user.erased") {
+		t.Errorf("envelope = %s %q, want registry.unavailable naming user.erased", env.Code, env.Message)
+	}
+}
+
+// eraseMarkerKey is the request-context key the after-erase test sets, so the
+// hook can show that it received a context derived from the request.
+type eraseMarkerKey struct{}
+
+// Spec: §8.6 — the after-erase re-anchor hook runs exactly once after the
+// erasure rewrites the file-backed chain, with a context derived from the
+// request context, and only after user.erased is on disk.
+func TestErase_AfterEraseRunsOnceWithRequestContext(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	sinkPath := filepath.Join(t.TempDir(), "audit.log")
+	sink, err := audit.NewFileSink(sinkPath)
+	if err != nil {
+		t.Fatalf("NewFileSink: %v", err)
+	}
+	if err := sink.Append(context.Background(), audit.Event{
+		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	var calls int
+	var marker any
+	var erasedOnDisk bool
+	admin := layer.Identity{Sub: "carol@acme.com", IsAuthenticated: true}
+	h := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
+		WithAudit(sink).
+		WithEraseSink(sink).
+		WithAfterErase(func(ctx context.Context) {
+			calls++
+			marker = ctx.Value(eraseMarkerKey{})
+			data, _ := os.ReadFile(sinkPath)
+			erasedOnDisk = strings.Contains(string(data), string(audit.EventUserErased))
+		}).
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) { return admin, nil }).
+		WithAdminAuth(func(*http.Request) error { return nil }).
+		EraseHandler()
+	b, _ := json.Marshal(map[string]any{"user_id": "alice@acme.com", "salt": "s"})
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/erase", bytes.NewReader(b))
+	req = req.WithContext(context.WithValue(req.Context(), eraseMarkerKey{}, "request"))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	if calls != 1 || marker != "request" || !erasedOnDisk {
+		t.Errorf("afterErase calls = %d, marker = %v, user.erased on disk = %v; want 1, request, true",
+			calls, marker, erasedOnDisk)
+	}
+}
+
+// multiTenantEraseServer builds a multi-tenant endpoint bound to the boot
+// tenant P over tenants A and B, with an admin that every request admits.
+// Each request acts in the tenant its X-Test-Tenant header names, standing in
+// for the §6.3.1 router serverboot mounts the route behind.
+func multiTenantEraseServer(t *testing.T, st store.Store, sink *audit.FileSink) *httptest.Server {
+	t.Helper()
+	for _, id := range []string{"A", "B"} {
+		if err := st.CreateTenant(context.Background(), store.Tenant{ID: id}); err != nil {
+			t.Fatalf("CreateTenant %s: %v", id, err)
+		}
+	}
+	admin := layer.Identity{Sub: "carol@acme.com", IsAuthenticated: true}
+	h := server.NewLayerEndpoint(st, "P", server.NewModeTracker()).
+		WithTenantRouting().
+		WithAudit(sink).
+		WithEraseSink(sink).
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) { return admin, nil }).
+		WithAdminAuth(func(*http.Request) error { return nil }).
+		EraseHandler()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if tenant := r.Header.Get("X-Test-Tenant"); tenant != "" {
+			r = r.WithContext(core.ContextWithTenant(r.Context(), tenant))
+		}
+		h.ServeHTTP(w, r)
+	}))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// postEraseIn sends an erase of user acting in tenant and returns the
+// decoded 200 response body.
+func postEraseIn(t *testing.T, base, tenant, user string) map[string]any {
+	t.Helper()
+	b, _ := json.Marshal(map[string]any{"user_id": user, "salt": "s"})
+	req, err := http.NewRequest(http.MethodPost, base+"/v1/admin/erase", bytes.NewReader(b))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("X-Test-Tenant", tenant)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST erase: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("erase %s in %s: status = %d, want 200", user, tenant, resp.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return out
+}
+
+// Spec: §8.5 — on a multi-tenant registry the erase response carries no
+// information about records outside the routed tenant. Erasing bob, who
+// appears only in B-labeled and unlabeled records and owns a layer in B,
+// answers A's admin exactly as erasing dave, who appears nowhere, and
+// neither erase changes bob's records or layer.
+func TestErase_MultiTenantForeignUserMatchesAbsentUser(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := store.NewMemory()
+	sinkPath := filepath.Join(t.TempDir(), "audit.log")
+	sink, err := audit.NewFileSink(sinkPath)
+	if err != nil {
+		t.Fatalf("NewFileSink: %v", err)
+	}
+	ts := multiTenantEraseServer(t, st, sink)
+	if err := st.PutLayerConfig(ctx, store.LayerConfig{
+		TenantID: "B", ID: "bob-personal", SourceType: "local", LocalPath: "/tmp/b",
+		UserDefined: true, Owner: "bob@acme.com", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
+	for _, ev := range []audit.Event{
+		{Caller: "bob@acme.com", Tenant: "B"},
+		{Caller: "bob@acme.com"},
+		{Caller: "erin@acme.com", Tenant: "A"},
+	} {
+		ev.Type, ev.Timestamp = audit.EventArtifactLoaded, time.Now().UTC()
+		if err := sink.Append(ctx, ev); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+
+	foreign := postEraseIn(t, ts.URL, "A", "bob@acme.com")
+	absent := postEraseIn(t, ts.URL, "A", "dave@acme.com")
+	for _, body := range []map[string]any{foreign, absent} {
+		if len(body) != 3 || body["audit_events_redacted"] != float64(0) {
+			t.Errorf("body = %v, want only erased, layers_purged, and audit_events_redacted 0", body)
+		}
+		if purged, ok := body["layers_purged"].([]any); !ok || len(purged) != 0 {
+			t.Errorf("layers_purged = %v, want []", body["layers_purged"])
+		}
+	}
+	delete(foreign, "erased")
+	delete(absent, "erased")
+	if !reflect.DeepEqual(foreign, absent) {
+		t.Errorf("foreign-user body %v differs from absent-user body %v", foreign, absent)
+	}
+	if data, _ := os.ReadFile(sinkPath); strings.Count(string(data), "bob@acme.com") != 2 {
+		t.Errorf("bob's B-labeled and unlabeled records changed:\n%s", data)
+	}
+	if _, err := st.GetLayerConfig(ctx, "B", "bob-personal"); err != nil {
+		t.Errorf("bob's B layer purged by A's erase: %v", err)
+	}
+}
+
+// Spec: §8.5, §8.1 — on a single-tenant endpoint the erase scope and the
+// endpoint's own emitter label read the same bound tenant, so an erase
+// reaches the records the endpoint labeled, together with unlabeled records,
+// and leaves a record labeled with a foreign tenant unchanged.
+func TestErase_SingleTenantReachesOwnLabels(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := store.NewMemory()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	sinkPath := filepath.Join(t.TempDir(), "audit.log")
+	sink, err := audit.NewFileSink(sinkPath)
+	if err != nil {
+		t.Fatalf("NewFileSink: %v", err)
+	}
+	ep := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
+		WithAudit(sink).
+		WithEraseSink(sink).
+		WithIdentityResolver(func(r *http.Request) (layer.Identity, error) {
+			return layer.Identity{Sub: r.Header.Get("X-Test-User"), IsAuthenticated: true}, nil
+		}).
+		WithAdminAuth(func(*http.Request) error { return nil })
+	mux := http.NewServeMux()
+	mux.Handle("/v1/layers", ep.Handler())
+	mux.Handle("/v1/admin/erase", ep.EraseHandler())
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	sendAs(t, ts.URL+"/v1/layers", "alice@acme.com", map[string]any{
+		"id": "alice-personal", "source_type": "git", "repo": "https://git.invalid/alice.git", "user_defined": true,
+	}, http.StatusCreated)
+	const alice = "alice@acme.com"
+	for _, tenant := range []string{"", "f"} {
+		if err := sink.Append(ctx, audit.Event{Type: audit.EventArtifactLoaded, Caller: alice,
+			Tenant: tenant, Timestamp: time.Now().UTC()}); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	before := eraseRecords(t, sinkPath)
+	if len(before) != 3 || before[0]["type"] != string(audit.EventLayerUserRegistered) || before[0]["tenant"] != "t" {
+		t.Fatalf("records before erase = %v, want the endpoint's t-labeled register record first", before)
+	}
+
+	var out struct {
+		Redacted int `json:"audit_events_redacted"`
+	}
+	sendAs(t, ts.URL+"/v1/admin/erase", "carol@acme.com",
+		map[string]any{"user_id": alice, "salt": "s"}, http.StatusOK, &out)
+	// The register record, the unlabeled seed, and the record of the purge.
+	if out.Redacted != 3 {
+		t.Errorf("audit_events_redacted = %d, want 3", out.Redacted)
+	}
+	after := eraseRecords(t, sinkPath)
+	for i, rec := range after {
+		enc, _ := json.Marshal(rec)
+		if rec["tenant"] == "f" {
+			continue
+		}
+		if strings.Contains(string(enc), alice) {
+			t.Errorf("record %d still names alice: %s", i, enc)
+		}
+		// The t-labeled register record and the unlabeled seed carry the
+		// tombstone where they named alice.
+		if i < 2 && !strings.Contains(string(enc), `"redacted-`) {
+			t.Errorf("record %d carries no tombstone: %s", i, enc)
+		}
+	}
+	if !reflect.DeepEqual(withoutChain(before[2]), withoutChain(after[2])) {
+		t.Errorf("f-labeled record changed:\nbefore %v\nafter  %v", before[2], after[2])
+	}
+	erased := after[len(after)-1]
+	if erased["type"] != string(audit.EventUserErased) || erased["tenant"] != "t" {
+		t.Errorf("last record = %v, want user.erased labeled t", erased)
+	}
+	if err := sink.Verify(ctx); err != nil {
+		t.Errorf("Verify after erase: %v", err)
+	}
+}
+
+// sendAs posts body to url as the subject user, checks the status, and
+// decodes the response into out when one is passed.
+func sendAs(t *testing.T, url, user string, body any, wantStatus int, out ...any) {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("X-Test-User", user)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("POST %s as %s: status = %d, want %d", url, user, resp.StatusCode, wantStatus)
+	}
+	for _, o := range out {
+		if err := json.NewDecoder(resp.Body).Decode(o); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+	}
+}
+
+// eraseRecords parses every line of the audit file at path.
+func eraseRecords(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var recs []map[string]any
+	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
+		var rec map[string]any
+		if err := json.Unmarshal(line, &rec); err != nil {
+			t.Fatalf("parse %s: %v", line, err)
+		}
+		recs = append(recs, rec)
+	}
+	return recs
+}
+
+// withoutChain returns rec without the hash and prev_hash keys, which a chain
+// rewrite recomputes.
+func withoutChain(rec map[string]any) map[string]any {
+	out := maps.Clone(rec)
+	delete(out, "hash")
+	delete(out, "prev_hash")
+	return out
 }

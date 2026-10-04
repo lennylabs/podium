@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -183,10 +184,13 @@ func TestTenants_NonOperatorForbidden(t *testing.T) {
 
 // Spec: §7.3.3 / §4.7.1 — a single-tenant registry rejects every tenant-
 // management request with registry.tenant_management_unavailable, regardless
-// of operator authorization.
+// of operator authorization. Spec: §8.1 — the refused requests record no
+// tenant.managed event, so the single-tenant bound-tenant label never applies
+// to one.
 func TestTenants_SingleTenantUnavailable(t *testing.T) {
 	t.Parallel()
-	ts, st := bootTenantServer(t, operatorCaller, false /* single-tenant */)
+	sink := audit.NewMemory()
+	ts, st := bootTenantServer(t, operatorCaller, false /* single-tenant */, server.WithAudit(sink))
 	_ = st.GrantOperator(context.Background(), operatorCaller.Sub) // still rejected
 	for _, tc := range []struct{ method, path, body string }{
 		{http.MethodGet, "/v1/admin/tenants", ""},
@@ -201,6 +205,49 @@ func TestTenants_SingleTenantUnavailable(t *testing.T) {
 		if c := tenantErrCode(t, body); c != "registry.tenant_management_unavailable" {
 			t.Errorf("%s %s code = %q, want registry.tenant_management_unavailable", tc.method, tc.path, c)
 		}
+	}
+	if n := len(sink.Events()); n != 0 {
+		t.Errorf("refused tenant-management requests recorded %d audit events, want 0", n)
+	}
+}
+
+// Spec: §8.1 — tenant.managed records no tenant. The operator's org routes to
+// the provisioned tenant default, but /v1/admin/tenants bypasses tenant
+// routing, so the shared label rule finds no routed tenant on the request.
+func TestTenants_ManagedEventRecordsNoTenant(t *testing.T) {
+	t.Parallel()
+	sink := audit.NewMemory()
+	ts, st := bootTenantServer(t, operatorCaller, true, server.WithAudit(sink))
+	if err := st.GrantOperator(context.Background(), operatorCaller.Sub); err != nil {
+		t.Fatalf("grant operator: %v", err)
+	}
+	tenantsURL := ts.URL + "/v1/admin/tenants"
+	code, body := tenantHTTP(t, http.MethodPost, tenantsURL, `{"name":"globex.com"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create status = %d (%s), want 201", code, body)
+	}
+	var created tenantWire
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	if code, body := tenantHTTP(t, http.MethodPatch, tenantsURL+"/"+created.ID, `{"active":false}`); code != http.StatusOK {
+		t.Fatalf("patch status = %d (%s), want 200", code, body)
+	}
+	if code, body := tenantHTTP(t, http.MethodDelete, tenantsURL+"/"+created.ID, ""); code >= 300 {
+		t.Fatalf("delete status = %d (%s), want 2xx", code, body)
+	}
+	managed := 0
+	for _, ev := range sink.Events() {
+		if ev.Type != audit.EventTenantManaged {
+			continue
+		}
+		managed++
+		if ev.Tenant != "" {
+			t.Errorf("tenant.managed (%s) tenant = %q, want none", ev.Context["action"], ev.Tenant)
+		}
+	}
+	if managed != 3 {
+		t.Errorf("recorded %d tenant.managed events, want 3", managed)
 	}
 }
 

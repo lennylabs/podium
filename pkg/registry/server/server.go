@@ -66,6 +66,11 @@ type Server struct {
 	// returns the tenant record it read, whose Quota the §4.7.8 charges and
 	// the quota read resolve against.
 	tenantRouter func(ctx context.Context, orgValue string) (store.Tenant, bool)
+	// multiTenant records that the registry runs in §6.3.1 multi-tenant mode,
+	// whether or not a tenant router is installed. withAuditMetaMiddleware is
+	// its only reader: it selects the §8.1 tenant-label rule, so an unrouted
+	// request records no tenant instead of the podium:unrouted binding.
+	multiTenant bool
 	// rejectUnknownTenant selects the response when the organization resolves
 	// to no provisioned tenant: true (verified providers) rejects with
 	// auth.tenant_unknown; false (trusted-headers) leaves the caller in no
@@ -220,7 +225,20 @@ func WithTenantRouter(resolve func(ctx context.Context, orgValue string) (store.
 	return func(s *Server) {
 		s.tenantRouter = resolve
 		s.rejectUnknownTenant = rejectUnknown
+		s.multiTenant = true
 	}
+}
+
+// WithMultiTenant marks the registry as running in §6.3.1 multi-tenant mode.
+// The boot path sets it whenever multi-tenancy is configured, including a
+// registry with no identity verifier or in public mode, which installs no
+// tenant router. It selects the §8.1 audit tenant-label rule: a request event
+// records the routed tenant, or no tenant when the request resolves to none.
+// WithTenantRouter implies it.
+//
+// Spec: §8.1, §6.3.1
+func WithMultiTenant() Option {
+	return func(s *Server) { s.multiTenant = true }
 }
 
 // WithObjectStore configures the §4.1 large-resource path. Resources
