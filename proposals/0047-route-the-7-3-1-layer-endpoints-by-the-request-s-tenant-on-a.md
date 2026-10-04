@@ -73,7 +73,7 @@ The problem statement raised two items. Item 1, the multi-tenant layer endpoints
       Levels: —. Depends on: S5
 - [ ] **S9 · docs** — CL-1. The `[Unreleased]` `Fixed`, `Changed`, and `Documentation` entries.
       Levels: —. Depends on: S5
-- [ ] **S10 · docs** — MV-1. Manual-validation scenario S85.
+- [ ] **S10 · docs** — MV-1. Manual-validation scenario S87 (S85 and S86 were taken by earlier proposals).
       Levels: manual. Depends on: S5
 
 **Ordering constraints.** S2 and S3 are independent and may proceed in parallel. S4 needs the multi-tenant field S3 introduces. S5 compiles only against S2, S3, and S4. Until S5 lands, no binary behavior changes, because serverboot neither wraps the routes nor enables per-request resolution.

@@ -235,6 +235,7 @@ rm -rf "$WORK"
 | S84 | A replayed stale latest is refused, and an honest regression is not | standalone | none | none | none |
 | S85 | Sigstore-keyless sign and verify against the staging instance | none | none | none | Sigstore staging instance, an OIDC token it accepts |
 | S86 | Webhook receivers are isolated per tenant on a multi-tenant registry | standard | none | none | Postgres, S3 |
+| S87 | Layer operations act in the caller's tenant on a multi-tenant registry | standard | none | none | Postgres, S3 |
 
 ---
 
@@ -10683,13 +10684,15 @@ catches.
 
 6. carol registers two user-defined layers whose git URLs are under `.invalid`,
    so no fetch runs, and reorders them in reverse registration order, which
-   publishes `layer.config_changed`.
+   publishes `layer.config_changed`. Each body sets `user_defined`, because
+   carol administers the `default` tenant and an admin registration without it
+   is admin-defined, which publishes its own `layer.config_changed`.
 
    ```bash
    for id in "mv-a-$SFX" "mv-b-$SFX"; do
      as "carol-$SFX@acme.com" default -X POST "$PODIUM_REGISTRY/v1/layers" \
        -H 'Content-Type: application/json' \
-       -d "{\"id\":\"$id\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/acme/$id.git\",\"ref\":\"main\"}"
+       -d "{\"id\":\"$id\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/acme/$id.git\",\"ref\":\"main\",\"user_defined\":true}"
    done
    as "carol-$SFX@acme.com" default -X POST "$PODIUM_REGISTRY/v1/layers/reorder" \
      -H 'Content-Type: application/json' -d "{\"order\":[\"mv-b-$SFX\",\"mv-a-$SFX\"]}"
@@ -10701,5 +10704,111 @@ catches.
    200. `carol-sink.log` holds a `SIG` line with a non-empty signature and a
    `BODY` line whose `event` is `layer.config_changed` and whose `data.layer`
    names both layers. `bob-sink.log` is empty.
+
+---
+
+## S87: Layer operations act in the caller's tenant on a multi-tenant registry
+
+**Goal.** Validate that on a multi-tenant registry the layer endpoints read and
+write the layer list of the tenant the caller's organization names, that a
+bootstrap admin can manage the default tenant's layers, that the advertised
+webhook URL carries the tenant ID, and that a caller whose organization names
+no tenant lists nothing and cannot write.
+
+**Covers.** §6.3.1 per-request tenant selection and §7.3.1 Tenant selection on
+the layer endpoints, through the compiled binary under `trusted-headers`.
+
+**Why by hand.** An operator reads the raw layer lists of callers in different
+tenants side by side. A user-defined class on carol's admin register, a dave layer
+in carol's list, or a `webhook_url` without the tenant ID is the defect this
+scenario catches. The standard-stack end-to-end test skips silently on macOS
+without the stack.
+
+**Prerequisites.** Local Postgres and MinIO from `make services-up`, plus
+`test.env` (Postgres DSN, S3 settings). Skip if either is absent.
+
+**Steps.**
+
+1. Run the isolation block. Start services, load the environment, and boot a
+   multi-tenant registry behind `trusted-headers`.
+
+   ```bash
+   (cd "$REAL_HOME/projects/podium" && make services-up)
+   set -a; source $REAL_HOME/projects/podium/test.env; set +a
+   export PODIUM_REGISTRY_STORE=postgres
+   export PODIUM_OBJECT_STORE=s3
+   export PODIUM_MULTI_TENANT=true
+   export PODIUM_IDENTITY_PROVIDER=trusted-headers
+   export PODIUM_TRUSTED_PROXY_SECRET=gateway-secret
+   export PODIUM_OPERATOR_ADMINS=olivia@acme.com
+   export PODIUM_BOOTSTRAP_ADMINS=carol@acme.com
+   S=$$
+   podium serve --no-embeddings --bind 127.0.0.1:8188 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8188/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export URL=http://127.0.0.1:8188
+   as() { curl -s -H "X-Podium-Proxy-Secret: gateway-secret" -H "X-Podium-User-Sub: $1" -H "X-Podium-User-Org: $2" "${@:3}"; }
+   ```
+
+   **Expect.** `server_alive` reports the server running, and the log carries
+   `multi-tenant mode: routing requests by organization`.
+
+2. Provision a per-run tenant as the operator. The `podium` CLI sends only a
+   bearer token, so this step uses curl with the trusted headers.
+
+   ```bash
+   as olivia@acme.com default -X POST -H 'Content-Type: application/json' \
+     -d "{\"name\":\"globex-$S\"}" "$URL/v1/admin/tenants" | tee "$WORK/tenant.json"
+   GLOBEX=$(python3 -c "import json,sys; print(json.load(open('$WORK/tenant.json'))['id'])")
+   echo "globex tenant id: $GLOBEX"
+   ```
+
+   **Expect.** The response carries an `id`, and `$GLOBEX` is a UUID rather
+   than the string `globex-<pid>`.
+
+3. As carol (org `default`), register an admin-defined Git layer.
+
+   ```bash
+   as carol@acme.com default -w "\nHTTP %{http_code}\n" -X POST -H 'Content-Type: application/json' \
+     -d "{\"id\":\"team-$S\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/acme/team.git\",\"ref\":\"main\"}" "$URL/v1/layers" \
+     | tee "$WORK/team.json"
+   python3 -c "import json; print('user_defined:', json.loads(open('$WORK/team.json').read().rsplit('HTTP',1)[0])['layer']['user_defined'])"
+   ```
+
+   **Expect.** `HTTP 201` and `user_defined: False`. `user_defined: True`
+   means the admin gate still checks the unrouted tenant, which resolves
+   carol's registration to the user-defined class.
+
+4. As dave (org `globex-<pid>`), register a user layer, then list as dave and
+   as carol.
+
+   ```bash
+   as dave@acme.com "globex-$S" -X POST -H 'Content-Type: application/json' \
+     -d "{\"id\":\"dave-$S\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/dave/notes.git\",\"ref\":\"main\"}" "$URL/v1/layers" \
+     | python3 -c "import json,sys; print('webhook_url:', json.load(sys.stdin).get('webhook_url'))"
+   echo "dave sees:  $(as dave@acme.com "globex-$S" "$URL/v1/layers" | python3 -c "import json,sys; print([l['id'] for l in json.load(sys.stdin)['layers']])")"
+   echo "carol sees: $(as carol@acme.com default "$URL/v1/layers" | python3 -c "import json,sys; print([l['id'] for l in json.load(sys.stdin)['layers']])")"
+   ```
+
+   **Expect.** `webhook_url` contains `/v1/ingest/webhook/$GLOBEX/dave-<pid>`.
+   dave's list contains `dave-<pid>` and not `team-<pid>`. carol's list
+   contains `team-<pid>` and not `dave-<pid>`.
+
+5. As erin (org `initech-<pid>`, which names no tenant), list and register.
+
+   ```bash
+   echo "erin list: $(as erin@acme.com "initech-$S" "$URL/v1/layers")"
+   as erin@acme.com "initech-$S" -X POST -H 'Content-Type: application/json' \
+     -d "{\"id\":\"erin-$S\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/erin/x.git\",\"ref\":\"main\"}" "$URL/v1/layers"
+   ```
+
+   **Expect.** The list is `{"layers":[]}`. The register answers `403` with
+   error code `auth.forbidden`.
+
+**Cleanup.** Delete `team-<pid>` and `dave-<pid>` with `DELETE /v1/layers?id=...`
+as carol and dave, stop the server, `rm -rf "$WORK"`, and
+`(cd "$REAL_HOME/projects/podium" && make services-down)` when finished with the
+standard-mode scenarios.
 
 ---
