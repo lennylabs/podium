@@ -1481,7 +1481,16 @@ func run(ctx context.Context, stop func()) error {
 	// admin-defined operations on the real identity rather than a hardcoded
 	// anonymous caller.
 	layerIdentity := layerIdentityResolver(layerVerify)
-	layers := server.NewLayerEndpoint(st, tenantID, mode).
+	layers := server.NewLayerEndpoint(st, tenantID, mode)
+	if cfg.multiTenant {
+		// §7.3.1 Tenant selection: a multi-tenant endpoint serves the tenant
+		// §6.3.1 routes each request to, and refuses an unrouted write. The
+		// condition omits verifierInstalled, so a multi-tenant boot with no
+		// verifier leaves every layer request unrouted rather than serving
+		// the bootstrap tenant to every caller.
+		layers = layers.WithTenantRouting()
+	}
+	layers = layers.
 		// §7.5.4: an admin layer change wakes a `podium sync --watch`
 		// subscriber, so the endpoint publishes onto the same bus
 		// /v1/events streams from.
@@ -1503,14 +1512,29 @@ func run(ctx context.Context, stop func()) error {
 		})
 
 	mux := http.NewServeMux()
-	mux.Handle("/v1/layers", layers.Handler())
-	mux.Handle("/v1/layers/", layers.Handler())
+	// §7.3.1 Tenant selection, §6.3.1: the layer routes pass through the
+	// shared tenant router rather than through srv.Handler(), whose identity
+	// middleware would refuse a failed credential with auth.untrusted_* where
+	// §7.3.1 fixes 403 auth.forbidden. A routed layer request therefore
+	// verifies its credential twice, once in TenantRouted and once in the
+	// endpoint's resolver. The verifiers keep no replay state, so the second
+	// verification observes the same result as the first.
+	mux.Handle("/v1/layers", srv.TenantRouted(layers.Handler()))
+	mux.Handle("/v1/layers/", srv.TenantRouted(layers.Handler()))
 	// §7.3.1 inbound Git-provider webhook trigger. Mounted at the
-	// per-layer path `podium layer register` advertises.
+	// per-layer path `podium layer register` advertises. The route stays
+	// unwrapped: a webhook delivery carries no caller identity, the
+	// multi-tenant path names its tenant ID, and the prefix mount reaches
+	// that tenant-qualified subpath.
 	mux.Handle("/v1/ingest/webhook/", layers.WebhookHandler())
 	// §8.5 GDPR right-to-erasure: purges the user's owned layers and redacts
 	// the registry audit stream. Backed by the same store + audit sink as the
-	// layer endpoint.
+	// layer endpoint. The route stays unwrapped: on a multi-tenant registry
+	// the refusal reads the endpoint's multi-tenant flag alone and answers
+	// 403 auth.forbidden for every caller, and routing the request would
+	// answer a caller whose organization names no tenant 401
+	// auth.tenant_unknown instead. A single-tenant erase reads the bound
+	// tenant and needs no routed context.
 	mux.Handle("/v1/admin/erase", layers.EraseHandler())
 	if cfg.webUI {
 		mux.Handle("/app/", http.StripPrefix("/app/", http.FileServer(http.FS(web.Assets()))))
@@ -1558,7 +1582,7 @@ func run(ctx context.Context, stop func()) error {
 		// on the browser flow, because a registry serving the UI with no
 		// browser flow is the deployment whose page has to learn not to offer
 		// sign-in.
-		mux.Handle(server.PathWebUISession, server.SessionPosture{
+		mux.Handle(server.PathWebUISession, srv.TenantRoutedNoReject(server.SessionPosture{
 			IdentityProviderConfigured: cfg.identityProvider != "",
 			PublicMode:                 cfg.publicMode,
 			BrowserAuthEnabled:         cfg.webUIAuth,
@@ -1567,9 +1591,16 @@ func run(ctx context.Context, stop func()) error {
 			// the closure WithAdminAuth installed above, so the reported
 			// capability and the enforced gate are one expression. Hoisting
 			// that closure into a variable and evaluating it here would let
-			// the two drift apart.
+			// the two drift apart. Both read the tenant §6.3.1 routes the
+			// request to, so manage_any_layer is false for an unrouted
+			// request on a multi-tenant registry. The mount uses
+			// TenantRoutedNoReject because §7.3.4 answers every posture
+			// request 200, so an organization that names no tenant leaves
+			// the request unrouted rather than refused. A single-tenant
+			// registry installs no router, and the wrapper returns the
+			// posture handler unchanged there.
 			Capabilities: layers.Capabilities,
-		}.Handler())
+		}.Handler()))
 	}
 	if mreg != nil {
 		// §13.8 Prometheus scrape endpoint. operationName("/metrics") is "", so
