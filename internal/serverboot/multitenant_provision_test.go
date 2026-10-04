@@ -28,22 +28,28 @@ func TestSeedOperatorAdmins(t *testing.T) {
 	}
 }
 
+// tenantResolver returns the active tenant record for an org ID or an org-name
+// alias, carrying the record's Quota to the request, and reports false for an
+// unknown, empty, or deactivated org.
+//
+// Spec: §4.7.8, §6.3.1
 func TestTenantResolver(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
 	acme := orgIDForName("acme")
-	if err := st.CreateTenant(t.Context(), store.Tenant{ID: acme, Name: "acme"}); err != nil {
+	if err := st.CreateTenant(t.Context(), store.Tenant{ID: acme, Name: "acme", Quota: store.Quota{SearchQPS: 4}}); err != nil {
 		t.Fatal(err)
 	}
 	resolve := tenantResolver(st)
 
-	// An org-name alias resolves to its deterministic org ID.
-	if got, ok := resolve(t.Context(), "acme"); !ok || got.ID != acme {
-		t.Errorf("resolve(\"acme\") = %q,%v want %q,true", got.ID, ok, acme)
-	}
-	// A direct org ID resolves to itself.
-	if got, ok := resolve(t.Context(), acme); !ok || got.ID != acme {
-		t.Errorf("resolve(<id>) = %q,%v want %q,true", got.ID, ok, acme)
+	// An org-name alias and a direct org ID each resolve to the tenant record,
+	// whose Quota is the request's §4.7.8 limit source.
+	for _, value := range []string{"acme", acme} {
+		got, ok := resolve(t.Context(), value)
+		if !ok || got.ID != acme || got.Quota.SearchQPS != 4 {
+			t.Errorf("resolve(%q) = {ID:%q SearchQPS:%d},%v want {ID:%q SearchQPS:4},true",
+				value, got.ID, got.Quota.SearchQPS, ok, acme)
+		}
 	}
 	// Surrounding whitespace is trimmed.
 	if _, ok := resolve(t.Context(), "  acme  "); !ok {
