@@ -161,10 +161,82 @@ func wtiWantLists(t *testing.T, f *wtiFixture, when string) {
 // wtiWantCode asserts the status and the §6.10 error code of one request.
 func wtiWantCode(t *testing.T, f *wtiFixture, method, path string, as http.Header, body any, wantStatus int, wantCode, what string) {
 	t.Helper()
-	st, resp := apiDoAs(t, method, f.srv.BaseURL+path, as, body)
+	apiWantCodeAs(t, f.srv, method, path, as, body, wantStatus, wantCode, what)
+}
+
+// apiWantCodeAs sends one request to srv as the caller the headers name and
+// asserts its status and its §6.10 error code. It returns the response body.
+func apiWantCodeAs(t *testing.T, srv *serverProc, method, path string, as http.Header, body any, wantStatus int, wantCode, what string) []byte {
+	t.Helper()
+	st, resp := apiDoAs(t, method, srv.BaseURL+path, as, body)
 	apiWantStatus(t, st, wantStatus, what, resp)
 	if code := envelopeCode(t, resp); code != wantCode {
 		t.Errorf("%s: code = %q, want %q\nbody: %s", what, code, wantCode, resp)
+	}
+	return resp
+}
+
+// wtiChangedNaming returns the layer.config_changed deliveries sink received
+// that name one of layerIDs. Filtering by the per-run layer IDs keeps a
+// default-tenant event another test publishes on the shared database out of
+// the count.
+func wtiChangedNaming(sink *notificationSink, layerIDs ...string) []recordedDelivery {
+	var out []recordedDelivery
+	for _, d := range sink.all() {
+		ev, _ := d.Body["event"].(string)
+		data, _ := d.Body["data"].(map[string]any)
+		if ev != "layer.config_changed" {
+			continue
+		}
+		line := registryEventLine{Event: ev, Data: data}
+		for _, id := range layerIDs {
+			if evNamesLayer(line, id) {
+				out = append(out, d)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// wtiReorder registers two user-defined layers as the caller the headers
+// name and reorders them, which publishes one layer.config_changed in the
+// caller's routed tenant. It returns the two layer IDs.
+func wtiReorder(t *testing.T, f *wtiFixture, as http.Header, who, prefix string) (string, string) {
+	t.Helper()
+	first, second := prefix+"-a-"+f.suffix, prefix+"-b-"+f.suffix
+	for _, id := range []string{first, second} {
+		evRegisterUserLayer(t, f.srv, as, id)
+	}
+	st, body := apiDoAs(t, http.MethodPost, f.srv.BaseURL+"/v1/layers/reorder", as,
+		map[string]any{"order": []string{second, first}})
+	apiWantStatus(t, st, http.StatusOK, who+" reorders the layers", body)
+	return first, second
+}
+
+// wtiWantOneChanged waits for the layer.config_changed naming layerIDs on
+// want, then watches other for evWindow, and asserts that want received
+// exactly one validly signed delivery and other received none.
+func wtiWantOneChanged(t *testing.T, f *wtiFixture, want, other *notificationSink, wantName, otherName string, layerIDs ...string) {
+	t.Helper()
+	deadline := time.Now().Add(evBound)
+	for len(wtiChangedNaming(want, layerIDs...)) == 0 && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+	}
+	// The window for the other sink starts after the receiving sink has the
+	// event, so a misrouted delivery fired alongside it has had the full
+	// window to land.
+	time.Sleep(evWindow)
+	if got := wtiChangedNaming(other, layerIDs...); len(got) != 0 {
+		t.Errorf("%s received %d layer.config_changed deliveries naming %v, want none: %+v", otherName, len(got), layerIDs, got)
+	}
+	changed := wtiChangedNaming(want, layerIDs...)
+	if len(changed) != 1 {
+		t.Fatalf("%s received %d layer.config_changed deliveries naming %v, want exactly 1: %+v\nlog:\n%s",
+			wantName, len(changed), layerIDs, changed, f.srv.log())
+	}
+	if !changed[0].SigValid {
+		t.Errorf("%s's layer.config_changed carries no valid X-Podium-Signature: %+v", wantName, changed[0])
 	}
 }
 
@@ -217,45 +289,24 @@ func TestWebhookReceivers_MultiTenantCRUDIsolation(t *testing.T) {
 
 // Spec: §7.3.2 — the registry delivers an event only to the receivers of the
 // tenant the event belongs to.
+// Spec: §7.3.1 — the layer endpoints act in the tenant §6.3.1 selects per
+// request, so a layer event belongs to the tenant whose layer it names.
 //
-// The multi-tenant binary publishes every layer event under the bootstrap
-// tenant, because the layer endpoint writes to the boot tenant, so the binary
-// can produce only that direction. The in-process suite in
-// pkg/registry/server covers an event of the other tenant. carol registers
-// personal layers, whose registration publishes no layer.config_changed, so
-// the reorder is the only layer.config_changed the run produces.
+// The test runs both directions on the binary. carol reorders two personal
+// layers in the bootstrap tenant, and only sink A receives that
+// layer.config_changed. bob then reorders two personal layers in
+// globex-<suffix>, and only sink B receives that one. Personal-layer
+// registration publishes layer.user_registered rather than
+// layer.config_changed, so each reorder is the only layer.config_changed that
+// names its layers. The deliveries are matched by the per-run layer IDs.
 func TestWebhookReceivers_MultiTenantDeliveryIsolation(t *testing.T) {
 	t.Parallel()
 	f := wtiSetup(t)
 
 	requireSubprocessTLSTrust(t)
-	first, second := "wti-a-"+f.suffix, "wti-b-"+f.suffix
-	for _, id := range []string{first, second} {
-		evRegisterUserLayer(t, f.srv, f.carolH(), id)
-	}
-	st, body := apiDoAs(t, http.MethodPost, f.srv.BaseURL+"/v1/layers/reorder", f.carolH(),
-		map[string]any{"order": []string{second, first}})
-	apiWantStatus(t, st, http.StatusOK, "carol reorders her layers", body)
+	carolA, carolB := wtiReorder(t, f, f.carolH(), "carol", "wti")
+	wtiWantOneChanged(t, f, f.sinkA, f.sinkB, "sink A (default receiver)", "sink B (globex receiver)", carolA, carolB)
 
-	if !f.sinkA.waitForEventType("layer.config_changed", evBound) {
-		t.Fatalf("sink A received no layer.config_changed within %s\nlog:\n%s", evBound, f.srv.log())
-	}
-	// The window for sink B starts after sink A has received the event, so a
-	// misrouted delivery fired alongside it has had the full window to land.
-	time.Sleep(evWindow)
-	if n := f.sinkB.count(); n != 0 {
-		t.Errorf("sink B (globex receiver) received %d deliveries, want none: %+v", n, f.sinkB.all())
-	}
-	var changed []recordedDelivery
-	for _, d := range f.sinkA.all() {
-		if d.Body["event"] == "layer.config_changed" {
-			changed = append(changed, d)
-		}
-	}
-	if len(changed) != 1 {
-		t.Fatalf("sink A received %d layer.config_changed deliveries, want exactly 1: %+v", len(changed), changed)
-	}
-	if !changed[0].SigValid {
-		t.Errorf("sink A's layer.config_changed carries no valid X-Podium-Signature: %+v", changed[0])
-	}
+	bobA, bobB := wtiReorder(t, f, f.bobH(), "bob", "wti-globex")
+	wtiWantOneChanged(t, f, f.sinkB, f.sinkA, "sink B (globex receiver)", "sink A (default receiver)", bobA, bobB)
 }

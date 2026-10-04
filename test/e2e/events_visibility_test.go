@@ -196,10 +196,10 @@ func TestEventStream_VisibilityChangeMidStream(t *testing.T) {
 // IMPLEMENTOR'S CHOICE (proposal 0042, TEST-3 case 3): the bootstrap-tenant
 // event is the layer.config_changed of a reorder of two user-defined layers
 // the per-run subject registers and owns. Registering a user-defined layer and
-// reordering it pass on the §7.3.1 owner arm, so the case needs no admin layer
-// write, which a multi-tenant registry refuses. The layers name a network git
-// repository under the reserved .invalid domain, so no operation resolves to
-// the file transport and no fetch is attempted. Each request's status is
+// reordering it pass on the §7.3.1 owner arm, so the case needs no admin grant
+// in the routed tenant, and the boot sets no bootstrap admin. The layers name
+// a network git repository under the reserved .invalid domain, so no
+// operation resolves to the file transport and no fetch is attempted. Each request's status is
 // asserted before any stream is read. The subject and the layer IDs carry a
 // per-run suffix, which keeps the per-owner layer cap and the shared database
 // from colliding across runs. The case needs no external tool. All three
@@ -265,8 +265,9 @@ func TestEventStream_MultiTenantRouting(t *testing.T) {
 // user-defined layer, and unregisters it when the test ends so the shared
 // database keeps no per-run layer. The body asserts user_defined so a caller
 // who holds the tenant admin grant also registers a personal layer, whose
-// registration publishes no layer.config_changed (§7.5.4).
-func evRegisterUserLayer(t *testing.T, srv *serverProc, as http.Header, id string) {
+// registration publishes no layer.config_changed (§7.5.4). It returns the
+// webhook_url the registration response advertises.
+func evRegisterUserLayer(t *testing.T, srv *serverProc, as http.Header, id string) string {
 	t.Helper()
 	st, body := apiDoAs(t, http.MethodPost, srv.BaseURL+"/v1/layers", as, map[string]any{
 		"id":           id,
@@ -280,6 +281,7 @@ func evRegisterUserLayer(t *testing.T, srv *serverProc, as http.Header, id strin
 		Layer struct {
 			UserDefined bool `json:"user_defined"`
 		} `json:"layer"`
+		WebhookURL string `json:"webhook_url"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil || !resp.Layer.UserDefined {
 		t.Fatalf("register %s did not store a user-defined layer (decode error %v)\nbody: %s", id, err, body)
@@ -289,4 +291,5 @@ func evRegisterUserLayer(t *testing.T, srv *serverProc, as http.Header, id strin
 			t.Logf("unregister %s: HTTP %d: %s", id, st, body)
 		}
 	})
+	return resp.WebhookURL
 }
