@@ -1,7 +1,7 @@
 # Proposal 0047: Route the §7.3.1 layer endpoints by the request's tenant on a multi-tenant registry
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-03), decided on the user's behalf under the overnight authorization. Signed off as staged. OQ-1: keep both webhook route forms as drafted (single-tenant URLs unchanged; the tenant-qualified form only on a multi-tenant registry), so no single-tenant operator re-registers. OQ-2: the existing §7.6 behavior stands and DOC-1(a) documents the stream-versus-list difference; a containment rule, if wanted, is a separate decision proposal. OQ-3: refuse erasure on a multi-tenant registry as staged; tenant-scoped audit records or a per-tenant audit sink is recorded as a follow-up.
+- Status: Applied to spec (2026-10-03). Approved on 2026-10-03 and decided on the user's behalf under the overnight authorization. Signed off as staged. OQ-1: keep both webhook route forms as drafted (single-tenant URLs unchanged; the tenant-qualified form only on a multi-tenant registry), so no single-tenant operator re-registers. OQ-2: the existing §7.6 behavior stands and DOC-1(a) documents the stream-versus-list difference; a containment rule, if wanted, is a separate decision proposal. OQ-3: refuse erasure on a multi-tenant registry as staged; tenant-scoped audit records or a per-tenant audit sink is recorded as a follow-up.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
