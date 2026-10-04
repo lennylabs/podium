@@ -1,7 +1,7 @@
 # Proposal 0049: Charge each §7.6.2 bulk-load item against the materialization rate, and resolve the user-layer cap tenant-first
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-03), decided on the user's behalf under the overnight authorization. Signed off as staged. OQ-1: keep the staged behavior (the user-layer cap reads the tenant record on both deployment modes, D10); ignoring it on single-tenant would add plumbing and tests and make GET /v1/quota's stored max_user_layers differ from the enforced value, while the stale-record edge case is documented in SPEC-3(b), DOC-1(d), and CL-1.
+- Status: Applied to spec (2026-10-03). The proposal was approved on the same date, decided on the user's behalf under the overnight authorization, and signed off as staged. OQ-1: keep the staged behavior (the user-layer cap reads the tenant record on both deployment modes, D10); ignoring it on single-tenant would add plumbing and tests and make GET /v1/quota's stored max_user_layers differ from the enforced value, while the stale-record edge case is documented in SPEC-3(b), DOC-1(d), and CL-1.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
