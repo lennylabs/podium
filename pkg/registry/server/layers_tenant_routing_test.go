@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -186,11 +187,11 @@ type trPoisonSnapshot struct {
 }
 
 // newTenantRoutingFixture builds the multi-tenant endpoint over the poisoned
-// boot tenant, mounted as serverboot mounts it: the layer routes through
-// TenantRouted, erasure and the inbound webhook unwrapped, the posture read
+// boot tenant, mounted as serverboot mounts it: the layer routes and erasure
+// through TenantRouted, the inbound webhook unwrapped, the posture read
 // through TenantRoutedNoReject, and the meta-tool routes through Handler.
 //
-// Spec: §6.3.1, §7.3.1 (Tenant selection)
+// Spec: §6.3.1, §7.3.1 (Tenant selection), §8.5
 func newTenantRoutingFixture(t *testing.T, opts trOptions) *trFixture {
 	t.Helper()
 	f := &trFixture{st: &trCountingStore{Memory: store.NewMemory()}}
@@ -305,7 +306,7 @@ func (f *trFixture) build(t *testing.T, opts trOptions) {
 	mux := http.NewServeMux()
 	mux.Handle("/v1/layers", f.srv.TenantRouted(layers))
 	mux.Handle("/v1/layers/", f.srv.TenantRouted(layers))
-	mux.Handle("/v1/admin/erase", f.ep.EraseHandler())
+	mux.Handle("/v1/admin/erase", f.srv.TenantRouted(f.ep.EraseHandler()))
 	mux.Handle("/v1/ingest/webhook/", f.ep.WebhookHandler())
 	mux.Handle(PathWebUISession, f.srv.TenantRoutedNoReject(SessionPosture{
 		Identity: trPostureIdentity, Capabilities: f.ep.Capabilities,
@@ -649,11 +650,13 @@ func (f *trFixture) writeSequence(t *testing.T, c trCaller, prefix string, first
 	f.expect(t, c, http.MethodPost, "/v1/layers/reingest?id="+two, nil, http.StatusOK, "")
 }
 
-// Spec: §6.3.1 / §7.3.1 / §8.5 — Case 2: every layer write a routed caller
-// issues acts in its own tenant, and erasure on a multi-tenant registry is
-// refused for every caller before the admin gate, any store access, and any
-// audit rewrite.
-func TestLayerTenantRouting_RoutedWritesAndEraseRefusal(t *testing.T) {
+// Spec: §6.3.1 / §7.3.1 / §8.5 / §4.7.2 — Case 2: every layer write a routed
+// caller issues acts in its own tenant. An erasure acts in the routed tenant
+// alone: the admin check reads that tenant's grants, the purge reaches that
+// tenant's layers, and the redaction reaches that tenant's audit records. A
+// request that resolves to no tenant is refused before the admin check, any
+// store access, and any audit rewrite.
+func TestLayerTenantRouting_RoutedWritesAndErase(t *testing.T) {
 	t.Parallel()
 	seeds := []store.LayerConfig{
 		trUserLayer(trTenantA, "carol-1", trCarol.user, 10),
@@ -700,54 +703,83 @@ func TestLayerTenantRouting_RoutedWritesAndEraseRefusal(t *testing.T) {
 		}
 	})
 
-	// The erased user owns layers in A and B, so a refused erase that ran in
-	// either tenant would purge a row the assertions read.
+	// The erased user owns layers in A and B, so an erase that ran in the
+	// wrong tenant, or a refused erase that ran at all, changes a row the
+	// assertions read.
 	eraseSeeds := append(slices.Clone(seeds), trUserLayer(trTenantB, "carol-b", trCarol.user, 50))
-	t.Run("erase refused for a B admin", func(t *testing.T) {
+	t.Run("B admin erase purges only carol-b", func(t *testing.T) {
 		g := newTenantRoutingFixture(t, trOptions{grants: map[string][]string{trTenantB: {trDave.user}}, layers: eraseSeeds})
-		g.assertEraseRefused(t, trDave, trCarol.user)
+		g.assertScopedErase(t, trDave, trCarol.user)
 	})
-	t.Run("erase refused under an always-admit callback", func(t *testing.T) {
+	// §4.7.2: the admin check runs in the routed tenant, so a grant held in
+	// another tenant, or in the boot tenant P that trSeedPoison grants to every
+	// subject, does not admit the caller. An admin check evaluated against the
+	// bound tenant or an unrouted context would admit olivia here.
+	t.Run("erase refused for a caller who is admin only in another tenant", func(t *testing.T) {
+		g := newTenantRoutingFixture(t, trOptions{grants: map[string][]string{trTenantB: {trOliviaB.user}}, layers: eraseSeeds})
+		g.assertEraseRefusedByAdminCheck(t, trOliviaA, trCarol.user)
+	})
+	t.Run("erase refused for a caller who is admin only in the boot tenant", func(t *testing.T) {
+		g := newTenantRoutingFixture(t, trOptions{layers: eraseSeeds})
+		g.assertEraseRefusedByAdminCheck(t, trOliviaA, trCarol.user)
+	})
+	// erin carries no organization and stays unrouted. An always-admit
+	// callback does not override the requireTenant refusal, which runs before
+	// the callback is consulted.
+	t.Run("erase refused for an unrouted caller under an always-admit callback", func(t *testing.T) {
 		g := newTenantRoutingFixture(t, trOptions{alwaysAdmit: true, layers: eraseSeeds})
-		g.assertEraseRefused(t, trDave, trCarol.user)
+		g.assertEraseRefused(t, trErin, trCarol.user)
 	})
 
+	// §6.3.1: a rejecting provider answers an organization that names no
+	// provisioned tenant with 401 auth.tenant_unknown before the handler runs.
 	t.Run("erase refused for an unknown org under a rejecting provider", func(t *testing.T) {
 		g := newTenantRoutingFixture(t, trOptions{rejectUnknown: true, alwaysAdmit: true, layers: seeds})
 		logBefore := trReadFile(t, g.auditPath)
+		rowsA := trTenantRows(t, g.st, trTenantA)
 		g.expect(t, trFrank, http.MethodPost, "/v1/admin/erase",
-			map[string]any{"user_id": trCarol.user, "salt": "s"}, http.StatusForbidden, "auth.forbidden")
+			map[string]any{"user_id": trCarol.user, "salt": "s"}, http.StatusUnauthorized, "auth.tenant_unknown")
 		if !bytes.Equal(logBefore, trReadFile(t, g.auditPath)) {
 			t.Errorf("refused erase rewrote the audit file")
 		}
 		if n := g.st.writes.Load(); n != 0 {
 			t.Errorf("refused erase wrote %d layer rows", n)
 		}
+		if !reflect.DeepEqual(rowsA, trTenantRows(t, g.st, trTenantA)) {
+			t.Errorf("refused erase changed A's rows")
+		}
 	})
 
 	t.Run("single-tenant erase control", trSingleTenantEraseControl)
 }
 
-// assertEraseRefused sends an erase of user as caller and checks the case 2
-// refusal: 403 auth.forbidden with no admin-callback call, the user's A and B
-// layers still live, every A and B row unchanged, and a byte-identical audit
-// file.
+// assertEraseRefused sends an erase of user as caller and checks the
+// unrouted refusal: 403 auth.forbidden with no admin-callback call, the
+// user's A and B layers still live, every A and B row unchanged, and a
+// byte-identical audit file.
 //
 // Spec: §8.5, §6.3.1
 func (f *trFixture) assertEraseRefused(t *testing.T, caller trCaller, user string) {
 	t.Helper()
-	owned := func() []string {
-		var ids []string
-		for _, tenantID := range []string{trTenantA, trTenantB} {
-			for _, lc := range trTenantRows(t, f.st, tenantID)[0] {
-				if lc.Owner == user {
-					ids = append(ids, tenantID+"/"+lc.ID)
-				}
-			}
-		}
-		return ids
-	}
-	ownedBefore := owned()
+	f.assertEraseRefusedAfter(t, caller, user, 0)
+}
+
+// assertEraseRefusedByAdminCheck is the routed counterpart of
+// assertEraseRefused: the request reaches the routed tenant, the admin
+// callback runs exactly once and refuses, and nothing changes.
+//
+// Spec: §8.5, §4.7.2
+func (f *trFixture) assertEraseRefusedByAdminCheck(t *testing.T, caller trCaller, user string) {
+	t.Helper()
+	f.assertEraseRefusedAfter(t, caller, user, 1)
+}
+
+// assertEraseRefusedAfter sends an erase of user as caller, expects 403
+// auth.forbidden after wantAdminCalls admin-callback calls, and checks that
+// the user's layers, the A and B rows, and the audit file are unchanged.
+func (f *trFixture) assertEraseRefusedAfter(t *testing.T, caller trCaller, user string, wantAdminCalls int64) {
+	t.Helper()
+	ownedBefore := f.ownedLayers(t, user)
 	if !slices.Contains(ownedBefore, trTenantA+"/carol-1") || !slices.Contains(ownedBefore, trTenantB+"/carol-b") {
 		t.Fatalf("erase target %s owns %v, want layers in both A and B", user, ownedBefore)
 	}
@@ -756,10 +788,10 @@ func (f *trFixture) assertEraseRefused(t *testing.T, caller trCaller, user strin
 	f.adminCalls.Store(0)
 	f.expect(t, caller, http.MethodPost, "/v1/admin/erase",
 		map[string]any{"user_id": user, "salt": "s"}, http.StatusForbidden, "auth.forbidden")
-	if n := f.adminCalls.Load(); n != 0 {
-		t.Errorf("admin callback ran %d times on a refused erase", n)
+	if n := f.adminCalls.Load(); n != wantAdminCalls {
+		t.Errorf("admin callback ran %d times on a refused erase, want %d", n, wantAdminCalls)
 	}
-	if after := owned(); !slices.Equal(ownedBefore, after) {
+	if after := f.ownedLayers(t, user); !slices.Equal(ownedBefore, after) {
 		t.Errorf("refused erase changed %s's layers: before %v, after %v", user, ownedBefore, after)
 	}
 	if !reflect.DeepEqual(rowsA, trTenantRows(t, f.st, trTenantA)) || !reflect.DeepEqual(rowsB, trTenantRows(t, f.st, trTenantB)) {
@@ -770,10 +802,124 @@ func (f *trFixture) assertEraseRefused(t *testing.T, caller trCaller, user strin
 	}
 }
 
+// ownedLayers returns the tenant-qualified IDs of user's live layers in A
+// and B.
+func (f *trFixture) ownedLayers(t *testing.T, user string) []string {
+	t.Helper()
+	var ids []string
+	for _, tenantID := range []string{trTenantA, trTenantB} {
+		for _, lc := range trTenantRows(t, f.st, tenantID)[0] {
+			if lc.Owner == user {
+				ids = append(ids, tenantID+"/"+lc.ID)
+			}
+		}
+	}
+	return ids
+}
+
+// assertScopedErase seeds one record of user labeled A, one labeled B, and
+// one unlabeled, has caller (routed to B and admin there) erase user, and
+// checks the §8.5 tenant scope: only B's layer is purged, A's rows are
+// unchanged, B's records lose user, A's and the unlabeled records are
+// unchanged apart from hash and prev_hash, and user.erased names B and the
+// caller over a chain that verifies.
+//
+// Spec: §8.5, §8.6, §8.1
+func (f *trFixture) assertScopedErase(t *testing.T, caller trCaller, user string) {
+	t.Helper()
+	ctx := context.Background()
+	for _, tenant := range []string{trTenantA, trTenantB, ""} {
+		trMust(t, f.ep.auditFile.Append(ctx, audit.Event{Type: audit.EventArtifactLoaded,
+			Caller: user, Target: "skill/x", Tenant: tenant, Timestamp: time.Now().UTC()}))
+	}
+	before := trAuditRecords(t, f.auditPath)
+	rowsA := trTenantRows(t, f.st, trTenantA)
+	data := f.expect(t, caller, http.MethodPost, "/v1/admin/erase",
+		map[string]any{"user_id": user, "salt": "s"}, http.StatusOK, "")
+	var resp struct {
+		Purged   []string `json:"layers_purged"`
+		Redacted int      `json:"audit_events_redacted"`
+	}
+	trMust(t, json.Unmarshal(data, &resp))
+	// The B-labeled seed and the layer.user_registered record of the purge.
+	if !slices.Equal(resp.Purged, []string{"carol-b"}) || resp.Redacted != 2 {
+		t.Errorf("erase = %+v, want carol-b purged and 2 records redacted", resp)
+	}
+	if !reflect.DeepEqual(rowsA, trTenantRows(t, f.st, trTenantA)) {
+		t.Errorf("B's erase changed A's rows")
+	}
+	if gone := trStoredIDs(t, f.st, trTenantB, true); !slices.Contains(gone, "carol-b") {
+		t.Errorf("carol-b is not tombstoned in B: %v", gone)
+	}
+	after := trAuditRecords(t, f.auditPath)
+	trAssertRecordsScoped(t, before, after, trTenantB, user)
+	erased := after[len(after)-1]
+	if erased["type"] != string(audit.EventUserErased) || erased["tenant"] != trTenantB ||
+		erased["caller"].(map[string]any)["identity"] != caller.user {
+		t.Errorf("last record = %v, want user.erased in %s by %s", erased, trTenantB, caller.user)
+	}
+	verify, err := audit.NewFileSink(f.auditPath)
+	trMust(t, err)
+	if err := verify.Verify(ctx); err != nil {
+		t.Errorf("Verify after erase: %v", err)
+	}
+}
+
+// trAssertRecordsScoped compares the records an erase started from with the
+// rewritten file: a record labeled tenant no longer names user, and every
+// other record is unchanged apart from its chain fields. The records the
+// erase appended carry tenant and no longer name user.
+func trAssertRecordsScoped(t *testing.T, before, after []map[string]any, tenant, user string) {
+	t.Helper()
+	if len(after) < len(before) {
+		t.Fatalf("erase dropped records: %d before, %d after", len(before), len(after))
+	}
+	for i, rec := range after {
+		enc, err := json.Marshal(rec)
+		trMust(t, err)
+		named := bytes.Contains(enc, []byte(user))
+		if i >= len(before) || rec["tenant"] == tenant {
+			if named || rec["tenant"] != tenant {
+				t.Errorf("record %d in the erased tenant: %s", i, enc)
+			}
+			continue
+		}
+		if !reflect.DeepEqual(trWithoutChain(before[i]), trWithoutChain(rec)) {
+			t.Errorf("record %d outside %s changed:\nbefore %v\nafter  %v", i, tenant, before[i], rec)
+		}
+	}
+}
+
+// trAuditRecords parses every line of the audit file at path.
+func trAuditRecords(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	var recs []map[string]any
+	for _, line := range bytes.Split(bytes.TrimSpace(trReadFile(t, path)), []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal(line, &rec); err != nil {
+			t.Fatalf("parse audit line %s: %v", line, err)
+		}
+		recs = append(recs, rec)
+	}
+	return recs
+}
+
+// trWithoutChain returns rec without the hash and prev_hash keys, which a
+// chain rewrite recomputes on every record after the first change.
+func trWithoutChain(rec map[string]any) map[string]any {
+	out := maps.Clone(rec)
+	delete(out, "hash")
+	delete(out, "prev_hash")
+	return out
+}
+
 // trSingleTenantEraseControl is the control for case 2: a router-less endpoint
-// without WithTenantRouting, bound to an ordinary tenant S, erases the user's
-// layers and redacts its audit file, so the multi-tenant refusal reads the
-// endpoint's routing mode alone.
+// without WithTenantRouting, bound to an ordinary tenant S, acts in S with no
+// routed tenant, erases the user's layers, and redacts its audit file, so the
+// unrouted refusal reads the endpoint's routing mode alone.
 //
 // Spec: §8.5
 func trSingleTenantEraseControl(t *testing.T) {
@@ -968,7 +1114,10 @@ func TestLayerTenantRouting_CredentialFailure(t *testing.T) {
 }
 
 // trUnroutedWrites is every layer write plus erasure, aimed at layers A holds
-// so a write that fell through to a tenant would find its target.
+// so a write that fell through to a tenant would find its target. The erase
+// row pins the requireTenant-before-authAdmin order: an unrouted erase is
+// refused with no admin call and no store write, so a callback that admits
+// every caller never reaches the tenant-scoped purge (§8.5, §6.3.1).
 var trUnroutedWrites = []struct {
 	name, method, path string
 	body               any
@@ -1103,6 +1252,9 @@ func TestLayerTenantRouting_NoRouter(t *testing.T) {
 	f.expect(t, trDave, http.MethodPost, "/v1/layers",
 		map[string]any{"id": "dave-x", "source_type": "git", "repo": trRepo(trTenantB, "dave-x")},
 		http.StatusForbidden, "auth.forbidden")
+	// With no router the request carries no routed tenant even though dave's
+	// organization names B, so requireTenant refuses the erase before the
+	// admin callback, which admits every caller here, and before any write.
 	f.expect(t, trDave, http.MethodPost, "/v1/admin/erase",
 		map[string]any{"user_id": trDave.user, "salt": "s"}, http.StatusForbidden, "auth.forbidden")
 	assertEmpty()
