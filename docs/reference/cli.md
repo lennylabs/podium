@@ -423,7 +423,7 @@ podium layer register --id <id> --local <path>
                       [--group <oidc-group>]... [--user <oidc-sub-or-email>]...
 ```
 
-For Git sources, the registry returns the webhook URL and HMAC secret to configure on the source repo. Without webhook configuration, the layer stays at its initial commit until the first manual reingest.
+For Git sources, the registry returns the webhook URL and HMAC secret to configure on the source repo. On a multi-tenant registry the webhook URL carries the tenant ID, `/v1/ingest/webhook/<tenant-id>/<layer-id>`. Without webhook configuration, the layer stays at its initial commit until the first manual reingest.
 
 `--local` names a filesystem path on the registry host and requires the per-tenant `admin` role. A caller without it is rejected with `auth.forbidden` carrying `details.constraint: "local_source"`. A `--repo` value that resolves to the Git file transport also names a host path and takes the same arm. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits the registration.
 
@@ -689,7 +689,7 @@ There is no SCIM sync command. SCIM is a server-side push from the identity prov
 
 ### `podium admin erase`
 
-GDPR right-to-erasure. The user identity is positional and `--salt` is required (an empty salt yields a guessable tombstone). The default form calls the registry, which unregisters and purges the user's owned layers and redacts the registry audit stream; the authenticated session identifies the invoking admin.
+GDPR right-to-erasure. The user identity is positional and `--salt` is required (an empty salt yields a guessable tombstone). The default form calls the registry, which unregisters and purges the user's owned layers and redacts the registry audit stream; the authenticated session identifies the invoking admin. On a registry started with `PODIUM_MULTI_TENANT=true`, the registry form is refused with `auth.forbidden` for every caller, including a caller whose verified organization names no provisioned tenant, and changes nothing, because the registry keeps one audit file for every tenant.
 
 ```
 podium admin erase <user-id> --salt <salt> --registry <url>

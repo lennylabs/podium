@@ -107,6 +107,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Layer endpoints act in the caller's tenant on a multi-tenant registry**
+  (§6.3.1, §7.3.1, §7.3.4): on a registry started with
+  `PODIUM_MULTI_TENANT=true`, the layer-management endpoints under `/v1/layers`
+  read and write the layer list of the tenant §6.3.1 selects for the request,
+  and they check the §4.7.2 admin role, apply the user-defined layer cap, and
+  scope the change events they publish to that tenant. The
+  `layer_capabilities.manage_any_layer` member of `GET /v1/ui/session` reports
+  the admin role in the same tenant. Previously these endpoints read and wrote
+  the default tenant's layers for every caller and checked the admin role
+  against the unrouted tenant, so on a registry with an identity provider
+  configured and public mode off every admin layer operation was refused,
+  including those of bootstrap admins, and an admin's registration was stored as
+  a user-defined layer. Layer rows that routed callers registered on a
+  multi-tenant registry before this release remain in the default tenant; to
+  move one, register it again from the owning tenant and have an admin of the
+  default tenant unregister the stale row, because the owner's requests no
+  longer reach the default tenant.
+- **A layer request that resolves to no tenant is refused on a multi-tenant
+  registry** (§7.3.1): a request the registry rejects on its other endpoints
+  with `401 auth.tenant_unknown`, because its verified organization names no
+  provisioned tenant, receives the same rejection on the layer endpoints. Any
+  other request that resolves to no tenant lists no layers, is refused with
+  `403 auth.forbidden` on every layer write, and reads `manage_any_layer` as
+  false, including on a registry started in public mode or with no identity
+  provider configured.
 - **Webhook receivers are keyed per tenant** (§7.3.2): receiver CRUD reads and
   writes only the receivers of the tenant the request resolves to, and the
   registry delivers each event only to the receivers of the event's tenant.
@@ -214,6 +239,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **The inbound webhook URL carries the layer's tenant ID on a multi-tenant
+  registry** (§7.3.1): on a multi-tenant registry, `podium layer register`
+  returns `/v1/ingest/webhook/{tenant-id}/{layer-id}`, and the
+  `/v1/ingest/webhook/{layer-id}` route is not served. Re-register the webhook
+  URL on the source repository for every Git layer on a multi-tenant registry,
+  default-tenant layers included; the default tenant's segment is its tenant ID.
+  Single-tenant registries keep `/v1/ingest/webhook/{layer-id}`.
+- **`POST /v1/admin/erase` is refused on a multi-tenant registry** (§8.5,
+  §4.7.1): on a registry started with `PODIUM_MULTI_TENANT=true`, erasure
+  answers `403 auth.forbidden` for every caller, including a caller whose
+  verified organization names no provisioned tenant, and changes nothing,
+  because the registry keeps one audit file for every tenant and a redaction
+  would rewrite other tenants' records. A registry with an identity provider
+  configured and public mode off already refused it; a registry in public mode
+  or with no identity provider configured previously admitted it and redacted
+  every tenant's records. Single-tenant registries are unchanged.
 - **Persisted webhook receivers must be registered again** (§7.3.2): a
   `PODIUM_WEBHOOK_STORE_PATH` file written by an earlier release keys every
   receiver under `default`. That key matches no tenant ID, including the
@@ -917,6 +958,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Documentation
 
+- HTTP API reference: layer tenant selection, the tenant-qualified webhook
+  route, the multi-tenant erasure refusal, the per-tenant `manage_any_layer`
+  posture member, and the change-event stream's delivery of public-layer events
+  to a caller with no verified subject.
+- Deployment pages: the per-tenant layer model, the tenant-qualified webhook
+  URL, the pre-release layer rows left in the default tenant, and the
+  deployment-wide audit-volume budget on a multi-tenant registry.
 - **Embedding-model switch on managed vector backends** (§4.7): per-row model
   versioning, query-time model filtering, and the stale-row purge apply to the
   collocated stores, pgvector and sqlite-vec. The vector-backends page gives the

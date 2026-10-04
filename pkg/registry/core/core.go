@@ -204,9 +204,13 @@ func ContextWithTenant(ctx context.Context, tenantID string) context.Context {
 	return context.WithValue(ctx, tenantCtxKey{}, tenantID)
 }
 
-// tenantFromContext recovers the per-request tenant, reporting false when none
-// is set.
-func tenantFromContext(ctx context.Context) (string, bool) {
+// TenantFromContext recovers the per-request tenant ContextWithTenant attached,
+// reporting false when none is set. The §7.3.1 layer endpoints read it to tell
+// a routed request from an unrouted one on a multi-tenant registry, where
+// TenantFor's fallback to the bound tenant would hide the difference.
+//
+// Spec: §6.3.1
+func TenantFromContext(ctx context.Context) (string, bool) {
 	t, ok := ctx.Value(tenantCtxKey{}).(string)
 	return t, ok && t != ""
 }
@@ -215,7 +219,7 @@ func tenantFromContext(ctx context.Context) (string, bool) {
 // tenant carried on the context (multi-tenant routing, §6.3.1) when present,
 // otherwise the registry's bound tenant (the single-tenant default).
 func (r *Registry) TenantFor(ctx context.Context) string {
-	if t, ok := tenantFromContext(ctx); ok {
+	if t, ok := TenantFromContext(ctx); ok {
 		return t
 	}
 	return r.tenantID
