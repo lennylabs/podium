@@ -249,6 +249,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   reingest. `GET /v1/quota` now reports the search QPS, materialization rate,
   and audit-volume limits the registry enforces.
 
+- **The bulk load is charged against the materialization rate** (§7.6.2,
+  §4.7.8): each item of `POST /v1/artifacts:batchLoad` (`Client.load_artifacts`,
+  `loadArtifacts`) now counts as one load against the materialization rate of
+  the request's tenant, the budget `load_artifact` draws on. When the rate
+  refuses an item, that item and every later item in the request come back as
+  per-item `quota.materialize_rate_exceeded` errors with `retryable: true`, and
+  the batch status stays 200. Previously the bulk load charged nothing, so a
+  caller that `load_artifact` refused could keep loading through it. A client
+  that loads above its tenant's rate now receives these per-item errors; back
+  off and retry the refused items, or raise the tenant's `materialize_rate`.
+
 ### Changed
 
 - **The inbound webhook URL carries the layer's tenant ID on a multi-tenant
@@ -933,6 +944,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   record's values for these budgets. On a multi-tenant registry, requests that
   resolve to no tenant share one budget at the deployment defaults.
 
+- On a multi-tenant registry, a tenant's positive `max_user_layers` is now
+  enforced ahead of `PODIUM_MAX_USER_LAYERS` (§4.7.8, §7.3.1), in the same order
+  as the search QPS, materialization rate, and audit-volume budgets.
+  `PODIUM_MAX_USER_LAYERS` applies to every tenant whose value is zero, and a
+  negative tenant value disables the cap. A deployment that relied on the
+  variable to override larger tenant values sets those tenants'
+  `max_user_layers` to 0, or to the intended cap, with `podium admin tenant
+  update`. A single-tenant registry still reads its stored tenant record for
+  this cap, unlike the three rate budgets. When that record holds a non-zero
+  `max_user_layers`, the record's value now applies ahead of
+  `PODIUM_MAX_USER_LAYERS`. `/v1/admin/tenants` is unavailable on a
+  single-tenant registry, so the operator cannot change that value there.
+
 ### Removed
 
 - **`PODIUM_SIGNATURE_KEY_ID`** (§4.7.9, §6.2): `podium-mcp` and
@@ -1050,6 +1074,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   environment-variable table), `docs/reference/error-codes.md`, and
   `docs/deployment/clustered.md` follow, and the `podium admin tenant` flag help
   in `cmd/podium/admin_tenant.go` states the same zero and negative rule.
+
+- §7.6.2 states how each bulk-load item is charged and reported, §4.7.8 names
+  the bulk load as a materialization charge site and states the user-layer cap
+  order, and §13.12 documents `PODIUM_MAX_USER_LAYERS` and states in the
+  `PODIUM_QUOTA_MATERIALIZE_RATE` row that an over-limit bulk-load item is
+  reported inside the batch's 200 response. `docs/reference/http-api.md`,
+  `docs/consuming/custom-via-sdk.md`, `docs/reference/error-codes.md`,
+  `docs/reference/cli.md` (the `--max-user-layers` row, the
+  `PODIUM_QUOTA_MATERIALIZE_RATE` environment row, and the new
+  `PODIUM_MAX_USER_LAYERS` environment row), and `docs/deployment/clustered.md`
+  follow, and the `podium admin tenant` flag help states the cap's zero and
+  negative rule.
 
 ## [0.4.0] - 2026-09-05
 
