@@ -17,7 +17,7 @@ import (
 
 func strReader(s string) io.Reader { return strings.NewReader(s) }
 
-func TestServerOptions_WithObjectStoreAndTenant(t *testing.T) {
+func TestServerOptions_WithObjectStore(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
@@ -26,7 +26,6 @@ func TestServerOptions_WithObjectStoreAndTenant(t *testing.T) {
 	srv := server.New(
 		core.New(st, "default", nil),
 		server.WithObjectStore(objectstore.NewMemory(), "https://example.test", 0),
-		server.WithTenant("default"),
 	)
 	if srv == nil {
 		t.Fatal("New returned nil")

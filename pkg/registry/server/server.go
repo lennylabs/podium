@@ -91,11 +91,6 @@ type Server struct {
 	// scim is the §6.3.1 SCIM 2.0 receiver. When set, the registry
 	// mounts /scim/v2/ to accept user/group push from an IdP.
 	scim *scim.Handler
-	// tenant is the key the §4.7.8 quota limiter charges search and
-	// materialize calls to. Webhook receivers do not read it: receiver CRUD
-	// keys on the request's routed tenant and delivery on the event's scope
-	// tenant (§7.3.2).
-	tenant string
 	// quota is the §4.7.8 rate limiter. When non-nil, search /
 	// load_artifact handlers consult it before doing real work.
 	quota *QuotaLimiter
@@ -268,11 +263,6 @@ func WithWebhooks(w *webhook.Worker) Option {
 	return func(s *Server) { s.webhooks = w }
 }
 
-// WithTenant sets the key the §4.7.8 quota limiter charges.
-func WithTenant(t string) Option {
-	return func(s *Server) { s.tenant = t }
-}
-
 // WithAudit installs the §8.3 audit sink used to record HTTP-boundary
 // events (admin.granted). The same sink backs the core read-event emitter
 // so both streams stay on one §8.6 hash chain.
@@ -282,7 +272,7 @@ func WithAudit(sink audit.Sink) Option {
 
 // New returns a Server backed by the given core.Registry.
 func New(r *core.Registry, opts ...Option) *Server {
-	s := &Server{core: r, events: newEventBus(), tenant: "default"}
+	s := &Server{core: r, events: newEventBus()}
 	for _, opt := range opts {
 		opt(s)
 	}
