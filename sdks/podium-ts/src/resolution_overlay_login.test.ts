@@ -16,6 +16,9 @@ import {
 } from "./index.js";
 import { resolveRegistry } from "./config.js";
 import { LocalOverlay, rrfFuse } from "./overlay.js";
+import { isolateVerification } from "./test_support.js";
+
+isolateVerification();
 
 async function writeFileAt(path: string, body: string): Promise<void> {
   await mkdir(join(path, ".."), { recursive: true });
@@ -113,6 +116,9 @@ describe("overlay merge", () => {
     expect(res.total_matched).toBe(2);
   });
 
+  // Spec: §4.7.10 — a §6.4 overlay load is exempt from the delivery check: it
+  // succeeds under a client whose §4.7.9 resolution would refuse, because it
+  // neither resolves the policy nor contacts the registry.
   it("resolves an overlay artifact ahead of the registry", async () => {
     const overlay = join(dir, "overlay");
     await overlayArtifact(overlay, "drafts/my-prompt", { body: "overlay body" });
@@ -121,7 +127,7 @@ describe("overlay merge", () => {
       hitNetwork = true;
       return new Response("{}", { status: 200 });
     };
-    const c = new Client({ registry: "http://reg", overlayPath: overlay, fetcher });
+    const c = new Client({ registry: "http://reg", overlayPath: overlay, fetcher, verifyKeys: "not-base64" });
     const art = await c.loadArtifact("drafts/my-prompt");
     expect(art.id).toBe("drafts/my-prompt");
     expect(art.manifest_body).toContain("overlay body");
@@ -130,6 +136,7 @@ describe("overlay merge", () => {
     expect(art.delivery_hash).toBeUndefined();
     expect(art.delivery_signature).toBeUndefined();
     expect(hitNetwork).toBe(false);
+    expect(c.verifySignatures).toBeUndefined();
   });
 
   // the overlay search honors the `scope` prefix filter so a scoped
@@ -400,9 +407,14 @@ describe("login device-code flow", () => {
   // Spec: §6.3
   it("login reports expired when the code expires before the timeout", async () => {
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    vi.useFakeTimers();
     const stub = oauthStub({ tokenReplies: ["pending"], interval: 1, expiresIn: 3 });
-    const p = settle(client(stub).login({ timeoutMs: 600_000 }));
+    const c = client(stub);
+    // The first registry request awaits the §4.7.9 resolution, which reads the
+    // filesystem; settle it before the clock is faked so the poll timers are
+    // scheduled inside the advanced window.
+    await c.searchArtifacts("settle");
+    vi.useFakeTimers();
+    const p = settle(c.login({ timeoutMs: 600_000 }));
     await vi.advanceTimersByTimeAsync(5_000);
     expectReason(await p, "expired");
     expect(stub.tokenRequests.length).toBeGreaterThan(0);

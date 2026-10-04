@@ -9,6 +9,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { Client, type LoadDomainNotable, type LoadDomainResult } from "./index.js";
+import { isolateVerification } from "./test_support.js";
+
+// load_domain is a registry request, so it resolves the §4.7.9 policy first.
+isolateVerification();
 
 // overlayArtifact writes one overlay ARTIFACT.md package at the canonical id.
 async function overlayArtifact(
