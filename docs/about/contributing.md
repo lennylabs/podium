@@ -58,7 +58,7 @@ The SDK suites run independently:
 
 ```bash
 cd sdks/podium-py
-pip install -e .
+pip install -e '.[verify]'
 pip install pytest
 pytest
 

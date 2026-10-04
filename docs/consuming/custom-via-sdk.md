@@ -10,7 +10,7 @@ Programmatic consumers (LangChain, Bedrock, OpenAI Assistants, custom orchestrat
 
 | SDK | Install | Import | Use for |
 |:--|:--|:--|:--|
-| `podium-py` | `pip install podium-sdk` | `from podium import …` | Python orchestrators, LangChain consumers, OpenAI Assistants integrations, build/eval pipelines, notebooks. |
+| `podium-py` | `pip install 'podium-sdk[verify]'` | `from podium import …` | Python orchestrators, LangChain consumers, OpenAI Assistants integrations, build/eval pipelines, notebooks. |
 | `podium-ts` | `npm install @lennylabs/podium-sdk` | `import { Client } from "@lennylabs/podium-sdk"` | TypeScript / Node orchestrators, Bedrock Agents, custom Node-based agent runtimes, Edge runtime integrations. |
 
 **The SDKs require a Podium server.** They speak HTTP and don't work against a filesystem-source registry. A consumer reading a filesystem-source registry uses `podium sync` directly.
@@ -25,9 +25,11 @@ from podium import Client
 # from_env reads PODIUM_REGISTRY (falling back to defaults.registry in the
 # workspace .podium/sync.local.yaml, the workspace .podium/sync.yaml, then
 # ~/.podium/sync.yaml), PODIUM_IDENTITY_PROVIDER, PODIUM_OVERLAY_PATH,
-# PODIUM_SESSION_TOKEN, and PODIUM_CACHE_MODE. The direct constructor below
-# reads no environment variable except PODIUM_OVERLAY_PATH, which an explicit
-# overlay_path argument overrides.
+# PODIUM_SESSION_TOKEN, PODIUM_CACHE_MODE, PODIUM_VERIFY_SIGNATURES,
+# PODIUM_SIGNATURE_VERIFY_KEY, and PODIUM_SIGN_KEY_PATH. The direct constructor
+# below reads PODIUM_OVERLAY_PATH, which an explicit overlay_path argument
+# overrides, and also resolves the signature policy and key material, which
+# the verify_signatures and verify_keys arguments override.
 client = Client.from_env()
 
 # Or pass explicitly:
@@ -123,6 +125,41 @@ for result in artifacts:
 Hard cap: 50 IDs per batch. The SDK splits larger sets transparently. Visibility is identical to `load_artifact`: items the caller can't see come back as `status: "error"` with `visibility.denied` (no leak about whether the artifact exists in some hidden layer). Partial failure does not fail the batch; each item carries its own status. Each item counts as one load against the tenant's materialization rate. An item the rate refuses, and every item after it in the same request, comes back as `status: "error"` with `quota.materialize_rate_exceeded`, and its error carries `retryable: true`. The SDK still posts the remaining 50-ID chunks after a refusal, and their items are charged and reported on their own.
 
 The bulk endpoint is not exposed as an MCP meta-tool: bulk loading is a programmatic-runtime concern that doesn't belong in the agent's tool list.
+
+---
+
+## Delivery verification
+
+Both SDKs run the delivery check that `podium-mcp` and server-source `podium sync` run. The SDK recomputes `delivery_hash` from the bytes it received on every `load_artifact` response and every `ok` batch item, under every signature policy including `never`, and refuses a response whose recomputed hash differs, or that carries no `delivery_hash`, with `materialize.content_hash_mismatch`. It then applies its signature policy to `delivery_signature` with the registry-managed verifier. A response loaded from the [workspace overlay](../authoring/extends#workspace-overlay) comes from the local filesystem and runs no check. [Verifying a response](../reference/http-api#verifying-a-response) states the procedure.
+
+The SDK resolves its policy in this order:
+
+1. The `verify_signatures` argument in Python, or `verifySignatures` in TypeScript.
+2. `PODIUM_VERIFY_SIGNATURES`.
+3. `defaults.verify_signatures` in `sync.yaml`.
+4. The SDK default.
+
+The policy takes `never` or `always`. Any other argument value fails construction with `ValueError` in Python and `Error` in TypeScript. A `PODIUM_VERIFY_SIGNATURES` or `defaults.verify_signatures` value other than `never` or `always` fails resolution with an error that names the value and its source, and the SDK never treats it as unset. The resolved policy is exposed as `client.verify_signatures` in Python and `client.verifySignatures` in TypeScript.
+
+The SDK default is `always` when a verification key is configured and `never` otherwise. A verification key is configured when the client is given a key list, when `PODIUM_SIGNATURE_VERIFY_KEY` is set, when `PODIUM_SIGN_KEY_PATH` is set, or when a file is present at the default key path `~/.podium/standalone/registry-signing.key`. The default does not depend on whether the configured material decodes, so `PODIUM_SIGNATURE_VERIFY_KEY=not-base64` selects `always` and the client then refuses. A key file present at the default path counts as configured whether or not it holds the key of the registry the client reaches. A machine that keeps a key file from an earlier standalone registry therefore resolves `always` with an unrelated key, and every signed load fails with `materialize.signature_invalid` until the client is given the right key or `never`. A variable set to the empty string counts as unset.
+
+The key-list argument is `verify_keys` in Python and `verifyKeys` in TypeScript, and it takes the `PODIUM_SIGNATURE_VERIFY_KEY` syntax: one or more base64 Ed25519 public keys separated by commas. A key list replaces the variable. Without either, the SDK reads the `public:` and `verify:` lines of the key file at `PODIUM_SIGN_KEY_PATH` or the default path.
+
+```python
+client = Client(
+    registry="https://podium.acme.com",
+    verify_signatures="always",
+    verify_keys="MCowBQYDK2VwAyEA...",
+)
+```
+
+The Python SDK verifies Ed25519 signatures through the `cryptography` package, which the `podium-sdk[verify]` extra installs. Hash recomputation needs no extra. A client on the standalone registry's machine resolves `always` from the default key file, so it needs the extra. Install the SDK with `pip install 'podium-sdk[verify]'`. The TypeScript SDK computes SHA-256 and verifies Ed25519 through the Web Crypto API (`globalThis.crypto.subtle`) on the Node versions its `engines` field names (Node 20 and later), and adds no dependency.
+
+The SDK resolves the policy and key set once, before its first registry request. The Python client resolves in its constructor, `Client.from_env()` included. The TypeScript client resolves in `Client.fromEnv()`, or, when constructed directly, before the first method call that sends a registry request, so `new Client(...)` reads no file. When the policy is `always` and no usable key resolves, the Python constructor raises, and `fromEnv()` or the first registry call in TypeScript rejects, with `config.signature_provider_unavailable` before any request. The Python client fails the same way, naming the `podium-sdk[verify]` extra, when the policy is `always` and the extra is not installed.
+
+A single load that fails the check raises a `RegistryError` that carries the error code. A batch item that fails the check is returned with `status: "error"` and the code, and the other items load. A batch response body that is not well-formed JSON under the procedure fails the whole `load_artifacts` call with `materialize.content_hash_mismatch` and returns no items. `materialize()` fetches every large resource, checks each against its link's `content_hash`, and writes no file of the artifact when any of them fails with `materialize.content_hash_mismatch`.
+
+A manifest document above the inline cutoff is fetched during `load_artifact` and verified as the fetched bytes. The SDK returns it as text decoded as UTF-8 with each invalid sequence replaced by U+FFFD, and `materialize()` writes that text. For a document that is not valid UTF-8, the SDK's file therefore differs from the bytes `podium sync` writes.
 
 ---
 

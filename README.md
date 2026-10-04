@@ -61,7 +61,7 @@ scoop install podium
 **SDKs** for programmatic consumers:
 
 ```bash
-pip install podium-sdk             # Python; imports as `from podium import ...`
+pip install 'podium-sdk[verify]'  # Python; imports as `from podium import ...`
 npm install @lennylabs/podium-sdk  # TypeScript
 ```
 
@@ -306,7 +306,7 @@ The SDK suites run independently:
 
 ```bash
 cd sdks/podium-py
-pip install -e .
+pip install -e '.[verify]'
 pytest
 
 cd sdks/podium-ts

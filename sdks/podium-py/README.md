@@ -5,7 +5,7 @@ Thin HTTP client for the Podium registry.
 Distributed on PyPI as `podium-sdk`; the import name is `podium`:
 
 ```sh
-pip install podium-sdk
+pip install 'podium-sdk[verify]'
 ```
 
 ```python
@@ -29,10 +29,25 @@ carrying the verification URL and the user code without printing or polling,
 and `client.finish_login(handle)` polls until the flow completes and installs
 the token on the client (§6.3).
 
+The client runs the §4.7.10 delivery check on every registry-served
+`load_artifact` response and every `ok` `load_artifacts` item (§7.6.3). It
+recomputes `delivery_hash` under every policy and verifies `delivery_signature`
+with the registry-managed verifier when the policy is `always`. The
+`verify_signatures` argument (`"never"` or `"always"`) sets the policy ahead of
+`PODIUM_VERIFY_SIGNATURES` and `defaults.verify_signatures`, and the
+`verify_keys` argument takes a comma-separated list of base64 Ed25519 public
+keys in place of `PODIUM_SIGNATURE_VERIFY_KEY`. The default is `always` when a
+verification key is configured, through `verify_keys`,
+`PODIUM_SIGNATURE_VERIFY_KEY`, `PODIUM_SIGN_KEY_PATH`, or a key file at
+`~/.podium/standalone/registry-signing.key`, and `never` otherwise. Signature
+verification needs the `podium-sdk[verify]` extra, and a client that resolves
+`always` without it raises `config.signature_provider_unavailable` at
+construction.
+
 ## Test
 
 ```sh
 cd sdks/podium-py
-pip install -e .
+pip install -e '.[verify]'
 pytest
 ```

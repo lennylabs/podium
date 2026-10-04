@@ -175,7 +175,7 @@ A parent whose canonical ID equals the requested ID, the same-ID overlay, is exe
 
 **Observable.** A requester can determine that a merge occurred. The served `content_hash` covers the child's pre-merge package, so the merged bytes a requester receives do not reproduce it, and that mismatch shows that the artifact extends something. The guarantee covers the parent's identity and its unmerged content. It does not conceal the existence of an inheritance relationship.
 
-The bytes a consumer receives are attested by the delivery record instead of the content hash. The registry serves `delivery_hash`, a digest over the merged record it served, and `delivery_signature`, its signature over that digest, and `podium-mcp` recomputes the digest on every load. The [HTTP API reference](../reference/http-api#materialization) describes both fields.
+The bytes a consumer receives are attested by the delivery record instead of the content hash. The registry serves `delivery_hash`, a digest over the merged record it served, and `delivery_signature`, its signature over that digest, and `podium-mcp`, server-source `podium sync`, and the language SDKs recompute the digest on every load. The [HTTP API reference](../reference/http-api#materialization) describes both fields.
 
 ---
 
