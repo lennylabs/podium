@@ -79,7 +79,7 @@ func tenantQuotaFlags(fs *flag.FlagSet) func(set map[string]bool) map[string]any
 	searchQPS := fs.Int("search-qps", 0, "search QPS quota (0 selects the deployment default; a negative value disables the limit)")
 	materializeRate := fs.Int("materialize-rate", 0, "materialize rate quota (0 selects the deployment default; a negative value disables the limit)")
 	auditVolume := fs.Int64("audit-volume-per-day", 0, "audit volume per day quota (0 selects the deployment default; a negative value disables the limit)")
-	maxUserLayers := fs.Int("max-user-layers", 0, "per-identity user-defined-layer cap (0 selects the default)")
+	maxUserLayers := fs.Int("max-user-layers", 0, "per-identity user-defined-layer cap (0 selects the deployment default; a negative value disables the cap)")
 	return func(set map[string]bool) map[string]any {
 		quota := map[string]any{}
 		if set["storage-bytes"] {

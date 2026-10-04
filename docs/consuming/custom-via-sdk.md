@@ -120,7 +120,7 @@ for result in artifacts:
         log.warning("skip %s: %s", result.id, result.error.code)
 ```
 
-Hard cap: 50 IDs per batch. The SDK splits larger sets transparently. Visibility is identical to `load_artifact`: items the caller can't see come back as `status: "error"` with `visibility.denied` (no leak about whether the artifact exists in some hidden layer). Partial failure does not fail the batch; each item carries its own status.
+Hard cap: 50 IDs per batch. The SDK splits larger sets transparently. Visibility is identical to `load_artifact`: items the caller can't see come back as `status: "error"` with `visibility.denied` (no leak about whether the artifact exists in some hidden layer). Partial failure does not fail the batch; each item carries its own status. Each item counts as one load against the tenant's materialization rate. An item the rate refuses, and every item after it in the same request, comes back as `status: "error"` with `quota.materialize_rate_exceeded`, and its error carries `retryable: true`. The SDK still posts the remaining 50-ID chunks after a refusal, and their items are charged and reported on their own.
 
 The bulk endpoint is not exposed as an MCP meta-tool: bulk loading is a programmatic-runtime concern that doesn't belong in the agent's tool list.
 

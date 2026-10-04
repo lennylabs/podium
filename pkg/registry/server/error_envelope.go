@@ -39,7 +39,7 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 	},
 	"quota.materialize_rate_exceeded": {
 		retryable:       true,
-		suggestedAction: "Reduce the load_artifact request rate or raise the tenant's materialize quota.",
+		suggestedAction: "Reduce the load_artifact and bulk-load request rate, retry refused items after a backoff, or raise the tenant's materialize quota.",
 	},
 	// spec §13.2.1: read-only mode is a transient state the registry
 	// leaves automatically once the Postgres primary is reachable again,

@@ -2047,9 +2047,11 @@ type Config struct {
 	// "organization" | "private". Defaults to "private" so
 	// admin-defined layers don't leak by accident.
 	defaultLayerVisibility string
-	// §7.3.1 cap on user-defined layers per identity. Zero applies the
-	// server.DefaultMaxUserLayers default (3); a negative value disables
-	// the cap.
+	// §4.7.8/§7.3.1 deployment default for the per-identity
+	// user-defined-layer cap. It applies to tenants whose max_user_layers
+	// is zero, and zero here selects server.DefaultMaxUserLayers (3).
+	// envInt clamps negative input to 0, so this value never disables the
+	// cap.
 	maxUserLayers int
 	// §13.10 sandbox-profile ingest gate. enforceSandboxProfile is set by
 	// PODIUM_ENFORCE_SANDBOX_PROFILE=true; when true the registry refuses to
@@ -2344,7 +2346,7 @@ func LoadConfig() *Config {
 		// §4.6 + §13.2.1. The default visibility is resolved after applyYAML
 		// (a standalone deployment defaults to public; see below).
 		defaultLayerVisibility: os.Getenv("PODIUM_DEFAULT_LAYER_VISIBILITY"),
-		// §7.3.1 user-defined-layer cap (0 = default of 3).
+		// §4.7.8/§7.3.1 deployment default for the user-defined-layer cap (0 selects 3).
 		maxUserLayers: envInt("PODIUM_MAX_USER_LAYERS", 0),
 		// §13.10 sandbox-profile ingest gate. Off unless flipped to
 		// standard-mode behavior; hostSandboxes defaults to unrestricted.

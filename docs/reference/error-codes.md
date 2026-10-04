@@ -148,7 +148,7 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 |:--|:--|
 | `quota.storage_exceeded` | Per-tenant storage limit hit. |
 | `quota.search_qps_exceeded` | Per-tenant search QPS limit hit. The limit is the tenant's own value. A zero tenant value takes the deployment default, and a negative tenant value disables the limit. |
-| `quota.materialize_rate_exceeded` | Per-tenant materialization rate limit hit. The limit is the tenant's own value. A zero tenant value takes the deployment default, and a negative tenant value disables the limit. |
+| `quota.materialize_rate_exceeded` | Per-tenant materialization rate limit hit. The limit is the tenant's own value. A zero tenant value takes the deployment default, and a negative tenant value disables the limit. The registry answers `load_artifact` with HTTP 429, and on each `artifacts:batchLoad` item the rate refuses it returns the code as the item's error envelope (`status: "error"`, `retryable: true`) inside the batch's 200 response. |
 | `quota.audit_volume_exceeded` | Per-tenant audit volume limit hit. The limit is the tenant's own value. A zero tenant value takes the deployment default, and a negative tenant value disables the limit. |
 | `quota.layer_count_exceeded` | A user has hit the per-identity user-defined-layer cap. The rejected layer is not created. |
 | `quota.artifact_count_exceeded` | Ingest would push the tenant past its artifact-count quota. The artifact is rejected. |

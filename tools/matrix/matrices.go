@@ -116,6 +116,7 @@ func KnownMatrices() []Matrix {
 					"materialize.content_hash_mismatch",
 					"materialize.stale_resolution",
 					"quota.storage_exceeded",
+					"quota.materialize_rate_exceeded",
 					"mcp.unsupported_version",
 					"network.registry_unreachable",
 					"registry.unavailable",

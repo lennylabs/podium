@@ -132,29 +132,89 @@ func TestLayerCap_TenantQuotaOverride(t *testing.T) {
 	}
 }
 
-// Spec: §7.3.1 — WithMaxUserLayers takes precedence over the tenant
-// quota and the default, and a negative value disables the cap entirely.
-func TestLayerCap_NegativeDisablesCap(t *testing.T) {
-	t.Parallel()
-	st := store.NewMemory()
-	// Tenant quota would cap at 2, but the explicit override disables it.
-	_ = st.CreateTenant(context.Background(), store.Tenant{
-		ID: "t", Quota: store.Quota{MaxUserLayers: 2},
-	})
+// newCapServer seeds tenant "t" with tenantMax as its max_user_layers in
+// st, serves a single-tenant layer endpoint over st with deploymentDefault
+// as its WithMaxUserLayers value, and returns the server URL.
+func newCapServer(t *testing.T, st store.Store, tenantMax, deploymentDefault int) string {
+	t.Helper()
+	if err := st.CreateTenant(context.Background(), store.Tenant{
+		ID: "t", Quota: store.Quota{MaxUserLayers: tenantMax},
+	}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
 	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
-		WithMaxUserLayers(-1)
+		WithMaxUserLayers(deploymentDefault)
 	ts := httptest.NewServer(endpoint.Handler())
-	defer ts.Close()
+	t.Cleanup(ts.Close)
+	return ts.URL
+}
 
+// assertUncapped registers five layers for alice and requires each to
+// succeed, which shows the resolved cap is disabled.
+func assertUncapped(t *testing.T, base string) {
+	t.Helper()
 	for _, id := range []string{"a", "b", "c", "d", "e"} {
-		if status, code := registerUserLayer(t, ts.URL, id, "alice"); status != http.StatusCreated {
+		if status, code := registerUserLayer(t, base, id, "alice"); status != http.StatusCreated {
 			t.Fatalf("layer %s with cap disabled: status %d code %q, want 201", id, status, code)
 		}
 	}
 }
 
-// Spec: §7.3.1 — WithMaxUserLayers wins over the default. A cap of 1
-// rejects the second registration even though the default is 3.
+// Spec: §4.7.8, §7.3.1 — a positive tenant max_user_layers is enforced
+// ahead of the WithMaxUserLayers deployment default. With a tenant value
+// of 2 and a deployment default of 1, the third registration is refused.
+func TestLayerCap_TenantValueAheadOfDeploymentDefault(t *testing.T) {
+	t.Parallel()
+	base := newCapServer(t, store.NewMemory(), 2, 1)
+
+	for _, id := range []string{"a", "b"} {
+		if status, code := registerUserLayer(t, base, id, "alice"); status != http.StatusCreated {
+			t.Fatalf("layer %s: status %d code %q, want 201", id, status, code)
+		}
+	}
+	status, code := registerUserLayer(t, base, "c", "alice")
+	if status != http.StatusTooManyRequests || code != "quota.layer_count_exceeded" {
+		t.Errorf("third layer: status %d code %q, want 429 quota.layer_count_exceeded", status, code)
+	}
+}
+
+// Spec: §4.7.8, §7.3.1 — a negative tenant max_user_layers disables the
+// cap for that tenant whatever the deployment default is.
+func TestLayerCap_NegativeTenantDisablesCap(t *testing.T) {
+	t.Parallel()
+	assertUncapped(t, newCapServer(t, store.NewMemory(), -1, 1))
+}
+
+// Spec: §4.7.8, §7.3.1 — a negative WithMaxUserLayers deployment default
+// disables the cap for a tenant whose max_user_layers is zero.
+func TestLayerCap_NegativeDeploymentDefaultDisablesZeroTenant(t *testing.T) {
+	t.Parallel()
+	assertUncapped(t, newCapServer(t, store.NewMemory(), 0, -1))
+}
+
+// Spec: §4.7.8, §7.3.1 — a GetTenant fault while resolving the cap falls
+// through to the deployment default. The tenant record holds 5, the
+// deployment default is 1, and the read fails, so the second
+// registration is refused at the deployment default.
+func TestLayerCap_TenantReadFaultUsesDeploymentDefault(t *testing.T) {
+	t.Parallel()
+	st := &flakyStore{Memory: store.NewMemory()}
+	base := newCapServer(t, st, 5, 1)
+	st.failTenant.Store(true)
+
+	if status, code := registerUserLayer(t, base, "a", "alice"); status != http.StatusCreated {
+		t.Fatalf("first layer: status %d code %q, want 201", status, code)
+	}
+	status, code := registerUserLayer(t, base, "b", "alice")
+	if status != http.StatusTooManyRequests || code != "quota.layer_count_exceeded" {
+		t.Errorf("second layer: status %d code %q, want 429 quota.layer_count_exceeded", status, code)
+	}
+}
+
+// Spec: §4.7.8, §7.3.1 — WithMaxUserLayers is the deployment default that
+// applies to a tenant whose max_user_layers is zero. A deployment default
+// of 1 rejects the second registration even though the built-in default
+// is 3.
 func TestLayerCap_WithMaxUserLayersOverridesDefault(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
