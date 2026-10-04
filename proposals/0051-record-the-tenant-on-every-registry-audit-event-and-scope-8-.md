@@ -1,7 +1,7 @@
 # Proposal 0051: Record the tenant on every registry audit event and scope §8.5 erasure to the requesting tenant on a multi-tenant registry
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-04). OQ-1: one shared chain with a tenant attribute (Decision 1). OQ-2: unlabeled records are untouched by a tenant-scoped erase and not reported (Decision 7). OQ-3: operator tenant.managed events record no tenant (Decision 4). OQ-4: keep all three fixes in this proposal as drafted: the post-erase re-anchor (SPEC-3), the superseded_head key, and the endpoint-sink user.erased emission.
+- Status: Implemented (2026-10-04). OQ-1: one shared chain with a tenant attribute (Decision 1). OQ-2: unlabeled records are untouched by a tenant-scoped erase and not reported (Decision 7). OQ-3: operator tenant.managed events record no tenant (Decision 4). OQ-4: keep all three fixes in this proposal as drafted: the post-erase re-anchor (SPEC-3), the superseded_head key, and the endpoint-sink user.erased emission.
 - Date: 2026-10-04
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -46,27 +46,27 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2. §8.1 gains the `tenant` attribute, and §8.5 replaces the multi-tenant refusal with tenant-scoped erasure. Bundled because SPEC-1 has no consumer without SPEC-2, both edit `spec/08-audit-and-observability.md`, and one reader reviews the pair.
+- [x] **S1 · spec** — SPEC-1, SPEC-2. §8.1 gains the `tenant` attribute, and §8.5 replaces the multi-tenant refusal with tenant-scoped erasure. Bundled because SPEC-1 has no consumer without SPEC-2, both edit `spec/08-audit-and-observability.md`, and one reader reviews the pair.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-3. §8.6 re-anchors after an erasure and names `superseded_head` on both rewrite events. Skip this step, and the parts of S5, S6, S7, S8, S9, S10, and S11 marked "SPEC-3" or conditioned on OQ-4 splitting, when OQ-4 resolves to splitting.
+- [x] **S2 · spec** — SPEC-3. §8.6 re-anchors after an erasure and names `superseded_head` on both rewrite events. Skip this step, and the parts of S5, S6, S7, S8, S9, S10, and S11 marked "SPEC-3" or conditioned on OQ-4 splitting, when OQ-4 resolves to splitting.
       Levels: —. Depends on: —
-- [ ] **S3 · code** — CODE-1. `audit.Event.Tenant`, conditional hashing, and the `tenant` wire key.
+- [x] **S3 · code** — CODE-1. `audit.Event.Tenant`, conditional hashing, and the `tenant` wire key.
       Levels: unit. Depends on: S1
-- [ ] **S4 · code** — CODE-3. Every registry emitter labels its events through the single tenant rule, keyed on multi-tenant mode through `server.WithMultiTenant()`, which serverboot sets from `cfg.multiTenant`.
+- [x] **S4 · code** — CODE-3. Every registry emitter labels its events through the single tenant rule, keyed on multi-tenant mode through `server.WithMultiTenant()`, which serverboot sets from `cfg.multiTenant`.
       Levels: unit, integration, e2e. Depends on: S3
-- [ ] **S5 · code** — CODE-2, CODE-4, CODE-6. `EraseScope`, `UserErasedEvent`, the tenant-scoped handler, the endpoint-sink `user.erased`, the `WithAfterErase` hook, and the CLI caller and help text. Bundled because the `EraseUser` signature and the shared event builder change in one commit for both callers (`pkg/registry/server/layers.go`, `cmd/podium/admin.go`) to compile.
+- [x] **S5 · code** — CODE-2, CODE-4, CODE-6. `EraseScope`, `UserErasedEvent`, the tenant-scoped handler, the endpoint-sink `user.erased`, the `WithAfterErase` hook, and the CLI caller and help text. Bundled because the `EraseUser` signature and the shared event builder change in one commit for both callers (`pkg/registry/server/layers.go`, `cmd/podium/admin.go`) to compile.
       Levels: unit, integration, e2e. Depends on: S2, S4
-- [ ] **S6 · code** — CODE-5. serverboot mounts the erase route through `srv.TenantRouted` and wires the re-anchor hook.
+- [x] **S6 · code** — CODE-5. serverboot mounts the erase route through `srv.TenantRouted` and wires the re-anchor hook.
       Levels: integration, e2e. Depends on: S5
-- [ ] **S7 · test** — TEST-1. `pkg/audit` unit tests for the hash, the wire key, legacy verification, and scoped erasure.
+- [x] **S7 · test** — TEST-1. `pkg/audit` unit tests for the hash, the wire key, legacy verification, and scoped erasure.
       Levels: unit. Depends on: S5
-- [ ] **S8 · test** — TEST-2. Server and serverboot tests for handler order, routing, the endpoint-sink event, the hook, emitter labels, and a single-tenant erase that reaches records its own emitters labeled.
+- [x] **S8 · test** — TEST-2. Server and serverboot tests for handler order, routing, the endpoint-sink event, the hook, emitter labels, and a single-tenant erase that reaches records its own emitters labeled.
       Levels: unit, integration. Depends on: S6
-- [ ] **S9 · test** — TEST-3. The multi-tenant end-to-end routing case erases in one tenant and reads the audit file, the no-router case reads the audit file for unlabeled events, the offline CLI erase case seeds tenant-labeled records, and the single-tenant registry erase case asserts that a request event and `user.erased` carry the same tenant.
+- [x] **S9 · test** — TEST-3. The multi-tenant end-to-end routing case erases in one tenant and reads the audit file, the no-router case reads the audit file for unlabeled events, the offline CLI erase case seeds tenant-labeled records, and the single-tenant registry erase case asserts that a request event and `user.erased` carry the same tenant.
       Levels: e2e. Depends on: S6
-- [ ] **S10 · test** — TEST-4. Manual scenario S88.
+- [x] **S10 · test** — TEST-4. Manual scenario S88.
       Levels: manual. Depends on: S6
-- [ ] **S11 · docs** — DOC-1. HTTP API and CLI references, the clustered deployment page, and the changelog. Land in the same pull request as S6.
+- [x] **S11 · docs** — DOC-1. HTTP API and CLI references, the clustered deployment page, and the changelog. Land in the same pull request as S6.
       Levels: —. Depends on: S6
 
 **Ordering constraints.** S1 and S2 land the rules every later step cites. S3 precedes S4 because the emitters set `Event.Tenant`. S4 precedes S5 so that the records a scoped erase selects are labeled before the refusal is lifted. S5 precedes S6 because S6 calls `WithAfterErase`. S7 through S11 need the wiring they assert.
