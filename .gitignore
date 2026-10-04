@@ -2,6 +2,8 @@
 tmp/
 bin/
 coverage.out
+# pytest-cov data file written by the Python SDK test suite.
+sdks/podium-py/.coverage
 coverage.html
 *.test
 *.out

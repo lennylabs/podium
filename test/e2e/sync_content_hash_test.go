@@ -16,7 +16,9 @@ import (
 // the dial is refused; the CLI must exit non-zero with the namespaced code.
 func TestSyncServerSource_AlwaysRevalidateUnreachable(t *testing.T) {
 	tgt := t.TempDir()
-	res := runPodium(t, t.TempDir(), []string{"HOME=" + t.TempDir()},
+	// The delivery check resolves before the first request (§7.5), so never
+	// keeps an unkeyed run reaching the unreachable registry.
+	res := runPodium(t, t.TempDir(), []string{"HOME=" + t.TempDir(), "PODIUM_VERIFY_SIGNATURES=never"},
 		"sync", "--registry", "http://127.0.0.1:1", "--target", tgt, "--harness", "none")
 	cliWantExit(t, res, 1, "always-revalidate unreachable sync")
 	cliContains(t, res.Stderr, "network.registry_unreachable", "structured unreachable code")
@@ -33,7 +35,7 @@ func TestSyncServerSource_AlwaysRevalidateUnreachable(t *testing.T) {
 func TestSyncServerSource_LockContentHashIsRegistryAuthoritative(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	tgt := t.TempDir()
-	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
+	res := runPodium(t, "", append(srvSyncEnv(srv), "HOME="+t.TempDir()),
 		"sync", "--registry", srv.BaseURL, "--target", tgt, "--harness", "none")
 	cliWantExit(t, res, 0, "server-source sync")
 

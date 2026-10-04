@@ -135,7 +135,7 @@ The full `sync.yaml` schema and the marketplace target fields are documented in 
 podium sync --config <path> [--dry-run] [--check] [--json]
 ```
 
-`podium sync --config <path>` reads one `sync.yaml` and runs each `targets:` entry: a `kind: workspace` target materializes the project-files layout, and a `kind: marketplace` target runs the fixed `prepare`, `render`, `publish` pipeline.
+`podium sync --config <path>` reads one `sync.yaml` and runs each `targets:` entry: a `kind: workspace` target materializes the project-files layout, and a `kind: marketplace` target runs the fixed `prepare`, `render`, `publish` pipeline. A run whose targets name a server registry verifies every record it loads, so it needs `PODIUM_SIGNATURE_VERIFY_KEY` set to the registry's verification key, or `PODIUM_VERIFY_SIGNATURES=never` against a registry with signing off.
 
 ```bash
 podium sync --config .podium/sync.yaml
@@ -167,7 +167,7 @@ Podium passes context to the commands through environment variables rather than 
 
 ### Exit codes
 
-A flag error or a config error (a `config.invalid` config, a missing `--config` path, or an unset registry `config.no_registry`) exits 2. A config-load failure (a malformed or unreadable config file) and a runtime failure (a fetch error, a render error, or a non-zero workflow command) exit 1. A successful run exits 0.
+A flag error or a config error (a `config.invalid` config, a missing `--config` path, an unset registry `config.no_registry`, or `config.signature_provider_unavailable` when no usable verification key resolves under the `always` policy) exits 2. A config-load failure (a malformed or unreadable config file) and a runtime failure (a fetch error, a delivery-check refusal with `materialize.content_hash_mismatch`, `materialize.signature_invalid`, or `materialize.signature_missing`, a render error, or a non-zero workflow command) exit 1. A successful run exits 0.
 
 ---
 
@@ -249,6 +249,7 @@ jobs:
       - env:
           PODIUM_REGISTRY: ${{ secrets.PODIUM_REGISTRY }}
           PODIUM_TOKEN:    ${{ secrets.PODIUM_TOKEN }}   # the publishing identity's registry credential
+          PODIUM_SIGNATURE_VERIFY_KEY: ${{ secrets.PODIUM_SIGNATURE_VERIFY_KEY }}
         run: podium sync --config .podium/sync.yaml
 ```
 

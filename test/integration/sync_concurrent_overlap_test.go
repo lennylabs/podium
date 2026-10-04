@@ -102,6 +102,7 @@ func TestSyncConcurrent_OverlappingIncludeByteIdenticalShared(t *testing.T) {
 			include := []string{"shared/**", fmt.Sprintf("c%d/**", k)}
 			<-ready
 			if _, err := podiumsync.Run(podiumsync.Options{
+				Delivery:     neverDelivery,
 				RegistryPath: ts.URL,
 				Target:       targets[k],
 				AdapterID:    "claude-code",

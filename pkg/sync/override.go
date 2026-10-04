@@ -47,6 +47,10 @@ type OverrideOptions struct {
 	AdapterRegistry *adapter.Registry
 	OverlayPath     string
 	HTTPClient      *http.Client
+	// Delivery resolves the §4.7.10 delivery check of the re-materialization's
+	// server-source load. It is copied into the Run call, so a resolution
+	// refusal arrives after the toggle change is written (§7.5).
+	Delivery DeliveryCheckFunc
 }
 
 // OverrideResult is what Override returns: the new lock state, whether
@@ -157,6 +161,7 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 			AdapterRegistry: opts.AdapterRegistry,
 			OverlayPath:     opts.OverlayPath,
 			HTTPClient:      opts.HTTPClient,
+			Delivery:        opts.Delivery,
 			Profile:         string(lock.Profile),
 			Scope: ScopeFilter{
 				Include: lock.Scope.Include,

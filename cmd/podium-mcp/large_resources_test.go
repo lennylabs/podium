@@ -3,11 +3,15 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/lennylabs/podium/pkg/sign"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // Spec: §6.6 step 1 — large_resources are fetched via presigned
@@ -39,9 +43,10 @@ func TestFetchLargeResources_MergesIntoResources(t *testing.T) {
 	}
 }
 
-// Spec: §6.6 step 1 — content_hash mismatch aborts the fetch
-// with a structured error so a tampered or stale presigned URL
-// can't sneak bad bytes onto the host.
+// Spec: §6.6 step 1, §4.7.10 — a content_hash mismatch aborts the fetch with
+// version.ErrLinkedHashMismatch, which verifyServedArtifact reports as
+// materialize.content_hash_mismatch, so a tampered or stale presigned URL
+// cannot place altered bytes on the host.
 func TestFetchLargeResources_HashMismatchAborts(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -56,8 +61,8 @@ func TestFetchLargeResources_HashMismatchAborts(t *testing.T) {
 		},
 	}
 	err := srv.fetchLargeResources(&resp, nil)
-	if err == nil || !strings.Contains(err.Error(), "content hash mismatch") {
-		t.Errorf("err = %v, want hash-mismatch refusal", err)
+	if !errors.Is(err, version.ErrLinkedHashMismatch) {
+		t.Errorf("err = %v, want version.ErrLinkedHashMismatch", err)
 	}
 }
 
@@ -120,5 +125,29 @@ func TestFetchOneLargeResource_404FailsFast(t *testing.T) {
 	}
 	if hits.Load() != 1 {
 		t.Errorf("hits = %d, want 1 (no retry on 404)", hits.Load())
+	}
+}
+
+// Spec: §4.7.10 — a large-resource link with an empty content_hash frames the
+// empty value. An authentic body served under a delivery_hash computed over
+// the body's true digest, as the registry computes it, therefore fails the
+// delivery comparison with materialize.content_hash_mismatch, because the
+// consumer never substitutes the fetched body's digest for the link's hash,
+// and nothing is cached.
+func TestDeliverLoadArtifact_EmptyLinkHashRefused(t *testing.T) {
+	t.Parallel()
+	body := []byte("authentic large bytes")
+	obj := newObjectStub(t, map[string][]byte{"/big.bin": body})
+	s := newTestServer(t, &config{harness: "none", verifyPolicy: sign.PolicyNever})
+	rec := liveRecord("---\ntype: context\nversion: 1.0.0\n---\nbody\n")
+	rec.LargeResources = map[string]largeResourceLink{"data/big.bin": {URL: obj.ts.URL + "/big.bin", ContentHash: sha256Hex(body)}}
+	rec = sealDelivery(rec)
+	rec.LargeResources["data/big.bin"] = largeResourceLink{URL: obj.ts.URL + "/big.bin"}
+	wantRefused(t, s.deliverLoadArtifact(rec), "materialize.content_hash_mismatch")
+	if obj.requests("/big.bin") == 0 {
+		t.Errorf("the authentic body was never fetched")
+	}
+	if s.cache.has(rec.ContentHash) {
+		t.Errorf("a refused record was cached under %s", rec.ContentHash)
 	}
 }

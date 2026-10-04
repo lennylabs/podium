@@ -436,6 +436,8 @@ func TestStandardStackParity_AuthorToConsumer(t *testing.T) {
 		"PODIUM_REGISTRY=" + srv.BaseURL,
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_SESSION_TOKEN_FILE=" + tokFile,
+		// The server signs under the shared key; sync verifies with it (§4.7.9).
+		"PODIUM_SIGN_KEY_PATH=" + msSigningKeyPath(t),
 	}, "sync", "--registry", srv.BaseURL, "--target", managedTarget, "--harness", "none")
 	if res.Exit != 0 {
 		t.Fatalf("managed-stack sync exit=%d stderr=%s stdout=%s", res.Exit, res.Stderr, res.Stdout)

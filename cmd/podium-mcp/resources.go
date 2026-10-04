@@ -66,14 +66,15 @@ func (s *mcpServer) handleResourcesList() any {
 // requested URI back to an artifact ID, loads the artifact body from the
 // same /v1/load_artifact path the canonical `load_artifact` tool uses,
 // and returns the manifest (frontmatter + body) as the resource content.
-// This is the read-only half of the §5.0 mirror. It runs the same §6.6
-// reconstitution and verification load_artifact runs, through
+// This is the read-only half of the §5.0 mirror. It decodes the body by the
+// same §4.7.10 steps load_artifact applies, through parseLoadArtifact, and
+// runs the same §6.6 reconstitution and verification, through
 // verifyServedArtifact, and the §6.5 freshness check, and performs none of
 // load_artifact's other effects: it emits no read event, caches nothing,
 // advances no revision mark, runs neither §4.4.1 gate, and materializes
 // nothing.
 //
-// Spec: §5.0, §6.6 step 2, §4.7.9, §6.5
+// Spec: §5.0, §6.6 step 2, §4.7.9, §4.7.10, §6.5
 func (s *mcpServer) handleResourcesRead(raw json.RawMessage) any {
 	var args struct {
 		URI string `json:"uri"`
@@ -90,9 +91,9 @@ func (s *mcpServer) handleResourcesRead(raw json.RawMessage) any {
 	if err != nil {
 		return errorResultFrom(err)
 	}
-	var resp loadArtifactResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return errorResult("decode load_artifact: " + err.Error())
+	resp, err := parseLoadArtifact(body)
+	if err != nil {
+		return errorResult(err.Error())
 	}
 	if resp.ID == "" {
 		return errorResult("resources.not_found: " + id)

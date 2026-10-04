@@ -31,10 +31,14 @@ The registry exposes two surfaces:
 
 At or below the inline cutoff, resources are returned inline. This avoids round-trips for small fixtures.
 
+**Record fields.** The registry's HTTP `load_artifact` response carries each field of the §4.7.10 delivery record other than the resource content hashes in its own string member, and this list is the complete mapping a consumer reconstructs the record from: the identity in `id`, the version in `version`, the type in `type`, the content hash in `content_hash`, the sensitivity in `sensitivity` (absent when the artifact declares none), the ingest time in `artifact_revision`, the `ARTIFACT.md` document in `frontmatter`, the manifest body in `manifest_body`, and the `SKILL.md` in `skill_raw` (absent for every type other than a skill). `delivery_hash` and `delivery_signature` are strings. `resources` is an object that maps each inline resource path to its body as a string, and the boolean `resources_base64`, when true, marks every value in that object as base64. `large_resources` is an object that maps each other resource path to a link object. A link object carries the strings `presigned_url` and `content_hash`. When the manifest document exceeds the inline cutoff, `manifest_body_url` carries a link object, and the response carries no inline `manifest_body` and no inline copy of that document (`skill_raw` for a skill, `frontmatter` for every other type). The members this paragraph names are the members the §4.7.10 verification procedure reads. The §4.7.10 canonical serialization fixes the order in which the record frames these fields.
+
+**Other response members.** The response also carries members the §4.7.10 verification procedure does not read, among them `layer`, a string naming the layer the served version comes from and absent when the registry records none, the `extends_pin` string described below, and a link object's `size`, an integer byte count, and `content_type`, a string absent when the registry records none. §7.6.2 states which members a batch entry carries.
+
 **Integrity and reference fields.** The registry's HTTP `load_artifact` response carries these fields beside the manifest and the resources:
 
 - `delivery_hash`: the §4.7.10 digest over the record this response delivers. Present on every response.
-- `delivery_signature`: the registry's §4.7.10 signature over `delivery_hash`. Absent when the registry runs without a signing key.
+- `delivery_signature`: the registry's §4.7.10 signature over `delivery_hash`. Absent when the registry runs without a signing key. A client verifies the pair by the §4.7.10 verification procedure.
 - `artifact_revision`: the §4.7.10 ingest time of the served version, an RFC 3339 UTC timestamp in the form §4.7.10 fixes, covered by `delivery_hash`. Present on every response that carries `delivery_hash`, including every `status: ok` batch entry.
 - `extends_pin`: the pinned `<id>@<version>` this artifact extends, as the registry resolved it at ingest; the manifest's `extends:` key may carry a version range, and this field carries the resolved pin rather than the authored reference, present only when the calling identity can see the parent record (§4.6). Its absence does not mean the artifact extends nothing.
 
@@ -285,6 +289,8 @@ The sync command reads the caller's effective view (the composed layer list afte
 
 `podium sync` works against either kind of registry source: a server (URL) or a local filesystem (path); see §7.5.2 for dispatch and §13.11 for filesystem-specific behavior. Against a server source, sync uses the same identity providers as the MCP server, the same content cache, and the same harness adapters.
 
+Against a server source, sync runs the §4.7.10 delivery check on every record it loads, under the policy and verification key set that §4.7.9 resolves for it. It verifies with the registry-managed verifier, as the §6.2 `PODIUM_SIGNATURE_PROVIDER` row states. An invocation resolves the policy and the verification key set at most once, immediately before its first request to a server source for the caller's effective view, whether or not that view lists any artifact. An invocation that sends no such request resolves nothing and reads no signing variable. `podium sync --preview` is one such invocation: it requests the §3.5 scope preview, which returns aggregate counts and no artifact of the view. Where §4.7.9 refuses to resolve the policy or the verification key set, sync sends no request to the registry and exits with status 2. What the invocation completed before that point stands. A `--config` run stops at the target whose load resolved, after the earlier targets have run and after any operator `prepare` phase that target runs before its load. A `podium sync override` keeps the toggle change it recorded in the lock. A `--watch` run exits without subscribing to change events. A record that fails the check fails that target's materialization: sync writes no file and no lock for the target. `podium sync override` (§7.5.5) records its toggle change in the lock before it materializes, so a refused record leaves that toggle change in the lock and writes no artifact file and no other lock change. A one-shot sync then exits with status 1. A `--config` run counts the target as failed and continues with the remaining targets. A `--watch` run reports the failed cycle and keeps watching, and exits with status 1 on interrupt. A filesystem-source sync runs no delivery check and needs no key material.
+
 The sync model is type-agnostic: skills, agents, contexts, commands, rules, hooks, and `mcp-server` registrations all sync through the same path; the harness adapter decides where each type lands.
 
 **`--dry-run`** resolves the artifact set against the current scope and prints it without writing. Default output is human-readable; `--json` produces a structured envelope (`{profile, target, harness, scope, artifacts: [{id, version, content_hash, type, layer}, ...]}`) for piping into `jq`. The per-artifact `content_hash` lets a pre-flight check verify the full §14.11 `(artifact_id, version, content_hash)` triple before the lock file is committed.
@@ -394,7 +400,7 @@ targets:
         - run: ["git", "-C", "$PODIUM_WORKDIR", "push", "origin", "$PODIUM_GIT_BRANCH"]
 ```
 
-`defaults.verify_signatures` sets the §4.7.9 signature policy the MCP server applies when `PODIUM_VERIFY_SIGNATURES` is unset. The MCP server resolves it across the three file scopes by the precedence above, discovering the workspace by the same walk up from CWD, so a project-local `sync.local.yaml` value overrides a project-shared one. It is the only signing-related key in this block: verification key material is resolved from the environment and from the registry's key file, in the order §4.7.9 states, and is never written to or read from `sync.yaml`.
+`defaults.verify_signatures` sets the §4.7.9 signature policy that the MCP server, server-source `podium sync`, and the language SDKs apply when no higher-precedence source sets it (§4.7.9 gives the order, and that order includes the MCP server's own configuration and an SDK constructor argument). Each consumer resolves the key across the three file scopes by the precedence above, discovering the workspace by the same walk up from CWD, so a project-local `sync.local.yaml` value overrides a project-shared one. A `podium sync --config <path>` run starts the walk at the directory that contains the configuration file's `.podium/` directory, the workspace its multi-target planning uses, so the policy does not depend on the directory the run starts in. When no source sets a policy, the default is the one §4.7.9 states for that consumer. It is the only signing-related key in this block: verification key material is resolved from the environment and from the registry's key file, in the order §4.7.9 states, and is never written to or read from `sync.yaml`.
 
 **Registry source.** `defaults.registry` accepts either a URL or a filesystem path; the client adapts:
 
@@ -618,7 +624,7 @@ deps = client.dependents_of("finance/ap/pay-invoice")
 
 `materialize()` writes the artifact under `<to>/<id>/` in the canonical layout, which is the output of the `none` harness adapter. The SDKs do not embed the harness adapters (§2.2). A consumer that needs harness-native files runs `podium sync --harness <name>` (§7.5) or loads through the MCP server (§6.7). The `harness` argument of `materialize()` accepts only `none`, and omitting it is equivalent to `none`. Any other value raises an argument error before any resource is fetched or any file is written. On a §7.6.2 bulk-load item the argument is checked before the item's status, so an `error` item called with an invalid `harness` raises the argument error rather than the item's registry error.
 
-Identity providers, the cache, visibility filtering, layer composition, and audit are all the same as in the MCP path; the SDK is just a different transport. Identity provider plug-points are exposed; custom providers register through the same interface as the MCP server's.
+Identity providers, the cache, visibility filtering, layer composition, and audit are all the same as in the MCP path; the SDK is just a different transport. Identity provider plug-points are exposed; custom providers register through the same interface as the MCP server's. The SDK runs the §4.7.10 delivery check the MCP server runs, with the signature-policy default and the verifier §7.6.3 states.
 
 **Change-event stream visibility.** `client.subscribe(...)` reads the registry's change-event stream, which the §7.5.4 watcher also reads. The registry resolves the subscriber's identity and tenant once, when the stream opens. It evaluates each event no earlier than the event's first delivery to a subscriber, against the stored layer visibility and the group membership it reads once for that event and applies to every subscriber of the event, so a visibility change made before that first evaluation governs the event's delivery to every subscriber. The registry records, with each event it places on the stream, the tenant and the layer or layers the event concerns; these are not necessarily fields of the event's `data`. The registry delivers an event to a subscriber only where the event's recorded tenant is the subscriber's tenant and the §4.6 evaluator reports a layer recorded for the event visible to the subscriber. On `artifact.published` and `artifact.deprecated`, the subscriber's §6.3.1 path scopes must also permit discovering the artifact the event names, and on `domain.published` they must permit the domain path it names. A `layer.config_changed` recorded for a `register`, `update`, `restore`, or `unregister` is also delivered to a subscriber that could see the layer under the visibility the layer held before the change, so a subscriber that loses sight of a layer, or whose visible layer is unregistered, receives the event that withdraws it. A `layer.config_changed` recorded for a `reorder` is delivered to a subscriber that can see at least one reordered layer, and the `layer` value delivered to that subscriber names, in reorder sequence, only the reordered layers that subscriber can see. An event the registry cannot evaluate is withheld; this covers an event whose tenant's layer list cannot be read, an event published with no layer, and an event published with no tenant. A withheld event leaves no trace on the stream and is reported through no §6.10 error code, on the same footing as §4.5.5, and the keepalive line reaches every subscriber. The §4.6 public-mode and no-identity bypasses apply on the same terms: the evaluator reports every layer visible, so a subscriber there receives every event of its tenant that its scopes permit. Outbound webhook receivers are governed by §7.3.2. A holder of the §4.7.2 admin role receives what its own §4.6 view admits. This differs from the §7.3.1 layer read visibility rule, because the stream wakes re-resolution of the subscriber's own §4.6 view and the §4.7.2 override is a per-use, audited diagnostic; a reorder event's `layer` value can therefore name fewer layers than the admin's own reorder response reports.
 
@@ -633,7 +639,7 @@ For shell pipelines and language-agnostic scripts that don't want to take a Pyth
 | `podium search <query>`       | `Client.search_artifacts(...)`             | Hybrid search over artifacts. Flags `--type`, `--tags`, `--scope`, `--top-k` mirror the SDK args. Returns ranked descriptors.                                                    |
 | `podium domain search <query>`| `Client.search_domains(...)`               | Hybrid search over domains. Flags `--scope`, `--top-k` mirror the SDK args. Returns ranked domain descriptors.                                                                   |
 | `podium domain show [<path>]` | `Client.load_domain(path)`                 | Domain map for `<path>` (or root when no path is given).                                                                                                                         |
-| `podium artifact show <id>`   | `Client.load_artifact(id)` (manifest only) | Prints the manifest body and frontmatter to stdout. **Does not materialize bundled resources**; for that, use `podium sync --include <id>`. Flags: `--version`, `--session-id`.  |
+| `podium artifact show <id>`   | `Client.load_artifact(id)` (manifest only) | Prints the manifest body and frontmatter to stdout. Runs no §4.7.10 delivery check. **Does not materialize bundled resources**; for that, use `podium sync --include <id>`. Flags: `--version`, `--session-id`.  |
 
 Output formats:
 
@@ -669,7 +675,7 @@ Output formats:
     "frontmatter": { ... }, "body": "..." }
   ```
 
-The CLI and SDK are intentionally interchangeable for these read operations. Pick whichever fits the surrounding code. Both defer to the same `RegistrySearchProvider`, `LayerComposer`, and cache paths server-side; output drift between them is treated as a bug.
+The CLI and SDK are intentionally interchangeable for these read operations. Pick whichever fits the surrounding code. Both defer to the same `RegistrySearchProvider`, `LayerComposer`, and cache paths server-side; output drift between them is treated as a bug. The exception is the §4.7.10 delivery check, which the SDK runs and the read CLI does not, so an SDK call can refuse with a §6.10 code a record that the read CLI prints.
 
 Example: fully scripted curation without an SDK install.
 
@@ -707,14 +713,19 @@ for result in artifacts:
   {
     "id": "finance/close-reporting/run-variance-analysis",
     "status": "ok",
+    "type": "skill",
     "version": "1.2.0",
     "content_hash": "sha256:...",
+    "sensitivity": "internal",
     "delivery_hash": "sha256:...",
     "delivery_signature": "...",
     "artifact_revision": "2025-01-01T00:00:00.000000Z",
+    "frontmatter": "...",
     "manifest_body": "...",
+    "skill_raw": "...",
     "resources": [
-      { "path": "...", "presigned_url": "...", "content_hash": "..." }
+      { "path": "...", "presigned_url": "...", "content_hash": "..." },
+      { "path": "...", "inline": "...", "content_hash": "..." }
     ]
   },
   {
@@ -725,16 +736,23 @@ for result in artifacts:
 ]
 ```
 
+The example is illustrative. The **Delivery record** bullet below states the presence and JSON type of each member of an `ok` entry.
+
 **Semantics.**
 
 - **Hard cap:** 50 IDs per batch. The SDK splits larger sets transparently.
 - **Visibility:** identical to `load_artifact`. Items the caller cannot see come back as `status: "error"` with `visibility.denied`; no leak about whether the artifact exists in some hidden layer.
 - **Session consistency:** with `session_id`, the first occurrence of each `(id, "latest")` in the batch freezes the resolved version for the rest of the batch and session.
 - **Partial failure** does not fail the batch. Each item carries its own status.
+- **Delivery record:** this bullet is the only statement of the presence and JSON type of each batch-entry member the §4.7.10 procedure reads. An `ok` entry carries the strings `id`, `delivery_hash`, and `artifact_revision`. It carries each other member to which §7.2 "Record fields" maps a delivery-record field as a string under the same name, absent when its value is empty. It carries `delivery_signature` as a string, absent when the registry runs without a signing key. The §4.7.10 procedure reads an absent string as the empty value (step 2). The other members that paragraph names do not describe a batch entry. The entry carries no `manifest_body_url`, `resources_base64`, or `large_resources`, and none of the members §7.2 "Other response members" names. Its `resources` member is an array of reference objects. Each reference carries the strings `path` and `content_hash`. A reference to a resource the registry does not hold inline on the manifest record also carries the string `presigned_url`. Every other reference, including one whose resource also has a copy in object storage, carries its body in the string `inline`, absent when the body is empty, and the boolean `inline_base64`, absent when false. A consumer classifies each reference by §4.7.10 step 2. A consumer verifies the entry by the §4.7.10 procedure (§7.6.3). An entry that fails verification is returned with `status: "error"` and the failure's code.
 - **Materialization rate:** each item counts as one load against the §4.7.8 materialization rate of the tenant the request resolves to, as a `load_artifact` request does. Items are charged in request order whatever their outcome, so an item that comes back with `visibility.denied` is charged. When the rate refuses an item, that item and every later item come back as `status: "error"` with `quota.materialize_rate_exceeded`. They are neither loaded nor charged, and they resolve no `latest` version for the session. The items before the refused one are served as usual. A request rejected as a whole, such as one above the hard cap, charges nothing.
 - **Bandwidth:** a bundled resource the registry does not hold inline on the manifest record travels via a presigned URL (§4.4) so the response body stays small, and the SDK fetches those resources concurrently after the response. A resource the registry holds inline on the manifest record travels in the reference's `inline` field in place of `presigned_url`, including when a copy of it also exists in object storage, base64-encoded with `inline_base64: true` when its bytes are not valid UTF-8. The registry holds inline every resource at or below the §4.1 inline cutoff, and every resource of a row ingested while no object store was configured (§7.2), so every link it serves names an object the §13.4 stored-row admission read.
 
 **Not exposed as an MCP meta-tool** (§5). The MCP path is agent-mediated and load-on-demand; bulk loading is a programmatic-runtime concern that doesn't belong in the agent's tool list. The MCP server does not call this endpoint. It writes a §6.5 cache entry only from a `load_artifact` response whose §4.7.10 delivery record it has verified (§6.6), and it performs no startup warm-up.
+
+### 7.6.3 Delivery Verification
+
+Both SDKs run the §4.7.10 delivery check on every registry-served `load_artifact` response and every `ok` batch entry, and apply the §4.7.9 policy, its resolution order, and its SDK default to `delivery_signature` with the registry-managed verifier, as the §6.2 `PODIUM_SIGNATURE_PROVIDER` row states. The constructor argument that §4.7.9 names first is `verify_signatures` in Python and `verifySignatures` in TypeScript, and it takes `never` or `always`; any other value fails construction. A non-empty `PODIUM_VERIFY_SIGNATURES` or `defaults.verify_signatures` value other than `never` or `always` fails the client's resolution with an error naming the value and its source, and is never treated as unset. The key-list argument is `verify_keys` in Python and `verifyKeys` in TypeScript, and it takes the `PODIUM_SIGNATURE_VERIFY_KEY` syntax. The client exposes the resolved policy. The client resolves the policy and key set once, before its first registry request, and fails there with `config.signature_provider_unavailable` when the policy is `always` and no usable key resolves. The Python client also fails there with `config.signature_provider_unavailable`, naming the `podium-sdk[verify]` extra, when the policy is `always` and that extra, which provides its Ed25519 verifier, is not installed. The Python client resolves when it is constructed. The TypeScript client resolves in `fromEnv`, or, when constructed directly, before its first registry request, so constructing it reads no file. A single load that fails the check raises an error that carries the §6.10 code, and a failing batch entry follows §7.6.2. A batch response body that fails the §4.7.10 JSON rule makes `load_artifacts` raise, and `loadArtifacts` reject, with a `RegistryError` carrying `materialize.content_hash_mismatch`, and the call returns no entries, including none from a request it already completed for the same call. `materialize()` checks each large resource it fetches against its link's `content_hash` and writes no file of that artifact on a mismatch. An SDK frames a fetched `manifest_body_url` document and its derived body as the fetched bytes (§4.7.10), and returns them as text decoded as UTF-8 with each invalid sequence replaced by U+FFFD. `materialize()` writes that decoded text, so for a document that is not valid UTF-8 the SDK's materialized file differs from the fetched bytes that server-source `podium sync` writes (§4.7.10). The §6.4 overlay path runs no check.
 
 ## 7.7 Onboarding: `podium init`, `podium config show`, `podium login`
 
@@ -917,7 +935,7 @@ A server-side publisher inside the registry process is out of scope, because it 
 
 A GitHub Actions deployment uses one of two patterns, because GitHub starts a workflow from an external system only through the authenticated REST API (`repository_dispatch` or `workflow_dispatch`), and a Podium webhook receiver posts an HMAC-signed event body that GitHub's dispatch endpoint does not accept.
 
-**Pattern A, scheduled (no bridge).** A workflow in the marketplace repository runs `podium sync --config <path>` on a cron. `skip_if_no_changes` makes an empty run a no-op, so a 5-to-15-minute poll is inexpensive. No webhook receiver is involved, and the debounce window is not used.
+**Pattern A, scheduled (no bridge).** A workflow in the marketplace repository runs `podium sync --config <path>` on a cron. `skip_if_no_changes` makes an empty run a no-op, so a 5-to-15-minute poll is inexpensive. No webhook receiver is involved, and the debounce window is not used. The job sets `PODIUM_SIGNATURE_VERIFY_KEY`, because a server-source sync verifies every record it loads under the `always` default (§7.5). Without verification key material, the run exits with status 2 and `config.signature_provider_unavailable` at the point and with the outcome §7.5 states. Against a registry with signing off, the job sets `PODIUM_VERIFY_SIGNATURES=never` instead.
 
 ```yaml
 # .github/workflows/publish.yml in acme/agent-marketplace
@@ -935,6 +953,7 @@ jobs:
       - env:
           PODIUM_REGISTRY: ${{ secrets.PODIUM_REGISTRY }}
           PODIUM_TOKEN:    ${{ secrets.PODIUM_TOKEN }}   # the publishing identity's registry credential
+          PODIUM_SIGNATURE_VERIFY_KEY: ${{ secrets.PODIUM_SIGNATURE_VERIFY_KEY }}   # the registry's verification key set (§4.7.9)
         run: podium sync --config .podium/sync.yaml
 ```
 

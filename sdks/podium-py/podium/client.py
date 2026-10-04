@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import os
-import re
 import sys
 import threading
 import time
@@ -16,31 +14,8 @@ import webbrowser
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from . import _config, _oauth, _overlay
-
-
-class RegistryError(Exception):
-    """Raised when the registry returns a structured error envelope (§6.10)."""
-
-    def __init__(
-        self,
-        code: str,
-        message: str,
-        retryable: bool = False,
-        *,
-        details: dict[str, Any] | None = None,
-        suggested_action: str = "",
-    ) -> None:
-        self.code = code
-        self.message = message
-        self.retryable = retryable
-        # spec: §6.10 — the full envelope carries a machine-readable details map
-        # (for example {"runtime_iss": ...}) and an operator remediation hint.
-        # Callers read both off the exception; they default to an
-        # empty map and empty string when the registry omits them.
-        self.details: dict[str, Any] = details or {}
-        self.suggested_action = suggested_action
-        super().__init__(f"{code}: {message}")
+from . import _config, _delivery, _oauth, _overlay
+from ._errors import RegistryError
 
 
 # spec: §11 (Search browse mode test) — the search top_k cap. Distinct from the
@@ -195,65 +170,36 @@ def _presigned_sigv4(url: str) -> bool:
     return any(v for v in query.get("X-Amz-Signature", []))
 
 
-def _decode_inline_resources(
-    resources: dict[str, str], b64: bool
-) -> dict[str, str | bytes]:
-    """Decode inline bundled resources for materialization.
+def _text(value: str | bytes) -> str:
+    """Return a record field as text.
 
-    spec §4.1 / §7.2: a binary resource at or below the inline
-    cutoff is base64-encoded on the wire and the response carries
-    ``resources_base64: true`` so ``encoding/json`` does not replace its
-    non-UTF-8 bytes with U+FFFD. The flag is response-wide, so when set
-    every inline value is decoded back to raw bytes; otherwise the values
-    are UTF-8 text and pass through unchanged.
+    A field placed from a fetched manifest document holds the fetched bytes,
+    which §7.6.3 returns decoded as UTF-8 with each invalid sequence replaced
+    by U+FFFD.
     """
-    if not b64:
-        return dict(resources)
-    return {k: base64.b64decode(v) for k, v in resources.items()}
+    if isinstance(value, str):
+        return value
+    return bytes(value).decode("utf-8", errors="replace")
 
 
-# spec §4.3 / §6.6: split a canonical manifest document into its prose body the
-# same way the registry does (pkg/manifest SplitFrontmatter), so a manifest
-# delivered above the 256 KB inline cutoff via manifest_body_url reconstitutes a
-# byte-identical manifest_body. The opening ``---`` begins the YAML frontmatter
-# and the next ``---`` line closes it; the body is everything after, with leading
-# newlines trimmed. A document without frontmatter yields an empty body, matching
-# the registry, which leaves manifest_body unset when the document does not parse.
-_FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n?(.*)\Z", re.DOTALL)
+def _apply_manifest_body_url(served: _delivery.Served, fetch: Callable[[str], bytes]) -> None:
+    """Resolve a presigned ``manifest_body_url`` into the served record.
 
+    Spec: §4.7.10, §6.6, §7.6.3
 
-def _manifest_body_from(doc: str) -> str:
-    m = _FRONTMATTER_RE.match(doc)
-    return m.group(1).lstrip("\r\n") if m else ""
-
-
-def _apply_manifest_body_url(
-    link: dict[str, Any],
-    artifact_type: str,
-    manifest_body: str,
-    frontmatter: str,
-    skill_raw: str,
-    fetch: Callable[[str], bytes],
-) -> tuple[str, str, str]:
-    """Resolve a presigned ``manifest_body_url`` (spec §6.6) into the inline
-    manifest fields, returning ``(manifest_body, frontmatter, skill_raw)``.
-
-    A canonical manifest above the 256 KB inline cutoff is delivered as a
-    presigned URL with the inline ``manifest_body``, ``skill_raw``, and
-    canonical-document field cleared. Mirror the MCP server (cmd/podium-mcp
-    ``fetchManifestBody``): download the canonical document, set the canonical
-    field (``skill_raw`` for a skill, ``frontmatter`` otherwise), and re-derive
-    the prose body. For a skill the small ARTIFACT.md frontmatter still arrives
-    inline, so the caller's ``frontmatter`` is preserved.
+    A canonical manifest above the 256 KB inline cutoff arrives as a presigned
+    link with the inline manifest fields cleared. The document is fetched from
+    the link's exact-name ``presigned_url``, so an unknown ``url`` member is
+    ignored as the Go consumers ignore it, and the fetched bytes are checked
+    against the link's ``content_hash`` before the body is derived. The record
+    keeps the fetched bytes rather than decoded text, because the registry
+    frames the raw document and a document that is not valid UTF-8 would
+    otherwise fail the delivery hash.
     """
-    url = link.get("url") or link.get("presigned_url")
-    if not url:
-        raise RegistryError("registry.unknown", "manifest_body_url has no presigned URL")
-    doc = fetch(url).decode("utf-8")
-    body = _manifest_body_from(doc)
-    if artifact_type == "skill":
-        return body, frontmatter, doc
-    return body, doc, skill_raw
+    link = served.manifest_link
+    doc = fetch(link["presigned_url"])
+    _delivery.check_linked(doc, link.get("content_hash") or "", "manifest_body_url document")
+    _delivery.place_manifest_document(served, doc, _delivery.manifest_body_of(doc))
 
 
 @dataclass
@@ -262,8 +208,9 @@ class LoadedArtifact:
 
     ``materialize`` writes the artifact to disk in the canonical layout
     (spec §7.6, §2.2). ``resources`` are inline bytes returned in the
-    response; ``large_resources`` are §7.2 presigned references that
-    materialize fetches on demand.
+    response; ``large_resources`` are §7.2 link objects, each keyed
+    ``presigned_url`` and ``content_hash``, that materialize fetches on
+    demand.
     """
 
     id: str
@@ -278,9 +225,12 @@ class LoadedArtifact:
     # spec: §4.3.4 / §11 — the verbatim SKILL.md for a skill, delivered so the
     # materialized file is byte-identical to the authored source.
     skill_raw: str = ""
-    # spec: §4.7.10 — the registry's delivery attestation, passed through
-    # unverified. The SDK verifies nothing; a workspace-overlay load leaves
-    # both empty because no registry served the record.
+    # spec: §4.7.10, §7.6.3 — the registry's delivery attestation. On every
+    # registry-served load the client recomputes delivery_hash from the served
+    # record, compares it with this value, and applies its §4.7.9 policy to
+    # delivery_signature before it returns the artifact. A §6.4
+    # workspace-overlay load is exempt from the check and leaves both fields
+    # empty, because no registry served the record.
     delivery_hash: str = ""
     delivery_signature: str = ""
 
@@ -298,7 +248,8 @@ class LoadedArtifact:
         ``<to>/<id>/`` in the canonical layout: ``ARTIFACT.md`` for every
         type, ``SKILL.md`` for skills, and each bundled resource at its
         package-relative path. Large resources are fetched from their
-        §7.2 presigned URLs.
+        §7.2 presigned URLs and checked against their ``content_hash``
+        before any file is written (§7.6.3).
 
         ``harness`` accepts only ``"none"`` (§2.2, §7.6). The SDK does not
         embed the harness adapters, so any other value raises ValueError
@@ -336,8 +287,16 @@ class BatchResult:
     manifest_body: str = ""
     frontmatter: str = ""
     skill_raw: str = ""
+    # Each reference holds only the members §4.7.10 step 2 reads: a link
+    # reference {path, presigned_url, content_hash}, and an inline reference
+    # {path, content_hash, inline, inline_base64} whose body passed step 6.
     resources: list[dict[str, Any]] = field(default_factory=list)
-    # spec: §4.7.10 — the delivery attestation, passed through unverified.
+    # spec: §4.7.10, §7.6.3 — the registry's delivery attestation. On every ok
+    # batch entry the client recomputes delivery_hash from the served record,
+    # compares it with this value, and applies its §4.7.9 policy to
+    # delivery_signature; an entry that fails becomes an error result (§7.6.2).
+    # A §6.4 workspace-overlay load is exempt from the check and leaves both
+    # fields empty, because no registry served the record.
     delivery_hash: str = ""
     delivery_signature: str = ""
     error: "RegistryError | None" = None
@@ -355,25 +314,27 @@ class BatchResult:
         that forgets to check ``status`` fails loudly rather than writing
         an empty package. A resource the registry holds inline on the
         manifest record travels inline, and every other resource travels as
-        a §7.6.2 presigned reference fetched from its URL. ``harness``
-        accepts only ``"none"`` and is checked before ``status`` (§7.6), so
-        an invalid value raises ValueError on an ``error`` item too.
+        a §7.6.2 presigned reference fetched from its URL and checked against
+        its ``content_hash``. ``harness`` accepts only ``"none"`` and is
+        checked before ``status`` (§7.6), so an invalid value raises
+        ValueError on an ``error`` item too.
         """
         _require_canonical_harness(harness)
         if self.status != "ok":
             raise self.error or RegistryError("registry.unknown", f"cannot materialize {self.id}")
-        # §7.6.2: a resource the registry holds inline on the manifest record
-        # carries its bytes inline (base64-encoded when inline_base64 is set),
-        # at any size and whether or not an object store is configured. Every
-        # other resource carries a presigned_url, which is fetched.
+        # Spec: §4.7.10 step 2 — a reference with a non-empty presigned_url is
+        # a link reference; every other reference is inline.
         inline: dict[str, str | bytes] = {}
         large: dict[str, dict[str, Any]] = {}
         for r in self.resources:
             if r.get("presigned_url"):
-                large[r["path"]] = {"url": r["presigned_url"]}
+                large[r["path"]] = {
+                    "presigned_url": r["presigned_url"],
+                    "content_hash": r.get("content_hash", ""),
+                }
             else:
                 value = r.get("inline", "")
-                inline[r["path"]] = base64.b64decode(value) if r.get("inline_base64") else value
+                inline[r["path"]] = _delivery.decode_base64(value) if r.get("inline_base64") else value
         return _materialize_canonical(
             to,
             artifact_id=self.id,
@@ -398,6 +359,48 @@ def _require_canonical_harness(harness: str) -> None:
         )
 
 
+def _presigned_link(rel: str, link: Any) -> dict[str, Any]:
+    """Return a large-resource link that names a presigned URL.
+
+    Only the exact-name ``presigned_url`` member is read, the member the
+    registry serves, so a link that also carries an unknown ``url`` member is
+    fetched from where the Go consumers fetch it.
+    """
+    if not isinstance(link, dict) or not link.get("presigned_url"):
+        raise MaterializeError(f"large resource {rel!r} has no presigned URL")
+    return link
+
+
+def _canonical_files(
+    root: str,
+    *,
+    artifact_type: str,
+    frontmatter: str,
+    manifest_body: str,
+    skill_raw: str,
+    inline_resources: dict[str, str | bytes],
+) -> list[tuple[str, bytes]]:
+    """Return the manifest files and inline resources as (path, bytes) pairs.
+
+    The wire ``frontmatter`` already carries the complete ``ARTIFACT.md``
+    for non-skills; for skills it carries the frontmatter-only
+    ``ARTIFACT.md`` and the skill body arrives separately as
+    ``manifest_body``, so ``SKILL.md`` is reconstructed as
+    ``frontmatter + manifest_body`` (mirroring the MCP server's
+    server-source delivery). spec §6.6, §6.7.
+    """
+    files = [(os.path.join(root, "ARTIFACT.md"), frontmatter.encode())]
+    if artifact_type == "skill":
+        # spec: §4.3.4 / §11 — prefer the verbatim SKILL.md the registry
+        # delivers; fall back to frontmatter+body only when it is absent.
+        skill_md = skill_raw if skill_raw else (frontmatter + manifest_body)
+        files.append((os.path.join(root, "SKILL.md"), skill_md.encode()))
+    for rel, content in sorted((inline_resources or {}).items()):
+        data = content.encode() if isinstance(content, str) else bytes(content)
+        files.append((_safe_join(root, rel), data))
+    return files
+
+
 def _materialize_canonical(
     to: str,
     *,
@@ -412,68 +415,80 @@ def _materialize_canonical(
 ) -> list[str]:
     """Write the canonical (``none``-adapter) layout for one artifact.
 
-    The wire ``frontmatter`` already carries the complete ``ARTIFACT.md``
-    for non-skills; for skills it carries the frontmatter-only
-    ``ARTIFACT.md`` and the skill body arrives separately as
-    ``manifest_body``, so ``SKILL.md`` is reconstructed as
-    ``frontmatter + manifest_body`` (mirroring the MCP server's
-    server-source delivery). spec §6.6, §6.7.
+    Spec: §4.7.10, §7.6.3
+
+    Every large resource is fetched and checked against its link's
+    ``content_hash`` before the first file is written, so a mismatch raises
+    ``materialize.content_hash_mismatch`` and leaves no file of the artifact
+    on disk. Destination paths are resolved first too, so a path that escapes
+    the root raises before any fetch.
     """
     if not to:
         raise MaterializeError("destination path is empty")
     root = _safe_join(to, artifact_id)
-    written: list[str] = []
-
-    art_path = os.path.join(root, "ARTIFACT.md")
-    _write_file(art_path, frontmatter.encode())
-    written.append(art_path)
-
-    if artifact_type == "skill":
-        skill_path = os.path.join(root, "SKILL.md")
-        # spec: §4.3.4 / §11 — prefer the verbatim SKILL.md the registry
-        # delivers; fall back to frontmatter+body only when it is absent.
-        skill_md = skill_raw if skill_raw else (frontmatter + manifest_body)
-        _write_file(skill_path, skill_md.encode())
-        written.append(skill_path)
-
-    for rel, content in sorted((inline_resources or {}).items()):
-        path = _safe_join(root, rel)
-        data = content.encode() if isinstance(content, str) else bytes(content)
+    files = _canonical_files(
+        root,
+        artifact_type=artifact_type,
+        frontmatter=frontmatter,
+        manifest_body=manifest_body,
+        skill_raw=skill_raw,
+        inline_resources=inline_resources,
+    )
+    links = [
+        (_safe_join(root, rel), rel, _presigned_link(rel, link))
+        for rel, link in sorted((large_resources or {}).items())
+    ]
+    for path, rel, link in links:
+        body = fetch(link["presigned_url"])
+        _delivery.check_linked(body, link.get("content_hash") or "", f"large resource {rel!r}")
+        files.append((path, body))
+    for path, data in files:
         _write_file(path, data)
-        written.append(path)
-
-    for rel, link in sorted((large_resources or {}).items()):
-        path = _safe_join(root, rel)
-        url = link.get("url") or link.get("presigned_url") if isinstance(link, dict) else link
-        if not url:
-            raise MaterializeError(f"large resource {rel!r} has no presigned URL")
-        _write_file(path, fetch(url))
-        written.append(path)
-
-    return written
+    return [path for path, _ in files]
 
 
-def _batch_result_from(env: dict[str, Any]) -> BatchResult:
-    """Parse one §7.6.2 batch envelope into a BatchResult."""
-    err = None
-    if env.get("error"):
-        # spec: §13.2.1 / §6.10 — a batch item rejected with
-        # registry.read_only carries RegistryReadOnly so materialize()
-        # re-raises the specific type.
-        err = _registry_error_from_envelope(env["error"])
+def _batch_result_from(
+    entry: _delivery.BatchEntry, verification: _delivery.Verification
+) -> BatchResult:
+    """Build one BatchResult from a parsed §7.6.2 entry, verifying an ok entry.
+
+    Spec: §4.7.10, §7.6.2, §7.6.3
+
+    An ok entry that fails §4.7.10 steps 2 to 7 or the §4.7.9 policy becomes
+    ``status="error"`` carrying the refusal, and the other entries load.
+    """
+    raw_id = entry.members.get("id")
+    entry_id = raw_id if isinstance(raw_id, str) else ""
+    if entry.served is None and entry.error is None:
+        err = None
+        envelope = entry.members.get("error")
+        if isinstance(envelope, dict) and envelope:
+            # spec: §13.2.1 / §6.10 — a batch item rejected with
+            # registry.read_only carries RegistryReadOnly so materialize()
+            # re-raises the specific type.
+            err = _registry_error_from_envelope(envelope)
+        return BatchResult(id=entry_id, status=entry.status, error=err)
+    err = entry.error
+    if err is None:
+        try:
+            _delivery.check_delivery(entry.served, verification)
+        except RegistryError as exc:
+            err = exc
+    if err is not None:
+        return BatchResult(id=entry_id, status="error", error=err)
+    rec = entry.served.record
     return BatchResult(
-        id=env.get("id", ""),
-        status=env.get("status", ""),
-        version=env.get("version", ""),
-        content_hash=env.get("content_hash", ""),
-        type=env.get("type", ""),
-        manifest_body=env.get("manifest_body", ""),
-        frontmatter=env.get("frontmatter", ""),
-        skill_raw=env.get("skill_raw", ""),
-        resources=env.get("resources", []) or [],
-        delivery_hash=env.get("delivery_hash", ""),
-        delivery_signature=env.get("delivery_signature", ""),
-        error=err,
+        id=rec["id"],
+        status="ok",
+        version=rec["version"],
+        content_hash=rec["content_hash"],
+        type=rec["type"],
+        manifest_body=rec["manifest_body"],
+        frontmatter=rec["frontmatter"],
+        skill_raw=rec["skill_raw"],
+        resources=entry.served.references,
+        delivery_hash=entry.served.hash,
+        delivery_signature=entry.served.signature,
     )
 
 
@@ -680,6 +695,16 @@ class Client:
     Construct with an explicit registry URL or call `Client.from_env()` to
     pick up `PODIUM_REGISTRY`, `PODIUM_IDENTITY_PROVIDER`,
     `PODIUM_OVERLAY_PATH`, and `PODIUM_CACHE_MODE` per §6.2.
+
+    Spec: §4.7.9, §7.6.3
+
+    ``verify_signatures`` (``"never"`` or ``"always"``) and ``verify_keys`` (a
+    ``PODIUM_SIGNATURE_VERIFY_KEY`` key list) configure the delivery check.
+    The constructor resolves the policy and key set once, before any registry
+    request, and exposes the policy as ``verify_signatures``. An invalid policy
+    value raises ``ValueError``; ``always`` with no usable key, or without the
+    ``podium-sdk[verify]`` extra, raises ``RegistryError`` with
+    ``config.signature_provider_unavailable``.
     """
 
     def __init__(
@@ -690,6 +715,8 @@ class Client:
         overlay_path: str | None = None,
         token: str = "",
         cache_mode: str = "always-revalidate",
+        verify_signatures: str | None = None,
+        verify_keys: str | None = None,
     ) -> None:
         self.registry = registry.rstrip("/")
         self.identity_provider = identity_provider
@@ -718,6 +745,17 @@ class Client:
                 f"cache_mode must be one of {_CACHE_MODES}, got {cache_mode!r}"
             )
         self.cache_mode = cache_mode
+        # spec: §4.7.9 / §7.6.3 — the argument, PODIUM_VERIFY_SIGNATURES,
+        # defaults.verify_signatures, then the SDK default, which is always
+        # when a verification key is configured and never otherwise.
+        self._verification = _delivery.resolve_verification(
+            verify_signatures,
+            verify_keys,
+            os.environ,
+            os.getcwd(),
+            os.path.expanduser("~"),
+        )
+        self.verify_signatures = self._verification.policy
 
     @classmethod
     def from_env(cls) -> "Client":
@@ -1400,44 +1438,34 @@ class Client:
         # consistent latest resolution within a session (§4.7.6).
         if session_id:
             params["session_id"] = session_id
-        body = self._get("/v1/load_artifact", params)
-        manifest_body = body.get("manifest_body", "")
-        frontmatter = body.get("frontmatter", "")
-        skill_raw = body.get("skill_raw", "")
-        # spec §6.6 — a canonical manifest above the 256 KB inline cutoff arrives
-        # as a presigned manifest_body_url with the inline fields cleared. Resolve
-        # it here so the returned artifact carries the manifest fields regardless
-        # of the manifest's size, matching the inline path and the MCP server.
-        # The default follower sends the client's token to a URL that is not
-        # SigV4 presigned (§13.12); a caller-supplied fetch owns its transport.
-        mbu = body.get("manifest_body_url")
-        if mbu:
-            manifest_body, frontmatter, skill_raw = _apply_manifest_body_url(
-                mbu,
-                body.get("type", ""),
-                manifest_body,
-                frontmatter,
-                skill_raw,
-                fetch
-                or (lambda u: _fetch_bytes(u, {} if _presigned_sigv4(u) else self._headers())),
+        # spec: §4.7.10 / §7.6.3 — the body is decoded by the verification
+        # procedure from its raw bytes, the manifest document is fetched and
+        # checked, and the record is verified before anything is returned. The
+        # default follower sends the client's token to a URL that is not SigV4
+        # presigned (§13.12); a caller-supplied fetch owns its transport.
+        served = _delivery.parse_load_response(self._get_raw("/v1/load_artifact", params))
+        if served.manifest_link is not None:
+            _apply_manifest_body_url(
+                served,
+                fetch or (lambda u: _fetch_bytes(u, {} if _presigned_sigv4(u) else self._headers())),
             )
+        _delivery.check_delivery(served, self._verification)
+        rec = served.record
         return LoadedArtifact(
-            id=body.get("id", artifact_id),
-            type=body.get("type", ""),
-            version=body.get("version", ""),
-            manifest_body=manifest_body,
-            frontmatter=frontmatter,
-            skill_raw=skill_raw,
-            # §4.1/§7.2: decode a base64-flagged inline set back to
-            # raw bytes so a binary resource materializes uncorrupted.
-            resources=_decode_inline_resources(
-                body.get("resources", {}) or {}, body.get("resources_base64", False)
-            ),
+            id=rec["id"],
+            type=rec["type"],
+            version=rec["version"],
+            manifest_body=_text(rec["manifest_body"]),
+            frontmatter=_text(rec["frontmatter"]),
+            skill_raw=_text(rec["skill_raw"]),
+            # §4.1/§7.2: a base64-flagged inline set arrives decoded to raw
+            # bytes so a binary resource materializes uncorrupted.
+            resources=dict(served.resources),
             # §7.2 large resources travel as presigned references the
             # consumer fetches from object storage; materialize() pulls them.
-            large_resources=body.get("large_resources", {}) or {},
-            delivery_hash=body.get("delivery_hash", ""),
-            delivery_signature=body.get("delivery_signature", ""),
+            large_resources=served.links,
+            delivery_hash=served.hash,
+            delivery_signature=served.signature,
         )
 
     def load_artifacts(
@@ -1454,12 +1482,20 @@ class Client:
         ``status="ok"`` with the manifest body (and a ``materialize()``
         helper), or ``status="error"`` with a §6.10 envelope. Partial
         failure does not raise.
+
+        Spec: §4.7.10, §7.6.2, §7.6.3
+
+        Each ok entry is verified on its own, and an entry that fails the
+        delivery check becomes an error result. A response body that fails
+        the §4.7.10 JSON rule raises ``RegistryError`` with
+        ``materialize.content_hash_mismatch``, and the call returns no
+        entries, including none from a chunk that already succeeded.
         """
         if not ids:
             return []
         # §7.4 offline-only short-circuit before any network request.
         self._guard_offline()
-        out: list[BatchResult] = []
+        entries: list[_delivery.BatchEntry] = []
         chunk_size = 50
         for chunk_start in range(0, len(ids), chunk_size):
             chunk = ids[chunk_start : chunk_start + chunk_size]
@@ -1468,24 +1504,27 @@ class Client:
                 body["session_id"] = session_id
             if version_pins:
                 body["version_pins"] = {k: v for k, v in version_pins.items() if k in chunk}
-            data = json.dumps(body).encode()
-            req = urllib.request.Request(
-                self.registry + "/v1/artifacts:batchLoad",
-                data=data,
-                headers=self._headers({"Content-Type": "application/json"}),
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req) as resp:
-                    raw = resp.read()
-            except urllib.error.HTTPError as exc:
-                self._raise_from_http_error(exc)
-            except urllib.error.URLError as exc:
-                # spec: §7.4 — an unreachable registry on the batch path also
-                # surfaces the structured no-cache error.
-                raise self._unreachable_error(exc) from exc
-            out.extend(_batch_result_from(env) for env in json.loads(raw))
-        return out
+            raw = self._post_raw("/v1/artifacts:batchLoad", body)
+            entries.extend(_delivery.parse_batch_response(raw))
+        return [_batch_result_from(e, self._verification) for e in entries]
+
+    def _post_raw(self, path: str, payload: dict[str, Any]) -> bytes:
+        """POST ``payload`` as JSON and return the raw response body."""
+        req = urllib.request.Request(
+            self.registry + path,
+            data=json.dumps(payload).encode(),
+            headers=self._headers({"Content-Type": "application/json"}),
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            self._raise_from_http_error(exc)
+        except urllib.error.URLError as exc:
+            # spec: §7.4 — an unreachable registry on the batch path also
+            # surfaces the structured no-cache error.
+            raise self._unreachable_error(exc) from exc
 
     def dependents_of(self, artifact_id: str) -> list[DependencyEdge]:
         """Return reverse-dependency edges for artifact_id (spec §7.6, §4.7.6).
@@ -1557,6 +1596,10 @@ class Client:
                     continue
 
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        return json.loads(self._get_raw(path, params))
+
+    def _get_raw(self, path: str, params: dict[str, Any]) -> bytes:
+        """GET ``path`` and return the raw response body."""
         # §7.4 offline-only short-circuit before any network request.
         self._guard_offline()
         url = self.registry + path
@@ -1572,7 +1615,7 @@ class Client:
             # spec: §7.4 — a transport failure (no HTTP response) is the
             # always-revalidate no-cache case.
             raise self._unreachable_error(exc) from exc
-        return json.loads(body)
+        return body
 
     def _raise_from_http_error(self, exc: urllib.error.HTTPError) -> None:
         try:

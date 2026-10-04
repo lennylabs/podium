@@ -693,11 +693,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   The response no longer carries `raw_frontmatter`, `manifest_merged`, or
   `signature`, and a merged manifest above the inline cutoff is served through
   `manifest_body_url` like any other.
-  A client that read any of the removed fields reads the new ones: `podium-mcp`
-  recomputes `delivery_hash` on every load, independent of
-  `PODIUM_VERIFY_SIGNATURES` and of sensitivity, and fails a mismatch with
-  `materialize.content_hash_mismatch` before it applies its signature policy to
-  `delivery_signature`. `podium verify <artifact>` verifies the delivery pair,
+  A client that read any of the removed fields reads the new ones:
+  `podium-mcp`, server-source `podium sync`, and the Python and TypeScript
+  SDKs recompute `delivery_hash` on every registry-served load, independent of
+  `PODIUM_VERIFY_SIGNATURES` and of sensitivity, and fail a mismatch with
+  `materialize.content_hash_mismatch` before they apply their signature policy
+  to `delivery_signature`. Each `ok` `artifacts:batchLoad` item also carries
+  `sensitivity`, absent when the artifact declares none, so a client rebuilds
+  the item's delivery record from the item alone, and the SDKs return a batch
+  item that fails the check with `status: "error"` while the other items load.
+  `podium-mcp` now reports a fetched body that fails the §4.7.10 step 6 check,
+  which it reported as `materialize.fetch_failed`, and a `resources_base64`
+  value that is not canonical base64, which it reported as
+  `materialize.invalid_base64`, as `materialize.content_hash_mismatch`.
+  Server-source `podium sync` and the SDKs frame `artifact_revision` into the
+  record they verify and do not compare it with an earlier value, so
+  `materialize.stale_resolution` remains a `podium-mcp` refusal. The Python SDK
+  reads a `large_resources` link's URL from its `presigned_url` key alone, so a
+  caller-built `LoadedArtifact` link keyed `url`, or given as a bare string,
+  raises `MaterializeError`. `podium verify <artifact>` verifies the delivery pair,
   and with `--signature` it verifies that envelope over the content hash. The
   `load_artifact` entity tag folds in the `extends_pin` value the caller is
   served. A captured record still verifies when it is replayed, and
@@ -788,6 +802,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `podium-mcp` announces a `never` that a `sync.yaml` file supplied with a
   startup line naming the file. `defaults.verify_signatures` resolves across
   the `sync.yaml` scopes, and `podium config show` reports it.
+  Server-source `podium sync` resolves its policy and verification key set by
+  the `podium-mcp` rules and defaults and reads no `PODIUM_SIGNATURE_PROVIDER`,
+  so a sync against a remote registry with no key material exits with status 2
+  and `config.signature_provider_unavailable`, and a keyed sync against a
+  registry that serves no `delivery_signature` fails with
+  `materialize.signature_missing`. A standalone sync on the registry's machine
+  resolves the registry's key file with no setup. The Python SDK takes the
+  `verify_signatures` and `verify_keys` arguments, and the TypeScript SDK takes
+  the `verifySignatures` and `verifyKeys` options. Each SDK defaults to
+  `always` only when a verification key is configured, and otherwise to
+  `never`. The Python SDK verifies signatures through the `podium-sdk[verify]`
+  extra, which installs `cryptography`. Roll the registry before its SDK
+  consumers, because a registry on the previous release serves no batch
+  `sensitivity`, and a batch item for an artifact that declares one then fails
+  with `materialize.content_hash_mismatch`.
 - **The registry admits each stored row before it serves the row's content**
   (§13.4): a full `load_artifact` and each `artifacts:batchLoad` item recompute
   the row's content hash, check each bundled resource's stored hash and size
@@ -1091,6 +1120,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `PODIUM_MAX_USER_LAYERS` environment row), and `docs/deployment/clustered.md`
   follow, and the `podium admin tenant` flag help states the cap's zero and
   negative rule.
+- §4.7.10 states the delivery verification procedure every consumer follows,
+  from the JSON rule and the exact-name members through canonical base64, the
+  byte-compared resource paths, the record framing, and the fetched-body check,
+  and §4.7.9 states the registry-managed envelope format.
+  `docs/reference/http-api.md` gains a "Verifying a response" section with the
+  procedure and the envelope format, `docs/reference/cli.md` describes the
+  delivery check in server-source `podium sync`, and
+  `docs/consuming/custom-via-sdk.md` gains a "Delivery verification" section
+  for the SDKs.
 
 ## [0.4.0] - 2026-09-05
 

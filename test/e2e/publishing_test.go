@@ -691,7 +691,7 @@ func TestPublishing_ServerSourceCredentialSelectsEffectiveView(t *testing.T) {
 		remote := bareRemote(t)
 		ws := t.TempDir()
 		cfg := writeSyncConfigMarketplace(t, ws, srv.URL, remote, "claude-code")
-		res := runPodium(t, "", append(gitEnv(), "PODIUM_TOKEN="+restrictedToken), "sync", "--config", cfg)
+		res := runPodium(t, "", append(gitEnv(), "PODIUM_TOKEN="+restrictedToken, "PODIUM_VERIFY_SIGNATURES=never"), "sync", "--config", cfg)
 		if res.Exit != 0 {
 			t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 		}
@@ -713,6 +713,7 @@ func TestPublishing_ServerSourceCredentialSelectsEffectiveView(t *testing.T) {
 			"PODIUM_SESSION_TOKEN=",
 			"PODIUM_SESSION_TOKEN_FILE=",
 			"PODIUM_TOKEN_KEYCHAIN_NAME=podium-nonexistent-test-service",
+			"PODIUM_VERIFY_SIGNATURES=never",
 		)
 		res := runPodium(t, "", env, "sync", "--config", cfg)
 		if res.Exit != 0 {
@@ -1447,14 +1448,14 @@ func newEffectiveViewStub(t *testing.T, restrictedToken string) *httptest.Server
 			id := r.URL.Query().Get("id")
 			for _, a := range restricted {
 				if a.id == id && authorized(r) {
-					_ = json.NewEncoder(w).Encode(map[string]any{
+					_ = json.NewEncoder(w).Encode(testharness.SealDelivery(map[string]any{
 						"id":           a.id,
 						"type":         "skill",
 						"content_hash": "sha256:deadbeef",
 						"layer":        "team-finance",
 						"frontmatter":  a.frontmatter,
 						"skill_raw":    a.skill,
-					})
+					}))
 					return
 				}
 			}

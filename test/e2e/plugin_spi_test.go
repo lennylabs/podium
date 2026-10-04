@@ -790,7 +790,7 @@ func TestPluginSPI_SyncIncludeOne(t *testing.T) {
 	srv := startServer(t, reg)
 	tgt := t.TempDir()
 
-	res := runPodium(t, "", nil, "sync",
+	res := runPodium(t, "", srvSyncEnv(srv), "sync",
 		"--registry", srv.BaseURL,
 		"--harness", "none",
 		"--target", tgt,
@@ -826,7 +826,7 @@ func TestPluginSPI_SyncIncludeMultiple(t *testing.T) {
 	srv := startServer(t, reg)
 	tgt := t.TempDir()
 
-	res := runPodium(t, "", nil, "sync",
+	res := runPodium(t, "", srvSyncEnv(srv), "sync",
 		"--registry", srv.BaseURL,
 		"--harness", "none",
 		"--target", tgt,
@@ -869,7 +869,7 @@ func TestPluginSPI_SyncIncludeReproducible(t *testing.T) {
 	tgtB := t.TempDir()
 
 	for _, tgt := range []string{tgtA, tgtB} {
-		res := runPodium(t, "", nil, "sync",
+		res := runPodium(t, "", srvSyncEnv(srv), "sync",
 			"--registry", srv.BaseURL,
 			"--harness", "none",
 			"--target", tgt,

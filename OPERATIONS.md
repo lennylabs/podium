@@ -55,7 +55,7 @@ Required before the first `vX.Y.Z` tag fires the release workflow successfully.
 
 The release workflow's `publish-py` job uses [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC-based, no API token stored as a secret). Do this once:
 
-The PyPI distribution name is `podium-sdk` (the plain `podium` name was taken). The Python import name stays `podium` — users run `pip install podium-sdk` then `from podium import Client`.
+The PyPI distribution name is `podium-sdk` (the plain `podium` name was taken). The Python import name stays `podium` — users run `pip install 'podium-sdk[verify]'` then `from podium import Client`.
 
 1. Reserve the project name. The first release must be uploaded manually so PyPI knows the package exists:
    ```bash

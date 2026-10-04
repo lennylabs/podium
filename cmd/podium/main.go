@@ -389,12 +389,18 @@ func syncCmd(args []string) int {
 		Scope:        resolved.Scope,
 		CacheMode:    cacheMode,
 		Token:        token,
+		Delivery:     newSyncDeliveryCheck(ws),
 	}
 	if *watch {
 		return runWatchLoop(syncOpts, overlayPath, *asJSON)
 	}
 	res, err := sync.Run(syncOpts)
 	if err != nil {
+		// Spec: §7.5 — a delivery check that cannot be resolved is a
+		// configuration error and exits 2; every other load failure exits 1.
+		if reportDeliveryConfigError(err, "") {
+			return 2
+		}
 		fmt.Fprintf(os.Stderr, "sync failed: %v\n", err)
 		return 1
 	}
@@ -441,8 +447,16 @@ func runWatchLoop(opts sync.Options, overlay string, asJSON bool) int {
 		return 1
 	}
 	failures := 0
+	configErr := false
 	for ev := range events {
 		if ev.Err != nil {
+			// Spec: §7.5 — the watcher stops before it subscribes when the
+			// delivery check cannot be resolved, so the channel closes and the
+			// loop exits 2.
+			if reportDeliveryConfigError(ev.Err, "") {
+				configErr = true
+				continue
+			}
 			fmt.Fprintf(os.Stderr, "sync failed: %v\n", ev.Err)
 			failures++
 			continue
@@ -458,6 +472,9 @@ func runWatchLoop(opts sync.Options, overlay string, asJSON bool) int {
 		if reportDropped(os.Stderr, ev.Result.Dropped) {
 			failures++
 		}
+	}
+	if configErr {
+		return 2
 	}
 	if failures > 0 {
 		return 1
@@ -525,15 +542,23 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watc
 	if check {
 		_, _ = fmt.Fprintln(os.Stdout, "sync.yaml: ok")
 	}
+	// Spec: §7.5.2 — the delivery-check policy is discovered from the config
+	// file's workspace, the same workspace PlanMultiTarget receives.
+	delivery := newSyncDeliveryCheck(workspace)
 	failures := 0
 	for _, p := range plans {
 		fmt.Printf("== target %s ==\n", p.ID)
 		var rerr error
 		switch p.Kind {
 		case sync.KindMarketplace:
-			rerr = runMarketplaceTarget(ctx, p, dryRun, check, asJSON)
+			rerr = runMarketplaceTarget(ctx, p, delivery, dryRun, check, asJSON)
 		default:
-			rerr = runWorkspaceTarget(ctx, p, cacheMode, dryRun, check, asJSON)
+			rerr = runWorkspaceTarget(ctx, p, delivery, cacheMode, dryRun, check, asJSON)
+		}
+		// Spec: §7.5 — a resolution refusal is the same for every later
+		// target, so the run stops at the refused target and exits 2.
+		if reportDeliveryConfigError(rerr, "target "+p.ID+": ") {
+			return 2
 		}
 		if rerr != nil {
 			fmt.Fprintf(os.Stderr, "target %s: %v\n", p.ID, rerr)
@@ -556,7 +581,7 @@ var errDropped = errors.New("dropped at least one artifact (ingest.collision)")
 // one (§7.5.2). Under check it runs sync.Run with DryRun set so no tree or
 // lock is written, and skips the workflow phases. Under dryRun it resolves and
 // reports without writing, and skips the workflow phases.
-func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, cacheMode string, dryRun, check, asJSON bool) error {
+func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sync.DeliveryCheckFunc, cacheMode string, dryRun, check, asJSON bool) error {
 	abs, err := filepath.Abs(p.Target)
 	if err != nil {
 		return err
@@ -581,6 +606,7 @@ func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, cacheMode s
 		Profile:      p.Profile,
 		Scope:        p.Scope,
 		CacheMode:    cacheMode,
+		Delivery:     delivery,
 	})
 	if err != nil {
 		return err
@@ -631,7 +657,7 @@ func droppedErr(dropped bool) error {
 // server source renders the anonymous public view. Under check the runner
 // validates the resolved output and returns before the prepare clone or the
 // render, so no tree is written.
-func runMarketplaceTarget(ctx context.Context, p sync.MultiTargetPlan, dryRun, check, asJSON bool) error {
+func runMarketplaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sync.DeliveryCheckFunc, dryRun, check, asJSON bool) error {
 	out := sync.ResolvedOutput{
 		ID:            p.ID,
 		Registry:      p.Registry,
@@ -659,13 +685,14 @@ func runMarketplaceTarget(ctx context.Context, p sync.MultiTargetPlan, dryRun, c
 		token = readPublishToken(out.Registry)
 	}
 	res, err := sync.RunMarketplace(ctx, sync.RunOptions{
-		Output:  out,
-		Token:   token,
-		Workdir: workdir,
-		DryRun:  dryRun,
-		Check:   check,
-		Stdout:  marketplaceStdout(asJSON),
-		Stderr:  os.Stderr,
+		Output:   out,
+		Token:    token,
+		Workdir:  workdir,
+		DryRun:   dryRun,
+		Check:    check,
+		Stdout:   marketplaceStdout(asJSON),
+		Stderr:   os.Stderr,
+		Delivery: delivery,
 	})
 	if err != nil {
 		return err
@@ -808,8 +835,14 @@ func syncOverrideCmd(args []string) int {
 		Reset: *reset, DryRun: *dryRun,
 		RegistryPath: registryPath,
 		AdapterID:    resolveOverrideHarness(*harness, abs),
+		Delivery:     newSyncDeliveryCheck(workingDir()),
 	})
 	if err != nil {
+		// Spec: §7.5 — the resolution refusal arrives wrapped as
+		// override: materialize:, after the toggle change is written.
+		if reportDeliveryConfigError(err, "") {
+			return 2
+		}
 		fmt.Fprintf(os.Stderr, "override failed: %v\n", err)
 		return 1
 	}

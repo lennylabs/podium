@@ -3,65 +3,15 @@
 from __future__ import annotations
 
 import base64
-import http.server
 import json
-import socket
-import threading
 import urllib.error
 import urllib.request
 
 import pytest
+from conftest import served
 
 from podium import Client, MaterializeError, RegistryError
 from podium.client import BatchResult, LoadedArtifact
-
-
-class _StubHandler(http.server.BaseHTTPRequestHandler):
-    """Records the last request and replies with whatever the test sets."""
-
-    def log_message(self, format, *args):  # noqa: A002 - signature inherited
-        pass
-
-    def do_GET(self):  # noqa: N802 - signature inherited
-        self.server.last_path = self.path  # type: ignore[attr-defined]
-        self.server.last_auth = self.headers.get("Authorization", "")  # type: ignore[attr-defined]
-        body = json.dumps(self.server.next_response).encode()  # type: ignore[attr-defined]
-        self.send_response(self.server.next_status)  # type: ignore[attr-defined]
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_POST(self):  # noqa: N802 - signature inherited
-        self.server.last_path = self.path  # type: ignore[attr-defined]
-        length = int(self.headers.get("Content-Length", "0"))
-        self.server.last_body = self.rfile.read(length)  # type: ignore[attr-defined]
-        body = json.dumps(self.server.next_response).encode()  # type: ignore[attr-defined]
-        self.send_response(self.server.next_status)  # type: ignore[attr-defined]
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-
-@pytest.fixture()
-def stub_server():
-    sock = socket.socket()
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    sock.close()
-
-    server = http.server.HTTPServer(("127.0.0.1", port), _StubHandler)
-    server.next_status = 200
-    server.next_response = {}
-    server.last_path = ""
-    server.last_auth = ""
-
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield server
-    server.shutdown()
-    thread.join()
 
 
 # Spec: §7.6 SDK surface — search_artifacts forwards to GET /v1/search_artifacts
@@ -114,14 +64,14 @@ def test_search_artifacts_surfaces_frontmatter(stub_server):
 # Spec: §7.6 SDK surface — load_artifact returns a LoadedArtifact with
 # manifest body and bundled resources.
 def test_load_artifact_returns_manifest_and_resources(stub_server):
-    stub_server.next_response = {
+    stub_server.next_response = served({
         "id": "finance/run",
         "type": "skill",
         "version": "1.0.0",
         "manifest_body": "Body.",
         "frontmatter": "---\ntype: skill\n---\n",
         "resources": {"scripts/run.py": "print('run')\n"},
-    }
+    })
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
     art = client.load_artifact("finance/run")
 
@@ -134,15 +84,18 @@ def test_load_artifact_returns_manifest_and_resources(stub_server):
 # manifest_body_url; load_artifact fetches it and restores the inline fields. For
 # a context the canonical document is the full ARTIFACT.md (frontmatter).
 def test_load_artifact_resolves_manifest_body_url_context(stub_server):
-    stub_server.next_response = {
-        "id": "big/ctx",
-        "type": "context",
-        "version": "1.0.0",
-        "manifest_body": "",
-        "frontmatter": "",
-        "manifest_body_url": {"presigned_url": "http://store/mb", "content_hash": "sha256:abc"},
-    }
     doc = b"---\ntype: context\n---\n\nThe big body.\n"
+    stub_server.next_response = served(
+        {
+            "id": "big/ctx",
+            "type": "context",
+            "version": "1.0.0",
+            "manifest_body": "",
+            "frontmatter": "",
+            "manifest_body_url": {"presigned_url": "http://store/mb"},
+        },
+        fetched={"http://store/mb": doc},
+    )
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
     art = client.load_artifact("big/ctx", fetch=lambda url: doc)
 
@@ -154,16 +107,19 @@ def test_load_artifact_resolves_manifest_body_url_context(stub_server):
 # (skill_raw); the small inline ARTIFACT.md frontmatter is preserved, and
 # materialize writes both files.
 def test_load_artifact_resolves_manifest_body_url_skill(stub_server, tmp_path):
-    stub_server.next_response = {
-        "id": "eng/big-skill",
-        "type": "skill",
-        "version": "1.0.0",
-        "manifest_body": "",
-        "skill_raw": "",
-        "frontmatter": "---\ntype: skill\n---\n",
-        "manifest_body_url": {"presigned_url": "http://store/skill"},
-    }
     skill_md = b"---\nname: big-skill\n---\n\nBig skill body.\n"
+    stub_server.next_response = served(
+        {
+            "id": "eng/big-skill",
+            "type": "skill",
+            "version": "1.0.0",
+            "manifest_body": "",
+            "skill_raw": "",
+            "frontmatter": "---\ntype: skill\n---\n",
+            "manifest_body_url": {"presigned_url": "http://store/skill"},
+        },
+        fetched={"http://store/skill": skill_md},
+    )
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
     art = client.load_artifact("eng/big-skill", fetch=lambda url: skill_md)
 
@@ -178,52 +134,19 @@ def test_load_artifact_resolves_manifest_body_url_skill(stub_server, tmp_path):
     assert str(root / "SKILL.md") in written
 
 
-class _ObjectHandler(http.server.BaseHTTPRequestHandler):
-    """A stub object route: records each request's Authorization header and,
-    when ``required_auth`` is set, answers 404 to a request without it, as the
-    filesystem backend's /objects route does for a caller it cannot see."""
-
-    def log_message(self, format, *args):  # noqa: A002 - signature inherited
-        pass
-
-    def do_GET(self):  # noqa: N802 - signature inherited
-        auth = self.headers.get("Authorization")
-        self.server.auths.append(auth)  # type: ignore[attr-defined]
-        required = self.server.required_auth  # type: ignore[attr-defined]
-        if required and auth != required:
-            self.send_response(404)
-            self.end_headers()
-            return
-        body = self.server.doc  # type: ignore[attr-defined]
-        self.send_response(200)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-
-@pytest.fixture()
-def object_server():
-    server = http.server.HTTPServer(("127.0.0.1", 0), _ObjectHandler)
-    server.auths = []
-    server.required_auth = ""
-    server.doc = b"---\ntype: context\n---\n\nThe big body.\n"
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield server
-    server.shutdown()
-    thread.join()
-
-
 def _serve_manifest_body_url(stub_server, object_server, query=""):
     url = f"http://127.0.0.1:{object_server.server_port}/objects/abc{query}"
-    stub_server.next_response = {
-        "id": "big/ctx",
-        "type": "context",
-        "version": "1.0.0",
-        "manifest_body": "",
-        "frontmatter": "",
-        "manifest_body_url": {"presigned_url": url, "content_hash": "sha256:abc"},
-    }
+    stub_server.next_response = served(
+        {
+            "id": "big/ctx",
+            "type": "context",
+            "version": "1.0.0",
+            "manifest_body": "",
+            "frontmatter": "",
+            "manifest_body_url": {"presigned_url": url},
+        },
+        fetched={url: object_server.doc},
+    )
 
 
 # Spec: §13.12 — the default manifest-body follower sends the client's token to
@@ -261,19 +184,20 @@ def test_load_artifact_manifest_body_url_without_token_sends_no_header(stub_serv
 
 
 # Spec: §7.2 — a single-load large resource arrives with its URL under
-# presigned_url; materialize resolves it (the SDK reads url or presigned_url)
-# and writes the fetched bytes.
+# presigned_url; materialize resolves it (the SDK reads presigned_url) and
+# writes the fetched bytes.
 def test_load_artifact_large_resource_presigned_materializes(stub_server, tmp_path):
-    stub_server.next_response = {
-        "id": "big/res",
-        "type": "context",
-        "version": "1.0.0",
-        "manifest_body": "B",
-        "frontmatter": "---\ntype: context\n---\nB",
-        "large_resources": {
-            "data/big.bin": {"presigned_url": "http://store/big", "content_hash": "sha256:x"},
+    stub_server.next_response = served(
+        {
+            "id": "big/res",
+            "type": "context",
+            "version": "1.0.0",
+            "manifest_body": "B",
+            "frontmatter": "---\ntype: context\n---\nB",
+            "large_resources": {"data/big.bin": {"presigned_url": "http://store/big"}},
         },
-    }
+        fetched={"http://store/big": b"BIGDATA"},
+    )
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
     art = client.load_artifact("big/res")
 
@@ -300,14 +224,17 @@ def test_load_artifact_manifest_body_url_without_url_raises(stub_server):
 # Spec: §6.6 — a canonical document the registry could not split (no frontmatter)
 # yields an empty manifest_body, matching the registry's own fallback.
 def test_manifest_body_from_without_frontmatter_is_empty(stub_server):
-    stub_server.next_response = {
-        "id": "big/ctx",
-        "type": "context",
-        "version": "1.0.0",
-        "manifest_body": "",
-        "frontmatter": "",
-        "manifest_body_url": {"presigned_url": "http://store/mb"},
-    }
+    stub_server.next_response = served(
+        {
+            "id": "big/ctx",
+            "type": "context",
+            "version": "1.0.0",
+            "manifest_body": "",
+            "frontmatter": "",
+            "manifest_body_url": {"presigned_url": "http://store/mb"},
+        },
+        fetched={"http://store/mb": b"no frontmatter here"},
+    )
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
     art = client.load_artifact("big/ctx", fetch=lambda url: b"no frontmatter here")
     assert art.frontmatter == "no frontmatter here"
@@ -378,10 +305,10 @@ def test_search_artifacts_forwards_session_id(stub_server):
 # Spec: §7.6.1 — load_artifact forwards --session-id for consistent latest
 # resolution within a session.
 def test_load_artifact_forwards_session_id(stub_server):
-    stub_server.next_response = {
+    stub_server.next_response = served({
         "id": "finance/run", "type": "skill", "version": "1.0.0",
         "manifest_body": "b", "frontmatter": "f",
-    }
+    })
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
     client.load_artifact("finance/run", session_id="sess-9")
     assert "session_id=sess-9" in stub_server.last_path
@@ -451,7 +378,7 @@ def test_load_domain_forwards_explicit_depth(stub_server):
 # body carries ids and session_id and selects no harness.
 def test_load_artifacts_returns_envelopes(stub_server):
     stub_server.next_response = [
-        {"id": "a", "status": "ok", "version": "1.0.0", "content_hash": "sha256:a"},
+        served({"id": "a", "status": "ok", "version": "1.0.0", "content_hash": "sha256:a"}),
         {"id": "b", "status": "error", "error": {"code": "registry.not_found", "message": "missing"}},
     ]
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
@@ -467,39 +394,30 @@ def test_load_artifacts_returns_envelopes(stub_server):
     assert out[1].error is not None and out[1].error.code == "registry.not_found"
 
 
-# Spec: §4.7.10 — load_artifact passes the served delivery attestation
-# through unverified; an absent delivery_signature reads as "".
-def test_load_artifact_passes_delivery_attestation_through(stub_server):
-    stub_server.next_response = {
-        "id": "finance/run",
-        "type": "prompt",
-        "version": "1.0.0",
-        "content_hash": "sha256:c",
-        "delivery_hash": "sha256:d",
-        "delivery_signature": "sig-d",
-    }
+# Spec: §4.7.10 — load_artifact returns the delivery attestation it verified;
+# an absent delivery_signature reads as "" under the never policy.
+def test_load_artifact_returns_verified_delivery_attestation(stub_server):
+    stub_server.next_response = served(
+        {"id": "finance/run", "type": "prompt", "version": "1.0.0", "content_hash": "sha256:c"}
+    )
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
     art = client.load_artifact("finance/run")
-    assert (art.delivery_hash, art.delivery_signature) == ("sha256:d", "sig-d")
-
-    stub_server.next_response = {"id": "finance/run", "delivery_hash": "sha256:d"}
-    art = client.load_artifact("finance/run")
-    assert (art.delivery_hash, art.delivery_signature) == ("sha256:d", "")
+    assert art.delivery_hash == stub_server.next_response["delivery_hash"]
+    assert art.delivery_signature == ""
 
 
-# Spec: §4.7.10 — each batchLoad envelope passes its delivery attestation
-# through; an absent delivery_signature, or an error item, reads as "".
-def test_load_artifacts_passes_delivery_attestation_through(stub_server):
+# Spec: §4.7.10 — each ok batchLoad entry carries the delivery attestation it
+# verified; an error item carries none.
+def test_load_artifacts_return_verified_delivery_attestation(stub_server):
+    a = served({"id": "a", "status": "ok", "type": "rule"})
     stub_server.next_response = [
-        {"id": "a", "status": "ok", "delivery_hash": "sha256:a", "delivery_signature": "sig-a"},
-        {"id": "b", "status": "ok", "delivery_hash": "sha256:b"},
+        a,
         {"id": "c", "status": "error", "error": {"code": "registry.not_found", "message": "x"}},
     ]
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
-    out = client.load_artifacts(["a", "b", "c"])
+    out = client.load_artifacts(["a", "c"])
     assert [(r.delivery_hash, r.delivery_signature) for r in out] == [
-        ("sha256:a", "sig-a"),
-        ("sha256:b", ""),
+        (a["delivery_hash"], ""),
         ("", ""),
     ]
 
@@ -579,7 +497,9 @@ def test_materialize_writes_inline_resources(tmp_path):
     assert (tmp_path / "a" / "b" / "data" / "table.csv").read_text() == "1,2,3\n"
 
 
-# Spec: §7.2 — large resources are fetched from their presigned URLs.
+# Spec: §7.2 — large resources are fetched from their presigned URLs. Only the
+# exact-name presigned_url member names the URL, so a link keyed url raises
+# before any fetch or write.
 def test_materialize_fetches_large_resources(tmp_path):
     calls = []
 
@@ -587,17 +507,27 @@ def test_materialize_fetches_large_resources(tmp_path):
         calls.append(url)
         return b"BIGDATA"
 
-    art = LoadedArtifact(
-        id="a/b",
-        type="context",
-        version="1",
-        manifest_body="x",
-        frontmatter="---\ntype: context\n---\n",
-        large_resources={"big.bin": {"url": "https://store/presigned"}},
-    )
-    art.materialize(str(tmp_path), fetch=fake_fetch)
-    assert (tmp_path / "a" / "b" / "big.bin").read_bytes() == b"BIGDATA"
+    def artifact(link):
+        return LoadedArtifact(
+            id="a/b",
+            type="context",
+            version="1",
+            manifest_body="x",
+            frontmatter="---\ntype: context\n---\n",
+            large_resources={"big.bin": link},
+        )
+
+    out = tmp_path / "ok"
+    artifact({"presigned_url": "https://store/presigned"}).materialize(str(out), fetch=fake_fetch)
+    assert (out / "a" / "b" / "big.bin").read_bytes() == b"BIGDATA"
     assert calls == ["https://store/presigned"]
+
+    calls.clear()
+    refused = tmp_path / "refused"
+    with pytest.raises(MaterializeError, match="no presigned URL"):
+        artifact({"url": "https://store/presigned"}).materialize(str(refused), fetch=fake_fetch)
+    assert calls == []
+    assert not refused.exists()
 
 
 # Spec: §6.6 — a resource path that escapes the destination root is rejected
@@ -651,7 +581,7 @@ def _refusing_fetch(url):
             version="1",
             manifest_body="x",
             frontmatter="---\ntype: context\n---\n",
-            large_resources={"big.bin": {"url": "https://store/presigned"}},
+            large_resources={"big.bin": {"presigned_url": "https://store/presigned"}},
         ),
         BatchResult(
             id="a/b",
@@ -676,7 +606,7 @@ def test_materialize_rejects_non_none_harness(item, tmp_path):
 # uncorrupted instead of as a U+FFFD-mangled string.
 def test_load_artifact_decodes_base64_binary_resources(stub_server, tmp_path):
     blob = bytes([0xFF, 0xFE, 0x00, 0x01, 0x02, 0xFD])
-    stub_server.next_response = {
+    stub_server.next_response = served({
         "id": "a/b",
         "type": "context",
         "version": "1.0.0",
@@ -684,7 +614,7 @@ def test_load_artifact_decodes_base64_binary_resources(stub_server, tmp_path):
         "frontmatter": "---\ntype: context\n---\n",
         "resources": {"data/blob.bin": base64.b64encode(blob).decode()},
         "resources_base64": True,
-    }
+    })
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
     art = client.load_artifact("a/b")
     assert art.resources["data/blob.bin"] == blob
@@ -914,3 +844,66 @@ def test_error_envelope_carries_details_and_suggested_action(stub_server):
         client.load_artifact("finance/x")
     assert exc.value.details == {"runtime_iss": "managed-runtime-x"}
     assert exc.value.suggested_action == "Register the runtime's signing key."
+
+
+def _ok_entry(artifact_id: str) -> dict:
+    return served({"id": artifact_id, "status": "ok", "type": "rule", "version": "1.0.0"})
+
+
+# Spec: §7.6.3 — a batch body that fails the §4.7.10 JSON rule makes
+# load_artifacts raise materialize.content_hash_mismatch and return no entries.
+def test_load_artifacts_refuses_a_body_that_is_not_utf8(stub_server):
+    stub_server.next_response = b'[{"id":"a","status":"ok","frontmatter":"\xff"}]'
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    with pytest.raises(RegistryError) as exc:
+        client.load_artifacts(["a"])
+    assert exc.value.code == "materialize.content_hash_mismatch"
+
+
+# Spec: §7.6.3 — a refused chunk discards the entries of a chunk the same call
+# already decoded: 51 ids take two requests, and the second body is not UTF-8.
+def test_load_artifacts_refused_second_chunk_returns_no_entries(stub_server):
+    ids = [f"acme/a{i}" for i in range(51)]
+    replies = iter([json.dumps([_ok_entry(i) for i in ids[:50]]).encode(), b"\xff"])
+    stub_server.routes["/v1/artifacts:batchLoad"] = (200, lambda: next(replies))
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    with pytest.raises(RegistryError) as exc:
+        client.load_artifacts(ids)
+    assert exc.value.code == "materialize.content_hash_mismatch"
+    assert len(stub_server.bodies) == 2
+
+
+# Spec: §7.6.3 — an entry that fails §4.7.10 step 2 is an error result and the
+# call does not raise: a numeric sensitivity, and a reference with no path.
+def test_load_artifacts_step_2_refusals_are_per_entry(stub_server):
+    numeric = _ok_entry("acme/b")
+    numeric["sensitivity"] = 5
+    pathless = served({"id": "acme/c", "status": "ok", "resources": [{"path": "a.md", "inline": "A"}]})
+    del pathless["resources"][0]["path"]
+    stub_server.next_response = [_ok_entry("acme/a"), numeric, pathless]
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    out = client.load_artifacts(["acme/a", "acme/b", "acme/c"])
+    assert out[0].status == "ok"
+    for result in out[1:]:
+        assert result.status == "error"
+        assert isinstance(result.error, RegistryError)
+        assert result.error.code == "materialize.content_hash_mismatch"
+
+
+# Spec: §7.6.3 — a link's size stays a JSON-serializable int after the
+# decoder kept every number as its literal text through the step-2 checks.
+def test_load_artifact_large_resource_size_is_an_int(stub_server):
+    stub_server.next_response = served(
+        {
+            "id": "big/res",
+            "type": "context",
+            "version": "1.0.0",
+            "large_resources": {
+                "big.bin": {"presigned_url": "http://store/big", "content_hash": "sha256:00", "size": 5242880},
+            },
+        }
+    )
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    link = client.load_artifact("big/res").large_resources["big.bin"]
+    assert isinstance(link["size"], int) and link["size"] == 5242880
+    assert json.loads(json.dumps(link))["size"] == 5242880

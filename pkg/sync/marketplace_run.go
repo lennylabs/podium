@@ -55,6 +55,9 @@ type RunOptions struct {
 	Stderr     io.Writer
 	HTTPClient *http.Client
 	Now        func() time.Time
+	// Delivery resolves the §4.7.10 delivery check of the render's
+	// server-source load.
+	Delivery DeliveryCheckFunc
 }
 
 // RunResult reports the outcome of one RunMarketplace. Workdir is the working
@@ -152,6 +155,7 @@ func runPipeline(ctx context.Context, opts RunOptions, out ResolvedOutput, workd
 		Harnesses:  out.Harnesses,
 		Plugins:    out.Plugins,
 		HTTPClient: opts.HTTPClient,
+		Delivery:   opts.Delivery,
 	})
 	if err != nil {
 		return nil, err

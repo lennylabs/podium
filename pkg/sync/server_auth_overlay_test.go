@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // spec: §6.3.2, §14.11 — a server-source sync attaches the caller
@@ -23,14 +25,16 @@ func TestRun_ServerSource_ForwardsBearerToken(t *testing.T) {
 	})
 	mux.HandleFunc("/v1/load_artifact", func(w http.ResponseWriter, r *http.Request) {
 		seen["load"] = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"team/glossary","type":"context","layer":"org","frontmatter":` + jsonQuote(contextArtifactSrc) + `}`))
+		writeJSONTest(w, testharness.SealDelivery(map[string]any{
+			"id": "team/glossary", "type": "context", "layer": "org", "frontmatter": contextArtifactSrc,
+		}))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
 	if _, err := Run(Options{
 		RegistryPath: srv.URL,
+		Delivery:     neverDelivery,
 		Target:       t.TempDir(),
 		AdapterID:    "none",
 		HTTPClient:   srv.Client(),
@@ -61,7 +65,7 @@ func TestRun_ServerSource_NoTokenSendsNoAuth(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	if _, err := Run(Options{RegistryPath: srv.URL, Target: t.TempDir(), AdapterID: "none", HTTPClient: srv.Client()}); err != nil {
+	if _, err := Run(Options{RegistryPath: srv.URL, Delivery: neverDelivery, Target: t.TempDir(), AdapterID: "none", HTTPClient: srv.Client()}); err != nil {
 		t.Fatalf("server-source Run: %v", err)
 	}
 	if present || gotAuth != "" {
@@ -98,6 +102,7 @@ func TestRun_ServerSource_OverlayOverridesServer(t *testing.T) {
 	target := t.TempDir()
 	if _, err := Run(Options{
 		RegistryPath: srv.URL,
+		Delivery:     neverDelivery,
 		Target:       target,
 		AdapterID:    "none",
 		HTTPClient:   srv.Client(),
@@ -109,26 +114,4 @@ func TestRun_ServerSource_OverlayOverridesServer(t *testing.T) {
 	if got != overlayBody {
 		t.Errorf("ARTIFACT.md = %q, want the overlay body (overlay must win over the server)", got)
 	}
-}
-
-// jsonQuote renders s as a JSON string literal for inline test fixtures.
-func jsonQuote(s string) string {
-	out := make([]byte, 0, len(s)+2)
-	out = append(out, '"')
-	for _, r := range s {
-		switch r {
-		case '"':
-			out = append(out, '\\', '"')
-		case '\\':
-			out = append(out, '\\', '\\')
-		case '\n':
-			out = append(out, '\\', 'n')
-		case '\t':
-			out = append(out, '\\', 't')
-		default:
-			out = append(out, string(r)...)
-		}
-	}
-	out = append(out, '"')
-	return string(out)
 }

@@ -1,6 +1,7 @@
 package sign
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/spi"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // RegistryManagedKey implements §4.7.9's registry-managed key model. A
@@ -64,9 +66,13 @@ func PublicKeyFromBase64(s string) (ed25519.PublicKey, error) {
 // Verify and VerifiedKeyID return it when the verification key set is empty.
 var ErrRegistryManagedUnavailable = &spi.Error{Code: "config.signature_provider_unavailable", Message: "sign: registry-managed key not configured"}
 
-// registryManagedEnvelope is the JSON encoding of a registry-managed
-// signature. Compact, no version field — the format is internal to
-// one deployment and changes via the §4.7.9 rotation flow.
+// registryManagedEnvelope is the JSON encoding Sign produces for a
+// registry-managed signature. §4.7.9 specifies the envelope format and the
+// signed message, the 32-byte SHA-256 digest that the attested sha256:<hex>
+// value encodes. Verifiers read an envelope through
+// decodeRegistryManagedEnvelope and never through this struct.
+//
+// Spec: §4.7.9
 type registryManagedEnvelope struct {
 	KeyID     string `json:"key_id,omitempty"`
 	Signature string `json:"signature"`
@@ -129,24 +135,74 @@ func (k RegistryManagedKey) VerifiedKeyID(_ context.Context, contentHash, signat
 	if len(candidates) == 0 {
 		return "", ErrRegistryManagedUnavailable
 	}
-	var env registryManagedEnvelope
-	if err := json.Unmarshal([]byte(signature), &env); err != nil {
-		return "", fmt.Errorf("%w: parse envelope: %v", ErrSignatureInvalid, err)
-	}
-	sig, err := base64.StdEncoding.DecodeString(env.Signature)
+	keyID, sig, err := decodeRegistryManagedEnvelope(signature)
 	if err != nil {
-		return "", fmt.Errorf("%w: signature decode: %v", ErrSignatureInvalid, err)
+		return "", err
 	}
 	hashBytes, err := decodeContentHash(contentHash)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrSignatureInvalid, err)
 	}
-	for _, pub := range namedKeyFirst(candidates, env.KeyID) {
+	for _, pub := range namedKeyFirst(candidates, keyID) {
 		if ed25519.Verify(pub, hashBytes, sig) {
 			return KeyIDFor(pub), nil
 		}
 	}
 	return "", fmt.Errorf("%w: signature does not verify under any trusted key", ErrSignatureInvalid)
+}
+
+// decodeRegistryManagedEnvelope applies the §4.7.9 envelope rules to
+// signature and returns its key_id and its decoded signature bytes. It reads
+// signature and key_id by exact name and treats a null member as absent, so a
+// case variant such as SIGNATURE is an ignored unknown member. The JSON rule
+// and the canonical base64 rule come from pkg/version because encoding/json
+// struct decoding matches names case-insensitively and base64.StdEncoding
+// skips CR and LF and accepts a non-zero pad bit. No length check runs here:
+// ed25519.Verify returns false for a signature that is not 64 bytes, so such a
+// value reaches the "does not verify" refusal. Every refusal wraps
+// ErrSignatureInvalid.
+//
+// Spec: §4.7.9
+func decodeRegistryManagedEnvelope(signature string) (keyID string, sig []byte, err error) {
+	members, err := version.DecodeJSONObject([]byte(signature))
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: parse envelope: %v", ErrSignatureInvalid, err)
+	}
+	sigText, ok, err := envelopeString(members, "signature")
+	if err != nil {
+		return "", nil, err
+	}
+	if !ok {
+		return "", nil, fmt.Errorf("%w: envelope has no signature", ErrSignatureInvalid)
+	}
+	if keyID, _, err = envelopeString(members, "key_id"); err != nil {
+		return "", nil, err
+	}
+	if sig, err = version.DecodeBase64(sigText); err != nil {
+		return "", nil, fmt.Errorf("%w: signature decode: %v", ErrSignatureInvalid, err)
+	}
+	return keyID, sig, nil
+}
+
+// envelopeString reads the exact-name member name of an envelope as a string.
+// It reports false for an absent or null member and refuses a value of any
+// other JSON type with ErrSignatureInvalid.
+func envelopeString(members map[string]json.RawMessage, name string) (string, bool, error) {
+	raw := bytes.TrimSpace(members[name])
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", false, nil
+	}
+	if raw[0] != '"' {
+		return "", false, fmt.Errorf("%w: envelope member %s is not a string", ErrSignatureInvalid, name)
+	}
+	var s string
+	// DecodeJSONObject admitted the text, so a value that begins with a quote
+	// is a valid JSON string and this decode does not fail. The check keeps a
+	// future decoder change from reading as an empty member.
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", false, fmt.Errorf("%w: envelope member %s: %v", ErrSignatureInvalid, name, err)
+	}
+	return s, true, nil
 }
 
 // CurrentKeyID returns the key_id Sign embeds, that of PrivateKey's public

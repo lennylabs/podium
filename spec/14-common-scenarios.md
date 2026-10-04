@@ -72,7 +72,7 @@ The operator distributes the registry's public verification key to consumers out
 
 4. `podium init --global --registry https://podium.acme.com`.
 5. `podium login`: completes the device-code flow once, caches the token.
-6. `cd <project>`, write `.podium/sync.yaml` with a profile, `podium sync --harness claude-code --profile <name>`.
+6. `cd <project>`, write `.podium/sync.yaml` with a profile, set `PODIUM_SIGNATURE_VERIFY_KEY` to the verification key the operator distributes, and run `podium sync --harness claude-code --profile <name>`. A server-source sync verifies every record it loads and exits with status 2 before its first registry request when no verification key material resolves (§4.7.9, §7.5).
 7. Repeat per workspace; each has its own lock file.
 
 ## 14.6 Remote registry + workspace local overlay, one-shot, multiple workspaces
@@ -80,7 +80,7 @@ The operator distributes the registry's public verification key to consumers out
 Operator setup as in §14.5. Per workspace:
 
 1. Drop in-progress artifacts under `<workspace>/.podium/overlay/`.
-2. `podium sync --harness claude-code --profile <name>`. The overlay path auto-resolves to `<CWD>/.podium/overlay/` per §6.4; no env var needed.
+2. `podium sync --harness claude-code --profile <name>`. The overlay path auto-resolves to `<CWD>/.podium/overlay/` per §6.4; no env var needed. The sync reads the verification key that §14.5 step 6 sets.
 
 ## 14.7 Remote registry + local overlay, MCP, multiple workspaces
 
@@ -164,11 +164,12 @@ A build pipeline materializes a deterministic artifact set into a deploy artifac
    export PODIUM_REGISTRY=https://podium.acme.com
    export PODIUM_IDENTITY_PROVIDER=injected-session-token
    export PODIUM_SESSION_TOKEN_FILE=/run/secrets/podium-token
+   export PODIUM_SIGNATURE_VERIFY_KEY="$(cat /run/secrets/podium-verify-key)"
    podium sync --harness claude-code --profile production --target ./build/.claude/
    ```
 3. The lock file (`./build/.claude/.podium/sync.lock`) captures exactly which `(artifact_id, version, content_hash)` triples landed in the image. Commit it alongside the build for reproducibility.
 
-`podium sync --dry-run --json` is useful in pre-flight to sanity-check what the build will include.
+`podium sync --dry-run --json` is useful in pre-flight to sanity-check what the build will include. The pipeline sets `PODIUM_SIGNATURE_VERIFY_KEY`, because a server-source sync, `--dry-run` included, verifies every record it loads and exits with status 2 before its first registry request when no verification key material resolves (§7.5). Against a registry with signing off, the pipeline sets `PODIUM_VERIFY_SIGNATURES=never` instead.
 
 ## 14.12 Air-gapped enterprise
 
@@ -219,4 +220,4 @@ podium search "variance analysis" --type skill --json
 podium artifact show finance/close-reporting/run-variance-analysis --version 1.2.0
 ```
 
-`podium sync --dry-run` provides the same view in materialization form (resolved profile + scope) without writing anything to disk.
+`podium sync --dry-run` provides the same view in materialization form (resolved profile + scope) without writing anything to disk. It loads records from the registry, so it needs the verification key that §14.5 step 6 sets.

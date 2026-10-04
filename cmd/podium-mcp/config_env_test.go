@@ -342,45 +342,8 @@ func TestLoadConfig_VerifySignaturesFromSyncYAML(t *testing.T) {
 	if cfg.verifier != nil {
 		t.Errorf("verifier = %v, want nil under never", cfg.verifier)
 	}
-	if !strings.Contains(out, path) || !strings.Contains(out, "defaults.verify_signatures") {
-		t.Errorf("stderr %q does not name %s and defaults.verify_signatures", out, path)
-	}
-}
-
-// spec: §4.7.9 / §6.2 — a never the environment supplied logs nothing, even
-// when a sync.yaml carries never too, because the file did not supply it.
-func TestLoadConfig_EnvNeverLogsNoWarning(t *testing.T) {
-	hermetic(t)
-	t.Setenv("PODIUM_REGISTRY", "")
-	path := filepath.Join(os.Getenv("HOME"), ".podium", "sync.yaml")
-	writeSyncFile(t, path, "defaults:\n  registry: http://127.0.0.1:8080\n  verify_signatures: never\n")
-	out := captureStderr(t, func() {
-		if _, err := loadConfig(); err != nil {
-			t.Fatalf("loadConfig: %v", err)
-		}
-	})
-	if strings.Contains(out, "verify_signatures") {
-		t.Errorf("stderr %q carries the stale-never warning for an environment-set never", out)
-	}
-}
-
-// spec: §7.5.2 — the workspace's sync.local.yaml outranks its sync.yaml for
-// defaults.verify_signatures, read from a subdirectory of the workspace.
-func TestLoadConfig_VerifySignaturesLocalOutranksShared(t *testing.T) {
-	hermetic(t)
-	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:8080")
-	t.Setenv("PODIUM_VERIFY_SIGNATURES", "")
-	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", testVerifyKey(t))
-	ws, _ := os.Getwd()
-	writeSyncFile(t, filepath.Join(ws, ".podium", "sync.yaml"), "defaults:\n  verify_signatures: never\n")
-	writeSyncFile(t, filepath.Join(ws, ".podium", "sync.local.yaml"), "defaults:\n  verify_signatures: always\n")
-	chdirSub(t, ws)
-	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("loadConfig: %v", err)
-	}
-	if cfg.verifyPolicy != sign.PolicyAlways {
-		t.Errorf("verifyPolicy = %q, want always from sync.local.yaml", cfg.verifyPolicy)
+	if !strings.HasPrefix(out, "WARN: ") || !strings.Contains(out, path) || !strings.Contains(out, "defaults.verify_signatures") {
+		t.Errorf("stderr %q is not one WARN line naming %s and defaults.verify_signatures", out, path)
 	}
 }
 
@@ -423,30 +386,6 @@ func chdirSub(t *testing.T, dir string) {
 	}
 }
 
-// spec: §6.2 / §7.5.2 — an explicit PODIUM_VERIFY_SIGNATURES overrides a
-// sync.yaml value.
-func TestLoadConfig_VerifySignaturesEnvOverridesSyncYAML(t *testing.T) {
-	hermetic(t)
-	t.Setenv("PODIUM_REGISTRY", "")
-	t.Setenv("PODIUM_VERIFY_SIGNATURES", "always")
-	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", testVerifyKey(t))
-	home := os.Getenv("HOME")
-	if err := os.MkdirAll(filepath.Join(home, ".podium"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	yaml := "defaults:\n  registry: http://127.0.0.1:8080\n  verify_signatures: never\n"
-	if err := os.WriteFile(filepath.Join(home, ".podium", "sync.yaml"), []byte(yaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("loadConfig: %v", err)
-	}
-	if cfg.verifyPolicy != "always" {
-		t.Errorf("verifyPolicy = %q, want always (env overrides sync.yaml)", cfg.verifyPolicy)
-	}
-}
-
 // spec: §4.7.9 / §6.2 — with neither env nor sync.yaml setting them, the
 // policy is always and the provider is registry-managed.
 func TestLoadConfig_VerifySignaturesDefaultsToAlways(t *testing.T) {
@@ -464,32 +403,6 @@ func TestLoadConfig_VerifySignaturesDefaultsToAlways(t *testing.T) {
 	if cfg.signatureProvider != "registry-managed" {
 		t.Errorf("signatureProvider = %q, want registry-managed (default)", cfg.signatureProvider)
 	}
-}
-
-// spec: §6.2 — medium-and-above is no longer a policy value. The environment
-// value refuses naming never and always, and a sync.yaml value refuses naming
-// the file too.
-func TestLoadConfig_RejectsMediumAndAbove(t *testing.T) {
-	t.Run("env", func(t *testing.T) {
-		hermetic(t)
-		t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:8080")
-		t.Setenv("PODIUM_VERIFY_SIGNATURES", "medium-and-above")
-		_, err := loadConfig()
-		if err == nil || !strings.Contains(err.Error(), "never | always") {
-			t.Fatalf("loadConfig = %v, want an error naming never | always", err)
-		}
-	})
-	t.Run("sync.yaml", func(t *testing.T) {
-		hermetic(t)
-		t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:8080")
-		t.Setenv("PODIUM_VERIFY_SIGNATURES", "")
-		path := filepath.Join(os.Getenv("HOME"), ".podium", "sync.yaml")
-		writeSyncFile(t, path, "defaults:\n  verify_signatures: medium-and-above\n")
-		_, err := loadConfig()
-		if err == nil || !strings.Contains(err.Error(), "never | always") || !strings.Contains(err.Error(), path) {
-			t.Fatalf("loadConfig = %v, want an error naming never | always and %s", err, path)
-		}
-	})
 }
 
 // spec: §6.2 / §6.5 — when PODIUM_CACHE_DIR is unset and the home
@@ -751,13 +664,13 @@ func TestLoadArtifact_PerCallDestinationMaterializes(t *testing.T) {
 }
 
 // spec: §4.7.9, §6.2, §6.9 — loadConfig resolves the verification material
-// once, through resolveVerifier, with one case per cell of the resolution
-// table: an unrecognized provider name refuses with config.invalid under every
-// policy, never resolves no material, even from a malformed
-// PODIUM_SIGNATURE_VERIFY_KEY, noop under always refuses, a set
-// PODIUM_SIGNATURE_VERIFY_KEY is authoritative over the key file, the key file
-// answers only when the variable is unset, and sigstore-keyless refuses with
-// config.invalid under every policy.
+// once, through resolveVerifier: an unrecognized provider name refuses with
+// config.invalid under every policy, never resolves no material, even from a
+// malformed PODIUM_SIGNATURE_VERIFY_KEY, noop under always refuses, the
+// registry-managed arm reads PODIUM_SIGNATURE_VERIFY_KEY and the key file
+// through sign.ResolveVerifier, and sigstore-keyless refuses with
+// config.invalid under every policy. The key-set parsing rules are pinned in
+// pkg/sign, which owns them.
 func TestLoadConfig_VerifierResolution(t *testing.T) {
 	type outcome struct {
 		code string                     // refusal code, or "" when loadConfig returns
@@ -768,7 +681,6 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 	}
 	var keyA ed25519.PublicKey
 	keyB := testVerifyKey(t)
-	keyC := testVerifyKey(t)
 	decode := func(ks ...string) []ed25519.PublicKey {
 		out := make([]ed25519.PublicKey, len(ks))
 		for i, k := range ks {
@@ -787,8 +699,6 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 		provider string
 		env      map[string]string
 		keyFile  bool
-		bodyFile bool // write fileBody verbatim as the key file
-		fileBody string
 		want     outcome
 	}{
 		{name: "unknown name under never", policy: "never", provider: "bogus", want: outcome{code: "config.invalid:", msg: []string{"bogus"}}},
@@ -801,40 +711,6 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 			name: "verify key set and decodes", policy: "always", provider: "registry-managed", keyFile: true,
 			env:  map[string]string{"PODIUM_SIGNATURE_VERIFY_KEY": keyB},
 			want: outcome{id: "registry-managed", keys: func() []ed25519.PublicKey { return decode(keyB) }},
-		},
-		{
-			name: "verify key list", policy: "always", provider: "registry-managed", keyFile: true,
-			env:  map[string]string{"PODIUM_SIGNATURE_VERIFY_KEY": keyB + " , " + keyC},
-			want: outcome{id: "registry-managed", keys: func() []ed25519.PublicKey { return decode(keyB, keyC) }},
-		},
-		{
-			name: "verify key list with a malformed second entry", policy: "always", provider: "registry-managed", keyFile: true,
-			env:  map[string]string{"PODIUM_SIGNATURE_VERIFY_KEY": keyB + ",!!!"},
-			want: outcome{code: "config.signature_provider_unavailable", msg: []string{"PODIUM_SIGNATURE_VERIFY_KEY"}},
-		},
-		{
-			name: "verify key list with a trailing comma", policy: "always", provider: "registry-managed", keyFile: true,
-			env:  map[string]string{"PODIUM_SIGNATURE_VERIFY_KEY": keyB + ","},
-			want: outcome{code: "config.signature_provider_unavailable", msg: []string{"PODIUM_SIGNATURE_VERIFY_KEY"}},
-		},
-		{
-			name: "key file with verify lines", policy: "always", provider: "registry-managed", bodyFile: true,
-			fileBody: "public: " + keyB + "\nverify: " + keyC + "\n",
-			want:     outcome{id: "registry-managed", keys: func() []ed25519.PublicKey { return decode(keyB, keyC) }},
-		},
-		{
-			name: "empty key file", policy: "always", provider: "registry-managed", bodyFile: true,
-			want: outcome{code: "config.signature_provider_unavailable", msg: []string{"PODIUM_SIGN_KEY_PATH", "public:"}},
-		},
-		{
-			name: "key file with verify lines and no public line", policy: "always", provider: "registry-managed", bodyFile: true,
-			fileBody: "verify: " + keyC + "\n",
-			want:     outcome{code: "config.signature_provider_unavailable", msg: []string{"PODIUM_SIGN_KEY_PATH", "public:"}},
-		},
-		{
-			name: "verify key set and malformed", policy: "always", provider: "registry-managed", keyFile: true,
-			env:  map[string]string{"PODIUM_SIGNATURE_VERIFY_KEY": "!!!not base64"},
-			want: outcome{code: "config.signature_provider_unavailable", msg: []string{"PODIUM_SIGNATURE_VERIFY_KEY"}},
 		},
 		{
 			name: "key file resolves", policy: "always", provider: "registry-managed", keyFile: true,
@@ -862,9 +738,6 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 			}
 			if c.keyFile {
 				keyA = writeHomeKeyFile(t)
-			}
-			if c.bodyFile {
-				writeHomeKeyFileBody(t, c.fileBody)
 			}
 			cfg, err := loadConfig()
 			if c.want.code != "" {

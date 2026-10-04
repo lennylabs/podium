@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
 	"github.com/lennylabs/podium/pkg/version"
 )
@@ -1082,7 +1083,10 @@ func TestHarness_SyncDryRunServerFromEnv(t *testing.T) {
 		case "/v1/sync/manifest":
 			_, _ = w.Write([]byte(`{"artifacts":[{"id":"greet","type":"context","version":"1.2.0","layer":"org"}]}`))
 		case "/v1/load_artifact":
-			_, _ = w.Write([]byte(`{"id":"greet","type":"context","layer":"org","frontmatter":"---\ntype: context\nversion: 1.2.0\ndescription: served\nsensitivity: low\n---\n\nbody\n"}`))
+			_ = json.NewEncoder(w).Encode(testharness.SealDelivery(map[string]any{
+				"id": "greet", "type": "context", "layer": "org",
+				"frontmatter": "---\ntype: context\nversion: 1.2.0\ndescription: served\nsensitivity: low\n---\n\nbody\n",
+			}))
 		default:
 			http.Error(w, `{"code":"not_found","message":"x"}`, 404)
 		}
@@ -1091,7 +1095,7 @@ func TestHarness_SyncDryRunServerFromEnv(t *testing.T) {
 
 	ws := t.TempDir()
 	target := t.TempDir()
-	env := []string{"PODIUM_REGISTRY=" + srv.URL}
+	env := []string{"PODIUM_REGISTRY=" + srv.URL, "PODIUM_VERIFY_SIGNATURES=never"}
 	res := runPodium(t, ws, env, "sync", "--harness", "claude-code", "--target", target, "--dry-run")
 	if res.Exit != 0 {
 		t.Fatalf("dry-run server sync from env exit=%d stderr=%s", res.Exit, res.Stderr)
@@ -1135,7 +1139,10 @@ func TestHarness_StandaloneSyncFromServer(t *testing.T) {
 		case "/v1/sync/manifest":
 			_, _ = w.Write([]byte(`{"artifacts":[{"id":"greet","type":"context","version":"1.0.0","layer":"org"}]}`))
 		case "/v1/load_artifact":
-			_, _ = w.Write([]byte(`{"id":"greet","type":"context","layer":"org","frontmatter":"---\ntype: context\nversion: 1.0.0\ndescription: served\nsensitivity: low\n---\n\nhello from server\n"}`))
+			_ = json.NewEncoder(w).Encode(testharness.SealDelivery(map[string]any{
+				"id": "greet", "type": "context", "layer": "org",
+				"frontmatter": "---\ntype: context\nversion: 1.0.0\ndescription: served\nsensitivity: low\n---\n\nhello from server\n",
+			}))
 		default:
 			http.Error(w, `{"code":"not_found","message":"x"}`, 404)
 		}
@@ -1145,7 +1152,7 @@ func TestHarness_StandaloneSyncFromServer(t *testing.T) {
 	ws := t.TempDir()
 	chWriteSyncYAML(t, ws, "defaults:\n  registry: "+srv.URL+"\n")
 	target := t.TempDir()
-	env := []string{"PODIUM_SESSION_TOKEN=tok-abc123"}
+	env := []string{"PODIUM_SESSION_TOKEN=tok-abc123", "PODIUM_VERIFY_SIGNATURES=never"}
 	res := runPodium(t, ws, env, "sync", "--harness", "claude-code", "--target", target)
 	if res.Exit != 0 {
 		t.Fatalf("server-source sync exit=%d stderr=%s", res.Exit, res.Stderr)

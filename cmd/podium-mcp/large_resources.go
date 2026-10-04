@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +9,7 @@ import (
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/tracing"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // manifestBodyRefreshKey is the synthetic resource path under which the
@@ -22,12 +21,14 @@ const manifestBodyRefreshKey = "\x00podium-manifest-body"
 // fetchManifestBody resolves a presigned manifest_body_url (§6.6 step 1)
 // back into the inline manifest fields. It downloads the canonical manifest
 // document with the same retry/refresh contract as a large resource,
-// verifies its content hash, restores the canonical-document field
-// (Frontmatter, or SkillRaw for a skill), and re-derives ManifestBody from
-// it. The frontmatter/body split reproduces ingest's own split, so the
-// derived body is byte-identical to the inline value the registry would have
-// served below the cutoff. A no-op when the body arrived inline
-// (ManifestBodyURL nil).
+// verifies its content hash by the §4.7.10 step 6 check, restores the
+// canonical-document field (Frontmatter, or SkillRaw for a skill), and derives
+// ManifestBody from it with manifest.ManifestBodyOf, the delimiter rule every
+// consumer applies, so the derived body is byte-identical to the inline value
+// the registry would have served below the cutoff. A no-op when the body
+// arrived inline (ManifestBodyURL nil).
+//
+// Spec: §4.7.10, §6.6 step 1
 func (s *mcpServer) fetchManifestBody(resp *loadArtifactResponse, refresh resourceRefresher) error {
 	if resp.ManifestBodyURL == nil {
 		return nil
@@ -39,24 +40,19 @@ func (s *mcpServer) fetchManifestBody(resp *loadArtifactResponse, refresh resour
 	if err != nil {
 		return fmt.Errorf("manifest body: %w", err)
 	}
-	if link.ContentHash != "" {
-		sum := sha256.Sum256(body)
-		got := "sha256:" + hex.EncodeToString(sum[:])
-		if got != link.ContentHash {
-			return fmt.Errorf("manifest body content hash mismatch: got %s want %s", got, link.ContentHash)
-		}
+	if err := version.CheckLinked(body, link.ContentHash); err != nil {
+		return fmt.Errorf("manifest body: %w", err)
+	}
+	derived, err := manifest.ManifestBodyOf(body)
+	if err != nil {
+		return fmt.Errorf("manifest body: %w", err)
 	}
 	if resp.Type == "skill" {
 		resp.SkillRaw = string(body)
-		if sk, perr := manifest.ParseSkill(body); perr == nil {
-			resp.ManifestBody = sk.Body
-		}
 	} else {
 		resp.Frontmatter = string(body)
-		if art, perr := manifest.ParseArtifact(body); perr == nil {
-			resp.ManifestBody = art.Body
-		}
 	}
+	resp.ManifestBody = derived
 	resp.ManifestBodyURL = nil
 	return nil
 }
@@ -69,9 +65,9 @@ func (s *mcpServer) fetchManifestBody(resp *loadArtifactResponse, refresh resour
 type resourceRefresher func() (map[string]largeResourceLink, error)
 
 // fetchLargeResources resolves every large_resource link in resp via an
-// authenticated HTTP GET, validates each blob's content hash against the
-// manifest, and merges the bytes into resp.Resources so the downstream
-// adapter sees a single map. Per §6.6 step 1, a 403/expired response triggers
+// authenticated HTTP GET, checks each blob against the content hash of its
+// link by the §4.7.10 step 6 check, and merges the bytes into resp.Resources
+// so the downstream adapter sees a single map. Per §6.6 step 1, a 403/expired response triggers
 // a retry with a fresh URL set (max 3 attempts, exponential backoff).
 func (s *mcpServer) fetchLargeResources(resp *loadArtifactResponse, refresh resourceRefresher) error {
 	if len(resp.LargeResources) == 0 {
@@ -92,13 +88,8 @@ func (s *mcpServer) fetchLargeResources(resp *loadArtifactResponse, refresh reso
 		if err != nil {
 			return fmt.Errorf("large resource %s: %w", path, err)
 		}
-		if link.ContentHash != "" {
-			sum := sha256.Sum256(body)
-			got := "sha256:" + hex.EncodeToString(sum[:])
-			if got != link.ContentHash {
-				return fmt.Errorf("large resource %s content hash mismatch: got %s want %s",
-					path, got, link.ContentHash)
-			}
+		if err := version.CheckLinked(body, link.ContentHash); err != nil {
+			return fmt.Errorf("large resource %s: %w", path, err)
 		}
 		resp.Resources[path] = string(body)
 	}

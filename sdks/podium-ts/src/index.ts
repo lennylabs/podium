@@ -4,7 +4,23 @@
 // via Client.login(). The config/overlay/oauth helpers load Node's fs/path
 // lazily, so importing the SDK stays safe in edge bundles.
 
-import { resolveRegistry } from "./config.js";
+import { resolveRegistry, resolveVerification } from "./config.js";
+import {
+  POLICIES,
+  checkDelivery,
+  checkLinked,
+  decodeBase64,
+  manifestBodyOf,
+  parseBatchResponse,
+  parseLoadResponse,
+  placeManifestDocument,
+  plainJson,
+  type BatchEntry,
+  type ParsedLoad,
+  type Verification,
+  type VerifyPolicy,
+} from "./delivery.js";
+import { RegistryError, RegistryReadOnly, registryErrorFromEnvelope } from "./errors.js";
 import {
   LocalOverlay,
   resolveOverlayPath,
@@ -28,6 +44,7 @@ import {
 } from "./oauth.js";
 
 export { DeviceCodeError, PendingLogin, type DeviceCodeErrorReason, type Tokens };
+export { RegistryError, RegistryReadOnly, registryErrorFromEnvelope };
 
 // LoginOptions configures the device-authorization request that startLogin()
 // and login() issue. Unset fields fall back to the PODIUM_OAUTH_* environment
@@ -370,33 +387,6 @@ export interface LargeResourceLink {
   content_type?: string;
 }
 
-// normalizeLink maps a wire large-resource / manifest-body link onto the `url`
-// field the rest of the client reads. The single-load response delivers the URL
-// under `presigned_url`; the batch path performs the same mapping inline.
-// Without this a single-load large resource (>256 KB) carries an undefined url
-// and materialize() throws "has no presigned URL".
-function normalizeLink(raw: unknown): LargeResourceLink {
-  const r = (raw ?? {}) as Record<string, unknown>;
-  return {
-    url: ((r.url as string) || (r.presigned_url as string)) ?? "",
-    content_hash: r.content_hash as string | undefined,
-    size: r.size as number | undefined,
-    content_type: r.content_type as string | undefined,
-  };
-}
-
-// spec §4.3 / §6.6: split a canonical manifest document into its prose body the
-// same way the registry does (pkg/manifest SplitFrontmatter), so a manifest
-// delivered above the 256 KB inline cutoff via manifest_body_url reconstitutes a
-// byte-identical manifest_body. A document without frontmatter yields an empty
-// body, matching the registry, which leaves manifest_body unset when the
-// document does not parse.
-const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/;
-function manifestBodyFrom(doc: string): string {
-  const m = FRONTMATTER_RE.exec(doc);
-  return m ? m[1].replace(/^[\r\n]+/, "") : "";
-}
-
 // presignedSigV4 reports whether raw is an AWS Signature V4 presigned URL, one
 // whose query carries a non-empty X-Amz-Signature parameter. spec §13.12: a
 // consumer sends no credential when following an S3 presigned URL, and sends
@@ -449,6 +439,12 @@ export class MaterializeError extends Error {
 // bundled resource at its package-relative path. Node-only filesystem and
 // path modules load lazily so the SDK stays importable in edge bundles that
 // never materialize.
+//
+// Spec: §4.7.10, §7.6.3 — every large resource is fetched and checked against
+// its link's content_hash before the first file of the artifact is written, so
+// a mismatch rejects with materialize.content_hash_mismatch and leaves no file
+// of the artifact on disk. Every destination path is resolved first too, so a
+// path that escapes the root rejects before any fetch.
 async function materializeCanonical(args: {
   to: string;
   id: string;
@@ -477,61 +473,54 @@ async function materializeCanonical(args: {
     }
     return target;
   };
-  const write = async (target: string, bytes: Uint8Array | string): Promise<void> => {
-    await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, bytes);
-  };
 
-  const written: string[] = [];
-  const artPath = safeJoin("ARTIFACT.md");
-  await write(artPath, args.frontmatter);
-  written.push(artPath);
-
+  const files: Array<[string, Uint8Array | string]> = [[safeJoin("ARTIFACT.md"), args.frontmatter]];
   if (args.type === "skill") {
-    const skillPath = safeJoin("SKILL.md");
     // spec: §4.3.4 / §11 — prefer the verbatim SKILL.md the registry delivers;
     // fall back to frontmatter + body only when it is absent.
-    await write(skillPath, args.skillRaw !== "" ? args.skillRaw : args.frontmatter + args.manifestBody);
-    written.push(skillPath);
+    files.push([safeJoin("SKILL.md"), args.skillRaw !== "" ? args.skillRaw : args.frontmatter + args.manifestBody]);
   }
-
   for (const rel of Object.keys(args.inline).sort()) {
-    const target = safeJoin(rel);
-    await write(target, args.inline[rel]);
-    written.push(target);
+    files.push([safeJoin(rel), args.inline[rel]]);
   }
-
-  for (const rel of Object.keys(args.large).sort()) {
-    const link = args.large[rel];
-    if (!link?.url) throw new MaterializeError(`large resource ${rel} has no presigned URL`);
+  const links = Object.keys(args.large)
+    .sort()
+    .map((rel) => {
+      const link = args.large[rel];
+      if (!link?.url) throw new MaterializeError(`large resource ${rel} has no presigned URL`);
+      return { rel, link, target: safeJoin(rel) };
+    });
+  for (const { rel, link, target } of links) {
     const resp = await args.fetcher(link.url);
     if (!resp.ok) {
       throw new MaterializeError(`fetch large resource ${rel}: HTTP ${resp.status}`);
     }
-    const target = safeJoin(rel);
-    await write(target, new Uint8Array(await resp.arrayBuffer()));
-    written.push(target);
+    const body = new Uint8Array(await resp.arrayBuffer());
+    await checkLinked(body, link.content_hash ?? "", `large resource ${JSON.stringify(rel)}`);
+    files.push([target, body]);
   }
 
-  return written;
+  for (const [target, bytes] of files) {
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, bytes);
+  }
+  return files.map(([target]) => target);
 }
 
 // decodeInlineForMaterialize decodes a base64-flagged inline resource set
 // (spec §4.1 / §7.2 resources_base64) back to raw bytes so a binary
 // resource materializes uncorrupted. encoding/json replaces invalid UTF-8 in
 // a string with U+FFFD, so the registry base64-encodes the whole inline set
-// when any member is binary; the flag is response-wide. Runs only inside
-// materialize (a Node context), so the Node Buffer global is available.
+// when any member is binary; the flag is response-wide. It decodes with
+// decodeBase64, the §4.7.10 step 3 decoder that checked each served value at
+// load, so materialize writes exactly the bytes the delivery hash covered.
 function decodeInlineForMaterialize(
   resources: Record<string, string>,
   b64: boolean | undefined,
 ): Record<string, string | Uint8Array> {
-  if (!b64) return resources;
-  const out: Record<string, Uint8Array> = {};
-  for (const [k, v] of Object.entries(resources)) {
-    out[k] = Uint8Array.from(Buffer.from(v, "base64"));
-  }
-  return out;
+  return Object.fromEntries(
+    Object.entries(resources).map(([k, v]) => [k, b64 ? decodeBase64(v) : v]),
+  );
 }
 
 // Spec §7.6 / §2.2 — the loaded-artifact object exposes materialize(to),
@@ -554,9 +543,12 @@ export class LoadedArtifact {
   deprecated?: boolean;
   replaced_by?: string;
   deprecation_warning?: string;
-  // spec: §4.7.10 — the registry's delivery attestation, passed through
-  // unverified. The SDK verifies nothing; a workspace-overlay load carries
-  // neither field because no registry served the record.
+  // spec: §4.7.10, §7.6.3 — the registry's delivery attestation. On every
+  // registry-served load the client recomputes delivery_hash from the served
+  // record, compares it with this value, and applies its §4.7.9 policy to
+  // delivery_signature before it returns the artifact. A §6.4
+  // workspace-overlay load is exempt from the check and carries neither
+  // field, because no registry served the record.
   delivery_hash?: string;
   delivery_signature?: string;
 
@@ -569,13 +561,8 @@ export class LoadedArtifact {
     this.skill_raw = data.skill_raw;
     this.resources = data.resources;
     this.resources_base64 = data.resources_base64;
-    // Normalize the single-load wire's `presigned_url` to the `url` field
-    // materialize() reads, so a single-load large resource (>256 KB) resolves
-    // instead of throwing on an undefined url.
     this.large_resources = data.large_resources
-      ? Object.fromEntries(
-          Object.entries(data.large_resources).map(([k, v]) => [k, normalizeLink(v)]),
-        )
+      ? Object.fromEntries(Object.entries(data.large_resources))
       : undefined;
     this.deprecated = data.deprecated;
     this.replaced_by = data.replaced_by;
@@ -618,7 +605,10 @@ export class BatchResult {
   // A resource the registry holds inline on the manifest record carries its
   // bytes inline (base64-encoded when inline_base64 is set), at any size and
   // whether or not an object store is configured; every other resource
-  // carries presigned_url (§7.6.2).
+  // carries presigned_url (§7.6.2). A loaded entry holds only the members
+  // §4.7.10 step 2 reads: a link reference {path, presigned_url,
+  // content_hash}, and an inline reference {path, content_hash, inline,
+  // inline_base64} whose body passed step 6.
   resources?: {
     path: string;
     presigned_url?: string;
@@ -629,7 +619,13 @@ export class BatchResult {
   deprecated?: boolean;
   replaced_by?: string;
   deprecation_warning?: string;
-  // spec: §4.7.10 — the delivery attestation, passed through unverified.
+  // spec: §4.7.10, §7.6.3 — the registry's delivery attestation. On every ok
+  // batch entry the client recomputes delivery_hash from the served record,
+  // compares it with this value, and applies its §4.7.9 policy to
+  // delivery_signature; an entry that fails becomes an error result whose
+  // error is the RegistryError (§7.6.2). A §6.4 workspace-overlay load is
+  // exempt from the check and carries neither field, because no registry
+  // served the record.
   delivery_hash?: string;
   delivery_signature?: string;
   error?: {
@@ -662,6 +658,8 @@ export class BatchResult {
   async materialize(to: string, opts: MaterializeOptions = {}): Promise<string[]> {
     requireCanonicalHarness(opts.harness);
     if (this.status !== "ok") {
+      // A delivery-check refusal is already the RegistryError.
+      if (this.error instanceof RegistryError) throw this.error;
       // spec: §13.2.1 / §6.10 — re-raise the specific subclass so a
       // registry.read_only batch item surfaces as RegistryReadOnly.
       throw registryErrorFromEnvelope({
@@ -672,20 +670,21 @@ export class BatchResult {
         suggested_action: this.error?.suggested_action,
       });
     }
-    // §7.6.2: a resource the registry holds inline on the manifest record
-    // carries its bytes inline (base64-encoded when inline_base64 is set), at
-    // any size and whether or not an object store is configured. Every other
-    // resource carries a presigned_url, which is fetched.
-    const large: Record<string, LargeResourceLink> = {};
-    const inline: Record<string, string | Uint8Array> = {};
-    for (const r of this.resources ?? []) {
-      if (r.presigned_url) {
-        large[r.path] = { url: r.presigned_url, content_hash: r.content_hash };
-      } else {
-        const v = r.inline ?? "";
-        inline[r.path] = r.inline_base64 ? Uint8Array.from(Buffer.from(v, "base64")) : v;
-      }
-    }
+    // Spec: §4.7.10 step 2 — a reference with a non-empty presigned_url is a
+    // link reference, fetched and checked against its content_hash; every
+    // other reference is inline, its bytes base64-encoded when inline_base64
+    // is set (§7.6.2).
+    const refs = this.resources ?? [];
+    const large: Record<string, LargeResourceLink> = Object.fromEntries(
+      refs
+        .filter((r) => r.presigned_url)
+        .map((r) => [r.path, { url: r.presigned_url as string, content_hash: r.content_hash }]),
+    );
+    const inline: Record<string, string | Uint8Array> = Object.fromEntries(
+      refs
+        .filter((r) => !r.presigned_url)
+        .map((r) => [r.path, r.inline_base64 ? decodeBase64(r.inline ?? "") : (r.inline ?? "")]),
+    );
     return materializeCanonical({
       to,
       id: this.id,
@@ -698,6 +697,84 @@ export class BatchResult {
       fetcher: opts.fetcher ?? fetch,
     });
   }
+}
+
+// recordText returns a record field as text. A field placed from a fetched
+// manifest document holds the fetched bytes, which §7.6.3 returns decoded as
+// UTF-8 with each invalid sequence replaced by U+FFFD.
+function recordText(value: string | Uint8Array): string {
+  return typeof value === "string" ? value : new TextDecoder().decode(value);
+}
+
+// loadedArtifactFrom builds the public LoadedArtifact from a verified
+// load_artifact body. Every path-keyed object is a plain-object copy built with
+// Object.fromEntries, so a "__proto__" path stays an own property.
+function loadedArtifactFrom(parsed: ParsedLoad): LoadedArtifact {
+  const rec = parsed.served.record;
+  return new LoadedArtifact({
+    id: recordText(rec.id),
+    type: recordText(rec.type),
+    version: recordText(rec.version),
+    manifest_body: recordText(rec.manifest_body),
+    frontmatter: recordText(rec.frontmatter),
+    skill_raw: recordText(rec.skill_raw),
+    // §4.1/§7.2: when resources_base64 is set every value is base64 text,
+    // which materialize decodes back to raw bytes.
+    resources: parsed.resources,
+    resources_base64: parsed.resourcesBase64 || undefined,
+    // §7.2 large resources travel as presigned references the consumer
+    // fetches from object storage; materialize() pulls them.
+    large_resources: parsed.largeResources,
+    ...parsed.lifecycle,
+    delivery_hash: parsed.served.hash,
+    delivery_signature: parsed.served.signature || undefined,
+  });
+}
+
+// batchResultFrom builds one BatchResult from a parsed §7.6.2 entry, verifying
+// an ok entry. An ok entry that fails §4.7.10 steps 2 to 7 or the §4.7.9
+// policy becomes status "error" carrying the RegistryError, and the other
+// entries load.
+//
+// Spec: §4.7.10, §7.6.2, §7.6.3
+async function batchResultFrom(entry: BatchEntry, verification: Verification): Promise<BatchResult> {
+  if (!entry.served && !entry.error) {
+    const envelope = plainJson(entry.members.get("error"));
+    return new BatchResult({
+      id: entry.id,
+      status: "error",
+      error: typeof envelope === "object" && envelope !== null && !Array.isArray(envelope)
+        ? (envelope as BatchResult["error"])
+        : undefined,
+    });
+  }
+  let err = entry.error;
+  if (!err && entry.served) {
+    try {
+      await checkDelivery(entry.served, verification);
+    } catch (e) {
+      // checkDelivery refuses only with RegistryError; anything else is a
+      // defect that must surface rather than become an error entry.
+      if (!(e instanceof RegistryError)) throw e;
+      err = e;
+    }
+  }
+  if (err || !entry.served) return new BatchResult({ id: entry.id, status: "error", error: err });
+  const rec = entry.served.record;
+  return new BatchResult({
+    id: recordText(rec.id),
+    status: "ok",
+    type: recordText(rec.type),
+    version: recordText(rec.version),
+    content_hash: recordText(rec.content_hash),
+    manifest_body: recordText(rec.manifest_body),
+    frontmatter: recordText(rec.frontmatter),
+    skill_raw: recordText(rec.skill_raw),
+    resources: entry.references.map((r) => ({ ...r })),
+    ...entry.lifecycle,
+    delivery_hash: entry.served.hash,
+    delivery_signature: entry.served.signature || undefined,
+  });
 }
 
 export interface DependencyEdge {
@@ -719,68 +796,6 @@ export interface RegistryEvent {
   timestamp?: string;
   actor?: Record<string, unknown>;
   data?: Record<string, unknown>;
-}
-
-export class RegistryError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly retryable: boolean = false,
-    // spec: §6.10 — the full envelope carries a machine-readable details map
-    // (for example {runtime_iss: ...}) and an operator remediation hint.
-    // Callers read both off the error; they default to an empty map
-    // and empty string when the registry omits them.
-    public readonly details: Record<string, unknown> = {},
-    public readonly suggestedAction: string = "",
-  ) {
-    super(`${code}: ${message}`);
-    this.name = "RegistryError";
-  }
-}
-
-// RegistryReadOnly is thrown when a write is rejected because the
-// registry is in §13.2.1 read-only mode (the §6.10 registry.read_only
-// error code). It extends RegistryError, so callers that catch the base
-// error keep working while callers that want to retry once the registry
-// leaves read-only mode can catch this type specifically.
-export class RegistryReadOnly extends RegistryError {
-  constructor(
-    message: string,
-    retryable = false,
-    details: Record<string, unknown> = {},
-    suggestedAction = "",
-  ) {
-    super("registry.read_only", message, retryable, details, suggestedAction);
-    this.name = "RegistryReadOnly";
-  }
-}
-
-// registryErrorFromEnvelope builds the §6.10 error for a structured
-// envelope, choosing the most specific subclass for the code.
-// registry.read_only (§13.2.1) maps to RegistryReadOnly; every other code
-// maps to the base RegistryError.
-export function registryErrorFromEnvelope(env: {
-  code?: unknown;
-  message?: unknown;
-  retryable?: unknown;
-  details?: unknown;
-  suggested_action?: unknown;
-}): RegistryError {
-  const code = (env.code as string) ?? "registry.unknown";
-  const message = (env.message as string) ?? "";
-  const retryable = Boolean(env.retryable);
-  // spec: §6.10 — preserve the machine-readable details map and the operator
-  // remediation hint so callers can read the full envelope.
-  const details =
-    env.details && typeof env.details === "object"
-      ? (env.details as Record<string, unknown>)
-      : {};
-  const suggestedAction =
-    typeof env.suggested_action === "string" ? env.suggested_action : "";
-  if (code === "registry.read_only") {
-    return new RegistryReadOnly(message, retryable, details, suggestedAction);
-  }
-  return new RegistryError(code, message, retryable, details, suggestedAction);
 }
 
 // spec: §11 (Search browse mode test) — the search top_k cap. Distinct from the
@@ -814,6 +829,14 @@ export interface ClientOptions {
   // spec: §7.4 — the cache mode the SDK applies, shared with the MCP server
   // and podium sync. fromEnv reads it from PODIUM_CACHE_MODE.
   cacheMode?: CacheMode;
+  // spec: §4.7.9 / §7.6.3 — the delivery-check policy, which takes precedence
+  // over PODIUM_VERIFY_SIGNATURES and defaults.verify_signatures. Unset, the
+  // SDK default applies: always when a verification key is configured and
+  // never otherwise.
+  verifySignatures?: VerifyPolicy;
+  // spec: §4.7.9 — a PODIUM_SIGNATURE_VERIFY_KEY key list that takes
+  // precedence over the variable and the key file.
+  verifyKeys?: string;
 }
 
 export class Client {
@@ -823,6 +846,10 @@ export class Client {
   readonly cacheMode: CacheMode;
   private readonly fetcher: typeof fetch;
   private token: string;
+  private readonly explicitVerification: { verifySignatures?: string; verifyKeys?: string };
+  // The memoized §4.7.9 resolution; resolvedPolicy is set once it settles.
+  private verificationPromise?: Promise<Verification>;
+  private resolvedPolicy?: VerifyPolicy;
   // spec §6.4 — the overlay index is read on demand and cached per
   // session_id ("cached for the duration of a session_id"). The empty-string
   // key holds the most recent no-session read, which is refreshed each call.
@@ -848,6 +875,44 @@ export class Client {
       );
     }
     this.cacheMode = mode;
+    // spec: §4.7.9 / §7.6.3 — an explicit policy is validated here, and the
+    // policy and key set resolve on the first registry request, so the
+    // constructor performs no I/O.
+    if (opts.verifySignatures !== undefined && !POLICIES.includes(opts.verifySignatures)) {
+      throw new Error(
+        `verifySignatures must be one of ${POLICIES.join(" | ")}, got ${String(opts.verifySignatures)}`,
+      );
+    }
+    this.explicitVerification = { verifySignatures: opts.verifySignatures, verifyKeys: opts.verifyKeys };
+  }
+
+  // verifySignatures is the resolved §4.7.9 policy, or undefined before the
+  // client has resolved it.
+  get verifySignatures(): VerifyPolicy | undefined {
+    return this.resolvedPolicy;
+  }
+
+  // verification resolves the §4.7.9 policy and key set once and memoizes the
+  // result, a rejection included. Every method that sends a request to the
+  // registry awaits it before the request, so an unusable key refuses the call
+  // before the registry is contacted; presigned object-store fetches do not
+  // await it. The process global is read only when the runtime has one.
+  //
+  // Spec: §4.7.9, §7.6.3
+  private verification(): Promise<Verification> {
+    if (!this.verificationPromise) {
+      const proc = globalThis.process;
+      this.verificationPromise = resolveVerification(
+        this.explicitVerification,
+        proc?.env ?? {},
+        proc ? proc.cwd() : "",
+        proc ? (proc.env.HOME ?? proc.env.USERPROFILE) : undefined,
+      ).then((v) => {
+        this.resolvedPolicy = v.policy;
+        return v;
+      });
+    }
+    return this.verificationPromise;
   }
 
   // spec §14.4 / §13.10 — fromEnv "picks up registry URL from sync.yaml +
@@ -869,7 +934,11 @@ export class Client {
         "no registry configured: set PODIUM_REGISTRY, add defaults.registry to sync.yaml, or run `podium init`",
       );
     }
-    return new Client({
+    // spec: §4.7.9 / §7.6.3 — resolve the delivery-check policy and key set
+    // before the client exists, so an unusable key rejects fromEnv.
+    const home = process.env.HOME ?? process.env.USERPROFILE;
+    const verification = await resolveVerification({}, process.env, process.cwd(), home);
+    const client = new Client({
       registry,
       identityProvider: process.env.PODIUM_IDENTITY_PROVIDER,
       overlayPath: process.env.PODIUM_OVERLAY_PATH,
@@ -879,6 +948,9 @@ export class Client {
       // §7.4 cache mode, shared with the MCP server and podium sync.
       cacheMode: (process.env.PODIUM_CACHE_MODE as CacheMode) || "always-revalidate",
     });
+    client.verificationPromise = Promise.resolve(verification);
+    client.resolvedPolicy = verification.policy;
+    return client;
   }
 
   // guardOffline enforces §7.4 offline-only: the SDK has no local cache, so an
@@ -952,6 +1024,8 @@ export class Client {
       "";
     let tokenUrl = opts.tokenEndpoint ?? process.env.PODIUM_OAUTH_TOKEN_URL ?? "";
     if (!deviceUrl) {
+      // Discovery is a registry request, so the §4.7.9 resolution precedes it.
+      await this.verification();
       const discovered = await discoverIdp(this.registry, this.fetcher);
       deviceUrl = discovered.deviceUrl;
       if (!tokenUrl) tokenUrl = discovered.tokenUrl;
@@ -1334,35 +1408,38 @@ export class Client {
     const params: Record<string, unknown> = { id };
     if (version) params.version = version;
     if (opts.sessionID) params.session_id = opts.sessionID;
-    const data = (await this.get("/v1/load_artifact", params)) as Partial<LoadedArtifact> & {
-      manifest_body_url?: unknown;
-    };
-    // spec §6.6 — a canonical manifest above the 256 KB inline cutoff arrives as
-    // a presigned manifest_body_url with the inline fields cleared. Resolve it so
-    // the returned artifact carries the manifest fields regardless of size,
-    // matching the inline path and the MCP server. For a skill the small inline
-    // ARTIFACT.md frontmatter is left untouched.
-    if (data.manifest_body_url) {
-      const link = normalizeLink(data.manifest_body_url);
-      if (!link.url) {
-        throw new RegistryError("registry.unknown", "manifest_body_url has no presigned URL");
-      }
-      // The client's token goes to a URL that is not SigV4 presigned (§13.12).
-      const resp = await (opts.fetcher ?? fetch)(link.url, {
-        headers: presignedSigV4(link.url) ? {} : this.headers(),
-      });
-      if (!resp.ok) {
-        throw new RegistryError("registry.unknown", `fetch manifest body: HTTP ${resp.status}`);
-      }
-      const doc = new TextDecoder().decode(new Uint8Array(await resp.arrayBuffer()));
-      data.manifest_body = manifestBodyFrom(doc);
-      if ((data.type ?? "") === "skill") {
-        data.skill_raw = doc;
-      } else {
-        data.frontmatter = doc;
-      }
+    // spec: §4.7.10 / §7.6.3 — the body is decoded by the verification
+    // procedure from its raw bytes, the manifest document is fetched and
+    // checked, and the record is verified before anything is returned.
+    const parsed = await parseLoadResponse(await this.getRaw("/v1/load_artifact", params));
+    if (parsed.manifestLink) {
+      await this.placeManifestBody(parsed, opts.fetcher ?? fetch);
     }
-    return new LoadedArtifact(data);
+    await checkDelivery(parsed.served, await this.verification());
+    return loadedArtifactFrom(parsed);
+  }
+
+  // placeManifestBody resolves a presigned manifest_body_url (spec §6.6) into
+  // the served record. A canonical manifest above the 256 KB inline cutoff
+  // arrives as a link with the inline manifest fields cleared. The document is
+  // fetched from the link's exact-name presigned_url, so an unknown url member
+  // is ignored as the Go consumers ignore it, and the fetched bytes are checked
+  // against the link's content_hash before the body is derived. The record
+  // keeps the fetched bytes rather than decoded text, because the registry
+  // frames the raw document and a document that is not valid UTF-8 would
+  // otherwise fail the delivery hash.
+  private async placeManifestBody(parsed: ParsedLoad, fetcher: typeof fetch): Promise<void> {
+    const link = parsed.manifestLink as { presigned_url: string; content_hash: string };
+    // The client's token goes to a URL that is not SigV4 presigned (§13.12).
+    const resp = await fetcher(link.presigned_url, {
+      headers: presignedSigV4(link.presigned_url) ? {} : this.headers(),
+    });
+    if (!resp.ok) {
+      throw new RegistryError("registry.unknown", `fetch manifest body: HTTP ${resp.status}`);
+    }
+    const doc = new Uint8Array(await resp.arrayBuffer());
+    await checkLinked(doc, link.content_hash, "manifest_body_url document");
+    placeManifestDocument(parsed.served, doc, manifestBodyOf(doc));
   }
 
   // Spec §7.6.2 — bulk fetch via POST /v1/artifacts:batchLoad. The
@@ -1380,9 +1457,13 @@ export class Client {
     } = {},
   ): Promise<BatchResult[]> {
     if (ids.length === 0) return [];
+    // spec: §7.6.3 — resolve the §4.7.9 policy before the registry request.
+    const verification = await this.verification();
     // §7.4 offline-only short-circuit before any network request.
     this.guardOffline();
-    const out: BatchResult[] = [];
+    // Every chunk is parsed before any result is built, so a refused body in
+    // any chunk rejects the call with no entries (§7.6.3).
+    const entries: BatchEntry[] = [];
     const cap = 50;
     for (let i = 0; i < ids.length; i += cap) {
       const chunk = ids.slice(i, i + cap);
@@ -1424,9 +1505,10 @@ export class Client {
           suggested_action: envelope.suggested_action,
         });
       }
-      const part = (await resp.json()) as Partial<BatchResult>[];
-      out.push(...part.map((e) => new BatchResult(e)));
+      entries.push(...(await parseBatchResponse(new Uint8Array(await resp.arrayBuffer()))));
     }
+    const out: BatchResult[] = [];
+    for (const entry of entries) out.push(await batchResultFrom(entry, verification));
     return out;
   }
 
@@ -1449,6 +1531,8 @@ export class Client {
   // long-poll JSON-Lines variant; SSE / websocket land alongside the
   // server's outbound webhook subsystem.
   async *subscribe(eventTypes: string[]): AsyncIterable<RegistryEvent> {
+    // spec: §7.6.3 — resolve the §4.7.9 policy before the registry request.
+    await this.verification();
     // §7.4 offline-only short-circuit before opening the event stream.
     this.guardOffline();
     const url = new URL(this.registry + "/v1/events");
@@ -1489,6 +1573,13 @@ export class Client {
   }
 
   private async get(path: string, params: Record<string, unknown>): Promise<unknown> {
+    return JSON.parse(new TextDecoder().decode(await this.getRaw(path, params)));
+  }
+
+  // getRaw issues a registry GET and returns the raw response body.
+  private async getRaw(path: string, params: Record<string, unknown>): Promise<Uint8Array> {
+    // spec: §7.6.3 — resolve the §4.7.9 policy before the registry request.
+    await this.verification();
     // §7.4 offline-only short-circuit before any network request.
     this.guardOffline();
     const url = new URL(this.registry + path);
@@ -1521,6 +1612,6 @@ export class Client {
         suggested_action: envelope.suggested_action,
       });
     }
-    return resp.json();
+    return new Uint8Array(await resp.arrayBuffer());
   }
 }

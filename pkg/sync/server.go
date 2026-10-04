@@ -2,9 +2,6 @@ package sync
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +13,8 @@ import (
 
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/objectstore"
+	"github.com/lennylabs/podium/pkg/sign"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // defaultServerTimeout bounds every server-source HTTP request so a sync
@@ -44,35 +43,6 @@ type syncManifestResponse struct {
 	} `json:"artifacts"`
 }
 
-// serverLoadResponse mirrors the subset of GET /v1/load_artifact that
-// podium sync materializes.
-type serverLoadResponse struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
-	// ContentHash is the registry's authoritative §6.6 content hash for the
-	// resolved (id, version) pair. podium sync pins it into the lock verbatim
-	// so the committed (id, version, content_hash) triple is the registry's
-	// system-of-record value rather than a digest recomputed from the served
-	// bytes (§14.11).
-	ContentHash    string            `json:"content_hash"`
-	Layer          string            `json:"layer"`
-	ManifestBody   string            `json:"manifest_body"`
-	Frontmatter    string            `json:"frontmatter"`
-	SkillRaw       string            `json:"skill_raw"`
-	Resources      map[string]string `json:"resources"`
-	ResourcesB64   bool              `json:"resources_base64"`
-	LargeResources map[string]struct {
-		URL string `json:"presigned_url"`
-	} `json:"large_resources"`
-	// ManifestBodyURL carries the canonical manifest document (SKILL.md for
-	// a skill, ARTIFACT.md otherwise) when it exceeds the inline cutoff, in
-	// which case the registry clears that inline field (§6.6, §7.2).
-	ManifestBodyURL *struct {
-		URL         string `json:"presigned_url"`
-		ContentHash string `json:"content_hash"`
-	} `json:"manifest_body_url"`
-}
-
 // errorEnvelope is the §6.10 structured error a registry returns on a
 // non-2xx response.
 type errorEnvelope struct {
@@ -85,7 +55,8 @@ type errorEnvelope struct {
 // server's server-source delivery (§2.2): the served frontmatter becomes
 // ARTIFACT.md, a skill's body is appended for SKILL.md, and bundled
 // resources are decoded inline or fetched from their §7.2 presigned URLs.
-func fetchServerRecords(ctx context.Context, opts Options) ([]materialRecord, error) {
+// Every record passes check before it is returned.
+func fetchServerRecords(ctx context.Context, opts Options, check *sign.DeliveryCheck) ([]materialRecord, error) {
 	client := opts.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: defaultServerTimeout}
@@ -97,134 +68,184 @@ func fetchServerRecords(ctx context.Context, opts Options) ([]materialRecord, er
 		return nil, fmt.Errorf("sync manifest: %w", err)
 	}
 
+	f := serverFetcher{client: client, base: base, token: opts.Token, check: check}
 	out := make([]materialRecord, 0, len(list.Artifacts))
 	for _, entry := range list.Artifacts {
-		rec, err := fetchServerRecord(ctx, client, base, opts.Token, entry.ID, entry.Layer)
+		rec, err := f.fetchServerRecord(ctx, entry.ID, entry.Layer)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("load_artifact %s: %w", entry.ID, err)
 		}
 		out = append(out, rec)
 	}
 	return out, nil
 }
 
-// fetchServerRecord loads one artifact over HTTP and assembles its record.
-func fetchServerRecord(ctx context.Context, client *http.Client, base, token, id, layerID string) (materialRecord, error) {
-	var resp serverLoadResponse
-	loadURL := base + "/v1/load_artifact?id=" + url.QueryEscape(id)
-	if err := httpGetJSON(ctx, client, loadURL, token, &resp); err != nil {
-		return materialRecord{}, fmt.Errorf("load_artifact %s: %w", id, err)
-	}
-	if resp.Layer != "" {
-		layerID = resp.Layer
-	}
-	if err := restoreManifestDocument(ctx, client, token, &resp); err != nil {
-		return materialRecord{}, fmt.Errorf("load_artifact %s: %w", id, err)
-	}
+// serverFetcher holds what every load_artifact request of one server-source
+// load shares: the client, the registry base URL, the caller credential, and
+// the resolved delivery check.
+type serverFetcher struct {
+	client *http.Client
+	base   string
+	token  string
+	check  *sign.DeliveryCheck
+}
 
-	resources, err := decodeInlineResources(resp.Resources, resp.ResourcesB64)
+// fetchServerRecord loads one artifact over HTTP, verifies it by the §4.7.10
+// procedure, and assembles its record. The body is read only through
+// version.ParseLoadResponse and its exact-name member maps, so sync refuses
+// exactly the bodies the MCP server and the SDKs refuse.
+//
+// Spec: §4.7.10, §6.6 step 2, §7.5
+func (f serverFetcher) fetchServerRecord(ctx context.Context, id, layerID string) (materialRecord, error) {
+	body, err := httpGetBody(ctx, f.client, f.base+"/v1/load_artifact?id="+url.QueryEscape(id), f.token)
 	if err != nil {
-		return materialRecord{}, fmt.Errorf("load_artifact %s: %w", id, err)
+		return materialRecord{}, err
 	}
-	// §7.2 large resources travel as presigned URLs; fetch each so the
-	// materialized package is complete on disk.
-	for path, link := range resp.LargeResources {
-		if link.URL == "" {
-			return materialRecord{}, fmt.Errorf("load_artifact %s: large resource %q missing presigned URL", id, path)
+	served, err := version.ParseLoadResponse(body)
+	if err != nil {
+		return materialRecord{}, fmt.Errorf("materialize.content_hash_mismatch: %w", err)
+	}
+	if layer, err := servedLayer(served.Members); err != nil {
+		return materialRecord{}, err
+	} else if layer != "" {
+		layerID = layer
+	}
+	if err := f.restoreManifestDocument(ctx, &served); err != nil {
+		return materialRecord{}, err
+	}
+	resources, err := f.fetchLargeResources(ctx, served)
+	if err != nil {
+		return materialRecord{}, err
+	}
+	if err := f.check.Verify(ctx, served.Record, served.Hash, served.Signature); err != nil {
+		return materialRecord{}, err
+	}
+	return recordFromServed(served.Record, id, layerID, resources), nil
+}
+
+// servedLayer reads the layer member by exact name. An absent member or a
+// null reads as empty, and a value of another JSON type is refused. layer sits
+// outside the delivery record, so a case variant or an earlier repeated
+// occurrence of the name is never read (§4.7.10 steps 1 and 2).
+func servedLayer(members map[string]json.RawMessage) (string, error) {
+	raw, ok := members["layer"]
+	if !ok {
+		return "", nil
+	}
+	var layer string
+	if err := json.Unmarshal(raw, &layer); err != nil {
+		return "", fmt.Errorf("materialize.content_hash_mismatch: layer: %w", err)
+	}
+	return layer, nil
+}
+
+// restoreManifestDocument follows a manifest_body_url, checks the fetched
+// document against the link's content hash (§4.7.10 step 6), and completes
+// the record with the document and the body manifest.ManifestBodyOf derives
+// from it. A no-op when the document arrived inline.
+//
+// Spec: §4.7.10, §6.6, §13.12
+func (f serverFetcher) restoreManifestDocument(ctx context.Context, served *version.Served) error {
+	link := served.ManifestLink
+	if link == nil {
+		return nil
+	}
+	doc, err := fetchBytes(ctx, f.client, link.URL, f.token)
+	if err != nil {
+		return fmt.Errorf("fetch manifest body: %w", err)
+	}
+	if err := version.CheckLinked(doc, link.ContentHash); err != nil {
+		return fmt.Errorf("materialize.content_hash_mismatch: manifest body: %w", err)
+	}
+	body, err := manifest.ManifestBodyOf(doc)
+	if err != nil {
+		// ManifestBodyOf returns no error today; the branch keeps a future
+		// failure from framing an empty body, and no test can reach it.
+		return fmt.Errorf("materialize.content_hash_mismatch: manifest body: %w", err)
+	}
+	served.PlaceManifestDocument(doc, body)
+	return nil
+}
+
+// fetchLargeResources returns the inline bodies together with each §7.2
+// large resource fetched from its presigned URL and checked against the
+// link's content hash (§4.7.10 step 6), so the materialized package is
+// complete on disk. Paths are fetched in sorted order.
+func (f serverFetcher) fetchLargeResources(ctx context.Context, served version.Served) (map[string][]byte, error) {
+	resources := make(map[string][]byte, len(served.Inline)+len(served.Links))
+	for path, body := range served.Inline {
+		resources[path] = body
+	}
+	paths := make([]string, 0, len(served.Links))
+	for path := range served.Links {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		link := served.Links[path]
+		body, err := fetchBytes(ctx, f.client, link.URL, f.token)
+		if err != nil {
+			return nil, fmt.Errorf("fetch resource %q: %w", path, err)
 		}
-		body, ferr := fetchBytes(ctx, client, link.URL, token)
-		if ferr != nil {
-			return materialRecord{}, fmt.Errorf("load_artifact %s: fetch resource %q: %w", id, path, ferr)
+		if err := version.CheckLinked(body, link.ContentHash); err != nil {
+			return nil, fmt.Errorf("materialize.content_hash_mismatch: large resource %s: %w", path, err)
 		}
 		resources[path] = body
 	}
+	return resources, nil
+}
 
-	rec := materialRecord{
-		ID:            id,
-		LayerID:       layerID,
-		ContentHash:   resp.ContentHash,
-		ArtifactBytes: []byte(resp.Frontmatter),
-		AuthoredBytes: []byte(resp.Frontmatter),
+// recordFromServed builds the adapter-ready record of a verified delivery
+// record.
+func recordFromServed(rec version.DeliveryRecord, id, layerID string, resources map[string][]byte) materialRecord {
+	out := materialRecord{
+		ID:      id,
+		LayerID: layerID,
+		// ContentHash is the registry's authoritative §6.6 content hash for
+		// the resolved (id, version) pair. The lock pins it verbatim so the
+		// committed (id, version, content_hash) triple is the registry's
+		// system-of-record value rather than a digest recomputed from the
+		// served bytes (§14.11).
+		ContentHash:   rec.ContentHash,
+		ArtifactBytes: []byte(rec.Frontmatter),
+		AuthoredBytes: []byte(rec.Frontmatter),
 		Resources:     resources,
 	}
 	// Parse the served frontmatter so the §4.3 target_harnesses gate runs.
 	// A parse failure leaves Artifact nil; the artifact then materializes
 	// for every harness (the gate only excludes opt-outs).
-	if a, perr := manifest.ParseArtifact([]byte(resp.Frontmatter)); perr == nil {
-		rec.Artifact = a
+	if a, perr := manifest.ParseArtifact([]byte(rec.Frontmatter)); perr == nil {
+		out.Artifact = a
 	}
 	// spec: §4.3.4 / §11 — a skill's SKILL.md is delivered verbatim so the
 	// materialized file is byte-identical to the filesystem-source consumer.
 	// The authored SKILL.md frontmatter (name, description, compatibility,
 	// allowed-tools, …) cannot be reconstructed from ARTIFACT.md frontmatter
 	// plus body, so the registry ships the original bytes in skill_raw.
-	if resp.Type == "skill" {
-		rec.SkillBytes = []byte(resp.SkillRaw)
+	if rec.Type == string(manifest.TypeSkill) {
+		out.SkillBytes = []byte(rec.SkillRaw)
 	}
-	return rec, nil
+	return out
 }
 
-// restoreManifestDocument follows a manifest_body_url and restores the field
-// the registry cleared: SkillRaw for a skill, Frontmatter otherwise. A body
-// whose digest differs from the link's content hash is refused, so a sync
-// never materializes a document other than the one the registry linked. A
-// no-op when the document arrived inline. Server-source sync runs no §6.6
-// delivery verification; the digest check binds the fetched bytes to the link.
-//
-// Spec: §2.2, §6.6, §13.12.
-func restoreManifestDocument(ctx context.Context, client *http.Client, token string, resp *serverLoadResponse) error {
-	if resp.ManifestBodyURL == nil {
-		return nil
-	}
-	link := resp.ManifestBodyURL
-	doc, err := fetchBytes(ctx, client, link.URL, token)
+// httpGetJSON issues a bounded GET through httpGetBody and decodes the JSON
+// body into out.
+func httpGetJSON(ctx context.Context, client *http.Client, rawURL, token string, out any) error {
+	body, err := httpGetBody(ctx, client, rawURL, token)
 	if err != nil {
-		return fmt.Errorf("fetch manifest body: %w", err)
+		return err
 	}
-	sum := sha256.Sum256(doc)
-	if "sha256:"+hex.EncodeToString(sum[:]) != link.ContentHash {
-		return fmt.Errorf("manifest body content hash mismatch")
-	}
-	if resp.Type == string(manifest.TypeSkill) {
-		resp.SkillRaw = string(doc)
-	} else {
-		resp.Frontmatter = string(doc)
-	}
-	return nil
+	return json.Unmarshal(body, out)
 }
 
-// decodeInlineResources copies the inline resource map to bytes, decoding
-// base64 when the registry flagged resources_base64. Sorted-key
-// iteration keeps the result deterministic.
-func decodeInlineResources(in map[string]string, b64 bool) (map[string][]byte, error) {
-	out := map[string][]byte{}
-	keys := make([]string, 0, len(in))
-	for k := range in {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		if !b64 {
-			out[k] = []byte(in[k])
-			continue
-		}
-		raw, err := base64.StdEncoding.DecodeString(in[k])
-		if err != nil {
-			return nil, fmt.Errorf("decode resource %q: %w", k, err)
-		}
-		out[k] = raw
-	}
-	return out, nil
-}
-
-// httpGetJSON issues a bounded GET and decodes a JSON body, mapping a
+// httpGetBody issues a bounded GET and returns the body bytes, mapping a
 // non-2xx response to the registry's §6.10 error envelope. When token is
 // non-empty it is attached as Authorization: Bearer so the registry resolves
 // the caller's identity (§6.3.2 / §14.11).
-func httpGetJSON(ctx context.Context, client *http.Client, rawURL, token string, out any) error {
+func httpGetBody(ctx context.Context, client *http.Client, rawURL, token string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -234,21 +255,21 @@ func httpGetJSON(ctx context.Context, client *http.Client, rawURL, token string,
 		// A transport-level failure (the registry could not be reached) is the
 		// §7.4 degraded-network condition; tag it so Run can apply the cache
 		// mode. A non-2xx status below is a structured rejection, not this.
-		return &serverUnreachableError{err}
+		return nil, &serverUnreachableError{err}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var env errorEnvelope
 		if json.Unmarshal(body, &env) == nil && env.Code != "" {
-			return fmt.Errorf("%s: %s", env.Code, env.Message)
+			return nil, fmt.Errorf("%s: %s", env.Code, env.Message)
 		}
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	return json.Unmarshal(body, out)
+	return body, nil
 }
 
 // fetchBytes downloads a large-resource URL with a bounded read. The §13.11

@@ -37,6 +37,7 @@ func TestPublishRender_ServerSourceMultiHarness(t *testing.T) {
 
 	workdir := t.TempDir()
 	opts := sync.RenderOptions{
+		Delivery:  neverDelivery,
 		OutputID:  "acme-agents",
 		Registry:  ts.URL,
 		Workdir:   workdir,
@@ -118,6 +119,7 @@ func TestPublishRender_ChangedFalseOnFreshCheckout(t *testing.T) {
 	plugins := []sync.PluginFilter{{Name: "finance-pack", Include: []string{"finance/**"}}}
 	source := t.TempDir()
 	opts := sync.RenderOptions{
+		Delivery:  neverDelivery,
 		OutputID:  "acme-agents",
 		Registry:  ts.URL,
 		Workdir:   source,
@@ -144,6 +146,7 @@ func TestPublishRender_ChangedFalseOnFreshCheckout(t *testing.T) {
 	}
 
 	res, err := sync.Render(context.Background(), sync.RenderOptions{
+		Delivery:  neverDelivery,
 		OutputID:  opts.OutputID,
 		Registry:  ts.URL,
 		Workdir:   checkout,
@@ -181,6 +184,7 @@ func TestPublishRender_StaleCleanupAndChangeSet(t *testing.T) {
 		ts := httptest.NewServer(srv.Handler())
 		defer ts.Close()
 		res, err := sync.Render(context.Background(), sync.RenderOptions{
+			Delivery:  neverDelivery,
 			OutputID:  "acme-agents",
 			Registry:  ts.URL,
 			Workdir:   workdir,
@@ -248,10 +252,11 @@ func TestPublishRunMarketplace_ServerSourceWorkflow(t *testing.T) {
 	}
 
 	res, err := sync.RunMarketplace(context.Background(), sync.RunOptions{
-		Output:  out,
-		Workdir: workdir,
-		Stdout:  io.Discard,
-		Stderr:  io.Discard,
+		Delivery: neverDelivery,
+		Output:   out,
+		Workdir:  workdir,
+		Stdout:   io.Discard,
+		Stderr:   io.Discard,
 	})
 	if err != nil {
 		t.Fatalf("RunMarketplace: %v", err)

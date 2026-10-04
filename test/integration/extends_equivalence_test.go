@@ -82,6 +82,7 @@ func TestSyncEquivalence_ExtendsChildMatchesAcrossModes(t *testing.T) {
 
 			fsTarget := t.TempDir()
 			fsRes, err := sync.Run(sync.Options{
+				Delivery:     neverDelivery,
 				RegistryPath: dir,
 				Target:       fsTarget,
 				AdapterID:    adapterID,
@@ -99,6 +100,7 @@ func TestSyncEquivalence_ExtendsChildMatchesAcrossModes(t *testing.T) {
 
 			srvTarget := t.TempDir()
 			srvRes, err := sync.Run(sync.Options{
+				Delivery:     neverDelivery,
 				RegistryPath: ts.URL,
 				Target:       srvTarget,
 				AdapterID:    adapterID,
@@ -170,7 +172,7 @@ func TestSyncEquivalence_UnhidableParentFailsBothModes(t *testing.T) {
 		"---\ntype: context\nversion: 1.0.0\ndescription: an unrelated context\n---\n\nother prose\n")
 
 	fsTarget := t.TempDir()
-	if _, err := sync.Run(sync.Options{RegistryPath: dir, Target: fsTarget}); err == nil {
+	if _, err := sync.Run(sync.Options{Delivery: neverDelivery, RegistryPath: dir, Target: fsTarget}); err == nil {
 		t.Fatalf("filesystem sync.Run succeeded on a child that cannot hide its parent:\n%v", materializedTree(t, fsTarget))
 	}
 
@@ -182,7 +184,7 @@ func TestSyncEquivalence_UnhidableParentFailsBothModes(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	srvTarget := t.TempDir()
-	if _, err := sync.Run(sync.Options{RegistryPath: ts.URL, Target: srvTarget}); err == nil {
+	if _, err := sync.Run(sync.Options{Delivery: neverDelivery, RegistryPath: ts.URL, Target: srvTarget}); err == nil {
 		t.Fatalf("server sync.Run succeeded on a child that cannot hide its parent:\n%v", materializedTree(t, srvTarget))
 	}
 
@@ -222,7 +224,7 @@ func TestSyncEquivalence_InheritedKeyNamingTheParentFailsBothModes(t *testing.T)
 			"extends: shared/base@1.x\n---\n\nderived prose\n")
 
 	fsTarget := t.TempDir()
-	if _, err := sync.Run(sync.Options{RegistryPath: dir, Target: fsTarget}); err == nil {
+	if _, err := sync.Run(sync.Options{Delivery: neverDelivery, RegistryPath: dir, Target: fsTarget}); err == nil {
 		t.Fatalf("filesystem sync.Run succeeded on a child that cannot hide its parent:\n%v", materializedTree(t, fsTarget))
 	}
 
@@ -234,7 +236,7 @@ func TestSyncEquivalence_InheritedKeyNamingTheParentFailsBothModes(t *testing.T)
 	t.Cleanup(ts.Close)
 
 	srvTarget := t.TempDir()
-	if _, err := sync.Run(sync.Options{RegistryPath: ts.URL, Target: srvTarget}); err == nil {
+	if _, err := sync.Run(sync.Options{Delivery: neverDelivery, RegistryPath: ts.URL, Target: srvTarget}); err == nil {
 		t.Fatalf("server sync.Run succeeded on a child that cannot hide its parent:\n%v", materializedTree(t, srvTarget))
 	}
 

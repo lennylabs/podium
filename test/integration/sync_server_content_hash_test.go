@@ -31,7 +31,7 @@ func TestSyncServerSource_LockPinsRegistryContentHash(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	target := t.TempDir()
-	if _, err := sync.Run(sync.Options{RegistryPath: ts.URL, Target: target, AdapterID: "none"}); err != nil {
+	if _, err := sync.Run(sync.Options{Delivery: neverDelivery, RegistryPath: ts.URL, Target: target, AdapterID: "none"}); err != nil {
 		t.Fatalf("server sync.Run: %v", err)
 	}
 	lock, err := sync.ReadLock(target)

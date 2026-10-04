@@ -26,10 +26,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -338,12 +336,12 @@ func loadConfig() (*config, error) {
 		return nil, fmt.Errorf("config.filesystem_registry_unsupported: PODIUM_REGISTRY %q is a filesystem-source registry; the MCP server speaks HTTP and requires a server source (http:// or https://). Use `podium sync` to consume a filesystem registry (§6.1, §7.5.2)", c.registry)
 	}
 	// §4.7.9 / §6.2 / §7.5.2: resolve the consumer-side signature policy.
-	// Precedence: an explicit env/flag/config value (already applied above)
-	// wins; otherwise honor defaults.verify_signatures from the §7.5.2 file
-	// scopes; otherwise fall back to always.
-	policySource := ""
-	if c.verifyPolicy == "" {
-		c.verifyPolicy, policySource = resolveSyncYAMLPolicy()
+	// An explicit env/flag/config value (already applied above) wins and is
+	// validated; otherwise defaults.verify_signatures from the §7.5.2 file
+	// scopes applies; otherwise always. An unknown value refuses to start so
+	// a typo cannot silently disable signature enforcement.
+	if err := resolveVerifyPolicy(c); err != nil {
+		return nil, err
 	}
 	if c.cacheDir == "" {
 		home, err := os.UserHomeDir()
@@ -362,15 +360,6 @@ func loadConfig() (*config, error) {
 		// known modes
 	default:
 		return nil, fmt.Errorf("PODIUM_CACHE_MODE must be always-revalidate | offline-first | offline-only, got %q", c.cacheMode)
-	}
-	// §6.2 / §4.7.9: PODIUM_VERIFY_SIGNATURES must be one of the recognized
-	// policies. Reject an unknown value at startup so a typo cannot silently
-	// disable signature enforcement on a security control.
-	if !sign.ValidPolicy(c.verifyPolicy) {
-		if policySource != "" {
-			return nil, fmt.Errorf("PODIUM_VERIFY_SIGNATURES must be never | always, got %q from defaults.verify_signatures in %s", c.verifyPolicy, policySource)
-		}
-		return nil, fmt.Errorf("PODIUM_VERIFY_SIGNATURES must be never | always, got %q", c.verifyPolicy)
 	}
 	// §6.2: PODIUM_IDENTITY_PROVIDER selects a built-in provider. Reject an
 	// unrecognized value at startup rather than silently treating it as the
@@ -406,25 +395,27 @@ func loadConfig() (*config, error) {
 	return c, nil
 }
 
-// resolveSyncYAMLPolicy returns the signature policy defaults.verify_signatures
-// supplies across the §7.5.2 scopes, with the path of the file that supplied
-// it, or the §6.2 always default and an empty path when no scope sets it. A
-// never a file supplied writes one line to stderr naming the file: the
-// standalone bootstrap of an earlier release wrote that line into
-// ~/.podium/sync.yaml, nothing in the product removes it, and it disables
-// verification on every registry the machine later points at.
+// resolveVerifyPolicy resolves c.verifyPolicy through sync.ResolveVerifyPolicy
+// from the working directory and the home directory, and prints the
+// stale-never warning it returns as one WARN line on stderr: the standalone
+// bootstrap of an earlier release wrote defaults.verify_signatures: never into
+// ~/.podium/sync.yaml, and that line disables verification on every registry
+// the machine later points at. An unresolvable working or home directory
+// reads as empty, which skips the scopes that depend on it.
 //
 // Spec: §4.7.9, §6.2, §7.5.2.
-func resolveSyncYAMLPolicy() (sign.VerificationPolicy, string) {
-	v, path := verifySignaturesFromSyncYAML()
-	if v == "" {
-		return sign.PolicyAlways, ""
+func resolveVerifyPolicy(c *config) error {
+	cwd, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	policy, _, warning, err := synccfg.ResolveVerifyPolicy(string(c.verifyPolicy), cwd, home)
+	if err != nil {
+		return err
 	}
-	policy := sign.VerificationPolicy(v)
-	if policy == sign.PolicyNever {
-		fmt.Fprintf(os.Stderr, "WARN: signature verification is off because defaults.verify_signatures is never in %s; remove defaults.verify_signatures from that file to verify under the always default (§4.7.9)\n", path)
+	if warning != "" {
+		fmt.Fprintf(os.Stderr, "WARN: %s\n", warning)
 	}
-	return policy, path
+	c.verifyPolicy = policy
+	return nil
 }
 
 func envDefault(key, def string) string {
@@ -1453,15 +1444,15 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 
 // deliverFreshLoad decodes a registry /v1/load_artifact response and delivers
 // it through the live-fetch path, which verifies it, caches it, and records
-// its resolution.
+// its resolution. Every caller passes a 2xx body, so a body that fails the
+// §4.7.10 decoding steps, an id-less one included, is refused rather than
+// passed through.
+//
+// Spec: §4.7.10, §6.6 step 2
 func (s *mcpServer) deliverFreshLoad(body []byte, args map[string]any, now time.Time) any {
-	var resp loadArtifactResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return errorResult("decode load_artifact: " + err.Error())
-	}
-	if resp.ID == "" {
-		// Either an error envelope or an empty result; pass through.
-		return jsonAny(body)
+	resp, err := parseLoadArtifact(body)
+	if err != nil {
+		return errorResult(err.Error())
 	}
 	id, version := argsIDAndVersion(args)
 	// §6.5: deliverLoadArtifact records the (id, version) → content_hash
@@ -1474,6 +1465,98 @@ func (s *mcpServer) deliverFreshLoad(body []byte, args map[string]any, now time.
 		manifestRefresh: s.manifestBodyRefresher(args),
 		resolution:      &resolutionWrite{ID: id, Version: version, Session: s.effectiveSessionID(args), Now: now},
 	})
+}
+
+// parseLoadArtifact decodes a 2xx /v1/load_artifact body by the §4.7.10
+// decoding steps through version.ParseLoadResponse and builds the
+// loadArtifactResponse from the decoded members. Every refusal reports
+// materialize.content_hash_mismatch, the code sync and the SDKs return for
+// the same body.
+//
+// Spec: §4.7.10
+func parseLoadArtifact(body []byte) (loadArtifactResponse, error) {
+	served, err := version.ParseLoadResponse(body)
+	if err != nil {
+		return loadArtifactResponse{}, fmt.Errorf("materialize.content_hash_mismatch: %v", err)
+	}
+	resp, err := applyServed(served)
+	if err != nil {
+		return loadArtifactResponse{}, fmt.Errorf("materialize.content_hash_mismatch: %v", err)
+	}
+	return resp, nil
+}
+
+// applyServed builds the loadArtifactResponse of a decoded body. The record
+// members, the delivery pair, the decoded inline bodies, and the links come
+// from served; layer and each link's size and content_type are read by exact
+// name from the member maps, so a case-variant or repeated member has no
+// effect. A mistyped member outside the record is refused, as §4.7.10 permits
+// for a member a consumer reads beyond the record.
+//
+// Spec: §4.7.10
+func applyServed(served version.Served) (loadArtifactResponse, error) {
+	rec := served.Record
+	resp := loadArtifactResponse{
+		ID:                rec.ID,
+		Type:              rec.Type,
+		Version:           rec.Version,
+		ContentHash:       rec.ContentHash,
+		ManifestBody:      rec.ManifestBody,
+		Frontmatter:       rec.Frontmatter,
+		SkillRaw:          rec.SkillRaw,
+		Sensitivity:       rec.Sensitivity,
+		ArtifactRevision:  rec.ArtifactRevision,
+		DeliveryHash:      served.Hash,
+		DeliverySignature: served.Signature,
+		Resources:         resourcesAsStrings(served.Inline),
+	}
+	if err := memberValue(served.Members, "layer", &resp.Layer); err != nil {
+		return loadArtifactResponse{}, err
+	}
+	if len(served.Links) > 0 {
+		resp.LargeResources = make(map[string]largeResourceLink, len(served.Links))
+	}
+	for path, link := range served.Links {
+		l, err := linkOf(link)
+		if err != nil {
+			return loadArtifactResponse{}, fmt.Errorf("large_resources[%q]: %w", path, err)
+		}
+		resp.LargeResources[path] = l
+	}
+	if served.ManifestLink != nil {
+		l, err := linkOf(*served.ManifestLink)
+		if err != nil {
+			return loadArtifactResponse{}, fmt.Errorf("manifest_body_url: %w", err)
+		}
+		resp.ManifestBodyURL = &l
+	}
+	return resp, nil
+}
+
+// linkOf builds a largeResourceLink from a decoded link, reading size and
+// content_type by exact name.
+func linkOf(link version.Link) (largeResourceLink, error) {
+	out := largeResourceLink{URL: link.URL, ContentHash: link.ContentHash}
+	if err := memberValue(link.Members, "size", &out.Size); err != nil {
+		return largeResourceLink{}, err
+	}
+	if err := memberValue(link.Members, "content_type", &out.ContentType); err != nil {
+		return largeResourceLink{}, err
+	}
+	return out, nil
+}
+
+// memberValue unmarshals the single raw member name of m into dst. An absent
+// member or a raw null leaves dst at its zero value.
+func memberValue(m map[string]json.RawMessage, name string, dst any) error {
+	raw, ok := m[name]
+	if !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil
+	}
+	if err := json.Unmarshal(raw, dst); err != nil {
+		return fmt.Errorf("member %s: %w", name, err)
+	}
+	return nil
 }
 
 // cachedOrRefetch serves the cached record for (hash, id) when it passes the
@@ -1966,68 +2049,44 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 // Spec: §6.6 step 2, §4.7.9, §4.7.10, §5.0
 func (s *mcpServer) verifyServedArtifact(resp *loadArtifactResponse, o deliverOpts) error {
 	if err := s.fetchManifestBody(resp, o.manifestRefresh); err != nil {
-		return fmt.Errorf("materialize.fetch_failed: %w", err)
-	}
-	if err := decodeInlineResources(resp); err != nil {
-		return err
+		return fetchFailure(err)
 	}
 	if err := s.fetchLargeResources(resp, o.refresh); err != nil {
-		return fmt.Errorf("materialize.fetch_failed: %w", err)
+		return fetchFailure(err)
 	}
-	if err := verifyDeliveryHash(*resp); err != nil {
-		return err
-	}
-	if err := s.enforceSignaturePolicy(*resp); err != nil {
-		// §6.10: a missing required signature and a signature that does not
-		// validate are separate codes with separate operator remedies, so the
-		// missing case keeps its own code rather than folding into the
-		// invalid one.
-		if errors.Is(err, sign.ErrSignatureMissing) {
-			return fmt.Errorf("materialize.signature_missing: %w", err)
-		}
-		return fmt.Errorf("materialize.signature_invalid: %w", err)
-	}
-	return nil
+	check := sign.DeliveryCheck{Policy: s.cfg.verifyPolicy, Verifier: s.cfg.verifier}
+	return check.Verify(s.reqCtx(), deliveryRecordOf(*resp), resp.DeliveryHash, resp.DeliverySignature)
 }
 
-// decodeInlineResources decodes base64-encoded inline resources in place when
-// the registry set resources_base64. Large resources are fetched
-// raw and are unaffected. A value that does not decode fails the call with a
-// structured error rather than writing the base64 text to disk.
-func decodeInlineResources(resp *loadArtifactResponse) error {
-	if !resp.ResourcesB64 || len(resp.Resources) == 0 {
-		return nil
-	}
-	decoded := make(map[string]string, len(resp.Resources))
-	for k, v := range resp.Resources {
-		raw, err := base64.StdEncoding.DecodeString(v)
-		if err != nil {
-			return fmt.Errorf("materialize.invalid_base64: resource %s: %v", k, err)
-		}
-		decoded[k] = string(raw)
-	}
-	resp.Resources = decoded
-	resp.ResourcesB64 = false
-	return nil
-}
-
-// verifyDeliveryHash recomputes the §4.7.10 delivery hash over the record the
-// consumer received and compares it to resp.DeliveryHash. The record is built
-// from the served fields themselves: the served frontmatter (the merged
-// document for a child declaring extends:), the served manifest body, the
-// served SKILL.md, and the top-level sensitivity field rather than any value
-// parsed from the frontmatter, so every byte the consumer returns or
-// materializes is covered. A large resource contributes the content hash its
-// link carries, which fetchLargeResources already checked the fetched bytes
-// against; an inline resource contributes the digest of its body. A response
-// that carries no delivery hash fails, whatever the signature policy.
+// fetchFailure maps a §6.6 step-1 fetch error to its §6.10 code. A fetched
+// body that does not match its link's content hash fails the §4.7.10 step 6
+// check and reports materialize.content_hash_mismatch, as every other
+// consumer reports it; every other fetch error reports materialize.fetch_failed.
 //
-// Spec: §4.7.10, §6.6 step 2
-func verifyDeliveryHash(resp loadArtifactResponse) error {
-	if resp.DeliveryHash == "" {
-		return errors.New("materialize.content_hash_mismatch: the response carries no delivery_hash")
+// Spec: §4.7.10, §6.6 step 1
+func fetchFailure(err error) error {
+	if errors.Is(err, version.ErrLinkedHashMismatch) {
+		return fmt.Errorf("materialize.content_hash_mismatch: %w", err)
 	}
-	rec := version.DeliveryRecord{
+	return fmt.Errorf("materialize.fetch_failed: %w", err)
+}
+
+// deliveryRecordOf builds the §4.7.10 delivery record of resp as the consumer
+// holds it after reconstitution. The record frames the served fields
+// themselves: the served frontmatter (the merged document for a child
+// declaring extends:), the served manifest body, the served SKILL.md, and the
+// top-level sensitivity rather than any value parsed from the frontmatter, so
+// every byte the consumer returns or materializes is covered. A large resource
+// contributes the content hash its link carries and an inline resource the
+// digest of its body, through version.ResourceHashes.
+//
+// Spec: §4.7.10
+func deliveryRecordOf(resp loadArtifactResponse) version.DeliveryRecord {
+	linkHashes := make(map[string]string, len(resp.LargeResources))
+	for path, link := range resp.LargeResources {
+		linkHashes[path] = link.ContentHash
+	}
+	return version.DeliveryRecord{
 		ID:               resp.ID,
 		Version:          resp.Version,
 		Type:             resp.Type,
@@ -2037,20 +2096,8 @@ func verifyDeliveryHash(resp loadArtifactResponse) error {
 		Frontmatter:      resp.Frontmatter,
 		ManifestBody:     resp.ManifestBody,
 		SkillRaw:         resp.SkillRaw,
-		Resources:        make(map[string]string, len(resp.Resources)),
+		Resources:        version.ResourceHashes(resourcesAsBytes(resp.Resources), linkHashes),
 	}
-	for path, body := range resp.Resources {
-		if link, ok := resp.LargeResources[path]; ok {
-			rec.Resources[path] = link.ContentHash
-			continue
-		}
-		sum := sha256.Sum256([]byte(body))
-		rec.Resources[path] = "sha256:" + hex.EncodeToString(sum[:])
-	}
-	if got := version.DeliveryHash(rec); got != resp.DeliveryHash {
-		return fmt.Errorf("materialize.content_hash_mismatch: recomputed delivery hash %s does not match served %s", got, resp.DeliveryHash)
-	}
-	return nil
 }
 
 // manifestContext parses the served frontmatter into the map[string]any the
@@ -2219,9 +2266,11 @@ func resourcesAsStrings(in map[string][]byte) map[string]string {
 	return out
 }
 
-// loadArtifactResponse mirrors the registry server's
-// LoadArtifactResponse so we can decode it without importing the server
-// package.
+// loadArtifactResponse is the consumer's form of a registry
+// /v1/load_artifact response. A served body reaches it only through
+// version.ParseLoadResponse and applyServed, never through struct decoding,
+// because the §4.7.10 procedure reads members by exact name. The JSON tags
+// serve the refresh closures alone, which read fresh link URLs.
 type loadArtifactResponse struct {
 	ID           string `json:"id"`
 	Type         string `json:"type"`
@@ -2232,14 +2281,13 @@ type loadArtifactResponse struct {
 	// SkillRaw is the verbatim SKILL.md for a type: skill artifact (§4.3.4),
 	// delivered so materialization reproduces the authored skill file exactly
 	// rather than reconstructing it from ARTIFACT.md frontmatter plus body.
-	SkillRaw    string            `json:"skill_raw,omitempty"`
-	Layer       string            `json:"layer,omitempty"`
-	Sensitivity string            `json:"sensitivity,omitempty"`
-	Resources   map[string]string `json:"resources,omitempty"`
-	// ResourcesB64 mirrors the registry's resources_base64 flag: when true,
-	// the inline Resources values are base64-encoded and must be decoded to
-	// raw bytes before the delivery-hash check and materialization.
-	ResourcesB64   bool                         `json:"resources_base64,omitempty"`
+	SkillRaw    string `json:"skill_raw,omitempty"`
+	Layer       string `json:"layer,omitempty"`
+	Sensitivity string `json:"sensitivity,omitempty"`
+	// Resources holds the decoded inline resource bodies. applyServed fills it
+	// from version.ParseLoadResponse, which decodes resources_base64 values, and
+	// fetchLargeResources merges each fetched large resource into it.
+	Resources      map[string]string            `json:"resources,omitempty"`
 	LargeResources map[string]largeResourceLink `json:"large_resources,omitempty"`
 	// ManifestBodyURL delivers the canonical manifest document via a
 	// presigned object-store URL when it exceeds the §4.2 inline cutoff
@@ -2250,7 +2298,7 @@ type loadArtifactResponse struct {
 	// below-cutoff body delivered inline.
 	ManifestBodyURL *largeResourceLink `json:"manifest_body_url,omitempty"`
 	// DeliveryHash is the registry's §4.7.10 digest over the record this
-	// response delivers, which verifyDeliveryHash recomputes. DeliverySignature
+	// response delivers, which sign.DeliveryCheck.Verify recomputes. DeliverySignature
 	// is the registry's signature over it, which the §4.7.9 policy governs.
 	DeliveryHash      string `json:"delivery_hash"`
 	DeliverySignature string `json:"delivery_signature,omitempty"`
@@ -2269,20 +2317,6 @@ type largeResourceLink struct {
 	ContentHash string `json:"content_hash"`
 	Size        int64  `json:"size"`
 	ContentType string `json:"content_type,omitempty"`
-}
-
-// enforceSignaturePolicy applies the configured §4.7.9 verification
-// policy to the response's §4.7.10 delivery pair with the verifier loadConfig
-// resolved. It
-// constructs nothing: the material was resolved once at startup. Returns nil
-// when the policy is satisfied and the verification error otherwise.
-func (s *mcpServer) enforceSignaturePolicy(resp loadArtifactResponse) error {
-	return sign.EnforceVerification(context.Background(),
-		s.cfg.verifyPolicy,
-		s.cfg.verifier,
-		resp.DeliveryHash,
-		resp.DeliverySignature,
-	)
 }
 
 // enforceSandboxPolicy applies the §4.4.1 sandbox-profile gate.
@@ -2458,24 +2492,7 @@ func resolveVerifier(policy sign.VerificationPolicy, name string) (sign.Provider
 	if name == "noop" {
 		return nil, fmt.Errorf("config.signature_provider_unavailable: PODIUM_SIGNATURE_PROVIDER=noop verifies no signature and PODIUM_VERIFY_SIGNATURES=%s requires verification; select registry-managed, or set PODIUM_VERIFY_SIGNATURES=never", policy)
 	}
-	keys, err := registryManagedVerifyKey()
-	if err != nil {
-		return nil, fmt.Errorf("config.signature_provider_unavailable: %w; supply the verification material or set PODIUM_VERIFY_SIGNATURES=never", err)
-	}
-	return sign.RegistryManagedKey{Trusted: keys}, nil
-}
-
-// registryManagedVerifyKey resolves the registry's verification key set in
-// the §4.7.9 order through sign.VerificationKeys: PODIUM_SIGNATURE_VERIFY_KEY
-// when set, which is authoritative, so a malformed list is an error and never
-// falls through to the key file; otherwise the public: line and every verify:
-// line of the key file at sign.KeyFilePath(PODIUM_SIGN_KEY_PATH), the file a
-// standalone registry on the same machine generated. The error names each
-// source tried.
-//
-// Spec: §4.7.9, §6.2.
-func registryManagedVerifyKey() ([]ed25519.PublicKey, error) {
-	return sign.VerificationKeys(os.Getenv("PODIUM_SIGNATURE_VERIFY_KEY"), os.Getenv("PODIUM_SIGN_KEY_PATH"))
+	return sign.ResolveVerifier(policy, os.Getenv("PODIUM_SIGNATURE_VERIFY_KEY"), os.Getenv("PODIUM_SIGN_KEY_PATH"))
 }
 
 func resourcesAsBytes(in map[string]string) map[string][]byte {

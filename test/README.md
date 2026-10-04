@@ -18,6 +18,11 @@ This tree holds the tests that span packages or run the built binaries.
 - `materialization/` holds golden-file conformance for the harness adapters.
   Each adapter's output is pinned under `testdata/`, and the golden helper
   regenerates it after an intentional change.
+- `vectors/` holds `delivery-record.json`, the cross-language vectors for the
+  §4.7.10 delivery-record verification procedure and the §4.7.9 envelope and
+  key rules. A Go test declares each case's outcome and generates the file, and
+  the Python and TypeScript SDK suites run their own decoders on it. Regenerate
+  it with `UPDATE_GOLDEN=1 go test ./test/vectors/`.
 - `verification/` holds the §11 performance, soak, and chaos categories, written
   to run in CI within a bounded budget.
 - `harness_integration/` holds opt-in tests that drive the real agent harnesses

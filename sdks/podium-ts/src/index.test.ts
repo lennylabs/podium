@@ -15,6 +15,17 @@ import {
   type MaterializeOptions,
   RegistryError,
 } from "./index.js";
+import { isolateVerification, served, signEnvelope, VECTOR_KEY, VECTOR_PUBLIC_KEY } from "./test_support.js";
+
+isolateVerification();
+
+// replyWith answers every request with body as JSON.
+const replyWith =
+  (body: unknown): typeof fetch =>
+  async () =>
+    new Response(JSON.stringify(body), { status: 200 });
+
+const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 
 describe("Client", () => {
   // Spec: §7.6 — searchArtifacts forwards to GET /v1/search_artifacts
@@ -141,18 +152,16 @@ describe("Client", () => {
 
   // Spec: §7.6 — loadArtifact returns the manifest body and resources.
   it("loadArtifact returns manifest and resources", async () => {
-    const fetcher: typeof fetch = async () =>
-      new Response(
-        JSON.stringify({
-          id: "x",
-          type: "skill",
-          version: "1.0.0",
-          manifest_body: "Body.",
-          frontmatter: "---\ntype: skill\n---\n",
-          resources: { "scripts/run.py": "print('run')\n" },
-        }),
-        { status: 200 },
-      );
+    const fetcher = replyWith(
+      await served({
+        id: "x",
+        type: "skill",
+        version: "1.0.0",
+        manifest_body: "Body.",
+        frontmatter: "---\ntype: skill\n---\n",
+        resources: { "scripts/run.py": "print('run')\n" },
+      }),
+    );
     const c = new Client({ registry: "http://reg", fetcher });
     const out = await c.loadArtifact("x");
     expect(out.id).toBe("x");
@@ -164,19 +173,20 @@ describe("Client", () => {
   // manifest_body_url; loadArtifact fetches it and restores the inline fields. For
   // a context the canonical document is the full ARTIFACT.md (frontmatter).
   it("loadArtifact resolves manifest_body_url for a context", async () => {
-    const fetcher: typeof fetch = async () =>
-      new Response(
-        JSON.stringify({
+    const doc = "---\ntype: context\n---\n\nThe big body.\n";
+    const fetcher = replyWith(
+      await served(
+        {
           id: "big/ctx",
           type: "context",
           version: "1.0.0",
           manifest_body: "",
           frontmatter: "",
-          manifest_body_url: { presigned_url: "http://store/mb", content_hash: "sha256:abc" },
-        }),
-        { status: 200 },
-      );
-    const doc = "---\ntype: context\n---\n\nThe big body.\n";
+          manifest_body_url: { presigned_url: "http://store/mb" },
+        },
+        { fetched: { "http://store/mb": enc(doc) } },
+      ),
+    );
     const objectStore: typeof fetch = async () => new Response(doc, { status: 200 });
     const c = new Client({ registry: "http://reg", fetcher });
     const out = await c.loadArtifact("big/ctx", undefined, { fetcher: objectStore });
@@ -185,18 +195,20 @@ describe("Client", () => {
   });
 
   // manifestBodyRegistry answers load_artifact with a manifest_body_url that
-  // points at url, with the inline fields cleared.
-  const manifestBodyRegistry: (url: string) => typeof fetch = (url) => async () =>
-    new Response(
-      JSON.stringify({
-        id: "big/ctx",
-        type: "context",
-        version: "1.0.0",
-        manifest_body: "",
-        frontmatter: "",
-        manifest_body_url: { presigned_url: url, content_hash: "sha256:abc" },
-      }),
-      { status: 200 },
+  // points at url, with the inline fields cleared, sealed over doc.
+  const manifestBodyRegistry = async (url: string, doc: string): Promise<typeof fetch> =>
+    replyWith(
+      await served(
+        {
+          id: "big/ctx",
+          type: "context",
+          version: "1.0.0",
+          manifest_body: "",
+          frontmatter: "",
+          manifest_body_url: { presigned_url: url },
+        },
+        { fetched: { [url]: enc(doc) } },
+      ),
     );
 
   // objectRoute records the Authorization header of each request and, when
@@ -221,7 +233,7 @@ describe("Client", () => {
     const c = new Client({
       registry: "http://reg",
       token: "tok-9",
-      fetcher: manifestBodyRegistry("http://reg/objects/abc"),
+      fetcher: await manifestBodyRegistry("http://reg/objects/abc", doc),
     });
     const out = await c.loadArtifact("big/ctx", undefined, { fetcher: route.fetcher });
     expect(out.frontmatter).toBe(doc);
@@ -235,7 +247,7 @@ describe("Client", () => {
     const c = new Client({
       registry: "http://reg",
       token: "tok-9",
-      fetcher: manifestBodyRegistry("https://s3.example/abc?X-Amz-Signature=deadbeef"),
+      fetcher: await manifestBodyRegistry("https://s3.example/abc?X-Amz-Signature=deadbeef", doc),
     });
     const out = await c.loadArtifact("big/ctx", undefined, { fetcher: route.fetcher });
     expect(route.auths).toEqual([null]);
@@ -245,8 +257,9 @@ describe("Client", () => {
   // Spec: §13.12 — a client with no token sends no Authorization header to the
   // non-SigV4 URL either.
   it("loadArtifact sends no Authorization without a token", async () => {
-    const route = objectRoute("---\ntype: context\n---\n\nbody\n");
-    const c = new Client({ registry: "http://reg", fetcher: manifestBodyRegistry("http://reg/objects/abc") });
+    const doc = "---\ntype: context\n---\n\nbody\n";
+    const route = objectRoute(doc);
+    const c = new Client({ registry: "http://reg", fetcher: await manifestBodyRegistry("http://reg/objects/abc", doc) });
     const out = await c.loadArtifact("big/ctx", undefined, { fetcher: route.fetcher });
     expect(route.auths).toEqual([null]);
     expect(out.manifest_body).toBe("body\n");
@@ -255,9 +268,10 @@ describe("Client", () => {
   // Spec: §6.6 — for a skill the manifest_body_url delivers the verbatim SKILL.md
   // (skill_raw); the small inline ARTIFACT.md frontmatter is preserved.
   it("loadArtifact resolves manifest_body_url for a skill", async () => {
-    const fetcher: typeof fetch = async () =>
-      new Response(
-        JSON.stringify({
+    const skillMd = "---\nname: big-skill\n---\n\nBig skill body.\n";
+    const fetcher = replyWith(
+      await served(
+        {
           id: "eng/big-skill",
           type: "skill",
           version: "1.0.0",
@@ -265,10 +279,10 @@ describe("Client", () => {
           skill_raw: "",
           frontmatter: "---\ntype: skill\n---\n",
           manifest_body_url: { presigned_url: "http://store/skill" },
-        }),
-        { status: 200 },
-      );
-    const skillMd = "---\nname: big-skill\n---\n\nBig skill body.\n";
+        },
+        { fetched: { "http://store/skill": enc(skillMd) } },
+      ),
+    );
     const objectStore: typeof fetch = async () => new Response(skillMd, { status: 200 });
     const c = new Client({ registry: "http://reg", fetcher });
     const out = await c.loadArtifact("eng/big-skill", undefined, { fetcher: objectStore });
@@ -278,23 +292,22 @@ describe("Client", () => {
   });
 
   // Spec: §7.2 — a single-load large resource (>256 KB) arrives with its URL under
-  // `presigned_url`; loadArtifact normalizes it to `url` so materialize() resolves
-  // it instead of throwing on an undefined URL.
-  it("loadArtifact normalizes a single-load large resource presigned_url", async () => {
-    const fetcher: typeof fetch = async () =>
-      new Response(
-        JSON.stringify({
+  // `presigned_url`; loadArtifact copies it to the public `url` field so
+  // materialize() resolves it instead of throwing on an undefined URL.
+  it("loadArtifact copies a single-load large resource presigned_url to url", async () => {
+    const fetcher = replyWith(
+      await served(
+        {
           id: "big/res",
           type: "context",
           version: "1.0.0",
           manifest_body: "B",
           frontmatter: "---\ntype: context\n---\nB",
-          large_resources: {
-            "data/big.bin": { presigned_url: "http://store/big", content_hash: "sha256:x" },
-          },
-        }),
-        { status: 200 },
-      );
+          large_resources: { "data/big.bin": { presigned_url: "http://store/big" } },
+        },
+        { fetched: { "http://store/big": enc("BIGDATA") } },
+      ),
+    );
     const c = new Client({ registry: "http://reg", fetcher });
     const out = await c.loadArtifact("big/res");
     expect(out.large_resources?.["data/big.bin"]?.url).toBe("http://store/big");
@@ -311,20 +324,17 @@ describe("Client", () => {
   // Spec: §6.6 — a manifest_body_url without a URL is a malformed response;
   // loadArtifact throws rather than returning an empty manifest.
   it("loadArtifact throws when manifest_body_url has no URL", async () => {
-    const fetcher: typeof fetch = async () =>
-      new Response(
-        JSON.stringify({
-          id: "x",
-          type: "context",
-          version: "1.0.0",
-          manifest_body: "",
-          frontmatter: "",
-          manifest_body_url: { content_hash: "sha256:abc" },
-        }),
-        { status: 200 },
-      );
+    const fetcher = replyWith({
+      id: "x",
+      type: "context",
+      version: "1.0.0",
+      manifest_body: "",
+      frontmatter: "",
+      manifest_body_url: { content_hash: "sha256:abc" },
+      delivery_hash: "sha256:abc",
+    });
     const c = new Client({ registry: "http://reg", fetcher });
-    await expect(c.loadArtifact("x")).rejects.toBeInstanceOf(RegistryError);
+    await expect(c.loadArtifact("x")).rejects.toMatchObject({ code: "materialize.content_hash_mismatch" });
   });
 
   // Spec: §6.6 — a failed manifest-body fetch surfaces as an error rather than a
@@ -352,18 +362,19 @@ describe("Client", () => {
   // Spec: §6.6 — a canonical document without frontmatter yields an empty
   // manifest_body, matching the registry's own fallback.
   it("loadArtifact manifest_body_url without frontmatter yields an empty body", async () => {
-    const fetcher: typeof fetch = async () =>
-      new Response(
-        JSON.stringify({
+    const fetcher = replyWith(
+      await served(
+        {
           id: "x",
           type: "context",
           version: "1.0.0",
           manifest_body: "",
           frontmatter: "",
           manifest_body_url: { presigned_url: "http://store/mb" },
-        }),
-        { status: 200 },
-      );
+        },
+        { fetched: { "http://store/mb": enc("no frontmatter here") } },
+      ),
+    );
     const objectStore: typeof fetch = async () => new Response("no frontmatter here", { status: 200 });
     const c = new Client({ registry: "http://reg", fetcher });
     const out = await c.loadArtifact("x", undefined, { fetcher: objectStore });
@@ -397,14 +408,12 @@ describe("Client", () => {
     let body = "";
     const fetcher: typeof fetch = async (_input, init) => {
       body = String(init?.body ?? "");
-      return new Response(
-        JSON.stringify([
-          { id: "a", status: "ok", version: "1.0.0", content_hash: "sha256:a" },
-          { id: "b", status: "error", error: { code: "registry.not_found", message: "missing" } },
-        ]),
-        { status: 200 },
-      );
+      return new Response(JSON.stringify(batch), { status: 200 });
     };
+    const batch = [
+      await served({ id: "a", status: "ok", version: "1.0.0", content_hash: "sha256:a" }),
+      { id: "b", status: "error", error: { code: "registry.not_found", message: "missing" } },
+    ];
     const c = new Client({ registry: "http://reg", fetcher });
     // A stray harness option from an untyped caller never reaches the wire.
     const out = await c.loadArtifacts(["a", "b"], {
@@ -418,45 +427,55 @@ describe("Client", () => {
     expect(out[1].error?.code).toBe("registry.not_found");
   });
 
-  // Spec: §4.7.10 — loadArtifact passes the served delivery attestation
-  // through unverified; an absent delivery_signature stays undefined.
-  it("loadArtifact passes the delivery attestation through", async () => {
-    let reply: Record<string, unknown> = {
-      id: "finance/run",
-      type: "prompt",
-      content_hash: "sha256:c",
-      delivery_hash: "sha256:d",
-      delivery_signature: "sig-d",
-    };
+  // Spec: §4.7.10
+  it("loadArtifact verifies the served delivery attestation", async () => {
+    const signed = await served(
+      { id: "finance/run", type: "prompt", version: "1.0.0", content_hash: "sha256:c" },
+      { signWith: VECTOR_KEY },
+    );
+    let reply: Record<string, unknown> = signed;
     const fetcher: typeof fetch = async () => new Response(JSON.stringify(reply), { status: 200 });
-    const c = new Client({ registry: "http://reg", fetcher });
+    const c = new Client({ registry: "http://reg", fetcher, verifyKeys: VECTOR_PUBLIC_KEY });
     const art = await c.loadArtifact("finance/run");
-    expect(art.delivery_hash).toBe("sha256:d");
-    expect(art.delivery_signature).toBe("sig-d");
+    expect(c.verifySignatures).toBe("always");
+    expect(art.delivery_hash).toBe(signed.delivery_hash);
+    expect(art.delivery_signature).toBe(signed.delivery_signature);
 
-    reply = { id: "finance/run", delivery_hash: "sha256:d" };
-    const unsigned = await c.loadArtifact("finance/run");
-    expect(unsigned.delivery_hash).toBe("sha256:d");
-    expect(unsigned.delivery_signature).toBeUndefined();
+    reply = { ...signed, delivery_hash: "sha256:" + "0".repeat(64) };
+    await expect(c.loadArtifact("finance/run")).rejects.toMatchObject({
+      code: "materialize.content_hash_mismatch",
+    });
   });
 
-  // Spec: §4.7.10 — each batchLoad envelope passes its delivery attestation
-  // through; an absent delivery_signature stays undefined.
-  it("loadArtifacts passes the delivery attestation through", async () => {
-    const fetcher: typeof fetch = async () =>
-      new Response(
-        JSON.stringify([
-          { id: "a", status: "ok", delivery_hash: "sha256:a", delivery_signature: "sig-a" },
-          { id: "b", status: "ok", delivery_hash: "sha256:b" },
-        ]),
-        { status: 200 },
-      );
-    const c = new Client({ registry: "http://reg", fetcher });
-    const out = await c.loadArtifacts(["a", "b"]);
-    expect(out.map((r) => [r.delivery_hash, r.delivery_signature])).toEqual([
-      ["sha256:a", "sig-a"],
-      ["sha256:b", undefined],
+  // Spec: §4.7.10
+  it("loadArtifact returns an unsigned record under never", async () => {
+    const unsigned = await served({ id: "finance/run", type: "prompt" });
+    const c = new Client({ registry: "http://reg", fetcher: replyWith(unsigned) });
+    const art = await c.loadArtifact("finance/run");
+    expect(c.verifySignatures).toBe("never");
+    expect(art.delivery_hash).toBe(unsigned.delivery_hash);
+    expect(art.delivery_signature).toBeUndefined();
+  });
+
+  // Spec: §4.7.10
+  it("loadArtifacts verifies each entry's delivery attestation", async () => {
+    const a = await served({ id: "a", status: "ok" }, { signWith: VECTOR_KEY });
+    const b = await served({ id: "b", status: "ok" });
+    const tampered = { ...(await served({ id: "c", status: "ok" })), frontmatter: "changed" };
+    const c = new Client({ registry: "http://reg", fetcher: replyWith([a, b, tampered]) });
+    const out = await c.loadArtifacts(["a", "b", "c"]);
+    expect(out.map((r) => [r.status, r.delivery_hash, r.delivery_signature])).toEqual([
+      ["ok", a.delivery_hash, a.delivery_signature],
+      ["ok", b.delivery_hash, undefined],
+      ["error", undefined, undefined],
     ]);
+    expect(out[2].error?.code).toBe("materialize.content_hash_mismatch");
+  });
+
+  // Spec: §4.7.10 — signEnvelope produces the envelope the registry signs.
+  it("signs the delivery hash in the registry-managed envelope", async () => {
+    const env = JSON.parse(await signEnvelope(VECTOR_KEY, "sha256:" + "ab".repeat(32)));
+    expect(Object.keys(env).sort()).toEqual(["key_id", "signature"]);
   });
 
   // Spec: §7.6.2 — empty ids list short-circuits without making

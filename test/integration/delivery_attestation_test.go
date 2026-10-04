@@ -6,12 +6,12 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -25,6 +25,7 @@ import (
 	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/store/storetest"
+	podiumsync "github.com/lennylabs/podium/pkg/sync"
 	"github.com/lennylabs/podium/pkg/version"
 )
 
@@ -47,7 +48,7 @@ var (
 			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Child.\nextends: " + daParentPin + "\n---\n\nchild body\n")},
 		{ArtifactID: "team/big", Layer: "team", Type: "context", ExtendsPin: daParentPin,
 			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Big.\nextends: " + daParentPin + "\n---\n\n" + daBigBody)},
-		{ArtifactID: "team/plain", Layer: "team", Type: "context",
+		{ArtifactID: "team/plain", Layer: "team", Type: "context", Sensitivity: "low",
 			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Plain.\nsensitivity: low\n---\n\nplain body\n")},
 		{ArtifactID: "team/withres", Layer: "team", Type: "context",
 			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: With resources.\n---\n\nresource body\n"),
@@ -156,8 +157,9 @@ func (f *daFixture) load(t *testing.T, id, user string) (server.LoadArtifactResp
 	return resp, raw
 }
 
-// batch issues POST /v1/artifacts:batchLoad for id as user.
-func (f *daFixture) batch(t *testing.T, id, user string) server.BatchLoadEnvelope {
+// batch issues POST /v1/artifacts:batchLoad for id as user and returns the
+// decoded entry and the raw body.
+func (f *daFixture) batch(t *testing.T, id, user string) (server.BatchLoadEnvelope, []byte) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"ids": []string{id}})
 	status, _, raw := f.do(t, http.MethodPost, "/v1/artifacts:batchLoad", user, body)
@@ -168,7 +170,7 @@ func (f *daFixture) batch(t *testing.T, id, user string) server.BatchLoadEnvelop
 	if err := json.Unmarshal(raw, &envs); err != nil || len(envs) != 1 || envs[0].Status != "ok" {
 		t.Fatalf("batchLoad %s: %v %s", id, err, raw)
 	}
-	return envs[0]
+	return envs[0], raw
 }
 
 // fetchObject follows a manifest_body_url as user, checks the bytes against
@@ -191,80 +193,53 @@ func daDigest(b []byte) string {
 }
 
 // singleRecord recomputes the delivery record from a load_artifact response's
-// served bytes, following manifest_body_url through /objects as user.
-func (f *daFixture) singleRecord(t *testing.T, resp server.LoadArtifactResponse, user string) version.DeliveryRecord {
+// raw body through version.ParseLoadResponse, following manifest_body_url
+// through /objects as user and placing the document with the body
+// manifest.ManifestBodyOf derives, as every Go consumer does.
+func (f *daFixture) singleRecord(t *testing.T, raw []byte, user string) version.DeliveryRecord {
 	t.Helper()
-	rec := version.DeliveryRecord{
-		ID: resp.ID, Version: resp.Version, Type: resp.Type, ContentHash: resp.ContentHash,
-		Sensitivity: resp.Sensitivity, ArtifactRevision: resp.ArtifactRevision, Frontmatter: resp.Frontmatter,
-		ManifestBody: resp.ManifestBody, SkillRaw: resp.SkillRaw, Resources: map[string]string{},
+	served, err := version.ParseLoadResponse(raw)
+	if err != nil {
+		t.Fatalf("ParseLoadResponse: %v", err)
 	}
-	if resp.ManifestBodyURL != nil {
-		doc := f.fetchObject(t, resp.ManifestBodyURL, user)
-		if resp.Type == string(manifest.TypeSkill) {
-			sk, err := manifest.ParseSkill(doc)
-			if err != nil {
-				t.Fatalf("ParseSkill: %v", err)
-			}
-			rec.SkillRaw, rec.ManifestBody = string(doc), sk.Body
-		} else {
-			a, err := manifest.ParseArtifact(doc)
-			if err != nil {
-				t.Fatalf("ParseArtifact: %v", err)
-			}
-			rec.Frontmatter, rec.ManifestBody = string(doc), a.Body
+	if link := served.ManifestLink; link != nil {
+		doc := f.fetchObject(t, &server.LargeResourceLink{URL: link.URL, ContentHash: link.ContentHash}, user)
+		body, err := manifest.ManifestBodyOf(doc)
+		if err != nil {
+			t.Fatalf("ManifestBodyOf: %v", err)
 		}
+		served.PlaceManifestDocument(doc, body)
 	}
-	for path, body := range resp.Resources {
-		raw := []byte(body)
-		if resp.ResourcesB64 {
-			raw, _ = base64.StdEncoding.DecodeString(body)
-		}
-		rec.Resources[path] = daDigest(raw)
-	}
-	for path, link := range resp.LargeResources {
-		rec.Resources[path] = link.ContentHash
-	}
-	return rec
+	return served.Record
 }
 
-// batchRecord recomputes the delivery record from a batch envelope's own
-// bytes. The envelope carries no sensitivity, so the caller supplies the
-// value the single-load response served for the same artifact.
-func batchRecord(env server.BatchLoadEnvelope, sensitivity string) version.DeliveryRecord {
-	rec := version.DeliveryRecord{
-		ID: env.ID, Version: env.Version, Type: env.Type, ContentHash: env.ContentHash,
-		Sensitivity: sensitivity, ArtifactRevision: env.ArtifactRevision, Frontmatter: env.Frontmatter,
-		ManifestBody: env.ManifestBody, SkillRaw: env.SkillRaw, Resources: map[string]string{},
+// batchRecord recomputes the delivery record of the single ok entry of a raw
+// batch body through version.ParseBatchResponse, which frames the
+// sensitivity the entry itself serves.
+func batchRecord(t *testing.T, raw []byte) version.DeliveryRecord {
+	t.Helper()
+	entries, err := version.ParseBatchResponse(raw)
+	if err != nil || len(entries) != 1 || entries[0].Err != nil {
+		t.Fatalf("ParseBatchResponse = %+v, %v", entries, err)
 	}
-	for _, r := range env.Resources {
-		if r.PresignedURL != "" {
-			rec.Resources[r.Path] = r.ContentHash
-			continue
-		}
-		raw := []byte(r.Inline)
-		if r.InlineBase64 {
-			raw, _ = base64.StdEncoding.DecodeString(r.Inline)
-		}
-		rec.Resources[r.Path] = daDigest(raw)
-	}
-	return rec
+	return entries[0].Served.Record
 }
 
 // Spec: §4.7.10 — the single-load response and the batch envelope serve one
 // delivery hash per artifact, both signatures verify under the registry key,
-// and a recomputation from each path's own served bytes reproduces it: a plain
-// artifact with resources, a merged child below the cutoff, a merged child
+// and a recomputation from each path's own served bytes reproduces it, the
+// batch entry's from its own sensitivity: a plain artifact with resources, a
+// classified artifact, a merged child below the cutoff, a merged child
 // whose merged document the single-load path serves by manifest_body_url, and
 // a skill.
 func TestLoadArtifact_SingleAndBatchAgreeOnTheDeliveryHash(t *testing.T) {
 	t.Parallel()
 	f := newDAFixture(t)
 	verifier := sign.RegistryManagedKey{PublicKey: f.pub}
-	for _, id := range []string{"team/withres", "team/child", "team/big", "team/skill"} {
+	for _, id := range []string{"team/withres", "team/plain", "team/child", "team/big", "team/skill"} {
 		t.Run(id, func(t *testing.T) {
-			single, _ := f.load(t, id, "alice")
-			env := f.batch(t, id, "alice")
+			single, singleRaw := f.load(t, id, "alice")
+			env, batchRaw := f.batch(t, id, "alice")
 			if single.DeliveryHash == "" || single.DeliveryHash != env.DeliveryHash {
 				t.Fatalf("delivery hashes: single %q, batch %q; want equal and non-empty", single.DeliveryHash, env.DeliveryHash)
 			}
@@ -279,10 +254,16 @@ func TestLoadArtifact_SingleAndBatchAgreeOnTheDeliveryHash(t *testing.T) {
 			if id == "team/big" && single.ManifestBodyURL == nil {
 				t.Error("the above-cutoff merged document was served inline on the single-load path")
 			}
-			if got := version.DeliveryHash(f.singleRecord(t, single, "alice")); got != single.DeliveryHash {
+			if got := version.DeliveryHash(f.singleRecord(t, singleRaw, "alice")); got != single.DeliveryHash {
 				t.Errorf("single-load recomputation = %s, served %s", got, single.DeliveryHash)
 			}
-			if got := version.DeliveryHash(batchRecord(env, single.Sensitivity)); got != env.DeliveryHash {
+			if id == "team/plain" && env.Sensitivity != "low" {
+				t.Errorf("batch sensitivity = %q, want low", env.Sensitivity)
+			}
+			if env.Sensitivity != single.Sensitivity {
+				t.Errorf("sensitivity: single %q, batch %q; want equal", single.Sensitivity, env.Sensitivity)
+			}
+			if got := version.DeliveryHash(batchRecord(t, batchRaw)); got != env.DeliveryHash {
 				t.Errorf("batch recomputation = %s, served %s", got, env.DeliveryHash)
 			}
 		})
@@ -337,14 +318,14 @@ func TestLoadArtifact_MergedAndUnmergedResponseKeysMatch(t *testing.T) {
 func TestLoadArtifact_LargeMergedManifestUsesPresignedURL(t *testing.T) {
 	t.Parallel()
 	f := newDAFixture(t)
-	resp, _ := f.load(t, "team/big", "bob")
+	resp, respRaw := f.load(t, "team/big", "bob")
 	if resp.ManifestBodyURL == nil {
 		t.Fatal("the above-cutoff merged manifest was served inline")
 	}
 	if resp.Frontmatter != "" || resp.ManifestBody != "" {
 		t.Error("the inline document fields were not cleared")
 	}
-	rec := f.singleRecord(t, resp, "bob")
+	rec := f.singleRecord(t, respRaw, "bob")
 	if !strings.HasSuffix(rec.ManifestBody, "last line\n") {
 		t.Errorf("re-derived body ends %q, want the normalized trailing newline", rec.ManifestBody[len(rec.ManifestBody)-12:])
 	}
@@ -517,4 +498,64 @@ func TestObjects_MergedSkillStoredSkillMDServed(t *testing.T) {
 		t.Errorf("link names %s, want the stored SKILL.md %s", resp.ManifestBodyURL.ContentHash, want)
 	}
 	f.fetchObject(t, resp.ManifestBodyURL, "alice")
+}
+
+// daUserTransport names user on every request, as the fixture's identity
+// resolver reads it.
+type daUserTransport struct{ user string }
+
+func (u daUserTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set(daUserHeader, u.user)
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+// syncAs runs a server-source sync of the fixture as user under check.
+func (f *daFixture) syncAs(t *testing.T, user string, check *sign.DeliveryCheck) (string, error) {
+	t.Helper()
+	target := t.TempDir()
+	_, err := podiumsync.Run(podiumsync.Options{
+		RegistryPath: f.ts.URL,
+		Target:       target,
+		AdapterID:    "none",
+		HTTPClient:   &http.Client{Transport: daUserTransport{user: user}, Timeout: 30 * time.Second},
+		Delivery:     func() (*sign.DeliveryCheck, error) { return check, nil },
+	})
+	return target, err
+}
+
+// Spec: §4.7.10, §7.5 — a server-source sync against a registry that signs
+// its delivery hashes verifies every record under always with the registry's
+// key, including a merged child served by manifest_body_url, and materializes.
+func TestServerSync_SignedAlwaysVerifies(t *testing.T) {
+	t.Parallel()
+	f := newDAFixture(t)
+	check := &sign.DeliveryCheck{Policy: sign.PolicyAlways, Verifier: sign.RegistryManagedKey{Trusted: []ed25519.PublicKey{f.pub}}}
+	target, err := f.syncAs(t, "alice", check)
+	if err != nil {
+		t.Fatalf("signed sync: %v", err)
+	}
+	lock, err := podiumsync.ReadLock(target)
+	if err != nil || lock == nil || len(lock.Artifacts) == 0 {
+		t.Fatalf("ReadLock = %+v, %v; want the materialized view", lock, err)
+	}
+}
+
+// Spec: §4.7.10, §7.5 — a sync that trusts an unrelated key refuses with
+// materialize.signature_invalid and writes nothing.
+func TestServerSync_WrongKeyRefuses(t *testing.T) {
+	t.Parallel()
+	f := newDAFixture(t)
+	other, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	check := &sign.DeliveryCheck{Policy: sign.PolicyAlways, Verifier: sign.RegistryManagedKey{Trusted: []ed25519.PublicKey{other}}}
+	target, err := f.syncAs(t, "alice", check)
+	if err == nil || !strings.Contains(err.Error(), "materialize.signature_invalid") {
+		t.Fatalf("wrong-key sync = %v, want materialize.signature_invalid", err)
+	}
+	if entries, _ := os.ReadDir(target); len(entries) != 0 {
+		t.Errorf("refused sync wrote %d entries under the target", len(entries))
+	}
 }

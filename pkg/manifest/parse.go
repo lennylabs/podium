@@ -46,6 +46,25 @@ func SplitFrontmatter(src []byte) (frontmatter []byte, body []byte, err error) {
 	return m[1], bytes.TrimLeft(m[2], "\r\n"), nil
 }
 
+// ManifestBodyOf derives the manifest body of a manifest document by the
+// §4.7.10 delimiter rule: the bytes after the closing "---", with leading CR
+// and LF characters removed. A document with no frontmatter block has an empty
+// body. It parses no YAML, because the delivery hash frames bytes and a
+// document whose frontmatter does not parse still has a body to frame.
+// Spec: §4.7.10
+func ManifestBodyOf(doc []byte) (string, error) {
+	_, body, err := SplitFrontmatter(doc)
+	if errors.Is(err, ErrNoFrontmatter) {
+		return "", nil
+	}
+	if err != nil {
+		// SplitFrontmatter returns no other error today. The branch keeps a
+		// future failure from reading as an empty body.
+		return "", fmt.Errorf("manifest: derive body: %w", err)
+	}
+	return string(body), nil
+}
+
 // FrontmatterFields extracts the named top-level frontmatter fields from a
 // manifest source, returning a name->value map for the names present as YAML
 // scalars. It is the value source for the §8.2 manifest-declared redaction

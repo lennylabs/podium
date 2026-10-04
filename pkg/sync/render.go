@@ -45,6 +45,8 @@ type RenderOptions struct {
 	Harnesses  []string
 	Plugins    []PluginFilter
 	HTTPClient *http.Client
+	// Delivery resolves the §4.7.10 delivery check of a server-source render.
+	Delivery DeliveryCheckFunc
 }
 
 // RenderResult describes one render. Changed reports whether the render produced
@@ -109,6 +111,7 @@ func Render(ctx context.Context, opts RenderOptions) (*RenderResult, error) {
 		RegistryPath: opts.Registry,
 		Token:        opts.Token,
 		HTTPClient:   opts.HTTPClient,
+		Delivery:     opts.Delivery,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("publish %q: fetch effective view: %w", opts.OutputID, err)

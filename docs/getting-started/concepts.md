@@ -261,13 +261,14 @@ steps:
 5. **Write**: atomic `.tmp + rename` write to the destination.
 
 `podium sync` runs the fetch, adapt, hook, and write steps in batch, over the
-caller's effective view or over the subset an active scope selects. It runs
-no signature check and no delivery check; those belong to the `load_artifact`
-path above as `podium-mcp` runs it, which is where `PODIUM_VERIFY_SIGNATURES`
-applies. Server-source `podium sync` compares a fetched manifest-body document
-with the content hash its link carries and fails with `manifest body content
-hash mismatch` on a difference, and it compares no fetched bundled-resource
-body with its hash. A signing registry verifies each stored row
+caller's effective view or over the subset an active scope selects.
+Server-source `podium sync` runs the same delivery check and the §4.7.9
+signature policy that `podium-mcp` runs, under `PODIUM_VERIFY_SIGNATURES` and
+the same key resolution. It runs the §4.7.10 step 6 check on every fetched
+manifest-body document and bundled-resource body, and fails with
+`materialize.content_hash_mismatch` when a body fails it. A filesystem-source
+`podium sync` composes and materializes in one process and runs no delivery
+check. A signing registry verifies each stored row
 before it serves it to any reader, `podium sync` included.
 
 The `load_artifact` response delivers the manifest body and the bundled

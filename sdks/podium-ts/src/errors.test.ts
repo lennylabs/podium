@@ -6,6 +6,10 @@ import {
   RegistryReadOnly,
   registryErrorFromEnvelope,
 } from "./index";
+import { RegistryError as ErrorsModuleRegistryError } from "./errors.js";
+import { isolateVerification } from "./test_support.js";
+
+isolateVerification();
 
 describe("registry error surface (§6.10 / §13.2.1)", () => {
   // spec: §13.2.1 — a write rejected with the registry.read_only envelope
@@ -79,6 +83,15 @@ describe("registry error surface (§6.10 / §13.2.1)", () => {
     const err = registryErrorFromEnvelope({ code: "auth.forbidden", message: "no" });
     expect(err.details).toEqual({});
     expect(err.suggestedAction).toBe("");
+  });
+
+  // Spec: §7.6.3 — index.ts re-exports the one RegistryError class the delivery
+  // check raises, so a caller's instanceof check matches a refusal.
+  it("exports the RegistryError the delivery check raises", async () => {
+    expect(RegistryError).toBe(ErrorsModuleRegistryError);
+    const refusal = new RegistryError("materialize.signature_invalid", "bad signature");
+    const result = new BatchResult({ id: "finance/x", status: "error", error: refusal });
+    await expect(result.materialize("/tmp/should-not-write")).rejects.toBe(refusal);
   });
 
   // spec: §6.10 — a batch error item carries the full envelope, which
