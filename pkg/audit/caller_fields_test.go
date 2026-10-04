@@ -2,6 +2,8 @@ package audit
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,8 +13,10 @@ import (
 )
 
 // spec §8.1: the structured caller attributes (email, groups, public-mode
-// flag, public-mode network) participate in the tamper-evident hash chain,
-// so each one must change the canonical body.
+// flag, public-mode network) and the tenant participate in the
+// tamper-evident hash chain, so each one must change the canonical body.
+//
+// Spec: §8.1
 func TestCanonicalBody_IncludesCallerFields(t *testing.T) {
 	base := Event{Type: EventArtifactLoaded, Caller: "alice"}
 	cases := map[string]func(*Event){
@@ -20,6 +24,7 @@ func TestCanonicalBody_IncludesCallerFields(t *testing.T) {
 		"caller_groups":      func(e *Event) { e.CallerGroups = []string{"eng"} },
 		"caller_public_mode": func(e *Event) { e.PublicMode = true },
 		"caller_network":     func(e *Event) { e.CallerNetwork = &CallerNetwork{SourceIP: "203.0.113.7"} },
+		"tenant":             func(e *Event) { e.Tenant = "acme" },
 	}
 	want := string(base.canonicalBody())
 	for name, mutate := range cases {
@@ -36,7 +41,10 @@ func TestCanonicalBody_IncludesCallerFields(t *testing.T) {
 // are the dotted names the spec illustrates (caller.identity, caller.email,
 // caller.groups, caller.network, caller.public_mode), and the chain
 // verifies. A SIEM consumer keying on caller.public_mode resolves the
-// nested field directly.
+// nested field directly. The tenant attribute serializes as a top-level
+// "tenant" key, omitted when empty.
+//
+// Spec: §8.1
 func TestFileSink_CallerFieldsRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.log")
 	sink, err := NewFileSink(path)
@@ -47,6 +55,7 @@ func TestFileSink_CallerFieldsRoundTrip(t *testing.T) {
 	authed := Event{
 		Type: EventArtifactLoaded, TraceID: "abc123", Caller: "alice",
 		CallerEmail: "alice@acme.com", CallerGroups: []string{"eng", "sec"},
+		Tenant: "acme",
 	}
 	pub := Event{
 		Type: EventDomainLoaded, TraceID: "def456", Caller: "system:public",
@@ -75,6 +84,7 @@ func TestFileSink_CallerFieldsRoundTrip(t *testing.T) {
 			t.Errorf("audit log missing %s\nlog:\n%s", want, got)
 		}
 	}
+	assertTenantWireKey(t, got)
 	// The spec's flat snake_case keys must no longer appear; the dotted names
 	// live inside the nested caller object instead.
 	for _, gone := range []string{"caller_email", "caller_groups", "caller_public_mode", "caller_network"} {
@@ -86,6 +96,68 @@ func TestFileSink_CallerFieldsRoundTrip(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(got), "\n")
 	if strings.Contains(lines[0], "public_mode") || strings.Contains(lines[0], "network") {
 		t.Errorf("authenticated event leaked public-mode fields: %s", lines[0])
+	}
+}
+
+// assertTenantWireKey checks the §8.1 tenant attribute on the two lines
+// TestFileSink_CallerFieldsRoundTrip writes: the labeled event carries a
+// top-level "tenant" key that eventFromJSON reads back, and the unlabeled
+// event writes no "tenant" key at all.
+func assertTenantWireKey(t *testing.T, log string) {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(log), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2:\n%s", len(lines), log)
+	}
+	var labeled jsonEvent
+	if err := json.Unmarshal([]byte(lines[0]), &labeled); err != nil {
+		t.Fatalf("decode labeled line: %v", err)
+	}
+	if labeled.Tenant != "acme" {
+		t.Errorf("top-level tenant = %q, want acme\nline: %s", labeled.Tenant, lines[0])
+	}
+	if got := eventFromJSON(labeled).Tenant; got != "acme" {
+		t.Errorf("eventFromJSON tenant = %q, want acme", got)
+	}
+	if strings.Contains(lines[1], `"tenant"`) {
+		t.Errorf("unlabeled event wrote a tenant key: %s", lines[1])
+	}
+}
+
+// legacyUnlabeledLine is a JSON line written by the FileSink before the
+// §8.1 tenant attribute existed, with the hash that writer stored. It is
+// committed as a literal so a change to canonicalBody that alters the hash
+// of an unlabeled record fails here instead of failing Verify on every
+// existing log.
+const legacyUnlabeledLine = `{"type":"artifact.loaded","timestamp":"2026-09-01T12:00:00Z","trace_id":"abc123","caller":{"identity":"alice","email":"alice@acme.com","groups":["eng"]},"target":"finance/close","context":{"version":"1.0.0"},"hash":"c202f8c770967ed85941b279e852cadb007f5abc8487d74a048b2e701273e10f"}`
+
+// An unlabeled record keeps the hash the pre-tenant writer stored, and a
+// log holding it still verifies with no migration.
+//
+// Spec: §8.1, §8.6
+func TestEvent_UnlabeledHashUnchanged(t *testing.T) {
+	var je jsonEvent
+	if err := json.Unmarshal([]byte(legacyUnlabeledLine), &je); err != nil {
+		t.Fatalf("decode legacy line: %v", err)
+	}
+	e := eventFromJSON(je)
+	if e.Tenant != "" {
+		t.Fatalf("legacy line decoded with tenant %q, want empty", e.Tenant)
+	}
+	sum := sha256.Sum256(append(e.canonicalBody(), []byte(e.PrevHash)...))
+	if got := hex.EncodeToString(sum[:]); got != je.Hash {
+		t.Errorf("recomputed hash = %s, want stored %s", got, je.Hash)
+	}
+	path := filepath.Join(t.TempDir(), "audit.log")
+	if err := os.WriteFile(path, []byte(legacyUnlabeledLine+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sink, err := NewFileSink(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Verify(context.Background()); err != nil {
+		t.Fatalf("legacy log failed verify: %v", err)
 	}
 }
 
