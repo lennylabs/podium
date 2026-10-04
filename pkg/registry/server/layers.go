@@ -467,6 +467,23 @@ func (e *LayerEndpoint) WithEraseSink(file *audit.FileSink) *LayerEndpoint {
 	return e
 }
 
+// emitAudit records one §8.1 audit event for a layer-endpoint request with
+// the endpoint's tenant label. The endpoint is mounted outside the server's
+// audit-metadata middleware, so it attaches the metadata itself with Tenant
+// resolved by the shared rule over its own mode and bound tenant. The label
+// never comes from router presence or from a TenantFor fallback.
+//
+// Spec: §8.1, §6.3.1
+func (e *LayerEndpoint) emitAudit(r *http.Request, typ audit.EventType, target string, fields map[string]string) {
+	id := e.caller(r)
+	m, ok := AuditMetaFromContext(r.Context())
+	if !ok {
+		m = auditMetaFrom(r, id)
+	}
+	m.Tenant = auditTenant(r.Context(), e.multiTenant, e.tenantID)
+	emitAuditEvent(e.auditSink, r.WithContext(withAuditMeta(r.Context(), m)), id, typ, target, fields)
+}
+
 // emitLayerEvent records the §8.1 audit event for a per-layer action:
 // layer.user_registered for a personal (user-defined) layer with its owner as
 // caller, or layer.config_changed for an admin-defined layer.
@@ -488,7 +505,7 @@ func (e *LayerEndpoint) emitLayerEvent(r *http.Request, before, cfg store.LayerC
 	if cfg.Owner != "" {
 		fields["owner"] = cfg.Owner
 	}
-	emitAuditEvent(e.auditSink, r, e.caller(r), typ, cfg.ID, fields)
+	e.emitAudit(r, typ, cfg.ID, fields)
 	// Spec: §7.5.4 — the watcher re-resolves its profile on
 	// layer.config_changed, so an admin layer change wakes it. A personal
 	// layer emits layer.user_registered instead and is not a §7.5.4 trigger:
@@ -1708,7 +1725,7 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	// tenant whose orders were seeded otherwise would report a change on a
 	// reorder that changed no precedence.
 	if !slices.Equal(precedenceSequence(layers), precedenceSequence(updated)) {
-		emitAuditEvent(e.auditSink, r, e.caller(r), audit.EventLayerConfigChanged,
+		e.emitAudit(r, audit.EventLayerConfigChanged,
 			strings.Join(req.Order, ","), map[string]string{"action": "reorder"})
 		// Spec: §7.6 — the scope names every reordered layer, in request
 		// order, so the stream delivers the event to a subscriber who can

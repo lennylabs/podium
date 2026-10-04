@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
@@ -304,6 +305,47 @@ func TestLayerEndpoint_RoutedActsInRequestTenant(t *testing.T) {
 		if sc.TenantID != "acme" {
 			t.Errorf("event scope tenant = %q, want acme (layers %v)", sc.TenantID, sc.Layers)
 		}
+	}
+}
+
+// Spec: §8.1, §6.3.1 — a routed layer write and a reorder record the routed
+// tenant, never the endpoint's bound tenant, and a single-tenant endpoint
+// records its bound tenant.
+func TestLayerEndpoint_AuditTenantLabel(t *testing.T) {
+	t.Parallel()
+	register := map[string]any{"id": "new", "source_type": "git", "repo": "https://example.com/n.git"}
+	reorder := map[string]any{"order": []string{"acme-only", "shared"}}
+
+	f := newTenantFixture(t)
+	sink := audit.NewMemory()
+	h := f.ep.WithAudit(sink).Handler()
+	if rec := serveLayer(h, http.MethodPost, "/v1/layers", register, "acme"); rec.Code != http.StatusCreated {
+		t.Fatalf("register status = %d; body %s", rec.Code, rec.Body.String())
+	}
+	if rec := serveLayer(h, http.MethodPost, "/v1/layers/reorder", reorder, "acme"); rec.Code != http.StatusOK {
+		t.Fatalf("reorder status = %d; body %s", rec.Code, rec.Body.String())
+	}
+	actions := map[string]bool{}
+	for _, ev := range sink.Events() {
+		actions[ev.Context["action"]] = true
+		if ev.Tenant != "acme" {
+			t.Errorf("%s (%s) tenant = %q, want acme", ev.Type, ev.Context["action"], ev.Tenant)
+		}
+	}
+	if !actions["register"] || !actions["reorder"] {
+		t.Errorf("recorded actions = %v, want register and reorder", actions)
+	}
+
+	st := store.NewMemory()
+	single := audit.NewMemory()
+	ep := NewLayerEndpoint(st, "t", NewModeTracker()).WithAudit(single).
+		WithAdminAuth(func(*http.Request) error { return nil })
+	if rec := serveLayer(ep.Handler(), http.MethodPost, "/v1/layers", register, ""); rec.Code != http.StatusCreated {
+		t.Fatalf("single-tenant register status = %d; body %s", rec.Code, rec.Body.String())
+	}
+	events := single.Events()
+	if len(events) != 1 || events[0].Tenant != "t" {
+		t.Errorf("single-tenant events = %+v, want one event with tenant t", events)
 	}
 }
 

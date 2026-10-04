@@ -164,6 +164,7 @@ func vectorOutboxLaggingCallback(sink audit.Sink, tenantID string) func(int, tim
 		if sink == nil {
 			return
 		}
+		// Spec: §8.1: vector.outbox_lagging describes the registry as a whole, so it records no tenant.
 		_ = sink.Append(context.Background(), audit.Event{
 			Type:   audit.EventType("vector.outbox_lagging"),
 			Caller: "system",

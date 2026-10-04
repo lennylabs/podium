@@ -87,7 +87,7 @@ func buildReingestRunner(
 			DomainVectorPut: collocatedVec.DomainVectorPut,
 		}
 		if auditSink != nil {
-			opts.AuditEmit = ingestAuditEmitter(ctx, auditSink, scrubber, caller)
+			opts.AuditEmit = ingestAuditEmitter(ctx, auditSink, scrubber, caller, lc.TenantID)
 		}
 		res, err := ingest.SourceIngestWithOptions(ctx, st, prov, lc, opts)
 		countIngest(mreg, err)
@@ -181,8 +181,9 @@ func reingestCaller(ctx context.Context) string {
 // ingestAuditEmitter adapts the §8.3 sink to ingest.AuditEmitterFunc so the
 // pipeline's §8.1 events (artifact.published, layer.ingested,
 // layer.history_rewritten, freeze.break_glass) land in the audit log with the
-// request's trace id and caller. A nil scrubber disables query-text scrubbing.
-func ingestAuditEmitter(ctx context.Context, sink audit.Sink, scrubber *audit.PIIScrubber, caller string) ingest.AuditEmitterFunc {
+// request's trace id and caller. Each event records tenant, the tenant that owns
+// the ingested layer (§8.1). A nil scrubber disables query-text scrubbing.
+func ingestAuditEmitter(ctx context.Context, sink audit.Sink, scrubber *audit.PIIScrubber, caller, tenant string) ingest.AuditEmitterFunc {
 	traceID := ""
 	if m, ok := server.AuditMetaFromContext(ctx); ok {
 		traceID = m.TraceID
@@ -194,6 +195,7 @@ func ingestAuditEmitter(ctx context.Context, sink audit.Sink, scrubber *audit.PI
 			Target:  target,
 			Context: ctxFields,
 			TraceID: traceID,
+			Tenant:  tenant,
 		}
 		ev = scrubber.ScrubEvent(ev)
 		_ = sink.Append(ctx, ev)

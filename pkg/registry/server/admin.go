@@ -50,6 +50,8 @@ func (s *Server) handleAdminGrants(w http.ResponseWriter, r *http.Request) {
 		}
 		// spec §8.1: record admin.granted with the acting admin as caller,
 		// the affected user as target, and the add action in context.
+		// The tenant label is the one withAuditMetaMiddleware resolved
+		// through auditTenant, so an unrouted request records none.
 		emitAuditEvent(s.auditSink, r, s.identity(r), audit.EventAdminGranted, body.UserID,
 			map[string]string{"action": "grant"})
 		writeJSON(w, http.StatusCreated, map[string]string{"user_id": body.UserID})
@@ -64,7 +66,8 @@ func (s *Server) handleAdminGrants(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// spec §8.1: an admin grant being revoked emits admin.granted with
-		// the revoke action recorded in context.
+		// the revoke action recorded in context. The tenant label follows the
+		// same auditTenant rule as the grant.
 		emitAuditEvent(s.auditSink, r, s.identity(r), audit.EventAdminGranted, userID,
 			map[string]string{"action": "revoke"})
 		w.WriteHeader(http.StatusNoContent)

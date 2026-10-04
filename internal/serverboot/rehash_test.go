@@ -1067,6 +1067,10 @@ func TestRehashStoredHashes_AppendsOneSignedEventPerRewrittenRow(t *testing.T) {
 		if ev.Caller != "system" {
 			t.Errorf("event caller = %q, want system", ev.Caller)
 		}
+		// Spec: §8.1: a re-sign event records the tenant that owns the row.
+		if ev.Tenant != "acme" {
+			t.Errorf("event tenant = %q, want the row's tenant acme", ev.Tenant)
+		}
 		byTarget[ev.Target] = ev
 	}
 	for _, s := range []rowSeed{plain, signed} {

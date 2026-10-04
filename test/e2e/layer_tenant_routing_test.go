@@ -18,6 +18,7 @@ package e2e
 import (
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -316,6 +317,9 @@ func ltrStreamIsolation(t *testing.T, f *ltrFixture, carolH, daveH http.Header, 
 // Spec: §8.5 — erasure on a multi-tenant registry is refused with 403
 // auth.forbidden.
 // Spec: §7.3.4 — manage_any_layer is false for an unrouted request.
+// Spec: §8.1 — an unrouted request event records no tenant, and the
+// podium:unrouted binding reaches no record. The boot installs no tenant
+// router, so this pins the serverboot multi-tenant label wiring.
 //
 // IMPLEMENTOR'S CHOICE (proposal 0047, TEST-3): the boot clears the
 // identity provider msStandardEnv selects with an overriding empty
@@ -327,10 +331,12 @@ func TestLayerEndpoint_MultiTenantNoRouter(t *testing.T) {
 	dsn, bucket, region := msSkipIfNoStack(t)
 	suffix := randHex(6)
 	_, pemPath := injKeyPair(t)
+	auditPath := filepath.Join(t.TempDir(), "audit.log")
 	srv := msStartStandardServerEnv(t, dsn, bucket, region, pemPath,
 		"PODIUM_IDENTITY_PROVIDER=",
 		"PODIUM_MULTI_TENANT=true",
 		"PODIUM_WEB_UI=true",
+		"PODIUM_AUDIT_LOG_PATH="+auditPath,
 	)
 	if strings.Contains(srv.log(), ltrRouterLog) {
 		t.Fatalf("the boot log carries %q with no identity provider\nlog:\n%s", ltrRouterLog, srv.log())
@@ -347,6 +353,39 @@ func TestLayerEndpoint_MultiTenantNoRouter(t *testing.T) {
 		t.Errorf("the unrouted list after the refusals = %v, want none", ids)
 	}
 	ltrWantManage(t, srv, nil, "anonymous", false)
+
+	// The read's status is not asserted: the Postgres store refuses the
+	// podium:unrouted binding as a schema name, so the unrouted search
+	// answers 500. The core emits artifacts.searched on every return path,
+	// so the record exists either way, and its label is what this pins.
+	_, _ = apiDo(t, http.MethodGet, srv.BaseURL+"/v1/search_artifacts?query=ltr-nr-"+suffix, nil)
+	ltrWantUnlabeledSearch(t, auditPath)
+}
+
+// ltrWantUnlabeledSearch waits for an artifacts.searched record in the audit
+// file at path and asserts that it carries no tenant and that no record in
+// the file carries the podium:unrouted binding.
+func ltrWantUnlabeledSearch(t *testing.T, path string) {
+	t.Helper()
+	if !brPollContains(path, `"type":"artifacts.searched"`, 5*time.Second) {
+		t.Fatalf("audit log missing artifacts.searched:\n%s", brReadOrEmpty(path))
+	}
+	raw := brReadOrEmpty(path)
+	if strings.Contains(raw, "podium:unrouted") {
+		t.Errorf("an audit record carries podium:unrouted:\n%s", raw)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		var rec struct {
+			Type   string  `json:"type"`
+			Tenant *string `json:"tenant"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("decode audit line %q: %v", line, err)
+		}
+		if rec.Type == "artifacts.searched" && rec.Tenant != nil {
+			t.Errorf("artifacts.searched carries tenant %q, want none", *rec.Tenant)
+		}
+	}
 }
 
 // ltrBearer is the Authorization header of an oidc-jwt token the test IdP

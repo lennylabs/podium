@@ -61,6 +61,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 // must not mask the original anchor error, so the append result is
 // ignored deliberately. spec: §8.6.
 func (s *Scheduler) notifyFailure(ctx context.Context, err error) {
+	// Spec: §8.1: audit.anchor_failed describes the registry as a whole, so it records no tenant.
 	_ = s.Sink.Append(ctx, Event{
 		Type:    EventAuditAnchorFailed,
 		Caller:  "system:anchor",
@@ -120,6 +121,7 @@ func (s *VerifyScheduler) verifyOnce(ctx context.Context) {
 	// SIEM. The gap_detected event chains off the (broken) head; the
 	// underlying break persists across passes until an operator repairs
 	// the log, so each pass re-alerts while the gap remains.
+	// Spec: §8.1: audit.gap_detected describes the registry as a whole, so it records no tenant.
 	_ = s.Sink.Append(ctx, Event{
 		Type:    EventAuditGapDetected,
 		Caller:  "system:verify",

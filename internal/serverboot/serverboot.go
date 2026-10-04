@@ -1457,6 +1457,14 @@ func run(ctx context.Context, stop func()) error {
 		log.Printf("multi-tenant mode: routing requests by organization")
 	}
 
+	if cfg.multiTenant {
+		// §8.1: the audit tenant label keys on multi-tenant mode rather than
+		// on the router installed above, which a boot with no verifier or in
+		// public mode omits. Without it an unrouted request event would record
+		// the podium:unrouted binding.
+		bootOpts = append(bootOpts, server.WithMultiTenant())
+	}
+
 	if err := identityVisibilityGuard(cfg.identityProvider, providerSelected, cfg.publicMode, verifierInstalled); err != nil {
 		return err
 	}

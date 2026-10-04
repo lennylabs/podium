@@ -14,6 +14,7 @@ func readOnlyEnterCallback(sink audit.Sink, tenantID, reason string) func() {
 		if sink == nil {
 			return
 		}
+		// Spec: §8.1: registry.read_only_entered describes the registry as a whole, so it records no tenant.
 		_ = sink.Append(context.Background(), audit.Event{
 			Type:    audit.EventReadOnlyEntered,
 			Caller:  "system",
@@ -30,6 +31,7 @@ func readOnlyExitCallback(sink audit.Sink, tenantID string) func() {
 		if sink == nil {
 			return
 		}
+		// Spec: §8.1: registry.read_only_exited describes the registry as a whole, so it records no tenant.
 		_ = sink.Append(context.Background(), audit.Event{
 			Type:   audit.EventReadOnlyExited,
 			Caller: "system",

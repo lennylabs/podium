@@ -138,6 +138,7 @@ func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy
 		if len(events) > 0 {
 			supersededHead = events[len(events)-1].Hash
 		}
+		// Spec: §8.1: audit.retention_enforced describes the registry as a whole, so it records no tenant.
 		kept = append(kept, Event{
 			Type:      EventRetentionEnforced,
 			Timestamp: now,

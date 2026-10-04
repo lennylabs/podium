@@ -186,8 +186,8 @@ func TestReingestCaller_NoMetadataIsEmpty(t *testing.T) {
 }
 
 // Spec: §8.1 / §8.3 — ingestAuditEmitter adapts the sink to the ingest emitter
-// closure. The emitted event carries the supplied caller and lands in the audit
-// log with its type, target, and context fields.
+// closure. The emitted event carries the supplied caller and tenant and lands
+// in the audit log with its type, target, and context fields.
 func TestIngestAuditEmitter_EmitsEventToSink(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
@@ -196,7 +196,7 @@ func TestIngestAuditEmitter_EmitsEventToSink(t *testing.T) {
 		t.Fatalf("NewFileSink: %v", err)
 	}
 
-	emit := ingestAuditEmitter(context.Background(), sink, audit.NewPIIScrubber(), "alice@acme.com")
+	emit := ingestAuditEmitter(context.Background(), sink, audit.NewPIIScrubber(), "alice@acme.com", "acme")
 	emit(string(audit.EventLayerIngested), "acme-base", map[string]string{"artifacts": "3"})
 
 	data, err := os.ReadFile(path)
@@ -209,6 +209,7 @@ func TestIngestAuditEmitter_EmitsEventToSink(t *testing.T) {
 		`"target":"acme-base"`,
 		`"artifacts":"3"`,
 		`alice@acme.com`,
+		`"tenant":"acme"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("emitted event missing %q\nlog:\n%s", want, got)
@@ -226,7 +227,7 @@ func TestIngestAuditEmitter_NilScrubberStillEmits(t *testing.T) {
 		t.Fatalf("NewFileSink: %v", err)
 	}
 
-	emit := ingestAuditEmitter(context.Background(), sink, nil, "")
+	emit := ingestAuditEmitter(context.Background(), sink, nil, "", "")
 	emit(string(audit.EventArtifactPublished), "acme/style", nil)
 
 	data, err := os.ReadFile(path)
@@ -235,6 +236,10 @@ func TestIngestAuditEmitter_NilScrubberStillEmits(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"type":"artifact.published"`) {
 		t.Errorf("nil scrubber dropped the event:\n%s", data)
+	}
+	// Spec: §8.1: an empty tenant adds no tenant key to the record.
+	if strings.Contains(string(data), `"tenant"`) {
+		t.Errorf("event with no tenant carries a tenant key:\n%s", data)
 	}
 }
 

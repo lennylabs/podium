@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -9,6 +11,8 @@ import (
 
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/registry/core"
+	"github.com/lennylabs/podium/pkg/store"
 )
 
 // spec §8.1: the trace id is taken from a well-formed W3C traceparent and
@@ -131,5 +135,148 @@ func TestEmitAuditEvent_AuthenticatedCaller(t *testing.T) {
 	}
 	if strings.Contains(s, `"network"`) || strings.Contains(s, "public_mode") {
 		t.Errorf("authenticated caller leaked public-mode fields:\n%s", s)
+	}
+}
+
+// auditTenant keys the §8.1 label on multi-tenant mode: the routed tenant or
+// nothing on a multi-tenant registry, whatever bound holds, and the bound
+// tenant on a single-tenant registry.
+//
+// Spec: §8.1, §6.3.1
+func TestAuditTenant_KeysOnMultiTenantMode(t *testing.T) {
+	t.Parallel()
+	routed := core.ContextWithTenant(context.Background(), "acme")
+	for _, tc := range []struct {
+		name        string
+		ctx         context.Context
+		multiTenant bool
+		bound       string
+		want        string
+	}{
+		{"single-tenant uses the bound tenant", context.Background(), false, "t", "t"},
+		{"multi-tenant routed uses the routed tenant", routed, true, "acme", "acme"},
+		{"multi-tenant unrouted records no tenant", context.Background(), true, unroutedTenant, ""},
+	} {
+		if got := auditTenant(tc.ctx, tc.multiTenant, tc.bound); got != tc.want {
+			t.Errorf("%s: auditTenant = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// unroutedTenant mirrors the no-data binding serverboot gives a multi-tenant
+// registry's core, which a request with no routed tenant falls back to.
+const unroutedTenant = "podium:unrouted"
+
+// grantTenantLabel issues one POST /v1/admin/grants as alice, who holds admin
+// in adminIn, against a server over a core bound to bound, and returns the
+// tenant label on the recorded admin.granted event.
+func grantTenantLabel(t *testing.T, org, bound, adminIn string, opts ...Option) string {
+	t.Helper()
+	st := store.NewMemory()
+	if err := st.GrantAdmin(context.Background(), store.AdminGrant{UserID: "alice", OrgID: adminIn}); err != nil {
+		t.Fatal(err)
+	}
+	sink := audit.NewMemory()
+	alice := layer.Identity{Sub: "alice", OrgID: org, IsAuthenticated: true}
+	opts = append([]Option{
+		WithAudit(sink),
+		WithIdentityResolver(func(*http.Request) layer.Identity { return alice }),
+	}, opts...)
+	ts := httptest.NewServer(New(core.New(st, bound, nil), opts...).Handler())
+	defer ts.Close()
+	resp, err := http.Post(ts.URL+"/v1/admin/grants", "application/json", strings.NewReader(`{"user_id":"bob"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /v1/admin/grants status = %d, want 201", resp.StatusCode)
+	}
+	for _, ev := range sink.Events() {
+		if ev.Type == audit.EventAdminGranted {
+			return ev.Tenant
+		}
+	}
+	t.Fatal("no admin.granted event recorded")
+	return ""
+}
+
+// admin.granted records the routed tenant on a routed request, no tenant on
+// an unrouted multi-tenant request with or without a tenant router, and the
+// bound tenant on a single-tenant registry. The podium:unrouted binding never
+// reaches the record.
+//
+// Spec: §8.1, §6.3.1
+func TestAdminGranted_TenantLabel(t *testing.T) {
+	t.Parallel()
+	router := func(_ context.Context, org string) (store.Tenant, bool) {
+		if org == "acme.com" {
+			return store.Tenant{ID: "acme"}, true
+		}
+		return store.Tenant{}, false
+	}
+	t.Run("routed request records the routed tenant", func(t *testing.T) {
+		t.Parallel()
+		got := grantTenantLabel(t, "acme.com", unroutedTenant, "acme", WithTenantRouter(router, false))
+		if got != "acme" {
+			t.Errorf("tenant = %q, want acme", got)
+		}
+	})
+	t.Run("unrouted request under a router records no tenant", func(t *testing.T) {
+		t.Parallel()
+		got := grantTenantLabel(t, "globex.com", unroutedTenant, unroutedTenant, WithTenantRouter(router, false))
+		if got != "" {
+			t.Errorf("tenant = %q, want none", got)
+		}
+	})
+	t.Run("multi-tenant with no router records no tenant", func(t *testing.T) {
+		t.Parallel()
+		got := grantTenantLabel(t, "acme.com", unroutedTenant, unroutedTenant, WithMultiTenant())
+		if got != "" {
+			t.Errorf("tenant = %q, want none", got)
+		}
+	})
+	t.Run("single-tenant request records the bound tenant", func(t *testing.T) {
+		t.Parallel()
+		if got := grantTenantLabel(t, "acme.com", "t", "t"); got != "t" {
+			t.Errorf("tenant = %q, want t", got)
+		}
+	})
+}
+
+// A public-mode meta-tool read on a multi-tenant registry with no router
+// carries no tenant in its audit metadata, although the core resolves the
+// request against the podium:unrouted binding.
+//
+// Spec: §8.1, §6.3.1
+func TestAuditMeta_PublicModeMultiTenantNoRouter(t *testing.T) {
+	t.Parallel()
+	var (
+		got    AuditMeta
+		gotOK  bool
+		bound  string
+		called bool
+	)
+	reg := core.New(store.NewMemory(), unroutedTenant, nil)
+	reg.WithAudit(func(ctx context.Context, _ core.AuditEvent) {
+		got, gotOK = AuditMetaFromContext(ctx)
+		bound = reg.TenantFor(ctx)
+		called = true
+	})
+	ts := httptest.NewServer(New(reg, WithMultiTenant(), WithPublicMode()).Handler())
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/v1/search_artifacts?query=x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if !called {
+		t.Fatalf("search_artifacts (status %d) emitted no audit event", resp.StatusCode)
+	}
+	if !gotOK || got.Tenant != "" {
+		t.Errorf("audit meta = %+v (attached %v), want attached with no tenant", got, gotOK)
+	}
+	if bound != unroutedTenant {
+		t.Errorf("core tenant = %q, want %q", bound, unroutedTenant)
 	}
 }

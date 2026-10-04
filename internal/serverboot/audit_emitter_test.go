@@ -2,11 +2,14 @@ package serverboot
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/audit"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
@@ -100,5 +103,101 @@ func TestWrapAuditVolume_NilBaseRecordsWithoutLimit(t *testing.T) {
 	emit(ctx, core.AuditEvent{Type: "artifacts.searched"})
 	if meter.Allow("tenant-a", 2) {
 		t.Error("Allow(tenant-a, 2) = true after two events, want false")
+	}
+}
+
+// searchLabelAndMeter boots a server over a core bound to podium:unrouted,
+// wires the production audit chain (wrapAuditVolume over auditEmitterFor),
+// issues one meta-tool read as id, and returns the recorded event's tenant
+// label together with the meter.
+func searchLabelAndMeter(t *testing.T, id layer.Identity, opts ...server.Option) (string, *server.AuditVolumeMeter) {
+	t.Helper()
+	const unrouted = "podium:unrouted"
+	sink := audit.NewMemory()
+	meter := server.NewAuditVolumeMeter()
+	reg := core.New(store.NewMemory(), unrouted, nil)
+	reg.WithAudit(wrapAuditVolume(meter, reg.TenantFor, auditEmitterFor(sink, nil, nil)))
+	opts = append([]server.Option{
+		server.WithIdentityResolver(func(*http.Request) layer.Identity { return id }),
+	}, opts...)
+	ts := httptest.NewServer(server.New(reg, opts...).Handler())
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/v1/search_artifacts?query=x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	var label string
+	found := false
+	for _, ev := range sink.Events() {
+		if ev.Type == audit.EventType("artifacts.searched") {
+			label, found = ev.Tenant, true
+		}
+	}
+	if !found {
+		t.Fatalf("search (status %d) recorded no artifacts.searched event", resp.StatusCode)
+	}
+	return label, meter
+}
+
+// countedOnce reports whether meter holds exactly one event under tenant.
+func countedOnce(meter *server.AuditVolumeMeter, tenant string) bool {
+	return meter.Allow(tenant, 2) && !meter.Allow(tenant, 1)
+}
+
+// auditEmitterFor labels a routed request's event with the routed tenant,
+// which is also the audit-volume meter key. An unrouted multi-tenant request,
+// with or without a tenant router, records no tenant while the meter keys it
+// under podium:unrouted (Decision 10 of proposal 0051).
+//
+// Spec: §8.1, §6.3.1, §4.7.8
+func TestAuditEmitterFor_TenantLabelAndMeterKey(t *testing.T) {
+	t.Parallel()
+	router := func(_ context.Context, org string) (store.Tenant, bool) {
+		if org == "acme.com" {
+			return store.Tenant{ID: "acme"}, true
+		}
+		return store.Tenant{}, false
+	}
+	alice := func(org string) layer.Identity {
+		return layer.Identity{Sub: "alice", OrgID: org, IsAuthenticated: true}
+	}
+	for _, tc := range []struct {
+		name      string
+		id        layer.Identity
+		opts      []server.Option
+		wantLabel string
+		wantMeter string
+	}{
+		{"routed", alice("acme.com"), []server.Option{server.WithTenantRouter(router, false)}, "acme", "acme"},
+		{"unrouted under a router", alice("globex.com"), []server.Option{server.WithTenantRouter(router, false)}, "", "podium:unrouted"},
+		{"no router, public mode", layer.Identity{}, []server.Option{server.WithMultiTenant(), server.WithPublicMode()}, "", "podium:unrouted"},
+		{"no router, no identity provider", layer.Identity{}, []server.Option{server.WithMultiTenant()}, "", "podium:unrouted"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			label, meter := searchLabelAndMeter(t, tc.id, tc.opts...)
+			if label != tc.wantLabel {
+				t.Errorf("record tenant = %q, want %q", label, tc.wantLabel)
+			}
+			if !countedOnce(meter, tc.wantMeter) {
+				t.Errorf("meter did not count the event under %q", tc.wantMeter)
+			}
+		})
+	}
+}
+
+// With no per-request audit metadata on the context, the emitter records no
+// tenant even when the context carries a routed tenant.
+//
+// Spec: §8.1
+func TestAuditEmitterFor_NoMetaRecordsNoTenant(t *testing.T) {
+	t.Parallel()
+	sink := audit.NewMemory()
+	emit := auditEmitterFor(sink, nil, nil)
+	emit(core.ContextWithTenant(t.Context(), "acme"), core.AuditEvent{Type: "artifacts.searched"})
+	events := sink.Events()
+	if len(events) != 1 || events[0].Tenant != "" {
+		t.Errorf("events = %+v, want one event with no tenant", events)
 	}
 }
