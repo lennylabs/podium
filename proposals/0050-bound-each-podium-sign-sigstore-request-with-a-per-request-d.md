@@ -1,7 +1,7 @@
 # Proposal 0050: Bound each podium sign Sigstore request with a per-request deadline set by PODIUM_SIGSTORE_REQUEST_TIMEOUT
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-04). Signed off under the overnight authorization. Signed off as staged. OQ-1: no retry, including for the TSA request; the operator reruns podium sign. OQ-2: keep the 60s default, overridable by PODIUM_SIGSTORE_REQUEST_TIMEOUT.
+- Status: Implemented (2026-10-04). Signed off under the overnight authorization. Signed off as staged. OQ-1: no retry, including for the TSA request; the operator reruns podium sign. OQ-2: keep the 60s default, overridable by PODIUM_SIGSTORE_REQUEST_TIMEOUT.
 - Date: 2026-10-04
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -45,23 +45,23 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §6.2 gains the `PODIUM_SIGSTORE_REQUEST_TIMEOUT` row after `PODIUM_SIGSTORE_TSA_URL`.
+- [x] **S1 · spec** — SPEC-1. §6.2 gains the `PODIUM_SIGSTORE_REQUEST_TIMEOUT` row after `PODIUM_SIGSTORE_TSA_URL`.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §4.7.9 gains the single-attempt, per-request-deadline paragraph after the keyless verifier paragraph.
+- [x] **S2 · spec** — SPEC-2. §4.7.9 gains the single-attempt, per-request-deadline paragraph after the keyless verifier paragraph.
       Levels: —. Depends on: —
-- [ ] **S3 · code** — CODE-1. `pkg/sign` gains `DefaultRequestTimeout`, `RequestTimeout`, the deadline inside `post`, and Fulcio routed through `post`.
+- [x] **S3 · code** — CODE-1. `pkg/sign` gains `DefaultRequestTimeout`, `RequestTimeout`, the deadline inside `post`, and Fulcio routed through `post`.
       Levels: unit. Depends on: S1, S2
-- [ ] **S4 · code** — CODE-2. `podium sign` parses `PODIUM_SIGSTORE_REQUEST_TIMEOUT` and sets `RequestTimeout`; `podium verify` does not read it.
+- [x] **S4 · code** — CODE-2. `podium sign` parses `PODIUM_SIGSTORE_REQUEST_TIMEOUT` and sets `RequestTimeout`; `podium verify` does not read it.
       Levels: unit, e2e. Depends on: S3
-- [ ] **S5 · test** — TEST-1. `pkg/sign` deadline unit suite against hanging, slow-body, delayed, error-status, and oversized-Fulcio-response endpoints, plus the default-fallback, parent-cancel, and parent-deadline cases.
+- [x] **S5 · test** — TEST-1. `pkg/sign` deadline unit suite against hanging, slow-body, delayed, error-status, and oversized-Fulcio-response endpoints, plus the default-fallback, parent-cancel, and parent-deadline cases.
       Levels: unit. Depends on: S3
-- [ ] **S6 · test** — TEST-2. `cmd/podium` parsing table, the verify-ignores-the-variable check, and the empty value in the existing endpoint-default test.
+- [x] **S6 · test** — TEST-2. `cmd/podium` parsing table, the verify-ignores-the-variable check, and the empty value in the existing endpoint-default test.
       Levels: unit. Depends on: S4
-- [ ] **S7 · test** — TEST-3. End-to-end hanging-Fulcio and invalid-value cases on the binary, plus the fixture default and the invalid-value override in `TestPodiumVerify_SigstoreKeyless`.
+- [x] **S7 · test** — TEST-3. End-to-end hanging-Fulcio and invalid-value cases on the binary, plus the fixture default and the invalid-value override in `TestPodiumVerify_SigstoreKeyless`.
       Levels: e2e. Depends on: S4
 - [ ] **S8 · docs** — DOC-1. The `docs/reference/cli.md` environment row and the `podium sign` paragraph sentences.
       Levels: —. Depends on: S4
-- [ ] **S9 · docs** — CL-1. The `[Unreleased]` `Fixed` entry.
+- [x] **S9 · docs** — CL-1. The `[Unreleased]` `Fixed` entry.
       Levels: —. Depends on: S4
 
 **Ordering constraints.** S1 and S2 land the text every later step cites. S3 precedes S4 because CODE-2 reads `sign.DefaultRequestTimeout` and sets `RequestTimeout`. S5 may proceed in parallel with S4. S6, S7, S8, and S9 need the CLI wiring from S4. Land S8 in the same pull request as S4 so no released build documents behavior it lacks.
