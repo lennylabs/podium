@@ -1538,13 +1538,17 @@ func run(ctx context.Context, stop func()) error {
 	mux.Handle("/v1/ingest/webhook/", layers.WebhookHandler())
 	// §8.5 GDPR right-to-erasure: purges the user's owned layers and redacts
 	// the registry audit stream. Backed by the same store + audit sink as the
-	// layer endpoint. The route stays unwrapped: on a multi-tenant registry
-	// the refusal reads the endpoint's multi-tenant flag alone and answers
-	// 403 auth.forbidden for every caller, and routing the request would
-	// answer a caller whose organization names no tenant 401
-	// auth.tenant_unknown instead. A single-tenant erase reads the bound
-	// tenant and needs no routed context.
-	mux.Handle("/v1/admin/erase", layers.EraseHandler())
+	// layer endpoint. Spec: §8.5, §6.3.1. On a multi-tenant registry the
+	// erase acts in the routed tenant, so the route passes through the shared
+	// tenant router for the reason the /v1/layers routes do: srv.Handler()'s
+	// identity middleware would refuse a failed credential with
+	// auth.untrusted_* where §7.3.1 fixes 403 auth.forbidden. A routed erase
+	// therefore verifies its credential twice, once in TenantRouted and once
+	// in the endpoint's resolver, and the stateless verifiers observe the
+	// same result both times. A request that resolves to no provisioned
+	// tenant reaches the handler unrouted, and its tenant check answers 403
+	// auth.forbidden before the admin check runs.
+	mux.Handle("/v1/admin/erase", srv.TenantRouted(layers.EraseHandler()))
 	if cfg.webUI {
 		mux.Handle("/app/", http.StripPrefix("/app/", http.FileServer(http.FS(web.Assets()))))
 		// Spec: §13.10. The root redirect lives inside this block, so it
@@ -1694,18 +1698,16 @@ func run(ctx context.Context, stop func()) error {
 	// dedicated anchor key at PODIUM_AUDIT_SIGNING_KEY_PATH, loaded and checked
 	// above, and appends audit.anchored. Operators monitor audit.anchored and
 	// audit.anchor_failed.
-	var reAnchor func()
+	var reAnchor func(context.Context)
 	if anchoringOn {
 		startAnchorScheduler(ctx, cfg, auditFile, anchorKey)
-		// §8.6: after a retention pass drops events the chain head moves,
-		// invalidating the last anchor. Re-anchor the new head immediately so
-		// verifiers do not wait for the next tick. Only the periodic
-		// scheduler records audit.anchor_failed; this path logs.
-		reAnchor = func() {
-			if _, err := audit.Anchor(context.Background(), auditFile, anchorKey); err != nil {
-				log.Printf("audit re-anchor after retention failed: %v", err)
-			}
-		}
+		reAnchor = newReAnchor(auditFile, anchorKey)
+	}
+	// §8.6: an erasure that rewrites the chain moves its head the same way a
+	// retention pass does, so the erase handler re-anchors through the same
+	// closure with the request context.
+	if reAnchor != nil {
+		layers.WithAfterErase(reAnchor)
 	}
 
 	// §8.6 audit-integrity verification: a goroutine re-verifies the hash

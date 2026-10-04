@@ -165,6 +165,23 @@ func startAnchorScheduler(ctx context.Context, cfg *Config, sink *audit.FileSink
 	log.Printf("audit anchor scheduler running (interval=%ds)", cfg.auditAnchorInterval)
 }
 
+// newReAnchor returns the §8.6 immediate re-anchor hook. A retention pass
+// that drops events and an erasure that redacts them both rewrite the hash
+// chain, which moves its head and leaves the last anchor naming a superseded
+// head. The hook anchors the new head with the caller's context so verifiers
+// do not wait for the next scheduler tick. Only the periodic scheduler
+// records audit.anchor_failed; a failed re-anchor logs, and the next tick
+// anchors the head.
+//
+// Spec: §8.6
+func newReAnchor(sink *audit.FileSink, signer sign.Provider) func(context.Context) {
+	return func(ctx context.Context) {
+		if _, err := audit.Anchor(ctx, sink, signer); err != nil {
+			log.Printf("audit re-anchor after chain rewrite failed: %v", err)
+		}
+	}
+}
+
 // startVerifyScheduler bootstraps the §8.6 audit-integrity
 // verification scheduler. It re-verifies the hash chain on a cadence
 // and, on a detected gap, records an audit.gap_detected event and logs
