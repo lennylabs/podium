@@ -15,7 +15,7 @@ This document stages the proposed spec, code, test, and documentation changes. I
 - `pkg/registry/server/webhooks.go`: the list, create, get, update, and delete handlers key the webhook store on `s.core.TenantFor(r.Context())` (CODE-2). `pkg/registry/server/events.go`: the webhook goroutine in `Server.PublishEvent` delivers under `scope.TenantID` (CODE-3).
 - `pkg/registry/server/server.go`: the `tenant` field and `WithTenant` comments name the §4.7.8 quota limiter as their only reader, and the webhook fixtures drop `WithTenant` (CODE-4).
 - Tests at every level the change reaches: the `pkg/webhook` unit tests (TEST-1), an in-process two-tenant HTTP integration suite (TEST-2), and a multi-tenant standard-stack end-to-end suite on the binary (TEST-3).
-- Docs, changelog, and manual validation follow: the HTTP API reference drops the shared-pool note and describes per-tenant receivers, the unrouted refusals, and the store file's tenant keying, and `docs/consuming/custom-via-sdk.md` confines the receiver-narrowing sentence to the event's tenant (DOC-1), the `[Unreleased]` section gains a `Fixed` and a breaking `Changed` entry (CL-1), and `test/manual-validation.md` gains scenario S84 (MV-1).
+- Docs, changelog, and manual validation follow: the HTTP API reference drops the shared-pool note and describes per-tenant receivers, the unrouted refusals, and the store file's tenant keying, and `docs/consuming/custom-via-sdk.md` confines the receiver-narrowing sentence to the event's tenant (DOC-1), the `[Unreleased]` section gains a `Fixed` and a breaking `Changed` entry (CL-1), and `test/manual-validation.md` gains scenario S86 (MV-1).
 
 **Fixed decisions.**
 
@@ -58,7 +58,7 @@ This document stages the proposed spec, code, test, and documentation changes. I
       Levels: —. Depends on: S3
 - [ ] **S8 · docs** — CL-1. The `[Unreleased]` `Fixed` and `Changed` entries.
       Levels: —. Depends on: S3
-- [ ] **S9 · docs** — MV-1. Manual-validation scenario S84.
+- [ ] **S9 · docs** — MV-1. Manual-validation scenario S86.
       Levels: —. Depends on: S3
 
 **Ordering constraints.** S1 lands the rule every later step cites. S2 precedes S3 so the empty-tenant guard is in place before delivery starts keying on a value that a future publisher could leave empty. S4, S5, and S6 need the wiring from S3 and may proceed in parallel.
