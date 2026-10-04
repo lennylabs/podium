@@ -82,7 +82,7 @@ layers:
       public: true
 ```
 
-User-defined layers (registered at runtime by individual users) sit above admin-defined layers in precedence; the workspace local overlay sits above those. Default cap is 3 user-defined layers per identity, configurable per tenant.
+User-defined layers (registered at runtime by individual users) sit above admin-defined layers in precedence; the workspace local overlay sits above those. Default cap is 3 user-defined layers per identity, configurable per tenant. `PODIUM_MAX_USER_LAYERS` sets the cap for a tenant whose own value is zero.
 
 ---
 

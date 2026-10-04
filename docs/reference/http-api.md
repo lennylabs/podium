@@ -292,6 +292,8 @@ Each `ok` item carries `delivery_hash`, `delivery_signature`, and `artifact_revi
 
 Visibility is identical to `load_artifact`: items the caller can't see come back as `status: "error"` with `visibility.denied`. No leak about whether the artifact exists in some hidden layer.
 
+Each item counts as one load against the materialization rate of the caller's tenant, the budget `load_artifact` also draws on. Items are charged in request order whatever their outcome, so an item that comes back with `visibility.denied` is charged. When the rate refuses an item, that item and every later item come back as `status: "error"` with `quota.materialize_rate_exceeded` and `retryable: true`. They are not loaded or charged, and the items before them are served as usual. The batch status stays 200. A request rejected as a whole, such as one with more than 50 IDs, is not charged.
+
 Not exposed as an MCP meta-tool; bulk loading is a programmatic-runtime concern.
 
 ---
@@ -593,7 +595,7 @@ Returns the limits the registry enforces against the calling tenant and the tena
 }
 ```
 
-`limits` uses the five field names `GET /v1/admin/tenants` uses. For `search_qps`, `materialize_rate`, and `audit_volume_per_day`, it reports the limit the registry enforces against the calling tenant. A zero tenant value is replaced by the deployment default (`PODIUM_QUOTA_SEARCH_QPS`, `PODIUM_QUOTA_MATERIALIZE_RATE`, or `PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY`), and a negative tenant value disables the budget for that tenant. A `0` in these three fields means the budget is not enforced, so they can differ from the stored values that `GET /v1/admin/tenants` reports. `storage_bytes` and `max_user_layers` report the stored values. A change made through `PATCH /v1/admin/tenants/{id}` applies from the tenant's next request, and a changed rate does not refill the tenant's unspent allowance. The bulk load `POST /v1/artifacts:batchLoad` is not charged against the materialization rate. A zero `max_user_layers` selects the deployment-configured cap, which is 3 unless the deployment sets one, and a negative value disables the cap. A deployment that configures the cap explicitly applies it ahead of this per-tenant value, so the enforced cap on such a deployment is the configured one whatever this field reports.
+`limits` uses the five field names `GET /v1/admin/tenants` uses. For `search_qps`, `materialize_rate`, and `audit_volume_per_day`, it reports the limit the registry enforces against the calling tenant. A zero tenant value is replaced by the deployment default (`PODIUM_QUOTA_SEARCH_QPS`, `PODIUM_QUOTA_MATERIALIZE_RATE`, or `PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY`), and a negative tenant value disables the budget for that tenant. A `0` in these three fields means the budget is not enforced, so they can differ from the stored values that `GET /v1/admin/tenants` reports. `storage_bytes` and `max_user_layers` report the stored values. A change made through `PATCH /v1/admin/tenants/{id}` applies from the tenant's next request, and a changed rate does not refill the tenant's unspent allowance. Each item of a bulk load `POST /v1/artifacts:batchLoad` counts against the materialization rate. The bulk-load section describes how a refused item is reported. A positive `max_user_layers` is the enforced cap. A zero value selects the deployment default, which is `PODIUM_MAX_USER_LAYERS` when the deployment sets it and 3 otherwise, and a negative value disables the cap.
 
 ---
 
