@@ -17,8 +17,8 @@ import (
 	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
-// newBatchFixture boots a server holding team/a and team/b in one public
-// layer. opts are passed to server.New, so a test can install a quota limiter.
+// newBatchFixture boots a server holding team/a, classified low, and the
+// unclassified team/b in one public layer. opts are passed to server.New, so a test can install a quota limiter.
 func newBatchFixture(t *testing.T, opts ...server.Option) (*httptest.Server, store.Store) {
 	t.Helper()
 	st := store.NewMemory()
@@ -27,7 +27,7 @@ func newBatchFixture(t *testing.T, opts ...server.Option) (*httptest.Server, sto
 	}
 	for _, m := range []store.ManifestRecord{
 		{TenantID: "default", ArtifactID: "team/a", Version: "1.0.0",
-			ContentHash: "sha256:a", Type: "skill", Layer: "L"},
+			ContentHash: "sha256:a", Type: "skill", Layer: "L", Sensitivity: "low"},
 		{TenantID: "default", ArtifactID: "team/b", Version: "1.0.0",
 			ContentHash: "sha256:b", Type: "skill", Layer: "L"},
 	} {
@@ -73,6 +73,34 @@ func TestBatchLoad_ReturnsPerItemEnvelopes(t *testing.T) {
 		if e.ContentHash == "" {
 			t.Errorf("%s content_hash empty", e.ID)
 		}
+	}
+}
+
+// Spec: §4.7.10, §7.6.2 — each ok batch entry serves the artifact's
+// sensitivity, the record field a client needs to rebuild the delivery
+// record from the entry alone, and omits the member when the artifact
+// carries no sensitivity.
+func TestBatchLoad_EntryCarriesSensitivity(t *testing.T) {
+	t.Parallel()
+	ts, _ := newBatchFixture(t)
+	body, _ := json.Marshal(map[string]any{"ids": []string{"team/a", "team/b"}})
+	resp, err := http.Post(ts.URL+"/v1/artifacts:batchLoad", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out []map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("len = %d, want 2", len(out))
+	}
+	if got := string(out[0]["sensitivity"]); got != `"low"` {
+		t.Errorf("team/a sensitivity = %s, want \"low\"", got)
+	}
+	if raw, ok := out[1]["sensitivity"]; ok {
+		t.Errorf("team/b carries sensitivity %s, want the member omitted", raw)
 	}
 }
 

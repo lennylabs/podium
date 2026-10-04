@@ -47,7 +47,7 @@ var (
 			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Child.\nextends: " + daParentPin + "\n---\n\nchild body\n")},
 		{ArtifactID: "team/big", Layer: "team", Type: "context", ExtendsPin: daParentPin,
 			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Big.\nextends: " + daParentPin + "\n---\n\n" + daBigBody)},
-		{ArtifactID: "team/plain", Layer: "team", Type: "context",
+		{ArtifactID: "team/plain", Layer: "team", Type: "context", Sensitivity: "low",
 			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Plain.\nsensitivity: low\n---\n\nplain body\n")},
 		{ArtifactID: "team/withres", Layer: "team", Type: "context",
 			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: With resources.\n---\n\nresource body\n"),
@@ -229,12 +229,11 @@ func (f *daFixture) singleRecord(t *testing.T, resp server.LoadArtifactResponse,
 }
 
 // batchRecord recomputes the delivery record from a batch envelope's own
-// bytes. The envelope carries no sensitivity, so the caller supplies the
-// value the single-load response served for the same artifact.
-func batchRecord(env server.BatchLoadEnvelope, sensitivity string) version.DeliveryRecord {
+// bytes, including the sensitivity the entry serves.
+func batchRecord(env server.BatchLoadEnvelope) version.DeliveryRecord {
 	rec := version.DeliveryRecord{
 		ID: env.ID, Version: env.Version, Type: env.Type, ContentHash: env.ContentHash,
-		Sensitivity: sensitivity, ArtifactRevision: env.ArtifactRevision, Frontmatter: env.Frontmatter,
+		Sensitivity: env.Sensitivity, ArtifactRevision: env.ArtifactRevision, Frontmatter: env.Frontmatter,
 		ManifestBody: env.ManifestBody, SkillRaw: env.SkillRaw, Resources: map[string]string{},
 	}
 	for _, r := range env.Resources {
@@ -253,15 +252,16 @@ func batchRecord(env server.BatchLoadEnvelope, sensitivity string) version.Deliv
 
 // Spec: §4.7.10 — the single-load response and the batch envelope serve one
 // delivery hash per artifact, both signatures verify under the registry key,
-// and a recomputation from each path's own served bytes reproduces it: a plain
-// artifact with resources, a merged child below the cutoff, a merged child
+// and a recomputation from each path's own served bytes reproduces it, the
+// batch entry's from its own sensitivity: a plain artifact with resources, a
+// classified artifact, a merged child below the cutoff, a merged child
 // whose merged document the single-load path serves by manifest_body_url, and
 // a skill.
 func TestLoadArtifact_SingleAndBatchAgreeOnTheDeliveryHash(t *testing.T) {
 	t.Parallel()
 	f := newDAFixture(t)
 	verifier := sign.RegistryManagedKey{PublicKey: f.pub}
-	for _, id := range []string{"team/withres", "team/child", "team/big", "team/skill"} {
+	for _, id := range []string{"team/withres", "team/plain", "team/child", "team/big", "team/skill"} {
 		t.Run(id, func(t *testing.T) {
 			single, _ := f.load(t, id, "alice")
 			env := f.batch(t, id, "alice")
@@ -282,7 +282,13 @@ func TestLoadArtifact_SingleAndBatchAgreeOnTheDeliveryHash(t *testing.T) {
 			if got := version.DeliveryHash(f.singleRecord(t, single, "alice")); got != single.DeliveryHash {
 				t.Errorf("single-load recomputation = %s, served %s", got, single.DeliveryHash)
 			}
-			if got := version.DeliveryHash(batchRecord(env, single.Sensitivity)); got != env.DeliveryHash {
+			if id == "team/plain" && env.Sensitivity != "low" {
+				t.Errorf("batch sensitivity = %q, want low", env.Sensitivity)
+			}
+			if env.Sensitivity != single.Sensitivity {
+				t.Errorf("sensitivity: single %q, batch %q; want equal", single.Sensitivity, env.Sensitivity)
+			}
+			if got := version.DeliveryHash(batchRecord(env)); got != env.DeliveryHash {
 				t.Errorf("batch recomputation = %s, served %s", got, env.DeliveryHash)
 			}
 		})

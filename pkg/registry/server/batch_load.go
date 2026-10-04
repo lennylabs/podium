@@ -31,13 +31,17 @@ type BatchLoadRequest struct {
 }
 
 // BatchLoadEnvelope is one per-item response. Status is "ok" or
-// "error"; on error the Error field carries the §6.10 envelope.
+// "error"; on error the Error field carries the §6.10 envelope. An "ok"
+// entry carries every §4.7.10 record field the single-load response serves,
+// including sensitivity, so a client rebuilds the delivery record from the
+// entry alone.
 type BatchLoadEnvelope struct {
 	ID           string `json:"id"`
 	Status       string `json:"status"`
 	Type         string `json:"type,omitempty"`
 	Version      string `json:"version,omitempty"`
 	ContentHash  string `json:"content_hash,omitempty"`
+	Sensitivity  string `json:"sensitivity,omitempty"` // Spec: §4.7.10, §7.6.2
 	ManifestBody string `json:"manifest_body,omitempty"`
 	Frontmatter  string `json:"frontmatter,omitempty"`
 	// SkillRaw is the verbatim SKILL.md for a type: skill artifact (§4.3.4),
@@ -165,6 +169,7 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 		Type:               res.Type,
 		Version:            res.Version,
 		ContentHash:        res.ContentHash,
+		Sensitivity:        res.Sensitivity,
 		ManifestBody:       res.ManifestBody,
 		Frontmatter:        string(res.Frontmatter),
 		SkillRaw:           string(res.SkillRaw),
