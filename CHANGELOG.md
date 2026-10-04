@@ -107,6 +107,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **An admin check that cannot be evaluated no longer exposes store detail** (§4.7.2): when the
+  admin-grant lookup fails, the admin-gated endpoints still refuse with `403 auth.forbidden`, and the
+  message is now `admin authorization could not be evaluated`. The registry logs the store error with
+  the caller and tenant. Previously the message carried the store error, which on a multi-tenant
+  registry named the internal schema ID of a request that resolves to no tenant.
 - **Layer endpoints act in the caller's tenant on a multi-tenant registry**
   (§6.3.1, §7.3.1, §7.3.4): on a registry started with
   `PODIUM_MULTI_TENANT=true`, the layer-management endpoints under `/v1/layers`
