@@ -289,6 +289,8 @@ The sync command reads the caller's effective view (the composed layer list afte
 
 `podium sync` works against either kind of registry source: a server (URL) or a local filesystem (path); see §7.5.2 for dispatch and §13.11 for filesystem-specific behavior. Against a server source, sync uses the same identity providers as the MCP server, the same content cache, and the same harness adapters.
 
+Against a server source, sync runs the §4.7.10 delivery check on every record it loads, under the policy and verification key set that §4.7.9 resolves for it. It verifies with the registry-managed verifier, as the §6.2 `PODIUM_SIGNATURE_PROVIDER` row states. An invocation resolves the policy and the verification key set at most once, immediately before its first request to a server source for the caller's effective view, whether or not that view lists any artifact. An invocation that sends no such request resolves nothing and reads no signing variable. `podium sync --preview` is one such invocation: it requests the §3.5 scope preview, which returns aggregate counts and no artifact of the view. Where §4.7.9 refuses to resolve the policy or the verification key set, sync sends no request to the registry and exits with status 2. What the invocation completed before that point stands. A `--config` run stops at the target whose load resolved, after the earlier targets have run and after any operator `prepare` phase that target runs before its load. A `podium sync override` keeps the toggle change it recorded in the lock. A `--watch` run exits without subscribing to change events. A record that fails the check fails that target's materialization: sync writes no file and no lock for the target. `podium sync override` (§7.5.5) records its toggle change in the lock before it materializes, so a refused record leaves that toggle change in the lock and writes no artifact file and no other lock change. A one-shot sync then exits with status 1. A `--config` run counts the target as failed and continues with the remaining targets. A `--watch` run reports the failed cycle and keeps watching, and exits with status 1 on interrupt. A filesystem-source sync runs no delivery check and needs no key material.
+
 The sync model is type-agnostic: skills, agents, contexts, commands, rules, hooks, and `mcp-server` registrations all sync through the same path; the harness adapter decides where each type lands.
 
 **`--dry-run`** resolves the artifact set against the current scope and prints it without writing. Default output is human-readable; `--json` produces a structured envelope (`{profile, target, harness, scope, artifacts: [{id, version, content_hash, type, layer}, ...]}`) for piping into `jq`. The per-artifact `content_hash` lets a pre-flight check verify the full §14.11 `(artifact_id, version, content_hash)` triple before the lock file is committed.
@@ -398,7 +400,7 @@ targets:
         - run: ["git", "-C", "$PODIUM_WORKDIR", "push", "origin", "$PODIUM_GIT_BRANCH"]
 ```
 
-`defaults.verify_signatures` sets the §4.7.9 signature policy the MCP server applies when `PODIUM_VERIFY_SIGNATURES` is unset. The MCP server resolves it across the three file scopes by the precedence above, discovering the workspace by the same walk up from CWD, so a project-local `sync.local.yaml` value overrides a project-shared one. It is the only signing-related key in this block: verification key material is resolved from the environment and from the registry's key file, in the order §4.7.9 states, and is never written to or read from `sync.yaml`.
+`defaults.verify_signatures` sets the §4.7.9 signature policy that the MCP server, server-source `podium sync`, and the language SDKs apply when no higher-precedence source sets it (§4.7.9 gives the order, and that order includes the MCP server's own configuration and an SDK constructor argument). Each consumer resolves the key across the three file scopes by the precedence above, discovering the workspace by the same walk up from CWD, so a project-local `sync.local.yaml` value overrides a project-shared one. A `podium sync --config <path>` run starts the walk at the directory that contains the configuration file's `.podium/` directory, the workspace its multi-target planning uses, so the policy does not depend on the directory the run starts in. When no source sets a policy, the default is the one §4.7.9 states for that consumer. It is the only signing-related key in this block: verification key material is resolved from the environment and from the registry's key file, in the order §4.7.9 states, and is never written to or read from `sync.yaml`.
 
 **Registry source.** `defaults.registry` accepts either a URL or a filesystem path; the client adapts:
 
@@ -929,7 +931,7 @@ A server-side publisher inside the registry process is out of scope, because it 
 
 A GitHub Actions deployment uses one of two patterns, because GitHub starts a workflow from an external system only through the authenticated REST API (`repository_dispatch` or `workflow_dispatch`), and a Podium webhook receiver posts an HMAC-signed event body that GitHub's dispatch endpoint does not accept.
 
-**Pattern A, scheduled (no bridge).** A workflow in the marketplace repository runs `podium sync --config <path>` on a cron. `skip_if_no_changes` makes an empty run a no-op, so a 5-to-15-minute poll is inexpensive. No webhook receiver is involved, and the debounce window is not used.
+**Pattern A, scheduled (no bridge).** A workflow in the marketplace repository runs `podium sync --config <path>` on a cron. `skip_if_no_changes` makes an empty run a no-op, so a 5-to-15-minute poll is inexpensive. No webhook receiver is involved, and the debounce window is not used. The job sets `PODIUM_SIGNATURE_VERIFY_KEY`, because a server-source sync verifies every record it loads under the `always` default (§7.5). Without verification key material, the run exits with status 2 and `config.signature_provider_unavailable` at the point and with the outcome §7.5 states. Against a registry with signing off, the job sets `PODIUM_VERIFY_SIGNATURES=never` instead.
 
 ```yaml
 # .github/workflows/publish.yml in acme/agent-marketplace
@@ -947,6 +949,7 @@ jobs:
       - env:
           PODIUM_REGISTRY: ${{ secrets.PODIUM_REGISTRY }}
           PODIUM_TOKEN:    ${{ secrets.PODIUM_TOKEN }}   # the publishing identity's registry credential
+          PODIUM_SIGNATURE_VERIFY_KEY: ${{ secrets.PODIUM_SIGNATURE_VERIFY_KEY }}   # the registry's verification key set (§4.7.9)
         run: podium sync --config .podium/sync.yaml
 ```
 

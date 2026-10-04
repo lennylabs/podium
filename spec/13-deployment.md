@@ -383,7 +383,8 @@ Migration is mechanical:
 
 1. Run `podium serve --standalone --layer-path /path/to/.podium/registry/` (the same directory) on a chosen host. For remote, set up the standard topology (§13.1) and use `podium admin migrate-to-standard` (§13.4).
 2. In each developer's `<workspace>/.podium/sync.yaml`, change `defaults.registry: ./.podium/registry/` to the server URL.
-3. Done. Authoring loop unchanged; consumer paths gain MCP / SDK availability.
+3. For a server on another host, or a remote standard deployment, each developer sets `PODIUM_SIGNATURE_VERIFY_KEY` to the verification key the operator distributes, or sets `PODIUM_VERIFY_SIGNATURES=never` against a registry with signing off. A server-source sync verifies every record it loads and exits with status 2 before its first registry request when no verification key material resolves (§4.7.9, §7.5). A standalone server on the developer's own machine, run under the same account, writes the key file at the default path that sync resolves, so that case needs no setup.
+4. Done. Authoring loop unchanged; consumer paths gain MCP / SDK availability.
 
 ## 13.12 Backend Configuration Reference
 
