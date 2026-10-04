@@ -176,14 +176,23 @@ func (e *LayerEndpoint) WithPublicBaseURL(u string) *LayerEndpoint {
 // absolute URL a developer can paste into a Git host's webhook configuration;
 // otherwise it falls back to the relative path.
 //
-// The layer id is percent-escaped as a single path segment. A layer id is an
+// On a multi-tenant endpoint the path carries the layer's tenant ID before the
+// layer ID, because a delivery carries no caller organization from which
+// §6.3.1 could select the tenant. The caller passes the layer record's
+// tenant, which is the store key rather than the tenant name. A single-tenant
+// endpoint keeps the one-segment path.
+//
+// Each segment is percent-escaped as a single path segment. A layer id is an
 // operator-chosen string that may contain a space or a slash, and pasting the
-// unescaped form into a Git host produces a request the {id} route never
+// unescaped form into a Git host produces a request the webhook route never
 // matches, so the advertised URL would 404 forever instead of ingesting.
 //
-// spec: §14.10 step 3 — "The CLI prints the webhook URL it would expect."
-func (e *LayerEndpoint) webhookURL(layerID string) string {
+// Spec: §7.3.1, §14.10 step 3 — "The CLI prints the webhook URL it would expect."
+func (e *LayerEndpoint) webhookURL(tenantID, layerID string) string {
 	path := "/v1/ingest/webhook/" + url.PathEscape(layerID)
+	if e.multiTenant {
+		path = "/v1/ingest/webhook/" + url.PathEscape(tenantID) + "/" + url.PathEscape(layerID)
+	}
 	if e.publicBaseURL == "" {
 		return path
 	}
@@ -1025,12 +1034,21 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 }
 
 // WebhookHandler returns the handler for the §7.3.1 inbound Git-provider
-// webhook trigger, mounted separately at /v1/ingest/webhook/{id}. The layer
-// id comes from the path so the URL `podium layer register` advertises is a
-// clean per-layer endpoint. POST only; other methods get 405 from the mux.
+// webhook trigger, mounted separately under /v1/ingest/webhook/. A
+// single-tenant endpoint serves /v1/ingest/webhook/{id}; a multi-tenant
+// endpoint serves /v1/ingest/webhook/{tenant}/{id} alone, so a delivery to the
+// one-segment form answers 404 there. The identifiers come from the path so
+// the URL `podium layer register` advertises is a clean per-layer endpoint.
+// POST only; other methods get 405 from the mux.
+//
+// Spec: §7.3.1
 func (e *LayerEndpoint) WebhookHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/ingest/webhook/{id}", e.handleWebhook)
+	if e.multiTenant {
+		mux.HandleFunc("POST /v1/ingest/webhook/{tenant}/{id}", e.handleWebhook)
+	} else {
+		mux.HandleFunc("POST /v1/ingest/webhook/{id}", e.handleWebhook)
+	}
 	return mux
 }
 
@@ -1205,7 +1223,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
 	if rotated {
-		resp.WebhookURL = e.webhookURL(cfg.ID)
+		resp.WebhookURL = e.webhookURL(cfg.TenantID, cfg.ID)
 		resp.WebhookSecret = cfg.WebhookSecret
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -1460,7 +1478,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 
 	resp := LayerRegisterResponse{Layer: cfg}
 	if cfg.SourceType == "git" {
-		resp.WebhookURL = e.webhookURL(cfg.ID)
+		resp.WebhookURL = e.webhookURL(cfg.TenantID, cfg.ID)
 		resp.WebhookSecret = cfg.WebhookSecret
 	}
 	writeJSON(w, http.StatusCreated, resp)

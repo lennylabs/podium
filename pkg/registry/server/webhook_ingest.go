@@ -15,7 +15,8 @@ import (
 const maxWebhookBody = 1 << 20 // 1 MiB
 
 // handleWebhook is the §7.3.1 inbound webhook ingest trigger
-// (POST /v1/layers/webhook?id=<layer>). It loads the layer's configured
+// (POST /v1/ingest/webhook/{id}, or /v1/ingest/webhook/{tenant}/{id} on a
+// multi-tenant endpoint). It loads the layer's configured
 // GitProvider and webhook secret, verifies the delivery signature through
 // the process-global webhook.Default GitProvider registry (§9.1/§9.2), and
 // only on success queues the reingest the polling endpoint records. A
@@ -26,6 +27,8 @@ const maxWebhookBody = 1 << 20 // 1 MiB
 // custom GitProvider into a source build" change behavior: a provider
 // registered via webhook.Default.Register is selected here by the layer's
 // configured provider id without editing this handler.
+//
+// Spec: §7.3.1
 func (e *LayerEndpoint) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
@@ -43,14 +46,8 @@ func (e *LayerEndpoint) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "layer id required")
 		return
 	}
-	tenantID, _ := e.tenant(r.Context())
-	cfg, err := e.store.GetLayerConfig(r.Context(), tenantID, id)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "registry.not_found", "no such layer: "+id)
-		} else {
-			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
-		}
+	cfg, ok := e.webhookLayer(w, r, id)
+	if !ok {
 		return
 	}
 	if cfg.SourceType != "git" {
@@ -88,6 +85,43 @@ func (e *LayerEndpoint) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// the ingest pipeline (no break-glass on the webhook path) and return its
 	// result summary. Without a runner wired the handler records the intent.
 	e.runIngestAndRespond(w, r, cfg, nil)
+}
+
+// webhookLayer loads the layer a delivery names and writes the refusal when
+// there is none. A single-tenant endpoint reads its bound tenant. A
+// multi-tenant endpoint reads the tenant ID from the path, because the
+// delivery carries no caller organization from which §6.3.1 could select one,
+// and requires that tenant to be provisioned and active. A deactivated
+// tenant's rows persist, so the layer read alone would still find its layer;
+// both an unknown and an inactive tenant answer 404 registry.not_found, as a
+// delivery naming no layer does.
+//
+// Spec: §7.3.1
+func (e *LayerEndpoint) webhookLayer(w http.ResponseWriter, r *http.Request, id string) (store.LayerConfig, bool) {
+	ctx := r.Context()
+	tenantID, _ := e.tenant(ctx)
+	if e.multiTenant {
+		tenantID = r.PathValue("tenant")
+		t, err := e.store.GetTenant(ctx, tenantID)
+		if err != nil && !errors.Is(err, store.ErrTenantNotFound) {
+			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+			return store.LayerConfig{}, false
+		}
+		if err != nil || !t.Active {
+			writeError(w, http.StatusNotFound, "registry.not_found", "no such layer: "+id)
+			return store.LayerConfig{}, false
+		}
+	}
+	cfg, err := e.store.GetLayerConfig(ctx, tenantID, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "registry.not_found", "no such layer: "+id)
+		} else {
+			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		}
+		return store.LayerConfig{}, false
+	}
+	return cfg, true
 }
 
 // webhookSignatureHeader returns the signature credential for the named
