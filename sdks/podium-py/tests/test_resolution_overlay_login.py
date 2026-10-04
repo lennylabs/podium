@@ -11,6 +11,7 @@ import time
 import urllib.error
 
 import pytest
+from conftest import VECTOR_PUBLIC_KEY
 
 from podium import Client, DeviceCodeError, RegistryError
 from podium import _config, _overlay
@@ -193,16 +194,25 @@ def test_search_artifacts_no_overlay_passthrough(artifacts_server, tmp_path, mon
     assert [r.id for r in res.results] == ["a/b"]
 
 
+# Spec: §6.4
+# Spec: §7.6.3
 def test_load_artifact_resolves_overlay_first(tmp_path):
     overlay = tmp_path / "overlay"
     _overlay_artifact(str(overlay), "drafts/my-prompt", desc="draft", body="overlay body")
     # Registry URL is unreachable; an overlay hit must not touch the network.
-    client = Client(registry="http://127.0.0.1:1", overlay_path=str(overlay))
+    # The client resolves always, so a check on the overlay record would refuse
+    # it for its missing delivery_hash.
+    client = Client(
+        registry="http://127.0.0.1:1",
+        overlay_path=str(overlay),
+        verify_keys=VECTOR_PUBLIC_KEY,
+    )
+    assert client.verify_signatures == "always"
     art = client.load_artifact("drafts/my-prompt")
     assert art.id == "drafts/my-prompt"
     assert "overlay body" in art.manifest_body
     # Spec: §4.7.10 — no registry served an overlay record, so it carries no
-    # delivery attestation.
+    # delivery attestation and §6.4 exempts it from the delivery check.
     assert (art.delivery_hash, art.delivery_signature) == ("", "")
 
 

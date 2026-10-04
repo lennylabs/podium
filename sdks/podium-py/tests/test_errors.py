@@ -1,16 +1,23 @@
 """Tests for the §6.10 / §13.2.1 SDK error surface."""
 
+import json
 import os
 import sys
 import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from podium import RegistryError, RegistryReadOnly  # noqa: E402
+from podium import RegistryError, RegistryReadOnly, _delivery  # noqa: E402
 from podium.client import (  # noqa: E402
     _batch_result_from,
     _registry_error_from_envelope,
 )
+
+
+def _batch_result(entry):
+    """Decode one served batch entry and build its BatchResult."""
+    (parsed,) = _delivery.parse_batch_response(json.dumps([entry]).encode())
+    return _batch_result_from(parsed, _delivery.Verification(_delivery.POLICY_NEVER))
 
 
 class RegistryReadOnlyTest(unittest.TestCase):
@@ -39,7 +46,7 @@ class RegistryReadOnlyTest(unittest.TestCase):
     # spec: §13.2.1 / §7.6.2 — a batch item rejected with registry.read_only
     # carries a RegistryReadOnly that materialize() re-raises.
     def test_batch_error_item_carries_registry_read_only(self):
-        result = _batch_result_from(
+        result = _batch_result(
             {
                 "id": "finance/x",
                 "status": "error",
@@ -92,7 +99,7 @@ class RegistryReadOnlyTest(unittest.TestCase):
     # spec: §6.10 — a batch error item carries the full envelope, which
     # materialize() re-raises with details and suggested_action intact.
     def test_batch_error_item_carries_full_envelope(self):
-        result = _batch_result_from(
+        result = _batch_result(
             {
                 "id": "finance/x",
                 "status": "error",

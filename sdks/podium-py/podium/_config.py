@@ -77,12 +77,7 @@ def _parse_defaults(text: str) -> dict[str, str]:
 
 def read_registry(path: str) -> str:
     """Return ``defaults.registry`` from one sync.yaml file, or ``""``."""
-    try:
-        with open(path, encoding="utf-8") as fh:
-            text = fh.read()
-    except OSError:
-        return ""
-    return _parse_defaults(text).get("registry", "")
+    return _read_defaults(path).get("registry", "")
 
 
 def resolve_registry(env_registry: str | None, cwd: str, home: str | None) -> str:
@@ -95,15 +90,48 @@ def resolve_registry(env_registry: str | None, cwd: str, home: str | None) -> st
     """
     if env_registry:
         return env_registry
-    candidates: list[str] = []
-    workspace = discover_workspace(cwd)
-    if workspace:
-        candidates.append(os.path.join(workspace, _PODIUM_DIR, "sync.local.yaml"))
-        candidates.append(os.path.join(workspace, _PODIUM_DIR, "sync.yaml"))
-    if home:
-        candidates.append(os.path.join(home, _PODIUM_DIR, "sync.yaml"))
-    for path in candidates:
+    for path in _scope_paths(cwd, home):
         registry = read_registry(path)
         if registry:
             return registry
     return ""
+
+
+def _read_defaults(path: str) -> dict[str, str]:
+    """Return the ``defaults:`` mapping of one sync.yaml file, or ``{}``."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except (OSError, UnicodeDecodeError):
+        return {}
+    return _parse_defaults(text)
+
+
+def _scope_paths(cwd: str, home: str | None) -> list[str]:
+    """List the §7.5.2 sync.yaml files, highest precedence first."""
+    paths: list[str] = []
+    workspace = discover_workspace(cwd)
+    if workspace:
+        paths.append(os.path.join(workspace, _PODIUM_DIR, "sync.local.yaml"))
+        paths.append(os.path.join(workspace, _PODIUM_DIR, "sync.yaml"))
+    if home:
+        paths.append(os.path.join(home, _PODIUM_DIR, "sync.yaml"))
+    return paths
+
+
+def read_verify_signatures(cwd: str, home: str | None) -> tuple[str | None, str | None]:
+    """Resolve ``defaults.verify_signatures`` across the §7.5.2 scopes.
+
+    Spec: §4.7.9, §7.5.2
+
+    Returns the first non-empty value with the path of the file that carried
+    it, or ``(None, None)`` when no scope sets it. The precedence is the
+    workspace ``sync.local.yaml``, the workspace ``sync.yaml``, and then the
+    user-global file, as in ``pkg/sync.VerifySignaturesSetting``. The caller
+    validates the value and names the path in its error or warning.
+    """
+    for path in _scope_paths(cwd, home):
+        value = _read_defaults(path).get("verify_signatures", "")
+        if value:
+            return value, path
+    return None, None

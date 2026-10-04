@@ -17,6 +17,13 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 
+# The client verifies delivery signatures (§4.7.9, §7.6.3) with an Ed25519
+# primitive the standard library lacks. A client that resolves the always
+# policy imports it and refuses construction without it; a client under
+# never needs only hashlib.
+[project.optional-dependencies]
+verify = ["cryptography>=42"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["podium*"]
