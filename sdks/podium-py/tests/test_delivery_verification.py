@@ -285,6 +285,17 @@ def test_missing_or_mismatched_hash_refused_under_never(stub_server):
     _raises(MISMATCH, lambda: client.load_artifact("acme/rule"))
 
 
+# Spec: §4.7.10
+def test_id_less_load_returns_the_framed_empty_id(stub_server):
+    # The record frames an absent id as the empty string, so the client returns
+    # that attested value rather than the id the caller requested.
+    body = _rule()
+    del body["id"]
+    stub_server.next_response = served(body)
+    art = _client(stub_server, verify_signatures="never").load_artifact("acme/rule")
+    assert art.id == ""
+
+
 def _manifest_url_response(object_server, doc: bytes, **link) -> dict:
     url = object_server.base + "/objects/doc.md"
     object_server.objects["/objects/doc.md"] = doc

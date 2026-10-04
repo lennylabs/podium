@@ -1450,7 +1450,7 @@ class Client:
         _delivery.check_delivery(served, self._verification)
         rec = served.record
         return LoadedArtifact(
-            id=rec["id"] or artifact_id,
+            id=rec["id"],
             type=rec["type"],
             version=rec["version"],
             manifest_body=_text(rec["manifest_body"]),
