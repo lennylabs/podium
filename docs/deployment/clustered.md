@@ -34,14 +34,14 @@ For day-two operations covering capacity, monitoring, alerts, backup, and upgrad
 - **Freeze windows.** A `freeze_windows:` list under `registry:` in `registry.yaml` rejects ingest with `ingest.frozen` during critical periods such as year-end close and release cuts. A single-node deployment reads the same list. `podium layer reingest --break-glass --justification <text> --approver <approver-id> <layer-id>` overrides an active window. The override needs a justification and two distinct approvers, and the authenticated caller counts as one of them.
 - **Signing.** The registry signs every artifact at ingest with its registry-managed Ed25519 key by default. In steady state every replica signs under the one key the chart mounts from one Secret (see [Deploy the registry](#2-deploy-the-registry)). During a rotation, every replica trusts the new key before any replica signs under it, as [Rotating the signing key across replicas](#rotating-the-signing-key-across-replicas) states. No registry signing mode produces a Sigstore-keyless envelope. Each `podium-mcp` consumer verifies what it loads under `PODIUM_VERIFY_SIGNATURES`, whose values are `always`, the default, and `never`.
 - **SCIM 2.0.** Group membership push from OIDC IdPs that support it. Layer visibility references group claims directly.
-- **GDPR erasure.** `podium admin erase --salt <tenant-salt> <user-id>` unregisters the user's user-defined layers, redacts their identity across the registry audit stream behind a `redacted-<sha256(user_id+salt)>` tombstone, and returns the purged layer ids plus the count of redacted audit events.
-- **Quotas.** Per-org limits on storage, search QPS, materialization rate, and audit volume.
+- **GDPR erasure.** `podium admin erase --salt <tenant-salt> <user-id>` unregisters the user's user-defined layers, redacts their identity across the registry audit stream behind a `redacted-<sha256(user_id+salt)>` tombstone, and returns the purged layer ids plus the count of redacted audit events. A registry started with `PODIUM_MULTI_TENANT=true` refuses `podium admin erase` with `auth.forbidden` and changes nothing, because the registry keeps one audit file for every tenant and a redaction would reach other tenants' records. A single-tenant registry performs erasure as described.
+- **Quotas.** Per-org limits on storage, search QPS, materialization rate, and audit volume. On a multi-tenant registry the audit-volume budget is counted across every tenant's events under the default tenant, so one tenant's audit traffic spends the budget that every tenant's ingest shares.
 
 ---
 
 ## Per-tenant layer model
 
-Each tenant has its own layer list. Layers are an explicit ordered list configured per tenant, with no fixed `org / team / user` hierarchy. [Layered composition](layers) covers the composition rules that apply in every tier.
+Each tenant has its own layer list. On a multi-tenant registry, the layer endpoints act in the tenant the caller's organization selects, and a tenant's admin manages that tenant's layer list. Layers are an explicit ordered list configured per tenant, with no fixed `org / team / user` hierarchy. [Layered composition](layers) covers the composition rules that apply in every tier.
 
 ```yaml
 # Tenant layer config, the `layers:` list alone. This is not a registry.yaml
@@ -190,11 +190,13 @@ podium admin grant --registry https://podium.acme.com alice@acme.com
 
 ### 5. Configure the tenant's layer list
 
-Register the org's layer sources and their visibility with `podium layer register`, or `POST /v1/layers` directly. `podium layer update` patches a registered layer afterwards. [Layered composition](layers#registering-layers-against-a-server) has the flags.
+Register the org's layer sources and their visibility with `podium layer register`, or `POST /v1/layers` directly. `podium layer update` patches a registered layer afterwards. [Layered composition](layers#registering-layers-against-a-server) has the flags. Each request acts in the tenant the caller's organization selects, so the tenant's admin manages that tenant's layer list.
+
+Layers that a caller registered on a multi-tenant registry before this release remain in the default tenant, because the registry previously stored every layer there. The owner registers the layer again from the owning tenant. An admin of the default tenant, such as a bootstrap admin whose organization is `default`, removes the stale row with `podium layer unregister`, because the owner's own requests no longer reach the default tenant.
 
 ### 6. Set up Git webhooks
 
-For each `git`-source layer, register the webhook URL the registry returned at layer creation. The registry validates the webhook signature and ingests on each merge to the tracked ref.
+For each `git`-source layer, register the webhook URL the registry returned at layer creation. The registry validates the webhook signature and ingests on each merge to the tracked ref. On a multi-tenant registry the webhook URL carries the layer's tenant ID, `/v1/ingest/webhook/<tenant-id>/<layer-id>`. Git layers registered on a multi-tenant registry before this release need their webhook re-registered on the source repository with that URL, including the default tenant's layers, whose segment is the default tenant's ID rather than the name `default`.
 
 ### 7. Configure CI
 

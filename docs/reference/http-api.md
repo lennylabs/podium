@@ -80,7 +80,7 @@ Reports the deployment's identity posture, the caller's own resolved subject, an
 
 `identity_provider_configured` reports whether an identity provider is configured and never names which one. `public_mode` reports whether public mode is engaged. `browser_auth.enabled` reports whether the browser flow is enabled on this deployment, and `sign_in_path` and `sign_out_path` are present only when it is, because the flow's routes are registered only then. `subject` is the verified subject of the request that asked, present only when one resolves. `email` is the requesting caller's own email as the configured identity provider recorded it, present only where one resolves and is non-empty, and absent otherwise. It belongs to the caller that asked and to no other caller.
 
-`layer_capabilities` reports what the requesting caller may do on the layer operations. It carries `manage_any_layer`, a boolean reporting whether this deployment's layer endpoints admit this caller on the `admin` arm, which is the arm that decides a write on a layer the caller does not own and every operation the [local-source authorization rule](#layer-management) governs. On a registry started with no identity provider configured, or one started in public mode, those endpoints admit every caller on that arm, so the member is true there, including on a request that resolves no subject. The object and its member are always present, and where the deployment determines no capability for the request the member is false. The object predicts a server decision rather than reporting a grant: it is a snapshot taken when the read was answered, an operation a client offers on the strength of it can still be refused, and the envelope the operation's own endpoint returns remains the authority.
+`layer_capabilities` reports what the requesting caller may do on the layer operations. It carries `manage_any_layer`, a boolean reporting whether this deployment's layer endpoints admit this caller on the `admin` arm, which is the arm that decides a write on a layer the caller does not own and every operation the [local-source authorization rule](#layer-management) governs. On a registry started with no identity provider configured, or one started in public mode, those endpoints admit every caller on that arm, so the member is true there, including on a request that resolves no subject. On a multi-tenant registry the member is evaluated in the tenant the caller's organization selects, and it is false for a request that resolves to no tenant. A caller that the layer endpoints reject with `401 auth.tenant_unknown` is answered `200` with the member false. The object and its member are always present, and where the deployment determines no capability for the request the member is false. The object predicts a server decision rather than reporting a grant: it is a snapshot taken when the read was answered, an operation a client offers on the strength of it can still be refused, and the envelope the operation's own endpoint returns remains the authority.
 
 The response carries no other field, and in particular no issuer, client identifier, endpoint, filesystem path, or other configuration value, and no subject, email, or authorization belonging to any caller other than the one that asked. A registry started without the web UI never registers this path and answers a request for it as it answers any path it does not register.
 
@@ -373,7 +373,7 @@ Returns the per-subtree domain analysis report for the path (the same report `po
 | `created_at` | string | RFC 3339 timestamp of the layer's registration. |
 | `deleted_at` | string | The soft-delete tombstone, or `null` on a live layer. A reader computes the remaining recovery window from it. |
 
-The object carries no tenant identifier, because these endpoints serve one tenant. It carries the layer's inbound webhook HMAC secret under no name: that credential is returned once, in the `webhook_secret` field of the registration response and of an update that requests a rotation. Timestamps are RFC 3339 in UTC.
+The object carries no tenant identifier, because these endpoints serve the one tenant the request's organization selects. It carries the layer's inbound webhook HMAC secret under no name: that credential is returned once, in the `webhook_secret` field of the registration response and of an update that requests a rotation. Timestamps are RFC 3339 in UTC.
 
 ### Register a layer
 
@@ -429,6 +429,12 @@ The response is `201 Created` with the stored layer and, for a `git` source, the
 }
 ```
 
+On a multi-tenant registry, `webhook_url` carries the layer's tenant ID before the layer ID:
+
+```json
+"webhook_url": "https://registry.acme.com/v1/ingest/webhook/<tenant-id>/team-finance"
+```
+
 The registration has not ingested yet, so `last_ingested_at` is absent, and this registration sets no force-push policy, so `force_push_policy` is absent. A `local` registration, and an update that requests no secret rotation, return the layer alone without `webhook_url` and `webhook_secret`.
 
 ### List layers
@@ -469,7 +475,9 @@ Returns the layers the caller can read, as an array of the layer object under th
 
 A caller who can read no layer receives `{"layers":[]}`.
 
-**Layer read visibility.** A caller holding the per-tenant `admin` role receives the tenant's whole layer list. Any other authenticated caller receives the layers that caller can see under the visibility rules, which include that caller's own user-defined layers through their implicit `users: [<registrant>]` visibility. A caller whose credential fails verification is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime`, the same refusal the registry answers on any other route that verifies the same credential. Whether presenting no credential is itself a verification failure is the configured identity provider's rule. A caller the registry resolves as anonymous rather than as a verification failure receives an empty list rather than a refusal. A layer the rule withholds is absent from the `200` response rather than refused with an error code, so the read discloses no identifier, source location, owner subject, or visibility declaration for it. A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so the read returns the tenant's whole layer list there.
+**Layer read visibility.** A caller holding the per-tenant `admin` role receives the tenant's whole layer list. Any other authenticated caller receives the layers that caller can see under the visibility rules, which include that caller's own user-defined layers through their implicit `users: [<registrant>]` visibility. A caller whose credential fails verification is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime`, the same refusal the registry answers on any other route that verifies the same credential. Whether presenting no credential is itself a verification failure is the configured identity provider's rule. A caller the registry resolves as anonymous rather than as a verification failure receives an empty list rather than a refusal. A layer the rule withholds is absent from the `200` response rather than refused with an error code, so the read discloses no identifier, source location, owner subject, or visibility declaration for it. A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so the read returns the tenant's whole layer list there, subject to the tenant selection rule below.
+
+**Tenant selection.** On a multi-tenant registry, each layer endpoint acts in the tenant the caller's organization selects. The admin check, the layer list, the user-defined layer cap, and the tenant whose change-event subscribers receive the operation's event all use that tenant. A request the registry rejects on its other endpoints with `401 auth.tenant_unknown`, because its verified organization names no provisioned tenant, receives the same rejection on every layer endpoint. Any other request that resolves to no tenant lists no layers, and every layer write is refused with `403 auth.forbidden`, including on a registry started in public mode or with no identity provider configured. A credential that fails verification on `list` or `reorder` keeps its own error envelope. `POST /v1/admin/erase` is refused with `403 auth.forbidden` for every caller on a multi-tenant registry, including a caller the layer endpoints reject with `auth.tenant_unknown`, as [Erase a user](#erase-a-user-gdpr) states.
 
 ### Reingest
 
@@ -525,7 +533,10 @@ POST /v1/layers/restore?id={id}
 
 ```
 POST /v1/ingest/webhook/{layer-id}
+POST /v1/ingest/webhook/{tenant-id}/{layer-id}
 ```
+
+A single-tenant registry serves the first route. On a multi-tenant registry, the URL carries the layer's tenant ID, and a delivery naming a tenant that is not provisioned and active answers `404 registry.not_found`.
 
 Receives Git provider webhooks. The registry validates the HMAC signature against the layer's secret, fetches the new commit, walks the diff, runs lint, validates the immutability invariant, hashes content, stores manifest + bundled resources, indexes metadata, and emits the corresponding outbound event.
 
@@ -592,7 +603,7 @@ Returns the calling tenant's configured limits and current usage. Read-only and 
 GET /v1/events?type={event}&type={event}
 ```
 
-Streams change events as NDJSON (`Content-Type: application/x-ndjson`). The connection stays open until the client disconnects. Repeat `type` to filter by event name; omit it to receive every event type. The handler emits a `{"event":"_heartbeat"}` line every 30 seconds so a proxy-buffered consumer sees the connection stay alive. This is the wire surface the SDK `client.subscribe(events)` helper wraps. The registry delivers an event only when the caller's identity can see the layer the event names under the layer visibility rules. For each event, it reads the layer visibility once and each group's membership once, when a caller's delivery first needs them, and applies those reads to every caller of the event. The caller's path-scoped OAuth scopes also narrow artifact and domain events. A `layer.config_changed` also reaches a caller that could see the layer before the change. The event a reorder records names only the reordered layers the caller can see. An event of another tenant is withheld, and so is an event the registry cannot evaluate, for example because the layer list cannot be read. A withheld event leaves no trace on the stream, and the `_heartbeat` line reaches every caller. The registry resolves the caller's identity when the stream opens, so a credential that expires while the stream is open does not close it, and a group claim in that credential applies until the caller reconnects. A registry started in public mode or with no identity provider configured admits every layer, so a caller there receives every event its scopes permit.
+Streams change events as NDJSON (`Content-Type: application/x-ndjson`). The connection stays open until the client disconnects. Repeat `type` to filter by event name; omit it to receive every event type. The handler emits a `{"event":"_heartbeat"}` line every 30 seconds so a proxy-buffered consumer sees the connection stay alive. This is the wire surface the SDK `client.subscribe(events)` helper wraps. The registry delivers an event only when the caller's identity can see the layer the event names under the layer visibility rules. For each event, it reads the layer visibility once and each group's membership once, when a caller's delivery first needs them, and applies those reads to every caller of the event. The caller's path-scoped OAuth scopes also narrow artifact and domain events. A `layer.config_changed` also reaches a caller that could see the layer before the change. The event a reorder records names only the reordered layers the caller can see. An event of another tenant is withheld, and so is an event the registry cannot evaluate, for example because the layer list cannot be read. A withheld event leaves no trace on the stream, and the `_heartbeat` line reaches every caller. The registry resolves the caller's identity when the stream opens, so a credential that expires while the stream is open does not close it, and a group claim in that credential applies until the caller reconnects. The stream follows the caller's layer visibility rather than the layer list rule, so a caller with no verified subject on a registry that verifies callers receives the events of `public: true` layers although `GET /v1/layers` lists it no layers. A registry started in public mode or with no identity provider configured admits every layer, so a caller there receives every event its scopes permit.
 
 ---
 
@@ -646,6 +657,8 @@ POST /v1/admin/erase    body: { "user_id": "...", "salt": "..." }
 
 Performs the right-to-erasure operation for the named user: it unregisters and soft-deletes every user-defined layer the user owns, redacts the user identity across the registry audit stream, and appends a `user.erased` event naming the invoking admin. Both `user_id` and `salt` are required.
 
+On a registry started with `PODIUM_MULTI_TENANT=true`, the endpoint answers `403 auth.forbidden` for every caller, including a caller whose verified organization names no provisioned tenant, and changes nothing, because the registry keeps one audit file for every tenant.
+
 ### Tenant management
 
 ```
@@ -683,7 +696,7 @@ These routes are authorized by the instance-operator role rather than the per-te
 
 ## Outbound webhooks
 
-The registry emits outbound webhooks for change events. Configure receivers per org (URL + HMAC secret). Each receiver belongs to the tenant whose admin registered it. The receiver CRUD routes read and write only the receivers of the tenant the request resolves to, and the registry delivers an event only to the receivers of the event's tenant. An event with no tenant reaches no receiver. On a multi-tenant registry, layer and ingest events belong to the bootstrap `default` tenant, so only that tenant's receivers receive them. Layer visibility does not narrow receiver delivery. A receiver receives every event of its tenant that its event filter matches, whatever layer the event names, and it carries no layer scope.
+The registry emits outbound webhooks for change events. Configure receivers per org (URL + HMAC secret). Each receiver belongs to the tenant whose admin registered it. The receiver CRUD routes read and write only the receivers of the tenant the request resolves to, and the registry delivers an event only to the receivers of the event's tenant. An event with no tenant reaches no receiver. A layer or ingest event belongs to the tenant whose layer it names, so on a multi-tenant registry only that tenant's receivers receive it. Layer visibility does not narrow receiver delivery. A receiver receives every event of its tenant that its event filter matches, whatever layer the event names, and it carries no layer scope.
 
 | Event | When |
 |:--|:--|

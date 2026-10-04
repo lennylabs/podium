@@ -83,7 +83,8 @@ Or register them at runtime:
 
 ```bash
 # A git-source layer. The registry returns a webhook URL and HMAC secret
-# to configure on the source repo. Setting a visibility flag requires the
+# to configure on the source repo. On a multi-tenant registry the webhook
+# URL carries the tenant ID. Setting a visibility flag requires the
 # tenant admin role.
 podium layer register --id org-defaults \
   --repo git@github.com:acme/podium-org-defaults.git --ref main \
@@ -116,7 +117,7 @@ The rule is evaluated on each of those operations rather than against the stored
 
 An ingest of a local-source layer reads only within the directory the layer's configured path resolves to. A path that leaves that directory, including one reached through a symbolic link stored inside it, is not read, and a read the ingest requires and cannot satisfy fails that layer's ingest with `ingest.source_unreachable` while the artifacts served before the refusal stay in place. A symbolic link inside the layer whose target is written as an absolute path is refused whatever that target names, including a target inside the same layer, so rewrite such a link with a target relative to its own directory. A layer that relied on a link leaving its root is restructured to hold the content inside the layer directory.
 
-`podium layer list` prints the registered layers the caller can see, and their current state. A caller holding the tenant `admin` role, and every caller on a registry that authenticates none, sees every layer in the tenant. Any other authenticated caller sees the layers that caller's identity admits, including that caller's own user-defined layers. A caller the registry resolves as anonymous sees none, and a caller whose credential fails verification is refused on the terms the [HTTP API reference](../reference/http-api#list-layers) states. Whether presenting no credential is itself a verification failure is the configured identity provider's rule. The visibility flags are covered in [Access control](access-control), and the built-in source types are covered in [Server-side integrations](integrations#layer-sources).
+`podium layer list` prints the registered layers the caller can see, and their current state. A caller holding the tenant `admin` role, and every caller on a registry that authenticates none, sees every layer in the tenant. Any other authenticated caller sees the layers that caller's identity admits, including that caller's own user-defined layers. A caller the registry resolves as anonymous sees none, and a caller whose credential fails verification is refused on the terms the [HTTP API reference](../reference/http-api#list-layers) states. Whether presenting no credential is itself a verification failure is the configured identity provider's rule. On a multi-tenant registry, `podium layer list` reads the tenant the caller's organization selects. A caller the registry rejects on its other endpoints with `401 auth.tenant_unknown`, because its verified organization names no provisioned tenant, receives the same rejection from `podium layer list`. Any other caller whose organization selects no tenant sees no layers, including on a registry that authenticates no caller. The visibility flags are covered in [Access control](access-control), and the built-in source types are covered in [Server-side integrations](integrations#layer-sources).
 
 ---
 
@@ -140,7 +141,7 @@ Each layer refreshes from its source independently.
 
 | Mechanism | When to use it |
 |:--|:--|
-| Git webhook | A `git`-source layer whose host can reach the registry. The registry ingests on each merge to the tracked ref. Register the webhook URL that `podium layer register` returned. |
+| Git webhook | A `git`-source layer whose host can reach the registry. The registry ingests on each merge to the tracked ref. Register the webhook URL that `podium layer register` returned. On a multi-tenant registry that URL carries the layer's tenant ID. |
 | `podium layer reingest <id>` | A manual or scheduled pull. Covers offline mirrors, internal Git that cannot reach the registry, and any host without a public ingress. |
 | `podium layer watch <id>` | A polling loop against the layer's source at an interval set with `--interval` (default 1m). Works for `local` sources and for `git` sources with no webhook. Each tick reingests, so a loop over a source naming a host path is authorized as [the local-source rule](#who-may-register-a-local-source-layer) states. |
 
