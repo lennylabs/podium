@@ -86,9 +86,13 @@ func (s *Server) handleWebhooksList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 		return
 	}
+	// Spec: §7.3.2 — a receiver belongs to the tenant the request resolves
+	// to (§6.3.1), the same tenant requireAdmin authorized the caller in, so
+	// an admin of one tenant never reads or writes another tenant's receivers.
+	tenant := s.core.TenantFor(r.Context())
 	switch r.Method {
 	case http.MethodGet:
-		rs, err := s.webhooks.Store.List(r.Context(), s.tenant)
+		rs, err := s.webhooks.Store.List(r.Context(), tenant)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 			return
@@ -136,7 +140,7 @@ func (s *Server) handleWebhooksList(w http.ResponseWriter, r *http.Request) {
 		}
 		rec := webhook.Receiver{
 			ID:          newWebhookID(),
-			TenantID:    s.tenant,
+			TenantID:    tenant,
 			URL:         body.URL,
 			Secret:      body.Secret,
 			EventFilter: body.EventFilter,
@@ -167,6 +171,10 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 		return
 	}
+	// Spec: §7.3.2 — a receiver belongs to the tenant the request resolves
+	// to (§6.3.1), the same tenant requireAdmin authorized the caller in, so
+	// an admin of one tenant never reads or writes another tenant's receivers.
+	tenant := s.core.TenantFor(r.Context())
 	const prefix = "/v1/webhooks/"
 	if !strings.HasPrefix(r.URL.Path, prefix) {
 		writeError(w, http.StatusNotFound, "registry.not_found", "no such webhook")
@@ -179,7 +187,7 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		rec, err := s.webhooks.Store.Get(r.Context(), s.tenant, id)
+		rec, err := s.webhooks.Store.Get(r.Context(), tenant, id)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "registry.not_found", err.Error())
 			return
@@ -192,7 +200,7 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 		if rejectIfReadOnly(w, s.mode) {
 			return
 		}
-		current, err := s.webhooks.Store.Get(r.Context(), s.tenant, id)
+		current, err := s.webhooks.Store.Get(r.Context(), tenant, id)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "registry.not_found", err.Error())
 			return
@@ -250,7 +258,7 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 		if rejectIfReadOnly(w, s.mode) {
 			return
 		}
-		if err := s.webhooks.Store.Delete(r.Context(), s.tenant, id); err != nil {
+		if err := s.webhooks.Store.Delete(r.Context(), tenant, id); err != nil {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 			return
 		}

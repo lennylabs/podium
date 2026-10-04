@@ -263,14 +263,17 @@ func TestEventStream_MultiTenantRouting(t *testing.T) {
 // evRegisterUserLayer registers a user-defined git layer as the caller the
 // headers name, fails the test unless the registry stores it as that caller's
 // user-defined layer, and unregisters it when the test ends so the shared
-// database keeps no per-run layer.
+// database keeps no per-run layer. The body asserts user_defined so a caller
+// who holds the tenant admin grant also registers a personal layer, whose
+// registration publishes no layer.config_changed (§7.5.4).
 func evRegisterUserLayer(t *testing.T, srv *serverProc, as http.Header, id string) {
 	t.Helper()
 	st, body := apiDoAs(t, http.MethodPost, srv.BaseURL+"/v1/layers", as, map[string]any{
-		"id":          id,
-		"source_type": "git",
-		"repo":        "https://git.invalid/acme/" + id + ".git",
-		"ref":         "main",
+		"id":           id,
+		"source_type":  "git",
+		"repo":         "https://git.invalid/acme/" + id + ".git",
+		"ref":          "main",
+		"user_defined": true,
 	})
 	apiWantStatus(t, st, 201, "register user-defined layer "+id, body)
 	var resp struct {

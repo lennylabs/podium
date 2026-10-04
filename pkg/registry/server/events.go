@@ -237,7 +237,11 @@ func (s *Server) deliverable(ctx context.Context, ev registryEvent, id layer.Ide
 //
 // When a §7.3.2 outbound webhook worker is wired (WithWebhooks),
 // this also fans the event out to every matching receiver
-// asynchronously. Receivers are not filtered by scope (§7.3.2).
+// asynchronously. The receiver pool is the receivers of the scope's
+// tenant (scope.TenantID), and an event with no tenant reaches no
+// receiver. Within that pool, each receiver's event filter is the only
+// narrowing applied, and the §7.6 layer and path conditions do not apply
+// to receivers (§7.3.2).
 //
 // scope names the tenant and layers the event concerns. The stream
 // evaluates it per subscriber at delivery, so publishing performs no
@@ -246,6 +250,7 @@ func (s *Server) deliverable(ctx context.Context, ev registryEvent, id layer.Ide
 // copies it and never mutates it.
 //
 // Spec: §7.6
+// Spec: §7.3.2
 func (s *Server) PublishEvent(ctx context.Context, scope core.EventScope, eventType string, data map[string]any) {
 	if s.events == nil {
 		return
@@ -256,13 +261,14 @@ func (s *Server) PublishEvent(ctx context.Context, scope core.EventScope, eventT
 	if s.webhooks != nil {
 		// Fire outbound deliveries asynchronously so a slow receiver
 		// never blocks the publisher. Worker.Deliver fans the event out
-		// to every matching receiver in the tenant, delivering the
+		// to every matching receiver of the event's tenant
+		// (scope.TenantID), delivering the
 		// single-event body to a windowless receiver and routing a
 		// debounced receiver into its trailing window for one batch
 		// delivery (§7.3.2). A background context detaches the delivery
 		// from the request's cancellation.
 		go func() {
-			_ = s.webhooks.Deliver(context.Background(), s.tenant, eventType, traceID, actor, data)
+			_ = s.webhooks.Deliver(context.Background(), scope.TenantID, eventType, traceID, actor, data)
 		}()
 	}
 	s.events.publish(registryEvent{

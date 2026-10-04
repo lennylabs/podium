@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -95,6 +97,37 @@ func TestWorker_DeliversWithHMACSignature(t *testing.T) {
 	}
 	if body["event"] != "artifact.published" {
 		t.Errorf("body.event = %v, want artifact.published", body["event"])
+	}
+}
+
+// Spec: §7.3.2 — an event published with no tenant reaches no receiver.
+// The store file is written by hand because no Store's Put creates a row
+// with an empty tenant; FileStore still loads such a row, so the guard in
+// Deliver is what keeps it from receiving the event.
+func TestDeliver_EmptyTenantReachesNoReceiver(t *testing.T) {
+	t.Parallel()
+	rs := newReceiverServer(t, "secret-1")
+	path := filepath.Join(t.TempDir(), "webhooks.json")
+	rows, err := json.Marshal([]webhook.Receiver{{ID: "r1", TenantID: "", URL: rs.srv.URL, Secret: "secret-1"}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(path, rows, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	store, err := webhook.LoadFileStore(path)
+	if err != nil {
+		t.Fatalf("LoadFileStore: %v", err)
+	}
+	w := &webhook.Worker{Store: store, HTTPClient: rs.srv.Client(), Backoff: []time.Duration{}}
+	deliverErr := w.Deliver(context.Background(), "", "artifact.published", "", nil, map[string]any{"id": "x"})
+	got, err := store.Get(context.Background(), "", "r1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if deliverErr != nil || rs.deliveries.Load() != 0 || got.FailureCount != 0 {
+		t.Errorf("Deliver err = %v, deliveries = %d, FailureCount = %d; want nil, 0, 0",
+			deliverErr, rs.deliveries.Load(), got.FailureCount)
 	}
 }
 

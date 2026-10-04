@@ -234,6 +234,7 @@ rm -rf "$WORK"
 | S83 | The change-event stream withholds events from layers the caller cannot see | standalone | none | none | none |
 | S84 | A replayed stale latest is refused, and an honest regression is not | standalone | none | none | none |
 | S85 | Sigstore-keyless sign and verify against the staging instance | none | none | none | Sigstore staging instance, an OIDC token it accepts |
+| S86 | Webhook receivers are isolated per tenant on a multi-tenant registry | standard | none | none | Postgres, S3 |
 
 ---
 
@@ -10536,5 +10537,169 @@ credentialed lane mints, and it writes every signature into a public log.
    `sigstore-keyless`, and `registry-managed` on stderr, then a non-zero
    `exit=`. A run that starts serving, or that refuses with
    `config.signature_provider_unavailable`, is the defect this step catches.
+
+---
+
+## S86: Webhook receivers are isolated per tenant on a multi-tenant registry
+
+**Goal.** Validate that on a multi-tenant registry each tenant's admin lists
+and addresses only its own webhook receivers, that a request naming another
+tenant's receiver is answered as an unknown receiver, that an unrouted request
+is refused, and that an event of one tenant is delivered only to that tenant's
+receivers.
+
+**Covers.** The §7.3.2 receiver tenancy rule, §6.3.1 per-request tenant
+selection under `trusted-headers`, and the receiver CRUD and delivery path
+through the compiled binary.
+
+**Prerequisites.** Local Postgres and MinIO from `make services-up`, plus
+`test.env` (Postgres DSN, S3 settings), `psql`, `openssl`, and `python3`. Skip
+if any is absent. Go on macOS verifies TLS against the system keychain and
+ignores `SSL_CERT_FILE`, so on macOS run step 6 only after trusting
+`$WORK/sink.pem` in the login keychain, or run the scenario on Linux.
+
+**Why by hand.** An operator reads the raw POST bodies and `X-Podium-Signature`
+headers at both listeners side by side, together with the two
+`GET /v1/webhooks` lists. Any POST at bob's listener after carol's reorder, or
+any receiver of the other tenant in either list, is the defect this scenario
+catches.
+
+**Steps.**
+
+1. Run the isolation block. Start services, load the environment, and create a
+   self-signed certificate for `127.0.0.1` that both listeners share.
+
+   ```bash
+   (cd "$REAL_HOME/projects/podium" && make services-up)
+   set -a; source $REAL_HOME/projects/podium/test.env; set +a
+   export PODIUM_REGISTRY_STORE=postgres
+   export PODIUM_OBJECT_STORE=s3
+   export SFX="$$"
+   openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=127.0.0.1" \
+     -addext "subjectAltName=IP:127.0.0.1" \
+     -keyout "$WORK/sink.key" -out "$WORK/sink.pem"
+   cat > "$WORK/sink.py" <<'EOF'
+   import http.server, ssl, sys
+   class H(http.server.BaseHTTPRequestHandler):
+       def do_POST(self):
+           body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+           print("SIG", self.headers.get("X-Podium-Signature"), flush=True)
+           print("BODY", body.decode(), flush=True)
+           self.send_response(200); self.end_headers()
+   srv = http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H)
+   ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+   ctx.load_cert_chain(sys.argv[2], sys.argv[3])
+   srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+   srv.serve_forever()
+   EOF
+   python3 "$WORK/sink.py" 9541 "$WORK/sink.pem" "$WORK/sink.key" > "$WORK/carol-sink.log" 2>&1 &
+   python3 "$WORK/sink.py" 9542 "$WORK/sink.pem" "$WORK/sink.key" > "$WORK/bob-sink.log" 2>&1 &
+   ```
+
+   **Expect.** Both listeners are running, and both log files are empty.
+
+2. Boot a multi-tenant `trusted-headers` server with carol as the bootstrap
+   admin of the `default` tenant and dave as an operator.
+
+   ```bash
+   export SECRET="mv-proxy-$SFX"
+   PODIUM_IDENTITY_PROVIDER=trusted-headers PODIUM_MULTI_TENANT=true \
+   PODIUM_TRUSTED_PROXY_SECRET="$SECRET" \
+   PODIUM_BOOTSTRAP_ADMINS="carol-$SFX@acme.com" \
+   PODIUM_OPERATOR_ADMINS="dave-$SFX@acme.com" \
+   PODIUM_WEBHOOK_ALLOWED_TARGETS=127.0.0.1/32 \
+   SSL_CERT_FILE="$WORK/sink.pem" \
+   PODIUM_NO_EMBEDDINGS=true \
+   podium serve --bind 127.0.0.1:8184 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   export PODIUM_REGISTRY=http://127.0.0.1:8184
+   curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null "$PODIUM_REGISTRY/healthz"
+   server_alive "$SRV" "$WORK/srv.log"
+   as() { # as <user> <org> <curl args...>
+     local u="$1" o="$2"; shift 2
+     if [ -n "$o" ]; then
+       curl -s -w '\n%{http_code}\n' -H "X-Podium-Proxy-Secret: $SECRET" \
+         -H "X-Podium-User-Sub: $u" -H "X-Podium-User-Org: $o" "$@"
+     else
+       curl -s -w '\n%{http_code}\n' -H "X-Podium-Proxy-Secret: $SECRET" \
+         -H "X-Podium-User-Sub: $u" "$@"
+     fi
+   }
+   ```
+
+   **Expect.** `server_alive` reports the server running. The boot passes no
+   layer path, because step 6 registers the scenario's layers over HTTP, and
+   `PODIUM_NO_EMBEDDINGS=true` keeps search BM25-only, so the boot needs no
+   embedding provider or API key. The `as` helper sends the organization header
+   through an explicit branch, so the block behaves the same under bash and zsh.
+
+3. dave provisions the `globex` tenant, and the operator seeds bob's admin grant
+   in it directly in Postgres. No API grants a new tenant's first admin.
+
+   ```bash
+   as "dave-$SFX@acme.com" default -X POST "$PODIUM_REGISTRY/v1/admin/tenants" \
+     -H 'Content-Type: application/json' -d "{\"name\":\"globex-$SFX\"}" | tee "$WORK/tenant.json"
+   GLOBEX_ID=$(sed '$d' "$WORK/tenant.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+   psql "$PODIUM_POSTGRES_DSN" -c "INSERT INTO \"org_$GLOBEX_ID\".admin_grants (user_id, org_id, granted_at) VALUES ('bob-$SFX@globex.com', '$GLOBEX_ID', now());"
+   ```
+
+   **Expect.** The provisioning request returns HTTP 201 with the tenant's ID,
+   and `psql` reports `INSERT 0 1`.
+
+4. carol registers a receiver for her listener, and bob registers one for his.
+
+   ```bash
+   as "carol-$SFX@acme.com" default -X POST "$PODIUM_REGISTRY/v1/webhooks" \
+     -H 'Content-Type: application/json' -d '{"url":"https://127.0.0.1:9541/h"}' | tee "$WORK/ra.json"
+   as "bob-$SFX@globex.com" "globex-$SFX" -X POST "$PODIUM_REGISTRY/v1/webhooks" \
+     -H 'Content-Type: application/json' -d '{"url":"https://127.0.0.1:9542/h"}' | tee "$WORK/rb.json"
+   RA=$(sed '$d' "$WORK/ra.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+   RB=$(sed '$d' "$WORK/rb.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+   ```
+
+   **Expect.** Both requests return HTTP 201 with the receiver and its unmasked
+   secret.
+
+5. Each admin lists receivers, and carol addresses bob's receiver by its `id`.
+
+   ```bash
+   as "carol-$SFX@acme.com" default "$PODIUM_REGISTRY/v1/webhooks"
+   as "bob-$SFX@globex.com" "globex-$SFX" "$PODIUM_REGISTRY/v1/webhooks"
+   as "carol-$SFX@acme.com" default "$PODIUM_REGISTRY/v1/webhooks/$RB"
+   as "carol-$SFX@acme.com" default -X PUT "$PODIUM_REGISTRY/v1/webhooks/$RB" \
+     -H 'Content-Type: application/json' -d '{"disabled":true}'
+   as "carol-$SFX@acme.com" default -X DELETE "$PODIUM_REGISTRY/v1/webhooks/$RB"
+   as "bob-$SFX@globex.com" "globex-$SFX" "$PODIUM_REGISTRY/v1/webhooks/$RB"
+   as "carol-$SFX@acme.com" initech "$PODIUM_REGISTRY/v1/webhooks"
+   as "carol-$SFX@acme.com" "" "$PODIUM_REGISTRY/v1/webhooks"
+   ```
+
+   **Expect.** carol's list holds `$RA` alone, and bob's list holds `$RB` alone.
+   carol's `GET` and `PUT` of `$RB` return HTTP 404 with `registry.not_found`.
+   carol's `DELETE` of `$RB` returns HTTP 204. bob's `GET` of `$RB` then
+   returns HTTP 200 with `disabled: false`. The `initech` request and the
+   request with no organization header each return HTTP 403 with
+   `auth.forbidden`.
+
+6. carol registers two user-defined layers whose git URLs are under `.invalid`,
+   so no fetch runs, and reorders them in reverse registration order, which
+   publishes `layer.config_changed`.
+
+   ```bash
+   for id in "mv-a-$SFX" "mv-b-$SFX"; do
+     as "carol-$SFX@acme.com" default -X POST "$PODIUM_REGISTRY/v1/layers" \
+       -H 'Content-Type: application/json' \
+       -d "{\"id\":\"$id\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/acme/$id.git\",\"ref\":\"main\"}"
+   done
+   as "carol-$SFX@acme.com" default -X POST "$PODIUM_REGISTRY/v1/layers/reorder" \
+     -H 'Content-Type: application/json' -d "{\"order\":[\"mv-b-$SFX\",\"mv-a-$SFX\"]}"
+   sleep 5
+   cat "$WORK/carol-sink.log"; echo ---; cat "$WORK/bob-sink.log"
+   ```
+
+   **Expect.** Each registration returns HTTP 201, and the reorder returns HTTP
+   200. `carol-sink.log` holds a `SIG` line with a non-empty signature and a
+   `BODY` line whose `event` is `layer.config_changed` and whose `data.layer`
+   names both layers. `bob-sink.log` is empty.
 
 ---

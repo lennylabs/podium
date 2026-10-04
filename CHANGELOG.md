@@ -107,6 +107,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Webhook receivers are keyed per tenant** (§7.3.2): receiver CRUD reads and
+  writes only the receivers of the tenant the request resolves to, and the
+  registry delivers each event only to the receivers of the event's tenant.
+  Previously every tenant on a multi-tenant registry shared one receiver pool,
+  so one tenant's admin could list, update, and delete another tenant's
+  receivers, and every receiver received the events of every tenant. An event
+  with no tenant now reaches no receiver, and a `PODIUM_WEBHOOK_STORE_PATH`
+  store refuses to write a receiver with no URL, tenant, or ID.
+
 - **The web UI command palette no longer flashes "Nothing matched"**: on the
   render where the typed query settled, the palette drew the no-match message
   for one frame before the search for that query was sent, and issued an
@@ -204,6 +213,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   Fulcio certificate expires. Verification makes no network call.
 
 ### Changed
+
+- **Persisted webhook receivers must be registered again** (§7.3.2): a
+  `PODIUM_WEBHOOK_STORE_PATH` file written by an earlier release keys every
+  receiver under `default`. That key matches no tenant ID, including the
+  single-tenant `default` org, whose ID is a UUID, so after the upgrade those
+  receivers are neither listed nor delivered to. Before upgrading, record each
+  receiver's `url`, `event_filter`, and `debounce` from `GET /v1/webhooks`, and
+  its secret from the store file, because the API returns the secret masked.
+  After upgrading, register each receiver again with `POST /v1/webhooks`,
+  passing the recorded `secret`. Removing the old file before the restart
+  discards the stale rows. A deployment without `PODIUM_WEBHOOK_STORE_PATH`
+  keeps receivers in memory and is unaffected beyond the usual re-registration
+  after a restart. This is a backward-incompatible change and lands in a MINOR
+  bump. No flag, environment variable, or configuration key restores the former
+  keying.
 
 - **SDK `materialize()` rejects a harness other than `none`** (§2.2, §7.6):
   `podium-py` and `podium-ts` write only the canonical layout, and

@@ -524,7 +524,7 @@ func extWebhookHarness(t *testing.T, eventFilter ...string) (*server.Server, sto
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	srv := server.New(core.New(st, "default", nil), server.WithWebhooks(worker), server.WithTenant("default"))
+	srv := server.New(core.New(st, "default", nil), server.WithWebhooks(worker))
 	return srv, st, bodies
 }
 

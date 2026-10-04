@@ -41,7 +41,7 @@ func newServerWithReceiver(t *testing.T) (*Server, <-chan []byte) {
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	srv := New(core.New(st, "default", nil), WithWebhooks(worker), WithTenant("default"))
+	srv := New(core.New(st, "default", nil), WithWebhooks(worker))
 	return srv, bodies
 }
 

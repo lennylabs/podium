@@ -89,10 +89,10 @@ type Server struct {
 	// scim is the §6.3.1 SCIM 2.0 receiver. When set, the registry
 	// mounts /scim/v2/ to accept user/group push from an IdP.
 	scim *scim.Handler
-	// tenant is the tenant identifier used for outbound webhook
-	// receiver lookup. Single-tenant deployments leave this as
-	// "default"; multi-tenant deployments resolve it per-request
-	// once tenant routing is wired.
+	// tenant is the key the §4.7.8 quota limiter charges search and
+	// materialize calls to. Webhook receivers do not read it: receiver CRUD
+	// keys on the request's routed tenant and delivery on the event's scope
+	// tenant (§7.3.2).
 	tenant string
 	// quota is the §4.7.8 rate limiter. When non-nil, search /
 	// load_artifact handlers consult it before doing real work.
@@ -264,10 +264,7 @@ func WithWebhooks(w *webhook.Worker) Option {
 	return func(s *Server) { s.webhooks = w }
 }
 
-// WithTenant sets the tenant identifier used for outbound webhook
-// receiver lookup. Single-tenant deployments leave this at the
-// default ("default"); multi-tenant deployments resolve it per
-// request.
+// WithTenant sets the key the §4.7.8 quota limiter charges.
 func WithTenant(t string) Option {
 	return func(s *Server) { s.tenant = t }
 }

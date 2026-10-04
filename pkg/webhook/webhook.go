@@ -168,9 +168,11 @@ func (w *Worker) checkRedirect() func(*http.Request, []*http.Request) error {
 	return NoRedirect
 }
 
-// Deliver fans the event out to every matching receiver in tenantID.
-// Returns once every windowless receiver has either acknowledged (2xx) or
-// exhausted its retry budget; failures don't abort the fan-out.
+// Deliver fans the event out to every matching receiver of tenantID. An
+// empty tenantID reaches no receiver, and Deliver returns nil without
+// reading the store (§7.3.2). Otherwise Deliver returns once every
+// windowless receiver has either acknowledged (2xx) or exhausted its retry
+// budget; failures don't abort the fan-out.
 //
 // Deliver routes each matching, non-disabled receiver by its Debounce.
 // A receiver with a zero Debounce takes the immediate single-event path:
@@ -188,6 +190,12 @@ func (w *Worker) checkRedirect() func(*http.Request, []*http.Request) error {
 // per-receiver failure-counter update is serialized so two events
 // firing close together never lose an increment.
 func (w *Worker) Deliver(ctx context.Context, tenantID, eventType, traceID string, actor, body map[string]any) error {
+	// Spec: §7.3.2 — an event published with no tenant reaches no receiver.
+	// The guard sits in the fan-out entry point so it holds for every Store,
+	// including a FileStore that loaded a hand-written row with no tenant.
+	if tenantID == "" {
+		return nil
+	}
 	receivers, err := w.Store.List(ctx, tenantID)
 	if err != nil {
 		return fmt.Errorf("webhook.Deliver: list: %w", err)
