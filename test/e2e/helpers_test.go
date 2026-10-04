@@ -104,6 +104,16 @@ func mergeEnv(extra ...string) []string {
 		if strings.HasPrefix(kv, "PODIUM_BIND=") {
 			continue
 		}
+		// Do not inherit the §4.7.9 signing variables. A developer shell that
+		// exports PODIUM_SIGNATURE_VERIFY_KEY or PODIUM_SIGN_KEY_PATH would
+		// otherwise select or replace the verification key of every
+		// server-source sync and every booted server. A test that needs one
+		// passes it explicitly in `extra`, as srvSyncEnv does.
+		if strings.HasPrefix(kv, "PODIUM_SIGNATURE_VERIFY_KEY=") ||
+			strings.HasPrefix(kv, "PODIUM_SIGN_KEY_PATH=") ||
+			strings.HasPrefix(kv, "PODIUM_VERIFY_SIGNATURES=") {
+			continue
+		}
 		out = append(out, kv)
 	}
 	// Suppress the login browser auto-open for every CLI subprocess unless the
@@ -467,6 +477,19 @@ func startServerUnsigned(t testing.TB, registry string) *serverProc {
 	return startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_SIGN=none"}, args...)
 }
 
+// srvSyncEnv returns the environment a server-source podium sync against srv
+// needs to verify its delivery signatures (§4.7.9, §7.5): PODIUM_SIGN_KEY_PATH
+// names the key file the standalone server wrote under its own HOME, which
+// differs from the isolated HOME runBin gives each CLI subprocess. The other
+// signing variables are pinned empty so the default always policy applies.
+func srvSyncEnv(srv *serverProc) []string {
+	return []string{
+		"PODIUM_SIGN_KEY_PATH=" + filepath.Join(srv.Home, ".podium", "standalone", "registry-signing.key"),
+		"PODIUM_SIGNATURE_VERIFY_KEY=",
+		"PODIUM_VERIFY_SIGNATURES=",
+	}
+}
+
 // stopProc asks the process to stop, then force-kills if it lingers.
 // reapOnExit waits for cmd in the background and returns a channel that is
 // closed once the process has exited. cmd must already be started. stopProc
@@ -521,8 +544,9 @@ func (w *watchProc) log() string {
 
 // startWatch launches `podium sync --watch` in the background. The caller
 // polls the target for materialized files; stop() sends SIGINT and returns
-// the exit code. t.Cleanup force-kills if the test forgets to stop it.
-func startWatch(t testing.TB, registry, target, harness string) *watchProc {
+// the exit code. t.Cleanup force-kills if the test forgets to stop it. env is
+// appended to the subprocess environment.
+func startWatch(t testing.TB, registry, target, harness string, env ...string) *watchProc {
 	t.Helper()
 	logf, err := os.CreateTemp(t.TempDir(), "watch-*.log")
 	if err != nil {
@@ -530,7 +554,12 @@ func startWatch(t testing.TB, registry, target, harness string) *watchProc {
 	}
 	cmd := exec.Command(cmdharness.Bin(t, "podium"),
 		"sync", "--registry", registry, "--target", target, "--harness", harness, "--watch")
-	cmd.Env = mergeEnv("PODIUM_NO_AUTOSTANDALONE=1")
+	// Run in an isolated HOME, as runBin does, so §7.5.2 workspace discovery
+	// does not climb from the package directory into the developer's
+	// ~/.podium and read its defaults (verify_signatures among them).
+	home := cmdharness.IsolatedHome(t)
+	cmd.Dir = home
+	cmd.Env = mergeEnv(withIsolatedHome(append([]string{"PODIUM_NO_AUTOSTANDALONE=1"}, env...), home)...)
 	cmd.Stdin = bytes.NewReader(nil)
 	cmd.Stdout = logf
 	cmd.Stderr = logf

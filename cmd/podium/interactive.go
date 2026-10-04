@@ -294,11 +294,18 @@ func appendUnique(list []string, s string) []string {
 // scripted input prints actionable guidance instead of blocking.
 func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun bool) int {
 	registryPath := resolveOverrideRegistry(registryFlag)
+	// One resolver serves both the view and the override, so the check
+	// resolves once, before the checklist (§7.5).
+	delivery := newSyncDeliveryCheck(workingDir())
 	view, err := sync.ResolveEffectiveView(sync.Options{
 		RegistryPath: registryPath,
 		Target:       target,
+		Delivery:     delivery,
 	})
 	if err != nil {
+		if reportDeliveryConfigError(err, "") {
+			return 2
+		}
 		fmt.Fprintf(os.Stderr, "override: resolve view: %v\n", err)
 		return 1
 	}
@@ -323,8 +330,12 @@ func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun
 		DryRun:       dryRun,
 		RegistryPath: registryPath,
 		AdapterID:    resolveOverrideHarness(harnessFlag, target),
+		Delivery:     delivery,
 	})
 	if err != nil {
+		if reportDeliveryConfigError(err, "") {
+			return 2
+		}
 		fmt.Fprintf(os.Stderr, "override failed: %v\n", err)
 		return 1
 	}

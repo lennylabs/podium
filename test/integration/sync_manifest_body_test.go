@@ -63,10 +63,10 @@ func TestServerSync_LargeMergedManifestMatchesFilesystemSync(t *testing.T) {
 	}
 
 	fsTarget, srvTarget := t.TempDir(), t.TempDir()
-	if _, err := sync.Run(sync.Options{RegistryPath: root, Target: fsTarget, AdapterID: "none"}); err != nil {
+	if _, err := sync.Run(sync.Options{Delivery: neverDelivery, RegistryPath: root, Target: fsTarget, AdapterID: "none"}); err != nil {
 		t.Fatalf("filesystem sync.Run: %v", err)
 	}
-	if _, err := sync.Run(sync.Options{RegistryPath: ts.URL, Target: srvTarget, AdapterID: "none"}); err != nil {
+	if _, err := sync.Run(sync.Options{Delivery: neverDelivery, RegistryPath: ts.URL, Target: srvTarget, AdapterID: "none"}); err != nil {
 		t.Fatalf("server sync.Run: %v", err)
 	}
 	fsTree, srvTree := materializedTree(t, fsTarget), materializedTree(t, srvTarget)
@@ -124,8 +124,8 @@ func TestServerSync_ManifestBodyDigestMismatchAbortsTheSync(t *testing.T) {
 	t.Cleanup(proxy.Close)
 
 	target := t.TempDir()
-	_, err := sync.Run(sync.Options{RegistryPath: proxy.URL, Target: target, AdapterID: "none"})
-	if err == nil || !strings.Contains(err.Error(), "load_artifact team/big: manifest body content hash mismatch") {
+	_, err := sync.Run(sync.Options{Delivery: neverDelivery, RegistryPath: proxy.URL, Target: target, AdapterID: "none"})
+	if err == nil || !strings.Contains(err.Error(), "load_artifact team/big: materialize.content_hash_mismatch: manifest body:") {
 		t.Fatalf("sync.Run err = %v, want the team/big manifest body mismatch", err)
 	}
 	if files := testharness.ReadTree(t, target); len(files) != 0 {
@@ -158,7 +158,7 @@ func TestSyncServerSource_OverlayExtendsChildAgreesWithIngest(t *testing.T) {
 	testharness.WriteTree(t, overlayDir, testharness.WriteTreeOption{Path: id + "/ARTIFACT.md", Content: string(authored)})
 
 	target := t.TempDir()
-	if _, err := sync.Run(sync.Options{RegistryPath: ts.URL, Target: target, AdapterID: "none", OverlayPath: overlayDir}); err != nil {
+	if _, err := sync.Run(sync.Options{Delivery: neverDelivery, RegistryPath: ts.URL, Target: target, AdapterID: "none", OverlayPath: overlayDir}); err != nil {
 		t.Fatalf("server sync.Run with overlay: %v", err)
 	}
 	lock, err := sync.ReadLock(target)
@@ -174,4 +174,47 @@ func TestSyncServerSource_OverlayExtendsChildAgreesWithIngest(t *testing.T) {
 		}
 	}
 	t.Fatalf("lock has no entry for %s", id)
+}
+
+// Spec: §4.7.10 — the body server-source sync derives from a fetched
+// manifest_body_url document reproduces the served delivery hash, for an LF
+// document and for a CRLF document, so the sync verifies and materializes the
+// same bytes a filesystem-source sync writes.
+func TestServerSync_DerivedManifestBodyReproducesTheServedHash(t *testing.T) {
+	t.Parallel()
+	crlfBody := strings.ReplaceAll(daBigBody, "\n", "\r\n")
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\nlayer_order:\n  - base\n  - top\n"},
+		testharness.WriteTreeOption{Path: "base/.layer-config", Content: "visibility:\n  public: true\n"},
+		testharness.WriteTreeOption{Path: "top/.layer-config", Content: "visibility:\n  public: true\n"},
+		testharness.WriteTreeOption{Path: "base/shared/note/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: note\n---\n\nnote\n"},
+		testharness.WriteTreeOption{Path: "top/team/lf/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: lf\n---\n\n" + daBigBody},
+		testharness.WriteTreeOption{Path: "top/team/crlf/ARTIFACT.md",
+			Content: "---\r\ntype: context\r\nversion: 1.0.0\r\ndescription: crlf\r\n---\r\n\r\n" + crlfBody},
+	)
+	ts := largeManifestServer(t, root)
+	for _, id := range []string{"team/lf", "team/crlf"} {
+		if registryManifestBodyURL(t, ts.URL, id) == nil {
+			t.Fatalf("%s was served inline; the fixture must exceed the cutoff", id)
+		}
+	}
+	fsTarget, srvTarget := t.TempDir(), t.TempDir()
+	if _, err := sync.Run(sync.Options{Delivery: neverDelivery, RegistryPath: root, Target: fsTarget, AdapterID: "none"}); err != nil {
+		t.Fatalf("filesystem sync.Run: %v", err)
+	}
+	if _, err := sync.Run(sync.Options{Delivery: neverDelivery, RegistryPath: ts.URL, Target: srvTarget, AdapterID: "none"}); err != nil {
+		t.Fatalf("server sync.Run: %v", err)
+	}
+	fsTree, srvTree := materializedTree(t, fsTarget), materializedTree(t, srvTarget)
+	for _, path := range []string{"team/lf/ARTIFACT.md", "team/crlf/ARTIFACT.md"} {
+		if srvTree[path] == "" || fsTree[path] != srvTree[path] {
+			t.Errorf("%s: filesystem %d bytes, server %d bytes; want equal and non-empty", path, len(fsTree[path]), len(srvTree[path]))
+		}
+	}
+	if !strings.Contains(srvTree["team/crlf/ARTIFACT.md"], "\r\n") {
+		t.Error("the server-source CRLF document lost its CRLF line endings")
+	}
 }

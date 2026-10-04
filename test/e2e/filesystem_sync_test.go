@@ -1377,7 +1377,7 @@ func TestFilesystemSync_BitIdenticalFilesystemVsServer(t *testing.T) {
 
 	srv := startServer(t, registry)
 	serverTarget := t.TempDir()
-	resSrv := runPodium(t, "", nil, "sync",
+	resSrv := runPodium(t, "", srvSyncEnv(srv), "sync",
 		"--registry", srv.BaseURL, "--target", serverTarget, "--harness", "none")
 	if resSrv.Exit != 0 {
 		t.Fatalf("server-source sync exit=%d\nstderr: %s", resSrv.Exit, resSrv.Stderr)
@@ -1420,7 +1420,7 @@ func TestSoloFS_ServerSourceURLMaterializes(t *testing.T) {
 	})
 	srv := startServer(t, registry)
 	target := t.TempDir()
-	res := runPodium(t, "", nil, "sync",
+	res := runPodium(t, "", srvSyncEnv(srv), "sync",
 		"--registry", srv.BaseURL, "--target", target, "--harness", "none")
 	if res.Exit != 0 {
 		t.Fatalf("server-source sync exit=%d\nstderr: %s", res.Exit, res.Stderr)

@@ -64,6 +64,7 @@ func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 			// Filesystem-source sync.
 			fsTarget := t.TempDir()
 			fsRes, err := sync.Run(sync.Options{
+				Delivery:     neverDelivery,
 				RegistryPath: dir,
 				Target:       fsTarget,
 				AdapterID:    adapterID,
@@ -84,6 +85,7 @@ func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 
 			srvTarget := t.TempDir()
 			srvRes, err := sync.Run(sync.Options{
+				Delivery:     neverDelivery,
 				RegistryPath: ts.URL,
 				Target:       srvTarget,
 				AdapterID:    adapterID,
@@ -153,6 +155,7 @@ func TestSyncEquivalence_SharedMergeTargetsAreByteIdentical(t *testing.T) {
 
 			fsTarget := t.TempDir()
 			fsRes, err := sync.Run(sync.Options{
+				Delivery:     neverDelivery,
 				RegistryPath: dir,
 				Target:       fsTarget,
 				AdapterID:    adapterID,
@@ -170,6 +173,7 @@ func TestSyncEquivalence_SharedMergeTargetsAreByteIdentical(t *testing.T) {
 
 			srvTarget := t.TempDir()
 			if _, err := sync.Run(sync.Options{
+				Delivery:     neverDelivery,
 				RegistryPath: ts.URL,
 				Target:       srvTarget,
 				AdapterID:    adapterID,
@@ -212,6 +216,7 @@ func TestSyncEquivalence_SharedMergeTargetsAreByteIdentical(t *testing.T) {
 					registryPath = ts.URL
 				}
 				res, err := sync.Run(sync.Options{
+					Delivery:     neverDelivery,
 					RegistryPath: registryPath,
 					Target:       target,
 					AdapterID:    adapterID,
@@ -286,6 +291,7 @@ func TestSyncEquivalence_LayerCollisionIsByteIdentical(t *testing.T) {
 
 			fsTarget := t.TempDir()
 			fsRes, err := sync.Run(sync.Options{
+				Delivery:     neverDelivery,
 				RegistryPath: dir,
 				Target:       fsTarget,
 				AdapterID:    adapterID,
@@ -303,6 +309,7 @@ func TestSyncEquivalence_LayerCollisionIsByteIdentical(t *testing.T) {
 
 			srvTarget := t.TempDir()
 			srvRes, err := sync.Run(sync.Options{
+				Delivery:     neverDelivery,
 				RegistryPath: ts.URL,
 				Target:       srvTarget,
 				AdapterID:    adapterID,
@@ -460,6 +467,7 @@ func TestSyncServerSource_WorkspaceOverlayWins(t *testing.T) {
 
 	target := t.TempDir()
 	if _, err := sync.Run(sync.Options{
+		Delivery:     neverDelivery,
 		RegistryPath: ts.URL,
 		Target:       target,
 		AdapterID:    "none",

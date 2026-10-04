@@ -7,10 +7,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/version"
 )
 
@@ -28,14 +30,49 @@ type stubArtifact struct {
 	// in the /v1/load_artifact response, so a test can assert the lock pins the
 	// registry's value rather than a locally recomputed digest.
 	contentHash string
+	// manifestURL, when set, moves the manifest document (frontmatter, or
+	// skill_raw for a skill) behind a manifest_body_url link served from
+	// /blob after the response is sealed, as the registry does above the
+	// inline cutoff.
+	manifestURL bool
+	// blobOverride, when set for a path, is served from /blob in place of the
+	// sealed bytes, so a test can tamper a fetched body.
+	blobOverride map[string]string
+	// mutate, when set, alters the sealed response before it is served.
+	mutate func(resp map[string]any)
+	// raw, when set, returns the exact body served in place of the JSON
+	// encoding of the sealed response, so a test can serve a body no map
+	// encodes, such as a repeated member name.
+	raw func(resp map[string]any) string
 }
 
 // newStubRegistry serves the §7.5 server-source endpoints podium sync reads:
 // GET /v1/sync/manifest (the effective view) and GET /v1/load_artifact
 // (per-artifact manifest + resources). Large resources are served from a
-// /blob endpoint via presigned-style URLs.
+// /blob endpoint via presigned-style URLs. Every load_artifact response
+// carries a version.DeliveryHash-correct delivery_hash and no signature.
 func newStubRegistry(t *testing.T, arts map[string]stubArtifact) *httptest.Server {
+	return newSignedStubRegistry(t, arts, nil)
+}
+
+// newSignedStubRegistry is newStubRegistry with each response's delivery_hash
+// signed by signer when it is non-nil.
+func newSignedStubRegistry(t *testing.T, arts map[string]stubArtifact, signer *deliverySigner) *httptest.Server {
+	srv, _ := newCountedStubRegistry(t, arts, signer)
+	return srv
+}
+
+// stubCounts records the requests a stub registry received.
+type stubCounts struct {
+	all  atomic.Int64
+	blob atomic.Int64
+}
+
+// newCountedStubRegistry is newSignedStubRegistry that also counts every
+// request and every object-store (/blob) request.
+func newCountedStubRegistry(t *testing.T, arts map[string]stubArtifact, signer *deliverySigner) (*httptest.Server, *stubCounts) {
 	t.Helper()
+	counts := &stubCounts{}
 	mux := http.NewServeMux()
 	var srv *httptest.Server
 
@@ -63,46 +100,108 @@ func newStubRegistry(t *testing.T, arts map[string]stubArtifact) *httptest.Serve
 			writeJSONTest(w, map[string]string{"code": "registry.not_found", "message": id})
 			return
 		}
-		type link struct {
-			URL string `json:"presigned_url"`
-		}
-		resp := map[string]any{
-			"id":            id,
-			"type":          a.typ,
-			"layer":         a.layer,
-			"manifest_body": a.manifestBody,
-			"frontmatter":   a.frontmatter,
-		}
-		if a.contentHash != "" {
-			resp["content_hash"] = a.contentHash
-		}
-		// spec: §4.3.4 / §11 — the registry delivers a skill's verbatim
-		// SKILL.md so the consumer materializes it byte-for-byte.
-		if a.skillRaw != "" {
-			resp["skill_raw"] = a.skillRaw
-		}
-		if len(a.resources) > 0 {
-			resp["resources"] = a.resources
-			resp["resources_base64"] = a.resourcesB64
-		}
-		if len(a.largeResource) > 0 {
-			large := map[string]link{}
-			for path := range a.largeResource {
-				large[path] = link{URL: srv.URL + "/blob?id=" + id + "&path=" + path}
-			}
-			resp["large_resources"] = large
+		resp := stubLoadResponse(t, srv.URL, id, a, signer)
+		if a.raw != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(a.raw(resp)))
+			return
 		}
 		writeJSONTest(w, resp)
 	})
 
 	mux.HandleFunc("/blob", func(w http.ResponseWriter, r *http.Request) {
+		counts.blob.Add(1)
 		a := arts[r.URL.Query().Get("id")]
-		_, _ = w.Write([]byte(a.largeResource[r.URL.Query().Get("path")]))
+		path := r.URL.Query().Get("path")
+		if body, ok := a.blobOverride[path]; ok {
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		if path == stubManifestPath {
+			_, _ = w.Write([]byte(stubManifestDocument(a)))
+			return
+		}
+		_, _ = w.Write([]byte(a.largeResource[path]))
 	})
 
-	srv = httptest.NewServer(mux)
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		counts.all.Add(1)
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(srv.Close)
-	return srv
+	return srv, counts
+}
+
+// stubManifestPath is the /blob path a stub serves the manifest document at.
+const stubManifestPath = "@manifest"
+
+// stubManifestDocument is the manifest document a stub artifact delivers:
+// skill_raw for a skill, frontmatter otherwise.
+func stubManifestDocument(a stubArtifact) string {
+	if a.typ == "skill" {
+		return a.skillRaw
+	}
+	return a.frontmatter
+}
+
+// stubLoadResponse builds and seals the load_artifact response of one stub
+// artifact.
+func stubLoadResponse(t *testing.T, base, id string, a stubArtifact, signer *deliverySigner) map[string]any {
+	t.Helper()
+	blob := func(path string) string { return base + "/blob?id=" + id + "&path=" + path }
+	resp := map[string]any{
+		"id":                id,
+		"version":           "1.0.0",
+		"type":              a.typ,
+		"layer":             a.layer,
+		"manifest_body":     a.manifestBody,
+		"frontmatter":       a.frontmatter,
+		"artifact_revision": "2025-01-01T00:00:00.000000Z",
+	}
+	if a.contentHash != "" {
+		resp["content_hash"] = a.contentHash
+	}
+	// spec: §4.3.4 / §11 — the registry delivers a skill's verbatim
+	// SKILL.md so the consumer materializes it byte-for-byte.
+	if a.skillRaw != "" {
+		resp["skill_raw"] = a.skillRaw
+	}
+	if len(a.resources) > 0 {
+		resp["resources"] = a.resources
+		resp["resources_base64"] = a.resourcesB64
+	}
+	if len(a.largeResource) > 0 {
+		large := map[string]any{}
+		for path, body := range a.largeResource {
+			large[path] = map[string]any{
+				"presigned_url": blob(path),
+				"content_hash":  version.ResourceDigest([]byte(body)),
+			}
+		}
+		resp["large_resources"] = large
+	}
+	if a.manifestURL {
+		body, err := manifest.ManifestBodyOf([]byte(stubManifestDocument(a)))
+		if err != nil {
+			t.Fatalf("ManifestBodyOf: %v", err)
+		}
+		resp["manifest_body"] = body
+	}
+	seal(t, resp, signer)
+	if a.manifestURL {
+		doc := stubManifestDocument(a)
+		delete(resp, "frontmatter")
+		delete(resp, "skill_raw")
+		delete(resp, "manifest_body")
+		resp["manifest_body_url"] = map[string]any{
+			"presigned_url": blob(stubManifestPath),
+			"content_hash":  version.ResourceDigest([]byte(doc)),
+		}
+	}
+	if a.mutate != nil {
+		a.mutate(resp)
+	}
+	return resp
 }
 
 func writeJSONTest(w http.ResponseWriter, v any) {
@@ -126,6 +225,7 @@ func TestRun_ServerSource_MaterializesEffectiveView(t *testing.T) {
 	target := t.TempDir()
 	res, err := Run(Options{
 		RegistryPath: srv.URL,
+		Delivery:     neverDelivery,
 		Target:       target,
 		AdapterID:    "none",
 		HTTPClient:   srv.Client(),
@@ -164,7 +264,7 @@ func TestRun_ServerSource_SkillWritesSkillMD(t *testing.T) {
 		},
 	})
 	target := t.TempDir()
-	if _, err := Run(Options{RegistryPath: srv.URL, Target: target, AdapterID: "none", HTTPClient: srv.Client()}); err != nil {
+	if _, err := Run(Options{RegistryPath: srv.URL, Delivery: neverDelivery, Target: target, AdapterID: "none", HTTPClient: srv.Client()}); err != nil {
 		t.Fatalf("server-source Run: %v", err)
 	}
 	root := filepath.Join(target, "eng", "lint")
@@ -199,7 +299,7 @@ func TestRun_ServerSourceWithoutContentHashHashesTheServedFrontmatter(t *testing
 		},
 	})
 	target := t.TempDir()
-	if _, err := Run(Options{RegistryPath: srv.URL, Target: target, AdapterID: "none", HTTPClient: srv.Client()}); err != nil {
+	if _, err := Run(Options{RegistryPath: srv.URL, Delivery: neverDelivery, Target: target, AdapterID: "none", HTTPClient: srv.Client()}); err != nil {
 		t.Fatalf("server-source Run: %v", err)
 	}
 	lock, err := ReadLock(target)
@@ -234,7 +334,7 @@ func TestRun_ServerSource_FetchesLargeResources(t *testing.T) {
 		},
 	})
 	target := t.TempDir()
-	if _, err := Run(Options{RegistryPath: srv.URL, Target: target, AdapterID: "none", HTTPClient: srv.Client()}); err != nil {
+	if _, err := Run(Options{RegistryPath: srv.URL, Delivery: neverDelivery, Target: target, AdapterID: "none", HTTPClient: srv.Client()}); err != nil {
 		t.Fatalf("server-source Run: %v", err)
 	}
 	if got := readFileT(t, filepath.Join(target, "team", "glossary", "data", "big.bin")); got != "BIGDATA" {
@@ -251,7 +351,7 @@ func TestRun_ServerSource_PropagatesError(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"code": "registry.unavailable", "message": "down"})
 	}))
 	t.Cleanup(srv.Close)
-	_, err := Run(Options{RegistryPath: srv.URL, Target: t.TempDir(), AdapterID: "none", HTTPClient: srv.Client()})
+	_, err := Run(Options{RegistryPath: srv.URL, Delivery: neverDelivery, Target: t.TempDir(), AdapterID: "none", HTTPClient: srv.Client()})
 	if err == nil {
 		t.Fatal("expected an error from an unavailable server source")
 	}
@@ -270,6 +370,7 @@ func TestRun_ServerSource_ScopeIncludeNarrows(t *testing.T) {
 	target := t.TempDir()
 	res, err := Run(Options{
 		RegistryPath: srv.URL,
+		Delivery:     neverDelivery,
 		Target:       target,
 		AdapterID:    "none",
 		HTTPClient:   srv.Client(),
@@ -316,10 +417,10 @@ func TestWatch_ServerSource_RerunsOnEvent(t *testing.T) {
 		}})
 	})
 	mux.HandleFunc("/v1/load_artifact", func(w http.ResponseWriter, r *http.Request) {
-		writeJSONTest(w, map[string]any{
+		writeJSONTest(w, testharness.SealDelivery(map[string]any{
 			"id": "team/glossary", "type": "context", "layer": "local",
 			"manifest_body": "body", "frontmatter": contextArtifactSrc,
-		})
+		}))
 	})
 	mux.HandleFunc("/v1/events", func(w http.ResponseWriter, r *http.Request) {
 		f, ok := w.(http.Flusher)
@@ -339,7 +440,7 @@ func TestWatch_ServerSource_RerunsOnEvent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	ch, err := Watch(ctx, WatchOptions{
-		Sync:     Options{RegistryPath: srv.URL, Target: t.TempDir(), AdapterID: "none", HTTPClient: srv.Client()},
+		Sync:     Options{RegistryPath: srv.URL, Delivery: neverDelivery, Target: t.TempDir(), AdapterID: "none", HTTPClient: srv.Client()},
 		Debounce: 10 * time.Millisecond,
 	})
 	if err != nil {

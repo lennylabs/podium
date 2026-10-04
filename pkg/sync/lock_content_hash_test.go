@@ -123,7 +123,7 @@ func TestRun_ServerSourceLockPinsRegistryContentHash(t *testing.T) {
 		},
 	})
 	target := t.TempDir()
-	res, err := Run(Options{RegistryPath: srv.URL, Target: target, AdapterID: "none", HTTPClient: srv.Client()})
+	res, err := Run(Options{RegistryPath: srv.URL, Delivery: neverDelivery, Target: target, AdapterID: "none", HTTPClient: srv.Client()})
 	if err != nil {
 		t.Fatalf("server-source Run: %v", err)
 	}

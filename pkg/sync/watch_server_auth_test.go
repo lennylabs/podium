@@ -52,6 +52,7 @@ func TestWatch_ServerSource_SubscriptionCarriesBearerToken(t *testing.T) {
 	events, err := Watch(ctx, WatchOptions{
 		Sync: Options{
 			RegistryPath: srv.URL,
+			Delivery:     neverDelivery,
 			Target:       t.TempDir(),
 			AdapterID:    "none",
 			Token:        "runtime-issued-jwt",

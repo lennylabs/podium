@@ -176,7 +176,7 @@ func mlReingest(t *testing.T, srv *serverProc, layerID string) {
 // mlSyncServer runs a one-shot server-source sync, failing on a non-zero exit.
 func mlSyncServer(t *testing.T, srv *serverProc, target, harness string) {
 	t.Helper()
-	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
+	res := runPodium(t, "", append(srvSyncEnv(srv), "HOME="+t.TempDir()),
 		"sync", "--registry", srv.BaseURL, "--target", target, "--harness", harness)
 	if res.Exit != 0 {
 		t.Fatalf("server-source sync(%s) exit=%d stderr=%s", harness, res.Exit, res.Stderr)

@@ -110,6 +110,11 @@ type Options struct {
 	// server). It is a no-op for a filesystem source, which is read locally and
 	// is always reachable. An empty value behaves as always-revalidate.
 	CacheMode string
+	// Delivery resolves the §4.7.10 delivery check a server-source load
+	// applies to every record. It is called once, at the start of the
+	// server-source branch of the effective-view resolution, and never for a
+	// filesystem source. A server-source load with a nil Delivery fails closed.
+	Delivery DeliveryCheckFunc
 }
 
 // materialRecord is a source-neutral artifact ready for the HarnessAdapter.
@@ -484,7 +489,15 @@ func resolveRecords(opts Options) ([]materialRecord, []layer.Collision, error) {
 	var dropped []layer.Collision
 	var err error
 	if isServerSource(opts.RegistryPath) {
-		records, err = fetchServerRecords(context.Background(), opts)
+		// Spec: §4.7.10, §7.5 — this is the one resolution point of the
+		// delivery check. It runs before the first registry request, so a
+		// resolution refusal sends nothing, and it runs whenever a server
+		// source is loaded, including an effective view that lists no artifact.
+		check, cerr := deliveryCheck(opts.Delivery)
+		if cerr != nil {
+			return nil, nil, cerr
+		}
+		records, err = fetchServerRecords(context.Background(), opts, check)
 	} else {
 		records, dropped, err = filesystemRecords(opts)
 	}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -33,6 +34,14 @@ func runServerWatch(ctx context.Context, opts WatchOptions, events chan<- WatchE
 	// Initial sync materializes the current effective view.
 	res, err := Run(opts.Sync)
 	emit(res, err)
+	// Spec: §7.5 — a delivery check that cannot be resolved stops the watcher
+	// before it subscribes. The resolution is memoized, so no later cycle
+	// could succeed, and returning here rather than in the caller keeps the
+	// buffered events channel from racing the subscription.
+	var cfgErr *DeliveryConfigError
+	if errors.As(err, &cfgErr) {
+		return
+	}
 
 	trigger := make(chan struct{}, 1)
 	go streamServerEvents(ctx, opts.Sync.RegistryPath, opts.Sync.HTTPClient, opts.Sync.Token, trigger)

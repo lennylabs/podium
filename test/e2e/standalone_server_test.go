@@ -642,7 +642,7 @@ func TestStandaloneServer_PodiumSyncServerRegistry(t *testing.T) {
 	})
 	srv := startServer(t, reg)
 	tgt := t.TempDir()
-	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
+	res := runPodium(t, "", append(srvSyncEnv(srv), "HOME="+t.TempDir()),
 		"sync", "--registry", srv.BaseURL, "--target", tgt, "--harness", "claude-code")
 	if res.Exit != 0 {
 		t.Fatalf("server-source sync exit=%d stderr=%s", res.Exit, res.Stderr)

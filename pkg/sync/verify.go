@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	stdsync "sync"
@@ -159,4 +160,28 @@ func NewDeliveryCheckFunc(startDir, home string, getenv func(string) string, war
 		})
 		return check, err
 	}
+}
+
+// errNoDeliveryCheck is the fail-closed refusal of a server-source load whose
+// caller supplied no DeliveryCheckFunc.
+var errNoDeliveryCheck = errors.New("sync: server-source load has no delivery check configured")
+
+// deliveryCheck resolves f, refusing a nil f so a caller that omits the
+// hand-off cannot load an unverified record. f's error is returned unchanged.
+// A nil check with no error is refused like a nil f, because no record can be
+// verified against it.
+//
+// Spec: §4.7.10, §7.5
+func deliveryCheck(f DeliveryCheckFunc) (*sign.DeliveryCheck, error) {
+	if f == nil {
+		return nil, errNoDeliveryCheck
+	}
+	check, err := f()
+	if err != nil {
+		return nil, err
+	}
+	if check == nil {
+		return nil, errNoDeliveryCheck
+	}
+	return check, nil
 }

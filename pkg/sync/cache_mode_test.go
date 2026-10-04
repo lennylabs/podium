@@ -45,6 +45,7 @@ func TestRun_OfflineOnlyServerSourceMisses(t *testing.T) {
 	t.Parallel()
 	_, err := Run(Options{
 		RegistryPath: "http://127.0.0.1:1", // unbound port → connect refused if dialed
+		Delivery:     neverDelivery,
 		Target:       t.TempDir(),
 		AdapterID:    "none",
 		CacheMode:    "offline-only",
@@ -93,7 +94,7 @@ func TestRun_OfflineFirstServerUnreachableIsNoop(t *testing.T) {
 	})
 	target := t.TempDir()
 	// First sync against the live server populates the target + lock.
-	if _, err := Run(Options{RegistryPath: srv.URL, Target: target, AdapterID: "none", HTTPClient: srv.Client(), CacheMode: "always-revalidate"}); err != nil {
+	if _, err := Run(Options{RegistryPath: srv.URL, Delivery: neverDelivery, Target: target, AdapterID: "none", HTTPClient: srv.Client(), CacheMode: "always-revalidate"}); err != nil {
 		t.Fatalf("warm sync: %v", err)
 	}
 	artifactPath := filepath.Join(target, "team", "glossary", "ARTIFACT.md")
@@ -105,6 +106,7 @@ func TestRun_OfflineFirstServerUnreachableIsNoop(t *testing.T) {
 	// offline-first mode: no error, existing output untouched, Offline set.
 	res, err := Run(Options{
 		RegistryPath: "http://127.0.0.1:1",
+		Delivery:     neverDelivery,
 		Target:       target,
 		AdapterID:    "none",
 		HTTPClient:   &http.Client{},
@@ -143,6 +145,7 @@ func TestRun_AlwaysRevalidateServerUnreachable(t *testing.T) {
 			t.Parallel()
 			_, err := Run(Options{
 				RegistryPath: "http://127.0.0.1:1", // unbound port → connect refused
+				Delivery:     neverDelivery,
 				Target:       t.TempDir(),
 				AdapterID:    "none",
 				CacheMode:    mode.value,
@@ -167,6 +170,7 @@ func TestRun_AlwaysRevalidateStructuredErrorNotUnreachable(t *testing.T) {
 	srv := newErrorRegistry(t, http.StatusInternalServerError, `{"code":"registry.unavailable","message":"boom"}`)
 	_, err := Run(Options{
 		RegistryPath: srv.URL,
+		Delivery:     neverDelivery,
 		Target:       t.TempDir(),
 		AdapterID:    "none",
 		HTTPClient:   srv.Client(),
@@ -207,6 +211,7 @@ func TestRun_OfflineFirstStructuredErrorStillFails(t *testing.T) {
 	srv := newErrorRegistry(t, http.StatusInternalServerError, `{"code":"registry.unavailable","message":"boom"}`)
 	_, err := Run(Options{
 		RegistryPath: srv.URL,
+		Delivery:     neverDelivery,
 		Target:       t.TempDir(),
 		AdapterID:    "none",
 		HTTPClient:   srv.Client(),
