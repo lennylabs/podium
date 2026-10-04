@@ -295,6 +295,8 @@ class BatchResult:
     # batch entry the client recomputes delivery_hash from the served record,
     # compares it with this value, and applies its §4.7.9 policy to
     # delivery_signature; an entry that fails becomes an error result (§7.6.2).
+    # A §6.4 workspace-overlay load is exempt from the check and leaves both
+    # fields empty, because no registry served the record.
     delivery_hash: str = ""
     delivery_signature: str = ""
     error: "RegistryError | None" = None
