@@ -17,7 +17,9 @@ import (
 	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
-func newBatchFixture(t *testing.T) (*httptest.Server, store.Store) {
+// newBatchFixture boots a server holding team/a and team/b in one public
+// layer. opts are passed to server.New, so a test can install a quota limiter.
+func newBatchFixture(t *testing.T, opts ...server.Option) (*httptest.Server, store.Store) {
 	t.Helper()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
@@ -36,7 +38,7 @@ func newBatchFixture(t *testing.T) (*httptest.Server, store.Store) {
 	reg := core.New(st, "default", []layer.Layer{
 		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
 	})
-	srv := server.New(reg)
+	srv := server.New(reg, opts...)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, st

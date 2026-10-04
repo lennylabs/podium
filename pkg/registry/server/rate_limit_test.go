@@ -334,6 +334,7 @@ func TestAdmitPrefix(t *testing.T) {
 		{"all admitted", 3, []bool{true, true, true}, 3, 3},
 		{"first refused", 3, []bool{false, true, true}, 0, 1},
 		{"middle refused", 4, []bool{true, false, true, true}, 1, 2},
+		{"refused then admitted", 3, []bool{true, false, true}, 1, 2},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
