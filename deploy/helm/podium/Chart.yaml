@@ -11,8 +11,8 @@ description: |
   pilots and single-node installations, prefer the standalone single
   binary deployment described in §13.10.
 type: application
-version: 0.5.0
-appVersion: 0.5.0
+version: 0.5.1
+appVersion: 0.5.1
 keywords:
   - ai-agents
   - skills
