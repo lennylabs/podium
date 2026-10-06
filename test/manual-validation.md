@@ -10510,8 +10510,13 @@ credentialed lane mints, and it writes every signature into a public log.
 **Prerequisites.**
 
 - An OIDC token the Sigstore staging Fulcio accepts, and the email or URI SAN
-  and issuer URL that token produces. When none is available, skip the
-  scenario and record the skip and the reason.
+  and issuer that Fulcio records in the certificate for that token. When none
+  is available, skip the scenario and record the skip and the reason.
+- The recorded issuer is not always the token's issuer. For a token from the
+  staging login provider at `https://oauth2.sigstage.dev/auth`, Fulcio records
+  the upstream identity provider, so a Google login yields
+  `https://accounts.google.com`. The provider's tokens expire about a minute
+  after login, so run step 2 immediately after obtaining one.
 - The staging `trusted_root.json` from the Sigstore staging TUF repository, and
   the staging Rekor v2 shard URL from the staging `signing_config`.
 - Built `podium` and `podium-mcp` binaries on `PATH`.
@@ -10528,7 +10533,7 @@ credentialed lane mints, and it writes every signature into a public log.
    export PODIUM_SIGSTORE_OIDC_TOKEN=<token>
    export PODIUM_SIGSTORE_TRUSTED_ROOT_FILE=<staging trusted_root.json>
    export PODIUM_SIGSTORE_CERT_IDENTITY=<expected SAN>
-   export PODIUM_SIGSTORE_CERT_OIDC_ISSUER=<expected issuer URL>
+   export PODIUM_SIGSTORE_CERT_OIDC_ISSUER=<issuer recorded in the certificate>
    H="sha256:$(printf 'podium s85' | shasum -a 256 | cut -d' ' -f1)"
    echo "$H"
    ```
