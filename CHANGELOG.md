@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-06
+
+### Fixed
+
+- **The Helm chart's default image is the image a release publishes**: the
+  chart defaulted to `ghcr.io/lennylabs/podium` at `appVersion` `0.0.0-dev`, an
+  image no release publishes, so an install that did not override `image` sat
+  in `ImagePullBackOff`. The chart now defaults to
+  `ghcr.io/lennylabs/podium-server`, its `version` and `appVersion` track the
+  release, and the release pipeline also tags the image with the bare version
+  (`X.Y.Z`) that `appVersion` names, alongside `vX.Y.Z` and `latest`. An install
+  that sets `image.repository` and `image.tag` explicitly is unaffected.
+
 ## [0.5.0] - 2026-10-06
 
 ### Added
@@ -1237,7 +1250,8 @@ Operators upgrading should note that a version already ingested keeps its unfold
 
 - Corrected the specification, the HTTP API reference, and the operator runbook where they offered `oauth-device-code` as a registry-process identity provider. It is client-side acquisition, the registry ships no request-time verifier for it, and a registry configured with it refuses startup with `config.identity_provider_unverified`. The `registry.yaml` example in §13 selects `oidc-jwt` and names `issuer` rather than `authorization_endpoint`, the read-only write set in §13.2.1 drops the claim that the registry issues tokens against a local session table, and the web-UI paragraph stops presenting the device-code flow as an authentication mode of a standard deployment.
 
-[Unreleased]: https://github.com/lennylabs/podium/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/lennylabs/podium/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/lennylabs/podium/releases/tag/v0.5.1
 [0.5.0]: https://github.com/lennylabs/podium/releases/tag/v0.5.0
 [0.4.0]: https://github.com/lennylabs/podium/releases/tag/v0.4.0
 

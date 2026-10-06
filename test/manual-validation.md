@@ -4881,9 +4881,10 @@ runs the chart.
 **Prerequisites.** `helm`, `kubectl`, `kind`, and a working Docker daemon. When
 any is absent, skip and record the skip.
 
-The chart's `appVersion` is `0.0.0-dev`, so the image it references is not
-published anywhere and has to be built locally and loaded into the cluster. That
-is a property of the development chart rather than a defect.
+The chart's default image is `ghcr.io/lennylabs/podium-server` at the chart's
+`appVersion`, which equals the release the tree is at. The scenario builds that
+image from the working tree under the same name and loads it into the cluster,
+so the install runs the code under test rather than a published image.
 
 **The stock defaults are a production topology, not a self-contained one.** A
 bare `helm install` with no overrides fails to render, naming
@@ -4907,10 +4908,11 @@ rather than trying to avoid them.
 
    ```bash
    cd "$REAL_HOME/projects/podium"
-   docker build -t ghcr.io/lennylabs/podium:0.0.0-dev .
+   APPV="$(awk '/^appVersion:/{print $2}' deploy/helm/podium/Chart.yaml)"
+   docker build -t "ghcr.io/lennylabs/podium-server:$APPV" .
    kind create cluster --name podium-s46
    kubectl wait --for=condition=Ready node --all --timeout=180s
-   kind load docker-image ghcr.io/lennylabs/podium:0.0.0-dev --name podium-s46
+   kind load docker-image "ghcr.io/lennylabs/podium-server:$APPV" --name podium-s46
    arch="$(docker version --format '{{.Server.Arch}}')"
    for image in pgsty/minio:RELEASE.2026-08-04T00-00-00Z pgsty/mc:RELEASE.2026-09-16T00-00-00Z \
        pgvector/pgvector:pg16; do
@@ -4924,11 +4926,12 @@ rather than trying to avoid them.
    **Expect.** The build succeeds, the node reports `Ready`, and `kind load
    docker-image` reports the Podium image loading onto the node. `kind load
    image-archive` prints nothing when it succeeds, so read the loads from
-   `crictl images`, which lists `ghcr.io/lennylabs/podium` at `0.0.0-dev`,
+   `crictl images`, which lists `ghcr.io/lennylabs/podium-server` at `$APPV`,
    `docker.io/pgsty/minio`, `docker.io/pgsty/mc`, and
    `docker.io/pgvector/pgvector` at their pinned tags. Skipping the load of the Podium
-   image leaves the pod in `ErrImagePull`, because `0.0.0-dev` resolves to
-   nothing in any registry. The loop loads the third-party images for the same
+   image makes the node pull the published image, which is a different build
+   from the tree under test, and fails with `ErrImagePull` when that image is
+   not public or not yet published. The loop loads the third-party images for the same
    reason S76 step 1 does: a pull from inside the kind node can be refused by
    Docker Hub for the pinned MinIO tags, which leaves `deployment/minio`
    unavailable in step 2.
@@ -5133,7 +5136,7 @@ rather than trying to avoid them.
 ```bash
 helm uninstall podium
 kind delete cluster --name podium-s46
-docker rmi ghcr.io/lennylabs/podium:0.0.0-dev
+docker rmi "ghcr.io/lennylabs/podium-server:$APPV"
 rm -rf "$WORK"
 ```
 

@@ -496,7 +496,7 @@ func TestChart_MigrationGuards(t *testing.T) {
 		with(append(zero, "--set", "migration.mode=dry-run", "--set", "image.repository=r", "--set", "image.tag=t",
 			"--set", "migration.previousImage=r:t")...),
 		"migration.previousImage", "r:t")
-	appImage := "ghcr.io/lennylabs/podium:" + chartAppVersion(t)
+	appImage := "ghcr.io/lennylabs/podium-server:" + chartAppVersion(t)
 	mustFail(t, "a migration on the AppVersion default image",
 		with(append(zero, "--set", "migration.mode=dry-run", "--set", "migration.previousImage="+appImage)...),
 		"migration.previousImage", appImage)
