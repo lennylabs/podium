@@ -2,7 +2,10 @@
 # Override per spec §13.12 (Backend Configuration Reference).
 
 image:
-  repository: ghcr.io/lennylabs/podium
+  # The image each release publishes. The release pipeline tags it both
+  # vX.Y.Z and X.Y.Z, and the empty tag selects .Chart.AppVersion (X.Y.Z),
+  # which tracks the release this chart ships with.
+  repository: ghcr.io/lennylabs/podium-server
   tag: ""  # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 
