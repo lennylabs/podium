@@ -152,9 +152,11 @@ export PODIUM_SIGSTORE_TSA_URL=https://timestamp.sigstage.dev/api/v1/timestamp
 export PODIUM_SIGSTORE_OIDC_TOKEN=$(gcloud auth print-identity-token)   # or any IdP the staging issuer accepts
 export PODIUM_SIGSTORE_TRUSTED_ROOT_FILE=/path/to/sigstage-trusted_root.json
 export PODIUM_SIGSTORE_CERT_IDENTITY=<the email or URI SAN the token's identity receives>
-export PODIUM_SIGSTORE_CERT_OIDC_ISSUER=<the issuer URL the token came from>
+export PODIUM_SIGSTORE_CERT_OIDC_ISSUER=<the issuer Fulcio records in the certificate>
 go test ./pkg/sign/... -count=1 -v -run TestSigstoreKeyless_LiveSmoke
 ```
+
+`PODIUM_SIGSTORE_CERT_OIDC_ISSUER` names the issuer Fulcio writes into the certificate, which is not always the issuer of the token. The staging login provider at `https://oauth2.sigstage.dev/auth` federates upstream identity providers, and for a token obtained through it Fulcio records the upstream issuer: a Google login yields `https://accounts.google.com`. A token minted directly by an issuer Fulcio trusts, such as a GitHub Actions token, records that issuer. A value that names the login provider instead fails `Verify` with `OIDC issuer mismatch` and the issuer the certificate carries. The tokens the staging login provider issues expire about a minute after login, so sign immediately after obtaining one.
 
 The `-run` pattern must name the test exactly. A pattern that matches nothing (for example an outdated `TestSigstore_Live`) reports `PASS` while running zero tests, so the manual smoke would be skipped while appearing to succeed.
 

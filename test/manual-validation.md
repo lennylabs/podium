@@ -659,7 +659,9 @@ $REAL_HOME/projects/podium/test.env; set +a`.
 
 **Expected.**
 
-- The server log shows embeddings enabled and OpenAI calls during ingest.
+- The server log shows embeddings enabled with the startup line
+  `hybrid search: vector=sqlite-vec embedder=openai dim=1536`. The registry
+  logs no line per embedding request.
 - The paraphrased query returns the `reconcile` skill as the top result.
 - An `insufficient_quota` response from OpenAI is reported clearly by the server
   rather than silently degrading; treat that as a skip, not a pass.
@@ -1267,8 +1269,9 @@ ingest-time sensitivity ceiling.
   credentials.
 - The `high`-sensitivity `incident` is rejected at ingest by the public-mode
   sensitivity ceiling (§13.10). The startup log line in `$WORK/srv.log` for the
-  layer load reports `rejected=1`; the rejection carries the structured code
-  `ingest.public_mode_rejects_sensitive`. The artifact never enters the catalog,
+  layer load reports `rejected=1`. The registry records the rejection under the
+  structured code `ingest.public_mode_rejects_sensitive`, which the startup log
+  line does not print. The artifact never enters the catalog,
   so `artifact show incident` returns HTTP 404 with `registry.not_found`. Public
   mode does not filter sensitivity per caller at read time; the ingest ceiling is
   what keeps `incident` out.
@@ -2023,7 +2026,7 @@ caller's identity, and that `admin erase` redacts a subject's entries while the
 hash chain still verifies.
 
 **Covers.** Standalone deployment, injected-session-token identity, the audit
-log, `admin erase`, `admin retention`.
+log, and `admin erase`.
 
 **Steps.**
 
@@ -4291,8 +4294,8 @@ S50 step 1 creates `bob`, read her `sub` and her access token, and name that
 `sub` as the bootstrap admin:
 
 ```bash
-$KC create users -r master -s username=carol -s enabled=true -s email=carol@acme.com
-$KC set-password -r master --username carol --new-password carol
+KC create users -r master -s username=carol -s enabled=true -s email=carol@acme.com
+KC set-password -r master --username carol --new-password carol
 export CAROL_TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
   -d grant_type=password -d client_id=podium -d client_secret="$KC_SECRET" \
   -d username=carol -d password=carol \
@@ -4394,19 +4397,19 @@ misconfigured:
    here and step 5.
 
    ```bash
-   KC="docker exec kc-podium /opt/keycloak/bin/kcadm.sh"
-   $KC config credentials --server http://localhost:8080 --realm master --user admin --password admin
-   $KC create clients -r master \
+   KC() { docker exec kc-podium /opt/keycloak/bin/kcadm.sh "$@"; }
+   KC config credentials --server http://localhost:8080 --realm master --user admin --password admin
+   KC create clients -r master \
      -s clientId=podium -s enabled=true -s publicClient=false \
      -s directAccessGrantsEnabled=true -s standardFlowEnabled=true \
      -s 'redirectUris=["http://127.0.0.1:8153/v1/ui/auth/callback"]' \
      -s 'attributes."client.use.lightweight.access.token.enabled"=false' \
      -s 'attributes."access.token.lifespan"=1800'
-   CID=$($KC get clients -r master -q clientId=podium --fields id --format csv --noquotes)
-   $KC create clients/$CID/protocol-mappers/models -r master \
+   CID=$(KC get clients -r master -q clientId=podium --fields id --format csv --noquotes)
+   KC create clients/$CID/protocol-mappers/models -r master \
      -s name=podium-aud -s protocol=openid-connect -s protocolMapper=oidc-audience-mapper \
      -s 'config."included.client.audience"=podium' -s 'config."access.token.claim"=true'
-   export KC_SECRET="$($KC get clients/$CID/client-secret -r master --fields value --format csv --noquotes)"
+   export KC_SECRET="$(KC get clients/$CID/client-secret -r master --fields value --format csv --noquotes)"
    echo "client secret length: ${#KC_SECRET}"
    ```
 
@@ -4421,18 +4424,18 @@ misconfigured:
    the group-scoped layer is keyed on, and put the `admin` user in it.
 
    ```bash
-   $KC create client-scopes -r master -s name=groups -s protocol=openid-connect \
+   KC create client-scopes -r master -s name=groups -s protocol=openid-connect \
      -s 'attributes."include.in.token.scope"=true' || true
-   SCID=$($KC get client-scopes -r master --fields id,name --format csv --noquotes | grep ',groups$' | cut -d, -f1)
-   $KC create client-scopes/$SCID/protocol-mappers/models -r master \
+   SCID=$(KC get client-scopes -r master --fields id,name --format csv --noquotes | grep ',groups$' | cut -d, -f1)
+   KC create client-scopes/$SCID/protocol-mappers/models -r master \
      -s name=groups -s protocol=openid-connect -s protocolMapper=oidc-group-membership-mapper \
      -s 'config."claim.name"=groups' -s 'config."full.path"=false' \
      -s 'config."access.token.claim"=true' -s 'config."id.token.claim"=true' || true
-   $KC update clients/$CID/optional-client-scopes/$SCID -r master
-   $KC create groups -r master -s name=podium-comp
-   GROUP_ID=$($KC get groups -r master -q search=podium-comp --fields id --format csv --noquotes)
-   ADMIN_UID=$($KC get users -r master -q username=admin --fields id --format csv --noquotes)
-   $KC update users/$ADMIN_UID/groups/$GROUP_ID -r master \
+   KC update clients/$CID/optional-client-scopes/$SCID -r master
+   KC create groups -r master -s name=podium-comp
+   GROUP_ID=$(KC get groups -r master -q search=podium-comp --fields id --format csv --noquotes)
+   ADMIN_UID=$(KC get users -r master -q username=admin --fields id --format csv --noquotes)
+   KC update users/$ADMIN_UID/groups/$GROUP_ID -r master \
      -s realm=master -s userId=$ADMIN_UID -s groupId=$GROUP_ID -n
    ```
 
@@ -4450,7 +4453,7 @@ misconfigured:
    Give the realm `admin` user an email address.
 
    ```bash
-   $KC update users/$ADMIN_UID -r master -s email=alice@acme.com -s emailVerified=true
+   KC update users/$ADMIN_UID -r master -s email=alice@acme.com -s emailVerified=true
    ```
 
    **Expect.** The command reports no error. The account cluster in the web
@@ -4922,7 +4925,7 @@ rather than trying to avoid them.
    docker-image` reports the Podium image loading onto the node. `kind load
    image-archive` prints nothing when it succeeds, so read the loads from
    `crictl images`, which lists `ghcr.io/lennylabs/podium` at `0.0.0-dev`,
-   `docker.io/minio/minio`, `docker.io/minio/mc`, and
+   `docker.io/pgsty/minio`, `docker.io/pgsty/mc`, and
    `docker.io/pgvector/pgvector` at their pinned tags. Skipping the load of the Podium
    image leaves the pod in `ErrImagePull`, because `0.0.0-dev` resolves to
    nothing in any registry. The loop loads the third-party images for the same
@@ -5050,7 +5053,9 @@ rather than trying to avoid them.
      --set config.identityProvider.type="" \
      --set config.publicMode=true --set config.allowPublicBind=true
    kubectl rollout status deployment/podium-podium --timeout=180s
-   kubectl logs deployment/podium-podium | grep 'podium-server listening on '
+   kubectl logs "$(kubectl get pods -l app.kubernetes.io/name=podium \
+     --sort-by=.metadata.creationTimestamp -o name | tail -1)" \
+     | grep 'podium-server listening on '
    ```
 
    Public mode and an identity provider are mutually exclusive; setting both
@@ -5186,7 +5191,7 @@ and record the skip.
    `alice@acme.com`. The two carry different values, which is the reading this
    command exists for: Keycloak issues an opaque UUID as the subject, and the
    email is the address S44's prerequisite 4 set on the realm `admin` user. An
-   answer carrying `subject` and no `email` means that `$KC update` did not
+   answer carrying `subject` and no `email` means that `KC update` did not
    take, or that the token carries no `email` claim because the `email` scope
    was not granted.
 
@@ -5504,8 +5509,8 @@ profile S47 signed in from cannot hold a second session.
 1. Create a second realm user.
 
    ```bash
-   $KC create users -r master -s username=bob -s enabled=true
-   $KC set-password -r master --username bob --new-password bob
+   KC create users -r master -s username=bob -s enabled=true
+   KC set-password -r master --username bob --new-password bob
    ```
 
    Mint bob's own token the way prerequisite 5 mints `TOKEN`, and read bob's
@@ -6027,10 +6032,11 @@ sensitivity: low
 <iframe src="https://example.com"></iframe>
 YAML
    podium lint --registry "$WORK/reg" --offline
-   podium layer reingest --registry http://127.0.0.1:8462 reg | tail -1
+   podium layer reingest --registry http://127.0.0.1:8462 reg | grep render-probe
    ```
 
-   **Expect.** `lint: no issues.`, and the reingest accepts the new artifact.
+   **Expect.** `lint: no issues.`, and the reingest prints an `artifact:` line
+   naming `render-probe`, which shows it accepted the new artifact.
    The `javascript:` URL is written as raw HTML rather than as a markdown link
    on purpose: authored as `[a javascript url](javascript:...)` lint refuses the
    artifact with `lint.prose_reference` and it never reaches the renderer, which
@@ -6747,8 +6753,8 @@ skip and record the skip.
    ```
 
    **Expect.** `1` from the first command, the registration step 1 performed, and
-   `no update event` from the second, because `grep -c` exits non-zero on a count
-   of zero. The registry returns above every mutation the handler performs, so a
+   `0` followed by `no update event` from the second, because `grep -c` prints a
+   count of zero and then exits non-zero. The registry returns above every mutation the handler performs, so a
    refused patch writes no record and emits no event. A count of `1` or more on
    the update grep means the refusal is being evaluated after the write rather
    than before it.
@@ -6863,8 +6869,8 @@ skip and record the skip.
    creation when S50 has already run in this shell.
 
    ```bash
-   $KC create users -r master -s username=bob -s enabled=true
-   $KC set-password -r master --username bob --new-password bob
+   KC create users -r master -s username=bob -s enabled=true
+   KC set-password -r master --username bob --new-password bob
    export BOB_TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
      -d grant_type=password -d client_id=podium -d client_secret="$KC_SECRET" \
      -d username=bob -d password=bob \
@@ -7040,13 +7046,13 @@ the `mkcert` CA is unavailable, skip and record the skip.
    which recreate the `kc-podium` container on an empty user set, so a `bob`
    created by an earlier S50 or S59 run does not survive into this realm and a
    `BOB_TOKEN` minted against the earlier realm's keys no longer verifies. When
-   bob already exists in the realm that is running, `$KC create users` reports a
+   bob already exists in the realm that is running, `KC create users` reports a
    conflict and exits non-zero, which is harmless here, because the token mint
    below is what the rest of the step reads.
 
    ```bash
-   $KC create users -r master -s username=bob -s enabled=true
-   $KC set-password -r master --username bob --new-password bob
+   KC create users -r master -s username=bob -s enabled=true
+   KC set-password -r master --username bob --new-password bob
    export BOB_TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
      -d grant_type=password -d client_id=podium -d client_secret="$KC_SECRET" \
      -d username=bob -d password=bob \
@@ -10510,8 +10516,13 @@ credentialed lane mints, and it writes every signature into a public log.
 **Prerequisites.**
 
 - An OIDC token the Sigstore staging Fulcio accepts, and the email or URI SAN
-  and issuer URL that token produces. When none is available, skip the
-  scenario and record the skip and the reason.
+  and issuer that Fulcio records in the certificate for that token. When none
+  is available, skip the scenario and record the skip and the reason.
+- The recorded issuer is not always the token's issuer. For a token from the
+  staging login provider at `https://oauth2.sigstage.dev/auth`, Fulcio records
+  the upstream identity provider, so a Google login yields
+  `https://accounts.google.com`. The provider's tokens expire about a minute
+  after login, so run step 2 immediately after obtaining one.
 - The staging `trusted_root.json` from the Sigstore staging TUF repository, and
   the staging Rekor v2 shard URL from the staging `signing_config`.
 - Built `podium` and `podium-mcp` binaries on `PATH`.
@@ -10528,7 +10539,7 @@ credentialed lane mints, and it writes every signature into a public log.
    export PODIUM_SIGSTORE_OIDC_TOKEN=<token>
    export PODIUM_SIGSTORE_TRUSTED_ROOT_FILE=<staging trusted_root.json>
    export PODIUM_SIGSTORE_CERT_IDENTITY=<expected SAN>
-   export PODIUM_SIGSTORE_CERT_OIDC_ISSUER=<expected issuer URL>
+   export PODIUM_SIGSTORE_CERT_OIDC_ISSUER=<issuer recorded in the certificate>
    H="sha256:$(printf 'podium s85' | shasum -a 256 | cut -d' ' -f1)"
    echo "$H"
    ```

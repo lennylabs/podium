@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-06
+
 ### Added
 
 - **Registry audit events record a `tenant` attribute** (§8.1): each record
@@ -79,8 +81,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `config.migrationObjectReadTimeout` for `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT`,
   and `config.auditLogPath` for `PODIUM_AUDIT_LOG_PATH`. The release notes of a
   zero-replica render print the stop step's wait command, and those of each
-  migration step print the next command. `make test-live-kind` runs
-  the procedure from v0.4.0 on a kind cluster.
+  migration step print the next command.
 - **`podium admin signing-key generate|rotate`** (§4.7.9, §13.12): writes the registry
   key file named by the required `--key-file` flag, and reads no environment
   variable and no default path. `rotate` keeps the previous keys as `verify:`
@@ -252,7 +253,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   checkpoint signed by a log key in the trusted root, and when the log entry
   records the content hash, the signature, and the certificate. The certificate
   is checked at the timestamp's time, so an envelope keeps verifying after its
-  Fulcio certificate expires. Verification makes no network call.
+  Fulcio certificate expires. Verification makes no network call. Both variables
+  are new. `podium verify --provider sigstore-keyless` refuses every envelope
+  with `materialize.signature_invalid` when `PODIUM_SIGSTORE_CERT_IDENTITY`
+  yields no entry, when `PODIUM_SIGSTORE_CERT_OIDC_ISSUER` is unset, or when
+  `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` is unset or unusable.
 - **Search, materialization, and audit-volume quotas are charged per tenant**
   (§4.7.8): on a multi-tenant registry, each `search_domains`,
   `search_artifacts`, and `load_artifact` request is charged to the tenant the
@@ -474,9 +479,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   2. Clear each consumer's cache, as "Clearing each consumer's cache" below
      states.
   3. Set `PODIUM_SIGNATURE_VERIFY_KEY` to the registry's public key on every
-     consumer that is not on the standalone registry's machine. Without it
-     such a consumer refuses to start, as the entry "The registry signs at
-     ingest by default, and `podium-mcp` verifies every load" below states. A
+     consumer that is not on the standalone registry's machine. Without it,
+     `podium-mcp` refuses to start and server-source `podium sync` exits with
+     status 2, as the entry "The registry signs at ingest by default, and
+     `podium-mcp` verifies every load" below states, and a Python or
+     TypeScript SDK client verifies no delivery signature. A
      consumer of a registry running with `PODIUM_SIGN=none` sets
      `PODIUM_VERIFY_SIGNATURES=never` instead.
   4. Remove `PODIUM_SIGNATURE_KEY_ID`, the `medium-and-above` value of
@@ -487,7 +494,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
      `defaults.verify_signatures: never` from `~/.podium/sync.yaml` unless the
      registry runs with `PODIUM_SIGN=none`. v0.4.0's bootstrap wrote that
      line, and no start of this release removes it, so such a consumer
-     otherwise verifies nothing.
+     otherwise verifies no delivery signature.
 
   **Return to the previous binary.** Restore the backup the upgrade takes,
   revert the registry and every consumer together, and clear each reverted
@@ -817,8 +824,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `signing.mode=none`, and `docker-compose.yml` pins `PODIUM_SIGN: "none"`.
   The standalone bootstrap no longer writes `defaults.verify_signatures: never`
   into `~/.podium/sync.yaml`, and no start removes that line from a machine an
-  earlier release wrote it on. Such a machine keeps verifying nothing, also
-  when it is later pointed at another registry, until the line is removed;
+  earlier release wrote it on. Such a machine keeps verifying no delivery
+  signature, also when it is later pointed at another registry, until the line
+  is removed;
   `podium-mcp` announces a `never` that a `sync.yaml` file supplied with a
   startup line naming the file. `defaults.verify_signatures` resolves across
   the `sync.yaml` scopes, and `podium config show` reports it.
@@ -958,11 +966,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `warning: audit sink disabled` and ran with no audit sink and no anchoring. An
   `http(s)` value still disables anchoring with a warning, and with the interval
   at 0 an unopenable file sink is still logged and the registry starts. The
-  warning text is now `warning: audit sink disabled: <cause>`.
-- A deployment carrying one of these configurations stops booting after the
-  upgrade. This is a backward-incompatible change and lands in a MINOR bump. No
-  flag, environment variable, or configuration key restores the in-memory SCIM
-  fallback or the unanchored start.
+  warning text is now `warning: audit sink disabled: <cause>`. A deployment
+  carrying one of the configurations this entry, the audit anchor key entry, or
+  the SCIM store entry describes stops booting after the upgrade. This is a
+  backward-incompatible change and lands in a MINOR bump. No flag, environment
+  variable, or configuration key restores the in-memory SCIM fallback or the
+  unanchored start.
 - **Every harness adapter derives the skill `compatibility` field** (§4.3.4,
   §6.7, §7.8): when a skill's `SKILL.md` omits `compatibility`, the Cursor,
   Codex, Gemini, OpenCode, and Pi adapters and the Claude, Codex, Cursor, Pi,
@@ -989,8 +998,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   its certificate authorities, transparency-log keys, and timestamp authorities
   apply only within their validity windows.
 - A tenant quota value of zero for `search_qps`, `materialize_rate`, or
-  `audit_volume_per_day` no longer disables the budget (§4.7.8). It takes the
-  deployment default from `PODIUM_QUOTA_SEARCH_QPS`,
+  `audit_volume_per_day` selects the deployment default (§4.7.8), where the
+  v0.4.0 specification and the `podium admin tenant` flag help described zero
+  as no limit. The deployment default comes from `PODIUM_QUOTA_SEARCH_QPS`,
   `PODIUM_QUOTA_MATERIALIZE_RATE`, or `PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY`, so a
   tenant set to 0 is throttled whenever the matching variable is positive. Set
   the tenant value to a negative number to exempt that tenant. A single-tenant
@@ -1054,12 +1064,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   registry-managed (§4.7.10), so the provider verified no load, and it accepted
   a keyless envelope from any OIDC identity. `podium sign` and `podium verify`
   keep `sigstore-keyless`.
-- `server.WithTenant` removed (library API).
+- **`server.WithTenant`** (§7.3.2, §4.7.8): the `pkg/registry/server` option is
+  removed from the library API. The registry resolves the tenant per request
+  and per event, so the option has no replacement.
 
 ### Documentation
 
 - HTTP API reference: layer tenant selection, the tenant-qualified webhook
-  route, the multi-tenant erasure refusal, the per-tenant `manage_any_layer`
+  route, tenant-scoped erasure on a multi-tenant registry, the per-tenant `manage_any_layer`
   posture member, and the change-event stream's delivery of public-layer events
   to a caller with no verified subject.
 - Deployment pages: the per-tenant layer model, the tenant-qualified webhook
@@ -1114,8 +1126,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   place of an `--all` flag the CLI never had.
 - §7.6 states the change-event stream visibility rule, and §4.6, §7.3.1, and
   §7.5.4 point to it. §7.3.2 states that the receiver fan-out applies no layer
-  visibility filter and that a receiver's event filter is the only narrowing
-  applied to it. `docs/consuming/configure-your-harness.md` no longer states
+  visibility filter and that, within the event's tenant, a receiver's event
+  filter is the only narrowing applied to it. `docs/consuming/configure-your-harness.md` no longer states
   that the stream applies no per-caller filtering, and
   `docs/reference/http-api.md` describes the filtered stream and the receiver
   delivery scope.
@@ -1225,7 +1237,8 @@ Operators upgrading should note that a version already ingested keeps its unfold
 
 - Corrected the specification, the HTTP API reference, and the operator runbook where they offered `oauth-device-code` as a registry-process identity provider. It is client-side acquisition, the registry ships no request-time verifier for it, and a registry configured with it refuses startup with `config.identity_provider_unverified`. The `registry.yaml` example in §13 selects `oidc-jwt` and names `issuer` rather than `authorization_endpoint`, the read-only write set in §13.2.1 drops the claim that the registry issues tokens against a local session table, and the web-UI paragraph stops presenting the device-code flow as an authentication mode of a standard deployment.
 
-[Unreleased]: https://github.com/lennylabs/podium/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/lennylabs/podium/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/lennylabs/podium/releases/tag/v0.5.0
 [0.4.0]: https://github.com/lennylabs/podium/releases/tag/v0.4.0
 
 ## [0.3.1] - 2026-08-18
