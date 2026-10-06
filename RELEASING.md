@@ -28,20 +28,22 @@ Versions in flight carry a suffix that semver orders before the plain version:
 
 | Place | Notes |
 |:--|:--|
-| `internal/buildinfo/buildinfo.go` | Default `Version` constant. Source of truth when no ldflags are passed. **The one place that needs a manual edit per release.** |
+| `internal/buildinfo/buildinfo.go` | Default `Version` constant. Source of truth when no ldflags are passed. **Needs a manual edit per release.** |
+| `deploy/helm/podium/Chart.yaml` | `version` and `appVersion`, both equal to `buildinfo.Version`. The chart's default image tag is `appVersion`, and the release pushes the registry image as `ghcr.io/lennylabs/podium-server` tagged `vX.Y.Z`, `X.Y.Z`, and `latest`, so a chart at the released version installs the released image. `TestChart_VersionTracksTheRelease` fails when the chart and `buildinfo.Version` disagree. **Needs a manual edit per release, in the same commit as `buildinfo.go`.** |
 | `sdks/podium-py/pyproject.toml` | Marks the version as dynamic; setuptools-scm derives it from the git tag. **No manual edit per release.** |
 | `sdks/podium-ts/package.json` | Permanent `"0.0.0-dev"` placeholder. The release workflow rewrites it from the git tag before `npm publish`. **No manual edit per release.** |
 | Git tag | Authoritative for a release: `vX.Y.Z`. Drives the Go binary version (via `make build` + `git describe`), the Python wheel version (via setuptools-scm), and the npm package version (via the workflow's `npm version` step). |
 | `Makefile` `build` target | Injects `git describe --tags --dirty --always` into the binary via `-ldflags`. |
 
-The two SDKs are fully tag-driven; only `buildinfo.go` requires a manual edit per release. The Go default is in source code so a plain `go build` on `main` still reports a recognizable `0.X.Y-dev` even when no ldflags are passed.
+The two SDKs are fully tag-driven; only `buildinfo.go` and `Chart.yaml` require a manual edit per release. The Go default is in source code so a plain `go build` on `main` still reports a recognizable `0.X.Y-dev` even when no ldflags are passed.
 
 ## Cutting a release
 
 1. **Pick the version.** Walk the CHANGELOG and the merged diff since the previous tag. Decide MAJOR, MINOR, or PATCH.
 
-2. **Bump the Go default version** (drop the `-dev` suffix):
+2. **Bump the Go default version and the chart** (drop the `-dev` suffix):
    - `internal/buildinfo/buildinfo.go`: `Version = "0.2.0"`.
+   - `deploy/helm/podium/Chart.yaml`: `version: 0.2.0` and `appVersion: 0.2.0`.
 
    The two SDKs need no edit at this step — setuptools-scm and the release workflow's `npm version` step will derive `0.2.0` from the tag.
 
@@ -57,8 +59,9 @@ The two SDKs are fully tag-driven; only `buildinfo.go` requires a manual edit pe
 
 5. **CI builds and publishes.** The release workflow runs `make build VERSION=v0.2.0` for the Go binaries, `python -m build` (under setuptools-scm) for the Python wheel, and `npm version --no-git-tag-version 0.2.0 && npm publish` for the TS SDK. All three report `0.2.0`. The workflow publishes binaries to GitHub Releases, the wheel + sdist to PyPI, the npm package, and the container image to ghcr.io.
 
-6. **Open the next development cycle.** On `main`, bump the Go default:
+6. **Open the next development cycle.** On `main`, bump the Go default and the chart:
    - `buildinfo.go`: `Version = "0.3.0-dev"`.
+   - `Chart.yaml`: `version: 0.3.0-dev` and `appVersion: 0.3.0-dev`.
 
    Commit as `Begin 0.3.0 development`. Both SDKs pick up the next dev version automatically (`0.2.1.dev<N>+g<sha>` for Python from setuptools-scm; `0.0.0-dev` is the permanent TS local placeholder).
 

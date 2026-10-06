@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Helm chart's default image is the image a release publishes**: the
+  chart defaulted to `ghcr.io/lennylabs/podium` at `appVersion` `0.0.0-dev`, an
+  image no release publishes, so an install that did not override `image` sat
+  in `ImagePullBackOff`. The chart now defaults to
+  `ghcr.io/lennylabs/podium-server`, its `version` and `appVersion` track the
+  release, and the release pipeline also tags the image with the bare version
+  (`X.Y.Z`) that `appVersion` names, alongside `vX.Y.Z` and `latest`. An install
+  that sets `image.repository` and `image.tag` explicitly is unaffected.
+
 ## [0.5.0] - 2026-10-06
 
 ### Added
