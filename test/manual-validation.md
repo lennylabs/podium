@@ -237,6 +237,7 @@ rm -rf "$WORK"
 | S86 | Webhook receivers are isolated per tenant on a multi-tenant registry | standard | none | none | Postgres, S3 |
 | S87 | Layer operations act in the caller's tenant on a multi-tenant registry | standard | none | none | Postgres, S3 |
 | S88 | Erasure on a multi-tenant registry redacts only the requesting tenant's audit records | standard | none | none | Postgres, S3 |
+| S89 | A git layer's URL credential is stored and used, and no response or log reports it | standalone | none | none | none |
 
 ---
 
@@ -11036,5 +11037,123 @@ The standard-stack end-to-end test skips silently on macOS.
 dave, stop the server, `rm -rf "$WORK"`, and
 `(cd "$REAL_HOME/projects/podium" && make services-down)` when finished with the
 standard-mode scenarios.
+
+---
+
+## S89: A git layer's URL credential is stored and used, and no response or log reports it
+
+**Goal.** Validate that a `git` layer registered with a credential in its URL
+userinfo is accepted, that the clone sends the credential, and that the
+register response, the layer list, the failed-reingest error, and the server
+log carry none of it, and that a re-registration carrying the listed remote
+is refused unless it passes the override flag.
+
+**Covers.** The §7.3.1 repository credentials and re-registration rules,
+through the compiled binary and the `podium layer` commands.
+
+**Why by hand.** An operator reads the raw `podium layer register` and
+`podium layer list` output and the reingest error on a terminal. The string
+`s89-token` in any of them, or in the server log, is the defect this scenario
+catches. A remote log with no `Authorization` header is the opposite defect:
+the credential was removed from the stored layer.
+
+**Steps.**
+
+1. Run the isolation block. Start a stub remote that answers every request
+   with 500 and logs the `Authorization` header, then serve a standalone
+   registry.
+
+   ```bash
+   cat > "$WORK/remote.py" <<'EOF'
+   import http.server, sys
+   class H(http.server.BaseHTTPRequestHandler):
+       def do_GET(self):
+           open(sys.argv[1], "a").write((self.headers.get("Authorization") or "none") + "\n")
+           self.send_response(500); self.end_headers()
+       def log_message(self, *a): pass
+   http.server.HTTPServer(("127.0.0.1", 8190), H).serve_forever()
+   EOF
+   python3 "$WORK/remote.py" "$WORK/remote.log" &
+   REMOTE=$!
+   podium serve --standalone --no-embeddings --bind 127.0.0.1:8189 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8189/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export PODIUM_REGISTRY=http://127.0.0.1:8189
+   ```
+
+   **Expect.** `server_alive` reports the server running.
+
+2. Register a layer whose remote carries a credential.
+
+   ```bash
+   podium layer register --registry "$PODIUM_REGISTRY" --id private --public \
+     --repo "http://x-access-token:s89-token@127.0.0.1:8190/acme/private.git" --ref main | tee "$WORK/register.out"
+   grep -c "s89-token" "$WORK/register.out"
+   ```
+
+   **Expect.** The command succeeds and prints the webhook URL and secret. The
+   printed `repo` is `http://127.0.0.1:8190/acme/private.git`, and the count is
+   `0`. A refusal of the registration is a defect.
+
+3. List the layers.
+
+   ```bash
+   podium layer list --registry "$PODIUM_REGISTRY" | tee "$WORK/list.out"
+   grep -c "s89-token\|x-access-token" "$WORK/list.out"
+   ```
+
+   **Expect.** The `private` layer's `repo` is
+   `http://127.0.0.1:8190/acme/private.git`, and the count is `0`.
+
+4. Reingest the layer, which fails against the stub.
+
+   ```bash
+   podium layer reingest --registry "$PODIUM_REGISTRY" private 2>&1 | tee "$WORK/reingest.out"
+   grep -c "s89-token\|x-access-token" "$WORK/reingest.out"
+   cat "$WORK/remote.log"
+   ```
+
+   **Expect.** The command reports `ingest.source_unreachable` with a message
+   that names `127.0.0.1:8190` and status `500`. The count is `0`.
+   `remote.log` holds at least one line beginning `Basic `, which shows the
+   clone sent the stored credential. A line reading `none` on every request
+   means the credential was lost.
+
+5. Stop the stub so the next reingest fails on the connection, and reingest
+   again.
+
+   ```bash
+   kill "$REMOTE"; wait "$REMOTE" 2>/dev/null
+   podium layer reingest --registry "$PODIUM_REGISTRY" private 2>&1 | tee "$WORK/reingest2.out"
+   grep -c "s89-token\|x-access-token" "$WORK/reingest2.out" "$WORK/srv.log"
+   ```
+
+   **Expect.** The command reports `ingest.source_unreachable` with a
+   connection error. Both counts are `0`.
+
+6. Re-register the layer with the remote exactly as step 3 listed it.
+
+   ```bash
+   podium layer register --registry "$PODIUM_REGISTRY" --id private --public \
+     --repo "http://127.0.0.1:8190/acme/private.git" --ref main 2>&1 | tee "$WORK/reregister.out"
+   grep -c "s89-token\|x-access-token" "$WORK/reregister.out"
+   ```
+
+   **Expect.** The command fails with HTTP 400, `registry.invalid_argument`,
+   and `"constraint": "redacted_repo"`. The message names the full repository
+   URL and `--force-repo-overwrite` as the two corrections. The count is `0`.
+
+7. Repeat the registration with the flag.
+
+   ```bash
+   podium layer register --registry "$PODIUM_REGISTRY" --id private --public --force-repo-overwrite \
+     --repo "http://127.0.0.1:8190/acme/private.git" --ref main
+   ```
+
+   **Expect.** The command succeeds and prints a webhook URL and secret. The
+   stored remote now carries no credential.
+
+**Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
 
 ---
