@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -247,5 +250,106 @@ func TestGit_RootNarrowsToSubtree(t *testing.T) {
 	// Files outside the subtree are not visible.
 	if _, err := fs.ReadFile(snap.Files, "top.txt"); err == nil {
 		t.Errorf("top.txt should not be visible under root=artifacts")
+	}
+}
+
+// closedPortAddr returns a loopback host:port that refuses connections. The
+// listener that reserved the port is closed before the address is returned.
+func closedPortAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	return addr
+}
+
+// Spec: §7.3.1 (Repository credentials) — the built-in git source's clone
+// failure message carries no URL userinfo. go-git and net/http render the
+// request URL with re-escaped userinfo, so each case drives a clone against a
+// local HTTP remote and reads the error the provider returns. For a repo
+// reported as [redacted], the message is the fixed withheld text.
+func TestGit_CloneErrorCarriesNoCredential(t *testing.T) {
+	t.Parallel()
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/denied/") {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(remote.Close)
+	host := strings.TrimPrefix(remote.URL, "http://")
+
+	cases := []struct {
+		name string
+		repo string
+		// want is a substring the redacted text keeps.
+		want string
+		// absent lists credential forms beyond credentialParts.
+		absent []string
+		// wantSuffix, when set, is the text the error ends with.
+		wantSuffix string
+	}{
+		{
+			name: "user and password against 500",
+			repo: "http://alice-user:s3cr3tpw@" + host + "/acme/private.git",
+			want: "500",
+		},
+		{
+			name: "username-only token against 500",
+			repo: "http://ghp_tok3n@" + host + "/acme/private.git",
+			want: "500",
+		},
+		{
+			name:   "password with an escaped character against 500",
+			repo:   "http://alice-user:s3cr3t!pw@" + host + "/acme/private.git",
+			want:   "500",
+			absent: []string{"s3cr3t!pw", "s3cr3t%21pw", "%21"},
+		},
+		{
+			name: "username-only token against a closed port",
+			repo: "http://ghp_tok3n@" + closedPortAddr(t) + "/acme/private.git",
+			want: "127.0.0.1",
+		},
+		{
+			name:       "unparseable repo",
+			repo:       "http://alice-user:s3cr3t\x7fpw@" + host + "/acme/private.git",
+			absent:     []string{host, "private.git", "\x7f"},
+			wantSuffix: withheldCloneError,
+		},
+		{
+			name: "401 keeps the upstream reason",
+			repo: "http://alice-user:s3cr3tpw@" + host + "/denied/private.git",
+			want: "authentication required",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := (source.Git{}).Snapshot(context.Background(), source.LayerConfig{
+				Repo: tc.repo, Ref: "main",
+			})
+			if !errors.Is(err, source.ErrSourceUnreachable) {
+				t.Fatalf("got %v, want ErrSourceUnreachable", err)
+			}
+			got := err.Error()
+			assertNoCredential(t, got)
+			for _, part := range tc.absent {
+				if strings.Contains(got, part) {
+					t.Errorf("error %q contains %q", got, part)
+				}
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("error %q does not contain %q", got, tc.want)
+			}
+			if !strings.HasSuffix(got, tc.wantSuffix) {
+				t.Errorf("error %q does not end with %q", got, tc.wantSuffix)
+			}
+		})
 	}
 }
