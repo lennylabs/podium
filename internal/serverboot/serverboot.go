@@ -676,8 +676,9 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 			log.Printf("ingested declared layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d)",
 				lc.ID, lc.LocalPath, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories))
 		case "git":
+			// Spec: §7.3.1. A declared repo may carry a URL credential, and a log line carries no secret value.
 			log.Printf("seeded declared git layer %s (repo=%s ref=%s); awaiting reingest/webhook to ingest",
-				lc.ID, lc.Repo, lc.Ref)
+				lc.ID, source.RedactRepo(lc.Repo), lc.Ref)
 		}
 		layers = append(layers, layer.Layer{
 			ID:         lc.ID,

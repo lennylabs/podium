@@ -235,8 +235,9 @@ func TestDeclarativeLayers_DeclaredGitProviderSurvivesRestart(t *testing.T) {
 }
 
 // Spec: §7.3.1 — a declared git layer whose repo carries a credential in its
-// URL userinfo is seeded with the full value, and the list endpoint of the
-// running binary reports the repo with the userinfo removed.
+// URL userinfo is seeded with the full value, the list endpoint of the
+// running binary reports the repo with the userinfo removed, and the server
+// log names the seeded layer with neither credential part.
 func TestDeclarativeLayers_RepoCredentialNotReported(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -254,9 +255,19 @@ func TestDeclarativeLayers_RepoCredentialNotReported(t *testing.T) {
 	if st != 200 {
 		t.Fatalf("GET /v1/layers = HTTP %d, want 200\nbody: %s", st, body)
 	}
+	// The seed line is written before the server answers, so its presence
+	// shows the absence checks below read a log that covers the boot.
+	serverLog := srv.log()
+	const seeded = "seeded declared git layer team-finance (repo=https://git.acme.com/acme/finance.git"
+	if !strings.Contains(serverLog, seeded) {
+		t.Errorf("server log missing %q:\n%s", seeded, serverLog)
+	}
 	for _, part := range []string{"alice-user", "s3cr3tpw"} {
 		if strings.Contains(string(body), part) {
 			t.Errorf("list response carries the credential part %q: %s", part, body)
+		}
+		if strings.Contains(serverLog, part) {
+			t.Errorf("server log carries the credential part %q:\n%s", part, serverLog)
 		}
 	}
 	var layers struct {
