@@ -360,9 +360,10 @@ func TestLayerEndpoint_LayerObjectWithholdsSecretAndTenant(t *testing.T) {
 func TestLayerEndpoint_RequestAndResponseAgreeOnNames(t *testing.T) {
 	t.Parallel()
 
-	// rotate_webhook_secret is an action the request asks for rather than a
-	// stored member, so the response answers no field of that name.
-	requestOnly := map[string]bool{"rotate_webhook_secret": true}
+	// rotate_webhook_secret is an action the request asks for, and
+	// force_repo_overwrite is an admission flag the request sets. Neither is a
+	// stored member, so the response answers no field of either name.
+	requestOnly := map[string]bool{"rotate_webhook_secret": true, "force_repo_overwrite": true}
 	// The response carries members no register request sets: the server
 	// assigns the precedence and the ingest bookkeeping.
 	responseOnly := map[string]bool{

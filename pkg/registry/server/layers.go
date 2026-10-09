@@ -741,6 +741,20 @@ type LayerRegisterRequest struct {
 	// update`"). When true on a git layer the handler regenerates
 	// WebhookSecret and returns the new value once. Ignored on register.
 	RotateWebhookSecret bool `json:"rotate_webhook_secret,omitempty"`
+	// ForceRepoOverwrite admits a registration the §7.3.1 re-registration rule
+	// would refuse: one whose repo is the value a read reports for the stored
+	// layer's credential-bearing repo. Read by that rule alone. Ignored on update.
+	ForceRepoOverwrite bool `json:"force_repo_overwrite,omitempty"`
+}
+
+// redactedRepoResubmitted reports whether repo is the value a read reports for
+// a stored repo that carries a credential. Storing it would replace the
+// credential-bearing remote with one that cannot clone a private repository.
+//
+// Spec: §7.3.1 (Re-registration with a reported repo)
+func redactedRepoResubmitted(stored store.LayerConfig, repo string) bool {
+	reported := source.RedactRepo(stored.Repo)
+	return reported != stored.Repo && repo == reported
 }
 
 // adminOnlyRegistrationFields reports the §7.3.1 admin-only registration
@@ -1432,6 +1446,16 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 				map[string]any{"constraint": "admin_only_fields"})
 			return
 		}
+	}
+
+	// spec: §7.3.1 — the re-registration rule. It runs below the write,
+	// local-source, and admin-only-fields rules so each keeps its envelope, and
+	// above every mutation so a refused request mints no secret and writes nothing.
+	if exists && !req.ForceRepoOverwrite && redactedRepoResubmitted(stored, req.Repo) {
+		writeErrorDetails(w, http.StatusBadRequest, "registry.invalid_argument",
+			"repo is the value a layer read reports for this layer, and the stored repository URL carries a credential that reads do not report; storing this value would remove it, so re-send the registration with the full repository URL, or set force_repo_overwrite (podium layer register --force-repo-overwrite) to store the value as sent",
+			map[string]any{"constraint": "redacted_repo"})
+		return
 	}
 
 	cfg := store.LayerConfig{
