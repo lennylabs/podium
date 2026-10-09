@@ -133,18 +133,28 @@ func TestRedactCloneError(t *testing.T) {
 			want: `Get "https://host/x.git": EOF`,
 		},
 	}
+	// The withheld phrase replaces the upstream text whatever it holds: a text
+	// that quotes the repo, and a text with no URL in it.
+	upstream := map[string]func(repo string) string{
+		"quoting the repo": func(repo string) string {
+			return `unexpected requesting "` + repo + `/info/refs?service=git-upload-pack" status code: 500`
+		},
+		"with no URL": func(string) string { return "repository not found" },
+	}
 	for _, unsafe := range unsafeRepos {
-		cases = append(cases, struct {
-			name string
-			repo string
-			text string
-			want string
-		}{
-			name: "withheld for " + unsafe,
-			repo: unsafe,
-			text: `unexpected requesting "` + unsafe + `/info/refs?service=git-upload-pack" status code: 500`,
-			want: withheldCloneError,
-		})
+		for label, text := range upstream {
+			cases = append(cases, struct {
+				name string
+				repo string
+				text string
+				want string
+			}{
+				name: "withheld for " + unsafe + " " + label,
+				repo: unsafe,
+				text: text(unsafe),
+				want: withheldCloneError,
+			})
+		}
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
