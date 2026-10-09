@@ -174,9 +174,11 @@ func TestLayerRepoCredential_ListResponse(t *testing.T) {
 			}
 			assertStoredRepo(t, st, "private", credRepoFull)
 
-			if resp, body := mustDelete(t, base, "/v1/layers?id=private"); resp.StatusCode != http.StatusOK {
+			resp, body := mustDelete(t, base, "/v1/layers?id=private")
+			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("unregister: status %d, body=%s", resp.StatusCode, body)
 			}
+			assertNoRepoCredential(t, "unregister response", body)
 			deleted := mustGet(t, base, "/v1/layers?deleted=true")
 			assertNoRepoCredential(t, "deleted list", deleted)
 			if got := listedRepos(t, deleted)["private"]; got != credRepoReported {
@@ -498,12 +500,14 @@ func TestLayerRegister_RedactedRepoGuard(t *testing.T) {
 		t.Parallel()
 		h := newGuardHarness(t, guardAdmin)
 		reported := seed(t, h, "private", credRepoFull)
-		if resp, body := mustDelete(t, h.base, "/v1/layers?id=private"); resp.StatusCode != http.StatusOK {
+		resp, body := mustDelete(t, h.base, "/v1/layers?id=private")
+		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("unregister: status %d, body=%s", resp.StatusCode, body)
 		}
+		assertNoRepoCredential(t, "unregister response", body)
 		recorded := len(h.sink.Events())
 
-		resp, body := h.register(t, "private", reported, nil)
+		resp, body = h.register(t, "private", reported, nil)
 		assertRedactedRepoRefusal(t, resp, body)
 		tombstones, err := h.st.ListDeletedLayerConfigs(context.Background(), "t")
 		if err != nil {

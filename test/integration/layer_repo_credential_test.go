@@ -162,6 +162,12 @@ func TestLayerRepoCredential_CloneFailureReportsNoCredential(t *testing.T) {
 		t.Fatalf("register status=%d decode=%v secret-present=%t, want 201 with a webhook secret",
 			resp.StatusCode, decodeErr, registered.WebhookSecret != "")
 	}
+	// The response reports the repo without its userinfo, and the clone below
+	// still sends the stored credential.
+	assertNoRepoCredential(t, "register response repo", registered.Layer.Repo)
+	if wantRepo := remote.URL + "/acme/private.git"; registered.Layer.Repo != wantRepo {
+		t.Errorf("register response repo = %q, want %q", registered.Layer.Repo, wantRepo)
+	}
 
 	resp, err = http.Post(ts.URL+"/v1/layers/reingest?id=private", "application/json", nil)
 	if err != nil {
