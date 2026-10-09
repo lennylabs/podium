@@ -78,7 +78,8 @@ func listedRepos(t *testing.T, body []byte) map[string]string {
 }
 
 // registerCredLayer registers a git layer with the given repo and returns the
-// response body.
+// response body. It asserts the body carries no part of the fixture
+// credential, so every seeding registration in this file is checked.
 func registerCredLayer(t *testing.T, base, id, repo string) []byte {
 	t.Helper()
 	resp, body := mustPost(t, base, "/v1/layers", map[string]any{
@@ -87,6 +88,7 @@ func registerCredLayer(t *testing.T, base, id, repo string) []byte {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("register %s: status %d, body=%s", id, resp.StatusCode, body)
 	}
+	assertNoRepoCredential(t, "register response of "+id, body)
 	return body
 }
 
@@ -99,7 +101,6 @@ func TestLayerRepoCredential_RegisterResponse(t *testing.T) {
 	defer cleanup()
 
 	body := registerCredLayer(t, base, "private", credRepoFull)
-	assertNoRepoCredential(t, "register response", body)
 	repo, hookURL, hookSecret := decodeRegisterResponse(t, body)
 	if repo != credRepoReported {
 		t.Errorf("layer.repo = %q, want %q", repo, credRepoReported)
@@ -251,7 +252,6 @@ func TestLayerRepoCredential_SchemeAndFailClosed(t *testing.T) {
 			defer cleanup()
 
 			body := registerCredLayer(t, base, tc.id, tc.stored)
-			assertNoRepoCredential(t, "register response", body)
 			if repo, _, _ := decodeRegisterResponse(t, body); repo != tc.reported {
 				t.Errorf("register layer.repo = %q, want %q", repo, tc.reported)
 			}
