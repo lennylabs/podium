@@ -1,7 +1,7 @@
 # Proposal 0052: Report a git layer's `repo` without its URL credential in every response, clone error, notification, and boot log line
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-08). Signed off as staged, with the open questions settled as recorded in "Resolved decisions" (RD-1 through RD-5). Verified on 2026-10-08; the final adversarial review pass converged with no findings.
+- Status: Implemented (2026-10-08). Signed off as staged, with the open questions settled as recorded in "Resolved decisions" (RD-1 through RD-5). Verified on 2026-10-08; the final adversarial review pass converged with no findings.
 - Date: 2026-10-08
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -50,25 +50,25 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2. §7.3.1 gains the "Repository credentials" and "Re-registration with a reported `repo`" paragraphs, and its **Errors** paragraph gains one clause.
+- [x] **S1 · spec** — SPEC-1, SPEC-2. §7.3.1 gains the "Repository credentials" and "Re-registration with a reported `repo`" paragraphs, and its **Errors** paragraph gains one clause.
       Levels: —. Depends on: —
-- [ ] **S2 · code** — CODE-1. `pkg/layer/source/redact.go` with `RedactRepo`, `RedactCloneError`, and `RedactedRepo`.
+- [x] **S2 · code** — CODE-1. `pkg/layer/source/redact.go` with `RedactRepo`, `RedactCloneError`, and `RedactedRepo`.
       Levels: unit. Depends on: S1
-- [ ] **S3 · code** — CODE-2. `pkg/layer/source/git.go` builds the clone error through `RedactCloneError`.
+- [x] **S3 · code** — CODE-2. `pkg/layer/source/git.go` builds the clone error through `RedactCloneError`.
       Levels: unit, integration. Depends on: S2
-- [ ] **S4 · code** — CODE-3. `pkg/registry/server/layers.go` redacts `repo` on each response copy through `wireLayer`.
+- [x] **S4 · code** — CODE-3. `pkg/registry/server/layers.go` redacts `repo` on each response copy through `wireLayer`.
       Levels: integration, e2e. Depends on: S2
-- [ ] **S5 · code** — CODE-4. `internal/serverboot/serverboot.go` logs the redacted `repo` for a declared git layer.
+- [x] **S5 · code** — CODE-4. `internal/serverboot/serverboot.go` logs the redacted `repo` for a declared git layer.
       Levels: integration, e2e. Depends on: S2
-- [ ] **S6 · code** — CODE-5, CODE-6. `pkg/registry/server/layers.go` refuses a registration that re-submits a reported `repo`, `pkg/registry/server/layer_wire_test.go` admits `force_repo_overwrite` as a request-only member, and `cmd/podium/layer.go` gains `--force-repo-overwrite`.
+- [x] **S6 · code** — CODE-5, CODE-6. `pkg/registry/server/layers.go` refuses a registration that re-submits a reported `repo`, `pkg/registry/server/layer_wire_test.go` admits `force_repo_overwrite` as a request-only member, and `cmd/podium/layer.go` gains `--force-repo-overwrite`.
       Levels: integration, e2e. Depends on: S1, S2
-- [ ] **S7 · test** — TEST-1. Unit tests for the helper and for the clone error against a local HTTP remote.
+- [x] **S7 · test** — TEST-1. Unit tests for the helper and for the clone error against a local HTTP remote.
       Levels: unit. Depends on: S3
-- [ ] **S8 · test** — TEST-2. Handler tests, the reingest and webhook integration test, the serverboot boot-log test, the end-to-end declared-layer case, and the end-to-end registration-guard case.
+- [x] **S8 · test** — TEST-2. Handler tests, the reingest and webhook integration test, the serverboot boot-log test, the end-to-end declared-layer case, and the end-to-end registration-guard case.
       Levels: integration, e2e. Depends on: S3, S4, S5, S6
-- [ ] **S9 · test** — TEST-3. Manual scenario S89.
+- [x] **S9 · test** — TEST-3. Manual scenario S89.
       Levels: manual. Depends on: S3, S4, S6
-- [ ] **S10 · docs** — DOC-1. HTTP API reference, CLI reference, layers deployment page, and changelog.
+- [x] **S10 · docs** — DOC-1. HTTP API reference, CLI reference, layers deployment page, and changelog.
       Levels: —. Depends on: S3, S4, S5, S6
 
 **Ordering constraints.** S1 lands the rule every later step cites. S2 precedes S3, S4, S5, and S6 because each calls the helper. S3, S4, S5, and S6 are independent of each other. Land S2 through S8 in one pull request, so the 85% coverage bar on the new lines is met when the pull request is measured.
