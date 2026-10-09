@@ -1,7 +1,7 @@
 # Proposal 0052: Report a git layer's `repo` without its URL credential in every response, clone error, notification, and boot log line
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-08). Signed off as staged, with the open questions settled as recorded in "Resolved decisions" (RD-1 through RD-5). Verified on 2026-10-08; the final adversarial review pass converged with no findings.
+- Status: Applied to spec (2026-10-08). Signed off as staged, with the open questions settled as recorded in "Resolved decisions" (RD-1 through RD-5). Verified on 2026-10-08; the final adversarial review pass converged with no findings.
 - Date: 2026-10-08
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
