@@ -445,12 +445,14 @@ Every `podium layer` subcommand takes `--registry <url>`, which defaults to `POD
 Registers a new layer.
 
 ```
-podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>] [--force-push-policy <tolerant|strict>]
+podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>] [--force-push-policy <tolerant|strict>] [--force-repo-overwrite]
 podium layer register --id <id> --local <path>
                       [--user-defined] [--owner <oidc-sub>]
                       [--public | --organization]
                       [--group <oidc-group>]... [--user <oidc-sub-or-email>]...
 ```
+
+A `--repo` URL may carry a credential in its userinfo. The registry stores it as given, and `podium layer list` reports the remote without it (see the layer object in the [HTTP API reference](http-api#layer-management)). A registration under an existing layer ID whose `--repo` is that reported value is rejected with `registry.invalid_argument` carrying `details.constraint: "redacted_repo"`. `--force-repo-overwrite` admits it and stores the remote as given, without the credential.
 
 For Git sources, the registry returns the webhook URL and HMAC secret to configure on the source repo. On a multi-tenant registry the webhook URL carries the tenant ID, `/v1/ingest/webhook/<tenant-id>/<layer-id>`. Without webhook configuration, the layer stays at its initial commit until the first manual reingest.
 

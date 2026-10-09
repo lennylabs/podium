@@ -373,7 +373,7 @@ Returns the per-subtree domain analysis report for the path (the same report `po
 |:--|:--|:--|
 | `id` | string | The layer identifier, unique within the tenant. |
 | `source_type` | string | `git` or `local`. |
-| `repo` | string | The Git remote for a `git` source. |
+| `repo` | string | The Git remote for a `git` source. A credential in the userinfo of the URL is not reported: a value written as a URL with a scheme is reported with its userinfo removed, for every caller. A value that is not written as a URL with a scheme, such as `git@github.com:acme/x.git`, is reported as stored. A value written with a scheme that does not parse as a URL, and an `http` or `https` value that carries `@` after its host, is reported as `[redacted]`. |
 | `ref` | string | The tracked ref for a `git` source. |
 | `root` | string | An optional subpath within the source. |
 | `local_path` | string | The filesystem path on the registry host for a `local` source. |
@@ -414,6 +414,8 @@ Body:
 ```
 
 `id` and `source_type` are required. Visibility is set with the top-level `public`, `organization`, `groups`, and `users` fields. `git_provider` names the Git provider whose webhook signature scheme verifies this layer's inbound deliveries; it applies to a `git` source alone, and a value naming no registered provider, or any value on a `local` source, is refused with `400 registry.invalid_argument`. Omitting it resolves the layer to `github`. A request whose `id` names a layer that already exists in the tenant is a write against that layer and is authorized against it under the rule above, so a caller neither arm authorizes is refused with `403 auth.forbidden` rather than overwriting it.
+
+A `repo` URL may carry a credential in its userinfo. The registry stores the value as given and clones with it. A registration that names an existing layer ID replaces the stored `repo` with the value the request carries. A `repo` copied from a layer read holds no credential, so the request carries the full remote. A registration whose `id` names an existing layer, a soft-deleted one inside its recovery window included, and whose `repo` equals the value a read reports for a stored `repo` that carries a credential is refused with `400 registry.invalid_argument` carrying `details.constraint: "redacted_repo"`. The refusal is evaluated after the layer write, local-source, and admin-only-fields rules, stores nothing, and names no part of the stored value. Setting the boolean `force_repo_overwrite` to true admits that registration and stores the `repo` as sent. The field has no effect on any other registration, and `POST|PUT /v1/layers/update` ignores it.
 
 A registration also falls under the local-source rule above when its `source_type` is `local`, when it carries a `local_path` and its `source_type` is not `git`, or when its `repo` resolves to the Git file transport. A `git` registration is placed by its `repo` string alone, so a `local_path` sent beside a `git` `repo` naming a network endpoint does not place it on the arm. A registration the rule places on the arm and whose caller does not hold the `admin` role is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
 

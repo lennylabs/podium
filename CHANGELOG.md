@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Re-registering a layer with its reported `repo` is refused** (§7.3.1):
+  `POST /v1/layers` under an existing layer ID, with a `repo` equal to the
+  value a read reports for a stored `repo` that carries a credential, returns
+  `400 registry.invalid_argument` carrying
+  `details.constraint: "redacted_repo"`. The `force_repo_overwrite` body field
+  and `podium layer register --force-repo-overwrite` admit it.
+
+### Fixed
+
+- **A git layer's URL credential is no longer reported** (§7.3.1): a `repo`
+  such as `https://x-access-token:<token>@git.acme.com/acme/private.git` is
+  still accepted, stored, and used to clone. The layer responses
+  (`POST /v1/layers`, `POST|PUT /v1/layers/update`, `GET /v1/layers`, and
+  `POST /v1/layers/reorder`), the `ingest.source_unreachable` message of a
+  failed clone, the failed-ingest notification, and the boot log line for a
+  declared layer no longer carry the credential. A `repo` that is reported as
+  `[redacted]`, which is a value written with a scheme that does not parse as a
+  URL or an `http` or `https` URL with `@` after its host, reports a failed
+  clone with a fixed message that carries no upstream detail. Earlier versions
+  returned the stored URL on a layer read that is not admin-gated. Rotate any
+  token that was stored in a layer `repo` on an earlier version.
+
 ## [0.5.1] - 2026-10-06
 
 ### Fixed
