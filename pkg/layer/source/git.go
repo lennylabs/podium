@@ -55,7 +55,9 @@ func (Git) Snapshot(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
 	}
 	repo, err := git.CloneContext(ctx, storer, nil, cloneOpts)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrSourceUnreachable, err)
+		// Spec: §7.3.1 (Repository credentials). go-git and net/http print the
+		// request URL, userinfo included, in a failed clone's error.
+		return nil, fmt.Errorf("%w: %s", ErrSourceUnreachable, RedactCloneError(cfg.Repo, err))
 	}
 
 	hash, err := repo.ResolveRevision(plumbing.Revision(cfg.Ref))

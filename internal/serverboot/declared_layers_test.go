@@ -1,7 +1,9 @@
 package serverboot
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -259,6 +261,45 @@ func TestBootstrapDeclaredLayers_GitProviderSeeded(t *testing.T) {
 	}
 	if lc.GitProvider != "gitlab" {
 		t.Errorf("GitProvider = %q, want gitlab", lc.GitProvider)
+	}
+}
+
+// Spec: §7.3.1 — the boot log line for a declared git layer names the layer
+// and the repo host with the URL userinfo removed, and the stored row keeps
+// the full repo the clone reads. The test replaces the process-wide log
+// writer, so it does not run in parallel.
+func TestBootstrapDeclaredLayers_GitRepoCredentialNotLogged(t *testing.T) {
+	const repo = "https://alice-user:s3cr3tpw@git.acme.com/acme/finance.git"
+	st := newMemoryStoreWithTenant(t)
+	cfg := &Config{
+		declaredLayers: []yamlLayerEntry{{
+			ID:     "team-finance",
+			Source: yamlLayerSource{Git: &yamlGitSource{Repo: repo, Ref: "main"}},
+		}},
+	}
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(old)
+	if _, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil, false, collocatedVectorIngest{}); err != nil {
+		t.Fatalf("bootstrapDeclaredLayers: %v", err)
+	}
+	out := buf.String()
+	const want = "seeded declared git layer team-finance (repo=https://git.acme.com/acme/finance.git ref=main)"
+	if !strings.Contains(out, want) {
+		t.Errorf("boot log missing %q, got: %q", want, out)
+	}
+	for _, part := range []string{"alice-user", "s3cr3tpw"} {
+		if strings.Contains(out, part) {
+			t.Errorf("boot log carries the credential part %q: %q", part, out)
+		}
+	}
+	lc, err := st.GetLayerConfig(context.Background(), "default", "team-finance")
+	if err != nil {
+		t.Fatalf("GetLayerConfig: %v", err)
+	}
+	if lc.Repo != repo {
+		t.Errorf("stored Repo = %q, want the full declared value %q", lc.Repo, repo)
 	}
 }
 

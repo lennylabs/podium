@@ -21,7 +21,7 @@ var sleepFor = func(d time.Duration) { time.Sleep(d) }
 
 // layerCmd dispatches `podium layer ...` subcommands per spec §7.3.1.
 //
-//	podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>]
+//	podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>] [--force-repo-overwrite]
 //	podium layer register --id <id> --local <path>
 //	podium layer list
 //	podium layer reorder <id> [<id> ...]
@@ -237,6 +237,7 @@ func layerRegister(args []string) int {
 	public := fs.Bool("public", false, "visibility: public (requires the administrator role)")
 	organization := fs.Bool("organization", false, "visibility: organization-wide (requires the administrator role)")
 	forcePush := fs.String("force-push-policy", "", "git force-push handling: tolerant (default) or strict")
+	forceRepoOverwrite := fs.Bool("force-repo-overwrite", false, "store --repo as given when it is the value 'podium layer list' reports for a layer whose stored URL carries a credential")
 	var groups, users stringSliceFlag
 	fs.Var(&groups, "group", "OIDC group with visibility (repeatable; requires the administrator role)")
 	fs.Var(&users, "user", "OIDC subject or email with visibility (repeatable; requires the administrator role)")
@@ -274,6 +275,11 @@ func layerRegister(args []string) int {
 	}
 	if *forcePush != "" {
 		body["force_push_policy"] = *forcePush
+	}
+	// Spec: §7.3.1 — the member is sent only when the flag is set, because the
+	// registry reads it for the re-registration rule alone.
+	if *forceRepoOverwrite {
+		body["force_repo_overwrite"] = true
 	}
 	if *public {
 		body["public"] = true

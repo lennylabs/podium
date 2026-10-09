@@ -234,6 +234,63 @@ func TestDeclarativeLayers_DeclaredGitProviderSurvivesRestart(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.1 — a declared git layer whose repo carries a credential in its
+// URL userinfo is seeded with the full value, the list endpoint of the
+// running binary reports the repo with the userinfo removed, and the server
+// log names the seeded layer with neither credential part.
+func TestDeclarativeLayers_RepoCredentialNotReported(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	cfgPath := declaredGitProviderConfig(t, home, "team-finance",
+		"https://alice-user:s3cr3tpw@git.acme.com/acme/finance.git", "")
+	srv := startServerArgs(t, []string{
+		"HOME=" + home,
+		"PODIUM_CONFIG_FILE=" + cfgPath,
+		"PODIUM_SQLITE_PATH=" + filepath.Join(home, "podium.db"),
+		"PODIUM_SIGN=none",
+		"PODIUM_INGEST_OFFLINE=true",
+	}, "serve", "--standalone")
+
+	st, body := getRaw(t, srv.BaseURL+"/v1/layers")
+	if st != 200 {
+		t.Fatalf("GET /v1/layers = HTTP %d, want 200\nbody: %s", st, body)
+	}
+	// The seed line is written before the server answers, so its presence
+	// shows the absence checks below read a log that covers the boot.
+	serverLog := srv.log()
+	const seeded = "seeded declared git layer team-finance (repo=https://git.acme.com/acme/finance.git"
+	if !strings.Contains(serverLog, seeded) {
+		t.Errorf("server log missing %q:\n%s", seeded, serverLog)
+	}
+	for _, part := range []string{"alice-user", "s3cr3tpw"} {
+		if strings.Contains(string(body), part) {
+			t.Errorf("list response carries the credential part %q: %s", part, body)
+		}
+		if strings.Contains(serverLog, part) {
+			t.Errorf("server log carries the credential part %q:\n%s", part, serverLog)
+		}
+	}
+	var layers struct {
+		Layers []struct {
+			ID   string `json:"id"`
+			Repo string `json:"repo"`
+		} `json:"layers"`
+	}
+	if err := json.Unmarshal(body, &layers); err != nil {
+		t.Fatalf("decode list response: %v\nbody: %s", err, body)
+	}
+	const want = "https://git.acme.com/acme/finance.git"
+	for _, l := range layers.Layers {
+		if l.ID == "team-finance" {
+			if l.Repo != want {
+				t.Errorf("repo = %q, want %q", l.Repo, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("layer team-finance missing from /v1/layers: %s", body)
+}
+
 // Spec: §7.3.1 — the declaration is the setter for a declared layer's git
 // provider: a value set over HTTP is reverted to the declared value at the
 // next start, and a declared entry that omits the key re-seeds the empty

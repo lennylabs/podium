@@ -313,11 +313,19 @@ func (e *LayerEndpoint) WithGroupResolver(fn layer.GroupResolver) *LayerEndpoint
 // The result is always non-nil so an empty read marshals as [] rather than
 // null.
 //
+// The returned slice is a response projection: each element passed through
+// wireLayer, so its Repo carries no URL credential. It must not be written
+// back to the store, because that write would remove the credential the clone
+// reads from the stored row.
+//
 // Spec: §4.6, §7.3.1
 func (e *LayerEndpoint) readableBy(r *http.Request, caller layer.Identity, configs []store.LayerConfig) []store.LayerConfig {
 	out := make([]store.LayerConfig, 0, len(configs))
 	if e.authAdmin(r) == nil {
-		return append(out, configs...)
+		for _, c := range configs {
+			out = append(out, wireLayer(c))
+		}
+		return out
 	}
 	if !caller.IsAuthenticated || caller.Sub == "" {
 		return out
@@ -327,10 +335,19 @@ func (e *LayerEndpoint) readableBy(r *http.Request, caller layer.Identity, confi
 		// Precedence is unused on this read, so it stays at its zero value.
 		l := layer.Layer{ID: c.ID, Visibility: core.VisibilityOf(c)}
 		if layer.VisibleWith(l, caller, e.resolveGroup) {
-			out = append(out, c)
+			out = append(out, wireLayer(c))
 		}
 	}
 	return out
+}
+
+// wireLayer returns the copy of cfg a response carries. The caller keeps its
+// own cfg for the store, the audit event, and the ingest runner.
+//
+// Spec: §7.3.1 (Repository credentials)
+func wireLayer(cfg store.LayerConfig) store.LayerConfig {
+	cfg.Repo = source.RedactRepo(cfg.Repo)
+	return cfg
 }
 
 // verifiedCaller resolves the caller and refuses the request when the
@@ -724,6 +741,20 @@ type LayerRegisterRequest struct {
 	// update`"). When true on a git layer the handler regenerates
 	// WebhookSecret and returns the new value once. Ignored on register.
 	RotateWebhookSecret bool `json:"rotate_webhook_secret,omitempty"`
+	// ForceRepoOverwrite admits a registration the §7.3.1 re-registration rule
+	// would refuse: one whose repo is the value a read reports for the stored
+	// layer's credential-bearing repo. Read by that rule alone. Ignored on update.
+	ForceRepoOverwrite bool `json:"force_repo_overwrite,omitempty"`
+}
+
+// redactedRepoResubmitted reports whether repo is the value a read reports for
+// a stored repo that carries a credential. Storing it would replace the
+// credential-bearing remote with one that cannot clone a private repository.
+//
+// Spec: §7.3.1 (Re-registration with a reported repo)
+func redactedRepoResubmitted(stored store.LayerConfig, repo string) bool {
+	reported := source.RedactRepo(stored.Repo)
+	return reported != stored.Repo && repo == reported
 }
 
 // adminOnlyRegistrationFields reports the §7.3.1 admin-only registration
@@ -1280,7 +1311,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// with the unchanged layer object and leaves the audit stream reporting
 	// only changes that happened.
 	if layerConfigEqual(before, cfg) {
-		writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: cfg})
+		writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: wireLayer(cfg)})
 		return
 	}
 	if err := e.store.PutLayerConfig(r.Context(), cfg); err != nil {
@@ -1290,7 +1321,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// spec §8.1: a config mutation (including a secret rotation) is an
 	// auditable layer.config_changed / layer.user_registered event.
 	e.emitLayerEvent(r, before, cfg, "update")
-	resp := LayerRegisterResponse{Layer: cfg}
+	resp := LayerRegisterResponse{Layer: wireLayer(cfg)}
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
 	if rotated {
@@ -1415,6 +1446,16 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 				map[string]any{"constraint": "admin_only_fields"})
 			return
 		}
+	}
+
+	// spec: §7.3.1 — the re-registration rule. It runs below the write,
+	// local-source, and admin-only-fields rules so each keeps its envelope, and
+	// above every mutation so a refused request mints no secret and writes nothing.
+	if exists && !req.ForceRepoOverwrite && redactedRepoResubmitted(stored, req.Repo) {
+		writeErrorDetails(w, http.StatusBadRequest, "registry.invalid_argument",
+			"repo is the value a layer read reports for this layer, and the stored repository URL carries a credential that reads do not report; storing this value would remove it, so re-send the registration with the full repository URL, or set force_repo_overwrite (podium layer register --force-repo-overwrite) to store the value as sent",
+			map[string]any{"constraint": "redacted_repo"})
+		return
 	}
 
 	cfg := store.LayerConfig{
@@ -1547,7 +1588,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// layer.config_changed.
 	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "register")
 
-	resp := LayerRegisterResponse{Layer: cfg}
+	resp := LayerRegisterResponse{Layer: wireLayer(cfg)}
 	if cfg.SourceType == "git" {
 		resp.WebhookURL = e.webhookURL(cfg.TenantID, cfg.ID)
 		resp.WebhookSecret = cfg.WebhookSecret
