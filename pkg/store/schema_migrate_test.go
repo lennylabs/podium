@@ -192,6 +192,70 @@ func TestSQLite_AdditiveMigration_BackfillsLayerConfigColumns(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.1 (Repository credentials) — a database a 0.5.2 binary wrote
+// holds a git layer's URL credential in the repo column and has no
+// repo_userinfo column. Opening it adds the column and rewrites no row, and
+// the read splits the stored value. The legacy table carries the 0.5.2 column
+// set, because the split reads repo and the four-column fixture above has
+// none.
+func TestSQLite_AdditiveMigration_SplitsLegacyLayerRepo(t *testing.T) {
+	t.Parallel()
+	const registered = "https://alice-user:s3cr3tpw@git.acme.com/acme/x.git"
+	path := filepath.Join(t.TempDir(), "legacy.db")
+
+	legacyExec(t, path,
+		`CREATE TABLE layer_configs (
+			tenant_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			source_type TEXT NOT NULL,
+			repo TEXT NOT NULL DEFAULT '',
+			ref TEXT NOT NULL DEFAULT '',
+			root TEXT NOT NULL DEFAULT '',
+			local_path TEXT NOT NULL DEFAULT '',
+			ord INTEGER NOT NULL DEFAULT 0,
+			user_defined INTEGER NOT NULL DEFAULT 0,
+			owner TEXT NOT NULL DEFAULT '',
+			public INTEGER NOT NULL DEFAULT 0,
+			organization INTEGER NOT NULL DEFAULT 0,
+			groups TEXT NOT NULL DEFAULT '',
+			users TEXT NOT NULL DEFAULT '',
+			webhook_secret TEXT NOT NULL DEFAULT '',
+			last_ingested_ref TEXT NOT NULL DEFAULT '',
+			force_push_policy TEXT NOT NULL DEFAULT '',
+			git_provider TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			deleted_at TEXT,
+			last_ingested_at TEXT,
+			PRIMARY KEY (tenant_id, id)
+		)`,
+		`INSERT INTO layer_configs (tenant_id, id, source_type, repo, ref, created_at)
+			VALUES ('t', 'team-shared', 'git', '`+registered+`', 'main', '2024-01-01T00:00:00Z')`,
+	)
+	if columnExists(t, path, "layer_configs", "repo_userinfo") {
+		t.Fatal("precondition failed: legacy layer_configs already has repo_userinfo")
+	}
+
+	s, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite on legacy database: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	cfg, err := s.GetLayerConfig(context.Background(), "t", "team-shared")
+	if err != nil {
+		t.Fatalf("GetLayerConfig on migrated legacy row: %v", err)
+	}
+	if cfg.Repo != "https://git.acme.com/acme/x.git" || !cfg.RegisteredRepo.Present() || cfg.CloneRepo() != registered {
+		t.Errorf("migrated layer: Repo %q, split %t, CloneRepo %q; want the split of %q",
+			cfg.Repo, cfg.RegisteredRepo.Present(), cfg.CloneRepo(), registered)
+	}
+	// The open added the column and left the stored bytes as they were.
+	want := layerRepoColumns{Repo: registered}
+	if got := rawLayerRepo(t, s.db, sqliteSelectLayerRepo, "t", "team-shared"); got != want {
+		t.Errorf("columns after migration = %+v, want %+v", got, want)
+	}
+}
+
 // Spec: §13.4 Migrations — every additive column declared for forward
 // migration must correspond to a real column in the current CREATE TABLE
 // schema. A typo or a stale table name would silently fail to migrate the
