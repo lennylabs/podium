@@ -59,6 +59,7 @@ func TestRedactRepo(t *testing.T) {
 		{"filesystem path", "/srv/git/acme.git", "/srv/git/acme.git"},
 		{"file URL with @ in path", "file:///srv/git/a@b.git", "file:///srv/git/a@b.git"},
 		{"empty", "", ""},
+		{"network-path reference", "//tok@host/x://y", "//host/x://y"},
 		{"control character fails to parse", unsafeRepos[0], source.RedactedRepo},
 		{"slash in password fails to parse", unsafeRepos[1], source.RedactedRepo},
 		{"slash in token parses with no userinfo", unsafeRepos[2], source.RedactedRepo},
