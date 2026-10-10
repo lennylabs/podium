@@ -593,6 +593,7 @@ func layerConfigEqual(a, b store.LayerConfig) bool {
 		a.ID == b.ID &&
 		a.SourceType == b.SourceType &&
 		a.Repo == b.Repo &&
+		a.RegisteredRepo == b.RegisteredRepo &&
 		a.Ref == b.Ref &&
 		a.Root == b.Root &&
 		a.LocalPath == b.LocalPath &&

@@ -276,16 +276,29 @@ type LayerConfig struct {
 	// on a read that is not admin-gated (notably GET /v1/layers). The SQL
 	// backends persist it through an explicit column, so the tag does not
 	// affect storage.
-	TenantID    string `json:"-"`
-	ID          string `json:"id"`
-	SourceType  string `json:"source_type"` // "git" | "local"
-	Repo        string `json:"repo"`        // git source
-	Ref         string `json:"ref"`         // git source
-	Root        string `json:"root"`        // optional subpath
-	LocalPath   string `json:"local_path"`  // local source
-	Order       int    `json:"order"`       // precedence within the tenant (lower = lower precedence)
-	UserDefined bool   `json:"user_defined"`
-	Owner       string `json:"owner"` // OIDC sub of the registrant for user-defined layers
+	TenantID   string `json:"-"`
+	ID         string `json:"id"`
+	SourceType string `json:"source_type"` // "git" | "local"
+	// Repo is the git remote in the form a response may report. A LayerConfig
+	// returned by a Store read carries no URL userinfo here for a repo in the
+	// split class (see SplitLayerRepo). A config built by a caller and not yet
+	// read back, such as the one a registration or the boot seed writes, may
+	// still carry userinfo, so a response and a log line pass it through
+	// source.RedactRepo.
+	Repo string `json:"repo"` // git source
+	// RegisteredRepo is the git remote exactly as registered, userinfo
+	// included. A Store read sets it for a repo in the split class and leaves
+	// it empty otherwise. It is withheld from every response by the json:"-"
+	// tag, on the model of WebhookSecret. The clone reads it through CloneRepo.
+	//
+	// Spec: §7.3.1 (Repository credentials)
+	RegisteredRepo RegisteredRepo `json:"-"`
+	Ref            string         `json:"ref"`        // git source
+	Root           string         `json:"root"`       // optional subpath
+	LocalPath      string         `json:"local_path"` // local source
+	Order          int            `json:"order"`      // precedence within the tenant (lower = lower precedence)
+	UserDefined    bool           `json:"user_defined"`
+	Owner          string         `json:"owner"` // OIDC sub of the registrant for user-defined layers
 	// Visibility fields (subset of layer.Visibility per §4.6).
 	Public       bool     `json:"public"`
 	Organization bool     `json:"organization"`
