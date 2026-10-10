@@ -200,7 +200,7 @@ func TestLayerRepoCredential_CloneFailureReportsNoCredential(t *testing.T) {
 		assertNoRepoCredential(t, "notification", text)
 	}
 
-	// The clone reads the stored repo, so the remote still receives the
+	// The clone reads the registered value, so the remote still receives the
 	// credential after the responses above reported none of it.
 	users, passwords := remote.basicAuth()
 	if len(users) == 0 {

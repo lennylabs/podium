@@ -35,15 +35,41 @@ func assertNoRepoCredential(t *testing.T, what string, body []byte) {
 }
 
 // assertStoredRepo fails when the stored row of a live layer does not hold
-// want, which pins that a response redacted a copy and wrote nothing back.
+// want as the remote a clone uses, which pins that a response redacted a copy
+// and wrote nothing back.
 func assertStoredRepo(t *testing.T, st store.Store, id, want string) {
 	t.Helper()
 	cfg, err := st.GetLayerConfig(context.Background(), "t", id)
 	if err != nil {
 		t.Fatalf("GetLayerConfig %s: %v", id, err)
 	}
-	if cfg.Repo != want {
-		t.Errorf("stored Repo of %s = %q, want %q", id, cfg.Repo, want)
+	if got := cfg.CloneRepo(); got != want {
+		t.Errorf("stored CloneRepo of %s = %q, want %q", id, got, want)
+	}
+}
+
+// assertSplitRepo fails when the stored row of a live layer does not hold
+// registered as the remote a clone uses and reported as its Repo.
+func assertSplitRepo(t *testing.T, st store.Store, id, registered, reported string) {
+	t.Helper()
+	cfg, err := st.GetLayerConfig(context.Background(), "t", id)
+	if err != nil {
+		t.Fatalf("GetLayerConfig %s: %v", id, err)
+	}
+	assertSplitConfig(t, cfg, registered, reported)
+}
+
+// assertSplitConfig fails when a config read from the store was not split
+// into the registered URL, which the clone uses, and the reported Repo.
+//
+// Spec: §7.3.1 (Repository credentials)
+func assertSplitConfig(t *testing.T, cfg store.LayerConfig, registered, reported string) {
+	t.Helper()
+	if got := cfg.CloneRepo(); got != registered {
+		t.Errorf("stored CloneRepo of %s = %q, want %q", cfg.ID, got, registered)
+	}
+	if cfg.Repo != reported {
+		t.Errorf("stored Repo of %s = %q, want %q", cfg.ID, cfg.Repo, reported)
 	}
 }
 
@@ -115,9 +141,7 @@ func TestLayerRepoCredential_RegisterResponse(t *testing.T) {
 	if hookSecret == "" || hookSecret != stored.WebhookSecret {
 		t.Errorf("webhook_secret = %q, want the stored secret %q", hookSecret, stored.WebhookSecret)
 	}
-	if stored.Repo != credRepoFull {
-		t.Errorf("stored Repo = %q, want %q", stored.Repo, credRepoFull)
-	}
+	assertSplitConfig(t, stored, credRepoFull, credRepoReported)
 }
 
 // Spec: §7.3.1 — an update, and an update that stores nothing, report the
@@ -137,7 +161,7 @@ func TestLayerRepoCredential_UpdateResponse(t *testing.T) {
 		if repo, _, _ := decodeRegisterResponse(t, body); repo != credRepoReported {
 			t.Errorf("%s: layer.repo = %q, want %q", name, repo, credRepoReported)
 		}
-		assertStoredRepo(t, st, "private", credRepoFull)
+		assertSplitRepo(t, st, "private", credRepoFull, credRepoReported)
 	}
 	stored, _ := st.GetLayerConfig(context.Background(), "t", "private")
 	if stored.Ref != "develop" {
@@ -173,7 +197,7 @@ func TestLayerRepoCredential_ListResponse(t *testing.T) {
 			if got := listedRepos(t, live)["private"]; got != credRepoReported {
 				t.Errorf("live list repo = %q, want %q", got, credRepoReported)
 			}
-			assertStoredRepo(t, st, "private", credRepoFull)
+			assertSplitRepo(t, st, "private", credRepoFull, credRepoReported)
 
 			resp, body := mustDelete(t, base, "/v1/layers?id=private")
 			if resp.StatusCode != http.StatusOK {
@@ -189,9 +213,10 @@ func TestLayerRepoCredential_ListResponse(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ListDeletedLayerConfigs: %v", err)
 			}
-			if len(tombstones) != 1 || tombstones[0].Repo != credRepoFull {
-				t.Errorf("stored tombstones = %+v, want one row with Repo %q", tombstones, credRepoFull)
+			if len(tombstones) != 1 {
+				t.Fatalf("stored tombstones = %+v, want one row", tombstones)
 			}
+			assertSplitConfig(t, tombstones[0], credRepoFull, credRepoReported)
 		})
 	}
 }
@@ -226,8 +251,8 @@ func TestLayerRepoCredential_ReorderResponse(t *testing.T) {
 			t.Errorf("reorder repo of %s = %q, want %q", id, got[id], repo)
 		}
 	}
-	assertStoredRepo(t, st, "private", credRepoFull)
-	assertStoredRepo(t, st, "other", otherFull)
+	assertSplitRepo(t, st, "private", credRepoFull, credRepoReported)
+	assertSplitRepo(t, st, "other", otherFull, "https://git.acme.com/acme/other.git")
 }
 
 // Spec: §7.3.1 — one userinfo rule covers every URL scheme, and a repo whose
@@ -236,13 +261,17 @@ func TestLayerRepoCredential_ReorderResponse(t *testing.T) {
 func TestLayerRepoCredential_SchemeAndFailClosed(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name, id, stored, reported string
+		// stored is the registered value, reported is the value a response
+		// carries, and repo is the Repo a store read returns.
+		name, id, stored, reported, repo string
 	}{
-		{"ssh userinfo is removed whole", "over-ssh", "ssh://git:s3cr3tpw@host/x.git", "ssh://host/x.git"},
+		{"ssh userinfo is removed whole", "over-ssh", "ssh://git:s3cr3tpw@host/x.git", "ssh://host/x.git", "ssh://host/x.git"},
 		// url.Parse rejects the non-numeric port, so the userinfo cannot be
-		// located and the whole value is withheld.
+		// located and the whole value is withheld. The store does not split a
+		// fail-closed value, so Repo keeps the registered bytes.
 		{"unparseable URL is withheld", "unparseable",
-			"https://alice-user:s3cr3tpw@git.acme.com:port/x.git", "[redacted]"},
+			"https://alice-user:s3cr3tpw@git.acme.com:port/x.git", "[redacted]",
+			"https://alice-user:s3cr3tpw@git.acme.com:port/x.git"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -260,7 +289,7 @@ func TestLayerRepoCredential_SchemeAndFailClosed(t *testing.T) {
 			if got := listedRepos(t, list)[tc.id]; got != tc.reported {
 				t.Errorf("list repo = %q, want %q", got, tc.reported)
 			}
-			assertStoredRepo(t, st, tc.id, tc.stored)
+			assertSplitRepo(t, st, tc.id, tc.stored, tc.repo)
 		})
 	}
 }
@@ -416,8 +445,9 @@ func TestLayerRegister_RedactedRepoGuard(t *testing.T) {
 		if after := h.stored(t, "private"); !reflect.DeepEqual(before, after) {
 			t.Errorf("stored row changed on a refused registration:\nbefore %+v\nafter  %+v", before, after)
 		}
-		if before.Repo != credRepoFull || before.WebhookSecret == "" {
-			t.Errorf("seeded row = %+v, want Repo %q and a minted webhook secret", before, credRepoFull)
+		assertSplitConfig(t, before, credRepoFull, credRepoReported)
+		if before.WebhookSecret == "" {
+			t.Errorf("seeded row = %+v, want a minted webhook secret", before)
 		}
 		if events := h.sink.Events(); len(events) != 1 {
 			t.Errorf("audit sink holds %d events, want the seeding event alone: %+v", len(events), events)
@@ -458,7 +488,7 @@ func TestLayerRegister_RedactedRepoGuard(t *testing.T) {
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("status = %d, want 201: %s", resp.StatusCode, body)
 		}
-		assertStoredRepo(t, h.st, "private", credRepoFull)
+		assertSplitRepo(t, h.st, "private", credRepoFull, credRepoReported)
 	})
 
 	t.Run("no stored credential", func(t *testing.T) {
@@ -513,9 +543,10 @@ func TestLayerRegister_RedactedRepoGuard(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListDeletedLayerConfigs: %v", err)
 		}
-		if len(tombstones) != 1 || tombstones[0].Repo != credRepoFull {
-			t.Errorf("stored tombstones = %+v, want one row with Repo %q", tombstones, credRepoFull)
+		if len(tombstones) != 1 {
+			t.Fatalf("stored tombstones = %+v, want one row", tombstones)
 		}
+		assertSplitConfig(t, tombstones[0], credRepoFull, credRepoReported)
 		if _, err := h.st.GetLayerConfig(context.Background(), "t", "private"); err == nil {
 			t.Errorf("a refused registration restored the soft-deleted layer")
 		}
@@ -547,7 +578,7 @@ func TestLayerRegister_RedactedRepoGuard(t *testing.T) {
 		if code, _, constraint := decodeErrorEnvelope(t, body); code != "auth.forbidden" || constraint != "" {
 			t.Errorf("code = %q, details.constraint = %q, want auth.forbidden and no constraint", code, constraint)
 		}
-		assertStoredRepo(t, h.st, "alice-personal", credRepoFull)
+		assertSplitRepo(t, h.st, "alice-personal", credRepoFull, credRepoReported)
 	})
 
 	t.Run("admin-only arm keeps its envelope", func(t *testing.T) {
@@ -562,7 +593,7 @@ func TestLayerRegister_RedactedRepoGuard(t *testing.T) {
 		if code, _, constraint := decodeErrorEnvelope(t, body); code != "auth.forbidden" || constraint != "admin_only_fields" {
 			t.Errorf("code = %q, details.constraint = %q, want auth.forbidden and admin_only_fields", code, constraint)
 		}
-		assertStoredRepo(t, h.st, "alice-personal", credRepoFull)
+		assertSplitRepo(t, h.st, "alice-personal", credRepoFull, credRepoReported)
 	})
 
 	t.Run("admin re-registration of a user-defined layer", func(t *testing.T) {
@@ -573,17 +604,21 @@ func TestLayerRegister_RedactedRepoGuard(t *testing.T) {
 		h.actAs(guardAdmin)
 		resp, body := h.register(t, "alice-personal", reported, nil)
 		assertRedactedRepoRefusal(t, resp, body)
-		if cfg := h.stored(t, "alice-personal"); !cfg.UserDefined || cfg.Owner != "alice@acme.com" || cfg.Repo != credRepoFull {
-			t.Errorf("stored row = %+v, want alice's user-defined layer with Repo %q", cfg, credRepoFull)
+		cfg := h.stored(t, "alice-personal")
+		if !cfg.UserDefined || cfg.Owner != "alice@acme.com" {
+			t.Errorf("stored row = %+v, want alice's user-defined layer", cfg)
 		}
+		assertSplitConfig(t, cfg, credRepoFull, credRepoReported)
 
 		resp, body = h.register(t, "alice-personal", credRepoFull, nil)
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("full-URL registration: status = %d, want 201: %s", resp.StatusCode, body)
 		}
-		if cfg := h.stored(t, "alice-personal"); cfg.UserDefined || cfg.Repo != credRepoFull {
-			t.Errorf("stored row = %+v, want an admin-defined layer with Repo %q", cfg, credRepoFull)
+		cfg = h.stored(t, "alice-personal")
+		if cfg.UserDefined {
+			t.Errorf("stored row = %+v, want an admin-defined layer", cfg)
 		}
+		assertSplitConfig(t, cfg, credRepoFull, credRepoReported)
 	})
 
 	t.Run("update ignores the member", func(t *testing.T) {
@@ -598,6 +633,6 @@ func TestLayerRegister_RedactedRepoGuard(t *testing.T) {
 			t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
 		}
 		assertNoRepoCredential(t, "update response", body)
-		assertStoredRepo(t, h.st, "private", credRepoFull)
+		assertSplitRepo(t, h.st, "private", credRepoFull, credRepoReported)
 	})
 }
