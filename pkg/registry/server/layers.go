@@ -1685,7 +1685,7 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 	// spec: §7.3.1 — the local-source authorization rule, evaluated against
 	// the tombstoned layer's stored source. A restore returns a layer whose
 	// next ingest re-reads that path, so it takes the same arm.
-	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.Repo) {
+	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.CloneRepo()) {
 		return
 	}
 	if err := e.store.RestoreLayerConfig(r.Context(), tenantID, id); err != nil {
@@ -1896,7 +1896,7 @@ func (e *LayerEndpoint) reingest(w http.ResponseWriter, r *http.Request) {
 	// spec: §7.3.1 — the local-source authorization rule. A reingest
 	// re-reads the stored layer's filesystem path with the registry
 	// process's own rights, so it is a tenant admin's operation.
-	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.Repo) {
+	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.CloneRepo()) {
 		return
 	}
 	e.runIngestAndRespond(w, r, cfg, bg)
