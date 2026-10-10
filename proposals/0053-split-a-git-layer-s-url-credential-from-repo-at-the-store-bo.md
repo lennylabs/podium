@@ -1,7 +1,7 @@
 # Proposal 0053: Split a git layer's URL credential from `repo` at the store boundary, with the stored value unchanged (step 1 of 2)
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-09). Signed off as staged, with the open questions settled as recorded in "Resolved decisions" (RD-1 through RD-3). Verified on 2026-10-09 after 4 adversarial review rounds (6 findings fixed).
+- Status: Implemented (2026-10-09). Signed off as staged, with the open questions settled as recorded in "Resolved decisions" (RD-1 through RD-3). Verified on 2026-10-09 after 4 adversarial review rounds (6 findings fixed).
 - Date: 2026-10-09
 
 This document stages the proposed code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off. The proposal stages no spec edit (D-14).
@@ -55,23 +55,23 @@ This document stages the proposed code, test, and documentation changes. It does
 
 ## Implementation checklist
 
-- [ ] **S1 · code** — CODE-1. `internal/repourl` with `Redact`, `Unsafe`, `Split`, and `Join`, and `pkg/layer/source/redact.go` delegating to it.
+- [x] **S1 · code** — CODE-1. `internal/repourl` with `Redact`, `Unsafe`, `Split`, and `Join`, and `pkg/layer/source/redact.go` delegating to it.
       Levels: unit. Depends on: —
-- [ ] **S2 · code** — CODE-2. `store.RegisteredRepo`, `LayerConfig.RegisteredRepo`, `CloneRepo()`, `SplitLayerRepo`, `LayerRepoColumn`, and `ErrRepoCredentialMismatch`, with the `layerConfigEqual` line and the `TestWakesWatchers_EveryField` row.
+- [x] **S2 · code** — CODE-2. `store.RegisteredRepo`, `LayerConfig.RegisteredRepo`, `CloneRepo()`, `SplitLayerRepo`, `LayerRepoColumn`, and `ErrRepoCredentialMismatch`, with the `layerConfigEqual` line and the `TestWakesWatchers_EveryField` row.
       Levels: unit. Depends on: S1
-- [ ] **S3 · code** — CODE-4. `pkg/registry/ingest/orchestrator.go` passes `cfg.CloneRepo()` to the provider, and the restore, reingest, and inbound-webhook handlers pass `cfg.CloneRepo()` to `authorizeLocalSource`.
+- [x] **S3 · code** — CODE-4. `pkg/registry/ingest/orchestrator.go` passes `cfg.CloneRepo()` to the provider, and the restore, reingest, and inbound-webhook handlers pass `cfg.CloneRepo()` to `authorizeLocalSource`.
       Levels: unit, integration. Depends on: S2
-- [ ] **S4 · code** — CODE-5. `reportedRepo`, with `wireLayer` and `redactedRepoResubmitted` reading it, so that the reported value and the guard hold for a split layer.
+- [x] **S4 · code** — CODE-5. `reportedRepo`, with `wireLayer` and `redactedRepoResubmitted` reading it, so that the reported value and the guard hold for a split layer.
       Levels: unit, integration. Depends on: S2
-- [ ] **S5 · code** — CODE-3, TEST-3. The memory, SQLite, and Postgres backends split on read and recompose on write, `layer_configs` gains `repo_userinfo`, and the existing stored-value assertions follow. The two are bundled because the listed assertions fail from the commit that makes the store split.
+- [x] **S5 · code** — CODE-3, TEST-3. The memory, SQLite, and Postgres backends split on read and recompose on write, `layer_configs` gains `repo_userinfo`, and the existing stored-value assertions follow. The two are bundled because the listed assertions fail from the commit that makes the store split.
       Levels: unit, conformance, integration, e2e. Depends on: S3, S4
-- [ ] **S6 · test** — TEST-1. Unit tests for `internal/repourl` and the added `TestRedactRepo` row.
+- [x] **S6 · test** — TEST-1. Unit tests for `internal/repourl` and the added `TestRedactRepo` row.
       Levels: unit. Depends on: S1
-- [ ] **S7 · test** — TEST-2. The `LayerRepoCredential` conformance case, the raw-column tests, the 0.5.2 rollback test, the migration test, the forward-read rows with their SQLite and Postgres raw-SQL tests, the print and marshal test, and the write-rule rows.
+- [x] **S7 · test** — TEST-2. The `LayerRepoCredential` conformance case, the raw-column tests, the 0.5.2 rollback test, the migration test, the forward-read rows with their SQLite and Postgres raw-SQL tests, the print and marshal test, and the write-rule rows.
       Levels: unit, conformance, integration. Depends on: S5
-- [ ] **S8 · test** — TEST-4. New handler subtests, the `reportedRepo` unit rows, the local-source gate rows, the orchestrator test, the `podium admin migrate` case, and the end-to-end restart test.
+- [x] **S8 · test** — TEST-4. New handler subtests, the `reportedRepo` unit rows, the local-source gate rows, the orchestrator test, the `podium admin migrate` case, and the end-to-end restart test.
       Levels: unit, integration, e2e. Depends on: S5
-- [ ] **S9 · docs** — DOC-1. The changelog entry.
+- [x] **S9 · docs** — DOC-1. The changelog entry.
       Levels: —. Depends on: S5
 
 **Ordering constraints.** S3 and S4 precede S5: each is behavior-neutral while no store sets `RegisteredRepo`, and each is required from the commit that sets it. S6 is independent of S2 through S5. Land S1 through S8 in one pull request, so the 85% coverage bar on the new lines is met when the pull request is measured.
