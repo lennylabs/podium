@@ -323,7 +323,14 @@ type guardHarness struct {
 
 func newGuardHarness(t *testing.T, who guardCaller) *guardHarness {
 	t.Helper()
-	h := &guardHarness{st: store.NewMemory(), sink: audit.NewMemory(), who: who}
+	return newGuardHarnessOn(t, who, store.NewMemory())
+}
+
+// newGuardHarnessOn is newGuardHarness over a store the caller built, for a
+// case whose subject is how the store returns a layer.
+func newGuardHarnessOn(t *testing.T, who guardCaller, st store.Store) *guardHarness {
+	t.Helper()
+	h := &guardHarness{st: st, sink: audit.NewMemory(), who: who}
 	if err := h.st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
@@ -419,15 +426,7 @@ func assertRedactedRepoRefusal(t *testing.T, resp *http.Response, body []byte) {
 func TestLayerRegister_RedactedRepoGuard(t *testing.T) {
 	t.Parallel()
 
-	// seed registers id as the harness's current caller and returns the
-	// reported repo, asserting that the read differs from the stored value.
-	seed := func(t *testing.T, h *guardHarness, id, repo string) string {
-		t.Helper()
-		if resp, body := h.register(t, id, repo, nil); resp.StatusCode != http.StatusCreated {
-			t.Fatalf("seed %s: status %d, body=%s", id, resp.StatusCode, body)
-		}
-		return h.reported(t, id)
-	}
+	seed := seedGuardLayer
 
 	t.Run("refuse", func(t *testing.T) {
 		t.Parallel()
@@ -635,4 +634,210 @@ func TestLayerRegister_RedactedRepoGuard(t *testing.T) {
 		assertNoRepoCredential(t, "update response", body)
 		assertSplitRepo(t, h.st, "private", credRepoFull, credRepoReported)
 	})
+}
+
+// unsplitStore wraps a store and returns every live layer the way a store
+// that does not apply the §7.3.1 read rule returns it: the registered URL in
+// Repo, userinfo included, and an empty RegisteredRepo. A custom RegistryStore
+// that skips store.SplitLayerRepo reads this way.
+type unsplitStore struct {
+	store.Store
+}
+
+// unsplit undoes the read split on one config.
+func unsplit(cfg store.LayerConfig) store.LayerConfig {
+	cfg.Repo = cfg.CloneRepo()
+	cfg.RegisteredRepo = ""
+	return cfg
+}
+
+// GetLayerConfig delegates and returns the layer unsplit.
+func (u unsplitStore) GetLayerConfig(ctx context.Context, tenantID, id string) (store.LayerConfig, error) {
+	cfg, err := u.Store.GetLayerConfig(ctx, tenantID, id)
+	return unsplit(cfg), err
+}
+
+// ListLayerConfigs delegates and returns each layer unsplit.
+func (u unsplitStore) ListLayerConfigs(ctx context.Context, tenantID string) ([]store.LayerConfig, error) {
+	cfgs, err := u.Store.ListLayerConfigs(ctx, tenantID)
+	for i := range cfgs {
+		cfgs[i] = unsplit(cfgs[i])
+	}
+	return cfgs, err
+}
+
+// seedGuardLayer registers id with repo as the harness's current caller and
+// returns the repo the list response reports for it.
+func seedGuardLayer(t *testing.T, h *guardHarness, id, repo string) string {
+	t.Helper()
+	if resp, body := h.register(t, id, repo, nil); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("seed %s: status %d, body=%s", id, resp.StatusCode, body)
+	}
+	return h.reported(t, id)
+}
+
+// assertGuardRefusesThenForces asserts the two halves of the re-registration
+// rule for a stored layer: a registration with the reported repo is refused
+// and leaves the row unchanged, and the same body with force_repo_overwrite
+// stores the value as sent.
+func assertGuardRefusesThenForces(t *testing.T, h *guardHarness, id, reported string) {
+	t.Helper()
+	before := h.stored(t, id)
+	resp, body := h.register(t, id, reported, nil)
+	assertRedactedRepoRefusal(t, resp, body)
+	if after := h.stored(t, id); !reflect.DeepEqual(before, after) {
+		t.Errorf("stored row changed on a refused registration:\nbefore %+v\nafter  %+v", before, after)
+	}
+
+	resp, body = h.register(t, id, reported, map[string]any{"force_repo_overwrite": true})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("forced registration: status = %d, want 201: %s", resp.StatusCode, body)
+	}
+	assertStoredRepo(t, h.st, id, reported)
+}
+
+// Spec: §7.3.1 (Re-registration with a reported repo) — a URL whose userinfo
+// is present and empty is reported with the userinfo removed, so the stored
+// layer counts as holding a credential: a registration with the reported
+// value is refused, and force_repo_overwrite stores it.
+func TestLayerRegister_RedactedRepoGuard_EmptyUserinfo(t *testing.T) {
+	t.Parallel()
+	const reportedWant = "https://git.acme.com/x.git"
+	for _, registered := range []string{"https://@git.acme.com/x.git", "https://:@git.acme.com/x.git"} {
+		registered := registered
+		t.Run(registered, func(t *testing.T) {
+			t.Parallel()
+			h := newGuardHarness(t, guardAdmin)
+			reported := seedGuardLayer(t, h, "empty", registered)
+			if reported != reportedWant {
+				t.Fatalf("reported repo = %q, want %q", reported, reportedWant)
+			}
+			assertSplitConfig(t, h.stored(t, "empty"), registered, reportedWant)
+			assertGuardRefusesThenForces(t, h, "empty", reported)
+		})
+	}
+}
+
+// Spec: §7.3.1 (Repository credentials) — an update, a reorder, and a webhook
+// secret rotation each read the stored layer and write it back, and the
+// stored layer still clones with the registered URL after each of them.
+func TestLayerRepoCredential_ReadModifyWriteKeepsCloneRepo(t *testing.T) {
+	t.Parallel()
+	base, st, cleanup := newLayerHarness(t)
+	defer cleanup()
+	registerCredLayer(t, base, "private", credRepoFull)
+	minted, err := st.GetLayerConfig(context.Background(), "t", "private")
+	if err != nil {
+		t.Fatalf("GetLayerConfig: %v", err)
+	}
+
+	steps := []struct {
+		name string
+		do   func() (*http.Response, []byte)
+	}{
+		{"update", func() (*http.Response, []byte) {
+			return mustPut(t, base, "/v1/layers/update?id=private", map[string]any{"ref": "develop"})
+		}},
+		{"reorder", func() (*http.Response, []byte) {
+			return mustPost(t, base, "/v1/layers/reorder", map[string]any{"order": []string{"private"}})
+		}},
+		{"rotate_webhook_secret", func() (*http.Response, []byte) {
+			return mustPut(t, base, "/v1/layers/update?id=private", map[string]any{"rotate_webhook_secret": true})
+		}},
+	}
+	for _, step := range steps {
+		resp, body := step.do()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status %d, body=%s", step.name, resp.StatusCode, body)
+		}
+		assertNoRepoCredential(t, step.name+" response", body)
+		assertSplitRepo(t, st, "private", credRepoFull, credRepoReported)
+	}
+
+	// The writes above reached the store, so the assertions did not pass on
+	// three requests that stored nothing.
+	stored, err := st.GetLayerConfig(context.Background(), "t", "private")
+	if err != nil {
+		t.Fatalf("GetLayerConfig: %v", err)
+	}
+	if stored.Ref != "develop" {
+		t.Errorf("stored Ref = %q, want develop", stored.Ref)
+	}
+	if stored.WebhookSecret == "" || stored.WebhookSecret == minted.WebhookSecret {
+		t.Errorf("stored webhook secret was not rotated")
+	}
+}
+
+// Spec: §7.3.1 (Re-registration with a reported repo) — a stored layer holds
+// a credential when the value a read reports differs from its Repo, whether
+// or not the store split a RegisteredRepo off. A store that returns the
+// registered URL unsplit therefore gets the same list response and the same
+// refusal as one that splits.
+func TestLayerRegister_RedactedRepoGuard_StoreThatDoesNotSplit(t *testing.T) {
+	t.Parallel()
+	mem := store.NewMemory()
+	h := newGuardHarnessOn(t, guardAdmin, unsplitStore{Store: mem})
+
+	reported := seedGuardLayer(t, h, "private", credRepoFull)
+	if reported != credRepoReported {
+		t.Fatalf("list repo = %q, want %q", reported, credRepoReported)
+	}
+	// The handler reads the layer unsplit, so the refusal below is decided by
+	// the reported value differing from Repo and by nothing else.
+	seen := h.stored(t, "private")
+	if seen.RegisteredRepo.Present() || seen.Repo != credRepoFull {
+		t.Fatalf("wrapped read = Repo %q with a present RegisteredRepo %t, want the unsplit URL and none",
+			seen.Repo, seen.RegisteredRepo.Present())
+	}
+	assertGuardRefusesThenForces(t, h, "private", reported)
+}
+
+// Spec: §7.3.1 (Repository credentials) / §7.3.1 (Re-registration with a
+// reported repo) — a registered URL whose reported form carries "@" after its
+// host is reported as that form by every response, and the guard refuses that
+// form. Redacting the reported form a second time yields [redacted], so each
+// assertion fails on a handler that redacts a Repo the store already redacted.
+func TestLayerRepoCredential_ReportedValueIsRedactedOnce(t *testing.T) {
+	t.Parallel()
+	const (
+		registered   = "https://ghp_tok3n@git.acme.com/acme/a%40b c.git"
+		reportedWant = "https://git.acme.com/acme/a@b%20c.git"
+	)
+	h := newGuardHarness(t, guardAdmin)
+	assertReported := func(what, got string, body []byte) {
+		t.Helper()
+		if got != reportedWant {
+			t.Errorf("%s repo = %q, want %q", what, got, reportedWant)
+		}
+		if strings.Contains(string(body), "ghp_tok3n") {
+			t.Errorf("%s carries the credential: %s", what, body)
+		}
+	}
+
+	resp, body := h.register(t, "odd", registered, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register: status %d, body=%s", resp.StatusCode, body)
+	}
+	repo, _, _ := decodeRegisterResponse(t, body)
+	assertReported("register response", repo, body)
+	assertSplitConfig(t, h.stored(t, "odd"), registered, reportedWant)
+
+	list := mustGet(t, h.base, "/v1/layers")
+	assertReported("list response", listedRepos(t, list)["odd"], list)
+
+	resp, body = mustPut(t, h.base, "/v1/layers/update?id=odd", map[string]any{"ref": "develop"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update: status %d, body=%s", resp.StatusCode, body)
+	}
+	repo, _, _ = decodeRegisterResponse(t, body)
+	assertReported("update response", repo, body)
+
+	resp, body = mustPost(t, h.base, "/v1/layers/reorder", map[string]any{"order": []string{"odd"}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reorder: status %d, body=%s", resp.StatusCode, body)
+	}
+	assertReported("reorder response", listedRepos(t, body)["odd"], body)
+	assertSplitConfig(t, h.stored(t, "odd"), registered, reportedWant)
+
+	assertGuardRefusesThenForces(t, h, "odd", reportedWant)
 }

@@ -22,12 +22,15 @@ type fakeProvider struct {
 	reference        string
 	historyRewritten bool
 	calledWithPrior  string
+	// calledWithRepo is the remote the orchestrator handed to Snapshot.
+	calledWithRepo string
 }
 
 func (p *fakeProvider) ID() string                   { return "fake" }
 func (p *fakeProvider) Trigger() source.TriggerModel { return source.TriggerManual }
 func (p *fakeProvider) Snapshot(_ context.Context, cfg source.LayerConfig) (*source.Snapshot, error) {
 	p.calledWithPrior = cfg.PriorRef
+	p.calledWithRepo = cfg.Repo
 	return &source.Snapshot{
 		Reference:        p.reference,
 		Files:            p.files,
@@ -89,6 +92,68 @@ func TestSourceIngest_TracksLastIngestedRef(t *testing.T) {
 	// spec: §7.3.1 — a successful cycle stamps last_ingested_at.
 	if updated.LastIngestedAt == nil {
 		t.Errorf("LastIngestedAt not stamped after a successful ingest")
+	}
+}
+
+// Spec: §7.3.1 (Repository credentials) — the ingest clones with the stored
+// value. A layer read back from the store carries the reportable form in Repo,
+// and the provider still receives the registered URL, userinfo included. The
+// post-ingest stamp writes the config back without changing that URL. A remote
+// outside the split class reaches the provider as its Repo.
+func TestSourceIngest_ProviderReceivesCloneRepo(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, registered, repo string
+	}{
+		{"URL with userinfo", "https://alice-user:s3cr3tpw@git.acme.com/acme/x.git", "https://git.acme.com/acme/x.git"},
+		{"scp-like remote", "git@github.com:acme/x.git", "git@github.com:acme/x.git"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			st := store.NewMemory()
+			if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+				t.Fatalf("CreateTenant: %v", err)
+			}
+			if err := st.PutLayerConfig(ctx, store.LayerConfig{
+				TenantID: "t", ID: "private", SourceType: "fake", Repo: tc.registered, Ref: "main",
+			}); err != nil {
+				t.Fatalf("PutLayerConfig: %v", err)
+			}
+			cfg, err := st.GetLayerConfig(ctx, "t", "private")
+			if err != nil {
+				t.Fatalf("GetLayerConfig: %v", err)
+			}
+			if cfg.Repo != tc.repo {
+				t.Fatalf("stored Repo = %q, want %q", cfg.Repo, tc.repo)
+			}
+
+			provider := &fakeProvider{
+				files: fstest.MapFS{"g/ARTIFACT.md": &fstest.MapFile{
+					Data: []byte(contextManifestBody("glossary")),
+				}},
+				reference: "fedcba9876543210",
+			}
+			if _, err := ingest.SourceIngest(ctx, st, provider, cfg, nil, nil); err != nil {
+				t.Fatalf("SourceIngest: %v", err)
+			}
+			if provider.calledWithRepo != tc.registered {
+				t.Errorf("provider received Repo %q, want the registered %q", provider.calledWithRepo, tc.registered)
+			}
+			stamped, err := st.GetLayerConfig(ctx, "t", "private")
+			if err != nil {
+				t.Fatalf("GetLayerConfig after the ingest: %v", err)
+			}
+			if stamped.LastIngestedRef != "fedcba9876543210" {
+				t.Errorf("LastIngestedRef = %q, want fedcba9876543210", stamped.LastIngestedRef)
+			}
+			if stamped.CloneRepo() != tc.registered || stamped.Repo != tc.repo {
+				t.Errorf("after the stamp: CloneRepo = %q, Repo = %q; want %q and %q",
+					stamped.CloneRepo(), stamped.Repo, tc.registered, tc.repo)
+			}
+		})
 	}
 }
 

@@ -4,9 +4,52 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
+
+// basicAuthPair is the credential one request to the git remote carried.
+type basicAuthPair struct {
+	user, password string
+}
+
+// failingGitRemote is an HTTP remote that answers every request with 500 and
+// records the basic-auth pair each request carried. The pair comes from the
+// Authorization header: a request line never carries URL userinfo, so the
+// request URL says nothing about the credential a clone sent.
+type failingGitRemote struct {
+	*httptest.Server
+
+	// mu guards pairs, which the handler appends to from the server's request
+	// goroutines.
+	mu    sync.Mutex
+	pairs []basicAuthPair
+}
+
+func newFailingGitRemote(t *testing.T) *failingGitRemote {
+	t.Helper()
+	remote := &failingGitRemote{}
+	remote.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if user, password, ok := r.BasicAuth(); ok {
+			remote.mu.Lock()
+			remote.pairs = append(remote.pairs, basicAuthPair{user, password})
+			remote.mu.Unlock()
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(remote.Close)
+	return remote
+}
+
+// recorded returns a copy of the pairs the remote has received.
+func (f *failingGitRemote) recorded() []basicAuthPair {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]basicAuthPair(nil), f.pairs...)
+}
 
 // reportedLayerRepo reads GET /v1/layers and returns the repo the response
 // carries for id.
@@ -92,4 +135,81 @@ func TestLayerRegister_RedactedRepoGuard_CLI(t *testing.T) {
 	// With the credential gone the stored value has no userinfo, so the guard
 	// no longer matches and the same registration needs no flag.
 	cliWantExit(t, register(reported), 0, "re-registration after the forced overwrite")
+}
+
+// Spec: §7.3.1 (Repository credentials) / §7.3.1 (Re-registration with a
+// reported repo) — a git layer registered with a credential in its URL
+// userinfo keeps that credential across a restart of the binary on the same
+// SQLite file. After the restart the list reports the repo without userinfo,
+// a registration with the reported value is refused, a reingest sends the
+// registered credential to the remote, and the log of neither process names a
+// credential part.
+func TestLayerRepoCredential_SurvivesRestart_CLI(t *testing.T) {
+	t.Parallel()
+	const (
+		user     = "alice-user"
+		password = "s3cr3tpw"
+	)
+	remote := newFailingGitRemote(t)
+	reportedWant := remote.URL + "/acme/private.git"
+	full := "http://" + user + ":" + password + "@" + strings.TrimPrefix(reportedWant, "http://")
+
+	home := t.TempDir()
+	env := []string{
+		"HOME=" + home,
+		"PODIUM_SQLITE_PATH=" + filepath.Join(home, "podium.db"),
+		"PODIUM_SIGN=none",
+	}
+	srv := startServerArgs(t, env, "serve", "--standalone")
+	registered := runPodium(t, "", nil, "layer", "register", "--registry", srv.BaseURL,
+		"--id", "private", "--repo", full, "--ref", "main")
+	cliWantExit(t, registered, 0, "register a layer whose repo carries a credential")
+	stopProc(srv.cmd)
+
+	// The second process reads the layer from the file the first one wrote.
+	srv2 := startServerArgs(t, env, "serve", "--standalone")
+	reported := reportedLayerRepo(t, srv2.BaseURL, "private")
+	if reported != reportedWant {
+		t.Fatalf("reported repo after the restart = %q, want %q", reported, reportedWant)
+	}
+
+	refused := runPodium(t, "", nil, "layer", "register", "--registry", srv2.BaseURL,
+		"--id", "private", "--repo", reported, "--ref", "main")
+	if refused.Exit == 0 {
+		t.Fatalf("re-registration with the reported repo exited 0:\nstdout: %s\nstderr: %s", refused.Stdout, refused.Stderr)
+	}
+	cliContains(t, refused.Stderr, "redacted_repo", "re-registration refusal after the restart")
+
+	// Only requests the second process makes count, so the pairs recorded
+	// before this point are skipped.
+	before := len(remote.recorded())
+	reingest := runPodium(t, "", nil, "layer", "reingest", "--registry", srv2.BaseURL, "private")
+	if reingest.Exit == 0 {
+		t.Fatalf("reingest against a remote that answers 500 exited 0:\nstdout: %s", reingest.Stdout)
+	}
+	sent := remote.recorded()[before:]
+	if len(sent) == 0 {
+		t.Fatalf("the remote recorded no basic-auth request after the restart; the clone sent no credential\nreingest stderr: %s\nserver log:\n%s",
+			reingest.Stderr, srv2.log())
+	}
+	for i, pair := range sent {
+		if pair.user != user || pair.password != password {
+			t.Errorf("remote request %d carried basic auth %q:%q, want the registered credential", i, pair.user, pair.password)
+		}
+	}
+
+	outputs := map[string]string{
+		"log of the first process":  srv.log(),
+		"log of the second process": srv2.log(),
+		"register output":           registered.Stdout + registered.Stderr,
+		"refusal output":            refused.Stdout + refused.Stderr,
+		"reingest output":           reingest.Stdout + reingest.Stderr,
+	}
+	for what, text := range outputs {
+		for _, part := range []string{user, password} {
+			if strings.Contains(text, part) {
+				t.Errorf("%s carries the credential part %q:\n%s", what, part, text)
+			}
+		}
+	}
 }
