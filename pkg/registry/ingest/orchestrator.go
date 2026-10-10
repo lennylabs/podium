@@ -105,8 +105,10 @@ func SourceIngestWithOptions(
 	opts SourceIngestOptions,
 ) (*Result, error) {
 	srcCfg := source.LayerConfig{
-		ID:       cfg.ID,
-		Repo:     cfg.Repo,
+		ID: cfg.ID,
+		// Spec: §7.3.1 (Repository credentials). The ingest clones with the stored
+		// value; cfg.Repo is the reportable form.
+		Repo:     cfg.CloneRepo(),
 		Ref:      cfg.Ref,
 		Root:     cfg.Root,
 		PriorRef: cfg.LastIngestedRef,

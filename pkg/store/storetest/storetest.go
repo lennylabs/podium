@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,6 +60,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("OperatorGrantsRoundTrip", func(t *testing.T) { operatorGrantsRoundTrip(t, factory(t)) })
 	t.Run("GetManifestNotFound", func(t *testing.T) { getManifestNotFound(t, factory(t)) })
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
+	t.Run("LayerRepoCredential", func(t *testing.T) { layerRepoCredential(t, factory(t)) })
 	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
 	t.Run("DeprecatedAtStampedAndPurged", func(t *testing.T) { deprecatedAtStampedAndPurged(t, factory(t)) })
 	t.Run("LayerSoftDeleteRecovery", func(t *testing.T) { layerSoftDeleteRecovery(t, factory(t)) })
@@ -688,6 +690,103 @@ func layerConfigCRUD(t *testing.T, s store.Store) {
 	}
 	if len(list) != 1 || list[0].ID != "team-shared" {
 		t.Errorf("ListLayerConfigs = %+v", list)
+	}
+}
+
+// layerRepoRows are the registered repo values the LayerRepoCredential case
+// writes, each with the Repo a read returns and whether the read sets
+// RegisteredRepo. The expectations are literals, because this package keeps
+// the git source and its classifier out of its imports.
+var layerRepoRows = []struct {
+	id, registered, repo string
+	split                bool
+}{
+	// A password and a path the canonical form re-escapes.
+	{"cred", "https://alice-user:s3cr3tpw@git.acme.com/acme/a b.git", "https://git.acme.com/acme/a%20b.git", true},
+	// Empty userinfo is still userinfo.
+	{"empty-userinfo", "https://@git.acme.com/x.git", "https://git.acme.com/x.git", true},
+	// The reported form carries '@' after its host. A backend that redacts
+	// the value twice returns [redacted] here.
+	{"at-in-path", "https://ghp_tok3n@git.acme.com/acme/a%40b c.git", "https://git.acme.com/acme/a@b%20c.git", true},
+	// Values outside the split class read back unchanged.
+	{"scp", "git@github.com:acme/x.git", "git@github.com:acme/x.git", false},
+	{"path", "/srv/git/acme.git", "/srv/git/acme.git", false},
+	{"fail-closed", "https://ghp_tok/3n@host/x.git", "https://ghp_tok/3n@host/x.git", false},
+}
+
+// layerRepoView renders the repo fields of each config on one line, sorted by
+// layer ID, so a step compares a whole read with one assertion.
+func layerRepoView(cfgs ...store.LayerConfig) string {
+	lines := make([]string, 0, len(cfgs))
+	for _, c := range cfgs {
+		lines = append(lines, fmt.Sprintf("%s repo=%q split=%t clone=%q ref=%q",
+			c.ID, c.Repo, c.RegisteredRepo.Present(), c.CloneRepo(), c.LastIngestedRef))
+	}
+	sort.Strings(lines)
+	return strings.Join(lines, "\n")
+}
+
+// Spec: §7.3.1 (Repository credentials) — a layer read returns a repo in the
+// split class as its reported form in Repo and the registered bytes in
+// RegisteredRepo, and it returns every other value unchanged. The split
+// survives a read-modify-write and a soft-delete. PutLayerConfig refuses a
+// config whose RegisteredRepo does not redact to its Repo and writes nothing.
+func layerRepoCredential(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+
+	// Fresh puts, read back through the get and the list.
+	var gets, want []store.LayerConfig
+	for i, row := range layerRepoRows {
+		must(t, s.PutLayerConfig(ctx, store.LayerConfig{
+			TenantID: "t", ID: row.id, SourceType: "git", Repo: row.registered, Ref: "main", Order: i,
+		}))
+		got, err := s.GetLayerConfig(ctx, "t", row.id)
+		must(t, err)
+		gets = append(gets, got)
+		exp := store.LayerConfig{ID: row.id, Repo: row.repo}
+		if row.split {
+			exp.RegisteredRepo = store.RegisteredRepo(row.registered)
+		}
+		want = append(want, exp)
+	}
+	list, err := s.ListLayerConfigs(ctx, "t")
+	must(t, err)
+	if g, l, w := layerRepoView(gets...), layerRepoView(list...), layerRepoView(want...); g != w || l != w {
+		t.Fatalf("fresh read:\nget:\n%s\nlist:\n%s\nwant:\n%s", g, l, w)
+	}
+
+	// Read-modify-write: the registered bytes survive a put of the config a
+	// read returned.
+	cred := gets[0]
+	cred.LastIngestedRef = "abc123"
+	must(t, s.PutLayerConfig(ctx, cred))
+	stamped, err := s.GetLayerConfig(ctx, "t", "cred")
+	must(t, err)
+	wantCred := want[0]
+	wantCred.LastIngestedRef = "abc123"
+	if g, w := layerRepoView(stamped), layerRepoView(wantCred); g != w {
+		t.Fatalf("read-modify-write:\ngot:  %s\nwant: %s", g, w)
+	}
+
+	// Error path: a Repo that the RegisteredRepo does not redact to is
+	// refused, and the row is unchanged.
+	bad := stamped
+	bad.Repo = "https://git.acme.com/acme/other.git"
+	putErr := s.PutLayerConfig(ctx, bad)
+	after, err := s.GetLayerConfig(ctx, "t", "cred")
+	must(t, err)
+	if g, w := layerRepoView(after), layerRepoView(wantCred); !errors.Is(putErr, store.ErrRepoCredentialMismatch) || g != w {
+		t.Fatalf("mismatched put: err = %v, want ErrRepoCredentialMismatch\nrow:  %s\nwant: %s", putErr, g, w)
+	}
+
+	// Soft-delete: the deleted list applies the same split.
+	must(t, s.DeleteLayerConfig(ctx, "t", "cred"))
+	deleted, err := s.ListDeletedLayerConfigs(ctx, "t")
+	must(t, err)
+	if g, w := layerRepoView(deleted...), layerRepoView(wantCred); g != w {
+		t.Fatalf("deleted list:\ngot:  %s\nwant: %s", g, w)
 	}
 }
 

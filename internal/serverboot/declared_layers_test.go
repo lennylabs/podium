@@ -298,8 +298,11 @@ func TestBootstrapDeclaredLayers_GitRepoCredentialNotLogged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLayerConfig: %v", err)
 	}
-	if lc.Repo != repo {
-		t.Errorf("stored Repo = %q, want the full declared value %q", lc.Repo, repo)
+	if got := lc.CloneRepo(); got != repo {
+		t.Errorf("stored CloneRepo = %q, want the full declared value %q", got, repo)
+	}
+	if lc.Repo != "https://git.acme.com/acme/finance.git" {
+		t.Errorf("stored Repo = %q, want the reported value", lc.Repo)
 	}
 }
 

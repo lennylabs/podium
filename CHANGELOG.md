@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **The metadata store gains the nullable column `layer_configs.repo_userinfo`** (§7.3.1): this release adds the column and leaves it empty. The stored `repo` and every layer response are unchanged, and a 0.5.2 binary runs against the upgraded database.
+
 ## [0.5.2] - 2026-10-09
 
 ### Changed

@@ -132,6 +132,22 @@ func TestAdminMigrateToStandard_PumpsMetadataAndObjects(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PutLayerConfig: %v", err)
 	}
+	// Spec: §7.3.1 (Repository credentials) — a second layer whose repo carries
+	// a URL credential, which the source store splits on read.
+	const credRepo = "https://alice-user:s3cr3tpw@git.acme.com/acme/private.git"
+	if err := src.PutLayerConfig(context.Background(), store.LayerConfig{
+		TenantID: "default", ID: "team-private", SourceType: "git", Repo: credRepo, Ref: "main",
+	}); err != nil {
+		t.Fatalf("PutLayerConfig team-private: %v", err)
+	}
+	srcPrivate, err := src.GetLayerConfig(context.Background(), "default", "team-private")
+	if err != nil {
+		t.Fatalf("GetLayerConfig team-private: %v", err)
+	}
+	if !srcPrivate.RegisteredRepo.Present() || srcPrivate.CloneRepo() != credRepo {
+		t.Fatalf("source team-private = Repo %q, CloneRepo %q; want a split of the registered URL",
+			srcPrivate.Repo, srcPrivate.CloneRepo())
+	}
 	if err := os.MkdirAll(srcObjs, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -146,18 +162,36 @@ func TestAdminMigrateToStandard_PumpsMetadataAndObjects(t *testing.T) {
 		t.Fatalf("WriteFile audit: %v", err)
 	}
 
-	rc := adminMigrateToStandard([]string{
-		"--source-sqlite", srcDB,
-		"--source-objects", srcObjs,
-		"--source-audit-log", srcAudit,
-		"--target-store", "sqlite",
-		"--target-sqlite", dstDB,
-		"--target-objects-type", "filesystem",
-		"--target-objects", dstObjs,
-		"--target-audit-log", dstAudit,
+	var (
+		rc     int
+		stderr string
+	)
+	stdout := captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			rc = adminMigrateToStandard([]string{
+				"--source-sqlite", srcDB,
+				"--source-objects", srcObjs,
+				"--source-audit-log", srcAudit,
+				"--target-store", "sqlite",
+				"--target-sqlite", dstDB,
+				"--target-objects-type", "filesystem",
+				"--target-objects", dstObjs,
+				"--target-audit-log", dstAudit,
+			})
+		})
 	})
 	if rc != 0 {
-		t.Fatalf("rc = %d, want 0", rc)
+		t.Fatalf("rc = %d, want 0\nstdout: %s\nstderr: %s", rc, stdout, stderr)
+	}
+	// The plan line is the proof that the capture covers the command's output,
+	// so the absence checks below do not pass on an empty capture.
+	if !strings.Contains(stdout, "layer configs: 2") {
+		t.Errorf("stdout does not carry the source plan with two layer configs: %s", stdout)
+	}
+	for _, part := range []string{"alice-user", "s3cr3tpw"} {
+		if strings.Contains(stdout+stderr, part) {
+			t.Errorf("command output carries the credential part %q:\nstdout: %s\nstderr: %s", part, stdout, stderr)
+		}
 	}
 
 	// Assert: target SQLite carries the manifest + layer.
@@ -176,8 +210,22 @@ func TestAdminMigrateToStandard_PumpsMetadataAndObjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListLayerConfigs: %v", err)
 	}
-	if len(layers) != 1 || layers[0].ID != "team-shared" {
-		t.Errorf("layers = %+v, want one team-shared", layers)
+	if len(layers) != 2 {
+		t.Fatalf("layers = %+v, want team-shared and team-private", layers)
+	}
+	byID := map[string]store.LayerConfig{}
+	for _, l := range layers {
+		byID[l.ID] = l
+	}
+	if got := byID["team-shared"].CloneRepo(); got != "git@example/team.git" {
+		t.Errorf("target team-shared CloneRepo = %q, want git@example/team.git", got)
+	}
+	// The target clones with the same registered URL as the source and reports
+	// the same Repo.
+	dstPrivate := byID["team-private"]
+	if dstPrivate.CloneRepo() != srcPrivate.CloneRepo() || dstPrivate.Repo != srcPrivate.Repo {
+		t.Errorf("target team-private = Repo %q, CloneRepo %q; want the source's %q and %q",
+			dstPrivate.Repo, dstPrivate.CloneRepo(), srcPrivate.CloneRepo(), srcPrivate.Repo)
 	}
 
 	// Assert: target object store carries the blob.

@@ -54,6 +54,9 @@ func TestWakesWatchers_EveryField(t *testing.T) {
 		{"ID", func(c *store.LayerConfig) { c.ID = "other" }, false},
 		{"SourceType", func(c *store.LayerConfig) { c.SourceType = "local" }, true},
 		{"Repo", func(c *store.LayerConfig) { c.Repo = "git@github.com:acme/other.git" }, true},
+		{"RegisteredRepo", func(c *store.LayerConfig) {
+			c.RegisteredRepo = store.RegisteredRepo("https://alice-user:s3cr3tpw@git.acme.com/acme/x.git")
+		}, false},
 		{"Ref", func(c *store.LayerConfig) { c.Ref = "release" }, true},
 		{"Root", func(c *store.LayerConfig) { c.Root = "other" }, true},
 		{"LocalPath", func(c *store.LayerConfig) { c.LocalPath = "/tmp/other" }, true},

@@ -145,6 +145,7 @@ func (s *SQLite) applySchema() error {
 			created_at TEXT NOT NULL,
 			deleted_at TEXT,
 			last_ingested_at TEXT,
+			repo_userinfo TEXT,
 			PRIMARY KEY (tenant_id, id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS vector_pending (
@@ -835,17 +836,24 @@ func (s *SQLite) IsOperator(ctx context.Context, identity string) (bool, error) 
 
 // PutLayerConfig inserts or replaces a layer config.
 func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
+	// Spec: §7.3.1 (Repository credentials). The write rule runs before any
+	// statement, so a config it refuses writes nothing.
+	repo, err := LayerRepoColumn(cfg)
+	if err != nil {
+		return err
+	}
 	createdAt := cfg.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, `
 		INSERT OR REPLACE INTO layer_configs
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
-			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		cfg.TenantID, cfg.ID, cfg.SourceType, cfg.Repo, cfg.Ref, cfg.Root, cfg.LocalPath,
+			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
+			 repo_userinfo)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+		cfg.TenantID, cfg.ID, cfg.SourceType, repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, boolToInt(cfg.UserDefined), cfg.Owner,
 		boolToInt(cfg.Public), boolToInt(cfg.Organization),
 		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
@@ -859,7 +867,8 @@ func (s *SQLite) GetLayerConfig(ctx context.Context, tenantID, id string) (Layer
 	row := s.db.QueryRowContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
+		       repo_userinfo
 		FROM layer_configs
 		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, tenantID, id)
 	cfg, err := scanLayerConfig(row)
@@ -874,7 +883,8 @@ func (s *SQLite) ListLayerConfigs(ctx context.Context, tenantID string) ([]Layer
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
+		       repo_userinfo
 		FROM layer_configs WHERE tenant_id = ? AND deleted_at IS NULL
 		ORDER BY ord ASC, id ASC`, tenantID)
 	if err != nil {
@@ -949,7 +959,8 @@ func (s *SQLite) ListDeletedLayerConfigs(ctx context.Context, tenantID string) (
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
+		       repo_userinfo
 		FROM layer_configs WHERE tenant_id = ? AND deleted_at IS NOT NULL
 		ORDER BY id ASC`, tenantID)
 	if err != nil {
@@ -1000,18 +1011,19 @@ func (s *SQLite) PurgeExpiredLayerDeletions(ctx context.Context, before time.Tim
 func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
 	var cfg LayerConfig
 	var userDefined, public, org int
-	var groups, users, createdAt string
-	var deletedAt, lastIngestedAt sql.NullString
+	var repo, groups, users, createdAt string
+	var deletedAt, lastIngestedAt, repoUserinfo sql.NullString
 	err := scanner.Scan(
 		&cfg.TenantID, &cfg.ID, &cfg.SourceType,
-		&cfg.Repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
+		&repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
 		&cfg.Order, &userDefined, &cfg.Owner,
 		&public, &org, &groups, &users,
 		&cfg.WebhookSecret, &cfg.LastIngestedRef, &cfg.ForcePushPolicy, &cfg.GitProvider,
-		&createdAt, &deletedAt, &lastIngestedAt)
+		&createdAt, &deletedAt, &lastIngestedAt, &repoUserinfo)
 	if err != nil {
 		return LayerConfig{}, err
 	}
+	cfg.Repo, cfg.RegisteredRepo = SplitLayerRepo(repo, repoUserinfo)
 	cfg.UserDefined = userDefined != 0
 	cfg.Public = public != 0
 	cfg.Organization = org != 0

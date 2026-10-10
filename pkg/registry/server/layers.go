@@ -315,8 +315,8 @@ func (e *LayerEndpoint) WithGroupResolver(fn layer.GroupResolver) *LayerEndpoint
 //
 // The returned slice is a response projection: each element passed through
 // wireLayer, so its Repo carries no URL credential. It must not be written
-// back to the store, because that write would remove the credential the clone
-// reads from the stored row.
+// back to the store, because that write would store [redacted] for a
+// fail-closed value and would drop the credential of an unsplit one.
 //
 // Spec: §4.6, §7.3.1
 func (e *LayerEndpoint) readableBy(r *http.Request, caller layer.Identity, configs []store.LayerConfig) []store.LayerConfig {
@@ -341,12 +341,22 @@ func (e *LayerEndpoint) readableBy(r *http.Request, caller layer.Identity, confi
 	return out
 }
 
+// reportedRepo returns the repo a response reports for cfg. It redacts the
+// registered bytes exactly once: the registered value for a layer the store
+// split, and Repo for every other config. source.RedactRepo is not
+// idempotent, so it is never applied to a Repo the store already redacted.
+//
+// Spec: §7.3.1 (Repository credentials)
+func reportedRepo(cfg store.LayerConfig) string {
+	return source.RedactRepo(cfg.CloneRepo())
+}
+
 // wireLayer returns the copy of cfg a response carries. The caller keeps its
 // own cfg for the store, the audit event, and the ingest runner.
 //
 // Spec: §7.3.1 (Repository credentials)
 func wireLayer(cfg store.LayerConfig) store.LayerConfig {
-	cfg.Repo = source.RedactRepo(cfg.Repo)
+	cfg.Repo = reportedRepo(cfg)
 	return cfg
 }
 
@@ -593,6 +603,7 @@ func layerConfigEqual(a, b store.LayerConfig) bool {
 		a.ID == b.ID &&
 		a.SourceType == b.SourceType &&
 		a.Repo == b.Repo &&
+		a.RegisteredRepo == b.RegisteredRepo &&
 		a.Ref == b.Ref &&
 		a.Root == b.Root &&
 		a.LocalPath == b.LocalPath &&
@@ -750,11 +761,14 @@ type LayerRegisterRequest struct {
 // redactedRepoResubmitted reports whether repo is the value a read reports for
 // a stored repo that carries a credential. Storing it would replace the
 // credential-bearing remote with one that cannot clone a private repository.
+// A stored layer holds a credential when the store split a registered value
+// off it, or when its reported value differs from its Repo.
 //
 // Spec: §7.3.1 (Re-registration with a reported repo)
 func redactedRepoResubmitted(stored store.LayerConfig, repo string) bool {
-	reported := source.RedactRepo(stored.Repo)
-	return reported != stored.Repo && repo == reported
+	reported := reportedRepo(stored)
+	holdsCredential := stored.RegisteredRepo.Present() || reported != stored.Repo
+	return holdsCredential && repo == reported
 }
 
 // adminOnlyRegistrationFields reports the §7.3.1 admin-only registration
@@ -1684,7 +1698,7 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 	// spec: §7.3.1 — the local-source authorization rule, evaluated against
 	// the tombstoned layer's stored source. A restore returns a layer whose
 	// next ingest re-reads that path, so it takes the same arm.
-	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.Repo) {
+	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.CloneRepo()) {
 		return
 	}
 	if err := e.store.RestoreLayerConfig(r.Context(), tenantID, id); err != nil {
@@ -1895,7 +1909,7 @@ func (e *LayerEndpoint) reingest(w http.ResponseWriter, r *http.Request) {
 	// spec: §7.3.1 — the local-source authorization rule. A reingest
 	// re-reads the stored layer's filesystem path with the registry
 	// process's own rights, so it is a tenant admin's operation.
-	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.Repo) {
+	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.CloneRepo()) {
 		return
 	}
 	e.runIngestAndRespond(w, r, cfg, bg)

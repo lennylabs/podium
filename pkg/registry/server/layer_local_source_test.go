@@ -384,6 +384,9 @@ type repoCase struct {
 	name string
 	repo string
 	file bool
+	// split marks a repository string the store splits on read, so the stored
+	// layer's Repo is the reported form and the gate must read CloneRepo().
+	split bool
 }
 
 func repoCases() []repoCase {
@@ -405,7 +408,41 @@ func repoCases() []repoCase {
 		{name: "at-sign-inside-a-path", repo: "/srv/repos@h:x", file: true},
 		// A string go-git's parser rejects outright takes the fail-closed arm.
 		{name: "unparseable", repo: "http://[::1", file: true},
+		// URLs with userinfo, which the store splits. The two hostless rows are
+		// the ones whose reported form go-git resolves to another transport
+		// than the registered bytes: "file:?/srv/x" reads as scp-like ssh, and
+		// "https:" reads as a file path.
+		{name: "file-url-with-userinfo", repo: "file://tok@/srv/x", file: true, split: true},
+		{name: "hostless-file-url-with-userinfo", repo: "file://tok@?/srv/x", file: true, split: true},
+		{name: "hostless-https-url-with-userinfo", repo: "https://tok@", split: true},
+		{name: "https-url-with-userinfo", repo: "https://ghp_tok3n@git.acme.com/x.git", split: true},
 	}
+}
+
+// assertStoredSplit fails when the stored layer carries no RegisteredRepo. A
+// gate row for a URL with userinfo calls it first, so the row cannot pass on a
+// store that returned the registered URL unsplit.
+//
+// Spec: §7.3.1 (local-source authorization)
+func assertStoredSplit(t *testing.T, cfg store.LayerConfig, err error, registered string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("read the stored layer: %v", err)
+	}
+	if !cfg.RegisteredRepo.Present() || cfg.CloneRepo() != registered || cfg.Repo == registered {
+		t.Fatalf("stored layer = Repo %q, CloneRepo %q, RegisteredRepo present %t; want a split of %q",
+			cfg.Repo, cfg.CloneRepo(), cfg.RegisteredRepo.Present(), registered)
+	}
+}
+
+// gitLayerOwnedByAlice is localLayer as a git layer on repo with no path, so
+// the repository string is the only thing the local-source rule classifies.
+func gitLayerOwnedByAlice(repo string) store.LayerConfig {
+	cfg := localLayer()
+	cfg.SourceType = "git"
+	cfg.Repo = repo
+	cfg.LocalPath = ""
+	return cfg
 }
 
 // Spec: §7.3.1 — the repository-string classifier, over the classifier itself
@@ -413,8 +450,22 @@ func repoCases() []repoCase {
 // A string go-git resolves to its file transport names a path on the registry
 // host and takes the local-source arm; a string it resolves to a network
 // transport does not.
+//
+// Spec: §7.3.1 (local-source authorization) — a stored layer is classified on
+// the registered bytes, which are the bytes the clone receives. The rows whose
+// repository carries URL userinfo read the stored layer back split before the
+// reingest, so they fail on a gate that classifies the reported Repo.
 func TestLocalSource_RepositoryStrings(t *testing.T) {
 	t.Parallel()
+	// These are the reported forms of "file://tok@?/srv/x" and "https://tok@".
+	// They are the values the gate must not read: each resolves to the opposite
+	// arm from the registered URL it reports.
+	if isFileTransportRepo("file:?/srv/x") {
+		t.Errorf(`isFileTransportRepo("file:?/srv/x") = true, want false`)
+	}
+	if !isFileTransportRepo("https:") {
+		t.Errorf(`isFileTransportRepo("https:") = false, want true`)
+	}
 	for _, c := range repoCases() {
 		t.Run("classifier/"+c.name, func(t *testing.T) {
 			t.Parallel()
@@ -438,11 +489,11 @@ func TestLocalSource_RepositoryStrings(t *testing.T) {
 		})
 		t.Run("reingest/"+c.name, func(t *testing.T) {
 			t.Parallel()
-			cfg := localLayer()
-			cfg.SourceType = "git"
-			cfg.Repo = c.repo
-			cfg.LocalPath = ""
-			e, _ := newLocalSourceEndpoint(t, false, localAlice, cfg)
+			e, st := newLocalSourceEndpoint(t, false, localAlice, gitLayerOwnedByAlice(c.repo))
+			if c.split {
+				stored, err := st.GetLayerConfig(context.Background(), localTenant, "own")
+				assertStoredSplit(t, stored, err, c.repo)
+			}
 			rec := localSourceDo(t, e, http.MethodPost, "/v1/layers/reingest?id=own", nil)
 			if c.file {
 				assertLocalSourceRefusal(t, rec, c.repo)
@@ -450,6 +501,53 @@ func TestLocalSource_RepositoryStrings(t *testing.T) {
 			}
 			if rec.Code != http.StatusOK {
 				t.Fatalf("reingest status = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+// Spec: §7.3.1 (local-source authorization) — restore classifies a
+// soft-deleted git layer on its registered bytes. A layer stored with a
+// hostless file-transport URL is refused for a caller the admin arm does not
+// admit, although its reported Repo reads as a network remote, and a layer
+// stored with a hostless https URL is restored by its non-admin owner,
+// although its reported Repo reads as a file path.
+func TestLocalSource_RestoreClassifiesRegisteredRepo(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		repo string
+		file bool
+	}{
+		{name: "hostless-file-url-with-userinfo", repo: "file://tok@?/srv/x", file: true},
+		{name: "hostless-https-url-with-userinfo", repo: "https://tok@"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			e, st := newLocalSourceEndpoint(t, false, localAlice, gitLayerOwnedByAlice(c.repo))
+			tombstone(t, st, "own")
+			deleted, err := st.ListDeletedLayerConfigs(ctx, localTenant)
+			if err != nil || len(deleted) != 1 {
+				t.Fatalf("ListDeletedLayerConfigs = %+v, %v; want one row", deleted, err)
+			}
+			assertStoredSplit(t, deleted[0], nil, c.repo)
+
+			rec := localSourceDo(t, e, http.MethodPost, "/v1/layers/restore?id=own", nil)
+			_, liveErr := st.GetLayerConfig(ctx, localTenant, "own")
+			if c.file {
+				assertLocalSourceRefusal(t, rec, c.repo)
+				if !errors.Is(liveErr, store.ErrNotFound) {
+					t.Errorf("refused restore cleared the tombstone: %v", liveErr)
+				}
+				return
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("restore status = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
+			if liveErr != nil {
+				t.Errorf("admitted restore left the layer soft-deleted: %v", liveErr)
 			}
 		})
 	}
@@ -588,6 +686,10 @@ func webhookDelivery(t *testing.T, e *LayerEndpoint, id, secret string) *httptes
 // endpoint reaches the ingest, its stored filesystem path included. The same
 // file-transport layer reaches the ingest under the constructor's admitting
 // default, which is the deployment that authenticates no caller.
+//
+// Spec: §7.3.1 (local-source authorization) — the handler classifies the
+// registered bytes of a layer the store split, so the rows with URL userinfo
+// take the arm go-git resolves the clone URL to.
 func TestLocalSource_WebhookIngest(t *testing.T) {
 	t.Parallel()
 	const secret = "hook-secret"
@@ -596,13 +698,23 @@ func TestLocalSource_WebhookIngest(t *testing.T) {
 		repo      string
 		localPath string
 		deny      bool
-		want      int
+		// split marks a repository the store splits on read.
+		split bool
+		want  int
 	}{
 		{name: "file-transport-repo-refused", repo: "/srv/other-tenant", deny: true, want: http.StatusForbidden},
 		{name: "file-transport-repo-admitted-unwired", repo: "/srv/other-tenant", want: http.StatusOK},
 		{name: "network-repo-admitted", repo: "https://github.com/acme/x.git", deny: true, want: http.StatusOK},
 		{name: "network-repo-with-a-stray-path-admitted", repo: "https://github.com/acme/x.git",
 			localPath: "/srv/stray", deny: true, want: http.StatusOK},
+		{name: "file-url-with-userinfo-refused", repo: "file://tok@/srv/x",
+			deny: true, split: true, want: http.StatusForbidden},
+		{name: "hostless-file-url-with-userinfo-refused", repo: "file://tok@?/srv/x",
+			deny: true, split: true, want: http.StatusForbidden},
+		{name: "hostless-https-url-with-userinfo-admitted", repo: "https://tok@",
+			deny: true, split: true, want: http.StatusOK},
+		{name: "https-url-with-userinfo-admitted", repo: "https://ghp_tok3n@git.acme.com/x.git",
+			deny: true, split: true, want: http.StatusOK},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -614,10 +726,14 @@ func TestLocalSource_WebhookIngest(t *testing.T) {
 			if c.deny {
 				opts = append(opts, denyAdminArm)
 			}
-			e, _ := newWebhookEndpoint(t, store.LayerConfig{
+			e, tenantID := newWebhookEndpoint(t, store.LayerConfig{
 				ID: "vendor", SourceType: "git", Repo: c.repo, LocalPath: c.localPath,
 				GitProvider: "github", WebhookSecret: secret,
 			}, opts...)
+			if c.split {
+				stored, err := e.store.GetLayerConfig(context.Background(), tenantID, "vendor")
+				assertStoredSplit(t, stored, err, c.repo)
+			}
 			rec := webhookDelivery(t, e, "vendor", secret)
 			if rec.Code != c.want {
 				t.Fatalf("delivery status = %d, want %d: %s", rec.Code, c.want, rec.Body.String())

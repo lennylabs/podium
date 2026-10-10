@@ -132,6 +132,7 @@ var orgTableStmts = []string{
 		created_at TIMESTAMPTZ NOT NULL,
 		deleted_at TIMESTAMPTZ,
 		last_ingested_at TIMESTAMPTZ,
+		repo_userinfo TEXT,
 		PRIMARY KEY (tenant_id, id)
 	)`,
 }
@@ -1271,6 +1272,12 @@ func (p *Postgres) RevokeAdmin(ctx context.Context, userID, orgID string) error 
 
 // PutLayerConfig inserts or replaces a layer config.
 func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
+	// Spec: §7.3.1 (Repository credentials). The write rule runs before any
+	// statement, so a config it refuses writes nothing.
+	repo, err := LayerRepoColumn(cfg)
+	if err != nil {
+		return err
+	}
 	createdAt := cfg.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -1284,8 +1291,9 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 		INSERT INTO layer_configs
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
-			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
+			 repo_userinfo)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NULL)
 		ON CONFLICT (tenant_id, id) DO UPDATE SET
 			source_type = EXCLUDED.source_type,
 			repo = EXCLUDED.repo,
@@ -1305,8 +1313,9 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 			git_provider = EXCLUDED.git_provider,
 			created_at = EXCLUDED.created_at,
 			deleted_at = EXCLUDED.deleted_at,
-			last_ingested_at = EXCLUDED.last_ingested_at`,
-		cfg.TenantID, cfg.ID, cfg.SourceType, cfg.Repo, cfg.Ref, cfg.Root, cfg.LocalPath,
+			last_ingested_at = EXCLUDED.last_ingested_at,
+			repo_userinfo = EXCLUDED.repo_userinfo`,
+		cfg.TenantID, cfg.ID, cfg.SourceType, repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, cfg.UserDefined, cfg.Owner,
 		cfg.Public, cfg.Organization,
 		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
@@ -1325,7 +1334,8 @@ func (p *Postgres) GetLayerConfig(ctx context.Context, tenantID, id string) (Lay
 	row := conn.QueryRowContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
+		       repo_userinfo
 		FROM layer_configs
 		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`, tenantID, id)
 	cfg, err := scanLayerConfigPG(row)
@@ -1345,7 +1355,8 @@ func (p *Postgres) ListLayerConfigs(ctx context.Context, tenantID string) ([]Lay
 	rows, err := conn.QueryContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
+		       repo_userinfo
 		FROM layer_configs WHERE tenant_id = $1 AND deleted_at IS NULL
 		ORDER BY ord ASC, id ASC`, tenantID)
 	if err != nil {
@@ -1435,7 +1446,8 @@ func (p *Postgres) ListDeletedLayerConfigs(ctx context.Context, tenantID string)
 	rows, err := conn.QueryContext(ctx, `
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
-		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at
+		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
+		       repo_userinfo
 		FROM layer_configs WHERE tenant_id = $1 AND deleted_at IS NOT NULL
 		ORDER BY id ASC`, tenantID)
 	if err != nil {
@@ -1559,18 +1571,20 @@ func ptrFromNullTime(nt sql.NullTime) *time.Time {
 // columns are scanned directly; timestamps come back as time.Time.
 func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 	var cfg LayerConfig
-	var groups, users string
+	var repo, groups, users string
 	var deletedAt, lastIngestedAt sql.NullTime
+	var repoUserinfo sql.NullString
 	err := scanner.Scan(
 		&cfg.TenantID, &cfg.ID, &cfg.SourceType,
-		&cfg.Repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
+		&repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
 		&cfg.Order, &cfg.UserDefined, &cfg.Owner,
 		&cfg.Public, &cfg.Organization, &groups, &users,
 		&cfg.WebhookSecret, &cfg.LastIngestedRef, &cfg.ForcePushPolicy, &cfg.GitProvider,
-		&cfg.CreatedAt, &deletedAt, &lastIngestedAt)
+		&cfg.CreatedAt, &deletedAt, &lastIngestedAt, &repoUserinfo)
 	if err != nil {
 		return LayerConfig{}, err
 	}
+	cfg.Repo, cfg.RegisteredRepo = SplitLayerRepo(repo, repoUserinfo)
 	if groups != "" {
 		cfg.Groups = strings.Split(groups, "\n")
 	}

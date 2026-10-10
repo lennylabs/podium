@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -180,5 +183,75 @@ func TestListAdminGrants(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Spec: §7.3.1 (Repository credentials) — a LayerConfig returned by a store
+// read prints and marshals without its URL credential. The subject is a read
+// from the memory store. A config built by a caller and not yet read back
+// still carries userinfo in Repo, and this test makes no claim about it.
+func TestLayerConfig_StoreReadPrintsNoCredential(t *testing.T) {
+	t.Parallel()
+	const registered = "https://alice-user:s3cr3tpw@git.acme.com/acme/x.git"
+	s := NewMemory()
+	ctx := context.Background()
+	if err := s.PutLayerConfig(ctx, LayerConfig{TenantID: "t", ID: "team", SourceType: "git", Repo: registered}); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
+	cfg, err := s.GetLayerConfig(ctx, "t", "team")
+	if err != nil {
+		t.Fatalf("GetLayerConfig: %v", err)
+	}
+	if cfg.CloneRepo() != registered {
+		t.Fatalf("CloneRepo = %q, want the registered URL; the read did not split", cfg.CloneRepo())
+	}
+
+	marshalled, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	outputs := map[string]string{"json.Marshal": string(marshalled)}
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q"} {
+		outputs[verb] = fmt.Sprintf(verb, cfg)
+	}
+	for name, out := range outputs {
+		for _, secret := range []string{"alice-user", "s3cr3tpw", registered} {
+			if strings.Contains(out, secret) {
+				t.Errorf("%s output contains %q: %s", name, secret, out)
+			}
+		}
+		// The reported repo is present, so the output is the config and
+		// the absence above is not an empty rendering.
+		if !strings.Contains(out, "git.acme.com/acme/x.git") {
+			t.Errorf("%s output does not carry the reported repo: %s", name, out)
+		}
+	}
+}
+
+// Spec: §7.3.1 (Repository credentials) — an empty RegisteredRepo is the
+// state of every layer outside the split class and of every config a caller
+// builds. It prints as the empty string, the clone reads Repo, and the write
+// rule stores Repo verbatim.
+func TestRegisteredRepo_EmptyValue(t *testing.T) {
+	t.Parallel()
+	var empty RegisteredRepo
+	if empty.Present() || empty.String() != "" || empty.GoString() != "" {
+		t.Errorf("empty RegisteredRepo: Present %t, String %q, GoString %q; want false and empty strings",
+			empty.Present(), empty.String(), empty.GoString())
+	}
+	// A value the classifier would refuse as a RegisteredRepo is stored as
+	// given when it arrives in Repo alone.
+	for _, repo := range []string{"", "git@github.com:acme/x.git", "https://ghp_tok3n@git.acme.com/x.git", "https://ghp_tok/3n@host/x.git"} {
+		cfg := LayerConfig{Repo: repo}
+		col, err := LayerRepoColumn(cfg)
+		if err != nil || col != repo || cfg.CloneRepo() != repo {
+			t.Errorf("config with Repo %q and no RegisteredRepo: column %q, err %v, CloneRepo %q; want %q throughout",
+				repo, col, err, cfg.CloneRepo(), repo)
+		}
+	}
+	present := RegisteredRepo("https://ghp_tok3n@git.acme.com/x.git")
+	if !present.Present() || present.String() != "[redacted]" || present.GoString() != "[redacted]" {
+		t.Errorf("present RegisteredRepo: Present %t, String %q, GoString %q; want true and [redacted]",
+			present.Present(), present.String(), present.GoString())
 	}
 }

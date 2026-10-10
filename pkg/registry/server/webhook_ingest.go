@@ -78,7 +78,7 @@ func (e *LayerEndpoint) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// rights by the holder of the per-layer secret. A repository naming a
 	// network endpoint is not classified, so every existing webhook for such
 	// a layer keeps working, its stored local_path included.
-	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.Repo) {
+	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.CloneRepo()) {
 		return
 	}
 	// §7.3.1: a verified delivery "fetches the new commit, ingests". Drive

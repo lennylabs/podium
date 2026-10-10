@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"sort"
 	"sync"
 	"time"
@@ -460,8 +461,16 @@ func (s *Memory) IsOperator(_ context.Context, identity string) (bool, error) {
 
 func layerKey(tenantID, id string) string { return tenantID + "/" + id }
 
-// PutLayerConfig inserts or replaces a layer config.
+// PutLayerConfig inserts or replaces a layer config. The map holds what a SQL
+// row holds: the registered bytes in Repo and no RegisteredRepo.
+//
+// Spec: §7.3.1 (Repository credentials)
 func (s *Memory) PutLayerConfig(_ context.Context, cfg LayerConfig) error {
+	repo, err := LayerRepoColumn(cfg)
+	if err != nil {
+		return err
+	}
+	cfg.Repo, cfg.RegisteredRepo = repo, ""
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.layers[layerKey(cfg.TenantID, cfg.ID)] = cfg
@@ -477,7 +486,16 @@ func (s *Memory) GetLayerConfig(_ context.Context, tenantID, id string) (LayerCo
 		// Soft-deleted layers are hidden from normal reads (§8.4).
 		return LayerConfig{}, ErrNotFound
 	}
-	return cfg, nil
+	return splitStoredLayer(cfg), nil
+}
+
+// splitStoredLayer applies the layer read rule to a copy of a stored config.
+// The memory store has no repo_userinfo column, so the rule reads Repo alone.
+//
+// Spec: §7.3.1 (Repository credentials)
+func splitStoredLayer(cfg LayerConfig) LayerConfig {
+	cfg.Repo, cfg.RegisteredRepo = SplitLayerRepo(cfg.Repo, sql.NullString{})
+	return cfg
 }
 
 // ListLayerConfigs returns every layer for the tenant in declared
@@ -488,7 +506,7 @@ func (s *Memory) ListLayerConfigs(_ context.Context, tenantID string) ([]LayerCo
 	out := []LayerConfig{}
 	for _, cfg := range s.layers {
 		if cfg.TenantID == tenantID && cfg.DeletedAt == nil {
-			out = append(out, cfg)
+			out = append(out, splitStoredLayer(cfg))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -549,7 +567,7 @@ func (s *Memory) ListDeletedLayerConfigs(_ context.Context, tenantID string) ([]
 	out := []LayerConfig{}
 	for _, cfg := range s.layers {
 		if cfg.TenantID == tenantID && cfg.DeletedAt != nil {
-			out = append(out, cfg)
+			out = append(out, splitStoredLayer(cfg))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
