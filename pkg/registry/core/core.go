@@ -1227,9 +1227,23 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		return nil, err
 	}
 
-	// Filter by type / scope / tags first.
-	filtered := visible[:0:0]
-	for _, m := range visible {
+	// spec: §4.7.6 — search ranks artifacts, so each canonical ID contributes
+	// one document at its latest version. Without this collapse a stored
+	// version history scores once per version: the returned list repeats the
+	// same artifact, and total_matched counts versions the reranks below
+	// (which key on the canonical ID) then dedupe away, so a caller reads a
+	// remainder no filter can reach.
+	//
+	// The collapse runs before the filters, so each filter judges the version
+	// `latest` resolves to, the one load_artifact serves for the same ID.
+	// Filtering first let an older version stand in for an artifact whose
+	// latest version a filter excludes: a direct-only latest surfaced its
+	// indexed predecessor, and a tag the latest version dropped still matched
+	// through the history.
+	latest := dedupeLatest(visible)
+
+	filtered := latest[:0:0]
+	for _, m := range latest {
 		if opts.Type != "" && m.Type != opts.Type {
 			continue
 		}
@@ -1253,14 +1267,6 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		}
 		filtered = append(filtered, m)
 	}
-
-	// spec: §4.7.6 — search ranks artifacts, so each canonical ID contributes
-	// one document at its latest version. Without this collapse a stored
-	// version history scores once per version: the returned list repeats the
-	// same artifact, and total_matched counts versions the reranks below
-	// (which key on the canonical ID) then dedupe away, so a caller reads a
-	// remainder no filter can reach.
-	filtered = dedupeLatest(filtered)
 
 	// Lexical: BM25 over manifest text. Empty query returns matched
 	// records with score 0 (alphabetical by id).
