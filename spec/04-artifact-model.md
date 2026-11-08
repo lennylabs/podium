@@ -908,7 +908,7 @@ The audit-volume limit is a per-tenant daily cap on emitted audit events. Each e
 
 ### 4.7.9 Signing
 
-Each artifact version is signed by the author's key at commit time, or by a registry-managed key at ingest. Two key models:
+The registry signs each artifact version it ingests with its registry-managed key while the signing mode resolves to `registry-key`, the default, and signs none at ingest under `none` (§13.12). `podium sign` signs outside the ingest flow (below). Two key models:
 
 - **Registry-managed key.** One Ed25519 signing keypair per registry deployment, held in the key file at `PODIUM_SIGN_KEY_PATH` and generated on first run when absent. The key file carries the signing keypair on a `private:` line and a `public:` line, and zero or more `verify:` lines, each a base64 Ed25519 public key trusted for verification only. The signing public key and the `verify:` keys form the registry's **verification key set**. The registry signs under the signing key alone, across every tenant that deployment serves, and verifies a stored signature under any key of its verification key set (§13.4). The registry signs at ingest by default (§13.10).
 - **Sigstore-keyless.** An OIDC-attested signature with a transparency-log entry and no key management. No registry signing mode produces one. A keyless envelope carries:
