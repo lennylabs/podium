@@ -1,7 +1,7 @@
 # Proposal 0055: Retract the audit transparency-log anchoring claims and restate the opening sentence of §4.7.9
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-08). Signed off as staged. Verified on 2026-11-08 after 3 adversarial review rounds (2 findings fixed).
+- Status: Applied to spec (2026-11-08). Signed off as staged. Verified on 2026-11-08 after 3 adversarial review rounds (2 findings fixed).
 - Date: 2026-11-08
 
 This document stages spec, documentation, and Go comment changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off. No runtime behavior changes.
