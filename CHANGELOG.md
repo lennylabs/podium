@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **The metadata store gains the nullable column `layer_configs.repo_userinfo`** (§7.3.1): this release adds the column and leaves it empty. The stored `repo` and every layer response are unchanged, and a 0.5.2 binary runs against the upgraded database.
 
+### Documentation
+
+- **The status lines name the current release series.** The README and the implementation status page said 0.3.x through the 0.5 releases, and now say 0.5.x. The overview and the quickstart no longer state a version and link to the status page. A test fails when a status line names a series other than the release's.
+
 ## [0.5.2] - 2026-10-09
 
 ### Changed

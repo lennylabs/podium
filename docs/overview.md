@@ -28,7 +28,7 @@ This page is the documentation home. It names the pages that cover each feature,
 each deployment tier, and each task.
 
 > [!NOTE]
-> **Status: 0.3.x, early release.** The CLI, server, MCP bridge, and SDKs
+> **Status: early release.** The CLI, server, MCP bridge, and SDKs
 > are published. Install with `brew tap lennylabs/tap && brew install podium`
 > (macOS / Linux) or `scoop bucket add lennylabs https://github.com/lennylabs/scoop-bucket && scoop install podium` (Windows).
 > See [Implementation status](about/status) for what's shipped and what's
