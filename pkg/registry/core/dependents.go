@@ -252,7 +252,9 @@ func latestPerArtifact(records []store.ManifestRecord) []store.ManifestRecord {
 // pickLatest selects the §4.7.6 `latest` record among the versions of one
 // artifact: the most recently ingested non-deprecated version, ties broken
 // by higher semver, falling back to the deprecated set when every version
-// is deprecated and to the first record when versions are not semver.
+// is deprecated and to the first record when versions are not semver. It
+// applies the rule LoadArtifact applies, so search, load_domain, the catalog,
+// and the effective view report the version a load of the same ID serves.
 func pickLatest(recs []store.ManifestRecord) store.ManifestRecord {
 	byVersion := make(map[string]store.ManifestRecord, len(recs))
 	cands := make([]version.Candidate, 0, len(recs))

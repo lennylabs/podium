@@ -10,7 +10,6 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/store"
-	"github.com/lennylabs/podium/pkg/version"
 )
 
 // domainKnobs is the resolved §4.5.5 discovery configuration for one
@@ -301,7 +300,7 @@ func latestByID(visible []store.ManifestRecord) map[string]store.ManifestRecord 
 	}
 	out := make(map[string]store.ManifestRecord, len(byID))
 	for id, recs := range byID {
-		out[id] = latestRecord(recs)
+		out[id] = pickLatest(recs)
 	}
 	return out
 }
@@ -320,38 +319,7 @@ func dedupeLatest(records []store.ManifestRecord) []store.ManifestRecord {
 	sort.Strings(ids)
 	out := make([]store.ManifestRecord, 0, len(ids))
 	for _, id := range ids {
-		out = append(out, latestRecord(byID[id]))
+		out = append(out, pickLatest(byID[id]))
 	}
 	return out
-}
-
-// latestRecord returns the record `latest` resolves to per §4.7.6: the most
-// recently ingested non-deprecated version, ties broken by the higher semver,
-// over every version when all are deprecated. It applies the rule
-// LoadArtifact applies, so the version a listing reports is the version a
-// load of the same ID serves. It falls back to the last record when no
-// version parses as semver.
-func latestRecord(recs []store.ManifestRecord) store.ManifestRecord {
-	if len(recs) == 1 {
-		return recs[0]
-	}
-	cands := make([]version.Candidate, 0, len(recs))
-	for _, m := range recs {
-		if !m.Deprecated {
-			cands = append(cands, version.Candidate{Version: m.Version, IngestedAt: m.IngestedAt})
-		}
-	}
-	if len(cands) == 0 {
-		for _, m := range recs {
-			cands = append(cands, version.Candidate{Version: m.Version, IngestedAt: m.IngestedAt})
-		}
-	}
-	if resolved, err := version.ResolveLatest(cands); err == nil {
-		for _, m := range recs {
-			if m.Version == resolved {
-				return m
-			}
-		}
-	}
-	return recs[len(recs)-1]
 }
