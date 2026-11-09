@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Documentation
 
 - **The status lines name the current release series.** The README and the implementation status page said 0.3.x through the 0.5 releases, and now say 0.5.x. The overview and the quickstart no longer state a version and link to the status page. A test fails when a status line names a series other than the release's.
+- **The spec and docs no longer claim transparency-log anchoring of the audit chain** (§13.10, §13.11.3): no deployment submits the audit chain head to a public transparency log, and §8.6 still recommends that anchoring for high-assurance deployments. The §8.6 local chain-head anchor runs on every tier, standalone included, when `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above 0 (the default 0 disables it) and the audit sink is a file. It signs the chain head with the anchor key at `PODIUM_AUDIT_SIGNING_KEY_PATH`. The README, the deployment pages, and the landing page no longer list transparency-log anchoring as a clustered feature.
+- **The opening of §4.7.9 states what the registry signs at ingest**: the registry signs each artifact version it ingests with its registry-managed key unless the signing mode is `none`, and `podium sign` signs outside the ingest flow. The previous text claimed author-key signing at commit time, which no code performs.
 
 ## [0.5.2] - 2026-10-09
 
