@@ -3482,9 +3482,14 @@ type: context
 version: 2.0.0
 extends: greet
 x_runbook: ops/greet.md
+x_owner: platform
 ---
 EOF
 ```
+
+   The overlay restates `x_owner` because the §4.6 executable-field rule
+   requires a child to restate each undeclared key that a parent in another
+   layer sets. Scenario S91 covers the refusal of a child that omits one.
 
 3. Serve, register both layers with `team` at higher precedence, and read the
    overlay back.
@@ -3503,9 +3508,8 @@ curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=greet" | tee "$WORK/greet.json" | 
 ```
 
    **Expect.** A 200. The served frontmatter carries the overlay's own
-   `x_runbook`, the base layer's inherited `x_owner: platform`, and the
-   inherited `description: base greet`. The served `version` is the overlay's
-   `2.0.0`.
+   `x_runbook`, its restated `x_owner: platform`, and the inherited
+   `description: base greet`. The served `version` is the overlay's `2.0.0`.
 
    A `registry.invalid_argument` refusal here is the collision this scenario
    exists to catch: the artifact's own ID equals its parent's, so a
@@ -3525,9 +3529,10 @@ print("version:", d.get("version"))
 PY
 ```
 
-   **Expect.** Three `ok` lines and version `2.0.0`. A `MISS` on `x_owner` is
-   the inherited-key drop; a `MISS` on `x_runbook` is the leaf's own key being
-   dropped, which is the more serious of the two.
+   **Expect.** Three `ok` lines and version `2.0.0`. A `MISS` on `base greet`
+   is the inherited-key drop, a `MISS` on `x_owner` is the overlay's restated
+   key being dropped, and a `MISS` on `x_runbook` is the leaf's own key being
+   dropped, which is the more serious.
 
 5. Build a three-level chain in one layer and read the leaf.
 

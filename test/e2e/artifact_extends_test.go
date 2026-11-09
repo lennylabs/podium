@@ -275,14 +275,21 @@ func TestExtends_McpServersOverrideByName(t *testing.T) {
 }
 
 // mcpServers: a parent-only server is inherited when the child
-// declares a differently named server. spec: docs/authoring/extends.md § "Field
-// merge semantics", mcpServers row.
+// declares a differently named server. The parent and the child live in one
+// layer, because the executable-field rule refuses a child that leaves an
+// mcpServers entry to a parent in another layer. finance/base sorts before
+// finance/child, so the single ingest pass stores the parent before the child
+// resolves its pin. spec: docs/authoring/extends.md § "Field merge semantics",
+// mcpServers row.
+// Spec: §4.6
 func TestExtends_McpServersParentOnlyInherited(t *testing.T) {
 	t.Parallel()
-	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nmcpServers:\n  - name: jira\n    command: jira\n---\n\nbody\n"
-	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nmcpServers:\n  - name: slack\n    command: slack\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
-	srv := extendsBoot(t, parent, child, nil)
-	fm := exLoad(t, srv, exParentID).Frontmatter
+	reg := writeRegistry(t, map[string]string{
+		"finance/base/ARTIFACT.md":  "---\ntype: context\nversion: 1.0.0\ndescription: parent\nmcpServers:\n  - name: jira\n    command: jira\n---\n\nbody\n",
+		"finance/child/ARTIFACT.md": "---\ntype: context\nversion: 2.0.0\ndescription: child\nmcpServers:\n  - name: slack\n    command: slack\nextends: finance/base@1.x\n---\n\nbody\n",
+	})
+	srv := startServer(t, reg)
+	fm := exLoad(t, srv, "finance/child").Frontmatter
 	if !strings.Contains(fm, "jira") || !strings.Contains(fm, "slack") {
 		t.Errorf("parent-only jira should be inherited alongside child's slack:\n%s", fm)
 	}

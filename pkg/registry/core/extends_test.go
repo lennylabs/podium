@@ -121,6 +121,8 @@ func TestExtends_LoadMergesFields(t *testing.T) {
 // record fields. The parent's when_to_use and mcpServers are inherited,
 // tags are unioned, sensitivity is most-restrictive, description is the
 // child's, and the extends: reference is stripped (hidden-parent privacy).
+// The child shares the parent's layer, because the executable-field rule
+// refuses a child that leaves an mcpServers entry to a parent in another layer.
 func TestExtends_MergedFrontmatterServed(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
@@ -142,7 +144,7 @@ func TestExtends_MergedFrontmatterServed(t *testing.T) {
 		t.Fatalf("ingest parent: %v", err)
 	}
 	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
-		TenantID: "t", LayerID: "L2", Files: fstest.MapFS{
+		TenantID: "t", LayerID: "L1", Files: fstest.MapFS{
 			"finance/child/ARTIFACT.md": &fstest.MapFile{Data: []byte(child)},
 		},
 	}); err != nil {
@@ -150,7 +152,6 @@ func TestExtends_MergedFrontmatterServed(t *testing.T) {
 	}
 	reg := core.New(st, "t", []layer.Layer{
 		{ID: "L1", Visibility: layer.Visibility{Public: true}, Precedence: 1},
-		{ID: "L2", Visibility: layer.Visibility{Public: true}, Precedence: 2},
 	})
 	got, err := reg.LoadArtifact(context.Background(), publicID, "finance/child", core.LoadArtifactOptions{})
 	if err != nil {

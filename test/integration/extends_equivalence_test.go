@@ -16,14 +16,22 @@ import (
 // `team/overlay` extends its own ID so the parent is the same artifact in the
 // lower-precedence layer. Each parent declares a frontmatter key
 // `manifest.Artifact` does not, each child authors one of its own and no prose,
-// so the fixture exercises the inherited-key path, the empty-body path, and
+// so the fixture exercises the undeclared-key path, the empty-body path, and
 // both parent resolutions that the two extends resolvers must agree on.
+//
+// §4.6 refuses a child that leaves an undeclared key to a parent in another
+// layer, so the two cross-layer children restate every undeclared key their
+// parent chain sets. The inherited-key path runs within the `top` layer:
+// `team/beta` extends `team/alpha` and omits the `x_steward` key the parent
+// sets. `team/alpha` sorts before `team/beta`, so server ingest stores the
+// parent before the child resolves its pin.
 //
 // `shared/base` extends `shared/anchor`, which makes `team/derived` a
 // three-level chain. The filesystem resolver rewrites a record in place as it
 // processes it, so a chain deeper than one link is what separates a resolver
 // that reads the chain from each record's parsed manifest from one that reads
-// it back out of bytes it has already rewritten.
+// it back out of bytes it has already rewritten. The anchor's tag reaches
+// `team/derived` only through that chain.
 func writeExtendsRegistry(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -49,14 +57,23 @@ func writeExtendsRegistry(t *testing.T) string {
 			"extends: shared/anchor@1.x\n---\n\nbase prose\n")
 	write("top/team/derived/ARTIFACT.md",
 		"---\ntype: context\nversion: 2.0.0\ndescription: the derived context\n"+
-			"tags: [team]\nx_runbook: ops/derived.md\nextends: shared/base@1.x\n---\n")
+			"tags: [team]\nx_runbook: ops/derived.md\nx_review_board: platform\n"+
+			"x_charter: docs/charter.md\nextends: shared/base@1.x\n---\n")
 
 	write("base/team/overlay/ARTIFACT.md",
 		"---\ntype: context\nversion: 1.0.0\ndescription: the overlay base\n"+
 			"tags: [shared]\nsensitivity: low\nx_review_board: platform\n---\n\noverlay base prose\n")
 	write("top/team/overlay/ARTIFACT.md",
 		"---\ntype: context\nversion: 2.0.0\ndescription: the overlay child\n"+
-			"tags: [team]\nx_runbook: ops/overlay.md\nextends: team/overlay@1.x\n---\n")
+			"tags: [team]\nx_runbook: ops/overlay.md\nx_review_board: platform\n"+
+			"extends: team/overlay@1.x\n---\n")
+
+	write("top/team/alpha/ARTIFACT.md",
+		"---\ntype: context\nversion: 1.0.0\ndescription: the alpha context\n"+
+			"tags: [team]\nsensitivity: low\nx_steward: finance-ops\n---\n\nalpha prose\n")
+	write("top/team/beta/ARTIFACT.md",
+		"---\ntype: context\nversion: 2.0.0\ndescription: the beta context\n"+
+			"tags: [team]\nx_runbook: ops/beta.md\nextends: team/alpha@1.x\n---\n")
 	return root
 }
 
@@ -67,6 +84,10 @@ func writeExtendsRegistry(t *testing.T) string {
 // serves the first, `pkg/registry/core` the second) that serialize the merged
 // manifest through the same call, so repairing one alone makes the two modes
 // serve different bytes for the same artifact.
+//
+// The fixture's cross-layer children restate the undeclared keys their parent
+// chains set, as §4.6 requires, and the within-layer child `team/beta`
+// inherits one, so the comparison covers a restated key and an inherited key.
 //
 // The case runs through both a no-op adapter and a harness adapter, because the
 // harness path lays the merged bytes out under its own target paths and a
@@ -112,25 +133,40 @@ func TestSyncEquivalence_ExtendsChildMatchesAcrossModes(t *testing.T) {
 			fsTree := materializedTree(t, fsTarget)
 			srvTree := materializedTree(t, srvTarget)
 
-			// Both extends children must be present and carry merged output,
+			// Every extends child must be present and carry merged output,
 			// so the byte comparison below cannot pass on a tree that dropped
-			// them or served them unmerged.
+			// them or served them unmerged. The cross-layer children restate
+			// x_review_board, so the key pins that a restated value survives
+			// the merge, and the child's own x_runbook pins the child's key.
 			for _, child := range []string{"team/derived", "team/overlay"} {
 				content := soleMaterializedEntry(t, fsTree, child)
 				if !strings.Contains(content, "x_review_board: platform") {
-					t.Errorf("%s: merged frontmatter lost the parent-inherited key:\n%s", child, content)
+					t.Errorf("%s: merged frontmatter lost the restated key:\n%s", child, content)
 				}
 				if !strings.Contains(content, "x_runbook:") {
 					t.Errorf("%s: merged frontmatter lost the child's own key:\n%s", child, content)
 				}
 			}
-			// team/derived sits two links below shared/anchor, so the
-			// grandparent's inherited key pins the deeper chain both
-			// resolvers have to restore identically. Its value names no
-			// ancestor, so §4.6's omitted-field rule carries it through both
-			// modes rather than the hidden-parent test leaving it out.
-			if content := soleMaterializedEntry(t, fsTree, "team/derived"); !strings.Contains(content, "x_charter: docs/charter.md") {
-				t.Errorf("team/derived: merged frontmatter lost the grandparent-inherited key:\n%s", content)
+			// team/beta omits the x_steward key its same-layer parent sets,
+			// so §4.6's omitted-field rule carries the parent's value into
+			// the merged frontmatter in both modes.
+			beta := soleMaterializedEntry(t, fsTree, "team/beta")
+			if !strings.Contains(beta, "x_steward: finance-ops") {
+				t.Errorf("team/beta: merged frontmatter lost the parent-inherited key:\n%s", beta)
+			}
+			if !strings.Contains(beta, "x_runbook: ops/beta.md") {
+				t.Errorf("team/beta: merged frontmatter lost the child's own key:\n%s", beta)
+			}
+			// team/derived sits two links below shared/anchor. The anchor's
+			// tag reaches it only through the deeper chain both resolvers
+			// have to resolve identically, and the restated x_charter holds
+			// the value the grandparent sets.
+			derived := soleMaterializedEntry(t, fsTree, "team/derived")
+			if !strings.Contains(derived, "anchor") {
+				t.Errorf("team/derived: merged frontmatter lost the grandparent's tag:\n%s", derived)
+			}
+			if !strings.Contains(derived, "x_charter: docs/charter.md") {
+				t.Errorf("team/derived: merged frontmatter lost the restated grandparent key:\n%s", derived)
 			}
 
 			assertTreesEqual(t, fsTree, srvTree)
