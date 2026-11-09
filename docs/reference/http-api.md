@@ -688,7 +688,7 @@ PATCH  /v1/admin/tenants/{id}   body: { "quota": {...}, "expose_scope_preview": 
 DELETE /v1/admin/tenants/{id}
 ```
 
-These routes are authorized by the instance-operator role rather than the per-tenant admin-grant table, and they are available only on a multi-tenant registry. A request on a single-tenant or standalone registry is rejected with `404 registry.tenant_management_unavailable`, before operator authorization. A caller without the operator role is rejected with `403 auth.forbidden`. `GET` serves in read-only mode; `POST`, `PATCH`, and `DELETE` are rejected with `registry.read_only`.
+These routes are authorized by the instance-operator role rather than the per-tenant admin-grant table, and they are available only on a multi-tenant registry. A request on a single-tenant registry, one started without `PODIUM_MULTI_TENANT`, is rejected with `404 registry.tenant_management_unavailable`, before operator authorization. A caller without the operator role is rejected with `403 auth.forbidden`. `GET` serves in read-only mode; `POST`, `PATCH`, and `DELETE` are rejected with `registry.read_only`.
 
 `GET` returns the tenants under the `tenants` key. Every other method returns one tenant object:
 

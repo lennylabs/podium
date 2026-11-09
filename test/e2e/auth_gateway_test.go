@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
+	"github.com/lennylabs/podium/pkg/registry/core"
 )
 
 // gwHeaderGet issues a GET with arbitrary request headers.
@@ -255,6 +256,98 @@ func TestGateway_TrustedHeadersMultitenantNoSecretRefused(t *testing.T) {
 		"PODIUM_IDENTITY_PROVIDER=trusted-headers",
 		"PODIUM_MULTI_TENANT=true",
 	)
+}
+
+// Spec: §13.10 / §7.3.3 / §6.3.1 / §7.3.1 — a standalone registry started
+// with PODIUM_MULTI_TENANT and a request-time identity verifier serves tenant
+// management and per-request tenant routing on the SQLite store, so the test
+// calls no msSkipIfNoStack. The instance operator provisions and lists
+// tenants (§7.3.3), the trusted-headers X-Podium-User-Org header names the
+// caller's tenant (§6.3.1), and layer registration and the layer list are
+// scoped to the routed tenant (§7.3.1).
+//
+// An unrouted list and a list routed to an empty tenant both answer 200 with
+// no layers, so the routing check registers a user layer in globex and lists
+// it back as the same owner in each org, because a user layer is visible to
+// its owner alone.
+func TestGateway_StandaloneMultiTenantManagesTenants(t *testing.T) {
+	t.Parallel()
+	const secret = "gw-mt-s3cr3t"
+	srv, _ := gwTrustedHeadersRegistry(t,
+		"PODIUM_TRUSTED_PROXY_SECRET="+secret,
+		"PODIUM_MULTI_TENANT=true",
+		"PODIUM_OPERATOR_ADMINS=alice@acme.com",
+	)
+	// caller returns the trusted-headers identity of sub in org in both the
+	// map form gwLayerIDs reads and the http.Header form apiDoAs reads.
+	caller := func(sub, org string) (map[string]string, http.Header) {
+		m := map[string]string{
+			"X-Podium-User-Sub":     sub,
+			"X-Podium-User-Org":     org,
+			"X-Podium-Proxy-Secret": secret,
+		}
+		h := http.Header{}
+		for k, v := range m {
+			h.Set(k, v)
+		}
+		return m, h
+	}
+
+	// The default tenant serves the registry.yaml layers.
+	bobDefault, _ := caller("bob@acme.com", "default")
+	if ids := gwLayerIDs(t, srv, bobDefault); !gwListsLayer(ids, "public-layer") {
+		t.Fatalf("bob in default: layer read = %v, want it to name public-layer\nlog:\n%s", ids, srv.log())
+	}
+
+	// The operator provisions globex and lists both tenants.
+	_, alice := caller("alice@acme.com", "default")
+	st, body := apiDoAs(t, http.MethodPost, srv.BaseURL+"/v1/admin/tenants", alice, map[string]any{"name": "globex"})
+	apiWantStatus(t, st, http.StatusCreated, "alice provisions globex", body)
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &created); err != nil || created.ID == "" {
+		t.Fatalf("decode provisioned tenant (error %v)\nbody: %s", err, body)
+	}
+	st, body = apiDoAs(t, http.MethodGet, srv.BaseURL+"/v1/admin/tenants", alice, nil)
+	apiWantStatus(t, st, http.StatusOK, "alice lists tenants", body)
+	var list struct {
+		Tenants []struct {
+			Name string `json:"name"`
+		} `json:"tenants"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		t.Fatalf("decode tenant list: %v\nbody: %s", err, body)
+	}
+	names := map[string]bool{}
+	for _, tn := range list.Tenants {
+		names[tn.Name] = true
+	}
+	if !names["default"] || !names["globex"] {
+		t.Errorf("tenant list = %s, want it to name default and globex", body)
+	}
+
+	// dave's user layer lands in globex and stays out of default.
+	daveGlobexMap, daveGlobex := caller("dave@acme.com", "globex")
+	hook := evRegisterUserLayer(t, srv, daveGlobex, "gw-mt-dave")
+	if want := "/v1/ingest/webhook/" + core.OrgIDForName("globex") + "/gw-mt-dave"; !strings.Contains(hook, want) {
+		t.Errorf("webhook_url = %q, want it to contain %q", hook, want)
+	}
+	if ids := gwLayerIDs(t, srv, daveGlobexMap); !gwListsLayer(ids, "gw-mt-dave") || gwListsLayer(ids, "public-layer") {
+		t.Errorf("dave in globex: layer read = %v, want gw-mt-dave and not public-layer", ids)
+	}
+	daveDefault, _ := caller("dave@acme.com", "default")
+	if ids := gwLayerIDs(t, srv, daveDefault); !gwListsLayer(ids, "public-layer") || gwListsLayer(ids, "gw-mt-dave") {
+		t.Errorf("dave in default: layer read = %v, want public-layer and not gw-mt-dave", ids)
+	}
+
+	// An unprovisioned org reads an empty list and cannot register a layer.
+	erinMap, erin := caller("erin@acme.com", "initech")
+	if ids := gwLayerIDs(t, srv, erinMap); len(ids) != 0 {
+		t.Errorf("erin in initech: layer read = %v, want no layers", ids)
+	}
+	apiWantCodeAs(t, srv, http.MethodPost, "/v1/layers", erin, ltrGitLayer("gw-mt-erin"),
+		http.StatusForbidden, "auth.forbidden", "erin registers a layer in unprovisioned initech")
 }
 
 // Spec: §6.3.3 / §13.10 — trusted-headers on a non-loopback bind without a

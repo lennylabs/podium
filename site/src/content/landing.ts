@@ -386,8 +386,7 @@ export const landing: LandingContent = {
         ],
         plusLabel: "Everything in single node, plus",
         plus: [
-          "Multi-tenancy",
-          "SCIM group sync",
+          "Postgres tenant isolation",
           "High availability",
         ],
       },

@@ -238,6 +238,7 @@ rm -rf "$WORK"
 | S87 | Layer operations act in the caller's tenant on a multi-tenant registry | standard | none | none | Postgres, S3 |
 | S88 | Erasure on a multi-tenant registry redacts only the requesting tenant's audit records | standard | none | none | Postgres, S3 |
 | S89 | A git layer's URL credential is stored and used, and no response or log reports it | standalone | none | none | none |
+| S90 | A standalone registry manages and routes tenants in multi-tenant mode | standalone | none | none | none |
 
 ---
 
@@ -11153,6 +11154,137 @@ the credential was removed from the stored layer.
 
    **Expect.** The command succeeds and prints a webhook URL and secret. The
    stored remote now carries no credential.
+
+**Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
+
+---
+
+## S90: A standalone registry manages and routes tenants in multi-tenant mode
+
+**Goal.** Validate that a standalone registry on the SQLite store, started with
+`PODIUM_MULTI_TENANT` behind `trusted-headers`, provisions and lists tenants
+through `/v1/admin/tenants`, routes each caller to the tenant its organization
+names, including a tenant created through the API, refuses a layer write from
+an organization that names no tenant, and that a single-tenant standalone
+registry refuses tenant management with a suggested action that names no
+backend.
+
+**Covers.** §13.10 Features enabled by configuration, §6.3.1 per-request tenant
+selection, §7.3.1 Tenant selection, §7.3.3 Tenant Management, and the §6.10
+`registry.tenant_management_unavailable` envelope, through the compiled binary.
+
+**Why by hand.** An operator reads the raw tenant list and the layer lists of
+one caller in different tenants side by side. A `registry.tenant_management_unavailable`
+answer from the multi-tenant server, a `globex-<pid>` registration refused
+with `auth.forbidden`, which means the registry did not route to the tenant the
+API created, a `globex-<pid>` list that names `public-layer`, or a suggested
+action that says "on a standard backend" is the defect this scenario catches.
+
+**Steps.**
+
+1. Run the isolation block. Write a public layer, then serve a multi-tenant
+   standalone registry behind `trusted-headers`.
+
+   ```bash
+   S=$$
+   podium artifact scaffold --type context --description "Public welcome" "$WORK/pub/welcome"
+   cat > "$WORK/registry.yaml" <<EOF
+   registry:
+     layers:
+       - id: public-layer
+         source:
+           local:
+             path: $WORK/pub
+         visibility:
+           public: true
+   EOF
+   export PODIUM_CONFIG_FILE="$WORK/registry.yaml"
+   export PODIUM_IDENTITY_PROVIDER=trusted-headers
+   export PODIUM_TRUSTED_PROXY_SECRET=gateway-secret
+   export PODIUM_OPERATOR_ADMINS=olivia@acme.com
+   PODIUM_MULTI_TENANT=true podium serve --standalone --no-embeddings --bind 127.0.0.1:8191 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8191/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export URL=http://127.0.0.1:8191
+   as() { curl -s -H "X-Podium-Proxy-Secret: gateway-secret" -H "X-Podium-User-Sub: $1" -H "X-Podium-User-Org: $2" "${@:3}"; }
+   ```
+
+   **Expect.** `server_alive` reports the server running, and the log carries
+   `multi-tenant mode: routing requests by organization`.
+
+2. As bob (org `default`), list layers.
+
+   ```bash
+   as bob@acme.com default "$URL/v1/layers"
+   ```
+
+   **Expect.** The list names `public-layer`.
+
+3. As olivia, the operator, create a per-run tenant and list tenants.
+
+   ```bash
+   as olivia@acme.com default -w "\nHTTP %{http_code}\n" -X POST -H 'Content-Type: application/json' \
+     -d "{\"name\":\"globex-$S\"}" "$URL/v1/admin/tenants" | tee "$WORK/tenant.json"
+   GLOBEX=$(python3 -c "import json; print(json.loads(open('$WORK/tenant.json').read().rsplit('HTTP',1)[0])['id'])")
+   echo "globex tenant id: $GLOBEX"
+   as olivia@acme.com default "$URL/v1/admin/tenants" \
+     | python3 -c "import json,sys; print(sorted(t['name'] for t in json.load(sys.stdin)['tenants']))"
+   ```
+
+   **Expect.** The create answers `HTTP 201`, and `$GLOBEX` is a UUID rather
+   than the string `globex-<pid>`. The list prints both `default` and
+   `globex-<pid>`. A `registry.tenant_management_unavailable` answer is the
+   defect.
+
+4. As dave (org `globex-<pid>`), register a user layer, then list layers as
+   dave in `globex-<pid>` and as dave in `default`.
+
+   ```bash
+   as dave@acme.com "globex-$S" -w "\nHTTP %{http_code}\n" -X POST -H 'Content-Type: application/json' \
+     -d "{\"id\":\"dave-$S\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/dave/notes.git\",\"ref\":\"main\"}" "$URL/v1/layers"
+   echo "dave in globex sees:  $(as dave@acme.com "globex-$S" "$URL/v1/layers" | python3 -c "import json,sys; print([l['id'] for l in json.load(sys.stdin)['layers']])")"
+   echo "dave in default sees: $(as dave@acme.com default "$URL/v1/layers" | python3 -c "import json,sys; print([l['id'] for l in json.load(sys.stdin)['layers']])")"
+   ```
+
+   **Expect.** The registration answers `HTTP 201`, and its `webhook_url`
+   contains `/v1/ingest/webhook/$GLOBEX/dave-<pid>`. The `globex` list
+   contains `dave-<pid>` and not `public-layer`. The `default` list contains
+   `public-layer` and not `dave-<pid>`. `HTTP 403` with `auth.forbidden` on the
+   registration means the registry did not route to the tenant the API created.
+   `public-layer` in the `globex` list means the default tenant's layers leaked
+   across tenants. Both lists are read as dave because a user layer is visible
+   to its owner alone, so another caller's list would omit `dave-<pid>` in
+   either tenant.
+
+5. As erin (org `initech-<pid>`, which names no tenant), list layers and
+   register one.
+
+   ```bash
+   as erin@acme.com "initech-$S" -w "\nHTTP %{http_code}\n" "$URL/v1/layers"
+   as erin@acme.com "initech-$S" -w "\nHTTP %{http_code}\n" -X POST -H 'Content-Type: application/json' \
+     -d "{\"id\":\"erin-$S\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/erin/x.git\",\"ref\":\"main\"}" "$URL/v1/layers"
+   ```
+
+   **Expect.** The list prints a JSON object whose `layers` array is empty and
+   answers `HTTP 200`. The registration answers `HTTP 403` with error code `auth.forbidden`.
+
+6. Stop the server and serve the same configuration single-tenant, then
+   request tenant management.
+
+   ```bash
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   podium serve --standalone --no-embeddings --bind 127.0.0.1:8192 > "$WORK/srv1.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8192/healthz
+   server_alive "$SRV" "$WORK/srv1.log"
+   as olivia@acme.com default -w "\nHTTP %{http_code}\n" "http://127.0.0.1:8192/v1/admin/tenants"
+   ```
+
+   **Expect.** `HTTP 404` with code `registry.tenant_management_unavailable`
+   and `suggested_action` exactly `Start the registry in multi-tenant mode
+   (PODIUM_MULTI_TENANT) to manage tenants.` The words `standard backend` in
+   the response are the defect.
 
 **Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
 

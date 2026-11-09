@@ -158,7 +158,7 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 | Code | When |
 |:--|:--|
 | `registry.read_only` | Postgres primary unreachable; the registry has fallen back to read-only mode. Write endpoints (ingest, layer admin, admin grants, tenant management) are rejected. Read endpoints continue to serve from the replica. |
-| `registry.tenant_management_unavailable` | A `/v1/admin/tenants` request (or a `podium admin tenant` command) reached a single-tenant or standalone registry, where multi-tenancy is out of scope. Start the registry in multi-tenant mode with `PODIUM_MULTI_TENANT` on a standard backend to manage tenants. |
+| `registry.tenant_management_unavailable` | A `/v1/admin/tenants` request (or a `podium admin tenant` command) reached a registry that serves no tenant management: a single-tenant registry, one started without `PODIUM_MULTI_TENANT`, or one started with it but with no identity provider the registry verifies, or in public mode. Start the registry in multi-tenant mode with `PODIUM_MULTI_TENANT` and an identity provider the registry verifies to manage tenants. |
 | `registry.invalid_argument` | A request argument failed validation (e.g., `top_k > 50`, or an outbound webhook receiver URL that is non-`https` or resolves to a loopback, link-local, or private target outside `PODIUM_WEBHOOK_ALLOWED_TARGETS`). Both the SDK (client-side) and the registry (server-side) enforce. Most endpoints also return it for an unsupported HTTP method. |
 | `registry.method_not_allowed` | `load_artifact` was called with a method other than `GET` or `HEAD`. |
 | `registry.not_found` | The named artifact, layer, webhook receiver, object, or tenant quota record does not exist. Returned as `404`. |

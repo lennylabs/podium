@@ -218,8 +218,8 @@ or to a private network.
 
 ### Clustered
 
-Registry replicas behind a load balancer, with Postgres, pgvector, S3,
-OIDC, and multi-tenancy. A Helm chart ships with the registry, and the
+Registry replicas behind a load balancer, with Postgres, pgvector, S3, and
+OIDC. A Helm chart ships with the registry, and the
 supporting services are managed or self-run alongside.
 
 - **Who it is for.** Larger teams and organizations, multi-tenant
@@ -227,9 +227,10 @@ supporting services are managed or self-run alongside.
   constraints or identity-based visibility requirements.
 - **What runs.** Registry replicas behind a load balancer,
   Postgres (managed or self-run), object storage, and an OIDC IdP.
-- **What it adds.** Multi-tenancy and high availability. SCIM group push,
-  freeze windows, the hash-chained audit log, and its local chain-head
-  anchoring run on a single node as well.
+- **What it adds.** High availability across registry replicas and Postgres
+  schema-per-org tenant isolation. Multi-tenancy, SCIM group push, freeze
+  windows, outbound webhooks, the hash-chained audit log, and its local
+  chain-head anchoring run on a single node as well.
 - **Migration path.** `podium admin migrate-to-standard` exports
   a single-node deployment into the clustered stack. The same artifact
   directory becomes a `local`-source layer until the cut-over to

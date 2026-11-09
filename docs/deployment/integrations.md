@@ -91,7 +91,7 @@ The registry process reads `PODIUM_IDENTITY_PROVIDER` for its own value. A consu
 
 Once an identity provider is configured, the default visibility for an endpoint-registered admin-defined layer flips from `public` to `private` so those layers do not leak by accident. `PODIUM_DEFAULT_LAYER_VISIBILITY` overrides it. See [Access control](access-control#deployment-defaults).
 
-SCIM 2.0 is group provisioning rather than an identity provider. It pushes group membership from the IdP so layer visibility can reference group names directly, and it is available on the [clustered](clustered) tier. Without SCIM, group membership comes from the OIDC `groups` claim, and `PODIUM_IDP_GROUP_MAPPING` translates IdP-specific group identifiers into the names layer config uses.
+SCIM 2.0 is group provisioning rather than an identity provider. It pushes group membership from the IdP so layer visibility can reference group names directly, and the registry mounts its receiver at `/scim/v2/` on a single-node or clustered deployment when `PODIUM_SCIM_TOKENS` lists a bearer token. Without SCIM, group membership comes from the OIDC `groups` claim, and `PODIUM_IDP_GROUP_MAPPING` translates IdP-specific group identifiers into the names layer config uses.
 
 ---
 

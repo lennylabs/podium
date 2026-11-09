@@ -117,10 +117,10 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 		suggestedAction: "Check the configured OAuth client credential and that the redirect URI the registry sends is registered with the identity provider for this client.",
 	},
 	// §7.3.3: tenant management is a multi-tenant-only capability. A
-	// single-tenant or standalone registry has no additional tenant to manage,
-	// so the operation never succeeds without changing the deployment mode.
+	// single-tenant registry has no additional tenant to manage, so the
+	// operation never succeeds outside multi-tenant mode.
 	"registry.tenant_management_unavailable": {
-		suggestedAction: "Start the registry in multi-tenant mode (PODIUM_MULTI_TENANT) on a standard backend to manage tenants.",
+		suggestedAction: "Start the registry in multi-tenant mode (PODIUM_MULTI_TENANT) to manage tenants.",
 	},
 }
 

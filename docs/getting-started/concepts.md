@@ -97,7 +97,7 @@ three tiers:
 - **Single node**: one binary on one machine, with SQLite, sqlite-vec, and
   filesystem object storage embedded.
 - **Clustered**: registry replicas behind a load balancer, with Postgres,
-  S3-compatible object storage, OIDC, and multi-tenancy.
+  S3-compatible object storage, and OIDC.
 
 All three tiers apply the same layer composition and serve the same
 artifacts. Migration between tiers is mechanical, because the same shared
