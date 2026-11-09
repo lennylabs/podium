@@ -1,7 +1,7 @@
 # Proposal 0057: Require an extends: child to restate every executable field a parent in another layer sets
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-09). Verified on 2026-11-09 after 10 adversarial review rounds (20 findings fixed).
+- Status: Applied to spec (2026-11-09). Verified on 2026-11-09 after 10 adversarial review rounds (20 findings fixed).
 - Date: 2026-11-09
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: ingest and a filesystem-source `podium sync` refuse an `extends:` child that ingests or syncs today.
