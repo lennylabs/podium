@@ -182,10 +182,10 @@ func TestTenants_NonOperatorForbidden(t *testing.T) {
 	}
 }
 
-// Spec: §7.3.3 / §4.7.1 — a single-tenant registry rejects every tenant-
-// management request with registry.tenant_management_unavailable, regardless
-// of operator authorization. Spec: §6.10 — the refusal carries the registered
-// suggested_action, which names PODIUM_MULTI_TENANT. Spec: §8.1 — the refused requests record no
+// Spec: §7.3.3 / §4.7.1 / §6.10 — a single-tenant registry rejects every
+// tenant-management request with registry.tenant_management_unavailable and
+// the registered suggested_action, which names PODIUM_MULTI_TENANT, regardless
+// of operator authorization. Per §8.1, the refused requests record no
 // tenant.managed event, so the single-tenant bound-tenant label never applies
 // to one.
 func TestTenants_SingleTenantUnavailable(t *testing.T) {
