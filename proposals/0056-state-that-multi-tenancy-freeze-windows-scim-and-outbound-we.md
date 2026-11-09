@@ -1,7 +1,7 @@
 # Proposal 0056: State that multi-tenancy, freeze windows, SCIM, and outbound webhooks run on any registry server when configured, and key single-tenant wording on PODIUM_MULTI_TENANT rather than on the backend
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-09). Verified on 2026-11-08 after 6 adversarial review rounds (5 findings fixed).
+- Status: Implemented (2026-11-09). Signed off as staged. Verified on 2026-11-08 after 6 adversarial review rounds (5 findings fixed).
 - Date: 2026-11-08
 
 This document stages spec, documentation, test, and Go changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. No runtime behavior changes. The one product-code edit changes a §6.10 `suggested_action` string and the comment above it.
@@ -47,29 +47,29 @@ This document stages spec, documentation, test, and Go changes. It does not modi
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4, SPEC-5, SPEC-6, SPEC-7, CODE-1. Every spec edit and the §6.10 code mirror land in one commit. The spec edits are bundled because SPEC-1 contradicts the other sections until they change, and CODE-1 rides in the spec commit because the mirrored-surfaces rule requires both sides of §6.10 in the same commit.
+- [x] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4, SPEC-5, SPEC-6, SPEC-7, CODE-1. Every spec edit and the §6.10 code mirror land in one commit. The spec edits are bundled because SPEC-1 contradicts the other sections until they change, and CODE-1 rides in the spec commit because the mirrored-surfaces rule requires both sides of §6.10 in the same commit.
       Levels: unit. Depends on: —
-- [ ] **S2 · test** — TEST-1. The standalone multi-tenant end-to-end test under `trusted-headers`.
+- [x] **S2 · test** — TEST-1. The standalone multi-tenant end-to-end test under `trusted-headers`.
       Levels: e2e. Depends on: S1
-- [ ] **S3 · test** — MV-1. Scenario S90 in `test/manual-validation.md`.
+- [x] **S3 · test** — MV-1. Scenario S90 in `test/manual-validation.md`.
       Levels: —. Depends on: S1
-- [ ] **S4 · docs** — DOC-1. The tier tables and the landing page name Postgres tenant isolation and high availability.
+- [x] **S4 · docs** — DOC-1. The tier tables and the landing page name Postgres tenant isolation and high availability.
       Levels: unit (site). Depends on: S1
-- [ ] **S5 · docs** — DOC-2. The getting-started tier summaries drop multi-tenancy from the clustered stack.
+- [x] **S5 · docs** — DOC-2. The getting-started tier summaries drop multi-tenancy from the clustered stack.
       Levels: —. Depends on: S1
-- [ ] **S6 · docs** — DOC-3. `clustered.md` description, multi-tenancy bullet, and SCIM bullet.
+- [x] **S6 · docs** — DOC-3. `clustered.md` description, multi-tenancy bullet, and SCIM bullet.
       Levels: —. Depends on: S1
-- [ ] **S7 · docs** — DOC-4, DOC-9. `single-node.md` "What the tier omits" and "Migrating to clustered". Bundled because both edit the same page and the same reader checks the migration advice against its limit.
+- [x] **S7 · docs** — DOC-4, DOC-9. `single-node.md` "What the tier omits" and "Migrating to clustered". Bundled because both edit the same page and the same reader checks the migration advice against its limit.
       Levels: —. Depends on: S1
-- [ ] **S8 · docs** — DOC-5. `local.md` and `progressive-adoption.md` reasons to move to clustered.
+- [x] **S8 · docs** — DOC-5. `local.md` and `progressive-adoption.md` reasons to move to clustered.
       Levels: —. Depends on: S1
-- [ ] **S9 · docs** — DOC-6. SCIM availability lines in `integrations.md` and `access-control.md`.
+- [x] **S9 · docs** — DOC-6. SCIM availability lines in `integrations.md` and `access-control.md`.
       Levels: —. Depends on: S1
-- [ ] **S10 · docs** — DOC-7. The reference pages' single-tenant wording for tenant management.
+- [x] **S10 · docs** — DOC-7. The reference pages' single-tenant wording for tenant management.
       Levels: —. Depends on: S1
-- [ ] **S11 · docs** — DOC-10. The single-tenant definition in `gateway-delegated-identity.md`.
+- [x] **S11 · docs** — DOC-10. The single-tenant definition in `gateway-delegated-identity.md`.
       Levels: —. Depends on: S1
-- [ ] **S12 · docs** — DOC-8. The CHANGELOG `### Documentation` bullet.
+- [x] **S12 · docs** — DOC-8. The CHANGELOG `### Documentation` bullet.
       Levels: —. Depends on: S1–S11
 
 **Ordering constraints.** S1 lands first, and `make coverage-gate` passes on it before any later step (D-9). S2 through S11 are independent of one another. S12 describes the whole change and lands last. Land every step in one pull request.
