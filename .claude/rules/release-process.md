@@ -14,13 +14,14 @@ Podium follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`MAJO
 
 - `deploy/helm/podium/Chart.yaml`: `version` and `appVersion`, both equal to `buildinfo.Version`. The chart's default image tag is `appVersion`, which the release pushes as a bare `X.Y.Z` tag of `ghcr.io/lennylabs/podium-server`. `TestChart_VersionTracksTheRelease` fails when they disagree. Edit them in the same commit as `buildinfo.go`.
 - `internal/buildinfo/buildinfo.go`: the `Version` constant. Edit it by hand each release. It is the `go build` fallback; the release pipeline overrides it from the tag via `-ldflags`.
+- `README.md` and `docs/about/status.md`: the release series (`X.Y.x`) in the status line. Edit them on a MINOR or MAJOR bump. `TestStatusPages_NameTheCurrentReleaseSeries` fails when a series on either page differs from the series of a release `buildinfo.Version`.
 - `sdks/podium-py/pyproject.toml` and `sdks/podium-ts/package.json`: tag-derived. setuptools-scm derives the Python version from the tag, and the workflow rewrites the npm version from the tag. Neither needs a manual edit per release.
 - The git tag `vX.Y.Z`: authoritative for a release.
 
 ## Preparing the release PR
 
 1. Branch from `main`: `git checkout -b release/X.Y.Z`.
-2. Bump `internal/buildinfo/buildinfo.go` `Version` to `X.Y.Z`, and set `version` and `appVersion` in `deploy/helm/podium/Chart.yaml` to `X.Y.Z`.
+2. Bump `internal/buildinfo/buildinfo.go` `Version` to `X.Y.Z`, and set `version` and `appVersion` in `deploy/helm/podium/Chart.yaml` to `X.Y.Z`. On a MINOR or MAJOR bump, also set the release series in the status lines of `README.md` and `docs/about/status.md` to `X.Y.x`.
 3. Add a `CHANGELOG.md` entry:
    - Insert a `## [X.Y.Z] - YYYY-MM-DD` section below `## [Unreleased]`, dated the release day.
    - Update the `[Unreleased]` compare link to `compare/vX.Y.Z...HEAD`.
@@ -28,7 +29,7 @@ Podium follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`MAJO
    - Group entries under `Added`, `Changed`, `Fixed`, `Removed`, and `Documentation`. Cover user-facing changes, and omit test-only and CI-only changes.
    - Match the `## [X.Y.Z] - YYYY-MM-DD` header format exactly. The release workflow extracts this section verbatim as the GitHub Release body, so a malformed header drops the release notes.
 4. Confirm `go build ./...`, `go test ./internal/buildinfo/`, and `go test ./test/chart/` pass.
-5. Commit as `chore(release): prep vX.Y.Z` with a DCO sign-off (`git commit -s`). The prep commit touches only `CHANGELOG.md`, `internal/buildinfo/buildinfo.go`, and `deploy/helm/podium/Chart.yaml`.
+5. Commit as `chore(release): prep vX.Y.Z` with a DCO sign-off (`git commit -s`). The prep commit touches only `CHANGELOG.md`, `internal/buildinfo/buildinfo.go`, and `deploy/helm/podium/Chart.yaml`, plus `README.md` and `docs/about/status.md` on a MINOR or MAJOR bump.
 6. Open a PR with base `main`. Let CI pass before merging, including `codecov/patch`, which reports separately from the test lanes and lands after them. See the Codecov section of [`test-coverage.md`](test-coverage.md) for how to read it.
 
 ## Tagging the release
@@ -65,7 +66,7 @@ When the release diff touches `pkg/sign` or the `SignatureProvider` contract, ru
 
 ## Where these rules apply
 
-- A change to the `Version` constant in `internal/buildinfo/buildinfo.go` or to the version fields of `deploy/helm/podium/Chart.yaml`.
+- A change to the `Version` constant in `internal/buildinfo/buildinfo.go`, to the version fields of `deploy/helm/podium/Chart.yaml`, or to the release series in the status lines of `README.md` and `docs/about/status.md`.
 - A new `CHANGELOG.md` release section.
 - A `vX.Y.Z` tag push.
 

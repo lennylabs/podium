@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Search reports an artifact at the version `load_artifact` serves** (§4.7.6): `search_artifacts` applied the deprecation, `search_visibility`, and tag filters to each stored version and then kept the highest semver, while `latest` resolves to the most recently ingested non-deprecated version. An artifact whose latest version is `direct-only` stayed in search at an older indexed version, a tag the latest version dropped still matched, and a lower-semver backport ingested after a newer line was listed at the newer version. Search now collapses each artifact to the version `latest` resolves to and filters that version. `load_domain`, the catalog, and the effective view `podium sync` walks use the same rule.
 
+### Documentation
+
+- **The status lines name the current release series.** The README and the implementation status page said 0.3.x through the 0.5 releases, and now say 0.5.x. The overview and the quickstart no longer state a version and link to the status page. A test fails when a status line names a series other than the release's.
+
 ## [0.5.2] - 2026-10-09
 
 ### Changed

@@ -14,7 +14,7 @@ require access control or progressive discovery, including solo work,
 prototypes, first evaluation, and Git-shared team catalogs.
 
 > [!NOTE]
-> Podium is at 0.3.x, an early release. The surface and its behavior may
+> Podium is an early release. The surface and its behavior may
 > still change before 1.0. See [Implementation status](../about/status) for
 > what's shipped and what's still on the roadmap.
 
