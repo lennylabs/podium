@@ -1,7 +1,7 @@
 package e2e
 
-// Audit transparency-log signing, anchoring, verification, and PII redaction in
-// one journey.
+// Audit chain-head anchoring under the anchor key, chain verification, and PII
+// redaction in one journey.
 //
 // PII redaction is unit-tested in pkg/audit, anchoring and chain verification
 // are integration-tested in audit_retention_reanchor_test.go, and
