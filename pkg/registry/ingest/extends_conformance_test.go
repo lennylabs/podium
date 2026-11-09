@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/clock"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/registry/projection"
@@ -100,6 +101,27 @@ func TestIngest_ExtendsUnpinnedPinsMostRecentlyIngestedParent(t *testing.T) {
 // per-version and immutable (§4.7), so a test cannot flip an existing row.
 func deprecatedAgentVersion(ver, desc string) string {
 	return "---\ntype: agent\nversion: " + ver + "\ndescription: " + desc + "\nsensitivity: low\ndeprecated: true\n---\n\nagent body\n"
+}
+
+// Spec: §4.6, §13.11.3 — a child whose extends: names an ID no stored record
+// provides is rejected with ingest.invalid_artifact and the shared
+// unresolved-parent reason, the same text a filesystem-source drop reports.
+// Matrix: §6.10 (ingest.invalid_artifact)
+func TestExtends_UnresolvedParentUsesSharedReason(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	child := "---\ntype: agent\nversion: 1.0.0\ndescription: child\nsensitivity: low\nextends: shared/missing@1.x\n---\n\nbody\n"
+	res := ingestOne(t, st, "L2", "finance/child", child)
+	if len(res.Rejected) != 1 || res.Accepted != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want a single rejection", res.Accepted, res.Rejected)
+	}
+	got := res.Rejected[0]
+	if got.Code != layer.InvalidArtifactCode {
+		t.Errorf("code = %q, want %q", got.Code, layer.InvalidArtifactCode)
+	}
+	if want := layer.UnresolvedParentReason("shared/missing"); got.Reason != want {
+		t.Errorf("reason = %q, want %q", got.Reason, want)
+	}
 }
 
 // Spec: §4.6 — an exact `extends:` pin naming a deprecated parent version is

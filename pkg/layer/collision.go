@@ -46,3 +46,26 @@ func (c Collision) Reason() string {
 func ExtendsOverlays(extendsRef, id string) bool {
 	return extendsRef != "" && version.StripPin(extendsRef) == id
 }
+
+// Drop is one artifact a filesystem-source composition dropped, with the
+// §6.10 code and reason it reports. A collision and an executable-field or
+// unresolved-parent refusal both report through it, so a caller prints every
+// drop the same way.
+//
+// Spec: §4.6, §13.11.3
+type Drop struct {
+	// ArtifactID is the canonical ID of the dropped artifact.
+	ArtifactID string
+	// Code is the §6.10 error code the drop reports.
+	Code string
+	// Reason is the human-readable text the drop reports.
+	Reason string
+}
+
+// Drop returns the drop record for c: its artifact ID, CollisionCode, and
+// its Reason.
+//
+// Spec: §4.6
+func (c Collision) Drop() Drop {
+	return Drop{ArtifactID: c.ArtifactID, Code: CollisionCode, Reason: c.Reason()}
+}

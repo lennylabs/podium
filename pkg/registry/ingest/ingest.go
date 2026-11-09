@@ -51,7 +51,7 @@ var (
 	ErrSandboxProfileUnenforceable = errors.New("ingest.sandbox_profile_unenforceable")
 	// ErrInvalidArtifact wraps parse / structural errors that surface at
 	// ingest as ingest.lint_failed.
-	ErrInvalidArtifact = errors.New("ingest.invalid_artifact")
+	ErrInvalidArtifact = errors.New(layer.InvalidArtifactCode)
 	// ErrQuotaExceeded maps to quota.storage_exceeded (§4.7.8).
 	ErrQuotaExceeded = errors.New("quota.storage_exceeded")
 	// ErrAuditVolumeExceeded maps to quota.audit_volume_exceeded (§4.7.8): the
@@ -616,7 +616,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			res.Rejected = append(res.Rejected, RejectedArtifact{
 				ArtifactID: rec.ID,
 				Reason:     err.Error(),
-				Code:       "ingest.invalid_artifact",
+				Code:       layer.InvalidArtifactCode,
 			})
 			continue
 		}
@@ -668,7 +668,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				res.Rejected = append(res.Rejected, RejectedArtifact{
 					ArtifactID: rec.ID,
 					Reason:     fmt.Sprintf("extends: %v", perr),
-					Code:       "ingest.invalid_artifact",
+					Code:       layer.InvalidArtifactCode,
 				})
 				continue
 			}
@@ -679,7 +679,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 					ArtifactID: rec.ID,
 					Reason: fmt.Sprintf("extends: child type %q does not match parent %s type %q",
 						rec.Artifact.Type, version.StripPin(rec.Artifact.Extends), parentType),
-					Code: "ingest.invalid_artifact",
+					Code: layer.InvalidArtifactCode,
 				})
 				continue
 			}
@@ -723,7 +723,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				res.Rejected = append(res.Rejected, RejectedArtifact{
 					ArtifactID: rec.ID,
 					Reason:     fmt.Sprintf("extends: parent %s not found", pin),
-					Code:       "ingest.invalid_artifact",
+					Code:       layer.InvalidArtifactCode,
 				})
 				continue
 			}
@@ -1518,7 +1518,9 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 		if id == childID {
 			return "", "", "", fmt.Errorf("self-extends cycle: %q", ref)
 		}
-		return "", "", "", fmt.Errorf("no parent artifact %q ingested yet", id)
+		// The caller prefixes "extends: ", so strip it from the shared
+		// text to keep the reason byte-identical to the filesystem drop's.
+		return "", "", "", errors.New(strings.TrimPrefix(layer.UnresolvedParentReason(id), "extends: "))
 	}
 
 	var resolved string
