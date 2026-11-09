@@ -7,14 +7,14 @@ import (
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
-// Scheduler runs Anchor periodically against the supplied sink,
-// honoring §8.6 transparency-log anchoring without requiring an
-// operator to invoke `podium admin anchor` by hand.
+// Scheduler runs Anchor periodically against the supplied sink. It
+// implements the periodic §8.6 local chain-head anchor that
+// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS enables.
 //
-// The scheduler is best-effort: failures (signer outage, network
-// blip) are not fatal; the next tick retries. Operators monitor
-// the audit log for `audit.anchored` events and the
-// `audit.anchor_failed` events the scheduler emits on failure.
+// The scheduler is best-effort: a failed attempt (a chain-head read,
+// signing, or sink write error) is not fatal, and the next tick
+// retries. Operators monitor the audit log for `audit.anchored` events
+// and the `audit.anchor_failed` events the scheduler emits on failure.
 type Scheduler struct {
 	Sink     *FileSink
 	Signer   sign.Provider
@@ -28,8 +28,8 @@ type Scheduler struct {
 }
 
 // Run blocks until ctx is canceled, calling Anchor every Interval.
-// One immediate Anchor fires before the first sleep so the chain
-// head lands in the transparency log promptly after startup.
+// One immediate Anchor fires before the first sleep so an anchor of
+// the current head exists promptly after startup.
 func (s *Scheduler) Run(ctx context.Context) error {
 	if s.Sink == nil || s.Signer == nil {
 		return nil

@@ -3,13 +3,12 @@ package e2e
 // Operational notifications through the wired §9.1 NotificationProvider.
 //
 // The §9.1 NotificationProvider delivers operational notifications (ingest
-// failure, embedding-provider outage, transparency-anchor failure, layer
-// auto-disable). serverboot selects the provider from
-// PODIUM_NOTIFICATION_PROVIDER and wires it into the registry, but no test
-// drove a registry-side event through that wired path: the prior coverage
-// proved the provider records a body (the recorder primitive) and that the
-// server boots with the provider configured, without firing a real registry
-// event.
+// failure, embedding-provider outage, layer auto-disable). serverboot selects
+// the provider from PODIUM_NOTIFICATION_PROVIDER and wires it into the
+// registry, but no test drove a registry-side event through that wired path:
+// the prior coverage proved the provider records a body (the recorder
+// primitive) and that the server boots with the provider configured, without
+// firing a real registry event.
 //
 // This file closes that journey. A standalone server boots with
 // PODIUM_NOTIFICATION_PROVIDER=webhook pointed at the in-test notificationSink

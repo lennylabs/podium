@@ -255,7 +255,7 @@ When to use public mode vs sensible-defaults standalone:
 
 Migration to a governed deployment goes through `podium admin migrate-to-standard --postgres <dsn> --object-store <url>` (§13.4), followed by removing the `--public-mode` flag and reconfiguring layer visibility. Same migration path standalone uses today.
 
-**Out of scope for standalone.** Multi-tenancy, freeze windows, SCIM, transparency-log anchoring, outbound webhooks. These are present in the binary but inert without the supporting infrastructure (an IdP for SCIM, a Sigstore stack for transparency anchoring, etc.). They can be enabled individually when their dependencies are available. Vulnerability scanning is out of scope for every deployment shape, not just standalone — see §1.1, §4.7.7.
+**Out of scope for standalone.** Multi-tenancy, freeze windows, SCIM, and outbound webhooks. These are present in the binary but inert without the supporting infrastructure (an IdP for SCIM, etc.). They can be enabled individually when their dependencies are available. §8.6 local chain-head anchoring runs on a standalone server as on any other registry process (§13.12). Vulnerability scanning is out of scope for every deployment shape, not just standalone — see §1.1, §4.7.7.
 
 **Client setup.** Clients (CLI, MCP server, SDK) don't read `registry.yaml`. That's server-side config. The registry value clients use to reach the server is configured separately on the client side, via `sync.yaml`'s `defaults.registry`, `PODIUM_REGISTRY`, or an SDK constructor param (§7.5.2 covers the lookup order). `podium serve` zero-flag writes both files in one step on first run: `~/.podium/registry.yaml` for the server (`bind: 127.0.0.1:8080`, store/vector defaults) and `~/.podium/sync.yaml` for the client (`defaults.registry: http://127.0.0.1:8080`). For client-only setup (e.g., when the server runs elsewhere), use `podium init --global --registry <url>` (§7.7).
 
@@ -350,7 +350,7 @@ What's **not available** in filesystem source:
 Features that require **specifically a remote server** (not just any server):
 
 - Centralized audit independent of clones.
-- Multi-tenancy, SCIM, and transparency-log anchoring.
+- Multi-tenancy and SCIM.
 
 Identity-based visibility filtering requires a server but not specifically a remote one: a standalone server fronted by a gateway provides it through `oidc-jwt` or `trusted-headers` (§6.3.3), and a remote standard deployment runs its own OIDC IdP.
 

@@ -9,12 +9,14 @@ import (
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
-// Anchor records the §8.6 transparency-anchor for the current
-// audit chain head. The chain head is signed via the supplied
-// Sigstore-keyless provider; the resulting envelope is stored in an
-// audit.anchored event so independent auditors can walk back to
-// any prior chain head and confirm via Rekor that the anchor was
-// recorded at that time.
+// Anchor records a §8.6 local chain-head anchor. It signs
+// "sha256:<chain head>" with signer and appends the envelope in an
+// audit.anchored event, so an auditor holding the signer's public key
+// can check that the key attested that head. The registry passes its
+// dedicated Ed25519 anchor key, and Anchor submits nothing to a
+// transparency log. The signature covers the digest alone; the event's
+// timestamp and anchored_at are hash-chained with the event but are not
+// covered by the anchor signature.
 //
 // The chain head is the Hash of the most recent event. An empty
 // log produces an anchor with chainHead="" (recorded as a no-op so
@@ -78,6 +80,8 @@ func chainHeadOf(sink *FileSink) (string, error) {
 // Sigstore-keyless envelope's tlog.log_index. Returns -1 when the
 // envelope carries no tlog object or no log_index in it (e.g.,
 // RegistryManagedKey or the Noop signer), or does not decode.
+// The registry's anchor key is a RegistryManagedKey, so registry anchors
+// record -1.
 //
 // Rekor indices are zero-based, so the first entry recorded against
 // an instance has index 0. The decode uses a nested pointer so a

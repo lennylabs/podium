@@ -2080,7 +2080,7 @@ type Config struct {
 	// §13.2.1 read-only mode probe.
 	readOnlyProbeFailures int
 	readOnlyProbeInterval int
-	// §8.6 transparency anchoring.
+	// §8.6 local chain-head anchoring.
 	auditLogPath        string
 	auditSigningKeyPath string
 	auditAnchorInterval int

@@ -152,12 +152,11 @@ The shared library does the same parsing, composition, and adapter work in both 
 
 ## What the tier omits
 
-Single node omits the capabilities that need external services or a multi-tenant model:
+Single node omits multi-tenancy. A single-node deployment is single-tenant.
 
-- **Multi-tenancy.** A single-node deployment is single-tenant.
-- **Transparency-log anchoring.** Anchoring the audit chain head to a public transparency log needs that log's infrastructure. Artifact signing is not part of this omission: a single-node registry signs every artifact with its registry-managed key by default.
+Artifact signing and local chain-head anchoring of the audit log run on a single node. The registry signs every artifact with its registry-managed key by default. When `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above 0 and the audit log is a file, the registry also anchors the audit chain head with its anchor key. No tier submits the chain head to a public transparency log.
 
-When any of these starts mattering, see [Clustered](clustered).
+When multi-tenancy starts mattering, see [Clustered](clustered).
 
 ---
 
