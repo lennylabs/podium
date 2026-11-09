@@ -1,8 +1,8 @@
 // Package notification implements the §9 NotificationProvider SPI.
 // Providers deliver operational notifications (ingest failure,
-// embedding-provider outage past N minutes, transparency-anchor
-// failure, layer auto-disable on force-push) to a fanout target
-// configured by the operator via PODIUM_NOTIFICATION_PROVIDER.
+// embedding-provider outage past N minutes, layer auto-disable on
+// force-push) to a fanout target configured by the operator via
+// PODIUM_NOTIFICATION_PROVIDER.
 //
 // This is distinct from the §7.3.2 outbound webhook stream, which
 // carries change events for downstream consumers (manifest
