@@ -152,11 +152,11 @@ The shared library does the same parsing, composition, and adapter work in both 
 
 ## What the tier omits
 
-Single node omits multi-tenancy. A single-node deployment is single-tenant.
+A single-node deployment is single-tenant by default. Setting `PODIUM_MULTI_TENANT=true` with an identity provider the registry verifies turns on multi-tenant routing on a single node, and the SQLite store scopes each row by its tenant. Without such a provider, or in public mode, a registry started with `PODIUM_MULTI_TENANT` binds every request to a tenant that holds no data, so every caller sees an empty catalog and `/v1/admin/tenants` answers `registry.tenant_management_unavailable`. A single node omits the Postgres schema-per-org isolation and row-level security the clustered tier provides for multi-tenant deployments, and it runs no replicas.
 
 Artifact signing and local chain-head anchoring of the audit log run on a single node. The registry signs every artifact with its registry-managed key by default. When `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above 0 and the audit log is a file, the registry also anchors the audit chain head with its anchor key. No tier submits the chain head to a public transparency log.
 
-When multi-tenancy starts mattering, see [Clustered](clustered).
+When a multi-tenant deployment needs Postgres-backed isolation, or the registry needs replicas, see [Clustered](clustered).
 
 ---
 
@@ -193,11 +193,13 @@ For everyday team use, enable the `oidc-jwt` provider instead. Each developer au
 
 ## Migrating to clustered
 
-When single node no longer fits, typically because multi-tenancy, OIDC group claims through SCIM, or production-grade availability is required, `podium admin migrate-to-standard` exports the single-node state into the standard stack:
+When single node no longer fits, typically because production-grade availability across replicas, Postgres-backed tenant isolation, or scale beyond tens of developers is required, `podium admin migrate-to-standard` exports the single-node state into the standard stack:
 
 ```bash
 podium admin migrate-to-standard --postgres <dsn> --object-store <url>
 ```
+
+The migration carries the artifact manifests, layer configuration, and admin grants of the `default` org alone. On a single node started with `PODIUM_MULTI_TENANT`, a tenant provisioned through `podium admin tenant` keeps its artifact manifests, layer configuration, and admin grants in the single-node store. The migration copies the artifact content blobs of every tenant, and with `--target-audit-log` it copies the whole audit log, which holds every tenant's events. A deployment that serves several tenants starts on the clustered tier (see [Progressive adoption](progressive-adoption)).
 
 [Clustered](clustered) documents the same migration path from the receiving side. The artifact directory is unchanged, and layer config moves from `~/.podium/registry.yaml` to the tenant config.
 
