@@ -123,7 +123,7 @@ A user-defined layer is a separate case. Its visibility is implicitly `users: [<
 Layer visibility references OIDC group names. They reach the registry through either of these paths:
 
 - **The OIDC `groups` claim.** The token carries group membership and the registry reads it directly. IdPs that emit group identifiers rather than names need `PODIUM_IDP_GROUP_MAPPING` to translate them, which the [OIDC cookbooks](oidc/) cover per IdP.
-- **SCIM 2.0 push.** The IdP pushes membership to the registry. SCIM is available on the [clustered](clustered) tier and is recommended once group-based visibility gates artifacts that matter.
+- **SCIM 2.0 push.** The IdP pushes membership to the registry. The registry mounts the SCIM receiver on a single-node or clustered deployment when `PODIUM_SCIM_TOKENS` lists a bearer token, and it expands `groups:` filters against the pushed directory under `oidc-jwt` and `injected-session-token` but not under `trusted-headers` (see [Gateway-delegated identity](gateway-delegated-identity)). SCIM is recommended once group-based visibility gates artifacts that matter.
 
 ---
 
