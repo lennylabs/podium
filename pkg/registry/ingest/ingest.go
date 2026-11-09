@@ -415,6 +415,12 @@ type RejectedArtifact struct {
 	ArtifactID string
 	Reason     string
 	Code       string // §6.10 namespaced code
+	// Details carries the structured detail the rejecting rule defines, such
+	// as the §4.6 executable-field rule's constraint and field paths. It is
+	// nil for every rule that defines none.
+	//
+	// Spec: §7.3.1
+	Details map[string]any
 }
 
 // Ingest runs the pipeline against st and returns a Result.
@@ -655,6 +661,11 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			req.CurrentArtifactCount = projected
 		}
 
+		// extendsParent is the pinned parent's stored row, kept past the
+		// extends: block so the insert path can compare layers and walk the
+		// parent's chain without a second read.
+		var extendsParent store.ManifestRecord
+
 		// Spec: §4.7.6 extends:-pin resolution. If the artifact extends a
 		// parent reference, resolve the parent against existing manifests and
 		// pin to an exact version. The pin and the fold below are recomputed on
@@ -708,7 +719,8 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			// accepted, so the parent's own columns already carry its
 			// ancestors' values by induction.
 			parentID, parentVersion := splitRef(pin)
-			parent, gerr := st.GetManifest(ctx, req.TenantID, parentID, parentVersion)
+			var gerr error
+			extendsParent, gerr = st.GetManifest(ctx, req.TenantID, parentID, parentVersion)
 			if gerr != nil {
 				// A store failure is not an authoring defect: match the
 				// loop's convention below and abort the ingest call.
@@ -727,7 +739,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				})
 				continue
 			}
-			mr = foldExtendsParent(parent, mr)
+			mr = foldExtendsParent(extendsParent, mr)
 
 			// spec: §13.10 / §4.6 — the floor above read the child's authored
 			// sensitivity, and the fold writes the most-restrictive value
@@ -785,6 +797,22 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			// Insert below.
 		default:
 			return nil, err
+		}
+
+		// Spec: §4.6 executable fields across layers. The check runs on the
+		// insert path alone, after the idempotency switch: the content hash
+		// covers only the child's authored bytes, so an unchanged stored
+		// child is idempotent above and is never re-judged against a parent
+		// that changed after it was accepted.
+		if mr.ExtendsPin != "" {
+			rej, cerr := executableInheritance(ctx, st, req.TenantID, req.LayerID, rec, mr, extendsParent)
+			if cerr != nil {
+				return nil, cerr
+			}
+			if rej != nil {
+				res.Rejected = append(res.Rejected, *rej)
+				continue
+			}
 		}
 
 		// §4.7.9 signing: when a Signer is configured, attach the
@@ -1104,6 +1132,25 @@ type invalidArtifactError struct{ cause error }
 
 func (e invalidArtifactError) Error() string   { return e.cause.Error() }
 func (e invalidArtifactError) Unwrap() []error { return []error{ErrInvalidArtifact, e.cause} }
+
+// chainReadError aborts an ingest cycle when a store read fails while the
+// §4.6 executable-field check walks a cross-layer parent's chain. The cause
+// can name an ancestor beyond the reference the author wrote, and the reingest
+// handler writes a runner error's text into the registry.unavailable envelope,
+// so the message names the child alone and the cause stays in the server log
+// and the error chain.
+//
+// Spec: §4.6 hidden parents (withheld)
+type chainReadError struct {
+	artifactID string
+	cause      error
+}
+
+func (e *chainReadError) Error() string {
+	return "ingest: resolve extends chain for " + e.artifactID + ": store read failed"
+}
+
+func (e *chainReadError) Unwrap() error { return e.cause }
 
 // invalidArtifact classifies a manifest the parser cannot decode as a fault in
 // the layer's content. spec: §7.3.1 — the refusal is an ingest rejection of the
@@ -1453,6 +1500,65 @@ func collisionRejection(tenantID, layerID, id, existingLayer string) RejectedArt
 		Reason:     layer.Collision{ArtifactID: id}.Reason(),
 		Code:       layer.CollisionCode,
 	}
+}
+
+// chainUnresolvedReason is the reason a server gives a child whose
+// cross-layer parent's stored chain is missing an ancestor or loops. It names
+// no parent, because the failing link can be an ancestor beyond the reference
+// the author wrote. The filesystem source has no stored chain and never gives
+// it.
+//
+// Spec: §4.6 hidden parents (withheld)
+const chainUnresolvedReason = "extends: parent chain does not resolve"
+
+// executableInheritance applies the §4.6 executable-field rule to a child
+// about to be inserted: a child whose pinned parent comes from another layer
+// restates every executable field that parent sets. It returns nil, nil when
+// the parent shares the child's layer or the child restates every field, and
+// a rejection when the rule refuses the child or the parent's chain does not
+// resolve. A store failure other than absence aborts the cycle with a
+// *chainReadError, as a failed parent load does.
+//
+// rec.ArtifactBytes is the child's authored block: server ingest walks one
+// layer and never rewrites a record with its parent's values, so the
+// comparison sees only what the author wrote.
+//
+// Spec: §4.6
+func executableInheritance(ctx context.Context, st store.Store, tenantID, childLayer string,
+	rec filesystem.ArtifactRecord, mr, parent store.ManifestRecord) (*RejectedArtifact, error) {
+	if parent.Layer == childLayer {
+		return nil, nil
+	}
+	chain, err := core.ExtendsChain(ctx, st, tenantID, parent)
+	switch {
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, core.ErrInvalidArgument):
+		return &RejectedArtifact{ArtifactID: rec.ID, Reason: chainUnresolvedReason, Code: layer.InvalidArtifactCode}, nil
+	case err != nil:
+		log.Printf("ingest: tenant=%s layer=%s artifact=%s extends_pin=%s: resolve extends chain: %v",
+			tenantID, childLayer, rec.ID, mr.ExtendsPin, err)
+		return nil, &chainReadError{artifactID: rec.ID, cause: err}
+	}
+	p, blocks := core.ResolvedArtifact(chain)
+	fields, err := manifest.InheritedExecutableFields(rec.ID, p, blocks, rec.ArtifactBytes)
+	if err != nil {
+		// The error can carry a field path that names a chain parent, so the
+		// log line and the reason name no field.
+		log.Printf("ingest: tenant=%s layer=%s artifact=%s extends_pin=%s parent_layer=%s rejected: executable fields could not be read",
+			tenantID, childLayer, rec.ID, mr.ExtendsPin, parent.Layer)
+		return &RejectedArtifact{ArtifactID: rec.ID, Reason: layer.UnreadableExecutableFieldsReason, Code: layer.InvalidArtifactCode}, nil
+	}
+	if len(fields) == 0 {
+		return nil, nil
+	}
+	ie := &layer.ExecutableInheritance{ArtifactID: rec.ID, Fields: fields}
+	log.Printf("ingest: tenant=%s layer=%s artifact=%s extends_pin=%s parent_layer=%s rejected: executable_inheritance fields=%s",
+		tenantID, childLayer, rec.ID, mr.ExtendsPin, parent.Layer, strings.Join(fields, ","))
+	return &RejectedArtifact{
+		ArtifactID: rec.ID,
+		Reason:     ie.Reason(),
+		Code:       layer.InvalidArtifactCode,
+		Details:    ie.Details(),
+	}, nil
 }
 
 // resolveExtendsPin resolves a parent reference (e.g.,
