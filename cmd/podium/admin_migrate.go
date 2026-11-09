@@ -296,9 +296,11 @@ func planMigration(sqlitePath string) (*migrationPlan, error) {
 		layerConfigs: map[string][]store.LayerConfig{},
 		adminGrants:  map[string][]store.AdminGrant{},
 	}
-	// Standalone has one tenant, but its id is the deterministic UUIDv5 the
-	// auto-bootstrap derives for the "default" org (§4.7.1: org IDs are UUIDs,
-	// names are aliases), not the literal string "default". A real standalone
+	// The pump reads the default org alone; a multi-tenant standalone
+	// source's other tenants stay in the source store (§13.10). The default
+	// org's id is the deterministic UUIDv5 the auto-bootstrap derives for the
+	// "default" org (§4.7.1: org IDs are UUIDs, names are aliases), not the
+	// literal string "default". A real standalone
 	// source keys every manifest, layer config, and grant by that UUID, so
 	// migrating only the literal "default" would silently pump zero metadata
 	// (the symptom: blobs copy but no manifests). Probe both ids: the UUID for a
