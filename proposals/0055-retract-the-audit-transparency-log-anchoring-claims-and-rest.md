@@ -1,7 +1,7 @@
 # Proposal 0055: Retract the audit transparency-log anchoring claims and restate the opening sentence of §4.7.9
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-08). Signed off as staged. Verified on 2026-11-08 after 3 adversarial review rounds (2 findings fixed).
+- Status: Implemented (2026-11-08). Signed off as staged. Verified on 2026-11-08 after 3 adversarial review rounds (2 findings fixed).
 - Date: 2026-11-08
 
 This document stages spec, documentation, and Go comment changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off. No runtime behavior changes.
@@ -42,29 +42,29 @@ This document stages spec, documentation, and Go comment changes. It does not mo
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2. §13.10 drops the item and its parenthetical and gains the local-anchoring pointer, and §13.11.3 drops the item. Bundled because both edit `spec/13-deployment.md` and the same reader checks that the point appears once.
+- [x] **S1 · spec** — SPEC-1, SPEC-2. §13.10 drops the item and its parenthetical and gains the local-anchoring pointer, and §13.11.3 drops the item. Bundled because both edit `spec/13-deployment.md` and the same reader checks that the point appears once.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-3. The opening sentence of §4.7.9 states what the registry signs at ingest under each signing mode.
+- [x] **S2 · spec** — SPEC-3. The opening sentence of §4.7.9 states what the registry signs at ingest under each signing mode.
       Levels: —. Depends on: —
-- [ ] **S3 · code** — CODE-1. The `Anchor` doc comment describes local chain-head anchoring, and the `extractRekorLogIndex` comment gains one sentence.
+- [x] **S3 · code** — CODE-1. The `Anchor` doc comment describes local chain-head anchoring, and the `extractRekorLogIndex` comment gains one sentence.
       Levels: unit. Depends on: S1, S2
-- [ ] **S4 · code** — CODE-2. The `Scheduler`, `Run`, and `EventAuditAnchorFailed` comments drop the transparency-log and `podium admin anchor` wording.
+- [x] **S4 · code** — CODE-2. The `Scheduler`, `Run`, and `EventAuditAnchorFailed` comments drop the transparency-log and `podium admin anchor` wording.
       Levels: unit. Depends on: S1, S2
-- [ ] **S5 · code** — CODE-3. The notification comments drop anchor failure, and the `Registry` comments carry no example list.
+- [x] **S5 · code** — CODE-3. The notification comments drop anchor failure, and the `Registry` comments carry no example list.
       Levels: unit. Depends on: S1, S2
-- [ ] **S6 · code** — CODE-4. The `internal/serverboot` comments say "local chain-head anchoring".
+- [x] **S6 · code** — CODE-4. The `internal/serverboot` comments say "local chain-head anchoring".
       Levels: unit. Depends on: S1, S2
-- [ ] **S7 · test** — TEST-1. The two `test/e2e` file comments stop describing transparency-log signing and anchor-failure notification.
+- [x] **S7 · test** — TEST-1. The two `test/e2e` file comments stop describing transparency-log signing and anchor-failure notification.
       Levels: e2e. Depends on: S1, S2
-- [ ] **S8 · docs** — DOC-1. The README, the deployment index, the overview, and the landing page drop the item from the clustered tier.
+- [x] **S8 · docs** — DOC-1. The README, the deployment index, the overview, and the landing page drop the item from the clustered tier.
       Levels: unit (site). Depends on: S1, S2
-- [ ] **S9 · docs** — DOC-2. `how-it-works.md` and `local.md` drop the item from the clustered additions.
+- [x] **S9 · docs** — DOC-2. `how-it-works.md` and `local.md` drop the item from the clustered additions.
       Levels: —. Depends on: S1, S2
-- [ ] **S10 · docs** — DOC-3. `single-node.md` rewrites "What the tier omits" as prose.
+- [x] **S10 · docs** — DOC-3. `single-node.md` rewrites "What the tier omits" as prose.
       Levels: —. Depends on: S1, S2
-- [ ] **S11 · docs** — DOC-4. `progressive-adoption.md` replaces the control with local chain-head anchoring.
+- [x] **S11 · docs** — DOC-4. `progressive-adoption.md` replaces the control with local chain-head anchoring.
       Levels: —. Depends on: S1, S2
-- [ ] **S12 · docs** — DOC-5. The CHANGELOG `### Documentation` group under `[Unreleased]`.
+- [x] **S12 · docs** — DOC-5. The CHANGELOG `### Documentation` group under `[Unreleased]`.
       Levels: —. Depends on: S1–S11
 
 **Ordering constraints.** S1 and S2 land first, each in its own commit, and `make coverage-gate` passes on each before any later step (D-9). S3 through S11 are independent of one another. S12 describes the whole change and lands last. Land every step in one pull request.
