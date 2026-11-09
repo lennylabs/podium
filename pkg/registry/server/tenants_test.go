@@ -184,7 +184,8 @@ func TestTenants_NonOperatorForbidden(t *testing.T) {
 
 // Spec: §7.3.3 / §4.7.1 — a single-tenant registry rejects every tenant-
 // management request with registry.tenant_management_unavailable, regardless
-// of operator authorization. Spec: §8.1 — the refused requests record no
+// of operator authorization. Spec: §6.10 — the refusal carries the registered
+// suggested_action, which names PODIUM_MULTI_TENANT. Spec: §8.1 — the refused requests record no
 // tenant.managed event, so the single-tenant bound-tenant label never applies
 // to one.
 func TestTenants_SingleTenantUnavailable(t *testing.T) {
@@ -192,6 +193,7 @@ func TestTenants_SingleTenantUnavailable(t *testing.T) {
 	sink := audit.NewMemory()
 	ts, st := bootTenantServer(t, operatorCaller, false /* single-tenant */, server.WithAudit(sink))
 	_ = st.GrantOperator(context.Background(), operatorCaller.Sub) // still rejected
+	const wantSuggestedAction = "Start the registry in multi-tenant mode (PODIUM_MULTI_TENANT) to manage tenants."
 	for _, tc := range []struct{ method, path, body string }{
 		{http.MethodGet, "/v1/admin/tenants", ""},
 		{http.MethodPost, "/v1/admin/tenants", `{"name":"x"}`},
@@ -204,6 +206,15 @@ func TestTenants_SingleTenantUnavailable(t *testing.T) {
 		}
 		if c := tenantErrCode(t, body); c != "registry.tenant_management_unavailable" {
 			t.Errorf("%s %s code = %q, want registry.tenant_management_unavailable", tc.method, tc.path, c)
+		}
+		var env struct {
+			SuggestedAction string `json:"suggested_action"`
+		}
+		if err := json.Unmarshal(body, &env); err != nil {
+			t.Fatalf("%s %s decode envelope: %v", tc.method, tc.path, err)
+		}
+		if env.SuggestedAction != wantSuggestedAction {
+			t.Errorf("%s %s suggested_action = %q, want %q", tc.method, tc.path, env.SuggestedAction, wantSuggestedAction)
 		}
 	}
 	if n := len(sink.Events()); n != 0 {
