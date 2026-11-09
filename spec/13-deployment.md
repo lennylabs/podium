@@ -350,9 +350,8 @@ What's **not available** in filesystem source:
 Features that require **specifically a remote server** (not just any server):
 
 - Centralized audit independent of clones.
-- Multi-tenancy and SCIM.
 
-Identity-based visibility filtering requires a server but not specifically a remote one: a standalone server fronted by a gateway provides it through `oidc-jwt` or `trusted-headers` (§6.3.3), and a remote standard deployment runs its own OIDC IdP.
+Identity-based visibility filtering, multi-tenancy, and SCIM require a server but not specifically a remote one. A standalone server fronted by a gateway provides identity-based visibility through `oidc-jwt` or `trusted-headers` (§6.3.3), and a remote standard deployment runs its own OIDC IdP. A standalone server runs multi-tenancy and SCIM under the conditions §13.10 states, and SCIM also needs a server the IdP can reach.
 
 ### 13.11.4 Watch Mode
 
