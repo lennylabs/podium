@@ -105,11 +105,11 @@ var operationalEventTypes = []audit.EventType{
 // frames its rows as "Defaults, configurable per deployment"; these types
 // carry no default policy, so Enforce never drops them:
 //
-//   - The §8.6 transparency-anchor markers (audit.anchored / anchor_failed /
-//     gap_detected) and the §8.4/§8.6 audit.retention_enforced boundary
-//     marker record the chain state needed to reconcile an external anchor
-//     of a superseded head; aging them out would erase the reconciliation
-//     trail.
+//   - The §8.6 chain-head anchor and integrity markers (audit.anchored /
+//     anchor_failed / gap_detected) and the §8.4/§8.6 audit.retention_enforced
+//     boundary marker record the chain state a verifier needs to reconcile
+//     an anchor it holds of a superseded head; aging them out would erase
+//     the reconciliation trail.
 //   - user.erased is the §8.5 GDPR right-to-erasure accountability record;
 //     it persists to prove the erasure was honored.
 //
