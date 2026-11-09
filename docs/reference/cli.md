@@ -561,7 +561,7 @@ Admin commands require the `admin` role on the tenant. Admin grants are recorded
 
 ### `podium admin tenant`
 
-Manages tenants at runtime on a multi-tenant registry. The group is authorized by the instance-operator role, which is distinct from the per-tenant `admin` role: an operator is seeded at boot through `PODIUM_OPERATOR_ADMINS` (see [CLI environment variables](#environment-variables)) and the operator authenticates as any caller does. The commands are available only when the registry runs in multi-tenant mode (`PODIUM_MULTI_TENANT`); a single-tenant or standalone registry rejects them with `registry.tenant_management_unavailable`. `--registry` is required on each command (defaults to `PODIUM_REGISTRY`).
+Manages tenants at runtime on a multi-tenant registry. The group is authorized by the instance-operator role, which is distinct from the per-tenant `admin` role: an operator is seeded at boot through `PODIUM_OPERATOR_ADMINS` (see [CLI environment variables](#environment-variables)) and the operator authenticates as any caller does. The commands are available only when the registry runs in multi-tenant mode (`PODIUM_MULTI_TENANT`); a single-tenant registry rejects them with `registry.tenant_management_unavailable`. `--registry` is required on each command (defaults to `PODIUM_REGISTRY`).
 
 ```
 podium admin tenant create <name> [--storage-bytes N] [--search-qps N] [--materialize-rate N] [--audit-volume-per-day N] [--max-user-layers N] [--expose-scope-preview true|false] --registry <url>
