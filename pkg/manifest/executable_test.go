@@ -76,7 +76,7 @@ func TestInheritedExecutableFields_FullRestateReportsNothing(t *testing.T) {
 }
 
 // A parent entry the child's list does not carry is reported as the whole
-// entry.
+// entry. An empty chain block contributes nothing and is not a decode failure.
 // Spec: §4.6
 func TestInheritedExecutableFields_MissingServerEntry(t *testing.T) {
 	t.Parallel()
@@ -84,7 +84,7 @@ func TestInheritedExecutableFields_MissingServerEntry(t *testing.T) {
 		"server_identifier: npx child-server\nx_launcher: child-launcher\n---\n"
 
 	got, err := manifest.InheritedExecutableFields(childID, parentArtifact(t, execParent),
-		[]manifest.MergedBlock{block(execParent, "")}, []byte(child))
+		[]manifest.MergedBlock{block("", ""), block(execParent, "shared/root@1.x")}, []byte(child))
 	if err != nil {
 		t.Fatalf("InheritedExecutableFields: %v", err)
 	}
@@ -131,6 +131,10 @@ func TestInheritedExecutableFields_UndecodableBlocks(t *testing.T) {
 		"child header only a comment": {child: "---\n# nothing\n---\n"},
 		"chain header not a mapping": {
 			chain: []manifest.MergedBlock{block("---\n- a\n---\n", "")},
+			child: good,
+		},
+		"chain executable field mistyped": {
+			chain: []manifest.MergedBlock{block("---\ntype: hook\nversion: 1.0.0\nhook_action: [a]\n---\n", "")},
 			child: good,
 		},
 	}

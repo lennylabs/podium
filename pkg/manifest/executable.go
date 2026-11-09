@@ -52,7 +52,7 @@ func InheritedExecutableFields(childID string, parent Artifact, parentChain []Me
 	if err != nil {
 		return nil, unreadable("decode child block", err)
 	}
-	authored, err := chainMappings(parentChain)
+	authored, err := decodeChain(parentChain)
 	if err != nil {
 		return nil, unreadable("decode parent chain", err)
 	}
@@ -94,6 +94,25 @@ func InheritedExecutableFields(childID string, parent Artifact, parentChain []Me
 // ErrUnhidableParent, does not leak that sentinel into this error's chain.
 func unreadable(op string, err error) error {
 	return fmt.Errorf("manifest: executable fields: %s: %v: %w", op, err, ErrUnreadableChain)
+}
+
+// decodeChain returns the authored mappings of parentChain after checking that
+// every non-empty block also passes ParseArtifact's typed decode. A block that
+// decodes as a YAML mapping but not as a manifest makes the read path fold the
+// parent from its stored columns, which carry no executable fields, so the
+// typed comparison would pass silently against that fallback. The comparison
+// is the fail-closed point for such a block. An empty block contributes
+// nothing, as in chainMappings.
+func decodeChain(parentChain []MergedBlock) ([]*yaml.Node, error) {
+	for _, block := range parentChain {
+		if len(block.Frontmatter) == 0 {
+			continue
+		}
+		if _, err := ParseArtifact(block.Frontmatter); err != nil {
+			return nil, err
+		}
+	}
+	return chainMappings(parentChain)
 }
 
 // inheritedServerFields compares each merged mcpServers entry with the child's
