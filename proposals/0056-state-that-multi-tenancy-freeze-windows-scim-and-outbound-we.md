@@ -1,7 +1,7 @@
 # Proposal 0056: State that multi-tenancy, freeze windows, SCIM, and outbound webhooks run on any registry server when configured, and key single-tenant wording on PODIUM_MULTI_TENANT rather than on the backend
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-09). Signed off as staged. Verified on 2026-11-08 after 6 adversarial review rounds (5 findings fixed).
+- Status: Applied to spec (2026-11-09). Verified on 2026-11-08 after 6 adversarial review rounds (5 findings fixed).
 - Date: 2026-11-08
 
 This document stages spec, documentation, test, and Go changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. No runtime behavior changes. The one product-code edit changes a §6.10 `suggested_action` string and the comment above it.
