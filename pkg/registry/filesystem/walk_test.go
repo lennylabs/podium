@@ -294,16 +294,16 @@ layer_order:
 }
 
 // Spec: §4.6, §13.11.3 — CollisionPolicyDrop reports each drop through
-// OnCollision, so Walk refuses the policy without a callback rather than
+// OnDrop, so Walk refuses the policy without a callback rather than
 // dropping an artifact silently. The refusal precedes the layer walk.
 //
 // Matrix: §6.10 (ingest.collision)
-func TestWalk_DropPolicyRequiresOnCollision(t *testing.T) {
+func TestWalk_DropPolicyRequiresOnDrop(t *testing.T) {
 	t.Parallel()
 	reg := &Registry{}
 	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyDrop})
-	if err == nil || !strings.Contains(err.Error(), "CollisionPolicyDrop requires OnCollision") {
-		t.Fatalf("Walk err = %v, want the missing-OnCollision refusal", err)
+	if err == nil || !strings.Contains(err.Error(), "filesystem: CollisionPolicyDrop requires OnDrop") {
+		t.Fatalf("Walk err = %v, want the missing-OnDrop refusal", err)
 	}
 	if got != nil {
 		t.Errorf("Walk records = %v, want nil on the refusal", idsOf(got))
@@ -351,9 +351,9 @@ func openDropFixture(t *testing.T, layers []string, files map[string]string) *Re
 
 // Spec: §4.6 — under CollisionPolicyDrop an unsanctioned collision drops the
 // higher-precedence record, keeps the lower one, reports the drop through
-// OnCollision, and leaves every non-colliding artifact in place. A third
-// layer is compared against the kept record, so its drop names the first
-// contributor as ExistingLayer.
+// OnDrop with the ingest.collision code, and leaves every non-colliding
+// artifact in place. A third layer is compared against the kept record, so
+// the first contributor's copy is the one kept.
 //
 // Matrix: §6.10 (ingest.collision)
 func TestWalk_DropPolicy(t *testing.T) {
@@ -364,7 +364,7 @@ func TestWalk_DropPolicy(t *testing.T) {
 		files     map[string]string
 		wantDesc  string
 		wantLayer string
-		wantDrops []layer.Collision
+		wantDrops []layer.Drop
 	}{
 		{
 			name:   "two layers without extends keep the lower copy",
@@ -375,7 +375,7 @@ func TestWalk_DropPolicy(t *testing.T) {
 			},
 			wantDesc:  "from-l1",
 			wantLayer: "l1",
-			wantDrops: []layer.Collision{{ArtifactID: "x", Layer: "l2", ExistingLayer: "l1"}},
+			wantDrops: []layer.Drop{{ArtifactID: "x", Code: "ingest.collision", Reason: layer.Collision{ArtifactID: "x"}.Reason()}},
 		},
 		{
 			name:   "three layers without extends drop both higher copies",
@@ -387,9 +387,9 @@ func TestWalk_DropPolicy(t *testing.T) {
 			},
 			wantDesc:  "from-l1",
 			wantLayer: "l1",
-			wantDrops: []layer.Collision{
-				{ArtifactID: "x", Layer: "l2", ExistingLayer: "l1"},
-				{ArtifactID: "x", Layer: "l3", ExistingLayer: "l1"},
+			wantDrops: []layer.Drop{
+				{ArtifactID: "x", Code: "ingest.collision", Reason: layer.Collision{ArtifactID: "x"}.Reason()},
+				{ArtifactID: "x", Code: "ingest.collision", Reason: layer.Collision{ArtifactID: "x"}.Reason()},
 			},
 		},
 		{
@@ -411,7 +411,7 @@ func TestWalk_DropPolicy(t *testing.T) {
 			},
 			wantDesc:  "from-l1",
 			wantLayer: "l1",
-			wantDrops: []layer.Collision{{ArtifactID: "x", Layer: "l2", ExistingLayer: "l1"}},
+			wantDrops: []layer.Drop{{ArtifactID: "x", Code: "ingest.collision", Reason: layer.Collision{ArtifactID: "x"}.Reason()}},
 		},
 	}
 	for _, tc := range cases {
@@ -422,16 +422,16 @@ func TestWalk_DropPolicy(t *testing.T) {
 				files[k] = v
 			}
 			reg := openDropFixture(t, tc.layers, files)
-			var drops []layer.Collision
+			var drops []layer.Drop
 			got, err := reg.Walk(WalkOptions{
 				CollisionPolicy: CollisionPolicyDrop,
-				OnCollision:     func(c layer.Collision) { drops = append(drops, c) },
+				OnDrop:          func(d layer.Drop) { drops = append(drops, d) },
 			})
 			if err != nil {
 				t.Fatalf("Walk: %v", err)
 			}
 			if !reflect.DeepEqual(drops, tc.wantDrops) {
-				t.Errorf("OnCollision calls = %+v, want %+v", drops, tc.wantDrops)
+				t.Errorf("OnDrop calls = %+v, want %+v", drops, tc.wantDrops)
 			}
 			byID := map[string]ArtifactRecord{}
 			for _, rec := range got {
@@ -464,18 +464,18 @@ func TestWalk_DropPolicyDroppedRecordIsNotAParent(t *testing.T) {
 		"l2/x": dropFixtureArtifact("from-l2", "", "l2-tag"),
 		"l3/x": dropFixtureArtifact("from-l3", "x", "l3-tag"),
 	})
-	var drops []layer.Collision
+	var drops []layer.Drop
 	got, err := reg.Walk(WalkOptions{
 		CollisionPolicy: CollisionPolicyDrop,
 		ResolveExtends:  true,
-		OnCollision:     func(c layer.Collision) { drops = append(drops, c) },
+		OnDrop:          func(d layer.Drop) { drops = append(drops, d) },
 	})
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
-	want := []layer.Collision{{ArtifactID: "x", Layer: "l2", ExistingLayer: "l1"}}
+	want := []layer.Drop{{ArtifactID: "x", Code: layer.CollisionCode, Reason: layer.Collision{ArtifactID: "x"}.Reason()}}
 	if !reflect.DeepEqual(drops, want) {
-		t.Errorf("OnCollision calls = %+v, want %+v", drops, want)
+		t.Errorf("OnDrop calls = %+v, want %+v", drops, want)
 	}
 	if len(got) != 1 {
 		t.Fatalf("got %v, want x only", idsOf(got))

@@ -339,7 +339,7 @@ func TestSyncEquivalence_LayerCollisionIsByteIdentical(t *testing.T) {
 				}
 			}
 
-			want := layer.Collision{ArtifactID: "shared/clash", Layer: "team-finance", ExistingLayer: "org-defaults"}
+			want := layer.Collision{ArtifactID: "shared/clash", Layer: "team-finance", ExistingLayer: "org-defaults"}.Drop()
 			if len(fsRes.Dropped) != 1 || fsRes.Dropped[0] != want {
 				t.Errorf("filesystem Dropped = %+v, want [%+v]", fsRes.Dropped, want)
 			}

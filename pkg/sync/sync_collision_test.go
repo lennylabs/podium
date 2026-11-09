@@ -64,25 +64,25 @@ func collisionRegistry(t *testing.T) string {
 	return reg
 }
 
-// assertOneCollision fails unless dropped holds exactly the personal copy of
-// shared/note, kept from team-shared, and its reason names the extends:
-// remedy without naming the kept layer.
-func assertOneCollision(t *testing.T, dropped []layer.Collision) {
+// assertOneCollision fails unless dropped holds exactly one ingest.collision
+// drop of shared/note whose reason names the extends: remedy without naming
+// the kept layer. A drop carries no layer, so each caller pins which copy was
+// dropped through the copy it materializes.
+func assertOneCollision(t *testing.T, dropped []layer.Drop) {
 	t.Helper()
 	if len(dropped) != 1 {
 		t.Fatalf("Dropped = %+v, want exactly one collision", dropped)
 	}
 	got := dropped[0]
-	want := layer.Collision{ArtifactID: collisionID, Layer: "personal", ExistingLayer: "team-shared"}
+	want := layer.Collision{ArtifactID: collisionID, Layer: "personal", ExistingLayer: "team-shared"}.Drop()
 	if got != want {
 		t.Errorf("Dropped[0] = %+v, want %+v", got, want)
 	}
-	reason := got.Reason()
-	if !strings.Contains(reason, "declare extends: "+collisionID) {
-		t.Errorf("Reason() = %q, want the extends: remedy", reason)
+	if !strings.Contains(got.Reason, "declare extends: "+collisionID) {
+		t.Errorf("Reason = %q, want the extends: remedy", got.Reason)
 	}
-	if strings.Contains(reason, "team-shared") {
-		t.Errorf("Reason() = %q names the kept layer", reason)
+	if strings.Contains(got.Reason, "team-shared") {
+		t.Errorf("Reason = %q names the kept layer", got.Reason)
 	}
 }
 

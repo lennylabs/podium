@@ -608,13 +608,15 @@ func printRejected(w io.Writer, id, code, reason string) {
 }
 
 // reportDropped prints a rejected line for each artifact a filesystem-source
-// composition dropped under the §4.6 collision rule and reports whether it
-// printed anything, so the caller can set a non-zero exit status.
+// composition dropped under the §4.6 collision rule or the §4.6
+// executable-field rule, with the code and reason each drop carries, and
+// reports whether it printed anything, so the caller can set a non-zero exit
+// status.
 //
-// Spec: §13.11.3
-func reportDropped(w io.Writer, dropped []layer.Collision) bool {
-	for _, c := range dropped {
-		printRejected(w, c.ArtifactID, layer.CollisionCode, c.Reason())
+// Spec: §4.6, §13.11.3
+func reportDropped(w io.Writer, dropped []layer.Drop) bool {
+	for _, d := range dropped {
+		printRejected(w, d.ArtifactID, d.Code, d.Reason)
 	}
 	return len(dropped) > 0
 }
