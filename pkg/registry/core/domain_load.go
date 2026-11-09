@@ -10,7 +10,6 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/store"
-	"github.com/lennylabs/podium/pkg/version"
 )
 
 // domainKnobs is the resolved §4.5.5 discovery configuration for one
@@ -301,7 +300,7 @@ func latestByID(visible []store.ManifestRecord) map[string]store.ManifestRecord 
 	}
 	out := make(map[string]store.ManifestRecord, len(byID))
 	for id, recs := range byID {
-		out[id] = latestRecord(recs)
+		out[id] = pickLatest(recs)
 	}
 	return out
 }
@@ -320,28 +319,7 @@ func dedupeLatest(records []store.ManifestRecord) []store.ManifestRecord {
 	sort.Strings(ids)
 	out := make([]store.ManifestRecord, 0, len(ids))
 	for _, id := range ids {
-		out = append(out, latestRecord(byID[id]))
+		out = append(out, pickLatest(byID[id]))
 	}
 	return out
-}
-
-// latestRecord returns the highest-version record per §4.7.6, falling
-// back to the last record when no version parses as semver.
-func latestRecord(recs []store.ManifestRecord) store.ManifestRecord {
-	if len(recs) == 1 {
-		return recs[0]
-	}
-	versions := make([]string, 0, len(recs))
-	for _, m := range recs {
-		versions = append(versions, m.Version)
-	}
-	latest, _ := version.ParsePin("latest")
-	if resolved, err := version.Resolve(latest, versions); err == nil {
-		for _, m := range recs {
-			if m.Version == resolved {
-				return m
-			}
-		}
-	}
-	return recs[len(recs)-1]
 }
