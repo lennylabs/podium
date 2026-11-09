@@ -11266,8 +11266,8 @@ action that says "on a standard backend" is the defect this scenario catches.
      -d "{\"id\":\"erin-$S\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/erin/x.git\",\"ref\":\"main\"}" "$URL/v1/layers"
    ```
 
-   **Expect.** The list prints `{"layers":[]}` and answers `HTTP 200`. The
-   registration answers `HTTP 403` with error code `auth.forbidden`.
+   **Expect.** The list prints a JSON object whose `layers` array is empty and
+   answers `HTTP 200`. The registration answers `HTTP 403` with error code `auth.forbidden`.
 
 6. Stop the server and serve the same configuration single-tenant, then
    request tenant management.
