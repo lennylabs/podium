@@ -105,7 +105,7 @@ Goal: protect critical periods (release cuts, year-end close, on-call rotations)
 By this point governance overhead is amortized; the further controls are easier to add when their specific need shows up:
 
 - **Sandbox profile enforcement** (`PODIUM_ENFORCE_SANDBOX_PROFILE=true`) when artifacts ship code that runs on user machines and the harness honors profiles. Until then, the field is informational.
-- **Transparency-log anchoring** when external auditors or regulators ask whether an artifact existed at time T. The hash-chained audit log already provides internal evidence; transparency-log anchoring extends it across organizational boundaries.
+- **Local chain-head anchoring** (`PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS`) when auditors ask for signed checkpoints of the audit chain. The registry periodically signs the chain head with a dedicated anchor key (`PODIUM_AUDIT_SIGNING_KEY_PATH`) and appends an `audit.anchored` event, and an auditor verifies the anchor with the key's public half. Anchoring runs only when the registry audit sink is a file. A registry whose `PODIUM_AUDIT_LOG_PATH` names an `http://` or `https://` endpoint logs that anchoring is disabled. The signature covers the chain-head digest alone, and the operator holds the anchor key, so the evidence stays within the operator's trust domain and does not establish when an anchor was made. Podium does not submit the chain head to a public transparency log.
 - **Multi-region replication** when single-region availability stops being acceptable.
 
 Each of these warrants a planned rollout: read the relevant spec section, run a controlled trial, then enable broadly.
