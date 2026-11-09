@@ -97,7 +97,7 @@ The proxy secret is the registry's only request-level control over header trust,
 
 ## Single-tenant and multi-tenant
 
-On a single-tenant registry, which covers a single-node deployment and a clustered one with a single org, the registry resolves every authenticated caller to its sole tenant and does not consult the organization value.
+On a single-tenant registry, which is a single-node or clustered registry started without `PODIUM_MULTI_TENANT`, the registry resolves every authenticated caller to its sole tenant and does not consult the organization value.
 
 A multi-tenant registry routes each request to the tenant its organization names: the verified `org_id` claim under `oidc-jwt`, or the `X-Podium-User-Org` header under `trusted-headers`. Enable multi-tenant mode with `PODIUM_MULTI_TENANT=true` (the `default` org is always provisioned). The organization value is an org ID or an org-name alias, which the registry resolves to a tenant. Under `oidc-jwt`, a value that resolves to no provisioned tenant is rejected with `auth.tenant_unknown`; under `trusted-headers`, the request is treated as anonymous and sees public visibility only. The layer endpoints follow the same routing, so a caller whose `X-Podium-User-Org` names no tenant lists no layers and cannot write one.
 
