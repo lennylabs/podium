@@ -520,14 +520,14 @@ The browser acquisition flow (§6.3.4) adds `auth.*` codes. `auth.csrf_invalid` 
 }
 ```
 
-The tenant-management endpoints (§7.3.3) reuse existing codes for authorization and lookup and add one code in the `registry.*` namespace. A request without operator authorization is rejected with `auth.forbidden`, the code the per-tenant admin endpoints already return. A `PATCH` or `DELETE` naming an unknown tenant is rejected with `registry.tenant_not_found`, the code `GetTenant` already surfaces. A `POST`, `PATCH`, or `DELETE /v1/admin/tenants` request on a read-only registry (§13.2.1) is rejected with `registry.read_only`, the code every other write endpoint returns; the registry checks this after operator authorization and before mutating the store. `registry.tenant_management_unavailable` reports a `/v1/admin/tenants` request on a single-tenant or standalone backend (§13.10), where multi-tenancy is out of scope; it joins the existing `registry.*` namespace and introduces no new namespace:
+The tenant-management endpoints (§7.3.3) reuse existing codes for authorization and lookup and add one code in the `registry.*` namespace. A request without operator authorization is rejected with `auth.forbidden`, the code the per-tenant admin endpoints already return. A `PATCH` or `DELETE` naming an unknown tenant is rejected with `registry.tenant_not_found`, the code `GetTenant` already surfaces. A `POST`, `PATCH`, or `DELETE /v1/admin/tenants` request on a read-only registry (§13.2.1) is rejected with `registry.read_only`, the code every other write endpoint returns; the registry checks this after operator authorization and before mutating the store. `registry.tenant_management_unavailable` reports a `/v1/admin/tenants` request on a single-tenant registry (§6.3.1), one started without `PODIUM_MULTI_TENANT`; it joins the existing `registry.*` namespace and introduces no new namespace:
 
 ```json
 {
   "code": "registry.tenant_management_unavailable",
   "message": "Tenant management requires a multi-tenant registry started with PODIUM_MULTI_TENANT.",
   "retryable": false,
-  "suggested_action": "Start the registry in multi-tenant mode (PODIUM_MULTI_TENANT) on a standard backend to manage tenants."
+  "suggested_action": "Start the registry in multi-tenant mode (PODIUM_MULTI_TENANT) to manage tenants."
 }
 ```
 
