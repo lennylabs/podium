@@ -10,7 +10,7 @@ import urllib.request
 import pytest
 from conftest import served
 
-from podium import Client, MaterializeError, RegistryError
+from podium import Client, MaterializeError, RegistryError, _skill_document
 from podium.client import BatchResult, LoadedArtifact
 
 
@@ -481,6 +481,85 @@ def test_materialize_skill_uses_verbatim_skill_raw(tmp_path):
     # ARTIFACT.md is the manifest frontmatter; SKILL.md is the authored file.
     assert (root / "ARTIFACT.md").read_text() == "---\ntype: skill\nversion: 2.0.0\n---\n"
     assert (root / "SKILL.md").read_text() == skill_md
+
+
+# The §4.3.4 synthesized document at 1.0.0, copied from the spec.
+_SYNTHESIZED_100 = (
+    "---\ntype: skill\nversion: 1.0.0\n---\n"
+    "<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n"
+)
+_GREET_SKILL = "---\nname: greet\ndescription: Greet the user.\n---\nGreet the user by name.\n"
+
+
+# Spec: §6.7, §7.6 — the canonical layout omits an ARTIFACT.md whose bytes
+# equal the §4.3.4 synthesized document for the version it names, and writes
+# every other document.
+@pytest.mark.parametrize(
+    ("frontmatter", "written"),
+    [
+        (_SYNTHESIZED_100, False),
+        (_SYNTHESIZED_100.replace("1.0.0", "0.0.0-auto.3"), False),
+        ("---\ntype: skill\nversion: 1.0.0\ntags: [greeting]\n---\n<!-- overlay -->\n", True),
+        (_SYNTHESIZED_100 + "\n", True),
+        (_SYNTHESIZED_100.replace("Podium:", "Podium;"), True),
+        ("---\ntype: skill\nversion: 1.0.0\n---\n", True),
+        (_SYNTHESIZED_100.replace("1.0.0", "1.0.0\ntags: [x]"), True),
+    ],
+    ids=[
+        "synthesized",
+        "synthesized-assigned",
+        "authored",
+        "one-byte-longer",
+        "different-comment",
+        "no-pointer-comment",
+        "injected-key",
+    ],
+)
+def test_materialize_omits_only_the_synthesized_artifact_md(tmp_path, frontmatter, written):
+    art = LoadedArtifact(
+        id="team/greet",
+        type="skill",
+        version="1.0.0",
+        manifest_body="Greet the user by name.\n",
+        frontmatter=frontmatter,
+        skill_raw=_GREET_SKILL,
+    )
+    out = art.materialize(str(tmp_path))
+    root = tmp_path / "team" / "greet"
+    assert (root / "SKILL.md").read_text() == _GREET_SKILL
+    if written:
+        assert (root / "ARTIFACT.md").read_text() == frontmatter
+    else:
+        assert sorted(p.name for p in root.iterdir()) == ["SKILL.md"]
+        assert out == [str(root / "SKILL.md")]
+
+
+# Spec: §6.4, §6.7, §7.6 — a SKILL.md-only overlay package round-trips through
+# load_artifact and materialize as a plain Agent Skills directory.
+def test_materialize_round_trips_a_skill_md_only_overlay_package(tmp_path):
+    pkg = tmp_path / "overlay" / "team" / "greet"
+    (pkg / "scripts").mkdir(parents=True)
+    (pkg / "SKILL.md").write_bytes(_GREET_SKILL.encode())
+    (pkg / "scripts" / "run.sh").write_bytes(b"echo hi\n")
+    client = Client(registry="http://127.0.0.1:1", overlay_path=str(tmp_path / "overlay"))
+    art = client.load_artifact("team/greet")
+    out = tmp_path / "out"
+    art.materialize(str(out))
+    root = out / "team" / "greet"
+    assert sorted(p.name for p in root.iterdir()) == ["SKILL.md", "scripts"]
+    assert (root / "SKILL.md").read_bytes() == _GREET_SKILL.encode()
+    assert (root / "scripts" / "run.sh").read_bytes() == b"echo hi\n"
+
+
+# Spec: §4.3.4 — the helper produces the fixed bytes and refuses a version
+# that is neither major.minor.patch nor the reserved form.
+def test_synthesized_skill_document_builds_fixed_bytes_and_refuses_other_versions():
+    assert _skill_document.synthesized_skill_document("1.0.0") == _SYNTHESIZED_100
+    assert _skill_document.is_synthesized_skill_document(_SYNTHESIZED_100)
+    for version in ("1.0", "0.0.0-auto.01", "1.0.0\ntags: [x]", "", "\u0661.0.0"):
+        with pytest.raises(ValueError, match="invalid version"):
+            _skill_document.synthesized_skill_document(version)
+    assert not _skill_document.is_synthesized_skill_document("---\ntype: skill\n")
 
 
 # Spec: §4.4 — inline bundled resources land at their package-relative path.

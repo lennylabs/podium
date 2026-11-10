@@ -207,6 +207,119 @@ describe("overlay merge", () => {
     expect(new Set(Object.keys(index.get("outer/inner")!.resources))).toEqual(new Set(["data.txt"]));
   });
 
+  // writeOverlay writes each package-relative file under the overlay root.
+  async function writeOverlay(root: string, files: Record<string, string>): Promise<void> {
+    for (const [rel, body] of Object.entries(files)) {
+      await writeFileAt(join(root, ...rel.split("/")), body);
+    }
+  }
+
+  // skillMD returns a SKILL.md with an optional metadata block.
+  const skillMD = (metadata = ""): string =>
+    `---\nname: greet\ndescription: Greet the user politely.\n${metadata}---\nGreet the user by name.\n`;
+
+  // The §4.3.4 synthesized documents, copied from the spec rather than built
+  // by the SDK helper.
+  const SYNTHESIZED_AUTO =
+    "---\ntype: skill\nversion: 0.0.0-auto.0\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n";
+  const SYNTHESIZED_100 =
+    "---\ntype: skill\nversion: 1.0.0\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n";
+
+  // Spec: §4.3.4, §6.4 — a SKILL.md-only overlay package loads as a skill
+  // whose frontmatter is the synthesized document for its resolved version,
+  // and whose manifest_body is the SKILL.md body rather than the document's
+  // pointer comment.
+  it.each([
+    { name: "no metadata.version", metadata: "", version: "0.0.0-auto.0", doc: SYNTHESIZED_AUTO },
+    { name: "a quoted metadata.version", metadata: 'metadata:\n  version: "1.0.0"\n', version: "1.0.0", doc: SYNTHESIZED_100 },
+    { name: "an unquoted metadata.version", metadata: "metadata:\n  version: 1.0.0\n", version: "1.0.0", doc: SYNTHESIZED_100 },
+    { name: "a non-semver metadata.version", metadata: 'metadata:\n  version: "1.0"\n', version: "0.0.0-auto.0", doc: SYNTHESIZED_AUTO },
+    {
+      name: "a version nested below a metadata child",
+      metadata: "metadata:\n  build:\n    version: 9.9.9\n  owner: alice\n",
+      version: "0.0.0-auto.0",
+      doc: SYNTHESIZED_AUTO,
+    },
+    { name: "a top-level key after the metadata block", metadata: "metadata:\n  owner: alice\nversion: 3.0.0\n", version: "0.0.0-auto.0", doc: SYNTHESIZED_AUTO },
+    { name: "a version under another mapping", metadata: "compatibility:\n  version: 4.0.0\n", version: "0.0.0-auto.0", doc: SYNTHESIZED_AUTO },
+  ])("loads a SKILL.md-only package with $name", async ({ metadata, version, doc }) => {
+    const overlay = join(dir, "overlay");
+    await writeOverlay(overlay, { "team/greet/SKILL.md": skillMD(metadata) });
+    const index = await LocalOverlay.load(overlay);
+    const rec = index.get("team/greet")!;
+    expect(rec.type).toBe("skill");
+    expect(rec.version).toBe(version);
+    expect(rec.frontmatter).toBe(doc);
+    expect(rec.skillRaw).toBe(skillMD(metadata));
+    expect(rec.resources).toEqual({});
+
+    const c = new Client({ registry: "http://reg", overlayPath: overlay, fetcher: async () => new Response("{}") });
+    const art = await c.loadArtifact("team/greet");
+    expect(art.type).toBe("skill");
+    expect(art.version).toBe(version);
+    expect(art.frontmatter).toBe(doc);
+    expect(art.manifest_body).toBe("Greet the user by name.\n");
+    expect(art.manifest_body).not.toContain("Synthesized by Podium");
+  });
+
+  // Spec: §4.3.4, §6.4 — the ARTIFACT.md version wins, a major.minor.patch
+  // metadata.version fills an ARTIFACT.md without one, and a skill with no
+  // usable version reports 0.0.0-auto.0. The authored ARTIFACT.md is served
+  // as-is.
+  it.each([
+    { name: "metadata.version fills a version-less ARTIFACT.md", art: "", metadata: "metadata:\n  version: 2.1.0\n", version: "2.1.0" },
+    { name: "both files declare the same version", art: "version: 2.1.0\n", metadata: "metadata:\n  version: 2.1.0\n", version: "2.1.0" },
+    { name: "the ARTIFACT.md version wins", art: "version: 3.0.0\n", metadata: "", version: "3.0.0" },
+    { name: "neither file declares a version", art: "", metadata: "", version: "0.0.0-auto.0" },
+    { name: "metadata.version is not semver", art: "", metadata: 'metadata:\n  version: "1.0"\n', version: "0.0.0-auto.0" },
+  ])("resolves a both-files skill version when $name", async ({ art, metadata, version }) => {
+    const overlay = join(dir, "overlay");
+    const authored = `---\ntype: skill\n${art}tags: [greeting]\n---\n<!-- overlay -->\n`;
+    await writeOverlay(overlay, { "team/greet/ARTIFACT.md": authored, "team/greet/SKILL.md": skillMD(metadata) });
+    const rec = (await LocalOverlay.load(overlay)).get("team/greet")!;
+    expect(rec.type).toBe("skill");
+    expect(rec.version).toBe(version);
+    expect(rec.frontmatter).toBe(authored);
+    expect(rec.tags).toEqual(["greeting"]);
+    expect(rec.skillRaw).toBe(skillMD(metadata));
+  });
+
+  // Spec: §4.2, §4.4, §6.4 — a SKILL.md below a package's root stays a bundled
+  // resource: a plain skill with a nested SKILL.md is one package, and so is a
+  // non-skill ARTIFACT.md package beside a root SKILL.md.
+  it("keeps a nested SKILL.md and a non-skill package's SKILL.md as resources", async () => {
+    const overlay = join(dir, "overlay");
+    await writeOverlay(overlay, {
+      "team/greet/SKILL.md": skillMD(),
+      "team/greet/references/SKILL.md": skillMD(),
+      "team/greet/references/guide.md": "guide\n",
+      "team/notes/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n---\nnotes\n",
+      "team/notes/SKILL.md": skillMD(),
+    });
+    const index = await LocalOverlay.load(overlay);
+    expect(new Set(index.artifacts.keys())).toEqual(new Set(["team/greet", "team/notes"]));
+    expect(new Set(Object.keys(index.get("team/greet")!.resources))).toEqual(
+      new Set(["references/SKILL.md", "references/guide.md"]),
+    );
+    const notes = index.get("team/notes")!;
+    expect(notes.type).toBe("context");
+    expect(notes.version).toBe("1.0.0");
+    expect(notes.skillRaw).toBe("");
+    expect(Object.keys(notes.resources)).toEqual(["SKILL.md"]);
+  });
+
+  // Spec: §4.3.4, §6.4 — a plain skill's description comes from SKILL.md, and
+  // overlay search ranks the skill by it.
+  it("finds a SKILL.md-only package by its SKILL.md description", async () => {
+    const overlay = join(dir, "overlay");
+    await writeOverlay(overlay, { "team/greet/SKILL.md": skillMD() });
+    await overlayArtifact(overlay, "team/other", { desc: "unrelated helper" });
+    const index = await LocalOverlay.load(overlay);
+    expect(index.get("team/greet")!.description).toBe("Greet the user politely.");
+    expect(index.search("politely").map((a) => a.id)).toEqual(["team/greet"]);
+    expect(index.search("", { type: "skill" }).map((a) => a.id)).toEqual(["team/greet"]);
+  });
+
   it("rrfFuse ranks an id present in both lists highest", () => {
     const fused = rrfFuse([["a", "b"], ["b", "c"]]);
     const top = [...fused.entries()].sort((x, y) => y[1] - x[1])[0][0];

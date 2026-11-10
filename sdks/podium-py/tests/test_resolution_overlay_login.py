@@ -253,6 +253,138 @@ def test_overlay_resource_set_matches_the_registry_walk(tmp_path):
     assert set(index.artifacts["outer/inner"].resources) == {"data.txt"}
 
 
+def _skill_md(metadata: str = "") -> str:
+    """Return a SKILL.md with an optional metadata block."""
+    return (
+        "---\nname: greet\ndescription: Greet the user politely.\n"
+        f"{metadata}---\nGreet the user by name.\n"
+    )
+
+
+# The §4.3.4 synthesized documents, copied from the spec rather than built by
+# the SDK helper.
+_SYNTHESIZED_AUTO = (
+    "---\ntype: skill\nversion: 0.0.0-auto.0\n---\n"
+    "<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n"
+)
+_SYNTHESIZED_100 = (
+    "---\ntype: skill\nversion: 1.0.0\n---\n"
+    "<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n"
+)
+
+
+# Spec: §4.3.4, §6.4 — a SKILL.md-only overlay package loads as a skill whose
+# frontmatter is the synthesized document for its resolved version, and whose
+# manifest_body is the SKILL.md body rather than the document's pointer
+# comment.
+@pytest.mark.parametrize(
+    ("metadata", "version", "doc"),
+    [
+        ("", "0.0.0-auto.0", _SYNTHESIZED_AUTO),
+        ('metadata:\n  version: "1.0.0"\n', "1.0.0", _SYNTHESIZED_100),
+        ("metadata:\n  version: 1.0.0\n", "1.0.0", _SYNTHESIZED_100),
+        ('metadata:\n  version: "1.0"\n', "0.0.0-auto.0", _SYNTHESIZED_AUTO),
+        (
+            "metadata:\n  build:\n    version: 9.9.9\n  owner: alice\n",
+            "0.0.0-auto.0",
+            _SYNTHESIZED_AUTO,
+        ),
+        ("metadata:\n  owner: alice\nversion: 3.0.0\n", "0.0.0-auto.0", _SYNTHESIZED_AUTO),
+        ("compatibility:\n  version: 4.0.0\n", "0.0.0-auto.0", _SYNTHESIZED_AUTO),
+    ],
+    ids=[
+        "no-metadata",
+        "quoted",
+        "unquoted",
+        "non-semver",
+        "nested-deeper",
+        "top-level-after",
+        "other-mapping",
+    ],
+)
+def test_overlay_loads_a_skill_md_only_package(tmp_path, metadata, version, doc):
+    overlay = tmp_path / "overlay"
+    _write(str(overlay / "team" / "greet" / "SKILL.md"), _skill_md(metadata))
+    index = _overlay.LocalOverlay(str(overlay))
+    rec = index.get("team/greet")
+    assert rec is not None
+    assert (rec.type, rec.version) == ("skill", version)
+    assert rec.frontmatter == doc
+    assert rec.skill_raw == _skill_md(metadata)
+    assert rec.resources == {}
+
+    client = Client(registry="http://127.0.0.1:1", overlay_path=str(overlay))
+    art = client.load_artifact("team/greet")
+    assert (art.type, art.version) == ("skill", version)
+    assert art.frontmatter == doc
+    assert art.manifest_body == "Greet the user by name."
+    assert "Synthesized by Podium" not in art.manifest_body
+
+
+# Spec: §4.3.4, §6.4 — the ARTIFACT.md version wins, a major.minor.patch
+# metadata.version fills an ARTIFACT.md without one, and a skill with no
+# usable version reports 0.0.0-auto.0. The authored ARTIFACT.md is served
+# as-is.
+@pytest.mark.parametrize(
+    ("art_version", "metadata", "version"),
+    [
+        ("", "metadata:\n  version: 2.1.0\n", "2.1.0"),
+        ("version: 2.1.0\n", "metadata:\n  version: 2.1.0\n", "2.1.0"),
+        ("version: 3.0.0\n", "", "3.0.0"),
+        ("", "", "0.0.0-auto.0"),
+        ("", 'metadata:\n  version: "1.0"\n', "0.0.0-auto.0"),
+    ],
+    ids=["metadata-fills", "both-equal", "artifact-wins", "neither", "non-semver"],
+)
+def test_overlay_resolves_a_both_files_skill_version(tmp_path, art_version, metadata, version):
+    overlay = tmp_path / "overlay"
+    authored = f"---\ntype: skill\n{art_version}tags: [greeting]\n---\n<!-- overlay -->\n"
+    _write(str(overlay / "team" / "greet" / "ARTIFACT.md"), authored)
+    _write(str(overlay / "team" / "greet" / "SKILL.md"), _skill_md(metadata))
+    rec = _overlay.LocalOverlay(str(overlay)).get("team/greet")
+    assert rec is not None
+    assert (rec.type, rec.version) == ("skill", version)
+    assert rec.frontmatter == authored
+    assert rec.tags == ["greeting"]
+    assert rec.skill_raw == _skill_md(metadata)
+
+
+# Spec: §4.2, §4.4, §6.4 — a SKILL.md below a package's root stays a bundled
+# resource: a plain skill with a nested SKILL.md is one package, and so is a
+# non-skill ARTIFACT.md package beside a root SKILL.md.
+def test_overlay_keeps_nested_and_non_skill_skill_md_as_resources(tmp_path):
+    overlay = tmp_path / "overlay"
+    _write(str(overlay / "team" / "greet" / "SKILL.md"), _skill_md())
+    _write(str(overlay / "team" / "greet" / "references" / "SKILL.md"), _skill_md())
+    _write(str(overlay / "team" / "greet" / "references" / "guide.md"), "guide\n")
+    _write(
+        str(overlay / "team" / "notes" / "ARTIFACT.md"),
+        "---\ntype: context\nversion: 1.0.0\n---\nnotes\n",
+    )
+    _write(str(overlay / "team" / "notes" / "SKILL.md"), _skill_md())
+    index = _overlay.LocalOverlay(str(overlay))
+    assert set(index.artifacts) == {"team/greet", "team/notes"}
+    assert set(index.artifacts["team/greet"].resources) == {
+        "references/SKILL.md",
+        "references/guide.md",
+    }
+    notes = index.artifacts["team/notes"]
+    assert (notes.type, notes.version, notes.skill_raw) == ("context", "1.0.0", "")
+    assert set(notes.resources) == {"SKILL.md"}
+
+
+# Spec: §4.3.4, §6.4 — a plain skill's description comes from SKILL.md, and
+# overlay search ranks the skill by it.
+def test_overlay_finds_a_skill_md_only_package_by_description(tmp_path):
+    overlay = tmp_path / "overlay"
+    _write(str(overlay / "team" / "greet" / "SKILL.md"), _skill_md())
+    _overlay_artifact(str(overlay), "team/other", desc="unrelated helper")
+    index = _overlay.LocalOverlay(str(overlay))
+    assert index.artifacts["team/greet"].description == "Greet the user politely."
+    assert [a.id for a in index.search("politely")] == ["team/greet"]
+    assert [a.id for a in index.search("", type_filter="skill")] == ["team/greet"]
+
+
 def test_overlay_path_cwd_fallback(tmp_path, monkeypatch):
     # spec §6.4 step 3 — <CWD>/.podium/overlay/ fallback when no env/explicit.
     monkeypatch.delenv("PODIUM_OVERLAY_PATH", raising=False)

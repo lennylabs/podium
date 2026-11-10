@@ -7,6 +7,8 @@
 // of the registry. Node's fs/path load lazily so the SDK stays importable
 // in edge bundles that never touch the overlay.
 
+import { resolveSkillVersion, synthesizedSkillDocument } from "./skill_document.js";
+
 const OVERLAY_SUBDIR = ".podium/overlay";
 const WORD_RE = /[a-z0-9]+/g;
 
@@ -41,10 +43,15 @@ interface FrontmatterFields {
   version: string;
   description: string;
   tags: string[];
+  // metadataVersion is the nested metadata.version of a SKILL.md (§4.3.4).
+  metadataVersion: string;
 }
 
+// parseFrontmatter hand-parses the fields the SDK ranks and reports from an
+// ARTIFACT.md or a SKILL.md: the top-level type, version, description, and
+// tags, and the version key directly under a block-form metadata: mapping.
 function parseFrontmatter(text: string): { fields: FrontmatterFields; body: string } {
-  const fields: FrontmatterFields = { type: "", version: "", description: "", tags: [] };
+  const fields: FrontmatterFields = { type: "", version: "", description: "", tags: [], metadataVersion: "" };
   if (!text.startsWith("---")) return { fields, body: text };
   const lines = text.split(/\r?\n/);
   let end = -1;
@@ -57,6 +64,10 @@ function parseFrontmatter(text: string): { fields: FrontmatterFields; body: stri
   if (end === -1) return { fields, body: text };
   const body = lines.slice(end + 1).join("\n");
   let pendingTags = false;
+  // metadataIndent is -1 outside a metadata: block, 0 inside one before its
+  // first child, and the child indent after it, so a deeper key never reads as
+  // metadata.version.
+  let metadataIndent = -1;
   const tags: string[] = [];
   const unquote = (s: string): string => s.trim().replace(/^['"]|['"]$/g, "");
   for (const raw of lines.slice(1, end)) {
@@ -65,12 +76,19 @@ function parseFrontmatter(text: string): { fields: FrontmatterFields; body: stri
       continue;
     }
     pendingTags = false;
-    if (raw.startsWith(" ") || !raw.trim() || raw.trimStart().startsWith("#")) continue;
+    if (!raw.trim() || raw.trimStart().startsWith("#")) continue;
+    if (raw.startsWith(" ")) {
+      metadataIndent = readMetadataVersion(raw, metadataIndent, fields, unquote);
+      continue;
+    }
+    metadataIndent = -1;
     const sep = raw.indexOf(":");
     if (sep === -1) continue;
     const key = raw.slice(0, sep).trim();
     const val = raw.slice(sep + 1).trim();
-    if (key === "tags") {
+    if (key === "metadata" && !val) {
+      metadataIndent = 0;
+    } else if (key === "tags") {
       if (val.startsWith("[") && val.endsWith("]")) {
         for (const t of val.slice(1, -1).split(",")) {
           if (t.trim()) tags.push(unquote(t));
@@ -86,6 +104,28 @@ function parseFrontmatter(text: string): { fields: FrontmatterFields; body: stri
   }
   fields.tags = tags.filter(Boolean);
   return { fields, body };
+}
+
+// readMetadataVersion reads one indented frontmatter line. Inside a metadata:
+// block it records a version key at the block's child indent into
+// fields.metadataVersion, quoted or unquoted. It returns the updated
+// metadataIndent state.
+function readMetadataVersion(
+  raw: string,
+  metadataIndent: number,
+  fields: FrontmatterFields,
+  unquote: (s: string) => string,
+): number {
+  if (metadataIndent < 0) return metadataIndent;
+  const indent = raw.length - raw.trimStart().length;
+  const childIndent = metadataIndent === 0 ? indent : metadataIndent;
+  if (indent !== childIndent) return childIndent;
+  const line = raw.trim();
+  const sep = line.indexOf(":");
+  if (sep !== -1 && line.slice(0, sep).trim() === "version") {
+    fields.metadataVersion = unquote(line.slice(sep + 1));
+  }
+  return childIndent;
 }
 
 export interface OverlayArtifact {
@@ -305,6 +345,73 @@ function matchSegments(pat: string[], tgt: string[]): boolean {
   return pat.length === tgt.length;
 }
 
+// readOptional returns a file's text, or "" when it cannot be read.
+async function readOptional(fs: typeof import("node:fs/promises"), file: string): Promise<string> {
+  try {
+    return await fs.readFile(file, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
+// collectResources returns every file under the package root dir, keyed by
+// its package-relative path, other than the root files named in skip and the
+// files of a nested package.
+async function collectResources(
+  fs: typeof import("node:fs/promises"),
+  path: typeof import("node:path"),
+  dir: string,
+  skip: Set<string>,
+): Promise<Record<string, string>> {
+  const resources: Record<string, string> = {};
+  const collect = async (sub: string): Promise<void> => {
+    const entries = await fs.readdir(sub, { withFileTypes: true });
+    // spec §4.4 — the files of a nested package are not resources of the
+    // enclosing one, so the walk stops at a subdirectory that directly
+    // contains an ARTIFACT.md. The test is the manifest alone, mirroring the
+    // artifact result of filesystem.PackageManifests in
+    // pkg/registry/filesystem/discovery.go, so a subdirectory holding only a
+    // SKILL.md stays part of this package.
+    if (sub !== dir && entries.some((e) => e.isFile() && e.name === "ARTIFACT.md")) return;
+    for (const e of entries) {
+      const full = path.join(sub, e.name);
+      if (e.isDirectory()) {
+        await collect(full);
+        continue;
+      }
+      const rel = path.relative(dir, full).split(path.sep).join("/");
+      if (skip.has(rel)) continue;
+      resources[rel] = await readOptional(fs, full);
+    }
+  };
+  await collect(dir);
+  return resources;
+}
+
+// overlayArtifact assembles an overlay record and its BM25 tokens.
+function overlayArtifact(
+  id: string,
+  fields: FrontmatterFields,
+  frontmatter: string,
+  body: string,
+  skillRaw: string,
+  resources: Record<string, string>,
+): OverlayArtifact {
+  const text = [id, fields.type, fields.description, fields.tags.join(" "), body].join(" ");
+  return {
+    id,
+    type: fields.type,
+    version: fields.version,
+    description: fields.description,
+    tags: fields.tags,
+    frontmatter,
+    body,
+    skillRaw,
+    resources,
+    tokens: tokenize(text),
+  };
+}
+
 // LocalOverlay indexes an overlay directory and ranks it with BM25 (§6.4.1).
 export class LocalOverlay {
   // spec §6.4.1 — BM25 is the default overlay ranker (standard Okapi params).
@@ -333,16 +440,27 @@ export class LocalOverlay {
     }
     if (!exists) return overlay;
 
-    // Walk for directories that directly contain an ARTIFACT.md or a
-    // DOMAIN.md. The canonical key is the dir relative to the overlay root
-    // ("/"-joined); the root level is keyed "".
-    const walk = async (dir: string): Promise<void> => {
+    // Walk for package directories and for directories that directly contain
+    // a DOMAIN.md. The canonical key is the dir relative to the overlay root
+    // ("/"-joined); the root level is keyed "". inPackage reports whether a
+    // directory between dir and the overlay root is a package.
+    //
+    // Spec: §4.2 — a directory is a package when it directly holds
+    // ARTIFACT.md, or when it directly holds SKILL.md and no directory between
+    // it and the overlay root is a package. This mirrors loadPackage, which
+    // combines filesystem.PackageManifests and filesystem.WithinPackage in
+    // pkg/registry/filesystem.
+    const walk = async (dir: string, inPackage: boolean): Promise<void> => {
       const entries = await fs.readdir(dir, { withFileTypes: true });
       const rel = path.relative(overlayPath, dir).split(path.sep).join("/");
       const key = rel === "." ? "" : rel;
-      const hasManifest = entries.some((e) => e.isFile() && e.name === "ARTIFACT.md");
-      if (hasManifest && key) {
-        const art = await overlay.readPackage(fs, path, dir, key);
+      const hasArtifact = entries.some((e) => e.isFile() && e.name === "ARTIFACT.md");
+      const hasSkill = entries.some((e) => e.isFile() && e.name === "SKILL.md");
+      const isPackage = key !== "" && (hasArtifact || (hasSkill && !inPackage));
+      if (isPackage) {
+        const art = hasArtifact
+          ? await overlay.readPackage(fs, path, dir, key)
+          : await overlay.readPlainSkill(fs, path, dir, key);
         if (art) overlay.artifacts.set(key, art);
       }
       if (entries.some((e) => e.isFile() && e.name === "DOMAIN.md")) {
@@ -360,14 +478,17 @@ export class LocalOverlay {
         // together with everything under it, as walkLayer does in
         // pkg/registry/filesystem/walk.go. The root itself is exempt, because
         // the default overlay path is <CWD>/.podium/overlay/.
-        if (e.isDirectory() && !e.name.startsWith(".")) await walk(path.join(dir, e.name));
+        if (e.isDirectory() && !e.name.startsWith(".")) await walk(path.join(dir, e.name), inPackage || isPackage);
       }
     };
-    await walk(overlayPath);
+    await walk(overlayPath, false);
     overlay.index();
     return overlay;
   }
 
+  // readPackage loads a package whose root holds ARTIFACT.md. For a skill it
+  // reads the sibling SKILL.md too, and an ARTIFACT.md that declares no
+  // version takes the SKILL.md version (§4.3.4).
   private async readPackage(
     fs: typeof import("node:fs/promises"),
     path: typeof import("node:path"),
@@ -381,54 +502,46 @@ export class LocalOverlay {
       return null;
     }
     const { fields, body } = parseFrontmatter(frontmatter);
-    let skillRaw = "";
-    if (fields.type === "skill") {
-      try {
-        skillRaw = await fs.readFile(path.join(dir, "SKILL.md"), "utf-8");
-      } catch {
-        skillRaw = "";
-      }
+    if (fields.type !== "skill") {
+      const resources = await collectResources(fs, path, dir, new Set(["ARTIFACT.md"]));
+      return overlayArtifact(id, fields, frontmatter, body, "", resources);
     }
-    const skip = new Set(["ARTIFACT.md"]);
-    if (fields.type === "skill") skip.add("SKILL.md");
-    const resources: Record<string, string> = {};
-    const collect = async (sub: string): Promise<void> => {
-      const entries = await fs.readdir(sub, { withFileTypes: true });
-      // spec §4.4 — the files of a nested package are not resources of the
-      // enclosing one, so the walk stops at a subdirectory that directly
-      // contains an ARTIFACT.md. The test is the manifest alone, mirroring
-      // hasArtifactManifest in pkg/registry/filesystem/walk.go, so a
-      // subdirectory holding only a SKILL.md stays part of this package.
-      if (sub !== dir && entries.some((e) => e.isFile() && e.name === "ARTIFACT.md")) return;
-      for (const e of entries) {
-        const full = path.join(sub, e.name);
-        if (e.isDirectory()) {
-          await collect(full);
-          continue;
-        }
-        const rel = path.relative(dir, full).split(path.sep).join("/");
-        if (skip.has(rel)) continue;
-        try {
-          resources[rel] = await fs.readFile(full, "utf-8");
-        } catch {
-          resources[rel] = "";
-        }
-      }
+    const skillRaw = await readOptional(fs, path.join(dir, "SKILL.md"));
+    const skill = parseFrontmatter(skillRaw).fields;
+    fields.version = resolveSkillVersion(fields.version, skill.metadataVersion);
+    const resources = await collectResources(fs, path, dir, new Set(["ARTIFACT.md", "SKILL.md"]));
+    return overlayArtifact(id, fields, frontmatter, body, skillRaw, resources);
+  }
+
+  // readPlainSkill loads a package whose root holds SKILL.md and no
+  // ARTIFACT.md. The description, the search tokens, and the body come from
+  // SKILL.md, and the frontmatter is the synthesized document, which is never
+  // parsed for a field.
+  //
+  // Spec: §4.3.4, §6.4
+  private async readPlainSkill(
+    fs: typeof import("node:fs/promises"),
+    path: typeof import("node:path"),
+    dir: string,
+    id: string,
+  ): Promise<OverlayArtifact | null> {
+    let skillRaw: string;
+    try {
+      skillRaw = await fs.readFile(path.join(dir, "SKILL.md"), "utf-8");
+    } catch {
+      return null;
+    }
+    const { fields: skill, body } = parseFrontmatter(skillRaw);
+    const version = resolveSkillVersion("", skill.metadataVersion);
+    const fields: FrontmatterFields = {
+      type: "skill",
+      version,
+      description: skill.description,
+      tags: [],
+      metadataVersion: skill.metadataVersion,
     };
-    await collect(dir);
-    const text = [id, fields.type, fields.description, fields.tags.join(" "), body].join(" ");
-    return {
-      id,
-      type: fields.type,
-      version: fields.version,
-      description: fields.description,
-      tags: fields.tags,
-      frontmatter,
-      body,
-      skillRaw,
-      resources,
-      tokens: tokenize(text),
-    };
+    const resources = await collectResources(fs, path, dir, new Set(["SKILL.md"]));
+    return overlayArtifact(id, fields, synthesizedSkillDocument(version), body, skillRaw, resources);
   }
 
   private index(): void {

@@ -14,7 +14,7 @@ import webbrowser
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from . import _config, _delivery, _oauth, _overlay
+from . import _config, _delivery, _oauth, _overlay, _skill_document
 from ._errors import RegistryError
 
 
@@ -245,9 +245,9 @@ class LoadedArtifact:
 
         spec §7.6 / §2.2 — the loaded-artifact object exposes
         ``materialize(to=...)``. The artifact lands under
-        ``<to>/<id>/`` in the canonical layout: ``ARTIFACT.md`` for every
-        type, ``SKILL.md`` for skills, and each bundled resource at its
-        package-relative path. Large resources are fetched from their
+        ``<to>/<id>/`` in the canonical layout: ``ARTIFACT.md`` unless it
+        equals the §4.3.4 synthesized document, ``SKILL.md`` for skills, and
+        each bundled resource at its package-relative path. Large resources are fetched from their
         §7.2 presigned URLs and checked against their ``content_hash``
         before any file is written (§7.6.3).
 
@@ -388,8 +388,14 @@ def _canonical_files(
     ``manifest_body``, so ``SKILL.md`` is reconstructed as
     ``frontmatter + manifest_body`` (mirroring the MCP server's
     server-source delivery). spec §6.6, §6.7.
+
+    Spec: §6.7, §7.6, §4.3.4 — a plain skill materializes as a plain Agent
+    Skills directory, so the synthesized ``ARTIFACT.md``, recognized by text
+    equality as the ``none`` adapter recognizes it, is not written.
     """
-    files = [(os.path.join(root, "ARTIFACT.md"), frontmatter.encode())]
+    files: list[tuple[str, bytes]] = []
+    if not _skill_document.is_synthesized_skill_document(frontmatter):
+        files.append((os.path.join(root, "ARTIFACT.md"), frontmatter.encode()))
     if artifact_type == "skill":
         # spec: §4.3.4 / §11 — prefer the verbatim SKILL.md the registry
         # delivers; fall back to frontmatter+body only when it is absent.

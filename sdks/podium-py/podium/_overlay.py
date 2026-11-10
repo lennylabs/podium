@@ -18,6 +18,8 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from . import _skill_document
+
 _OVERLAY_SUBDIR = os.path.join(".podium", "overlay")
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
@@ -45,11 +47,13 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
-    """Return (fields, body) for an ARTIFACT.md document (§4.3).
+    """Return (fields, body) for an ARTIFACT.md or a SKILL.md (§4.3, §4.3.4).
 
     Only the fields the SDK ranks and reports are parsed: ``type``,
-    ``version``, ``description``, and ``tags``. ``tags`` accepts both the
-    inline ``[a, b]`` form and the block ``- a`` form.
+    ``version``, ``description``, and ``tags``, plus the ``version`` key
+    directly under a block-form ``metadata:`` mapping, reported as
+    ``metadata_version``. ``tags`` accepts both the inline ``[a, b]`` form and
+    the block ``- a`` form.
     """
     fields: dict[str, object] = {}
     if not text.startswith("---"):
@@ -64,20 +68,30 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
         return fields, text
     body = "\n".join(lines[end + 1 :])
     pending_tags = False
+    # metadata_indent is -1 outside a metadata: block, 0 inside one before its
+    # first child, and the child indent after it, so a deeper key never reads
+    # as metadata.version.
+    metadata_indent = -1
     tags: list[str] = []
     for raw in lines[1:end]:
         if pending_tags and raw.lstrip().startswith("- "):
             tags.append(raw.lstrip()[2:].strip().strip("\"'"))
             continue
         pending_tags = False
-        if raw.startswith(" ") or not raw.strip() or raw.lstrip().startswith("#"):
+        if not raw.strip() or raw.lstrip().startswith("#"):
             continue
+        if raw.startswith(" "):
+            metadata_indent = _read_metadata_version(raw, metadata_indent, fields)
+            continue
+        metadata_indent = -1
         key, sep, val = raw.partition(":")
         if not sep:
             continue
         key = key.strip()
         val = val.strip()
-        if key == "tags":
+        if key == "metadata" and not val:
+            metadata_indent = 0
+        elif key == "tags":
             if val.startswith("[") and val.endswith("]"):
                 tags = [t.strip().strip("\"'") for t in val[1:-1].split(",") if t.strip()]
             elif val:
@@ -88,6 +102,25 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
             fields[key] = val.strip("\"'")
     fields["tags"] = [t for t in tags if t]
     return fields, body
+
+
+def _read_metadata_version(raw: str, metadata_indent: int, fields: dict[str, object]) -> int:
+    """Read one indented frontmatter line and return the metadata_indent state.
+
+    Inside a ``metadata:`` block, a ``version`` key at the block's child
+    indent is recorded as ``fields["metadata_version"]``, quoted or unquoted.
+    """
+    if metadata_indent < 0:
+        return metadata_indent
+    stripped = raw.lstrip()
+    indent = len(raw) - len(stripped)
+    child_indent = indent if metadata_indent == 0 else metadata_indent
+    if indent != child_indent:
+        return child_indent
+    key, sep, val = stripped.partition(":")
+    if sep and key.strip() == "version":
+        fields["metadata_version"] = val.strip().strip("\"'")
+    return child_indent
 
 
 def _parse_domain(text: str) -> "OverlayDomain | None":
@@ -268,6 +301,10 @@ class LocalOverlay:
     def _load(self) -> None:
         if not self.path or not os.path.isdir(self.path):
             return
+        # packages holds the canonical id of every package directory recorded
+        # so far. os.walk is top-down, so it holds every ancestor package by
+        # the time a directory is visited.
+        packages: set[str] = set()
         for dirpath, dirnames, filenames in os.walk(self.path):
             # spec §6.4 — an overlay carries the registry-side layers' format,
             # so discovery skips a dot-prefixed directory below the overlay
@@ -281,14 +318,23 @@ class LocalOverlay:
                 dom = self._read_domain(dirpath)
                 if dom is not None:
                     self.domains[canonical] = dom
-            if "ARTIFACT.md" not in filenames:
+            has_artifact, has_skill = _package_manifests(dirpath)
+            # Spec: §4.2 — a directory is a package when it directly holds
+            # ARTIFACT.md, or when it directly holds SKILL.md and no directory
+            # between it and the overlay root is a package. This mirrors
+            # loadPackage, which combines filesystem.PackageManifests and
+            # filesystem.WithinPackage in pkg/registry/filesystem.
+            if canonical == "":
                 continue
-            artifact_id = canonical
-            if artifact_id == "":
+            if not has_artifact and not (has_skill and not _within_package(packages, canonical)):
                 continue
-            art = self._read_package(dirpath, artifact_id)
+            packages.add(canonical)
+            if has_artifact:
+                art = self._read_package(dirpath, canonical)
+            else:
+                art = self._read_plain_skill(dirpath, canonical)
             if art is not None:
-                self.artifacts[artifact_id] = art
+                self.artifacts[canonical] = art
         self._index()
 
     def _read_domain(self, dirpath: str) -> OverlayDomain | None:
@@ -300,51 +346,53 @@ class LocalOverlay:
         return _parse_domain(text)
 
     def _read_package(self, dirpath: str, artifact_id: str) -> OverlayArtifact | None:
+        """Load a package whose root holds ARTIFACT.md.
+
+        For a skill the sibling SKILL.md is read too, and an ARTIFACT.md that
+        declares no version takes the SKILL.md version (§4.3.4).
+        """
         try:
             with open(os.path.join(dirpath, "ARTIFACT.md"), encoding="utf-8") as fh:
                 frontmatter = fh.read()
         except OSError:
             return None
         fields, body = _parse_frontmatter(frontmatter)
-        art_type = str(fields.get("type", ""))
-        skill_raw = ""
-        if art_type == "skill":
-            try:
-                with open(os.path.join(dirpath, "SKILL.md"), encoding="utf-8") as fh:
-                    skill_raw = fh.read()
-            except OSError:
-                skill_raw = ""
-        resources: dict[str, object] = {}
-        skip = {"ARTIFACT.md"}
-        if art_type == "skill":
-            skip.add("SKILL.md")
-        for sub, dirs, files in os.walk(dirpath):
-            # spec §4.4 — the files of a nested package are not resources of
-            # the enclosing one, so the walk stops at a subdirectory that
-            # directly contains an ARTIFACT.md.
-            dirs[:] = [d for d in dirs if not _has_artifact_manifest(os.path.join(sub, d))]
-            for name in files:
-                full = os.path.join(sub, name)
-                relname = os.path.relpath(full, dirpath).replace(os.sep, "/")
-                if relname in skip:
-                    continue
-                resources[relname] = _read_resource(full)
-        tags = [str(t) for t in fields.get("tags", [])]
-        text = " ".join(
-            [artifact_id, art_type, str(fields.get("description", "")), " ".join(tags), body]
+        if fields.get("type", "") != "skill":
+            resources = _collect_resources(dirpath, {"ARTIFACT.md"})
+            return _overlay_artifact(artifact_id, fields, frontmatter, body, "", resources)
+        skill_raw = _read_optional(os.path.join(dirpath, "SKILL.md"))
+        skill_fields, _ = _parse_frontmatter(skill_raw)
+        fields["version"] = _skill_document.resolve_skill_version(
+            str(fields.get("version", "")), str(skill_fields.get("metadata_version", ""))
         )
-        return OverlayArtifact(
-            id=artifact_id,
-            type=art_type,
-            version=str(fields.get("version", "")),
-            description=str(fields.get("description", "")),
-            tags=tags,
-            frontmatter=frontmatter,
-            body=body,
-            skill_raw=skill_raw,
-            resources=resources,
-            tokens=_tokenize(text),
+        resources = _collect_resources(dirpath, {"ARTIFACT.md", "SKILL.md"})
+        return _overlay_artifact(artifact_id, fields, frontmatter, body, skill_raw, resources)
+
+    def _read_plain_skill(self, dirpath: str, artifact_id: str) -> OverlayArtifact | None:
+        """Load a package whose root holds SKILL.md and no ARTIFACT.md.
+
+        Spec: §4.3.4, §6.4. The description, the search tokens, and the body
+        come from SKILL.md, and the frontmatter is the synthesized document,
+        which is never parsed for a field.
+        """
+        try:
+            with open(os.path.join(dirpath, "SKILL.md"), encoding="utf-8") as fh:
+                skill_raw = fh.read()
+        except OSError:
+            return None
+        skill_fields, body = _parse_frontmatter(skill_raw)
+        version = _skill_document.resolve_skill_version(
+            "", str(skill_fields.get("metadata_version", ""))
         )
+        fields: dict[str, object] = {
+            "type": "skill",
+            "version": version,
+            "description": skill_fields.get("description", ""),
+            "tags": [],
+        }
+        resources = _collect_resources(dirpath, {"SKILL.md"})
+        frontmatter = _skill_document.synthesized_skill_document(version)
+        return _overlay_artifact(artifact_id, fields, frontmatter, body, skill_raw, resources)
 
     def _index(self) -> None:
         if not self.artifacts:
@@ -416,11 +464,91 @@ class LocalOverlay:
 def _has_artifact_manifest(dirpath: str) -> bool:
     """Report whether dirpath directly contains an ARTIFACT.md (§4.4).
 
-    Mirrors hasArtifactManifest in pkg/registry/filesystem/walk.go: the test
-    is the manifest alone, so a subdirectory holding only a SKILL.md is an
-    ordinary part of the enclosing package.
+    This is the nested-package boundary. It mirrors the artifact result of
+    filesystem.PackageManifests in pkg/registry/filesystem/discovery.go: the
+    test is the manifest alone, so a subdirectory holding only a SKILL.md is
+    an ordinary part of the enclosing package.
     """
     return os.path.isfile(os.path.join(dirpath, "ARTIFACT.md"))
+
+
+def _package_manifests(dirpath: str) -> tuple[bool, bool]:
+    """Report whether dirpath directly holds ARTIFACT.md and SKILL.md (§4.2).
+
+    Mirrors filesystem.PackageManifests in pkg/registry/filesystem/discovery.go.
+    """
+    return _has_artifact_manifest(dirpath), os.path.isfile(os.path.join(dirpath, "SKILL.md"))
+
+
+def _within_package(packages: set[str], canonical: str) -> bool:
+    """Report whether a directory strictly above canonical is a package (§4.2).
+
+    Mirrors filesystem.WithinPackage. A directory holding only SKILL.md below
+    such an ancestor is a bundled resource of that package.
+    """
+    parent = canonical.rpartition("/")[0]
+    while parent:
+        if parent in packages:
+            return True
+        parent = parent.rpartition("/")[0]
+    return False
+
+
+def _collect_resources(dirpath: str, skip: set[str]) -> dict[str, object]:
+    """Return every file under the package root dirpath as a resource.
+
+    The keys are package-relative paths. The root files named in skip and the
+    files of a nested package are left out.
+    """
+    resources: dict[str, object] = {}
+    for sub, dirs, files in os.walk(dirpath):
+        # spec §4.4 — the files of a nested package are not resources of the
+        # enclosing one, so the walk stops at a subdirectory that directly
+        # contains an ARTIFACT.md.
+        dirs[:] = [d for d in dirs if not _has_artifact_manifest(os.path.join(sub, d))]
+        for name in files:
+            full = os.path.join(sub, name)
+            relname = os.path.relpath(full, dirpath).replace(os.sep, "/")
+            if relname in skip:
+                continue
+            resources[relname] = _read_resource(full)
+    return resources
+
+
+def _overlay_artifact(
+    artifact_id: str,
+    fields: dict[str, object],
+    frontmatter: str,
+    body: str,
+    skill_raw: str,
+    resources: dict[str, object],
+) -> OverlayArtifact:
+    """Assemble an overlay record and its BM25 tokens."""
+    art_type = str(fields.get("type", ""))
+    description = str(fields.get("description", ""))
+    tags = [str(t) for t in fields.get("tags", [])]
+    text = " ".join([artifact_id, art_type, description, " ".join(tags), body])
+    return OverlayArtifact(
+        id=artifact_id,
+        type=art_type,
+        version=str(fields.get("version", "")),
+        description=description,
+        tags=tags,
+        frontmatter=frontmatter,
+        body=body,
+        skill_raw=skill_raw,
+        resources=resources,
+        tokens=_tokenize(text),
+    )
+
+
+def _read_optional(path: str) -> str:
+    """Return a file's text, or "" when it cannot be read."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return ""
 
 
 def _read_resource(path: str) -> object:
