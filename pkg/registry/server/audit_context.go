@@ -44,11 +44,11 @@ type AuditMeta struct {
 // multi-tenant registry it is the §6.3.1-routed tenant, or "" when the request
 // resolves to no provisioned tenant. On a single-tenant registry it is bound.
 //
-// The rule keys on multi-tenant mode rather than on router presence: a
-// multi-tenant registry with no identity verifier, or in public mode, installs
-// no tenant router, and its bound tenant is the podium:unrouted no-data
-// binding, which must never reach a record. For the same reason the
-// multi-tenant arm ignores bound, so a caller may pass a TenantFor result.
+// On a multi-tenant registry, which WithTenantRouter marks on the Server and
+// WithTenantRouting marks on the layer endpoint, the tenant comes from the
+// §6.3.1 routing context. An unrouted request's bound value is the
+// podium:unrouted no-data binding, which must never reach a record, so the
+// multi-tenant arm ignores bound and a caller may pass a TenantFor result.
 //
 // Spec: §8.1, §6.3.1
 func auditTenant(ctx context.Context, multiTenant bool, bound string) string {

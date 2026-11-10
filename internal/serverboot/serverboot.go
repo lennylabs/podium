@@ -1452,18 +1452,15 @@ func run(ctx context.Context, stop func()) error {
 	if cfg.multiTenant && verifierInstalled {
 		// §6.3.1: route each request to the tenant its organization names. A
 		// verified provider rejects an unknown org with auth.tenant_unknown;
-		// trusted-headers leaves it in no tenant (an empty view).
+		// trusted-headers leaves it in no tenant (an empty view). validate
+		// refuses multi-tenant mode without a request-time verifier
+		// (config.multitenant_no_verifier), and identityVisibilityGuard refuses
+		// a registered provider without one before server.New, so every
+		// multi-tenant registry that serves requests installs this router.
+		// WithTenantRouter also selects the §8.1 audit tenant-label rule.
 		rejectUnknownTenant := cfg.identityProvider != "trusted-headers"
 		bootOpts = append(bootOpts, server.WithTenantRouter(tenantResolver(st), rejectUnknownTenant))
 		log.Printf("multi-tenant mode: routing requests by organization")
-	}
-
-	if cfg.multiTenant {
-		// §8.1: the audit tenant label keys on multi-tenant mode rather than
-		// on the router installed above, which a boot with no verifier or in
-		// public mode omits. Without it an unrouted request event would record
-		// the podium:unrouted binding.
-		bootOpts = append(bootOpts, server.WithMultiTenant())
 	}
 
 	if err := identityVisibilityGuard(cfg.identityProvider, providerSelected, cfg.publicMode, verifierInstalled); err != nil {
@@ -1494,10 +1491,10 @@ func run(ctx context.Context, stop func()) error {
 	layers := server.NewLayerEndpoint(st, tenantID, mode)
 	if cfg.multiTenant {
 		// §7.3.1 Tenant selection: a multi-tenant endpoint serves the tenant
-		// §6.3.1 routes each request to, and refuses an unrouted write. The
-		// condition omits verifierInstalled, so a multi-tenant boot with no
-		// verifier leaves every layer request unrouted rather than serving
-		// the bootstrap tenant to every caller.
+		// §6.3.1 routes each request to, and refuses an unrouted write.
+		// validate refuses multi-tenant mode without a request-time verifier,
+		// so the tenant router installed above is present whenever this
+		// branch runs.
 		layers = layers.WithTenantRouting()
 	}
 	layers = layers.
@@ -1550,10 +1547,11 @@ func run(ctx context.Context, stop func()) error {
 	// names no provisioned tenant is refused by TenantRouted with 401
 	// auth.tenant_unknown and never reaches the handler. Any other request
 	// that resolves to no tenant reaches the handler unrouted: no credential,
-	// a failed verification, trusted-headers with an unknown organization,
-	// public mode, or no identity provider. The handler's requireTenant
-	// check answers that request with 403 auth.forbidden before authAdmin
-	// runs.
+	// a failed verification, or trusted-headers with an unknown organization.
+	// A multi-tenant boot in public mode or with no identity provider is
+	// refused at validate with config.multitenant_no_verifier (§6.3.1). The
+	// handler's requireTenant check answers an unrouted request with 403
+	// auth.forbidden before authAdmin runs.
 	mux.Handle("/v1/admin/erase", srv.TenantRouted(layers.EraseHandler()))
 	if cfg.webUI {
 		mux.Handle("/app/", http.StripPrefix("/app/", http.FileServer(http.FS(web.Assets()))))
