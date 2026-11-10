@@ -239,6 +239,7 @@ rm -rf "$WORK"
 | S88 | Erasure on a multi-tenant registry redacts only the requesting tenant's audit records | standard | none | none | Postgres, S3 |
 | S89 | A git layer's URL credential is stored and used, and no response or log reports it | standalone | none | none | none |
 | S90 | A standalone registry manages and routes tenants in multi-tenant mode | standalone | none | none | none |
+| S91 | A cross-layer extends: child that leaves an executable field to its parent is refused | solo then standalone | none | none | none |
 
 ---
 
@@ -11294,3 +11295,107 @@ action that says "on a standard backend" is the defect this scenario catches.
 **Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
 
 ---
+
+## S91: A cross-layer extends: child that leaves an executable field to its parent is refused
+
+**Goal.** Validate that a same-ID overlay in a higher layer that does not
+restate its parent's `mcpServers` entry is dropped by a filesystem-source
+`podium sync` and rejected by a server reingest with the same code, that the
+reason names the missing field and neither the parent's layer nor its version,
+that the reingest response carries `details`, that both modes materialize the
+lower copy, and that restating the entry admits the overlay.
+
+**Covers.** §4.6 executable fields across layers, §7.3.1 ingest outcome,
+§13.11.3 executable inheritance, and §11 filesystem-to-server equivalence,
+through the compiled binary.
+
+**Why by hand.** An operator reads the `rejected:` line and the reingest body
+directly and gates CI on `$?`. A reason that names `org` or `1.0.0`, a
+`rejected` entry with no `details`, `exit=0` from either sync, or a target
+holding `team-jira` before step 4 is the defect this scenario catches.
+
+**Prerequisites.** A built `podium` binary on `PATH`.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then build a
+   two-layer registry in which `org` holds a skill with an `mcpServers` entry
+   and `team` holds a same-ID overlay that declares no entry.
+
+   ```bash
+   mkdir -p "$WORK/reg/org/ops/jira-skill" "$WORK/reg/team/ops/jira-skill"
+   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n' > "$WORK/reg/.registry-config"
+   printf 'visibility:\n  public: true\n' > "$WORK/reg/org/.layer-config"
+   printf 'visibility:\n  public: true\n' > "$WORK/reg/team/.layer-config"
+   for L in org team; do
+     printf -- '---\nname: jira-skill\ndescription: File Jira tickets. Use when a task needs a ticket.\n---\n\nFile the ticket.\n' \
+       > "$WORK/reg/$L/ops/jira-skill/SKILL.md"
+   done
+   printf -- '---\ntype: skill\nversion: 1.0.0\nmcpServers:\n  - name: jira\n    transport: stdio\n    command: org-jira\n    args: ["--org"]\n---\n' \
+     > "$WORK/reg/org/ops/jira-skill/ARTIFACT.md"
+   printf -- '---\ntype: skill\nversion: 1.1.0\nextends: ops/jira-skill\n---\n' \
+     > "$WORK/reg/team/ops/jira-skill/ARTIFACT.md"
+   ```
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and the four files
+   exist.
+
+2. Sync through the filesystem source, then repeat with `--dry-run`.
+
+   ```bash
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
+   cat "$WORK/err.txt"
+   cat "$WORK/fs/ops/jira-skill/ARTIFACT.md"
+   podium sync --registry "$WORK/reg" --target "$WORK/dry" --harness none --dry-run; echo "exit=$?"
+   ```
+
+   **Expect.** `exit=1` twice. `$WORK/err.txt` holds one line beginning
+   `rejected: ops/jira-skill (ingest.invalid_artifact): extends: a parent in another layer`
+   that names `mcpServers[jira]` and contains neither `org` nor `1.0.0`. The
+   materialized manifest carries `version: 1.0.0` and `command: org-jira`.
+
+3. Serve the same directory, reingest `team`, read the reingest body, and sync
+   through the server.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8193 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8193/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export URL=http://127.0.0.1:8193
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   curl -s -X POST "$URL/v1/layers/reingest?id=team"; echo
+   podium sync --registry "$URL" --target "$WORK/srv" --harness none; echo "exit=$?"
+   diff "$WORK/fs/ops/jira-skill/ARTIFACT.md" "$WORK/srv/ops/jira-skill/ARTIFACT.md" && echo same
+   ```
+
+   **Expect.** `podium layer reingest` prints the same `rejected:` line as
+   step 2 and `exit=1`. The `curl` body holds a `rejected` entry with
+   `"details":{"constraint":"executable_inheritance","fields":["mcpServers[jira]"]}`
+   and no occurrence of `"org"`. The server sync prints `exit=0`, and `diff`
+   prints `same`. A difference means the two deployment modes kept different
+   copies.
+
+4. Restate the entry in the overlay with a team command, reingest, and sync
+   both ways.
+
+   ```bash
+   printf -- '---\ntype: skill\nversion: 1.1.0\nextends: ops/jira-skill\nmcpServers:\n  - name: jira\n    transport: stdio\n    command: team-jira\n    args: ["--team"]\n---\n' \
+     > "$WORK/reg/team/ops/jira-skill/ARTIFACT.md"
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   podium artifact show --registry "$URL" ops/jira-skill
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none; echo "exit=$?"
+   cat "$WORK/fs/ops/jira-skill/ARTIFACT.md"
+   ```
+
+   **Expect.** The reingest prints no `rejected:` line and `exit=0`.
+   `podium artifact show` shows `version: 1.1.0` and `command: team-jira`. The
+   filesystem sync prints `exit=0`, and its manifest carries `team-jira` and
+   no `org-jira`.
+
+5. Clean up.
+
+   ```bash
+   kill "$SRV"; rm -rf "$WORK"
+   ```
