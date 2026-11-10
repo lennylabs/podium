@@ -312,3 +312,88 @@ func TestLoadConfig_DeviceCodeKeyIsNotTheBrowserFlowEndpoint(t *testing.T) {
 		t.Errorf("oauthAuthorizationEndpoint = %q, want the device-code key's value", c.oauthAuthorizationEndpoint)
 	}
 }
+
+// Spec: §6.3.1 / §13.10 — earlier startup refusals keep precedence over
+// config.multitenant_no_verifier.
+//
+// multiTenantVerifierGuard runs after StartupConfig.Validate, so a
+// multi-tenant configuration that also violates a §13.10 check reports that
+// check. The public-bind and web-UI rows configure no identity provider, so
+// they meet the guard's predicate and fail here if the guard runs first.
+func TestValidate_MultiTenantPrecedence(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		cfg      Config
+		wantIs   error
+		wantCode string
+		wantText string
+	}{
+		{
+			name:   "public mode with oidc-jwt",
+			cfg:    Config{multiTenant: true, publicMode: true, identityProvider: "oidc-jwt", bind: "127.0.0.1:8080"},
+			wantIs: server.ErrPublicModeWithIdP,
+		},
+		{
+			// config.public_mode_with_idp exempts none, which configures no
+			// identity provider, so the configuration reaches the guard.
+			name:     "public mode with none",
+			cfg:      Config{multiTenant: true, publicMode: true, identityProvider: "none", bind: "127.0.0.1:8080"},
+			wantCode: "config.multitenant_no_verifier",
+			wantText: "unset PODIUM_PUBLIC_MODE",
+		},
+		{
+			name:   "public mode on a non-loopback bind",
+			cfg:    Config{multiTenant: true, publicMode: true, bind: "0.0.0.0:8080"},
+			wantIs: server.ErrPublicBindNonLoopback,
+		},
+		{
+			name:   "web UI on a non-loopback bind",
+			cfg:    Config{multiTenant: true, webUI: true, bind: "0.0.0.0:8080"},
+			wantIs: server.ErrWebUIPublicBindRefused,
+		},
+		{
+			// Regression row: trusted-headers is a verified provider, so the
+			// new guard never fires for it, and the existing refusal still does.
+			name:   "trusted-headers without a proxy secret",
+			cfg:    Config{multiTenant: true, identityProvider: "trusted-headers", bind: "127.0.0.1:8080"},
+			wantIs: server.ErrTrustedHeadersMultitenantNoSecret,
+		},
+		{
+			name:     "no identity provider",
+			cfg:      Config{multiTenant: true, bind: "127.0.0.1:8080"},
+			wantCode: "config.multitenant_no_verifier",
+		},
+		{
+			name: "oidc-jwt passes",
+			cfg:  Config{multiTenant: true, identityProvider: "oidc-jwt", bind: "127.0.0.1:8080"},
+		},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := c.cfg
+			cfg.storeType = "sqlite"
+			cfg.objectStore = "filesystem"
+			err := cfg.validate()
+			switch {
+			case c.wantIs != nil:
+				if !errors.Is(err, c.wantIs) {
+					t.Fatalf("validate() = %v, want %v", err, c.wantIs)
+				}
+			case c.wantCode != "":
+				if err == nil || !strings.Contains(err.Error(), c.wantCode) {
+					t.Fatalf("validate() = %v, want %s", err, c.wantCode)
+				}
+				if !strings.Contains(err.Error(), c.wantText) {
+					t.Errorf("validate() = %v, want the message to contain %q", err, c.wantText)
+				}
+			default:
+				if err != nil {
+					t.Fatalf("validate() = %v, want nil", err)
+				}
+			}
+		})
+	}
+}
