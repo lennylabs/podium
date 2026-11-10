@@ -61,7 +61,7 @@ func buildReingestRunner(
 			PublishEvent:  srv.PublishEvent,
 			ResourcePut:   resourcePut,
 			CallerID:      caller,
-			FreezeWindows: applyBreakGlass(cfg.freezeWindows, bg, caller),
+			FreezeWindows: applyBreakGlass(cfg.freezeWindows, bg),
 			// §13.10/§13.2.2: a public-mode deployment enforces the
 			// sensitivity floor on the §7.3.1 manual-reingest / inbound-webhook
 			// path too, matching the boot ingest paths, so a public reingest
@@ -147,16 +147,14 @@ func sourceProviderFor(sourceType string) (source.Provider, error) {
 // break-glass grant attached when the manual reingest path supplied one. The
 // ingest pipeline validates the §4.7.2 dual-signoff (two distinct approvers,
 // non-empty justification, ≤24h) before honoring the bypass; an invalid grant
-// leaves the window in effect. The triggering caller is recorded as one
-// approver so a single supplied approver still yields the required two.
-func applyBreakGlass(windows []ingest.FreezeWindow, bg *server.BreakGlass, caller string) []ingest.FreezeWindow {
+// leaves the window in effect. The approvers are exactly the identities the
+// request names: the caller who triggers the reingest is not counted, so the
+// request names both approvers.
+func applyBreakGlass(windows []ingest.FreezeWindow, bg *server.BreakGlass) []ingest.FreezeWindow {
 	if len(windows) == 0 || bg == nil {
 		return windows
 	}
 	approvers := bg.Approvers
-	if caller != "" {
-		approvers = append([]string{caller}, approvers...)
-	}
 	out := make([]ingest.FreezeWindow, len(windows))
 	for i, w := range windows {
 		w.BreakGlass = true

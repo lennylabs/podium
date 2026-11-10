@@ -101,12 +101,12 @@ func TestSourceProviderFor_KnownAndUnknown(t *testing.T) {
 func TestApplyBreakGlass_NoWindowsOrNoGrant(t *testing.T) {
 	t.Parallel()
 
-	if got := applyBreakGlass(nil, &server.BreakGlass{Justification: "x"}, "alice@acme.com"); got != nil {
+	if got := applyBreakGlass(nil, &server.BreakGlass{Justification: "x"}); got != nil {
 		t.Errorf("no windows: got %v, want nil (unchanged)", got)
 	}
 
 	windows := []ingest.FreezeWindow{{Name: "weekend", Blocks: []string{"ingest"}}}
-	got := applyBreakGlass(windows, nil, "alice@acme.com")
+	got := applyBreakGlass(windows, nil)
 	if len(got) != 1 || got[0].BreakGlass {
 		t.Errorf("nil grant: window should be returned unchanged, got %+v", got)
 	}
@@ -114,39 +114,28 @@ func TestApplyBreakGlass_NoWindowsOrNoGrant(t *testing.T) {
 
 // Spec: §4.7.2 — when a grant is supplied, applyBreakGlass attaches the
 // justification, the approvers, and a fresh grant timestamp to a copy of each
-// window. The triggering caller is prepended as one approver so a single
-// supplied approver still yields the two distinct approvers the dual-signoff
-// rule requires, and the original windows are not mutated in place.
-func TestApplyBreakGlass_AttachesGrantAndPrependsCaller(t *testing.T) {
+// window, and the original windows are not mutated in place. The approvers are
+// exactly the supplied identities.
+func TestApplyBreakGlass_AttachesGrant(t *testing.T) {
 	t.Parallel()
 
 	windows := []ingest.FreezeWindow{
 		{Name: "weekend", Blocks: []string{"ingest"}},
 		{Name: "release", Blocks: []string{"ingest"}},
 	}
-	bg := &server.BreakGlass{Justification: "hotfix CVE-2026-1", Approvers: []string{"bob@acme.com"}}
+	bg := &server.BreakGlass{Justification: "hotfix CVE-2026-1", Approvers: []string{"bob@acme.com", "carol@acme.com"}}
 	before := time.Now().UTC()
 
-	got := applyBreakGlass(windows, bg, "alice@acme.com")
+	got := applyBreakGlass(windows, bg)
 
 	if len(got) != 2 {
 		t.Fatalf("got %d windows, want 2", len(got))
 	}
 	for _, w := range got {
-		if !w.BreakGlass {
-			t.Errorf("window %q: BreakGlass not set", w.Name)
+		if !w.BreakGlass || w.Justification != "hotfix CVE-2026-1" || w.GrantedAt.Before(before) ||
+			len(w.Approvers) != 2 || w.Approvers[0] != "bob@acme.com" || w.Approvers[1] != "carol@acme.com" {
+			t.Errorf("window %q: grant = %+v, want the supplied justification and approvers with a fresh timestamp", w.Name, w)
 		}
-		if w.Justification != "hotfix CVE-2026-1" {
-			t.Errorf("window %q: justification = %q", w.Name, w.Justification)
-		}
-		if len(w.Approvers) != 2 || w.Approvers[0] != "alice@acme.com" || w.Approvers[1] != "bob@acme.com" {
-			t.Errorf("window %q: approvers = %v, want [caller, supplied]", w.Name, w.Approvers)
-		}
-		if w.GrantedAt.Before(before) {
-			t.Errorf("window %q: GrantedAt %v predates the call", w.Name, w.GrantedAt)
-		}
-		// The attached grant must satisfy the §4.7.2 rule (two distinct
-		// approvers, non-empty justification, within the auto-expiry window).
 		if err := w.ValidateBreakGlass(time.Now().UTC()); err != nil {
 			t.Errorf("window %q: ValidateBreakGlass = %v, want nil", w.Name, err)
 		}
@@ -158,20 +147,21 @@ func TestApplyBreakGlass_AttachesGrantAndPrependsCaller(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.2 — an empty caller (anonymous standalone) is not prepended as an
-// approver, so the grant carries only the explicitly supplied approvers.
-func TestApplyBreakGlass_EmptyCallerNotPrepended(t *testing.T) {
+// Spec: §4.7.2 — dual-signoff needs two approvers named in the request. A
+// single supplied approver yields a grant that fails validation, so the window
+// stays in effect; the caller who triggers the reingest is not added.
+func TestApplyBreakGlass_SingleApproverDoesNotSatisfyDualSignoff(t *testing.T) {
 	t.Parallel()
 
 	windows := []ingest.FreezeWindow{{Name: "weekend", Blocks: []string{"ingest"}}}
-	bg := &server.BreakGlass{Justification: "j", Approvers: []string{"bob@acme.com", "carol@acme.com"}}
+	bg := &server.BreakGlass{Justification: "j", Approvers: []string{"bob@acme.com"}}
 
-	got := applyBreakGlass(windows, bg, "")
-	if len(got) != 1 {
-		t.Fatalf("got %d windows, want 1", len(got))
+	got := applyBreakGlass(windows, bg)
+	if len(got) != 1 || len(got[0].Approvers) != 1 {
+		t.Fatalf("approvers = %+v, want only the single supplied approver", got)
 	}
-	if len(got[0].Approvers) != 2 || got[0].Approvers[0] != "bob@acme.com" {
-		t.Errorf("approvers = %v, want the supplied pair without a prepended caller", got[0].Approvers)
+	if err := got[0].ValidateBreakGlass(time.Now().UTC()); err == nil {
+		t.Error("ValidateBreakGlass = nil, want the two-distinct-approvers error")
 	}
 }
 
