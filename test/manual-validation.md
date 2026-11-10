@@ -256,6 +256,7 @@ rm -rf "$WORK"
 | S98 | A multi-tenant configuration with no request-time verifier is refused before any store opens | standalone | none | none | none |
 | S99 | An extends: child whose sandbox_profile conflicts with its parent's is refused in both modes, and a stored version keeps serving | solo then standalone | none | none | none |
 | S100 | A sandbox_profile that tightens an open parent is admitted, and a same-layer conflict is refused with its dependants in both modes | solo then standalone | none | none | none |
+| S101 | An Agent Skills directory with no ARTIFACT.md is a Podium layer | standalone | none | none | none |
 
 ---
 
@@ -277,7 +278,13 @@ Claude Code adapter.
    podium artifact scaffold --type skill --description "Greet a user politely" "$WORK/reg/greet"
    ```
 
-3. Create a project and write its project-local configuration. `podium init`
+3. Confirm the skill scaffold refuses a Podium-only field.
+
+   ```bash
+   podium artifact scaffold --type skill --tags x --description "Tagged" "$WORK/reg/tagged"; echo "exit=$?"
+   ```
+
+4. Create a project and write its project-local configuration. `podium init`
    discovers the workspace by walking up from the current directory (§7.5.2), so
    change into the project first; that makes init write
    `$WORK/proj/.podium/sync.yaml`. The `--target` flag only sets the
@@ -290,14 +297,14 @@ Claude Code adapter.
    podium init --registry "$WORK/reg" --harness claude-code --target "$WORK/proj"
    ```
 
-4. Materialize into the project.
+5. Materialize into the project.
 
    ```bash
    cd "$WORK/proj"
    podium sync
    ```
 
-5. Inspect the materialized output.
+6. Inspect the materialized output.
 
    ```bash
    find "$WORK/proj/.claude" -type f
@@ -307,10 +314,12 @@ Claude Code adapter.
 **Expected.**
 
 - Step 2 reports `Scaffolded skill at .../reg/greet/` and the directory holds
-  `ARTIFACT.md` and `SKILL.md`.
-- Step 3 writes `$WORK/proj/.podium/sync.yaml`.
-- Step 4 reports one artifact materialized through the `claude-code` adapter.
-- Step 5 lists a `greet` skill file under `$WORK/proj/.claude/` (the Claude Code
+  `SKILL.md` alone, with `version: "0.1.0"` under `metadata:`.
+- Step 3 prints `exit=2` and a message that names `--tags` and the
+  `ARTIFACT.md` overlay. `$WORK/reg/tagged` is not created.
+- Step 4 writes `$WORK/proj/.podium/sync.yaml`.
+- Step 5 reports one artifact materialized through the `claude-code` adapter.
+- Step 6 lists a `greet` skill file under `$WORK/proj/.claude/` (the Claude Code
   skills layout). `podium status` shows `registry: $WORK/reg`, `harness:
   claude-code`, and `source: filesystem (no server to reach)`.
 
@@ -769,10 +778,12 @@ from a lower-precedence layer.
    `team` repository holds its own `greet` skill plus a unique `team-only`
    skill. Per §4.6, two layers contributing the same canonical ID is a
    forbidden silent shadow unless the higher-precedence artifact declares
-   `extends: <id>`. Per §4.7.6 each artifact carries its own version, so the
-   `team` overlay bumps its `version:` and declares `extends: greet` to overlay
-   the `base` copy. The `extends:` field is top-level frontmatter in
-   `ARTIFACT.md`.
+   `extends: <id>`. The scaffold writes `SKILL.md` alone, and `extends:` is a
+   Podium-only field, so the `team` copy of `greet` carries a hand-written
+   `ARTIFACT.md` overlay that declares `version: 0.2.0` and `extends: greet`.
+   Its `SKILL.md` `metadata.version` is set to the same value so the two files
+   agree (§4.3.4). The `rm` keeps the `sed` backup out of the commit, where it
+   would become a bundled resource.
 
    ```bash
    mkdir -p "$WORK/base" && cd "$WORK/base" && git init -q
@@ -781,12 +792,9 @@ from a lower-precedence layer.
 
    mkdir -p "$WORK/team" && cd "$WORK/team" && git init -q
    podium artifact scaffold --type skill --description "team greet" "$WORK/team/greet" --force
-   # Overlay the base greet: bump the version and declare extends in ARTIFACT.md.
-   python3 - "$WORK/team/greet/ARTIFACT.md" <<'PY'
-   import sys
-   p = sys.argv[1]; s = open(p).read()
-   open(p, "w").write(s.replace("version: 0.1.0\n", "version: 0.2.0\nextends: greet\n"))
-   PY
+   # Overlay the base greet: write an ARTIFACT.md overlay and bump SKILL.md to match.
+   printf -- '---\ntype: skill\nversion: 0.2.0\nextends: greet\n---\n<!-- Skill body lives in SKILL.md. -->\n' > "$WORK/team/greet/ARTIFACT.md"
+   sed -i.bak 's/^  version: "0.1.0"$/  version: "0.2.0"/' "$WORK/team/greet/SKILL.md" && rm "$WORK/team/greet/SKILL.md.bak"
    podium artifact scaffold --type skill --description "Team only" "$WORK/team/team-only" --force
    git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "team"
    ```
@@ -1268,11 +1276,21 @@ ingest-time sensitivity ceiling.
 
 1. Run the isolation block.
 2. Author a registry with a low-sensitivity artifact and a high-sensitivity
-   artifact.
+   artifact. The skill scaffold writes `SKILL.md` alone and refuses
+   `--sensitivity`, so the `incident` skill carries `sensitivity: high` in a
+   hand-written `ARTIFACT.md` overlay.
 
    ```bash
    podium artifact scaffold --type context --sensitivity low  --description "Public FAQ" "$WORK/reg/faq"
-   podium artifact scaffold --type skill   --sensitivity high --description "Production incident runbook" "$WORK/reg/incident"
+   podium artifact scaffold --type skill   --description "Production incident runbook" "$WORK/reg/incident"
+   cat > "$WORK/reg/incident/ARTIFACT.md" <<'MD'
+   ---
+   type: skill
+   version: 0.1.0
+   sensitivity: high
+   ---
+   <!-- Skill body lives in SKILL.md. -->
+   MD
    ```
 
 3. Serve in public mode and query anonymously.
@@ -1323,13 +1341,15 @@ that loading a deprecated artifact surfaces the replacement.
 1. Run the isolation block.
 2. Create a Git-source layer holding version 1.0.0 of a skill, serve, and
    register it (as in S09, on `127.0.0.1:8114`). The scaffold writes
-   `version: 0.1.0`, so edit `$WORK/repo/deploy/ARTIFACT.md` to `version: 1.0.0`
-   before the first commit.
+   `SKILL.md` alone with `version: "0.1.0"` under `metadata:`, so set the
+   `SKILL.md` `metadata.version` to `1.0.0` before the first commit. The `rm`
+   keeps each `sed` backup out of the commit, where it would become a bundled
+   resource.
 
    ```bash
    mkdir -p "$WORK/repo" && cd "$WORK/repo" && git init -q
    podium artifact scaffold --type skill --description "Deploy the service" "$WORK/repo/deploy"
-   # set version: 1.0.0 in $WORK/repo/deploy/ARTIFACT.md, then:
+   sed -i.bak 's/^  version: ".*"$/  version: "1.0.0"/' "$WORK/repo/deploy/SKILL.md" && rm "$WORK/repo/deploy/SKILL.md.bak"
    git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "add deploy skill 1.0.0"
    podium serve --standalone --no-embeddings --bind 127.0.0.1:8114 > "$WORK/srv.log" 2>&1 &
    SRV=$!
@@ -1340,12 +1360,12 @@ that loading a deprecated artifact surfaces the replacement.
    podium layer reingest --registry "$PODIUM_REGISTRY" team
    ```
 
-3. Publish version 2.0.0 by editing the artifact's `version` and committing,
-   then re-ingest. A bare `artifact show` resolves `latest`, which is the most
-   recently ingested non-deprecated version, so it reports 2.0.0.
+3. Publish version 2.0.0 by editing the `SKILL.md` `metadata.version` and
+   committing, then re-ingest. A bare `artifact show` resolves `latest`, which
+   is the most recently ingested non-deprecated version, so it reports 2.0.0.
 
    ```bash
-   # bump the version in $WORK/repo/deploy/ARTIFACT.md to 2.0.0, then:
+   sed -i.bak 's/^  version: ".*"$/  version: "2.0.0"/' "$WORK/repo/deploy/SKILL.md" && rm "$WORK/repo/deploy/SKILL.md.bak"
    cd "$WORK/repo" && git -c user.email=alice@acme.com -c user.name=alice commit -aqm "deploy 2.0.0"
    podium layer reingest --registry "$PODIUM_REGISTRY" team
    podium artifact show --registry "$PODIUM_REGISTRY" deploy
@@ -1355,16 +1375,18 @@ that loading a deprecated artifact surfaces the replacement.
    `(artifact_id, version)` is immutable by content hash (§4.7.6), so an
    already-published version cannot be re-published with a changed `deprecated`
    flag. Deprecation is published as a new version that carries
-   `deprecated: true` and a `replaced_by` upgrade target. Edit
-   `$WORK/repo/deploy/ARTIFACT.md` to version 3.0.0 with those two frontmatter
-   fields added, commit, re-ingest, then observe search and an explicit load of
-   the deprecated version. Flags precede the positional id, so `--version 3.0.0`
-   comes before `deploy`.
+   `deprecated: true` and a `replaced_by` upgrade target. `deprecated` and
+   `replaced_by` are Podium-only fields, so set the `SKILL.md`
+   `metadata.version` to 3.0.0 and write a hand-written `ARTIFACT.md` overlay
+   that declares the same version and the two fields. Stage the new file with
+   `git add -A`, because `commit -a` does not stage it. Commit, re-ingest, then
+   observe search and an explicit load of the deprecated version. Flags precede
+   the positional id, so `--version 3.0.0` comes before `deploy`.
 
    ```bash
-   # set version: 3.0.0 and add `deprecated: true` and
-   # `replaced_by: deploy@2.0.0` to $WORK/repo/deploy/ARTIFACT.md, then:
-   cd "$WORK/repo" && git -c user.email=alice@acme.com -c user.name=alice commit -aqm "deploy 3.0.0 deprecated"
+   sed -i.bak 's/^  version: ".*"$/  version: "3.0.0"/' "$WORK/repo/deploy/SKILL.md" && rm "$WORK/repo/deploy/SKILL.md.bak"
+   printf -- '---\ntype: skill\nversion: 3.0.0\ndeprecated: true\nreplaced_by: deploy@2.0.0\n---\n<!-- Skill body lives in SKILL.md. -->\n' > "$WORK/repo/deploy/ARTIFACT.md"
+   cd "$WORK/repo" && git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "deploy 3.0.0 deprecated"
    podium layer reingest --registry "$PODIUM_REGISTRY" team
    podium search --registry "$PODIUM_REGISTRY" "deploy"
    podium artifact show --registry "$PODIUM_REGISTRY" --version 3.0.0 deploy
@@ -1399,11 +1421,21 @@ is refused.
 
 1. Run the isolation block.
 2. Author one high-sensitivity artifact and serve it with ingest signing
-   enabled. The server log reports `ingest signing: registry-managed key` and
+   enabled. The skill carries `sensitivity: high` in a hand-written
+   `ARTIFACT.md` overlay, because the skill scaffold refuses `--sensitivity`.
+   The server log reports `ingest signing: registry-managed key` and
    the signing keypair is written to `PODIUM_SIGN_KEY_PATH` on first run.
 
    ```bash
-   podium artifact scaffold --type skill --sensitivity high --description "Signed runbook" "$WORK/reg/signed-runbook"
+   podium artifact scaffold --type skill --description "Signed runbook" "$WORK/reg/signed-runbook"
+   cat > "$WORK/reg/signed-runbook/ARTIFACT.md" <<'MD'
+   ---
+   type: skill
+   version: 0.1.0
+   sensitivity: high
+   ---
+   <!-- Skill body lives in SKILL.md. -->
+   MD
    export PODIUM_SIGN_KEY_PATH="$WORK/registry-sign.key"
    podium serve --standalone --no-embeddings --sign registry-key --layer-path "$WORK/reg" --bind 127.0.0.1:8115 > "$WORK/srv.log" 2>&1 &
    SRV=$!
@@ -1449,7 +1481,15 @@ is refused.
    is refused.
 
    ```bash
-   podium artifact scaffold --type skill --sensitivity high --description "Unsigned runbook" "$WORK/reg-unsigned/unsigned-runbook"
+   podium artifact scaffold --type skill --description "Unsigned runbook" "$WORK/reg-unsigned/unsigned-runbook"
+   cat > "$WORK/reg-unsigned/unsigned-runbook/ARTIFACT.md" <<'MD'
+   ---
+   type: skill
+   version: 0.1.0
+   sensitivity: high
+   ---
+   <!-- Skill body lives in SKILL.md. -->
+   MD
    PODIUM_SIGN=none PODIUM_SIGN_KEY_PATH="$WORK/registry-sign2.key" \
    PODIUM_SQLITE_PATH="$WORK/podium2.db" PODIUM_FILESYSTEM_ROOT="$WORK/objects2" \
      podium serve --standalone --no-embeddings --layer-path "$WORK/reg-unsigned" \
@@ -1960,12 +2000,11 @@ given artifact through `extends` and `delegates_to` edges.
    podium artifact scaffold --type skill --description "Base deploy routine" "$WORK/reg/deploy-base"
    podium artifact scaffold --type skill --description "Pro deploy routine" "$WORK/reg/deploy-pro"
    podium artifact scaffold --type agent --delegates-to deploy-base --description "Release agent" "$WORK/reg/release-agent"
-   # Make deploy-pro extend deploy-base (bump version and add the extends field).
-   python3 - "$WORK/reg/deploy-pro/ARTIFACT.md" <<'PY'
-   import sys
-   p = sys.argv[1]; s = open(p).read()
-   open(p, "w").write(s.replace("version: 0.1.0\n", "version: 0.2.0\nextends: deploy-base\n"))
-   PY
+   # Make deploy-pro extend deploy-base: write an ARTIFACT.md overlay with the
+   # version and the extends field, and set the SKILL.md metadata.version to match.
+   # The rm keeps the sed backup from becoming a bundled resource of the layer.
+   printf -- '---\ntype: skill\nversion: 0.2.0\nextends: deploy-base\n---\n<!-- Skill body lives in SKILL.md. -->\n' > "$WORK/reg/deploy-pro/ARTIFACT.md"
+   sed -i.bak 's/^  version: "0.1.0"$/  version: "0.2.0"/' "$WORK/reg/deploy-pro/SKILL.md" && rm "$WORK/reg/deploy-pro/SKILL.md.bak"
    ```
 
 3. Serve and query impact.
@@ -2231,7 +2270,9 @@ cache mode.
 ## S31: Import an existing skill tree into a layer
 
 **Goal.** Validate that `podium import` converts a directory of plain skills into
-a Podium-shaped layer that lints, serves, and is searchable.
+plain Agent Skills directories that lint, serve, and are searchable, and that
+it refuses a conflicting `metadata.version`, a source `ARTIFACT.md`, and the
+removed `--type` flag.
 
 **Covers.** Solo and standalone deployment, `import`, `lint`, search over the
 imported layer.
@@ -2251,8 +2292,9 @@ imported layer.
 3. Import the tree into a Podium layer, lint it, then serve and search.
 
    ```bash
-   podium import --source "$WORK/skills" --target "$WORK/reg" --type skill
-   find "$WORK/reg" -name ARTIFACT.md | sort
+   podium import --source "$WORK/skills" --target "$WORK/reg" --version 1.2.0
+   find "$WORK/reg" -name ARTIFACT.md | wc -l
+   grep -A1 '^metadata:' "$WORK/reg"/*/SKILL.md
    podium lint --registry "$WORK/reg"; echo "lint exit=$?"
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8125 > "$WORK/srv.log" 2>&1 &
    SRV=$!
@@ -2262,13 +2304,33 @@ imported layer.
    podium search --registry "$PODIUM_REGISTRY" "greet"
    ```
 
+4. Import a source skill whose `metadata.version` differs from `--version`, a
+   source directory that holds an `ARTIFACT.md`, and the tree with the removed
+   `--type` flag.
+
+   ```bash
+   mkdir -p "$WORK/pinned/pin" "$WORK/both/dual"
+   printf -- '---\nname: pin\ndescription: A pinned skill\nmetadata:\n  version: "9.9.9"\n---\n\nPinned.\n' > "$WORK/pinned/pin/SKILL.md"
+   podium import --source "$WORK/pinned" --target "$WORK/reg-pin" --version 1.2.0; echo "exit=$?"
+   printf -- '---\nname: dual\ndescription: A skill with an overlay\n---\n\nDual.\n' > "$WORK/both/dual/SKILL.md"
+   printf -- '---\ntype: skill\nversion: 1.0.0\n---\n' > "$WORK/both/dual/ARTIFACT.md"
+   podium import --source "$WORK/both" --target "$WORK/reg-both"; echo "exit=$?"
+   podium import --source "$WORK/skills" --target "$WORK/reg-type" --type skill; echo "exit=$?"
+   ```
+
 **Expected.**
 
-- `podium import` writes a Podium-shaped layer under `$WORK/reg`: each source
-  skill becomes a directory with an `ARTIFACT.md` (declaring `type: skill` and a
-  version) beside its `SKILL.md`.
+- `podium import` writes plain Agent Skills directories under `$WORK/reg`. The
+  `find` count is `0`, and each `SKILL.md` carries `version: "1.2.0"` under
+  `metadata:`.
 - `podium lint` reports `lint: no issues.` on the imported layer.
 - The standalone server ingests the imported skills and search returns `greet`.
+- Step 4 prints three refusals. The first names `.../pinned/pin/SKILL.md`, the
+  value `"9.9.9"`, and `--version "1.2.0"`, and prints `exit=1`. The second
+  names `.../both/dual` and says it holds `ARTIFACT.md`, and prints `exit=1`.
+  The third prints `flag provided but not defined: -type` and the usage, and
+  prints `exit=2`. None of `$WORK/reg-pin`, `$WORK/reg-both`, and
+  `$WORK/reg-type` holds a skill directory.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
@@ -7695,10 +7757,11 @@ one algorithm and read by another, which no in-process test constructs.
 
    **Expect.** `which podium` prints `$PODIUM_BIN/podium`.
 
-2. Author one skill carrying an `ARTIFACT.md`, a `SKILL.md`, and two bundled
-   resources. A manifest-only artifact exercises one framed slot and hides a
-   slot-order defect, so the two resources are what make the comparison
-   non-vacuous.
+2. Author one skill carrying a `SKILL.md` and two bundled resources. The
+   scaffold writes `SKILL.md` alone, so the digest frames a zero-length first
+   value for the absent `ARTIFACT.md`. A single-file artifact exercises one
+   framed slot and hides a slot-order defect, so the two resources are what
+   make the comparison non-vacuous.
 
    ```bash
    mkdir -p "$WORK/reg/close-reporting"
@@ -7709,7 +7772,7 @@ one algorithm and read by another, which no in-process test constructs.
    ls "$WORK/reg/close-reporting/variance"
    ```
 
-   **Expect.** `ARTIFACT.md`, `SKILL.md`, `notes.md`, and `scripts.py`.
+   **Expect.** `SKILL.md`, `notes.md`, and `scripts.py`.
 
 3. Start the registry over that directory and load the artifact through the MCP
    consumer. The artifact's id carries its domain path, which `podium search`
@@ -7735,9 +7798,9 @@ one algorithm and read by another, which no in-process test constructs.
    over an empty store, `rehash: 0 rewritten, 0 already migrated, ...`. Each
    line carries a timestamp prefix. The load prints
    one `content_hash`, of the form
-   `"content_hash":"sha256:cb81ac9dcecf8a644e8614e93f90851f1801151c00c64a4e90d12daacc2379b8"`.
+   `"content_hash":"sha256:4e48811607d696dc8e97a071b696e2de25bd7f37cfcfa962007b58ef8511f3eb"`.
    Record the value as the served hash; the digest covers the scaffolded
-   manifest, so a different scaffold template produces a different value. A
+   `SKILL.md`, so a different scaffold template produces a different value. A
    refusal here is the disagreement this scenario exists to catch.
 
 4. Read the overlay's served hash on either side of an edit to its `SKILL.md`.
@@ -7754,9 +7817,9 @@ one algorithm and read by another, which no in-process test constructs.
    ```
 
    **Expect.** Two `content_hash` values that differ, such as
-   `sha256:8c90d58634b221cdd8c462d0c4149d7934bec895185e4bec0e16de9e8732cf26`
+   `sha256:3807e00c4b9d852e1b75d2f41695e9239716c3ae0a3d0b8f27d7dbb15b1d5e66`
    and
-   `sha256:57053072665ffa3fb0d78bc3e447c607793b50d42434d2720d2d18f0354b9904`.
+   `sha256:89ad9310c4def9c83bfd9b2837f0e2b00664cc8576280bcb32a3331217415462`.
    Two equal values are the defect this step catches: the overlay response
    would then be reporting a hash of the manifest alone.
 
@@ -7766,9 +7829,10 @@ one algorithm and read by another, which no in-process test constructs.
    and holds the edited value. The registry's §13.4 stored-row admission
    recomputes the row's hash on the full load and refuses it before any
    consumer check runs. The `shasum` line computes the pre-upgrade
-   digest by hand, as the concatenation of `ARTIFACT.md`, `SKILL.md`, and each
-   bundled resource's path followed by its body in ascending path order, with
-   no length prefixes; no shipped tool computes it. The load runs against an
+   digest by hand, as the concatenation of `SKILL.md` and each bundled
+   resource's path followed by its body in ascending path order, with no length
+   prefixes; no shipped tool computes it. The skill has no `ARTIFACT.md`, so
+   the concatenation carries nothing for it. The load runs against an
    empty `$PODIUM_CACHE_DIR` in the default `always-revalidate` mode, so the
    consumer makes a full load, which admission answers. An `offline-first` load would not surface
    it, because a resolution hit serves the bucket it resolved and the
@@ -7777,7 +7841,7 @@ one algorithm and read by another, which no in-process test constructs.
    ```bash
    kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
    D="$WORK/reg/close-reporting/variance"
-   OLD=$( { cat "$D/ARTIFACT.md" "$D/SKILL.md"; printf 'notes.md'; cat "$D/notes.md"; \
+   OLD=$( { cat "$D/SKILL.md"; printf 'notes.md'; cat "$D/notes.md"; \
             printf 'scripts.py'; cat "$D/scripts.py"; } | shasum -a 256 | cut -d' ' -f1 )
    sqlite3 "$PODIUM_SQLITE_PATH" \
      "update manifests set content_hash='sha256:$OLD' where artifact_id='close-reporting/variance';"
@@ -8086,10 +8150,11 @@ column confirms what the registry holds rather than what a load reports.
    `sqlite3` query prints `''`. A load that succeeds here means a reingest
    re-signed the stored row, which this scenario exists to catch.
 
-5. Raise the artifact's version, reingest, and load both versions.
+5. Raise the artifact's `SKILL.md` `metadata.version`, reingest, and load both
+   versions.
 
    ```bash
-   sed -i.bak 's/^version: 0.1.0$/version: 0.2.0/' "$WORK/reg/early/ARTIFACT.md"
+   sed -i.bak 's/^  version: "0.1.0"$/  version: "0.2.0"/' "$WORK/reg/early/SKILL.md"
    podium layer reingest --registry "$PODIUM_REGISTRY" reg
    load_http 0.2.0
    load_mcp 0.2.0
@@ -8323,22 +8388,24 @@ the edits run against the SQLite file a deployment holds.
    also carries a `content_hash`. A small resource carrying a `presigned_url`
    means the batch path presigns a resource admission never read.
 
-4. Stop the server, keep the row's stored `frontmatter` and `signature` in a
-   side table, and append a byte to the stored `frontmatter`. The stored
-   `content_hash` is unchanged. Restart and load through `curl`, through the
-   bridge with a new empty cache, and through the bridge with a fresh copy of
-   the warm cache. Restore the row.
+4. Stop the server, keep the row's stored `frontmatter`, `signature`, and
+   `skill_raw` in a side table, and append a byte to the stored `skill_raw`,
+   which holds the admitted `SKILL.md` bytes. The scaffolded `admit` skill has
+   no `ARTIFACT.md`, so its stored `frontmatter` is NULL and an edit to it
+   would change nothing. The stored `content_hash` is unchanged. Restart and
+   load through `curl`, through the bridge with a new empty cache, and through
+   the bridge with a fresh copy of the warm cache. Restore the row.
 
    ```bash
    stop
-   sqlite3 "$PODIUM_SQLITE_PATH" "create table s69_keep as select frontmatter, signature from manifests where artifact_id='admit';"
-   sqlite3 "$PODIUM_SQLITE_PATH" "update manifests set frontmatter = frontmatter || ' ' where artifact_id='admit';"
+   sqlite3 "$PODIUM_SQLITE_PATH" "create table s69_keep as select frontmatter, signature, skill_raw from manifests where artifact_id='admit';"
+   sqlite3 "$PODIUM_SQLITE_PATH" "update manifests set skill_raw = skill_raw || ' ' where artifact_id='admit';"
    serve
    load_http
    load_mcp "$(mktemp -d "$WORK/cache.XXXXXX")"
    W="$(mktemp -d "$WORK/warm.XXXXXX")"; cp -R "$WORK/cache-warm/." "$W"; load_mcp "$W"
    stop
-   sqlite3 "$PODIUM_SQLITE_PATH" "update manifests set frontmatter = (select frontmatter from s69_keep) where artifact_id='admit';"
+   sqlite3 "$PODIUM_SQLITE_PATH" "update manifests set skill_raw = (select skill_raw from s69_keep) where artifact_id='admit';"
    ```
 
    **Expect.** The `curl` and the empty-cache loads print
@@ -10463,12 +10530,14 @@ after the withdrawal, is the defect this scenario catches.
 
 1. Run the isolation block.
 
-2. Generate the key file, scaffold skill `fresh` at 1.0.0, serve it, capture its `latest` body, and load it once.
+2. Generate the key file, scaffold skill `fresh` at 1.0.0, serve it, capture its `latest` body, and load it once. The scaffold writes `SKILL.md` alone, so the step writes a hand-written `ARTIFACT.md` overlay that carries the version, which `setver` and the step 6 `deprecated: true` insertion edit. The step removes the scaffolded `SKILL.md` `metadata.version` so the two files never disagree.
 
    ```bash
    podium admin signing-key generate --key-file "$PODIUM_SIGN_KEY_PATH" > /dev/null
    KEY="$(awk '/^public:/{print $2}' "$PODIUM_SIGN_KEY_PATH")"
    podium artifact scaffold --type skill --description "Fresh skill" "$WORK/reg/fresh" > /dev/null
+   sed -i.bak '/^metadata:$/d; /^  version: /d' "$WORK/reg/fresh/SKILL.md" && rm "$WORK/reg/fresh/SKILL.md.bak"
+   printf -- '---\ntype: skill\nversion: 1.0.0\n---\n<!-- Skill body lives in SKILL.md. -->\n' > "$WORK/reg/fresh/ARTIFACT.md"
    setver() { sed -i.bak "s/^version: .*/version: $1/" "$WORK/reg/fresh/ARTIFACT.md"; }
    setver 1.0.0
    serve() { podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
@@ -12988,3 +13057,136 @@ loaded frontmatter is the defect this scenario catches.
    ```bash
    kill "$SRV"; wait "$SRV" 2>/dev/null; rm -rf "$WORK"
    ```
+
+---
+
+## S101: An Agent Skills directory with no ARTIFACT.md is a Podium layer
+
+**Goal.** Validate that a directory of plain Agent Skills, with no `ARTIFACT.md`
+anywhere, lints, syncs through filesystem source, serves from a standalone
+registry with a registry-assigned version and the synthesized `ARTIFACT.md`,
+assigns a new version on each content change, rejects a revert to bytes it already stored, materializes
+with no `ARTIFACT.md`, and leaves the source tree unmodified.
+
+**Covers.** §4.2 package discovery, §4.3.4 version precedence and the
+synthesized `ARTIFACT.md`, §4.4 bundled resources, §4.7.6 the reserved version
+form, §6.7 the `none` layout, §7.3.1 registry-assigned versions, and §13.11.3,
+through the compiled binaries.
+
+**Why by hand.** An operator reads the materialized tree, the lock file, and the
+raw `frontmatter` member side by side. A `nested` skill directory beside
+`greet`, a lock version other than `0.0.0-auto.0` for `greet`, a `frontmatter`
+that differs from the synthesized bytes, an `ARTIFACT.md` in the `none` output,
+an `ingest.immutable_violation` after an edit, a revert that is accepted
+instead of rejected, or a modified source tree is the defect this scenario catches.
+
+**Steps.**
+
+1. Run the isolation block. Build a plain skills repository.
+
+   ```bash
+   mkdir -p "$WORK/repo/skills/greet/examples/nested" "$WORK/repo/skills/summarize" "$WORK/repo/.claude/skills/hidden"
+   printf -- '---\nname: greet\ndescription: Greet a user politely\n---\n\nGreet the user by name.\n' > "$WORK/repo/skills/greet/SKILL.md"
+   printf -- '---\nname: nested\ndescription: An example skill kept as a resource\n---\n\nExample.\n' > "$WORK/repo/skills/greet/examples/nested/SKILL.md"
+   printf -- '---\nname: summarize\ndescription: Summarize a document\nmetadata:\n  version: "1.0.0"\n---\n\nProduce a short summary.\n' > "$WORK/repo/skills/summarize/SKILL.md"
+   printf -- '---\nname: hidden\ndescription: A skill under a dot directory\n---\n\nHidden.\n' > "$WORK/repo/.claude/skills/hidden/SKILL.md"
+   printf 'Plain skills repository.\n' > "$WORK/repo/README.md"
+   git -C "$WORK/repo" init -q && git -C "$WORK/repo" add -A && git -C "$WORK/repo" -c user.email=alice@acme.com -c user.name=alice commit -qm init
+   ```
+
+   **Expect.** `git -C "$WORK/repo" log --oneline` prints one commit.
+
+2. Lint the skills directory.
+
+   ```bash
+   podium lint --registry "$WORK/repo/skills"; echo "lint exit=$?"
+   ```
+
+   **Expect.** `lint exit=0`, and the output carries one
+   `lint.skill_version_assigned` warning, for `greet` only.
+
+3. Sync through filesystem source, then inspect the output, the lock, and the
+   source tree.
+
+   ```bash
+   podium sync --registry "$WORK/repo/skills" --target "$WORK/fs" --harness claude-code
+   (cd "$WORK/fs" && find .claude/skills -name SKILL.md | sort)
+   grep -A3 'greet' "$WORK/fs/.podium/sync.lock"
+   git -C "$WORK/repo" status --porcelain
+   ```
+
+   **Expect.** `find` prints `.claude/skills/greet/SKILL.md`,
+   `.claude/skills/greet/examples/nested/SKILL.md`, and
+   `.claude/skills/summarize/SKILL.md`, and no `.claude/skills/nested/`
+   directory exists. The lock records `version: 0.0.0-auto.0` for `greet`.
+   `git status` prints nothing.
+
+4. Serve the skills directory from a standalone registry and read the raw
+   `load_artifact` response for `greet`.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/repo/skills" --bind 127.0.0.1:8206 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8206/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export PODIUM_REGISTRY=http://127.0.0.1:8206
+   show() { curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=greet" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['version']); print(repr(d['frontmatter'])); print(d['manifest_body'])"; }
+   show
+   ```
+
+   **Expect.** The first line is `0.0.0-auto.0`. The second line is
+   `'---\ntype: skill\nversion: 0.0.0-auto.0\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n'`.
+   The body reads `Greet the user by name.`
+
+5. Sync from the server with `claude-code` and with `none`, then compare.
+
+   ```bash
+   podium sync --registry "$PODIUM_REGISTRY" --target "$WORK/srv" --harness claude-code
+   podium sync --registry "$PODIUM_REGISTRY" --target "$WORK/raw" --harness none
+   diff -r "$WORK/fs/.claude" "$WORK/srv/.claude" && echo SAME
+   find "$WORK/raw" -name ARTIFACT.md | wc -l
+   ```
+
+   **Expect.** `diff` prints nothing and the step prints `SAME`. The `find`
+   count is `0`.
+
+6. Edit `greet`, reingest, and show it. Revert the edit, reingest, and show it
+   again. Then declare a version, reingest, show it, and restore the file.
+
+   ```bash
+   printf -- '---\nname: greet\ndescription: Greet a user politely\n---\n\nGreet the user warmly by name.\n' > "$WORK/repo/skills/greet/SKILL.md"
+   podium layer reingest --registry "$PODIUM_REGISTRY" skills
+   show
+   git -C "$WORK/repo" checkout -- skills/greet/SKILL.md
+   podium layer reingest --registry "$PODIUM_REGISTRY" skills; echo "exit=$?"
+   show
+   printf -- '---\nname: greet\ndescription: Greet a user politely\nmetadata:\n  version: "1.0.0"\n---\n\nGreet the user by name.\n' > "$WORK/repo/skills/greet/SKILL.md"
+   podium layer reingest --registry "$PODIUM_REGISTRY" skills
+   show
+   git -C "$WORK/repo" checkout -- skills/greet/SKILL.md
+   ```
+
+   **Expect.** The first reingest reports no `ingest.immutable_violation`, and
+   the first `show` prints `0.0.0-auto.1` and `Greet the user warmly by name.`
+   The second reingest prints `rejected: greet (ingest.invalid_artifact): `
+   followed by a reason that names `metadata.version`, and `exit=1`. The
+   second `show` still prints `0.0.0-auto.1` and `Greet the user warmly by name.`
+   The third `show` prints `1.0.0`, a `frontmatter` of
+   `'---\ntype: skill\nversion: 1.0.0\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n'`,
+   and `Greet the user by name.`
+
+7. Sync the repository root and the dot directory as layers.
+
+   ```bash
+   podium sync --registry "$WORK/repo" --target "$WORK/root" --harness claude-code
+   podium sync --registry "$WORK/repo/.claude" --target "$WORK/dot" --harness claude-code
+   ls "$WORK/root/.claude/skills"; ls "$WORK/dot/.claude/skills"
+   grep -c '^ *- id: skills/hidden$' "$WORK/dot/.podium/sync.lock"
+   ```
+
+   **Expect.** The first listing names `greet` and `summarize` and no `hidden`.
+   The second names `hidden`, and the lock count is `1`. The pattern matches
+   the entry's `id` line only, because the `materialized_path` line
+   `.claude/skills/hidden/SKILL.md` also contains `skills/hidden`.
+
+**Cleanup.** Stop the server and `rm -rf "$WORK"`.
