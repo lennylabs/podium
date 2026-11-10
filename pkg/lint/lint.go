@@ -115,6 +115,8 @@ func AllRulesWithClient(client *http.Client) []Rule {
 		ruleRuleModeCanonical{},
 		ruleTypeProviderValidate{},
 		ruleSkillCompliance{},
+		ruleSkillVersionAssigned{},
+		ruleSkillReservedVersion{},
 		ruleSkillPodiumOnlyFields{},
 		ruleSkillArtifactFields{},
 		ruleSkillRefValidate{},
@@ -244,7 +246,11 @@ func (r ruleRequiredFields) Check(_ context.Context, _ *filesystem.Registry, rec
 			out = append(out, warn(rec.ID, "lint.unknown_type",
 				fmt.Sprintf("type %q is not registered with any TypeProvider; register an extension TypeProvider for it", a.Type)))
 		}
-		if a.Version == "" {
+		// Spec: §4.3.4 — a skill that declares no usable version has its
+		// version assigned, so its absence is a warning from
+		// ruleSkillVersionAssigned. Lint runs before ingest assigns the
+		// version, so the check reads VersionAssigned rather than Version.
+		if a.Version == "" && !rec.VersionAssigned {
 			out = append(out, errMsg(rec.ID, r, "version is required"))
 		}
 	}
@@ -341,6 +347,14 @@ func (r ruleNameSyntax) Check(_ context.Context, _ *filesystem.Registry, records
 	return out
 }
 
+// ruleVersionSemver enforces the §4.7.6 major.minor.patch form on an
+// authored version. A record whose version is assigned is skipped, because
+// under `podium lint` it carries the registry-reserved 0.0.0-auto.<N> form,
+// which no author wrote. An ARTIFACT.md version in the reserved form still
+// fails here, because manifest.ResolveSkillVersion returns the authored
+// ARTIFACT.md value first and leaves VersionAssigned false.
+//
+// Spec: §4.7.6, §4.3.4
 type ruleVersionSemver struct{}
 
 func (ruleVersionSemver) Code() string { return "lint.invalid_version" }
@@ -348,7 +362,7 @@ func (ruleVersionSemver) Code() string { return "lint.invalid_version" }
 func (r ruleVersionSemver) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
 	for _, rec := range records {
-		if rec.Artifact.Version == "" {
+		if rec.VersionAssigned || rec.Artifact.Version == "" {
 			continue
 		}
 		if err := manifest.ValidateVersion(rec.Artifact.Version); err != nil {

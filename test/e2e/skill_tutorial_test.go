@@ -565,7 +565,11 @@ func TestSkillTutorial_MissingType(t *testing.T) {
 	}
 }
 
-// missing version field fails lint. spec: ruleRequiredFields.
+// A skill whose ARTIFACT.md and SKILL.md declare no version lints with
+// exit 0 and one lint.skill_version_assigned warning, because the registry
+// assigns its version. TestFrontmatter_MissingVersion keeps the
+// required-version error for a non-skill type.
+// Spec: §4.3.4
 func TestSkillTutorial_MissingVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -573,11 +577,14 @@ func TestSkillTutorial_MissingVersion(t *testing.T) {
 		"personal/hello/greet/SKILL.md":    greetSkillBody,
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 1 {
-		t.Fatalf("lint exit=%d, want 1\nstdout=%s", res.Exit, res.Stdout)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
 	}
-	if !strings.Contains(res.Stdout, "lint.required_field_missing") || !strings.Contains(res.Stdout, "version is required") {
-		t.Errorf("missing 'version is required' diagnostic:\n%s", res.Stdout)
+	if n := strings.Count(res.Stdout, "lint.skill_version_assigned"); n != 1 {
+		t.Errorf("want exactly one lint.skill_version_assigned warning, got %d:\n%s", n, res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "lint.required_field_missing") {
+		t.Errorf("an assigned version must not draw lint.required_field_missing:\n%s", res.Stdout)
 	}
 }
 
