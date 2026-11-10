@@ -427,8 +427,8 @@ func layerReingest(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	// spec §7.3.1 / §4.7.2: break-glass overrides an active freeze window on
 	// the manual reingest path. It requires a justification and (per the
-	// dual-signoff rule) two distinct approvers, supplied by the repeatable
-	// --approver flag plus the authenticated caller.
+	// dual-signoff rule) two distinct approvers, both supplied by the
+	// repeatable --approver flag.
 	breakGlass := fs.Bool("break-glass", false, "override an active freeze window (requires --justification)")
 	justification := fs.String("justification", "", "reason for the break-glass override")
 	var approvers stringSliceFlag
