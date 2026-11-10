@@ -591,8 +591,9 @@ func TestAdminMigrateToStandard_ClearsTheTargetMarker(t *testing.T) {
 }
 
 // markerRecorder records the order of the target writes pumpStore makes and can
-// fail the marker clear, a tenant record write, or a manifest write, which is
-// what pins the clear-before-copy order and the tenant-major write order.
+// fail the marker clear, a tenant record write, a manifest write, a layer
+// config write, or an admin grant, which is what pins the clear-before-copy
+// order, the tenant-major write order, and the error that stops the pump.
 type markerRecorder struct {
 	store.Store
 	calls      []string
@@ -602,6 +603,8 @@ type markerRecorder struct {
 	putErrOn   int
 	putErr     error
 	putCounter int
+	layerErr   error
+	grantErr   error
 }
 
 func (m *markerRecorder) SetDataMigrationApplied(ctx context.Context, name string, applied bool) error {
@@ -635,6 +638,22 @@ func (m *markerRecorder) PutManifest(ctx context.Context, rec store.ManifestReco
 		return m.putErr
 	}
 	return m.Store.PutManifest(ctx, rec)
+}
+
+func (m *markerRecorder) PutLayerConfig(ctx context.Context, cfg store.LayerConfig) error {
+	m.calls = append(m.calls, "layer:"+cfg.TenantID)
+	if m.layerErr != nil {
+		return m.layerErr
+	}
+	return m.Store.PutLayerConfig(ctx, cfg)
+}
+
+func (m *markerRecorder) GrantAdmin(ctx context.Context, g store.AdminGrant) error {
+	m.calls = append(m.calls, "grant:"+g.OrgID)
+	if m.grantErr != nil {
+		return m.grantErr
+	}
+	return m.Store.GrantAdmin(ctx, g)
 }
 
 // firstCallIndex returns the index of the first recorded call with the prefix,
@@ -880,7 +899,11 @@ func TestPumpStore_WritesTenantsInIDOrderAndResumes(t *testing.T) {
 
 // TestPumpStore_TenantWriteErrorsStopThePump pins that a CreateTenant or
 // UpdateTenant failure stops the pump before any of the tenant's rows are
-// written, where the pump once discarded the CreateTenant error.
+// written, where the pump once discarded the CreateTenant error, and that a
+// PutLayerConfig or GrantAdmin failure stops the pump with an error naming the
+// tenant.
+//
+// Spec: §13.10
 func TestPumpStore_TenantWriteErrorsStopThePump(t *testing.T) {
 	ctx := context.Background()
 	plan := &migrationPlan{
@@ -889,16 +912,23 @@ func TestPumpStore_TenantWriteErrorsStopThePump(t *testing.T) {
 			manifests: []store.ManifestRecord{
 				{TenantID: "a", ArtifactID: "alpha", Version: "1.0.0", ContentHash: "sha256:a", Type: "skill", Layer: "team"},
 			},
+			layerConfigs: []store.LayerConfig{
+				{TenantID: "a", ID: "team", SourceType: "local", LocalPath: "/srv/team", Order: 1},
+			},
+			adminGrants: []store.AdminGrant{{UserID: "alice@acme.com", OrgID: "a"}},
 		}},
 		manifestCount: 1,
 	}
 	cases := []struct {
-		name    string
-		target  *markerRecorder
-		wantErr string
+		name            string
+		target          *markerRecorder
+		wantErr         string
+		beforeManifests bool // the failing write precedes the manifest writes
 	}{
-		{"create", &markerRecorder{Store: store.NewMemory(), createErr: errors.New("schema denied")}, "create tenant a:"},
-		{"update", &markerRecorder{Store: store.NewMemory(), updateErr: errors.New("connection reset")}, "update tenant a:"},
+		{"create", &markerRecorder{Store: store.NewMemory(), createErr: errors.New("schema denied")}, "create tenant a:", true},
+		{"update", &markerRecorder{Store: store.NewMemory(), updateErr: errors.New("connection reset")}, "update tenant a:", true},
+		{"layer config", &markerRecorder{Store: store.NewMemory(), layerErr: errors.New("disk full")}, "put layer config a/team:", false},
+		{"admin grant", &markerRecorder{Store: store.NewMemory(), grantErr: errors.New("disk full")}, "grant admin a/alice@acme.com:", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -906,7 +936,7 @@ func TestPumpStore_TenantWriteErrorsStopThePump(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("pumpStore = %v, want an error containing %q", err, tc.wantErr)
 			}
-			if i := tc.target.firstCallIndex("put:"); i >= 0 {
+			if i := tc.target.firstCallIndex("put:"); tc.beforeManifests && i >= 0 {
 				t.Errorf("a manifest was written after the tenant write failed; calls = %v", tc.target.calls)
 			}
 		})
