@@ -165,7 +165,7 @@ type Result struct {
 	// rather than silently omitting it.
 	Skipped []string
 	// Dropped lists the artifacts a filesystem-source composition dropped
-	// under the §4.6 collision rule or the §4.6 executable-field rule
+	// under the §4.6 collision, sandbox-profile, or executable-field rule
 	// (§13.11.3). Callers render each entry with its Code and Reason; a
 	// server source never reports one.
 	Dropped []layer.Drop
@@ -482,8 +482,8 @@ func offlineFirstNoop(opts Options, adapterID string) *Result {
 // source-neutral records to materialize. A server URL reads the effective
 // view over HTTP; any other value reads the local filesystem registry. The
 // second return lists the artifacts a filesystem-source composition dropped
-// under the §4.6 collision rule or the §4.6 executable-field rule. A server
-// source contributes none, because ingest already rejected the artifact
+// under the §4.6 collision, sandbox-profile, or executable-field rule. A
+// server source contributes none, because ingest already rejected the artifact
 // (§7.3.1).
 func resolveRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
 	var records []materialRecord
@@ -561,8 +561,8 @@ func applyOverlay(base []materialRecord, overlayPath string) ([]materialRecord, 
 // filesystemRecords reads the filesystem registry and converts the result to
 // source-neutral records. The §6.4 workspace overlay is merged by the caller
 // (resolveRecords) so both registry sources honor it identically. The
-// second return lists the artifacts dropped under the §4.6 collision rule or
-// the §4.6 executable-field rule.
+// second return lists the artifacts dropped under the §4.6 collision,
+// sandbox-profile, or executable-field rule.
 func filesystemRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
 	reg, err := filesystem.Open(opts.RegistryPath)
 	if err != nil {
@@ -573,8 +573,9 @@ func filesystemRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
 	// the same artifact directory (the §13.11.6 migration equivalence). Per
 	// §4.6, an unsanctioned cross-layer collision drops the higher-precedence
 	// artifact, which a server would have rejected at ingest, and the walk
-	// continues with the rest. A child the §4.6 executable-field rule refuses
-	// is dropped the same way, and the layers are composed again without it.
+	// continues with the rest. A child the §4.6 sandbox-profile rule or the
+	// §4.6 executable-field rule refuses is dropped the same way, and the
+	// layers are composed again without it.
 	var dropped []layer.Drop
 	records, err := reg.Walk(filesystem.WalkOptions{
 		CollisionPolicy: filesystem.CollisionPolicyDrop,

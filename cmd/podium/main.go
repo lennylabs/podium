@@ -572,7 +572,7 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watc
 }
 
 // errDropped marks a --config target whose composition dropped at least one
-// artifact under the §4.6 collision rule or the §4.6 executable-field rule.
+// artifact under the §4.6 collision, sandbox-profile, or executable-field rule.
 // runMultiTargetSync prints it as the target's failure and counts the target
 // as failed (§13.11.3). It names no code, because the per-artifact rejected
 // line on standard error already carries each drop's code.
