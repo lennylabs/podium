@@ -8,8 +8,8 @@ description: "Every field in Podium artifact frontmatter (ARTIFACT.md and, for s
 
 Podium artifact frontmatter is YAML between two `---` lines at the top of a manifest file. Manifest files:
 
-- **`ARTIFACT.md`** — present in every artifact directory. Carries Podium's canonical schema (universal, caller-interpreted, and type-specific fields). For non-skill types, the prose body below the frontmatter is what the agent reads at load time.
-- **`SKILL.md`** — present additionally in skill directories (`type: skill`). Carries the [agentskills.io](https://agentskills.io/specification) standard's frontmatter (`name`, `description`, plus optional `license`, `compatibility`, `metadata`, `allowed-tools`). Its prose body is what the agent reads at load time. For skills, `ARTIFACT.md`'s body is empty.
+- **`ARTIFACT.md`** (every non-skill type; optional overlay for skills). Carries Podium's canonical schema (universal, caller-interpreted, and type-specific fields). For non-skill types, the prose body below the frontmatter is what the agent reads at load time.
+- **`SKILL.md`** (skill directories, `type: skill`). Carries the [agentskills.io](https://agentskills.io/specification) standard's frontmatter (`name` and `description`, plus the optional `license`, `compatibility`, `metadata`, and `allowed-tools`). Its prose body is what the agent reads at load time. A directory that holds a `SKILL.md` and no `ARTIFACT.md` is a complete skill. When a skill has an `ARTIFACT.md`, that file's body is empty.
 
 Field groups:
 
@@ -21,9 +21,9 @@ Field groups:
 
 ## File allocation for skills
 
-Skills split their frontmatter between `SKILL.md` and `ARTIFACT.md` so that `SKILL.md` stays strictly within the agentskills.io specification. The split is mechanical:
+A skill's `SKILL.md` carries the agentskills.io fields, and an optional `ARTIFACT.md` that the author writes by hand carries the Podium-only fields, so that `SKILL.md` stays strictly within the agentskills.io specification. The allocation is mechanical:
 
-| Field | SKILL.md | ARTIFACT.md (skill) | ARTIFACT.md (non-skill) |
+| Field | SKILL.md | ARTIFACT.md (skill, optional overlay) | ARTIFACT.md (non-skill) |
 |:--|:--|:--|:--|
 | `name` | Yes (matches parent directory) | — | Yes |
 | `description` | Yes (≤ 1024 chars) | — | Yes |
@@ -31,8 +31,9 @@ Skills split their frontmatter between `SKILL.md` and `ARTIFACT.md` so that `SKI
 | `compatibility` | Optional (≤ 500 chars; human-readable) | — | — (every adapter that writes a skill's `SKILL.md`, except `none`, derives it from `runtime_requirements` and `sandbox_profile`) |
 | `metadata` | Optional (string-to-string map) | — | — |
 | `allowed-tools` | Optional (experimental) | — | — |
-| `type` | — | Yes (`type: skill`) | Yes |
-| `version`, `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, `audit_redact`, `lint_suppress` | — | Yes | Yes |
+| `type` | — | Yes (`type: skill`); implied when `ARTIFACT.md` is absent | Yes |
+| `version` | As `metadata.version` (string) | Optional; equal to `metadata.version` when that is a `major.minor.patch` value | Yes |
+| `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, `audit_redact`, `lint_suppress` | — | Yes | Yes |
 | `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `external_resources`, `extends`, `target_harnesses` | — | Yes | Yes |
 | Type-specific fields (`input`, `output`, `delegates_to`, `rule_*`, `hook_*`, `server_identifier`) | — | Yes (when applicable) | Yes (when applicable) |
 
@@ -61,7 +62,7 @@ license: MIT                       # SPDX identifier
 ```
 
 ```yaml
-# In ARTIFACT.md (every type):
+# In ARTIFACT.md (every non-skill type; optional overlay for skills):
 type: skill | agent | context | command | rule | hook | mcp-server | <extension type>
 version: 1.0.0                     # semver, author-chosen
 when_to_use:
@@ -78,9 +79,9 @@ lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence
 
 | Field | Required | Description |
 |:--|:--|:--|
-| `type` | Yes | Artifact type. See [Artifact types](artifact-types). |
+| `type` | Yes (implied for a skill with no `ARTIFACT.md`) | Artifact type. See [Artifact types](artifact-types). |
 | `name` | Yes | Short identifier. For skills, must match the parent directory name (per agentskills.io). The canonical artifact ID is the directory path under the registry root, separate from this field. |
-| `version` | Yes | Semver. Once `(artifact_id, version)` is ingested, it's bit-for-bit immutable. |
+| `version` | Yes, except for a skill | Semver. Once `(artifact_id, version)` is ingested, it's bit-for-bit immutable. A skill's version is its `ARTIFACT.md` `version` or its `SKILL.md` `metadata.version`, and the registry assigns one when neither declares a usable value. See [Skill versions](#skill-versions). |
 | `description` | Yes | "When should I use this?" The harness uses this to decide whether the artifact matches a prompt. Vague descriptions get ignored. ≤ 1024 chars for skills (per agentskills.io). |
 | `when_to_use` | Optional | List of explicit situations. Additional retrieval signal. |
 | `tags` | Optional | List of strings. Used for filtering in `search_artifacts`. |
@@ -92,6 +93,26 @@ lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence
 | `release_notes` | Optional | Free text. |
 | `audit_redact` | Optional | List of frontmatter field names whose values the registry replaces with `[redacted]` in audit log entries that reference this artifact. |
 | `lint_suppress` | Optional | List of lint rule codes to silence for this artifact. Only advisory (non-error) rules honor the list; hard-error rules still fire. |
+
+### Skill versions
+
+A skill's version is the `version` field of its `ARTIFACT.md` when that file declares one, and otherwise the `SKILL.md` `metadata.version` when that value is in `major.minor.patch` form. The Agent Skills standard leaves `metadata` free-form, so a `metadata.version` in any other form, such as `1.0`, is ignored. When both are set and `metadata.version` is a `major.minor.patch` value, the two must be equal (`lint.skill_artifact_field_mismatch`).
+
+A skill that declares no usable version carries a registry-assigned version `0.0.0-auto.<N>`, a semver prerelease of `0.0.0`, and lint reports the `lint.skill_version_assigned` warning for it. The form is reserved to the registry, so an authored version in that form fails lint with `lint.invalid_version`. The registry derives `<N>` at ingest from the rows it stores for the artifact:
+
+- Bytes that the layer's most recently ingested non-deleted row of the artifact holds reuse that row's version, and the ingest is a no-op.
+- Bytes that no stored or soft-deleted row of the artifact holds receive one more than the highest `<N>` any such row carries, or `0` when none carries one.
+- Bytes that another stored or soft-deleted row of the artifact holds under a different version are rejected with `ingest.invalid_artifact` and `details.constraint: "auto_version_duplicate_content"`. A revert to earlier bytes is rejected this way, including a revert across an interval in which the skill declared a version, and so is a second layer's byte-identical version-less package. `latest` keeps serving the newer row. To publish such a skill, set `metadata.version` in `SKILL.md` or change the content.
+
+`<id>@0.0.0-auto.<N>` pins an assigned version exactly, a range pin such as `<id>@1.x` never selects one, and assigned versions are candidates for `latest`.
+
+A soft-deleted row counts, because `podium layer restore` serves it again. A layer unregistered and registered again under its ID therefore rejects its unchanged version-less skills until the retention purge removes the earlier rows or the author sets `metadata.version`, and `podium layer restore` within the recovery window serves the earlier rows instead. A purge that removes the row holding the highest `<N>` lets a later ingest assign that `<N>` again, and a purge of every row carrying rejected bytes lets a later ingest accept them. An MCP server whose content cache held the purged row for those bytes keeps reporting the purged version for them until the cache drops the record.
+
+A filesystem source keeps no ingest history and reports `0.0.0-auto.0` for every skill whose version is assigned.
+
+Removing `ARTIFACT.md` from an ingested skill changes its content hash, so a reingest at an unchanged `metadata.version` is rejected with `ingest.immutable_violation`. Bump `metadata.version`, or remove it to let the registry assign a version.
+
+For a skill with no `ARTIFACT.md`, the registry serves a synthesized `ARTIFACT.md` carrying `type: skill` and the resolved version, which the [HTTP API](../reference/http-api) reference states byte for byte.
 
 ---
 
@@ -107,6 +128,7 @@ license: MIT
 compatibility: Requires Python 3.10+ and pandas. Designed for Claude Code or similar.
 metadata:
   author: example-org
+  version: "1.2.0"
 allowed-tools:
   - Bash(python:*)
   - Read
@@ -116,7 +138,7 @@ allowed-tools:
 | Field | Description |
 |:--|:--|
 | `compatibility` | Free-form environment notes (≤ 500 chars). Read by SKILL.md-aware tools to surface preconditions to a reader. When it is omitted, every harness adapter that writes a skill's `SKILL.md` derives a compatibility string from `runtime_requirements` and `sandbox_profile` and adds it to the materialized `SKILL.md`. The `none` adapter copies `SKILL.md` unchanged. Published marketplace output carries the same line. |
-| `metadata` | Open-ended string-to-string map. Use for client-specific properties not defined by the agentskills.io spec. |
+| `metadata` | Open-ended string-to-string map. Use for client-specific properties not defined by the agentskills.io spec. A `version` key in `major.minor.patch` form sets the skill's version when `ARTIFACT.md` declares none (see [Skill versions](#skill-versions)). |
 | `allowed-tools` | Experimental. YAML list of tools the skill is pre-approved to call. Podium's parser rejects a bare string here, so write one list entry per tool. Adapter support varies by harness. |
 
 ---
@@ -291,7 +313,7 @@ When two layers contribute artifacts with the same canonical ID, the higher-prec
 
 If a child omits a field of its `ARTIFACT.md` frontmatter, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above, except that a child whose parent comes from another layer restates the [executable fields](extends#executable-fields-across-layers) that parent sets. When both the parent and the child declare a value, a field in the table merges per its row, and every field outside the table takes the child's value. The child's `type:` must match the parent's, and the child's `version:` is independent of the parent's.
 
-For skills, the merge applies to the `ARTIFACT.md` frontmatter alone. The registry serves the child's `SKILL.md` verbatim, so `name`, `description`, `license`, and the other agentskills.io fields come from the child's `SKILL.md` and are not inherited from the parent's, whether or not the child's `SKILL.md` declares them.
+For skills, the merge applies to the `ARTIFACT.md` frontmatter alone. A skill that declares `extends:` therefore carries an `ARTIFACT.md`, and the parent it names may be a skill without one. The registry serves the child's `SKILL.md` verbatim, so `name`, `description`, `license`, and the other agentskills.io fields come from the child's `SKILL.md` and are not inherited from the parent's, whether or not the child's `SKILL.md` declares them.
 
 See [Extends](extends) for examples and gotchas.
 

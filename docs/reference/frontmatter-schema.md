@@ -12,7 +12,7 @@ This page is a concise reference. For prose-style explanations of when to use ea
 
 ## Manifest files
 
-Every artifact directory contains an `ARTIFACT.md`. Skill artifacts (`type: skill`) additionally contain a `SKILL.md` to comply with the [agentskills.io](https://agentskills.io/specification) standard. Field allocation across the two files for skills is summarized in the [SKILL.md](#skillmd-for-type-skill) section below; `ARTIFACT.md` for non-skills carries every field listed below.
+A non-skill artifact directory contains an `ARTIFACT.md`, which carries every field listed below. A skill artifact (`type: skill`) directory contains a `SKILL.md` that complies with the [agentskills.io](https://agentskills.io/specification) standard, and it may contain an `ARTIFACT.md` overlay that the author writes by hand for the Podium-only fields. A directory that holds a `SKILL.md` and no `ARTIFACT.md` is a complete skill. Field allocation across the two files for skills is summarized in the [SKILL.md](#skillmd-for-type-skill) section below.
 
 ## ARTIFACT.md
 
@@ -20,9 +20,9 @@ Every artifact directory contains an `ARTIFACT.md`. Skill artifacts (`type: skil
 
 | Field | Type | Required | Description | For skills |
 |:--|:--|:--|:--|:--|
-| `type` | enum | yes | `skill`, `agent`, `context`, `command`, `rule`, `hook`, `mcp-server`, or extension type. | In `ARTIFACT.md` |
+| `type` | enum | yes (implied for a skill with no `ARTIFACT.md`) | `skill`, `agent`, `context`, `command`, `rule`, `hook`, `mcp-server`, or extension type. | In `ARTIFACT.md` when present; implied otherwise |
 | `name` | string | yes | Short identifier. For skills, must match the parent directory name (per agentskills.io). | In `SKILL.md` |
-| `version` | semver | yes | Author-chosen semver. Once `(artifact_id, version)` is ingested, it's bit-for-bit immutable. | In `ARTIFACT.md` |
+| `version` | semver | yes, except for a skill | Semver. An authored version is `major.minor.patch` and author-chosen; a skill that declares no usable version carries a registry-assigned `0.0.0-auto.<N>`. Once `(artifact_id, version)` is ingested, it's bit-for-bit immutable. | `metadata.version` in `SKILL.md`, or `version` in `ARTIFACT.md`; assigned when neither declares a usable one |
 | `description` | string | yes | "When should I use this?" ≤ 1024 chars for skills. | In `SKILL.md` |
 | `when_to_use` | list of strings | no | Explicit situations the artifact applies to. | In `ARTIFACT.md` |
 | `tags` | list of strings | no | Filter target for `search_artifacts`. | In `ARTIFACT.md` |
@@ -66,7 +66,7 @@ Every artifact directory contains an `ARTIFACT.md`. Skill artifacts (`type: skil
 
 | Field | Type | Description |
 |:--|:--|:--|
-| `extends` | string | Inherit and refine another artifact's manifest. Single scalar (no multiple inheritance). Pin syntax: `<id>`, `<id>@<semver>`, `<id>@<semver>.x`, `<id>@sha256:<hash>`. |
+| `extends` | string | Inherit and refine another artifact's manifest. Single scalar (no multiple inheritance). Pin syntax: `<id>`, `<id>@<semver>`, `<id>@0.0.0-auto.<N>`, `<id>@<semver>.x`, or `<id>@sha256:<hash>`. A range never selects a registry-assigned version. |
 | `target_harnesses` | list of strings | Opt out of cross-harness materialization. Set to a list of harness names; the artifact only materializes for harnesses on the list. |
 | `external_resources` | list of objects | External resources (URL + sha256 + size + signature) too large to bundle. |
 
@@ -97,7 +97,7 @@ For skills, the prose body lives in `SKILL.md`; for non-skills, it lives in `ART
 
 ## SKILL.md (for type: skill)
 
-A `SKILL.md` carries the [agentskills.io](https://agentskills.io/specification) standard's frontmatter and the agent-facing prose body. For skills, the `ARTIFACT.md` body is empty (a one-line HTML comment pointer is allowed).
+A `SKILL.md` carries the [agentskills.io](https://agentskills.io/specification) standard's frontmatter and the agent-facing prose body. When a skill has an `ARTIFACT.md`, its body is empty (a one-line HTML comment pointer is allowed).
 
 ### Top-level fields (per agentskills.io)
 
@@ -110,6 +110,8 @@ A `SKILL.md` carries the [agentskills.io](https://agentskills.io/specification) 
 | `metadata` | map (string → string) | no | Open-ended map for client-specific extension. |
 | `allowed-tools` | list of strings | no | Experimental. Pre-approved tools, one per entry. A scalar fails to parse. |
 
+A skill's version is the `ARTIFACT.md` `version` when that file declares one, and otherwise a `SKILL.md` `metadata.version` in `major.minor.patch` form. A `metadata.version` in any other form, such as `1.0`, is ignored, and with no `ARTIFACT.md` `version` the registry assigns the version. When both are set and `metadata.version` is a `major.minor.patch` value, the two are equal (`lint.skill_artifact_field_mismatch` otherwise). [Skill versions](../authoring/frontmatter-reference#skill-versions) describes how the registry assigns `0.0.0-auto.<N>`.
+
 ### Body
 
 Markdown after the frontmatter. The agentskills.io spec recommends ≤ 5K tokens and ≤ 500 lines, with longer reference content factored into `references/`.
@@ -118,13 +120,15 @@ Markdown after the frontmatter. The agentskills.io spec recommends ≤ 5K tokens
 
 Lint enforces (errors unless noted):
 
-- Both `SKILL.md` and `ARTIFACT.md` exist for `type: skill`.
+- `SKILL.md` exists for `type: skill`. `ARTIFACT.md` is optional, and the `ARTIFACT.md` rules below apply only when it exists.
 - `SKILL.md` `name` matches the parent directory.
 - `SKILL.md` `name` syntax follows the agentskills.io constraints.
 - `SKILL.md` `description` is non-empty. The ≤ 1024-char cap is checked by the `skills-ref validate` rule below and reported as a warning.
-- `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, etc.).
-- `ARTIFACT.md` does not contain `name`, `description`, or `license` (warning); when present, values must match `SKILL.md` exactly (error on mismatch).
+- `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, etc.). The diagnostic recommends `metadata.version` for a version and the `ARTIFACT.md` overlay for every other field.
+- `ARTIFACT.md` does not contain `name`, `description`, or `license` (warning); when present, values must match `SKILL.md` exactly (error on mismatch). A `version` in `ARTIFACT.md` equals `SKILL.md` `metadata.version` when both are set and `metadata.version` is a `major.minor.patch` value (`lint.skill_artifact_field_mismatch` on mismatch).
 - `ARTIFACT.md` body is empty or a single HTML comment (warning).
+- A skill that declares no usable version has its version assigned (`lint.skill_version_assigned` warning, which names any ignored `metadata.version` value and the fix).
+- An authored version in the reserved `0.0.0-auto.<N>` form, in either file, is an error (`lint.invalid_version`).
 - `skills-ref validate` passes against `SKILL.md` (warning; suppression flag available).
 
 ---

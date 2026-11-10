@@ -14,12 +14,12 @@ Reference for writing artifacts. Each page below covers one topic.
 | [Your first command](your-first-command) | A parameterized slash command the user invokes by name. Argument substitution and how the command lands in the harness's slash menu. |
 | [Your first agent](your-first-agent) | A complete agent definition: minimal end-to-end version first, then runtime requirements, a bundled script, and a delegated artifact. |
 | [Artifact types](artifact-types) | Built-in types: `skill`, `agent`, `context`, `command`, `rule`, `hook`, `mcp-server`. |
-| [Frontmatter reference](frontmatter-reference) | Field-by-field reference for the YAML frontmatter in `ARTIFACT.md` (and, for skills, `SKILL.md`). |
+| [Frontmatter reference](frontmatter-reference) | Field-by-field reference for the YAML frontmatter in `SKILL.md` for skills, with an optional `ARTIFACT.md`, and `ARTIFACT.md` for other types. |
 | [Domains](domains) | How folders and subfolders structure the catalog, and how `DOMAIN.md` adds descriptions, keywords, featured artifacts, the prose body, and discovery rendering knobs. |
 | [Rule modes](rule-modes) | The `rule_mode` values (`always`, `glob`, `auto`, `explicit`) and how each harness honors them. |
 | [Hooks](hooks) | Lifecycle observers with `hook_event` and `hook_action`. |
 | [Extends](extends) | Cross-layer inheritance with `extends:`. |
-| [Bundled resources](bundled-resources) | Scripts, references, assets, and other files that ship alongside `ARTIFACT.md` (and `SKILL.md` for skills). |
+| [Bundled resources](bundled-resources) | Scripts, references, assets, and other files that ship alongside the manifest files: `SKILL.md` for skills, with an optional `ARTIFACT.md`, and `ARTIFACT.md` for other types. |
 | [Hints](hints) | Advisory metadata: `effort_hint` and `model_class_hint`. |
 
 The three "Your first ..." walkthroughs are the foundation. The pages that follow are topic-specific reference.

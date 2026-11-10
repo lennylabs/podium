@@ -175,6 +175,8 @@ Hybrid retrieval over artifact frontmatter. Every argument is optional. When `qu
 
 Each result's `frontmatter` is the artifact's stored YAML frontmatter as a string. For an artifact that declares `extends:`, the `extends` key is removed before the block is returned, so the result does not surface the parent. That block is re-encoded from the remaining keys, which normalizes comments, quoting, and indentation, and the result carries no `frontmatter` key in any of these cases: the child's stored frontmatter cannot be read, rewritten, or re-encoded; the rewritten block still resolves a parent, which is the case for a child that supplies `extends:` through a YAML merge key or anchors its value; the rewritten block still names an ancestor in the chain the child pinned at ingest, other than an ancestor that shares the child's canonical ID (the same-ID overlay), which is exempt from this test; or that chain cannot be resolved. The result itself is still returned in each case.
 
+For a skill with no `ARTIFACT.md`, a result's `frontmatter` is the frontmatter block of the synthesized document that `load_artifact` serves for it, `---\ntype: skill\nversion: <version>\n---\n`, where `<version>` is the result's `version`.
+
 Response:
 
 ```json
@@ -215,6 +217,7 @@ Response:
   "type": "skill",
   "version": "1.2.0",
   "content_hash": "sha256:...",
+  "frontmatter": "---\ntype: skill\nversion: 1.2.0\n---\n<!-- Skill body lives in SKILL.md. -->\n",
   "manifest_body": "...",
   "resources": {
     "scripts/variance.py": "...inline bytes..."
@@ -231,6 +234,17 @@ Response:
 
 The response carries these integrity and reference fields:
 
+- `frontmatter` is the served `ARTIFACT.md` document. For a skill with no `ARTIFACT.md`, it is a document the registry synthesizes with exactly these bytes, where `<version>` is the response's `version` and each line ends with a single line feed:
+
+  ```
+  ---
+  type: skill
+  version: <version>
+  ---
+  <!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->
+  ```
+
+  The registry does not store this document, and `delivery_hash` covers it while `content_hash` does not. A batch entry carries the same bytes. Read the version from the `version` member, because an authored `ARTIFACT.md` overlay may omit `version`.
 - `content_hash` names the stored artifact. It is the resolution-cache key, the `sync.lock` value, and the target of an `@sha256:` pin. For an artifact that declares `extends:`, it covers the child's pre-merge package, so the merged bytes the response serves do not reproduce it.
 - `delivery_hash` is a SHA-256 digest over the record this response delivers: the identity, version, type, content hash, sensitivity, ingest time, served `ARTIFACT.md` document, manifest body, `SKILL.md`, and each bundled resource's path and content hash. It is present on every response, for every artifact, whether or not the artifact declares `extends:`. The record is framed under the tag `podium/delivery-record/2`, so every verifying consumer and the registry must run matching releases, or every load fails with `materialize.content_hash_mismatch`.
 - `delivery_signature` is the registry's signature over `delivery_hash`, minted per response with the registry-managed key. It is absent when the registry runs without a signing key. It is a registry-managed envelope whatever key model signed the artifact at ingest, so a consumer verifies it with the registry-managed verifier under its verification key set.

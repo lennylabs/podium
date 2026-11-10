@@ -492,7 +492,7 @@ Hermes natively reads project-level `.cursor/rules/*.mdc`, root `AGENTS.md`, and
 
 ## Generic / `none`
 
-For runtimes without a dedicated adapter, or when canonical raw output is needed, set `PODIUM_HARNESS=none`. The MCP server and `podium sync` write the canonical layout as-is, with no harness-specific translation and no field renaming. Consumers such as runtimes, eval harnesses, and custom tooling read `ARTIFACT.md` (and `SKILL.md` for skills) plus bundled resources directly.
+For runtimes without a dedicated adapter, or when canonical raw output is needed, set `PODIUM_HARNESS=none`. The MCP server and `podium sync` write the canonical layout as-is, with no harness-specific translation and no field renaming. Consumers such as runtimes, eval harnesses, and custom tooling read `ARTIFACT.md` (and `SKILL.md` for skills) plus bundled resources directly. The `none` layout omits `ARTIFACT.md` when the served document is the synthesized document the registry serves for a skill with no `ARTIFACT.md`, which covers such a skill and an authored `ARTIFACT.md` byte-identical to that document, and it writes `ARTIFACT.md` otherwise. A skill with no `ARTIFACT.md` therefore lands as a plain Agent Skills directory.
 
 ```json
 {

@@ -93,7 +93,7 @@ print(artifact.manifest_body)
 artifact.materialize(to="./artifacts/")
 ```
 
-`materialize()` writes the canonical layout under `<to>/<id>/`: `ARTIFACT.md` for every type, `SKILL.md` for a skill, and each bundled resource at its package-relative path. The SDK is an independent HTTP client that does not embed the harness adapters, so `materialize()` writes only the canonical layout, the output of the `none` adapter, and its `harness` argument accepts only `none`. Any other value raises an argument error (`ValueError` in Python, `Error` in TypeScript) before a file is written. Run `podium sync --harness <name>`, or load through the MCP server, when the consumer needs harness-native files.
+`materialize()` writes the canonical layout under `<to>/<id>/`: `SKILL.md` for a skill, `ARTIFACT.md`, and each bundled resource at its package-relative path. It omits `ARTIFACT.md` when the served document is the synthesized document the registry serves for a skill with no `ARTIFACT.md` (see [Skill versions](../authoring/frontmatter-reference#skill-versions)), which covers such a skill and an authored `ARTIFACT.md` byte-identical to that document, and it writes `ARTIFACT.md` otherwise. A skill with no `ARTIFACT.md` therefore materializes as a plain Agent Skills directory. The SDK is an independent HTTP client that does not embed the harness adapters, so `materialize()` writes only the canonical layout, the output of the `none` adapter, and its `harness` argument accepts only `none`. Any other value raises an argument error (`ValueError` in Python, `Error` in TypeScript) before a file is written. Run `podium sync --harness <name>`, or load through the MCP server, when the consumer needs harness-native files.
 
 The SDK separates loading from writing. The MCP server writes every resource to disk during `load_artifact`; the SDK holds the result in memory and writes only when `materialize()` is called. `load_artifact` returns the manifest body and the bundled resources small enough to travel inline; a resource above the 256 KB inline cutoff arrives as a presigned reference, unless the registry holds it inline on the manifest record, as it does for every resource of an artifact ingested while no object store was configured, in which case it arrives inline at any size. `materialize(to=...)` writes the canonical layout under `<to>/<id>/` and fetches each referenced resource. A manifest above the cutoff is fetched during `load_artifact`, so `artifact.manifest_body` is populated whatever the manifest's size. [Inline content and materialized files](handling-artifact-responses#inline-content-and-materialized-files) covers the model both consumer paths share.
 
@@ -238,7 +238,8 @@ manifest = artifact.frontmatter
 body = artifact.manifest_body
 
 # Write the canonical layout when the runtime wants files on disk:
-# ARTIFACT.md (and SKILL.md for skills) plus bundled resources.
+# SKILL.md for skills, ARTIFACT.md unless the registry synthesized it,
+# and bundled resources.
 artifact.materialize(to="./artifacts/", harness="none")
 ```
 
