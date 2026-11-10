@@ -4,9 +4,9 @@
 
 An artifact is a directory with one or two manifest files at its root.
 
-**Every artifact has an `ARTIFACT.md`.** It is a markdown file with YAML frontmatter that carries Podium's canonical schema (universal fields, caller-interpreted fields, and type-specific fields). The frontmatter is what the registry indexes. For non-skill types, the prose body is what the host reads when the artifact is loaded.
+**Every non-skill artifact has an `ARTIFACT.md`.** It is a markdown file with YAML frontmatter that carries Podium's canonical schema (universal fields, caller-interpreted fields, and type-specific fields). The frontmatter is what the registry indexes. For non-skill types, the prose body is what the host reads when the artifact is loaded.
 
-**Skill artifacts (`type: skill`) additionally have a `SKILL.md`** alongside `ARTIFACT.md` to comply with the [Agent Skills specification](https://agentskills.io/specification). `SKILL.md` carries the standard's required frontmatter (`name`, `description`) and any of the standard's optional fields (`license`, `compatibility`, `metadata`, `allowed-tools`); its prose body holds the agent-facing skill instructions. `ARTIFACT.md` carries Podium's structured frontmatter and omits the prose body for skills (a one-line pointer comment is allowed). Field allocation across the two files and the lint rules that govern them are described in §4.3.4.
+**Skill artifacts (`type: skill`) have a `SKILL.md`** that complies with the [Agent Skills specification](https://agentskills.io/specification). `SKILL.md` carries the standard's required frontmatter (`name`, `description`) and any of the standard's optional fields (`license`, `compatibility`, `metadata`, `allowed-tools`); its prose body holds the agent-facing skill instructions. A package (§4.2) whose root holds a `SKILL.md` and no `ARTIFACT.md` is a skill artifact, and the registry indexes its `SKILL.md` frontmatter. An optional `ARTIFACT.md` beside `SKILL.md` carries Podium-only structured frontmatter and omits the prose body (a one-line pointer comment is allowed). Field allocation, version precedence, and lint are in §4.3.4.
 
 **Bundled resources alongside the manifest are arbitrary files.** Python scripts, shell scripts, templates, JSON / YAML schemas, evaluation datasets, model weights, binary blobs, or anything else the host needs at runtime. The registry treats these as opaque versioned blobs.
 
@@ -42,14 +42,14 @@ The type determines indexing, loading semantics, governance requirements, and se
 
 **Package layout example (skill).** A skill that ships with a Python script and a Jinja template, following the agentskills.io directory conventions (`scripts/`, `references/`, `assets/`):
 
-![Artifact package layout: a single directory containing ARTIFACT.md (required) and optionally SKILL.md, scripts/, references/, assets/, or other files.](../docs/assets/diagrams/artifact-package.svg)
+![Artifact package layout for a skill: a single directory containing SKILL.md (required for a skill), an optional ARTIFACT.md, and optional scripts/, references/, assets/, or other files. An artifact of any other type carries ARTIFACT.md and no SKILL.md.](../docs/assets/diagrams/artifact-package.svg)
 
 <!--
 ASCII fallback for the diagram above (artifact package layout):
 
   finance/close-reporting/run-variance-analysis/
-    ARTIFACT.md            [REQUIRED] manifest frontmatter + prose
-    SKILL.md               [REQUIRED FOR SKILLS] agentskills.io body
+    ARTIFACT.md            [OPTIONAL] Podium-only frontmatter
+    SKILL.md               [REQUIRED] agentskills.io body
     scripts/               [OPTIONAL] code resources
       variance.py
       helpers.py
