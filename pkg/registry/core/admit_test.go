@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
@@ -647,9 +648,9 @@ var admDispositions = map[string]string{
 	"ManifestRecord.DeletedAt":        "selection",
 	"ManifestRecord.DeprecatedAt":     "selection",
 	"ManifestRecord.Name":             "search-only",
-	"ManifestRecord.Description":      "search-only",
+	"ManifestRecord.Description":      "search-only; derived for a plain-skill row",
 	"ManifestRecord.WhenToUse":        "search-only",
-	"ManifestRecord.Tags":             "search-only",
+	"ManifestRecord.Tags":             "search-only; derived for a plain-skill row",
 	"ManifestRecord.SearchVisibility": "search-only",
 	"ResourceRef.ContentType":         "served as stored",
 }
@@ -733,6 +734,20 @@ func TestLoadArtifact_RevalidatedReadEventRedactsKeys(t *testing.T) {
 			t.Errorf("revalidation result carries content or no validator: %+v", res)
 		}
 		assertRedactsVersion(t, f)
+	})
+
+	t.Run("plain-skill row records no stored column", func(t *testing.T) {
+		t.Parallel()
+		f := newAdmFixture(t)
+		f.put(t, admTamperedPlainSkill(t, "ops/plain", admPlainSkillMD))
+		if _, err := f.registry(nil).LoadArtifact(context.Background(), layer.Identity{IsPublic: true}, "ops/plain",
+			core.LoadArtifactOptions{Version: "1.0.0", Revalidate: revalidateAll}); err != nil {
+			t.Fatalf("LoadArtifact: %v", err)
+		}
+		ev := f.events.ofType("artifact.loaded")
+		if len(ev) != 1 || len(ev[0].RedactKeys) != 0 {
+			t.Errorf("read event = %+v, want no audit_redact keys, as a full load records", ev)
+		}
 	})
 
 	t.Run("unresolvable chain names only the requested ID", func(t *testing.T) {
@@ -831,5 +846,119 @@ func TestAdmit_SentinelsCarryTheirCodes(t *testing.T) {
 		if sentinel.Error() != code {
 			t.Errorf("sentinel %q, want %q", sentinel.Error(), code)
 		}
+	}
+}
+
+// admPlainSkillMD is the SKILL.md of a plain skill: a package with no
+// ARTIFACT.md, stored with an empty manifest.
+const admPlainSkillMD = "---\nname: plain\ndescription: The admitted description.\n---\n\nAdmitted skill prose.\n"
+
+// admTamperedPlainSkill is a sealed plain-skill row whose unhashed columns a
+// metadata-store writer rewrote after ingest: every served column names a
+// value the admitted SKILL.md does not state.
+func admTamperedPlainSkill(t *testing.T, id, skillRaw string) store.ManifestRecord {
+	t.Helper()
+	rec := storetest.Seal(t, store.ManifestRecord{
+		TenantID: admTenant, ArtifactID: id, Version: "1.0.0", Layer: "L",
+		SkillRaw: []byte(skillRaw),
+	}, nil, nil)
+	rec.Type = "agent"
+	rec.Body = []byte("injected body\n")
+	rec.Description = "injected description"
+	rec.Tags = []string{"injected"}
+	rec.Sensitivity = "high"
+	rec.Deprecated = true
+	rec.ReplacedBy = "ops/elsewhere"
+	rec.AuditRedact = []string{"name"}
+	return rec
+}
+
+// admLoadVersion loads id at an exact version, so a tampered deprecation
+// column does not steer the latest selection away from the row under test.
+func admLoadVersion(reg *core.Registry, id, ver string) (*core.LoadArtifactResult, error) {
+	return reg.LoadArtifact(context.Background(), layer.Identity{IsPublic: true}, id, core.LoadArtifactOptions{Version: ver})
+}
+
+// Spec: §13.4 — a row whose manifest is empty and whose SKILL.md parses is a
+// skill with no ARTIFACT.md. Its served type, body, sensitivity, deprecation,
+// replacement, and audit_redact keys come from the admitted SKILL.md, and its
+// served ARTIFACT.md is the synthesized document, whatever the stored columns
+// say.
+func TestAdmit_PlainSkillRowServesItsAdmittedSkill(t *testing.T) {
+	t.Parallel()
+	f := newAdmFixture(t)
+	f.put(t, admTamperedPlainSkill(t, "ops/plain", admPlainSkillMD))
+	res, err := admLoadVersion(f.registry(nil), "ops/plain", "1.0.0")
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	if res.Type != "skill" || res.ManifestBody != "Admitted skill prose.\n" {
+		t.Errorf("type=%q body=%q, want skill and the SKILL.md body", res.Type, res.ManifestBody)
+	}
+	if res.Sensitivity != "" || res.Deprecated || res.ReplacedBy != "" || res.DeprecationWarning != "" {
+		t.Errorf("sensitivity=%q deprecated=%v replaced_by=%q, want the empty values ingest stores", res.Sensitivity, res.Deprecated, res.ReplacedBy)
+	}
+	want, err := manifest.SynthesizedSkillDocument("1.0.0")
+	if err != nil {
+		t.Fatalf("SynthesizedSkillDocument: %v", err)
+	}
+	if !bytes.Equal(res.Frontmatter, want) {
+		t.Errorf("frontmatter = %q, want the synthesized %q", res.Frontmatter, want)
+	}
+	ev := f.events.ofType("artifact.loaded")
+	if len(ev) != 1 || len(ev[0].RedactKeys) != 0 {
+		t.Errorf("read event = %+v, want no audit_redact keys", ev)
+	}
+}
+
+// Spec: §13.4, §4.6 — the §4.6 merge for an extends: child of a plain-skill
+// row takes the parent's admitted description and no tags, so a rewritten
+// Description or Tags column of the parent never reaches the child's served
+// and attested merged document.
+func TestAdmit_PlainSkillParentColumnsDoNotReachTheMerge(t *testing.T) {
+	t.Parallel()
+	f := newAdmFixture(t)
+	f.put(t, admTamperedPlainSkill(t, "ops/plain", admPlainSkillMD))
+	f.put(t, storetest.Seal(t, store.ManifestRecord{
+		TenantID: admTenant, ArtifactID: "team/child", Version: "2.0.0", Layer: "L", Type: "skill",
+		Frontmatter: []byte("---\ntype: skill\nversion: 2.0.0\nextends: ops/plain@1.0.0\n---\n"),
+		SkillRaw:    []byte("---\nname: child\ndescription: d\n---\n\nchild prose\n"),
+		ExtendsPin:  "ops/plain@1.0.0",
+	}, nil, nil))
+	res, err := admLoadVersion(f.registry(nil), "team/child", "2.0.0")
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	a, err := manifest.ParseArtifact(res.Frontmatter)
+	if err != nil {
+		t.Fatalf("ParseArtifact(merged): %v\n%s", err, res.Frontmatter)
+	}
+	if a.Description != "The admitted description." {
+		t.Errorf("merged description = %q, want the parent's SKILL.md description", a.Description)
+	}
+	if len(a.Tags) != 0 || bytes.Contains(res.Frontmatter, []byte("injected")) {
+		t.Errorf("merged document carries an injected column:\n%s", res.Frontmatter)
+	}
+	if res.Sensitivity != "" || res.Deprecated {
+		t.Errorf("sensitivity=%q deprecated=%v, want the parent's admitted empty values", res.Sensitivity, res.Deprecated)
+	}
+}
+
+// Spec: §13.4 — a row whose manifest is empty and whose SKILL.md carries no
+// frontmatter is not a plain skill. It keeps the stored-value path and serves
+// its stored manifest, which is empty.
+func TestAdmit_EmptyManifestWithUnparseableSkillKeepsStoredValues(t *testing.T) {
+	t.Parallel()
+	f := newAdmFixture(t)
+	f.put(t, admTamperedPlainSkill(t, "ops/raw", "no frontmatter here\n"))
+	res, err := admLoadVersion(f.registry(nil), "ops/raw", "1.0.0")
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	if res.Type != "agent" || res.ManifestBody != "injected body\n" || res.Sensitivity != "high" || !res.Deprecated {
+		t.Errorf("type=%q body=%q sensitivity=%q deprecated=%v, want the stored values", res.Type, res.ManifestBody, res.Sensitivity, res.Deprecated)
+	}
+	if len(res.Frontmatter) != 0 {
+		t.Errorf("frontmatter = %q, want the empty stored manifest", res.Frontmatter)
 	}
 }

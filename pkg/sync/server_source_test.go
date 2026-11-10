@@ -276,6 +276,36 @@ func TestRun_ServerSource_SkillWritesSkillMD(t *testing.T) {
 	}
 }
 
+// Spec: §7.5, §13.4 — a server-source sync records the served version member
+// in the lock, because a skill's ARTIFACT.md overlay may omit version when its
+// SKILL.md declares metadata.version (§4.3.4). Reading the version back out of
+// the served document would record an empty version.
+func TestRun_ServerSourceLockTakesTheServedVersion(t *testing.T) {
+	t.Parallel()
+	srv := newStubRegistry(t, map[string]stubArtifact{
+		"eng/lint": {
+			typ:          "skill",
+			layer:        "local",
+			frontmatter:  "---\ntype: skill\ntags: [ops]\n---\n",
+			manifestBody: "Run the linter.\n",
+			skillRaw:     "---\nname: lint\ndescription: Run the linter.\nmetadata:\n  version: \"1.0.0\"\n---\n\nRun the linter.\n",
+		},
+	})
+	target := t.TempDir()
+	if _, err := Run(Options{RegistryPath: srv.URL, Delivery: neverDelivery, Target: target, AdapterID: "none", HTTPClient: srv.Client()}); err != nil {
+		t.Fatalf("server-source Run: %v", err)
+	}
+	lock, err := ReadLock(target)
+	if err != nil || lock == nil || len(lock.Artifacts) == 0 {
+		t.Fatalf("ReadLock = %+v, %v; want the skill's entries", lock, err)
+	}
+	for _, la := range lock.Artifacts {
+		if la.Version != "1.0.0" {
+			t.Errorf("lock %s version = %q, want the served 1.0.0", la.MaterializedPath, la.Version)
+		}
+	}
+}
+
 // Spec: §4.7.6, §7.5.3 — a /v1/load_artifact response carrying no
 // content_hash leaves the consumer to compute one, and the digest it records
 // is the canonical one over the served frontmatter, the served SKILL.md, and

@@ -139,7 +139,7 @@ func TestLoadArtifactFromCache_TouchesBucketOnRead(t *testing.T) {
 	}
 	// The per-ID delivery files make the read a hit; the mtime asserted below
 	// stays the bucket-level frontmatter's, which prune reads.
-	if err := cache.putDelivery(hash, "team/x", deliveryFiles{Frontmatter: "fm", Body: "body", DeliveryHash: "sha256:d"}); err != nil {
+	if err := cache.putDelivery(hash, "team/x", deliveryFiles{Frontmatter: "fm", Body: "body", DeliveryHash: "sha256:d", Version: "1.0.0", Type: "context"}); err != nil {
 		t.Fatalf("putDelivery: %v", err)
 	}
 	bucket := filepath.Join(dir, sanitizeHash(hash))

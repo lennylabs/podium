@@ -310,3 +310,128 @@ func TestReingestPipeline_MalformedFrontmatterIsContentFault(t *testing.T) {
 		t.Errorf("message = %q does not name the offending artifact", msg)
 	}
 }
+
+// localReingest registers layerDir as the local layer L of a file-backed
+// SQLite store and returns the store and a function that reingests L through
+// the layer endpoint, returning the status and the decoded body.
+func localReingest(t *testing.T, layerDir string) (store.Store, func() (int, map[string]any)) {
+	t.Helper()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "reg.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	if err := st.PutLayerConfig(ctx, store.LayerConfig{
+		TenantID: "t", ID: "L", SourceType: "local", LocalPath: layerDir,
+	}); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
+	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
+		WithReingestRunner(localReingestRunner(st, nil))
+	ts := httptest.NewServer(endpoint.Handler())
+	t.Cleanup(ts.Close)
+	return st, func() (int, map[string]any) {
+		t.Helper()
+		resp, err := http.Post(ts.URL+"/v1/layers/reingest?id=L", "application/json", nil)
+		if err != nil {
+			t.Fatalf("reingest: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var m map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&m)
+		return resp.StatusCode, m
+	}
+}
+
+// writeFile writes content to path, creating its directory.
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// Spec: §4.2, §7.3.1 — a SKILL.md directly under the layer root makes no
+// package, because a package is a directory below the root. The reingest is
+// refused as a content fault, 422 ingest.lint_failed, rather than the
+// retryable registry.unavailable.
+func TestReingestPipeline_RootLevelSkillIsLintFailure(t *testing.T) {
+	t.Parallel()
+	layerDir := t.TempDir()
+	writeFile(t, filepath.Join(layerDir, "SKILL.md"), "---\nname: root\ndescription: A skill at the layer root.\n---\n\nbody\n")
+	_, reingest := localReingest(t, layerDir)
+	status, m := reingest()
+	if status != http.StatusUnprocessableEntity || m["code"] != "ingest.lint_failed" {
+		t.Errorf("reingest = %d %v, want 422 ingest.lint_failed", status, m)
+	}
+}
+
+// Spec: §7.3.1, §6.10, §4.2 — a local layer whose only package is a SKILL.md
+// symlink to a file outside the layer directory fails the reingest with 502
+// ingest.source_unreachable under local-source confinement, and stores no
+// row, rather than silently dropping the package.
+func TestReingestPipeline_EscapingSoleSkillIsSourceUnreachable(t *testing.T) {
+	t.Parallel()
+	outside := filepath.Join(t.TempDir(), "SKILL.md")
+	writeFile(t, outside, "---\nname: x\ndescription: A skill outside the layer.\n---\n\nbody\n")
+	layerDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(layerDir, "x"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(layerDir, "x", "SKILL.md")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	st, reingest := localReingest(t, layerDir)
+	status, m := reingest()
+	if status != http.StatusBadGateway || m["code"] != "ingest.source_unreachable" {
+		t.Errorf("reingest = %d %v, want 502 ingest.source_unreachable", status, m)
+	}
+	all, err := st.ListManifestsIncludingDeleted(context.Background(), "t")
+	if err != nil {
+		t.Fatalf("ListManifestsIncludingDeleted: %v", err)
+	}
+	if len(all) != 0 {
+		t.Errorf("stored rows = %+v, want none", all)
+	}
+}
+
+// Spec: §7.3.1 — a version-less skill reverted to bytes a stored row already
+// holds is reported in the reingest response's rejected array with
+// ingest.invalid_artifact and its constraint, and nothing is accepted.
+func TestReingestPipeline_RevertedVersionlessSkillIsRejected(t *testing.T) {
+	t.Parallel()
+	layerDir := t.TempDir()
+	path := filepath.Join(layerDir, "y", "SKILL.md")
+	first := "---\nname: y\ndescription: A version-less skill.\n---\n\nfirst\n"
+	writeFile(t, path, first)
+	_, reingest := localReingest(t, layerDir)
+	if status, m := reingest(); status != http.StatusOK || m["accepted"] != float64(1) {
+		t.Fatalf("first reingest = %d %v, want one accepted", status, m)
+	}
+	writeFile(t, path, "---\nname: y\ndescription: A version-less skill.\n---\n\nchanged\n")
+	if status, m := reingest(); status != http.StatusOK || m["accepted"] != float64(1) {
+		t.Fatalf("second reingest = %d %v, want one accepted", status, m)
+	}
+	writeFile(t, path, first)
+	status, m := reingest()
+	if status != http.StatusOK || m["accepted"] != float64(0) || m["idempotent"] != float64(0) {
+		t.Fatalf("revert reingest = %d %v, want 200 with nothing accepted or idempotent", status, m)
+	}
+	rejected, _ := m["rejected"].([]any)
+	if len(rejected) != 1 {
+		t.Fatalf("rejected = %v, want one entry", m["rejected"])
+	}
+	entry, _ := rejected[0].(map[string]any)
+	details, _ := entry["details"].(map[string]any)
+	if entry["artifact_id"] != "y" || entry["code"] != "ingest.invalid_artifact" ||
+		len(details) != 1 || details["constraint"] != "auto_version_duplicate_content" {
+		t.Errorf("rejected entry = %v, want y, ingest.invalid_artifact, and the duplicate-content constraint", entry)
+	}
+}

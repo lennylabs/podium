@@ -215,6 +215,10 @@ func recordFromServed(rec version.DeliveryRecord, id, layerID string, resources 
 	// A parse failure leaves Artifact nil; the artifact then materializes
 	// for every harness (the gate only excludes opt-outs).
 	if a, perr := manifest.ParseArtifact([]byte(rec.Frontmatter)); perr == nil {
+		// Spec: §7.5, §13.4 — the lock version is the served version member,
+		// which the delivery check verified. An ARTIFACT.md overlay may omit
+		// version (§4.3.4), so the served document does not state it.
+		a.Version = rec.Version
 		out.Artifact = a
 	}
 	// spec: §4.3.4 / §11 — a skill's SKILL.md is delivered verbatim so the

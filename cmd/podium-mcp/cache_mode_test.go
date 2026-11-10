@@ -281,7 +281,7 @@ func TestVerifyDeliveryHash_CacheServedSkillWithoutSkillRawFails(t *testing.T) {
 	}
 	if err := s.cache.putDelivery(rec.ContentHash, rec.ID, deliveryFiles{
 		Frontmatter: rec.Frontmatter, Body: rec.ManifestBody, DeliveryHash: rec.DeliveryHash,
-		ArtifactRevision: rec.ArtifactRevision,
+		ArtifactRevision: rec.ArtifactRevision, Version: rec.Version, Type: rec.Type,
 	}); err != nil {
 		t.Fatalf("putDelivery: %v", err)
 	}
@@ -726,5 +726,126 @@ func TestCacheVerifiedRecord_DisabledCacheIsANoOp(t *testing.T) {
 	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
 	if err := (&mcpServer{cache: cache}).cacheVerifiedRecord(rec); err != nil {
 		t.Errorf("cacheVerifiedRecord on a disabled cache: %v", err)
+	}
+}
+
+// ----- the served version and type ------------------------------------------
+
+// overlaySkillRecord is a both-files skill whose ARTIFACT.md overlay omits
+// version while its SKILL.md declares metadata.version, so only the served
+// version member states the version.
+func overlaySkillRecord() loadArtifactResponse {
+	fm := "---\ntype: skill\ntags: [ops]\n---\n"
+	skillRaw := "---\nname: s\ndescription: s\nmetadata:\n  version: \"1.0.0\"\n---\n\nprose\n"
+	return sealDelivery(loadArtifactResponse{
+		ID: "team/s", Type: "skill", Version: "1.0.0", Frontmatter: fm, ManifestBody: "prose\n", SkillRaw: skillRaw,
+		ContentHash:      "sha256:" + version.CanonicalContentHash([]byte(fm), []byte(skillRaw), nil),
+		ArtifactRevision: cachedRevision,
+	})
+}
+
+// wantVersion fails unless out is a successful load result reporting v.
+func wantVersion(t *testing.T, out any, v string) {
+	t.Helper()
+	wantServed(t, out, "prose\n")
+	if got := out.(map[string]any)["version"]; got != v {
+		t.Errorf("version = %v, want %s", got, v)
+	}
+}
+
+// Spec: §6.5, §6.6, §4.7.10 — a cache-served load reports the served version
+// member the bridge persisted with the delivery record, so a skill whose
+// ARTIFACT.md overlay omits version verifies and reports its version on a 304,
+// on a matching HEAD, and in offline-only mode.
+func TestCacheServedLoad_OverlayWithoutVersionKeepsServedVersion(t *testing.T) {
+	t.Parallel()
+	for _, path := range []struct {
+		name        string
+		mode        string
+		notModified bool
+	}{
+		{name: "304", mode: "", notModified: true},
+		{name: "HEAD match", mode: "always-revalidate"},
+		{name: "offline-only", mode: "offline-only"},
+	} {
+		t.Run(path.name, func(t *testing.T) {
+			t.Parallel()
+			rec := overlaySkillRecord()
+			registry, stub := newCacheStub(t, rec)
+			s := cacheServer(t, t.TempDir(), registry.URL, path.mode)
+			args := map[string]any{"id": rec.ID, "version": "1.0.0"}
+			primeLive(t, s, rec, args)
+			stub.notModified = path.notModified
+			wantVersion(t, s.loadArtifact(args), "1.0.0")
+		})
+	}
+}
+
+// Spec: §6.5, §6.6 — a record cached without the version file, as an earlier
+// release cached it, is a cache miss: always-revalidate refetches and serves
+// the live record, and offline-only reports its cache-miss error.
+func TestCacheServedLoad_MissingVersionFileIsAMiss(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"always-revalidate", "offline-only"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			rec := overlaySkillRecord()
+			registry, _ := newCacheStub(t, rec)
+			dir := t.TempDir()
+			s := cacheServer(t, dir, registry.URL, mode)
+			args := map[string]any{"id": rec.ID, "version": "1.0.0"}
+			primeLive(t, s, rec, args)
+			if err := os.Remove(filepath.Join(deliveryDir(dir, rec), "version")); err != nil {
+				t.Fatalf("remove version: %v", err)
+			}
+			out := s.loadArtifact(args)
+			if mode == "offline-only" {
+				wantRefused(t, out, "network.offline_cache_miss")
+				return
+			}
+			wantVersion(t, out, "1.0.0")
+		})
+	}
+}
+
+// Spec: §6.5, §6.6, §4.7.10 — a per-ID version or type file rewritten after a
+// verified load fails the delivery check, because the record frames the
+// served version and type: a cache-served load in offline-only mode and a
+// latest load answered by a matching HEAD are each refused, and no response
+// reports the rewritten version.
+func TestCacheServedLoad_RewrittenVersionOrTypeFails(t *testing.T) {
+	t.Parallel()
+	for _, file := range []struct{ name, forged string }{
+		{name: "version", forged: "9.9.9"},
+		{name: "type", forged: "skill"},
+	} {
+		for _, path := range []struct {
+			mode string
+			args map[string]any
+		}{
+			{mode: "offline-only", args: map[string]any{"id": "team/x", "version": "1.0.0"}},
+			{mode: "always-revalidate", args: map[string]any{"id": "team/x"}},
+		} {
+			t.Run(file.name+" "+path.mode, func(t *testing.T) {
+				t.Parallel()
+				rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+				registry, _ := newCacheStub(t, rec)
+				dir := t.TempDir()
+				s := cacheServer(t, dir, registry.URL, path.mode)
+				primeLive(t, s, rec, path.args)
+				target := filepath.Join(deliveryDir(dir, rec), file.name)
+				if b, err := os.ReadFile(target); err != nil || string(b) != map[string]string{"version": rec.Version, "type": rec.Type}[file.name] {
+					t.Fatalf("%s file = %q (%v), want the served value", file.name, b, err)
+				}
+				if err := os.WriteFile(target, []byte(file.forged), 0o644); err != nil {
+					t.Fatalf("rewrite %s: %v", file.name, err)
+				}
+				out := s.loadArtifact(path.args)
+				wantRefused(t, out, "materialize.content_hash_mismatch")
+				if strings.Contains(errorMessageText(out), "9.9.9") {
+					t.Errorf("refusal reports the rewritten version: %q", errorMessageText(out))
+				}
+			})
+		}
 	}
 }

@@ -1771,6 +1771,12 @@ func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord,
 			return nil, store.ManifestRecord{}, err
 		}
 	}
+	// Spec: §4.3.4, §4.7.10 — a plain skill is served the synthesized
+	// ARTIFACT.md. A merged chain is never affected, because a merged
+	// document is non-empty.
+	if served.Frontmatter, err = servedFrontmatter(served); err != nil {
+		return nil, store.ManifestRecord{}, err
+	}
 	res := withDeprecationWarning(resultFromRecord(served))
 	// Spec: §4.7.10 — the revision is the resolved row's ingest time, taken
 	// from rec so a merged extends chain carries the child's value.
@@ -1940,6 +1946,14 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 		// extends a parent still ships its own authored SKILL.md.
 		out.SkillRaw = c.SkillRaw
 	}
+	// Spec: §4.6, §4.3.4 — a child whose ARTIFACT.md overlay omits version
+	// is served the child row's version, the version the load returns and the
+	// one the filesystem resolver merges. The fill lives here rather than in
+	// ResolvedArtifact, which ingest's executable-field check also calls on
+	// raw stored rows and which compares no version.
+	if merged.Version == "" {
+		merged.Version = out.Version
+	}
 	// Surface the merged structured fields onto the returned record. Each one
 	// has a consumer that reads it from this record: resultFromRecord copies
 	// Type, Sensitivity, Deprecated, and ReplacedBy onto the result, and
@@ -1986,10 +2000,13 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 // manifest.Artifact. A record whose frontmatter is empty or does not parse
 // yields its stored columns instead, including every field setManifestFields
 // serves, so mergeChain and revalidationRedactKeys fold the same per-row
-// values that admission leaves on such a row.
+// values that admission leaves on such a row. On an admitted plain-skill row
+// those columns already hold the values its SKILL.md states, because
+// withAdmittedFields derived them from the admitted bytes.
 //
-// Spec: §13.4 — a row whose manifest is empty or does not parse is served
-// with its stored values.
+// Spec: §13.4 — a plain-skill row is served from its admitted SKILL.md, and
+// any other row whose manifest is empty or does not parse is served with its
+// stored values.
 func parsedArtifact(rec store.ManifestRecord) *manifest.Artifact {
 	if a, err := manifest.ParseArtifact(rec.Frontmatter); err == nil && a != nil {
 		return a
@@ -2262,11 +2279,29 @@ func descriptorOf(m store.ManifestRecord) ArtifactDescriptor {
 		Tags:        append([]string(nil), m.Tags...),
 		// spec: §5 / §7.6.1 — search_artifacts results carry the artifact's
 		// frontmatter block for the read-CLI/SDK JSON schema ({..., frontmatter}).
-		// Only the frontmatter metadata travels; the stored bytes are the full
+		// Only the frontmatter metadata travels; the served bytes are the full
 		// ARTIFACT.md source, so the prose body is split off and dropped here
 		// because the body stays at the registry until load_artifact.
-		Frontmatter: frontmatterBlock(m.Frontmatter),
+		Frontmatter: descriptorFrontmatter(m),
 	}
+}
+
+// descriptorFrontmatter returns the frontmatter block of the document a load
+// of m serves, so a plain skill's descriptor carries its synthesized block as
+// a both-files skill's carries its authored one (§7.6.1). Search is served
+// without admission (§13.4), and plainSkillRow reads no unhashed column, so
+// the descriptor applies the predicate a load applies. A synthesis error
+// yields the empty block and stays in the server log, as an unresolvable
+// chain does in descriptorBlockHidingChain.
+//
+// Spec: §4.3.4, §7.6.1
+func descriptorFrontmatter(m store.ManifestRecord) string {
+	doc, err := servedFrontmatter(m)
+	if err != nil {
+		log.Printf("search: descriptor of %s: %v", m.ArtifactID, err)
+		return ""
+	}
+	return frontmatterBlock(doc)
 }
 
 // frontmatterBlock returns the ---fenced--- YAML frontmatter header of a stored
