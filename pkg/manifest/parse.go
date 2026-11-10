@@ -203,8 +203,9 @@ func ValidateName(name string) error {
 	return nil
 }
 
-// semverRegex matches the canonical major.minor.patch form. Pre-release
-// and build metadata land with full semver support in phase 1.
+// semverRegex matches an authored major.minor.patch version. The
+// registry-reserved 0.0.0-auto.<N> form (§4.7.6) is validated separately by
+// IsAutoVersion and is never accepted from an author.
 var semverRegex = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
 // ValidateVersion returns nil when v is a recognized semver-major.minor.patch
