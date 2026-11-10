@@ -1,7 +1,7 @@
 # Proposal 0058: Ingest, sync, materialize, and serve a plain Agent Skills directory as a type: skill artifact with no ARTIFACT.md
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-09). Verified on 2026-11-09 after 3 adversarial review rounds (5 findings fixed).
+- Status: Applied to spec (2026-11-10). Verified on 2026-11-09 after 3 adversarial review rounds (5 findings fixed).
 - Date: 2026-11-09
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible in four places. `podium import` loses `--type`. `podium artifact scaffold --type skill` refuses the Podium-only flags. A both-files skill whose `SKILL.md` `metadata.version` is a `major.minor.patch` value different from its `ARTIFACT.md` `version` fails ingest lint. A `SKILL.md` outside any package that has no frontmatter, which discovery ignored before, now fails the walk of its layer.
