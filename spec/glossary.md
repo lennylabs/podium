@@ -8,12 +8,12 @@
 - **Host**: the MCP-speaking system that runs the Podium MCP server alongside its own runtime.
 - **Layer**: a unit of composition with a single source (Git repo or local filesystem path) and a visibility declaration. Admin-defined, user-defined, or the workspace local overlay.
 - **Workspace local overlay**: the workspace-scoped layer sourced from `${PODIUM_OVERLAY_PATH}` by the MCP server's `LocalOverlayProvider`. Highest precedence in the caller's effective view.
-- **Manifest**: the `ARTIFACT.md` file specifically. Skills additionally have a `SKILL.md` (§4.3.4) carrying the agentskills.io-spec frontmatter and the agent-facing prose body; for skills the term "manifest" without qualification refers to `ARTIFACT.md`, and "skill manifest" refers to `SKILL.md`.
+- **Manifest**: the `ARTIFACT.md` file specifically. Skills also have a `SKILL.md` (§4.3.4) carrying the agentskills.io-spec frontmatter and the agent-facing prose body; for skills the term "manifest" without qualification refers to `ARTIFACT.md`, and "skill manifest" refers to `SKILL.md`. A skill's `ARTIFACT.md` is optional (§4.3.4). A skill without one has no manifest on disk, and its stored manifest is empty (§13.4).
 - **Marketplace**: a git repository a harness imports to install plugins, holding a vendor manifest at a fixed location and per-plugin content. The extension, package, and tap formats are the analogous repository distributions for Gemini, Pi, and Hermes.
 - **Marketplace output**: a `podium sync` target of `kind: marketplace` (§7.5.2): a git repository, a harness set, a plugin list, and a workflow.
 - **Materialization**: atomic write of a loaded artifact's content (manifest and bundled resources, after harness adapter translation) onto the host's filesystem.
 - **MCP server (Podium MCP server)**: the in-process bridge binary the host runs.
-- **Package**: the on-disk directory containing an artifact's `ARTIFACT.md` (plus `SKILL.md` for skills) and bundled resources.
+- **Package**: the on-disk directory containing an artifact's manifest files (an `ARTIFACT.md`, a `SKILL.md`, or both, per the §4.2 discovery rule) and bundled resources.
 - **Plugin (publishing)**: a named bundle of selected artifacts, defined by a scope filter, rendered into each harness's distribution layout. The existing "plugin" usage for the in-process SPI extensions (§9) is unchanged; this entry distinguishes the publishing sense.
 - **Registry**: the centralized service that ingests artifacts from layer sources and serves the catalog.
 - **Visibility**: per-layer access declaration in the registry config (or, for user-defined layers, set by the registrar): `public`, `organization`, OIDC `groups`, or explicit `users`.

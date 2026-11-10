@@ -1,11 +1,10 @@
 # 0. Quickstart
 
-A minimal skill artifact has both a `SKILL.md` (per the [agentskills.io specification](https://agentskills.io/specification)) and an `ARTIFACT.md` (per Podium's schema):
+A minimal skill artifact is a directory with a `SKILL.md` (per the [agentskills.io specification](https://agentskills.io/specification)):
 
 ```
 finance/close-reporting/run-variance-analysis/
-├── SKILL.md
-└── ARTIFACT.md
+└── SKILL.md
 ```
 
 `SKILL.md` (agent-facing instructions and the spec's required frontmatter):
@@ -15,6 +14,8 @@ finance/close-reporting/run-variance-analysis/
 name: run-variance-analysis
 description: Flag unusual variance vs. forecast after month-end close. Use after the close period when reviewing financial performance.
 license: MIT
+metadata:
+  version: "1.0.0"
 ---
 
 Compare actuals vs. forecast for the most recent close period. For each line
@@ -22,25 +23,12 @@ item, flag variances above the threshold defined in your team's policy doc.
 Output a markdown table sorted by absolute variance.
 ```
 
-`ARTIFACT.md` (Podium structured frontmatter; no body):
-
-```markdown
----
-type: skill
-version: 1.0.0
-when_to_use:
-  - "After month-end close, when reviewing financial performance"
-tags: [finance, close, variance]
-sensitivity: low
----
-
-<!-- Skill body lives in SKILL.md. -->
-```
+`metadata.version` sets the version. An optional `ARTIFACT.md` beside `SKILL.md` carries Podium-only fields such as `when_to_use`, `tags`, and `sensitivity` (§4.3.4).
 
 Ingest:
 
 ```bash
-$ git add SKILL.md ARTIFACT.md && git commit -m "Add run-variance-analysis@1.0.0"
+$ git add SKILL.md && git commit -m "Add run-variance-analysis@1.0.0"
 $ git push    # opens or updates a PR; CI runs `podium lint`; reviewers approve; merge.
 # The Git provider's webhook fires; the registry ingests automatically.
 # If the webhook was missed, a tenant admin can reingest manually:

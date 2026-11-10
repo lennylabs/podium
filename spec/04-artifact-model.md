@@ -472,7 +472,7 @@ This asymmetry exists because the workspace local overlay is merged client-side 
 
 Imports are dynamic: an artifact added at `finance/ap/payments/new-thing/` is automatically picked up by any domain whose `DOMAIN.md` includes `finance/ap/payments/*`; no `DOMAIN.md` re-ingest needed.
 
-**Imports do not change canonical paths.** An artifact has exactly one canonical home (the directory where its `ARTIFACT.md` lives, plus `SKILL.md` for skills). Imports add additional appearances under other domains. `search_artifacts` returns the artifact once, with its canonical path and (optionally) the list of domains that import it.
+**Imports do not change canonical paths.** An artifact has exactly one canonical home (its package directory, which holds an `ARTIFACT.md`, a `SKILL.md`, or both, per §4.2). Imports add additional appearances under other domains. `search_artifacts` returns the artifact once, with its canonical path and (optionally) the list of domains that import it.
 
 **Authoring rights for imports.** Editing a domain's `include:`/`exclude:` requires write access to the layer that contains the destination `DOMAIN.md` (a Git merge or a `local`-source filesystem write). Importing does not require any rights in the source path; only that the artifact resolves under some layer the registry has ingested. Visibility at read time is enforced per layer.
 

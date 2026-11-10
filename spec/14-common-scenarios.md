@@ -8,7 +8,7 @@ A developer keeps artifacts in a local folder and materializes a subset into one
 
 **One-time:**
 
-1. Lay out artifacts in `~/podium-artifacts/` per §4.2 (each artifact a subdirectory containing `ARTIFACT.md`, plus `SKILL.md` for skills). The path is interpreted as a single `local`-source layer rooted at `~/podium-artifacts/`; for a multi-layer setup (each subdirectory a separate layer) opt in via `<path>/.registry-config` with `multi_layer: true` per §13.11.1.
+1. Lay out artifacts in `~/podium-artifacts/` per §4.2 (each artifact a subdirectory containing an `ARTIFACT.md`, a `SKILL.md`, or both, per the §4.2 discovery rule). The path is interpreted as a single `local`-source layer rooted at `~/podium-artifacts/`; for a multi-layer setup (each subdirectory a separate layer) opt in via `<path>/.registry-config` with `multi_layer: true` per §13.11.1.
 2. `podium init --global --registry ~/podium-artifacts/` to write `~/.podium/sync.yaml` with `defaults.registry: ~/podium-artifacts/`. No server needed; the client reads the directory directly.
 
 **Per project:**
@@ -197,7 +197,7 @@ A single developer uses Claude Code on one project and Cursor on another, sharin
 
 A developer iterates on a new artifact in their workspace overlay, then promotes it to a shared layer.
 
-1. Edit `<workspace>/.podium/overlay/finance/cashflow/forecast/ARTIFACT.md` (and `SKILL.md` if `forecast` is a skill). The MCP server (or sync, or SDK) sees it immediately.
+1. Edit `<workspace>/.podium/overlay/finance/cashflow/forecast/SKILL.md` if `forecast` is a skill (and its `ARTIFACT.md` overlay when it has one), or `.../forecast/ARTIFACT.md` for any other type. The MCP server (or sync, or SDK) sees it immediately.
 2. Test the artifact end-to-end in the workspace.
 3. When ready, `git mv` (or copy) the artifact into the team's Git layer repo, commit, open PR.
 4. PR runs `podium lint` and any team-specific checks. Reviewers approve, merge.
