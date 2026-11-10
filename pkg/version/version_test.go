@@ -159,6 +159,135 @@ func TestResolveLatest_EmptyIsError(t *testing.T) {
 	}
 }
 
+// Spec: §4.7.6 — the registry-reserved 0.0.0-auto.<N> form parses as an
+// exact pin carrying N, and every other suffix stays invalid.
+func TestParsePin_AutoForm(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		in    string
+		wantN int
+	}{
+		{"0.0.0-auto.0", 0},
+		{"0.0.0-auto.12", 12},
+	} {
+		p, err := ParsePin(c.in)
+		if err != nil {
+			t.Errorf("ParsePin(%q): %v", c.in, err)
+			continue
+		}
+		want := Pin{Kind: PinExact, Auto: true, AutoN: c.wantN}
+		if p != want {
+			t.Errorf("ParsePin(%q) = %+v, want %+v", c.in, p, want)
+		}
+	}
+	for _, in := range []string{
+		"0.0.0-auto.01",
+		"0.0.0-auto.",
+		"0.0.0-rc.1",
+		"1.2.3-auto.x",
+		"1.2.3-auto.0",
+	} {
+		if _, err := ParsePin(in); !errors.Is(err, ErrInvalidPin) {
+			t.Errorf("ParsePin(%q) = %v, want ErrInvalidPin", in, err)
+		}
+	}
+}
+
+// Spec: §4.7.6 — an exact auto pin resolves to the stored string, a range
+// never selects a registry-assigned version, and an exact 0.0.0 pin does not
+// select 0.0.0-auto.<N>.
+func TestResolve_AutoForm(t *testing.T) {
+	t.Parallel()
+	candidates := []string{"0.0.0-auto.0", "0.0.0-auto.3", "0.0.0-auto.12"}
+	for _, c := range []struct {
+		pin, want string
+		wantErr   bool
+	}{
+		{pin: "0.0.0-auto.3", want: "0.0.0-auto.3"},
+		{pin: "0.0.0-auto.12", want: "0.0.0-auto.12"},
+		{pin: "", want: "0.0.0-auto.12"},
+		{pin: "0.0.0-auto.7", wantErr: true},
+		{pin: "0.0.x", wantErr: true},
+		{pin: "0.x", wantErr: true},
+		{pin: "0.0.0", wantErr: true},
+	} {
+		p, err := ParsePin(c.pin)
+		if err != nil {
+			t.Fatalf("ParsePin(%q): %v", c.pin, err)
+		}
+		got, err := Resolve(p, candidates)
+		if c.wantErr {
+			if !errors.Is(err, ErrInvalidPin) {
+				t.Errorf("Resolve(%q) = (%q, %v), want ErrInvalidPin", c.pin, got, err)
+			}
+			continue
+		}
+		if err != nil || got != c.want {
+			t.Errorf("Resolve(%q) = (%q, %v), want %q", c.pin, got, err, c.want)
+		}
+	}
+}
+
+// Spec: §4.7.6 — with an authored 0.0.0 beside assigned versions, a range
+// selects only the authored one, and the semver order ranks it above every
+// 0.0.0-auto.<N>.
+func TestResolve_RangeSkipsAutoBesideAuthored(t *testing.T) {
+	t.Parallel()
+	candidates := []string{"0.0.0-auto.5", "0.0.0", "0.0.0-auto.9"}
+	for _, pin := range []string{"", "0.0.x", "0.x", "0.0.0"} {
+		p, err := ParsePin(pin)
+		if err != nil {
+			t.Fatalf("ParsePin(%q): %v", pin, err)
+		}
+		got, err := Resolve(p, candidates)
+		if err != nil || got != "0.0.0" {
+			t.Errorf("Resolve(%q) = (%q, %v), want 0.0.0", pin, got, err)
+		}
+	}
+}
+
+// Spec: §4.7.6 — `latest` treats a registry-assigned version as a candidate
+// and picks the most recently ingested one.
+func TestResolveLatest_AutoByIngest(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	got, err := ResolveLatest([]Candidate{
+		{Version: "1.0.0", IngestedAt: base},
+		{Version: "0.0.0-auto.4", IngestedAt: base.Add(2 * time.Hour)},
+		{Version: "0.0.0-auto.5", IngestedAt: base.Add(1 * time.Hour)},
+	})
+	if err != nil {
+		t.Fatalf("ResolveLatest: %v", err)
+	}
+	if got != "0.0.0-auto.4" {
+		t.Errorf("ResolveLatest = %q, want 0.0.0-auto.4 (ingested last)", got)
+	}
+}
+
+// Spec: §4.7.6 — on an IngestedAt tie, a non-auto version ranks above an
+// assigned one with the same core, and assigned versions order by N.
+func TestResolveLatest_AutoTieOrdering(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name  string
+		cands []string
+		want  string
+	}{
+		{"authored above auto", []string{"0.0.0-auto.9", "0.0.0", "0.0.0-auto.2"}, "0.0.0"},
+		{"higher N wins", []string{"0.0.0-auto.2", "0.0.0-auto.10", "0.0.0-auto.9"}, "0.0.0-auto.10"},
+	} {
+		cands := make([]Candidate, 0, len(c.cands))
+		for _, v := range c.cands {
+			cands = append(cands, Candidate{Version: v, IngestedAt: at})
+		}
+		got, err := ResolveLatest(cands)
+		if err != nil || got != c.want {
+			t.Errorf("%s: ResolveLatest = (%q, %v), want %q", c.name, got, err, c.want)
+		}
+	}
+}
+
 // Spec: §6.7 "Versioning" — Compare orders two exact versions by their
 // major.minor.patch core, ignoring any -prerelease or +build suffix.
 func TestCompare_Ordering(t *testing.T) {
@@ -177,6 +306,9 @@ func TestCompare_Ordering(t *testing.T) {
 		{"0.0.0-dev", "0.0.0", 0},
 		{"1.2.0-rc.1", "1.2.0", 0},
 		{"1.2.3+build.5", "1.2.3", 0},
+		// Spec: §6.7 — a registry-assigned version compares by its 0.0.0
+		// core, so the auto ranking in less does not reach Compare.
+		{"0.0.0-auto.1", "0.0.0", 0},
 	}
 	for _, c := range cases {
 		got, err := Compare(c.a, c.b)
