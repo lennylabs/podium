@@ -258,6 +258,46 @@ func TestGateway_TrustedHeadersMultitenantNoSecretRefused(t *testing.T) {
 	)
 }
 
+// Spec: §6.3.1 / §13.10 / §13.12 — a registry started with PODIUM_MULTI_TENANT
+// selects each request's tenant from the verified caller identity, so a
+// multi-tenant registry with no request-time identity verifier fails to start
+// with config.multitenant_no_verifier. The cases cover an unset provider, the
+// free-form labels "none" and "oidc" that resolve to no registered provider,
+// and public mode on the default loopback bind. Each case sets
+// PODIUM_IDENTITY_PROVIDER explicitly because mergeEnv inherits the test
+// process environment, which testenv.Load can populate from test.env, and an
+// inherited provider would let the boot pass.
+func TestGateway_MultiTenantNoVerifierRefused(t *testing.T) {
+	cases := []struct {
+		name string
+		env  []string
+		want []string
+	}{
+		{name: "unset provider", env: []string{"PODIUM_IDENTITY_PROVIDER="}},
+		{name: "none label", env: []string{"PODIUM_IDENTITY_PROVIDER=none"}},
+		{name: "oidc label", env: []string{"PODIUM_IDENTITY_PROVIDER=oidc"}},
+		{
+			name: "public mode",
+			env:  []string{"PODIUM_IDENTITY_PROVIDER=", "PODIUM_PUBLIC_MODE=true"},
+			want: []string{"unset PODIUM_PUBLIC_MODE"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := gwExpectStartupFailure(t, "config.multitenant_no_verifier",
+				append([]string{"PODIUM_MULTI_TENANT=true"}, tc.env...)...)
+			want := append([]string{
+				"injected-session-token", "oidc-jwt", "trusted-headers", "unset PODIUM_MULTI_TENANT",
+			}, tc.want...)
+			for _, sub := range want {
+				if !strings.Contains(out, sub) {
+					t.Errorf("output missing %q:\n%s", sub, out)
+				}
+			}
+		})
+	}
+}
+
 // Spec: §13.10 / §7.3.3 / §6.3.1 / §7.3.1 — a standalone registry started
 // with PODIUM_MULTI_TENANT and a request-time identity verifier serves tenant
 // management and per-request tenant routing on the SQLite store, so the test
