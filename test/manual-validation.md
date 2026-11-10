@@ -251,6 +251,7 @@ rm -rf "$WORK"
 | S93 | An executable-field refusal withholds the parent, spares stored versions, and follows the pinned edge | solo then standalone | none | none | none |
 | S94 | An `mcpServers` entry restated by name restates each member, and a same-layer child inherits its entry | solo then standalone | none | none | none |
 | S95 | An `extends:` child stored before the executable-field rule keeps serving after an upgrade | standalone then solo | none | none | none |
+| S98 | A multi-tenant configuration with no request-time verifier is refused before any store opens | standalone | none | none | none |
 
 ---
 
@@ -10946,8 +10947,8 @@ without the stack.
      -d "{\"id\":\"erin-$S\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/erin/x.git\",\"ref\":\"main\"}" "$URL/v1/layers"
    ```
 
-   **Expect.** The list is `{"layers":[]}`. The register answers `403` with
-   error code `auth.forbidden`.
+   **Expect.** The list prints a JSON object whose `layers` array is empty.
+   The register answers `403` with error code `auth.forbidden`.
 
 **Cleanup.** Delete `team-<pid>` and `dave-<pid>` with `DELETE /v1/layers?id=...`
 as carol and dave, stop the server, `rm -rf "$WORK"`, and
@@ -12100,3 +12101,189 @@ rule.
    runs the rule, and only the version stored before it is spared.
 
 **Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
+
+---
+
+## S98: A multi-tenant configuration with no request-time verifier is refused before any store opens
+
+**Goal.** Validate that `podium serve` refuses `PODIUM_MULTI_TENANT=true` with
+no identity provider and with public mode before it opens the store, writes a
+signing key, or binds a listener, that `podium-server sign-stored-rows` and
+`podium admin sign-stored-rows` refuse the same configurations through the
+same validation, that every earlier configuration refusal keeps precedence,
+that a multi-tenant registry behind `injected-session-token` still starts and
+routes each caller to the tenant its `org_id` claim names, and that a
+single-tenant public-mode registry still starts.
+
+**Covers.** §6.3.1 the multi-tenant verifier requirement and per-request tenant
+selection, §13.10 Features enabled by configuration, §13.12
+`PODIUM_MULTI_TENANT`, §13.4 `sign-stored-rows`, and the
+`config.multitenant_no_verifier` startup refusal, through the compiled
+binaries.
+
+**Why by hand.** S90 step 7 reads the refusal message of `podium serve`. This
+scenario reads what the refusal leaves behind: an operator checks that no
+`podium-server listening on` line was printed, that neither the SQLite file nor
+the signing key exists afterwards, and that the one-shot `sign-stored-rows`
+command, which an operator runs outside the server, refuses the same
+configuration. A refused run that leaves `$PODIUM_SQLITE_PATH` on disk, a
+`sign-stored-rows` dry run that prints a plan under `PODIUM_MULTI_TENANT` with
+no provider, or a verified multi-tenant registry that does not start is the
+defect this scenario catches.
+
+**Prerequisites.** Built `podium` and `podium-server` binaries on `PATH`, a Go
+toolchain for `tools/minttoken`, and `python3`. No container or external
+service is required.
+
+**Steps.**
+
+1. Run the isolation block. Write a public layer, generate a runtime key, and
+   export the multi-tenant configuration the later steps share.
+
+   ```bash
+   S=$$
+   podium artifact scaffold --type context --description "Public welcome" "$WORK/pub/welcome" > /dev/null
+   cat > "$WORK/registry.yaml" <<EOF
+   registry:
+     layers:
+       - id: public-layer
+         source:
+           local:
+             path: $WORK/pub
+         visibility:
+           public: true
+   EOF
+   go -C "$PODIUM_REPO" run ./tools/minttoken --keys "$WORK/keys" > /dev/null 2>&1
+   podium admin runtime register --keys-file "$WORK/keys/runtimes.json" --issuer manual-runtime --algorithm RS256 --public-key-file "$WORK/keys/runtime-pub.pem"
+   export PODIUM_CONFIG_FILE="$WORK/registry.yaml"
+   export PODIUM_MULTI_TENANT=true
+   export PODIUM_RUNTIME_KEYS_PATH="$WORK/keys/runtimes.json"
+   export PODIUM_OAUTH_AUDIENCE=https://podium.manual
+   export PODIUM_OPERATOR_ADMINS=olivia@acme.com
+   ```
+
+   **Expect.** The register command prints `Registered runtime manual-runtime
+   (RS256)`. The shell exports no `PODIUM_IDENTITY_PROVIDER` and no
+   `PODIUM_PUBLIC_MODE`, so steps 2 and 3 set each one per command.
+
+2. Start `podium serve` with no identity provider and then in public mode, in
+   the foreground, and read what each run left behind.
+
+   ```bash
+   refuse_serve() {
+     env "$@" podium serve --standalone --no-embeddings --bind 127.0.0.1:8203 > "$WORK/serve.log" 2>&1
+     echo "[$*] exit=$?"; tail -1 "$WORK/serve.log"
+     echo "listening lines: $(grep -c 'podium-server listening on ' "$WORK/serve.log")"
+   }
+   refuse_serve PODIUM_IDENTITY_PROVIDER=
+   refuse_serve PODIUM_IDENTITY_PROVIDER= PODIUM_PUBLIC_MODE=true
+   ls "$PODIUM_SQLITE_PATH" "$PODIUM_SIGN_KEY_PATH"
+   ```
+
+   **Expect.** Both runs print `exit=1` and a message that begins
+   `podium serve: config.multitenant_no_verifier:`, names
+   `injected-session-token`, `oidc-jwt`, and `trusted-headers`, and ends with
+   `or unset PODIUM_MULTI_TENANT`. The public-mode message also contains
+   `unset PODIUM_PUBLIC_MODE`. Each run prints `listening lines: 0`. `ls`
+   reports that both files do not exist, because the refusal runs before the
+   store opens and before the signing key is generated. A listening line, or
+   either file on disk, is the defect.
+
+3. Run `sign-stored-rows` under the same two configurations through both
+   dispatchers.
+
+   ```bash
+   PODIUM_IDENTITY_PROVIDER= podium-server sign-stored-rows --dry-run; echo "exit=$?"
+   PODIUM_IDENTITY_PROVIDER= PODIUM_PUBLIC_MODE=true podium-server sign-stored-rows --dry-run; echo "exit=$?"
+   PODIUM_IDENTITY_PROVIDER= podium admin sign-stored-rows --dry-run; echo "exit=$?"
+   ls "$PODIUM_SQLITE_PATH" "$PODIUM_SIGN_KEY_PATH"
+   ```
+
+   **Expect.** Each command prints a message that begins
+   `config.multitenant_no_verifier:` and prints `exit=1`. The second message
+   contains `unset PODIUM_PUBLIC_MODE`. No command prints a `dry-run:` line,
+   and `ls` still reports that both files do not exist. A `dry-run: plan`
+   line means the command opened the store under a configuration the server
+   refuses.
+
+4. Confirm that the configuration refusals that run before the verifier check
+   keep precedence.
+
+   ```bash
+   PODIUM_IDENTITY_PROVIDER= PODIUM_PUBLIC_MODE=true podium serve --standalone --no-embeddings --bind 0.0.0.0:8203; echo "exit=$?"
+   PODIUM_IDENTITY_PROVIDER= podium serve --standalone --no-embeddings --web-ui --bind 0.0.0.0:8203; echo "exit=$?"
+   PODIUM_IDENTITY_PROVIDER=trusted-headers podium-server sign-stored-rows --dry-run; echo "exit=$?"
+   ```
+
+   **Expect.** Each command prints `exit=1`. The first names
+   `config.public_bind_refused`, the second names
+   `config.web_ui_public_bind_refused`, and the third names
+   `config.trusted_headers_multitenant_no_secret`. None names
+   `config.multitenant_no_verifier`, which would mean the verifier check ran
+   first.
+
+5. **Positive control: a verified multi-tenant registry starts and routes.**
+   Serve the same configuration behind `injected-session-token`, provision a
+   per-run tenant as olivia, register a user layer as dave in it, and list
+   layers as dave in that tenant and in `default`.
+
+   ```bash
+   export PODIUM_IDENTITY_PROVIDER=injected-session-token
+   podium serve --standalone --no-embeddings --bind 127.0.0.1:8202 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8202/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   grep 'multi-tenant mode' "$WORK/srv.log"
+   export URL=http://127.0.0.1:8202
+   mint() { go -C "$PODIUM_REPO" run ./tools/minttoken --keys "$WORK/keys" --sub "$1" --email "$1" --org "$2"; }
+   OLIVIA=$(mint olivia@acme.com default)
+   DAVE_G=$(mint dave@acme.com "globex-$S")
+   curl -s -o /dev/null -w "create tenant HTTP %{http_code}\n" -X POST -H "Authorization: Bearer $OLIVIA" \
+     -H 'Content-Type: application/json' -d "{\"name\":\"globex-$S\"}" "$URL/v1/admin/tenants"
+   curl -s -o /dev/null -w "register layer HTTP %{http_code}\n" -X POST -H "Authorization: Bearer $DAVE_G" \
+     -H 'Content-Type: application/json' \
+     -d "{\"id\":\"dave-$S\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/dave/notes.git\",\"ref\":\"main\"}" "$URL/v1/layers"
+   layers() { curl -s -H "Authorization: Bearer $(mint "$1" "$2")" "$URL/v1/layers" | python3 -c "import json,sys; print([l['id'] for l in json.load(sys.stdin)['layers']])"; }
+   echo "dave in globex sees:  $(layers dave@acme.com "globex-$S")"
+   echo "dave in default sees: $(layers dave@acme.com default)"
+   ```
+
+   **Expect.** `server_alive` reports the server running, and `grep` prints
+   `multi-tenant mode: routing requests by organization`. The tenant create
+   and the layer registration each print `HTTP 201`. dave in `globex-<pid>`
+   sees `['dave-<pid>']`, and dave in `default` sees `['public-layer']`. A
+   startup refusal here means the verifier check refuses a verified provider.
+   `HTTP 403` on the registration means the registry did not route the
+   `org_id` claim to the tenant the API created.
+
+6. **Positive control for `sign-stored-rows`.** Stop the server and run the
+   dry run under the configuration step 5 served.
+
+   ```bash
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   podium-server sign-stored-rows --dry-run; echo "exit=$?"
+   ```
+
+   **Expect.** The command prints `dry-run: plan`, `dry-run: ... row(s)
+   planned`, and `dry-run: plan digest` lines and `exit=0`, which shows that
+   the refusals in step 3 came from the verifier check rather than from the
+   command or the store.
+
+7. **Positive control: a single-tenant public-mode registry starts.** Drop the
+   multi-tenant and identity settings and serve in public mode.
+
+   ```bash
+   unset PODIUM_MULTI_TENANT PODIUM_IDENTITY_PROVIDER PODIUM_RUNTIME_KEYS_PATH PODIUM_OAUTH_AUDIENCE
+   PODIUM_PUBLIC_MODE=true podium serve --standalone --no-embeddings --bind 127.0.0.1:8202 > "$WORK/pub.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8202/healthz
+   server_alive "$SRV" "$WORK/pub.log"
+   grep 'podium-server listening on ' "$WORK/pub.log"
+   curl -s "$URL/v1/layers" | python3 -c "import json,sys; print([l['id'] for l in json.load(sys.stdin)['layers']])"
+   ```
+
+   **Expect.** `server_alive` reports the server running, `grep` prints a
+   `podium-server listening on 127.0.0.1:8202 (mode=public)` line, and the
+   anonymous list prints `['public-layer']`.
+
+**Cleanup.** Stop the server with `kill "$SRV" 2>/dev/null` and `rm -rf "$WORK"`.
