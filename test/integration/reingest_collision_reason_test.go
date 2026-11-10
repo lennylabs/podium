@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -52,6 +53,10 @@ type rcReject struct {
 // executable field a child in another layer must restate under §4.6.
 const rcMCPParent = "core/mcpparent"
 
+// rcSandboxParent is the hidden-layer agent whose read-only-fs
+// sandbox_profile a child in another layer conflicts with under §4.6.
+const rcSandboxParent = "core/sandboxparent"
+
 // rcReingestStatus seeds the hidden admin layer with parents, ingests it,
 // gives alice a user-defined layer holding aliceTree, reingests that layer as
 // alice over POST /v1/layers/reingest, and returns the store, the status, and
@@ -75,6 +80,7 @@ func rcReingestStatus(t *testing.T, aliceTree map[string]string) (store.Store, i
 	rcWrite(t, coreDir, "core/old", rcArtifact("context", "1.0.0", "", "deprecated: true\n"))
 	rcWrite(t, coreDir, rcMCPParent, rcArtifact("agent", "1.0.0", "",
 		"mcpServers:\n  - name: jira\n    command: jira-mcp\n    args: [--stdio]\n"))
+	rcWrite(t, coreDir, rcSandboxParent, rcArtifact("agent", "1.0.0", "", "sandbox_profile: read-only-fs\n"))
 	core := store.LayerConfig{
 		TenantID: "t", ID: rcHiddenLayer, Order: 1, SourceType: "local", LocalPath: coreDir,
 		Users: []string{"ops@acme.com"},
@@ -83,7 +89,7 @@ func rcReingestStatus(t *testing.T, aliceTree map[string]string) (store.Store, i
 		t.Fatalf("PutLayerConfig(core): %v", err)
 	}
 	res, err := localReingestRunner(st, nil)(ctx, core, nil)
-	if err != nil || len(res.Rejected) > 0 || res.Accepted != 5 {
+	if err != nil || len(res.Rejected) > 0 || res.Accepted != 6 {
 		t.Fatalf("ingest core: err=%v accepted=%d rejected=%+v", err, res.Accepted, res.Rejected)
 	}
 
@@ -258,6 +264,39 @@ func TestReingest_ExecutableInheritanceDetails(t *testing.T) {
 	}
 	if !sawNote {
 		t.Errorf("shared/note collision not rejected: %s", body)
+	}
+}
+
+// Spec: §4.6, §7.3.1 — a reingest that refuses a child whose
+// sandbox_profile conflicts with a parent's in a layer the owner cannot read
+// reports the refusal with ingest.invalid_artifact and details holding the
+// sandbox_profile_conflict constraint alone. Neither the reason, the details,
+// nor the response body names the parent, its layer, or either profile value.
+func TestReingest_SandboxProfileConflictDetails(t *testing.T) {
+	t.Parallel()
+	body, rejected := rcReingest(t, map[string]string{
+		"mine/sandboxed": rcArtifact("agent", "1.0.0", rcSandboxParent, "sandbox_profile: network-isolated\n"),
+	})
+	got, ok := rejected["mine/sandboxed"]
+	if !ok {
+		t.Fatalf("mine/sandboxed not rejected: %s", body)
+	}
+	if got.Code != "ingest.invalid_artifact" {
+		t.Errorf("code = %q, want ingest.invalid_artifact", got.Code)
+	}
+	if want := map[string]any{"constraint": "sandbox_profile_conflict"}; !reflect.DeepEqual(got.Details, want) {
+		t.Errorf("details = %#v, want %#v", got.Details, want)
+	}
+	details, err := json.Marshal(got.Details)
+	if err != nil {
+		t.Fatalf("marshal details: %v", err)
+	}
+	for _, withheld := range []string{rcSandboxParent, rcHiddenLayer, "read-only-fs", "network-isolated"} {
+		for where, text := range map[string]string{"reason": got.Reason, "details": string(details), "body": string(body)} {
+			if strings.Contains(text, withheld) {
+				t.Errorf("%s names %q: %s", where, withheld, text)
+			}
+		}
 	}
 }
 
