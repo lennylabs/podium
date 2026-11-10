@@ -20,7 +20,10 @@ import (
 )
 
 // writeLargeManifestRegistry lays out a two-layer filesystem registry whose
-// merged child and skill carry manifest documents above the inline cutoff.
+// merged child and skill carry manifest documents above the inline cutoff. The
+// child team/big restates the undeclared x_owner key its parent in the base
+// layer sets, because §4.6 refuses a child that leaves an undeclared key to a
+// parent in another layer, and it inherits the parent's sensitivity.
 func writeLargeManifestRegistry(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -31,7 +34,7 @@ func writeLargeManifestRegistry(t *testing.T) string {
 		testharness.WriteTreeOption{Path: "base/shared/parent/ARTIFACT.md",
 			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsensitivity: low\nx_owner: platform\n---\n\nparent prose\n"},
 		testharness.WriteTreeOption{Path: "top/team/big/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: big child\nextends: shared/parent@1.x\n---\n\n" + daBigBody},
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: big child\nx_owner: platform\nextends: shared/parent@1.x\n---\n\n" + daBigBody},
 		testharness.WriteTreeOption{Path: "top/team/bigskill/ARTIFACT.md",
 			Content: "---\ntype: skill\nversion: 1.0.0\ndescription: big skill\n---\n"},
 		testharness.WriteTreeOption{Path: "top/team/bigskill/SKILL.md",
@@ -75,7 +78,8 @@ func TestServerSync_LargeMergedManifestMatchesFilesystemSync(t *testing.T) {
 			t.Errorf("%s: filesystem %d bytes, server %d bytes; want equal and non-empty", path, len(fsTree[path]), len(srvTree[path]))
 		}
 	}
-	if !strings.Contains(srvTree["team/big/ARTIFACT.md"], "x_owner: platform") {
+	if big := srvTree["team/big/ARTIFACT.md"]; !strings.Contains(big, "x_owner: platform") ||
+		!strings.Contains(big, "sensitivity: low") {
 		t.Error("the server-source ARTIFACT.md is not the merged document")
 	}
 }

@@ -11,35 +11,40 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// earLoad ingests a parent and a child, loads the child, and returns the audit
-// events the load emitted.
+// earChildID is the canonical ID of the child earLoad stores beside its parent
+// shared/parent. It sorts byte-wise after the parent's ID, so the single ingest
+// pass stores the parent before the child resolves its pin.
+const earChildID = "shared/payroll-child"
+
+// earLoad ingests a parent and a child into one layer, loads the child, and
+// returns the audit events the load emitted. The tests that call it pin how
+// audit_redact and the undeclared keys it names reach the read event when the
+// child inherits them, and §4.6 refuses a child that leaves an undeclared key to
+// a parent in another layer, so both rows share a layer.
 func earLoad(t *testing.T, parent, child string) []core.AuditEvent {
 	t.Helper()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	for _, in := range []struct{ layerID, path, body string }{
-		{"L1", "shared/parent/ARTIFACT.md", parent},
-		{"L2", "finance/child/ARTIFACT.md", child},
-	} {
-		res, err := ingest.Ingest(context.Background(), st, ingest.Request{
-			TenantID: "t", LayerID: in.layerID,
-			Files: fstest.MapFS{in.path: &fstest.MapFile{Data: []byte(in.body)}},
-		})
-		if err != nil {
-			t.Fatalf("ingest %s: %v", in.path, err)
-		}
-		if res.Accepted != 1 {
-			t.Fatalf("ingest %s not accepted: %+v", in.path, res.Rejected)
-		}
+	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "t", LayerID: "L1",
+		Files: fstest.MapFS{
+			"shared/parent/ARTIFACT.md": &fstest.MapFile{Data: []byte(parent)},
+			earChildID + "/ARTIFACT.md": &fstest.MapFile{Data: []byte(child)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if res.Accepted != 2 {
+		t.Fatalf("ingest accepted %d of 2 artifacts: %+v", res.Accepted, res.Rejected)
 	}
 	rec := &recorder{}
 	reg := core.New(st, "t", []layer.Layer{
 		{ID: "L1", Visibility: layer.Visibility{Public: true}, Precedence: 1},
-		{ID: "L2", Visibility: layer.Visibility{Public: true}, Precedence: 2},
 	}).WithAudit(rec.emit)
-	if _, err := reg.LoadArtifact(context.Background(), publicID, "finance/child", core.LoadArtifactOptions{}); err != nil {
+	if _, err := reg.LoadArtifact(context.Background(), publicID, earChildID, core.LoadArtifactOptions{}); err != nil {
 		t.Fatalf("LoadArtifact: %v", err)
 	}
 	return rec.snapshot()
@@ -93,14 +98,14 @@ func TestExtendsAuditRedact_InheritedDirectiveReachesTheReadEvent(t *testing.T) 
 			"audit_redact: [x_bank_account]\nx_bank_account: GB29-NWBK-0000\n---\n\nparent body\n",
 		"---\ntype: agent\nversion: 2.0.0\ndescription: child\nextends: shared/parent@1.x\n---\n\nchild body\n")
 
-	keys := redactKeysFor(events, "finance/child")
+	keys := redactKeysFor(events, earChildID)
 	if !hasKey(keys, "x_bank_account") {
 		t.Fatalf("RedactKeys = %v, want the inherited x_bank_account directive", keys)
 	}
 	// The directive needs a concrete target, so the value must be in the
 	// event context for the emitter to mask.
 	for _, e := range events {
-		if e.Target != "finance/child" || e.Type != "artifact.loaded" {
+		if e.Target != earChildID || e.Type != "artifact.loaded" {
 			continue
 		}
 		if got := e.Context["x_bank_account"]; got != "GB29-NWBK-0000" {
@@ -127,9 +132,9 @@ func TestExtendsAuditRedact_ChildOwnDirectiveIsKept(t *testing.T) {
 		"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
 			"audit_redact: [x_child_key]\nx_child_key: c\nextends: shared/parent@1.x\n---\n\nchild body\n")
 
-	ev := loadEventFor(events, "finance/child")
+	ev := loadEventFor(events, earChildID)
 	if ev == nil {
-		t.Fatalf("no artifact.loaded event for finance/child: %+v", events)
+		t.Fatalf("no artifact.loaded event for %s: %+v", earChildID, events)
 	}
 	if !hasKey(ev.RedactKeys, "x_child_key") {
 		t.Errorf("RedactKeys = %v, want the child's own x_child_key", ev.RedactKeys)
@@ -151,7 +156,7 @@ func TestExtendsAuditRedact_NoDirectiveAnywhereEmitsNoKeys(t *testing.T) {
 		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
 		"---\ntype: agent\nversion: 2.0.0\ndescription: child\nextends: shared/parent@1.x\n---\n\nchild body\n")
 
-	if keys := redactKeysFor(events, "finance/child"); len(keys) != 0 {
+	if keys := redactKeysFor(events, earChildID); len(keys) != 0 {
 		t.Errorf("RedactKeys = %v, want none", keys)
 	}
 }

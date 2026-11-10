@@ -61,9 +61,10 @@ type RenderResult struct {
 	ChangedArtifacts []string
 	Files            []string
 	// Dropped lists the artifacts the filesystem-source composition dropped
-	// under the §4.6 collision rule (§13.11.3). The render omits them;
-	// callers report each entry with layer.CollisionCode and Reason().
-	Dropped []layer.Collision
+	// under the §4.6 collision rule or the §4.6 executable-field rule
+	// (§13.11.3). The render omits them; callers report each entry with its
+	// Code and Reason.
+	Dropped []layer.Drop
 }
 
 // ErrNoEmitter signals that a harness in the output's harness set has no §7.8

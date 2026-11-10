@@ -18,7 +18,12 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// emfLoad ingests a parent and a child into two layers and loads the child.
+// emfLoad ingests a parent and then a child into one layer and loads the child.
+// The tests that call it pin how the read path serves keys the child inherits,
+// including undeclared keys. §4.6 refuses a child that leaves an undeclared key
+// to a parent in another layer, so both rows share a layer. The parent is
+// ingested by its own call first, so the child resolves its pin against a
+// stored row whatever order the two IDs sort in.
 func emfLoad(t *testing.T, parent, child string) (*core.LoadArtifactResult, error) {
 	t.Helper()
 	st := store.NewMemory()
@@ -26,15 +31,14 @@ func emfLoad(t *testing.T, parent, child string) (*core.LoadArtifactResult, erro
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	for _, in := range []struct {
-		layerID string
-		path    string
-		body    string
+		path string
+		body string
 	}{
-		{"L1", "shared/parent/ARTIFACT.md", parent},
-		{"L2", "finance/child/ARTIFACT.md", child},
+		{"shared/parent/ARTIFACT.md", parent},
+		{"finance/child/ARTIFACT.md", child},
 	} {
 		res, err := ingest.Ingest(context.Background(), st, ingest.Request{
-			TenantID: "t", LayerID: in.layerID,
+			TenantID: "t", LayerID: "L1",
 			Files: fstest.MapFS{in.path: &fstest.MapFile{Data: []byte(in.body)}},
 		})
 		if err != nil {
@@ -46,7 +50,6 @@ func emfLoad(t *testing.T, parent, child string) (*core.LoadArtifactResult, erro
 	}
 	reg := core.New(st, "t", []layer.Layer{
 		{ID: "L1", Visibility: layer.Visibility{Public: true}, Precedence: 1},
-		{ID: "L2", Visibility: layer.Visibility{Public: true}, Precedence: 2},
 	})
 	return reg.LoadArtifact(context.Background(), publicID, "finance/child", core.LoadArtifactOptions{})
 }
@@ -568,8 +571,8 @@ func TestExtendsFrontmatter_EmptyChildCollectionWins(t *testing.T) {
 }
 
 // Spec: §4.6 hidden parents, §4.6 collisions — a child may extend its own
-// canonical ID, and the parent is then the row below it in layer order. That
-// row carries the canonical ID the requester asked for, so serving a value that
+// canonical ID, and the parent is then an earlier version of that ID. That row
+// carries the canonical ID the requester asked for, so serving a value that
 // spells it surfaces neither an ID the requester lacks nor the existence of a
 // second row, and the overlay keeps every key it inherits.
 func TestExtendsFrontmatter_SameIDOverlayIsServed(t *testing.T) {
@@ -597,35 +600,43 @@ func TestExtendsFrontmatter_SameIDOverlayIsServed(t *testing.T) {
 	}
 }
 
-// overlayLoad ingests a base carrying keys and a same-ID overlay extending it
-// into two layers, then loads the shared canonical ID.
+// overlayLoad ingests a base carrying keys at version 1.0.0 and a same-ID
+// overlay at version 2.0.0 that extends it, both into one layer, then loads the
+// shared canonical ID. The overlay inherits the base's undeclared keys, and
+// §4.6 refuses a child that leaves an undeclared key to a parent in another
+// layer, so the overlay extends an earlier version in its own layer rather than
+// a row a lower layer contributes. Each version is ingested by its own call
+// because one snapshot holds one ARTIFACT.md per canonical ID.
 func overlayLoad(t *testing.T, keys string) (*core.LoadArtifactResult, error) {
 	t.Helper()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	for _, in := range []struct{ layerID, body string }{
-		{"L1", "---\ntype: agent\nversion: 1.0.0\ndescription: base\n" + keys + "---\n\nbase body\n"},
-		{"L2", "---\ntype: agent\nversion: 2.0.0\ndescription: overlay\n" +
-			"extends: shared/base@1.x\n---\n\noverlay body\n"},
+	for _, body := range []string{
+		"---\ntype: agent\nversion: 1.0.0\ndescription: base\n" + keys + "---\n\nbase body\n",
+		"---\ntype: agent\nversion: 2.0.0\ndescription: overlay\n" +
+			"extends: shared/base@1.x\n---\n\noverlay body\n",
 	} {
 		res, err := ingest.Ingest(context.Background(), st, ingest.Request{
-			TenantID: "t", LayerID: in.layerID,
-			Files: fstest.MapFS{"shared/base/ARTIFACT.md": &fstest.MapFile{Data: []byte(in.body)}},
+			TenantID: "t", LayerID: "L1",
+			Files: fstest.MapFS{"shared/base/ARTIFACT.md": &fstest.MapFile{Data: []byte(body)}},
 		})
 		if err != nil {
-			t.Fatalf("ingest %s: %v", in.layerID, err)
+			t.Fatalf("ingest %q: %v", body, err)
 		}
 		if res.Accepted != 1 {
-			t.Fatalf("ingest %s not accepted: %+v", in.layerID, res.Rejected)
+			t.Fatalf("ingest %q not accepted: %+v", body, res.Rejected)
 		}
 	}
 	reg := core.New(st, "t", []layer.Layer{
 		{ID: "L1", Visibility: layer.Visibility{Public: true}, Precedence: 1},
-		{ID: "L2", Visibility: layer.Visibility{Public: true}, Precedence: 2},
 	})
-	return reg.LoadArtifact(context.Background(), publicID, "shared/base", core.LoadArtifactOptions{})
+	got, err := reg.LoadArtifact(context.Background(), publicID, "shared/base", core.LoadArtifactOptions{})
+	if err == nil && got.Version != "2.0.0" {
+		t.Fatalf("load served version %s, want the overlay's 2.0.0", got.Version)
+	}
+	return got, err
 }
 
 // Spec: §4.6 — a child that declares no undeclared key is served the typed

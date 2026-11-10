@@ -228,3 +228,47 @@ func TestRegister_ForcePushPolicyValidation(t *testing.T) {
 		t.Errorf("ForcePushPolicy = %q, want strict", got.ForcePushPolicy)
 	}
 }
+
+// Spec: §7.3.1 — a rejected entry carries details only when the rejecting
+// rule defines them. The §4.6 executable-field rejection serializes its
+// constraint and field paths, and a rule without details, such as the
+// cross-layer collision, serializes no details key.
+func TestReingest_RejectedCarriesDetailsOnlyWhenDefined(t *testing.T) {
+	t.Parallel()
+	runner := func(_ context.Context, _ store.LayerConfig, _ *server.BreakGlass) (*ingest.Result, error) {
+		return &ingest.Result{Rejected: []ingest.RejectedArtifact{
+			{
+				ArtifactID: "mine/agent", Code: "ingest.invalid_artifact", Reason: "extends: executable",
+				Details: map[string]any{"constraint": "executable_inheritance", "fields": []string{"mcpServers[jira]"}},
+			},
+			{ArtifactID: "shared/note", Code: "ingest.collision", Reason: "collision"},
+		}}, nil
+	}
+	base, cleanup := newRunnerHarness(t, runner)
+	defer cleanup()
+
+	resp, err := http.Post(base+"/v1/layers/reingest?id=team-shared", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var m struct {
+		Rejected []map[string]any `json:"rejected"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := []map[string]any{
+		{
+			"artifact_id": "mine/agent", "code": "ingest.invalid_artifact", "reason": "extends: executable",
+			"details": map[string]any{"constraint": "executable_inheritance", "fields": []any{"mcpServers[jira]"}},
+		},
+		{"artifact_id": "shared/note", "code": "ingest.collision", "reason": "collision"},
+	}
+	if !reflect.DeepEqual(m.Rejected, want) {
+		t.Errorf("rejected = %#v, want %#v", m.Rejected, want)
+	}
+}

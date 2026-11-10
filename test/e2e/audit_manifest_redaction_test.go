@@ -93,7 +93,7 @@ func TestAudit_ExtendsInheritedRedaction(t *testing.T) {
 	t.Parallel()
 
 	const secret = "GB29-NWBK-6016-1331-9268-19"
-	const childID = "finance/inherited-payroll"
+	const childID = "shared/payroll-inherited"
 	var mu sync.Mutex
 	var received []string
 	recorder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -105,15 +105,17 @@ func TestAudit_ExtendsInheritedRedaction(t *testing.T) {
 	}))
 	t.Cleanup(recorder.Close)
 
-	// Two layers, so the parent is ingested and stored before the child that
-	// pins it. A single-layer fixture depends on the walk order of one ingest
-	// pass, where a parent that sorts after its child is not yet stored.
+	// The parent and the child share one layer, because §4.6 refuses a child
+	// that leaves an undeclared key to a parent in another layer. One ingest
+	// pass processes a layer's records in canonical-ID order and resolves a pin
+	// only against stored rows, so the parent's ID shared/payroll-base sorts
+	// before the child's and the parent is stored before the child pins it.
 	reg := writeRegistry(t, map[string]string{
-		".registry-config": "multi_layer: true\nlayer_order:\n  - org-defaults\n  - team-foo\n",
+		".registry-config": "multi_layer: true\nlayer_order:\n  - org-defaults\n",
 		"org-defaults/shared/payroll-base/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n" +
 			"description: Payroll base.\nsensitivity: low\n" +
 			"x_bank_account: \"" + secret + "\"\naudit_redact:\n  - x_bank_account\n---\n\nparent body\n",
-		"team-foo/" + childID + "/ARTIFACT.md": "---\ntype: context\nversion: 2.0.0\n" +
+		"org-defaults/" + childID + "/ARTIFACT.md": "---\ntype: context\nversion: 2.0.0\n" +
 			"description: Inherited payroll record.\nsensitivity: low\n" +
 			"extends: shared/payroll-base@1.x\n---\n\nchild body\n",
 	})

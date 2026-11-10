@@ -84,9 +84,9 @@ func (f ScopeFilter) Select(records []Record) []Record {
 // view as a workspace sync).
 //
 // The second return lists the artifacts a filesystem-source composition
-// dropped under the §4.6 collision rule (§13.11.3); a server source returns
-// none.
-func FetchRecords(opts Options) ([]Record, []layer.Collision, error) {
+// dropped under the §4.6 collision rule or the §4.6 executable-field rule
+// (§13.11.3); a server source returns none.
+func FetchRecords(opts Options) ([]Record, []layer.Drop, error) {
 	if opts.RegistryPath == "" {
 		return nil, nil, ErrNoRegistry
 	}

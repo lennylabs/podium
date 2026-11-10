@@ -572,9 +572,11 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watc
 }
 
 // errDropped marks a --config target whose composition dropped at least one
-// artifact under the §4.6 collision rule. runMultiTargetSync prints it as the
-// target's failure and counts the target as failed (§13.11.3).
-var errDropped = errors.New("dropped at least one artifact (ingest.collision)")
+// artifact under the §4.6 collision rule or the §4.6 executable-field rule.
+// runMultiTargetSync prints it as the target's failure and counts the target
+// as failed (§13.11.3). It names no code, because the per-artifact rejected
+// line on standard error already carries each drop's code.
+var errDropped = errors.New("dropped at least one artifact")
 
 // runWorkspaceTarget materializes a kind: workspace plan through sync.Run,
 // wrapped by the operator prepare/publish workflow phases when the plan carries

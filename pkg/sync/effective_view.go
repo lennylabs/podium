@@ -42,7 +42,8 @@ func ResolveEffectiveView(opts Options) ([]EffectiveArtifact, error) {
 	}
 
 	if opts.RegistryPath != "" {
-		// A dropped artifact is outside the effective view, as it is on a
+		// An artifact dropped under the §4.6 collision rule or the §4.6
+		// executable-field rule is outside the effective view, as it is on a
 		// server that rejected it at ingest, so the checklist omits it. The
 		// override's apply step reports the drops through
 		// OverrideResult.Dropped.

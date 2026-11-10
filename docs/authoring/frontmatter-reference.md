@@ -289,7 +289,7 @@ When two layers contribute artifacts with the same canonical ID, the higher-prec
 | `license` | Scalar; child wins (lint warning if changed across layers). |
 | `search_visibility` | Scalar; most-restrictive (`direct-only` > `indexed`). |
 
-If a child omits a field of its `ARTIFACT.md` frontmatter, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above. When both the parent and the child declare a value, a field in the table merges per its row, and every field outside the table takes the child's value. The child's `type:` must match the parent's, and the child's `version:` is independent of the parent's.
+If a child omits a field of its `ARTIFACT.md` frontmatter, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above, except that a child whose parent comes from another layer restates the [executable fields](extends#executable-fields-across-layers) that parent sets. When both the parent and the child declare a value, a field in the table merges per its row, and every field outside the table takes the child's value. The child's `type:` must match the parent's, and the child's `version:` is independent of the parent's.
 
 For skills, the merge applies to the `ARTIFACT.md` frontmatter alone. The registry serves the child's `SKILL.md` verbatim, so `name`, `description`, `license`, and the other agentskills.io fields come from the child's `SKILL.md` and are not inherited from the parent's, whether or not the child's `SKILL.md` declares them.
 

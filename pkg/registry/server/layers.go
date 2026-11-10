@@ -1998,16 +1998,23 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 	}
 	// spec: §7.3.1 / §4.6 — surface the artifacts the snapshot dropped for
 	// reasons other than lint or immutability (sensitivity floor, sandbox
-	// profile, cross-layer collision, extends mismatch, quota). Without this a
-	// reingest that accepts nothing returns accepted:0 with no indication of
-	// why, which is indistinguishable from "the snapshot was empty."
-	rejected := make([]map[string]string, 0, len(res.Rejected))
+	// profile, cross-layer collision, extends mismatch, the executable-field
+	// rule, quota). Without this a reingest that accepts nothing returns
+	// accepted:0 with no indication of why, which is indistinguishable from
+	// "the snapshot was empty." An entry carries details only when the
+	// rejecting rule defines them, as the executable-field rule's constraint
+	// and field paths are.
+	rejected := make([]map[string]any, 0, len(res.Rejected))
 	for _, rj := range res.Rejected {
-		rejected = append(rejected, map[string]string{
+		entry := map[string]any{
 			"artifact_id": rj.ArtifactID,
 			"code":        rj.Code,
 			"reason":      rj.Reason,
-		})
+		}
+		if len(rj.Details) > 0 {
+			entry["details"] = rj.Details
+		}
+		rejected = append(rejected, entry)
 	}
 	// §4.7 hybrid search: an artifact whose manifest stored but whose embedding
 	// call failed is searchable by BM25 only until `podium admin reembed`.

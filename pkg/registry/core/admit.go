@@ -353,7 +353,7 @@ func sentinelOf(err error) error {
 //
 // Spec: §8.2, §13.4.
 func (r *Registry) revalidationRedactKeys(ctx context.Context, rec store.ManifestRecord, requestedID string) ([]string, error) {
-	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
+	chain, err := r.resolveExtendsChain(ctx, rec)
 	if err != nil {
 		log.Printf("admission: revalidation of %s/%s: %v", r.TenantFor(ctx), requestedID, err)
 		return nil, fmt.Errorf("%w: %s", sentinelOf(err), requestedID)

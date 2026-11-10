@@ -61,9 +61,9 @@ type OverrideResult struct {
 	Changed  bool
 	Warnings []string
 	// Dropped lists the artifacts the re-materialization dropped under the
-	// §4.6 collision rule (§13.11.3); empty under DryRun, without a
-	// RegistryPath, and for a server source.
-	Dropped []layer.Collision
+	// §4.6 collision rule or the §4.6 executable-field rule (§13.11.3);
+	// empty under DryRun, without a RegistryPath, and for a server source.
+	Dropped []layer.Drop
 }
 
 // Override applies the §7.5.5 toggle semantics to the lock file at
@@ -152,7 +152,7 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 	// Re-materialize the target from the lock's scope + the updated toggles
 	// so the on-disk set matches. PreserveToggles keeps the toggles we just
 	// wrote and rewrites the lock with the new materialized paths.
-	var dropped []layer.Collision
+	var dropped []layer.Drop
 	if !opts.DryRun && opts.RegistryPath != "" {
 		res, err := Run(Options{
 			RegistryPath:    opts.RegistryPath,

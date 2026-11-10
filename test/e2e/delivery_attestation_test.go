@@ -129,14 +129,17 @@ var showBigBody = strings.Repeat("show line\n", objectstore.InlineCutoff/10+100)
 
 // showRegistry serves a two-layer registry whose merged child and skill carry
 // above-cutoff manifest documents, over the filesystem object-store backend.
+// The child team/big restates the undeclared x_owner key its parent in the base
+// layer sets, because §4.6 refuses a child that leaves an undeclared key to a
+// parent in another layer, and it inherits the parent's from-parent tag.
 func showRegistry(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	testharness.WriteTree(t, root,
 		testharness.WriteTreeOption{Path: "base/shared/parent/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\nx_owner: platform\n---\n\nparent prose\n"},
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\ntags: [from-parent]\nx_owner: platform\n---\n\nparent prose\n"},
 		testharness.WriteTreeOption{Path: "top/team/big/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: big child\nextends: shared/parent@1.x\n---\n\n" + showBigBody},
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: big child\nx_owner: platform\nextends: shared/parent@1.x\n---\n\n" + showBigBody},
 		testharness.WriteTreeOption{Path: "top/team/bigskill/ARTIFACT.md",
 			Content: "---\ntype: skill\nversion: 1.0.0\ndescription: big skill\n---\n"},
 		testharness.WriteTreeOption{Path: "top/team/bigskill/SKILL.md",
@@ -177,6 +180,7 @@ func TestCLI_ArtifactShowFollowsManifestBodyURL(t *testing.T) {
 	res = runPodium(t, "", env, "artifact", "show", "team/big")
 	cliWantExit(t, res, 0, "artifact show team/big")
 	cliContains(t, res.Stdout, "x_owner: platform", "the merged frontmatter")
+	cliContains(t, res.Stdout, "from-parent", "the parent's inherited tag")
 	cliContains(t, res.Stdout, "final line", "the merged body")
 
 	res = runPodium(t, "", env, "artifact", "show", "team/bigskill", "--json")

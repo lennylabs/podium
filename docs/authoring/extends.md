@@ -113,11 +113,54 @@ ASCII fallback for the diagram above (inheritance with extends:):
 | `license` | Scalar; child wins (lint warning if changed across layers). |
 | `search_visibility` | Scalar; most-restrictive (`direct-only` > `indexed`). |
 
-**Omitted fields.** If a child omits a frontmatter field, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above. When both the parent and the child declare a value, a field in the table merges per its row, and every other field takes the child's value: `deprecated`, `replaced_by`, `effort_hint`, `model_class_hint`, `sbom`, `rule_mode`, `rule_globs`, `rule_description`, `hook_event`, `hook_action`, `server_identifier`, `target_harnesses`, `input`, `output`, and any extension-type fields. The child's `type:` must match the parent's; ingest rejects an `extends:` chain that crosses types. The child's `version:` is independent; each artifact has its own version, and the parent version is pinned at the child's ingest time.
+**Omitted fields.** If a child omits a frontmatter field, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above. When both the parent and the child declare a value, a field in the table merges per its row, and every other field takes the child's value: `deprecated`, `replaced_by`, `effort_hint`, `model_class_hint`, `sbom`, `rule_mode`, `rule_globs`, `rule_description`, `hook_event`, `hook_action`, `server_identifier`, `target_harnesses`, `input`, `output`, and any extension-type fields. The child's `type:` must match the parent's; ingest rejects an `extends:` chain that crosses types. The child's `version:` is independent; each artifact has its own version, and the parent version is pinned at the child's ingest time. A child whose parent comes from another layer restates the executable fields that parent sets; see [Executable fields across layers](#executable-fields-across-layers).
 
 Extension types register their own merge semantics via `TypeProvider`.
 
 The "most-restrictive" rules apply to security-relevant fields. A parent at `sensitivity: medium` cannot be relaxed to `low` by a child; a parent with `sandbox_profile: read-only-fs` cannot be widened to `unrestricted`.
+
+---
+
+## Executable fields across layers
+
+A child whose parent comes from another layer restates every executable field that parent sets. An executable field carries something a harness runs, or something an adapter can write verbatim into a harness-native file, where the registry cannot determine whether the harness acts on it.
+
+**The executable fields.** The executable fields are `hook_action`, `server_identifier`, `mcpServers`, and every top-level `ARTIFACT.md` key that the [ARTIFACT.md section of the frontmatter schema](../reference/frontmatter-schema#artifactmd) does not list. That section lists `source`, `audit_redact`, and `lint_suppress`, so they are outside the set. It also lists `name`, `description`, and `license`, so they are outside the set even in a skill's `ARTIFACT.md`. The set includes custom metadata keys, every extension-type field whatever its `TypeProvider` declares, and a key that only `SKILL.md` or `DOMAIN.md` defines when it is written into `ARTIFACT.md`, such as `allowed-tools`, `compatibility`, `metadata`, or `include`.
+
+**Restating a field.** When the parent version the child pins comes from another layer, the child restates each executable field the parent sets. The parent sets a field when the field carries a value in the parent's resolved manifest, so a value the parent inherited from its own `extends:` chain counts as one it sets. The child restates a field under these conditions:
+
+- `hook_action` or `server_identifier`: the child's own frontmatter sets the key to a non-empty value.
+- `mcpServers`: for each entry name in the parent's list, the child's list carries an entry under that name, and that entry sets each of `transport`, `command`, and `args` that the parent's entry sets and each `env` key that the parent's entry sets.
+- An undeclared key: the child's own frontmatter sets the key to a value other than an empty scalar. An empty list (`[]`) or an empty map (`{}`) restates the key, and an empty string does not.
+
+The restated value may equal the parent's or differ from it. A child cannot remove a parent's `mcpServers` entry, `env` key, or undeclared key, so it restates each one. A child that sets `mcpServers: []` restates no entry, because the merge keeps every parent entry.
+
+**Which edges the rule tests.** The rule compares the child's layer with the layer that contributes the parent version the child pins. A child and a parent in the same layer are unaffected, and the child inherits every field as before. A same-ID overlay crosses layers when its `extends:` reference selects the copy a lower layer contributes, so the overlay restates each executable field that copy sets. When a registry server resolves the reference to an earlier version of the overlay stored from the overlay's own layer, the edge lies within that layer and the server accepts the overlay without a restatement. `podium sync` against a filesystem registry always tests the edge to the next-lower layer's copy, so it drops the same overlay.
+
+**Fields outside the rule.** `hook_event`, `runtime_requirements`, `sandbox_profile`, `external_resources`, and the remaining fields of the merge table follow the merge rules above. `hook_event` selects when an action runs and supplies nothing to run. `runtime_requirements` is an input to the host capability check. `sandbox_profile` constrains execution. `external_resources` holds pointer records whose bytes the registry neither stores nor serves.
+
+**Rejection.** Ingest rejects a child that leaves an executable field to a parent in another layer with `ingest.invalid_artifact`. The rejection carries a `details` object with `constraint: "executable_inheritance"` and `fields`, which lists each field to restate as `hook_action`, `server_identifier`, `mcpServers[<name>]`, `mcpServers[<name>].transport`, `mcpServers[<name>].command`, `mcpServers[<name>].args`, `mcpServers[<name>].env.<KEY>`, or the bare name of an undeclared key. The reason lists the same fields. Neither the reason nor `details` names the parent's canonical ID, version, or layer. The [reingest endpoint](../reference/http-api#reingest) describes the wire form, and [Error codes](../reference/error-codes) describes the code.
+
+When a field the child would have to restate is named with the ID of an artifact in its parent chain, as an `mcpServers` entry name, an `env` key, or an undeclared key, ingest rejects the child with `ingest.invalid_artifact` and no `details`, and the reason names no field and no parent. A registry server and `podium sync` against a filesystem registry both give the reason `extends: executable fields could not be read`. Such a child would fail every read, because every read of it withholds the IDs in its parent chain.
+
+**Stored versions and filesystem registries.** The rule applies to the version being ingested and never invalidates a version already stored. A stored version keeps its pin and keeps serving, and a reingest that presents it with unchanged bytes classifies it unchanged. A child in the same layer as such a stored version keeps inheriting the executable values that version inherited from another layer, because the child's own edge lies within one layer. `podium sync` against a filesystem registry keeps no ingest state, so it applies the rule on every run and drops each child the rule refuses.
+
+**Hooks.** A registry server already refuses an authored `type: hook` artifact that omits `hook_action`, through lint, before this rule runs. A same-ID overlay of a hook from a lower layer restates both hook fields:
+
+```yaml
+# layers/team-foo/ops/session-audit/ARTIFACT.md
+---
+type: hook
+version: 2.0.0
+extends: ops/session-audit@1.x
+hook_event: session_end
+hook_action: |
+  INPUT=$(cat)
+  echo "$INPUT" >> ~/.podium/team-foo-session-audit.log
+---
+```
+
+Lint requires `hook_event` on a hook artifact, and the executable-field rule requires `hook_action`, because the parent copy comes from another layer.
 
 ---
 
@@ -171,7 +214,7 @@ When a child manifest declares `extends: <parent>` and the requesting identity c
 
 A parent whose canonical ID equals the requested ID, the same-ID overlay, is exempt from the canonical-ID withholding, because the requester asked for that ID. The overlay is also exempt from the reference test on the load path and on the search descriptor, so a block that names its own canonical ID is served. Its version, layer, content hash, and signature stay withheld.
 
-**Served.** The parent's frontmatter values reach the requester through the merge by design. Every key the parent declares and the child does not override is served in the merged block per the merge table above, including extension-type keys, and list-valued fields carry the parent's entries beside the child's. The parent's description, tags, sensitivity, and search visibility are folded into the child's indexed record at ingest, so parent-authored text is reachable through search on the child. The parent's prose body, bundled resources, and `SKILL.md` are not served.
+**Served.** The parent's frontmatter values reach the requester through the merge by design. Every key the parent declares and the child does not override is served in the merged block per the merge table above, including extension-type keys, and list-valued fields carry the parent's entries beside the child's. The [executable-field rule](#executable-fields-across-layers) limits which executable keys a child may leave to a parent in another layer. The parent's description, tags, sensitivity, and search visibility are folded into the child's indexed record at ingest, so parent-authored text is reachable through search on the child. The parent's prose body, bundled resources, and `SKILL.md` are not served.
 
 **Observable.** A requester can determine that a merge occurred. The served `content_hash` covers the child's pre-merge package, so the merged bytes a requester receives do not reproduce it, and that mismatch shows that the artifact extends something. The guarantee covers the parent's identity and its unmerged content. It does not conceal the existence of an inheritance relationship.
 
@@ -258,6 +301,8 @@ mcpServers:
 
 Merged result for a caller who can see both layers: child's `description`, `version`, prose body. `mcpServers` deep-merged by `name`, with the child's entry overriding the parent's (because the merge key matches). `sensitivity: medium` carried from the parent (most-restrictive between unset and `medium`).
 
+The team child restates the parent's only `mcpServers` entry in full, so it satisfies the [executable-field rule](#executable-fields-across-layers).
+
 ### Tightening sandbox profile
 
 A child can tighten security-relevant fields in `ARTIFACT.md` without redeclaring the rest:
@@ -276,13 +321,16 @@ sandbox_profile: read-only-fs
 
 The parent's `sandbox_profile: unrestricted` is overridden by the child's `read-only-fs` (most-restrictive wins). The rest of the parent (description, prose body, tags, etc.) is unchanged.
 
+The child ingests because the parent sets no executable field. A parent that sets one requires the child to restate it.
+
 ---
 
 ## Lint behavior
 
 - Unresolved parent at ingest time: ingest error (`ingest.invalid_artifact`). The registry pins the parent version when the child is ingested, so the parent must already be ingested under the tenant. Ingest the parent's layer first.
 - Cycle detected: ingest error.
-- Child declaring `extends:` against a parent in a layer the child's layer cannot see: ingest succeeds; the parent resolves at request time per the visibility rules above.
+- Child declaring `extends:` against a parent in a layer the child's layer cannot see: ingest succeeds when the child restates every executable field the parent sets, and the parent resolves at request time per the visibility rules above.
+- Child that leaves an executable field to a parent in another layer: ingest error (`ingest.invalid_artifact`). Ingest and `podium sync` evaluate this rule, and `podium lint` does not, because it resolves no `extends:` chain.
 - Child declaring `extends:` with a parent type that doesn't match the child's type: ingest error.
 - Child declaring `extends:` with an exact or content-hash pin onto a deprecated parent version, or with a range or unpinned reference when every stored version of the parent is deprecated: ingest error (`ingest.invalid_artifact`).
 

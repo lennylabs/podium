@@ -511,6 +511,19 @@ Forces a fresh snapshot of the layer regardless of the trigger model. Reingestin
 { "break_glass": true, "justification": "...", "approvers": ["...", "..."] }
 ```
 
+A `200` response reports each artifact the cycle dropped for a reason other than a lint failure or a same-version content conflict in a `rejected` array. Each entry carries `artifact_id`, `code`, and `reason`, and a `details` object when the rule that rejected it defines one. Same-version content conflicts are reported in the `conflicts` array, and lint failures only as the `lint_failures` count. A cycle that accepts no artifact and classifies none unchanged is answered with the `409 ingest.immutable_violation` error envelope when it has a same-version content conflict, and with the `422 ingest.lint_failed` error envelope when it has a lint failure and no conflict. Neither envelope carries a `rejected` array, so it reports none of the cycle's other drops and no `details`. The executable-field rule's entry reads:
+
+```json
+{
+  "artifact_id": "ops/jira-skill",
+  "code": "ingest.invalid_artifact",
+  "reason": "extends: a parent in another layer sets executable fields this artifact does not restate: hook_action, mcpServers[jira]; restate each one in this artifact",
+  "details": {"constraint": "executable_inheritance", "fields": ["hook_action", "mcpServers[jira]"]}
+}
+```
+
+The reason and `details` name no parent ID, version, or layer.
+
 ### Reorder layers
 
 ```

@@ -189,7 +189,7 @@ When two layers contribute artifacts with the same canonical ID and the higher-p
 | `license` | Scalar; child wins (lint warning if changed across layers). |
 | `search_visibility` | Scalar; most-restrictive (`direct-only` > `indexed`). |
 
-If a child omits a frontmatter field, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above. When both the parent and the child declare a value, a field in the table merges per its row, and a field absent from the table takes the child's value. `version` is independent, so the child keeps its own, and `type` must match on both sides because ingest rejects an `extends:` chain that crosses types.
+If a child omits a frontmatter field, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above, except that a child whose parent comes from another layer restates the [executable fields](../authoring/extends#executable-fields-across-layers) that parent sets. When both the parent and the child declare a value, a field in the table merges per its row, and a field absent from the table takes the child's value. `version` is independent, so the child keeps its own, and `type` must match on both sides because ingest rejects an `extends:` chain that crosses types.
 
 Extension types register their own merge semantics via `TypeProvider`.
 

@@ -1362,7 +1362,7 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 //
 // Spec: §4.6 hidden parents (withheld).
 func (r *Registry) descriptorBlockHidingChain(ctx context.Context, rec store.ManifestRecord) string {
-	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
+	chain, err := r.resolveExtendsChain(ctx, rec)
 	if err != nil {
 		log.Printf("search: descriptor of %s/%s: %v", r.TenantFor(ctx), rec.ArtifactID, err)
 		return ""
@@ -1811,12 +1811,35 @@ func servedExtends(pin string, visible []store.ManifestRecord) string {
 	return ""
 }
 
-// resolveExtendsChain returns the chain of records starting at rec and
-// walking each parent via ExtendsPin. Order: parent first (lowest
-// precedence) ... rec (highest). Cycles are detected and produce an
-// error to prevent infinite loops, matching §4.6 "Cycle detection at
-// ingest time" — we re-check at load time as defense in depth.
-func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRecord, seen map[string]bool) ([]store.ManifestRecord, error) {
+// resolveExtendsChain returns the extends: chain of rec, read from the
+// registry's store under the caller's tenant. ExtendsChain documents the order
+// and the error contract.
+func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRecord) ([]store.ManifestRecord, error) {
+	return ExtendsChain(ctx, r.store, r.TenantFor(ctx), rec)
+}
+
+// ExtendsChain returns the chain of records that starts at rec and walks each
+// stored ExtendsPin, ordered root parent first (lowest precedence) and rec last
+// (highest). The load path re-checks for a cycle as defense in depth, although
+// ingest already rejects one, and the ingest path walks a pinned parent's chain
+// with it to compare the executable fields that parent sets.
+//
+// Error contract: a missing parent matches both ErrNotFound and
+// store.ErrNotFound. Any other store failure matches ErrNotFound and the
+// store's own error, and it does not match store.ErrNotFound, so a caller can
+// tell an unresolvable chain from a store fault. A cycle matches
+// ErrInvalidArgument. The message names the pin of the record whose parent
+// read failed, which can be an ancestor beyond rec's own pin, so a caller that
+// reports the error outside the server log withholds it (§4.6 Withheld).
+//
+// Spec: §4.6
+func ExtendsChain(ctx context.Context, st store.Store, tenantID string, rec store.ManifestRecord) ([]store.ManifestRecord, error) {
+	return walkExtendsChain(ctx, st, tenantID, rec, map[string]bool{})
+}
+
+// walkExtendsChain is ExtendsChain's recursion. seen holds the id@version keys
+// already on the chain, and a repeat is a cycle.
+func walkExtendsChain(ctx context.Context, st store.Store, tenantID string, rec store.ManifestRecord, seen map[string]bool) ([]store.ManifestRecord, error) {
 	key := rec.ArtifactID + "@" + rec.Version
 	if seen[key] {
 		return nil, fmt.Errorf("%w: extends cycle at %s", ErrInvalidArgument, key)
@@ -1827,15 +1850,48 @@ func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRe
 		return []store.ManifestRecord{rec}, nil
 	}
 	parentID, parentVer := splitParentRef(rec.ExtendsPin)
-	parent, err := r.store.GetManifest(ctx, r.TenantFor(ctx), parentID, parentVer)
+	parent, err := st.GetManifest(ctx, tenantID, parentID, parentVer)
 	if err != nil {
-		return nil, fmt.Errorf("%w: parent %s: %v", ErrNotFound, rec.ExtendsPin, err)
+		// Both verbs wrap so errors.Is reaches the store's own error, which
+		// separates a missing parent from a store fault.
+		return nil, fmt.Errorf("%w: parent %s: %w", ErrNotFound, rec.ExtendsPin, err)
 	}
-	parentChain, err := r.resolveExtendsChain(ctx, parent, seen)
+	parentChain, err := walkExtendsChain(ctx, st, tenantID, parent, seen)
 	if err != nil {
 		return nil, err
 	}
 	return append(parentChain, rec), nil
+}
+
+// ResolvedArtifact folds the chain, root parent first, into the artifact a
+// read serves per the §4.6 field-semantics table, and it returns the chain's
+// authored blocks root first with each record's stored pin as its Extends
+// reference. Each record is decoded with parsedArtifact, so a block whose
+// frontmatter does not parse contributes its stored columns rather than
+// failing the fold. A caller that must fail closed on such a block checks the
+// blocks itself, as manifest.InheritedExecutableFields does.
+//
+// Spec: §4.6
+func ResolvedArtifact(chain []store.ManifestRecord) (manifest.Artifact, []manifest.MergedBlock) {
+	if len(chain) == 0 {
+		return manifest.Artifact{}, nil
+	}
+	merged := *parsedArtifact(chain[0])
+	for _, c := range chain[1:] {
+		merged = manifest.MergeExtends(merged, *parsedArtifact(c))
+	}
+	// The stored pin is the reference this record was ingested with,
+	// reduced to its canonical ID on the other side of the strip. Passing
+	// it rather than re-reading the block keeps both modes checking the
+	// same chain (§11).
+	blocks := make([]manifest.MergedBlock, 0, len(chain))
+	for _, c := range chain {
+		blocks = append(blocks, manifest.MergedBlock{
+			Frontmatter: c.Frontmatter,
+			Extends:     c.ExtendsPin,
+		})
+	}
+	return merged, blocks
 }
 
 // mergeChain folds the chain parent → child per the §4.6 field-semantics
@@ -1853,11 +1909,9 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	if len(chain) == 0 {
 		return store.ManifestRecord{}, nil
 	}
+	merged, authored := ResolvedArtifact(chain)
 	out := chain[0]
-	merged := parsedArtifact(out)
 	for _, c := range chain[1:] {
-		m := manifest.MergeExtends(*merged, *parsedArtifact(c))
-		merged = &m
 		// Identity fields preserve the child's coordinates so callers
 		// see the child rather than the parent.
 		out.ArtifactID = c.ArtifactID
@@ -1896,7 +1950,7 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	// deliberately absent: LoadArtifactResult declares no such fields, and the
 	// search path reads the stored columns the ingest fold writes rather than
 	// this record, so an assignment here would be unread.
-	setManifestFields(&out, merged)
+	setManifestFields(&out, &merged)
 	// Serialize through the chain's authored blocks so an extension type's
 	// own frontmatter keys survive, and strip the extends reference so the
 	// hidden parent is not surfaced (§4.6). A merged block that names a chain
@@ -1904,18 +1958,7 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	// read rather than being served. The record's own ID goes with it, because
 	// a same-ID overlay's parent carries the ID the requester asked for and so
 	// discloses nothing.
-	authored := make([]manifest.MergedBlock, 0, len(chain))
-	for _, c := range chain {
-		// The stored pin is the reference this record was ingested with,
-		// reduced to its canonical ID on the other side of the strip. Passing
-		// it rather than re-reading the block keeps both modes checking the
-		// same chain (§11).
-		authored = append(authored, manifest.MergedBlock{
-			Frontmatter: c.Frontmatter,
-			Extends:     c.ExtendsPin,
-		})
-	}
-	fm, err := manifest.SerializeMerged(merged, out.ArtifactID, authored...)
+	fm, err := manifest.SerializeMerged(&merged, out.ArtifactID, authored...)
 	if err != nil {
 		return store.ManifestRecord{}, fmt.Errorf("%w: extends manifest for %s: %v",
 			ErrInvalidArgument, out.ArtifactID, err)
@@ -2089,7 +2132,7 @@ func servesMergedDocument(rec store.ManifestRecord) bool {
 // and reads no object storage. A walk or merge error answers false, so a
 // broken chain authorizes nothing and answers as a key that does not exist.
 func (r *Registry) mergedDocumentKeyMatches(ctx context.Context, rec store.ManifestRecord, key string) bool {
-	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
+	chain, err := r.resolveExtendsChain(ctx, rec)
 	if err != nil {
 		return false
 	}
