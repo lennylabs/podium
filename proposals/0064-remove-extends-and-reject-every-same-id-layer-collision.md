@@ -1,7 +1,7 @@
 # Proposal 0064: Remove extends: and make every same-ID collision between registry-side layers a rejection
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-10). Verified on 2026-11-10 after 21 adversarial review rounds (50 findings fixed).
+- Status: Applied to spec (2026-11-10). Verified on 2026-11-10 after 21 adversarial review rounds (50 findings fixed).
 - Date: 2026-11-10
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: ingest, a filesystem-source `podium sync`, and `podium lint` refuse an `ARTIFACT.md` that declares `extends:`, a same-ID overlay between registry-side layers is rejected, and a row an earlier release stored from such an `ARTIFACT.md` stops serving. It ships in 0.6.0, a MINOR release.
