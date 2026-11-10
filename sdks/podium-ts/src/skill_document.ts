@@ -10,6 +10,21 @@ export const AUTO_VERSION_ZERO = "0.0.0-auto.0";
 const SEMVER_RE = /^[0-9]+\.[0-9]+\.[0-9]+$/;
 const AUTO_VERSION_RE = /^0\.0\.0-auto\.(0|[1-9][0-9]*)$/;
 
+// MAX_GO_INT is the largest N manifest.IsAutoVersion accepts: strconv.Atoi
+// rejects a larger value as an int overflow on the 64-bit targets.
+const MAX_GO_INT = 9223372036854775807n;
+
+// isAutoVersion reports whether v is the reserved 0.0.0-auto.<N> form with an
+// N that fits a Go int. Mirrors manifest.IsAutoVersion, which returns false on
+// an overflow, so an overflowing N never yields a synthesized document that
+// the none adapter would write.
+//
+// Spec: §4.7.6
+function isAutoVersion(v: string): boolean {
+  const m = AUTO_VERSION_RE.exec(v);
+  return m !== null && BigInt(m[1]) <= MAX_GO_INT;
+}
+
 // The bytes are fixed by §4.3.4: every line ends with a single line feed, and
 // the document ends with the line feed after the comment.
 const SYNTHESIZED_PREFIX = "---\ntype: skill\nversion: ";
@@ -42,7 +57,7 @@ export function resolveSkillVersion(artifactVersion: string, metadataVersion: st
 //
 // Spec: §4.3.4
 export function synthesizedSkillDocument(v: string): string {
-  if (!isSemver(v) && !AUTO_VERSION_RE.test(v)) {
+  if (!isSemver(v) && !isAutoVersion(v)) {
     throw new Error(`invalid version: ${JSON.stringify(v)}`);
   }
   return SYNTHESIZED_PREFIX + v + SYNTHESIZED_SUFFIX;

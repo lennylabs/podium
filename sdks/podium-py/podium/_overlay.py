@@ -476,6 +476,9 @@ def _package_manifests(dirpath: str) -> tuple[bool, bool]:
     """Report whether dirpath directly holds ARTIFACT.md and SKILL.md (§4.2).
 
     Mirrors filesystem.PackageManifests in pkg/registry/filesystem/discovery.go.
+    ``os.path.isfile`` follows a symbolic link as ``fs.Stat`` does there, so a
+    manifest linked to a shared regular file counts and a dangling link reads
+    as absent.
     """
     return _has_artifact_manifest(dirpath), os.path.isfile(os.path.join(dirpath, "SKILL.md"))
 

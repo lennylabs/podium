@@ -562,6 +562,25 @@ def test_synthesized_skill_document_builds_fixed_bytes_and_refuses_other_version
     assert not _skill_document.is_synthesized_skill_document("---\ntype: skill\n")
 
 
+# Spec: §4.3.4, §4.7.6 — N must fit a Go int, as manifest.IsAutoVersion
+# requires, so an overflowing N is neither synthesized nor recognized and
+# materialize() keeps such a document as the none adapter does.
+def test_synthesized_skill_document_refuses_an_overflowing_auto_version():
+    def doc(version: str) -> str:
+        return (
+            f"---\ntype: skill\nversion: {version}\n---\n"
+            "<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n"
+        )
+
+    top = "0.0.0-auto.9223372036854775807"
+    assert _skill_document.synthesized_skill_document(top) == doc(top)
+    assert _skill_document.is_synthesized_skill_document(doc(top))
+    for version in ("0.0.0-auto.9223372036854775808", "0.0.0-auto.99999999999999999999"):
+        with pytest.raises(ValueError, match="invalid version"):
+            _skill_document.synthesized_skill_document(version)
+        assert not _skill_document.is_synthesized_skill_document(doc(version))
+
+
 # Spec: §4.4 — inline bundled resources land at their package-relative path.
 def test_materialize_writes_inline_resources(tmp_path):
     art = LoadedArtifact(

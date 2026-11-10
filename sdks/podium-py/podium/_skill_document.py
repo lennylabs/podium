@@ -18,6 +18,10 @@ AUTO_VERSION_ZERO = "0.0.0-auto.0"
 _SEMVER_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 _AUTO_VERSION_RE = re.compile(r"0\.0\.0-auto\.(0|[1-9][0-9]*)")
 
+# The largest N ``manifest.IsAutoVersion`` accepts: ``strconv.Atoi`` rejects a
+# larger value as an int overflow on the 64-bit targets.
+_MAX_GO_INT = 2**63 - 1
+
 # The bytes are fixed by §4.3.4: every line ends with a single line feed, and
 # the document ends with the line feed after the comment.
 _SYNTHESIZED_PREFIX = "---\ntype: skill\nversion: "
@@ -48,6 +52,17 @@ def resolve_skill_version(artifact_version: str, metadata_version: str) -> str:
     return AUTO_VERSION_ZERO
 
 
+def _is_auto_version(v: str) -> bool:
+    """Report whether v is ``0.0.0-auto.<N>`` with an N that fits a Go int.
+
+    Spec: §4.7.6. Mirrors ``manifest.IsAutoVersion``, which returns false on an
+    overflow, so an overflowing N never yields a synthesized document that the
+    ``none`` adapter would write.
+    """
+    m = _AUTO_VERSION_RE.fullmatch(v)
+    return m is not None and int(m.group(1)) <= _MAX_GO_INT
+
+
 def synthesized_skill_document(version: str) -> str:
     """Return the ARTIFACT.md served for a skill with no ARTIFACT.md (§4.3.4).
 
@@ -56,7 +71,7 @@ def synthesized_skill_document(version: str) -> str:
     key or a line into the document. Mirrors
     ``manifest.SynthesizedSkillDocument``.
     """
-    if not is_semver(version) and _AUTO_VERSION_RE.fullmatch(version) is None:
+    if not is_semver(version) and not _is_auto_version(version):
         raise ValueError(f"invalid version: {version!r}")
     return _SYNTHESIZED_PREFIX + version + _SYNTHESIZED_SUFFIX
 

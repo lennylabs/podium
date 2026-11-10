@@ -345,6 +345,32 @@ function matchSegments(pat: string[], tgt: string[]): boolean {
   return pat.length === tgt.length;
 }
 
+// holdsManifest reports whether dir directly holds a regular file named name,
+// following a symbolic link as filesystem.PackageManifests in
+// pkg/registry/filesystem/discovery.go does with fs.Stat. Dirent.isFile()
+// reports false for a link, so a SKILL.md linked from a skill shared across
+// tools would otherwise go undiscovered. A link that cannot be resolved reads
+// as absent, as os.path.isfile does in the Python overlay.
+//
+// Spec: §4.2
+async function holdsManifest(
+  fs: typeof import("node:fs/promises"),
+  path: typeof import("node:path"),
+  dir: string,
+  entries: import("node:fs").Dirent[],
+  name: string,
+): Promise<boolean> {
+  const entry = entries.find((e) => e.name === name);
+  if (!entry) return false;
+  if (entry.isFile()) return true;
+  if (!entry.isSymbolicLink()) return false;
+  try {
+    return (await fs.stat(path.join(dir, name))).isFile();
+  } catch {
+    return false;
+  }
+}
+
 // readOptional returns a file's text, or "" when it cannot be read.
 async function readOptional(fs: typeof import("node:fs/promises"), file: string): Promise<string> {
   try {
@@ -372,7 +398,7 @@ async function collectResources(
     // artifact result of filesystem.PackageManifests in
     // pkg/registry/filesystem/discovery.go, so a subdirectory holding only a
     // SKILL.md stays part of this package.
-    if (sub !== dir && entries.some((e) => e.isFile() && e.name === "ARTIFACT.md")) return;
+    if (sub !== dir && (await holdsManifest(fs, path, sub, entries, "ARTIFACT.md"))) return;
     for (const e of entries) {
       const full = path.join(sub, e.name);
       if (e.isDirectory()) {
@@ -454,8 +480,8 @@ export class LocalOverlay {
       const entries = await fs.readdir(dir, { withFileTypes: true });
       const rel = path.relative(overlayPath, dir).split(path.sep).join("/");
       const key = rel === "." ? "" : rel;
-      const hasArtifact = entries.some((e) => e.isFile() && e.name === "ARTIFACT.md");
-      const hasSkill = entries.some((e) => e.isFile() && e.name === "SKILL.md");
+      const hasArtifact = await holdsManifest(fs, path, dir, entries, "ARTIFACT.md");
+      const hasSkill = await holdsManifest(fs, path, dir, entries, "SKILL.md");
       const isPackage = key !== "" && (hasArtifact || (hasSkill && !inPackage));
       if (isPackage) {
         const art = hasArtifact

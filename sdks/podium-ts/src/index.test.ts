@@ -703,6 +703,21 @@ describe("LoadedArtifact.materialize", () => {
     expect(isSynthesizedSkillDocument("---\ntype: skill\n")).toBe(false);
   });
 
+  // Spec: §4.3.4, §4.7.6 — N must fit a Go int, as manifest.IsAutoVersion
+  // requires, so an overflowing N is neither synthesized nor recognized and
+  // materialize() keeps such a document as the none adapter does.
+  it("synthesizedSkillDocument refuses a 0.0.0-auto.<N> whose N overflows a Go int", () => {
+    const max = "0.0.0-auto.9223372036854775807";
+    const doc = (v: string): string =>
+      `---\ntype: skill\nversion: ${v}\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n`;
+    expect(synthesizedSkillDocument(max)).toBe(doc(max));
+    expect(isSynthesizedSkillDocument(doc(max))).toBe(true);
+    for (const v of ["0.0.0-auto.9223372036854775808", "0.0.0-auto.99999999999999999999"]) {
+      expect(() => synthesizedSkillDocument(v)).toThrow(/invalid version/);
+      expect(isSynthesizedSkillDocument(doc(v))).toBe(false);
+    }
+  });
+
   it("writes inline resources at their relative path", async () => {
     await withTempDir(async (dir) => {
       const art = new LoadedArtifact({

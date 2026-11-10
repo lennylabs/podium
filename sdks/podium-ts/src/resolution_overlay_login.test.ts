@@ -2,7 +2,7 @@
 // Spec: §7.5.2 / §13.10 (registry resolution), §6.4 / §6.4.1 (overlay),
 // §6.3 / §7.7 / §14.8 (device-code login).
 
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -306,6 +306,34 @@ describe("overlay merge", () => {
     expect(notes.version).toBe("1.0.0");
     expect(notes.skillRaw).toBe("");
     expect(Object.keys(notes.resources)).toEqual(["SKILL.md"]);
+  });
+
+  // Spec: §4.2, §4.4, §6.4 — manifest detection follows a symbolic link, as
+  // filesystem.PackageManifests does with fs.Stat: a SKILL.md linked to a
+  // shared regular file makes a plain skill, a linked nested ARTIFACT.md bounds
+  // the enclosing package, and a dangling SKILL.md link reads as absent.
+  it("follows a symlinked SKILL.md or ARTIFACT.md and ignores a dangling one", async () => {
+    const overlay = join(dir, "overlay");
+    const shared = join(dir, "shared");
+    await writeOverlay(shared, {
+      "SKILL.md": skillMD(),
+      "ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n---\nnested\n",
+    });
+    await writeOverlay(overlay, {
+      "team/greet/scripts/run.sh": "echo hi\n",
+      "team/greet/nested/notes.md": "notes\n",
+      "team/broken/readme.md": "readme\n",
+    });
+    await symlink(join(shared, "SKILL.md"), join(overlay, "team/greet/SKILL.md"));
+    await symlink(join(shared, "ARTIFACT.md"), join(overlay, "team/greet/nested/ARTIFACT.md"));
+    await symlink(join(shared, "missing.md"), join(overlay, "team/broken/SKILL.md"));
+    const index = await LocalOverlay.load(overlay);
+    expect(new Set(index.artifacts.keys())).toEqual(new Set(["team/greet", "team/greet/nested"]));
+    const greet = index.get("team/greet")!;
+    expect(greet.type).toBe("skill");
+    expect(greet.skillRaw).toBe(skillMD());
+    expect(Object.keys(greet.resources)).toEqual(["scripts/run.sh"]);
+    expect(index.get("team/greet/nested")!.type).toBe("context");
   });
 
   // Spec: §4.3.4, §6.4 — a plain skill's description comes from SKILL.md, and

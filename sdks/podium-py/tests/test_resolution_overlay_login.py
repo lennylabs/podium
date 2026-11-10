@@ -373,6 +373,30 @@ def test_overlay_keeps_nested_and_non_skill_skill_md_as_resources(tmp_path):
     assert set(notes.resources) == {"SKILL.md"}
 
 
+# Spec: §4.2, §4.4, §6.4 — manifest detection follows a symbolic link, as
+# filesystem.PackageManifests does with fs.Stat: a SKILL.md linked to a shared
+# regular file makes a plain skill, a linked nested ARTIFACT.md bounds the
+# enclosing package, and a dangling SKILL.md link reads as absent.
+def test_overlay_follows_symlinked_manifests_and_ignores_dangling(tmp_path):
+    overlay = tmp_path / "overlay"
+    shared = tmp_path / "shared"
+    _write(str(shared / "SKILL.md"), _skill_md())
+    _write(str(shared / "ARTIFACT.md"), "---\ntype: context\nversion: 1.0.0\n---\nnested\n")
+    greet = overlay / "team" / "greet"
+    _write(str(greet / "scripts" / "run.sh"), "echo hi\n")
+    _write(str(greet / "nested" / "notes.md"), "notes\n")
+    _write(str(overlay / "team" / "broken" / "readme.md"), "readme\n")
+    os.symlink(shared / "SKILL.md", greet / "SKILL.md")
+    os.symlink(shared / "ARTIFACT.md", greet / "nested" / "ARTIFACT.md")
+    os.symlink(shared / "missing.md", overlay / "team" / "broken" / "SKILL.md")
+    index = _overlay.LocalOverlay(str(overlay))
+    assert set(index.artifacts) == {"team/greet", "team/greet/nested"}
+    rec = index.artifacts["team/greet"]
+    assert (rec.type, rec.skill_raw) == ("skill", _skill_md())
+    assert set(rec.resources) == {"scripts/run.sh"}
+    assert index.artifacts["team/greet/nested"].type == "context"
+
+
 # Spec: §4.3.4, §6.4 — a plain skill's description comes from SKILL.md, and
 # overlay search ranks the skill by it.
 def test_overlay_finds_a_skill_md_only_package_by_description(tmp_path):
