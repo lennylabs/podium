@@ -295,6 +295,37 @@ func TestExtends_McpServersParentOnlyInherited(t *testing.T) {
 	}
 }
 
+// A team-foo overlay that leaves its org-defaults parent's mcpServers entry
+// jira to the parent is refused at boot ingest and again on a manual reingest,
+// so the parent serves. The reingest reports the refusal on standard error
+// with the field path and exits 1. The reason names neither the parent's layer
+// nor a parent version, because the parent may sit in a layer the reader cannot
+// see. The server lint passes the child, so the refusal comes from the
+// executable-field rule rather than from a required-field lint failure.
+//
+// Spec: §4.6
+func TestExtends_ExecutableInheritanceRejected(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nmcpServers:\n  - name: jira\n    command: jira\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nmcpServers:\n  - name: slack\n    command: slack\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+
+	if got := exLoad(t, srv, exParentID); got.Version != "1.0.0" {
+		t.Fatalf("version = %q, want the parent's 1.0.0 (the child is refused at boot ingest)", got.Version)
+	}
+	if !strings.Contains(srv.log(), "rejected=1") {
+		t.Errorf("server log missing the single ingest rejection:\n%s", srv.log())
+	}
+
+	res := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, "team-foo")
+	cliWantExit(t, res, 1, "reingest a layer holding the refused child")
+	cliContains(t, res.Stderr, "rejected: "+exParentID+" (ingest.invalid_artifact):", "the refused child")
+	cliContains(t, res.Stderr, "mcpServers[jira]", "the field path the child must restate")
+	for _, leak := range []string{"org-defaults", "1.0.0", "@1."} {
+		cliNotContains(t, res.Stderr, leak, "the parent's layer or version")
+	}
+}
+
 // ---- Hidden parents ------------------------------------
 
 // exHiddenParentServer boots the authenticated, visibility-capable harness with
