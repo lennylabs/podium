@@ -241,6 +241,7 @@ rm -rf "$WORK"
 | S90 | A standalone registry manages and routes tenants in multi-tenant mode | standalone | none | none | none |
 | S91 | A cross-layer extends: child that leaves an executable field to its parent is refused | solo then standalone | none | none | none |
 | S92 | A filesystem sync recomposes after an executable-field drop, and override and `--config` count the drop | solo then standalone | none | none | none |
+| S93 | An executable-field refusal withholds the parent, spares stored versions, and follows the pinned edge | solo then standalone | none | none | none |
 
 ---
 
@@ -3601,6 +3602,34 @@ PY
 
    **Expect.** Three `ok` lines. A `LEAK` on `a@1.x` means the check covers the
    immediate parent only and lets an ancestor through.
+
+7. Negative control on the restated key. Publish a new overlay version that
+   pins the `base` copy and no longer restates `x_owner`, then reingest `team`.
+
+```bash
+cat > "$WORK/team/greet/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 2.1.0
+extends: greet@1.0.0
+x_runbook: ops/greet.md
+---
+EOF
+podium layer reingest --registry "$PODIUM_REGISTRY" team; echo "exit=$?"
+curl -s -X POST "$PODIUM_REGISTRY/v1/layers/reingest?id=team" \
+  | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["rejected"]))'
+curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=greet" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'
+```
+
+   **Expect.** The reingest prints
+   `rejected: greet (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: x_owner; restate each one in this artifact`
+   and `exit=1`. The `rejected` entry carries
+   `"details": {"constraint": "executable_inheritance", "fields": ["x_owner"]}`,
+   and `greet` still serves `2.0.0`. The pin is explicit because an unpinned
+   `extends: greet` selects the stored `team` copy `2.0.0`, which is a
+   within-layer edge the server accepts. Scenario S93 step 6 covers that case.
+   An accepted `2.1.0` here means the rule did not run, and steps 3 and 4 then
+   prove nothing about the restatement.
 
 **Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
 
@@ -11553,5 +11582,179 @@ the defect it catches.
    server never stored the refused `team` copies, so the `project` copy is not
    a collision there. A difference means the two deployment modes kept
    different copies.
+
+**Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
+
+---
+
+## S93: An executable-field refusal withholds the parent, spares stored versions, and follows the pinned edge
+
+**Goal.** Validate three outcomes of the §4.6 executable-field rule that S91
+and S92 do not reach. A child whose field path would name its parent is
+refused in both modes with a reason that names no field and no parent, while
+the server log traces the refusal for an operator. A child version stored
+before its parent gained an executable field stays stored and served, and a
+new version of that child is refused. A same-ID overlay whose unpinned
+reference selects an earlier version from its own layer is accepted by the
+server and dropped by a filesystem sync, which is the parent-selection
+divergence §13.11.3 states.
+
+**Covers.** §4.6 executable fields across layers and hidden parents
+(withheld), §7.3.1 ingest outcome, §4.7.6 pin selection, §13.11.3 executable
+inheritance, and §11 filesystem-to-server equivalence, through the compiled
+binary.
+
+**Why by hand.** The withheld reason, the server log line, and the two modes'
+different answers for one directory are read from an operator's terminal. A
+reason or reingest body that names `shared/base`, a log with no trace line, a
+stored child dropped on an unchanged reingest, or a server that refuses the
+same-layer overlay is the defect this scenario catches.
+
+**Prerequisites.** A built `podium` binary on `PATH`.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then build a
+   two-layer registry. `org` holds the agent `shared/base`, whose
+   `mcpServers` entry is named after the artifact's own canonical ID. `team`
+   holds `finance/child`, which extends `shared/base` and restates no entry.
+   The `agent` function writes one agent manifest from a version, a
+   description, an optional `extends:` reference, and optional extra
+   frontmatter.
+
+   ```bash
+   agent() {
+     { printf -- '---\ntype: agent\nversion: %s\ndescription: %s\nsensitivity: low\n' "$2" "$3"
+       [ -n "$4" ] && printf 'extends: %s\n' "$4"
+       printf '%b' "$5"; printf -- '---\n\n%s\n' "$3"; } > "$1"
+   }
+   mkdir -p "$WORK/reg/org/shared/base" "$WORK/reg/team/finance/child"
+   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n' > "$WORK/reg/.registry-config"
+   for L in org team; do
+     printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
+   done
+   agent "$WORK/reg/org/shared/base/ARTIFACT.md" 1.0.0 "Route a ticket to the owning team." "" \
+     'mcpServers:\n  - name: shared/base\n    command: route-ticket\n'
+   agent "$WORK/reg/team/finance/child/ARTIFACT.md" 2.0.0 "Route a finance ticket to its queue." "shared/base" ""
+   cat "$WORK/reg/team/finance/child/ARTIFACT.md"
+   ```
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and the child's
+   manifest carries `extends: shared/base` and no `mcpServers` key.
+
+2. Sync through the filesystem source.
+
+   ```bash
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
+   cat "$WORK/err.txt"
+   ```
+
+   **Expect.** `exit=1`, the summary lists `shared/base [org]` alone, and
+   `$WORK/err.txt` holds one line,
+   `rejected: finance/child (ingest.invalid_artifact): extends: executable fields could not be read`.
+   The field path `mcpServers[shared/base]` would name the parent, so the
+   reason names no field. A reason that names `mcpServers` or `shared/base`
+   discloses the parent through the rejection.
+
+3. Serve the same directory, reingest `team`, and compare the two modes' lines,
+   the reingest body, and the server log.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8195 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8195/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export URL=http://127.0.0.1:8195
+   podium layer reingest --registry "$URL" team 2> "$WORK/err.txt"; echo "exit=$?"
+   diff "$WORK/err.txt" <(podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2>&1 >/dev/null) && echo same
+   curl -s -X POST "$URL/v1/layers/reingest?id=team" > "$WORK/body.json"
+   python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["rejected"]))' "$WORK/body.json"
+   grep -c 'shared/base' "$WORK/body.json"
+   grep 'artifact=finance/child' "$WORK/srv.log" | tail -1
+   ```
+
+   **Expect.** `exit=1` and `same`. The `rejected` entry carries
+   `artifact_id`, `code`, and `reason` and no `details` member, and `grep -c`
+   prints `0`. The log line reads
+   `ingest: tenant=<tenant> layer=team artifact=finance/child extends_pin=shared/base@1.0.0 parent_layer=org rejected: executable fields could not be read`,
+   which is the trace an operator follows to the parent. A `details` member, a
+   body that names `shared/base`, or no log line is the defect.
+
+4. Store a child before its parent sets an executable field, then publish a
+   parent version that sets one and reingest both layers. Remove
+   `finance/child` first so the later reingests report only the artifacts
+   this step adds.
+
+   ```bash
+   rm -rf "$WORK/reg/team/finance"
+   mkdir -p "$WORK/reg/org/shared/tool" "$WORK/reg/team/ops/runner"
+   agent "$WORK/reg/org/shared/tool/ARTIFACT.md" 1.0.0 "Run the shared ticket tool." "" ""
+   agent "$WORK/reg/team/ops/runner/ARTIFACT.md" 1.0.0 "Run the team ticket tool." "shared/tool@1.x" ""
+   podium layer reingest --registry "$URL" org; echo "exit=$?"
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   agent "$WORK/reg/org/shared/tool/ARTIFACT.md" 1.1.0 "Run the shared ticket tool." "" 'x_hook: org-hook.sh\n'
+   podium layer reingest --registry "$URL" org; echo "exit=$?"
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   curl -s "$URL/v1/load_artifact?id=ops/runner" \
+     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["version"], d.get("extends_pin"), "x_hook" in d["frontmatter"])'
+   ```
+
+   **Expect.** All four reingests print `exit=0`, and the second `team`
+   reingest prints `artifact: ops/runner@1.0.0   layer: team` with no
+   `rejected:` line. The load prints `1.0.0 shared/tool@1.0.0 False`. The
+   stored version keeps the pin it received at ingest and is not evaluated
+   again. A `rejected: ops/runner` line here means an unchanged stored
+   version is dropped on every reingest.
+
+5. Publish a new version of the child that still omits `x_hook`, reingest,
+   then restate the key and reingest again.
+
+   ```bash
+   agent "$WORK/reg/team/ops/runner/ARTIFACT.md" 1.1.0 "Run the team ticket tool." "shared/tool@1.x" ""
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   curl -s -X POST "$URL/v1/layers/reingest?id=team" \
+     | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin)["rejected"]))'
+   agent "$WORK/reg/team/ops/runner/ARTIFACT.md" 1.1.0 "Run the team ticket tool." "shared/tool@1.x" 'x_hook: team-hook.sh\n'
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   ```
+
+   **Expect.** The first reingest prints
+   `rejected: ops/runner (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: x_hook; restate each one in this artifact`
+   and `exit=1`, and the `rejected` entry carries
+   `"details": {"constraint": "executable_inheritance", "fields": ["x_hook"]}`.
+   The new version pins `shared/tool@1.1.0`, which sets `x_hook`. The last
+   reingest prints `artifact: ops/runner@1.1.0   layer: team` and `exit=0`.
+
+6. Overlay a same-ID artifact from `team`, then publish a later overlay
+   version with an unpinned `extends:` that omits the key. Read the server's
+   copy and sync through the filesystem source.
+
+   ```bash
+   mkdir -p "$WORK/reg/org/ops/tool" "$WORK/reg/team/ops/tool"
+   agent "$WORK/reg/org/ops/tool/ARTIFACT.md" 1.0.0 "File a ticket with the org tool." "" 'x_hook: org-tool.sh\n'
+   agent "$WORK/reg/team/ops/tool/ARTIFACT.md" 1.1.0 "File a ticket with the team tool." "ops/tool" 'x_hook: team-tool.sh\n'
+   podium layer reingest --registry "$URL" org; echo "exit=$?"
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   agent "$WORK/reg/team/ops/tool/ARTIFACT.md" 1.2.0 "File a ticket with the team tool." "ops/tool" ""
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   curl -s "$URL/v1/load_artifact?id=ops/tool" \
+     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["version"], d["layer"], d.get("extends_pin"))'
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
+   cat "$WORK/err.txt"
+   grep -e '^version:' -e '^x_hook:' "$WORK/fs/ops/tool/ARTIFACT.md"
+   ```
+
+   **Expect.** All three reingests print `exit=0`, and the last one prints
+   `artifact: ops/tool@1.2.0   layer: team`. The load prints
+   `1.2.0 team ops/tool@1.1.0`: the unpinned reference selected the stored
+   `team` version `1.1.0`, so the server tested a within-layer edge. The
+   filesystem sync prints `exit=1` and one line,
+   `rejected: ops/tool (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: x_hook; restate each one in this artifact`,
+   and the materialized `ops/tool` carries `version: 1.0.0` and
+   `x_hook: org-tool.sh`. The filesystem source keeps one record per ID and
+   layer and tests the edge to the `org` copy, so the two modes keep different
+   copies here by design (§13.11.3). A server refusal of `1.2.0`, or a
+   filesystem sync that keeps the `team` copy, is the defect.
 
 **Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
