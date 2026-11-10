@@ -1,7 +1,7 @@
 # Proposal 0059: Refresh the §1.5 and "How Podium compares" product comparison to November 2026
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-09). Verified on 2026-11-09 after 4 adversarial review rounds (8 findings fixed).
+- Status: Applied to spec (2026-11-09). Verified on 2026-11-09 after 4 adversarial review rounds (8 findings fixed).
 - Date: 2026-11-09
 
 This document stages spec and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is prose-only and changes no behavior.
