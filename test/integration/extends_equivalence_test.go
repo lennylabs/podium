@@ -4,9 +4,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/sync"
 )
@@ -283,6 +286,221 @@ func TestSyncEquivalence_InheritedKeyNamingTheParentFailsBothModes(t *testing.T)
 			}
 		}
 	}
+}
+
+// eqMCPServer is an mcp-server manifest with an optional extends: line and an
+// optional server_identifier, the §4.6 executable field the drop cases leave
+// to a parent in another layer. The equivalence fixtures use it instead of a
+// hook that omits hook_action, because server lint refuses such a hook before
+// the executable-field rule runs and the case would pass on lint alone.
+func eqMCPServer(version, desc, extends, serverIdentifier string) string {
+	src := "---\ntype: mcp-server\nversion: " + version + "\ndescription: " + desc + "\nsensitivity: low\n"
+	if extends != "" {
+		src += "extends: " + extends + "\n"
+	}
+	if serverIdentifier != "" {
+		src += "server_identifier: " + serverIdentifier + "\n"
+	}
+	return src + "---\n\n" + desc + "\n"
+}
+
+// eqAgent is an agent manifest with an optional extends: line and extra
+// frontmatter lines.
+func eqAgent(desc, extends, extra string) string {
+	src := "---\ntype: agent\nversion: 1.0.0\ndescription: " + desc + "\nsensitivity: low\n"
+	if extends != "" {
+		src += "extends: " + extends + "\n"
+	}
+	return src + extra + "---\n\n" + desc + "\n"
+}
+
+// writeLayeredRegistry writes a multi-layer filesystem registry with the
+// given layer order, every layer public so the server source's anonymous
+// identity sees what the filesystem source walks. Each artifacts key is
+// "<layer>/<canonical ID>".
+func writeLayeredRegistry(t *testing.T, layers []string, artifacts map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	opts := []testharness.WriteTreeOption{{
+		Path:    ".registry-config",
+		Content: "multi_layer: true\nlayer_order:\n  - " + strings.Join(layers, "\n  - ") + "\n",
+	}}
+	for _, l := range layers {
+		opts = append(opts, testharness.WriteTreeOption{Path: l + "/.layer-config", Content: "visibility:\n  public: true\n"})
+	}
+	for rel, src := range artifacts {
+		opts = append(opts, testharness.WriteTreeOption{Path: rel + "/ARTIFACT.md", Content: src})
+	}
+	testharness.WriteTree(t, dir, opts...)
+	return dir
+}
+
+// lockLayers returns the layer the lock file at target records for each
+// artifact ID it lists.
+func lockLayers(t *testing.T, target string) map[string]string {
+	t.Helper()
+	lock, err := sync.ReadLock(target)
+	if err != nil {
+		t.Fatalf("reading the lock at %s: %v", target, err)
+	}
+	out := make(map[string]string, len(lock.Artifacts))
+	for _, a := range lock.Artifacts {
+		out[a.ID] = a.Layer
+	}
+	return out
+}
+
+// executableDrop is the drop the §4.6 executable-field rule reports for id.
+func executableDrop(id string, fields ...string) layer.Drop {
+	ie := &layer.ExecutableInheritance{ArtifactID: id, Fields: fields}
+	return layer.Drop{ArtifactID: id, Code: layer.InvalidArtifactCode, Reason: ie.Reason()}
+}
+
+// Spec: §11 (filesystem ↔ server equivalence) / §2.2 (shared library), §4.6
+// executable fields across layers, §13.11.3 — a child that leaves an
+// executable field to a parent in another layer is refused in both modes, and
+// the two modes materialize byte-identical trees without it. The filesystem
+// source drops the child and reports one ingest.invalid_artifact drop, and the
+// server source never stored it and reports nothing, which is the same split
+// TestSyncEquivalence_LayerCollisionIsByteIdentical pins for a collision.
+//
+// Every fixture is one where both modes select the same parent, because the
+// two modes do not always do so for a same-ID pin (§13.11.3). The subcases are
+// a different-ID child beside an unrelated kept artifact, a same-ID overlay
+// that falls back to the lower copy, a child whose field path would name its
+// parent and is refused with the shared unreadable-fields reason, and a
+// higher-layer record whose collision with the refused record is retracted so
+// both modes serve it.
+func TestSyncEquivalence_ExecutableInheritanceDropIsByteIdentical(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		layers    []string
+		artifacts map[string]string
+		// wantLayers is the layer each lock entry records, in both modes, so
+		// the case pins which copy each tree carries and that the refused
+		// child is absent.
+		wantLayers map[string]string
+		wantDrops  []layer.Drop
+	}{
+		{
+			name:   "different-id child",
+			layers: []string{"base", "top"},
+			artifacts: map[string]string{
+				"base/shared/server": eqMCPServer("1.0.0", "the base server", "", "base-id"),
+				"top/team/server":    eqMCPServer("2.0.0", "the team server", "shared/server@1.x", ""),
+				"top/team/notes":     eqAgent("the team notes", "", ""),
+			},
+			wantLayers: map[string]string{"shared/server": "base", "team/notes": "top"},
+			wantDrops:  []layer.Drop{executableDrop("team/server", "server_identifier")},
+		},
+		{
+			name:   "same-id overlay",
+			layers: []string{"base", "top"},
+			artifacts: map[string]string{
+				"base/shared/tool": eqMCPServer("1.0.0", "from-base", "", "base-tool"),
+				"top/shared/tool":  eqMCPServer("2.0.0", "from-top", "shared/tool@1.x", ""),
+			},
+			wantLayers: map[string]string{"shared/tool": "base"},
+			wantDrops:  []layer.Drop{executableDrop("shared/tool", "server_identifier")},
+		},
+		{
+			// The parent sets an undeclared key named with its own ID, so the
+			// child's field path would disclose the parent and both modes
+			// refuse it with the shared reason, which names no field.
+			name:   "disclosing name",
+			layers: []string{"L1", "L2"},
+			artifacts: map[string]string{
+				"L1/shared/base": eqAgent("the base agent", "", "shared/base: secret\n"),
+				"L2/team/child":  eqAgent("the child agent", "shared/base", ""),
+			},
+			wantLayers: map[string]string{"shared/base": "L1"},
+			wantDrops: []layer.Drop{{
+				ArtifactID: "team/child", Code: layer.InvalidArtifactCode, Reason: layer.UnreadableExecutableFieldsReason,
+			}},
+		},
+		{
+			// l3's x collides only with l2's refused x. A server never stores
+			// l2's x and accepts l3's, so the filesystem composition retracts
+			// the collision and reports the refusal alone.
+			name:   "retracted collision",
+			layers: []string{"l1", "l2", "l3"},
+			artifacts: map[string]string{
+				"l1/p": eqMCPServer("1.0.0", "the parent server", "", "parent-id"),
+				"l2/x": eqMCPServer("1.0.0", "the refused server", "p", ""),
+				"l3/x": eqMCPServer("1.0.0", "the kept server", "", "l3-id"),
+			},
+			wantLayers: map[string]string{"p": "l1", "x": "l3"},
+			wantDrops:  []layer.Drop{executableDrop("x", "server_identifier")},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		dir := writeLayeredRegistry(t, tc.layers, tc.artifacts)
+		for _, adapterID := range []string{"none", "claude-code"} {
+			adapterID := adapterID
+			t.Run(tc.name+"/"+adapterID, func(t *testing.T) {
+				t.Parallel()
+				fsTarget, fsRes, srvTarget, srvRes := syncBothModes(t, dir, adapterID)
+
+				fsTree := materializedTree(t, fsTarget)
+				if len(fsTree) == 0 {
+					t.Fatalf("filesystem sync materialized nothing")
+				}
+				assertTreesEqual(t, fsTree, materializedTree(t, srvTarget))
+				if got, want := artifactKeys(srvRes), artifactKeys(fsRes); !equalStringSlices(got, want) {
+					t.Errorf("artifacts list mismatch:\n filesystem=%v\n server=    %v", want, got)
+				}
+				assertLockArtifactsEqual(t, fsTarget, srvTarget)
+				if got := lockLayers(t, fsTarget); !reflect.DeepEqual(got, tc.wantLayers) {
+					t.Errorf("lock layers = %v, want %v", got, tc.wantLayers)
+				}
+
+				if !reflect.DeepEqual(fsRes.Dropped, tc.wantDrops) {
+					t.Errorf("filesystem Dropped = %+v, want %+v", fsRes.Dropped, tc.wantDrops)
+				}
+				if len(srvRes.Dropped) != 0 {
+					t.Errorf("server Dropped = %+v, want none", srvRes.Dropped)
+				}
+			})
+		}
+	}
+}
+
+// syncBothModes runs `podium sync` with the given adapter against dir as a
+// filesystem source and against a server built from dir, and returns each
+// target and result.
+func syncBothModes(t *testing.T, dir, adapterID string) (string, *sync.Result, string, *sync.Result) {
+	t.Helper()
+	fsTarget := t.TempDir()
+	fsRes, err := sync.Run(sync.Options{
+		Delivery:     neverDelivery,
+		RegistryPath: dir,
+		Target:       fsTarget,
+		AdapterID:    adapterID,
+	})
+	if err != nil {
+		t.Fatalf("filesystem sync.Run: %v", err)
+	}
+
+	srv, err := server.NewFromFilesystem(dir)
+	if err != nil {
+		t.Fatalf("NewFromFilesystem: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	srvTarget := t.TempDir()
+	srvRes, err := sync.Run(sync.Options{
+		Delivery:     neverDelivery,
+		RegistryPath: ts.URL,
+		Target:       srvTarget,
+		AdapterID:    adapterID,
+	})
+	if err != nil {
+		t.Fatalf("server sync.Run: %v", err)
+	}
+	return fsTarget, fsRes, srvTarget, srvRes
 }
 
 // soleMaterializedEntry returns the content of the single materialized path
