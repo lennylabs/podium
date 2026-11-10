@@ -70,9 +70,6 @@ func hrWantFM(t *testing.T, baseURL, id string, wants ...string) {
 	}
 }
 
-func hrSandboxRank(p string) int {
-	return map[string]int{"unrestricted": 0, "read-only-fs": 1, "network-isolated": 2, "seccomp-strict": 3}[p]
-}
 func hrTierRank(s string) int {
 	return map[string]int{"nano": 0, "small": 1, "medium": 2, "large": 3, "frontier": 4,
 		"low": 0, "high": 3, "max": 4}[s]
@@ -535,21 +532,24 @@ func TestArtifactResponse_ReleaseNotes(t *testing.T) {
 
 // ---- Composing multiple artifacts -------------------------------------------
 
-// sandbox_profile composes to the most restrictive.
+// sandbox_profile does not compose across a session. Each profile restricts
+// a different resource, so no profile stands in for another, and each
+// artifact keeps the profile it was loaded with.
+// Spec: §4.6
 func TestArtifactResponse_ComposeSandbox(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"a/ARTIFACT.md": hrCtx("sandbox_profile: read-only-fs"),
 		"b/ARTIFACT.md": hrCtx("sandbox_profile: seccomp-strict"),
 	}))
-	hrWantFM(t, srv.BaseURL, "a", "sandbox_profile: read-only-fs")
-	hrWantFM(t, srv.BaseURL, "b", "sandbox_profile: seccomp-strict")
-	composed := "read-only-fs"
-	if hrSandboxRank("seccomp-strict") > hrSandboxRank(composed) {
-		composed = "seccomp-strict"
-	}
-	if composed != "seccomp-strict" {
-		t.Errorf("composed sandbox=%q, want seccomp-strict", composed)
+	for id, own := range map[string]string{"a": "read-only-fs", "b": "seccomp-strict"} {
+		fm := fmLoadFrontmatter(t, srv.BaseURL, id)
+		if got := strings.Count(fm, "sandbox_profile:"); got != 1 {
+			t.Errorf("frontmatter for %s carries %d sandbox_profile keys, want 1:\n%s", id, got, fm)
+		}
+		if !strings.Contains(fm, "sandbox_profile: "+own) {
+			t.Errorf("frontmatter for %s lost its own profile %q:\n%s", id, own, fm)
+		}
 	}
 }
 

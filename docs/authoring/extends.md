@@ -107,7 +107,7 @@ ASCII fallback for the diagram above (inheritance with extends:):
 | `mcpServers` | List of objects; deep-merge by `name`. |
 | `requiresApproval` | List; append. |
 | `runtime_requirements` | Map; deep-merge with child wins. |
-| `sandbox_profile` | Scalar; most-restrictive. |
+| `sandbox_profile` | Scalar; the parent's value unless it is unset or `unrestricted`. A child that sets a different restricting profile is rejected; see [Sandbox profile](#sandbox-profile). |
 | `delegates_to` | List; append. |
 | `external_resources` | List; append. |
 | `license` | Scalar; child wins (lint warning if changed across layers). |
@@ -117,7 +117,7 @@ ASCII fallback for the diagram above (inheritance with extends:):
 
 Extension types register their own merge semantics via `TypeProvider`.
 
-The "most-restrictive" rules apply to security-relevant fields. A parent at `sensitivity: medium` cannot be relaxed to `low` by a child; a parent with `sandbox_profile: read-only-fs` cannot be widened to `unrestricted`.
+The most-restrictive rules for `sensitivity` and `search_visibility`, and the [sandbox-profile rule](#sandbox-profile), keep a child from loosening a security-relevant field. A parent at `sensitivity: medium` cannot be relaxed to `low`, and a parent with `sandbox_profile: read-only-fs` cannot be widened to `unrestricted`.
 
 ---
 
@@ -137,7 +137,7 @@ The restated value may equal the parent's or differ from it. A child cannot remo
 
 **Which edges the rule tests.** The rule compares the child's layer with the layer that contributes the parent version the child pins. A child and a parent in the same layer are unaffected, and the child inherits every field as before. A same-ID overlay crosses layers when its `extends:` reference selects the copy a lower layer contributes, so the overlay restates each executable field that copy sets. When a registry server resolves the reference to an earlier version of the overlay stored from the overlay's own layer, the edge lies within that layer and the server accepts the overlay without a restatement. `podium sync` against a filesystem registry always tests the edge to the next-lower layer's copy, so it drops the same overlay.
 
-**Fields outside the rule.** `hook_event`, `runtime_requirements`, `sandbox_profile`, `external_resources`, and the remaining fields of the merge table follow the merge rules above. `hook_event` selects when an action runs and supplies nothing to run. `runtime_requirements` is an input to the host capability check. `sandbox_profile` constrains execution. `external_resources` holds pointer records whose bytes the registry neither stores nor serves.
+**Fields outside the rule.** `hook_event`, `runtime_requirements`, `sandbox_profile`, `external_resources`, and the remaining fields of the merge table follow the merge rules above. `hook_event` selects when an action runs and supplies nothing to run. `runtime_requirements` is an input to the host capability check. `sandbox_profile` constrains execution, and the [sandbox-profile rule](#sandbox-profile) governs its merge. `external_resources` holds pointer records whose bytes the registry neither stores nor serves.
 
 **Rejection.** Ingest rejects a child that leaves an executable field to a parent in another layer with `ingest.invalid_artifact`. The rejection carries a `details` object with `constraint: "executable_inheritance"` and `fields`, which lists each field to restate as `hook_action`, `server_identifier`, `mcpServers[<name>]`, `mcpServers[<name>].transport`, `mcpServers[<name>].command`, `mcpServers[<name>].args`, `mcpServers[<name>].env.<KEY>`, or the bare name of an undeclared key. The reason lists the same fields. Neither the reason nor `details` names the parent's canonical ID, version, or layer. The [reingest endpoint](../reference/http-api#reingest) describes the wire form, and [Error codes](../reference/error-codes) describes the code.
 
@@ -161,6 +161,28 @@ hook_action: |
 ```
 
 Lint requires `hook_event` on a hook artifact, and the executable-field rule requires `hook_action`, because the parent copy comes from another layer.
+
+---
+
+## Sandbox profile
+
+The profiles other than `unrestricted` each restrict a different resource: `read-only-fs` restricts filesystem writes outside the materialization destination, `network-isolated` restricts outbound network access, and `seccomp-strict` restricts system calls. None of them includes another, so `sandbox_profile` has no order among them. The rule below treats every value other than `unrestricted` as a restricting profile, including a value the [caller-interpreted fields](../reference/frontmatter-schema#caller-interpreted-fields) do not list, and treats two values as the same only when they are byte-identical.
+
+**Merge.** The merged `sandbox_profile` is the child's value when the child sets one and the parent's resolved value is unset or `unrestricted`. In every other case it is the parent's resolved value. The parent's resolved value is the one the parent's resolved manifest carries, so a value the parent inherited from its own `extends:` chain counts. A child can tighten a parent that sets no restriction, and a child that omits the field or sets `unrestricted` keeps the restriction its parent sets.
+
+**Refusal.** Ingest rejects a child whose own frontmatter sets a restricting `sandbox_profile` when the parent's resolved value is also a restricting profile and the two values differ. The rule tests every `extends:` edge, whether the parent comes from the child's own layer or from another layer, and it tests a same-ID overlay as well. A child that sets `read-only-fs` under a grandparent's `network-isolated` is rejected when the parent between them omits the field, because the parent inherits `network-isolated`.
+
+The rule rejects `network-isolated` against `seccomp-strict` on purpose. The baseline syscall allowlist Podium ships for `seccomp-strict` blocks the network system calls, but a host can extend that allowlist, so `seccomp-strict` carries no guarantee that it contains `network-isolated`. Any two different restricting profiles therefore conflict.
+
+**Rejection.** The rejection uses `ingest.invalid_artifact` and carries `details: {"constraint": "sandbox_profile_conflict"}` with no other member. Neither the reason nor `details` names either profile value or the parent's canonical ID, version, layer, content hash, or signature. When the registry cannot read the parent's chain to evaluate the rule, it rejects the child as the [executable-field rule](#executable-fields-across-layers) does. A child that both rules refuse is rejected under the sandbox-profile rule. The [reingest endpoint](../reference/http-api#reingest) describes the wire form.
+
+**Remedy.** The reason directs the author to omit `sandbox_profile` from the child. A child that omits the field inherits the parent's profile, and its other fields merge as before.
+
+**Stored versions and filesystem registries.** The rule applies to the version being ingested and never invalidates a version already stored. A stored version whose chain pairs two conflicting profiles keeps its pin, and the registry serves it with the parent's profile. A reingest that presents it with unchanged bytes classifies it unchanged, and a new version of that child that still conflicts is rejected while the stored version keeps serving. `podium sync` against a filesystem registry keeps no ingest state, so it applies the rule on every run, drops each child the rule refuses, and reports the drop as `rejected: <id> (ingest.invalid_artifact): <reason>`.
+
+**Cached copies in `podium-mcp`.** A version stored before the registry applied this rule changes its served profile without changing its content hash. A `podium-mcp` whose content cache already holds such a version keeps delivering the profile it cached, because its revalidation compares the content hash. Publishing a new version of the child changes the content hash, which replaces the cached copy only for an `always-revalidate` load of `latest` that reaches the registry. A pinned load, a load under `offline-first`, and the degraded-network fallback keep delivering the cached record. Run `podium cache prune --days 0` against the consumer's cache directory to remove the cached content; under `always-revalidate` and `offline-first`, the next load that reaches the registry fetches the parent's profile. A consumer that runs with `PODIUM_CACHE_MODE=offline-only` never calls the registry, so it keeps the cached record indefinitely, and after a prune it answers every load from that cache with `network.offline_cache_miss`. For such a consumer, clear its cache directory and refill it under `always-revalidate` or `offline-first`. The [`podium cache prune`](../reference/cli#podium-cache-prune) reference describes the command.
+
+**Host enforcement.** The opt-in ingest gate that `PODIUM_ENFORCE_SANDBOX_PROFILE=true` turns on judges the profile the child's own frontmatter sets. A profile the child inherits from its parent is checked when a host loads the artifact.
 
 ---
 
@@ -319,7 +341,7 @@ sandbox_profile: read-only-fs
 <!-- Skill body lives in SKILL.md. -->
 ```
 
-The parent's `sandbox_profile: unrestricted` is overridden by the child's `read-only-fs` (most-restrictive wins). The rest of the parent (description, prose body, tags, etc.) is unchanged.
+The parent's `sandbox_profile: unrestricted` is overridden by the child's `read-only-fs` because the parent's profile is `unrestricted`. The rest of the parent (description, prose body, tags, etc.) is unchanged.
 
 The child ingests because the parent sets no executable field. A parent that sets one requires the child to restate it.
 
@@ -331,6 +353,7 @@ The child ingests because the parent sets no executable field. A parent that set
 - Cycle detected: ingest error.
 - Child declaring `extends:` against a parent in a layer the child's layer cannot see: ingest succeeds when the child restates every executable field the parent sets, and the parent resolves at request time per the visibility rules above.
 - Child that leaves an executable field to a parent in another layer: ingest error (`ingest.invalid_artifact`). Ingest and `podium sync` evaluate this rule, and `podium lint` does not, because it resolves no `extends:` chain.
+- Child whose `sandbox_profile` differs from the profile its parent resolves to, neither `unrestricted`: ingest error (`ingest.invalid_artifact`). Ingest and `podium sync` evaluate this rule, and `podium lint` does not.
 - Child declaring `extends:` with a parent type that doesn't match the child's type: ingest error.
 - Child declaring `extends:` with an exact or content-hash pin onto a deprecated parent version, or with a range or unpinned reference when every stored version of the parent is deprecated: ingest error (`ingest.invalid_artifact`).
 

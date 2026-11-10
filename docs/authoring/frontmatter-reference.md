@@ -283,7 +283,7 @@ When two layers contribute artifacts with the same canonical ID, the higher-prec
 | `mcpServers` | List of objects; deep-merge by `name`. |
 | `requiresApproval` | List; append. |
 | `runtime_requirements` | Map; deep-merge with child wins. |
-| `sandbox_profile` | Scalar; most-restrictive. |
+| `sandbox_profile` | Scalar; the parent's value unless it is unset or `unrestricted`. A child that sets a different restricting profile is rejected; see [Sandbox profile](../authoring/extends.md#sandbox-profile). |
 | `delegates_to` | List; append. |
 | `external_resources` | List; append. |
 | `license` | Scalar; child wins (lint warning if changed across layers). |
