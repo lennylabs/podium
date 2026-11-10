@@ -62,7 +62,7 @@ registry:
         git:
           repo: git@github.com:acme/podium-org-defaults.git
           ref: main
-          root: artifacts/
+          root: artifacts
       visibility:
         organization: true
 
