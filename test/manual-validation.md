@@ -251,6 +251,7 @@ rm -rf "$WORK"
 | S93 | An executable-field refusal withholds the parent, spares stored versions, and follows the pinned edge | solo then standalone | none | none | none |
 | S94 | An `mcpServers` entry restated by name restates each member, and a same-layer child inherits its entry | solo then standalone | none | none | none |
 | S95 | An `extends:` child stored before the executable-field rule keeps serving after an upgrade | standalone then solo | none | none | none |
+| S96 | A multi-tenant standalone registry migrates every tenant | standalone | none | none | none |
 
 ---
 
@@ -12054,5 +12055,128 @@ rule.
    run. The reingest prints the same `rejected:` line and `exit=1`, and the
    load still prints `1.0.0`. The refusal is the control: the build under test
    runs the rule, and only the version stored before it is spared.
+
+**Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
+
+---
+
+## S96: A multi-tenant standalone registry migrates every tenant
+
+**Goal.** Validate that `podium admin migrate-to-standard` carries every
+tenant of a standalone registry that runs with `PODIUM_MULTI_TENANT=true`
+behind `trusted-headers`, including a deactivated tenant, that a repeated run
+before any target start leaves the same state, and that the migrated target
+routes the tenant the API created and refuses the deactivated one.
+
+**Covers.** §13.10 Upgrade path and the §13.4 re-run rule, through the
+compiled binary.
+
+**Why by hand.** The tenants are provisioned through the live §7.3.3 API, and
+the migrated target is then served in multi-tenant mode. An operator reads
+the plan counts, the target's tenant rows, and the layer list of a caller in
+the migrated tenant. A `tenants:` count of 1, a missing `globex-<pid>` row, a
+layer row under the default org's ID, `initech-<pid>|1`, or a `globex-<pid>`
+list without `dave-<pid>` is the defect this scenario catches.
+
+**Prerequisites.** A built `podium` binary on `PATH` and `sqlite3`.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then serve an
+   empty multi-tenant standalone registry behind `trusted-headers`.
+
+   ```bash
+   S=$$
+   export PODIUM_IDENTITY_PROVIDER=trusted-headers
+   export PODIUM_TRUSTED_PROXY_SECRET=gateway-secret
+   export PODIUM_OPERATOR_ADMINS=alice@acme.com
+   PODIUM_MULTI_TENANT=true podium serve --standalone --no-embeddings --bind 127.0.0.1:8198 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8198/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export URL=http://127.0.0.1:8198
+   as() { curl -s -H "X-Podium-Proxy-Secret: gateway-secret" -H "X-Podium-User-Sub: $1" -H "X-Podium-User-Org: $2" "${@:3}"; }
+   ```
+
+   **Expect.** `server_alive` reports the server running, and the log carries
+   `multi-tenant mode: routing requests by organization`.
+
+2. As alice, the operator, create the tenants `globex-<pid>` and
+   `initech-<pid>`. As dave in `globex-<pid>`, register a user layer. As
+   alice, deactivate `initech-<pid>`. Stop the server.
+
+   ```bash
+   for n in globex initech; do
+     as alice@acme.com default -w "\nHTTP %{http_code}\n" -X POST -H 'Content-Type: application/json' \
+       -d "{\"name\":\"$n-$S\"}" "$URL/v1/admin/tenants" | tee "$WORK/$n.json"
+   done
+   GLOBEX=$(python3 -c "import json; print(json.loads(open('$WORK/globex.json').read().rsplit('HTTP',1)[0])['id'])")
+   INITECH=$(python3 -c "import json; print(json.loads(open('$WORK/initech.json').read().rsplit('HTTP',1)[0])['id'])")
+   as dave@acme.com "globex-$S" -w "\nHTTP %{http_code}\n" -X POST -H 'Content-Type: application/json' \
+     -d "{\"id\":\"dave-$S\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/dave/notes.git\",\"ref\":\"main\"}" "$URL/v1/layers"
+   as alice@acme.com default -w "\nHTTP %{http_code}\n" -X DELETE "$URL/v1/admin/tenants/$INITECH"
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   mkdir -p "$WORK/objects"
+   ```
+
+   **Expect.** Both creates and the registration answer `HTTP 201`, and the
+   deactivation answers a 2xx status. `$GLOBEX` and `$INITECH` are UUIDs.
+
+3. Dry-run the migration into a SQLite target.
+
+   ```bash
+   podium admin migrate-to-standard --dry-run \
+     --source-sqlite "$WORK/podium.db" --source-objects "$WORK/objects" \
+     --target-store=sqlite --target-sqlite "$WORK/target.db" --target-objects "$WORK/target-objects"
+   ls "$WORK/target.db"
+   ```
+
+   **Expect.** The plan prints `tenants:       3` and `layer configs: 1`, and
+   `ls` reports that `$WORK/target.db` does not exist. A `tenants:` count of 1
+   is the defect.
+
+4. Run the migration, then read the target's tenant rows and layer rows.
+
+   ```bash
+   podium admin migrate-to-standard \
+     --source-sqlite "$WORK/podium.db" --source-objects "$WORK/objects" \
+     --target-store=sqlite --target-sqlite "$WORK/target.db" --target-objects "$WORK/target-objects"; echo "exit=$?"
+   sqlite3 "$WORK/target.db" "select name, active from tenants order by name;"
+   sqlite3 "$WORK/target.db" "select tenant_id, id from layer_configs;"
+   echo "globex id: $GLOBEX"
+   ```
+
+   **Expect.** `exit=0`. The tenant rows are `default|1`, `globex-<pid>|1`,
+   and `initech-<pid>|0`. One layer row reads `$GLOBEX|dave-<pid>`. A missing
+   `globex-<pid>` row, a layer row under the default org's ID, or
+   `initech-<pid>|1` is the defect.
+
+5. Before any registry starts on the target, run step 4's commands again.
+
+   **Expect.** `exit=0` and the same rows as step 4. A different result means
+   the re-run is not idempotent (§13.4).
+
+6. Serve the target in multi-tenant mode. As dave in `globex-<pid>`, list
+   layers. As dave in `initech-<pid>`, register a layer.
+
+   ```bash
+   PODIUM_SQLITE_PATH="$WORK/target.db" PODIUM_FILESYSTEM_ROOT="$WORK/target-objects" PODIUM_MULTI_TENANT=true \
+     podium serve --standalone --no-embeddings --bind 127.0.0.1:8199 > "$WORK/target.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8199/healthz
+   server_alive "$SRV" "$WORK/target.log"
+   as dave@acme.com "globex-$S" "http://127.0.0.1:8199/v1/layers" \
+     | python3 -c "import json,sys; print([l['id'] for l in json.load(sys.stdin)['layers']])"
+   as dave@acme.com "initech-$S" -w "\nHTTP %{http_code}\n" -X POST -H 'Content-Type: application/json' \
+     -d "{\"id\":\"dave2-$S\",\"source_type\":\"git\",\"repo\":\"https://git.invalid/dave/x.git\",\"ref\":\"main\"}" \
+     "http://127.0.0.1:8199/v1/layers"
+   ```
+
+   **Expect.** The `globex-<pid>` list names `dave-<pid>`. The
+   `initech-<pid>` registration answers `HTTP 403` with error code
+   `auth.forbidden`, because a deactivated tenant does not resolve, as S90
+   step 5 observes for an organization that names no tenant. A `globex-<pid>`
+   list without `dave-<pid>`, or an `initech-<pid>` registration that
+   succeeds, is the defect.
 
 **Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
