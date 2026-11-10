@@ -8,12 +8,17 @@ package e2e
 // the acceptance criterion.
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/registry/core"
+	"github.com/lennylabs/podium/pkg/store"
 )
 
 // hiwSkillRegistry stages a skill + context for filesystem-mode tests.
@@ -413,30 +418,166 @@ func TestDeployment_InjectedSessionToken(t *testing.T) {
 	t.Skip("requires a seeded runtime keys file (podium admin runtime register --keys-file) and a self-signed JWT; standard-deployment identity scenario not wired in the sandbox")
 }
 
-// migrate-to-standard into a SQLite target.
+// migrate-to-standard carries every tenant of a standalone store into a
+// SQLite target: the default org, a second tenant with a manifest, a layer
+// config, and an admin grant, and a deactivated tenant that stays
+// deactivated. A second identical run before any registry starts on the
+// target exits 0 and leaves the same tenants and manifests.
+//
+// Spec: §13.10
 func TestDeployment_MigrateToStandard(t *testing.T) {
 	t.Parallel()
 	src := makeStandaloneDB(t)
+	seedMigrateTenants(t, src.db)
 	targetDB := filepath.Join(t.TempDir(), "target.db")
-	res := runPodium(t, "", nil, "admin", "migrate-to-standard",
-		"--source-sqlite", src.db,
-		"--source-objects", src.objects,
-		"--target-store", "sqlite",
-		"--target-sqlite", targetDB,
-		"--target-objects", t.TempDir(),
-	)
+	targetObjects := t.TempDir()
+	migrate := func() cliResult {
+		return runPodium(t, "", nil, "admin", "migrate-to-standard",
+			"--source-sqlite", src.db,
+			"--source-objects", src.objects,
+			"--target-store", "sqlite",
+			"--target-sqlite", targetDB,
+			"--target-objects", targetObjects,
+		)
+	}
+	res := migrate()
 	if res.Exit != 0 {
 		t.Fatalf("migrate exit=%d stderr=%s\nstdout=%s", res.Exit, res.Stderr, res.Stdout)
 	}
-	if !strings.Contains(res.Stdout, "source plan:") {
-		t.Errorf("stdout missing 'source plan:':\n%s", res.Stdout)
+	for _, line := range []string{"source plan:", "tenants:       3"} {
+		if !strings.Contains(res.Stdout, line) {
+			t.Errorf("stdout missing %q:\n%s", line, res.Stdout)
+		}
 	}
 	mustExist(t, targetDB)
+	first := assertMigratedTenants(t, targetDB)
+
+	// §13.10: a re-run before any registry starts on the target completes
+	// or rewrites the same records, so the target ends in the same state.
+	rerun := migrate()
+	if rerun.Exit != 0 {
+		t.Fatalf("re-run exit=%d stderr=%s\nstdout=%s", rerun.Exit, rerun.Stderr, rerun.Stdout)
+	}
+	if second := assertMigratedTenants(t, targetDB); !reflect.DeepEqual(second, first) {
+		t.Errorf("re-run manifest counts = %v, want %v", second, first)
+	}
 
 	// Negative: omitting --source-sqlite exits 2.
 	neg := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "admin", "migrate-to-standard", "--target-store", "sqlite", "--target-sqlite", filepath.Join(t.TempDir(), "t.db"))
 	if neg.Exit != 2 {
 		t.Errorf("missing --source-sqlite exit=%d, want 2\nstderr=%s", neg.Exit, neg.Stderr)
+	}
+}
+
+// seedMigrateTenants adds two tenants beside the default org in the
+// standalone store at dbPath: globex with one manifest, one layer config, and
+// an admin grant for bob@acme.com, and initech, deactivated.
+func seedMigrateTenants(t *testing.T, dbPath string) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open source %s: %v", dbPath, err)
+	}
+	defer func() { _ = st.Close() }()
+	globexID := core.OrgIDForName("globex")
+	initechID := core.OrgIDForName("initech")
+	steps := []struct {
+		name string
+		run  func() error
+	}{
+		{"create globex", func() error { return st.CreateTenant(ctx, store.Tenant{ID: globexID, Name: "globex"}) }},
+		{"put globex manifest", func() error {
+			return st.PutManifest(ctx, store.ManifestRecord{
+				TenantID: globexID, ArtifactID: "globex/skill", Version: "1.0.0",
+				ContentHash: "sha256:globex", Type: "skill", Layer: "globex-team",
+			})
+		}},
+		{"put globex layer config", func() error {
+			return st.PutLayerConfig(ctx, store.LayerConfig{
+				TenantID: globexID, ID: "globex-team", SourceType: "local", LocalPath: "/srv/globex", Order: 1,
+			})
+		}},
+		{"grant globex admin", func() error {
+			return st.GrantAdmin(ctx, store.AdminGrant{UserID: "bob@acme.com", OrgID: globexID})
+		}},
+		{"create initech", func() error { return st.CreateTenant(ctx, store.Tenant{ID: initechID, Name: "initech"}) }},
+		{"deactivate initech", func() error { return st.DeactivateTenant(ctx, initechID) }},
+	}
+	for _, step := range steps {
+		if err := step.run(); err != nil {
+			t.Fatalf("%s: %v", step.name, err)
+		}
+	}
+}
+
+// assertMigratedTenants checks that the target store at dbPath holds the
+// default org, globex, and initech with the records seedMigrateTenants wrote,
+// and returns each tenant's manifest count so a re-run can compare them.
+func assertMigratedTenants(t *testing.T, dbPath string) map[string]int {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open target %s: %v", dbPath, err)
+	}
+	defer func() { _ = st.Close() }()
+	defaultID := core.OrgIDForName("default")
+	globexID := core.OrgIDForName("globex")
+	initechID := core.OrgIDForName("initech")
+
+	tenants, err := st.ListTenants(ctx)
+	if err != nil {
+		t.Fatalf("target ListTenants: %v", err)
+	}
+	counts := map[string]int{}
+	active := map[string]bool{}
+	for _, tn := range tenants {
+		manifests, err := st.ListManifests(ctx, tn.ID)
+		if err != nil {
+			t.Fatalf("target ListManifests %s: %v", tn.ID, err)
+		}
+		counts[tn.ID] = len(manifests)
+		active[tn.ID] = tn.Active
+	}
+	if len(counts) != 3 {
+		t.Fatalf("target tenants = %v, want default, globex, and initech", counts)
+	}
+	for _, id := range []string{defaultID, globexID} {
+		if counts[id] == 0 || !active[id] {
+			t.Errorf("tenant %s: manifests=%d active=%v, want manifests and active", id, counts[id], active[id])
+		}
+	}
+	if a, ok := active[initechID]; !ok || a {
+		t.Errorf("initech present=%v active=%v, want present and deactivated", ok, a)
+	}
+	assertGlobexCarried(t, st, globexID, defaultID)
+	return counts
+}
+
+// assertGlobexCarried checks globex's layer config and admin grant on the
+// target, and that the grant did not leak into the default org.
+func assertGlobexCarried(t *testing.T, st *store.SQLite, globexID, defaultID string) {
+	t.Helper()
+	ctx := context.Background()
+	layers, err := st.ListLayerConfigs(ctx, globexID)
+	if err != nil {
+		t.Fatalf("target ListLayerConfigs: %v", err)
+	}
+	if len(layers) != 1 || layers[0].ID != "globex-team" {
+		t.Errorf("globex layer configs = %+v, want globex-team", layers)
+	}
+	for _, c := range []struct {
+		org  string
+		want bool
+	}{{globexID, true}, {defaultID, false}} {
+		got, err := st.IsAdmin(ctx, "bob@acme.com", c.org)
+		if err != nil {
+			t.Fatalf("target IsAdmin %s: %v", c.org, err)
+		}
+		if got != c.want {
+			t.Errorf("IsAdmin(bob@acme.com, %s) = %v, want %v", c.org, got, c.want)
+		}
 	}
 }
 
