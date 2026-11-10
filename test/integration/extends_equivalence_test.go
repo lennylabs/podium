@@ -373,16 +373,7 @@ func executableDrop(id string, fields ...string) layer.Drop {
 // both modes serve it.
 func TestSyncEquivalence_ExecutableInheritanceDropIsByteIdentical(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		name      string
-		layers    []string
-		artifacts map[string]string
-		// wantLayers is the layer each lock entry records, in both modes, so
-		// the case pins which copy each tree carries and that the refused
-		// child is absent.
-		wantLayers map[string]string
-		wantDrops  []layer.Drop
-	}{
+	runDropEquivalence(t, []dropEquivalenceCase{
 		{
 			name:   "different-id child",
 			layers: []string{"base", "top"},
@@ -433,7 +424,73 @@ func TestSyncEquivalence_ExecutableInheritanceDropIsByteIdentical(t *testing.T) 
 			wantLayers: map[string]string{"p": "l1", "x": "l3"},
 			wantDrops:  []layer.Drop{executableDrop("x", "server_identifier")},
 		},
-	}
+	})
+}
+
+// sandboxConflictDrop is the drop the §4.6 sandbox-profile rule reports for id.
+func sandboxConflictDrop(id string) layer.Drop {
+	return layer.Drop{ArtifactID: id, Code: layer.InvalidArtifactCode, Reason: layer.SandboxProfileConflictReason}
+}
+
+// Spec: §11 (filesystem ↔ server equivalence) / §2.2 (shared library), §4.6
+// sandbox profile, §13.11.3 — a child whose restricting sandbox_profile
+// differs from its parent's is refused in both modes, on a same-layer edge and
+// on a cross-layer edge, and the two modes materialize byte-identical trees
+// without it. The filesystem source drops the child and reports one
+// ingest.invalid_artifact drop, and the server source never stored it and
+// reports nothing. The server's rejection reason is pinned by the ingest
+// tests, and both modes take it from layer.SandboxProfileConflictReason.
+func TestSyncEquivalence_SandboxProfileConflictDropIsByteIdentical(t *testing.T) {
+	t.Parallel()
+	runDropEquivalence(t, []dropEquivalenceCase{
+		{
+			// Server ingest processes one layer's records in canonical-ID
+			// order and resolves a pin against stored rows alone, so the
+			// parent's ID sorts before the child's. A child that sorted first
+			// would be rejected for an unresolved pin, a reason unrelated to
+			// the sandbox-profile rule.
+			name:   "same-layer conflict",
+			layers: []string{"base", "top"},
+			artifacts: map[string]string{
+				"base/shared/notes": eqAgent("the shared notes", "", ""),
+				"top/team/a-parent": eqAgent("the parent agent", "", "sandbox_profile: read-only-fs\n"),
+				"top/team/b-child":  eqAgent("the child agent", "team/a-parent", "sandbox_profile: network-isolated\n"),
+			},
+			wantLayers: map[string]string{"shared/notes": "base", "team/a-parent": "top"},
+			wantDrops:  []layer.Drop{sandboxConflictDrop("team/b-child")},
+		},
+		{
+			name:   "cross-layer conflict",
+			layers: []string{"base", "top"},
+			artifacts: map[string]string{
+				"base/shared/agent": eqAgent("the base agent", "", "sandbox_profile: read-only-fs\n"),
+				"top/team/agent":    eqAgent("the team agent", "shared/agent", "sandbox_profile: seccomp-strict\n"),
+				"top/team/notes":    eqAgent("the team notes", "", ""),
+			},
+			wantLayers: map[string]string{"shared/agent": "base", "team/notes": "top"},
+			wantDrops:  []layer.Drop{sandboxConflictDrop("team/agent")},
+		},
+	})
+}
+
+// dropEquivalenceCase is one registry layout whose filesystem walk drops
+// records the server source never stores.
+type dropEquivalenceCase struct {
+	name      string
+	layers    []string
+	artifacts map[string]string
+	// wantLayers is the layer each lock entry records, in both modes, so the
+	// case pins which copy each tree carries and that the refused child is
+	// absent.
+	wantLayers map[string]string
+	wantDrops  []layer.Drop
+}
+
+// runDropEquivalence syncs each case through both modes with a no-op adapter
+// and a harness adapter, and asserts byte-identical trees and lock entries,
+// the filesystem drops the case names, and no server drop.
+func runDropEquivalence(t *testing.T, cases []dropEquivalenceCase) {
+	t.Helper()
 	for _, tc := range cases {
 		tc := tc
 		dir := writeLayeredRegistry(t, tc.layers, tc.artifacts)
