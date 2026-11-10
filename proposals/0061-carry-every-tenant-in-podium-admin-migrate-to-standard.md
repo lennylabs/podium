@@ -1,7 +1,7 @@
 # Proposal 0061: Carry every tenant in podium admin migrate-to-standard
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-09). Verified on 2026-11-09 after 3 adversarial review rounds (3 findings fixed).
+- Status: Applied to spec (2026-11-09). Verified on 2026-11-09 after 3 adversarial review rounds (3 findings fixed).
 - Date: 2026-11-09
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is scheduled for the 0.6.0 release. It is a pre-1.0 behavior change and lands in a MINOR bump with no compatibility flag that restores the default-org-only pump.
