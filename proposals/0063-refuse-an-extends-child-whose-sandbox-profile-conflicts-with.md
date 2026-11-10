@@ -1,7 +1,7 @@
 # Proposal 0063: Refuse an extends: child whose sandbox_profile conflicts with its parent's instead of ranking the profiles
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-09). Verified on 2026-11-09 after 5 adversarial review rounds (3 findings fixed).
+- Status: Implemented (2026-11-09). Verified on 2026-11-09 after 5 adversarial review rounds (3 findings fixed).
 - Date: 2026-11-09
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: ingest and a filesystem-source `podium sync` refuse an `extends:` child that ingests or syncs today. It ships in 0.6.0.
@@ -49,28 +49,28 @@ This document stages spec, code, test, and documentation changes. It does not mo
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3. The §4.6 sandbox-profile rule, the §7.3.1 drop, and the §13.11.3 sync paragraph land in one commit, because SPEC-2 and SPEC-3 cite the rule SPEC-1 defines and §4.6 would point at a §13.11.3 paragraph that does not exist alone.
+- [x] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3. The §4.6 sandbox-profile rule, the §7.3.1 drop, and the §13.11.3 sync paragraph land in one commit, because SPEC-2 and SPEC-3 cite the rule SPEC-1 defines and §4.6 would point at a §13.11.3 paragraph that does not exist alone.
       Levels: unit. Depends on: —
-- [ ] **S2 · test** — TEST-5. The merge-table unit fixture and the e2e tightening fixture move their parents to `unrestricted`, and the `TestExtends_SandboxChildCannotWiden` doc comment cites the *Sandbox profile* section of `docs/authoring/extends.md`.
+- [x] **S2 · test** — TEST-5. The merge-table unit fixture and the e2e tightening fixture move their parents to `unrestricted`, and the `TestExtends_SandboxChildCannotWiden` doc comment cites the *Sandbox profile* section of `docs/authoring/extends.md`.
       Levels: unit, e2e. Depends on: S1
       Interleave: this test step precedes the code steps because each edit passes before and after CODE-1, so every later commit stays green (D-12). The doc comment cites the section S10 adds, and D-12 places the docs after the code, so that citation resolves at S10 in the same pull request.
-- [ ] **S3 · code** — CODE-1. `mergeSandboxProfile` and `SandboxProfilesConflict` replace the rank in `pkg/manifest/merge.go`.
+- [x] **S3 · code** — CODE-1. `mergeSandboxProfile` and `SandboxProfilesConflict` replace the rank in `pkg/manifest/merge.go`.
       Levels: unit. Depends on: S2
-- [ ] **S4 · code** — CODE-2. `SandboxProfileConflictConstraint`, `SandboxProfileConflictReason`, and `ErrSandboxProfileConflict` in `pkg/layer/sandbox.go`.
+- [x] **S4 · code** — CODE-2. `SandboxProfileConflictConstraint`, `SandboxProfileConflictReason`, and `ErrSandboxProfileConflict` in `pkg/layer/sandbox.go`.
       Levels: unit. Depends on: S1
-- [ ] **S5 · code** — CODE-3, CODE-4. The server insert-path check and the filesystem drop. Bundled because landing one mode's refusal without the other leaves the deployment modes diverging at that commit (§2.2), and one reviewer checks that both call the same predicate in the same order.
+- [x] **S5 · code** — CODE-3, CODE-4. The server insert-path check and the filesystem drop. Bundled because landing one mode's refusal without the other leaves the deployment modes diverging at that commit (§2.2), and one reviewer checks that both call the same predicate in the same order.
       Levels: unit, integration, materialization, e2e. Depends on: S3, S4
-- [ ] **S6 · test** — TEST-1. The 6x6 merge and conflict table, the idempotence properties, and the `pkg/layer` constant tests.
+- [x] **S6 · test** — TEST-1. The 6x6 merge and conflict table, the idempotence properties, and the `pkg/layer` constant tests.
       Levels: unit. Depends on: S3, S4
-- [ ] **S7 · test** — TEST-2. Server ingest cases and the reingest wire case.
+- [x] **S7 · test** — TEST-2. Server ingest cases and the reingest wire case.
       Levels: integration. Depends on: S5
-- [ ] **S8 · test** — TEST-3. Filesystem resolver cases and the mode-equivalence cases.
+- [x] **S8 · test** — TEST-3. Filesystem resolver cases and the mode-equivalence cases.
       Levels: unit, integration, materialization. Depends on: S5
-- [ ] **S9 · test** — TEST-4. End-to-end server and sync cases, the warm-cache `podium-mcp` case, and scenario S96.
+- [x] **S9 · test** — TEST-4. End-to-end server and sync cases, the warm-cache `podium-mcp` case, and scenario S96.
       Levels: unit, e2e, manual. Depends on: S5
-- [ ] **S10 · docs** — DOC-1. `docs/authoring/extends.md`, the frontmatter pages, the reference pages, and the consumer composition table.
+- [x] **S10 · docs** — DOC-1. `docs/authoring/extends.md`, the frontmatter pages, the reference pages, and the consumer composition table.
       Levels: —. Depends on: S1
-- [ ] **S11 · docs** — DOC-2. The CHANGELOG bullet.
+- [x] **S11 · docs** — DOC-2. The CHANGELOG bullet.
       Levels: —. Depends on: S1–S10
 
 **Ordering constraints.** S1 lands first and passes `make coverage-gate` before any later step (D-12). S2 lands before S3. S3 and S4 are independent of each other. The test steps S6 to S9 and the docs step S10 are independent of one another once their dependencies land. S11 describes the whole change and lands last. Land every step in one pull request.
