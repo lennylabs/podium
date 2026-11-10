@@ -25,6 +25,22 @@ func mcpServerArtifact(desc, extends, serverIdentifier string) string {
 	return b.String()
 }
 
+// hookArtifact is a hook manifest with an optional extends: line and an
+// optional hook_action, the executable field the hook cases leave to a parent
+// or restate.
+func hookArtifact(desc, extends, action string) string {
+	var b strings.Builder
+	b.WriteString("---\ntype: hook\nversion: 1.0.0\ndescription: " + desc + "\nhook_event: stop\n")
+	if extends != "" {
+		b.WriteString("extends: " + extends + "\n")
+	}
+	if action != "" {
+		b.WriteString("hook_action: " + action + "\n")
+	}
+	b.WriteString("---\n\nBody.\n")
+	return b.String()
+}
+
 // walkDrops walks reg under CollisionPolicyDrop with ResolveExtends and
 // returns the records and every drop OnDrop received, in order.
 func walkDrops(t *testing.T, reg *Registry) ([]ArtifactRecord, []layer.Drop) {
@@ -53,19 +69,9 @@ func inheritanceDrop(id string, fields ...string) layer.Drop {
 // no lint, so the hook example reaches the executable-field rule here.
 func TestWalk_ExecutableInheritanceDropsCrossLayerChild(t *testing.T) {
 	t.Parallel()
-	hook := func(desc, extends, action string) string {
-		s := "---\ntype: hook\nversion: 1.0.0\ndescription: " + desc + "\nhook_event: stop\n"
-		if extends != "" {
-			s += "extends: " + extends + "\n"
-		}
-		if action != "" {
-			s += "hook_action: " + action + "\n"
-		}
-		return s + "---\n\nBody.\n"
-	}
 	reg := openDropFixture(t, []string{"base", "team"}, map[string]string{
-		"base/core/notify": hook("parent", "", "./notify.sh"),
-		"team/team/notify": hook("child", "core/notify", ""),
+		"base/core/notify": hookArtifact("parent", "", "./notify.sh"),
+		"team/team/notify": hookArtifact("child", "core/notify", ""),
 	})
 	got, drops := walkDrops(t, reg)
 	want := []layer.Drop{inheritanceDrop("team/notify", "hook_action")}
@@ -300,5 +306,153 @@ func TestWalk_ExecutableInheritanceKeepsResolverFailures(t *testing.T) {
 				t.Errorf("drops = %+v, want none", drops)
 			}
 		})
+	}
+}
+
+// Spec: §4.6, §13.11.3 — a two-layer same-ID overlay that omits the executable
+// field is dropped, and x serves L1's record with L1's authored bytes, which
+// hold none of the dropped overlay's values.
+func TestWalk_ExecutableInheritanceDropsSameIDOverlay(t *testing.T) {
+	t.Parallel()
+	base := mcpServerArtifact("from-l1", "", "l1-id")
+	reg := openDropFixture(t, []string{"l1", "l2"}, map[string]string{
+		"l1/x": base,
+		"l2/x": mcpServerArtifact("from-l2", "x", ""),
+	})
+	got, drops := walkDrops(t, reg)
+	if want := []layer.Drop{inheritanceDrop("x", "server_identifier")}; !reflect.DeepEqual(drops, want) {
+		t.Fatalf("drops = %+v, want %+v", drops, want)
+	}
+	x := recByID(t, got, "x")
+	if x.Layer.ID != "l1" || len(got) != 1 {
+		t.Fatalf("records = %v, x from %q, want l1's x alone", idsOf(got), x.Layer.ID)
+	}
+	if string(x.ArtifactBytes) != base {
+		t.Errorf("served bytes = %q, want l1's authored bytes %q", x.ArtifactBytes, base)
+	}
+}
+
+// Spec: §4.6, §13.11.3 — the filesystem side of the same-ID pin layout. L2's
+// x 1.2.0 declares an unpinned extends: x and omits the undeclared executable
+// key acme_hook. A filesystem layer holds one record per ID, so the resolver
+// takes L1's x 1.0.0 as the parent, tests a cross-layer edge, and drops the
+// overlay, and x serves L1's 1.0.0.
+//
+// A server that holds a stored x 1.1.0 from L2 resolves the same 1.2.0's pin
+// to that within-layer version and accepts it (D-5; the ingest case TEST-2 (n)
+// pins that outcome). A later change to same-ID parent selection shows here as
+// a test change.
+func TestWalk_ExecutableInheritanceDropsUnpinnedSameIDOverlay(t *testing.T) {
+	t.Parallel()
+	reg := openDropFixture(t, []string{"l1", "l2"}, map[string]string{
+		"l1/x": "---\ntype: agent\nversion: 1.0.0\ndescription: base\nacme_hook: run.sh\n---\n\nBody.\n",
+		"l2/x": "---\ntype: agent\nversion: 1.2.0\ndescription: overlay\nextends: x\n---\n\nBody.\n",
+	})
+	got, drops := walkDrops(t, reg)
+	if want := []layer.Drop{inheritanceDrop("x", "acme_hook")}; !reflect.DeepEqual(drops, want) {
+		t.Fatalf("drops = %+v, want %+v", drops, want)
+	}
+	if !strings.Contains(drops[0].Reason, "acme_hook") {
+		t.Errorf("reason %q does not name acme_hook", drops[0].Reason)
+	}
+	x := recByID(t, got, "x")
+	if x.Layer.ID != "l1" || x.Artifact.Version != "1.0.0" {
+		t.Errorf("x served from %q at %q, want l1's 1.0.0", x.Layer.ID, x.Artifact.Version)
+	}
+}
+
+// Spec: §4.6, §13.11.3 — the rule compares the cross-layer child against its
+// parent's chain-resolved values, so a field the parent inherits within its
+// own layer counts as set by the parent. B (L2) extends A (L1), which extends
+// A0 (L1) and leaves acme_hook to it, so B is dropped for omitting acme_hook,
+// and A keeps the value it inherits within L1.
+func TestWalk_ExecutableInheritanceDropsChildOfInheritedField(t *testing.T) {
+	t.Parallel()
+	agent := func(desc, extends, hook string) string {
+		s := "---\ntype: agent\nversion: 1.0.0\ndescription: " + desc + "\n"
+		if extends != "" {
+			s += "extends: " + extends + "\n"
+		}
+		if hook != "" {
+			s += "acme_hook: " + hook + "\n"
+		}
+		return s + "---\n\nBody.\n"
+	}
+	reg := openDropFixture(t, []string{"L1", "L2"}, map[string]string{
+		"L1/a0": agent("grandparent", "", "run.sh"),
+		"L1/a":  agent("parent", "a0", ""),
+		"L2/b":  agent("child", "a", ""),
+	})
+	got, drops := walkDrops(t, reg)
+	if want := []layer.Drop{inheritanceDrop("b", "acme_hook")}; !reflect.DeepEqual(drops, want) {
+		t.Fatalf("drops = %+v, want %+v", drops, want)
+	}
+	if ids := idsOf(got); !reflect.DeepEqual(ids, []string{"a", "a0"}) {
+		t.Fatalf("records = %v, want a and a0", ids)
+	}
+	if a := recByID(t, got, "a"); !strings.Contains(string(a.ArtifactBytes), "acme_hook: run.sh") {
+		t.Errorf("a serves no inherited acme_hook:\n%s", a.ArtifactBytes)
+	}
+}
+
+// Spec: §4.6, §13.11.3 — inheritance within one layer is unchanged: a chain in
+// L2 whose members leave hook_action to the chain root is kept, and every
+// member serves the root's value. The filesystem source runs no lint, so the
+// hook children reach the resolver without the hook_action that server lint
+// requires on the authored record.
+func TestWalk_ExecutableInheritanceKeepsWithinLayerHookChain(t *testing.T) {
+	t.Parallel()
+	reg := openDropFixture(t, []string{"l1", "l2"}, map[string]string{
+		"l1/other":     hookArtifact("unrelated", "", "./other.sh"),
+		"l2/core/base": hookArtifact("root", "", "./notify.sh"),
+		"l2/core/mid":  hookArtifact("mid", "core/base", ""),
+		"l2/core/leaf": hookArtifact("leaf", "core/mid", ""),
+	})
+	got, drops := walkDrops(t, reg)
+	if len(drops) != 0 {
+		t.Fatalf("drops = %+v, want none", drops)
+	}
+	served := map[string]string{}
+	for _, rec := range got {
+		served[rec.ID] = rec.Artifact.HookAction
+	}
+	want := map[string]string{
+		"other": "./other.sh", "core/base": "./notify.sh",
+		"core/mid": "./notify.sh", "core/leaf": "./notify.sh",
+	}
+	if !reflect.DeepEqual(served, want) {
+		t.Errorf("served hook_action = %v, want %v", served, want)
+	}
+}
+
+// Spec: §4.6, §13.11.3 — the divergent-parent fixture. L1 holds p 2.0.0, and
+// L2 holds an overlay of p that restates server_identifier and a child c with
+// an unpinned extends: p that omits it, where c sorts before p. The filesystem
+// resolver takes the highest-precedence p, L2's overlay, so the edge it tests
+// is L2 to L2 and c is kept with the overlay's value.
+//
+// A server ingesting L2 processes c before p in canonical-ID order and
+// resolves c's pin against stored rows alone, so it selects L1's p 2.0.0,
+// tests a cross-layer edge, and rejects c. This is the parent-selection
+// divergence §13.11.3 states (SPEC-3, D-5). The fixture records the
+// filesystem outcome so a later change to parent selection shows here as a
+// test change.
+func TestWalk_ExecutableInheritanceDivergentParentKeepsChild(t *testing.T) {
+	t.Parallel()
+	reg := openDropFixture(t, []string{"l1", "l2"}, map[string]string{
+		"l1/p": "---\ntype: mcp-server\nversion: 2.0.0\ndescription: base\nserver_identifier: l1-id\n---\n\nBody.\n",
+		"l2/p": "---\ntype: mcp-server\nversion: 2.1.0\ndescription: overlay\nextends: p\nserver_identifier: l2-id\n---\n\nBody.\n",
+		"l2/c": mcpServerArtifact("child", "p", ""),
+	})
+	got, drops := walkDrops(t, reg)
+	if len(drops) != 0 {
+		t.Fatalf("drops = %+v, want none", drops)
+	}
+	served := map[string]string{}
+	for _, rec := range got {
+		served[rec.ID] = rec.Layer.ID + ":" + rec.Artifact.ServerIdentifier
+	}
+	if want := map[string]string{"c": "l2:l2-id", "p": "l2:l2-id"}; !reflect.DeepEqual(served, want) {
+		t.Errorf("served = %v, want %v", served, want)
 	}
 }
