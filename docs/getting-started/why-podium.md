@@ -129,69 +129,100 @@ Podium addresses the intersection of multiple types, multiple teams, multiple ha
 
 ## How Podium compares
 
-The adjacent landscape splits into categories. The comparisons below cover products that catalog or distribute authored AI agent artifacts into the harnesses an organization runs. LLM application development frameworks, evaluation suites, observability and tracing products, prompt-version-as-program-artifact tools, RAG-over-corpora knowledge bases, and agent runtimes solve different problems and are out of scope.
+The adjacent landscape splits into categories. The comparisons below cover products that catalog or distribute authored AI agent artifacts into the harnesses an organization runs. LLM application development frameworks, evaluation suites, observability and tracing products, prompt-version-as-program-artifact tools, RAG-over-corpora knowledge bases, and agent runtimes solve different problems and are out of scope. Product details are current as of November 2026.
 
-### Catalogs of AI agent artifacts
+### Self-hosted and managed registries
 
-The products in this section are the closest direct comparisons. All ship registries for SKILL.md or related authored content; the differences are scope, deployment, governance, and license.
+These products store and govern agent artifacts centrally. They differ in artifact scope, delivery into harnesses, composition, and hosting.
 
-| Product | License | Hosting | Artifact types | Layered composition | Per-layer visibility |
+| Product | License and hosting | Artifact types | Delivery into harnesses | Composition across sources | Access control |
 |:--|:--|:--|:--|:--|:--|
-| **Vercel skills.sh** ([skills.sh](https://skills.sh/)) | OSS Apache; registry is SaaS | Public registry; `npx skills add <pkg>` | SKILL.md packages | No | Public-only |
-| **iFlytek SkillHub** ([repo](https://github.com/iflytek/skillhub)) | OSS | Self-hosted (Docker / Kubernetes) | SKILL.md packages | No | Namespace + RBAC; visibility flags per package |
-| **SkillReg** ([skillreg.dev](https://skillreg.dev/)) | Closed commercial; SaaS-only | SaaS | SKILL.md packages | No | Org-scoped roles |
-| **Tessl** ([tessl.io](https://tessl.io/registry)) | Closed commercial; SaaS-only | SaaS | Skills, docs, rules, and commands bundled in tiles | No | Workspace-scoped private or public |
-| **Continue Hub** ([continue.dev/hub](https://www.continue.dev/hub)) | Closed SaaS hub; Continue extension is Apache 2.0 | SaaS hub plus `.continue/` in-repo | Assistants, agents, rules, MCP servers, prompts, models | No | Account or org sharing |
+| **iFlytek SkillHub** ([repo](https://github.com/iflytek/skillhub)) | Apache 2.0; self-hosted | Skills | CLI download and install | None | Team namespaces with roles; review before promotion to global scope |
+| **agentregistry** ([repo](https://github.com/agentregistry-dev/agentregistry)) | Apache 2.0; self-hosted | MCP servers, agents, skills, and prompts | Generated client configuration; deployment to Kubernetes; MCP routing through agentgateway | None | Curation and publishing controls |
+| **AWS Agent Registry** ([announcement](https://aws.amazon.com/about-aws/whats-new/2026/08/aws-agent-registry-generally-available/)) | Managed (AWS) | MCP servers, A2A agent cards, skills, and custom records | Discovery from MCP-compatible IDEs | None | IAM; approval workflow; approved-only discovery |
+| **Google Cloud Agent Registry** ([docs](https://docs.cloud.google.com/agent-registry/concepts)) | Managed (Google Cloud) | Agents, MCP servers, and skills (skill governance in preview) | Discovery through the registry's search API | None | Skill governance (preview); vulnerability scanning of skills |
+| **JFrog AI Catalog** ([skills registry](https://jfrog.com/ai-catalog/skills-registry/)) | Commercial; SaaS or self-hosted | Skills, plugins, MCP servers, and models | CLI and MCP | None | Policy-driven approval; scanning; signing of approved skills |
+| **Tessl** ([tessl.io](https://tessl.io/registry)) | Commercial; SaaS | Skills, docs, rules, and commands in tiles | Package manager; MCP tools to install | None | Workspace-scoped; evaluation of skill effect |
+| **Podium** | MIT; self-hosted in the local, single-node, or clustered deployment mode | Skills, agents, contexts, commands, rules, hooks, MCP server registrations, and extension types | Native project files through the built-in adapters, for each type a harness's project-level surface carries; marketplace repositories; MCP discovery tools; SDKs | Ordered layers with `extends:` | Per-OIDC-group and per-user visibility evaluated per request; SCIM; multi-tenant mode |
 
-**Where each applies.** skills.sh fits public-content discovery. SkillHub fits an on-prem-only shop wanting a SKILL.md-only registry. SkillReg fits a SaaS-acceptable shop wanting registry-side approval workflows. Tessl fits a shop that wants registry-side evaluation of skills against agent task outcomes. Continue Hub fits a shop standardized on the Continue extension.
+**Where each applies.**
 
-**Where Podium applies.** Podium applies when the catalog needs type heterogeneity beyond what each product holds, ordered-layer composition with `extends:`, per-OIDC-group visibility composed across multiple sources at request time, cross-type dependency edges, or MIT-licensed self-hosted deployment across the local, single-node, and clustered tiers.
+- SkillHub fits an organization that wants a self-hosted skill registry with team namespaces and a review step.
+- agentregistry fits a Kubernetes platform team that deploys MCP servers and agents and wants a catalog beside them.
+- AWS Agent Registry and Google Cloud Agent Registry fit an organization standardized on that cloud provider.
+- JFrog AI Catalog fits an organization that already governs packages in Artifactory and wants scanning and approval for skills.
+- Tessl fits an organization that accepts SaaS and wants evaluation of each skill's effect on agent tasks.
 
-### Single-vendor private marketplaces and team-rule systems
+**Where Podium applies.** Podium applies when the catalog holds agents, contexts, commands, rules, and hooks beside skills and MCP server registrations, when ordered layers and `extends:` compose several sources, when visibility is evaluated per OIDC group at request time, when the built-in adapters write native project files for each type a harness's project-level surface carries, when consumers verify the signature of what they receive, or when the registry is self-hosted under the MIT license in any deployment mode. Podium does not scan artifacts. Scanning runs in the CI/CD pipeline of the Git repository that a layer ingests from.
 
-Single-harness organizations get a shared catalog from the harness vendor's own enterprise tier. Podium delivers into these vendors via harness adapters. The comparison is the boundary at which a multi-harness organization stops fitting in any single one of them.
+### Harness vendors' private marketplaces
 
-| Product | Coverage | Where it applies | Where Podium applies |
-|:--|:--|:--|:--|
-| **Anthropic Cowork private plugin marketplaces** | Claude Code and Claude Cowork; org-private GitHub-hosted marketplace; per-user provisioning, auto-install, and audit | Claude-only shop; managed by Anthropic | Multi-harness shop; on-prem deployment; per-OIDC-group visibility composed across multiple sources |
-| **Cursor Team Rules** | Cursor only; rules only; recommend / require flags from a cloud dashboard | Cursor-only shop; rules-only catalog | Multi-harness; multi-type catalog; on-prem deployment |
-| **AWS Bedrock Registry with AgentCore** | AWS-managed; Kiro resources; AgentCore harness; cross-harness skill rollout announced | AWS-tied shop; managed runtime | Multi-vendor; MIT-licensed; on-prem deployment |
-| **Per-harness skill systems** (OpenAI Codex Skills, GitHub Copilot custom instructions, Goose, Roo Code, Windsurf, Trae, Amp, Factory) | Single harness; each surface manages its own catalog | One-harness shop | Cross-harness delivery via the adapter set |
+The coding agents below offer plugin bundles and an admin-managed private marketplace. An organization that sanctions one coding agent gets a shared, governed catalog from that vendor.
 
-### Cross-harness skill installers and conventions
-
-These tools translate one source SKILL.md into many harness-native locations on a developer's machine without a server. They operate per-machine; they do not compose multiple sources or apply per-OIDC-group visibility at request time.
-
-| Tool or pattern | What it does |
+| Product | Coverage |
 |:--|:--|
-| **agent-skill-creator** ([repo](https://github.com/FrancyJGLisboa/agent-skill-creator)) | Generates a SKILL.md plus an `install.sh` that targets multiple harnesses. |
-| **AGENTS.md plus sync hook** ([AGENTS.md spec](https://www.harness.io/blog/the-agent-native-repo-why-agents-md-is-the-new-standard)) | A single repo-rooted file plus a pre-commit hook copies it into `.cursorrules`, `CLAUDE.md`, `.windsurfrules`, `.github/copilot-instructions.md`, and similar. |
-| **Curated GitHub-hosted skill libraries** (VoltAgent awesome-agent-skills, alirezarezvani/claude-skills, tech-leads-club/agent-skills, harness/harness-skills) | `git clone` distribution. |
+| **Claude** private plugin marketplaces with managed settings ([docs](https://code.claude.com/docs/en/plugins/org)) | Claude Code, Claude Desktop, and Claude Cowork; admin allowlists of marketplace sources through managed settings |
+| **Cursor** team marketplaces ([docs](https://cursor.com/docs/plugins)) | Cursor; a team marketplace imported from a GitHub repository; per-plugin install modes Default Off, Default On, and Required |
+| **OpenAI Codex** workspace plugins ([help article](https://help.openai.com/en/articles/20001256)) | Codex and ChatGPT; a public or private GitHub marketplace imported with daily sync; per-role installation policy |
+| **GitHub Copilot** enterprise-managed plugins ([changelog](https://github.blog/changelog/2026-05-06-enterprise-managed-plugins-in-github-copilot-cli-are-now-in-public-preview/)) | Copilot CLI; marketplaces defined in the enterprise's `.github-private` repository; installation on sign-in; plugins that bundle agents, hooks, skills, and MCP servers (public preview) |
 
-**Where they apply.** These tools apply to a single team, a single type, and modest scale. The overhead of a registry server is not justified.
+**Where they apply.** A vendor marketplace fits an organization that sanctions a single coding agent.
 
-**Where Podium applies.** Podium applies when multiple sources compose into one effective view, per-OIDC-group visibility is required, cross-type dependency edges matter, or the catalog spans multiple types.
+**Where Podium applies.** Podium applies when an organization sanctions more than one coding agent and wants one source and one visibility policy across them, or when the catalog must be deployed on-prem. Podium renders marketplace repositories for Claude, Codex, Cursor, Gemini, Pi, and Hermes from the same catalog (§7.8 in the spec). The Claude, Codex, and Cursor marketplaces coexist in one repository, a Gemini extension occupies a repository of its own, and a Hermes tap defaults to a root `skills/` directory and usually takes its own repository. Podium has no GitHub Copilot adapter, so it writes no Copilot custom agents, hooks, or plugin marketplaces.
 
-### MCP server registries and gateways
+### Gateways and MCP server registries
 
-These overlap with Podium's `mcp-server` built-in extension type and with the governance plane around MCP. Their scope is restricted to MCP server registrations.
+These products overlap with Podium's `mcp-server` type and with the governance around MCP. Some gateways also store skills and hand them to coding agents.
 
 | Product | License | Coverage |
 |:--|:--|:--|
-| **Kong MCP Registry / Gateway** ([konghq.com](https://konghq.com/products/mcp-registry)) | Commercial | Discovery, OAuth, observability, per-tool governance |
-| **TrueFoundry MCP Gateway** ([truefoundry.com](https://www.truefoundry.com/mcp-gateway)) | Commercial | MCP catalog, OAuth, federated identity, request tracing |
-| **agentic-community/mcp-gateway-registry** ([repo](https://github.com/agentic-community/mcp-gateway-registry)) | OSS | Keycloak / Entra OAuth, dynamic discovery, allowlist |
-| **MACH Alliance MCP Registry, Docker MCP Catalog, GitHub VS Code internal MCP registry, ServiceNow MCP Registry** | Industry- or vendor-curated | Curated catalogs scoped to a platform |
+| **LiteLLM** Skills Gateway ([docs](https://docs.litellm.ai/docs/skills_gateway)) | Open source with a commercial enterprise edition | Imports skills from Git, grants private skills per key or team, and generates a Claude Code marketplace |
+| **agentic-community/mcp-gateway-registry** ([repo](https://github.com/agentic-community/mcp-gateway-registry)) | OSS | Registers MCP servers, agents, and skills, with Keycloak or Entra OAuth, dynamic discovery, and scanning at registration |
+| **Kong AI Registry** ([konghq.com](https://konghq.com/products/mcp-registry)) | Commercial | Governed discovery of MCP servers, tools, models, agents, and skills |
+| **TrueFoundry MCP Gateway** ([truefoundry.com](https://www.truefoundry.com/mcp-gateway)) | Commercial | MCP catalog, OAuth, federated identity, and request tracing |
+| **MACH Alliance MCP Registry** ([machalliance.org](https://machalliance.org/mach-alliance-mcp-registry)) | Industry alliance | A vendor-neutral directory of MCP servers that agents and tools query |
+| **Docker MCP Catalog** ([hub.docker.com](https://hub.docker.com/mcp)) | Run by Docker, with community submissions | A catalog of containerized MCP servers |
+| **GitHub Copilot internal MCP registry** ([docs](https://docs.github.com/en/copilot/how-tos/administer-copilot/manage-mcp-usage/configure-mcp-server-access)) | Hosted by the organization, configured in Copilot policies | An organization's registry of MCP servers for discovery and allowlisting in Copilot clients |
+| **ServiceNow MCP Registry** ([docs](https://www.servicenow.com/docs/r/integrate-applications/mcp-registry.html)) | Commercial (ServiceNow application) | A private registry of approved MCP servers |
 
-These coexist with Podium in a deployment. An MCP gateway brokers transport and runtime auth for MCP servers; Podium catalogs the registrations and the rest of the artifact graph under one governance plane.
+**Where they apply.** A gateway or MCP registry fits an organization whose catalog holds MCP server registrations alone, or that already routes coding-agent traffic through a gateway.
 
-### Git monorepo with per-harness directory layout
+**Where Podium applies.** Podium applies when agents, contexts, commands, rules, and hooks need the same governance as MCP server registrations, when `mcpServers:` references from skills and agents must resolve to `mcp-server` artifacts as dependency edges, or when ordered layers compose several sources. A gateway and Podium can run together: the gateway brokers model and tool traffic, and Podium catalogs the authored artifacts.
 
-A Git monorepo with per-harness directories is the original baseline.
+### Cross-harness installers and generators
 
-**Where it applies.** This model applies to a single team, a single harness, one or two artifact types, and no formal governance requirements. It requires no additional infrastructure beyond an existing Git provider.
+These tools copy or convert one source into several coding agents' formats on a developer machine or in CI, without a server.
 
-**Where Podium applies.** Podium applies when multi-source composition with deterministic merge across multiple Git repositories, per-layer visibility for cross-team catalogs, cross-type dependency-aware impact analysis, or lazy discovery at scale is required.
+| Tool | What it does |
+|:--|:--|
+| **`npx skills`** and the **Vercel skills.sh** registry ([skills.sh](https://skills.sh/), [repo](https://github.com/vercel-labs/skills)) | Installs skills from the public skills.sh registry, a Git repository, or a discovery index into many coding agents |
+| **`gh skill`** ([changelog](https://github.blog/changelog/2026-04-16-manage-agent-skills-with-github-cli/)) | Searches, installs, pins, and updates skills from GitHub repositories |
+| **rulesync** ([repo](https://github.com/dyoshikawa/rulesync)) | Generates rules, commands, MCP configuration, subagents, and skills for many coding agents from one source |
+| **agent-skills-platform** ([repo](https://github.com/FrancyJGLisboa/agent-skills-platform)) | Builds tested skills from workflows and publishes them to a Git-hosted team marketplace |
+
+**Where they apply.** These tools fit a single team or a library author with a modest catalog and no per-group visibility requirement.
+
+**Where Podium applies.** Podium applies when several sources compose into one effective view, when visibility is evaluated per OIDC group at request time, when loads must be audited, or when the catalog is too large to install in full and needs lazy discovery through the MCP server.
+
+### Git repository with harness-native directories
+
+A Git repository that holds each harness's native directories is the baseline. A common variant keeps one `AGENTS.md` or rule file and runs a pre-commit hook or CI script that copies it into each harness's location, such as `CLAUDE.md`, `.cursorrules`, `.windsurfrules`, or `.github/copilot-instructions.md`.
+
+**Where it applies.** This model applies to a single team with one or a few harnesses, one or two artifact types, a modest catalog, and no formal governance requirements. It requires no infrastructure beyond Git.
+
+**Where Podium applies.** Podium applies when several repositories compose into one effective view with deterministic merge, when visibility differs per layer across teams, when each artifact type needs translation into the native format of each harness whose project-level surface carries it, when impact analysis must follow dependency edges across types, or when the catalog is too large to load in full and needs lazy discovery.
+
+### Open specifications
+
+Several open specifications define parts of this space. The table states what Podium implements of each.
+
+| Specification | Status | What it defines | What Podium implements |
+|:--|:--|:--|:--|
+| **Agent Skills** ([specification](https://agentskills.io/specification)) | Specification governed by the Agentic AI Foundation (AAIF) | The `SKILL.md` skill directory format | A `type: skill` artifact carries a `SKILL.md` that follows the specification. Podium-only fields, such as `when_to_use` and `sensitivity`, live in an `ARTIFACT.md` beside it. |
+| **AGENTS.md** ([agents.md](https://agents.md/)) | Open convention | Repository-wide instructions for coding agents | The Codex, OpenCode, and Pi adapters inject rule artifacts into `AGENTS.md` between Podium-managed markers. |
+| **Agent Plugins 1.0** ([agent-plugins.org](https://agent-plugins.org/)) | Published specification, version 1.0.0 | A portable package format for skills, tools, and other agent components | Podium writes no Agent Plugins packages. |
+| **MCP Skills Extension, SEP-2640** ([SEP](https://modelcontextprotocol.io/seps/2640-skills-extension)) | Final MCP extension (`io.modelcontextprotocol/skills`) | Serving skills from MCP servers | The Podium MCP server mirrors artifact bodies as read-only MCP resources and does not implement the skills extension. |
+| **Agent Skills discovery index** ([RFC](https://github.com/cloudflare/agent-skills-discovery-rfc)) | Proposal (RFC) | A public `/.well-known/agent-skills/index.json` listing | The registry publishes no discovery index. |
 
 ---
 
