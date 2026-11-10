@@ -317,7 +317,7 @@ The target for each remaining type, by adapter (paths are project-relative; `<n>
 | `hook`       | `settings.json` (cfg)     | ✗              | ✗   | `.cursor/hooks.json` (cfg) | `config.toml` (cfg)    | ✗                       | `settings.json` (cfg)      | ✗                   | ✗                     |
 | `mcp-server` | `.mcp.json` (cfg)         | ✗              | ✗          | `.cursor/mcp.json` (cfg)   | `config.toml` (cfg)    | `opencode.json` (cfg)       | `settings.json` (cfg)      | ✗                   | ✗                     |
 
-`none` writes the canonical layout (`ARTIFACT.md`, `SKILL.md`, bundled resources) without translation. The config-merge targets resolve to the harness's project-scope config file: `.claude/settings.json`, `.cursor/hooks.json` and `.cursor/mcp.json`, `.codex/config.toml`, `.gemini/settings.json`, and root `opencode.json`.
+`none` writes the canonical layout (`ARTIFACT.md`, `SKILL.md`, and bundled resources) without translation. It omits the served `ARTIFACT.md` when its bytes equal the synthesized document of §4.3.4 for the version that document names, which covers a skill with no `ARTIFACT.md` and an authored `ARTIFACT.md` identical to that document. The config-merge targets resolve to the harness's project-scope config file: `.claude/settings.json`, `.cursor/hooks.json` and `.cursor/mcp.json`, `.codex/config.toml`, `.gemini/settings.json`, and root `opencode.json`.
 
 Notes on partial and migrating surfaces:
 

@@ -624,7 +624,7 @@ print(f"showing {len(browse.results)} of {browse.total_matched} artifacts in fin
 # Load (in-memory or to disk)
 artifact = client.load_artifact("finance/close-reporting/run-variance-analysis")
 print(artifact.manifest_body)
-artifact.materialize(to="./artifacts/")  # canonical layout: ARTIFACT.md, SKILL.md for a skill, and bundled resources
+artifact.materialize(to="./artifacts/")  # canonical layout: ARTIFACT.md unless it equals the §4.3.4 synthesized document, SKILL.md for a skill, and bundled resources
 
 # Streaming change events for sync use cases
 for event in client.subscribe(["artifact.published", "artifact.deprecated"]):
