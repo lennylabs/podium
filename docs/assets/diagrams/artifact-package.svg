@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 440" class="dg">
   <!--
-    Single artifact package layout: one directory containing a manifest and
-    optional bundled resources. The bundled folders are conventional names; any
-    structure works under the manifest.
+    Skill package layout: one directory containing a SKILL.md, an optional
+    ARTIFACT.md, and optional bundled resources. The bundled folders are
+    conventional names; any structure works under the package root.
   -->
   <defs>
     <style>
@@ -94,7 +94,7 @@
   <rect class="dg-bg" width="1080" height="440"/>
 
   <text class="dg-title" x="40" y="42">Artifact package layout</text>
-  <text class="dg-lead" x="40" y="64">An artifact is a directory with a manifest plus optional bundled resources.</text>
+  <text class="dg-lead" x="40" y="64">A skill is a directory with a SKILL.md, an optional ARTIFACT.md, and optional bundled resources.</text>
 
   <!-- Root folder card -->
   <rect class="dg-card-primary" x="60" y="92" width="500" height="44" rx="6"/>
@@ -106,17 +106,17 @@
   <!-- Child entries: each is (tree-tick, box, label, callout) -->
   <!-- ARTIFACT.md -->
   <path class="dg-guide" d="M 100 158 L 140 158"/>
-  <rect class="dg-card-primary" x="140" y="148" width="200" height="32" rx="6"/>
+  <rect class="dg-card" x="140" y="148" width="200" height="32" rx="6"/>
   <text class="dg-mono dg-t-m" x="156" y="170">ARTIFACT.md</text>
-  <text class="dg-label dg-t-xs" x="356" y="170">REQUIRED</text>
-  <text class="dg-sub" x="446" y="170">manifest frontmatter and prose body</text>
+  <text class="dg-label-quiet dg-t-xs" x="356" y="170">OPTIONAL</text>
+  <text class="dg-sub" x="446" y="170">Podium-only frontmatter, no prose body</text>
 
   <!-- SKILL.md -->
   <path class="dg-guide" d="M 100 200 L 140 200"/>
   <rect class="dg-card-primary" x="140" y="190" width="200" height="32" rx="6"/>
   <text class="dg-mono dg-t-m" x="156" y="212">SKILL.md</text>
-  <text class="dg-label dg-t-xs" x="356" y="212">REQUIRED FOR SKILLS</text>
-  <text class="dg-sub" x="556" y="212">agentskills.io-compatible body</text>
+  <text class="dg-label dg-t-xs" x="356" y="212">REQUIRED</text>
+  <text class="dg-sub" x="446" y="212">agentskills.io-compatible body</text>
 
   <!-- scripts/ -->
   <path class="dg-guide" d="M 100 242 L 140 242"/>
@@ -146,6 +146,6 @@
   <text class="dg-label-quiet dg-t-xs" x="356" y="384">OPTIONAL</text>
   <text class="dg-sub" x="446" y="384">folder names are conventional</text>
 
-  <text class="dg-foot" x="40" y="412">Only the manifest is required. Resources larger than the per-package cap use external_resources:</text>
+  <text class="dg-foot" x="40" y="412">SKILL.md is required for a skill. Resources larger than the per-package cap use external_resources:</text>
   <text class="dg-foot" x="40" y="430">pointing at pre-uploaded object-storage URLs with content hashes.</text>
 </svg>
