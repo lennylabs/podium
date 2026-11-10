@@ -1,7 +1,7 @@
 # Proposal 0060: Refuse to start a multi-tenant registry that has no request-time identity verifier
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-09). Verified on 2026-11-09 after 8 adversarial review rounds (12 findings fixed).
+- Status: Implemented (2026-11-09). Verified on 2026-11-09 after 8 adversarial review rounds (12 findings fixed).
 - Date: 2026-11-09
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: a registry that starts today with `PODIUM_MULTI_TENANT=true` and no request-time identity verifier exits at startup after it, and it ships in 0.6.0.
@@ -45,31 +45,35 @@ This document stages spec, code, test, and documentation changes. It does not mo
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4. The §6.3.1 refusal, the §13.10 sentence and public-mode bullet, the §13.12 row sentence, and the §4.7.8 clause removal land in one commit, because the §13.12 sentence contradicts the current §4.7.8 text and §13.10 cites §6.3.1. Run `make coverage-gate`.
+- [x] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4. The §6.3.1 refusal, the §13.10 sentence and public-mode bullet, the §13.12 row sentence, and the §4.7.8 clause removal land in one commit, because the §13.12 sentence contradicts the current §4.7.8 text and §13.10 cites §6.3.1. Run `make coverage-gate`.
       Levels: —. Depends on: —
-- [ ] **S2 · test** — TEST-3. Delete `TestLayerEndpoint_MultiTenantNoRouter` and move its unrouted assertions into step 6 of `TestLayerEndpoint_MultiTenantRouting`.
+- [x] **S2 · test** — TEST-3. Delete `TestLayerEndpoint_MultiTenantNoRouter` and move its unrouted assertions into step 6 of `TestLayerEndpoint_MultiTenantRouting`.
       Interleave: this test step precedes the code steps on purpose. The extension passes before and after CODE-1, and the deleted test would fail once CODE-1 lands.
       Levels: e2e. Depends on: S1
-- [ ] **S3 · code** — CODE-1. `multiTenantVerifierGuard` and its call in `(*Config).validate`.
+- [x] **S3 · code** — CODE-1. `multiTenantVerifierGuard` and its call in `(*Config).validate`.
       Levels: unit, e2e. Depends on: S1, S2
-- [ ] **S4 · code** — CODE-2. The rewritten `config.identity_provider_unverified` message.
+- [x] **S4 · code** — CODE-2. The rewritten `config.identity_provider_unverified` message.
       Levels: unit, e2e. Depends on: S1
-- [ ] **S5 · code** — CODE-3. Remove the `WithMultiTenant` boot block and option, rewrite the stale comments, and update the unit tests that build the unreachable combination.
+- [x] **S5 · code** — CODE-3. Remove the `WithMultiTenant` boot block and option, rewrite the stale comments, and update the unit tests that build the unreachable combination.
       Levels: unit, integration, e2e. Depends on: S3
-- [ ] **S6 · test** — TEST-1. Unit tests for both guards and the `(*Config).validate` precedence.
+- [x] **S6 · test** — TEST-1. Unit tests for both guards and the `(*Config).validate` precedence.
       Levels: unit. Depends on: S3, S4
-- [ ] **S7 · test** — TEST-2. End-to-end refusal through the compiled binary, and the single-tenant and multi-tenant table for `config.identity_provider_unverified`.
+- [x] **S7 · test** — TEST-2. End-to-end refusal through the compiled binary, and the single-tenant and multi-tenant table for `config.identity_provider_unverified`.
       Levels: e2e. Depends on: S3, S4
-- [ ] **S8 · test** — MV-1. Scenario S90 gains the negative-control step 7.
+- [x] **S8 · test** — MV-1. Scenario S90 gains the negative-control step 7.
       Levels: manual. Depends on: S3, S4
-- [ ] **S9 · docs** — DOC-1. `docs/deployment/single-node.md`, `docs/deployment/clustered.md`, and `docs/deployment/layers.md`.
+- [x] **S9 · docs** — DOC-1. `docs/deployment/single-node.md`, `docs/deployment/clustered.md`, and `docs/deployment/layers.md`.
       Levels: —. Depends on: S1
-- [ ] **S10 · docs** — DOC-2. `docs/reference/error-codes.md`, `docs/reference/cli.md`, and `docs/reference/http-api.md`.
+- [x] **S10 · docs** — DOC-2. `docs/reference/error-codes.md`, `docs/reference/cli.md`, and `docs/reference/http-api.md`.
       Levels: —. Depends on: S1
-- [ ] **S11 · docs** — DOC-3. The CHANGELOG bullet.
+- [x] **S11 · docs** — DOC-3. The CHANGELOG bullet.
       Levels: —. Depends on: S1–S10
 
 **Ordering constraints.** S1 lands first and passes `make coverage-gate` before any later step. S2 lands before S3. S3 and S4 are independent of each other. S5 lands after S3. S6, S7, and S8 are independent of one another once S3 and S4 land. S9 and S10 are independent. S11 describes the whole change and lands last. Land every step in one pull request.
+
+## Deviations from the checklist
+
+- **S1a** is absent from this checklist, and the build recorded it as landed. The branch history between S1 and S2 holds one commit, and that commit records this proposal's status as Applied to spec after the spec amendments landed.
 
 ## Current state and the gap
 
