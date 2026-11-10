@@ -238,7 +238,7 @@ The default is BM25-only. Local artifacts have lower recall on semantic queries 
 Disk cache at `${PODIUM_CACHE_DIR}/<sha256>/`. Two cache layers:
 
 - **Resolution cache.** Maps `(id, "latest")` to `semver`. TTL 30s by default. Revalidated via HEAD on hit when `PODIUM_CACHE_MODE=always-revalidate`.
-- **Content cache.** Maps `content_hash` to manifest bytes + bundled resources. Forever (immutable by definition).
+- **Content cache.** Maps `content_hash` to manifest bytes + bundled resources. Forever (immutable by definition). A skill whose version the registry assigns is the exception for its version and its served `ARTIFACT.md`: after a purge lets the registry accept content it had rejected under a new registry-assigned version (§7.3.1), a cached record of that content reports the purged version and, for a skill with no `ARTIFACT.md`, the synthesized document that names it (§4.3.4). A HEAD revalidation and a `304` confirm the content hash only, so the record keeps reporting that version until the cache no longer holds it. Its body and bundled resources are the bytes the registry serves.
 
 Cache modes (set at server startup via `PODIUM_CACHE_MODE`):
 
