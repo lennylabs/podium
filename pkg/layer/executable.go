@@ -7,8 +7,9 @@ import (
 
 // InvalidArtifactCode is the §6.10 code ingest returns for an artifact it
 // cannot accept as authored, and the code a filesystem-source composition
-// reports for an artifact it drops under the §4.6 executable-field rule or
-// because its extends: reference no longer resolves.
+// reports for an artifact it drops under the §4.6 executable-field rule, under
+// the §4.6 sandbox-profile rule, or because its extends: reference no longer
+// resolves.
 //
 // Spec: §4.6, §13.11.3
 const InvalidArtifactCode = "ingest.invalid_artifact"
