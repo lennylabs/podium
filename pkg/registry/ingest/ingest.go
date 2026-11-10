@@ -522,7 +522,8 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		}
 	}
 
-	// Walk the layer's filesystem to find every ARTIFACT.md.
+	// Walk the layer's filesystem to find every package: a directory holding
+	// ARTIFACT.md, or one holding SKILL.md below no other package (§4.2).
 	records, err := walkLayer(req.Files, req.LayerID)
 	if err != nil {
 		return nil, err
@@ -1018,8 +1019,14 @@ func embedDomain(ctx context.Context, req Request, dr store.DomainRecord) error 
 	return nil
 }
 
+// walkLayer enumerates every artifact package in the snapshot by the §4.2
+// discovery rule that the filesystem-source walk in pkg/registry/filesystem
+// applies, through the shared filesystem.PackageManifests predicate.
+//
+// Spec: §4.2
 func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) {
 	var out []filesystem.ArtifactRecord
+	packages := map[string]bool{}
 	walkErr := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			// spec: §6.10 — a directory of the snapshot that cannot be read is
@@ -1030,19 +1037,17 @@ func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) 
 			// answer when the registry answered and the source is the problem.
 			return fmt.Errorf("%w: %v", source.ErrSourceUnreachable, err)
 		}
-		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") && p != "." {
-				return fs.SkipDir
-			}
+		if !d.IsDir() {
 			return nil
 		}
-		if d.Name() != "ARTIFACT.md" {
-			return nil
+		if strings.HasPrefix(d.Name(), ".") && p != "." {
+			return fs.SkipDir
 		}
-		rec, err := loadOne(fsys, p, layerID)
-		if err != nil {
+		rec, found, err := loadPackage(fsys, packages, p, layerID)
+		if err != nil || !found {
 			return err
 		}
+		packages[p] = true
 		out = append(out, rec)
 		return nil
 	})
@@ -1159,14 +1164,50 @@ func (e *chainReadError) Unwrap() error { return e.cause }
 // reproduces the same parse failure until the source is corrected.
 func invalidArtifact(cause error) error { return invalidArtifactError{cause: cause} }
 
+// loadPackage applies the §4.2 discovery rule to the directory dir and loads
+// the package it holds. found is false when dir is not a package. A stat
+// failure other than an absent manifest is returned, so a manifest the
+// confined source refuses fails the layer's ingest (§7.3.1).
+//
+// Spec: §4.2, §7.3.1
+func loadPackage(fsys fs.FS, packages map[string]bool, dir, layerID string) (rec filesystem.ArtifactRecord, found bool, err error) {
+	artifact, skill, err := filesystem.PackageManifests(fsys, dir)
+	if err != nil {
+		return filesystem.ArtifactRecord{}, false, err
+	}
+	switch {
+	case artifact:
+		rec, err = loadOne(fsys, joinPath(dir, "ARTIFACT.md"), layerID)
+	case skill && !filesystem.WithinPackage(packages, dir):
+		rec, err = loadPlainSkill(fsys, joinPath(dir, "SKILL.md"), layerID)
+	default:
+		return filesystem.ArtifactRecord{}, false, nil
+	}
+	if err != nil {
+		return filesystem.ArtifactRecord{}, false, err
+	}
+	return rec, true, nil
+}
+
+// packageID returns the canonical ID of the package whose manifest is at
+// manifestPath. spec: §4.2 — it enforces the canonical-ID invariants the
+// filesystem-source registry enforces, so both walk paths reject a root-level
+// manifest (empty ID) and any segment containing "@" identically. The error is
+// a content fault, so it carries ErrInvalidArtifact and the reingest endpoint
+// answers ingest.lint_failed rather than a retryable registry.unavailable.
+func packageID(manifestPath string) (string, error) {
+	id := dirToCanonical(dirOf(manifestPath))
+	if err := filesystem.ValidateCanonicalID(id); err != nil {
+		return "", fmt.Errorf("%s: %w", manifestPath, invalidArtifact(err))
+	}
+	return id, nil
+}
+
 func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecord, error) {
 	dir := dirOf(artifactPath)
-	id := dirToCanonical(dir)
-	// spec: §4.2 — enforce the canonical-ID invariants the filesystem-source
-	// registry already enforces, so both walk paths reject a root-level
-	// ARTIFACT.md (empty ID) and any segment containing "@" identically.
-	if err := filesystem.ValidateCanonicalID(id); err != nil {
-		return filesystem.ArtifactRecord{}, fmt.Errorf("%s: %w", artifactPath, err)
+	id, err := packageID(artifactPath)
+	if err != nil {
+		return filesystem.ArtifactRecord{}, err
 	}
 
 	bytes, err := fs.ReadFile(fsys, artifactPath)
@@ -1206,8 +1247,55 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		rec.Skill = s
 		rec.SkillBytes = skillBytes
 	}
-	// Walk the artifact's directory for bundled resources.
-	walkErr := fs.WalkDir(fsys, dir, func(p string, d fs.DirEntry, err error) error {
+	if err := captureResources(fsys, dir, &rec); err != nil {
+		return filesystem.ArtifactRecord{}, err
+	}
+	rec.ResolveSkillVersion()
+	return rec, nil
+}
+
+// loadPlainSkill loads a package that holds SKILL.md and no ARTIFACT.md as a
+// type: skill artifact. ArtifactBytes and AuthoredBytes stay nil, so the
+// §4.7.6 digest frames a zero-length first value and the stored manifest is
+// empty. A SKILL.md that does not parse is a content fault that fails the
+// call, as an unparseable ARTIFACT.md does.
+//
+// Spec: §4.2, §4.3.4, §4.7.6
+func loadPlainSkill(fsys fs.FS, skillPath, layerID string) (filesystem.ArtifactRecord, error) {
+	id, err := packageID(skillPath)
+	if err != nil {
+		return filesystem.ArtifactRecord{}, err
+	}
+	skillBytes, err := fs.ReadFile(fsys, skillPath)
+	if err != nil {
+		return filesystem.ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, err)
+	}
+	s, err := manifest.ParseSkill(skillBytes)
+	if err != nil {
+		return filesystem.ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, invalidArtifact(err))
+	}
+	rec := filesystem.ArtifactRecord{
+		ID:         id,
+		Layer:      filesystem.Layer{ID: layerID},
+		Artifact:   &manifest.Artifact{Type: manifest.TypeSkill},
+		Skill:      s,
+		SkillBytes: skillBytes,
+		Resources:  map[string][]byte{},
+	}
+	if err := captureResources(fsys, dirOf(skillPath), &rec); err != nil {
+		return filesystem.ArtifactRecord{}, err
+	}
+	rec.ResolveSkillVersion()
+	return rec, nil
+}
+
+// captureResources walks the package directory dir and records every file
+// in it as a bundled resource of rec, except the package root's manifests and
+// the files of a nested package.
+func captureResources(fsys fs.FS, dir string, rec *filesystem.ArtifactRecord) error {
+	skillPath := joinPath(dir, "SKILL.md")
+	isSkill := rec.Artifact.Type == manifest.TypeSkill
+	return fs.WalkDir(fsys, dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			// spec: §6.10 — an unreadable directory under the artifact package
 			// is the same source-unreachable condition walkLayer reports.
@@ -1216,8 +1304,16 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		if d.IsDir() {
 			// spec: §4.2/§4.4 — stop at a nested artifact-package boundary so
 			// a child artifact's files are not captured as the parent's
-			// bundled resources.
-			if p != dir && fsHasArtifactManifest(fsys, p) {
+			// bundled resources. Only a nested ARTIFACT.md is a boundary; a
+			// subdirectory holding SKILL.md alone stays a bundled resource.
+			if p == dir {
+				return nil
+			}
+			artifact, _, err := filesystem.PackageManifests(fsys, p)
+			if err != nil {
+				return err
+			}
+			if artifact {
 				return fs.SkipDir
 			}
 			return nil
@@ -1230,7 +1326,7 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		// two walks two digests for one package. A nested ARTIFACT.md is a
 		// package boundary the directory arm above has already skipped, so
 		// the base-name comparison reaches only the root's.
-		if d.Name() == "ARTIFACT.md" || (a.Type == manifest.TypeSkill && p == skillPath) {
+		if d.Name() == "ARTIFACT.md" || (isSkill && p == skillPath) {
 			return nil
 		}
 		data, err := fs.ReadFile(fsys, p)
@@ -1241,10 +1337,6 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		rec.Resources[rel] = data
 		return nil
 	})
-	if walkErr != nil {
-		return filesystem.ArtifactRecord{}, walkErr
-	}
-	return rec, nil
 }
 
 // manifestRecordFor canonicalizes one ArtifactRecord into a ManifestRecord
@@ -1766,13 +1858,6 @@ func dirToCanonical(dir string) string {
 		return ""
 	}
 	return dir
-}
-
-// fsHasArtifactManifest reports whether dir directly contains an ARTIFACT.md
-// file, marking it as a nested artifact-package boundary (§4.2).
-func fsHasArtifactManifest(fsys fs.FS, dir string) bool {
-	info, err := fs.Stat(fsys, joinPath(dir, "ARTIFACT.md"))
-	return err == nil && !info.IsDir()
 }
 
 // sensitivityRejection reports the §13.10 public-mode rejection for an
