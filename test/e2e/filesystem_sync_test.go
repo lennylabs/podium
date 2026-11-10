@@ -1253,6 +1253,44 @@ func TestFilesystemSync_ExecutableInheritanceDropsChild(t *testing.T) {
 	})
 }
 
+// A filesystem-source sync drops a same-layer extends: child whose
+// sandbox_profile network-isolated differs from its parent's read-only-fs,
+// reports it on standard error without naming either profile, materializes
+// the parent and the unrelated sibling, and exits 1. The dry-run and --config
+// arms share the drop path TestFilesystemSync_ExecutableInheritanceDropsChild
+// pins, so only the one-shot arm runs here.
+//
+// Spec: §13.11.3
+func TestFilesystemSync_SandboxProfileConflictDropsChild(t *testing.T) {
+	t.Parallel()
+	profiled := func(desc, extra string) string {
+		return "---\ntype: context\nversion: 1.0.0\ndescription: " + desc + "\n" + extra + "---\n\nbody\n"
+	}
+	reg := writeRegistry(t, map[string]string{
+		".registry-config":                      solofsRegistryConfig("team-layer"),
+		"team-layer/ops/a-parent/ARTIFACT.md":   profiled("parent", "sandbox_profile: read-only-fs\n"),
+		"team-layer/ops/b-child/ARTIFACT.md":    profiled("child", "sandbox_profile: network-isolated\nextends: ops/a-parent\n"),
+		"team-layer/shared/sibling/ARTIFACT.md": contextArtifact("sibling"),
+	})
+	target := t.TempDir()
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
+	if res.Exit != 1 {
+		t.Fatalf("sync exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
+	}
+	cliContains(t, res.Stderr, "rejected: ops/b-child (ingest.invalid_artifact): extends: sandbox_profile differs", "the dropped child")
+	for _, leak := range []string{"read-only-fs", "network-isolated", "seccomp-strict"} {
+		cliNotContains(t, res.Stderr, leak, "a restricting profile value")
+	}
+	mustExist(t, filepath.Join(target, "ops", "a-parent", "ARTIFACT.md"))
+	mustExist(t, filepath.Join(target, "shared", "sibling", "ARTIFACT.md"))
+	if _, err := os.Stat(filepath.Join(target, "ops", "b-child")); !os.IsNotExist(err) {
+		t.Errorf("the dropped ops/b-child reached the target (stat err=%v)", err)
+	}
+	if lock := readFile(t, filepath.Join(target, ".podium", "sync.lock")); strings.Contains(lock, "ops/b-child") {
+		t.Errorf("lock records the dropped ops/b-child:\n%s", lock)
+	}
+}
+
 // DOMAIN.md files at layer root are not treated as artifacts.
 func TestFilesystemSync_DomainMDInLayerNotTreatedAsArtifact(t *testing.T) {
 	t.Parallel()

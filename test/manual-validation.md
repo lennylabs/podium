@@ -251,6 +251,7 @@ rm -rf "$WORK"
 | S93 | An executable-field refusal withholds the parent, spares stored versions, and follows the pinned edge | solo then standalone | none | none | none |
 | S94 | An `mcpServers` entry restated by name restates each member, and a same-layer child inherits its entry | solo then standalone | none | none | none |
 | S95 | An `extends:` child stored before the executable-field rule keeps serving after an upgrade | standalone then solo | none | none | none |
+| S96 | An extends: child whose sandbox_profile conflicts with its parent's is refused in both modes, and a stored version keeps serving | solo then standalone | none | none | none |
 
 ---
 
@@ -12056,3 +12057,205 @@ rule.
    runs the rule, and only the version stored before it is spared.
 
 **Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
+
+---
+
+## S96: An extends: child whose sandbox_profile conflicts with its parent's is refused in both modes, and a stored version keeps serving
+
+**Goal.** Validate that a filesystem-source `podium sync` drops an `extends:`
+child whose `sandbox_profile` conflicts with its parent's, within one layer
+and across layers, that a reingest refuses a new conflicting version with
+`details.constraint: "sandbox_profile_conflict"`, that neither reason names a
+profile value, that a conflicting child an earlier release stored keeps
+serving, now with the parent's profile, and that a `podium-mcp` whose cache
+holds that child from before the upgrade keeps its earlier profile until
+`podium cache prune` clears the cache.
+
+**Covers.** §4.6 sandbox profile, §7.3.1 ingest outcome, §13.11.3 sandbox
+profile conflicts, §4.7.6 pin immutability, and the §6.5 content cache,
+through the compiled binaries.
+
+**Why by hand.** An operator reads the served frontmatter and the `rejected:`
+lines directly and gates CI on `$?`. A served `seccomp-strict` for
+`ops/tool` after the upgrade, a `rejected:` line on the unchanged reingest, a
+reason that names `read-only-fs`, `network-isolated`, or `seccomp-strict`, or
+`exit=0` from the filesystem sync is the defect this scenario catches. The
+warm-cache loads confirm the upgrade note the CHANGELOG gives operators.
+
+**Prerequisites.** Built `podium` and `podium-mcp` binaries on `PATH`, a Go
+toolchain, and a checkout whose history holds the `v0.5.2` tag, a release
+without the rule.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then build
+   the `v0.5.2` `podium` binary into `$WORK/old`.
+
+   ```bash
+   mkdir -p "$WORK/src" "$WORK/old"
+   git -C "$REAL_HOME/projects/podium" archive v0.5.2 | tar -x -C "$WORK/src"
+   go -C "$WORK/src" build -o "$WORK/old/" ./cmd/podium
+   "$WORK/old/podium" version
+   ```
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and the old binary
+   prints `podium 0.5.2`.
+
+2. Build a two-layer registry. `org` holds `ops/base` with `read-only-fs`.
+   `team` holds `ops/tool`, which extends `ops/base` with `seccomp-strict`, and
+   the same-layer pair `ops/a-parent` (`read-only-fs`) and `ops/b-child`
+   (`network-isolated`, extends `ops/a-parent`). The parent's ID sorts before
+   the child's.
+
+   ```bash
+   mkdir -p "$WORK/reg/org/ops/base" "$WORK/reg/team/ops/tool" \
+     "$WORK/reg/team/ops/a-parent" "$WORK/reg/team/ops/b-child"
+   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n' > "$WORK/reg/.registry-config"
+   for L in org team; do
+     printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
+   done
+   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Org base.\nsandbox_profile: read-only-fs\n---\n\nOrg base.\n' \
+     > "$WORK/reg/org/ops/base/ARTIFACT.md"
+   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Team tool.\nsandbox_profile: seccomp-strict\nextends: ops/base\n---\n\nTeam tool.\n' \
+     > "$WORK/reg/team/ops/tool/ARTIFACT.md"
+   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Team parent.\nsandbox_profile: read-only-fs\n---\n\nTeam parent.\n' \
+     > "$WORK/reg/team/ops/a-parent/ARTIFACT.md"
+   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Team child.\nsandbox_profile: network-isolated\nextends: ops/a-parent\n---\n\nTeam child.\n' \
+     > "$WORK/reg/team/ops/b-child/ARTIFACT.md"
+   ```
+
+   **Expect.** The four `ARTIFACT.md` files exist.
+
+3. Sync through the filesystem source with the build under test.
+
+   ```bash
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
+   cat "$WORK/err.txt"
+   grep -c -e read-only-fs -e network-isolated -e seccomp-strict "$WORK/err.txt"
+   ls "$WORK/fs/ops"
+   ```
+
+   **Expect.** The sync lists `ops/base [org]` and `ops/a-parent [team]` and
+   prints `exit=1`. `$WORK/err.txt` holds two lines, `ops/b-child` first:
+   `rejected: ops/b-child (ingest.invalid_artifact): extends: sandbox_profile differs from the profile the parent sets, and neither is unrestricted; omit sandbox_profile to inherit the parent's profile`,
+   then the same line for `ops/tool`. `grep -c` prints `0`. `ls` prints
+   `a-parent` and `base` alone. A missing `ops/b-child` line means the
+   same-layer edge is not tested.
+
+4. Serve the directory with the old binary, reingest `team`, load both
+   children, warm a `podium-mcp` cache with `ops/tool`, and stop the server.
+
+   ```bash
+   "$WORK/old/podium" serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8198 > "$WORK/old.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8198/healthz
+   server_alive "$SRV" "$WORK/old.log"
+   export URL=http://127.0.0.1:8198
+   "$WORK/old/podium" layer reingest --registry "$URL" team; echo "exit=$?"
+   for ID in ops/tool ops/b-child; do
+     curl -s "$URL/v1/load_artifact?id=$ID" \
+       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["version"], [l for l in d["frontmatter"].splitlines() if l.startswith("sandbox_profile")])'
+   done
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"ops/tool"}}}'
+   mcp_load() {
+     printf '%s\n%s\n' "$INIT" "$LOAD" | PODIUM_REGISTRY="$URL" PODIUM_CACHE_DIR="$1" \
+       PODIUM_HARNESS=none PODIUM_MATERIALIZE_ROOT="$2" \
+       PODIUM_HOST_SANDBOXES=unrestricted,read-only-fs,network-isolated,seccomp-strict \
+       podium-mcp > /dev/null 2> "$2.err"
+     grep '^sandbox_profile' "$2/ops/tool/ARTIFACT.md"; ls "$2/.podium" 2>/dev/null
+   }
+   mcp_load "$WORK/mcp-warm" "$WORK/out-old"
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** The reingest prints no `rejected:` line and `exit=0`. The loads
+   print `1.0.0 ['sandbox_profile: seccomp-strict']` for `ops/tool` and
+   `1.0.0 ['sandbox_profile: network-isolated']` for `ops/b-child`: the old
+   release ranked the child's profile above the parent's `read-only-fs`. A
+   `rejected:` line here means the old binary already carries the rule, and the
+   later steps prove nothing. `mcp_load` prints `sandbox_profile: seccomp-strict`
+   and `seccomp-strict.json`, and `$WORK/mcp-warm` now holds the record the old
+   release merged. A missing `ARTIFACT.md` means the load failed; read
+   `$WORK/out-old.err`.
+
+5. Start the build under test on the same store and directory, reingest the
+   unchanged `team` layer, load both children, and load `ops/tool` through
+   `podium-mcp` with the warm cache, with a cold cache, and with the warm cache
+   after a prune.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8198 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8198/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   grep 'ingested layer' "$WORK/srv.log"
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   for ID in ops/tool ops/b-child; do
+     curl -s "$URL/v1/load_artifact?id=$ID" \
+       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["version"], [l for l in d["frontmatter"].splitlines() if l.startswith("sandbox_profile")])'
+   done
+   mcp_load "$WORK/mcp-warm" "$WORK/out-warm"
+   mcp_load "$WORK/mcp-cold" "$WORK/out-cold"
+   podium cache prune --dir "$WORK/mcp-warm" --days 0
+   mcp_load "$WORK/mcp-warm" "$WORK/out-pruned"
+   ```
+
+   **Expect.** The `ingested layer` lines report `rejected=0` for `org` and
+   for `team`. The reingest prints no `rejected:` line and `exit=0`. Both loads
+   print `1.0.0 ['sandbox_profile: read-only-fs']`. The stored versions keep
+   serving, and the merge now yields the parent's profile for a conflicting
+   pair. `seccomp-strict` or `network-isolated` here means the build under test
+   still ranks the profiles.
+
+   The warm-cache `mcp_load` prints `sandbox_profile: seccomp-strict` and
+   `seccomp-strict.json`: the HEAD revalidation matches the unchanged content
+   hash, and `podium-mcp` delivers the record it cached in step 4, as D-7
+   accepts and the CHANGELOG states. The cold-cache load and the load after the
+   prune each print `sandbox_profile: read-only-fs` and no `.podium` entry. A
+   warm-cache `read-only-fs` means the load validator now covers the merged
+   record, and the docs and the CHANGELOG need the matching update.
+
+6. Publish a new version of `ops/tool` that still sets `seccomp-strict`,
+   reingest, and read the reingest body.
+
+   ```bash
+   printf -- '---\ntype: context\nversion: 1.1.0\ndescription: Team tool.\nsandbox_profile: seccomp-strict\nextends: ops/base\n---\n\nTeam tool.\n' \
+     > "$WORK/reg/team/ops/tool/ARTIFACT.md"
+   podium layer reingest --registry "$URL" team 2> "$WORK/re.txt"; echo "exit=$?"
+   cat "$WORK/re.txt"
+   curl -s -X POST "$URL/v1/layers/reingest?id=team" > "$WORK/body.json"
+   python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["rejected"]))' "$WORK/body.json"
+   grep -c -e read-only-fs -e network-isolated -e seccomp-strict "$WORK/body.json"
+   curl -s "$URL/v1/load_artifact?id=ops/tool" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'
+   ```
+
+   **Expect.** `$WORK/re.txt` holds
+   `rejected: ops/tool (ingest.invalid_artifact): extends: sandbox_profile differs from the profile the parent sets, and neither is unrestricted; omit sandbox_profile to inherit the parent's profile`,
+   and the reingest prints `exit=1`. The `rejected` entry carries
+   `"details": {"constraint": "sandbox_profile_conflict"}` and no other
+   `details` member, `grep -c` prints `0`, and the load prints `1.0.0`. The
+   refusal is the control: the build under test runs the rule, and only the
+   versions stored before it are spared.
+
+7. Follow the reason: omit `sandbox_profile` from `ops/tool` 1.1.0, reingest,
+   and load it.
+
+   ```bash
+   printf -- '---\ntype: context\nversion: 1.1.0\ndescription: Team tool.\nextends: ops/base\n---\n\nTeam tool.\n' \
+     > "$WORK/reg/team/ops/tool/ARTIFACT.md"
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   curl -s "$URL/v1/load_artifact?id=ops/tool" \
+     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["version"], [l for l in d["frontmatter"].splitlines() if l.startswith("sandbox_profile")])'
+   ```
+
+   **Expect.** The reingest prints no `rejected:` line for `ops/tool` and
+   `exit=0`, and the load prints `1.1.0 ['sandbox_profile: read-only-fs']`.
+
+8. Clean up.
+
+   ```bash
+   kill "$SRV"; rm -rf "$WORK"
+   ```
