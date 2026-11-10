@@ -253,11 +253,11 @@ The registry stores the URL + hash + size + signature, not the bytes.
 
 Skill artifacts comply with the [agentskills.io specification](https://agentskills.io/specification). The compliance rules below apply on top of the universal and type-specific schema described above.
 
-**Two manifest files.** A skill artifact directory contains both `SKILL.md` and `ARTIFACT.md`. `SKILL.md` is the agentskills.io manifest read by every SKILL.md-aware tool (the `npx skills` CLI, the public Vercel skills.sh registry, third-party skill validators, and any harness that consumes SKILL.md directly). `ARTIFACT.md` is Podium's structured manifest read by the registry, the MCP server, the SDKs, and `podium sync`.
+**Manifest files.** A skill artifact directory contains a `SKILL.md` and may contain an `ARTIFACT.md`. `SKILL.md` is the agentskills.io manifest read by every SKILL.md-aware tool (the `npx skills` CLI, the public Vercel skills.sh registry, third-party skill validators, and any harness that consumes SKILL.md directly). `ARTIFACT.md` is an optional overlay that the author writes by hand to carry Podium-only fields, and no Podium tool generates one for a skill. The registry, the MCP server, the SDKs, and `podium sync` read both files when both are present. An `extends:` child carries an `ARTIFACT.md`; the parent it names may be a skill without one.
 
 **Field allocation.** The split keeps `SKILL.md` strictly within the agentskills.io spec. Podium-specific fields stay in `ARTIFACT.md` so they retain their YAML types and so the spec's `skills-ref validate` check passes without warnings.
 
-| Field | SKILL.md | ARTIFACT.md |
+| Field | SKILL.md | ARTIFACT.md (optional overlay) |
 | --- | --- | --- |
 | `name` | Top-level (per spec; matches parent directory name) | Omitted (Podium reads from SKILL.md) |
 | `description` | Top-level (per spec; ≤ 1024 chars) | Omitted (Podium reads from SKILL.md) |
@@ -265,9 +265,24 @@ Skill artifacts comply with the [agentskills.io specification](https://agentskil
 | `compatibility` | Top-level (per spec; ≤ 500 chars; human-readable string) | Omitted. When `SKILL.md` does not author it, every harness adapter that writes a skill's `SKILL.md` (§6.7) and every marketplace emitter that writes one (§7.8) derives it from `runtime_requirements` and `sandbox_profile` at materialization time and adds it to the materialized `SKILL.md`. An authored value is kept unchanged. The `none` adapter writes `SKILL.md` without translation (§6.7) and derives nothing. |
 | `metadata` | Top-level (per spec; string-to-string map for free-form extension) | Omitted |
 | `allowed-tools` | Top-level (per spec; experimental) | Omitted |
-| `type` | Not present | Top-level (`type: skill`) |
-| `version`, `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes` | Not present | Top-level |
+| `type` | Not present | Top-level (`type: skill`); implied when `ARTIFACT.md` is absent |
+| `version` | As `metadata.version` (string) | Top-level; equal to `metadata.version` when `metadata.version` is a `major.minor.patch` value |
+| `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes` | Not present | Top-level |
 | `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `extends`, `target_harnesses`, `external_resources` | Not present | Top-level |
+
+**Version.** A skill's version is `SKILL.md` `metadata.version`, the `ARTIFACT.md` `version`, or both. When `ARTIFACT.md` declares `version`, that value is the version. Otherwise a `metadata.version` in `major.minor.patch` form is the version. A `metadata.version` in any other form is ignored, because `metadata` is free-form in the Agent Skills standard. When `ARTIFACT.md` declares `version` and `metadata.version` is a `major.minor.patch` value, the two are equal. A skill that declares no usable version carries an assigned version in the reserved form of §4.7.6 (§7.3.1, §13.11.3).
+
+**Synthesized `ARTIFACT.md`.** For a skill with no `ARTIFACT.md`, every response or record that serves an `ARTIFACT.md` document carries exactly these bytes, where `<version>` is the resolved version. Each line ends with a single line feed, and the document ends with the line feed after the comment.
+
+```
+---
+type: skill
+version: <version>
+---
+<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->
+```
+
+The document is not part of the authored package. The §4.7.6 content hash frames a zero-length value in its position, the registry does not store it, and no adapter or SDK writer materializes it (§6.7, §7.6). Those writers also omit an authored `ARTIFACT.md` whose bytes equal this document for the version it names.
 
 **Body content.** `SKILL.md` carries the agent-facing skill prose body. `ARTIFACT.md` for skills has no prose body; a one-line HTML comment pointer (`<!-- Skill body lives in SKILL.md. -->`) is allowed and ignored by the linter.
 
@@ -285,12 +300,14 @@ Skill artifacts comply with the [agentskills.io specification](https://agentskil
 
 **Skill-artifact ingest lint.** For every artifact with `type: skill`:
 
-- Both `SKILL.md` and `ARTIFACT.md` are present (error if either is missing).
+- `SKILL.md` is present (error if missing).
 - `SKILL.md` has top-level `name` matching the parent directory and `description` non-empty (error).
 - `SKILL.md` `name` follows the agentskills.io syntax constraints (error).
-- `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, `tags`, etc.); if present, error and recommend moving the field to `ARTIFACT.md`.
-- `ARTIFACT.md` does not contain `name`, `description`, or `license` fields (warning); if present, the values must match `SKILL.md` exactly (error on mismatch).
-- `ARTIFACT.md` body is empty or a single HTML comment (warning otherwise).
+- `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, `tags`, etc.); if present, error. The diagnostic recommends `metadata.version` for a version and the `ARTIFACT.md` overlay for every other field.
+- When `ARTIFACT.md` is present, it does not contain `name`, `description`, or `license` fields (warning); if present, the values must match `SKILL.md` exactly (error on mismatch). A `version` in `ARTIFACT.md` equals `SKILL.md` `metadata.version` when both are set and `metadata.version` is a `major.minor.patch` value (error on mismatch).
+- When `ARTIFACT.md` is present, its body is empty or a single HTML comment (warning otherwise).
+- A skill that declares no usable version has its version assigned (warning that names any ignored `metadata.version` value and the fix).
+- An authored version in the reserved form of §4.7.6, in either file, is an error (`lint.invalid_version`).
 - The `skills-ref validate` reference check from the agentskills.io project passes against `SKILL.md` (warning on failure; lint suppression flag available for cases where the standard's validator is overly strict).
 
 ### 4.3.5 Canonical hook events
