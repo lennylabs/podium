@@ -141,8 +141,10 @@ adds server-side capability.
 The artifacts are the same in every tier. The catalog on disk does not change
 when the deployment changes, and the same shared Go library parses, composes,
 and materializes it everywhere, so a given target and profile produce
-bit-identical output. [Deployment](https://lennylabs.github.io/podium/deployment/)
-covers picking a tier and moving between them.
+bit-identical output. [Local](https://lennylabs.github.io/podium/deployment/local#skills-that-declare-no-version)
+lists the exceptions for skills that declare no version.
+[Deployment](https://lennylabs.github.io/podium/deployment/) covers picking a
+tier and moving between them.
 
 ---
 

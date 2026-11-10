@@ -135,7 +135,7 @@ Migration is mechanical:
    - Optionally add the Podium MCP server entry to the harness's MCP config so the agent can call meta-tools at runtime.
 3. The authoring loop is unchanged. Authors open a PR and merge against the same registry repo, and the server picks up changes through `podium layer reingest` or a watcher.
 
-The shared library does the same parsing, composition, and adapter work in both tiers. Output is bit-identical for the same target and profile, so end-user behavior is preserved across the cut-over.
+The shared library does the same parsing, composition, and adapter work in both tiers. Output is bit-identical for the same target and profile, so end-user behavior is preserved across the cut-over. Skills that declare no version are the exception that [Local](local#skills-that-declare-no-version) describes.
 
 ---
 

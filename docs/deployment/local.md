@@ -71,7 +71,7 @@ A filesystem registry rooted at `<registry-path>` is a directory of layer direct
 │   ├── DOMAIN.md
 │   ├── finance/
 │   │   └── close-reporting/
-│   │       └── run-variance-analysis/   # type: skill — SKILL.md + ARTIFACT.md
+│   │       └── run-variance-analysis/   # type: skill — SKILL.md, with an optional ARTIFACT.md
 │   │           ├── SKILL.md
 │   │           └── ARTIFACT.md
 │   └── platform/
@@ -79,6 +79,8 @@ A filesystem registry rooted at `<registry-path>` is a directory of layer direct
 └── personal/                   # another layer
     └── …
 ```
+
+[Skills that declare no version](#skills-that-declare-no-version) states the version each tier records for a skill whose `SKILL.md` declares none.
 
 Each subdirectory of `<registry-path>` is treated as a `local`-source layer. Layer IDs default to the subdirectory name. Layer order is alphabetical by subdirectory name unless overridden by `layer_order:` in `.registry-config`. The file is YAML:
 
@@ -126,8 +128,9 @@ Either works. Per-project is simpler; shared local is lighter when the registry 
 ## Authoring loop
 
 ```bash
-# Create or edit a skill artifact in the registry (skills have both SKILL.md and ARTIFACT.md)
+# Create or edit a skill artifact in the registry
 $EDITOR ~/podium-artifacts/team-shared/finance/close-reporting/run-variance-analysis/SKILL.md
+# Edit the optional ARTIFACT.md overlay when the skill carries Podium-only fields
 $EDITOR ~/podium-artifacts/team-shared/finance/close-reporting/run-variance-analysis/ARTIFACT.md
 
 # In the consuming project
@@ -157,9 +160,13 @@ podium serve --standalone --layer-path ~/podium-artifacts/
 
 Each developer's `<workspace>/.podium/sync.yaml` switches `defaults.registry` from the path to `http://podium.your-team.example` (or wherever the server lives). The directory layout and authoring loop are unchanged, and the consumer paths gain MCP and SDK support. See [Single node](single-node).
 
-The shared library does the same parsing, composition, and adapter work in both tiers, so output is bit-identical for the same target and profile.
+The shared library does the same parsing, composition, and adapter work in both tiers, so output is bit-identical for the same target and profile. Skills that declare no version are the exception that the next subsection describes.
 
 **To clustered.** When production availability or Postgres-backed tenant isolation is required, follow [Clustered](clustered) and use `podium admin migrate-to-standard` to export the single-node state.
+
+### Skills that declare no version
+
+A filesystem source records a skill that declares no version as `0.0.0-auto.0`. A registry assigns a higher N once it has ingested changed bytes for the skill, and when several layers contribute the skill's ID, as a same-ID `extends:` overlay that declares no version does, so the lock-file versions differ between the tiers. When they differ for an `extends:` child, the `version:` line of the merged `ARTIFACT.md` that the `none` harness writes differs as well. A same-ID overlay that declares no version can also resolve a different parent in each tier after its content changes, because a registry pins the most recently ingested non-deprecated version of the ID and a filesystem source merges the overlay over the next-lower-precedence layer's artifact. A registry rejects a change of such a skill back to content it already stored under another version and keeps serving its newer version, while a filesystem source serves the reverted content. After a revert, the content hash, the body, and every harness's output differ between the tiers until the author sets `metadata.version` in `SKILL.md` or changes the content.
 
 ---
 
