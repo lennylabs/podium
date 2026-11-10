@@ -17,7 +17,8 @@ import (
 
 // importCmd normalizes a directory of skills into a Podium filesystem layer
 // of plain Agent Skills directories. Each immediate subdirectory of --source
-// is one skill whose directory name is the artifact ID. The output for a
+// that is not dot-prefixed is one skill whose directory name is the artifact
+// ID. The output for a
 // skill is its SKILL.md, with metadata.version set to --version, plus every
 // other file copied verbatim as a bundled resource. The command never writes
 // ARTIFACT.md, because §4.3.4 makes a skill's ARTIFACT.md an optional overlay
@@ -91,9 +92,13 @@ type importedSkill struct {
 }
 
 // buildImportPlan plans one skill per immediate subdirectory of source. A
-// subdirectory with no root-level .md file yields no body and is skipped, so
-// a skill nested deeper is not imported and a Git clone's .git directory is
-// ignored. Every refusal names the directory or file it concerns.
+// dot-prefixed subdirectory is skipped, as §4.2 package discovery never
+// descends into one, so a Git clone's .git and .github directories yield no
+// skill and cause no refusal. A subdirectory with no root-level .md file
+// yields no body and is skipped as well, so a skill nested deeper is not
+// imported. Every refusal names the directory or file it concerns.
+//
+// Spec: §4.2, §4.3.4
 func buildImportPlan(source, version string) ([]importedSkill, error) {
 	entries, err := os.ReadDir(source)
 	if err != nil {
@@ -101,7 +106,7 @@ func buildImportPlan(source, version string) ([]importedSkill, error) {
 	}
 	out := []importedSkill{}
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
 		dir := filepath.Join(source, e.Name())
@@ -126,16 +131,55 @@ func buildImportPlan(source, version string) ([]importedSkill, error) {
 // file. Every other file, other .md files and a SKILL.md in a subdirectory
 // included, is a bundled resource copied verbatim, so a nested SKILL.md stays
 // a resource of this skill. It returns a nil body when the root holds no .md
-// file.
+// file, and it refuses an ARTIFACT.md anywhere in the tree (see
+// readSkillTree).
 //
 // Spec: §4.3.4, §4.4
 func collectSkillFiles(dir string) (bodyName string, body []byte, resources map[string][]byte, err error) {
-	bodyName, err = chooseSkillBody(dir)
-	if err != nil || bodyName == "" {
+	mds, err := rootMarkdownFiles(dir)
+	if err != nil || len(mds) == 0 {
 		return "", nil, nil, err
 	}
-	resources = map[string][]byte{}
-	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	resources, err = readSkillTree(dir)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	bodyName, err = chooseSkillBody(mds)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	body = resources[bodyName]
+	delete(resources, bodyName)
+	return bodyName, body, resources, nil
+}
+
+// rootMarkdownFiles returns the names of the regular .md files directly in
+// dir, in directory order.
+func rootMarkdownFiles(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var mds []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			mds = append(mds, e.Name())
+		}
+	}
+	return mds, nil
+}
+
+// readSkillTree reads every file below dir, keyed by slash-separated
+// relative path. It refuses a file named ARTIFACT.md at any depth. Import
+// never writes an ARTIFACT.md, and a nested one would also start a separate
+// package under §4.4, which removes its subtree from this skill's resource
+// set and carries into the output an artifact the operator did not write for
+// this layer.
+//
+// Spec: §4.3.4, §4.4
+func readSkillTree(dir string) (map[string][]byte, error) {
+	files := map[string][]byte{}
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info == nil {
 			return err
 		}
@@ -146,52 +190,33 @@ func collectSkillFiles(dir string) (bodyName string, body []byte, resources map[
 		if err != nil {
 			return err
 		}
+		if info.Name() == "ARTIFACT.md" {
+			return fmt.Errorf("holds %s; import writes plain skill directories and never copies an ARTIFACT.md", filepath.ToSlash(rel))
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		if rel == bodyName {
-			body = data
-			return nil
-		}
-		resources[filepath.ToSlash(rel)] = data
+		files[filepath.ToSlash(rel)] = data
 		return nil
 	})
 	if err != nil {
-		return "", nil, nil, err
+		return nil, err
 	}
-	return bodyName, body, resources, nil
+	return files, nil
 }
 
-// chooseSkillBody returns the name of the root-level file that becomes the
-// skill's SKILL.md, or "" when the root holds no .md file. It refuses a root
-// ARTIFACT.md, because import never writes one and copying it would carry an
-// overlay into the output that the operator did not write for this layer. It
-// refuses several root .md files with no SKILL.md, because no rule picks one
-// of them as the body.
-func chooseSkillBody(dir string) (string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", err
-	}
-	var mds []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		mds = append(mds, e.Name())
-	}
+// chooseSkillBody returns the root-level file among mds that becomes the
+// skill's SKILL.md. It refuses several root .md files with no SKILL.md,
+// because no rule picks one of them as the body.
+func chooseSkillBody(mds []string) (string, error) {
 	switch {
-	case slices.Contains(mds, "ARTIFACT.md"):
-		return "", errors.New("holds an ARTIFACT.md; import writes plain skill directories and never copies an ARTIFACT.md")
 	case slices.Contains(mds, "SKILL.md"):
 		return "SKILL.md", nil
 	case len(mds) > 1:
 		return "", fmt.Errorf("holds several .md files (%s) and no SKILL.md; rename the skill's file to SKILL.md", strings.Join(mds, ", "))
-	case len(mds) == 1:
-		return mds[0], nil
 	}
-	return "", nil
+	return mds[0], nil
 }
 
 // setSkillMetadataVersion returns src with metadata.version set to version.

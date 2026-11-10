@@ -156,6 +156,14 @@ func TestImport_Refusals(t *testing.T) {
 			want: "ARTIFACT.md",
 		},
 		{
+			name: "nested ARTIFACT.md",
+			files: map[string]string{
+				"SKILL.md":        "---\nname: bad\n---\nbody\n",
+				"sub/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n---\n",
+			},
+			want: "sub/ARTIFACT.md",
+		},
+		{
 			name: "several root md files and no SKILL.md",
 			files: map[string]string{
 				"a.md": "---\nname: a\n---\n",
@@ -379,6 +387,29 @@ func TestImport_SkipsDirectoryWithoutRootMarkdown(t *testing.T) {
 		t.Errorf("skipped directory imported (stat err=%v)", err)
 	}
 	importedSkillMD(t, target, "top")
+}
+
+// Spec: §4.2, §4.3.4 — a dot-prefixed subdirectory of --source is skipped,
+// so a Git clone's .github directory holding several .md files neither
+// refuses the import nor becomes a skill.
+func TestImport_SkipsDotPrefixedDirectories(t *testing.T) {
+	source := t.TempDir()
+	mustWrite(t, filepath.Join(source, ".github", "CONTRIBUTING.md"), "contributing\n")
+	mustWrite(t, filepath.Join(source, ".github", "PULL_REQUEST_TEMPLATE.md"), "template\n")
+	mustWrite(t, filepath.Join(source, ".hidden", "SKILL.md"), "---\nname: hidden\n---\nbody\n")
+	mustWrite(t, filepath.Join(source, "greet", "SKILL.md"), "---\nname: greet\n---\nbody\n")
+	target := t.TempDir()
+	if rc, stderr := runImport(t, "--source", source, "--target", target); rc != 0 {
+		t.Fatalf("rc = %d, want 0; stderr=%s", rc, stderr)
+	}
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "greet" {
+		t.Errorf("target entries = %v, want only greet", entries)
+	}
+	importedSkillMD(t, target, "greet")
 }
 
 // Spec: §4.3.4 — an unreadable source fails with exit 1.

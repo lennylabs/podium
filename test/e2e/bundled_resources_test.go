@@ -1429,8 +1429,8 @@ func TestBundled_ImportSingleMarkdownFile(t *testing.T) {
 }
 
 // podium import refuses a source skill whose metadata.version differs from
-// --version, a source directory holding an ARTIFACT.md, and a body file with
-// no frontmatter block. Each refusal exits 1 naming the directory and writes
+// --version, a source directory holding an ARTIFACT.md at its root or in a
+// subdirectory, and a body file with no frontmatter block. Each refusal exits 1 naming the directory and writes
 // nothing, also under --dry-run.
 //
 // Spec: §4.3.4
@@ -1450,6 +1450,13 @@ func TestBundled_ImportRefusals(t *testing.T) {
 				"bad/SKILL.md":    "---\nname: bad\n---\nbody\n",
 			},
 			want: "ARTIFACT.md",
+		},
+		"nested ARTIFACT.md": {
+			files: map[string]string{
+				"bad/SKILL.md":        "---\nname: bad\n---\nbody\n",
+				"bad/sub/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n---\n",
+			},
+			want: "sub/ARTIFACT.md",
 		},
 		"no frontmatter": {
 			files: map[string]string{"bad/SKILL.md": "Plain prose with no frontmatter.\n"},
@@ -1474,6 +1481,29 @@ func TestBundled_ImportRefusals(t *testing.T) {
 			})
 		}
 	}
+}
+
+// podium import skips a dot-prefixed subdirectory of --source, so a Git
+// clone's .github directory holding several .md files yields no skill and no
+// refusal.
+//
+// Spec: §4.2, §4.3.4
+func TestBundled_ImportSkipsDotPrefixedDirectories(t *testing.T) {
+	t.Parallel()
+	src := writeRegistry(t, map[string]string{
+		".github/CONTRIBUTING.md":          "contributing\n",
+		".github/PULL_REQUEST_TEMPLATE.md": "template\n",
+		"greet/SKILL.md":                   "---\nname: greet\ndescription: Greet the user.\n---\n\nSay hello.\n",
+	})
+	tgt := t.TempDir()
+	res := runPodium(t, "", nil, "import", "--source", src, "--target", tgt)
+	if res.Exit != 0 {
+		t.Fatalf("import exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if v := importedMetadataVersion(t, tgt, "greet"); v != "1.0.0" {
+		t.Errorf("SKILL.md metadata.version = %q, want 1.0.0", v)
+	}
+	mustNotExist(t, filepath.Join(tgt, ".github"))
 }
 
 // The --type flag is removed from podium import, so passing it exits 2.
