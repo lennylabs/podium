@@ -534,8 +534,8 @@ func TestArtifactResponse_ReleaseNotes(t *testing.T) {
 
 // sandbox_profile does not compose across a session. Each profile restricts
 // a different resource, so no profile stands in for another, and each
-// artifact keeps the profile it was loaded with.
-// Spec: §4.6
+// artifact keeps the profile it was loaded with, as the composition table in
+// docs/consuming/handling-artifact-responses.md states.
 func TestArtifactResponse_ComposeSandbox(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
