@@ -192,7 +192,7 @@ When a consumer loads several artifacts in the same session (typical for agents 
 
 | Aspect | Composition rule |
 |:--|:--|
-| `sandbox_profile` | Take the most restrictive (`seccomp-strict` > `network-isolated` > `read-only-fs` > `unrestricted`). |
+| `sandbox_profile` | Keep each artifact's profile and apply it when that artifact's bundled scripts run (see the per-artifact rule below). The profiles restrict different resources, so no profile stands in for another. |
 | `sensitivity` | Take the highest value. |
 | `requiresApproval` | Union the tool lists. |
 | `mcpServers` | Union by `name`; deep-merge the per-name record. |

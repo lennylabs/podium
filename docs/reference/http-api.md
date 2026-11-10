@@ -522,7 +522,7 @@ A `200` response reports each artifact the cycle dropped for a reason other than
 }
 ```
 
-The reason and `details` name no parent ID, version, or layer.
+The reason and `details` name no parent ID, version, or layer. A child rejected under the §4.6 sandbox-profile rule carries `details: {"constraint": "sandbox_profile_conflict"}` and names no profile value.
 
 ### Reorder layers
 

@@ -19,7 +19,7 @@ func TestMergeExtends_FieldSemanticsTable(t *testing.T) {
 		Tags:             []string{"a", "shared"},
 		WhenToUse:        []string{"parent case"},
 		Sensitivity:      SensitivityMedium,
-		SandboxProfile:   SandboxReadOnlyFS,
+		SandboxProfile:   SandboxUnrestricted,
 		SearchVisibility: SearchVisibilityIndexed,
 		DelegatesTo:      []string{"finance/x"},
 		RequiresApproval: []ApprovalRequirement{{Tool: "deploy"}},
@@ -84,10 +84,12 @@ func TestMergeExtends_FieldSemanticsTable(t *testing.T) {
 	if !reflect.DeepEqual(got.WhenToUse, []string{"parent case", "child case"}) {
 		t.Errorf("when_to_use = %v", got.WhenToUse)
 	}
-	// sensitivity / sandbox_profile: most-restrictive.
+	// sensitivity: most-restrictive.
 	if got.Sensitivity != SensitivityHigh {
 		t.Errorf("sensitivity = %q, want high", got.Sensitivity)
 	}
+	// sandbox_profile: the parent's value unless it is unset or
+	// unrestricted. The parent is unrestricted, so the child's applies.
 	if got.SandboxProfile != SandboxSeccompStrict {
 		t.Errorf("sandbox_profile = %q, want seccomp-strict", got.SandboxProfile)
 	}
@@ -172,6 +174,69 @@ func TestMergeExtends_MostRestrictiveCannotRelax(t *testing.T) {
 	}
 	if got.SandboxProfile != SandboxSeccompStrict {
 		t.Errorf("sandbox = %q, want seccomp-strict (child cannot widen)", got.SandboxProfile)
+	}
+}
+
+// Spec: §4.6 — the sandbox-profile rule over every pair of an unset value,
+// unrestricted, each §4.4.1 restricting profile, and a value §4.4.1 does not
+// list. Each row is one parent and each column the child in the order of
+// values. A conflicting cell merges to the parent's value. The loop also pins
+// the properties the filesystem rewrite pass relies on when it re-runs the
+// merge on a record whose parent it rewrote: merging the child again changes
+// nothing, and the merged value never conflicts with the parent.
+func TestMergeSandboxProfile_Pairs(t *testing.T) {
+	t.Parallel()
+	const (
+		u = SandboxUnrestricted
+		r = SandboxReadOnlyFS
+		n = SandboxNetworkIsolated
+		s = SandboxSeccompStrict
+		c = SandboxProfile("custom")
+	)
+	values := []SandboxProfile{"", u, r, n, s, c}
+	rows := []struct {
+		parent   SandboxProfile
+		merged   []SandboxProfile
+		conflict []bool
+	}{
+		{"", []SandboxProfile{"", u, r, n, s, c}, []bool{false, false, false, false, false, false}},
+		{u, []SandboxProfile{u, u, r, n, s, c}, []bool{false, false, false, false, false, false}},
+		{r, []SandboxProfile{r, r, r, r, r, r}, []bool{false, false, false, true, true, true}},
+		{n, []SandboxProfile{n, n, n, n, n, n}, []bool{false, false, true, false, true, true}},
+		{s, []SandboxProfile{s, s, s, s, s, s}, []bool{false, false, true, true, false, true}},
+		{c, []SandboxProfile{c, c, c, c, c, c}, []bool{false, false, true, true, true, false}},
+	}
+	for _, row := range rows {
+		for i, child := range values {
+			p := row.parent
+			merged := mergeSandboxProfile(p, child)
+			if merged != row.merged[i] {
+				t.Errorf("mergeSandboxProfile(%q, %q) = %q, want %q", p, child, merged, row.merged[i])
+			}
+			if got := SandboxProfilesConflict(p, child); got != row.conflict[i] {
+				t.Errorf("SandboxProfilesConflict(%q, %q) = %v, want %v", p, child, got, row.conflict[i])
+			}
+			if row.conflict[i] && merged != p {
+				t.Errorf("conflicting pair (%q, %q) merged to %q, want the parent's value", p, child, merged)
+			}
+			if again := mergeSandboxProfile(p, merged); again != merged {
+				t.Errorf("mergeSandboxProfile(%q, %q) = %q, want idempotent %q", p, merged, again, merged)
+			}
+			if SandboxProfilesConflict(p, merged) {
+				t.Errorf("SandboxProfilesConflict(%q, merged %q) = true, want false", p, merged)
+			}
+		}
+	}
+}
+
+// Spec: §4.6 — a conflicting pair driven through the public fold keeps the
+// parent's value, so the child's read-only-fs does not replace it.
+func TestMergeExtends_SandboxConflictKeepsParent(t *testing.T) {
+	t.Parallel()
+	parent := Artifact{SandboxProfile: SandboxNetworkIsolated}
+	child := Artifact{SandboxProfile: SandboxReadOnlyFS}
+	if got := MergeExtends(parent, child).SandboxProfile; got != SandboxNetworkIsolated {
+		t.Errorf("sandbox_profile = %q, want network-isolated", got)
 	}
 }
 

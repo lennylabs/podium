@@ -608,7 +608,7 @@ func printRejected(w io.Writer, id, code, reason string) {
 }
 
 // reportDropped prints a rejected line for each artifact a filesystem-source
-// composition dropped under the §4.6 collision rule or the §4.6
+// composition dropped under the §4.6 collision, sandbox-profile, or
 // executable-field rule, with the code and reason each drop carries, and
 // reports whether it printed anything, so the caller can set a non-zero exit
 // status.

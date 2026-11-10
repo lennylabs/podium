@@ -161,8 +161,9 @@ const (
 	// CollisionPolicyDrop keeps the lower-precedence record, drops a
 	// higher-precedence one that declares no extends: on the ID, and
 	// reports it through WalkOptions.OnDrop (§4.6, §13.11.3). With
-	// ResolveExtends it also drops a record the §4.6 executable-field rule
-	// refuses, and every record whose extends: reference that drop strands.
+	// ResolveExtends it also drops a record the §4.6 sandbox-profile rule or
+	// the §4.6 executable-field rule refuses, and every record whose extends:
+	// reference that drop strands.
 	// Used by filesystem-source sync.
 	CollisionPolicyDrop
 )
@@ -178,8 +179,8 @@ type WalkOptions struct {
 	ResolveExtends bool
 	// OnDrop receives each record the walk drops: a collision under
 	// CollisionPolicyDrop and, with ResolveExtends, a record the §4.6
-	// executable-field rule refuses or whose extends: parent such a refusal
-	// removed. Walk refuses CollisionPolicyDrop when it is nil, so no drop
+	// sandbox-profile rule or the §4.6 executable-field rule refuses, or
+	// whose extends: parent such a refusal removed. Walk refuses CollisionPolicyDrop when it is nil, so no drop
 	// goes unreported. With OnDrop nil, a refused record fails the walk.
 	OnDrop func(layer.Drop)
 }

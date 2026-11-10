@@ -799,13 +799,13 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			return nil, err
 		}
 
-		// Spec: §4.6 executable fields across layers. The check runs on the
-		// insert path alone, after the idempotency switch: the content hash
-		// covers only the child's authored bytes, so an unchanged stored
-		// child is idempotent above and is never re-judged against a parent
-		// that changed after it was accepted.
+		// Spec: §4.6 sandbox profile and executable fields across layers.
+		// Both checks run on the insert path alone, after the idempotency
+		// switch: the content hash covers only the child's authored bytes, so
+		// an unchanged stored child is idempotent above and is never
+		// re-judged against a parent that changed after it was accepted.
 		if mr.ExtendsPin != "" {
-			rej, cerr := executableInheritance(ctx, st, req.TenantID, req.LayerID, rec, mr, extendsParent)
+			rej, cerr := extendsEdgeRejection(ctx, st, req.TenantID, req.LayerID, rec, mr, extendsParent)
 			if cerr != nil {
 				return nil, cerr
 			}
@@ -1502,8 +1502,10 @@ func collisionRejection(tenantID, layerID, id, existingLayer string) RejectedArt
 	}
 }
 
-// chainUnresolvedReason is the reason a server gives a child whose
-// cross-layer parent's stored chain is missing an ancestor or loops. It names
+// chainUnresolvedReason is the reason a server gives a child whose parent's
+// stored chain is missing an ancestor or loops, when the edge crosses layers
+// or, on a same-layer edge, when the child authors a restricting
+// sandbox_profile. Those are the edges whose §4.6 checks read the chain. It names
 // no parent, because the failing link can be an ancestor beyond the reference
 // the author wrote. The filesystem source has no stored chain and never gives
 // it.
@@ -1511,22 +1513,34 @@ func collisionRejection(tenantID, layerID, id, existingLayer string) RejectedArt
 // Spec: §4.6 hidden parents (withheld)
 const chainUnresolvedReason = "extends: parent chain does not resolve"
 
-// executableInheritance applies the §4.6 executable-field rule to a child
-// about to be inserted: a child whose pinned parent comes from another layer
-// restates every executable field that parent sets. It returns nil, nil when
-// the parent shares the child's layer or the child restates every field, and
-// a rejection when the rule refuses the child or the parent's chain does not
-// resolve. A store failure other than absence aborts the cycle with a
-// *chainReadError, as a failed parent load does.
+// extendsEdgeRejection applies the §4.6 sandbox-profile rule to every
+// extends: edge, and the §4.6 executable-field rule to an edge whose pinned
+// parent comes from another layer, to a child about to be inserted. It reads
+// the parent's stored chain only when one of the rules can refuse the edge:
+// the edge crosses layers, or the child authors a restricting
+// sandbox_profile. A same-layer child that leaves sandbox_profile unset or
+// unrestricted therefore costs no store read and cannot be rejected for a
+// chain it never needed. A child both rules refuse reports the
+// sandbox-profile rejection, the precedence the filesystem resolver also
+// applies.
 //
-// rec.ArtifactBytes is the child's authored block: server ingest walks one
-// layer and never rewrites a record with its parent's values, so the
-// comparison sees only what the author wrote.
+// It returns nil, nil when neither rule refuses the child, and a rejection
+// when a rule refuses it or the parent's chain does not resolve. A store
+// failure other than absence aborts the cycle with a *chainReadError, as a
+// failed parent load does.
+//
+// rec.Artifact and rec.ArtifactBytes are the child's authored values: server
+// ingest walks one layer and never rewrites a record with its parent's
+// values, so both comparisons see only what the author wrote, against the
+// parent's chain-resolved values.
 //
 // Spec: §4.6
-func executableInheritance(ctx context.Context, st store.Store, tenantID, childLayer string,
+func extendsEdgeRejection(ctx context.Context, st store.Store, tenantID, childLayer string,
 	rec filesystem.ArtifactRecord, mr, parent store.ManifestRecord) (*RejectedArtifact, error) {
-	if parent.Layer == childLayer {
+	childProfile := rec.Artifact.SandboxProfile
+	childRestricts := childProfile != "" && childProfile != manifest.SandboxUnrestricted
+	crossLayer := parent.Layer != childLayer
+	if !crossLayer && !childRestricts {
 		return nil, nil
 	}
 	chain, err := core.ExtendsChain(ctx, st, tenantID, parent)
@@ -1539,6 +1553,21 @@ func executableInheritance(ctx context.Context, st store.Store, tenantID, childL
 		return nil, &chainReadError{artifactID: rec.ID, cause: err}
 	}
 	p, blocks := core.ResolvedArtifact(chain)
+	if manifest.SandboxProfilesConflict(p.SandboxProfile, childProfile) {
+		// The log line names the parent's layer for the operator; the
+		// rejection names no profile value and no parent.
+		log.Printf("ingest: tenant=%s layer=%s artifact=%s extends_pin=%s parent_layer=%s rejected: sandbox_profile_conflict",
+			tenantID, childLayer, rec.ID, mr.ExtendsPin, parent.Layer)
+		return &RejectedArtifact{
+			ArtifactID: rec.ID,
+			Reason:     layer.SandboxProfileConflictReason,
+			Code:       layer.InvalidArtifactCode,
+			Details:    map[string]any{"constraint": layer.SandboxProfileConflictConstraint},
+		}, nil
+	}
+	if !crossLayer {
+		return nil, nil
+	}
 	fields, err := manifest.InheritedExecutableFields(rec.ID, p, blocks, rec.ArtifactBytes)
 	if err != nil {
 		// The error can carry a field path that names a chain parent, so the

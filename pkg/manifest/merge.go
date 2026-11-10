@@ -15,8 +15,9 @@ import (
 // Table fields merge as the spec mandates: description / name /
 // release_notes / license are scalar child-wins; tags are append-unique;
 // when_to_use / requiresApproval / delegates_to / external_resources are
-// append; sensitivity and sandbox_profile take the most-restrictive
-// value; search_visibility takes the most-restrictive value
+// append; sensitivity takes the most-restrictive value; sandbox_profile
+// takes the parent's value unless it is unset or unrestricted;
+// search_visibility takes the most-restrictive value
 // (direct-only > indexed); mcpServers deep-merge by name; and
 // runtime_requirements deep-merge with the child winning per key.
 //
@@ -54,8 +55,8 @@ func MergeExtends(parent, child Artifact) Artifact {
 	out.ExternalResources = appendResources(parent.ExternalResources, child.ExternalResources)
 	// sensitivity: scalar; most-restrictive (high > medium > low).
 	out.Sensitivity = Sensitivity(mostRestrictiveSensitivity(string(parent.Sensitivity), string(child.Sensitivity)))
-	// sandbox_profile: scalar; most-restrictive.
-	out.SandboxProfile = SandboxProfile(mostRestrictiveSandbox(string(parent.SandboxProfile), string(child.SandboxProfile)))
+	// sandbox_profile: the parent's value unless it is unset or unrestricted.
+	out.SandboxProfile = mergeSandboxProfile(parent.SandboxProfile, child.SandboxProfile)
 	// search_visibility: scalar; most-restrictive (direct-only > indexed).
 	out.SearchVisibility = mostRestrictiveSearchVisibility(parent.SearchVisibility, child.SearchVisibility)
 	// mcpServers: list of objects; deep-merge by name.
@@ -228,27 +229,32 @@ func mostRestrictiveSensitivity(a, b string) string {
 	return a
 }
 
-// sandboxRank orders sandbox profiles from least to most restrictive
-// (§4.4.1). The empty string ranks lowest.
-func sandboxRank(s string) int {
-	switch s {
-	case string(SandboxSeccompStrict):
-		return 4
-	case string(SandboxNetworkIsolated):
-		return 3
-	case string(SandboxReadOnlyFS):
-		return 2
-	case string(SandboxUnrestricted):
-		return 1
+// mergeSandboxProfile returns the §4.6 merged sandbox_profile: the child's
+// value when the parent's is unset or unrestricted, and the parent's
+// otherwise. The §4.4.1 profiles restrict different resources, so they carry
+// no rank. Ingest and a filesystem sync refuse a pair SandboxProfilesConflict
+// reports; only a version stored before that rule reaches this function with
+// one, and it is served the parent's value.
+//
+// Spec: §4.6
+func mergeSandboxProfile(parent, child SandboxProfile) SandboxProfile {
+	if child != "" && (parent == "" || parent == SandboxUnrestricted) {
+		return child
 	}
-	return 0
+	return parent
 }
 
-func mostRestrictiveSandbox(a, b string) string {
-	if sandboxRank(b) > sandboxRank(a) {
-		return b
+// SandboxProfilesConflict reports whether the parent's resolved and the
+// child's authored sandbox_profile both restrict and differ. Any value other
+// than unrestricted restricts, including one §4.4.1 does not list, and values
+// compare byte-wise.
+//
+// Spec: §4.6
+func SandboxProfilesConflict(parent, child SandboxProfile) bool {
+	if parent == "" || child == "" || parent == child {
+		return false
 	}
-	return a
+	return parent != SandboxUnrestricted && child != SandboxUnrestricted
 }
 
 // mostRestrictiveSearchVisibility returns direct-only when either input is

@@ -10,15 +10,16 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
-// composeExtends applies the §4.6 collision rule and the §4.6
-// executable-field rule to all, which is in layer order, and returns one
-// resolved record per canonical ID.
+// composeExtends applies the §4.6 collision rule, the §4.6 sandbox-profile
+// rule, and the §4.6 executable-field rule to all, which is in layer order,
+// and returns one resolved record per canonical ID.
 //
 // It repeats the composition until it settles. Each round re-runs dedupe
 // over the records not yet refused, then validates every deduped record that
 // declares extends: against the authored bytes, rewriting nothing. A round
-// refuses each record the executable-field rule rejects and each record whose
-// extends: parent a refusal in an earlier round removed. A round that refuses
+// refuses each record the sandbox-profile rule or the executable-field rule
+// rejects and each record whose extends: parent a refusal in an earlier round
+// removed. A round that refuses
 // nothing settles the composition. Re-running dedupe matters because a
 // higher-precedence record that collided only with a refused record is kept,
 // as a server that never stored the refused record keeps it, and a reference
@@ -111,8 +112,9 @@ func sortedDrops(refusals []refusal, all []ArtifactRecord) []layer.Drop {
 }
 
 // validateExtends runs mergeRecord on each deduped record that declares
-// extends: and returns every record the round refuses, without rewriting any
-// record. refusedIDs holds the canonical IDs earlier rounds refused: an
+// extends: and returns every record the round refuses under the §4.6
+// sandbox-profile or executable-field rule, without rewriting any record.
+// refusedIDs holds the canonical IDs earlier rounds refused: an
 // unresolved reference to one of them refuses the referencing record with
 // layer.UnresolvedParentReason, and every other resolver error fails the walk.
 // A record's refusal can come from an ancestor in its chain, and several
@@ -146,7 +148,7 @@ func validateExtends(deduped, kept []ArtifactRecord, refusedIDs map[string]bool)
 }
 
 // refusalOf maps a mergeRecord error to the refusal it carries. An
-// executable-field refusal passes through. An unresolved reference to an ID an
+// executable-field or sandbox-profile refusal passes through. An unresolved reference to an ID an
 // earlier round refused becomes a refusal of the referencing record. Any other
 // error is returned as the walk's failure.
 func refusalOf(err error, refusedIDs map[string]bool) (*refusedRecordError, error) {
@@ -167,10 +169,12 @@ func refusalOf(err error, refusedIDs map[string]bool) (*refusedRecordError, erro
 }
 
 // refusedRecordError reports a record composeExtends removes: one the §4.6
-// executable-field rule refuses, one whose comparison cannot be read, or one
-// whose extends: parent an earlier refusal removed. With WalkOptions.OnDrop
-// nil it fails the walk, and errors.As reaches the wrapped
-// *layer.ExecutableInheritance for an executable-field refusal.
+// sandbox-profile rule refuses, one the §4.6 executable-field rule refuses,
+// one whose executable-field comparison cannot be read, or one whose extends:
+// parent an earlier refusal removed. With WalkOptions.OnDrop nil it fails the
+// walk. errors.As reaches the wrapped *layer.ExecutableInheritance for an
+// executable-field refusal, and errors.Is reaches
+// layer.ErrSandboxProfileConflict for a sandbox-profile refusal.
 //
 // Spec: §4.6, §13.11.3
 type refusedRecordError struct {
@@ -292,8 +296,9 @@ func resolveExtends(deduped, all []ArtifactRecord) error {
 // layered same-ID list is layerIdx. When rec declares extends:, the parent
 // chain is resolved recursively (parent first) and folded via
 // manifest.MergeExtends. seen guards against extends cycles, mirroring the
-// server's load-time cycle re-check (§4.6). An edge whose parent comes from
-// another layer is held to the §4.6 executable-field rule, and a refusal
+// server's load-time cycle re-check (§4.6). Every edge is held to the §4.6
+// sandbox-profile rule, and an edge whose parent comes from another layer is
+// also held to the §4.6 executable-field rule, checked second. A refusal
 // anywhere in the chain returns a *refusedRecordError naming the refused
 // record. An unresolved reference returns an *unresolvedParentError.
 func mergeRecord(rec ArtifactRecord, layerIdx int, deduped []ArtifactRecord, effective map[string]int, layered map[string][]ArtifactRecord, seen map[string]bool) (*manifest.Artifact, error) {
@@ -343,6 +348,15 @@ func mergeRecord(rec ArtifactRecord, layerIdx int, deduped []ArtifactRecord, eff
 	if parentMerged.Type != rec.Artifact.Type {
 		return nil, fmt.Errorf("extends.type_mismatch: %q (type %q) extends %q (type %q); a child's type must match the parent's",
 			rec.ID, rec.Artifact.Type, parentID, parentMerged.Type)
+	}
+	// Spec: §4.6 sandbox profile. Every edge, same-layer included, is
+	// checked before the cross-layer executable-field check, so a child both
+	// rules refuse reports this refusal, as the server does. The rewrite pass
+	// needs no exemption: a child already merged under its parent never
+	// conflicts with that parent.
+	if manifest.SandboxProfilesConflict(parentMerged.SandboxProfile, rec.Artifact.SandboxProfile) {
+		return nil, &refusedRecordError{id: rec.ID, layerID: rec.Layer.ID,
+			reason: layer.SandboxProfileConflictReason, err: layer.ErrSandboxProfileConflict}
 	}
 	if parentRec.Layer.ID != rec.Layer.ID {
 		chain := authoredChain(parentRec, parentIdx, deduped, effective, layered)

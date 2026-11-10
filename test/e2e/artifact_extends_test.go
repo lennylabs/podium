@@ -232,11 +232,11 @@ func TestExtends_SensitivityChildTightens(t *testing.T) {
 	}
 }
 
-// sandbox_profile: most-restrictive wins; the child tightens
-// the parent. spec: docs/authoring/extends.md § "Tightening sandbox profile".
+// sandbox_profile: the child's profile applies because the parent's is
+// unrestricted. spec: docs/authoring/extends.md § "Tightening sandbox profile".
 func TestExtends_SandboxChildTightens(t *testing.T) {
 	t.Parallel()
-	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsandbox_profile: read-only-fs\n---\n\nbody\n"
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsandbox_profile: unrestricted\n---\n\nbody\n"
 	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nsandbox_profile: seccomp-strict\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
 	srv := extendsBoot(t, parent, child, nil)
 	if fm := exLoad(t, srv, exParentID).Frontmatter; !strings.Contains(fm, "seccomp-strict") {
@@ -245,7 +245,7 @@ func TestExtends_SandboxChildTightens(t *testing.T) {
 }
 
 // sandbox_profile: the child cannot widen the parent
-// restriction. spec: docs/authoring/extends.md § "The most-restrictive rules".
+// restriction. spec: docs/authoring/extends.md § "Sandbox profile".
 func TestExtends_SandboxChildCannotWiden(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsandbox_profile: seccomp-strict\n---\n\nbody\n"
@@ -253,10 +253,44 @@ func TestExtends_SandboxChildCannotWiden(t *testing.T) {
 	srv := extendsBoot(t, parent, child, nil)
 	fm := exLoad(t, srv, exParentID).Frontmatter
 	if !strings.Contains(fm, "seccomp-strict") {
-		t.Errorf("most-restrictive sandbox must stay seccomp-strict:\n%s", fm)
+		t.Errorf("the parent's seccomp-strict must win over the child's unrestricted:\n%s", fm)
 	}
 	if strings.Contains(fm, "unrestricted") {
 		t.Errorf("child must not widen sandbox to unrestricted:\n%s", fm)
+	}
+}
+
+// A team-foo overlay whose sandbox_profile network-isolated differs from its
+// org-defaults parent's read-only-fs is refused at boot ingest and again on a
+// manual reingest, so the parent serves at 1.0.0 with its own profile. Before
+// the sandbox-profile rule the removed ranking served the child at 2.0.0 with
+// network-isolated. The reingest reports the refusal on standard error and
+// exits 1. The reason names no profile value, no parent layer, and no parent
+// version, because the parent may sit in a layer the reader cannot see.
+//
+// Spec: §4.6
+func TestExtends_SandboxConflictRejected(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsandbox_profile: read-only-fs\n---\n\nbody\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nsandbox_profile: network-isolated\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+
+	got := exLoad(t, srv, exParentID)
+	if got.Version != "1.0.0" {
+		t.Fatalf("version = %q, want the parent's 1.0.0 (the child is refused at boot ingest)", got.Version)
+	}
+	if !strings.Contains(got.Frontmatter, "read-only-fs") || strings.Contains(got.Frontmatter, "network-isolated") {
+		t.Errorf("served frontmatter must carry the parent's read-only-fs alone:\n%s", got.Frontmatter)
+	}
+	if !strings.Contains(srv.log(), "rejected=1") {
+		t.Errorf("server log missing the single ingest rejection:\n%s", srv.log())
+	}
+
+	res := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, "team-foo")
+	cliWantExit(t, res, 1, "reingest a layer holding the conflicting child")
+	cliContains(t, res.Stderr, "rejected: "+exParentID+" (ingest.invalid_artifact): extends: sandbox_profile differs", "the refused child")
+	for _, leak := range []string{"read-only-fs", "network-isolated", "org-defaults", "1.0.0", "@1."} {
+		cliNotContains(t, res.Stderr, leak, "a profile value or the parent's layer or version")
 	}
 }
 
