@@ -199,7 +199,7 @@ When single node no longer fits, typically because production-grade availability
 podium admin migrate-to-standard --postgres <dsn> --object-store <url>
 ```
 
-The migration carries the artifact manifests, layer configuration, and admin grants of the `default` org alone. On a single node started with `PODIUM_MULTI_TENANT`, a tenant provisioned through `podium admin tenant` keeps its artifact manifests, layer configuration, and admin grants in the single-node store. The migration copies the artifact content blobs of every tenant, and with `--target-audit-log` it copies the whole audit log, which holds every tenant's events. A deployment that serves several tenants starts on the clustered tier (see [Progressive adoption](progressive-adoption)).
+The migration carries every tenant on the single node, with each tenant's artifact manifests, layer configuration, admin grants, quotas, and active state, and it copies the artifact content blobs and, with `--target-audit-log`, the whole audit log. A clustered target routes requests to a tenant other than the `default` org only when it is started with `PODIUM_MULTI_TENANT` and an identity provider that authenticates each caller. Instance-operator grants come from the target's own `PODIUM_OPERATOR_ADMINS`.
 
 [Clustered](clustered) documents the same migration path from the receiving side. The artifact directory is unchanged, and layer config moves from `~/.podium/registry.yaml` to the tenant config.
 
