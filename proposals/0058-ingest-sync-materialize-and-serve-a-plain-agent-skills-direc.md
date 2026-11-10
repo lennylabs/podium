@@ -1,7 +1,7 @@
 # Proposal 0058: Ingest, sync, materialize, and serve a plain Agent Skills directory as a type: skill artifact with no ARTIFACT.md
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-10). Verified on 2026-11-09 after 3 adversarial review rounds (5 findings fixed).
+- Status: Implemented (2026-11-10). Verified on 2026-11-09 after 3 adversarial review rounds (5 findings fixed).
 - Date: 2026-11-09
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible in four places. `podium import` loses `--type`. `podium artifact scaffold --type skill` refuses the Podium-only flags. A both-files skill whose `SKILL.md` `metadata.version` is a `major.minor.patch` value different from its `ARTIFACT.md` `version` fails ingest lint. A `SKILL.md` outside any package that has no frontmatter, which discovery ignored before, now fails the walk of its layer.
@@ -56,45 +56,45 @@ This document stages spec, code, test, and documentation changes. It does not mo
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4, SPEC-5, SPEC-6, SPEC-7, SPEC-8, SPEC-9, SPEC-10, SPEC-11, SPEC-12, SPEC-13. Every spec edit and the `artifact-package.svg` edit land in one commit, because each edit contradicts the unedited restatements of the both-files rule until all of them change.
+- [x] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4, SPEC-5, SPEC-6, SPEC-7, SPEC-8, SPEC-9, SPEC-10, SPEC-11, SPEC-12, SPEC-13. Every spec edit and the `artifact-package.svg` edit land in one commit, because each edit contradicts the unedited restatements of the both-files rule until all of them change.
       Levels: unit (`make coverage-gate`). Depends on: —
-- [ ] **S2 · code** — CODE-2, TEST-1B. The `pkg/manifest` skill-version, auto-form, and synthesized-document helpers with their unit tests, bundled because both touch `pkg/manifest` only and the reviewer reads them together.
+- [x] **S2 · code** — CODE-2, TEST-1B. The `pkg/manifest` skill-version, auto-form, and synthesized-document helpers with their unit tests, bundled because both touch `pkg/manifest` only and the reviewer reads them together.
       Levels: unit. Depends on: S1
-- [ ] **S3 · code** — CODE-1, TEST-1A. `pkg/version` pins and resolution accept the reserved form, with their unit tests in the same package.
+- [x] **S3 · code** — CODE-1, TEST-1A. `pkg/version` pins and resolution accept the reserved form, with their unit tests in the same package.
       Levels: unit. Depends on: S2
-- [ ] **S4 · code** — CODE-3, TEST-1C. The shared discovery predicate, the `SKILL.md` trigger with the ancestor check, and the cross-walker parity table.
+- [x] **S4 · code** — CODE-3, TEST-1C. The shared discovery predicate, the `SKILL.md` trigger with the ancestor check, and the cross-walker parity table.
       Levels: unit. Depends on: S2
-- [ ] **S5 · code** — CODE-7, TEST-1D. Lint for an assigned version, the reserved form, the version mismatch, and the optional overlay, with the end-to-end lint test that CODE-7 changes in the same commit.
+- [x] **S5 · code** — CODE-7, TEST-1D. Lint for an assigned version, the reserved form, the version mismatch, and the optional overlay, with the end-to-end lint test that CODE-7 changes in the same commit.
       Levels: unit, e2e. Depends on: S4
-- [ ] **S6 · code** — CODE-4. The filesystem registry assigns `0.0.0-auto.0` and synthesizes `ArtifactBytes` after `extends:` resolution.
+- [x] **S6 · code** — CODE-4. The filesystem registry assigns `0.0.0-auto.0` and synthesizes `ArtifactBytes` after `extends:` resolution.
       Levels: unit, integration. Depends on: S3, S5
-- [ ] **S7 · code** — CODE-5, TEST-2A. Ingest assigns N from stored rows, refuses a version-less skill whose bytes a stored or soft-deleted row of its ID already holds under another version, and re-derives N on conflict, and the §4.6 executable-field check runs once per record inside the re-derivation loop.
+- [x] **S7 · code** — CODE-5, TEST-2A. Ingest assigns N from stored rows, refuses a version-less skill whose bytes a stored or soft-deleted row of its ID already holds under another version, and re-derives N on conflict, and the §4.6 executable-field check runs once per record inside the re-derivation loop.
       Levels: unit, integration. Depends on: S3, S5
-- [ ] **S8 · code** — CODE-6, CODE-12, TEST-2B. Core serves the synthesized document, admits a plain-skill row from its `SKILL.md`, and gives a merged `extends:` document the child row's version; server-source sync and the MCP cache take the version from the served `version` member; and the ingest-to-HTTP integration tests run across the stores.
+- [x] **S8 · code** — CODE-6, CODE-12, TEST-2B. Core serves the synthesized document, admits a plain-skill row from its `SKILL.md`, and gives a merged `extends:` document the child row's version; server-source sync and the MCP cache take the version from the served `version` member; and the ingest-to-HTTP integration tests run across the stores.
       Levels: unit, integration. Depends on: S7
-- [ ] **S9 · code** — CODE-8. The `none` adapter omits the synthesized document.
+- [x] **S9 · code** — CODE-8. The `none` adapter omits the synthesized document.
       Levels: unit. Depends on: S2
-- [ ] **S10 · test** — TEST-3. Cross-mode equivalence and the golden materialization case.
+- [x] **S10 · test** — TEST-3. Cross-mode equivalence and the golden materialization case.
       Levels: integration, materialization. Depends on: S6, S8, S9
-- [ ] **S11 · code** — CODE-9, TEST-5. SDK overlay discovery and canonical-layout writers, with the SDK suites.
+- [x] **S11 · code** — CODE-9, TEST-5. SDK overlay discovery and canonical-layout writers, with the SDK suites.
       Levels: unit, integration (SDK suites). Depends on: S1
-- [ ] **S12 · code** — CODE-10, TEST-4A. `podium artifact scaffold --type skill` writes `SKILL.md` alone, and the existing scaffold unit tests (CODE-10) and end-to-end tests (TEST-4A) change in the same commit so the suite stays green.
+- [x] **S12 · code** — CODE-10, TEST-4A. `podium artifact scaffold --type skill` writes `SKILL.md` alone, and the existing scaffold unit tests (CODE-10) and end-to-end tests (TEST-4A) change in the same commit so the suite stays green.
       Levels: unit, e2e. Depends on: S5
-- [ ] **S13 · code** — CODE-11, TEST-4B. `podium import` writes plain skill directories, and the existing import end-to-end tests change in the same commit.
+- [x] **S13 · code** — CODE-11, TEST-4B. `podium import` writes plain skill directories, and the existing import end-to-end tests change in the same commit.
       Levels: unit, e2e. Depends on: S5
-- [ ] **S14 · test** — TEST-4C. The plain-skills end-to-end test and its fixture.
+- [x] **S14 · test** — TEST-4C. The plain-skills end-to-end test and its fixture.
       Levels: e2e. Depends on: S6, S8, S9, S12
-- [ ] **S15 · test** — MV-1. Scenario S101 and the edits to the existing scenarios MV-1 lists.
+- [x] **S15 · test** — MV-1. Scenario S101 and the edits to the existing scenarios MV-1 lists.
       Levels: —. Depends on: S12, S13, S14
-- [ ] **S16 · docs** — DOC-1. Quickstart, README, overview, and tutorial lead with a `SKILL.md`-only skill, with their end-to-end fixtures.
+- [x] **S16 · docs** — DOC-1. Quickstart, README, overview, and tutorial lead with a `SKILL.md`-only skill, with their end-to-end fixtures.
       Levels: e2e. Depends on: S12, S14
-- [ ] **S17 · docs** — DOC-2. Authoring and reference pages.
+- [x] **S17 · docs** — DOC-2. Authoring and reference pages.
       Levels: —. Depends on: S1
-- [ ] **S18 · docs** — DOC-3. Deployment pages on skills repositories and hidden directories, and the cross-tier exceptions for skills that declare no version on the deployment pages and in `README.md`.
+- [x] **S18 · docs** — DOC-3. Deployment pages on skills repositories and hidden directories, and the cross-tier exceptions for skills that declare no version on the deployment pages and in `README.md`.
       Levels: —. Depends on: S1
-- [ ] **S19 · docs** — DOC-4. CLI reference for import, scaffold, and lint.
+- [x] **S19 · docs** — DOC-4. CLI reference for import, scaffold, and lint.
       Levels: e2e. Depends on: S12, S13
-- [ ] **S20 · docs** — DOC-5. CHANGELOG entry.
+- [x] **S20 · docs** — DOC-5. CHANGELOG entry.
       Levels: —. Depends on: S19
 
 **Ordering constraints.** S1 lands first and passes `make coverage-gate` before any code step (D-14). S2 precedes S3, because `version.ParsePin` calls `manifest.IsAutoVersion`. S6 and S7 are independent of each other once S3 and S5 land. S9 and S11 depend on no step after S2 and may proceed in parallel with S3 through S8. Land every step in one pull request (D-14).
