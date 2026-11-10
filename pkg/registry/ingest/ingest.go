@@ -571,14 +571,16 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	// this check a same-ID record from another layer is stored and
 	// silently shadows at read time. Index the manifests already
 	// contributed by other layers so the per-record check can spot it.
-	crossLayerByID := map[string][]store.ManifestRecord{}
-	if existing, lerr := st.ListManifests(ctx, req.TenantID); lerr == nil {
-		for _, m := range existing {
-			if m.Layer != req.LayerID {
-				crossLayerByID[m.ArtifactID] = append(crossLayerByID[m.ArtifactID], m)
-			}
-		}
+	//
+	// Spec: §7.3.1, §4.7.6 — the same listing, soft-deleted rows included,
+	// is the input from which a skill that declares no version receives its
+	// registry-assigned version. One read serves both, and a failed read
+	// aborts the call, because neither check can be evaluated without it.
+	rowsByID, err := listManifestRows(ctx, st, req.TenantID)
+	if err != nil {
+		return nil, err
 	}
+	crossLayerByID := crossLayerRows(rowsByID, req.LayerID)
 
 	// spec: §4.7.3 — mcpServers edges resolve to the mcp-server
 	// artifact that declares the matching server_identifier. Index the
@@ -777,86 +779,24 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			}
 		}
 
-		// Check current state to distinguish accepted vs idempotent vs
-		// immutable-violation.
-		existing, err := st.GetManifest(ctx, req.TenantID, mr.ArtifactID, mr.Version)
+		// Distinguish accepted vs idempotent vs immutable-violation, and
+		// assign the version of a skill that declares none.
+		placer := &manifestPlacer{st: st, req: req, rec: rec, mr: &mr, parent: extendsParent}
+		placed, err := placer.place(ctx, rowsByID)
+		if err != nil {
+			return nil, err
+		}
 		switch {
-		case err == nil:
-			if existing.ContentHash == mr.ContentHash {
-				res.Idempotent++
-				res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version})
-				continue
-			}
-			res.Conflicts = append(res.Conflicts, ConflictReport{
-				ArtifactID: mr.ArtifactID,
-				Version:    mr.Version,
-				OldHash:    existing.ContentHash,
-				NewHash:    mr.ContentHash,
-			})
+		case placed.rejected != nil:
+			res.Rejected = append(res.Rejected, *placed.rejected)
 			continue
-		case errors.Is(err, store.ErrNotFound):
-			// Insert below.
-		default:
-			return nil, err
-		}
-
-		// Spec: §4.6 sandbox profile and executable fields across layers.
-		// Both checks run on the insert path alone, after the idempotency
-		// switch: the content hash covers only the child's authored bytes, so
-		// an unchanged stored child is idempotent above and is never
-		// re-judged against a parent that changed after it was accepted.
-		if mr.ExtendsPin != "" {
-			rej, cerr := extendsEdgeRejection(ctx, st, req.TenantID, req.LayerID, rec, mr, extendsParent)
-			if cerr != nil {
-				return nil, cerr
-			}
-			if rej != nil {
-				res.Rejected = append(res.Rejected, *rej)
-				continue
-			}
-		}
-
-		// §4.7.9 signing: when a Signer is configured, attach the
-		// signature envelope before PutManifest commits so callers
-		// see signed bytes from the moment ingest accepts them. A
-		// signing failure rejects the artifact — unsigned bytes
-		// must not sneak in when a signer is configured.
-		if req.Signer != nil {
-			env, err := req.Signer(ctx, mr.ContentHash)
-			if err != nil {
-				res.Rejected = append(res.Rejected, RejectedArtifact{
-					ArtifactID: mr.ArtifactID,
-					Reason:     fmt.Sprintf("sign: %v", err),
-					Code:       "ingest.sign_failed",
-				})
-				continue
-			}
-			mr.Signature = env
-		}
-
-		// §7.2 data plane: persist bundled resources before the manifest
-		// commits so a served artifact's resources are retrievable the
-		// moment ingest accepts it. Large resources upload to object
-		// storage and drop their inline bytes; small ones stay inline.
-		if err := persistResources(ctx, req.ResourcePut, mr.Resources); err != nil {
-			res.Rejected = append(res.Rejected, RejectedArtifact{
-				ArtifactID: mr.ArtifactID,
-				Reason:     fmt.Sprintf("persist resources: %v", err),
-				Code:       "ingest.resource_store_failed",
-			})
+		case placed.conflict != nil:
+			res.Conflicts = append(res.Conflicts, *placed.conflict)
 			continue
-		}
-
-		if err := commitManifest(ctx, st, req, mr); err != nil {
-			if errors.Is(err, store.ErrImmutableViolation) {
-				res.Conflicts = append(res.Conflicts, ConflictReport{
-					ArtifactID: mr.ArtifactID,
-					Version:    mr.Version,
-					NewHash:    mr.ContentHash,
-				})
-				continue
-			}
-			return nil, err
+		case placed.idempotent:
+			res.Idempotent++
+			res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version})
+			continue
 		}
 		res.Accepted++
 		res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version, Accepted: true})
@@ -952,6 +892,156 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		return res, fmt.Errorf("%w: %d diagnostics", ErrLintFailed, len(res.LintFailures))
 	}
 	return res, nil
+}
+
+// placement is the outcome of placing one record in the store. At most one
+// field is set; none set means the record was newly stored.
+type placement struct {
+	idempotent bool
+	conflict   *ConflictReport
+	rejected   *RejectedArtifact
+}
+
+// manifestPlacer stores one record after the per-record checks have passed.
+// mr is the record being placed; its Version is rewritten for a record whose
+// version the registry assigns. prepared records that the §4.6 edge checks,
+// signing, and the resource upload ran, because none of them depends on the
+// version and each runs at most once per record.
+type manifestPlacer struct {
+	st       store.Store
+	req      Request
+	rec      filesystem.ArtifactRecord
+	mr       *store.ManifestRecord
+	parent   store.ManifestRecord
+	prepared bool
+}
+
+// place runs the pre-check and the commit for the record. A record with an
+// authored version takes one attempt. A record whose version the registry
+// assigns takes up to autoVersionAttempts: each attempt derives the version
+// from rowsByID, and a different-hash row at that version, found by the
+// pre-check or by the commit, re-reads the listing into rowsByID before the
+// next attempt. A duplicate that only the re-read listing reveals is
+// therefore rejected rather than committed. The last attempt's conflict is
+// the reported one.
+//
+// Spec: §7.3.1, §4.7.6
+func (p *manifestPlacer) place(ctx context.Context, rowsByID map[string][]store.ManifestRecord) (placement, error) {
+	attempts := 1
+	if p.rec.VersionAssigned {
+		attempts = autoVersionAttempts
+	}
+	for attempt := 1; ; attempt++ {
+		if p.rec.VersionAssigned {
+			v, duplicate := assignVersion(rowsByID[p.mr.ArtifactID], p.req.LayerID, p.mr.ContentHash)
+			if duplicate {
+				return placement{rejected: autoVersionDuplicateRejection(p.req.TenantID, p.req.LayerID, p.mr.ArtifactID)}, nil
+			}
+			p.mr.Version = v
+		}
+		out, taken, err := p.attempt(ctx)
+		if err != nil || !taken || attempt == attempts {
+			return out, err
+		}
+		reread, err := listManifestRows(ctx, p.st, p.req.TenantID)
+		if err != nil {
+			return placement{}, err
+		}
+		rowsByID[p.mr.ArtifactID] = reread[p.mr.ArtifactID]
+	}
+}
+
+// attempt places the record at its current version. taken reports that a
+// row with a different content hash holds that version, found by the
+// pre-check or by the commit, in which case out carries the conflict.
+func (p *manifestPlacer) attempt(ctx context.Context) (out placement, taken bool, err error) {
+	mr := p.mr
+	existing, err := p.st.GetManifest(ctx, p.req.TenantID, mr.ArtifactID, mr.Version)
+	switch {
+	case err == nil:
+		if existing.ContentHash == mr.ContentHash {
+			return placement{idempotent: true}, false, nil
+		}
+		return placement{conflict: &ConflictReport{
+			ArtifactID: mr.ArtifactID,
+			Version:    mr.Version,
+			OldHash:    existing.ContentHash,
+			NewHash:    mr.ContentHash,
+		}}, true, nil
+	case errors.Is(err, store.ErrNotFound):
+		// Insert below.
+	default:
+		return placement{}, false, err
+	}
+	if !p.prepared {
+		rej, err := p.prepare(ctx)
+		if err != nil || rej != nil {
+			return placement{rejected: rej}, false, err
+		}
+		p.prepared = true
+	}
+	if err := commitManifest(ctx, p.st, p.req, *mr); err != nil {
+		if errors.Is(err, store.ErrImmutableViolation) {
+			return placement{conflict: &ConflictReport{
+				ArtifactID: mr.ArtifactID,
+				Version:    mr.Version,
+				NewHash:    mr.ContentHash,
+			}}, true, nil
+		}
+		return placement{}, false, err
+	}
+	return placement{}, false, nil
+}
+
+// prepare runs the insert-path steps that precede the commit: the §4.6 edge
+// checks, §4.7.9 signing, and the §7.2 resource upload. It returns a
+// rejection when one of them refuses the record. The caller runs it on the
+// first attempt whose pre-check finds no row, so a record the pre-check
+// classifies as unchanged is never judged, and a re-derived version does not
+// repeat it: none of its inputs is the version.
+func (p *manifestPlacer) prepare(ctx context.Context) (*RejectedArtifact, error) {
+	mr := p.mr
+	// Spec: §4.6 sandbox profile and executable fields across layers.
+	// Both checks run on the insert path alone, after the idempotency
+	// switch: the content hash covers only the child's authored bytes, so
+	// an unchanged stored child is idempotent and is never re-judged
+	// against a parent that changed after it was accepted.
+	if mr.ExtendsPin != "" {
+		rej, err := extendsEdgeRejection(ctx, p.st, p.req.TenantID, p.req.LayerID, p.rec, *mr, p.parent)
+		if err != nil || rej != nil {
+			return rej, err
+		}
+	}
+
+	// §4.7.9 signing: when a Signer is configured, attach the
+	// signature envelope before PutManifest commits so callers
+	// see signed bytes from the moment ingest accepts them. A
+	// signing failure rejects the artifact — unsigned bytes
+	// must not sneak in when a signer is configured.
+	if p.req.Signer != nil {
+		env, err := p.req.Signer(ctx, mr.ContentHash)
+		if err != nil {
+			return &RejectedArtifact{
+				ArtifactID: mr.ArtifactID,
+				Reason:     fmt.Sprintf("sign: %v", err),
+				Code:       "ingest.sign_failed",
+			}, nil
+		}
+		mr.Signature = env
+	}
+
+	// §7.2 data plane: persist bundled resources before the manifest
+	// commits so a served artifact's resources are retrievable the
+	// moment ingest accepts it. Large resources upload to object
+	// storage and drop their inline bytes; small ones stay inline.
+	if err := persistResources(ctx, p.req.ResourcePut, mr.Resources); err != nil {
+		return &RejectedArtifact{
+			ArtifactID: mr.ArtifactID,
+			Reason:     fmt.Sprintf("persist resources: %v", err),
+			Code:       "ingest.resource_store_failed",
+		}, nil
+	}
+	return nil, nil
 }
 
 // commitManifest persists the manifest. Under the §4.7 outbox path

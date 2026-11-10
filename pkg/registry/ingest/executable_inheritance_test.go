@@ -558,3 +558,33 @@ func TestIngest_ExecutableInheritanceSameLayerOverlayPinAccepted(t *testing.T) {
 		t.Errorf("merged frontmatter = %q, want acme_hook: team.sh", fm)
 	}
 }
+
+// A plain skill's stored manifest is empty, so it sets no executable field,
+// and a cross-layer extends: child of it is accepted without restating
+// anything, even when the parent's SKILL.md carries allowed-tools and a
+// metadata mapping. The child pins the parent's registry-assigned version.
+// Spec: §4.6, §13.4
+func TestIngest_ExecutableInheritancePlainSkillParentSetsNoField(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	parent := "---\nname: x\ndescription: x skill\nallowed-tools:\n  - Bash\n  - Read\n" +
+		"metadata:\n  owner: platform\n  tier: gold\n---\n\nx body\n"
+	if res := ingestSnapshot(t, st, "L1", fstest.MapFS{"x/SKILL.md": artifactFile(parent)}); res.Accepted != 1 {
+		t.Fatalf("parent: accepted=%d result=%+v, want x accepted", res.Accepted, res)
+	}
+
+	res := ingestSnapshot(t, st, "L2", fstest.MapFS{
+		"y/ARTIFACT.md": artifactFile("---\ntype: skill\nversion: 1.0.0\nextends: x\n---\n\n"),
+		"y/SKILL.md":    artifactFile("---\nname: y\ndescription: y skill\n---\n\ny body\n"),
+	})
+	if res.Accepted != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want the child accepted", res.Accepted, res.Rejected)
+	}
+	rec, err := st.GetManifest(context.Background(), "tenant-1", "y", "1.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest y@1.0.0: %v", err)
+	}
+	if rec.ExtendsPin != "x@0.0.0-auto.0" {
+		t.Errorf("ExtendsPin = %q, want x@0.0.0-auto.0", rec.ExtendsPin)
+	}
+}
