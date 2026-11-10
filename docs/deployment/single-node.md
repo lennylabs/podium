@@ -152,7 +152,7 @@ The shared library does the same parsing, composition, and adapter work in both 
 
 ## What the tier omits
 
-A single-node deployment is single-tenant by default. Setting `PODIUM_MULTI_TENANT=true` with an identity provider the registry verifies turns on multi-tenant routing on a single node, and the SQLite store scopes each row by its tenant. Without such a provider, or in public mode, a registry started with `PODIUM_MULTI_TENANT` binds every request to a tenant that holds no data, so every caller sees an empty catalog and `/v1/admin/tenants` answers `registry.tenant_management_unavailable`. A single node omits the Postgres schema-per-org isolation and row-level security the clustered tier provides for multi-tenant deployments, and it runs no replicas.
+A single-node deployment is single-tenant by default. Setting `PODIUM_MULTI_TENANT=true` with an identity provider the registry verifies turns on multi-tenant routing on a single node, and the SQLite store scopes each row by its tenant. A registry started with `PODIUM_MULTI_TENANT` fails to start with `config.multitenant_no_verifier` when it configures no identity provider, names a provider value the registry does not recognize, or runs in public mode with no identity provider, unless another startup check refuses the configuration first. It fails with `config.identity_provider_unverified` when it names a recognized provider the registry does not verify, such as `oauth-device-code`. A single node omits the Postgres schema-per-org isolation and row-level security the clustered tier provides for multi-tenant deployments, and it runs no replicas.
 
 Artifact signing and local chain-head anchoring of the audit log run on a single node. The registry signs every artifact with its registry-managed key by default. When `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above 0 and the audit log is a file, the registry also anchors the audit chain head with its anchor key. No tier submits the chain head to a public transparency log.
 
@@ -168,7 +168,7 @@ For demos, evaluation pilots, and intentionally open internal knowledge bases, a
 podium serve --standalone --public-mode --layer-path /path/to/artifacts/
 ```
 
-Public mode is mutually exclusive with an identity provider, and setting both fails at startup. It binds to `127.0.0.1` by default. Pass `--allow-public-bind` to bind a non-loopback address, typically behind an authenticated reverse proxy.
+Public mode is mutually exclusive with an identity provider, and setting both fails at startup. It is also mutually exclusive with `PODIUM_MULTI_TENANT`, and setting both fails at startup. The registry reports `config.multitenant_no_verifier` when `PODIUM_IDENTITY_PROVIDER` is unset or `none`, unless another startup check refuses the configuration first. Public mode binds to `127.0.0.1` by default. Pass `--allow-public-bind` to bind a non-loopback address, typically behind an authenticated reverse proxy.
 
 Public mode applies a sensitivity ceiling: ingest of `sensitivity: medium` and `sensitivity: high` artifacts is rejected. The audit log records `caller.identity = "system:public"` for every call so downstream consumers can filter on it.
 

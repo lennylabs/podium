@@ -147,8 +147,8 @@ func countedOnce(meter *server.AuditVolumeMeter, tenant string) bool {
 
 // auditEmitterFor labels a routed request's event with the routed tenant,
 // which is also the audit-volume meter key. An unrouted multi-tenant request,
-// with or without a tenant router, records no tenant while the meter keys it
-// under podium:unrouted (Decision 10 of proposal 0051).
+// anonymous or from an organization with no tenant, records no tenant while
+// the meter keys it under podium:unrouted (Decision 10 of proposal 0051).
 //
 // Spec: §8.1, §6.3.1, §4.7.8
 func TestAuditEmitterFor_TenantLabelAndMeterKey(t *testing.T) {
@@ -171,8 +171,7 @@ func TestAuditEmitterFor_TenantLabelAndMeterKey(t *testing.T) {
 	}{
 		{"routed", alice("acme.com"), []server.Option{server.WithTenantRouter(router, false)}, "acme", "acme"},
 		{"unrouted under a router", alice("globex.com"), []server.Option{server.WithTenantRouter(router, false)}, "", "podium:unrouted"},
-		{"no router, public mode", layer.Identity{}, []server.Option{server.WithMultiTenant(), server.WithPublicMode()}, "", "podium:unrouted"},
-		{"no router, no identity provider", layer.Identity{}, []server.Option{server.WithMultiTenant()}, "", "podium:unrouted"},
+		{"anonymous under a router", layer.Identity{}, []server.Option{server.WithTenantRouter(router, false)}, "", "podium:unrouted"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

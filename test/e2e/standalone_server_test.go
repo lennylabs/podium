@@ -294,19 +294,41 @@ func TestStandaloneServer_PublicModeWithIdPFails(t *testing.T) {
 	}
 }
 
-// spec: §2.2, §6.3.1 — a registry configured with
-// oauth-device-code (and public mode off) has no request-time verifier
-// wired, so it would resolve every caller as anonymous-public and never
-// apply per-layer visibility. The boot guard refuses to start with
-// config.identity_provider_unverified rather than silently serve a private
-// registry open.
+// Spec: §4.6 / §6.3.1 / §13.12 — a registry that names a recognized provider without a request-time verifier fails to start with config.identity_provider_unverified in single-tenant and multi-tenant mode.
+// A registry configured with oauth-device-code (and public mode off) has no
+// request-time verifier wired, so it would resolve every caller as
+// anonymous-public and never apply per-layer visibility. The boot guard
+// refuses to start with config.identity_provider_unverified rather than
+// silently serve a private registry open. oauth-device-code is a registered
+// provider, so the multi-tenant row passes the config.multitenant_no_verifier
+// guard and reaches this one, and the message names the remedies for both
+// modes.
 func TestSmallTeam_IdentityProviderUnverifiedFailsStartup(t *testing.T) {
 	t.Parallel()
-	out := smallteamRawExecFail(t,
-		[]string{"HOME=" + t.TempDir(), "PODIUM_IDENTITY_PROVIDER=oauth-device-code"},
-		"serve", "--standalone")
-	if !strings.Contains(out, "config.identity_provider_unverified") {
-		t.Errorf("expected config.identity_provider_unverified in output; got:\n%s", out)
+	cases := []struct {
+		name string
+		env  []string
+	}{
+		{name: "single-tenant", env: []string{"PODIUM_IDENTITY_PROVIDER=oauth-device-code"}},
+		{name: "multi-tenant", env: []string{"PODIUM_IDENTITY_PROVIDER=oauth-device-code", "PODIUM_MULTI_TENANT=true"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := smallteamRawExecFail(t,
+				append([]string{"HOME=" + t.TempDir()}, tc.env...),
+				"serve", "--standalone")
+			for _, sub := range []string{
+				"config.identity_provider_unverified",
+				"unset PODIUM_IDENTITY_PROVIDER",
+				"PODIUM_PUBLIC_MODE=true",
+				"PODIUM_MULTI_TENANT",
+			} {
+				if !strings.Contains(out, sub) {
+					t.Errorf("output missing %q:\n%s", sub, out)
+				}
+			}
+		})
 	}
 }
 
