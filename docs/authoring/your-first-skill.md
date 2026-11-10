@@ -83,7 +83,7 @@ sensitivity: low
 Notes on the overlay:
 
 - **`type: skill`** marks the package as a skill. The body is empty apart from the one-line HTML comment pointer, because the agent-facing prose lives in `SKILL.md`.
-- **`version`** is absent, so the skill's version stays the `metadata.version` in `SKILL.md`. When the overlay declares a `version`, it equals `metadata.version`.
+- **`version`** is absent, so the skill's version stays the `metadata.version` in `SKILL.md`. When the overlay declares a `version`, that value is the skill's version, and it must equal `metadata.version` whenever `metadata.version` is a `major.minor.patch` value.
 - **`when_to_use`** is a list of explicit situations. Hybrid retrieval uses these as additional signal. Be concrete: "After month-end close" beats "When working on finance stuff."
 
 ---
