@@ -86,6 +86,11 @@ This document stages spec, code, test, and documentation changes. It does not mo
 
 **Ordering constraints.** S1 lands first and passes `make coverage-gate` before any later step (D-14). S2 lands before S6 and S7. S3, S4, and S5 are independent of one another. S6 and S7 are independent of each other once their dependencies land. The test steps S8 to S13 and the docs steps S14 and S15 are independent of one another. S16 describes the whole change and lands last. Land every step in one pull request.
 
+## Deviations from the checklist
+
+- **S17 · test** is absent from the checklist. It added scenario S92 to `test/manual-validation.md`. S92 drives the compiled `podium` binary through a three-layer filesystem registry and checks that an executable-field drop retracts a collision, that the cascade drops a same-layer child of a dropped artifact and reports it in canonical-ID order, that `podium sync override` exits 1 with the same drop lines while its `--dry-run` reports none, that a `--config` workspace target fails with `dropped at least one artifact`, and that a standalone server over the same directory materializes the same files.
+- **S18 · test** is absent from the checklist. It added scenario S93 and a negative-control step 7 to scenario S39 in `test/manual-validation.md`. S93 covers the withheld unreadable-fields reason in both modes with its server log trace, a stored child that is not re-evaluated after its parent gains an executable field while a new version is refused, and a same-ID overlay whose unpinned reference selects its own layer's earlier version, which the server accepts and a filesystem sync drops. The S39 step checks that a pinned overlay version that no longer restates `x_owner` is rejected with `details` fields `["x_owner"]` while the stored 2.0.0 keeps serving.
+
 ## Current state and the gap
 
 ### Inheritance today
