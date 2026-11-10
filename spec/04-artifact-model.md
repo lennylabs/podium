@@ -115,14 +115,13 @@ ASCII fallback for the diagram above (registry layout on disk):
         DOMAIN.md
         routing-validator/             [type: skill]
           SKILL.md
-          ARTIFACT.md
         swift-bic-parser/              [type: skill]
           SKILL.md
-          ARTIFACT.md
     engineering/platform/code-change-pr/    [type: command]
       ARTIFACT.md
 -->
 
+A directory below the layer root is an artifact package when it directly contains a file named `ARTIFACT.md`, or when it directly contains a file named `SKILL.md` and no directory between it and the layer root is itself a package (§4.1). A `SKILL.md` below a package's root is a bundled resource of that package (§4.4) and starts no package. Package discovery does not descend into a directory below the layer root whose name begins with a dot, so no package is discovered inside one. Files under a dot-prefixed subdirectory of a package remain that package's bundled resources (§4.4). A layer whose skills sit under `.claude/skills/` or `.agents/skills/` therefore places its root at that directory or at the dot-prefixed directory itself: a `git` source sets `root` (§4.6), and a `local` source, `--layer-path`, or a `podium sync` path names the directory as its path. A manifest file directly at the layer root is an error, because the canonical ID is the non-empty directory path under the root.
 
 The hierarchy can nest to arbitrary depth for organization. The discovery output returned by `load_domain` is a separate concern, governed by configurable rules (§4.5.5): a tenant-level `max_depth` (default 3) caps how deep the rendered subtree goes below the requested path, `fold_below_artifacts` collapses sparse subdomains into the parent's leaf set, and `fold_passthrough_chains` collapses single-child intermediate domains. All of these can be overridden per-subtree via `DOMAIN.md`. Authoring depth never changes the canonical artifact ID; that remains the directory path.
 
