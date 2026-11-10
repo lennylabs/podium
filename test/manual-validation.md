@@ -252,6 +252,7 @@ rm -rf "$WORK"
 | S94 | An `mcpServers` entry restated by name restates each member, and a same-layer child inherits its entry | solo then standalone | none | none | none |
 | S95 | An `extends:` child stored before the executable-field rule keeps serving after an upgrade | standalone then solo | none | none | none |
 | S96 | An extends: child whose sandbox_profile conflicts with its parent's is refused in both modes, and a stored version keeps serving | solo then standalone | none | none | none |
+| S97 | A sandbox_profile that tightens an open parent is admitted, and a same-layer conflict is refused with its dependants in both modes | solo then standalone | none | none | none |
 
 ---
 
@@ -12093,7 +12094,7 @@ without the rule.
 
    ```bash
    mkdir -p "$WORK/src" "$WORK/old"
-   git -C "$REAL_HOME/projects/podium" archive v0.5.2 | tar -x -C "$WORK/src"
+   git -C "$PODIUM_REPO" archive v0.5.2 | tar -x -C "$WORK/src"
    go -C "$WORK/src" build -o "$WORK/old/" ./cmd/podium
    "$WORK/old/podium" version
    ```
@@ -12258,4 +12259,187 @@ without the rule.
 
    ```bash
    kill "$SRV"; rm -rf "$WORK"
+   ```
+
+---
+
+## S97: A sandbox_profile that tightens an open parent is admitted, and a same-layer conflict is refused with its dependants in both modes
+
+**Goal.** Validate that an `extends:` child that sets a restricting
+`sandbox_profile` under a parent whose profile is `unrestricted` or unset is
+admitted with the child's profile, that a child that omits the field inherits
+its parent's restricting profile, that a same-layer `network-isolated` parent
+and `seccomp-strict` child conflict, that a filesystem-source `podium sync`
+and a fresh server ingest both drop that child and the grandchild that extends
+it, that the sandbox-profile rule answers before the executable-field rule on
+a child that breaks both, and that the materialized `SKILL.md` `compatibility`
+line and the `.podium/seccomp-strict.json` file follow the merged profile.
+
+**Covers.** §4.6 sandbox profile, §4.6 executable fields, §7.3.1 ingest
+outcome, §13.11.3 sandbox profile conflicts, §4.3.4 derived skill
+compatibility, §4.4.1 sandbox profiles, and §11 filesystem-versus-server
+equivalence, through the compiled binaries.
+
+**Why by hand.** S96 stores its same-layer conflict with a release that has no
+rule, so its server never refuses a same-layer edge, and its fixtures carry no
+open parent, no grandchild, and no skill. A same-layer refusal without
+`details.constraint`, an admitted `ops/b-sec`, a surviving `ops/c-grand`, a
+`server_identifier` reason for `ops/srv-child`, a tightened child that reads
+its parent's `unrestricted`, or a `compatibility` line that disagrees with the
+loaded frontmatter is the defect this scenario catches.
+
+**Prerequisites.** Built `podium` and `podium-mcp` binaries on `PATH`.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above.
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`.
+
+2. Build a two-layer registry. `org` holds the skills `ops/open`
+   (`unrestricted`), `ops/bare` (no profile), and `ops/strict`
+   (`seccomp-strict`), and the MCP server `ops/srv` (`read-only-fs`, with a
+   `server_identifier`). `team` holds `ops/tight` (`seccomp-strict`, extends
+   `ops/open`), `ops/tight2` (`network-isolated`, extends `ops/bare`),
+   `ops/inherit` (no profile, extends `ops/strict`), the same-layer chain
+   `ops/a-net` (`network-isolated`), `ops/b-sec` (`seccomp-strict`, extends
+   `ops/a-net`), and `ops/c-grand` (no profile, extends `ops/b-sec`), and the
+   MCP server `ops/srv-child` (`seccomp-strict`, extends `ops/srv`, omits
+   `server_identifier`). Each same-layer parent's ID sorts before its child's.
+
+   ```bash
+   sk() {
+     mkdir -p "$WORK/reg/$1"
+     { printf -- '---\ntype: skill\nversion: 1.0.0\n'
+       [ -n "$2" ] && printf 'sandbox_profile: %s\n' "$2"
+       [ -n "$3" ] && printf 'extends: %s\n' "$3"
+       printf -- '---\n'; } > "$WORK/reg/$1/ARTIFACT.md"
+     printf -- '---\nname: %s\ndescription: The %s skill exercises the sandbox profile rule.\n---\n\n%s body.\n' \
+       "${1##*/}" "${1##*/}" "${1##*/}" > "$WORK/reg/$1/SKILL.md"
+   }
+   mkdir -p "$WORK/reg/org/ops/srv" "$WORK/reg/team/ops/srv-child"
+   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n' > "$WORK/reg/.registry-config"
+   sk org/ops/open unrestricted ""
+   sk org/ops/bare "" ""
+   sk org/ops/strict seccomp-strict ""
+   sk team/ops/tight seccomp-strict ops/open
+   sk team/ops/tight2 network-isolated ops/bare
+   sk team/ops/inherit "" ops/strict
+   sk team/ops/a-net network-isolated ""
+   sk team/ops/b-sec seccomp-strict ops/a-net
+   sk team/ops/c-grand "" ops/b-sec
+   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Org server fixture for the sandbox rule.\nserver_identifier: org-srv\nsandbox_profile: read-only-fs\n---\n\nOrg server.\n' \
+     > "$WORK/reg/org/ops/srv/ARTIFACT.md"
+   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Team server fixture for the sandbox rule.\nsandbox_profile: seccomp-strict\nextends: ops/srv\n---\n\nTeam server.\n' \
+     > "$WORK/reg/team/ops/srv-child/ARTIFACT.md"
+   for L in org team; do
+     printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
+   done
+   podium lint --offline --registry "$WORK/reg"; echo "exit=$?"
+   ```
+
+   **Expect.** `lint: no issues.` and `exit=0`. A skill's `ARTIFACT.md`
+   carries no `description`, because a value there that differs from the
+   `SKILL.md` one is `lint.skill_artifact_field_mismatch`, which stops the
+   server in step 4 before it binds.
+
+3. Sync through the filesystem source to Cursor and read the derived
+   `compatibility` lines.
+
+   ```bash
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness cursor 2> "$WORK/err.txt"; echo "exit=$?"
+   cat "$WORK/err.txt"
+   sed -n 's/^rejected: [^ ]* //p' "$WORK/err.txt" | grep sandbox_profile \
+     | grep -c -e ops/ -e read-only-fs -e network-isolated -e seccomp-strict
+   for S in tight tight2 inherit; do grep '^compatibility' "$WORK/fs/.cursor/skills/$S/SKILL.md"; done
+   ls "$WORK/fs/.cursor/skills"
+   ```
+
+   **Expect.** The sync lists `ops/a-net`, `ops/bare`, `ops/inherit`,
+   `ops/open`, `ops/srv`, `ops/strict`, `ops/tight`, and `ops/tight2`, and
+   prints `exit=1`. `$WORK/err.txt` holds three lines in this order:
+   `rejected: ops/b-sec (ingest.invalid_artifact): extends: sandbox_profile differs from the profile the parent sets, and neither is unrestricted; omit sandbox_profile to inherit the parent's profile`,
+   `rejected: ops/c-grand (ingest.invalid_artifact): extends: no parent artifact "ops/b-sec" ingested yet`,
+   and the `ops/b-sec` reason again for `ops/srv-child`. The `ops/srv-child`
+   line carries the sandbox reason rather than the `server_identifier` one,
+   because the sandbox rule is checked first. `grep -c` prints `0`: no
+   sandbox reason names an artifact or a profile value. The `compatibility`
+   lines read `"sandbox: seccomp-strict"`, `"sandbox: network-isolated"`, and
+   `"sandbox: seccomp-strict"`, and `ls` prints `a-net`, `bare`, `inherit`,
+   `open`, `strict`, `tight`, and `tight2`. A missing `ops/c-grand` line means
+   the drop did not cascade.
+
+4. Serve the same directory with the build under test on a fresh store, read
+   the boot ingest, and reingest `team`.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8199 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8199/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export URL=http://127.0.0.1:8199
+   grep -e 'ingested layer' -e 'rejected: sandbox' "$WORK/srv.log"
+   podium layer reingest --registry "$URL" team > /dev/null 2> "$WORK/re.txt"; echo "exit=$?"
+   diff "$WORK/err.txt" "$WORK/re.txt" && echo same
+   curl -s -X POST "$URL/v1/layers/reingest?id=team" > "$WORK/body.json"
+   python3 -c '
+   import json, sys
+   for r in json.load(open(sys.argv[1]))["rejected"]:
+       hits = [w for w in ("ops/", "read-only-fs", "network-isolated", "seccomp-strict") if w in r["reason"] + json.dumps(r.get("details", {}))]
+       print(r["artifact_id"], json.dumps(r.get("details")), hits if "sandbox" in r["reason"] else "-")
+   ' "$WORK/body.json"
+   ```
+
+   **Expect.** The `ingested layer` lines report `accepted=4, idempotent=0,
+   rejected=0` for `org` and `accepted=4, idempotent=0, rejected=3` for
+   `team`. Two log lines end in `rejected: sandbox_profile_conflict`, one for
+   `artifact=ops/b-sec` with `parent_layer=team` and one for
+   `artifact=ops/srv-child` with `parent_layer=org`. The reingest prints
+   `exit=1`, and `diff` prints `same`: the server refuses the same three
+   children with the same lines as the filesystem sync. The `python3` block
+   prints `ops/b-sec {"constraint": "sandbox_profile_conflict"} []`,
+   `ops/c-grand null -`, and `ops/srv-child {"constraint": "sandbox_profile_conflict"} []`.
+   A `null` for `ops/b-sec` means the same-layer refusal carries no
+   `details`, and a non-empty list means the reason or `details` names a
+   parent or a profile value.
+
+5. Load the admitted children, sync the same target through the server, and
+   load the tightened and inheriting skills through `podium-mcp`.
+
+   ```bash
+   for ID in ops/tight ops/tight2 ops/inherit ops/b-sec ops/c-grand; do
+     curl -s "$URL/v1/load_artifact?id=$ID" \
+       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sys.argv[1], d.get("version") or d["code"], [l for l in d.get("frontmatter","").splitlines() if l.startswith("sandbox_profile")])' "$ID"
+   done
+   podium sync --registry "$URL" --target "$WORK/srv" --harness cursor > /dev/null; echo "exit=$?"
+   diff -r "$WORK/fs/.cursor" "$WORK/srv/.cursor" && echo IDENTICAL
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   for S in tight tight2 inherit; do
+     LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"ops/'"$S"'"}}}'
+     printf '%s\n%s\n' "$INIT" "$LOAD" | PODIUM_REGISTRY="$URL" PODIUM_CACHE_DIR="$WORK/mcp" \
+       PODIUM_HARNESS=none PODIUM_MATERIALIZE_ROOT="$WORK/m-$S" \
+       PODIUM_HOST_SANDBOXES=unrestricted,read-only-fs,network-isolated,seccomp-strict \
+       podium-mcp > /dev/null 2> "$WORK/m-$S.err"
+     echo "$S: $(grep '^sandbox_profile' "$WORK/m-$S/ops/$S/ARTIFACT.md") $(ls "$WORK/m-$S/.podium" 2>/dev/null)"
+   done
+   ```
+
+   **Expect.** The loads print
+   `ops/tight 1.0.0 ['sandbox_profile: seccomp-strict']`,
+   `ops/tight2 1.0.0 ['sandbox_profile: network-isolated']`,
+   `ops/inherit 1.0.0 ['sandbox_profile: seccomp-strict']`,
+   `ops/b-sec registry.not_found []`, and `ops/c-grand registry.not_found []`.
+   An `unrestricted` or absent value for a tightened child means the merge
+   kept the open parent's value. The server sync prints `exit=0`, and `diff`
+   prints `IDENTICAL`: the two modes derive the same `compatibility` lines.
+   The `podium-mcp` loads print `tight: sandbox_profile: seccomp-strict seccomp-strict.json`,
+   `tight2: sandbox_profile: network-isolated`, and
+   `inherit: sandbox_profile: seccomp-strict seccomp-strict.json`. A missing
+   `ARTIFACT.md` means the load failed; read `$WORK/m-<name>.err`.
+
+6. Clean up.
+
+   ```bash
+   kill "$SRV"; wait "$SRV" 2>/dev/null; rm -rf "$WORK"
    ```
