@@ -1,7 +1,7 @@
 # Proposal 0057: Require an extends: child to restate every executable field a parent in another layer sets
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-09). Verified on 2026-11-09 after 10 adversarial review rounds (20 findings fixed).
+- Status: Implemented (2026-11-09). Signed off as staged. Verified on 2026-11-09 after 10 adversarial review rounds (20 findings fixed).
 - Date: 2026-11-09
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: ingest and a filesystem-source `podium sync` refuse an `extends:` child that ingests or syncs today.
@@ -51,37 +51,37 @@ This document stages spec, code, test, and documentation changes. It does not mo
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3. The §4.6 rule, the §7.3.1 drop and `details` sentence, and the §13.11.3 filesystem drop land in one commit, because each cites the others and §4.6 would contradict §13.11.3 alone.
+- [x] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3. The §4.6 rule, the §7.3.1 drop and `details` sentence, and the §13.11.3 filesystem drop land in one commit, because each cites the others and §4.6 would contradict §13.11.3 alone.
       Levels: unit. Depends on: —
-- [ ] **S2 · test** — TEST-6, MV-2. Existing fixtures and scenario S39 stop relying on cross-layer inheritance of an executable field. This test step precedes the code steps on purpose: each update passes before and after the rule, so every later commit stays green.
+- [x] **S2 · test** — TEST-6, MV-2. Existing fixtures and scenario S39 stop relying on cross-layer inheritance of an executable field. This test step precedes the code steps on purpose: each update passes before and after the rule, so every later commit stays green.
       Levels: unit, integration, e2e, manual. Depends on: S1
-- [ ] **S3 · code** — CODE-1. `manifest.InheritedExecutableFields` and `ErrUnreadableChain`.
+- [x] **S3 · code** — CODE-1. `manifest.InheritedExecutableFields` and `ErrUnreadableChain`.
       Levels: unit. Depends on: S1
-- [ ] **S4 · code** — CODE-2. `layer.ExecutableInheritance`, `layer.Drop`, `Collision.Drop`, `InvalidArtifactCode`, and the shared reasons, with ingest's literals replaced.
+- [x] **S4 · code** — CODE-2. `layer.ExecutableInheritance`, `layer.Drop`, `Collision.Drop`, `InvalidArtifactCode`, and the shared reasons, with ingest's literals replaced.
       Levels: unit. Depends on: S1
-- [ ] **S5 · code** — CODE-3. `core.ExtendsChain` and `core.ResolvedArtifact`, with the two-`%w` error contract and its unit test.
+- [x] **S5 · code** — CODE-3. `core.ExtendsChain` and `core.ResolvedArtifact`, with the two-`%w` error contract and its unit test.
       Levels: unit. Depends on: S1
-- [ ] **S6 · code** — CODE-4, CODE-5. The server check on the insert path and the `details` member on the wire. Bundled because `Details` has no reader until the response serializes it, and one reviewer checks the field end to end.
+- [x] **S6 · code** — CODE-4, CODE-5. The server check on the insert path and the `details` member on the wire. Bundled because `Details` has no reader until the response serializes it, and one reviewer checks the field end to end.
       Levels: unit, integration, e2e. Depends on: S2, S3, S4, S5
-- [ ] **S7 · code** — CODE-6, CODE-7. The filesystem drop path and the `layer.Drop` plumbing through `pkg/sync` and `cmd/podium`. Bundled because the `OnDrop` rename does not compile without the callers it changes.
+- [x] **S7 · code** — CODE-6, CODE-7. The filesystem drop path and the `layer.Drop` plumbing through `pkg/sync` and `cmd/podium`. Bundled because the `OnDrop` rename does not compile without the callers it changes.
       Levels: unit, integration, e2e. Depends on: S2, S3, S4
-- [ ] **S8 · test** — TEST-1. Unit table for `InheritedExecutableFields`.
+- [x] **S8 · test** — TEST-1. Unit table for `InheritedExecutableFields`.
       Levels: unit. Depends on: S3
-- [ ] **S9 · test** — TEST-2. Ingest integration cases for the server rule.
+- [x] **S9 · test** — TEST-2. Ingest integration cases for the server rule.
       Levels: integration. Depends on: S6
-- [ ] **S10 · test** — TEST-3. Filesystem resolver cases for drop, overlay fallback, collision re-evaluation, cascade, and drop-report order.
+- [x] **S10 · test** — TEST-3. Filesystem resolver cases for drop, overlay fallback, collision re-evaluation, cascade, and drop-report order.
       Levels: unit. Depends on: S7
-- [ ] **S11 · test** — TEST-4. HTTP `details` on the reingest response, the error-envelope scope of the `rejected` array, and cross-mode equivalence of the drop.
+- [x] **S11 · test** — TEST-4. HTTP `details` on the reingest response, the error-envelope scope of the `rejected` array, and cross-mode equivalence of the drop.
       Levels: integration, materialization. Depends on: S6, S7
-- [ ] **S12 · test** — TEST-5. End-to-end CLI reporting for `podium layer reingest` and `podium sync`.
+- [x] **S12 · test** — TEST-5. End-to-end CLI reporting for `podium layer reingest` and `podium sync`.
       Levels: e2e. Depends on: S6, S7
-- [ ] **S13 · test** — MV-1. Scenario S91 in `test/manual-validation.md`.
+- [x] **S13 · test** — MV-1. Scenario S91 in `test/manual-validation.md`.
       Levels: manual. Depends on: S6, S7
-- [ ] **S14 · docs** — DOC-1. `docs/authoring/extends.md` and the two frontmatter pages.
+- [x] **S14 · docs** — DOC-1. `docs/authoring/extends.md` and the two frontmatter pages.
       Levels: —. Depends on: S1
-- [ ] **S15 · docs** — DOC-2. `docs/reference/error-codes.md`, `docs/reference/cli.md`, and `docs/reference/http-api.md`.
+- [x] **S15 · docs** — DOC-2. `docs/reference/error-codes.md`, `docs/reference/cli.md`, and `docs/reference/http-api.md`.
       Levels: —. Depends on: S1
-- [ ] **S16 · docs** — DOC-3. The CHANGELOG bullet.
+- [x] **S16 · docs** — DOC-3. The CHANGELOG bullet.
       Levels: —. Depends on: S1–S15
 
 **Ordering constraints.** S1 lands first and passes `make coverage-gate` before any later step (D-14). S2 lands before S6 and S7. S3, S4, and S5 are independent of one another. S6 and S7 are independent of each other once their dependencies land. The test steps S8 to S13 and the docs steps S14 and S15 are independent of one another. S16 describes the whole change and lands last. Land every step in one pull request.
