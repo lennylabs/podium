@@ -116,11 +116,16 @@ var verifiedProviders = []string{"injected-session-token", "oidc-jwt", "trusted-
 // exempt, matching selectIdentityProvider. Public mode opts out of identity
 // by design (every layer visible); the empty/standalone default has no
 // authenticated callers (the local operator is the de facto admin, §13.10).
+// The remedy names the preconditions for public mode: no identity provider
+// (config.public_mode_with_idp) and no PODIUM_MULTI_TENANT
+// (config.multitenant_no_verifier). The previous message offered public mode
+// alone, which led an operator who kept the provider into
+// config.public_mode_with_idp.
 func identityVisibilityGuard(identityProvider string, providerSelected, publicMode, verifierInstalled bool) error {
 	if !providerSelected || publicMode || verifierInstalled {
 		return nil
 	}
-	return fmt.Errorf("config.identity_provider_unverified: PODIUM_IDENTITY_PROVIDER=%q has no request-time token verifier wired, so the registry would resolve every caller as anonymous-public and never apply per-layer visibility (§2.2, §6.3.1); the registry verifies %s server-side. Set PODIUM_PUBLIC_MODE=true to run an open registry, or select one of those", identityProvider, strings.Join(verifiedProviders, ", "))
+	return fmt.Errorf("config.identity_provider_unverified: PODIUM_IDENTITY_PROVIDER=%q has no request-time token verifier wired, so the registry would resolve every caller as anonymous-public and never apply per-layer visibility (§2.2, §6.3.1); the registry verifies %s server-side. Select one of those. To run an open single-tenant registry instead, unset PODIUM_IDENTITY_PROVIDER and set PODIUM_PUBLIC_MODE=true; a registry started with PODIUM_MULTI_TENANT requires a verified provider (§6.3.1)", identityProvider, strings.Join(verifiedProviders, ", "))
 }
 
 // multiTenantVerifierGuard refuses a multi-tenant configuration whose identity
