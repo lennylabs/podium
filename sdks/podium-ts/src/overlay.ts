@@ -49,7 +49,8 @@ interface FrontmatterFields {
 
 // parseFrontmatter hand-parses the fields the SDK ranks and reports from an
 // ARTIFACT.md or a SKILL.md: the top-level type, version, description, and
-// tags, and the version key directly under a block-form metadata: mapping.
+// tags, and the version key directly under a block-form or a single-line
+// flow-form metadata: mapping.
 function parseFrontmatter(text: string): { fields: FrontmatterFields; body: string } {
   const fields: FrontmatterFields = { type: "", version: "", description: "", tags: [], metadataVersion: "" };
   if (!text.startsWith("---")) return { fields, body: text };
@@ -86,8 +87,8 @@ function parseFrontmatter(text: string): { fields: FrontmatterFields; body: stri
     if (sep === -1) continue;
     const key = raw.slice(0, sep).trim();
     const val = raw.slice(sep + 1).trim();
-    if (key === "metadata" && !val) {
-      metadataIndent = 0;
+    if (key === "metadata") {
+      metadataIndent = readMetadataValue(val, fields, unquote);
     } else if (key === "tags") {
       if (val.startsWith("[") && val.endsWith("]")) {
         for (const t of val.slice(1, -1).split(",")) {
@@ -104,6 +105,55 @@ function parseFrontmatter(text: string): { fields: FrontmatterFields; body: stri
   }
   fields.tags = tags.filter(Boolean);
   return { fields, body };
+}
+
+// readMetadataValue reads the value of a top-level metadata: line and returns
+// the metadataIndent state. An empty value or a lone comment opens a
+// block-form mapping. A single-line flow mapping such as {version: "1.0.0"}
+// records its own version key into fields.metadataVersion, so the SDK overlay
+// reports the version the Go overlay's full YAML parse reports (§4.3.4).
+function readMetadataValue(val: string, fields: FrontmatterFields, unquote: (s: string) => string): number {
+  if (!val || val.startsWith("#")) return 0;
+  for (const entry of flowMappingEntries(val) ?? []) {
+    const m = /^(.*?):(?:\s|$)(.*)$/s.exec(entry.trim());
+    if (m && unquote(m[1]) === "version") fields.metadataVersion = unquote(m[2]);
+  }
+  return -1;
+}
+
+// flowMappingEntries splits a single-line YAML flow mapping into its top-level
+// entries. Commas inside a nested mapping, a sequence, or a quoted scalar stay
+// part of their entry, so a nested version key never reads as the mapping's
+// own. It returns null for a value that is not a flow mapping, whose braces do
+// not close on the line, or that carries anything but a comment after the
+// closing brace.
+function flowMappingEntries(val: string): string[] | null {
+  if (!val.startsWith("{")) return null;
+  const entries: string[] = [];
+  let depth = 0;
+  let quote = "";
+  let start = 1;
+  for (let i = 0; i < val.length; i++) {
+    const ch = val[i];
+    if (quote) {
+      if (quote === '"' && ch === "\\") i++;
+      else if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === "{" || ch === "[") {
+      depth++;
+    } else if (ch === "," && depth === 1) {
+      entries.push(val.slice(start, i));
+      start = i + 1;
+    } else if ((ch === "}" || ch === "]") && --depth === 0) {
+      entries.push(val.slice(start, i));
+      const rest = val.slice(i + 1).trim();
+      return rest && !rest.startsWith("#") ? null : entries;
+    }
+  }
+  return null;
 }
 
 // readMetadataVersion reads one indented frontmatter line. Inside a metadata:

@@ -291,6 +291,15 @@ _SYNTHESIZED_100 = (
         ),
         ("metadata:\n  owner: alice\nversion: 3.0.0\n", "0.0.0-auto.0", _SYNTHESIZED_AUTO),
         ("compatibility:\n  version: 4.0.0\n", "0.0.0-auto.0", _SYNTHESIZED_AUTO),
+        ('metadata: {version: "1.0.0"}\n', "1.0.0", _SYNTHESIZED_100),
+        (
+            'metadata: {owner: "alice, bob", version: 1.0.0} # pinned\n',
+            "1.0.0",
+            _SYNTHESIZED_100,
+        ),
+        ('metadata: {note: "say \\"hi\\", bob", version: 1.0.0}\n', "1.0.0", _SYNTHESIZED_100),
+        ('metadata: {version: "1.0"}\n', "0.0.0-auto.0", _SYNTHESIZED_AUTO),
+        ("metadata: # build info\n  version: 1.0.0\n", "1.0.0", _SYNTHESIZED_100),
     ],
     ids=[
         "no-metadata",
@@ -300,6 +309,11 @@ _SYNTHESIZED_100 = (
         "nested-deeper",
         "top-level-after",
         "other-mapping",
+        "flow-form",
+        "flow-form-quoted-comma",
+        "flow-form-escaped-quote",
+        "flow-form-non-semver",
+        "commented-metadata-line",
     ],
 )
 def test_overlay_loads_a_skill_md_only_package(tmp_path, metadata, version, doc):
@@ -319,6 +333,24 @@ def test_overlay_loads_a_skill_md_only_package(tmp_path, metadata, version, doc)
     assert art.frontmatter == doc
     assert art.manifest_body == "Greet the user by name."
     assert "Synthesized by Podium" not in art.manifest_body
+
+
+# Spec: §4.3.4 — only a single-line flow mapping that closes on its line, with
+# at most a comment after the closing brace, yields entries; a nested
+# mapping's commas stay inside its entry.
+@pytest.mark.parametrize(
+    ("val", "entries"),
+    [
+        ("{version: 1.0.0}", ["version: 1.0.0"]),
+        ("{build: {a: 1, b: 2}, version: 1.0.0}", ["build: {a: 1, b: 2}", " version: 1.0.0"]),
+        ("{version: 1.0.0", None),
+        ("{version: 1.0.0} trailing", None),
+        ("none", None),
+    ],
+    ids=["single", "nested", "unclosed", "trailing-text", "scalar"],
+)
+def test_flow_mapping_entries(val, entries):
+    assert _overlay._flow_mapping_entries(val) == entries
 
 
 # Spec: §4.3.4, §6.4 — the ARTIFACT.md version wins, a major.minor.patch

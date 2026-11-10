@@ -242,6 +242,21 @@ describe("overlay merge", () => {
     },
     { name: "a top-level key after the metadata block", metadata: "metadata:\n  owner: alice\nversion: 3.0.0\n", version: "0.0.0-auto.0", doc: SYNTHESIZED_AUTO },
     { name: "a version under another mapping", metadata: "compatibility:\n  version: 4.0.0\n", version: "0.0.0-auto.0", doc: SYNTHESIZED_AUTO },
+    { name: "a flow-form metadata.version", metadata: 'metadata: {version: "1.0.0"}\n', version: "1.0.0", doc: SYNTHESIZED_100 },
+    {
+      name: "a flow-form metadata.version after a quoted comma",
+      metadata: 'metadata: {owner: "alice, bob", version: 1.0.0} # pinned\n',
+      version: "1.0.0",
+      doc: SYNTHESIZED_100,
+    },
+    {
+      name: "a flow-form metadata.version after an escaped quote",
+      metadata: 'metadata: {note: "say \\"hi\\", bob", version: 1.0.0}\n',
+      version: "1.0.0",
+      doc: SYNTHESIZED_100,
+    },
+    { name: "a non-semver flow-form metadata.version", metadata: 'metadata: {version: "1.0"}\n', version: "0.0.0-auto.0", doc: SYNTHESIZED_AUTO },
+    { name: "a commented metadata: line", metadata: "metadata: # build info\n  version: 1.0.0\n", version: "1.0.0", doc: SYNTHESIZED_100 },
   ])("loads a SKILL.md-only package with $name", async ({ metadata, version, doc }) => {
     const overlay = join(dir, "overlay");
     await writeOverlay(overlay, { "team/greet/SKILL.md": skillMD(metadata) });

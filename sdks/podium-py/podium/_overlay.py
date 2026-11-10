@@ -51,8 +51,8 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
 
     Only the fields the SDK ranks and reports are parsed: ``type``,
     ``version``, ``description``, and ``tags``, plus the ``version`` key
-    directly under a block-form ``metadata:`` mapping, reported as
-    ``metadata_version``. ``tags`` accepts both the inline ``[a, b]`` form and
+    directly under a block-form or a single-line flow-form ``metadata:``
+    mapping, reported as ``metadata_version``. ``tags`` accepts both the inline ``[a, b]`` form and
     the block ``- a`` form.
     """
     fields: dict[str, object] = {}
@@ -89,8 +89,8 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
             continue
         key = key.strip()
         val = val.strip()
-        if key == "metadata" and not val:
-            metadata_indent = 0
+        if key == "metadata":
+            metadata_indent = _read_metadata_value(val, fields)
         elif key == "tags":
             if val.startswith("[") and val.endswith("]"):
                 tags = [t.strip().strip("\"'") for t in val[1:-1].split(",") if t.strip()]
@@ -102,6 +102,66 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
             fields[key] = val.strip("\"'")
     fields["tags"] = [t for t in tags if t]
     return fields, body
+
+
+_FLOW_ENTRY_RE = re.compile(r"^(.*?):(?:\s|$)(.*)$", re.DOTALL)
+
+
+def _read_metadata_value(val: str, fields: dict[str, object]) -> int:
+    """Read the value of a top-level ``metadata:`` line and return the metadata_indent state.
+
+    An empty value or a lone comment opens a block-form mapping. A single-line
+    flow mapping such as ``{version: "1.0.0"}`` records its own ``version``
+    key as ``fields["metadata_version"]``, so the SDK overlay reports the
+    version the Go overlay's full YAML parse reports (§4.3.4).
+    """
+    if not val or val.startswith("#"):
+        return 0
+    for entry in _flow_mapping_entries(val) or []:
+        m = _FLOW_ENTRY_RE.match(entry.strip())
+        if m and m.group(1).strip().strip("\"'") == "version":
+            fields["metadata_version"] = m.group(2).strip().strip("\"'")
+    return -1
+
+
+def _flow_mapping_entries(val: str) -> list[str] | None:
+    """Split a single-line YAML flow mapping into its top-level entries.
+
+    Commas inside a nested mapping, a sequence, or a quoted scalar stay part
+    of their entry, so a nested ``version`` key never reads as the mapping's
+    own. Returns ``None`` for a value that is not a flow mapping, whose braces
+    do not close on the line, or that carries anything but a comment after
+    the closing brace.
+    """
+    if not val.startswith("{"):
+        return None
+    entries: list[str] = []
+    depth = 0
+    quote = ""
+    start = 1
+    i = 0
+    while i < len(val):
+        ch = val[i]
+        if quote:
+            if quote == '"' and ch == "\\":
+                i += 1
+            elif ch == quote:
+                quote = ""
+        elif ch in "\"'":
+            quote = ch
+        elif ch in "{[":
+            depth += 1
+        elif ch == "," and depth == 1:
+            entries.append(val[start:i])
+            start = i + 1
+        elif ch in "}]":
+            depth -= 1
+            if depth == 0:
+                entries.append(val[start:i])
+                rest = val[i + 1 :].strip()
+                return None if rest and not rest.startswith("#") else entries
+        i += 1
+    return None
 
 
 def _read_metadata_version(raw: str, metadata_indent: int, fields: dict[str, object]) -> int:
