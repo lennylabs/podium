@@ -3,8 +3,10 @@
 // registry. The author picks the destination path (the last component
 // becomes the artifact name; preceding components form the §4.2
 // domain hierarchy) and the artifact type (per spec §4.3); the
-// scaffolder produces lint-clean starting files with the universal
-// frontmatter populated.
+// scaffolder produces lint-clean starting files. A skill gets a
+// SKILL.md alone, carrying the Agent Skills fields and the version
+// under metadata (§4.3.4); every other type gets an ARTIFACT.md with
+// the universal frontmatter populated.
 package main
 
 import (
@@ -34,6 +36,16 @@ var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // validRuleModes mirrors pkg/manifest.RuleMode values per §4.3.
 var validRuleModes = []string{"always", "glob", "auto", "explicit"}
+
+// skillRefusedFlags names the flags that set Podium-only fields, in
+// flag-definition order. §4.3.4 keeps those fields out of SKILL.md
+// and states that no Podium tool generates a skill's ARTIFACT.md, so
+// --type skill refuses them. The refusal walks this list rather than
+// the flag.FlagSet, because fs.Visit reports flags in lexicographical
+// order and the message names them in definition order.
+//
+// Spec: §4.3.4
+var skillRefusedFlags = []string{"tags", "sensitivity", "when-to-use", "extends"}
 
 type scaffoldOpts struct {
 	// Positional and identifying.
@@ -77,12 +89,12 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 	opts := &scaffoldOpts{}
 	fs.StringVar(&opts.typ, "type", "", "artifact type ("+strings.Join(firstClassTypes, "|")+"); required")
 	fs.StringVar(&opts.description, "description", "", "one-line description (required)")
-	fs.StringVar(&opts.tags, "tags", "", "comma-separated tags")
-	fs.StringVar(&opts.sensitivity, "sensitivity", "low", "sensitivity (low|medium|high)")
+	fs.StringVar(&opts.tags, "tags", "", "comma-separated tags; not accepted with --type skill")
+	fs.StringVar(&opts.sensitivity, "sensitivity", "low", "sensitivity (low|medium|high); not accepted with --type skill")
 	fs.StringVar(&opts.license, "license", "", "SPDX license identifier")
-	fs.StringVar(&opts.whenToUse, "when-to-use", "", "comma-separated when_to_use entries")
+	fs.StringVar(&opts.whenToUse, "when-to-use", "", "comma-separated when_to_use entries; not accepted with --type skill")
 	fs.StringVar(&opts.version, "version", "0.1.0", "starting semver")
-	fs.StringVar(&opts.extends, "extends", "", "parent artifact id to extend")
+	fs.StringVar(&opts.extends, "extends", "", "parent artifact id to extend; not accepted with --type skill")
 	// Type-specific.
 	fs.StringVar(&opts.inputSchema, "input-schema", "", "type=agent: relative path to input JSON schema")
 	fs.StringVar(&opts.outputSchema, "output-schema", "", "type=agent: relative path to output JSON schema")
@@ -147,6 +159,12 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 	if err := validateSensitivity(opts.sensitivity); err != nil {
 		_, _ = fmt.Fprintf(errOut, "error: %v\n", err)
 		return 2
+	}
+	if opts.typ == "skill" {
+		if passed := passedSkillRefusedFlags(fs); len(passed) > 0 {
+			_, _ = fmt.Fprintf(errOut, "error: %s set Podium-only fields; write them in a hand-written ARTIFACT.md overlay (see docs/authoring/frontmatter-reference.md)\n", strings.Join(passed, ", "))
+			return 2
+		}
 	}
 
 	if _, statErr := os.Stat(opts.path); statErr == nil && !opts.force {
@@ -217,6 +235,24 @@ func validateName(name, typ string) error {
 	return nil
 }
 
+// passedSkillRefusedFlags returns the skillRefusedFlags the caller set
+// explicitly, as "--name" strings in definition order. A flag left at
+// its default (such as --sensitivity low) is absent from fs.Visit and
+// therefore never refused.
+//
+// Spec: §4.3.4
+func passedSkillRefusedFlags(fs *flag.FlagSet) []string {
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	var passed []string
+	for _, name := range skillRefusedFlags {
+		if set[name] {
+			passed = append(passed, "--"+name)
+		}
+	}
+	return passed
+}
+
 func validateSensitivity(s string) error {
 	switch s {
 	case "low", "medium", "high":
@@ -284,29 +320,23 @@ func collectTypeSpecific(o *scaffoldOpts, r *bufio.Reader, w, errOut io.Writer) 
 	return nil
 }
 
-// renderAndWrite writes ARTIFACT.md for every type and additionally
-// SKILL.md for type=skill. Returns the relative basenames written.
+// renderAndWrite writes the package's single manifest file and
+// returns its basename. A skill gets SKILL.md alone, because §4.3.4
+// makes a skill's ARTIFACT.md a hand-written overlay that no Podium
+// tool generates; every other type gets ARTIFACT.md.
+//
+// Spec: §4.3.4
 func renderAndWrite(dir, name string, o *scaffoldOpts) ([]string, error) {
-	written := []string{}
+	var file, body string
 	if o.typ == "skill" {
-		artifact := renderSkillArtifactMD(o)
-		skill := renderSkillMD(name, o)
-		if err := os.WriteFile(filepath.Join(dir, "ARTIFACT.md"), []byte(artifact), 0o644); err != nil {
-			return nil, err
-		}
-		written = append(written, "ARTIFACT.md")
-		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skill), 0o644); err != nil {
-			return nil, err
-		}
-		written = append(written, "SKILL.md")
-		return written, nil
+		file, body = "SKILL.md", renderSkillMD(name, o)
+	} else {
+		file, body = "ARTIFACT.md", renderArtifactMD(name, o)
 	}
-	body := renderArtifactMD(name, o)
-	if err := os.WriteFile(filepath.Join(dir, "ARTIFACT.md"), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, file), []byte(body), 0o644); err != nil {
 		return nil, err
 	}
-	written = append(written, "ARTIFACT.md")
-	return written, nil
+	return []string{file}, nil
 }
 
 // renderArtifactMD assembles a non-skill ARTIFACT.md. Universal
@@ -333,26 +363,12 @@ func renderArtifactMD(name string, o *scaffoldOpts) string {
 	return sb.String()
 }
 
-// renderSkillArtifactMD assembles a skill's ARTIFACT.md. Per §4.3.4
-// `name`, `description`, and `license` live in SKILL.md; ARTIFACT.md
-// carries the Podium-specific frontmatter and an empty body marker.
-func renderSkillArtifactMD(o *scaffoldOpts) string {
-	var sb strings.Builder
-	sb.WriteString("---\n")
-	sb.WriteString("type: skill\n")
-	fmt.Fprintf(&sb, "version: %s\n", o.version)
-	writeWhenToUse(&sb, o.whenToUse)
-	writeTags(&sb, o.tags)
-	fmt.Fprintf(&sb, "sensitivity: %s\n", o.sensitivity)
-	if o.extends != "" {
-		fmt.Fprintf(&sb, "extends: %s\n", o.extends)
-	}
-	sb.WriteString("---\n\n")
-	sb.WriteString("<!-- Skill body lives in SKILL.md. -->\n")
-	return sb.String()
-}
-
-// renderSkillMD writes SKILL.md per the agentskills.io spec.
+// renderSkillMD writes SKILL.md per the agentskills.io spec. The
+// version goes in metadata.version as a quoted string, because the
+// standard types metadata as a string-to-string map and §4.3.4 reads
+// a major.minor.patch metadata.version as the skill's version.
+//
+// Spec: §4.3.4
 func renderSkillMD(name string, o *scaffoldOpts) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
@@ -361,6 +377,8 @@ func renderSkillMD(name string, o *scaffoldOpts) string {
 	if o.license != "" {
 		fmt.Fprintf(&sb, "license: %s\n", o.license)
 	}
+	sb.WriteString("metadata:\n")
+	fmt.Fprintf(&sb, "  version: %q\n", o.version)
 	sb.WriteString("---\n\n")
 	fmt.Fprintf(&sb, "# %s\n\n", name)
 	sb.WriteString("When the user asks for X, do Y.\n\n")
@@ -389,8 +407,8 @@ func writeTags(sb *strings.Builder, raw string) {
 }
 
 // writeTypeSpecific emits type-specific frontmatter lines for the
-// non-skill types. Skill artifacts use renderSkillArtifactMD and
-// have no type-specific fields in ARTIFACT.md.
+// non-skill types. A skill is written by renderSkillMD and gets no
+// ARTIFACT.md.
 func writeTypeSpecific(sb *strings.Builder, o *scaffoldOpts) {
 	switch o.typ {
 	case "agent":

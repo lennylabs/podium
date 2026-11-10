@@ -839,12 +839,16 @@ func TestExtends_RuntimeRequirementsDeepMerge(t *testing.T) {
 
 // ---- scaffold --extends ------------------------------------
 
-// artifact scaffold --extends writes the extends field.
+// artifact scaffold --extends writes the extends field on a non-skill
+// type, and --extends with --type skill exits 2 with the overlay message,
+// because extends belongs in a hand-written ARTIFACT.md overlay.
 // spec: docs/authoring/extends.md opening YAML example; scaffold flag --extends.
+//
+// Spec: §4.3.4
 func TestExtends_ScaffoldExtendsField(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/ap/pay-invoice")
-	sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
+	sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context",
 		"--description", "x", "--extends", "finance/ap/pay-invoice@1.x", "--yes", out)
 	if sc.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
@@ -853,9 +857,14 @@ func TestExtends_ScaffoldExtendsField(t *testing.T) {
 	if !strings.Contains(art, "extends: finance/ap/pay-invoice@1.x") {
 		t.Errorf("ARTIFACT.md missing extends:\n%s", art)
 	}
-	if !strings.Contains(art, "type: skill") {
-		t.Errorf("ARTIFACT.md missing type: skill:\n%s", art)
+	if !strings.Contains(art, "type: context") {
+		t.Errorf("ARTIFACT.md missing type: context:\n%s", art)
 	}
+
+	skill := filepath.Join(t.TempDir(), "finance/ap/pay-invoice")
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
+		"--description", "x", "--extends", "finance/ap/pay-invoice@1.x", "--yes", skill)
+	assertSkillOverlayRefusal(t, res, skill, "--extends")
 }
 
 // ---- Impact / dependents -------------------------------

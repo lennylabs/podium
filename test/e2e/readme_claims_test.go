@@ -423,7 +423,10 @@ func TestReadme_LintMalformed(t *testing.T) {
 	}
 }
 
-// artifact scaffold creates a skill directory.
+// artifact scaffold creates a skill directory holding SKILL.md alone,
+// with the version under metadata.
+//
+// Spec: §4.3.4
 func TestReadme_ScaffoldSkill(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "personal/hello/greet")
@@ -431,10 +434,7 @@ func TestReadme_ScaffoldSkill(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(readFile(t, filepath.Join(out, "ARTIFACT.md")), "type: skill") {
-		t.Errorf("ARTIFACT.md missing type: skill")
-	}
-	if !strings.Contains(readFile(t, filepath.Join(out, "SKILL.md")), "name: greet") {
+	if !strings.Contains(assertScaffoldedSkillAlone(t, out, "0.1.0"), "name: greet") {
 		t.Errorf("SKILL.md missing name: greet")
 	}
 	if !strings.Contains(res.Stdout, "Scaffolded skill at") {

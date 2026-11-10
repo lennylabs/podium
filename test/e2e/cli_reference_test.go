@@ -1304,39 +1304,51 @@ func TestCLI_ArtifactShowNoSideEffects(t *testing.T) {
 
 // ===== Read CLI — artifact scaffold ===================
 
-// spec: doc "Read CLI — podium artifact scaffold", skill row.
+// spec: doc "Read CLI — podium artifact scaffold", skill row. The skill
+// package holds SKILL.md alone, and the intermediate domains are created.
+//
+// Spec: §4.3.4
 func TestCLI_ScaffoldSkill(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "finance/release/release-notes")
 	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Draft release notes.", "--license", "MIT", "--yes", dst)
 	cliWantExit(t, res, 0, "scaffold skill")
-	mustExist(t, filepath.Join(dst, "ARTIFACT.md"))
-	mustExist(t, filepath.Join(dst, "SKILL.md"))
+	assertScaffoldedSkillAlone(t, dst, "0.1.0")
+	cliNotContains(t, res.Stdout, "ARTIFACT.md", "success message names SKILL.md alone")
 	mustExist(t, filepath.Join(root, "finance"))
 	mustExist(t, filepath.Join(root, "finance/release"))
+	cliWantExit(t, runPodium(t, "", nil, "lint", "--registry", root), 0, "lint scaffolded")
+
+	refused := filepath.Join(t.TempDir(), "finance/release/release-notes")
+	res = runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Draft release notes.", "--tags", "release", "--yes", refused)
+	assertSkillOverlayRefusal(t, res, refused, "--tags")
 }
 
 // spec: doc "podium artifact scaffold", "Non-interactive example".
+//
+// Spec: §4.3.4
 func TestCLI_ScaffoldSkillExample(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "finance/release/release-notes")
 	res := runPodium(t, "", nil, "artifact", "scaffold",
 		"--type", "skill",
 		"--description", "Draft release notes from a list of ticket keys.",
-		"--tags", "release,workflow",
 		"--license", "MIT", "--yes", dst)
 	cliWantExit(t, res, 0, "scaffold skill example")
-	skill := readFile(t, filepath.Join(dst, "SKILL.md"))
+	skill := assertScaffoldedSkillAlone(t, dst, "0.1.0")
 	cliContains(t, skill, "name: release-notes", "skill name")
 	cliContains(t, skill, "description: Draft release notes from a list of ticket keys.", "skill description")
 	cliContains(t, skill, "license: MIT", "skill license")
-	art := readFile(t, filepath.Join(dst, "ARTIFACT.md"))
-	cliNotContains(t, art, "name:", "ARTIFACT.md has no name")
-	cliNotContains(t, art, "description:", "ARTIFACT.md has no description")
-	cliContains(t, art, "release", "tag release")
-	cliContains(t, art, "workflow", "tag workflow")
 	// The scaffolded tree lints clean.
 	cliWantExit(t, runPodium(t, "", nil, "lint", "--registry", root), 0, "lint scaffolded")
+
+	refused := filepath.Join(t.TempDir(), "finance/release/release-notes")
+	res = runPodium(t, "", nil, "artifact", "scaffold",
+		"--type", "skill",
+		"--description", "Draft release notes from a list of ticket keys.",
+		"--tags", "release,workflow",
+		"--license", "MIT", "--yes", refused)
+	assertSkillOverlayRefusal(t, res, refused, "--tags")
 }
 
 // spec: doc "podium artifact scaffold", agent row (ARTIFACT.md only).
@@ -2249,12 +2261,19 @@ func TestCLI_ScaffoldSensitivity(t *testing.T) {
 	cliContains(t, readFile(t, filepath.Join(dst, "ARTIFACT.md")), "sensitivity: low", "sensitivity field")
 }
 
-// spec: doc "podium artifact scaffold", `--extends` flag.
+// spec: doc "podium artifact scaffold", `--extends` flag. A skill refuses
+// it, because extends belongs in a hand-written ARTIFACT.md overlay, and a
+// non-skill type writes it into ARTIFACT.md.
+//
+// Spec: §4.3.4
 func TestCLI_ScaffoldExtends(t *testing.T) {
+	skill := filepath.Join(t.TempDir(), "personal/extended")
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Extended skill.", "--extends", "base/base-skill@1.x", "--yes", skill)
+	assertSkillOverlayRefusal(t, res, skill, "--extends")
+
 	dst := filepath.Join(t.TempDir(), "personal/extended")
-	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Extended skill.", "--extends", "base/base-skill@1.x", "--yes", dst), 0, "scaffold extends")
-	combined := readFile(t, filepath.Join(dst, "ARTIFACT.md"))
-	cliContains(t, combined, "extends: base/base-skill@1.x", "extends field")
+	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "Extended context.", "--extends", "base/base-skill@1.x", "--yes", dst), 0, "scaffold extends")
+	cliContains(t, readFile(t, filepath.Join(dst, "ARTIFACT.md")), "extends: base/base-skill@1.x", "extends field")
 }
 
 // spec: doc "Admin — podium admin scim-sync". The command does not exist.

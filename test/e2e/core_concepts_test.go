@@ -648,7 +648,10 @@ func TestCoreConcept_VersionPinInID(t *testing.T) {
 	}
 }
 
-// artifact scaffold generates a skill directory structure.
+// artifact scaffold generates a skill directory holding SKILL.md alone,
+// with the version under metadata.
+//
+// Spec: §4.3.4
 func TestCoreConcept_ScaffoldSkill(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/close-reporting/run-variance-analysis")
@@ -656,11 +659,7 @@ func TestCoreConcept_ScaffoldSkill(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	art := readFile(t, filepath.Join(out, "ARTIFACT.md"))
-	if !strings.Contains(art, "type: skill") {
-		t.Errorf("ARTIFACT.md missing type: skill:\n%s", art)
-	}
-	mustExist(t, filepath.Join(out, "SKILL.md"))
+	assertScaffoldedSkillAlone(t, out, "0.1.0")
 }
 
 // load_domain note field when truncated by token budget.

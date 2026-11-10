@@ -20,8 +20,10 @@ import (
 
 // ---- skill -----------------------------------------------------------------
 
-// scaffold skill splits name/description into
-// SKILL.md and keeps the Podium frontmatter in ARTIFACT.md; lints clean.
+// Spec: §4.3.4 — scaffold skill writes SKILL.md alone, carrying name,
+// description, and metadata.version, and the result lints clean. The
+// Podium-only flags are refused in one exit-2 message that names each flag
+// passed, so the author writes those fields in an ARTIFACT.md overlay.
 func TestArtifactTypes_ScaffoldSkillSplit(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -29,21 +31,11 @@ func TestArtifactTypes_ScaffoldSkillSplit(t *testing.T) {
 	sc := runPodium(t, "", nil, "artifact", "scaffold",
 		"--type", "skill",
 		"--description", "Flag unusual variance vs. forecast after month-end close.",
-		"--tags", "finance,close,variance",
-		"--sensitivity", "low",
-		"--when-to-use", "After month-end close",
 		"--yes", out)
 	if sc.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
 	}
-	art := readFile(t, filepath.Join(out, "ARTIFACT.md"))
-	if !strings.Contains(art, "type: skill") || !strings.Contains(art, "sensitivity: low") || !strings.Contains(art, "when_to_use:") {
-		t.Errorf("ARTIFACT.md missing skill frontmatter:\n%s", art)
-	}
-	if strings.Contains(art, "name:") || strings.Contains(art, "description:") {
-		t.Errorf("skill ARTIFACT.md must not carry name/description (agentskills.io split):\n%s", art)
-	}
-	skill := readFile(t, filepath.Join(out, "SKILL.md"))
+	skill := assertScaffoldedSkillAlone(t, out, "0.1.0")
 	if !strings.Contains(skill, "name: run-variance-analysis") ||
 		!strings.Contains(skill, "description: Flag unusual variance vs. forecast after month-end close.") {
 		t.Errorf("SKILL.md missing name/description:\n%s", skill)
@@ -51,6 +43,16 @@ func TestArtifactTypes_ScaffoldSkillSplit(t *testing.T) {
 	if l := runPodium(t, "", nil, "lint", "--registry", root); l.Exit != 0 {
 		t.Errorf("lint exit=%d stdout=%q", l.Exit, l.Stdout)
 	}
+
+	refused := filepath.Join(t.TempDir(), "finance/close/run-variance-analysis")
+	res := runPodium(t, "", nil, "artifact", "scaffold",
+		"--type", "skill",
+		"--description", "Flag unusual variance vs. forecast after month-end close.",
+		"--tags", "finance,close,variance",
+		"--sensitivity", "low",
+		"--when-to-use", "After month-end close",
+		"--yes", refused)
+	assertSkillOverlayRefusal(t, res, refused, "--tags", "--sensitivity", "--when-to-use")
 }
 
 // the doc's skill example (with runtime_requirements)
