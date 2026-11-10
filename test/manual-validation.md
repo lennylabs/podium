@@ -242,6 +242,8 @@ rm -rf "$WORK"
 | S91 | A cross-layer extends: child that leaves an executable field to its parent is refused | solo then standalone | none | none | none |
 | S92 | A filesystem sync recomposes after an executable-field drop, and override and `--config` count the drop | solo then standalone | none | none | none |
 | S93 | An executable-field refusal withholds the parent, spares stored versions, and follows the pinned edge | solo then standalone | none | none | none |
+| S94 | An `mcpServers` entry restated by name restates each member, and a same-layer child inherits its entry | solo then standalone | none | none | none |
+| S95 | An `extends:` child stored before the executable-field rule keeps serving after an upgrade | standalone then solo | none | none | none |
 
 ---
 
@@ -11395,15 +11397,18 @@ holding `team-jira` before step 4 is the defect this scenario catches.
    server_alive "$SRV" "$WORK/srv.log"
    export URL=http://127.0.0.1:8193
    podium layer reingest --registry "$URL" team; echo "exit=$?"
-   curl -s -X POST "$URL/v1/layers/reingest?id=team"; echo
+   curl -s -X POST "$URL/v1/layers/reingest?id=team" > "$WORK/body.json"
+   python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["rejected"]))' "$WORK/body.json"
+   grep -c '"org"' "$WORK/body.json"
    podium sync --registry "$URL" --target "$WORK/srv" --harness none; echo "exit=$?"
    diff "$WORK/fs/ops/jira-skill/ARTIFACT.md" "$WORK/srv/ops/jira-skill/ARTIFACT.md" && echo same
    ```
 
    **Expect.** `podium layer reingest` prints the same `rejected:` line as
-   step 2 and `exit=1`. The `curl` body holds a `rejected` entry with
-   `"details":{"constraint":"executable_inheritance","fields":["mcpServers[jira]"]}`
-   and no occurrence of `"org"`. The server sync prints `exit=0`, and `diff`
+   step 2 and `exit=1`. The `rejected` entry carries
+   `"details": {"constraint": "executable_inheritance", "fields": ["mcpServers[jira]"]}`,
+   and `grep -c` prints `0`. The server indents its JSON body, so the
+   `python3` line prints the entry on one line. The server sync prints `exit=0`, and `diff`
    prints `same`. A difference means the two deployment modes kept different
    copies.
 
@@ -11756,5 +11761,280 @@ same-layer overlay is the defect this scenario catches.
    layer and tests the edge to the `org` copy, so the two modes keep different
    copies here by design (§13.11.3). A server refusal of `1.2.0`, or a
    filesystem sync that keeps the `team` copy, is the defect.
+
+**Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
+
+---
+
+## S94: An `mcpServers` entry restated by name restates each member, and a same-layer child inherits its entry
+
+**Goal.** Validate that an overlay whose `mcpServers` entry carries the
+parent's entry name but omits `command` or an `env` key is refused in both
+modes, with a reason and a `details.fields` list that name each missing member,
+that restating every member admits the overlay with its own values, and that a
+child in its parent's own layer inherits the parent's entry without restating
+it in both modes.
+
+**Covers.** §4.6 executable fields across layers (the restate definition for an
+`mcpServers` entry) and same-layer inheritance, §7.3.1 ingest outcome and the
+reingest `details` member, §13.11.3 executable inheritance, and §11
+filesystem-to-server equivalence, through the compiled binary.
+
+**Why by hand.** S91 drives an overlay that drops the whole entry. An author
+who copies the entry's name and `transport` and forgets `command` reads this
+scenario's lines. An accepted overlay at step 2 or step 4, a reason that names
+the entry without the member, or a dropped `ops/confluence-variant` is the
+defect this scenario catches.
+
+**Prerequisites.** A built `podium` binary on `PATH`.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then build a
+   two-layer registry. `org` holds `ops/jira-skill`, whose `jira` entry sets
+   `transport`, `command`, `args`, and the `env` key `JIRA_URL`, and
+   `ops/confluence-skill`, whose `confluence` entry `ops/confluence-variant`
+   inherits from the same layer. `team` holds a same-ID overlay of
+   `ops/jira-skill` whose `jira` entry restates `transport` and `args` alone.
+   The `skill` function writes a `SKILL.md` from a directory, a name, and a
+   description.
+
+   ```bash
+   skill() { printf -- '---\nname: %s\ndescription: %s\n---\n\n%s\n' "$2" "$3" "$3" > "$1/SKILL.md"; }
+   mkdir -p "$WORK/reg/org/ops/jira-skill" "$WORK/reg/org/ops/confluence-skill" \
+     "$WORK/reg/org/ops/confluence-variant" "$WORK/reg/team/ops/jira-skill"
+   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n' > "$WORK/reg/.registry-config"
+   for L in org team; do
+     printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
+   done
+   skill "$WORK/reg/org/ops/jira-skill" jira-skill "File Jira tickets. Use when a task needs a ticket."
+   skill "$WORK/reg/team/ops/jira-skill" jira-skill "File Jira tickets. Use when a task needs a ticket."
+   skill "$WORK/reg/org/ops/confluence-skill" confluence-skill "Search Confluence pages. Use when a task needs a design doc."
+   skill "$WORK/reg/org/ops/confluence-variant" confluence-variant "Search the runbook space. Use when a task needs a runbook."
+   printf -- '---\ntype: skill\nversion: 1.0.0\nmcpServers:\n  - name: jira\n    transport: stdio\n    command: org-jira\n    args: ["--org"]\n    env:\n      JIRA_URL: https://jira.acme.com\n---\n' \
+     > "$WORK/reg/org/ops/jira-skill/ARTIFACT.md"
+   printf -- '---\ntype: skill\nversion: 1.0.0\nmcpServers:\n  - name: confluence\n    transport: stdio\n    command: org-confluence\n---\n' \
+     > "$WORK/reg/org/ops/confluence-skill/ARTIFACT.md"
+   printf -- '---\ntype: skill\nversion: 1.0.0\nextends: ops/confluence-skill\n---\n' \
+     > "$WORK/reg/org/ops/confluence-variant/ARTIFACT.md"
+   printf -- '---\ntype: skill\nversion: 1.1.0\nextends: ops/jira-skill\nmcpServers:\n  - name: jira\n    transport: stdio\n    args: ["--team"]\n---\n' \
+     > "$WORK/reg/team/ops/jira-skill/ARTIFACT.md"
+   find "$WORK/reg" -name ARTIFACT.md | sed "s|$WORK/reg/||" | sort
+   ```
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and `find` lists
+   `org/ops/confluence-skill/ARTIFACT.md`,
+   `org/ops/confluence-variant/ARTIFACT.md`, `org/ops/jira-skill/ARTIFACT.md`,
+   and `team/ops/jira-skill/ARTIFACT.md`. `ops/confluence-skill` sorts before
+   `ops/confluence-variant`, which a server ingest needs to resolve a parent in
+   the same layer.
+
+2. Sync through the filesystem source.
+
+   ```bash
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
+   cat "$WORK/err.txt"
+   grep -e '^version:' -e 'command:' "$WORK/fs/ops/jira-skill/ARTIFACT.md"
+   grep -e '^version:' -e 'command:' "$WORK/fs/ops/confluence-variant/ARTIFACT.md"
+   ```
+
+   **Expect.** `exit=1`. The summary lists `ops/confluence-skill [org]`,
+   `ops/confluence-variant [org]`, and `ops/jira-skill [org]`. `$WORK/err.txt`
+   holds one line,
+   `rejected: ops/jira-skill (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: mcpServers[jira].command, mcpServers[jira].env.JIRA_URL; restate each one in this artifact`.
+   The materialized `ops/jira-skill` carries `version: 1.0.0` and
+   `command: org-jira`, and `ops/confluence-variant` carries
+   `version: 1.0.0` and the inherited `command: org-confluence`. A line for
+   `ops/confluence-variant` means the rule tested a same-layer edge.
+
+3. Serve the same directory, reingest `team`, read the `rejected` entry, and
+   read the same-layer child and a server sync.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8196 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8196/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export URL=http://127.0.0.1:8196
+   podium layer reingest --registry "$URL" team 2> "$WORK/err.txt"; echo "exit=$?"
+   diff "$WORK/err.txt" <(podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2>&1 >/dev/null) && echo same
+   curl -s -X POST "$URL/v1/layers/reingest?id=team" \
+     | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["rejected"][0]["details"]))'
+   curl -s "$URL/v1/load_artifact?id=ops/confluence-variant" \
+     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["layer"], d.get("extends_pin"), "command: org-confluence" in d["frontmatter"])'
+   podium sync --registry "$URL" --target "$WORK/srv" --harness none > /dev/null; echo "exit=$?"
+   diff -r -x .podium "$WORK/fs" "$WORK/srv" && echo same
+   ```
+
+   **Expect.** `exit=1` and `same`: the reingest prints the line step 2
+   printed. The `details` member reads
+   `{"constraint": "executable_inheritance", "fields": ["mcpServers[jira].command", "mcpServers[jira].env.JIRA_URL"]}`.
+   The load prints `org ops/confluence-skill@1.0.0 True`. The server sync
+   prints `exit=0`, and `diff` prints `same`. A difference means the two
+   deployment modes kept different copies.
+
+4. Restate `command` with a team value and leave `env` out, then reingest.
+
+   ```bash
+   printf -- '---\ntype: skill\nversion: 1.1.0\nextends: ops/jira-skill\nmcpServers:\n  - name: jira\n    transport: stdio\n    command: team-jira\n    args: ["--team"]\n---\n' \
+     > "$WORK/reg/team/ops/jira-skill/ARTIFACT.md"
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   curl -s -X POST "$URL/v1/layers/reingest?id=team" \
+     | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["rejected"][0]["details"]))'
+   ```
+
+   **Expect.** The reingest prints
+   `rejected: ops/jira-skill (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: mcpServers[jira].env.JIRA_URL; restate each one in this artifact`
+   and `exit=1`, and the `details` member reads
+   `{"constraint": "executable_inheritance", "fields": ["mcpServers[jira].env.JIRA_URL"]}`.
+   An accepted overlay here means the check compares entry names alone.
+
+5. Restate the `env` key with a team value, reingest, and sync both ways.
+
+   ```bash
+   printf -- '---\ntype: skill\nversion: 1.1.0\nextends: ops/jira-skill\nmcpServers:\n  - name: jira\n    transport: stdio\n    command: team-jira\n    args: ["--team"]\n    env:\n      JIRA_URL: https://jira.team.acme.com\n---\n' \
+     > "$WORK/reg/team/ops/jira-skill/ARTIFACT.md"
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   curl -s "$URL/v1/load_artifact?id=ops/jira-skill" \
+     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["version"], d["layer"]); print(d["frontmatter"])'
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none > /dev/null; echo "exit=$?"
+   podium sync --registry "$URL" --target "$WORK/srv" --harness none > /dev/null; echo "exit=$?"
+   diff -r -x .podium "$WORK/fs" "$WORK/srv" && echo same
+   ```
+
+   **Expect.** The reingest prints `artifact: ops/jira-skill@1.1.0   layer: team`
+   and `exit=0`. The load prints `1.1.0 team`, and the frontmatter carries
+   `command: team-jira`, `--team`, and `JIRA_URL: https://jira.team.acme.com`
+   and no `org-jira` or `https://jira.acme.com`. Both syncs print `exit=0`,
+   and `diff` prints `same`.
+
+**Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
+
+---
+
+## S95: An `extends:` child stored before the executable-field rule keeps serving after an upgrade
+
+**Goal.** Validate that a cross-layer `extends:` child that a release without
+the §4.6 executable-field rule stored, and that leaves its parent's
+`server_identifier` to inheritance, stays stored and served when a build with
+the rule starts on the same store and reingests the unchanged layer, and that
+the same build refuses a new version of that child.
+
+**Covers.** §4.6 executable fields across layers and the stored-version terms,
+§7.3.1 ingest outcome, §4.7 immutability, and §13.11.3 executable inheritance,
+through the compiled binaries.
+
+**Why by hand.** The state under test is a store row written by an earlier
+release, which no in-process test constructs. S93 step 4 stores its child with
+the rule already in place. A `rejected:` line for `ops/jira-tracker@1.0.0`
+after the upgrade, or a child that no longer loads, is the defect this
+scenario catches.
+
+**Prerequisites.** A built `podium` binary on `PATH`, a Go toolchain, and a
+checkout whose history holds the `v0.5.2` tag, the last release without the
+rule.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then build
+   the `v0.5.2` `podium` binary into `$WORK/old`.
+
+   ```bash
+   mkdir -p "$WORK/src" "$WORK/old"
+   git -C "$REAL_HOME/projects/podium" archive v0.5.2 | tar -x -C "$WORK/src"
+   go -C "$WORK/src" build -o "$WORK/old/" ./cmd/podium
+   "$WORK/old/podium" version
+   ```
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and the old binary
+   prints `podium 0.5.2`. The build under test can print the same version
+   until the next release bumps it, so step 5 is the control that shows the
+   rule runs in the build under test.
+
+2. Build a two-layer registry. `org` holds the MCP server `ops/jira-server`
+   with a `server_identifier`, and `team` holds `ops/jira-tracker`, which
+   extends it and omits `server_identifier`.
+
+   ```bash
+   mkdir -p "$WORK/reg/org/ops/jira-server" "$WORK/reg/team/ops/jira-tracker"
+   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n' > "$WORK/reg/.registry-config"
+   for L in org team; do
+     printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
+   done
+   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Org Jira server.\nserver_identifier: org-jira\n---\n\nOrg Jira server.\n' \
+     > "$WORK/reg/org/ops/jira-server/ARTIFACT.md"
+   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Team Jira tracker server.\nextends: ops/jira-server\n---\n\nTeam Jira tracker server.\n' \
+     > "$WORK/reg/team/ops/jira-tracker/ARTIFACT.md"
+   ```
+
+   **Expect.** The two `ARTIFACT.md` files exist.
+
+3. Serve the directory with the old binary, reingest `team`, load the child,
+   and stop the server.
+
+   ```bash
+   "$WORK/old/podium" serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8197 > "$WORK/old.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8197/healthz
+   server_alive "$SRV" "$WORK/old.log"
+   export URL=http://127.0.0.1:8197
+   "$WORK/old/podium" layer reingest --registry "$URL" team; echo "exit=$?"
+   curl -s "$URL/v1/load_artifact?id=ops/jira-tracker" \
+     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["version"], d["layer"], d.get("extends_pin"), "server_identifier: org-jira" in d["frontmatter"])'
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** The reingest prints `artifact: ops/jira-tracker@1.0.0   layer: team`
+   and `exit=0`, and the load prints
+   `1.0.0 team ops/jira-server@1.0.0 True`. The old release stored the child
+   with the inherited `server_identifier`. A `rejected:` line here means the
+   old binary already carries the rule, and the later steps prove nothing.
+
+4. Start the build under test on the same store and directory, reingest the
+   unchanged `team` layer, load the child, and sync through the server.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8197 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8197/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   grep 'ingested layer' "$WORK/srv.log"
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   curl -s "$URL/v1/load_artifact?id=ops/jira-tracker" \
+     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["version"], d["layer"], d.get("extends_pin"), "server_identifier: org-jira" in d["frontmatter"])'
+   podium sync --registry "$URL" --target "$WORK/srv" --harness none; echo "exit=$?"
+   ```
+
+   **Expect.** The two `ingested layer` lines report `accepted=0, idempotent=1,
+   rejected=0` for `org` and for `team`. The reingest prints
+   `artifact: ops/jira-tracker@1.0.0   layer: team`, no `rejected:` line, and
+   `exit=0`. The load prints `1.0.0 team ops/jira-server@1.0.0 True`. The sync
+   lists `ops/jira-server [org]` and `ops/jira-tracker [team]` and prints
+   `exit=0`. The registry classifies the stored version as unchanged and does
+   not evaluate it again.
+
+5. Sync the same directory through the filesystem source, then publish a new
+   version of the child that still omits `server_identifier` and reingest.
+
+   ```bash
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
+   cat "$WORK/err.txt"
+   printf -- '---\ntype: mcp-server\nversion: 1.1.0\ndescription: Team Jira tracker server.\nextends: ops/jira-server\n---\n\nTeam Jira tracker server.\n' \
+     > "$WORK/reg/team/ops/jira-tracker/ARTIFACT.md"
+   podium layer reingest --registry "$URL" team; echo "exit=$?"
+   curl -s "$URL/v1/load_artifact?id=ops/jira-tracker" \
+     | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'
+   ```
+
+   **Expect.** The filesystem sync lists `ops/jira-server [org]` alone, prints
+   `exit=1`, and `$WORK/err.txt` holds
+   `rejected: ops/jira-tracker (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: server_identifier; restate each one in this artifact`.
+   The filesystem source keeps no ingest state, so it applies the rule on every
+   run. The reingest prints the same `rejected:` line and `exit=1`, and the
+   load still prints `1.0.0`. The refusal is the control: the build under test
+   runs the rule, and only the version stored before it is spared.
 
 **Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
