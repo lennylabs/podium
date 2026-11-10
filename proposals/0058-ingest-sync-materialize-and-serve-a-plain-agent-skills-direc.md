@@ -398,9 +398,9 @@ In the "**Ingest outcome.**" paragraph of §7.3.1, after "an unresolved `extends
 
 > a skill whose registry-assigned version would give stored content a second version (`ingest.invalid_artifact`, the ingest cases above),
 
-In the same paragraph, replace "with a `details` object when the rule that rejected it defines one, as the §4.6 executable-field rule does." with:
+In the same paragraph, replace "with a `details` object when the rule that rejected it defines one, as the §4.6 executable-field and sandbox-profile rules do." with:
 
-> with a `details` object when the rule that rejected it defines one, as the §4.6 executable-field rule and the registry-assigned-version rule do.
+> with a `details` object when the rule that rejected it defines one, as the §4.6 executable-field and sandbox-profile rules and the registry-assigned-version rule do.
 
 `spec/11-verification.md`, the "**Versioning and ingest tests**" bullet: after "same-version-different-content ingests return `ingest.immutable_violation`;", insert:
 
