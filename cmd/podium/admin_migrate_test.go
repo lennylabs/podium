@@ -921,3 +921,143 @@ func TestPlanMigration_SourceOpenFailure(t *testing.T) {
 		t.Fatalf("planMigration(directory) = %v, want an open source SQLite error", err)
 	}
 }
+
+// seedSQLiteStore creates tenants and manifests in a fresh SQLite store at
+// path and closes it, so a test can stage a source or a pre-existing target.
+func seedSQLiteStore(t *testing.T, path string, tenants []store.Tenant, manifests []store.ManifestRecord) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite %s: %v", path, err)
+	}
+	defer func() { _ = st.Close() }()
+	for _, tn := range tenants {
+		if err := st.CreateTenant(ctx, tn); err != nil {
+			t.Fatalf("CreateTenant %s: %v", tn.Name, err)
+		}
+	}
+	for _, m := range manifests {
+		if err := st.PutManifest(ctx, m); err != nil {
+			t.Fatalf("PutManifest %s/%s: %v", m.TenantID, m.ArtifactID, err)
+		}
+	}
+}
+
+// runMigrateSQLiteToSQLite runs the command from srcDB into the SQLite store
+// at dstDB and returns its exit code and captured stderr.
+func runMigrateSQLiteToSQLite(t *testing.T, srcDB, dstDB string) (int, string) {
+	t.Helper()
+	var rc int
+	var stderr string
+	captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			rc = adminMigrateToStandard([]string{
+				"--source-sqlite", srcDB,
+				"--target-store", "sqlite",
+				"--target-sqlite", dstDB,
+			})
+		})
+	})
+	return rc, stderr
+}
+
+// Spec: §13.10 — a tenant whose ID already exists on the target is the same
+// tenant: the source's record is written over it, and the migration removes
+// nothing from the target store.
+func TestAdminMigrateToStandard_SameIDTenantOnTarget(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("the source record wins over a same-ID target tenant", func(t *testing.T) {
+		dir := t.TempDir()
+		srcDB := filepath.Join(dir, "source.db")
+		dstDB := filepath.Join(dir, "dest.db")
+		defaultID := core.OrgIDForName("default")
+		umbrellaID := core.OrgIDForName("umbrella")
+		off := false
+
+		umbrella := store.Tenant{ID: umbrellaID, Name: "umbrella", Quota: store.Quota{SearchQPS: 7}}
+		umbrellaManifest := store.ManifestRecord{
+			TenantID: umbrellaID, ArtifactID: "umbrella/skill", Version: "1.0.0",
+			ContentHash: "sha256:umbrella", Type: "skill", Layer: "team-shared",
+		}
+		seedSQLiteStore(t, dstDB, []store.Tenant{
+			{ID: defaultID, Name: "default", ExposeScopePreview: &off, Quota: store.Quota{SearchQPS: 1}},
+			umbrella,
+		}, []store.ManifestRecord{umbrellaManifest})
+		seedSQLiteStore(t, srcDB, []store.Tenant{{ID: defaultID, Name: "default"}}, []store.ManifestRecord{{
+			TenantID: defaultID, ArtifactID: "default/skill", Version: "1.0.0",
+			ContentHash: "sha256:default", Type: "skill", Layer: "team-shared",
+		}})
+
+		if rc, stderr := runMigrateSQLiteToSQLite(t, srcDB, dstDB); rc != 0 {
+			t.Fatalf("rc = %d, want 0; stderr:\n%s", rc, stderr)
+		}
+
+		dst, err := store.OpenSQLite(dstDB)
+		if err != nil {
+			t.Fatalf("open dest: %v", err)
+		}
+		t.Cleanup(func() { _ = dst.Close() })
+		got, err := dst.GetTenant(ctx, defaultID)
+		if err != nil {
+			t.Fatalf("GetTenant(default): %v", err)
+		}
+		if !got.ScopePreviewEnabled() || got.Quota.SearchQPS != 0 {
+			t.Errorf("default org = %+v, want the source record (scope preview on, SearchQPS 0)", got)
+		}
+		if _, err := dst.GetManifest(ctx, defaultID, "default/skill", "1.0.0"); err != nil {
+			t.Errorf("source manifest on the target: %v", err)
+		}
+		gotUmbrella, err := dst.GetTenant(ctx, umbrellaID)
+		if err != nil {
+			t.Fatalf("GetTenant(umbrella): %v", err)
+		}
+		umbrella.Active = true
+		if !reflect.DeepEqual(gotUmbrella, umbrella) {
+			t.Errorf("umbrella = %+v, want it unchanged at %+v", gotUmbrella, umbrella)
+		}
+		m, err := dst.GetManifest(ctx, umbrellaID, umbrellaManifest.ArtifactID, umbrellaManifest.Version)
+		if err != nil || m.ContentHash != umbrellaManifest.ContentHash {
+			t.Errorf("umbrella manifest = %+v (err %v), want it unchanged", m, err)
+		}
+	})
+
+	// Spec: §13.4 — a copied manifest whose version the target already holds
+	// at a differing content hash fails with immutable_violation and stops
+	// the run, leaving the target's row as it was.
+	t.Run("a copied manifest at a differing hash stops the run", func(t *testing.T) {
+		dir := t.TempDir()
+		srcDB := filepath.Join(dir, "source.db")
+		dstDB := filepath.Join(dir, "dest.db")
+		globex := store.Tenant{ID: core.OrgIDForName("globex"), Name: "globex"}
+		manifestAt := func(hash string) store.ManifestRecord {
+			return store.ManifestRecord{
+				TenantID: globex.ID, ArtifactID: "x", Version: "1.0.0",
+				ContentHash: hash, Type: "skill", Layer: "team-shared",
+			}
+		}
+		seedSQLiteStore(t, dstDB, []store.Tenant{globex}, []store.ManifestRecord{manifestAt("sha256:aa")})
+		seedSQLiteStore(t, srcDB, []store.Tenant{globex}, []store.ManifestRecord{manifestAt("sha256:bb")})
+
+		rc, stderr := runMigrateSQLiteToSQLite(t, srcDB, dstDB)
+		if rc != 1 {
+			t.Fatalf("rc = %d, want 1; stderr:\n%s", rc, stderr)
+		}
+		for _, want := range []string{"pump store: put manifest", globex.ID, "immutable_violation"} {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("stderr missing %q:\n%s", want, stderr)
+			}
+		}
+
+		dst, err := store.OpenSQLite(dstDB)
+		if err != nil {
+			t.Fatalf("open dest: %v", err)
+		}
+		t.Cleanup(func() { _ = dst.Close() })
+		m, err := dst.GetManifest(ctx, globex.ID, "x", "1.0.0")
+		if err != nil || m.ContentHash != "sha256:aa" {
+			t.Errorf("target x@1.0.0 = %q (err %v), want sha256:aa", m.ContentHash, err)
+		}
+	})
+}
