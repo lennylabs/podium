@@ -1015,8 +1015,11 @@ func TestReadme_CachePrune(t *testing.T) {
 	}
 }
 
-// import converts a skills tree into a Podium layer.
+// import normalizes a skills tree into a layer of plain skill directories:
+// SKILL.md with metadata.version and no ARTIFACT.md.
 // Doc-accuracy: the implemented flag is --target (the README shows --output).
+//
+// Spec: §4.3.4
 func TestReadme_Import(t *testing.T) {
 	t.Parallel()
 	src := t.TempDir()
@@ -1034,8 +1037,11 @@ func TestReadme_Import(t *testing.T) {
 		t.Fatalf("import exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
 	tree := readTreeAll(t, out)
-	if !hasSuffixKey(tree, "ARTIFACT.md") || !hasSuffixKey(tree, "SKILL.md") {
-		t.Errorf("import did not produce ARTIFACT.md + SKILL.md: %v", keysOf(tree))
+	if hasSuffixKey(tree, "ARTIFACT.md") || !hasSuffixKey(tree, "SKILL.md") {
+		t.Errorf("import did not produce a SKILL.md-only skill: %v", keysOf(tree))
+	}
+	if !strings.Contains(tree["greet/SKILL.md"], "metadata:\n  version: \"1.0.0\"\n") {
+		t.Errorf("greet/SKILL.md missing metadata.version 1.0.0:\n%s", tree["greet/SKILL.md"])
 	}
 }
 

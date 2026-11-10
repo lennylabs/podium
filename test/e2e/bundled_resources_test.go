@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // brSkillArtifact is a minimal skill ARTIFACT.md (Podium frontmatter only).
@@ -1340,54 +1342,56 @@ func TestBundled_PublicModeRejectsSensitive(t *testing.T) {
 
 // ---- podium import ----------------------------------------------------------
 
-// podium import wraps a SKILL.md tree into a Podium
-// layer: it writes ARTIFACT.md (type + version) and copies SKILL.md plus
-// bundled scripts.
+// importVarianceSource stages a source tree holding one skill directory,
+// run-variance-analysis, with a root SKILL.md and a bundled script.
+func importVarianceSource(t *testing.T) string {
+	t.Helper()
+	return writeRegistry(t, map[string]string{
+		"run-variance-analysis/SKILL.md":            "---\nname: run-variance-analysis\ndescription: Variance.\n---\n\nbody\n",
+		"run-variance-analysis/scripts/variance.py": "print('variance')\n",
+	})
+}
+
+// importedMetadataVersion parses the SKILL.md import wrote for id under tgt
+// and returns its metadata.version.
+func importedMetadataVersion(t *testing.T, tgt, id string) string {
+	t.Helper()
+	skill, err := manifest.ParseSkill([]byte(readFile(t, filepath.Join(tgt, id, "SKILL.md"))))
+	if err != nil {
+		t.Fatalf("parse imported SKILL.md: %v", err)
+	}
+	return skill.Metadata["version"]
+}
+
+// podium import writes each source skill as a plain skill directory: SKILL.md
+// with metadata.version from --version, the bundled scripts, and no
+// ARTIFACT.md.
+//
+// Spec: §4.3.4
 func TestBundled_ImportCreatesLayer(t *testing.T) {
 	t.Parallel()
-	src := t.TempDir()
-	sd := filepath.Join(src, "run-variance-analysis")
-	if err := os.MkdirAll(filepath.Join(sd, "scripts"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sd, "SKILL.md"),
-		[]byte("---\nname: run-variance-analysis\ndescription: Variance.\n---\n\nbody\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sd, "scripts", "variance.py"), []byte("print('variance')\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	src := importVarianceSource(t)
 	tgt := t.TempDir()
-	res := runPodium(t, "", nil, "import", "--source", src, "--target", tgt, "--type", "skill", "--version", "1.0.0")
+	res := runPodium(t, "", nil, "import", "--source", src, "--target", tgt, "--version", "1.0.0")
 	if res.Exit != 0 {
 		t.Fatalf("import exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	art := readFile(t, filepath.Join(tgt, "run-variance-analysis", "ARTIFACT.md"))
-	if !strings.Contains(art, "type: skill") || !strings.Contains(art, "version: 1.0.0") {
-		t.Errorf("ARTIFACT.md missing type/version:\n%s", art)
+	if v := importedMetadataVersion(t, tgt, "run-variance-analysis"); v != "1.0.0" {
+		t.Errorf("SKILL.md metadata.version = %q, want 1.0.0", v)
 	}
-	mustExist(t, filepath.Join(tgt, "run-variance-analysis", "SKILL.md"))
+	mustNotExist(t, filepath.Join(tgt, "run-variance-analysis", "ARTIFACT.md"))
 	mustExist(t, filepath.Join(tgt, "run-variance-analysis", "scripts", "variance.py"))
 }
 
-// podium import --dry-run reports the plan ("would
-// write") and writes no files.
+// podium import --dry-run reports the plan ("would write") and writes no
+// files.
+//
+// Spec: §4.3.4
 func TestBundled_ImportDryRun(t *testing.T) {
 	t.Parallel()
-	src := t.TempDir()
-	sd := filepath.Join(src, "run-variance-analysis")
-	if err := os.MkdirAll(filepath.Join(sd, "scripts"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sd, "SKILL.md"),
-		[]byte("---\nname: run-variance-analysis\ndescription: Variance.\n---\n\nbody\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sd, "scripts", "variance.py"), []byte("print('variance')\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	src := importVarianceSource(t)
 	tgt := t.TempDir()
-	res := runPodium(t, "", nil, "import", "--source", src, "--target", tgt, "--type", "skill", "--version", "1.0.0", "--dry-run")
+	res := runPodium(t, "", nil, "import", "--source", src, "--target", tgt, "--version", "1.0.0", "--dry-run")
 	if res.Exit != 0 {
 		t.Fatalf("import --dry-run exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
@@ -1396,6 +1400,111 @@ func TestBundled_ImportDryRun(t *testing.T) {
 	}
 	if tree := readTreeAll(t, tgt); len(tree) != 0 {
 		t.Errorf("dry-run wrote files: %v", tree)
+	}
+}
+
+// A source directory whose only root-level .md file is not named SKILL.md
+// imports as a skill whose SKILL.md holds that file, with metadata.version
+// set and no ARTIFACT.md.
+//
+// Spec: §4.3.4
+func TestBundled_ImportSingleMarkdownFile(t *testing.T) {
+	t.Parallel()
+	src := writeRegistry(t, map[string]string{
+		"greet/greet.md": "---\nname: greet\ndescription: Greet the user.\n---\n\nSay hello.\n",
+	})
+	tgt := t.TempDir()
+	res := runPodium(t, "", nil, "import", "--source", src, "--target", tgt)
+	if res.Exit != 0 {
+		t.Fatalf("import exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if v := importedMetadataVersion(t, tgt, "greet"); v != "1.0.0" {
+		t.Errorf("SKILL.md metadata.version = %q, want 1.0.0", v)
+	}
+	if body := readFile(t, filepath.Join(tgt, "greet", "SKILL.md")); !strings.HasSuffix(body, "---\n\nSay hello.\n") {
+		t.Errorf("SKILL.md does not keep the greet.md body:\n%s", body)
+	}
+	mustNotExist(t, filepath.Join(tgt, "greet", "greet.md"))
+	mustNotExist(t, filepath.Join(tgt, "greet", "ARTIFACT.md"))
+}
+
+// podium import refuses a source skill whose metadata.version differs from
+// --version, a source directory holding an ARTIFACT.md, and a body file with
+// no frontmatter block. Each refusal exits 1 naming the directory and writes
+// nothing, also under --dry-run.
+//
+// Spec: §4.3.4
+func TestBundled_ImportRefusals(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct {
+		files map[string]string
+		want  string
+	}{
+		"metadata.version mismatch": {
+			files: map[string]string{"bad/SKILL.md": "---\nname: bad\nmetadata:\n  version: \"2.0.0\"\n---\nbody\n"},
+			want:  "differs from --version",
+		},
+		"source ARTIFACT.md": {
+			files: map[string]string{
+				"bad/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n",
+				"bad/SKILL.md":    "---\nname: bad\n---\nbody\n",
+			},
+			want: "ARTIFACT.md",
+		},
+		"no frontmatter": {
+			files: map[string]string{"bad/SKILL.md": "Plain prose with no frontmatter.\n"},
+			want:  "no frontmatter block",
+		},
+	}
+	for name, tc := range cases {
+		for _, extra := range [][]string{nil, {"--dry-run"}} {
+			t.Run(strings.TrimSpace(name+" "+strings.Join(extra, "")), func(t *testing.T) {
+				t.Parallel()
+				src := writeRegistry(t, tc.files)
+				tgt := filepath.Join(t.TempDir(), "out")
+				args := append([]string{"import", "--source", src, "--target", tgt}, extra...)
+				res := runPodium(t, "", nil, args...)
+				if res.Exit != 1 {
+					t.Fatalf("import exit=%d, want 1; stderr=%s", res.Exit, res.Stderr)
+				}
+				if !strings.Contains(res.Stderr, filepath.Join(src, "bad")) || !strings.Contains(res.Stderr, tc.want) {
+					t.Errorf("stderr = %q, want the directory and %q", res.Stderr, tc.want)
+				}
+				mustNotExist(t, tgt)
+			})
+		}
+	}
+}
+
+// The --type flag is removed from podium import, so passing it exits 2.
+//
+// Spec: §4.3.4
+func TestBundled_ImportTypeFlagExits2(t *testing.T) {
+	t.Parallel()
+	tgt := filepath.Join(t.TempDir(), "out")
+	res := runPodium(t, "", nil, "import", "--source", importVarianceSource(t), "--target", tgt, "--type", "skill")
+	if res.Exit != 2 || !strings.Contains(res.Stderr, "-type") {
+		t.Errorf("import --type exit=%d stderr=%q, want 2 naming the flag", res.Exit, res.Stderr)
+	}
+	mustNotExist(t, tgt)
+}
+
+// podium import refuses a --version outside major.minor.patch with exit 2,
+// the registry-reserved 0.0.0-auto.<N> form included, and writes nothing.
+//
+// Spec: §4.3.4, §4.7.6
+func TestBundled_ImportInvalidVersionExits2(t *testing.T) {
+	t.Parallel()
+	for _, v := range []string{"1.0", "0.0.0-auto.0"} {
+		t.Run(v, func(t *testing.T) {
+			t.Parallel()
+			tgt := filepath.Join(t.TempDir(), "out")
+			res := runPodium(t, "", nil, "import", "--source", importVarianceSource(t), "--target", tgt, "--version", v)
+			if res.Exit != 2 || !strings.Contains(res.Stderr, "--version") {
+				t.Errorf("import --version %s exit=%d stderr=%q, want 2 naming --version", v, res.Exit, res.Stderr)
+			}
+			mustNotExist(t, tgt)
+		})
 	}
 }
 
