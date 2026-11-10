@@ -1,7 +1,7 @@
 # Proposal 0060: Refuse to start a multi-tenant registry that has no request-time identity verifier
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-09). Verified on 2026-11-09 after 8 adversarial review rounds (12 findings fixed).
+- Status: Applied to spec (2026-11-09). Verified on 2026-11-09 after 8 adversarial review rounds (12 findings fixed).
 - Date: 2026-11-09
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: a registry that starts today with `PODIUM_MULTI_TENANT=true` and no request-time identity verifier exits at startup after it, and it ships in 0.6.0.
