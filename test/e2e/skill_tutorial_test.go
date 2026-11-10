@@ -3,8 +3,8 @@ package e2e
 // End-to-end tests for docs/authoring/your-first-skill.md (D-first-skill).
 // Each test drives the real podium binary against the tutorial's `greet`
 // skill (personal/hello/greet) and asserts the behavior the page
-// documents: init/sync/lint, the two-file skill layout, a bundled
-// script, runtime requirements, watch mode, and the claude-code /
+// documents: init/sync/lint, a SKILL.md-only skill, the ARTIFACT.md
+// overlay, a bundled script, runtime requirements, watch mode, and the claude-code /
 // none materialization layouts. Doc-accuracy gaps (the doc's
 // positional `podium lint <path>` form, the quickstart's
 // .claude/agents arrow) are asserted against actual behavior.
@@ -24,18 +24,20 @@ const fsTodayPy = "\"\"\"Print today's date in a friendly format.\"\"\"\n" +
 	"print(datetime.date.today().strftime(\"%A, %B %-d, %Y\"))\n"
 
 // greetSkillBodyFuller is the SKILL.md after the "Add fuller frontmatter"
-// section: a longer, more specific description.
+// section: a longer, more specific description and metadata.version.
 const greetSkillBodyFuller = "---\n" +
 	"name: greet\n" +
 	"description: Greet the user by name and tell them today's date in a friendly format. Use when the user opens a session with a greeting or asks who you are.\n" +
 	"license: MIT\n" +
+	"metadata:\n  version: \"1.0.0\"\n" +
 	"---\n\nGreet the user warmly and state today's date.\n"
 
-// greetArtifactFuller is the ARTIFACT.md after "Add fuller frontmatter":
-// when_to_use (two entries), three tags, sensitivity, comment body.
+// greetArtifactFuller is the ARTIFACT.md overlay from "Add Podium-only
+// fields with an ARTIFACT.md overlay": when_to_use (two entries), three
+// tags, sensitivity, and the comment body. It declares no version, so the
+// skill's version is the SKILL.md metadata.version.
 const greetArtifactFuller = "---\n" +
 	"type: skill\n" +
-	"version: 1.0.0\n" +
 	"when_to_use:\n" +
 	"  - \"When the user opens a session with a greeting like 'hi' or 'hello'.\"\n" +
 	"  - \"When the user asks who you are at session start.\"\n" +
@@ -43,11 +45,10 @@ const greetArtifactFuller = "---\n" +
 	"sensitivity: low\n" +
 	"---\n\n<!-- Skill body lives in SKILL.md. -->\n"
 
-// greetArtifactRuntime is the final ARTIFACT.md from "Declare runtime
-// requirements": the fuller frontmatter plus runtime_requirements.
+// greetArtifactRuntime is the final ARTIFACT.md overlay from "Declare
+// runtime requirements": the overlay plus runtime_requirements.
 const greetArtifactRuntime = "---\n" +
 	"type: skill\n" +
-	"version: 1.0.0\n" +
 	"when_to_use:\n" +
 	"  - \"When the user opens a session with a greeting like 'hi' or 'hello'.\"\n" +
 	"  - \"When the user asks who you are at session start.\"\n" +
@@ -64,6 +65,7 @@ func greetSkillWithBody(body string) string {
 		"name: greet\n" +
 		"description: Greet the user by name and tell them today's date. Use when the user greets you or asks who you are.\n" +
 		"license: MIT\n" +
+		"metadata:\n  version: \"1.0.0\"\n" +
 		"---\n\n" + body
 }
 
@@ -123,27 +125,37 @@ func TestSkillTutorial_InitRefusesOverwrite(t *testing.T) {
 	}
 }
 
-// the minimal two-file greet skill lints cleanly.
-// spec: doc "## Starting point".
-func TestSkillTutorial_MinimalTwoFileLints(t *testing.T) {
+// A SKILL.md alone with the minimum frontmatter (name and description) is a
+// complete skill. It lints with exit 0 and exactly one
+// lint.skill_version_assigned warning, because it declares no version and
+// the registry assigns one. spec: doc "## Starting point" and
+// "## Add fuller frontmatter".
+// Spec: §4.2
+// Spec: §4.3.4
+func TestSkillTutorial_MinimalSkillLints(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
-		"personal/hello/greet/SKILL.md":    greetSkillBody,
+		"personal/hello/greet/SKILL.md": greetSkillBody,
 	})
-	mustExist(t, filepath.Join(reg, "personal/hello/greet/SKILL.md"))
-	mustExist(t, filepath.Join(reg, "personal/hello/greet/ARTIFACT.md"))
+	mustNotExist(t, filepath.Join(reg, "personal/hello/greet/ARTIFACT.md"))
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 {
 		t.Fatalf("lint exit=%d stderr=%s stdout=%s", res.Exit, res.Stderr, res.Stdout)
 	}
-	if !strings.Contains(res.Stdout, "lint: no issues.") {
-		t.Errorf("stdout=%q, want 'lint: no issues.'", res.Stdout)
+	if n := strings.Count(res.Stdout, "lint.skill_version_assigned"); n != 1 {
+		t.Errorf("want exactly one lint.skill_version_assigned warning, got %d:\n%s", n, res.Stdout)
+	}
+	if n := strings.Count(res.Stdout, "[warning]"); n != 1 {
+		t.Errorf("want exactly one diagnostic, got %d warnings:\n%s", n, res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "[error]") {
+		t.Errorf("unexpected error diagnostic:\n%s", res.Stdout)
 	}
 }
 
-// the fuller SKILL.md/ARTIFACT.md frontmatter is
-// accepted by lint. spec: doc "## Add fuller frontmatter".
+// the fuller SKILL.md frontmatter and the ARTIFACT.md overlay are accepted
+// by lint. spec: doc "## Add fuller frontmatter" and "## Add Podium-only
+// fields with an ARTIFACT.md overlay".
 func TestSkillTutorial_FullerFrontmatterLints(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -565,7 +577,11 @@ func TestSkillTutorial_MissingType(t *testing.T) {
 	}
 }
 
-// missing version field fails lint. spec: ruleRequiredFields.
+// A skill whose ARTIFACT.md and SKILL.md declare no version lints with
+// exit 0 and one lint.skill_version_assigned warning, because the registry
+// assigns its version. TestFrontmatter_MissingVersion keeps the
+// required-version error for a non-skill type.
+// Spec: §4.3.4
 func TestSkillTutorial_MissingVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -573,11 +589,14 @@ func TestSkillTutorial_MissingVersion(t *testing.T) {
 		"personal/hello/greet/SKILL.md":    greetSkillBody,
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 1 {
-		t.Fatalf("lint exit=%d, want 1\nstdout=%s", res.Exit, res.Stdout)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
 	}
-	if !strings.Contains(res.Stdout, "lint.required_field_missing") || !strings.Contains(res.Stdout, "version is required") {
-		t.Errorf("missing 'version is required' diagnostic:\n%s", res.Stdout)
+	if n := strings.Count(res.Stdout, "lint.skill_version_assigned"); n != 1 {
+		t.Errorf("want exactly one lint.skill_version_assigned warning, got %d:\n%s", n, res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "lint.required_field_missing") {
+		t.Errorf("an assigned version must not draw lint.required_field_missing:\n%s", res.Stdout)
 	}
 }
 

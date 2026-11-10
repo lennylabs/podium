@@ -27,6 +27,8 @@ Team-specific addendum on top of the org-wide skill...
 
 At request time the registry folds the parent's frontmatter into the child's per the field-specific rules below. The child's prose body replaces the parent's; bodies are never concatenated.
 
+For a skill, `extends:` is a Podium-only field, so the child declares it in an `ARTIFACT.md` overlay beside its `SKILL.md`, as the [examples](#examples) below show. The parent it names may be a skill that has a `SKILL.md` and no `ARTIFACT.md`.
+
 ---
 
 ## Pinning

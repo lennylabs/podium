@@ -1,7 +1,7 @@
 // Spec coverage: §7.6 SDK surface — TypeScript client mirrors the
 // Python client and the registry HTTP API.
 
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,6 +15,7 @@ import {
   type MaterializeOptions,
   RegistryError,
 } from "./index.js";
+import { isSynthesizedSkillDocument, synthesizedSkillDocument } from "./skill_document.js";
 import { isolateVerification, served, signEnvelope, VECTOR_KEY, VECTOR_PUBLIC_KEY } from "./test_support.js";
 
 isolateVerification();
@@ -616,6 +617,105 @@ describe("LoadedArtifact.materialize", () => {
       expect(await readFile(join(root, "ARTIFACT.md"), "utf8")).toBe("---\ntype: skill\nversion: 2.0.0\n---\n");
       expect(await readFile(join(root, "SKILL.md"), "utf8")).toBe(skillMD);
     });
+  });
+
+  // The §4.3.4 synthesized document at 1.0.0, copied from the spec.
+  const SYNTHESIZED_100 =
+    "---\ntype: skill\nversion: 1.0.0\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n";
+  const GREET_SKILL = "---\nname: greet\ndescription: Greet the user.\n---\nGreet the user by name.\n";
+
+  // Spec: §6.7, §7.6 — the canonical layout omits an ARTIFACT.md whose bytes
+  // equal the §4.3.4 synthesized document for the version it names, and
+  // writes every other document.
+  it.each([
+    { name: "the synthesized document", frontmatter: SYNTHESIZED_100, written: false },
+    {
+      name: "the synthesized document at an assigned version",
+      frontmatter: SYNTHESIZED_100.replace("1.0.0", "0.0.0-auto.3"),
+      written: false,
+    },
+    {
+      name: "an authored document",
+      frontmatter: "---\ntype: skill\nversion: 1.0.0\ntags: [greeting]\n---\n<!-- overlay -->\n",
+      written: true,
+    },
+    { name: "a document one byte longer", frontmatter: SYNTHESIZED_100 + "\n", written: true },
+    { name: "a document with a different comment", frontmatter: SYNTHESIZED_100.replace("Podium:", "Podium;"), written: true },
+    { name: "a document with no pointer comment", frontmatter: "---\ntype: skill\nversion: 1.0.0\n---\n", written: true },
+    {
+      name: "a document whose version line carries another key",
+      frontmatter: SYNTHESIZED_100.replace("1.0.0", "1.0.0\ntags: [x]"),
+      written: true,
+    },
+  ])("writes ARTIFACT.md for $name only when it is authored", async ({ frontmatter, written }) => {
+    await withTempDir(async (dir) => {
+      const art = new LoadedArtifact({
+        id: "team/greet",
+        type: "skill",
+        version: "1.0.0",
+        manifest_body: "Greet the user by name.\n",
+        frontmatter,
+        skill_raw: GREET_SKILL,
+      });
+      const out = await art.materialize(dir);
+      const root = join(dir, "team", "greet");
+      expect(await readFile(join(root, "SKILL.md"), "utf8")).toBe(GREET_SKILL);
+      if (written) {
+        expect(await readFile(join(root, "ARTIFACT.md"), "utf8")).toBe(frontmatter);
+      } else {
+        expect(await readdir(root)).toEqual(["SKILL.md"]);
+        expect(out).toEqual([join(root, "SKILL.md")]);
+      }
+    });
+  });
+
+  // Spec: §6.4, §6.7, §7.6 — a SKILL.md-only overlay package round-trips
+  // through loadArtifact and materialize as a plain Agent Skills directory.
+  it("round-trips a SKILL.md-only overlay package without an ARTIFACT.md", async () => {
+    await withTempDir(async (dir) => {
+      const pkg = join(dir, "overlay", "team", "greet");
+      await mkdir(join(pkg, "scripts"), { recursive: true });
+      await writeFile(join(pkg, "SKILL.md"), GREET_SKILL);
+      await writeFile(join(pkg, "scripts", "run.sh"), "echo hi\n");
+      const c = new Client({
+        registry: "http://reg",
+        overlayPath: join(dir, "overlay"),
+        fetcher: async () => new Response("{}"),
+      });
+      const art = await c.loadArtifact("team/greet");
+      const out = join(dir, "out");
+      await art.materialize(out);
+      const root = join(out, "team", "greet");
+      expect((await readdir(root)).sort()).toEqual(["SKILL.md", "scripts"]);
+      expect(await readFile(join(root, "SKILL.md"), "utf8")).toBe(GREET_SKILL);
+      expect(await readFile(join(root, "scripts", "run.sh"), "utf8")).toBe("echo hi\n");
+    });
+  });
+
+  // Spec: §4.3.4 — the helper produces the fixed bytes and refuses a version
+  // that is neither major.minor.patch nor the reserved form.
+  it("synthesizedSkillDocument builds the fixed bytes and refuses other versions", () => {
+    expect(synthesizedSkillDocument("1.0.0")).toBe(SYNTHESIZED_100);
+    expect(isSynthesizedSkillDocument(SYNTHESIZED_100)).toBe(true);
+    for (const v of ["1.0", "0.0.0-auto.01", "1.0.0\ntags: [x]", ""]) {
+      expect(() => synthesizedSkillDocument(v)).toThrow(/invalid version/);
+    }
+    expect(isSynthesizedSkillDocument("---\ntype: skill\n")).toBe(false);
+  });
+
+  // Spec: §4.3.4, §4.7.6 — N must fit a Go int, as manifest.IsAutoVersion
+  // requires, so an overflowing N is neither synthesized nor recognized and
+  // materialize() keeps such a document as the none adapter does.
+  it("synthesizedSkillDocument refuses a 0.0.0-auto.<N> whose N overflows a Go int", () => {
+    const max = "0.0.0-auto.9223372036854775807";
+    const doc = (v: string): string =>
+      `---\ntype: skill\nversion: ${v}\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n`;
+    expect(synthesizedSkillDocument(max)).toBe(doc(max));
+    expect(isSynthesizedSkillDocument(doc(max))).toBe(true);
+    for (const v of ["0.0.0-auto.9223372036854775808", "0.0.0-auto.99999999999999999999"]) {
+      expect(() => synthesizedSkillDocument(v)).toThrow(/invalid version/);
+      expect(isSynthesizedSkillDocument(doc(v))).toBe(false);
+    }
   });
 
   it("writes inline resources at their relative path", async () => {

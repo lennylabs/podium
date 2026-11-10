@@ -141,8 +141,10 @@ adds server-side capability.
 The artifacts are the same in every tier. The catalog on disk does not change
 when the deployment changes, and the same shared Go library parses, composes,
 and materializes it everywhere, so a given target and profile produce
-bit-identical output. [Deployment](https://lennylabs.github.io/podium/deployment/)
-covers picking a tier and moving between them.
+bit-identical output. [Local](https://lennylabs.github.io/podium/deployment/local#skills-that-declare-no-version)
+lists the exceptions for skills that declare no version.
+[Deployment](https://lennylabs.github.io/podium/deployment/) covers picking a
+tier and moving between them.
 
 ---
 
@@ -183,8 +185,9 @@ requirements, because registry replicas need shared state. See
 ## 'Hello world' example
 
 After installing the `podium` CLI, create a skill directory with a
-`SKILL.md` file for agent-facing instructions and an `ARTIFACT.md` file for
-Podium metadata:
+`SKILL.md` file from the [agentskills.io](https://agentskills.io/specification)
+standard. Its frontmatter carries the version in `metadata.version`, and its
+body holds the agent-facing instructions:
 
 ```markdown
 ~/podium-artifacts/personal/hello/greet/SKILL.md
@@ -192,22 +195,17 @@ Podium metadata:
 ---
 name: greet
 description: Greet the user by name and tell them today's date.
+metadata:
+  version: "1.0.0"
 ---
 
 Greet the user by their first name. Tell them today's date.
 ```
 
-```markdown
-~/podium-artifacts/personal/hello/greet/ARTIFACT.md
-
----
-type: skill
-version: 1.0.0
-tags: [demo, hello-world]
----
-
-<!-- Skill body lives in SKILL.md. -->
-```
+A hand-written `ARTIFACT.md` beside `SKILL.md` is optional. It carries
+Podium-only fields such as `tags` and `sensitivity`, and the
+[frontmatter reference](https://lennylabs.github.io/podium/authoring/frontmatter-reference)
+lists them.
 
 Anything else in the directory is a bundled resource that travels with the
 artifact, so give the skill a script to call:

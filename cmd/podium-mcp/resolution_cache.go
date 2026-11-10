@@ -431,10 +431,11 @@ func (r *resolutionCache) Len() int {
 // through deliverLoadArtifact, which re-runs the §6.6 delivery check and the
 // §4.7.9 policy, so no cache mode serves an unverified record.
 //
-// The served document, body, delivery pair, and sensitivity come from the
-// per-ID delivery files putDelivery wrote. A bucket without them for idHint,
-// including one written before the delivery record existed, is a miss, and so
-// is a per-ID directory whose id file names another artifact.
+// The served document, body, delivery pair, sensitivity, version, and type
+// come from the per-ID delivery files putDelivery wrote. A bucket without them
+// for idHint, including one written before the delivery record or the version
+// and type files existed, is a miss, and so is a per-ID directory whose id
+// file names another artifact.
 //
 // Spec: §6.5, §6.6 step 2, §4.7.10
 func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArtifactResponse, error) {
@@ -452,24 +453,14 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 		DeliveryHash:      d.DeliveryHash,
 		DeliverySignature: d.DeliverySignature,
 		ArtifactRevision:  d.ArtifactRevision,
+		Version:           d.Version,
+		Type:              d.Type,
 		Resources:         map[string]string{},
 	}
 	// A skill's verbatim SKILL.md is bucket-level, because the authored
 	// package the content hash names carries it.
 	if sr, err := os.ReadFile(filepath.Join(bucket, "skill_raw")); err == nil {
 		resp.SkillRaw = string(sr)
-	}
-	// Recover the resolved version and type from the cached served document so
-	// a cache-served load reports the version and type a live fetch does. The
-	// delivery record frames both, so a recovered value that differs from the
-	// served one fails the delivery check.
-	if ctx := manifestContext(d.Frontmatter); ctx != nil {
-		if v, ok := ctx["version"].(string); ok {
-			resp.Version = v
-		}
-		if tp, ok := ctx["type"].(string); ok {
-			resp.Type = tp
-		}
 	}
 	resourcesDir := filepath.Join(bucket, "resources")
 	_ = filepath.Walk(resourcesDir, func(path string, info os.FileInfo, err error) error {
@@ -493,14 +484,16 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 }
 
 // readDeliveryFiles reads the per-ID delivery files putDelivery wrote in dir.
-// The id file, the served document, the body, the delivery hash, and the
-// artifact revision are required, and the id file must hold id verbatim; the
-// signature and sensitivity files read as empty when absent. A record cached
-// before the artifact_revision file existed is therefore a miss, because its
-// delivery check would frame an empty revision.
+// The id file, the served document, the body, the delivery hash, the artifact
+// revision, the version, and the type are required, and the id file must hold
+// id verbatim; the signature and sensitivity files read as empty when absent.
+// A record cached before the artifact_revision, version, or type file existed
+// is therefore a miss, because its delivery check would frame an empty value.
+//
+// Spec: §6.5, §6.6, §4.7.10
 func readDeliveryFiles(dir, id string) (deliveryFiles, error) {
 	required := map[string]string{}
-	for _, name := range []string{"id", "frontmatter", "body", "delivery_hash", "artifact_revision"} {
+	for _, name := range []string{"id", "frontmatter", "body", "delivery_hash", "artifact_revision", "version", "type"} {
 		b, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			return deliveryFiles{}, fmt.Errorf("delivery %s: %w", name, err)
@@ -524,6 +517,8 @@ func readDeliveryFiles(dir, id string) (deliveryFiles, error) {
 		DeliverySignature: optional("delivery_signature"),
 		Sensitivity:       optional("sensitivity"),
 		ArtifactRevision:  required["artifact_revision"],
+		Version:           required["version"],
+		Type:              required["type"],
 	}, nil
 }
 

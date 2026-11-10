@@ -3,6 +3,7 @@ package integration
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -42,6 +43,12 @@ func referenceRegistryPath(t testing.TB) string {
 // adapter that reaches the derivation through skillOut. codex, opencode, and
 // pi are absent because the reference fixture carries §6.9 untranslatable
 // cells for them, so sync.Run fails before any comparison.
+//
+// Spec: §11, §2.2, §4.3.4, §13.11.3 — the fixture's plain skills, the overlay
+// that omits version, and the extends: children of plain skills report the
+// same versions and materialize the same bytes under both registry sources.
+// The filesystem source reports 0.0.0-auto.0 for the version-less skill, and
+// the server assigns it on its first ingest into an empty store.
 func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 	t.Parallel()
 	dir := referenceRegistryPath(t)
@@ -111,12 +118,14 @@ func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 					t.Errorf("%s: %s lacks %q:\n%s", adapterID, path, wantCompat, body)
 				}
 			}
+			assertPlainSkillTree(t, adapterID, dir, fsTree)
 			assertTreesEqual(t, fsTree, srvTree)
 
 			// The lock-file artifacts list (id + version) must match.
 			if got, want := artifactKeys(srvRes), artifactKeys(fsRes); !equalStringSlices(got, want) {
 				t.Errorf("artifacts list mismatch:\n filesystem=%v\n server=    %v", want, got)
 			}
+			assertPlainSkillLockVersions(t, fsTarget)
 
 			// §11 names the lock-file artifacts: list among the four things the
 			// two modes must produce identically, and the id and version alone do
@@ -127,6 +136,102 @@ func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 			// timestamps, and source provenance legitimately differ.
 			assertLockArtifactsEqual(t, fsTarget, srvTarget)
 		})
+	}
+}
+
+// plainSkillVersions maps each plain-skill fixture package of the reference
+// registry to the version both registry sources report for it. The first is
+// registry-assigned, the overlay of plain-skills/overlay-unversioned omits
+// version so its SKILL.md metadata.version applies, and notes/meta-child
+// declares its version only in metadata.version.
+var plainSkillVersions = map[string]string{
+	"plain-skills/unversioned":         "0.0.0-auto.0",
+	"plain-skills/versioned":           "1.0.0",
+	"plain-skills/overlay-unversioned": "1.0.0",
+	"notes/versioned-child":            "1.0.0",
+	"notes/meta-child":                 "2.0.0",
+}
+
+// assertPlainSkillLockVersions asserts that the lock under target records
+// every plain-skill fixture ID, and that each of its entries carries the
+// expected version. assertLockArtifactsEqual then holds the other mode to the
+// same entries, so a server that read the version back out of a served
+// ARTIFACT.md that omits it fails there.
+func assertPlainSkillLockVersions(t *testing.T, target string) {
+	t.Helper()
+	lock, err := sync.ReadLock(target)
+	if err != nil {
+		t.Fatalf("reading the lock: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, a := range lock.Artifacts {
+		want, ok := plainSkillVersions[a.ID]
+		if !ok {
+			continue
+		}
+		seen[a.ID] = true
+		if a.Version != want {
+			t.Errorf("lock entry %s (%s): version %q, want %q", a.ID, a.MaterializedPath, a.Version, want)
+		}
+	}
+	for id := range plainSkillVersions {
+		if !seen[id] {
+			t.Errorf("the lock records no entry for %s", id)
+		}
+	}
+}
+
+// assertPlainSkillTree pins what the plain-skill fixture packages materialize
+// to. Byte equality between the modes also holds when both write the same
+// wrong tree, so the layout is checked on one side before the comparison.
+func assertPlainSkillTree(t *testing.T, adapterID, registry string, tree map[string]string) {
+	t.Helper()
+	switch adapterID {
+	case "none":
+		assertNonePlainSkillTree(t, registry, tree)
+	case "claude-code":
+		for id := range plainSkillVersions {
+			path := ".claude/skills/" + id[strings.LastIndex(id, "/")+1:] + "/SKILL.md"
+			if _, ok := tree[path]; !ok {
+				t.Errorf("claude-code: %s not materialized for %s", path, id)
+			}
+		}
+	}
+}
+
+// assertNonePlainSkillTree checks the none layout of the plain-skill fixture.
+// Spec: §6.7, §4.3.4 — a skill with no ARTIFACT.md materializes as a plain
+// Agent Skills directory, an authored overlay is written as authored, and the
+// merged document of an extends: child whose overlay omits version and
+// description carries the child's metadata.version and the parent's SKILL.md
+// description.
+func assertNonePlainSkillTree(t *testing.T, registry string, tree map[string]string) {
+	t.Helper()
+	for _, id := range []string{"plain-skills/unversioned", "plain-skills/versioned"} {
+		if _, ok := tree[id+"/SKILL.md"]; !ok {
+			t.Errorf("none: %s/SKILL.md not materialized", id)
+		}
+		if _, ok := tree[id+"/ARTIFACT.md"]; ok {
+			t.Errorf("none: %s/ARTIFACT.md materialized for a skill with no ARTIFACT.md", id)
+		}
+	}
+
+	authored, err := os.ReadFile(filepath.Join(registry, "org-defaults", "plain-skills", "overlay-unversioned", "ARTIFACT.md"))
+	if err != nil {
+		t.Fatalf("reading the authored overlay: %v", err)
+	}
+	if got := tree["plain-skills/overlay-unversioned/ARTIFACT.md"]; got != string(authored) {
+		t.Errorf("none: overlay ARTIFACT.md differs from the authored bytes:\n got= %q\n want=%q", got, authored)
+	}
+
+	merged := tree["notes/meta-child/ARTIFACT.md"]
+	for _, want := range []string{
+		"version: 2.0.0\n",
+		"description: Draft a status update from the week's merged changes.\n",
+	} {
+		if !strings.Contains(merged, want) {
+			t.Errorf("none: notes/meta-child/ARTIFACT.md lacks %q:\n%s", want, merged)
+		}
 	}
 }
 

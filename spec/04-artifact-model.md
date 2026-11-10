@@ -4,9 +4,9 @@
 
 An artifact is a directory with one or two manifest files at its root.
 
-**Every artifact has an `ARTIFACT.md`.** It is a markdown file with YAML frontmatter that carries Podium's canonical schema (universal fields, caller-interpreted fields, and type-specific fields). The frontmatter is what the registry indexes. For non-skill types, the prose body is what the host reads when the artifact is loaded.
+**Every non-skill artifact has an `ARTIFACT.md`.** It is a markdown file with YAML frontmatter that carries Podium's canonical schema (universal fields, caller-interpreted fields, and type-specific fields). The frontmatter is what the registry indexes. For non-skill types, the prose body is what the host reads when the artifact is loaded.
 
-**Skill artifacts (`type: skill`) additionally have a `SKILL.md`** alongside `ARTIFACT.md` to comply with the [Agent Skills specification](https://agentskills.io/specification). `SKILL.md` carries the standard's required frontmatter (`name`, `description`) and any of the standard's optional fields (`license`, `compatibility`, `metadata`, `allowed-tools`); its prose body holds the agent-facing skill instructions. `ARTIFACT.md` carries Podium's structured frontmatter and omits the prose body for skills (a one-line pointer comment is allowed). Field allocation across the two files and the lint rules that govern them are described in §4.3.4.
+**Skill artifacts (`type: skill`) have a `SKILL.md`** that complies with the [Agent Skills specification](https://agentskills.io/specification). `SKILL.md` carries the standard's required frontmatter (`name`, `description`) and any of the standard's optional fields (`license`, `compatibility`, `metadata`, `allowed-tools`); its prose body holds the agent-facing skill instructions. A package (§4.2) whose root holds a `SKILL.md` and no `ARTIFACT.md` is a skill artifact, and the registry indexes its `SKILL.md` frontmatter. An optional `ARTIFACT.md` beside `SKILL.md` carries Podium-only structured frontmatter and omits the prose body (a one-line pointer comment is allowed). Field allocation, version precedence, and lint are in §4.3.4.
 
 **Bundled resources alongside the manifest are arbitrary files.** Python scripts, shell scripts, templates, JSON / YAML schemas, evaluation datasets, model weights, binary blobs, or anything else the host needs at runtime. The registry treats these as opaque versioned blobs.
 
@@ -42,14 +42,14 @@ The type determines indexing, loading semantics, governance requirements, and se
 
 **Package layout example (skill).** A skill that ships with a Python script and a Jinja template, following the agentskills.io directory conventions (`scripts/`, `references/`, `assets/`):
 
-![Artifact package layout: a single directory containing ARTIFACT.md (required) and optionally SKILL.md, scripts/, references/, assets/, or other files.](../docs/assets/diagrams/artifact-package.svg)
+![Artifact package layout for a skill: a single directory containing SKILL.md (required for a skill), an optional ARTIFACT.md, and optional scripts/, references/, assets/, or other files. An artifact of any other type carries ARTIFACT.md and no SKILL.md.](../docs/assets/diagrams/artifact-package.svg)
 
 <!--
 ASCII fallback for the diagram above (artifact package layout):
 
   finance/close-reporting/run-variance-analysis/
-    ARTIFACT.md            [REQUIRED] manifest frontmatter + prose
-    SKILL.md               [REQUIRED FOR SKILLS] agentskills.io body
+    ARTIFACT.md            [OPTIONAL] Podium-only frontmatter
+    SKILL.md               [REQUIRED] agentskills.io body
     scripts/               [OPTIONAL] code resources
       variance.py
       helpers.py
@@ -115,14 +115,13 @@ ASCII fallback for the diagram above (registry layout on disk):
         DOMAIN.md
         routing-validator/             [type: skill]
           SKILL.md
-          ARTIFACT.md
         swift-bic-parser/              [type: skill]
           SKILL.md
-          ARTIFACT.md
     engineering/platform/code-change-pr/    [type: command]
       ARTIFACT.md
 -->
 
+A directory below the layer root is an artifact package when it directly contains a file named `ARTIFACT.md`, or when it directly contains a file named `SKILL.md` and no directory between it and the layer root is itself a package (§4.1). A `SKILL.md` below a package's root is a bundled resource of that package (§4.4) and starts no package. Package discovery does not descend into a directory below the layer root whose name begins with a dot, so no package is discovered inside one. Files under a dot-prefixed subdirectory of a package remain that package's bundled resources (§4.4). A layer whose skills sit under `.claude/skills/` or `.agents/skills/` therefore places its root at that directory or at the dot-prefixed directory itself: a `git` source sets `root` (§4.6), and a `local` source, `--layer-path`, or a `podium sync` path names the directory as its path. A manifest file directly at the layer root is an error, because the canonical ID is the non-empty directory path under the root.
 
 The hierarchy can nest to arbitrary depth for organization. The discovery output returned by `load_domain` is a separate concern, governed by configurable rules (§4.5.5): a tenant-level `max_depth` (default 3) caps how deep the rendered subtree goes below the requested path, `fold_below_artifacts` collapses sparse subdomains into the parent's leaf set, and `fold_passthrough_chains` collapses single-child intermediate domains. All of these can be overridden per-subtree via `DOMAIN.md`. Authoring depth never changes the canonical artifact ID; that remains the directory path.
 
@@ -132,7 +131,7 @@ Each layer (§4.6) is rooted at a Git repo or local filesystem path; the directo
 
 The manifest frontmatter is YAML; the prose body is markdown. The registry indexes frontmatter for `search_artifacts` and `load_domain`. The prose body is returned inline by `load_artifact`.
 
-For non-skill types, frontmatter and prose both live in `ARTIFACT.md`. For skills, frontmatter lives in `ARTIFACT.md` while prose lives in `SKILL.md`; a small subset of frontmatter fields is mirrored into `SKILL.md` to satisfy the agentskills.io specification (§4.3.4).
+For non-skill types, frontmatter and prose both live in `ARTIFACT.md`. For skills, the Agent Skills fields and the prose body live in `SKILL.md`, and the Podium-only fields live in an optional `ARTIFACT.md` (§4.3.4).
 
 ### Universal fields (any artifact type)
 
@@ -254,11 +253,11 @@ The registry stores the URL + hash + size + signature, not the bytes.
 
 Skill artifacts comply with the [agentskills.io specification](https://agentskills.io/specification). The compliance rules below apply on top of the universal and type-specific schema described above.
 
-**Two manifest files.** A skill artifact directory contains both `SKILL.md` and `ARTIFACT.md`. `SKILL.md` is the agentskills.io manifest read by every SKILL.md-aware tool (the `npx skills` CLI, the public Vercel skills.sh registry, third-party skill validators, and any harness that consumes SKILL.md directly). `ARTIFACT.md` is Podium's structured manifest read by the registry, the MCP server, the SDKs, and `podium sync`.
+**Manifest files.** A skill artifact directory contains a `SKILL.md` and may contain an `ARTIFACT.md`. `SKILL.md` is the agentskills.io manifest read by every SKILL.md-aware tool (the `npx skills` CLI, the public Vercel skills.sh registry, third-party skill validators, and any harness that consumes SKILL.md directly). `ARTIFACT.md` is an optional overlay that the author writes by hand to carry Podium-only fields, and no Podium tool generates one for a skill. The registry, the MCP server, the SDKs, and `podium sync` read both files when both are present. An `extends:` child carries an `ARTIFACT.md`; the parent it names may be a skill without one.
 
 **Field allocation.** The split keeps `SKILL.md` strictly within the agentskills.io spec. Podium-specific fields stay in `ARTIFACT.md` so they retain their YAML types and so the spec's `skills-ref validate` check passes without warnings.
 
-| Field | SKILL.md | ARTIFACT.md |
+| Field | SKILL.md | ARTIFACT.md (optional overlay) |
 | --- | --- | --- |
 | `name` | Top-level (per spec; matches parent directory name) | Omitted (Podium reads from SKILL.md) |
 | `description` | Top-level (per spec; ≤ 1024 chars) | Omitted (Podium reads from SKILL.md) |
@@ -266,9 +265,24 @@ Skill artifacts comply with the [agentskills.io specification](https://agentskil
 | `compatibility` | Top-level (per spec; ≤ 500 chars; human-readable string) | Omitted. When `SKILL.md` does not author it, every harness adapter that writes a skill's `SKILL.md` (§6.7) and every marketplace emitter that writes one (§7.8) derives it from `runtime_requirements` and `sandbox_profile` at materialization time and adds it to the materialized `SKILL.md`. An authored value is kept unchanged. The `none` adapter writes `SKILL.md` without translation (§6.7) and derives nothing. |
 | `metadata` | Top-level (per spec; string-to-string map for free-form extension) | Omitted |
 | `allowed-tools` | Top-level (per spec; experimental) | Omitted |
-| `type` | Not present | Top-level (`type: skill`) |
-| `version`, `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes` | Not present | Top-level |
+| `type` | Not present | Top-level (`type: skill`); implied when `ARTIFACT.md` is absent |
+| `version` | As `metadata.version` (string) | Top-level; equal to `metadata.version` when `metadata.version` is a `major.minor.patch` value |
+| `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes` | Not present | Top-level |
 | `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `extends`, `target_harnesses`, `external_resources` | Not present | Top-level |
+
+**Version.** A skill's version is `SKILL.md` `metadata.version`, the `ARTIFACT.md` `version`, or both. When `ARTIFACT.md` declares `version`, that value is the version. Otherwise a `metadata.version` in `major.minor.patch` form is the version. A `metadata.version` in any other form is ignored, because `metadata` is free-form in the Agent Skills standard. When `ARTIFACT.md` declares `version` and `metadata.version` is a `major.minor.patch` value, the two are equal. A skill that declares no usable version carries an assigned version in the reserved form of §4.7.6 (§7.3.1, §13.11.3).
+
+**Synthesized `ARTIFACT.md`.** For a skill with no `ARTIFACT.md`, every response or record that serves an `ARTIFACT.md` document carries exactly these bytes, where `<version>` is the resolved version. Each line ends with a single line feed, and the document ends with the line feed after the comment.
+
+```
+---
+type: skill
+version: <version>
+---
+<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->
+```
+
+The document is not part of the authored package. The §4.7.6 content hash frames a zero-length value in its position, the registry does not store it, and no adapter or SDK writer materializes it (§6.7, §7.6). Those writers also omit an authored `ARTIFACT.md` whose bytes equal this document for the version it names.
 
 **Body content.** `SKILL.md` carries the agent-facing skill prose body. `ARTIFACT.md` for skills has no prose body; a one-line HTML comment pointer (`<!-- Skill body lives in SKILL.md. -->`) is allowed and ignored by the linter.
 
@@ -286,12 +300,14 @@ Skill artifacts comply with the [agentskills.io specification](https://agentskil
 
 **Skill-artifact ingest lint.** For every artifact with `type: skill`:
 
-- Both `SKILL.md` and `ARTIFACT.md` are present (error if either is missing).
+- `SKILL.md` is present (error if missing).
 - `SKILL.md` has top-level `name` matching the parent directory and `description` non-empty (error).
 - `SKILL.md` `name` follows the agentskills.io syntax constraints (error).
-- `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, `tags`, etc.); if present, error and recommend moving the field to `ARTIFACT.md`.
-- `ARTIFACT.md` does not contain `name`, `description`, or `license` fields (warning); if present, the values must match `SKILL.md` exactly (error on mismatch).
-- `ARTIFACT.md` body is empty or a single HTML comment (warning otherwise).
+- `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, `tags`, etc.); if present, error. The diagnostic recommends `metadata.version` for a version and the `ARTIFACT.md` overlay for every other field.
+- When `ARTIFACT.md` is present, it does not contain `name`, `description`, or `license` fields (warning); if present, the values must match `SKILL.md` exactly (error on mismatch). A `version` in `ARTIFACT.md` equals `SKILL.md` `metadata.version` when both are set and `metadata.version` is a `major.minor.patch` value (error on mismatch).
+- When `ARTIFACT.md` is present, its body is empty or a single HTML comment (warning otherwise).
+- A skill that declares no usable version has its version assigned (warning that names any ignored `metadata.version` value and the fix).
+- An authored version in the reserved form of §4.7.6, in either file, is an error (`lint.invalid_version`).
 - The `skills-ref validate` reference check from the agentskills.io project passes against `SKILL.md` (warning on failure; lint suppression flag available for cases where the standard's validator is overly strict).
 
 ### 4.3.5 Canonical hook events
@@ -335,7 +351,7 @@ The list of canonical events grows as new harnesses introduce events that warran
 
 ## 4.4 Bundled Resources
 
-Bundled resources ship with the artifact package and are discovered implicitly from the directory: every file under the artifact's root other than the root `ARTIFACT.md` (and, for skills, the root `SKILL.md`) is a bundled resource, including a file whose own name or whose parent directory's name begins with a dot, and including a file named `SKILL.md` in a subdirectory of the package. Every file below a nested directory that carries its own `ARTIFACT.md` is excluded from the enclosing artifact's set. No ignore file, size threshold, or name pattern removes a file from the set; the §4.1 size caps are lint diagnostics over the set. The set is what the §4.7.6 content hash covers. There is no `resources:` list in frontmatter; what's in the folder ships, and the manifest references files inline in prose.
+Bundled resources ship with the artifact package and are discovered implicitly from the directory: every file under the artifact's root other than the root `ARTIFACT.md` (and, for skills, the root `SKILL.md`) is a bundled resource, including a file whose own name or whose parent directory's name begins with a dot, and including a file named `SKILL.md` in a subdirectory of the package. A `SKILL.md` in a subdirectory of a package does not start a package (§4.2). Every file below a nested directory that carries its own `ARTIFACT.md` is excluded from the enclosing artifact's set. No ignore file, size threshold, or name pattern removes a file from the set; the §4.1 size caps are lint diagnostics over the set. The set is what the §4.7.6 content hash covers. There is no `resources:` list in frontmatter; what's in the folder ships, and the manifest references files inline in prose.
 
 The registry stores bundled resources content-addressed by SHA-256 in object storage; bytes are deduplicated across all artifact versions within an org's storage namespace. Presigned URLs deliver them at load time.
 
@@ -456,7 +472,7 @@ This asymmetry exists because the workspace local overlay is merged client-side 
 
 Imports are dynamic: an artifact added at `finance/ap/payments/new-thing/` is automatically picked up by any domain whose `DOMAIN.md` includes `finance/ap/payments/*`; no `DOMAIN.md` re-ingest needed.
 
-**Imports do not change canonical paths.** An artifact has exactly one canonical home (the directory where its `ARTIFACT.md` lives, plus `SKILL.md` for skills). Imports add additional appearances under other domains. `search_artifacts` returns the artifact once, with its canonical path and (optionally) the list of domains that import it.
+**Imports do not change canonical paths.** An artifact has exactly one canonical home (its package directory, which holds an `ARTIFACT.md`, a `SKILL.md`, or both, per §4.2). Imports add additional appearances under other domains. `search_artifacts` returns the artifact once, with its canonical path and (optionally) the list of domains that import it.
 
 **Authoring rights for imports.** Editing a domain's `include:`/`exclude:` requires write access to the layer that contains the destination `DOMAIN.md` (a Git merge or a `local`-source filesystem write). Importing does not require any rights in the source path; only that the artifact resolves under some layer the registry has ingested. Visibility at read time is enforced per layer.
 
@@ -883,9 +899,9 @@ Every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` c
 
 ### 4.7.6 Version Resolution and Consistency
 
-Versions are semver-named (`major.minor.patch`), author-chosen via the manifest's `version:` field. Internally, the registry stores `(artifact_id, semver, content_hash)` triples. `content_hash` is the SHA-256 digest of the artifact's canonical serialization.
+Versions are semver-named and author-chosen through `ARTIFACT.md` `version:` or, for a skill, `SKILL.md` `metadata.version` (§4.3.4). An authored version is `major.minor.patch`. A skill that declares no usable version carries a registry-assigned version `0.0.0-auto.<N>` (§7.3.1). That form is a semver 2.0.0 prerelease of `0.0.0`, where N is a non-negative decimal integer with no leading zeros, and it orders by semver precedence. The form is reserved to the registry, and an authored version in that form fails lint (§4.3.4). Internally, the registry stores `(artifact_id, semver, content_hash)` triples. `content_hash` is the SHA-256 digest of the artifact's canonical serialization. No two versions of one `artifact_id` share a `content_hash`, soft-deleted versions included: an authored version lies in the hashed bytes, and ingest refuses a registry-assigned version whose content a stored row of the artifact already holds (§7.3.1). A `sha256:` pin therefore selects at most one version of an artifact.
 
-A framed value is its length in bytes, encoded as an unsigned 64-bit big-endian integer, followed by the bytes themselves. The canonical serialization is the framed bytes of the artifact's `ARTIFACT.md`, then the framed bytes of its `SKILL.md`, then, for each bundled resource in ascending byte-wise order of its UTF-8 path, the framed path followed by the framed body. An artifact that carries no `SKILL.md` frames a zero-length value in that position, so an absent and an empty `SKILL.md` produce the same digest.
+A framed value is its length in bytes, encoded as an unsigned 64-bit big-endian integer, followed by the bytes themselves. The canonical serialization is the framed bytes of the artifact's `ARTIFACT.md`, then the framed bytes of its `SKILL.md`, then, for each bundled resource in ascending byte-wise order of its UTF-8 path, the framed path followed by the framed body. An artifact that carries no `SKILL.md` frames a zero-length value in that position, so an absent and an empty `SKILL.md` produce the same digest. An artifact that carries no `ARTIFACT.md` frames a zero-length value in the first position in the same way. The content hash never frames the synthesized document of §4.3.4, and the §4.7.10 delivery record frames it as the served `ARTIFACT.md` document.
 
 The first framed value is the artifact's own `ARTIFACT.md` as ingested, before any `extends:` merge (§4.6). A merged serialization does not reproduce the digest, so any party that recomputes the digest for an artifact declaring `extends:` recomputes over the pre-merge bytes.
 
@@ -901,10 +917,11 @@ Pinning syntax in references (`extends:`, `delegates_to:`, `mcpServers:`):
 
 - `<id>`: resolves to `latest`.
 - `<id>@<semver>`: exact version.
-- `<id>@<semver>.x`: minor or patch range (e.g., `1.2.x`, `1.x`).
+- `<id>@0.0.0-auto.<N>`: exact registry-assigned version.
+- `<id>@<semver>.x`: minor or patch range (e.g., `1.2.x`, `1.x`). A range never selects a registry-assigned version.
 - `<id>@sha256:<hash>`: content-pinned.
 
-`load_artifact(<id>)` resolves to `latest` = "the most recently ingested non-deprecated version visible under the caller's effective view, at resolution time." Resolution is registry-side.
+`load_artifact(<id>)` resolves to `latest` = "the most recently ingested non-deprecated version visible under the caller's effective view, at resolution time." Resolution is registry-side. Registry-assigned versions are candidates for `latest`.
 
 For session consistency, the meta-tools accept an optional `session_id` argument (UUID generated by the host per agent session). The first `latest` lookup within a session is recorded and reused for all subsequent same-id lookups in that session, so the host sees a consistent snapshot.
 
@@ -975,7 +992,7 @@ Rotating the registry-managed key replaces the signing keypair and keeps the ret
 
 The `content_hash` (§4.7.6) names the stored artifact. For a child declaring `extends:` the registry serves a merged re-serialization (§4.6) whose bytes do not reproduce that digest, so the record a consumer materializes is not the record the content hash names. The delivery attestation binds the served record instead.
 
-The **delivery record** is the artifact identity, type, and resolved version the response carries; the `content_hash` of the stored artifact the registry composed the response from; the served `sensitivity`; the ingest time of the served version; the served `ARTIFACT.md` document, which for a child declaring `extends:` is the merged document (§4.6), for every type including a skill; the served manifest body; the served `SKILL.md`, which for a skill is the child's own; and, for each bundled resource, its path and its content hash. Its canonical serialization uses the §4.7.6 framing: the framed ASCII tag `podium/delivery-record/2`, then the framed identity, version, type, content hash, sensitivity, and ingest time in that order, then the framed `ARTIFACT.md` document, manifest body, and `SKILL.md`, then, for each bundled resource in ascending byte-wise order of its UTF-8 path, the framed path followed by the framed resource content hash. An absent `SKILL.md` frames a zero-length value. The `delivery_hash` is the SHA-256 digest of that serialization, served as `sha256:<hex>`.
+The **delivery record** is the artifact identity, type, and resolved version the response carries; the `content_hash` of the stored artifact the registry composed the response from; the served `sensitivity`; the ingest time of the served version; the served `ARTIFACT.md` document for every type including a skill, which for a child declaring `extends:` is the merged document (§4.6) and for a skill with no `ARTIFACT.md` is the synthesized document of §4.3.4 rather than a zero-length value; the served manifest body; the served `SKILL.md`, which for a skill is the child's own; and, for each bundled resource, its path and its content hash. Its canonical serialization uses the §4.7.6 framing: the framed ASCII tag `podium/delivery-record/2`, then the framed identity, version, type, content hash, sensitivity, and ingest time in that order, then the framed `ARTIFACT.md` document, manifest body, and `SKILL.md`, then, for each bundled resource in ascending byte-wise order of its UTF-8 path, the framed path followed by the framed resource content hash. An absent `SKILL.md` frames a zero-length value. The `delivery_hash` is the SHA-256 digest of that serialization, served as `sha256:<hex>`.
 
 The **ingest time** is the time at which the registry stored the served `(artifact_id, version)`, written as an RFC 3339 timestamp in UTC with exactly six fractional digits and the zone written `Z` (for example `2025-01-01T00:00:00.000000Z`), and as `1970-01-01T00:00:00.000000Z` when the registry holds no ingest time for the version or holds one before that instant. A stored version is immutable (§4.7), so its ingest time does not depend on when or by whom the record is read. A consumer compares it only with ingest times the same registry served earlier, so no consumer clock reads it. The HTTP response serves it as `artifact_revision` (§7.2).
 

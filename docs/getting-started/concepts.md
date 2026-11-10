@@ -25,21 +25,21 @@ the terms it is built from and to the page that covers it in operational detail.
 
 ## Artifact
 
-An **artifact** is a packaged authoring unit: a directory with an `ARTIFACT.md` file at its root, plus a `SKILL.md` if the artifact is a skill, and any number of bundled resources alongside (scripts, references, assets).
+An **artifact** is a packaged authoring unit: a directory with its manifest files at its root and any number of bundled resources alongside (scripts, references, assets). A skill's directory holds a `SKILL.md` and may hold an `ARTIFACT.md` overlay. Every other type's directory holds an `ARTIFACT.md`.
 
 ```
 finance/close-reporting/run-variance-analysis/   # type: skill
 ├── SKILL.md              ← agent-facing prose + the agentskills.io frontmatter
-├── ARTIFACT.md           ← Podium's structured frontmatter
+├── ARTIFACT.md           ← optional overlay: Podium's structured frontmatter
 ├── scripts/
 │   └── variance.py
 └── references/
     └── variance-explained.md
 ```
 
-Each manifest is markdown with YAML frontmatter. For skills, `SKILL.md` carries the standard's frontmatter (`name`, `description`, plus optional `license`, `compatibility`, `metadata`, `allowed-tools`) and the prose body that the agent reads. `ARTIFACT.md` carries Podium's structured frontmatter (`type`, `version`, `when_to_use`, `tags`, `sensitivity`, and the rest); for skills its body is empty. For non-skill types, `ARTIFACT.md` is the only manifest and carries both frontmatter and prose body.
+Each manifest is markdown with YAML frontmatter. For skills, `SKILL.md` carries the standard's frontmatter (`name`, `description`, plus optional `license`, `compatibility`, `metadata`, `allowed-tools`) and the prose body that the agent reads. `ARTIFACT.md` carries Podium's structured frontmatter (`type`, `version`, `when_to_use`, `tags`, `sensitivity`, and the rest). For a skill, `ARTIFACT.md` is an optional overlay that the author writes by hand, and its body is empty. For non-skill types, `ARTIFACT.md` is the only manifest and carries both frontmatter and prose body.
 
-The directory path is the artifact's **canonical ID**: `finance/close-reporting/run-variance-analysis` above. Other artifacts reference it by that ID, optionally with `@<semver>` or `@sha256:<hash>` for version pinning.
+The directory path is the artifact's **canonical ID**: `finance/close-reporting/run-variance-analysis` above. Other artifacts reference it by that ID, optionally with `@<semver>`, `@0.0.0-auto.<N>`, or `@sha256:<hash>` for version pinning.
 
 The unit is the directory rather than the manifest file. Everything beside the manifest is a **bundled resource**. A skill carries its resources inside the skill folder in every destination that ships the skill: a workspace tree written by `podium sync`, a lazily loaded artifact written by `load_artifact`, and a published marketplace repository. Workspace materialization of an `agent`, `command`, `context`, or `hook` artifact writes the resources to a bucket beside the native file, such as `.podium/resources/<id>/` or `.podium/context/<id>/`. Workspace materialization of a `type: rule` or `type: mcp-server` artifact writes only the rule file or the config-file entry, so those two types drop their bundled resources. [Bundled resources](../authoring/bundled-resources) covers the conventional subfolders, the size limits, and the handling of large files.
 
@@ -47,7 +47,7 @@ The unit is the directory rather than the manifest file. Everything beside the m
 
 ## Type
 
-Every artifact declares a `type:`. Built-in artifact types include:
+Every artifact has a `type:`, and a skill with no `ARTIFACT.md` has the type `skill`. Built-in artifact types include:
 
 | Type | What it is |
 |:--|:--|

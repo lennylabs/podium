@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
@@ -122,9 +123,13 @@ func overlayTokens(rec filesystem.ArtifactRecord) []string {
 }
 
 // manifestBodyOf returns ARTIFACT.md body bytes minus the YAML
-// frontmatter so BM25 sees prose, not duplicated structured fields.
+// frontmatter so BM25 sees prose, not duplicated structured fields. The
+// synthesized ARTIFACT.md of a skill with no ARTIFACT.md has no authored
+// prose, so its pointer comment is not indexed.
+//
+// Spec: §4.3.4
 func manifestBodyOf(rec filesystem.ArtifactRecord) string {
-	if len(rec.ArtifactBytes) == 0 {
+	if len(rec.ArtifactBytes) == 0 || manifest.IsSynthesizedSkillDocument(rec.ArtifactBytes) {
 		return ""
 	}
 	src := string(rec.ArtifactBytes)

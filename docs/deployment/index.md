@@ -14,7 +14,7 @@ Podium runs in tiers. Each tier keeps everything the tier below it does and adds
 | [Single node](single-node) | One binary | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in local, plus discovery through MCP or the SDKs, hybrid search, registered and remote layers with visibility, and one audit log |
 | [Clustered](clustered) | Replicas, Postgres, and object storage | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in single node, plus Postgres schema-per-org tenant isolation and high availability across registry replicas |
 
-Artifacts are the same in every tier. The catalog on disk does not change when the deployment changes, and the same shared Go library parses, composes, and materializes it everywhere, so a given target and profile produce bit-identical output.
+Artifacts are the same in every tier. The catalog on disk does not change when the deployment changes, and the same shared Go library parses, composes, and materializes it everywhere, so a given target and profile produce bit-identical output. [Local](local#skills-that-declare-no-version) lists the exceptions for skills that declare no version.
 
 ## What runs in each tier
 

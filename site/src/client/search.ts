@@ -3,7 +3,6 @@ import type MiniSearchType from "minisearch";
 import { NAVIGATE_EVENT } from "./router";
 
 type Stored = {
-  route: string;
   page: string;
   heading: string;
   section: string;
@@ -30,7 +29,7 @@ async function load(basePath: string): Promise<void> {
   ]);
   index = MiniSearch.loadJSON<Stored>(serialized, {
     fields: ["page", "heading", "text"],
-    storeFields: ["route", "page", "heading", "section"],
+    storeFields: ["page", "heading", "section"],
     searchOptions: { boost: { page: 3, heading: 2 }, prefix: true, fuzzy: 0.2 },
   });
 }
@@ -85,15 +84,18 @@ function open(overlay: HTMLElement, input: HTMLInputElement): void {
   input.select();
 }
 
+/** A search result: the stored fields plus the document ID, which is the route. */
+type Hit = Stored & { id: string; score: number };
+
 /**
- * The index stores each route as the site publishes it, without the path prefix
- * the site is served under, so every result href is joined with the base path
- * the page carries.
+ * The index keys each entry by its route as the site publishes it, without the
+ * path prefix the site is served under, so every result href is joined with
+ * the base path the page carries.
  */
 function render(
   results: HTMLElement,
   basePath: string,
-  hits: Array<Stored & { score: number }>,
+  hits: Hit[],
 ): void {
   if (hits.length === 0) {
     results.innerHTML = `<li class="search-empty">No matches.</li>`;
@@ -104,7 +106,7 @@ function render(
     .map((hit) => {
       const context = [hit.section, hit.page].filter((part) => part !== "").join(" · ");
       const label = hit.heading === "" ? hit.page : hit.heading;
-      const href = escape(`${basePath}${hit.route}`);
+      const href = escape(`${basePath}${hit.id}`);
       return `<li class="search-result"><a href="${href}"><span class="search-result-title">${escape(label)}</span><span class="search-result-context">${escape(context)}</span></a></li>`;
     })
     .join("");
@@ -151,7 +153,7 @@ export function mountSearch(basePath: string): void {
     render(
       results,
       basePath,
-      index.search(query) as unknown as Array<Stored & { score: number }>,
+      index.search(query) as unknown as Hit[],
     );
   };
 

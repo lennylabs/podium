@@ -95,11 +95,11 @@ across projects, run `podium init --global` instead.
 
 ## 3. Write your first skill
 
-A skill is a directory with two manifest files at its root:
-`SKILL.md` from the [agentskills.io](https://agentskills.io/specification)
-standard and `ARTIFACT.md` for Podium metadata. The registry path is one
-filesystem layer; artifacts and intermediate domain directories live
-underneath. The example below creates a `greet` skill under a `personal/hello/`
+A skill is a directory with a `SKILL.md` from the
+[agentskills.io](https://agentskills.io/specification) standard at its root.
+An optional `ARTIFACT.md` beside it carries Podium-only fields. The registry
+path is one filesystem layer; artifacts and intermediate domain directories
+live underneath. The example below creates a `greet` skill under a `personal/hello/`
 domain path:
 
 ```bash
@@ -110,28 +110,17 @@ cat > ~/podium-artifacts/personal/hello/greet/SKILL.md <<'EOF'
 name: greet
 description: Greet the user by name and tell them today's date. Use when the user greets you or asks who you are.
 license: MIT
+metadata:
+  version: "1.0.0"
 ---
 
 Greet the user by their first name (ask if you don't know it).
 Tell them today's date in a friendly format. Keep it to one or
 two sentences.
 EOF
-
-cat > ~/podium-artifacts/personal/hello/greet/ARTIFACT.md <<'EOF'
----
-type: skill
-version: 1.0.0
-when_to_use:
-  - "When the user greets you or asks who you are."
-tags: [demo, hello-world]
-sensitivity: low
----
-
-<!-- Skill body lives in SKILL.md. -->
-EOF
 ```
 
-Add a script the skill can call. Anything beside the two manifests is a bundled
+Add a script the skill can call. Anything beside the manifest files is a bundled
 resource, and `scripts/` is the convention for executable helpers:
 
 ```bash
@@ -146,10 +135,10 @@ print(date.today().strftime("%A, %-d %B %Y"))
 EOF
 ```
 
-The pair of files has these roles:
+The files have these roles:
 
-- **`SKILL.md` carries the agent-facing content.** The standard's required `name` and `description` sit in its frontmatter, and the prose body is what the agent reads.
-- **`ARTIFACT.md` carries Podium's structured frontmatter.** `type`, `version`, `when_to_use`, `tags`, `sensitivity`, and the rest of Podium's schema live here. The body is empty (a one-line HTML comment pointer).
+- **`SKILL.md` carries the agent-facing content and the version in `metadata.version`.** The standard's required `name` and `description` sit in its frontmatter, and the prose body is what the agent reads.
+- **An optional, hand-written `ARTIFACT.md` carries Podium-only fields such as `when_to_use`, `tags`, and `sensitivity`.** See the [frontmatter reference](../authoring/frontmatter-reference).
 - **The directory path is the canonical artifact ID.** Above, that is `personal/hello/greet`. References from other artifacts use this ID.
 
 The unit is the directory. Anything else placed in `greet/` is a bundled
@@ -236,8 +225,8 @@ matches the prompt and uses it to produce a greeting with the current date.
 
 For iterative authoring, run `podium sync --watch` instead of
 `podium sync`. It watches the registry directory with `fsnotify` and
-re-materializes on every change. A saved edit to `SKILL.md` or
-`ARTIFACT.md` lands in `.claude/` immediately.
+re-materializes on every change. A saved edit to `SKILL.md`, or to an
+`ARTIFACT.md` overlay, lands in `.claude/` immediately.
 
 ---
 
@@ -251,8 +240,8 @@ After the local loop works, continue with one of these paths:
   [Configure your harness](../consuming/configure-your-harness) has the roster,
   the per-type destinations, and the MCP setup for each.
 - **Add more artifacts.** Drop more directories under
-  `~/podium-artifacts/personal/` with their own `ARTIFACT.md` files
-  (and `SKILL.md` for skills).
+  `~/podium-artifacts/personal/`, each with a `SKILL.md` for a skill or an
+  `ARTIFACT.md` for other types.
   Try a different `type:`: `command`, `context`, `rule`, `hook`,
   `agent`, or `mcp-server`. The [authoring guide](../authoring/) has
   the field reference and recipes for each.
@@ -292,8 +281,8 @@ After the local loop works, continue with one of these paths:
 resolved `defaults.registry` is empty. Re-run step 2.
 
 **`podium sync` says no artifacts.** Confirm that the artifact directory
-contains both `ARTIFACT.md` and (for skills) `SKILL.md` at its immediate
-root. The directory path beneath `~/podium-artifacts/` is the canonical
+holds `SKILL.md` (for a skill) or `ARTIFACT.md` (for other types) at its
+immediate root. The directory path beneath `~/podium-artifacts/` is the canonical
 artifact ID; intermediate directories without manifest files are domain
 nodes, not artifacts.
 

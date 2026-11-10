@@ -42,6 +42,7 @@ import {
   type DeviceCodeErrorReason,
   type Tokens,
 } from "./oauth.js";
+import { isSynthesizedSkillDocument } from "./skill_document.js";
 
 export { DeviceCodeError, PendingLogin, type DeviceCodeErrorReason, type Tokens };
 export { RegistryError, RegistryReadOnly, registryErrorFromEnvelope };
@@ -434,9 +435,10 @@ export class MaterializeError extends Error {
 
 // materializeCanonical writes one artifact to disk in the canonical
 // (`none`-adapter) layout under `<to>/<id>/` (spec §6.6, §6.7): ARTIFACT.md
-// for every type, SKILL.md for skills (reconstructed as frontmatter +
-// manifest body, mirroring the registry's server-source delivery), and each
-// bundled resource at its package-relative path. Node-only filesystem and
+// unless it equals the §4.3.4 synthesized document, SKILL.md for skills
+// (reconstructed as frontmatter + manifest body, mirroring the registry's
+// server-source delivery), and each bundled resource at its package-relative
+// path. Node-only filesystem and
 // path modules load lazily so the SDK stays importable in edge bundles that
 // never materialize.
 //
@@ -474,7 +476,13 @@ async function materializeCanonical(args: {
     return target;
   };
 
-  const files: Array<[string, Uint8Array | string]> = [[safeJoin("ARTIFACT.md"), args.frontmatter]];
+  const files: Array<[string, Uint8Array | string]> = [];
+  // Spec: §6.7, §7.6, §4.3.4 — a plain skill materializes as a plain Agent
+  // Skills directory, so the synthesized ARTIFACT.md, recognized by byte
+  // equality as the none adapter recognizes it, is not written.
+  if (!isSynthesizedSkillDocument(args.frontmatter)) {
+    files.push([safeJoin("ARTIFACT.md"), args.frontmatter]);
+  }
   if (args.type === "skill") {
     // spec: §4.3.4 / §11 — prefer the verbatim SKILL.md the registry delivers;
     // fall back to frontmatter + body only when it is absent.

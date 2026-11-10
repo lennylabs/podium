@@ -23,7 +23,10 @@ var skillMDAllowedFields = map[string]bool{
 // Podium-only fields (`type`, `version`, `when_to_use`, `tags`, etc.); if
 // present, error"). It is every Podium manifest field outside the
 // agentskills.io subset in skillMDAllowedFields, including the type-specific
-// fields, so a stray hook_event or rule_mode in SKILL.md is flagged too.
+// fields, so a stray hook_event or rule_mode in SKILL.md is flagged too. A
+// top-level version is flagged because a skill's version lives in SKILL.md
+// metadata.version, with the ARTIFACT.md version taking precedence when the
+// overlay sets one (ResolveSkillVersion).
 var podiumOnlySkillFields = []string{
 	"type",
 	"version",

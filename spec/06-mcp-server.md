@@ -208,7 +208,7 @@ The gate carries no request-side value. It is the browser-origin evidence check 
 
 ## 6.4 Workspace Local Overlay
 
-The workspace local overlay is a per-developer set of artifact packages (`ARTIFACT.md` for every type, plus `SKILL.md` for skills) and `DOMAIN.md` files that merge as the **highest-precedence layer in the caller's effective view** (§4.6). It's the path most teams use for in-progress work that isn't ready to share.
+The workspace local overlay is a per-developer set of artifact packages (an `ARTIFACT.md`, a `SKILL.md`, or both, per the §4.2 discovery rule) and `DOMAIN.md` files that merge as the **highest-precedence layer in the caller's effective view** (§4.6). It's the path most teams use for in-progress work that isn't ready to share.
 
 **Path resolution.** Every consumer (MCP server, `podium sync`, language SDKs) honors the same lookup:
 
@@ -219,7 +219,7 @@ The workspace local overlay is a per-developer set of artifact packages (`ARTIFA
 
 The MCP server watches the resolved path via fsnotify and re-indexes on change. `podium sync` reads it once per invocation and again on each watcher event when `--watch` is set. The SDK reads it on each `Client.search_artifacts` and `Client.load_artifact` call (cached for the duration of a `session_id`).
 
-Format: same `ARTIFACT.md` (plus `SKILL.md` for skills) and frontmatter as the registry.
+Format: the same package layout (§4.2) and frontmatter as the registry.
 
 **Collisions with registry-side artifacts.** The workspace local overlay is an exception to the §4.6 collision rule. An overlay artifact whose canonical ID matches an artifact in the caller's composed registry-side view replaces that artifact in the consumer's view on every consumer (the MCP server, `podium sync`, and the SDKs). This holds whether or not the overlay artifact declares `extends:`: the consumer resolves no `extends:` chain for an overlay artifact and serves it as authored. The collision is neither rejected nor reported. The overlay is per-developer, is never ingested or shared, and exists for the local iteration loop, so a replacement affects only the developer who wrote it. Promoting the artifact to a shared layer subjects it to the §4.6 rule, including `extends:` resolution.
 
@@ -238,7 +238,7 @@ The default is BM25-only. Local artifacts have lower recall on semantic queries 
 Disk cache at `${PODIUM_CACHE_DIR}/<sha256>/`. Two cache layers:
 
 - **Resolution cache.** Maps `(id, "latest")` to `semver`. TTL 30s by default. Revalidated via HEAD on hit when `PODIUM_CACHE_MODE=always-revalidate`.
-- **Content cache.** Maps `content_hash` to manifest bytes + bundled resources. Forever (immutable by definition).
+- **Content cache.** Maps `content_hash` to manifest bytes + bundled resources. Forever (immutable by definition). A skill whose version the registry assigns is the exception for its version and its served `ARTIFACT.md`: after a purge lets the registry accept content it had rejected under a new registry-assigned version (§7.3.1), a cached record of that content reports the purged version and, for a skill with no `ARTIFACT.md`, the synthesized document that names it (§4.3.4). A HEAD revalidation and a `304` confirm the content hash only, so the record keeps reporting that version until the cache no longer holds it. Its body and bundled resources are the bytes the registry serves.
 
 Cache modes (set at server startup via `PODIUM_CACHE_MODE`):
 
@@ -317,7 +317,7 @@ The target for each remaining type, by adapter (paths are project-relative; `<n>
 | `hook`       | `settings.json` (cfg)     | ✗              | ✗   | `.cursor/hooks.json` (cfg) | `config.toml` (cfg)    | ✗                       | `settings.json` (cfg)      | ✗                   | ✗                     |
 | `mcp-server` | `.mcp.json` (cfg)         | ✗              | ✗          | `.cursor/mcp.json` (cfg)   | `config.toml` (cfg)    | `opencode.json` (cfg)       | `settings.json` (cfg)      | ✗                   | ✗                     |
 
-`none` writes the canonical layout (`ARTIFACT.md`, `SKILL.md`, bundled resources) without translation. The config-merge targets resolve to the harness's project-scope config file: `.claude/settings.json`, `.cursor/hooks.json` and `.cursor/mcp.json`, `.codex/config.toml`, `.gemini/settings.json`, and root `opencode.json`.
+`none` writes the canonical layout (`ARTIFACT.md`, `SKILL.md`, and bundled resources) without translation. It omits the served `ARTIFACT.md` when its bytes equal the synthesized document of §4.3.4 for the version that document names, which covers a skill with no `ARTIFACT.md` and an authored `ARTIFACT.md` identical to that document. The config-merge targets resolve to the harness's project-scope config file: `.claude/settings.json`, `.cursor/hooks.json` and `.cursor/mcp.json`, `.codex/config.toml`, `.gemini/settings.json`, and root `opencode.json`.
 
 Notes on partial and migrating surfaces:
 

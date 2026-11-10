@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // Errors returned by version functions.
@@ -36,13 +38,17 @@ const (
 )
 
 // Pin is a parsed reference. Major / Minor / Patch are populated when
-// applicable; Hash is the sha256 hex content hash for PinContentHash.
+// applicable; Hash is the sha256 hex content hash for PinContentHash. Auto
+// marks the registry-assigned 0.0.0-auto.<N> form of a PinExact, and AutoN
+// carries its N.
 type Pin struct {
 	Kind  PinKind
 	Major int
 	Minor int
 	Patch int
 	Hash  string
+	Auto  bool
+	AutoN int
 }
 
 // ParsePin parses one of the §4.7.6 forms:
@@ -52,9 +58,19 @@ type Pin struct {
 //	"1.2.x"         -> PinMinor
 //	"1.x"           -> PinMajor
 //	"sha256:<hex>"  -> PinContentHash
+//	"0.0.0-auto.N"  -> PinExact (registry-assigned)
+//
+// The registry-assigned form is the only suffix accepted. Every other
+// prerelease or build suffix, and an -auto. suffix on any core other than
+// 0.0.0, returns ErrInvalidPin.
+//
+// Spec: §4.7.6
 func ParsePin(s string) (Pin, error) {
 	if s == "" {
 		return Pin{Kind: PinLatest}, nil
+	}
+	if n, ok := manifest.IsAutoVersion(s); ok {
+		return Pin{Kind: PinExact, Auto: true, AutoN: n}, nil
 	}
 	if strings.HasPrefix(s, "sha256:") {
 		hash := strings.TrimPrefix(s, "sha256:")
@@ -118,23 +134,31 @@ func StripPin(ref string) string {
 }
 
 // Resolve picks the highest version from candidates that satisfies pin.
-// Candidates is a list of "major.minor.patch" strings; the resolved
-// version is returned, or ErrInvalidPin when no match exists.
+// Candidates is a list of exact version strings, "major.minor.patch" or the
+// registry-assigned "0.0.0-auto.N"; the matching candidate string is returned
+// unchanged, so the result always equals a stored version, or ErrInvalidPin
+// when no match exists.
+//
+// Spec: §4.7.6
 func Resolve(pin Pin, candidates []string) (string, error) {
-	versions := make([]Pin, 0, len(candidates))
+	type parsed struct {
+		pin Pin
+		src string
+	}
+	versions := make([]parsed, 0, len(candidates))
 	for _, c := range candidates {
 		v, err := ParsePin(c)
 		if err != nil || v.Kind != PinExact {
 			continue
 		}
-		versions = append(versions, v)
+		versions = append(versions, parsed{pin: v, src: c})
 	}
 	sort.Slice(versions, func(i, j int) bool {
-		return less(versions[j], versions[i]) // descending
+		return less(versions[j].pin, versions[i].pin) // descending
 	})
 	for _, v := range versions {
-		if matches(pin, v) {
-			return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch), nil
+		if matches(pin, v.pin) {
+			return v.src, nil
 		}
 	}
 	return "", fmt.Errorf("%w: no candidate matches", ErrInvalidPin)
@@ -234,6 +258,11 @@ func AtLeast(version, minimum string) (bool, error) {
 	return c >= 0, nil
 }
 
+// matches reports whether candidate satisfies pin. A range pin never selects
+// a registry-assigned version, so 0.0.x and 0.x skip 0.0.0-auto.<N>, and an
+// exact pin selects one only when it names the same N.
+//
+// Spec: §4.7.6
 func matches(pin, candidate Pin) bool {
 	switch pin.Kind {
 	case PinLatest:
@@ -241,15 +270,24 @@ func matches(pin, candidate Pin) bool {
 	case PinExact:
 		return pin.Major == candidate.Major &&
 			pin.Minor == candidate.Minor &&
-			pin.Patch == candidate.Patch
+			pin.Patch == candidate.Patch &&
+			pin.Auto == candidate.Auto &&
+			pin.AutoN == candidate.AutoN
 	case PinMinor:
-		return pin.Major == candidate.Major && pin.Minor == candidate.Minor
+		return !candidate.Auto && pin.Major == candidate.Major && pin.Minor == candidate.Minor
 	case PinMajor:
-		return pin.Major == candidate.Major
+		return !candidate.Auto && pin.Major == candidate.Major
 	}
 	return false
 }
 
+// less orders two exact versions by their major.minor.patch core, then ranks
+// a registry-assigned version below a non-auto one with the same core, as a
+// semver prerelease ranks below its release, then orders assigned versions by
+// N. Compare stays core-only because parseCore strips the suffix before it
+// reaches here.
+//
+// Spec: §4.7.6
 func less(a, b Pin) bool {
 	if a.Major != b.Major {
 		return a.Major < b.Major
@@ -257,7 +295,13 @@ func less(a, b Pin) bool {
 	if a.Minor != b.Minor {
 		return a.Minor < b.Minor
 	}
-	return a.Patch < b.Patch
+	if a.Patch != b.Patch {
+		return a.Patch < b.Patch
+	}
+	if a.Auto != b.Auto {
+		return a.Auto
+	}
+	return a.AutoN < b.AutoN
 }
 
 // CanonicalContentHash returns the §4.7.6 content hash of one artifact: the

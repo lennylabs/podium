@@ -27,8 +27,10 @@ func fmSkillMD(name, desc string) string {
 
 // ---- File allocation for skills (scaffold split) ---------------------------
 
-// skill scaffold puts name/description in SKILL.md, keeps
-// type/version in ARTIFACT.md, and writes an HTML-comment ARTIFACT.md body.
+// Spec: §4.3.4 — a skill scaffold writes SKILL.md alone, with name and
+// description at the top level and the version under metadata. The
+// Podium-only flags are refused with exit 2, because a skill's ARTIFACT.md
+// is a hand-written overlay that no Podium tool generates.
 func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/close/run-variance-analysis")
@@ -37,20 +39,53 @@ func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 	if sc.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
 	}
-	art := readFile(t, filepath.Join(out, "ARTIFACT.md"))
-	if !strings.Contains(art, "type: skill") || !strings.Contains(art, "version:") {
-		t.Errorf("ARTIFACT.md missing type/version:\n%s", art)
-	}
-	if strings.Contains(art, "name:") || strings.Contains(art, "description:") {
-		t.Errorf("skill ARTIFACT.md must not carry name/description:\n%s", art)
-	}
-	skill := readFile(t, filepath.Join(out, "SKILL.md"))
+	skill := assertScaffoldedSkillAlone(t, out, "0.1.0")
 	if !strings.Contains(skill, "name: run-variance-analysis") || !strings.Contains(skill, "description:") {
 		t.Errorf("SKILL.md missing name/description:\n%s", skill)
 	}
 	if strings.Contains(skill, "type:") {
 		t.Errorf("SKILL.md must not carry type:\n%s", skill)
 	}
+
+	for _, tc := range []struct{ flag, value string }{
+		{"--tags", "finance,close"},
+		{"--sensitivity", "medium"},
+		{"--when-to-use", "After month-end close"},
+	} {
+		refused := filepath.Join(t.TempDir(), "finance/close/refused-skill")
+		res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
+			"--description", "Refused.", tc.flag, tc.value, "--yes", refused)
+		assertSkillOverlayRefusal(t, res, refused, tc.flag)
+	}
+}
+
+// assertScaffoldedSkillAlone fails the test unless dir holds a SKILL.md
+// carrying version under metadata and no ARTIFACT.md (§4.3.4). It returns
+// the SKILL.md text for further assertions.
+func assertScaffoldedSkillAlone(t testing.TB, dir, version string) string {
+	t.Helper()
+	mustNotExist(t, filepath.Join(dir, "ARTIFACT.md"))
+	skill := readFile(t, filepath.Join(dir, "SKILL.md"))
+	if want := "metadata:\n  version: \"" + version + "\"\n"; !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md missing %q:\n%s", want, skill)
+	}
+	return skill
+}
+
+// assertSkillOverlayRefusal fails the test unless res is the exit-2 refusal
+// that names every flag in flags, in that order, and points at the
+// ARTIFACT.md overlay, and the refused scaffold created no directory at dir
+// (§4.3.4).
+func assertSkillOverlayRefusal(t testing.TB, res cliResult, dir string, flags ...string) {
+	t.Helper()
+	if res.Exit != 2 {
+		t.Errorf("scaffold %v exit=%d, want 2\nstderr=%s", flags, res.Exit, res.Stderr)
+	}
+	want := "error: " + strings.Join(flags, ", ") + " set Podium-only fields; write them in a hand-written ARTIFACT.md overlay"
+	if !strings.Contains(res.Stderr, want) {
+		t.Errorf("stderr missing %q:\n%s", want, res.Stderr)
+	}
+	mustNotExist(t, dir)
 }
 
 // a non-skill scaffold emits a single ARTIFACT.md with the

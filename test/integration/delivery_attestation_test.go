@@ -59,6 +59,10 @@ var (
 		{ArtifactID: "base/skillparent", Layer: "base", Type: "skill",
 			Frontmatter: []byte("---\ntype: skill\nversion: 1.0.0\ndescription: Parent skill.\n---\n"),
 			SkillRaw:    []byte("---\nname: skillparent\ndescription: Parent skill.\n---\n\nparent skill prose\n")},
+		// team/plainskill is a skill with no ARTIFACT.md: its stored
+		// manifest is empty and the registry serves the synthesized document.
+		{ArtifactID: "team/plainskill", Layer: "team", Type: "skill",
+			SkillRaw: []byte("---\nname: plainskill\ndescription: A plain skill.\n---\n\nplain skill prose\n")},
 		{ArtifactID: "team/bigskill", Layer: "team", Type: "skill", ExtendsPin: "base/skillparent@1.0.0",
 			Frontmatter: []byte("---\ntype: skill\nversion: 1.0.0\ndescription: Big skill.\nextends: base/skillparent@1.0.0\n---\n"),
 			SkillRaw:    []byte("---\nname: bigskill\ndescription: Big skill.\n---\n\n" + daBigBody)},
@@ -230,13 +234,18 @@ func batchRecord(t *testing.T, raw []byte) version.DeliveryRecord {
 // and a recomputation from each path's own served bytes reproduces it, the
 // batch entry's from its own sensitivity: a plain artifact with resources, a
 // classified artifact, a merged child below the cutoff, a merged child
-// whose merged document the single-load path serves by manifest_body_url, and
-// a skill.
+// whose merged document the single-load path serves by manifest_body_url, a
+// skill, and a skill with no ARTIFACT.md, whose records frame the synthesized
+// document (§4.3.4).
 func TestLoadArtifact_SingleAndBatchAgreeOnTheDeliveryHash(t *testing.T) {
 	t.Parallel()
 	f := newDAFixture(t)
 	verifier := sign.RegistryManagedKey{PublicKey: f.pub}
-	for _, id := range []string{"team/withres", "team/plain", "team/child", "team/big", "team/skill"} {
+	synthesized, err := manifest.SynthesizedSkillDocument("1.0.0")
+	if err != nil {
+		t.Fatalf("SynthesizedSkillDocument: %v", err)
+	}
+	for _, id := range []string{"team/withres", "team/plain", "team/child", "team/big", "team/skill", "team/plainskill"} {
 		t.Run(id, func(t *testing.T) {
 			single, singleRaw := f.load(t, id, "alice")
 			env, batchRaw := f.batch(t, id, "alice")
@@ -265,6 +274,21 @@ func TestLoadArtifact_SingleAndBatchAgreeOnTheDeliveryHash(t *testing.T) {
 			}
 			if got := version.DeliveryHash(batchRecord(t, batchRaw)); got != env.DeliveryHash {
 				t.Errorf("batch recomputation = %s, served %s", got, env.DeliveryHash)
+			}
+			if id != "team/plainskill" {
+				return
+			}
+			// Spec: §4.3.4, §4.7.10 — both paths serve and frame the
+			// synthesized ARTIFACT.md.
+			for path, fm := range map[string]string{
+				"single":        single.Frontmatter,
+				"batch":         env.Frontmatter,
+				"single record": f.singleRecord(t, singleRaw, "alice").Frontmatter,
+				"batch record":  batchRecord(t, batchRaw).Frontmatter,
+			} {
+				if fm != string(synthesized) {
+					t.Errorf("%s frontmatter = %q, want the synthesized %q", path, fm, synthesized)
+				}
 			}
 		})
 	}

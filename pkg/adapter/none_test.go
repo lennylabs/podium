@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // Spec: §6.7 Harness Adapters — the none adapter writes the canonical
@@ -147,5 +149,56 @@ func TestNone_OutputIsDeterministic(t *testing.T) {
 				t.Errorf("iter %d, paths[%d] = %q, want %q", i, j, paths[j], w)
 			}
 		}
+	}
+}
+
+// Spec: §6.7, §4.3.4 — none omits the served ARTIFACT.md when it is the
+// synthesized document, writes an authored document, and writes a document
+// that differs from the synthesized one by a single byte.
+func TestNone_OmitsSynthesizedSkillDocument(t *testing.T) {
+	t.Parallel()
+	synth, err := manifest.SynthesizedSkillDocument("0.0.0-auto.3")
+	if err != nil {
+		t.Fatalf("SynthesizedSkillDocument: %v", err)
+	}
+	oneByteOff := append([]byte(nil), synth...)
+	oneByteOff[len(oneByteOff)-2] = 'X'
+	cases := []struct {
+		name          string
+		artifactBytes []byte
+		wantArtifact  bool
+	}{
+		{"synthesized", synth, false},
+		{"authored", []byte("---\ntype: skill\nversion: 1.0.0\n---\n"), true},
+		{"one byte different", oneByteOff, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			src := Source{
+				ArtifactID:    "skills/greet",
+				ArtifactBytes: tc.artifactBytes,
+				SkillBytes:    []byte("---\nname: greet\ndescription: Greet.\n---\nbody\n"),
+				Resources:     map[string][]byte{"scripts/x.py": []byte("print('x')\n")},
+			}
+			out, err := None{}.Adapt(context.Background(), src)
+			if err != nil {
+				t.Fatalf("Adapt: %v", err)
+			}
+			want := []string{"skills/greet/SKILL.md", "skills/greet/scripts/x.py"}
+			if tc.wantArtifact {
+				want = append([]string{"skills/greet/ARTIFACT.md"}, want...)
+			}
+			got := make([]string, len(out))
+			for i, f := range out {
+				got[i] = f.Path
+			}
+			if strings.Join(got, ",") != strings.Join(want, ",") {
+				t.Fatalf("paths = %v, want %v", got, want)
+			}
+			if tc.wantArtifact && string(out[0].Content) != string(tc.artifactBytes) {
+				t.Errorf("ARTIFACT.md content = %q, want %q", out[0].Content, tc.artifactBytes)
+			}
+		})
 	}
 }

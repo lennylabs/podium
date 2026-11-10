@@ -52,13 +52,14 @@ func assertLintClean(t *testing.T, root string) {
 	}
 }
 
+// Spec: §4.3.4 — a skill scaffold writes SKILL.md alone, carrying the
+// Agent Skills fields and the version under metadata, and no ARTIFACT.md.
 func TestScaffold_Skill_LintClean(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "greet")
-	exit, _, stderr := runScaffold([]string{
+	exit, stdout, stderr := runScaffold([]string{
 		"--type", "skill",
 		"--description", "Greet the user by name.",
-		"--tags", "demo,greeting",
 		"--license", "MIT",
 		"--yes",
 		target,
@@ -66,31 +67,107 @@ func TestScaffold_Skill_LintClean(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
 	}
-	for _, f := range []string{"ARTIFACT.md", "SKILL.md"} {
-		if _, err := os.Stat(filepath.Join(target, f)); err != nil {
-			t.Errorf("expected %s: %v", f, err)
+	assertSkillMDAlone(t, target)
+	skill, _ := os.ReadFile(filepath.Join(target, "SKILL.md"))
+	for _, want := range []string{
+		"name: greet\n",
+		"description: Greet the user by name.\n",
+		"license: MIT\n",
+		"metadata:\n  version: \"0.1.0\"\n",
+	} {
+		if !bytes.Contains(skill, []byte(want)) {
+			t.Errorf("SKILL.md missing %q: %s", want, skill)
 		}
 	}
-	// SKILL.md carries the agentskills.io fields; ARTIFACT.md must
-	// not duplicate them (lint rule §4.3.4).
-	skill, _ := os.ReadFile(filepath.Join(target, "SKILL.md"))
-	if !bytes.Contains(skill, []byte("name: greet")) {
-		t.Errorf("SKILL.md missing name: %s", skill)
-	}
-	if !bytes.Contains(skill, []byte("description: Greet the user by name.")) {
-		t.Errorf("SKILL.md missing description: %s", skill)
-	}
-	if !bytes.Contains(skill, []byte("license: MIT")) {
-		t.Errorf("SKILL.md missing license: %s", skill)
-	}
-	artifact, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
-	if bytes.Contains(artifact, []byte("name:")) {
-		t.Errorf("ARTIFACT.md must not carry name: for skills (§4.3.4): %s", artifact)
-	}
-	if bytes.Contains(artifact, []byte("description:")) {
-		t.Errorf("ARTIFACT.md must not carry description: for skills (§4.3.4): %s", artifact)
+	if strings.Contains(stdout, "ARTIFACT.md") || !strings.Contains(stdout, "  SKILL.md\n") {
+		t.Errorf("success message must name SKILL.md alone: %s", stdout)
 	}
 	assertLintClean(t, root)
+}
+
+// assertSkillMDAlone fails the test unless dir holds SKILL.md and no
+// ARTIFACT.md, which §4.3.4 reserves for a hand-written overlay.
+func assertSkillMDAlone(t *testing.T, dir string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
+		t.Errorf("expected SKILL.md: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ARTIFACT.md")); !os.IsNotExist(err) {
+		t.Errorf("ARTIFACT.md must not be written for a skill (stat err=%v)", err)
+	}
+}
+
+// Spec: §4.3.4 — --tags with --type skill is refused with exit 2, the
+// message points at the ARTIFACT.md overlay, and no directory is created.
+func TestScaffold_Skill_RefusesTags(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "greet")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "skill",
+		"--description", "Greet the user by name.",
+		"--tags", "demo,greeting",
+		"--yes",
+		target,
+	}, "")
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2 (stderr=%s)", exit, stderr)
+	}
+	if !strings.Contains(stderr, "--tags") || !strings.Contains(stderr, "ARTIFACT.md overlay") {
+		t.Errorf("stderr must name --tags and the ARTIFACT.md overlay: %s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "personal")); !os.IsNotExist(err) {
+		t.Errorf("refusal must create no directory (stat err=%v)", err)
+	}
+}
+
+// Spec: §4.3.4 — every refused flag is reported in one message, named in
+// flag-definition order whatever order the command line used.
+func TestScaffold_Skill_RefusesFlagsInDefinitionOrder(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "greet")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "skill",
+		"--description", "Greet the user by name.",
+		"--extends", "finance/ap/parent@1.x",
+		"--when-to-use", "greeting",
+		"--sensitivity", "high",
+		"--tags", "demo",
+		"--yes",
+		target,
+	}, "")
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2 (stderr=%s)", exit, stderr)
+	}
+	want := "error: --tags, --sensitivity, --when-to-use, --extends set Podium-only fields; write them in a hand-written ARTIFACT.md overlay (see docs/authoring/frontmatter-reference.md)\n"
+	if stderr != want {
+		t.Errorf("stderr = %q, want %q", stderr, want)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("refusal must create no directory (stat err=%v)", err)
+	}
+}
+
+// Spec: §4.3.4 — an invalid --sensitivity value is reported by the value
+// check, which runs before the skill refusal.
+func TestScaffold_Skill_BadSensitivityReportsHint(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "greet")
+	exit, _, stderr := runScaffold([]string{
+		"--type", "skill",
+		"--description", "Greet the user by name.",
+		"--sensitivity", "ultra",
+		"--yes",
+		target,
+	}, "")
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2", exit)
+	}
+	if !strings.Contains(stderr, "low|medium|high") || strings.Contains(stderr, "overlay") {
+		t.Errorf("stderr must carry the sensitivity hint alone: %s", stderr)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("rejection must create no directory (stat err=%v)", err)
+	}
 }
 
 func TestScaffold_Context_LintClean(t *testing.T) {
@@ -99,6 +176,7 @@ func TestScaffold_Context_LintClean(t *testing.T) {
 	exit, _, stderr := runScaffold([]string{
 		"--type", "context",
 		"--description", "Company glossary of acronyms.",
+		"--tags", "glossary,reference",
 		"--yes",
 		target,
 	}, "")
@@ -111,6 +189,9 @@ func TestScaffold_Context_LintClean(t *testing.T) {
 	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
 	if !bytes.Contains(body, []byte("type: context")) {
 		t.Errorf("ARTIFACT.md missing type: %s", body)
+	}
+	if !bytes.Contains(body, []byte("tags: [glossary, reference]")) {
+		t.Errorf("ARTIFACT.md missing tags: %s", body)
 	}
 	if !bytes.Contains(body, []byte("name: company-glossary")) {
 		t.Errorf("ARTIFACT.md missing name: %s", body)
@@ -296,6 +377,8 @@ func TestScaffold_MCPServer_RequiresIdentifier(t *testing.T) {
 	}
 }
 
+// Spec: §4.2, §4.3.4 — intermediate path components become domains,
+// and the skill package holds SKILL.md alone.
 func TestScaffold_DomainHierarchyInPath(t *testing.T) {
 	root := t.TempDir()
 	// <root>/team-shared/finance/ap/pay-invoice/ — the scaffolder
@@ -310,11 +393,7 @@ func TestScaffold_DomainHierarchyInPath(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
 	}
-	for _, f := range []string{"ARTIFACT.md", "SKILL.md"} {
-		if _, err := os.Stat(filepath.Join(target, f)); err != nil {
-			t.Errorf("expected %s: %v", f, err)
-		}
-	}
+	assertSkillMDAlone(t, target)
 	assertLintClean(t, root)
 }
 
@@ -857,8 +936,9 @@ func TestScaffold_ExtendsOnContext(t *testing.T) {
 	}
 }
 
-// --extends populates the extends field for skill (ARTIFACT.md,
-// not SKILL.md — extends is Podium-specific per §4.3.4).
+// Spec: §4.3.4 — extends is a Podium-only field, so --extends with
+// --type skill is refused and the author writes it in an ARTIFACT.md
+// overlay by hand.
 func TestScaffold_ExtendsOnSkill(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "child-skill")
@@ -869,16 +949,14 @@ func TestScaffold_ExtendsOnSkill(t *testing.T) {
 		"--yes",
 		target,
 	}, "")
-	if exit != 0 {
-		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	if exit != 2 {
+		t.Fatalf("exit=%d, want 2 (stderr=%s)", exit, stderr)
 	}
-	artifact, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
-	if !bytes.Contains(artifact, []byte("extends: finance/ap/parent@1.x")) {
-		t.Errorf("extends not written to skill ARTIFACT.md: %s", artifact)
+	if !strings.Contains(stderr, "error: --extends set Podium-only fields; write them in a hand-written ARTIFACT.md overlay") {
+		t.Errorf("stderr missing the overlay message: %s", stderr)
 	}
-	skill, _ := os.ReadFile(filepath.Join(target, "SKILL.md"))
-	if bytes.Contains(skill, []byte("extends:")) {
-		t.Errorf("extends must live in ARTIFACT.md only (§4.3.4): %s", skill)
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("refusal must create no directory (stat err=%v)", err)
 	}
 }
 
@@ -1058,9 +1136,10 @@ func TestScaffold_WriteFileFailsCleanly(t *testing.T) {
 }
 
 // Same as above but for the skill branch: pre-create SKILL.md as a
-// directory so the second WriteFile in renderAndWrite fails (the
-// ARTIFACT.md write succeeds first). Covers the skill-specific
-// SKILL.md write-error branch.
+// directory so the single WriteFile in renderAndWrite fails on the
+// skill's SKILL.md.
+//
+// Spec: §4.3.4
 func TestScaffold_Skill_SkillMDWriteFailsCleanly(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "greet")

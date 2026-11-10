@@ -698,6 +698,9 @@ const (
 	greetSkillArtifact = "---\ntype: skill\nversion: 1.0.0\ntags: [demo, hello-world]\nsensitivity: low\n---\n\n<!-- Skill body lives in SKILL.md. -->\n"
 	// greetSkillBody is the matching SKILL.md.
 	greetSkillBody = "---\nname: greet\ndescription: Greet the user by name and tell them today's date. Use when the user greets you or asks who you are.\nlicense: MIT\n---\n\nGreet the user warmly and state today's date.\n"
+	// greetSkillVersioned is the quickstart's and the README's SKILL.md: a
+	// complete skill with no ARTIFACT.md, versioned through metadata.version.
+	greetSkillVersioned = "---\nname: greet\ndescription: Greet the user by name and tell them today's date. Use when the user greets you or asks who you are.\nlicense: MIT\nmetadata:\n  version: \"1.0.0\"\n---\n\nGreet the user warmly and state today's date.\n"
 )
 
 // runExternal runs an arbitrary command (go, make, ...) found on PATH with a

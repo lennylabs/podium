@@ -184,7 +184,7 @@ Commands:
   cache prune         Remove content-cache buckets older than N days.
   cache reset-revisions
                       Delete the revision marks podium-mcp keeps for latest loads.
-  import              Convert a skills/* tree into a Podium-shaped layer.
+  import              Normalize a directory of skills into a layer of plain skill directories.
   sync                Materialize the caller's effective view through a HarnessAdapter.
   sync override       Add or remove ephemeral artifact toggles.
   sync save-as        Capture the current target state as a sync.yaml profile.

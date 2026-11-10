@@ -183,23 +183,24 @@ Validates manifests against the type's schema and runs type-specific rules. CI-f
 podium lint --registry <path>
 ```
 
-`--registry <path>` is required and points at a filesystem registry root. The command walks every artifact under that root, validating each `ARTIFACT.md` (plus `SKILL.md` for skills) and any `DOMAIN.md` against the type's schema. To lint a single artifact, point `--registry` at a root that resolves that artifact's canonical ID. Exits 2 when `--registry` is absent, exits 1 on lint errors, and exits 0 when the registry is clean. Pass `--offline` to skip the URL HEAD check and validate only bundled-file references.
+`--registry <path>` is required and points at a filesystem registry root. The command walks every artifact under that root, validating each `SKILL.md`, each `ARTIFACT.md`, and any `DOMAIN.md` against the type's schema. To lint a single artifact, point `--registry` at a root that resolves that artifact's canonical ID. Exits 2 when `--registry` is absent, exits 1 on lint errors, and exits 0 when the registry is clean. Pass `--offline` to skip the URL HEAD check and validate only bundled-file references.
 
 ### `podium import`
 
-Converts a directory tree of standalone skill files (each skill in its own subdirectory with a `SKILL.md` inside) into a Podium-shaped filesystem layer where each artifact has an `ARTIFACT.md`, a `SKILL.md`, and any bundled resources. Filesystem-only; the command never modifies the source.
+Normalizes a directory of skills into Agent Skills directories. Each immediate subdirectory of `--source` becomes a directory under `--target` named for that subdirectory. The directory holds a `SKILL.md`, taken from the source `SKILL.md` or, when there is none, from the single root-level `.md` file, plus every other file as a bundled resource. A subdirectory with no root-level `.md` file is skipped. `--version` is written to `SKILL.md` `metadata.version`. The command writes no `ARTIFACT.md` and never modifies the source. The command is optional, because a directory of skill directories is already a valid layer.
 
 ```
-podium import --source <dir> --target <dir> [--type <type>] [--version <semver>] [--dry-run]
+podium import --source <dir> --target <dir> [--version <semver>] [--dry-run]
 ```
 
 | Flag | Effect |
 |:--|:--|
 | `--source <dir>` | Directory of skill subdirectories. Each immediate subdirectory name becomes the artifact ID. Required. |
 | `--target <dir>` | Destination layer directory. Required. |
-| `--type <type>` | Artifact type written into `ARTIFACT.md`. Default: `skill`. |
-| `--version <semver>` | Artifact version written into `ARTIFACT.md`. Default: `1.0.0`. |
+| `--version <semver>` | Version written to `SKILL.md` `metadata.version`. Default: `1.0.0`. |
 | `--dry-run` | Report the plan; write nothing. |
+
+The command exits 1 and names the directory when a source directory holds an `ARTIFACT.md`, when an existing `SKILL.md` carries a `metadata.version` different from `--version`, when the chosen file has no frontmatter block, or when the root holds several `.md` files and no `SKILL.md`. `--dry-run` runs the same checks before reporting the plan.
 
 ---
 
@@ -388,11 +389,13 @@ podium artifact scaffold --type <type> --description <text>
                          <path>
 ```
 
-`--sensitivity` defaults to `low` and `--version` defaults to `0.1.0`. `--type` is required. It accepts the first-class artifact types and `mcp-server`, the extension type Podium ships built-in:
+For `--type skill`, the command refuses `--tags`, `--when-to-use`, `--extends`, and an explicitly passed `--sensitivity` with exit 2, because they are Podium-only fields that belong in a hand-written `ARTIFACT.md` overlay (see the [frontmatter reference](../authoring/frontmatter-reference)).
+
+`--version` defaults to `0.1.0`. For types other than `skill`, `--sensitivity` defaults to `low`. `--type` is required. It accepts the first-class artifact types and `mcp-server`, the extension type Podium ships built-in:
 
 | Type | Files written | Type-specific flags |
 |---|---|---|
-| `skill` | ARTIFACT.md + SKILL.md (per §4.3.4 field allocation) | — |
+| `skill` | `SKILL.md` (with `metadata.version`) | — |
 | `agent` | ARTIFACT.md | `--input-schema`, `--output-schema`, `--delegates-to` |
 | `context` | ARTIFACT.md | — |
 | `command` | ARTIFACT.md | — |
@@ -408,13 +411,12 @@ Extension types (anything outside the first-class enum) are accepted with a warn
 podium artifact scaffold \
     --type skill \
     --description "Draft release notes from a list of ticket keys." \
-    --tags "release,workflow" \
     --license MIT \
     --yes \
     finance/release/release-notes
 ```
 
-This writes `finance/release/release-notes/ARTIFACT.md` and `SKILL.md` (intermediate domain directories are created). Per spec §4.3.4, `name`, `description`, and `license` live in `SKILL.md`; `ARTIFACT.md` carries Podium's structured fields and an empty-body marker.
+This writes `finance/release/release-notes/SKILL.md` and creates the intermediate domain directories. `SKILL.md` carries `name`, `description`, `license`, and `metadata.version`. The command writes no `ARTIFACT.md`.
 
 **Conditional requirements when `--yes` is set:**
 

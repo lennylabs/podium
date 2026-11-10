@@ -103,6 +103,29 @@ podium layer register --id alice-personal \
 
 An authenticated caller without the tenant `admin` role registers a user-defined layer whether or not `--user-defined` is passed, where the registration asserts none of `owner`, `public`, `organization`, `groups`, and `users`. The registry resolves the class from the caller's identity. A registration that asserts one of those fields is refused with `auth.forbidden` carrying `details.constraint: "admin_only_fields"`, as the section below states.
 
+### Using an Agent Skills repository as a layer
+
+A repository of Agent Skills directories registers as a layer with no `ARTIFACT.md` in any skill. Discovery treats a directory below the layer root as a package when it directly contains `ARTIFACT.md`, and when it directly contains `SKILL.md` and sits inside no other package. A package with `SKILL.md` and no `ARTIFACT.md` is a `type: skill` artifact. A repository whose skills sit under `skills/<name>/` registers as a git layer with `root: skills`, and the canonical IDs are `<name>`:
+
+```yaml
+registry:
+  layers:
+    - id: acme-skills
+      source:
+        git:
+          repo: git@github.com:acme/agent-skills.git
+          ref: main
+          root: skills
+```
+
+Discovery skips every directory below the layer root whose name begins with a dot. A repository whose skills sit under `.claude/skills/` or `.agents/skills/` names the dot directory in `root`. With `root: .claude/skills` the canonical IDs are `<name>`, and with `root: .claude` they are `skills/<name>`.
+
+`root` names a subtree path inside the repository and is written without a trailing slash.
+
+A repository whose root directory is itself a single skill cannot register as a git layer. A manifest at the layer root has no canonical ID, and `root` cannot name a directory above the repository root, so a reingest of such a layer fails with `ingest.lint_failed`. Register it as a `local` layer whose path holds a copy of the skill without its `.git/` directory, for example one filled by `git -C <clone> archive --prefix=<name>/ HEAD | tar -x -C <layer-path>`. Every file below a package's root, including the files under `.git/`, is a bundled resource of that package, so a layer that holds the clone itself ships its Git metadata as resources and changes the content hash with every Git operation.
+
+A `SKILL.md` without frontmatter in a directory outside any package fails discovery for the whole layer. Rename the file or add the Agent Skills frontmatter.
+
 ### Private remotes
 
 A `git` layer for a private HTTPS repository carries its credential in the userinfo of the `--repo` URL:

@@ -15,11 +15,11 @@ import (
 	"time"
 )
 
-// readmeGreet stages the README hello-world skill at personal/hello/greet.
+// readmeGreet stages the README hello-world skill at personal/hello/greet,
+// a SKILL.md with no ARTIFACT.md.
 func readmeGreet(t *testing.T) string {
 	return writeRegistry(t, map[string]string{
-		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
-		"personal/hello/greet/SKILL.md":    greetSkillBody,
+		"personal/hello/greet/SKILL.md": greetSkillVersioned,
 	})
 }
 
@@ -86,18 +86,20 @@ func TestReadme_TypeScriptSDK(t *testing.T) {
 	t.Skip("requires Node.js 20+ and npm in sdks/podium-ts; not available in the test sandbox")
 }
 
-// hello world: create the documented skill files.
+// hello world: create the documented skill file, a SKILL.md that carries
+// its version in metadata.version and no ARTIFACT.md beside it.
+// Spec: §4.3.4
 func TestReadme_HelloWorldFiles(t *testing.T) {
 	t.Parallel()
 	reg := readmeGreet(t)
-	art := readFile(t, filepath.Join(reg, "personal/hello/greet/ARTIFACT.md"))
-	if !strings.Contains(art, "type: skill") || !strings.Contains(art, "version: 1.0.0") {
-		t.Errorf("ARTIFACT.md missing type/version:\n%s", art)
-	}
 	skill := readFile(t, filepath.Join(reg, "personal/hello/greet/SKILL.md"))
 	if !strings.Contains(skill, "name: greet") {
 		t.Errorf("SKILL.md missing name: greet:\n%s", skill)
 	}
+	if !strings.Contains(skill, "metadata:\n  version: \"1.0.0\"\n") {
+		t.Errorf("SKILL.md missing metadata.version 1.0.0:\n%s", skill)
+	}
+	mustNotExist(t, filepath.Join(reg, "personal/hello/greet/ARTIFACT.md"))
 }
 
 // hello world: podium lint passes.
@@ -162,13 +164,17 @@ func TestReadme_HelloWorldSyncClaudeCode(t *testing.T) {
 	}
 }
 
-// hello world: sync --harness none writes the canonical layout.
+// hello world: sync --harness none writes the canonical layout, which for
+// a skill with no ARTIFACT.md is SKILL.md alone.
+// Spec: §4.2
 func TestReadme_HelloWorldSyncNone(t *testing.T) {
 	t.Parallel()
 	reg := readmeGreet(t)
 	tgt := t.TempDir()
-	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
-	mustExist(t, filepath.Join(tgt, "personal/hello/greet/ARTIFACT.md"))
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none"); res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	mustNotExist(t, filepath.Join(tgt, "personal/hello/greet/ARTIFACT.md"))
 	mustExist(t, filepath.Join(tgt, "personal/hello/greet/SKILL.md"))
 }
 
@@ -423,7 +429,10 @@ func TestReadme_LintMalformed(t *testing.T) {
 	}
 }
 
-// artifact scaffold creates a skill directory.
+// artifact scaffold creates a skill directory holding SKILL.md alone,
+// with the version under metadata.
+//
+// Spec: §4.3.4
 func TestReadme_ScaffoldSkill(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "personal/hello/greet")
@@ -431,10 +440,7 @@ func TestReadme_ScaffoldSkill(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(readFile(t, filepath.Join(out, "ARTIFACT.md")), "type: skill") {
-		t.Errorf("ARTIFACT.md missing type: skill")
-	}
-	if !strings.Contains(readFile(t, filepath.Join(out, "SKILL.md")), "name: greet") {
+	if !strings.Contains(assertScaffoldedSkillAlone(t, out, "0.1.0"), "name: greet") {
 		t.Errorf("SKILL.md missing name: greet")
 	}
 	if !strings.Contains(res.Stdout, "Scaffolded skill at") {
@@ -1015,8 +1021,11 @@ func TestReadme_CachePrune(t *testing.T) {
 	}
 }
 
-// import converts a skills tree into a Podium layer.
+// import normalizes a skills tree into a layer of plain skill directories:
+// SKILL.md with metadata.version and no ARTIFACT.md.
 // Doc-accuracy: the implemented flag is --target (the README shows --output).
+//
+// Spec: §4.3.4
 func TestReadme_Import(t *testing.T) {
 	t.Parallel()
 	src := t.TempDir()
@@ -1034,8 +1043,11 @@ func TestReadme_Import(t *testing.T) {
 		t.Fatalf("import exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
 	tree := readTreeAll(t, out)
-	if !hasSuffixKey(tree, "ARTIFACT.md") || !hasSuffixKey(tree, "SKILL.md") {
-		t.Errorf("import did not produce ARTIFACT.md + SKILL.md: %v", keysOf(tree))
+	if hasSuffixKey(tree, "ARTIFACT.md") || !hasSuffixKey(tree, "SKILL.md") {
+		t.Errorf("import did not produce a SKILL.md-only skill: %v", keysOf(tree))
+	}
+	if !strings.Contains(tree["greet/SKILL.md"], "metadata:\n  version: \"1.0.0\"\n") {
+		t.Errorf("greet/SKILL.md missing metadata.version 1.0.0:\n%s", tree["greet/SKILL.md"])
 	}
 }
 

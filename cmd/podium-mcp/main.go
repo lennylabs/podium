@@ -1832,6 +1832,8 @@ func (s *mcpServer) cacheVerifiedRecord(resp loadArtifactResponse) error {
 		DeliverySignature: resp.DeliverySignature,
 		Sensitivity:       resp.Sensitivity,
 		ArtifactRevision:  resp.ArtifactRevision,
+		Version:           resp.Version,
+		Type:              resp.Type,
 	})
 }
 
@@ -2868,7 +2870,8 @@ func (c *contentCache) putExtras(hash string, ex cacheExtras) error {
 }
 
 // deliveryFiles is the per-ID part of a verified §4.7.10 delivery record: the
-// served document and body, the delivery pair, and the served sensitivity.
+// served document and body, the delivery pair, the served sensitivity, and the
+// served version and type.
 // Two IDs whose authored packages are byte-identical share one content-hash
 // bucket, and their served documents differ in the framed ID and, when they
 // pinned different parents, in the merged document itself, so these files
@@ -2882,13 +2885,21 @@ type deliveryFiles struct {
 	// ArtifactRevision is the served §4.7.10 ingest time. A cache-served
 	// record frames it in the delivery check, so it is cached with the record.
 	ArtifactRevision string
+	// Version and Type are the served version and type members the delivery
+	// record frames. They are cached beside the record rather than read back
+	// out of the served document, because an ARTIFACT.md overlay may omit
+	// version (§4.3.4).
+	//
+	// Spec: §6.5, §6.6, §4.7.10
+	Version string
+	Type    string
 }
 
 // putDelivery writes d under delivery/<deliverySegment(id)>/ in the bucket
 // for hash, with an id file holding the canonical ID verbatim so a reader can
 // refuse a directory another ID's record occupies. The signature,
-// sensitivity, and artifact_revision files are written even when empty. Call only with a record that
-// passed verification.
+// sensitivity, artifact_revision, version, and type files are written even
+// when empty. Call only with a record that passed verification.
 func (c *contentCache) putDelivery(hash, id string, d deliveryFiles) error {
 	if c.dir == "" || hash == "" {
 		return nil
@@ -2905,6 +2916,8 @@ func (c *contentCache) putDelivery(hash, id string, d deliveryFiles) error {
 		"delivery_signature": d.DeliverySignature,
 		"sensitivity":        d.Sensitivity,
 		"artifact_revision":  d.ArtifactRevision,
+		"version":            d.Version,
+		"type":               d.Type,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			return err

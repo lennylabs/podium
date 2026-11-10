@@ -45,13 +45,26 @@ type fixture struct {
 // The fixture sets no sandbox_profile because §6.9 rejects that field for codex
 // and pi before Adapt runs, and the golden test calls Adapt directly.
 //
-// Spec: §4.3.4
+// The team/standup skill has no authored ARTIFACT.md. Its artifact field is the
+// synthesized document the registry serves for the assigned version
+// 0.0.0-auto.0, written out as a literal so a change to the synthesized bytes
+// fails here rather than regenerating silently. The none adapter omits that
+// document, so none.golden carries the SKILL.md and the resource for it and no
+// ARTIFACT.md, and every other adapter treats it as any other skill.
+//
+// Spec: §4.3.4, §6.7
 var canonicalArtifacts = []fixture{
 	{
 		id:        "team/hello",
 		artifact:  "---\ntype: skill\nversion: 1.0.0\nruntime_requirements:\n  python: \">=3.10\"\n---\n\nUse this skill to greet a teammate.\n",
 		skill:     "---\nname: hello\ndescription: Greet a teammate warmly by name.\n---\n\nSay hello to the person and offer help.\n",
 		resources: map[string]string{"scripts/run.py": "print('hello')\n"},
+	},
+	{
+		id:        "team/standup",
+		artifact:  "---\ntype: skill\nversion: 0.0.0-auto.0\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n",
+		skill:     "---\nname: standup\ndescription: Summarize yesterday's work for the daily standup.\n---\n\nList what changed yesterday and what is planned today.\n",
+		resources: map[string]string{"references/template.md": "# Standup\n\n- Yesterday:\n- Today:\n"},
 	},
 	{
 		id:       "team/reviewer",

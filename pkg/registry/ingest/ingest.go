@@ -522,7 +522,8 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		}
 	}
 
-	// Walk the layer's filesystem to find every ARTIFACT.md.
+	// Walk the layer's filesystem to find every package: a directory holding
+	// ARTIFACT.md, or one holding SKILL.md below no other package (§4.2).
 	records, err := walkLayer(req.Files, req.LayerID)
 	if err != nil {
 		return nil, err
@@ -570,14 +571,16 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	// this check a same-ID record from another layer is stored and
 	// silently shadows at read time. Index the manifests already
 	// contributed by other layers so the per-record check can spot it.
-	crossLayerByID := map[string][]store.ManifestRecord{}
-	if existing, lerr := st.ListManifests(ctx, req.TenantID); lerr == nil {
-		for _, m := range existing {
-			if m.Layer != req.LayerID {
-				crossLayerByID[m.ArtifactID] = append(crossLayerByID[m.ArtifactID], m)
-			}
-		}
+	//
+	// Spec: §7.3.1, §4.7.6 — the same listing, soft-deleted rows included,
+	// is the input from which a skill that declares no version receives its
+	// registry-assigned version. One read serves both, and a failed read
+	// aborts the call, because neither check can be evaluated without it.
+	rowsByID, err := listManifestRows(ctx, st, req.TenantID)
+	if err != nil {
+		return nil, err
 	}
+	crossLayerByID := crossLayerRows(rowsByID, req.LayerID)
 
 	// spec: §4.7.3 — mcpServers edges resolve to the mcp-server
 	// artifact that declares the matching server_identifier. Index the
@@ -776,86 +779,24 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			}
 		}
 
-		// Check current state to distinguish accepted vs idempotent vs
-		// immutable-violation.
-		existing, err := st.GetManifest(ctx, req.TenantID, mr.ArtifactID, mr.Version)
+		// Distinguish accepted vs idempotent vs immutable-violation, and
+		// assign the version of a skill that declares none.
+		placer := &manifestPlacer{st: st, req: req, rec: rec, mr: &mr, parent: extendsParent}
+		placed, err := placer.place(ctx, rowsByID)
+		if err != nil {
+			return nil, err
+		}
 		switch {
-		case err == nil:
-			if existing.ContentHash == mr.ContentHash {
-				res.Idempotent++
-				res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version})
-				continue
-			}
-			res.Conflicts = append(res.Conflicts, ConflictReport{
-				ArtifactID: mr.ArtifactID,
-				Version:    mr.Version,
-				OldHash:    existing.ContentHash,
-				NewHash:    mr.ContentHash,
-			})
+		case placed.rejected != nil:
+			res.Rejected = append(res.Rejected, *placed.rejected)
 			continue
-		case errors.Is(err, store.ErrNotFound):
-			// Insert below.
-		default:
-			return nil, err
-		}
-
-		// Spec: §4.6 sandbox profile and executable fields across layers.
-		// Both checks run on the insert path alone, after the idempotency
-		// switch: the content hash covers only the child's authored bytes, so
-		// an unchanged stored child is idempotent above and is never
-		// re-judged against a parent that changed after it was accepted.
-		if mr.ExtendsPin != "" {
-			rej, cerr := extendsEdgeRejection(ctx, st, req.TenantID, req.LayerID, rec, mr, extendsParent)
-			if cerr != nil {
-				return nil, cerr
-			}
-			if rej != nil {
-				res.Rejected = append(res.Rejected, *rej)
-				continue
-			}
-		}
-
-		// §4.7.9 signing: when a Signer is configured, attach the
-		// signature envelope before PutManifest commits so callers
-		// see signed bytes from the moment ingest accepts them. A
-		// signing failure rejects the artifact — unsigned bytes
-		// must not sneak in when a signer is configured.
-		if req.Signer != nil {
-			env, err := req.Signer(ctx, mr.ContentHash)
-			if err != nil {
-				res.Rejected = append(res.Rejected, RejectedArtifact{
-					ArtifactID: mr.ArtifactID,
-					Reason:     fmt.Sprintf("sign: %v", err),
-					Code:       "ingest.sign_failed",
-				})
-				continue
-			}
-			mr.Signature = env
-		}
-
-		// §7.2 data plane: persist bundled resources before the manifest
-		// commits so a served artifact's resources are retrievable the
-		// moment ingest accepts it. Large resources upload to object
-		// storage and drop their inline bytes; small ones stay inline.
-		if err := persistResources(ctx, req.ResourcePut, mr.Resources); err != nil {
-			res.Rejected = append(res.Rejected, RejectedArtifact{
-				ArtifactID: mr.ArtifactID,
-				Reason:     fmt.Sprintf("persist resources: %v", err),
-				Code:       "ingest.resource_store_failed",
-			})
+		case placed.conflict != nil:
+			res.Conflicts = append(res.Conflicts, *placed.conflict)
 			continue
-		}
-
-		if err := commitManifest(ctx, st, req, mr); err != nil {
-			if errors.Is(err, store.ErrImmutableViolation) {
-				res.Conflicts = append(res.Conflicts, ConflictReport{
-					ArtifactID: mr.ArtifactID,
-					Version:    mr.Version,
-					NewHash:    mr.ContentHash,
-				})
-				continue
-			}
-			return nil, err
+		case placed.idempotent:
+			res.Idempotent++
+			res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version})
+			continue
 		}
 		res.Accepted++
 		res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version, Accepted: true})
@@ -953,6 +894,156 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	return res, nil
 }
 
+// placement is the outcome of placing one record in the store. At most one
+// field is set; none set means the record was newly stored.
+type placement struct {
+	idempotent bool
+	conflict   *ConflictReport
+	rejected   *RejectedArtifact
+}
+
+// manifestPlacer stores one record after the per-record checks have passed.
+// mr is the record being placed; its Version is rewritten for a record whose
+// version the registry assigns. prepared records that the §4.6 edge checks,
+// signing, and the resource upload ran, because none of them depends on the
+// version and each runs at most once per record.
+type manifestPlacer struct {
+	st       store.Store
+	req      Request
+	rec      filesystem.ArtifactRecord
+	mr       *store.ManifestRecord
+	parent   store.ManifestRecord
+	prepared bool
+}
+
+// place runs the pre-check and the commit for the record. A record with an
+// authored version takes one attempt. A record whose version the registry
+// assigns takes up to autoVersionAttempts: each attempt derives the version
+// from rowsByID, and a different-hash row at that version, found by the
+// pre-check or by the commit, re-reads the listing into rowsByID before the
+// next attempt. A duplicate that only the re-read listing reveals is
+// therefore rejected rather than committed. The last attempt's conflict is
+// the reported one.
+//
+// Spec: §7.3.1, §4.7.6
+func (p *manifestPlacer) place(ctx context.Context, rowsByID map[string][]store.ManifestRecord) (placement, error) {
+	attempts := 1
+	if p.rec.VersionAssigned {
+		attempts = autoVersionAttempts
+	}
+	for attempt := 1; ; attempt++ {
+		if p.rec.VersionAssigned {
+			v, duplicate := assignVersion(rowsByID[p.mr.ArtifactID], p.req.LayerID, p.mr.ContentHash)
+			if duplicate {
+				return placement{rejected: autoVersionDuplicateRejection(p.req.TenantID, p.req.LayerID, p.mr.ArtifactID)}, nil
+			}
+			p.mr.Version = v
+		}
+		out, taken, err := p.attempt(ctx)
+		if err != nil || !taken || attempt == attempts {
+			return out, err
+		}
+		reread, err := listManifestRows(ctx, p.st, p.req.TenantID)
+		if err != nil {
+			return placement{}, err
+		}
+		rowsByID[p.mr.ArtifactID] = reread[p.mr.ArtifactID]
+	}
+}
+
+// attempt places the record at its current version. taken reports that a
+// row with a different content hash holds that version, found by the
+// pre-check or by the commit, in which case out carries the conflict.
+func (p *manifestPlacer) attempt(ctx context.Context) (out placement, taken bool, err error) {
+	mr := p.mr
+	existing, err := p.st.GetManifest(ctx, p.req.TenantID, mr.ArtifactID, mr.Version)
+	switch {
+	case err == nil:
+		if existing.ContentHash == mr.ContentHash {
+			return placement{idempotent: true}, false, nil
+		}
+		return placement{conflict: &ConflictReport{
+			ArtifactID: mr.ArtifactID,
+			Version:    mr.Version,
+			OldHash:    existing.ContentHash,
+			NewHash:    mr.ContentHash,
+		}}, true, nil
+	case errors.Is(err, store.ErrNotFound):
+		// Insert below.
+	default:
+		return placement{}, false, err
+	}
+	if !p.prepared {
+		rej, err := p.prepare(ctx)
+		if err != nil || rej != nil {
+			return placement{rejected: rej}, false, err
+		}
+		p.prepared = true
+	}
+	if err := commitManifest(ctx, p.st, p.req, *mr); err != nil {
+		if errors.Is(err, store.ErrImmutableViolation) {
+			return placement{conflict: &ConflictReport{
+				ArtifactID: mr.ArtifactID,
+				Version:    mr.Version,
+				NewHash:    mr.ContentHash,
+			}}, true, nil
+		}
+		return placement{}, false, err
+	}
+	return placement{}, false, nil
+}
+
+// prepare runs the insert-path steps that precede the commit: the §4.6 edge
+// checks, §4.7.9 signing, and the §7.2 resource upload. It returns a
+// rejection when one of them refuses the record. The caller runs it on the
+// first attempt whose pre-check finds no row, so a record the pre-check
+// classifies as unchanged is never judged, and a re-derived version does not
+// repeat it: none of its inputs is the version.
+func (p *manifestPlacer) prepare(ctx context.Context) (*RejectedArtifact, error) {
+	mr := p.mr
+	// Spec: §4.6 sandbox profile and executable fields across layers.
+	// Both checks run on the insert path alone, after the idempotency
+	// switch: the content hash covers only the child's authored bytes, so
+	// an unchanged stored child is idempotent and is never re-judged
+	// against a parent that changed after it was accepted.
+	if mr.ExtendsPin != "" {
+		rej, err := extendsEdgeRejection(ctx, p.st, p.req.TenantID, p.req.LayerID, p.rec, *mr, p.parent)
+		if err != nil || rej != nil {
+			return rej, err
+		}
+	}
+
+	// §4.7.9 signing: when a Signer is configured, attach the
+	// signature envelope before PutManifest commits so callers
+	// see signed bytes from the moment ingest accepts them. A
+	// signing failure rejects the artifact — unsigned bytes
+	// must not sneak in when a signer is configured.
+	if p.req.Signer != nil {
+		env, err := p.req.Signer(ctx, mr.ContentHash)
+		if err != nil {
+			return &RejectedArtifact{
+				ArtifactID: mr.ArtifactID,
+				Reason:     fmt.Sprintf("sign: %v", err),
+				Code:       "ingest.sign_failed",
+			}, nil
+		}
+		mr.Signature = env
+	}
+
+	// §7.2 data plane: persist bundled resources before the manifest
+	// commits so a served artifact's resources are retrievable the
+	// moment ingest accepts it. Large resources upload to object
+	// storage and drop their inline bytes; small ones stay inline.
+	if err := persistResources(ctx, p.req.ResourcePut, mr.Resources); err != nil {
+		return &RejectedArtifact{
+			ArtifactID: mr.ArtifactID,
+			Reason:     fmt.Sprintf("persist resources: %v", err),
+			Code:       "ingest.resource_store_failed",
+		}, nil
+	}
+	return nil, nil
+}
+
 // commitManifest persists the manifest. Under the §4.7 outbox path
 // (req.UseVectorOutbox set and the store implementing store.VectorOutbox) it
 // commits the manifest and a vector_pending row atomically, so an external
@@ -1018,8 +1109,14 @@ func embedDomain(ctx context.Context, req Request, dr store.DomainRecord) error 
 	return nil
 }
 
+// walkLayer enumerates every artifact package in the snapshot by the §4.2
+// discovery rule that the filesystem-source walk in pkg/registry/filesystem
+// applies, through the shared filesystem.PackageManifests predicate.
+//
+// Spec: §4.2
 func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) {
 	var out []filesystem.ArtifactRecord
+	packages := map[string]bool{}
 	walkErr := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			// spec: §6.10 — a directory of the snapshot that cannot be read is
@@ -1030,19 +1127,17 @@ func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) 
 			// answer when the registry answered and the source is the problem.
 			return fmt.Errorf("%w: %v", source.ErrSourceUnreachable, err)
 		}
-		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") && p != "." {
-				return fs.SkipDir
-			}
+		if !d.IsDir() {
 			return nil
 		}
-		if d.Name() != "ARTIFACT.md" {
-			return nil
+		if strings.HasPrefix(d.Name(), ".") && p != "." {
+			return fs.SkipDir
 		}
-		rec, err := loadOne(fsys, p, layerID)
-		if err != nil {
+		rec, found, err := loadPackage(fsys, packages, p, layerID)
+		if err != nil || !found {
 			return err
 		}
+		packages[p] = true
 		out = append(out, rec)
 		return nil
 	})
@@ -1159,14 +1254,50 @@ func (e *chainReadError) Unwrap() error { return e.cause }
 // reproduces the same parse failure until the source is corrected.
 func invalidArtifact(cause error) error { return invalidArtifactError{cause: cause} }
 
+// loadPackage applies the §4.2 discovery rule to the directory dir and loads
+// the package it holds. found is false when dir is not a package. A stat
+// failure other than an absent manifest is returned, so a manifest the
+// confined source refuses fails the layer's ingest (§7.3.1).
+//
+// Spec: §4.2, §7.3.1
+func loadPackage(fsys fs.FS, packages map[string]bool, dir, layerID string) (rec filesystem.ArtifactRecord, found bool, err error) {
+	artifact, skill, err := filesystem.PackageManifests(fsys, dir)
+	if err != nil {
+		return filesystem.ArtifactRecord{}, false, err
+	}
+	switch {
+	case artifact:
+		rec, err = loadOne(fsys, joinPath(dir, "ARTIFACT.md"), layerID)
+	case skill && !filesystem.WithinPackage(packages, dir):
+		rec, err = loadPlainSkill(fsys, joinPath(dir, "SKILL.md"), layerID)
+	default:
+		return filesystem.ArtifactRecord{}, false, nil
+	}
+	if err != nil {
+		return filesystem.ArtifactRecord{}, false, err
+	}
+	return rec, true, nil
+}
+
+// packageID returns the canonical ID of the package whose manifest is at
+// manifestPath. spec: §4.2 — it enforces the canonical-ID invariants the
+// filesystem-source registry enforces, so both walk paths reject a root-level
+// manifest (empty ID) and any segment containing "@" identically. The error is
+// a content fault, so it carries ErrInvalidArtifact and the reingest endpoint
+// answers ingest.lint_failed rather than a retryable registry.unavailable.
+func packageID(manifestPath string) (string, error) {
+	id := dirToCanonical(dirOf(manifestPath))
+	if err := filesystem.ValidateCanonicalID(id); err != nil {
+		return "", fmt.Errorf("%s: %w", manifestPath, invalidArtifact(err))
+	}
+	return id, nil
+}
+
 func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecord, error) {
 	dir := dirOf(artifactPath)
-	id := dirToCanonical(dir)
-	// spec: §4.2 — enforce the canonical-ID invariants the filesystem-source
-	// registry already enforces, so both walk paths reject a root-level
-	// ARTIFACT.md (empty ID) and any segment containing "@" identically.
-	if err := filesystem.ValidateCanonicalID(id); err != nil {
-		return filesystem.ArtifactRecord{}, fmt.Errorf("%s: %w", artifactPath, err)
+	id, err := packageID(artifactPath)
+	if err != nil {
+		return filesystem.ArtifactRecord{}, err
 	}
 
 	bytes, err := fs.ReadFile(fsys, artifactPath)
@@ -1206,8 +1337,55 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		rec.Skill = s
 		rec.SkillBytes = skillBytes
 	}
-	// Walk the artifact's directory for bundled resources.
-	walkErr := fs.WalkDir(fsys, dir, func(p string, d fs.DirEntry, err error) error {
+	if err := captureResources(fsys, dir, &rec); err != nil {
+		return filesystem.ArtifactRecord{}, err
+	}
+	rec.ResolveSkillVersion()
+	return rec, nil
+}
+
+// loadPlainSkill loads a package that holds SKILL.md and no ARTIFACT.md as a
+// type: skill artifact. ArtifactBytes and AuthoredBytes stay nil, so the
+// §4.7.6 digest frames a zero-length first value and the stored manifest is
+// empty. A SKILL.md that does not parse is a content fault that fails the
+// call, as an unparseable ARTIFACT.md does.
+//
+// Spec: §4.2, §4.3.4, §4.7.6
+func loadPlainSkill(fsys fs.FS, skillPath, layerID string) (filesystem.ArtifactRecord, error) {
+	id, err := packageID(skillPath)
+	if err != nil {
+		return filesystem.ArtifactRecord{}, err
+	}
+	skillBytes, err := fs.ReadFile(fsys, skillPath)
+	if err != nil {
+		return filesystem.ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, err)
+	}
+	s, err := manifest.ParseSkill(skillBytes)
+	if err != nil {
+		return filesystem.ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, invalidArtifact(err))
+	}
+	rec := filesystem.ArtifactRecord{
+		ID:         id,
+		Layer:      filesystem.Layer{ID: layerID},
+		Artifact:   &manifest.Artifact{Type: manifest.TypeSkill},
+		Skill:      s,
+		SkillBytes: skillBytes,
+		Resources:  map[string][]byte{},
+	}
+	if err := captureResources(fsys, dirOf(skillPath), &rec); err != nil {
+		return filesystem.ArtifactRecord{}, err
+	}
+	rec.ResolveSkillVersion()
+	return rec, nil
+}
+
+// captureResources walks the package directory dir and records every file
+// in it as a bundled resource of rec, except the package root's manifests and
+// the files of a nested package.
+func captureResources(fsys fs.FS, dir string, rec *filesystem.ArtifactRecord) error {
+	skillPath := joinPath(dir, "SKILL.md")
+	isSkill := rec.Artifact.Type == manifest.TypeSkill
+	return fs.WalkDir(fsys, dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			// spec: §6.10 — an unreadable directory under the artifact package
 			// is the same source-unreachable condition walkLayer reports.
@@ -1216,8 +1394,16 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		if d.IsDir() {
 			// spec: §4.2/§4.4 — stop at a nested artifact-package boundary so
 			// a child artifact's files are not captured as the parent's
-			// bundled resources.
-			if p != dir && fsHasArtifactManifest(fsys, p) {
+			// bundled resources. Only a nested ARTIFACT.md is a boundary; a
+			// subdirectory holding SKILL.md alone stays a bundled resource.
+			if p == dir {
+				return nil
+			}
+			artifact, _, err := filesystem.PackageManifests(fsys, p)
+			if err != nil {
+				return err
+			}
+			if artifact {
 				return fs.SkipDir
 			}
 			return nil
@@ -1230,7 +1416,7 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		// two walks two digests for one package. A nested ARTIFACT.md is a
 		// package boundary the directory arm above has already skipped, so
 		// the base-name comparison reaches only the root's.
-		if d.Name() == "ARTIFACT.md" || (a.Type == manifest.TypeSkill && p == skillPath) {
+		if d.Name() == "ARTIFACT.md" || (isSkill && p == skillPath) {
 			return nil
 		}
 		data, err := fs.ReadFile(fsys, p)
@@ -1241,10 +1427,6 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		rec.Resources[rel] = data
 		return nil
 	})
-	if walkErr != nil {
-		return filesystem.ArtifactRecord{}, walkErr
-	}
-	return rec, nil
 }
 
 // manifestRecordFor canonicalizes one ArtifactRecord into a ManifestRecord
@@ -1766,13 +1948,6 @@ func dirToCanonical(dir string) string {
 		return ""
 	}
 	return dir
-}
-
-// fsHasArtifactManifest reports whether dir directly contains an ARTIFACT.md
-// file, marking it as a nested artifact-package boundary (§4.2).
-func fsHasArtifactManifest(fsys fs.FS, dir string) bool {
-	info, err := fs.Stat(fsys, joinPath(dir, "ARTIFACT.md"))
-	return err == nil && !info.IsDir()
 }
 
 // sensitivityRejection reports the §13.10 public-mode rejection for an

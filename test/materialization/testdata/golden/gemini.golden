@@ -78,6 +78,20 @@ Say hello to the person and offer help.
 === .gemini/skills/hello/scripts/run.py ===
 print('hello')
 
+=== .gemini/skills/standup/SKILL.md ===
+---
+name: standup
+description: Summarize yesterday's work for the daily standup.
+---
+
+List what changed yesterday and what is planned today.
+
+=== .gemini/skills/standup/references/template.md ===
+# Standup
+
+- Yesterday:
+- Today:
+
 === .podium/context/team/glossary/ARTIFACT.md ===
 ---
 type: context

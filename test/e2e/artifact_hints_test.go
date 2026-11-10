@@ -407,10 +407,13 @@ func TestHints_FrontierHintLoadsWithoutModel(t *testing.T) {
 
 // ---- scaffold interaction ---------------------------------------------------
 
-// a scaffolded skill with hints added to its ARTIFACT.md
-// frontmatter lints clean. The scaffold omits hints by default; inserting them
-// before the closing delimiter produces a lint-clean artifact.
+// a scaffolded skill with hints in a hand-written ARTIFACT.md overlay lints
+// clean. The scaffold writes SKILL.md alone; the author adds the overlay
+// beside it to carry the Podium-only hint fields, and the overlay omits
+// version because SKILL.md carries it under metadata.
 // spec: docs/authoring/hints.md §Advisory framing.
+//
+// Spec: §4.3.4
 func TestHints_ScaffoldSkillWithAddedHintsLintsClean(t *testing.T) {
 	t.Parallel()
 	reg := t.TempDir()
@@ -420,13 +423,10 @@ func TestHints_ScaffoldSkillWithAddedHintsLintsClean(t *testing.T) {
 	if sc.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
 	}
-	mustExist(t, filepath.Join(out, "ARTIFACT.md"))
-	mustExist(t, filepath.Join(out, "SKILL.md"))
-	artPath := filepath.Join(out, "ARTIFACT.md")
-	art := readFile(t, artPath)
-	art = strings.Replace(art, "\n---\n", "\neffort_hint: high\nmodel_class_hint: frontier\n---\n", 1)
-	if err := os.WriteFile(artPath, []byte(art), 0o644); err != nil {
-		t.Fatalf("rewrite ARTIFACT.md: %v", err)
+	assertScaffoldedSkillAlone(t, out, "0.1.0")
+	overlay := "---\ntype: skill\neffort_hint: high\nmodel_class_hint: frontier\n---\n\n<!-- Skill body lives in SKILL.md. -->\n"
+	if err := os.WriteFile(filepath.Join(out, "ARTIFACT.md"), []byte(overlay), 0o644); err != nil {
+		t.Fatalf("write ARTIFACT.md overlay: %v", err)
 	}
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 {

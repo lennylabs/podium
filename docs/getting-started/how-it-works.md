@@ -436,13 +436,17 @@ aggregates would leak signal.
 
 ## Versioning
 
-Versions are semver, author-chosen via the manifest's `version:`
-field. Once `(artifact_id, version)` is ingested, it's bit-for-bit
+Versions are semver, author-chosen through the manifest's `version:`
+field or, for a skill, `SKILL.md` `metadata.version`. A skill that
+declares no version receives `0.0.0-auto.<N>` from the registry.
+Once `(artifact_id, version)` is ingested, it's bit-for-bit
 immutable forever in the registry's content store. Subsequent
 commits to the same version with different content are rejected at
 ingest. References can pin exact versions
 (`@1.2.3`), minor / patch ranges (`@1.2.x`, `@1.x`), or content
-hashes (`@sha256:abc...`).
+hashes (`@sha256:abc...`). `@0.0.0-auto.<N>` pins a
+registry-assigned version exactly, and a range pin never selects
+one. See [Skill versions](../authoring/frontmatter-reference#skill-versions).
 
 `load_artifact(id)` without a version pin resolves to the most
 recently ingested non-deprecated version visible to the caller. For

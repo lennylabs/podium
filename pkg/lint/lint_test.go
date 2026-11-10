@@ -59,6 +59,52 @@ body
 	}
 }
 
+// Spec: §4.3.4 — a skill whose version is assigned draws the
+// lint.skill_version_assigned warning and neither the required-version nor
+// the semver error, in the ingest state (Version empty, because lint runs
+// before ingest assigns it) and in the `podium lint` state (Version in the
+// registry-reserved form the filesystem source reports).
+func TestLint_AssignedVersionSkipsRequiredAndSemver(t *testing.T) {
+	t.Parallel()
+	for _, version := range []string{"", manifest.AutoVersion(0)} {
+		t.Run("version="+version, func(t *testing.T) {
+			t.Parallel()
+			reg, records := openFixture(t, testharness.WriteTreeOption{
+				Path:    "greetings/hello/SKILL.md",
+				Content: "---\nname: hello\ndescription: Greet the user.\n---\n\nbody\n",
+			})
+			if len(records) != 1 || !records[0].VersionAssigned {
+				t.Fatalf("want one VersionAssigned record, got %+v", records)
+			}
+			records[0].Artifact.Version = version
+			diags := (&Linter{}).Lint(context.Background(), reg, records)
+			if !hasSeverity(diags, "lint.skill_version_assigned", SeverityWarning) {
+				t.Errorf("expected lint.skill_version_assigned warning, got: %v", diags)
+			}
+			for _, code := range []string{"lint.required_field_missing", "lint.invalid_version"} {
+				if hasCode(diags, code) {
+					t.Errorf("assigned version must not draw %s: %v", code, diags)
+				}
+			}
+		})
+	}
+}
+
+// Spec: §4.3.4 — "`SKILL.md` is present (error if missing)." A record of
+// type: skill with no SKILL.md keeps the ruleSkillCompliance error. The
+// filesystem walk refuses such a package, so the record is built directly.
+func TestLint_SkillWithoutSkillMDErrors(t *testing.T) {
+	t.Parallel()
+	recs := []filesystem.ArtifactRecord{{
+		ID:       "greetings/hello",
+		Artifact: &manifest.Artifact{Type: manifest.TypeSkill, Version: "1.0.0"},
+	}}
+	diags := ruleSkillCompliance{}.Check(context.Background(), nil, recs)
+	if !hasSeverity(diags, "lint.skill_md_compliance", SeverityError) {
+		t.Fatalf("expected lint.skill_md_compliance error, got: %v", diags)
+	}
+}
+
 // Spec: §4.3.4 SKILL.md compliance — type: skill artifact missing SKILL.md
 // fails Walk before lint runs (Phase 0); a skill with SKILL.md whose name
 // does not match the parent directory triggers lint.skill_md_compliance.

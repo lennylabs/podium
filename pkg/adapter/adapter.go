@@ -108,7 +108,8 @@ type Source struct {
 	// ArtifactID is the canonical artifact path under the registry root,
 	// e.g., "finance/ap/pay-invoice".
 	ArtifactID string
-	// ArtifactBytes is the verbatim bytes of ARTIFACT.md.
+	// ArtifactBytes is the verbatim bytes of ARTIFACT.md, or the §4.3.4
+	// synthesized document for a skill that has none.
 	ArtifactBytes []byte
 	// SkillBytes is the verbatim bytes of SKILL.md (only for type: skill).
 	SkillBytes []byte

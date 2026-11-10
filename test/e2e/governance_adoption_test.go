@@ -1052,13 +1052,17 @@ func TestGovernance_HighSensitivityDomainSigning(t *testing.T) {
 
 // TestProgressive_43_ScaffoldSensitivityHigh verifies that
 // `podium artifact scaffold --type context --sensitivity high --yes <path>`
-// produces an ARTIFACT.md with sensitivity:high in the frontmatter.
+// produces an ARTIFACT.md with sensitivity:high in the frontmatter, and that
+// a skill scaffold refuses --sensitivity because a skill carries it in a
+// hand-written ARTIFACT.md overlay.
+//
+// Spec: §4.3.4
 func TestGovernance_ScaffoldSensitivityHigh(t *testing.T) {
 	t.Parallel()
-	dir := filepath.Join(t.TempDir(), "my-skill")
+	dir := filepath.Join(t.TempDir(), "my-context")
 	res := runPodium(t, "", nil, "artifact", "scaffold",
-		"--type", "skill",
-		"--description", "A high-sensitivity skill for testing.",
+		"--type", "context",
+		"--description", "A high-sensitivity context for testing.",
 		"--sensitivity", "high",
 		"--version", "0.1.0",
 		"--yes",
@@ -1067,15 +1071,20 @@ func TestGovernance_ScaffoldSensitivityHigh(t *testing.T) {
 		t.Fatalf("artifact scaffold exit=%d\nstdout: %s\nstderr: %s", res.Exit, res.Stdout, res.Stderr)
 	}
 	content := readFile(t, filepath.Join(dir, "ARTIFACT.md"))
-	if !strings.Contains(content, "sensitivity: high") {
-		t.Errorf("ARTIFACT.md missing 'sensitivity: high':\n%s", content)
+	for _, want := range []string{"sensitivity: high", "type: context", "version: 0.1.0"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("ARTIFACT.md missing %q:\n%s", want, content)
+		}
 	}
-	if !strings.Contains(content, "type: skill") {
-		t.Errorf("ARTIFACT.md missing 'type: skill':\n%s", content)
-	}
-	if !strings.Contains(content, "version: 0.1.0") {
-		t.Errorf("ARTIFACT.md missing 'version: 0.1.0':\n%s", content)
-	}
+
+	skill := filepath.Join(t.TempDir(), "my-skill")
+	res = runPodium(t, "", nil, "artifact", "scaffold",
+		"--type", "skill",
+		"--description", "A high-sensitivity skill for testing.",
+		"--sensitivity", "high",
+		"--yes",
+		skill)
+	assertSkillOverlayRefusal(t, res, skill, "--sensitivity")
 }
 
 // ---- — scaffold rejects invalid sensitivity ---------------

@@ -38,7 +38,9 @@ your team's policy doc. Output a markdown table sorted by absolute
 variance.
 ```
 
-`ARTIFACT.md`:
+A `SKILL.md` alone is a complete skill.
+
+An optional `ARTIFACT.md` overlay, written by hand beside `SKILL.md`, carries the Podium-only fields:
 
 ```markdown
 ---

@@ -37,9 +37,11 @@ func TestLintCmd_FindsDiagnosticIssue(t *testing.T) {
 	_ = out
 }
 
+// Spec: §4.3.4 — the import body is the root-level SKILL.md of each
+// immediate subdirectory of --source.
 func TestImportCmd_HappyPath(t *testing.T) {
 	dir := t.TempDir()
-	skillDir := filepath.Join(dir, "src", "skills", "greet")
+	skillDir := filepath.Join(dir, "src", "greet")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}

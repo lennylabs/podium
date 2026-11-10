@@ -3,6 +3,7 @@ package filesystem
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -30,7 +31,25 @@ type ArtifactRecord struct {
 	// AuthoredBytes, because the digest is defined over the bytes as ingested
 	// and a merged serialization does not reproduce it. The store's
 	// ManifestRecord.Frontmatter carries the same bytes on the registry side.
+	// Both fields are nil for a skill package that holds no ARTIFACT.md.
 	AuthoredBytes []byte
+	// VersionAssigned reports that the skill declares no usable version
+	// (§4.3.4), so the version is assigned.
+	VersionAssigned bool
+}
+
+// ResolveSkillVersion sets a skill record's version by the §4.3.4
+// precedence, the ARTIFACT.md version and then a major.minor.patch SKILL.md
+// metadata.version, and sets VersionAssigned when neither declares one. A
+// record of any other type is unchanged.
+//
+// Spec: §4.3.4
+func (r *ArtifactRecord) ResolveSkillVersion() {
+	if r.Artifact == nil || r.Artifact.Type != manifest.TypeSkill {
+		return
+	}
+	r.Artifact.Version = manifest.ResolveSkillVersion(r.Artifact, r.Skill)
+	r.VersionAssigned = r.Artifact.Version == ""
 }
 
 // CanonicalID is the path under the layer root, separated by "/".
@@ -66,6 +85,25 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 	// merge the registry applies at load time, so materialization produces
 	// equivalent output for the same artifact directory. Callers that want
 	// raw layer records (lint, conformance) leave ResolveExtends false.
+	records, err := resolveWalk(all, opts)
+	if err != nil {
+		return nil, err
+	}
+	// Synthesis follows composition on both paths, so every caller, the
+	// lint and overlay walks that leave ResolveExtends false included,
+	// receives a plain skill's synthesized ARTIFACT.md.
+	if err := synthesizeSkillDocuments(records); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+// resolveWalk applies the §4.6 collision rule to all and, when
+// opts.ResolveExtends is set, the extends: composition, returning one record
+// per canonical ID.
+//
+// Spec: §4.6, §13.11.3
+func resolveWalk(all []ArtifactRecord, opts WalkOptions) ([]ArtifactRecord, error) {
 	if opts.ResolveExtends {
 		return composeExtends(all, opts)
 	}
@@ -75,6 +113,57 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 	}
 	reportDrops(opts, collisions)
 	return deduped, nil
+}
+
+// assignSourceSkillFields applies the filesystem-source values to a skill
+// record after its version is resolved. An assigned version becomes
+// 0.0.0-auto.0, because a filesystem source keeps no history from which to
+// derive N; VersionAssigned stays true so lint still skips the required and
+// semver checks. A skill with no ARTIFACT.md takes its description from
+// SKILL.md, the value the server admits for a plain-skill row, so an extends:
+// child merges the same parent description in both modes. The loader runs
+// before composeExtends, so every composition round and both the deduped and
+// kept slices carry these values. ArtifactBytes stays nil here, so a
+// plain-skill parent contributes an empty block to the §4.6 executable-field
+// comparison, as the server's empty stored Frontmatter does.
+//
+// Spec: §13.11.3, §4.3.4, §4.6
+func assignSourceSkillFields(rec *ArtifactRecord) {
+	if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill {
+		return
+	}
+	if rec.VersionAssigned {
+		rec.Artifact.Version = manifest.AutoVersion(0)
+	}
+	if len(rec.AuthoredBytes) == 0 && rec.Skill != nil {
+		rec.Artifact.Description = rec.Skill.Description
+	}
+}
+
+// synthesizeSkillDocuments sets the ArtifactBytes of every skill record with
+// no ARTIFACT.md to the synthesized document of §4.3.4, so adapters dispatch
+// a plain skill as a skill in every mode. Walk calls it on the slice each of
+// its paths returns, after composeExtends, so the §4.6 validation and the
+// rewrite pass read a plain skill's nil ArtifactBytes. A plain skill declares
+// no extends:, so the executable-field comparison never parses its
+// synthesized bytes as authored. The version is a validated metadata.version
+// or the auto form, so an error marks a broken invariant rather than an
+// authoring fault.
+//
+// Spec: §13.11.3, §4.3.4
+func synthesizeSkillDocuments(records []ArtifactRecord) error {
+	for i := range records {
+		rec := &records[i]
+		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill || len(rec.AuthoredBytes) != 0 {
+			continue
+		}
+		doc, err := manifest.SynthesizedSkillDocument(rec.Artifact.Version)
+		if err != nil {
+			return fmt.Errorf("filesystem: synthesize ARTIFACT.md for %s: %w", rec.ID, err)
+		}
+		rec.ArtifactBytes = doc
+	}
+	return nil
 }
 
 // reportDrops passes each drop to opts.OnDrop in order. A non-empty drops
@@ -185,29 +274,37 @@ type WalkOptions struct {
 	OnDrop func(layer.Drop)
 }
 
-// walkLayer enumerates every artifact directory in a single layer.
-// An artifact directory contains an ARTIFACT.md (and SKILL.md when the
-// type is skill). DOMAIN.md files are ignored at this stage; phase 8
-// adds domain composition.
+// walkLayer enumerates every artifact package in a single layer. A
+// directory is a package when it directly holds ARTIFACT.md, or when it
+// directly holds SKILL.md and no directory between it and the layer root is a
+// package; the second form is a type: skill artifact with no ARTIFACT.md.
+// DOMAIN.md files are ignored at this stage; phase 8 adds domain composition.
+//
+// Spec: §4.2
 func walkLayer(layer Layer) ([]ArtifactRecord, error) {
+	fsys := os.DirFS(layer.Path)
+	packages := map[string]bool{}
 	var records []ArtifactRecord
 	walkErr := filepath.WalkDir(layer.Path, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") && path != layer.Path {
-				return filepath.SkipDir
-			}
+		if !d.IsDir() {
 			return nil
 		}
-		if d.Name() != "ARTIFACT.md" {
-			return nil
+		if strings.HasPrefix(d.Name(), ".") && path != layer.Path {
+			return filepath.SkipDir
 		}
-		rec, err := loadArtifactRecord(layer, path)
+		rel, err := filepath.Rel(layer.Path, path)
 		if err != nil {
 			return err
 		}
+		rel = filepath.ToSlash(rel)
+		rec, found, err := loadPackage(layer, fsys, packages, rel, path)
+		if err != nil || !found {
+			return err
+		}
+		packages[rel] = true
 		records = append(records, rec)
 		return nil
 	})
@@ -216,6 +313,30 @@ func walkLayer(layer Layer) ([]ArtifactRecord, error) {
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
 	return records, nil
+}
+
+// loadPackage applies the §4.2 discovery rule to the directory dir, whose
+// slash path under the layer root is rel, and loads the package it holds.
+// found is false when dir is not a package.
+//
+// Spec: §4.2
+func loadPackage(layer Layer, fsys fs.FS, packages map[string]bool, rel, dir string) (rec ArtifactRecord, found bool, err error) {
+	artifact, skill, err := PackageManifests(fsys, rel)
+	if err != nil {
+		return ArtifactRecord{}, false, err
+	}
+	switch {
+	case artifact:
+		rec, err = loadArtifactRecord(layer, filepath.Join(dir, "ARTIFACT.md"))
+	case skill && !WithinPackage(packages, rel):
+		rec, err = loadPlainSkillRecord(layer, dir)
+	default:
+		return ArtifactRecord{}, false, nil
+	}
+	if err != nil {
+		return ArtifactRecord{}, false, err
+	}
+	return rec, true, nil
 }
 
 // loadArtifactRecord reads ARTIFACT.md and (for skills) SKILL.md from the
@@ -261,27 +382,63 @@ func loadArtifactRecord(layer Layer, artifactPath string) (ArtifactRecord, error
 		rec.SkillBytes = skillBytes
 	}
 
-	if err := captureResources(&rec, dir); err != nil {
+	if err := captureResources(&rec, layer.Path, dir); err != nil {
 		return ArtifactRecord{}, err
 	}
+	rec.ResolveSkillVersion()
+	assignSourceSkillFields(&rec)
 	return rec, nil
 }
 
-func captureResources(rec *ArtifactRecord, dir string) error {
+// loadPlainSkillRecord loads a package that holds SKILL.md and no
+// ARTIFACT.md as a type: skill artifact. ArtifactBytes and AuthoredBytes stay
+// nil, so the §4.7.6 digest frames a zero-length first value. A SKILL.md that
+// does not parse fails the walk, as an unparseable ARTIFACT.md does.
+//
+// Spec: §4.2, §4.3.4
+func loadPlainSkillRecord(layer Layer, dir string) (ArtifactRecord, error) {
+	id, err := canonicalID(layer.Path, dir)
+	if err != nil {
+		return ArtifactRecord{}, err
+	}
+	skillBytes, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+	if err != nil {
+		return ArtifactRecord{}, err
+	}
+	s, err := manifest.ParseSkill(skillBytes)
+	if err != nil {
+		return ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, err)
+	}
+	rec := ArtifactRecord{
+		ID:         id,
+		Layer:      layer,
+		Artifact:   &manifest.Artifact{Type: manifest.TypeSkill},
+		Skill:      s,
+		SkillBytes: skillBytes,
+		Resources:  map[string][]byte{},
+	}
+	if err := captureResources(&rec, layer.Path, dir); err != nil {
+		return ArtifactRecord{}, err
+	}
+	rec.ResolveSkillVersion()
+	assignSourceSkillFields(&rec)
+	return rec, nil
+}
+
+// captureResources records every file under dir, the package directory
+// below layerRoot, as a bundled resource of rec, except the package root's
+// manifests and the files of a nested package.
+func captureResources(rec *ArtifactRecord, layerRoot, dir string) error {
+	fsys := os.DirFS(layerRoot)
 	return filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if d.IsDir() {
-			// spec: §4.2 — directories are domain paths and the leaves are
-			// artifact packages. A subdirectory that carries its own
-			// ARTIFACT.md is a separate package; its files belong to that
-			// artifact, so stop descending here instead of capturing them as
-			// this artifact's bundled resources (§4.4).
-			if path != dir && hasArtifactManifest(path) {
-				return filepath.SkipDir
+			if path == dir {
+				return nil
 			}
-			return nil
+			return skipNestedPackage(fsys, layerRoot, path)
 		}
 		if path == filepath.Join(dir, "ARTIFACT.md") {
 			return nil
@@ -312,7 +469,7 @@ func canonicalID(layerRoot, dir string) (string, error) {
 	}
 	id := filepath.ToSlash(rel)
 	if id == "." {
-		// A root-level ARTIFACT.md has no directory path under the root.
+		// A root-level manifest has no directory path under the root.
 		id = ""
 	}
 	if err := ValidateCanonicalID(id); err != nil {
@@ -321,24 +478,40 @@ func canonicalID(layerRoot, dir string) (string, error) {
 	return id, nil
 }
 
-// hasArtifactManifest reports whether dir directly contains an ARTIFACT.md
-// file, marking it as a nested artifact-package boundary (§4.2).
-func hasArtifactManifest(dir string) bool {
-	info, err := os.Stat(filepath.Join(dir, "ARTIFACT.md"))
-	return err == nil && !info.IsDir()
+// skipNestedPackage returns filepath.SkipDir when the subdirectory dir of a
+// package carries its own ARTIFACT.md. Directories are domain paths and the
+// leaves are artifact packages, so a nested package's files belong to that
+// artifact rather than to the enclosing one's bundled resources. A
+// subdirectory holding only SKILL.md stays inside the enclosing package, and
+// its SKILL.md is a bundled resource.
+//
+// Spec: §4.2, §4.4
+func skipNestedPackage(fsys fs.FS, layerRoot, dir string) error {
+	rel, err := filepath.Rel(layerRoot, dir)
+	if err != nil {
+		return err
+	}
+	artifact, _, err := PackageManifests(fsys, filepath.ToSlash(rel))
+	if err != nil {
+		return err
+	}
+	if artifact {
+		return filepath.SkipDir
+	}
+	return nil
 }
 
 // ValidateCanonicalID enforces the §4.2 canonical-ID invariants that every
 // artifact-walk path shares: the ID is the non-empty directory path under
 // the registry root, and no path segment contains "@". A root-level
-// ARTIFACT.md yields an empty ID and is rejected, so every artifact has an
+// ARTIFACT.md or SKILL.md yields an empty ID and is rejected, so every artifact has an
 // addressable canonical home. "@" is reserved as the reference delimiter in
 // the "<id>@<semver>" and "<id>@sha256:<hash>" grammar; allowing it inside a
 // segment makes a reference split ambiguously. Both the filesystem-source
 // walk and the server ingest walk call this so they share one invariant.
 func ValidateCanonicalID(id string) error {
 	if id == "" {
-		return errors.New("artifact must live in a subdirectory of the layer (a root-level ARTIFACT.md has no canonical ID)")
+		return errors.New("artifact must live in a subdirectory of the layer (a root-level ARTIFACT.md or SKILL.md has no canonical ID)")
 	}
 	for _, seg := range strings.Split(id, "/") {
 		if seg == "" {
