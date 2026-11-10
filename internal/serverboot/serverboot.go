@@ -1989,7 +1989,8 @@ type Config struct {
 	trustedProxySecret string
 	// multiTenant enables §6.3.1 per-request tenant routing (PODIUM_MULTI_TENANT):
 	// the registry binds to a no-data tenant and resolves each request's tenant
-	// from the caller's organization.
+	// from the caller's organization. validate refuses it without a
+	// request-time identity verifier (§6.3.1).
 	multiTenant bool
 	// operatorAdmins is the §4.7.1 list of identities granted the instance
 	// operator role at boot (PODIUM_OPERATOR_ADMINS). An operator provisions
@@ -2558,6 +2559,13 @@ func (c *Config) validate() error {
 		MultiTenant:                     c.multiTenant,
 	}
 	if err := startup.Validate(); err != nil {
+		return err
+	}
+	// §6.3.1: a multi-tenant registry routes by verified identity, so refuse a
+	// configuration with no verifier before any backend opens. The guard runs
+	// after StartupConfig.Validate, so every refusal Validate returns keeps
+	// precedence (§13.10).
+	if err := multiTenantVerifierGuard(c.multiTenant, c.publicMode, c.identityProvider); err != nil {
 		return err
 	}
 	// §13.10 signing: --sign / PODIUM_SIGN accepts "registry-key" and "none",

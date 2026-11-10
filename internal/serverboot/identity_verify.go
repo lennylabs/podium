@@ -123,6 +123,30 @@ func identityVisibilityGuard(identityProvider string, providerSelected, publicMo
 	return fmt.Errorf("config.identity_provider_unverified: PODIUM_IDENTITY_PROVIDER=%q has no request-time token verifier wired, so the registry would resolve every caller as anonymous-public and never apply per-layer visibility (§2.2, §6.3.1); the registry verifies %s server-side. Set PODIUM_PUBLIC_MODE=true to run an open registry, or select one of those", identityProvider, strings.Join(verifiedProviders, ", "))
 }
 
+// multiTenantVerifierGuard refuses a multi-tenant configuration whose identity
+// provider resolves to no registered provider: an empty value, a free-form
+// label such as "oidc" or "none", or public mode, which config.public_mode_with_idp
+// already confines to those values. A multi-tenant registry selects each
+// request's tenant from the verified identity, so without a verifier it would
+// bind every request to the no-data tenant and route none. A registered
+// provider without a verifier is left to identityVisibilityGuard, which
+// refuses it in either mode, so the predicate matches selectIdentityProvider's
+// nil case and cannot drift from it.
+//
+// Spec: §6.3.1 / §13.10 / §13.12
+func multiTenantVerifierGuard(multiTenant, publicMode bool, identityProvider string) error {
+	if !multiTenant || identity.Default.Has(identityProvider) {
+		return nil
+	}
+	cause := fmt.Sprintf("PODIUM_IDENTITY_PROVIDER=%q names no identity provider the registry verifies at request time", identityProvider)
+	remedy := "set PODIUM_IDENTITY_PROVIDER to one of " + strings.Join(verifiedProviders, ", ")
+	if publicMode {
+		cause = "public mode (PODIUM_PUBLIC_MODE) verifies no caller"
+		remedy = "unset PODIUM_PUBLIC_MODE and " + remedy
+	}
+	return fmt.Errorf("config.multitenant_no_verifier: PODIUM_MULTI_TENANT=true selects each request's tenant from the verified caller identity (§6.3.1), and %s; %s, or unset PODIUM_MULTI_TENANT", cause, remedy)
+}
+
 // canonicalAudience returns the canonical entry of the accepted-audience set
 // (§6.3.4): the first entry, which is the audience the registry asks for when
 // it initiates a flow itself. A set that resolves to no entry yields "".
