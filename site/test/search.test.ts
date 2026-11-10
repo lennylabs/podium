@@ -1,3 +1,4 @@
+import MiniSearch from "minisearch";
 import { describe, expect, it } from "vitest";
 
 import { buildSearchIndex, documentsFor } from "../src/build/search";
@@ -73,7 +74,7 @@ describe("documentsFor", () => {
     );
 
     expect(docs[1]).toMatchObject({
-      route: "/a.html#requirements",
+      id: "/a.html#requirements",
       text: "A machine running Linux.",
     });
   });
@@ -141,6 +142,24 @@ describe("buildSearchIndex", () => {
     };
 
     expect(parsed.documentCount).toBe(3);
+  });
+
+  it("returns the route as the hit ID and stores it in no field", () => {
+    const serialized = buildSearchIndex(pages, sectionTitles).serialized;
+    const loaded = MiniSearch.loadJSON(serialized, {
+      fields: ["page", "heading", "text"],
+      storeFields: ["page", "heading", "section"],
+    });
+
+    const [hit] = loaded.search("Linux");
+
+    expect(hit).toMatchObject({
+      id: "/guide/install.html#requirements",
+      page: "Install",
+      heading: "Requirements",
+      section: "Guide",
+    });
+    expect(hit).not.toHaveProperty("route");
   });
 
   it("names the section each entry belongs to", () => {

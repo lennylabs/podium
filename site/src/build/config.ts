@@ -52,7 +52,10 @@ export function loadConfig(overrides: Partial<SiteConfig> = {}): SiteConfig {
     // browser-session, posture-read, and layer-write-authorization sections,
     // and from 640kB when a release note and one CLI paragraph together added
     // under 2kB of source and carried it past the ceiling. Both raises were
-    // taken rather than paid for by dropping reference content.
+    // taken rather than paid for by dropping reference content. When the
+    // Agent Skills layer and version pages carried it past 768kB, the index
+    // stopped storing each route as a field beside the identical document ID
+    // (search.ts), which recovered the headroom without a third raise.
     //
     // The headroom here is deliberate so a routine documentation change does
     // not fail the gate. A third raise is the signal to stop raising it and

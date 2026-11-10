@@ -4,9 +4,13 @@ import MiniSearch from "minisearch";
 import type { PageModel } from "./types";
 
 export type SearchDocument = {
+  /**
+   * URL to open, including any heading fragment. MiniSearch keeps every
+   * document ID in the serialized index, so the route is read back from the ID
+   * rather than stored a second time as a field, which would add every route's
+   * bytes to the index again.
+   */
   id: string;
-  /** URL to open, including any heading fragment. */
-  route: string;
   /** Page title, shown as the result's context. */
   page: string;
   /** Heading text, empty for a whole-page entry. */
@@ -40,7 +44,6 @@ export function documentsFor(page: PageModel, sectionTitle: string): SearchDocum
   const docs: SearchDocument[] = [
     {
       id: page.route,
-      route: page.route,
       page: page.title,
       heading: "",
       section: sectionTitle,
@@ -64,7 +67,6 @@ export function documentsFor(page: PageModel, sectionTitle: string): SearchDocum
     const text = current.parts.join(" ").replace(/\s+/g, " ").trim();
     docs.push({
       id: `${page.route}#${current.id}`,
-      route: `${page.route}#${current.id}`,
       page: page.title,
       heading: current.heading,
       section: sectionTitle,
@@ -108,7 +110,7 @@ export function buildSearchIndex(
 
   const index = new MiniSearch<SearchDocument>({
     fields: ["page", "heading", "text"],
-    storeFields: ["route", "page", "heading", "section"],
+    storeFields: ["page", "heading", "section"],
     searchOptions: {
       boost: { page: 3, heading: 2 },
       prefix: true,
