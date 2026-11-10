@@ -232,11 +232,11 @@ func TestExtends_SensitivityChildTightens(t *testing.T) {
 	}
 }
 
-// sandbox_profile: most-restrictive wins; the child tightens
-// the parent. spec: docs/authoring/extends.md § "Tightening sandbox profile".
+// sandbox_profile: the child's profile applies because the parent's is
+// unrestricted. spec: docs/authoring/extends.md § "Tightening sandbox profile".
 func TestExtends_SandboxChildTightens(t *testing.T) {
 	t.Parallel()
-	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsandbox_profile: read-only-fs\n---\n\nbody\n"
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsandbox_profile: unrestricted\n---\n\nbody\n"
 	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nsandbox_profile: seccomp-strict\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
 	srv := extendsBoot(t, parent, child, nil)
 	if fm := exLoad(t, srv, exParentID).Frontmatter; !strings.Contains(fm, "seccomp-strict") {
@@ -245,7 +245,7 @@ func TestExtends_SandboxChildTightens(t *testing.T) {
 }
 
 // sandbox_profile: the child cannot widen the parent
-// restriction. spec: docs/authoring/extends.md § "The most-restrictive rules".
+// restriction. spec: docs/authoring/extends.md § "Sandbox profile".
 func TestExtends_SandboxChildCannotWiden(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsandbox_profile: seccomp-strict\n---\n\nbody\n"

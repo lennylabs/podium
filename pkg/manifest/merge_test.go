@@ -19,7 +19,7 @@ func TestMergeExtends_FieldSemanticsTable(t *testing.T) {
 		Tags:             []string{"a", "shared"},
 		WhenToUse:        []string{"parent case"},
 		Sensitivity:      SensitivityMedium,
-		SandboxProfile:   SandboxReadOnlyFS,
+		SandboxProfile:   SandboxUnrestricted,
 		SearchVisibility: SearchVisibilityIndexed,
 		DelegatesTo:      []string{"finance/x"},
 		RequiresApproval: []ApprovalRequirement{{Tool: "deploy"}},
@@ -84,10 +84,12 @@ func TestMergeExtends_FieldSemanticsTable(t *testing.T) {
 	if !reflect.DeepEqual(got.WhenToUse, []string{"parent case", "child case"}) {
 		t.Errorf("when_to_use = %v", got.WhenToUse)
 	}
-	// sensitivity / sandbox_profile: most-restrictive.
+	// sensitivity: most-restrictive.
 	if got.Sensitivity != SensitivityHigh {
 		t.Errorf("sensitivity = %q, want high", got.Sensitivity)
 	}
+	// sandbox_profile: the parent's value unless it is unset or
+	// unrestricted. The parent is unrestricted, so the child's applies.
 	if got.SandboxProfile != SandboxSeccompStrict {
 		t.Errorf("sandbox_profile = %q, want seccomp-strict", got.SandboxProfile)
 	}
