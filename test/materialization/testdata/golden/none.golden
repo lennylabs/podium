@@ -87,6 +87,20 @@ description: Reviews pull requests for bugs.
 
 Review the diff and report defects.
 
+=== team/standup/SKILL.md ===
+---
+name: standup
+description: Summarize yesterday's work for the daily standup.
+---
+
+List what changed yesterday and what is planned today.
+
+=== team/standup/references/template.md ===
+# Standup
+
+- Yesterday:
+- Today:
+
 === team/tabs-always/ARTIFACT.md ===
 ---
 type: rule
