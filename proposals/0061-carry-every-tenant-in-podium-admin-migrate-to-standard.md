@@ -1,7 +1,7 @@
 # Proposal 0061: Carry every tenant in podium admin migrate-to-standard
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-09). Verified on 2026-11-09 after 3 adversarial review rounds (3 findings fixed).
+- Status: Implemented (2026-11-09). Verified on 2026-11-09 after 3 adversarial review rounds (3 findings fixed).
 - Date: 2026-11-09
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is scheduled for the 0.6.0 release. It is a pre-1.0 behavior change and lands in a MINOR bump with no compatibility flag that restores the default-org-only pump.
@@ -51,21 +51,21 @@ This document stages spec, code, test, and documentation changes. It does not mo
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. The §13.10 *Upgrade path* paragraph states that the migration carries every tenant.
+- [x] **S1 · spec** — SPEC-1. The §13.10 *Upgrade path* paragraph states that the migration carries every tenant.
       Levels: unit. Depends on: —
-- [ ] **S2 · code** — CODE-1, CODE-2, TEST-1, TEST-3. The `ListTenants` plan, the tenant-major pump with faithful records, the multi-tenant unit test, and the order, resume, and error tests. Bundled because CODE-1 changes the plan type that `pumpStore` and the existing marker test consume, so no part compiles alone, and TEST-1 lands with the behavior it pins.
+- [x] **S2 · code** — CODE-1, CODE-2, TEST-1, TEST-3. The `ListTenants` plan, the tenant-major pump with faithful records, the multi-tenant unit test, and the order, resume, and error tests. Bundled because CODE-1 changes the plan type that `pumpStore` and the existing marker test consume, so no part compiles alone, and TEST-1 lands with the behavior it pins.
       Levels: unit, e2e. Depends on: S1
-- [ ] **S3 · test** — TEST-2. Same-ID collision subtests.
+- [x] **S3 · test** — TEST-2. Same-ID collision subtests.
       Levels: unit. Depends on: S2
-- [ ] **S4 · test** — TEST-4. `TestDeployment_MigrateToStandard` carries a multi-tenant standalone store through the binary and re-runs.
+- [x] **S4 · test** — TEST-4. `TestDeployment_MigrateToStandard` carries a multi-tenant standalone store through the binary and re-runs.
       Levels: e2e. Depends on: S2
-- [ ] **S5 · test** — MV-1. Scenario S96 in `test/manual-validation.md`.
+- [x] **S5 · test** — MV-1. Scenario S96 in `test/manual-validation.md`.
       Levels: manual. Depends on: S2
-- [ ] **S6 · docs** — DOC-1. The `podium admin migrate-to-standard` paragraph in `docs/reference/cli.md`.
+- [x] **S6 · docs** — DOC-1. The `podium admin migrate-to-standard` paragraph in `docs/reference/cli.md`.
       Levels: —. Depends on: S1
-- [ ] **S7 · docs** — DOC-2. The "Migrating to clustered" paragraph in `docs/deployment/single-node.md`.
+- [x] **S7 · docs** — DOC-2. The "Migrating to clustered" paragraph in `docs/deployment/single-node.md`.
       Levels: —. Depends on: S1
-- [ ] **S8 · docs** — DOC-3. The `CHANGELOG.md` `[Unreleased]` edits.
+- [x] **S8 · docs** — DOC-3. The `CHANGELOG.md` `[Unreleased]` edits.
       Levels: —. Depends on: S1–S7
 
 **Ordering constraints.** S1 lands first and passes `make speccov-drift` and `make coverage-gate` before S2 (D-15). S3, S4, and S5 are independent of one another once S2 lands. S6 and S7 are independent of each other. S8 describes the whole change and lands last. Land every step in one pull request.
