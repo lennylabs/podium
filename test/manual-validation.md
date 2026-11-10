@@ -8155,7 +8155,7 @@ column confirms what the registry holds rather than what a load reports.
 
    ```bash
    sed -i.bak 's/^  version: "0.1.0"$/  version: "0.2.0"/' "$WORK/reg/early/SKILL.md"
-    rm "$WORK/reg/early/SKILL.md.bak"
+   rm "$WORK/reg/early/SKILL.md.bak"
    podium layer reingest --registry "$PODIUM_REGISTRY" reg
    load_http 0.2.0
    load_mcp 0.2.0
