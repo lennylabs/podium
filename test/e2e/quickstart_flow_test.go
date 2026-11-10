@@ -16,11 +16,11 @@ import (
 )
 
 // greetRegistry stages the quickstart's hello-world skill at
-// personal/hello/greet and returns the registry root.
+// personal/hello/greet, a SKILL.md with no ARTIFACT.md, and returns the
+// registry root.
 func greetRegistry(t *testing.T) string {
 	return writeRegistry(t, map[string]string{
-		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
-		"personal/hello/greet/SKILL.md":    greetSkillBody,
+		"personal/hello/greet/SKILL.md": greetSkillVersioned,
 	})
 }
 
@@ -136,8 +136,9 @@ func TestQuickstart_InitRefusesOverwrite(t *testing.T) {
 	}
 }
 
-// The documented skill (ARTIFACT.md +
-// SKILL.md) lints cleanly. Doc: quickstart § 3.
+// The documented skill (SKILL.md with metadata.version and no ARTIFACT.md)
+// lints cleanly. Doc: quickstart § 3.
+// Spec: §4.3.4
 func TestQuickstart_LintCleanSkill(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", nil, "lint", "--registry", greetRegistry(t))
@@ -256,8 +257,10 @@ func TestQuickstart_SyncNoRegistryExits2(t *testing.T) {
 	}
 }
 
-// sync --harness none writes the canonical layout.
-// Doc: quickstart § 4.
+// sync --harness none writes the canonical layout. A skill with no
+// ARTIFACT.md materializes as a plain Agent Skills directory, so the none
+// output holds SKILL.md and no ARTIFACT.md. Doc: quickstart § 4.
+// Spec: §4.2
 func TestQuickstart_SyncNoneCanonical(t *testing.T) {
 	t.Parallel()
 	reg := greetRegistry(t)
@@ -266,8 +269,8 @@ func TestQuickstart_SyncNoneCanonical(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	mustExist(t, filepath.Join(tgt, "personal/hello/greet/ARTIFACT.md"))
 	mustExist(t, filepath.Join(tgt, "personal/hello/greet/SKILL.md"))
+	mustNotExist(t, filepath.Join(tgt, "personal/hello/greet/ARTIFACT.md"))
 	if _, err := os.Stat(filepath.Join(tgt, ".claude")); err == nil {
 		t.Errorf(".claude/ created under --harness none")
 	}
@@ -336,12 +339,13 @@ func TestQuickstart_WatchInitialSyncThenSIGINT(t *testing.T) {
 	reg := greetRegistry(t)
 	tgt := t.TempDir()
 	w := startWatch(t, reg, tgt, "none")
-	if !pollFile(filepath.Join(tgt, "personal/hello/greet/ARTIFACT.md"), 5*time.Second) {
+	if !pollFile(filepath.Join(tgt, "personal/hello/greet/SKILL.md"), 5*time.Second) {
 		t.Fatalf("initial sync did not materialize within 5s\nlog:\n%s", w.log())
 	}
 	if code := w.stop(t); code != 0 {
 		t.Errorf("watch exit after SIGINT = %d, want 0\nlog:\n%s", code, w.log())
 	}
+	mustNotExist(t, filepath.Join(tgt, "personal/hello/greet/ARTIFACT.md"))
 	if !strings.Contains(w.log(), "adapter:") || !strings.Contains(w.log(), "artifacts:") {
 		t.Errorf("watch log missing initial sync block:\n%s", w.log())
 	}
@@ -407,8 +411,10 @@ func TestQuickstart_SyncUnknownHarness(t *testing.T) {
 	}
 }
 
-// intermediate domain directories without ARTIFACT.md are
-// not treated as artifacts. Doc: quickstart § 3.
+// intermediate domain directories without manifest files are not treated
+// as artifacts, and the skill below them materializes with no ARTIFACT.md.
+// Doc: quickstart § 3.
+// Spec: §4.2
 func TestQuickstart_IntermediateDirsNotArtifacts(t *testing.T) {
 	t.Parallel()
 	reg := greetRegistry(t) // personal/ and personal/hello/ are bare dirs
@@ -423,7 +429,8 @@ func TestQuickstart_IntermediateDirsNotArtifacts(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(tgt, "personal/hello/ARTIFACT.md")); err == nil {
 		t.Errorf("personal/hello/ARTIFACT.md should not exist")
 	}
-	mustExist(t, filepath.Join(tgt, "personal/hello/greet/ARTIFACT.md"))
+	mustExist(t, filepath.Join(tgt, "personal/hello/greet/SKILL.md"))
+	mustNotExist(t, filepath.Join(tgt, "personal/hello/greet/ARTIFACT.md"))
 }
 
 // lint on a non-existent registry path exits 1. Doc:
