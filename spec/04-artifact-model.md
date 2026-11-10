@@ -131,7 +131,7 @@ Each layer (§4.6) is rooted at a Git repo or local filesystem path; the directo
 
 The manifest frontmatter is YAML; the prose body is markdown. The registry indexes frontmatter for `search_artifacts` and `load_domain`. The prose body is returned inline by `load_artifact`.
 
-For non-skill types, frontmatter and prose both live in `ARTIFACT.md`. For skills, frontmatter lives in `ARTIFACT.md` while prose lives in `SKILL.md`; a small subset of frontmatter fields is mirrored into `SKILL.md` to satisfy the agentskills.io specification (§4.3.4).
+For non-skill types, frontmatter and prose both live in `ARTIFACT.md`. For skills, the Agent Skills fields and the prose body live in `SKILL.md`, and the Podium-only fields live in an optional `ARTIFACT.md` (§4.3.4).
 
 ### Universal fields (any artifact type)
 
