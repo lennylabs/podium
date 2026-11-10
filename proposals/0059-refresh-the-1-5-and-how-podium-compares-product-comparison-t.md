@@ -1,7 +1,7 @@
 # Proposal 0059: Refresh the §1.5 and "How Podium compares" product comparison to November 2026
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-09). Verified on 2026-11-09 after 4 adversarial review rounds (8 findings fixed).
+- Status: Implemented (2026-11-09). Verified on 2026-11-09 after 4 adversarial review rounds (8 findings fixed).
 - Date: 2026-11-09
 
 This document stages spec and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is prose-only and changes no behavior.
@@ -46,11 +46,11 @@ This document stages spec and documentation changes. It does not modify any spec
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2. The reconciled §1.5 table and the closing sentence land in one commit, because both replace adjacent text in §1.5 and one reviewer reads them together. Entry criterion: verification step 1 has run in the main session before approval, and its results are written into the staged text, so S1 applies SPEC-1 and SPEC-2 as written.
+- [x] **S1 · spec** — SPEC-1, SPEC-2. The reconciled §1.5 table and the closing sentence land in one commit, because both replace adjacent text in §1.5 and one reviewer reads them together. Entry criterion: verification step 1 has run in the main session before approval, and its results are written into the staged text, so S1 applies SPEC-1 and SPEC-2 as written.
       Levels: unit (`make coverage-gate`). Depends on: —
-- [ ] **S2 · docs** — DOC-1. The "How Podium compares" section of `docs/getting-started/why-podium.md` is rewritten to the SPEC-1 categories, with the open-specifications table and the November 2026 date.
+- [x] **S2 · docs** — DOC-1. The "How Podium compares" section of `docs/getting-started/why-podium.md` is rewritten to the SPEC-1 categories, with the open-specifications table and the November 2026 date.
       Levels: unit (`make coverage-gate`, `cd site && npm run build`). Depends on: S1
-- [ ] **S3 · docs** — DOC-3. The `CHANGELOG.md` bullet under `[Unreleased]` > `Documentation`.
+- [x] **S3 · docs** — DOC-3. The `CHANGELOG.md` bullet under `[Unreleased]` > `Documentation`.
       Levels: unit (`make coverage-gate`, `cd site && npm run build`, because the site's changelog page includes `CHANGELOG.md`). Depends on: S1, S2
 
 ## Current state and the gap
