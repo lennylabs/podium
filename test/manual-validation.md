@@ -11221,13 +11221,17 @@ the credential was removed from the stored layer.
 `PODIUM_MULTI_TENANT` behind `trusted-headers`, provisions and lists tenants
 through `/v1/admin/tenants`, routes each caller to the tenant its organization
 names, including a tenant created through the API, refuses a layer write from
-an organization that names no tenant, and that a single-tenant standalone
+an organization that names no tenant, that a single-tenant standalone
 registry refuses tenant management with a suggested action that names no
-backend.
+backend, and that a registry started with `PODIUM_MULTI_TENANT` and no
+request-time identity verifier fails to start with
+`config.multitenant_no_verifier`.
 
 **Covers.** §13.10 Features enabled by configuration, §6.3.1 per-request tenant
-selection, §7.3.1 Tenant selection, §7.3.3 Tenant Management, and the §6.10
-`registry.tenant_management_unavailable` envelope, through the compiled binary.
+selection and the multi-tenant verifier requirement, §7.3.1 Tenant selection,
+§7.3.3 Tenant Management, §13.12 `PODIUM_MULTI_TENANT`, the §6.10
+`registry.tenant_management_unavailable` envelope, and the
+`config.multitenant_no_verifier` startup refusal, through the compiled binary.
 
 **Why by hand.** An operator reads the raw tenant list and the layer lists of
 one caller in different tenants side by side. A `registry.tenant_management_unavailable`
@@ -11235,6 +11239,9 @@ answer from the multi-tenant server, a `globex-<pid>` registration refused
 with `auth.forbidden`, which means the registry did not route to the tenant the
 API created, a `globex-<pid>` list that names `public-layer`, or a suggested
 action that says "on a standard backend" is the defect this scenario catches.
+A multi-tenant server that starts without a verifier, or a refusal that offers
+`PODIUM_PUBLIC_MODE=true` without the conditions it requires, is the defect
+step 7 catches.
 
 **Steps.**
 
@@ -11342,7 +11349,44 @@ action that says "on a standard backend" is the defect this scenario catches.
    (PODIUM_MULTI_TENANT) to manage tenants.` The words `standard backend` in
    the response are the defect.
 
-**Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
+7. **Negative control: a multi-tenant registry with no request-time verifier.**
+   Stop the single-tenant server, then start the registry with
+   `PODIUM_MULTI_TENANT=true` under each configuration that has no
+   request-time verifier, in the foreground, and print each exit status and
+   the last lines of its log.
+
+   ```bash
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   refuse() {
+     env "$@" PODIUM_MULTI_TENANT=true podium serve --standalone --no-embeddings --bind 127.0.0.1:8193 > "$WORK/refuse.log" 2>&1
+     echo "[$*] exit=$?"; tail -2 "$WORK/refuse.log"
+   }
+   refuse PODIUM_IDENTITY_PROVIDER=
+   refuse PODIUM_IDENTITY_PROVIDER=oidc
+   refuse PODIUM_IDENTITY_PROVIDER= PODIUM_PUBLIC_MODE=true
+   refuse PODIUM_IDENTITY_PROVIDER=oauth-device-code
+   ```
+
+   Each run passes its variables to `refuse` as separate words and the
+   function forwards them with `"$@"`, so the block relies on no word
+   splitting and behaves the same under bash and zsh.
+   `PODIUM_TRUSTED_PROXY_SECRET` from step 1 stays exported and plays no
+   part, because no run selects `trusted-headers`. A run that does not return
+   within a few seconds has started a server, which is the defect. Stop it with
+   Ctrl-C and record the failure.
+
+   **Expect.** The first three runs exit non-zero with
+   `config.multitenant_no_verifier`. Each message names
+   `injected-session-token`, `oidc-jwt`, and `trusted-headers`, and each
+   contains `unset PODIUM_MULTI_TENANT`. The `oidc` run quotes `"oidc"`, and
+   the public-mode run contains `unset PODIUM_PUBLIC_MODE`. The fourth run
+   exits non-zero with `config.identity_provider_unverified`, and its message
+   contains `unset PODIUM_IDENTITY_PROVIDER` and `PODIUM_MULTI_TENANT`. Any
+   `exit=0` is the defect. A fourth-run message that offers
+   `PODIUM_PUBLIC_MODE=true` without `unset PODIUM_IDENTITY_PROVIDER` is the
+   defect.
+
+**Cleanup.** Stop the server with `kill "$SRV" 2>/dev/null` and `rm -rf "$WORK"`.
 
 ---
 
