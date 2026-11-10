@@ -38,7 +38,7 @@ your team's policy doc. Output a markdown table sorted by absolute
 variance.
 ```
 
-A `SKILL.md` alone is a complete skill. Its version is `metadata.version` when that key holds a `major.minor.patch` value, and the registry assigns one otherwise (see [Skill versions](frontmatter-reference#skill-versions)).
+A `SKILL.md` alone is a complete skill.
 
 An optional `ARTIFACT.md` overlay, written by hand beside `SKILL.md`, carries the Podium-only fields:
 

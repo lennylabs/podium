@@ -96,23 +96,21 @@ lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence
 
 ### Skill versions
 
-A skill's version is the `version` field of its `ARTIFACT.md` when that file declares one, and otherwise the `SKILL.md` `metadata.version` when that value is in `major.minor.patch` form. The Agent Skills standard leaves `metadata` free-form, so a `metadata.version` in any other form, such as `1.0`, is ignored. When both are set and `metadata.version` is a `major.minor.patch` value, the two must be equal (`lint.skill_artifact_field_mismatch`).
+A skill's version is the `ARTIFACT.md` `version` when that file declares one, and otherwise a `SKILL.md` `metadata.version` in `major.minor.patch` form. A `metadata.version` in any other form, such as `1.0`, is ignored. When both are set and `metadata.version` is a `major.minor.patch` value, the two must be equal (`lint.skill_artifact_field_mismatch`).
 
 A skill that declares no usable version carries a registry-assigned version `0.0.0-auto.<N>`, a semver prerelease of `0.0.0`, and lint reports the `lint.skill_version_assigned` warning for it. The form is reserved to the registry, so an authored version in that form fails lint with `lint.invalid_version`. The registry derives `<N>` at ingest from the rows it stores for the artifact:
 
 - Bytes that the layer's most recently ingested non-deleted row of the artifact holds reuse that row's version, and the ingest is a no-op.
 - Bytes that no stored or soft-deleted row of the artifact holds receive one more than the highest `<N>` any such row carries, or `0` when none carries one.
-- Bytes that another stored or soft-deleted row of the artifact holds under a different version are rejected with `ingest.invalid_artifact` and `details.constraint: "auto_version_duplicate_content"`. A revert to earlier bytes is rejected this way, including a revert across an interval in which the skill declared a version, and so is a second layer's byte-identical version-less package. `latest` keeps serving the newer row. To publish such a skill, set `metadata.version` in `SKILL.md` or change the content.
+- Bytes that another stored or soft-deleted row of the artifact holds under a different version are rejected with `ingest.invalid_artifact` and `details.constraint: "auto_version_duplicate_content"`. A revert to earlier bytes is rejected this way, including a revert across an interval in which the skill declared a version. `latest` keeps serving the newer row. To publish such a skill, set `metadata.version` in `SKILL.md` or change the content.
 
 `<id>@0.0.0-auto.<N>` pins an assigned version exactly, a range pin such as `<id>@1.x` never selects one, and assigned versions are candidates for `latest`.
 
-A soft-deleted row counts, because `podium layer restore` serves it again. A layer unregistered and registered again under its ID therefore rejects its unchanged version-less skills until the retention purge removes the earlier rows or the author sets `metadata.version`, and `podium layer restore` within the recovery window serves the earlier rows instead. A purge that removes the row holding the highest `<N>` lets a later ingest assign that `<N>` again, and a purge of every row carrying rejected bytes lets a later ingest accept them. An MCP server whose content cache held the purged row for those bytes keeps reporting the purged version for them until the cache drops the record.
+A soft-deleted row counts, because `podium layer restore` serves it again. A layer unregistered and registered again under its ID therefore rejects its unchanged version-less skills until the retention purge removes the earlier rows or the author sets `metadata.version`. Within the recovery window, `podium layer restore` serves the earlier rows instead. A purge that removes the row holding the highest `<N>` lets a later ingest assign that `<N>` again, and a purge of every row carrying rejected bytes lets a later ingest accept them. An MCP server whose content cache held the purged row for those bytes keeps reporting the purged version for them until the cache drops the record.
 
 A filesystem source keeps no ingest history and reports `0.0.0-auto.0` for every skill whose version is assigned.
 
 Removing `ARTIFACT.md` from an ingested skill changes its content hash, so a reingest at an unchanged `metadata.version` is rejected with `ingest.immutable_violation`. Bump `metadata.version`, or remove it to let the registry assign a version.
-
-For a skill with no `ARTIFACT.md`, the registry serves a synthesized `ARTIFACT.md` carrying `type: skill` and the resolved version, which the [HTTP API](../reference/http-api) reference states byte for byte.
 
 ---
 
@@ -138,7 +136,7 @@ allowed-tools:
 | Field | Description |
 |:--|:--|
 | `compatibility` | Free-form environment notes (≤ 500 chars). Read by SKILL.md-aware tools to surface preconditions to a reader. When it is omitted, every harness adapter that writes a skill's `SKILL.md` derives a compatibility string from `runtime_requirements` and `sandbox_profile` and adds it to the materialized `SKILL.md`. The `none` adapter copies `SKILL.md` unchanged. Published marketplace output carries the same line. |
-| `metadata` | Open-ended string-to-string map. Use for client-specific properties not defined by the agentskills.io spec. A `version` key in `major.minor.patch` form sets the skill's version when `ARTIFACT.md` declares none (see [Skill versions](#skill-versions)). |
+| `metadata` | Open-ended string-to-string map. Use for client-specific properties not defined by the agentskills.io spec. |
 | `allowed-tools` | Experimental. YAML list of tools the skill is pre-approved to call. Podium's parser rejects a bare string here, so write one list entry per tool. Adapter support varies by harness. |
 
 ---
@@ -313,7 +311,7 @@ When two layers contribute artifacts with the same canonical ID, the higher-prec
 
 If a child omits a field of its `ARTIFACT.md` frontmatter, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above, except that a child whose parent comes from another layer restates the [executable fields](extends#executable-fields-across-layers) that parent sets. When both the parent and the child declare a value, a field in the table merges per its row, and every field outside the table takes the child's value. The child's `type:` must match the parent's, and the child's `version:` is independent of the parent's.
 
-For skills, the merge applies to the `ARTIFACT.md` frontmatter alone. A skill that declares `extends:` therefore carries an `ARTIFACT.md`, and the parent it names may be a skill without one. The registry serves the child's `SKILL.md` verbatim, so `name`, `description`, `license`, and the other agentskills.io fields come from the child's `SKILL.md` and are not inherited from the parent's, whether or not the child's `SKILL.md` declares them.
+For skills, the merge applies to the `ARTIFACT.md` frontmatter alone. The registry serves the child's `SKILL.md` verbatim, so `name`, `description`, `license`, and the other agentskills.io fields come from the child's `SKILL.md` and are not inherited from the parent's, whether or not the child's `SKILL.md` declares them.
 
 See [Extends](extends) for examples and gotchas.
 

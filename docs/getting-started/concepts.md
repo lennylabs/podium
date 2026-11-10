@@ -37,7 +37,7 @@ finance/close-reporting/run-variance-analysis/   # type: skill
     └── variance-explained.md
 ```
 
-Each manifest is markdown with YAML frontmatter. For skills, `SKILL.md` carries the standard's frontmatter (`name`, `description`, plus optional `license`, `compatibility`, `metadata`, `allowed-tools`) and the prose body that the agent reads. `ARTIFACT.md` carries Podium's structured frontmatter (`type`, `version`, `when_to_use`, `tags`, `sensitivity`, and the rest). For a skill, `ARTIFACT.md` is an optional overlay that the author writes by hand, and its body is empty. A `SKILL.md` alone is a complete skill. For non-skill types, `ARTIFACT.md` is the only manifest and carries both frontmatter and prose body.
+Each manifest is markdown with YAML frontmatter. For skills, `SKILL.md` carries the standard's frontmatter (`name`, `description`, plus optional `license`, `compatibility`, `metadata`, `allowed-tools`) and the prose body that the agent reads. `ARTIFACT.md` carries Podium's structured frontmatter (`type`, `version`, `when_to_use`, `tags`, `sensitivity`, and the rest). For a skill, `ARTIFACT.md` is an optional overlay that the author writes by hand, and its body is empty. For non-skill types, `ARTIFACT.md` is the only manifest and carries both frontmatter and prose body.
 
 The directory path is the artifact's **canonical ID**: `finance/close-reporting/run-variance-analysis` above. Other artifacts reference it by that ID, optionally with `@<semver>`, `@0.0.0-auto.<N>`, or `@sha256:<hash>` for version pinning.
 

@@ -110,7 +110,7 @@ A `SKILL.md` carries the [agentskills.io](https://agentskills.io/specification) 
 | `metadata` | map (string → string) | no | Open-ended map for client-specific extension. |
 | `allowed-tools` | list of strings | no | Experimental. Pre-approved tools, one per entry. A scalar fails to parse. |
 
-A skill's version is the `ARTIFACT.md` `version` when that file declares one, and otherwise a `SKILL.md` `metadata.version` in `major.minor.patch` form. A `metadata.version` in any other form, such as `1.0`, is ignored, and with no `ARTIFACT.md` `version` the registry assigns the version. When both are set and `metadata.version` is a `major.minor.patch` value, the two are equal (`lint.skill_artifact_field_mismatch` otherwise). [Skill versions](../authoring/frontmatter-reference#skill-versions) describes how the registry assigns `0.0.0-auto.<N>`.
+A skill's version is the `ARTIFACT.md` `version` when that file declares one, and otherwise a `SKILL.md` `metadata.version` in `major.minor.patch` form. A `metadata.version` in any other form, such as `1.0`, is ignored, and with no `ARTIFACT.md` `version` the registry assigns the version. When both are set and `metadata.version` is a `major.minor.patch` value, the two are equal (`lint.skill_artifact_field_mismatch` otherwise).
 
 ### Body
 
