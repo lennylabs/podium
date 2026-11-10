@@ -8,6 +8,22 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
+// synthesizedComment is the body line of the §4.3.4 synthesized ARTIFACT.md.
+const synthesizedComment = "<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n"
+
+// synthesizedSkillDocument returns the §4.3.4 synthesized ARTIFACT.md for v.
+func synthesizedSkillDocument(t *testing.T, v string) string {
+	t.Helper()
+	doc, err := manifest.SynthesizedSkillDocument(v)
+	if err != nil {
+		t.Fatalf("SynthesizedSkillDocument(%q): %v", v, err)
+	}
+	return string(doc)
+}
+
+// Spec: §4.3.4 — manifestBodyOf strips the frontmatter so BM25 indexes
+// prose, and indexes nothing for the synthesized ARTIFACT.md of a skill with
+// no ARTIFACT.md.
 func TestManifestBodyOf_StripsFrontmatter(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
@@ -20,6 +36,12 @@ func TestManifestBodyOf_StripsFrontmatter(t *testing.T) {
 		"": "",
 		// frontmatter without closing fence — returned as-is
 		"---\nno-close": "---\nno-close",
+		// the synthesized ARTIFACT.md of a skill with no ARTIFACT.md has no
+		// authored prose (§4.3.4)
+		synthesizedSkillDocument(t, "0.0.0-auto.0"): "",
+		// an authored ARTIFACT.md with the same pointer comment under other
+		// frontmatter keeps its body
+		"---\nversion: 1.0.0\ntype: skill\n---\n" + synthesizedComment: "\n" + synthesizedComment,
 	}
 	for in, want := range cases {
 		rec := filesystem.ArtifactRecord{ArtifactBytes: []byte(in)}

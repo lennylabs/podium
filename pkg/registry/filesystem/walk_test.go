@@ -1,6 +1,9 @@
 package filesystem
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -8,6 +11,7 @@ import (
 	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 const skillArtifact = `---
@@ -806,5 +810,201 @@ func TestExtendsOf(t *testing.T) {
 	rec := ArtifactRecord{Artifact: &manifest.Artifact{Extends: "x@1.0.0"}}
 	if got := extendsOf(rec); got != "x@1.0.0" {
 		t.Errorf("extendsOf = %q, want x@1.0.0", got)
+	}
+}
+
+// plainSkill is a SKILL.md with no ARTIFACT.md beside it. metadataVersion,
+// when set, is written as metadata.version.
+func plainSkill(name, desc, metadataVersion string) string {
+	var b strings.Builder
+	b.WriteString("---\nname: " + name + "\ndescription: " + desc + "\n")
+	if metadataVersion != "" {
+		b.WriteString("metadata:\n  version: \"" + metadataVersion + "\"\n")
+	}
+	b.WriteString("---\n\nBody for " + name + ".\n")
+	return b.String()
+}
+
+// openTree writes files under a fresh registry root and opens it.
+func openTree(t *testing.T, files ...testharness.WriteTreeOption) (string, *Registry) {
+	t.Helper()
+	root := t.TempDir()
+	testharness.WriteTree(t, root, files...)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	return root, reg
+}
+
+// recordByID returns the record with canonical ID id, failing the test when
+// the walk returned none.
+func recordByID(t *testing.T, recs []ArtifactRecord, id string) ArtifactRecord {
+	t.Helper()
+	for _, r := range recs {
+		if r.ID == id {
+			return r
+		}
+	}
+	t.Fatalf("walk returned no record %q among %d records", id, len(recs))
+	return ArtifactRecord{}
+}
+
+// synthesizedDoc returns the §4.3.4 synthesized ARTIFACT.md for v.
+func synthesizedDoc(t *testing.T, v string) []byte {
+	t.Helper()
+	doc, err := manifest.SynthesizedSkillDocument(v)
+	if err != nil {
+		t.Fatalf("SynthesizedSkillDocument(%q): %v", v, err)
+	}
+	return doc
+}
+
+// Spec: §13.11.3, §4.3.4, §4.6 — a filesystem source reports 0.0.0-auto.0
+// for a skill with no ARTIFACT.md and no usable version, keeps
+// VersionAssigned, takes the description from SKILL.md, and places the
+// synthesized ARTIFACT.md in ArtifactBytes on both Walk paths while
+// AuthoredBytes stays nil. A versioned plain skill is synthesized at its
+// metadata.version.
+func TestWalk_PlainSkillAssignsAutoVersionAndSynthesizes(t *testing.T) {
+	t.Parallel()
+	_, reg := openTree(t,
+		testharness.WriteTreeOption{Path: "ops/plain/SKILL.md", Content: plainSkill("plain", "Plain skill.", "")},
+		testharness.WriteTreeOption{Path: "ops/versioned/SKILL.md", Content: plainSkill("versioned", "Versioned skill.", "1.2.3")},
+	)
+	for _, resolve := range []bool{false, true} {
+		recs, err := reg.Walk(WalkOptions{ResolveExtends: resolve})
+		if err != nil {
+			t.Fatalf("Walk(ResolveExtends=%v): %v", resolve, err)
+		}
+		cases := []struct {
+			id, version, desc string
+			assigned          bool
+		}{
+			{"ops/plain", manifest.AutoVersion(0), "Plain skill.", true},
+			{"ops/versioned", "1.2.3", "Versioned skill.", false},
+		}
+		for _, c := range cases {
+			rec := recordByID(t, recs, c.id)
+			if rec.Artifact.Version != c.version || rec.VersionAssigned != c.assigned {
+				t.Errorf("ResolveExtends=%v %s: version %q assigned %v, want %q %v",
+					resolve, c.id, rec.Artifact.Version, rec.VersionAssigned, c.version, c.assigned)
+			}
+			if rec.Artifact.Description != c.desc {
+				t.Errorf("ResolveExtends=%v %s: description %q, want %q", resolve, c.id, rec.Artifact.Description, c.desc)
+			}
+			if rec.AuthoredBytes != nil {
+				t.Errorf("ResolveExtends=%v %s: AuthoredBytes = %q, want nil", resolve, c.id, rec.AuthoredBytes)
+			}
+			if want := synthesizedDoc(t, c.version); string(rec.ArtifactBytes) != string(want) {
+				t.Errorf("ResolveExtends=%v %s: ArtifactBytes = %q, want %q", resolve, c.id, rec.ArtifactBytes, want)
+			}
+		}
+	}
+}
+
+// Spec: §13.11.3, §4.3.4 — a skill with both files whose ARTIFACT.md and
+// SKILL.md declare no usable version reports 0.0.0-auto.0 and keeps its
+// authored ARTIFACT.md bytes and description.
+func TestWalk_BothFilesSkillWithoutVersionGetsAutoVersion(t *testing.T) {
+	t.Parallel()
+	authored := "---\ntype: skill\ndescription: Overlay description.\n---\n"
+	_, reg := openTree(t,
+		testharness.WriteTreeOption{Path: "ops/both/ARTIFACT.md", Content: authored},
+		testharness.WriteTreeOption{Path: "ops/both/SKILL.md", Content: plainSkill("both", "Skill description.", "1.0")},
+	)
+	recs, err := reg.Walk(WalkOptions{ResolveExtends: true})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	rec := recordByID(t, recs, "ops/both")
+	if rec.Artifact.Version != manifest.AutoVersion(0) || !rec.VersionAssigned {
+		t.Errorf("version %q assigned %v, want %q true", rec.Artifact.Version, rec.VersionAssigned, manifest.AutoVersion(0))
+	}
+	if string(rec.ArtifactBytes) != authored || string(rec.AuthoredBytes) != authored {
+		t.Errorf("ArtifactBytes %q AuthoredBytes %q, want the authored bytes %q", rec.ArtifactBytes, rec.AuthoredBytes, authored)
+	}
+	if rec.Artifact.Description != "Overlay description." {
+		t.Errorf("description %q, want the ARTIFACT.md description", rec.Artifact.Description)
+	}
+}
+
+// Spec: §13.11.3, §7.3.1 — the filesystem source keeps no history, so a
+// version-less plain skill walked, changed, and reverted reports
+// 0.0.0-auto.0 with the content hash of each walk's bytes and no error. The
+// §7.3.1 duplicate-content refusal never applies to it.
+func TestWalk_PlainSkillChangeAndRevertKeepsAutoVersion(t *testing.T) {
+	t.Parallel()
+	first := plainSkill("plain", "First.", "")
+	root, reg := openTree(t, testharness.WriteTreeOption{Path: "ops/plain/SKILL.md", Content: first})
+	skillPath := filepath.Join(root, "ops", "plain", "SKILL.md")
+	for i, content := range []string{first, plainSkill("plain", "Second.", ""), first} {
+		if err := os.WriteFile(skillPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("write SKILL.md: %v", err)
+		}
+		recs, err := reg.Walk(WalkOptions{ResolveExtends: true})
+		if err != nil {
+			t.Fatalf("walk %d: %v", i, err)
+		}
+		rec := recordByID(t, recs, "ops/plain")
+		if rec.Artifact.Version != manifest.AutoVersion(0) {
+			t.Errorf("walk %d: version %q, want %q", i, rec.Artifact.Version, manifest.AutoVersion(0))
+		}
+		want := version.CanonicalContentHash(nil, []byte(content), nil)
+		if got := version.CanonicalContentHash(rec.AuthoredBytes, rec.SkillBytes, rec.Resources); got != want {
+			t.Errorf("walk %d: content hash %s, want %s", i, got, want)
+		}
+	}
+}
+
+// Spec: §13.11.3, §4.6 — an extends: child whose ARTIFACT.md overlay sets
+// no description receives its plain-skill parent's SKILL.md description in
+// the merged document, whether the parent declares a version or not, as the
+// server merges the description it admits from the parent's SKILL.md.
+func TestWalk_ExtendsChildInheritsPlainSkillParentDescription(t *testing.T) {
+	t.Parallel()
+	for _, parentVersion := range []string{"", "1.0.0"} {
+		_, reg := openTree(t,
+			testharness.WriteTreeOption{Path: "ops/base/SKILL.md", Content: plainSkill("base", "Parent description.", parentVersion)},
+			testharness.WriteTreeOption{Path: "ops/child/ARTIFACT.md", Content: "---\ntype: skill\nversion: 2.0.0\nextends: ops/base\n---\n"},
+			testharness.WriteTreeOption{Path: "ops/child/SKILL.md", Content: plainSkill("child", "Child skill.", "")},
+		)
+		recs, err := reg.Walk(WalkOptions{ResolveExtends: true})
+		if err != nil {
+			t.Fatalf("parent version %q: Walk: %v", parentVersion, err)
+		}
+		child := recordByID(t, recs, "ops/child")
+		if child.Artifact.Description != "Parent description." {
+			t.Errorf("parent version %q: merged description %q, want the parent's SKILL.md description",
+				parentVersion, child.Artifact.Description)
+		}
+		if !strings.Contains(string(child.ArtifactBytes), "description: Parent description.") {
+			t.Errorf("parent version %q: merged ArtifactBytes %q lack the parent description", parentVersion, child.ArtifactBytes)
+		}
+		if child.Artifact.Version != "2.0.0" {
+			t.Errorf("parent version %q: child version %q, want 2.0.0", parentVersion, child.Artifact.Version)
+		}
+	}
+}
+
+// Spec: §13.11.3, §4.3.4 — a skill record whose version is neither
+// major.minor.patch nor the reserved form cannot be synthesized, and the
+// helper names the record. The loader never produces one, so the error marks
+// a broken invariant.
+func TestSynthesizeSkillDocuments_RefusesUnsynthesizableVersion(t *testing.T) {
+	t.Parallel()
+	recs := []ArtifactRecord{
+		{ID: "ops/ctx", Artifact: &manifest.Artifact{Type: manifest.TypeContext, Version: "x"}},
+		{ID: "ops/bad", Artifact: &manifest.Artifact{Type: manifest.TypeSkill, Version: "1.0"}},
+	}
+	err := synthesizeSkillDocuments(recs)
+	if err == nil || !strings.Contains(err.Error(), "filesystem: synthesize ARTIFACT.md for ops/bad") {
+		t.Fatalf("err = %v, want the ops/bad synthesis error", err)
+	}
+	if !errors.Is(err, manifest.ErrInvalidVersion) {
+		t.Errorf("err = %v, want it to wrap manifest.ErrInvalidVersion", err)
+	}
+	if recs[0].ArtifactBytes != nil {
+		t.Errorf("non-skill record ArtifactBytes = %q, want nil", recs[0].ArtifactBytes)
 	}
 }

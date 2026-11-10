@@ -403,8 +403,16 @@ func assertWalkParity(t *testing.T, want []walkParityPackage, ingestRecs, fsRecs
 		}
 		assertResourceSet(t, "ingest walk "+w.id, ing.Resources, w.resources)
 		assertResourceSet(t, "filesystem walk "+w.id, fsr.Resources, w.resources)
-		if ing.Artifact.Version != w.version || fsr.Artifact.Version != w.version {
-			t.Errorf("%s version: ingest %q, filesystem %q, want %q", w.id, ing.Artifact.Version, fsr.Artifact.Version, w.version)
+		// A filesystem source reports 0.0.0-auto.0 for an assigned version
+		// (§13.11.3), while ingest leaves it empty until it derives N from
+		// the stored rows (§7.3.1).
+		fsVersion := w.version
+		if w.versionAssigned {
+			fsVersion = manifest.AutoVersion(0)
+		}
+		if ing.Artifact.Version != w.version || fsr.Artifact.Version != fsVersion {
+			t.Errorf("%s version: ingest %q, filesystem %q, want %q and %q",
+				w.id, ing.Artifact.Version, fsr.Artifact.Version, w.version, fsVersion)
 		}
 		if ing.VersionAssigned != w.versionAssigned || fsr.VersionAssigned != w.versionAssigned {
 			t.Errorf("%s VersionAssigned: ingest %v, filesystem %v, want %v",

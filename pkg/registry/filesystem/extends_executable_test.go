@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // mcpServerArtifact is an mcp-server manifest with an optional extends: line
@@ -454,5 +456,52 @@ func TestWalk_ExecutableInheritanceDivergentParentKeepsChild(t *testing.T) {
 	}
 	if want := map[string]string{"c": "l2:l2-id", "p": "l2:l2-id"}; !reflect.DeepEqual(served, want) {
 		t.Errorf("served = %v, want %v", served, want)
+	}
+}
+
+// Spec: §4.6, §13.11.3 — a plain-skill parent sets no executable field, so a
+// cross-layer extends: child that restates none is kept. The parent's chain
+// block is empty in the executable-field comparison, as the server's empty
+// stored Frontmatter is, even though its SKILL.md carries allowed-tools and a
+// metadata mapping. The walk then synthesizes the parent's ARTIFACT.md.
+func TestWalk_ExecutableInheritancePlainSkillParentSetsNoField(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\nlayer_order:\n  - L1\n  - L2\n"},
+		testharness.WriteTreeOption{Path: "L1/ops/base/SKILL.md", Content: "---\nname: base\ndescription: Base skill.\n" +
+			"allowed-tools:\n  - Bash\nmetadata:\n  owner: ops\n---\n\nBase body.\n"},
+		testharness.WriteTreeOption{Path: "L2/ops/child/ARTIFACT.md", Content: "---\ntype: skill\nversion: 1.0.0\nextends: ops/base\n---\n"},
+		testharness.WriteTreeOption{Path: "L2/ops/child/SKILL.md", Content: "---\nname: child\ndescription: Child skill.\n---\n\nChild body.\n"},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got, drops := walkDrops(t, reg)
+	if len(drops) != 0 {
+		t.Fatalf("drops = %+v, want none", drops)
+	}
+	var child, base *ArtifactRecord
+	for i := range got {
+		switch got[i].ID {
+		case "ops/child":
+			child = &got[i]
+		case "ops/base":
+			base = &got[i]
+		}
+	}
+	if child == nil || base == nil {
+		t.Fatalf("walk returned %d records, want ops/base and ops/child", len(got))
+	}
+	if string(child.ArtifactBytes) == string(child.AuthoredBytes) {
+		t.Errorf("ops/child ArtifactBytes = authored bytes, want the merged document")
+	}
+	want, err := manifest.SynthesizedSkillDocument(manifest.AutoVersion(0))
+	if err != nil {
+		t.Fatalf("SynthesizedSkillDocument: %v", err)
+	}
+	if string(base.ArtifactBytes) != string(want) {
+		t.Errorf("ops/base ArtifactBytes = %q, want %q", base.ArtifactBytes, want)
 	}
 }

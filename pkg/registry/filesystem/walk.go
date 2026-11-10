@@ -85,6 +85,25 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 	// merge the registry applies at load time, so materialization produces
 	// equivalent output for the same artifact directory. Callers that want
 	// raw layer records (lint, conformance) leave ResolveExtends false.
+	records, err := resolveWalk(all, opts)
+	if err != nil {
+		return nil, err
+	}
+	// Synthesis follows composition on both paths, so every caller, the
+	// lint and overlay walks that leave ResolveExtends false included,
+	// receives a plain skill's synthesized ARTIFACT.md.
+	if err := synthesizeSkillDocuments(records); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+// resolveWalk applies the §4.6 collision rule to all and, when
+// opts.ResolveExtends is set, the extends: composition, returning one record
+// per canonical ID.
+//
+// Spec: §4.6, §13.11.3
+func resolveWalk(all []ArtifactRecord, opts WalkOptions) ([]ArtifactRecord, error) {
 	if opts.ResolveExtends {
 		return composeExtends(all, opts)
 	}
@@ -94,6 +113,57 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 	}
 	reportDrops(opts, collisions)
 	return deduped, nil
+}
+
+// assignSourceSkillFields applies the filesystem-source values to a skill
+// record after its version is resolved. An assigned version becomes
+// 0.0.0-auto.0, because a filesystem source keeps no history from which to
+// derive N; VersionAssigned stays true so lint still skips the required and
+// semver checks. A skill with no ARTIFACT.md takes its description from
+// SKILL.md, the value the server admits for a plain-skill row, so an extends:
+// child merges the same parent description in both modes. The loader runs
+// before composeExtends, so every composition round and both the deduped and
+// kept slices carry these values. ArtifactBytes stays nil here, so a
+// plain-skill parent contributes an empty block to the §4.6 executable-field
+// comparison, as the server's empty stored Frontmatter does.
+//
+// Spec: §13.11.3, §4.3.4, §4.6
+func assignSourceSkillFields(rec *ArtifactRecord) {
+	if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill {
+		return
+	}
+	if rec.VersionAssigned {
+		rec.Artifact.Version = manifest.AutoVersion(0)
+	}
+	if len(rec.AuthoredBytes) == 0 && rec.Skill != nil {
+		rec.Artifact.Description = rec.Skill.Description
+	}
+}
+
+// synthesizeSkillDocuments sets the ArtifactBytes of every skill record with
+// no ARTIFACT.md to the synthesized document of §4.3.4, so adapters dispatch
+// a plain skill as a skill in every mode. Walk calls it on the slice each of
+// its paths returns, after composeExtends, so the §4.6 validation and the
+// rewrite pass read a plain skill's nil ArtifactBytes. A plain skill declares
+// no extends:, so the executable-field comparison never parses its
+// synthesized bytes as authored. The version is a validated metadata.version
+// or the auto form, so an error marks a broken invariant rather than an
+// authoring fault.
+//
+// Spec: §13.11.3, §4.3.4
+func synthesizeSkillDocuments(records []ArtifactRecord) error {
+	for i := range records {
+		rec := &records[i]
+		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill || len(rec.AuthoredBytes) != 0 {
+			continue
+		}
+		doc, err := manifest.SynthesizedSkillDocument(rec.Artifact.Version)
+		if err != nil {
+			return fmt.Errorf("filesystem: synthesize ARTIFACT.md for %s: %w", rec.ID, err)
+		}
+		rec.ArtifactBytes = doc
+	}
+	return nil
 }
 
 // reportDrops passes each drop to opts.OnDrop in order. A non-empty drops
@@ -316,6 +386,7 @@ func loadArtifactRecord(layer Layer, artifactPath string) (ArtifactRecord, error
 		return ArtifactRecord{}, err
 	}
 	rec.ResolveSkillVersion()
+	assignSourceSkillFields(&rec)
 	return rec, nil
 }
 
@@ -350,6 +421,7 @@ func loadPlainSkillRecord(layer Layer, dir string) (ArtifactRecord, error) {
 		return ArtifactRecord{}, err
 	}
 	rec.ResolveSkillVersion()
+	assignSourceSkillFields(&rec)
 	return rec, nil
 }
 
