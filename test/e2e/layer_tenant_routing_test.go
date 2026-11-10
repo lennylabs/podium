@@ -187,9 +187,14 @@ var ltrDefaultID = core.OrgIDForName("default")
 // Spec: §8.6 — an erase that rewrites the chain records the superseded head,
 // the rewritten chain verifies, and the new head is anchored at once.
 // Spec: §7.6 — a stream receives only the events of the tenant it resolves to.
+// Spec: §8.5 — an unrouted erase is refused with 403 at the erase mount.
+// Spec: §8.1 — an unrouted search records no tenant, and no record carries podium:unrouted.
 func TestLayerEndpoint_MultiTenantRouting(t *testing.T) {
 	t.Parallel()
 	f := ltrSetup(t)
+	if !strings.Contains(f.srv.log(), ltrRouterLog) {
+		t.Fatalf("the boot log lacks %q under trusted-headers\nlog:\n%s", ltrRouterLog, f.srv.log())
+	}
 	carolH := f.as(f.carol, "default")
 	daveH := f.as(f.dave, f.globex)
 	erinH := f.as(f.erin, f.initech)
@@ -200,13 +205,7 @@ func TestLayerEndpoint_MultiTenantRouting(t *testing.T) {
 	ltrWebhookRoutes(t, f, daveH, daveA)
 	ltrStreamIsolation(t, f, carolH, daveH, daveA, daveB)
 
-	// Step 6: an unprovisioned org under trusted-headers resolves to no
-	// tenant, so the list is empty and a write is refused.
-	if ids := ltrListIDs(t, f.srv, erinH, "erin"); len(ids) != 0 {
-		t.Errorf("erin (unprovisioned %s) lists %v, want none", f.initech, ids)
-	}
-	apiWantCodeAs(t, f.srv, http.MethodPost, "/v1/layers", erinH, ltrGitLayer("ltr-erin-"+f.suffix),
-		http.StatusForbidden, "auth.forbidden", "erin registers a layer")
+	ltrUnroutedRefusals(t, f, erinH)
 
 	// Step 7: the posture member follows the routed tenant, and the
 	// bootstrap tenant's admin erases dave in the bootstrap tenant alone.
@@ -218,6 +217,49 @@ func TestLayerEndpoint_MultiTenantRouting(t *testing.T) {
 	ltrEraseInDefault(t, f, carolH, daveDefault)
 	if ids := ltrListIDs(t, f.srv, daveH, "dave after the erase"); !ids[daveA] || !ids[daveB] {
 		t.Errorf("dave's globex list after the default-tenant erase = %v, want %s and %s", ids, daveA, daveB)
+	}
+}
+
+// ltrUnroutedMessage is the message the layer endpoint writes when it refuses
+// a request that resolves to no tenant. It attributes a 403 to §7.3.1 tenant
+// selection, because on a verified provider the admin check also answers 403
+// auth.forbidden, in the routed tenant (§8.5).
+const ltrUnroutedMessage = "request resolves to no tenant"
+
+// ltrUnroutedRefusals is step 6: erin's unprovisioned org under
+// trusted-headers resolves to no tenant, so a layer write and an erase are
+// refused for tenant selection, the list stays empty, and a search records no
+// tenant. The search is the only one the test issues, so every
+// artifacts.searched record ltrWantUnlabeledSearch reads is erin's.
+func ltrUnroutedRefusals(t *testing.T, f *ltrFixture, erinH http.Header) {
+	t.Helper()
+	if ids := ltrListIDs(t, f.srv, erinH, "erin"); len(ids) != 0 {
+		t.Errorf("erin (unprovisioned %s) lists %v, want none", f.initech, ids)
+	}
+	body := apiWantCodeAs(t, f.srv, http.MethodPost, "/v1/layers", erinH, ltrGitLayer("ltr-erin-"+f.suffix),
+		http.StatusForbidden, "auth.forbidden", "erin registers a layer")
+	ltrWantUnroutedMessage(t, body, "erin registers a layer")
+	body = apiWantCodeAs(t, f.srv, http.MethodPost, "/v1/admin/erase", erinH, ltrEraseBody("frank-"+f.suffix+"@acme.com"),
+		http.StatusForbidden, "auth.forbidden", "erin erases")
+	ltrWantUnroutedMessage(t, body, "erin erases")
+	if ids := ltrListIDs(t, f.srv, erinH, "erin after the refusals"); len(ids) != 0 {
+		t.Errorf("erin's list after the refusals = %v, want none", ids)
+	}
+
+	// The search's status is not asserted: the Postgres store refuses the
+	// podium:unrouted binding as a schema name, so the unrouted search
+	// answers 500. The core emits artifacts.searched on every return path,
+	// so the record exists either way, and its label is what this pins.
+	_, _ = apiDoAs(t, http.MethodGet, f.srv.BaseURL+"/v1/search_artifacts?query=ltr-erin-"+f.suffix, erinH, nil)
+	ltrWantUnlabeledSearch(t, f.auditPath)
+}
+
+// ltrWantUnroutedMessage asserts that a refusal body carries
+// ltrUnroutedMessage.
+func ltrWantUnroutedMessage(t *testing.T, body []byte, what string) {
+	t.Helper()
+	if !strings.Contains(string(body), ltrUnroutedMessage) {
+		t.Errorf("%s: body lacks %q\nbody: %s", what, ltrUnroutedMessage, body)
 	}
 }
 
@@ -517,60 +559,6 @@ func ltrStreamIsolation(t *testing.T, f *ltrFixture, carolH, daveH http.Header, 
 		t.Errorf("carol's stream received %q naming %v; a bootstrap-tenant subscriber must receive no globex event",
 			ev.Event, ev.Data["layer"])
 	}
-}
-
-// Spec: §6.3.1 — a multi-tenant registry with no identity provider installs
-// no tenant router, so every request resolves to no tenant.
-// Spec: §7.3.1 — Tenant selection: an unrouted list is empty and an unrouted
-// layer write is refused with 403 auth.forbidden, which overrides the
-// no-provider admission.
-// Spec: §8.5 — an erase that resolves to no tenant is refused with 403
-// auth.forbidden before the admin check, which admits every caller on a
-// registry with no identity provider.
-// Spec: §7.3.4 — manage_any_layer is false for an unrouted request.
-// Spec: §8.1 — an unrouted request event records no tenant, and the
-// podium:unrouted binding reaches no record. The boot installs no tenant
-// router, so this pins the serverboot multi-tenant label wiring.
-//
-// IMPLEMENTOR'S CHOICE (proposal 0047, TEST-3): the boot clears the
-// identity provider msStandardEnv selects with an overriding empty
-// PODIUM_IDENTITY_PROVIDER= entry. The spawned process sees the last value
-// for a repeated key, the empty value selects no provider, and the boot log
-// carries no router line, which the case asserts.
-func TestLayerEndpoint_MultiTenantNoRouter(t *testing.T) {
-	t.Parallel()
-	dsn, bucket, region := msSkipIfNoStack(t)
-	suffix := randHex(6)
-	_, pemPath := injKeyPair(t)
-	auditPath := filepath.Join(t.TempDir(), "audit.log")
-	srv := msStartStandardServerEnv(t, dsn, bucket, region, pemPath,
-		"PODIUM_IDENTITY_PROVIDER=",
-		"PODIUM_MULTI_TENANT=true",
-		"PODIUM_WEB_UI=true",
-		"PODIUM_AUDIT_LOG_PATH="+auditPath,
-	)
-	if strings.Contains(srv.log(), ltrRouterLog) {
-		t.Fatalf("the boot log carries %q with no identity provider\nlog:\n%s", ltrRouterLog, srv.log())
-	}
-
-	if ids := ltrListIDs(t, srv, nil, "anonymous"); len(ids) != 0 {
-		t.Errorf("the unrouted list = %v, want none", ids)
-	}
-	apiWantCodeAs(t, srv, http.MethodPost, "/v1/layers", nil, ltrGitLayer("ltr-nr-"+suffix),
-		http.StatusForbidden, "auth.forbidden", "an unrouted registration")
-	apiWantCodeAs(t, srv, http.MethodPost, "/v1/admin/erase", nil, ltrEraseBody("frank-"+suffix+"@acme.com"),
-		http.StatusForbidden, "auth.forbidden", "an unrouted erase")
-	if ids := ltrListIDs(t, srv, nil, "anonymous after the refusals"); len(ids) != 0 {
-		t.Errorf("the unrouted list after the refusals = %v, want none", ids)
-	}
-	ltrWantManage(t, srv, nil, "anonymous", false)
-
-	// The read's status is not asserted: the Postgres store refuses the
-	// podium:unrouted binding as a schema name, so the unrouted search
-	// answers 500. The core emits artifacts.searched on every return path,
-	// so the record exists either way, and its label is what this pins.
-	_, _ = apiDo(t, http.MethodGet, srv.BaseURL+"/v1/search_artifacts?query=ltr-nr-"+suffix, nil)
-	ltrWantUnlabeledSearch(t, auditPath)
 }
 
 // ltrWantUnlabeledSearch waits for an artifacts.searched record in the audit

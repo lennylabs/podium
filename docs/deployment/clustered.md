@@ -181,7 +181,7 @@ Each cookbook covers: client registration, scopes and audience, group claim mapp
 
 ### 4. Create the first tenant and admin
 
-Run the registry in multi-tenant mode with `PODIUM_MULTI_TENANT=true`, and seed the first instance operator with `PODIUM_OPERATOR_ADMINS` (comma-separated identities). The operator role authorizes tenant management; it is distinct from the per-tenant `admin` role and from `PODIUM_BOOTSTRAP_ADMINS`. With the registry running, the operator provisions a tenant at runtime and grants the first per-tenant admin:
+Run the registry in multi-tenant mode with `PODIUM_MULTI_TENANT=true`, and seed the first instance operator with `PODIUM_OPERATOR_ADMINS` (comma-separated identities). A registry started with `PODIUM_MULTI_TENANT=true` fails to start with `config.multitenant_no_verifier` when it configures no identity provider, names a provider value the registry does not recognize, or runs in public mode with no identity provider, unless another startup check refuses the configuration first. On this chart, `config.publicMode` reaches that refusal only when `config.identityProvider.type` is empty or `none` and `config.allowPublicBind` is set: with any other type, including the default `oidc-jwt`, it fails with `config.public_mode_with_idp`, and with an empty or `none` type but without `config.allowPublicBind` it fails with `config.public_bind_refused`, because the chart renders a `0.0.0.0` bind. The operator role authorizes tenant management; it is distinct from the per-tenant `admin` role and from `PODIUM_BOOTSTRAP_ADMINS`. With the registry running, the operator provisions a tenant at runtime and grants the first per-tenant admin:
 
 ```bash
 podium admin tenant create acme --registry https://podium.acme.com

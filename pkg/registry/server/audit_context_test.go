@@ -202,9 +202,8 @@ func grantTenantLabel(t *testing.T, org, bound, adminIn string, opts ...Option) 
 }
 
 // admin.granted records the routed tenant on a routed request, no tenant on
-// an unrouted multi-tenant request with or without a tenant router, and the
-// bound tenant on a single-tenant registry. The podium:unrouted binding never
-// reaches the record.
+// an unrouted multi-tenant request, and the bound tenant on a single-tenant
+// registry. The podium:unrouted binding never reaches the record.
 //
 // Spec: §8.1, §6.3.1
 func TestAdminGranted_TenantLabel(t *testing.T) {
@@ -229,54 +228,10 @@ func TestAdminGranted_TenantLabel(t *testing.T) {
 			t.Errorf("tenant = %q, want none", got)
 		}
 	})
-	t.Run("multi-tenant with no router records no tenant", func(t *testing.T) {
-		t.Parallel()
-		got := grantTenantLabel(t, "acme.com", unroutedTenant, unroutedTenant, WithMultiTenant())
-		if got != "" {
-			t.Errorf("tenant = %q, want none", got)
-		}
-	})
 	t.Run("single-tenant request records the bound tenant", func(t *testing.T) {
 		t.Parallel()
 		if got := grantTenantLabel(t, "acme.com", "t", "t"); got != "t" {
 			t.Errorf("tenant = %q, want t", got)
 		}
 	})
-}
-
-// A public-mode meta-tool read on a multi-tenant registry with no router
-// carries no tenant in its audit metadata, although the core resolves the
-// request against the podium:unrouted binding.
-//
-// Spec: §8.1, §6.3.1
-func TestAuditMeta_PublicModeMultiTenantNoRouter(t *testing.T) {
-	t.Parallel()
-	var (
-		got    AuditMeta
-		gotOK  bool
-		bound  string
-		called bool
-	)
-	reg := core.New(store.NewMemory(), unroutedTenant, nil)
-	reg.WithAudit(func(ctx context.Context, _ core.AuditEvent) {
-		got, gotOK = AuditMetaFromContext(ctx)
-		bound = reg.TenantFor(ctx)
-		called = true
-	})
-	ts := httptest.NewServer(New(reg, WithMultiTenant(), WithPublicMode()).Handler())
-	defer ts.Close()
-	resp, err := http.Get(ts.URL + "/v1/search_artifacts?query=x")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if !called {
-		t.Fatalf("search_artifacts (status %d) emitted no audit event", resp.StatusCode)
-	}
-	if !gotOK || got.Tenant != "" {
-		t.Errorf("audit meta = %+v (attached %v), want attached with no tenant", got, gotOK)
-	}
-	if bound != unroutedTenant {
-		t.Errorf("core tenant = %q, want %q", bound, unroutedTenant)
-	}
 }
