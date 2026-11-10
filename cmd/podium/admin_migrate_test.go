@@ -7,10 +7,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/objectstore"
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -262,9 +264,9 @@ func TestAdminMigrateToStandard_MigratesStandaloneUUIDTenant(t *testing.T) {
 
 	// Seed the source the way a running standalone server does: under the UUID
 	// tenant id, not the literal "default".
-	uuidTenant := standaloneDefaultOrgID()
+	uuidTenant := core.OrgIDForName("default")
 	if uuidTenant == "default" {
-		t.Fatal("standaloneDefaultOrgID returned the literal default; the UUID derivation is wrong")
+		t.Fatal("core.OrgIDForName returned the literal default; the UUID derivation is wrong")
 	}
 	src, err := store.OpenSQLite(srcDB)
 	if err != nil {
@@ -589,14 +591,20 @@ func TestAdminMigrateToStandard_ClearsTheTargetMarker(t *testing.T) {
 }
 
 // markerRecorder records the order of the target writes pumpStore makes and can
-// fail either of them, which is what pins the clear-before-copy order.
+// fail the marker clear, a tenant record write, a manifest write, a layer
+// config write, or an admin grant, which is what pins the clear-before-copy
+// order, the tenant-major write order, and the error that stops the pump.
 type markerRecorder struct {
 	store.Store
 	calls      []string
 	markerErr  error
+	createErr  error
+	updateErr  error
 	putErrOn   int
 	putErr     error
 	putCounter int
+	layerErr   error
+	grantErr   error
 }
 
 func (m *markerRecorder) SetDataMigrationApplied(ctx context.Context, name string, applied bool) error {
@@ -607,13 +615,56 @@ func (m *markerRecorder) SetDataMigrationApplied(ctx context.Context, name strin
 	return m.Store.SetDataMigrationApplied(ctx, name, applied)
 }
 
+func (m *markerRecorder) CreateTenant(ctx context.Context, t store.Tenant) error {
+	m.calls = append(m.calls, "tenant:"+t.ID)
+	if m.createErr != nil {
+		return m.createErr
+	}
+	return m.Store.CreateTenant(ctx, t)
+}
+
+func (m *markerRecorder) UpdateTenant(ctx context.Context, t store.Tenant) error {
+	m.calls = append(m.calls, "update:"+t.ID)
+	if m.updateErr != nil {
+		return m.updateErr
+	}
+	return m.Store.UpdateTenant(ctx, t)
+}
+
 func (m *markerRecorder) PutManifest(ctx context.Context, rec store.ManifestRecord) error {
-	m.calls = append(m.calls, "put")
+	m.calls = append(m.calls, "put:"+rec.TenantID)
 	m.putCounter++
 	if m.putErr != nil && m.putCounter == m.putErrOn {
 		return m.putErr
 	}
 	return m.Store.PutManifest(ctx, rec)
+}
+
+func (m *markerRecorder) PutLayerConfig(ctx context.Context, cfg store.LayerConfig) error {
+	m.calls = append(m.calls, "layer:"+cfg.TenantID)
+	if m.layerErr != nil {
+		return m.layerErr
+	}
+	return m.Store.PutLayerConfig(ctx, cfg)
+}
+
+func (m *markerRecorder) GrantAdmin(ctx context.Context, g store.AdminGrant) error {
+	m.calls = append(m.calls, "grant:"+g.OrgID)
+	if m.grantErr != nil {
+		return m.grantErr
+	}
+	return m.Store.GrantAdmin(ctx, g)
+}
+
+// firstCallIndex returns the index of the first recorded call with the prefix,
+// or -1 when no call has it.
+func (m *markerRecorder) firstCallIndex(prefix string) int {
+	for i, call := range m.calls {
+		if strings.HasPrefix(call, prefix) {
+			return i
+		}
+	}
+	return -1
 }
 
 // Spec: §13.4 — pumpStore clears the target's record of the content-hash
@@ -624,14 +675,14 @@ func TestPumpStore_ClearsTheMarkerBeforeTheFirstWrite(t *testing.T) {
 	ctx := context.Background()
 	newPlan := func() *migrationPlan {
 		return &migrationPlan{
-			tenants: []store.Tenant{{ID: "default", Name: "default"}},
-			manifests: map[string][]store.ManifestRecord{"default": {
-				{TenantID: "default", ArtifactID: "alpha", Version: "1.0.0", ContentHash: "sha256:a", Type: "skill", Layer: "team"},
-				{TenantID: "default", ArtifactID: "beta", Version: "1.0.0", ContentHash: "sha256:b", Type: "skill", Layer: "team"},
+			tenants: []tenantPlan{{
+				tenant: store.Tenant{ID: "default", Name: "default"},
+				manifests: []store.ManifestRecord{
+					{TenantID: "default", ArtifactID: "alpha", Version: "1.0.0", ContentHash: "sha256:a", Type: "skill", Layer: "team"},
+					{TenantID: "default", ArtifactID: "beta", Version: "1.0.0", ContentHash: "sha256:b", Type: "skill", Layer: "team"},
+				},
 			}},
 			manifestCount: 2,
-			layerConfigs:  map[string][]store.LayerConfig{},
-			adminGrants:   map[string][]store.AdminGrant{},
 		}
 	}
 	newTarget := func(t *testing.T) *store.Memory {
@@ -645,13 +696,13 @@ func TestPumpStore_ClearsTheMarkerBeforeTheFirstWrite(t *testing.T) {
 
 	t.Run("a failed clear stops the copy", func(t *testing.T) {
 		target := &markerRecorder{Store: newTarget(t), markerErr: errors.New("connection refused")}
-		err := pumpStore(newPlan(), target)
+		err := pumpStore(ctx, newPlan(), target)
 		if err == nil || !strings.Contains(err.Error(), "clear data-migration marker:") {
 			t.Fatalf("pumpStore = %v, want an error naming the marker clear", err)
 		}
-		for _, call := range target.calls {
-			if call == "put" {
-				t.Error("a manifest row was written after the clear failed")
+		for _, prefix := range []string{"tenant:", "update:", "put:"} {
+			if i := target.firstCallIndex(prefix); i >= 0 {
+				t.Errorf("call %q was made after the clear failed; calls = %v", target.calls[i], target.calls)
 			}
 		}
 	})
@@ -659,16 +710,384 @@ func TestPumpStore_ClearsTheMarkerBeforeTheFirstWrite(t *testing.T) {
 	t.Run("the clear precedes the first copy", func(t *testing.T) {
 		mem := newTarget(t)
 		target := &markerRecorder{Store: mem, putErrOn: 2, putErr: errors.New("disk full")}
-		err := pumpStore(newPlan(), target)
+		err := pumpStore(ctx, newPlan(), target)
 		if err == nil || !strings.Contains(err.Error(), "put manifest") {
 			t.Fatalf("pumpStore = %v, want the write error", err)
 		}
-		if len(target.calls) < 2 || target.calls[0] != "marker" || target.calls[1] != "put" {
+		if len(target.calls) == 0 || target.calls[0] != "marker" || target.firstCallIndex("put:") <= 0 {
 			t.Errorf("call order = %v, want the marker clear before the first put", target.calls)
 		}
 		applied, err := mem.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
 		if err != nil || applied {
 			t.Errorf("marker applied = %v (err %v), want false after a partial pump", applied, err)
+		}
+	})
+}
+
+// Spec: §13.10 — the migration carries every tenant the standalone store holds,
+// active or deactivated, with its record (name, quotas, expose_scope_preview,
+// and active state), manifests, layer configuration, and admin grants. A tenant
+// deactivated on the source stays deactivated on the target.
+func TestAdminMigrateToStandard_MigratesEveryTenant(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	srcDB := filepath.Join(dir, "source.db")
+	dstDB := filepath.Join(dir, "dest.db")
+
+	defaultID := core.OrgIDForName("default")
+	globexID := core.OrgIDForName("globex")
+	initechID := core.OrgIDForName("initech")
+	off := false
+
+	src, err := store.OpenSQLite(srcDB)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	tenants := []store.Tenant{
+		{ID: defaultID, Name: "default"},
+		{ID: globexID, Name: "globex", Quota: store.Quota{MaxUserLayers: 3, SearchQPS: 5}, ExposeScopePreview: &off},
+		{ID: initechID, Name: "initech"},
+	}
+	for _, tn := range tenants {
+		if err := src.CreateTenant(ctx, tn); err != nil {
+			t.Fatalf("CreateTenant %s: %v", tn.Name, err)
+		}
+		if err := src.PutManifest(ctx, store.ManifestRecord{
+			TenantID: tn.ID, ArtifactID: tn.Name + "/skill", Version: "1.0.0",
+			ContentHash: "sha256:" + tn.Name, Type: "skill", Layer: "team-shared",
+		}); err != nil {
+			t.Fatalf("PutManifest %s: %v", tn.Name, err)
+		}
+	}
+	if err := src.PutLayerConfig(ctx, store.LayerConfig{
+		TenantID: globexID, ID: "globex-team", SourceType: "local", LocalPath: "/srv/globex", Order: 1,
+	}); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
+	if err := src.GrantAdmin(ctx, store.AdminGrant{UserID: "bob@acme.com", OrgID: globexID}); err != nil {
+		t.Fatalf("GrantAdmin: %v", err)
+	}
+	if err := src.DeactivateTenant(ctx, initechID); err != nil {
+		t.Fatalf("DeactivateTenant: %v", err)
+	}
+	want, err := src.ListTenants(ctx)
+	if err != nil {
+		t.Fatalf("source ListTenants: %v", err)
+	}
+	_ = src.Close()
+
+	var rc int
+	stdout := captureStdout(t, func() {
+		captureStderr(t, func() {
+			rc = adminMigrateToStandard([]string{
+				"--source-sqlite", srcDB,
+				"--target-store", "sqlite",
+				"--target-sqlite", dstDB,
+			})
+		})
+	})
+	if rc != 0 {
+		t.Fatalf("rc = %d, want 0; stdout:\n%s", rc, stdout)
+	}
+	for _, line := range []string{"tenants:       3", "manifests:     3"} {
+		if !strings.Contains(stdout, line) {
+			t.Errorf("stdout missing %q:\n%s", line, stdout)
+		}
+	}
+
+	dst, err := store.OpenSQLite(dstDB)
+	if err != nil {
+		t.Fatalf("open dest: %v", err)
+	}
+	t.Cleanup(func() { _ = dst.Close() })
+	got, err := dst.ListTenants(ctx)
+	if err != nil {
+		t.Fatalf("target ListTenants: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("target tenants = %+v, want %+v", got, want)
+	}
+	for _, tn := range tenants {
+		manifests, err := dst.ListManifests(ctx, tn.ID)
+		if err != nil {
+			t.Fatalf("ListManifests %s: %v", tn.Name, err)
+		}
+		if len(manifests) != 1 {
+			t.Errorf("tenant %s manifests = %d, want 1", tn.Name, len(manifests))
+		}
+	}
+	layers, err := dst.ListLayerConfigs(ctx, globexID)
+	if err != nil {
+		t.Fatalf("ListLayerConfigs: %v", err)
+	}
+	if len(layers) != 1 || layers[0].ID != "globex-team" {
+		t.Errorf("globex layers = %+v, want globex-team", layers)
+	}
+	if ok, err := dst.IsAdmin(ctx, "bob@acme.com", globexID); err != nil || !ok {
+		t.Errorf("IsAdmin(bob@acme.com, globex) = %v (err %v), want true", ok, err)
+	}
+}
+
+// Spec: §13.4 — a pump that fails partway leaves the target unmarked, and a
+// re-run before any registry starts on the target completes it.
+// Spec: §13.10 — every tenant is carried.
+func TestPumpStore_WritesTenantsInIDOrderAndResumes(t *testing.T) {
+	ctx := context.Background()
+	srcDB := filepath.Join(t.TempDir(), "source.db")
+	src, err := store.OpenSQLite(srcDB)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	// Created out of ID order, so the plan's order comes from ListTenants.
+	for _, id := range []string{"b", "a", "c"} {
+		if err := src.CreateTenant(ctx, store.Tenant{ID: id, Name: id}); err != nil {
+			t.Fatalf("CreateTenant %s: %v", id, err)
+		}
+		for _, artifact := range []string{"alpha", "beta"} {
+			if err := src.PutManifest(ctx, store.ManifestRecord{
+				TenantID: id, ArtifactID: artifact, Version: "1.0.0",
+				ContentHash: "sha256:" + id + artifact, Type: "skill", Layer: "team",
+			}); err != nil {
+				t.Fatalf("PutManifest %s/%s: %v", id, artifact, err)
+			}
+		}
+	}
+	_ = src.Close()
+	plan, err := planMigration(ctx, srcDB)
+	if err != nil {
+		t.Fatalf("planMigration: %v", err)
+	}
+
+	mem := store.NewMemory()
+	if err := mem.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, true); err != nil {
+		t.Fatalf("set marker: %v", err)
+	}
+	target := &markerRecorder{Store: mem, putErrOn: 3, putErr: errors.New("disk full")}
+	err = pumpStore(ctx, plan, target)
+	if err == nil || !strings.Contains(err.Error(), "put manifest b/") {
+		t.Fatalf("pumpStore = %v, want the write error in tenant b", err)
+	}
+	// The third manifest write falls in tenant b, with a complete and c absent,
+	// because the pump writes tenants in the ascending ID order D-7 of proposal
+	// 0061 fixes. §13.10 does not state the order.
+	if manifests, err := mem.ListManifests(ctx, "a"); err != nil || len(manifests) != 2 {
+		t.Errorf("tenant a manifests = %d (err %v), want 2", len(manifests), err)
+	}
+	if _, err := mem.GetTenant(ctx, "c"); !errors.Is(err, store.ErrTenantNotFound) {
+		t.Errorf("GetTenant(c) = %v, want ErrTenantNotFound", err)
+	}
+
+	if err := pumpStore(ctx, plan, &markerRecorder{Store: mem}); err != nil {
+		t.Fatalf("re-run pumpStore = %v, want nil", err)
+	}
+	total := 0
+	for _, id := range []string{"a", "b", "c"} {
+		manifests, err := mem.ListManifests(ctx, id)
+		if err != nil {
+			t.Fatalf("ListManifests %s: %v", id, err)
+		}
+		total += len(manifests)
+	}
+	if total != 6 {
+		t.Errorf("manifests after the re-run = %d, want 6", total)
+	}
+	applied, err := mem.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
+	if err != nil || applied {
+		t.Errorf("marker applied = %v (err %v), want false after the re-run", applied, err)
+	}
+}
+
+// TestPumpStore_TenantWriteErrorsStopThePump pins that a CreateTenant or
+// UpdateTenant failure stops the pump before any of the tenant's rows are
+// written, where the pump once discarded the CreateTenant error, and that a
+// PutLayerConfig or GrantAdmin failure stops the pump with an error naming the
+// tenant.
+//
+// Spec: §13.10
+func TestPumpStore_TenantWriteErrorsStopThePump(t *testing.T) {
+	ctx := context.Background()
+	plan := &migrationPlan{
+		tenants: []tenantPlan{{
+			tenant: store.Tenant{ID: "a", Name: "a"},
+			manifests: []store.ManifestRecord{
+				{TenantID: "a", ArtifactID: "alpha", Version: "1.0.0", ContentHash: "sha256:a", Type: "skill", Layer: "team"},
+			},
+			layerConfigs: []store.LayerConfig{
+				{TenantID: "a", ID: "team", SourceType: "local", LocalPath: "/srv/team", Order: 1},
+			},
+			adminGrants: []store.AdminGrant{{UserID: "alice@acme.com", OrgID: "a"}},
+		}},
+		manifestCount: 1,
+	}
+	cases := []struct {
+		name            string
+		target          *markerRecorder
+		wantErr         string
+		beforeManifests bool // the failing write precedes the manifest writes
+	}{
+		{"create", &markerRecorder{Store: store.NewMemory(), createErr: errors.New("schema denied")}, "create tenant a:", true},
+		{"update", &markerRecorder{Store: store.NewMemory(), updateErr: errors.New("connection reset")}, "update tenant a:", true},
+		{"layer config", &markerRecorder{Store: store.NewMemory(), layerErr: errors.New("disk full")}, "put layer config a/team:", false},
+		{"admin grant", &markerRecorder{Store: store.NewMemory(), grantErr: errors.New("disk full")}, "grant admin a/alice@acme.com:", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := pumpStore(ctx, plan, tc.target)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("pumpStore = %v, want an error containing %q", err, tc.wantErr)
+			}
+			if i := tc.target.firstCallIndex("put:"); tc.beforeManifests && i >= 0 {
+				t.Errorf("a manifest was written after the tenant write failed; calls = %v", tc.target.calls)
+			}
+		})
+	}
+}
+
+// TestPlanMigration_SourceOpenFailure pins that a source path SQLite cannot
+// open stops the plan with an error naming the source.
+func TestPlanMigration_SourceOpenFailure(t *testing.T) {
+	_, err := planMigration(context.Background(), t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "open source SQLite:") {
+		t.Fatalf("planMigration(directory) = %v, want an open source SQLite error", err)
+	}
+}
+
+// seedSQLiteStore creates tenants and manifests in a fresh SQLite store at
+// path and closes it, so a test can stage a source or a pre-existing target.
+func seedSQLiteStore(t *testing.T, path string, tenants []store.Tenant, manifests []store.ManifestRecord) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite %s: %v", path, err)
+	}
+	defer func() { _ = st.Close() }()
+	for _, tn := range tenants {
+		if err := st.CreateTenant(ctx, tn); err != nil {
+			t.Fatalf("CreateTenant %s: %v", tn.Name, err)
+		}
+	}
+	for _, m := range manifests {
+		if err := st.PutManifest(ctx, m); err != nil {
+			t.Fatalf("PutManifest %s/%s: %v", m.TenantID, m.ArtifactID, err)
+		}
+	}
+}
+
+// runMigrateSQLiteToSQLite runs the command from srcDB into the SQLite store
+// at dstDB and returns its exit code and captured stderr.
+func runMigrateSQLiteToSQLite(t *testing.T, srcDB, dstDB string) (int, string) {
+	t.Helper()
+	var rc int
+	var stderr string
+	captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			rc = adminMigrateToStandard([]string{
+				"--source-sqlite", srcDB,
+				"--target-store", "sqlite",
+				"--target-sqlite", dstDB,
+			})
+		})
+	})
+	return rc, stderr
+}
+
+// Spec: §13.10 — a tenant whose ID already exists on the target is the same
+// tenant: the source's record is written over it, and the migration removes
+// nothing from the target store.
+func TestAdminMigrateToStandard_SameIDTenantOnTarget(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("the source record wins over a same-ID target tenant", func(t *testing.T) {
+		dir := t.TempDir()
+		srcDB := filepath.Join(dir, "source.db")
+		dstDB := filepath.Join(dir, "dest.db")
+		defaultID := core.OrgIDForName("default")
+		umbrellaID := core.OrgIDForName("umbrella")
+		off := false
+
+		umbrella := store.Tenant{ID: umbrellaID, Name: "umbrella", Quota: store.Quota{SearchQPS: 7}}
+		umbrellaManifest := store.ManifestRecord{
+			TenantID: umbrellaID, ArtifactID: "umbrella/skill", Version: "1.0.0",
+			ContentHash: "sha256:umbrella", Type: "skill", Layer: "team-shared",
+		}
+		seedSQLiteStore(t, dstDB, []store.Tenant{
+			{ID: defaultID, Name: "default", ExposeScopePreview: &off, Quota: store.Quota{SearchQPS: 1}},
+			umbrella,
+		}, []store.ManifestRecord{umbrellaManifest})
+		seedSQLiteStore(t, srcDB, []store.Tenant{{ID: defaultID, Name: "default"}}, []store.ManifestRecord{{
+			TenantID: defaultID, ArtifactID: "default/skill", Version: "1.0.0",
+			ContentHash: "sha256:default", Type: "skill", Layer: "team-shared",
+		}})
+
+		if rc, stderr := runMigrateSQLiteToSQLite(t, srcDB, dstDB); rc != 0 {
+			t.Fatalf("rc = %d, want 0; stderr:\n%s", rc, stderr)
+		}
+
+		dst, err := store.OpenSQLite(dstDB)
+		if err != nil {
+			t.Fatalf("open dest: %v", err)
+		}
+		t.Cleanup(func() { _ = dst.Close() })
+		got, err := dst.GetTenant(ctx, defaultID)
+		if err != nil {
+			t.Fatalf("GetTenant(default): %v", err)
+		}
+		if !got.ScopePreviewEnabled() || got.Quota.SearchQPS != 0 {
+			t.Errorf("default org = %+v, want the source record (scope preview on, SearchQPS 0)", got)
+		}
+		if _, err := dst.GetManifest(ctx, defaultID, "default/skill", "1.0.0"); err != nil {
+			t.Errorf("source manifest on the target: %v", err)
+		}
+		gotUmbrella, err := dst.GetTenant(ctx, umbrellaID)
+		if err != nil {
+			t.Fatalf("GetTenant(umbrella): %v", err)
+		}
+		umbrella.Active = true
+		if !reflect.DeepEqual(gotUmbrella, umbrella) {
+			t.Errorf("umbrella = %+v, want it unchanged at %+v", gotUmbrella, umbrella)
+		}
+		m, err := dst.GetManifest(ctx, umbrellaID, umbrellaManifest.ArtifactID, umbrellaManifest.Version)
+		if err != nil || m.ContentHash != umbrellaManifest.ContentHash {
+			t.Errorf("umbrella manifest = %+v (err %v), want it unchanged", m, err)
+		}
+	})
+
+	// Spec: §13.4 — a copied manifest whose version the target already holds
+	// at a differing content hash fails with immutable_violation and stops
+	// the run, leaving the target's row as it was.
+	t.Run("a copied manifest at a differing hash stops the run", func(t *testing.T) {
+		dir := t.TempDir()
+		srcDB := filepath.Join(dir, "source.db")
+		dstDB := filepath.Join(dir, "dest.db")
+		globex := store.Tenant{ID: core.OrgIDForName("globex"), Name: "globex"}
+		manifestAt := func(hash string) store.ManifestRecord {
+			return store.ManifestRecord{
+				TenantID: globex.ID, ArtifactID: "x", Version: "1.0.0",
+				ContentHash: hash, Type: "skill", Layer: "team-shared",
+			}
+		}
+		seedSQLiteStore(t, dstDB, []store.Tenant{globex}, []store.ManifestRecord{manifestAt("sha256:aa")})
+		seedSQLiteStore(t, srcDB, []store.Tenant{globex}, []store.ManifestRecord{manifestAt("sha256:bb")})
+
+		rc, stderr := runMigrateSQLiteToSQLite(t, srcDB, dstDB)
+		if rc != 1 {
+			t.Fatalf("rc = %d, want 1; stderr:\n%s", rc, stderr)
+		}
+		for _, want := range []string{"pump store: put manifest", globex.ID, "immutable_violation"} {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("stderr missing %q:\n%s", want, stderr)
+			}
+		}
+
+		dst, err := store.OpenSQLite(dstDB)
+		if err != nil {
+			t.Fatalf("open dest: %v", err)
+		}
+		t.Cleanup(func() { _ = dst.Close() })
+		m, err := dst.GetManifest(ctx, globex.ID, "x", "1.0.0")
+		if err != nil || m.ContentHash != "sha256:aa" {
+			t.Errorf("target x@1.0.0 = %q (err %v), want sha256:aa", m.ContentHash, err)
 		}
 	})
 }
