@@ -240,6 +240,7 @@ rm -rf "$WORK"
 | S89 | A git layer's URL credential is stored and used, and no response or log reports it | standalone | none | none | none |
 | S90 | A standalone registry manages and routes tenants in multi-tenant mode | standalone | none | none | none |
 | S91 | A cross-layer extends: child that leaves an executable field to its parent is refused | solo then standalone | none | none | none |
+| S92 | A filesystem sync recomposes after an executable-field drop, and override and `--config` count the drop | solo then standalone | none | none | none |
 
 ---
 
@@ -11399,3 +11400,158 @@ holding `team-jira` before step 4 is the defect this scenario catches.
    ```bash
    kill "$SRV"; rm -rf "$WORK"
    ```
+
+---
+
+## S92: A filesystem sync recomposes after an executable-field drop, and override and `--config` count the drop
+
+**Goal.** Validate that a filesystem-source `podium sync` that drops a
+cross-layer child under the executable-field rule composes the layers again
+without it, so a higher-layer copy that collided only with the dropped child
+is kept and its collision is not reported. Validate that a drop cascades to a
+same-layer child of the dropped artifact, that the `rejected:` lines follow
+canonical-ID order, that `podium sync override` and a `--config` workspace
+target treat these drops as a collision drop, and that a standalone server
+over the same directory materializes the same files.
+
+**Covers.** §4.6 executable fields across layers, §13.11.3 recomposition,
+retracted collision, cascade, `podium sync override`, and `--config` targets,
+and §11 filesystem-to-server equivalence, through the compiled binary.
+
+**Why by hand.** S91 drives a single same-ID overlay. This scenario reads what
+an operator sees when one drop changes the rest of the composition: an
+`ingest.collision` line for a copy that is in fact materialized, a cascade line
+missing or out of order, `exit=0` from `podium sync override` or from a
+`--config` run, or a server target that differs from the filesystem target is
+the defect it catches.
+
+**Prerequisites.** A built `podium` binary on `PATH`.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then build a
+   three-layer registry. `org` holds the MCP server `ops/jira-server` with a
+   `server_identifier`. `team` holds `ops/jira`, which extends
+   `ops/jira-server` and omits `server_identifier`. `project` holds its own
+   `ops/jira`, which declares no `extends:` and sets its own
+   `server_identifier`.
+
+   ```bash
+   mkdir -p "$WORK/reg/org/ops/jira-server" "$WORK/reg/team/ops/jira" "$WORK/reg/project/ops/jira"
+   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n  - project\n' > "$WORK/reg/.registry-config"
+   for L in org team project; do
+     printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
+   done
+   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Org Jira server.\nserver_identifier: org-jira\n---\n\nOrg Jira server.\n' \
+     > "$WORK/reg/org/ops/jira-server/ARTIFACT.md"
+   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Team Jira server.\nextends: ops/jira-server\n---\n\nTeam Jira server.\n' \
+     > "$WORK/reg/team/ops/jira/ARTIFACT.md"
+   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Project Jira server.\nserver_identifier: project-jira\n---\n\nProject Jira server.\n' \
+     > "$WORK/reg/project/ops/jira/ARTIFACT.md"
+   ```
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and the three
+   `ARTIFACT.md` files exist.
+
+2. Sync through the filesystem source.
+
+   ```bash
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
+   cat "$WORK/err.txt"
+   cat "$WORK/fs/ops/jira/ARTIFACT.md"
+   ```
+
+   **Expect.** `exit=1`. `$WORK/err.txt` holds exactly one line,
+   `rejected: ops/jira (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: server_identifier; restate each one in this artifact`,
+   and no `ingest.collision` line. The summary lists `ops/jira [project]` and
+   `ops/jira-server [org]`, and the materialized `ops/jira` carries
+   `server_identifier: project-jira`. An `ingest.collision` line for
+   `ops/jira`, or a materialized `ops/jira` that is missing or carries
+   `org-jira`, means sync reported or applied the collision with the dropped
+   `team` copy.
+
+3. Add a cascade to `team`: `ops/tracker` extends `ops/jira-server` and omits
+   `server_identifier`, and `ops/alerts` extends `ops/tracker` in the same
+   layer and sets its own `server_identifier`. `ops/alerts` sorts before
+   `ops/tracker`. Sync again.
+
+   ```bash
+   mkdir -p "$WORK/reg/team/ops/tracker" "$WORK/reg/team/ops/alerts"
+   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Team tracker server.\nextends: ops/jira-server\n---\n\nTeam tracker server.\n' \
+     > "$WORK/reg/team/ops/tracker/ARTIFACT.md"
+   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Team alerts server.\nextends: ops/tracker\nserver_identifier: team-alerts\n---\n\nTeam alerts server.\n' \
+     > "$WORK/reg/team/ops/alerts/ARTIFACT.md"
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
+   cat "$WORK/err.txt"
+   ls "$WORK/fs/ops"
+   ```
+
+   **Expect.** `exit=1`. `$WORK/err.txt` holds exactly these three lines in
+   this order:
+
+   ```text
+   rejected: ops/alerts (ingest.invalid_artifact): extends: no parent artifact "ops/tracker" ingested yet
+   rejected: ops/jira (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: server_identifier; restate each one in this artifact
+   rejected: ops/tracker (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: server_identifier; restate each one in this artifact
+   ```
+
+   `ls` prints `jira` and `jira-server` alone. `ops/alerts` sets its own
+   `server_identifier`, so its line reports the cascade from the dropped
+   `ops/tracker` with the unresolved-parent reason. A materialized `ops/alerts` or `ops/tracker`, or lines in
+   another order, is the defect.
+
+4. Preview an override toggle with `--dry-run`, then apply it.
+
+   ```bash
+   podium sync override --registry "$WORK/reg" --target "$WORK/fs" --harness none \
+     --remove ops/jira-server --dry-run; echo "exit=$?"
+   ls "$WORK/fs/ops"
+   podium sync override --registry "$WORK/reg" --target "$WORK/fs" --harness none \
+     --remove ops/jira-server 2> "$WORK/err.txt"; echo "exit=$?"
+   cat "$WORK/err.txt"
+   ls "$WORK/fs/ops"
+   ```
+
+   **Expect.** The dry run prints `(dry-run; nothing written)`,
+   `toggles.remove: ops/jira-server`, no `rejected:` line, and `exit=0`, and
+   `ls` still prints `jira` and `jira-server`. The applied override prints
+   `toggles.remove: ops/jira-server` and `exit=1`, `$WORK/err.txt` holds the
+   three lines from step 3 in the same order, and `ls` prints `jira` alone.
+   The toggle stays recorded although the run exits 1.
+
+5. Sync the same registry through a `--config` workspace target.
+
+   ```bash
+   mkdir -p "$WORK/ws/.podium"
+   printf 'defaults:\n  registry: %s\ntargets:\n  - id: ops-workspace\n    kind: workspace\n    harness: none\n    target: %s\n' \
+     "$WORK/reg" "$WORK/cfg" > "$WORK/ws/.podium/sync.yaml"
+   podium sync --config "$WORK/ws/.podium/sync.yaml" 2> "$WORK/err.txt"; echo "exit=$?"
+   cat "$WORK/err.txt"
+   ls "$WORK/cfg/ops"
+   ```
+
+   **Expect.** Standard output starts with `== target ops-workspace ==`, and
+   the run prints `exit=1`. `$WORK/err.txt` holds the three lines from step 3
+   followed by `target ops-workspace: dropped at least one artifact`, and
+   `ls` prints `jira` and `jira-server`. `exit=0`, or a failure line that
+   names a code, is the defect.
+
+6. Serve the same directory and sync through the server.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8194 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8194/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   podium sync --registry http://127.0.0.1:8194 --target "$WORK/srv" --harness none; echo "exit=$?"
+   diff -r "$WORK/cfg/ops" "$WORK/srv/ops" && echo same
+   ```
+
+   **Expect.** The server sync lists `ops/jira [project]` and
+   `ops/jira-server [org]` and prints `exit=0`, and `diff` prints `same`. The
+   server never stored the refused `team` copies, so the `project` copy is not
+   a collision there. A difference means the two deployment modes kept
+   different copies.
+
+**Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
