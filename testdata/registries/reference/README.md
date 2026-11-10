@@ -22,19 +22,13 @@ types: `skill`, `agent`, `context`, `command`, `rule`, `hook`, and
 `mcp-server`. Bundled resources span Python scripts, Markdown
 references, JSON schemas, and a binary blob.
 
-`personal/notes/glossary-notes` extends `company-glossary` in `org-defaults`
-with no version pin. The §11 filesystem ↔ server equivalence test requires the
-fixture to carry an `extends:` child, because the two consumers obtain a
-derived artifact's manifest bytes by different routes and its lock entry is
-what pins them to one §4.7.6 content hash.
-
-`org-defaults/plain-skills/` and the `personal/notes/versioned-child` and
-`personal/notes/meta-child` packages exist for the same test. Its §11 bullet
-requires a skill with no `ARTIFACT.md` and no declared version, a skill with no
-`ARTIFACT.md` and a `SKILL.md` `metadata.version`, a skill whose `ARTIFACT.md`
-overlay omits `version`, and `extends:` children of the first two skills. The
-version-less skill pins the registry-assigned `0.0.0-auto.0` (§4.3.4) and the
-synthesized `ARTIFACT.md` that the `none` adapter omits (§6.7).
-`notes/meta-child` declares its version only in `metadata.version`, and its
-overlay omits `description`, so its merged document carries the parent's
-`SKILL.md` description. No other layer contributes any of these canonical IDs.
+`org-defaults/plain-skills/` exists for the §11 filesystem ↔ server
+equivalence test. Its §11 bullet requires a skill with no `ARTIFACT.md` and no
+declared version, a skill with no `ARTIFACT.md` and a `SKILL.md`
+`metadata.version`, and a skill whose `ARTIFACT.md` overlay omits `version`
+while its `SKILL.md` declares `metadata.version`. The version-less skill pins
+the registry-assigned `0.0.0-auto.0` (§4.3.4) and the synthesized
+`ARTIFACT.md` that the `none` adapter omits (§6.7). The same test also reads
+`personal/notes/versioned-child`, a skill whose `ARTIFACT.md` overlay declares
+`version` over a `SKILL.md` that carries none. No other layer contributes any
+of these canonical IDs.

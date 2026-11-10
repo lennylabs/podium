@@ -45,10 +45,10 @@ func referenceRegistryPath(t testing.TB) string {
 // cells for them, so sync.Run fails before any comparison.
 //
 // Spec: §11, §2.2, §4.3.4, §13.11.3 — the fixture's plain skills, the overlay
-// that omits version, and the extends: children of plain skills report the
-// same versions and materialize the same bytes under both registry sources.
-// The filesystem source reports 0.0.0-auto.0 for the version-less skill, and
-// the server assigns it on its first ingest into an empty store.
+// that omits version, and the overlay that declares it report the same
+// versions and materialize the same bytes under both registry sources. The
+// filesystem source reports 0.0.0-auto.0 for the version-less skill, and the
+// server assigns it on its first ingest into an empty store.
 func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 	t.Parallel()
 	dir := referenceRegistryPath(t)
@@ -141,15 +141,15 @@ func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 
 // plainSkillVersions maps each plain-skill fixture package of the reference
 // registry to the version both registry sources report for it. The first is
-// registry-assigned, the overlay of plain-skills/overlay-unversioned omits
-// version so its SKILL.md metadata.version applies, and notes/meta-child
-// declares its version only in metadata.version.
+// registry-assigned, the second comes from its SKILL.md metadata.version, the
+// overlay of plain-skills/overlay-unversioned omits version so its SKILL.md
+// metadata.version applies, and the overlay of notes/versioned-child declares
+// the version over a SKILL.md that carries none.
 var plainSkillVersions = map[string]string{
 	"plain-skills/unversioned":         "0.0.0-auto.0",
 	"plain-skills/versioned":           "1.0.0",
 	"plain-skills/overlay-unversioned": "1.0.0",
 	"notes/versioned-child":            "1.0.0",
-	"notes/meta-child":                 "2.0.0",
 }
 
 // assertPlainSkillLockVersions asserts that the lock under target records
@@ -201,10 +201,8 @@ func assertPlainSkillTree(t *testing.T, adapterID, registry string, tree map[str
 
 // assertNonePlainSkillTree checks the none layout of the plain-skill fixture.
 // Spec: §6.7, §4.3.4 — a skill with no ARTIFACT.md materializes as a plain
-// Agent Skills directory, an authored overlay is written as authored, and the
-// merged document of an extends: child whose overlay omits version and
-// description carries the child's metadata.version and the parent's SKILL.md
-// description.
+// Agent Skills directory, and an authored overlay is written as authored,
+// both the overlay that omits version and the overlay that declares it.
 func assertNonePlainSkillTree(t *testing.T, registry string, tree map[string]string) {
 	t.Helper()
 	for _, id := range []string{"plain-skills/unversioned", "plain-skills/versioned"} {
@@ -216,21 +214,17 @@ func assertNonePlainSkillTree(t *testing.T, registry string, tree map[string]str
 		}
 	}
 
-	authored, err := os.ReadFile(filepath.Join(registry, "org-defaults", "plain-skills", "overlay-unversioned", "ARTIFACT.md"))
-	if err != nil {
-		t.Fatalf("reading the authored overlay: %v", err)
+	overlays := map[string]string{
+		"plain-skills/overlay-unversioned": filepath.Join("org-defaults", "plain-skills", "overlay-unversioned"),
+		"notes/versioned-child":            filepath.Join("personal", "notes", "versioned-child"),
 	}
-	if got := tree["plain-skills/overlay-unversioned/ARTIFACT.md"]; got != string(authored) {
-		t.Errorf("none: overlay ARTIFACT.md differs from the authored bytes:\n got= %q\n want=%q", got, authored)
-	}
-
-	merged := tree["notes/meta-child/ARTIFACT.md"]
-	for _, want := range []string{
-		"version: 2.0.0\n",
-		"description: Draft a status update from the week's merged changes.\n",
-	} {
-		if !strings.Contains(merged, want) {
-			t.Errorf("none: notes/meta-child/ARTIFACT.md lacks %q:\n%s", want, merged)
+	for id, dir := range overlays {
+		authored, err := os.ReadFile(filepath.Join(registry, dir, "ARTIFACT.md"))
+		if err != nil {
+			t.Fatalf("reading the authored overlay of %s: %v", id, err)
+		}
+		if got := tree[id+"/ARTIFACT.md"]; got != string(authored) {
+			t.Errorf("none: %s/ARTIFACT.md differs from the authored bytes:\n got= %q\n want=%q", id, got, authored)
 		}
 	}
 }
