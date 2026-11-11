@@ -406,3 +406,22 @@ func TestPostgres_LayerConfigTimestampsAreUTC(t *testing.T) {
 	}
 	assertUTC("ListDeletedLayerConfigs deleted_at", *gone[0].DeletedAt, deleted)
 }
+
+// Spec: §4.7.3 Reverse Dependency Index — a dependency read that cannot reach
+// the org's schema returns the error rather than an empty edge list or zero
+// in-degrees, so a caller never reads a failed read as "no dependents".
+// Gated on PODIUM_POSTGRES_DSN.
+func TestPostgres_DependencyReadsReturnConnectionErrors(t *testing.T) {
+	s := openIsolationPG(t)
+	if err := s.CreateTenant(context.Background(), store.Tenant{ID: "deporg", Name: "acme"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got, err := s.DependentsOf(ctx, "deporg", "parent"); err == nil {
+		t.Errorf("DependentsOf on a canceled context = %v, nil; want an error", got)
+	}
+	if got, err := s.DependencyInDegree(ctx, "deporg"); err == nil {
+		t.Errorf("DependencyInDegree on a canceled context = %v, nil; want an error", got)
+	}
+}

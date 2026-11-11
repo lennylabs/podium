@@ -296,3 +296,19 @@ func TestSQLite_LayerRepoUserinfoColumnRead(t *testing.T) {
 		t.Errorf("columns after the put back = %+v, want %+v", got, want)
 	}
 }
+
+// Spec: §4.7.3 Reverse Dependency Index — a dependency read the database
+// cannot answer returns the error rather than an empty edge list or zero
+// in-degrees, so a caller never reads a failed query as "no dependents".
+func TestSQLite_DependencyReadsReturnQueryErrors(t *testing.T) {
+	t.Parallel()
+	s := openLayerRepoSQLite(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got, err := s.DependentsOf(ctx, "a", "parent"); err == nil {
+		t.Errorf("DependentsOf on a canceled context = %v, nil; want an error", got)
+	}
+	if got, err := s.DependencyInDegree(ctx, "a"); err == nil {
+		t.Errorf("DependencyInDegree on a canceled context = %v, nil; want an error", got)
+	}
+}

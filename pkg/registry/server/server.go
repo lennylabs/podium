@@ -1328,10 +1328,9 @@ func encodeBinaryInlineResources(resp *LoadArtifactResponse) {
 // the canonical-document field. Below the cutoff, or without an object
 // store (the §13.11 standalone-without-storage mode), the body stays inline.
 //
-// A merged manifest takes the channel like any other. It was once kept inline
-// because the consumer hashed the pre-merge bytes the URL does not deliver;
-// the §4.7.10 delivery hash frames the served document itself, and a channel
-// that differed for a merged manifest would disclose the merge (§4.6).
+// Every manifest above the cutoff takes the channel. The §4.7.10 delivery hash
+// frames the served document itself, so the bytes the URL delivers are the
+// bytes the consumer hashes.
 func (s *Server) attachManifestBody(ctx context.Context, resp *LoadArtifactResponse, res *core.LoadArtifactResult) error {
 	if s.objectStore == nil {
 		return nil
