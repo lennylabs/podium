@@ -1,7 +1,7 @@
 # Proposal 0054: Store a git layer's URL credential in `layer_configs.repo_userinfo` and a userinfo-free `repo` (step 2 of 2)
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-10). Approved on 2026-11-08 and signed off as staged, with the open questions settled as recorded in "Resolved decisions" (RD-1 through RD-4). Verified on 2026-10-10 after 3 adversarial review rounds (2 findings fixed). The step-1 release tag `v0.6.0` exists, so the D-5 precondition is satisfied. Re-anchored on 2026-11-10 for step 1 = 0.6.0 and step 2 = 0.7.0 against main 29852fae.
+- Status: Implemented (2026-11-10). Approved on 2026-11-08 and signed off as staged, with the open questions settled as recorded in "Resolved decisions" (RD-1 through RD-4). Verified on 2026-10-10 after 3 adversarial review rounds (2 findings fixed). The step-1 release tag `v0.6.0` exists, so the D-5 precondition is satisfied. Re-anchored on 2026-11-10 for step 1 = 0.6.0 and step 2 = 0.7.0 against main 29852fae.
 - Date: 2026-10-10
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -57,21 +57,21 @@ Step 1, proposal 0053, shipped in 0.6.0, which is tagged `v0.6.0`. This proposal
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. The §7.3.1 "Repository credentials" sentence is replaced with the retained-value and store-write wording.
+- [x] **S1 · spec** — SPEC-1. The §7.3.1 "Repository credentials" sentence is replaced with the retained-value and store-write wording.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §13.4 gains the paragraph for a change of stored form with a version floor.
+- [x] **S2 · spec** — SPEC-2. §13.4 gains the paragraph for a change of stored form with a version floor.
       Levels: —. Depends on: —
-- [ ] **S3 · code** — CODE-1, CODE-2, TEST-1. `LayerRepoColumns` and `registeredLayerRepo` replace `LayerRepoColumn`, the SQLite and Postgres writers bind both columns, the memory writer calls `registeredLayerRepo`, and the store tests follow. The three are bundled because the rename does not compile without its callers and the existing raw-column assertions fail from the commit that changes the write.
+- [x] **S3 · code** — CODE-1, CODE-2, TEST-1. `LayerRepoColumns` and `registeredLayerRepo` replace `LayerRepoColumn`, the SQLite and Postgres writers bind both columns, the memory writer calls `registeredLayerRepo`, and the store tests follow. The three are bundled because the rename does not compile without its callers and the existing raw-column assertions fail from the commit that changes the write.
       Levels: unit, conformance, integration. Depends on: S1, and S2 when it is not skipped
-- [ ] **S4 · test** — TEST-2. The SQLite handler test, the post-ingest stamp test, the `admin migrate` raw-row assertion, and the raw read between stop and restart in the end-to-end test.
+- [x] **S4 · test** — TEST-2. The SQLite handler test, the post-ingest stamp test, the `admin migrate` raw-row assertion, and the raw read between stop and restart in the end-to-end test.
       Levels: unit, integration, e2e. Depends on: S3
-- [ ] **S5 · docs** — DOC-2. The operator guide subsection "Rollback floor for the layer credential columns", the pointer sentences, and the `clustered.md` and `cli.md` sentences. The staged text carries the released version literals.
+- [x] **S5 · docs** — DOC-2. The operator guide subsection "Rollback floor for the layer credential columns", the pointer sentences, and the `clustered.md` and `cli.md` sentences. The staged text carries the released version literals.
       Levels: —. Depends on: S3
-- [ ] **S6 · docs** — DOC-3. "stores" becomes "keeps" on the layer pages, with the link to the DOC-2 subsection.
+- [x] **S6 · docs** — DOC-3. "stores" becomes "keeps" on the layer pages, with the link to the DOC-2 subsection.
       Levels: —. Depends on: S5
-- [ ] **S7 · docs** — DOC-1. The changelog entry under `## [Unreleased]`, which names 0.6.0 as the rollback floor.
+- [x] **S7 · docs** — DOC-1. The changelog entry under `## [Unreleased]`, which names 0.6.0 as the rollback floor.
       Levels: —. Depends on: S5
-- [ ] **S8 · test** — TEST-3. Scenario S103 in `test/manual-validation.md` and its index row.
+- [x] **S8 · test** — TEST-3. Scenario S103 in `test/manual-validation.md` and its index row.
       Levels: manual. Depends on: S3
 
 **Ordering constraints.** S1 and S2 land as their own commits, with `make coverage-gate` run before any code change. S3 through S8 land in one pull request, so the 85% coverage bar on the new lines is met when the pull request is measured. D-5 holds the pull request back from `main` until the step-1 tag exists, and `git tag -l` lists `v0.6.0`, so that condition is met.
