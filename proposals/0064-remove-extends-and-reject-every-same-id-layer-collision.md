@@ -1,7 +1,7 @@
 # Proposal 0064: Remove extends: and make every same-ID collision between registry-side layers a rejection
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-10). Verified on 2026-11-10 after 21 adversarial review rounds (50 findings fixed).
+- Status: Implemented (2026-11-10). Verified on 2026-11-10 after 21 adversarial review rounds (50 findings fixed).
 - Date: 2026-11-10
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: ingest, a filesystem-source `podium sync`, and `podium lint` refuse an `ARTIFACT.md` that declares `extends:`, a same-ID overlay between registry-side layers is rejected, and a row an earlier release stored from such an `ARTIFACT.md` stops serving. It ships in 0.6.0, a MINOR release.
@@ -62,44 +62,44 @@ The list above is an index. Each rule has exactly one normative statement, in it
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4, SPEC-5, SPEC-6. The §4.6 collision and no-inheritance rules and every dependent statement land in one commit (D-15), because each later edit cites the §4.6 rule and deleting §4.6 text alone leaves dangling references.
+- [x] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4, SPEC-5, SPEC-6. The §4.6 collision and no-inheritance rules and every dependent statement land in one commit (D-15), because each later edit cites the §4.6 rule and deleting §4.6 text alone leaves dangling references.
       Levels: unit. Depends on: —
-- [ ] **S2 · test** — FIX-1. The reference registry drops its `extends:` children, and the equivalence and manifest-body tests that read them follow.
+- [x] **S2 · test** — FIX-1. The reference registry drops its `extends:` children, and the equivalence and manifest-body tests that read them follow.
       Levels: integration, conformance, materialization. Depends on: S1
       Interleave: this test step precedes the code because each edit passes against the code before and after CODE-4. The S2 suites run against the old code at S2, and again at S8, the first step after S3 at which `test/integration` compiles.
-- [ ] **S3 · code** — CODE-1, CODE-2, CODE-3, CODE-4, CODE-5, CODE-6, CODE-7, CODE-8. The Go removal for both deployment modes. Bundled because deleting `Artifact.Extends`, `ManifestRecord.ExtendsPin`, `layer.ExtendsOverlays`, and `WalkOptions.ResolveExtends` breaks compilation in every package these deliverables touch, and D-15 keeps the modes from diverging at a commit. CODE-1, CODE-3, CODE-6, and CODE-7 carry test edits, and those tests run from S8, the first step at which every test package compiles.
+- [x] **S3 · code** — CODE-1, CODE-2, CODE-3, CODE-4, CODE-5, CODE-6, CODE-7, CODE-8. The Go removal for both deployment modes. Bundled because deleting `Artifact.Extends`, `ManifestRecord.ExtendsPin`, `layer.ExtendsOverlays`, and `WalkOptions.ResolveExtends` breaks compilation in every package these deliverables touch, and D-15 keeps the modes from diverging at a commit. CODE-1, CODE-3, CODE-6, and CODE-7 carry test edits, and those tests run from S8, the first step at which every test package compiles.
       Levels: unit, integration, conformance, e2e. Depends on: S2
-- [ ] **S4 · code** — CODE-9. Comment cleanup in `pkg/version`, `pkg/sign`, and `cmd/`, and the deletion of `dependency.EdgeExtends`, with the `graph_test.go` edges that use it moved to the surviving kinds.
+- [x] **S4 · code** — CODE-9. Comment cleanup in `pkg/version`, `pkg/sign`, and `cmd/`, and the deletion of `dependency.EdgeExtends`, with the `graph_test.go` edges that use it moved to the surviving kinds.
       Levels: unit. Depends on: S3
-- [ ] **S5 · code** — CODE-10. `podium artifact scaffold` drops `--extends`.
+- [x] **S5 · code** — CODE-10. `podium artifact scaffold` drops `--extends`.
       Levels: unit, e2e. Depends on: S3
-- [ ] **S6 · code** — CODE-11. The SDK edge-kind type and docstring.
+- [x] **S6 · code** — CODE-11. The SDK edge-kind type and docstring.
       Levels: unit. Depends on: S3
-- [ ] **S7 · code** — CODE-12. The web viewer, the layer panel copy, the UI tests, and the rebuilt `web/bundle`.
+- [x] **S7 · code** — CODE-12. The web viewer, the layer panel copy, the UI tests, and the rebuilt `web/bundle`.
       Levels: unit. Depends on: S3
-- [ ] **S8 · test** — TEST-8. Delete or rewrite the existing `extends:` tests that S3 leaves uncompiled or wrong, including every compile-only removal that CODE-1, CODE-3, CODE-6, and CODE-7 do not carry at S3 and the doc-claim end-to-end tests, and move the shared helpers the deleted files define. The TEST-8 grep gate then lists only allowlisted files. Every test package compiles from this step.
+- [x] **S8 · test** — TEST-8. Delete or rewrite the existing `extends:` tests that S3 leaves uncompiled or wrong, including every compile-only removal that CODE-1, CODE-3, CODE-6, and CODE-7 do not carry at S3 and the doc-claim end-to-end tests, and move the shared helpers the deleted files define. The TEST-8 grep gate then lists only allowlisted files. Every test package compiles from this step.
       Levels: unit, integration, e2e. Depends on: S3, S4
-- [ ] **S9 · test** — TEST-1. The predicate, constant, and collision-reason unit tests.
+- [x] **S9 · test** — TEST-1. The predicate, constant, and collision-reason unit tests.
       Levels: unit. Depends on: S8
-- [ ] **S10 · test** — TEST-3. The walk, sync, equivalence, and filesystem-sync end-to-end tests.
+- [x] **S10 · test** — TEST-3. The walk, sync, equivalence, and filesystem-sync end-to-end tests.
       Levels: unit, integration, materialization, e2e. Depends on: S8
-- [ ] **S11 · test** — TEST-4. The retired-row read-path, dependents, and upgrade tests.
+- [x] **S11 · test** — TEST-4. The retired-row read-path, dependents, and upgrade tests.
       Levels: unit, integration, e2e. Depends on: S8
-- [ ] **S12 · test** — TEST-5. The response, ETag, and delivery tests.
+- [x] **S12 · test** — TEST-5. The response, ETag, and delivery tests.
       Levels: unit, integration. Depends on: S8
-- [ ] **S13 · test** — TEST-2. The server ingest and reingest wire tests.
+- [x] **S13 · test** — TEST-2. The server ingest and reingest wire tests.
       Levels: integration. Depends on: S8
-- [ ] **S14 · test** — TEST-6. The consumer overlay and `podium-mcp` fixture tests.
+- [x] **S14 · test** — TEST-6. The consumer overlay and `podium-mcp` fixture tests.
       Levels: unit. Depends on: S6, S8
-- [ ] **S15 · test** — TEST-7. The end-to-end lint, scaffold, standalone, and impact-analysis tests.
+- [x] **S15 · test** — TEST-7. The end-to-end lint, scaffold, standalone, and impact-analysis tests.
       Levels: unit, e2e. Depends on: S5, S8 to S14
-- [ ] **S16 · test** — MV-1. Scenario deletions and rewrites, and S102, in `test/manual-validation.md`.
+- [x] **S16 · test** — MV-1. Scenario deletions and rewrites, and S102, in `test/manual-validation.md`.
       Levels: e2e. Depends on: S3 to S15
-- [ ] **S17 · docs** — DOC-1, DOC-2. The extends page and diagram are deleted after their content moves, and every page and diagram that mentions `extends:` is rewritten. Bundled because DOC-1 re-homes content into `docs/deployment/layers.md`, which DOC-2 also edits, and one site build checks both.
+- [x] **S17 · docs** — DOC-1, DOC-2. The extends page and diagram are deleted after their content moves, and every page and diagram that mentions `extends:` is rewritten. Bundled because DOC-1 re-homes content into `docs/deployment/layers.md`, which DOC-2 also edits, and one site build checks both.
       Levels: e2e. Depends on: S1, S15
-- [ ] **S18 · docs** — PROP-1. Proposal 0062 is committed with a withdrawn status.
+- [x] **S18 · docs** — PROP-1. Proposal 0062 is committed with a withdrawn status.
       Levels: —. Depends on: S1
-- [ ] **S19 · docs** — DOC-3. The `[Unreleased]` CHANGELOG reconciliation.
+- [x] **S19 · docs** — DOC-3. The `[Unreleased]` CHANGELOG reconciliation.
       Levels: —. Depends on: S1 to S18
 
 **Ordering constraints.**
@@ -110,6 +110,10 @@ The list above is an index. Each rule has exactly one normative statement, in it
 - S4 to S7 are independent of one another once S3 lands. S9 to S13 are independent of one another once S8 lands, because none of them waits on another to compile and each runs only its own tests.
 - S17 follows S15 so that its doc-claim end-to-end run executes against the finished code and tests. TEST-8 rewrites those doc-claim tests at S8, so the full suite passes from S15, and S17 changes no test file.
 - S19 describes the whole change and lands last. The closing step of the commands list runs after S19, over the finished branch. Land every step in one pull request.
+
+## Deviations from the checklist
+
+- S20 has no checklist entry. It ran the closing step of the commands list over the finished branch. It ran the combined coverage run with `PODIUM_POSTGRES_DSN` set, the subprocess coverage profile over the end-to-end tests, and the TEST-8 grep. It added tests for the query-error branch of the SQLite store and the connection-error branch of the Postgres store in `DependentsOf` and `DependencyInDegree`, which raised both reads above 85%, and it dropped a stale merged-manifest comment. It also corrected the expected `podium artifact show` output of a scenario in `test/manual-validation.md` to match the command's output.
 
 ## Current state and the gap
 
