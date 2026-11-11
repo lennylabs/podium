@@ -69,8 +69,8 @@ func TestContentHashFor_DistinctAndStable(t *testing.T) {
 // spec: §14.11, §7.5.3 — for a server source, lockContentHash pins
 // the registry's authoritative content_hash verbatim. The registry value wins
 // even when it diverges from a digest recomputed over the served bytes, which
-// is the §4.6 extends-merge case the registry itself flags ("served bytes no
-// longer reproduce ContentHash").
+// is the §4.3.4 synthesized-skill case: the served ARTIFACT.md is the
+// synthesized document while the content hash frames an empty one.
 func TestLockContentHash_PrefersRegistryValue(t *testing.T) {
 	t.Parallel()
 	rec := materialRecord{ID: "x", ArtifactBytes: []byte("served bytes"), AuthoredBytes: []byte("served bytes"), ContentHash: "sha256:authoritative"}
@@ -82,21 +82,21 @@ func TestLockContentHash_PrefersRegistryValue(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.6, §7.5.3 — a filesystem source carries no recorded hash, so
-// lockContentHash computes one, and it computes it over the authored
-// ARTIFACT.md rather than over the merged, parent-hidden re-serialization the
-// extends: resolver leaves in ArtifactBytes.
+// Spec: §4.7.6, §7.5.3, §4.3.4 — a filesystem source carries no recorded hash,
+// so lockContentHash computes one, and it computes it over the authored
+// ARTIFACT.md rather than over the synthesized document the walk leaves in
+// ArtifactBytes for a skill with no ARTIFACT.md.
 func TestLockContentHash_FilesystemSourceHashesTheAuthoredManifest(t *testing.T) {
 	t.Parallel()
-	authored := []byte("---\ntype: context\nversion: 2.0.0\ndescription: child desc\nextends: acme/base\n---\n\nChild body.\n")
-	merged := []byte("---\ntype: context\nversion: 2.0.0\ndescription: child desc\nname: Base\n---\n\nChild body.\n")
-	rec := materialRecord{ID: "acme/child", ArtifactBytes: merged, AuthoredBytes: authored} // no ContentHash
-	want := "sha256:" + version.CanonicalContentHash(authored, nil, nil)
+	skill := []byte("---\nname: plain\ndescription: Plain skill.\n---\n\nSkill body.\n")
+	synthesized := []byte("---\ntype: skill\nversion: 0.0.0-auto.0\n---\n")
+	rec := materialRecord{ID: "acme/plain", ArtifactBytes: synthesized, SkillBytes: skill} // no ContentHash
+	want := "sha256:" + version.CanonicalContentHash(nil, skill, nil)
 	if got := lockContentHash(rec); got != want {
 		t.Errorf("lockContentHash = %q, want the authored-bytes digest %q", got, want)
 	}
-	if overMerged := "sha256:" + version.CanonicalContentHash(merged, nil, nil); want == overMerged {
-		t.Fatal("test setup: the authored and the merged bytes hash alike; the fixture proves nothing")
+	if overSynthesized := "sha256:" + version.CanonicalContentHash(synthesized, skill, nil); want == overSynthesized {
+		t.Fatal("test setup: the authored and the synthesized bytes hash alike; the fixture proves nothing")
 	}
 }
 
@@ -176,25 +176,18 @@ func TestRun_LockRecordsVersionAndContentHash(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.6, §7.5.3 — a filesystem-source sync pins the digest over the
-// authored ARTIFACT.md for an extends: child, which is the value ingest stores
-// and a server-source sync records, rather than the digest over the merged
-// re-serialization the extends: resolver writes into ArtifactBytes. The parent
-// sits in the layer layer_order: places first, so the resolver finds it through
-// the effective view.
-func TestRun_FilesystemSourceLockHashesAnExtendsChildBeforeTheMerge(t *testing.T) {
+// Spec: §4.7.6, §7.5.3, §4.3.4 — a filesystem-source sync pins the digest over
+// the authored files of a skill with no ARTIFACT.md, which is the value ingest
+// stores and a server-source sync records, rather than the digest over the
+// synthesized document the walk writes into ArtifactBytes.
+func TestRun_FilesystemSourceLockHashesAPlainSkillBeforeSynthesis(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()
 	target := t.TempDir()
-	parent := "---\ntype: context\nversion: 1.0.0\nname: Base\ndescription: parent desc\n---\n\nParent body.\n"
-	child := "---\ntype: context\nversion: 2.0.0\ndescription: child desc\nextends: acme/base\n---\n\nChild body.\n"
+	skill := "---\nname: plain\ndescription: Plain skill.\n---\n\nSkill body.\n"
 	testharness.WriteTree(t, registry,
-		testharness.WriteTreeOption{
-			Path:    ".registry-config",
-			Content: "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n",
-		},
-		testharness.WriteTreeOption{Path: "team-shared/acme/base/ARTIFACT.md", Content: parent},
-		testharness.WriteTreeOption{Path: "personal/acme/child/ARTIFACT.md", Content: child},
+		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\n"},
+		testharness.WriteTreeOption{Path: "team/acme/plain/SKILL.md", Content: skill},
 	)
 	if _, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"}); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -203,26 +196,24 @@ func TestRun_FilesystemSourceLockHashesAnExtendsChildBeforeTheMerge(t *testing.T
 	if err != nil {
 		t.Fatalf("ReadLock: %v", err)
 	}
-	want := "sha256:" + version.CanonicalContentHash([]byte(child), nil, nil)
-	// Guard the fixture: the merged re-serialization must hash differently, or
+	want := "sha256:" + version.CanonicalContentHash(nil, []byte(skill), nil)
+	// Guard the fixture: the synthesized document must hash differently, or
 	// the assertion below passes whichever bytes the composer read.
 	recs, _, err := filesystemRecords(Options{RegistryPath: registry})
 	if err != nil {
 		t.Fatalf("filesystemRecords: %v", err)
 	}
 	for _, rec := range recs {
-		if rec.ID != "acme/child" {
+		if rec.ID != "acme/plain" {
 			continue
 		}
-		mergedBytes := rec.ArtifactBytes
-		merged := "sha256:" + version.CanonicalContentHash(mergedBytes, nil, nil)
-		if merged == want {
-			t.Fatal("test setup: the merged bytes hash to the authored digest; the fixture proves nothing")
+		if synthesized := "sha256:" + version.CanonicalContentHash(rec.ArtifactBytes, []byte(skill), nil); synthesized == want {
+			t.Fatal("test setup: the synthesized bytes hash to the authored digest; the fixture proves nothing")
 		}
 	}
 	var seen int
 	for _, la := range lock.Artifacts {
-		if la.ID != "acme/child" {
+		if la.ID != "acme/plain" {
 			continue
 		}
 		seen++
@@ -231,6 +222,6 @@ func TestRun_FilesystemSourceLockHashesAnExtendsChildBeforeTheMerge(t *testing.T
 		}
 	}
 	if seen == 0 {
-		t.Fatalf("lock has no acme/child entry: %+v", lock.Artifacts)
+		t.Fatalf("lock has no acme/plain entry: %+v", lock.Artifacts)
 	}
 }

@@ -253,39 +253,6 @@ func TestCompose_HighestPrecedenceWins(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 merge semantics — sensitivity is most-restrictive-wins
-// (high > medium > low).
-func TestMostRestrictiveSensitivity(t *testing.T) {
-	t.Parallel()
-	candidates := []Candidate{
-		{Artifact: &manifest.Artifact{Sensitivity: manifest.SensitivityLow}},
-		{Artifact: &manifest.Artifact{Sensitivity: manifest.SensitivityHigh}},
-		{Artifact: &manifest.Artifact{Sensitivity: manifest.SensitivityMedium}},
-	}
-	if got := MostRestrictiveSensitivity(candidates); got != manifest.SensitivityHigh {
-		t.Errorf("got %s, want high", got)
-	}
-}
-
-// Spec: §4.6 merge semantics — tags append-unique across layers.
-func TestAppendUniqueTags(t *testing.T) {
-	t.Parallel()
-	candidates := []Candidate{
-		{Artifact: &manifest.Artifact{Tags: []string{"a", "b"}}},
-		{Artifact: &manifest.Artifact{Tags: []string{"b", "c"}}},
-	}
-	got := AppendUniqueTags(candidates)
-	want := []string{"a", "b", "c"}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("[%d] got %q want %q", i, got[i], want[i])
-		}
-	}
-}
-
 // Spec: §4.7.6 — SplitArtifactRef parses id@version pinning syntax.
 func TestSplitArtifactRef(t *testing.T) {
 	t.Parallel()

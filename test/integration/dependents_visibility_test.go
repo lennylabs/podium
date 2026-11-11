@@ -36,14 +36,13 @@ func TestDependents_InvisibleTargetReturnsEmpty200(t *testing.T) {
 	rlvLayer(t, st, store.LayerConfig{TenantID: "default", ID: "hidden", Order: 1, Users: []string{"alice"}})
 	rlvLayer(t, st, store.LayerConfig{TenantID: "default", ID: "team", Order: 2, Users: []string{"alice", "bob"}})
 	rlvManifest(t, st, store.ManifestRecord{
-		TenantID: "default", ArtifactID: "acme/hidden-parent", Version: "1.0.0", Layer: "hidden", Type: "context",
+		TenantID: "default", ArtifactID: "acme/hidden-target", Version: "1.0.0", Layer: "hidden", Type: "context",
 	})
 	rlvManifest(t, st, store.ManifestRecord{
-		TenantID: "default", ArtifactID: "acme/child", Version: "1.0.0", Layer: "team", Type: "context",
-		ExtendsPin: "acme/hidden-parent@1.0.0",
+		TenantID: "default", ArtifactID: "acme/child", Version: "1.0.0", Layer: "team", Type: "agent",
 	})
 	if err := st.PutDependency(ctx, "default", store.DependencyEdge{
-		From: "acme/child", To: "acme/hidden-parent", Kind: "extends",
+		From: "acme/child", To: "acme/hidden-target", Kind: "delegates_to",
 	}); err != nil {
 		t.Fatalf("PutDependency: %v", err)
 	}
@@ -87,7 +86,7 @@ func TestDependents_InvisibleTargetReturnsEmpty200(t *testing.T) {
 		return resp.StatusCode, string(raw), compact.String()
 	}
 
-	status, invisible, compact := get("bob", "acme/hidden-parent")
+	status, invisible, compact := get("bob", "acme/hidden-target")
 	if status != http.StatusOK || compact != `{"edges":[]}` {
 		t.Errorf("invisible target = %d %s, want 200 {\"edges\":[]}", status, invisible)
 	}
@@ -106,7 +105,7 @@ func TestDependents_InvisibleTargetReturnsEmpty200(t *testing.T) {
 	mu.Unlock()
 
 	// alice reads both layers and sees the edge, so the fixture is live.
-	if status, _, body := get("alice", "acme/hidden-parent"); status != http.StatusOK || !strings.Contains(body, `"from":"acme/child"`) {
+	if status, _, body := get("alice", "acme/hidden-target"); status != http.StatusOK || !strings.Contains(body, `"from":"acme/child"`) {
 		t.Errorf("alice = %d %s, want the acme/child edge", status, body)
 	}
 }

@@ -32,30 +32,6 @@ func TestCollision_Reason(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 — only an extends: reference that names the colliding ID,
-// pinned or bare, sanctions the overlay.
-func TestExtendsOverlays(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name, ref, id string
-		want          bool
-	}{
-		{"empty reference", "", "a/b", false},
-		{"empty reference and empty id", "", "", false},
-		{"bare same id", "a/b", "a/b", true},
-		{"semver pin", "a/b@1.0.0", "a/b", true},
-		{"minor pin", "a/b@1.2.x", "a/b", true},
-		{"content-hash pin", "a/b@sha256:abc", "a/b", true},
-		{"other id", "a/c", "a/b", false},
-		{"other id pinned", "a/c@1.0.0", "a/b", false},
-	}
-	for _, c := range cases {
-		if got := ExtendsOverlays(c.ref, c.id); got != c.want {
-			t.Errorf("%s: ExtendsOverlays(%q, %q) = %v, want %v", c.name, c.ref, c.id, got, c.want)
-		}
-	}
-}
-
 // Spec: §4.6, §13.11.3 — a collision reports as a drop with the collision
 // code and the same withheld reason.
 func TestCollision_Drop(t *testing.T) {

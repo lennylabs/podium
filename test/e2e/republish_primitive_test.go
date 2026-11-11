@@ -139,7 +139,7 @@ func sessionLoad(t testing.TB, srv *serverProc, id, sessionID string) string {
 	if st != http.StatusOK {
 		t.Fatalf("session %s load %s = HTTP %d\nbody: %s", sessionID, id, st, body)
 	}
-	var r exLoadResp
+	var r loadArtifactResp
 	if err := json.Unmarshal(body, &r); err != nil {
 		t.Fatalf("decode session load: %v\nbody: %s", err, body)
 	}

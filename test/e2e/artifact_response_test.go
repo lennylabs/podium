@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // ---- helpers ----------------------------------------------------------------
@@ -1056,5 +1058,43 @@ func TestArtifactResponse_ManifestPropertyAbsent(t *testing.T) {
 		if !strings.Contains(py, want) {
 			t.Errorf("python SDK LoadedArtifact missing the raw %q field", want)
 		}
+	}
+}
+
+// Spec: §6.6 step 2 / §4.7.6 — a skill's content_hash covers the verbatim
+// SKILL.md (delivered as skill_raw) plus the ARTIFACT.md; the prose body alone
+// cannot reproduce it. ContentHash(frontmatter, skill_raw) reproduces the stored
+// hash, pinning the registry canonicalization to the MCP bridge's §6.6 step 2
+// recomputation so a skill is verified rather than skipped.
+func TestSkill_ContentHashCoversSkillRaw(t *testing.T) {
+	t.Parallel()
+	id := "finance/ap/pay-invoice"
+	skillMD := "---\nname: pay-invoice\ndescription: Pay an approved invoice.\n---\n\npay-invoice body.\n"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md": brSkillArtifact,
+		id + "/SKILL.md":    skillMD,
+	}))
+	var r struct {
+		Type        string `json:"type"`
+		ContentHash string `json:"content_hash"`
+		Frontmatter string `json:"frontmatter"`
+		SkillRaw    string `json:"skill_raw"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/load_artifact?id="+id, &r)
+
+	if r.Type != "skill" {
+		t.Fatalf("type = %q, want skill", r.Type)
+	}
+	if r.SkillRaw != skillMD {
+		t.Errorf("skill_raw is not the verbatim SKILL.md:\n got %q\nwant %q", r.SkillRaw, skillMD)
+	}
+	// The bridge recomputes the hash over (ARTIFACT.md, SKILL.md, resources).
+	if got := "sha256:" + version.CanonicalContentHash([]byte(r.Frontmatter), []byte(r.SkillRaw), nil); got != r.ContentHash {
+		t.Errorf("ContentHash(frontmatter, skill_raw) = %s, want stored %s", got, r.ContentHash)
+	}
+	// The prose body / ARTIFACT.md alone does not reproduce the hash, which is
+	// why skipping the check for skills left them unverified.
+	if "sha256:"+version.CanonicalContentHash([]byte(r.Frontmatter), nil, nil) == r.ContentHash {
+		t.Error("hash reproduced without skill_raw; the SKILL.md is not actually covered")
 	}
 }

@@ -36,7 +36,7 @@ func TestSearchArtifacts_DependencyRerank(t *testing.T) {
 	// alphabetical winner. A second edge kind from the same source must not
 	// inflate the count.
 	st := seedDepStore(t, fsys)
-	putDep(t, st, store.DependencyEdge{From: "consumer/one", To: "tools/bbb", Kind: "extends"})
+	putDep(t, st, store.DependencyEdge{From: "consumer/one", To: "tools/bbb", Kind: "delegates_to"})
 	putDep(t, st, store.DependencyEdge{From: "consumer/two", To: "tools/bbb", Kind: "delegates_to"})
 	putDep(t, st, store.DependencyEdge{From: "consumer/two", To: "tools/bbb", Kind: "mcpServers"})
 	reg := core.New(st, tenant, depPublicLayers())

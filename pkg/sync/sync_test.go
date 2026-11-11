@@ -260,43 +260,6 @@ func TestRun_RequiresTarget(t *testing.T) {
 	}
 }
 
-// Spec: §4.6, §13.11.3 — a higher-precedence layer that declares extends: on
-// the colliding ID merges over the lower one, and sync drops nothing.
-func TestRun_HigherLayerWinsOnCollision(t *testing.T) {
-	t.Parallel()
-	registry := t.TempDir()
-	target := t.TempDir()
-	testharness.WriteTree(t, registry,
-		testharness.WriteTreeOption{
-			Path: ".registry-config",
-			Content: `multi_layer: true
-layer_order:
-  - team-shared
-  - personal
-`,
-		},
-		testharness.WriteTreeOption{
-			Path:    "team-shared/x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: shared\n---\n\nshared body\n",
-		},
-		testharness.WriteTreeOption{
-			Path:    "personal/x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 2.0.0\nextends: x\ndescription: personal\n---\n\npersonal body\n",
-		},
-	)
-	res, err := Run(Options{RegistryPath: registry, Target: target})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	got := testharness.ReadTree(t, target)["x/ARTIFACT.md"]
-	if !contains(got, "description: personal") || !contains(got, "personal body") {
-		t.Errorf("expected personal layer's description and body, got: %s", got)
-	}
-	if len(res.Dropped) != 0 {
-		t.Errorf("Dropped = %+v, want empty", res.Dropped)
-	}
-}
-
 // Spec: §6.9 / §6.7 — Run enforces the §6.7.1 ✗-cell contract before
 // adapting, so a plugin-layout type on claude-cowork fails with
 // materialize.untranslatable instead of silently producing no output. This

@@ -1372,8 +1372,7 @@ func TestHarness_SyncIdempotent(t *testing.T) {
 }
 
 // PODIUM_OVERLAY_PATH overrides the registry for load_artifact. Spec: §6.4 —
-// the overlay is the exception to the §4.6 collision rule, so the replacement
-// needs no extends:.
+// the overlay is the exception to the §4.6 collision rule.
 func TestHarness_MCPOverlayOverridesRegistry(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{

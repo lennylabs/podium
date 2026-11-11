@@ -47,8 +47,8 @@ func makeOverlayWithBody(t *testing.T, dir, body string) string {
 
 // Spec: §6.4 — workspace overlay sits at the highest precedence and
 // replaces the registry's contribution at the same canonical ID. The overlay
-// is the §6.4 exception to the §4.6 collision rule, so the replacement needs
-// no extends: and reports no drop.
+// is the §6.4 exception to the §4.6 collision rule, so the replacement reports
+// no drop.
 func TestRun_OverlayOverridesRegistry(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

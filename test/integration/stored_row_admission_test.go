@@ -159,17 +159,12 @@ func admEnvManifest(ver, extra string) []byte {
 	return []byte("---\ntype: context\nversion: " + ver + "\ndescription: admission fixture\n" + extra + "---\n\nbody " + ver + "\n")
 }
 
-// row is a sealed row whose manifest declares extends (empty for none) and
-// whose stored pin is pin, signed by signer when it is non-nil.
-func (e *admEnv) row(t *testing.T, id, extends, pin string, signer sign.Provider, resources ...store.ResourceRef) store.ManifestRecord {
+// row is a sealed context row, signed by signer when it is non-nil.
+func (e *admEnv) row(t *testing.T, id string, signer sign.Provider, resources ...store.ResourceRef) store.ManifestRecord {
 	t.Helper()
-	extra := ""
-	if extends != "" {
-		extra = "extends: " + extends + "\n"
-	}
 	return storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: id, Version: "1.0.0", Type: "context", Layer: "L",
-		Frontmatter: admEnvManifest("1.0.0", extra), ExtendsPin: pin, Resources: resources,
+		Frontmatter: admEnvManifest("1.0.0", ""), Resources: resources,
 		IngestedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}, e.objects, signer)
 }
@@ -255,19 +250,19 @@ func TestLoadArtifact_InadmissibleRowAnswersItsCode(t *testing.T) {
 		{
 			name: "bytes altered with the hash unchanged",
 			seed: func(t *testing.T, e *admEnv) {
-				e.put(t, e.row(t, "team/c", "", "", e.key))
+				e.put(t, e.row(t, "team/c", e.key))
 				e.exec(t, `UPDATE manifests SET frontmatter = ? WHERE artifact_id = 'team/c'`, admEnvManifest("1.0.0", "sensitivity: low\n"))
 			},
 			code: "materialize.content_hash_mismatch",
 		},
 		{
 			name: "envelope under another key",
-			seed: func(t *testing.T, e *admEnv) { e.put(t, e.row(t, "team/c", "", "", e.other)) },
+			seed: func(t *testing.T, e *admEnv) { e.put(t, e.row(t, "team/c", e.other)) },
 			code: "materialize.signature_invalid",
 		},
 		{
 			name: "no envelope",
-			seed: func(t *testing.T, e *admEnv) { e.put(t, e.row(t, "team/c", "", "", nil)) },
+			seed: func(t *testing.T, e *admEnv) { e.put(t, e.row(t, "team/c", nil)) },
 			code: "materialize.signature_missing",
 		},
 		{
@@ -275,7 +270,7 @@ func TestLoadArtifact_InadmissibleRowAnswersItsCode(t *testing.T) {
 			// pre-framing digest fails the hash first.
 			name: "pre-framing digest with another key's envelope",
 			seed: func(t *testing.T, e *admEnv) {
-				rec := e.row(t, "team/c", "", "", nil)
+				rec := e.row(t, "team/c", nil)
 				sum := sha256.Sum256(rec.Frontmatter)
 				rec.ContentHash = "sha256:" + hex.EncodeToString(sum[:])
 				sig, err := e.other.Sign(context.Background(), rec.ContentHash)
@@ -286,61 +281,6 @@ func TestLoadArtifact_InadmissibleRowAnswersItsCode(t *testing.T) {
 				e.put(t, rec)
 			},
 			code: "materialize.content_hash_mismatch",
-		},
-		{
-			name: "merged child whose parent row is altered",
-			seed: func(t *testing.T, e *admEnv) {
-				e.put(t, e.row(t, "base/parent", "", "", e.key))
-				e.put(t, e.row(t, "team/c", "base/parent@1.0.0", "base/parent@1.0.0", e.key))
-				e.exec(t, `UPDATE manifests SET frontmatter = ? WHERE artifact_id = 'base/parent'`, admEnvManifest("1.0.0", "sensitivity: high\n"))
-			},
-			code:   "materialize.content_hash_mismatch",
-			hidden: []string{"base/parent", "sha256:"},
-		},
-		{
-			name: "child pin cleared",
-			seed: func(t *testing.T, e *admEnv) {
-				e.put(t, e.row(t, "base/parent", "", "", e.key))
-				e.put(t, e.row(t, "team/c", "base/parent@1.0.0", "", e.key))
-			},
-			code: "materialize.content_hash_mismatch",
-		},
-		{
-			name: "child pin redirected to another artifact",
-			seed: func(t *testing.T, e *admEnv) {
-				e.put(t, e.row(t, "base/parent", "", "", e.key))
-				e.put(t, e.row(t, "base/other", "", "", e.key))
-				e.put(t, e.row(t, "team/c", "base/parent@1.0.0", "base/other@1.0.0", e.key))
-			},
-			code:   "materialize.content_hash_mismatch",
-			hidden: []string{"base/other"},
-		},
-		{
-			name: "pin added to a row declaring no extends",
-			seed: func(t *testing.T, e *admEnv) {
-				e.put(t, e.row(t, "base/parent", "", "", e.key))
-				e.put(t, e.row(t, "team/c", "", "base/parent@1.0.0", e.key))
-			},
-			code:   "materialize.content_hash_mismatch",
-			hidden: []string{"base/parent"},
-		},
-		{
-			name: "parent given a pin toward a row the store does not hold",
-			seed: func(t *testing.T, e *admEnv) {
-				e.put(t, e.row(t, "base/parent", "", "ghost/row@1.0.0", e.key))
-				e.put(t, e.row(t, "team/c", "base/parent@1.0.0", "base/parent@1.0.0", e.key))
-			},
-			code:   "materialize.content_hash_mismatch",
-			hidden: []string{"base/parent", "ghost/row"},
-		},
-		{
-			name: "parent given a pin pointed back at the child",
-			seed: func(t *testing.T, e *admEnv) {
-				e.put(t, e.row(t, "base/parent", "", "team/c@1.0.0", e.key))
-				e.put(t, e.row(t, "team/c", "base/parent@1.0.0", "base/parent@1.0.0", e.key))
-			},
-			code:   "materialize.content_hash_mismatch",
-			hidden: []string{"base/parent"},
 		},
 	}
 	for _, tc := range cases {
@@ -434,7 +374,7 @@ func TestLoadArtifact_AdmissionBindsResourceRefs(t *testing.T) {
 func admObjectRow(t *testing.T, e *admEnv) store.ManifestRecord {
 	t.Helper()
 	big := bytes.Repeat([]byte("o"), objectstore.InlineCutoff+8)
-	rec := e.row(t, "ops/r", "", "", nil, store.ResourceRef{Path: "data/big.bin", ContentHash: e.object(t, big)})
+	rec := e.row(t, "ops/r", nil, store.ResourceRef{Path: "data/big.bin", ContentHash: e.object(t, big)})
 	e.put(t, rec)
 	return rec
 }
@@ -495,7 +435,7 @@ func TestLoadArtifact_RevalidationOutsideScopeIsDenied(t *testing.T) {
 		t.Run(scope, func(t *testing.T) {
 			t.Parallel()
 			e := newAdmEnv(t, false)
-			rec := e.row(t, "ops/r", "", "", nil)
+			rec := e.row(t, "ops/r", nil)
 			e.put(t, rec)
 			auth := map[string]string{scopeHeader: scope}
 			fullStatus, fullBody, _ := e.request(t, http.MethodGet, "ops/r", auth)
@@ -523,25 +463,5 @@ func TestLoadArtifact_RevalidationOutsideScopeIsDenied(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// Spec: §13.4 — admission reads the object-held bodies of every row in the
-// extends: chain, so an outage refuses a full load of a child whose own
-// resources are all inline, while a HEAD of it reads nothing.
-func TestLoadArtifact_ChainOutageRefusesInlineChild(t *testing.T) {
-	t.Parallel()
-	e := newAdmEnv(t, false)
-	big := bytes.Repeat([]byte("p"), objectstore.InlineCutoff+8)
-	e.put(t, e.row(t, "base/parent", "", "", nil, store.ResourceRef{Path: "data/parent.bin", ContentHash: e.object(t, big)}))
-	e.put(t, e.row(t, "team/c", "base/parent@1.0.0", "base/parent@1.0.0", nil, store.ResourceRef{Path: "notes.txt", Inline: []byte("child notes")}))
-
-	e.objects.failing.Store(true)
-	status, body, _ := e.request(t, http.MethodGet, "team/c", nil)
-	wantCode(t, status, body, http.StatusInternalServerError, "registry.unavailable", true)
-	e.objects.reads.Store(0)
-	status, _, _ = e.request(t, http.MethodHead, "team/c", nil)
-	if status != http.StatusOK || e.objects.reads.Load() != 0 {
-		t.Errorf("HEAD = %d with %d read(s), want 200 and none", status, e.objects.reads.Load())
 	}
 }

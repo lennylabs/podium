@@ -156,10 +156,10 @@ func TestWalk_CapturesBundledResources(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 — two layers contributing the same canonical artifact ID
-// without extends: are rejected (default Walk behavior).
+// Spec: §4.6 — two layers contributing the same canonical artifact ID are
+// rejected (default Walk behavior).
 // Matrix: §6.10 (ingest.collision)
-func TestWalk_CollisionWithoutExtendsFails(t *testing.T) {
+func TestWalk_CollisionFails(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	testharness.WriteTree(t, root,
@@ -256,8 +256,8 @@ func TestWalk_CollisionExtendsOtherIDStillFails(t *testing.T) {
 	}
 }
 
-// CollisionPolicyHighestWins keeps the highest-precedence record for each ID
-// without checking extends:. The workspace overlay's walk of its own
+// CollisionPolicyHighestWins keeps the highest-precedence record for each ID.
+// The workspace overlay's walk of its own
 // directory (pkg/overlay) uses it; §6.4 defines no multi-layer overlay, so
 // this pins the policy rather than a spec rule.
 func TestWalk_HighestWinsKeepsTopLayer(t *testing.T) {
@@ -453,49 +453,6 @@ func TestWalk_DropPolicy(t *testing.T) {
 					x.Layer.ID, x.Artifact.Description, tc.wantLayer, tc.wantDesc)
 			}
 		})
-	}
-}
-
-// Spec: §4.6 — a record CollisionPolicyDrop drops is also removed from the
-// extends: resolver's input, so a higher layer's extends: merges onto the
-// kept lower copy rather than onto the dropped middle copy.
-//
-// Matrix: §6.10 (ingest.collision)
-func TestWalk_DropPolicyDroppedRecordIsNotAParent(t *testing.T) {
-	t.Parallel()
-	reg := openDropFixture(t, []string{"l1", "l2", "l3"}, map[string]string{
-		"l1/x": dropFixtureArtifact("from-l1", "", "l1-tag"),
-		"l2/x": dropFixtureArtifact("from-l2", "", "l2-tag"),
-		"l3/x": dropFixtureArtifact("from-l3", "x", "l3-tag"),
-	})
-	var drops []layer.Drop
-	got, err := reg.Walk(WalkOptions{
-		CollisionPolicy: CollisionPolicyDrop,
-		ResolveExtends:  true,
-		OnDrop:          func(d layer.Drop) { drops = append(drops, d) },
-	})
-	if err != nil {
-		t.Fatalf("Walk: %v", err)
-	}
-	want := []layer.Drop{{ArtifactID: "x", Code: layer.CollisionCode, Reason: layer.Collision{ArtifactID: "x"}.Reason()}}
-	if !reflect.DeepEqual(drops, want) {
-		t.Errorf("OnDrop calls = %+v, want %+v", drops, want)
-	}
-	if len(got) != 1 {
-		t.Fatalf("got %v, want x only", idsOf(got))
-	}
-	a, err := manifest.ParseArtifact(got[0].ArtifactBytes)
-	if err != nil {
-		t.Fatalf("ParseArtifact(merged): %v", err)
-	}
-	if a.Description != "from-l3" {
-		t.Errorf("Description = %q, want from-l3", a.Description)
-	}
-	if !contains(a.Tags, "l1-tag") || !contains(a.Tags, "l3-tag") || contains(a.Tags, "l2-tag") {
-		t.Errorf("Tags = %v, want the union of l1-tag and l3-tag without l2-tag", a.Tags)
-	}
-	if strings.Contains(string(got[0].ArtifactBytes), "from-l2") {
-		t.Errorf("merged bytes carry the dropped copy's description:\n%s", got[0].ArtifactBytes)
 	}
 }
 
@@ -800,19 +757,6 @@ func toBytes(m map[string]string) map[string][]byte {
 	return out
 }
 
-// Spec: §4.6 — a record with no parsed ARTIFACT.md declares no extends:, so
-// the collision check treats it as an unsanctioned overlay.
-func TestExtendsOf(t *testing.T) {
-	t.Parallel()
-	if got := extendsOf(ArtifactRecord{}); got != "" {
-		t.Errorf("extendsOf(no artifact) = %q, want empty", got)
-	}
-	rec := ArtifactRecord{Artifact: &manifest.Artifact{Extends: "x@1.0.0"}}
-	if got := extendsOf(rec); got != "x@1.0.0" {
-		t.Errorf("extendsOf = %q, want x@1.0.0", got)
-	}
-}
-
 // plainSkill is a SKILL.md with no ARTIFACT.md beside it. metadataVersion,
 // when set, is written as metadata.version.
 func plainSkill(name, desc, metadataVersion string) string {
@@ -863,7 +807,7 @@ func synthesizedDoc(t *testing.T, v string) []byte {
 // Spec: §13.11.3, §4.3.4, §4.6 — a filesystem source reports 0.0.0-auto.0
 // for a skill with no ARTIFACT.md and no usable version, keeps
 // VersionAssigned, takes the description from SKILL.md, and places the
-// synthesized ARTIFACT.md in ArtifactBytes on both Walk paths while
+// synthesized ARTIFACT.md in ArtifactBytes while
 // AuthoredBytes stays nil. A versioned plain skill is synthesized at its
 // metadata.version.
 func TestWalk_PlainSkillAssignsAutoVersionAndSynthesizes(t *testing.T) {
@@ -872,33 +816,31 @@ func TestWalk_PlainSkillAssignsAutoVersionAndSynthesizes(t *testing.T) {
 		testharness.WriteTreeOption{Path: "ops/plain/SKILL.md", Content: plainSkill("plain", "Plain skill.", "")},
 		testharness.WriteTreeOption{Path: "ops/versioned/SKILL.md", Content: plainSkill("versioned", "Versioned skill.", "1.2.3")},
 	)
-	for _, resolve := range []bool{false, true} {
-		recs, err := reg.Walk(WalkOptions{ResolveExtends: resolve})
-		if err != nil {
-			t.Fatalf("Walk(ResolveExtends=%v): %v", resolve, err)
+	recs, err := reg.Walk(WalkOptions{})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	cases := []struct {
+		id, version, desc string
+		assigned          bool
+	}{
+		{"ops/plain", manifest.AutoVersion(0), "Plain skill.", true},
+		{"ops/versioned", "1.2.3", "Versioned skill.", false},
+	}
+	for _, c := range cases {
+		rec := recordByID(t, recs, c.id)
+		if rec.Artifact.Version != c.version || rec.VersionAssigned != c.assigned {
+			t.Errorf("%s: version %q assigned %v, want %q %v",
+				c.id, rec.Artifact.Version, rec.VersionAssigned, c.version, c.assigned)
 		}
-		cases := []struct {
-			id, version, desc string
-			assigned          bool
-		}{
-			{"ops/plain", manifest.AutoVersion(0), "Plain skill.", true},
-			{"ops/versioned", "1.2.3", "Versioned skill.", false},
+		if rec.Artifact.Description != c.desc {
+			t.Errorf("%s: description %q, want %q", c.id, rec.Artifact.Description, c.desc)
 		}
-		for _, c := range cases {
-			rec := recordByID(t, recs, c.id)
-			if rec.Artifact.Version != c.version || rec.VersionAssigned != c.assigned {
-				t.Errorf("ResolveExtends=%v %s: version %q assigned %v, want %q %v",
-					resolve, c.id, rec.Artifact.Version, rec.VersionAssigned, c.version, c.assigned)
-			}
-			if rec.Artifact.Description != c.desc {
-				t.Errorf("ResolveExtends=%v %s: description %q, want %q", resolve, c.id, rec.Artifact.Description, c.desc)
-			}
-			if rec.AuthoredBytes != nil {
-				t.Errorf("ResolveExtends=%v %s: AuthoredBytes = %q, want nil", resolve, c.id, rec.AuthoredBytes)
-			}
-			if want := synthesizedDoc(t, c.version); string(rec.ArtifactBytes) != string(want) {
-				t.Errorf("ResolveExtends=%v %s: ArtifactBytes = %q, want %q", resolve, c.id, rec.ArtifactBytes, want)
-			}
+		if rec.AuthoredBytes != nil {
+			t.Errorf("%s: AuthoredBytes = %q, want nil", c.id, rec.AuthoredBytes)
+		}
+		if want := synthesizedDoc(t, c.version); string(rec.ArtifactBytes) != string(want) {
+			t.Errorf("%s: ArtifactBytes = %q, want %q", c.id, rec.ArtifactBytes, want)
 		}
 	}
 }
@@ -913,7 +855,7 @@ func TestWalk_BothFilesSkillWithoutVersionGetsAutoVersion(t *testing.T) {
 		testharness.WriteTreeOption{Path: "ops/both/ARTIFACT.md", Content: authored},
 		testharness.WriteTreeOption{Path: "ops/both/SKILL.md", Content: plainSkill("both", "Skill description.", "1.0")},
 	)
-	recs, err := reg.Walk(WalkOptions{ResolveExtends: true})
+	recs, err := reg.Walk(WalkOptions{})
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -942,7 +884,7 @@ func TestWalk_PlainSkillChangeAndRevertKeepsAutoVersion(t *testing.T) {
 		if err := os.WriteFile(skillPath, []byte(content), 0o644); err != nil {
 			t.Fatalf("write SKILL.md: %v", err)
 		}
-		recs, err := reg.Walk(WalkOptions{ResolveExtends: true})
+		recs, err := reg.Walk(WalkOptions{})
 		if err != nil {
 			t.Fatalf("walk %d: %v", i, err)
 		}
@@ -953,36 +895,6 @@ func TestWalk_PlainSkillChangeAndRevertKeepsAutoVersion(t *testing.T) {
 		want := version.CanonicalContentHash(nil, []byte(content), nil)
 		if got := version.CanonicalContentHash(rec.AuthoredBytes, rec.SkillBytes, rec.Resources); got != want {
 			t.Errorf("walk %d: content hash %s, want %s", i, got, want)
-		}
-	}
-}
-
-// Spec: §13.11.3, §4.6 — an extends: child whose ARTIFACT.md overlay sets
-// no description receives its plain-skill parent's SKILL.md description in
-// the merged document, whether the parent declares a version or not, as the
-// server merges the description it admits from the parent's SKILL.md.
-func TestWalk_ExtendsChildInheritsPlainSkillParentDescription(t *testing.T) {
-	t.Parallel()
-	for _, parentVersion := range []string{"", "1.0.0"} {
-		_, reg := openTree(t,
-			testharness.WriteTreeOption{Path: "ops/base/SKILL.md", Content: plainSkill("base", "Parent description.", parentVersion)},
-			testharness.WriteTreeOption{Path: "ops/child/ARTIFACT.md", Content: "---\ntype: skill\nversion: 2.0.0\nextends: ops/base\n---\n"},
-			testharness.WriteTreeOption{Path: "ops/child/SKILL.md", Content: plainSkill("child", "Child skill.", "")},
-		)
-		recs, err := reg.Walk(WalkOptions{ResolveExtends: true})
-		if err != nil {
-			t.Fatalf("parent version %q: Walk: %v", parentVersion, err)
-		}
-		child := recordByID(t, recs, "ops/child")
-		if child.Artifact.Description != "Parent description." {
-			t.Errorf("parent version %q: merged description %q, want the parent's SKILL.md description",
-				parentVersion, child.Artifact.Description)
-		}
-		if !strings.Contains(string(child.ArtifactBytes), "description: Parent description.") {
-			t.Errorf("parent version %q: merged ArtifactBytes %q lack the parent description", parentVersion, child.ArtifactBytes)
-		}
-		if child.Artifact.Version != "2.0.0" {
-			t.Errorf("parent version %q: child version %q, want 2.0.0", parentVersion, child.Artifact.Version)
 		}
 	}
 }

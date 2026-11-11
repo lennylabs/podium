@@ -1163,12 +1163,12 @@ func TestPluginSPI_BatchLoadOver50(t *testing.T) {
 	t.Logf("batch >50: HTTP %d body=%s", st, body)
 }
 
-// Dependents endpoint: dependents_of returns artifacts that extend a given artifact.
-func TestPluginSPI_DependentsOfExtends(t *testing.T) {
+// Dependents endpoint: dependents_of returns artifacts that delegate to a given artifact.
+func TestPluginSPI_DependentsOfDelegatesTo(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md":     "---\ntype: context\nversion: 1.2.0\ndescription: Pay invoice.\n---\n\npay invoice body\n",
-		"finance/ap/pay-invoice-ext/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Extended pay invoice.\nextends: finance/ap/pay-invoice@1.2.0\n---\n\nextended body\n",
+		"finance/ap/pay-invoice/ARTIFACT.md":      "---\ntype: agent\nversion: 1.2.0\ndescription: Pay invoice.\n---\n\npay invoice body\n",
+		"finance/ap/pay-invoice-lead/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Pay invoice lead.\ndelegates_to: [finance/ap/pay-invoice]\n---\n\nlead body\n",
 	})
 	srv := startServer(t, reg)
 
@@ -1183,7 +1183,7 @@ func TestPluginSPI_DependentsOfExtends(t *testing.T) {
 	if err := json.Unmarshal(body, &resp); err != nil {
 		t.Fatalf("unmarshal dependents: %v\nbody=%s", err, body)
 	}
-	// edges may be empty if extends edge is not registered; assert 200 + array shape
+	// assert 200 + array shape; edges may be empty for the versioned query id
 	if resp.Edges == nil {
 		// ensure the key exists even if empty
 		var raw map[string]any

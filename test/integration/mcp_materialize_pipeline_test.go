@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/version"
 )
 
@@ -154,18 +155,24 @@ func TestPodiumMCP_SkillTamperedSkillRawRejected(t *testing.T) {
 	}
 }
 
-// Spec: §6.6 step 2 / §4.7.10 — end to end: a merged manifest's delivery
-// record frames the served merged frontmatter, so a consistent merged manifest
-// materializes that ARTIFACT.md and the same record with one merged byte
-// altered is rejected before any write.
-func TestPodiumMCP_MergedManifestDeliveryHashVerifies(t *testing.T) {
+// Spec: §6.6 step 2 / §4.7.10 — end to end: a skill with no ARTIFACT.md is
+// served the §4.3.4 synthesized document while its content hash frames a
+// zero-length ARTIFACT.md. Its delivery record frames the served synthesized
+// frontmatter, so the consistent record materializes the skill (its SKILL.md,
+// and no synthesized ARTIFACT.md, which the none adapter omits per §6.7) and
+// the same record with one served byte altered is rejected before any write.
+func TestPodiumMCP_SynthesizedSkillDeliveryHashVerifies(t *testing.T) {
 	t.Parallel()
-	raw := "---\ntype: context\nextends: shared/parent@1.x\n---\nbody"
-	served := "---\ntype: context\n---\nbody" // re-serialized, parent stripped
+	skillRaw := "---\nname: x\ndescription: a plain skill\n---\nskill prose\n"
+	synthesized, err := manifest.SynthesizedSkillDocument("1.0.0")
+	if err != nil {
+		t.Fatalf("SynthesizedSkillDocument: %v", err)
+	}
+	served := string(synthesized)
 	fields := testharness.SealDelivery(map[string]any{
-		"id": "team/x", "version": "1.0.0", "type": "context",
-		"content_hash": "sha256:" + version.CanonicalContentHash([]byte(raw), nil, nil),
-		"frontmatter":  served,
+		"id": "team/x", "version": "1.0.0", "type": "skill",
+		"content_hash": "sha256:" + version.CanonicalContentHash(nil, []byte(skillRaw), nil),
+		"frontmatter":  served, "skill_raw": skillRaw, "manifest_body": "skill prose\n",
 	})
 	serve := func(frontmatter string) string {
 		reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -188,10 +195,14 @@ func TestPodiumMCP_MergedManifestDeliveryHashVerifies(t *testing.T) {
 	target := t.TempDir()
 	resp := runMCPLoad(t, serve(served), target, "team/x")
 	if resp.Result.StructuredContent.Error != "" {
-		t.Fatalf("valid merged manifest load failed: %s", resp.Result.StructuredContent.Error)
+		t.Fatalf("valid synthesized-skill load failed: %s", resp.Result.StructuredContent.Error)
 	}
-	if files := testharness.ReadTree(t, target); files["team/x/ARTIFACT.md"] != served {
-		t.Errorf("merged ARTIFACT.md not materialized; tree: %v", keysOf(files))
+	files := testharness.ReadTree(t, target)
+	if files["team/x/SKILL.md"] != skillRaw {
+		t.Errorf("SKILL.md not materialized verbatim; tree: %v", keysOf(files))
+	}
+	if _, ok := files["team/x/ARTIFACT.md"]; ok {
+		t.Errorf("the synthesized ARTIFACT.md was materialized; tree: %v", keysOf(files))
 	}
 
 	tamperedTarget := t.TempDir()
@@ -200,7 +211,7 @@ func TestPodiumMCP_MergedManifestDeliveryHashVerifies(t *testing.T) {
 		t.Errorf("error = %q, want materialize.content_hash_mismatch", resp.Result.StructuredContent.Error)
 	}
 	if files := testharness.ReadTree(t, tamperedTarget); len(files) != 0 {
-		t.Errorf("tampered merged manifest was materialized: %v", keysOf(files))
+		t.Errorf("tampered synthesized document was materialized: %v", keysOf(files))
 	}
 }
 

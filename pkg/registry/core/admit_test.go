@@ -425,7 +425,7 @@ func TestAdmit_RefusesAndAdmitsStoredRows(t *testing.T) {
 		}
 	})
 
-	t.Run("empty frontmatter with an empty pin serves its stored fields", func(t *testing.T) {
+	t.Run("empty frontmatter serves its stored fields", func(t *testing.T) {
 		t.Parallel()
 		f := newAdmFixture(t)
 		rec := storetest.Seal(t, store.ManifestRecord{
@@ -440,12 +440,6 @@ func TestAdmit_RefusesAndAdmitsStoredRows(t *testing.T) {
 		if res.Sensitivity != "high" || res.ReplacedBy != "ops/next" || res.ManifestBody != "stored body" {
 			t.Errorf("served %q %q %q, want the stored values", res.Sensitivity, res.ReplacedBy, res.ManifestBody)
 		}
-		pinned := rec
-		pinned.ArtifactID = "ops/bare-pinned"
-		pinned.ExtendsPin = "ops/bare@1.0.0"
-		f.put(t, pinned)
-		_, err = admLoad(f.registry(f.key), "ops/bare-pinned")
-		wantRefused(t, err, core.ErrContentHashMismatch, "ops/bare-pinned")
 	})
 }
 
@@ -458,167 +452,14 @@ func (f *admFixture) registryWithFaults(signer sign.Provider) *core.Registry {
 		WithAudit(f.events.emit)
 }
 
-// admChainRow is a sealed, signed row whose manifest declares extends (empty
-// for none) and whose stored pin is pin.
-func (f *admFixture) admChainRow(t *testing.T, id, ver, extends, pin, extra string, signer sign.Provider) store.ManifestRecord {
+// admPlainRow is a sealed, signed context row whose manifest carries extra
+// beside its type and version.
+func (f *admFixture) admPlainRow(t *testing.T, id, ver, extra string, signer sign.Provider) store.ManifestRecord {
 	t.Helper()
-	if extends != "" {
-		extra += "extends: " + extends + "\n"
-	}
 	return storetest.Seal(t, store.ManifestRecord{
 		TenantID: admTenant, ArtifactID: id, Version: ver, Layer: "L", Type: "context",
-		Frontmatter: admManifest(ver, extra), ExtendsPin: pin,
+		Frontmatter: admManifest(ver, extra),
 	}, nil, signer)
-}
-
-// Spec: §13.4 — admission checks each row's pin against the extends: its
-// admitted bytes declare, admits each chain row before it follows that row's
-// pin, compares a content-hash reference after the parent is admitted, and
-// names only the requested artifact in every error.
-func TestAdmit_ChainRefusesTamperedPinsAndRows(t *testing.T) {
-	t.Parallel()
-
-	type chainCase struct {
-		name     string
-		seed     func(t *testing.T, f *admFixture)
-		sentinel error
-	}
-	parent := func(t *testing.T, f *admFixture) store.ManifestRecord {
-		p := f.admChainRow(t, "base/p", "1.0.0", "", "", "sensitivity: low\n", f.key)
-		f.put(t, p)
-		return p
-	}
-	cases := []chainCase{
-		{
-			name: "parent bytes altered with its hash unchanged",
-			seed: func(t *testing.T, f *admFixture) {
-				p := f.admChainRow(t, "base/p", "1.0.0", "", "", "", f.key)
-				p.Frontmatter = admManifest("1.0.0", "sensitivity: high\n")
-				f.put(t, p)
-				f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@1.0.0", "base/p@1.0.0", "", f.key))
-			},
-			sentinel: core.ErrContentHashMismatch,
-		},
-		{
-			name: "parent envelope under another key",
-			seed: func(t *testing.T, f *admFixture) {
-				f.put(t, f.admChainRow(t, "base/p", "1.0.0", "", "", "", f.other))
-				f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@1.0.0", "base/p@1.0.0", "", f.key))
-			},
-			sentinel: core.ErrStoredSignatureInvalid,
-		},
-		{
-			name: "pin cleared on a child declaring extends",
-			seed: func(t *testing.T, f *admFixture) {
-				parent(t, f)
-				f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@1.0.0", "", "", f.key))
-			},
-			sentinel: core.ErrContentHashMismatch,
-		},
-		{
-			name: "pin added to a row declaring none",
-			seed: func(t *testing.T, f *admFixture) {
-				parent(t, f)
-				f.put(t, f.admChainRow(t, "team/c", "1.0.0", "", "base/p@1.0.0", "", f.key))
-			},
-			sentinel: core.ErrContentHashMismatch,
-		},
-		{
-			name: "pin pointed at another artifact",
-			seed: func(t *testing.T, f *admFixture) {
-				parent(t, f)
-				f.put(t, f.admChainRow(t, "base/q", "1.0.0", "", "", "", f.key))
-				f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@1.0.0", "base/q@1.0.0", "", f.key))
-			},
-			sentinel: core.ErrContentHashMismatch,
-		},
-		{
-			name: "pin outside a declared exact reference",
-			seed: func(t *testing.T, f *admFixture) {
-				parent(t, f)
-				f.put(t, f.admChainRow(t, "base/p", "2.0.0", "", "", "", f.key))
-				f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@1.0.0", "base/p@2.0.0", "", f.key))
-			},
-			sentinel: core.ErrContentHashMismatch,
-		},
-		{
-			name: "pin at a parent version whose hash the content-hash reference does not name",
-			seed: func(t *testing.T, f *admFixture) {
-				p := parent(t, f)
-				f.put(t, f.admChainRow(t, "base/p", "2.0.0", "", "", "", f.key))
-				f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@"+p.ContentHash, "base/p@2.0.0", "", f.key))
-			},
-			sentinel: core.ErrContentHashMismatch,
-		},
-		{
-			// Check (4) runs after the child's own signature check (3), so a
-			// child failing both carries the signature code.
-			name: "content-hash reference mismatch under a wrong-key child envelope",
-			seed: func(t *testing.T, f *admFixture) {
-				p := parent(t, f)
-				f.put(t, f.admChainRow(t, "base/p", "2.0.0", "", "", "", f.key))
-				f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@"+p.ContentHash, "base/p@2.0.0", "", f.other))
-			},
-			sentinel: core.ErrStoredSignatureInvalid,
-		},
-		{
-			name: "root given a pin toward a row the store does not hold",
-			seed: func(t *testing.T, f *admFixture) {
-				f.put(t, f.admChainRow(t, "base/root", "1.0.0", "", "ghost/row@1.0.0", "", f.key))
-				f.put(t, f.admChainRow(t, "base/mid", "1.0.0", "base/root@1.0.0", "base/root@1.0.0", "", f.key))
-				f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/mid@1.0.0", "base/mid@1.0.0", "", f.key))
-			},
-			sentinel: core.ErrContentHashMismatch,
-		},
-		{
-			name: "root given a pin pointed back at the requested child",
-			seed: func(t *testing.T, f *admFixture) {
-				f.put(t, f.admChainRow(t, "base/root", "1.0.0", "", "team/c@1.0.0", "", f.key))
-				f.put(t, f.admChainRow(t, "base/mid", "1.0.0", "base/root@1.0.0", "base/root@1.0.0", "", f.key))
-				f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/mid@1.0.0", "base/mid@1.0.0", "", f.key))
-			},
-			sentinel: core.ErrContentHashMismatch,
-		},
-		{
-			name: "pin agreeing with an exact reference the store does not hold",
-			seed: func(t *testing.T, f *admFixture) {
-				f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@3.0.0", "base/p@3.0.0", "", f.key))
-			},
-			sentinel: core.ErrNotFound,
-		},
-		{
-			name: "two rows declaring each other with agreeing pins",
-			seed: func(t *testing.T, f *admFixture) {
-				f.put(t, f.admChainRow(t, "base/p", "1.0.0", "team/c@1.0.0", "team/c@1.0.0", "", f.key))
-				f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@1.0.0", "base/p@1.0.0", "", f.key))
-			},
-			sentinel: core.ErrInvalidArgument,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			f := newAdmFixture(t)
-			tc.seed(t, f)
-			_, err := admLoad(f.registry(f.key), "team/c")
-			wantRefused(t, err, tc.sentinel, "team/c")
-		})
-	}
-
-	t.Run("pin at another version a minor reference accepts merges that version", func(t *testing.T) {
-		t.Parallel()
-		f := newAdmFixture(t)
-		f.put(t, f.admChainRow(t, "base/p", "1.0.0", "", "", "sensitivity: high\n", f.key))
-		f.put(t, f.admChainRow(t, "base/p", "1.0.1", "", "", "sensitivity: low\n", f.key))
-		f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@1.0.x", "base/p@1.0.0", "sensitivity: low\n", f.key))
-		res, err := admLoad(f.registry(f.key), "team/c")
-		if err != nil {
-			t.Fatalf("LoadArtifact: %v", err)
-		}
-		if res.Sensitivity != "high" {
-			t.Errorf("Sensitivity = %q; want the merge over base/p@1.0.0 (high)", res.Sensitivity)
-		}
-	})
 }
 
 // admDispositions is CODE-14's column table: the disposition of every field of
@@ -632,7 +473,6 @@ var admDispositions = map[string]string{
 	"ManifestRecord.ContentHash":      "checked",
 	"ResourceRef.ContentHash":         "checked",
 	"ResourceRef.Size":                "checked",
-	"ManifestRecord.ExtendsPin":       "checked",
 	"ManifestRecord.Signature":        "checked",
 	"ManifestRecord.Body":             "derived",
 	"ManifestRecord.Type":             "derived",
@@ -689,7 +529,7 @@ func TestAdmit_EveryRecordFieldIsDisposed(t *testing.T) {
 func TestLoadArtifact_ReadEventRedactsDerivedKeys(t *testing.T) {
 	t.Parallel()
 	f := newAdmFixture(t)
-	f.put(t, f.admChainRow(t, "ops/pii", "1.0.0", "", "", "ssn: 123-45-6789\naudit_redact: [ssn]\n", nil))
+	f.put(t, f.admPlainRow(t, "ops/pii", "1.0.0", "ssn: 123-45-6789\naudit_redact: [ssn]\n", nil))
 	if _, err := admLoad(f.registry(nil), "ops/pii"); err != nil {
 		t.Fatalf("LoadArtifact: %v", err)
 	}
@@ -703,7 +543,7 @@ func TestLoadArtifact_ReadEventRedactsDerivedKeys(t *testing.T) {
 func revalidateAll(*core.LoadArtifactResult) bool { return true }
 
 // Spec: §8.2, §13.4 — a revalidation answered without admission records the
-// key set a full load would, folded child-wins over the extends: chain.
+// key set a full load would: the row's own directive.
 func TestLoadArtifact_RevalidatedReadEventRedactsKeys(t *testing.T) {
 	t.Parallel()
 	revalidate := func(t *testing.T, reg *core.Registry, id string) (*core.LoadArtifactResult, error) {
@@ -714,24 +554,9 @@ func TestLoadArtifact_RevalidatedReadEventRedactsKeys(t *testing.T) {
 	t.Run("own directive", func(t *testing.T) {
 		t.Parallel()
 		f := newAdmFixture(t)
-		f.put(t, f.admChainRow(t, "ops/r", "1.0.0", "", "", "audit_redact: [version]\n", nil))
+		f.put(t, f.admPlainRow(t, "ops/r", "1.0.0", "audit_redact: [version]\n", nil))
 		if _, err := revalidate(t, f.registry(nil), "ops/r"); err != nil {
 			t.Fatalf("LoadArtifact: %v", err)
-		}
-		assertRedactsVersion(t, f)
-	})
-
-	t.Run("inherited directive", func(t *testing.T) {
-		t.Parallel()
-		f := newAdmFixture(t)
-		f.put(t, f.admChainRow(t, "base/p", "1.0.0", "", "", "audit_redact: [version]\n", nil))
-		f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@1.0.0", "base/p@1.0.0", "", nil))
-		res, err := revalidate(t, f.registry(nil), "team/c")
-		if err != nil {
-			t.Fatalf("LoadArtifact: %v", err)
-		}
-		if res.ManifestBody != "" || res.Frontmatter != nil || res.ContentHash == "" {
-			t.Errorf("revalidation result carries content or no validator: %+v", res)
 		}
 		assertRedactsVersion(t, f)
 	})
@@ -750,39 +575,43 @@ func TestLoadArtifact_RevalidatedReadEventRedactsKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("unresolvable chain names only the requested ID", func(t *testing.T) {
+	t.Run("unparseable manifest records its stored column", func(t *testing.T) {
 		t.Parallel()
 		f := newAdmFixture(t)
-		f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@3.0.0", "base/p@3.0.0", "", nil))
-		_, err := revalidate(t, f.registry(nil), "team/c")
-		wantRefused(t, err, core.ErrNotFound, "team/c")
+		f.put(t, storetest.Seal(t, store.ManifestRecord{
+			TenantID: admTenant, ArtifactID: "ops/broken", Version: "1.0.0", Layer: "L", Type: "context",
+			Frontmatter: []byte("---\ntype: [unclosed\n---\n\nbody\n"),
+			AuditRedact: []string{"version"},
+		}, nil, nil))
+		if _, err := revalidate(t, f.registry(nil), "ops/broken"); err != nil {
+			t.Fatalf("LoadArtifact: %v", err)
+		}
+		assertRedactsVersion(t, f)
 	})
 }
 
-// Spec: §8.2, §13.4 — a chain root whose manifest is empty is served
-// with its stored audit_redact, deprecated, and replaced_by, so a full load and
-// a revalidation of a child that declares none record the same key set.
-func TestLoadArtifact_EmptyRootKeepsStoredFieldsInChain(t *testing.T) {
+// Spec: §8.2, §13.4 — a row whose manifest is empty is served with its stored
+// audit_redact, deprecated, and replaced_by, so a full load and a revalidation
+// of it record the same key set.
+func TestLoadArtifact_EmptyManifestKeepsStoredFields(t *testing.T) {
 	t.Parallel()
 	f := newAdmFixture(t)
-	root := storetest.Seal(t, store.ManifestRecord{
+	f.put(t, storetest.Seal(t, store.ManifestRecord{
 		TenantID: admTenant, ArtifactID: "base/p", Version: "1.0.0", Layer: "L", Type: "context",
 		Frontmatter: nil,
 		AuditRedact: []string{"version"}, Deprecated: true, ReplacedBy: "base/q",
-	}, nil, nil)
-	f.put(t, root)
-	f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@1.0.0", "base/p@1.0.0", "", nil))
+	}, nil, nil))
 	reg := f.registry(nil)
 
-	res, err := admLoad(reg, "team/c")
+	res, err := admLoadVersion(reg, "base/p", "1.0.0")
 	if err != nil {
 		t.Fatalf("full LoadArtifact: %v", err)
 	}
 	if !res.Deprecated || res.ReplacedBy != "base/q" {
-		t.Errorf("full load deprecated=%v replaced_by=%q, want the root's stored true and base/q", res.Deprecated, res.ReplacedBy)
+		t.Errorf("full load deprecated=%v replaced_by=%q, want the stored true and base/q", res.Deprecated, res.ReplacedBy)
 	}
-	if _, err := reg.LoadArtifact(context.Background(), layer.Identity{IsPublic: true}, "team/c",
-		core.LoadArtifactOptions{Revalidate: revalidateAll}); err != nil {
+	if _, err := reg.LoadArtifact(context.Background(), layer.Identity{IsPublic: true}, "base/p",
+		core.LoadArtifactOptions{Version: "1.0.0", Revalidate: revalidateAll}); err != nil {
 		t.Fatalf("revalidated LoadArtifact: %v", err)
 	}
 	ev := f.events.ofType("artifact.loaded")
@@ -815,7 +644,7 @@ func TestLoadArtifact_RevalidationKeepsLoadScope(t *testing.T) {
 		t.Run(scope, func(t *testing.T) {
 			t.Parallel()
 			f := newAdmFixture(t)
-			f.put(t, f.admChainRow(t, "ops/r", "1.0.0", "", "", "", nil))
+			f.put(t, f.admPlainRow(t, "ops/r", "1.0.0", "", nil))
 			id := layer.Identity{Sub: "alice", IsAuthenticated: true, Scopes: []string{scope}}
 			_, err := f.registry(nil).LoadArtifact(context.Background(), id, "ops/r", core.LoadArtifactOptions{Revalidate: revalidateAll})
 			if !errors.Is(err, core.ErrNotFound) {
@@ -908,39 +737,6 @@ func TestAdmit_PlainSkillRowServesItsAdmittedSkill(t *testing.T) {
 	ev := f.events.ofType("artifact.loaded")
 	if len(ev) != 1 || len(ev[0].RedactKeys) != 0 {
 		t.Errorf("read event = %+v, want no audit_redact keys", ev)
-	}
-}
-
-// Spec: §13.4, §4.6 — the §4.6 merge for an extends: child of a plain-skill
-// row takes the parent's admitted description and no tags, so a rewritten
-// Description or Tags column of the parent never reaches the child's served
-// and attested merged document.
-func TestAdmit_PlainSkillParentColumnsDoNotReachTheMerge(t *testing.T) {
-	t.Parallel()
-	f := newAdmFixture(t)
-	f.put(t, admTamperedPlainSkill(t, "ops/plain", admPlainSkillMD))
-	f.put(t, storetest.Seal(t, store.ManifestRecord{
-		TenantID: admTenant, ArtifactID: "team/child", Version: "2.0.0", Layer: "L", Type: "skill",
-		Frontmatter: []byte("---\ntype: skill\nversion: 2.0.0\nextends: ops/plain@1.0.0\n---\n"),
-		SkillRaw:    []byte("---\nname: child\ndescription: d\n---\n\nchild prose\n"),
-		ExtendsPin:  "ops/plain@1.0.0",
-	}, nil, nil))
-	res, err := admLoadVersion(f.registry(nil), "team/child", "2.0.0")
-	if err != nil {
-		t.Fatalf("LoadArtifact: %v", err)
-	}
-	a, err := manifest.ParseArtifact(res.Frontmatter)
-	if err != nil {
-		t.Fatalf("ParseArtifact(merged): %v\n%s", err, res.Frontmatter)
-	}
-	if a.Description != "The admitted description." {
-		t.Errorf("merged description = %q, want the parent's SKILL.md description", a.Description)
-	}
-	if len(a.Tags) != 0 || bytes.Contains(res.Frontmatter, []byte("injected")) {
-		t.Errorf("merged document carries an injected column:\n%s", res.Frontmatter)
-	}
-	if res.Sensitivity != "" || res.Deprecated {
-		t.Errorf("sensitivity=%q deprecated=%v, want the parent's admitted empty values", res.Sensitivity, res.Deprecated)
 	}
 }
 

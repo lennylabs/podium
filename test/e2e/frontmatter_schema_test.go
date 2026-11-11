@@ -3,9 +3,9 @@ package e2e
 // End-to-end tests for docs/authoring/frontmatter-reference.md (D-frontmatter).
 // Covers the SKILL.md/ARTIFACT.md field split, universal fields, lint
 // enforcement, caller-interpreted fields (stored verbatim and surfaced in the
-// load_artifact frontmatter), type-specific fields, provenance rewriting, and
-// the cross-layer merge table. Tests drive the podium CLI, the standalone
-// server, and the podium-mcp bridge. Behaviors blocked by a known implementation-gap
+// load_artifact frontmatter), type-specific fields, and provenance rewriting.
+// Tests drive the podium CLI, the standalone server, and the podium-mcp
+// bridge. Behaviors blocked by a known implementation-gap
 // finding are recorded as skips; doc claims that the implementation does not
 // honor (with no finding filed) are asserted against actual behavior with a
 // note so a future change is detected.
@@ -610,20 +610,6 @@ func TestFrontmatter_McpServerScaffold(t *testing.T) {
 	}
 }
 
-// scaffold --extends writes the extends field.
-func TestFrontmatter_ScaffoldExtends(t *testing.T) {
-	t.Parallel()
-	out := filepath.Join(t.TempDir(), "finance/ap/pay-invoice-extended")
-	sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "Extended pay agent.",
-		"--extends", "finance/ap/pay-invoice@1.2", "--yes", out)
-	if sc.Exit != 0 {
-		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
-	}
-	if art := readFile(t, filepath.Join(out, "ARTIFACT.md")); !strings.Contains(art, "extends: finance/ap/pay-invoice@1.2") {
-		t.Errorf("ARTIFACT.md missing extends:\n%s", art)
-	}
-}
-
 // an artifact carrying target_harnesses lints cleanly.
 func TestFrontmatter_TargetHarnessesLintsClean(t *testing.T) {
 	t.Parallel()
@@ -742,86 +728,6 @@ func TestFrontmatter_ProvenancePassthrough(t *testing.T) {
 	}
 	if !strings.Contains(got, "Plain authored prose with no imported blocks.") {
 		t.Errorf("authored prose missing:\n%s", got)
-	}
-}
-
-// Cross-layer merge: a higher-precedence team-foo
-// child declares extends: at the same canonical ID as the org-defaults parent,
-// is accepted as an overlay (§4.6 extends exception), and the field-semantics
-// table merges into the served frontmatter. The two-layer boot helpers live in
-// docs_extends_test.go (same package).
-
-// child description wins over parent description.
-func TestFrontmatter_MergeChildDescriptionWins(t *testing.T) {
-	t.Parallel()
-	parent := "---\ntype: context\nversion: 1.0.0\ndescription: PARENT description\n---\n\nbody\n"
-	child := "---\ntype: context\nversion: 2.0.0\ndescription: CHILD description\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
-	fm := exLoad(t, extendsBoot(t, parent, child, nil), exParentID).Frontmatter
-	if !strings.Contains(fm, "CHILD description") || strings.Contains(fm, "PARENT description") {
-		t.Errorf("description should be the child's only:\n%s", fm)
-	}
-}
-
-// tags are unioned across parent and child.
-func TestFrontmatter_MergeTagsUnion(t *testing.T) {
-	t.Parallel()
-	parent := "---\ntype: context\nversion: 1.0.0\ndescription: p\ntags: [parent-tag, shared]\n---\n\nbody\n"
-	child := "---\ntype: context\nversion: 2.0.0\ndescription: c\ntags: [child-tag, shared]\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
-	fm := exLoad(t, extendsBoot(t, parent, child, nil), exParentID).Frontmatter
-	for _, tag := range []string{"parent-tag", "child-tag", "shared"} {
-		if !strings.Contains(fm, tag) {
-			t.Errorf("merged tags missing %q:\n%s", tag, fm)
-		}
-	}
-}
-
-// sensitivity takes the most-restrictive value.
-func TestFrontmatter_MergeSensitivityMostRestrictive(t *testing.T) {
-	t.Parallel()
-	parent := "---\ntype: context\nversion: 1.0.0\ndescription: p\nsensitivity: high\n---\n\nbody\n"
-	child := "---\ntype: context\nversion: 2.0.0\ndescription: c\nsensitivity: low\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
-	if got := exLoad(t, extendsBoot(t, parent, child, nil), exParentID); got.Sensitivity != "high" {
-		t.Errorf("sensitivity = %q, want high (most-restrictive)", got.Sensitivity)
-	}
-}
-
-// search_visibility takes the most-restrictive value.
-func TestFrontmatter_MergeSearchVisibilityMostRestrictive(t *testing.T) {
-	t.Parallel()
-	parent := "---\ntype: context\nversion: 1.0.0\ndescription: p\nsearch_visibility: direct-only\n---\n\nbody\n"
-	child := "---\ntype: context\nversion: 2.0.0\ndescription: c\nsearch_visibility: indexed\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
-	fm := exLoad(t, extendsBoot(t, parent, child, nil), exParentID).Frontmatter
-	if !strings.Contains(fm, "direct-only") {
-		t.Errorf("search_visibility should stay direct-only (most-restrictive):\n%s", fm)
-	}
-}
-
-// the child type must match the parent type.
-func TestFrontmatter_MergeTypeMustMatch(t *testing.T) {
-	t.Parallel()
-	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent agent\n---\n\nbody\n"
-	child := "---\ntype: context\nversion: 2.0.0\ndescription: child context\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
-	srv := extendsBoot(t, parent, child, nil)
-	got := exLoad(t, srv, exParentID)
-	if got.Type != "agent" || got.Version != "1.0.0" {
-		t.Errorf("got type=%q version=%q, want the agent parent (cross-type child rejected)", got.Type, got.Version)
-	}
-}
-
-// a self-referencing extends is rejected at ingest (cycle
-// detection); the artifact is dropped and a sibling keeps boot alive.
-func TestFrontmatter_ExtendsCycleDetected(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"finance/sibling/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: sibling keeps boot alive\n---\n\nbody\n",
-		"finance/self/ARTIFACT.md":    "---\ntype: context\nversion: 1.0.0\ndescription: self\nextends: finance/self@1.x\n---\n\nbody\n",
-	})
-	srv := startServer(t, reg)
-	if st := getStatus(t, srv.BaseURL+"/v1/load_artifact?id=finance/sibling"); st != 200 {
-		t.Fatalf("sibling = HTTP %d, want 200", st)
-	}
-	if st := getStatus(t, srv.BaseURL+"/v1/load_artifact?id=finance/self"); st != 404 {
-		t.Errorf("self-extends artifact = HTTP %d, want 404 (cycle rejected at ingest)", st)
 	}
 }
 

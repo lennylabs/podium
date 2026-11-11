@@ -888,14 +888,15 @@ func TestReadme_DomainAnalyzePositional(t *testing.T) {
 	}
 }
 
-// impact lists dependents. A child extends a parent, so the
-// reverse-dependency index records the edge and `podium impact` reports it.
+// impact lists dependents. An agent delegates to a parent, so the
+// reverse-dependency index records the delegates_to edge and `podium impact`
+// reports it.
 func TestReadme_Impact(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":               "multi_layer: true\nlayer_order:\n  - org\n  - team\n",
 		"org/shared/parent/ARTIFACT.md":  "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nbody\n",
-		"team/finance/child/ARTIFACT.md": "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: shared/parent@1.x\n---\n\nbody\n",
+		"team/finance/child/ARTIFACT.md": "---\ntype: agent\nversion: 2.0.0\ndescription: child\ndelegates_to: [shared/parent]\n---\n\nbody\n",
 	})
 	srv := startServer(t, reg)
 	res := runPodium(t, "", nil, "impact", "--registry", srv.BaseURL, "shared/parent")
@@ -903,7 +904,7 @@ func TestReadme_Impact(t *testing.T) {
 		t.Fatalf("impact exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
 	if !strings.Contains(res.Stdout, "finance/child") {
-		t.Errorf("impact should list the extends dependent finance/child:\n%s", res.Stdout)
+		t.Errorf("impact should list the delegates_to dependent finance/child:\n%s", res.Stdout)
 	}
 }
 

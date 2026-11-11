@@ -3,9 +3,7 @@ package e2e
 // End-to-end artifact and deployment lifecycle journeys.
 //
 // These tests drive the lifecycle behaviors the registry promises across a
-// version's life: a child that pins an extends parent keeps resolving the
-// pinned version when a newer parent ships and re-resolves only on its own
-// reingest; a deprecated version with replaced_by drops out of search while an
+// version's life: a deprecated version with replaced_by drops out of search while an
 // explicit load still serves it with the upgrade target named; an in-place
 // SQLite schema upgrade preserves ingested artifacts and runs idempotently; and
 // a force-push that rewrites a registered git layer's history is tolerated
@@ -17,9 +15,7 @@ package e2e
 // (git_source_journey_test.go) for the force-push journey, and the store schema
 // migration path (pkg/store) for the in-place upgrade.
 //
-// Spec: §4.6 (extends field-semantics: when_to_use append, most-restrictive
-// sensitivity; the pin is resolved at the child's ingest time and re-resolved
-// only on the child's reingest), §4.7.4 / §4.7.6 (deprecation excludes from
+// Spec: §4.7.4 / §4.7.6 (deprecation excludes from
 // search, latest skips a deprecated version, an explicit version still loads
 // with the deprecation warning and replaced_by upgrade target), §13.4
 // (additive forward migration in place; a binary upgrade migrates an existing
@@ -44,125 +40,6 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 	podiumversion "github.com/lennylabs/podium/pkg/version"
 )
-
-// ---- extends parent-pin stability and reingest re-resolution --
-
-// TestLifecycle_ExtendsPinStabilityAndReingest drives the full §4.6 pin journey
-// end to end: a parent is ingested at 1.2.0 and a child (a different canonical
-// id, in its own layer) pins the parent's major range. The child's merged
-// manifest inherits the parent's when_to_use and folds sensitivity
-// most-restrictively. A newer parent 1.3.0 is then published WITHOUT reingesting
-// the child, and the child still resolves the pinned 1.2.0. Finally the child is
-// reingested and re-resolves the pin to 1.3.0.
-//
-// The parent and child live in separate runtime-republish layers so the parent
-// can ship a new version without triggering a reingest of the child; reingesting
-// only the parent layer leaves the child's stored ExtendsPin untouched (no
-// silent propagation), and reingesting the child layer re-resolves it.
-func TestLifecycle_ExtendsPinStabilityAndReingest(t *testing.T) {
-	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{
-		"seed/ARTIFACT.md": contextArtifact("seed context"),
-	}))
-
-	const parentID = "platform/base/http-policy"
-	const childID = "team/checkout/http-policy"
-
-	parentLayer := newRepublishLayer(t, srv, "extends-parent")
-	childLayer := newRepublishLayer(t, srv, "extends-child")
-
-	// The parent ships at 1.2.0 carrying a distinctive when_to_use entry and a
-	// high sensitivity the child cannot relax.
-	parentLayer.publishVersion(t, versionSpec{
-		ID: parentID, Version: "1.2.0", Description: "base http policy for services",
-		WhenToUse: []string{"calling an internal HTTP service"}, Sensitivity: "high",
-	})
-
-	// The child (a distinct id) pins the parent's major range and carries its own
-	// when_to_use plus a lower sensitivity. The merge appends the parent's
-	// when_to_use and takes the most-restrictive sensitivity (high).
-	childLayer.publishVersion(t, versionSpec{
-		ID: childID, Version: "1.0.0", Description: "checkout http policy",
-		Extends:   parentID + "@1.x",
-		WhenToUse: []string{"calling the checkout service"}, Sensitivity: "low",
-	})
-
-	// The child's merged manifest inherits the parent's when_to_use and the
-	// most-restrictive sensitivity. The parent's id must not leak (hidden parent).
-	st, child := childLayer.loadVersion(t, childID, "")
-	if st != 200 {
-		t.Fatalf("load child: HTTP %d", st)
-	}
-	if !strings.Contains(child.Frontmatter, "calling an internal HTTP service") {
-		t.Errorf("child did not inherit the parent's when_to_use (pin resolved to 1.2.0?):\n%s", child.Frontmatter)
-	}
-	if !strings.Contains(child.Frontmatter, "calling the checkout service") {
-		t.Errorf("child lost its own when_to_use after merge:\n%s", child.Frontmatter)
-	}
-	if child.Sensitivity != "high" {
-		t.Errorf("merged sensitivity = %q, want high (child low folded with parent high most-restrictively)", child.Sensitivity)
-	}
-	if strings.Contains(child.Frontmatter, parentID) {
-		t.Errorf("hidden parent id %q leaked into the served child frontmatter:\n%s", parentID, child.Frontmatter)
-	}
-
-	// The parent ships a newer version 1.3.0 WITHOUT reingesting the child. The
-	// parent layer reingest does not touch the child layer, so the child's stored
-	// pin still points at 1.2.0.
-	parentLayer.publishVersion(t, versionSpec{
-		ID: parentID, Version: "1.3.0", Description: "base http policy for services v2",
-		WhenToUse: []string{"calling an internal HTTP service", "honoring the v2 retry budget"}, Sensitivity: "high",
-	})
-
-	// The pinned child 1.0.0 still merges the pinned 1.2.0: it carries the 1.2.0
-	// when_to_use but NOT the 1.3.0-only entry, proving no silent propagation
-	// (§4.6). The child manifest is immutable by content hash, so the resolved
-	// parent version is frozen at the child's ingest time.
-	st, childAfterParentBump := childLayer.loadVersion(t, childID, "1.0.0")
-	if st != 200 {
-		t.Fatalf("reload child 1.0.0 after parent bump: HTTP %d", st)
-	}
-	if !strings.Contains(childAfterParentBump.Frontmatter, "calling an internal HTTP service") {
-		t.Errorf("child 1.0.0 lost the pinned 1.2.0 when_to_use:\n%s", childAfterParentBump.Frontmatter)
-	}
-	if strings.Contains(childAfterParentBump.Frontmatter, "honoring the v2 retry budget") {
-		t.Errorf("child 1.0.0 silently picked up the 1.3.0-only when_to_use without a reingest (pin propagated):\n%s", childAfterParentBump.Frontmatter)
-	}
-
-	// The child is reingested by shipping a new child version 1.1.0. A new
-	// version is a fresh manifest, so the ingest pipeline re-resolves the extends
-	// pin against the now-latest parent 1.3.0 (re-ingesting the same immutable
-	// bytes would be a content-hash no-op and could not advance the pin, which is
-	// the correct immutability behavior).
-	childLayer.publishVersion(t, versionSpec{
-		ID: childID, Version: "1.1.0", Description: "checkout http policy",
-		Extends:   parentID + "@1.x",
-		WhenToUse: []string{"calling the checkout service"}, Sensitivity: "low",
-	})
-
-	// The reingested child (latest, 1.1.0) now merges parent 1.3.0: the
-	// 1.3.0-only when_to_use entry appears, proving the pin advanced on reingest.
-	st, childAfterReingest := childLayer.loadVersion(t, childID, "")
-	if st != 200 {
-		t.Fatalf("reload child after its reingest: HTTP %d", st)
-	}
-	if childAfterReingest.Version != "1.1.0" {
-		t.Errorf("latest child = %q, want 1.1.0 (the reingested version)", childAfterReingest.Version)
-	}
-	if !strings.Contains(childAfterReingest.Frontmatter, "honoring the v2 retry budget") {
-		t.Errorf("child reingest did not re-resolve the pin to parent 1.3.0:\n%s", childAfterReingest.Frontmatter)
-	}
-
-	// The original child 1.0.0 remains pinned to 1.2.0 even after the new child
-	// version re-resolved: immutability keeps each child version's pin frozen.
-	st, child100 := childLayer.loadVersion(t, childID, "1.0.0")
-	if st != 200 {
-		t.Fatalf("reload child 1.0.0 after reingest: HTTP %d", st)
-	}
-	if strings.Contains(child100.Frontmatter, "honoring the v2 retry budget") {
-		t.Errorf("child 1.0.0 pin advanced to 1.3.0; each immutable version must keep its frozen pin:\n%s", child100.Frontmatter)
-	}
-}
 
 // ---- deprecation excludes from search, load surfaces target ---
 
@@ -335,8 +212,8 @@ func TestLifecycle_InPlaceSQLiteUpgradePreservesArtifactsAndAudit(t *testing.T) 
 	const version = "1.4.2"
 	// Spec: §13.4 — the legacy row stores the §4.7.6 digest of its own bytes
 	// (an empty manifest, no SKILL.md, and no resources), so the first-start
-	// rewrite and the stored-row admission check both reproduce it. Its empty
-	// manifest declares no extends:, and admission serves its stored columns.
+	// rewrite and the stored-row admission check both reproduce it. Its manifest
+	// is empty, and admission serves its stored columns.
 	contentHash := legacyEmptyRowHash
 
 	// Seed a legacy database the way an earlier binary would have written it:

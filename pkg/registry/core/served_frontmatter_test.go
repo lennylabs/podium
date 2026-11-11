@@ -79,28 +79,3 @@ func TestPlainSkill_SynthesisFailureFailsTheRead(t *testing.T) {
 		t.Errorf("descriptor frontmatter = %q, want the empty block", got)
 	}
 }
-
-// Spec: §4.6, §4.3.4 — an extends: child whose ARTIFACT.md overlay omits
-// version is served a merged document carrying the child row's version, the
-// version the load reports.
-func TestExtendsChild_MergedDocumentTakesTheChildRowVersion(t *testing.T) {
-	t.Parallel()
-	f := newAdmFixture(t)
-	f.put(t, plainSkillRow(t, "ops/plain", "1.0.0"))
-	f.put(t, storetest.Seal(t, store.ManifestRecord{
-		TenantID: admTenant, ArtifactID: "team/child", Version: "2.0.0", Layer: "L", Type: "skill",
-		Frontmatter: []byte("---\ntype: skill\nextends: ops/plain@1.0.0\ntags: [ops]\n---\n"),
-		SkillRaw:    []byte("---\nname: child\ndescription: d\nmetadata:\n  version: \"2.0.0\"\n---\n\nchild prose\n"),
-	}, nil, nil))
-	res, err := admLoad(f.registry(nil), "team/child")
-	if err != nil {
-		t.Fatalf("LoadArtifact: %v", err)
-	}
-	a, err := manifest.ParseArtifact(res.Frontmatter)
-	if err != nil {
-		t.Fatalf("ParseArtifact(merged): %v\n%s", err, res.Frontmatter)
-	}
-	if a.Version != "2.0.0" || res.Version != "2.0.0" {
-		t.Errorf("merged version = %q, load version = %q, want 2.0.0 for both", a.Version, res.Version)
-	}
-}

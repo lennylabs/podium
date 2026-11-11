@@ -22,10 +22,9 @@ import (
 )
 
 // writeLargeManifestRegistry lays out a two-layer filesystem registry whose
-// merged child and skill carry manifest documents above the inline cutoff. The
-// child team/big restates the undeclared x_owner key its parent in the base
-// layer sets, because §4.6 refuses a child that leaves an undeclared key to a
-// parent in another layer, and it inherits the parent's sensitivity.
+// context team/big and skill team/bigskill carry manifest documents above the
+// inline cutoff. team/big also carries the undeclared x_owner key, so the
+// comparison covers a key manifest.Artifact does not declare.
 func writeLargeManifestRegistry(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -34,9 +33,9 @@ func writeLargeManifestRegistry(t *testing.T) string {
 		testharness.WriteTreeOption{Path: "base/.layer-config", Content: "visibility:\n  public: true\n"},
 		testharness.WriteTreeOption{Path: "top/.layer-config", Content: "visibility:\n  public: true\n"},
 		testharness.WriteTreeOption{Path: "base/shared/parent/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsensitivity: low\nx_owner: platform\n---\n\nparent prose\n"},
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsensitivity: low\n---\n\nparent prose\n"},
 		testharness.WriteTreeOption{Path: "top/team/big/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: big child\nx_owner: platform\nextends: shared/parent@1.x\n---\n\n" + daBigBody},
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: big context\nsensitivity: low\nx_owner: platform\n---\n\n" + daBigBody},
 		testharness.WriteTreeOption{Path: "top/team/bigskill/ARTIFACT.md",
 			Content: "---\ntype: skill\nversion: 1.0.0\ndescription: big skill\n---\n"},
 		testharness.WriteTreeOption{Path: "top/team/bigskill/SKILL.md",
@@ -55,9 +54,9 @@ func largeManifestServer(t *testing.T, root string) *httptest.Server {
 }
 
 // Spec: §2.2, §6.6 — server-source `podium sync` follows manifest_body_url, so
-// an above-cutoff merged ARTIFACT.md and an above-cutoff SKILL.md materialize
+// an above-cutoff ARTIFACT.md and an above-cutoff SKILL.md materialize
 // byte-identical to a filesystem-source sync of the same layers.
-func TestServerSync_LargeMergedManifestMatchesFilesystemSync(t *testing.T) {
+func TestServerSync_LargeManifestMatchesFilesystemSync(t *testing.T) {
 	t.Parallel()
 	root := writeLargeManifestRegistry(t)
 	ts := largeManifestServer(t, root)
@@ -82,7 +81,7 @@ func TestServerSync_LargeMergedManifestMatchesFilesystemSync(t *testing.T) {
 	}
 	if big := srvTree["team/big/ARTIFACT.md"]; !strings.Contains(big, "x_owner: platform") ||
 		!strings.Contains(big, "sensitivity: low") {
-		t.Error("the server-source ARTIFACT.md is not the merged document")
+		t.Error("the server-source ARTIFACT.md is not the authored document")
 	}
 }
 

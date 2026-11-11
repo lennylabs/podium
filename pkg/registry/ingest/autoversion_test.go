@@ -327,50 +327,6 @@ func TestIngest_AutoVersionDuplicateRevealedByReread(t *testing.T) {
 	}
 }
 
-// (g) The §4.6 executable-field check runs on the re-derived attempt that
-// reaches the insert path: a version-less same-ID overlay that leaves a
-// cross-layer parent's mcpServers entry to it is rejected at 0.0.0-auto.1
-// after the pre-check found 0.0.0-auto.0 taken, with no conflict and no row.
-// Spec: §4.6, §7.3.1
-func TestIngest_AutoVersionRederivedAttemptRunsExecutableCheck(t *testing.T) {
-	t.Parallel()
-	st := &interveningStore{Store: avStore(t)}
-	base := fstest.MapFS{
-		"x/ARTIFACT.md": &fstest.MapFile{Data: []byte("---\ntype: skill\nversion: 1.0.0\nsensitivity: low\n" +
-			"mcpServers:\n  - name: jira\n    transport: stdio\n    command: org-jira\n---\n\n")},
-		"x/SKILL.md": &fstest.MapFile{Data: []byte(avSkill("base"))},
-	}
-	if res := avIngest(t, st, "base", base); res.Accepted != 1 {
-		t.Fatalf("base ingest = %+v, want x@1.0.0 accepted", res)
-	}
-
-	fired := false
-	st.beforeGet = func(_ context.Context, id, v string) {
-		if !fired && id == "x" && v == "0.0.0-auto.0" {
-			fired = true
-			st.seed(t, avRow("team", v, "sha256:competing", time.Now()))
-		}
-	}
-	team := fstest.MapFS{
-		"x/ARTIFACT.md": &fstest.MapFile{Data: []byte("---\ntype: skill\nextends: x\n---\n\n")},
-		"x/SKILL.md":    &fstest.MapFile{Data: []byte(avSkill("team"))},
-	}
-	res := avIngest(t, st, "team", team)
-	if !fired {
-		t.Fatal("the pre-check never read x@0.0.0-auto.0")
-	}
-	if res.Accepted != 0 || len(res.Conflicts) != 0 || len(res.Rejected) != 1 {
-		t.Fatalf("result = %+v, want one rejection and no conflict", res)
-	}
-	want := map[string]any{"constraint": layer.ExecutableInheritanceConstraint, "fields": []string{"mcpServers[jira]"}}
-	if rj := res.Rejected[0]; rj.Code != layer.InvalidArtifactCode || !reflect.DeepEqual(rj.Details, want) {
-		t.Errorf("rejection = %+v, want %s with details %v", rj, layer.InvalidArtifactCode, want)
-	}
-	if _, err := st.GetManifest(context.Background(), avTenant, "x", "0.0.0-auto.1"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("x@0.0.0-auto.1 stored (err=%v), want no row", err)
-	}
-}
-
 // (e) assignVersion over hand-built rows of one artifact ID.
 // Spec: §7.3.1
 func TestAssignVersion(t *testing.T) {

@@ -230,16 +230,16 @@ func TestRegister_ForcePushPolicyValidation(t *testing.T) {
 }
 
 // Spec: §7.3.1 — a rejected entry carries details only when the rejecting
-// rule defines them. The §4.6 executable-field rejection serializes its
-// constraint and field paths, and a rule without details, such as the
-// cross-layer collision, serializes no details key.
+// rule defines them. The §7.3.1 duplicate-content rejection serializes its
+// constraint, and a rule without details, such as the cross-layer collision,
+// serializes no details key.
 func TestReingest_RejectedCarriesDetailsOnlyWhenDefined(t *testing.T) {
 	t.Parallel()
 	runner := func(_ context.Context, _ store.LayerConfig, _ *server.BreakGlass) (*ingest.Result, error) {
 		return &ingest.Result{Rejected: []ingest.RejectedArtifact{
 			{
-				ArtifactID: "mine/agent", Code: "ingest.invalid_artifact", Reason: "extends: executable",
-				Details: map[string]any{"constraint": "executable_inheritance", "fields": []string{"mcpServers[jira]"}},
+				ArtifactID: "mine/agent", Code: "ingest.invalid_artifact", Reason: "duplicate content",
+				Details: map[string]any{"constraint": "auto_version_duplicate_content"},
 			},
 			{ArtifactID: "shared/note", Code: "ingest.collision", Reason: "collision"},
 		}}, nil
@@ -263,8 +263,8 @@ func TestReingest_RejectedCarriesDetailsOnlyWhenDefined(t *testing.T) {
 	}
 	want := []map[string]any{
 		{
-			"artifact_id": "mine/agent", "code": "ingest.invalid_artifact", "reason": "extends: executable",
-			"details": map[string]any{"constraint": "executable_inheritance", "fields": []any{"mcpServers[jira]"}},
+			"artifact_id": "mine/agent", "code": "ingest.invalid_artifact", "reason": "duplicate content",
+			"details": map[string]any{"constraint": "auto_version_duplicate_content"},
 		},
 		{"artifact_id": "shared/note", "code": "ingest.collision", "reason": "collision"},
 	}

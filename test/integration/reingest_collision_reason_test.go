@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -162,46 +161,6 @@ func TestReingest_CollisionReasonNamesNoLayer(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 hidden parents (observable) — resolving an extends: reference
-// discloses its resolution to the author who wrote it, so the reingest
-// rejections other than the collision keep naming the parent and why it did
-// not resolve: that it does not exist, that its type differs, that no stored
-// version satisfies the constraint, and that its versions are deprecated.
-// None of them names the layer that contributes the parent.
-func TestReingest_ExtendsResolutionReasonsSurvive(t *testing.T) {
-	t.Parallel()
-	body, rejected := rcReingest(t, map[string]string{
-		"mine/missing": rcArtifact("context", "1.0.0", "core/absent", ""),
-		"mine/typed":   rcArtifact("context", "1.0.0", "core/agentparent", ""),
-		"mine/range":   rcArtifact("context", "1.0.0", "core/ctxparent@9.x", ""),
-		"mine/dep":     rcArtifact("context", "1.0.0", "core/old", ""),
-	})
-	cases := map[string][]string{
-		"mine/missing": {`no parent artifact "core/absent"`},
-		"mine/typed":   {"core/agentparent", `type "agent"`},
-		"mine/range":   {"no parent version satisfies", "core/ctxparent@9.x"},
-		"mine/dep":     {`parent "core/old"`, "deprecated"},
-	}
-	for id, wants := range cases {
-		got, ok := rejected[id]
-		if !ok {
-			t.Errorf("%s not rejected: %s", id, body)
-			continue
-		}
-		if got.Code != "ingest.invalid_artifact" {
-			t.Errorf("%s code = %q, want ingest.invalid_artifact", id, got.Code)
-		}
-		for _, want := range wants {
-			if !strings.Contains(got.Reason, want) {
-				t.Errorf("%s reason %q missing %q", id, got.Reason, want)
-			}
-		}
-	}
-	if strings.Contains(string(body), rcHiddenLayer) {
-		t.Errorf("reingest response names the hidden layer %q: %s", rcHiddenLayer, body)
-	}
-}
-
 // rcMCPChild is alice's agent that extends the hidden rcMCPParent and does
 // not restate its jira mcpServers entry.
 func rcMCPChild() string {
@@ -264,39 +223,6 @@ func TestReingest_ExecutableInheritanceDetails(t *testing.T) {
 	}
 	if !sawNote {
 		t.Errorf("shared/note collision not rejected: %s", body)
-	}
-}
-
-// Spec: §4.6, §7.3.1 — a reingest that refuses a child whose
-// sandbox_profile conflicts with a parent's in a layer the owner cannot read
-// reports the refusal with ingest.invalid_artifact and details holding the
-// sandbox_profile_conflict constraint alone. Neither the reason, the details,
-// nor the response body names the parent, its layer, or either profile value.
-func TestReingest_SandboxProfileConflictDetails(t *testing.T) {
-	t.Parallel()
-	body, rejected := rcReingest(t, map[string]string{
-		"mine/sandboxed": rcArtifact("agent", "1.0.0", rcSandboxParent, "sandbox_profile: network-isolated\n"),
-	})
-	got, ok := rejected["mine/sandboxed"]
-	if !ok {
-		t.Fatalf("mine/sandboxed not rejected: %s", body)
-	}
-	if got.Code != "ingest.invalid_artifact" {
-		t.Errorf("code = %q, want ingest.invalid_artifact", got.Code)
-	}
-	if want := map[string]any{"constraint": "sandbox_profile_conflict"}; !reflect.DeepEqual(got.Details, want) {
-		t.Errorf("details = %#v, want %#v", got.Details, want)
-	}
-	details, err := json.Marshal(got.Details)
-	if err != nil {
-		t.Fatalf("marshal details: %v", err)
-	}
-	for _, withheld := range []string{rcSandboxParent, rcHiddenLayer, "read-only-fs", "network-isolated"} {
-		for where, text := range map[string]string{"reason": got.Reason, "details": string(details), "body": string(body)} {
-			if strings.Contains(text, withheld) {
-				t.Errorf("%s names %q: %s", where, withheld, text)
-			}
-		}
 	}
 }
 

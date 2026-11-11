@@ -389,58 +389,17 @@ func TestPlainSkillIngest_ConcurrentIngestsCommitDistinctVersions(t *testing.T) 
 	}
 }
 
-// psOverlay is team's same-ID overlay of x: a hand-written ARTIFACT.md that
-// extends x, sets two tags, and declares no version.
-const psOverlay = "---\ntype: skill\nextends: x\ntags: [alpha, beta]\n---\n"
-
-// Spec: §7.3.1, §13.11.3, §4.6 — two layers contribute one ID: base a plain
-// skill and team a same-ID overlay that declares no version. N is derived
-// across both layers' rows, and the assigned-version overlay pins its parent
-// as an authored one does: its first row pins base's row, and after a change
-// to its bytes it pins its own previous row, the most recently ingested row
-// of the ID. A load serves the merged document at the child row's version.
-func TestPlainSkillIngest_TwoLayersShareTheAssignedSequence(t *testing.T) {
+// Spec: §4.6, §7.3.1 — a second layer's version-less plain skill at an ID
+// another layer already contributes is a §4.6 collision. Once the first
+// layer's row is soft-deleted the collision no longer applies, and a package
+// byte-identical to the soft-deleted plain skill is then refused as duplicate
+// content. Neither stores a row for the second layer.
+func TestPlainSkillIngest_SecondLayerCollisionAndDuplicate(t *testing.T) {
 	t.Parallel()
 	for _, f := range ingestConvergenceStores(t) {
 		t.Run(f.name, func(t *testing.T) {
 			t.Parallel()
-			e := newPSEnv(t, f, "base", "team")
-			baseFS := psFS("x", psSkill("base prose", ""), "")
-			teamFS := psFS("x", psSkill("team prose", ""), psOverlay)
-
-			wantAccepted(t, e.ingest(t, "base", baseFS), "x", "0.0.0-auto.0")
-			wantAccepted(t, e.ingest(t, "team", teamFS), "x", "0.0.0-auto.1")
-			wantIdempotent(t, e.ingest(t, "base", baseFS), "x", "0.0.0-auto.0")
-			wantIdempotent(t, e.ingest(t, "team", teamFS), "x", "0.0.0-auto.1")
-
-			wantAccepted(t, e.ingest(t, "team", psFS("x", psSkill("team prose, edited", ""), psOverlay)), "x", "0.0.0-auto.2")
-
-			status, got := e.load(t, "x", "")
-			if status != http.StatusOK {
-				t.Fatalf("load x = %d, want 200", status)
-			}
-			a, err := manifest.ParseArtifact([]byte(got.Frontmatter))
-			if err != nil {
-				t.Fatalf("ParseArtifact(merged): %v\n%s", err, got.Frontmatter)
-			}
-			if got.Version != "0.0.0-auto.2" || a.Version != "0.0.0-auto.2" {
-				t.Errorf("served version %q, merged version %q, want 0.0.0-auto.2", got.Version, a.Version)
-			}
-		})
-	}
-}
-
-// Spec: §4.6, §7.3.1 — a third layer's version-less plain skill at an ID
-// another layer already contributes is a §4.6 collision when no overlay row
-// of the ID is stored. Once team's overlay row is stored the §4.6 check admits
-// it, and a package byte-identical to base's plain skill is then refused as
-// duplicate content. Neither stores a row for the third layer.
-func TestPlainSkillIngest_ThirdLayerCollisionAndDuplicate(t *testing.T) {
-	t.Parallel()
-	for _, f := range ingestConvergenceStores(t) {
-		t.Run(f.name, func(t *testing.T) {
-			t.Parallel()
-			e := newPSEnv(t, f, "base", "team", "other")
+			e := newPSEnv(t, f, "base", "other")
 			baseFS := psFS("x", psSkill("base prose", ""), "")
 			wantAccepted(t, e.ingest(t, "base", baseFS), "x", "0.0.0-auto.0")
 
@@ -449,7 +408,9 @@ func TestPlainSkillIngest_ThirdLayerCollisionAndDuplicate(t *testing.T) {
 				t.Errorf("other's ingest = %+v, want one ingest.collision rejection", res)
 			}
 
-			wantAccepted(t, e.ingest(t, "team", psFS("x", psSkill("team prose", ""), psOverlay)), "x", "0.0.0-auto.1")
+			if err := e.st.DeleteLayerConfig(context.Background(), psTenant, "base"); err != nil {
+				t.Fatalf("DeleteLayerConfig: %v", err)
+			}
 			wantRejected(t, e.ingest(t, "other", baseFS), "x", layer.InvalidArtifactCode, psDuplicateDetails)
 			for _, m := range e.rows(t, "x") {
 				if m.Layer == "other" {
