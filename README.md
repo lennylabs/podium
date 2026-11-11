@@ -30,7 +30,7 @@ repositories alike. Selecting the artifact selects its files.
 [Hello world](#hello-world-example) •
 [Contributing](#contributing)
 
-> **Status: 0.5.x, early release.** The CLI, server, MCP bridge, and SDKs are
+> **Status: 0.6.x, early release.** The CLI, server, MCP bridge, and SDKs are
 > all published, but the surface and behavior may still shift before 1.0.
 > Open an [issue](https://github.com/lennylabs/podium/issues) or
 > [discussion](https://github.com/lennylabs/podium/discussions) for bug
