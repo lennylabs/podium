@@ -584,8 +584,8 @@ func writeIngestReport(stdout, stderr io.Writer, layerID string, body []byte) (d
 		_, _ = fmt.Fprintf(stderr, "conflict: %s@%s rejected (%s); bump the version\n", c.ArtifactID, c.Version, c.Code)
 	}
 	// §13.10 / §4.6 / §4.7.8: an artifact dropped for a non-conflict reason
-	// (sensitivity floor, sandbox profile, cross-layer collision, quota,
-	// unresolved extends, or a data-plane resource-store failure).
+	// (sensitivity floor, cross-layer collision, a declared extends:, quota,
+	// or a data-plane resource-store failure).
 	for _, rj := range report.Rejected {
 		printRejected(stderr, rj.ArtifactID, rj.Code, rj.Reason)
 	}

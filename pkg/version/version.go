@@ -366,8 +366,9 @@ const deliveryRecordTag = "podium/delivery-record/2"
 
 // DeliveryRecord is the §4.7.10 delivery record: the values one load response
 // serves, as the registry composes them and as the consumer receives them.
-// Every field is the served value, so for a child declaring extends: the
-// Frontmatter is the merged ARTIFACT.md document, whatever the type.
+// Every field is the served value, so for a skill with no ARTIFACT.md the
+// Frontmatter is the §4.3.4 synthesized document rather than the stored
+// zero-length ARTIFACT.md.
 type DeliveryRecord struct {
 	// ID is the canonical artifact ID the response carries.
 	ID string
@@ -416,9 +417,10 @@ type DeliveryRecord struct {
 // consumer checks every resource body it fetches or decodes against the hash
 // the verified record carries, which binds the body to the attestation.
 //
-// The per-caller extends_pin and the lifecycle fields are absent from the
-// record: the digest must not depend on who reads the record or when, so the
-// single-load path, the batch path, and every consumer agree on it.
+// The lifecycle fields and the contributing layer are absent from the record:
+// the digest must not depend on when the record is read or on which path
+// served it, so the single-load path, the batch path, and every consumer
+// agree on it.
 //
 // Spec: §4.7.10
 func DeliveryHash(rec DeliveryRecord) string {

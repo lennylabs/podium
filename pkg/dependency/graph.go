@@ -1,6 +1,6 @@
 // Package dependency implements the cross-type dependency graph and
 // reverse index from spec §4.7.3 plus the impact-analysis surface
-// from §4.7.5. Edges span types: extends, delegates_to, mcpServers.
+// from §4.7.5. Edges span types: delegates_to and mcpServers.
 package dependency
 
 import "sort"
@@ -10,7 +10,6 @@ type EdgeKind string
 
 // EdgeKind values.
 const (
-	EdgeExtends     EdgeKind = "extends"
 	EdgeDelegatesTo EdgeKind = "delegates_to"
 	EdgeMCPServer   EdgeKind = "mcpServers"
 )

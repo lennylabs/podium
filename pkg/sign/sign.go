@@ -32,8 +32,7 @@ var (
 type VerificationPolicy string
 
 // VerificationPolicy values. The policy reads no sensitivity: the value is
-// reported by the party that supplies the signature, and for a child
-// declaring extends: no attested source for it exists.
+// reported by the same party that supplies the signature.
 const (
 	// PolicyNever skips verification entirely, including a signature the
 	// response carries.
@@ -104,10 +103,7 @@ func (Noop) Verify(_ context.Context, _, _ string) error {
 // under any policy other than never. Whether a missing signature aborts the
 // load is the axis the policy governs. Neither axis reads the artifact's
 // sensitivity: the value is reported by the same party that supplies the
-// signature, and for a child declaring extends: (§4.6) no attested source for
-// it exists, because the merge takes the most-restrictive value
-// (pkg/manifest/merge.go) while the content hash covers only the child's
-// pre-merge bytes. Under never the provider is not touched, so a caller that
+// signature. Under never the provider is not touched, so a caller that
 // resolved no provider under never may pass nil.
 //
 // Spec: §4.7.9, §6.6 step 2.

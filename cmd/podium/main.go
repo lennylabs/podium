@@ -573,7 +573,8 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watc
 }
 
 // errDropped marks a --config target whose composition dropped at least one
-// artifact under the §4.6 collision rule or the §4.6 no-inheritance rule.
+// artifact under the §4.6 collision rule or the §4.6 rule that manifests do
+// not inherit.
 // runMultiTargetSync prints it as the target's failure and counts the target
 // as failed (§13.11.3). It names no code, because the per-artifact rejected
 // line on standard error already carries each drop's code.
@@ -1074,14 +1075,15 @@ func lintCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	// spec: §4.6 — lint validates the registry, so it surfaces a
-	// same-canonical-ID cross-layer collision as an error ("silent
-	// shadowing is never permitted"): the default policy fails the walk on
-	// one. An ARTIFACT.md that declares extends: is refused as server
-	// ingest refuses it: OnDrop collects each refusal, which is printed as a
-	// rejected line, and the remaining records are linted, so lint names
-	// every refused artifact and every diagnostic of the rest. The walk
-	// calls OnDrop synchronously, so drops needs no lock.
+	// spec: §4.6 — lint validates the registry, so it fails on a
+	// same-canonical-ID cross-layer collision ("silent shadowing is never
+	// permitted"): the default policy fails the walk on one. OnDrop collects
+	// every ARTIFACT.md that declares extends:, each is reported as a
+	// rejected: error line, and the remaining artifacts are linted, as ingest
+	// does (§4.6, §7.3.1), so lint names every refused artifact and every
+	// diagnostic of the rest. sync uses CollisionPolicyDrop, which drops and
+	// reports both (§13.11.3). The walk calls OnDrop synchronously, so drops
+	// needs no lock.
 	var drops []layer.Drop
 	records, err := reg.Walk(filesystem.WalkOptions{
 		CollisionPolicy: filesystem.CollisionPolicyDefault,
