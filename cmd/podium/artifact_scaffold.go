@@ -45,7 +45,7 @@ var validRuleModes = []string{"always", "glob", "auto", "explicit"}
 // order and the message names them in definition order.
 //
 // Spec: §4.3.4
-var skillRefusedFlags = []string{"tags", "sensitivity", "when-to-use", "extends"}
+var skillRefusedFlags = []string{"tags", "sensitivity", "when-to-use"}
 
 type scaffoldOpts struct {
 	// Positional and identifying.
@@ -59,7 +59,6 @@ type scaffoldOpts struct {
 	license     string
 	whenToUse   string
 	version     string
-	extends     string
 
 	// Type-specific.
 	inputSchema  string
@@ -94,7 +93,6 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 	fs.StringVar(&opts.license, "license", "", "SPDX license identifier")
 	fs.StringVar(&opts.whenToUse, "when-to-use", "", "comma-separated when_to_use entries; not accepted with --type skill")
 	fs.StringVar(&opts.version, "version", "0.1.0", "starting semver")
-	fs.StringVar(&opts.extends, "extends", "", "parent artifact id to extend; not accepted with --type skill")
 	// Type-specific.
 	fs.StringVar(&opts.inputSchema, "input-schema", "", "type=agent: relative path to input JSON schema")
 	fs.StringVar(&opts.outputSchema, "output-schema", "", "type=agent: relative path to output JSON schema")
@@ -353,9 +351,6 @@ func renderArtifactMD(name string, o *scaffoldOpts) string {
 	fmt.Fprintf(&sb, "sensitivity: %s\n", o.sensitivity)
 	if o.license != "" {
 		fmt.Fprintf(&sb, "license: %s\n", o.license)
-	}
-	if o.extends != "" {
-		fmt.Fprintf(&sb, "extends: %s\n", o.extends)
 	}
 	writeTypeSpecific(&sb, o)
 	sb.WriteString("---\n\n")
