@@ -1537,7 +1537,7 @@ class Client:
 
         The server replies with ``{"edges": [{"from", "to", "kind"}]}``
         (matching the TypeScript SDK). Each edge names a dependent and the
-        dependency kind (extends, delegates_to, mcpServers).
+        dependency kind (delegates_to or mcpServers).
         """
         body = self._get("/v1/dependents", {"id": artifact_id})
         return [
