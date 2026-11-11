@@ -177,5 +177,4 @@ If lint passes, commit the artifact. Each diagnostic prints as `[<severity>] <ar
 - **Write an agent.** An `agent` is a complete agent definition with its own instructions, dependencies, and optional bundled scripts. See [Your first agent](your-first-agent).
 - **Cover the other built-in types.** [Artifact types](artifact-types) covers `rule`, `hook`, `context`, and `mcp-server` alongside skills, commands, and agents.
 - **Organize multiple artifacts.** As they accumulate, group them with `DOMAIN.md` files: descriptions, keywords, featured artifacts. See [Domains](domains).
-- **Inherit from another artifact.** When two artifacts share most of their structure, `extends:` lets the second refine the first instead of duplicating it. See [Extends](extends).
 - **Move from solo to team-shared.** [Deployment](../deployment/) walks the migration paths.

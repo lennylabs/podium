@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 580" class="dg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 562" class="dg">
   <!--
     Identity and visibility flow. Every registry call carries an OAuth identity.
     The registry verifies the token, resolves claims, then evaluates the layer
@@ -94,7 +94,7 @@
     </style>
   </defs>
 
-  <rect class="dg-bg" width="1080" height="580"/>
+  <rect class="dg-bg" width="1080" height="562"/>
 
   <text class="dg-title" x="40" y="42">Identity and visibility flow</text>
   <text class="dg-sub" x="40" y="64">Every registry call carries an OAuth identity. The registry uses it to compose the caller's effective view.</text>
@@ -177,6 +177,5 @@
   <text class="dg-label" x="900" y="460">YES</text>
 
   <text class="dg-foot" x="40" y="510">Visibility evaluation runs on every registry call. Layers the caller cannot see are silently excluded from the view.</text>
-  <text class="dg-foot" x="40" y="528">When a visible child declares extends:, a hidden parent merges server-side and its ID and layer are withheld.</text>
-  <text class="dg-foot" x="40" y="546">Public mode and filesystem-source deployments short-circuit visibility to true for every layer (no identity present).</text>
+  <text class="dg-foot" x="40" y="528">Public mode and filesystem-source deployments short-circuit visibility to true for every layer (no identity present).</text>
 </svg>

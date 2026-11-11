@@ -36,7 +36,7 @@ deployment) or as a local directory. Most consumers work against a server, and
 | Domains and subdomains | The catalog's directory layout, plus the `DOMAIN.md` metadata read from it. | In the catalog, in every tier. | [Domains](../authoring/domains) |
 | Selective materialization | Scope resolution in `podium sync`, from the merged `sync.yaml` and the CLI flags. | On the consumer, in every tier. | [Selective materialization](../consuming/selective-materialization) |
 | Progressive discovery | The meta-tools, backed by the domain renderer and hybrid retrieval. | On the registry, reached through the MCP server or an SDK. Requires single node or clustered. | [Browsing the catalog](../consuming/browsing-the-catalog) |
-| Layered composition | The layer composer and the `extends:` resolver. | On the registry. A local directory composes ordered layers from one root; identity-aware composition across independent sources requires a server. | [Layered composition](../deployment/layers) |
+| Layered composition | The layer composer. | On the registry. A local directory composes ordered layers from one root; identity-aware composition across independent sources requires a server. | [Layered composition](../deployment/layers) |
 | Access control | The visibility evaluator, run against the caller's attested identity. | On the registry. Requires single node or clustered with an identity provider configured. | [Access control](../deployment/access-control) |
 
 ---
@@ -377,9 +377,8 @@ Actions patterns.
 
 ## Shared library code
 
-The manifest parsers, glob resolver, layer composer, `extends:`
-resolver, visibility evaluator, materialization writer, and harness
-adapters all live in a single Go module. The registry binary embeds it
+The manifest parsers, glob resolver, layer composer, visibility
+evaluator, materialization writer, and harness adapters all live in a single Go module. The registry binary embeds it
 behind the HTTP API. `podium sync` against a filesystem-source registry calls
 the same module functions directly, skipping HTTP. The MCP server and
 `podium sync` against a server-source registry are thin HTTP clients that invoke

@@ -66,7 +66,6 @@ A non-skill artifact directory contains an `ARTIFACT.md`, which carries every fi
 
 | Field | Type | Description |
 |:--|:--|:--|
-| `extends` | string | Inherit and refine another artifact's manifest. Single scalar (no multiple inheritance). Pin syntax: `<id>`, `<id>@<semver>`, `<id>@0.0.0-auto.<N>`, `<id>@<semver>.x`, or `<id>@sha256:<hash>`. A range never selects a registry-assigned version. |
 | `target_harnesses` | list of strings | Opt out of cross-harness materialization. Set to a list of harness names; the artifact only materializes for harnesses on the list. |
 | `external_resources` | list of objects | External resources (URL + sha256 + size + signature) too large to bundle. |
 
@@ -174,28 +173,7 @@ A bare canonical artifact ID matches that artifact exactly.
 
 ---
 
-## Cross-layer merge
-
-When two layers contribute artifacts with the same canonical ID and the higher-precedence one declares `extends:`, fields merge per the table below.
-
-| Field | Merge |
-|:--|:--|
-| `description`, `name`, `release_notes` | Scalar; child wins. |
-| `tags` | List; append unique. |
-| `when_to_use` | List; append. |
-| `sensitivity` | Scalar; most-restrictive (high > medium > low). |
-| `mcpServers` | List of objects; deep-merge by `name`. |
-| `requiresApproval` | List; append. |
-| `runtime_requirements` | Map; deep-merge with child wins. |
-| `sandbox_profile` | Scalar; the parent's value unless it is unset or `unrestricted`. A child that sets a different restricting profile is rejected; see [Sandbox profile](../authoring/extends.md#sandbox-profile). |
-| `delegates_to` | List; append. |
-| `external_resources` | List; append. |
-| `license` | Scalar; child wins (lint warning if changed across layers). |
-| `search_visibility` | Scalar; most-restrictive (`direct-only` > `indexed`). |
-
-If a child omits a frontmatter field, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above, except that a child whose parent comes from another layer restates the [executable fields](../authoring/extends#executable-fields-across-layers) that parent sets. When both the parent and the child declare a value, a field in the table merges per its row, and a field absent from the table takes the child's value. `version` is independent, so the child keeps its own, and `type` must match on both sides because ingest rejects an `extends:` chain that crosses types.
-
-Extension types register their own merge semantics via `TypeProvider`.
+## DOMAIN.md merge across layers
 
 When two layers contribute a `DOMAIN.md` for the same path:
 

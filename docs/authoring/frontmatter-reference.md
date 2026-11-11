@@ -34,7 +34,7 @@ A skill's `SKILL.md` carries the agentskills.io fields, and an optional `ARTIFAC
 | `type` | — | Yes (`type: skill`); implied when `ARTIFACT.md` is absent | Yes |
 | `version` | As `metadata.version` (string) | Optional; equal to `metadata.version` when that is a `major.minor.patch` value | Yes |
 | `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, `audit_redact`, `lint_suppress` | — | Yes | Yes |
-| `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `external_resources`, `extends`, `target_harnesses` | — | Yes | Yes |
+| `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `external_resources`, `target_harnesses` | — | Yes | Yes |
 | Type-specific fields (`input`, `output`, `delegates_to`, `rule_*`, `hook_*`, `server_identifier`) | — | Yes (when applicable) | Yes (when applicable) |
 
 For non-skill types (`agent`, `context`, `command`, `rule`, `hook`, `mcp-server`, extension types), `ARTIFACT.md` carries every field. There is no `SKILL.md`.
@@ -85,7 +85,7 @@ lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence
 | `description` | Yes | "When should I use this?" The harness uses this to decide whether the artifact matches a prompt. Vague descriptions get ignored. ≤ 1024 chars for skills (per agentskills.io). |
 | `when_to_use` | Optional | List of explicit situations. Additional retrieval signal. |
 | `tags` | Optional | List of strings. Used for filtering in `search_artifacts`. |
-| `sensitivity` | Optional | `low` (default), `medium`, `high`. Exposed in search and load responses. A registry in public mode rejects ingest of an artifact at or above its configured floor, and the floor reads the value an artifact declaring `extends:` inherits from its parent; a private deployment treats the field as metadata. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection. |
+| `sensitivity` | Optional | `low` (default), `medium`, `high`. Exposed in search and load responses. A registry in public mode rejects ingest of an artifact at or above its configured floor; a private deployment treats the field as metadata. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection. |
 | `license` | Optional | SPDX identifier. |
 | `search_visibility` | Optional | `indexed` (default) or `direct-only`. `direct-only` artifacts don't appear in `search_artifacts` results; they're reachable via `load_artifact` if the caller knows the ID. |
 | `deprecated` | Optional | Boolean. When `true`, `load_artifact` returns a warning, and the artifact is excluded from default search results. |
@@ -100,7 +100,7 @@ A skill's version is the `ARTIFACT.md` `version` when that file declares one, an
 
 A skill that declares no usable version carries a registry-assigned version `0.0.0-auto.<N>`, a semver prerelease of `0.0.0`, and lint reports the `lint.skill_version_assigned` warning for it. The form is reserved to the registry, so an authored version in that form fails lint with `lint.invalid_version`. The registry derives `<N>` at ingest from the rows it stores for the artifact:
 
-- Bytes that the layer's most recently ingested non-deleted row of the artifact holds reuse that row's version, and the ingest is a no-op.
+- Bytes that the layer's most recently ingested non-deleted row of the artifact, other than a row the [no-inheritance rule](../deployment/layers#inheritance) retires, holds reuse that row's version, and the ingest is a no-op.
 - Bytes that no stored or soft-deleted row of the artifact holds receive one more than the highest `<N>` any such row carries, or `0` when none carries one.
 - Bytes that another stored or soft-deleted row of the artifact holds under a different version are rejected with `ingest.invalid_artifact` and `details.constraint: "auto_version_duplicate_content"`. A revert to earlier bytes is rejected this way, including a revert across an interval in which the skill declared a version. `latest` keeps serving the newer row. To publish such a skill, set `metadata.version` in `SKILL.md` or change the content.
 
@@ -221,9 +221,6 @@ hook_action: |                    # shell snippet executed when the event fires
 # For type: mcp-server — canonical server identifier (drives reverse index)
 server_identifier: npx:@company/finance-warehouse-mcp
 
-# Inheritance: explicitly extend another artifact's manifest (cross-layer merge)
-extends: finance/ap/pay-invoice@1.2.x
-
 # Adapter targeting: opt out of cross-harness materialization for this artifact
 target_harnesses: [claude-code, opencode]
 ```
@@ -238,7 +235,6 @@ target_harnesses: [claude-code, opencode]
 | `hook_event` | `hook` | Required for `type: hook`; a missing value is an ingest error. One of the canonical event names. Session: `session_start`, `session_end`. Prompt: `user_prompt_submit`. Generic tool: `pre_tool_use`, `post_tool_use`, `post_tool_use_failure`. Tool subtypes: `pre_shell_execution`, `post_shell_execution`, `pre_mcp_execution`, `post_mcp_execution`, `pre_read_file`, `post_file_edit`. Permission: `permission_request`, `permission_denied`. Subagent: `subagent_start`, `subagent_stop`. Turn: `stop`. Compaction: `pre_compact`, `post_compact`. Notification: `notification`. A value outside this list is an ingest error. The adapter translates to the harness's native event. See [Hooks](hooks). |
 | `hook_action` | `hook` | Required for `type: hook`; a missing value is an ingest error. Shell snippet executed when the event fires; receives event payload on stdin. |
 | `server_identifier` | `mcp-server` | Canonical server identifier. Drives the reverse index that links `skill` artifacts referencing the server via `mcpServers:`. |
-| `extends` | Any | Inherit and refine another artifact's manifest. Single scalar (no multiple inheritance). See [Extends](extends). |
 | `target_harnesses` | Any | Opt out of cross-harness materialization. Set to a list of harness names; the artifact only materializes for harnesses on the list. |
 
 ---
@@ -287,33 +283,6 @@ Inline markers in the prose body (`SKILL.md` for skills, `ARTIFACT.md` for non-s
 ```
 
 Adapters propagate provenance markers to harnesses that support trust regions (Claude's `<untrusted-data>` convention, etc.). Hosts can apply differential trust, treating imported content as data rather than as instruction. This is the primary defense against prompt injection from manifests that aggregate external content.
-
----
-
-## Cross-layer merge
-
-When two layers contribute artifacts with the same canonical ID, the higher-precedence one can declare `extends:` to inherit and refine the lower one. Field merge semantics:
-
-| Field | Merge |
-|:--|:--|
-| `description`, `name`, `release_notes` | Scalar; child wins. |
-| `tags` | List; append unique. |
-| `when_to_use` | List; append. |
-| `sensitivity` | Scalar; most-restrictive (high > medium > low). |
-| `mcpServers` | List of objects; deep-merge by `name`. |
-| `requiresApproval` | List; append. |
-| `runtime_requirements` | Map; deep-merge with child wins. |
-| `sandbox_profile` | Scalar; the parent's value unless it is unset or `unrestricted`. A child that sets a different restricting profile is rejected; see [Sandbox profile](../authoring/extends.md#sandbox-profile). |
-| `delegates_to` | List; append. |
-| `external_resources` | List; append. |
-| `license` | Scalar; child wins (lint warning if changed across layers). |
-| `search_visibility` | Scalar; most-restrictive (`direct-only` > `indexed`). |
-
-If a child omits a field of its `ARTIFACT.md` frontmatter, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above, except that a child whose parent comes from another layer restates the [executable fields](extends#executable-fields-across-layers) that parent sets. When both the parent and the child declare a value, a field in the table merges per its row, and every field outside the table takes the child's value. The child's `type:` must match the parent's, and the child's `version:` is independent of the parent's.
-
-For skills, the merge applies to the `ARTIFACT.md` frontmatter alone. The registry serves the child's `SKILL.md` verbatim, so `name`, `description`, `license`, and the other agentskills.io fields come from the child's `SKILL.md` and are not inherited from the parent's, whether or not the child's `SKILL.md` declares them.
-
-See [Extends](extends) for examples and gotchas.
 
 ---
 

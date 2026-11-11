@@ -130,7 +130,7 @@ The bulk endpoint is not exposed as an MCP meta-tool: bulk loading is a programm
 
 ## Delivery verification
 
-Both SDKs run the delivery check that `podium-mcp` and server-source `podium sync` run. The SDK recomputes `delivery_hash` from the bytes it received on every `load_artifact` response and every `ok` batch item, under every signature policy including `never`, and refuses a response whose recomputed hash differs, or that carries no `delivery_hash`, with `materialize.content_hash_mismatch`. It then applies its signature policy to `delivery_signature` with the registry-managed verifier. A response loaded from the [workspace overlay](../authoring/extends#workspace-overlay) comes from the local filesystem and runs no check. [Verifying a response](../reference/http-api#verifying-a-response) states the procedure.
+Both SDKs run the delivery check that `podium-mcp` and server-source `podium sync` run. The SDK recomputes `delivery_hash` from the bytes it received on every `load_artifact` response and every `ok` batch item, under every signature policy including `never`, and refuses a response whose recomputed hash differs, or that carries no `delivery_hash`, with `materialize.content_hash_mismatch`. It then applies its signature policy to `delivery_signature` with the registry-managed verifier. A response loaded from the [workspace overlay](../deployment/layers#workspace-local-overlay) comes from the local filesystem and runs no check. [Verifying a response](../reference/http-api#verifying-a-response) states the procedure.
 
 The SDK resolves its policy in this order:
 
@@ -184,7 +184,7 @@ For impact analysis and custom tooling:
 deps = client.dependents_of("finance/ap/pay-invoice")
 ```
 
-Returns the set of artifacts that depend on the given one via `extends:`, `delegates_to:`, or `mcpServers:` references. Dependency edges key on the unpinned canonical ID, so a query carrying an `@version` suffix matches no edge. Useful before deprecating, when assessing blast radius, or when building a "what breaks if I change this?" check.
+Returns the set of artifacts that depend on the given one via `delegates_to:` or `mcpServers:` references. Dependency edges key on the unpinned canonical ID, so a query carrying an `@version` suffix matches no edge. Useful before deprecating, when assessing blast radius, or when building a "what breaks if I change this?" check.
 
 ---
 
@@ -192,7 +192,7 @@ Returns the set of artifacts that depend on the given one via `extends:`, `deleg
 
 ### Programmatic curation (semantic discovery + scoped sync)
 
-A common pattern: a script picks artifacts based on context (current task, recent work, an upstream ticket, semantic match against a query), then invokes `podium sync` with `--include` flags to materialize the chosen set. The script owns the discovery logic; Podium owns the materialization (visibility filtering, `extends:` resolution, harness adaptation, audit). The on-disk result is reproducible from the include list.
+A common pattern: a script picks artifacts based on context (current task, recent work, an upstream ticket, semantic match against a query), then invokes `podium sync` with `--include` flags to materialize the chosen set. The script owns the discovery logic; Podium owns the materialization (visibility filtering, harness adaptation, and audit). The on-disk result is reproducible from the include list.
 
 ```python
 from podium import Client

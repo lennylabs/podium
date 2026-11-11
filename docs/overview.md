@@ -55,7 +55,7 @@ each deployment tier, and each task.
 | Domains and subdomains | The directory layout defines the domain hierarchy, and `DOMAIN.md` adds descriptions, keywords, and featured artifacts. | [Domains](authoring/domains) |
 | Selective materialization | `podium sync` materializes the subset named by include globs, exclude globs, and types, and a named profile replays that subset. | [Selective materialization](consuming/selective-materialization) |
 | Progressive discovery | An agent traverses domains and searches the catalog through the meta-tools, and materializes an artifact and its bundled files only when it loads one. | [Browsing the catalog](consuming/browsing-the-catalog) |
-| Layered composition | Several independent sources compose into one catalog with deterministic merge, explicit precedence, and `extends:`. | [Layered composition](deployment/layers) |
+| Layered composition | Several independent sources compose into one catalog with deterministic merge and explicit precedence. | [Layered composition](deployment/layers) |
 | Access control | Each layer declares who can see it, and the registry composes the caller's effective view from the layers that pass. | [Access control](deployment/access-control) |
 
 ---
@@ -83,7 +83,7 @@ default and what can replace it.
 | Guide | What it covers |
 |:--|:--|
 | [Getting Started](getting-started/) | Positioning, the quickstart, the vocabulary, and the architecture. |
-| [Authoring](authoring/) | Writing artifacts: types, frontmatter, domains, bundled resources, `extends:`, rule modes, hooks, and hints. |
+| [Authoring](authoring/) | Writing artifacts: types, frontmatter, domains, bundled resources, rule modes, hooks, and hints. |
 | [Consuming](consuming/) | Delivering artifacts into a harness, narrowing what a workspace receives, runtime discovery, the SDKs, and marketplace publishing. |
 | [Deployment](deployment/) | Running each tier, the server-side integrations, layers, access control, day-two operations, and the OIDC cookbooks. |
 | [Reference](reference/) | CLI, HTTP API, frontmatter schema, error codes, and glossary. |

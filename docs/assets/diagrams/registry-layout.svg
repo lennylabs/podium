@@ -193,5 +193,5 @@
   <text class="dg-label dg-t-xs" x="540" y="556">type: command</text>
 
   <text class="dg-foot" x="40" y="616">The canonical artifact ID is the directory path under the registry root, for example finance/ap/pay-invoice.</text>
-  <text class="dg-foot" x="40" y="636">References (extends:, delegates_to:, glob patterns) use this ID, optionally suffixed with @version or @sha256:hash.</text>
+  <text class="dg-foot" x="40" y="636">References (delegates_to: and glob patterns) use this ID, optionally suffixed with @version or @sha256:hash.</text>
 </svg>

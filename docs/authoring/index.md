@@ -18,7 +18,6 @@ Reference for writing artifacts. Each page below covers one topic.
 | [Domains](domains) | How folders and subfolders structure the catalog, and how `DOMAIN.md` adds descriptions, keywords, featured artifacts, the prose body, and discovery rendering knobs. |
 | [Rule modes](rule-modes) | The `rule_mode` values (`always`, `glob`, `auto`, `explicit`) and how each harness honors them. |
 | [Hooks](hooks) | Lifecycle observers with `hook_event` and `hook_action`. |
-| [Extends](extends) | Cross-layer inheritance with `extends:`. |
 | [Bundled resources](bundled-resources) | Scripts, references, assets, and other files that ship alongside the manifest files: `SKILL.md` for skills, with an optional `ARTIFACT.md`, and `ARTIFACT.md` for other types. |
 | [Hints](hints) | Advisory metadata: `effort_hint` and `model_class_hint`. |
 

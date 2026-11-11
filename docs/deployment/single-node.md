@@ -144,7 +144,7 @@ The shared library does the same parsing, composition, and adapter work in both 
 - **Runtime discovery** through the Podium MCP server. Agents call `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` to materialize only what they need.
 - **Hybrid retrieval.** BM25 hits and vector hits are fused by reciprocal rank fusion. BM25 runs over manifest text, and vectors come from the configured embedding provider. `--no-embeddings` disables embeddings so search runs BM25-only.
 - **Single audit log** capturing every read, ingest, and admin action. It is an append-only hash-chained file at `~/.podium/audit.log`, relocated by `PODIUM_AUDIT_LOG_PATH`, with retention enforced daily against `PODIUM_AUDIT_RETENTION_MAX_AGE_DAYS` (default 365).
-- **Cross-type dependency graph.** `extends:`, `delegates_to:`, and `mcpServers:` references are all tracked.
+- **Cross-type dependency graph.** `delegates_to:` and `mcpServers:` references are both tracked.
 - **Layer composition.** Several sources compose into one ordered catalog, so a deployment that starts with a single permissive layer already has the layer system in place for the second one. Visibility filtering runs once an identity provider is configured; without one the registry resolves every caller as anonymous and admits every layer. See [Layered composition](layers) and [Access control](access-control).
 - **Lint as a CI check.** Run `podium lint` against the registry repo's PRs.
 

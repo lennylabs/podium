@@ -69,16 +69,15 @@ body or a large resource; the object-storage SLA dashboard shows
 degradation.
 
 **Impact.** The registry admits each stored row before it serves the
-row's content, and admission reads the object-held bodies of every row
-in the requested artifact's `extends:` chain, parents included. A full
-`load_artifact` of an artifact whose chain holds any object-held
-bundled-resource body is refused with `registry.unavailable`. A full
+row's content, and admission reads the object-held bundled-resource
+bodies of the requested row. A full `load_artifact` of an artifact whose
+row holds any object-held bundled-resource body is refused with `registry.unavailable`. A full
 load whose manifest document goes through the manifest-body channel (a
 document above the 256 KiB inline cutoff) is refused with
 `registry.unavailable` when the registry's object-store write or stat
 fails. A full load whose presigned manifest-body or large-resource
 fetch fails returns `materialize.fetch_failed` at the consumer. Only a
-load whose whole chain holds inline bundled resources, and whose
+load whose row holds inline bundled resources, and whose
 manifest document is below the cutoff, loads in full. A HEAD
 revalidation and a matching conditional GET read no object storage and
 are answered from the stored content hash, so a consumer in any cache

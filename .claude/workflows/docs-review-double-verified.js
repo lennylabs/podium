@@ -29,7 +29,7 @@ const GROUPS = [
   },
   {
     key: 'authoring-reference',
-    pages: 'docs/authoring/ (frontmatter-reference, domains, rule-modes, hooks, extends, bundled-resources, hints)',
+    pages: 'docs/authoring/ (frontmatter-reference, domains, rule-modes, hooks, bundled-resources, hints)',
     focus:
       'Field names, types, requiredness, defaults, merge semantics, hook event names, and size limits, against pkg/manifest and pkg/lint.',
   },
