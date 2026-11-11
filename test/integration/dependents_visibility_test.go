@@ -109,3 +109,58 @@ func TestDependents_InvisibleTargetReturnsEmpty200(t *testing.T) {
 		t.Errorf("alice = %d %s, want the acme/child edge", status, body)
 	}
 }
+
+// Spec: §4.7.3, §4.6 — the reverse index is keyed by artifact ID and admits no
+// edge whose source ID has only rows the no-inheritance rule retires. A
+// delegates_to edge stored for an ID whose only row declares extends: is
+// absent from GET /v1/dependents, while an edge from a servable source to the
+// same target is returned.
+func TestDependents_AllRetiredSourceEdgeNotReturned(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := store.NewMemory()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "default", Name: "default"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	rlvLayer(t, st, store.LayerConfig{TenantID: "default", ID: "team", Order: 1, Public: true})
+	rlvManifest(t, st, store.ManifestRecord{
+		TenantID: "default", ArtifactID: "acme/target", Version: "1.0.0", Layer: "team", Type: "context",
+		Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\n---\n\nTarget.\n"),
+	})
+	rlvManifest(t, st, store.ManifestRecord{
+		TenantID: "default", ArtifactID: "acme/live", Version: "1.0.0", Layer: "team", Type: "agent",
+		Frontmatter: []byte("---\ntype: agent\nversion: 1.0.0\ndelegates_to: [acme/target]\n---\n\nLive.\n"),
+	})
+	rlvManifest(t, st, store.ManifestRecord{
+		TenantID: "default", ArtifactID: "acme/legacy", Version: "1.0.0", Layer: "team", Type: "agent",
+		Frontmatter: []byte("---\ntype: agent\nversion: 1.0.0\nextends: acme/live\ndelegates_to: [acme/target]\n---\n\nLegacy.\n"),
+	})
+	for _, from := range []string{"acme/live", "acme/legacy"} {
+		if err := st.PutDependency(ctx, "default", store.DependencyEdge{
+			From: from, To: "acme/target", Kind: "delegates_to",
+		}); err != nil {
+			t.Fatalf("PutDependency %s: %v", from, err)
+		}
+	}
+	ts := httptest.NewServer(server.New(core.New(st, "default", nil)).Handler())
+	t.Cleanup(ts.Close)
+
+	resp, err := http.Get(ts.URL + "/v1/dependents?id=acme/target")
+	if err != nil {
+		t.Fatalf("GET dependents: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var body struct {
+		Edges []struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+			Kind string `json:"kind"`
+		} `json:"edges"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("dependents = %d: %v", resp.StatusCode, err)
+	}
+	if len(body.Edges) != 1 || body.Edges[0].From != "acme/live" || body.Edges[0].Kind != "delegates_to" {
+		t.Errorf("edges = %+v, want only the acme/live delegates_to edge", body.Edges)
+	}
+}
