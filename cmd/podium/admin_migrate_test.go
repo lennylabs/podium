@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"os"
@@ -229,6 +230,15 @@ func TestAdminMigrateToStandard_PumpsMetadataAndObjects(t *testing.T) {
 		t.Errorf("target team-private = Repo %q, CloneRepo %q; want the source's %q and %q",
 			dstPrivate.Repo, dstPrivate.CloneRepo(), srcPrivate.CloneRepo(), srcPrivate.Repo)
 	}
+	// Spec: §7.3.1 (Repository credentials) — the target store writes the
+	// userinfo apart from the rest of the value.
+	wantRow := rawRepoRow{
+		Repo:     "https://git.acme.com/acme/private.git",
+		Userinfo: sql.NullString{String: "alice-user:s3cr3tpw", Valid: true},
+	}
+	if got := readRawRepoRow(t, dstDB, "default", "team-private"); got != wantRow {
+		t.Errorf("target team-private row = %+v, want %+v", got, wantRow)
+	}
 
 	// Assert: target object store carries the blob.
 	dstStore, err := objectstore.Open(dstObjs)
@@ -251,6 +261,30 @@ func TestAdminMigrateToStandard_PumpsMetadataAndObjects(t *testing.T) {
 	if string(got) != "audit line\n" {
 		t.Errorf("audit log = %q, want passthrough", got)
 	}
+}
+
+// rawRepoRow is the repo and repo_userinfo columns of one layer_configs row,
+// read with no store read rule in between.
+type rawRepoRow struct {
+	Repo     string
+	Userinfo sql.NullString
+}
+
+// readRawRepoRow reads the repo columns of one layer row from the SQLite file
+// at path over a connection of its own.
+func readRawRepoRow(t *testing.T, path, tenantID, id string) rawRepoRow {
+	t.Helper()
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var row rawRepoRow
+	if err := db.QueryRow(`SELECT repo, repo_userinfo FROM layer_configs WHERE tenant_id = ? AND id = ?`,
+		tenantID, id).Scan(&row.Repo, &row.Userinfo); err != nil {
+		t.Fatalf("select repo, repo_userinfo for %s/%s: %v", tenantID, id, err)
+	}
+	return row
 }
 
 // Spec: §13.10 / §4.7.1 — a real standalone source keys every row by the

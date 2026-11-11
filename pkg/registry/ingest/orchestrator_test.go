@@ -2,8 +2,10 @@ package ingest_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io/fs"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -154,6 +156,86 @@ func TestSourceIngest_ProviderReceivesCloneRepo(t *testing.T) {
 					stamped.CloneRepo(), stamped.Repo, tc.registered, tc.repo)
 			}
 		})
+	}
+}
+
+// rawStampedRow is the repo columns and the stamped ref of one layer_configs
+// row, read with no store read rule in between.
+type rawStampedRow struct {
+	Repo            string
+	Userinfo        sql.NullString
+	LastIngestedRef string
+}
+
+// Spec: §7.3.1 (Repository credentials) — over the SQLite store, a row that
+// holds the registered URL whole in repo, the form an earlier release wrote,
+// still clones with that URL, and the post-ingest stamp writes it back with
+// the userinfo apart from the rest of the value.
+func TestSourceIngest_StampWritesUserinfoApartOnSQLite(t *testing.T) {
+	t.Parallel()
+	const (
+		registered = "https://alice-user:s3cr3tpw@git.acme.com/acme/x.git"
+		bare       = "https://git.acme.com/acme/x.git"
+	)
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "podium.db")
+	st, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	if err := st.PutLayerConfig(ctx, store.LayerConfig{
+		TenantID: "t", ID: "private", SourceType: "fake", Repo: registered, Ref: "main",
+	}); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	res, err := db.Exec(`UPDATE layer_configs SET repo = ?, repo_userinfo = NULL WHERE tenant_id = ? AND id = ?`,
+		registered, "t", "private")
+	if err != nil {
+		t.Fatalf("rewrite the row to the earlier form: %v", err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		t.Fatalf("rewrite the row to the earlier form: %d rows, err %v; want 1 row", n, err)
+	}
+	cfg, err := st.GetLayerConfig(ctx, "t", "private")
+	if err != nil {
+		t.Fatalf("GetLayerConfig: %v", err)
+	}
+
+	provider := &fakeProvider{
+		files: fstest.MapFS{"g/ARTIFACT.md": &fstest.MapFile{
+			Data: []byte(contextManifestBody("glossary")),
+		}},
+		reference: "fedcba9876543210",
+	}
+	if _, err := ingest.SourceIngest(ctx, st, provider, cfg, nil, nil); err != nil {
+		t.Fatalf("SourceIngest: %v", err)
+	}
+	var row rawStampedRow
+	if err := db.QueryRow(`SELECT repo, repo_userinfo, last_ingested_ref FROM layer_configs WHERE tenant_id = ? AND id = ?`,
+		"t", "private").Scan(&row.Repo, &row.Userinfo, &row.LastIngestedRef); err != nil {
+		t.Fatalf("select the stamped row: %v", err)
+	}
+
+	type stamp struct {
+		ClonedWith string
+		Row        rawStampedRow
+	}
+	want := stamp{ClonedWith: registered, Row: rawStampedRow{
+		Repo:            bare,
+		Userinfo:        sql.NullString{String: "alice-user:s3cr3tpw", Valid: true},
+		LastIngestedRef: "fedcba9876543210",
+	}}
+	if got := (stamp{provider.calledWithRepo, row}); got != want {
+		t.Errorf("ingest of an earlier-form row = %+v, want %+v", got, want)
 	}
 }
 
