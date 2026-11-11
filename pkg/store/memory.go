@@ -449,12 +449,14 @@ func (s *Memory) IsOperator(_ context.Context, identity string) (bool, error) {
 
 func layerKey(tenantID, id string) string { return tenantID + "/" + id }
 
-// PutLayerConfig inserts or replaces a layer config. The map holds what a SQL
-// row holds: the registered bytes in Repo and no RegisteredRepo.
+// PutLayerConfig inserts or replaces a layer config. The map holds the
+// registered bytes in Repo and no RegisteredRepo. The memory store has no
+// repo_userinfo slot and nothing reads its map but this file, so it does not
+// take the two-column form the SQL stores write.
 //
 // Spec: §7.3.1 (Repository credentials)
 func (s *Memory) PutLayerConfig(_ context.Context, cfg LayerConfig) error {
-	repo, err := LayerRepoColumn(cfg)
+	repo, err := registeredLayerRepo(cfg)
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -232,7 +233,8 @@ func TestLayerConfig_StoreReadPrintsNoCredential(t *testing.T) {
 // Spec: §7.3.1 (Repository credentials) — an empty RegisteredRepo is the
 // state of every layer outside the split class and of every config a caller
 // builds. It prints as the empty string, the clone reads Repo, and the write
-// rule stores Repo verbatim.
+// rule splits Repo itself: a split-class value into its bare form and its
+// userinfo, and every other value whole with a NULL userinfo.
 func TestRegisteredRepo_EmptyValue(t *testing.T) {
 	t.Parallel()
 	var empty RegisteredRepo
@@ -240,14 +242,19 @@ func TestRegisteredRepo_EmptyValue(t *testing.T) {
 		t.Errorf("empty RegisteredRepo: Present %t, String %q, GoString %q; want false and empty strings",
 			empty.Present(), empty.String(), empty.GoString())
 	}
-	// A value the classifier would refuse as a RegisteredRepo is stored as
-	// given when it arrives in Repo alone.
-	for _, repo := range []string{"", "git@github.com:acme/x.git", "https://ghp_tok3n@git.acme.com/x.git", "https://ghp_tok/3n@host/x.git"} {
+	// A value the classifier would refuse as a RegisteredRepo is stored whole
+	// when it arrives in Repo alone, and a credentialed value is split.
+	for repo, want := range map[string]layerRepoColumns{
+		"":                                     {},
+		"git@github.com:acme/x.git":            {Repo: "git@github.com:acme/x.git"},
+		"https://ghp_tok3n@git.acme.com/x.git": {Repo: "https://git.acme.com/x.git", Userinfo: sql.NullString{String: "ghp_tok3n", Valid: true}},
+		"https://ghp_tok/3n@host/x.git":        {Repo: "https://ghp_tok/3n@host/x.git"},
+	} {
 		cfg := LayerConfig{Repo: repo}
-		col, err := LayerRepoColumn(cfg)
-		if err != nil || col != repo || cfg.CloneRepo() != repo {
-			t.Errorf("config with Repo %q and no RegisteredRepo: column %q, err %v, CloneRepo %q; want %q throughout",
-				repo, col, err, cfg.CloneRepo(), repo)
+		col, userinfo, err := LayerRepoColumns(cfg)
+		if got := (layerRepoColumns{Repo: col, Userinfo: userinfo}); err != nil || got != want || cfg.CloneRepo() != repo {
+			t.Errorf("config with Repo %q and no RegisteredRepo: columns %+v, err %v, CloneRepo %q; want %+v and CloneRepo %q",
+				repo, got, err, cfg.CloneRepo(), want, repo)
 		}
 	}
 	present := RegisteredRepo("https://ghp_tok3n@git.acme.com/x.git")

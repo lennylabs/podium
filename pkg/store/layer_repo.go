@@ -86,16 +86,9 @@ func recombineLayerRepo(repo string, userinfo sql.NullString) string {
 	return joined
 }
 
-// LayerRepoColumn is the write rule every RegistryStore applies in
-// PutLayerConfig. It returns the value of the repo column.
-//
-// A config with no RegisteredRepo stores its Repo. A config with one stores
-// the registered bytes, provided they are in the split class and redact to
-// Repo. Any other config returns ErrRepoCredentialMismatch and an empty
-// string.
-//
-// Spec: §7.3.1 (Repository credentials)
-func LayerRepoColumn(cfg LayerConfig) (string, error) {
+// registeredLayerRepo returns the registered remote a config carries: its
+// RegisteredRepo when present and valid, and its Repo otherwise.
+func registeredLayerRepo(cfg LayerConfig) (string, error) {
 	if !cfg.RegisteredRepo.Present() {
 		return cfg.Repo, nil
 	}
@@ -105,4 +98,35 @@ func LayerRepoColumn(cfg LayerConfig) (string, error) {
 		return "", ErrRepoCredentialMismatch
 	}
 	return registered, nil
+}
+
+// LayerRepoColumns is the write rule every SQL RegistryStore applies in
+// PutLayerConfig. It returns the values of the repo and repo_userinfo columns.
+//
+// A registered value in the split class is returned as its bare form and a
+// valid userinfo, the empty string included. Every other value is returned
+// whole with an invalid NullString. A config whose RegisteredRepo is outside
+// the split class or does not redact to its Repo returns
+// ErrRepoCredentialMismatch.
+//
+// Spec: §7.3.1 (Repository credentials)
+func LayerRepoColumns(cfg LayerConfig) (string, sql.NullString, error) {
+	registered, err := registeredLayerRepo(cfg)
+	if err != nil {
+		return "", sql.NullString{}, err
+	}
+	parts, ok := repourl.Split(registered)
+	if !ok {
+		return registered, sql.NullString{}, nil
+	}
+	userinfo := sql.NullString{String: parts.RawUserinfo, Valid: true}
+	// This branch cannot run for the current classifier: Join(Bare,
+	// RawUserinfo) returns the registered bytes for every split-class value.
+	// It keeps the registered bytes whole if a classifier change breaks that,
+	// so a row is never written in a form that reads back without its
+	// credential.
+	if recombineLayerRepo(parts.Bare, userinfo) != registered {
+		return registered, sql.NullString{}, nil
+	}
+	return parts.Bare, userinfo, nil
 }

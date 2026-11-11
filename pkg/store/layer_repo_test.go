@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math/rand/v2"
 	"os"
+	"slices"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/lennylabs/podium/internal/repourl"
 )
 
 // Spec: §7.3.1 (Repository credentials) — the read rule recombines a repo
@@ -61,43 +64,140 @@ func TestSplitLayerRepo(t *testing.T) {
 	}
 }
 
-// Spec: §7.3.1 (Repository credentials) — the write rule stores the
-// registered bytes only when they are in the split class and redact to Repo.
+// Spec: §7.3.1 (Repository credentials) — the write rule returns a
+// registered value in the split class as its bare form and its userinfo, the
+// empty userinfo included, and every other value whole with a NULL userinfo.
+// It splits RegisteredRepo when present and Repo otherwise.
 //
 // The conformance error path reaches the Clean != Repo half with a registered
-// value inside the split class. The first rows here reach the split-class
+// value inside the split class. The first refusing rows reach the split-class
 // half: each pairs a registered value outside the class with the Repo its
 // redaction reports, so a rule that compares the redaction alone accepts
-// them. The last row fails a rule that redacts Repo before comparing, because
-// redacting that Repo a second time gives [redacted].
-func TestLayerRepoColumn(t *testing.T) {
+// them. The reported-form row fails a rule that redacts Repo before
+// comparing, because redacting that Repo a second time gives [redacted].
+func TestLayerRepoColumns(t *testing.T) {
 	t.Parallel()
+	registered := func(reg, repo string) LayerConfig {
+		return LayerConfig{Repo: repo, RegisteredRepo: RegisteredRepo(reg)}
+	}
+	split := func(bare, userinfo string) layerRepoColumns {
+		return layerRepoColumns{Repo: bare, Userinfo: sql.NullString{String: userinfo, Valid: true}}
+	}
+	whole := func(repo string) layerRepoColumns { return layerRepoColumns{Repo: repo} }
 	cases := []struct {
-		name       string
-		registered string
-		repo       string
-		want       string
-		refused    bool
+		name    string
+		cfg     LayerConfig
+		want    layerRepoColumns
+		refused bool
 	}{
-		{"fail-closed registered value", "https://ghp_tok/3n@host/x.git", "[redacted]", "", true},
-		{"scp-like registered value", "git@github.com:acme/x.git", "git@github.com:acme/x.git", "", true},
-		{"network-path registered value", "//tok@host/x://y", "//host/x://y", "", true},
-		{"registered value without userinfo", "https://git.acme.com/x.git", "https://git.acme.com/x.git", "", true},
-		{"split class, Repo differs", "https://ghp_tok3n@git.acme.com/x.git", "https://git.acme.com/other.git", "", true},
-		{"split class, Repo matches", "https://ghp_tok3n@git.acme.com/x.git", "https://git.acme.com/x.git",
-			"https://ghp_tok3n@git.acme.com/x.git", false},
-		{"reported form carries @ after the host", "https://ghp_tok3n@git.acme.com/acme/a%40b c.git",
-			"https://git.acme.com/acme/a@b%20c.git", "https://ghp_tok3n@git.acme.com/acme/a%40b c.git", false},
+		{"fail-closed registered value", registered("https://ghp_tok/3n@host/x.git", "[redacted]"), layerRepoColumns{}, true},
+		{"scp-like registered value", registered("git@github.com:acme/x.git", "git@github.com:acme/x.git"), layerRepoColumns{}, true},
+		{"network-path registered value", registered("//tok@host/x://y", "//host/x://y"), layerRepoColumns{}, true},
+		{"registered value without userinfo", registered("https://git.acme.com/x.git", "https://git.acme.com/x.git"), layerRepoColumns{}, true},
+		{"split class, Repo differs", registered("https://ghp_tok3n@git.acme.com/x.git", "https://git.acme.com/other.git"), layerRepoColumns{}, true},
+		{"split class, Repo matches", registered("https://ghp_tok3n@git.acme.com/x.git", "https://git.acme.com/x.git"),
+			split("https://git.acme.com/x.git", "ghp_tok3n"), false},
+		{"reported form carries @ after the host",
+			registered("https://ghp_tok3n@git.acme.com/acme/a%40b c.git", "https://git.acme.com/acme/a@b%20c.git"),
+			split("https://git.acme.com/acme/a%40b c.git", "ghp_tok3n"), false},
+		{"credential in Repo alone", LayerConfig{Repo: "https://ghp_tok3n@git.acme.com/x.git"},
+			split("https://git.acme.com/x.git", "ghp_tok3n"), false},
+		{"empty userinfo", LayerConfig{Repo: "https://@git.acme.com/x.git"}, split("https://git.acme.com/x.git", ""), false},
+		{"colon userinfo", LayerConfig{Repo: "https://:@host/x"}, split("https://host/x", ":"), false},
+		{"userinfo with @", LayerConfig{Repo: "https://a@b@host/x"}, split("https://host/x", "a@b"), false},
+		{"uppercase scheme", LayerConfig{Repo: "HTTPS://t@host/a.git"}, split("HTTPS://host/a.git", "t"), false},
+		{"ssh with port, query, and fragment", LayerConfig{Repo: "ssh://u:p@h:22/x?y#z@w"}, split("ssh://h:22/x?y#z@w", "u:p"), false},
+		{"scp-like remote", LayerConfig{Repo: "git@github.com:acme/x.git"}, whole("git@github.com:acme/x.git"), false},
+		{"filesystem path", LayerConfig{Repo: "/srv/git/acme.git"}, whole("/srv/git/acme.git"), false},
+		{"network-path value", LayerConfig{Repo: "//tok@host/x://y"}, whole("//tok@host/x://y"), false},
+		{"fail-closed value", LayerConfig{Repo: "https://ghp_tok/3n@host/x.git"}, whole("https://ghp_tok/3n@host/x.git"), false},
+		{"userinfo-free URL", LayerConfig{Repo: "https://git.acme.com/x.git"}, whole("https://git.acme.com/x.git"), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := LayerRepoColumn(LayerConfig{Repo: tc.repo, RegisteredRepo: RegisteredRepo(tc.registered)})
+			repo, userinfo, err := LayerRepoColumns(tc.cfg)
+			got := layerRepoColumns{Repo: repo, Userinfo: userinfo}
 			if got != tc.want || errors.Is(err, ErrRepoCredentialMismatch) != tc.refused || (err != nil) != tc.refused {
-				t.Errorf("LayerRepoColumn(registered %q, repo %q) = %q, %v; want %q, refused %t",
-					tc.registered, tc.repo, got, err, tc.want, tc.refused)
+				t.Errorf("LayerRepoColumns(registered %q, repo %q) = %+v, %v; want %+v, refused %t",
+					string(tc.cfg.RegisteredRepo), tc.cfg.Repo, got, err, tc.want, tc.refused)
 			}
 		})
+	}
+}
+
+// layerRepoCorpus returns the round-trip test's inputs: every combination of
+// a scheme prefix, a userinfo, a host, and a path, followed by values drawn
+// from an adversarial alphabet under a fixed seed. The prefixes cover an
+// uppercase scheme, the http class with its fail-closed '@' check, a scheme
+// outside that class, a network-path value, and no scheme, and the explicit
+// entries add an scp-like remote and a filesystem path.
+func layerRepoCorpus() []string {
+	schemes := []string{"https://", "HTTPS://", "http://", "ssh://", "git+ssh://", "file://", "//", ""}
+	userinfos := []string{"-", "", "tok", "u:p", ":", "a@b", "t%40k", "a b", "t/k", "t?k", "t#k", "t:p%2F"}
+	hosts := []string{"git.acme.com", "h:22", ""}
+	paths := []string{"", "/x.git", "/a b.git", "/a%40b", "/x?y#z@w", "/x@y", "/x://y", "?q@r", "#f@g"}
+	corpus := []string{"git@github.com:acme/x.git", "/srv/git/acme.git", "./rel/x.git", "", "https://"}
+	for _, scheme := range schemes {
+		for _, userinfo := range userinfos {
+			for _, host := range hosts {
+				for _, path := range paths {
+					authority := host
+					if userinfo != "-" {
+						authority = userinfo + "@" + host
+					}
+					corpus = append(corpus, scheme+authority+path)
+				}
+			}
+		}
+	}
+	const alphabet = "@:/?#% aZ.%40"
+	rng := rand.New(rand.NewPCG(54, 2))
+	for range 4000 {
+		b := []byte(schemes[rng.IntN(len(schemes))])
+		for range rng.IntN(16) {
+			b = append(b, alphabet[rng.IntN(len(alphabet))])
+		}
+		corpus = append(corpus, string(b))
+	}
+	return corpus
+}
+
+// Spec: §7.3.1 (Repository credentials) — the read of what the write rule
+// stores returns what the read of the registered value held whole returns, for
+// every value a caller registers. A value the write splits must rejoin into
+// the registered bytes, and a value it keeps whole must read as held. This is
+// the invariant the write rule's unreachable fallback guards.
+func TestLayerRepoColumns_RoundTrip(t *testing.T) {
+	t.Parallel()
+	type read struct {
+		Repo       string
+		Registered RegisteredRepo
+	}
+	var classes struct{ split, emptyUserinfo, failClosed, noScheme, wholeURL int }
+	for _, x := range layerRepoCorpus() {
+		repo, userinfo, err := LayerRepoColumns(LayerConfig{Repo: x})
+		var got, want read
+		got.Repo, got.Registered = SplitLayerRepo(repo, userinfo)
+		want.Repo, want.Registered = SplitLayerRepo(x, sql.NullString{})
+		if err != nil || got != want {
+			t.Errorf("value %q: stored as %q, %+v (err %v) reads %+v; held whole it reads %+v", x, repo, userinfo, err, got, want)
+		}
+		switch parts, ok := repourl.Split(x); {
+		case ok && parts.RawUserinfo == "":
+			classes.emptyUserinfo++
+		case ok:
+			classes.split++
+		case repourl.Unsafe(x):
+			classes.failClosed++
+		case !strings.Contains(x, "://"):
+			classes.noScheme++
+		default:
+			classes.wholeURL++
+		}
+	}
+	if classes.split == 0 || classes.emptyUserinfo == 0 || classes.failClosed == 0 || classes.noScheme == 0 || classes.wholeURL == 0 {
+		t.Errorf("corpus misses a class: %+v", classes)
 	}
 }
 
@@ -122,40 +222,6 @@ func rawLayerRepo(t *testing.T, q rowQuerier, query, tenantID, id string) layerR
 	}
 	return got
 }
-
-const pgSelectLayerRepo = `SELECT repo, repo_userinfo FROM layer_configs WHERE tenant_id = $1 AND id = $2`
-
-// legacyPostgresPutLayerConfig is a frozen copy of the upsert that the 0.5.2
-// Postgres PutLayerConfig executes (git show v0.5.2:pkg/store/postgres.go).
-// It names no repo_userinfo column. Delete it, with the rollback test that
-// executes it, when step 2 of the credential split raises the rollback floor
-// above 0.5.2.
-const legacyPostgresPutLayerConfig = `
-		INSERT INTO layer_configs
-			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
-			 user_defined, owner, public, organization, groups, users,
-			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
-		ON CONFLICT (tenant_id, id) DO UPDATE SET
-			source_type = EXCLUDED.source_type,
-			repo = EXCLUDED.repo,
-			ref = EXCLUDED.ref,
-			root = EXCLUDED.root,
-			local_path = EXCLUDED.local_path,
-			ord = EXCLUDED.ord,
-			user_defined = EXCLUDED.user_defined,
-			owner = EXCLUDED.owner,
-			public = EXCLUDED.public,
-			organization = EXCLUDED.organization,
-			groups = EXCLUDED.groups,
-			users = EXCLUDED.users,
-			webhook_secret = EXCLUDED.webhook_secret,
-			last_ingested_ref = EXCLUDED.last_ingested_ref,
-			force_push_policy = EXCLUDED.force_push_policy,
-			git_provider = EXCLUDED.git_provider,
-			created_at = EXCLUDED.created_at,
-			deleted_at = EXCLUDED.deleted_at,
-			last_ingested_at = EXCLUDED.last_ingested_at`
 
 // openPostgresOrg opens the Postgres store named by PODIUM_POSTGRES_DSN and
 // returns it with a connection pinned to a fresh org schema for tenantID, so
@@ -194,79 +260,173 @@ func openPostgresOrg(t *testing.T, tenantID string) (*Postgres, *sql.Conn) {
 	return p, conn
 }
 
-// Spec: §7.3.1 (Repository credentials) — "stores it unchanged". After a put
-// and a read-modify-write of a credential-bearing layer on Postgres, the repo
-// column holds the registered bytes and repo_userinfo is NULL.
-func TestPostgres_LayerRepoColumnHoldsRegisteredBytes(t *testing.T) {
-	const tenant, registered = "layer-repo-raw", "https://alice-user:s3cr3tpw@git.acme.com/acme/a b.git"
-	p, conn := openPostgresOrg(t, tenant)
-	ctx := context.Background()
-	want := layerRepoColumns{Repo: registered}
+// layerRepoDB is the raw access both *sql.DB and *sql.Conn offer.
+type layerRepoDB interface {
+	rowQuerier
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
 
-	if err := p.PutLayerConfig(ctx, LayerConfig{TenantID: tenant, ID: "team", SourceType: "git", Repo: registered}); err != nil {
-		t.Fatalf("PutLayerConfig: %v", err)
-	}
-	if got := rawLayerRepo(t, conn, pgSelectLayerRepo, tenant, "team"); got != want {
-		t.Errorf("columns after put = %+v, want %+v", got, want)
-	}
+// layerRepoBackend is a SQL store under test together with raw access to its
+// layer_configs table. The queries carry the backend's placeholders: sel takes
+// the tenant and the layer ID, and toEarlier takes the repo, the tenant, and
+// the layer ID.
+type layerRepoBackend struct {
+	st        Store
+	db        layerRepoDB
+	tenant    string
+	sel       string
+	toEarlier string
+}
 
-	cfg, err := p.GetLayerConfig(ctx, tenant, "team")
+func (b layerRepoBackend) raw(t *testing.T, id string) layerRepoColumns {
+	t.Helper()
+	return rawLayerRepo(t, b.db, b.sel, b.tenant, id)
+}
+
+// layerRepoRead is what a store read returns for a layer's repo.
+type layerRepoRead struct {
+	Repo  string
+	Clone string
+}
+
+func layerRepoReads(cfgs ...LayerConfig) []layerRepoRead {
+	out := make([]layerRepoRead, 0, len(cfgs))
+	for _, c := range cfgs {
+		out = append(out, layerRepoRead{Repo: c.Repo, Clone: c.CloneRepo()})
+	}
+	return out
+}
+
+// mustDo fails the test on err. It keeps the store calls below free of their
+// own branches, so each test step ends in one combined comparison.
+func mustDo(t *testing.T, step string, err error) {
+	t.Helper()
 	if err != nil {
-		t.Fatalf("GetLayerConfig: %v", err)
-	}
-	cfg.LastIngestedRef = "abc123"
-	if err := p.PutLayerConfig(ctx, cfg); err != nil {
-		t.Fatalf("PutLayerConfig (read-modify-write): %v", err)
-	}
-	if got := rawLayerRepo(t, conn, pgSelectLayerRepo, tenant, "team"); got != want {
-		t.Errorf("columns after read-modify-write = %+v, want %+v", got, want)
+		t.Fatalf("%s: %v", step, err)
 	}
 }
 
-// Spec: §7.3.1 (Repository credentials) — a 0.5.2 binary runs against a
-// Postgres database this release created and wrote. The statement is the
-// frozen 0.5.2 upsert, which names no repo_userinfo column, so the test fails
-// if the column is ever declared NOT NULL without a default. Delete this test
-// when step 2 of the credential split raises the rollback floor.
-func TestPostgres_LayerRepoRollbackWriter(t *testing.T) {
-	const tenant, registered = "layer-repo-rollback", "https://alice-user:s3cr3tpw@git.acme.com/acme/x.git"
-	p, conn := openPostgresOrg(t, tenant)
-	ctx := context.Background()
+const (
+	pgSelectLayerRepo     = `SELECT repo, repo_userinfo FROM layer_configs WHERE tenant_id = $1 AND id = $2`
+	pgLayerRepoToEarlier  = `UPDATE layer_configs SET repo = $1, repo_userinfo = NULL WHERE tenant_id = $2 AND id = $3`
+	layerRepoCredentialed = "https://alice-user:s3cr3tpw@git.acme.com/acme/a b.git"
+)
 
-	// This release writes the row first, so the 0.5.2 statement takes both
-	// the insert arm (a new layer) and the conflict arm (the existing one).
-	if err := p.PutLayerConfig(ctx, LayerConfig{TenantID: tenant, ID: "existing", SourceType: "git", Repo: registered}); err != nil {
-		t.Fatalf("PutLayerConfig: %v", err)
+// checkLayerRepoColumnsHoldBareAndUserinfo puts one layer per value, then gets
+// it and puts it back, and asserts the raw columns after each put.
+func checkLayerRepoColumnsHoldBareAndUserinfo(t *testing.T, b layerRepoBackend) {
+	ctx := context.Background()
+	split := func(bare, userinfo string) layerRepoColumns {
+		return layerRepoColumns{Repo: bare, Userinfo: sql.NullString{String: userinfo, Valid: true}}
 	}
-	for _, id := range []string{"existing", "added"} {
-		if _, err := conn.ExecContext(ctx, legacyPostgresPutLayerConfig,
-			tenant, id, "git", registered, "main", "", "", 0,
-			false, "", false, false, "", "",
-			"", "", "", "", time.Now().UTC(), nil, nil); err != nil {
-			t.Fatalf("0.5.2 writer on layer %q: %v", id, err)
-		}
-		got, err := p.GetLayerConfig(ctx, tenant, id)
-		if err != nil {
-			t.Fatalf("GetLayerConfig(%q): %v", id, err)
-		}
-		if got.Repo != "https://git.acme.com/acme/x.git" || got.CloneRepo() != registered {
-			t.Errorf("layer %q after the 0.5.2 writer: Repo %q, CloneRepo %q; want the split of %q",
-				id, got.Repo, got.CloneRepo(), registered)
+	cases := []struct {
+		id   string
+		repo string
+		want layerRepoColumns
+	}{
+		{"credentialed", layerRepoCredentialed, split("https://git.acme.com/acme/a b.git", "alice-user:s3cr3tpw")},
+		{"empty-userinfo", "https://@git.acme.com/x.git", split("https://git.acme.com/x.git", "")},
+		{"scp-like", "git@github.com:acme/x.git", layerRepoColumns{Repo: "git@github.com:acme/x.git"}},
+		{"path", "/srv/git/acme.git", layerRepoColumns{Repo: "/srv/git/acme.git"}},
+		{"network-path", "//tok@host/x://y", layerRepoColumns{Repo: "//tok@host/x://y"}},
+		{"fail-closed", "https://ghp_tok/3n@host/x.git", layerRepoColumns{Repo: "https://ghp_tok/3n@host/x.git"}},
+	}
+	for _, tc := range cases {
+		mustDo(t, "PutLayerConfig "+tc.id, b.st.PutLayerConfig(ctx, LayerConfig{TenantID: b.tenant, ID: tc.id, SourceType: "git", Repo: tc.repo}))
+		afterPut := b.raw(t, tc.id)
+		cfg, err := b.st.GetLayerConfig(ctx, b.tenant, tc.id)
+		mustDo(t, "GetLayerConfig "+tc.id, err)
+		cfg.LastIngestedRef = "abc123"
+		mustDo(t, "PutLayerConfig (read-modify-write) "+tc.id, b.st.PutLayerConfig(ctx, cfg))
+		if got := [2]layerRepoColumns{afterPut, b.raw(t, tc.id)}; got != [2]layerRepoColumns{tc.want, tc.want} {
+			t.Errorf("layer %q columns after put and after read-modify-write = %+v, want %+v twice", tc.id, got, tc.want)
 		}
 	}
+}
+
+// checkLayerRepoEarlierFormRow sets a row this release wrote back to the form
+// an earlier version writes, and asserts that the reads return what they
+// returned before, that a soft delete and a restore leave the row in that
+// form, and that the next put writes the two-column form again.
+func checkLayerRepoEarlierFormRow(t *testing.T, b layerRepoBackend) {
+	ctx := context.Background()
+	const id = "team"
+	twoColumn := layerRepoColumns{
+		Repo:     "https://git.acme.com/acme/a b.git",
+		Userinfo: sql.NullString{String: "alice-user:s3cr3tpw", Valid: true},
+	}
+	earlier := layerRepoColumns{Repo: layerRepoCredentialed}
+
+	mustDo(t, "PutLayerConfig", b.st.PutLayerConfig(ctx, LayerConfig{TenantID: b.tenant, ID: id, SourceType: "git", Repo: layerRepoCredentialed}))
+	if got := b.raw(t, id); got != twoColumn {
+		t.Fatalf("columns after put = %+v, want %+v", got, twoColumn)
+	}
+	before, err := b.st.GetLayerConfig(ctx, b.tenant, id)
+	mustDo(t, "GetLayerConfig before", err)
+	_, err = b.db.ExecContext(ctx, b.toEarlier, layerRepoCredentialed, b.tenant, id)
+	mustDo(t, "set the earlier form", err)
+
+	got, err := b.st.GetLayerConfig(ctx, b.tenant, id)
+	mustDo(t, "GetLayerConfig", err)
+	list, err := b.st.ListLayerConfigs(ctx, b.tenant)
+	mustDo(t, "ListLayerConfigs", err)
+	mustDo(t, "DeleteLayerConfig", b.st.DeleteLayerConfig(ctx, b.tenant, id))
+	afterDelete := b.raw(t, id)
+	deleted, err := b.st.ListDeletedLayerConfigs(ctx, b.tenant)
+	mustDo(t, "ListDeletedLayerConfigs", err)
+	mustDo(t, "RestoreLayerConfig", b.st.RestoreLayerConfig(ctx, b.tenant, id))
+	afterRestore := b.raw(t, id)
+	cfg, err := b.st.GetLayerConfig(ctx, b.tenant, id)
+	mustDo(t, "GetLayerConfig after restore", err)
+	mustDo(t, "PutLayerConfig (put back)", b.st.PutLayerConfig(ctx, cfg))
+	afterPut := b.raw(t, id)
+
+	reads := layerRepoReads(append(append([]LayerConfig{before, got}, list...), deleted...)...)
+	read := layerRepoRead{Repo: "https://git.acme.com/acme/a%20b.git", Clone: layerRepoCredentialed}
+	want := []layerRepoRead{read, read, read, read}
+	gotCols := [3]layerRepoColumns{afterDelete, afterRestore, afterPut}
+	wantCols := [3]layerRepoColumns{earlier, earlier, twoColumn}
+	if !slices.Equal(reads, want) || gotCols != wantCols {
+		t.Errorf("earlier-form row: reads %+v, want %+v; columns after delete, restore, and put back %+v, want %+v",
+			reads, want, gotCols, wantCols)
+	}
+}
+
+// postgresLayerRepoBackend opens a Postgres org for tenant as a layerRepoBackend.
+func postgresLayerRepoBackend(t *testing.T, tenant string) layerRepoBackend {
+	t.Helper()
+	p, conn := openPostgresOrg(t, tenant)
+	return layerRepoBackend{st: p, db: conn, tenant: tenant, sel: pgSelectLayerRepo, toEarlier: pgLayerRepoToEarlier}
+}
+
+// Spec: §7.3.1 (Repository credentials) — on Postgres, a put and a
+// read-modify-write of a split-class value store its bare form in repo and its
+// userinfo in repo_userinfo, the empty userinfo as a non-NULL empty string.
+// Every other value is stored whole beside a NULL repo_userinfo.
+func TestPostgres_LayerRepoColumnsHoldBareAndUserinfo(t *testing.T) {
+	checkLayerRepoColumnsHoldBareAndUserinfo(t, postgresLayerRepoBackend(t, "layer-repo-raw"))
+}
+
+// Spec: §7.3.1 (Repository credentials) — a Postgres row that holds the
+// registered value whole in repo, as an earlier version writes it, reads as
+// held, keeps that form through a soft delete and a restore, and takes the
+// two-column form at the next put.
+// Spec: §13.4
+func TestPostgres_LayerRepoEarlierFormRow(t *testing.T) {
+	checkLayerRepoEarlierFormRow(t, postgresLayerRepoBackend(t, "layer-repo-earlier"))
 }
 
 // Spec: §7.3.1 (Repository credentials) — the Postgres read honors a non-NULL
-// repo_userinfo column on the get, the list, and the deleted list, and the
-// next put clears the column.
+// repo_userinfo column on the get, the list, and the deleted list. The put
+// back writes the same two columns, and a later put of the layer with a
+// userinfo-free repo replaces repo_userinfo with NULL.
 //
 // The last assertion fails when repo_userinfo = EXCLUDED.repo_userinfo is
 // absent from the DO UPDATE SET list, because the upsert then leaves the
-// column holding ghp_tok3n beside a repo that already carries it. A store
-// read cannot stand in for the raw SELECT: once repo is in the split class
-// the read ignores the column, so a stale value is invisible to
-// GetLayerConfig.
-func TestPostgres_LayerRepoUserinfoColumnReadAndCleared(t *testing.T) {
+// column holding ghp_tok3n, and the read rejoins that credential to the new
+// repo. The put back cannot detect the omission, because it writes the value
+// the column already holds.
+func TestPostgres_LayerRepoUserinfoColumnReadAndReplaced(t *testing.T) {
 	const (
 		tenant = "layer-repo-forward"
 		bare   = "https://git.acme.com/x.git"
@@ -284,11 +444,12 @@ func TestPostgres_LayerRepoUserinfoColumnReadAndCleared(t *testing.T) {
 		}
 	}
 
-	// Step 1: the row exists, so the put in step 4 takes the ON CONFLICT arm.
+	// Step 1: the row exists, so the puts in steps 4 and 5 take the ON
+	// CONFLICT arm.
 	if err := p.PutLayerConfig(ctx, LayerConfig{TenantID: tenant, ID: "team", SourceType: "git", Repo: bare}); err != nil {
 		t.Fatalf("PutLayerConfig: %v", err)
 	}
-	// Step 2: the column holds what a step-2 writer would store.
+	// Step 2: the column holds the userinfo of the registered value.
 	if _, err := conn.ExecContext(ctx,
 		`UPDATE layer_configs SET repo_userinfo = 'ghp_tok3n' WHERE tenant_id = $1 AND id = $2`, tenant, "team"); err != nil {
 		t.Fatalf("set repo_userinfo: %v", err)
@@ -312,23 +473,14 @@ func TestPostgres_LayerRepoUserinfoColumnReadAndCleared(t *testing.T) {
 	if err := p.PutLayerConfig(ctx, cfg); err != nil {
 		t.Fatalf("PutLayerConfig (put back): %v", err)
 	}
-	// Step 5: the raw row holds the registered bytes and a cleared column.
-	if got, want := rawLayerRepo(t, conn, pgSelectLayerRepo, tenant, "team"), (layerRepoColumns{Repo: joined}); got != want {
-		t.Errorf("columns after the put back = %+v, want %+v", got, want)
+	afterPutBack := rawLayerRepo(t, conn, pgSelectLayerRepo, tenant, "team")
+	// Step 5: put the layer with a userinfo-free repo and no RegisteredRepo.
+	if err := p.PutLayerConfig(ctx, LayerConfig{TenantID: tenant, ID: "team", SourceType: "git", Repo: bare}); err != nil {
+		t.Fatalf("PutLayerConfig (userinfo-free): %v", err)
 	}
-}
-
-// Spec: §7.3.1 (Repository credentials) — the frozen 0.5.2 writers name no
-// repo_userinfo column. A copy edited to name it would no longer stand for
-// the 0.5.2 binary, and the rollback tests would pass without testing it.
-func TestLegacyLayerWriters_NameNoUserinfoColumn(t *testing.T) {
-	t.Parallel()
-	for name, stmt := range map[string]string{
-		"sqlite":   legacySQLitePutLayerConfig,
-		"postgres": legacyPostgresPutLayerConfig,
-	} {
-		if strings.Contains(stmt, "repo_userinfo") {
-			t.Errorf("the frozen 0.5.2 %s writer names repo_userinfo", name)
-		}
+	got := [2]layerRepoColumns{afterPutBack, rawLayerRepo(t, conn, pgSelectLayerRepo, tenant, "team")}
+	want := [2]layerRepoColumns{{Repo: bare, Userinfo: sql.NullString{String: "ghp_tok3n", Valid: true}}, {Repo: bare}}
+	if got != want {
+		t.Errorf("columns after the put back and after the userinfo-free put = %+v, want %+v", got, want)
 	}
 }
