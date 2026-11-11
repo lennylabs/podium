@@ -1,7 +1,7 @@
 # Proposal 0054: Store a git layer's URL credential in `layer_configs.repo_userinfo` and a userinfo-free `repo` (step 2 of 2)
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-08). Signed off as staged, with the open questions settled as recorded in "Resolved decisions" (RD-1 through RD-4). Verified on 2026-10-10 after 3 adversarial review rounds (2 findings fixed). The step-1 release tag `v0.6.0` exists, so the D-5 precondition is satisfied. Re-anchored on 2026-11-10 for step 1 = 0.6.0 and step 2 = 0.7.0 against main 29852fae.
+- Status: Applied to spec (2026-11-10). Approved on 2026-11-08 and signed off as staged, with the open questions settled as recorded in "Resolved decisions" (RD-1 through RD-4). Verified on 2026-10-10 after 3 adversarial review rounds (2 findings fixed). The step-1 release tag `v0.6.0` exists, so the D-5 precondition is satisfied. Re-anchored on 2026-11-10 for step 1 = 0.6.0 and step 2 = 0.7.0 against main 29852fae.
 - Date: 2026-10-10
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
