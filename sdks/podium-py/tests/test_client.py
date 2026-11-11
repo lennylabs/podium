@@ -320,7 +320,7 @@ def test_load_artifact_forwards_session_id(stub_server):
 def test_dependents_of_decodes_edges(stub_server):
     stub_server.next_response = {
         "edges": [
-            {"from": "finance/run", "to": "finance/glossary", "kind": "extends"},
+            {"from": "finance/run", "to": "finance/glossary", "kind": "delegates_to"},
         ],
     }
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
@@ -329,7 +329,7 @@ def test_dependents_of_decodes_edges(stub_server):
     assert len(deps) == 1
     assert deps[0].from_ == "finance/run"
     assert deps[0].to == "finance/glossary"
-    assert deps[0].kind == "extends"
+    assert deps[0].kind == "delegates_to"
 
 
 # Spec: §3.5 — preview_scope takes no arguments and sends no query

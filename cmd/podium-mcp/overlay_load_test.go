@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -224,11 +225,11 @@ func TestLoadArtifactFromOverlay_ServesTheCanonicalContentHash(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.6, §6.4, §11 — a §6.4 overlay resolves no extends: chain, so a child
-// that declares extends: with no parent in the overlay is served the §4.7.6
-// digest over its own authored ARTIFACT.md, the value ingest computes for
-// the same bytes.
-func TestLoadArtifactFromOverlay_ExtendsChildServesTheAuthoredContentHash(t *testing.T) {
+// Spec: §6.4 — the workspace overlay applies no ingest rule, so an overlay
+// ARTIFACT.md that declares a top-level extends: key is served byte for byte
+// as authored. Its content hash frames the authored bytes, and the key has no
+// effect on the served record.
+func TestLoadArtifactFromOverlay_ExtendsKeyIsServedAsAuthored(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	authored := []byte("---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: acme/base@1.0.0\n---\n\nchild body\n")
@@ -254,12 +255,26 @@ func TestLoadArtifactFromOverlay_ExtendsChildServesTheAuthoredContentHash(t *tes
 	}
 	cache, _ := newContentCache(t.TempDir())
 	s := &mcpServer{cfg: &config{harness: "none", verifyPolicy: sign.PolicyNever}, cache: cache, adapters: adapter.DefaultRegistry()}
-	m, ok := s.loadArtifactFromOverlay(rec, map[string]any{}).(map[string]any)
+	dest := t.TempDir()
+	m, ok := s.loadArtifactFromOverlay(rec, map[string]any{"destination": dest}).(map[string]any)
 	if !ok {
 		t.Fatal("overlay load returned no result map")
 	}
 	if want := "sha256:" + version.CanonicalContentHash(authored, nil, nil); m["content_hash"] != want {
 		t.Errorf("content_hash = %v, want %v", m["content_hash"], want)
+	}
+	if m["layer"] != "overlay" || m["version"] != "2.0.0" || m["manifest_body"] != "child body\n" {
+		t.Errorf("layer = %v, version = %v, manifest_body = %q, want the overlay's own 2.0.0 record", m["layer"], m["version"], m["manifest_body"])
+	}
+	written, err := os.ReadFile(filepath.Join(dest, "team", "child", "ARTIFACT.md"))
+	if err != nil {
+		t.Fatalf("read materialized ARTIFACT.md: %v", err)
+	}
+	if !bytes.Equal(written, authored) {
+		t.Errorf("materialized ARTIFACT.md = %q, want the authored bytes %q", written, authored)
+	}
+	if w, ok := m["warnings"]; ok {
+		t.Errorf("warnings = %v, want none for an overlay extends: key", w)
 	}
 }
 

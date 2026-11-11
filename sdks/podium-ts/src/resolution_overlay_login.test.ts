@@ -139,6 +139,41 @@ describe("overlay merge", () => {
     expect(c.verifySignatures).toBeUndefined();
   });
 
+  // Spec: §6.4 — the workspace overlay applies no ingest rule, so an overlay
+  // ARTIFACT.md that declares a top-level extends: key is served as authored.
+  // It replaces the registry artifact of the same ID, and no warning is raised.
+  it("serves an overlay ARTIFACT.md with an extends: key as authored", async () => {
+    const overlay = join(dir, "overlay");
+    const authored =
+      "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: acme/base@1.0.0\n---\noverlay child body\n";
+    await writeFileAt(join(overlay, "team", "child", "ARTIFACT.md"), authored);
+    let hitNetwork = false;
+    const fetcher: typeof fetch = async () => {
+      hitNetwork = true;
+      return new Response(
+        JSON.stringify({ id: "team/child", type: "context", version: "1.0.0", manifest_body: "registry body" }),
+        { status: 200 },
+      );
+    };
+    const warn = vi.spyOn(console, "warn");
+    const emitWarning = vi.spyOn(process, "emitWarning");
+    try {
+      const c = new Client({ registry: "http://reg", overlayPath: overlay, fetcher });
+      const art = await c.loadArtifact("team/child");
+      expect(art.id).toBe("team/child");
+      expect(art.frontmatter).toBe(authored);
+      expect(art.version).toBe("2.0.0");
+      expect(art.manifest_body).toContain("overlay child body");
+      expect(art.manifest_body).not.toContain("registry body");
+      expect(hitNetwork).toBe(false);
+      expect(warn).not.toHaveBeenCalled();
+      expect(emitWarning).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      emitWarning.mockRestore();
+    }
+  });
+
   // the overlay search honors the `scope` prefix filter so a scoped
   // query excludes out-of-scope overlay artifacts (spec §6.4).
   it("LocalOverlay.search excludes out-of-scope ids", async () => {

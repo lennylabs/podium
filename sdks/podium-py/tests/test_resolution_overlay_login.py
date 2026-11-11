@@ -9,6 +9,7 @@ import socket
 import threading
 import time
 import urllib.error
+import warnings
 
 import pytest
 from conftest import VECTOR_PUBLIC_KEY
@@ -214,6 +215,38 @@ def test_load_artifact_resolves_overlay_first(tmp_path):
     # Spec: §4.7.10 — no registry served an overlay record, so it carries no
     # delivery attestation and §6.4 exempts it from the delivery check.
     assert (art.delivery_hash, art.delivery_signature) == ("", "")
+
+
+# Spec: §6.4 — the workspace overlay applies no ingest rule, so an overlay
+# ARTIFACT.md that declares a top-level extends: key is served as authored. It
+# replaces the registry artifact of the same ID, and no warning is raised.
+def test_load_artifact_overlay_extends_key_served_as_authored(artifacts_server, tmp_path):
+    authored = (
+        "---\ntype: context\nversion: 2.0.0\ndescription: child\n"
+        "extends: acme/base@1.0.0\n---\noverlay child body\n"
+    )
+    overlay = tmp_path / "overlay"
+    _write(str(overlay / "team" / "child" / "ARTIFACT.md"), authored)
+    # The registry holds a different team/child; the overlay hit replaces it
+    # without a request, so the registry record is never served.
+    artifacts_server.next_response = {
+        "id": "team/child",
+        "type": "context",
+        "version": "1.0.0",
+        "manifest_body": "registry body",
+        "frontmatter": "---\ntype: context\nversion: 1.0.0\n---\nregistry body\n",
+    }
+    base = f"http://127.0.0.1:{artifacts_server.server_address[1]}"
+    client = Client(registry=base, overlay_path=str(overlay))
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        art = client.load_artifact("team/child")
+    assert caught == []
+    assert art.id == "team/child"
+    assert art.frontmatter == authored
+    assert art.version == "2.0.0"
+    assert "overlay child body" in art.manifest_body
+    assert "registry body" not in art.manifest_body
 
 
 # Spec: §4.4, §6.4 — the overlay carries the registry-side layers' format, so

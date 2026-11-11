@@ -325,53 +325,60 @@ func TestDeliver_SkillTamperedSkillRawRejected(t *testing.T) {
 	}
 }
 
-// Spec: §6.6 step 2, §4.7.10 — a merged manifest's delivery record frames the
-// served merged frontmatter, the document the consumer materializes, so a
-// matching merged manifest passes the delivery check and materializes that
-// document.
-func TestDeliver_MergedManifestVerifiesDeliveryHash(t *testing.T) {
+// synthesizedSkillResponse returns a sealed load_artifact record for a skill
+// with no ARTIFACT.md. Its served frontmatter is the §4.3.4 synthesized
+// document, while its content hash frames a zero-length ARTIFACT.md, so the
+// served bytes and the hashed bytes differ.
+func synthesizedSkillResponse(t *testing.T) loadArtifactResponse {
+	t.Helper()
+	skillRaw := "---\nname: demo\ndescription: a plain skill\n---\nskill prose\n"
+	return sealDelivery(loadArtifactResponse{
+		ID: "team/x", Type: "skill", Version: "1.0.0",
+		Frontmatter:  synthesizedSkillDocument(t, "1.0.0"),
+		SkillRaw:     skillRaw,
+		ManifestBody: "skill prose\n",
+		ContentHash:  "sha256:" + version.CanonicalContentHash(nil, []byte(skillRaw), nil),
+	})
+}
+
+// Spec: §6.6 step 2, §4.7.10, §4.3.4 — a skill with no ARTIFACT.md is served
+// the synthesized document while its content hash frames a zero-length
+// ARTIFACT.md. The delivery record frames the served synthesized frontmatter,
+// so the consistent record passes the delivery check and materializes the
+// skill's SKILL.md verbatim.
+func TestDeliver_SynthesizedSkillVerifiesDeliveryHash(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
-	raw := "---\ntype: context\nextends: shared/parent@1.x\n---\nbody"
-	merged := "---\ntype: context\n---\nbody"
-	resp := sealDelivery(loadArtifactResponse{
-		ID: "team/x", Type: "context", Version: "1.0.0",
-		Frontmatter: merged, // re-serialized, parent stripped
-		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(raw), nil, nil),
-	})
+	resp := synthesizedSkillResponse(t)
 	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
 	if _, isErr := m["error"]; isErr {
-		t.Fatalf("valid merged manifest rejected by the delivery check: %v", m)
+		t.Fatalf("valid synthesized skill rejected by the delivery check: %v", m)
 	}
-	if b, _ := os.ReadFile(filepath.Join(dest, "team/x", "ARTIFACT.md")); string(b) != merged {
-		t.Errorf("materialized ARTIFACT.md = %q, want the served merged document", b)
+	if b, _ := os.ReadFile(filepath.Join(dest, "team/x", "SKILL.md")); string(b) != resp.SkillRaw {
+		t.Errorf("materialized SKILL.md = %q, want the served SKILL.md %q", b, resp.SkillRaw)
 	}
 }
 
-// Spec: §6.6 step 2, §4.7.10 — a merged manifest whose served frontmatter was
-// altered after the delivery hash was composed is rejected, so the merged
-// bytes the consumer materializes are covered by the check.
-func TestDeliver_MergedManifestTamperedRejected(t *testing.T) {
+// Spec: §6.6 step 2, §4.7.10, §4.3.4 — a synthesized skill whose served
+// frontmatter was altered after the delivery hash was composed is rejected
+// before any write. The content hash frames a zero-length ARTIFACT.md and
+// cannot see the served document, so only the delivery check covers it.
+func TestDeliver_SynthesizedSkillTamperedRejected(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
-	raw := "---\ntype: context\nextends: shared/parent@1.x\n---\nbody"
-	resp := sealDelivery(loadArtifactResponse{
-		ID: "team/x", Type: "context", Version: "1.0.0",
-		Frontmatter: "---\ntype: context\n---\nbody",
-		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(raw), nil, nil),
-	})
-	// Tamper the merged bytes after the hash was fixed.
-	resp.Frontmatter += "\ntampered"
+	resp := synthesizedSkillResponse(t)
+	// Tamper the served synthesized document after the hash was fixed.
+	resp.Frontmatter += "\ninjected: true"
 	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
 	if code, _ := m["code"].(string); code != "materialize.content_hash_mismatch" {
 		t.Errorf("code = %v, want materialize.content_hash_mismatch", m["code"])
 	}
 	if entries, _ := os.ReadDir(dest); len(entries) != 0 {
-		t.Errorf("tampered merged manifest left files in destination: %v", entries)
+		t.Errorf("tampered synthesized document left files in destination: %v", entries)
 	}
 }
 
