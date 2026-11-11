@@ -740,10 +740,11 @@ reingest`, source updates.
 - After the new commit, `layer reingest` ingests it (the layer's
   `last_ingested_ref` advances to the new commit), and the post-reingest search
   returns the `rollback` skill.
-- The reingest response reports the count accepted and any rejected with a
-  reason, rather than a bare zero. An artifact dropped for a cross-layer
-  collision is reported under `rejected` with `code: ingest.collision` and a
-  reason.
+- The reingest prints one `artifact: <id>@<version>   layer: team` line per
+  accepted or unchanged artifact on standard output, rather than a bare zero.
+  An artifact dropped for a cross-layer collision is reported on standard
+  error as `rejected: <id> (ingest.collision): <reason>`, and the command then
+  exits 1.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
