@@ -291,21 +291,15 @@ export interface LoadArtifactResponse {
   resources_base64?: boolean;
   large_resources?: Record<string, LargeResourceLink>;
   manifest_body_url?: LargeResourceLink;
-  /** extends_pin is the `<id>@<version>` parent pin the artifact resolved at
-   * ingest. The registry serves it only to a caller who can see the parent
-   * record (§4.6), so its absence does not mean the artifact extends
-   * nothing. */
-  extends_pin?: string;
   /** delivery_hash and delivery_signature are the §4.7.10 attestation of the
    * record this response delivers. */
   delivery_hash?: string;
   delivery_signature?: string;
   /** deprecated, replaced_by, and deprecation_warning carry the §4.7.4
-   * lifecycle signal. The registry keeps serving a retired artifact and
-   * reports the state alongside the bytes, and it resolves the state through
-   * an `extends:` merge, so the viewer reads these rather than the
-   * frontmatter pair of the same names. replaced_by is an artifact
-   * identifier, which the viewer links to. */
+   * lifecycle signal. The registry keeps serving a deprecated artifact and
+   * reports the §4.7.4 state for the served row alongside the bytes, so the
+   * viewer reads these rather than the frontmatter pair of the same names.
+   * replaced_by is an artifact identifier, which the viewer links to. */
   deprecated?: boolean;
   replaced_by?: string;
   deprecation_warning?: string;
@@ -569,8 +563,8 @@ export function updateLayer(id: string, patch: LayerUpdate): Promise<LayerSecret
  * named layer an absolute order value taken from its position in the array
  * rather than swapping two stored values, so the array is the resulting order
  * of the whole class block rather than a single move. The composition order
- * decides how an extending artifact merges with its parent, and a request
- * that named a subset would leave the rows it omitted holding order values
+ * decides precedence for the collision rule and for `DOMAIN.md` merging
+ * (§4.6), and a request that named a subset would leave the rows it omitted holding order values
  * that tie or invert against the ones it rewrote. Each layer in the array is
  * authorized on its own under the §7.3.1 layer-write rule. */
 export function reorderLayers(order: string[]): Promise<unknown> {

@@ -72,7 +72,8 @@ export function atCatalogRoute(hash: string): boolean {
 }
 
 /** versionMark separates an artifact's identifier from the version pinned on
- * it, the way an `extends:` reference separates the two (§4.4). Both halves
+ * it, the way the `<id>@<version>` pin syntax of a `delegates_to:` or
+ * `mcpServers:` reference separates the two (§4.7.6). Both halves
  * are percent-encoded and `encodeURIComponent` escapes `@`, so the separator
  * cannot occur inside either one. */
 const versionMark = '@';
