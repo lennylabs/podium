@@ -1,7 +1,7 @@
 # Proposal 0065: Take a git layer's username and token as write-only members apart from `repo` in the layer API, the CLI, the web UI, and declared layers
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-11). Signed off as staged, with OD-3 to OD-6 settled under their defaults as recorded in "Open questions". Verified on 2026-11-11 after 11 adversarial review rounds (12 findings fixed).
+- Status: Applied to spec (2026-11-11). Signed off as staged, with OD-3 to OD-6 settled under their defaults as recorded in "Open questions". Verified on 2026-11-11 after 11 adversarial review rounds (12 findings fixed).
 - Date: 2026-11-10
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: a registration whose `http` or `https` `repo` carries URL userinfo is refused, the `force_repo_overwrite` member and `--force-repo-overwrite` flag are removed, and a re-registration of an `ssh://` layer with the remote a read reports, which 0.6.0 refused with `redacted_repo`, stores that remote without its login name (D-9, D-2 matrix X7). It ships in 0.7.0, a MINOR release, after proposal 0054.
