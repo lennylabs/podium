@@ -5147,7 +5147,9 @@ reader.
    everything would produce the same reading as one that works.
 
 2. Open `http://127.0.0.1:8462/app/`, press the search control in the top bar,
-   and search for `deploy`.
+   type `deploy`, and press ⌘⏎ (Ctrl+⏎ off macOS) to hand the query to the
+   search surface. A plain ⏎ in that panel opens the highlighted artifact
+   rather than the result list.
 
    **Expect.** The page reports `Showing 2 of 2 matches` and lists both
    runbooks, matching the CLI's first line.
@@ -9284,7 +9286,7 @@ after the withdrawal, is the defect this scenario catches.
    podium artifact scaffold --type skill --description "Fresh skill" "$WORK/reg/fresh" > /dev/null
    sed -i.bak '/^metadata:$/d; /^  version: /d' "$WORK/reg/fresh/SKILL.md" && rm "$WORK/reg/fresh/SKILL.md.bak"
    printf -- '---\ntype: skill\nversion: 1.0.0\n---\n<!-- Skill body lives in SKILL.md. -->\n' > "$WORK/reg/fresh/ARTIFACT.md"
-   setver() { sed -i.bak "s/^version: .*/version: $1/" "$WORK/reg/fresh/ARTIFACT.md"; }
+   setver() { sed -i.bak "s/^version: .*/version: $1/" "$WORK/reg/fresh/ARTIFACT.md" && rm "$WORK/reg/fresh/ARTIFACT.md.bak"; }
    setver 1.0.0
    serve() { podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
        --bind 127.0.0.1:8182 > "$WORK/srv$1.log" 2>&1 & SRV=$!
