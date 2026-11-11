@@ -2261,19 +2261,21 @@ func TestCLI_ScaffoldSensitivity(t *testing.T) {
 	cliContains(t, readFile(t, filepath.Join(dst, "ARTIFACT.md")), "sensitivity: low", "sensitivity field")
 }
 
-// spec: doc "podium artifact scaffold", `--extends` flag. A skill refuses
-// it, because extends belongs in a hand-written ARTIFACT.md overlay, and a
-// non-skill type writes it into ARTIFACT.md.
+// podium artifact scaffold has no --extends flag, because §4.6 removes
+// inheritance. Passing it fails flag parsing with the usage error and exit 2
+// for a skill and a non-skill type alike, and writes no directory.
 //
-// Spec: §4.3.4
-func TestCLI_ScaffoldExtends(t *testing.T) {
-	skill := filepath.Join(t.TempDir(), "personal/extended")
-	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Extended skill.", "--extends", "base/base-skill@1.x", "--yes", skill)
-	assertSkillOverlayRefusal(t, res, skill, "--extends")
-
-	dst := filepath.Join(t.TempDir(), "personal/extended")
-	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "Extended context.", "--extends", "base/base-skill@1.x", "--yes", dst), 0, "scaffold extends")
-	cliContains(t, readFile(t, filepath.Join(dst, "ARTIFACT.md")), "extends: base/base-skill@1.x", "extends field")
+// Spec: §4.6
+func TestCLI_ScaffoldExtendsIsUndefined(t *testing.T) {
+	for _, typ := range []string{"skill", "context"} {
+		t.Run(typ, func(t *testing.T) {
+			dst := filepath.Join(t.TempDir(), "personal/extended")
+			res := runPodium(t, "", nil, "artifact", "scaffold", "--type", typ, "--description", "Extended artifact.", "--extends", "x", "--yes", dst)
+			cliWantExit(t, res, 2, "scaffold --extends")
+			cliContains(t, res.Stderr, "flag provided but not defined: -extends", "undefined flag")
+			mustNotExist(t, dst)
+		})
+	}
 }
 
 // spec: doc "Admin — podium admin scim-sync". The command does not exist.

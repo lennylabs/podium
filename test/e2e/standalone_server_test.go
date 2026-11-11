@@ -29,10 +29,23 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
 // ---- package-level helpers for single-node tests ----------------------------
+
+// extendsContextArtifact returns a low-sensitivity context ARTIFACT.md that
+// declares extends: parent, which §4.6 refuses.
+func extendsContextArtifact(desc, parent string) string {
+	return fmt.Sprintf("---\ntype: context\nversion: 1.0.0\ndescription: %s\nsensitivity: low\nextends: %s\n---\n\n%s body.\n", desc, parent, desc)
+}
+
+// extendsRejected returns the standard-error line podium lint and podium
+// layer reingest print for an ARTIFACT.md that declares extends:.
+func extendsRejected(id string) string {
+	return "rejected: " + id + " (" + layer.InvalidArtifactCode + "): " + layer.ExtendsRemovedReason
+}
 
 // smallteamLowArtifact returns a valid low-sensitivity context ARTIFACT.md.
 func smallteamLowArtifact(desc string) string {
@@ -1400,13 +1413,116 @@ func TestStandaloneServer_LintValidInvalid(t *testing.T) {
 	}
 }
 
-// cross-type dependency graph: podium impact shows dependents.
+// podium lint names every ARTIFACT.md that declares extends: on standard
+// error and lints the rest, so a lint failure beside a refusal still reports
+// its diagnostic, and a refusal alone fails the run.
+//
+// Spec: §4.6, §7.3.1
+func TestLint_ExtendsRefusalBesideLintFailure(t *testing.T) {
+	t.Parallel()
+	t.Run("beside a lint failure", func(t *testing.T) {
+		t.Parallel()
+		reg := writeRegistry(t, map[string]string{
+			"ops/base/ARTIFACT.md": smallteamLowArtifact("base artifact"),
+			"ops/c/ARTIFACT.md":    extendsContextArtifact("c artifact", "ops/base"),
+			"ops/d/ARTIFACT.md":    extendsContextArtifact("d artifact", "ops/base"),
+			// Invalid: missing the required version field, which the linter rejects.
+			"invalid/ARTIFACT.md": "---\ntype: context\ndescription: missing version\n---\n\nbody.\n",
+		})
+		res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "lint", "--registry", reg)
+		cliWantExit(t, res, 1, "lint beside a lint failure")
+		c := strings.Index(res.Stderr, extendsRejected("ops/c"))
+		d := strings.Index(res.Stderr, extendsRejected("ops/d"))
+		if c < 0 || d < 0 || c > d {
+			t.Errorf("stderr must name ops/c then ops/d as refused (c=%d d=%d):\n%s", c, d, res.Stderr)
+		}
+		if !lintErrorNames(res.Stdout, "invalid") {
+			t.Errorf("stdout missing an error diagnostic naming invalid:\n%s", res.Stdout)
+		}
+	})
+	t.Run("refusal alone", func(t *testing.T) {
+		t.Parallel()
+		reg := writeRegistry(t, map[string]string{
+			"ops/c/ARTIFACT.md": extendsContextArtifact("c artifact", "ops/base"),
+		})
+		res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "lint", "--registry", reg)
+		cliWantExit(t, res, 1, "lint over a refused artifact alone")
+		cliContains(t, res.Stderr, extendsRejected("ops/c"), "the refused ops/c")
+		cliNotContains(t, res.Stdout, "lint: no issues.", "the clean-run line")
+	})
+}
+
+// lintErrorNames reports whether a podium lint stdout line is an error
+// diagnostic that names the artifact id.
+func lintErrorNames(stdout, id string) bool {
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(line, "error") && strings.Contains(line, id) {
+			return true
+		}
+	}
+	return false
+}
+
+// An extends key in a skill's SKILL.md is not a Podium field, so podium lint
+// neither refuses the skill nor reports lint.skill_podium_only_field for it.
+//
+// Spec: §4.3.4, §4.6
+func TestLint_SkillMDExtendsKeyPasses(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"ops/greet/SKILL.md": "---\nname: greet\ndescription: Greet the user by name. Use when the user says hello.\nextends: ops/base\n---\n\nGreet the user.\n",
+	})
+	res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "lint", "--registry", reg)
+	cliWantExit(t, res, 0, "lint over a SKILL.md extends key")
+	cliNotContains(t, res.Stdout+res.Stderr, "lint.skill_podium_only_field", "the Podium-only field error")
+	cliNotContains(t, res.Stderr, "rejected:", "a refusal")
+}
+
+// A standalone server boots over a layer that holds an ARTIFACT.md declaring
+// extends:, refuses that artifact at ingest so search and load_artifact do
+// not return it, and serves the rest. podium layer reingest then exits
+// non-zero and names the refused artifact on standard error. The CLI prints
+// no rejection details, so the extends_removed constraint is pinned over
+// HTTP by the ingest wire tests.
+//
+// Spec: §4.6, §7.3.1
+func TestStandaloneServer_ExtendsArtifactRefused(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"ops/base/ARTIFACT.md":  smallteamLowArtifact("quarterly base runbook"),
+		"ops/child/ARTIFACT.md": extendsContextArtifact("quarterly child runbook", "ops/base"),
+	})
+	srv := startServer(t, reg)
+
+	st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=quarterly+runbook")
+	if st != 200 {
+		t.Fatalf("search HTTP %d: %s", st, body)
+	}
+	if !strings.Contains(string(body), "ops/base") || strings.Contains(string(body), "ops/child") {
+		t.Errorf("search must return ops/base and not the refused ops/child: %s", body)
+	}
+	if st := getStatus(t, srv.BaseURL+"/v1/load_artifact?id=ops/base"); st != 200 {
+		t.Errorf("load ops/base = HTTP %d, want 200", st)
+	}
+	if st := getStatus(t, srv.BaseURL+"/v1/load_artifact?id=ops/child"); st != 404 {
+		t.Errorf("load the refused ops/child = HTTP %d, want 404", st)
+	}
+
+	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
+		"layer", "reingest", "--registry", srv.BaseURL, smallteamLayerID(t, srv.BaseURL))
+	cliWantNonZero(t, res, "layer reingest over a refused artifact")
+	cliContains(t, res.Stderr, extendsRejected("ops/child"), "the refused ops/child")
+}
+
+// cross-type dependency graph: podium impact lists an agent that declares
+// delegates_to: [parent] as a dependent of parent.
+//
+// Spec: §4.7.3
 func TestStandaloneServer_ImpactAnalysis(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"parent/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: parent artifact\nsensitivity: low\n---\n\nparent body.\n",
-		// extends is a string field, not a sequence.
-		"child/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: child artifact\nsensitivity: low\nextends: parent@1.x\n---\n\nchild body.\n",
+		"child/ARTIFACT.md":  "---\ntype: agent\nversion: 1.0.0\ndescription: child agent\nsensitivity: low\ndelegates_to: [parent]\n---\n\nchild body.\n",
 	})
 	srv := startServer(t, reg)
 
@@ -1416,10 +1532,8 @@ func TestStandaloneServer_ImpactAnalysis(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("podium impact exit=%d stderr=%s stdout=%s", res.Exit, res.Stderr, res.Stdout)
 	}
-	// The output should reference child as a dependent.
-	combined := res.Stdout + res.Stderr
-	if !strings.Contains(combined, "child") && !strings.Contains(combined, "edges") {
-		t.Errorf("podium impact missing child in output:\n%s", combined)
+	if !strings.Contains(res.Stdout, "child") || !strings.Contains(res.Stdout, "delegates_to") {
+		t.Errorf("podium impact must list child through its delegates_to edge:\n%s", res.Stdout)
 	}
 }
 

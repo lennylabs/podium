@@ -929,7 +929,7 @@ func TestFilesystemSync_CollisionRaisedByLint(t *testing.T) {
 }
 
 // collidingSyncRegistry writes a two-layer filesystem registry in which
-// override-layer contributes shared/note without extends:, colliding with
+// override-layer contributes its own shared/note, colliding with
 // base-layer's copy, plus a non-colliding base-layer/shared/other.
 func collidingSyncRegistry(t *testing.T) string {
 	t.Helper()
@@ -945,15 +945,19 @@ func collidingSyncRegistry(t *testing.T) string {
 // prints for the dropped override-layer/shared/note.
 const collisionRejectedLine = "rejected: shared/note (ingest.collision): cross-layer collision"
 
-// assertCollisionReported checks the rejected line and the extends: remedy on
-// standard error.
+// assertCollisionReported checks the rejected line and the rename-or-remove
+// remedy on standard error. The remedy names no inheritance, because §4.6
+// rejects every same-ID collision between registry-side layers.
 func assertCollisionReported(t *testing.T, res cliResult) {
 	t.Helper()
 	if !strings.Contains(res.Stderr, collisionRejectedLine) {
 		t.Errorf("stderr missing %q:\n%s", collisionRejectedLine, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "declare extends: shared/note") {
-		t.Errorf("stderr missing the extends: remedy:\n%s", res.Stderr)
+	if !strings.Contains(res.Stderr, "rename this artifact or remove the other copy first") {
+		t.Errorf("stderr missing the rename-or-remove remedy:\n%s", res.Stderr)
+	}
+	if strings.Contains(res.Stderr, "extends") {
+		t.Errorf("stderr names the removed extends: remedy:\n%s", res.Stderr)
 	}
 }
 
@@ -969,8 +973,8 @@ func assertLowerCopyMaterialized(t *testing.T, target string) {
 }
 
 // A filesystem-source sync drops the higher-precedence copy of an artifact
-// two layers contribute without extends:, reports it on standard error,
-// materializes the rest, and exits 1.
+// two layers contribute, reports it on standard error, materializes the
+// rest, and exits 1.
 //
 // Spec: §13.11.3
 // Matrix: §6.10 (ingest.collision)
@@ -1247,44 +1251,6 @@ func TestFilesystemSync_ExtendsDeclarationDropsArtifact(t *testing.T) {
 		}
 		assertExtendsRefusedOnly(t, target)
 	})
-}
-
-// A filesystem-source sync drops a same-layer extends: child whose
-// sandbox_profile network-isolated differs from its parent's read-only-fs,
-// reports it on standard error without naming either profile, materializes
-// the parent and the unrelated sibling, and exits 1. The dry-run and --config
-// arms share the drop path TestFilesystemSync_ExtendsDeclarationDropsArtifact
-// pins, so only the one-shot arm runs here.
-//
-// Spec: §13.11.3
-func TestFilesystemSync_SandboxProfileConflictDropsChild(t *testing.T) {
-	t.Parallel()
-	profiled := func(desc, extra string) string {
-		return "---\ntype: context\nversion: 1.0.0\ndescription: " + desc + "\n" + extra + "---\n\nbody\n"
-	}
-	reg := writeRegistry(t, map[string]string{
-		".registry-config":                      solofsRegistryConfig("team-layer"),
-		"team-layer/ops/a-parent/ARTIFACT.md":   profiled("parent", "sandbox_profile: read-only-fs\n"),
-		"team-layer/ops/b-child/ARTIFACT.md":    profiled("child", "sandbox_profile: network-isolated\nextends: ops/a-parent\n"),
-		"team-layer/shared/sibling/ARTIFACT.md": contextArtifact("sibling"),
-	})
-	target := t.TempDir()
-	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
-	if res.Exit != 1 {
-		t.Fatalf("sync exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
-	}
-	cliContains(t, res.Stderr, "rejected: ops/b-child (ingest.invalid_artifact): extends: sandbox_profile differs", "the dropped child")
-	for _, leak := range []string{"read-only-fs", "network-isolated", "seccomp-strict"} {
-		cliNotContains(t, res.Stderr, leak, "a restricting profile value")
-	}
-	mustExist(t, filepath.Join(target, "ops", "a-parent", "ARTIFACT.md"))
-	mustExist(t, filepath.Join(target, "shared", "sibling", "ARTIFACT.md"))
-	if _, err := os.Stat(filepath.Join(target, "ops", "b-child")); !os.IsNotExist(err) {
-		t.Errorf("the dropped ops/b-child reached the target (stat err=%v)", err)
-	}
-	if lock := readFile(t, filepath.Join(target, ".podium", "sync.lock")); strings.Contains(lock, "ops/b-child") {
-		t.Errorf("lock records the dropped ops/b-child:\n%s", lock)
-	}
 }
 
 // DOMAIN.md files at layer root are not treated as artifacts.
