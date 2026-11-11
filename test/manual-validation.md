@@ -806,9 +806,10 @@ ordering. S05 covers the same-ID collision between layers.
 - Searching `greet` returns both `greet` (description `base greet`) and
   `team-greet` (description `team greet`), so both layers' skills are served.
 - Searching `team only` returns the `team-only` skill.
-- `artifact show greet` returns version `0.1.0` and the `base greet`
-  description, and `artifact show team-greet` returns version `0.1.0` and the
-  `team greet` description.
+- `artifact show greet` prints `version: 0.1.0` and the `# greet` skill body,
+  and `artifact show team-greet` prints `version: 0.1.0` and the `# team-greet`
+  skill body. The description lives in the SKILL.md frontmatter, which
+  `artifact show` does not print, so the search lines above check it.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
