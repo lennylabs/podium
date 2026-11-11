@@ -46,6 +46,10 @@ func TestLoadArtifact_HeadReturnsContentHash(t *testing.T) {
 	if got := resp.Header.Get("X-Podium-Content-Hash"); got != hash {
 		t.Errorf("X-Podium-Content-Hash = %q, want %s", got, hash)
 	}
+	// Spec: §7.2 — the entity tag is the quoted content hash.
+	if got, want := resp.Header.Get("ETag"), `"`+hash+`"`; got != want {
+		t.Errorf("ETag = %q, want %s", got, want)
+	}
 	if got := resp.Header.Get("X-Podium-Version"); got != "1.0.0" {
 		t.Errorf("X-Podium-Version = %q, want 1.0.0", got)
 	}

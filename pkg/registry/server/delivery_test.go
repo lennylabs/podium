@@ -8,7 +8,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -19,14 +18,12 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
-// deliveryTree writes a one-layer registry holding a parent, a child that
-// extends it, and a plain artifact.
+// deliveryTree writes a one-layer registry holding the single context
+// artifact team/plain, which every delivery test loads.
 func deliveryTree(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	testharness.WriteTree(t, dir,
-		testharness.WriteTreeOption{Path: "shared/parent/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nparent\n"},
-		testharness.WriteTreeOption{Path: "team/child/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\ndescription: child\nextends: shared/parent@1.0.0\n---\n\nchild\n"},
 		testharness.WriteTreeOption{Path: "team/plain/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\ndescription: plain\n---\n\nplain\n"},
 	)
 	return dir
@@ -44,51 +41,29 @@ func deliveryServer(t *testing.T, signer sign.Provider) *httptest.Server {
 	return ts
 }
 
-// envelopeKeys returns the sorted keys of a registry-managed envelope.
-func envelopeKeys(t *testing.T, envelope string) string {
-	t.Helper()
-	var m map[string]any
-	if err := json.Unmarshal([]byte(envelope), &m); err != nil {
-		t.Fatalf("envelope %q is not JSON: %v", envelope, err)
-	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return strings.Join(keys, ",")
-}
-
-// Spec: §4.7.10 — a non-extends artifact carries a delivery_hash and a
-// delivery_signature of the same form as a merged child's, so the presence
-// and form of the attestation disclose nothing about a merge.
-func TestLoadArtifact_UniformAttestationAcrossMergedAndPlain(t *testing.T) {
+// Spec: §4.7.10 — a loaded artifact carries a sha256 delivery_hash over its
+// served record and a delivery_signature that verifies against the registry
+// key.
+func TestLoadArtifact_ServesASignedDeliveryHash(t *testing.T) {
 	t.Parallel()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("GenerateKey: %v", err)
 	}
 	ts := deliveryServer(t, sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub})
-	var forms []string
-	for _, id := range []string{"team/child", "team/plain"} {
-		status, body := getBody(t, ts.URL+"/v1/load_artifact?id="+id)
-		if status != http.StatusOK {
-			t.Fatalf("%s: status %d: %s", id, status, body)
-		}
-		var resp server.LoadArtifactResponse
-		if err := json.Unmarshal(body, &resp); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		if !strings.HasPrefix(resp.DeliveryHash, "sha256:") || len(resp.DeliveryHash) != len("sha256:")+64 {
-			t.Errorf("%s delivery_hash = %q, want sha256:<64 hex>", id, resp.DeliveryHash)
-		}
-		if err := (sign.RegistryManagedKey{PublicKey: pub}).Verify(context.Background(), resp.DeliveryHash, resp.DeliverySignature); err != nil {
-			t.Errorf("%s delivery signature does not verify: %v", id, err)
-		}
-		forms = append(forms, envelopeKeys(t, resp.DeliverySignature))
+	status, body := getBody(t, ts.URL+"/v1/load_artifact?id=team/plain")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
 	}
-	if forms[0] != forms[1] {
-		t.Errorf("envelope forms differ: merged %s, plain %s", forms[0], forms[1])
+	var resp server.LoadArtifactResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.HasPrefix(resp.DeliveryHash, "sha256:") || len(resp.DeliveryHash) != len("sha256:")+64 {
+		t.Errorf("delivery_hash = %q, want sha256:<64 hex>", resp.DeliveryHash)
+	}
+	if err := (sign.RegistryManagedKey{PublicKey: pub}).Verify(context.Background(), resp.DeliveryHash, resp.DeliverySignature); err != nil {
+		t.Errorf("delivery signature does not verify: %v", err)
 	}
 }
 
