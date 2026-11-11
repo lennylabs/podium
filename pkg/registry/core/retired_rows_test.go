@@ -566,8 +566,13 @@ func TestSearchArtifacts_RetiredRowVectorsDoNotSurface(t *testing.T) {
 // requests, so this test must pass under -race (the S11 command runs it with
 // -race). Readers issue SearchArtifacts, LoadArtifact, and DependentsOf while
 // a writer stores new plain and retired rows with distinct content hashes,
-// including a retired row under a purged and reused (id, version). No answer
-// ever carries a retired row, and every plain row a reader expects appears.
+// which covers first-time memo population. The plain ops/reused row is stored
+// before the readers start, and every reader lists it before the writes
+// begin, so the memo holds its plain verdict when the writer purges it and
+// stores a retired row under the same (id, version) while the readers are
+// mid-listing. A memo keyed by (id, version) instead of the content hash
+// would keep serving that key. No answer ever carries a retired row, and
+// every plain row a reader expects appears.
 func TestServableRows_ConcurrentListingsAndIngest(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -575,7 +580,7 @@ func TestServableRows_ConcurrentListingsAndIngest(t *testing.T) {
 	const reused = "ops/reused"
 	reusedPlain := rtPlain(reused, "1.0.0", "base", 30)
 	reusedPlain.Deprecated = true
-	reusedPlainHash := storetest.Seal(t, reusedPlain, nil, nil).ContentHash
+	reusedPlainHash := rtPut(t, st, reusedPlain).ContentHash
 
 	const writes, readers = 40, 4
 	done := make(chan struct{})
@@ -586,14 +591,14 @@ func TestServableRows_ConcurrentListingsAndIngest(t *testing.T) {
 		defer wg.Done()
 		defer close(done)
 		// The writes start once every reader has answered once, so they
-		// overlap the readers' listings.
+		// overlap the readers' listings and every reader has memoized the
+		// plain verdict for ops/reused before its key is reused.
 		ready.Wait()
 		for i := range writes {
 			rtPutConcurrent(t, st, rtPlain(fmt.Sprintf("ops/new-plain-%d", i), "1.0.0", "base", 40+i))
 			rtPutConcurrent(t, st, rtRow(fmt.Sprintf("ops/new-retired-%d", i), "1.0.0", "team", 40+i,
 				rtDoc(fmt.Sprintf("type: context\nversion: 1.0.0\nextends: %s\nnote: %d\n", rtP, i), "New retired.\n")))
 			if i == writes/2 {
-				rtPutConcurrent(t, st, reusedPlain)
 				if _, err := st.PurgeDeprecatedManifests(ctx, time.Now().Add(time.Hour)); err != nil {
 					t.Errorf("PurgeDeprecatedManifests: %v", err)
 				}
@@ -603,15 +608,23 @@ func TestServableRows_ConcurrentListingsAndIngest(t *testing.T) {
 		}
 	}()
 
-	check := func() {
+	// check runs one round of reads and reports whether the search listed
+	// ops/reused, which only the plain row may answer.
+	check := func() (sawReused bool) {
 		res, err := reg.SearchArtifacts(ctx, publicID, core.SearchArtifactsOptions{TopK: 50, IncludeDeprecated: true})
 		if err != nil {
 			t.Errorf("SearchArtifacts: %v", err)
-			return
+			return false
 		}
 		found := make([]string, 0, len(res.Results))
 		for _, d := range res.Results {
 			found = append(found, d.ID)
+			if d.ID == reused {
+				sawReused = true
+				if strings.Contains(d.Frontmatter, "extends:") {
+					t.Errorf("search returned the retired row under the reused key %s", reused)
+				}
+			}
 			if strings.HasPrefix(d.ID, "ops/new-retired-") || slices.Contains(rtRetiredIDs, d.ID) {
 				t.Errorf("search returned the retired %s", d.ID)
 			}
@@ -636,10 +649,13 @@ func TestServableRows_ConcurrentListingsAndIngest(t *testing.T) {
 		if edges, err := reg.DependentsOf(ctx, publicID, rtT); err != nil || len(edges) != 1 || edges[0].From != rtD {
 			t.Errorf("dependents_of(%s) = %+v, %v; want only %s", rtT, edges, err, rtD)
 		}
+		return sawReused
 	}
 	reader := func() {
 		defer wg.Done()
-		check()
+		if !check() {
+			t.Errorf("the first listing omitted %s, so its plain verdict was not memoized before the reuse", reused)
+		}
 		ready.Done()
 		for {
 			select {
