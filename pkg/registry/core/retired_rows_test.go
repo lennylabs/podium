@@ -52,6 +52,10 @@ var rtRetiredIDs = []string{rtR, rtE, rtF, rtU}
 // rtServedIDs are the IDs with a servable row in fixtures (a) to (d).
 var rtServedIDs = []string{rtP, rtC, rtX, rtD, rtT}
 
+// rtMixedIDs are the served IDs that also hold a retired 2.0.0 row, so only
+// their servable 1.0.0 row may answer a read.
+var rtMixedIDs = []string{rtC, rtX, rtD}
+
 // rtEpoch orders the fixture rows' ingest times, so a retired row is always
 // the most recently ingested row of its ID and would be `latest` if it served.
 var rtEpoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -610,6 +614,12 @@ func TestServableRows_ConcurrentListingsAndIngest(t *testing.T) {
 			found = append(found, d.ID)
 			if strings.HasPrefix(d.ID, "ops/new-retired-") || slices.Contains(rtRetiredIDs, d.ID) {
 				t.Errorf("search returned the retired %s", d.ID)
+			}
+			// C, X, and D each keep a retired 2.0.0 row beside the served
+			// 1.0.0 row, so a memo race on a mixed ID surfaces as a result
+			// at any version other than 1.0.0.
+			if slices.Contains(rtMixedIDs, d.ID) && d.Version != "1.0.0" {
+				t.Errorf("search returned %s@%s, want only the servable 1.0.0", d.ID, d.Version)
 			}
 		}
 		for _, id := range rtServedIDs {
