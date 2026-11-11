@@ -11130,7 +11130,8 @@ restart in step 4 is a startup rewrite, which the release does not run.
 
    **Expect.** The `private` layer's listed `repo` is
    `http://127.0.0.1:8195/acme/private.git`, and both counts are `0`. The
-   reingest reports `ingest.source_unreachable` with status `500`.
+   reingest reports `ingest.source_unreachable` with a message that names
+   `127.0.0.1:8195` and status `500`.
    `remote.log` holds at least one line beginning `Basic `, which shows the
    clone sent the credential from the earlier-form row. A line reading `none`
    on every request means the row was read without its credential.
