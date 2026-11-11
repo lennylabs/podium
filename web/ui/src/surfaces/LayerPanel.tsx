@@ -147,17 +147,17 @@ function PanelHead({
     <div className="panel-head">
       <div>
         <h1 ref={heading}>Layers</h1>
-        {/* Spec: §4.6 ("Merge semantics for collisions"). A second layer
-         * carrying an artifact ID another layer already contributed is
-         * rejected at ingest unless the higher-precedence copy declares
-         * extends:, and silent shadowing is never permitted. Copy that
-         * promised the higher precedence simply wins sent the reader to
-         * register a shadowing layer and collect an ingest.collision. */}
+        {/* Spec: §4.6 ("Collisions"). A second registry-side layer carrying
+         * an artifact ID another layer already contributed is rejected at
+         * ingest with ingest.collision, and silent shadowing is never
+         * permitted. Copy that promised the higher precedence simply wins
+         * sent the reader to register a shadowing layer and collect the
+         * rejection, so the lead names the remedy instead. */}
         <p className="lead">
           Sources the catalog is composed from. Two layers cannot both carry the
-          same artifact ID: the collision is rejected at ingest unless the
-          higher-precedence artifact declares <code>extends:</code>, and the
-          order below decides which artifact that overlay merges onto.
+          same artifact ID: a same-ID artifact in a second layer is rejected at
+          ingest with <code>ingest.collision</code>, so rename it or remove the
+          other copy first. The order below sets precedence.
         </p>
       </div>
       {children !== undefined && <div className="panel-actions">{children}</div>}

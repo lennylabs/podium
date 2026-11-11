@@ -152,24 +152,27 @@ func TestCoreConcept_FilesystemVsStandaloneEquivalent(t *testing.T) {
 	t.Skip("blocked by a known gap: the server-source sync path is unimplemented, so the filesystem-vs-server content comparison cannot run")
 }
 
-// a higher-precedence layer that declares extends: on the colliding ID
-// overrides the lower one through the §4.6 merge, and the sync exits 0.
-func TestCoreConcept_LayerPrecedenceOverride(t *testing.T) {
+// Spec: §4.6, §13.11.3 — two layers that contribute the same ID collide: the
+// sync drops the higher-precedence copy, reports it on standard error, exits
+// 1, and materializes the lower-precedence copy.
+func TestCoreConcept_LayerCollisionRejected(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		".registry-config":                      "multi_layer: true\nlayer_order: [low-layer, high-layer]\n",
-		"low-layer/shared/glossary/ARTIFACT.md": contextArtifact("low-description"),
-		"high-layer/shared/glossary/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\nextends: shared/glossary\n" +
-			"description: high-description\n---\n\nhigh-description body.\n",
+		".registry-config":                       "multi_layer: true\nlayer_order: [low-layer, high-layer]\n",
+		"low-layer/shared/glossary/ARTIFACT.md":  contextArtifact("low-description"),
+		"high-layer/shared/glossary/ARTIFACT.md": contextArtifact("high-description"),
 	})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
-	if res.Exit != 0 {
-		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	if res.Exit != 1 {
+		t.Fatalf("sync exit=%d, want 1 for a same-ID collision; stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "rejected: shared/glossary (ingest.collision): ") {
+		t.Errorf("stderr does not report the collision:\n%s", res.Stderr)
 	}
 	got := readFile(t, filepath.Join(tgt, "shared/glossary/ARTIFACT.md"))
-	if !strings.Contains(got, "description: high-description") || strings.Contains(got, "description: low-description") {
-		t.Errorf("higher-precedence layer did not win through the merge:\n%s", got)
+	if !strings.Contains(got, "description: low-description") || strings.Contains(got, "description: high-description") {
+		t.Errorf("the lower-precedence copy is not the materialized one:\n%s", got)
 	}
 }
 
@@ -190,24 +193,27 @@ func TestCoreConcept_OverlayHighestPrecedence(t *testing.T) {
 	}
 }
 
-// layer ordering defaults to alphabetical by subdirectory, so b-layer's
-// extends: child merges over a-layer's copy.
+// Spec: §4.6, §13.11.3 — layer ordering defaults to alphabetical by
+// subdirectory. b-layer sorts after a-layer, so its copy of a colliding ID is
+// the one the sync drops, and the target holds a-layer's copy.
 func TestCoreConcept_LayerOrderAlphabeticalDefault(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                "multi_layer: true\n",
 		"a-layer/shared/item/ARTIFACT.md": contextArtifact("from-a"),
-		"b-layer/shared/item/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\nextends: shared/item\n" +
-			"description: from-b\n---\n\nfrom-b body.\n",
+		"b-layer/shared/item/ARTIFACT.md": contextArtifact("from-b"),
 	})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
-	if res.Exit != 0 {
-		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	if res.Exit != 1 {
+		t.Fatalf("sync exit=%d, want 1 for a same-ID collision; stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "rejected: shared/item (ingest.collision): ") {
+		t.Errorf("stderr does not report the b-layer copy as dropped:\n%s", res.Stderr)
 	}
 	got := readFile(t, filepath.Join(tgt, "shared/item/ARTIFACT.md"))
-	if !strings.Contains(got, "description: from-b") {
-		t.Errorf("alphabetically-later layer did not win:\n%s", got)
+	if !strings.Contains(got, "description: from-a") || strings.Contains(got, "description: from-b") {
+		t.Errorf("the alphabetically-earlier layer's copy is not the materialized one:\n%s", got)
 	}
 }
 

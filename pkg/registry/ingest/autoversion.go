@@ -50,16 +50,23 @@ func listManifestRows(ctx context.Context, st store.Store, tenantID string) (map
 	return byID, nil
 }
 
-// crossLayerRows returns the non-deleted rows of rowsByID that a layer other
-// than layerID contributed, grouped by artifact ID. A soft-deleted row is
-// served by no read path, so it is not a §4.6 collision.
+// retired reports whether a stored row's ARTIFACT.md declares extends:, so
+// the §4.6 no-inheritance rule serves it on no read path.
+//
+// Spec: §4.6, §7.3.1
+func retired(m store.ManifestRecord) bool { return manifest.DeclaresExtends(m.Frontmatter) }
+
+// crossLayerRows returns the non-deleted, non-retired rows of rowsByID that a
+// layer other than layerID contributed, grouped by artifact ID. A soft-deleted
+// row and a row the §4.6 no-inheritance rule retires are served by no read
+// path, so neither is a §4.6 collision.
 //
 // Spec: §4.6
 func crossLayerRows(rowsByID map[string][]store.ManifestRecord, layerID string) map[string][]store.ManifestRecord {
 	out := map[string][]store.ManifestRecord{}
 	for id, rows := range rowsByID {
 		for _, m := range rows {
-			if m.Layer != layerID && m.DeletedAt == nil {
+			if m.Layer != layerID && m.DeletedAt == nil && !retired(m) {
 				out[id] = append(out[id], m)
 			}
 		}
@@ -71,8 +78,8 @@ func crossLayerRows(rowsByID map[string][]store.ManifestRecord, layerID string) 
 // none, from rows (every stored row of the skill's artifact ID, soft-deleted
 // rows included), the ingesting layer, and the incoming content hash:
 //
-//  1. When the layer's own row, the most recently ingested non-deleted row the
-//     layer contributed at any version (ordered as `latest` orders
+//  1. When the layer's own row, the most recently ingested non-deleted,
+//     non-retired row the layer contributed at any version (ordered as `latest` orders
 //     candidates), carries hash, its version is reused. That version is always
 //     registry-assigned, because a declared version lies in the hashed bytes.
 //  2. Otherwise, when any row carries hash, duplicate is true, so no two rows
@@ -88,6 +95,12 @@ func crossLayerRows(rowsByID map[string][]store.ManifestRecord, layerID string) 
 // earlier row of the layer, rather than its latest one, would map a revert
 // back to an older row while `latest` serves the newer one.
 //
+// A row the §4.6 no-inheritance rule retires is treated the same way. It
+// joins the duplicate set and the N derivation, because it still occupies its
+// (id, version) and its content hash. It never supplies the reused version,
+// because no read path serves it: reusing it, or letting it outrank the served
+// row as `latest`, would misreport a revert.
+//
 // assignVersion reads no store and no clock.
 //
 // Spec: §7.3.1, §4.7.6
@@ -96,7 +109,7 @@ func assignVersion(rows []store.ManifestRecord, layerID, hash string) (v string,
 	ownHash := map[string]string{}
 	maxN := -1
 	for _, r := range rows {
-		if r.Layer == layerID && r.DeletedAt == nil {
+		if r.Layer == layerID && r.DeletedAt == nil && !retired(r) {
 			own = append(own, version.Candidate{Version: r.Version, IngestedAt: r.IngestedAt})
 			ownHash[r.Version] = r.ContentHash
 		}

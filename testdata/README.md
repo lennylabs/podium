@@ -15,7 +15,6 @@ Sample artifact registries used as inputs to the test suite.
   realistic data.
 - `visibility/`  one minimal registry per visibility scenario. Each
   scenario asserts a specific row of the §11 visibility test list.
-- `extends/`  parent and child manifests for layered `extends:` scenarios.
 - `lint/`  paired good and bad registries per lint rule. The bad registries
   carry a single intentional violation; the test asserts the lint rule
   fires with the expected diagnostic.

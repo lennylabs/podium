@@ -389,3 +389,25 @@ func TestLint_SkillPodiumOnlyVersionRecommendsMetadataVersion(t *testing.T) {
 		t.Errorf("expected the tags diagnostic to recommend ARTIFACT.md: %v", diags)
 	}
 }
+
+// Spec: §4.3.4, §4.6 — extends is no Podium manifest field, so a top-level
+// extends key in SKILL.md is an unknown agentskills.io key rather than a
+// Podium-only field, with or without an ARTIFACT.md overlay.
+func TestLint_SkillMDExtendsKeyIsNotPodiumOnly(t *testing.T) {
+	t.Parallel()
+	const skillFM = "name: hello\ndescription: Greet the user.\nextends: other/skill\n"
+	trees := map[string][]testharness.WriteTreeOption{
+		"with ARTIFACT.md": skillTree("type: skill\nversion: 1.0.0\n", skillFM),
+		"plain":            plainSkillTree(skillFM),
+	}
+	for name, tree := range trees {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			reg, records := openFixture(t, tree...)
+			diags := (&Linter{}).Lint(context.Background(), reg, records)
+			if n := countCode(diags, "lint.skill_podium_only_field"); n != 0 {
+				t.Errorf("SKILL.md extends drew %d lint.skill_podium_only_field diagnostics: %v", n, diags)
+			}
+		})
+	}
+}

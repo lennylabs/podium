@@ -353,8 +353,8 @@ func deps(st store.Store, objs objectstore.Provider) rehashDeps {
 
 // Spec: §4.7.6, §13.4 — the pass rewrites every stored row from the bytes the
 // registry holds, across tenants, including a soft-deleted row a §8.4 restore
-// would bring back and an extends: child, and records the completion so a later
-// start reads no row at all.
+// would bring back and a row seeded apart from the batch, and records the
+// completion so a later start reads no row at all.
 func TestRehashStoredHashes_MigratesEveryTenantsRows(t *testing.T) {
 	st := store.NewMemory()
 	seeds := []rowSeed{
@@ -365,7 +365,8 @@ func TestRehashStoredHashes_MigratesEveryTenantsRows(t *testing.T) {
 	for _, s := range seeds {
 		seedRow(t, st, nil, s)
 	}
-	// An extends: child stores its own pre-merge bytes and an ExtendsPin.
+	// A row seeded after the batch, with a SKILL.md and no resource, is
+	// rewritten from its own bytes like every other row.
 	child := rowSeed{tenant: "globex", id: "delta", version: "1.0.0", skill: []byte("# Delta\n")}
 	seedRow(t, st, nil, child)
 	seeds = append(seeds, child)

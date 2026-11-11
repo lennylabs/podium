@@ -337,10 +337,10 @@ func TestDependencyRanking_OrdersByInDegreeTiesById(t *testing.T) {
 	st := gapMemStore(t)
 	// in-degree: high=2, mid-a=1, mid-b=1, zero=0 (no edges).
 	edges := []store.DependencyEdge{
-		{From: "c1", To: "high", Kind: "extends"},
-		{From: "c2", To: "high", Kind: "extends"},
-		{From: "c1", To: "mid-a", Kind: "extends"},
-		{From: "c1", To: "mid-b", Kind: "extends"},
+		{From: "c1", To: "high", Kind: "delegates_to"},
+		{From: "c2", To: "high", Kind: "delegates_to"},
+		{From: "c1", To: "mid-a", Kind: "delegates_to"},
+		{From: "c1", To: "mid-b", Kind: "delegates_to"},
 	}
 	for _, e := range edges {
 		if err := st.PutDependency(context.Background(), "t", e); err != nil {
@@ -362,8 +362,8 @@ func TestDependencyRanking_RespectsAllowedSet(t *testing.T) {
 	t.Parallel()
 	st := gapMemStore(t)
 	for _, e := range []store.DependencyEdge{
-		{From: "c1", To: "visible", Kind: "extends"},
-		{From: "c1", To: "hidden", Kind: "extends"},
+		{From: "c1", To: "visible", Kind: "delegates_to"},
+		{From: "c1", To: "hidden", Kind: "delegates_to"},
 	} {
 		if err := st.PutDependency(context.Background(), "t", e); err != nil {
 			t.Fatalf("PutDependency: %v", err)
@@ -391,7 +391,7 @@ func TestDependencyRanking_AllowedExcludesEverythingReturnsNil(t *testing.T) {
 	t.Parallel()
 	st := gapMemStore(t)
 	if err := st.PutDependency(context.Background(), "t", store.DependencyEdge{
-		From: "c1", To: "only", Kind: "extends",
+		From: "c1", To: "only", Kind: "delegates_to",
 	}); err != nil {
 		t.Fatalf("PutDependency: %v", err)
 	}

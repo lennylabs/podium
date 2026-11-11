@@ -324,9 +324,9 @@ func TestIngest_ContentHashCoversBundledResources(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.3 Reverse Dependency Index — extends, delegates_to, and
-// mcpServers references in the manifest produce dependency edges in
-// the store at ingest time.
+// Spec: §4.7.3 Reverse Dependency Index — delegates_to and mcpServers
+// references in the manifest produce dependency edges in the store at
+// ingest time.
 func TestIngest_PopulatesDependencyEdges(t *testing.T) {
 	t.Parallel()
 	src := "---\n" +
@@ -334,7 +334,6 @@ func TestIngest_PopulatesDependencyEdges(t *testing.T) {
 		"version: 1.0.0\n" +
 		"description: dependent\n" +
 		"sensitivity: low\n" +
-		"extends: shared/parent@1.0.0\n" +
 		"delegates_to:\n" +
 		"  - finance/sub-agent@1.x\n" +
 		"mcpServers:\n" +
@@ -354,16 +353,6 @@ func TestIngest_PopulatesDependencyEdges(t *testing.T) {
 		"server_identifier: npx:@company/finance-warehouse-mcp\n" +
 		"---\n\nbody\n"
 	st := newStore(t)
-	// Per §4.7.6 the extends: parent must exist at the child's ingest
-	// time so its version can be pinned. Ingest the parent first.
-	parentSrc := "---\ntype: agent\nversion: 1.0.0\ndescription: parent\nsensitivity: low\n---\n\nparent body\n"
-	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
-		TenantID: "tenant-1", LayerID: "L", Files: fstest.MapFS{
-			"shared/parent/ARTIFACT.md": &fstest.MapFile{Data: []byte(parentSrc)},
-		},
-	}); err != nil {
-		t.Fatalf("Ingest parent: %v", err)
-	}
 	fsys := fstest.MapFS{
 		"finance/dependent/ARTIFACT.md":   &fstest.MapFile{Data: []byte(src)},
 		"infra/mcp/warehouse/ARTIFACT.md": &fstest.MapFile{Data: []byte(mcpSrc)},
@@ -376,7 +365,6 @@ func TestIngest_PopulatesDependencyEdges(t *testing.T) {
 	cases := []struct {
 		to, kind string
 	}{
-		{"shared/parent", "extends"},
 		{"finance/sub-agent", "delegates_to"},
 		// §4.7.3 — keyed on the resolved mcp-server artifact ID, not the
 		// consumer-side local name "finance-warehouse".

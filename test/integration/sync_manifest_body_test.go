@@ -15,15 +15,16 @@ import (
 
 	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/internal/testharness/registryharness"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/sync"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // writeLargeManifestRegistry lays out a two-layer filesystem registry whose
-// merged child and skill carry manifest documents above the inline cutoff. The
-// child team/big restates the undeclared x_owner key its parent in the base
-// layer sets, because §4.6 refuses a child that leaves an undeclared key to a
-// parent in another layer, and it inherits the parent's sensitivity.
+// context team/big and skill team/bigskill carry manifest documents above the
+// inline cutoff. team/big also carries the undeclared x_owner key, so the
+// comparison covers a key manifest.Artifact does not declare.
 func writeLargeManifestRegistry(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -32,9 +33,9 @@ func writeLargeManifestRegistry(t *testing.T) string {
 		testharness.WriteTreeOption{Path: "base/.layer-config", Content: "visibility:\n  public: true\n"},
 		testharness.WriteTreeOption{Path: "top/.layer-config", Content: "visibility:\n  public: true\n"},
 		testharness.WriteTreeOption{Path: "base/shared/parent/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsensitivity: low\nx_owner: platform\n---\n\nparent prose\n"},
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsensitivity: low\n---\n\nparent prose\n"},
 		testharness.WriteTreeOption{Path: "top/team/big/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: big child\nx_owner: platform\nextends: shared/parent@1.x\n---\n\n" + daBigBody},
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: big context\nsensitivity: low\nx_owner: platform\n---\n\n" + daBigBody},
 		testharness.WriteTreeOption{Path: "top/team/bigskill/ARTIFACT.md",
 			Content: "---\ntype: skill\nversion: 1.0.0\ndescription: big skill\n---\n"},
 		testharness.WriteTreeOption{Path: "top/team/bigskill/SKILL.md",
@@ -53,9 +54,9 @@ func largeManifestServer(t *testing.T, root string) *httptest.Server {
 }
 
 // Spec: §2.2, §6.6 — server-source `podium sync` follows manifest_body_url, so
-// an above-cutoff merged ARTIFACT.md and an above-cutoff SKILL.md materialize
+// an above-cutoff ARTIFACT.md and an above-cutoff SKILL.md materialize
 // byte-identical to a filesystem-source sync of the same layers.
-func TestServerSync_LargeMergedManifestMatchesFilesystemSync(t *testing.T) {
+func TestServerSync_LargeManifestMatchesFilesystemSync(t *testing.T) {
 	t.Parallel()
 	root := writeLargeManifestRegistry(t)
 	ts := largeManifestServer(t, root)
@@ -80,7 +81,7 @@ func TestServerSync_LargeMergedManifestMatchesFilesystemSync(t *testing.T) {
 	}
 	if big := srvTree["team/big/ARTIFACT.md"]; !strings.Contains(big, "x_owner: platform") ||
 		!strings.Contains(big, "sensitivity: low") {
-		t.Error("the server-source ARTIFACT.md is not the merged document")
+		t.Error("the server-source ARTIFACT.md is not the authored document")
 	}
 }
 
@@ -137,12 +138,14 @@ func TestServerSync_ManifestBodyDigestMismatchAbortsTheSync(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.6, §11 — the §6.4 overlay leg of the content-hash agreement for
-// a package that declares extends:: the overlay resolves no chain and hashes
-// the child's authored bytes, so a server-source sync whose overlay holds the
-// reference fixture's extends: child byte for byte records the digest ingest
-// stored for it.
-func TestSyncServerSource_OverlayExtendsChildAgreesWithIngest(t *testing.T) {
+// Spec: §4.7.6, §6.4, §11 — the §6.4 overlay leg of the content-hash agreement
+// for a skill with no ARTIFACT.md: the overlay hashes the zero-length
+// ARTIFACT.md framing over the authored SKILL.md, so a server-source sync whose
+// overlay holds the reference fixture's version-less plain skill byte for byte
+// records the digest ingest stored for it. The digest over the synthesized
+// ARTIFACT.md differs, which pins the overlay to the authored bytes rather than
+// the document it synthesizes for materialization.
+func TestSyncServerSource_OverlayPlainSkillAgreesWithIngest(t *testing.T) {
 	t.Parallel()
 	dir := referenceRegistryPath(t)
 	srv, err := server.NewFromFilesystem(dir)
@@ -151,15 +154,25 @@ func TestSyncServerSource_OverlayExtendsChildAgreesWithIngest(t *testing.T) {
 	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	const id = "notes/glossary-notes"
+	const id = "plain-skills/unversioned"
 	ingested := registryContentHash(t, &http.Client{Timeout: 30 * time.Second}, ts.URL, id)
 
-	authored, err := os.ReadFile(filepath.Join(dir, "personal", id, "ARTIFACT.md"))
+	skillBytes, err := os.ReadFile(filepath.Join(dir, "org-defaults", id, "SKILL.md"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
+	synth, err := manifest.SynthesizedSkillDocument("0.0.0-auto.0")
+	if err != nil {
+		t.Fatalf("SynthesizedSkillDocument: %v", err)
+	}
+	authoredHash := "sha256:" + version.CanonicalContentHash(nil, skillBytes, nil)
+	synthHash := "sha256:" + version.CanonicalContentHash(synth, skillBytes, nil)
+	if ingested != authoredHash {
+		t.Fatalf("ingested content_hash = %s, want the authored-bytes digest %s", ingested, authoredHash)
+	}
+
 	overlayDir := t.TempDir()
-	testharness.WriteTree(t, overlayDir, testharness.WriteTreeOption{Path: id + "/ARTIFACT.md", Content: string(authored)})
+	testharness.WriteTree(t, overlayDir, testharness.WriteTreeOption{Path: id + "/SKILL.md", Content: string(skillBytes)})
 
 	target := t.TempDir()
 	if _, err := sync.Run(sync.Options{Delivery: neverDelivery, RegistryPath: ts.URL, Target: target, AdapterID: "none", OverlayPath: overlayDir}); err != nil {
@@ -170,12 +183,16 @@ func TestSyncServerSource_OverlayExtendsChildAgreesWithIngest(t *testing.T) {
 		t.Fatalf("ReadLock: %v %v", lock, err)
 	}
 	for _, a := range lock.Artifacts {
-		if a.ID == id {
-			if a.ContentHash != ingested {
-				t.Errorf("overlay lock content_hash = %s, want the ingested %s", a.ContentHash, ingested)
-			}
-			return
+		if a.ID != id {
+			continue
 		}
+		if a.ContentHash != ingested {
+			t.Errorf("overlay lock content_hash = %s, want the ingested %s", a.ContentHash, ingested)
+		}
+		if a.ContentHash == synthHash {
+			t.Errorf("overlay lock content_hash = %s is the digest over the synthesized ARTIFACT.md", a.ContentHash)
+		}
+		return
 	}
 	t.Fatalf("lock has no entry for %s", id)
 }

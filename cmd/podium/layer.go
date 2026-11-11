@@ -584,8 +584,8 @@ func writeIngestReport(stdout, stderr io.Writer, layerID string, body []byte) (d
 		_, _ = fmt.Fprintf(stderr, "conflict: %s@%s rejected (%s); bump the version\n", c.ArtifactID, c.Version, c.Code)
 	}
 	// §13.10 / §4.6 / §4.7.8: an artifact dropped for a non-conflict reason
-	// (sensitivity floor, sandbox profile, cross-layer collision, quota,
-	// unresolved extends, or a data-plane resource-store failure).
+	// (sensitivity floor, cross-layer collision, a declared extends:, quota,
+	// or a data-plane resource-store failure).
 	for _, rj := range report.Rejected {
 		printRejected(stderr, rj.ArtifactID, rj.Code, rj.Reason)
 	}
@@ -608,10 +608,10 @@ func printRejected(w io.Writer, id, code, reason string) {
 }
 
 // reportDropped prints a rejected line for each artifact a filesystem-source
-// composition dropped under the §4.6 collision, sandbox-profile, or
-// executable-field rule, with the code and reason each drop carries, and
+// composition dropped under the §4.6 collision rule or the §4.6
+// no-inheritance rule, with the code and reason each drop carries, and
 // reports whether it printed anything, so the caller can set a non-zero exit
-// status.
+// status. The sync commands and podium lint call it.
 //
 // Spec: §4.6, §13.11.3
 func reportDropped(w io.Writer, dropped []layer.Drop) bool {

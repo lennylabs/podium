@@ -788,7 +788,7 @@ async function batchResultFrom(entry: BatchEntry, verification: Verification): P
 export interface DependencyEdge {
   from: string;
   to: string;
-  kind: "extends" | "delegates_to" | "mcpServers";
+  kind: "delegates_to" | "mcpServers";
 }
 
 export interface ScopePreview {
@@ -1521,7 +1521,7 @@ export class Client {
   }
 
   // Spec §7.6 — dependents_of returns reverse-dependency edges for
-  // impact analysis (extends, delegates_to, mcpServers).
+  // impact analysis (delegates_to and mcpServers).
   async dependentsOf(artifactID: string): Promise<DependencyEdge[]> {
     const body = (await this.get("/v1/dependents", { id: artifactID })) as {
       edges?: DependencyEdge[];

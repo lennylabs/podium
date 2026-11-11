@@ -54,9 +54,8 @@ var (
 	ErrScopePreviewDisabled = errors.New("config.scope_preview_disabled")
 	// ErrContentHashMismatch is the §13.4 stored-row admission refusal of a
 	// row whose bytes do not reproduce its stored content hash, whose
-	// resource refs do not match their bodies, whose body object storage
-	// reports absent, or whose parent pin its manifest does not declare
-	// (materialize.content_hash_mismatch).
+	// resource refs do not match their bodies, or whose body object storage
+	// reports absent (materialize.content_hash_mismatch).
 	ErrContentHashMismatch = errors.New("materialize.content_hash_mismatch")
 	// ErrStoredSignatureMissing is the §13.4 admission refusal of a row that
 	// carries no signature on a registry with a signer configured
@@ -120,6 +119,17 @@ type Registry struct {
 	admitSigner      sign.Provider
 	admitObjects     objectstore.Provider
 	admitReadTimeout time.Duration
+	// retiredMu guards retired, the memo of the §4.6 no-inheritance verdict
+	// keyed by (tenant, content hash). An entry is written once and never
+	// changed or evicted, so the map holds one boolean per distinct stored
+	// content hash the registry has listed. The content hash is injective
+	// over the ARTIFACT.md bytes (§4.7.6), so a key names one verdict even
+	// when a purge and a re-ingest store other bytes under a reused
+	// (id, version). A row whose bytes no longer reproduce its hash is
+	// refused at admission whatever the memo says, so a stale verdict fails
+	// closed.
+	retiredMu sync.RWMutex
+	retired   map[retiredKey]bool
 }
 
 // DiscoveryDefaults carries the §13.12 tenant-scope discovery knobs from
@@ -523,11 +533,9 @@ type ArtifactDescriptor struct {
 	Description string
 	Tags        []string
 	Score       float64
-	// Sensitivity is the artifact's classification label, surfaced in
-	// search_artifacts results for filtering and display (§4.7.4). For an
-	// artifact that declares extends:, it carries the most-restrictive value
-	// across the chain (§4.6 field-semantics) so search agrees with
-	// load_artifact. Empty when the artifact declares no sensitivity.
+	// Sensitivity is the artifact's declared classification label, surfaced
+	// in search_artifacts results for filtering and display (§4.7.4). Empty
+	// when the artifact declares no sensitivity.
 	Sensitivity string
 	// FoldedFrom records the relative subpath an artifact was lifted
 	// from when fold_below_artifacts collapsed its sparse subdomain
@@ -1277,7 +1285,7 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 	// embedder may be nil when the backend self-embeds (§13.12).
 	degraded := !r.vectorSearchActive()
 	if !degraded && opts.Query != "" {
-		vecRanks, vecErr := r.vectorRanks(ctx, opts.Query, filtered, opts.TopK)
+		vecRanks, vecErr := r.vectorRanks(ctx, opts.Query, filtered, visible, opts.TopK)
 		if vecErr != nil {
 			degraded = true
 		} else if len(vecRanks) > 0 {
@@ -1336,49 +1344,24 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		d := descriptorOf(sc.rec)
 		d.Score = sc.score
 		// spec: §4.7.4 — surface the sensitivity label in search results.
-		// The record's indexed columns are already §4.6-merged at ingest,
-		// so the stored value is the resolved one and the search path runs
-		// no read-time fold per result.
 		d.Sensitivity = sc.rec.Sensitivity
-		// A record with no pin keeps the block descriptorOf built, which
-		// leaves the common path free of a chain walk and a YAML decode.
-		if sc.rec.ExtendsPin != "" {
-			d.Frontmatter = r.descriptorBlockHidingChain(ctx, sc.rec)
-		}
 		res.Results = append(res.Results, d)
 	}
 	ev.ResultSize = len(res.Results)
 	return res, nil
 }
 
-// descriptorBlockHidingChain returns a pinned child's authored frontmatter
-// block for its search descriptor, held to the parent-ID test load_artifact
-// applies over the same child's whole pinned chain. The walk is the unadmitted
-// one revalidationRedactKeys makes, because a search result serves no admitted
-// content (§13.4). A chain that cannot be resolved, whether an ancestor is
-// missing, the pins cycle, or the store fails, yields the empty block: the
-// search caller gets the descriptor without its frontmatter key and no error,
-// and the walk error, which can name an ancestor, stays in the server log.
+// vectorRanks embeds the query and returns the top-K nearest artifact IDs
+// from the vector store, restricted to the candidate IDs so a leaked vector
+// outside the caller's view never surfaces. servable is the listing the
+// candidates came from, which servableRows already filtered: a match is kept
+// only when its (ArtifactID, Version) names a servable row, so the vector of
+// a row the §4.6 no-inheritance rule retires, which the index still holds,
+// never returns or ranks its ID. The vector of an older servable version
+// still surfaces its ID.
 //
-// Spec: §4.6 hidden parents (withheld).
-func (r *Registry) descriptorBlockHidingChain(ctx context.Context, rec store.ManifestRecord) string {
-	chain, err := r.resolveExtendsChain(ctx, rec)
-	if err != nil {
-		log.Printf("search: descriptor of %s/%s: %v", r.TenantFor(ctx), rec.ArtifactID, err)
-		return ""
-	}
-	pins := make([]string, 0, len(chain))
-	for _, member := range chain {
-		pins = append(pins, member.ExtendsPin)
-	}
-	return manifest.FrontmatterHidingParent(rec.Frontmatter, rec.ArtifactID, pins)
-}
-
-// vectorRanks embeds the query and returns the top-K nearest
-// artifact IDs from the vector store, restricted to the visible
-// candidate set so a leaked vector outside the caller's view never
-// surfaces.
-func (r *Registry) vectorRanks(ctx context.Context, query string, candidates []store.ManifestRecord, topK int) ([]string, error) {
+// Spec: §4.6
+func (r *Registry) vectorRanks(ctx context.Context, query string, candidates, servable []store.ManifestRecord, topK int) ([]string, error) {
 	matches, err := r.queryVector(ctx, query, topK*4)
 	if err != nil {
 		return nil, fmt.Errorf("vector: %w", err)
@@ -1386,6 +1369,11 @@ func (r *Registry) vectorRanks(ctx context.Context, query string, candidates []s
 	candidateIDs := map[string]bool{}
 	for _, c := range candidates {
 		candidateIDs[c.ArtifactID] = true
+	}
+	type rowKey struct{ id, version string }
+	servableKeys := make(map[rowKey]bool, len(servable))
+	for _, m := range servable {
+		servableKeys[rowKey{m.ArtifactID, m.Version}] = true
 	}
 	out := make([]string, 0, len(matches))
 	seen := map[string]bool{}
@@ -1396,7 +1384,7 @@ func (r *Registry) vectorRanks(ctx context.Context, query string, candidates []s
 		if m.Version == DomainVectorVersion {
 			continue
 		}
-		if !candidateIDs[m.ArtifactID] || seen[m.ArtifactID] {
+		if !candidateIDs[m.ArtifactID] || !servableKeys[rowKey{m.ArtifactID, m.Version}] || seen[m.ArtifactID] {
 			continue
 		}
 		seen[m.ArtifactID] = true
@@ -1487,15 +1475,6 @@ type LoadArtifactResult struct {
 	// emits when serving a deprecated artifact, per §4.7.4. Empty
 	// when the artifact is live.
 	DeprecationWarning string
-	// ExtendsPin is the "<id>@<version>" parent pin the artifact resolved at
-	// ingest, set only when the requesting identity can see that parent
-	// record. It is empty for an artifact that extends nothing and for a
-	// caller who cannot see the parent, and the two are indistinguishable.
-	// LoadArtifact sets it on the full result and on the revalidation result
-	// alike, because the HTTP validator folds it in (§7.2).
-	//
-	// Spec: §4.6 hidden parents (withheld), §7.2.
-	ExtendsPin string
 	// ArtifactRevision is the resolved record's stored ingest time, written by
 	// version.FormatArtifactRevision. It is the served record's own value
 	// rather than a maximum over the caller's candidate versions, because such
@@ -1532,10 +1511,9 @@ type LoadArtifactOptions struct {
 	Revalidate func(res *LoadArtifactResult) bool
 }
 
-// LoadArtifact returns the manifest body. When the resolved manifest
-// declares extends:, the parent is fetched (server-side, hidden-parent
-// semantics per §4.6) and field-merged per the §4.6 merge-semantics
-// table. The returned body and frontmatter are the merged result.
+// LoadArtifact returns the resolved row's manifest body and frontmatter as
+// admitted under §13.4. Manifests do not inherit (§4.6), so there is no parent
+// to fetch.
 func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifactID string, opts LoadArtifactOptions) (res *LoadArtifactResult, err error) {
 	// spec: §4.7.5 — log the read with resolved layer composition and
 	// result size. Deferred over a named return so a resolved artifact
@@ -1618,35 +1596,22 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 			"content_hash": rec.ContentHash,
 			"layer":        rec.Layer,
 		}
-		// Spec: §4.6 hidden parents (withheld), §7.2 — the pin is served only
-		// to a caller who can see the parent record, and it is computed once
-		// against the same view for the revalidation result and the full
-		// result, so a HEAD, a 304, and a full GET publish one validator.
-		extendsPin := servedExtends(rec.ExtendsPin, visible)
 		if opts.Revalidate != nil {
 			unadmitted := revalidationResult(rec)
-			unadmitted.ExtendsPin = extendsPin
 			if opts.Revalidate(unadmitted) {
 				// Spec: §13.4 — a revalidation returns no content and is
 				// answered from the resolved row without admission, so the
-				// key set comes from the unadmitted chain walk.
-				keys, err := r.revalidationRedactKeys(ctx, rec, artifactID)
-				if err != nil {
-					return nil, err
-				}
+				// key set comes from the row's own directive.
 				ev.Context = readContext
-				ev.RedactKeys = keys
+				ev.RedactKeys = r.revalidationRedactKeys(rec)
 				return unadmitted, nil
 			}
 		}
-		res, served, err := r.assembleResult(ctx, rec, artifactID)
+		res, served, err := r.assembleResult(ctx, rec)
 		if err == nil {
-			res.ExtendsPin = extendsPin
 			ev.Context = readContext
 			// The served record carries the admitted audit_redact key set:
-			// admission derives it from the row's bytes, and for an extends
-			// child mergeChain folds it over the admitted chain, because §4.6
-			// makes audit_redact inheritable.
+			// admission derives it from the row's bytes.
 			redactKeys := served.AuditRedact
 			// Surface the author-named sensitive frontmatter fields (e.g.
 			// bank_account, ssn) into the read-event context so the directive
@@ -1750,36 +1715,25 @@ func (r *Registry) recordSessionPin(session, id, ver string) {
 }
 
 // assembleResult turns one manifest record into a LoadArtifactResult. It
-// admits the record and every row of its extends: chain first (§13.4), then
-// field-merges a chain per §4.6, loading each parent privilege-bypassing the
-// visibility filter under hidden-parent semantics. It also returns the record
-// the caller was served, which is the admitted row for a record with no chain
-// and the merged record otherwise. The §8.2 read emitter needs the served
-// frontmatter and the served audit_redact directive, and LoadArtifactResult is
-// a client-facing type that carries neither the directive nor any internal
-// field, so the record travels beside the result rather than widening the wire
-// contract.
-func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord, requestedID string) (*LoadArtifactResult, store.ManifestRecord, error) {
-	chain, err := r.admitChain(ctx, rec, requestedID)
+// admits the record first (§13.4) and serves the admitted row: manifests do
+// not inherit (§4.6), so no other row contributes to the result. It also
+// returns the record the caller was served. The §8.2 read emitter needs the
+// served frontmatter and the served audit_redact directive, and
+// LoadArtifactResult is a client-facing type that carries neither the
+// directive nor any internal field, so the record travels beside the result
+// rather than widening the wire contract.
+func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord) (*LoadArtifactResult, store.ManifestRecord, error) {
+	served, err := r.admit(ctx, rec)
 	if err != nil {
 		return nil, store.ManifestRecord{}, err
 	}
-	served := chain[0]
-	if len(chain) > 1 {
-		served, err = mergeChain(chain)
-		if err != nil {
-			return nil, store.ManifestRecord{}, err
-		}
-	}
 	// Spec: §4.3.4, §4.7.10 — a plain skill is served the synthesized
-	// ARTIFACT.md. A merged chain is never affected, because a merged
-	// document is non-empty.
+	// ARTIFACT.md.
 	if served.Frontmatter, err = servedFrontmatter(served); err != nil {
 		return nil, store.ManifestRecord{}, err
 	}
 	res := withDeprecationWarning(resultFromRecord(served))
-	// Spec: §4.7.10 — the revision is the resolved row's ingest time, taken
-	// from rec so a merged extends chain carries the child's value.
+	// Spec: §4.7.10 — the revision is the resolved row's ingest time.
 	res.ArtifactRevision = version.FormatArtifactRevision(rec.IngestedAt)
 	return res, served, nil
 }
@@ -1797,210 +1751,11 @@ func revalidationResult(rec store.ManifestRecord) *LoadArtifactResult {
 	}
 }
 
-// servedExtends returns pin when the parent record it names, keyed on
-// (ArtifactID, Version), is in visible, and the empty string otherwise. The key
-// is the pair rather than the ID because a §4.6 same-ID overlay's parent shares
-// the child's ID: a caller who sees only the overlaying layer sees the ID and
-// not the pinned version, and an ID-keyed test would serve that version.
-//
-// Spec: §4.6 hidden parents (withheld).
-func servedExtends(pin string, visible []store.ManifestRecord) string {
-	if pin == "" {
-		return ""
-	}
-	parentID, parentVer := splitParentRef(pin)
-	for _, m := range visible {
-		if m.ArtifactID == parentID && m.Version == parentVer {
-			return pin
-		}
-	}
-	return ""
-}
-
-// resolveExtendsChain returns the extends: chain of rec, read from the
-// registry's store under the caller's tenant. ExtendsChain documents the order
-// and the error contract.
-func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRecord) ([]store.ManifestRecord, error) {
-	return ExtendsChain(ctx, r.store, r.TenantFor(ctx), rec)
-}
-
-// ExtendsChain returns the chain of records that starts at rec and walks each
-// stored ExtendsPin, ordered root parent first (lowest precedence) and rec last
-// (highest). The load path re-checks for a cycle as defense in depth, although
-// ingest already rejects one, and the ingest path walks a pinned parent's chain
-// with it to compare the executable fields that parent sets.
-//
-// Error contract: a missing parent matches both ErrNotFound and
-// store.ErrNotFound. Any other store failure matches ErrNotFound and the
-// store's own error, and it does not match store.ErrNotFound, so a caller can
-// tell an unresolvable chain from a store fault. A cycle matches
-// ErrInvalidArgument. The message names the pin of the record whose parent
-// read failed, which can be an ancestor beyond rec's own pin, so a caller that
-// reports the error outside the server log withholds it (§4.6 Withheld).
-//
-// Spec: §4.6
-func ExtendsChain(ctx context.Context, st store.Store, tenantID string, rec store.ManifestRecord) ([]store.ManifestRecord, error) {
-	return walkExtendsChain(ctx, st, tenantID, rec, map[string]bool{})
-}
-
-// walkExtendsChain is ExtendsChain's recursion. seen holds the id@version keys
-// already on the chain, and a repeat is a cycle.
-func walkExtendsChain(ctx context.Context, st store.Store, tenantID string, rec store.ManifestRecord, seen map[string]bool) ([]store.ManifestRecord, error) {
-	key := rec.ArtifactID + "@" + rec.Version
-	if seen[key] {
-		return nil, fmt.Errorf("%w: extends cycle at %s", ErrInvalidArgument, key)
-	}
-	seen[key] = true
-
-	if rec.ExtendsPin == "" {
-		return []store.ManifestRecord{rec}, nil
-	}
-	parentID, parentVer := splitParentRef(rec.ExtendsPin)
-	parent, err := st.GetManifest(ctx, tenantID, parentID, parentVer)
-	if err != nil {
-		// Both verbs wrap so errors.Is reaches the store's own error, which
-		// separates a missing parent from a store fault.
-		return nil, fmt.Errorf("%w: parent %s: %w", ErrNotFound, rec.ExtendsPin, err)
-	}
-	parentChain, err := walkExtendsChain(ctx, st, tenantID, parent, seen)
-	if err != nil {
-		return nil, err
-	}
-	return append(parentChain, rec), nil
-}
-
-// ResolvedArtifact folds the chain, root parent first, into the artifact a
-// read serves per the §4.6 field-semantics table, and it returns the chain's
-// authored blocks root first with each record's stored pin as its Extends
-// reference. Each record is decoded with parsedArtifact, so a block whose
-// frontmatter does not parse contributes its stored columns rather than
-// failing the fold. A caller that must fail closed on such a block checks the
-// blocks itself, as manifest.InheritedExecutableFields does.
-//
-// Spec: §4.6
-func ResolvedArtifact(chain []store.ManifestRecord) (manifest.Artifact, []manifest.MergedBlock) {
-	if len(chain) == 0 {
-		return manifest.Artifact{}, nil
-	}
-	merged := *parsedArtifact(chain[0])
-	for _, c := range chain[1:] {
-		merged = manifest.MergeExtends(merged, *parsedArtifact(c))
-	}
-	// The stored pin is the reference this record was ingested with,
-	// reduced to its canonical ID on the other side of the strip. Passing
-	// it rather than re-reading the block keeps both modes checking the
-	// same chain (§11).
-	blocks := make([]manifest.MergedBlock, 0, len(chain))
-	for _, c := range chain {
-		blocks = append(blocks, manifest.MergedBlock{
-			Frontmatter: c.Frontmatter,
-			Extends:     c.ExtendsPin,
-		})
-	}
-	return merged, blocks
-}
-
-// mergeChain folds the chain parent → child per the §4.6 field-semantics
-// table. It parses each record's stored frontmatter into a
-// manifest.Artifact, applies manifest.MergeExtends across the chain, and
-// re-serializes the merged frontmatter so every consumer that reads the
-// served frontmatter, and not only the indexed Sensitivity record field,
-// observes the merged result. The merged record keeps the child's identity
-// (id, version, content hash, and layer) and the child's body, and it surfaces the
-// merged Type, Sensitivity, Deprecated, ReplacedBy, and AuditRedact back onto
-// the row. Every other merged field reaches its consumers through the
-// re-serialized frontmatter alone.
-// spec: §4.6 field-semantics table.
-func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
-	if len(chain) == 0 {
-		return store.ManifestRecord{}, nil
-	}
-	merged, authored := ResolvedArtifact(chain)
-	out := chain[0]
-	for _, c := range chain[1:] {
-		// Identity fields preserve the child's coordinates so callers
-		// see the child rather than the parent.
-		out.ArtifactID = c.ArtifactID
-		out.Version = c.Version
-		out.ContentHash = c.ContentHash
-		out.Layer = c.Layer
-		out.IngestedAt = c.IngestedAt
-		out.ExtendsPin = c.ExtendsPin
-		// The body takes the child's, and the parent's prose is never
-		// concatenated. The assignment is unconditional, matching
-		// manifest.MergeExtends and the filesystem resolver: guarding on a
-		// non-empty child body served the parent's prose to a child that
-		// authored none. For a type whose prose lives in ARTIFACT.md that
-		// also left the record's Body disagreeing with the body inside its
-		// own merged frontmatter. For type: skill the two sources differ by
-		// construction, because ingest stores the SKILL.md body on Body and
-		// the ARTIFACT.md bytes as Frontmatter, so dropping the guard serves
-		// a skill child its own empty SKILL.md body in place of the parent's
-		// prose.
-		out.Body = c.Body
-		// Bundled resources belong to the concrete package: the child's
-		// own files ship, not the hidden parent's (§4.6). The leaf record
-		// is last in the chain, so its refs win.
-		out.Resources = c.Resources
-		// The verbatim SKILL.md follows the child's identity: a skill that
-		// extends a parent still ships its own authored SKILL.md.
-		out.SkillRaw = c.SkillRaw
-	}
-	// Spec: §4.6, §4.3.4 — a child whose ARTIFACT.md overlay omits version
-	// is served the child row's version, the version the load returns and the
-	// one the filesystem resolver merges. The fill lives here rather than in
-	// ResolvedArtifact, which ingest's executable-field check also calls on
-	// raw stored rows and which compares no version.
-	if merged.Version == "" {
-		merged.Version = out.Version
-	}
-	// Surface the merged structured fields onto the returned record. Each one
-	// has a consumer that reads it from this record: resultFromRecord copies
-	// Type, Sensitivity, Deprecated, and ReplacedBy onto the result, and
-	// withDeprecationWarning reads the last two. AuditRedact is inheritable
-	// under §4.6 and manifest.MergeExtends folds it child-wins, so the record
-	// carries the resolved key set the §8.2 read emitter reads off the record
-	// assembleResult returns. Description, Tags, and SearchVisibility are
-	// deliberately absent: LoadArtifactResult declares no such fields, and the
-	// search path reads the stored columns the ingest fold writes rather than
-	// this record, so an assignment here would be unread.
-	setManifestFields(&out, &merged)
-	// Serialize through the chain's authored blocks so an extension type's
-	// own frontmatter keys survive, and strip the extends reference so the
-	// hidden parent is not surfaced (§4.6). A merged block that names a chain
-	// parent under any key, and one that cannot be rewritten at all, fail the
-	// read rather than being served. The record's own ID goes with it, because
-	// a same-ID overlay's parent carries the ID the requester asked for and so
-	// discloses nothing.
-	fm, err := manifest.SerializeMerged(&merged, out.ArtifactID, authored...)
-	if err != nil {
-		return store.ManifestRecord{}, fmt.Errorf("%w: extends manifest for %s: %v",
-			ErrInvalidArgument, out.ArtifactID, err)
-	}
-	out.Frontmatter = fm
-	// Spec: §4.7.10 — for a type whose prose lives in ARTIFACT.md, the served
-	// body is the one the served document splits to. SerializeMerged embeds
-	// the body with its trailing newlines normalized, and a consumer that
-	// receives the document by manifest_body_url re-derives the body from it,
-	// so serving the stored body verbatim would let the inline and the URL
-	// delivery of one record carry different bodies. A skill keeps its stored
-	// body, because its served document is its own SKILL.md.
-	if out.Type != string(manifest.TypeSkill) {
-		a, err := manifest.ParseArtifact(fm)
-		if err != nil {
-			return store.ManifestRecord{}, fmt.Errorf("%w: extends manifest for %s: %v",
-				ErrInvalidArgument, out.ArtifactID, err)
-		}
-		out.Body = []byte(a.Body)
-	}
-	return out, nil
-}
-
 // parsedArtifact decodes a record's stored frontmatter into a
 // manifest.Artifact. A record whose frontmatter is empty or does not parse
 // yields its stored columns instead, including every field setManifestFields
-// serves, so mergeChain and revalidationRedactKeys fold the same per-row
-// values that admission leaves on such a row. On an admitted plain-skill row
+// serves, so revalidationRedactKeys reads the same values admission leaves on
+// such a row. On an admitted plain-skill row
 // those columns already hold the values its SKILL.md states, because
 // withAdmittedFields derived them from the admitted bytes.
 //
@@ -2021,19 +1776,6 @@ func parsedArtifact(rec store.ManifestRecord) *manifest.Artifact {
 		ReplacedBy:  rec.ReplacedBy,
 		AuditRedact: append([]string(nil), rec.AuditRedact...),
 	}
-}
-
-// splitParentRef splits "<id>@<version>" into its components. It splits on
-// the first "@" so it parses the §4.2 reference grammar identically to the
-// other split helpers (ingest.splitRef, version.StripPin,
-// composer.SplitArtifactRef); canonical-ID segments may not contain "@"
-// (filesystem.ValidateCanonicalID), so the suffix always begins at the first
-// "@".
-func splitParentRef(ref string) (id, ver string) {
-	if i := strings.Index(ref, "@"); i >= 0 {
-		return ref[:i], ref[i+1:]
-	}
-	return ref, ""
 }
 
 // callerOf renders the caller identity per §8.1. Public-mode (or
@@ -2095,15 +1837,13 @@ func ManifestBodyKey(doc []byte) string {
 // artifacts (§4.4), so any one visible owner authorizes the read.
 //
 // An artifact owns each resource it bundles and the §6.6 presigned manifest
-// document it serves. The served document is the stored SKILL.md for a skill
-// and the stored ARTIFACT.md for an artifact with no parent. For a non-skill
-// child declaring extends: it is the merged document, so the stored pre-merge
-// ARTIFACT.md has no owner: it is never served, and authorizing its key would
-// let a caller confirm a guessed extends: line by the route's answer. Only
-// documents above the inline cutoff are stored externally, so the hash is
-// computed for those alone.
+// document it serves: the stored SKILL.md for a skill and the stored
+// ARTIFACT.md otherwise. The candidates are the caller's servable rows, so a
+// row the §4.6 no-inheritance rule retires owns nothing. Only documents above
+// the inline cutoff are stored externally, so the hash is computed for those
+// alone.
 //
-// Spec: §13.12 filesystem backend.
+// Spec: §13.12 filesystem backend, §4.6.
 func (r *Registry) ResolveResourceOwner(ctx context.Context, id layer.Identity, key string) (string, bool) {
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {
@@ -2122,43 +1862,9 @@ func (r *Registry) ResolveResourceOwner(ctx context.Context, id layer.Identity, 
 		if len(doc) <= objectstore.InlineCutoff || ManifestBodyKey(doc) != key {
 			continue
 		}
-		if servesMergedDocument(m) {
-			continue
-		}
 		return m.ArtifactID, true
 	}
-	for _, m := range visible {
-		if servesMergedDocument(m) && r.mergedDocumentKeyMatches(ctx, m, key) {
-			return m.ArtifactID, true
-		}
-	}
 	return "", false
-}
-
-// servesMergedDocument reports whether rec's served manifest document is the
-// §4.6 merged ARTIFACT.md rather than a stored document: a pinned child of a
-// type other than skill. A skill serves its own stored SKILL.md whatever its
-// pin.
-func servesMergedDocument(rec store.ManifestRecord) bool {
-	return rec.ExtendsPin != "" && rec.Type != string(manifest.TypeSkill)
-}
-
-// mergedDocumentKeyMatches reports whether key names rec's merged manifest
-// document above the inline cutoff. It walks and folds the chain without
-// admission, because the /objects route serves no admitted content (§13.4)
-// and reads no object storage. A walk or merge error answers false, so a
-// broken chain authorizes nothing and answers as a key that does not exist.
-func (r *Registry) mergedDocumentKeyMatches(ctx context.Context, rec store.ManifestRecord, key string) bool {
-	chain, err := r.resolveExtendsChain(ctx, rec)
-	if err != nil {
-		return false
-	}
-	merged, err := mergeChain(chain)
-	if err != nil {
-		return false
-	}
-	doc := CanonicalManifestDoc(merged.Type, merged.Frontmatter, merged.SkillRaw)
-	return len(doc) > objectstore.InlineCutoff && ManifestBodyKey(doc) == key
 }
 
 // withDeprecationWarning fills in DeprecationWarning when the
@@ -2187,7 +1893,7 @@ func (r *Registry) artifactExistsAnywhere(ctx context.Context, artifactID string
 	if err != nil {
 		return false
 	}
-	for _, m := range all {
+	for _, m := range r.servableRows(ctx, all) {
 		if m.ArtifactID == artifactID {
 			return true
 		}
@@ -2195,14 +1901,15 @@ func (r *Registry) artifactExistsAnywhere(ctx context.Context, artifactID string
 	return false
 }
 
-// visibleManifests returns every manifest from the tenant whose
+// visibleManifests returns every servable manifest from the tenant whose
 // originating layer is visible to id. In standalone / filesystem
-// modes (id.IsPublic), every manifest is returned.
+// modes (id.IsPublic), every servable manifest is returned.
 func (r *Registry) visibleManifests(ctx context.Context, id layer.Identity) ([]store.ManifestRecord, error) {
 	all, err := r.store.ListManifests(ctx, r.TenantFor(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
+	all = r.servableRows(ctx, all)
 	// §6.3.1 fine-grained scopes intersect with layer visibility; the
 	// smaller surface wins. A public-mode caller bypasses layer filtering
 	// but a presented scope still narrows the read surface.
@@ -2249,7 +1956,7 @@ func (r *Registry) adminVisibleManifests(ctx context.Context, id layer.Identity,
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	return applyReadScope(all, layer.ParseScopes(id.Scopes)), nil
+	return applyReadScope(r.servableRows(ctx, all), layer.ParseScopes(id.Scopes)), nil
 }
 
 // applyReadScope narrows a visible-manifest set to the records the
@@ -2291,8 +1998,7 @@ func descriptorOf(m store.ManifestRecord) ArtifactDescriptor {
 // a both-files skill's carries its authored one (§7.6.1). Search is served
 // without admission (§13.4), and plainSkillRow reads no unhashed column, so
 // the descriptor applies the predicate a load applies. A synthesis error
-// yields the empty block and stays in the server log, as an unresolvable
-// chain does in descriptorBlockHidingChain.
+// yields the empty block and stays in the server log.
 //
 // Spec: §4.3.4, §7.6.1
 func descriptorFrontmatter(m store.ManifestRecord) string {

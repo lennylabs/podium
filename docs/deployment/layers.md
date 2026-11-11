@@ -14,7 +14,7 @@ A catalog usually draws on several sources. An org keeps shared defaults in one 
 
 ## Precedence
 
-Layers form an ordered list. Two layers holding the same artifact ID is a collision that Podium rejects rather than resolving silently: a server rejects the second contribution at ingest with `ingest.collision`, and `podium lint` reports the same collision on a local catalog. `extends:` is the sanctioned exception. It lets a higher-precedence artifact inherit and refine a lower one instead of replacing it, and it is documented in [Authoring → extends](../authoring/extends). The workspace local overlay is merged on the client and replaces a base artifact that carries the same ID, whether or not it declares `extends:` (see [Authoring → extends](../authoring/extends#workspace-overlay)).
+Layers form an ordered list. Two registry-side layers holding the same artifact ID is a collision that Podium rejects rather than resolving silently: a server rejects the second contribution at ingest with `ingest.collision`, and `podium lint` reports the same collision on a local catalog. The rejection names the artifact and directs the author to rename it or to remove the other copy. Replacing an artifact that another layer contributes is an explicit two-step operation: remove the lower-precedence copy or rename the higher-precedence one, then ingest the replacement. The workspace local overlay is merged on the client and replaces a registry-side artifact that carries the same ID (see [Workspace local overlay](#workspace-local-overlay)).
 
 The order is, from lowest precedence to highest:
 
@@ -29,6 +29,30 @@ Every tier applies the same rules. What differs is where the ordered list lives 
 | [Local](local) | `layer_order:` in `<registry-path>/.registry-config`, defaulting to alphabetical order by subdirectory name | None. Every layer composes. |
 | [Single node](single-node) | `registry.layers:` in `~/.podium/registry.yaml`, plus layers registered at runtime | Applied when an identity provider is configured |
 | [Clustered](clustered) | The tenant's layer config | Always applied |
+
+---
+
+## Workspace local overlay
+
+The workspace local overlay (`<workspace>/.podium/overlay/`) is an exception to the collision rule. An overlay artifact replaces the registry-side artifact with the same ID in `podium-mcp`, in `podium sync`, and in the SDKs, and no consumer reports the replacement. The consumer applies no ingest rule to an overlay artifact and serves it as authored. An overlay `ARTIFACT.md` that carries an `extends` key is served as authored too, and the key has no effect.
+
+The overlay is per-developer and is never ingested or shared, so a replacement affects only the developer who wrote it. Copying the artifact into a shared layer subjects it to the collision rule and to the [no-inheritance rule](#inheritance). `podium lint` reports an `ARTIFACT.md` that the no-inheritance rule refuses. `podium lint` contacts no registry, so it does not report a collision with an artifact that only a registry holds.
+
+---
+
+## Inheritance
+
+No artifact inherits frontmatter, prose, or resources from another artifact.
+
+- Ingest rejects an `ARTIFACT.md` whose frontmatter carries a top-level `extends` key, whatever its value, with `ingest.invalid_artifact` and `details.constraint: "extends_removed"`. The refusal runs before lint, so it reports the artifact whatever lint rule the artifact also fails. A filesystem-source `podium sync` drops such an artifact and exits 1, and `podium lint` reports it as an error.
+- Another artifact of the same reingest whose prose links to a refused artifact fails `lint.prose_reference`, because the refused artifact is not stored.
+- An `extends` key in a skill's `SKILL.md` is an ordinary key and is not refused.
+- A refused artifact collides with no other artifact, so the other copy of its ID is materialized or ingested, and no `ingest.collision` line is printed for it.
+- A row an earlier release stored from an `ARTIFACT.md` that declares `extends:` is served by no read path. `latest` resolves to the artifact's most recent other version, an ID whose retired row overlaid a lower layer's artifact serves the lower layer's copy when no other layer holds a served row of the ID, and an artifact with no other version answers `registry.not_found`.
+- Such a stored row is not a collision. When only one layer holds a served row of the ID, that layer ingests new versions of the artifact ID without `ingest.collision`, and an ID with no served row is ingested by any layer without it. The retired row still holds its `(id, version)`, so other bytes at that version are rejected with `ingest.immutable_violation`.
+- An earlier release also admitted a plain copy of the ID from a further layer while an overlay row was stored. When served rows of the ID remain in two or more layers, `latest` serves the most recently ingested of them, and every later ingest of the ID from those layers is rejected with `ingest.collision`, including a re-ingest of unchanged bytes. Unregister all but one of those layers with `podium layer unregister`, which soft-deletes every row of each unregistered layer, so its other artifacts stop serving too. Register a removed source again, without the artifact, only after the recovery window ends and the purge removes its soft-deleted rows. Before the purge, the soft-deleted rows still hold their artifacts' versions, so a registration under any layer ID serves none of the source's artifacts at an unchanged version, even when the ingest reports them accepted, and rejects a skill with no declared version as `auto_version_duplicate_content`. Remove a layer's declaration from the registry configuration before unregistering it, because a declared layer is re-seeded at each start, and declare it again only after the purge.
+- A retired version's `delegates_to` and `mcpServers` references stay in impact analysis while another version of the artifact is served.
+- Retiring an artifact's newest rows lowers the version `latest` resolves to, so a `podium-mcp` that loaded a retired version as `latest` refuses the older one with `materialize.stale_resolution`. Stop every MCP server that uses the cache directory and run `podium cache reset-revisions <id>`. A `podium-mcp` in `offline-first` or `offline-only` that cached a merged artifact also needs `podium cache prune --days 0`, which leaves the revision marks in place.
 
 ---
 
@@ -199,7 +223,6 @@ On a server-backed deployment, `podium admin show-effective [--group <g>]... <us
 
 ## Merge behavior worth knowing
 
-- **Same-ID collisions across layers are rejected rather than shadowed.** A server rejects the second contribution at ingest with `ingest.collision` unless the higher-precedence artifact declares `extends:` against that ID. `podium lint` reports the same collision on a local catalog. `podium sync` against a local catalog drops the higher-precedence copy, names it on standard error, materializes the rest, and exits 1, so it materializes the copy a server started on the same directory serves. A dropped copy cannot serve as an `extends:` parent. The same layer list and the same identity always produce the same view.
-- **A hidden parent still merges.** When a visible artifact declares `extends:` against an artifact in a layer the caller cannot see, the registry resolves the parent server-side and returns the merged result. The parent's ID, version, layer, content hash, and signature are withheld from that caller, and its prose body and bundled files are not served. Its frontmatter values reach the caller through the merge, and the caller can tell that a merge occurred, because the merged bytes do not reproduce the served content hash. [Authoring → extends](../authoring/extends#hidden-parents) states the full guarantee.
+- **Same-ID collisions across registry-side layers are rejected rather than shadowed.** A server rejects the second contribution at ingest with `ingest.collision`. `podium lint` reports the same collision on a local catalog. `podium sync` against a local catalog drops the higher-precedence copy, names it on standard error, materializes the rest, and exits 1, so it materializes the copy a server started on the same directory serves. The same layer list and the same identity always produce the same view.
 - **Layer order is declared, never inferred.** There is no fixed `org / team / user` hierarchy. The ordering is whatever the layer list says.
 - **Authoring rights are separate.** Whoever can merge to a layer's tracked Git ref publishes there, and whoever can write to a `local`-source layer's path publishes there. Branch protection and required reviewers stay in the Git host. That scope statement is about writing content into a source the registry already reads. Which caller may declare a layer that makes the registry read a given filesystem path is governed by the local-source rule under [Who may register a local-source layer](#who-may-register-a-local-source-layer).

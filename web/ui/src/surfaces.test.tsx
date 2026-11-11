@@ -4476,7 +4476,7 @@ describe("the artifact viewer", () => {
             {
               from: "platform/review-strict",
               to: "platform/review",
-              kind: "extends",
+              kind: "delegates_to",
             },
           ],
         },
@@ -4668,10 +4668,10 @@ describe("the artifact viewer", () => {
     );
   });
 
-  // Spec: §13.10 — the viewer links to extending or dependent artifacts.
-  // Every edge the dependents endpoint serves ends at the artifact on the
-  // page, so the label reads in the passive direction. Labelling the row
-  // with the raw edge kind states the relationship backwards.
+  // Spec: §13.10 — the viewer links to dependent artifacts (§4.7.3). Every
+  // edge the dependents endpoint serves ends at the artifact on the page, so
+  // the label reads in the passive direction. Labelling the row with the raw
+  // edge kind states the relationship backwards.
   it("labels each graph edge as inbound rather than inverting the relationship", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
@@ -4689,14 +4689,14 @@ describe("the artifact viewer", () => {
         body: {
           edges: [
             {
-              from: "finance/ap/reconcile-ledger",
-              to: "finance/ap/pay-invoice",
-              kind: "extends",
-            },
-            {
               from: "finance/ap/close-books",
               to: "finance/ap/pay-invoice",
               kind: "delegates_to",
+            },
+            {
+              from: "finance/ap/ledger-agent",
+              to: "finance/ap/pay-invoice",
+              kind: "mcpServers",
             },
           ],
         },
@@ -4705,31 +4705,40 @@ describe("the artifact viewer", () => {
     goTo("#/artifact/finance%2Fap%2Fpay-invoice");
     render(<App />);
     const relations = await screen.findByLabelText("Relations");
-    // The rail stands once the artifact read answers, and the inbound groups
-    // follow from the dependents read, which answers on its own.
+    // The groups follow from the dependents read, which answers after the
+    // rail stands.
     await waitFor(() => {
-      expect(relations.querySelectorAll(".rail-group").length).toBe(3);
+      expect(relations.querySelectorAll(".rail-group").length).toBe(2);
     });
     const groups = relations.querySelectorAll(".rail-group");
-    // The outbound group leads, then one group per inbound relation, each
-    // labelled in the passive direction.
+    // One group per relation, each labelled in the passive direction. The
+    // dependents band stands only when there are no members to draw.
     expect(
       [...groups].map((group) => group.querySelector("p")?.textContent),
-    ).toEqual(["extends", "extended by", "delegated to by"]);
-    expect(groups[1].querySelector("li")?.textContent).toBe(
-      "finance/ap/reconcile-ledger",
-    );
-    expect(groups[2].querySelector("li")?.textContent).toBe(
+    ).toEqual(["delegated to by", "referenced by"]);
+    expect(groups[0].querySelector("li")?.textContent).toBe(
       "finance/ap/close-books",
     );
+    expect(groups[1].querySelector("li")?.textContent).toBe(
+      "finance/ap/ledger-agent",
+    );
+    // Each chip leads with its marker and links the artifact that declared
+    // the relation.
+    const chip = groups[0].querySelector(".relation-chip") as HTMLElement;
+    expect(chip.firstElementChild?.className).toBe("relation-dot");
+    expect(within(chip).getByRole("link").getAttribute("href")).toBe(
+      "#/artifact/finance%2Fap%2Fclose-books",
+    );
+    expect(
+      within(relations).queryByText("Nothing depends on this artifact."),
+    ).toBeNull();
   });
 
-  // Spec: §13.10 — the viewer links to extending or dependent artifacts. A
-  // reverse-index read that did not answer reports the failure inside the
-  // group whose members it would have carried, so the reader is told which
-  // relation went unreported rather than reading a bare failure band between
-  // the outbound group and the rest of the rail.
-  it("keeps the extended-by heading on the group whose reverse-index read failed", async () => {
+  // Spec: §13.10 — the viewer links to dependent artifacts. A reverse-index
+  // read that did not answer reports the failure inside the dependents band,
+  // so the reader is told which relation went unreported rather than reading
+  // a bare failure band in the rail.
+  it("keeps the dependents heading on the band whose reverse-index read failed", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_artifact": {
@@ -4756,19 +4765,19 @@ describe("the artifact viewer", () => {
     const groups = relations.querySelectorAll(".rail-group");
     expect(
       [...groups].map((group) => group.querySelector("p")?.textContent),
-    ).toEqual(["extends", "extended by"]);
+    ).toEqual(["dependents"]);
     // The failure band stands inside the group it belongs to.
-    expect(groups[1].textContent).toContain("registry.unavailable");
-    expect(groups[1].textContent).toContain(
+    expect(groups[0].textContent).toContain("registry.unavailable");
+    expect(groups[0].textContent).toContain(
       "The registry did not answer this request.",
     );
   });
 
-  // Spec: §13.10 — the viewer links to extending or dependent artifacts. The
-  // dependents endpoint serves the reverse index alone, so the artifact's own
-  // outbound extends reaches the rail from the load response's extends_pin,
-  // which the registry serves only to a caller who can see the parent (§4.6).
-  it("splits the rail's relations into the artifact's own extends and the artifacts extending it", async () => {
+  // Spec: §13.10 — the viewer links to dependent artifacts, and an artifact
+  // nothing depends on says so in the one band that is always drawn. No
+  // artifact inherits from another (§4.6), so the rail draws no extends group
+  // and no chip for an extends_pin, even when a response still carries one.
+  it("draws the dependents band's absent state and no extends group", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_artifact": {
@@ -4787,147 +4796,24 @@ describe("the artifact viewer", () => {
     goTo("#/artifact/finance%2Fap%2Fthree-way-match");
     render(<App />);
     const relations = await screen.findByLabelText("Relations");
-    // The direction the artifact declares is a group of its own, and the
-    // chip shows the served pin while the link drops its version.
-    const declared = within(relations).getByText(
-      "finance/ap/pay-invoice@1.2.0",
+    const absent = await within(relations).findByText(
+      "Nothing depends on this artifact.",
     );
-    expect(declared.getAttribute("href")).toBe(
-      "#/artifact/finance%2Fap%2Fpay-invoice",
-    );
-    // The other direction has no members, and says so on its own group
-    // rather than leaving the reader to read the absence off the first. That
-    // group is drawn from the dependents read, which answers after the rail
-    // stands.
     expect(
-      await within(relations).findByText("Nothing extends this artifact."),
-    ).toBeTruthy();
-    expect(
-      within(relations).queryByText("This artifact extends nothing."),
-    ).toBeNull();
-  });
-
-  // Spec: §13.10 — the frontmatter panel and the relation rail stand on the
-  // same page, and the block the panel renders is the one the registry
-  // re-serializes with the parent stripped (§4.6). The panel keeps the
-  // stripped block, because republishing the pre-merge document is the
-  // disclosure §4.6 withholds, and names the removal so the reader can
-  // reconcile a missing extends row with the parent the rail links.
-  it("names the withheld key on the frontmatter panel that the rail links as a parent", async () => {
-    stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
-      "/v1/load_artifact": {
-        body: {
-          id: "eng/overlay",
-          type: "context",
-          version: "0.1.0",
-          content_hash: "sha256:abc",
-          manifest_body: "# Overlay\n",
-          frontmatter: "---\ntype: context\nversion: 0.1.0\n---\n",
-          extends_pin: "eng/deploy@1.0.0",
-        },
-      },
-      "/v1/dependents": { body: { edges: [] } },
-    });
-    goTo("#/artifact/eng%2Foverlay");
-    render(<App />);
-    const relations = await screen.findByLabelText("Relations");
-    await within(relations).findByText("eng/deploy@1.0.0");
+      absent.closest(".rail-group")?.querySelector("p")?.textContent,
+    ).toBe("dependents");
+    expect(relations.querySelectorAll(".rail-group").length).toBe(1);
+    expect(relations.querySelector(".relation-chip")).toBeNull();
+    expect(relations.textContent).not.toContain("extend");
+    expect(relations.textContent).not.toContain("finance/ap/pay-invoice");
+    // The frontmatter panel carries no note accounting for a withheld key in
+    // either view.
     fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
-    // The served block carries no extends row, and the panel says so rather
-    // than claiming the pairs are the ones the author wrote.
-    expect(screen.getByTestId("frontmatter-table").textContent).not.toContain(
-      "extends",
-    );
-    expect(screen.queryByText(/shown as authored/)).toBeNull();
-    expect(screen.getByTestId("frontmatter-served-note").textContent).toContain(
-      "(key withheld)",
-    );
-    // The note stands in the raw view too, which is the half that reads as
-    // the authored file when nothing accounts for the removal.
+    expect(screen.getByTestId("frontmatter-table")).toBeTruthy();
+    expect(screen.queryByTestId("frontmatter-served-note")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Raw YAML" }));
-    expect(screen.getByTestId("raw-frontmatter").textContent).not.toContain(
-      "extends",
-    );
-    expect(screen.getByTestId("frontmatter-served-note").textContent).toContain(
-      "(key withheld)",
-    );
-  });
-
-  // Spec: §4.6 — the registry decides whether the reader may be told a parent
-  // exists and serves no extends_pin when it may not, so the group reads as it
-  // does for an artifact that extends nothing. The viewer makes no scoped
-  // catalog read to decide it in the browser; the unscoped catalog read the
-  // sidebar footer makes on every route is stubbed and not asserted on.
-  it("draws no extends chip when the load response carries no extends_pin", async () => {
-    stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
-      "/v1/catalog": { body: { ids: [] } },
-      "/v1/load_artifact": {
-        body: {
-          id: "pub/child",
-          type: "skill",
-          version: "0.1.0",
-          content_hash: "sha256:abc",
-          manifest_body: "# Child\n",
-          frontmatter: "---\ntype: skill\nversion: 0.1.0\n---\n",
-        },
-      },
-      "/v1/dependents": { body: { edges: [] } },
-    });
-    goTo("#/artifact/pub%2Fchild");
-    render(<App />);
-    const relations = await screen.findByLabelText("Relations");
-    await within(relations).findByText("This artifact extends nothing.");
-    expect(relations.querySelector(".relation-dot.outbound")).toBeNull();
-    expect(
-      requests.some((req) => req.url.includes("/v1/catalog?scope=")),
-    ).toBe(false);
-  });
-
-  // Spec: §13.10 — the viewer links to extending or dependent artifacts. The
-  // chips of both directions are the same bordered row, so the leading dot is
-  // what separates the edge the artifact declares from the edges that end at
-  // it once the group label is out of the reader's eye.
-  it("tones each relation chip's leading dot by the direction of its edge", async () => {
-    stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
-      "/v1/load_artifact": {
-        body: {
-          id: "finance/ap/three-way-match",
-          type: "skill",
-          version: "1.0.0",
-          content_hash: "sha256:abc",
-          manifest_body: "# Three-way match\n",
-          frontmatter: "---\ntype: skill\nversion: 1.0.0\n---\n",
-          extends_pin: "finance/ap/pay-invoice@1.0.0",
-        },
-      },
-      "/v1/dependents": {
-        body: {
-          edges: [
-            {
-              from: "finance/ap/close-books",
-              to: "finance/ap/three-way-match",
-              kind: "extends",
-            },
-          ],
-        },
-      },
-    });
-    goTo("#/artifact/finance%2Fap%2Fthree-way-match");
-    render(<App />);
-    const relations = await screen.findByLabelText("Relations");
-    await screen.findByText("finance/ap/close-books");
-    // Every chip carries a dot, and only the outbound group's is accented.
-    const chips = [...relations.querySelectorAll(".relation-chip")];
-    expect(
-      chips.map(
-        (chip) => chip.querySelector(".relation-dot")?.className ?? "none",
-      ),
-    ).toEqual(["relation-dot outbound", "relation-dot inbound"]);
-    // The dot stands before the id rather than after it.
-    expect(chips[0].firstElementChild?.className).toBe("relation-dot outbound");
+    expect(screen.getByTestId("raw-frontmatter")).toBeTruthy();
+    expect(screen.queryByTestId("frontmatter-served-note")).toBeNull();
   });
 
   // The rail is a fixed-width column, and provenance is a set of labelled
@@ -6682,9 +6568,8 @@ describe("the artifact viewer", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
     expect(screen.getByText("No frontmatter on this artifact.")).toBeTruthy();
     expect(
-      await screen.findByText("Nothing extends this artifact."),
+      await screen.findByText("Nothing depends on this artifact."),
     ).toBeTruthy();
-    expect(screen.getByText("This artifact extends nothing.")).toBeTruthy();
   });
 
   it("draws a rail section’s absence quieter than the section label over it", async () => {
@@ -6708,8 +6593,7 @@ describe("the artifact viewer", () => {
     // Every absent rail section takes the inline preset, so absence never
     // reads louder than the sections that hold content.
     for (const sentence of [
-      "This artifact extends nothing.",
-      "Nothing extends this artifact.",
+      "Nothing depends on this artifact.",
       "This artifact bundles no files.",
     ]) {
       const absent = (await screen.findByText(sentence)).closest(
@@ -7185,8 +7069,8 @@ describe("the artifact viewer", () => {
     // The rail is a summary column, and the relation links §13.10 requires the
     // artifact viewer to carry stand under this table in the same scrolling
     // column. A description of several hundred words rendered whole made one
-    // cell 2,600px tall and put EXTENDS and EXTENDED BY thousands of pixels
-    // below the fold, so the rail reads a scalar value at the three lines the
+    // cell 2,600px tall and put RELATIONS thousands of pixels below the
+    // fold, so the rail reads a scalar value at the three lines the
     // header states the same string at and offers the rest in place.
     // Spec: §13.10
     it("clips a long property value in the rail's table and opens it on request", async () => {
@@ -8498,20 +8382,21 @@ describe("the layer panel", () => {
     goTo("#/layers");
     render(<App />);
     const panel = within(await screen.findByLabelText("Layer panel"));
-    // Spec: §4.6 ("Merge semantics for collisions"). The lead has to state
-    // that a same-ID collision is rejected unless the higher-precedence copy
-    // declares extends:. Copy promising that the higher precedence simply
-    // wins describes shadowing the registry refuses.
+    // Spec: §4.6 ("Collisions"). The lead has to state that a same-ID
+    // collision is rejected at ingest and name the remedy: rename the
+    // artifact or remove the other copy first. Copy promising that the
+    // higher precedence simply wins describes shadowing the registry refuses.
     const lead = panel.getByText(
       /Sources the catalog is composed from/,
     ).textContent;
     expect(lead).toContain(
-      "Two layers cannot both carry the same artifact ID: the collision is " +
-        "rejected at ingest unless the higher-precedence artifact declares " +
-        "extends:, and the order below decides which artifact that overlay " +
-        "merges onto.",
+      "Two layers cannot both carry the same artifact ID: a same-ID artifact " +
+        "in a second layer is rejected at ingest with ingest.collision, so " +
+        "rename it or remove the other copy first. The order below sets " +
+        "precedence.",
     );
     expect(lead).not.toContain("the higher precedence wins");
+    expect(lead).not.toContain("extends");
     // The qualifier sits on the label's own line rather than in a paragraph
     // below the label.
     const label = panel.getByText(
@@ -18420,7 +18305,7 @@ describe("a whole-surface failure", () => {
         body: {
           code: "registry.invalid_argument",
           message:
-            "registry.invalid_argument: extends manifest for rel/child: merged frontmatter still names the extends parent",
+            "registry.invalid_argument: version: not a semver version",
           retryable: false,
         },
       },

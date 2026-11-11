@@ -13,9 +13,12 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// arRegistry ingests shared/parent@1.2.0 into L1 at parentAt and
-// finance/child@2.0.0, which extends it, into L2 at childAt. Distinct ingest
-// times let an assertion tell the child's revision from the parent's.
+// arFile wraps an ARTIFACT.md body as an in-memory file.
+func arFile(body string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(body)} }
+
+// arRegistry ingests the plain artifacts shared/parent@1.2.0 into L1 at
+// parentAt and finance/child@2.0.0 into L2 at childAt. Distinct ingest times
+// let an assertion tell the child's revision from the parent's.
 func arRegistry(t *testing.T, parentAt, childAt time.Time) *core.Registry {
 	t.Helper()
 	st := store.NewMemory()
@@ -27,8 +30,10 @@ func arRegistry(t *testing.T, parentAt, childAt time.Time) *core.Registry {
 		at    time.Time
 		files fstest.MapFS
 	}{
-		{"L1", parentAt, fstest.MapFS{"shared/parent/ARTIFACT.md": epFile(parentArtifact("parent"))}},
-		{"L2", childAt, fstest.MapFS{"finance/child/ARTIFACT.md": epFile(childArtifact("shared/parent@1.x", "child"))}},
+		{"L1", parentAt, fstest.MapFS{"shared/parent/ARTIFACT.md": arFile(
+			"---\ntype: agent\nversion: 1.2.0\ndescription: parent\n---\n\nparent body\n")}},
+		{"L2", childAt, fstest.MapFS{"finance/child/ARTIFACT.md": arFile(
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n---\n\nchild body\n")}},
 	} {
 		res, err := ingest.Ingest(context.Background(), st, ingest.Request{
 			TenantID: "t", LayerID: in.layer, Files: in.files, Clock: clock.NewFrozen(in.at),
@@ -45,8 +50,8 @@ func arRegistry(t *testing.T, parentAt, childAt time.Time) *core.Registry {
 
 // Spec: §4.7.10, §4.7.6 — every load result carries the resolved record's own
 // ingest time as its artifact revision: a latest load, a pinned load, a
-// revalidation answer, and a merged extends child, which carries the child's
-// time rather than the parent's.
+// session load, and a revalidation answer each carry the time of the row they
+// serve.
 func TestLoadArtifact_CarriesServedArtifactRevision(t *testing.T) {
 	t.Parallel()
 	parentAt := time.Date(2026, 1, 2, 3, 4, 5, 123456789, time.UTC)
@@ -60,7 +65,7 @@ func TestLoadArtifact_CarriesServedArtifactRevision(t *testing.T) {
 		name, artifact, want string
 		opts                 core.LoadArtifactOptions
 	}{
-		{"latest extends child", "finance/child", wantChild, core.LoadArtifactOptions{}},
+		{"latest", "finance/child", wantChild, core.LoadArtifactOptions{}},
 		{"pinned version", "finance/child", wantChild, core.LoadArtifactOptions{Version: "2.0.0"}},
 		{"session first latest", "finance/child", wantChild, core.LoadArtifactOptions{SessionID: "s1"}},
 		{"session pinned latest", "finance/child", wantChild, core.LoadArtifactOptions{SessionID: "s1"}},

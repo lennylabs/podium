@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 520" class="dg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 500" class="dg">
   <!--
     Layer composition and precedence. The left column shows the ordered layer
     list (bottom is lowest precedence). The right column shows the effective
@@ -94,7 +94,7 @@
     </style>
   </defs>
 
-  <rect class="dg-bg" width="1080" height="520"/>
+  <rect class="dg-bg" width="1080" height="500"/>
 
   <text class="dg-title" x="40" y="42">Layer composition and precedence</text>
   <text class="dg-sub" x="40" y="64">Each layer contributes artifacts. The registry composes them per caller identity in precedence order.</text>
@@ -141,11 +141,9 @@
   <text class="dg-mono" x="630" y="262">finance  → if alice is a member</text>
   <text class="dg-mono" x="630" y="286">org      → lowest, visible to anyone</text>
 
-  <text class="dg-sub" x="630" y="324">Layers the caller cannot see are silently</text>
-  <text class="dg-sub" x="630" y="344">excluded. Hidden parents merge server-side</text>
-  <text class="dg-sub" x="630" y="364">when a child declares extends:.</text>
+  <text class="dg-sub" x="630" y="334">Layers the caller cannot see are silently</text>
+  <text class="dg-sub" x="630" y="354">excluded.</text>
 
-  <text class="dg-foot" x="40" y="450">Collisions are rejected at ingest unless the higher-precedence artifact declares extends: &lt;lower&gt;.</text>
-  <text class="dg-foot" x="40" y="470">Field-level merge semantics decide which value wins per frontmatter field.</text>
-  <text class="dg-foot" x="40" y="490">Resolution runs on every registry call; the workspace overlay is merged in by the MCP server.</text>
+  <text class="dg-foot" x="40" y="450">Collisions between registry-side layers are rejected at ingest.</text>
+  <text class="dg-foot" x="40" y="470">Resolution runs on every registry call; the workspace overlay is merged in by the MCP server.</text>
 </svg>

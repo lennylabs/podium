@@ -14,7 +14,7 @@ The local tier has no server-side deployment. The catalog is a directory tree on
 
 The only running component is the `podium` CLI. There is no server process, no database, and no identity provider.
 
-`podium sync` runs the same shared Go library functions the server would run behind its HTTP API: parsers, glob resolver, layer composer, `extends:` resolver, harness adapters, and atomic materialization. `podium lint` runs the same ingest lint rules the server applies. The library is the single behavioral surface across the tiers, so moving to a server preserves output.
+`podium sync` runs the same shared Go library functions the server would run behind its HTTP API: parsers, glob resolver, layer composer, harness adapters, and atomic materialization. `podium lint` runs the same ingest lint rules the server applies. The library is the single behavioral surface across the tiers, so moving to a server preserves output.
 
 ---
 
@@ -104,7 +104,7 @@ visibility:
 
 `podium sync` ignores it, because filesystem-source visibility is bypassed. It takes effect once a server serves the same directory through `podium serve --standalone --layer-path`: a layer with a non-empty `visibility:` block boots with that visibility, and a layer with no `.layer-config` or an empty block takes the deployment default (`PODIUM_DEFAULT_LAYER_VISIBILITY`). See [Access control](access-control).
 
-The workspace local overlay (`<workspace>/.podium/overlay/`) sits on top of the filesystem-registry layers, at the same precedence it has against a server. An overlay artifact replaces a registry artifact with the same ID without a collision error; see [Authoring → extends](../authoring/extends#workspace-overlay). A collision between two registry layers fails `podium sync` instead; see [Layers](layers#merge-behavior-worth-knowing).
+The workspace local overlay (`<workspace>/.podium/overlay/`) sits on top of the filesystem-registry layers, at the same precedence it has against a server. An overlay artifact replaces a registry artifact with the same ID without a collision error; see [Layers → Workspace local overlay](layers#workspace-local-overlay). A collision between two registry layers fails `podium sync` instead; see [Layers](layers#merge-behavior-worth-knowing).
 
 ---
 
@@ -166,7 +166,7 @@ The shared library does the same parsing, composition, and adapter work in both 
 
 ### Skills that declare no version
 
-A filesystem source records a skill that declares no version as `0.0.0-auto.0`. A registry assigns a higher N once it has ingested changed bytes for the skill, and when several layers contribute the skill's ID, as a same-ID `extends:` overlay that declares no version does, so the lock-file versions differ between the tiers. When they differ for an `extends:` child, the `version:` line of the merged `ARTIFACT.md` that the `none` harness writes differs as well. A same-ID overlay that declares no version can also resolve a different parent in each tier after its content changes, because a registry pins the most recently ingested non-deprecated version of the ID and a filesystem source merges the overlay over the next-lower-precedence layer's artifact. A registry rejects a change of such a skill back to content it already stored under another version and keeps serving its newer version, while a filesystem source serves the reverted content. After a revert, the content hash, the body, and every harness's output differ between the tiers until the author sets `metadata.version` in `SKILL.md` or changes the content.
+A filesystem source records a skill that declares no version as `0.0.0-auto.0`. A registry ingesting the same directory for the first time assigns the same value, and it assigns a higher N once it has ingested changed bytes for the skill, so the lock-file versions then differ between the tiers. While the registry serves the directory's current bytes as the skill's latest row, the content hash and every harness's output stay identical. A registry rejects a change of such a skill back to content it already stored under another version and keeps serving its newer version, while a filesystem source serves the reverted content. After a revert, the content hash, the body, and every harness's output differ between the tiers until the author sets `metadata.version` in `SKILL.md` or changes the content.
 
 ---
 

@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
@@ -45,10 +46,10 @@ func referenceRegistryPath(t testing.TB) string {
 // cells for them, so sync.Run fails before any comparison.
 //
 // Spec: §11, §2.2, §4.3.4, §13.11.3 — the fixture's plain skills, the overlay
-// that omits version, and the extends: children of plain skills report the
-// same versions and materialize the same bytes under both registry sources.
-// The filesystem source reports 0.0.0-auto.0 for the version-less skill, and
-// the server assigns it on its first ingest into an empty store.
+// that omits version, and the overlay that declares it report the same
+// versions and materialize the same bytes under both registry sources. The
+// filesystem source reports 0.0.0-auto.0 for the version-less skill, and the
+// server assigns it on its first ingest into an empty store.
 func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 	t.Parallel()
 	dir := referenceRegistryPath(t)
@@ -141,15 +142,15 @@ func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 
 // plainSkillVersions maps each plain-skill fixture package of the reference
 // registry to the version both registry sources report for it. The first is
-// registry-assigned, the overlay of plain-skills/overlay-unversioned omits
-// version so its SKILL.md metadata.version applies, and notes/meta-child
-// declares its version only in metadata.version.
+// registry-assigned, the second comes from its SKILL.md metadata.version, the
+// overlay of plain-skills/overlay-unversioned omits version so its SKILL.md
+// metadata.version applies, and the overlay of notes/versioned-child declares
+// the version over a SKILL.md that carries none.
 var plainSkillVersions = map[string]string{
 	"plain-skills/unversioned":         "0.0.0-auto.0",
 	"plain-skills/versioned":           "1.0.0",
 	"plain-skills/overlay-unversioned": "1.0.0",
 	"notes/versioned-child":            "1.0.0",
-	"notes/meta-child":                 "2.0.0",
 }
 
 // assertPlainSkillLockVersions asserts that the lock under target records
@@ -201,10 +202,8 @@ func assertPlainSkillTree(t *testing.T, adapterID, registry string, tree map[str
 
 // assertNonePlainSkillTree checks the none layout of the plain-skill fixture.
 // Spec: §6.7, §4.3.4 — a skill with no ARTIFACT.md materializes as a plain
-// Agent Skills directory, an authored overlay is written as authored, and the
-// merged document of an extends: child whose overlay omits version and
-// description carries the child's metadata.version and the parent's SKILL.md
-// description.
+// Agent Skills directory, and an authored overlay is written as authored,
+// both the overlay that omits version and the overlay that declares it.
 func assertNonePlainSkillTree(t *testing.T, registry string, tree map[string]string) {
 	t.Helper()
 	for _, id := range []string{"plain-skills/unversioned", "plain-skills/versioned"} {
@@ -216,21 +215,17 @@ func assertNonePlainSkillTree(t *testing.T, registry string, tree map[string]str
 		}
 	}
 
-	authored, err := os.ReadFile(filepath.Join(registry, "org-defaults", "plain-skills", "overlay-unversioned", "ARTIFACT.md"))
-	if err != nil {
-		t.Fatalf("reading the authored overlay: %v", err)
+	overlays := map[string]string{
+		"plain-skills/overlay-unversioned": filepath.Join("org-defaults", "plain-skills", "overlay-unversioned"),
+		"notes/versioned-child":            filepath.Join("personal", "notes", "versioned-child"),
 	}
-	if got := tree["plain-skills/overlay-unversioned/ARTIFACT.md"]; got != string(authored) {
-		t.Errorf("none: overlay ARTIFACT.md differs from the authored bytes:\n got= %q\n want=%q", got, authored)
-	}
-
-	merged := tree["notes/meta-child/ARTIFACT.md"]
-	for _, want := range []string{
-		"version: 2.0.0\n",
-		"description: Draft a status update from the week's merged changes.\n",
-	} {
-		if !strings.Contains(merged, want) {
-			t.Errorf("none: notes/meta-child/ARTIFACT.md lacks %q:\n%s", want, merged)
+	for id, dir := range overlays {
+		authored, err := os.ReadFile(filepath.Join(registry, dir, "ARTIFACT.md"))
+		if err != nil {
+			t.Fatalf("reading the authored overlay of %s: %v", id, err)
+		}
+		if got := tree[id+"/ARTIFACT.md"]; got != string(authored) {
+			t.Errorf("none: %s/ARTIFACT.md differs from the authored bytes:\n got= %q\n want=%q", id, got, authored)
 		}
 	}
 }
@@ -379,11 +374,16 @@ func collidingRegistry(t *testing.T) string {
 	return dir
 }
 
-// Spec: §11 / §2.2 / §13.11.3 — Filesystem ↔ server equivalence test: a
+// Spec: §11, §2.2, §4.6, §13.11.3 — Filesystem ↔ server equivalence test: a
 // registry whose higher-precedence layer contributes an artifact ID the lower
-// layer already contributes, without declaring extends:, materializes byte-identically under both registry sources. The
-// filesystem source drops the higher copy and reports the drop, and the
-// server source never stored it, so both serve the lower-precedence copy.
+// layer already contributes materializes byte-identically under both registry
+// sources. The filesystem source drops the higher copy and reports the drop,
+// and the server source never stored it, so both serve the lower-precedence
+// copy. The lower layer's copy of shared/legacy declares extends:, so the
+// §4.6 no-inheritance rule refuses it before the collision rule runs, and both
+// sources serve the plain higher copy. A walk that applied the collision rule
+// first would drop the higher copy and then refuse the lower one, serving
+// neither, while the server would still serve the higher one.
 // Matrix: §6.10 (ingest.collision)
 func TestSyncEquivalence_LayerCollisionIsByteIdentical(t *testing.T) {
 	t.Parallel()
@@ -436,17 +436,24 @@ func TestSyncEquivalence_LayerCollisionIsByteIdentical(t *testing.T) {
 
 			// Byte equality alone would also hold if both sources served the
 			// higher copy, so pin which copy each tree carries.
-			assertTreeHolds(t, fsTree, "shared/clash", "from-org")
+			assertTreeHolds(t, fsTree, "shared/clash", "from-org clash")
 			assertTreeHolds(t, fsTree, "finance/ledger", "finance ledger")
+			assertTreeHolds(t, fsTree, "shared/legacy", "from-team legacy")
 			for _, body := range fsTree {
-				if strings.Contains(body, "from-team") {
+				if strings.Contains(body, "from-team clash") {
 					t.Errorf("the dropped team-finance copy of shared/clash was materialized")
+				}
+				if strings.Contains(body, "from-org legacy") {
+					t.Errorf("the refused org-defaults copy of shared/legacy was materialized")
 				}
 			}
 
-			want := layer.Collision{ArtifactID: "shared/clash", Layer: "team-finance", ExistingLayer: "org-defaults"}.Drop()
-			if len(fsRes.Dropped) != 1 || fsRes.Dropped[0] != want {
-				t.Errorf("filesystem Dropped = %+v, want [%+v]", fsRes.Dropped, want)
+			want := []layer.Drop{
+				layer.ExtendsRemovedDrop("shared/legacy"),
+				layer.Collision{ArtifactID: "shared/clash", Layer: "team-finance", ExistingLayer: "org-defaults"}.Drop(),
+			}
+			if !reflect.DeepEqual(fsRes.Dropped, want) {
+				t.Errorf("filesystem Dropped = %+v, want %+v", fsRes.Dropped, want)
 			}
 			if len(srvRes.Dropped) != 0 {
 				t.Errorf("server Dropped = %+v, want none", srvRes.Dropped)
@@ -456,16 +463,20 @@ func TestSyncEquivalence_LayerCollisionIsByteIdentical(t *testing.T) {
 }
 
 // crossLayerCollisionRegistry writes a two-layer registry in which
-// team-finance contributes shared/clash without declaring extends:, colliding
-// with the org-defaults copy, and finance/ledger collides with nothing. Both
-// layers are public so the server source's anonymous identity sees the same
-// set the filesystem source walks.
+// team-finance contributes shared/clash, colliding with the org-defaults
+// copy, and finance/ledger collides with nothing. The org-defaults copy of
+// shared/legacy declares extends:, and team-finance contributes a plain copy
+// of the same ID. Both layers are public so the server source's anonymous
+// identity sees the same set the filesystem source walks.
 func crossLayerCollisionRegistry(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	contextArtifact := func(description string) string {
-		return "---\ntype: context\nversion: 1.0.0\ndescription: " + description +
-			"\nsensitivity: low\n---\n\n" + description + "\n"
+	contextArtifact := func(description, extends string) string {
+		fm := "---\ntype: context\nversion: 1.0.0\ndescription: " + description + "\nsensitivity: low\n"
+		if extends != "" {
+			fm += "extends: " + extends + "\n"
+		}
+		return fm + "---\n\n" + description + "\n"
 	}
 	testharness.WriteTree(t, dir,
 		testharness.WriteTreeOption{
@@ -474,9 +485,11 @@ func crossLayerCollisionRegistry(t *testing.T) string {
 		},
 		testharness.WriteTreeOption{Path: "org-defaults/.layer-config", Content: "visibility:\n  public: true\n"},
 		testharness.WriteTreeOption{Path: "team-finance/.layer-config", Content: "visibility:\n  public: true\n"},
-		testharness.WriteTreeOption{Path: "org-defaults/shared/clash/ARTIFACT.md", Content: contextArtifact("from-org")},
-		testharness.WriteTreeOption{Path: "team-finance/shared/clash/ARTIFACT.md", Content: contextArtifact("from-team")},
-		testharness.WriteTreeOption{Path: "team-finance/finance/ledger/ARTIFACT.md", Content: contextArtifact("finance ledger")},
+		testharness.WriteTreeOption{Path: "org-defaults/shared/clash/ARTIFACT.md", Content: contextArtifact("from-org clash", "")},
+		testharness.WriteTreeOption{Path: "team-finance/shared/clash/ARTIFACT.md", Content: contextArtifact("from-team clash", "")},
+		testharness.WriteTreeOption{Path: "team-finance/finance/ledger/ARTIFACT.md", Content: contextArtifact("finance ledger", "")},
+		testharness.WriteTreeOption{Path: "org-defaults/shared/legacy/ARTIFACT.md", Content: contextArtifact("from-org legacy", "finance/ledger")},
+		testharness.WriteTreeOption{Path: "team-finance/shared/legacy/ARTIFACT.md", Content: contextArtifact("from-team legacy", "")},
 	)
 	return dir
 }

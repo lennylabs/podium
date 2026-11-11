@@ -192,12 +192,7 @@ rm -rf "$WORK"
 | S34 | Marketplace publishing through a `kind: marketplace` sync target | solo | none | none | local git |
 | S35 | Webhook receiver hardening: admin gate and SSRF policy | standalone | none | none | none |
 | S36 | Successful oidc-jwt verification against a live IdP | standalone | none | none | OIDC IdP (AD FS for the split-issuer steps) |
-| S37 | `extends:` merged manifest, hidden parent, and inherited redaction | standalone | none | none | none |
-| S38 | `extends:` child under a signing registry | standalone | none | none | none |
-| S39 | same-ID `extends:` overlay and a three-level chain | standalone | none | none | none |
-| S40 | `extends:` for a skill, and filesystem-versus-server parity | solo then standalone | none | none | none |
-| S41 | inherited `audit_redact` over a forwarded audit stream | standalone | none | none | none |
-| S42 | a deprecated parent in an `extends:` chain | standalone | none | none | none |
+| S41 | manifest-declared `audit_redact` over a forwarded audit stream | standalone | none | none | none |
 | S43 | The documented `registry.yaml` example starts a registry | standalone | none | none | any public https OIDC issuer |
 | S44 | The web UI on a directly reachable `oidc-jwt` registry | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S45 | The runbook's read-only write set matches what the registry rejects | standard | none | pgvector | severable Postgres, S3 |
@@ -225,9 +220,6 @@ rm -rf "$WORK"
 | S67 | `podium verify --provider noop` refuses | none | none | none | none |
 | S68 | A stale `never` is announced | standalone | none | none | none |
 | S69 | The registry refuses a row edited in its store | standalone | none | none | none |
-| S70 | The hidden parent does not appear in any response body | standalone | none | none | none |
-| S71 | An `extends:` child verifies through the MCP bridge and materializes | standalone | none | none | none |
-| S72 | The artifact viewer's extends rail matches the caller's view | standalone | none | none | a desktop browser |
 | S73 | A key rotation keeps every stored row loadable | standalone | none | none | none |
 | S74 | A cached pre-rotation delivery signature recovers | standalone | none | none | none |
 | S75 | `podium-server sign-stored-rows` refuses without a key and never writes one | standalone | none | none | none |
@@ -246,17 +238,11 @@ rm -rf "$WORK"
 | S88 | Erasure on a multi-tenant registry redacts only the requesting tenant's audit records | standard | none | none | Postgres, S3 |
 | S89 | A git layer's URL credential is stored and used, and no response or log reports it | standalone | none | none | none |
 | S90 | A standalone registry manages and routes tenants in multi-tenant mode | standalone | none | none | none |
-| S91 | A cross-layer extends: child that leaves an executable field to its parent is refused | solo then standalone | none | none | none |
-| S92 | A filesystem sync recomposes after an executable-field drop, and override and `--config` count the drop | solo then standalone | none | none | none |
-| S93 | An executable-field refusal withholds the parent, spares stored versions, and follows the pinned edge | solo then standalone | none | none | none |
-| S94 | An `mcpServers` entry restated by name restates each member, and a same-layer child inherits its entry | solo then standalone | none | none | none |
-| S95 | An `extends:` child stored before the executable-field rule keeps serving after an upgrade | standalone then solo | none | none | none |
 | S96 | A multi-tenant standalone registry migrates every tenant | standalone | none | none | none |
 | S97 | Every migrated tenant serves its own layers and artifacts | standalone | none | none | none |
 | S98 | A multi-tenant configuration with no request-time verifier is refused before any store opens | standalone | none | none | none |
-| S99 | An extends: child whose sandbox_profile conflicts with its parent's is refused in both modes, and a stored version keeps serving | solo then standalone | none | none | none |
-| S100 | A sandbox_profile that tightens an open parent is admitted, and a same-layer conflict is refused with its dependants in both modes | solo then standalone | none | none | none |
 | S101 | An Agent Skills directory with no ARTIFACT.md is a Podium layer | standalone | none | none | none |
+| S102 | An ARTIFACT.md that declares extends: is refused, and a stored extends: child stops serving after an upgrade | solo then standalone | none | none | none |
 
 ---
 
@@ -536,8 +522,8 @@ collision-rejection rule.
 - `layer reingest team` reports `greet` rejected with code `ingest.collision`
   and a reason that names the artifact and the remedy and no layer:
   `cross-layer collision: "greet" is already contributed by another layer;
-  declare extends: greet to overlay it`. A reason that names `base` is a §4.6
-  disclosure to a layer owner who cannot read that layer. The registry log
+  rename this artifact or remove the other copy first`. A reason that names
+  `base` is a §4.6 disclosure to a layer owner who cannot read that layer. The registry log
   names both layers. The team layer's non-colliding `deploy` is ingested.
 - Searching `greet` returns a single `greet` artifact whose description is the
   base layer's (`Base greet`), confirming the base artifact survives and the
@@ -764,26 +750,19 @@ reingest`, source updates.
 
 ## S10: Standalone server, multiple Git-source layers
 
-**Goal.** Validate composition across two real Git repositories registered as
-two layers, including a higher-precedence layer overlaying a same-ID artifact
-from a lower-precedence layer.
+**Goal.** Validate composition across two Git repositories registered as two
+layers, each contributing artifacts under distinct IDs.
 
-**Covers.** Standalone deployment, multiple Git layers, layer ordering, the
-`extends:` overlay, the merged view.
+**Covers.** Standalone deployment, multiple Git-source layers, and layer
+ordering. S05 covers the same-ID collision between layers.
 
 **Steps.**
 
 1. Run the isolation block.
 2. Create two repositories. The `base` repository holds a `greet` skill. The
-   `team` repository holds its own `greet` skill plus a unique `team-only`
-   skill. Per §4.6, two layers contributing the same canonical ID is a
-   forbidden silent shadow unless the higher-precedence artifact declares
-   `extends: <id>`. The scaffold writes `SKILL.md` alone, and `extends:` is a
-   Podium-only field, so the `team` copy of `greet` carries a hand-written
-   `ARTIFACT.md` overlay that declares `version: 0.2.0` and `extends: greet`.
-   Its `SKILL.md` `metadata.version` is set to the same value so the two files
-   agree (§4.3.4). The `rm` keeps the `sed` backup out of the commit, where it
-   would become a bundled resource.
+   `team` repository holds a `team-greet` skill and a `team-only` skill. Every
+   canonical ID is contributed by one layer, because §4.6 rejects a same-ID
+   collision between layers.
 
    ```bash
    mkdir -p "$WORK/base" && cd "$WORK/base" && git init -q
@@ -791,10 +770,7 @@ from a lower-precedence layer.
    git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "base"
 
    mkdir -p "$WORK/team" && cd "$WORK/team" && git init -q
-   podium artifact scaffold --type skill --description "team greet" "$WORK/team/greet" --force
-   # Overlay the base greet: write an ARTIFACT.md overlay and bump SKILL.md to match.
-   printf -- '---\ntype: skill\nversion: 0.2.0\nextends: greet\n---\n<!-- Skill body lives in SKILL.md. -->\n' > "$WORK/team/greet/ARTIFACT.md"
-   sed -i.bak 's/^  version: "0.1.0"$/  version: "0.2.0"/' "$WORK/team/greet/SKILL.md" && rm "$WORK/team/greet/SKILL.md.bak"
+   podium artifact scaffold --type skill --description "team greet" "$WORK/team/team-greet" --force
    podium artifact scaffold --type skill --description "Team only" "$WORK/team/team-only" --force
    git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "team"
    ```
@@ -818,21 +794,22 @@ from a lower-precedence layer.
    podium search --registry "$PODIUM_REGISTRY" "greet"
    podium search --registry "$PODIUM_REGISTRY" "team only"
    podium artifact show --registry "$PODIUM_REGISTRY" greet
+   podium artifact show --registry "$PODIUM_REGISTRY" team-greet
    ```
 
 **Expected.**
 
 - `layer list` shows `base` then `team`.
 - `layer reingest base` ingests `greet@0.1.0` into `base`. `layer reingest team`
-  ingests both `greet@0.2.0` and `team-only@0.1.0` into `team` with no
-  collision rejection, because the team `greet` declares `extends: greet`.
-- Searching `greet` returns one merged `greet` whose description is the team
-  layer's version (`team greet`); the two underlying versions collapse to a
-  single entry in the results.
-- Searching `team only` returns the `team-only` skill. The merged `greet` also
-  matches because its description contains "team".
-- `artifact show greet` returns version `0.2.0`, confirming the team overlay
-  won.
+  ingests `team-greet@0.1.0` and `team-only@0.1.0` into `team` with no
+  rejection.
+- Searching `greet` returns both `greet` (description `base greet`) and
+  `team-greet` (description `team greet`), so both layers' skills are served.
+- Searching `team only` returns the `team-only` skill.
+- `artifact show greet` prints `version: 0.1.0` and the `# greet` skill body,
+  and `artifact show team-greet` prints `version: 0.1.0` and the `# team-greet`
+  skill body. The description lives in the SKILL.md frontmatter, which
+  `artifact show` does not print, so the search lines above check it.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
@@ -1986,25 +1963,18 @@ materialize only the requested subset.
 ## S26: Reverse-dependency impact analysis
 
 **Goal.** Validate that `podium impact` lists the artifacts that depend on a
-given artifact through `extends` and `delegates_to` edges.
+given artifact through `delegates_to` edges.
 
 **Covers.** Standalone deployment, the dependency graph, `impact`.
 
 **Steps.**
 
 1. Run the isolation block.
-2. Author a base skill, a skill that extends it, and an agent that delegates to
-   it.
+2. Author a base skill and an agent that delegates to it.
 
    ```bash
    podium artifact scaffold --type skill --description "Base deploy routine" "$WORK/reg/deploy-base"
-   podium artifact scaffold --type skill --description "Pro deploy routine" "$WORK/reg/deploy-pro"
    podium artifact scaffold --type agent --delegates-to deploy-base --description "Release agent" "$WORK/reg/release-agent"
-   # Make deploy-pro extend deploy-base: write an ARTIFACT.md overlay with the
-   # version and the extends field, and set the SKILL.md metadata.version to match.
-   # The rm keeps the sed backup from becoming a bundled resource of the layer.
-   printf -- '---\ntype: skill\nversion: 0.2.0\nextends: deploy-base\n---\n<!-- Skill body lives in SKILL.md. -->\n' > "$WORK/reg/deploy-pro/ARTIFACT.md"
-   sed -i.bak 's/^  version: "0.1.0"$/  version: "0.2.0"/' "$WORK/reg/deploy-pro/SKILL.md" && rm "$WORK/reg/deploy-pro/SKILL.md.bak"
    ```
 
 3. Serve and query impact.
@@ -2020,8 +1990,7 @@ given artifact through `extends` and `delegates_to` edges.
 
 **Expected.**
 
-- `impact deploy-base` lists `deploy-pro` (an `extends` dependent) and
-  `release-agent` (a `delegates_to` dependent).
+- `impact deploy-base` lists `release-agent` (a `delegates_to` dependent) alone.
 - A leaf artifact with no dependents (for example `release-agent`) reports an
   empty impact set.
 
@@ -3205,666 +3174,13 @@ repository rather than in `$WORK`.
 
 ---
 
-## S37: `extends:` merged manifest, hidden parent, and inherited redaction
+## S41: manifest-declared `audit_redact` over a forwarded audit stream
 
-**Goal.** Validate by hand what a consumer is served for an artifact that
-declares `extends:`, across the four surfaces the merge reaches: the signature,
-the body, the frontmatter an extension type authors, and the audit stream.
+**Goal.** Validate that a redaction directive the loaded artifact declares is
+applied before the event leaves the process, by reading what a receiver
+receives rather than what the local log file holds.
 
-**Covers.** §4.6 field semantics and hidden parents, §4.7.9 signatures, §8.2
-manifest-declared redaction, §11 filesystem-versus-server equivalence.
-
-**Why by hand.** Each behavior below shipped broken at least once, and in every
-case the automated suite passed: the assertions checked a substring rather than
-a value, or the case skipped on the platform it was run on. Reading the served
-bytes directly is what these steps are for.
-
-**Steps.**
-
-1. Run the isolation block.
-
-2. Build a registry holding a parent and a child that inherits from it. The
-   parent carries a frontmatter key `manifest.Artifact` does not declare, a
-   comment naming itself, and a redaction directive. The child authors no
-   prose, declares its own undeclared key, and declares neither a description
-   nor a directive of its own.
-
-   ```bash
-   mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
-   cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
-   ---
-   type: context
-   version: 1.0.0
-   description: the base context
-   sensitivity: medium
-   # authored by the shared/base owners
-   x_review_board: platform
-   x_account: GB29-NWBK-0000
-   audit_redact: [x_account]
-   ---
-
-   base prose
-   EOF
-   cat > "$WORK/reg/team/derived/ARTIFACT.md" <<'EOF'
-   ---
-   type: context
-   version: 2.0.0
-   extends: shared/base@1.x
-   x_runbook: ops/derived.md
-   ---
-   EOF
-   ```
-
-3. Serve the registry and read the child back.
-
-   ```bash
-   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-     --bind 127.0.0.1:8144 > "$WORK/srv.log" 2>&1 &
-   SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8144/healthz
-   server_alive "$SRV" "$WORK/srv.log"
-   export PODIUM_REGISTRY=http://127.0.0.1:8144
-   curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=team/derived" | tee "$WORK/child.json" | python3 -m json.tool
-   ```
-
-   **Expect.** The response's `frontmatter` carries the child's `x_runbook`
-   **and** the parent's `x_review_board: platform`, because §4.6's omitted-field
-   rule makes an extension type's own fields inheritable. It carries the
-   inherited `description: the base context`.
-
-4. Check the hidden-parent guarantee (§4.6) on the served bytes, not on the
-   parsed fields. The parent's ID must not appear anywhere in the served
-   frontmatter, including inside a YAML comment the parent authored.
-
-   ```bash
-   python3 - "$WORK/child.json" <<'PY'
-   import json, sys
-   fm = json.load(open(sys.argv[1])).get("frontmatter", "")
-   for probe in ("shared/base", "extends", "authored by the shared/base owners"):
-       print(("LEAK  " if probe in fm else "ok    ") + probe)
-   print(fm)
-   PY
-   ```
-
-   **Expect.** Three `ok` lines. A `LEAK` on the comment probe is the §4.6
-   violation a value-only check does not catch: a restored node carries its
-   author's comments and the serializer re-emits them unless it clears them.
-
-   The probe reads the `frontmatter` field, which is the served string the
-   merge writes. The response carries no `raw_frontmatter`, `manifest_merged`,
-   or `signature` field, and it names the parent in `extends_pin` only because
-   this unauthenticated standalone caller can see every layer. S70 reads the
-   whole raw body as a caller that cannot see the parent's layer.
-
-5. Check the body. The child authored no prose, so it must be served none
-   rather than the parent's.
-
-   ```bash
-   python3 -c "import json;d=json.load(open('$WORK/child.json'));print(repr(d.get('manifest_body','')))"
-   ```
-
-   **Expect.** An empty or whitespace-only string. `'base prose'` means the
-   body carry-over is guarded on a non-empty child body again.
-
-6. Check that search resolves the inherited description. The ingest fold
-   writes the merged value to the indexed columns, so the child is findable by
-   a description it never authored.
-
-   ```bash
-   podium search --registry "$PODIUM_REGISTRY" "base context"
-   ```
-
-   **Expect.** The child is listed under the inherited description. A result
-   whose description is empty means the ingest fold did not run.
-
-   The two surfaces agree on the descriptor columns and deliberately do not
-   agree on the embedded `frontmatter` string: a search descriptor serves the
-   child's authored block with `extends:` removed and merges nothing, which
-   avoids a chain walk per result. Do not read a difference in that field as a
-   defect here.
-
-7. Check the §8.2 inherited redaction in the audit stream.
-
-   ```bash
-   grep -c "GB29-NWBK-0000" "$PODIUM_AUDIT_LOG_PATH" || true
-   grep -o '"x_account":"[^"]*"' "$PODIUM_AUDIT_LOG_PATH" | tail -2
-   ```
-
-   **Expect.** Zero occurrences of the raw account value, and the child's
-   `artifact.loaded` event carrying `"x_account": "[redacted]"` in its
-   `context`. The directive is applied by substituting the value in place
-   rather than by emitting a key list, so the masked entry is the observable.
-   The child declares no directive of its own, so a directive that reaches the
-   event at all is the inherited one.
-
-8. Check the fail-closed arm. A child whose `extends` arrives through a YAML
-   merge key keeps an operative reference inside the mapping it merges in, and
-   the served block would name the parent, so the read is refused rather than
-   served.
-
-   ```bash
-   mkdir -p "$WORK/reg/team/aliased"
-   cat > "$WORK/reg/team/aliased/ARTIFACT.md" <<'EOF'
-   ---
-   type: context
-   version: 1.0.0
-   description: aliased child
-   base: &b
-     extends: shared/base@1.x
-   <<: *b
-   ---
-
-   aliased body
-   EOF
-   kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
-   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-     --bind 127.0.0.1:8145 > "$WORK/srv2.log" 2>&1 &
-   SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8145/healthz
-   server_alive "$SRV" "$WORK/srv2.log"
-   curl -s -o "$WORK/aliased.json" -w '%{http_code}\n' \
-     "http://127.0.0.1:8145/v1/load_artifact?id=team/aliased"
-   cat "$WORK/aliased.json"
-   ```
-
-   **Expect.** A 400 carrying `registry.invalid_argument`. A 200 whose
-   frontmatter names `shared/base` is the leak this arm exists to prevent; a
-   200 with the key silently dropped is also wrong, because a consumer cannot
-   tell an inherited-as-nothing key from one the chain never set. Check the
-   error code rather than the status class alone: a wrong URL also returns a
-   4xx, so a status-only check passes against a route that does not exist.
-
-   The refusal is at the read. Ingest accepts the artifact, so it stays
-   listed by search and by `/v1/catalog` under its authored description, and
-   the refusal arrives when a consumer loads it. Its search descriptor carries
-   no frontmatter, so nothing leaks through discovery.
-
-**Cleanup.** Stop the server and `rm -rf "$WORK"`.
-
----
-
-## S38: `extends:` child under a signing registry
-
-**Goal.** Validate that a signing registry serves an `extends:` child a
-signature that verifies against the bytes it serves, and that a consumer
-enforcing verification loads it.
-
-**Covers.** §4.7.9 signatures, §4.6 merge, §6.6 materialization verification.
-
-**Why by hand.** No test in the tree paired signing with `extends:` before
-2026-08-20, so the suite was green while the two were mutually exclusive: the
-merged record carried the root parent's envelope against the child's own
-content hash, so verification could not succeed.
-
-**Watch out for.** Two commands look like they exercise this and do not.
-`PODIUM_SIGNATURE_PROVIDER` is read by `podium sign`, `podium verify`, and
-`podium-mcp`; `podium serve` does not read it. Ingest signing is on unless
-`PODIUM_SIGN=none` or `--sign none` turns it off. And a filesystem-source
-`podium sync` runs no signature check, so `PODIUM_VERIFY_SIGNATURES` in front of it
-has no effect. Server-source `podium sync` does verify, and it refuses an invalid
-`PODIUM_VERIFY_SIGNATURES` value with exit status 2. A scenario built on either one passes whether or not
-the defect is present.
-
-**Steps.**
-
-1. Run the isolation block.
-
-2. Build a parent and an inheriting child.
-
-```bash
-mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
-cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 1.0.0
-description: the base context
-sensitivity: medium
----
-
-base prose
-EOF
-cat > "$WORK/reg/team/derived/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 2.0.0
-description: the derived context
-sensitivity: medium
-extends: shared/base@1.x
----
-
-derived prose
-EOF
-```
-
-3. Serve with ingest signing on, and confirm it is actually on before reading
-   anything into the result.
-
-```bash
-podium serve --standalone --no-embeddings --sign registry-key \
-  --layer-path "$WORK/reg" --bind 127.0.0.1:8139 > "$WORK/srv.log" 2>&1 &
-SRV=$!
-curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8139/healthz
-server_alive "$SRV" "$WORK/srv.log"
-export PODIUM_REGISTRY=http://127.0.0.1:8139
-curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=team/derived" > "$WORK/child.json"
-curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=shared/base" > "$WORK/parent.json"
-python3 - "$WORK/child.json" "$WORK/parent.json" <<'PY'
-import json, sys
-c, p = (json.load(open(a)) for a in sys.argv[1:3])
-print("child  sig empty:", not c.get("delivery_signature"))
-print("parent sig empty:", not p.get("delivery_signature"))
-print("same envelope:", c.get("delivery_signature") == p.get("delivery_signature"))
-print("child delivery hash:", c.get("delivery_hash"))
-print("parent delivery hash:", p.get("delivery_hash"))
-print("child hash:", c.get("content_hash"))
-print("parent hash:", p.get("content_hash"))
-PY
-```
-
-   **Expect.** Neither `delivery_signature` is empty and the two envelopes
-   differ, because each is minted over its own record's `delivery_hash`. The two
-   delivery hashes differ, and the two content hashes differ. An empty
-   delivery signature means signing never turned on and every later step is
-   vacuous. An identical envelope across a child and its parent is the defect
-   itself.
-
-4. Load the child through the path that enforces verification. `podium-mcp`
-   is the consumer that raises `materialize.signature_invalid`, and it is
-   driven by a JSON-RPC request on stdin rather than by a flag.
-
-```bash
-PUBKEY="$(awk '/^public:/{print $2}' "$PODIUM_SIGN_KEY_PATH")"
-REQ='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"team/derived"}}}'
-echo "$REQ" | PODIUM_REGISTRY="$PODIUM_REGISTRY" PODIUM_MATERIALIZE_DIR="$WORK/mat" \
-  PODIUM_VERIFY_SIGNATURES=always \
-  PODIUM_SIGNATURE_PROVIDER=registry-managed \
-  PODIUM_SIGNATURE_VERIFY_KEY="$PUBKEY" \
-  podium-mcp
-```
-
-   **Expect.** A JSON-RPC result whose `structuredContent.content_hash` is the
-   child's own hash from step 3, and whose `manifest_body` is `derived prose` with its trailing newline.
-   An error naming `materialize.signature_invalid` means the served delivery
-   signature does not cover the served delivery hash, and an error naming
-   `materialize.content_hash_mismatch` means the served bytes do not reproduce
-   the served delivery hash. Either is the defect this scenario pins.
-
-5. Negative control on the key. Without it the scenario cannot tell "verified"
-   from "never checked", which is how its first version passed against the
-   defect it was written for.
-
-```bash
-BOGUS="$(head -c 32 /dev/urandom | base64)"
-echo "$REQ" | PODIUM_REGISTRY="$PODIUM_REGISTRY" PODIUM_MATERIALIZE_DIR="$WORK/mat2" \
-  PODIUM_VERIFY_SIGNATURES=always \
-  PODIUM_SIGNATURE_PROVIDER=registry-managed \
-  PODIUM_SIGNATURE_VERIFY_KEY="$BOGUS" \
-  podium-mcp
-```
-
-   **Expect.** An error carrying `signature_invalid: signature does not
-   verify`. A success here means verification is not running, so step 4's pass
-   proves nothing.
-
-6. Control on the non-extends path, so a pass in step 4 is attributable to the
-   merge rather than to verification being lenient for everything.
-
-```bash
-PARENT_REQ='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"shared/base"}}}'
-echo "$PARENT_REQ" | PODIUM_REGISTRY="$PODIUM_REGISTRY" PODIUM_MATERIALIZE_DIR="$WORK/mat3" \
-  PODIUM_VERIFY_SIGNATURES=always \
-  PODIUM_SIGNATURE_PROVIDER=registry-managed \
-  PODIUM_SIGNATURE_VERIFY_KEY="$PUBKEY" \
-  podium-mcp
-```
-
-   **Expect.** The parent loads and reports its own content hash, which differs
-   from the child's. The parent declares no `extends:`, so it exercises the
-   unmerged path.
-
-**Cleanup.** Stop the server by the PID this scenario recorded, and remove the
-work directory. Do not pattern-kill by process name: another scenario or
-another session may be running its own server.
-
-```bash
-kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
-rm -rf "$WORK"
-```
-
----
-
-## S39: same-ID `extends:` overlay and a three-level chain
-
-**Goal.** Validate the two chain shapes the single parent-child case does not
-reach: a child that overlays its own canonical ID from a lower-precedence
-layer, and a chain deep enough that an inherited key travels two hops.
-
-**Covers.** §4.6 field semantics, the §4.6 same-ID overlay exception, hidden
-parents over a multi-hop chain.
-
-**Why by hand.** The same-ID overlay is the case where the parent's ID and the
-child's ID are equal, so a hidden-parent check written over "the parent's ID
-must not appear" collides with the artifact's own identity. That collision took
-the longest of any part of this work to settle, and the resolution is that the
-check runs on inherited values rather than on the leaf's own. A three-level
-chain is the shape where a middle member's contribution can be dropped without
-either end looking wrong.
-
-**Steps.**
-
-1. Run the isolation block. `--layer-path` names a single registry root, so a
-   multi-layer scenario registers each layer instead.
-
-2. Build a base layer and an overlay layer that extends the same canonical ID.
-
-```bash
-mkdir -p "$WORK/base/greet" "$WORK/team/greet"
-cat > "$WORK/base/greet/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 1.0.0
-description: base greet
-x_owner: platform
----
-
-base prose
-EOF
-cat > "$WORK/team/greet/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 2.0.0
-extends: greet
-x_runbook: ops/greet.md
-x_owner: platform
----
-EOF
-```
-
-   The overlay restates `x_owner` because the §4.6 executable-field rule
-   requires a child to restate each undeclared key that a parent in another
-   layer sets. Scenario S91 covers the refusal of a child that omits one.
-
-3. Serve, register both layers with `team` at higher precedence, and read the
-   overlay back.
-
-```bash
-podium serve --standalone --no-embeddings --bind 127.0.0.1:8140 > "$WORK/srv.log" 2>&1 &
-SRV=$!
-curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8140/healthz
-server_alive "$SRV" "$WORK/srv.log"
-export PODIUM_REGISTRY=http://127.0.0.1:8140
-podium layer register --registry "$PODIUM_REGISTRY" --id base --local "$WORK/base" --public
-podium layer register --registry "$PODIUM_REGISTRY" --id team --local "$WORK/team" --public
-podium layer reingest --registry "$PODIUM_REGISTRY" base
-podium layer reingest --registry "$PODIUM_REGISTRY" team
-curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=greet" | tee "$WORK/greet.json" | python3 -m json.tool
-```
-
-   **Expect.** A 200. The served frontmatter carries the overlay's own
-   `x_runbook`, its restated `x_owner: platform`, and the inherited
-   `description: base greet`. The served `version` is the overlay's `2.0.0`.
-
-   A `registry.invalid_argument` refusal here is the collision this scenario
-   exists to catch: the artifact's own ID equals its parent's, so a
-   hidden-parent check that runs over the leaf's own keys refuses a legitimate
-   overlay.
-
-4. Confirm the overlay is still served, rather than being refused or emptied.
-
-```bash
-python3 - "$WORK/greet.json" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-fm = d.get("frontmatter", "")
-for probe in ("x_runbook", "x_owner", "base greet"):
-    print(("ok    " if probe in fm else "MISS  ") + probe)
-print("version:", d.get("version"))
-PY
-```
-
-   **Expect.** Three `ok` lines and version `2.0.0`. A `MISS` on `base greet`
-   is the inherited-key drop, a `MISS` on `x_owner` is the overlay's restated
-   key being dropped, and a `MISS` on `x_runbook` is the leaf's own key being
-   dropped, which is the more serious.
-
-5. Build a three-level chain in one layer and read the leaf.
-
-```bash
-mkdir -p "$WORK/deep/a" "$WORK/deep/b" "$WORK/deep/c"
-cat > "$WORK/deep/a/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 1.0.0
-description: grandparent
-x_grandparent: gp-value
----
-
-gp prose
-EOF
-cat > "$WORK/deep/b/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 1.0.0
-extends: a@1.x
-x_middle: mid-value
----
-EOF
-cat > "$WORK/deep/c/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 1.0.0
-extends: b@1.x
-x_leaf: leaf-value
----
-EOF
-podium layer register --registry "$PODIUM_REGISTRY" --id deep --local "$WORK/deep" --public
-podium layer reingest --registry "$PODIUM_REGISTRY" deep
-curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=c" | tee "$WORK/c.json" | python3 -m json.tool
-```
-
-   **Expect.** The leaf carries `x_leaf`, the middle's `x_middle`, the
-   grandparent's `x_grandparent`, and the inherited `description: grandparent`.
-   A missing `x_grandparent` with `x_middle` present means the fold stops after
-   one hop.
-
-   The leaf's `manifest_body` is empty. A body is never inherited, at any depth:
-   `extends:` folds frontmatter and the child's prose replaces the parent's
-   rather than being concatenated with it. `gp prose` appearing here is a body
-   carried across two hops, which is the same defect as carrying it across one.
-
-```bash
-python3 -c "import json;print(repr(json.load(open('$WORK/c.json')).get('manifest_body','')))"
-```
-
-   **Expect.** An empty or whitespace-only string.
-
-6. Check the hidden-parent guarantee over the whole chain, not just the
-   immediate parent.
-
-```bash
-python3 - "$WORK/c.json" <<'PY'
-import json, sys
-fm = json.load(open(sys.argv[1])).get("frontmatter", "")
-for probe in ("extends", "a@1.x", "b@1.x"):
-    print(("LEAK  " if probe in fm else "ok    ") + probe)
-PY
-```
-
-   **Expect.** Three `ok` lines. A `LEAK` on `a@1.x` means the check covers the
-   immediate parent only and lets an ancestor through.
-
-7. Negative control on the restated key. Publish a new overlay version that
-   pins the `base` copy and no longer restates `x_owner`, then reingest `team`.
-
-```bash
-cat > "$WORK/team/greet/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 2.1.0
-extends: greet@1.0.0
-x_runbook: ops/greet.md
----
-EOF
-podium layer reingest --registry "$PODIUM_REGISTRY" team; echo "exit=$?"
-curl -s -X POST "$PODIUM_REGISTRY/v1/layers/reingest?id=team" \
-  | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["rejected"]))'
-curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=greet" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'
-```
-
-   **Expect.** The reingest prints
-   `rejected: greet (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: x_owner; restate each one in this artifact`
-   and `exit=1`. The `rejected` entry carries
-   `"details": {"constraint": "executable_inheritance", "fields": ["x_owner"]}`,
-   and `greet` still serves `2.0.0`. The pin is explicit because an unpinned
-   `extends: greet` selects the stored `team` copy `2.0.0`, which is a
-   within-layer edge the server accepts. Scenario S93 step 6 covers that case.
-   An accepted `2.1.0` here means the rule did not run, and steps 3 and 4 then
-   prove nothing about the restatement.
-
-**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
-
----
-
-## S40: `extends:` for a skill, and filesystem-versus-server parity
-
-**Goal.** Validate the artifact type whose prose does not live in
-`ARTIFACT.md`, and validate that the two registry modes materialize the same
-bytes for the same `extends:` child.
-
-**Covers.** §4.3.4 skills, §4.6 merge, §11 filesystem-versus-server
-equivalence, §2.2 shared library.
-
-**Why by hand.** A skill stores its body in `SKILL.md` and its frontmatter in
-`ARTIFACT.md`, so the body rule reads differently for it than for every other
-type, and the two sources differ by construction. Separately, the two extends
-resolvers are distinct implementations of the same merge: repairing one alone
-makes the modes disagree, and the disagreement is in materialized bytes rather
-than in an error.
-
-**Watch out for.** A filesystem-source `podium sync` does not lint, so a
-fixture a server refuses still materializes here. A skill's `SKILL.md` `name`
-must be lowercase and must equal its parent directory (`lint.invalid_name`,
-`lint.skill_md_compliance`), and a fixture that breaks either one passes the
-first half of this scenario and then kills the server in the second half with
-`ingest.lint_failed` before it binds.
-
-**Steps.**
-
-1. Run the isolation block.
-
-2. Build a skill parent and a skill child that authors no `SKILL.md` body.
-
-```bash
-mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
-cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
----
-type: skill
-version: 1.0.0
-x_review_board: platform
----
-EOF
-cat > "$WORK/reg/shared/base/SKILL.md" <<'EOF'
----
-name: base
-description: the base skill
----
-
-base skill body
-EOF
-cat > "$WORK/reg/team/derived/ARTIFACT.md" <<'EOF'
----
-type: skill
-version: 2.0.0
-extends: shared/base@1.x
-x_runbook: ops/derived.md
----
-EOF
-cat > "$WORK/reg/team/derived/SKILL.md" <<'EOF'
----
-name: derived
-description: the derived skill
----
-
-derived skill body
-EOF
-```
-
-3. Materialize through the filesystem source.
-
-```bash
-mkdir -p "$WORK/fs-target"
-podium sync --registry "$WORK/reg" --target "$WORK/fs-target" --harness none
-find "$WORK/fs-target" -type f | sed "s|$WORK/fs-target/||" | sort
-```
-
-   **Expect.** Both artifacts materialize. The derived skill's `SKILL.md`
-   carries `derived skill body` and its own `description`, because a skill's
-   body and identity come from `SKILL.md` and follow the child rather than the
-   parent. A skill's `name` is forced to equal its directory by
-   `lint.skill_md_compliance`, so the child-versus-parent distinction lives in
-   the description and the body rather than in the name.
-
-4. Materialize the same registry through a server and compare byte for byte.
-
-```bash
-podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-  --bind 127.0.0.1:8141 > "$WORK/srv.log" 2>&1 &
-SRV=$!
-curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8141/healthz
-server_alive "$SRV" "$WORK/srv.log"
-mkdir -p "$WORK/srv-target"
-podium sync --registry http://127.0.0.1:8141 --target "$WORK/srv-target" --harness none
-find "$WORK/fs-target" -name ARTIFACT.md | wc -l   # must be 2, not 0
-diff -r -x sync.lock "$WORK/fs-target" "$WORK/srv-target" && echo "IDENTICAL"
-```
-
-   Then compare the two lock files with the per-consumer fields removed.
-
-```bash
-diff <(grep -v -e '^target:' -e '^last_synced_at:' "$WORK/fs-target/.podium/sync.lock") \
-     <(grep -v -e '^target:' -e '^last_synced_at:' "$WORK/srv-target/.podium/sync.lock") \
-  && echo "LOCKS IDENTICAL"
-```
-
-   **Expect.** `LOCKS IDENTICAL`. A differing `content_hash` line means the
-   filesystem consumer and the registry hash different inputs.
-
-   **Expect.** A non-zero count, then `IDENTICAL`. The count runs first
-   because an empty tree compared against an empty tree also reports no
-   differences, which scores as a pass while proving nothing. The lock file is
-   excluded rather than tolerated: its `target` and `last_synced_at` differ by
-   construction between two consumers. Its `content_hash` entries match
-   between the two modes, because both compute the §4.7.6 framed hash from
-   the same inputs, and the lock comparison below checks them. Any difference in an `ARTIFACT.md` or
-   `SKILL.md` is the §11 equivalence break that repairing one resolver alone
-   produces.
-
-5. Repeat the comparison for a harness that writes a native layout, so the
-   parity covers adapter output rather than the neutral copy alone.
-
-```bash
-mkdir -p "$WORK/fs-cc" "$WORK/srv-cc"
-podium sync --registry "$WORK/reg" --target "$WORK/fs-cc" --harness claude-code
-podium sync --registry http://127.0.0.1:8141 --target "$WORK/srv-cc" --harness claude-code
-find "$WORK/fs-cc" -name '*.md' | wc -l   # must be non-zero
-diff -r -x sync.lock "$WORK/fs-cc" "$WORK/srv-cc" && echo "IDENTICAL"
-```
-
-   **Expect.** A non-zero count, then `IDENTICAL`, with the lock excluded for
-   the same reason.
-
-**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
-
----
-
-## S41: inherited `audit_redact` over a forwarded audit stream
-
-**Goal.** Validate that an inherited redaction directive is applied before the
-event leaves the process, by reading what a receiver actually receives rather
-than what the local log file holds.
-
-**Covers.** §8.2 manifest-declared redaction, §8.3 audit sink selection, §4.6
-inheritance.
+**Covers.** §8.2 manifest-declared redaction and §8.3 audit sink selection.
 
 **Why by hand.** Redaction that is applied only on the way to the local file
 still leaks to an aggregator, and the two paths are different sinks: a
@@ -3894,34 +3210,27 @@ SINK=$!
 sleep 1
 ```
 
-2. Build a parent carrying the sensitive field and the directive, and a child
-   that declares neither.
+2. Build an artifact that declares the sensitive field and the directive in
+   its own frontmatter.
 
 ```bash
-mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
-cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
+mkdir -p "$WORK/reg/team/ledger"
+cat > "$WORK/reg/team/ledger/ARTIFACT.md" <<'EOF'
 ---
 type: context
 version: 1.0.0
-description: the base context
+description: the ledger context
 sensitivity: medium
 x_account: GB29-NWBK-0000
 audit_redact: [x_account]
 ---
 
-base prose
-EOF
-cat > "$WORK/reg/team/derived/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 2.0.0
-extends: shared/base@1.x
----
+ledger prose
 EOF
 ```
 
 3. Serve with the audit stream pointed at the receiver rather than at a file,
-   then read the child.
+   then read the artifact.
 
 ```bash
 PODIUM_AUDIT_LOG_PATH="http://127.0.0.1:8901/ingest" \
@@ -3930,7 +3239,7 @@ podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
 SRV=$!
 curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8142/healthz
 server_alive "$SRV" "$WORK/srv.log"
-curl -s -o /dev/null "http://127.0.0.1:8142/v1/load_artifact?id=team/derived"
+curl -s -o /dev/null "http://127.0.0.1:8142/v1/load_artifact?id=team/ledger"
 sleep 2
 wc -l < "$WORK/forwarded.jsonl"
 ```
@@ -3953,18 +3262,18 @@ for line in open(sys.argv[1]):
         ev = json.loads(line)
     except ValueError:
         continue
-    if ev.get("target") == "team/derived":
+    if ev.get("target") == "team/ledger":
         print(json.dumps(ev.get("context", {}), indent=2))
 PY
 ```
 
    **Expect.** Zero occurrences of the raw account value in the forwarded
-   stream, and the child's event carrying `"x_account": "[redacted]"` in its
+   stream, and the artifact's event carrying `"x_account": "[redacted]"` in its
    context. The raw value appearing here is a leak to the aggregator even when
    the local file is clean.
 
-5. Confirm the directive reached the event by inheritance rather than by the
-   field being absent. A missing field and a redacted field are different
+5. Confirm the field reached the event and was redacted by the directive
+   rather than being absent. A missing field and a redacted field are different
    outcomes, and only one of them is redaction working.
 
 ```bash
@@ -3979,14 +3288,14 @@ for line in open(sys.argv[1]):
         ev = json.loads(line)
     except ValueError:
         continue
-    if ev.get("target") == "team/derived" and "x_account" in ev.get("context", {}):
+    if ev.get("target") == "team/ledger" and "x_account" in ev.get("context", {}):
         seen = True
-print("x_account present in the child's event context:", seen)
+print("x_account present in the artifact's event context:", seen)
 PY
 ```
 
    **Expect.** `True`. `False` means the field never reached the event at all,
-   so the scenario proves nothing about redaction: the inherited directive
+   so the scenario proves nothing about redaction: the declared directive
    would look identical to a directive that was never applied.
 
 **Cleanup.** Stop the server and the receiver by their recorded PIDs, then
@@ -3997,206 +3306,6 @@ kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
 kill "$SINK" 2>/dev/null; wait "$SINK" 2>/dev/null
 rm -rf "$WORK"
 ```
-
----
-
-## S42: a deprecated parent in an `extends:` chain
-
-**Goal.** Validate what happens to a child whose parent is deprecated, across
-the orderings that differ: a range reference that can avoid a deprecated
-version, an explicit pin onto one, a line with no live version left, and a
-parent deprecated after the child was already stored.
-
-**Covers.** §4.6 inheritance, §4.7.6 pin resolution, §4.7.4 deprecation, §4.7
-immutability.
-
-**Why by hand.** Deprecation is per-version and a pin is frozen at the child's
-ingest, so which ordering produced a state is invisible from the state itself.
-The refusal also lands at ingest for some orderings and at read for others.
-
-**Layout, before you start.** Both walkers key on the literal filename
-`ARTIFACT.md`, and an artifact's id is its directory path relative to the layer
-root. A registry directory therefore holds exactly one `(id, version)` at a
-time, and any other file in it is captured as a bundled resource rather than as
-a second version. Multiple versions of one id live only in the store,
-accumulated across successive reingests of the same directory. Publishing a new
-version means overwriting `ARTIFACT.md` in place and reingesting, not adding a
-file beside it: a second file changes the artifact's content hash while its
-version stays the same, which ingest refuses with
-`ingest.immutable_violation`.
-
-There is no deprecation verb. A version's `deprecated` flag is part of its
-frontmatter and therefore part of its content hash, so a stored version cannot
-be deprecated in place; the same refusal applies.
-
-**Steps.**
-
-1. Run the isolation block, serve an empty registry, and register one layer.
-
-```bash
-mkdir -p "$WORK/reg"
-podium serve --standalone --no-embeddings --bind 127.0.0.1:8143 > "$WORK/srv.log" 2>&1 &
-SRV=$!
-curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8143/healthz
-server_alive "$SRV" "$WORK/srv.log"
-export PODIUM_REGISTRY=http://127.0.0.1:8143
-podium layer register --registry "$PODIUM_REGISTRY" --id reg --local "$WORK/reg" --public
-```
-
-2. Publish a live parent and a child that references it by range.
-
-```bash
-mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
-cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 1.0.0
-description: base v1
----
-
-base prose
-EOF
-cat > "$WORK/reg/team/derived/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 1.0.0
-extends: shared/base@1.x
----
-EOF
-podium layer reingest --registry "$PODIUM_REGISTRY" reg
-curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=team/derived" | python3 -c "import json,sys;d=json.load(sys.stdin);print('deprecated=',d.get('deprecated'));print('inherits base v1:', 'base v1' in d.get('frontmatter',''))"
-```
-
-   **Expect.** The child loads and inherits `base v1`. Its `deprecated` is
-   absent or `false`; the field is omitted rather than emitted as `false`, so
-   read the absence as the negative rather than looking for the word.
-
-3. Deprecate the line by publishing a newer version, which means overwriting
-   the same file. Confirm both versions are stored before continuing: no HTTP
-   route lists versions, so read the store.
-
-```bash
-cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 1.1.0
-description: base v1.1 deprecated
-deprecated: true
----
-
-base prose
-EOF
-podium layer reingest --registry "$PODIUM_REGISTRY" reg
-sqlite3 "$PODIUM_SQLITE_PATH" "select artifact_id, version, deprecated from manifests order by artifact_id, version;"
-```
-
-   **Expect.** Two rows for `shared/base`: `1.0.0` with `0`, and `1.1.0` with
-   `1`. One row means the overwrite did not land as a new version and every
-   later step runs against the wrong registry.
-
-4. Ingest a **fresh** range child while the deprecated version is already
-   stored. A child already stored is idempotent on reingest and its pin is
-   frozen, so re-reading it tests nothing about the selection rule.
-
-```bash
-mkdir -p "$WORK/reg/team/ranged"
-cat > "$WORK/reg/team/ranged/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 1.0.0
-extends: shared/base@1.x
----
-EOF
-podium layer reingest --registry "$PODIUM_REGISTRY" reg
-sqlite3 "$PODIUM_SQLITE_PATH" "select artifact_id, extends_pin from manifests where extends_pin != '';"
-```
-
-   **Expect.** `team/ranged` pins `shared/base@1.0.0`, the live version, not
-   the newer deprecated `1.1.0`. The range skipped the deprecated candidate.
-   `team/derived` still pins `1.0.0` from its original ingest.
-
-5. Pin a deprecated version explicitly. Read the reingest output: the rejection
-   is printed by the CLI on stdout and never reaches the server log, and a grep
-   of the server log matches unrelated boot lines whether or not the rejection
-   happened.
-
-```bash
-mkdir -p "$WORK/reg/team/pinned"
-cat > "$WORK/reg/team/pinned/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 1.0.0
-extends: shared/base@1.1.0
----
-EOF
-podium layer reingest --registry "$PODIUM_REGISTRY" reg 2>&1 | grep -iE "rejected|conflict" || echo "NO REJECTION LINE"
-```
-
-   **Expect.** A line naming `team/pinned`, `ingest.invalid_artifact`, and
-   deprecation, for example `extends: parent version shared/base@1.1.0 is
-   deprecated`. A message claiming the parent was never published is a defect:
-   the author named a stored version explicitly and is entitled to be told why
-   it was refused.
-
-   Note that `podium layer reingest` exits `1` here, because the cycle dropped
-   `team/pinned`. Read the printed reason rather than inferring it from the
-   exit status.
-
-6. Exhaust a line: a parent whose only version is deprecated.
-
-```bash
-mkdir -p "$WORK/reg/shared/dead" "$WORK/reg/team/orphaned"
-cat > "$WORK/reg/shared/dead/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 1.0.0
-description: dead line
-deprecated: true
----
-
-dead prose
-EOF
-cat > "$WORK/reg/team/orphaned/ARTIFACT.md" <<'EOF'
----
-type: context
-version: 1.0.0
-extends: shared/dead@1.x
----
-EOF
-podium layer reingest --registry "$PODIUM_REGISTRY" reg 2>&1 | grep -iE "rejected|conflict" || echo "NO REJECTION LINE"
-```
-
-   **Expect.** `team/orphaned` refused with `ingest.invalid_artifact` and a
-   reason naming that every stored version of the parent is deprecated. A
-   range with no live candidate refuses rather than falling back to a
-   deprecated one.
-
-7. Record the read-versus-search disposition for a child that inherits the
-   flag. **This state is not reachable on a current build**, and the step
-   exists to keep the accepted deferral visible rather than to produce it.
-
-   A child can inherit `deprecated: true` only by pinning a deprecated version,
-   which steps 5 and 6 show is refused at ingest, and a stored version cannot
-   be deprecated in place because the flag is part of its content hash. So the
-   only artifacts in this state are ones stored before those ingest rules
-   existed.
-
-   When you need to observe the deferral, reconstruct it out of band in the
-   throwaway store, which is not a product path:
-
-```bash
-sqlite3 "$PODIUM_SQLITE_PATH" "select artifact_id, version, deprecated from manifests where artifact_id like 'shared/%';"
-```
-
-   **Expect.** Record what you see. The known disposition is that
-   `load_artifact` reports an inherited `deprecated: true` with its deprecation
-   warning while the default `search_artifacts` filter reads the child's own
-   stored column and does not exclude it. That divergence is an accepted
-   deferral rather than a defect. Note also that the read path parses each
-   record's stored frontmatter rather than its column, so flipping the column
-   alone changes nothing on the read.
-
-**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
 
 ---
 
@@ -5864,8 +4973,8 @@ mkdir -p "$WORK/reg/eng/platform/deploy-runbook/scripts"
 printf '#!/usr/bin/env bash\necho deploying\n' > "$WORK/reg/eng/platform/deploy-runbook/scripts/deploy.sh"
 ````
 
-Give the second runbook an `extends:` on the first, and declare `tags` that omit
-one tag the parent carries. S52 and S53 both read the difference.
+Give the second runbook `tags` that omit the `runbook` tag the first carries.
+S52 and S53 both read the difference.
 
 ```bash
 cat > "$WORK/reg/eng/platform/deploy-runbook-strict/ARTIFACT.md" <<'YAML'
@@ -5874,7 +4983,6 @@ type: context
 name: deploy-runbook-strict
 version: 1.0.0
 description: The deploy runbook with the canary stage made mandatory for tier-1 services.
-extends: eng/platform/deploy-runbook
 tags: [deploy, platform]
 sensitivity: low
 ---
@@ -6027,20 +5135,21 @@ reader.
    podium search --registry $R --json --scope eng "invoice"       | ids
    ```
 
-   **Expect.** In order: `2` with both runbooks, `0`, `2` with both runbooks,
-   `0`, `1` with `finance/ap/pay-invoice`, and `0`. Flags precede the positional
+   **Expect.** In order: `2` with both runbooks, `0`, `1` with
+   `deploy-runbook`, `0`, `1` with `finance/ap/pay-invoice`, and `0`. Flags precede the positional
    query; a command written the other way round returns nothing and reads as an
    empty result set rather than as a usage error.
 
    The `--tags runbook` result is the one worth pausing on.
-   `deploy-runbook-strict` declares `tags: [deploy, platform]` and no `runbook`
-   tag, and it matches because it declares `extends:` and the merged manifest
-   carries the parent's tags. The `--tags nosuchtag` line is the negative
+   `deploy-runbook-strict` declares `tags: [deploy, platform]` and does not
+   match, because it declares no `runbook` tag. The `--tags nosuchtag` line is the negative
    control for the same filter: without it, a filter that silently matched
    everything would produce the same reading as one that works.
 
 2. Open `http://127.0.0.1:8462/app/`, press the search control in the top bar,
-   and search for `deploy`.
+   type `deploy`, and press ⌘⏎ (Ctrl+⏎ off macOS) to hand the query to the
+   search surface. A plain ⏎ in that panel opens the highlighted artifact
+   rather than the result list.
 
    **Expect.** The page reports `Showing 2 of 2 matches` and lists both
    runbooks, matching the CLI's first line.
@@ -6071,7 +5180,8 @@ reader.
 
    **Expect.** `scope:finance invoice` reports `Showing 1 of 1 match` for
    `finance/ap/pay-invoice`; `scope:eng invoice` reports `Showing 0 of 0
-   matches`; `tag:runbook deploy` reports `Showing 2 of 2 matches`. Each line
+   matches`; `tag:runbook deploy` reports `Showing 1 of 1 match` for
+   `eng/platform/deploy-runbook`. Each line
    matches the CLI's answer for the same filter.
 
 **Cleanup.** Leave the server running for S53 and S54.
@@ -6081,13 +5191,11 @@ reader.
 ## S53: Read an artifact through the viewer
 
 **Goal.** Validate that the artifact viewer renders the body as markdown rather
-than as source, presents the frontmatter as a property table, links an artifact
-to the one it extends, lists bundled resources, and renders untrusted body
-markup without executing it.
+than as source, presents the frontmatter as a property table, lists bundled
+resources, and renders untrusted body markup without executing it.
 
-**Covers.** The §13.10 artifact-viewer surface, §4.3 manifest merging as it
-reaches a reader, and the §13.10 rendering of body content the registry does not
-control.
+**Covers.** The §13.10 artifact-viewer surface and the §13.10 rendering of body
+content the registry does not control.
 
 **Why by hand.** The assertion is what a person sees rendered, and, for the last
 step, what a browser does not execute. No Go test reads a browser rendering or
@@ -6128,13 +5236,10 @@ observes a script that failed to run.
    grep '^tags:' "$WORK/reg/eng/platform/deploy-runbook-strict/ARTIFACT.md"
    ```
 
-   **Expect.** The file declares `tags: [deploy, platform]`. The property table
-   shows `deploy`, `platform`, and `runbook`, because the artifact declares
-   `extends:` and the viewer presents the merged manifest. The page also carries
-   a link to `eng/platform/deploy-runbook`, the artifact this one extends. The
-   inherited tag is the visible evidence that the merge reached the reader; a
-   table showing only the two declared tags is presenting the authored manifest
-   where the merged one is specified.
+   **Expect.** The file declares `tags: [deploy, platform]`, and the property
+   table shows the two declared tags, `deploy` and `platform`, and no `runbook`
+   tag. A `runbook` tag in the table means the viewer presents a manifest other
+   than the one the artifact declares.
 
 5. Add an artifact whose body carries markup a reader must never execute, and
    ingest it.
@@ -8461,374 +7566,6 @@ stored hash is unchanged, so a refusal is observed through a full load.
 
 ---
 
-## S70: The hidden parent does not appear in any response body
-
-**Goal.** Validate that a caller who cannot see the layer contributing an
-`extends:` parent finds the parent's ID and layer in no response body the
-registry serves for the merged child, and that a chain failure names only the
-child.
-
-**Covers.** §4.6 hidden parents (withheld), §4.7.3 reverse-index visibility,
-§7.2 `extends_pin`, and §7.6.2 batch loading.
-
-**Why by hand.** The check reads raw response bytes across every read surface.
-A parsed-field assertion passes while the ID sits in another field, and each
-surface has leaked the parent at least once through a field no assertion read.
-
-**Steps.**
-
-1. Run the isolation block.
-
-2. Build a two-layer registry. The lower layer holds the parent and is visible
-   to bob alone. The upper layer holds the merged child and is visible to alice
-   and bob. carol is seeded as the tenant admin for the last step. The
-   `trusted-headers` provider takes the caller from the `X-Podium-User-Sub`
-   header, so no token is minted.
-
-   ```bash
-   mkdir -p "$WORK/lower/shared/base" "$WORK/upper/team/derived"
-   cat > "$WORK/lower/shared/base/ARTIFACT.md" <<'EOF'
-   ---
-   type: context
-   version: 1.0.0
-   description: the base context
-   tags: [from-base]
-   ---
-
-   base prose
-   EOF
-   cat > "$WORK/upper/team/derived/ARTIFACT.md" <<'EOF'
-   ---
-   type: context
-   version: 2.0.0
-   description: the derived context
-   extends: shared/base@1.x
-   ---
-
-   derived prose
-   EOF
-   cat > "$WORK/registry.yaml" <<YAML
-   registry:
-     layers:
-       - id: shared-base
-         source: { local: { path: $WORK/lower } }
-         visibility: { users: [bob@acme.com] }
-       - id: team-derived
-         source: { local: { path: $WORK/upper } }
-         visibility: { users: [alice@acme.com, bob@acme.com] }
-   YAML
-   PODIUM_IDENTITY_PROVIDER=trusted-headers PODIUM_BOOTSTRAP_ADMINS=carol@acme.com \
-     podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" \
-     --bind 127.0.0.1:8170 > "$WORK/srv.log" 2>&1 &
-   SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8170/healthz
-   server_alive "$SRV" "$WORK/srv.log"
-   export URL=http://127.0.0.1:8170
-   as() { who="$1"; shift; curl -s -H "X-Podium-User-Sub: $who@acme.com" "$@"; }
-   ```
-
-3. Confirm the control is switched on. bob can see both layers, so his load of
-   the child carries the parent pin and his reverse-index query on the parent
-   returns the child's edge.
-
-   ```bash
-   as bob "$URL/v1/load_artifact?id=team/derived" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("extends_pin"))'
-   as bob "$URL/v1/dependents?id=shared/base" | python3 -c 'import sys,json; print(json.load(sys.stdin)["edges"])'
-   ```
-
-   **Expect.** `shared/base@1.0.0`, then one edge from `team/derived` to
-   `shared/base` of kind `extends`. A `None` or an empty list means the
-   registry resolved no parent for anyone, and every later step is vacuous.
-
-4. Read every surface as alice and count the parent's ID and the parent
-   layer's ID in the raw bytes. The child's ID is counted as well, so a surface
-   that answered an error envelope does not pass the scan.
-
-   ```bash
-   scan() { printf '%-36s child=%s shared/base=%s shared-base=%s\n' "$1" \
-     "$(grep -o 'team/derived' "$WORK/body" | wc -l | tr -d ' ')" \
-     "$(grep -o 'shared/base' "$WORK/body" | wc -l | tr -d ' ')" \
-     "$(grep -o 'shared-base' "$WORK/body" | wc -l | tr -d ' ')"; }
-   for p in "/v1/load_artifact?id=team/derived" "/v1/search_artifacts?query=" \
-            "/v1/search_artifacts?query=derived" "/v1/catalog" "/v1/sync/manifest"; do
-     as alice "$URL$p" > "$WORK/body"; scan "$p"
-   done
-   as alice "$URL/v1/dependents?id=team/derived" > "$WORK/body"; scan "/v1/dependents?id=team/derived"
-   as alice -X POST -H 'Content-Type: application/json' -d '{"ids":["team/derived"]}' \
-     "$URL/v1/artifacts:batchLoad" > "$WORK/body"; scan "/v1/artifacts:batchLoad"
-   ```
-
-   **Expect.** Every line reads `shared/base=0 shared-base=0`. Every line except
-   the `/v1/dependents` one reads `child=` with a count of at least 1; the
-   dependents body for the child is an empty edge list, because nothing
-   depends on the child.
-
-5. Query the reverse index on the parent as alice.
-
-   ```bash
-   as alice -w '%{http_code}\n' "$URL/v1/dependents?id=shared/base"
-   as alice "$URL/v1/dependents?id=no/such-artifact"
-   ```
-
-   **Expect.** Status `200` with a body that parses to `{"edges": []}`, and the
-   same body for the artifact that does not exist. A `403`, a `404`, or an edge
-   list naming `team/derived` distinguishes the parent from an absent ID.
-
-6. Read alice's load response keys.
-
-   ```bash
-   as alice "$URL/v1/load_artifact?id=team/derived" | python3 -c 'import sys,json; print(sorted(json.load(sys.stdin)))'
-   ```
-
-   **Expect.** The list carries `delivery_hash` and `delivery_signature` and
-   carries no `extends_pin`, `raw_frontmatter`, `manifest_merged`, or
-   `signature`.
-
-7. Unregister the parent's layer as carol and load the child as alice again.
-
-   ```bash
-   as carol -X DELETE -w ' %{http_code}\n' "$URL/v1/layers?id=shared-base"
-   as alice -w ' %{http_code}\n' "$URL/v1/load_artifact?id=team/derived"
-   ```
-
-   **Expect.** The unregister answers `200`. The load answers `404` with a
-   `registry.not_found` envelope whose `message` is
-   `registry.not_found: team/derived`. A message naming `shared/base` discloses
-   the parent through the chain failure.
-
-**Cleanup.** `kill "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.
-
----
-
-## S71: An `extends:` child verifies through the MCP bridge and materializes
-
-**Goal.** Validate that the compiled `podium-mcp` recomputes the delivery hash
-of a merged child served to a caller who cannot see the parent, verifies the
-delivery signature, and materializes the merged bytes, and that one byte of the
-served frontmatter altered in transit fails the load before anything is
-written.
-
-**Covers.** §4.7.10 delivery attestation, §6.6 step 2, the §6.9
-delivery-hash mismatch row, and §7.2 integrity fields.
-
-**Why by hand.** The refusal needs a response one process composed and another
-process rejected, which no in-process test provides.
-
-**Steps.**
-
-1. Run the isolation block.
-
-2. Build the two-layer registry from S70 step 2, without `PODIUM_BOOTSTRAP_ADMINS`,
-   and serve it on its own port with the default signing mode.
-
-   ```bash
-   mkdir -p "$WORK/lower/shared/base" "$WORK/upper/team/derived"
-   cat > "$WORK/lower/shared/base/ARTIFACT.md" <<'EOF'
-   ---
-   type: context
-   version: 1.0.0
-   description: the base context
-   tags: [from-base]
-   ---
-
-   base prose
-   EOF
-   cat > "$WORK/upper/team/derived/ARTIFACT.md" <<'EOF'
-   ---
-   type: context
-   version: 2.0.0
-   description: the derived context
-   extends: shared/base@1.x
-   ---
-
-   derived prose
-   EOF
-   cat > "$WORK/registry.yaml" <<YAML
-   registry:
-     layers:
-       - id: shared-base
-         source: { local: { path: $WORK/lower } }
-         visibility: { users: [bob@acme.com] }
-       - id: team-derived
-         source: { local: { path: $WORK/upper } }
-         visibility: { users: [alice@acme.com, bob@acme.com] }
-   YAML
-   PODIUM_IDENTITY_PROVIDER=trusted-headers \
-     podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" \
-     --bind 127.0.0.1:8171 > "$WORK/srv.log" 2>&1 &
-   SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8171/healthz
-   server_alive "$SRV" "$WORK/srv.log"
-   ```
-
-3. Start two gateways in front of the registry. `podium-mcp` sends no identity
-   headers, so each gateway stamps `X-Podium-User-Sub: alice@acme.com` on every
-   request, as the gateway of a `trusted-headers` deployment does. The second
-   gateway also replaces one byte of the `frontmatter` field in each
-   `load_artifact` response, which is the in-transit alteration.
-
-   ```bash
-   cat > "$WORK/gateway.py" <<'PY'
-   import http.server, json, os, sys, urllib.error, urllib.request
-
-   UPSTREAM, USER, TAMPER = os.environ["UPSTREAM"], os.environ["AS_USER"], os.environ.get("TAMPER") == "1"
-   DROP = {"host", "content-length", "accept-encoding", "connection"}
-
-   class Gateway(http.server.BaseHTTPRequestHandler):
-       def forward(self):
-           n = int(self.headers.get("Content-Length") or 0)
-           req = urllib.request.Request(UPSTREAM + self.path, data=self.rfile.read(n) if n else None, method=self.command)
-           for k, v in self.headers.items():
-               if k.lower() not in DROP and not k.lower().startswith("x-podium-user-"):
-                   req.add_header(k, v)
-           req.add_header("X-Podium-User-Sub", USER)
-           try:
-               resp = urllib.request.urlopen(req)
-           except urllib.error.HTTPError as err:
-               resp = err
-           data = resp.read()
-           if TAMPER and self.command == "GET" and self.path.startswith("/v1/load_artifact") and resp.status == 200:
-               doc = json.loads(data)
-               doc["frontmatter"] = doc["frontmatter"].replace("derived", "derivee", 1)
-               data = json.dumps(doc).encode()
-           self.send_response(resp.status)
-           for k, v in resp.headers.items():
-               if k.lower() not in ("content-length", "transfer-encoding", "connection"):
-                   self.send_header(k, v)
-           self.send_header("Content-Length", str(len(data)))
-           self.end_headers()
-           if self.command != "HEAD":
-               self.wfile.write(data)
-
-       do_GET = do_HEAD = do_POST = do_DELETE = forward
-
-       def log_message(self, *args):
-           pass
-
-   http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Gateway).serve_forever()
-   PY
-   UPSTREAM=http://127.0.0.1:8171 AS_USER=alice@acme.com python3 "$WORK/gateway.py" 8172 &
-   GW=$!
-   UPSTREAM=http://127.0.0.1:8171 AS_USER=alice@acme.com TAMPER=1 python3 "$WORK/gateway.py" 8173 &
-   GWT=$!
-   curl -s --retry 20 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8172/healthz
-   curl -s --retry 20 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8173/healthz
-   ```
-
-4. Read the raw response through the unaltering gateway.
-
-   ```bash
-   curl -s "http://127.0.0.1:8172/v1/load_artifact?id=team/derived" | python3 -c '
-   import sys, json
-   d = json.load(sys.stdin)
-   print("delivery_hash:", d.get("delivery_hash", "")[:14], "delivery_signature set:", bool(d.get("delivery_signature")))
-   print("removed fields present:", sorted(k for k in ("raw_frontmatter", "manifest_merged", "signature") if k in d))
-   print("extends_pin present:", "extends_pin" in d)'
-   ```
-
-   **Expect.** `delivery_hash: sha256:` followed by hex, `delivery_signature
-   set: True`, `removed fields present: []`, and `extends_pin present: False`.
-
-5. Load the child through the bridge via the unaltering gateway, with the
-   registry-managed verifier and the registry's public key.
-
-   ```bash
-   PUBKEY="$(awk '/^public:/{print $2}' "$PODIUM_SIGN_KEY_PATH")"
-   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
-   LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"team/derived"}}}'
-   load_mcp() { printf '%s\n%s\n' "$INIT" "$LOAD" \
-     | PODIUM_REGISTRY="$1" PODIUM_HARNESS=none PODIUM_MATERIALIZE_ROOT="$2" \
-       PODIUM_CACHE_DIR="$(mktemp -d "$WORK/cache.XXXXXX")" \
-       PODIUM_VERIFY_SIGNATURES=always PODIUM_SIGNATURE_PROVIDER=registry-managed \
-       PODIUM_SIGNATURE_VERIFY_KEY="$PUBKEY" podium-mcp 2>/dev/null | tail -1 \
-     | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]["structuredContent"]; print(r.get("error") or "loaded " + r["content_hash"])'; }
-   load_mcp http://127.0.0.1:8172 "$WORK/out"
-   cat "$WORK/out/team/derived/ARTIFACT.md"
-   grep -rl "shared/base" "$WORK/out" || echo "no parent ID on disk"
-   ```
-
-   **Expect.** `loaded sha256:...`. The materialized `ARTIFACT.md` carries the
-   child's `description: the derived context` and the inherited `from-base`
-   tag, and the last line reads `no parent ID on disk`.
-
-6. Load the child through the altering gateway into a new destination.
-
-   ```bash
-   load_mcp http://127.0.0.1:8173 "$WORK/out-altered"
-   ls -A "$WORK/out-altered" 2>&1
-   ```
-
-   **Expect.** An error beginning
-   `materialize.content_hash_mismatch: recomputed delivery hash`, and `ls`
-   reports that `$WORK/out-altered` does not exist. A `loaded` line means the
-   bridge materialized bytes the registry did not attest. Step 5 is the
-   control that shows the same bridge, key, and registry load the unaltered
-   record.
-
-**Cleanup.** `kill "$GW" "$GWT" "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.
-
----
-
-## S72: The artifact viewer's extends rail matches the caller's view
-
-**Goal.** Validate that the web UI draws the outbound extends rail from the
-served `extends_pin`, so a caller who cannot see the parent reads the same rail
-as for an artifact that extends nothing, and makes no scoped catalog request
-that would decide the question in the browser.
-
-**Covers.** §13.10 artifact viewer, §4.6 hidden parents (withheld), and §7.2
-`extends_pin`.
-
-**Why by hand.** The assertion is what a reader sees rendered and which
-requests the browser sends, and no Go test observes either.
-
-**Prerequisites.** A desktop browser that can run two separate profiles.
-
-**Steps.**
-
-1. Run the isolation block.
-
-2. Build and serve the two-layer registry from S71 step 2 with the web UI
-   mounted, on port 8174 instead of 8171, by adding `--web-ui` to the
-   `podium serve` line. Record its PID in `SRV`, and run
-   `server_alive "$SRV" "$WORK/srv.log"` after the `/healthz` poll.
-
-3. Write `gateway.py` as in S71 step 3, and start one unaltering gateway per
-   identity. Each port is a separate browser origin.
-
-   ```bash
-   UPSTREAM=http://127.0.0.1:8174 AS_USER=alice@acme.com python3 "$WORK/gateway.py" 8175 &
-   GWA=$!
-   UPSTREAM=http://127.0.0.1:8174 AS_USER=bob@acme.com python3 "$WORK/gateway.py" 8176 &
-   GWB=$!
-   curl -s --retry 20 --retry-delay 1 --retry-all-errors -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8175/app/
-   ```
-
-   **Expect.** `200`.
-
-4. In a browser profile used for nothing else, open the network tab, then open
-   `http://127.0.0.1:8175/app/#/artifact/team%2Fderived`.
-
-   **Expect.** The viewer shows `team/derived` and its relations rail reads
-   "This artifact extends nothing." The network tab lists no request whose URL
-   includes `/v1/catalog?scope=`. The unscoped `/v1/catalog` request the
-   sidebar footer makes on every route is not part of the check.
-
-5. In a second browser profile, open the network tab, then open
-   `http://127.0.0.1:8176/app/#/artifact/team%2Fderived`.
-
-   **Expect.** The relations rail shows the chip `shared/base@1.0.0`, drawn
-   from the served `extends_pin`, and following it opens `shared/base`. This is
-   the control that shows the rail draws a parent when the caller can see one.
-   A rail reading "This artifact extends nothing." for bob means the viewer no
-   longer reads `extends_pin`, and step 4 then proves nothing.
-
-**Cleanup.** Close both browser profiles, `kill "$GWA" "$GWB" "$SRV"; wait "$SRV"`,
-then `rm -rf "$WORK"`.
-
-
----
-
 ## S73: A key rotation keeps every stored row loadable
 
 **Goal.** Validate that `podium admin signing-key rotate` keeps the previous
@@ -9798,15 +8535,17 @@ rm -rf "$WORK"
 ## S77: A filesystem sync that drops a colliding artifact fails
 
 **Goal.** Validate that `podium sync` against a filesystem registry drops the
-higher-precedence copy of an unsanctioned cross-layer collision, names it on
-standard error, materializes the rest, and exits 1; that a standalone server
-over the same directory serves the same copy; and that a workspace overlay
-artifact replaces the registry-side artifact silently even when it declares
-`extends:`.
+higher-precedence copy of a cross-layer collision, names it on standard error,
+materializes the rest, and exits 1; that a standalone server over the same
+directory serves the same copy; that a colliding copy that declares
+`extends:` is refused rather than sanctioned; and that a workspace overlay
+artifact replaces the registry-side artifact silently and is served as
+authored.
 
-**Covers.** The §4.6 collision rule for registry-side layers, the §13.11.3
-report and exit status, the §11 filesystem-to-server equivalence requirement
-on a colliding directory, and the §6.4 overlay exception.
+**Covers.** The §4.6 collision rule and no-inheritance rule for registry-side
+layers, the §13.11.3 report and exit status, the §11 filesystem-to-server
+equivalence requirement on a colliding directory, and the §6.4 overlay
+exception.
 
 **Why by hand.** The end-to-end suite reads the exit code and the streams
 through the harness. What it does not read is the operator's terminal: that
@@ -9853,9 +8592,10 @@ what a CI step gates on.
 
    **Expect.** `exit=1`. `$WORK/err.txt` carries one line beginning
    `rejected: shared/clash (ingest.collision): cross-layer collision` that
-   ends with `declare extends: shared/clash to overlay it`. The materialized
-   `shared/clash` holds `from-org`, and `shared/other` is present. `exit=0`
-   or `from-team` is the shipped behavior this scenario exists to catch.
+   ends with `rename this artifact or remove the other copy first`. The
+   materialized `shared/clash` holds `from-org`, and `shared/other` is
+   present. `exit=0` or `from-team` is the shipped behavior this scenario
+   exists to catch.
 
 3. Repeat with `--dry-run` into a new target.
 
@@ -9883,35 +8623,42 @@ what a CI step gates on.
    `diff` prints `same`. A difference means the two deployment modes kept
    different copies.
 
-5. Sanction the collision and sync the filesystem target again.
+5. Make the team copy declare `extends: shared/clash` and sync the
+   filesystem target again.
 
    ```bash
    printf -- '---\ntype: context\nversion: 1.1.0\ndescription: from-team\nextends: shared/clash\n---\n\nfrom-team\n' \
      > "$WORK/reg/team-finance/shared/clash/ARTIFACT.md"
-   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none; echo "exit=$?"
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err5.txt"; echo "exit=$?"
+   cat "$WORK/err5.txt"
    cat "$WORK/fs/shared/clash/ARTIFACT.md"
    ```
 
-   **Expect.** `exit=0`, no `rejected:` line, and the materialized artifact
-   carries `description: from-team` with the `from-team` body.
+   **Expect.** `exit=1`. `$WORK/err5.txt` holds one line,
+   `rejected: shared/clash (ingest.invalid_artifact): extends: is not supported; remove the extends: key and declare every field this artifact needs in its own frontmatter`,
+   and no `ingest.collision` line. The materialized file holds `from-org`.
+   `exit=0` or `from-team` means the build still sanctions a same-ID
+   overlay.
 
-6. Add a workspace overlay artifact that declares `extends:` on the same ID
-   and sync with it.
+6. Remove the team copy, add a workspace overlay artifact that carries
+   `extends:` on the same ID, and sync with it.
 
    ```bash
+   rm -rf "$WORK/reg/team-finance/shared/clash"
    mkdir -p "$WORK/overlay/shared/clash"
    printf -- '---\ntype: context\nversion: 9.0.0\ndescription: from-overlay\nextends: shared/clash\n---\n\nfrom-overlay\n' \
      > "$WORK/overlay/shared/clash/ARTIFACT.md"
    podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none \
-     --overlay "$WORK/overlay"; echo "exit=$?"
-   cat "$WORK/fs/shared/clash/ARTIFACT.md"
+     --overlay "$WORK/overlay" 2> "$WORK/err6.txt"; echo "exit=$?"
+   cat "$WORK/err6.txt"
+   cmp "$WORK/overlay/shared/clash/ARTIFACT.md" "$WORK/fs/shared/clash/ARTIFACT.md" && echo same
    ```
 
-   **Expect.** `exit=0`, no `rejected:` line, and the materialized file is
-   byte-for-byte the overlay's authored `ARTIFACT.md`, including its
-   `extends: shared/clash` line. Merged registry fields in the file, a
-   `rejected:` line, or a non-zero exit means the §6.4 exception is not
-   honored.
+   **Expect.** `exit=0`, an empty `$WORK/err6.txt`, and `same`: the
+   materialized file is byte-for-byte the overlay's authored `ARTIFACT.md`,
+   including its `extends: shared/clash` line. A `rejected:` line, a
+   warning, or a non-zero exit means the §6.4 exception applies an ingest
+   rule to the overlay.
 
 **Cleanup.** `kill "$SRV"` and `rm -rf "$WORK"`.
 
@@ -10539,7 +9286,7 @@ after the withdrawal, is the defect this scenario catches.
    podium artifact scaffold --type skill --description "Fresh skill" "$WORK/reg/fresh" > /dev/null
    sed -i.bak '/^metadata:$/d; /^  version: /d' "$WORK/reg/fresh/SKILL.md" && rm "$WORK/reg/fresh/SKILL.md.bak"
    printf -- '---\ntype: skill\nversion: 1.0.0\n---\n<!-- Skill body lives in SKILL.md. -->\n' > "$WORK/reg/fresh/ARTIFACT.md"
-   setver() { sed -i.bak "s/^version: .*/version: $1/" "$WORK/reg/fresh/ARTIFACT.md"; }
+   setver() { sed -i.bak "s/^version: .*/version: $1/" "$WORK/reg/fresh/ARTIFACT.md" && rm "$WORK/reg/fresh/ARTIFACT.md.bak"; }
    setver 1.0.0
    serve() { podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
        --bind 127.0.0.1:8182 > "$WORK/srv$1.log" 2>&1 & SRV=$!
@@ -11468,719 +10215,6 @@ step 7 catches.
 
 ---
 
-## S91: A cross-layer extends: child that leaves an executable field to its parent is refused
-
-**Goal.** Validate that a same-ID overlay in a higher layer that does not
-restate its parent's `mcpServers` entry is dropped by a filesystem-source
-`podium sync` and rejected by a server reingest with the same code, that the
-reason names the missing field and neither the parent's layer nor its version,
-that the reingest response carries `details`, that both modes materialize the
-lower copy, and that restating the entry admits the overlay.
-
-**Covers.** §4.6 executable fields across layers, §7.3.1 ingest outcome,
-§13.11.3 executable inheritance, and §11 filesystem-to-server equivalence,
-through the compiled binary.
-
-**Why by hand.** An operator reads the `rejected:` line and the reingest body
-directly and gates CI on `$?`. A reason that names `org` or `1.0.0`, a
-`rejected` entry with no `details`, `exit=0` from either sync, or a target
-holding `team-jira` before step 4 is the defect this scenario catches.
-
-**Prerequisites.** A built `podium` binary on `PATH`.
-
-**Steps.**
-
-1. Run the isolation block from "Per-scenario isolation" above, then build a
-   two-layer registry in which `org` holds a skill with an `mcpServers` entry
-   and `team` holds a same-ID overlay that declares no entry.
-
-   ```bash
-   mkdir -p "$WORK/reg/org/ops/jira-skill" "$WORK/reg/team/ops/jira-skill"
-   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n' > "$WORK/reg/.registry-config"
-   printf 'visibility:\n  public: true\n' > "$WORK/reg/org/.layer-config"
-   printf 'visibility:\n  public: true\n' > "$WORK/reg/team/.layer-config"
-   for L in org team; do
-     printf -- '---\nname: jira-skill\ndescription: File Jira tickets. Use when a task needs a ticket.\n---\n\nFile the ticket.\n' \
-       > "$WORK/reg/$L/ops/jira-skill/SKILL.md"
-   done
-   printf -- '---\ntype: skill\nversion: 1.0.0\nmcpServers:\n  - name: jira\n    transport: stdio\n    command: org-jira\n    args: ["--org"]\n---\n' \
-     > "$WORK/reg/org/ops/jira-skill/ARTIFACT.md"
-   printf -- '---\ntype: skill\nversion: 1.1.0\nextends: ops/jira-skill\n---\n' \
-     > "$WORK/reg/team/ops/jira-skill/ARTIFACT.md"
-   ```
-
-   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and the four files
-   exist.
-
-2. Sync through the filesystem source, then repeat with `--dry-run`.
-
-   ```bash
-   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
-   cat "$WORK/err.txt"
-   cat "$WORK/fs/ops/jira-skill/ARTIFACT.md"
-   podium sync --registry "$WORK/reg" --target "$WORK/dry" --harness none --dry-run; echo "exit=$?"
-   ```
-
-   **Expect.** `exit=1` twice. `$WORK/err.txt` holds one line beginning
-   `rejected: ops/jira-skill (ingest.invalid_artifact): extends: a parent in another layer`
-   that names `mcpServers[jira]` and contains neither `org` nor `1.0.0`. The
-   materialized manifest carries `version: 1.0.0` and `command: org-jira`.
-
-3. Serve the same directory, reingest `team`, read the reingest body, and sync
-   through the server.
-
-   ```bash
-   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-     --bind 127.0.0.1:8193 > "$WORK/srv.log" 2>&1 &
-   SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8193/healthz
-   server_alive "$SRV" "$WORK/srv.log"
-   export URL=http://127.0.0.1:8193
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   curl -s -X POST "$URL/v1/layers/reingest?id=team" > "$WORK/body.json"
-   python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["rejected"]))' "$WORK/body.json"
-   grep -c '"org"' "$WORK/body.json"
-   podium sync --registry "$URL" --target "$WORK/srv" --harness none; echo "exit=$?"
-   diff "$WORK/fs/ops/jira-skill/ARTIFACT.md" "$WORK/srv/ops/jira-skill/ARTIFACT.md" && echo same
-   ```
-
-   **Expect.** `podium layer reingest` prints the same `rejected:` line as
-   step 2 and `exit=1`. The `rejected` entry carries
-   `"details": {"constraint": "executable_inheritance", "fields": ["mcpServers[jira]"]}`,
-   and `grep -c` prints `0`. The server indents its JSON body, so the
-   `python3` line prints the entry on one line. The server sync prints `exit=0`, and `diff`
-   prints `same`. A difference means the two deployment modes kept different
-   copies.
-
-4. Restate the entry in the overlay with a team command, reingest, and sync
-   both ways.
-
-   ```bash
-   printf -- '---\ntype: skill\nversion: 1.1.0\nextends: ops/jira-skill\nmcpServers:\n  - name: jira\n    transport: stdio\n    command: team-jira\n    args: ["--team"]\n---\n' \
-     > "$WORK/reg/team/ops/jira-skill/ARTIFACT.md"
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   podium artifact show --registry "$URL" ops/jira-skill
-   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none; echo "exit=$?"
-   cat "$WORK/fs/ops/jira-skill/ARTIFACT.md"
-   ```
-
-   **Expect.** The reingest prints no `rejected:` line and `exit=0`.
-   `podium artifact show` shows `version: 1.1.0` and `command: team-jira`. The
-   filesystem sync prints `exit=0`, and its manifest carries `team-jira` and
-   no `org-jira`.
-
-5. Clean up.
-
-   ```bash
-   kill "$SRV"; rm -rf "$WORK"
-   ```
-
----
-
-## S92: A filesystem sync recomposes after an executable-field drop, and override and `--config` count the drop
-
-**Goal.** Validate that a filesystem-source `podium sync` that drops a
-cross-layer child under the executable-field rule composes the layers again
-without it, so a higher-layer copy that collided only with the dropped child
-is kept and its collision is not reported. Validate that a drop cascades to a
-same-layer child of the dropped artifact, that the `rejected:` lines follow
-canonical-ID order, that `podium sync override` and a `--config` workspace
-target treat these drops as a collision drop, and that a standalone server
-over the same directory materializes the same files.
-
-**Covers.** §4.6 executable fields across layers, §13.11.3 recomposition,
-retracted collision, cascade, `podium sync override`, and `--config` targets,
-and §11 filesystem-to-server equivalence, through the compiled binary.
-
-**Why by hand.** S91 drives a single same-ID overlay. This scenario reads what
-an operator sees when one drop changes the rest of the composition: an
-`ingest.collision` line for a copy that is in fact materialized, a cascade line
-missing or out of order, `exit=0` from `podium sync override` or from a
-`--config` run, or a server target that differs from the filesystem target is
-the defect it catches.
-
-**Prerequisites.** A built `podium` binary on `PATH`.
-
-**Steps.**
-
-1. Run the isolation block from "Per-scenario isolation" above, then build a
-   three-layer registry. `org` holds the MCP server `ops/jira-server` with a
-   `server_identifier`. `team` holds `ops/jira`, which extends
-   `ops/jira-server` and omits `server_identifier`. `project` holds its own
-   `ops/jira`, which declares no `extends:` and sets its own
-   `server_identifier`.
-
-   ```bash
-   mkdir -p "$WORK/reg/org/ops/jira-server" "$WORK/reg/team/ops/jira" "$WORK/reg/project/ops/jira"
-   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n  - project\n' > "$WORK/reg/.registry-config"
-   for L in org team project; do
-     printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
-   done
-   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Org Jira server.\nserver_identifier: org-jira\n---\n\nOrg Jira server.\n' \
-     > "$WORK/reg/org/ops/jira-server/ARTIFACT.md"
-   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Team Jira server.\nextends: ops/jira-server\n---\n\nTeam Jira server.\n' \
-     > "$WORK/reg/team/ops/jira/ARTIFACT.md"
-   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Project Jira server.\nserver_identifier: project-jira\n---\n\nProject Jira server.\n' \
-     > "$WORK/reg/project/ops/jira/ARTIFACT.md"
-   ```
-
-   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and the three
-   `ARTIFACT.md` files exist.
-
-2. Sync through the filesystem source.
-
-   ```bash
-   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
-   cat "$WORK/err.txt"
-   cat "$WORK/fs/ops/jira/ARTIFACT.md"
-   ```
-
-   **Expect.** `exit=1`. `$WORK/err.txt` holds exactly one line,
-   `rejected: ops/jira (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: server_identifier; restate each one in this artifact`,
-   and no `ingest.collision` line. The summary lists `ops/jira [project]` and
-   `ops/jira-server [org]`, and the materialized `ops/jira` carries
-   `server_identifier: project-jira`. An `ingest.collision` line for
-   `ops/jira`, or a materialized `ops/jira` that is missing or carries
-   `org-jira`, means sync reported or applied the collision with the dropped
-   `team` copy.
-
-3. Add a cascade to `team`: `ops/tracker` extends `ops/jira-server` and omits
-   `server_identifier`, and `ops/alerts` extends `ops/tracker` in the same
-   layer and sets its own `server_identifier`. `ops/alerts` sorts before
-   `ops/tracker`. Sync again.
-
-   ```bash
-   mkdir -p "$WORK/reg/team/ops/tracker" "$WORK/reg/team/ops/alerts"
-   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Team tracker server.\nextends: ops/jira-server\n---\n\nTeam tracker server.\n' \
-     > "$WORK/reg/team/ops/tracker/ARTIFACT.md"
-   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Team alerts server.\nextends: ops/tracker\nserver_identifier: team-alerts\n---\n\nTeam alerts server.\n' \
-     > "$WORK/reg/team/ops/alerts/ARTIFACT.md"
-   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
-   cat "$WORK/err.txt"
-   ls "$WORK/fs/ops"
-   ```
-
-   **Expect.** `exit=1`. `$WORK/err.txt` holds exactly these three lines in
-   this order:
-
-   ```text
-   rejected: ops/alerts (ingest.invalid_artifact): extends: no parent artifact "ops/tracker" ingested yet
-   rejected: ops/jira (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: server_identifier; restate each one in this artifact
-   rejected: ops/tracker (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: server_identifier; restate each one in this artifact
-   ```
-
-   `ls` prints `jira` and `jira-server` alone. `ops/alerts` sets its own
-   `server_identifier`, so its line reports the cascade from the dropped
-   `ops/tracker` with the unresolved-parent reason. A materialized `ops/alerts` or `ops/tracker`, or lines in
-   another order, is the defect.
-
-4. Preview an override toggle with `--dry-run`, then apply it.
-
-   ```bash
-   podium sync override --registry "$WORK/reg" --target "$WORK/fs" --harness none \
-     --remove ops/jira-server --dry-run; echo "exit=$?"
-   ls "$WORK/fs/ops"
-   podium sync override --registry "$WORK/reg" --target "$WORK/fs" --harness none \
-     --remove ops/jira-server 2> "$WORK/err.txt"; echo "exit=$?"
-   cat "$WORK/err.txt"
-   ls "$WORK/fs/ops"
-   ```
-
-   **Expect.** The dry run prints `(dry-run; nothing written)`,
-   `toggles.remove: ops/jira-server`, no `rejected:` line, and `exit=0`, and
-   `ls` still prints `jira` and `jira-server`. The applied override prints
-   `toggles.remove: ops/jira-server` and `exit=1`, `$WORK/err.txt` holds the
-   three lines from step 3 in the same order, and `ls` prints `jira` alone.
-   The toggle stays recorded although the run exits 1.
-
-5. Sync the same registry through a `--config` workspace target.
-
-   ```bash
-   mkdir -p "$WORK/ws/.podium"
-   printf 'defaults:\n  registry: %s\ntargets:\n  - id: ops-workspace\n    kind: workspace\n    harness: none\n    target: %s\n' \
-     "$WORK/reg" "$WORK/cfg" > "$WORK/ws/.podium/sync.yaml"
-   podium sync --config "$WORK/ws/.podium/sync.yaml" 2> "$WORK/err.txt"; echo "exit=$?"
-   cat "$WORK/err.txt"
-   ls "$WORK/cfg/ops"
-   ```
-
-   **Expect.** Standard output starts with `== target ops-workspace ==`, and
-   the run prints `exit=1`. `$WORK/err.txt` holds the three lines from step 3
-   followed by `target ops-workspace: dropped at least one artifact`, and
-   `ls` prints `jira` and `jira-server`. `exit=0`, or a failure line that
-   names a code, is the defect.
-
-6. Serve the same directory and sync through the server.
-
-   ```bash
-   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-     --bind 127.0.0.1:8194 > "$WORK/srv.log" 2>&1 &
-   SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8194/healthz
-   server_alive "$SRV" "$WORK/srv.log"
-   podium sync --registry http://127.0.0.1:8194 --target "$WORK/srv" --harness none; echo "exit=$?"
-   diff -r "$WORK/cfg/ops" "$WORK/srv/ops" && echo same
-   ```
-
-   **Expect.** The server sync lists `ops/jira [project]` and
-   `ops/jira-server [org]` and prints `exit=0`, and `diff` prints `same`. The
-   server never stored the refused `team` copies, so the `project` copy is not
-   a collision there. A difference means the two deployment modes kept
-   different copies.
-
-**Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
-
----
-
-## S93: An executable-field refusal withholds the parent, spares stored versions, and follows the pinned edge
-
-**Goal.** Validate three outcomes of the §4.6 executable-field rule that S91
-and S92 do not reach. A child whose field path would name its parent is
-refused in both modes with a reason that names no field and no parent, while
-the server log traces the refusal for an operator. A child version stored
-before its parent gained an executable field stays stored and served, and a
-new version of that child is refused. A same-ID overlay whose unpinned
-reference selects an earlier version from its own layer is accepted by the
-server and dropped by a filesystem sync, which is the parent-selection
-divergence §13.11.3 states.
-
-**Covers.** §4.6 executable fields across layers and hidden parents
-(withheld), §7.3.1 ingest outcome, §4.7.6 pin selection, §13.11.3 executable
-inheritance, and §11 filesystem-to-server equivalence, through the compiled
-binary.
-
-**Why by hand.** The withheld reason, the server log line, and the two modes'
-different answers for one directory are read from an operator's terminal. A
-reason or reingest body that names `shared/base`, a log with no trace line, a
-stored child dropped on an unchanged reingest, or a server that refuses the
-same-layer overlay is the defect this scenario catches.
-
-**Prerequisites.** A built `podium` binary on `PATH`.
-
-**Steps.**
-
-1. Run the isolation block from "Per-scenario isolation" above, then build a
-   two-layer registry. `org` holds the agent `shared/base`, whose
-   `mcpServers` entry is named after the artifact's own canonical ID. `team`
-   holds `finance/child`, which extends `shared/base` and restates no entry.
-   The `agent` function writes one agent manifest from a version, a
-   description, an optional `extends:` reference, and optional extra
-   frontmatter.
-
-   ```bash
-   agent() {
-     { printf -- '---\ntype: agent\nversion: %s\ndescription: %s\nsensitivity: low\n' "$2" "$3"
-       [ -n "$4" ] && printf 'extends: %s\n' "$4"
-       printf '%b' "$5"; printf -- '---\n\n%s\n' "$3"; } > "$1"
-   }
-   mkdir -p "$WORK/reg/org/shared/base" "$WORK/reg/team/finance/child"
-   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n' > "$WORK/reg/.registry-config"
-   for L in org team; do
-     printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
-   done
-   agent "$WORK/reg/org/shared/base/ARTIFACT.md" 1.0.0 "Route a ticket to the owning team." "" \
-     'mcpServers:\n  - name: shared/base\n    command: route-ticket\n'
-   agent "$WORK/reg/team/finance/child/ARTIFACT.md" 2.0.0 "Route a finance ticket to its queue." "shared/base" ""
-   cat "$WORK/reg/team/finance/child/ARTIFACT.md"
-   ```
-
-   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and the child's
-   manifest carries `extends: shared/base` and no `mcpServers` key.
-
-2. Sync through the filesystem source.
-
-   ```bash
-   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
-   cat "$WORK/err.txt"
-   ```
-
-   **Expect.** `exit=1`, the summary lists `shared/base [org]` alone, and
-   `$WORK/err.txt` holds one line,
-   `rejected: finance/child (ingest.invalid_artifact): extends: executable fields could not be read`.
-   The field path `mcpServers[shared/base]` would name the parent, so the
-   reason names no field. A reason that names `mcpServers` or `shared/base`
-   discloses the parent through the rejection.
-
-3. Serve the same directory, reingest `team`, and compare the two modes' lines,
-   the reingest body, and the server log.
-
-   ```bash
-   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-     --bind 127.0.0.1:8195 > "$WORK/srv.log" 2>&1 &
-   SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8195/healthz
-   server_alive "$SRV" "$WORK/srv.log"
-   export URL=http://127.0.0.1:8195
-   podium layer reingest --registry "$URL" team 2> "$WORK/err.txt"; echo "exit=$?"
-   diff "$WORK/err.txt" <(podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2>&1 >/dev/null) && echo same
-   curl -s -X POST "$URL/v1/layers/reingest?id=team" > "$WORK/body.json"
-   python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["rejected"]))' "$WORK/body.json"
-   grep -c 'shared/base' "$WORK/body.json"
-   grep 'artifact=finance/child' "$WORK/srv.log" | tail -1
-   ```
-
-   **Expect.** `exit=1` and `same`. The `rejected` entry carries
-   `artifact_id`, `code`, and `reason` and no `details` member, and `grep -c`
-   prints `0`. The log line reads
-   `ingest: tenant=<tenant> layer=team artifact=finance/child extends_pin=shared/base@1.0.0 parent_layer=org rejected: executable fields could not be read`,
-   which is the trace an operator follows to the parent. A `details` member, a
-   body that names `shared/base`, or no log line is the defect.
-
-4. Store a child before its parent sets an executable field, then publish a
-   parent version that sets one and reingest both layers. Remove
-   `finance/child` first so the later reingests report only the artifacts
-   this step adds.
-
-   ```bash
-   rm -rf "$WORK/reg/team/finance"
-   mkdir -p "$WORK/reg/org/shared/tool" "$WORK/reg/team/ops/runner"
-   agent "$WORK/reg/org/shared/tool/ARTIFACT.md" 1.0.0 "Run the shared ticket tool." "" ""
-   agent "$WORK/reg/team/ops/runner/ARTIFACT.md" 1.0.0 "Run the team ticket tool." "shared/tool@1.x" ""
-   podium layer reingest --registry "$URL" org; echo "exit=$?"
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   agent "$WORK/reg/org/shared/tool/ARTIFACT.md" 1.1.0 "Run the shared ticket tool." "" 'x_hook: org-hook.sh\n'
-   podium layer reingest --registry "$URL" org; echo "exit=$?"
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   curl -s "$URL/v1/load_artifact?id=ops/runner" \
-     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["version"], d.get("extends_pin"), "x_hook" in d["frontmatter"])'
-   ```
-
-   **Expect.** All four reingests print `exit=0`, and the second `team`
-   reingest prints `artifact: ops/runner@1.0.0   layer: team` with no
-   `rejected:` line. The load prints `1.0.0 shared/tool@1.0.0 False`. The
-   stored version keeps the pin it received at ingest and is not evaluated
-   again. A `rejected: ops/runner` line here means an unchanged stored
-   version is dropped on every reingest.
-
-5. Publish a new version of the child that still omits `x_hook`, reingest,
-   then restate the key and reingest again.
-
-   ```bash
-   agent "$WORK/reg/team/ops/runner/ARTIFACT.md" 1.1.0 "Run the team ticket tool." "shared/tool@1.x" ""
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   curl -s -X POST "$URL/v1/layers/reingest?id=team" \
-     | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin)["rejected"]))'
-   agent "$WORK/reg/team/ops/runner/ARTIFACT.md" 1.1.0 "Run the team ticket tool." "shared/tool@1.x" 'x_hook: team-hook.sh\n'
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   ```
-
-   **Expect.** The first reingest prints
-   `rejected: ops/runner (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: x_hook; restate each one in this artifact`
-   and `exit=1`, and the `rejected` entry carries
-   `"details": {"constraint": "executable_inheritance", "fields": ["x_hook"]}`.
-   The new version pins `shared/tool@1.1.0`, which sets `x_hook`. The last
-   reingest prints `artifact: ops/runner@1.1.0   layer: team` and `exit=0`.
-
-6. Overlay a same-ID artifact from `team`, then publish a later overlay
-   version with an unpinned `extends:` that omits the key. Read the server's
-   copy and sync through the filesystem source.
-
-   ```bash
-   mkdir -p "$WORK/reg/org/ops/tool" "$WORK/reg/team/ops/tool"
-   agent "$WORK/reg/org/ops/tool/ARTIFACT.md" 1.0.0 "File a ticket with the org tool." "" 'x_hook: org-tool.sh\n'
-   agent "$WORK/reg/team/ops/tool/ARTIFACT.md" 1.1.0 "File a ticket with the team tool." "ops/tool" 'x_hook: team-tool.sh\n'
-   podium layer reingest --registry "$URL" org; echo "exit=$?"
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   agent "$WORK/reg/team/ops/tool/ARTIFACT.md" 1.2.0 "File a ticket with the team tool." "ops/tool" ""
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   curl -s "$URL/v1/load_artifact?id=ops/tool" \
-     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["version"], d["layer"], d.get("extends_pin"))'
-   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
-   cat "$WORK/err.txt"
-   grep -e '^version:' -e '^x_hook:' "$WORK/fs/ops/tool/ARTIFACT.md"
-   ```
-
-   **Expect.** All three reingests print `exit=0`, and the last one prints
-   `artifact: ops/tool@1.2.0   layer: team`. The load prints
-   `1.2.0 team ops/tool@1.1.0`: the unpinned reference selected the stored
-   `team` version `1.1.0`, so the server tested a within-layer edge. The
-   filesystem sync prints `exit=1` and one line,
-   `rejected: ops/tool (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: x_hook; restate each one in this artifact`,
-   and the materialized `ops/tool` carries `version: 1.0.0` and
-   `x_hook: org-tool.sh`. The filesystem source keeps one record per ID and
-   layer and tests the edge to the `org` copy, so the two modes keep different
-   copies here by design (§13.11.3). A server refusal of `1.2.0`, or a
-   filesystem sync that keeps the `team` copy, is the defect.
-
-**Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
-
----
-
-## S94: An `mcpServers` entry restated by name restates each member, and a same-layer child inherits its entry
-
-**Goal.** Validate that an overlay whose `mcpServers` entry carries the
-parent's entry name but omits `command` or an `env` key is refused in both
-modes, with a reason and a `details.fields` list that name each missing member,
-that restating every member admits the overlay with its own values, and that a
-child in its parent's own layer inherits the parent's entry without restating
-it in both modes.
-
-**Covers.** §4.6 executable fields across layers (the restate definition for an
-`mcpServers` entry) and same-layer inheritance, §7.3.1 ingest outcome and the
-reingest `details` member, §13.11.3 executable inheritance, and §11
-filesystem-to-server equivalence, through the compiled binary.
-
-**Why by hand.** S91 drives an overlay that drops the whole entry. An author
-who copies the entry's name and `transport` and forgets `command` reads this
-scenario's lines. An accepted overlay at step 2 or step 4, a reason that names
-the entry without the member, or a dropped `ops/confluence-variant` is the
-defect this scenario catches.
-
-**Prerequisites.** A built `podium` binary on `PATH`.
-
-**Steps.**
-
-1. Run the isolation block from "Per-scenario isolation" above, then build a
-   two-layer registry. `org` holds `ops/jira-skill`, whose `jira` entry sets
-   `transport`, `command`, `args`, and the `env` key `JIRA_URL`, and
-   `ops/confluence-skill`, whose `confluence` entry `ops/confluence-variant`
-   inherits from the same layer. `team` holds a same-ID overlay of
-   `ops/jira-skill` whose `jira` entry restates `transport` and `args` alone.
-   The `skill` function writes a `SKILL.md` from a directory, a name, and a
-   description.
-
-   ```bash
-   skill() { printf -- '---\nname: %s\ndescription: %s\n---\n\n%s\n' "$2" "$3" "$3" > "$1/SKILL.md"; }
-   mkdir -p "$WORK/reg/org/ops/jira-skill" "$WORK/reg/org/ops/confluence-skill" \
-     "$WORK/reg/org/ops/confluence-variant" "$WORK/reg/team/ops/jira-skill"
-   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n' > "$WORK/reg/.registry-config"
-   for L in org team; do
-     printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
-   done
-   skill "$WORK/reg/org/ops/jira-skill" jira-skill "File Jira tickets. Use when a task needs a ticket."
-   skill "$WORK/reg/team/ops/jira-skill" jira-skill "File Jira tickets. Use when a task needs a ticket."
-   skill "$WORK/reg/org/ops/confluence-skill" confluence-skill "Search Confluence pages. Use when a task needs a design doc."
-   skill "$WORK/reg/org/ops/confluence-variant" confluence-variant "Search the runbook space. Use when a task needs a runbook."
-   printf -- '---\ntype: skill\nversion: 1.0.0\nmcpServers:\n  - name: jira\n    transport: stdio\n    command: org-jira\n    args: ["--org"]\n    env:\n      JIRA_URL: https://jira.acme.com\n---\n' \
-     > "$WORK/reg/org/ops/jira-skill/ARTIFACT.md"
-   printf -- '---\ntype: skill\nversion: 1.0.0\nmcpServers:\n  - name: confluence\n    transport: stdio\n    command: org-confluence\n---\n' \
-     > "$WORK/reg/org/ops/confluence-skill/ARTIFACT.md"
-   printf -- '---\ntype: skill\nversion: 1.0.0\nextends: ops/confluence-skill\n---\n' \
-     > "$WORK/reg/org/ops/confluence-variant/ARTIFACT.md"
-   printf -- '---\ntype: skill\nversion: 1.1.0\nextends: ops/jira-skill\nmcpServers:\n  - name: jira\n    transport: stdio\n    args: ["--team"]\n---\n' \
-     > "$WORK/reg/team/ops/jira-skill/ARTIFACT.md"
-   find "$WORK/reg" -name ARTIFACT.md | sed "s|$WORK/reg/||" | sort
-   ```
-
-   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and `find` lists
-   `org/ops/confluence-skill/ARTIFACT.md`,
-   `org/ops/confluence-variant/ARTIFACT.md`, `org/ops/jira-skill/ARTIFACT.md`,
-   and `team/ops/jira-skill/ARTIFACT.md`. `ops/confluence-skill` sorts before
-   `ops/confluence-variant`, which a server ingest needs to resolve a parent in
-   the same layer.
-
-2. Sync through the filesystem source.
-
-   ```bash
-   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
-   cat "$WORK/err.txt"
-   grep -e '^version:' -e 'command:' "$WORK/fs/ops/jira-skill/ARTIFACT.md"
-   grep -e '^version:' -e 'command:' "$WORK/fs/ops/confluence-variant/ARTIFACT.md"
-   ```
-
-   **Expect.** `exit=1`. The summary lists `ops/confluence-skill [org]`,
-   `ops/confluence-variant [org]`, and `ops/jira-skill [org]`. `$WORK/err.txt`
-   holds one line,
-   `rejected: ops/jira-skill (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: mcpServers[jira].command, mcpServers[jira].env.JIRA_URL; restate each one in this artifact`.
-   The materialized `ops/jira-skill` carries `version: 1.0.0` and
-   `command: org-jira`, and `ops/confluence-variant` carries
-   `version: 1.0.0` and the inherited `command: org-confluence`. A line for
-   `ops/confluence-variant` means the rule tested a same-layer edge.
-
-3. Serve the same directory, reingest `team`, read the `rejected` entry, and
-   read the same-layer child and a server sync.
-
-   ```bash
-   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-     --bind 127.0.0.1:8196 > "$WORK/srv.log" 2>&1 &
-   SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8196/healthz
-   server_alive "$SRV" "$WORK/srv.log"
-   export URL=http://127.0.0.1:8196
-   podium layer reingest --registry "$URL" team 2> "$WORK/err.txt"; echo "exit=$?"
-   diff "$WORK/err.txt" <(podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2>&1 >/dev/null) && echo same
-   curl -s -X POST "$URL/v1/layers/reingest?id=team" \
-     | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["rejected"][0]["details"]))'
-   curl -s "$URL/v1/load_artifact?id=ops/confluence-variant" \
-     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["layer"], d.get("extends_pin"), "command: org-confluence" in d["frontmatter"])'
-   podium sync --registry "$URL" --target "$WORK/srv" --harness none > /dev/null; echo "exit=$?"
-   diff -r -x .podium "$WORK/fs" "$WORK/srv" && echo same
-   ```
-
-   **Expect.** `exit=1` and `same`: the reingest prints the line step 2
-   printed. The `details` member reads
-   `{"constraint": "executable_inheritance", "fields": ["mcpServers[jira].command", "mcpServers[jira].env.JIRA_URL"]}`.
-   The load prints `org ops/confluence-skill@1.0.0 True`. The server sync
-   prints `exit=0`, and `diff` prints `same`. A difference means the two
-   deployment modes kept different copies.
-
-4. Restate `command` with a team value and leave `env` out, then reingest.
-
-   ```bash
-   printf -- '---\ntype: skill\nversion: 1.1.0\nextends: ops/jira-skill\nmcpServers:\n  - name: jira\n    transport: stdio\n    command: team-jira\n    args: ["--team"]\n---\n' \
-     > "$WORK/reg/team/ops/jira-skill/ARTIFACT.md"
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   curl -s -X POST "$URL/v1/layers/reingest?id=team" \
-     | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["rejected"][0]["details"]))'
-   ```
-
-   **Expect.** The reingest prints
-   `rejected: ops/jira-skill (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: mcpServers[jira].env.JIRA_URL; restate each one in this artifact`
-   and `exit=1`, and the `details` member reads
-   `{"constraint": "executable_inheritance", "fields": ["mcpServers[jira].env.JIRA_URL"]}`.
-   An accepted overlay here means the check compares entry names alone.
-
-5. Restate the `env` key with a team value, reingest, and sync both ways.
-
-   ```bash
-   printf -- '---\ntype: skill\nversion: 1.1.0\nextends: ops/jira-skill\nmcpServers:\n  - name: jira\n    transport: stdio\n    command: team-jira\n    args: ["--team"]\n    env:\n      JIRA_URL: https://jira.team.acme.com\n---\n' \
-     > "$WORK/reg/team/ops/jira-skill/ARTIFACT.md"
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   curl -s "$URL/v1/load_artifact?id=ops/jira-skill" \
-     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["version"], d["layer"]); print(d["frontmatter"])'
-   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none > /dev/null; echo "exit=$?"
-   podium sync --registry "$URL" --target "$WORK/srv" --harness none > /dev/null; echo "exit=$?"
-   diff -r -x .podium "$WORK/fs" "$WORK/srv" && echo same
-   ```
-
-   **Expect.** The reingest prints `artifact: ops/jira-skill@1.1.0   layer: team`
-   and `exit=0`. The load prints `1.1.0 team`, and the frontmatter carries
-   `command: team-jira`, `--team`, and `JIRA_URL: https://jira.team.acme.com`
-   and no `org-jira` or `https://jira.acme.com`. Both syncs print `exit=0`,
-   and `diff` prints `same`.
-
-**Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
-
----
-
-## S95: An `extends:` child stored before the executable-field rule keeps serving after an upgrade
-
-**Goal.** Validate that a cross-layer `extends:` child that a release without
-the §4.6 executable-field rule stored, and that leaves its parent's
-`server_identifier` to inheritance, stays stored and served when a build with
-the rule starts on the same store and reingests the unchanged layer, and that
-the same build refuses a new version of that child.
-
-**Covers.** §4.6 executable fields across layers and the stored-version terms,
-§7.3.1 ingest outcome, §4.7 immutability, and §13.11.3 executable inheritance,
-through the compiled binaries.
-
-**Why by hand.** The state under test is a store row written by an earlier
-release, which no in-process test constructs. S93 step 4 stores its child with
-the rule already in place. A `rejected:` line for `ops/jira-tracker@1.0.0`
-after the upgrade, or a child that no longer loads, is the defect this
-scenario catches.
-
-**Prerequisites.** A built `podium` binary on `PATH`, a Go toolchain, and a
-checkout whose history holds the `v0.5.2` tag, the last release without the
-rule.
-
-**Steps.**
-
-1. Run the isolation block from "Per-scenario isolation" above, then build
-   the `v0.5.2` `podium` binary into `$WORK/old`.
-
-   ```bash
-   mkdir -p "$WORK/src" "$WORK/old"
-   git -C "$PODIUM_REPO" archive v0.5.2 | tar -x -C "$WORK/src"
-   go -C "$WORK/src" build -o "$WORK/old/" ./cmd/podium
-   "$WORK/old/podium" version
-   ```
-
-   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and the old binary
-   prints `podium 0.5.2`. The build under test can print the same version
-   until the next release bumps it, so step 5 is the control that shows the
-   rule runs in the build under test.
-
-2. Build a two-layer registry. `org` holds the MCP server `ops/jira-server`
-   with a `server_identifier`, and `team` holds `ops/jira-tracker`, which
-   extends it and omits `server_identifier`.
-
-   ```bash
-   mkdir -p "$WORK/reg/org/ops/jira-server" "$WORK/reg/team/ops/jira-tracker"
-   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n' > "$WORK/reg/.registry-config"
-   for L in org team; do
-     printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
-   done
-   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Org Jira server.\nserver_identifier: org-jira\n---\n\nOrg Jira server.\n' \
-     > "$WORK/reg/org/ops/jira-server/ARTIFACT.md"
-   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Team Jira tracker server.\nextends: ops/jira-server\n---\n\nTeam Jira tracker server.\n' \
-     > "$WORK/reg/team/ops/jira-tracker/ARTIFACT.md"
-   ```
-
-   **Expect.** The two `ARTIFACT.md` files exist.
-
-3. Serve the directory with the old binary, reingest `team`, load the child,
-   and stop the server.
-
-   ```bash
-   "$WORK/old/podium" serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-     --bind 127.0.0.1:8197 > "$WORK/old.log" 2>&1 &
-   SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8197/healthz
-   server_alive "$SRV" "$WORK/old.log"
-   export URL=http://127.0.0.1:8197
-   "$WORK/old/podium" layer reingest --registry "$URL" team; echo "exit=$?"
-   curl -s "$URL/v1/load_artifact?id=ops/jira-tracker" \
-     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["version"], d["layer"], d.get("extends_pin"), "server_identifier: org-jira" in d["frontmatter"])'
-   kill "$SRV"; wait "$SRV" 2>/dev/null
-   ```
-
-   **Expect.** The reingest prints `artifact: ops/jira-tracker@1.0.0   layer: team`
-   and `exit=0`, and the load prints
-   `1.0.0 team ops/jira-server@1.0.0 True`. The old release stored the child
-   with the inherited `server_identifier`. A `rejected:` line here means the
-   old binary already carries the rule, and the later steps prove nothing.
-
-4. Start the build under test on the same store and directory, reingest the
-   unchanged `team` layer, load the child, and sync through the server.
-
-   ```bash
-   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-     --bind 127.0.0.1:8197 > "$WORK/srv.log" 2>&1 &
-   SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8197/healthz
-   server_alive "$SRV" "$WORK/srv.log"
-   grep 'ingested layer' "$WORK/srv.log"
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   curl -s "$URL/v1/load_artifact?id=ops/jira-tracker" \
-     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["version"], d["layer"], d.get("extends_pin"), "server_identifier: org-jira" in d["frontmatter"])'
-   podium sync --registry "$URL" --target "$WORK/srv" --harness none; echo "exit=$?"
-   ```
-
-   **Expect.** The two `ingested layer` lines report `accepted=0, idempotent=1,
-   rejected=0` for `org` and for `team`. The reingest prints
-   `artifact: ops/jira-tracker@1.0.0   layer: team`, no `rejected:` line, and
-   `exit=0`. The load prints `1.0.0 team ops/jira-server@1.0.0 True`. The sync
-   lists `ops/jira-server [org]` and `ops/jira-tracker [team]` and prints
-   `exit=0`. The registry classifies the stored version as unchanged and does
-   not evaluate it again.
-
-5. Sync the same directory through the filesystem source, then publish a new
-   version of the child that still omits `server_identifier` and reingest.
-
-   ```bash
-   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
-   cat "$WORK/err.txt"
-   printf -- '---\ntype: mcp-server\nversion: 1.1.0\ndescription: Team Jira tracker server.\nextends: ops/jira-server\n---\n\nTeam Jira tracker server.\n' \
-     > "$WORK/reg/team/ops/jira-tracker/ARTIFACT.md"
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   curl -s "$URL/v1/load_artifact?id=ops/jira-tracker" \
-     | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'
-   ```
-
-   **Expect.** The filesystem sync lists `ops/jira-server [org]` alone, prints
-   `exit=1`, and `$WORK/err.txt` holds
-   `rejected: ops/jira-tracker (ingest.invalid_artifact): extends: a parent in another layer sets executable fields this artifact does not restate: server_identifier; restate each one in this artifact`.
-   The filesystem source keeps no ingest state, so it applies the rule on every
-   run. The reingest prints the same `rejected:` line and `exit=1`, and the
-   load still prints `1.0.0`. The refusal is the control: the build under test
-   runs the rule, and only the version stored before it is spared.
-
-**Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
-
----
-
 ## S96: A multi-tenant standalone registry migrates every tenant
 
 **Goal.** Validate that `podium admin migrate-to-standard` carries every
@@ -12676,391 +10710,6 @@ service is required.
 
 ---
 
-## S99: An extends: child whose sandbox_profile conflicts with its parent's is refused in both modes, and a stored version keeps serving
-
-**Goal.** Validate that a filesystem-source `podium sync` drops an `extends:`
-child whose `sandbox_profile` conflicts with its parent's, within one layer
-and across layers, that a reingest refuses a new conflicting version with
-`details.constraint: "sandbox_profile_conflict"`, that neither reason names a
-profile value, that a conflicting child an earlier release stored keeps
-serving, now with the parent's profile, and that a `podium-mcp` whose cache
-holds that child from before the upgrade keeps its earlier profile until
-`podium cache prune` clears the cache.
-
-**Covers.** §4.6 sandbox profile, §7.3.1 ingest outcome, §13.11.3 sandbox
-profile conflicts, §4.7.6 pin immutability, and the §6.5 content cache,
-through the compiled binaries.
-
-**Why by hand.** An operator reads the served frontmatter and the `rejected:`
-lines directly and gates CI on `$?`. A served `seccomp-strict` for
-`ops/tool` after the upgrade, a `rejected:` line on the unchanged reingest, a
-reason that names `read-only-fs`, `network-isolated`, or `seccomp-strict`, or
-`exit=0` from the filesystem sync is the defect this scenario catches. The
-warm-cache loads confirm the upgrade note the CHANGELOG gives operators.
-
-**Prerequisites.** Built `podium` and `podium-mcp` binaries on `PATH`, a Go
-toolchain, and a checkout whose history holds the `v0.5.2` tag, a release
-without the rule.
-
-**Steps.**
-
-1. Run the isolation block from "Per-scenario isolation" above, then build
-   the `v0.5.2` `podium` binary into `$WORK/old`.
-
-   ```bash
-   mkdir -p "$WORK/src" "$WORK/old"
-   git -C "$PODIUM_REPO" archive v0.5.2 | tar -x -C "$WORK/src"
-   go -C "$WORK/src" build -o "$WORK/old/" ./cmd/podium
-   "$WORK/old/podium" version
-   ```
-
-   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and the old binary
-   prints `podium 0.5.2`.
-
-2. Build a two-layer registry. `org` holds `ops/base` with `read-only-fs`.
-   `team` holds `ops/tool`, which extends `ops/base` with `seccomp-strict`, and
-   the same-layer pair `ops/a-parent` (`read-only-fs`) and `ops/b-child`
-   (`network-isolated`, extends `ops/a-parent`). The parent's ID sorts before
-   the child's.
-
-   ```bash
-   mkdir -p "$WORK/reg/org/ops/base" "$WORK/reg/team/ops/tool" \
-     "$WORK/reg/team/ops/a-parent" "$WORK/reg/team/ops/b-child"
-   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n' > "$WORK/reg/.registry-config"
-   for L in org team; do
-     printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
-   done
-   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Org base.\nsandbox_profile: read-only-fs\n---\n\nOrg base.\n' \
-     > "$WORK/reg/org/ops/base/ARTIFACT.md"
-   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Team tool.\nsandbox_profile: seccomp-strict\nextends: ops/base\n---\n\nTeam tool.\n' \
-     > "$WORK/reg/team/ops/tool/ARTIFACT.md"
-   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Team parent.\nsandbox_profile: read-only-fs\n---\n\nTeam parent.\n' \
-     > "$WORK/reg/team/ops/a-parent/ARTIFACT.md"
-   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Team child.\nsandbox_profile: network-isolated\nextends: ops/a-parent\n---\n\nTeam child.\n' \
-     > "$WORK/reg/team/ops/b-child/ARTIFACT.md"
-   ```
-
-   **Expect.** The four `ARTIFACT.md` files exist.
-
-3. Sync through the filesystem source with the build under test.
-
-   ```bash
-   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "exit=$?"
-   cat "$WORK/err.txt"
-   grep -c -e read-only-fs -e network-isolated -e seccomp-strict "$WORK/err.txt"
-   ls "$WORK/fs/ops"
-   ```
-
-   **Expect.** The sync lists `ops/base [org]` and `ops/a-parent [team]` and
-   prints `exit=1`. `$WORK/err.txt` holds two lines, `ops/b-child` first:
-   `rejected: ops/b-child (ingest.invalid_artifact): extends: sandbox_profile differs from the profile the parent sets, and neither is unrestricted; omit sandbox_profile to inherit the parent's profile`,
-   then the same line for `ops/tool`. `grep -c` prints `0`. `ls` prints
-   `a-parent` and `base` alone. A missing `ops/b-child` line means the
-   same-layer edge is not tested.
-
-4. Serve the directory with the old binary, reingest `team`, load both
-   children, warm a `podium-mcp` cache with `ops/tool`, and stop the server.
-
-   ```bash
-   "$WORK/old/podium" serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-     --bind 127.0.0.1:8204 > "$WORK/old.log" 2>&1 &
-   SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8204/healthz
-   server_alive "$SRV" "$WORK/old.log"
-   export URL=http://127.0.0.1:8204
-   "$WORK/old/podium" layer reingest --registry "$URL" team; echo "exit=$?"
-   for ID in ops/tool ops/b-child; do
-     curl -s "$URL/v1/load_artifact?id=$ID" \
-       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["version"], [l for l in d["frontmatter"].splitlines() if l.startswith("sandbox_profile")])'
-   done
-   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
-   LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"ops/tool"}}}'
-   mcp_load() {
-     printf '%s\n%s\n' "$INIT" "$LOAD" | PODIUM_REGISTRY="$URL" PODIUM_CACHE_DIR="$1" \
-       PODIUM_HARNESS=none PODIUM_MATERIALIZE_ROOT="$2" \
-       PODIUM_HOST_SANDBOXES=unrestricted,read-only-fs,network-isolated,seccomp-strict \
-       podium-mcp > /dev/null 2> "$2.err"
-     grep '^sandbox_profile' "$2/ops/tool/ARTIFACT.md"; ls "$2/.podium" 2>/dev/null
-   }
-   mcp_load "$WORK/mcp-warm" "$WORK/out-old"
-   kill "$SRV"; wait "$SRV" 2>/dev/null
-   ```
-
-   **Expect.** The reingest prints no `rejected:` line and `exit=0`. The loads
-   print `1.0.0 ['sandbox_profile: seccomp-strict']` for `ops/tool` and
-   `1.0.0 ['sandbox_profile: network-isolated']` for `ops/b-child`: the old
-   release ranked the child's profile above the parent's `read-only-fs`. A
-   `rejected:` line here means the old binary already carries the rule, and the
-   later steps prove nothing. `mcp_load` prints `sandbox_profile: seccomp-strict`
-   and `seccomp-strict.json`, and `$WORK/mcp-warm` now holds the record the old
-   release merged. A missing `ARTIFACT.md` means the load failed; read
-   `$WORK/out-old.err`.
-
-5. Start the build under test on the same store and directory, reingest the
-   unchanged `team` layer, load both children, and load `ops/tool` through
-   `podium-mcp` with the warm cache, with a cold cache, and with the warm cache
-   after a prune.
-
-   ```bash
-   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-     --bind 127.0.0.1:8204 > "$WORK/srv.log" 2>&1 &
-   SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8204/healthz
-   server_alive "$SRV" "$WORK/srv.log"
-   grep 'ingested layer' "$WORK/srv.log"
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   for ID in ops/tool ops/b-child; do
-     curl -s "$URL/v1/load_artifact?id=$ID" \
-       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["version"], [l for l in d["frontmatter"].splitlines() if l.startswith("sandbox_profile")])'
-   done
-   mcp_load "$WORK/mcp-warm" "$WORK/out-warm"
-   mcp_load "$WORK/mcp-cold" "$WORK/out-cold"
-   podium cache prune --dir "$WORK/mcp-warm" --days 0
-   mcp_load "$WORK/mcp-warm" "$WORK/out-pruned"
-   ```
-
-   **Expect.** The `ingested layer` lines report `rejected=0` for `org` and
-   for `team`. The reingest prints no `rejected:` line and `exit=0`. Both loads
-   print `1.0.0 ['sandbox_profile: read-only-fs']`. The stored versions keep
-   serving, and the merge now yields the parent's profile for a conflicting
-   pair. `seccomp-strict` or `network-isolated` here means the build under test
-   still ranks the profiles.
-
-   The warm-cache `mcp_load` prints `sandbox_profile: seccomp-strict` and
-   `seccomp-strict.json`: the HEAD revalidation matches the unchanged content
-   hash, and `podium-mcp` delivers the record it cached in step 4, as D-7
-   accepts and the CHANGELOG states. The cold-cache load and the load after the
-   prune each print `sandbox_profile: read-only-fs` and no `.podium` entry. A
-   warm-cache `read-only-fs` means the load validator now covers the merged
-   record, and the docs and the CHANGELOG need the matching update.
-
-6. Publish a new version of `ops/tool` that still sets `seccomp-strict`,
-   reingest, and read the reingest body.
-
-   ```bash
-   printf -- '---\ntype: context\nversion: 1.1.0\ndescription: Team tool.\nsandbox_profile: seccomp-strict\nextends: ops/base\n---\n\nTeam tool.\n' \
-     > "$WORK/reg/team/ops/tool/ARTIFACT.md"
-   podium layer reingest --registry "$URL" team 2> "$WORK/re.txt"; echo "exit=$?"
-   cat "$WORK/re.txt"
-   curl -s -X POST "$URL/v1/layers/reingest?id=team" > "$WORK/body.json"
-   python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["rejected"]))' "$WORK/body.json"
-   grep -c -e read-only-fs -e network-isolated -e seccomp-strict "$WORK/body.json"
-   curl -s "$URL/v1/load_artifact?id=ops/tool" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'
-   ```
-
-   **Expect.** `$WORK/re.txt` holds
-   `rejected: ops/tool (ingest.invalid_artifact): extends: sandbox_profile differs from the profile the parent sets, and neither is unrestricted; omit sandbox_profile to inherit the parent's profile`,
-   and the reingest prints `exit=1`. The `rejected` entry carries
-   `"details": {"constraint": "sandbox_profile_conflict"}` and no other
-   `details` member, `grep -c` prints `0`, and the load prints `1.0.0`. The
-   refusal is the control: the build under test runs the rule, and only the
-   versions stored before it are spared.
-
-7. Follow the reason: omit `sandbox_profile` from `ops/tool` 1.1.0, reingest,
-   and load it.
-
-   ```bash
-   printf -- '---\ntype: context\nversion: 1.1.0\ndescription: Team tool.\nextends: ops/base\n---\n\nTeam tool.\n' \
-     > "$WORK/reg/team/ops/tool/ARTIFACT.md"
-   podium layer reingest --registry "$URL" team; echo "exit=$?"
-   curl -s "$URL/v1/load_artifact?id=ops/tool" \
-     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["version"], [l for l in d["frontmatter"].splitlines() if l.startswith("sandbox_profile")])'
-   ```
-
-   **Expect.** The reingest prints no `rejected:` line for `ops/tool` and
-   `exit=0`, and the load prints `1.1.0 ['sandbox_profile: read-only-fs']`.
-
-8. Clean up.
-
-   ```bash
-   kill "$SRV"; rm -rf "$WORK"
-   ```
-
----
-
-## S100: A sandbox_profile that tightens an open parent is admitted, and a same-layer conflict is refused with its dependants in both modes
-
-**Goal.** Validate that an `extends:` child that sets a restricting
-`sandbox_profile` under a parent whose profile is `unrestricted` or unset is
-admitted with the child's profile, that a child that omits the field inherits
-its parent's restricting profile, that a same-layer `network-isolated` parent
-and `seccomp-strict` child conflict, that a filesystem-source `podium sync`
-and a fresh server ingest both drop that child and the grandchild that extends
-it, that the sandbox-profile rule answers before the executable-field rule on
-a child that breaks both, and that the materialized `SKILL.md` `compatibility`
-line and the `.podium/seccomp-strict.json` file follow the merged profile.
-
-**Covers.** §4.6 sandbox profile, §4.6 executable fields, §7.3.1 ingest
-outcome, §13.11.3 sandbox profile conflicts, §4.3.4 derived skill
-compatibility, §4.4.1 sandbox profiles, and §11 filesystem-versus-server
-equivalence, through the compiled binaries.
-
-**Why by hand.** S99 stores its same-layer conflict with a release that has no
-rule, so its server never refuses a same-layer edge, and its fixtures carry no
-open parent, no grandchild, and no skill. A same-layer refusal without
-`details.constraint`, an admitted `ops/b-sec`, a surviving `ops/c-grand`, a
-`server_identifier` reason for `ops/srv-child`, a tightened child that reads
-its parent's `unrestricted`, or a `compatibility` line that disagrees with the
-loaded frontmatter is the defect this scenario catches.
-
-**Prerequisites.** Built `podium` and `podium-mcp` binaries on `PATH`.
-
-**Steps.**
-
-1. Run the isolation block from "Per-scenario isolation" above.
-
-   **Expect.** `which podium` prints `$PODIUM_BIN/podium`.
-
-2. Build a two-layer registry. `org` holds the skills `ops/open`
-   (`unrestricted`), `ops/bare` (no profile), and `ops/strict`
-   (`seccomp-strict`), and the MCP server `ops/srv` (`read-only-fs`, with a
-   `server_identifier`). `team` holds `ops/tight` (`seccomp-strict`, extends
-   `ops/open`), `ops/tight2` (`network-isolated`, extends `ops/bare`),
-   `ops/inherit` (no profile, extends `ops/strict`), the same-layer chain
-   `ops/a-net` (`network-isolated`), `ops/b-sec` (`seccomp-strict`, extends
-   `ops/a-net`), and `ops/c-grand` (no profile, extends `ops/b-sec`), and the
-   MCP server `ops/srv-child` (`seccomp-strict`, extends `ops/srv`, omits
-   `server_identifier`). Each same-layer parent's ID sorts before its child's.
-
-   ```bash
-   sk() {
-     mkdir -p "$WORK/reg/$1"
-     { printf -- '---\ntype: skill\nversion: 1.0.0\n'
-       [ -n "$2" ] && printf 'sandbox_profile: %s\n' "$2"
-       [ -n "$3" ] && printf 'extends: %s\n' "$3"
-       printf -- '---\n'; } > "$WORK/reg/$1/ARTIFACT.md"
-     printf -- '---\nname: %s\ndescription: The %s skill exercises the sandbox profile rule.\n---\n\n%s body.\n' \
-       "${1##*/}" "${1##*/}" "${1##*/}" > "$WORK/reg/$1/SKILL.md"
-   }
-   mkdir -p "$WORK/reg/org/ops/srv" "$WORK/reg/team/ops/srv-child"
-   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n' > "$WORK/reg/.registry-config"
-   sk org/ops/open unrestricted ""
-   sk org/ops/bare "" ""
-   sk org/ops/strict seccomp-strict ""
-   sk team/ops/tight seccomp-strict ops/open
-   sk team/ops/tight2 network-isolated ops/bare
-   sk team/ops/inherit "" ops/strict
-   sk team/ops/a-net network-isolated ""
-   sk team/ops/b-sec seccomp-strict ops/a-net
-   sk team/ops/c-grand "" ops/b-sec
-   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Org server fixture for the sandbox rule.\nserver_identifier: org-srv\nsandbox_profile: read-only-fs\n---\n\nOrg server.\n' \
-     > "$WORK/reg/org/ops/srv/ARTIFACT.md"
-   printf -- '---\ntype: mcp-server\nversion: 1.0.0\ndescription: Team server fixture for the sandbox rule.\nsandbox_profile: seccomp-strict\nextends: ops/srv\n---\n\nTeam server.\n' \
-     > "$WORK/reg/team/ops/srv-child/ARTIFACT.md"
-   for L in org team; do
-     printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
-   done
-   podium lint --offline --registry "$WORK/reg"; echo "exit=$?"
-   ```
-
-   **Expect.** `lint: no issues.` and `exit=0`. A skill's `ARTIFACT.md`
-   carries no `description`, because a value there that differs from the
-   `SKILL.md` one is `lint.skill_artifact_field_mismatch`, which stops the
-   server in step 4 before it binds.
-
-3. Sync through the filesystem source to Cursor and read the derived
-   `compatibility` lines.
-
-   ```bash
-   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness cursor 2> "$WORK/err.txt"; echo "exit=$?"
-   cat "$WORK/err.txt"
-   sed -n 's/^rejected: [^ ]* //p' "$WORK/err.txt" | grep sandbox_profile \
-     | grep -c -e ops/ -e read-only-fs -e network-isolated -e seccomp-strict
-   for S in tight tight2 inherit; do grep '^compatibility' "$WORK/fs/.cursor/skills/$S/SKILL.md"; done
-   ls "$WORK/fs/.cursor/skills"
-   ```
-
-   **Expect.** The sync lists `ops/a-net`, `ops/bare`, `ops/inherit`,
-   `ops/open`, `ops/srv`, `ops/strict`, `ops/tight`, and `ops/tight2`, and
-   prints `exit=1`. `$WORK/err.txt` holds three lines in this order:
-   `rejected: ops/b-sec (ingest.invalid_artifact): extends: sandbox_profile differs from the profile the parent sets, and neither is unrestricted; omit sandbox_profile to inherit the parent's profile`,
-   `rejected: ops/c-grand (ingest.invalid_artifact): extends: no parent artifact "ops/b-sec" ingested yet`,
-   and the `ops/b-sec` reason again for `ops/srv-child`. The `ops/srv-child`
-   line carries the sandbox reason rather than the `server_identifier` one,
-   because the sandbox rule is checked first. `grep -c` prints `0`: no
-   sandbox reason names an artifact or a profile value. The `compatibility`
-   lines read `"sandbox: seccomp-strict"`, `"sandbox: network-isolated"`, and
-   `"sandbox: seccomp-strict"`, and `ls` prints `a-net`, `bare`, `inherit`,
-   `open`, `strict`, `tight`, and `tight2`. A missing `ops/c-grand` line means
-   the drop did not cascade.
-
-4. Serve the same directory with the build under test on a fresh store, read
-   the boot ingest, and reingest `team`.
-
-   ```bash
-   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-     --bind 127.0.0.1:8205 > "$WORK/srv.log" 2>&1 &
-   SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8205/healthz
-   server_alive "$SRV" "$WORK/srv.log"
-   export URL=http://127.0.0.1:8205
-   grep -e 'ingested layer' -e 'rejected: sandbox' "$WORK/srv.log"
-   podium layer reingest --registry "$URL" team > /dev/null 2> "$WORK/re.txt"; echo "exit=$?"
-   diff "$WORK/err.txt" "$WORK/re.txt" && echo same
-   curl -s -X POST "$URL/v1/layers/reingest?id=team" > "$WORK/body.json"
-   python3 -c '
-   import json, sys
-   for r in json.load(open(sys.argv[1]))["rejected"]:
-       hits = [w for w in ("ops/", "read-only-fs", "network-isolated", "seccomp-strict") if w in r["reason"] + json.dumps(r.get("details", {}))]
-       print(r["artifact_id"], json.dumps(r.get("details")), hits if "sandbox" in r["reason"] else "-")
-   ' "$WORK/body.json"
-   ```
-
-   **Expect.** The `ingested layer` lines report `accepted=4, idempotent=0,
-   rejected=0` for `org` and `accepted=4, idempotent=0, rejected=3` for
-   `team`. Two log lines end in `rejected: sandbox_profile_conflict`, one for
-   `artifact=ops/b-sec` with `parent_layer=team` and one for
-   `artifact=ops/srv-child` with `parent_layer=org`. The reingest prints
-   `exit=1`, and `diff` prints `same`: the server refuses the same three
-   children with the same lines as the filesystem sync. The `python3` block
-   prints `ops/b-sec {"constraint": "sandbox_profile_conflict"} []`,
-   `ops/c-grand null -`, and `ops/srv-child {"constraint": "sandbox_profile_conflict"} []`.
-   A `null` for `ops/b-sec` means the same-layer refusal carries no
-   `details`, and a non-empty list means the reason or `details` names a
-   parent or a profile value.
-
-5. Load the admitted children, sync the same target through the server, and
-   load the tightened and inheriting skills through `podium-mcp`.
-
-   ```bash
-   for ID in ops/tight ops/tight2 ops/inherit ops/b-sec ops/c-grand; do
-     curl -s "$URL/v1/load_artifact?id=$ID" \
-       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sys.argv[1], d.get("version") or d["code"], [l for l in d.get("frontmatter","").splitlines() if l.startswith("sandbox_profile")])' "$ID"
-   done
-   podium sync --registry "$URL" --target "$WORK/srv" --harness cursor > /dev/null; echo "exit=$?"
-   diff -r "$WORK/fs/.cursor" "$WORK/srv/.cursor" && echo IDENTICAL
-   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
-   for S in tight tight2 inherit; do
-     LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"ops/'"$S"'"}}}'
-     printf '%s\n%s\n' "$INIT" "$LOAD" | PODIUM_REGISTRY="$URL" PODIUM_CACHE_DIR="$WORK/mcp" \
-       PODIUM_HARNESS=none PODIUM_MATERIALIZE_ROOT="$WORK/m-$S" \
-       PODIUM_HOST_SANDBOXES=unrestricted,read-only-fs,network-isolated,seccomp-strict \
-       podium-mcp > /dev/null 2> "$WORK/m-$S.err"
-     echo "$S: $(grep '^sandbox_profile' "$WORK/m-$S/ops/$S/ARTIFACT.md") $(ls "$WORK/m-$S/.podium" 2>/dev/null)"
-   done
-   ```
-
-   **Expect.** The loads print
-   `ops/tight 1.0.0 ['sandbox_profile: seccomp-strict']`,
-   `ops/tight2 1.0.0 ['sandbox_profile: network-isolated']`,
-   `ops/inherit 1.0.0 ['sandbox_profile: seccomp-strict']`,
-   `ops/b-sec registry.not_found []`, and `ops/c-grand registry.not_found []`.
-   An `unrestricted` or absent value for a tightened child means the merge
-   kept the open parent's value. The server sync prints `exit=0`, and `diff`
-   prints `IDENTICAL`: the two modes derive the same `compatibility` lines.
-   The `podium-mcp` loads print `tight: sandbox_profile: seccomp-strict seccomp-strict.json`,
-   `tight2: sandbox_profile: network-isolated`, and
-   `inherit: sandbox_profile: seccomp-strict seccomp-strict.json`. A missing
-   `ARTIFACT.md` means the load failed; read `$WORK/m-<name>.err`.
-
-6. Clean up.
-
-   ```bash
-   kill "$SRV"; wait "$SRV" 2>/dev/null; rm -rf "$WORK"
-   ```
-
----
-
 ## S101: An Agent Skills directory with no ARTIFACT.md is a Podium layer
 
 **Goal.** Validate that a directory of plain Agent Skills, with no `ARTIFACT.md`
@@ -13191,3 +10840,214 @@ instead of rejected, or a modified source tree is the defect this scenario catch
    `.claude/skills/hidden/SKILL.md` also contains `skills/hidden`.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
+
+---
+
+## S102: An ARTIFACT.md that declares extends: is refused, and a stored extends: child stops serving after an upgrade
+
+**Goal.** Validate that `podium lint` and a filesystem-source `podium sync`
+refuse an `ARTIFACT.md` that declares `extends:`, that a reingest refuses it
+with `details.constraint: "extends_removed"`, that a child an earlier release
+stored stops serving after the upgrade while its earlier version and the
+lower layer's copy of a same-ID overlay serve, and that a `podium-mcp` in
+`offline-first` that cached the merged child from the earlier registry keeps
+serving it until `podium cache prune` clears the cache, after which its
+revision mark refuses the older version until `podium cache reset-revisions`
+clears the mark.
+
+**Covers.** The §4.6 no-inheritance rule and collision rule, §7.3.1 ingest
+outcome, §13.11.3 removed inheritance, §7.2 entity tag, and the §6.5 content
+cache and revision marks, through the compiled binaries.
+
+**Why by hand.** An operator reads the `rejected:` lines, the served version,
+and the HTTP status directly and gates CI on `$?`. A served `2.0.0` for
+`ops/c` after the upgrade, a 304 for the retired version, an `ingest.collision`
+when the lower layer publishes `ops/x`, or `exit=0` from the filesystem sync is
+the defect this scenario catches. The cache loads confirm the upgrade note the
+CHANGELOG gives operators.
+
+**Prerequisites.** Built `podium` and `podium-mcp` binaries on `PATH`, a Go
+toolchain, and a checkout whose history holds the `v0.5.2` tag, a release that
+still serves `extends:`.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then build
+   the `v0.5.2` `podium` binary into `$WORK/old`.
+
+   ```bash
+   mkdir -p "$WORK/src" "$WORK/old"
+   git -C "$PODIUM_REPO" archive v0.5.2 | tar -x -C "$WORK/src"
+   go -C "$WORK/src" build -o "$WORK/old/" ./cmd/podium
+   "$WORK/old/podium" version
+   ```
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and the old binary
+   prints `podium 0.5.2`.
+
+2. Build a two-layer registry. `org` holds `ops/base` and `ops/x` 1.0.0.
+   `team` holds a plain `ops/c` 1.0.0.
+
+   ```bash
+   mkdir -p "$WORK/reg/org/ops/base" "$WORK/reg/org/ops/x" "$WORK/reg/team/ops/c"
+   printf 'multi_layer: true\nlayer_order:\n  - org\n  - team\n' > "$WORK/reg/.registry-config"
+   for L in org team; do
+     printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
+   done
+   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Org base.\ntags: [base]\n---\n\nOrg base.\n' \
+     > "$WORK/reg/org/ops/base/ARTIFACT.md"
+   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Org x.\n---\n\nOrg x.\n' \
+     > "$WORK/reg/org/ops/x/ARTIFACT.md"
+   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Team c.\n---\n\nTeam c.\n' \
+     > "$WORK/reg/team/ops/c/ARTIFACT.md"
+   ```
+
+   **Expect.** The three `ARTIFACT.md` files exist.
+
+3. Serve the directory with the old binary. Then make `ops/c` 2.0.0 extend
+   `ops/base`, add a same-ID overlay `ops/x` 2.0.0 in `team`, reingest `team`,
+   and load both. Warm a `podium-mcp` cache in `offline-first` with `ops/c`,
+   and stop the server.
+
+   ```bash
+   "$WORK/old/podium" serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8207 > "$WORK/old.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8207/healthz
+   server_alive "$SRV" "$WORK/old.log"
+   export URL=http://127.0.0.1:8207
+   printf -- '---\ntype: context\nversion: 2.0.0\ndescription: Team c.\nextends: ops/base\n---\n\nTeam c two.\n' \
+     > "$WORK/reg/team/ops/c/ARTIFACT.md"
+   mkdir -p "$WORK/reg/team/ops/x"
+   printf -- '---\ntype: context\nversion: 2.0.0\ndescription: Team x.\nextends: ops/x\n---\n\nTeam x.\n' \
+     > "$WORK/reg/team/ops/x/ARTIFACT.md"
+   "$WORK/old/podium" layer reingest --registry "$URL" team; echo "exit=$?"
+   for ID in ops/c ops/x; do
+     curl -s "$URL/v1/load_artifact?id=$ID" \
+       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["id"], d["version"], d.get("extends_pin"))'
+   done
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"ops/c"}}}'
+   mcp_load() {
+     printf '%s\n%s\n' "$INIT" "$LOAD" | PODIUM_REGISTRY="$URL" PODIUM_CACHE_DIR="$WORK/mcp" \
+       PODIUM_CACHE_MODE=offline-first PODIUM_HARNESS=none PODIUM_MATERIALIZE_ROOT="$1" \
+       podium-mcp > "$1.out" 2> "$1.err"
+     grep -e '^version:' -e '^tags:' -e '- base$' "$1/ops/c/ARTIFACT.md"
+   }
+   mcp_load "$WORK/out-old"
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** The reingest prints no `rejected:` line and `exit=0`. The loads
+   print `ops/c 2.0.0 ops/base@1.0.0` and `ops/x 2.0.0 ops/x@1.0.0`: the old
+   release merged both. `mcp_load` prints `version: 2.0.0`, a `tags:` line,
+   and a `- base` entry, the merged body: the old registry writes the merged
+   `tags` as a block sequence, so the tag sits on its own line. The bridge
+   also records a revision mark for `ops/c` at the 2.0.0 row's ingest time.
+   A `rejected:` line here means the old
+   binary already refuses `extends:`, and the later steps prove nothing. A
+   missing `ARTIFACT.md` means the load failed; read `$WORK/out-old.err`.
+
+4. Lint and sync the directory with the build under test.
+
+   ```bash
+   podium lint --registry "$WORK/reg" 2> "$WORK/lint.txt"; echo "lint exit=$?"
+   cat "$WORK/lint.txt"
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err.txt"; echo "sync exit=$?"
+   cat "$WORK/err.txt"
+   cat "$WORK/fs/ops/x/ARTIFACT.md"; ls "$WORK/fs/ops"
+   ```
+
+   **Expect.** `lint exit=1`, and `$WORK/lint.txt` holds the same two
+   `rejected:` lines the sync prints below, `ops/c` first, so lint names
+   every refused artifact rather than stopping at the first. `sync exit=1`,
+   and `$WORK/err.txt` holds two lines, `ops/c` first:
+   `rejected: ops/c (ingest.invalid_artifact): extends: is not supported; remove the extends: key and declare every field this artifact needs in its own frontmatter`,
+   then the same line for `ops/x`, and no `ingest.collision` line. The
+   materialized `ops/x` holds `Org x.`, and `ls` prints `base` and `x`.
+
+5. Start the build under test on the same store and directory, reingest the
+   unchanged `team` layer, and read every path for the retired rows.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8207 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8207/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   grep 'ingested layer' "$WORK/srv.log"
+   podium layer reingest --registry "$URL" team 2> "$WORK/re.txt"; echo "exit=$?"
+   cat "$WORK/re.txt"
+   for ID in ops/c ops/x; do
+     curl -s "$URL/v1/load_artifact?id=$ID" \
+       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["id"], d["version"], "extends_pin" in d)'
+   done
+   curl -s "$URL/v1/load_artifact?id=ops/c&version=2.0.0" | grep -o 'registry.not_found'
+   curl -s -o /dev/null -w 'head %{http_code}\n' -I "$URL/v1/load_artifact?id=ops/c&version=2.0.0"
+   curl -s "$URL/v1/search_artifacts?query=Team" \
+     | python3 -c 'import json,sys; print(sorted((r["id"], r["version"]) for r in json.load(sys.stdin)["results"]))'
+   podium impact --registry "$URL" ops/base
+   curl -s -D - -o /dev/null "$URL/v1/load_artifact?id=ops/c" | grep -i '^etag'
+   ```
+
+   **Expect.** The `ingested layer` line for `team` reports `rejected=2`. The
+   reingest prints `exit=1` and the two `rejected:` lines of step 4.
+   The loads print `ops/c 1.0.0 False` and `ops/x 1.0.0 False`. The exact load
+   prints `registry.not_found`, and the HEAD prints `head 404`. The search
+   lists `('ops/c', '1.0.0')` and no `2.0.0`. `impact ops/base` lists no
+   dependent. The `ETag` header is the quoted content hash of `ops/c` 1.0.0
+   with nothing folded in. `2.0.0` from any path, `head 304`, or an `ops/c`
+   dependent of `ops/base` means a retired row is still served.
+
+6. Read the reingest body over HTTP, then publish a new `ops/x` from the
+   lower layer.
+
+   ```bash
+   curl -s -X POST "$URL/v1/layers/reingest?id=team" > "$WORK/body.json"
+   python3 -c 'import json,sys; print(json.dumps(sorted(json.load(open(sys.argv[1]))["rejected"], key=lambda r: r["artifact_id"])))' "$WORK/body.json"
+   printf -- '---\ntype: context\nversion: 1.1.0\ndescription: Org x.\n---\n\nOrg x one.\n' \
+     > "$WORK/reg/org/ops/x/ARTIFACT.md"
+   podium layer reingest --registry "$URL" org; echo "exit=$?"
+   curl -s "$URL/v1/load_artifact?id=ops/x" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'
+   ```
+
+   **Expect.** Each `rejected` entry carries `"code": "ingest.invalid_artifact"`
+   and `"details": {"constraint": "extends_removed"}` and no other `details`
+   member. The `org` reingest prints no `rejected:` line and `exit=0`, and the
+   load prints `1.1.0`. An `ingest.collision` here means the retired `team`
+   row still counts as a collision.
+
+7. Load `ops/c` through the warm `offline-first` cache, prune it, load
+   again, reset the revision mark, and load a third time.
+
+   ```bash
+   mcp_load "$WORK/out-warm"
+   podium cache prune --dir "$WORK/mcp" --days 0
+   mcp_load "$WORK/out-pruned"
+   grep -o 'materialize.stale_resolution' "$WORK/out-pruned.out"
+   podium cache reset-revisions --dir "$WORK/mcp" ops/c; echo "exit=$?"
+   mcp_load "$WORK/out-reset"
+   ```
+
+   **Expect.** The warm load prints `version: 2.0.0`, a `tags:` line, and a
+   `- base` entry: `offline-first` serves the record it cached in step 3
+   without calling the registry, as proposal 0064 accepts (D-9) and the
+   CHANGELOG states.
+   After the prune the bridge finds no cached content and calls the
+   registry, which serves `ops/c` 1.0.0 at an ingest time below the mark
+   step 3 recorded. The bridge refuses the load and writes no file, so the
+   pruned load's `grep` reports a missing `ARTIFACT.md`, and
+   `out-pruned.out` holds `materialize.stale_resolution`. The reset prints
+   `cache: reset 1 revision mark(s)` and `exit=0`, and the third load
+   prints `version: 1.0.0` with no `tags:` line and no `- base` entry.
+   `version: 2.0.0` after the prune means the prune left the merged record
+   in place. `version: 1.0.0` before the reset means the bridge did not
+   compare the answer with its revision mark. A cache filled by a `v0.5.2`
+   bridge is a miss under the 0.6.0 cache layout and does not reproduce the
+   warm load.
+
+8. Clean up.
+
+   ```bash
+   kill "$SRV"; rm -rf "$WORK"
+   ```

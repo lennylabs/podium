@@ -229,9 +229,8 @@ the artifact's frontmatter. Two of those drive design decisions:
   arrive without one. Whether to expose the score, and how to treat a result that
   has none, is open.
 - The classification label is omitted when the artifact declares none and is
-  resolved to the most restrictive value across an extends chain
-  (`ArtifactDescriptor.Sensitivity`, with the values and their informational
-  meaning in spec §4.3 and §4.6). It needs a treatment that reads as a property of
+  otherwise the row's own declared sensitivity (`ArtifactDescriptor.Sensitivity`,
+  §4.7.4, with the values and their informational meaning in spec §4.3). It needs a treatment that reads as a property of
   the artifact rather than as an alert, and every screen showing it needs an
   unclassified state.
 
@@ -263,8 +262,8 @@ Go file. The parts of it that carry a design consequence:
 | the inline resources | The bundled files delivered with the response. The values are not always readable text: one binary file forces the whole inline set into base64 and the response says so through a companion flag, so the viewer needs a treatment for a resource it cannot render as text. |
 | the fetched resources | The bundled files the client retrieves from object storage instead. Each entry is a reference object rather than a bare link, carrying the size and the content type alongside the URL (`LargeResourceLink` in `pkg/registry/server/server.go`, whose comment records that the URL's authentication model differs by object-store backend), so the viewer can show a file's size and kind before any fetch and needs a state for a fetch that fails. |
 
-§13.10 also requires links to extending or dependent artifacts, so an artifact is
-a node in a graph and the viewer is where that graph becomes navigable. Those
+§13.10 also requires links to dependent artifacts (§4.7.3), so an artifact is a
+node in a graph and the viewer is where that graph becomes navigable. Those
 edges are served by their own endpoint rather than by the artifact response
 (`handleDependents` in `pkg/registry/server/server.go`), so the graph arrives on a
 second request and the design needs a state for an artifact that has no edges.
@@ -280,19 +279,15 @@ splits the bundled files one by one (`attachResources` in the same file), so a
 single artifact can present inline files beside fetched files, and the resource
 list has to read as one list rather than as two.
 
-The third is a response that yields no frontmatter pairs to render. More than one
-path through the API produces it, so the treatment covers the state rather than
-branching per producer: the property table is omitted entirely, with no header
+The third is a response that yields no frontmatter pairs to render. The treatment
+covers the state rather than branching per producer: the property table is omitted entirely, with no header
 standing over an empty table and no placeholder row, and the rest of the viewer
 reads as a finished document rather than as a partial load. That treatment is
 distinct from the one for a frontmatter block that fails to parse, which is a
-defect the reader is told about. The producers known today are a search result
-whose inherited extension block could not be rewritten, which carries no
-frontmatter block at all, and a non-skill artifact response whose frontmatter is
-cleared because the manifest arrives by link instead of inline. The response
-structs in `pkg/registry/server/server.go` own both, and
-`docs/reference/http-api.md` carries the search-result case under
-`search_artifacts`.
+defect the reader is told about. The producer known today is a non-skill artifact
+response whose frontmatter is cleared because the manifest arrives by link
+instead of inline. The response structs in `pkg/registry/server/server.go` own
+it.
 
 ### 4. Layer panel
 
@@ -383,11 +378,10 @@ any state the CLI can reach is a state the panel must render.
   is still recoverable, because an unregistered layer has not been erased.
 - **Reorder** layers, which changes the order the effective view is composed in
   (spec §4.6, "Composition order"). Two layers cannot simply carry the same
-  artifact ID: that collision is rejected at ingest unless the higher-precedence
-  artifact declares `extends:` (spec §4.6, "Merge semantics for collisions").
-  Reordering therefore changes how an extending artifact merges with its parent,
-  which is why the control has to show the resulting order rather than treat the
-  list as unordered.
+  artifact ID: every same-ID collision between registry-side layers is rejected
+  at ingest (spec §4.6, "Collisions"). The order sets precedence for the
+  collision rule and for `DOMAIN.md` merging, which is why the control has to
+  show the resulting order rather than treat the list as unordered.
 
 Roles differ. An administrator manages every layer in the tenant, which is the
 panel §13.10 describes, because a tenant admin is authorized on both layer

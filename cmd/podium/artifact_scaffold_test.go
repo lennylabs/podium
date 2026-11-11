@@ -128,7 +128,6 @@ func TestScaffold_Skill_RefusesFlagsInDefinitionOrder(t *testing.T) {
 	exit, _, stderr := runScaffold([]string{
 		"--type", "skill",
 		"--description", "Greet the user by name.",
-		"--extends", "finance/ap/parent@1.x",
 		"--when-to-use", "greeting",
 		"--sensitivity", "high",
 		"--tags", "demo",
@@ -138,7 +137,7 @@ func TestScaffold_Skill_RefusesFlagsInDefinitionOrder(t *testing.T) {
 	if exit != 2 {
 		t.Fatalf("exit=%d, want 2 (stderr=%s)", exit, stderr)
 	}
-	want := "error: --tags, --sensitivity, --when-to-use, --extends set Podium-only fields; write them in a hand-written ARTIFACT.md overlay (see docs/authoring/frontmatter-reference.md)\n"
+	want := "error: --tags, --sensitivity, --when-to-use set Podium-only fields; write them in a hand-written ARTIFACT.md overlay (see docs/authoring/frontmatter-reference.md)\n"
 	if stderr != want {
 		t.Errorf("stderr = %q, want %q", stderr, want)
 	}
@@ -913,50 +912,6 @@ func TestScaffold_WhenToUsePopulated(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte(`- "second situation"`)) {
 		t.Errorf("second when_to_use entry missing: %s", body)
-	}
-}
-
-// --extends populates the extends field for a non-skill type.
-func TestScaffold_ExtendsOnContext(t *testing.T) {
-	root := t.TempDir()
-	target := filepath.Join(root, "personal", "x")
-	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
-		"--description", "x",
-		"--extends", "finance/ap/pay-invoice@1.x",
-		"--yes",
-		target,
-	}, "")
-	if exit != 0 {
-		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
-	}
-	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
-	if !bytes.Contains(body, []byte("extends: finance/ap/pay-invoice@1.x")) {
-		t.Errorf("extends not written: %s", body)
-	}
-}
-
-// Spec: §4.3.4 — extends is a Podium-only field, so --extends with
-// --type skill is refused and the author writes it in an ARTIFACT.md
-// overlay by hand.
-func TestScaffold_ExtendsOnSkill(t *testing.T) {
-	root := t.TempDir()
-	target := filepath.Join(root, "personal", "child-skill")
-	exit, _, stderr := runScaffold([]string{
-		"--type", "skill",
-		"--description", "Child skill that extends a parent.",
-		"--extends", "finance/ap/parent@1.x",
-		"--yes",
-		target,
-	}, "")
-	if exit != 2 {
-		t.Fatalf("exit=%d, want 2 (stderr=%s)", exit, stderr)
-	}
-	if !strings.Contains(stderr, "error: --extends set Podium-only fields; write them in a hand-written ARTIFACT.md overlay") {
-		t.Errorf("stderr missing the overlay message: %s", stderr)
-	}
-	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Errorf("refusal must create no directory (stat err=%v)", err)
 	}
 }
 

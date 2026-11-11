@@ -1,8 +1,10 @@
 package manifest
 
 import (
+	"encoding/binary"
 	"errors"
 	"testing"
+	"unicode/utf16"
 )
 
 // Spec: §4.3 Artifact Manifest Schema — SplitFrontmatter splits on the
@@ -82,6 +84,73 @@ func TestManifestBodyOf(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Errorf("ManifestBodyOf = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// utf16Frontmatter returns a document whose frontmatter block is text
+// encoded as UTF-16 behind its byte order mark, between ASCII "---" lines.
+func utf16Frontmatter(text string, order binary.AppendByteOrder, bom []byte) []byte {
+	doc := append([]byte("---\n"), bom...)
+	for _, u := range utf16.Encode([]rune(text)) {
+		doc = order.AppendUint16(doc, u)
+	}
+	return append(doc, "\n---\n\nbody\n"...)
+}
+
+// Spec: §4.6 — the predicate is true for every top-level extends key the
+// 0.5.x typed decoder resolved, whatever its spelling, encoding, or value,
+// and false when the key is absent from the decoded frontmatter block.
+func TestDeclaresExtends(t *testing.T) {
+	t.Parallel()
+	const body = "\nbody\n"
+	trueCases := []struct {
+		name string
+		src  []byte
+	}{
+		{"block", []byte("---\ntype: context\nextends: a\n---\n" + body)},
+		{"flow mapping", []byte("---\n{type: skill, extends: a}\n---\n" + body)},
+		{"quoted key", []byte("---\ntype: context\n\"extends\": a\n---\n" + body)},
+		{"hex escape", []byte("---\ntype: context\n\"\\x65xtends\": a\n---\n" + body)},
+		{"unicode escape", []byte("---\ntype: context\n\"ext\\u0065nds\": a\n---\n" + body)},
+		{"explicit key continuation", []byte("---\ntype: context\n? \"ext\\\n  ends\"\n: a\n---\n" + body)},
+		{"binary implicit", []byte("---\ntype: context\n!!binary ZXh0ZW5kcw==: a\n---\n" + body)},
+		{"binary explicit key", []byte("---\ntype: context\n? !!binary ZXh0ZW5kcw==\n: a\n---\n" + body)},
+		{"binary verbose tag", []byte("---\ntype: context\n!<tag:yaml.org,2002:binary> ZXh0ZW5kcw==: a\n---\n" + body)},
+		{"utf-16le", utf16Frontmatter("type: context\nextends: a\n", binary.LittleEndian, []byte{0xff, 0xfe})},
+		{"utf-16be", utf16Frontmatter("type: context\nextends: a\n", binary.BigEndian, []byte{0xfe, 0xff})},
+		{"empty value", []byte("---\ntype: context\nextends:\n---\n" + body)},
+		{"empty string value", []byte("---\ntype: context\nextends: \"\"\n---\n" + body)},
+		{"merge key", []byte("---\ntype: context\n<<: {extends: a}\n---\n" + body)},
+		{"beside a typed-decode failure", []byte("---\ntype: context\ndescription: [x]\nextends: a\n---\n" + body)},
+	}
+	for _, tc := range trueCases {
+		t.Run("true/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			if !DeclaresExtends(tc.src) {
+				t.Errorf("DeclaresExtends(%q) = false, want true", tc.src)
+			}
+		})
+	}
+	falseCases := []struct {
+		name string
+		src  []byte
+	}{
+		{"nil", nil},
+		{"empty", []byte{}},
+		{"implicit split quoted key", []byte("---\ntype: context\n\"ext\\\n  ends\": a\n---\n" + body)},
+		{"nested", []byte("---\ntype: context\nmetadata:\n  extends: a\n---\n" + body)},
+		{"value substring", []byte("---\ntype: context\ndescription: never extends anything\n---\n" + body)},
+		{"body only", []byte("---\ntype: context\n---\n\nextends: a\n")},
+		{"no frontmatter", []byte("type: context\nextends: a\n")},
+		{"malformed flow mapping", []byte("---\n{type: skill, extends: a\n---\n" + body)},
+	}
+	for _, tc := range falseCases {
+		t.Run("false/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			if DeclaresExtends(tc.src) {
+				t.Errorf("DeclaresExtends(%q) = true, want false", tc.src)
 			}
 		})
 	}

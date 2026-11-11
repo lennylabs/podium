@@ -116,8 +116,8 @@ const ruLegacyLayer = "ops-legacy"
 // (including layer, description, deprecated, frontmatter, and body), but none of
 // the genuinely-recent additive columns the current binary adds (the §8.4
 // soft-delete deleted_at, the retention deprecated_at, the externalized
-// resources, the ingest signature, search_visibility, skill_raw, extends_pin,
-// tags, and sensitivity). This is an upgrade from a recent prior version rather
+// resources, the ingest signature, search_visibility, skill_raw, tags, and
+// sensitivity). This is an upgrade from a recent prior version rather
 // than from the first release, which is the realistic expand-contract case. A
 // boot against this table must add the missing recent columns in place before
 // the soft-delete-filtered read (WHERE deleted_at IS NULL) can run at all.

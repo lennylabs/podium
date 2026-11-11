@@ -27,10 +27,10 @@ The registry's pluggable interfaces:
 | `EmbeddingProvider` | Generates embeddings for ingest text and query text. Built-ins: `openai`, `voyage`, `cohere`, `ollama`. |
 | `LocalSearchProvider` | Optional semantic backing for the local-overlay index. Same SPI as `RegistrySearchProvider`. |
 | `RegistryAuditSink` | Stream for catalogue events; logically distinct from `RegistryStore`, separately mockable, separately routable. |
-| `LayerComposer` | Resolves the caller's effective view from the configured layer list; applies merge semantics and `extends:` resolution. |
+| `LayerComposer` | Resolves the caller's effective view from the configured layer list and applies the collision rule. |
 | `LayerSourceProvider` | Resolves and watches the source backing a layer. Built-ins: `git`, `local`. Custom backends: S3 versioned buckets, OCI registries, HTTP archives, internal CMS bridges. |
 | `GitProvider` | Webhook signature verification and Git fetch semantics, used by the built-in `git` `LayerSourceProvider`. Built-in support for GitHub, GitLab, Bitbucket. |
-| `TypeProvider` | Type definitions: frontmatter JSON Schema + lint rules + adapter hints + field-merge semantics. |
+| `TypeProvider` | Type definitions: frontmatter JSON Schema + lint rules + adapter hints. |
 | `IngestLinter` | Manifest validation, resource-reference checks, type-specific rules; runs pre-merge in CI and again at registry ingest. |
 | `IdentityProvider` | Attaches the caller's attested identity to every registry call. Client-side built-ins acquire the token at the consumer: `oauth-device-code` and `injected-session-token`. Registry-process built-ins resolve identity from the request at the registry: `oidc-jwt` and `trusted-headers`, covered in [Gateway-delegated identity](gateway-delegated-identity). |
 | `LocalOverlayProvider` | Source for the workspace-scoped local overlay layer. Default: workspace filesystem (`.podium/overlay/`). |
@@ -78,7 +78,7 @@ The registry's HTTP API, SDKs, CLI, and outbound webhook stream are designed to 
 
 ### Programmatic curation (semantic discovery + scoped sync)
 
-A script picks artifacts based on whatever context is meaningful (semantic match against a query, the user's recent work, the active project, an upstream ticket) and then invokes `podium sync` with `--include` flags to materialize the selected set. The script owns the discovery logic; Podium owns the materialization (visibility filtering, `extends:` resolution, harness adaptation, audit). The on-disk result is reproducible from the include list.
+A script picks artifacts based on whatever context is meaningful (semantic match against a query, the user's recent work, the active project, an upstream ticket) and then invokes `podium sync` with `--include` flags to materialize the selected set. The script owns the discovery logic; Podium owns the materialization (visibility filtering, harness adaptation, and audit). The on-disk result is reproducible from the include list.
 
 See [Custom consumers via the SDK → Programmatic curation](../consuming/custom-via-sdk#patterns) for a worked example.
 

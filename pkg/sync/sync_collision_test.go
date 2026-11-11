@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -14,11 +15,10 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 )
 
-// These tests pin the filesystem-source outcome of an unsanctioned
-// cross-layer collision on each pkg/sync entry point: Run, Render, and
-// Override. Two registry-side layers contribute shared/note, the higher layer
-// (personal) declares no extends:, and team-shared also contributes
-// shared/other. The composition drops the personal copy, keeps the
+// These tests pin the filesystem-source outcome of a cross-layer collision on
+// each pkg/sync entry point: Run, Render, and Override. Two registry-side
+// layers contribute shared/note, and team-shared also contributes
+// shared/other. The composition drops the higher (personal) copy, keeps the
 // team-shared copy, and materializes the rest.
 
 const (
@@ -42,32 +42,25 @@ func collisionSkill(dir, name, marker, extends string) []testharness.WriteTreeOp
 	}
 }
 
-// writeCollisionRegistry writes the two-layer colliding registry into reg.
-// A non-empty extends is declared on the higher-precedence (personal) copy.
-func writeCollisionRegistry(t *testing.T, reg, extends string) {
+// collisionRegistry returns a fresh two-layer colliding registry.
+func collisionRegistry(t *testing.T) string {
 	t.Helper()
+	reg := t.TempDir()
 	opts := []testharness.WriteTreeOption{{
 		Path:    ".registry-config",
 		Content: "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n",
 	}}
 	opts = append(opts, collisionSkill("team-shared/shared/note", "note", "from-base", "")...)
 	opts = append(opts, collisionSkill("team-shared/shared/other", "other", "from-other", "")...)
-	opts = append(opts, collisionSkill("personal/shared/note", "note", "from-personal", extends)...)
+	opts = append(opts, collisionSkill("personal/shared/note", "note", "from-personal", "")...)
 	testharness.WriteTree(t, reg, opts...)
-}
-
-// collisionRegistry returns a fresh colliding registry with no extends:.
-func collisionRegistry(t *testing.T) string {
-	t.Helper()
-	reg := t.TempDir()
-	writeCollisionRegistry(t, reg, "")
 	return reg
 }
 
 // assertOneCollision fails unless dropped holds exactly one ingest.collision
-// drop of shared/note whose reason names the extends: remedy without naming
-// the kept layer. A drop carries no layer, so each caller pins which copy was
-// dropped through the copy it materializes.
+// drop of shared/note whose reason names the rename-or-remove remedy, carries
+// no extends: wording, and omits the kept layer. A drop carries no layer, so
+// each caller pins which copy was dropped through the copy it materializes.
 func assertOneCollision(t *testing.T, dropped []layer.Drop) {
 	t.Helper()
 	if len(dropped) != 1 {
@@ -78,8 +71,8 @@ func assertOneCollision(t *testing.T, dropped []layer.Drop) {
 	if got != want {
 		t.Errorf("Dropped[0] = %+v, want %+v", got, want)
 	}
-	if !strings.Contains(got.Reason, "declare extends: "+collisionID) {
-		t.Errorf("Reason = %q, want the extends: remedy", got.Reason)
+	if !strings.Contains(got.Reason, "rename") || strings.Contains(got.Reason, "extends") {
+		t.Errorf("Reason = %q, want the rename-or-remove remedy with no extends: wording", got.Reason)
 	}
 	if strings.Contains(got.Reason, "team-shared") {
 		t.Errorf("Reason = %q names the kept layer", got.Reason)
@@ -125,8 +118,7 @@ func lockLayers(t *testing.T, target string) map[string]string {
 // Spec: §4.6
 // Spec: §13.11.3
 // Matrix: §6.10 (ingest.collision)
-// A filesystem-source sync drops the higher-precedence copy of an unsanctioned
-// collision, keeps the lower copy, materializes every other artifact, and
+// A filesystem-source sync drops the higher-precedence copy of a collision, keeps the lower copy, materializes every other artifact, and
 // writes a lock that omits the dropped copy.
 func TestRun_FilesystemCollisionDropsAndContinues(t *testing.T) {
 	t.Parallel()
@@ -180,57 +172,41 @@ func TestRun_FilesystemCollisionDryRunWritesNothing(t *testing.T) {
 
 // Spec: §4.6
 // Spec: §13.11.3
-// Matrix: §6.10 (ingest.collision)
-// Adding extends: to the higher copy sanctions the collision: the next sync
-// drops nothing, materializes the merge, and stale-file cleanup leaves no file
-// the first run wrote for the kept copy that the merge no longer produces.
-func TestRun_FilesystemCollisionResolvedByExtends(t *testing.T) {
+// A filesystem-source sync refuses an ARTIFACT.md that declares extends:
+// under the §4.6 no-inheritance rule. Result.Dropped holds the
+// extends_removed drop, the target and the lock omit the artifact, and every
+// other artifact materializes. Run sets neither standard error nor an exit
+// code, so the CLI end-to-end test pins those.
+func TestRun_FilesystemExtendsDeclarationDropped(t *testing.T) {
 	t.Parallel()
-	reg := collisionRegistry(t)
+	const legacyID = "shared/legacy"
+	reg := t.TempDir()
+	opts := []testharness.WriteTreeOption{{
+		Path:    ".registry-config",
+		Content: "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n",
+	}}
+	opts = append(opts, collisionSkill("team-shared/"+collisionOtherID, "other", "from-other", "")...)
+	opts = append(opts, collisionSkill("personal/"+legacyID, "legacy", "from-legacy", collisionOtherID)...)
+	testharness.WriteTree(t, reg, opts...)
 	target := t.TempDir()
 
-	first, err := Run(Options{RegistryPath: reg, Target: target})
+	res, err := Run(Options{RegistryPath: reg, Target: target})
 	if err != nil {
-		t.Fatalf("first Run: %v", err)
+		t.Fatalf("Run: %v", err)
 	}
-	assertOneCollision(t, first.Dropped)
-
-	writeCollisionRegistry(t, reg, collisionID)
-	second, err := Run(Options{RegistryPath: reg, Target: target})
-	if err != nil {
-		t.Fatalf("second Run: %v", err)
+	if want := []layer.Drop{layer.ExtendsRemovedDrop(legacyID)}; !reflect.DeepEqual(res.Dropped, want) {
+		t.Errorf("Dropped = %+v, want %+v", res.Dropped, want)
 	}
-	if len(second.Dropped) != 0 {
-		t.Fatalf("second Run Dropped = %+v, want none", second.Dropped)
+	if got, want := lockIDs(t, target), []string{collisionOtherID}; !equalStrings(got, want) {
+		t.Errorf("lock IDs = %v, want %v", got, want)
 	}
-
 	tree := testharness.ReadTree(t, target)
-	if got := tree[collisionID+"/ARTIFACT.md"]; !strings.Contains(got, "description: from-personal") {
-		t.Errorf("%s/ARTIFACT.md = %q, want the merged personal description", collisionID, got)
-	}
-	if got := tree[collisionID+"/SKILL.md"]; !strings.Contains(got, "from-personal body") {
-		t.Errorf("%s/SKILL.md = %q, want the personal body", collisionID, got)
-	}
-	if layer := lockLayers(t, target)[collisionID]; layer != "personal" {
-		t.Errorf("lock layer for %s = %q, want personal", collisionID, layer)
-	}
-
-	// Every file on disk is either a lock-tracked path or the lock itself, so
-	// nothing from the first run survived outside the current materialization.
-	lock, err := ReadLock(target)
-	if err != nil || lock == nil {
-		t.Fatalf("ReadLock: lock=%v err=%v", lock, err)
-	}
-	tracked := map[string]bool{}
-	for _, a := range lock.Artifacts {
-		tracked[filepath.ToSlash(a.MaterializedPath)] = true
+	if _, ok := tree[collisionOtherID+"/SKILL.md"]; !ok {
+		t.Errorf("%s not materialized; tree keys:\n%s", collisionOtherID, sortedTreeKeys(tree))
 	}
 	for path := range tree {
-		if strings.HasPrefix(path, ".podium/") {
-			continue
-		}
-		if !tracked[path] {
-			t.Errorf("leftover file %s is not in the lock", path)
+		if strings.HasPrefix(path, legacyID+"/") {
+			t.Errorf("refused artifact materialized at %s", path)
 		}
 	}
 }

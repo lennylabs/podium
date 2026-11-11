@@ -108,9 +108,9 @@ cd podium && go build -o ~/.local/bin/podium ./cmd/podium
   Requires a Podium server, reached through the MCP server or an SDK. See
   [Browsing the catalog](https://lennylabs.github.io/podium/consuming/browsing-the-catalog).
 - **Layered composition.** One catalog assembles from several independent
-  sources in a declared order, with deterministic merge, explicit precedence,
-  and `extends:` for an artifact that inherits and refines a lower one. A
-  catalog on disk composes its subdirectories as ordered layers through
+  sources in a declared order, with deterministic merge and explicit
+  precedence. Two layers that contribute the same artifact ID are a collision,
+  which Podium rejects. A catalog on disk composes its subdirectories as ordered layers through
   `.registry-config`. A server adds registered layers, remote Git sources, and
   visibility. See
   [Layered composition](https://lennylabs.github.io/podium/deployment/layers).

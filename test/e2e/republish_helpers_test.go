@@ -46,6 +46,18 @@ import (
 	"time"
 )
 
+// loadArtifactResp captures the load_artifact response fields the end-to-end
+// tests assert: version, type, frontmatter, manifest_body, sensitivity, and
+// deprecated.
+type loadArtifactResp struct {
+	Version      string `json:"version"`
+	Type         string `json:"type"`
+	Frontmatter  string `json:"frontmatter"`
+	ManifestBody string `json:"manifest_body"`
+	Sensitivity  string `json:"sensitivity"`
+	Deprecated   bool   `json:"deprecated"`
+}
+
 // republishLayer is a handle to a local-source layer registered at runtime
 // against a running server. publishVersion writes the layer's artifact at a
 // given version and reingests, so successive calls stage multiple versions of
@@ -64,12 +76,6 @@ type republishLayer struct {
 // surfaced in the deprecation advisory. Files adds further bundled files in the
 // artifact directory (for example a SKILL.md body or a script), keyed by path
 // relative to the artifact directory.
-//
-// Extends, WhenToUse, and Sensitivity carry the §4.6 extends-merge inputs so a
-// version can declare a pinned parent (Extends: "<id>@<pin>"), inherited
-// when_to_use entries, and a sensitivity the merge folds most-restrictively.
-// They are emitted into the frontmatter only when set, so a plain artifact
-// carries none of them.
 type versionSpec struct {
 	ID          string
 	Version     string
@@ -77,9 +83,6 @@ type versionSpec struct {
 	Type        string
 	Deprecated  bool
 	ReplacedBy  string
-	Extends     string
-	WhenToUse   []string
-	Sensitivity string
 	Files       map[string]string
 }
 
@@ -190,14 +193,14 @@ func (l *republishLayer) writeArtifact(t testing.TB, spec versionSpec) {
 // loadVersion GETs load_artifact for the given id and version (empty version
 // resolves latest) and returns the HTTP status and decoded envelope. It is the
 // read-side companion to publishVersion: assert which version a caller resolves.
-func (l *republishLayer) loadVersion(t testing.TB, id, version string) (int, exLoadResp) {
+func (l *republishLayer) loadVersion(t testing.TB, id, version string) (int, loadArtifactResp) {
 	t.Helper()
 	url := l.srv.BaseURL + "/v1/load_artifact?id=" + id
 	if version != "" {
 		url += "&version=" + version
 	}
 	st, body := l.srv.getMaybeAuth(t, url)
-	var r exLoadResp
+	var r loadArtifactResp
 	if st == 200 {
 		if err := json.Unmarshal(body, &r); err != nil {
 			t.Fatalf("decode load_artifact %s@%s: %v\nbody: %s", id, version, err, body)
@@ -237,18 +240,6 @@ func republishArtifact(spec versionSpec) string {
 	fmt.Fprintf(&b, "---\ntype: %s\nversion: %s\n", typ, spec.Version)
 	if spec.Description != "" {
 		fmt.Fprintf(&b, "description: %s\n", spec.Description)
-	}
-	if spec.Extends != "" {
-		fmt.Fprintf(&b, "extends: %s\n", spec.Extends)
-	}
-	if spec.Sensitivity != "" {
-		fmt.Fprintf(&b, "sensitivity: %s\n", spec.Sensitivity)
-	}
-	if len(spec.WhenToUse) > 0 {
-		b.WriteString("when_to_use:\n")
-		for _, w := range spec.WhenToUse {
-			fmt.Fprintf(&b, "  - %s\n", w)
-		}
 	}
 	if spec.Deprecated {
 		b.WriteString("deprecated: true\n")

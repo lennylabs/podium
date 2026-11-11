@@ -301,22 +301,9 @@ func (s *Memory) listManifests(tenantID string, includeDeleted bool) ([]Manifest
 func (s *Memory) PurgeDeprecatedManifests(_ context.Context, before time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// §4.6/§4.7.6 extends-pin protection: collect the set of versions still
-	// pinned as an extends parent so a deprecated parent a live child depends on
-	// is not purged out from under it (purging it would orphan the child's
-	// load_artifact). The pin form is "<artifact_id>@<version>".
-	pinned := map[string]bool{}
-	for _, rec := range s.manifests {
-		if rec.TenantID != "" && rec.ExtendsPin != "" {
-			pinned[rec.TenantID+"\x00"+rec.ExtendsPin] = true
-		}
-	}
 	n := 0
 	for key, rec := range s.manifests {
 		if rec.Deprecated && rec.DeprecatedAt != nil && rec.DeprecatedAt.Before(before) {
-			if pinned[rec.TenantID+"\x00"+rec.ArtifactID+"@"+rec.Version] {
-				continue
-			}
 			delete(s.manifests, key)
 			n++
 		}
@@ -364,13 +351,13 @@ func (s *Memory) PutDependency(_ context.Context, tenantID string, edge Dependen
 	return nil
 }
 
-// DependentsOf returns every edge ending at artifactID.
+// DependentsOf returns every §4.7.3 edge ending at artifactID.
 func (s *Memory) DependentsOf(_ context.Context, tenantID, artifactID string) ([]DependencyEdge, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []DependencyEdge
 	for _, e := range s.deps[tenantID] {
-		if e.To == artifactID {
+		if e.To == artifactID && isIndexedEdgeKind(e.Kind) {
 			out = append(out, e)
 		}
 	}
@@ -382,10 +369,11 @@ func (s *Memory) DependencyInDegree(_ context.Context, tenantID string) (map[str
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Collect the distinct source set per target, then count, so an artifact
-	// that both extends and delegates to the same target counts once.
+	// that both delegates to a target and names it under mcpServers counts
+	// once. An edge of a kind §4.7.3 does not define is not read.
 	sources := map[string]map[string]struct{}{}
 	for _, e := range s.deps[tenantID] {
-		if e.To == "" || e.From == "" {
+		if e.To == "" || e.From == "" || !isIndexedEdgeKind(e.Kind) {
 			continue
 		}
 		set := sources[e.To]

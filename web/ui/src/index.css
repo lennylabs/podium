@@ -5228,7 +5228,7 @@ label:has(> input:disabled) {
 }
 
 /* A relation names one artifact and leads to it, so each one stands on its
-   own bordered row inside its direction's group rather than wrapping into a
+   own bordered row inside its relation's group rather than wrapping into a
    paragraph of links. The identifier can be longer than the rail is wide and
    breaks inside itself. */
 .relation-chip {
@@ -5242,19 +5242,14 @@ label:has(> input:disabled) {
   margin-bottom: 6px;
 }
 
-/* The chip's direction marker. It is decorative, so the direction it stands
-   for is carried by the group label rather than by the dot alone, and colour
-   is the only thing that separates the two tones. */
+/* The chip's leading marker. It is decorative, and the relation the chip
+   stands for is carried by the group label. */
 .relation-dot {
   flex: none;
   width: 5px;
   height: 5px;
   border-radius: 50%;
   background: var(--meta);
-}
-
-.relation-dot.outbound {
-  background: var(--acc);
 }
 
 .relation-chip a {

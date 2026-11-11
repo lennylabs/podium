@@ -79,9 +79,8 @@ Covered in [Browsing the catalog](../consuming/browsing-the-catalog).
 
 One catalog can be assembled from several independent sources. The layers
 compose in a declared order with deterministic merge. Two layers that
-contribute the same artifact ID are a collision, which Podium rejects unless the
-higher artifact declares `extends:`. `extends:` lets that artifact inherit and
-refine the lower one without forking it. A catalog on disk composes its
+contribute the same artifact ID are a collision, which Podium rejects. A
+catalog on disk composes its
 subdirectories as ordered layers through a `.registry-config` file. A registry
 server adds registered layers, remote Git sources, custom sources through the
 `LayerSourceProvider` SPI, and per-layer visibility.
@@ -115,7 +114,7 @@ Podium becomes valuable as any of these dimensions grow:
 
 - **Catalog size.** Progressive discovery and per-domain navigation handle catalogs that exceed what fits in a system prompt.
 - **Cross-harness delivery.** A canonical artifact format pays off as soon as a team targets more than one harness.
-- **Multiple artifact types.** A dependency graph across skills, agents, contexts, commands, rules, hooks, and MCP server registrations covers cross-type edges (`extends:`, `delegates_to:`, `mcpServers:`) that type-specific stores do not model.
+- **Multiple artifact types.** A dependency graph across skills, agents, contexts, commands, rules, hooks, and MCP server registrations covers cross-type edges (`delegates_to:` and `mcpServers:`) that type-specific stores do not model.
 - **Multiple contributors and audiences.** Per-layer access control, classification, and audit address contributor and audience diversity.
 - **Audiences beyond engineering.** The same catalog feeds developers in coding harnesses and non-developers in desktop chat clients.
 
@@ -143,7 +142,7 @@ These products store and govern agent artifacts centrally. They differ in artifa
 | **Google Cloud Agent Registry** ([docs](https://docs.cloud.google.com/agent-registry/concepts)) | Managed (Google Cloud) | Agents, MCP servers, and skills (skill governance in preview) | Discovery through the registry's search API | None | Skill governance (preview); vulnerability scanning of skills |
 | **JFrog AI Catalog** ([skills registry](https://jfrog.com/ai-catalog/skills-registry/)) | Commercial; SaaS or self-hosted | Skills, plugins, MCP servers, and models | CLI and MCP | None | Policy-driven approval; scanning; signing of approved skills |
 | **Tessl** ([tessl.io](https://tessl.io/registry)) | Commercial; SaaS | Skills, docs, rules, and commands in tiles | Package manager; MCP tools to install | None | Workspace-scoped; evaluation of skill effect |
-| **Podium** | MIT; self-hosted in the local, single-node, or clustered deployment mode | Skills, agents, contexts, commands, rules, hooks, MCP server registrations, and extension types | Native project files through the built-in adapters, for each type a harness's project-level surface carries; marketplace repositories; MCP discovery tools; SDKs | Ordered layers with `extends:` | Per-OIDC-group and per-user visibility evaluated per request; SCIM; multi-tenant mode |
+| **Podium** | MIT; self-hosted in the local, single-node, or clustered deployment mode | Skills, agents, contexts, commands, rules, hooks, MCP server registrations, and extension types | Native project files through the built-in adapters, for each type a harness's project-level surface carries; marketplace repositories; MCP discovery tools; SDKs | Ordered layers | Per-OIDC-group and per-user visibility evaluated per request; SCIM; multi-tenant mode |
 
 **Where each applies.**
 
@@ -153,7 +152,7 @@ These products store and govern agent artifacts centrally. They differ in artifa
 - JFrog AI Catalog fits an organization that already governs packages in Artifactory and wants scanning and approval for skills.
 - Tessl fits an organization that accepts SaaS and wants evaluation of each skill's effect on agent tasks.
 
-**Where Podium applies.** Podium applies when the catalog holds agents, contexts, commands, rules, and hooks beside skills and MCP server registrations, when ordered layers and `extends:` compose several sources, when visibility is evaluated per OIDC group at request time, when the built-in adapters write native project files for each type a harness's project-level surface carries, when consumers verify the signature of what they receive, or when the registry is self-hosted under the MIT license in any deployment mode. Podium does not scan artifacts. Scanning runs in the CI/CD pipeline of the Git repository that a layer ingests from.
+**Where Podium applies.** Podium applies when the catalog holds agents, contexts, commands, rules, and hooks beside skills and MCP server registrations, when ordered layers compose several sources, when visibility is evaluated per OIDC group at request time, when the built-in adapters write native project files for each type a harness's project-level surface carries, when consumers verify the signature of what they receive, or when the registry is self-hosted under the MIT license in any deployment mode. Podium does not scan artifacts. Scanning runs in the CI/CD pipeline of the Git repository that a layer ingests from.
 
 ### Harness vendors' private marketplaces
 

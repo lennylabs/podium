@@ -926,22 +926,6 @@ func TestArtifactTypes_TargetHarnessesRestrictsSync(t *testing.T) {
 	}
 }
 
-// scaffold --extends writes the extends field.
-func TestArtifactTypes_ScaffoldExtends(t *testing.T) {
-	t.Parallel()
-	out := filepath.Join(t.TempDir(), "finance/procurement/extended-vendor-check")
-	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent",
-		"--description", "Extended vendor check.",
-		"--extends", "finance/procurement/vendor-compliance-check@1.x",
-		"--yes", out)
-	if res.Exit != 0 {
-		t.Fatalf("scaffold exit=%d stderr=%s", res.Exit, res.Stderr)
-	}
-	if art := readFile(t, filepath.Join(out, "ARTIFACT.md")); !strings.Contains(art, "extends: finance/procurement/vendor-compliance-check@1.x") {
-		t.Errorf("ARTIFACT.md missing extends:\n%s", art)
-	}
-}
-
 // an invalid sensitivity value exits 2.
 func TestArtifactTypes_InvalidSensitivity(t *testing.T) {
 	t.Parallel()

@@ -132,32 +132,31 @@ func TestAuthCrossTenantQuota_NonInterferenceOverSharedPostgres(t *testing.T) {
 	}
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	// Each org owns a depended-on artifact and a dependent that extends it, so a
-	// dependency edge exists per org. The artifact ids are org-prefixed so a
-	// cross-org dependents query targets an id absent from the other schema.
-	// A dependent pins its parent record, because §4.7.3 resolves an extends
-	// edge through the child's pin.
-	mustPut := func(tenant, artifactID, desc, extendsPin string) {
+	// Each org owns a depended-on artifact and a dependent with a delegates_to
+	// edge to it, so a dependency edge exists per org. The artifact ids are
+	// org-prefixed so a cross-org dependents query targets an id absent from
+	// the other schema.
+	mustPut := func(tenant, artifactID, desc string) {
 		t.Helper()
 		if err := pg.PutManifest(ctx, store.ManifestRecord{
 			TenantID: tenant, ArtifactID: artifactID, Version: "1.0.0",
 			ContentHash: "sha256:" + artifactID, Type: "context", Description: desc,
-			Layer: "shared", IngestedAt: base, ExtendsPin: extendsPin,
+			Layer: "shared", IngestedAt: base,
 		}); err != nil {
 			t.Fatalf("PutManifest(%s/%s): %v", tenant, artifactID, err)
 		}
 	}
 	mustPutEdge := func(tenant, from, to string) {
 		t.Helper()
-		if err := pg.PutDependency(ctx, tenant, store.DependencyEdge{From: from, To: to, Kind: "extends"}); err != nil {
+		if err := pg.PutDependency(ctx, tenant, store.DependencyEdge{From: from, To: to, Kind: "delegates_to"}); err != nil {
 			t.Fatalf("PutDependency(%s %s->%s): %v", tenant, from, to, err)
 		}
 	}
-	mustPut(tenantAcme, "acme/base-policy", "acme base policy", "")
-	mustPut(tenantAcme, "acme/derived-policy", "acme derived policy", "acme/base-policy@1.0.0")
+	mustPut(tenantAcme, "acme/base-policy", "acme base policy")
+	mustPut(tenantAcme, "acme/derived-policy", "acme derived policy")
 	mustPutEdge(tenantAcme, "acme/derived-policy", "acme/base-policy")
-	mustPut(tenantGlobex, "globex/base-policy", "globex base policy", "")
-	mustPut(tenantGlobex, "globex/derived-policy", "globex derived policy", "globex/base-policy@1.0.0")
+	mustPut(tenantGlobex, "globex/base-policy", "globex base policy")
+	mustPut(tenantGlobex, "globex/derived-policy", "globex derived policy")
 	mustPutEdge(tenantGlobex, "globex/derived-policy", "globex/base-policy")
 
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)

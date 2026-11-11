@@ -47,8 +47,8 @@ func makeOverlayWithBody(t *testing.T, dir, body string) string {
 
 // Spec: §6.4 — workspace overlay sits at the highest precedence and
 // replaces the registry's contribution at the same canonical ID. The overlay
-// is the §6.4 exception to the §4.6 collision rule, so the replacement needs
-// no extends: and reports no drop.
+// is the §6.4 exception to the §4.6 collision rule, so the replacement reports
+// no drop.
 func TestRun_OverlayOverridesRegistry(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -81,11 +81,12 @@ func TestRun_OverlayOverridesRegistry(t *testing.T) {
 	}
 }
 
-// Spec: §6.4 — an overlay artifact that declares extends: replaces the
-// same-ID registry-side artifact wholesale. The consumer resolves no extends:
-// chain for an overlay artifact, so the registry copy's fields (tag a) never
-// merge in, an unresolvable parent is not an error, and the §4.6 collision
-// rule drops nothing.
+// Spec: §6.4 — the consumer applies no ingest rule to an overlay artifact
+// and serves it as authored, so an overlay artifact that declares extends:
+// replaces the same-ID registry-side artifact wholesale. The §4.6
+// no-inheritance rule does not refuse it, the registry copy's fields (tag a)
+// never merge in, an extends: value naming a missing artifact is not an
+// error, and the §4.6 collision rule drops nothing.
 func TestRun_OverlayWithExtendsReplacesWholesale(t *testing.T) {
 	t.Parallel()
 	registryBody := "---\ntype: context\nversion: 1.0.0\ndescription: base\nsensitivity: low\ntags: [a]\n---\n\nfrom registry\n"

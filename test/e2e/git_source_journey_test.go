@@ -315,14 +315,14 @@ func pollReingest(t testing.TB, srv *serverProc, layerID, id, version string) {
 
 // loadArtifact GETs /v1/load_artifact for id (empty version resolves latest)
 // and returns the HTTP status and decoded envelope.
-func loadArtifact(t testing.TB, srv *serverProc, id, version string) (int, exLoadResp) {
+func loadArtifact(t testing.TB, srv *serverProc, id, version string) (int, loadArtifactResp) {
 	t.Helper()
 	url := srv.BaseURL + "/v1/load_artifact?id=" + id
 	if version != "" {
 		url += "&version=" + version
 	}
 	st, body := getRaw(t, url)
-	var r exLoadResp
+	var r loadArtifactResp
 	if st == 200 {
 		if err := json.Unmarshal(body, &r); err != nil {
 			t.Fatalf("decode load_artifact %s@%s: %v\nbody: %s", id, version, err, body)

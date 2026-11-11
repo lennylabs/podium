@@ -181,5 +181,4 @@ Directory:
 - **Register an MCP server.** When the agent needs to talk to a service such as a ticket system or a CI dashboard, declare an `mcpServers:` entry pointing at an `mcp-server`-type artifact. See the `mcp-server` and `agent` sections in [Artifact types](artifact-types).
 - **Constrain execution with a sandbox profile.** Set `sandbox_profile: read-only-fs` or stricter so hosts that honor profiles refuse to widen the agent's filesystem access. See [Bundled resources](bundled-resources).
 - **Cap reasoning budget.** When the agent does not need extended thinking, set `effort_hint: low` so consumers route accordingly. See [Hints](hints).
-- **Inherit a base agent.** When two agents share most of their structure, `extends:` lets the second refine the first instead of duplicating it. See [Extends](extends).
 - **Understand what the consumer does with the response.** [Handling artifact responses](../consuming/handling-artifact-responses) covers how SDK callers and harness adapters interpret each frontmatter field.

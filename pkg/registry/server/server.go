@@ -6,9 +6,7 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -635,9 +633,9 @@ type ArtifactDescriptor struct {
 	Description string   `json:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Score       float64  `json:"score,omitempty"`
-	// Sensitivity is the classification label surfaced in search_artifacts
-	// results (§4.7.4), resolved most-restrictive across an extends chain
-	// (§4.6). Omitted when the artifact declares no sensitivity.
+	// Sensitivity is the artifact's own declared classification label,
+	// surfaced in search_artifacts results (§4.7.4). Omitted when the
+	// artifact declares no sensitivity.
 	Sensitivity string `json:"sensitivity,omitempty"`
 	// FoldedFrom is the relative subpath a notable artifact was lifted
 	// from when fold_below_artifacts collapsed its sparse subdomain
@@ -715,10 +713,6 @@ type LoadArtifactResponse struct {
 	// the §7.2.1 timestamp layout. It is present on every response because
 	// DeliveryHash frames it, and it stays out of the §12 entity tag.
 	ArtifactRevision string `json:"artifact_revision"`
-	// ExtendsPin is the "<id>@<version>" parent pin the artifact resolved at
-	// ingest, present only when the caller can see the parent record (§4.6).
-	// Its absence does not mean the artifact extends nothing.
-	ExtendsPin string `json:"extends_pin,omitempty"`
 }
 
 // LargeResourceLink describes one resource whose payload exceeded
@@ -1191,7 +1185,6 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		Deprecated:         res.Deprecated,
 		ReplacedBy:         res.ReplacedBy,
 		DeprecationWarning: res.DeprecationWarning,
-		ExtendsPin:         res.ExtendsPin,
 		ArtifactRevision:   res.ArtifactRevision,
 	}
 	// Spec: §4.7.10 — attest the record before the manifest-body channel
@@ -1219,27 +1212,15 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// validatorFor returns the HTTP validator a load_artifact response carries.
-// The Revalidate predicate and the ETag branch both read it, so the §13.4
+// validatorFor returns the HTTP validator a load_artifact response carries:
+// the content-hash ETag, on a full response, a HEAD, and a 304 alike. The
+// Revalidate predicate and the ETag branch both read it, so the §13.4
 // admission bypass is taken for a GET only when the ETag branch answers
 // 304. A change to the validator lands in both decisions at once.
-func validatorFor(res *core.LoadArtifactResult) string {
-	return loadArtifactETag(res.ContentHash, res.ExtendsPin)
-}
-
-// loadArtifactETag is the strong ETag of a load_artifact response. With no
-// extends_pin served it is the content-hash ETag. With one it appends the hex
-// SHA-256 of the pin, so a body that carries one caller's extends_pin is never
-// revalidated for a caller who is served a different one, or none. The pin is
-// hashed rather than embedded so the validator repeats no parent ID.
 //
 // Spec: §7.2, §13.4.
-func loadArtifactETag(contentHash, extendsPin string) string {
-	if extendsPin == "" || contentHash == "" {
-		return contentHashETag(contentHash)
-	}
-	sum := sha256.Sum256([]byte(extendsPin))
-	return `"` + contentHash + "+" + hex.EncodeToString(sum[:]) + `"`
+func validatorFor(res *core.LoadArtifactResult) string {
+	return contentHashETag(res.ContentHash)
 }
 
 // contentHashETag formats a resolved content hash as a strong HTTP ETag
@@ -1347,10 +1328,9 @@ func encodeBinaryInlineResources(resp *LoadArtifactResponse) {
 // the canonical-document field. Below the cutoff, or without an object
 // store (the §13.11 standalone-without-storage mode), the body stays inline.
 //
-// A merged manifest takes the channel like any other. It was once kept inline
-// because the consumer hashed the pre-merge bytes the URL does not deliver;
-// the §4.7.10 delivery hash frames the served document itself, and a channel
-// that differed for a merged manifest would disclose the merge (§4.6).
+// Every manifest above the cutoff takes the channel. The §4.7.10 delivery hash
+// frames the served document itself, so the bytes the URL delivers are the
+// bytes the consumer hashes.
 func (s *Server) attachManifestBody(ctx context.Context, resp *LoadArtifactResponse, res *core.LoadArtifactResult) error {
 	if s.objectStore == nil {
 		return nil

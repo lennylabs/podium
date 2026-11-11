@@ -151,8 +151,7 @@ type Artifact struct {
 	HookAction       string     `yaml:"hook_action,omitempty"`
 	ServerIdentifier string     `yaml:"server_identifier,omitempty"`
 
-	// Inheritance / targeting (§4.3, §4.6).
-	Extends         string   `yaml:"extends,omitempty"`
+	// Targeting (§4.3).
 	TargetHarnesses []string `yaml:"target_harnesses,omitempty"`
 
 	// External resources (§4.3 external resources).

@@ -63,7 +63,6 @@ var additiveColumns = []additiveColumn{
 	{"manifests", "frontmatter BLOB", "frontmatter BYTEA"},
 	{"manifests", "body BLOB", "body BYTEA"},
 	{"manifests", "skill_raw BLOB", "skill_raw BYTEA"},
-	{"manifests", "extends_pin TEXT NOT NULL DEFAULT ''", "extends_pin TEXT NOT NULL DEFAULT ''"},
 	{"manifests", "signature TEXT NOT NULL DEFAULT ''", "signature TEXT NOT NULL DEFAULT ''"},
 	{"manifests", "search_visibility TEXT NOT NULL DEFAULT ''", "search_visibility TEXT NOT NULL DEFAULT ''"},
 	{"manifests", "resources BLOB", "resources BYTEA"},

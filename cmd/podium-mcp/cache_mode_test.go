@@ -448,39 +448,6 @@ func TestOfflineOnly_SharedBucketKeepsEachIDsRecord(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.10, §6.5 — two children with byte-identical authored packages
-// that pinned different parent versions share a bucket and are served
-// different merged documents. Each loads cache-served and materializes its own
-// merged document, which a reader of the bucket-level frontmatter would not.
-func TestOfflineOnly_DifferingPinsServeEachChildsMergedDocument(t *testing.T) {
-	t.Parallel()
-	authored := "---\ntype: context\nversion: 1.0.0\nextends: shared/base@1.x\n---\nchild\n"
-	hash := "sha256:" + version.CanonicalContentHash([]byte(authored), nil, nil)
-	child := func(id, description string) loadArtifactResponse {
-		return sealDelivery(loadArtifactResponse{
-			ID: id, Type: "context", Version: "1.0.0", ContentHash: hash,
-			Frontmatter:  "---\ntype: context\nversion: 1.0.0\ndescription: " + description + "\n---\nchild\n",
-			ManifestBody: "child\n",
-		})
-	}
-	first, second := child("team/one", "from base 1.0.0"), child("team/two", "from base 1.1.0")
-	registry, _ := newCacheStub(t, first, second)
-	s := cacheServer(t, t.TempDir(), registry.URL, "offline-only")
-	primeLive(t, s, first, map[string]any{"id": first.ID, "version": "1.0.0"})
-	primeLive(t, s, second, map[string]any{"id": second.ID, "version": "1.0.0"})
-
-	dest := t.TempDir()
-	out := s.loadArtifact(map[string]any{"id": first.ID, "version": "1.0.0", "destination": dest})
-	wantServed(t, out, "child\n")
-	got, err := os.ReadFile(filepath.Join(dest, "team/one", "ARTIFACT.md"))
-	if err != nil {
-		t.Fatalf("read materialized: %v", err)
-	}
-	if string(got) != first.Frontmatter {
-		t.Errorf("materialized %q, want team/one's own merged document %q", got, first.Frontmatter)
-	}
-}
-
 // Spec: §4.7.10, §6.5 — the delivery segment is one fixed-length path
 // component of lowercase hex for every canonical ID, and separator-colliding
 // IDs map to distinct segments.

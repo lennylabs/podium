@@ -217,7 +217,7 @@ The registry process reads its own `PODIUM_IDENTITY_PROVIDER` separately. Set it
 
 Setting the registry's provider to `injected-session-token` also requires `PODIUM_RUNTIME_KEYS_PATH`, which names the JSON file holding the trusted runtime signing keys. Write a record into it with `podium admin runtime register --keys-file`, ship the same file to every replica, and restart the process to pick a new key up. A registry that cannot read or parse the file aborts startup with `config.runtime_keys_unavailable`, as does an `injected-session-token` registry whose key set is empty.
 
-For each identity, the registry composes the caller's effective view from every layer their identity is entitled to see, in precedence order. When two layers hold the same artifact ID, ingest rejects the second contribution with `ingest.collision` unless the higher-precedence artifact declares `extends:` against that ID, which lets it inherit and refine the lower one without forking.
+For each identity, the registry composes the caller's effective view from every layer their identity is entitled to see, in precedence order. When two layers hold the same artifact ID, ingest rejects the second contribution with `ingest.collision`.
 
 ---
 

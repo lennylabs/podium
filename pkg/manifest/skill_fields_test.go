@@ -57,7 +57,7 @@ func TestPodiumOnlySkillFieldClassification(t *testing.T) {
 		"type", "version", "when_to_use", "tags", "sensitivity",
 		"search_visibility", "deprecated", "replaced_by", "release_notes",
 		"runtime_requirements", "sandbox_profile", "effort_hint",
-		"model_class_hint", "sbom", "extends", "target_harnesses",
+		"model_class_hint", "sbom", "target_harnesses",
 		"external_resources", "hook_event", "rule_mode", "lint_suppress",
 	}
 	for _, f := range podiumOnly {
@@ -76,6 +76,18 @@ func TestPodiumOnlySkillFieldClassification(t *testing.T) {
 		if !IsAgentSkillsField(f) {
 			t.Errorf("IsAgentSkillsField(%q) = false, want true", f)
 		}
+	}
+}
+
+// Spec: §4.3.4, §4.6 — extends is no longer a Podium-only SKILL.md field, so
+// a SKILL.md extends key is an ordinary non-Podium key.
+func TestPodiumOnlySkillFields_ExcludeExtends(t *testing.T) {
+	t.Parallel()
+	if IsPodiumOnlySkillField("extends") {
+		t.Error(`IsPodiumOnlySkillField("extends") = true, want false`)
+	}
+	if contains(PodiumOnlySkillFields(), "extends") {
+		t.Error("PodiumOnlySkillFields() contains extends")
 	}
 }
 

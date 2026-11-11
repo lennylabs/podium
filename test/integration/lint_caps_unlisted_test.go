@@ -2,6 +2,8 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -13,6 +15,36 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
 )
+
+// lintWriteArtifact writes content as the ARTIFACT.md of the package at dir.
+func lintWriteArtifact(t *testing.T, dir, content string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ARTIFACT.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+}
+
+// lintReingest posts a reingest of layer id to the server at base and returns
+// the decoded 200 response.
+func lintReingest(t *testing.T, base, id string) map[string]any {
+	t.Helper()
+	resp, err := http.Post(base+"/v1/layers/reingest?id="+id, "application/json", nil)
+	if err != nil {
+		t.Fatalf("reingest %s: %v", id, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var m map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		t.Fatalf("decode reingest %s: %v", id, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reingest %s status = %d: %v", id, resp.StatusCode, m)
+	}
+	return m
+}
 
 // Spec: §12 — "ingest-time lint flags newly-set unlisted: true for
 // review." End-to-end through the SQLite store and the HTTP reingest endpoint:
@@ -33,7 +65,7 @@ func TestNewlyUnlistedAdvisory_ReingestSurfacesIt(t *testing.T) {
 
 	layerDir := t.TempDir()
 	domainPath := filepath.Join(layerDir, "finance", "DOMAIN.md")
-	lcaWriteArtifact(t, filepath.Join(layerDir, "finance/ap"),
+	lintWriteArtifact(t, filepath.Join(layerDir, "finance/ap"),
 		"---\ntype: context\nversion: 1.0.0\ndescription: ap\nsensitivity: low\n---\n\nbody\n")
 	writeDomain := func(content string) {
 		t.Helper()
@@ -55,14 +87,14 @@ func TestNewlyUnlistedAdvisory_ReingestSurfacesIt(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	// First reingest: listed — no advisory.
-	first := lcaReingest(t, ts.URL, "finance-layer")
+	first := lintReingest(t, ts.URL, "finance-layer")
 	if hasReingestAdvisory(first, "lint.domain_newly_unlisted") {
 		t.Fatalf("listed DOMAIN.md flagged as newly-unlisted: %v", first["advisories"])
 	}
 
 	// Flip to unlisted and reingest: advisory surfaces.
 	writeDomain("---\nunlisted: true\ndescription: Finance\n---\n\n# Finance\n")
-	second := lcaReingest(t, ts.URL, "finance-layer")
+	second := lintReingest(t, ts.URL, "finance-layer")
 	if !hasReingestAdvisory(second, "lint.domain_newly_unlisted") {
 		t.Fatalf("newly-set unlisted: true not surfaced in reingest advisories: %v", second["advisories"])
 	}
@@ -103,12 +135,12 @@ func TestConfigurablePackageCap_GatesIngest(t *testing.T) {
 	// over the 4 KB configured per-package cap) alongside a clean one, so the
 	// gated package surfaces in LintFailures without aborting the whole layer.
 	artDir := filepath.Join(t.TempDir(), "layer")
-	lcaWriteArtifact(t, filepath.Join(artDir, "finance/big"),
+	lintWriteArtifact(t, filepath.Join(artDir, "finance/big"),
 		"---\ntype: context\nversion: 1.0.0\ndescription: big\nsensitivity: low\n---\n\nbody\n")
 	if err := os.WriteFile(filepath.Join(artDir, "finance/big", "data.bin"), make([]byte, 8*1024), 0o644); err != nil {
 		t.Fatalf("write resource: %v", err)
 	}
-	lcaWriteArtifact(t, filepath.Join(artDir, "finance/small"),
+	lintWriteArtifact(t, filepath.Join(artDir, "finance/small"),
 		"---\ntype: context\nversion: 1.0.0\ndescription: small\nsensitivity: low\n---\n\nbody\n")
 
 	cfg := store.LayerConfig{TenantID: "t", ID: "big-layer", SourceType: "local", LocalPath: artDir, Order: 1}

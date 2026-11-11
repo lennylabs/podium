@@ -43,9 +43,9 @@ const GROUPS = [
   {
     key: 'authoring-semantics',
     pages:
-      'docs/authoring/frontmatter-reference.md, docs/authoring/domains.md, docs/authoring/rule-modes.md, docs/authoring/hooks.md, docs/authoring/extends.md',
+      'docs/authoring/frontmatter-reference.md, docs/authoring/domains.md, docs/authoring/rule-modes.md, docs/authoring/hooks.md',
     focus:
-      'Semantics rather than syntax: merge and precedence order, what extends inherits and what it overrides, hook event names, and which rule mode each adapter actually emits. Check against pkg/manifest, pkg/lint, and pkg/adapter.',
+      'Semantics rather than syntax: merge and precedence order, hook event names, and which rule mode each adapter actually emits. Check against pkg/manifest, pkg/lint, and pkg/adapter.',
   },
   {
     key: 'delivery',

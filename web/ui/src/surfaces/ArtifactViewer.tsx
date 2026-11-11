@@ -1,7 +1,7 @@
 // The artifact viewer. It renders the manifest body as a document through the
 // sanitized rendering path, presents the frontmatter as a property table
-// whose values are text, and links to the artifacts that extend or depend on
-// this one, which §13.10 requires.
+// whose values are text, and links to the artifacts that depend on this one
+// (§4.7.3), which §13.10 requires.
 //
 // The layout is two columns: the content column carries the header, the tabs,
 // and whichever tab is open, and the rail beside it carries the metadata that
@@ -714,7 +714,7 @@ function ArtifactRail({
           <PropertyTable raw={frontmatter} testID="rail-frontmatter-table" clampValues />
         </section>
       )}
-      <Relations artifact={artifact} />
+      <Relations id={artifact.id} />
       <section aria-label="Bundled resources">
         {/* The count stands on the header's far edge, so the extent of the
             section is read off the header rather than by counting rows. */}
@@ -898,13 +898,11 @@ function ingestedLine(layer: LayerRecord | null): string {
  * (§4.7.3: the reverse index holds the edges whose `to` is this artifact,
  * and `from` is the artifact that declared the relation), so the raw edge
  * kind beside the `from` link would state the relationship backwards: it
- * would read as this artifact extending the one that extends it. Each label
- * therefore reads in the passive direction, and an edge kind this UI does
- * not know still reads inbound rather than inverted. */
+ * would read as this artifact delegating to the one that delegates to it.
+ * Each label therefore reads in the passive direction, and an edge kind this
+ * UI does not know still reads inbound rather than inverted. */
 function inboundLabel(kind: string): string {
   switch (kind) {
-    case 'extends':
-      return 'extended by';
     case 'delegates_to':
       return 'delegated to by';
     case 'mcpServers':
@@ -915,25 +913,16 @@ function inboundLabel(kind: string): string {
 }
 
 /** RelationChip is one artifact named by a relation group: the reference as
- * the manifest or the edge states it, and the viewer route it opens. */
+ * the edge states it, and the viewer route it opens. */
 interface RelationChip {
   href: string;
   text: string;
 }
 
-/** RailRelationGroup draws one direction of the relation graph. The two
- * directions are separate groups because a single merged list leaves the
- * reader unable to tell whether this artifact extends the one named or is
- * extended by it, and each group states its own absence so a direction with
- * no members reads as empty rather than as missing. The count stands beside
- * the label once a group holds more than one member, where a single chip
- * already counts itself. Each chip carries a leading dot toned by direction,
- * accent on the edge this artifact declares and meta on the edges that end
- * here, so the two directions stay apart once the group labels have scrolled
- * out of the reader's eye. */
 /** RailGroup is one labelled band of the relations rail. It carries the label
  * so a band that reports a state other than its members, such as a read that
- * failed, still names the relation it stands for. */
+ * failed or a reverse index with no edges, still names the relation it stands
+ * for. */
 function RailGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="rail-group">
@@ -943,113 +932,72 @@ function RailGroup({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
-function RailRelationGroup({
-  label,
-  chips,
-  absent,
-  direction,
-}: {
-  label: string;
-  chips: RelationChip[];
-  absent: string;
-  direction: 'outbound' | 'inbound';
-}) {
+/** RailRelationGroup draws the dependent artifacts that declared one relation
+ * to this artifact. A group is drawn only when it has members, so its list is
+ * never empty. The count stands beside the label once a group holds more than
+ * one member, where a single chip already counts itself. */
+function RailRelationGroup({ label, chips }: { label: string; chips: RelationChip[] }) {
   return (
     <RailGroup label={chips.length > 1 ? `${label} · ${chips.length}` : label}>
-      {chips.length === 0 ? (
-        <EmptyState scope="inline">{absent}</EmptyState>
-      ) : (
-        <ul className="relation-list">
-          {chips.map((chip) => (
-            <li key={chip.text} className="relation-chip">
-              <span className={`relation-dot ${direction}`} aria-hidden="true" />
-              <a className="mono" href={chip.href}>
-                {chip.text}
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul className="relation-list">
+        {chips.map((chip) => (
+          <li key={chip.text} className="relation-chip">
+            <span className="relation-dot" aria-hidden="true" />
+            <a className="mono" href={chip.href}>
+              {chip.text}
+            </a>
+          </li>
+        ))}
+      </ul>
     </RailGroup>
   );
 }
 
-/** referenceID strips the version from an `<id>@<version>` pin (§4.4), so the
- * link opens the artifact the pin names and the chip keeps the pin. */
-function referenceID(reference: string): string {
-  const at = reference.indexOf('@');
-  return at === -1 ? reference : reference.slice(0, at);
-}
-
-/** servedExtends turns the registry's extends_pin into the rail's outbound
- * chip. Whether the reader may be told the parent exists is the registry's
- * decision (§4.6): it serves the pinned `<id>@<version>` only to a caller who
- * can see the parent record, and its absence reads exactly as an artifact that
- * extends nothing. The chip shows the pin verbatim and links the artifact it
- * names. */
-function servedExtends(artifact: LoadArtifactResponse): RelationChip[] {
-  const pin = artifact.extends_pin ?? '';
-  return pin === '' ? [] : [{ href: artifactHref(referenceID(pin)), text: pin }];
-}
-
 /** inboundGroups splits the reverse-index edges into one group per relation,
- * in the order the registry served them. The extends group is always drawn,
- * because §13.10 puts the extending artifacts on this surface and a reader
- * has to be told when there are none; a relation nobody declared stands no
+ * in the order the registry served them. A relation nobody declared stands no
  * group of its own. */
-const extendedBy = 'extended by';
-
-function inboundGroups(edges: DependencyEdge[]): { label: string; chips: RelationChip[]; absent: string }[] {
-  const groups = new Map<string, RelationChip[]>([[extendedBy, []]]);
+function inboundGroups(edges: DependencyEdge[]): { label: string; chips: RelationChip[] }[] {
+  const groups = new Map<string, RelationChip[]>();
   for (const edge of edges) {
     const label = inboundLabel(edge.kind);
     const chips = groups.get(label) ?? [];
     chips.push({ href: artifactHref(edge.from), text: edge.from });
     groups.set(label, chips);
   }
-  return [...groups].map(([label, chips]) => ({
-    label,
-    chips,
-    absent: label === extendedBy ? 'Nothing extends this artifact.' : `Nothing is ${label} this artifact.`,
-  }));
+  return [...groups].map(([label, chips]) => ({ label, chips }));
 }
 
-/** Relations lists the artifacts this one extends and the artifacts that
- * extend or otherwise depend on it. The reverse-index edges arrive on their
- * own request, so an artifact with no edges is a state of that group rather
- * than of the page. The outbound direction comes from the load response. */
-function Relations({ artifact }: { artifact: LoadArtifactResponse }) {
-  const edges = useAsync(() => dependentsOf(artifact.id), [artifact.id]);
+/** dependentsLabel heads the band that stands for the dependents as a whole:
+ * the absent state when the reverse index holds no edges, and the failure
+ * band when the read does not answer. §13.10 puts the dependent artifacts on
+ * this surface, so the reader has to be told when there are none and when
+ * they went unreported. */
+const dependentsLabel = 'dependents';
+
+/** Relations lists the artifacts that depend on this one (§4.7.3), as §13.10
+ * requires. The reverse-index edges arrive on their own request, so an
+ * artifact with no edges is a state of the dependents band rather than of the
+ * page. */
+function Relations({ id }: { id: string }) {
+  const edges = useAsync(() => dependentsOf(id), [id]);
+  const groups = edges.value === null ? [] : inboundGroups(edges.value);
   return (
     <section aria-label="Relations">
       <p className="label">Relations</p>
-      <RailRelationGroup
-        label="extends"
-        chips={servedExtends(artifact)}
-        absent="This artifact extends nothing."
-        direction="outbound"
-      />
       {edges.loading && <Loading label="Loading relations." />}
-      {/* A failed reverse-index read keeps the group heading the served
-          groups would have carried, for the same reason inboundGroups always
-          draws the extends group: the reader has to be told which relation
-          went unreported, and a bare failure band between the outbound group
-          and the rest of the rail names none. */}
       {edges.error !== null && (
-        <RailGroup label={extendedBy}>
+        <RailGroup label={dependentsLabel}>
           <ErrorState error={edges.error} onRetry={edges.reload} />
         </RailGroup>
       )}
-      {edges.value !== null &&
-        inboundGroups(edges.value).map((group) => (
-          <RailRelationGroup
-            key={group.label}
-            label={group.label}
-            chips={group.chips}
-            absent={group.absent}
-            direction="inbound"
-          />
-        ))}
+      {edges.value !== null && groups.length === 0 && (
+        <RailGroup label={dependentsLabel}>
+          <EmptyState scope="inline">Nothing depends on this artifact.</EmptyState>
+        </RailGroup>
+      )}
+      {groups.map((group) => (
+        <RailRelationGroup key={group.label} label={group.label} chips={group.chips} />
+      ))}
     </section>
   );
 }

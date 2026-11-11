@@ -5,14 +5,14 @@ import (
 )
 
 // Spec: §4.7.3 — DependentsOf returns every edge ending at the artifact,
-// covering extends, delegates_to, and mcpServers edges.
+// covering delegates_to and mcpServers edges.
 func TestDependentsOf_AllEdgeKinds(t *testing.T) {
 	t.Parallel()
 	g := NewGraph()
-	g.AddEdge(Edge{From: "child-skill", To: "parent", Kind: EdgeExtends})
+	g.AddEdge(Edge{From: "child-skill", To: "parent", Kind: EdgeDelegatesTo})
 	g.AddEdge(Edge{From: "agent1", To: "parent", Kind: EdgeDelegatesTo})
 	g.AddEdge(Edge{From: "skill-with-mcp", To: "parent", Kind: EdgeMCPServer})
-	g.AddEdge(Edge{From: "irrelevant", To: "other", Kind: EdgeExtends})
+	g.AddEdge(Edge{From: "irrelevant", To: "other", Kind: EdgeMCPServer})
 
 	got := g.DependentsOf("parent")
 	if len(got) != 3 {
@@ -36,8 +36,8 @@ func TestDependentsOf_AllEdgeKinds(t *testing.T) {
 func TestImpactSet_Transitive(t *testing.T) {
 	t.Parallel()
 	g := NewGraph()
-	g.AddEdge(Edge{From: "a", To: "b", Kind: EdgeExtends})
-	g.AddEdge(Edge{From: "b", To: "c", Kind: EdgeExtends})
+	g.AddEdge(Edge{From: "a", To: "b", Kind: EdgeDelegatesTo})
+	g.AddEdge(Edge{From: "b", To: "c", Kind: EdgeMCPServer})
 	g.AddEdge(Edge{From: "d", To: "b", Kind: EdgeDelegatesTo})
 
 	got := g.ImpactSet("c")

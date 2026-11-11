@@ -1,13 +1,13 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -31,7 +31,7 @@ func rcWrite(t *testing.T, dir, id, src string) {
 	}
 }
 
-// rcArtifact returns a context artifact's source, with an extends: line when
+// rcArtifact returns an artifact's source, with an extends: line when
 // extends is non-empty and the extra frontmatter lines appended.
 func rcArtifact(typ, ver, extends, extra string) string {
 	src := "---\ntype: " + typ + "\nversion: " + ver + "\ndescription: fixture artifact\nsensitivity: low\n"
@@ -49,15 +49,7 @@ type rcReject struct {
 	Details    map[string]any `json:"details"`
 }
 
-// rcMCPParent is the hidden-layer agent whose mcpServers entry jira is an
-// executable field a child in another layer must restate under §4.6.
-const rcMCPParent = "core/mcpparent"
-
-// rcSandboxParent is the hidden-layer agent whose read-only-fs
-// sandbox_profile a child in another layer conflicts with under §4.6.
-const rcSandboxParent = "core/sandboxparent"
-
-// rcReingestStatus seeds the hidden admin layer with parents, ingests it,
+// rcReingestStatus seeds the hidden admin layer with shared/note, ingests it,
 // gives alice a user-defined layer holding aliceTree, reingests that layer as
 // alice over POST /v1/layers/reingest, and returns the store, the status, and
 // the raw body, whatever the status is.
@@ -75,12 +67,6 @@ func rcReingestStatus(t *testing.T, aliceTree map[string]string) (store.Store, i
 
 	coreDir := t.TempDir()
 	rcWrite(t, coreDir, "shared/note", rcArtifact("context", "1.0.0", "", ""))
-	rcWrite(t, coreDir, "core/agentparent", rcArtifact("agent", "1.0.0", "", ""))
-	rcWrite(t, coreDir, "core/ctxparent", rcArtifact("context", "1.0.0", "", ""))
-	rcWrite(t, coreDir, "core/old", rcArtifact("context", "1.0.0", "", "deprecated: true\n"))
-	rcWrite(t, coreDir, rcMCPParent, rcArtifact("agent", "1.0.0", "",
-		"mcpServers:\n  - name: jira\n    command: jira-mcp\n    args: [--stdio]\n"))
-	rcWrite(t, coreDir, rcSandboxParent, rcArtifact("agent", "1.0.0", "", "sandbox_profile: read-only-fs\n"))
 	core := store.LayerConfig{
 		TenantID: "t", ID: rcHiddenLayer, Order: 1, SourceType: "local", LocalPath: coreDir,
 		Users: []string{"ops@acme.com"},
@@ -89,7 +75,7 @@ func rcReingestStatus(t *testing.T, aliceTree map[string]string) (store.Store, i
 		t.Fatalf("PutLayerConfig(core): %v", err)
 	}
 	res, err := localReingestRunner(st, nil)(ctx, core, nil)
-	if err != nil || len(res.Rejected) > 0 || res.Accepted != 6 {
+	if err != nil || len(res.Rejected) > 0 || res.Accepted != 1 {
 		t.Fatalf("ingest core: err=%v accepted=%d rejected=%+v", err, res.Accepted, res.Rejected)
 	}
 
@@ -135,11 +121,11 @@ func rcReingest(t *testing.T, aliceTree map[string]string) ([]byte, map[string]r
 	return body, byID
 }
 
-// Spec: §4.6 hidden parents (observable) — the cross-layer collision rejection
-// a non-admin layer owner receives from POST /v1/layers/reingest names the
-// colliding artifact ID, the `declare extends:` remedy, and the
-// ingest.collision code, and names no layer, because the layer that already
-// contributes the ID is one alice cannot read.
+// Spec: §4.6, §7.3.1 — the cross-layer collision rejection a non-admin
+// layer owner receives from POST /v1/layers/reingest names the colliding
+// artifact ID, tells the author to rename it, and carries the ingest.collision
+// code. It names no layer, because the layer that already contributes the ID
+// is one alice cannot read, and it no longer offers extends: as a remedy.
 func TestReingest_CollisionReasonNamesNoLayer(t *testing.T) {
 	t.Parallel()
 	body, rejected := rcReingest(t, map[string]string{
@@ -152,95 +138,37 @@ func TestReingest_CollisionReasonNamesNoLayer(t *testing.T) {
 	if got.Code != "ingest.collision" {
 		t.Errorf("code = %q, want ingest.collision", got.Code)
 	}
-	for _, want := range []string{`"shared/note"`, "declare extends: shared/note"} {
+	for _, want := range []string{`"shared/note"`, "rename"} {
 		if !strings.Contains(got.Reason, want) {
 			t.Errorf("reason %q missing %q", got.Reason, want)
 		}
 	}
-	if strings.Contains(string(body), rcHiddenLayer) {
-		t.Errorf("reingest response names the hidden layer %q: %s", rcHiddenLayer, body)
-	}
-}
-
-// Spec: §4.6 hidden parents (observable) — resolving an extends: reference
-// discloses its resolution to the author who wrote it, so the reingest
-// rejections other than the collision keep naming the parent and why it did
-// not resolve: that it does not exist, that its type differs, that no stored
-// version satisfies the constraint, and that its versions are deprecated.
-// None of them names the layer that contributes the parent.
-func TestReingest_ExtendsResolutionReasonsSurvive(t *testing.T) {
-	t.Parallel()
-	body, rejected := rcReingest(t, map[string]string{
-		"mine/missing": rcArtifact("context", "1.0.0", "core/absent", ""),
-		"mine/typed":   rcArtifact("context", "1.0.0", "core/agentparent", ""),
-		"mine/range":   rcArtifact("context", "1.0.0", "core/ctxparent@9.x", ""),
-		"mine/dep":     rcArtifact("context", "1.0.0", "core/old", ""),
-	})
-	cases := map[string][]string{
-		"mine/missing": {`no parent artifact "core/absent"`},
-		"mine/typed":   {"core/agentparent", `type "agent"`},
-		"mine/range":   {"no parent version satisfies", "core/ctxparent@9.x"},
-		"mine/dep":     {`parent "core/old"`, "deprecated"},
-	}
-	for id, wants := range cases {
-		got, ok := rejected[id]
-		if !ok {
-			t.Errorf("%s not rejected: %s", id, body)
-			continue
-		}
-		if got.Code != "ingest.invalid_artifact" {
-			t.Errorf("%s code = %q, want ingest.invalid_artifact", id, got.Code)
-		}
-		for _, want := range wants {
-			if !strings.Contains(got.Reason, want) {
-				t.Errorf("%s reason %q missing %q", id, got.Reason, want)
-			}
-		}
+	if strings.Contains(got.Reason, "extends") {
+		t.Errorf("reason %q offers extends:", got.Reason)
 	}
 	if strings.Contains(string(body), rcHiddenLayer) {
 		t.Errorf("reingest response names the hidden layer %q: %s", rcHiddenLayer, body)
 	}
 }
 
-// rcMCPChild is alice's agent that extends the hidden rcMCPParent and does
-// not restate its jira mcpServers entry.
-func rcMCPChild() string {
-	return rcArtifact("agent", "1.0.0", rcMCPParent, "")
-}
-
-// Spec: §4.6 executable fields across layers, §7.3.1 — a reingest that
-// refuses a child for leaving an executable field to a parent in a layer the
-// owner cannot read reports the refusal with ingest.invalid_artifact and a
-// details member holding the executable_inheritance constraint and the field
-// path. Neither the reason nor details names the parent, the body names no
-// hidden layer, and a rejection whose rule defines no details, the collision
-// beside it, carries no details key.
-func TestReingest_ExecutableInheritanceDetails(t *testing.T) {
+// Spec: §4.6, §7.3.1 — a reingest that refuses an ARTIFACT.md declaring
+// extends: answers 200 and reports the refusal with ingest.invalid_artifact,
+// the §4.6 no-inheritance reason, and a details member holding exactly the
+// extends_removed constraint. A rejection whose rule defines no details, the
+// collision beside it, carries no details key, and the body names no hidden
+// layer.
+func TestReingest_ExtendsRemovedDetails(t *testing.T) {
 	t.Parallel()
 	body, rejected := rcReingest(t, map[string]string{
-		"mine/agent":  rcMCPChild(),
+		"mine/child":  rcArtifact("context", "1.0.0", "shared/note", ""),
 		"shared/note": rcArtifact("context", "2.0.0", "", ""),
 	})
-	got, ok := rejected["mine/agent"]
+	got, ok := rejected["mine/child"]
 	if !ok {
-		t.Fatalf("mine/agent not rejected: %s", body)
+		t.Fatalf("mine/child not rejected: %s", body)
 	}
-	if got.Code != "ingest.invalid_artifact" {
-		t.Errorf("code = %q, want ingest.invalid_artifact", got.Code)
-	}
-	if c := got.Details["constraint"]; c != "executable_inheritance" {
-		t.Errorf("details.constraint = %v, want executable_inheritance", c)
-	}
-	fields, _ := got.Details["fields"].([]any)
-	if len(fields) != 1 || fields[0] != "mcpServers[jira]" {
-		t.Errorf("details.fields = %v, want [mcpServers[jira]]", got.Details["fields"])
-	}
-	details, err := json.Marshal(got.Details)
-	if err != nil {
-		t.Fatalf("marshal details: %v", err)
-	}
-	if strings.Contains(got.Reason, rcMCPParent) || strings.Contains(string(details), rcMCPParent) {
-		t.Errorf("rejection names the hidden parent %q: reason=%q details=%s", rcMCPParent, got.Reason, details)
+	if got.Code != "ingest.invalid_artifact" || got.Reason != layer.ExtendsRemovedReason {
+		t.Errorf("rejection = %+v, want ingest.invalid_artifact with the extends_removed reason", got)
 	}
 	if strings.Contains(string(body), rcHiddenLayer) {
 		t.Errorf("reingest response names the hidden layer %q: %s", rcHiddenLayer, body)
@@ -252,68 +180,42 @@ func TestReingest_ExecutableInheritanceDetails(t *testing.T) {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		t.Fatalf("decode reingest response %s: %v", body, err)
 	}
-	var sawNote bool
+	seen := map[string]bool{}
 	for _, entry := range raw.Rejected {
-		if string(entry["artifact_id"]) != `"shared/note"` {
-			continue
-		}
-		sawNote = true
-		if d, has := entry["details"]; has {
-			t.Errorf("shared/note collision entry carries details %s, want no details key", d)
-		}
-	}
-	if !sawNote {
-		t.Errorf("shared/note collision not rejected: %s", body)
-	}
-}
-
-// Spec: §4.6, §7.3.1 — a reingest that refuses a child whose
-// sandbox_profile conflicts with a parent's in a layer the owner cannot read
-// reports the refusal with ingest.invalid_artifact and details holding the
-// sandbox_profile_conflict constraint alone. Neither the reason, the details,
-// nor the response body names the parent, its layer, or either profile value.
-func TestReingest_SandboxProfileConflictDetails(t *testing.T) {
-	t.Parallel()
-	body, rejected := rcReingest(t, map[string]string{
-		"mine/sandboxed": rcArtifact("agent", "1.0.0", rcSandboxParent, "sandbox_profile: network-isolated\n"),
-	})
-	got, ok := rejected["mine/sandboxed"]
-	if !ok {
-		t.Fatalf("mine/sandboxed not rejected: %s", body)
-	}
-	if got.Code != "ingest.invalid_artifact" {
-		t.Errorf("code = %q, want ingest.invalid_artifact", got.Code)
-	}
-	if want := map[string]any{"constraint": "sandbox_profile_conflict"}; !reflect.DeepEqual(got.Details, want) {
-		t.Errorf("details = %#v, want %#v", got.Details, want)
-	}
-	details, err := json.Marshal(got.Details)
-	if err != nil {
-		t.Fatalf("marshal details: %v", err)
-	}
-	for _, withheld := range []string{rcSandboxParent, rcHiddenLayer, "read-only-fs", "network-isolated"} {
-		for where, text := range map[string]string{"reason": got.Reason, "details": string(details), "body": string(body)} {
-			if strings.Contains(text, withheld) {
-				t.Errorf("%s names %q: %s", where, withheld, text)
+		d, has := entry["details"]
+		switch id := string(entry["artifact_id"]); id {
+		case `"mine/child"`:
+			seen[id] = true
+			var compact bytes.Buffer
+			if err := json.Compact(&compact, d); err != nil || compact.String() != `{"constraint":"extends_removed"}` {
+				t.Errorf("mine/child details = %s (%v), want exactly {\"constraint\":\"extends_removed\"}", d, err)
+			}
+		case `"shared/note"`:
+			seen[id] = true
+			if has {
+				t.Errorf("shared/note collision entry carries details %s, want no details key", d)
 			}
 		}
 	}
+	if len(seen) != 2 {
+		t.Errorf("rejected entries seen = %v, want mine/child and shared/note: %s", seen, body)
+	}
 }
 
-// Spec: §7.3.1 — the rejected list and its details belong to a cycle answered
-// without a §6.10 error envelope. A cycle that accepts nothing and holds a
-// lint failure is answered with the ingest.lint_failed 422 envelope, which
-// reports neither the executable-field refusal beside the lint failure nor its
-// details, and the refused child is not stored. The omission is the existing
-// envelope behavior SPEC-2 edit 2 of proposal 0057 records, so a later change
-// that carries rejected into the envelope shows here as a test change.
-func TestReingest_ExecutableInheritanceUnderLintEnvelope(t *testing.T) {
+// Spec: §4.6, §7.3.1 — the rejected list and its details belong to a cycle
+// answered without a §6.10 error envelope. A cycle that accepts nothing and
+// holds a lint failure is answered with the ingest.lint_failed 422 envelope,
+// which reports neither the extends_removed refusal beside the lint failure
+// nor its details, and the refused artifact is not stored. The omission is the
+// existing envelope behavior, so a later change that carries rejected into the
+// envelope shows here as a test change.
+func TestReingest_ExtendsRemovedUnderLintEnvelope(t *testing.T) {
 	t.Parallel()
 	// The hook omits hook_action, which the ingest linter refuses.
 	hook := "---\ntype: hook\nversion: 1.0.0\ndescription: fixture hook\nsensitivity: low\n" +
 		"hook_event: stop\n---\n\nbody\n"
 	st, status, body := rcReingestStatus(t, map[string]string{
-		"mine/agent": rcMCPChild(),
+		"mine/child": rcArtifact("context", "1.0.0", "shared/note", ""),
 		"mine/hook":  hook,
 	})
 	if status != http.StatusUnprocessableEntity {
@@ -329,10 +231,10 @@ func TestReingest_ExecutableInheritanceUnderLintEnvelope(t *testing.T) {
 	if _, has := env["rejected"]; has {
 		t.Errorf("422 envelope carries a rejected member: %s", body)
 	}
-	if strings.Contains(string(body), "executable_inheritance") {
-		t.Errorf("422 envelope reports the executable-field refusal: %s", body)
+	if strings.Contains(string(body), "extends_removed") {
+		t.Errorf("422 envelope reports the extends_removed refusal: %s", body)
 	}
-	if _, err := st.GetManifest(context.Background(), "t", "mine/agent", "1.0.0"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("GetManifest(mine/agent) err = %v, want store.ErrNotFound", err)
+	if _, err := st.GetManifest(context.Background(), "t", "mine/child", "1.0.0"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("GetManifest(mine/child) err = %v, want store.ErrNotFound", err)
 	}
 }

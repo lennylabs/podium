@@ -719,13 +719,13 @@ func TestDeployment_BatchLoad(t *testing.T) {
 	}
 }
 
-// /v1/dependents returns extends-based edges.
+// /v1/dependents returns delegates_to edges.
 func TestDeployment_Dependents(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":               "multi_layer: true\nlayer_order:\n  - org\n  - team\n",
 		"org/shared/parent/ARTIFACT.md":  "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nbody\n",
-		"team/finance/child/ARTIFACT.md": "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: shared/parent@1.x\n---\n\nbody\n",
+		"team/finance/child/ARTIFACT.md": "---\ntype: agent\nversion: 2.0.0\ndescription: child\ndelegates_to: [shared/parent]\n---\n\nbody\n",
 	})
 	srv := startServer(t, reg)
 	st, body := getRaw(t, srv.BaseURL+"/v1/dependents?id=shared/parent")
@@ -733,7 +733,7 @@ func TestDeployment_Dependents(t *testing.T) {
 		t.Fatalf("GET /v1/dependents = HTTP %d: %s", st, body)
 	}
 	if !strings.Contains(string(body), "finance/child") {
-		t.Errorf("/v1/dependents should report the extends edge from finance/child:\n%s", body)
+		t.Errorf("/v1/dependents should report the delegates_to edge from finance/child:\n%s", body)
 	}
 }
 

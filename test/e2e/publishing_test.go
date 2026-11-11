@@ -1006,7 +1006,7 @@ const pubDroppedDesc = "Dropped copy of pay-invoice."
 const pubCollisionRejected = "rejected: finance/ap/pay-invoice (ingest.collision):"
 
 // writeCollidingPublishRegistry stages writePublishRegistry plus a
-// team-shared copy of finance/ap/pay-invoice that declares no extends:. With no
+// team-shared copy of finance/ap/pay-invoice. With no
 // layer_order, team-shared follows team-finance alphabetically and has the
 // higher precedence, so the sync drops it. The colliding ID sits inside the
 // finance-pack plugin scope (finance/**), so a marketplace render composes it.

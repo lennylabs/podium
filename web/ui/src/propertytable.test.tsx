@@ -7,7 +7,7 @@
 // computed style, so a case reads the declaration the sheet's matching rules
 // give the row rather than a resolved colour.
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { PropertyTable } from './components/PropertyTable';
@@ -104,16 +104,17 @@ describe('frontmatter property table', () => {
     expect(ruleValue('.property-items li + li::before', 'color')).toBe('var(--faint)');
   });
 
-  // The note under the panel quotes a frontmatter key inside a sentence. Left
-  // as bare mono it reads as a slip in the typeface rather than as a quoted
-  // identifier, and the same element in the rendered body on the tab beside it
-  // carries the chip fill, so one viewer would draw one token two ways.
+  // The registry serves the frontmatter block as the author wrote it, with no
+  // key withheld, so the panel carries no note accounting for a removed key in
+  // either of its views.
   // Spec: §13.10
-  it('draws the served note key as a code chip', () => {
+  it('draws no served note in the table view or the raw view', () => {
     render(<PropertyTable raw={raw} offerRaw />);
-    const token = screen.getByTestId('frontmatter-served-note').querySelector('code');
-    expect(token?.textContent).toBe('extends');
-    expect(declared(token as Element, 'background')).toBe('var(--chip)');
-    expect(declared(token as Element, 'border-radius')).toBe('4px');
+    expect(screen.getByTestId('frontmatter-table')).toBeTruthy();
+    expect(screen.queryByTestId('frontmatter-served-note')).toBeNull();
+    expect(screen.getByText(/Values are shown verbatim/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Raw YAML' }));
+    expect(screen.queryByTestId('frontmatter-table')).toBeNull();
+    expect(screen.queryByTestId('frontmatter-served-note')).toBeNull();
   });
 });

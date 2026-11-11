@@ -287,7 +287,7 @@ func TestRunSyncOverrideInteractive_AddsAndMaterializes(t *testing.T) {
 // Spec: §13.11.3
 // Matrix: §6.10 (ingest.collision)
 // TestRunSyncOverrideInteractive_CollisionExits1 pins that applying a toggle
-// from the TUI over a registry whose layers collide without extends: reports
+// from the TUI over a registry whose layers collide reports
 // the dropped artifact on standard error and exits 1, with the toggle kept.
 func TestRunSyncOverrideInteractive_CollisionExits1(t *testing.T) {
 	registry := t.TempDir()

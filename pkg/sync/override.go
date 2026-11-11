@@ -61,7 +61,7 @@ type OverrideResult struct {
 	Changed  bool
 	Warnings []string
 	// Dropped lists the artifacts the re-materialization dropped under the
-	// §4.6 collision rule or the §4.6 executable-field rule (§13.11.3);
+	// §4.6 collision rule or the §4.6 no-inheritance rule (§13.11.3);
 	// empty under DryRun, without a RegistryPath, and for a server source.
 	Dropped []layer.Drop
 }

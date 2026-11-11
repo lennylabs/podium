@@ -129,10 +129,10 @@ A typical setup might have:
 
 When a caller asks for an artifact, Podium composes the caller's
 **effective view** from every visible layer, in precedence order.
-Two layers cannot contribute the same canonical ID unless the
-higher-precedence artifact declares `extends:` on the lower one. In
-that case the higher artifact inherits and refines the lower one
-without forking (see [extends](../authoring/extends)).
+Two registry-side layers cannot contribute the same canonical ID.
+Ingest rejects the second contribution with `ingest.collision`, and
+no artifact inherits from another (see
+[Layered composition](../deployment/layers#inheritance)).
 
 ![Layer composition and precedence: an ordered layer stack on the left (lowest precedence at the bottom) composes into a single effective view for one caller identity on the right.](../assets/diagrams/layer-composition.svg)
 
@@ -149,9 +149,11 @@ ASCII fallback for the diagram above (layer composition and precedence):
      admin - groups: [finance]                 |  org       -> lowest, visible to anyone
   1. org-defaults                              |
      admin - organization: true                |  Layers the caller cannot see are
-                                               |  silently excluded; hidden parents
-                                               |  merge server-side when a child
-                                               |  declares extends:.
+                                               |  silently excluded.
+
+  Collisions between registry-side layers are rejected at ingest.
+  Resolution runs on every registry call; the workspace overlay is
+  merged in by the MCP server.
 -->
 
 
@@ -202,9 +204,7 @@ ASCII fallback for the diagram above (identity and visibility flow):
     marketing-public public: true             always visible     YES
 
   Visibility evaluation runs on every registry call. Layers the
-  caller cannot see are silently excluded from the view. When a
-  visible child declares extends:, a hidden parent merges server-side
-  and its ID and layer are withheld. Public mode
+  caller cannot see are silently excluded from the view. Public mode
   and filesystem-source deployments short-circuit visibility to
   true for every layer.
 -->

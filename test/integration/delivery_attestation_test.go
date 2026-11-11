@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -29,25 +28,20 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
-// The delivery-attestation fixture holds a parent layer only alice can see
-// and a child layer alice and bob can see. carol sees neither. Every request
-// names its identity in the daUserHeader header.
-const (
-	daUserHeader = "X-Test-User"
-	daParentPin  = "base/parent@1.0.0"
-)
+// The delivery-attestation fixture holds a base layer only alice can see and
+// a team layer alice and bob can see. carol sees neither. Every request names
+// its identity in the daUserHeader header.
+const daUserHeader = "X-Test-User"
 
 var (
 	// daBigBody exceeds the inline cutoff and ends without a trailing
-	// newline, so the merged document normalizes it (CODE-5).
+	// newline.
 	daBigBody = strings.Repeat("big line\n", objectstore.InlineCutoff/9+100) + "last line"
 	daRecords = []store.ManifestRecord{
-		{ArtifactID: "base/parent", Layer: "base", Type: "context",
-			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Parent.\nsensitivity: low\n---\n\nparent prose\n")},
-		{ArtifactID: "team/child", Layer: "team", Type: "context", ExtendsPin: daParentPin,
-			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Child.\nextends: " + daParentPin + "\n---\n\nchild body\n")},
-		{ArtifactID: "team/big", Layer: "team", Type: "context", ExtendsPin: daParentPin,
-			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Big.\nextends: " + daParentPin + "\n---\n\n" + daBigBody)},
+		{ArtifactID: "base/note", Layer: "base", Type: "context",
+			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Base note.\nsensitivity: low\n---\n\nbase prose\n")},
+		{ArtifactID: "team/big", Layer: "team", Type: "context",
+			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Big.\n---\n\n" + daBigBody)},
 		{ArtifactID: "team/plain", Layer: "team", Type: "context", Sensitivity: "low",
 			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Plain.\nsensitivity: low\n---\n\nplain body\n")},
 		{ArtifactID: "team/withres", Layer: "team", Type: "context",
@@ -56,15 +50,12 @@ var (
 		{ArtifactID: "team/skill", Layer: "team", Type: "skill",
 			Frontmatter: []byte("---\ntype: skill\nversion: 1.0.0\ndescription: A skill.\n---\n"),
 			SkillRaw:    []byte("---\nname: skill\ndescription: A skill.\n---\n\nskill prose\n")},
-		{ArtifactID: "base/skillparent", Layer: "base", Type: "skill",
-			Frontmatter: []byte("---\ntype: skill\nversion: 1.0.0\ndescription: Parent skill.\n---\n"),
-			SkillRaw:    []byte("---\nname: skillparent\ndescription: Parent skill.\n---\n\nparent skill prose\n")},
 		// team/plainskill is a skill with no ARTIFACT.md: its stored
 		// manifest is empty and the registry serves the synthesized document.
 		{ArtifactID: "team/plainskill", Layer: "team", Type: "skill",
 			SkillRaw: []byte("---\nname: plainskill\ndescription: A plain skill.\n---\n\nplain skill prose\n")},
-		{ArtifactID: "team/bigskill", Layer: "team", Type: "skill", ExtendsPin: "base/skillparent@1.0.0",
-			Frontmatter: []byte("---\ntype: skill\nversion: 1.0.0\ndescription: Big skill.\nextends: base/skillparent@1.0.0\n---\n"),
+		{ArtifactID: "team/bigskill", Layer: "team", Type: "skill",
+			Frontmatter: []byte("---\ntype: skill\nversion: 1.0.0\ndescription: Big skill.\n---\n"),
 			SkillRaw:    []byte("---\nname: bigskill\ndescription: Big skill.\n---\n\n" + daBigBody)},
 	}
 )
@@ -232,11 +223,10 @@ func batchRecord(t *testing.T, raw []byte) version.DeliveryRecord {
 // Spec: §4.7.10 — the single-load response and the batch envelope serve one
 // delivery hash per artifact, both signatures verify under the registry key,
 // and a recomputation from each path's own served bytes reproduces it, the
-// batch entry's from its own sensitivity: a plain artifact with resources, a
-// classified artifact, a merged child below the cutoff, a merged child
-// whose merged document the single-load path serves by manifest_body_url, a
-// skill, and a skill with no ARTIFACT.md, whose records frame the synthesized
-// document (§4.3.4).
+// batch entry's from its own sensitivity: an artifact with resources, a
+// classified artifact, an artifact whose above-cutoff document the single-load
+// path serves by manifest_body_url, a skill, and a skill with no ARTIFACT.md,
+// whose records frame the synthesized document (§4.3.4).
 func TestLoadArtifact_SingleAndBatchAgreeOnTheDeliveryHash(t *testing.T) {
 	t.Parallel()
 	f := newDAFixture(t)
@@ -245,7 +235,7 @@ func TestLoadArtifact_SingleAndBatchAgreeOnTheDeliveryHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SynthesizedSkillDocument: %v", err)
 	}
-	for _, id := range []string{"team/withres", "team/plain", "team/child", "team/big", "team/skill", "team/plainskill"} {
+	for _, id := range []string{"team/withres", "team/plain", "team/big", "team/skill", "team/plainskill"} {
 		t.Run(id, func(t *testing.T) {
 			single, singleRaw := f.load(t, id, "alice")
 			env, batchRaw := f.batch(t, id, "alice")
@@ -261,7 +251,7 @@ func TestLoadArtifact_SingleAndBatchAgreeOnTheDeliveryHash(t *testing.T) {
 				}
 			}
 			if id == "team/big" && single.ManifestBodyURL == nil {
-				t.Error("the above-cutoff merged document was served inline on the single-load path")
+				t.Error("the above-cutoff document was served inline on the single-load path")
 			}
 			if got := version.DeliveryHash(f.singleRecord(t, singleRaw, "alice")); got != single.DeliveryHash {
 				t.Errorf("single-load recomputation = %s, served %s", got, single.DeliveryHash)
@@ -294,140 +284,26 @@ func TestLoadArtifact_SingleAndBatchAgreeOnTheDeliveryHash(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 hidden parents (withheld) — the raw response bytes of a merged
-// child loaded by an identity that cannot see the parent layer name neither
-// the parent nor carry a raw_frontmatter, manifest_merged, or signature key.
-func TestLoadArtifact_MergedResponseCarriesNoParentReference(t *testing.T) {
-	t.Parallel()
-	f := newDAFixture(t)
-	_, raw := f.load(t, "team/child", "bob")
-	for _, needle := range []string{"base/parent", `"raw_frontmatter"`, `"manifest_merged"`, `"signature"`, `"extends_pin"`} {
-		if bytes.Contains(raw, []byte(needle)) {
-			t.Errorf("response carries %s:\n%s", needle, raw)
-		}
-	}
-}
-
-// daKeys returns the sorted top-level keys of a JSON object.
-func daKeys(t *testing.T, raw []byte) []string {
-	t.Helper()
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &m); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-// Spec: §4.6 hidden parents (withheld) — a merged and an unmerged response
-// carry equal key sets, so no field's presence marks a merge.
-func TestLoadArtifact_MergedAndUnmergedResponseKeysMatch(t *testing.T) {
-	t.Parallel()
-	f := newDAFixture(t)
-	_, merged := f.load(t, "team/child", "bob")
-	_, plain := f.load(t, "team/plain", "bob")
-	if a, b := strings.Join(daKeys(t, merged), ","), strings.Join(daKeys(t, plain), ","); a != b {
-		t.Errorf("merged keys %s, plain keys %s", a, b)
-	}
-}
-
-// Spec: §4.6 hidden parents (withheld), §6.6, §13.12 — an above-cutoff merged
-// manifest is served by manifest_body_url, the loading identity fetches it
-// through /objects, and the body the fetched document splits to is the body
-// the delivery hash frames, for a child body with no trailing newline.
-func TestLoadArtifact_LargeMergedManifestUsesPresignedURL(t *testing.T) {
+// Spec: §6.6, §13.12 — an above-cutoff manifest is served by
+// manifest_body_url, the loading identity fetches it through /objects, and the
+// body the fetched document splits to is the authored body the delivery hash
+// frames, for a body with no trailing newline.
+func TestLoadArtifact_LargeManifestUsesPresignedURL(t *testing.T) {
 	t.Parallel()
 	f := newDAFixture(t)
 	resp, respRaw := f.load(t, "team/big", "bob")
 	if resp.ManifestBodyURL == nil {
-		t.Fatal("the above-cutoff merged manifest was served inline")
+		t.Fatal("the above-cutoff manifest was served inline")
 	}
 	if resp.Frontmatter != "" || resp.ManifestBody != "" {
 		t.Error("the inline document fields were not cleared")
 	}
 	rec := f.singleRecord(t, respRaw, "bob")
-	if !strings.HasSuffix(rec.ManifestBody, "last line\n") {
-		t.Errorf("re-derived body ends %q, want the normalized trailing newline", rec.ManifestBody[len(rec.ManifestBody)-12:])
+	if rec.ManifestBody != daBigBody {
+		t.Errorf("re-derived body ends %q, want the authored body ending %q", rec.ManifestBody[len(rec.ManifestBody)-12:], "last line")
 	}
 	if got := version.DeliveryHash(rec); got != resp.DeliveryHash {
 		t.Errorf("recomputed delivery hash %s, served %s", got, resp.DeliveryHash)
-	}
-}
-
-// Spec: §4.6 hidden parents (withheld), §7.2 — a parent-visible identity's raw
-// response body carries the pinned parent in extends_pin.
-func TestLoadArtifact_ExtendsPinFieldReachesTheWire(t *testing.T) {
-	t.Parallel()
-	f := newDAFixture(t)
-	_, raw := f.load(t, "team/child", "alice")
-	var wire map[string]any
-	if err := json.Unmarshal(raw, &wire); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if wire["extends_pin"] != daParentPin {
-		t.Errorf("extends_pin = %v, want %s", wire["extends_pin"], daParentPin)
-	}
-}
-
-// Spec: §4.6 hidden parents (withheld), §13.4 — a conditional GET carrying
-// one identity's ETag, sent by an identity with the other parent visibility,
-// answers 200 with the sender's own extends_pin, or none, and a different
-// ETag, in both directions.
-func TestLoadArtifact_ConditionalGetAcrossIdentitiesServesOwnExtendsPin(t *testing.T) {
-	t.Parallel()
-	f := newDAFixture(t)
-	const path = "/v1/load_artifact?id=team/child"
-	_, aliceHeaders, _ := f.do(t, http.MethodGet, path, "alice", nil)
-	_, bobHeaders, _ := f.do(t, http.MethodGet, path, "bob", nil)
-	aliceTag, bobTag := aliceHeaders.Get("ETag"), bobHeaders.Get("ETag")
-	if aliceTag == "" || aliceTag == bobTag {
-		t.Fatalf("ETags alice %q bob %q, want distinct", aliceTag, bobTag)
-	}
-	for _, tc := range []struct {
-		user, sentTag, wantTag string
-		wantPin                bool
-	}{
-		{user: "bob", sentTag: aliceTag, wantTag: bobTag, wantPin: false},
-		{user: "alice", sentTag: bobTag, wantTag: aliceTag, wantPin: true},
-	} {
-		status, headers, raw := f.do(t, http.MethodGet, path, tc.user, nil, "If-None-Match", tc.sentTag)
-		if status != http.StatusOK {
-			t.Errorf("%s with the other identity's ETag = %d, want 200", tc.user, status)
-			continue
-		}
-		if got := headers.Get("ETag"); got != tc.wantTag {
-			t.Errorf("%s ETag = %q, want %q", tc.user, got, tc.wantTag)
-		}
-		if has := bytes.Contains(raw, []byte(`"extends_pin"`)); has != tc.wantPin {
-			t.Errorf("%s response extends_pin present = %v, want %v", tc.user, has, tc.wantPin)
-		}
-	}
-	if status, _, _ := f.do(t, http.MethodGet, path, "alice", nil, "If-None-Match", aliceTag); status != http.StatusNotModified {
-		t.Errorf("alice with her own ETag = %d, want 304", status)
-	}
-}
-
-// Spec: §4.6 hidden parents (withheld), §13.4 — each identity's HEAD ETag
-// equals its own full-GET ETag, and only the parent-visible identity's differs
-// from the content-hash ETag.
-func TestLoadArtifact_HeadETagMatchesFullGetETagPerIdentity(t *testing.T) {
-	t.Parallel()
-	f := newDAFixture(t)
-	const path = "/v1/load_artifact?id=team/child"
-	contentTag := `"` + f.stored["team/child"].ContentHash + `"`
-	for user, wantContentTag := range map[string]bool{"alice": false, "bob": true} {
-		_, getHeaders, _ := f.do(t, http.MethodGet, path, user, nil)
-		_, headHeaders, _ := f.do(t, http.MethodHead, path, user, nil)
-		if headHeaders.Get("ETag") != getHeaders.Get("ETag") {
-			t.Errorf("%s HEAD ETag %q, GET ETag %q", user, headHeaders.Get("ETag"), getHeaders.Get("ETag"))
-		}
-		if isContent := getHeaders.Get("ETag") == contentTag; isContent != wantContentTag {
-			t.Errorf("%s ETag %q equals the content-hash ETag = %v, want %v", user, getHeaders.Get("ETag"), isContent, wantContentTag)
-		}
 	}
 }
 
@@ -461,9 +337,9 @@ func (f *daFixture) bigLink(t *testing.T) *server.LargeResourceLink {
 	return resp.ManifestBodyURL
 }
 
-// Spec: §13.12 — an identity that can see the merged child fetches its
+// Spec: §13.12 — an identity that can see the artifact fetches its
 // manifest_body_url key through /objects.
-func TestObjects_MergedManifestKeyServedToVisibleCaller(t *testing.T) {
+func TestObjects_ManifestKeyServedToVisibleCaller(t *testing.T) {
 	t.Parallel()
 	f := newDAFixture(t)
 	link := f.bigLink(t)
@@ -472,22 +348,22 @@ func TestObjects_MergedManifestKeyServedToVisibleCaller(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 — an identity that cannot see the child receives the
-// random-key 404 for the merged document's key.
-func TestObjects_MergedManifestKeyInvisibleAnswersAsNonexistent(t *testing.T) {
+// Spec: §13.12 — an identity that cannot see the artifact receives the
+// random-key 404 for its document's key.
+func TestObjects_ManifestKeyInvisibleAnswersAsNonexistent(t *testing.T) {
 	t.Parallel()
 	f := newDAFixture(t)
 	key := strings.TrimPrefix(f.bigLink(t).ContentHash, "sha256:")
 	f.wantNonexistent(t, key, "carol")
 }
 
-// Spec: §13.12 — the stored pre-merge ARTIFACT.md of a pinned non-skill child
-// is not a served document, so its key answers as nonexistent to an identity
-// that can see the child, even when an object is stored under it.
+// Spec: §13.12 — an object stored under a key no served document names is not
+// owned by any artifact, so the key answers as nonexistent to an identity that
+// can see every artifact, even when an object is stored under it.
 func TestObjects_UnservedStoredDocumentKeyAnswersAsNonexistent(t *testing.T) {
 	t.Parallel()
 	f := newDAFixture(t)
-	doc := f.stored["team/big"].Frontmatter
+	doc := append(append([]byte(nil), f.stored["team/big"].Frontmatter...), "\nunserved\n"...)
 	key := core.ManifestBodyKey(doc)
 	if err := f.objects.Put(context.Background(), key, doc, "text/markdown"); err != nil {
 		t.Fatalf("Put: %v", err)
@@ -495,23 +371,22 @@ func TestObjects_UnservedStoredDocumentKeyAnswersAsNonexistent(t *testing.T) {
 	f.wantNonexistent(t, key, "alice")
 }
 
-// Spec: §13.12 — after the parent is soft-deleted the recorded merged key
-// authorizes nothing: it answers as nonexistent to an identity that can still
-// see the child. Deleting the parent's layer tombstones the parent row, which
-// resolveExtendsChain then cannot read.
-func TestObjects_MergedManifestKeyWithBrokenChainAnswersAsNonexistent(t *testing.T) {
+// Spec: §13.12 — after the artifact's layer is soft-deleted its document key
+// authorizes nothing: it answers as nonexistent to an identity that could see
+// the artifact before the deletion.
+func TestObjects_ManifestKeyOfDeletedLayerAnswersAsNonexistent(t *testing.T) {
 	t.Parallel()
 	f := newDAFixture(t)
 	key := strings.TrimPrefix(f.bigLink(t).ContentHash, "sha256:")
-	if err := f.st.DeleteLayerConfig(context.Background(), "default", "base"); err != nil {
+	if err := f.st.DeleteLayerConfig(context.Background(), "default", "team"); err != nil {
 		t.Fatalf("DeleteLayerConfig: %v", err)
 	}
 	f.wantNonexistent(t, key, "alice")
 }
 
-// Spec: §13.12 — a merged skill serves its own stored SKILL.md, so that key
-// stays owned whatever the skill's pin.
-func TestObjects_MergedSkillStoredSkillMDServed(t *testing.T) {
+// Spec: §13.12 — a skill serves its own stored SKILL.md by manifest_body_url,
+// so that key is owned.
+func TestObjects_SkillStoredSkillMDServed(t *testing.T) {
 	t.Parallel()
 	f := newDAFixture(t)
 	resp, _ := f.load(t, "team/bigskill", "alice")
@@ -550,7 +425,8 @@ func (f *daFixture) syncAs(t *testing.T, user string, check *sign.DeliveryCheck)
 
 // Spec: §4.7.10, §7.5 — a server-source sync against a registry that signs
 // its delivery hashes verifies every record under always with the registry's
-// key, including a merged child served by manifest_body_url, and materializes.
+// key, including an above-cutoff manifest served by manifest_body_url, and
+// materializes.
 func TestServerSync_SignedAlwaysVerifies(t *testing.T) {
 	t.Parallel()
 	f := newDAFixture(t)

@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	podsync "github.com/lennylabs/podium/pkg/sync"
 )
@@ -928,7 +929,7 @@ func TestFilesystemSync_CollisionRaisedByLint(t *testing.T) {
 }
 
 // collidingSyncRegistry writes a two-layer filesystem registry in which
-// override-layer contributes shared/note without extends:, colliding with
+// override-layer contributes its own shared/note, colliding with
 // base-layer's copy, plus a non-colliding base-layer/shared/other.
 func collidingSyncRegistry(t *testing.T) string {
 	t.Helper()
@@ -944,15 +945,19 @@ func collidingSyncRegistry(t *testing.T) string {
 // prints for the dropped override-layer/shared/note.
 const collisionRejectedLine = "rejected: shared/note (ingest.collision): cross-layer collision"
 
-// assertCollisionReported checks the rejected line and the extends: remedy on
-// standard error.
+// assertCollisionReported checks the rejected line and the rename-or-remove
+// remedy on standard error. The remedy names no inheritance, because §4.6
+// rejects every same-ID collision between registry-side layers.
 func assertCollisionReported(t *testing.T, res cliResult) {
 	t.Helper()
 	if !strings.Contains(res.Stderr, collisionRejectedLine) {
 		t.Errorf("stderr missing %q:\n%s", collisionRejectedLine, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "declare extends: shared/note") {
-		t.Errorf("stderr missing the extends: remedy:\n%s", res.Stderr)
+	if !strings.Contains(res.Stderr, "rename this artifact or remove the other copy first") {
+		t.Errorf("stderr missing the rename-or-remove remedy:\n%s", res.Stderr)
+	}
+	if strings.Contains(res.Stderr, "extends") {
+		t.Errorf("stderr names the removed extends: remedy:\n%s", res.Stderr)
 	}
 }
 
@@ -968,8 +973,8 @@ func assertLowerCopyMaterialized(t *testing.T, target string) {
 }
 
 // A filesystem-source sync drops the higher-precedence copy of an artifact
-// two layers contribute without extends:, reports it on standard error,
-// materializes the rest, and exits 1.
+// two layers contribute, reports it on standard error, materializes the
+// rest, and exits 1.
 //
 // Spec: §13.11.3
 // Matrix: §6.10 (ingest.collision)
@@ -1154,58 +1159,47 @@ func pollLog(w *watchProc, needle string, within time.Duration) bool {
 	return false
 }
 
-// inheritanceRejectedLine is the standard-error line a filesystem-source sync
-// prints for the dropped team-layer/team/notify.
-const inheritanceRejectedLine = "rejected: team/notify (ingest.invalid_artifact):"
+// extendsRejectedLine is the standard-error line a filesystem-source sync
+// prints for the refused team-layer/team/notify.
+const extendsRejectedLine = "rejected: team/notify (" + layer.InvalidArtifactCode + "): " + layer.ExtendsRemovedReason
 
-// inheritingSyncRegistry writes a two-layer filesystem registry in which
-// team-layer's hook team/notify extends base-layer's core/notify and omits the
-// hook_action the parent sets, plus a kept team-layer/shared/other. The
-// filesystem source runs no lint, so the hook reaches the executable-field rule.
-func inheritingSyncRegistry(t *testing.T) string {
+// extendsSyncRegistry writes a two-layer filesystem registry in which
+// team-layer's hook team/notify declares extends: core/notify and omits the
+// hook_action it once inherited, beside base-layer's core/notify and
+// shared/other. The filesystem source runs no lint, so the hook reaches the
+// §4.6 no-inheritance rule.
+func extendsSyncRegistry(t *testing.T) string {
 	t.Helper()
 	hook := func(desc, extra string) string {
 		return "---\ntype: hook\nversion: 1.0.0\ndescription: " + desc + "\nhook_event: stop\n" + extra + "---\n\nbody\n"
 	}
 	return writeRegistry(t, map[string]string{
 		".registry-config":                    solofsRegistryConfig("base-layer", "team-layer"),
-		"base-layer/core/notify/ARTIFACT.md":  hook("parent", "hook_action: ./notify.sh\n"),
-		"team-layer/team/notify/ARTIFACT.md":  hook("child", "extends: core/notify\n"),
-		"team-layer/shared/other/ARTIFACT.md": contextArtifact("other"),
+		"base-layer/core/notify/ARTIFACT.md":  hook("base", "hook_action: ./notify.sh\n"),
+		"base-layer/shared/other/ARTIFACT.md": contextArtifact("other"),
+		"team-layer/team/notify/ARTIFACT.md":  hook("team", "extends: core/notify\n"),
 	})
 }
 
-// assertInheritanceReported checks the rejected line and the field it names on
-// standard error.
-func assertInheritanceReported(t *testing.T, res cliResult) {
-	t.Helper()
-	if !strings.Contains(res.Stderr, inheritanceRejectedLine) {
-		t.Errorf("stderr missing %q:\n%s", inheritanceRejectedLine, res.Stderr)
-	}
-	if !strings.Contains(res.Stderr, "hook_action") {
-		t.Errorf("stderr does not name the unrestated hook_action:\n%s", res.Stderr)
-	}
-}
-
-// assertChildDropped checks that target holds the parent and the kept sibling
-// and does not hold the dropped child.
-func assertChildDropped(t *testing.T, target string) {
+// assertExtendsRefusedOnly checks that target holds core/notify and
+// shared/other and does not hold the refused team/notify.
+func assertExtendsRefusedOnly(t *testing.T, target string) {
 	t.Helper()
 	mustExist(t, filepath.Join(target, "core", "notify", "ARTIFACT.md"))
 	mustExist(t, filepath.Join(target, "shared", "other", "ARTIFACT.md"))
 	if _, err := os.Stat(filepath.Join(target, "team", "notify")); !os.IsNotExist(err) {
-		t.Errorf("the dropped team/notify reached the target (stat err=%v)", err)
+		t.Errorf("the refused team/notify reached the target (stat err=%v)", err)
 	}
 }
 
-// A filesystem-source sync drops a cross-layer extends: child that leaves an
-// executable field to its parent, reports it on standard error, materializes
-// the rest, and exits 1.
+// A filesystem-source sync refuses an ARTIFACT.md that declares extends:,
+// reports it on standard error with ingest.invalid_artifact and the
+// no-inheritance reason, materializes the rest, and exits 1.
 //
-// Spec: §13.11.3
-func TestFilesystemSync_ExecutableInheritanceDropsChild(t *testing.T) {
+// Spec: §4.6, §13.11.3
+func TestFilesystemSync_ExtendsDeclarationDropsArtifact(t *testing.T) {
 	t.Parallel()
-	reg := inheritingSyncRegistry(t)
+	reg := extendsSyncRegistry(t)
 
 	t.Run("one-shot", func(t *testing.T) {
 		t.Parallel()
@@ -1214,10 +1208,16 @@ func TestFilesystemSync_ExecutableInheritanceDropsChild(t *testing.T) {
 		if res.Exit != 1 {
 			t.Fatalf("sync exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
 		}
-		assertInheritanceReported(t, res)
-		assertChildDropped(t, target)
-		if lock := readFile(t, filepath.Join(target, ".podium", "sync.lock")); strings.Contains(lock, "team/notify") {
-			t.Errorf("lock records the dropped team/notify:\n%s", lock)
+		cliContains(t, res.Stderr, extendsRejectedLine, "the refused team/notify")
+		assertExtendsRefusedOnly(t, target)
+		lock := readFile(t, filepath.Join(target, ".podium", "sync.lock"))
+		if strings.Contains(lock, "team/notify") {
+			t.Errorf("lock records the refused team/notify:\n%s", lock)
+		}
+		for _, want := range []string{"core/notify", "shared/other"} {
+			if !strings.Contains(lock, want) {
+				t.Errorf("lock missing %q:\n%s", want, lock)
+			}
 		}
 	})
 
@@ -1228,14 +1228,14 @@ func TestFilesystemSync_ExecutableInheritanceDropsChild(t *testing.T) {
 		if res.Exit != 1 {
 			t.Fatalf("sync --dry-run exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
 		}
-		assertInheritanceReported(t, res)
+		cliContains(t, res.Stderr, extendsRejectedLine, "the refused team/notify")
 		if entries, _ := os.ReadDir(target); len(entries) != 0 {
 			t.Errorf("--dry-run wrote into the target: %v", entries)
 		}
 	})
 
-	// The --config arm returns errDropped for the target, so the drop fails the
-	// target run the same way a collision does.
+	// The --config arm returns errDropped for the target, so the refusal fails
+	// the target run the same way a collision does.
 	t.Run("config workspace target", func(t *testing.T) {
 		t.Parallel()
 		ws := t.TempDir()
@@ -1245,50 +1245,12 @@ func TestFilesystemSync_ExecutableInheritanceDropsChild(t *testing.T) {
 		if res.Exit != 1 {
 			t.Fatalf("sync --config exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
 		}
-		assertInheritanceReported(t, res)
+		cliContains(t, res.Stderr, extendsRejectedLine, "the refused team/notify")
 		if !strings.Contains(res.Stderr, "target collide-ws:") {
 			t.Errorf("stderr missing the target failure line:\n%s", res.Stderr)
 		}
-		assertChildDropped(t, target)
+		assertExtendsRefusedOnly(t, target)
 	})
-}
-
-// A filesystem-source sync drops a same-layer extends: child whose
-// sandbox_profile network-isolated differs from its parent's read-only-fs,
-// reports it on standard error without naming either profile, materializes
-// the parent and the unrelated sibling, and exits 1. The dry-run and --config
-// arms share the drop path TestFilesystemSync_ExecutableInheritanceDropsChild
-// pins, so only the one-shot arm runs here.
-//
-// Spec: §13.11.3
-func TestFilesystemSync_SandboxProfileConflictDropsChild(t *testing.T) {
-	t.Parallel()
-	profiled := func(desc, extra string) string {
-		return "---\ntype: context\nversion: 1.0.0\ndescription: " + desc + "\n" + extra + "---\n\nbody\n"
-	}
-	reg := writeRegistry(t, map[string]string{
-		".registry-config":                      solofsRegistryConfig("team-layer"),
-		"team-layer/ops/a-parent/ARTIFACT.md":   profiled("parent", "sandbox_profile: read-only-fs\n"),
-		"team-layer/ops/b-child/ARTIFACT.md":    profiled("child", "sandbox_profile: network-isolated\nextends: ops/a-parent\n"),
-		"team-layer/shared/sibling/ARTIFACT.md": contextArtifact("sibling"),
-	})
-	target := t.TempDir()
-	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
-	if res.Exit != 1 {
-		t.Fatalf("sync exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
-	}
-	cliContains(t, res.Stderr, "rejected: ops/b-child (ingest.invalid_artifact): extends: sandbox_profile differs", "the dropped child")
-	for _, leak := range []string{"read-only-fs", "network-isolated", "seccomp-strict"} {
-		cliNotContains(t, res.Stderr, leak, "a restricting profile value")
-	}
-	mustExist(t, filepath.Join(target, "ops", "a-parent", "ARTIFACT.md"))
-	mustExist(t, filepath.Join(target, "shared", "sibling", "ARTIFACT.md"))
-	if _, err := os.Stat(filepath.Join(target, "ops", "b-child")); !os.IsNotExist(err) {
-		t.Errorf("the dropped ops/b-child reached the target (stat err=%v)", err)
-	}
-	if lock := readFile(t, filepath.Join(target, ".podium", "sync.lock")); strings.Contains(lock, "ops/b-child") {
-		t.Errorf("lock records the dropped ops/b-child:\n%s", lock)
-	}
 }
 
 // DOMAIN.md files at layer root are not treated as artifacts.

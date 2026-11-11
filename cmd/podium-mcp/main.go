@@ -2075,8 +2075,8 @@ func fetchFailure(err error) error {
 
 // deliveryRecordOf builds the §4.7.10 delivery record of resp as the consumer
 // holds it after reconstitution. The record frames the served fields
-// themselves: the served frontmatter (the merged document for a child
-// declaring extends:), the served manifest body, the served SKILL.md, and the
+// themselves: the served frontmatter (the synthesized document for a skill
+// with no ARTIFACT.md), the served manifest body, the served SKILL.md, and the
 // top-level sensitivity rather than any value parsed from the frontmatter, so
 // every byte the consumer returns or materializes is covered. A large resource
 // contributes the content hash its link carries and an inline resource the

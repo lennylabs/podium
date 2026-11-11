@@ -68,19 +68,16 @@ func TestLoadArtifact_AlwaysRevalidate_HeadMatchServesCache(t *testing.T) {
 	}
 }
 
-// A cached record keeps the sandbox_profile the registry merged when it was
-// cached. The record below carries seccomp-strict, the value the removed
-// ranking merged for a seccomp-strict child over a read-only-fs parent. The
-// registry now merges that stored version to read-only-fs, but the merged
-// record keeps the child's content hash, so the HEAD revalidation matches and
-// the bridge delivers the cached seccomp-strict with its baseline profile and
-// no GET. A change that makes the load validator cover the merged record fails
-// this test, and that change updates the documented upgrade behavior with it.
+// A HEAD revalidation that matches the cached content hash serves the cached
+// record without a GET. The bridge materializes the cached frontmatter,
+// including its seccomp-strict sandbox_profile, and writes the baseline
+// profile file beside it, because the content hash covers the authored bytes
+// the profile came from.
 //
-// Spec: §6.5, §4.6
+// Spec: §6.5, §4.4.1
 func TestLoadArtifact_HeadMatchServesCachedSandboxProfile(t *testing.T) {
 	t.Parallel()
-	const fm = "---\ntype: context\nversion: 1.0.0\ndescription: tool\nextends: ops/base\nsandbox_profile: seccomp-strict\n---\n"
+	const fm = "---\ntype: context\nversion: 1.0.0\ndescription: tool\nsandbox_profile: seccomp-strict\n---\n"
 	var gets int32
 	dir := t.TempDir()
 	cache, _ := newContentCache(dir)

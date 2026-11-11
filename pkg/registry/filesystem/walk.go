@@ -24,14 +24,13 @@ type ArtifactRecord struct {
 	ArtifactBytes []byte
 	SkillBytes    []byte
 	Resources     map[string][]byte
-	// AuthoredBytes is ARTIFACT.md as read from disk. It equals ArtifactBytes
-	// until the extends: resolver overwrites ArtifactBytes with the merged,
-	// parent-hidden re-serialization (§4.6), after which the two differ for a
-	// child. Materialization reads ArtifactBytes; the §4.7.6 digest reads
-	// AuthoredBytes, because the digest is defined over the bytes as ingested
-	// and a merged serialization does not reproduce it. The store's
+	// AuthoredBytes is ARTIFACT.md as read from disk. ArtifactBytes and
+	// AuthoredBytes differ only for a skill with no ARTIFACT.md, where Walk
+	// sets ArtifactBytes to the §4.3.4 synthesized document and AuthoredBytes
+	// stays nil. Materialization reads ArtifactBytes; the §4.7.6 digest and
+	// the §4.6 no-inheritance check read AuthoredBytes, because the digest
+	// frames a zero-length ARTIFACT.md for a plain skill. The store's
 	// ManifestRecord.Frontmatter carries the same bytes on the registry side.
-	// Both fields are nil for a skill package that holds no ARTIFACT.md.
 	AuthoredBytes []byte
 	// VersionAssigned reports that the skill declares no usable version
 	// (§4.3.4), so the version is assigned.
@@ -61,13 +60,15 @@ func (r *ArtifactRecord) CanonicalID() string { return r.ID }
 // stable order: layer order first, alphabetical canonical-ID within each
 // layer.
 //
-// Per §4.6, two layers that contribute the same canonical ID collide
-// unless the higher-precedence artifact declares extends: on the ID.
-// WalkOptions.CollisionPolicy selects the outcome of an unsanctioned
-// collision: an ingest.collision error (the default), a drop reported
-// through OnDrop (filesystem-source sync, §13.11.3), or
+// Per §4.6, an ARTIFACT.md that declares extends: is refused, and two layers
+// that contribute the same canonical ID collide. Under every policy except
+// CollisionPolicyHighestWins, Walk removes each refused record before it
+// applies the collision rule, reporting it through OnDrop when OnDrop is set
+// and failing the walk when it is not. WalkOptions.CollisionPolicy selects
+// the outcome of a collision: an ingest.collision error (the default), a drop
+// reported through OnDrop (filesystem-source sync, §13.11.3), or
 // highest-precedence-wins (the workspace overlay's walk of its own
-// directory, §6.4).
+// directory, §6.4), which applies no ingest rule.
 func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 	if opts.CollisionPolicy == CollisionPolicyDrop && opts.OnDrop == nil {
 		return nil, errors.New("filesystem: CollisionPolicyDrop requires OnDrop")
@@ -81,38 +82,54 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 		all = append(all, records...)
 	}
 
-	// spec: §13.11.3 — filesystem source resolves extends: through the same
-	// merge the registry applies at load time, so materialization produces
-	// equivalent output for the same artifact directory. Callers that want
-	// raw layer records (lint, conformance) leave ResolveExtends false.
-	records, err := resolveWalk(all, opts)
+	// spec: §13.11.3 — the filesystem source applies the same §4.6 rules as
+	// the server, so a source materializes the artifacts a server stores
+	// from it.
+	kept, refused, err := refuseExtends(all, opts)
 	if err != nil {
 		return nil, err
 	}
-	// Synthesis follows composition on both paths, so every caller, the
-	// lint and overlay walks that leave ResolveExtends false included,
-	// receives a plain skill's synthesized ARTIFACT.md.
+	records, collisions, err := dedupe(kept, opts)
+	if err != nil {
+		return nil, err
+	}
+	reportDrops(opts, append(refused, collisions...))
+	// Synthesis follows composition, so every caller receives a plain
+	// skill's synthesized ARTIFACT.md.
 	if err := synthesizeSkillDocuments(records); err != nil {
 		return nil, err
 	}
 	return records, nil
 }
 
-// resolveWalk applies the §4.6 collision rule to all and, when
-// opts.ResolveExtends is set, the extends: composition, returning one record
-// per canonical ID.
+// refuseExtends applies the §4.6 no-inheritance rule to all, which is in
+// layer order and then canonical-ID order. Under CollisionPolicyHighestWins
+// it returns all unchanged, because the workspace overlay serves an artifact
+// as authored (§6.4). Under every other policy it removes each record whose
+// authored ARTIFACT.md declares extends:. With OnDrop set, it returns the
+// removed records' drops in the order it met them; with OnDrop nil, the first
+// such record fails the walk. AuthoredBytes is nil for a plain skill, so its
+// synthesized document is never tested for the key.
 //
 // Spec: §4.6, §13.11.3
-func resolveWalk(all []ArtifactRecord, opts WalkOptions) ([]ArtifactRecord, error) {
-	if opts.ResolveExtends {
-		return composeExtends(all, opts)
+func refuseExtends(all []ArtifactRecord, opts WalkOptions) ([]ArtifactRecord, []layer.Drop, error) {
+	if opts.CollisionPolicy == CollisionPolicyHighestWins {
+		return all, nil, nil
 	}
-	deduped, _, collisions, err := dedupe(all, opts)
-	if err != nil {
-		return nil, err
+	var drops []layer.Drop
+	kept := make([]ArtifactRecord, 0, len(all))
+	for _, rec := range all {
+		if !manifest.DeclaresExtends(rec.AuthoredBytes) {
+			kept = append(kept, rec)
+			continue
+		}
+		if opts.OnDrop == nil {
+			return nil, nil, fmt.Errorf("%s: %q in layer %q: %s",
+				layer.InvalidArtifactCode, rec.ID, rec.Layer.ID, layer.ExtendsRemovedReason)
+		}
+		drops = append(drops, layer.ExtendsRemovedDrop(rec.ID))
 	}
-	reportDrops(opts, collisions)
-	return deduped, nil
+	return kept, drops, nil
 }
 
 // assignSourceSkillFields applies the filesystem-source values to a skill
@@ -120,14 +137,10 @@ func resolveWalk(all []ArtifactRecord, opts WalkOptions) ([]ArtifactRecord, erro
 // 0.0.0-auto.0, because a filesystem source keeps no history from which to
 // derive N; VersionAssigned stays true so lint still skips the required and
 // semver checks. A skill with no ARTIFACT.md takes its description from
-// SKILL.md, the value the server admits for a plain-skill row, so an extends:
-// child merges the same parent description in both modes. The loader runs
-// before composeExtends, so every composition round and both the deduped and
-// kept slices carry these values. ArtifactBytes stays nil here, so a
-// plain-skill parent contributes an empty block to the §4.6 executable-field
-// comparison, as the server's empty stored Frontmatter does.
+// SKILL.md, the value the server admits for a plain-skill row, so both modes
+// serve the same plain-skill description (§11).
 //
-// Spec: §13.11.3, §4.3.4, §4.6
+// Spec: §13.11.3, §4.3.4
 func assignSourceSkillFields(rec *ArtifactRecord) {
 	if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill {
 		return
@@ -142,15 +155,13 @@ func assignSourceSkillFields(rec *ArtifactRecord) {
 
 // synthesizeSkillDocuments sets the ArtifactBytes of every skill record with
 // no ARTIFACT.md to the synthesized document of §4.3.4, so adapters dispatch
-// a plain skill as a skill in every mode. Walk calls it on the slice each of
-// its paths returns, after composeExtends, so the §4.6 validation and the
-// rewrite pass read a plain skill's nil ArtifactBytes. A plain skill declares
-// no extends:, so the executable-field comparison never parses its
-// synthesized bytes as authored. The version is a validated metadata.version
-// or the auto form, so an error marks a broken invariant rather than an
-// authoring fault.
+// a plain skill as a skill in every mode. Walk calls it on the slice dedupe
+// returns, and refuseExtends reads AuthoredBytes, so a plain skill's
+// synthesized document is never tested for the extends key. The version is a
+// validated metadata.version or the auto form, so an error marks a broken
+// invariant rather than an authoring fault.
 //
-// Spec: §13.11.3, §4.3.4
+// Spec: §13.11.3, §4.3.4, §4.6
 func synthesizeSkillDocuments(records []ArtifactRecord) error {
 	for i := range records {
 		rec := &records[i]
@@ -167,8 +178,10 @@ func synthesizeSkillDocuments(records []ArtifactRecord) error {
 }
 
 // reportDrops passes each drop to opts.OnDrop in order. A non-empty drops
-// slice only arises under CollisionPolicyDrop, which Walk refuses without
-// OnDrop.
+// slice arises under CollisionPolicyDrop, which Walk refuses without OnDrop,
+// and for a §4.6 no-inheritance refusal under any refusing policy with OnDrop
+// set, because a refusal with OnDrop nil fails the walk before reportDrops
+// runs.
 func reportDrops(opts WalkOptions, drops []layer.Drop) {
 	for _, d := range drops {
 		opts.OnDrop(d)
@@ -176,59 +189,38 @@ func reportDrops(opts WalkOptions, drops []layer.Drop) {
 }
 
 // dedupe applies the §4.6 collision rule to all, which is in layer order.
-// It returns one record per canonical ID (deduped), every record that was
-// not dropped, in layer order (kept), and under CollisionPolicyDrop the drop
-// of each record the rule removed, in the order it met them. It calls no
-// callback, so composeExtends can discard the collisions of a composition it
-// repeats. Under CollisionPolicyError and CollisionPolicyHighestWins, kept
-// equals all.
+// It returns one record per canonical ID and, under CollisionPolicyDrop, the
+// drop of each record the rule removed, in the order it met them. It calls no
+// callback, so Walk reports every drop in one pass.
 //
 // Spec: §4.6, §13.11.3
-func dedupe(all []ArtifactRecord, opts WalkOptions) (deduped, kept []ArtifactRecord, collisions []layer.Drop, err error) {
+func dedupe(all []ArtifactRecord, opts WalkOptions) (deduped []ArtifactRecord, collisions []layer.Drop, err error) {
 	collisionError := opts.CollisionPolicy == CollisionPolicyDefault ||
 		opts.CollisionPolicy == CollisionPolicyError
 	byID := map[string]int{}
 	deduped = make([]ArtifactRecord, 0, len(all))
-	kept = make([]ArtifactRecord, 0, len(all))
 	for _, rec := range all {
 		idx, seen := byID[rec.ID]
 		if !seen {
 			byID[rec.ID] = len(deduped)
 			deduped = append(deduped, rec)
-			kept = append(kept, rec)
 			continue
 		}
 		// rec is the higher-precedence record (later layers override
-		// earlier), so the collision is sanctioned when its extends:
-		// resolves to the colliding canonical ID; the extends merge is
-		// applied later. A collision without that declaration is a
-		// forbidden silent shadow.
-		if !layer.ExtendsOverlays(extendsOf(rec), rec.ID) {
-			switch {
-			case collisionError:
-				return nil, nil, nil, fmt.Errorf("%s: artifact %q present in layers %q and %q",
-					layer.CollisionCode, rec.ID, deduped[idx].Layer.ID, rec.Layer.ID)
-			case opts.CollisionPolicy == CollisionPolicyDrop:
-				// The comparison is against the kept record, so a third
-				// layer's drop collides with the first contributor.
-				collisions = append(collisions, layer.Collision{ArtifactID: rec.ID, Layer: rec.Layer.ID, ExistingLayer: deduped[idx].Layer.ID}.Drop())
-				continue
-			}
+		// earlier), and every same-ID pair is a forbidden silent shadow.
+		switch {
+		case collisionError:
+			return nil, nil, fmt.Errorf("%s: artifact %q present in layers %q and %q",
+				layer.CollisionCode, rec.ID, deduped[idx].Layer.ID, rec.Layer.ID)
+		case opts.CollisionPolicy == CollisionPolicyDrop:
+			// The comparison is against the kept record, so a third
+			// layer's drop collides with the first contributor.
+			collisions = append(collisions, layer.Collision{ArtifactID: rec.ID, Layer: rec.Layer.ID, ExistingLayer: deduped[idx].Layer.ID}.Drop())
+			continue
 		}
 		deduped[idx] = rec
-		kept = append(kept, rec)
 	}
-	return deduped, kept, collisions, nil
-}
-
-// extendsOf returns rec's declared extends: reference, or "" when the record
-// carries no parsed ARTIFACT.md, so the §4.6 collision check treats a record
-// without frontmatter as declaring no overlay.
-func extendsOf(rec ArtifactRecord) string {
-	if rec.Artifact == nil {
-		return ""
-	}
-	return rec.Artifact.Extends
+	return deduped, collisions, nil
 }
 
 // CollisionPolicy controls how Walk handles two layers contributing the
@@ -240,37 +232,31 @@ const (
 	// CollisionPolicyDefault is alias for CollisionPolicyError.
 	CollisionPolicyDefault CollisionPolicy = iota
 	// CollisionPolicyError makes Walk return ingest.collision on duplicate
-	// IDs across layers (per §4.6 default behavior, no extends:).
+	// IDs across layers (§4.6), and fail on an ARTIFACT.md that declares
+	// extends: when OnDrop is nil.
 	CollisionPolicyError
 	// CollisionPolicyHighestWins keeps the highest-precedence layer's
 	// record and drops earlier ones. Used by the workspace overlay's walk
-	// of its own directory (pkg/overlay, §6.4), which the §4.6 collision
-	// rule exempts.
+	// of its own directory (pkg/overlay, §6.4), which applies no ingest
+	// rule: neither the §4.6 collision rule nor the §4.6 no-inheritance rule.
 	CollisionPolicyHighestWins
-	// CollisionPolicyDrop keeps the lower-precedence record, drops a
-	// higher-precedence one that declares no extends: on the ID, and
-	// reports it through WalkOptions.OnDrop (§4.6, §13.11.3). With
-	// ResolveExtends it also drops a record the §4.6 sandbox-profile rule or
-	// the §4.6 executable-field rule refuses, and every record whose extends:
-	// reference that drop strands.
-	// Used by filesystem-source sync.
+	// CollisionPolicyDrop keeps the lower-precedence record, drops every
+	// higher-precedence one with the same ID, and reports it through
+	// WalkOptions.OnDrop (§4.6, §13.11.3). Used by filesystem-source sync.
 	CollisionPolicyDrop
 )
 
 // WalkOptions configures Walk behavior.
 type WalkOptions struct {
 	CollisionPolicy CollisionPolicy
-	// ResolveExtends folds each record's extends: chain into the record via
-	// the shared manifest.MergeExtends before Walk returns, replacing the
-	// record's ArtifactBytes/Artifact with the merged, extends-stripped
-	// manifest (§4.6, §13.11.3). When false, records keep their authored
-	// frontmatter unchanged.
-	ResolveExtends bool
-	// OnDrop receives each record the walk drops: a collision under
-	// CollisionPolicyDrop and, with ResolveExtends, a record the §4.6
-	// sandbox-profile rule or the §4.6 executable-field rule refuses, or
-	// whose extends: parent such a refusal removed. Walk refuses CollisionPolicyDrop when it is nil, so no drop
-	// goes unreported. With OnDrop nil, a refused record fails the walk.
+	// OnDrop receives each record the walk drops: an extends_removed drop
+	// (§4.6 no-inheritance rule) under CollisionPolicyDefault,
+	// CollisionPolicyError, and CollisionPolicyDrop, and a collision drop
+	// under CollisionPolicyDrop only. Walk refuses CollisionPolicyDrop when it
+	// is nil, so no drop goes unreported. Under CollisionPolicyDefault or
+	// CollisionPolicyError with OnDrop nil, an ARTIFACT.md that declares
+	// extends: fails the walk. Walk calls it synchronously in the calling
+	// goroutine.
 	OnDrop func(layer.Drop)
 }
 

@@ -33,16 +33,18 @@ func (r *Registry) WithAdmission(signer sign.Provider, objects objectstore.Provi
 	return r
 }
 
-// admit checks one stored row before the registry serves content built from it
-// and returns the row with its derived fields taken from the admitted bytes.
-// The checks run in the §13.4 order: the bundled-resource paths are distinct,
-// each body is assembled and bound to its ref's content hash and size, the
-// §4.7.6 content hash is recomputed and compared, the parent pin is checked
-// against the admitted extends: reference, and, under a signer, the stored
-// signature is verified over the stored hash. Each refusal is logged with the
-// row's coordinates, and the returned error wraps the refusal's sentinel.
+// admit checks the requested stored row before the registry serves content
+// built from it and returns the row with its derived fields taken from the
+// admitted bytes. The checks run in the §13.4 order: the bundled-resource
+// paths are distinct, each body is assembled and bound to its ref's content
+// hash and size, the §4.7.6 content hash is recomputed and compared, and,
+// under a signer, the stored signature is verified over the stored hash. Each
+// refusal is logged with the row's coordinates and the underlying error, and
+// the returned error is built from the refusal's sentinel and the artifact ID
+// alone, so no stored detail reaches a caller. Manifests do not inherit
+// (§4.6), so the served content comes from this one row.
 //
-// Spec: §13.4 — stored-row admission, checks (1) through (3).
+// Spec: §13.4 — stored-row admission, checks (1) and (2).
 func (r *Registry) admit(ctx context.Context, rec store.ManifestRecord) (store.ManifestRecord, error) {
 	a, err := r.admitBytes(ctx, rec)
 	if err == nil {
@@ -50,16 +52,16 @@ func (r *Registry) admit(ctx context.Context, rec store.ManifestRecord) (store.M
 	}
 	if err != nil {
 		log.Printf("admission: refused %s/%s@%s: %v", rec.TenantID, rec.ArtifactID, rec.Version, err)
-		return store.ManifestRecord{}, err
+		return store.ManifestRecord{}, fmt.Errorf("%w: %s", sentinelOf(err), rec.ArtifactID)
 	}
 	return withAdmittedFields(rec, a), nil
 }
 
-// admitBytes runs the content checks, (1) and (2), and returns the parsed
-// manifest the derived fields come from. A plain-skill row yields the value
-// the filesystem loader builds for a skill with no ARTIFACT.md: type skill and
-// the SKILL.md description. The artifact is nil for any other row whose
-// manifest is empty or does not parse, which declares no extends:.
+// admitBytes runs the content check, (1), and returns the parsed manifest the
+// derived fields come from. A plain-skill row yields the value the filesystem
+// loader builds for a skill with no ARTIFACT.md: type skill and the SKILL.md
+// description. The artifact is nil for any other row whose manifest is empty
+// or does not parse.
 func (r *Registry) admitBytes(ctx context.Context, rec store.ManifestRecord) (*manifest.Artifact, error) {
 	if err := distinctResourcePaths(rec.Resources); err != nil {
 		return nil, err
@@ -77,11 +79,7 @@ func (r *Registry) admitBytes(ctx context.Context, rec store.ManifestRecord) (*m
 	if err := bindResourceRefs(rec.Resources, bodies); err != nil {
 		return nil, err
 	}
-	a := admittedArtifact(rec)
-	if err := checkExtendsPin(a, rec.ExtendsPin); err != nil {
-		return nil, err
-	}
-	return a, nil
+	return admittedArtifact(rec), nil
 }
 
 // admittedArtifact parses the row's admitted manifest. A plain-skill row has
@@ -178,47 +176,7 @@ func (r *Registry) readObjectBody(ctx context.Context, ref store.ResourceRef) ([
 	}
 }
 
-// checkExtendsPin requires the stored parent pin to agree with the extends:
-// reference the admitted manifest declares: empty exactly when it declares
-// none, naming the referenced ID, and, for a reference other than a content
-// hash, naming a version the reference accepts. A content-hash reference is
-// compared with the parent row's admitted hash once admitChain has admitted
-// that parent.
-//
-// Spec: §13.4 — stored-row admission, check (2).
-func checkExtendsPin(a *manifest.Artifact, pin string) error {
-	ref := ""
-	if a != nil {
-		ref = a.Extends
-	}
-	if ref == "" {
-		if pin != "" {
-			return fmt.Errorf("%w: the row stores a parent pin and its manifest declares no extends: reference", ErrContentHashMismatch)
-		}
-		return nil
-	}
-	if pin == "" {
-		return fmt.Errorf("%w: the manifest declares extends: and the row stores no parent pin", ErrContentHashMismatch)
-	}
-	refID, refVersion := splitParentRef(ref)
-	pinID, pinVersion := splitParentRef(pin)
-	if refID != pinID {
-		return fmt.Errorf("%w: the parent pin names another artifact than the extends: reference", ErrContentHashMismatch)
-	}
-	p, err := version.ParsePin(refVersion)
-	if err != nil {
-		return fmt.Errorf("%w: the extends: reference does not parse: %v", ErrContentHashMismatch, err)
-	}
-	if p.Kind == version.PinContentHash {
-		return nil
-	}
-	if _, err := version.Resolve(p, []string{pinVersion}); err != nil {
-		return fmt.Errorf("%w: the parent pin's version does not satisfy the extends: reference", ErrContentHashMismatch)
-	}
-	return nil
-}
-
-// admitSignature is check (3): under a configured signer, the stored signature
+// admitSignature is check (2): under a configured signer, the stored signature
 // must be present and verify over the stored content hash.
 func (r *Registry) admitSignature(ctx context.Context, rec store.ManifestRecord) error {
 	if r.admitSigner == nil {
@@ -235,12 +193,10 @@ func (r *Registry) admitSignature(ctx context.Context, rec store.ManifestRecord)
 
 // withAdmittedFields returns rec with every derived field taken from the
 // admitted bytes. A plain-skill row also takes its description and tags from
-// them, because parsedArtifact reads both columns for a row with no manifest
-// and the §4.6 merge would otherwise carry an edited column of a plain-skill
-// parent into its extends: child's served document. The branch stays out of
-// setManifestFields, which mergeChain also calls on every merged record. Any
-// other row whose manifest is empty or does not parse keeps its stored values,
-// because its bytes state none.
+// them, because parsedArtifact reads both columns for a row with no manifest,
+// so an edited column never reaches the served result or the revalidation key
+// set. Any other row whose manifest is empty or does not parse keeps its
+// stored values, because its bytes state none.
 //
 // Spec: §13.4
 func withAdmittedFields(rec store.ManifestRecord, a *manifest.Artifact) store.ManifestRecord {
@@ -268,9 +224,7 @@ func admittedBody(a *manifest.Artifact, skillRaw []byte) string {
 }
 
 // setManifestFields writes the served fields a parsed manifest states onto a
-// record. admit calls it with one row's manifest and mergeChain with the §4.6
-// merge over a chain, so a chained and an unchained record take these fields
-// by one rule.
+// record.
 func setManifestFields(rec *store.ManifestRecord, a *manifest.Artifact) {
 	rec.Type = string(a.Type)
 	rec.Sensitivity = string(a.Sensitivity)
@@ -279,84 +233,13 @@ func setManifestFields(rec *store.ManifestRecord, a *manifest.Artifact) {
 	rec.AuditRedact = append([]string(nil), a.AuditRedact...)
 }
 
-// admitChain admits the requested row and, for a row that declares extends:,
-// each row of its chain, and returns the admitted rows parent first, the order
-// mergeChain takes. It follows a row's pin only after admit has passed that
-// row, so a pin the admitted bytes do not declare is refused before anything
-// reads it. Every error it returns is built from its sentinel and the
-// requested ID alone; the failing chain member and the underlying error are
-// logged, so no ancestor's ID or pin reaches a caller.
-//
-// Spec: §13.4 — stored-row admission, check (4) and the chain walk.
-func (r *Registry) admitChain(ctx context.Context, rec store.ManifestRecord, requestedID string) ([]store.ManifestRecord, error) {
-	chain, err := r.walkAdmitted(ctx, rec)
-	if err != nil {
-		log.Printf("admission: refused load of %s/%s: %v", r.TenantFor(ctx), requestedID, err)
-		return nil, fmt.Errorf("%w: %s", sentinelOf(err), requestedID)
-	}
-	return chain, nil
-}
-
-// walkAdmitted is admitChain's walk from the requested row toward the root.
-func (r *Registry) walkAdmitted(ctx context.Context, rec store.ManifestRecord) ([]store.ManifestRecord, error) {
-	seen := map[string]bool{rec.ArtifactID + "@" + rec.Version: true}
-	current, err := r.admit(ctx, rec)
-	if err != nil {
-		return nil, err
-	}
-	chain := []store.ManifestRecord{current}
-	for current.ExtendsPin != "" {
-		if seen[current.ExtendsPin] {
-			return nil, fmt.Errorf("%w: extends cycle at %s", ErrInvalidArgument, current.ExtendsPin)
-		}
-		seen[current.ExtendsPin] = true
-		parentID, parentVer := splitParentRef(current.ExtendsPin)
-		stored, err := r.store.GetManifest(ctx, r.TenantFor(ctx), parentID, parentVer)
-		if err != nil {
-			return nil, fmt.Errorf("%w: parent %s: %v", ErrNotFound, current.ExtendsPin, err)
-		}
-		parent, err := r.admit(ctx, stored)
-		if err != nil {
-			return nil, fmt.Errorf("parent %s: %w", current.ExtendsPin, err)
-		}
-		if err := checkContentHashReference(current, parent); err != nil {
-			return nil, err
-		}
-		chain = append([]store.ManifestRecord{parent}, chain...)
-		current = parent
-	}
-	return chain, nil
-}
-
-// checkContentHashReference requires the admitted parent of a child that
-// declares a content-hash extends: reference to carry the hash it names. The
-// child passed checkExtendsPin, which parsed its manifest and its reference,
-// so the parse failures here cannot occur and return nil defensively.
-func checkContentHashReference(child, parent store.ManifestRecord) error {
-	a, err := manifest.ParseArtifact(child.Frontmatter)
-	if err != nil {
-		return nil
-	}
-	_, refVersion := splitParentRef(a.Extends)
-	p, err := version.ParsePin(refVersion)
-	if err != nil || p.Kind != version.PinContentHash {
-		return nil
-	}
-	if parent.ContentHash != "sha256:"+p.Hash {
-		return fmt.Errorf("%w: parent %s does not carry the content hash extends: names", ErrContentHashMismatch, child.ExtendsPin)
-	}
-	return nil
-}
-
-// admissionSentinels are the errors admitChain and revalidationRedactKeys
-// report to a caller, in the order sentinelOf tests them.
+// admissionSentinels are the errors admit reports to a caller, in the order
+// sentinelOf tests them.
 var admissionSentinels = []error{
 	ErrContentHashMismatch,
 	ErrStoredSignatureMissing,
 	ErrStoredSignatureInvalid,
 	ErrUnavailable,
-	ErrNotFound,
-	ErrInvalidArgument,
 }
 
 // sentinelOf returns the sentinel err wraps. Admission builds every error from
@@ -372,28 +255,16 @@ func sentinelOf(err error) error {
 }
 
 // revalidationRedactKeys returns the §8.2 audit_redact key set a full load of
-// rec would record, for the read event of a revalidation that is answered
-// without admission. It folds each chain row's directive child-wins over the
-// unadmitted walk, as manifest.MergeExtends folds audit_redact, and reads no
-// object. A plain-skill row contributes no key, as its admitted SKILL.md
-// states none, and any other row whose manifest is empty or does not parse
-// contributes its stored column, the fallback admission applies.
+// rec would record, for the read event of a revalidation answered without
+// admission. It is the row's own directive: no key for a plain-skill row, as
+// its admitted SKILL.md states none, and the stored column for a row whose
+// manifest is empty or does not parse, the fallback admission applies. It
+// reads no store and no object.
 //
 // Spec: §8.2, §13.4.
-func (r *Registry) revalidationRedactKeys(ctx context.Context, rec store.ManifestRecord, requestedID string) ([]string, error) {
-	chain, err := r.resolveExtendsChain(ctx, rec)
-	if err != nil {
-		log.Printf("admission: revalidation of %s/%s: %v", r.TenantFor(ctx), requestedID, err)
-		return nil, fmt.Errorf("%w: %s", sentinelOf(err), requestedID)
+func (r *Registry) revalidationRedactKeys(rec store.ManifestRecord) []string {
+	if plainSkillRow(rec) {
+		return nil
 	}
-	var keys []string
-	for _, row := range chain {
-		if plainSkillRow(row) {
-			continue
-		}
-		if own := parsedArtifact(row).AuditRedact; len(own) > 0 {
-			keys = own
-		}
-	}
-	return append([]string(nil), keys...), nil
+	return append([]string(nil), parsedArtifact(rec).AuditRedact...)
 }
