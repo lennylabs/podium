@@ -42,6 +42,8 @@ The two SDKs are fully tag-driven; only `buildinfo.go` and `Chart.yaml` require 
 
 1. **Pick the version.** Walk the CHANGELOG and the merged diff since the previous tag. Decide MAJOR, MINOR, or PATCH.
 
+   On a MINOR or MAJOR bump, re-verify the product comparison in spec §1.5 and in `docs/getting-started/why-podium.md` first: each listed product's name, availability, and stated capabilities, plus new products in the covered categories. A correction to §1.5 goes through the proposal pipeline and merges before the prep PR. `.claude/rules/release-process.md` states the full check.
+
 2. **Bump the Go default version and the chart** (drop the `-dev` suffix):
    - `internal/buildinfo/buildinfo.go`: `Version = "0.2.0"`.
    - `deploy/helm/podium/Chart.yaml`: `version: 0.2.0` and `appVersion: 0.2.0`.

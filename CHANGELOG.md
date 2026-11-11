@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-10
+
 ### Added
 
 - **A directory with a `SKILL.md` and no `ARTIFACT.md` is a skill artifact** (§4.2, §4.3.4, §4.7.6, §7.3.1, §13.11.3). Discovery, ingest, `podium sync`, the MCP server, and the SDK workspace overlays recognize it. Its version is `SKILL.md` `metadata.version` in `major.minor.patch` form. When no usable version is declared, the registry assigns `0.0.0-auto.<N>`: a filesystem source reports `0.0.0-auto.0`, and the registry issues a new N for each content change. It rejects a change back to bytes it already stored under another assigned version with `ingest.invalid_artifact` and `details.constraint: "auto_version_duplicate_content"`; declare `metadata.version` to publish such a change. `<id>@0.0.0-auto.<N>` pins an assigned version exactly, and a `<semver>.x` range never selects one. The registry serves a synthesized `ARTIFACT.md` (`type: skill` and the resolved version) in `frontmatter`, which the delivery hash covers, and the `none` adapter and SDK `materialize()` write no `ARTIFACT.md` for such a skill. `podium lint` warns with `lint.skill_version_assigned` when a skill declares no usable version.
@@ -36,7 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Documentation
 
 - The clustered deployment page now states that a break-glass reingest names both dual-signoff approvers with `--approver`, and that the caller who runs it does not count as one. The registry has always required two named approvers on the manual reingest route, and an unused code path that would have counted the caller is removed.
-- **The status lines name the current release series.** The README and the implementation status page said 0.3.x through the 0.5 releases, and now say 0.5.x. The overview and the quickstart no longer state a version and link to the status page. A test fails when a status line names a series other than the release's.
+- **The status lines name the current release series.** The README and the implementation status page said 0.3.x through the 0.5 releases, and now say 0.6.x. The overview and the quickstart no longer state a version and link to the status page. A test fails when a status line names a series other than the release's.
 - **The spec and docs no longer claim transparency-log anchoring of the audit chain** (§13.10, §13.11.3): no deployment submits the audit chain head to a public transparency log, and §8.6 still recommends that anchoring for high-assurance deployments. The §8.6 local chain-head anchor runs on every registry server, standalone included, when `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above 0 (the default 0 disables it) and the audit sink is a file. It signs the chain head with the anchor key at `PODIUM_AUDIT_SIGNING_KEY_PATH`. The README, the deployment pages, and the landing page no longer list transparency-log anchoring as a clustered feature.
 - **The opening of §4.7.9 states what the registry signs at ingest**: the registry signs each artifact version it ingests with its registry-managed key unless the signing mode is `none`, and `podium sign` signs outside the ingest flow. The previous text claimed author-key signing at commit time, which no code performs.
 - **Multi-tenancy, freeze windows, SCIM, and outbound webhooks are documented as running on every registry server** (§13.10, §13.11.3, §6.3.1, §6.3.3, §6.10, §7.3.3): a standalone registry runs each of them when its configuration is present. Multi-tenant mode needs `PODIUM_MULTI_TENANT` and an identity provider that authenticates each caller, and the SCIM receiver mounts when `PODIUM_SCIM_TOKENS` lists a token. Schema-per-org isolation and row-level security remain properties of the Postgres backend, and the SQLite store scopes rows by tenant. A single-tenant registry is one started without `PODIUM_MULTI_TENANT` on either backend, and the `registry.tenant_management_unavailable` suggested action no longer says "on a standard backend". The README, the deployment pages, and the landing page describe the clustered tier as adding Postgres tenant isolation and high availability.
@@ -1312,7 +1314,8 @@ Operators upgrading should note that a version already ingested keeps its unfold
 
 - Corrected the specification, the HTTP API reference, and the operator runbook where they offered `oauth-device-code` as a registry-process identity provider. It is client-side acquisition, the registry ships no request-time verifier for it, and a registry configured with it refuses startup with `config.identity_provider_unverified`. The `registry.yaml` example in §13 selects `oidc-jwt` and names `issuer` rather than `authorization_endpoint`, the read-only write set in §13.2.1 drops the claim that the registry issues tokens against a local session table, and the web-UI paragraph stops presenting the device-code flow as an authentication mode of a standard deployment.
 
-[Unreleased]: https://github.com/lennylabs/podium/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/lennylabs/podium/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/lennylabs/podium/releases/tag/v0.6.0
 [0.5.2]: https://github.com/lennylabs/podium/releases/tag/v0.5.2
 [0.5.1]: https://github.com/lennylabs/podium/releases/tag/v0.5.1
 [0.5.0]: https://github.com/lennylabs/podium/releases/tag/v0.5.0

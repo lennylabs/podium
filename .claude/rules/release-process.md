@@ -18,6 +18,10 @@ Podium follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`MAJO
 - `sdks/podium-py/pyproject.toml` and `sdks/podium-ts/package.json`: tag-derived. setuptools-scm derives the Python version from the tag, and the workflow rewrites the npm version from the tag. Neither needs a manual edit per release.
 - The git tag `vX.Y.Z`: authoritative for a release.
 
+## Before a MINOR or MAJOR release
+
+Re-verify the product comparison in spec §1.5 and in `docs/getting-started/why-podium.md` before the prep PR of a MINOR or MAJOR release. Check each listed product's name, availability, and stated capabilities against its current public documentation, and look for new products in the categories the comparison covers. §1.5 is spec text, so a correction goes through the proposal pipeline and merges before the prep PR, and it updates the "current as of" date on the Why Podium page. A check that finds nothing stale is recorded in the prep PR description. A PATCH release skips this step.
+
 ## Preparing the release PR
 
 1. Branch from `main`: `git checkout -b release/X.Y.Z`.
@@ -66,6 +70,7 @@ When the release diff touches `pkg/sign` or the `SignatureProvider` contract, ru
 
 ## Where these rules apply
 
+- The prep PR of a MINOR or MAJOR release, for the comparison re-check.
 - A change to the `Version` constant in `internal/buildinfo/buildinfo.go`, to the version fields of `deploy/helm/podium/Chart.yaml`, or to the release series in the status lines of `README.md` and `docs/about/status.md`.
 - A new `CHANGELOG.md` release section.
 - A `vX.Y.Z` tag push.
