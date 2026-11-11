@@ -823,7 +823,7 @@ func (s *SQLite) IsOperator(ctx context.Context, identity string) (bool, error) 
 func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 	// Spec: §7.3.1 (Repository credentials). The write rule runs before any
 	// statement, so a config it refuses writes nothing.
-	repo, err := LayerRepoColumn(cfg)
+	repo, userinfo, err := LayerRepoColumns(cfg)
 	if err != nil {
 		return err
 	}
@@ -837,13 +837,14 @@ func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 			 user_defined, owner, public, organization, groups, users,
 			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
 			 repo_userinfo)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		cfg.TenantID, cfg.ID, cfg.SourceType, repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, boolToInt(cfg.UserDefined), cfg.Owner,
 		boolToInt(cfg.Public), boolToInt(cfg.Organization),
 		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
-		createdAt.UTC().Format(time.RFC3339Nano), nullTimeText(cfg.DeletedAt), nullTimeText(cfg.LastIngestedAt))
+		createdAt.UTC().Format(time.RFC3339Nano), nullTimeText(cfg.DeletedAt), nullTimeText(cfg.LastIngestedAt),
+		userinfo)
 	return err
 }
 

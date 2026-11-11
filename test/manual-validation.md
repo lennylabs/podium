@@ -243,6 +243,7 @@ rm -rf "$WORK"
 | S98 | A multi-tenant configuration with no request-time verifier is refused before any store opens | standalone | none | none | none |
 | S101 | An Agent Skills directory with no ARTIFACT.md is a Podium layer | standalone | none | none | none |
 | S102 | An ARTIFACT.md that declares extends: is refused, and a stored extends: child stops serving after an upgrade | solo then standalone | none | none | none |
+| S103 | A git layer's URL credential is held apart from `repo` in the metadata store, and a row in the earlier form keeps working | standalone | none | none | none |
 
 ---
 
@@ -739,10 +740,11 @@ reingest`, source updates.
 - After the new commit, `layer reingest` ingests it (the layer's
   `last_ingested_ref` advances to the new commit), and the post-reingest search
   returns the `rollback` skill.
-- The reingest response reports the count accepted and any rejected with a
-  reason, rather than a bare zero. An artifact dropped for a cross-layer
-  collision is reported under `rejected` with `code: ingest.collision` and a
-  reason.
+- The reingest prints one `artifact: <id>@<version>   layer: team` line per
+  accepted or unchanged artifact on standard output, rather than a bare zero.
+  An artifact dropped for a cross-layer collision is reported on standard
+  error as `rejected: <id> (ingest.collision): <reason>`, and the command then
+  exits 1.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
@@ -11051,3 +11053,134 @@ still serves `extends:`.
    ```bash
    kill "$SRV"; rm -rf "$WORK"
    ```
+
+---
+
+## S103: A git layer's URL credential is held apart from `repo` in the metadata store, and a row in the earlier form keeps working
+
+**Goal.** Validate that a `git` layer registered with a credential in its URL
+userinfo is written with the userinfo in `layer_configs.repo_userinfo` and the
+rest of the URL in `layer_configs.repo`, that a row holding the whole URL in
+`repo` is read, reported, and cloned as before and is left as it is by a
+restart, and that the next registration of that layer writes the two-part form.
+
+**Covers.** The §7.3.1 repository credentials rule for the SQLite store and
+the §13.4 rule that a change of stored form rewrites no row at start, through
+the compiled binary, the `podium layer` commands, and the store file.
+
+**Why by hand.** An operator reads the raw `layer_configs` row with `sqlite3`,
+as a SQL report or a support dump does. The string `s103-token` in the `repo`
+column after step 2 or step 5 is the defect this scenario catches. An empty
+`repo_userinfo` beside a `repo` with no credential after step 2 is the
+opposite defect: the credential was lost. A row that changes across the
+restart in step 4 is a startup rewrite, which the release does not run.
+
+**Steps.**
+
+1. Run the isolation block. Start a stub remote that answers every request
+   with 500 and logs the `Authorization` header, then serve a standalone
+   registry.
+
+   ```bash
+   cat > "$WORK/remote.py" <<'EOF'
+   import http.server, sys
+   class H(http.server.BaseHTTPRequestHandler):
+       def do_GET(self):
+           open(sys.argv[1], "a").write((self.headers.get("Authorization") or "none") + "\n")
+           self.send_response(500); self.end_headers()
+       def log_message(self, *a): pass
+   http.server.HTTPServer(("127.0.0.1", 8195), H).serve_forever()
+   EOF
+   python3 "$WORK/remote.py" "$WORK/remote.log" &
+   REMOTE=$!
+   podium serve --standalone --no-embeddings --bind 127.0.0.1:8194 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8194/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export PODIUM_REGISTRY=http://127.0.0.1:8194
+   ```
+
+   **Expect.** `server_alive` reports the server running.
+
+2. Register a layer whose remote carries a credential, and read its row.
+
+   ```bash
+   podium layer register --registry "$PODIUM_REGISTRY" --id private --public \
+     --repo "http://x-access-token:s103-token@127.0.0.1:8195/acme/private.git" --ref main > "$WORK/register.out"
+   sqlite3 "$PODIUM_SQLITE_PATH" \
+     "select repo, repo_userinfo, repo_userinfo is null from layer_configs where id = 'private';"
+   ```
+
+   **Expect.** The registration succeeds. The query prints
+   `http://127.0.0.1:8195/acme/private.git|x-access-token:s103-token|0`. A
+   `repo` that contains `s103-token` is a defect, and so is a last column of
+   `1`.
+
+3. Put the row in the form an earlier release wrote, then list and reingest
+   the layer.
+
+   ```bash
+   sqlite3 "$PODIUM_SQLITE_PATH" \
+     "update layer_configs set repo = 'http://x-access-token:s103-token@127.0.0.1:8195/acme/private.git', repo_userinfo = null where id = 'private';"
+   podium layer list --registry "$PODIUM_REGISTRY" | tee "$WORK/list.out"
+   grep -c "s103-token\|x-access-token" "$WORK/list.out"
+   podium layer reingest --registry "$PODIUM_REGISTRY" private 2>&1 | tee "$WORK/reingest.out"
+   grep -c "s103-token\|x-access-token" "$WORK/reingest.out"
+   cat "$WORK/remote.log"
+   ```
+
+   **Expect.** The `private` layer's listed `repo` is
+   `http://127.0.0.1:8195/acme/private.git`, and both counts are `0`. The
+   reingest reports `ingest.source_unreachable` with a message that names
+   `127.0.0.1:8195` and status `500`.
+   `remote.log` holds at least one line beginning `Basic `, which shows the
+   clone sent the credential from the earlier-form row. A line reading `none`
+   on every request means the row was read without its credential.
+
+4. Restart the server on the same store and read the row again.
+
+   ```bash
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   podium serve --standalone --no-embeddings --bind 127.0.0.1:8194 > "$WORK/srv2.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8194/healthz
+   server_alive "$SRV" "$WORK/srv2.log"
+   sqlite3 "$PODIUM_SQLITE_PATH" \
+     "select repo, repo_userinfo is null from layer_configs where id = 'private';"
+   ```
+
+   **Expect.** The query prints
+   `http://x-access-token:s103-token@127.0.0.1:8195/acme/private.git|1`. The
+   start rewrote nothing, and the failed reingest of step 3 wrote nothing. A
+   row in the two-part form here means a start or a failed ingest converted
+   it.
+
+5. Re-register the layer with its full remote and read the row.
+
+   ```bash
+   podium layer register --registry "$PODIUM_REGISTRY" --id private --public \
+     --repo "http://x-access-token:s103-token@127.0.0.1:8195/acme/private.git" --ref main > "$WORK/reregister.out"
+   sqlite3 "$PODIUM_SQLITE_PATH" \
+     "select repo, repo_userinfo from layer_configs where id = 'private';"
+   ```
+
+   **Expect.** The registration succeeds, and the query prints
+   `http://127.0.0.1:8195/acme/private.git|x-access-token:s103-token`.
+
+6. Register the listed remote with the override flag and read the row.
+
+   ```bash
+   podium layer register --registry "$PODIUM_REGISTRY" --id private --public --force-repo-overwrite \
+     --repo "http://127.0.0.1:8195/acme/private.git" --ref main > "$WORK/force.out"
+   sqlite3 "$PODIUM_SQLITE_PATH" \
+     "select repo, repo_userinfo is null from layer_configs where id = 'private';"
+   grep -c "s103-token" "$WORK/srv.log" "$WORK/srv2.log"
+   ```
+
+   **Expect.** The query prints `http://127.0.0.1:8195/acme/private.git|1`,
+   so the credential is gone from both columns. Both log counts are `0`.
+
+**Cleanup.** Stop the stub with `kill "$REMOTE"`, stop the server with
+`kill "$SRV"`, and `rm -rf "$WORK"`.
+
+---

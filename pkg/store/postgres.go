@@ -1264,7 +1264,7 @@ func (p *Postgres) RevokeAdmin(ctx context.Context, userID, orgID string) error 
 func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 	// Spec: §7.3.1 (Repository credentials). The write rule runs before any
 	// statement, so a config it refuses writes nothing.
-	repo, err := LayerRepoColumn(cfg)
+	repo, userinfo, err := LayerRepoColumns(cfg)
 	if err != nil {
 		return err
 	}
@@ -1283,7 +1283,7 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 			 user_defined, owner, public, organization, groups, users,
 			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
 			 repo_userinfo)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NULL)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 		ON CONFLICT (tenant_id, id) DO UPDATE SET
 			source_type = EXCLUDED.source_type,
 			repo = EXCLUDED.repo,
@@ -1310,7 +1310,8 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 		cfg.Public, cfg.Organization,
 		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
-		createdAt.UTC(), nullTimePG(cfg.DeletedAt), nullTimePG(cfg.LastIngestedAt))
+		createdAt.UTC(), nullTimePG(cfg.DeletedAt), nullTimePG(cfg.LastIngestedAt),
+		userinfo)
 	return err
 }
 

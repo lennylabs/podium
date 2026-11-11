@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -85,6 +86,30 @@ func reportedLayerRepo(t *testing.T, baseURL, id string) string {
 	return ""
 }
 
+// rawLayerRepoRow is the repo and repo_userinfo columns of one layer_configs
+// row, read with no store read rule in between.
+type rawLayerRepoRow struct {
+	Repo     string
+	Userinfo sql.NullString
+}
+
+// readRawLayerRepoRow reads the repo columns of layer id from the SQLite file
+// at path. A standalone registry holds one tenant, so the ID names one row.
+func readRawLayerRepoRow(t *testing.T, path, id string) rawLayerRepoRow {
+	t.Helper()
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var row rawLayerRepoRow
+	if err := db.QueryRow(`SELECT repo, repo_userinfo FROM layer_configs WHERE id = ?`, id).
+		Scan(&row.Repo, &row.Userinfo); err != nil {
+		t.Fatalf("select repo, repo_userinfo for %s: %v", id, err)
+	}
+	return row
+}
+
 // Spec: §7.3.1 — the re-registration rule through the CLI. `podium layer
 // register` with the repo a read reports for a layer whose stored URL carries
 // a credential exits non-zero with the 400 registry.invalid_argument refusal
@@ -140,10 +165,11 @@ func TestLayerRegister_RedactedRepoGuard_CLI(t *testing.T) {
 // Spec: §7.3.1 (Repository credentials) / §7.3.1 (Re-registration with a
 // reported repo) — a git layer registered with a credential in its URL
 // userinfo keeps that credential across a restart of the binary on the same
-// SQLite file. After the restart the list reports the repo without userinfo,
-// a registration with the reported value is refused, a reingest sends the
-// registered credential to the remote, and the log of neither process names a
-// credential part.
+// SQLite file. The row the first process wrote holds the userinfo apart from
+// the rest of the URL. After the restart the list reports the repo without
+// userinfo, a registration with the reported value is refused, a reingest
+// sends the registered credential to the remote, and the log of neither
+// process names a credential part.
 func TestLayerRepoCredential_SurvivesRestart_CLI(t *testing.T) {
 	t.Parallel()
 	const (
@@ -155,9 +181,10 @@ func TestLayerRepoCredential_SurvivesRestart_CLI(t *testing.T) {
 	full := "http://" + user + ":" + password + "@" + strings.TrimPrefix(reportedWant, "http://")
 
 	home := t.TempDir()
+	sqlitePath := filepath.Join(home, "podium.db")
 	env := []string{
 		"HOME=" + home,
-		"PODIUM_SQLITE_PATH=" + filepath.Join(home, "podium.db"),
+		"PODIUM_SQLITE_PATH=" + sqlitePath,
 		"PODIUM_SIGN=none",
 	}
 	srv := startServerArgs(t, env, "serve", "--standalone")
@@ -165,6 +192,12 @@ func TestLayerRepoCredential_SurvivesRestart_CLI(t *testing.T) {
 		"--id", "private", "--repo", full, "--ref", "main")
 	cliWantExit(t, registered, 0, "register a layer whose repo carries a credential")
 	stopProc(srv.cmd)
+
+	// The stopped process wrote the userinfo apart from the rest of the URL.
+	wantRow := rawLayerRepoRow{Repo: reportedWant, Userinfo: sql.NullString{String: user + ":" + password, Valid: true}}
+	if got := readRawLayerRepoRow(t, sqlitePath, "private"); got != wantRow {
+		t.Errorf("stored row of private = %+v, want %+v", got, wantRow)
+	}
 
 	// The second process reads the layer from the file the first one wrote.
 	srv2 := startServerArgs(t, env, "serve", "--standalone")

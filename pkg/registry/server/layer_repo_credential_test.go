@@ -2,9 +2,11 @@ package server_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -840,4 +842,74 @@ func TestLayerRepoCredential_ReportedValueIsRedactedOnce(t *testing.T) {
 	assertSplitConfig(t, h.stored(t, "odd"), registered, reportedWant)
 
 	assertGuardRefusesThenForces(t, h, "odd", reportedWant)
+}
+
+// rawRepoRow is the repo and repo_userinfo columns of one layer_configs row,
+// read with no store read rule in between.
+type rawRepoRow struct {
+	Repo     string
+	Userinfo sql.NullString
+}
+
+// readRawRepoRow reads the repo columns of layer id in tenant "t" from the
+// SQLite file at path over a connection of its own.
+func readRawRepoRow(t *testing.T, path, id string) rawRepoRow {
+	t.Helper()
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var row rawRepoRow
+	if err := db.QueryRow(`SELECT repo, repo_userinfo FROM layer_configs WHERE tenant_id = ? AND id = ?`,
+		"t", id).Scan(&row.Repo, &row.Userinfo); err != nil {
+		t.Fatalf("select repo, repo_userinfo for %s: %v", id, err)
+	}
+	return row
+}
+
+// Spec: §7.3.1 (Repository credentials) — over the SQLite store, a
+// registration through the handler writes the userinfo of a credentialed URL
+// apart from the rest of the value, a refused re-registration with the
+// reported value leaves the row as it was, and a forced re-registration with
+// that value writes it with no userinfo. Every response reports the URL
+// without its userinfo.
+func TestLayerRepoCredential_SQLiteRowHoldsUserinfoApart(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "podium.db")
+	st, err := store.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	h := newGuardHarnessOn(t, guardAdmin, st)
+
+	type registered struct {
+		Status           int
+		Response, Listed string
+		Row              rawRepoRow
+	}
+	resp, body := h.register(t, "private", credRepoFull, nil)
+	repo, _, _ := decodeRegisterResponse(t, body)
+	split := rawRepoRow{Repo: credRepoReported, Userinfo: sql.NullString{String: "alice-user:s3cr3tpw", Valid: true}}
+	want := registered{Status: http.StatusCreated, Response: credRepoReported, Listed: credRepoReported, Row: split}
+	if got := (registered{resp.StatusCode, repo, h.reported(t, "private"), readRawRepoRow(t, path, "private")}); got != want {
+		t.Fatalf("registration = %+v, want %+v", got, want)
+	}
+
+	resp, body = h.register(t, "private", credRepoReported, nil)
+	assertRedactedRepoRefusal(t, resp, body)
+	if got := readRawRepoRow(t, path, "private"); got != split {
+		t.Errorf("row after the refused registration = %+v, want %+v", got, split)
+	}
+
+	type forced struct {
+		Status int
+		Row    rawRepoRow
+	}
+	resp, body = h.register(t, "private", credRepoReported, map[string]any{"force_repo_overwrite": true})
+	wantForced := forced{Status: http.StatusCreated, Row: rawRepoRow{Repo: credRepoReported}}
+	if got := (forced{resp.StatusCode, readRawRepoRow(t, path, "private")}); got != wantForced {
+		t.Errorf("forced registration = %+v, want %+v: %s", got, wantForced, body)
+	}
 }
