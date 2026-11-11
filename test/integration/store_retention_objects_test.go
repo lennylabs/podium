@@ -24,8 +24,8 @@ package integration
 // Spec: §8.4 (deprecated artifact versions retained 90 days after the
 // deprecation flag is set), §4.4 (bundled resources are content-addressed and
 // deduplicated across versions), §4.6 (a stored row whose ARTIFACT.md declares
-// extends: is retired), §7.2 (existing databases keep the unused extends_pin
-// column).
+// extends: is retired), §13.4 (the additive schema keeps an existing
+// database's unused extends_pin column).
 
 import (
 	"context"
