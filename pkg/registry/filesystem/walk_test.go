@@ -189,70 +189,29 @@ func TestWalk_CollisionFails(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 — "A collision is rejected at ingest unless the
-// higher-precedence artifact declares extends: <lower-precedence-id>."
-// The higher-precedence (personal) record at canonical ID x declares
-// extends: x, so the same-ID collision is permitted and the
-// higher-precedence record wins; the extends merge runs at read time.
-func TestWalk_CollisionWithExtendsAllowed(t *testing.T) {
+// Spec: §4.6 — a higher-precedence copy of x that declares extends: x no
+// longer sanctions the same-ID collision. The no-inheritance rule refuses it
+// with extends_removed before the collision rule runs, so the lower copy is
+// kept and no ingest.collision is reported.
+func TestWalk_CollisionWithExtendsRefused(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
-	testharness.WriteTree(t, root,
-		testharness.WriteTreeOption{
-			Path:    ".registry-config",
-			Content: "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n",
-		},
-		testharness.WriteTreeOption{
-			Path:    "team-shared/x/ARTIFACT.md",
-			Content: stringf(contextArtifact, "shared parent", "shared parent"),
-		},
-		testharness.WriteTreeOption{
-			Path:    "personal/x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 2.0.0\ndescription: overlay child\nextends: x\n---\n\noverlay body\n",
-		},
-	)
-	reg, err := Open(root)
+	reg := openDropFixture(t, []string{"team-shared", "personal"}, map[string]string{
+		"team-shared/x": dropFixtureArtifact("shared", ""),
+		"personal/x":    dropFixtureArtifact("personal", "x"),
+	})
+	var drops []layer.Drop
+	got, err := reg.Walk(WalkOptions{
+		CollisionPolicy: CollisionPolicyDrop,
+		OnDrop:          func(d layer.Drop) { drops = append(drops, d) },
+	})
 	if err != nil {
-		t.Fatalf("Open: %v", err)
+		t.Fatalf("Walk: %v", err)
 	}
-	got, err := reg.Walk(WalkOptions{})
-	if err != nil {
-		t.Fatalf("Walk returned %v; the extends exception should permit the same-ID overlay", err)
+	if want := []layer.Drop{layer.ExtendsRemovedDrop("x")}; !reflect.DeepEqual(drops, want) {
+		t.Errorf("OnDrop calls = %+v, want %+v", drops, want)
 	}
-	if len(got) != 1 {
-		t.Fatalf("got %d artifacts, want 1 (the overlay)", len(got))
-	}
-	if got[0].Layer.ID != "personal" {
-		t.Errorf("Layer.ID = %q, want personal (the higher-precedence overlay)", got[0].Layer.ID)
-	}
-}
-
-// Spec: §4.6 — the extends exception is keyed on the COLLIDING id. A
-// higher-precedence record that extends some other id is still a
-// forbidden silent shadow of the colliding id.
-func TestWalk_CollisionExtendsOtherIDStillFails(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	testharness.WriteTree(t, root,
-		testharness.WriteTreeOption{
-			Path:    ".registry-config",
-			Content: "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n",
-		},
-		testharness.WriteTreeOption{
-			Path:    "team-shared/x/ARTIFACT.md",
-			Content: stringf(contextArtifact, "shared", "shared"),
-		},
-		testharness.WriteTreeOption{
-			Path:    "personal/x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 2.0.0\ndescription: shadow\nextends: some/other-id\n---\n\nbody\n",
-		},
-	)
-	reg, err := Open(root)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	if _, err := reg.Walk(WalkOptions{}); err == nil || !strings.Contains(err.Error(), "ingest.collision") {
-		t.Fatalf("Walk err = %v, want ingest.collision (extends points at a different id)", err)
+	if len(got) != 1 || got[0].Layer.ID != "team-shared" || got[0].Artifact.Description != "shared" {
+		t.Fatalf("got %v, want only the team-shared copy of x", idsOf(got))
 	}
 }
 
@@ -315,19 +274,14 @@ func TestWalk_DropPolicyRequiresOnDrop(t *testing.T) {
 }
 
 // dropFixtureArtifact is a context artifact whose description names the
-// contributing layer, with an optional extends: line and tags, so a test
-// can tell which layer's copy survived and what an extends: merge folded in.
-func dropFixtureArtifact(desc, extends string, tags ...string) string {
+// contributing layer, with an optional extends: line, so a test can tell
+// which layer's copy survived and whether the §4.6 no-inheritance rule
+// refused it.
+func dropFixtureArtifact(desc, extends string) string {
 	var b strings.Builder
 	b.WriteString("---\ntype: context\nversion: 1.0.0\ndescription: " + desc + "\n")
 	if extends != "" {
 		b.WriteString("extends: " + extends + "\n")
-	}
-	if len(tags) > 0 {
-		b.WriteString("tags:\n")
-		for _, tag := range tags {
-			b.WriteString("  - " + tag + "\n")
-		}
 	}
 	b.WriteString("---\n\nBody.\n")
 	return b.String()
@@ -337,23 +291,14 @@ func dropFixtureArtifact(desc, extends string, tags ...string) string {
 // and whose files map "<layer>/<id>" to ARTIFACT.md content, and opens it.
 func openDropFixture(t *testing.T, layers []string, files map[string]string) *Registry {
 	t.Helper()
-	root := t.TempDir()
-	opts := []testharness.WriteTreeOption{{
-		Path:    ".registry-config",
-		Content: "multi_layer: true\nlayer_order:\n  - " + strings.Join(layers, "\n  - ") + "\n",
-	}}
+	paths := make(map[string]string, len(files))
 	for path, content := range files {
-		opts = append(opts, testharness.WriteTreeOption{Path: path + "/ARTIFACT.md", Content: content})
+		paths[path+"/ARTIFACT.md"] = content
 	}
-	testharness.WriteTree(t, root, opts...)
-	reg, err := Open(root)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	return reg
+	return openLayeredTree(t, layers, paths)
 }
 
-// Spec: §4.6 — under CollisionPolicyDrop an unsanctioned collision drops the
+// Spec: §4.6 — under CollisionPolicyDrop a same-ID collision drops the
 // higher-precedence record, keeps the lower one, reports the drop through
 // OnDrop with the ingest.collision code, and leaves every non-colliding
 // artifact in place. A third layer is compared against the kept record, so
@@ -371,7 +316,7 @@ func TestWalk_DropPolicy(t *testing.T) {
 		wantDrops []layer.Drop
 	}{
 		{
-			name:   "two layers without extends keep the lower copy",
+			name:   "two layers keep the lower copy",
 			layers: []string{"l1", "l2"},
 			files: map[string]string{
 				"l1/x": dropFixtureArtifact("from-l1", ""),
@@ -382,7 +327,7 @@ func TestWalk_DropPolicy(t *testing.T) {
 			wantDrops: []layer.Drop{{ArtifactID: "x", Code: "ingest.collision", Reason: layer.Collision{ArtifactID: "x"}.Reason()}},
 		},
 		{
-			name:   "three layers without extends drop both higher copies",
+			name:   "three layers drop both higher copies",
 			layers: []string{"l1", "l2", "l3"},
 			files: map[string]string{
 				"l1/x": dropFixtureArtifact("from-l1", ""),
@@ -395,27 +340,6 @@ func TestWalk_DropPolicy(t *testing.T) {
 				{ArtifactID: "x", Code: "ingest.collision", Reason: layer.Collision{ArtifactID: "x"}.Reason()},
 				{ArtifactID: "x", Code: "ingest.collision", Reason: layer.Collision{ArtifactID: "x"}.Reason()},
 			},
-		},
-		{
-			name:   "higher copy declaring extends on the id is kept",
-			layers: []string{"l1", "l2"},
-			files: map[string]string{
-				"l1/x": dropFixtureArtifact("from-l1", ""),
-				"l2/x": dropFixtureArtifact("from-l2", "x"),
-			},
-			wantDesc:  "from-l2",
-			wantLayer: "l2",
-		},
-		{
-			name:   "higher copy declaring extends on another id is dropped",
-			layers: []string{"l1", "l2"},
-			files: map[string]string{
-				"l1/x": dropFixtureArtifact("from-l1", ""),
-				"l2/x": dropFixtureArtifact("from-l2", "other/id"),
-			},
-			wantDesc:  "from-l1",
-			wantLayer: "l1",
-			wantDrops: []layer.Drop{{ArtifactID: "x", Code: "ingest.collision", Reason: layer.Collision{ArtifactID: "x"}.Reason()}},
 		},
 	}
 	for _, tc := range cases {
@@ -454,6 +378,197 @@ func TestWalk_DropPolicy(t *testing.T) {
 			}
 		})
 	}
+}
+
+// extendsRefusalCase is one TestWalk_ExtendsRefusal row. files maps a path
+// under the registry root to its content, want maps each kept canonical ID to
+// the layer its record came from, and wantErr lists the substrings a walk
+// error must contain (empty when the walk succeeds).
+type extendsRefusalCase struct {
+	name      string
+	policy    CollisionPolicy
+	collect   bool
+	layers    []string
+	files     map[string]string
+	want      map[string]string
+	wantDrops []layer.Drop
+	wantErr   []string
+}
+
+// extendsSkillMD is a SKILL.md that carries a top-level extends: key, which
+// is an ordinary non-Podium SKILL.md key (§4.3.4).
+const extendsSkillMD = "---\nname: s\ndescription: Skill.\nextends: other/skill\n---\n\nBody.\n"
+
+// extendsRefusalCases builds the TestWalk_ExtendsRefusal rows. The refusing
+// policies are CollisionPolicyDrop and CollisionPolicyDefault with a
+// collecting OnDrop, the walks of filesystem-source sync and podium lint.
+func extendsRefusalCases() []extendsRefusalCase {
+	declaring := dropFixtureArtifact("declares extends", "core/base")
+	plain := dropFixtureArtifact("plain", "")
+	cases := []extendsRefusalCase{
+		{
+			name:      "drop policy reports extends_removed",
+			policy:    CollisionPolicyDrop,
+			collect:   true,
+			layers:    []string{"l1"},
+			files:     map[string]string{"l1/x/ARTIFACT.md": declaring, "l1/other/ARTIFACT.md": plain},
+			want:      map[string]string{"other": "l1"},
+			wantDrops: []layer.Drop{layer.ExtendsRemovedDrop("x")},
+		},
+		{
+			name:    "default policy without OnDrop fails naming the id and layer",
+			policy:  CollisionPolicyDefault,
+			layers:  []string{"l1"},
+			files:   map[string]string{"l1/x/ARTIFACT.md": declaring, "l1/other/ARTIFACT.md": plain},
+			wantErr: []string{layer.InvalidArtifactCode, `"x"`, `"l1"`, layer.ExtendsRemovedReason},
+		},
+		{
+			name:    "refusals in two layers precede the collision in layer then id order",
+			policy:  CollisionPolicyDrop,
+			collect: true,
+			layers:  []string{"l1", "l2"},
+			files: map[string]string{
+				"l1/z/ARTIFACT.md": declaring,
+				"l2/b/ARTIFACT.md": declaring,
+				"l2/a/ARTIFACT.md": declaring,
+				"l1/c/ARTIFACT.md": plain,
+				"l2/c/ARTIFACT.md": plain,
+			},
+			want: map[string]string{"c": "l1"},
+			wantDrops: []layer.Drop{
+				layer.ExtendsRemovedDrop("z"),
+				layer.ExtendsRemovedDrop("a"),
+				layer.ExtendsRemovedDrop("b"),
+				layer.Collision{ArtifactID: "c"}.Drop(),
+			},
+		},
+	}
+	for _, policy := range []CollisionPolicy{CollisionPolicyDrop, CollisionPolicyDefault} {
+		name := map[CollisionPolicy]string{CollisionPolicyDrop: "drop", CollisionPolicyDefault: "default"}[policy]
+		cases = append(cases,
+			extendsRefusalCase{
+				name:      name + " policy refuses the lower copy and keeps the plain higher copy",
+				policy:    policy,
+				collect:   true,
+				layers:    []string{"l1", "l2"},
+				files:     map[string]string{"l1/x/ARTIFACT.md": declaring, "l2/x/ARTIFACT.md": plain},
+				want:      map[string]string{"x": "l2"},
+				wantDrops: []layer.Drop{layer.ExtendsRemovedDrop("x")},
+			},
+			extendsRefusalCase{
+				name:    name + " policy keeps a SKILL.md extends key with no ARTIFACT.md",
+				policy:  policy,
+				collect: policy == CollisionPolicyDrop,
+				layers:  []string{"l1"},
+				files:   map[string]string{"l1/s/SKILL.md": extendsSkillMD},
+				want:    map[string]string{"s": "l1"},
+			},
+			extendsRefusalCase{
+				name:    name + " policy keeps a SKILL.md extends key under an ARTIFACT.md overlay",
+				policy:  policy,
+				collect: policy == CollisionPolicyDrop,
+				layers:  []string{"l1"},
+				files:   map[string]string{"l1/s/SKILL.md": extendsSkillMD, "l1/s/ARTIFACT.md": skillArtifact},
+				want:    map[string]string{"s": "l1"},
+			},
+		)
+	}
+	return cases
+}
+
+// Spec: §4.6, §6.4, §13.11.3 — the no-inheritance rule refuses an
+// ARTIFACT.md that declares extends: before the collision rule runs. Under
+// CollisionPolicyDrop and under CollisionPolicyDefault with OnDrop set, OnDrop
+// receives an extends_removed drop for each refusal, in layer order and then
+// canonical-ID order, before any collision drop, and the remaining records
+// are walked. With OnDrop nil the walk fails naming the ID, the layer, and
+// ingest.invalid_artifact. Refusing before dedupe keeps the plain higher copy
+// of an ID whose lower copy declares extends:, with no collision.
+//
+// Spec: §4.3.4, §4.6 — an extends key in a skill's SKILL.md is not a Podium
+// field, so a skill that carries one is kept with or without an ARTIFACT.md.
+func TestWalk_ExtendsRefusal(t *testing.T) {
+	t.Parallel()
+	for _, tc := range extendsRefusalCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			reg := openLayeredTree(t, tc.layers, tc.files)
+			got, drops, err := walkCollecting(reg, tc.policy, tc.collect)
+			if len(tc.wantErr) > 0 {
+				if err == nil {
+					t.Fatalf("Walk err = nil, want an error containing %q", tc.wantErr)
+				}
+				for _, sub := range tc.wantErr {
+					if !strings.Contains(err.Error(), sub) {
+						t.Errorf("Walk err = %q, want it to contain %q", err, sub)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Walk: %v", err)
+			}
+			if !reflect.DeepEqual(drops, tc.wantDrops) {
+				t.Errorf("OnDrop calls = %+v, want %+v", drops, tc.wantDrops)
+			}
+			kept := map[string]string{}
+			for _, rec := range got {
+				kept[rec.ID] = rec.Layer.ID
+			}
+			if !reflect.DeepEqual(kept, tc.want) {
+				t.Errorf("kept records (id -> layer) = %v, want %v", kept, tc.want)
+			}
+		})
+	}
+}
+
+// Spec: §6.4 — the workspace overlay walks under CollisionPolicyHighestWins,
+// which applies no ingest rule, so an ARTIFACT.md that declares extends: is
+// kept as authored whether or not OnDrop is set, and OnDrop receives nothing.
+func TestWalk_HighestWinsKeepsExtendsAsAuthored(t *testing.T) {
+	t.Parallel()
+	authored := dropFixtureArtifact("overlay", "core/base")
+	for _, collect := range []bool{false, true} {
+		reg := openLayeredTree(t, []string{"l1"}, map[string]string{"l1/x/ARTIFACT.md": authored})
+		got, drops, err := walkCollecting(reg, CollisionPolicyHighestWins, collect)
+		if err != nil {
+			t.Fatalf("collect=%v: Walk: %v", collect, err)
+		}
+		if len(drops) != 0 {
+			t.Errorf("collect=%v: OnDrop calls = %+v, want none", collect, drops)
+		}
+		x := recordByID(t, got, "x")
+		if string(x.ArtifactBytes) != authored {
+			t.Errorf("collect=%v: ArtifactBytes = %q, want the authored bytes %q", collect, x.ArtifactBytes, authored)
+		}
+	}
+}
+
+// openLayeredTree writes a multi-layer registry whose layer_order is layers
+// and whose files map a path under the root to its content, and opens it.
+func openLayeredTree(t *testing.T, layers []string, files map[string]string) *Registry {
+	t.Helper()
+	opts := []testharness.WriteTreeOption{{
+		Path:    ".registry-config",
+		Content: "multi_layer: true\nlayer_order:\n  - " + strings.Join(layers, "\n  - ") + "\n",
+	}}
+	for path, content := range files {
+		opts = append(opts, testharness.WriteTreeOption{Path: path, Content: content})
+	}
+	_, reg := openTree(t, opts...)
+	return reg
+}
+
+// walkCollecting walks reg under policy. When collect is set, it passes an
+// OnDrop that records each drop and returns them; otherwise OnDrop is nil.
+func walkCollecting(reg *Registry, policy CollisionPolicy, collect bool) ([]ArtifactRecord, []layer.Drop, error) {
+	var drops []layer.Drop
+	opts := WalkOptions{CollisionPolicy: policy}
+	if collect {
+		opts.OnDrop = func(d layer.Drop) { drops = append(drops, d) }
+	}
+	got, err := reg.Walk(opts)
+	return got, drops, err
 }
 
 // Spec: §13.11 — single-layer mode walks the layer rooted at the registry

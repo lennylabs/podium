@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
@@ -373,11 +374,16 @@ func collidingRegistry(t *testing.T) string {
 	return dir
 }
 
-// Spec: §11 / §2.2 / §13.11.3 — Filesystem ↔ server equivalence test: a
+// Spec: §11, §2.2, §4.6, §13.11.3 — Filesystem ↔ server equivalence test: a
 // registry whose higher-precedence layer contributes an artifact ID the lower
-// layer already contributes, without declaring extends:, materializes byte-identically under both registry sources. The
-// filesystem source drops the higher copy and reports the drop, and the
-// server source never stored it, so both serve the lower-precedence copy.
+// layer already contributes materializes byte-identically under both registry
+// sources. The filesystem source drops the higher copy and reports the drop,
+// and the server source never stored it, so both serve the lower-precedence
+// copy. The lower layer's copy of shared/legacy declares extends:, so the
+// §4.6 no-inheritance rule refuses it before the collision rule runs, and both
+// sources serve the plain higher copy. A walk that applied the collision rule
+// first would drop the higher copy and then refuse the lower one, serving
+// neither, while the server would still serve the higher one.
 // Matrix: §6.10 (ingest.collision)
 func TestSyncEquivalence_LayerCollisionIsByteIdentical(t *testing.T) {
 	t.Parallel()
@@ -430,17 +436,24 @@ func TestSyncEquivalence_LayerCollisionIsByteIdentical(t *testing.T) {
 
 			// Byte equality alone would also hold if both sources served the
 			// higher copy, so pin which copy each tree carries.
-			assertTreeHolds(t, fsTree, "shared/clash", "from-org")
+			assertTreeHolds(t, fsTree, "shared/clash", "from-org clash")
 			assertTreeHolds(t, fsTree, "finance/ledger", "finance ledger")
+			assertTreeHolds(t, fsTree, "shared/legacy", "from-team legacy")
 			for _, body := range fsTree {
-				if strings.Contains(body, "from-team") {
+				if strings.Contains(body, "from-team clash") {
 					t.Errorf("the dropped team-finance copy of shared/clash was materialized")
+				}
+				if strings.Contains(body, "from-org legacy") {
+					t.Errorf("the refused org-defaults copy of shared/legacy was materialized")
 				}
 			}
 
-			want := layer.Collision{ArtifactID: "shared/clash", Layer: "team-finance", ExistingLayer: "org-defaults"}.Drop()
-			if len(fsRes.Dropped) != 1 || fsRes.Dropped[0] != want {
-				t.Errorf("filesystem Dropped = %+v, want [%+v]", fsRes.Dropped, want)
+			want := []layer.Drop{
+				layer.ExtendsRemovedDrop("shared/legacy"),
+				layer.Collision{ArtifactID: "shared/clash", Layer: "team-finance", ExistingLayer: "org-defaults"}.Drop(),
+			}
+			if !reflect.DeepEqual(fsRes.Dropped, want) {
+				t.Errorf("filesystem Dropped = %+v, want %+v", fsRes.Dropped, want)
 			}
 			if len(srvRes.Dropped) != 0 {
 				t.Errorf("server Dropped = %+v, want none", srvRes.Dropped)
@@ -450,16 +463,20 @@ func TestSyncEquivalence_LayerCollisionIsByteIdentical(t *testing.T) {
 }
 
 // crossLayerCollisionRegistry writes a two-layer registry in which
-// team-finance contributes shared/clash without declaring extends:, colliding
-// with the org-defaults copy, and finance/ledger collides with nothing. Both
-// layers are public so the server source's anonymous identity sees the same
-// set the filesystem source walks.
+// team-finance contributes shared/clash, colliding with the org-defaults
+// copy, and finance/ledger collides with nothing. The org-defaults copy of
+// shared/legacy declares extends:, and team-finance contributes a plain copy
+// of the same ID. Both layers are public so the server source's anonymous
+// identity sees the same set the filesystem source walks.
 func crossLayerCollisionRegistry(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	contextArtifact := func(description string) string {
-		return "---\ntype: context\nversion: 1.0.0\ndescription: " + description +
-			"\nsensitivity: low\n---\n\n" + description + "\n"
+	contextArtifact := func(description, extends string) string {
+		fm := "---\ntype: context\nversion: 1.0.0\ndescription: " + description + "\nsensitivity: low\n"
+		if extends != "" {
+			fm += "extends: " + extends + "\n"
+		}
+		return fm + "---\n\n" + description + "\n"
 	}
 	testharness.WriteTree(t, dir,
 		testharness.WriteTreeOption{
@@ -468,9 +485,11 @@ func crossLayerCollisionRegistry(t *testing.T) string {
 		},
 		testharness.WriteTreeOption{Path: "org-defaults/.layer-config", Content: "visibility:\n  public: true\n"},
 		testharness.WriteTreeOption{Path: "team-finance/.layer-config", Content: "visibility:\n  public: true\n"},
-		testharness.WriteTreeOption{Path: "org-defaults/shared/clash/ARTIFACT.md", Content: contextArtifact("from-org")},
-		testharness.WriteTreeOption{Path: "team-finance/shared/clash/ARTIFACT.md", Content: contextArtifact("from-team")},
-		testharness.WriteTreeOption{Path: "team-finance/finance/ledger/ARTIFACT.md", Content: contextArtifact("finance ledger")},
+		testharness.WriteTreeOption{Path: "org-defaults/shared/clash/ARTIFACT.md", Content: contextArtifact("from-org clash", "")},
+		testharness.WriteTreeOption{Path: "team-finance/shared/clash/ARTIFACT.md", Content: contextArtifact("from-team clash", "")},
+		testharness.WriteTreeOption{Path: "team-finance/finance/ledger/ARTIFACT.md", Content: contextArtifact("finance ledger", "")},
+		testharness.WriteTreeOption{Path: "org-defaults/shared/legacy/ARTIFACT.md", Content: contextArtifact("from-org legacy", "finance/ledger")},
+		testharness.WriteTreeOption{Path: "team-finance/shared/legacy/ARTIFACT.md", Content: contextArtifact("from-team legacy", "")},
 	)
 	return dir
 }
