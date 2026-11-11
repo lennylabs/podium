@@ -160,11 +160,6 @@ type ManifestRecord struct {
 	// allowed-tools, and any other keys) cannot be reconstructed from the
 	// indexed fields alone. Empty for non-skills.
 	SkillRaw []byte
-	// ExtendsPin is the parent reference pinned at this child's
-	// ingest time per §4.7.6: "extends: parent version pinned at
-	// child ingest time". Empty when the artifact does not extend.
-	// Format: "<artifact_id>@<exact-version>".
-	ExtendsPin string
 	// Signature is the §4.7.9 signature envelope produced at
 	// ingest by the configured SignatureProvider. Empty when the
 	// deployment has no signing provider configured. Consumers
@@ -250,7 +245,23 @@ type DomainRecord struct {
 type DependencyEdge struct {
 	From string
 	To   string
-	Kind string // "extends" | "delegates_to" | "mcpServers"
+	Kind string // "delegates_to" | "mcpServers"
+}
+
+// indexedEdgeKindsSQL is the predicate the SQL stores apply to every
+// dependency read. A database written by an earlier release can hold edges of
+// a kind §4.7.3 no longer defines, such as extends, and DependentsOf and
+// DependencyInDegree return and count none of them. No stored edge is deleted.
+//
+// Spec: §4.7.3
+const indexedEdgeKindsSQL = "kind IN ('delegates_to','mcpServers')"
+
+// isIndexedEdgeKind reports whether kind is a §4.7.3 edge kind, the Memory
+// store's form of indexedEdgeKindsSQL.
+//
+// Spec: §4.7.3
+func isIndexedEdgeKind(kind string) bool {
+	return kind == "delegates_to" || kind == "mcpServers"
 }
 
 // AdminGrant is one (identity, org_id, "admin") row (§4.7.2).
@@ -446,8 +457,9 @@ type Store interface {
 	// DependencyInDegree returns, per depended-on artifact, the number of
 	// distinct artifacts that depend on it (§4.7.3 "frequently-depended-on
 	// artifacts surface higher"). The key is the target artifact ID; the
-	// value counts distinct sources across all edge kinds. Artifacts with no
-	// dependents are absent. Tenant-scoped.
+	// value counts distinct sources across the §4.7.3 kinds delegates_to and
+	// mcpServers; a stored edge of any other kind is not read. Artifacts with
+	// no dependents are absent. Tenant-scoped.
 	DependencyInDegree(ctx context.Context, tenantID string) (map[string]int, error)
 
 	// Admin grants

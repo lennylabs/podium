@@ -91,7 +91,6 @@ func TestExtendsChild_MergedDocumentTakesTheChildRowVersion(t *testing.T) {
 		TenantID: admTenant, ArtifactID: "team/child", Version: "2.0.0", Layer: "L", Type: "skill",
 		Frontmatter: []byte("---\ntype: skill\nextends: ops/plain@1.0.0\ntags: [ops]\n---\n"),
 		SkillRaw:    []byte("---\nname: child\ndescription: d\nmetadata:\n  version: \"2.0.0\"\n---\n\nchild prose\n"),
-		ExtendsPin:  "ops/plain@1.0.0",
 	}, nil, nil))
 	res, err := admLoad(f.registry(nil), "team/child")
 	if err != nil {

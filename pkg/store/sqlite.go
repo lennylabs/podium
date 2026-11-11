@@ -92,7 +92,6 @@ func (s *SQLite) applySchema() error {
 			frontmatter BLOB,
 			body BLOB,
 			skill_raw BLOB,
-			extends_pin TEXT NOT NULL DEFAULT '',
 			signature TEXT NOT NULL DEFAULT '',
 			search_visibility TEXT NOT NULL DEFAULT '',
 			resources BLOB,
@@ -324,8 +323,8 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
-			 extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 signature, search_visibility, resources, deprecated_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -334,7 +333,7 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		boolToInt(rec.Deprecated),
 		ingestedAt.UTC().Format(time.RFC3339Nano),
 		rec.Frontmatter, rec.Body, rec.SkillRaw,
-		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources,
+		rec.Signature, rec.SearchVisibility, resources,
 		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt))
 	if err != nil {
 		return err
@@ -389,8 +388,8 @@ func (s *SQLite) PutManifestWithVectorPending(ctx context.Context, rec ManifestR
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
-			 extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 signature, search_visibility, resources, deprecated_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -399,7 +398,7 @@ func (s *SQLite) PutManifestWithVectorPending(ctx context.Context, rec ManifestR
 		boolToInt(rec.Deprecated),
 		ingestedAt.UTC().Format(time.RFC3339Nano),
 		rec.Frontmatter, rec.Body, rec.SkillRaw,
-		rec.ExtendsPin, rec.Signature, rec.SearchVisibility, resources,
+		rec.Signature, rec.SearchVisibility, resources,
 		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt))
 	if err != nil {
 		return err
@@ -509,7 +508,7 @@ func (s *SQLite) GetManifest(ctx context.Context, tenantID, artifactID, version 
 	row := s.db.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
-		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at
+		       signature, search_visibility, resources, deprecated_at, deleted_at
 		FROM manifests
 		WHERE tenant_id = ? AND artifact_id = ? AND version = ? AND deleted_at IS NULL`,
 		tenantID, artifactID, version)
@@ -615,7 +614,7 @@ func (s *SQLite) listManifests(ctx context.Context, tenantID string, includeDele
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
-		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at
+		       signature, search_visibility, resources, deprecated_at, deleted_at
 		FROM manifests
 		WHERE tenant_id = ? `+tombstone+`
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
@@ -638,23 +637,9 @@ func (s *SQLite) listManifests(ctx context.Context, tenantID string, includeDele
 // DeprecatedAt predates `before` (§8.4 90-day window). Timestamps are
 // stored as RFC3339Nano UTC text, which sorts lexicographically.
 func (s *SQLite) PurgeDeprecatedManifests(ctx context.Context, before time.Time) (int, error) {
-	// §4.6/§4.7.6 extends-pin protection: a deprecated version that is still
-	// pinned as an extends parent by another manifest must not be purged. The
-	// child's pin is a hard reference resolved to this exact version at the
-	// child's ingest time, and load_artifact resolves the parent through it
-	// (resolveExtendsChain). Purging the pinned parent would orphan the child
-	// and make it unloadable, so the version is retained until no manifest pins
-	// it (the child is itself reingested onto a newer parent or removed). The
-	// NOT EXISTS clause keys on the canonical "<artifact_id>@<version>" pin form
-	// ExtendsPin stores.
 	res, err := s.db.ExecContext(ctx, `
 		DELETE FROM manifests
-		WHERE deprecated = 1 AND deprecated_at IS NOT NULL AND deprecated_at < ?
-		  AND NOT EXISTS (
-			SELECT 1 FROM manifests AS child
-			WHERE child.tenant_id = manifests.tenant_id
-			  AND child.extends_pin = manifests.artifact_id || '@' || manifests.version
-		  )`,
+		WHERE deprecated = 1 AND deprecated_at IS NOT NULL AND deprecated_at < ?`,
 		before.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return 0, err
@@ -704,12 +689,12 @@ func (s *SQLite) PutDependency(ctx context.Context, tenantID string, edge Depend
 	return err
 }
 
-// DependentsOf returns every edge whose To matches artifactID.
+// DependentsOf returns every §4.7.3 edge whose To matches artifactID.
 func (s *SQLite) DependentsOf(ctx context.Context, tenantID, artifactID string) ([]DependencyEdge, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT from_artifact, to_artifact, kind
 		FROM dependencies
-		WHERE tenant_id = ? AND to_artifact = ?
+		WHERE tenant_id = ? AND to_artifact = ? AND `+indexedEdgeKindsSQL+`
 		ORDER BY from_artifact, kind`,
 		tenantID, artifactID)
 	if err != nil {
@@ -732,7 +717,7 @@ func (s *SQLite) DependencyInDegree(ctx context.Context, tenantID string) (map[s
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT to_artifact, COUNT(DISTINCT from_artifact)
 		FROM dependencies
-		WHERE tenant_id = ?
+		WHERE tenant_id = ? AND `+indexedEdgeKindsSQL+`
 		GROUP BY to_artifact`,
 		tenantID)
 	if err != nil {
@@ -1057,7 +1042,7 @@ func scanManifest(scanner rowScanner) (ManifestRecord, error) {
 		&rec.TenantID, &rec.ArtifactID, &rec.Version, &rec.ContentHash,
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
 		&deprecated, &ingestedAt, &rec.Frontmatter, &rec.Body, &rec.SkillRaw,
-		&rec.ExtendsPin, &rec.Signature, &rec.SearchVisibility, &resources,
+		&rec.Signature, &rec.SearchVisibility, &resources,
 		&deprecatedAt, &deletedAt)
 	if err != nil {
 		return ManifestRecord{}, err

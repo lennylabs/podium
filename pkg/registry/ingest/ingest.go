@@ -415,11 +415,12 @@ type RejectedArtifact struct {
 	ArtifactID string
 	Reason     string
 	Code       string // §6.10 namespaced code
-	// Details carries the structured detail the rejecting rule defines, such
-	// as the §4.6 executable-field rule's constraint and field paths. It is
-	// nil for every rule that defines none.
+	// Details carries the structured detail the rejecting rule defines: the
+	// constraint of the §4.6 no-inheritance rule (extends_removed) and of the
+	// §7.3.1 registry-assigned-version rule (auto_version_duplicate_content).
+	// It is nil for every rule that defines none.
 	//
-	// Spec: §7.3.1
+	// Spec: §4.6, §7.3.1
 	Details map[string]any
 }
 
@@ -529,11 +530,17 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		return nil, err
 	}
 
+	// The §4.6 no-inheritance rule runs before lint and before every other
+	// per-artifact rule, and the refused records leave the set lint, the
+	// description advisories, and the server_identifier index read, so a
+	// refused mcp-server never resolves an mcpServers edge.
+	records, refused := refuseExtends(records)
+
 	// Run lint over the collected set; diagnostics with severity Error
 	// abort their artifact's ingest.
 	diags := req.Linter.Lint(ctx, nil, records)
 
-	res := &Result{}
+	res := &Result{Rejected: refused}
 	errsByID := groupLintErrors(diags)
 
 	// §3.3 / §12 — the registry flags thin descriptions and clusters of
@@ -565,12 +572,11 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	}
 
 	// spec: §4.6 — two layers contributing the same canonical ID is a
-	// forbidden silent shadow unless the higher-precedence artifact
-	// declares extends: <lower-precedence-id>. The server-store path keys
-	// records by (tenant, id, version) with the layer excluded, so without
-	// this check a same-ID record from another layer is stored and
-	// silently shadows at read time. Index the manifests already
-	// contributed by other layers so the per-record check can spot it.
+	// forbidden silent shadow. The server-store path keys records by
+	// (tenant, id, version) with the layer excluded, so without this check a
+	// same-ID record from another layer is stored and silently shadows at
+	// read time. Index the manifests already contributed by other layers so
+	// the per-record check can spot it.
 	//
 	// Spec: §7.3.1, §4.7.6 — the same listing, soft-deleted rows included,
 	// is the input from which a skill that declares no version receives its
@@ -596,9 +602,6 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		}
 
 		// Sensitivity floor (public mode) per §13.10, on the authored value.
-		// The §4.6 fold below re-runs it on the merged value for an extends
-		// child; this check keeps every other artifact out before the extra
-		// store read the fold takes.
 		if rej, over := sensitivityRejection(rec.ID, req.RejectAtOrAbove, rec.Artifact.Sensitivity); over {
 			res.Rejected = append(res.Rejected, rej)
 			continue
@@ -664,124 +667,17 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			req.CurrentArtifactCount = projected
 		}
 
-		// extendsParent is the pinned parent's stored row, kept past the
-		// extends: block so the insert path can compare layers and walk the
-		// parent's chain without a second read.
-		var extendsParent store.ManifestRecord
-
-		// Spec: §4.7.6 extends:-pin resolution. If the artifact extends a
-		// parent reference, resolve the parent against existing manifests and
-		// pin to an exact version. The pin and the fold below are recomputed on
-		// every pass, but an unchanged re-ingest of a stored version is
-		// classified idempotent further down and discards them, because the
-		// content hash covers only the child's authored bytes (§4.7). A child
-		// picks up a newer parent only at a new version.
-		if rec.Artifact.Extends != "" {
-			pin, parentType, parentLicense, perr := resolveExtendsPin(ctx, st, req.TenantID, rec.Artifact.Extends, rec.ID, rec.Artifact.Version, req.LayerID)
-			if perr != nil {
-				res.Rejected = append(res.Rejected, RejectedArtifact{
-					ArtifactID: rec.ID,
-					Reason:     fmt.Sprintf("extends: %v", perr),
-					Code:       layer.InvalidArtifactCode,
-				})
-				continue
-			}
-			// spec: §4.6 — "The child's type: must match the parent's;
-			// ingest rejects an extends: chain that crosses types."
-			if parentType != string(rec.Artifact.Type) {
-				res.Rejected = append(res.Rejected, RejectedArtifact{
-					ArtifactID: rec.ID,
-					Reason: fmt.Sprintf("extends: child type %q does not match parent %s type %q",
-						rec.Artifact.Type, version.StripPin(rec.Artifact.Extends), parentType),
-					Code: layer.InvalidArtifactCode,
-				})
-				continue
-			}
-			// spec: §4.6 field-semantics table — license is "Scalar; child
-			// wins (lint warning if changed across layers)". The merge already
-			// gives the child its license; emit the advisory the table mandates
-			// when the child's license differs from the resolved parent's so the
-			// publisher sees the cross-layer change.
-			if rec.Artifact.License != "" && parentLicense != "" && rec.Artifact.License != parentLicense {
-				res.Advisories = append(res.Advisories, lint.Diagnostic{
-					ArtifactID: rec.ID,
-					Code:       "lint.license_changed_across_layers",
-					Severity:   lint.SeverityWarning,
-					Message: fmt.Sprintf("license %q differs from extended parent %s license %q; the child's license wins per §4.6",
-						rec.Artifact.License, version.StripPin(rec.Artifact.Extends), parentLicense),
-				})
-			}
-			mr.ExtendsPin = pin
-
-			// spec: §4.6 — an omitted or empty child scalar inherits the
-			// parent's value. Fold the pinned parent's stored record into
-			// the child's indexed columns so the values the registry
-			// filters, ranks, and (§4.7) embeds on are the resolved ones
-			// rather than the child's authored subset. The fold is one
-			// level deep: a parent is always stored before its child is
-			// accepted, so the parent's own columns already carry its
-			// ancestors' values by induction.
-			parentID, parentVersion := splitRef(pin)
-			var gerr error
-			extendsParent, gerr = st.GetManifest(ctx, req.TenantID, parentID, parentVersion)
-			if gerr != nil {
-				// A store failure is not an authoring defect: match the
-				// loop's convention below and abort the ingest call.
-				if !errors.Is(gerr, store.ErrNotFound) {
-					return nil, fmt.Errorf("ingest: load extends parent %s: %w", pin, gerr)
-				}
-				// resolveExtendsPin picked the pin out of the tenant's own
-				// manifest listing, so a missing record here means the parent
-				// went away between the two calls. Reject, because accepting
-				// the child would index it under its unresolved columns and no
-				// later pass repairs a stored version.
-				res.Rejected = append(res.Rejected, RejectedArtifact{
-					ArtifactID: rec.ID,
-					Reason:     fmt.Sprintf("extends: parent %s not found", pin),
-					Code:       layer.InvalidArtifactCode,
-				})
-				continue
-			}
-			mr = foldExtendsParent(extendsParent, mr)
-
-			// spec: §13.10 / §4.6 — the floor above read the child's authored
-			// sensitivity, and the fold writes the most-restrictive value
-			// across the chain into the indexed column, so a child that
-			// authored none can land at its parent's level. A parent stored
-			// before public mode was enabled is still served under §13.10's
-			// carve-out, so that level is reachable. Re-run the floor on the
-			// folded value; otherwise ingest commits and serves a record whose
-			// indexed sensitivity is exactly what the floor refuses.
-			if rej, over := sensitivityRejection(rec.ID, req.RejectAtOrAbove, manifest.Sensitivity(mr.Sensitivity)); over {
-				res.Rejected = append(res.Rejected, rej)
-				continue
-			}
-		}
-
-		// spec: §4.6 — reject a cross-layer same-ID collision unless an
-		// extends: overlay links the two records. The overlay is sanctioned
-		// when the incoming record extends the colliding ID, or when an
-		// existing cross-layer record does (the existing record is the
-		// overlay). Anything else is a silent shadow, which the spec forbids.
+		// spec: §4.6 — reject every cross-layer same-ID collision. Anything
+		// else is a silent shadow, which the spec forbids. A soft-deleted or
+		// retired row is not in crossLayerByID (crossLayerRows).
 		if crossLayer := crossLayerByID[mr.ArtifactID]; len(crossLayer) > 0 {
-			overlay := layer.ExtendsOverlays(rec.Artifact.Extends, mr.ArtifactID)
-			if !overlay {
-				for _, ex := range crossLayer {
-					if layer.ExtendsOverlays(ex.ExtendsPin, mr.ArtifactID) {
-						overlay = true
-						break
-					}
-				}
-			}
-			if !overlay {
-				res.Rejected = append(res.Rejected, collisionRejection(req.TenantID, req.LayerID, mr.ArtifactID, crossLayer[0].Layer))
-				continue
-			}
+			res.Rejected = append(res.Rejected, collisionRejection(req.TenantID, req.LayerID, mr.ArtifactID, crossLayer[0].Layer))
+			continue
 		}
 
 		// Distinguish accepted vs idempotent vs immutable-violation, and
 		// assign the version of a skill that declares none.
-		placer := &manifestPlacer{st: st, req: req, rec: rec, mr: &mr, parent: extendsParent}
+		placer := &manifestPlacer{st: st, req: req, rec: rec, mr: &mr}
 		placed, err := placer.place(ctx, rowsByID)
 		if err != nil {
 			return nil, err
@@ -904,15 +800,14 @@ type placement struct {
 
 // manifestPlacer stores one record after the per-record checks have passed.
 // mr is the record being placed; its Version is rewritten for a record whose
-// version the registry assigns. prepared records that the §4.6 edge checks,
-// signing, and the resource upload ran, because none of them depends on the
-// version and each runs at most once per record.
+// version the registry assigns. prepared records that signing and the
+// resource upload ran, because neither depends on the version and each runs
+// at most once per record.
 type manifestPlacer struct {
 	st       store.Store
 	req      Request
 	rec      filesystem.ArtifactRecord
 	mr       *store.ManifestRecord
-	parent   store.ManifestRecord
 	prepared bool
 }
 
@@ -993,26 +888,14 @@ func (p *manifestPlacer) attempt(ctx context.Context) (out placement, taken bool
 	return placement{}, false, nil
 }
 
-// prepare runs the insert-path steps that precede the commit: the §4.6 edge
-// checks, §4.7.9 signing, and the §7.2 resource upload. It returns a
-// rejection when one of them refuses the record. The caller runs it on the
+// prepare runs the insert-path steps that precede the commit: §4.7.9 signing
+// and the §7.2 resource upload. It returns a rejection when one of them
+// refuses the record. The caller runs it on the
 // first attempt whose pre-check finds no row, so a record the pre-check
 // classifies as unchanged is never judged, and a re-derived version does not
 // repeat it: none of its inputs is the version.
 func (p *manifestPlacer) prepare(ctx context.Context) (*RejectedArtifact, error) {
 	mr := p.mr
-	// Spec: §4.6 sandbox profile and executable fields across layers.
-	// Both checks run on the insert path alone, after the idempotency
-	// switch: the content hash covers only the child's authored bytes, so
-	// an unchanged stored child is idempotent and is never re-judged
-	// against a parent that changed after it was accepted.
-	if mr.ExtendsPin != "" {
-		rej, err := extendsEdgeRejection(ctx, p.st, p.req.TenantID, p.req.LayerID, p.rec, *mr, p.parent)
-		if err != nil || rej != nil {
-			return rej, err
-		}
-	}
-
 	// §4.7.9 signing: when a Signer is configured, attach the
 	// signature envelope before PutManifest commits so callers
 	// see signed bytes from the moment ingest accepts them. A
@@ -1227,25 +1110,6 @@ type invalidArtifactError struct{ cause error }
 
 func (e invalidArtifactError) Error() string   { return e.cause.Error() }
 func (e invalidArtifactError) Unwrap() []error { return []error{ErrInvalidArtifact, e.cause} }
-
-// chainReadError aborts an ingest cycle when a store read fails while the
-// §4.6 executable-field check walks a cross-layer parent's chain. The cause
-// can name an ancestor beyond the reference the author wrote, and the reingest
-// handler writes a runner error's text into the registry.unavailable envelope,
-// so the message names the child alone and the cause stays in the server log
-// and the error chain.
-//
-// Spec: §4.6 hidden parents (withheld)
-type chainReadError struct {
-	artifactID string
-	cause      error
-}
-
-func (e *chainReadError) Error() string {
-	return "ingest: resolve extends chain for " + e.artifactID + ": store read failed"
-}
-
-func (e *chainReadError) Unwrap() error { return e.cause }
 
 // invalidArtifact classifies a manifest the parser cannot decode as a fault in
 // the layer's content. spec: §7.3.1 — the refusal is an ingest rejection of the
@@ -1532,26 +1396,20 @@ func persistResources(ctx context.Context, put ResourcePutFunc, refs []store.Res
 
 // contentHashOf computes the canonical content hash for an artifact:
 // SHA-256 over the authored ARTIFACT.md bytes, the optional SKILL.md bytes,
-// and every bundled resource in sorted-path order. This walk does not resolve
-// extends:, so AuthoredBytes and ArtifactBytes hold the same bytes here; the
-// field names the digest's input so every composer reads one field. Spec
-// §4.7.6.
+// and every bundled resource in sorted-path order. At ingest AuthoredBytes
+// and ArtifactBytes hold the same bytes; the field names the digest's input
+// so every composer reads one field. Spec §4.7.6.
 func contentHashOf(rec filesystem.ArtifactRecord) string {
 	return version.CanonicalContentHash(rec.AuthoredBytes, rec.SkillBytes, rec.Resources)
 }
 
 // edgesFor extracts cross-type dependency edges from the artifact
-// frontmatter (§4.7.3): extends, delegates_to, mcpServers references.
+// frontmatter (§4.7.3): delegates_to and mcpServers references.
 // serverIDs maps a canonical server_identifier to the mcp-server-type
 // artifact ID that declares it; an mcpServers entry produces an edge
 // only when its derived server identifier resolves to such an artifact.
 func edgesFor(a *manifest.Artifact, id string, serverIDs map[string]string) []store.DependencyEdge {
 	var out []store.DependencyEdge
-	if a.Extends != "" {
-		out = append(out, store.DependencyEdge{
-			From: id, To: version.StripPin(a.Extends), Kind: "extends",
-		})
-	}
 	for _, target := range a.DelegatesTo {
 		out = append(out, store.DependencyEdge{
 			From: id, To: version.StripPin(target), Kind: "delegates_to",
@@ -1627,54 +1485,14 @@ func recordBytes(rec store.ManifestRecord) int64 {
 	return int64(len(rec.Frontmatter)) + int64(len(rec.Body))
 }
 
-// foldExtendsParent folds the pinned parent's stored record into the
-// child's and returns the child. Only the columns every store backend
-// persists are written: Description, Tags, Sensitivity, and
-// SearchVisibility. spec: §4.6 field-semantics table and "Omitted
-// fields".
-//
-// The projection stays a pure function of the stored record, so the
-// inline embed, the vector-outbox row, and `podium admin reembed` all
-// derive the same §4.7 text for the artifact.
-//
-// Three §4.6 fields are deliberately left unfolded. Name, WhenToUse, and
-// ReplacedBy have no column in either SQL store, so a merged value would
-// survive only until read-back and would differ per deployment mode.
-// Deprecated is excluded because PutManifest stamps DeprecatedAt from it,
-// which would arm the §8.4 hard purge against a child whose author never
-// deprecated it. The authored bytes in Frontmatter, ContentHash, Body,
-// and SkillRaw are untouched.
-func foldExtendsParent(parent, child store.ManifestRecord) store.ManifestRecord {
-	merged := manifest.MergeExtends(indexedArtifact(parent), indexedArtifact(child))
-	child.Description = merged.Description
-	child.Tags = merged.Tags
-	child.Sensitivity = string(merged.Sensitivity)
-	child.SearchVisibility = string(merged.SearchVisibility)
-	return child
-}
-
-// indexedArtifact projects the folded columns of a stored record back
-// into a manifest.Artifact so manifest.MergeExtends stays the single
-// canonical §4.6 fold. Reading the record rather than the stored
-// frontmatter matters for a skill, whose Name and Description are
-// indexed from SKILL.md while ARTIFACT.md omits them.
-func indexedArtifact(mr store.ManifestRecord) manifest.Artifact {
-	return manifest.Artifact{
-		Description:      mr.Description,
-		Tags:             mr.Tags,
-		Sensitivity:      manifest.Sensitivity(mr.Sensitivity),
-		SearchVisibility: manifest.SearchVisibility(mr.SearchVisibility),
-	}
-}
-
 // collisionRejection builds the §4.6 cross-layer collision rejection for id.
-// The reason names the artifact and the extends: remedy and never the
-// contributing layer: the reingest response reaches a non-admin layer owner,
-// and the layer that already contributes id is a §4.7.2 configuration fact
-// about a part of the tenant that caller may not be able to read. The layer is
-// logged server-side so an operator can still trace the collision.
+// The reason names the artifact and the remedy and never the contributing
+// layer: the reingest response reaches a non-admin layer owner, and the layer
+// that already contributes id is a §4.7.2 configuration fact about a part of
+// the tenant that caller may not be able to read. The layer is logged
+// server-side so an operator can still trace the collision.
 //
-// Spec: §4.6 hidden parents (observable)
+// Spec: §4.6, §4.7.2
 func collisionRejection(tenantID, layerID, id, existingLayer string) RejectedArtifact {
 	log.Printf("ingest: tenant %s layer %s: cross-layer collision on %q with layer %q", tenantID, layerID, id, existingLayer)
 	return RejectedArtifact{
@@ -1684,249 +1502,30 @@ func collisionRejection(tenantID, layerID, id, existingLayer string) RejectedArt
 	}
 }
 
-// chainUnresolvedReason is the reason a server gives a child whose parent's
-// stored chain is missing an ancestor or loops, when the edge crosses layers
-// or, on a same-layer edge, when the child authors a restricting
-// sandbox_profile. Those are the edges whose §4.6 checks read the chain. It names
-// no parent, because the failing link can be an ancestor beyond the reference
-// the author wrote. The filesystem source has no stored chain and never gives
-// it.
+// refuseExtends partitions the walked records under the §4.6 no-inheritance
+// rule. Each record whose authored ARTIFACT.md declares extends: becomes an
+// ingest.invalid_artifact rejection with the extends_removed constraint, and
+// the rest are returned in walk order. A plain skill's AuthoredBytes is empty,
+// so its synthesized document is never tested for the key; AuthoredBytes is
+// read for parity with filesystem.Walk.
 //
-// Spec: §4.6 hidden parents (withheld)
-const chainUnresolvedReason = "extends: parent chain does not resolve"
-
-// extendsEdgeRejection applies the §4.6 sandbox-profile rule to every
-// extends: edge, and the §4.6 executable-field rule to an edge whose pinned
-// parent comes from another layer, to a child about to be inserted. It reads
-// the parent's stored chain only when one of the rules can refuse the edge:
-// the edge crosses layers, or the child authors a restricting
-// sandbox_profile. A same-layer child that leaves sandbox_profile unset or
-// unrestricted therefore costs no store read and cannot be rejected for a
-// chain it never needed. A child both rules refuse reports the
-// sandbox-profile rejection, the precedence the filesystem resolver also
-// applies.
-//
-// It returns nil, nil when neither rule refuses the child, and a rejection
-// when a rule refuses it or the parent's chain does not resolve. A store
-// failure other than absence aborts the cycle with a *chainReadError, as a
-// failed parent load does.
-//
-// rec.Artifact and rec.ArtifactBytes are the child's authored values: server
-// ingest walks one layer and never rewrites a record with its parent's
-// values, so both comparisons see only what the author wrote, against the
-// parent's chain-resolved values.
-//
-// Spec: §4.6
-func extendsEdgeRejection(ctx context.Context, st store.Store, tenantID, childLayer string,
-	rec filesystem.ArtifactRecord, mr, parent store.ManifestRecord) (*RejectedArtifact, error) {
-	childProfile := rec.Artifact.SandboxProfile
-	childRestricts := childProfile != "" && childProfile != manifest.SandboxUnrestricted
-	crossLayer := parent.Layer != childLayer
-	if !crossLayer && !childRestricts {
-		return nil, nil
-	}
-	chain, err := core.ExtendsChain(ctx, st, tenantID, parent)
-	switch {
-	case errors.Is(err, store.ErrNotFound), errors.Is(err, core.ErrInvalidArgument):
-		return &RejectedArtifact{ArtifactID: rec.ID, Reason: chainUnresolvedReason, Code: layer.InvalidArtifactCode}, nil
-	case err != nil:
-		log.Printf("ingest: tenant=%s layer=%s artifact=%s extends_pin=%s: resolve extends chain: %v",
-			tenantID, childLayer, rec.ID, mr.ExtendsPin, err)
-		return nil, &chainReadError{artifactID: rec.ID, cause: err}
-	}
-	p, blocks := core.ResolvedArtifact(chain)
-	if manifest.SandboxProfilesConflict(p.SandboxProfile, childProfile) {
-		// The log line names the parent's layer for the operator; the
-		// rejection names no profile value and no parent.
-		log.Printf("ingest: tenant=%s layer=%s artifact=%s extends_pin=%s parent_layer=%s rejected: sandbox_profile_conflict",
-			tenantID, childLayer, rec.ID, mr.ExtendsPin, parent.Layer)
-		return &RejectedArtifact{
+// Spec: §4.6, §7.3.1
+func refuseExtends(records []filesystem.ArtifactRecord) ([]filesystem.ArtifactRecord, []RejectedArtifact) {
+	var refused []RejectedArtifact
+	kept := records[:0:0]
+	for _, rec := range records {
+		if !manifest.DeclaresExtends(rec.AuthoredBytes) {
+			kept = append(kept, rec)
+			continue
+		}
+		refused = append(refused, RejectedArtifact{
 			ArtifactID: rec.ID,
-			Reason:     layer.SandboxProfileConflictReason,
+			Reason:     layer.ExtendsRemovedReason,
 			Code:       layer.InvalidArtifactCode,
-			Details:    map[string]any{"constraint": layer.SandboxProfileConflictConstraint},
-		}, nil
+			Details:    map[string]any{"constraint": layer.ExtendsRemovedConstraint},
+		})
 	}
-	if !crossLayer {
-		return nil, nil
-	}
-	fields, err := manifest.InheritedExecutableFields(rec.ID, p, blocks, rec.ArtifactBytes)
-	if err != nil {
-		// The error can carry a field path that names a chain parent, so the
-		// log line and the reason name no field.
-		log.Printf("ingest: tenant=%s layer=%s artifact=%s extends_pin=%s parent_layer=%s rejected: executable fields could not be read",
-			tenantID, childLayer, rec.ID, mr.ExtendsPin, parent.Layer)
-		return &RejectedArtifact{ArtifactID: rec.ID, Reason: layer.UnreadableExecutableFieldsReason, Code: layer.InvalidArtifactCode}, nil
-	}
-	if len(fields) == 0 {
-		return nil, nil
-	}
-	ie := &layer.ExecutableInheritance{ArtifactID: rec.ID, Fields: fields}
-	log.Printf("ingest: tenant=%s layer=%s artifact=%s extends_pin=%s parent_layer=%s rejected: executable_inheritance fields=%s",
-		tenantID, childLayer, rec.ID, mr.ExtendsPin, parent.Layer, strings.Join(fields, ","))
-	return &RejectedArtifact{
-		ArtifactID: rec.ID,
-		Reason:     ie.Reason(),
-		Code:       layer.InvalidArtifactCode,
-		Details:    ie.Details(),
-	}, nil
-}
-
-// resolveExtendsPin resolves a parent reference (e.g.,
-// "finance/parent" or "finance/parent@1.x" or
-// "finance/parent@sha256:<hex>") against existing manifests for the
-// tenant and returns the pinned form "<id>@<exact-version>" together with
-// the parent's type at the resolved version. childID is the artifact
-// being ingested; we use it together with childLayer to detect a genuine
-// self-reference (the child's own record in its own layer) while still
-// allowing a same-ID, same-version record from a lower-precedence layer to
-// serve as the parent (the §4.6 same-ID extends overlay). The returned type
-// lets the caller enforce the §4.6 rule that a child's type must match its
-// parent's.
-func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, childID, childVersion, childLayer string) (pin, parentType, parentLicense string, err error) {
-	id, pinStr := splitRef(ref)
-	if id == "" {
-		return "", "", "", fmt.Errorf("invalid extends reference %q", ref)
-	}
-	p, err := version.ParsePin(pinStr)
-	if err != nil {
-		return "", "", "", fmt.Errorf("parse pin: %w", err)
-	}
-
-	all, err := st.ListManifests(ctx, tenantID)
-	if err != nil {
-		return "", "", "", err
-	}
-	versions := make([]string, 0, 4)
-	hashByVersion := map[string]string{}
-	typeByVersion := map[string]string{}
-	// deprecatedByVersion and ingestedAtByVersion carry the two columns
-	// §4.7.6 candidate selection needs: the deprecation flag the filter
-	// removes on, and the ingest timestamp `latest` orders by.
-	deprecatedByVersion := map[string]bool{}
-	ingestedAtByVersion := map[string]time.Time{}
-	// frontmatterByVersion lets the resolver recover the parent's license
-	// (not an indexed column) so ingest can flag a cross-layer license
-	// change per the §4.6 field-semantics table.
-	frontmatterByVersion := map[string][]byte{}
-	for _, m := range all {
-		if m.ArtifactID != id {
-			continue
-		}
-		// A child may extend its own canonical ID to overlay a
-		// lower-precedence layer's artifact (§4.6 same-ID extends
-		// exception). The child's own record in its own layer is never a
-		// valid parent (that would be a self-cycle), so exclude only that
-		// row. A same-ID, same-version record contributed by a different
-		// (lower-precedence) layer is a legitimate parent and must stay in
-		// the candidate set; two repositories that scaffold the same
-		// artifact at the default version land here.
-		if id == childID && m.Version == childVersion && m.Layer == childLayer {
-			continue
-		}
-		versions = append(versions, m.Version)
-		hashByVersion[m.Version] = m.ContentHash
-		typeByVersion[m.Version] = m.Type
-		deprecatedByVersion[m.Version] = m.Deprecated
-		ingestedAtByVersion[m.Version] = m.IngestedAt
-		frontmatterByVersion[m.Version] = m.Frontmatter
-	}
-	if len(versions) == 0 {
-		if id == childID {
-			return "", "", "", fmt.Errorf("self-extends cycle: %q", ref)
-		}
-		// The caller prefixes "extends: ", so strip it from the shared
-		// text to keep the reason byte-identical to the filesystem drop's.
-		return "", "", "", errors.New(strings.TrimPrefix(layer.UnresolvedParentReason(id), "extends: "))
-	}
-
-	var resolved string
-	if p.Kind == version.PinContentHash {
-		for v, h := range hashByVersion {
-			if h == "sha256:"+p.Hash {
-				resolved = v
-				break
-			}
-		}
-		if resolved == "" {
-			return "", "", "", fmt.Errorf("no parent version with content hash sha256:%s", p.Hash)
-		}
-	} else if p.Kind == version.PinExact {
-		// Spec: §4.7.6 — the deprecation filter covers a range or unpinned
-		// reference only. An exact pin names one version, so it resolves
-		// against the unfiltered candidate set and a pin onto a deprecated
-		// version reaches the §4.6 deprecation refusal with a message that
-		// names deprecation, rather than being reported as an unsatisfiable
-		// range by the arm below.
-		resolved, err = version.Resolve(p, versions)
-		if err != nil {
-			return "", "", "", fmt.Errorf("no parent version satisfies %q", ref)
-		}
-	} else {
-		// Spec: §4.7.6 — a range or unpinned reference selects among the
-		// parent's non-deprecated versions only, so deprecated candidates
-		// leave the selection set before resolution. The unfiltered
-		// `versions` slice stays intact for the empty-candidate checks
-		// above and below.
-		selectable := make([]string, 0, len(versions))
-		for _, v := range versions {
-			if !deprecatedByVersion[v] {
-				selectable = append(selectable, v)
-			}
-		}
-		// Spec: §4.7.6 — the parent has stored versions and the filter left
-		// no candidate, so the reference is refused rather than falling back
-		// to the deprecated set. The message names deprecation, because the
-		// arms that report an unpublished parent or an unsatisfied range
-		// would send the author looking for a publication that already
-		// happened.
-		if len(selectable) == 0 {
-			return "", "", "", fmt.Errorf("every stored version of parent %q is deprecated", id)
-		}
-		if p.Kind == version.PinLatest {
-			// Spec: §4.7.6 — `latest` is the most recently ingested
-			// non-deprecated version, so order by ingest time rather than
-			// by semver and a backported fix published after a newer major
-			// line wins. The read path runs the same rule at
-			// pkg/registry/core/core.go, and it deliberately diverges by
-			// falling back to the full candidate set when every version is
-			// deprecated so a caller still receives stored bytes. Ingest
-			// writes a new row instead of serving one, so it fails closed
-			// here and lets the author correct the source.
-			cands := make([]version.Candidate, 0, len(selectable))
-			for _, v := range selectable {
-				cands = append(cands, version.Candidate{Version: v, IngestedAt: ingestedAtByVersion[v]})
-			}
-			resolved, err = version.ResolveLatest(cands)
-		} else {
-			resolved, err = version.Resolve(p, selectable)
-		}
-		if err != nil {
-			return "", "", "", fmt.Errorf("no parent version satisfies %q", ref)
-		}
-	}
-	// Spec: §4.6 — a child may not extend a deprecated parent version. An
-	// explicit reference, by exact semver or by content hash, names one
-	// version and is refused when that version is deprecated. A range or
-	// unpinned reference never reaches this check, because its selection set
-	// already excludes every deprecated candidate.
-	if deprecatedByVersion[resolved] {
-		return "", "", "", fmt.Errorf("parent version %s@%s is deprecated", id, resolved)
-	}
-	// Parse the resolved parent's license from its stored source. The
-	// frontmatter holds the full ARTIFACT.md bytes; a parse failure leaves
-	// the license empty so the license-change check simply does not fire.
-	if a, perr := manifest.ParseArtifact(frontmatterByVersion[resolved]); perr == nil {
-		parentLicense = a.License
-	}
-	return id + "@" + resolved, typeByVersion[resolved], parentLicense, nil
-}
-
-func splitRef(ref string) (id, pin string) {
-	if i := strings.Index(ref, "@"); i >= 0 {
-		return ref[:i], ref[i+1:]
-	}
-	return ref, ""
+	return kept, refused
 }
 
 func dirOf(p string) string {
@@ -1952,8 +1551,7 @@ func dirToCanonical(dir string) string {
 
 // sensitivityRejection reports the §13.10 public-mode rejection for an
 // artifact whose sensitivity sits at or above the floor, and false when the
-// floor admits it. The ingest loop takes it twice for an extends child: once
-// on the authored value and once on the §4.6-merged one.
+// floor admits it. The ingest loop applies it to the authored value.
 func sensitivityRejection(id string, floor, actual manifest.Sensitivity) (RejectedArtifact, bool) {
 	if !rejectsSensitivity(floor, actual) {
 		return RejectedArtifact{}, false
@@ -2038,8 +1636,7 @@ func groupLintErrors(diags []lint.Diagnostic) map[string][]lint.Diagnostic {
 // Ingest calls it for the artifact.published, artifact.deprecated, and
 // artifact.signed events it emits; the §13.4 rehash pass calls it for the
 // artifact.signed event it appends for each row it re-signs, so a re-signed row
-// carries the redaction its own manifest declares. Neither applies a directive
-// an extends: child inherits.
+// carries the redaction its own manifest declares.
 func ArtifactEventRedactor(mr store.ManifestRecord) func(base map[string]string) map[string]string {
 	keys := mr.AuditRedact
 	if len(keys) == 0 {

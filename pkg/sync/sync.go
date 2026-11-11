@@ -133,19 +133,20 @@ type materialRecord struct {
 	SkillBytes    []byte
 	Resources     map[string][]byte
 	// AuthoredBytes is the filesystem source's hashing input: the authored
-	// ARTIFACT.md as read from disk, before the extends: resolver rewrites
-	// ArtifactBytes with the merged, parent-hidden re-serialization (§4.6).
-	// contentHashFor reads it so this consumer and ingest hash the same bytes
-	// for an extends: child (§4.7.6). The server source copies the served
-	// frontmatter into it.
+	// ARTIFACT.md as read from disk. It differs from ArtifactBytes only for a
+	// skill with no ARTIFACT.md, where ArtifactBytes holds the §4.3.4
+	// synthesized document and AuthoredBytes is empty. contentHashFor reads it
+	// so this consumer and ingest hash the same bytes (§4.7.6). The server
+	// source copies the served frontmatter into it.
 	AuthoredBytes []byte
 	// ContentHash is the registry's authoritative §6.6 content hash for a
 	// server-source record, decoded from the /v1/load_artifact response. The
 	// lock pins it verbatim so the committed (id, version, content_hash) triple
 	// matches the registry's system-of-record value, which a locally recomputed
-	// digest does not for an extends-merged manifest whose served bytes no
-	// longer reproduce ContentHash (§4.6). Empty for a filesystem source, which
-	// has no separate recorded hash and falls back to contentHashFor.
+	// digest does not for a plain skill, whose served ARTIFACT.md is the
+	// §4.3.4 synthesized document while its content hash frames a zero-length
+	// ARTIFACT.md. Empty for a filesystem source, which has no separate
+	// recorded hash and falls back to contentHashFor.
 	// spec: §14.11, §7.5.3.
 	ContentHash string
 }
@@ -165,7 +166,7 @@ type Result struct {
 	// rather than silently omitting it.
 	Skipped []string
 	// Dropped lists the artifacts a filesystem-source composition dropped
-	// under the §4.6 collision, sandbox-profile, or executable-field rule
+	// under the §4.6 collision rule or the §4.6 no-inheritance rule
 	// (§13.11.3). Callers render each entry with its Code and Reason; a
 	// server source never reports one.
 	Dropped []layer.Drop
@@ -431,9 +432,10 @@ func stripHarnessConfigPrefix(target string, files []adapter.File) {
 // lockContentHash returns the §7.5.3 content_hash to pin in the lock for a
 // record. A server source carries the registry's authoritative §6.6 value
 // (decoded from /v1/load_artifact), used verbatim so the committed lock matches
-// the registry's system-of-record hash even when an extends-merged manifest's
-// served bytes no longer reproduce it (§4.6). A filesystem source has no
-// recorded hash, so it is computed from the authored bytes.
+// the registry's system-of-record hash even when the served bytes do not
+// reproduce it, as for a plain skill served the §4.3.4 synthesized document. A
+// filesystem source has no recorded hash, so it is computed from the authored
+// bytes.
 // spec: §14.11, §7.5.3.
 func lockContentHash(rec materialRecord) string {
 	if rec.ContentHash != "" {
@@ -443,10 +445,10 @@ func lockContentHash(rec materialRecord) string {
 }
 
 // contentHashFor computes the §7.5.3 content_hash for a filesystem-source
-// record over the authored ARTIFACT.md bytes rather than the merged form the
-// extends: resolver writes into ArtifactBytes, so this consumer, ingest, and
-// the §6.6 check hash the same bytes for an extends: child (§4.7.6). The
-// record supplies the other slots as before: the SKILL.md bytes when the
+// record over the authored ARTIFACT.md bytes rather than the §4.3.4
+// synthesized document the walk writes into ArtifactBytes for a plain skill,
+// so this consumer, ingest, and the §6.6 check hash the same bytes (§4.7.6).
+// The record supplies the other slots as before: the SKILL.md bytes when the
 // artifact carries one, and every bundled resource, inline and large alike.
 // The result carries the spec's "sha256:<hex>" prefix, which
 // CanonicalContentHash omits. spec: §4.7.6, §7.5.3, §14.11.
@@ -482,7 +484,7 @@ func offlineFirstNoop(opts Options, adapterID string) *Result {
 // source-neutral records to materialize. A server URL reads the effective
 // view over HTTP; any other value reads the local filesystem registry. The
 // second return lists the artifacts a filesystem-source composition dropped
-// under the §4.6 collision, sandbox-profile, or executable-field rule. A
+// under the §4.6 collision rule or the §4.6 no-inheritance rule (§13.11.3). A
 // server source contributes none, because ingest already rejected the artifact
 // (§7.3.1).
 func resolveRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
@@ -521,9 +523,8 @@ func resolveRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
 // applyOverlay resolves the §6.4 workspace overlay and merges its records on
 // top of base at the source-neutral materialRecord level. An overlay record
 // replaces the same-ID base record (or appends when no base record matches),
-// per the §6.4 overlay exception: an overlay record replaces the base record
-// whether or not it declares extends:. ErrNoOverlay (the
-// directory is absent) leaves base unchanged.
+// per the §6.4 overlay exception, and the overlay applies no ingest rule.
+// ErrNoOverlay (the directory is absent) leaves base unchanged.
 func applyOverlay(base []materialRecord, overlayPath string) ([]materialRecord, error) {
 	overlayRecords, oerr := overlay.Filesystem{Path: overlayPath}.Resolve(context.Background())
 	if oerr != nil && !errors.Is(oerr, overlay.ErrNoOverlay) {
@@ -561,26 +562,24 @@ func applyOverlay(base []materialRecord, overlayPath string) ([]materialRecord, 
 // filesystemRecords reads the filesystem registry and converts the result to
 // source-neutral records. The §6.4 workspace overlay is merged by the caller
 // (resolveRecords) so both registry sources honor it identically. The
-// second return lists the artifacts dropped under the §4.6 collision,
-// sandbox-profile, or executable-field rule.
+// second return lists the artifacts dropped under the §4.6 collision rule or
+// the §4.6 no-inheritance rule (§13.11.3).
 func filesystemRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
 	reg, err := filesystem.Open(opts.RegistryPath)
 	if err != nil {
 		return nil, nil, err
 	}
-	// spec: §13.11.3 — filesystem source runs the same composer and extends:
-	// resolver as the server so materialization produces equivalent output for
-	// the same artifact directory (the §13.11.6 migration equivalence). Per
-	// §4.6, an unsanctioned cross-layer collision drops the higher-precedence
-	// artifact, which a server would have rejected at ingest, and the walk
-	// continues with the rest. A child the §4.6 sandbox-profile rule or the
-	// §4.6 executable-field rule refuses is dropped the same way, and the
-	// layers are composed again without it.
+	// spec: §13.11.3 — the filesystem source runs the same §4.6 collision
+	// rule as the server, so materialization produces equivalent output for
+	// the same artifact directory (the §13.11.6 migration equivalence). A
+	// cross-layer collision drops the higher-precedence artifact, which a
+	// server would have rejected at ingest, and the walk continues with the
+	// rest. Each artifact whose ARTIFACT.md declares extends: is dropped
+	// before the collision rule, as a server never stores it.
 	var dropped []layer.Drop
 	records, err := reg.Walk(filesystem.WalkOptions{
 		CollisionPolicy: filesystem.CollisionPolicyDrop,
 		OnDrop:          func(d layer.Drop) { dropped = append(dropped, d) },
-		ResolveExtends:  true,
 	})
 	if err != nil {
 		return nil, nil, err

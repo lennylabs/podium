@@ -54,7 +54,6 @@ var podiumOnlySkillFields = []string{
 	"hook_event",
 	"hook_action",
 	"server_identifier",
-	"extends",
 	"target_harnesses",
 	"external_resources",
 	"lint_suppress",
@@ -131,4 +130,27 @@ func TopLevelFrontmatterKeys(src []byte) ([]string, error) {
 		keys = append(keys, root.Content[i].Value)
 	}
 	return keys, nil
+}
+
+// DeclaresExtends reports whether an ARTIFACT.md frontmatter carries the
+// top-level key extends, whatever its value, which §4.6 refuses. Merge keys
+// are applied, because the 0.5.x typed decoder applied them when it folded a
+// child. It decodes the frontmatter block only, because stored rows hold
+// the full document and this predicate runs on every listed row. A source
+// whose frontmatter does not split or decode reports false, because
+// ParseArtifact refuses the same bytes and the map decode accepts every
+// input the typed decode accepts.
+//
+// Spec: §4.6
+func DeclaresExtends(src []byte) bool {
+	fm, _, err := SplitFrontmatter(src)
+	if err != nil {
+		return false
+	}
+	var all map[string]yaml.Node
+	if err := yaml.Unmarshal(fm, &all); err != nil {
+		return false
+	}
+	_, ok := all["extends"]
+	return ok
 }

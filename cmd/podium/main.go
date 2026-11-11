@@ -25,6 +25,7 @@ import (
 
 	"github.com/lennylabs/podium/internal/buildinfo"
 	"github.com/lennylabs/podium/pkg/identity"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
 	overlaypkg "github.com/lennylabs/podium/pkg/overlay"
@@ -572,7 +573,7 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watc
 }
 
 // errDropped marks a --config target whose composition dropped at least one
-// artifact under the §4.6 collision, sandbox-profile, or executable-field rule.
+// artifact under the §4.6 collision rule or the §4.6 no-inheritance rule.
 // runMultiTargetSync prints it as the target's failure and counts the target
 // as failed (§13.11.3). It names no code, because the per-artifact rejected
 // line on standard error already carries each drop's code.
@@ -1075,26 +1076,32 @@ func lintCmd(args []string) int {
 	}
 	// spec: §4.6 — lint validates the registry, so it surfaces a
 	// same-canonical-ID cross-layer collision as an error ("silent
-	// shadowing is never permitted"). The default policy honors the
-	// extends exception, so a legitimate higher-precedence overlay that
-	// declares extends: passes; only an unsanctioned shadow errors. sync
-	// uses CollisionPolicyDrop, which drops and reports an unsanctioned
-	// collision and materializes the rest (§13.11.3).
+	// shadowing is never permitted"): the default policy fails the walk on
+	// one. An ARTIFACT.md that declares extends: is refused as server
+	// ingest refuses it: OnDrop collects each refusal, which is printed as a
+	// rejected line, and the remaining records are linted, so lint names
+	// every refused artifact and every diagnostic of the rest. The walk
+	// calls OnDrop synchronously, so drops needs no lock.
+	var drops []layer.Drop
 	records, err := reg.Walk(filesystem.WalkOptions{
 		CollisionPolicy: filesystem.CollisionPolicyDefault,
+		OnDrop:          func(d layer.Drop) { drops = append(drops, d) },
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
+	exit := 0
+	if reportDropped(os.Stderr, drops) {
+		exit = 1
+	}
 
 	linter := lint.NewIngestLinter(*offline || os.Getenv("PODIUM_INGEST_OFFLINE") == "true")
 	diags := linter.Lint(context.Background(), reg, records)
-	if len(diags) == 0 {
+	if len(diags) == 0 && exit == 0 {
 		fmt.Println("lint: no issues.")
 		return 0
 	}
-	exit := 0
 	for _, d := range diags {
 		_, _ = fmt.Fprintln(os.Stdout, d.String())
 		if d.Severity == lint.SeverityError {

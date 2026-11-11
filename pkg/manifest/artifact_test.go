@@ -208,27 +208,6 @@ body
 	}
 }
 
-// Spec: §4.3 inheritance — extends: <id>@<semver> is preserved verbatim.
-func TestParseArtifact_Extends(t *testing.T) {
-	t.Parallel()
-	src := []byte(`---
-type: skill
-name: child
-version: 2.0.0
-extends: finance/ap/pay-invoice@1.2.0
----
-
-extends parent.
-`)
-	got, err := ParseArtifact(src)
-	if err != nil {
-		t.Fatalf("ParseArtifact: %v", err)
-	}
-	if got.Extends != "finance/ap/pay-invoice@1.2.0" {
-		t.Errorf("Extends = %q, want finance/ap/pay-invoice@1.2.0", got.Extends)
-	}
-}
-
 // Spec: §4.3 target_harnesses — an empty or absent list targets
 // every harness; a non-empty list restricts materialization to the named
 // harnesses (exact adapter-ID match).

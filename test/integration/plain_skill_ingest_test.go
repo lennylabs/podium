@@ -410,16 +410,10 @@ func TestPlainSkillIngest_TwoLayersShareTheAssignedSequence(t *testing.T) {
 
 			wantAccepted(t, e.ingest(t, "base", baseFS), "x", "0.0.0-auto.0")
 			wantAccepted(t, e.ingest(t, "team", teamFS), "x", "0.0.0-auto.1")
-			if pin := e.row(t, "x", "0.0.0-auto.1").ExtendsPin; pin != "x@0.0.0-auto.0" {
-				t.Errorf("team's first pin = %q, want x@0.0.0-auto.0", pin)
-			}
 			wantIdempotent(t, e.ingest(t, "base", baseFS), "x", "0.0.0-auto.0")
 			wantIdempotent(t, e.ingest(t, "team", teamFS), "x", "0.0.0-auto.1")
 
 			wantAccepted(t, e.ingest(t, "team", psFS("x", psSkill("team prose, edited", ""), psOverlay)), "x", "0.0.0-auto.2")
-			if pin := e.row(t, "x", "0.0.0-auto.2").ExtendsPin; pin != "x@0.0.0-auto.1" {
-				t.Errorf("team's second pin = %q, want x@0.0.0-auto.1, team's own previous row", pin)
-			}
 
 			status, got := e.load(t, "x", "")
 			if status != http.StatusOK {

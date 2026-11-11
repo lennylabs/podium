@@ -119,8 +119,7 @@ func EffectiveLayersWith(layers []Layer, id Identity, resolveGroup GroupResolver
 }
 
 // Compose returns, for each canonical ID, the candidate from the
-// highest-precedence layer in layers. It applies neither the §4.6 collision
-// rule nor extends: resolution. Ingest and filesystem.Walk enforce the
+// highest-precedence layer in layers. It applies no §4.6 rule. Ingest and filesystem.Walk enforce the
 // collision rule on their own inputs, and the consumer applies the workspace
 // overlay's exception (§6.4). No production path calls Compose.
 func Compose(layers []Layer, candidates map[string][]Candidate) []Composed {
@@ -167,61 +166,12 @@ type Candidate struct {
 	Skill    *manifest.Skill
 }
 
-// Composed is the result of merging candidates for a canonical artifact ID.
+// Composed is the candidate Compose selects for a canonical artifact ID.
 type Composed struct {
 	ID       string
 	LayerID  string
 	Artifact *manifest.Artifact
 	Skill    *manifest.Skill
-}
-
-// MostRestrictiveSensitivity returns the highest sensitivity among the
-// candidates' artifacts (§4.6 merge semantics: most-restrictive-wins).
-func MostRestrictiveSensitivity(candidates []Candidate) manifest.Sensitivity {
-	rank := func(s manifest.Sensitivity) int {
-		switch s {
-		case manifest.SensitivityHigh:
-			return 3
-		case manifest.SensitivityMedium:
-			return 2
-		case manifest.SensitivityLow:
-			return 1
-		}
-		return 0
-	}
-	best := manifest.Sensitivity("")
-	bestRank := 0
-	for _, c := range candidates {
-		if c.Artifact == nil {
-			continue
-		}
-		r := rank(c.Artifact.Sensitivity)
-		if r > bestRank {
-			bestRank = r
-			best = c.Artifact.Sensitivity
-		}
-	}
-	return best
-}
-
-// AppendUniqueTags returns the union of tags across candidates, in
-// first-seen order (§4.6 merge semantics for list fields).
-func AppendUniqueTags(candidates []Candidate) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, c := range candidates {
-		if c.Artifact == nil {
-			continue
-		}
-		for _, tag := range c.Artifact.Tags {
-			if seen[tag] {
-				continue
-			}
-			seen[tag] = true
-			out = append(out, tag)
-		}
-	}
-	return out
 }
 
 // SplitArtifactRef splits "id@version" into its components. Empty

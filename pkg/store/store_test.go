@@ -53,8 +53,9 @@ func TestMemory_ImmutabilityInvariant(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.3 Reverse Dependency Index — DependentsOf returns every
-// edge ending at the artifact.
+// Spec: §4.7.3 Reverse Dependency Index — DependentsOf returns every §4.7.3
+// edge ending at the artifact and no stored edge of another kind, such as the
+// legacy extends edge an earlier release stored.
 func TestMemory_DependencyIndex(t *testing.T) {
 	t.Parallel()
 	s := NewMemory()
@@ -66,8 +67,8 @@ func TestMemory_DependencyIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DependentsOf: %v", err)
 	}
-	if len(got) != 2 {
-		t.Errorf("got %d edges, want 2", len(got))
+	if len(got) != 1 || got[0].Kind != "delegates_to" {
+		t.Errorf("got %+v, want exactly one delegates_to edge", got)
 	}
 }
 

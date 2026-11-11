@@ -6,18 +6,6 @@ import (
 	"github.com/lennylabs/podium/pkg/manifest"
 )
 
-func TestSplitRef(t *testing.T) {
-	t.Parallel()
-	id, pin := splitRef("foo/bar@1.0.0")
-	if id != "foo/bar" || pin != "1.0.0" {
-		t.Errorf("got %q %q", id, pin)
-	}
-	id, pin = splitRef("foo/bar")
-	if id != "foo/bar" || pin != "" {
-		t.Errorf("got %q %q", id, pin)
-	}
-}
-
 func TestDirOf(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{

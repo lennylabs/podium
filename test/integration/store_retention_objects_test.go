@@ -108,7 +108,6 @@ func TestStoreRetention_PurgesDeprecatedBytesProtectsPinnedParent(t *testing.T) 
 		TenantID: tenant, ArtifactID: idC, Version: "1.0.0", ContentHash: "sha256:c",
 		Type: "context", Layer: "team", IngestedAt: fresh,
 		Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: checkout policy\nextends: " + idP + "@1.0.0\n---\n\nbody\n"),
-		ExtendsPin:  idP + "@1.0.0",
 	})
 
 	// Sanity: the child loads before the sweep (it resolves the pinned parent).

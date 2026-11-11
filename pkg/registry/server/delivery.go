@@ -22,7 +22,7 @@ func WithDeliverySigner(p sign.Provider) Option {
 // result. Every value is the one the response serves before the manifest-body
 // channel moves the document out of line, and each resource contributes the
 // content hash its ref carries rather than its body, so composing the record
-// reads nothing from object storage. The per-caller ExtendsPin is excluded.
+// reads nothing from object storage.
 //
 // Spec: §4.7.10.
 func deliveryRecordOf(res *core.LoadArtifactResult) version.DeliveryRecord {
