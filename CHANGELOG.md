@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **A `git` layer's URL credential is stored apart from its `repo`** (§7.3.1, §13.4): for a `repo` URL that carries userinfo, the metadata store now writes the userinfo to `layer_configs.repo_userinfo` and the rest of the URL to `layer_configs.repo`. No row is rewritten at upgrade. A layer registered earlier keeps working and takes the new form at its next write, which is its next completed ingest, an update that changes the layer, a reorder, or a re-registration, or the next start for a layer declared in the registry configuration. Registration, every layer response, and the clone are unchanged. `podium admin migrate-to-standard` writes the new form to its target. **The lowest version that runs against a database this release has written to is 0.6.0.** Roll back to 0.6.0 and no further, and upgrade from 0.5.2 or earlier by stopping every replica first or by upgrading through 0.6.0. Replicas on 0.6.0 and on this release run together during a rolling upgrade. The rollback floor section of `docs/deployment/operator-guide.md` gives the mixed-version rule and the effects of running 0.5.2 against a written database.
+
 ## [0.6.0] - 2026-11-10
 
 ### Added
