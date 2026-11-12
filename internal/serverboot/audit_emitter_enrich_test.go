@@ -1,9 +1,12 @@
 package serverboot
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -35,16 +38,32 @@ func newReadEventServer(t *testing.T, opts ...server.Option) sinkServer {
 	return sinkServer{srv: server.New(reg, opts...), sink: sink}
 }
 
-func (s sinkServer) drive(t *testing.T, traceparent, forwardedUser string) string {
+// readRequest is the search request drive sends. An empty query searches for
+// "variance"; an empty header value leaves that header off the request.
+type readRequest struct {
+	traceparent   string
+	forwardedUser string
+	client        string
+	query         string
+}
+
+func (s sinkServer) drive(t *testing.T, rr readRequest) string {
 	t.Helper()
 	ts := httptest.NewServer(s.srv.Handler())
 	t.Cleanup(ts.Close)
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/search_artifacts?query=variance", nil)
-	if traceparent != "" {
-		req.Header.Set("traceparent", traceparent)
+	query := rr.query
+	if query == "" {
+		query = "variance"
 	}
-	if forwardedUser != "" {
-		req.Header.Set("X-Forwarded-User", forwardedUser)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/search_artifacts?query="+url.QueryEscape(query), nil)
+	for name, v := range map[string]string{
+		"traceparent":      rr.traceparent,
+		"X-Forwarded-User": rr.forwardedUser,
+		audit.ClientHeader: rr.client,
+	} {
+		if v != "" {
+			req.Header.Set(name, v)
+		}
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -80,7 +99,7 @@ func TestReadEvent_AuthenticatedCallerCarriesEmailGroupsAndTrace(t *testing.T) {
 			IsAuthenticated: true,
 		}
 	}))
-	got := s.drive(t, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "")
+	got := s.drive(t, readRequest{traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"})
 	for _, want := range []string{
 		`"type":"artifacts.searched"`,
 		`"caller":{"identity":"alice"`,
@@ -104,7 +123,7 @@ func TestReadEvent_AuthenticatedCallerCarriesEmailGroupsAndTrace(t *testing.T) {
 // generated trace id.
 func TestReadEvent_PublicCallerCarriesNetworkAndFlag(t *testing.T) {
 	s := newReadEventServer(t, server.WithPublicMode())
-	got := s.drive(t, "", "upstream-bob")
+	got := s.drive(t, readRequest{forwardedUser: "upstream-bob"})
 	for _, want := range []string{
 		`"type":"artifacts.searched"`,
 		`"caller":{"identity":"system:public"`,
@@ -120,5 +139,34 @@ func TestReadEvent_PublicCallerCarriesNetworkAndFlag(t *testing.T) {
 	}
 	if !strings.Contains(got, `"trace_id"`) {
 		t.Errorf("public read missing generated trace_id:\n%s", got)
+	}
+}
+
+// Spec: §7.2.2, §8.1 — a search that names its client in X-Podium-Client
+// records the normalized value as caller.client on artifacts.searched, beside
+// the PII-scrubbed context.query. caller.client is event metadata, so the §8.2
+// query scrub leaves it unchanged while it removes the email from the query.
+func TestReadEvent_RecordsCallerClientBesideScrubbedQuery(t *testing.T) {
+	s := newReadEventServer(t)
+	got := s.drive(t, readRequest{
+		client: testClientHeader,
+		query:  "variance report for alice@acme.com",
+	})
+	var ev auditLine
+	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &ev); err != nil {
+		t.Fatalf("decode audit line: %v\nlog:\n%s", err, got)
+	}
+	if ev.Type != string(audit.EventArtifactsSearched) {
+		t.Fatalf("type = %s, want artifacts.searched", ev.Type)
+	}
+	if !reflect.DeepEqual(ev.Caller.Client, testClient) {
+		t.Errorf("caller.client = %v, want %v", ev.Caller.Client, testClient)
+	}
+	q := ev.Context["query"]
+	if q == "" || strings.Contains(q, "alice@acme.com") {
+		t.Errorf("context.query = %q, want the query with the email scrubbed", q)
+	}
+	if strings.Contains(got, "alice@acme.com") {
+		t.Errorf("audit line carries the unscrubbed email:\n%s", got)
 	}
 }
