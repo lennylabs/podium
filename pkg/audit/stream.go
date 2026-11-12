@@ -67,8 +67,8 @@ type OpenOptions struct {
 	// Clock stamps default timestamps and times the drop log; nil uses
 	// clock.Real{}.
 	Clock clock.Clock
-	// Rand is the randomness source of service.instance.id; nil uses
-	// crypto/rand.Reader.
+	// Rand is the randomness source of service.instance.id and of the
+	// network destinations' retry delays; nil uses crypto/rand.Reader.
 	Rand io.Reader
 }
 
@@ -138,6 +138,10 @@ type Stream struct {
 	// instanceID is the OTLP resource's service.instance.id, outside the
 	// hashed body.
 	instanceID string
+	// rand is opts.Rand behind a mutex, shared by the forwarders.
+	rand io.Reader
+	// transport is the one client every network destination sends through.
+	transport *transport
 
 	file   *FileSink
 	stdout io.Writer
@@ -157,7 +161,7 @@ type Stream struct {
 
 // newStream returns an empty stream over opts, which must be resolved.
 func newStream(opts OpenOptions) *Stream {
-	return &Stream{opts: opts, drops: newDropLog(opts.Clock)}
+	return &Stream{opts: opts, drops: newDropLog(opts.Clock), rand: &lockedReader{r: opts.Rand}}
 }
 
 // Open parses the destination list value and opens a stream over it. Every
@@ -173,7 +177,12 @@ func Open(ctx context.Context, value string, opts OpenOptions) (*Stream, error) 
 	if err != nil {
 		return nil, err
 	}
+	tr, err := loadTransport(opts)
+	if err != nil {
+		return nil, err
+	}
 	s := newStream(opts)
+	s.transport = tr
 	for _, spec := range specs {
 		if err := s.addDestination(spec); err != nil {
 			return nil, err
@@ -201,6 +210,10 @@ func (s *Stream) addDestination(spec destSpec) error {
 			return fmt.Errorf("%w: %s: file destination %s cannot be opened for appending: %w", ErrConfig, variable, file.Path(), err)
 		}
 		s.file = file
+		return nil
+	case kindHTTP:
+		dest := &httpDest{url: spec.url.String(), tr: s.transport}
+		s.queues = append(s.queues, newForwarder(s, spec.kind, spec.name(), dest))
 		return nil
 	default:
 		return fmt.Errorf("%w: %s: the %s destination is not available in this build", ErrConfig, variable, spec.kind)
@@ -369,6 +382,9 @@ func (s *Stream) Close(ctx context.Context) error {
 		wg.Wait()
 		if s.cancel != nil {
 			s.cancel()
+		}
+		if s.transport != nil {
+			s.transport.client.CloseIdleConnections()
 		}
 		s.closeErr = errors.Join(errs...)
 	})

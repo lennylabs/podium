@@ -82,6 +82,13 @@ func TestOpen_RefusesUnusableConfiguration(t *testing.T) {
 		{"stdout with TracingStdout", "stdout", OpenOptions{TracingStdout: true}, []string{envRegistryPath, envTracing}},
 		{"local list variable", "default,,x", OpenOptions{Local: true}, []string{envLocalSink}},
 	}
+	for _, row := range transportRefusals(t, dir) {
+		cases = append(cases, struct {
+			name, value string
+			opts        OpenOptions
+			want        []string
+		}{row.name, "http://h/x", row.opts, row.want})
+	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -98,7 +105,7 @@ func TestOpen_RefusesUnusableConfiguration(t *testing.T) {
 					t.Errorf("error %q does not contain %q", msg, w)
 				}
 			}
-			for _, secret := range []string{"alice", "pw9x", "zq7k", "sig=", "tok=", "%zz"} {
+			for _, secret := range []string{"alice", "pw9x", "zq7k", "sig=", "tok=", "%zz", "BEGIN"} {
 				if strings.Contains(msg, secret) {
 					t.Errorf("error %q echoes %q", msg, secret)
 				}
@@ -107,17 +114,16 @@ func TestOpen_RefusesUnusableConfiguration(t *testing.T) {
 	}
 }
 
-// Until their constructors land, Open refuses an HTTP, OTLP, or stdout
-// element with ErrConfig naming the list variable and the kind.
+// Until their constructors land, Open refuses an OTLP or stdout element
+// with ErrConfig naming the list variable and the kind.
 //
 // Spec: §13.12
 func TestOpen_RefusesDestinationsWithoutConstructor(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"https://h/x?tok=zq7k":    "http",
-		"otlp+http://c:4318/":     "otlp",
-		"stdout":                  "stdout",
-		"otlp+https://c/v1/logs?": "otlp",
+		"otlp+http://c:4318/":             "otlp",
+		"stdout":                          "stdout",
+		"otlp+https://c/v1/logs?tok=zq7k": "otlp",
 	}
 	for value, kind := range cases {
 		_, err := Open(context.Background(), value, OpenOptions{})
