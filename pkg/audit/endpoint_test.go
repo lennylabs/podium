@@ -119,3 +119,57 @@ func TestEndpointSink_Non2xxReturnsError(t *testing.T) {
 		t.Errorf("Append err = %v, want status 500", err)
 	}
 }
+
+// Spec: §8.3, §8.6 — the endpoint sink chains each event in memory before it
+// sends, and it neither retries nor buffers a failed POST. The operator
+// guide's "Audit records" section documents the consequence a receiver sees:
+// after a dropped event, the next record it receives names, as prev_hash, the
+// hash of a record that never arrived.
+func TestEndpointSink_DroppedEventLeavesDanglingPrevHash(t *testing.T) {
+	t.Parallel()
+	var (
+		mu       sync.Mutex
+		attempts int
+		received []map[string]any
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var rec map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		attempts++
+		if attempts == 2 {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		received = append(received, rec)
+	}))
+	defer srv.Close()
+	sink, err := audit.NewEndpointSink(srv.URL)
+	if err != nil {
+		t.Fatalf("NewEndpointSink: %v", err)
+	}
+	errs := make([]error, 3)
+	for i, target := range []string{"a", "b", "c"} {
+		errs[i] = sink.Append(context.Background(), audit.Event{Type: audit.EventArtifactLoaded, Target: target})
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if errs[0] != nil || errs[1] == nil || errs[2] != nil {
+		t.Fatalf("Append errors = %v, want only the second to fail", errs)
+	}
+	if attempts != 3 || len(received) != 2 {
+		t.Fatalf("attempts = %d, received = %d; want 3 POSTs and 2 accepted records (no retry)", attempts, len(received))
+	}
+	first, third := received[0], received[1]
+	if _, ok := first["prev_hash"]; ok {
+		t.Errorf("first record of the chain carries prev_hash %v, want none", first["prev_hash"])
+	}
+	prev, _ := third["prev_hash"].(string)
+	if prev == "" || prev == first["hash"] {
+		t.Errorf("third record prev_hash = %q, want the hash of the dropped record (not %v)", prev, first["hash"])
+	}
+}

@@ -50,6 +50,46 @@ The registry serves Prometheus metrics at `/metrics` by default, and `PODIUM_MET
 
 ---
 
+## Audit records
+
+The registry and `podium-mcp` each write their own audit stream. `PODIUM_AUDIT_LOG_PATH` selects the registry's sink, and `PODIUM_AUDIT_SINK` selects the `podium-mcp` local sink. A file path selects the file sink, and an `http://` or `https://` URL selects the endpoint sink.
+
+The file sink writes JSON Lines: one JSON object per event, one event per line.
+
+The endpoint sink sends one HTTP POST per event. Each POST carries `Content-Type: application/json` and one JSON object in the body. The sink does not batch events, and each POST has a 10-second timeout.
+
+A record carries the following keys:
+
+| Key | Content |
+|:--|:--|
+| `type` | The event type, such as `artifact.loaded` or `layer.ingested`. |
+| `timestamp` | The event time in RFC 3339 with fractional seconds, in UTC. |
+| `trace_id` | The W3C trace ID of the request that raised the event. |
+| `caller` | An object with `identity`, `email`, `groups`, `network`, and `public_mode`. `network` holds `source_ip` and `forwarded_user` and appears on public-mode events. |
+| `target` | The artifact, domain, layer, or user the event concerns. |
+| `context` | A string map of event-specific fields, such as `version` on `artifact.loaded`. |
+| `tenant` | The org ID of the tenant the event concerns. |
+| `resolved_layers` | The caller's effective layer composition on a read event. |
+| `result_size` | The number of results a read event returned. |
+| `hash` | The SHA-256 hash of this record's body chained to `prev_hash`. |
+| `prev_hash` | The `hash` of the record before this one in the same chain. |
+
+`type`, `timestamp`, and `hash` are always present. Every other key is omitted when it is empty, so the first record of a chain carries no `prev_hash`.
+
+```json
+{"type":"artifact.loaded","timestamp":"2026-11-11T14:03:22.418273Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","caller":{"identity":"alice","email":"alice@acme.com","groups":["platform"]},"target":"platform/deploy-runbook","context":{"version":"1.2.0"},"tenant":"acme","resolved_layers":["org-defaults","team-platform"],"result_size":1,"hash":"9f2c4e7a1b8d3f60c5e2a9d4b7f1038e6c2d5a9b4e7f1c3a8d6b2e0f5a9c7d41","prev_hash":"3e8b1d6f0a4c7e2b9d5f8a1c4e7b0d3f6a9c2e5b8d1f4a7c0e3b6d9f2a5c8e10"}
+```
+
+The endpoint sink treats a transport error or a non-2xx response as a failed send and drops the event. It does not retry the POST or buffer the event.
+
+The sending process computes the hash chain in memory before each send. A dropped event therefore leaves the receiver with a later record whose `prev_hash` names a record the receiver never received.
+
+The chain belongs to the process that writes it. Each process start begins a new chain, whose first record carries no `prev_hash`. In a clustered deployment, each replica sends its own chain, so a receiver that collects every replica's stream holds one chain per replica and per process start.
+
+The registry does not verify a stream it forwards to an endpoint. The receiver stores the stream and verifies its chain.
+
+---
+
 ## Alerting
 
 A reasonable starting set, tuned for the baseline deployment:
