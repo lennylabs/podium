@@ -133,6 +133,25 @@ func readRawLayerRepoRow(t *testing.T, path, id string) rawLayerRepoRow {
 	return row
 }
 
+// writeRawLayerRepoRow sets the repo columns of layer id in the SQLite file at
+// path to row, with no store write rule in between. It runs while no server
+// process holds the file.
+func writeRawLayerRepoRow(t *testing.T, path, id string, row rawLayerRepoRow) {
+	t.Helper()
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	res, err := db.Exec(`UPDATE layer_configs SET repo = ?, repo_userinfo = ? WHERE id = ?`, row.Repo, row.Userinfo, id)
+	if err != nil {
+		t.Fatalf("update repo, repo_userinfo for %s: %v", id, err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		t.Fatalf("update repo, repo_userinfo for %s affected %d row(s) (err %v), want 1", id, n, err)
+	}
+}
+
 // credentialCLI runs the podium CLI against one registry and keeps every
 // output, so a test can assert at its end that none carries a fixture.
 type credentialCLI struct {
@@ -424,6 +443,67 @@ func TestLayerRepoCredential_SurvivesRestart_CLI(t *testing.T) {
 		for _, part := range []string{user, password} {
 			if strings.Contains(text, part) {
 				t.Errorf("%s carries the credential part %q:\n%s", what, part, text)
+			}
+		}
+	}
+}
+
+// Spec: §13.4 — a row an earlier release wrote, with the credential whole in
+// repo, takes the two-column form at the next start of the binary, before the
+// registry serves, and the start logs the count alone.
+// Spec: §7.3.1 (Repository credentials) — after the rewrite the list reports
+// the repo without userinfo and a reingest sends the registered credential.
+func TestLayerRepoCredential_EarlierFormRowRewrittenAtStart(t *testing.T) {
+	t.Parallel()
+	const (
+		user     = "alice-user"
+		password = "s3cr3tpw"
+	)
+	remote := newFailingGitRemote(t)
+	bare := remote.URL + "/acme/private.git"
+	whole := strings.Replace(bare, "://", "://"+user+":"+password+"@", 1)
+
+	home := t.TempDir()
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte(password+"\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	sqlitePath := filepath.Join(home, "podium.db")
+	env := []string{
+		"HOME=" + home,
+		"PODIUM_SQLITE_PATH=" + sqlitePath,
+		"PODIUM_SIGN=none",
+	}
+	srv := startServerArgs(t, env, "serve", "--standalone")
+	registered := runPodium(t, "", nil, "layer", "register", "--registry", srv.BaseURL,
+		"--id", "private", "--repo", bare, "--ref", "main",
+		"--repo-username", user, "--repo-token-file", tokenFile)
+	cliWantExit(t, registered, 0, "register a layer through the credential flags")
+	stopProc(srv.cmd)
+
+	// The row takes the form an earlier release writes.
+	writeRawLayerRepoRow(t, sqlitePath, "private", rawLayerRepoRow{Repo: whole})
+
+	srv2 := startServerArgs(t, env, "serve", "--standalone")
+	cli := &credentialCLI{t: t, baseURL: srv2.BaseURL}
+	listed := cli.listLayer("private")
+	sent := cli.reingest(remote, "private", "reingest after the rewrite")
+	stopProc(srv2.cmd)
+
+	wantSent(t, sent, basicAuthPair{user, password}, "reingest after the rewrite")
+	wantRow := rawLayerRepoRow{Repo: bare, Userinfo: sql.NullString{String: user + ":" + password, Valid: true}}
+	if got := readRawLayerRepoRow(t, sqlitePath, "private"); listed.Repo != bare || got != wantRow {
+		t.Errorf("after the restart: listed repo %q, want %q; stored row %+v, want %+v", listed.Repo, bare, got, wantRow)
+	}
+	log2 := srv2.log()
+	if !strings.Contains(log2, "layer repo migration: rewrote 1 stored layer(s)") {
+		t.Errorf("the second process's log does not report the rewrite:\n%s", log2)
+	}
+	outputs := append([]string{srv.log(), log2, registered.Stdout + registered.Stderr}, cli.outputs...)
+	for _, text := range outputs {
+		for _, part := range []string{user, password} {
+			if strings.Contains(text, part) {
+				t.Errorf("an output carries the credential part %q:\n%s", part, text)
 			}
 		}
 	}

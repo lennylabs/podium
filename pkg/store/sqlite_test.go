@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -173,8 +174,15 @@ func openLayerRepoSQLite(t *testing.T) *SQLite {
 func sqliteLayerRepoBackend(t *testing.T) layerRepoBackend {
 	t.Helper()
 	s := openLayerRepoSQLite(t)
-	return layerRepoBackend{st: s, db: s.db, tenant: "t", sel: sqliteSelectLayerRepo,
-		toEarlier: `UPDATE layer_configs SET repo = ?, repo_userinfo = NULL WHERE tenant_id = ? AND id = ?`}
+	return layerRepoBackend{
+		st: s, db: s.db, tenant: "t", sel: sqliteSelectLayerRepo,
+		toEarlier:   `UPDATE layer_configs SET repo = ?, repo_userinfo = NULL WHERE tenant_id = ? AND id = ?`,
+		setUserinfo: `UPDATE layer_configs SET repo_userinfo = ? WHERE tenant_id = ? AND id = ?`,
+		migrate:     s.MigrateLayerRepoForm,
+		migrateRow: func(ctx context.Context, row layerRepoRow, repo string, userinfo sql.NullString) (bool, error) {
+			return rewriteLayerRepoRowSQLite(ctx, s.db, row, repo, userinfo)
+		},
+	}
 }
 
 // Spec: §7.3.1 (Repository credentials) — on SQLite, a put and a
@@ -245,6 +253,45 @@ func TestSQLite_LayerRepoUserinfoColumnRead(t *testing.T) {
 	want := layerRepoColumns{Repo: bare, Userinfo: sql.NullString{String: "ghp_tok3n", Valid: true}}
 	if got := rawLayerRepo(t, s.db, sqliteSelectLayerRepo, "t", "team"); got != want {
 		t.Errorf("columns after the put back = %+v, want %+v", got, want)
+	}
+}
+
+// Spec: §13.4 — at start every SQLite layer row whose repo columns differ
+// from the form its next write would take is rewritten into that form, for
+// every tenant and soft-deleted rows included, and a second pass writes
+// nothing.
+// Spec: §7.3.1 (Repository credentials)
+//
+// The count is 6: the four whole credentialed rows of the check, its
+// ignored-column row, and the second tenant's row.
+func TestSQLite_LayerRepoFormMigration(t *testing.T) {
+	t.Parallel()
+	b := sqliteLayerRepoBackend(t)
+	const globexRepo = "https://bob-user:hunt3r2@git.acme.com/globex/x.git"
+	ctx := context.Background()
+	mustDo(t, "PutLayerConfig globex", b.st.PutLayerConfig(ctx, LayerConfig{TenantID: "globex", ID: "team", SourceType: "git", Repo: globexRepo}))
+	_, err := b.db.ExecContext(ctx, b.toEarlier, globexRepo, "globex", "team")
+	mustDo(t, "set the earlier form under globex", err)
+
+	n := checkLayerRepoFormMigration(t, b)
+	got := rawLayerRepo(t, b.db, b.sel, "globex", "team")
+	want := layerRepoTwoColumn("https://git.acme.com/globex/x.git", "bob-user:hunt3r2")
+	if n != 6 || got != want {
+		t.Errorf("first call rewrote %d, want 6; globex row %+v, want %+v", n, got, want)
+	}
+}
+
+// Spec: §13.4 — the SQLite per-row statement leaves a row another writer
+// changed after the scan as that writer wrote it, and a pass on a closed store
+// returns an error.
+// Spec: §7.3.1 (Repository credentials)
+func TestSQLite_LayerRepoFormMigration_LeavesARowAnotherWriterChanged(t *testing.T) {
+	t.Parallel()
+	b := sqliteLayerRepoBackend(t)
+	checkLayerRepoFormMigrationLeavesARowAnotherWriterChanged(t, b)
+	mustDo(t, "Close", b.st.(*SQLite).Close())
+	if n, err := b.migrate(context.Background()); err == nil || !strings.HasPrefix(err.Error(), "store: migrate layer repo form: ") {
+		t.Errorf("MigrateLayerRepoForm on a closed store = %d, %v; want a store: migrate layer repo form error", n, err)
 	}
 }
 
