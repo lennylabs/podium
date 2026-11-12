@@ -1,7 +1,7 @@
 # Proposal 0065: Record the self-reported client software on audit events, and strip the query string from every exported trace span
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-11). Verified (2026-11-11) after 10 adversarial review rounds (21 findings fixed).
+- Status: Implemented (2026-11-11). Verified (2026-11-11) after 10 adversarial review rounds (21 findings fixed).
 - Date: 2026-11-11
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. One part is backward-incompatible: the MCP server's local audit events lose the constant `context.source` key. The change ships in a MINOR release.
@@ -54,52 +54,52 @@ This document stages spec, code, test, and documentation changes. It does not mo
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §7.2.2 Client Identification lands after §7.2.1.
+- [x] **S1 · spec** — SPEC-1. §7.2.2 Client Identification lands after §7.2.1.
       Levels: unit. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. The §8.1 "Client in audit events" paragraph lands after the tenant paragraph.
+- [x] **S2 · spec** — SPEC-2. The §8.1 "Client in audit events" paragraph lands after the tenant paragraph.
       Levels: unit. Depends on: S1
-- [ ] **S3 · spec** — SPEC-4. The §13.8 Tracing bullet gains the exported-span-content rule.
+- [x] **S3 · spec** — SPEC-4. The §13.8 Tracing bullet gains the exported-span-content rule.
       Levels: unit. Depends on: —
-- [ ] **S4 · docs** — DOC-2a. The operator guide's "Audit records" section documents the current file and endpoint audit formats.
+- [x] **S4 · docs** — DOC-2a. The operator guide's "Audit records" section documents the current file and endpoint audit formats.
       Levels: e2e. Depends on: —
       Interleave: this docs step precedes the code because it documents behavior that exists today and depends on no other step.
-- [ ] **S5 · code** — CODE-1. `pkg/audit` gains `CallerClient`, the header codec, normalization at every sink's `Append`, the hashed parts, the wire key, and the `client` parameter of `EraseUser`.
+- [x] **S5 · code** — CODE-1. `pkg/audit` gains `CallerClient`, the header codec, normalization at every sink's `Append`, the hashed parts, the wire key, and the `client` parameter of `EraseUser`.
       Levels: unit. Depends on: S2
-- [ ] **S6 · test** — TEST-1. The codec, hash, wire-form, and erasure unit tests in `pkg/audit`.
+- [x] **S6 · test** — TEST-1. The codec, hash, wire-form, and erasure unit tests in `pkg/audit`.
       Levels: unit. Depends on: S5
-- [ ] **S7 · code** — CODE-2. `pkg/registry/server` reads the header into `AuditMeta` and records it on write-handler events and on `user.erased`.
+- [x] **S7 · code** — CODE-2. `pkg/registry/server` reads the header into `AuditMeta` and records it on write-handler events and on `user.erased`.
       Levels: unit, integration. Depends on: S5
-- [ ] **S8 · code** — CODE-3. `internal/serverboot` copies `caller.client` onto read events.
+- [x] **S8 · code** — CODE-3. `internal/serverboot` copies `caller.client` onto read events.
       Levels: unit, integration. Depends on: S7
-- [ ] **S9 · test** — TEST-2. Registry integration tests through the serverboot mux.
+- [x] **S9 · test** — TEST-2. Registry integration tests through the serverboot mux.
       Levels: unit, integration. Depends on: S8
-- [ ] **S10 · code** — CODE-4. `podium-mcp` sends the header and records `caller.client` on local events, and drops `context.source`.
+- [x] **S10 · code** — CODE-4. `podium-mcp` sends the header and records `caller.client` on local events, and drops `context.source`.
       Levels: unit. Depends on: S5
-- [ ] **S11 · test** — TEST-3. `podium-mcp` header and local-stream tests.
+- [x] **S11 · test** — TEST-3. `podium-mcp` header and local-stream tests.
       Levels: unit, integration. Depends on: S10
-- [ ] **S12 · code** — CODE-5. `pkg/sync` sends `kind=sync` with the run's harness, and the interactive `podium sync override` passes its harness to the view resolution.
+- [x] **S12 · code** — CODE-5. `pkg/sync` sends `kind=sync` with the run's harness, and the interactive `podium sync override` passes its harness to the view resolution.
       Levels: unit. Depends on: S5
-- [ ] **S13 · test** — TEST-4. `pkg/sync` header tests on control-plane requests and their absence on links, and the `cmd/podium` test that the interactive `podium sync override` sends its resolved harness.
+- [x] **S13 · test** — TEST-4. `pkg/sync` header tests on control-plane requests and their absence on links, and the `cmd/podium` test that the interactive `podium sync override` sends its resolved harness.
       Levels: integration. Depends on: S12
-- [ ] **S14 · code** — CODE-6. The `podium` CLI sends `kind=cli`, and `podium sync --preview` sends the `pkg/sync` value through the `fetchScopePreview` header parameter, with its own `cmd/podium` unit test.
+- [x] **S14 · code** — CODE-6. The `podium` CLI sends `kind=cli`, and `podium sync --preview` sends the `pkg/sync` value through the `fetchScopePreview` header parameter, with its own `cmd/podium` unit test.
       Levels: unit. Depends on: S12
-- [ ] **S15 · code** — CODE-7. `podium-py` and `podium-ts` send `kind=sdk` on API calls only.
+- [x] **S15 · code** — CODE-7. `podium-py` and `podium-ts` send `kind=sdk` on API calls only.
       Levels: unit. Depends on: S1
-- [ ] **S16 · test** — TEST-6. SDK header tests in the existing suites.
+- [x] **S16 · test** — TEST-6. SDK header tests in the existing suites.
       Levels: unit, integration. Depends on: S15
-- [ ] **S17 · test** — TEST-5. End-to-end tests that the real binaries record `caller.client` in both audit streams.
+- [x] **S17 · test** — TEST-5. End-to-end tests that the real binaries record `caller.client` in both audit streams.
       Levels: e2e. Depends on: S9, S11, S13, S14
-- [ ] **S18 · code** — CODE-8. `pkg/tracing` wraps every exporter in the export-time scrub through an unexported `newProvider`.
+- [x] **S18 · code** — CODE-8. `pkg/tracing` wraps every exporter in the export-time scrub through an unexported `newProvider`.
       Levels: unit. Depends on: S3
-- [ ] **S19 · test** — TEST-7. The scrub unit table, the provider-level test over every span field, and the binary-level OTLP test on success and error paths.
+- [x] **S19 · test** — TEST-7. The scrub unit table, the provider-level test over every span field, and the binary-level OTLP test on success and error paths.
       Levels: unit, integration. Depends on: S18
-- [ ] **S20 · test** — MV-1. Scenario S104 in `test/manual-validation.md`.
+- [x] **S20 · test** — MV-1. Scenario S104 in `test/manual-validation.md`.
       Levels: e2e. Depends on: S17, S19
-- [ ] **S21 · docs** — DOC-2b. The operator guide adds `caller.client` and the tracing paragraph.
+- [x] **S21 · docs** — DOC-2b. The operator guide adds `caller.client` and the tracing paragraph.
       Levels: e2e. Depends on: S4, S9, S11, S18
-- [ ] **S22 · docs** — DOC-1. The HTTP API reference documents `X-Podium-Client` and links to the operator guide's `caller.client` text.
+- [x] **S22 · docs** — DOC-1. The HTTP API reference documents `X-Podium-Client` and links to the operator guide's `caller.client` text.
       Levels: e2e. Depends on: S1, S21
-- [ ] **S23 · docs** — DOC-3. The `[Unreleased]` CHANGELOG entries.
+- [x] **S23 · docs** — DOC-3. The `[Unreleased]` CHANGELOG entries.
       Levels: —. Depends on: S1 to S22
 
 **Ordering constraints.**
