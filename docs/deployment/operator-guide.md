@@ -48,6 +48,10 @@ The registry serves Prometheus metrics at `/metrics` by default, and `PODIUM_MET
 - `podium_mcp_requests_total{tool}` and `podium_mcp_request_errors_total{tool}`: per-tool call volume and error count at the bridge.
 - `podium_mcp_request_duration_seconds{tool}`: per-tool call latency at the bridge.
 
+**Tracing:**
+
+Tracing is off by default. `PODIUM_TRACING=otlp`, or a set `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, exports spans over OTLP/HTTP, and `PODIUM_TRACING=stdout` writes them to standard output for local inspection. No exported span carries a URL query component, search text, or a `session_id` in its name, attributes, events, links, or status description. A span attribute that holds an `http` or `https` URL, such as `url.full`, shows the scheme, host, and path only, so the signature of a presigned URL stays out of the trace backend. A failed outbound call exports a status description that names the host and port and no URL.
+
 ---
 
 ## Audit records
@@ -65,7 +69,7 @@ A record carries the following keys:
 | `type` | The event type, such as `artifact.loaded` or `layer.ingested`. |
 | `timestamp` | The event time in RFC 3339 with fractional seconds, in UTC. |
 | `trace_id` | The W3C trace ID of the request that raised the event. |
-| `caller` | An object with `identity`, `email`, `groups`, `network`, and `public_mode`. `network` holds `source_ip` and `forwarded_user` and appears on public-mode events. |
+| `caller` | An object with `identity`, `email`, `groups`, `network`, `client`, and `public_mode`. `network` holds `source_ip` and `forwarded_user` and appears on public-mode events. `client` holds `kind`, `name`, `version`, `host`, `host_version`, and `harness`, as described in [Client software](#client-software). |
 | `target` | The artifact, domain, layer, or user the event concerns. |
 | `context` | A string map of event-specific fields, such as `version` on `artifact.loaded`. |
 | `tenant` | The org ID of the tenant the event concerns. |
@@ -77,7 +81,7 @@ A record carries the following keys:
 `type`, `timestamp`, and `hash` are always present. Every other key is omitted when it is empty, so the first record of a chain carries no `prev_hash`.
 
 ```json
-{"type":"artifact.loaded","timestamp":"2026-11-11T14:03:22.418273Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","caller":{"identity":"alice","email":"alice@acme.com","groups":["platform"]},"target":"platform/deploy-runbook","context":{"version":"1.2.0"},"tenant":"acme","resolved_layers":["org-defaults","team-platform"],"result_size":1,"hash":"9f2c4e7a1b8d3f60c5e2a9d4b7f1038e6c2d5a9b4e7f1c3a8d6b2e0f5a9c7d41","prev_hash":"3e8b1d6f0a4c7e2b9d5f8a1c4e7b0d3f6a9c2e5b8d1f4a7c0e3b6d9f2a5c8e10"}
+{"type":"artifact.loaded","timestamp":"2026-11-11T14:03:22.418273Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","caller":{"identity":"alice","email":"alice@acme.com","groups":["platform"],"client":{"kind":"mcp","name":"podium-mcp","version":"0.6.0","host":"claude-code","host_version":"2.1.0","harness":"claude-code"}},"target":"platform/deploy-runbook","context":{"version":"1.2.0"},"tenant":"acme","resolved_layers":["org-defaults","team-platform"],"result_size":1,"hash":"9f2c4e7a1b8d3f60c5e2a9d4b7f1038e6c2d5a9b4e7f1c3a8d6b2e0f5a9c7d41","prev_hash":"3e8b1d6f0a4c7e2b9d5f8a1c4e7b0d3f6a9c2e5b8d1f4a7c0e3b6d9f2a5c8e10"}
 ```
 
 The endpoint sink treats a transport error or a non-2xx response as a failed send and drops the event. It does not retry the POST or buffer the event.
@@ -89,6 +93,22 @@ The endpoint sink keeps its chain in process memory. Each process start begins a
 The file sink reads the last record's hash when it opens an existing log, so its chain continues across a restart.
 
 The registry does not verify a stream it forwards to an endpoint. The receiver stores the stream and verifies its chain.
+
+### Client software
+
+`caller.client` names the client software that sent the request, as the client stated it in the `X-Podium-Client` request header. Each of its members `kind`, `name`, `version`, `host`, `host_version`, and `harness` appears only when it is non-empty. `kind` is `mcp`, `sync`, `cli`, `sdk`, or `other`.
+
+The client reports `caller.client` itself, and the registry does not verify it. The registry never uses it for authentication, visibility, quotas, or tenant selection. The registry bounds and sanitizes the value and records the result as the client reported it. Neither the query-text PII scrub nor `podium admin erase` rewrites `caller.client`, so a value a client placed in a member stays in the record after an erasure.
+
+Read events and the events of write and administrative requests, including `user.erased`, carry `caller.client` when the request named its client. The following events carry none:
+
+- The events the ingest pipeline raises: `artifact.published`, `artifact.deprecated`, `artifact.signed`, `domain.published`, `layer.ingested`, `layer.history_rewritten`, and `freeze.break_glass`. They carry no `caller.client` even when a reingest or webhook request triggered the ingest.
+- Events raised without a request, such as the `user.erased` that `podium admin erase --local` writes.
+- Events about the registry as a whole, such as `audit.anchored`. This includes the `audit.anchored` the registry appends after an erasure while it serves the erase request.
+
+The `podium-mcp` local events carry the `caller.client` value the MCP server builds for the call, which is the value it sends to the registry. They also carry it when the call sends no registry request: a load served from the workspace overlay, or from the content cache without revalidation in the `offline-first` or `offline-only` cache mode. A cache hit that the MCP server revalidates with the registry, through a HEAD request under the default `always-revalidate` cache mode or a conditional GET answered with 304, also produces a registry `artifact.loaded` event with `caller.client`.
+
+A record without `caller.client` keeps the hash it had before the key existed. Records written before the release that added `caller.client` therefore verify unchanged, and a log that mixes older and newer records verifies.
 
 ---
 
