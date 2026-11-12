@@ -1195,6 +1195,16 @@ func run(ctx context.Context, stop func()) error {
 	if err != nil {
 		return err
 	}
+	// §13.4: rewrite every stored layer row into the form its next write would
+	// take, before anything is served. It runs after the declared-layer seed,
+	// so a start that seed aborts rewrites no row and the seed's own writes are
+	// already in that form. A start whose listener never bound does not run it,
+	// on the precedent of the content-hash rewrite above.
+	if bindErr == nil {
+		if err := migrateLayerRepoForm(ctx, st); err != nil {
+			return err
+		}
+	}
 	bootLayers := append(declared, pathLayers...)
 	// §6.3.1: a multi-tenant registry binds to a no-data tenant; every request
 	// resolves its tenant from the caller's organization, and an unrouted request
