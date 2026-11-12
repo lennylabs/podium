@@ -30,7 +30,7 @@ func TestFetchScopePreview_Decodes(t *testing.T) {
 	ts := scopePreviewServer(t, http.StatusOK,
 		`{"layers":["alice-personal"],"artifact_count":3,"by_type":{"skill":2,"agent":1},"by_sensitivity":{"low":2,"high":1}}`)
 
-	p, err := fetchScopePreview(ts.URL)
+	p, err := fetchScopePreview(ts.URL, cliClientHeader())
 	if err != nil {
 		t.Fatalf("fetchScopePreview: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestFetchScopePreview_Decodes(t *testing.T) {
 func TestFetchScopePreview_Disabled(t *testing.T) {
 	ts := scopePreviewServer(t, http.StatusForbidden, `{"code":"config.scope_preview_disabled"}`)
 
-	_, err := fetchScopePreview(ts.URL)
+	_, err := fetchScopePreview(ts.URL, cliClientHeader())
 	if !isScopePreviewDisabled(err) {
 		t.Fatalf("err = %v, want config.scope_preview_disabled sentinel", err)
 	}
@@ -153,7 +153,7 @@ func TestSyncPreview_ServerRegistry(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	out := captureStdout(t, func() {
-		if rc := runScopePreview(ts.URL, false); rc != 0 {
+		if rc := runScopePreview(ts.URL, false, cliClientHeader()); rc != 0 {
 			t.Errorf("rc = %d, want 0", rc)
 		}
 	})

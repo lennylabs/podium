@@ -24,6 +24,7 @@ import (
 	"syscall"
 
 	"github.com/lennylabs/podium/internal/buildinfo"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/lint"
@@ -341,7 +342,10 @@ func syncCmd(args []string) int {
 			fmt.Fprintln(os.Stderr, "error: --preview requires a server registry URL (the §3.5 scope preview is served by GET /v1/scope/preview)")
 			return 2
 		}
-		return runScopePreview(registryPath, *asJSON)
+		// Spec: §7.2.2 — the preview is the one podium sync request
+		// pkg/sync does not send, so it carries the sync client value with
+		// the resolved harness rather than the CLI value.
+		return runScopePreview(registryPath, *asJSON, sync.ClientHeaderValue(resolved.Harness))
 	}
 
 	targetDir := resolved.Target
@@ -1607,6 +1611,14 @@ func readPublishToken(registry string) string {
 	return readCLIToken(registry)
 }
 
+// cliClientHeader is the §7.2.2 value the podium CLI sends on a
+// control-plane request.
+//
+// Spec: §7.2.2
+func cliClientHeader() string {
+	return audit.CallerClient{Kind: "cli", Name: "podium", Version: buildinfo.Version}.Header()
+}
+
 func mustGetJSON(base, path string, params map[string]string) []byte {
 	u, err := url.Parse(base + path)
 	if err != nil {
@@ -1629,6 +1641,7 @@ func mustGetJSON(base, path string, params map[string]string) []byte {
 	if tok := readCLIToken(base); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
+	req.Header.Set(audit.ClientHeader, cliClientHeader())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

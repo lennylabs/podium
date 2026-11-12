@@ -9,6 +9,8 @@ import (
 	"os"
 	"sort"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/audit"
 )
 
 // scopePreview mirrors the §3.5 GET /v1/scope/preview response: aggregate
@@ -37,11 +39,14 @@ func isScopePreviewDisabled(err error) bool {
 // registry, attaching the resolved caller credential so layer composition and
 // visibility filtering apply to this identity (matching the MCP and SDK
 // paths). A 403 config.scope_preview_disabled maps to scopePreviewDisabledError; any
-// other non-2xx or transport failure is returned verbatim.
+// other non-2xx or transport failure is returned verbatim. A non-empty
+// clientHeader is sent as the §7.2.2 X-Podium-Client value; the caller names
+// it because podium status identifies as the CLI and podium sync --preview
+// identifies as podium sync.
 //
 // spec: §3.5 — the consumer paths (MCP server, SDK, podium sync) and the
 // podium status CLI all surface this preview.
-func fetchScopePreview(registry string) (*scopePreview, error) {
+func fetchScopePreview(registry, clientHeader string) (*scopePreview, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, registry+"/v1/scope/preview", nil)
@@ -50,6 +55,9 @@ func fetchScopePreview(registry string) (*scopePreview, error) {
 	}
 	if tok := readCLIToken(registry); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	if clientHeader != "" {
+		req.Header.Set(audit.ClientHeader, clientHeader)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -77,8 +85,9 @@ func fetchScopePreview(registry string) (*scopePreview, error) {
 // server-source registry. With asJSON it emits the raw preview object;
 // otherwise it prints the human-readable count block. A disabled tenant
 // gate is reported on stderr with a non-zero exit so scripts can detect it.
-func runScopePreview(registry string, asJSON bool) int {
-	preview, err := fetchScopePreview(registry)
+// clientHeader is passed through to fetchScopePreview.
+func runScopePreview(registry string, asJSON bool, clientHeader string) int {
+	preview, err := fetchScopePreview(registry, clientHeader)
 	switch {
 	case isScopePreviewDisabled(err):
 		fmt.Fprintln(os.Stderr, "error: scope preview is disabled for this tenant (expose_scope_preview: false)")

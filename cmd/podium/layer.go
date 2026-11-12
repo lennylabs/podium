@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/sync"
 )
@@ -685,6 +686,7 @@ func doJSON(url, method string, body any) ([]byte, int) {
 	if tok := readCLIToken(requestBase(url)); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
+	req.Header.Set(audit.ClientHeader, cliClientHeader())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return []byte(err.Error()), 500
