@@ -60,7 +60,7 @@ type ldArtifact struct {
 // §6.4). With no overlay the behavior is identical to the pre-merge proxy.
 func (s *mcpServer) loadDomain(args map[string]any) any {
 	path := argString(args, "path")
-	s.auditMeta(audit.EventDomainLoaded, path)
+	s.auditMeta(audit.EventDomainLoaded, path, s.cfg.harness)
 
 	domains := s.overlayDomainsSnapshot()
 	records := s.overlaySnapshot()

@@ -72,10 +72,10 @@ func TestMCPSharedAuditLog_ConcurrentWritersVerify(t *testing.T) {
 	procB := &mcpServer{cfg: &config{}, audit: sinkB, sessionID: "cursor"}
 
 	// Interleave meta-tool audit writes from the two processes.
-	procA.auditMeta(audit.EventArtifactLoaded, "finance/close/forecast")
-	procB.auditMeta(audit.EventDomainLoaded, "finance/close")
-	procA.auditMeta(audit.EventArtifactLoaded, "finance/close/variance")
-	procB.auditMeta(audit.EventArtifactLoaded, "finance/close/forecast")
+	procA.auditMeta(audit.EventArtifactLoaded, "finance/close/forecast", "")
+	procB.auditMeta(audit.EventDomainLoaded, "finance/close", "")
+	procA.auditMeta(audit.EventArtifactLoaded, "finance/close/variance", "")
+	procB.auditMeta(audit.EventArtifactLoaded, "finance/close/forecast", "")
 
 	reader, err := audit.NewFileSink(path)
 	if err != nil {
