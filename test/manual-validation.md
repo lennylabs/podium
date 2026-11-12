@@ -236,7 +236,7 @@ rm -rf "$WORK"
 | S86 | Webhook receivers are isolated per tenant on a multi-tenant registry | standard | none | none | Postgres, S3 |
 | S87 | Layer operations act in the caller's tenant on a multi-tenant registry | standard | none | none | Postgres, S3 |
 | S88 | Erasure on a multi-tenant registry redacts only the requesting tenant's audit records | standard | none | none | Postgres, S3 |
-| S89 | A git layer's URL credential is stored and used, and no response or log reports it | standalone | none | none | none |
+| S89 | A git layer's username and token are taken apart from the URL, used for the clone, and reported nowhere | standalone | none | none | none |
 | S90 | A standalone registry manages and routes tenants in multi-tenant mode | standalone | none | none | none |
 | S96 | A multi-tenant standalone registry migrates every tenant | standalone | none | none | none |
 | S97 | Every migrated tenant serves its own layers and artifacts | standalone | none | none | none |
@@ -5698,8 +5698,8 @@ print("carries a secret value:", "webhook_secret" in doc)
    **Expect.** The envelope carries `['layer', 'webhook_secret',
    'webhook_url']`, and `response.layer` carries `['created_at', 'deleted_at',
    'git_provider', 'groups', 'id', 'last_ingested_ref', 'local_path', 'order',
-   'organization', 'owner', 'public', 'ref', 'repo', 'root', 'source_type',
-   'user_defined', 'users']`. `records: [('own-release', None)]`,
+   'organization', 'owner', 'public', 'ref', 'repo', 'repo_credential', 'root',
+   'source_type', 'user_defined', 'users']`. `records: [('own-release', None)]`,
    `go-cased keys: []`, `tenant mentions: 0`, and
    `carries a secret value: True`. A member spelled `ID`, `Order`, or
    `UserDefined` here is the §7.2.1 violation this scenario exists to catch,
@@ -5728,8 +5728,10 @@ print("carries a secret value:", "webhook_secret" in doc)
    ```
 
    **Expect.** `response ['layers']` and `response.layers[]` carrying the
-   step 1 members plus `last_ingested_at`, which the `reg` layer carries
-   because it ingested at boot. `records: [('reg', None), ('own-release',
+   step 1 members other than `repo_credential`, plus `last_ingested_at`. The
+   walk reports the first element, `reg`, which `--layer-path` serves as a
+   `local` layer, so it omits `repo_credential` (§7.3.1) and carries
+   `last_ingested_at` because it ingested at boot. `records: [('reg', None), ('own-release',
    None)]`, `go-cased keys: []`, `tenant mentions: 0`, and
    `carries a secret value: False`.
 
@@ -9924,28 +9926,33 @@ standard-mode scenarios.
 
 ---
 
-## S89: A git layer's URL credential is stored and used, and no response or log reports it
+## S89: A git layer's username and token are taken apart from the URL, used for the clone, and reported nowhere
 
-**Goal.** Validate that a `git` layer registered with a credential in its URL
-userinfo is accepted, that the clone sends the credential, and that the
-register response, the layer list, the failed-reingest error, and the server
-log carry none of it, and that a re-registration carrying the listed remote
-is refused unless it passes the override flag.
+**Goal.** Validate that a `git` layer's credential is refused inside the URL
+and accepted through `--repo-username` and `--repo-token-file`, that the clone
+sends it, that a rotation, a re-registration with the listed remote, and a
+removal behave as stated, that the web panel's dialogs set and remove it, and
+that no response, panel, or log carries it. Validate that a `registry.yaml`
+that declares a credential in `source.git.repo` alone starts, clones with it,
+and logs that it belongs in the keys, and that one that declares it there and
+in `source.git.token`, or an unset token variable, refuses to start.
 
-**Covers.** The §7.3.1 repository credentials and re-registration rules,
-through the compiled binary and the `podium layer` commands.
+**Covers.** The §7.3.1 repository credentials rule, the rule on setting,
+replacing, and removing a repository credential, the re-registration rule,
+and declared repository credentials, through the compiled binary, the
+`podium layer` commands, and the web UI layer panel.
 
-**Why by hand.** An operator reads the raw `podium layer register` and
-`podium layer list` output and the reingest error on a terminal. The string
-`s89-token` in any of them, or in the server log, is the defect this scenario
-catches. A remote log with no `Authorization` header is the opposite defect:
-the credential was removed from the stored layer.
+**Why by hand.** An operator reads the raw `podium layer` output, the layer
+panel, and the server log on a terminal and in a browser. The string
+`s89-token` in any of them is the defect this scenario catches. A remote log
+reading `none` where a credential is set means the credential was lost, and a
+`Basic` line after the removal means it was not removed.
 
 **Steps.**
 
 1. Run the isolation block. Start a stub remote that answers every request
    with 500 and logs the `Authorization` header, then serve a standalone
-   registry.
+   registry with the web UI.
 
    ```bash
    cat > "$WORK/remote.py" <<'EOF'
@@ -9959,7 +9966,7 @@ the credential was removed from the stored layer.
    EOF
    python3 "$WORK/remote.py" "$WORK/remote.log" &
    REMOTE=$!
-   podium serve --standalone --no-embeddings --bind 127.0.0.1:8189 > "$WORK/srv.log" 2>&1 &
+   podium serve --standalone --no-embeddings --web-ui --bind 127.0.0.1:8189 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8189/healthz
    server_alive "$SRV" "$WORK/srv.log"
@@ -9968,75 +9975,212 @@ the credential was removed from the stored layer.
 
    **Expect.** `server_alive` reports the server running.
 
-2. Register a layer whose remote carries a credential.
+2. Register a layer whose remote carries the credential in the URL.
 
    ```bash
    podium layer register --registry "$PODIUM_REGISTRY" --id private --public \
-     --repo "http://x-access-token:s89-token@127.0.0.1:8190/acme/private.git" --ref main | tee "$WORK/register.out"
-   grep -c "s89-token" "$WORK/register.out"
+     --repo "http://x-access-token:s89-token@127.0.0.1:8190/acme/private.git" --ref main > "$WORK/refused.out" 2>&1; echo "exit=$?"
+   grep -c "url_credential" "$WORK/refused.out"
+   grep -c "s89-token" "$WORK/refused.out"
+   podium layer list --registry "$PODIUM_REGISTRY" | grep -c "private"
+   ```
+
+   **Expect.** `exit=1`. The first count is `1` or more, and the message names
+   `repo_username` and `repo_token`. The second count and the list count are
+   `0`. A successful registration is a defect.
+
+3. Register the layer with the credential in its own flags.
+
+   ```bash
+   printf 's89-token' > "$WORK/token"
+   podium layer register --registry "$PODIUM_REGISTRY" --id private --public \
+     --repo "http://127.0.0.1:8190/acme/private.git" --ref main \
+     --repo-username x-access-token --repo-token-file "$WORK/token" | tee "$WORK/register.out"
+   grep -c "s89-token\|x-access-token" "$WORK/register.out"
    ```
 
    **Expect.** The command succeeds and prints the webhook URL and secret. The
-   printed `repo` is `http://127.0.0.1:8190/acme/private.git`, and the count is
-   `0`. A refusal of the registration is a defect.
+   printed `repo` is `http://127.0.0.1:8190/acme/private.git`, and the count
+   is `0`.
 
-3. List the layers.
+4. List and reingest the layer, and read the header the clone sent.
 
    ```bash
    podium layer list --registry "$PODIUM_REGISTRY" | tee "$WORK/list.out"
-   grep -c "s89-token\|x-access-token" "$WORK/list.out"
+   podium layer reingest --registry "$PODIUM_REGISTRY" private > "$WORK/reingest.out" 2>&1
+   grep -c "s89-token\|x-access-token" "$WORK/list.out" "$WORK/reingest.out"
+   tail -n 1 "$WORK/remote.log"
+   printf 'x-access-token:s89-token' | base64
    ```
 
-   **Expect.** The `private` layer's `repo` is
-   `http://127.0.0.1:8190/acme/private.git`, and the count is `0`.
+   **Expect.** The listed `repo` is `http://127.0.0.1:8190/acme/private.git`,
+   and the layer carries `"repo_credential": true`. The reingest reports
+   `ingest.source_unreachable` with status `500`. Both counts are `0`. The last
+   `remote.log` line is `Basic ` followed by the value the `base64` command
+   prints.
 
-4. Reingest the layer, which fails against the stub.
+5. Rotate the token through standard input, without the URL or the username,
+   and reingest.
 
    ```bash
-   podium layer reingest --registry "$PODIUM_REGISTRY" private 2>&1 | tee "$WORK/reingest.out"
-   grep -c "s89-token\|x-access-token" "$WORK/reingest.out"
-   cat "$WORK/remote.log"
+   printf 's89-token2\n' | podium layer update --registry "$PODIUM_REGISTRY" --id private --repo-token-file - | tee "$WORK/update.out"
+   podium layer reingest --registry "$PODIUM_REGISTRY" private > "$WORK/reingest2.out" 2>&1
+   grep -c "s89-token" "$WORK/update.out" "$WORK/reingest2.out"
+   tail -n 1 "$WORK/remote.log"
+   printf 'x-access-token:s89-token2' | base64
    ```
 
-   **Expect.** The command reports `ingest.source_unreachable` with a message
-   that names `127.0.0.1:8190` and status `500`. The count is `0`.
-   `remote.log` holds at least one line beginning `Basic `, which shows the
-   clone sent the stored credential. A line reading `none` on every request
-   means the credential was lost.
+   **Expect.** Both counts are `0`. The last `remote.log` line is `Basic `
+   followed by the printed value, which shows the stored username was kept and
+   the trailing line ending was removed.
 
-5. Stop the stub so the next reingest fails on the connection, and reingest
-   again.
-
-   ```bash
-   kill "$REMOTE"; wait "$REMOTE" 2>/dev/null
-   podium layer reingest --registry "$PODIUM_REGISTRY" private 2>&1 | tee "$WORK/reingest2.out"
-   grep -c "s89-token\|x-access-token" "$WORK/reingest2.out" "$WORK/srv.log"
-   ```
-
-   **Expect.** The command reports `ingest.source_unreachable` with a
-   connection error. Both counts are `0`.
-
-6. Re-register the layer with the remote exactly as step 3 listed it.
+6. Re-register the layer with the remote exactly as step 4 listed it, and
+   reingest.
 
    ```bash
    podium layer register --registry "$PODIUM_REGISTRY" --id private --public \
-     --repo "http://127.0.0.1:8190/acme/private.git" --ref main 2>&1 | tee "$WORK/reregister.out"
-   grep -c "s89-token\|x-access-token" "$WORK/reregister.out"
+     --repo "http://127.0.0.1:8190/acme/private.git" --ref main > "$WORK/reregister.out" 2>&1; echo "exit=$?"
+   podium layer reingest --registry "$PODIUM_REGISTRY" private > /dev/null 2>&1
+   grep -c "s89-token" "$WORK/reregister.out"
+   tail -n 1 "$WORK/remote.log"
    ```
 
-   **Expect.** The command fails with HTTP 400, `registry.invalid_argument`,
-   and `"constraint": "redacted_repo"`. The message names the full repository
-   URL and `--force-repo-overwrite` as the two corrections. The count is `0`.
+   **Expect.** `exit=0`, and the command prints a new webhook URL and secret.
+   The count is `0`. The last `remote.log` line is the step 5 value, which
+   shows the registry kept the stored credential. A line reading `none` is a
+   defect.
 
-7. Repeat the registration with the flag.
+7. Remove the credential and reingest.
 
    ```bash
-   podium layer register --registry "$PODIUM_REGISTRY" --id private --public --force-repo-overwrite \
-     --repo "http://127.0.0.1:8190/acme/private.git" --ref main
+   podium layer update --registry "$PODIUM_REGISTRY" --id private --clear-repo-credential > /dev/null
+   podium layer reingest --registry "$PODIUM_REGISTRY" private > /dev/null 2>&1
+   tail -n 1 "$WORK/remote.log"
    ```
 
-   **Expect.** The command succeeds and prints a webhook URL and secret. The
-   stored remote now carries no credential.
+   **Expect.** The last `remote.log` line is `none`.
+
+8. Register a second layer with an empty username, and reingest it.
+
+   ```bash
+   printf 's89-token3' > "$WORK/token3"
+   podium layer register --registry "$PODIUM_REGISTRY" --id private-empty --public \
+     --repo "http://127.0.0.1:8190/acme/empty.git" --ref main \
+     --repo-username '' --repo-token-file "$WORK/token3" > /dev/null
+   podium layer reingest --registry "$PODIUM_REGISTRY" private-empty > /dev/null 2>&1
+   tail -n 1 "$WORK/remote.log"
+   printf ':s89-token3' | base64
+   ```
+
+   **Expect.** The last `remote.log` line is `Basic ` followed by the printed
+   value. A line reading `none` means the empty-username credential was not
+   sent.
+
+9. Open `http://127.0.0.1:8189/app/#/layers` in a private browser window.
+   Press Register layer and register a `git` layer with the ID `panel`, the
+   Repository `http://127.0.0.1:8190/acme/panel.git`, the ref `main`, the
+   Username `x-access-token`, and the Token `s89-token4`. Reingest it from its
+   row, then read `remote.log`. Open the row's edit dialog, enter the Token
+   `s89-token5`, save, and reingest. Open the edit dialog again, tick Remove
+   the stored credential, save, and reingest. Keep the browser's network
+   inspector open on the `/v1/layers` responses throughout.
+
+   ```bash
+   tail -n 3 "$WORK/remote.log"
+   printf 'x-access-token:s89-token4' | base64
+   printf 'x-access-token:s89-token5' | base64
+   ```
+
+   **Expect.** The Token field is masked and empty each time a dialog opens.
+   The `panel` row reads `credential stored` after the registration and after
+   the token change, and the edit dialog offers Remove the stored credential
+   each time. After the removal the row no longer reads `credential stored`,
+   the dialog no longer offers the checkbox, and it still offers Username and
+   Token. The last lines of `remote.log` are the `s89-token4` value, the
+   `s89-token5` value, and `none`, in that order. No `/v1/layers` response and no panel
+   text carries `s89-token4`, `s89-token5`, or `x-access-token`. Typing
+   `http://u:t@127.0.0.1:8190/x.git` into Repository holds the submit and
+   names the Username and Token fields.
+
+10. Stop the stub so the next reingest fails on the connection, register a
+    layer whose username is `x-access-token`, and reingest it. The layers from
+    steps 7 to 9 hold no username, so this layer is the one whose failed clone
+    could carry a username.
+
+    ```bash
+    kill "$REMOTE"; wait "$REMOTE" 2>/dev/null
+    podium layer register --registry "$PODIUM_REGISTRY" --id private-down --public \
+      --repo "http://127.0.0.1:8190/acme/down.git" --ref main \
+      --repo-username x-access-token --repo-token-file "$WORK/token" > "$WORK/register3.out" 2>&1
+    podium layer reingest --registry "$PODIUM_REGISTRY" private-down > "$WORK/reingest3.out" 2>&1
+    grep -c "s89-token\|x-access-token" "$WORK/register3.out" "$WORK/reingest3.out" "$WORK/srv.log"
+    ```
+
+    **Expect.** The registration succeeds, because a registration does not
+    ingest. The reingest reports `ingest.source_unreachable` with a connection
+    error that names `127.0.0.1:8190`. All three counts are `0`. An
+    `x-access-token` count above `0` means that the username reached the
+    message of a refused connection, which net/http renders with the raw
+    username.
+
+11. Restart the stub, start a second registry whose `registry.yaml` declares a
+    credential in `source.git.repo` alone, reingest its layer, and stop it.
+    Then start one that declares a credential in `source.git.repo` and in
+    `source.git.token`, and one whose token variable is unset.
+
+    ```bash
+    python3 "$WORK/remote.py" "$WORK/remote.log" &
+    REMOTE=$!
+    cat > "$WORK/declared.yaml" <<'YAML'
+    registry:
+      layers:
+        - id: declared-private
+          source: { git: { repo: "http://x-access-token:s89-token@127.0.0.1:8190/acme/d.git", ref: main } }
+    YAML
+    PODIUM_SQLITE_PATH="$WORK/declared.db" podium serve --standalone --no-embeddings \
+      --config "$WORK/declared.yaml" --bind 127.0.0.1:8196 > "$WORK/declared.log" 2>&1 &
+    DECL=$!
+    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8196/healthz
+    server_alive "$DECL" "$WORK/declared.log"
+    podium layer list --registry http://127.0.0.1:8196 > "$WORK/declared-list.out"
+    podium layer reingest --registry http://127.0.0.1:8196 declared-private > "$WORK/declared-reingest.out" 2>&1
+    kill "$DECL"; wait "$DECL" 2>/dev/null
+    grep -c "declared git layer declared-private carries URL userinfo in source.git.repo" "$WORK/declared.log"
+    grep -c "s89-token\|x-access-token" "$WORK/declared.log" "$WORK/declared-list.out" "$WORK/declared-reingest.out"
+    tail -n 1 "$WORK/remote.log"
+    printf 'x-access-token:s89-token' | base64
+    cat > "$WORK/declared2.yaml" <<'YAML'
+    registry:
+      layers:
+        - id: declared-private
+          source: { git: { repo: "http://x-access-token:s89-token@127.0.0.1:8190/acme/d.git", ref: main, token: '${PODIUM_S89_TOKEN}' } }
+    YAML
+    PODIUM_S89_TOKEN=s89-token PODIUM_SQLITE_PATH="$WORK/declared2.db" podium serve --standalone --no-embeddings \
+      --config "$WORK/declared2.yaml" --bind 127.0.0.1:8196 > "$WORK/declared2.log" 2>&1; echo "exit=$?"
+    grep -c "remove the userinfo from source.git.repo" "$WORK/declared2.log"
+    grep -c "s89-token" "$WORK/declared2.log"
+    cat > "$WORK/declared3.yaml" <<'YAML'
+    registry:
+      layers:
+        - id: declared-private
+          source: { git: { repo: "http://127.0.0.1:8190/acme/d.git", ref: main, username: x-access-token, token: '${PODIUM_S89_UNSET}' } }
+    YAML
+    unset PODIUM_S89_UNSET
+    PODIUM_SQLITE_PATH="$WORK/declared3.db" podium serve --standalone --no-embeddings \
+      --config "$WORK/declared3.yaml" --bind 127.0.0.1:8196 > "$WORK/declared3.log" 2>&1; echo "exit=$?"
+    grep -c "source.git.token" "$WORK/declared3.log"
+    kill "$REMOTE"; wait "$REMOTE" 2>/dev/null
+    ```
+
+    **Expect.** `server_alive` reports the first registry running, and its
+    first count is `1`. The three credential counts are `0`. The reingest
+    reports `ingest.source_unreachable` with status `500`, and the last line of
+    `remote.log` is `Basic ` followed by the printed value, which shows that the
+    declared credential reached the remote. The second and third starts print a
+    non-zero `exit=`. The second log's first count is `1` or more, and its
+    `s89-token` count is `0`. The third log names `source.git.token`. A refused
+    first start, or a second or third registry that listens on 8196, is a
+    defect.
 
 **Cleanup.** Stop the server with `kill "$SRV"` and `rm -rf "$WORK"`.
 
@@ -11058,22 +11202,24 @@ still serves `extends:`.
 
 ## S103: A git layer's URL credential is held apart from `repo` in the metadata store, and a row in the earlier form keeps working
 
-**Goal.** Validate that a `git` layer registered with a credential in its URL
-userinfo is written with the userinfo in `layer_configs.repo_userinfo` and the
-rest of the URL in `layer_configs.repo`, that a row holding the whole URL in
-`repo` is read, reported, and cloned as before and is left as it is by a
-restart, and that the next registration of that layer writes the two-part form.
+**Goal.** Validate that a `git` layer registered with a username and a token
+is written with the userinfo in `layer_configs.repo_userinfo` and the rest of
+the URL in `layer_configs.repo`, that a row holding the whole URL in `repo` is
+read, reported, and cloned as before and is rewritten into the two-part form
+by the next start, and that the next registration of that layer writes the
+two-part form.
 
 **Covers.** The §7.3.1 repository credentials rule for the SQLite store and
-the §13.4 rule that a change of stored form rewrites no row at start, through
-the compiled binary, the `podium layer` commands, and the store file.
+the §13.4 rule that each start rewrites a row in the earlier form into the
+two-part form, through the compiled binary, the `podium layer` commands, and
+the store file.
 
 **Why by hand.** An operator reads the raw `layer_configs` row with `sqlite3`,
 as a SQL report or a support dump does. The string `s103-token` in the `repo`
 column after step 2 or step 5 is the defect this scenario catches. An empty
 `repo_userinfo` beside a `repo` with no credential after step 2 is the
-opposite defect: the credential was lost. A row that changes across the
-restart in step 4 is a startup rewrite, which the release does not run.
+opposite defect: the credential was lost. A row that still holds the whole
+URL in `repo` after the restart in step 4 is a missed startup rewrite.
 
 **Steps.**
 
@@ -11102,11 +11248,13 @@ restart in step 4 is a startup rewrite, which the release does not run.
 
    **Expect.** `server_alive` reports the server running.
 
-2. Register a layer whose remote carries a credential, and read its row.
+2. Register a layer with a username and a token, and read its row.
 
    ```bash
+   printf 's103-token' > "$WORK/token"
    podium layer register --registry "$PODIUM_REGISTRY" --id private --public \
-     --repo "http://x-access-token:s103-token@127.0.0.1:8195/acme/private.git" --ref main > "$WORK/register.out"
+     --repo "http://127.0.0.1:8195/acme/private.git" --ref main \
+     --repo-username x-access-token --repo-token-file "$WORK/token" > "$WORK/register.out"
    sqlite3 "$PODIUM_SQLITE_PATH" \
      "select repo, repo_userinfo, repo_userinfo is null from layer_configs where id = 'private';"
    ```
@@ -11145,21 +11293,23 @@ restart in step 4 is a startup rewrite, which the release does not run.
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8194/healthz
    server_alive "$SRV" "$WORK/srv2.log"
-   sqlite3 "$PODIUM_SQLITE_PATH" \
-     "select repo, repo_userinfo is null from layer_configs where id = 'private';"
+   sqlite3 "$PODIUM_SQLITE_PATH" "select repo, repo_userinfo from layer_configs where id = 'private';"
+   grep -c "layer repo migration: rewrote 1 stored layer(s)" "$WORK/srv2.log"
+   grep -c "s103-token" "$WORK/srv2.log"
    ```
 
    **Expect.** The query prints
-   `http://x-access-token:s103-token@127.0.0.1:8195/acme/private.git|1`. The
-   start rewrote nothing, and the failed reingest of step 3 wrote nothing. A
-   row in the two-part form here means a start or a failed ingest converted
-   it.
+   `http://127.0.0.1:8195/acme/private.git|x-access-token:s103-token`, the
+   first count is `1`, and the second is `0`. A `repo` that still holds
+   `s103-token` means the start did not rewrite the row, and any other
+   `repo_userinfo` means the rewrite changed the credential.
 
-5. Re-register the layer with its full remote and read the row.
+5. Re-register the layer with its username and token, and read the row.
 
    ```bash
    podium layer register --registry "$PODIUM_REGISTRY" --id private --public \
-     --repo "http://x-access-token:s103-token@127.0.0.1:8195/acme/private.git" --ref main > "$WORK/reregister.out"
+     --repo "http://127.0.0.1:8195/acme/private.git" --ref main \
+     --repo-username x-access-token --repo-token-file "$WORK/token" > "$WORK/reregister.out"
    sqlite3 "$PODIUM_SQLITE_PATH" \
      "select repo, repo_userinfo from layer_configs where id = 'private';"
    ```
@@ -11167,10 +11317,10 @@ restart in step 4 is a startup rewrite, which the release does not run.
    **Expect.** The registration succeeds, and the query prints
    `http://127.0.0.1:8195/acme/private.git|x-access-token:s103-token`.
 
-6. Register the listed remote with the override flag and read the row.
+6. Register the listed remote with the credential removed, and read the row.
 
    ```bash
-   podium layer register --registry "$PODIUM_REGISTRY" --id private --public --force-repo-overwrite \
+   podium layer register --registry "$PODIUM_REGISTRY" --id private --public --clear-repo-credential \
      --repo "http://127.0.0.1:8195/acme/private.git" --ref main > "$WORK/force.out"
    sqlite3 "$PODIUM_SQLITE_PATH" \
      "select repo, repo_userinfo is null from layer_configs where id = 'private';"
