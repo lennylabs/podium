@@ -64,7 +64,7 @@ type otlpDest struct {
 	// drop funnel.
 	rejected func(n int)
 	// undecodable is set once the destination has logged a 2xx body that
-	// does not decode, so a receiver that never answers in the OTLP format
+	// yields no partial-success count, so a receiver that never answers in the OTLP format
 	// writes one line rather than one per batch.
 	undecodable atomic.Bool
 }
@@ -101,15 +101,7 @@ func otlpTarget(u *url.URL) string {
 
 // send POSTs batch on ctx, which carries the forwarder's request deadline,
 // and counts the records a 2xx partial-success response reports as
-// rejected.
-//
-// A 2xx response whose body could not be read in full is returned as a
-// network error, so the forwarder retries the batch. Its partial_success
-// field is length-delimited, so a body cut short by the request deadline,
-// a connection reset, or the maxResponseBody bound does not decode, and
-// counting the batch as delivered would leave the records the receiver
-// rejected counted under no reason. The receiver deduplicates the resent
-// records on hash (§8.1).
+// rejected. A 2xx status delivers the batch whatever its body holds.
 //
 // Spec: §8.3
 func (d *otlpDest) send(ctx context.Context, batch []record) (sendResult, error) {
@@ -131,34 +123,49 @@ func (d *otlpDest) send(ctx context.Context, batch []record) (sendResult, error)
 	if err != nil || res.status < 200 || res.status >= 300 {
 		return res, err
 	}
-	if res.bodyErr != nil {
-		return sendResult{}, fmt.Errorf("read the 2xx response: %w", res.bodyErr)
-	}
-	d.countRejected(res.body, len(batch))
+	d.countRejected(res, len(batch))
 	return res, nil
 }
 
-// countRejected counts the response's partial_success.rejected_log_records
-// as drops with reason rejected, at most the batch's size, so a receiver
-// that over-reports cannot count a record that was not in the request. A
-// complete 2xx body that does not decode came from a receiver that does
-// not answer in the OTLP format, and resending would get the same answer,
-// so the batch counts as delivered and the first such body is logged.
+// countRejected counts the partial_success.rejected_log_records of a 2xx
+// response as drops with reason rejected, at most the batch's size, so a
+// receiver that over-reports cannot count a record that was not in the
+// request.
+//
+// The 2xx status has already delivered the batch (§8.3), so a body that
+// yields no count counts nothing: a body whose read failed or was cut
+// short, a body longer than maxResponseBody, and a body that does not
+// decode. Resending would duplicate records the receiver accepted, and a
+// receiver that always answers that way would get the same batch forever.
+// The first such body is logged.
 //
 // Spec: §8.3
-func (d *otlpDest) countRejected(body []byte, sent int) {
-	var resp collogspb.ExportLogsServiceResponse
-	if err := proto.Unmarshal(body, &resp); err != nil {
+func (d *otlpDest) countRejected(res sendResult, sent int) {
+	n, err := rejectedRecords(res)
+	if err != nil {
 		if !d.undecodable.Swap(true) {
-			log.Printf("audit: %s answered 2xx with a body that is not an ExportLogsServiceResponse: %v; counting its batches as delivered", d.name, err)
+			log.Printf("audit: %s answered 2xx with a body that yields no partial-success count: %v; counting its batches as delivered", d.name, err)
 		}
 		return
 	}
-	n := resp.GetPartialSuccess().GetRejectedLogRecords()
 	if n <= 0 {
 		return
 	}
 	d.rejected(int(min(n, int64(sent))))
+}
+
+// rejectedRecords decodes the partial-success count of a 2xx response. An
+// incomplete body is not decoded, because partial_success is
+// length-delimited and a truncated message can decode to a wrong count.
+func rejectedRecords(res sendResult) (int64, error) {
+	if res.bodyErr != nil {
+		return 0, fmt.Errorf("read the body: %w", res.bodyErr)
+	}
+	var resp collogspb.ExportLogsServiceResponse
+	if err := proto.Unmarshal(res.body, &resp); err != nil {
+		return 0, fmt.Errorf("decode the body as an ExportLogsServiceResponse: %w", err)
+	}
+	return resp.GetPartialSuccess().GetRejectedLogRecords(), nil
 }
 
 // request builds the export request of batch: one resource, one scope, and

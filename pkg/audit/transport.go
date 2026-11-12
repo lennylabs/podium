@@ -162,9 +162,9 @@ func loadCAPool(path string) (*x509.CertPool, error) {
 // do sends req through the stream's client and returns the status, the
 // Retry-After value, and at most maxResponseBody bytes of the body, which
 // it closes. A body read that fails, or a body longer than
-// maxResponseBody, sets bodyErr rather than failing the send: the status
-// alone decides an HTTP destination's outcome, and the OTLP destination
-// decides what an incomplete 2xx body means for its partial-success count.
+// maxResponseBody, sets bodyErr rather than failing the send, because the
+// status alone decides every destination's outcome (§8.3). The OTLP
+// destination decodes no partial-success count from an incomplete body.
 func (t *transport) do(req *http.Request) (sendResult, error) {
 	resp, err := t.client.Do(req)
 	if err != nil {
