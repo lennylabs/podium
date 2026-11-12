@@ -5,21 +5,36 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
 // fetchJSON forwards the request, attaches Authorization + Tenant
-// headers, and skips the "harness" key when building the query.
+// headers, and skips the "harness" key when building the query. It also
+// names podium-mcp in X-Podium-Client: with no initialize the header carries
+// no host members, the harness member takes the per-call argument only on
+// /v1/load_artifact, and the always-revalidate HEAD carries the same value as
+// the GET it revalidates.
+//
+// Spec: §7.2.2, §8.1, §8.3
 func TestFetchJSON_AttachesAuthAndTenant(t *testing.T) {
 	t.Parallel()
+	var mu sync.Mutex
 	var gotAuth, gotTenant string
 	var gotQuery string
+	clients := map[string]string{} // "<method> <path>" -> X-Podium-Client
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		gotTenant = r.Header.Get("X-Podium-Tenant")
-		gotQuery = r.URL.RawQuery
+		mu.Lock()
+		defer mu.Unlock()
+		clients[r.Method+" "+r.URL.Path] = r.Header.Get(audit.ClientHeader)
+		if r.URL.Path == "/v1/x" {
+			gotAuth = r.Header.Get("Authorization")
+			gotTenant = r.Header.Get("X-Podium-Tenant")
+			gotQuery = r.URL.RawQuery
+		}
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
@@ -27,6 +42,7 @@ func TestFetchJSON_AttachesAuthAndTenant(t *testing.T) {
 		registry:     srv.URL,
 		sessionToken: "abc",
 		tenantID:     "tenant-1",
+		harness:      "claude-code",
 		verifyPolicy: sign.PolicyNever,
 	})
 	if _, err := s.fetchJSON("/v1/x", map[string]any{
@@ -34,6 +50,18 @@ func TestFetchJSON_AttachesAuthAndTenant(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("fetchJSON: %v", err)
 	}
+	cursorArgs := map[string]any{"id": "team/x", "harness": "cursor"}
+	for _, path := range []string{"/v1/load_artifact", "/v1/search_artifacts"} {
+		if _, err := s.fetchJSON(path, cursorArgs); err != nil {
+			t.Fatalf("fetchJSON %s: %v", path, err)
+		}
+	}
+	if _, err := s.headContentHash("/v1/load_artifact", cursorArgs); err != nil {
+		t.Fatalf("headContentHash: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
 	if gotAuth != "Bearer abc" {
 		t.Errorf("Authorization = %q", gotAuth)
 	}
@@ -45,6 +73,18 @@ func TestFetchJSON_AttachesAuthAndTenant(t *testing.T) {
 	}
 	if !strings.Contains(gotQuery, "q=search-me") {
 		t.Errorf("query missing q: %q", gotQuery)
+	}
+	for key, wantHarness := range map[string]string{
+		"GET /v1/x":                "claude-code",
+		"GET /v1/load_artifact":    "cursor",
+		"GET /v1/search_artifacts": "claude-code",
+		"HEAD /v1/load_artifact":   "cursor",
+	} {
+		assertClientMembers(t, key, clients[key], mcpClientMembers("", "", wantHarness))
+	}
+	if clients["HEAD /v1/load_artifact"] != clients["GET /v1/load_artifact"] {
+		t.Errorf("HEAD header %q differs from GET header %q",
+			clients["HEAD /v1/load_artifact"], clients["GET /v1/load_artifact"])
 	}
 }
 
