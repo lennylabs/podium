@@ -2,6 +2,7 @@ package audit
 
 import (
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -89,7 +90,8 @@ func newDropLog(c clock.Clock) *dropLog {
 }
 
 // record counts n drops for name and reason and writes a line when no line
-// for that key was written in the last dropLogInterval.
+// for that key was written in the last dropLogInterval. A suppressed count
+// stays pending until the next line for the key or until flush.
 func (d *dropLog) record(name, reason string, n int) {
 	now := d.clock.Now()
 	d.mu.Lock()
@@ -104,7 +106,41 @@ func (d *dropLog) record(name, reason string, n int) {
 	if seen && now.Sub(ent.logged) < dropLogInterval {
 		return
 	}
-	log.Printf("audit: dropped %d record(s) for destination %s: %s", ent.pending, name, reason)
+	writeDropLine(key, ent, now)
+}
+
+// flush writes one line for every key that holds suppressed drops. A burst
+// followed by no further drop for its key would otherwise never reach the
+// log, and an unmetered podium-mcp has no other record of those drops, so
+// Stream.Shutdown calls flush once the stream can drop nothing more. Keys
+// are written in sorted order so the exit log is deterministic.
+//
+// Spec: §8.3
+func (d *dropLog) flush() {
+	now := d.clock.Now()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	keys := make([]dropKey, 0, len(d.entries))
+	for key, ent := range d.entries {
+		if ent.pending > 0 {
+			keys = append(keys, key)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].name != keys[j].name {
+			return keys[i].name < keys[j].name
+		}
+		return keys[i].reason < keys[j].reason
+	})
+	for _, key := range keys {
+		writeDropLine(key, d.entries[key], now)
+	}
+}
+
+// writeDropLine logs ent's pending count for key and resets it. The caller
+// holds the dropLog mutex.
+func writeDropLine(key dropKey, ent *dropEntry, now time.Time) {
+	log.Printf("audit: dropped %d record(s) for destination %s: %s", ent.pending, key.name, key.reason)
 	ent.logged = now
 	ent.pending = 0
 }

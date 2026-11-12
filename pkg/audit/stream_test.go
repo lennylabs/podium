@@ -503,6 +503,43 @@ func TestStream_DropFunnelCountsAndLogs(t *testing.T) {
 		t.Errorf("log carries the query: %s", logs.String())
 	}
 
+	// Bursts whose suppressed drops are followed by no further drop for
+	// their key still reach the log at Shutdown, one line per key in key
+	// order, and a key with nothing pending writes no extra line.
+	s.dropped(kindHTTP, name, ReasonRejected, 1)
+	s.dropped(kindHTTP, name, ReasonRejected, 4)
+	s.dropped(kindHTTP, name, ReasonRejected, 5)
+	s.dropped(kindStdout, "stdout", ReasonWriteError, 1)
+	s.dropped(kindStdout, "stdout", ReasonWriteError, 1)
+	s.dropped(kindHTTP, name, ReasonShutdown, 2)
+	s.dropped(kindHTTP, name, ReasonShutdown, 3)
+	before := len(strings.Split(strings.TrimSpace(logs.String()), "\n"))
+	if before != 6 {
+		t.Fatalf("got %d log lines before Shutdown, want 6:\n%s", before, logs.String())
+	}
+	s.Shutdown()
+	lines = strings.Split(strings.TrimSpace(logs.String()), "\n")
+	wantTail := []struct {
+		count, dest, reason string
+	}{
+		{"dropped 9 ", name, ReasonRejected},
+		{"dropped 3 ", name, ReasonShutdown},
+		{"dropped 1 ", "destination stdout", ReasonWriteError},
+	}
+	if len(lines) != before+len(wantTail) {
+		t.Fatalf("got %d log lines after Shutdown, want %d:\n%s", len(lines), before+len(wantTail), logs.String())
+	}
+	for i, w := range wantTail {
+		l := lines[before+i]
+		if !strings.Contains(l, w.count) || !strings.Contains(l, w.dest) || !strings.HasSuffix(l, w.reason) {
+			t.Errorf("Shutdown line %d = %q, want %q for %s: %s", i, l, w.count, w.dest, w.reason)
+		}
+	}
+	s.drops.flush()
+	if got := len(strings.Split(strings.TrimSpace(logs.String()), "\n")); got != len(lines) {
+		t.Errorf("a second flush wrote a line; log:\n%s", logs.String())
+	}
+
 	obs := &fakeObserver{}
 	counted := newStream(OpenOptions{Observer: obs, Clock: frozen}.withDefaults())
 	counted.dropped(kindHTTP, name, ReasonQueueFull, 1)
