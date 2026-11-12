@@ -1,9 +1,6 @@
 package metrics
 
 import (
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -11,17 +8,7 @@ import (
 
 func scrapeMCP(t *testing.T, m *MCPRegistry) string {
 	t.Helper()
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-	m.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("scrape status = %d, want 200", rec.Code)
-	}
-	body, err := io.ReadAll(rec.Result().Body)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
-	return string(body)
+	return scrapeHandler(t, m.Handler())
 }
 
 func TestMCPRegistry_EmitsSeries(t *testing.T) {
@@ -54,4 +41,13 @@ func TestMCPRegistry_EmptyToolNotRecorded(t *testing.T) {
 	if strings.Contains(body, `tool=""`) {
 		t.Errorf("empty tool was recorded:\n%s", body)
 	}
+}
+
+// The MCP server exports the same audit delivery series for its local stream,
+// absent until the stream first reports.
+//
+// Spec: §13.8
+func TestMCPRegistry_AuditSeriesAppearOnFirstUse(t *testing.T) {
+	m := NewMCP()
+	assertAuditSeriesAppearOnFirstUse(t, m)
 }
