@@ -448,14 +448,21 @@ Every `podium layer` subcommand takes `--registry <url>`, which defaults to `POD
 Registers a new layer.
 
 ```
-podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>] [--force-push-policy <tolerant|strict>] [--force-repo-overwrite]
+podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>] [--force-push-policy <tolerant|strict>] [--repo-username <name>] [--repo-token-file <path|->] [--clear-repo-credential]
 podium layer register --id <id> --local <path>
                       [--user-defined] [--owner <oidc-sub>]
                       [--public | --organization]
                       [--group <oidc-group>]... [--user <oidc-sub-or-email>]...
 ```
 
-A `--repo` URL may carry a credential in its userinfo. The registry keeps it as given, and `podium layer list` reports the remote without it (see the layer object in the [HTTP API reference](http-api#layer-management)). A registration under an existing layer ID whose `--repo` is that reported value is rejected with `registry.invalid_argument` carrying `details.constraint: "redacted_repo"`. `--force-repo-overwrite` admits it and stores the remote as given, without the credential.
+`--repo-username` and `--repo-token-file` set the username and the write-only token of a `git` layer's repository credential, and `--repo-username ''` sends an empty username. `--repo-token-file` reads the named file, or standard input for `-`, and removes one trailing `\n` or `\r\n`. No flag takes the token as an argument value. `--clear-repo-credential` stores the `--repo` with no credential, including when it equals the remote `podium layer list` reports. The command exits 2 before sending a request in these cases:
+
+- a non-empty `--repo-username` without `--repo-token-file`: `error: --repo-username requires --repo-token-file`;
+- `--repo-token-file` with `--clear-repo-credential`: `error: --repo-token-file cannot be combined with --clear-repo-credential`;
+- a credential flag without `--repo`: `error: --repo-username, --repo-token-file, and --clear-repo-credential apply to a --repo registration`;
+- an empty token file: `error: --repo-token-file names an empty token`, and an unreadable one: `error: layer: read --repo-token-file: <cause>`.
+
+A `--repo` that carries a credential in its URL is refused with `details.constraint: "url_credential"` ([HTTP API reference](http-api#layer-management)). [Private remotes](../deployment/layers#private-remotes) states when a re-registration with the remote `podium layer list` reports keeps the stored credential, and why an `ssh://` layer is re-registered with its login name.
 
 For Git sources, the registry returns the webhook URL and HMAC secret to configure on the source repo. On a multi-tenant registry the webhook URL carries the tenant ID, `/v1/ingest/webhook/<tenant-id>/<layer-id>`. Without webhook configuration, the layer stays at its initial commit until the first manual reingest.
 
@@ -480,7 +487,7 @@ Lists the configured layers the caller's identity can see, and their current sta
 podium layer list [--deleted]
 ```
 
-`--deleted` lists soft-deleted layers still recoverable within the recovery window (see `podium layer restore`).
+`--deleted` lists soft-deleted layers still recoverable within the recovery window (see `podium layer restore`). The command prints the registry's response, an object whose `layers` member holds the layer objects. A layer whose credential `--repo-token-file` can set carries `repo_credential`, which reports whether a repository credential is stored, and no member carries its value.
 
 ### `podium layer reorder`
 
@@ -529,6 +536,7 @@ podium layer update --id <id>
                     [--ref <ref>] [--root <subpath>] [--local <path>]
                     [--force-push-policy <tolerant|strict>]
                     [--rotate-webhook-secret]
+                    [--repo-username <name>] [--repo-token-file <path|->] [--clear-repo-credential]
                     [--owner <oidc-sub>] [--public[=false]] [--organization[=false]]
                     [--group <oidc-group>]... [--user <oidc-sub-or-email>]...
                     [--clear-groups] [--clear-users]
@@ -536,7 +544,9 @@ podium layer update --id <id>
 
 `--rotate-webhook-secret` regenerates the Git layer's HMAC webhook secret and prints the new value.
 
-The visibility flags withdraw as well as grant, because the update endpoint applies the visibility members the command sends and leaves the ones it omits. `--public=false` withdraws the public axis and `--organization=false` withdraws the organization axis, while omitting the flag keeps the stored value. `--group` and `--user` replace the stored list with the values given on that invocation, so a repeated flag naming fewer members narrows the list. `--clear-groups` and `--clear-users` empty their list, which the repeatable flags cannot express. Combining `--clear-groups` with `--group`, or `--clear-users` with `--user`, is refused before any request is sent: the command prints `error: --group cannot be combined with --clear-groups, and --user cannot be combined with --clear-users` and exits 2. Withdrawing every axis leaves a layer the visibility evaluator reports visible to no caller the registry resolves to a subject, and re-granting one restores it. A registry started with no identity provider configured, and one started in public mode, authenticates no caller and keeps every layer visible there, so a withdrawal applied on such a registry takes effect once an identity provider is configured. A layer declared in `registry.yaml` is re-seeded from that declaration at every start, visibility included, so a withdrawal applied to a declared layer reverts at the next start; withdraw it in the declaration to make it durable.
+`--repo-token-file` replaces the stored repository credential without the URL, and it keeps the stored username unless `--repo-username` is also passed, `--repo-username ''` included. Where the stored username, from a credential an earlier release accepted inside `--repo`, holds a character `repo_username` may not carry, the registry refuses the update with `400 registry.invalid_argument` naming `repo_username`, and the update passes `--repo-username` with the token. `--clear-repo-credential` removes the stored credential, and omitting both keeps it. The exit-2 refusals of `podium layer register` apply, apart from the `--repo` rule. `--repo-token-file` and `--clear-repo-credential` satisfy "at least one mutable field". `--repo-username` applies only with `--repo-token-file`, so `--repo-username ''` alone sends no field and exits 2 with `error: at least one mutable field must be provided`.
+
+The visibility flags withdraw as well as grant, because the update endpoint applies the visibility members the command sends and leaves the ones it omits. `--public=false` withdraws the public axis and `--organization=false` withdraws the organization axis, while omitting the flag keeps the stored value. `--group` and `--user` replace the stored list with the values given on that invocation, so a repeated flag naming fewer members narrows the list. `--clear-groups` and `--clear-users` empty their list, which the repeatable flags cannot express. Combining `--clear-groups` with `--group`, or `--clear-users` with `--user`, is refused before any request is sent: the command prints `error: --group cannot be combined with --clear-groups, and --user cannot be combined with --clear-users` and exits 2. Withdrawing every axis leaves a layer the visibility evaluator reports visible to no caller the registry resolves to a subject, and re-granting one restores it. A registry started with no identity provider configured, and one started in public mode, authenticates no caller and keeps every layer visible there, so a withdrawal applied on such a registry takes effect once an identity provider is configured. A layer declared in `registry.yaml` is re-seeded from that declaration at every start, visibility and repository credential included, so a withdrawal or a credential change applied to a declared layer reverts at the next start; make it in the declaration to make it durable.
 
 `--owner`, `--public`, `--organization`, `--group`, `--user`, `--clear-groups`, and `--clear-users` apply to an admin-defined layer. Against a stored user-defined layer, whose owner and whose implicit `users: [<owner>]` visibility are fixed at registration, the refusal reads the value each flag would store against the value the layer holds. A flag that would change the stored value is refused with `registry.invalid_argument` carrying `details.constraint: "immutable_visibility"`: `--public`, `--organization`, `--group`, a `--user` naming anyone other than the owner, an `--owner` naming another subject, and `--clear-users`, which empties the stored list. The refusal rejects the whole patch, so no other flag the same command carries is applied. A flag whose value restates what the layer holds asserts nothing and is admitted, including `--public=false`, `--organization=false`, `--user <owner>`, `--owner <owner>`, and `--clear-groups` against a layer storing no group. An administrator widens such a layer by re-registering its ID as an admin-defined layer.
 
