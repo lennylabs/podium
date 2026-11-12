@@ -114,21 +114,6 @@ func TestOpen_RefusesUnusableConfiguration(t *testing.T) {
 	}
 }
 
-// Until its constructor lands, Open refuses a stdout element with ErrConfig
-// naming the list variable and the kind.
-//
-// Spec: §13.12
-func TestOpen_RefusesDestinationsWithoutConstructor(t *testing.T) {
-	t.Parallel()
-	_, err := Open(context.Background(), "stdout", OpenOptions{})
-	if !errors.Is(err, ErrConfig) {
-		t.Fatalf("Open(stdout) = %v, want ErrConfig", err)
-	}
-	if !strings.Contains(err.Error(), envRegistryPath) || !strings.Contains(err.Error(), "the stdout destination") {
-		t.Errorf("error %q does not name %s and the stdout kind", err, envRegistryPath)
-	}
-}
-
 // A file destination that NewFileSink cannot open, or that cannot be opened
 // for appending, refuses startup with ErrConfig and leaves an existing
 // file's bytes unchanged.

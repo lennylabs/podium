@@ -144,7 +144,7 @@ type Stream struct {
 	transport *transport
 
 	file   *FileSink
-	stdout io.Writer
+	stdout *stdoutDest
 	queues []queueDest
 	cancel context.CancelFunc
 
@@ -195,6 +195,9 @@ func Open(ctx context.Context, value string, opts OpenOptions) (*Stream, error) 
 			return nil, err
 		}
 	}
+	if s.stdout != nil {
+		ignoreSIGPIPE()
+	}
 	s.startQueues(ctx)
 	return s, nil
 }
@@ -221,8 +224,14 @@ func (s *Stream) addDestination(spec destSpec) error {
 		dest := newOTLPDest(s, spec.url, spec.name())
 		s.queues = append(s.queues, newForwarder(s, spec.kind, spec.name(), dest))
 		return nil
+	case kindStdout:
+		s.stdout = &stdoutDest{w: s.opts.Stdout}
+		return nil
 	default:
-		return fmt.Errorf("%w: %s: the %s destination is not available in this build", ErrConfig, variable, spec.kind)
+		// parseDestinations yields only the four kinds above, so this arm
+		// does not run. It refuses rather than opening a stream that
+		// silently omits a destination the list names.
+		return fmt.Errorf("%w: %s: unknown destination kind %s", ErrConfig, variable, spec.kind)
 	}
 }
 
@@ -346,9 +355,7 @@ func (s *Stream) handOff(r record) {
 	if s.stdout == nil {
 		return
 	}
-	line := make([]byte, 0, len(r.line)+1)
-	line = append(append(line, r.line...), '\n')
-	if _, err := s.stdout.Write(line); err != nil {
+	if err := s.stdout.write(r); err != nil {
 		s.dropped(kindStdout, tokenStdout, ReasonWriteError, 1)
 	}
 }

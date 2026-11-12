@@ -384,7 +384,7 @@ func TestStream_StdoutFailureIsNeverReturned(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "audit.log")
 		obs := &fakeObserver{}
 		s := openFileStream(t, path, OpenOptions{Observer: obs})
-		s.stdout = epipe
+		s.stdout = &stdoutDest{w: epipe}
 		appendN(t, s, 1)
 		if n := len(fileRecords(t, path)); n != 1 {
 			t.Fatalf("file holds %d records, want 1", n)
@@ -397,7 +397,7 @@ func TestStream_StdoutFailureIsNeverReturned(t *testing.T) {
 		t.Parallel()
 		obs := &fakeObserver{}
 		s := newStream(OpenOptions{Observer: obs}.withDefaults())
-		s.stdout = epipe
+		s.stdout = &stdoutDest{w: epipe}
 		appendN(t, s, 1)
 		if got := obs.snapshot(); len(got) != 1 || got[0] != "Dropped(stdout,write_error,1)" {
 			t.Fatalf("observer calls = %v", got)
@@ -430,7 +430,7 @@ func TestStream_QueuesNetworkCopiesBeforeStdoutWrite(t *testing.T) {
 	obs := &fakeObserver{}
 	s := openFileStream(t, path, OpenOptions{Observer: obs})
 	w := &blockingWriter{entered: make(chan struct{}), release: make(chan struct{})}
-	s.stdout = w
+	s.stdout = &stdoutDest{w: w}
 	newFakeQueue(s, kindHTTP)
 	done := make(chan error, 1)
 	go func() { done <- s.Append(context.Background(), Event{Type: EventArtifactLoaded}) }()
