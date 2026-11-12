@@ -84,7 +84,9 @@ The endpoint sink treats a transport error or a non-2xx response as a failed sen
 
 The sending process computes the hash chain in memory before each send. A dropped event therefore leaves the receiver with a later record whose `prev_hash` names a record the receiver never received.
 
-The chain belongs to the process that writes it. Each process start begins a new chain, whose first record carries no `prev_hash`. In a clustered deployment, each replica sends its own chain, so a receiver that collects every replica's stream holds one chain per replica and per process start.
+The endpoint sink keeps its chain in process memory. Each process start begins a new forwarded chain, whose first record carries no `prev_hash`. In a clustered deployment, each replica sends its own chain, so a receiver that collects every replica's stream holds one chain per replica and per process start.
+
+The file sink reads the last record's hash when it opens an existing log, so its chain continues across a restart.
 
 The registry does not verify a stream it forwards to an endpoint. The receiver stores the stream and verifies its chain.
 
