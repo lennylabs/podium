@@ -81,6 +81,7 @@ func (f *FileSink) Append(_ context.Context, e Event) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	normalizeEventClient(&e)
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now().UTC()
 	}
@@ -193,7 +194,19 @@ type jsonCaller struct {
 	Email      string       `json:"email,omitempty"`
 	Groups     []string     `json:"groups,omitempty"`
 	Network    *jsonNetwork `json:"network,omitempty"`
+	Client     *jsonClient  `json:"client,omitempty"`
 	PublicMode bool         `json:"public_mode,omitempty"`
+}
+
+// jsonClient is the wire form of CallerClient (§8.1 caller.client). Each
+// member appears only when non-empty.
+type jsonClient struct {
+	Kind        string `json:"kind,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Version     string `json:"version,omitempty"`
+	Host        string `json:"host,omitempty"`
+	HostVersion string `json:"host_version,omitempty"`
+	Harness     string `json:"harness,omitempty"`
 }
 
 // jsonNetwork is the wire form of CallerNetwork (§8.1 caller.network).
@@ -220,10 +233,12 @@ func eventForJSON(e Event) jsonEvent {
 
 // callerForJSON builds the nested caller object, or nil when the event
 // carries no caller attributes at all (so the "caller" key is omitted
-// entirely rather than serialized as an empty object).
+// entirely rather than serialized as an empty object). Every caller
+// attribute takes part in the check: an event whose only caller attribute is
+// left out of it loses that attribute on disk and then fails Verify.
 func callerForJSON(e Event) *jsonCaller {
 	if e.Caller == "" && e.CallerEmail == "" && len(e.CallerGroups) == 0 &&
-		e.CallerNetwork == nil && !e.PublicMode {
+		e.CallerNetwork == nil && e.CallerClient == nil && !e.PublicMode {
 		return nil
 	}
 	return &jsonCaller{
@@ -231,6 +246,7 @@ func callerForJSON(e Event) *jsonCaller {
 		Email:      e.CallerEmail,
 		Groups:     e.CallerGroups,
 		Network:    networkForJSON(e.CallerNetwork),
+		Client:     clientForJSON(e.CallerClient),
 		PublicMode: e.PublicMode,
 	}
 }
@@ -254,6 +270,7 @@ func eventFromJSON(je jsonEvent) Event {
 		e.CallerEmail = je.Caller.Email
 		e.CallerGroups = je.Caller.Groups
 		e.CallerNetwork = networkFromJSON(je.Caller.Network)
+		e.CallerClient = clientFromJSON(je.Caller.Client)
 		e.PublicMode = je.Caller.PublicMode
 	}
 	return e
@@ -271,6 +288,22 @@ func networkFromJSON(n *jsonNetwork) *CallerNetwork {
 		return nil
 	}
 	return &CallerNetwork{SourceIP: n.SourceIP, ForwardedUser: n.ForwardedUser}
+}
+
+func clientForJSON(c *CallerClient) *jsonClient {
+	if c == nil {
+		return nil
+	}
+	j := jsonClient(*c)
+	return &j
+}
+
+func clientFromJSON(c *jsonClient) *CallerClient {
+	if c == nil {
+		return nil
+	}
+	cc := CallerClient(*c)
+	return &cc
 }
 
 // splitLines mirrors strings.Split on '\n' but operates on bytes so

@@ -135,9 +135,13 @@ type Event struct {
 	CallerEmail   string
 	CallerGroups  []string
 	CallerNetwork *CallerNetwork
-	PublicMode    bool
-	Target        string
-	Context       map[string]string
+	// CallerClient is the §8.1 caller.client attribute: the normalized
+	// X-Podium-Client value (§7.2.2) of the request the event serves. Nil
+	// when the request named no client and on events no request raised.
+	CallerClient *CallerClient
+	PublicMode   bool
+	Target       string
+	Context      map[string]string
 
 	// Tenant is the §4.7.1 org ID whose audit stream the event belongs to;
 	// empty for deployment-wide events and for records written before the
@@ -198,6 +202,16 @@ func (e Event) canonicalBody() []byte {
 	if e.Tenant != "" {
 		parts = append(parts, "tenant="+e.Tenant)
 	}
+	// Spec: §8.1, §8.6: caller.client is hashed one part per non-empty
+	// member, after the tenant part. A nil client contributes nothing, so a
+	// record written before the attribute existed keeps its hash.
+	if e.CallerClient != nil {
+		for _, m := range e.CallerClient.members() {
+			if *m.val != "" {
+				parts = append(parts, "caller_client_"+m.key+"="+*m.val)
+			}
+		}
+	}
 	out := []byte{}
 	for _, p := range parts {
 		out = append(out, []byte(p)...)
@@ -239,6 +253,7 @@ func NewMemory() *Memory { return &Memory{} }
 func (m *Memory) Append(_ context.Context, e Event) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	normalizeEventClient(&e)
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now().UTC()
 	}

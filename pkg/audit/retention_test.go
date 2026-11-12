@@ -176,7 +176,7 @@ func TestEraseUser_ReplacesIdentifiersAndAppendsTombstone(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 	})
 	transformed, err := audit.EraseUser(context.Background(), sink,
-		"joan@example.com", "tenant-salt", "carol@acme.com", audit.EraseScope{Unlabeled: true})
+		"joan@example.com", "tenant-salt", "carol@acme.com", nil, audit.EraseScope{Unlabeled: true})
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestEraseUser_RedactsEmailAndGroups(t *testing.T) {
 			Timestamp:    time.Now().UTC(),
 		})
 	}
-	transformed, err := audit.EraseUser(context.Background(), sink, sub, "tenant-salt", "carol@acme.com", audit.EraseScope{Unlabeled: true})
+	transformed, err := audit.EraseUser(context.Background(), sink, sub, "tenant-salt", "carol@acme.com", nil, audit.EraseScope{Unlabeled: true})
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestEraseUser_EmailInputErasesSubClaimAndContext(t *testing.T) {
 		Type: audit.EventArtifactLoaded, Caller: "auth0|bob", CallerEmail: "bob@acme.com",
 		Target: "skill/y", Timestamp: time.Now().UTC(),
 	})
-	transformed, err := audit.EraseUser(ctx, sink, email, "tenant-salt", "carol@acme.com", audit.EraseScope{Unlabeled: true})
+	transformed, err := audit.EraseUser(ctx, sink, email, "tenant-salt", "carol@acme.com", nil, audit.EraseScope{Unlabeled: true})
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestEraseUser_ContextMatchPreservesDistinctCaller(t *testing.T) {
 		Context: map[string]string{"owner": aliceSub, "action": "erase"},
 		Target:  "alice-personal", Timestamp: time.Now().UTC(),
 	})
-	transformed, err := audit.EraseUser(ctx, sink, aliceSub, "salt", "carol@acme.com", audit.EraseScope{Unlabeled: true})
+	transformed, err := audit.EraseUser(ctx, sink, aliceSub, "salt", "carol@acme.com", nil, audit.EraseScope{Unlabeled: true})
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -439,7 +439,7 @@ func TestEraseUser_TombstoneFormatMatchesSpec(t *testing.T) {
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
 	})
-	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "tenant-salt", "carol@acme.com", audit.EraseScope{Unlabeled: true}); err != nil {
+	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "tenant-salt", "carol@acme.com", nil, audit.EraseScope{Unlabeled: true}); err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
 	want := func() string {
@@ -476,7 +476,7 @@ func TestEraseUser_EmptySaltRejected(t *testing.T) {
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
 	})
-	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "", "carol@acme.com", audit.EraseScope{Unlabeled: true}); err == nil {
+	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "", "carol@acme.com", nil, audit.EraseScope{Unlabeled: true}); err == nil {
 		t.Fatalf("EraseUser with empty salt: want error, got nil")
 	}
 	// The log must be untouched: the original identity still present, no
@@ -499,7 +499,7 @@ func TestEraseUser_RecordsInvokingAdmin(t *testing.T) {
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
 	})
-	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com", audit.EraseScope{Unlabeled: true}); err != nil {
+	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com", nil, audit.EraseScope{Unlabeled: true}); err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
 	events := parseEvents(t, path)
@@ -532,7 +532,7 @@ func TestEraseUser_ZeroScopeRefused(t *testing.T) {
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Tenant: "acme", Timestamp: time.Now().UTC(),
 	})
 	before, _ := readSinkBytes(path)
-	_, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com", audit.EraseScope{})
+	_, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com", nil, audit.EraseScope{})
 	if !errors.Is(err, audit.ErrEraseScope) {
 		t.Fatalf("EraseUser(zero scope) err = %v, want ErrEraseScope", err)
 	}
@@ -673,7 +673,7 @@ func TestEraseUser_TenantScoped(t *testing.T) {
 	before := rawLines(t, path)
 	head := chainHeadFromFile(t, path)
 
-	n, err := audit.EraseUser(ctx, sink, aliceSub, eraseSalt, eraseAdmin, audit.EraseScope{Tenant: "A"})
+	n, err := audit.EraseUser(ctx, sink, aliceSub, eraseSalt, eraseAdmin, nil, audit.EraseScope{Tenant: "A"})
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -712,7 +712,7 @@ func TestEraseUser_TenantScoped(t *testing.T) {
 	}
 
 	onlySink, _ := writeEraseLog(t, tenantScopedLog(true))
-	m, err := audit.EraseUser(ctx, onlySink, aliceSub, eraseSalt, eraseAdmin, audit.EraseScope{Tenant: "A"})
+	m, err := audit.EraseUser(ctx, onlySink, aliceSub, eraseSalt, eraseAdmin, nil, audit.EraseScope{Tenant: "A"})
 	if err != nil {
 		t.Fatalf("EraseUser (A only): %v", err)
 	}
@@ -735,11 +735,11 @@ func TestEraseUser_UnlabeledScope(t *testing.T) {
 	}
 	boundSink, boundPath := writeEraseLog(t, log)
 	allSink, allPath := writeEraseLog(t, log)
-	nb, err := audit.EraseUser(ctx, boundSink, aliceSub, eraseSalt, eraseAdmin, audit.EraseScope{Tenant: "S", Unlabeled: true})
+	nb, err := audit.EraseUser(ctx, boundSink, aliceSub, eraseSalt, eraseAdmin, nil, audit.EraseScope{Tenant: "S", Unlabeled: true})
 	if err != nil {
 		t.Fatalf("EraseUser (bound): %v", err)
 	}
-	na, err := audit.EraseUser(ctx, allSink, aliceSub, eraseSalt, eraseAdmin, audit.EraseScope{Unlabeled: true})
+	na, err := audit.EraseUser(ctx, allSink, aliceSub, eraseSalt, eraseAdmin, nil, audit.EraseScope{Unlabeled: true})
 	if err != nil {
 		t.Fatalf("EraseUser (all): %v", err)
 	}
@@ -771,7 +771,7 @@ func TestEraseUser_AllRecords(t *testing.T) {
 		aliceAt("B", aliceAliasB, now),
 		aliceAt("", aliceEmail, now),
 	})
-	n, err := audit.EraseUser(ctx, sink, aliceSub, eraseSalt, eraseAdmin, audit.EraseScope{Unlabeled: true})
+	n, err := audit.EraseUser(ctx, sink, aliceSub, eraseSalt, eraseAdmin, nil, audit.EraseScope{Unlabeled: true})
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -800,7 +800,7 @@ func TestEraseUser_EmptyLog(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	sink, path := writeEraseLog(t, nil)
-	n, err := audit.EraseUser(ctx, sink, aliceSub, eraseSalt, eraseAdmin, audit.EraseScope{Tenant: "A"})
+	n, err := audit.EraseUser(ctx, sink, aliceSub, eraseSalt, eraseAdmin, nil, audit.EraseScope{Tenant: "A"})
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -834,7 +834,7 @@ func TestEraseUser_SingleTenantScopeExcludesForeignLabels(t *testing.T) {
 		aliceAt("F", aliceEmail, now),
 	})
 	before := rawLines(t, path)
-	n, err := audit.EraseUser(ctx, sink, aliceSub, eraseSalt, eraseAdmin, audit.EraseScope{Tenant: "S", Unlabeled: true})
+	n, err := audit.EraseUser(ctx, sink, aliceSub, eraseSalt, eraseAdmin, nil, audit.EraseScope{Tenant: "S", Unlabeled: true})
 	if err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}

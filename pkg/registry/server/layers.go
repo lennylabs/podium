@@ -1130,7 +1130,7 @@ func (e *LayerEndpoint) eraseAudit(r *http.Request, body eraseRequest, tenantID 
 		// A multi-tenant registry keeps one audit file for every tenant, so
 		// the scope excludes unlabeled records there: no tenant owns them.
 		scope := audit.EraseScope{Tenant: tenantID, Unlabeled: !e.multiTenant}
-		redacted, err := audit.EraseUser(r.Context(), e.auditFile, body.UserID, body.Salt, admin, scope)
+		redacted, err := audit.EraseUser(r.Context(), e.auditFile, body.UserID, body.Salt, admin, nil, scope)
 		if err != nil {
 			return 0, err
 		}
