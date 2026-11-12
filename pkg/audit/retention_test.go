@@ -221,6 +221,7 @@ func TestEraseUser_RedactsEmailAndGroups(t *testing.T) {
 			Caller:       sub,
 			CallerEmail:  email,
 			CallerGroups: []string{group},
+			CallerClient: &audit.CallerClient{Kind: "mcp", Host: "Claude Code"},
 			Target:       "skill/x",
 			Timestamp:    time.Now().UTC(),
 		})
@@ -256,6 +257,11 @@ func TestEraseUser_RedactsEmailAndGroups(t *testing.T) {
 		}
 		if len(e.Caller.Groups) != 0 {
 			t.Errorf("caller.groups = %v, want empty after erasure", e.Caller.Groups)
+		}
+		// Spec: §8.1, §8.5 — caller.client is event metadata rather than an
+		// identifier, so erasure leaves it unchanged.
+		if c := e.Caller.Client; c == nil || *c != (wireClient{Kind: "mcp", Host: "Claude Code"}) {
+			t.Errorf("caller.client = %+v, want kind mcp, host Claude Code after erasure", c)
 		}
 	}
 	if err := sink.Verify(context.Background()); err != nil {
@@ -350,16 +356,27 @@ func TestEraseUser_ContextMatchPreservesDistinctCaller(t *testing.T) {
 	}
 }
 
-// fullEvent mirrors the §8.1 nested caller wire form including the email and
-// group membership the erasure tests inspect.
+// fullEvent mirrors the §8.1 nested caller wire form including the email,
+// group membership, and client the erasure tests inspect.
 type fullEvent struct {
 	Type   string `json:"type"`
 	Caller struct {
-		Identity string   `json:"identity"`
-		Email    string   `json:"email"`
-		Groups   []string `json:"groups"`
+		Identity string      `json:"identity"`
+		Email    string      `json:"email"`
+		Groups   []string    `json:"groups"`
+		Client   *wireClient `json:"client"`
 	} `json:"caller"`
 	Context map[string]string `json:"context"`
+}
+
+// wireClient mirrors the §8.1 caller.client wire form.
+type wireClient struct {
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Host        string `json:"host"`
+	HostVersion string `json:"host_version"`
+	Harness     string `json:"harness"`
 }
 
 func parseFullEvents(t *testing.T, path string) []fullEvent {
@@ -491,7 +508,10 @@ func TestEraseUser_EmptySaltRejected(t *testing.T) {
 }
 
 // Spec: §8.5 / §8.1 — the appended user.erased event records the
-// invoking admin as the Caller and in the admin context field.
+// invoking admin as the Caller and in the admin context field, and the erase
+// request's client as caller.client. EraseUser normalizes the client itself,
+// because the chain rewrite hashes user.erased without going through Append,
+// so a NUL byte in the client is stored sanitized and the file verifies.
 func TestEraseUser_RecordsInvokingAdmin(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
@@ -499,8 +519,18 @@ func TestEraseUser_RecordsInvokingAdmin(t *testing.T) {
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
 	})
-	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com", nil, audit.EraseScope{Unlabeled: true}); err != nil {
+	client := &audit.CallerClient{Kind: "cli", Name: "podium", Host: "x\x00y"}
+	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com", client, audit.EraseScope{Unlabeled: true}); err != nil {
 		t.Fatalf("EraseUser: %v", err)
+	}
+	if err := sink.Verify(context.Background()); err != nil {
+		t.Fatalf("Verify after EraseUser: %v", err)
+	}
+	full := parseFullEvents(t, path)
+	erased := full[len(full)-1]
+	if c := erased.Caller.Client; erased.Type != string(audit.EventUserErased) || c == nil ||
+		*c != (wireClient{Kind: "cli", Name: "podium", Host: "x_y"}) {
+		t.Errorf("user.erased %s caller.client = %+v, want kind cli, name podium, host x_y", erased.Type, c)
 	}
 	events := parseEvents(t, path)
 	var found bool
@@ -535,6 +565,13 @@ func TestEraseUser_ZeroScopeRefused(t *testing.T) {
 	_, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com", nil, audit.EraseScope{})
 	if !errors.Is(err, audit.ErrEraseScope) {
 		t.Fatalf("EraseUser(zero scope) err = %v, want ErrEraseScope", err)
+	}
+	// Spec: §8.1, §8.5 — the request's client is a parameter of its own, so a
+	// header-derived value cannot make the zero scope pass the guard.
+	client := &audit.CallerClient{Kind: "cli", Host: "evil"}
+	_, err = audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com", client, audit.EraseScope{})
+	if !errors.Is(err, audit.ErrEraseScope) {
+		t.Fatalf("EraseUser(zero scope, client) err = %v, want ErrEraseScope", err)
 	}
 	if after, _ := readSinkBytes(path); !bytes.Equal(before, after) {
 		t.Errorf("audit file changed despite the refused scope")
