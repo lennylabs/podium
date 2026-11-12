@@ -13,13 +13,14 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/registry/server"
-	"github.com/lennylabs/podium/pkg/store"
 )
 
-// layerObjectMembers is the §7.3.1 layer object minus the two members
-// §7.3.1 states are conditional (force_push_policy and last_ingested_at).
-// Every arm below asserts set equality against this list plus whichever
-// conditional member its fixture supplies, so a member added later without
+// layerObjectMembers is the §7.3.1 layer object minus the three members
+// §7.3.1 states are conditional: force_push_policy, last_ingested_at, and
+// repo_credential, which a layer carries only where the repository credential
+// members apply to it (a git source on an http or https URL outside the
+// [redacted] class). Every arm below asserts set equality against this list
+// plus whichever conditional member its fixture supplies, so a member added later without
 // a spec decision fails the test rather than reaching the wire unnoticed,
 // which is how the tenant identifier reached it.
 var layerObjectMembers = []string{
@@ -245,6 +246,23 @@ func TestLayerEndpoint_LayerObjectMemberNames(t *testing.T) {
 	}
 	assertMembers(t, "POST /v1/layers/reorder", findLayer(t, body, "team-finance"), wantMembers("force_push_policy"))
 
+	// A git layer on an https remote carries repo_credential, false here
+	// because the registration carries no credential member. It sets no
+	// force-push policy, so that conditional member is absent. The scp-like
+	// team-finance and the local alice-personal arms above omit the member,
+	// so they pin its omission. A MarshalJSON added to store.LayerConfig would
+	// be promoted through server.LayerObject and drop the member here.
+	resp, body = mustPost(t, base, "/v1/layers", map[string]any{
+		"id": "team-web", "source_type": "git",
+		"repo": "https://git.acme.com/acme/web.git", "ref": "main",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register team-web status = %d, body=%s", resp.StatusCode, body)
+	}
+	assertMembers(t, "POST /v1/layers (https git)", singleLayer(t, body), wantMembers("repo_credential"))
+	assertMembers(t, "GET /v1/layers (https git)", findLayer(t, mustGet(t, base, "/v1/layers"), "team-web"),
+		wantMembers("repo_credential"))
+
 	// The deleted read carries the tombstone stamp under deleted_at.
 	resp, body = mustDelete(t, base, "/v1/layers?id=alice-personal")
 	if resp.StatusCode != http.StatusOK {
@@ -360,19 +378,31 @@ func TestLayerEndpoint_LayerObjectWithholdsSecretAndTenant(t *testing.T) {
 func TestLayerEndpoint_RequestAndResponseAgreeOnNames(t *testing.T) {
 	t.Parallel()
 
-	// rotate_webhook_secret is an action the request asks for, and
-	// force_repo_overwrite is an admission flag the request sets. Neither is a
-	// stored member, so the response answers no field of either name.
-	requestOnly := map[string]bool{"rotate_webhook_secret": true, "force_repo_overwrite": true}
+	// rotate_webhook_secret is an action the request asks for, and the
+	// repository credential members are write-only: repo_username and
+	// repo_token are never answered, and clear_repo_credential is an action.
+	// None is a stored member, so the response answers no field of any of
+	// these names.
+	requestOnly := map[string]bool{
+		"rotate_webhook_secret": true,
+		"repo_username":         true, "repo_token": true, "clear_repo_credential": true,
+	}
 	// The response carries members no register request sets: the server
-	// assigns the precedence and the ingest bookkeeping.
+	// assigns the precedence and the ingest bookkeeping, and repo_credential
+	// reports what the request set through repo_token and
+	// clear_repo_credential.
 	responseOnly := map[string]bool{
 		"order": true, "last_ingested_ref": true, "created_at": true,
-		"deleted_at": true, "last_ingested_at": true,
+		"deleted_at": true, "last_ingested_at": true, "repo_credential": true,
 	}
 
 	req := jsonTagNames(reflect.TypeOf(server.LayerRegisterRequest{}))
-	resp := jsonTagNames(reflect.TypeOf(store.LayerConfig{}))
+	// force_repo_overwrite was removed; json.Decoder ignores it as an unknown
+	// member, so no request field may carry the name again.
+	if req["force_repo_overwrite"] {
+		t.Errorf("the register request accepts force_repo_overwrite, which §7.3.1 removed")
+	}
+	resp := jsonTagNames(reflect.TypeOf(server.LayerObject{}))
 	for name := range req {
 		if requestOnly[name] {
 			continue
@@ -392,13 +422,21 @@ func TestLayerEndpoint_RequestAndResponseAgreeOnNames(t *testing.T) {
 }
 
 // jsonTagNames returns the JSON member names a struct type marshals, skipping
-// the fields tagged json:"-".
+// the fields tagged json:"-". An anonymous struct field with no JSON tag
+// contributes its own fields, as encoding/json promotes them, which is how
+// server.LayerObject carries the members of the store.LayerConfig it embeds.
 func jsonTagNames(t reflect.Type) map[string]bool {
 	out := map[string]bool{}
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		tag := f.Tag.Get("json")
 		if tag == "-" {
+			continue
+		}
+		if f.Anonymous && tag == "" && f.Type.Kind() == reflect.Struct {
+			for name := range jsonTagNames(f.Type) {
+				out[name] = true
+			}
 			continue
 		}
 		name, _, _ := strings.Cut(tag, ",")

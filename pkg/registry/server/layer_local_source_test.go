@@ -115,6 +115,29 @@ func assertLocalSourceRefusal(t *testing.T, rec *httptest.ResponseRecorder, path
 	}
 }
 
+// assertURLCredentialRecorder asserts the §7.3.1 url_credential refusal of a
+// registration: 400 registry.invalid_argument carrying details.constraint
+// "url_credential".
+//
+// Spec: §7.3.1 (Setting, replacing, and removing a repository credential)
+func assertURLCredentialRecorder(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	var env struct {
+		Code    string         `json:"code"`
+		Details map[string]any `json:"details"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope %q: %v", rec.Body.String(), err)
+	}
+	if env.Code != "registry.invalid_argument" || env.Details["constraint"] != "url_credential" {
+		t.Errorf("code = %q, details.constraint = %v, want registry.invalid_argument and url_credential",
+			env.Code, env.Details["constraint"])
+	}
+}
+
 // countingRunner returns a reingest runner that records how often it ran.
 func countingRunner(ran *atomic.Int64) ReingestRunner {
 	return func(context.Context, store.LayerConfig, *BreakGlass) (*ingest.Result, error) {
@@ -387,6 +410,9 @@ type repoCase struct {
 	// split marks a repository string the store splits on read, so the stored
 	// layer's Repo is the reported form and the gate must read CloneRepo().
 	split bool
+	// urlCredential marks a repository string a registration refuses with
+	// details.constraint "url_credential" ahead of the local-source rule.
+	urlCredential bool
 }
 
 func repoCases() []repoCase {
@@ -407,15 +433,17 @@ func repoCases() []repoCase {
 		// carries a "/", and routes the string to the file transport.
 		{name: "at-sign-inside-a-path", repo: "/srv/repos@h:x", file: true},
 		// A string go-git's parser rejects outright takes the fail-closed arm.
-		{name: "unparseable", repo: "http://[::1", file: true},
+		// It is also in the url_credential class, which a registration
+		// refuses before the local-source rule (X15-0.7.0).
+		{name: "unparseable", repo: "http://[::1", file: true, urlCredential: true},
 		// URLs with userinfo, which the store splits. The two hostless rows are
 		// the ones whose reported form go-git resolves to another transport
 		// than the registered bytes: "file:?/srv/x" reads as scp-like ssh, and
 		// "https:" reads as a file path.
 		{name: "file-url-with-userinfo", repo: "file://tok@/srv/x", file: true, split: true},
 		{name: "hostless-file-url-with-userinfo", repo: "file://tok@?/srv/x", file: true, split: true},
-		{name: "hostless-https-url-with-userinfo", repo: "https://tok@", split: true},
-		{name: "https-url-with-userinfo", repo: "https://ghp_tok3n@git.acme.com/x.git", split: true},
+		{name: "hostless-https-url-with-userinfo", repo: "https://tok@", split: true, urlCredential: true},
+		{name: "https-url-with-userinfo", repo: "https://ghp_tok3n@git.acme.com/x.git", split: true, urlCredential: true},
 	}
 }
 
@@ -455,6 +483,12 @@ func gitLayerOwnedByAlice(repo string) store.LayerConfig {
 // the registered bytes, which are the bytes the clone receives. The rows whose
 // repository carries URL userinfo read the stored layer back split before the
 // reingest, so they fail on a gate that classifies the reported Repo.
+//
+// Spec: §7.3.1 (Setting, replacing, and removing a repository credential) — a
+// registration whose http or https repo carries userinfo, or whose repo is in
+// the [redacted] class, is refused with url_credential before the local-source
+// rule runs, so the register arm of those rows asserts that refusal. A file
+// URL that parses is outside the class and keeps its local_source refusal.
 func TestLocalSource_RepositoryStrings(t *testing.T) {
 	t.Parallel()
 	// These are the reported forms of "file://tok@?/srv/x" and "https://tok@".
@@ -479,6 +513,10 @@ func TestLocalSource_RepositoryStrings(t *testing.T) {
 			rec := localSourceDo(t, e, http.MethodPost, "/v1/layers", map[string]any{
 				"id": "fresh", "source_type": "git", "repo": c.repo,
 			})
+			if c.urlCredential {
+				assertURLCredentialRecorder(t, rec)
+				return
+			}
 			if c.file {
 				assertLocalSourceRefusal(t, rec, c.repo)
 				return
