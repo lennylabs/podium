@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/audit"
 )
 
 // serverWatchReconnectDelay is the pause before re-opening a dropped
@@ -43,8 +45,15 @@ func runServerWatch(ctx context.Context, opts WatchOptions, events chan<- WatchE
 		return
 	}
 
+	// Spec: §7.2.2. Run defaults AdapterID to none on its own copy of the
+	// options, so the subscription applies the same default here and both
+	// streams of one watch report the same harness.
+	adapterID := opts.Sync.AdapterID
+	if adapterID == "" {
+		adapterID = "none"
+	}
 	trigger := make(chan struct{}, 1)
-	go streamServerEvents(ctx, opts.Sync.RegistryPath, opts.Sync.HTTPClient, opts.Sync.Token, trigger)
+	go streamServerEvents(ctx, opts.Sync.RegistryPath, opts.Sync.HTTPClient, opts.Sync.Token, ClientHeaderValue(adapterID), trigger)
 
 	var timer *time.Timer
 	var timerC <-chan time.Time
@@ -77,8 +86,9 @@ func runServerWatch(ctx context.Context, opts WatchOptions, events chan<- WatchE
 // and signals trigger on each one. It reconnects after a dropped stream
 // until ctx is canceled, then closes trigger. The §7.5 event types are
 // requested server-side so every delivered line (apart from heartbeats) is
-// relevant to the watcher.
-func streamServerEvents(ctx context.Context, registry string, client *http.Client, token string, trigger chan<- struct{}) {
+// relevant to the watcher. clientHeader is the §7.2.2 X-Podium-Client value
+// each subscription sends.
+func streamServerEvents(ctx context.Context, registry string, client *http.Client, token, clientHeader string, trigger chan<- struct{}) {
 	defer close(trigger)
 
 	// A streaming subscription must not carry an overall client timeout, or
@@ -92,7 +102,7 @@ func streamServerEvents(ctx context.Context, registry string, client *http.Clien
 	url := base + "/v1/events?type=artifact.published&type=artifact.deprecated&type=layer.config_changed"
 
 	for ctx.Err() == nil {
-		readServerEventStream(ctx, stream, url, token, trigger)
+		readServerEventStream(ctx, stream, url, token, clientHeader, trigger)
 		if ctx.Err() != nil {
 			return
 		}
@@ -106,7 +116,7 @@ func streamServerEvents(ctx context.Context, registry string, client *http.Clien
 
 // readServerEventStream opens one /v1/events connection and signals trigger
 // for every non-heartbeat NDJSON line until the stream ends or ctx is done.
-func readServerEventStream(ctx context.Context, client *http.Client, url, token string, trigger chan<- struct{}) {
+func readServerEventStream(ctx context.Context, client *http.Client, url, token, clientHeader string, trigger chan<- struct{}) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return
@@ -117,6 +127,9 @@ func readServerEventStream(ctx context.Context, client *http.Client, url, token 
 	// watcher would reconnect forever without ever triggering a run.
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if clientHeader != "" {
+		req.Header.Set(audit.ClientHeader, clientHeader)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
