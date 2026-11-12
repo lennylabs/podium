@@ -243,6 +243,19 @@ type yamlGitSource struct {
 	// re-seeds the empty string, which resolves to "github" at the point
 	// of use.
 	GitProvider string `yaml:"git_provider,omitempty"`
+	// Username is the §7.3.1 repository credential's username, under the
+	// rules of the repo_username member. It is written as the provider
+	// issues it and is never percent-encoded.
+	Username string `yaml:"username,omitempty"`
+	// Token is the §7.3.1 repository credential's token, under the rules of
+	// the repo_token member. It is meant to be written as ${ENV_VAR}, which
+	// expandEnvVars substitutes before parsing, and it is never
+	// percent-encoded. It is a yaml.Node because an unset variable expands
+	// to the empty string and leaves `token:` with a null value: yaml.v3
+	// skips a custom unmarshaler on a null node but sets a yaml.Node field,
+	// so a present null stays apart from an absent key, which a string
+	// field cannot tell apart.
+	Token yaml.Node `yaml:"token,omitempty"`
 }
 
 type yamlLocalSource struct {
