@@ -14616,7 +14616,7 @@ describe("the layer write flows", () => {
 
   // Spec: §7.3.1, §13.10
   it("keeps no update credential in the result or in the reopened dialog", async () => {
-    stubCredentialPanel(credentialLayer(true));
+    stubCredentialPanel(credentialLayer(false));
     render(<App />);
     const form = await openEdit();
     fillCredential("update", "x-access-token", "tok2");
