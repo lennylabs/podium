@@ -20,10 +20,11 @@ const (
 	envKeyFile     = "PODIUM_AUDIT_TLS_KEY_FILE"
 )
 
-// maxResponseDrain bounds how much of a response body a destination reads
-// so the connection can be reused. The body carries nothing the forwarder
-// needs.
-const maxResponseDrain = 64 << 10
+// maxResponseBody bounds how much of a response body a destination reads.
+// Reading it lets the connection be reused, and the OTLP destination
+// decodes its partial-success count from it, which an
+// ExportLogsServiceResponse holds in far fewer bytes.
+const maxResponseBody = 64 << 10
 
 // reservedHeaders are the header names a headers file may not set, because
 // the request itself defines them (§13.12).
@@ -154,16 +155,17 @@ func loadCAPool(path string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-// do sends req through the stream's client and returns the status and the
-// Retry-After value after draining and closing the body.
+// do sends req through the stream's client and returns the status, the
+// Retry-After value, and at most maxResponseBody bytes of the body, which
+// it closes.
 func (t *transport) do(req *http.Request) (sendResult, error) {
 	resp, err := t.client.Do(req)
 	if err != nil {
 		return sendResult{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	// A failed drain only costs connection reuse; the status already
-	// decides the outcome.
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseDrain))
-	return sendResult{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After")}, nil
+	// A failed read only costs connection reuse and the bytes after the
+	// failure; the status already decides the outcome.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+	return sendResult{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After"), body: body}, nil
 }

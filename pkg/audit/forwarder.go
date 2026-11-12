@@ -75,10 +75,12 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// sendResult is a receiver's answer to one batch.
+// sendResult is a receiver's answer to one batch. body is the start of the
+// response body, which only the OTLP destination reads.
 type sendResult struct {
 	status     int
 	retryAfter string
+	body       []byte
 }
 
 // batchSender sends one batch to a network destination's receiver on ctx,

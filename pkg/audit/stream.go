@@ -183,16 +183,18 @@ func Open(ctx context.Context, value string, opts OpenOptions) (*Stream, error) 
 	}
 	s := newStream(opts)
 	s.transport = tr
-	for _, spec := range specs {
-		if err := s.addDestination(spec); err != nil {
-			return nil, err
-		}
-	}
+	// The OTLP destinations carry the identifier in their resource, so it
+	// is generated before any destination is built.
 	id, err := uuid.NewRandomFromReader(opts.Rand)
 	if err != nil {
 		return nil, fmt.Errorf("%w: generate service.instance.id: %w", ErrConfig, err)
 	}
 	s.instanceID = id.String()
+	for _, spec := range specs {
+		if err := s.addDestination(spec); err != nil {
+			return nil, err
+		}
+	}
 	s.startQueues(ctx)
 	return s, nil
 }
@@ -213,6 +215,10 @@ func (s *Stream) addDestination(spec destSpec) error {
 		return nil
 	case kindHTTP:
 		dest := &httpDest{url: spec.url.String(), tr: s.transport}
+		s.queues = append(s.queues, newForwarder(s, spec.kind, spec.name(), dest))
+		return nil
+	case kindOTLP:
+		dest := newOTLPDest(s, spec.url, spec.name())
 		s.queues = append(s.queues, newForwarder(s, spec.kind, spec.name(), dest))
 		return nil
 	default:

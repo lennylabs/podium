@@ -19,7 +19,9 @@ import (
 	"testing"
 	"time"
 
+	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	"go.uber.org/goleak"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/lennylabs/podium/internal/clock"
 )
@@ -35,14 +37,16 @@ func (r repeatReader) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// received is one request a receiver recorded.
+// received is one request a receiver recorded. lines holds the records the
+// body carries; export holds the decoded request of an OTLP destination.
 type received struct {
 	path   string
 	header http.Header
 	lines  []jsonEvent
+	export *collogspb.ExportLogsServiceRequest
 }
 
-// receiver is an HTTP destination's test receiver. It records each request
+// receiver is an HTTP or OTLP destination's test receiver. It records each request
 // before respond answers it; respond gets the 1-based request number, and
 // a nil respond answers 200.
 type receiver struct {
@@ -79,16 +83,15 @@ func newTLSReceiver(t *testing.T, cfg *tls.Config, respond func(n int, w http.Re
 func (rcv *receiver) serve(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	got := received{path: r.URL.Path, header: r.Header.Clone()}
-	for _, line := range splitLines(body) {
-		if len(line) == 0 {
-			continue
-		}
-		var je jsonEvent
-		if err := json.Unmarshal(line, &je); err != nil {
-			http.Error(w, err.Error(), http.StatusTeapot)
-			return
-		}
-		got.lines = append(got.lines, je)
+	var err error
+	if r.Header.Get("Content-Type") == otlpContentType {
+		got.export, got.lines, err = decodeExport(body)
+	} else {
+		got.lines, err = decodeNDJSON(body)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusTeapot)
+		return
 	}
 	rcv.mu.Lock()
 	rcv.reqs = append(rcv.reqs, got)
@@ -104,6 +107,44 @@ func (rcv *receiver) serve(w http.ResponseWriter, r *http.Request) {
 	if rcv.respond != nil {
 		rcv.respond(n, w, r)
 	}
+}
+
+// decodeNDJSON parses an HTTP destination's body, one record per line.
+func decodeNDJSON(body []byte) ([]jsonEvent, error) {
+	var lines []jsonEvent
+	for _, line := range splitLines(body) {
+		if len(line) == 0 {
+			continue
+		}
+		var je jsonEvent
+		if err := json.Unmarshal(line, &je); err != nil {
+			return nil, err
+		}
+		lines = append(lines, je)
+	}
+	return lines, nil
+}
+
+// decodeExport parses an OTLP destination's body and the record each log
+// record's body carries.
+func decodeExport(body []byte) (*collogspb.ExportLogsServiceRequest, []jsonEvent, error) {
+	var req collogspb.ExportLogsServiceRequest
+	if err := proto.Unmarshal(body, &req); err != nil {
+		return nil, nil, err
+	}
+	var lines []jsonEvent
+	for _, rl := range req.GetResourceLogs() {
+		for _, sl := range rl.GetScopeLogs() {
+			for _, lr := range sl.GetLogRecords() {
+				var je jsonEvent
+				if err := json.Unmarshal([]byte(lr.GetBody().GetStringValue()), &je); err != nil {
+					return nil, nil, err
+				}
+				lines = append(lines, je)
+			}
+		}
+	}
+	return &req, lines, nil
 }
 
 func (rcv *receiver) requests() []received {

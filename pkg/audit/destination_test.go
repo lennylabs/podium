@@ -114,28 +114,18 @@ func TestOpen_RefusesUnusableConfiguration(t *testing.T) {
 	}
 }
 
-// Until their constructors land, Open refuses an OTLP or stdout element
-// with ErrConfig naming the list variable and the kind.
+// Until its constructor lands, Open refuses a stdout element with ErrConfig
+// naming the list variable and the kind.
 //
 // Spec: §13.12
 func TestOpen_RefusesDestinationsWithoutConstructor(t *testing.T) {
 	t.Parallel()
-	cases := map[string]string{
-		"otlp+http://c:4318/":             "otlp",
-		"stdout":                          "stdout",
-		"otlp+https://c/v1/logs?tok=zq7k": "otlp",
+	_, err := Open(context.Background(), "stdout", OpenOptions{})
+	if !errors.Is(err, ErrConfig) {
+		t.Fatalf("Open(stdout) = %v, want ErrConfig", err)
 	}
-	for value, kind := range cases {
-		_, err := Open(context.Background(), value, OpenOptions{})
-		if !errors.Is(err, ErrConfig) {
-			t.Fatalf("Open(%q) = %v, want ErrConfig", value, err)
-		}
-		if !strings.Contains(err.Error(), envRegistryPath) || !strings.Contains(err.Error(), "the "+kind+" destination") {
-			t.Errorf("error %q does not name %s and the %s kind", err, envRegistryPath, kind)
-		}
-		if strings.Contains(err.Error(), "zq7k") {
-			t.Errorf("error %q echoes the query", err)
-		}
+	if !strings.Contains(err.Error(), envRegistryPath) || !strings.Contains(err.Error(), "the stdout destination") {
+		t.Errorf("error %q does not name %s and the stdout kind", err, envRegistryPath)
 	}
 }
 
