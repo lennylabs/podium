@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   BatchResult,
   Client,
+  clientHeader,
   LoadedArtifact,
   MaterializeError,
   type MaterializeOptions,
@@ -514,6 +515,39 @@ describe("Client", () => {
     expect(observedURL).toContain("type=artifact.published");
     expect(observedURL).toContain("type=artifact.deprecated");
     expect(observedURL).not.toContain("types=");
+  });
+
+  // Spec: §7.2.2, §7.6 — the SDK names itself as kind=sdk and
+  // name=podium-ts, and omits the version member when the release is unknown.
+  it("clientHeader encodes the sdk members", () => {
+    const withVersion = new URLSearchParams(clientHeader("1.2.3"));
+    expect(withVersion.get("kind")).toBe("sdk");
+    expect(withVersion.get("name")).toBe("podium-ts");
+    expect(withVersion.get("version")).toBe("1.2.3");
+    const without = new URLSearchParams(clientHeader(""));
+    expect([...without.keys()].sort()).toEqual(["kind", "name"]);
+  });
+
+  // Spec: §7.2.2, §7.6 — a control-plane request carries X-Podium-Client
+  // with the package.json release.
+  it("sends X-Podium-Client on control-plane requests", async () => {
+    const pkg = JSON.parse(
+      await readFile(new URL("../package.json", import.meta.url), "utf8"),
+    ) as { version: string };
+    let got: string | null = null;
+    const fetcher: typeof fetch = async (_input, init) => {
+      got = new Headers(init?.headers).get("X-Podium-Client");
+      return new Response(
+        JSON.stringify({ query: "q", total_matched: 0, results: [] }),
+        { status: 200 },
+      );
+    };
+    const c = new Client({ registry: "http://reg", fetcher });
+    await c.searchArtifacts("q");
+    const members = new URLSearchParams(got ?? "");
+    expect(members.get("kind")).toBe("sdk");
+    expect(members.get("name")).toBe("podium-ts");
+    expect(members.get("version")).toBe(pkg.version);
   });
 
   // Spec: §7.6 — the client attaches its token as the Bearer

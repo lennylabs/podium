@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import pytest
@@ -788,6 +789,32 @@ def test_no_token_sends_no_auth_header(stub_server):
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
     client.search_artifacts("q")
     assert getattr(stub_server, "last_auth", "") == ""
+
+
+# Spec: §7.2.2, §7.6 — the SDK names itself as kind=sdk, name=podium-py, and
+# its release, and omits the version member when the release is unknown.
+def test_client_header_members():
+    from podium.client import _client_header
+
+    assert urllib.parse.parse_qs(_client_header("1.2.3")) == {
+        "kind": ["sdk"],
+        "name": ["podium-py"],
+        "version": ["1.2.3"],
+    }
+    assert urllib.parse.parse_qs(_client_header("")) == {"kind": ["sdk"], "name": ["podium-py"]}
+
+
+# Spec: §7.2.2, §7.6 — control-plane headers carry X-Podium-Client beside the
+# Bearer credential, and the link-fetch headers carry no client value.
+def test_api_headers_add_client_value_only_on_control_plane():
+    from podium.client import _SDK_VERSION, _client_header
+
+    client = Client(registry="http://127.0.0.1:9999", token="tok-7")
+    api = client._api_headers({"Content-Type": "application/json"})
+    assert api["X-Podium-Client"] == _client_header(_SDK_VERSION)
+    assert api["Authorization"] == "Bearer tok-7"
+    assert api["Content-Type"] == "application/json"
+    assert "X-Podium-Client" not in client._headers()
 
 
 # Spec: §6.2 / §6.3.2 — from_env reads the injected session token from

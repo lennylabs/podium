@@ -817,6 +817,41 @@ function checkTopK(topK: number): void {
   }
 }
 
+// clientHeader returns the X-Podium-Client value the SDK sends on a
+// control-plane request: kind=sdk and name=podium-ts, plus version when it is
+// non-empty, because §7.2.2 omits a member with no value.
+//
+// Spec: §7.2.2, §7.6
+export function clientHeader(version: string): string {
+  return new URLSearchParams({
+    kind: "sdk",
+    name: "podium-ts",
+    ...(version ? { version } : {}),
+  }).toString();
+}
+
+let sdkVersionPromise: Promise<string> | undefined;
+
+// sdkVersion resolves the SDK release from its package.json, once per module
+// load. node:fs/promises loads through a guarded import so the SDK stays
+// importable in edge bundles, and any failure resolves to "": the header then
+// carries no version member and the request proceeds (§7.2.2).
+function sdkVersion(): Promise<string> {
+  sdkVersionPromise ??= readSdkVersion();
+  return sdkVersionPromise;
+}
+
+async function readSdkVersion(): Promise<string> {
+  try {
+    const fs = await import("node:fs/promises");
+    const raw = await fs.readFile(new URL("../package.json", import.meta.url), "utf8");
+    const version = (JSON.parse(raw) as { version?: unknown }).version;
+    return typeof version === "string" ? version : "";
+  } catch {
+    return "";
+  }
+}
+
 // spec: §6.5 / §6.2 — the recognized PODIUM_CACHE_MODE values.
 export type CacheMode = "always-revalidate" | "offline-first" | "offline-only";
 const CACHE_MODES: readonly CacheMode[] = [
@@ -998,6 +1033,16 @@ export class Client {
     const h: Record<string, string> = { ...(extra ?? {}) };
     if (this.token) h.Authorization = `Bearer ${this.token}`;
     return h;
+  }
+
+  // apiHeaders returns the headers of a control-plane request, which names the
+  // client in X-Podium-Client. The manifest-link and large-resource fetches
+  // keep headers(), because §7.2.2 sends the value on no request that follows
+  // a presigned or /objects link.
+  //
+  // Spec: §7.2.2, §7.6
+  private async apiHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
+    return { ...this.headers(extra), "X-Podium-Client": clientHeader(await sdkVersion()) };
   }
 
   // overlayIndex reads the overlay on demand, applying the §6.4 CWD fallback
@@ -1488,7 +1533,7 @@ export class Client {
       try {
         resp = await this.fetcher(this.registry + "/v1/artifacts:batchLoad", {
           method: "POST",
-          headers: this.headers({ "Content-Type": "application/json" }),
+          headers: await this.apiHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify(body),
         });
       } catch (e) {
@@ -1549,7 +1594,7 @@ export class Client {
     }
     let resp: Response;
     try {
-      resp = await this.fetcher(url.toString(), { headers: this.headers() });
+      resp = await this.fetcher(url.toString(), { headers: await this.apiHeaders() });
     } catch (e) {
       // spec: §7.4 — an unreachable registry on the event stream surfaces the
       // structured no-cache error.
@@ -1597,7 +1642,7 @@ export class Client {
     }
     let resp: Response;
     try {
-      resp = await this.fetcher(url.toString(), { headers: this.headers() });
+      resp = await this.fetcher(url.toString(), { headers: await this.apiHeaders() });
     } catch (e) {
       // spec: §7.4 — a rejected fetch (no Response) is the always-revalidate
       // no-cache case.
