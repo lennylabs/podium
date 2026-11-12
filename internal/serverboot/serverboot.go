@@ -13,6 +13,7 @@ package serverboot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -28,7 +29,9 @@ import (
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"gopkg.in/yaml.v3"
 
+	"github.com/lennylabs/podium/internal/repourl"
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/identity"
@@ -676,7 +679,13 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 			log.Printf("ingested declared layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d)",
 				lc.ID, lc.LocalPath, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories))
 		case "git":
-			// Spec: §7.3.1. A declared repo may carry a URL credential, and a log line carries no secret value.
+			// Spec: §7.3.1 (Declared repository credentials). A declared repo
+			// may carry a URL credential, the seed joins declared keys into
+			// it, and a log line carries no secret value.
+			if declaredURLCredential(entry.Source.Git) {
+				log.Printf("declared git layer %s carries URL userinfo in source.git.repo; declare its credential in source.git.username and source.git.token",
+					lc.ID)
+			}
 			log.Printf("seeded declared git layer %s (repo=%s ref=%s); awaiting reingest/webhook to ingest",
 				lc.ID, source.RedactRepo(lc.Repo), lc.Ref)
 		}
@@ -742,8 +751,12 @@ func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg 
 				"declared git layer %s has invalid force_push_policy %q (want tolerant or strict)",
 				entry.ID, entry.Source.Git.ForcePushPolicy)
 		}
+		repo, err := declaredGitRepo(entry.ID, entry.Source.Git)
+		if err != nil {
+			return store.LayerConfig{}, layer.Visibility{}, err
+		}
 		lc.SourceType = "git"
-		lc.Repo = entry.Source.Git.Repo
+		lc.Repo = repo
 		lc.Ref = entry.Source.Git.Ref
 		lc.Root = entry.Source.Git.Root
 		if prov := entry.Source.Git.GitProvider; prov != "" {
@@ -765,6 +778,89 @@ func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg 
 		lc.LocalPath = entry.Source.Local.Path
 	}
 	return lc, vis, nil
+}
+
+// declaresCredentialKeys reports whether a declared git source sets one of
+// the §7.3.1 credential keys: a non-empty username, or a token key that is
+// present, a null value included.
+//
+// Spec: §7.3.1 (Declared repository credentials)
+func declaresCredentialKeys(g *yamlGitSource) bool {
+	return g.Username != "" || g.Token.Kind != 0
+}
+
+// declaredURLCredential reports whether a declared git source that sets
+// neither credential key carries a credential in the userinfo of an http or
+// https source.git.repo, an empty userinfo included. Such a declaration is
+// seeded as declared, and each start logs a line steering its credential to
+// the keys.
+//
+// Spec: §7.3.1 (Declared repository credentials)
+func declaredURLCredential(g *yamlGitSource) bool {
+	return !declaresCredentialKeys(g) && repourl.TakesCredential(g.Repo) && repourl.CarriesURLCredential(g.Repo)
+}
+
+// declaredGitRepo returns the repo a declared git layer is seeded with. A
+// declaration that sets neither credential key is seeded with its
+// source.git.repo byte for byte, whatever it holds, because 0.6.0
+// configurations carry the credential in its userinfo. A declaration that
+// sets a key is seeded with the credential joined into the repo, and the
+// store's write rule splits it into its own column. Each refusal names the
+// layer and the key and carries no part of the repo or the credential.
+//
+// Spec: §7.3.1 (Declared repository credentials)
+func declaredGitRepo(id string, g *yamlGitSource) (string, error) {
+	if !declaresCredentialKeys(g) {
+		return g.Repo, nil
+	}
+	if !repourl.TakesCredential(g.Repo) {
+		return "", errDeclaredCredentialRemote(id)
+	}
+	if repourl.CarriesURLCredential(g.Repo) {
+		return "", fmt.Errorf("declared git layer %s sets source.git.username or source.git.token and carries URL userinfo in source.git.repo; remove the userinfo from source.git.repo", id)
+	}
+	token, err := declaredToken(id, g)
+	if err != nil {
+		return "", err
+	}
+	joined, err := repourl.WithCredential(g.Repo, g.Username, token)
+	switch {
+	case errors.Is(err, repourl.ErrCredentialUsername):
+		return "", fmt.Errorf("declared git layer %s has an invalid source.git.username", id)
+	case errors.Is(err, repourl.ErrCredentialToken):
+		return "", fmt.Errorf("declared git layer %s has an invalid source.git.token", id)
+	case err != nil:
+		// ErrCredentialRemote cannot occur here: the two checks above
+		// admitted only an http or https repo without userinfo. It maps to
+		// the takes-no-credential refusal so a failure still aborts startup.
+		return "", errDeclaredCredentialRemote(id)
+	}
+	return joined, nil
+}
+
+// errDeclaredCredentialRemote is the startup refusal for a declaration that
+// sets a credential key on a source.git.repo the credential members do not
+// apply to.
+func errDeclaredCredentialRemote(id string) error {
+	return fmt.Errorf("declared git layer %s sets source.git.username or source.git.token on a source.git.repo that takes no credential", id)
+}
+
+// declaredToken returns the value of a declared source.git.token. It refuses
+// a token key that is not a scalar, a token that is empty or null, which is
+// what an unset ${ENV_VAR} yields, and a username declared without a token.
+//
+// Spec: §7.3.1 (Declared repository credentials)
+func declaredToken(id string, g *yamlGitSource) (string, error) {
+	tok := &g.Token
+	switch {
+	case tok.Kind == 0:
+		return "", fmt.Errorf("declared git layer %s sets source.git.username without source.git.token", id)
+	case tok.Kind != yaml.ScalarNode:
+		return "", fmt.Errorf("declared git layer %s has a source.git.token that is not a string", id)
+	case tok.Value == "" || tok.ShortTag() == "!!null":
+		return "", fmt.Errorf("declared git layer %s has an empty source.git.token", id)
+	}
+	return tok.Value, nil
 }
 
 // openSCIMStore returns the §6.3.1 SCIM directory store. An empty path
@@ -1098,6 +1194,16 @@ func run(ctx context.Context, stop func()) error {
 	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner, useVectorOutbox, collocatedVec, cfg.enforceSandboxProfile, cfg.hostSandboxes)
 	if err != nil {
 		return err
+	}
+	// §13.4: rewrite every stored layer row into the form its next write would
+	// take, before anything is served. It runs after the declared-layer seed,
+	// so a start that seed aborts rewrites no row and the seed's own writes are
+	// already in that form. A start whose listener never bound does not run it,
+	// on the precedent of the content-hash rewrite above.
+	if bindErr == nil {
+		if err := migrateLayerRepoForm(ctx, st); err != nil {
+			return err
+		}
 	}
 	bootLayers := append(declared, pathLayers...)
 	// §6.3.1: a multi-tenant registry binds to a no-data tenant; every request

@@ -305,10 +305,13 @@ A layer record identifies its source, records when it was last ingested, carries
 an order value that sets its precedence, and declares who can see it. Spec §7.3.1
 fixes the layer object's member names, and §7.2.1 makes them lower snake_case, so
 the response example in `docs/reference/http-api.md` and the JSON tags on
-`store.LayerConfig` (`pkg/store/store.go`) agree. The struct is the one
-enumeration of the field list, and the design reads it there rather than from a
-copy in this brief. The webhook secret and the tenant identifier are both absent
-from the object. Three of the record's properties drive design work.
+`server.LayerObject` (`pkg/registry/server/layers.go`) agree. Those tags are the
+tags of the embedded `store.LayerConfig` (`pkg/store/store.go`) and
+`repo_credential`, which no store field holds because the registry reads it from
+the registered value. `server.LayerObject` is the one enumeration of the field
+list, and the design reads it there rather than from a copy in this brief. The
+webhook secret and the tenant identifier are both absent from the object. Three of
+the record's properties drive design work.
 
 - **Source.** The built-in source types are a git repository and a local
   filesystem path, listed under "Source types" in spec §4.6, and each carries a
@@ -347,7 +350,10 @@ any state the CLI can reach is a state the panel must render.
   (`pkg/registry/server/layers.go`). Registering a local-path layer returns
   neither, so the reveal is a conditional part of the flow. The one-time reveal is
   a specific design problem: it must be copyable, it must be clearly
-  unrecoverable, and it must not be mistaken for persistent content.
+  unrecoverable, and it must not be mistaken for persistent content. On a git
+  source the form takes an optional username and a write-only token apart from the
+  repository URL. The token field is masked and never prefilled, and no response
+  returns either value.
 - **Update** a layer. The update is a partial patch, and the fields it accepts are
   listed under "Update a layer" in `docs/reference/http-api.md`, against the
   handler in `pkg/registry/server/layers.go`. Requesting a webhook-secret rotation
@@ -359,8 +365,14 @@ any state the CLI can reach is a state the panel must render.
   `details.constraint: "immutable_visibility"`, so the form must not offer
   controls for values it cannot change. On an admin-defined layer the endpoint
   withdraws a visibility member as well as grants one, so the form offers a
-  control for every visibility axis and a member list whose entries are
-  removable.
+  control for every visibility axis and a member list whose entries are removable.
+  On a git layer whose record carries `repo_credential` the update takes a new
+  username and token, and, where the member is true, removes the stored
+  credential. The registry carries the member only on a layer whose update takes a
+  credential, so the form offers no credential field on any other layer and keeps
+  no rule of its own about which repository takes one. The member reports whether
+  a credential is stored and never its value. The panel marks a layer that holds
+  one, and a token entered without a username keeps the stored username.
 - **Reingest** a layer. The registry runs the whole ingest pipeline inside the
   request and answers with a summary of what the snapshot accepted, what it
   rejected, and what it conflicted on (`POST /v1/layers/reingest` in

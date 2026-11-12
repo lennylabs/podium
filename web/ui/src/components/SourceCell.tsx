@@ -43,6 +43,14 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
             repository under bob as one identical string. The repository line
             takes the opposite elision and keeps its start (§13.10). */}
         <Detail value={layer.repo ?? ''} clip="trailing" />
+        {/* §7.3.1: the layer object reports whether a credential is stored
+            for the repository and never the credential itself, so the row
+            states the fact and nothing of the value. */}
+        {layer.repo_credential === true && (
+          <div className="quiet source-detail" data-testid="source-credential">
+            <span className="source-detail-whole">credential stored</span>
+          </div>
+        )}
         {present(layer.root) && <Detail value={rootLine(layer.root)} />}
       </div>
     );

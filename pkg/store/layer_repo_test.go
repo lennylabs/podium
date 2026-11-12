@@ -201,6 +201,88 @@ func TestLayerRepoColumns_RoundTrip(t *testing.T) {
 	}
 }
 
+// Spec: §13.4 — the start-time rewrite gives a stored row the form its next
+// write would take.
+// Spec: §7.3.1 (Repository credentials) — the target reads as the stored row
+// reads, and a row already in the target form is not rewritten.
+//
+// The listed rows pin the outcome for each class, and the properties over the
+// corpus pin that the rewrite never changes what a read returns and that the
+// target of a target is unchanged, so a second start writes nothing.
+func TestLayerRepoFormTarget(t *testing.T) {
+	t.Parallel()
+	col := func(s string) sql.NullString { return sql.NullString{String: s, Valid: true} }
+	type pair struct {
+		Repo     string
+		Userinfo sql.NullString
+	}
+	cases := []struct {
+		name    string
+		stored  pair
+		want    pair
+		changed bool
+	}{
+		{"whole credentialed https is split",
+			pair{Repo: "https://alice-user:s3cr3tpw@git.acme.com/x.git"},
+			pair{"https://git.acme.com/x.git", col("alice-user:s3cr3tpw")}, true},
+		{"whole ssh login name is split",
+			pair{Repo: "ssh://git@git.acme.com/x.git"},
+			pair{"ssh://git.acme.com/x.git", col("git")}, true},
+		{"two-column pair the read honors is unchanged",
+			pair{"https://git.acme.com/x.git", col("ghp_tok3n")},
+			pair{"https://git.acme.com/x.git", col("ghp_tok3n")}, false},
+		{"whole scp-like is unchanged", pair{Repo: "git@github.com:acme/x.git"}, pair{Repo: "git@github.com:acme/x.git"}, false},
+		{"whole path is unchanged", pair{Repo: "/srv/git/acme.git"}, pair{Repo: "/srv/git/acme.git"}, false},
+		{"whole userinfo-free URL is unchanged", pair{Repo: "https://git.acme.com/x.git"}, pair{Repo: "https://git.acme.com/x.git"}, false},
+		{"whole fail-closed value is unchanged", pair{Repo: "https://ghp_tok/3n@host/x.git"}, pair{Repo: "https://ghp_tok/3n@host/x.git"}, false},
+		{"whole network-path value is unchanged", pair{Repo: "//tok@host/x://y"}, pair{Repo: "//tok@host/x://y"}, false},
+		{"ignored column beside scp-like is set to NULL",
+			pair{"git@github.com:acme/x.git", col("ghp_tok3n")},
+			pair{Repo: "git@github.com:acme/x.git"}, true},
+		{"ignored fail-closed column is set to NULL",
+			pair{"https://git.acme.com/x.git", col("ghp_tok/3n")},
+			pair{Repo: "https://git.acme.com/x.git"}, true},
+	}
+	type read struct {
+		Repo       string
+		Registered RegisteredRepo
+	}
+	readOf := func(p pair) read {
+		var r read
+		r.Repo, r.Registered = SplitLayerRepo(p.Repo, p.Userinfo)
+		return r
+	}
+	// checkProperties asserts that the target reads as the stored pair reads
+	// and is its own target.
+	checkProperties := func(stored pair) {
+		t.Helper()
+		var target, again pair
+		var changedAgain bool
+		target.Repo, target.Userinfo, _ = layerRepoFormTarget(stored.Repo, stored.Userinfo)
+		again.Repo, again.Userinfo, changedAgain = layerRepoFormTarget(target.Repo, target.Userinfo)
+		if readOf(target) != readOf(stored) || again != target || changedAgain {
+			t.Errorf("stored %+v: target %+v reads %+v, stored reads %+v; target of target %+v, changed %t",
+				stored, target, readOf(target), readOf(stored), again, changedAgain)
+		}
+	}
+	for _, tc := range cases {
+		var got pair
+		var changed bool
+		got.Repo, got.Userinfo, changed = layerRepoFormTarget(tc.stored.Repo, tc.stored.Userinfo)
+		if got != tc.want || changed != tc.changed {
+			t.Errorf("%s: layerRepoFormTarget(%+v) = %+v, changed %t; want %+v, changed %t",
+				tc.name, tc.stored, got, changed, tc.want, tc.changed)
+		}
+		checkProperties(tc.stored)
+	}
+	columns := []sql.NullString{{}, col(""), col("ghp_tok3n"), col("ghp_tok/3n"), col("tok@evil.com/y")}
+	for _, x := range layerRepoCorpus() {
+		for _, c := range columns {
+			checkProperties(pair{x, c})
+		}
+	}
+}
+
 // layerRepoColumns is the raw content of one layer row's repo columns.
 type layerRepoColumns struct {
 	Repo     string
@@ -268,14 +350,19 @@ type layerRepoDB interface {
 
 // layerRepoBackend is a SQL store under test together with raw access to its
 // layer_configs table. The queries carry the backend's placeholders: sel takes
-// the tenant and the layer ID, and toEarlier takes the repo, the tenant, and
-// the layer ID.
+// the tenant and the layer ID, toEarlier takes the repo, the tenant, and the
+// layer ID, and setUserinfo takes the repo_userinfo value, the tenant, and the
+// layer ID. migrate is the store's MigrateLayerRepoForm, and migrateRow is its
+// conditional per-row statement.
 type layerRepoBackend struct {
-	st        Store
-	db        layerRepoDB
-	tenant    string
-	sel       string
-	toEarlier string
+	st          Store
+	db          layerRepoDB
+	tenant      string
+	sel         string
+	toEarlier   string
+	setUserinfo string
+	migrate     func(ctx context.Context) (int, error)
+	migrateRow  layerRepoRowWriter
 }
 
 func (b layerRepoBackend) raw(t *testing.T, id string) layerRepoColumns {
@@ -307,9 +394,10 @@ func mustDo(t *testing.T, step string, err error) {
 }
 
 const (
-	pgSelectLayerRepo     = `SELECT repo, repo_userinfo FROM layer_configs WHERE tenant_id = $1 AND id = $2`
-	pgLayerRepoToEarlier  = `UPDATE layer_configs SET repo = $1, repo_userinfo = NULL WHERE tenant_id = $2 AND id = $3`
-	layerRepoCredentialed = "https://alice-user:s3cr3tpw@git.acme.com/acme/a b.git"
+	pgSelectLayerRepo      = `SELECT repo, repo_userinfo FROM layer_configs WHERE tenant_id = $1 AND id = $2`
+	pgLayerRepoToEarlier   = `UPDATE layer_configs SET repo = $1, repo_userinfo = NULL WHERE tenant_id = $2 AND id = $3`
+	pgLayerRepoSetUserinfo = `UPDATE layer_configs SET repo_userinfo = $1 WHERE tenant_id = $2 AND id = $3`
+	layerRepoCredentialed  = "https://alice-user:s3cr3tpw@git.acme.com/acme/a b.git"
 )
 
 // checkLayerRepoColumnsHoldBareAndUserinfo puts one layer per value, then gets
@@ -396,7 +484,14 @@ func checkLayerRepoEarlierFormRow(t *testing.T, b layerRepoBackend) {
 func postgresLayerRepoBackend(t *testing.T, tenant string) layerRepoBackend {
 	t.Helper()
 	p, conn := openPostgresOrg(t, tenant)
-	return layerRepoBackend{st: p, db: conn, tenant: tenant, sel: pgSelectLayerRepo, toEarlier: pgLayerRepoToEarlier}
+	return layerRepoBackend{
+		st: p, db: conn, tenant: tenant,
+		sel: pgSelectLayerRepo, toEarlier: pgLayerRepoToEarlier, setUserinfo: pgLayerRepoSetUserinfo,
+		migrate: p.MigrateLayerRepoForm,
+		migrateRow: func(ctx context.Context, row layerRepoRow, repo string, userinfo sql.NullString) (bool, error) {
+			return rewriteLayerRepoRowPostgres(ctx, conn, row, repo, userinfo)
+		},
+	}
 }
 
 // Spec: §7.3.1 (Repository credentials) — on Postgres, a put and a
@@ -482,5 +577,202 @@ func TestPostgres_LayerRepoUserinfoColumnReadAndReplaced(t *testing.T) {
 	want := [2]layerRepoColumns{{Repo: bare, Userinfo: sql.NullString{String: "ghp_tok3n", Valid: true}}, {Repo: bare}}
 	if got != want {
 		t.Errorf("columns after the put back and after the userinfo-free put = %+v, want %+v", got, want)
+	}
+}
+
+// layerRepoTwoColumn is the two-column form of a split-class value.
+func layerRepoTwoColumn(bare, userinfo string) layerRepoColumns {
+	return layerRepoColumns{Repo: bare, Userinfo: sql.NullString{String: userinfo, Valid: true}}
+}
+
+// layerRepoListReads returns what the list and the deleted list report for the
+// backend's tenant, with the get of each listed layer.
+func layerRepoListReads(t *testing.T, b layerRepoBackend) []layerRepoRead {
+	t.Helper()
+	ctx := context.Background()
+	list, err := b.st.ListLayerConfigs(ctx, b.tenant)
+	mustDo(t, "ListLayerConfigs", err)
+	deleted, err := b.st.ListDeletedLayerConfigs(ctx, b.tenant)
+	mustDo(t, "ListDeletedLayerConfigs", err)
+	cfgs := append(append([]LayerConfig{}, list...), deleted...)
+	for _, l := range list {
+		cfg, err := b.st.GetLayerConfig(ctx, b.tenant, l.ID)
+		mustDo(t, "GetLayerConfig "+l.ID, err)
+		cfgs = append(cfgs, cfg)
+	}
+	return layerRepoReads(cfgs...)
+}
+
+// checkLayerRepoFormMigration seeds rows in every class the start-time rewrite
+// distinguishes, the earlier whole form and a soft-deleted row included, runs
+// the store's MigrateLayerRepoForm twice, and returns the first call's count.
+// After the first call the whole credentialed rows, the local one included,
+// hold the two-column form, the ignored column beside the scp-like repo is
+// NULL, every other row is unchanged, and the reads return what they returned
+// before. The second call returns 0 and changes no column.
+func checkLayerRepoFormMigration(t *testing.T, b layerRepoBackend) int {
+	ctx := context.Background()
+	rows := []struct {
+		id, sourceType, repo string
+		earlier              bool
+		want                 layerRepoColumns
+	}{
+		{"live", "git", "https://alice-user:s3cr3tpw@git.acme.com/acme/live.git", true,
+			layerRepoTwoColumn("https://git.acme.com/acme/live.git", "alice-user:s3cr3tpw")},
+		{"retired", "git", "https://alice-user:s3cr3tpw@git.acme.com/acme/retired.git", true,
+			layerRepoTwoColumn("https://git.acme.com/acme/retired.git", "alice-user:s3cr3tpw")},
+		{"ssh", "git", "ssh://git@git.acme.com/acme/ssh.git", true,
+			layerRepoTwoColumn("ssh://git.acme.com/acme/ssh.git", "git")},
+		{"scp-like", "git", "git@github.com:acme/scp.git", false, layerRepoColumns{Repo: "git@github.com:acme/scp.git"}},
+		{"local", "local", "https://alice-user:s3cr3tpw@git.acme.com/acme/local.git", true,
+			layerRepoTwoColumn("https://git.acme.com/acme/local.git", "alice-user:s3cr3tpw")},
+		{"two-column", "git", "https://ghp_tok3n@git.acme.com/acme/two.git", false,
+			layerRepoTwoColumn("https://git.acme.com/acme/two.git", "ghp_tok3n")},
+		{"ignored", "git", "git@github.com:acme/x.git", false, layerRepoColumns{Repo: "git@github.com:acme/x.git"}},
+	}
+	for i, r := range rows {
+		mustDo(t, "PutLayerConfig "+r.id, b.st.PutLayerConfig(ctx, LayerConfig{TenantID: b.tenant, ID: r.id, SourceType: r.sourceType, Repo: r.repo, Order: i}))
+		if r.earlier {
+			_, err := b.db.ExecContext(ctx, b.toEarlier, r.repo, b.tenant, r.id)
+			mustDo(t, "set the earlier form of "+r.id, err)
+		}
+	}
+	_, err := b.db.ExecContext(ctx, b.setUserinfo, "ghp_tok3n", b.tenant, "ignored")
+	mustDo(t, "set the ignored column", err)
+	mustDo(t, "DeleteLayerConfig retired", b.st.DeleteLayerConfig(ctx, b.tenant, "retired"))
+
+	readsBefore := layerRepoListReads(t, b)
+	n, err := b.migrate(ctx)
+	mustDo(t, "MigrateLayerRepoForm", err)
+	readsAfter := layerRepoListReads(t, b)
+	var got, want []layerRepoColumns
+	for _, r := range rows {
+		got = append(got, b.raw(t, r.id))
+		want = append(want, r.want)
+	}
+	if !slices.Equal(got, want) || !slices.Equal(readsAfter, readsBefore) {
+		t.Errorf("after the rewrite: columns %+v, want %+v; reads %+v, want %+v", got, want, readsAfter, readsBefore)
+	}
+
+	mustDo(t, "RestoreLayerConfig retired", b.st.RestoreLayerConfig(ctx, b.tenant, "retired"))
+	restored, err := b.st.GetLayerConfig(ctx, b.tenant, "retired")
+	mustDo(t, "GetLayerConfig retired", err)
+	again, err := b.migrate(ctx)
+	mustDo(t, "MigrateLayerRepoForm (second call)", err)
+	var gotAgain []layerRepoColumns
+	for _, r := range rows {
+		gotAgain = append(gotAgain, b.raw(t, r.id))
+	}
+	if restored.CloneRepo() != rows[1].repo || again != 0 || !slices.Equal(gotAgain, want) {
+		t.Errorf("restored clone %q, want %q; second call rewrote %d, want 0; columns %+v, want %+v",
+			restored.CloneRepo(), rows[1].repo, again, gotAgain, want)
+	}
+	return n
+}
+
+// checkLayerRepoFormMigrationLeavesARowAnotherWriterChanged scans two rows in
+// an earlier form, lets a writer change each after the scan, and runs the
+// store's per-row statement with the stale scan. The first writer moves the
+// layer to another remote, which only the repo conjunct detects. The second
+// gives a row whose column the read ignores a credential through the members,
+// which only the repo_userinfo conjunct detects: without it, the statement
+// sets the new credential to NULL.
+func checkLayerRepoFormMigrationLeavesARowAnotherWriterChanged(t *testing.T, b layerRepoBackend) {
+	ctx := context.Background()
+	cases := []struct {
+		id, repo  string
+		userinfo  string
+		writerTo  string
+		wantAfter layerRepoColumns
+	}{
+		{"moved", "https://alice-user:s3cr3tpw@git.acme.com/acme/moved.git", "",
+			"https://git.acme.com/acme/other.git", layerRepoColumns{Repo: "https://git.acme.com/acme/other.git"}},
+		{"rotated", "https://git.acme.com/x.git", "ghp_tok/3n",
+			"https://alice-user:n3wpw@git.acme.com/x.git", layerRepoTwoColumn("https://git.acme.com/x.git", "alice-user:n3wpw")},
+	}
+	type outcome struct {
+		Changed  bool
+		Affected bool
+		Err      string
+		Row      layerRepoColumns
+	}
+	for _, tc := range cases {
+		mustDo(t, "PutLayerConfig "+tc.id, b.st.PutLayerConfig(ctx, LayerConfig{TenantID: b.tenant, ID: tc.id, SourceType: "git", Repo: tc.repo}))
+		var err error
+		if tc.userinfo == "" {
+			_, err = b.db.ExecContext(ctx, b.toEarlier, tc.repo, b.tenant, tc.id)
+		} else {
+			_, err = b.db.ExecContext(ctx, b.setUserinfo, tc.userinfo, b.tenant, tc.id)
+		}
+		mustDo(t, "set the earlier form of "+tc.id, err)
+		scanned := b.raw(t, tc.id)
+		row := layerRepoRow{tenantID: b.tenant, id: tc.id, repo: scanned.Repo, userinfo: scanned.Userinfo}
+		repo, userinfo, changed := layerRepoFormTarget(row.repo, row.userinfo)
+
+		mustDo(t, "writer's PutLayerConfig "+tc.id, b.st.PutLayerConfig(ctx, LayerConfig{TenantID: b.tenant, ID: tc.id, SourceType: "git", Repo: tc.writerTo}))
+		affected, err := b.migrateRow(ctx, row, repo, userinfo)
+		got := outcome{Changed: changed, Affected: affected, Row: b.raw(t, tc.id)}
+		if err != nil {
+			got.Err = err.Error()
+		}
+		if want := (outcome{Changed: true, Row: tc.wantAfter}); got != want {
+			t.Errorf("%s: stale-scan rewrite = %+v, want %+v", tc.id, got, want)
+		}
+	}
+}
+
+// Spec: §13.4 — at start every Postgres layer row whose repo columns differ
+// from the form its next write would take is rewritten into that form,
+// soft-deleted rows included, and a second pass writes nothing.
+// Spec: §7.3.1 (Repository credentials)
+//
+// The pass scans every tenant of the test database, so this test does not run
+// in parallel: TestPostgres_LayerRepoEarlierFormRow holds an earlier-form row
+// between its steps. The count is not asserted for the same reason.
+func TestPostgres_LayerRepoFormMigration(t *testing.T) {
+	checkLayerRepoFormMigration(t, postgresLayerRepoBackend(t, "layer-repo-migrate"))
+}
+
+// Spec: §13.4 — the Postgres per-row statement leaves a row another writer
+// changed after the scan as that writer wrote it.
+// Spec: §7.3.1 (Repository credentials)
+//
+// The test does not close its store early, because its cleanup drops the
+// test's org schema through that store.
+func TestPostgres_LayerRepoFormMigration_LeavesARowAnotherWriterChanged(t *testing.T) {
+	checkLayerRepoFormMigrationLeavesARowAnotherWriterChanged(t, postgresLayerRepoBackend(t, "layer-repo-stale"))
+}
+
+// Spec: §13.4 — the Postgres pass reaches every tenant, and an org schema that
+// lacks repo_userinfo, as one only 0.5.x used does, gains the column before
+// the scan reads it. The pass runs on a freshly opened store, whose
+// provisioning cache is empty, as a starting process's store is.
+// Spec: §7.3.1 (Repository credentials)
+func TestPostgres_LayerRepoFormMigration_EveryTenant(t *testing.T) {
+	ctx := context.Background()
+	const repo = "https://alice-user:s3cr3tpw@git.acme.com/acme/every.git"
+	tenants := []string{"layer-repo-every-a", "layer-repo-every-b"}
+	conns := make([]*sql.Conn, len(tenants))
+	for i, tenant := range tenants {
+		p, conn := openPostgresOrg(t, tenant)
+		conns[i] = conn
+		mustDo(t, "PutLayerConfig "+tenant, p.PutLayerConfig(ctx, LayerConfig{TenantID: tenant, ID: "team", SourceType: "git", Repo: repo}))
+		_, err := conn.ExecContext(ctx, pgLayerRepoToEarlier, repo, tenant, "team")
+		mustDo(t, "set the earlier form under "+tenant, err)
+	}
+	_, err := conns[1].ExecContext(ctx, `ALTER TABLE layer_configs DROP COLUMN repo_userinfo`)
+	mustDo(t, "drop repo_userinfo", err)
+
+	fresh, err := OpenPostgres(os.Getenv("PODIUM_POSTGRES_DSN"))
+	mustDo(t, "OpenPostgres", err)
+	t.Cleanup(func() { _ = fresh.Close() })
+	_, err = fresh.MigrateLayerRepoForm(ctx)
+	mustDo(t, "MigrateLayerRepoForm", err)
+
+	want := layerRepoTwoColumn("https://git.acme.com/acme/every.git", "alice-user:s3cr3tpw")
+	for i, tenant := range tenants {
+		if got := rawLayerRepo(t, conns[i], pgSelectLayerRepo, tenant, "team"); got != want {
+			t.Errorf("row under %s after the pass = %+v, want %+v", tenant, got, want)
+		}
 	}
 }

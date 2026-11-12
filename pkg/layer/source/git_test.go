@@ -17,6 +17,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage/memory"
 
+	"github.com/lennylabs/podium/internal/repourl"
 	"github.com/lennylabs/podium/pkg/layer/source"
 )
 
@@ -268,6 +269,19 @@ func closedPortAddr(t *testing.T) string {
 	return addr
 }
 
+// mustCredentialRepo returns bare with the credential that username and token
+// build as its userinfo, the form the registry stores for a credential taken
+// from the repo_username and repo_token members. It fails the test when
+// repourl.WithCredential refuses the input.
+func mustCredentialRepo(t *testing.T, bare, username, token string) string {
+	t.Helper()
+	repo, err := repourl.WithCredential(bare, username, token)
+	if err != nil {
+		t.Fatalf("WithCredential(%q): %v", bare, err)
+	}
+	return repo
+}
+
 // Spec: §7.3.1 (Repository credentials) — the built-in git source's clone
 // failure message carries no URL userinfo. go-git and net/http render the
 // request URL with re-escaped userinfo, so each case drives a clone against a
@@ -315,6 +329,22 @@ func TestGit_CloneErrorCarriesNoCredential(t *testing.T) {
 			name: "username-only token against a closed port",
 			repo: "http://ghp_tok3n@" + closedPortAddr(t) + "/acme/private.git",
 			want: "127.0.0.1",
+		},
+		// On a refused connection net/http renders the URL with the raw
+		// username followed by ":***@", which the username-only row above
+		// never reaches. These rows pin that a member-built credential leaves
+		// neither member in the message.
+		{
+			name:   "member-built email username against a closed port",
+			repo:   mustCredentialRepo(t, "http://"+closedPortAddr(t)+"/acme/private.git", "alice@acme.com", "s3cr3tpw-a"),
+			want:   "127.0.0.1",
+			absent: []string{"alice@acme.com", "alice%40acme.com", "s3cr3tpw-a", "alice@acme.com:***"},
+		},
+		{
+			name:   "member-built token username against a closed port",
+			repo:   mustCredentialRepo(t, "http://"+closedPortAddr(t)+"/acme/private.git", "x-access-token", "s3cr3tpw-b"),
+			want:   "127.0.0.1",
+			absent: []string{"x-access-token", "s3cr3tpw-b", "x-access-token:***"},
 		},
 		{
 			name:       "unparseable repo",
