@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -305,15 +306,7 @@ func TestOTLPDest_PartialSuccessCountsRejected(t *testing.T) {
 			_, _ = w.Write(body)
 		}
 	}
-	partial := func(n int64) []byte {
-		b, err := proto.Marshal(&collogspb.ExportLogsServiceResponse{
-			PartialSuccess: &collogspb.ExportLogsPartialSuccess{RejectedLogRecords: n, ErrorMessage: "schema"},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return b
-	}
+	partial := func(n int64) []byte { return partialSuccess(t, n, "schema") }
 	cases := []struct {
 		name string
 		body []byte
@@ -347,6 +340,113 @@ func TestOTLPDest_PartialSuccessCountsRejected(t *testing.T) {
 				t.Fatalf("queue depth %d after %d requests, want 0 after 1", queued["otlp"], rcv.count())
 			}
 		})
+	}
+}
+
+// partialSuccess marshals a partial-success response that reports n
+// rejected records with message as its error message.
+func partialSuccess(t *testing.T, n int64, message string) []byte {
+	t.Helper()
+	b, err := proto.Marshal(&collogspb.ExportLogsServiceResponse{
+		PartialSuccess: &collogspb.ExportLogsPartialSuccess{RejectedLogRecords: n, ErrorMessage: message},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// A 2xx response whose body cannot be read in full may hide a
+// partial-success count, so the batch is retried rather than counted as
+// delivered. The first answer reports two rejections in a body that is
+// either longer than the 64 KiB read bound or cut short by the connection
+// closing; the retry's complete answer reports one, and only that one is
+// counted.
+//
+// Spec: §8.3
+func TestOTLPDest_IncompleteSuccessBodyRetries(t *testing.T) {
+	cases := []struct {
+		name  string
+		msg   string
+		first func(w http.ResponseWriter, body []byte)
+	}{
+		{
+			name: "body over the read bound",
+			msg:  strings.Repeat("m", maxResponseBody+1),
+			first: func(w http.ResponseWriter, body []byte) {
+				_, _ = w.Write(body)
+			},
+		},
+		{
+			name: "body cut short",
+			msg:  "schema",
+			first: func(w http.ResponseWriter, body []byte) {
+				w.Header().Set("Content-Length", strconv.Itoa(len(body)+100))
+				_, _ = w.Write(body)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubTicker(t)
+			gate := stubSleepGate(t, false)
+			first := partialSuccess(t, 2, tc.msg)
+			retry := partialSuccess(t, 1, "schema")
+			rcv := newReceiver(t, func(n int, w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", otlpContentType)
+				if n == 1 {
+					tc.first(w, first)
+					return
+				}
+				_, _ = w.Write(retry)
+			})
+			obs := &fakeObserver{}
+			s := openStream(t, otlpURL(rcv.srv.URL, ""), OpenOptions{Observer: obs})
+			appendN(t, s, 3)
+			if err := s.Close(context.Background()); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			queued, dropped := totals(obs)
+			if len(dropped) != 1 || dropped["otlp,rejected"] != 1 {
+				t.Fatalf("dropped %v, want one otlp rejected", dropped)
+			}
+			if queued["otlp"] != 0 || rcv.count() != 2 || len(gate.recorded()) != 1 {
+				t.Fatalf("queue depth %d after %d requests and %d backoffs, want 0 after 2 and 1",
+					queued["otlp"], rcv.count(), len(gate.recorded()))
+			}
+			if hs := rcv.hashes(); len(hs) != 3 {
+				t.Fatalf("receiver holds %d distinct records, want 3", len(hs))
+			}
+		})
+	}
+}
+
+// A complete 2xx body that is not an ExportLogsServiceResponse delivers
+// the batch, and the destination logs it once rather than once per batch.
+//
+// Spec: §8.3
+func TestOTLPDest_UndecodableBodyLogsOnce(t *testing.T) {
+	logs := captureLog(t)
+	fire := stubTicker(t)
+	rcv := newReceiver(t, func(_ int, w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("not protobuf \xff\xff\xff"))
+	})
+	obs := &fakeObserver{}
+	s := openStream(t, otlpURL(rcv.srv.URL, ""), OpenOptions{Observer: obs})
+	for i := 1; i <= 2; i++ {
+		appendN(t, s, 1)
+		fire()
+		rcv.wait(t, i)
+		waitFor(t, func() bool { q, _ := totals(obs); return q["otlp"] == 0 })
+	}
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, dropped := totals(obs); len(dropped) != 0 {
+		t.Fatalf("dropped %v, want none", dropped)
+	}
+	if n := strings.Count(logs.String(), "is not an ExportLogsServiceResponse"); n != 1 {
+		t.Fatalf("logged the undecodable body %d times, want once:\n%s", n, logs.String())
 	}
 }
 

@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -397,6 +398,27 @@ func TestHTTPDest_RetryClasses(t *testing.T) {
 	}
 	if control <= 0 {
 		t.Errorf("control draw = %v, want > 0", control)
+	}
+}
+
+// The status alone decides an HTTP destination's outcome, so a 2xx whose
+// body is longer than the read bound delivers the batch in one request.
+//
+// Spec: §8.3
+func TestHTTPDest_OversizedSuccessBodyDelivers(t *testing.T) {
+	t.Parallel()
+	rcv := newReceiver(t, func(_ int, w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("x"), 2*maxResponseBody))
+	})
+	obs := &fakeObserver{}
+	s := openStream(t, rcv.srv.URL+"/p", OpenOptions{Observer: obs})
+	appendN(t, s, 2)
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	queued, dropped := totals(obs)
+	if queued["http"] != 0 || len(dropped) != 0 || rcv.count() != 1 {
+		t.Fatalf("queued %v dropped %v after %d requests, want none after 1", queued, dropped, rcv.count())
 	}
 }
 

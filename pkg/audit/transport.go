@@ -26,6 +26,10 @@ const (
 // ExportLogsServiceResponse holds in far fewer bytes.
 const maxResponseBody = 64 << 10
 
+// errResponseTooLarge is a sendResult's bodyErr when the response body is
+// longer than maxResponseBody.
+var errResponseTooLarge = fmt.Errorf("the response body exceeds %d bytes", maxResponseBody)
+
 // reservedHeaders are the header names a headers file may not set, because
 // the request itself defines them (§13.12).
 var reservedHeaders = []string{"Host", "Content-Length", "Content-Type"}
@@ -157,15 +161,22 @@ func loadCAPool(path string) (*x509.CertPool, error) {
 
 // do sends req through the stream's client and returns the status, the
 // Retry-After value, and at most maxResponseBody bytes of the body, which
-// it closes.
+// it closes. A body read that fails, or a body longer than
+// maxResponseBody, sets bodyErr rather than failing the send: the status
+// alone decides an HTTP destination's outcome, and the OTLP destination
+// decides what an incomplete 2xx body means for its partial-success count.
 func (t *transport) do(req *http.Request) (sendResult, error) {
 	resp, err := t.client.Do(req)
 	if err != nil {
 		return sendResult{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	// A failed read only costs connection reuse and the bytes after the
-	// failure; the status already decides the outcome.
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
-	return sendResult{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After"), body: body}, nil
+	res := sendResult{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After")}
+	// One byte past the bound tells a body of exactly maxResponseBody bytes
+	// from a longer one.
+	res.body, res.bodyErr = io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
+	if res.bodyErr == nil && len(res.body) > maxResponseBody {
+		res.body, res.bodyErr = res.body[:maxResponseBody], errResponseTooLarge
+	}
+	return res, nil
 }

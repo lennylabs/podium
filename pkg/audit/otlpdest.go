@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
@@ -51,6 +54,8 @@ const (
 //
 // Spec: §8.3
 type otlpDest struct {
+	// name is the destination's log name, without the URL's query.
+	name     string
 	url      string
 	tr       *transport
 	resource *resourcepb.Resource
@@ -58,6 +63,10 @@ type otlpDest struct {
 	// reason rejected, so a partial-success count goes through the one
 	// drop funnel.
 	rejected func(n int)
+	// undecodable is set once the destination has logged a 2xx body that
+	// does not decode, so a receiver that never answers in the OTLP format
+	// writes one line rather than one per batch.
+	undecodable atomic.Bool
 }
 
 // newOTLPDest builds the OTLP destination for u, an otlp+http or
@@ -65,8 +74,9 @@ type otlpDest struct {
 // carries s's service name and instance identifier.
 func newOTLPDest(s *Stream, u *url.URL, name string) *otlpDest {
 	return &otlpDest{
-		url: otlpTarget(u),
-		tr:  s.transport,
+		name: name,
+		url:  otlpTarget(u),
+		tr:   s.transport,
 		resource: &resourcepb.Resource{Attributes: []*commonpb.KeyValue{
 			stringAttr("service.name", s.opts.Service),
 			stringAttr("service.instance.id", s.instanceID),
@@ -92,6 +102,16 @@ func otlpTarget(u *url.URL) string {
 // send POSTs batch on ctx, which carries the forwarder's request deadline,
 // and counts the records a 2xx partial-success response reports as
 // rejected.
+//
+// A 2xx response whose body could not be read in full is returned as a
+// network error, so the forwarder retries the batch. Its partial_success
+// field is length-delimited, so a body cut short by the request deadline,
+// a connection reset, or the maxResponseBody bound does not decode, and
+// counting the batch as delivered would leave the records the receiver
+// rejected counted under no reason. The receiver deduplicates the resent
+// records on hash (§8.1).
+//
+// Spec: §8.3
 func (d *otlpDest) send(ctx context.Context, batch []record) (sendResult, error) {
 	body, err := proto.Marshal(d.request(batch))
 	// Every string field holds valid UTF-8 (validUTF8 and encoding/json
@@ -108,22 +128,30 @@ func (d *otlpDest) send(ctx context.Context, batch []record) (sendResult, error)
 	}
 	setHeaders(req, d.tr.headers, otlpContentType)
 	res, err := d.tr.do(req)
-	if err == nil && res.status >= 200 && res.status < 300 {
-		d.countRejected(res.body, len(batch))
+	if err != nil || res.status < 200 || res.status >= 300 {
+		return res, err
 	}
-	return res, err
+	if res.bodyErr != nil {
+		return sendResult{}, fmt.Errorf("read the 2xx response: %w", res.bodyErr)
+	}
+	d.countRejected(res.body, len(batch))
+	return res, nil
 }
 
 // countRejected counts the response's partial_success.rejected_log_records
 // as drops with reason rejected, at most the batch's size, so a receiver
 // that over-reports cannot count a record that was not in the request. A
-// 2xx body that does not decode delivered the batch and reports no
-// rejection the destination can read, so nothing is counted.
+// complete 2xx body that does not decode came from a receiver that does
+// not answer in the OTLP format, and resending would get the same answer,
+// so the batch counts as delivered and the first such body is logged.
 //
 // Spec: §8.3
 func (d *otlpDest) countRejected(body []byte, sent int) {
 	var resp collogspb.ExportLogsServiceResponse
 	if err := proto.Unmarshal(body, &resp); err != nil {
+		if !d.undecodable.Swap(true) {
+			log.Printf("audit: %s answered 2xx with a body that is not an ExportLogsServiceResponse: %v; counting its batches as delivered", d.name, err)
+		}
 		return
 	}
 	n := resp.GetPartialSuccess().GetRejectedLogRecords()
