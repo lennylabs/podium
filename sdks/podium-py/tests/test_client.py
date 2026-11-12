@@ -758,6 +758,8 @@ def test_materialize_empty_destination(tmp_path):
 # documented call form) and sends one repeated `type` query parameter per
 # event type, matching the server's /v1/events handler and the TypeScript SDK.
 # A comma-joined `types` parameter the server never reads must not be emitted.
+# Spec: §7.2.2, §7.6 — the /v1/events subscription names the SDK in
+# X-Podium-Client.
 def test_subscribe_sends_repeated_type_params(stub_server):
     stub_server.next_response = {"event": "artifact.published"}
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
@@ -768,6 +770,8 @@ def test_subscribe_sends_repeated_type_params(stub_server):
     assert "type=artifact.published" in path
     assert "type=artifact.deprecated" in path
     assert "types=" not in path
+    assert len(stub_server.clients) == 1
+    _assert_sdk_client(stub_server.clients[0])
 
 
 # Spec: §7.6 — the client attaches its session/access token as the
@@ -802,6 +806,93 @@ def test_client_header_members():
         "version": ["1.2.3"],
     }
     assert urllib.parse.parse_qs(_client_header("")) == {"kind": ["sdk"], "name": ["podium-py"]}
+
+
+def _assert_sdk_client(value):
+    """Assert that ``value`` names podium-py and its installed release."""
+    from podium._version import __version__
+
+    assert value is not None
+    assert urllib.parse.parse_qs(value) == {
+        "kind": ["sdk"],
+        "name": ["podium-py"],
+        "version": [__version__],
+    }
+
+
+# Spec: §7.2.2, §7.6 — search_artifacts, load_artifact, and the batch-load
+# POST each send X-Podium-Client with kind=sdk, name=podium-py, and the
+# installed release.
+def test_control_plane_requests_send_client_header(stub_server):
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+
+    stub_server.next_response = {"query": "q", "total_matched": 0, "results": []}
+    client.search_artifacts("q")
+    stub_server.next_response = served({"id": "finance/run", "type": "prompt", "version": "1.0.0"})
+    client.load_artifact("finance/run")
+    stub_server.next_response = [served({"id": "a", "status": "ok", "type": "rule"})]
+    client.load_artifacts(["a"])
+
+    paths = [path.split("?", 1)[0] for path in stub_server.requests]
+    assert paths == ["/v1/search_artifacts", "/v1/load_artifact", "/v1/artifacts:batchLoad"]
+    assert len(stub_server.clients) == 3
+    for value in stub_server.clients:
+        _assert_sdk_client(value)
+
+
+# Spec: §7.2.2, §7.6 — neither manifest_body_url link carries X-Podium-Client.
+# The /objects link still receives the Bearer credential, so the link fetch
+# and the control-plane request build their headers separately.
+def test_manifest_body_links_send_no_client_header(stub_server, object_server):
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}", token="tok-9")
+
+    _serve_manifest_body_url(stub_server, object_server)
+    client.load_artifact("big/ctx")
+    _serve_manifest_body_url(stub_server, object_server, "?X-Amz-Signature=deadbeef")
+    client.load_artifact("big/ctx")
+
+    assert object_server.paths == ["/objects/abc", "/objects/abc?X-Amz-Signature=deadbeef"]
+    assert object_server.clients == [None, None]
+    assert object_server.auths == ["Bearer tok-9", None]
+    assert len(stub_server.clients) == 2
+    for value in stub_server.clients:
+        _assert_sdk_client(value)
+
+
+# Spec: §7.2.2, §7.6 — a large-resource fetch carries no X-Podium-Client. The
+# default fetcher reaches the object store without it, and a caller-supplied
+# fetch= hook receives only the URL.
+def test_large_resource_fetch_sends_no_client_header(stub_server, object_server, tmp_path):
+    url = f"{object_server.base}/objects/big"
+    object_server.objects["/objects/big"] = b"BIGDATA"
+    stub_server.next_response = served(
+        {
+            "id": "big/res",
+            "type": "context",
+            "version": "1.0.0",
+            "manifest_body": "B",
+            "frontmatter": "---\ntype: context\n---\nB",
+            "large_resources": {"data/big.bin": {"presigned_url": url}},
+        },
+        fetched={url: b"BIGDATA"},
+    )
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}", token="tok-9")
+    art = client.load_artifact("big/res")
+
+    art.materialize(str(tmp_path / "default"))
+    assert object_server.paths == ["/objects/big"]
+    assert object_server.clients == [None]
+
+    calls = []
+
+    def hook(*args, **kwargs):
+        calls.append((args, kwargs))
+        return b"BIGDATA"
+
+    art.materialize(str(tmp_path / "hook"), fetch=hook)
+    assert calls == [((url,), {})]
+    assert (tmp_path / "hook" / "big" / "res" / "data" / "big.bin").read_bytes() == b"BIGDATA"
+    _assert_sdk_client(stub_server.clients[0])
 
 
 # Spec: §7.2.2, §7.6 — control-plane headers carry X-Podium-Client beside the
