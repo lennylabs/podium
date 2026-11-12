@@ -2,8 +2,8 @@
 
 ## 13.1 Reference Topology
 
-- **Stateless front-end:** 3+ replicas behind a load balancer (HTTP).
-- **Postgres:** managed (RDS, Cloud SQL, Aurora) or self-run; primary + read replicas. Holds manifest metadata, layer config, admin grants, and audit; also holds embeddings when the default vector backend (pgvector) is in use.
+- **Stateless front-end:** 3+ replicas behind a load balancer (HTTP). Each replica chains and delivers its own audit records (§8.3).
+- **Postgres:** managed (RDS, Cloud SQL, Aurora) or self-run; primary + read replicas. Holds manifest metadata, layer config, and admin grants; also holds embeddings when the default vector backend (pgvector) is in use.
 - **Vector backend:** `pgvector` by default, collocated in the Postgres deployment with no separate service to run. The default binary also ships built-ins for `pinecone`, `weaviate-cloud`, and `qdrant-cloud`, selectable via `PODIUM_VECTOR_BACKEND` (each takes its own endpoint + API key env vars). Custom backends register through the `RegistrySearchProvider` SPI (§9.1, §9.2).
 - **Embedding provider:** `openai` by default in standard deployments. Text projection from manifest frontmatter (§4.7 _Embedding generation_) is sent to OpenAI's embeddings API. The default binary also ships `voyage`, `cohere`, and `ollama`, selectable via `PODIUM_EMBEDDING_PROVIDER`. Optional when the configured vector backend self-embeds (Pinecone Integrated Inference, Weaviate Cloud vectorizer, Qdrant Cloud Inference).
 - **Object storage:** S3-compatible (S3, GCS, MinIO, R2).
@@ -159,7 +159,7 @@ podium serve --strict
 | Git provider / webhooks | Required for `git`-source layers                | `git` source layers work without webhooks; webhooks are optional. Without a webhook (typical for a developer machine without a public ingress), `podium layer reingest <id>` pulls the current state on demand, and `podium layer watch <id>` polls the source at a configured interval.        |
 | Signing                 | Registry-managed key                            | Enabled by default. The Ed25519 keypair is generated on first run at `PODIUM_SIGN_KEY_PATH` (default `~/.podium/standalone/registry-signing.key`). `--sign none` disables it |
 | Content cache           | Cross-workspace disk cache (`~/.podium/cache/`) | Disabled; the registry is local, the cache adds nothing                                                                                                                                                                                                                                        |
-| Audit                   | Per-tenant Postgres table                       | Same SQLite file (audit table)                                                                                                                                                                                                                                                                 |
+| Audit | The §8.3 destinations listed in `PODIUM_AUDIT_LOG_PATH` | The §8.3 destinations listed in `PODIUM_AUDIT_LOG_PATH` |
 | Helm chart / Kubernetes | Required for production deployments             | Not used                                                                                                                                                                                                                                                                                       |
 
 **`--layer-path` modes.** The path passed to `--layer-path` is interpreted as either a single-layer directory or a filesystem-registry root. The standalone server selects between these via an explicit dispatch:
