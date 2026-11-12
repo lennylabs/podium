@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -135,6 +136,103 @@ func TestEmitAuditEvent_AuthenticatedCaller(t *testing.T) {
 	}
 	if strings.Contains(s, `"network"`) || strings.Contains(s, "public_mode") {
 		t.Errorf("authenticated caller leaked public-mode fields:\n%s", s)
+	}
+}
+
+// clientHeaderValue is the X-Podium-Client value the client tests send, and
+// wantHeaderClient the caller.client it normalizes to.
+const clientHeaderValue = "kind=mcp&host=claude-code&harness=cursor"
+
+var wantHeaderClient = &audit.CallerClient{Kind: "mcp", Host: "claude-code", Harness: "cursor"}
+
+// auditMetaFrom records the X-Podium-Client value for authenticated and public
+// callers alike, and an absent, oversized, or malformed header yields no
+// client rather than failing the request.
+//
+// Spec: §7.2.2, §8.1
+func TestAuditMetaFrom_ClientHeader(t *testing.T) {
+	authed := layer.Identity{Sub: "alice", IsAuthenticated: true}
+	public := layer.Identity{IsPublic: true}
+	oversized := "kind=mcp&name=" + strings.Repeat("a", 1025-len("kind=mcp&name="))
+	cases := []struct {
+		name   string
+		header string
+		id     layer.Identity
+		want   *audit.CallerClient
+	}{
+		{"authenticated", clientHeaderValue, authed, wantHeaderClient},
+		{"public", clientHeaderValue, public, wantHeaderClient},
+		{"absent", "", authed, nil},
+		{"oversized", oversized, authed, nil},
+		{"malformed", "%zz", public, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/v1/search_artifacts", nil)
+			if c.header != "" {
+				req.Header.Set(audit.ClientHeader, c.header)
+			}
+			if got := auditMetaFrom(req, c.id).Client; !reflect.DeepEqual(got, c.want) {
+				t.Errorf("Client = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}
+
+// emitAuditEvent copies the request's client onto the event, from the
+// attached audit metadata when the middleware ran and from the header
+// otherwise.
+//
+// Spec: §7.2.2, §8.1
+func TestEmitAuditEvent_RecordsCallerClient(t *testing.T) {
+	id := layer.Identity{Sub: "alice", IsAuthenticated: true}
+	attached := &audit.CallerClient{Kind: "cli", Name: "podium"}
+
+	fromHeader := httptest.NewRequest(http.MethodPost, "/v1/admin/grants", nil)
+	fromHeader.Header.Set(audit.ClientHeader, clientHeaderValue)
+	fromMeta := httptest.NewRequest(http.MethodPost, "/v1/admin/grants", nil)
+	fromMeta = fromMeta.WithContext(withAuditMeta(fromMeta.Context(), AuditMeta{Client: attached}))
+	bare := httptest.NewRequest(http.MethodPost, "/v1/admin/grants", nil)
+
+	for _, c := range []struct {
+		name string
+		req  *http.Request
+		want *audit.CallerClient
+	}{
+		{"header fallback", fromHeader, wantHeaderClient},
+		{"attached metadata", fromMeta, attached},
+		{"no header", bare, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			sink := audit.NewMemory()
+			emitAuditEvent(sink, c.req, id, audit.EventAdminGranted, "carol", nil)
+			events := sink.Events()
+			if len(events) != 1 {
+				t.Fatalf("events = %+v, want one", events)
+			}
+			if got := events[0].CallerClient; !reflect.DeepEqual(got, c.want) {
+				t.Errorf("CallerClient = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}
+
+// requestClient prefers the client in the attached audit metadata and falls
+// back to the header on a layer route outside the metadata middleware.
+//
+// Spec: §7.2.2, §8.1
+func TestLayerEndpoint_RequestClient(t *testing.T) {
+	e := NewLayerEndpoint(store.NewMemory(), "t", NewModeTracker())
+	attached := &audit.CallerClient{Kind: "sync", Harness: "claude-code"}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/erase", nil)
+	req.Header.Set(audit.ClientHeader, clientHeaderValue)
+	if got := e.requestClient(req); !reflect.DeepEqual(got, wantHeaderClient) {
+		t.Errorf("header fallback = %+v, want %+v", got, wantHeaderClient)
+	}
+	req = req.WithContext(withAuditMeta(req.Context(), AuditMeta{Client: attached}))
+	if got := e.requestClient(req); !reflect.DeepEqual(got, attached) {
+		t.Errorf("attached metadata = %+v, want %+v", got, attached)
 	}
 }
 

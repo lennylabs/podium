@@ -14,8 +14,9 @@ import (
 // trace id and structured caller attributes (email, groups, public-mode
 // network, and the public_mode flag) from the per-request audit metadata
 // the server's identity middleware attached to the context, together with the
-// §8.1 tenant label the middleware resolved. A context with no metadata
-// records no tenant.
+// §8.1 tenant label the middleware resolved and the §8.1 caller.client the
+// middleware parsed from the X-Podium-Client header. A context with no
+// metadata records no tenant and no client.
 //
 // Before each write it applies the two §8.2 redaction surfaces: manifest-
 // declared field redaction (RedactFields keyed by the event's RedactKeys)
@@ -47,6 +48,11 @@ func auditEmitterFor(sink audit.Sink, scrubber *audit.PIIScrubber, sampler *audi
 			ev.TraceID = m.TraceID
 			ev.PublicMode = m.PublicMode
 			ev.Tenant = m.Tenant
+			// caller.client is event metadata copied after the sampler
+			// decision, so the §8.4 keep-rate stays keyed on the event type
+			// alone and the client never influences what is kept.
+			// Spec: §8.1
+			ev.CallerClient = m.Client
 			if m.PublicMode {
 				ev.CallerNetwork = &audit.CallerNetwork{SourceIP: m.SourceIP, ForwardedUser: m.ForwardedUser}
 			} else {

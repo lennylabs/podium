@@ -37,7 +37,7 @@ func Tracer() trace.Tracer { return otel.Tracer(scopeName) }
 
 // Init installs the global W3C TraceContext + Baggage propagator and, when an
 // exporter is configured, a batch span processor exporting to it for the named
-// service. The returned shutdown func flushes and stops the exporter; it is a
+// service. Every exported span passes through the §13.8 URL query scrub. The returned shutdown func flushes and stops the exporter; it is a
 // no-op when tracing is off. A misconfigured PODIUM_TRACING value is an error.
 func Init(ctx context.Context, service string) (func(context.Context) error, error) {
 	// Always install the propagator so inbound traceparent extraction and
@@ -53,14 +53,21 @@ func Init(ctx context.Context, service string) (func(context.Context) error, err
 	if exp == nil {
 		return func(context.Context) error { return nil }, nil
 	}
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exp),
+	tp := newProvider(exp, service)
+	otel.SetTracerProvider(tp)
+	return tp.Shutdown, nil
+}
+
+// newProvider returns the tracer provider Init installs: a batch processor
+// over exp, wrapped so exported spans carry no URL query (§13.8), under the
+// named service.
+func newProvider(exp sdktrace.SpanExporter, service string) *sdktrace.TracerProvider {
+	return sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(scrubExporter{exp}),
 		sdktrace.WithResource(resource.NewSchemaless(
 			attribute.String("service.name", service),
 		)),
 	)
-	otel.SetTracerProvider(tp)
-	return tp.Shutdown, nil
 }
 
 // newExporter builds the configured span exporter, or nil when tracing is off.

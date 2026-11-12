@@ -54,6 +54,7 @@ func NewEndpointSink(rawURL string) (*EndpointSink, error) {
 // server swallows it so a forwarding failure never breaks a tool call.
 func (s *EndpointSink) Append(ctx context.Context, e Event) error {
 	s.mu.Lock()
+	normalizeEventClient(&e)
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now().UTC()
 	}

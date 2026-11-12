@@ -546,7 +546,7 @@ func TestAuditMeta_AppendsEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &mcpServer{cfg: &config{}, audit: sink, sessionID: "sess-1"}
-	s.auditMeta(audit.EventArtifactLoaded, "acme/widget")
+	s.auditMeta(audit.EventArtifactLoaded, "acme/widget", "")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -555,7 +555,7 @@ func TestAuditMeta_AppendsEvent(t *testing.T) {
 		t.Errorf("audit line missing event/target: %s", data)
 	}
 	// Nil sink: no panic, no write.
-	(&mcpServer{cfg: &config{}}).auditMeta(audit.EventArtifactLoaded, "x")
+	(&mcpServer{cfg: &config{}}).auditMeta(audit.EventArtifactLoaded, "x", "")
 }
 
 // spec: §6.2 — callTool records the per-tool audit event before

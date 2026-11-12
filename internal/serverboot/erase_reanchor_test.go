@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -89,13 +90,28 @@ func TestNewReAnchor_FailureLogs(t *testing.T) {
 	}
 }
 
-// auditLine is the subset of a §8.1 audit JSON line the erase tests read.
+// auditLine is the subset of a §8.1 audit JSON line the serverboot audit
+// tests read.
 type auditLine struct {
-	Type   string `json:"type"`
-	Target string `json:"target"`
-	Tenant string `json:"tenant"`
-	Hash   string `json:"hash"`
+	Type    string            `json:"type"`
+	Target  string            `json:"target"`
+	Tenant  string            `json:"tenant"`
+	Hash    string            `json:"hash"`
+	Context map[string]string `json:"context"`
+	Caller  auditLineCaller   `json:"caller"`
 }
+
+// auditLineCaller is the part of the §8.1 caller object the tests read. An
+// event that records no caller.client decodes Client as nil.
+type auditLineCaller struct {
+	Client map[string]string `json:"client"`
+}
+
+// testClientHeader is the X-Podium-Client value the serverboot request tests
+// send, and testClient is the caller.client it records.
+const testClientHeader = "kind=mcp&host=claude-code&harness=cursor"
+
+var testClient = map[string]string{"kind": "mcp", "host": "claude-code", "harness": "cursor"}
 
 func readAuditLines(t *testing.T, path string) []auditLine {
 	t.Helper()
@@ -120,12 +136,18 @@ func readAuditLines(t *testing.T, path string) []auditLine {
 	return out
 }
 
-// postErase drives POST /v1/admin/erase against the booted registry and
-// returns the status code.
+// postErase drives POST /v1/admin/erase against the booted registry with the
+// X-Podium-Client header and returns the status code.
 func postErase(t *testing.T, addr string) int {
 	t.Helper()
 	body := strings.NewReader(`{"user_id":"carol@acme.com","salt":"s"}`)
-	resp, err := http.Post("http://"+addr+"/v1/admin/erase", "application/json", body)
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/v1/admin/erase", body)
+	if err != nil {
+		t.Fatalf("build erase request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(audit.ClientHeader, testClientHeader)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST erase: %v", err)
 	}
@@ -137,6 +159,10 @@ func postErase(t *testing.T, addr string) int {
 // tenant router, and an erasure that rewrites the file-backed chain is
 // followed at once by an audit.anchored record over the new head, which is
 // the user.erased record the rewrite appended.
+//
+// Spec: §7.2.2, §8.1 — user.erased records the erase request's caller.client.
+// The audit.anchored record over its head is an event about the registry as a
+// whole, so it records none even though the request named its client.
 func TestRun_EraseReAnchorsTheRewrittenChain(t *testing.T) {
 	f := newBootFixture(t)
 	t.Setenv("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", "3600")
@@ -158,9 +184,15 @@ func TestRun_EraseReAnchorsTheRewrittenChain(t *testing.T) {
 	if erased < 0 {
 		t.Fatalf("no user.erased record in the audit log")
 	}
+	if got := events[erased].Caller.Client; !reflect.DeepEqual(got, testClient) {
+		t.Errorf("user.erased caller.client = %v, want %v", got, testClient)
+	}
 	head := events[erased].Hash
 	for _, ev := range events[erased+1:] {
 		if ev.Type == string(audit.EventAuditAnchored) && ev.Target == head {
+			if ev.Caller.Client != nil {
+				t.Errorf("audit.anchored caller.client = %v, want none", ev.Caller.Client)
+			}
 			return
 		}
 	}

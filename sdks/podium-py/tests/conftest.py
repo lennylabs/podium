@@ -160,7 +160,8 @@ class _StubHandler(http.server.BaseHTTPRequestHandler):
     ``routes`` maps a request path, without its query, to ``(status, body)``;
     a request path it does not name gets ``next_status`` and
     ``next_response``. A ``bytes`` body is sent as is and any other body as
-    JSON. Every request path is appended to ``requests``.
+    JSON. Every request path is appended to ``requests``, and every request's
+    ``X-Podium-Client`` header, or ``None`` when it is absent, to ``clients``.
     """
 
     def log_message(self, format, *args):  # noqa: A002 - signature inherited
@@ -181,11 +182,16 @@ class _StubHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _record_client(self) -> None:
+        self.server.clients.append(self.headers.get("X-Podium-Client"))  # type: ignore[attr-defined]
+
     def do_GET(self):  # noqa: N802 - signature inherited
         self.server.last_auth = self.headers.get("Authorization", "")  # type: ignore[attr-defined]
+        self._record_client()
         self._reply()
 
     def do_POST(self):  # noqa: N802 - signature inherited
+        self._record_client()
         length = int(self.headers.get("Content-Length", "0"))
         self.server.last_body = self.rfile.read(length)  # type: ignore[attr-defined]
         self.server.bodies.append(self.server.last_body)  # type: ignore[attr-defined]
@@ -215,6 +221,7 @@ def stub_server():
     server.routes = {}
     server.requests = []
     server.bodies = []
+    server.clients = []
     server.last_path = ""
     server.last_auth = ""
     yield server
@@ -224,7 +231,8 @@ def stub_server():
 class _ObjectHandler(http.server.BaseHTTPRequestHandler):
     """A stub object route.
 
-    It records each request's path and Authorization header and serves
+    It records each request's path, Authorization header, and
+    X-Podium-Client header (``None`` when absent) and serves
     ``objects[path]``, or ``doc`` for a path ``objects`` does not name. When
     ``required_auth`` is set it answers 404 to a request without it, as the
     filesystem backend's /objects route does for a caller it cannot see.
@@ -236,6 +244,7 @@ class _ObjectHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 - signature inherited
         auth = self.headers.get("Authorization")
         self.server.auths.append(auth)  # type: ignore[attr-defined]
+        self.server.clients.append(self.headers.get("X-Podium-Client"))  # type: ignore[attr-defined]
         self.server.paths.append(self.path)  # type: ignore[attr-defined]
         required = self.server.required_auth  # type: ignore[attr-defined]
         if required and auth != required:
@@ -252,6 +261,7 @@ class _ObjectHandler(http.server.BaseHTTPRequestHandler):
 def _object_server():
     server = _start(_ObjectHandler)
     server.auths = []
+    server.clients = []
     server.paths = []
     server.objects = {}
     server.required_auth = ""

@@ -20,7 +20,7 @@ func TestMCPAuditSearch_ScrubsQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &mcpServer{cfg: &config{}, audit: sink, sessionID: "sess-1", scrubber: audit.NewPIIScrubber()}
-	s.auditSearch(audit.EventArtifactsSearched, "find ssn 123-45-6789 and card 4111111111111111")
+	s.auditSearch(audit.EventArtifactsSearched, "find ssn 123-45-6789 and card 4111111111111111", "")
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -76,7 +76,7 @@ func TestMCPAuditSearch_DisabledWritesRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &mcpServer{cfg: &config{}, audit: sink, sessionID: "sess-3"} // scrubber nil
-	s.auditSearch(audit.EventDomainsSearched, "ssn 123-45-6789")
+	s.auditSearch(audit.EventDomainsSearched, "ssn 123-45-6789", "")
 	data, _ := os.ReadFile(path)
 	if !strings.Contains(string(data), "123-45-6789") {
 		t.Errorf("disabled scrub should write the raw query:\n%s", data)

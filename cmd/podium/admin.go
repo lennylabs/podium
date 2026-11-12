@@ -273,7 +273,7 @@ func adminEraseCmd(args []string) int {
 		// off an in-process lastHash and the rewrite renames a re-hashed file
 		// into place, so a live registry's next append would carry a stale
 		// prev_hash and raise audit.gap_detected.
-		transformed, err := audit.EraseUser(context.Background(), sink, userID, *salt, *operator, audit.EraseScope{Unlabeled: true})
+		transformed, err := audit.EraseUser(context.Background(), sink, userID, *salt, *operator, nil, audit.EraseScope{Unlabeled: true})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "erase failed: %v\n", err)
 			return 1

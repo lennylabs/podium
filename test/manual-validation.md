@@ -244,6 +244,7 @@ rm -rf "$WORK"
 | S101 | An Agent Skills directory with no ARTIFACT.md is a Podium layer | standalone | none | none | none |
 | S102 | An ARTIFACT.md that declares extends: is refused, and a stored extends: child stops serving after an upgrade | solo then standalone | none | none | none |
 | S103 | A git layer's URL credential is held apart from `repo` in the metadata store, and a row in the earlier form keeps working | standalone | none | none | none |
+| S104 | The registry and the MCP server record the client that called them, and exported spans carry no query text | standalone | none | none | none |
 
 ---
 
@@ -11332,5 +11333,148 @@ URL in `repo` after the restart in step 4 is a missed startup rewrite.
 
 **Cleanup.** Stop the stub with `kill "$REMOTE"`, stop the server with
 `kill "$SRV"`, and `rm -rf "$WORK"`.
+
+---
+
+## S104: The registry and the MCP server record the client that called them, and exported spans carry no query text
+
+**Goal.** Validate that the compiled `podium-mcp`, `podium sync`, and registry
+record the self-reported client as `caller.client` in the forwarded registry
+stream and in the local stream, that a malformed header changes nothing but
+the attribute, and that the OTLP bytes `podium-mcp` exports hold no search
+text, on a call the registry answers and on a call that fails because the
+registry cannot be reached.
+
+**Covers.** §7.2.2 `X-Podium-Client`, §8.1 `caller.client` in both audit
+streams, §8.3, and the §13.8 exported-span-content rule, through `podium serve`,
+`podium-mcp`, and `podium sync`.
+
+**Why by hand.** An operator reads the raw JSON a SIEM receiver gets and the
+raw OTLP bytes a collector gets. The scrub must hold on the bytes that leave
+the machine, which a decoded in-process span does not show, and an empty
+capture has to be told apart from a clean one. A forwarded event that names
+`podium-mcp` without the host, or a capture that holds `alice` or `bob`, is the defect
+this scenario catches.
+
+**Steps.**
+
+1. Run the isolation block, then start two receivers that record every POST
+   body verbatim: one for OTLP on port 8905 and one for the audit stream on
+   port 8906.
+
+   ```bash
+   cat > "$WORK/sink.py" <<'EOF'
+   import http.server, sys
+   OUT, PORT = sys.argv[1], int(sys.argv[2])
+   class H(http.server.BaseHTTPRequestHandler):
+       def do_POST(self):
+           n = int(self.headers.get("content-length", 0))
+           open(OUT, "ab").write(self.rfile.read(n) + b"\n")
+           self.send_response(200); self.send_header("Content-Length", "0"); self.end_headers()
+       def log_message(self, *a): pass
+   http.server.HTTPServer(("127.0.0.1", PORT), H).serve_forever()
+   EOF
+   python3 "$WORK/sink.py" "$WORK/otlp.bin" 8905 &
+   OTLP=$!
+   python3 "$WORK/sink.py" "$WORK/forwarded.jsonl" 8906 &
+   FWD=$!
+   sleep 1
+   ```
+
+2. Build one artifact and serve with the audit stream pointed at the receiver.
+
+   ```bash
+   mkdir -p "$WORK/reg/team/budget-guide"
+   cat > "$WORK/reg/team/budget-guide/ARTIFACT.md" <<'EOF'
+   ---
+   type: context
+   version: 1.0.0
+   description: how to prepare the quarterly budget
+   ---
+
+   budget prose
+   EOF
+   PODIUM_AUDIT_LOG_PATH="http://127.0.0.1:8906/ingest" \
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8208 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8208/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export PODIUM_REGISTRY=http://127.0.0.1:8208
+   ```
+
+   **Expect.** `server_alive` prints nothing.
+
+3. Drive `podium-mcp` over stdio with a named host, a search that holds an
+   email address, and OTLP export pointed at the receiver. Then run a second
+   search against port 8907, where nothing listens.
+
+   ```bash
+   printf '%s\n%s\n' \
+     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"s104-host","version":"9.9"}}}' \
+     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_artifacts","arguments":{"query":"alice@acme.com budget"}}}' \
+     | PODIUM_HARNESS=claude-code PODIUM_AUDIT_SINK="$WORK/local.log" \
+       OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:8905 \
+       podium-mcp 2>"$WORK/mcp.log" > "$WORK/mcp.out"
+   sleep 2
+   wc -c < "$WORK/otlp.bin"
+   grep -c search_artifacts "$WORK/otlp.bin"
+   grep -c alice "$WORK/otlp.bin" || true
+   jq -cS 'select(.type=="artifacts.searched") | .caller.client' "$WORK/forwarded.jsonl"
+   jq -cS '[.caller.client, .context]' "$WORK/local.log"
+   printf '%s\n%s\n' \
+     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"s104-host","version":"9.9"}}}' \
+     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_artifacts","arguments":{"query":"bob@acme.com budget"}}}' \
+     | PODIUM_REGISTRY=http://127.0.0.1:8907 \
+       OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:8905 \
+       podium-mcp 2>>"$WORK/mcp.log" > /dev/null
+   sleep 2
+   grep -c bob "$WORK/otlp.bin" || true
+   grep -c 'connection refused' "$WORK/otlp.bin"
+   ```
+
+   **Expect.**
+   - The byte count is above 0 and the `search_artifacts` count is at least
+     1. A 0 on either means no span was exported, and the next check proves
+     nothing.
+   - The `alice` count is `0`. Any other count means the search text reached
+     the trace backend.
+   - The forwarded `caller.client`, printed with its keys sorted, is
+     `{"harness":"claude-code","host":"s104-host","host_version":"9.9","kind":"mcp","name":"podium-mcp","version":"<release>"}`
+     with the release that the `initialize` result reports as `serverInfo.version` in `$WORK/mcp.out`. A missing `host` means
+     the bridge discarded `clientInfo`.
+   - The local log line shows the same object, and its context holds no
+     `source` key.
+   - The `bob` count is `0`, and the `connection refused` count is at least
+     1. The second run sent its search to port 8907, where nothing listens, so
+     its client span ended in a transport error whose description reached the
+     receiver. A 0 for `connection refused` means the error span was not
+     exported, and the `bob` check proves nothing. Any `bob` count above 0
+     means a failed call exported its search text.
+
+4. Sync against the registry with a different harness.
+
+   ```bash
+   podium sync --registry "$PODIUM_REGISTRY" --target "$WORK/fs" --harness cursor; echo "exit=$?"
+   sleep 1
+   jq -c 'select(.type=="artifact.loaded") | .caller.client' "$WORK/forwarded.jsonl" | tail -1
+   ```
+
+   **Expect.** `exit=0`, and a `caller.client` with `kind` `sync`, `name`
+   `podium`, and `harness` `cursor`.
+
+5. Send a malformed header by hand.
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Podium-Client: %zz' \
+     "$PODIUM_REGISTRY/v1/search_artifacts?query=x"
+   sleep 1
+   jq -c 'select(.type=="artifacts.searched") | .caller.client' "$WORK/forwarded.jsonl" | tail -1
+   ```
+
+   **Expect.** `200`, and `null` for the newest `artifacts.searched`. A 4xx
+   means a bad header fails the request, which §7.2.2 forbids.
+
+**Cleanup.** `kill "$SRV" "$OTLP" "$FWD"` and `rm -rf "$WORK"`.
 
 ---

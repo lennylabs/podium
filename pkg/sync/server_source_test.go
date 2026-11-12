@@ -7,11 +7,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/version"
 )
@@ -66,6 +68,39 @@ func newSignedStubRegistry(t *testing.T, arts map[string]stubArtifact, signer *d
 type stubCounts struct {
 	all  atomic.Int64
 	blob atomic.Int64
+
+	// mu guards requests, which the stub's handler goroutines append to
+	// while the test reads it.
+	mu       sync.Mutex
+	requests []stubRequest
+}
+
+// stubRequest is the path of one request a stub registry received and the
+// §7.2.2 X-Podium-Client header it carried. present distinguishes a header
+// sent empty from one not sent.
+type stubRequest struct {
+	path    string
+	client  string
+	present bool
+}
+
+// record appends r's path and X-Podium-Client header.
+func (c *stubCounts) record(r *http.Request) {
+	vals, present := r.Header[http.CanonicalHeaderKey(audit.ClientHeader)]
+	req := stubRequest{path: r.URL.Path, present: present}
+	if present {
+		req.client = vals[0]
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.requests = append(c.requests, req)
+}
+
+// seen returns a copy of the requests recorded so far.
+func (c *stubCounts) seen() []stubRequest {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]stubRequest(nil), c.requests...)
 }
 
 // newCountedStubRegistry is newSignedStubRegistry that also counts every
@@ -126,6 +161,7 @@ func newCountedStubRegistry(t *testing.T, arts map[string]stubArtifact, signer *
 
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		counts.all.Add(1)
+		counts.record(r)
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(srv.Close)
@@ -372,6 +408,33 @@ func TestRun_ServerSource_FetchesLargeResources(t *testing.T) {
 	}
 }
 
+// Spec: §7.2.2, §7.5 — the X-Podium-Client header goes on the control-plane
+// requests and on no link the response names: neither a large-resource
+// presigned URL nor a manifest_body_url link carries it, because a link may
+// point at an object store outside the registry (D-4).
+func TestRun_ServerSource_LinksCarryNoClientHeader(t *testing.T) {
+	t.Parallel()
+	art := glossaryStub()
+	art.largeResource = map[string]string{"data/big.bin": "BIGDATA"}
+	art.manifestURL = true
+	srv, counts := newCountedStubRegistry(t, map[string]stubArtifact{"team/glossary": art}, nil)
+	if _, err := Run(Options{RegistryPath: srv.URL, Delivery: neverDelivery, Target: t.TempDir(), AdapterID: "none", HTTPClient: srv.Client()}); err != nil {
+		t.Fatalf("server-source Run: %v", err)
+	}
+	if got := counts.blob.Load(); got != 2 {
+		t.Fatalf("link fetches = %d, want 2 (the large resource and the manifest_body_url)", got)
+	}
+	for _, req := range counts.seen() {
+		isLink := req.path == "/blob"
+		if isLink && req.present {
+			t.Errorf("link %s carried X-Podium-Client %q, want none", req.path, req.client)
+		}
+		if !isLink && !req.present {
+			t.Errorf("control-plane request %s carried no X-Podium-Client", req.path)
+		}
+	}
+}
+
 // spec: §6.10 — a server error surfaces as a Run error rather than a partial
 // or silent materialization.
 func TestRun_ServerSource_PropagatesError(t *testing.T) {
@@ -526,8 +589,10 @@ func TestIsServerSource(t *testing.T) {
 func TestFetchBytes_WithholdsCredentialFromSigV4URL(t *testing.T) {
 	t.Parallel()
 	var gotAuth string
+	var gotClient bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
+		_, gotClient = r.Header[http.CanonicalHeaderKey(audit.ClientHeader)]
 		_, _ = w.Write([]byte("bytes"))
 	}))
 	t.Cleanup(srv.Close)
@@ -541,6 +606,11 @@ func TestFetchBytes_WithholdsCredentialFromSigV4URL(t *testing.T) {
 	if gotAuth != "Bearer session-jwt" {
 		t.Errorf("objects route Authorization = %q, want Bearer session-jwt", gotAuth)
 	}
+	// Spec: §7.2.2 — an /objects link carries the credential and never the
+	// X-Podium-Client header (D-4).
+	if gotClient {
+		t.Error("objects route received X-Podium-Client, want none")
+	}
 
 	// A SigV4 presigned URL: the token is withheld so S3 does not reject it.
 	gotAuth = ""
@@ -550,6 +620,9 @@ func TestFetchBytes_WithholdsCredentialFromSigV4URL(t *testing.T) {
 	}
 	if gotAuth != "" {
 		t.Errorf("SigV4 URL received Authorization = %q, want none", gotAuth)
+	}
+	if gotClient {
+		t.Error("SigV4 URL received X-Podium-Client, want none")
 	}
 }
 

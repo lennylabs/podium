@@ -100,7 +100,7 @@ func statusCmd(args []string) int {
 		// counts the MCP server, SDK, and podium sync expose, for human
 		// inspection of "what could this identity have loaded?".
 		fmt.Printf("scope preview:\n")
-		switch preview, err := fetchScopePreview(registry); {
+		switch preview, err := fetchScopePreview(registry, cliClientHeader()); {
 		case err == nil:
 			printScopePreview(os.Stdout, preview)
 		case isScopePreviewDisabled(err):

@@ -5,11 +5,12 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   BatchResult,
   Client,
+  clientHeader,
   LoadedArtifact,
   MaterializeError,
   type MaterializeOptions,
@@ -27,6 +28,29 @@ const replyWith =
     new Response(JSON.stringify(body), { status: 200 });
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
+
+// recordClients wraps a fetcher so each request's X-Podium-Client header, or
+// null when it is absent, is appended to clients.
+const recordClients =
+  (inner: typeof fetch, clients: (string | null)[]): typeof fetch =>
+  async (input, init) => {
+    clients.push(new Headers(init?.headers).get("X-Podium-Client"));
+    return inner(input, init);
+  };
+
+// expectSdkClient asserts that an X-Podium-Client value names podium-ts and
+// the release in its package.json.
+const expectSdkClient = async (value: string | null | undefined): Promise<void> => {
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as {
+    version: string;
+  };
+  expect(value).toBeTruthy();
+  const members = new URLSearchParams(value ?? "");
+  expect([...members.keys()].sort()).toEqual(["kind", "name", "version"]);
+  expect(members.get("kind")).toBe("sdk");
+  expect(members.get("name")).toBe("podium-ts");
+  expect(members.get("version")).toBe(pkg.version);
+};
 
 describe("Client", () => {
   // Spec: §7.6 — searchArtifacts forwards to GET /v1/search_artifacts
@@ -212,19 +236,80 @@ describe("Client", () => {
       ),
     );
 
-  // objectRoute records the Authorization header of each request and, when
-  // required is set, answers 404 without it, as the filesystem backend's
-  // /objects route does for a caller it cannot see.
+  // objectRoute records the Authorization and X-Podium-Client headers of each
+  // request and, when required is set, answers 404 without the credential, as
+  // the filesystem backend's /objects route does for a caller it cannot see.
   const objectRoute = (doc: string, required = "") => {
     const auths: (string | null)[] = [];
+    const clients: (string | null)[] = [];
     const fetcher: typeof fetch = async (_input, init) => {
-      const auth = new Headers(init?.headers).get("Authorization");
+      const headers = new Headers(init?.headers);
+      const auth = headers.get("Authorization");
       auths.push(auth);
+      clients.push(headers.get("X-Podium-Client"));
       if (required && auth !== required) return new Response("", { status: 404 });
       return new Response(doc, { status: 200 });
     };
-    return { auths, fetcher };
+    return { auths, clients, fetcher };
   };
+
+  // Spec: §7.2.2, §7.6 — neither manifest_body_url link carries
+  // X-Podium-Client. The /objects link still receives the Bearer credential,
+  // so the link fetch and the control-plane request build their headers
+  // separately.
+  it("manifest_body_url links carry no X-Podium-Client", async () => {
+    const doc = "---\ntype: context\n---\n\nThe big body.\n";
+    const route = objectRoute(doc);
+    const registryClients: (string | null)[] = [];
+    for (const url of ["http://reg/objects/abc", "https://s3.example/abc?X-Amz-Signature=deadbeef"]) {
+      const c = new Client({
+        registry: "http://reg",
+        token: "tok-9",
+        fetcher: recordClients(await manifestBodyRegistry(url, doc), registryClients),
+      });
+      const out = await c.loadArtifact("big/ctx", undefined, { fetcher: route.fetcher });
+      expect(out.frontmatter).toBe(doc);
+    }
+    expect(route.clients).toEqual([null, null]);
+    expect(route.auths).toEqual(["Bearer tok-9", null]);
+    expect(registryClients.length).toBe(2);
+    for (const value of registryClients) await expectSdkClient(value);
+  });
+
+  // Spec: §7.2.2, §7.6 — a large-resource fetch through the injected fetcher
+  // carries no X-Podium-Client, while the load_artifact request carries it.
+  it("a large-resource fetch carries no X-Podium-Client", async () => {
+    const registryClients: (string | null)[] = [];
+    const fetcher = recordClients(
+      replyWith(
+        await served(
+          {
+            id: "big/res",
+            type: "context",
+            version: "1.0.0",
+            manifest_body: "B",
+            frontmatter: "---\ntype: context\n---\nB",
+            large_resources: { "data/big.bin": { presigned_url: "http://reg/objects/big" } },
+          },
+          { fetched: { "http://reg/objects/big": enc("BIGDATA") } },
+        ),
+      ),
+      registryClients,
+    );
+    const c = new Client({ registry: "http://reg", token: "tok-9", fetcher });
+    const out = await c.loadArtifact("big/res");
+    const route = objectRoute("BIGDATA");
+    const dir = await mkdtemp(join(tmpdir(), "podium-client-hdr-"));
+    try {
+      await out.materialize(dir, { fetcher: route.fetcher });
+      expect(await readFile(join(dir, "big", "res", "data", "big.bin"), "utf8")).toBe("BIGDATA");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+    expect(route.clients).toEqual([null]);
+    expect(registryClients.length).toBe(1);
+    await expectSdkClient(registryClients[0]);
+  });
 
   // Spec: §13.12 — the manifest-body follower sends the client's token to a URL
   // that is not SigV4 presigned, which the /objects route requires.
@@ -496,10 +581,14 @@ describe("Client", () => {
   // Spec: §7.6 — subscribe sends one repeated `type` query
   // parameter per event type (matching the server and the Python SDK), never a
   // comma-joined `types` parameter the server does not read.
+  // Spec: §7.2.2, §7.6 — the /v1/events subscription names the SDK in
+  // X-Podium-Client.
   it("subscribe sends repeated type params", async () => {
     let observedURL = "";
-    const fetcher: typeof fetch = async (input) => {
+    let observedClient: string | null = null;
+    const fetcher: typeof fetch = async (input, init) => {
       observedURL = String(input);
+      observedClient = new Headers(init?.headers).get("X-Podium-Client");
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
           controller.enqueue(new TextEncoder().encode('{"event":"artifact.published"}\n'));
@@ -514,6 +603,81 @@ describe("Client", () => {
     expect(observedURL).toContain("type=artifact.published");
     expect(observedURL).toContain("type=artifact.deprecated");
     expect(observedURL).not.toContain("types=");
+    await expectSdkClient(observedClient);
+  });
+
+  // Spec: §7.2.2, §7.6 — the SDK names itself as kind=sdk and
+  // name=podium-ts, and omits the version member when the release is unknown.
+  it("clientHeader encodes the sdk members", () => {
+    const withVersion = new URLSearchParams(clientHeader("1.2.3"));
+    expect(withVersion.get("kind")).toBe("sdk");
+    expect(withVersion.get("name")).toBe("podium-ts");
+    expect(withVersion.get("version")).toBe("1.2.3");
+    const without = new URLSearchParams(clientHeader(""));
+    expect([...without.keys()].sort()).toEqual(["kind", "name"]);
+  });
+
+  // Spec: §7.2.2, §7.6 — searchArtifacts, loadArtifact, and the batch-load
+  // POST each send X-Podium-Client with kind=sdk, name=podium-ts, and the
+  // package.json release.
+  it("sends X-Podium-Client on control-plane requests", async () => {
+    const load = await served({ id: "finance/run", type: "prompt", version: "1.0.0" });
+    const entry = await served({ id: "a", status: "ok", type: "rule" });
+    const replies: Record<string, unknown> = {
+      "/v1/search_artifacts": { query: "q", total_matched: 0, results: [] },
+      "/v1/load_artifact": load,
+      "/v1/artifacts:batchLoad": [entry],
+    };
+    const paths: string[] = [];
+    const clients: (string | null)[] = [];
+    const route: typeof fetch = async (input) => {
+      const path = new URL(String(input)).pathname;
+      paths.push(path);
+      return new Response(JSON.stringify(replies[path]), { status: 200 });
+    };
+    const c = new Client({ registry: "http://reg", fetcher: recordClients(route, clients) });
+    await c.searchArtifacts("q");
+    await c.loadArtifact("finance/run");
+    await c.loadArtifacts(["a"]);
+    expect(paths).toEqual(["/v1/search_artifacts", "/v1/load_artifact", "/v1/artifacts:batchLoad"]);
+    expect(clients.length).toBe(3);
+    for (const value of clients) await expectSdkClient(value);
+  });
+
+  // Spec: §7.2.2, §7.6 — when the SDK cannot read its package.json, the
+  // request proceeds and X-Podium-Client carries no version member. The mock
+  // forwards every other read to the real module, so the §4.7.9 verification
+  // resolution still reads sync.yaml and the key file.
+  it("omits the version member when package.json cannot be read", async () => {
+    vi.resetModules();
+    vi.doMock("node:fs/promises", async (importOriginal) => {
+      const real = await importOriginal<typeof import("node:fs/promises")>();
+      const forward = real.readFile as (...args: unknown[]) => Promise<unknown>;
+      const readFile = ((path: unknown, ...rest: unknown[]) =>
+        String(path).endsWith("package.json")
+          ? Promise.reject(new Error("package.json unreadable"))
+          : forward(path, ...rest)) as typeof real.readFile;
+      return { ...real, readFile, default: { ...real, readFile } };
+    });
+    try {
+      const fresh = await import("./index.js");
+      let got: string | null = null;
+      const fetcher: typeof fetch = async (_input, init) => {
+        got = new Headers(init?.headers).get("X-Podium-Client");
+        return new Response(JSON.stringify({ query: "q", total_matched: 0, results: [] }), {
+          status: 200,
+        });
+      };
+      const out = await new fresh.Client({ registry: "http://reg", fetcher }).searchArtifacts("q");
+      expect(out.total_matched).toBe(0);
+      const members = new URLSearchParams(got ?? "");
+      expect(members.get("kind")).toBe("sdk");
+      expect(members.get("name")).toBe("podium-ts");
+      expect(members.has("version")).toBe(false);
+    } finally {
+      vi.doUnmock("node:fs/promises");
+      vi.resetModules();
+    }
   });
 
   // Spec: §7.6 — the client attaches its token as the Bearer

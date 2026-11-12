@@ -110,6 +110,18 @@ describe("highlightTree", () => {
     });
   });
 
+  it("highlights an http request block", async () => {
+    const { pre, diagnostics } = await highlight(
+      "```http\nGET /v1/search_artifacts?query=x HTTP/1.1\nX-Podium-Client: kind=sdk\n```\n",
+    );
+
+    expect(diagnostics).toEqual([]);
+    expect(pre?.properties).toMatchObject({
+      "data-language": "http",
+      "data-highlighted": "true",
+    });
+  });
+
   const aliases: Array<[string, string]> = [
     ["sh", "bash"],
     ["shell", "bash"],

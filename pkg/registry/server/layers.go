@@ -1333,16 +1333,22 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 // chain to rewrite and the receiving system owns redaction of the shipped
 // stream, so it appends only the tenant-labeled user.erased. A failed append
 // is reported rather than dropped, because §8.5 requires the erasure itself
-// to be logged.
+// to be logged. On both branches user.erased records the request's
+// caller.client, while the audit.anchored the re-anchor hook appends records
+// none, because it is an event about the registry as a whole.
 //
-// Spec: §8.5, §8.6
+// Spec: §8.1, §8.5, §8.6
 func (e *LayerEndpoint) eraseAudit(r *http.Request, body eraseRequest, tenantID string) (int, error) {
 	admin := callerIdentityString(e.caller(r))
+	client := e.requestClient(r)
 	if e.auditFile != nil {
 		// A multi-tenant registry keeps one audit file for every tenant, so
 		// the scope excludes unlabeled records there: no tenant owns them.
+		// The client travels as its own argument rather than on the scope,
+		// because EraseUser refuses a cross-tenant scope only by comparing
+		// it to the zero EraseScope.
 		scope := audit.EraseScope{Tenant: tenantID, Unlabeled: !e.multiTenant}
-		redacted, err := audit.EraseUser(r.Context(), e.auditFile, body.UserID, body.Salt, admin, scope)
+		redacted, err := audit.EraseUser(r.Context(), e.auditFile, body.UserID, body.Salt, admin, client, scope)
 		if err != nil {
 			return 0, err
 		}
@@ -1355,10 +1361,23 @@ func (e *LayerEndpoint) eraseAudit(r *http.Request, body eraseRequest, tenantID 
 		return 0, nil
 	}
 	ev := audit.UserErasedEvent(body.UserID, body.Salt, admin, tenantID, 0, "")
+	ev.CallerClient = client
 	if err := e.auditSink.Append(r.Context(), ev); err != nil {
 		return 0, fmt.Errorf("record user.erased: %w", err)
 	}
 	return 0, nil
+}
+
+// requestClient returns the §8.1 caller.client of the request: the value the
+// audit metadata middleware attached, or, on a route outside that
+// middleware, the value parsed from the request's X-Podium-Client header.
+//
+// Spec: §7.2.2, §8.1
+func (e *LayerEndpoint) requestClient(r *http.Request) *audit.CallerClient {
+	if m, ok := AuditMetaFromContext(r.Context()); ok {
+		return m.Client
+	}
+	return auditMetaFrom(r, e.caller(r)).Client
 }
 
 // WebhookHandler returns the handler for the §7.3.1 inbound Git-provider

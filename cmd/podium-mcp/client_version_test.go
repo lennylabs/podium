@@ -7,11 +7,12 @@ import (
 )
 
 // initWithClient builds an initialize request carrying the given clientInfo
-// version and the current protocol version, and returns the handler response.
-func initWithClient(srv *mcpServer, clientVersion string) rpcResponse {
+// name and version and the current protocol version, and returns the handler
+// response.
+func initWithClient(srv *mcpServer, clientName, clientVersion string) rpcResponse {
 	params, _ := json.Marshal(map[string]any{
 		"protocolVersion": protocolVersion,
-		"clientInfo":      map[string]any{"name": "test-host", "version": clientVersion},
+		"clientInfo":      map[string]any{"name": clientName, "version": clientVersion},
 	})
 	return srv.handle(rpcRequest{JSONRPC: "2.0", Method: "initialize", Params: params})
 }
@@ -22,7 +23,7 @@ func initWithClient(srv *mcpServer, clientVersion string) rpcResponse {
 func TestHandle_InitializeRefusesOldClient(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{cfg: &config{minClientVersion: "1.2.0"}}
-	resp := initWithClient(srv, "1.1.9")
+	resp := initWithClient(srv, "test-host", "1.1.9")
 	if resp.Error == nil {
 		t.Fatalf("expected refusal for old host caller, got %+v", resp.Result)
 	}
@@ -42,7 +43,7 @@ func TestHandle_InitializeAcceptsCurrentClient(t *testing.T) {
 		t.Run(v, func(t *testing.T) {
 			t.Parallel()
 			srv := &mcpServer{cfg: &config{minClientVersion: "1.2.0"}}
-			resp := initWithClient(srv, v)
+			resp := initWithClient(srv, "test-host", v)
 			if resp.Error != nil {
 				t.Errorf("client %q at/above floor refused: %v", v, resp.Error)
 			}
@@ -55,7 +56,7 @@ func TestHandle_InitializeAcceptsCurrentClient(t *testing.T) {
 func TestHandle_InitializeNoFloorNeverRefuses(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{cfg: &config{}} // no minClientVersion
-	resp := initWithClient(srv, "0.0.1")
+	resp := initWithClient(srv, "test-host", "0.0.1")
 	if resp.Error != nil {
 		t.Errorf("no floor must not refuse any client: %v", resp.Error)
 	}
@@ -70,7 +71,7 @@ func TestHandle_InitializeUnparsableClientNotRefused(t *testing.T) {
 		t.Run("version="+v, func(t *testing.T) {
 			t.Parallel()
 			srv := &mcpServer{cfg: &config{minClientVersion: "1.2.0"}}
-			resp := initWithClient(srv, v)
+			resp := initWithClient(srv, "test-host", v)
 			if resp.Error != nil {
 				t.Errorf("unparsable/absent client version %q must not be refused: %v", v, resp.Error)
 			}

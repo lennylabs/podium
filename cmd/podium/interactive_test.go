@@ -2,12 +2,17 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	gosync "sync"
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/sync"
 )
 
@@ -282,6 +287,113 @@ func TestRunSyncOverrideInteractive_AddsAndMaterializes(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(target, "company-glossary", "ARTIFACT.md")); err != nil {
 		t.Errorf("checked artifact not materialized: %v", err)
 	}
+}
+
+// Spec: §7.2.2, §7.5.5 — the interactive podium sync override resolves its
+// harness once and sends it on every registry request: the view the checklist
+// renders and the re-materialization after save both report it, so the view
+// requests sent before the apply carry the harness too. An empty flag on a
+// target with no lock falls back to none.
+func TestRunSyncOverrideInteractive_SendsResolvedHarness(t *testing.T) {
+	cases := []struct {
+		name, harnessFlag, wantHarness string
+	}{
+		{name: "harness flag", harnessFlag: "cursor", wantHarness: "cursor"},
+		{name: "no harness flag", harnessFlag: "", wantHarness: "none"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := newClientRecordingRegistry(t)
+			t.Setenv("PODIUM_VERIFY_SIGNATURES", "never")
+			t.Setenv("PODIUM_HARNESS", "")
+			t.Setenv("HOME", t.TempDir())
+			withInteractiveStdin(t, "1\nsave\n", true)
+
+			withCwd(t, t.TempDir(), func() {
+				withStderr(t, func() {
+					captureStdout(t, func() {
+						if rc := runSyncOverrideInteractive(t.TempDir(), reg.srv.URL, tc.harnessFlag, false); rc != 0 {
+							t.Errorf("rc = %d, want 0", rc)
+						}
+					})
+				})
+			})
+
+			reqs := reg.seen()
+			manifests := 0
+			for _, req := range reqs {
+				if req.path == "/v1/sync/manifest" {
+					manifests++
+				}
+				got := audit.ParseClientHeader(req.client)
+				if got == nil || got.Kind != "sync" || got.Harness != tc.wantHarness {
+					t.Errorf("%s X-Podium-Client %q parsed to %+v, want kind sync and harness %q", req.path, req.client, got, tc.wantHarness)
+				}
+			}
+			// One manifest read serves the checklist view and one serves the
+			// Override re-materialization.
+			if manifests < 2 {
+				t.Errorf("/v1/sync/manifest requests = %d, want at least 2", manifests)
+			}
+		})
+	}
+}
+
+// clientRecordingRegistry is a server-source registry stub that serves one
+// context artifact and records the path and X-Podium-Client header of every
+// request.
+type clientRecordingRegistry struct {
+	srv *httptest.Server
+
+	// mu guards reqs, which the handler goroutines append to while the test
+	// reads it.
+	mu   gosync.Mutex
+	reqs []recordedRequest
+}
+
+// recordedRequest is one request a clientRecordingRegistry received.
+type recordedRequest struct {
+	path, client string
+}
+
+// newClientRecordingRegistry serves /v1/sync/manifest and a sealed
+// /v1/load_artifact response for company-glossary.
+func newClientRecordingRegistry(t *testing.T) *clientRecordingRegistry {
+	t.Helper()
+	reg := &clientRecordingRegistry{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/sync/manifest", func(w http.ResponseWriter, r *http.Request) {
+		writeTestJSON(w, map[string]any{"artifacts": []map[string]string{
+			{"id": "company-glossary", "type": "context", "version": "1.0.0", "layer": "team-shared"},
+		}})
+	})
+	mux.HandleFunc("/v1/load_artifact", func(w http.ResponseWriter, r *http.Request) {
+		writeTestJSON(w, testharness.SealDelivery(map[string]any{
+			"id": "company-glossary", "type": "context", "layer": "team-shared",
+			"frontmatter": "---\ntype: context\nversion: 1.0.0\ndescription: glossary\n---\n\nBody.\n",
+		}))
+	})
+	reg.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reg.mu.Lock()
+		reg.reqs = append(reg.reqs, recordedRequest{path: r.URL.Path, client: r.Header.Get(audit.ClientHeader)})
+		reg.mu.Unlock()
+		mux.ServeHTTP(w, r)
+	}))
+	t.Cleanup(reg.srv.Close)
+	return reg
+}
+
+// seen returns a copy of the requests recorded so far.
+func (r *clientRecordingRegistry) seen() []recordedRequest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]recordedRequest(nil), r.reqs...)
+}
+
+// writeTestJSON writes v as a JSON response body.
+func writeTestJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // Spec: §13.11.3

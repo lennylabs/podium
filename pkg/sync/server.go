@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lennylabs/podium/internal/buildinfo"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/sign"
@@ -50,6 +52,16 @@ type errorEnvelope struct {
 	Message string `json:"message"`
 }
 
+// ClientHeaderValue is the §7.2.2 value podium sync sends on control-plane
+// requests. An empty adapterID (a marketplace render) omits harness. It is
+// exported for the one podium sync request pkg/sync does not send: the
+// podium sync --preview scope preview, which cmd/podium sends.
+//
+// Spec: §7.2.2
+func ClientHeaderValue(adapterID string) string {
+	return audit.CallerClient{Kind: "sync", Name: "podium", Version: buildinfo.Version, Harness: adapterID}.Header()
+}
+
 // fetchServerRecords reads the caller's effective view from a server-source
 // registry (§7.5) and returns adapter-ready records. It mirrors the MCP
 // server's server-source delivery (§2.2): the served frontmatter becomes
@@ -62,13 +74,14 @@ func fetchServerRecords(ctx context.Context, opts Options, check *sign.DeliveryC
 		client = &http.Client{Timeout: defaultServerTimeout}
 	}
 	base := strings.TrimRight(opts.RegistryPath, "/")
+	clientHeader := ClientHeaderValue(opts.AdapterID)
 
 	var list syncManifestResponse
-	if err := httpGetJSON(ctx, client, base+"/v1/sync/manifest", opts.Token, &list); err != nil {
+	if err := httpGetJSON(ctx, client, base+"/v1/sync/manifest", opts.Token, clientHeader, &list); err != nil {
 		return nil, fmt.Errorf("sync manifest: %w", err)
 	}
 
-	f := serverFetcher{client: client, base: base, token: opts.Token, check: check}
+	f := serverFetcher{client: client, base: base, token: opts.Token, clientHeader: clientHeader, check: check}
 	out := make([]materialRecord, 0, len(list.Artifacts))
 	for _, entry := range list.Artifacts {
 		rec, err := f.fetchServerRecord(ctx, entry.ID, entry.Layer)
@@ -81,13 +94,14 @@ func fetchServerRecords(ctx context.Context, opts Options, check *sign.DeliveryC
 }
 
 // serverFetcher holds what every load_artifact request of one server-source
-// load shares: the client, the registry base URL, the caller credential, and
-// the resolved delivery check.
+// load shares: the client, the registry base URL, the caller credential, the
+// §7.2.2 X-Podium-Client value, and the resolved delivery check.
 type serverFetcher struct {
-	client *http.Client
-	base   string
-	token  string
-	check  *sign.DeliveryCheck
+	client       *http.Client
+	base         string
+	token        string
+	clientHeader string
+	check        *sign.DeliveryCheck
 }
 
 // fetchServerRecord loads one artifact over HTTP, verifies it by the §4.7.10
@@ -97,7 +111,7 @@ type serverFetcher struct {
 //
 // Spec: §4.7.10, §6.6 step 2, §7.5
 func (f serverFetcher) fetchServerRecord(ctx context.Context, id, layerID string) (materialRecord, error) {
-	body, err := httpGetBody(ctx, f.client, f.base+"/v1/load_artifact?id="+url.QueryEscape(id), f.token)
+	body, err := httpGetBody(ctx, f.client, f.base+"/v1/load_artifact?id="+url.QueryEscape(id), f.token, f.clientHeader)
 	if err != nil {
 		return materialRecord{}, err
 	}
@@ -234,8 +248,8 @@ func recordFromServed(rec version.DeliveryRecord, id, layerID string, resources 
 
 // httpGetJSON issues a bounded GET through httpGetBody and decodes the JSON
 // body into out.
-func httpGetJSON(ctx context.Context, client *http.Client, rawURL, token string, out any) error {
-	body, err := httpGetBody(ctx, client, rawURL, token)
+func httpGetJSON(ctx context.Context, client *http.Client, rawURL, token, clientHeader string, out any) error {
+	body, err := httpGetBody(ctx, client, rawURL, token, clientHeader)
 	if err != nil {
 		return err
 	}
@@ -245,14 +259,19 @@ func httpGetJSON(ctx context.Context, client *http.Client, rawURL, token string,
 // httpGetBody issues a bounded GET and returns the body bytes, mapping a
 // non-2xx response to the registry's §6.10 error envelope. When token is
 // non-empty it is attached as Authorization: Bearer so the registry resolves
-// the caller's identity (§6.3.2 / §14.11).
-func httpGetBody(ctx context.Context, client *http.Client, rawURL, token string) ([]byte, error) {
+// the caller's identity (§6.3.2 / §14.11). When clientHeader is non-empty it
+// is sent as X-Podium-Client (§7.2.2). Only control-plane requests come
+// through here; fetchBytes follows the links that must not carry it.
+func httpGetBody(ctx context.Context, client *http.Client, rawURL, token, clientHeader string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if clientHeader != "" {
+		req.Header.Set(audit.ClientHeader, clientHeader)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

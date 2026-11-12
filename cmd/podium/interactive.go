@@ -297,9 +297,13 @@ func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun
 	// One resolver serves both the view and the override, so the check
 	// resolves once, before the checklist (§7.5).
 	delivery := newSyncDeliveryCheck(workingDir())
+	// Spec: §7.2.2. The view and the apply step send the same harness, so one
+	// invocation never records its loads both with and without it.
+	harness := resolveOverrideHarness(harnessFlag, target)
 	view, err := sync.ResolveEffectiveView(sync.Options{
 		RegistryPath: registryPath,
 		Target:       target,
+		AdapterID:    harness,
 		Delivery:     delivery,
 	})
 	if err != nil {
@@ -329,7 +333,7 @@ func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun
 		Remove:       res.Remove,
 		DryRun:       dryRun,
 		RegistryPath: registryPath,
-		AdapterID:    resolveOverrideHarness(harnessFlag, target),
+		AdapterID:    harness,
 		Delivery:     delivery,
 	})
 	if err != nil {

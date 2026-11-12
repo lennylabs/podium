@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	oteltrace "go.opentelemetry.io/otel/trace"
 
+	"github.com/lennylabs/podium/internal/buildinfo"
 	"github.com/lennylabs/podium/pkg/audit"
 )
 
@@ -47,7 +50,7 @@ func TestMCPAuditMeta_StampsTraceID(t *testing.T) {
 	s := &mcpServer{cfg: &config{}, audit: sink, sessionID: "sess-1"}
 	s.activeCtx = ctxWithTraceID(t, traceID)
 
-	s.auditMeta(audit.EventDomainLoaded, "finance/close")
+	s.auditMeta(audit.EventDomainLoaded, "finance/close", "")
 
 	data, _ := os.ReadFile(path)
 	got := string(data)
@@ -69,7 +72,7 @@ func TestMCPAuditSearch_StampsTraceID(t *testing.T) {
 	s := &mcpServer{cfg: &config{}, audit: sink, sessionID: "sess-2", scrubber: audit.NewPIIScrubber()}
 	s.activeCtx = ctxWithTraceID(t, traceID)
 
-	s.auditSearch(audit.EventArtifactsSearched, "quarterly forecast")
+	s.auditSearch(audit.EventArtifactsSearched, "quarterly forecast", "")
 
 	data, _ := os.ReadFile(path)
 	got := string(data)
@@ -89,7 +92,7 @@ func TestMCPAudit_NoTraceIDWhenTracingOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &mcpServer{cfg: &config{}, audit: sink, sessionID: "sess-3"} // no activeCtx
-	s.auditMeta(audit.EventDomainLoaded, "finance/close")
+	s.auditMeta(audit.EventDomainLoaded, "finance/close", "")
 
 	data, _ := os.ReadFile(path)
 	if strings.Contains(string(data), "trace_id") {
@@ -118,7 +121,7 @@ func TestMCPAuditLoadArtifact_RedactsManifestFields(t *testing.T) {
 		"ssn: \"078-05-1120\"\n" +
 		"---\n"
 
-	s.auditLoadArtifact("finance/payroll", frontmatter)
+	s.auditLoadArtifact("finance/payroll", frontmatter, "")
 
 	data, _ := os.ReadFile(path)
 	got := string(data)
@@ -135,9 +138,8 @@ func TestMCPAuditLoadArtifact_RedactsManifestFields(t *testing.T) {
 	}
 }
 
-// Spec: §8.2 — an artifact with no audit_redact directive writes
-// only the structural source key; the directive is inert by design, not by
-// omission.
+// Spec: §8.2 — an artifact with no audit_redact directive writes an
+// event with no context; the directive is inert by design, not by omission.
 func TestMCPAuditLoadArtifact_NoDirectiveNoRedaction(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
@@ -148,7 +150,7 @@ func TestMCPAuditLoadArtifact_NoDirectiveNoRedaction(t *testing.T) {
 	s := &mcpServer{cfg: &config{}, audit: sink, sessionID: "sess-5"}
 	frontmatter := "---\nname: notes\ntype: skill\nversion: 1.0.0\n---\n"
 
-	s.auditLoadArtifact("team/notes", frontmatter)
+	s.auditLoadArtifact("team/notes", frontmatter, "")
 
 	data, _ := os.ReadFile(path)
 	got := string(data)
@@ -157,5 +159,80 @@ func TestMCPAuditLoadArtifact_NoDirectiveNoRedaction(t *testing.T) {
 	}
 	if strings.Contains(got, "[redacted]") {
 		t.Errorf("no directive should produce no redaction:\n%s", got)
+	}
+	if strings.Contains(got, `"context"`) {
+		t.Errorf("no directive should leave the context empty:\n%s", got)
+	}
+}
+
+// Spec: §8.1, §8.3, §7.2.2 — each local event records caller.client with
+// the members podium-mcp reports for the call and carries no context.source
+// key. The host members come from the accepted initialize.
+func TestMCPLocalEvents_RecordCallerClient(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, err := audit.NewFileSink(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &mcpServer{
+		cfg:         &config{harness: "claude-code"},
+		audit:       sink,
+		sessionID:   "sess-6",
+		hostName:    "cursor",
+		hostVersion: "2.0",
+	}
+	s.auditMeta(audit.EventDomainLoaded, "finance/close", "claude-code")
+	s.auditSearch(audit.EventArtifactsSearched, "forecast", "claude-code")
+	s.auditLoadArtifact("team/notes", "---\nname: notes\ntype: skill\nversion: 1.0.0\n---\n", "codex")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("got %d local events, want 3:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	for i, wantHarness := range []string{"claude-code", "claude-code", "codex"} {
+		var ev struct {
+			Caller struct {
+				Client map[string]string `json:"client"`
+			} `json:"caller"`
+			Context map[string]string `json:"context"`
+		}
+		if err := json.Unmarshal([]byte(lines[i]), &ev); err != nil {
+			t.Fatalf("decode event %d: %v", i, err)
+		}
+		want := map[string]string{
+			"kind": "mcp", "name": "podium-mcp", "version": buildinfo.Version,
+			"host": "cursor", "host_version": "2.0", "harness": wantHarness,
+		}
+		if !reflect.DeepEqual(ev.Caller.Client, want) {
+			t.Errorf("event %d caller.client = %v, want %v", i, ev.Caller.Client, want)
+		}
+		if _, ok := ev.Context["source"]; ok {
+			t.Errorf("event %d carries context.source: %v", i, ev.Context)
+		}
+	}
+	if err := sink.Verify(context.Background()); err != nil {
+		t.Errorf("Verify: %v", err)
+	}
+}
+
+// Spec: §7.2.2, §6.7 — only load_artifact reports the per-call harness
+// argument; every other meta-tool reports the deployment default.
+func TestCallHarness_LoadArtifactOnly(t *testing.T) {
+	t.Parallel()
+	s := &mcpServer{cfg: &config{harness: "claude-code"}}
+	args := map[string]any{"harness": "cursor"}
+	if got := s.callHarness("/v1/load_artifact", args); got != "cursor" {
+		t.Errorf("load_artifact harness = %q, want cursor", got)
+	}
+	if got := s.callHarness("/v1/search_artifacts", args); got != "claude-code" {
+		t.Errorf("search_artifacts harness = %q, want claude-code", got)
+	}
+	if got := s.callHarness("/v1/load_artifact", nil); got != "claude-code" {
+		t.Errorf("load_artifact without argument = %q, want claude-code", got)
 	}
 }

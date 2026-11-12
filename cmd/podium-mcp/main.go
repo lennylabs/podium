@@ -505,6 +505,12 @@ type mcpServer struct {
 	// loop is single-threaded, so these need no extra synchronization.
 	hostSupportsRoots bool
 	rootsRequested    bool
+	// hostName and hostVersion are the MCP host's initialize clientInfo,
+	// reported as the §7.2.2 host and host_version members. They are set
+	// only after the handshake succeeds, so a refused initialize leaves
+	// them empty. The single-threaded serve loop needs no lock for them.
+	hostName    string
+	hostVersion string
 	// audit is the optional §6.2/§8.3 local audit sink (PODIUM_AUDIT_SINK),
 	// the §9.1 LocalAuditSink seam. Nil when the var is unset, in which case
 	// auditing is left to the registry. When set, meta-tool calls append a
@@ -683,22 +689,51 @@ func isAuditEndpoint(v string) bool {
 	return strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://")
 }
 
+// client returns the §7.2.2 client identification podium-mcp reports for a
+// call that resolves to harness: the X-Podium-Client header value on the
+// registry request and the §8.1 caller.client on the local audit event.
+//
+// Spec: §7.2.2
+func (s *mcpServer) client(harness string) *audit.CallerClient {
+	return audit.NormalizeClient(audit.CallerClient{
+		Kind:        "mcp",
+		Name:        "podium-mcp",
+		Version:     buildinfo.Version,
+		Host:        s.hostName,
+		HostVersion: s.hostVersion,
+		Harness:     harness,
+	})
+}
+
+// callHarness returns the harness a registry request for path reports in
+// its §7.2.2 harness member. Only load_artifact takes a per-call harness
+// argument (§6.7); every other meta-tool reports the deployment default.
+//
+// Spec: §7.2.2, §6.7
+func (s *mcpServer) callHarness(path string, args map[string]any) string {
+	if path == "/v1/load_artifact" {
+		return harnessFromArgs(s.cfg.harness, args)
+	}
+	return s.cfg.harness
+}
+
 // auditMeta appends a local audit event for a meta-tool call when a sink
 // is configured (§6.2). It is a no-op when auditing is registry-only.
 // Failures are swallowed: a local-audit write must not break a tool call,
 // and the registry audit stream remains the authoritative record. The
 // in-flight call's trace id (§8.1) is stamped so the local event shares
-// the registry stream's trace id.
-func (s *mcpServer) auditMeta(t audit.EventType, target string) {
+// the registry stream's trace id, and caller.client records the value the
+// call's registry request carries for harness.
+func (s *mcpServer) auditMeta(t audit.EventType, target, harness string) {
 	if s.audit == nil {
 		return
 	}
 	_ = s.audit.Append(context.Background(), audit.Event{
-		Type:    t,
-		Caller:  s.sessionID,
-		Target:  target,
-		TraceID: s.traceID(),
-		Context: map[string]string{"source": "mcp"},
+		Type:         t,
+		Caller:       s.sessionID,
+		CallerClient: s.client(harness),
+		Target:       target,
+		TraceID:      s.traceID(),
 	})
 }
 
@@ -708,28 +743,29 @@ func (s *mcpServer) auditMeta(t audit.EventType, target string) {
 // fields (for example bank_account or ssn); auditLoadArtifact surfaces
 // those field values into the event context and masks them to [redacted],
 // the same directive the registry honors on its own stream. With no
-// audit_redact directive the event carries only the structural source key.
-// The in-flight trace id (§8.1) is stamped for cross-stream correlation.
-func (s *mcpServer) auditLoadArtifact(id, frontmatter string) {
+// audit_redact directive the event carries an empty context. The in-flight
+// trace id (§8.1) is stamped for cross-stream correlation, and
+// caller.client records the value podium-mcp builds for the load's harness,
+// including on a load that sends no registry request.
+func (s *mcpServer) auditLoadArtifact(id, frontmatter, harness string) {
 	if s.audit == nil {
 		return
 	}
 	ev := audit.Event{
-		Type:    audit.EventArtifactLoaded,
-		Caller:  s.sessionID,
-		Target:  id,
-		TraceID: s.traceID(),
-		Context: map[string]string{"source": "mcp"},
+		Type:         audit.EventArtifactLoaded,
+		Caller:       s.sessionID,
+		CallerClient: s.client(harness),
+		Target:       id,
+		TraceID:      s.traceID(),
 	}
 	// §8.2 manifest-declared redaction: pull the author-named sensitive
 	// fields into the context so the directive has a concrete target, then
 	// mask them. RedactFields lower-cases keys for matching, so the value
 	// reaches the sink only as [redacted].
 	if redactKeys := manifestRedactKeys(frontmatter); len(redactKeys) > 0 {
+		ev.Context = map[string]string{}
 		for k, v := range manifest.FrontmatterFields([]byte(frontmatter), redactKeys) {
-			if _, exists := ev.Context[k]; !exists {
-				ev.Context[k] = v
-			}
+			ev.Context[k] = v
 		}
 		ev.Context = audit.RedactFields(ev.Context, redactKeys)
 	}
@@ -755,16 +791,18 @@ func manifestRedactKeys(frontmatter string) []string {
 // applying the §8.2 default-on query-text scrub to the free-text query
 // before it lands in the local sink. A nil sink is a no-op; a nil scrubber
 // (operator-disabled) writes the query unredacted. The in-flight trace id
-// (§8.1) is stamped so the local event shares the registry stream's id.
-func (s *mcpServer) auditSearch(t audit.EventType, query string) {
+// (§8.1) is stamped so the local event shares the registry stream's id, and
+// caller.client records the value the call's registry request carries.
+func (s *mcpServer) auditSearch(t audit.EventType, query, harness string) {
 	if s.audit == nil {
 		return
 	}
 	ev := audit.Event{
-		Type:    t,
-		Caller:  s.sessionID,
-		TraceID: s.traceID(),
-		Context: map[string]string{"source": "mcp", "query": query},
+		Type:         t,
+		Caller:       s.sessionID,
+		CallerClient: s.client(harness),
+		TraceID:      s.traceID(),
+		Context:      map[string]string{"query": query},
 	}
 	ev = s.scrubber.ScrubEvent(ev)
 	_ = s.audit.Append(context.Background(), ev)
@@ -1174,6 +1212,10 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 			}
 			return resp
 		}
+		// §7.2.2: the host members are recorded only once the handshake
+		// is accepted, so a refused initialize reports no host.
+		s.hostName = initParams.ClientInfo.Name
+		s.hostVersion = initParams.ClientInfo.Version
 		// §5 capability set: `{tools: {}, resources: {},
 		// sessionCorrelation: true}`. tools/resources are MCP capability
 		// objects ({} = present, no listChanged/subscribe sub-features);
@@ -1300,10 +1342,10 @@ func (s *mcpServer) dispatchTool(p toolCallParams) any {
 		// emitted inside loadDomain so it fires once on every path.
 		return s.loadDomain(p.Arguments)
 	case "search_domains":
-		s.auditSearch(audit.EventDomainsSearched, argString(p.Arguments, "query"))
+		s.auditSearch(audit.EventDomainsSearched, argString(p.Arguments, "query"), s.cfg.harness)
 		return s.proxyGet("/v1/search_domains", p.Arguments, map[string]any{"results": []any{}})
 	case "search_artifacts":
-		s.auditSearch(audit.EventArtifactsSearched, argString(p.Arguments, "query"))
+		s.auditSearch(audit.EventArtifactsSearched, argString(p.Arguments, "query"), s.cfg.harness)
 		return s.searchArtifacts(p.Arguments)
 	case "load_artifact":
 		// The artifact.loaded local audit event is emitted from the load
@@ -1909,8 +1951,14 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	// §8.1 / §8.2: record the local artifact.loaded event with the in-flight
 	// trace id and the manifest's audit_redact directive applied. Emitted here
 	// (rather than at dispatch) so the verified frontmatter supplies the
-	// sensitive field values the directive masks.
-	s.auditLoadArtifact(resp.ID, resp.Frontmatter)
+	// sensitive field values the directive masks. Every load path passes
+	// the per-call harness (harnessFromArgs); an empty one falls back to the
+	// deployment default, as materialization does below.
+	harnessID := o.harness
+	if harnessID == "" {
+		harnessID = s.cfg.harness
+	}
+	s.auditLoadArtifact(resp.ID, resp.Frontmatter, harnessID)
 	// §4.4.1 sandbox profile enforcement.
 	if err := s.enforceSandboxPolicy(resp); err != nil {
 		return errorResult("materialize.sandbox_unsupported: " + err.Error())
@@ -1945,10 +1993,6 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	// on-disk write location.
 	root = absMaterializeRoot(root)
 	if root != "" {
-		harnessID := o.harness
-		if harnessID == "" {
-			harnessID = s.cfg.harness
-		}
 		a, err := s.adapters.Get(harnessID)
 		if err != nil {
 			return errorResult("config.unknown_harness: " + err.Error())
@@ -2184,7 +2228,7 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 	// §8.1 / §8.2: the overlay load path emits its own artifact.loaded event,
 	// matching the registry-served path (deliverLoadArtifact), so an overlay
 	// artifact's audit_redact directive is honored on the local sink too.
-	s.auditLoadArtifact(resp.ID, resp.Frontmatter)
+	s.auditLoadArtifact(resp.ID, resp.Frontmatter, harnessFromArgs(s.cfg.harness, args))
 	materialized := []string{}
 	var warnings []string
 	root := destFromArgs(args)
@@ -2573,6 +2617,8 @@ func (s *mcpServer) newRegistryRequest(method, path string, args map[string]any)
 	if s.cfg.tenantID != "" {
 		req.Header.Set("X-Podium-Tenant", s.cfg.tenantID)
 	}
+	// §7.2.2: name the client software on every control-plane request.
+	req.Header.Set(audit.ClientHeader, s.client(s.callHarness(path, args)).Header())
 	return req, nil
 }
 

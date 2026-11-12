@@ -86,6 +86,25 @@ The response carries no other field, and in particular no issuer, client identif
 
 ---
 
+## Client identification
+
+A request to a `/v1/` control-plane route can name its client software in the `X-Podium-Client` header, an `application/x-www-form-urlencoded` value with the members `kind`, `name`, `version`, `host`, `host_version`, and `harness`, where `kind` is `mcp`, `sync`, `sdk`, or `cli`.
+
+```http
+GET /v1/search_artifacts?query=x HTTP/1.1
+X-Podium-Client: kind=sdk&name=acme-tool&version=1.2.0
+```
+
+The registry ignores a value longer than 1024 bytes and a value that does not parse. When a member repeats, the registry uses its first occurrence, and it ignores unknown members. In each member, the registry replaces every byte other than an ASCII letter, a digit, a space, `.`, `_`, `-`, `+`, `/`, `(`, or `)` with `_`, and then truncates the member to 64 bytes. A value that leaves no non-empty member after sanitization is treated as absent and records no `caller.client`. Otherwise, the registry records `kind` as `other` when it is absent or is not exactly one of the values above.
+
+An absent or ignored value never causes a request to fail. The value is never an input to authentication, authorization, visibility, quotas, audit sampling, or tenant selection.
+
+The first-party clients send the header on every control-plane request and omit it on presigned links, on `/objects` links, and on `/healthz` and `/readyz`.
+
+The value appears in audit records as `caller.client`, as described in the operator guide's [Audit records](../deployment/operator-guide#audit-records) section. The values each first-party client sends are listed in [§7.2.2 of the specification](https://github.com/lennylabs/podium/blob/main/spec/07-external-integration.md#722-client-identification).
+
+---
+
 ## SLO targets (server source)
 
 | Endpoint | p99 |

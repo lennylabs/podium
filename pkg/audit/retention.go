@@ -228,10 +228,21 @@ func (s EraseScope) includes(recTenant string) bool {
 // dictionary over candidate user IDs and defeats de-identification. The zero
 // scope is refused with ErrEraseScope before the file is read.
 //
+// client is the §8.1 caller.client of the erase request, or nil when the
+// erasure serves no request (the offline CLI form) or the request named no
+// client. EraseUser normalizes it onto the user.erased event itself, because
+// rewriteWithChain hashes that event without going through Append. The
+// client is a parameter of its own rather than a field of EraseScope: the
+// cross-tenant guard refuses only the zero EraseScope, so a header-derived
+// field there would let a scope with no tenant and Unlabeled false pass the
+// guard and select every tenant's records.
+//
 // Returns the number of in-scope events transformed (excludes the appended
 // user.erased event). The count covers nothing outside the scope, so it
 // carries no information about other tenants' records.
-func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string, scope EraseScope) (int, error) {
+//
+// Spec: §8.1, §8.5
+func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string, client *CallerClient, scope EraseScope) (int, error) {
 	if userID == "" {
 		return 0, fmt.Errorf("audit.erase: userID is required")
 	}
@@ -264,7 +275,11 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string, sc
 	if len(events) > 0 {
 		supersededHead = events[len(events)-1].Hash
 	}
-	events = append(events, UserErasedEvent(userID, salt, admin, scope.Tenant, transformed, supersededHead))
+	erased := UserErasedEvent(userID, salt, admin, scope.Tenant, transformed, supersededHead)
+	if client != nil {
+		erased.CallerClient = NormalizeClient(*client)
+	}
+	events = append(events, erased)
 	if err := rewriteWithChain(sink.path, events); err != nil {
 		return 0, err
 	}

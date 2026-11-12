@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -198,5 +199,109 @@ func TestAuditEmitterFor_NoMetaRecordsNoTenant(t *testing.T) {
 	events := sink.Events()
 	if len(events) != 1 || events[0].Tenant != "" {
 		t.Errorf("events = %+v, want one event with no tenant", events)
+	}
+}
+
+// searchEventsWithClient boots a server whose read events flow through
+// auditEmitterFor into a memory sink under sampler, issues one search as id
+// with header as its X-Podium-Client value (none when empty), and returns the
+// recorded events.
+func searchEventsWithClient(t *testing.T, id layer.Identity, header string, sampler *audit.Sampler, opts ...server.Option) []audit.Event {
+	t.Helper()
+	sink := audit.NewMemory()
+	reg := core.New(store.NewMemory(), "default", nil).WithAudit(auditEmitterFor(sink, audit.NewPIIScrubber(), sampler))
+	opts = append([]server.Option{
+		server.WithIdentityResolver(func(*http.Request) layer.Identity { return id }),
+	}, opts...)
+	ts := httptest.NewServer(server.New(reg, opts...).Handler())
+	defer ts.Close()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/v1/search_artifacts?query=variance", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if header != "" {
+		req.Header.Set(audit.ClientHeader, header)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET search_artifacts: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("search status = %d, want 200", resp.StatusCode)
+	}
+	return sink.Events()
+}
+
+// searchedEvent returns the single artifacts.searched event in events.
+func searchedEvent(t *testing.T, events []audit.Event) audit.Event {
+	t.Helper()
+	var found []audit.Event
+	for _, ev := range events {
+		if ev.Type == audit.EventType("artifacts.searched") {
+			found = append(found, ev)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("artifacts.searched events = %d, want 1 (events %+v)", len(found), events)
+	}
+	return found[0]
+}
+
+// A read event records the normalized X-Podium-Client value as caller.client
+// for an authenticated and a public caller, and records none when the header
+// is absent, oversized, or unparsable. The ignored header never fails the
+// read.
+//
+// Spec: §8.1, §7.2.2
+func TestAuditEmitterFor_ReadEventRecordsCallerClient(t *testing.T) {
+	t.Parallel()
+	alice := layer.Identity{Sub: "alice", Email: "alice@acme.com", IsAuthenticated: true}
+	sent := audit.CallerClient{Kind: "mcp", Host: "claude-code", Harness: "cursor"}
+	for _, tc := range []struct {
+		name   string
+		id     layer.Identity
+		opts   []server.Option
+		header string
+		want   *audit.CallerClient
+	}{
+		{"authenticated with header", alice, nil, sent.Header(), &sent},
+		{"public with header", layer.Identity{}, []server.Option{server.WithPublicMode()}, sent.Header(), &sent},
+		{"unknown kind becomes other", alice, nil, "kind=robot&name=x", &audit.CallerClient{Kind: "other", Name: "x"}},
+		{"absent header", alice, nil, "", nil},
+		{"oversized header", alice, nil, "name=" + strings.Repeat("a", 2048), nil},
+		{"unparsable header", alice, nil, "%zz", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ev := searchedEvent(t, searchEventsWithClient(t, tc.id, tc.header, nil, tc.opts...))
+			if !reflect.DeepEqual(ev.CallerClient, tc.want) {
+				t.Errorf("caller.client = %+v, want %+v", ev.CallerClient, tc.want)
+			}
+		})
+	}
+}
+
+// The §8.4 sampler decides on the event type alone: a header-bearing read of a
+// type sampled at rate 0 is dropped, and a read of an unsampled type is kept
+// with its caller.client.
+//
+// Spec: §8.4, §8.1
+func TestAuditEmitterFor_SamplingIgnoresCallerClient(t *testing.T) {
+	t.Parallel()
+	alice := layer.Identity{Sub: "alice", IsAuthenticated: true}
+	header := audit.CallerClient{Kind: "sdk", Name: "podium-py"}.Header()
+
+	dropAll := audit.NewSampler(map[audit.EventType]float64{"artifacts.searched": 0})
+	for _, ev := range searchEventsWithClient(t, alice, header, dropAll) {
+		if ev.Type == audit.EventType("artifacts.searched") {
+			t.Errorf("sampled-out artifacts.searched was written: %+v", ev)
+		}
+	}
+
+	other := audit.NewSampler(map[audit.EventType]float64{"domain.loaded": 0})
+	ev := searchedEvent(t, searchEventsWithClient(t, alice, header, other))
+	if ev.CallerClient == nil || ev.CallerClient.Kind != "sdk" || ev.CallerClient.Name != "podium-py" {
+		t.Errorf("caller.client = %+v, want kind=sdk name=podium-py", ev.CallerClient)
 	}
 }
