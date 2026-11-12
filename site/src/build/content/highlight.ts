@@ -14,6 +14,7 @@ import type { BuildDiagnostic } from "../types";
 export const LANGUAGES = [
   "bash",
   "go",
+  "http",
   "javascript",
   "json",
   "markdown",
