@@ -1,7 +1,7 @@
 # Proposal 0065: Take a git layer's username and token as write-only members apart from `repo` in the layer API, the CLI, the web UI, and declared layers
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-11). Signed off as staged, with OD-3 to OD-6 settled under their defaults as recorded in "Open questions". Verified on 2026-11-11 after 11 adversarial review rounds (12 findings fixed).
+- Status: Implemented (2026-11-11). Signed off as staged, with OD-3 to OD-6 settled under their defaults as recorded in "Open questions". Verified on 2026-11-11 after 11 adversarial review rounds (12 findings fixed).
 - Date: 2026-11-10
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: a registration whose `http` or `https` `repo` carries URL userinfo is refused, the `force_repo_overwrite` member and `--force-repo-overwrite` flag are removed, and a re-registration of an `ssh://` layer with the remote a read reports, which 0.6.0 refused with `redacted_repo`, stores that remote without its login name (D-9, D-2 matrix X7). It ships in 0.7.0, a MINOR release, after proposal 0054.
@@ -71,45 +71,45 @@ File and line citations are to `main` at `3662db49`, the merge of proposal 0054 
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3. The §7.3.1 credential members, the `url_credential` refusal, the `repo_credential` member and its layer object entry, the keep rule, and the patch, event, and Errors sentences land in one commit, because SPEC-2 retires the `redacted_repo` constraint that the Errors list names and SPEC-3 cites the rule SPEC-1 names.
+- [x] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3. The §7.3.1 credential members, the `url_credential` refusal, the `repo_credential` member and its layer object entry, the keep rule, and the patch, event, and Errors sentences land in one commit, because SPEC-2 retires the `redacted_repo` constraint that the Errors list names and SPEC-3 cites the rule SPEC-1 names.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-4. The "Declared repository credentials" paragraph lands after "Git provider selection".
+- [x] **S2 · spec** — SPEC-4. The "Declared repository credentials" paragraph lands after "Git provider selection".
       Levels: —. Depends on: S1
-- [ ] **S3 · spec** — SPEC-5. The §13.4 stored-form paragraph states the start-time rewrite of a `git` layer's stored `repo`.
+- [x] **S3 · spec** — SPEC-5. The §13.4 stored-form paragraph states the start-time rewrite of a `git` layer's stored `repo`.
       Levels: —. Depends on: —
-- [ ] **S4 · code** — CODE-1. The `internal/repourl` package doc comment, the `TakesCredential` and `CarriesURLCredential` predicates, the `WithoutCredential`, `CredentialUsername`, and `WithCredential` helpers, and the sentinels.
+- [x] **S4 · code** — CODE-1. The `internal/repourl` package doc comment, the `TakesCredential` and `CarriesURLCredential` predicates, the `WithoutCredential`, `CredentialUsername`, and `WithCredential` helpers, and the sentinels.
       Levels: unit. Depends on: S1, S2
-- [ ] **S5 · test** — TEST-1. The `internal/repourl` table tests and the member-built closed-port rows of `TestGit_CloneErrorCarriesNoCredential` in `pkg/layer/source`.
+- [x] **S5 · test** — TEST-1. The `internal/repourl` table tests and the member-built closed-port rows of `TestGit_CloneErrorCarriesNoCredential` in `pkg/layer/source`.
       Levels: unit. Depends on: S4
-- [ ] **S6 · code** — CODE-2. The handler members, refusals, keep rule, and update rotation, the `credentialApplies` predicate that the refusal and `wireLayer` share, the `LayerObject` wire wrapper with the conditional `repo_credential`, and the removal of the guard and `force_repo_overwrite`.
+- [x] **S6 · code** — CODE-2. The handler members, refusals, keep rule, and update rotation, the `credentialApplies` predicate that the refusal and `wireLayer` share, the `LayerObject` wire wrapper with the conditional `repo_credential`, and the removal of the guard and `force_repo_overwrite`.
       Levels: unit, integration, e2e. Depends on: S4
-- [ ] **S7 · test** — TEST-2. The handler, wire, and integration tests over the memory store and SQLite, and the rewrite of the guard tests.
+- [x] **S7 · test** — TEST-2. The handler, wire, and integration tests over the memory store and SQLite, and the rewrite of the guard tests.
       Levels: unit, integration. Depends on: S6
-- [ ] **S8 · code** — CODE-3. The declared `username` and `token` keys, the startup refusals on a declaration that sets a key, the seed join, and the URL-userinfo start log line.
+- [x] **S8 · code** — CODE-3. The declared `username` and `token` keys, the startup refusals on a declaration that sets a key, the seed join, and the URL-userinfo start log line.
       Levels: unit, integration, e2e. Depends on: S4
-- [ ] **S9 · test** — TEST-3. The declared-layer boot tests.
+- [x] **S9 · test** — TEST-3. The declared-layer boot tests.
       Levels: unit, integration. Depends on: S8
-- [ ] **S10 · code** — CODE-4. The CLI credential flags and the removal of `--force-repo-overwrite`.
+- [x] **S10 · code** — CODE-4. The CLI credential flags and the removal of `--force-repo-overwrite`.
       Levels: unit, e2e. Depends on: S6
-- [ ] **S11 · code** — CODE-5. The web API types, the register and edit dialog fields, the edit dialog's credential fields gated on the presence of `repo_credential`, the stored-credential marker, the removal checkbox gated on its value, the design brief, and the rebuilt `web/bundle`.
+- [x] **S11 · code** — CODE-5. The web API types, the register and edit dialog fields, the edit dialog's credential fields gated on the presence of `repo_credential`, the stored-credential marker, the removal checkbox gated on its value, the design brief, and the rebuilt `web/bundle`.
       Levels: unit, e2e. Depends on: S6
-- [ ] **S12 · test** — TEST-5. The vitest surface cases for both dialogs and the stored-credential marker.
+- [x] **S12 · test** — TEST-5. The vitest surface cases for both dialogs and the stored-credential marker.
       Levels: unit. Depends on: S11
-- [ ] **S13 · test** — TEST-4. The end-to-end CLI, declared-layer, and served-bundle tests through the binary, and the `cmd/podium` unit tests of the CLI credential flags.
+- [x] **S13 · test** — TEST-4. The end-to-end CLI, declared-layer, and served-bundle tests through the binary, and the `cmd/podium` unit tests of the CLI credential flags.
       Levels: unit, e2e. Depends on: S8, S10, S11
-- [ ] **S14 · code** — CODE-6. `layerRepoFormTarget`, `MigrateLayerRepoForm` on SQLite and Postgres, and the boot call.
+- [x] **S14 · code** — CODE-6. `layerRepoFormTarget`, `MigrateLayerRepoForm` on SQLite and Postgres, and the boot call.
       Levels: unit, integration, e2e. Depends on: S3
-- [ ] **S15 · test** — TEST-6. The rule, store, boot, and end-to-end tests of the rewrite.
+- [x] **S15 · test** — TEST-6. The rule, store, boot, and end-to-end tests of the rewrite.
       Levels: unit, integration, e2e. Depends on: S10, S14
-- [ ] **S16 · docs** — DOC-1. `docs/deployment/layers.md`, and the operator guide's rollback-floor stored-form, mixed-version, declared-layer, and recovery sentences, which cite the D-2 matrix cells.
+- [x] **S16 · docs** — DOC-1. `docs/deployment/layers.md`, and the operator guide's rollback-floor stored-form, mixed-version, declared-layer, and recovery sentences, which cite the D-2 matrix cells.
       Levels: e2e. Depends on: S8, S10, S14
-- [ ] **S17 · docs** — DOC-2. `docs/reference/http-api.md`.
+- [x] **S17 · docs** — DOC-2. `docs/reference/http-api.md`.
       Levels: —. Depends on: S6
-- [ ] **S18 · docs** — DOC-3. `docs/reference/cli.md`.
+- [x] **S18 · docs** — DOC-3. `docs/reference/cli.md`.
       Levels: e2e. Depends on: S10, S16
-- [ ] **S19 · test** — MV-1. The S89 rewrite, the S103 edits, the S58 step 1 member list and step 3 expectation, and the index row in `test/manual-validation.md`.
+- [x] **S19 · test** — MV-1. The S89 rewrite, the S103 edits, the S58 step 1 member list and step 3 expectation, and the index row in `test/manual-validation.md`.
       Levels: e2e. Depends on: S8, S10, S11, S14
-- [ ] **S20 · docs** — DOC-4. The `[Unreleased]` CHANGELOG reconciliation and entry.
+- [x] **S20 · docs** — DOC-4. The `[Unreleased]` CHANGELOG reconciliation and entry.
       Levels: —. Depends on: S1 to S19
 
 **Ordering constraints.**
