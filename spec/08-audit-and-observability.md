@@ -114,6 +114,8 @@ Defaults, configurable per deployment:
 | Deprecated artifact versions        | 90 days after the deprecation flag is set               |
 | Layers unregistered by their owners | 30 days (artifacts soft-deleted, recoverable via admin) |
 
+Retention rewrites only the file destination (§8.3). The receiving system of a stdout, HTTP, or OTLP destination owns the retention of the records it received.
+
 Optional sampling for high-volume low-sensitivity events (e.g., `domain.loaded` at 10% sample) reduces storage cost.
 
 ## 8.5 Erasure
@@ -129,9 +131,9 @@ The first form calls the registry. The second form is the offline erasure form: 
 - Redacts the user identity (replaces it with `redacted-<sha256(user_id+salt)>`) in the requesting tenant's audit records. On a multi-tenant registry, these are the records whose `tenant` (§8.1) is the tenant §6.3.1 selects for the request. Alias discovery reads only those records. On a single-tenant registry, these are the records whose `tenant` is the sole tenant and the records that name no tenant.
 - Preserves audit event sequencing for integrity.
 - On a multi-tenant registry, erasure acts in the tenant §6.3.1 selects for the request. The admin check (§4.7.2) runs in that tenant, and only that tenant's layers are purged. Under `oidc-jwt`, a request whose verified organization names no provisioned tenant is rejected with `auth.tenant_unknown` (§6.3.1). Any other request that resolves to no tenant is refused with `403 auth.forbidden` before the admin check, before any layer is read, and before any audit record is rewritten.
-- On a multi-tenant registry, erasure leaves records that name no tenant (§8.1) unchanged, and the response carries no information about them, so a tenant admin cannot learn whether the user appears in records outside the tenant. An operator redacts them with the offline erasure form shown above, run against the registry's file sink (`PODIUM_AUDIT_LOG_PATH`, §13.12) while the registry is stopped. That form reaches every record in the file whatever its tenant, and every tombstone it writes uses the salt the operator supplies.
+- On a multi-tenant registry, erasure leaves records that name no tenant (§8.1) unchanged, and the response carries no information about them, so a tenant admin cannot learn whether the user appears in records outside the tenant. An operator redacts them with the offline erasure form shown above, run against the registry stream's file destination (`PODIUM_AUDIT_LOG_PATH`, §13.12) while the registry is stopped. That form reaches every record in the file whatever its tenant, and every tombstone it writes uses the salt the operator supplies.
 
-Use this command for GDPR right-to-erasure. Erasure is itself logged as a `user.erased` event that names the requesting tenant. The event is recorded whether the registry sink is a file or an external endpoint, and with an external endpoint the registry rewrites no record and the receiving system owns redaction of the shipped stream.
+Use this command for GDPR right-to-erasure. Erasure is itself logged as a `user.erased` event that names the requesting tenant. Erasure through the registry rewrites the registry stream's file destination when its list names one, and every destination of that stream receives the `user.erased` event. When the list names no file destination, the registry rewrites no record and records only the `user.erased` event. The offline form rewrites only the file at `<file>`, and its `user.erased` event reaches no other destination. The registry cannot reach records already delivered to a stdout, HTTP, or OTLP destination, and the receiving system owns their redaction.
 
 ## 8.6 Audit Integrity
 
