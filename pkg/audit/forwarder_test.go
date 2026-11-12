@@ -226,11 +226,16 @@ func appendTarget(t *testing.T, s *Stream, target string) {
 	}
 }
 
-func closeWithin(t *testing.T, s *Stream, d time.Duration) error {
+// closeWithin closes s on a context that ends after d. A forwarder reports
+// the records its flush leaves undelivered only through the drop log, so
+// Close returns nil even when the deadline cut the flush short.
+func closeWithin(t *testing.T, s *Stream, d time.Duration) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), d)
 	defer cancel()
-	return s.Close(ctx)
+	if err := s.Close(ctx); err != nil {
+		t.Fatalf("Close = %v, want nil: the drop is reported only through the drop log", err)
+	}
 }
 
 // Batches are cut at 500 records and at 1 MiB, and a partial batch is sent
@@ -376,9 +381,7 @@ func TestHTTPDest_NetworkErrorRetries(t *testing.T) {
 	if d := gate.next(t); d < 0 || d > time.Second {
 		t.Fatalf("first backoff %v outside [0, 1s]", d)
 	}
-	if err := closeWithin(t, s, 100*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Close = %v, want the deadline", err)
-	}
+	closeWithin(t, s, 100*time.Millisecond)
 	queued, dropped := totals(obs)
 	if queued["http"] != 0 || dropped["http,shutdown"] != 1 {
 		t.Fatalf("queued %v dropped %v, want 0 and one shutdown", queued, dropped)
@@ -510,10 +513,12 @@ func TestHTTPDest_RecordLargerThanBoundDropsOnEmptyQueue(t *testing.T) {
 
 // A batch held across a backoff counts toward the bound, a tick during the
 // backoff sends nothing, and close counts the held batch as shutdown when
-// its context ends.
+// its context ends. The shutdown drop reaches the log once, through the
+// drop log, and Shutdown writes no second line for it.
 //
 // Spec: §8.3, §13.12
 func TestHTTPDest_HeldBatchCountsTowardBound(t *testing.T) {
+	logs := captureLog(t)
 	fire := stubTicker(t)
 	gate := stubSleepGate(t, true)
 	flushCtx, cancelFlush := context.WithCancel(context.Background())
@@ -541,12 +546,23 @@ func TestHTTPDest_HeldBatchCountsTowardBound(t *testing.T) {
 	if queued["http"] != 2 || dropped["http,queue_full"] != 1 {
 		t.Fatalf("queued %v dropped %v, want 2 queued and one queue_full", queued, dropped)
 	}
-	if err := s.Close(flushCtx); !errors.Is(err, context.Canceled) {
-		t.Fatalf("Close = %v, want the cancellation", err)
+	if err := s.Close(flushCtx); err != nil {
+		t.Fatalf("Close = %v, want nil: the drop is reported only through the drop log", err)
 	}
 	queued, dropped = totals(obs)
 	if queued["http"] != 0 || dropped["http,shutdown"] != 2 {
 		t.Fatalf("after Close queued %v dropped %v, want 0 and two shutdown", queued, dropped)
+	}
+	s.Shutdown()
+	out := logs.String()
+	if n := strings.Count(out, "audit: dropped"); n != 2 {
+		t.Fatalf("log holds %d drop lines, want one queue_full and one shutdown: %q", n, out)
+	}
+	if n := strings.Count(out, "record(s) for destination "+rcv.srv.URL+"/p: shutdown"); n != 1 {
+		t.Fatalf("log holds %d shutdown drop lines, want 1: %q", n, out)
+	}
+	if strings.Contains(out, "shutdown flush") {
+		t.Fatalf("Shutdown logged the drop a second time: %q", out)
 	}
 }
 
@@ -643,9 +659,7 @@ func TestHTTPDest_HungReceiverIsBoundedByCloseDeadline(t *testing.T) {
 		if reqs[0].lines[0].Hash != reqs[1].lines[0].Hash {
 			t.Fatalf("the retry carried a different batch")
 		}
-		if err := closeWithin(t, s, 100*time.Millisecond); err == nil {
-			t.Fatalf("Close against a hung receiver returned nil")
-		}
+		closeWithin(t, s, 100*time.Millisecond)
 		if _, dropped := totals(obs); dropped["http,shutdown"] != 1 {
 			t.Fatalf("dropped %v, want one shutdown", dropped)
 		}
@@ -673,8 +687,8 @@ func TestHTTPDest_HungReceiverIsBoundedByCloseDeadline(t *testing.T) {
 		cancel()
 		select {
 		case err := <-closed:
-			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("Close = %v, want the cancellation", err)
+			if err != nil {
+				t.Fatalf("Close = %v, want nil: the drop is reported only through the drop log", err)
 			}
 		case <-time.After(time.Second):
 			t.Fatalf("Close did not return within 1s of its cancellation")
@@ -792,9 +806,7 @@ func TestHTTPDest_HeadersAndTLS(t *testing.T) {
 			before := rcv.count()
 			s := openStream(t, url, opts)
 			appendN(t, s, 1)
-			if err := closeWithin(t, s, 300*time.Millisecond); err == nil {
-				t.Fatalf("Close returned nil for a refused handshake")
-			}
+			closeWithin(t, s, 300*time.Millisecond)
 			if _, dropped := totals(obs); dropped["http,shutdown"] != 1 {
 				t.Fatalf("dropped %v, want one shutdown", dropped)
 			}

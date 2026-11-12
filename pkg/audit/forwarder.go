@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"math/bits"
@@ -426,6 +425,12 @@ func (f *forwarder) retryAfter(v string) time.Duration {
 // requestContext(ctx, requestTimeout), until the queue is empty or ctx
 // ends, and counts what remains as shutdown.
 //
+// The records left undelivered are reported only through the bound drop
+// method, so the drop log's per-minute limit governs their one log line.
+// close returns nil for them: an error describing them would reach
+// Stream.Shutdown's log.Printf and write a second, unlimited line for the
+// same destination and reason.
+//
 // Spec: §8.3
 func (f *forwarder) close(ctx context.Context) error {
 	f.mu.Lock()
@@ -437,27 +442,21 @@ func (f *forwarder) close(ctx context.Context) error {
 		<-done
 	}
 	f.sendQueued(ctx, false)
-	n := f.dropRemaining()
-	if n == 0 {
-		return nil
-	}
-	// sendQueued returns with records queued only once ctx has ended, so
-	// ctx.Err() is non-nil here.
-	return fmt.Errorf("audit: flush to %s left %d record(s) undelivered: %w", f.name, n, ctx.Err())
+	f.dropRemaining()
+	return nil
 }
 
 // dropRemaining counts every record still queued as shutdown and empties
 // the queue, reporting nothing when it is already empty.
-func (f *forwarder) dropRemaining() int {
+func (f *forwarder) dropRemaining() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	n := len(f.records)
 	if n == 0 {
-		return 0
+		return
 	}
 	f.removeLocked(n)
 	f.drop(ReasonShutdown, n)
-	return n
 }
 
 // lockedReader serializes reads of a Rand that the stream's forwarders
