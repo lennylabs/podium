@@ -53,8 +53,23 @@ func eraseTestEndpoint(t *testing.T, admin layer.Identity, authErr error) (*http
 
 func postErase(t *testing.T, url string, body any) *http.Response {
 	t.Helper()
+	return postEraseWithClient(t, url, body, "")
+}
+
+// postEraseWithClient posts an erase request that names its client software
+// in the X-Podium-Client header, or sends no header when client is empty.
+func postEraseWithClient(t *testing.T, url string, body any, client string) *http.Response {
+	t.Helper()
 	b, _ := json.Marshal(body)
-	resp, err := http.Post(url+"/v1/admin/erase", "application/json", bytes.NewReader(b))
+	req, err := http.NewRequest(http.MethodPost, url+"/v1/admin/erase", bytes.NewReader(b))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if client != "" {
+		req.Header.Set(audit.ClientHeader, client)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST erase: %v", err)
 	}
@@ -285,6 +300,70 @@ func TestErase_EndpointSinkAppendFailure(t *testing.T) {
 	}
 	if env := decodeEnvelope(t, resp); env.Code != "registry.unavailable" || !strings.Contains(env.Message, "user.erased") {
 		t.Errorf("envelope = %s %q, want registry.unavailable naming user.erased", env.Code, env.Message)
+	}
+}
+
+// eraseClientHeader is the X-Podium-Client value the erase client tests send.
+const eraseClientHeader = "kind=mcp&host=claude-code&harness=cursor"
+
+// Spec: §7.2.2, §8.1, §8.5 — with a file sink, the user.erased that EraseUser
+// appends and the layer event of each purged personal layer record the
+// request's caller.client, and the rewritten chain still verifies.
+func TestErase_FileSinkRecordsCallerClient(t *testing.T) {
+	t.Parallel()
+	admin := layer.Identity{Sub: "carol@acme.com", IsAuthenticated: true}
+	ts, sinkPath, st := eraseTestEndpoint(t, admin, nil)
+	if err := st.PutLayerConfig(context.Background(), store.LayerConfig{
+		TenantID: "t", ID: "alice-personal", SourceType: "local", LocalPath: "/tmp/x",
+		UserDefined: true, Owner: "alice@acme.com", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
+	resp := postEraseWithClient(t, ts.URL, map[string]any{"user_id": "alice@acme.com", "salt": "s"}, eraseClientHeader)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	want := map[string]any{"kind": "mcp", "host": "claude-code", "harness": "cursor"}
+	seen := map[string]bool{}
+	for _, rec := range eraseRecords(t, sinkPath) {
+		typ, _ := rec["type"].(string)
+		caller, _ := rec["caller"].(map[string]any)
+		if !reflect.DeepEqual(caller["client"], want) {
+			t.Errorf("%s caller.client = %v, want %v", typ, caller["client"], want)
+		}
+		seen[typ] = true
+	}
+	for _, typ := range []string{string(audit.EventUserErased), string(audit.EventLayerUserRegistered)} {
+		if !seen[typ] {
+			t.Errorf("no %s record in the stream", typ)
+		}
+	}
+	verifySink, _ := audit.NewFileSink(sinkPath)
+	if err := verifySink.Verify(context.Background()); err != nil {
+		t.Errorf("hash chain broken after erase: %v", err)
+	}
+}
+
+// Spec: §7.2.2, §8.1, §8.5 — with an external endpoint sink, the user.erased
+// the registry appends records the request's caller.client.
+func TestErase_EndpointSinkRecordsCallerClient(t *testing.T) {
+	t.Parallel()
+	sink := audit.NewMemory()
+	hooks := 0
+	ts := endpointSinkErase(t, sink, &hooks)
+	resp := postEraseWithClient(t, ts.URL, map[string]any{"user_id": "alice@acme.com", "salt": "s"}, eraseClientHeader)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	events := sink.Events()
+	if len(events) != 1 || events[0].Type != audit.EventUserErased {
+		t.Fatalf("events = %+v, want one user.erased", events)
+	}
+	want := &audit.CallerClient{Kind: "mcp", Host: "claude-code", Harness: "cursor"}
+	if got := events[0].CallerClient; !reflect.DeepEqual(got, want) {
+		t.Errorf("user.erased CallerClient = %+v, want %+v", got, want)
 	}
 }
 

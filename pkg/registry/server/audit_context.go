@@ -38,6 +38,10 @@ type AuditMeta struct {
 	// for an unrouted request on a multi-tenant registry and never holds the
 	// podium:unrouted binding.
 	Tenant string
+	// Client is the §8.1 caller.client attribute parsed from the §7.2.2
+	// X-Podium-Client header, or nil when the header is absent or ignored.
+	// It is advisory and feeds no access decision.
+	Client *audit.CallerClient
 }
 
 // auditTenant resolves the §8.1 tenant label for a request-scoped event. On a
@@ -80,11 +84,17 @@ func AuditMetaFromContext(ctx context.Context) (AuditMeta, bool) {
 // otherwise generated so every request-scoped event carries one and both
 // audit streams can share it. Email and groups come from the OAuth-token
 // identity for authenticated callers; the source IP and X-Forwarded-User
-// are captured for public-mode callers per §8.1.
+// are captured for public-mode callers per §8.1. The self-reported client
+// comes from the X-Podium-Client header for every caller; an absent,
+// oversized, or malformed header yields no client and never fails the
+// request.
+//
+// Spec: §7.2.2, §8.1
 func auditMetaFrom(r *http.Request, id layer.Identity) AuditMeta {
 	m := AuditMeta{
 		TraceID:    traceIDFromRequest(r),
 		PublicMode: id.IsPublic || !id.IsAuthenticated,
+		Client:     audit.ParseClientHeader(r.Header.Get(audit.ClientHeader)),
 	}
 	if !m.PublicMode {
 		m.Email = id.Email
@@ -188,6 +198,8 @@ func (s *Server) withAuditMetaMiddleware(next http.Handler) http.Handler {
 // are not behind the middleware still record a trace id and caller
 // network. The §8.1 tenant label comes from the metadata, so a request with
 // no attached metadata records no tenant. A nil sink is a no-op.
+//
+// Spec: §7.2.2, §8.1
 func emitAuditEvent(sink audit.Sink, r *http.Request, id layer.Identity, typ audit.EventType, target string, fields map[string]string) {
 	if sink == nil {
 		return
@@ -197,13 +209,14 @@ func emitAuditEvent(sink audit.Sink, r *http.Request, id layer.Identity, typ aud
 		m = auditMetaFrom(r, id)
 	}
 	ev := audit.Event{
-		Type:       typ,
-		TraceID:    m.TraceID,
-		Caller:     callerIdentityString(id),
-		Target:     target,
-		Context:    fields,
-		PublicMode: m.PublicMode,
-		Tenant:     m.Tenant,
+		Type:         typ,
+		TraceID:      m.TraceID,
+		Caller:       callerIdentityString(id),
+		Target:       target,
+		Context:      fields,
+		PublicMode:   m.PublicMode,
+		Tenant:       m.Tenant,
+		CallerClient: m.Client,
 	}
 	if m.PublicMode {
 		ev.CallerNetwork = &audit.CallerNetwork{SourceIP: m.SourceIP, ForwardedUser: m.ForwardedUser}
