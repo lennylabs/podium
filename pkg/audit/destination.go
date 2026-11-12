@@ -132,20 +132,36 @@ func stdoutElement(opts OpenOptions) (destSpec, error) {
 	return destSpec{kind: kindStdout}, nil
 }
 
-// parseURLElement parses an element that contains "://".
+// urlKinds maps each recognized `scheme://` prefix to its destination kind
+// (§8.3).
+var urlKinds = map[string]destKind{
+	"http":       kindHTTP,
+	"https":      kindHTTP,
+	"otlp+http":  kindOTLP,
+	"otlp+https": kindOTLP,
+}
+
+// parseURLElement parses an element that contains "://". The element's kind
+// comes from the literal text before the first "://", compared without
+// regard to case. url.Parse reads the scheme only up to the first ":", so
+// "http:x://alice:pw@h" parses as scheme http with the rest opaque, where
+// neither the kind check nor the userinfo check would see the credential.
+// A parse whose scheme differs from that prefix, or that leaves opaque
+// text, therefore refuses as an unrecognized scheme and names the element
+// by schemeName alone.
+//
+// Spec: §8.3, §13.12
 func parseURLElement(elem string) (destSpec, error) {
-	scheme := elem[:strings.Index(elem, "://")]
+	prefix := strings.ToLower(elem[:strings.Index(elem, "://")])
 	u, err := url.Parse(elem)
 	if err != nil {
-		return destSpec{}, fmt.Errorf("an element with scheme %s does not parse as a URL", schemeName(scheme))
+		return destSpec{}, fmt.Errorf("an element with scheme %s does not parse as a URL", schemeName(prefix))
 	}
-	var kind destKind
-	switch strings.ToLower(u.Scheme) {
-	case "http", "https":
-		kind = kindHTTP
-	case "otlp+http", "otlp+https":
-		kind = kindOTLP
-	default:
+	if u.Scheme != prefix || u.Opaque != "" {
+		return destSpec{}, fmt.Errorf("an element with scheme %s has an unrecognized scheme", schemeName(prefix))
+	}
+	kind, ok := urlKinds[prefix]
+	if !ok {
 		return destSpec{}, fmt.Errorf("destination %s has an unrecognized scheme", redactedURL(u))
 	}
 	if u.User != nil {

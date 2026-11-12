@@ -35,6 +35,23 @@ func TestParseDestinations_TrimsWhitespace(t *testing.T) {
 	}
 }
 
+// A recognized `scheme://` prefix is matched without regard to case.
+//
+// Spec: §8.3
+func TestParseDestinations_SchemePrefixIgnoresCase(t *testing.T) {
+	t.Parallel()
+	specs, err := parseDestinations("HTTPS://h/x,Otlp+Http://c:4318", OpenOptions{})
+	if err != nil {
+		t.Fatalf("parseDestinations: %v", err)
+	}
+	if len(specs) != 2 || specs[0].kind != kindHTTP || specs[1].kind != kindOTLP {
+		t.Fatalf("got %+v, want one http and one otlp destination", specs)
+	}
+	if got := specs[0].name(); got != "https://h/x" {
+		t.Errorf("name = %q, want https://h/x", got)
+	}
+}
+
 // Every destination-list refusal wraps ErrConfig, names the list variable, and never
 // echoes a URL's userinfo, query, or unparseable text.
 //
@@ -51,6 +68,10 @@ func TestOpen_RefusesUnusableConfiguration(t *testing.T) {
 		{"empty element", a + ",,http://h/x", OpenOptions{}, []string{envRegistryPath, "element 2 is empty"}},
 		{"trailing empty element", a + ",", OpenOptions{}, []string{envRegistryPath, "is empty"}},
 		{"unrecognized scheme", "s3://alice:pw9x@bucket/key?sig=zq7k", OpenOptions{}, []string{envRegistryPath, "s3://bucket/key", "unrecognized scheme"}},
+		{"opaque http prefix with userinfo", "http:x://alice:pw9x@host/p?tok=zq7k", OpenOptions{}, []string{envRegistryPath, "malformed-scheme", "unrecognized scheme"}},
+		{"opaque otlp prefix with userinfo", "otlp+https:evil://alice:pw9x@c", OpenOptions{}, []string{envRegistryPath, "malformed-scheme", "unrecognized scheme"}},
+		{"prefix with a leading digit", "1http://alice:pw9x@h/x", OpenOptions{}, []string{envRegistryPath, "malformed-scheme", "does not parse"}},
+		{"uppercase unrecognized scheme", "S3://alice:pw9x@bucket/key", OpenOptions{}, []string{envRegistryPath, "s3://bucket/key", "unrecognized scheme"}},
 		{"unparseable URL", "http://%zz", OpenOptions{}, []string{envRegistryPath, "scheme http"}},
 		{"unparseable malformed scheme", "a b:c@d://x", OpenOptions{}, []string{envRegistryPath, "malformed-scheme"}},
 		{"unparseable empty scheme", "://x", OpenOptions{}, []string{envRegistryPath, "scheme-less"}},
