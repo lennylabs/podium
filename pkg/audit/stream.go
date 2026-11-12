@@ -375,12 +375,10 @@ func (s *Stream) Close(ctx context.Context) error {
 	return s.closeErr
 }
 
-// Shutdown flushes the stream within ShutdownTimeout, seals it, and then
-// writes every drop count the drop log still holds. The flush context
-// derives from context.Background, so a cancelled serve context never
-// shortens the flush. The drop log is written after Seal because a sealed
-// stream counts no further drop, so no count arrives after the last line.
-// It is the one call a process makes when it ends.
+// Shutdown flushes the stream within ShutdownTimeout and then seals it. The
+// flush context derives from context.Background, so a cancelled serve
+// context never shortens the flush. It is the one call a process makes when
+// it ends.
 //
 // Spec: §6.8, §8.3
 func (s *Stream) Shutdown() {
@@ -393,7 +391,6 @@ func (s *Stream) Shutdown() {
 		log.Printf("audit: shutdown flush: %v", err)
 	}
 	s.Seal()
-	s.drops.flush()
 }
 
 // Seal makes every later Append return ErrSealed. It takes s.mu, so an
