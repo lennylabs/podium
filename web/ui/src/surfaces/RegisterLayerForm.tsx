@@ -65,6 +65,11 @@ export function RegisterLayerForm({
   // cannot be registered without it.
   const [root, setRoot] = useState('');
   const [localPath, setLocalPath] = useState('');
+  // The credential a private http or https remote is fetched with. The token
+  // is write-only: no response returns it, and the form drops it once the
+  // registration is sent (§7.3.1).
+  const [repoUsername, setRepoUsername] = useState('');
+  const [repoSecret, setRepoSecret] = useState('');
   // The class defaults to the one the caller can register. A user-defined
   // layer's owner is derived from the caller's own subject and the registry
   // refuses the registration where none resolves, so a caller who holds a
@@ -178,6 +183,8 @@ export function RegisterLayerForm({
     repo,
     ref,
     localPath,
+    repoUsername,
+    repoSecret,
     userDefined,
     groupScoped,
     groupMembers,
@@ -203,6 +210,11 @@ export function RegisterLayerForm({
     if (pending) {
       return;
     }
+    // The credential members travel on the git arm alone, as the repository
+    // they qualify does, and only with a token: §7.3.1 refuses a non-empty
+    // username sent without one. A value left in a field the Local folder arm
+    // no longer draws therefore never reaches the registry.
+    const credential = sourceType === 'git' && repoSecret !== '';
     const body: LayerRegistration = {
       id,
       source_type: sourceType,
@@ -210,6 +222,8 @@ export function RegisterLayerForm({
       ref: sourceType === 'git' ? ref : undefined,
       root: sourceType === 'git' ? root : undefined,
       local_path: sourceType === 'local' ? localPath : undefined,
+      repo_username: credential && repoUsername !== '' ? repoUsername : undefined,
+      repo_token: credential ? repoSecret : undefined,
       user_defined: userDefined,
       // The registry derives a user-defined layer's visibility from the
       // registrant and refuses a registration asserting an admin-only field on
@@ -226,6 +240,7 @@ export function RegisterLayerForm({
       (next) => {
         setPending(false);
         setRefusal(null);
+        setRepoSecret('');
         setResult(next);
         onRegistered();
       },
@@ -382,6 +397,14 @@ export function RegisterLayerForm({
                   />
                 </label>
               </div>
+              <RepoCredentialFields
+                form="register"
+                username={repoUsername}
+                secret={repoSecret}
+                onUsername={setRepoUsername}
+                onSecret={setRepoSecret}
+                held={heldOn('repo-token')}
+              />
               <p className="quiet field-note" data-testid="register-git-note">
                 The ref is a branch, tag, or commit. Leave the root empty for the whole repository.
               </p>
@@ -529,7 +552,7 @@ export function RegisterLayerForm({
 
 /** HoldField identifies the field a registration hold stands on, so the field
  * itself can be marked invalid and pointed at the sentence stating the hold. */
-type HoldField = 'id' | 'repo' | 'ref' | 'local-path' | 'groups' | 'users';
+type HoldField = 'id' | 'repo' | 'ref' | 'repo-token' | 'local-path' | 'groups' | 'users';
 
 /** registrationHold names the field the submit is held on, or null when the
  * form is ready to send. The submit is disabled while a hold stands, and a
@@ -543,6 +566,8 @@ function registrationHold({
   repo,
   ref,
   localPath,
+  repoUsername,
+  repoSecret,
   userDefined,
   groupScoped,
   groupMembers,
@@ -555,6 +580,8 @@ function registrationHold({
   repo: string;
   ref: string;
   localPath: string;
+  repoUsername: string;
+  repoSecret: string;
   userDefined: boolean;
   groupScoped: boolean;
   groupMembers: string[];
@@ -588,8 +615,26 @@ function registrationHold({
   if (sourceType === 'git' && repo.trim() === '') {
     return { field: 'repo', message: 'Name the repository before registering.' };
   }
+  // §7.3.1 refuses an http or https repository that carries userinfo with
+  // `details.constraint: "url_credential"`, and the credential belongs in
+  // the Username and Token fields instead. The hold covers userinfo before
+  // the host alone. The rest of the refused class, an `@` after the host or a
+  // schemed value that does not parse, is left to that refusal, which arrives
+  // through ErrorState.
+  if (sourceType === 'git' && /^https?:\/\/[^/?#]*@/i.test(repo.trim())) {
+    return {
+      field: 'repo',
+      message: 'Remove the credential from the repository URL and enter it in Username and Token.',
+    };
+  }
   if (sourceType === 'git' && ref.trim() === '') {
     return { field: 'ref', message: 'Name the ref before registering.' };
+  }
+  // §7.3.1 refuses a non-empty username sent without a token, and the form
+  // sends neither member without one, so a username entered alone would be
+  // dropped silently. The form holds the write and names the missing token.
+  if (sourceType === 'git' && repoUsername !== '' && repoSecret === '') {
+    return { field: 'repo-token', message: 'Enter a token to go with the username.' };
   }
   if (sourceType === 'local' && localPath.trim() === '') {
     return { field: 'local-path', message: 'Name the local path before registering.' };
@@ -660,6 +705,68 @@ function RequiredField({
           onChange(event.target.value);
         }}
       />
+    </div>
+  );
+}
+
+/** RepoCredentialFields takes the credential a git layer's http or https
+ * repository is fetched with, apart from the repository URL. The register and
+ * the edit dialogs both draw it. The username is a plain field. The token is
+ * write-only (§7.3.1): no response returns it, so the field is never
+ * prefilled, and it is masked and marked `new-password` so the browser neither
+ * echoes it nor fills the reader's own password for this site into it. When
+ * the hold stands on the token, `held` carries the id of the element stating
+ * it. A disabled pair keeps its values, so the caller's send predicate decides
+ * whether they travel. */
+export function RepoCredentialFields({
+  form,
+  username,
+  secret,
+  onUsername,
+  onSecret,
+  disabled,
+  held,
+}: {
+  form: 'register' | 'update';
+  username: string;
+  secret: string;
+  onUsername: (next: string) => void;
+  onSecret: (next: string) => void;
+  disabled?: boolean;
+  held?: string;
+}) {
+  const { invalid, onBlur } = useHeldInvalid(held);
+  return (
+    <div className="field-pair" data-testid={`${form}-repo-credential`}>
+      <label className="field">
+        <span className="label">Username</span>
+        <input
+          type="text"
+          value={username}
+          autoComplete="off"
+          disabled={disabled}
+          data-testid={`${form}-repo-username`}
+          onChange={(event) => {
+            onUsername(event.target.value);
+          }}
+        />
+      </label>
+      <label className="field">
+        <span className="label">Token</span>
+        <input
+          type="password"
+          value={secret}
+          autoComplete="new-password"
+          disabled={disabled}
+          aria-invalid={invalid}
+          aria-describedby={held}
+          data-testid={`${form}-repo-token`}
+          onBlur={onBlur}
+          onChange={(event) => {
+            onSecret(event.target.value);
+          }}
+        />
+      </label>
     </div>
   );
 }

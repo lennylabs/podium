@@ -15,7 +15,7 @@ import { useState } from "react";
 
 import { SecretReveal, useSecretAcknowledgement } from "./SecretReveal";
 import { members, without } from "./members";
-import { TokenInput } from "./RegisterLayerForm";
+import { RepoCredentialFields, TokenInput } from "./RegisterLayerForm";
 import { mayTake } from "./layerrights";
 import type { LayerCapabilities } from "../session";
 import { Badge, ErrorState, Modal } from "../components/primitives";
@@ -48,6 +48,17 @@ export function UpdateLayerForm({
   const [localPath, setLocalPath] = useState(layer.local_path ?? "");
   const [policy, setPolicy] = useState(layer.force_push_policy ?? "tolerant");
   const [rotate, setRotate] = useState(false);
+  // §7.3.1: the registry carries repo_credential exactly on a layer whose
+  // update takes the credential members, and omits it on every other layer
+  // and in a 0.6.0 replica's response. The dialog therefore reads its gate
+  // from the member's presence and keeps no rule of its own about which
+  // repository takes a credential. The removal is offered only where the
+  // member is true, which is where it changes the stored repository.
+  const takesCredential = git && typeof layer.repo_credential === "boolean";
+  const credentialStored = takesCredential && layer.repo_credential === true;
+  const [repoUsername, setRepoUsername] = useState("");
+  const [repoSecret, setRepoSecret] = useState("");
+  const [clearCredential, setClearCredential] = useState(false);
   const editableVisibility = layer.user_defined !== true;
   const [isPublic, setPublic] = useState(layer.public === true);
   const [organization, setOrganization] = useState(layer.organization === true);
@@ -90,6 +101,12 @@ export function UpdateLayerForm({
       : mayNamePath
         ? { local_path: localPath, root }
         : { root };
+    if (takesCredential) {
+      Object.assign(
+        patch,
+        credentialPatch(repoUsername, repoSecret, clearCredential),
+      );
+    }
     if (editableVisibility) {
       // The patch carries every visibility member, so the registry applies
       // each one: an axis the reader turned off is withdrawn, and a member
@@ -104,6 +121,7 @@ export function UpdateLayerForm({
       (next) => {
         setPending(false);
         setRefusal(null);
+        setRepoSecret("");
         setResult(next);
         onUpdated();
       },
@@ -190,6 +208,40 @@ export function UpdateLayerForm({
                   </option>
                 </select>
               </label>
+              {takesCredential && (
+                <>
+                  <RepoCredentialFields
+                    form="update"
+                    username={repoUsername}
+                    secret={repoSecret}
+                    onUsername={setRepoUsername}
+                    onSecret={setRepoSecret}
+                    disabled={clearCredential}
+                  />
+                  <p
+                    className="quiet field-note"
+                    data-testid="update-repo-hint"
+                  >
+                    {credentialStored
+                      ? "Leave Username empty to keep the stored username."
+                      : "No credential is stored. A token entered without a " +
+                        "username is stored with an empty username."}
+                  </p>
+                  {credentialStored && (
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={clearCredential}
+                        data-testid="update-repo-clear"
+                        onChange={(event) => {
+                          setClearCredential(event.target.checked);
+                        }}
+                      />
+                      Remove the stored credential
+                    </label>
+                  )}
+                </>
+              )}
             </>
           ) : (
             mayNamePath && (
@@ -316,6 +368,26 @@ export function UpdateLayerForm({
       </form>
     </Modal>
   );
+}
+
+/** credentialPatch is the credential half of the patch. §7.3.1 refuses
+ * repo_token sent with clear_repo_credential, and a disabled input keeps the
+ * value typed into it before the removal box was checked, so each member is
+ * gated on the box rather than on the field alone. An empty field sends
+ * nothing: an omitted repo_username keeps the stored username, and §7.3.1
+ * requires a token to set a credential. */
+function credentialPatch(
+  username: string,
+  secret: string,
+  clear: boolean,
+): Pick<LayerUpdate, "repo_username" | "repo_token" | "clear_repo_credential"> {
+  if (clear) {
+    return { clear_repo_credential: true };
+  }
+  return {
+    repo_username: username === "" ? undefined : username,
+    repo_token: secret === "" ? undefined : secret,
+  };
 }
 
 /** useMemberList holds one visibility member list across the dialog: the

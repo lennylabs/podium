@@ -104,17 +104,21 @@ const readOnlyHeaderName = "X-Podium-Read-Only"
 // identifier it keys a row on, the class and the order that place the row in
 // the composition, the owner the ownership marker compares against, and the
 // staleness stamp the row renders, plus the force-push policy the update
-// form edits. The registry answers the §7.3.1 layer object, so every member
-// is lower snake_case. The bundle half of the assertion below is weak for
+// form edits and the repo_credential presence member that gates the edit
+// dialog's credential fields and marks a layer holding a credential. The
+// registry answers the §7.3.1 layer object, so every member is lower
+// snake_case. The bundle half of the assertion below is weak for
 // "id" and "order", because both strings occur in unrelated bundle code; the
 // wire half still pins their presence.
-var panelLayerFields = []string{"id", "order", "user_defined", "owner", "last_ingested_at", "force_push_policy"}
+var panelLayerFields = []string{"id", "order", "user_defined", "owner", "last_ingested_at", "force_push_policy", "repo_credential"}
 
-// panelLayerOmitted are the panel's members whose json tag carries omitempty
-// and which a layer served from a local path leaves unset, so the wire object
-// carries neither. Their names are checked against the struct tag through the
-// bundle alone.
-var panelLayerOmitted = map[string]bool{"last_ingested_at": true, "force_push_policy": true}
+// panelLayerOmitted are the panel's members that a layer served from a local
+// path leaves out of the wire object: the members whose json tag carries
+// omitempty, and repo_credential, which the registry carries only on a git
+// layer whose repo takes a credential. Their names are checked through the bundle alone.
+//
+// Spec: §7.3.1 (Setting, replacing, and removing a repository credential).
+var panelLayerOmitted = map[string]bool{"last_ingested_at": true, "force_push_policy": true, "repo_credential": true}
 
 // Spec: §7.2.1 / §7.3.1 / §13.10 — the served bundle reads a layer record under
 // the member names the registry answers, which §7.3.1 fixes as lower

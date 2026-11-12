@@ -14373,6 +14373,357 @@ describe("the layer write flows", () => {
       "The registry reported no erase date.",
     );
   });
+
+  // §7.3.1 takes a git layer's credential through the write-only members
+  // repo_username and repo_token, and no response returns either value. The
+  // token field is therefore masked, kept out of the browser's own password
+  // fill, and empty whenever a dialog opens.
+  //
+  // Spec: §7.3.1, §13.10
+  it("masks the credential token on both dialogs and opens it empty", async () => {
+    stubCredentialPanel(credentialLayer(false));
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const registered = screen.getByTestId("register-repo-token") as HTMLInputElement;
+    expect(registered.getAttribute("type")).toBe("password");
+    expect(registered.getAttribute("autocomplete")).toBe("new-password");
+    expect(registered.value).toBe("");
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Register a layer" })).getByRole(
+        "button",
+        { name: "Cancel" },
+      ),
+    );
+    await openEdit();
+    const updated = screen.getByTestId("update-repo-token") as HTMLInputElement;
+    expect(updated.getAttribute("type")).toBe("password");
+    expect(updated.getAttribute("autocomplete")).toBe("new-password");
+    expect(updated.value).toBe("");
+  });
+
+  // The credential travels in its own members and never as URL userinfo, so
+  // the repository the form sends is the one the reader typed, with no
+  // credential joined into it. Fields left empty send neither member.
+  //
+  // Spec: §7.3.1, §13.10
+  it("sends the register credential in its own members and only when a token is entered", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: adminCaller() },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": gitRegistered(),
+    });
+    goTo("#/layers");
+    const first = render(<App />);
+    let dialog = await openRegisterGit();
+    fillCredential("register", "x-access-token", "tok1");
+    fireEvent.click(registerSubmit(dialog));
+    await screen.findByLabelText("Webhook secret");
+    let body = lastBody();
+    expect(body.repo_username).toBe("x-access-token");
+    expect(body.repo_token).toBe("tok1");
+    expect(body.repo).toBe("https://git.acme.com/acme/x.git");
+    expect(String(body.repo)).not.toContain("@");
+    first.unmount();
+
+    render(<App />);
+    dialog = await openRegisterGit();
+    fireEvent.click(registerSubmit(dialog));
+    await screen.findByLabelText("Webhook secret");
+    expect(sentCredentialMembers(lastBody())).toEqual([]);
+  });
+
+  // The credential qualifies the git arm's repository, so a value typed there
+  // stays behind when the reader switches to Local folder: the arm the reader
+  // left neither sends it nor holds the submit on it.
+  //
+  // Spec: §7.3.1, §13.10
+  it("sends no credential member and holds nothing once the register form leaves the git arm", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: adminCaller() },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": localRegistered(),
+    });
+    goTo("#/layers");
+    render(<App />);
+    const dialog = await openRegisterGit();
+    fillCredential("register", "x-access-token", "tok1");
+    switchToLocal();
+    const submit = registerSubmit(dialog);
+    expect(submit.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(submit);
+    await screen.findByText("Layer acme-x is registered.");
+    const body = lastBody();
+    expect(body.source_type).toBe("local");
+    expect(sentCredentialMembers(body)).toEqual([]);
+    expect(body).not.toHaveProperty("repo");
+  });
+
+  // §7.3.1 refuses an http or https repository carrying userinfo with
+  // `details.constraint: "url_credential"`, and a non-empty username sent
+  // without a token. The form holds both writes and names the fix, so the
+  // reader is not sent to a refusal the form could predict.
+  //
+  // Spec: §7.3.1, §13.10
+  it("holds a registration whose repository carries a credential or whose username has no token", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: adminCaller() },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": gitRegistered(),
+    });
+    goTo("#/layers");
+    render(<App />);
+    let dialog = await openRegisterGit("https://u:t@git.acme.com/x.git");
+    expect(screen.getByTestId("register-foot-note").textContent).toBe(
+      "Remove the credential from the repository URL and enter it in Username and Token.",
+    );
+    expect(registerSubmit(dialog).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(registerSubmit(dialog));
+    fireEvent.change(screen.getByLabelText("Repository"), {
+      target: { value: "https://git.acme.com/x.git" },
+    });
+    fillCredential("register", "x-access-token", "");
+    expect(screen.getByTestId("register-foot-note").textContent).toBe(
+      "Enter a token to go with the username.",
+    );
+    dialog = screen.getByRole("dialog", { name: "Register a layer" });
+    expect(registerSubmit(dialog).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(registerSubmit(dialog));
+    expect(requests.some((r) => r.method === "POST")).toBe(false);
+  });
+
+  // Both holds stand on the git arm alone, because the repository and the
+  // credential they read are sent on that arm alone. A username left without
+  // a token, and a repository carrying userinfo, each stop holding the submit
+  // once the reader switches to Local folder.
+  //
+  // Spec: §7.3.1, §13.10
+  for (const held of [
+    { name: "a username without a token", repo: "https://git.acme.com/x.git", username: "x-access-token" },
+    { name: "a repository carrying a credential", repo: "https://u:t@git.acme.com/x.git", username: "" },
+  ]) {
+    it(`releases the hold on ${held.name} once the register form leaves the git arm`, async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: adminCaller() },
+        "/v1/layers": { body: { layers: [] } },
+        "POST /v1/layers": localRegistered(),
+      });
+      goTo("#/layers");
+      render(<App />);
+      const dialog = await openRegisterGit(held.repo);
+      fillCredential("register", held.username, "");
+      expect(registerSubmit(dialog).hasAttribute("disabled")).toBe(true);
+      switchToLocal();
+      const note = screen.getByTestId("register-foot-note");
+      expect(note.textContent).toBe(
+        "Registers at the end of the order, where the last row wins.",
+      );
+      expect(registerSubmit(dialog).hasAttribute("disabled")).toBe(false);
+      fireEvent.click(registerSubmit(dialog));
+      await screen.findByText("Layer acme-x is registered.");
+      const body = lastBody();
+      expect(body).not.toHaveProperty("repo");
+      expect(sentCredentialMembers(body)).toEqual([]);
+    });
+  }
+
+  // An update patches the stored credential through the same members. A
+  // token sent alone keeps the stored username, so the username is sent only
+  // when one is entered, and an untouched pair sends nothing.
+  //
+  // Spec: §7.3.1, §13.10
+  it("sends the update credential members the reader entered and no others", async () => {
+    const cases: { username: string; token: string; sent: string[] }[] = [
+      { username: "", token: "tok2", sent: ["repo_token"] },
+      { username: "x-access-token", token: "tok2", sent: ["repo_username", "repo_token"] },
+      { username: "", token: "", sent: [] },
+    ];
+    for (const { username, token, sent } of cases) {
+      stubCredentialPanel(credentialLayer(false));
+      const page = render(<App />);
+      const form = await openEdit();
+      fillCredential("update", username, token);
+      fireEvent.submit(form);
+      await screen.findByText("Layer company is updated.");
+      const body = lastBody();
+      expect(sentCredentialMembers(body)).toEqual(sent);
+      if (token !== "") {
+        expect(body.repo_token).toBe(token);
+      }
+      if (username !== "") {
+        expect(body.repo_username).toBe(username);
+      }
+      page.unmount();
+    }
+  });
+
+  // §7.3.1 refuses repo_token sent with clear_repo_credential. A disabled
+  // input keeps what was typed into it, so the removal box gates the members
+  // themselves: once it is checked the pair is disabled and the patch carries
+  // the removal alone.
+  //
+  // Spec: §7.3.1, §13.10
+  it("disables the credential pair and sends the removal alone once the stored credential is removed", async () => {
+    stubCredentialPanel(credentialLayer(true));
+    render(<App />);
+    const form = await openEdit();
+    expect(screen.getByTestId("update-repo-hint").textContent).toBe(
+      "Leave Username empty to keep the stored username.",
+    );
+    fillCredential("update", "x-access-token", "tok2");
+    fireEvent.click(screen.getByTestId("update-repo-clear"));
+    expect(
+      screen.getByTestId("update-repo-username").hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen.getByTestId("update-repo-token").hasAttribute("disabled"),
+    ).toBe(true);
+    fireEvent.submit(form);
+    await screen.findByText("Layer company is updated.");
+    const body = lastBody();
+    expect(body.clear_repo_credential).toBe(true);
+    expect(sentCredentialMembers(body)).toEqual(["clear_repo_credential"]);
+  });
+
+  // The token is write-only, so the form keeps no copy of it once the write
+  // has landed, and the result modal states the outcome with neither value.
+  // The stubbed response carries neither, so a value the modal showed would
+  // be the form echoing its own state.
+  //
+  // Spec: §7.3.1, §13.10
+  it("keeps no register credential in the result or in the reopened dialog", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: adminCaller() },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": gitRegistered(),
+    });
+    goTo("#/layers");
+    render(<App />);
+    const dialog = await openRegisterGit();
+    fillCredential("register", "x-access-token", "tok1");
+    fireEvent.click(registerSubmit(dialog));
+    await screen.findByLabelText("Webhook secret");
+    const result = screen.getByRole("dialog", { name: "Layer registered" });
+    expect(result.textContent).not.toContain("tok1");
+    expect(result.textContent).not.toContain("x-access-token");
+    fireEvent.click(screen.getByLabelText("I have stored the secret."));
+    fireEvent.click(within(result).getByRole("button", { name: "Done" }));
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    expect(
+      (screen.getByTestId("register-repo-token") as HTMLInputElement).value,
+    ).toBe("");
+  });
+
+  // Spec: §7.3.1, §13.10
+  it("keeps no update credential in the result or in the reopened dialog", async () => {
+    stubCredentialPanel(credentialLayer(false));
+    render(<App />);
+    const form = await openEdit();
+    fillCredential("update", "x-access-token", "tok2");
+    fireEvent.submit(form);
+    await screen.findByText("Layer company is updated.");
+    const result = screen.getByRole("dialog", { name: "Layer updated" });
+    expect(result.textContent).not.toContain("tok2");
+    expect(result.textContent).not.toContain("x-access-token");
+    fireEvent.click(within(result).getByRole("button", { name: "Done" }));
+    await openEdit();
+    expect(
+      (screen.getByTestId("update-repo-token") as HTMLInputElement).value,
+    ).toBe("");
+  });
+
+  // §7.3.1 carries repo_credential exactly on a layer whose update takes the
+  // credential members, and the controls are a function of that member alone:
+  // the panel marks a stored credential, the Edit dialog draws the pair where
+  // the member is carried, and it offers the removal where the member is
+  // true. The `https:` row is the reported form of a legacy hostless
+  // userinfo URL, and the absent row is a 0.6.0 replica's answer, so a dialog
+  // that decided from `repo` fails one of them.
+  //
+  // Spec: §7.3.1, §13.10
+  it("renders the credential controls from the layer's repo_credential member alone", async () => {
+    const all = [
+      "source-credential",
+      "update-repo-username",
+      "update-repo-token",
+      "update-repo-clear",
+    ];
+    const cases: {
+      layer: Record<string, unknown>;
+      controls: string[];
+      hint?: string;
+    }[] = [
+      {
+        layer: credentialLayer(true),
+        controls: all,
+        hint: "Leave Username empty to keep the stored username.",
+      },
+      {
+        layer: credentialLayer(true, "https:"),
+        controls: all,
+        hint: "Leave Username empty to keep the stored username.",
+      },
+      {
+        layer: credentialLayer(false),
+        controls: ["update-repo-username", "update-repo-token"],
+        hint:
+          "No credential is stored. A token entered without a username is " +
+          "stored with an empty username.",
+      },
+      { layer: credentialLayer(undefined), controls: [] },
+    ];
+    for (const { layer, controls, hint } of cases) {
+      stubCredentialPanel(layer);
+      const page = render(<App />);
+      await openEdit();
+      expect(credentialControls()).toEqual(controls);
+      if (hint === undefined) {
+        expect(screen.queryByTestId("update-repo-hint")).toBeNull();
+      } else {
+        expect(screen.getByTestId("update-repo-hint").textContent).toBe(hint);
+      }
+      page.unmount();
+    }
+  });
+
+  // Where the member is false the pair sets a first credential, and the
+  // patch carries no removal. Where it is absent the patch of another field
+  // carries no credential member at all.
+  //
+  // Spec: §7.3.1, §13.10
+  it("sends a first credential where repo_credential is false and none where it is absent", async () => {
+    stubCredentialPanel(credentialLayer(false));
+    const first = render(<App />);
+    let form = await openEdit();
+    fillCredential("update", "", "tok2");
+    fireEvent.submit(form);
+    await screen.findByText("Layer company is updated.");
+    expect(sentCredentialMembers(lastBody())).toEqual(["repo_token"]);
+    first.unmount();
+
+    stubCredentialPanel(credentialLayer(undefined));
+    render(<App />);
+    form = await openEdit();
+    fireEvent.change(screen.getByLabelText("Ref"), {
+      target: { value: "release" },
+    });
+    fireEvent.submit(form);
+    await screen.findByText("Layer company is updated.");
+    const body = lastBody();
+    expect(body.ref).toBe("release");
+    expect(sentCredentialMembers(body)).toEqual([]);
+  });
+
+  // A local layer reads no repository, so neither the row nor the Edit
+  // dialog carries a credential control.
+  //
+  // Spec: §7.3.1, §13.10
+  it("renders no credential control on a local layer", async () => {
+    stubCredentialPanel(userLayer());
+    render(<App />);
+    await openEdit("alice-personal");
+    expect(credentialControls()).toEqual([]);
+  });
 });
 
 /** moveHandleLabel is the accessible name of one row's reorder handle. */
@@ -14522,6 +14873,180 @@ function scratchLayer(owner = "alice@acme.com"): Record<string, unknown> {
     user_defined: true,
     owner: owner,
   };
+}
+
+/** credentialLayer is an admin-defined git layer on an https remote, which is
+ * a layer whose update takes the §7.3.1 credential members. `member` is the
+ * layer object's repo_credential, and undefined leaves it out, which is how a
+ * 0.6.0 replica answers. */
+function credentialLayer(
+  member: boolean | undefined,
+  repo = "https://git.acme.com/acme/x.git",
+): Record<string, unknown> {
+  const layer: Record<string, unknown> = { ...adminLayer(), repo };
+  if (member !== undefined) {
+    layer.repo_credential = member;
+  }
+  return layer;
+}
+
+/** adminCaller is the posture of a caller the §7.3.1 admin arm admits, which
+ * renders every layer write control the panel carries, the register dialog's
+ * Local folder option among them. */
+function adminCaller(): SessionPosture {
+  return posture({
+    subject: "alice@acme.com",
+    layer_capabilities: { manage_any_layer: true },
+  });
+}
+
+/** lastBody is the most recent request body the page sent, parsed. The layer
+ * list reloads a write triggers carry no body, so it is the write's own. */
+function lastBody(): Record<string, unknown> {
+  const body = bodies.at(-1);
+  if (body === undefined) {
+    throw new Error("no request body was sent");
+  }
+  return JSON.parse(body) as Record<string, unknown>;
+}
+
+/** credentialMembers are the request members that carry or remove a git
+ * layer's repository credential. */
+const credentialMembers = [
+  "repo_username",
+  "repo_token",
+  "clear_repo_credential",
+] as const;
+
+/** sentCredentialMembers is the credential members a request body carried. */
+function sentCredentialMembers(body: Record<string, unknown>): string[] {
+  return credentialMembers.filter((member) => member in body);
+}
+
+/** openRegisterGit opens the register dialog and fills a git registration
+ * with every field the submit is otherwise held on. */
+async function openRegisterGit(
+  repo = "https://git.acme.com/acme/x.git",
+): Promise<HTMLElement> {
+  await screen.findByLabelText("Layer panel");
+  fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+  const dialog = screen.getByRole("dialog", { name: "Register a layer" });
+  fireEvent.change(screen.getByLabelText("Layer ID"), {
+    target: { value: "acme-x" },
+  });
+  fireEvent.change(screen.getByLabelText("Repository"), {
+    target: { value: repo },
+  });
+  fireEvent.change(screen.getByLabelText("Ref"), {
+    target: { value: "main" },
+  });
+  return dialog;
+}
+
+/** fillCredential types a username and a token into one dialog's credential
+ * pair. An empty value leaves its field untouched. */
+function fillCredential(
+  form: "register" | "update",
+  username: string,
+  token: string,
+): void {
+  if (username !== "") {
+    fireEvent.change(screen.getByTestId(`${form}-repo-username`), {
+      target: { value: username },
+    });
+  }
+  if (token !== "") {
+    fireEvent.change(screen.getByTestId(`${form}-repo-token`), {
+      target: { value: token },
+    });
+  }
+}
+
+/** registerSubmit is the register dialog's own submit control. A case
+ * presses it rather than submitting the form, so a hold that disables it
+ * holds the case's write too. */
+function registerSubmit(dialog: HTMLElement): HTMLButtonElement {
+  return within(dialog).getByRole("button", {
+    name: "Register",
+  }) as HTMLButtonElement;
+}
+
+/** gitRegistered is the registry's answer to a git registration. It carries
+ * the webhook secret and neither credential value, as §7.3.1 states. */
+function gitRegistered(): Stub {
+  return {
+    body: {
+      layer: {
+        id: "acme-x",
+        source_type: "git",
+        repo: "https://git.acme.com/acme/x.git",
+        ref: "main",
+        order: 1,
+        user_defined: true,
+        repo_credential: true,
+      },
+      webhook_url: "https://registry.acme.com/v1/ingest/webhook/acme-x",
+      webhook_secret: "whsec-abc",
+    },
+  };
+}
+
+/** stubCredentialPanel installs a panel listing `layer` for an admin caller,
+ * with a stubbed update that answers `update`. */
+function stubCredentialPanel(
+  layer: Record<string, unknown>,
+  update: Stub = { body: { layer } },
+): void {
+  stubRegistry({
+    "/v1/ui/session": { body: adminCaller() },
+    "/v1/layers": { body: { layers: [layer] } },
+    "PUT /v1/layers/update": update,
+  });
+  goTo("#/layers");
+}
+
+/** openEdit opens the Edit dialog of one listed layer. */
+async function openEdit(layerID = "company"): Promise<HTMLElement> {
+  await screen.findByLabelText("Layer panel");
+  openRowActions(layerID);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+  return screen.findByLabelText(`Update ${layerID}`);
+}
+
+/** credentialControls is which of the credential controls the page renders
+ * now, across the panel row and the Edit dialog. */
+function credentialControls(): string[] {
+  return [
+    "source-credential",
+    "update-repo-username",
+    "update-repo-token",
+    "update-repo-clear",
+  ].filter((testID) => screen.queryByTestId(testID) !== null);
+}
+
+/** localRegistered is the registry's answer to a local registration, which
+ * issues no webhook secret. */
+function localRegistered(): Stub {
+  return {
+    body: {
+      layer: {
+        id: "acme-x",
+        source_type: "local",
+        local_path: "/Users/alice/reg",
+        order: 1,
+        user_defined: true,
+      },
+    },
+  };
+}
+
+/** switchToLocal moves the open register dialog to the Local folder arm and
+ * names the path that arm is otherwise held on. */
+function switchToLocal(): void {
+  fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+  fireEvent.change(screen.getByLabelText("Local path"), {
+    target: { value: "/Users/alice/reg" },
+  });
 }
 
 describe("the command palette", () => {
@@ -17990,6 +18515,96 @@ describe("a refused layer write", () => {
     ).toContain("badge-count");
     // The rows the panel did read are untouched by the failure beside them.
     expect(screen.getByText("alice-personal")).toBeTruthy();
+  });
+
+  // The form holds what it can predict and sends the rest. A username
+  // carrying `:` and a repository with an `@` after its host both reach the
+  // registry, and its refusal renders on the form through the same banner
+  // every other refused registration takes. Neither the banner nor the field
+  // shows the token the request carried.
+  //
+  // Spec: §7.3.1, §13.10
+  it("renders a refused register credential on the form without the token", async () => {
+    const refusals = [
+      {
+        repo: "https://git.acme.com/acme/x.git",
+        username: "x:y",
+        answer: {
+          status: 400,
+          body: {
+            code: "registry.invalid_argument",
+            message: "repo_username must not contain ':'",
+          },
+        },
+        names: "repo_username",
+      },
+      {
+        repo: "https://git.acme.com/x@y",
+        username: "x-access-token",
+        answer: {
+          status: 400,
+          body: {
+            code: "registry.invalid_argument",
+            message:
+              "repo carries a credential; send it in repo_username and repo_token",
+            details: { constraint: "url_credential" },
+          },
+        },
+        names: "repo_username and repo_token",
+      },
+    ];
+    for (const { repo, username, answer, names } of refusals) {
+      stubRegistry({
+        "/v1/ui/session": { body: adminCaller() },
+        "/v1/layers": { body: { layers: [] } },
+        "POST /v1/layers": answer,
+      });
+      goTo("#/layers");
+      const page = render(<App />);
+      const dialog = await openRegisterGit(repo);
+      fillCredential("register", username, "tok1");
+      fireEvent.click(registerSubmit(dialog));
+      const refusal = await screen.findByTestId("register-refusal");
+      expect(
+        requests.filter((r) => r.url === "/v1/layers" && r.method === "POST")
+          .length,
+      ).toBe(1);
+      expect(lastBody().repo_token).toBe("tok1");
+      expect(refusal.textContent).toContain("registry.invalid_argument");
+      expect(refusal.textContent).toContain(names);
+      expect(refusal.textContent).not.toContain("tok1");
+      expect(
+        screen.getByTestId("register-repo-token").getAttribute("type"),
+      ).toBe("password");
+      page.unmount();
+      requests.length = 0;
+      bodies.length = 0;
+    }
+  });
+
+  // An update the registry refuses on a credential member renders on the
+  // Edit dialog, and the refusal names the member rather than its value.
+  //
+  // Spec: §7.3.1, §13.10
+  it("renders a refused update credential on the Edit dialog without the token", async () => {
+    stubCredentialPanel(credentialLayer(false), {
+      status: 400,
+      body: {
+        code: "registry.invalid_argument",
+        message: "repo_token must not contain a control character",
+      },
+    });
+    render(<App />);
+    const form = await openEdit();
+    fillCredential("update", "", "tok2");
+    fireEvent.submit(form);
+    const refusal = await within(form).findByRole("alert");
+    expect(lastBody()).toHaveProperty("repo_token");
+    expect(refusal.textContent).toContain("repo_token");
+    expect(refusal.textContent).not.toContain("tok2");
+    expect(screen.getByTestId("update-repo-token").getAttribute("type")).toBe(
+      "password",
+    );
   });
 });
 

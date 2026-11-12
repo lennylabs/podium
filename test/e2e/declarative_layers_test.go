@@ -98,6 +98,18 @@ func TestDeclarativeLayers_LocalLayerBootsAndServes(t *testing.T) {
 // returns its path.
 func declaredGitProviderConfig(t *testing.T, dir, id, repoURL, provider string) string {
 	t.Helper()
+	var keys []string
+	if provider != "" {
+		keys = append(keys, "git_provider: "+provider)
+	}
+	return declaredGitConfig(t, dir, id, repoURL, keys...)
+}
+
+// declaredGitConfig writes a registry.yaml declaring one public git layer on
+// repoURL at ref master, with each of gitKeys written as one more line of its
+// source.git block, and returns its path.
+func declaredGitConfig(t *testing.T, dir, id, repoURL string, gitKeys ...string) string {
+	t.Helper()
 	cfg := "" +
 		"registry:\n" +
 		"  layers:\n" +
@@ -106,8 +118,8 @@ func declaredGitProviderConfig(t *testing.T, dir, id, repoURL, provider string) 
 		"        git:\n" +
 		"          repo: " + repoURL + "\n" +
 		"          ref: master\n"
-	if provider != "" {
-		cfg += "          git_provider: " + provider + "\n"
+	for _, key := range gitKeys {
+		cfg += "          " + key + "\n"
 	}
 	cfg += "" +
 		"      visibility:\n" +
@@ -234,23 +246,24 @@ func TestDeclarativeLayers_DeclaredGitProviderSurvivesRestart(t *testing.T) {
 	}
 }
 
-// Spec: §7.3.1 — a declared git layer whose repo carries a credential in its
-// URL userinfo is seeded with the full value, the list endpoint of the
-// running binary reports the repo with the userinfo removed, and the server
-// log names the seeded layer with neither credential part.
-func TestDeclarativeLayers_RepoCredentialNotReported(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	cfgPath := declaredGitProviderConfig(t, home, "team-finance",
-		"https://alice-user:s3cr3tpw@git.acme.com/acme/finance.git", "")
-	srv := startServerArgs(t, []string{
+// declaredCredentialEnv is the server environment the declared-credential
+// tests start the binary with. The layer is never cloned, because the tests
+// read what the registry reports and logs rather than what a clone sends.
+func declaredCredentialEnv(home, cfgPath string, extra ...string) []string {
+	return append([]string{
 		"HOME=" + home,
 		"PODIUM_CONFIG_FILE=" + cfgPath,
 		"PODIUM_SQLITE_PATH=" + filepath.Join(home, "podium.db"),
 		"PODIUM_SIGN=none",
 		"PODIUM_INGEST_OFFLINE=true",
-	}, "serve", "--standalone")
+	}, extra...)
+}
 
+// declaredCredentialLayer reads the list endpoint and the server log of srv,
+// fails the test when either carries one of parts or when the log lacks the
+// seed line of id, and returns the layer object of id as the list reports it.
+func declaredCredentialLayer(t *testing.T, srv *serverProc, id string, parts ...string) declaredLayerObject {
+	t.Helper()
 	st, body := getRaw(t, srv.BaseURL+"/v1/layers")
 	if st != 200 {
 		t.Fatalf("GET /v1/layers = HTTP %d, want 200\nbody: %s", st, body)
@@ -258,11 +271,11 @@ func TestDeclarativeLayers_RepoCredentialNotReported(t *testing.T) {
 	// The seed line is written before the server answers, so its presence
 	// shows the absence checks below read a log that covers the boot.
 	serverLog := srv.log()
-	const seeded = "seeded declared git layer team-finance (repo=https://git.acme.com/acme/finance.git"
+	seeded := "seeded declared git layer " + id + " (repo=https://git.acme.com/acme/finance.git"
 	if !strings.Contains(serverLog, seeded) {
 		t.Errorf("server log missing %q:\n%s", seeded, serverLog)
 	}
-	for _, part := range []string{"alice-user", "s3cr3tpw"} {
+	for _, part := range parts {
 		if strings.Contains(string(body), part) {
 			t.Errorf("list response carries the credential part %q: %s", part, body)
 		}
@@ -271,24 +284,139 @@ func TestDeclarativeLayers_RepoCredentialNotReported(t *testing.T) {
 		}
 	}
 	var layers struct {
-		Layers []struct {
-			ID   string `json:"id"`
-			Repo string `json:"repo"`
-		} `json:"layers"`
+		Layers []declaredLayerObject `json:"layers"`
 	}
 	if err := json.Unmarshal(body, &layers); err != nil {
 		t.Fatalf("decode list response: %v\nbody: %s", err, body)
 	}
-	const want = "https://git.acme.com/acme/finance.git"
 	for _, l := range layers.Layers {
-		if l.ID == "team-finance" {
-			if l.Repo != want {
-				t.Errorf("repo = %q, want %q", l.Repo, want)
-			}
-			return
+		if l.ID == id {
+			return l
 		}
 	}
-	t.Fatalf("layer team-finance missing from /v1/layers: %s", body)
+	t.Fatalf("layer %s missing from /v1/layers: %s", id, body)
+	return declaredLayerObject{}
+}
+
+// declaredLayerObject is the part of the §7.3.1 layer object the
+// declared-credential tests read. RepoCredential is nil when the object omits
+// the member.
+type declaredLayerObject struct {
+	ID             string `json:"id"`
+	Repo           string `json:"repo"`
+	RepoCredential *bool  `json:"repo_credential"`
+}
+
+// urlUserinfoLogLine is the start log line for a declaration that carries a
+// credential in the userinfo of source.git.repo rather than in the keys.
+const urlUserinfoLogLine = "declared git layer team-finance carries URL userinfo in source.git.repo"
+
+// Spec: §7.3.1 (Declared repository credentials) — a declared git layer whose
+// repo carries a credential in its URL userinfo and that sets neither
+// credential key is seeded with the full value, the list endpoint of the
+// running binary reports the repo with the userinfo removed and the stored
+// credential through repo_credential, and the server log names the seeded
+// layer, tells the operator to move the credential to the keys, and carries
+// neither credential part.
+func TestDeclarativeLayers_RepoCredentialNotReported(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	cfgPath := declaredGitProviderConfig(t, home, "team-finance",
+		"https://alice-user:s3cr3tpw@git.acme.com/acme/finance.git", "")
+	srv := startServerArgs(t, declaredCredentialEnv(home, cfgPath), "serve", "--standalone")
+
+	l := declaredCredentialLayer(t, srv, "team-finance", "alice-user", "s3cr3tpw")
+	if !strings.Contains(srv.log(), urlUserinfoLogLine) {
+		t.Errorf("server log missing %q:\n%s", urlUserinfoLogLine, srv.log())
+	}
+	if want := "https://git.acme.com/acme/finance.git"; l.Repo != want {
+		t.Errorf("repo = %q, want %q", l.Repo, want)
+	}
+	if l.RepoCredential == nil || !*l.RepoCredential {
+		t.Errorf("repo_credential = %v, want true", l.RepoCredential)
+	}
+}
+
+// Spec: §7.3.1 (Declared repository credentials) — a declared git layer that
+// names its credential in source.git.username and source.git.token, the token
+// interpolated from the server environment, is seeded with the credential
+// joined into its repo. The list endpoint reports the repo without userinfo and
+// the stored credential through repo_credential, and the server log carries
+// neither credential part and no line about URL userinfo.
+func TestDeclarativeLayers_RepoCredentialKeys(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	cfgPath := declaredGitConfig(t, home, "team-finance", "https://git.acme.com/acme/finance.git",
+		"username: alice-user", "token: '${PODIUM_E2E_GIT_TOKEN}'")
+	srv := startServerArgs(t, declaredCredentialEnv(home, cfgPath, "PODIUM_E2E_GIT_TOKEN=s3cr3tpw"),
+		"serve", "--standalone")
+
+	l := declaredCredentialLayer(t, srv, "team-finance", "alice-user", "s3cr3tpw")
+	if strings.Contains(srv.log(), "carries URL userinfo") {
+		t.Errorf("server log carries the URL userinfo line for a declaration that uses the keys:\n%s", srv.log())
+	}
+	if want := "https://git.acme.com/acme/finance.git"; l.Repo != want {
+		t.Errorf("repo = %q, want %q", l.Repo, want)
+	}
+	if l.RepoCredential == nil || !*l.RepoCredential {
+		t.Errorf("repo_credential = %v, want true", l.RepoCredential)
+	}
+}
+
+// Spec: §7.3.1 (Declared repository credentials) — a declaration that sets a
+// credential key aborts startup when source.git.repo carries userinfo of its
+// own and when source.git.token is empty, which an unset ${ENV_VAR} yields.
+// The error names the layer and the key and carries no credential value.
+func TestDeclarativeLayers_RepoCredentialRefusesStart(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		repo    string
+		keys    []string
+		env     []string
+		want    string
+		secrets []string
+	}{
+		{
+			name:    "userinfo beside the token key",
+			repo:    "https://alice-user:s3cr3tpw@git.acme.com/acme/finance.git",
+			keys:    []string{"token: '${PODIUM_E2E_GIT_TOKEN}'"},
+			env:     []string{"PODIUM_E2E_GIT_TOKEN=tok-e2e-fixture"},
+			want:    "remove the userinfo from source.git.repo",
+			secrets: []string{"alice-user", "s3cr3tpw", "tok-e2e-fixture"},
+		},
+		{
+			name:    "token from an unset variable",
+			repo:    "https://git.acme.com/acme/finance.git",
+			keys:    []string{"username: alice-user", "token: '${PODIUM_E2E_UNSET_TOKEN}'"},
+			want:    "source.git.token",
+			secrets: []string{"alice-user"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			cfgPath := declaredGitConfig(t, home, "team-finance", tc.repo, tc.keys...)
+			// The boot aborts before the listener binds, so port 0 suffices.
+			res := runPodium(t, "", declaredCredentialEnv(home, cfgPath, tc.env...),
+				"serve", "--standalone", "--bind", "127.0.0.1:0")
+			if res.Exit == 0 {
+				t.Fatalf("expected a non-zero exit (refuse to start)\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			}
+			out := res.Stdout + res.Stderr
+			for _, want := range []string{"team-finance", tc.want} {
+				if !strings.Contains(out, want) {
+					t.Errorf("startup error does not carry %q:\n%s", want, out)
+				}
+			}
+			for _, secret := range tc.secrets {
+				if strings.Contains(out, secret) {
+					t.Errorf("startup output carries the credential fixture %q:\n%s", secret, out)
+				}
+			}
+		})
+	}
 }
 
 // Spec: §7.3.1 — the declaration is the setter for a declared layer's git

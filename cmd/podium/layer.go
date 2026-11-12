@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	neturl "net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/audit"
@@ -16,13 +18,23 @@ import (
 	"github.com/lennylabs/podium/pkg/sync"
 )
 
+// layerStdin is the reader `--repo-token-file -` takes the token from. It is
+// an indirection so tests can supply a token without a terminal, on the
+// pattern of initStdin and interactiveStdin.
+var layerStdin io.Reader = os.Stdin
+
+// errEmptyRepoToken refuses a --repo-token-file that holds no token. The
+// registry reads an empty repo_token as absent, so sending one would store no
+// credential and report success.
+var errEmptyRepoToken = errors.New("--repo-token-file names an empty token")
+
 // sleepFor blocks for d. Wrapped so tests can override without
 // relying on time.Sleep.
 var sleepFor = func(d time.Duration) { time.Sleep(d) }
 
 // layerCmd dispatches `podium layer ...` subcommands per spec §7.3.1.
 //
-//	podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>] [--force-repo-overwrite]
+//	podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>] [--repo-username <name>] [--repo-token-file <path|->] [--clear-repo-credential]
 //	podium layer register --id <id> --local <path>
 //	podium layer list
 //	podium layer reorder <id> [<id> ...]
@@ -73,7 +85,10 @@ func layerCmd(args []string) int {
 // Only flags the operator passes are applied; everything else
 // keeps its prior value. --clear-groups and --clear-users send an
 // empty list on their member, which the repeatable --group and
-// --user flags cannot express.
+// --user flags cannot express. --repo-username, --repo-token-file, and
+// --clear-repo-credential set, rotate, or remove the git layer's repository
+// credential, and the token is read from a file or standard input so it never
+// appears on the command line.
 func layerUpdate(args []string) int {
 	fs := flag.NewFlagSet("layer update", flag.ContinueOnError)
 	setUsage(fs, "Patch a registered layer's mutable fields.")
@@ -89,6 +104,7 @@ func layerUpdate(args []string) int {
 	rotateSecret := fs.Bool("rotate-webhook-secret", false, "regenerate the git layer's HMAC webhook secret and print the new value")
 	clearGroups := fs.Bool("clear-groups", false, "empty the layer's group visibility list")
 	clearUsers := fs.Bool("clear-users", false, "empty the layer's user visibility list")
+	cred := addRepoCredentialFlags(fs)
 	var groups, users stringSliceFlag
 	fs.Var(&groups, "group", "OIDC group with visibility (repeatable)")
 	fs.Var(&users, "user", "OIDC subject or email with visibility (repeatable)")
@@ -109,7 +125,11 @@ func layerUpdate(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --group cannot be combined with --clear-groups, and --user cannot be combined with --clear-users")
 		return 2
 	}
-	body := map[string]any{}
+	body, err := cred.members(set)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
 	if set["ref"] {
 		body["ref"] = *ref
 	}
@@ -238,7 +258,7 @@ func layerRegister(args []string) int {
 	public := fs.Bool("public", false, "visibility: public (requires the administrator role)")
 	organization := fs.Bool("organization", false, "visibility: organization-wide (requires the administrator role)")
 	forcePush := fs.String("force-push-policy", "", "git force-push handling: tolerant (default) or strict")
-	forceRepoOverwrite := fs.Bool("force-repo-overwrite", false, "store --repo as given when it is the value 'podium layer list' reports for a layer whose stored URL carries a credential")
+	cred := addRepoCredentialFlags(fs)
 	var groups, users stringSliceFlag
 	fs.Var(&groups, "group", "OIDC group with visibility (repeatable; requires the administrator role)")
 	fs.Var(&users, "user", "OIDC subject or email with visibility (repeatable; requires the administrator role)")
@@ -255,6 +275,21 @@ func layerRegister(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --id is required")
 		return 2
 	}
+	set := setFlags(fs)
+	// Spec: §7.3.1 (Setting, replacing, and removing a repository credential)
+	// — the credential members apply to a git source only, and only the --repo
+	// arm sends source_type git. The test reads --repo alone and ignores
+	// --local, because the git arm wins when both are set. Whether the repo
+	// itself takes a credential is left to the registry's refusal.
+	if *repo == "" && cred.anySet(set) {
+		fmt.Fprintln(os.Stderr, "error: --repo-username, --repo-token-file, and --clear-repo-credential apply to a --repo registration")
+		return 2
+	}
+	credMembers, err := cred.members(set)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
 	body := map[string]any{"id": *id}
 	if *repo != "" {
 		body["source_type"] = "git"
@@ -262,6 +297,9 @@ func layerRegister(args []string) int {
 		body["ref"] = *ref
 		if *root != "" {
 			body["root"] = *root
+		}
+		for k, v := range credMembers {
+			body[k] = v
 		}
 	} else if *local != "" {
 		body["source_type"] = "local"
@@ -276,11 +314,6 @@ func layerRegister(args []string) int {
 	}
 	if *forcePush != "" {
 		body["force_push_policy"] = *forcePush
-	}
-	// Spec: §7.3.1 — the member is sent only when the flag is set, because the
-	// registry reads it for the re-registration rule alone.
-	if *forceRepoOverwrite {
-		body["force_repo_overwrite"] = true
 	}
 	if *public {
 		body["public"] = true
@@ -694,4 +727,89 @@ func doJSON(url, method string, body any) ([]byte, int) {
 	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	return out, resp.StatusCode
+}
+
+// repoCredentialFlags are the repository-credential flags `podium layer
+// register` and `podium layer update` share. The token is taken from a file or
+// standard input rather than from a flag value, so it never appears in argv,
+// the shell history, or a process listing.
+type repoCredentialFlags struct {
+	username  *string
+	tokenFile *string
+	clear     *bool
+}
+
+// addRepoCredentialFlags defines the credential flags on fs.
+func addRepoCredentialFlags(fs *flag.FlagSet) repoCredentialFlags {
+	return repoCredentialFlags{
+		username:  fs.String("repo-username", "", "username of the repository credential"),
+		tokenFile: fs.String("repo-token-file", "", "file holding the repository token, or - for standard input"),
+		clear:     fs.Bool("clear-repo-credential", false, "store no repository credential"),
+	}
+}
+
+// anySet reports whether the caller set any credential flag.
+func (f repoCredentialFlags) anySet(set map[string]bool) bool {
+	return set["repo-username"] || set["repo-token-file"] || set["clear-repo-credential"]
+}
+
+// members validates the credential flags and returns the request members they
+// map to. A username travels only with a token, because the registry stores a
+// credential only when repo_token is present. An empty --repo-username is the
+// one username that is not refused without a token: it is sent as "" beside a
+// token, and otherwise it sends nothing.
+//
+// Spec: §7.3.1 (Setting, replacing, and removing a repository credential).
+func (f repoCredentialFlags) members(set map[string]bool) (map[string]any, error) {
+	out := map[string]any{}
+	if *f.username != "" && !set["repo-token-file"] {
+		return nil, errors.New("--repo-username requires --repo-token-file")
+	}
+	if set["repo-token-file"] && *f.clear {
+		return nil, errors.New("--repo-token-file cannot be combined with --clear-repo-credential")
+	}
+	if set["repo-token-file"] {
+		token, err := readRepoToken(*f.tokenFile)
+		if err != nil {
+			return nil, err
+		}
+		out["repo_token"] = token
+		if set["repo-username"] {
+			out["repo_username"] = *f.username
+		}
+	}
+	if *f.clear {
+		out["clear_repo_credential"] = true
+	}
+	return out, nil
+}
+
+// readRepoToken reads the repository token from the file at path, or from
+// layerStdin when path is "-". It removes exactly one trailing "\n" or "\r\n",
+// the line ending an editor or `echo` leaves, and keeps every other byte so a
+// token is sent as the file holds it. The returned error never carries the
+// file's contents.
+func readRepoToken(path string) (string, error) {
+	var (
+		raw []byte
+		err error
+	)
+	if path == "-" {
+		raw, err = io.ReadAll(layerStdin)
+	} else {
+		raw, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return "", fmt.Errorf("layer: read --repo-token-file: %w", err)
+	}
+	token := string(raw)
+	if t, ok := strings.CutSuffix(token, "\r\n"); ok {
+		token = t
+	} else {
+		token = strings.TrimSuffix(token, "\n")
+	}
+	if token == "" {
+		return "", errEmptyRepoToken
+	}
+	return token, nil
 }

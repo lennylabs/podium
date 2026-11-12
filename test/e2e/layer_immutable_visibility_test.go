@@ -36,15 +36,18 @@ import (
 const immutableRepo = "https://github.com/acme/notes.git"
 
 // listedLayer is the subset of a layer record `podium layer list` prints that
-// the assertions here read.
+// the assertions here and in layer_repo_credential_test.go read.
+// RepoCredential is nil when the record omits the member.
 type listedLayer struct {
-	ID           string   `json:"id"`
-	UserDefined  bool     `json:"user_defined"`
-	Owner        string   `json:"owner"`
-	Public       bool     `json:"public"`
-	Organization bool     `json:"organization"`
-	Groups       []string `json:"groups"`
-	Users        []string `json:"users"`
+	ID             string   `json:"id"`
+	UserDefined    bool     `json:"user_defined"`
+	Owner          string   `json:"owner"`
+	Public         bool     `json:"public"`
+	Organization   bool     `json:"organization"`
+	Groups         []string `json:"groups"`
+	Users          []string `json:"users"`
+	Repo           string   `json:"repo"`
+	RepoCredential *bool    `json:"repo_credential"`
 }
 
 // cliLayer runs `podium layer list` in env and returns the record with id,

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lennylabs/podium/internal/repourl"
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/layer/source"
@@ -313,14 +315,14 @@ func (e *LayerEndpoint) WithGroupResolver(fn layer.GroupResolver) *LayerEndpoint
 // The result is always non-nil so an empty read marshals as [] rather than
 // null.
 //
-// The returned slice is a response projection: each element passed through
-// wireLayer, so its Repo carries no URL credential. It must not be written
-// back to the store, because that write would store [redacted] for a
+// Each element of the result is a LayerObject built by wireLayer, so its Repo
+// carries no URL credential. The type keeps it out of PutLayerConfig, which
+// takes a store.LayerConfig: writing it back would store [redacted] for a
 // fail-closed value and would drop the credential of an unsplit one.
 //
 // Spec: §4.6, §7.3.1
-func (e *LayerEndpoint) readableBy(r *http.Request, caller layer.Identity, configs []store.LayerConfig) []store.LayerConfig {
-	out := make([]store.LayerConfig, 0, len(configs))
+func (e *LayerEndpoint) readableBy(r *http.Request, caller layer.Identity, configs []store.LayerConfig) []LayerObject {
+	out := make([]LayerObject, 0, len(configs))
 	if e.authAdmin(r) == nil {
 		for _, c := range configs {
 			out = append(out, wireLayer(c))
@@ -351,13 +353,41 @@ func reportedRepo(cfg store.LayerConfig) string {
 	return source.RedactRepo(cfg.CloneRepo())
 }
 
-// wireLayer returns the copy of cfg a response carries. The caller keeps its
-// own cfg for the store, the audit event, and the ingest runner.
+// LayerObject is the §7.3.1 layer object a response carries: the config with
+// Repo in its reported form, and repo_credential, which no store field holds
+// because it is read from the registered value. It is carried only where
+// credentialApplies admits the credential members on an update, so its
+// presence is that predicate as a client reads it. store.LayerConfig declares
+// no MarshalJSON; one added later would be promoted here and drop
+// repo_credential.
 //
-// Spec: §7.3.1 (Repository credentials)
-func wireLayer(cfg store.LayerConfig) store.LayerConfig {
+// Spec: §7.3.1 (Setting, replacing, and removing a repository credential)
+type LayerObject struct {
+	store.LayerConfig
+	RepoCredential *bool `json:"repo_credential,omitempty"`
+}
+
+// wireLayer returns the layer object a response carries for cfg. The caller
+// keeps its own cfg for the store, the audit event, and the ingest runner.
+//
+// The registered value is read through CloneRepo rather than
+// RegisteredRepo.Present, because a handler-built or memory-store config can
+// hold the registered value whole in Repo, and an ssh:// login name splits
+// too. The member's presence is decided by credentialApplies rather than by a
+// predicate of its own, because the web edit dialog renders its credential
+// controls on that presence, so the member and the update refusal read one
+// expression.
+//
+// Spec: §7.3.1 (Repository credentials), §7.3.1 (The layer object)
+func wireLayer(cfg store.LayerConfig) LayerObject {
+	registered := cfg.CloneRepo()
 	cfg.Repo = reportedRepo(cfg)
-	return cfg
+	obj := LayerObject{LayerConfig: cfg}
+	if credentialApplies(cfg.SourceType, registered) {
+		stored := repourl.CarriesURLCredential(registered)
+		obj.RepoCredential = &stored
+	}
+	return obj
 }
 
 // verifiedCaller resolves the caller and refuses the request when the
@@ -641,7 +671,9 @@ func timePtrEqual(a, b *time.Time) bool {
 // bookkeeping and the timestamps record what an ingest already did. Owner is
 // not projected onto the §4.6 visibility record (core.VisibilityOf), and the
 // caller reaches this predicate only on the admin-defined class, where the
-// field names no authorized subject.
+// field names no authorized subject. A repository credential decides how the
+// registry clones, which no materialized tree observes, so a credential change
+// wakes a watcher only through a change of the reported Repo.
 //
 // Spec: §7.3.1, §7.5.4
 func wakesWatchers(before, after store.LayerConfig) bool {
@@ -752,23 +784,203 @@ type LayerRegisterRequest struct {
 	// update`"). When true on a git layer the handler regenerates
 	// WebhookSecret and returns the new value once. Ignored on register.
 	RotateWebhookSecret bool `json:"rotate_webhook_secret,omitempty"`
-	// ForceRepoOverwrite admits a registration the §7.3.1 re-registration rule
-	// would refuse: one whose repo is the value a read reports for the stored
-	// layer's credential-bearing repo. Read by that rule alone. Ignored on update.
-	ForceRepoOverwrite bool `json:"force_repo_overwrite,omitempty"`
+	// RepoUsername is the username of the git layer's repository credential.
+	// Write-only: no response carries it.
+	RepoUsername RepoSecret `json:"repo_username,omitempty"`
+	// RepoToken is the token, or the password, of the repository credential.
+	// Write-only: no response, log line, event, or message carries it.
+	RepoToken RepoSecret `json:"repo_token,omitempty"`
+	// ClearRepoCredential removes the stored repository credential.
+	ClearRepoCredential bool `json:"clear_repo_credential,omitempty"`
 }
 
-// redactedRepoResubmitted reports whether repo is the value a read reports for
-// a stored repo that carries a credential. Storing it would replace the
-// credential-bearing remote with one that cannot clone a private repository.
-// A stored layer holds a credential when the store split a registered value
-// off it, or when its reported value differs from its Repo.
+// RepoSecret is a repository credential member of a layer request. String and
+// GoString return a fixed text, so a formatted request prints no username or
+// token.
+//
+// Spec: §7.3.1 (Setting, replacing, and removing a repository credential)
+type RepoSecret string
+
+// String returns a fixed text for a non-empty value and the empty string
+// otherwise.
+func (s RepoSecret) String() string {
+	if s == "" {
+		return ""
+	}
+	return repourl.Redacted
+}
+
+// GoString returns what String returns, which covers the %#v verb.
+func (s RepoSecret) GoString() string { return s.String() }
+
+// credentialApplies reports whether the repository credential members apply
+// to a layer whose source type is sourceType and whose repo is repo: a git
+// source on an http or https URL outside the [redacted] class (proposal 0065
+// D-12). It is the registry's one implementation of that rule. register
+// passes repoCredentialError the request's source_type and repo, update
+// passes it the stored source type and cfg.CloneRepo(), and wireLayer calls
+// it with the stored source type and cfg.CloneRepo() to decide whether the
+// layer object carries repo_credential.
+//
+// The git conjunct matters: a local layer an earlier release registered can
+// hold a credential URL in repo, and the members must not apply there.
+//
+// Spec: §7.3.1 (Setting, replacing, and removing a repository credential)
+func credentialApplies(sourceType, repo string) bool {
+	return sourceType == "git" && repourl.TakesCredential(repo)
+}
+
+// urlCredentialError reports why a registration's repo is refused with
+// details.constraint "url_credential", or the empty string when it is not. It
+// takes no source type, because the class is refused on a registration of any
+// source type. Neither message carries any part of repo.
+//
+// Spec: §7.3.1 (Setting, replacing, and removing a repository credential)
+func urlCredentialError(repo string) string {
+	if !repourl.CarriesURLCredential(repo) {
+		return ""
+	}
+	// The scheme is read from the text, because a [redacted]-class value with
+	// an http or https scheme can fail url.Parse.
+	if scheme, _, _ := strings.Cut(repo, "://"); strings.EqualFold(scheme, "http") || strings.EqualFold(scheme, "https") {
+		return "repo carries a credential in its URL; send the repository URL without userinfo and the credential in repo_username and repo_token"
+	}
+	return "repo does not parse as a URL; correct the repository URL"
+}
+
+// repoCredentialError reports why the credential members of req are refused
+// against a layer whose source type is sourceType and whose repo is repo, or
+// the empty string when they are not. register passes the request's own
+// source type and repo, and update passes the stored ones.
+//
+// A present empty repo_username triggers no check, so a request that carries
+// no non-empty credential member passes, a local or ssh:// registration
+// included. Presence of repo_username decides only which username an update's
+// rotation keeps, which is why the helper takes no presence argument. Each
+// message names the member and carries no part of the username, the token, or
+// the repo.
+//
+// Spec: §7.3.1 (Setting, replacing, and removing a repository credential)
+func repoCredentialError(req LayerRegisterRequest, sourceType, repo string) string {
+	switch {
+	case req.RepoToken != "" && req.ClearRepoCredential:
+		return "repo_token and clear_repo_credential cannot be sent together"
+	case req.RepoUsername != "" && req.RepoToken == "":
+		return "repo_username requires a non-empty repo_token"
+	}
+	if member := carriedCredentialMember(req); member != "" && !credentialApplies(sourceType, repo) {
+		return member + " applies to a git layer whose repo is an http or https URL"
+	}
+	if !repourl.ValidUsername(string(req.RepoUsername)) {
+		return "repo_username must not contain ':', '/', '\"', a space, or a control character"
+	}
+	if req.RepoToken != "" && !repourl.ValidToken(string(req.RepoToken)) {
+		return "repo_token must not contain a control character"
+	}
+	return ""
+}
+
+// carriesRepoUsername reports whether an update body carries repo_username.
+// LayerRegisterRequest decodes an absent member and "" to one value, and an
+// update reads them apart: an absent member keeps the stored username, and a
+// present one, JSON null included, sets it. The caller has already decoded
+// the same bytes as a JSON object, so the error is a body that is not one.
+//
+// Spec: §7.3.1 (Patch semantics on the update body)
+func carriesRepoUsername(body []byte) (bool, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return false, fmt.Errorf("layer update: decode body: %w", err)
+	}
+	_, ok := raw["repo_username"]
+	return ok, nil
+}
+
+// patchedCredentialRepo returns the registered repo an update stores for the
+// credential members of patch, whether the members change it, and a refusal
+// message. stored is the layer's registered repo, and usernameSent reports
+// whether the body carried repo_username. The caller has already passed patch
+// through repoCredentialError against stored.
+//
+// A repo_token replaces the stored credential on the stored remote, with the
+// username from the body when it carried one and the stored username
+// otherwise. clear_repo_credential removes the userinfo. Neither member
+// leaves the stored repo unchanged.
+//
+// Spec: §7.3.1 (Setting, replacing, and removing a repository credential)
+func patchedCredentialRepo(patch LayerRegisterRequest, usernameSent bool, stored string) (string, bool, string) {
+	switch {
+	case patch.ClearRepoCredential:
+		return repourl.WithoutCredential(stored), true, ""
+	case patch.RepoToken == "":
+		return stored, false, ""
+	}
+	username := string(patch.RepoUsername)
+	if !usernameSent {
+		username = repourl.CredentialUsername(stored)
+	}
+	registered, err := repourl.WithCredential(repourl.WithoutCredential(stored), username, string(patch.RepoToken))
+	switch {
+	case errors.Is(err, repourl.ErrCredentialUsername):
+		// repoCredentialError refused a repo_username the body carried, so
+		// this username is the stored one, which an earlier release accepted
+		// inside repo. The message carries no part of it.
+		return "", false, "the stored username cannot be kept; send repo_username"
+	case err != nil:
+		// This branch cannot run: repoCredentialError refused a token
+		// WithCredential refuses and a stored repo the members do not apply
+		// to, and WithoutCredential removed the stored userinfo. The sentinel's
+		// message carries no value.
+		return "", false, err.Error()
+	}
+	return registered, true, ""
+}
+
+// carriedCredentialMember names the first credential member req carries, for
+// the applicability refusal's message, or the empty string when it carries
+// none.
+func carriedCredentialMember(req LayerRegisterRequest) string {
+	switch {
+	case req.RepoToken != "":
+		return "repo_token"
+	case req.RepoUsername != "":
+		return "repo_username"
+	case req.ClearRepoCredential:
+		return "clear_repo_credential"
+	}
+	return ""
+}
+
+// keepsStoredRemote reports whether a registration that carries the value a
+// read reports for the stored layer's repo stores the stored registered value,
+// its credential included, in place of the reported one. cfg is the
+// registration after the class and owner resolution. Each condition closes a
+// path a stored credential would otherwise take:
+//
+//   - both source types are git, so a credential is never carried to or from
+//     another source;
+//   - the stored repo carries a credential or is in the [redacted] class,
+//     because a reported value equal to a credential-free stored value needs
+//     no keep;
+//   - the request's repo equals the reported value byte for byte, so a stored
+//     credential is never presented to another remote;
+//   - the resolved class equals the stored class and, on a user-defined layer,
+//     the resolved owner equals the stored owner, so alice's token is never
+//     carried to an admin-defined layer or to bob's layer. An admin-defined
+//     layer's owner names no authorized subject, so it is not compared;
+//   - the request carries neither repo_token nor clear_repo_credential, which
+//     state the credential explicitly.
 //
 // Spec: §7.3.1 (Re-registration with a reported repo)
-func redactedRepoResubmitted(stored store.LayerConfig, repo string) bool {
-	reported := reportedRepo(stored)
-	holdsCredential := stored.RegisteredRepo.Present() || reported != stored.Repo
-	return holdsCredential && repo == reported
+func keepsStoredRemote(stored store.LayerConfig, req LayerRegisterRequest, cfg store.LayerConfig) bool {
+	return stored.SourceType == "git" &&
+		req.SourceType == "git" &&
+		repourl.CarriesURLCredential(stored.CloneRepo()) &&
+		req.Repo == reportedRepo(stored) &&
+		cfg.UserDefined == stored.UserDefined &&
+		(!cfg.UserDefined || cfg.Owner == stored.Owner) &&
+		req.RepoToken == "" &&
+		!req.ClearRepoCredential
 }
 
 // adminOnlyRegistrationFields reports the §7.3.1 admin-only registration
@@ -988,9 +1200,9 @@ func gitProviderError(p, sourceType string) string {
 
 // LayerRegisterResponse is the POST /v1/layers JSON response.
 type LayerRegisterResponse struct {
-	Layer         store.LayerConfig `json:"layer"`
-	WebhookURL    string            `json:"webhook_url,omitempty"`
-	WebhookSecret string            `json:"webhook_secret,omitempty"`
+	Layer         LayerObject `json:"layer"`
+	WebhookURL    string      `json:"webhook_url,omitempty"`
+	WebhookSecret string      `json:"webhook_secret,omitempty"`
 }
 
 // Handler returns the http.Handler that dispatches to the layer
@@ -1256,6 +1468,11 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
 		return
 	}
+	usernameSent, err := carriesRepoUsername(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
 	if !validForcePushPolicy(patch.ForcePushPolicy) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument",
 			"force_push_policy must be \"tolerant\" or \"strict\"")
@@ -1268,11 +1485,13 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// spec: §7.3.1 — the local-source authorization rule, evaluated against
-	// the patch rather than against the stored layer. The handler applies
-	// neither patch.SourceType nor patch.Repo, so a patch carrying no
+	// the patch rather than against the stored layer. The handler never
+	// applies patch.SourceType or patch.Repo, so a patch carrying no
 	// local_path patches no filesystem path and is admitted for whatever
 	// caller the write gate admitted; a patch that names one is a tenant
-	// admin's operation.
+	// admin's operation. The repository credential members change only the
+	// stored credential and never the remote, and they apply to an http or
+	// https remote alone, so they place no patch on this arm.
 	if !e.authorizeLocalSource(w, r, "", patch.LocalPath, "") {
 		return
 	}
@@ -1288,6 +1507,20 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("the fields %s cannot be patched on a user-defined layer; its owner and its users:[<owner>] visibility are fixed at registration, so re-send the patch without them, or ask an administrator to re-register the layer as an admin-defined one",
 				strings.Join(asserted, ", ")),
 			map[string]any{"constraint": "immutable_visibility"})
+		return
+	}
+	// spec: §7.3.1 — the repository credential rule, read against the stored
+	// source type and registered repo because an update never changes the
+	// remote. It runs above every field assignment and the secret rotation,
+	// so a refused patch writes nothing and mints no secret. The new value is
+	// held in a local and applied with the other fields below.
+	if msg := repoCredentialError(patch, cfg.SourceType, cfg.CloneRepo()); msg != "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
+		return
+	}
+	credentialRepo, credentialChanged, msg := patchedCredentialRepo(patch, usernameSent, cfg.CloneRepo())
+	if msg != "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
 		return
 	}
 	// spec: §7.3.1 — a non-empty force_push_policy replaces the prior
@@ -1309,6 +1542,9 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	}
 	if patch.LocalPath != "" {
 		cfg.LocalPath = patch.LocalPath
+	}
+	if credentialChanged {
+		cfg.Repo, cfg.RegisteredRepo = store.SplitLayerRepo(credentialRepo, sql.NullString{})
 	}
 	// spec: §12 — "Per-layer HMAC secret rotated via `podium layer
 	// update`." A compromised secret is replaced here; only a git layer
@@ -1392,6 +1628,19 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// value on a non-git source, are refused here rather than stored and
 	// left to fail every inbound delivery.
 	if msg := gitProviderError(req.GitProvider, req.SourceType); msg != "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
+		return
+	}
+	// spec: §7.3.1 — the repository credential refusals. They run with the
+	// checks on the request's own fields, above lookupLayerForWrite, so a
+	// registration they refuse reads no stored layer. Neither message carries
+	// any part of the repo or the credential members.
+	if msg := urlCredentialError(req.Repo); msg != "" {
+		writeErrorDetails(w, http.StatusBadRequest, "registry.invalid_argument", msg,
+			map[string]any{"constraint": "url_credential"})
+		return
+	}
+	if msg := repoCredentialError(req, req.SourceType, req.Repo); msg != "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
 		return
 	}
@@ -1481,16 +1730,6 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// spec: §7.3.1 — the re-registration rule. It runs below the write,
-	// local-source, and admin-only-fields rules so each keeps its envelope, and
-	// above every mutation so a refused request mints no secret and writes nothing.
-	if exists && !req.ForceRepoOverwrite && redactedRepoResubmitted(stored, req.Repo) {
-		writeErrorDetails(w, http.StatusBadRequest, "registry.invalid_argument",
-			"repo is the value a layer read reports for this layer, and the stored repository URL carries a credential that reads do not report; storing this value would remove it, so re-send the registration with the full repository URL, or set force_repo_overwrite (podium layer register --force-repo-overwrite) to store the value as sent",
-			map[string]any{"constraint": "redacted_repo"})
-		return
-	}
-
 	cfg := store.LayerConfig{
 		TenantID:        tenantID,
 		ID:              req.ID,
@@ -1534,6 +1773,24 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		cfg.Organization = req.Organization
 		cfg.Groups = req.Groups
 		cfg.Users = req.Users
+	}
+
+	// spec: §7.3.1 — this switch sets the credential the registration stores.
+	// The keep case runs here, below the class and owner resolution, because
+	// it compares the resolved class and owner with the stored layer's; above
+	// that resolution it would carry alice's credential to an admin-defined
+	// layer registered under the same ID. With neither case the literal above
+	// stores req.Repo with no credential.
+	switch {
+	case req.RepoToken != "":
+		// The error is discarded because repoCredentialError above refused
+		// every input WithCredential refuses: a repo the members do not apply
+		// to, a refused username byte, and a refused token byte. urlCredentialError
+		// refused a repo carrying userinfo of its own.
+		registered, _ := repourl.WithCredential(req.Repo, string(req.RepoUsername), string(req.RepoToken))
+		cfg.Repo, cfg.RegisteredRepo = store.SplitLayerRepo(registered, sql.NullString{})
+	case exists && keepsStoredRemote(stored, req, cfg):
+		cfg.Repo, cfg.RegisteredRepo = store.SplitLayerRepo(stored.CloneRepo(), sql.NullString{})
 	}
 
 	// spec: §7.3.1 / §1.4 — cap of N user-defined layers per identity
@@ -1650,7 +1907,7 @@ func (e *LayerEndpoint) list(w http.ResponseWriter, r *http.Request) {
 	}
 	tenantID, routed := e.tenant(r.Context())
 	if !routed {
-		writeJSON(w, http.StatusOK, map[string]any{"layers": []store.LayerConfig{}})
+		writeJSON(w, http.StatusOK, map[string]any{"layers": []LayerObject{}})
 		return
 	}
 	fetch := e.store.ListLayerConfigs

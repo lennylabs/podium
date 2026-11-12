@@ -338,6 +338,12 @@ export interface LayerRecord {
    * surface derives the erase date from it. The member carries no omitempty
    * tag, so an active layer marshals it as null rather than omitting it. */
   deleted_at?: string | null;
+  /** repo_credential reports whether a credential is stored for the layer's
+   * repository, and it carries no part of that credential. The registry
+   * carries it on a layer whose update takes the credential members and omits
+   * it on every other layer, and a 0.6.0 replica's response omits it on every
+   * layer. It is true while a credential is stored (§7.3.1). */
+  repo_credential?: boolean;
 }
 
 /** IngestSummary is the §7.3.1 reingest result. The registry runs the whole
@@ -502,6 +508,11 @@ export interface LayerRegistration {
   organization?: boolean;
   groups?: string[];
   users?: string[];
+  /** repo_username and repo_token set the credential a git layer's http or
+   * https repository is fetched with. Both are write-only: no layer object
+   * reports either value (§7.3.1). */
+  repo_username?: string;
+  repo_token?: string;
 }
 
 /** LayerSecretResult carries the one-time credential. A git source returns a
@@ -545,6 +556,14 @@ export interface LayerUpdate {
   organization?: boolean;
   groups?: string[];
   users?: string[];
+  /** repo_username and repo_token replace the stored credential, and
+   * clear_repo_credential removes it. The members are write-only: no layer
+   * object reports either value. An omitted repo_username keeps the stored
+   * username, so a patch carrying repo_token alone rotates the token
+   * (§7.3.1). */
+  repo_username?: string;
+  repo_token?: string;
+  clear_repo_credential?: boolean;
 }
 
 /** updateLayer patches one layer. A rotation returns the fresh HMAC secret

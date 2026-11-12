@@ -1,7 +1,9 @@
 package repourl_test
 
 import (
+	"errors"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/internal/repourl"
@@ -132,6 +134,185 @@ func TestJoin_NoSchemeSeparator(t *testing.T) {
 	for _, bare := range []string{"git@github.com:acme/x.git", "/srv/git/acme.git", ""} {
 		if got, ok := repourl.Join(bare, "ghp_tok3n"); ok || got != "" {
 			t.Errorf("Join(%q, ...) = %q, %v, want \"\", false", bare, got, ok)
+		}
+	}
+}
+
+// Spec: §7.3.1 (Repository credentials)
+//
+// Every expected joined value and userinfo is a literal, so no assertion
+// compares WithCredential, Split, or Redact with itself.
+func TestWithCredential_RoundTrip(t *testing.T) {
+	t.Parallel()
+	const bare = "https://git.acme.com/acme/x.git"
+	cases := []struct {
+		name     string
+		username string
+		token    string
+		userinfo string
+	}{
+		{"token username", "x-access-token", "ghp_x", "x-access-token:ghp_x"},
+		{"empty username", "", "azpat", ":azpat"},
+		{"reserved characters", "alice@acme.com", "p@ss/w:rd?#% ", "alice%40acme.com:p%40ss%2Fw%3Ard%3F%23%25%20"},
+		{"bitbucket token username", "x-token-auth", "t", "x-token-auth:t"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			want := "https://" + tc.userinfo + "@git.acme.com/acme/x.git"
+			got, err := repourl.WithCredential(bare, tc.username, tc.token)
+			if err != nil {
+				t.Fatalf("WithCredential: %v", err)
+			}
+			if got != want {
+				t.Fatalf("WithCredential = %q, want %q", got, want)
+			}
+			u, err := url.Parse(got)
+			if err != nil {
+				t.Fatalf("url.Parse(%q): %v", got, err)
+			}
+			password, ok := u.User.Password()
+			if u.User.Username() != tc.username || !ok || password != tc.token {
+				t.Errorf("url.Parse(%q).User = %q, %q, %v, want %q, %q, true", got, u.User.Username(), password, ok, tc.username, tc.token)
+			}
+			parts, ok := repourl.Split(got)
+			if !ok {
+				t.Fatalf("Split(%q) = false, want true", got)
+			}
+			if parts.Bare != bare {
+				t.Errorf("Split(%q).Bare = %q, want %q", got, parts.Bare, bare)
+			}
+			if parts.RawUserinfo != tc.userinfo {
+				t.Errorf("Split(%q).RawUserinfo = %q, want %q", got, parts.RawUserinfo, tc.userinfo)
+			}
+			if parts.Clean != bare {
+				t.Errorf("Split(%q).Clean = %q, want %q", got, parts.Clean, bare)
+			}
+			if r := repourl.Redact(got); r != bare {
+				t.Errorf("Redact(%q) = %q, want %q", got, r, bare)
+			}
+		})
+	}
+}
+
+// Spec: §7.3.1 (Repository credentials)
+func TestWithCredential_Refusals(t *testing.T) {
+	t.Parallel()
+	const (
+		bare     = "https://git.acme.com/acme/x.git"
+		username = "alice-user"
+		token    = "s3cr3tpw"
+	)
+	cases := []struct {
+		name     string
+		bare     string
+		username string
+		token    string
+		want     error
+	}{
+		{"colon in username", bare, "alice:x", token, repourl.ErrCredentialUsername},
+		{"newline in username", bare, "a\nb", token, repourl.ErrCredentialUsername},
+		{"DEL in username", bare, "a\x7fb", token, repourl.ErrCredentialUsername},
+		{"space in username", bare, "acme ci", token, repourl.ErrCredentialUsername},
+		{"slash in username", bare, "acme/ci", token, repourl.ErrCredentialUsername},
+		{"quote in username", bare, "a\"b", token, repourl.ErrCredentialUsername},
+		{"empty token", bare, username, "", repourl.ErrCredentialToken},
+		{"carriage return in token", bare, username, "t\r", repourl.ErrCredentialToken},
+		{"NUL in token", bare, username, "t\x00", repourl.ErrCredentialToken},
+		{"ssh URL", "ssh://h/x.git", username, token, repourl.ErrCredentialRemote},
+		{"scp-like remote", "git@h:x.git", username, token, repourl.ErrCredentialRemote},
+		{"filesystem path", "/srv/x", username, token, repourl.ErrCredentialRemote},
+		{"remote with userinfo", "https://u:t@h/x.git", username, token, repourl.ErrCredentialRemote},
+		{"redacted class", "https://h/x@y", username, token, repourl.ErrCredentialRemote},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := repourl.WithCredential(tc.bare, tc.username, tc.token)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("WithCredential(%q) = %q, %v, want %v", tc.bare, got, err, tc.want)
+			}
+			if got != "" {
+				t.Errorf("WithCredential(%q) = %q, want \"\"", tc.bare, got)
+			}
+			for _, secret := range []string{tc.username, tc.token} {
+				if secret != "" && strings.Contains(err.Error(), secret) {
+					t.Errorf("error %q contains %q", err, secret)
+				}
+			}
+		})
+	}
+}
+
+// credentialClassCases lists each repo value with its literal
+// CarriesURLCredential and TakesCredential answers.
+var credentialClassCases = []struct {
+	in      string
+	carries bool
+	takes   bool
+}{
+	{"https://u:t@h/x", true, true},
+	{"https://@h/x", true, true},
+	{"HTTPS://h/x", false, true},
+	{"http://h/x", false, true},
+	{"https://h/x@y", true, false},
+	{"ssh://git@host:org/x.git", true, false},
+	{"ssh://git@h/x", false, false},
+	{"git@h:x", false, false},
+	{"/srv/x", false, false},
+	{repourl.Redacted, false, false},
+}
+
+// Spec: §7.3.1 (Repository credentials)
+func TestCarriesURLCredential(t *testing.T) {
+	t.Parallel()
+	for _, tc := range credentialClassCases {
+		if got := repourl.CarriesURLCredential(tc.in); got != tc.carries {
+			t.Errorf("CarriesURLCredential(%q) = %v, want %v", tc.in, got, tc.carries)
+		}
+	}
+}
+
+// Spec: §7.3.1 (Repository credentials)
+func TestTakesCredential(t *testing.T) {
+	t.Parallel()
+	for _, tc := range credentialClassCases {
+		if got := repourl.TakesCredential(tc.in); got != tc.takes {
+			t.Errorf("TakesCredential(%q) = %v, want %v", tc.in, got, tc.takes)
+		}
+	}
+}
+
+// Spec: §7.3.1 (Repository credentials)
+func TestWithoutCredential(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ in, want string }{
+		{"https://u:t@H/a%2Fb.git", "https://H/a%2Fb.git"},
+		{"https://@h/x", "https://h/x"},
+		{"https://h/x", "https://h/x"},
+		// A [redacted]-class value is returned unchanged.
+		{"https://h/x@y", "https://h/x@y"},
+	}
+	for _, tc := range cases {
+		if got := repourl.WithoutCredential(tc.in); got != tc.want {
+			t.Errorf("WithoutCredential(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// Spec: §7.3.1 (Repository credentials)
+func TestCredentialUsername(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ in, want string }{
+		{"https://alice%40acme.com:t@h/x", "alice@acme.com"},
+		{"https://:t@h/x", ""},
+		// A legacy token in the username position is not a username.
+		{"https://tok@h/x", ""},
+		{"https://h/x", ""},
+	}
+	for _, tc := range cases {
+		if got := repourl.CredentialUsername(tc.in); got != tc.want {
+			t.Errorf("CredentialUsername(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

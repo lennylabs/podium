@@ -130,3 +130,25 @@ func LayerRepoColumns(cfg LayerConfig) (string, sql.NullString, error) {
 	}
 	return parts.Bare, userinfo, nil
 }
+
+// layerRepoFormTarget returns the repo and repo_userinfo columns a stored row
+// takes at its next write, and whether they differ from the stored ones. The
+// target is the read rule followed by the write rule, so the start-time
+// rewrite adds no class of its own and reads back as the stored row reads.
+//
+// Spec: §13.4, §7.3.1 (Repository credentials)
+func layerRepoFormTarget(repo string, userinfo sql.NullString) (string, sql.NullString, bool) {
+	clean, registered := SplitLayerRepo(repo, userinfo)
+	targetRepo, targetUserinfo, err := LayerRepoColumns(LayerConfig{Repo: clean, RegisteredRepo: registered})
+	if err != nil {
+		// This branch cannot run: SplitLayerRepo returns a RegisteredRepo only
+		// together with its Split(...).Clean as Repo, which is the condition
+		// registeredLayerRepo checks. A row it would reach is kept as stored,
+		// so the rewrite never writes a form the write rule refused.
+		return repo, userinfo, false
+	}
+	changed := targetRepo != repo ||
+		targetUserinfo.Valid != userinfo.Valid ||
+		targetUserinfo.String != userinfo.String
+	return targetRepo, targetUserinfo, changed
+}
