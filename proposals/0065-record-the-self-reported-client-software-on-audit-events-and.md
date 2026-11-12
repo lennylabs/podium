@@ -1,7 +1,7 @@
 # Proposal 0065: Record the self-reported client software on audit events, and strip the query string from every exported trace span
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-11). Verified (2026-11-11) after 10 adversarial review rounds (21 findings fixed).
+- Status: Applied to spec (2026-11-11). Verified (2026-11-11) after 10 adversarial review rounds (21 findings fixed).
 - Date: 2026-11-11
 
 This document stages spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. One part is backward-incompatible: the MCP server's local audit events lose the constant `context.source` key. The change ships in a MINOR release.
