@@ -6,9 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Audit records name the client software** (§7.2.2, §8.1): the MCP server, `podium sync`, the `podium` CLI, and the SDKs send the `X-Podium-Client` request header on control-plane requests. The registry audit log and the MCP server's local audit sink record its normalized value as `caller.client`, with the members `kind`, `name`, `version`, `host`, `host_version`, and `harness`. An `http(s)` audit target receives the same key in each POSTed event. The value is self-reported, bounded, and sanitized. The registry never uses it for authentication, authorization, visibility, quotas, sampling, or tenant selection, and an ignored or malformed value never fails a request. A record without `caller.client` keeps its hash, so existing audit logs verify unchanged.
+
 ### Changed
 
 - **A `git` layer's URL credential is stored apart from its `repo`** (§7.3.1, §13.4): for a `repo` URL that carries userinfo, the metadata store now writes the userinfo to `layer_configs.repo_userinfo` and the rest of the URL to `layer_configs.repo`. No row is rewritten at upgrade. A layer registered earlier keeps working and takes the new form at its next write, which is its next completed ingest, an update that changes the layer, a reorder, or a re-registration, or the next start for a layer declared in the registry configuration. Registration, every layer response, and the clone are unchanged. `podium admin migrate-to-standard` writes the new form to its target. **The lowest version that runs against a database this release has written to is 0.6.0.** Roll back to 0.6.0 and no further, and upgrade from 0.5.2 or earlier by stopping every replica first or by upgrading through 0.6.0. Replicas on 0.6.0 and on this release run together during a rolling upgrade. The rollback floor section of `docs/deployment/operator-guide.md` gives the mixed-version rule and the effects of running 0.5.2 against a written database.
+- **The MCP server's local audit events no longer carry `context.source`** (§8.1, §8.3): `caller.client.kind` is `mcp` on those events instead. A consumer that filtered on `context.source` filters on `caller.client.kind`. This is a backward-incompatible change and lands in a MINOR bump.
+
+### Fixed
+
+- **Exported trace spans no longer carry URL query strings** (§13.8): every exporter, including `PODIUM_TRACING=stdout` and OTLP, receives each span attribute that holds an `http` or `https` URL, `url.full` among them, with the query and fragment removed. This holds for calls that succeed and calls that fail. Search text, `session_id`, and presigned-URL signatures that the MCP server sent as query parameters no longer reach the trace backend.
 
 ## [0.6.0] - 2026-11-10
 
