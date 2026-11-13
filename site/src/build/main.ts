@@ -162,9 +162,9 @@ async function runBuild(config: SiteConfig): Promise<void> {
     join(config.outDir, "index.html"),
     renderDocument({
       config,
-      title: "Podium · One catalog. Every harness.",
+      title: "Podium · The skill registry for AI agents",
       description:
-        "Podium is a catalog for reusable AI agent artifacts, with tooling that translates them into harness-specific formats.",
+        "Podium is an enterprise-grade registry for reusable agent skills and other artifacts, with signing, access control, audit, and delivery into each harness's native format.",
       route: "/index.html",
       bodyClass: "landing",
       scriptSrc,

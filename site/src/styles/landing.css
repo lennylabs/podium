@@ -281,7 +281,8 @@
   /* minmax(0, 1fr) keeps the mono transcript from widening the whole grid. */
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 56px;
-  align-items: center;
+  /* Top-aligned, because the transcript is taller than the headline block. */
+  align-items: start;
   max-width: var(--landing-width);
   margin: 0 auto;
   padding: 76px var(--gutter-landing) 66px;
@@ -316,7 +317,7 @@
 
 .l-headline {
   margin: 0 0 20px;
-  font-size: clamp(40px, 7vw, 64px);
+  font-size: clamp(40px, 7vw, 60px);
   line-height: 1.01;
   letter-spacing: -0.042em;
   font-weight: 700;
@@ -460,22 +461,15 @@
   margin: 0;
 }
 
-.l-terminal::before {
-  content: "";
-  position: absolute;
-  inset: var(--terminal-glow-inset);
-  border-radius: calc(var(--r-card) + 7px);
-  background: var(--terminal-glow);
-  filter: blur(var(--terminal-glow-blur));
-}
-
 .l-terminal-card {
   position: relative;
   overflow: hidden;
   border: 1px solid var(--l-term-border);
   border-radius: var(--r-card);
   background: var(--surface);
-  box-shadow: var(--terminal-shadow);
+  /* The glow is an offset shadow on the card itself rather than a blurred
+     layer behind it, so it has no hard edge where the blur ends. */
+  box-shadow: var(--terminal-glow), var(--terminal-shadow);
 }
 
 .l-terminal-bar {
@@ -506,21 +500,35 @@
 }
 
 .l-term {
-  padding: 20px;
+  padding: 18px 20px;
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.7;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--ink);
 }
 
-/* Each transcript line is its own block, and keeps the spaces it carries. */
+/* Each transcript line is its own block, and keeps the spaces it carries,
+   because the indentation is what shows the output's hierarchy. */
 .l-term-line {
   white-space: pre;
 }
 
-.l-term-gap {
-  height: 1.7em;
+.l-term-line--command {
+  font-weight: 600;
+}
+
+/* The space under a command, under a results header, and between blocks. */
+.l-term-gap--command {
+  height: 0.45em;
+}
+
+.l-term-gap--header {
+  height: 0.4em;
+}
+
+.l-term-gap--block {
+  height: 2.1em;
 }
 
 .l-term-prompt {
@@ -674,6 +682,10 @@
   color: var(--secondary);
 }
 
+.l-card-body + .l-card-body {
+  margin-top: 8px;
+}
+
 /* ------------------------------------------------------- feature diagrams */
 
 .l-dg {
@@ -752,6 +764,22 @@
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* The pill at the right of a deployment card's title row. It takes the
+   integrations pill's colours, which are the ones the design names. */
+.l-deploy-badge {
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--callout-border);
+  border-radius: var(--r-pill);
+  background: var(--l-pill-fill);
+  color: var(--link);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
 }
 
 .l-deploy-title {
@@ -1217,11 +1245,12 @@
     box-shadow: none;
   }
 
+  /* white-space stays pre, which each line sets: nowrap would collapse the
+     leading spaces that carry the output's hierarchy. */
   .l-term {
     padding: 16px;
-    font-size: 11px;
+    font-size: 10.5px;
     line-height: 1.6;
-    white-space: nowrap;
     overflow-x: auto;
   }
 
@@ -1317,6 +1346,10 @@
   .l-deploy-card {
     border: 1px solid var(--border);
     border-radius: 13px;
+  }
+
+  .l-deploy-badge {
+    font-size: 10.5px;
   }
 
   /*
