@@ -1,7 +1,7 @@
 # Proposal 0067: Deliver the audit streams to external systems: destination lists, an HTTP and OTLP forwarder, a stdout destination, and a versioned record format
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-12). Verified after 7 adversarial review rounds (9 findings fixed).
+- Status: Implemented (2026-11-12). Verified after 7 adversarial review rounds (9 findings fixed).
 - Date: 2026-11-11
 
 This document stages spec, code, test, chart, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: the audit record gains a hashed `schema_version` member, an `http(s)` audit destination receives NDJSON batches asynchronously in place of one JSON object per synchronous request, a destination URL that carries userinfo refuses startup, and a value that contains a comma now names more than one destination. It ships in a MINOR release.
@@ -64,34 +64,38 @@ This document stages spec, code, test, chart, and documentation changes. It does
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4, SPEC-5, SPEC-6. The §8 record format and destination contract and every dependent row land in one commit, because §8.3, §8.6, §13.12, and §6.2 cite each other's new text and a partial commit leaves dangling references.
+- [x] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4, SPEC-5, SPEC-6. The §8 record format and destination contract and every dependent row land in one commit, because §8.3, §8.6, §13.12, and §6.2 cite each other's new text and a partial commit leaves dangling references.
       Levels: unit. Depends on: —
-- [ ] **S2 · code** — CODE-1. `audit.Stream`, destination parsing, `audit.Open` and `audit.OpenFile`, the `audit.Observer` interface and drop reasons, the `Stream.dropped` and `Stream.queued` reporting methods, `Stream.Shutdown`, which seals the stream after its flush, and `ShutdownTimeout`, `Stream.Seal` and `ErrSealed`, `ParseQueueMaxBytes`, the `ErrConfig` sentinel, and the hashed `schema_version` member land, unused by the binaries. Until S3, S4, and S5 land, `Open` refuses an `http`, `otlp`, or `stdout` element (CODE-1).
+- [x] **S2 · code** — CODE-1. `audit.Stream`, destination parsing, `audit.Open` and `audit.OpenFile`, the `audit.Observer` interface and drop reasons, the `Stream.dropped` and `Stream.queued` reporting methods, `Stream.Shutdown`, which seals the stream after its flush, and `ShutdownTimeout`, `Stream.Seal` and `ErrSealed`, `ParseQueueMaxBytes`, the `ErrConfig` sentinel, and the hashed `schema_version` member land, unused by the binaries. Until S3, S4, and S5 land, `Open` refuses an `http`, `otlp`, or `stdout` element (CODE-1).
       Levels: unit. Depends on: S1
-- [ ] **S3 · code** — CODE-2. The in-memory forwarder, the shared transport, and the HTTP NDJSON destination land.
+- [x] **S3 · code** — CODE-2. The in-memory forwarder, the shared transport, and the HTTP NDJSON destination land.
       Levels: unit. Depends on: S2
-- [ ] **S4 · code** — CODE-3. The OTLP destination lands on the OTLP proto modules that `go.mod` already requires directly, and `go.mod` and `go.sum` stay unchanged.
+- [x] **S4 · code** — CODE-3. The OTLP destination lands on the OTLP proto modules that `go.mod` already requires directly, and `go.mod` and `go.sum` stay unchanged.
       Levels: unit. Depends on: S3
-- [ ] **S5 · code** — CODE-4. The stdout destination lands.
+- [x] **S5 · code** — CODE-4. The stdout destination lands.
       Levels: unit. Depends on: S2
-- [ ] **S6 · code** — CODE-7. The two audit series, the `Observer` implementations on both metric registries, and the dashboard row land.
+- [x] **S6 · code** — CODE-7. The two audit series, the `Observer` implementations on both metric registries, and the dashboard row land.
       Levels: unit. Depends on: S2
-- [ ] **S7 · code** — CODE-5, CODE-6. Retention, erasure, anchoring, and the schedulers move onto the stream, and both binaries and the offline admin forms switch to `audit.Open` and `audit.OpenFile`. Each entry point arranges its `Shutdown` call as the CODE-6 lifecycle table states, and the body of the `podium-mcp` `main` moves into `run() int`, which handles SIGINT and SIGTERM (CODE-6 item 5). The two items land in one step because CODE-5 changes the signatures of `Enforce`, `EraseUser`, `Anchor`, and the schedulers, so every caller CODE-6 rewrites stops compiling until both land. `EndpointSink` and its test file are deleted here, where their last callers go, and every existing test that uses a removed or re-signatured function gets the disposition CODE-5 item 6 and CODE-6 item 10 give it.
+- [x] **S7 · code** — CODE-5, CODE-6. Retention, erasure, anchoring, and the schedulers move onto the stream, and both binaries and the offline admin forms switch to `audit.Open` and `audit.OpenFile`. Each entry point arranges its `Shutdown` call as the CODE-6 lifecycle table states, and the body of the `podium-mcp` `main` moves into `run() int`, which handles SIGINT and SIGTERM (CODE-6 item 5). The two items land in one step because CODE-5 changes the signatures of `Enforce`, `EraseUser`, `Anchor`, and the schedulers, so every caller CODE-6 rewrites stops compiling until both land. `EndpointSink` and its test file are deleted here, where their last callers go, and every existing test that uses a removed or re-signatured function gets the disposition CODE-5 item 6 and CODE-6 item 10 give it.
       Levels: unit, integration, e2e. Depends on: S3, S4, S5, S6
-- [ ] **S8 · code** — DEPLOY-1. The chart's `stdout` default for `config.auditLogPath`, its rewritten values and template comments, and the transport-secret mount land with their render tests, including the disposition of `TestChart_MigrationConfigReachesBothPods`.
+- [x] **S8 · code** — DEPLOY-1. The chart's `stdout` default for `config.auditLogPath`, its rewritten values and template comments, and the transport-secret mount land with their render tests, including the disposition of `TestChart_MigrationConfigReachesBothPods`.
       Levels: unit. Depends on: S7
-- [ ] **S9 · code** — SCHEMA-1. The v1 JSON Schema file and its conformance test land.
+- [x] **S9 · code** — SCHEMA-1. The v1 JSON Schema file and its conformance test land.
       Levels: unit. Depends on: S2
-- [ ] **S10 · test** — TEST-1. Hashing, round-trip, stream, parsing, and sampling unit tests, including the SPEC-2 Loss accounting property test, the drop-funnel test, the `Seal` ordering test, the `Shutdown` seal test, the rewrite-after-seal test, the stored-part test, the foreign-rewrite test, the stdout-failure retention re-anchor test, and the queue-before-stdout order test.
+- [x] **S10 · test** — TEST-1. Hashing, round-trip, stream, parsing, and sampling unit tests, including the SPEC-2 Loss accounting property test, the drop-funnel test, the `Seal` ordering test, the `Shutdown` seal test, the rewrite-after-seal test, the stored-part test, the foreign-rewrite test, the stdout-failure retention re-anchor test, and the queue-before-stdout order test.
       Levels: unit, integration. Depends on: S7
-- [ ] **S11 · test** — TEST-2. Forwarder, transport, OTLP, stdout, and leak tests, including the assertions moved from the deleted `endpoint_test.go`, the hung-receiver request-timeout test, the backoff cap-growth cases, the held-batch bound test, the OTLP redirect test, and the server-verification cases that refuse an untrusted receiver certificate.
+- [x] **S11 · test** — TEST-2. Forwarder, transport, OTLP, stdout, and leak tests, including the assertions moved from the deleted `endpoint_test.go`, the hung-receiver request-timeout test, the backoff cap-growth cases, the held-batch bound test, the OTLP redirect test, and the server-verification cases that refuse an untrusted receiver certificate.
       Levels: unit. Depends on: S7
-- [ ] **S12 · test** — TEST-3. Unit, integration, and end-to-end tests for destination lists, refusals, shutdown flushing, the `podium-mcp` signal exit and observer conversion, the stdout destination, and the offline admin forms.
+- [x] **S12 · test** — TEST-3. Unit, integration, and end-to-end tests for destination lists, refusals, shutdown flushing, the `podium-mcp` signal exit and observer conversion, the stdout destination, and the offline admin forms.
       Levels: unit, integration, e2e. Depends on: S7
-- [ ] **S13 · test** — MV-1. S105, S106, the S41 rewrite, and the S104 edit in `test/manual-validation.md`. The implementor writes the S105 and S106 commands from MV-1's specification, which meet MV-1's command requirements, and runs both scenarios under zsh and under bash, confirming every Expect. S105 step 6 ends `podium-mcp` with SIGTERM and checks its exit status and its flushed local record. S106 needs Docker and a running `podium-minio`; record a skip when either is absent.
+- [x] **S13 · test** — MV-1. S105, S106, the S41 rewrite, and the S104 edit in `test/manual-validation.md`. The implementor writes the S105 and S106 commands from MV-1's specification, which meet MV-1's command requirements, and runs both scenarios under zsh and under bash, confirming every Expect. S105 step 6 ends `podium-mcp` with SIGTERM and checks its exit status and its flushed local record. S106 needs Docker and a running `podium-minio`; record a skip when either is absent.
       Levels: e2e. Depends on: S12
-- [ ] **S14 · docs** — DOC-1. The new audit reference page, the deployment, reference, and getting-started rewrites, and the CHANGELOG entries, which land last.
+- [x] **S14 · docs** — DOC-1. The new audit reference page, the deployment, reference, and getting-started rewrites, and the CHANGELOG entries, which land last.
       Levels: e2e. Depends on: S1, S8, S13
+
+## Deviations from the checklist
+
+- **S15** is absent from the checklist. It closed the coverage gaps that the closing cross-package profile reported, merged with the end-to-end subprocess profile. It added tests that pin the audit stream shutdown when a store cannot open in `internal/serverboot/signpass_test.go`, the `audit.anchor_failed` record of a periodic anchor that cannot sign in `internal/serverboot/schedulers_test.go`, and the `podium-mcp` refusal of an unknown `PODIUM_TRACING` value before it opens its local audit stream in `test/e2e/audit_sink_redirect_test.go`. It added comments in `pkg/audit/file.go` and `pkg/audit/sigpipe_windows.go` that name why their remaining branches cannot run in the default suite. The changed lines reach 98.8% coverage.
 
 ## Current state and the gap
 
