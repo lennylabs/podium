@@ -102,3 +102,25 @@ func TestStdoutDest_ReturnsWriteError(t *testing.T) {
 		t.Fatalf("write = %v, want EPIPE", err)
 	}
 }
+
+// TestStdoutDest_LeavesSharedLineUnchanged pins that writing a record's line
+// with its newline never writes into the line's backing array, which the
+// other destinations of the stream read after the stdout write.
+//
+// Spec: §8.3
+func TestStdoutDest_LeavesSharedLineUnchanged(t *testing.T) {
+	t.Parallel()
+	backing := []byte(`{"a":1}XXXX`)
+	line := backing[:7]
+	w := &writeRecorder{}
+	d := &stdoutDest{w: w}
+	if err := d.write(record{line: line}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got := string(backing); got != `{"a":1}XXXX` {
+		t.Fatalf("backing array = %q, want it unchanged", got)
+	}
+	if len(w.writes) != 1 || string(w.writes[0]) != "{\"a\":1}\n" {
+		t.Fatalf("writes = %q, want one line with its newline", w.writes)
+	}
+}

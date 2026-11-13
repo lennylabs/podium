@@ -14,10 +14,12 @@ type stdoutDest struct {
 // write writes r's line and its newline in a single Write call, so a
 // reader of the pipe never sees a partial record from a split write. The
 // caller counts a returned error with write_error and never returns it from
-// Append (§8.3 Loss accounting).
+// Append (§8.3 Loss accounting). The full slice expression caps the
+// capacity at the length, so append copies into a new array: r.line is
+// shared with the other destinations and must never gain the newline in
+// place.
 func (d *stdoutDest) write(r record) error {
-	line := make([]byte, 0, len(r.line)+1)
-	line = append(append(line, r.line...), '\n')
+	line := append(r.line[:len(r.line):len(r.line)], '\n')
 	_, err := d.w.Write(line)
 	return err
 }
