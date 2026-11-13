@@ -574,6 +574,59 @@ func TestHTTPDest_RecordLargerThanBoundDropsOnEmptyQueue(t *testing.T) {
 	}
 }
 
+// While a blocked receiver holds the queue, a record that does not fit the
+// bound is chained, written to the file, and dropped as queue_full for the
+// HTTP destination. The next delivered record's prev_hash names the dropped
+// record, which the receiver never got, so the receiver's §8.1 gap check
+// sees the loss.
+//
+// Spec: §8.1, §8.3
+func TestHTTPDest_QueueFullDropsAfterChaining(t *testing.T) {
+	fire := stubTicker(t)
+	unblock := make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(unblock) }) }
+	rcv := newReceiver(t, func(n int, _ http.ResponseWriter, _ *http.Request) {
+		if n == 1 {
+			<-unblock
+		}
+	})
+	t.Cleanup(release)
+	path := filepath.Join(t.TempDir(), "audit.log")
+	obs := &fakeObserver{}
+	s := openStream(t, path+","+rcv.srv.URL+"/p", OpenOptions{Observer: obs, QueueMaxBytes: 3000})
+
+	appendTarget(t, s, strings.Repeat("a", 1000))
+	fire()
+	rcv.wait(t, 1)
+	appendTarget(t, s, strings.Repeat("b", 2000))
+	appendTarget(t, s, "c")
+	if _, dropped := totals(obs); dropped["http,queue_full"] != 1 || len(dropped) != 1 {
+		t.Fatalf("dropped %v, want one queue_full", dropped)
+	}
+	release()
+	fire()
+	rcv.wait(t, 2)
+
+	file := fileRecords(t, path)
+	if len(file) != 3 {
+		t.Fatalf("file holds %d records, want 3", len(file))
+	}
+	dropped := file[1].Hash
+	got := rcv.requests()[1].lines
+	if len(got) != 1 || got[0].Hash != file[2].Hash {
+		t.Fatalf("the second request carried %d records, want the third record", len(got))
+	}
+	if got[0].PrevHash != dropped {
+		t.Fatalf("delivered prev_hash = %q, want the dropped record's hash %q", got[0].PrevHash, dropped)
+	}
+	for _, h := range rcv.hashes() {
+		if h == dropped {
+			t.Fatalf("the receiver holds the dropped record")
+		}
+	}
+}
+
 // A batch held across a backoff counts toward the bound, a tick during the
 // backoff sends nothing, and close counts the held batch as shutdown when
 // its context ends. The shutdown drop reaches the log once, through the
@@ -674,6 +727,123 @@ func TestHTTPDest_CloseDuringBackoffFlushesHeldBatch(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "dropped") {
 		t.Errorf("a delivered flush wrote a drop line: %s", logs.String())
+	}
+}
+
+// Close sends every queued record and reports nothing when the flush
+// delivers them all. When its context ends part-way through the flush, the
+// batches already delivered stay delivered and the rest are counted as
+// shutdown in one drop line. Either way the queue-depth deltas sum to 0.
+//
+// Spec: §8.3
+func TestHTTPDest_CloseFlushesThenCountsShutdown(t *testing.T) {
+	t.Run("delivers everything", func(t *testing.T) {
+		logs := captureLog(t)
+		stubTicker(t)
+		rcv := newReceiver(t, nil)
+		obs := &fakeObserver{}
+		s := openStream(t, rcv.srv.URL+"/p", OpenOptions{Observer: obs})
+		appendN(t, s, 3)
+		if err := s.Close(context.Background()); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if n := len(rcv.hashes()); n != 3 {
+			t.Fatalf("receiver holds %d records, want 3", n)
+		}
+		queued, _ := totals(obs)
+		if queued["http"] != 0 {
+			t.Fatalf("AddQueued deltas sum to %d, want 0", queued["http"])
+		}
+		if calls := strings.Join(obs.snapshot(), " "); strings.Contains(calls, "Dropped") {
+			t.Fatalf("a full drain reported a drop: %s", calls)
+		}
+		if strings.Contains(logs.String(), "audit: dropped") {
+			t.Fatalf("a full drain wrote a drop line: %s", logs.String())
+		}
+	})
+
+	t.Run("deadline ends the flush", func(t *testing.T) {
+		logs := captureLog(t)
+		fire := stubTicker(t)
+		gate := stubSleepGate(t, true)
+		flushCtx, cancelFlush := context.WithCancel(context.Background())
+		defer cancelFlush()
+		// The first request holds the sender in a backoff, so the whole
+		// queue is left for Close: the flush delivers one full batch, and
+		// its second request ends the flush's context.
+		rcv := newReceiver(t, func(n int, w http.ResponseWriter, _ *http.Request) {
+			switch n {
+			case 1:
+				w.WriteHeader(http.StatusServiceUnavailable)
+			case 3:
+				cancelFlush()
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}
+		})
+		obs := &fakeObserver{}
+		s := openStream(t, rcv.srv.URL+"/p", OpenOptions{Observer: obs})
+		appendN(t, s, 1)
+		fire()
+		gate.next(t)
+		appendN(t, s, maxBatchRecords+100)
+		if err := s.Close(flushCtx); err != nil {
+			t.Fatalf("Close = %v, want nil: the drop is reported only through the drop log", err)
+		}
+		reqs := rcv.requests()
+		if len(reqs) != 3 || len(reqs[1].lines) != maxBatchRecords {
+			t.Fatalf("requests = %d, want the refused one, a delivered full batch, and the refused remainder", len(reqs))
+		}
+		queued, dropped := totals(obs)
+		if queued["http"] != 0 || dropped["http,shutdown"] != 101 || len(dropped) != 1 {
+			t.Fatalf("queued %v dropped %v, want 0 and 101 shutdown", queued, dropped)
+		}
+		if n := strings.Count(logs.String(), "audit: dropped 101 record(s) for destination "+rcv.srv.URL+"/p: shutdown"); n != 1 {
+			t.Fatalf("log holds %d shutdown drop lines for 101 records, want 1: %s", n, logs.String())
+		}
+	})
+}
+
+// Against a receiver that refuses throughout, Close during a backoff
+// flushes once, waits out the retry until its context is cancelled, and
+// then counts the held batch and the later records as shutdown.
+//
+// Spec: §8.3
+func TestHTTPDest_CloseDuringBackoffCountsHeldBatch(t *testing.T) {
+	fire := stubTicker(t)
+	gate := stubSleepGate(t, true)
+	rcv := newReceiver(t, func(_ int, w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	obs := &fakeObserver{}
+	s := openStream(t, rcv.srv.URL+"/p", OpenOptions{Observer: obs})
+	appendN(t, s, 3)
+	fire()
+	gate.next(t)
+	appendN(t, s, 2)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close(ctx) }()
+	gate.next(t)
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned %v before its context was cancelled", err)
+	default:
+	}
+	if n := rcv.count(); n != 2 {
+		t.Fatalf("receiver recorded %d requests, want the refused batch and the refused flush", n)
+	}
+	cancel()
+	if err := <-closed; err != nil {
+		t.Fatalf("Close = %v, want nil: the drop is reported only through the drop log", err)
+	}
+	if got := rcv.requests()[1].lines; len(got) != 5 {
+		t.Fatalf("the flush sent %d records, want the held three and the later two", len(got))
+	}
+	queued, dropped := totals(obs)
+	if queued["http"] != 0 || dropped["http,shutdown"] != 5 || len(dropped) != 1 {
+		t.Fatalf("queued %v dropped %v, want 0 and five shutdown", queued, dropped)
 	}
 }
 
@@ -828,6 +998,40 @@ func TestHTTPDest_FailureLogCadence(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "tok") || strings.Contains(logs.String(), "s3cr3tvalue") {
 		t.Errorf("the log carries the query: %s", logs.String())
+	}
+}
+
+// The failure line and the shutdown drop line name the destination by its
+// scheme, host, and path. The query, which can carry a credential, appears
+// in neither. The request context the hook returns has already expired, so
+// the attempt fails before any dial and the test needs no resolvable host.
+//
+// Spec: §8.3
+func TestHTTPDest_FailureLogNamesRedactedEndpoint(t *testing.T) {
+	logs := captureLog(t)
+	fire := stubTicker(t)
+	gate := stubSleepGate(t, true)
+	stubRequestContext(t, func(parent context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
+		return context.WithDeadline(parent, time.Time{})
+	})
+	s := openStream(t, "http://h/p?tok=secret", OpenOptions{})
+	appendN(t, s, 1)
+	fire()
+	gate.next(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "audit: delivery to http://h/p failed") {
+		t.Fatalf("the failure line does not name http://h/p: %q", out)
+	}
+	if !strings.Contains(out, "for destination http://h/p: shutdown") {
+		t.Fatalf("the drop line does not name http://h/p: %q", out)
+	}
+	if strings.Contains(out, "tok") || strings.Contains(out, "secret") {
+		t.Fatalf("the log carries the query: %q", out)
 	}
 }
 
