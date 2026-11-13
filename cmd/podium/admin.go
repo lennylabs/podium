@@ -264,16 +264,19 @@ func adminEraseCmd(args []string) int {
 			fmt.Fprintln(os.Stderr, "error: --operator is required for the local-log erase")
 			return 2
 		}
-		sink, err := audit.NewFileSink(*auditPath)
+		// The offline form reads only --audit-path, never
+		// PODIUM_AUDIT_LOG_PATH, so its stream has no network destination.
+		stream, err := audit.OpenFile(*auditPath, audit.OpenOptions{})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "open audit log: %v\n", err)
 			return 1
 		}
-		// The registry that writes this file must be stopped: FileSink chains
-		// off an in-process lastHash and the rewrite renames a re-hashed file
-		// into place, so a live registry's next append would carry a stale
-		// prev_hash and raise audit.gap_detected.
-		transformed, err := audit.EraseUser(context.Background(), sink, userID, *salt, *operator, nil, audit.EraseScope{Unlabeled: true})
+		defer stream.Shutdown()
+		// The registry that writes this file must be stopped: its stream
+		// chains off an in-process head and the rewrite renames a re-hashed
+		// file into place, so a live registry's next append would carry a
+		// stale prev_hash and raise audit.gap_detected.
+		transformed, err := audit.EraseUser(context.Background(), stream, userID, *salt, *operator, nil, audit.EraseScope{Unlabeled: true})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "erase failed: %v\n", err)
 			return 1
@@ -316,17 +319,18 @@ func adminRetentionCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "parse --policy: %v\n", err)
 		return 2
 	}
-	sink, err := audit.NewFileSink(*auditPath)
+	stream, err := audit.OpenFile(*auditPath, audit.OpenOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "open audit log: %v\n", err)
 		return 1
 	}
-	dropped, err := audit.Enforce(context.Background(), sink, time.Now().UTC(), policies, audit.DefaultQueryRetention())
+	defer stream.Shutdown()
+	res, err := audit.Enforce(context.Background(), stream, time.Now().UTC(), policies, audit.DefaultQueryRetention())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "enforce failed: %v\n", err)
 		return 1
 	}
-	fmt.Printf("retention enforced: %d audit events dropped\n", dropped)
+	fmt.Printf("retention enforced: %d audit events dropped\n", res.Dropped)
 	return 0
 }
 

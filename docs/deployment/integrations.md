@@ -25,7 +25,7 @@ Nothing in the alternatives column is required to start. At cluster scale, Postg
 
 ## Metadata store
 
-The metadata store holds manifest metadata, dependency edges, layer config, and admin grants. `PODIUM_REGISTRY_STORE` selects it, and the interface is the `RegistryStore` SPI described in [Extending](extending). The audit stream is separate: the registry writes an append-only hash-chained file at `~/.podium/audit.log` unless `PODIUM_AUDIT_LOG_PATH` names another path, or an `http(s)` URL, which routes the stream to that endpoint instead.
+The metadata store holds manifest metadata, dependency edges, layer config, and admin grants. `PODIUM_REGISTRY_STORE` selects it, and the interface is the `RegistryStore` SPI described in [Extending](extending). The audit stream is separate. `PODIUM_AUDIT_LOG_PATH` lists its destinations: a hash-chained file, an `http(s)` URL, an `otlp+http(s)` URL, and `stdout`, alone or in a comma-separated list. Unset, the registry writes the file `~/.podium/audit.log`. [Audit events](../reference/audit-events) describes each destination.
 
 - **SQLite** is the default. The file lives at `~/.podium/standalone/podium.db` unless `PODIUM_SQLITE_PATH` moves it. One process owns the file, so it does not survive being shared between replicas.
 - **Postgres** is selected with `PODIUM_REGISTRY_STORE=postgres` and a DSN. Registry replicas share it, which is what makes horizontal scaling possible. The [clustered](clustered) tier requires it.

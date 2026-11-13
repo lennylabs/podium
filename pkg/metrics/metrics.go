@@ -17,6 +17,11 @@
 //   - podium_ingest_success_total                     counter
 //   - podium_ingest_failure_total                     counter
 //   - podium_vector_outbox_depth                      gauge
+//   - podium_audit_queue_depth{destination}           gauge
+//   - podium_audit_dropped_total{destination,reason}  counter
+//
+// The two audit series are Vecs, so a scrape carries them only after the
+// audit stream first reports a queued or dropped record (§8.3).
 //
 // spec: §13.8 Observability (Prometheus endpoint on registry and MCP server).
 package metrics
@@ -47,13 +52,16 @@ type Registry struct {
 	ingestSuccess    prometheus.Counter
 	ingestFailure    prometheus.Counter
 	vectorOutbox     atomic.Int64
+
+	// auditSeries implements audit.Observer for the registry's stream.
+	auditSeries
 }
 
 // New builds the Podium metric set, registers it (plus the Go runtime and
 // process collectors) against a fresh prometheus.Registry, and returns the
 // handle the server uses to record observations and serve /metrics.
 func New() *Registry {
-	m := &Registry{reg: prometheus.NewRegistry()}
+	m := &Registry{reg: prometheus.NewRegistry(), auditSeries: newAuditSeries()}
 
 	m.requestTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "podium_request_total",
@@ -106,6 +114,7 @@ func New() *Registry {
 		m.requestTotal, m.requestErrors, m.requestDuration, m.visibilityDenied,
 		m.cacheHits, m.cacheMisses, m.ingestSuccess, m.ingestFailure,
 		vectorOutbox,
+		m.queueDepth, m.dropped,
 		collectors(),
 	)
 	return m

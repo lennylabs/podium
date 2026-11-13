@@ -15,6 +15,13 @@ import (
 	"time"
 )
 
+// SchemaVersion is the §8.1 record format version a Stream stamps on every
+// event it chains. A record that carries 0 predates the member and hashes
+// as it did before the member existed.
+//
+// Spec: §8.1
+const SchemaVersion = 1
+
 // Errors returned by Sink and Verifier functions.
 var (
 	// ErrChainBroken signals that a hash gap was detected during
@@ -158,6 +165,12 @@ type Event struct {
 	// (§4.7.5 "result size"). Zero for non-read events.
 	ResultSize int
 
+	// SchemaVersion is the §8.1 record format version. Zero means a record
+	// written before the member existed, which hashes without it.
+	//
+	// Spec: §8.1
+	SchemaVersion int
+
 	// Hash is the chain hash sha256(body || prev_hash).
 	Hash     string
 	PrevHash string
@@ -211,6 +224,12 @@ func (e Event) canonicalBody() []byte {
 				parts = append(parts, "caller_client_"+m.key+"="+*m.val)
 			}
 		}
+	}
+	// Spec: §8.1, §8.6: schema_version is the last part and is present only
+	// when greater than 0, so a record written before the member existed
+	// keeps its hash.
+	if e.SchemaVersion > 0 {
+		parts = append(parts, "schema_version="+strconv.Itoa(e.SchemaVersion))
 	}
 	out := []byte{}
 	for _, p := range parts {

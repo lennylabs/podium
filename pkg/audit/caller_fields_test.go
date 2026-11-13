@@ -33,6 +33,7 @@ func TestCanonicalBody_IncludesCallerFields(t *testing.T) {
 		"caller_client_host":         func(e *Event) { e.CallerClient = &CallerClient{Host: "v"} },
 		"caller_client_host_version": func(e *Event) { e.CallerClient = &CallerClient{HostVersion: "v"} },
 		"caller_client_harness":      func(e *Event) { e.CallerClient = &CallerClient{Harness: "v"} },
+		"schema_version":             func(e *Event) { e.SchemaVersion = 1 },
 	}
 	want := string(base.canonicalBody())
 	for name, mutate := range cases {
@@ -50,6 +51,46 @@ func TestCanonicalBody_IncludesCallerFields(t *testing.T) {
 	empty.CallerClient = &CallerClient{}
 	if string(empty.canonicalBody()) != want {
 		t.Errorf("a client with no members must not change the canonical body")
+	}
+	full := base
+	full.Tenant = "acme"
+	full.CallerClient = &CallerClient{Kind: "mcp", Name: "podium-mcp"}
+	full.SchemaVersion = 1
+	wantTail := "tenant=acme\x00caller_client_kind=mcp\x00caller_client_name=podium-mcp\x00schema_version=1\x00"
+	if body := string(full.canonicalBody()); !strings.HasSuffix(body, wantTail) {
+		t.Errorf("canonical body must end with the tenant, caller_client_*, and schema_version parts in that order; got %q", body)
+	}
+}
+
+// A zero SchemaVersion marks a record written before the member existed, so
+// it adds nothing to the hashed body and the record keeps its hash.
+//
+// Spec: §8.1, §8.6
+func TestCanonicalBody_ZeroSchemaVersionAddsNothing(t *testing.T) {
+	t.Parallel()
+	base := Event{Type: EventArtifactLoaded, Caller: "alice", Tenant: "acme"}
+	zero := base
+	zero.SchemaVersion = 0
+	if string(zero.canonicalBody()) != string(base.canonicalBody()) {
+		t.Fatalf("SchemaVersion 0 changed the canonical body")
+	}
+}
+
+// The schema_version part follows the tenant part and is the last part of
+// the hashed body.
+//
+// Spec: §8.1, §8.6
+func TestCanonicalBody_SchemaVersionIsLastPart(t *testing.T) {
+	t.Parallel()
+	zero := Event{Type: EventArtifactLoaded, Caller: "alice", Tenant: "acme"}
+	one := zero
+	one.SchemaVersion = 1
+	body := string(one.canonicalBody())
+	if !strings.HasSuffix(body, "tenant=acme\x00schema_version=1\x00") {
+		t.Fatalf("body does not end with the tenant part then schema_version: %q", body)
+	}
+	if body != string(zero.canonicalBody())+"schema_version=1\x00" {
+		t.Fatalf("body is not the zero-version body followed by the schema_version part: %q", body)
 	}
 }
 

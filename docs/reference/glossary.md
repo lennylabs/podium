@@ -1,6 +1,6 @@
 ---
 title: Glossary
-nav_order: 5
+nav_order: 6
 description: Vocabulary used across the docs.
 ---
 

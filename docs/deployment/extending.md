@@ -21,12 +21,12 @@ The registry's pluggable interfaces:
 
 | Interface | Purpose |
 |:--|:--|
-| `RegistryStore` | Manifest metadata, dependency edges, layer config, admin grants, and registry-side audit. Built-ins: `sqlite` and `postgres`. |
+| `RegistryStore` | Manifest metadata, dependency edges, layer config, and admin grants. Built-ins: `sqlite` and `postgres`. |
 | `RegistryObjectStore` | Bundled resource bytes and presigned URLs. Built-ins: the local filesystem and S3-compatible storage. |
 | `RegistrySearchProvider` | Hybrid retrieval for `search_artifacts`. Built-ins: `pgvector`, `sqlite-vec`, `pinecone`, `weaviate-cloud`, `qdrant-cloud`. See [Vector backends](vector-backends) for the per-backend recipes. |
 | `EmbeddingProvider` | Generates embeddings for ingest text and query text. Built-ins: `openai`, `voyage`, `cohere`, `ollama`. |
 | `LocalSearchProvider` | Optional semantic backing for the local-overlay index. Same SPI as `RegistrySearchProvider`. |
-| `RegistryAuditSink` | Stream for catalogue events; logically distinct from `RegistryStore`, separately mockable, separately routable. |
+| `RegistryAuditSink` | Stream for catalogue events; logically distinct from `RegistryStore`, separately mockable, separately routable. The `audit.Sink` interface is the seam. An operator lists the stream's destinations (file, HTTP, OTLP, and stdout) in `PODIUM_AUDIT_LOG_PATH`, and the file destination `audit.FileSink` is the default in both deployment modes. See [Audit events](../reference/audit-events). |
 | `LayerComposer` | Resolves the caller's effective view from the configured layer list and applies the collision rule. |
 | `LayerSourceProvider` | Resolves and watches the source backing a layer. Built-ins: `git`, `local`. Custom backends: S3 versioned buckets, OCI registries, HTTP archives, internal CMS bridges. |
 | `GitProvider` | Webhook signature verification and Git fetch semantics, used by the built-in `git` `LayerSourceProvider`. Built-in support for GitHub, GitLab, Bitbucket. |
@@ -34,7 +34,7 @@ The registry's pluggable interfaces:
 | `IngestLinter` | Manifest validation, resource-reference checks, type-specific rules; runs pre-merge in CI and again at registry ingest. |
 | `IdentityProvider` | Attaches the caller's attested identity to every registry call. Client-side built-ins acquire the token at the consumer: `oauth-device-code` and `injected-session-token`. Registry-process built-ins resolve identity from the request at the registry: `oidc-jwt` and `trusted-headers`, covered in [Gateway-delegated identity](gateway-delegated-identity). |
 | `LocalOverlayProvider` | Source for the workspace-scoped local overlay layer. Default: workspace filesystem (`.podium/overlay/`). |
-| `LocalAuditSink` | Local audit log for meta-tool calls (when configured). Default: JSON Lines file at `~/.podium/audit.log`. |
+| `LocalAuditSink` | Local audit log for meta-tool calls (when configured). Default: JSON Lines file at `~/.podium/audit.log`, user-wide and one file across all workspaces. Redirect it to a workspace-local path, or add HTTP and OTLP destinations, through `PODIUM_AUDIT_SINK`. |
 | `HarnessAdapter` | Translates canonical artifacts to the harness's native format at materialization time. The adapter `Source` carries a plugin descriptor (name, optional description, harness subtree prefix) so a marketplace emitter can render an artifact into a named plugin when `podium sync` renders a `kind: marketplace` target. |
 | `MaterializationHook` | Per-file pre-write transformation of materialized output. Use cases: redact secrets, rewrite paths, inject team-specific headers, enforce content policy. |
 | `NotificationProvider` | Delivery for ingest-failure and operational notifications. Built-ins: `log`, `webhook`, `email` (over SMTP, also accepted as `smtp`), and `multi`, which combines the log provider with whichever of webhook and email is configured. `PODIUM_NOTIFICATION_PROVIDER` selects one; an unset variable and `noop` both wire no notifier. |

@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -203,16 +205,24 @@ func writeAnchorKeyFile(t *testing.T, dir, name string) (string, sign.RegistryMa
 }
 
 // Spec: §8.6, §13.12 — loadAnchorSigner reads nothing with the interval at 0,
-// refuses an unopenable file sink before it reads the key, warns and skips an
-// endpoint sink, refuses an unusable key with config.audit_anchor_key_unavailable
-// (never classified as a registry-key failure), and refuses a key the registry
-// key file carries only while registry signing is on.
+// warns and skips a stream with no file destination and a nil stream, refuses
+// an unusable key with config.audit_anchor_key_unavailable (never classified
+// as a registry-key failure), and refuses a key the registry key file carries
+// only while registry signing is on.
 func TestLoadAnchorSigner(t *testing.T) {
 	dir := t.TempDir()
-	logSink, err := audit.NewFileSink(filepath.Join(dir, "audit.log"))
+	logSink, err := audit.OpenFile(filepath.Join(dir, "audit.log"), audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
+	t.Cleanup(logSink.Shutdown)
+	receiver := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(receiver.Close)
+	noFile, err := audit.Open(context.Background(), receiver.URL, audit.OpenOptions{})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(noFile.Shutdown)
 	blocker := filepath.Join(dir, "blocker")
 	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
@@ -228,34 +238,31 @@ func TestLoadAnchorSigner(t *testing.T) {
 	}
 	sharedPath, sharedKey := writeAnchorKeyFile(t, dir, "shared.key")
 	t.Setenv("PODIUM_SIGN_KEY_PATH", sharedPath)
-	sinkErr := errors.New("audit: open /x: is a directory")
 
 	cases := []struct {
 		name       string
 		interval   int
 		keyPath    string
-		file       *audit.FileSink
-		sinkErr    error
+		stream     *audit.Stream
 		signingOn  bool
 		wantOn     bool
 		wantCode   string
 		wantAbsent bool
 	}{
-		{name: "sink error refuses before the key", interval: 60, keyPath: filepath.Join(dir, "never-sink.key"), sinkErr: sinkErr, wantCode: "config.audit_sink_unavailable", wantAbsent: true},
-		{name: "sink error with interval 0", keyPath: filepath.Join(dir, "never-off.key"), sinkErr: sinkErr, wantAbsent: true},
-		{name: "interval 0 with an unreachable key", keyPath: filepath.Join(blocker, "audit.key"), file: logSink},
-		{name: "interval 0 with an absent key", keyPath: filepath.Join(dir, "absent-off.key"), file: logSink, wantAbsent: true},
-		{name: "endpoint sink", interval: 60, keyPath: filepath.Join(dir, "never-endpoint.key"), wantAbsent: true},
-		{name: "absent key is generated", interval: 60, keyPath: filepath.Join(dir, "generated.key"), file: logSink, wantOn: true},
-		{name: "malformed key", interval: 60, keyPath: malformed, file: logSink, wantCode: "config.audit_anchor_key_unavailable"},
-		{name: "public-only key", interval: 60, keyPath: publicOnly, file: logSink, wantCode: "config.audit_anchor_key_unavailable"},
-		{name: "shared key with signing off", interval: 60, keyPath: sharedPath, file: logSink, wantOn: true},
-		{name: "shared key with signing on", interval: 60, keyPath: sharedPath, file: logSink, signingOn: true, wantCode: "config.audit_anchor_key_shared"},
+		{name: "interval 0 with an unreachable key", keyPath: filepath.Join(blocker, "audit.key"), stream: logSink},
+		{name: "interval 0 with an absent key", keyPath: filepath.Join(dir, "absent-off.key"), stream: logSink, wantAbsent: true},
+		{name: "no file destination", interval: 60, keyPath: filepath.Join(dir, "never-endpoint.key"), stream: noFile, wantAbsent: true},
+		{name: "nil stream", interval: 60, keyPath: filepath.Join(dir, "never-nil.key"), wantAbsent: true},
+		{name: "absent key is generated", interval: 60, keyPath: filepath.Join(dir, "generated.key"), stream: logSink, wantOn: true},
+		{name: "malformed key", interval: 60, keyPath: malformed, stream: logSink, wantCode: "config.audit_anchor_key_unavailable"},
+		{name: "public-only key", interval: 60, keyPath: publicOnly, stream: logSink, wantCode: "config.audit_anchor_key_unavailable"},
+		{name: "shared key with signing off", interval: 60, keyPath: sharedPath, stream: logSink, wantOn: true},
+		{name: "shared key with signing on", interval: 60, keyPath: sharedPath, stream: logSink, signingOn: true, wantCode: "config.audit_anchor_key_shared"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &Config{auditAnchorInterval: tc.interval, auditSigningKeyPath: tc.keyPath}
-			key, on, err := loadAnchorSigner(cfg, tc.file, tc.sinkErr, sharedKey, tc.signingOn)
+			key, on, err := loadAnchorSigner(cfg, tc.stream, sharedKey, tc.signingOn)
 			if on != tc.wantOn {
 				t.Errorf("anchoring on = %v, want %v", on, tc.wantOn)
 			}
@@ -267,9 +274,6 @@ func TestLoadAnchorSigner(t *testing.T) {
 			}
 			if errors.Is(err, sign.ErrRegistryManagedUnavailable) {
 				t.Errorf("err %v wraps sign.ErrRegistryManagedUnavailable", err)
-			}
-			if tc.wantCode == "config.audit_sink_unavailable" && !errors.Is(err, tc.sinkErr) {
-				t.Errorf("err %v does not wrap the sink error", err)
 			}
 			if tc.wantCode == "config.audit_anchor_key_unavailable" && !strings.Contains(err.Error(), tc.keyPath) {
 				t.Errorf("err %v does not name %s", err, tc.keyPath)
@@ -291,13 +295,14 @@ func TestLoadAnchorSigner(t *testing.T) {
 // Spec: §8.6, §13.12 — with the anchor key path unset and no resolvable home
 // directory, the refusal names PODIUM_AUDIT_SIGNING_KEY_PATH.
 func TestLoadAnchorSigner_UnresolvableDefaultPath(t *testing.T) {
-	sink, err := audit.NewFileSink(filepath.Join(t.TempDir(), "audit.log"))
+	sink, err := audit.OpenFile(filepath.Join(t.TempDir(), "audit.log"), audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
+	t.Cleanup(sink.Shutdown)
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
-	_, on, err := loadAnchorSigner(&Config{auditAnchorInterval: 60}, sink, nil, sign.RegistryManagedKey{}, false)
+	_, on, err := loadAnchorSigner(&Config{auditAnchorInterval: 60}, sink, sign.RegistryManagedKey{}, false)
 	if on || err == nil || !strings.HasPrefix(err.Error(), "config.audit_anchor_key_unavailable") ||
 		!strings.Contains(err.Error(), "PODIUM_AUDIT_SIGNING_KEY_PATH") {
 		t.Errorf("loadAnchorSigner = (%v, %v), want a config.audit_anchor_key_unavailable refusal naming PODIUM_AUDIT_SIGNING_KEY_PATH", on, err)

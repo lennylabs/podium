@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -14,18 +15,19 @@ func queryOf(events []Event, i int) (string, bool) {
 	return v, ok
 }
 
-// Spec: §8.4 — "Query text: 30 days (redacted to placeholders after 7
-// days)". Enforce with a QueryRetention keeps every search event but
-// ages out its query field: verbatim under 7 days, a placeholder between
-// 7 and 30 days, and removed past 30 days. The event metadata survives
-// and the chain stays valid.
+// Spec: §8.4, §8.6 — "Query text: 30 days (redacted to placeholders
+// after 7 days)". Enforce with a QueryRetention keeps every search event
+// but ages out its query field: verbatim under 7 days, a placeholder
+// between 7 and 30 days, and removed past 30 days. The event metadata
+// survives, the pass closes with an audit.retention_enforced marker, and
+// the chain stays valid.
 func TestQueryRetention_PlaceholderThenDrop(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, err := NewFileSink(path)
+	sink, err := OpenFile(path, OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	now := time.Now().UTC()
 	ages := []time.Duration{
@@ -53,20 +55,30 @@ func TestQueryRetention_PlaceholderThenDrop(t *testing.T) {
 		t.Fatalf("Append: %v", err)
 	}
 
-	dropped, err := Enforce(context.Background(), sink, now, nil, DefaultQueryRetention())
+	res, err := Enforce(context.Background(), sink, now, nil, DefaultQueryRetention())
 	if err != nil {
 		t.Fatalf("Enforce: %v", err)
 	}
-	if dropped != 0 {
-		t.Errorf("dropped = %d, want 0 (query retention keeps events)", dropped)
+	if res.Dropped != 0 {
+		t.Errorf("dropped = %d, want 0 (query retention keeps events)", res.Dropped)
 	}
 
 	events, err := readAllEvents(path)
 	if err != nil {
 		t.Fatalf("readAllEvents: %v", err)
 	}
-	if len(events) != 4 {
-		t.Fatalf("got %d events, want 4 (none dropped)", len(events))
+	if len(events) != 5 {
+		t.Fatalf("got %d events, want 5 (none dropped, plus the retention marker)", len(events))
+	}
+	marker := events[4]
+	if marker.Type != EventRetentionEnforced {
+		t.Fatalf("record 4 type = %q, want %q", marker.Type, EventRetentionEnforced)
+	}
+	if marker.Context["dropped"] != "0" {
+		t.Errorf("marker dropped = %q, want 0", marker.Context["dropped"])
+	}
+	if want := fmt.Sprint(res.QueriesRedacted); marker.Context["queries_redacted"] != want {
+		t.Errorf("marker queries_redacted = %q, want %s", marker.Context["queries_redacted"], want)
 	}
 	if q, _ := queryOf(events, 0); q != "secret project apollo" {
 		t.Errorf("fresh query = %q, want verbatim", q)
@@ -90,14 +102,15 @@ func TestQueryRetention_PlaceholderThenDrop(t *testing.T) {
 	}
 }
 
-// Spec: §8.4 — query retention is idempotent: a second pass over an
-// already-placeholdered or already-dropped log makes no further change
-// and reports nothing dropped.
+// Spec: §8.4, §8.6 — query retention is idempotent: the first pass
+// redacts the query and closes with its marker, and a second pass over the
+// already-placeholdered log makes no further change and leaves both records
+// with the hashes the first pass gave them.
 func TestQueryRetention_Idempotent(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, _ := NewFileSink(path)
+	sink, _ := OpenFile(path, OpenOptions{})
 	now := time.Now().UTC()
 	_ = sink.Append(context.Background(), Event{
 		Type:      EventDomainsSearched,
@@ -112,10 +125,12 @@ func TestQueryRetention_Idempotent(t *testing.T) {
 		t.Fatalf("Enforce (second): %v", err)
 	}
 	after, _ := readAllEvents(path)
-	if len(before) != 1 || len(after) != 1 {
-		t.Fatalf("event count changed: before=%d after=%d", len(before), len(after))
+	if len(before) != 2 || len(after) != 2 {
+		t.Fatalf("event count: before=%d after=%d, want 2 and 2", len(before), len(after))
 	}
-	if before[0].Hash != after[0].Hash {
-		t.Errorf("idempotent pass rewrote the chain: %s -> %s", before[0].Hash, after[0].Hash)
+	for i := range before {
+		if before[i].Hash != after[i].Hash {
+			t.Errorf("idempotent pass rewrote record %d: %s -> %s", i, before[i].Hash, after[i].Hash)
+		}
 	}
 }

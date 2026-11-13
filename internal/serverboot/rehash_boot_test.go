@@ -5,12 +5,15 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +21,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/internal/testharness/auditharness"
 	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/version"
@@ -397,18 +401,176 @@ func TestRun_AnchorKeyRefusalPrecedesTheRewrite(t *testing.T) {
 	}
 }
 
-// Spec: §8.3, §13.12 — with anchoring disabled, a file audit sink that cannot
-// be opened is logged and the registry starts without one.
-func TestRun_UnopenableSinkWithAnchoringOffStarts(t *testing.T) {
-	f := newBootFixture(t)
-	t.Setenv("PODIUM_AUDIT_LOG_PATH", f.home)
-	t.Setenv("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", "0")
-	logs, err := f.boot(t)
-	if err != nil {
-		t.Fatalf("run = %v, want a start", err)
+// Spec: §8.3, §13.12 — a file destination that cannot be opened refuses the
+// start with config.audit_sink_unavailable whatever the anchoring setting,
+// so no registry runs with no audit stream. With anchoring on the refusal
+// comes before the anchor key is read, so no key is generated.
+func TestRun_UnopenableSinkRefusesWhateverAnchoring(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		interval string
+	}{
+		{name: "anchoring off", interval: "0"},
+		{name: "anchoring on", interval: "60"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newBootFixture(t)
+			anchorKey := filepath.Join(f.home, "anchor", "audit.key")
+			t.Setenv("PODIUM_AUDIT_LOG_PATH", f.home)
+			t.Setenv("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", tc.interval)
+			t.Setenv("PODIUM_AUDIT_SIGNING_KEY_PATH", anchorKey)
+			logs, err := f.bootWith(t, func() { t.Error("the registry served with an unopenable audit file") })
+			if err == nil || !strings.HasPrefix(err.Error(), "config.audit_sink_unavailable:") ||
+				!strings.Contains(err.Error(), "PODIUM_AUDIT_LOG_PATH") || !strings.Contains(err.Error(), f.home) {
+				t.Fatalf("run = %v, want a config.audit_sink_unavailable refusal naming PODIUM_AUDIT_LOG_PATH and %s", err, f.home)
+			}
+			if strings.Contains(logs, "warning: audit sink disabled") {
+				t.Errorf("logs report a disabled sink rather than a refusal:\n%s", logs)
+			}
+			if _, statErr := os.Stat(anchorKey); !errors.Is(statErr, fs.ErrNotExist) {
+				t.Errorf("anchor key %s exists or is unreadable (%v), want it absent", anchorKey, statErr)
+			}
+		})
 	}
-	if !strings.Contains(logs, "warning: audit sink disabled: audit: open "+f.home) {
-		t.Errorf("logs do not report the disabled sink:\n%s", logs)
+}
+
+// downgradedSignedStore boots the fixture once with registry signing on and
+// moves every stored row back to the previous release's signed digest, so the
+// next start runs the §13.4 rewrite. Signing stays on for that start.
+func downgradedSignedStore(t *testing.T, f *bootFixture) []store.ManifestRecord {
+	t.Helper()
+	t.Setenv("PODIUM_SIGN", "registry-key")
+	t.Setenv("PODIUM_SIGN_KEY_PATH", f.keyPath)
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	st := f.openStoreDirect(t)
+	rows := downgradeRows(t, st, f.keyPath)
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	return rows
+}
+
+// Spec: §13.12, §13.4 — every unusable audit configuration refuses the start
+// with config.audit_sink_unavailable before the §13.4 first-start rewrite,
+// the anchor key load, and the bootstrap ingest, so the refused start changes
+// no stored row. A refusal placed after the rewrite would re-sign the
+// downgraded rows and set the completion record.
+//
+// Matrix: §6.10 (config.audit_sink_unavailable)
+func TestRun_AuditConfigRefusalPrecedesTheRewrite(t *testing.T) {
+	const password = "pw-q8zr"
+	cases := []struct {
+		name string
+		// configure sets the audit environment of the second start.
+		configure func(t *testing.T, f *bootFixture)
+		anchoring bool
+		wantText  string
+	}{
+		{name: "unreadable headers file", wantText: "PODIUM_AUDIT_HEADERS_FILE", configure: func(t *testing.T, f *bootFixture) {
+			t.Setenv("PODIUM_AUDIT_HEADERS_FILE", filepath.Join(f.home, "absent-headers"))
+		}},
+		{name: "zero queue bound", wantText: "PODIUM_AUDIT_QUEUE_MAX_BYTES", configure: func(t *testing.T, f *bootFixture) {
+			t.Setenv("PODIUM_AUDIT_QUEUE_MAX_BYTES", "0")
+		}},
+		{name: "directory beside an HTTP destination", wantText: "PODIUM_AUDIT_LOG_PATH", configure: func(t *testing.T, f *bootFixture) {
+			dir := filepath.Join(f.home, "audit-dir")
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PODIUM_AUDIT_LOG_PATH", dir+",http://127.0.0.1:1/audit")
+		}},
+		{name: "userinfo URL with anchoring on", anchoring: true, wantText: "PODIUM_AUDIT_LOG_PATH", configure: func(t *testing.T, f *bootFixture) {
+			t.Setenv("PODIUM_AUDIT_LOG_PATH", f.auditPath+",https://alice:"+password+"@127.0.0.1:1/audit")
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newBootFixture(t)
+			rows := downgradedSignedStore(t, f)
+			tc.configure(t, f)
+			anchorKey := filepath.Join(f.home, "absent-audit.key")
+			t.Setenv("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", "0")
+			if tc.anchoring {
+				t.Setenv("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", "60")
+				t.Setenv("PODIUM_AUDIT_SIGNING_KEY_PATH", anchorKey)
+			}
+			logs, err := f.boot(t)
+			if err == nil || !strings.HasPrefix(err.Error(), "config.audit_sink_unavailable") || !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("run = %v, want a config.audit_sink_unavailable refusal naming %s", err, tc.wantText)
+			}
+			f.assertStoreUnchanged(t, rows)
+			if strings.Contains(logs, "ingested layer ") {
+				t.Errorf("a refused start ran the bootstrap ingest; logs:\n%s", logs)
+			}
+			if !tc.anchoring {
+				return
+			}
+			if _, statErr := os.Stat(anchorKey); !errors.Is(statErr, fs.ErrNotExist) {
+				t.Errorf("anchor key %s exists or is unreadable (%v), want it absent", anchorKey, statErr)
+			}
+			if strings.Contains(err.Error(), password) {
+				t.Errorf("the refusal echoes the URL password: %v", err)
+			}
+		})
+	}
+}
+
+// auditGoroutines returns the goroutine stacks that hold a pkg/audit frame.
+func auditGoroutines() []string {
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	var out []string
+	for _, g := range strings.Split(string(buf[:n]), "\n\n") {
+		if strings.Contains(g, auditPackagePath+".") {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// auditPackagePath is the import path whose frames auditGoroutines looks for.
+const auditPackagePath = "github.com/lennylabs/podium/pkg/audit"
+
+// Spec: §8.3, §13.4 — a refusal after the §13.4 rewrite still runs the
+// stream's deferred Shutdown: the artifact.signed records the rewrite
+// appended reach the receiver, and no audit goroutine outlives run. The check
+// names the audit package rather than calling goleak.VerifyNone, because a
+// boot that run abandons part-way can leave goroutines from other packages.
+func TestRun_LateRefusalClosesTheAuditStream(t *testing.T) {
+	f := newBootFixture(t)
+	rows := downgradedSignedStore(t, f)
+	rcv := auditharness.NewReceiver(t)
+	t.Setenv("PODIUM_AUDIT_LOG_PATH", rcv.URL())
+	t.Setenv("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", "0")
+	keys := filepath.Join(f.home, "runtime-keys.json")
+	if err := os.WriteFile(keys, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PODIUM_RUNTIME_KEYS_PATH", keys)
+
+	_, err := f.boot(t)
+	if err == nil || !strings.HasPrefix(err.Error(), "config.runtime_keys_unavailable") {
+		t.Fatalf("run = %v, want a config.runtime_keys_unavailable refusal", err)
+	}
+	signed := 0
+	for _, rec := range rcv.Records(t) {
+		if rec.Type == "artifact.signed" {
+			signed++
+		}
+	}
+	if signed != len(rows) {
+		t.Errorf("the receiver holds %d artifact.signed record(s), want %d", signed, len(rows))
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	leaked := auditGoroutines()
+	for len(leaked) > 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+		leaked = auditGoroutines()
+	}
+	if len(leaked) > 0 {
+		t.Errorf("audit goroutines outlive run:\n%s", strings.Join(leaked, "\n\n"))
 	}
 }
 

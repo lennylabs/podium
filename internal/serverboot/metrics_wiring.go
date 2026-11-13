@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/metrics"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -18,6 +19,19 @@ func metricsEnabled() bool {
 		return *v
 	}
 	return true
+}
+
+// auditObserver returns m as the §8.3 audit stream's observer, or a nil
+// interface for a nil m. A typed-nil *metrics.Registry in the interface
+// would be non-nil to the stream and panic on its first count, so
+// PODIUM_METRICS=false must reach audit.Open as a nil interface.
+//
+// Spec: §8.3, §13.8
+func auditObserver(m *metrics.Registry) audit.Observer {
+	if m == nil {
+		return nil
+	}
+	return m
 }
 
 // metricsLatencyObserver returns a server.LatencyObserver that records the

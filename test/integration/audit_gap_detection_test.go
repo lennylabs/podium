@@ -22,9 +22,9 @@ func TestAuditGapDetection_SchedulerDetectsOutOfBandEdit(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, err := audit.NewFileSink(path)
+	sink, err := audit.OpenFile(path, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	ctx := context.Background()
 	for i := 0; i < 4; i++ {

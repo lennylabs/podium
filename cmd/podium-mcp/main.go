@@ -36,11 +36,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -124,11 +126,24 @@ func (s *mcpServer) clientVersionRefusal(clientVersion string) (message string, 
 		" is below the minimum " + floor + " this binary serves; update the host", true
 }
 
+// main exits with run's status. os.Exit skips deferred calls, so every
+// deferred flush lives in run and completes before main exits.
 func main() {
+	os.Exit(run())
+}
+
+// run is the bridge's body. It returns 2 for a configuration error, 1 when
+// serve fails, and 0 when the serve loop ends on stdin EOF or after the
+// first SIGINT or SIGTERM. Every return runs the deferred audit Shutdown,
+// which flushes the local stream within the §8.3 budget and seals it, and
+// the tracing shutdown.
+//
+// Spec: §6.8, §8.3
+func run() int {
 	cfg, err := loadConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		return 2
 	}
 	// §13.8 OpenTelemetry: install the W3C propagator and, when PODIUM_TRACING
 	// (or an OTLP endpoint) is configured, the trace exporter. Off by default;
@@ -137,18 +152,41 @@ func main() {
 	shutdownTracing, terr := tracing.Init(context.Background(), "podium-mcp")
 	if terr != nil {
 		fmt.Fprintln(os.Stderr, terr)
-		os.Exit(2)
+		return 2
 	}
 	defer func() { _ = shutdownTracing(context.Background()) }()
 	srv, err := newServer(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		return 2
 	}
-	if err := srv.serve(os.Stdin, os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	defer srv.auditStream.Shutdown()
+	// §6.8: SIGINT and SIGTERM end the bridge the way stdin EOF does. The
+	// channel holds one signal and run never stops the registration, so a
+	// later signal is held or dropped and cannot cut the flush short.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	served := make(chan error, 1)
+	go func() { served <- srv.serve(os.Stdin, os.Stdout) }()
+	select {
+	case err := <-served:
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	case <-sigs:
+		srv.stopDispatch()
+		return 0
 	}
+}
+
+// stopDispatch makes the serve loop return at its next frame read without
+// dispatching that frame. A tool call already dispatching is not waited for.
+//
+// Spec: §6.8
+func (s *mcpServer) stopDispatch() {
+	s.stopping.Store(true)
 }
 
 // config captures every PODIUM_ env var the bridge consults.
@@ -516,6 +554,13 @@ type mcpServer struct {
 	// auditing is left to the registry. When set, meta-tool calls append a
 	// local audit event.
 	audit audit.LocalAuditSink
+	// auditStream is the same local stream as audit, kept for the Shutdown
+	// run defers. Nil when PODIUM_AUDIT_SINK is unset.
+	auditStream *audit.Stream
+	// stopping is set by stopDispatch when run receives SIGINT or SIGTERM,
+	// and never cleared. serve reads it after each frame read and returns
+	// without dispatching once it is set.
+	stopping atomic.Bool
 	// scrubber applies the §8.2 default-on query-text PII scrub before a
 	// search event is written to the local audit sink. Nil when an operator
 	// disabled scrubbing via PODIUM_PII_REDACTION=false.
@@ -634,12 +679,19 @@ func newServer(cfg *config) (*mcpServer, error) {
 		srv.localSem = sem
 	}
 	// §6.2 PODIUM_AUDIT_SINK: when configured, append meta-tool calls to a
-	// local audit log in addition to the registry's audit stream.
-	sink, err := newAuditSink(cfg)
+	// local audit stream in addition to the registry's audit stream. The
+	// observer is a nil interface unless the metric set exists, because a
+	// typed-nil *metrics.MCPRegistry would panic on the stream's first count.
+	var obs audit.Observer
+	if srv.metrics != nil {
+		obs = srv.metrics
+	}
+	stream, err := newAuditSink(cfg, obs)
 	if err != nil {
 		return nil, err
 	}
-	srv.audit = sink
+	srv.auditStream = stream
+	srv.audit = audit.AsSink(stream)
 	// §8.2 query-text scrub: default-on; a nil scrubber means an operator
 	// disabled it with PODIUM_PII_REDACTION=false.
 	if cfg.piiRedaction == nil || *cfg.piiRedaction {
@@ -658,35 +710,39 @@ func piiDisabledValue(v string) bool {
 	return false
 }
 
-// newAuditSink builds the §6.2 local audit sink from PODIUM_AUDIT_SINK.
-// An unset var leaves auditing to the registry (nil sink). A value of
-// "default" (or an explicit empty value) writes to ~/.podium/audit.log;
-// any other value is treated as a destination file path.
+// newAuditSink opens the §6.2 local audit stream over the PODIUM_AUDIT_SINK
+// destination list. An unset variable leaves auditing to the registry and
+// returns a nil stream without reading the transport and queue variables.
+// A value of "default" or an explicit empty value names ~/.podium/audit.log.
+// Every error carries config.audit_sink_unavailable and wraps
+// audit.ErrConfig, and the text after the code names the variable at fault.
 //
 // spec: §6.2 — "When set without a value (or set to `default`), uses
 // ~/.podium/audit.log".
-func newAuditSink(cfg *config) (audit.LocalAuditSink, error) {
+//
+// Spec: §6.2, §8.3, §13.12
+func newAuditSink(cfg *config, obs audit.Observer) (*audit.Stream, error) {
 	if !cfg.auditSinkSet {
 		return nil, nil
 	}
-	path := cfg.auditSink
-	if path == "default" {
-		path = ""
+	queueMax, err := audit.ParseQueueMaxBytes(os.Getenv("PODIUM_AUDIT_QUEUE_MAX_BYTES"))
+	if err != nil {
+		return nil, fmt.Errorf("config.audit_sink_unavailable: %w", err)
 	}
-	// §6.2 / §9: PODIUM_AUDIT_SINK may name an external endpoint instead of
-	// a filesystem path ("Local audit destination (path or external
-	// endpoint)"). An http(s) URL forwards meta-tool events to a SIEM / log
-	// aggregator; any other value is a local JSON-Lines file.
-	if isAuditEndpoint(path) {
-		return audit.NewEndpointSink(path)
+	stream, err := audit.Open(context.Background(), cfg.auditSink, audit.OpenOptions{
+		Local:         true,
+		Service:       "podium-mcp",
+		HeadersFile:   os.Getenv("PODIUM_AUDIT_HEADERS_FILE"),
+		CAFile:        os.Getenv("PODIUM_AUDIT_TLS_CA_FILE"),
+		CertFile:      os.Getenv("PODIUM_AUDIT_TLS_CERT_FILE"),
+		KeyFile:       os.Getenv("PODIUM_AUDIT_TLS_KEY_FILE"),
+		QueueMaxBytes: queueMax,
+		Observer:      obs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("config.audit_sink_unavailable: %w", err)
 	}
-	return audit.NewFileSink(path)
-}
-
-// isAuditEndpoint reports whether a PODIUM_AUDIT_SINK value selects the
-// external-endpoint sink rather than a local file path.
-func isAuditEndpoint(v string) bool {
-	return strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://")
+	return stream, nil
 }
 
 // client returns the §7.2.2 client identification podium-mcp reports for a
@@ -957,11 +1013,15 @@ func (s *mcpServer) serve(r io.Reader, w io.Writer) error {
 	// operator named PODIUM_MCP_METRICS_ADDR; shuts down when serve returns.
 	stopMetrics := s.startMetricsListener(s.cfg.metricsAddr)
 	defer stopMetrics()
-	// §6.8: the host owns the lifecycle. The loop ends only when stdin
-	// reaches EOF (the host closing the pipe); there is no signal-driven
-	// shutdown here. A read error other than EOF propagates.
+	// §6.8: the loop ends when stdin reaches EOF (the host closing the
+	// pipe), or at the first frame read after run receives SIGINT or
+	// SIGTERM, which it does not dispatch. A read error other than EOF
+	// propagates.
 	for {
 		line, tooLong, err := readFrame(reader, maxFrameBytes)
+		if s.stopping.Load() {
+			return nil
+		}
 		if tooLong {
 			// fail only this request, keep serving. The frame's id
 			// is unrecoverable, so the error carries a null id per JSON-RPC.

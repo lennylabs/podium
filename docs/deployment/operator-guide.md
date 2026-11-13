@@ -22,7 +22,7 @@ Baseline (10K artifacts, 100 QPS, 1 GB Postgres, 500 GB object storage on a 3-re
 | QPS | 1K | Scale registry replicas horizontally; put a CDN in front of object storage for resource bytes. |
 | QPS | 10K | Review search query patterns; consider dedicated Elasticsearch for BM25 with pgvector (or Pinecone/Weaviate/Qdrant) for vector. |
 | Tenants | 50 | Confirm `RegistryStore` connection pool is sized appropriately; increase pgbouncer pool if used. |
-| Audit volume | 1M events/day | Set retention explicitly; ship the registry audit stream to an external SIEM by setting `PODIUM_AUDIT_LOG_PATH` to an `http(s)://` endpoint, which selects the registry endpoint sink instead of the on-disk hash-chained file. |
+| Audit volume | 1M events/day | Set retention explicitly. Keep or replace the file destination in `PODIUM_AUDIT_LOG_PATH`, add an `http(s)` or `otlp+http(s)` destination that ships the stream to a SIEM or a collector, or ship `stdout` through the container log pipeline. See [Audit events](../reference/audit-events). |
 
 Embeddings dominate Postgres growth at scale. Each artifact's text projection becomes a float vector whose dimension depends on the configured provider (768 for `nomic-embed-text` via Ollama, 1024 for `voyage-3` or `embed-v4`, 1536 for `text-embedding-3-small`). At ~6 KB per row including metadata at 1536 dim, 100K artifacts is ~600 MB of embeddings.
 
@@ -42,11 +42,14 @@ The registry serves Prometheus metrics at `/metrics` by default, and `PODIUM_MET
 - `podium_cache_hits_total` and `podium_cache_misses_total`: hits and misses on the registry's cache of `DOMAIN.md` import-glob expansions. The cache key combines the include and exclude patterns with a fingerprint of the caller's visible artifact-ID set, so the ratio falls when ingest changes that set frequently, when callers see different subsets of the catalogue, or when a domain's globs vary from request to request. The MCP server reports its own resolution-cache hits and misses under the same two names.
 - `podium_ingest_success_total` and `podium_ingest_failure_total`: ingest attempts that succeeded or failed. Flag a recent uptick in the failure counter.
 - `podium_vector_outbox_depth`: pending rows in the external-vector-backend outbox. A rising depth indicates the drain worker is falling behind. The gauge reads 0 on a collocated backend that uses no outbox.
+- `podium_audit_queue_depth{destination}`: audit records queued for the `http` or `otlp` destination. A depth that keeps rising means the receiver is refusing or not answering, and `queue_full` drops follow once the queue reaches `PODIUM_AUDIT_QUEUE_MAX_BYTES`.
+- `podium_audit_dropped_total{destination,reason}`: audit records dropped for the `file`, `stdout`, `http`, or `otlp` destination, with the reason `queue_full`, `rejected`, `shutdown`, or `write_error`. [Delivery](../reference/audit-events#delivery) gives each reason's condition. Both audit series are Vecs, which export no series until a destination first reports a queued or dropped record. A registry whose list names only a file destination never exports `podium_audit_queue_depth`, and exports `podium_audit_dropped_total` only after a file write fails.
 
 **MCP server:**
 
 - `podium_mcp_requests_total{tool}` and `podium_mcp_request_errors_total{tool}`: per-tool call volume and error count at the bridge.
 - `podium_mcp_request_duration_seconds{tool}`: per-tool call latency at the bridge.
+- `podium_audit_queue_depth{destination}` and `podium_audit_dropped_total{destination,reason}`: the same audit delivery series for the local stream that `PODIUM_AUDIT_SINK` enables, with the reasons `queue_full`, `rejected`, `shutdown`, and `write_error`, as [Delivery](../reference/audit-events#delivery) describes. They export no series until a network destination of the local stream is first used or a file write fails.
 
 **Tracing:**
 
@@ -56,59 +59,18 @@ Tracing is off by default. `PODIUM_TRACING=otlp`, or a set `OTEL_EXPORTER_OTLP_E
 
 ## Audit records
 
-The registry and `podium-mcp` each write their own audit stream. `PODIUM_AUDIT_LOG_PATH` selects the registry's sink, and `PODIUM_AUDIT_SINK` selects the `podium-mcp` local sink. A file path selects the file sink, and an `http://` or `https://` URL selects the endpoint sink.
+The registry and `podium-mcp` each write their own audit stream. `PODIUM_AUDIT_LOG_PATH` lists the registry stream's destinations, and `PODIUM_AUDIT_SINK` lists the `podium-mcp` local stream's destinations. Each takes a comma-separated list of the following destinations:
 
-The file sink writes JSON Lines: one JSON object per event, one event per line.
+- A file path, the file destination. It appends one JSON line per record, and it is the destination that retention, erasure, local chain-head anchoring, and scheduled verification act on.
+- An `http://` or `https://` URL, the HTTP destination. It receives batches of records as NDJSON `POST` requests, retried with backoff.
+- An `otlp+http://` or `otlp+https://` URL, the OTLP destination. It receives OTLP/HTTP log export requests, such as an OpenTelemetry Collector accepts.
+- `stdout`, the stdout destination, which the registry accepts and `podium-mcp` refuses. It writes one JSON line per record to standard output for a container log pipeline.
 
-The endpoint sink sends one HTTP POST per event. Each POST carries `Content-Type: application/json` and one JSON object in the body. The sink does not batch events, and each POST has a 10-second timeout.
+Unset, `PODIUM_AUDIT_LOG_PATH` names the file `~/.podium/audit.log`, and an unset `PODIUM_AUDIT_SINK` disables the local stream. Each process chains every record once and writes the chained record to every destination in its list. [Audit events](../reference/audit-events) documents the record format, the delivery and loss-accounting rules, the transport settings, a collector configuration that keeps a persistent queue, and the checks a receiver applies.
 
-A record carries the following keys:
+The Helm chart sets `config.auditLogPath` to `stdout` by default. Each registry pod then writes its audit records to the container log, where the cluster's log pipeline holds them under the platform's retention and outside the reach of erasure. To keep a file destination, set `config.auditLogPath` to a file path on a writable volume. To ship the stream to a receiver, set it to an `http(s)` URL or an `otlp+http(s)` URL. Each of those values can also join `stdout` in a comma-separated list. With the `stdout` default, or any list without a file destination, the registry runs no local chain-head anchoring and no scheduled verification, and the receiving system applies the `prev_hash` check to the shipped stream, as [Receiver checks](../reference/audit-events#receiver-checks) describes.
 
-| Key | Content |
-|:--|:--|
-| `type` | The event type, such as `artifact.loaded` or `layer.ingested`. |
-| `timestamp` | The event time in RFC 3339 with fractional seconds, in UTC. |
-| `trace_id` | The W3C trace ID of the request that raised the event. |
-| `caller` | An object with `identity`, `email`, `groups`, `network`, `client`, and `public_mode`. `network` holds `source_ip` and `forwarded_user` and appears on public-mode events. `client` holds `kind`, `name`, `version`, `host`, `host_version`, and `harness`, as described in [Client software](#client-software). |
-| `target` | The artifact, domain, layer, or user the event concerns. |
-| `context` | A string map of event-specific fields, such as `version` on `artifact.loaded`. |
-| `tenant` | The org ID of the tenant the event concerns. |
-| `resolved_layers` | The caller's effective layer composition on a read event. |
-| `result_size` | The number of results a read event returned. |
-| `hash` | The SHA-256 hash of this record's body chained to `prev_hash`. |
-| `prev_hash` | The `hash` of the record before this one in the same chain. |
-
-`type`, `timestamp`, and `hash` are always present. Every other key is omitted when it is empty, so the first record of a chain carries no `prev_hash`.
-
-```json
-{"type":"artifact.loaded","timestamp":"2026-11-11T14:03:22.418273Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","caller":{"identity":"alice","email":"alice@acme.com","groups":["platform"],"client":{"kind":"mcp","name":"podium-mcp","version":"0.6.0","host":"claude-code","host_version":"2.1.0","harness":"claude-code"}},"target":"platform/deploy-runbook","context":{"version":"1.2.0"},"tenant":"acme","resolved_layers":["org-defaults","team-platform"],"result_size":1,"hash":"9f2c4e7a1b8d3f60c5e2a9d4b7f1038e6c2d5a9b4e7f1c3a8d6b2e0f5a9c7d41","prev_hash":"3e8b1d6f0a4c7e2b9d5f8a1c4e7b0d3f6a9c2e5b8d1f4a7c0e3b6d9f2a5c8e10"}
-```
-
-The endpoint sink treats a transport error or a non-2xx response as a failed send and drops the event. It does not retry the POST or buffer the event.
-
-The sending process computes the hash chain in memory before each send. A dropped event therefore leaves the receiver with a later record whose `prev_hash` names a record the receiver never received.
-
-The endpoint sink keeps its chain in process memory. Each process start begins a new forwarded chain, whose first record carries no `prev_hash`. In a clustered deployment, each replica sends its own chain, so a receiver that collects every replica's stream holds one chain per replica and per process start.
-
-The file sink reads the last record's hash when it opens an existing log, so its chain continues across a restart.
-
-The registry does not verify a stream it forwards to an endpoint. The receiver stores the stream and verifies its chain.
-
-### Client software
-
-`caller.client` names the client software that sent the request, as the client stated it in the `X-Podium-Client` request header. Each of its members `kind`, `name`, `version`, `host`, `host_version`, and `harness` appears only when it is non-empty. `kind` is `mcp`, `sync`, `cli`, `sdk`, or `other`.
-
-The client reports `caller.client` itself, and the registry does not verify it. The registry never uses it for authentication, visibility, quotas, or tenant selection. The registry bounds and sanitizes the value and records the result as the client reported it. Neither the query-text PII scrub nor `podium admin erase` rewrites `caller.client`, so a value a client placed in a member stays in the record after an erasure.
-
-Read events and the events of write and administrative requests, including `user.erased`, carry `caller.client` when the request named its client. The following events carry none:
-
-- The events the ingest pipeline raises: `artifact.published`, `artifact.deprecated`, `artifact.signed`, `domain.published`, `layer.ingested`, `layer.history_rewritten`, and `freeze.break_glass`. They carry no `caller.client` even when a reingest or webhook request triggered the ingest.
-- Events raised without a request, such as the `user.erased` that `podium admin erase --local` writes.
-- Events about the registry as a whole, such as `audit.anchored`. This includes the `audit.anchored` the registry appends after an erasure while it serves the erase request.
-
-The `podium-mcp` local events carry the `caller.client` value the MCP server builds for the call, which is the value it sends to the registry. They also carry it when the call sends no registry request: a load served from the workspace overlay, or from the content cache without revalidation in the `offline-first` or `offline-only` cache mode. A cache hit that the MCP server revalidates with the registry, through a HEAD request under the default `always-revalidate` cache mode or a conditional GET answered with 304, also produces a registry `artifact.loaded` event with `caller.client`.
-
-A record without `caller.client` keeps the hash it had before the key existed. Records written before the release that added `caller.client` therefore verify unchanged, and a log that mixes older and newer records verifies.
+Retention and erasure rewrite the file destination, so ship the stream through a stdout, HTTP, or OTLP destination listed beside the file rather than by tailing the file. `podium_audit_queue_depth` and `podium_audit_dropped_total`, listed under [Monitoring](#monitoring), report delivery to each destination.
 
 ---
 
@@ -163,9 +125,11 @@ Test restores quarterly. The runbook procedure:
    signing key restored from the backup.
 2. Restore Postgres from PITR to T-1h.
 3. Sync the production S3 bucket to the fresh one (rclone or aws s3 sync).
-4. Watch the restored registry's log for the scheduled audit-integrity pass.
-   A hash-chain gap logs "audit integrity ALERT" and records an
-   audit.gap_detected event.
+4. When PODIUM_AUDIT_LOG_PATH lists a file destination, watch the restored
+   registry's log for the scheduled audit-integrity pass. A hash-chain gap
+   logs "audit integrity ALERT" and records an audit.gap_detected event.
+   When it lists none, as with the chart's stdout default, confirm that the
+   receiving system's prev_hash check reports no gap.
 5. Run `podium verify <artifact> --registry <restored-url> --provider
    <name>` for a signed artifact and confirm it exits 0.
 6. Spot-check `load_artifact` for a known-good artifact; should match the
@@ -179,7 +143,7 @@ Test restores quarterly. The runbook procedure:
 
 Step 1 restores the signing key because a registry with signing on, a Postgres store, and no key path is refused at start, and because the drill then also exercises the key backup. In step 5, `podium verify <artifact>` verifies the registry's delivery signature over its delivery hash under the verification key set the default `registry-managed` provider resolves: `PODIUM_SIGNATURE_VERIFY_KEY`, one base64 key or a comma-separated list, or, when that variable is unset, the `public:` line and every `verify:` line of the key file at `PODIUM_SIGN_KEY_PATH`. Run step 5 with the production registry's public key in `PODIUM_SIGNATURE_VERIFY_KEY`, extracted as [Clustered](clustered#2-deploy-the-registry) shows. `--provider noop` is refused for every envelope. A Sigstore envelope passed with `--signature` takes `--provider sigstore-keyless` with `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE`, a Sigstore `trusted_root.json` that holds the certificate authorities, the transparency-log keys, and the timestamp authorities, and with `PODIUM_SIGSTORE_CERT_IDENTITY` and `PODIUM_SIGSTORE_CERT_OIDC_ISSUER`, which name the expected signer. Verification fails with `no trust root configured` when the trust root is absent, and with a message naming the variable when either policy variable is unset. The delivery signature itself is never a Sigstore envelope.
 
-The audit-integrity pass runs inside the registry on the `PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS` schedule, which defaults to 3600 seconds. Lower it on the restored deployment to get the first pass sooner.
+When the registry stream lists a file destination, the audit-integrity pass runs inside the registry on the `PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS` schedule, which defaults to 3600 seconds. Lower it on the restored deployment to get the first pass sooner.
 
 ---
 
@@ -217,7 +181,7 @@ Schema migrations are bundled in the registry binary and applied additively on s
 1. **Pre-upgrade.** Read the changelog and the migration notes for the target version. If a migration is non-trivial (reshuffling embeddings, changing the audit schema), schedule a maintenance window.
 2. **Canary.** Roll one registry replica to the new version. Watch metrics for 30 min and confirm latency, error rate, and cache hit rate are unchanged. A release whose changelog names a migration of the values stored under the schema has no canary phase, because the new version computes different values over the stored bytes than every replica on the previous version, which still reads and writes them. For such a release, follow the upgrade procedure that changelog entry gives, in a maintenance window: stop every replica, back up the store, and provision the signing key file first where signing is on. Over any store other than the SQLite store in the key file's directory, which includes every multi-replica deployment, the order then runs `sign-stored-rows --dry-run`, reviews its report, and runs `sign-stored-rows` with its `--plan-digest` before the replicas start, in either signing mode, because a start over such a store that holds rows and no completion record is refused. Then start the replicas together on the new version. Where the store is the SQLite store in the key file's directory, the first start rewrites the stored values itself, and no `sign-stored-rows` run precedes it.
 3. **Roll.** Roll the rest of the replicas. Because migrations are additive, an older replica ignores the new tables and columns, so old and new replicas coexist during the roll. The additive guarantee covers the database schema and does not cover the values stored under it, so a release whose changelog names a migration of those values does not permit mixed-version replicas. A release whose changelog names a rollback floor permits mixed-version replicas at or above that floor. [Rollback floor for the layer credential columns](#rollback-floor-for-the-layer-credential-columns) describes such a release.
-4. **Verify.** After the roll completes, confirm `/readyz` reports `ready` on every replica and that the audit-integrity pass logs no gap on its next run.
+4. **Verify.** After the roll completes, confirm `/readyz` reports `ready` on every replica. When `PODIUM_AUDIT_LOG_PATH` lists a file destination, confirm that the audit-integrity pass logs no gap on its next run. When it lists none, as with the chart's `stdout` default, confirm that the receiving system's `prev_hash` check reports no gap.
 
 A Helm chart deployment runs such a migration through the chart's migrate Job, in either signing mode, which holds the Deployment at zero replicas while `sign-stored-rows` rewrites the store, and follows [Upgrading the chart from v0.4.0](clustered#upgrading-the-chart-from-v040). In either signing mode, a registry pod over a store that holds manifest rows and no completion record exits at start, rewriting no manifest row, signing no row, and recording no completion. A GitOps controller such as Argo CD runs the same procedure as the value commits [GitOps controllers](clustered#gitops-controllers) lists, in that order. Pass neither `--rollback-on-failure` (Helm v4) nor `--atomic` (Helm v3) to those upgrades, because an automatic rollback reinstalls the previous binary over rows it cannot read.
 
@@ -278,7 +242,7 @@ Walk through these before launching to a tenant that handles sensitive content.
 | OIDC group claim mapping | Group claims actually produced by your IdP arrive in the registry's audit log. Test with a non-admin user. |
 | Per-layer visibility | Each layer's `visibility:` declaration is correct. Test by impersonating a non-member identity (via `injected-session-token` test harness). |
 | Signature enforcement | Each consumer's MCP server resolves the policy from `PODIUM_VERIFY_SIGNATURES`, then `defaults.verify_signatures` in its `sync.yaml`, then an `always` fallback, and the values are `never` and `always`. Confirm the resolved policy is `always` on every consumer. A machine where an earlier release's standalone bootstrap wrote `verify_signatures: never` into `~/.podium/sync.yaml` keeps it until the line is removed, and `podium-mcp` announces that `never` with a startup line naming the file. The registry does not read the variable. Server-source `podium sync` applies the same policy and key resolution as `podium-mcp`, with the same `always` default, and a filesystem-source sync runs no delivery check. The Python and TypeScript SDKs read `PODIUM_VERIFY_SIGNATURES` and default to `always` with a verification key configured and to `never` otherwise, so confirm a key is configured on every SDK client. Test tampering as the notes below the table state. |
-| Audit hash chain | `PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS` is non-zero so the registry re-verifies the chain on a schedule. Alert on the `audit.gap_detected` event and on the "audit integrity ALERT" log line. |
+| Audit hash chain | `PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS` is non-zero and `PODIUM_AUDIT_LOG_PATH` lists a file destination, so the registry re-verifies the chain on a schedule, or the receiving system applies the `prev_hash` check to the shipped stream (see the [audit events reference](../reference/audit-events#receiver-checks)). Alert on the `audit.gap_detected` event and on the "audit integrity ALERT" log line. |
 | Webhook signing | Git provider webhook HMAC secret is unique per layer. Test with an invalid signature; expect `ingest.webhook_invalid`. |
 | Outbound receiver URL policy | Receiver CRUD is admin-gated. `PODIUM_WEBHOOK_ALLOWED_TARGETS` lists only the internal receivers a deployment intends. Test by registering an `http` or private-address receiver; expect `registry.invalid_argument`. |
 | Sandbox profile honoring | The hosts in production honor `sandbox_profile` for non-`unrestricted` artifacts. Test with a `read-only-fs` artifact and confirm the host enforces. |
@@ -327,8 +291,13 @@ These come up a few times a year for most operators:
 ### SCIM and audit-anchor startup refusals
 
 - **The registry refuses to start with `config.scim_store_unavailable`.** The error names `PODIUM_SCIM_STORE_PATH` and the cause: a non-empty file that does not parse, a path that is a directory or has a non-directory parent, or a parent directory that cannot be created or written. Fix the permissions, or point the variable at a valid path. For a corrupt file, move it aside and start the registry, which loads a missing file as an empty directory, and then trigger a full push from the IdP's provisioning console to repopulate users and groups, as the SCIM lag entry describes. Unsetting the variable keeps the directory in memory, so it is lost on every restart. When the store becomes unwritable after startup, the receiver answers a create or replace push with HTTP 400 `invalidValue`, and that record is served until restart and then lost. It answers a delete push with HTTP 500, and the deleted record returns on restart. In either case, fix the directory and trigger a full push.
-- **The registry refuses to start with `config.audit_sink_unavailable`.** This refusal applies only when `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above 0 and `PODIUM_AUDIT_LOG_PATH` is a file path or unset. The error names the path and the cause: the path is a directory, a parent component is a regular file, the parent directory cannot be created, an existing log file cannot be read, or the home directory cannot be resolved for the default `~/.podium/audit.log`. Fix the path or its permissions. Setting the interval to 0 lets the registry start, but it then runs with no audit sink, which disables audit retention, erasure, and verification as well as anchoring. The startup check reads the file and does not write it, so a log that can be read but not written passes startup, and the first audit event reports the failure.
-- **The registry refuses to start with `config.audit_anchor_key_unavailable`.** This refusal applies only when `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above 0 and the audit sink is a file. The key file at `PODIUM_AUDIT_SIGNING_KEY_PATH` exists and cannot be read, lacks a `private:` line, or does not decode, or it cannot be generated. Restore the file, or move it aside so the registry generates a new keypair. Keep the old public key, because anchors written before the change were signed with it and anyone who checks them needs it.
+- **The registry, `sign-stored-rows`, or `podium-mcp` refuses to start with `config.audit_sink_unavailable`.** The audit configuration cannot be used. Every cause refuses whatever the anchoring setting, and the error names the cause and the variable that holds the unusable setting. It names a destination by its scheme, host, and path and never includes a header value or URL userinfo.
+  - `PODIUM_AUDIT_LOG_PATH` names a list with an empty element, an element whose `scheme://` prefix is not `http`, `https`, `otlp+http`, or `otlp+https`, an element with one of those prefixes that does not parse as a URL, two file destinations, an element named twice, or a destination URL that carries userinfo. Move a credential from the URL into the `PODIUM_AUDIT_HEADERS_FILE` file.
+  - `PODIUM_AUDIT_LOG_PATH` lists `stdout` while `PODIUM_TRACING=stdout` also writes spans to standard output.
+  - `PODIUM_AUDIT_LOG_PATH` names a file destination the registry cannot open: the path is a directory, a parent component is a regular file, the parent directory cannot be created, an existing log file cannot be read, or the home directory cannot be resolved for the default `~/.podium/audit.log`. A file the registry can read but cannot open for appending also refuses startup. A file destination refuses for either cause even when it is the only destination, because the registry would otherwise run with no audit stream. Fix the path or its permissions.
+  - A transport or queue variable refuses its value, and the error names that variable: `PODIUM_AUDIT_HEADERS_FILE` for a file that cannot be read, a line without a colon, an empty name, or the name `Host`, `Content-Length`, or `Content-Type`, with the file and the line number; `PODIUM_AUDIT_TLS_CA_FILE` for a file that cannot be read or holds no certificate; `PODIUM_AUDIT_TLS_CERT_FILE` or `PODIUM_AUDIT_TLS_KEY_FILE` when only one of the two is set or the pair cannot be loaded; and `PODIUM_AUDIT_QUEUE_MAX_BYTES` for a non-empty value that is not a positive base-10 integer.
+  - `podium-mcp` refuses with the same code, naming `PODIUM_AUDIT_SINK` or the transport variable, when `PODIUM_AUDIT_SINK` lists `stdout`, names a list these rules do not admit, or names a file destination that cannot be opened or cannot be opened for appending, or when a transport or queue variable refuses its value while `PODIUM_AUDIT_SINK` is set.
+- **The registry refuses to start with `config.audit_anchor_key_unavailable`.** This refusal applies only when `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above 0 and the registry stream lists a file destination. The key file at `PODIUM_AUDIT_SIGNING_KEY_PATH` exists and cannot be read, lacks a `private:` line, or does not decode, or it cannot be generated. Restore the file, or move it aside so the registry generates a new keypair. Keep the old public key, because anchors written before the change were signed with it and anyone who checks them needs it.
 - **The registry refuses to start with `config.audit_anchor_key_shared`.** The anchor key is also the registry signing key or one of its `verify:` keys. Generate a separate keypair for `PODIUM_AUDIT_SIGNING_KEY_PATH`. The anchor signature carries no purpose label, so the anchor key cannot also be a registry signing or `verify:` key, and an external verifier must not trust one key for both purposes.
 
 ---

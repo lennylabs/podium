@@ -33,9 +33,9 @@ func (r *recordingSigner) Sign(_ context.Context, contentHash string) (string, e
 func TestScheduler_AnchorsOnStartupAndPeriodically(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	sink, err := audit.NewFileSink(filepath.Join(dir, "audit.log"))
+	sink, err := audit.OpenFile(filepath.Join(dir, "audit.log"), audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	if err := sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "u",
@@ -65,7 +65,7 @@ func TestScheduler_AnchorsOnStartupAndPeriodically(t *testing.T) {
 func TestScheduler_FailureDoesNotStop(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
+	sink, _ := audit.OpenFile(filepath.Join(dir, "audit.log"), audit.OpenOptions{})
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "u",
 	})
@@ -109,7 +109,7 @@ func TestScheduler_NoOpWithoutSinkOrSigner(t *testing.T) {
 	if err := sched.Run(context.Background()); err != nil {
 		t.Errorf("Run: %v, want nil", err)
 	}
-	sched.Sink, _ = audit.NewFileSink(filepath.Join(t.TempDir(), "x"))
+	sched.Sink, _ = audit.OpenFile(filepath.Join(t.TempDir(), "x"), audit.OpenOptions{})
 	if err := sched.Run(context.Background()); err != nil {
 		t.Errorf("Run with sink only: %v, want nil", err)
 	}

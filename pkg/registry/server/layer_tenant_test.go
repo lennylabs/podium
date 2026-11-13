@@ -386,13 +386,13 @@ func TestLayerEndpoint_MultiTenantEraseScoped(t *testing.T) {
 			t.Fatalf("PutLayerConfig: %v", err)
 		}
 		sink := seedEraseLog(t, "acme", "globex", "")
-		before := readFile(t, sink.Path())
+		before := readFile(t, sink.File().Path())
 		hooks := 0
 		h := f.ep.WithEraseSink(sink).WithAfterErase(func(context.Context) { hooks++ }).EraseHandler()
 		rec := serveLayer(h, http.MethodPost, "/v1/admin/erase",
 			map[string]any{"user_id": "alice@acme.com", "salt": "s"}, tenantID)
 		if tenantID == "" {
-			assertUnroutedEraseRefused(t, f, rec, hooks, before, readFile(t, sink.Path()))
+			assertUnroutedEraseRefused(t, f, rec, hooks, before, readFile(t, sink.File().Path()))
 			continue
 		}
 		if rec.Code != http.StatusOK {
@@ -432,11 +432,11 @@ func assertUnroutedEraseRefused(t *testing.T, f *tenantFixture, rec *httptest.Re
 
 // seedEraseLog writes one alice record per tenant label into a fresh file
 // sink. An empty label seeds an unlabeled record.
-func seedEraseLog(t *testing.T, tenants ...string) *audit.FileSink {
+func seedEraseLog(t *testing.T, tenants ...string) *audit.Stream {
 	t.Helper()
-	sink, err := audit.NewFileSink(filepath.Join(t.TempDir(), "audit.log"))
+	sink, err := audit.OpenFile(filepath.Join(t.TempDir(), "audit.log"), audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	for _, tenant := range tenants {
 		if err := sink.Append(context.Background(), audit.Event{
@@ -452,10 +452,10 @@ func seedEraseLog(t *testing.T, tenants ...string) *audit.FileSink {
 // assertScopedErase checks that only the records labeled tenant lost alice,
 // that user.erased names the tenant and the superseded head, and that the
 // rewritten chain verifies.
-func assertScopedErase(t *testing.T, sink *audit.FileSink, tenant string) {
+func assertScopedErase(t *testing.T, sink *audit.Stream, tenant string) {
 	t.Helper()
 	var erased map[string]any
-	for _, line := range bytes.Split(bytes.TrimSpace(readFile(t, sink.Path())), []byte("\n")) {
+	for _, line := range bytes.Split(bytes.TrimSpace(readFile(t, sink.File().Path())), []byte("\n")) {
 		var ev map[string]any
 		if err := json.Unmarshal(line, &ev); err != nil {
 			t.Fatalf("parse %s: %v", line, err)

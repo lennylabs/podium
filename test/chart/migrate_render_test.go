@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -239,6 +240,8 @@ func TestChart_MigrateJobMirrorsTheDeployment(t *testing.T) {
 		"extra env":     {"extraEnv[0].name=EXTRA", "extraEnv[0].value=x"},
 		"no secret":     {"existingSecret="},
 		"config leaves": {"config.migrationObjectReadTimeout=2m", "config.auditLogPath=https://siem.acme.com/podium"},
+		"audit transport": {"audit.transportSecret.name=audit-tls",
+			"audit.transportSecret.keys={headers,ca.crt,tls.crt,tls.key}"},
 		"pod metadata": {"podLabels.team=platform", "podAnnotations.vault\\.hashicorp\\.com/agent-inject=true",
 			"nodeSelector.pool=db", "tolerations[0].key=dedicated", "tolerations[0].operator=Exists",
 			"affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key=zone",
@@ -538,9 +541,11 @@ func TestChart_StrategyRendering(t *testing.T) {
 	}
 }
 
-// The object-read deadline and the audit sink reach both pods, ahead of
-// extraEnv so an operator entry can still override them, and render nothing
-// when unset so the registry's own default applies.
+// The object-read deadline and the audit destination list reach both pods,
+// ahead of extraEnv so an operator entry can still override them. The
+// object-read deadline renders nothing when unset, so the registry's own
+// default applies. TestChart_AuditLogPathDefaultsToStdout pins the audit
+// default.
 //
 // Spec: §13.4, §13.12
 func TestChart_MigrationConfigReachesBothPods(t *testing.T) {
@@ -566,12 +571,32 @@ func TestChart_MigrationConfigReachesBothPods(t *testing.T) {
 	m = renderMigration(t, "dry-run")
 	for _, kind := range []string{"Deployment", "Job"} {
 		c := oneWorkload(t, m, kind).Spec.Template.Spec.Containers[0]
-		for _, name := range []string{"PODIUM_MIGRATION_OBJECT_READ_TIMEOUT", "PODIUM_AUDIT_LOG_PATH"} {
-			for _, n := range envNames(c) {
-				if n == name {
-					t.Errorf("%s renders %s with the value unset", kind, name)
-				}
-			}
+		if slices.Contains(envNames(c), "PODIUM_MIGRATION_OBJECT_READ_TIMEOUT") {
+			t.Errorf("%s renders PODIUM_MIGRATION_OBJECT_READ_TIMEOUT with the value unset", kind)
+		}
+	}
+}
+
+// Every chart install records audit: the default destination is stdout on the
+// registry pods and the migrate Job, so the records reach the cluster's log
+// pipeline. An explicit empty value renders no variable, so a
+// PODIUM_AUDIT_LOG_PATH that existingSecret supplies through envFrom applies.
+//
+// Spec: §8.3, §13.12
+func TestChart_AuditLogPathDefaultsToStdout(t *testing.T) {
+	t.Parallel()
+	m := renderMigration(t, "dry-run")
+	for _, kind := range []string{"Deployment", "Job"} {
+		c := oneWorkload(t, m, kind).Spec.Template.Spec.Containers[0]
+		if got := envValue(c, "PODIUM_AUDIT_LOG_PATH"); got != "stdout" {
+			t.Errorf("a default render sets %s PODIUM_AUDIT_LOG_PATH=%q; want stdout", kind, got)
+		}
+	}
+	m = renderMigration(t, "dry-run", "config.auditLogPath=")
+	for _, kind := range []string{"Deployment", "Job"} {
+		c := oneWorkload(t, m, kind).Spec.Template.Spec.Containers[0]
+		if slices.Contains(envNames(c), "PODIUM_AUDIT_LOG_PATH") {
+			t.Errorf("config.auditLogPath= renders PODIUM_AUDIT_LOG_PATH on the %s, which overrides the existingSecret value", kind)
 		}
 	}
 }

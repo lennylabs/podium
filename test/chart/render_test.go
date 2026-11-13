@@ -12,6 +12,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -550,5 +551,99 @@ func TestChart_UnknownSigningModeFailsTheRender(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("the refusal does not name %q: %s", want, out)
 		}
+	}
+}
+
+// auditTransportDir is the directory the audit transport Secret mounts at.
+const auditTransportDir = "/etc/podium/audit"
+
+// auditTransportVars maps each audit transport Secret key to the variable that
+// names its file.
+var auditTransportVars = map[string]string{
+	"headers": "PODIUM_AUDIT_HEADERS_FILE",
+	"ca.crt":  "PODIUM_AUDIT_TLS_CA_FILE",
+	"tls.crt": "PODIUM_AUDIT_TLS_CERT_FILE",
+	"tls.key": "PODIUM_AUDIT_TLS_KEY_FILE",
+}
+
+// assertAuditTransport checks the Deployment and the migrate Job of a
+// migration render. With secret set, each carries the read-only mount of that
+// Secret and exactly the variables of keys, each naming its key's file inside
+// the mount. With secret empty, each carries no transport mount, volume, or
+// variable.
+func assertAuditTransport(t *testing.T, manifests, secret string, keys ...string) {
+	t.Helper()
+	for _, kind := range []string{"Deployment", "Job"} {
+		w := oneWorkload(t, manifests, kind)
+		c := w.Spec.Template.Spec.Containers[0]
+		for key, name := range auditTransportVars {
+			want := ""
+			if slices.Contains(keys, key) {
+				want = auditTransportDir + "/" + key
+			}
+			if got := envValue(c, name); got != want {
+				t.Errorf("%s %s is %q; want %q", kind, name, got, want)
+			}
+		}
+		m, v := findMount(c, "audit-transport"), findVolume(w, "audit-transport")
+		if secret == "" {
+			if m != nil || v != nil {
+				t.Errorf("%s renders an audit transport mount or volume with no Secret named: %v %v", kind, m, v)
+			}
+			continue
+		}
+		if m == nil || m["mountPath"] != auditTransportDir || m["readOnly"] != true {
+			t.Errorf("%s has no read-only audit transport mount at %s: %v", kind, auditTransportDir, c.VolumeMounts)
+		}
+		s, _ := v["secret"].(map[string]any)
+		if s == nil || s["secretName"] != secret {
+			t.Errorf("%s has no audit transport volume from Secret %s: %v", kind, secret, w.Spec.Template.Spec.Volumes)
+		}
+	}
+}
+
+// A default install names no transport Secret, so neither pod mounts one or
+// points a transport variable at a file the registry would then refuse to
+// start without. A keys list without a Secret name renders nothing either.
+//
+// Spec: §13.12
+func TestChart_AuditTransportSecretDefaultRendersNothing(t *testing.T) {
+	t.Parallel()
+	assertAuditTransport(t, renderMigration(t, "dry-run"), "")
+	assertAuditTransport(t, renderMigration(t, "dry-run", "audit.transportSecret.keys={headers}"), "")
+}
+
+// The registry refuses startup when a transport variable names a file it
+// cannot read, so each pod sets a variable only for a key the operator lists,
+// and both pods mount the Secret read-only.
+//
+// Spec: §13.12
+func TestChart_AuditTransportSecretSetsListedKeys(t *testing.T) {
+	t.Parallel()
+	for name, keys := range map[string][]string{
+		"all keys":           {"headers", "ca.crt", "tls.crt", "tls.key"},
+		"headers":            {"headers"},
+		"headers and ca.crt": {"headers", "ca.crt"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			m := renderMigration(t, "dry-run",
+				"audit.transportSecret.name=audit-tls",
+				"audit.transportSecret.keys={"+strings.Join(keys, ",")+"}")
+			assertAuditTransport(t, m, "audit-tls", keys...)
+		})
+	}
+}
+
+// The registry refuses startup when only one of the client certificate and
+// its key is set, so the chart refuses the render that would set one.
+//
+// Spec: §13.12
+func TestChart_AuditTransportSecretRefusesAHalfClientPair(t *testing.T) {
+	t.Parallel()
+	for _, key := range []string{"tls.crt", "tls.key"} {
+		mustFail(t, "audit.transportSecret.keys listing only "+key,
+			upgradeArgs("dry-run", "audit.transportSecret.name=audit-tls", "audit.transportSecret.keys={headers,"+key+"}"),
+			"audit.transportSecret.keys", "tls.crt", "tls.key")
 	}
 }

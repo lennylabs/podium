@@ -114,8 +114,8 @@ type Server struct {
 	// auditSink records §8.1 events that originate at the HTTP boundary
 	// (admin.granted). Read events flow through the core emitter; sharing
 	// the same sink keeps both on one §8.6 hash chain. It is the §8.3
-	// registry sink, which is a file sink or an EndpointSink when redirected
-	// to a SIEM (§8.3). Nil is a no-op.
+	// registry stream, which fans each record out to every destination its
+	// list names. Nil is a no-op.
 	auditSink audit.Sink
 	// latency, when set, receives one §7.1 timing observation per served
 	// request (operation name, status, elapsed) so a deployment can compare

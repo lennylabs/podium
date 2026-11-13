@@ -78,33 +78,62 @@ func lastChainHash(path string) (string, error) {
 
 // Append writes the next event in the chain.
 func (f *FileSink) Append(_ context.Context, e Event) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
 	normalizeEventClient(&e)
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now().UTC()
 	}
-	e.PrevHash = f.lastHash
-	hash := sha256.Sum256(append(e.canonicalBody(), []byte(f.lastHash)...))
-	e.Hash = hex.EncodeToString(hash[:])
+	_, _, err := f.appendChained(e)
+	return err
+}
 
-	line, err := json.Marshal(eventForJSON(e))
+// appendChained chains e onto the file's head under f.mu, writes its line
+// in one call, and returns the chained event and its JSON line without the
+// newline. The head advances only after the write succeeds, so a failed
+// open or write leaves lastHash unchanged and the event unchained (§8.3
+// Loss accounting). A part of the line that a failed write stored stays in
+// the file: the head is read from the file only by NewFileSink, because
+// re-reading it here could hide a loss that Verify reports.
+//
+// Spec: §8.3, §8.6
+func (f *FileSink) appendChained(e Event) (Event, []byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	e = chainEvent(e, f.lastHash)
+	line, err := encodeLine(e)
+	// jsonEvent holds only strings, ints, bools, and string slices and maps,
+	// so encoding cannot fail; the error is kept rather than discarded.
 	if err != nil {
-		return err
+		return Event{}, nil, err
 	}
-	line = append(line, '\n')
-
 	file, err := os.OpenFile(f.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return err
+		return Event{}, nil, err
 	}
 	defer func() { _ = file.Close() }()
-	if _, err := file.Write(line); err != nil {
-		return err
+	// A write to a file that opened for appending fails only on a device
+	// error or a full disk, which a test cannot induce portably. The failed
+	// open above takes the same return, and the tests pin that path.
+	if _, err := file.Write(append(line[:len(line):len(line)], '\n')); err != nil {
+		return Event{}, nil, err
 	}
 	f.lastHash = e.Hash
-	return nil
+	return e, line, nil
+}
+
+// chainEvent sets e's PrevHash to prev and its Hash to
+// sha256(body || prev_hash) (§8.6).
+func chainEvent(e Event, prev string) Event {
+	e.PrevHash = prev
+	hash := sha256.Sum256(append(e.canonicalBody(), []byte(prev)...))
+	e.Hash = hex.EncodeToString(hash[:])
+	return e
+}
+
+// encodeLine returns e's JSON record line without the newline, the bytes
+// every destination carries (§8.1, §8.3).
+func encodeLine(e Event) ([]byte, error) {
+	return json.Marshal(eventForJSON(e))
 }
 
 // Verify re-reads the audit log and validates the hash chain. Returns
@@ -178,6 +207,7 @@ type jsonEvent struct {
 	Tenant         string            `json:"tenant,omitempty"`
 	ResolvedLayers []string          `json:"resolved_layers,omitempty"`
 	ResultSize     int               `json:"result_size,omitempty"`
+	SchemaVersion  int               `json:"schema_version,omitempty"`
 	Hash           string            `json:"hash"`
 	PrevHash       string            `json:"prev_hash,omitempty"`
 }
@@ -226,6 +256,7 @@ func eventForJSON(e Event) jsonEvent {
 		Tenant:         e.Tenant,
 		ResolvedLayers: e.ResolvedLayers,
 		ResultSize:     e.ResultSize,
+		SchemaVersion:  e.SchemaVersion,
 		Hash:           e.Hash,
 		PrevHash:       e.PrevHash,
 	}
@@ -262,6 +293,7 @@ func eventFromJSON(je jsonEvent) Event {
 		Tenant:         je.Tenant,
 		ResolvedLayers: je.ResolvedLayers,
 		ResultSize:     je.ResultSize,
+		SchemaVersion:  je.SchemaVersion,
 		Hash:           je.Hash,
 		PrevHash:       je.PrevHash,
 	}

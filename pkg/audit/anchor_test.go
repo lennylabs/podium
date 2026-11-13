@@ -19,9 +19,9 @@ func TestAnchor_RecordsChainHeadAndAppendsEvent(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, err := audit.NewFileSink(path)
+	sink, err := audit.OpenFile(path, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	for i := 0; i < 3; i++ {
 		_ = sink.Append(context.Background(), audit.Event{
@@ -49,7 +49,7 @@ func TestAnchor_EmptyLogIsNoOp(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	idx, err := audit.Anchor(context.Background(), sink, sign.Noop{})
 	if err != nil {
 		t.Fatalf("Anchor empty: %v", err)
@@ -67,7 +67,7 @@ func TestAnchor_SurfacesRekorLogIndex(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	_ = sink.Append(context.Background(), audit.Event{
 		Type:   audit.EventArtifactLoaded,
 		Caller: "alice",
@@ -99,7 +99,7 @@ func TestAnchor_PreservesRekorLogIndexZero(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	_ = sink.Append(context.Background(), audit.Event{
 		Type:   audit.EventArtifactLoaded,
 		Caller: "alice",
@@ -127,7 +127,7 @@ func TestAnchor_AbsentRekorLogIndexIsMinusOne(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	_ = sink.Append(context.Background(), audit.Event{
 		Type:   audit.EventArtifactLoaded,
 		Caller: "alice",
@@ -148,7 +148,7 @@ func TestAnchor_TopLevelLogIndexIsMinusOne(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	_ = sink.Append(context.Background(), audit.Event{
 		Type:   audit.EventArtifactLoaded,
 		Caller: "alice",
