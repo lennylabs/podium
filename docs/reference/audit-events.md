@@ -220,7 +220,7 @@ The OTLP destination reads no `OTEL_EXPORTER_OTLP_*` variable and runs independe
 
 ## Stdout
 
-The stdout destination is available to the registry only. It writes each record as one JSON line on the registry's standard output, before the operation that raised the event continues. A reader of standard output that stalls therefore delays audited requests, and it holds the registry's exit until the blocked write returns. The registry places each record in every HTTP and OTLP queue before it writes the record to standard output, so a record whose stdout write blocks is already queued, or counted as dropped, for each HTTP and OTLP destination.
+The stdout destination is available to the registry only. It writes each record as one JSON line on the registry's standard output, before the operation that raised the event continues. A reader of standard output that stalls therefore delays audited requests, and it holds the registry's exit until the blocked write returns. A second SIGINT or SIGTERM, or a SIGKILL, ends that wait as an abnormal exit whose losses are not counted, as [Shutdown](#shutdown) states, and a file destination in the list already holds the blocked record, because the registry writes the file and fills the HTTP and OTLP queues before it writes to standard output. The registry places each record in every HTTP and OTLP queue before it writes the record to standard output, so a record whose stdout write blocks is already queued, or counted as dropped, for each HTTP and OTLP destination.
 
 When the list names `stdout`, the registry ignores SIGPIPE on platforms that have it. A reader that goes away then makes the write fail with a broken-pipe error, which is counted as dropped with reason `write_error`, and the registry keeps serving.
 
