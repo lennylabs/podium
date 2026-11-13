@@ -536,21 +536,63 @@ func TestStream_RewriteRefusalLeavesFileUntouched(t *testing.T) {
 	}
 }
 
-// A sealed stream refuses a rewrite with ErrSealed and leaves the file
-// untouched.
+// After Shutdown, a sealed stream refuses every rewrite with ErrSealed, even
+// one that has work to do. The file keeps its bytes and inode, no temporary
+// file is left behind, and neither a destination nor the observer records
+// anything further. A rewrite that did not read sealed would replace the
+// file and forward its closing event.
 //
 // Spec: §8.3, §8.6
 func TestStream_SealedRewriteIsRefused(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "audit.log")
-	s := openFileStream(t, path, OpenOptions{})
-	appendN(t, s, 1)
-	s.Seal()
-	if _, err := EraseUser(context.Background(), s, "alice", "salt", "carol", nil, EraseScope{Unlabeled: true}); !errors.Is(err, ErrSealed) {
+	rcv := newRawReceiver(t)
+	out := &lineWriter{}
+	obs := &fakeObserver{}
+	s := openFileStream(t, path+",stdout,"+rcv.srv.URL, OpenOptions{Stdout: out, Observer: obs})
+	now := time.Now().UTC()
+	appendRewriteFixture(t, s, now)
+	s.Shutdown()
+
+	before := mustRead(t, path)
+	infoBefore, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, received, calls := len(out.got()), len(rcv.got()), len(obs.snapshot())
+	if written != 2 || received != 2 {
+		t.Fatalf("before the rewrites stdout holds %d lines and the receiver %d, want 2 each", written, received)
+	}
+
+	if _, err := Enforce(ctx, s, now, nil, DefaultQueryRetention()); !errors.Is(err, ErrSealed) {
+		t.Errorf("Enforce err = %v, want ErrSealed", err)
+	}
+	if _, err := EraseUser(ctx, s, "alice", "salt", "carol", nil, EraseScope{Unlabeled: true}); !errors.Is(err, ErrSealed) {
 		t.Errorf("EraseUser err = %v, want ErrSealed", err)
 	}
-	if n := len(fileRecords(t, path)); n != 1 {
-		t.Errorf("file holds %d records, want 1", n)
+
+	if after := mustRead(t, path); !bytes.Equal(before, after) {
+		t.Errorf("file bytes changed:\nbefore %s\nafter  %s", before, after)
+	}
+	infoAfter, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(infoBefore, infoAfter) {
+		t.Error("file was replaced by another inode")
+	}
+	if _, err := os.Stat(path + ".tmp"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("temp file present: %v", err)
+	}
+	if n := len(out.got()); n != written {
+		t.Errorf("stdout received %d further lines", n-written)
+	}
+	if n := len(rcv.got()); n != received {
+		t.Errorf("receiver received %d further lines", n-received)
+	}
+	if got := obs.snapshot(); len(got) != calls {
+		t.Errorf("observer recorded %v after the stream was sealed", got[calls:])
 	}
 }
 

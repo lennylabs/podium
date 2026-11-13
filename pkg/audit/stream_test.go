@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/clock"
+	"github.com/lennylabs/podium/pkg/sign"
 )
 
 // fakeObserver records every Observer call.
@@ -664,5 +667,328 @@ func waitFor(t *testing.T, cond func() bool) {
 			t.Fatalf("condition not met within 5s")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A part of a line that a failed write stored stays in the file and joins
+// the next record's line. Verify reports the joined line, and Enforce,
+// EraseUser, and Anchor each refuse a file they cannot parse rather than
+// rewrite or anchor over the loss. With the part removed the chain
+// verifies, because the failed write never advanced the head.
+//
+// Spec: §8.3, §8.6
+func TestStream_StoredPartOfFailedWriteIsReportedByVerify(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	s := openFileStream(t, path, OpenOptions{})
+	now := time.Now().UTC()
+	appendRewriteFixture(t, s, now)
+	at := len(mustRead(t, path))
+
+	// Another handle writes the part, standing in for the bytes a failed
+	// write stored before it returned.
+	part := []byte(`{"type":"artifact.loaded","timest`)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(part); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	appendN(t, s, 1)
+	stored := mustRead(t, path)
+	joined := append(append([]byte(nil), part...), '{')
+	if !bytes.HasPrefix(stored[at:], joined) {
+		t.Fatalf("the part did not join the next record's line:\n%s", stored)
+	}
+
+	if err := s.Verify(ctx); !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("Verify = %v, want ErrChainBroken", err)
+	}
+	refusals := map[string]func() error{
+		"Enforce": func() error {
+			_, err := Enforce(ctx, s, now, nil, DefaultQueryRetention())
+			return err
+		},
+		"EraseUser": func() error {
+			_, err := EraseUser(ctx, s, "alice", "salt", "carol", nil, EraseScope{Unlabeled: true})
+			return err
+		},
+		"Anchor": func() error {
+			_, err := Anchor(ctx, s, sign.Noop{})
+			return err
+		},
+	}
+	for name, run := range refusals {
+		if err := run(); err == nil {
+			t.Errorf("%s over the joined line returned nil", name)
+		}
+		if got := mustRead(t, path); !bytes.Equal(got, stored) {
+			t.Errorf("%s changed the file", name)
+		}
+	}
+
+	repaired := append(append([]byte(nil), stored[:at]...), stored[at+len(part):]...)
+	if err := os.WriteFile(path, repaired, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Verify(ctx); err != nil {
+		t.Fatalf("Verify with the part removed = %v, want nil", err)
+	}
+}
+
+// Stream B keeps its head across a rewrite that stream A runs on the same
+// file, so B's next record links to a hash the rewrite replaced, and Verify
+// reports it. No coordination exists between writers of one file, and this
+// pins that the outcome is reported rather than silent.
+//
+// Spec: §8.3, §8.6
+func TestStream_AppendAfterForeignRewriteIsReported(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	now := time.Now().UTC()
+	a := openFileStream(t, path, OpenOptions{})
+	if err := a.Append(ctx, Event{
+		Type: EventArtifactsSearched, Timestamp: now.Add(-8 * 24 * time.Hour), Caller: "bob",
+		Context: map[string]string{"query": "apollo"},
+	}); err != nil {
+		t.Fatalf("A Append: %v", err)
+	}
+	b := openFileStream(t, path, OpenOptions{})
+	appendN(t, b, 1)
+	first := fileRecords(t, path)[1].Hash
+
+	res, err := Enforce(ctx, a, now, nil, DefaultQueryRetention())
+	if err != nil || res.QueriesRedacted != 1 {
+		t.Fatalf("A Enforce = %+v, %v; want one query redacted", res, err)
+	}
+	appendN(t, b, 1)
+
+	recs := fileRecords(t, path)
+	if got := recs[len(recs)-1].PrevHash; got != first {
+		t.Fatalf("B's next prev_hash = %q, want the pre-rewrite hash %q of B's first record", got, first)
+	}
+	for i, r := range recs {
+		if r.Hash == first {
+			t.Fatalf("line %d still holds the pre-rewrite hash", i)
+		}
+	}
+	for name, s := range map[string]*Stream{"A": a, "B": b} {
+		if err := s.Verify(ctx); !errors.Is(err, ErrChainBroken) {
+			t.Errorf("%s Verify = %v, want ErrChainBroken", name, err)
+		}
+	}
+}
+
+// lossCase is one drop source of TestStream_EveryChainedRecordIsDeliveredOrCounted.
+type lossCase struct {
+	name string
+	// kind and reason name the one destination and drop reason the case
+	// may count.
+	kind, reason string
+	// refuse returns the status the receiver answers a request with, or 0
+	// to accept it.
+	refuse     func(r received) int
+	failStdout bool
+	queueMax   int64
+	// drive appends the case's events, closes s, and returns the number of
+	// events it appended.
+	drive func(t *testing.T, s *Stream, path string) int
+}
+
+// lossCases lists one case per §8.3 drop source.
+func lossCases() []lossCase {
+	closeNow := func(t *testing.T, s *Stream) { closeWithin(t, s, 10*time.Second) }
+	return []lossCase{
+		{
+			name: "queue_full", kind: "http", reason: ReasonQueueFull, queueMax: 1000,
+			drive: func(t *testing.T, s *Stream, _ string) int {
+				appendN(t, s, 10)
+				closeNow(t, s)
+				return 10
+			},
+		},
+		{
+			name: "rejected by the receiver", kind: "http", reason: ReasonRejected,
+			refuse: func(r received) int {
+				if poisoned(r) {
+					return http.StatusBadRequest
+				}
+				return 0
+			},
+			drive: func(t *testing.T, s *Stream, _ string) int {
+				for _, target := range []string{"0", "1", "poison", "3", "4"} {
+					appendTarget(t, s, target)
+				}
+				closeNow(t, s)
+				return 5
+			},
+		},
+		{
+			name: "rejected as larger than 1 MiB", kind: "http", reason: ReasonRejected, queueMax: maxRecordBytes / 2,
+			drive: func(t *testing.T, s *Stream, _ string) int {
+				appendN(t, s, 2)
+				appendTarget(t, s, strings.Repeat("x", maxRecordBytes))
+				appendN(t, s, 2)
+				closeNow(t, s)
+				return 5
+			},
+		},
+		{
+			name: "shutdown after a refused flush", kind: "http", reason: ReasonShutdown,
+			refuse: func(received) int { return http.StatusServiceUnavailable },
+			drive: func(t *testing.T, s *Stream, _ string) int {
+				appendN(t, s, 3)
+				closeWithin(t, s, 200*time.Millisecond)
+				return 3
+			},
+		},
+		{
+			name: "shutdown for an append after Close", kind: "http", reason: ReasonShutdown,
+			drive: func(t *testing.T, s *Stream, _ string) int {
+				appendN(t, s, 2)
+				closeNow(t, s)
+				appendN(t, s, 3)
+				return 5
+			},
+		},
+		{
+			name: "stdout write_error", kind: "stdout", reason: ReasonWriteError, failStdout: true,
+			drive: func(t *testing.T, s *Stream, _ string) int {
+				appendN(t, s, 3)
+				closeNow(t, s)
+				return 3
+			},
+		},
+		{
+			name: "file write_error", kind: "file", reason: ReasonWriteError,
+			drive: func(t *testing.T, s *Stream, path string) int {
+				if err := os.Chmod(path, 0o444); err != nil {
+					t.Fatal(err)
+				}
+				for i := 0; i < 3; i++ {
+					if err := s.Append(context.Background(), Event{Type: EventArtifactLoaded}); err == nil {
+						t.Fatalf("Append %d to an unwritable file returned nil", i)
+					}
+				}
+				closeNow(t, s)
+				return 3
+			},
+		},
+	}
+}
+
+// Every record the stream chains is delivered to each destination or
+// counted as dropped for it with the case's reason, and the queue depth
+// returns to 0. An event the file did not store is not chained, and it is
+// counted for the file alone. It must pass under go test -race
+// ./pkg/audit/.
+//
+// Spec: §8.3
+func TestStream_EveryChainedRecordIsDeliveredOrCounted(t *testing.T) {
+	captureLog(t)
+	for _, tc := range lossCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.kind == "file" {
+				skipIfRoot(t)
+			}
+			stubTicker(t)
+			stubSleepGate(t, true)
+			var mu sync.Mutex
+			accepted := map[string]bool{}
+			var rcv *receiver
+			rcv = newReceiver(t, func(n int, w http.ResponseWriter, _ *http.Request) {
+				req := rcv.requests()[n-1]
+				if tc.refuse != nil {
+					if code := tc.refuse(req); code != 0 {
+						w.WriteHeader(code)
+						return
+					}
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				for _, l := range req.lines {
+					accepted[l.Hash] = true
+				}
+			})
+			var out io.Writer = &lineWriter{}
+			if tc.failStdout {
+				out = failWriter{err: syscall.EPIPE}
+			}
+			obs := &fakeObserver{}
+			path := filepath.Join(t.TempDir(), "audit.log")
+			s := openStream(t, path+",stdout,"+rcv.srv.URL+"/p", OpenOptions{Stdout: out, Observer: obs, QueueMaxBytes: tc.queueMax})
+			appended := tc.drive(t, s, path)
+
+			recs := 0
+			if _, err := os.Stat(path); err == nil {
+				recs = len(fileRecords(t, path))
+			}
+			queued, dropped := totals(obs)
+			byKind := map[string]int{}
+			for key, n := range dropped {
+				if key != tc.kind+","+tc.reason {
+					t.Errorf("dropped %d with %s, want only %s,%s", n, key, tc.kind, tc.reason)
+				}
+				byKind[strings.SplitN(key, ",", 2)[0]] += n
+			}
+			if byKind[tc.kind] == 0 {
+				t.Errorf("the case counted no %s drop", tc.reason)
+			}
+			for kind, sum := range queued {
+				if sum != 0 {
+					t.Errorf("AddQueued deltas of %s sum to %d, want 0", kind, sum)
+				}
+			}
+			if appended != recs+byKind["file"] {
+				t.Errorf("appended %d, want the file's %d records plus %d file drops", appended, recs, byKind["file"])
+			}
+			mu.Lock()
+			delivered := len(accepted)
+			mu.Unlock()
+			if delivered+byKind["http"] != recs {
+				t.Errorf("http: %d accepted plus %d dropped, want the file's %d records", delivered, byKind["http"], recs)
+			}
+			written := 0
+			if lw, ok := out.(*lineWriter); ok {
+				written = len(lw.got())
+			}
+			if written+byKind["stdout"] != recs {
+				t.Errorf("stdout: %d written plus %d dropped, want the file's %d records", written, byKind["stdout"], recs)
+			}
+			if tc.kind == "file" && len(queued) != 0 {
+				t.Errorf("an unchained event reached another destination: %v", obs.snapshot())
+			}
+		})
+	}
+}
+
+// The observer sees the first Append's queue count, because Open fixes it
+// before any record is chained, and the counts balance after Close.
+//
+// Spec: §8.3, §13.8
+func TestStream_ObserverCountsFromFirstAppend(t *testing.T) {
+	stubTicker(t)
+	rcv := newReceiver(t, nil)
+	obs := &fakeObserver{}
+	s := openStream(t, rcv.srv.URL+"/p", OpenOptions{Observer: obs})
+	appendN(t, s, 1)
+	if got := obs.snapshot(); len(got) != 1 || got[0] != "AddQueued(http,1)" {
+		t.Fatalf("observer calls after the first Append = %v, want AddQueued(http,1)", got)
+	}
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	queued, dropped := totals(obs)
+	if queued["http"] != 0 || len(dropped) != 0 {
+		t.Fatalf("after Close queued %v dropped %v, want deltas summing to 0 and no drop", queued, dropped)
+	}
+	if n := len(rcv.hashes()); n != 1 {
+		t.Fatalf("receiver accepted %d records, want 1", n)
 	}
 }
