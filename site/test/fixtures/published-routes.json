@@ -68,6 +68,7 @@
   "/getting-started/quickstart.html",
   "/getting-started/why-podium.html",
   "/overview.html",
+  "/reference/audit-events.html",
   "/reference/cli.html",
   "/reference/error-codes.html",
   "/reference/frontmatter-schema.html",
