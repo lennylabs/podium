@@ -50,6 +50,25 @@ Spec: §13.4
 {{- if and (eq $mode "run") (not (regexMatch "^sha256:[0-9a-f]{64}$" (toString .Values.migration.planDigest))) }}
 {{- fail "migration.mode=run requires migration.planDigest, the `sha256:` value on the `dry-run: plan digest` line that ends the reviewed dry run's log; run the migration.mode=dry-run step first and review its log" }}
 {{- end }}
+{{- $transportKeys := .Values.audit.transportSecret.keys | default list }}
+{{- if ne (has "tls.crt" $transportKeys) (has "tls.key" $transportKeys) }}
+{{- fail "audit.transportSecret.keys lists one of tls.crt and tls.key: the registry refuses startup with config.audit_sink_unavailable when only one of PODIUM_AUDIT_TLS_CERT_FILE and PODIUM_AUDIT_TLS_KEY_FILE is set, so list both or neither" }}
+{{- end }}
+{{- end -}}
+
+{{/*
+The directory the audit transport Secret mounts at, and the variable each of
+its keys sets. The registry reads each variable as a file path (§13.12).
+*/}}
+{{- define "podium.auditTransportDir" -}}
+/etc/podium/audit
+{{- end -}}
+
+{{- define "podium.auditTransportKeys" -}}
+headers: PODIUM_AUDIT_HEADERS_FILE
+ca.crt: PODIUM_AUDIT_TLS_CA_FILE
+tls.crt: PODIUM_AUDIT_TLS_CERT_FILE
+tls.key: PODIUM_AUDIT_TLS_KEY_FILE
 {{- end -}}
 
 {{/*
@@ -200,12 +219,33 @@ env:
   - name: PODIUM_MIGRATION_OBJECT_READ_TIMEOUT
     value: {{ . | quote }}
   {{- end }}
-  {{- /* The audit sink. The root filesystem is read-only, so the default
-  file under the home directory cannot be written; an http(s) endpoint keeps
-  the artifact.signed events a migration run appends. */}}
+  {{- /* The audit destination list (§8.3). The default, stdout, writes each
+  record as one JSON line to the container's standard output, where the
+  cluster's log pipeline holds it under the platform's retention and outside
+  the reach of §8.5 erasure. A file path on a writable volume, an http(s) URL,
+  or an otlp+http(s) URL replaces it or joins it in a comma-separated list.
+  This env: entry overrides a PODIUM_AUDIT_LOG_PATH that existingSecret
+  supplies through envFrom. An empty value renders nothing, so the secret's
+  value applies when it carries one; otherwise the pods keep the file under
+  the home directory, which the read-only root filesystem cannot hold, and
+  they refuse startup with config.audit_sink_unavailable. An extraEnv entry
+  that sets PODIUM_TRACING=stdout beside a stdout destination refuses startup
+  as well. */}}
   {{- with .Values.config.auditLogPath }}
   - name: PODIUM_AUDIT_LOG_PATH
     value: {{ . | quote }}
+  {{- end }}
+  {{- /* One variable per listed transport key and none for an unlisted one,
+  because the registry refuses startup when a named file cannot be read
+  (§13.12). The mapping is fixed by podium.auditTransportKeys. */}}
+  {{- if .Values.audit.transportSecret.name }}
+  {{- $keys := .Values.audit.transportSecret.keys | default list }}
+  {{- range $key, $var := include "podium.auditTransportKeys" . | fromYaml }}
+  {{- if has $key $keys }}
+  - name: {{ $var }}
+    value: {{ printf "%s/%s" (include "podium.auditTransportDir" $) $key | quote }}
+  {{- end }}
+  {{- end }}
   {{- end }}
   {{- with .Values.extraEnv }}
   {{- toYaml . | nindent 2 }}
@@ -218,7 +258,8 @@ identical configuration.
 */}}
 {{- define "podium.volumeMounts" -}}
 {{- $signingKey := eq .Values.signing.mode "registry-key" }}
-{{- if or .Values.objects.enabled .Values.runtimeKeys.enabled $signingKey }}
+{{- $auditTransport := .Values.audit.transportSecret.name }}
+{{- if or .Values.objects.enabled .Values.runtimeKeys.enabled $signingKey $auditTransport }}
 volumeMounts:
   {{- if .Values.objects.enabled }}
   - name: objects
@@ -234,6 +275,11 @@ volumeMounts:
     mountPath: {{ .Values.signing.mountPath }}
     readOnly: true
   {{- end }}
+  {{- if $auditTransport }}
+  - name: audit-transport
+    mountPath: {{ include "podium.auditTransportDir" . }}
+    readOnly: true
+  {{- end }}
 {{- end }}
 {{- end -}}
 
@@ -242,7 +288,8 @@ The pod volumes behind podium.volumeMounts.
 */}}
 {{- define "podium.volumes" -}}
 {{- $signingKey := eq .Values.signing.mode "registry-key" }}
-{{- if or .Values.objects.enabled .Values.runtimeKeys.enabled $signingKey }}
+{{- $auditTransport := .Values.audit.transportSecret.name }}
+{{- if or .Values.objects.enabled .Values.runtimeKeys.enabled $signingKey $auditTransport }}
 volumes:
   {{- if .Values.objects.enabled }}
   - name: objects
@@ -258,6 +305,11 @@ volumes:
   - name: signing
     secret:
       secretName: {{ required "signing.secretName is required unless signing.mode=none" .Values.signing.secretName }}
+  {{- end }}
+  {{- if $auditTransport }}
+  - name: audit-transport
+    secret:
+      secretName: {{ $auditTransport }}
   {{- end }}
 {{- end }}
 {{- end -}}
