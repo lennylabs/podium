@@ -114,7 +114,7 @@ Two series report delivery. The registry exports them at `/metrics`, and `podium
 | `podium_audit_queue_depth{destination}` | Gauge | Records queued for the HTTP or OTLP destination. `destination` is `http` or `otlp`. |
 | `podium_audit_dropped_total{destination,reason}` | Counter | Records dropped for a destination. `destination` is `file`, `stdout`, `http`, or `otlp`, and `reason` is `queue_full`, `rejected`, `shutdown`, or `write_error`. |
 
-Each series is exported once a destination first reports a queued or dropped record, so a process whose list names only a file destination exports neither series until a file write fails.
+Each series is exported once a destination first reports a queued or dropped record. A process whose list names only a file destination never exports `podium_audit_queue_depth`, and exports `podium_audit_dropped_total` only after a file write fails.
 
 Dropped records are also logged, whether or not metrics are enabled, in at most one line per destination and reason per minute. A log line names a destination by its file path, as `stdout`, or by its scheme, host, and path.
 

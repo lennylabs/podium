@@ -735,7 +735,7 @@ There is no SCIM sync command. SCIM is a server-side push from the identity prov
 
 ### `podium admin erase`
 
-GDPR right-to-erasure. The user identity is positional and `--salt` is required (an empty salt yields a guessable tombstone). The default form calls the registry, which unregisters and purges the user's owned layers and redacts the user identity in the audit records of the tenant the request acts in; the authenticated session identifies the invoking admin. On a registry started with `PODIUM_MULTI_TENANT=true`, the registry form acts in the tenant the caller's organization selects and redacts only that tenant's audit records. Records that carry no tenant are left unchanged, and the response reports nothing about them; the local form redacts them.
+GDPR right-to-erasure. The user identity is positional and `--salt` is required (an empty salt yields a guessable tombstone). The default form calls the registry, which unregisters and purges the user's owned layers and redacts the user identity in the audit records of the tenant the request acts in when the registry's audit list names a file destination; the authenticated session identifies the invoking admin. On a registry started with `PODIUM_MULTI_TENANT=true`, the registry form acts in the tenant the caller's organization selects and redacts only that tenant's audit records. Records that carry no tenant are left unchanged, and the response reports nothing about them; the local form redacts them.
 
 ```
 podium admin erase <user-id> --salt <salt> --registry <url>
@@ -744,8 +744,8 @@ podium admin erase <user-id> --salt <salt> --local --operator <admin-id> [--audi
 
 | Mode | Effect |
 |:--|:--|
-| Registry (default) | Calls `/v1/admin/erase`. Requires `--registry` (defaults to `PODIUM_REGISTRY`). Purges owned layers and redacts the user identity in the audit records of the tenant the request acts in. |
-| Local (`--local` or `--audit-path`) | Rewrites an audit log file directly (default `~/.podium/audit.log`). `--audit-path` may name the registry's `PODIUM_AUDIT_LOG_PATH` file, and the local form then redacts every record in it whatever its tenant. Stop the registry first, because a running registry's next write would break the rewritten chain. Requires `--operator` to record the invoking admin. Every tombstone uses the one `--salt` supplied. |
+| Registry (default) | Calls `/v1/admin/erase`. Requires `--registry` (defaults to `PODIUM_REGISTRY`). Purges owned layers and redacts the user identity in the audit records of the tenant the request acts in. When `PODIUM_AUDIT_LOG_PATH` lists no file destination, such as the Helm chart's `stdout` default, the registry rewrites no record and records only `user.erased`, and the receiving system redacts the records already delivered to it (see [Retention and erasure](audit-events#retention-and-erasure)). |
+| Local (`--local` or `--audit-path`) | Rewrites an audit log file directly (default `~/.podium/audit.log`). `--audit-path` may name the file destination that `PODIUM_AUDIT_LOG_PATH` lists, and the local form then redacts every record in it whatever its tenant. The local form's `user.erased` event is written to that file only and reaches no other destination. Stop the registry first, because a running registry's next write would break the rewritten chain. Requires `--operator` to record the invoking admin. Every tombstone uses the one `--salt` supplied. |
 
 Redaction replaces `sub` with `redacted-<sha256(sub+salt)>` and preserves audit event sequencing. Erasure is itself logged as a `user.erased` event.
 

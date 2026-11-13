@@ -43,7 +43,7 @@ The registry serves Prometheus metrics at `/metrics` by default, and `PODIUM_MET
 - `podium_ingest_success_total` and `podium_ingest_failure_total`: ingest attempts that succeeded or failed. Flag a recent uptick in the failure counter.
 - `podium_vector_outbox_depth`: pending rows in the external-vector-backend outbox. A rising depth indicates the drain worker is falling behind. The gauge reads 0 on a collocated backend that uses no outbox.
 - `podium_audit_queue_depth{destination}`: audit records queued for the `http` or `otlp` destination. A depth that keeps rising means the receiver is refusing or not answering, and `queue_full` drops follow once the queue reaches `PODIUM_AUDIT_QUEUE_MAX_BYTES`.
-- `podium_audit_dropped_total{destination,reason}`: audit records dropped for the `file`, `stdout`, `http`, or `otlp` destination, with the reason `queue_full`, `rejected`, `shutdown`, or `write_error`. [Delivery](../reference/audit-events#delivery) gives each reason's condition. Both audit series are Vecs, which export no series until a destination first reports a queued or dropped record, so a registry whose list names only a file destination exports neither until a file write fails.
+- `podium_audit_dropped_total{destination,reason}`: audit records dropped for the `file`, `stdout`, `http`, or `otlp` destination, with the reason `queue_full`, `rejected`, `shutdown`, or `write_error`. [Delivery](../reference/audit-events#delivery) gives each reason's condition. Both audit series are Vecs, which export no series until a destination first reports a queued or dropped record. A registry whose list names only a file destination never exports `podium_audit_queue_depth`, and exports `podium_audit_dropped_total` only after a file write fails.
 
 **MCP server:**
 
