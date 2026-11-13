@@ -125,9 +125,11 @@ Test restores quarterly. The runbook procedure:
    signing key restored from the backup.
 2. Restore Postgres from PITR to T-1h.
 3. Sync the production S3 bucket to the fresh one (rclone or aws s3 sync).
-4. Watch the restored registry's log for the scheduled audit-integrity pass.
-   A hash-chain gap logs "audit integrity ALERT" and records an
-   audit.gap_detected event.
+4. When PODIUM_AUDIT_LOG_PATH lists a file destination, watch the restored
+   registry's log for the scheduled audit-integrity pass. A hash-chain gap
+   logs "audit integrity ALERT" and records an audit.gap_detected event.
+   When it lists none, as with the chart's stdout default, confirm that the
+   receiving system's prev_hash check reports no gap.
 5. Run `podium verify <artifact> --registry <restored-url> --provider
    <name>` for a signed artifact and confirm it exits 0.
 6. Spot-check `load_artifact` for a known-good artifact; should match the

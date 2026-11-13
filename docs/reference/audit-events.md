@@ -70,7 +70,7 @@ A record without `caller.client` keeps the hash it had before the member existed
 
 An unset or empty `PODIUM_AUDIT_LOG_PATH` resolves to the file `~/.podium/audit.log` under the home directory of the registry process. An unset `PODIUM_AUDIT_SINK` disables the local stream. `PODIUM_AUDIT_SINK` set to an empty value, or to the token `default`, names the file `~/.podium/audit.log`.
 
-A list names at most one file destination and names no element twice. A file path that contains a comma cannot be listed, because the comma separates elements and the list has no escape syntax. Examples:
+A list names at most one file destination and names no element twice. An empty element refuses startup, and so does a trailing comma, which leaves an empty last element. An element that carries a `scheme://` prefix other than `http://`, `https://`, `otlp+http://`, or `otlp+https://` refuses startup, and so does an element with one of those prefixes that does not parse as a URL. An element that contains `://` is therefore never read as a file path. A file path that contains a comma cannot be listed, because the comma separates elements and the list has no escape syntax. Examples:
 
 ```text
 PODIUM_AUDIT_LOG_PATH=/var/lib/podium/audit.log,otlp+https://collector.acme.com:4318
@@ -212,7 +212,7 @@ The OTLP destination sends OTLP/HTTP protobuf log export requests to the URL wit
 | `body` | A string holding the record's JSON, byte for byte as the file destination writes the line, without the line ending. |
 | Attributes | `podium.audit.schema_version` as an integer value, and `podium.audit.hash`, `podium.audit.prev_hash` when it is non-empty, and `podium.tenant` when the record names a tenant, each as a string value. |
 
-Caller identity stays in the body and is not copied into attributes. A receiver recomputes `hash` from the body. The resource carries `service.name`, which is `podium-registry` for the registry and `podium-mcp` for the MCP server, and `service.instance.id`, a random identifier the process generates when it opens the stream. The instrumentation scope name is `github.com/lennylabs/podium/audit`.
+Caller identity stays in the body and is not copied into attributes. The body is the record's JSON exactly as the file destination writes it, so a verifier can parse it as a file line. The resource carries `service.name`, which is `podium-registry` for the registry and `podium-mcp` for the MCP server, and `service.instance.id`, a random identifier the process generates when it opens the stream. The instrumentation scope name is `github.com/lennylabs/podium/audit`.
 
 The OTLP destination reads no `OTEL_EXPORTER_OTLP_*` variable and runs independently of `PODIUM_TRACING`, so audit export works with tracing off and leaves span export unchanged.
 
