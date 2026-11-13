@@ -1103,6 +1103,44 @@ func TestOpenSignPassDeps_RefusesUnusableAuditList(t *testing.T) {
 	}
 }
 
+// Spec: §8.3 — a store that cannot open after the audit stream opened
+// refuses sign-stored-rows, and the refusal shuts the stream down: no
+// forwarder goroutine of the HTTP destination outlives openSignPassDeps.
+func TestOpenSignPassDeps_StoreFailureShutsDownTheAuditStream(t *testing.T) {
+	f := newBootFixture(t)
+	rcv := auditharness.NewReceiver(t)
+	t.Setenv("PODIUM_SIGN", "none")
+	t.Setenv("PODIUM_AUDIT_LOG_PATH", f.auditPath+","+rcv.URL())
+	blocker := filepath.Join(f.home, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PODIUM_SQLITE_PATH", filepath.Join(blocker, "podium.db"))
+	cfg, err := loadBootConfig()
+	if err != nil {
+		t.Fatalf("loadBootConfig: %v", err)
+	}
+	d, cleanup, err := openSignPassDeps(cfg, signStoredRowsOptions{dryRun: true})
+	if err == nil || !strings.HasPrefix(err.Error(), "open store:") {
+		t.Fatalf("openSignPassDeps err = %v, want an open store error", err)
+	}
+	if cleanup != nil {
+		t.Error("cleanup is non-nil for a refused command")
+	}
+	if !reflect.DeepEqual(d, rehashDeps{}) {
+		t.Errorf("deps = %+v, want the zero value", d)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	leaked := auditGoroutines()
+	for len(leaked) > 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+		leaked = auditGoroutines()
+	}
+	if len(leaked) > 0 {
+		t.Errorf("audit goroutines outlive openSignPassDeps:\n%s", strings.Join(leaked, "\n\n"))
+	}
+}
+
 // Spec: §8.3 — sign-stored-rows flushes its stream before it returns, so
 // every artifact.signed record has reached an HTTP destination that is the
 // only one listed.

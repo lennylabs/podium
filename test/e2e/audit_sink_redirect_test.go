@@ -705,3 +705,23 @@ func TestAuditSink_MCPRefusesUnopenableFile(t *testing.T) {
 		t.Errorf("podium-mcp panicked:\n%s", res.Stderr)
 	}
 }
+
+// Spec: §6.8, §8.3, §13.8 — run refuses an unknown PODIUM_TRACING value
+// before it builds the server: the bridge exits with status 2, names the
+// variable, answers no MCP request, and opens no local audit stream, so the
+// PODIUM_AUDIT_SINK file is never created.
+func TestAuditSink_MCPUnknownTracingModeOpensNoStream(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	res := mcpExec(t, mcpEnv(t, "PODIUM_AUDIT_SINK="+path, "PODIUM_TRACING=carrier-pigeon"), searchCall(1, "q-tracing"))
+	cliWantExit(t, res, 2, "podium-mcp with an unknown PODIUM_TRACING value")
+	if !strings.Contains(res.Stderr, "PODIUM_TRACING") {
+		t.Errorf("stderr does not name PODIUM_TRACING:\n%s", res.Stderr)
+	}
+	if strings.TrimSpace(res.Stdout) != "" {
+		t.Errorf("stdout carries an MCP response:\n%s", res.Stdout)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("audit file %s exists or is unreadable (%v), want it absent", path, err)
+	}
+}

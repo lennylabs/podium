@@ -33,6 +33,52 @@ func TestStartAnchorScheduler_RunsWithLoadedSigner(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 }
 
+// Spec: §8.6 — a periodic anchor that cannot sign records audit.anchor_failed
+// through the stream, and the scheduler goroutine stops at the context's end.
+func TestStartAnchorScheduler_SignFailureRecordsAnchorFailed(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, err := audit.OpenFile(path, audit.OpenOptions{})
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	t.Cleanup(sink.Shutdown)
+	// An empty log has no head to anchor, so one record gives Anchor a head
+	// to sign.
+	if err := sink.Append(t.Context(), audit.Event{Type: audit.EventArtifactLoaded, Caller: "alice"}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	startAnchorScheduler(ctx, &Config{auditAnchorInterval: 3600}, sink, refusingSigner{})
+	for {
+		b, err := os.ReadFile(path)
+		if err == nil && strings.Contains(string(b), `"type":"audit.anchor_failed"`) {
+			if !strings.Contains(string(b), "signing key unavailable") {
+				t.Errorf("audit.anchor_failed does not carry the signing error:\n%s", b)
+			}
+			return
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("no audit.anchor_failed record before the deadline (read err %v):\n%s", err, b)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// refusingSigner is a sign.Provider whose every Sign call fails.
+type refusingSigner struct{}
+
+func (refusingSigner) ID() string { return "refusing" }
+
+func (refusingSigner) Sign(context.Context, string) (string, error) {
+	return "", errors.New("signing key unavailable")
+}
+
+func (refusingSigner) Verify(context.Context, string, string) error {
+	return errors.New("signing key unavailable")
+}
+
 // Spec: §8.4 — a nil stream reaches the scheduler's file check through the
 // nil-receiver-safe File, so retention is disabled without a panic.
 func TestStartRetentionScheduler_NilSink(t *testing.T) {

@@ -101,6 +101,8 @@ func (f *FileSink) appendChained(e Event) (Event, []byte, error) {
 
 	e = chainEvent(e, f.lastHash)
 	line, err := encodeLine(e)
+	// jsonEvent holds only strings, ints, bools, and string slices and maps,
+	// so encoding cannot fail; the error is kept rather than discarded.
 	if err != nil {
 		return Event{}, nil, err
 	}
@@ -109,6 +111,9 @@ func (f *FileSink) appendChained(e Event) (Event, []byte, error) {
 		return Event{}, nil, err
 	}
 	defer func() { _ = file.Close() }()
+	// A write to a file that opened for appending fails only on a device
+	// error or a full disk, which a test cannot induce portably. The failed
+	// open above takes the same return, and the tests pin that path.
 	if _, err := file.Write(append(line[:len(line):len(line)], '\n')); err != nil {
 		return Event{}, nil, err
 	}
