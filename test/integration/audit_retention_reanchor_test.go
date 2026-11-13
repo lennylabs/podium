@@ -24,9 +24,9 @@ func TestAuditRetention_ReanchorsNewHeadAfterDrop(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, err := audit.NewFileSink(path)
+	sink, err := audit.OpenFile(path, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -60,16 +60,16 @@ func TestAuditRetention_ReanchorsNewHeadAfterDrop(t *testing.T) {
 			t.Errorf("re-anchor: %v", err)
 		}
 	}
-	dropped, err := audit.Enforce(ctx, sink, now,
+	res, err := audit.Enforce(ctx, sink, now,
 		[]audit.Policy{{Type: audit.EventArtifactLoaded, MaxAge: 365 * 24 * time.Hour}}, nil)
 	if err != nil {
 		t.Fatalf("Enforce: %v", err)
 	}
-	if dropped > 0 {
+	if res.Dropped > 0 {
 		reAnchor()
 	}
 	if !reAnchored {
-		t.Fatalf("expected a re-anchor after dropping %d event(s)", dropped)
+		t.Fatalf("expected a re-anchor after dropping %d event(s)", res.Dropped)
 	}
 
 	body, err := os.ReadFile(path)

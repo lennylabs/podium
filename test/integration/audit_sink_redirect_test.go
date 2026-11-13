@@ -19,11 +19,11 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §8.3, §8.5 — when the registry sink is redirected to an external
-// endpoint, the §8.5 erase endpoint still purges the user's layers and
-// forwards the lifecycle events to the endpoint. The on-disk redaction pass
-// is skipped because there is no local log to rewrite; the receiving
-// aggregator owns redaction of the shipped stream. The endpoint also receives
+// Spec: §8.3, §8.5 — when the registry stream has only an HTTP destination,
+// the §8.5 erase endpoint still purges the user's layers and forwards the
+// lifecycle events to the receiver as NDJSON batches. The on-disk redaction
+// pass is skipped because there is no local file to rewrite; the receiving
+// system owns redaction of the records it holds. The receiver also gets
 // user.erased labeled with the tenant, naming the admin as caller, with a
 // transformed count of 0.
 func TestErase_EndpointRedirectPurgesAndForwards(t *testing.T) {
@@ -41,10 +41,11 @@ func TestErase_EndpointRedirectPurgesAndForwards(t *testing.T) {
 	}))
 	t.Cleanup(recorder.Close)
 
-	endpoint, err := audit.NewEndpointSink(recorder.URL + "/sink")
+	stream, err := audit.Open(ctx, recorder.URL+"/sink", audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewEndpointSink: %v", err)
+		t.Fatalf("audit.Open: %v", err)
 	}
+	t.Cleanup(stream.Shutdown)
 
 	st := store.NewMemory()
 	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
@@ -52,8 +53,8 @@ func TestErase_EndpointRedirectPurgesAndForwards(t *testing.T) {
 	}
 	admin := layer.Identity{Sub: "carol@acme.com", IsAuthenticated: true}
 	ep := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
-		WithAudit(endpoint).
-		WithEraseSink(nil). // redirected to an endpoint: no local file to rewrite
+		WithAudit(stream).
+		WithEraseSink(nil). // no file destination: no local file to rewrite
 		WithIdentityResolver(func(*http.Request) (layer.Identity, error) { return admin, nil }).
 		WithAdminAuth(func(*http.Request) error { return nil })
 	mux := http.NewServeMux()
@@ -97,43 +98,48 @@ func TestErase_EndpointRedirectPurgesAndForwards(t *testing.T) {
 		t.Errorf("layer still visible after erase")
 	}
 
-	// The lifecycle event was forwarded to the endpoint rather than written
-	// to a file.
-	deadline := time.Now().Add(3 * time.Second)
-	found := false
-	for time.Now().Before(deadline) && !found {
-		mu.Lock()
-		for _, b := range received {
-			if strings.Contains(b, "layer.user_registered") && strings.Contains(b, "erase") {
-				found = true
-				break
-			}
-		}
-		mu.Unlock()
-		if !found {
-			time.Sleep(50 * time.Millisecond)
-		}
-	}
-	if !found {
-		mu.Lock()
-		got := strings.Join(received, "\n")
-		mu.Unlock()
-		t.Errorf("endpoint did not receive a forwarded layer lifecycle event; got:\n%s", got)
+	// Close flushes every queued batch, so the receiver holds every record
+	// once it returns.
+	if err := stream.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 	mu.Lock()
-	forwarded := slices.Clone(received)
+	forwarded := ndjsonLines(slices.Clone(received))
 	mu.Unlock()
+	// The lifecycle event was forwarded to the receiver rather than written
+	// to a file.
+	found := slices.ContainsFunc(forwarded, func(line string) bool {
+		return strings.Contains(line, "layer.user_registered") && strings.Contains(line, "erase")
+	})
+	if !found {
+		t.Errorf("receiver did not get a forwarded layer lifecycle event; got:\n%s", strings.Join(forwarded, "\n"))
+	}
 	assertForwardedUserErased(t, forwarded, "t", "carol@acme.com")
 }
 
-// assertForwardedUserErased finds the user.erased record among the bodies the
-// endpoint received and checks its tenant, its caller, and its transformed
-// count of 0, since a redirected registry rewrites no local record.
+// ndjsonLines splits each NDJSON request body into its non-empty lines, one
+// record per line.
+func ndjsonLines(bodies []string) []string {
+	var lines []string
+	for _, b := range bodies {
+		for _, line := range strings.Split(b, "\n") {
+			if line != "" {
+				lines = append(lines, line)
+			}
+		}
+	}
+	return lines
+}
+
+// assertForwardedUserErased finds the user.erased record among the records
+// the receiver got and checks its tenant, its caller, and its transformed
+// count of 0, since a registry with no file destination rewrites no local
+// record.
 //
 // Spec: §8.5
-func assertForwardedUserErased(t *testing.T, bodies []string, tenant, admin string) {
+func assertForwardedUserErased(t *testing.T, records []string, tenant, admin string) {
 	t.Helper()
-	for _, b := range bodies {
+	for _, b := range records {
 		var ev struct {
 			Type   string `json:"type"`
 			Tenant string `json:"tenant"`
@@ -150,5 +156,5 @@ func assertForwardedUserErased(t *testing.T, bodies []string, tenant, admin stri
 		}
 		return
 	}
-	t.Errorf("endpoint did not receive user.erased; got:\n%s", strings.Join(bodies, "\n"))
+	t.Errorf("receiver did not get user.erased; got:\n%s", strings.Join(records, "\n"))
 }

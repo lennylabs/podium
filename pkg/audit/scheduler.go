@@ -7,7 +7,7 @@ import (
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
-// Scheduler runs Anchor periodically against the supplied sink. It
+// Scheduler runs Anchor periodically against the supplied stream. It
 // implements the periodic §8.6 local chain-head anchor that
 // PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS enables.
 //
@@ -16,7 +16,9 @@ import (
 // retries. Operators monitor the audit log for `audit.anchored` events
 // and the `audit.anchor_failed` events the scheduler emits on failure.
 type Scheduler struct {
-	Sink     *FileSink
+	// Sink is the stream whose file destination is anchored. A nil stream
+	// or one with no file destination makes Run a no-op.
+	Sink     *Stream
 	Signer   sign.Provider
 	Interval time.Duration
 	// Now overrides the clock for tests; production leaves nil.
@@ -31,7 +33,7 @@ type Scheduler struct {
 // One immediate Anchor fires before the first sleep so an anchor of
 // the current head exists promptly after startup.
 func (s *Scheduler) Run(ctx context.Context) error {
-	if s.Sink == nil || s.Signer == nil {
+	if s.Sink.File() == nil || s.Signer == nil {
 		return nil
 	}
 	interval := s.Interval
@@ -56,8 +58,8 @@ func (s *Scheduler) Run(ctx context.Context) error {
 }
 
 // notifyFailure records an audit.anchor_failed event (best-effort) so the
-// failure the operator is told to monitor lands in the audit log and any
-// SIEM mirror, then invokes the OnFailure seam. A sink write error here
+// failure the operator is told to monitor lands in the file and every other
+// destination of the stream, then invokes the OnFailure seam. An append error here
 // must not mask the original anchor error, so the append result is
 // ignored deliberately. spec: §8.6.
 func (s *Scheduler) notifyFailure(ctx context.Context, err error) {
@@ -78,11 +80,14 @@ func (s *Scheduler) notifyFailure(ctx context.Context, err error) {
 // Interval until ctx is canceled.
 //
 // On a detected gap (Verify returns ErrChainBroken) the scheduler records
-// an audit.gap_detected event best-effort, so SIEM mirroring (the §8.6
-// operational backstop) surfaces the break even when OnGap is unconfigured,
-// then invokes OnGap for in-process alerting. spec: §8.6.
+// an audit.gap_detected event best-effort through the stream, so every
+// destination of the stream (the §8.6 operational backstop) surfaces the
+// break even when OnGap is unconfigured, then invokes OnGap for in-process
+// alerting. spec: §8.6.
 type VerifyScheduler struct {
-	Sink     *FileSink
+	// Sink is the stream whose file destination is verified. A nil stream
+	// or one with no file destination makes Run a no-op.
+	Sink     *Stream
 	Interval time.Duration
 	// OnGap is called when Verify detects a chain gap. The scheduler
 	// records the gap in the audit log regardless; OnGap is the
@@ -92,7 +97,7 @@ type VerifyScheduler struct {
 
 // Run blocks until ctx is canceled, verifying the chain every Interval.
 func (s *VerifyScheduler) Run(ctx context.Context) error {
-	if s.Sink == nil {
+	if s.Sink.File() == nil {
 		return nil
 	}
 	interval := s.Interval

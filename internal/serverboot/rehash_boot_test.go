@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -397,18 +399,36 @@ func TestRun_AnchorKeyRefusalPrecedesTheRewrite(t *testing.T) {
 	}
 }
 
-// Spec: §8.3, §13.12 — with anchoring disabled, a file audit sink that cannot
-// be opened is logged and the registry starts without one.
-func TestRun_UnopenableSinkWithAnchoringOffStarts(t *testing.T) {
-	f := newBootFixture(t)
-	t.Setenv("PODIUM_AUDIT_LOG_PATH", f.home)
-	t.Setenv("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", "0")
-	logs, err := f.boot(t)
-	if err != nil {
-		t.Fatalf("run = %v, want a start", err)
-	}
-	if !strings.Contains(logs, "warning: audit sink disabled: audit: open "+f.home) {
-		t.Errorf("logs do not report the disabled sink:\n%s", logs)
+// Spec: §8.3, §13.12 — a file destination that cannot be opened refuses the
+// start with config.audit_sink_unavailable whatever the anchoring setting,
+// so no registry runs with no audit stream. With anchoring on the refusal
+// comes before the anchor key is read, so no key is generated.
+func TestRun_UnopenableSinkRefusesWhateverAnchoring(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		interval string
+	}{
+		{name: "anchoring off", interval: "0"},
+		{name: "anchoring on", interval: "60"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newBootFixture(t)
+			anchorKey := filepath.Join(f.home, "anchor", "audit.key")
+			t.Setenv("PODIUM_AUDIT_LOG_PATH", f.home)
+			t.Setenv("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", tc.interval)
+			t.Setenv("PODIUM_AUDIT_SIGNING_KEY_PATH", anchorKey)
+			logs, err := f.bootWith(t, func() { t.Error("the registry served with an unopenable audit file") })
+			if err == nil || !strings.HasPrefix(err.Error(), "config.audit_sink_unavailable:") ||
+				!strings.Contains(err.Error(), "PODIUM_AUDIT_LOG_PATH") || !strings.Contains(err.Error(), f.home) {
+				t.Fatalf("run = %v, want a config.audit_sink_unavailable refusal naming PODIUM_AUDIT_LOG_PATH and %s", err, f.home)
+			}
+			if strings.Contains(logs, "warning: audit sink disabled") {
+				t.Errorf("logs report a disabled sink rather than a refusal:\n%s", logs)
+			}
+			if _, statErr := os.Stat(anchorKey); !errors.Is(statErr, fs.ErrNotExist) {
+				t.Errorf("anchor key %s exists or is unreadable (%v), want it absent", anchorKey, statErr)
+			}
+		})
 	}
 }
 

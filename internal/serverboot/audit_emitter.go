@@ -8,9 +8,9 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/server"
 )
 
-// auditEmitterFor adapts the §8.3 registry sink (a file sink, or an
-// EndpointSink when redirected to a SIEM) to the core.AuditEmitter so
-// every meta-tool call surfaces in the audit log. It carries the §8.1
+// auditEmitterFor adapts the §8.3 registry stream to the core.AuditEmitter so
+// every meta-tool call surfaces in the audit log and every other destination
+// of the stream. It carries the §8.1
 // trace id and structured caller attributes (email, groups, public-mode
 // network, and the public_mode flag) from the per-request audit metadata
 // the server's identity middleware attached to the context, together with the

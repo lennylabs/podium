@@ -1,9 +1,7 @@
 package e2e
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,20 +18,23 @@ import (
 // Spec: §8.3 — "Both the registry and local sinks can be
 // redirected to external SIEM / log aggregation independently." When
 // PODIUM_AUDIT_LOG_PATH is an http(s) URL the standalone registry forwards
-// each catalogue event (here domain.loaded) to that endpoint as JSON rather
-// than writing a local file. The endpoint is an in-test recorder.
+// each catalogue event (here domain.loaded) to that receiver as NDJSON
+// batches rather than writing a local file. The receiver is an in-test
+// recorder.
 //
-// Spec: §8.1 — the read carries X-Podium-Client, so the forwarded event is one
-// JSON object whose caller.client records the client the request named.
+// Spec: §8.1 — the read carries X-Podium-Client, so the forwarded
+// domain.loaded record's caller.client records the client the request named.
 func TestAuditSink_RegistryEndpointRedirect(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
 	var received []string
+	var contentTypes []string
 	recorder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		mu.Lock()
 		received = append(received, string(body))
+		contentTypes = append(contentTypes, r.Header.Get("Content-Type"))
 		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -46,35 +47,37 @@ func TestAuditSink_RegistryEndpointRedirect(t *testing.T) {
 		"PODIUM_AUDIT_LOG_PATH=" + recorder.URL + "/sink",
 	}, "serve", "--standalone", "--layer-path", reg)
 
-	// A read emits domain.loaded, which the registry forwards to the endpoint.
+	// A read emits domain.loaded, which the registry forwards to the receiver.
 	getWithClient(t, srv.BaseURL+"/v1/load_domain?path=finance", "kind=cli&name=podium")
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	forwarded := ""
 	for time.Now().Before(deadline) && forwarded == "" {
 		mu.Lock()
-		for _, b := range received {
-			if strings.Contains(b, "domain.loaded") {
-				forwarded = b
-				break
-			}
-		}
+		forwarded = findRecordLine(received, "domain.loaded")
 		mu.Unlock()
 		if forwarded == "" {
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
+	mu.Lock()
+	bodies := strings.Join(received, "")
+	types := append([]string(nil), contentTypes...)
+	mu.Unlock()
 	if forwarded == "" {
-		mu.Lock()
-		got := strings.Join(received, "\n")
-		mu.Unlock()
-		t.Fatalf("SIEM endpoint did not receive a forwarded domain.loaded event; got:\n%s", got)
+		t.Fatalf("receiver did not get a forwarded domain.loaded record; got:\n%s", bodies)
+	}
+	for i, ct := range types {
+		if ct != "application/x-ndjson" {
+			t.Errorf("request %d Content-Type = %q, want application/x-ndjson", i, ct)
+		}
 	}
 
-	// The endpoint sink sends one event per POST, and its caller.client
-	// records the kind the request named.
-	if kind := singleObjectClientKind(t, forwarded); kind != "cli" {
-		t.Errorf("forwarded domain.loaded caller.client.kind = %q, want cli\nbody: %s", kind, forwarded)
+	// A batch can carry the standalone boot's records beside domain.loaded,
+	// so the record is found by line, and its caller.client records the kind
+	// the request named.
+	if kind := lineClientKind(t, forwarded); kind != "cli" {
+		t.Errorf("forwarded domain.loaded caller.client.kind = %q, want cli\nline: %s", kind, forwarded)
 	}
 
 	// The redirect replaces the file sink: no local audit.log is written at
@@ -82,6 +85,22 @@ func TestAuditSink_RegistryEndpointRedirect(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".podium", "audit.log")); err == nil {
 		t.Errorf("redirected registry wrote a local audit.log under %s/.podium", home)
 	}
+}
+
+// findRecordLine splits each NDJSON body on newlines and returns the first
+// record line whose type is typ, or "".
+func findRecordLine(bodies []string, typ string) string {
+	for _, b := range bodies {
+		for _, line := range strings.Split(b, "\n") {
+			var ev struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal([]byte(line), &ev) == nil && ev.Type == typ {
+				return line
+			}
+		}
+	}
+	return ""
 }
 
 // getWithClient sends a GET to url carrying the given X-Podium-Client value
@@ -104,10 +123,9 @@ func getWithClient(t *testing.T, url, client string) {
 	}
 }
 
-// singleObjectClientKind decodes body as exactly one JSON object and returns
-// its caller.client.kind. A second JSON value after the object fails the
-// test.
-func singleObjectClientKind(t *testing.T, body string) string {
+// lineClientKind decodes one NDJSON record line and returns its
+// caller.client.kind.
+func lineClientKind(t *testing.T, line string) string {
 	t.Helper()
 	var ev struct {
 		Caller struct {
@@ -116,13 +134,8 @@ func singleObjectClientKind(t *testing.T, body string) string {
 			} `json:"client"`
 		} `json:"caller"`
 	}
-	dec := json.NewDecoder(bytes.NewReader([]byte(body)))
-	if err := dec.Decode(&ev); err != nil {
-		t.Fatalf("decode forwarded event: %v\nbody: %s", err, body)
-	}
-	var extra json.RawMessage
-	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		t.Fatalf("forwarded body holds more than one JSON value (err=%v)\nbody: %s", err, body)
+	if err := json.Unmarshal([]byte(line), &ev); err != nil {
+		t.Fatalf("decode forwarded record: %v\nline: %s", err, line)
 	}
 	return ev.Caller.Client.Kind
 }

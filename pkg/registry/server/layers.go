@@ -83,8 +83,8 @@ type LayerEndpoint struct {
 	maxUserLayers int
 	// auditSink records §8.1 layer.config_changed (admin-defined) and
 	// layer.user_registered (personal) events on register, unregister, and
-	// reorder. It is the §8.3 registry sink (a file sink or an EndpointSink
-	// when redirected to a SIEM). Nil is a no-op.
+	// reorder. It is the §8.3 registry stream, whose destination list can
+	// name a file, HTTP and OTLP receivers, and stdout. Nil is a no-op.
 	auditSink audit.Sink
 	// publishEvent fans a §7.5.4 layer.config_changed onto the registry event
 	// bus so a `podium sync --watch` subscriber re-resolves its profile. It
@@ -92,13 +92,13 @@ type LayerEndpoint struct {
 	// operator rather than waking a client. Nil is a no-op, which is the
 	// deployment that wires no event bus.
 	publishEvent ingest.EventEmitter
-	// auditFile is the file-backed form of the §8.3 registry sink, set only
-	// when the sink writes a local log. The §8.5 erasure pass rewrites the
-	// on-disk hash chain in place (audit.EraseUser), so it needs the concrete
-	// file sink; it is nil when the registry is redirected to an external
-	// endpoint, where the receiving aggregator owns erasure of the shipped
-	// stream. spec: §8.3, §8.5.
-	auditFile *audit.FileSink
+	// eraseStream is the §8.3 registry stream, set only when its list names
+	// a file destination. The §8.5 erasure pass rewrites that file's hash
+	// chain in place (audit.EraseUser) and forwards the closing user.erased
+	// to the stream's other destinations. It is nil for a stream with no
+	// file destination, where each receiving system owns erasure of the
+	// records it holds. spec: §8.3, §8.5.
+	eraseStream *audit.Stream
 	// reingestRunner runs the §7.3.1 ingest pipeline for a resolved layer
 	// (the manual reingest and inbound-webhook triggers). serverboot wires
 	// it with the source-provider resolver, linter, event publisher, audit
@@ -501,7 +501,7 @@ func (e *LayerEndpoint) WithMaxUserLayers(n int) *LayerEndpoint {
 
 // WithAudit installs the §8.3 audit sink the endpoint records layer
 // lifecycle events to (§8.1 layer.config_changed / layer.user_registered).
-// The sink may be a file sink or an EndpointSink (SIEM redirect).
+// The sink is the registry's audit stream.
 func (e *LayerEndpoint) WithAudit(sink audit.Sink) *LayerEndpoint {
 	e.auditSink = sink
 	return e
@@ -519,21 +519,21 @@ func (e *LayerEndpoint) WithEventPublisher(fn ingest.EventEmitter) *LayerEndpoin
 	return e
 }
 
-// WithEraseSink installs the file-backed sink the §8.5 erasure flow
-// rewrites in place. Pass the same file sink given to WithAudit when the
-// registry writes a local log; pass nil when redirected to an external
-// endpoint, in which case the erase endpoint purges layers, performs no
-// local-log redaction (the aggregator owns the shipped stream), and appends
+// WithEraseSink installs the stream whose file destination the §8.5
+// erasure flow rewrites in place. Pass the registry stream given to
+// WithAudit when its list names a file destination; pass nil for a stream
+// with no file destination, in which case the erase endpoint purges layers,
+// rewrites no file (each receiver owns the records it holds), and appends
 // user.erased to the WithAudit sink.
-func (e *LayerEndpoint) WithEraseSink(file *audit.FileSink) *LayerEndpoint {
-	e.auditFile = file
+func (e *LayerEndpoint) WithEraseSink(stream *audit.Stream) *LayerEndpoint {
+	e.eraseStream = stream
 	return e
 }
 
 // WithAfterErase installs the §8.6 re-anchor seam: fn runs with the request
 // context after an erasure rewrites the file-backed audit chain, so the new
-// chain head is anchored immediately. It does not run when the registry is
-// redirected to an external endpoint, because no local chain is rewritten.
+// chain head is anchored immediately. It does not run for a registry stream
+// with no file destination, because no local chain is rewritten.
 //
 // Spec: §8.6
 func (e *LayerEndpoint) WithAfterErase(fn func(context.Context)) *LayerEndpoint {
@@ -1327,28 +1327,32 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 }
 
 // eraseAudit applies the §8.5 audit half of an erasure and returns the number
-// of records it redacted. With a file sink it rewrites the chain over the
-// records in the request's erase scope, appends user.erased there, and runs
-// the §8.6 re-anchor hook. With an external endpoint sink there is no on-disk
-// chain to rewrite and the receiving system owns redaction of the shipped
-// stream, so it appends only the tenant-labeled user.erased. A failed append
-// is reported rather than dropped, because §8.5 requires the erasure itself
-// to be logged. On both branches user.erased records the request's
-// caller.client, while the audit.anchored the re-anchor hook appends records
-// none, because it is an event about the registry as a whole.
+// of records it redacted. With a file destination it rewrites the chain over
+// the records in the request's erase scope, closes the rewrite with
+// user.erased, which reaches every other destination of the stream, and runs
+// the §8.6 re-anchor hook. With no file destination the registry rewrites no
+// file and each receiving system owns redaction of the records it holds, so
+// it appends only the tenant-labeled user.erased through the WithAudit sink.
+// The stream's Append returns an error only when the stream is sealed;
+// receiver and stdout failures are counted by the stream rather than
+// returned. An Append error is still answered 500 registry.unavailable,
+// because §8.5 requires the erasure itself to be logged (§8.3). On both
+// branches user.erased records the request's caller.client, while the
+// audit.anchored the re-anchor hook appends records none, because it is an
+// event about the registry as a whole.
 //
 // Spec: §8.1, §8.5, §8.6
 func (e *LayerEndpoint) eraseAudit(r *http.Request, body eraseRequest, tenantID string) (int, error) {
 	admin := callerIdentityString(e.caller(r))
 	client := e.requestClient(r)
-	if e.auditFile != nil {
+	if e.eraseStream != nil {
 		// A multi-tenant registry keeps one audit file for every tenant, so
 		// the scope excludes unlabeled records there: no tenant owns them.
 		// The client travels as its own argument rather than on the scope,
 		// because EraseUser refuses a cross-tenant scope only by comparing
 		// it to the zero EraseScope.
 		scope := audit.EraseScope{Tenant: tenantID, Unlabeled: !e.multiTenant}
-		redacted, err := audit.EraseUser(r.Context(), e.auditFile, body.UserID, body.Salt, admin, client, scope)
+		redacted, err := audit.EraseUser(r.Context(), e.eraseStream, body.UserID, body.Salt, admin, client, scope)
 		if err != nil {
 			return 0, err
 		}

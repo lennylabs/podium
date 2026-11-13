@@ -360,6 +360,91 @@ func (s *Stream) handOff(r record) {
 	}
 }
 
+// errNoFileDestination reports a rewrite of a stream whose list names no
+// file. Retention, erasure, and anchoring act on the file destination only.
+var errNoFileDestination = errors.New("audit: stream has no file destination")
+
+// errNoClosingEvent reports a rewrite pass that changed the file but named
+// no closing event. Every rewrite closes with an event (§8.6), so such a
+// pass is refused before the file is touched.
+var errNoClosingEvent = errors.New("audit: rewrite changed the log with no closing event")
+
+// rewriteFunc transforms the file destination's records for one rewrite. It
+// returns the records to keep, the closing event that describes the rewrite,
+// and whether the pass changed anything; a false changed leaves the file
+// untouched and ignores out and closing. A pass that reports a change must
+// return a closing event.
+type rewriteFunc func(events []Event) (out []Event, closing *Event, changed bool, err error)
+
+// rewrite reads every record of the file destination, passes them to fn,
+// and rewrites the file under one fresh chain closed by fn's closing event.
+// It holds s.mu and then file.mu, the order Append uses, so no Append
+// interleaves with the read and the rename. Both are in-process locks; a
+// rewrite adds no coordination with another process writing the file
+// (§8.3 Loss accounting).
+//
+// A pass that changes nothing returns before rewriteWithChain: re-chaining
+// an unchanged file would change the hashes and head of a multi-writer file
+// with no closing event (§8.6). When the rewrite succeeds, the closing
+// record as rewriteWithChain chained it goes to every other destination, so
+// its hash and prev_hash equal the file's last line. A failed rewrite leaves
+// the file's chain and head in place and forwards nothing, because the
+// closing event describes a rewrite that did not happen. A stdout failure
+// on the closing record is counted and not returned, because the file
+// already holds the rewrite.
+//
+// Spec: §8.4, §8.5, §8.6
+func (s *Stream) rewrite(_ context.Context, fn rewriteFunc) error {
+	file := s.File()
+	if file == nil {
+		return errNoFileDestination
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sealed {
+		return ErrSealed
+	}
+	closing, err := rewriteFile(file, fn)
+	if err != nil || closing == nil {
+		return err
+	}
+	s.handOff(*closing)
+	return nil
+}
+
+// rewriteFile runs one rewrite pass over file under file.mu and returns the
+// closing record to forward, or nil when the pass changed nothing. The
+// caller holds s.mu.
+func rewriteFile(file *FileSink, fn rewriteFunc) (*record, error) {
+	file.mu.Lock()
+	defer file.mu.Unlock()
+	events, err := readAllEvents(file.path)
+	if err != nil {
+		return nil, err
+	}
+	out, closing, changed, err := fn(events)
+	if err != nil || !changed {
+		return nil, err
+	}
+	if closing == nil {
+		return nil, errNoClosingEvent
+	}
+	closing.SchemaVersion = SchemaVersion
+	out = append(out, *closing)
+	if err := rewriteWithChain(file.path, out); err != nil {
+		return nil, err
+	}
+	last := out[len(out)-1]
+	file.lastHash = last.Hash
+	line, err := encodeLine(last)
+	// rewriteWithChain has already encoded this event, so encoding it again
+	// cannot fail; the error is kept rather than discarded.
+	if err != nil {
+		return nil, err
+	}
+	return &record{event: last, line: line}, nil
+}
+
 // Verify checks the file destination's chain (§8.6), and returns nil when
 // the list names no file.
 //

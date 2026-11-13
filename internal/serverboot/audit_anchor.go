@@ -10,78 +10,65 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
-// openAuditSink builds the registry's §8.3 audit sink from
-// PODIUM_AUDIT_LOG_PATH. A filesystem path (or the empty default,
-// ~/.podium/audit.log) yields a hash-chained file sink. An http(s) value
-// yields an EndpointSink that forwards catalogue events to an external
-// SIEM / log aggregator, mirroring the local sink's PODIUM_AUDIT_SINK
-// redirect so "both the registry and local sinks can be redirected to
-// external SIEM / log aggregation independently" (§8.3).
+// openAuditStream opens the registry's §8.3 audit stream over the
+// PODIUM_AUDIT_LOG_PATH destination list, with the §13.12 transport and
+// queue settings read from the environment when it runs. Every error wraps
+// audit.ErrConfig, and run refuses it with config.audit_sink_unavailable
+// whatever the anchoring setting (§13.12).
 //
-// It returns the emit sink (the audit.Sink every event flows through) plus
-// the *FileSink, which is non-nil only for the file case. The §8.6
-// anchor/verify and §8.4 retention schedulers, and the §8.5 erasure pass,
-// walk and rewrite the on-disk chain, so they run only against the file
-// sink; with an endpoint, the receiving aggregator owns durability,
-// integrity, and erasure of the shipped stream.
+// The stream's senders run on context.Background rather than the serve
+// context: the shutdown signal cancels the serve context before the HTTP
+// drain starts, and the senders keep delivering the records drained requests
+// chain until Stream.Shutdown closes them.
 //
-// The error is non-nil only for a file-path value that cannot be opened, and
-// the caller decides between refusing the start (anchoring on) and warning
-// (anchoring off). An endpoint that cannot be constructed is logged here and
-// returns a nil error, because an http(s) sink never refuses a start.
-// Spec: §8.3, §8.6, §13.12.
-func openAuditSink(cfg *Config) (audit.Sink, *audit.FileSink, error) {
-	if isAuditEndpoint(cfg.auditLogPath) {
-		sink, err := audit.NewEndpointSink(cfg.auditLogPath)
-		if err != nil {
-			log.Printf("warning: audit sink disabled (endpoint): %v", err)
-			return nil, nil, nil
-		}
-		return sink, nil, nil
-	}
-	logPath, err := resolveAuditPath(cfg.auditLogPath)
+// Spec: §8.3, §13.8, §13.12
+func openAuditStream(cfg *Config, obs audit.Observer) (*audit.Stream, error) {
+	queueMax, err := audit.ParseQueueMaxBytes(os.Getenv("PODIUM_AUDIT_QUEUE_MAX_BYTES"))
 	if err != nil {
-		return nil, nil, fmt.Errorf("audit: resolve default log path ~/.podium/audit.log: %w", err)
+		return nil, err
 	}
-	sink, err := audit.NewFileSink(logPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("audit: open %s: %w", logPath, err)
-	}
-	return sink, sink, nil
+	return audit.Open(context.Background(), cfg.auditLogPath, audit.OpenOptions{
+		Service:       "podium-registry",
+		TracingStdout: os.Getenv("PODIUM_TRACING") == "stdout",
+		HeadersFile:   os.Getenv("PODIUM_AUDIT_HEADERS_FILE"),
+		CAFile:        os.Getenv("PODIUM_AUDIT_TLS_CA_FILE"),
+		CertFile:      os.Getenv("PODIUM_AUDIT_TLS_CERT_FILE"),
+		KeyFile:       os.Getenv("PODIUM_AUDIT_TLS_KEY_FILE"),
+		QueueMaxBytes: queueMax,
+		Observer:      obs,
+	})
 }
 
-// isAuditEndpoint reports whether a PODIUM_AUDIT_LOG_PATH value selects the
-// external-endpoint sink rather than a local file path. The MCP local sink
-// applies the same http(s) test to PODIUM_AUDIT_SINK. spec: §8.3.
-func isAuditEndpoint(v string) bool {
-	return strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://")
+// auditSinkUnavailable builds the config.audit_sink_unavailable refusal of
+// an audit configuration openAuditStream cannot use. The audit.Open text
+// that follows the code names the variable at fault.
+//
+// Spec: §6.10, §13.12
+func auditSinkUnavailable(err error) error {
+	return fmt.Errorf("config.audit_sink_unavailable: %w", err)
 }
 
 // loadAnchorSigner loads and checks the §8.6 audit anchor key ahead of the
 // §13.4 first-start rewrite and the bootstrap ingest, so a start it refuses
 // changes no stored row. It returns the key and whether anchoring runs.
 //
-// With the interval at 0 nothing is read. With anchoring on, an unopenable
-// file sink refuses before the key is read, so a refused start generates no
-// anchor key. An http(s) sink leaves no chain to anchor and only warns. With
-// registry signing on, an anchor key that the registry key file also carries
-// refuses, because the anchor signature carries no purpose label.
+// With the interval at 0 nothing is read. run refuses an unusable audit
+// configuration before this call, so the stream it receives opened. A
+// stream with no file destination leaves no chain to anchor and only warns.
+// With registry signing on, an anchor key that the registry key file also
+// carries refuses, because the anchor signature carries no purpose label.
 // Spec: §8.6, §13.12.
-func loadAnchorSigner(cfg *Config, auditFile *audit.FileSink, sinkErr error, registryKey sign.RegistryManagedKey, signingOn bool) (sign.RegistryManagedKey, bool, error) {
+func loadAnchorSigner(cfg *Config, stream *audit.Stream, registryKey sign.RegistryManagedKey, signingOn bool) (sign.RegistryManagedKey, bool, error) {
 	if cfg.auditAnchorInterval <= 0 {
 		return sign.RegistryManagedKey{}, false, nil
 	}
-	if sinkErr != nil {
-		return sign.RegistryManagedKey{}, false, fmt.Errorf("config.audit_sink_unavailable: PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS is %d, and the audit log file named by PODIUM_AUDIT_LOG_PATH cannot be opened, so there is no chain to anchor (§8.6, §13.12): %w", cfg.auditAnchorInterval, sinkErr)
-	}
-	if auditFile == nil {
+	if stream.File() == nil {
 		log.Printf("warning: audit anchor disabled (no sink)")
 		return sign.RegistryManagedKey{}, false, nil
 	}
@@ -148,9 +135,9 @@ func sharedKeyRole(pub ed25519.PublicKey, registryKey sign.RegistryManagedKey) s
 // with the anchor key loadAnchorSigner loaded and checked. The scheduler
 // runs in its own goroutine, never blocks startup, and records a failed
 // periodic attempt as audit.anchor_failed.
-func startAnchorScheduler(ctx context.Context, cfg *Config, sink *audit.FileSink, signer sign.Provider) {
+func startAnchorScheduler(ctx context.Context, cfg *Config, stream *audit.Stream, signer sign.Provider) {
 	sched := &audit.Scheduler{
-		Sink:     sink,
+		Sink:     stream,
 		Signer:   signer,
 		Interval: time.Duration(cfg.auditAnchorInterval) * time.Second,
 		OnFailure: func(err error) {
@@ -174,9 +161,9 @@ func startAnchorScheduler(ctx context.Context, cfg *Config, sink *audit.FileSink
 // anchors the head.
 //
 // Spec: §8.6
-func newReAnchor(sink *audit.FileSink, signer sign.Provider) func(context.Context) {
+func newReAnchor(stream *audit.Stream, signer sign.Provider) func(context.Context) {
 	return func(ctx context.Context) {
-		if _, err := audit.Anchor(ctx, sink, signer); err != nil {
+		if _, err := audit.Anchor(ctx, stream, signer); err != nil {
 			log.Printf("audit re-anchor after chain rewrite failed: %v", err)
 		}
 	}
@@ -188,15 +175,17 @@ func newReAnchor(sink *audit.FileSink, signer sign.Provider) func(context.Contex
 // an alert ("Detection of gaps is automated and alerted"). The
 // scheduler runs in its own goroutine and never blocks startup.
 //
-// Nil sink disables verification. The verification pass needs no signer,
-// so it runs independently of whether anchoring is enabled.
-func startVerifyScheduler(ctx context.Context, cfg *Config, sink *audit.FileSink) {
-	if sink == nil {
+// A stream with no file destination, or a nil stream, disables
+// verification, because there is no local chain to walk. The verification
+// pass needs no signer, so it runs independently of whether anchoring is
+// enabled.
+func startVerifyScheduler(ctx context.Context, cfg *Config, stream *audit.Stream) {
+	if stream.File() == nil {
 		log.Printf("warning: audit verify disabled (no sink)")
 		return
 	}
 	sched := &audit.VerifyScheduler{
-		Sink:     sink,
+		Sink:     stream,
 		Interval: time.Duration(cfg.auditVerifyInterval) * time.Second,
 		OnGap: func(err error) {
 			log.Printf("audit integrity ALERT: hash-chain gap detected: %v", err)
@@ -208,19 +197,6 @@ func startVerifyScheduler(ctx context.Context, cfg *Config, sink *audit.FileSink
 		}
 	}()
 	log.Printf("audit verify scheduler running (interval=%ds)", cfg.auditVerifyInterval)
-}
-
-// resolveAuditPath returns the audit log path with the home
-// directory expanded. Empty defaults to ~/.podium/audit.log.
-func resolveAuditPath(p string) (string, error) {
-	if p != "" {
-		return p, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".podium", "audit.log"), nil
 }
 
 // loadOrGenerateAuditSigner reads the §8.6 anchor keypair from path,

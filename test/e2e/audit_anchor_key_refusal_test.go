@@ -3,12 +3,13 @@ package e2e
 // Startup refusals for §8.6 local chain-head anchoring, and the negative
 // controls that pin where each refusal stops applying.
 //
-// With PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS above 0, the registry refuses to
-// start when the audit log file cannot be opened
-// (config.audit_sink_unavailable), when the anchor key cannot be read, parsed,
-// or generated (config.audit_anchor_key_unavailable), and, while registry
-// signing is on, when the registry signing key file carries the anchor public
-// key as its public: key or as a verify: key (config.audit_anchor_key_shared).
+// The registry refuses to start when the audit log file cannot be opened
+// (config.audit_sink_unavailable), whatever the anchoring setting. With
+// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS above 0 it also refuses when the anchor
+// key cannot be read, parsed, or generated
+// (config.audit_anchor_key_unavailable), and, while registry signing is on,
+// when the registry signing key file carries the anchor public key as its
+// public: key or as a verify: key (config.audit_anchor_key_shared).
 // Every case owns its t.TempDir for the audit log and the key files, so no
 // case observes another's files.
 
@@ -171,8 +172,8 @@ func TestAuditAnchor_UnusableKeyRefusesStart(t *testing.T) {
 }
 
 // Spec: §8.6, §13.12 — with anchoring running, a PODIUM_AUDIT_LOG_PATH file
-// sink that cannot be opened refuses startup, and the sink check precedes the
-// anchor key load, so the refused start generates no anchor key.
+// destination that cannot be opened refuses startup, and the audit check
+// precedes the anchor key load, so the refused start generates no anchor key.
 // Matrix: §6.10 (config.audit_sink_unavailable)
 func TestAuditAnchor_UnopenableSinkRefusesStart(t *testing.T) {
 	t.Parallel()
@@ -269,24 +270,30 @@ func TestAuditAnchor_NoDefaultKeyWithAnchoringOff(t *testing.T) {
 	}
 }
 
-// Spec: §8.6, §13.12 — with the interval at 0, a file sink that cannot be
-// opened logs a warning and the registry starts.
-func TestAuditAnchor_UnopenableSinkWarnsWithAnchoringOff(t *testing.T) {
+// Spec: §8.6, §13.12 — with the interval at 0, a file destination that cannot
+// be opened still refuses startup with config.audit_sink_unavailable, so no
+// registry runs with no audit stream. The refusal names PODIUM_AUDIT_LOG_PATH
+// and the path, and the start logs no disabled-sink warning.
+// Matrix: §6.10 (config.audit_sink_unavailable)
+func TestAuditAnchor_UnopenableSinkRefusesWithAnchoringOff(t *testing.T) {
 	t.Parallel()
-	srv := startServerArgs(t, []string{
-		"HOME=" + t.TempDir(),
-		"PODIUM_AUDIT_LOG_PATH=" + t.TempDir(),
+	logDir := t.TempDir()
+	out := anchorExpectRefusal(t, "config.audit_sink_unavailable",
+		"PODIUM_AUDIT_LOG_PATH="+logDir,
 		"PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS=0",
-	}, anchorStartArgs(t)...)
-	if !strings.Contains(srv.log(), "warning: audit sink disabled") {
-		t.Errorf("start log does not warn that the audit sink is disabled:\n%s", srv.log())
+	)
+	if !strings.Contains(out, "PODIUM_AUDIT_LOG_PATH") || !strings.Contains(out, logDir) {
+		t.Errorf("refusal does not name PODIUM_AUDIT_LOG_PATH and %s:\n%s", logDir, out)
+	}
+	if strings.Contains(out, "warning: audit sink disabled") {
+		t.Errorf("start logged a disabled sink rather than refusing:\n%s", out)
 	}
 }
 
-// Spec: §8.6, §13.12 — an http(s) audit sink never refuses a start. With
-// anchoring on, the endpoint leaves no local chain to anchor, so the registry
-// logs that anchoring is disabled and starts.
-func TestAuditAnchor_EndpointSinkDisablesAnchoring(t *testing.T) {
+// Spec: §8.6, §13.12 — a destination list with no file destination leaves
+// no local chain to anchor. With anchoring on, the registry logs that
+// anchoring is disabled and starts.
+func TestAuditAnchor_NoFileDestinationDisablesAnchoring(t *testing.T) {
 	t.Parallel()
 	recorder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

@@ -1065,29 +1065,48 @@ func run(ctx context.Context, stop func()) error {
 		log.Printf("ingest signing: registry-managed key (§4.7.9)")
 	}
 
-	// §8.3 audit sink and §8.2 query-text scrubber. Both read only cfg, and
+	// §13.8 Prometheus instrumentation: build the metric set once and thread it
+	// through the request, cache, visibility, ingest, and audit seams. Nil when
+	// disabled (PODIUM_METRICS=false), in which case every recording site
+	// no-ops and /metrics is not mounted. It is built before the audit stream
+	// opens, because the stream's observer must see every count from the
+	// §13.4 rewrite's first artifact.signed record.
+	var mreg *metrics.Registry
+	if metricsEnabled() {
+		mreg = metrics.New()
+	}
+
+	// §8.3 audit stream and §8.2 query-text scrubber. Both read only cfg, and
 	// they are resolved here rather than at the mount below because the §13.4
 	// rewrite emits one artifact.signed event per row it re-signs.
 	//
-	// auditSink is the sink every event is emitted through (a file sink, or an
-	// EndpointSink when PODIUM_AUDIT_LOG_PATH names a SIEM endpoint).
-	// auditFile is the same sink in its file form, non-nil only for the file
-	// case; the §8.6 anchor/verify, §8.4 retention, and §8.5 erasure paths
-	// rewrite the on-disk chain and run only against it. A nil scrubber means
-	// an operator disabled scrubbing.
-	auditSink, auditFile, sinkErr := openAuditSink(cfg)
-	// §8.6, §13.12: with anchoring on, an unopenable file sink, an anchor key
-	// that cannot be read, parsed, or generated, and an anchor key the
-	// registry key file also carries each refuse the start here, whatever the
-	// bind outcome and before the §13.4 rewrite and the bootstrap ingest, so a
-	// refused start changes no stored row.
-	anchorKey, anchoringOn, err := loadAnchorSigner(cfg, auditFile, sinkErr, signKey, signingOn)
+	// The stream chains every event once and writes it to each destination
+	// PODIUM_AUDIT_LOG_PATH lists. auditSink is the same stream as the
+	// audit.Sink every emitter takes. stream.File() is its file destination,
+	// nil when the list names none; the §8.6 anchor/verify, §8.4 retention,
+	// and §8.5 erasure paths rewrite that file and run only against it. A
+	// nil scrubber means an operator disabled scrubbing.
+	//
+	// §13.12: every unusable audit configuration refuses the start here,
+	// whatever the anchoring setting and whatever the bind outcome, before
+	// the anchor key is read, the §13.4 rewrite, and the bootstrap ingest, so
+	// a refused start changes no stored row and no registry runs with no
+	// audit stream.
+	stream, err := openAuditStream(cfg, auditObserver(mreg))
+	if err != nil {
+		return auditSinkUnavailable(err)
+	}
+	// The flush runs after serveUntilShutdown returns, which is after the
+	// HTTP drain, so the records drained requests chain are delivered.
+	defer stream.Shutdown()
+	auditSink := audit.AsSink(stream)
+	// §8.6, §13.12: with anchoring on, an anchor key that cannot be read,
+	// parsed, or generated, and an anchor key the registry key file also
+	// carries each refuse the start here, before the §13.4 rewrite and the
+	// bootstrap ingest.
+	anchorKey, anchoringOn, err := loadAnchorSigner(cfg, stream, signKey, signingOn)
 	if err != nil {
 		return err
-	}
-	// Reached with a sink error only when anchoring is off (§13.12).
-	if sinkErr != nil {
-		log.Printf("warning: audit sink disabled: %v", sinkErr)
 	}
 	scrubber, err := cfg.piiRedaction.BuildScrubber()
 	if err != nil {
@@ -1228,13 +1247,9 @@ func run(ctx context.Context, stop func()) error {
 	// is in-process advisory ordering; a restart relearns it from live traffic.
 	registry = registry.WithUsageSignals(core.NewMemoryUsageSignals())
 
-	// §13.8 Prometheus instrumentation: build the metric set once and thread it
-	// through the request, cache, visibility, and ingest seams. Nil when
-	// disabled (PODIUM_METRICS=false), in which case every recording site
-	// no-ops and /metrics is not mounted.
-	var mreg *metrics.Registry
-	if metricsEnabled() {
-		mreg = metrics.New()
+	// §13.8: the metric set built before the audit stream opened also
+	// records the registry cache.
+	if mreg != nil {
 		registry = registry.WithCacheObserver(mreg.ObserveCache)
 	}
 	// §4.7 hybrid search: wire the vector backend and embedder (opened above,
@@ -1743,10 +1758,10 @@ func run(ctx context.Context, stop func()) error {
 	// (e.g. domain.loaded at 10%). Built from PODIUM_AUDIT_SAMPLE_RATES;
 	// nil when unset, in which case every event is kept.
 	auditSampler := audit.NewSampler(cfg.auditSampleRates)
-	// §8.1/§8.3: when a sink is configured this FileSink is the
-	// registry's own sink for catalogue events (the metadata store persists no
-	// audit stream), so the §8.4 retention scheduler below, which enforces
-	// against this same sink, ages out registry-owned catalogue events.
+	// §8.1/§8.3: the stream is the registry's own sink for catalogue events
+	// (the metadata store persists no audit stream), so the §8.4 retention
+	// scheduler below, which enforces against the same stream's file
+	// destination, ages out registry-owned catalogue events.
 	var baseEmitter core.AuditEmitter
 	if auditSink != nil {
 		baseEmitter = auditEmitterFor(auditSink, scrubber, auditSampler)
@@ -1774,10 +1789,13 @@ func run(ctx context.Context, stop func()) error {
 		// shares one §8.6 hash chain.
 		server.WithAudit(auditSink)(srv)
 		layers.WithAudit(auditSink)
-		// §8.5 erasure rewrites the on-disk chain in place, so the layer
-		// endpoint also needs the file form of the sink; nil when redirected
-		// to an endpoint.
-		layers.WithEraseSink(auditFile)
+		// §8.5 erasure rewrites the file destination's chain in place, so the
+		// layer endpoint also takes the stream when its list names a file;
+		// nil otherwise, so the endpoint appends user.erased through the
+		// WithAudit sink.
+		if stream.File() != nil {
+			layers.WithEraseSink(stream)
+		}
 	}
 
 	// §7.3.1: wire the ingest-pipeline driver so the manual reingest and
@@ -1804,14 +1822,14 @@ func run(ctx context.Context, stop func()) error {
 	}
 
 	// §8.6 local chain-head anchoring: with PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS
-	// above 0 and a file sink, a goroutine signs the chain head with the
+	// above 0 and a file destination, a goroutine signs the chain head with the
 	// dedicated anchor key at PODIUM_AUDIT_SIGNING_KEY_PATH, loaded and checked
 	// above, and appends audit.anchored. Operators monitor audit.anchored and
 	// audit.anchor_failed.
 	var reAnchor func(context.Context)
 	if anchoringOn {
-		startAnchorScheduler(ctx, cfg, auditFile, anchorKey)
-		reAnchor = newReAnchor(auditFile, anchorKey)
+		startAnchorScheduler(ctx, cfg, stream, anchorKey)
+		reAnchor = newReAnchor(stream, anchorKey)
 	}
 	// §8.6: an erasure that rewrites the chain moves its head the same way a
 	// retention pass does, so the erase handler re-anchors through the same
@@ -1827,7 +1845,7 @@ func run(ctx context.Context, stop func()) error {
 	// (PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS defaults to one hour); set the
 	// interval to 0 to disable.
 	if cfg.auditVerifyInterval > 0 {
-		startVerifyScheduler(ctx, cfg, auditFile)
+		startVerifyScheduler(ctx, cfg, stream)
 	}
 
 	// §8.4 audit-event retention: a goroutine truncates the audit log on
@@ -1836,7 +1854,7 @@ func run(ctx context.Context, stop func()) error {
 	// Enabled by default (PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS defaults
 	// to one day); set the interval to 0 to disable.
 	if cfg.auditRetentionInterval > 0 {
-		startRetentionScheduler(ctx, cfg, auditFile, reAnchor)
+		startRetentionScheduler(ctx, cfg, stream, reAnchor)
 	}
 
 	// §8.4 store retention: when PODIUM_STORE_RETENTION_INTERVAL_SECONDS

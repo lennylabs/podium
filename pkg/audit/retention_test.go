@@ -24,9 +24,9 @@ func TestEnforce_DropsExpiredEventsAndRebuildsChain(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, err := audit.NewFileSink(path)
+	sink, err := audit.OpenFile(path, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	now := time.Now().UTC()
 	old := now.Add(-2 * 365 * 24 * time.Hour)
@@ -40,13 +40,13 @@ func TestEnforce_DropsExpiredEventsAndRebuildsChain(t *testing.T) {
 			Context:   map[string]string{"i": string(rune('a' + i))},
 		})
 	}
-	dropped, err := audit.Enforce(context.Background(), sink, now,
+	res, err := audit.Enforce(context.Background(), sink, now,
 		[]audit.Policy{{Type: audit.EventArtifactsSearched, MaxAge: 30 * 24 * time.Hour}}, nil)
 	if err != nil {
 		t.Fatalf("Enforce: %v", err)
 	}
-	if dropped != 1 {
-		t.Errorf("dropped = %d, want 1", dropped)
+	if res.Dropped != 1 {
+		t.Errorf("dropped = %d, want 1", res.Dropped)
 	}
 	if err := sink.Verify(context.Background()); err != nil {
 		t.Errorf("Verify after Enforce: %v", err)
@@ -60,9 +60,9 @@ func TestEnforce_AppendsRetentionMarkerRecordingSupersededHead(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, err := audit.NewFileSink(path)
+	sink, err := audit.OpenFile(path, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	now := time.Now().UTC()
 	old := now.Add(-2 * 365 * 24 * time.Hour)
@@ -75,13 +75,13 @@ func TestEnforce_AppendsRetentionMarkerRecordingSupersededHead(t *testing.T) {
 	// Capture the chain head before retention; the marker must name it.
 	headBefore := chainHeadFromFile(t, path)
 
-	dropped, err := audit.Enforce(context.Background(), sink, now,
+	res, err := audit.Enforce(context.Background(), sink, now,
 		[]audit.Policy{{Type: audit.EventArtifactLoaded, MaxAge: 30 * 24 * time.Hour}}, nil)
 	if err != nil {
 		t.Fatalf("Enforce: %v", err)
 	}
-	if dropped != 1 {
-		t.Fatalf("dropped = %d, want 1", dropped)
+	if res.Dropped != 1 {
+		t.Fatalf("dropped = %d, want 1", res.Dropped)
 	}
 	if err := sink.Verify(context.Background()); err != nil {
 		t.Errorf("Verify after Enforce: %v", err)
@@ -104,18 +104,18 @@ func TestEnforce_NoMarkerWhenNothingChanges(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	now := time.Now().UTC()
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Timestamp: now.Add(-time.Hour), Caller: "u",
 	})
-	dropped, err := audit.Enforce(context.Background(), sink, now,
+	res, err := audit.Enforce(context.Background(), sink, now,
 		[]audit.Policy{{Type: audit.EventArtifactLoaded, MaxAge: 365 * 24 * time.Hour}}, nil)
 	if err != nil {
 		t.Fatalf("Enforce: %v", err)
 	}
-	if dropped != 0 {
-		t.Fatalf("dropped = %d, want 0", dropped)
+	if res.Dropped != 0 {
+		t.Fatalf("dropped = %d, want 0", res.Dropped)
 	}
 	data, _ := os.ReadFile(path)
 	if containsBytes(data, []byte("audit.retention_enforced")) {
@@ -129,7 +129,7 @@ func TestEnforce_MostRestrictivePolicyWins(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	now := time.Now().UTC()
 	for i := 0; i < 3; i++ {
 		_ = sink.Append(context.Background(), audit.Event{
@@ -138,7 +138,7 @@ func TestEnforce_MostRestrictivePolicyWins(t *testing.T) {
 			Caller:    "u",
 		})
 	}
-	dropped, err := audit.Enforce(context.Background(), sink, now, []audit.Policy{
+	res, err := audit.Enforce(context.Background(), sink, now, []audit.Policy{
 		{Type: audit.EventDomainLoaded, MaxAge: 7 * 24 * time.Hour},
 		{Type: audit.EventDomainLoaded, MaxAge: 36 * time.Hour},
 	}, nil)
@@ -147,8 +147,8 @@ func TestEnforce_MostRestrictivePolicyWins(t *testing.T) {
 	}
 	// 36h policy wins; events at -1d (24h, kept), -2d (48h, dropped),
 	// -3d (72h, dropped).
-	if dropped != 2 {
-		t.Errorf("dropped = %d, want 2", dropped)
+	if res.Dropped != 2 {
+		t.Errorf("dropped = %d, want 2", res.Dropped)
 	}
 }
 
@@ -159,7 +159,7 @@ func TestEraseUser_ReplacesIdentifiersAndAppendsTombstone(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	for i := 0; i < 3; i++ {
 		_ = sink.Append(context.Background(), audit.Event{
 			Type:      audit.EventArtifactLoaded,
@@ -209,7 +209,7 @@ func TestEraseUser_ReplacesIdentifiersAndAppendsTombstone(t *testing.T) {
 func TestEraseUser_RedactsEmailAndGroups(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	const (
 		sub   = "auth0|alice"
 		email = "alice@acme.com"
@@ -277,7 +277,7 @@ func TestEraseUser_RedactsEmailAndGroups(t *testing.T) {
 func TestEraseUser_EmailInputErasesSubClaimAndContext(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	ctx := context.Background()
 	const (
 		sub   = "auth0|alice"
@@ -328,7 +328,7 @@ func TestEraseUser_EmailInputErasesSubClaimAndContext(t *testing.T) {
 func TestEraseUser_ContextMatchPreservesDistinctCaller(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	ctx := context.Background()
 	const aliceSub = "auth0|alice"
 	_ = sink.Append(ctx, audit.Event{
@@ -452,7 +452,7 @@ func parseEvents(t *testing.T, path string) []parsedEvent {
 func TestEraseUser_TombstoneFormatMatchesSpec(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
 	})
@@ -489,7 +489,7 @@ func TestEraseUser_TombstoneFormatMatchesSpec(t *testing.T) {
 func TestEraseUser_EmptySaltRejected(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
 	})
@@ -515,7 +515,7 @@ func TestEraseUser_EmptySaltRejected(t *testing.T) {
 func TestEraseUser_RecordsInvokingAdmin(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
 	})
@@ -557,7 +557,7 @@ func TestEraseUser_RecordsInvokingAdmin(t *testing.T) {
 func TestEraseUser_ZeroScopeRefused(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Tenant: "acme", Timestamp: time.Now().UTC(),
 	})
@@ -595,14 +595,14 @@ func aliceTombstone() string {
 	return "redacted-" + hex.EncodeToString(h[:])
 }
 
-// writeEraseLog appends events to a fresh file sink and returns it with its
+// writeEraseLog appends events to a fresh file stream and returns it with its
 // path.
-func writeEraseLog(t *testing.T, events []audit.Event) (*audit.FileSink, string) {
+func writeEraseLog(t *testing.T, events []audit.Event) (*audit.Stream, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "audit.log")
-	sink, err := audit.NewFileSink(path)
+	sink, err := audit.OpenFile(path, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	for _, ev := range events {
 		if err := sink.Append(context.Background(), ev); err != nil {

@@ -15,9 +15,9 @@ import (
 func TestRunRetentionOnce_DropsOldEvents(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	sink, err := audit.NewFileSink(filepath.Join(dir, "audit.log"))
+	sink, err := audit.OpenFile(filepath.Join(dir, "audit.log"), audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	now := time.Now().UTC()
 	old := now.Add(-400 * 24 * time.Hour)
@@ -49,9 +49,9 @@ func TestRunRetentionOnce_DropsOldEvents(t *testing.T) {
 func TestRunRetentionOnce_NoReAnchorWhenNothingDropped(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	sink, err := audit.NewFileSink(filepath.Join(dir, "audit.log"))
+	sink, err := audit.OpenFile(filepath.Join(dir, "audit.log"), audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	if err := sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Timestamp: time.Now().UTC(),

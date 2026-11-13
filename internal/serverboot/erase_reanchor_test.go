@@ -40,11 +40,11 @@ func (s *recordingSigner) Sign(ctx context.Context, _ string) (string, error) {
 
 func (s *recordingSigner) Verify(context.Context, string, string) error { return nil }
 
-func seededFileSink(t *testing.T) *audit.FileSink {
+func seededFileSink(t *testing.T) *audit.Stream {
 	t.Helper()
-	sink, err := audit.NewFileSink(filepath.Join(t.TempDir(), "audit.log"))
+	sink, err := audit.OpenFile(filepath.Join(t.TempDir(), "audit.log"), audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	if err := sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Timestamp: time.Now().UTC(),
@@ -65,7 +65,7 @@ func TestNewReAnchor_UsesCallerContext(t *testing.T) {
 	if signer.seen != "request" {
 		t.Errorf("Sign observed context value %v, want the caller's context", signer.seen)
 	}
-	events := readAuditLines(t, sink.Path())
+	events := readAuditLines(t, sink.File().Path())
 	if last := events[len(events)-1]; last.Type != string(audit.EventAuditAnchored) {
 		t.Errorf("last event = %s, want audit.anchored", last.Type)
 	}
@@ -83,7 +83,7 @@ func TestNewReAnchor_FailureLogs(t *testing.T) {
 	if !strings.Contains(logs.String(), "audit re-anchor after chain rewrite failed: ") {
 		t.Errorf("logs do not report the failed re-anchor:\n%s", logs)
 	}
-	for _, ev := range readAuditLines(t, sink.Path()) {
+	for _, ev := range readAuditLines(t, sink.File().Path()) {
 		if ev.Type == string(audit.EventAuditAnchorFailed) {
 			t.Errorf("re-anchor recorded audit.anchor_failed")
 		}

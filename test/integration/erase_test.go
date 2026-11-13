@@ -38,9 +38,9 @@ func TestErase_SQLitePurgesLayersAndRedactsAudit(t *testing.T) {
 	}
 
 	sinkPath := filepath.Join(t.TempDir(), "audit.log")
-	sink, err := audit.NewFileSink(sinkPath)
+	sink, err := audit.OpenFile(sinkPath, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 
 	admin := layer.Identity{Sub: "carol@acme.com", IsAuthenticated: true}
@@ -128,9 +128,9 @@ func TestErase_SQLiteTwoTenantsScopedToRoutedTenant(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	sinkPath := filepath.Join(t.TempDir(), "audit.log")
-	sink, err := audit.NewFileSink(sinkPath)
+	sink, err := audit.OpenFile(sinkPath, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	ts := twoTenantEraseServer(t, st, sink)
 	for _, tenant := range []string{"A", "B"} {
@@ -189,7 +189,7 @@ func TestErase_SQLiteTwoTenantsScopedToRoutedTenant(t *testing.T) {
 // serverboot mounts it. The stub verifier reads the subject and organization
 // from the X-Test-User and X-Test-Org headers, and the admin check reads the
 // routed tenant's grants.
-func twoTenantEraseServer(t *testing.T, st store.Store, sink *audit.FileSink) *httptest.Server {
+func twoTenantEraseServer(t *testing.T, st store.Store, sink *audit.Stream) *httptest.Server {
 	t.Helper()
 	for _, id := range []string{"P", "A", "B"} {
 		if err := st.CreateTenant(context.Background(), store.Tenant{ID: id, Name: id}); err != nil {

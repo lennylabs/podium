@@ -20,9 +20,9 @@ func TestRetention_CoversRegistryCatalogueEvents(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, err := audit.NewFileSink(path)
+	sink, err := audit.OpenFile(path, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 
 	// The registry emits a catalogue event through the same emitter

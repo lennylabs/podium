@@ -9,7 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1041,29 +1041,29 @@ func TestRunSignStoredRows_SigningOffRefusesAStrandedSignature(t *testing.T) {
 	}
 }
 
-// Spec: §8.3, §13.12 — sign-stored-rows never anchors, so a file audit sink
-// that cannot be opened is logged and the pass opens its collaborators
-// without a sink.
-func TestOpenSignPassDeps_UnopenableSinkLogsAndContinues(t *testing.T) {
+// Spec: §8.3, §13.12 — sign-stored-rows refuses a file audit destination that
+// cannot be opened with config.audit_sink_unavailable, so the pass never runs
+// without an audit stream. The stream opens before the store, so the refused
+// command creates no store.
+func TestOpenSignPassDeps_UnopenableSinkRefuses(t *testing.T) {
 	f := newBootFixture(t)
 	t.Setenv("PODIUM_AUDIT_LOG_PATH", f.home)
 	cfg, err := loadBootConfig()
 	if err != nil {
 		t.Fatalf("loadBootConfig: %v", err)
 	}
-	logs := &syncBuffer{}
-	prev := log.Writer()
-	log.SetOutput(logs)
-	defer log.SetOutput(prev)
-	d, closeStore, err := openSignPassDeps(cfg, signStoredRowsOptions{dryRun: true})
-	if err != nil {
-		t.Fatalf("openSignPassDeps: %v", err)
+	d, cleanup, err := openSignPassDeps(cfg, signStoredRowsOptions{dryRun: true})
+	if err == nil || !strings.HasPrefix(err.Error(), "config.audit_sink_unavailable:") ||
+		!strings.Contains(err.Error(), "PODIUM_AUDIT_LOG_PATH") || !strings.Contains(err.Error(), f.home) {
+		t.Fatalf("openSignPassDeps err = %v, want a config.audit_sink_unavailable refusal naming PODIUM_AUDIT_LOG_PATH and %s", err, f.home)
 	}
-	defer closeStore()
-	if d.Sink != nil {
-		t.Errorf("sink = %v, want nil for an unopenable file sink", d.Sink)
+	if cleanup != nil {
+		t.Error("cleanup is non-nil for a refused command")
 	}
-	if !strings.Contains(logs.String(), "warning: audit sink disabled: audit: open "+f.home) {
-		t.Errorf("logs do not report the disabled sink:\n%s", logs.String())
+	if !reflect.DeepEqual(d, rehashDeps{}) {
+		t.Errorf("deps = %+v, want the zero value", d)
+	}
+	if _, statErr := os.Stat(f.sqlitePath); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("store %s exists or is unreadable (%v), want it absent", f.sqlitePath, statErr)
 	}
 }

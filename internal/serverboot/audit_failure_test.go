@@ -62,10 +62,9 @@ func TestAuditEmit_NilEmitterIsSafe(t *testing.T) {
 	emit := auditEmitterFor(nil, audit.NewPIIScrubber(), nil)
 	// Calling the returned function with a nil sink would panic on
 	// sink.Append. The current adapter does not nil-check the sink
-	// at construction time — we test that the documented production
-	// path (openAuditSink returns nil → registry.WithAudit is never
-	// called → emit is nil) avoids the panic by NOT calling the
-	// adapter at all.
+	// at construction time. The production path never builds the adapter
+	// over a nil sink: run refuses every openAuditStream error, and a
+	// caller with no sink never calls registry.WithAudit.
 	if emit == nil {
 		t.Fatal("adapter returned nil; expected a callable function")
 	}
@@ -74,8 +73,8 @@ func TestAuditEmit_NilEmitterIsSafe(t *testing.T) {
 		// this recover prevents the test from blocking other tests.
 		_ = recover()
 	}()
-	// Production never reaches this call (openAuditSink-nil short-
-	// circuits before WithAudit is wired). We document the
+	// Production never reaches this call (the nil-sink guard
+	// short-circuits before WithAudit is wired). We document the
 	// adapter's nil-sink fragility by NOT invoking emit() here;
 	// the assertion is that the construction itself does not panic.
 }
