@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/lennylabs/podium/main/pkg/audit/schema/audit-event.v1.schema.json",
+  "title": "Podium audit event, version 1",
+  "description": "One Podium audit record as a destination receives it: one JSON object per line. A record without schema_version predates version 1 and is outside this schema. Such records remain in a file destination after an upgrade and keep their hashes. This file is never edited after release; a change to the record's members ships a new version.",
+  "type": "object",
+  "required": ["type", "timestamp", "hash", "schema_version"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "description": "The event type, a dotted lowercase name such as artifact.loaded. A new event type is not a schema change.",
+      "type": "string",
+      "pattern": "^[a-z_]+(\\.[a-z_]+)+$"
+    },
+    "timestamp": {
+      "description": "The time the event occurred, as an RFC 3339 time in UTC.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "trace_id": {
+      "description": "The trace identifier of the request the event serves.",
+      "type": "string"
+    },
+    "caller": {
+      "description": "The caller that raised the event.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "identity": {
+          "description": "The caller's identity string.",
+          "type": "string"
+        },
+        "email": {
+          "description": "The authenticated caller's email address.",
+          "type": "string"
+        },
+        "groups": {
+          "description": "The authenticated caller's groups.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "network": {
+          "description": "The network attributes recorded for a public-mode call.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source_ip": { "type": "string" },
+            "forwarded_user": { "type": "string" }
+          }
+        },
+        "public_mode": {
+          "description": "Present and true when the registry served the call in public mode.",
+          "const": true
+        },
+        "client": {
+          "description": "The normalized, self-reported client software of the request the event serves.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "type": "string" },
+            "name": { "type": "string" },
+            "version": { "type": "string" },
+            "host": { "type": "string" },
+            "host_version": { "type": "string" },
+            "harness": { "type": "string" }
+          }
+        }
+      }
+    },
+    "target": {
+      "description": "The object the event acts on, such as an artifact ID.",
+      "type": "string"
+    },
+    "context": {
+      "description": "Event-specific string attributes.",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "tenant": {
+      "description": "The org ID whose audit stream the event belongs to. Absent on deployment-wide events.",
+      "type": "string"
+    },
+    "resolved_layers": {
+      "description": "The ordered layer composition of the caller's effective view, recorded on read events.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "result_size": {
+      "description": "The number of result items a read event returned.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "schema_version": {
+      "description": "The record format version.",
+      "const": 1
+    },
+    "hash": {
+      "description": "The chain hash, the lowercase hex SHA-256 of the canonical body followed by prev_hash. Receivers deduplicate on it.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "prev_hash": {
+      "description": "The hash of the preceding record in the stream. Absent on the first record.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}
