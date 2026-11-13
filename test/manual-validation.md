@@ -11927,11 +11927,12 @@ run as the invoking user, so the files they write under `$WORK` are removable.
    A STOP or a skip in step 1 therefore leaves no bucket and no container for
    the cleanup to remove.
    Then check the ports and MinIO, and print the S3 client image and the
-   endpoint the containers use.
+   endpoint the containers use. The block sends the MinIO readiness request
+   only when the endpoint host is `localhost` or `127.0.0.1`.
 
    ```bash
    S106=$$
-   S106_BUCKET= S106_COL= S106_CLEANED= SRV=
+   S106_BUCKET= S106_COL= S106_CLEANED= S3_LOCAL= SRV=
    COL="podium-s106-col-$S106"
    BUCKET="podium-s106-$S106"
    COL_IMAGE=otel/opentelemetry-collector-contrib:0.105.0
@@ -11944,7 +11945,7 @@ run as the invoking user, so the files they write under `$WORK` are removable.
    S3_HOSTPORT=${S3_ENDPOINT#*://}; S3_HOSTPORT=${S3_HOSTPORT%%/*}
    S3_HOST=${S3_HOSTPORT%%:*}
    case "$S3_HOST" in
-     localhost|127.0.0.1) echo "endpoint host: local" ;;
+     localhost|127.0.0.1) S3_LOCAL=1; echo "endpoint host: local" ;;
      *) echo "STOP: the S3 endpoint host $S3_HOST is not local" ;;
    esac
    CEP="${S3_ENDPOINT%%://*}://host.docker.internal:${S3_HOSTPORT#*:}"
@@ -11974,15 +11975,19 @@ run as the invoking user, so the files they write under `$WORK` are removable.
      if [ "$rc" -eq 7 ]; then echo "port $p: free"; else echo "STOP: port $p in use (curl exit $rc)"; fi
    done
    echo "podium-minio running: $(docker inspect -f '{{.State.Running}}' podium-minio 2>/dev/null)"
-   echo "MinIO ready: $(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "$S3_ENDPOINT/minio/health/ready")"
+   if [ -n "$S3_LOCAL" ]; then
+     echo "MinIO ready: $(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "$S3_ENDPOINT/minio/health/ready")"
+     echo "container endpoint: $CEP"
+   else
+     echo "MinIO ready: skipped (non-local endpoint)"
+   fi
    echo "S3 client image: $MC_IMAGE"
-   echo "container endpoint: $CEP"
    ```
 
    **Expect.** `endpoint host: local`, `free` for both ports, `podium-minio
-   running: true`, `MinIO ready: 200`, an image reference that begins
-   `pgsty/mc:RELEASE.`, and `container endpoint:
-   http://host.docker.internal:9000` with the repository's settings.
+   running: true`, `MinIO ready: 200`, `container endpoint:
+   http://host.docker.internal:9000` with the repository's settings, and an
+   image reference that begins `pgsty/mc:RELEASE.`.
 
    Wrong outputs:
    - A `STOP` line for a port means another process would answer the
@@ -11991,7 +11996,10 @@ run as the invoking user, so the files they write under `$WORK` are removable.
      other than 200, means the prerequisite is absent, so record a skip.
    - An empty image reference means `docker-compose.yml` no longer pins the
      image in the form the scenario reads.
-   - A `STOP` line for the endpoint host stops the scenario.
+   - A `STOP` line for the endpoint host stops the scenario. That line comes
+     with `MinIO ready: skipped (non-local endpoint)` and no container
+     endpoint line, because the block sends no readiness request to a host
+     other than `localhost` or `127.0.0.1`.
 
 2. Create the scenario bucket, write the collector configuration, and start
    the collector. The configuration has one `logs` pipeline from the `otlp`
