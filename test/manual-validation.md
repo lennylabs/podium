@@ -11710,7 +11710,7 @@ start), 8904 (receiver R1), and 8909 (receiver R2).
 
    ```bash
    LAST=$(tail -n 1 "$WORK/audit.log" | jq -r .hash)
-   kill -INT "$SRV"; wait "$SRV"
+   kill -INT "$SRV"; wait "$SRV"; SRV=
    mv "$WORK/srv.log" "$WORK/srv-run1.log"
    s105_serve
    curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:8143/v1/load_artifact?id=team/ledger"
@@ -11785,21 +11785,22 @@ start), 8904 (receiver R1), and 8909 (receiver R2).
    }
    mcp_start 1
    touch "$WORK/mcp-up"
-   kill -TERM "$MCP"; wait "$MCP"; echo "run 1: exit $?"
+   kill -TERM "$MCP"; wait "$MCP"; RC=$?; MCP=
+   echo "run 1: exit $RC"
    exec 3>&-
    mcp_start 2
    touch "$WORK/mcp-up" "$WORK/mcp-slow"
    exec 3>&-
    i=0
    until [ -s "$WORK/r2-held" ] || [ "$i" -ge 40 ]; do sleep 0.1; i=$((i+1)); done
-   T0=$(date +%s); kill -TERM "$MCP"; wait "$MCP"; RC=$?; T1=$(date +%s)
+   T0=$(date +%s); kill -TERM "$MCP"; wait "$MCP"; RC=$?; T1=$(date +%s); MCP=
    echo "run 2: exit $RC after $((T1 - T0)) s"
    for n in 1 2; do
      python3 "$WORK/s105.py" searched "$WORK/mcp$n.log"
      python3 "$WORK/s105.py" missing "$WORK/mcp$n.log" "$WORK/mcp-forwarded.jsonl"
      echo "mcp$n.err panic: $(grep -c 'panic:' "$WORK/mcp$n.err")"
    done
-   kill "$R2"; wait "$R2"
+   kill "$R2"; wait "$R2"; R2=
    ```
 
    **Expect.**
@@ -11825,7 +11826,7 @@ start), 8904 (receiver R1), and 8909 (receiver R2).
    exit, then stop R1.
 
    ```bash
-   kill -INT "$SRV"; wait "$SRV"
+   kill -INT "$SRV"; wait "$SRV"; SRV=
    PODIUM_AUDIT_LOG_PATH="http://alice:s105-pass@127.0.0.1:8904/ingest" \
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
      --bind 127.0.0.1:8144 > "$WORK/refuse.log" 2>&1 &
@@ -11833,14 +11834,15 @@ start), 8904 (receiver R1), and 8909 (receiver R2).
    i=0
    while kill -0 "$BAD" 2>/dev/null && [ "$i" -lt 10 ]; do sleep 1; i=$((i+1)); done
    if kill -0 "$BAD" 2>/dev/null; then
-     echo "FAIL: the registry still runs after 10 s"; kill "$BAD"; wait "$BAD"
+     echo "FAIL: the registry still runs after 10 s"; kill "$BAD"; wait "$BAD"; BAD=
    else
-     wait "$BAD"; echo "exit $?"
+     wait "$BAD"; RC=$?; BAD=
+     echo "exit $RC"
    fi
    echo "config.audit_sink_unavailable: $(grep -c config.audit_sink_unavailable "$WORK/refuse.log")"
    echo "s105-pass: $(grep -c s105-pass "$WORK/refuse.log")"
    echo "listening lines: $(grep -c 'podium-server listening on' "$WORK/refuse.log")"
-   kill "$R1"; wait "$R1"
+   kill "$R1"; wait "$R1"; R1=
    ```
 
    **Expect.** A non-zero `exit` status, `config.audit_sink_unavailable` of
@@ -11852,7 +11854,10 @@ start), 8904 (receiver R1), and 8909 (receiver R2).
    - A non-zero `s105-pass` count means the refusal leaks the password.
 
 **Cleanup.** Stop every process the scenario started that still runs by its
-recorded PID, then remove `$WORK`.
+recorded PID, then remove `$WORK`. Each step clears a PID variable once it has
+waited for that process, because the kernel can give a reaped process's PID to
+an unrelated process. On a complete run every variable is empty, and the loop
+signals nothing.
 
 ```bash
 for p in "$SRV" "$BAD" "$R1" "$R2" "$MCP"; do
@@ -11915,11 +11920,18 @@ run as the invoking user, so the files they write under `$WORK` are removable.
 1. Run the isolation block. Set the names, read the MinIO settings from
    `test.env` (or from `test.env.example` when `test.env` is absent) without
    sourcing the file, and register the cleanup to run when the shell exits.
+   The cleanup removes the bucket only when `S106_BUCKET` is set and the
+   collector container only when `S106_COL` is set. Step 2 sets
+   `S106_BUCKET` when this run's `mb` exits 0, and sets `S106_COL` when no
+   container of the collector's name exists before this run's `docker run`.
+   A STOP or a skip in step 1 therefore leaves no bucket and no container for
+   the cleanup to remove.
    Then check the ports and MinIO, and print the S3 client image and the
    endpoint the containers use.
 
    ```bash
    S106=$$
+   S106_BUCKET= S106_COL= S106_CLEANED= SRV=
    COL="podium-s106-col-$S106"
    BUCKET="podium-s106-$S106"
    COL_IMAGE=otel/opentelemetry-collector-contrib:0.105.0
@@ -11948,8 +11960,12 @@ run as the invoking user, so the files they write under `$WORK` are removable.
      [ -n "$S106_CLEANED" ] && return 0
      S106_CLEANED=1
      [ -n "$SRV" ] && kill -0 "$SRV" 2>/dev/null && kill "$SRV"
-     s106_mc rb rb --force "s3/$BUCKET" > /dev/null 2>&1 || echo "the bucket $BUCKET was not removed; remove that bucket by name"
-     docker rm -f "$COL" > /dev/null 2>&1
+     if [ -n "$S106_BUCKET" ]; then
+       s106_mc rb rb --force "s3/$BUCKET" > /dev/null 2>&1 || echo "the bucket $BUCKET was not removed; remove that bucket by name"
+     fi
+     if [ -n "$S106_COL" ]; then
+       docker rm -f "$COL" > /dev/null 2>&1
+     fi
      rm -rf "$WORK"
    }
    trap s106_cleanup EXIT
@@ -11984,7 +12000,7 @@ run as the invoking user, so the files they write under `$WORK` are removable.
    `GET /v1/logs` answers or the container stops running.
 
    ```bash
-   s106_mc mb mb "s3/$BUCKET"
+   if s106_mc mb mb "s3/$BUCKET"; then S106_BUCKET=1; else echo "STOP: the bucket $BUCKET was not created"; fi
    mkdir -p "$WORK/col" "$WORK/s3"
    cat > "$WORK/col.yaml" <<EOF
    receivers:
@@ -12009,12 +12025,17 @@ run as the invoking user, so the files they write under `$WORK` are removable.
          receivers: [otlp]
          exporters: [file, awss3]
    EOF
-   AWS_ACCESS_KEY_ID="$S3_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET" \
-     docker run -d --name "$COL" \
-     --add-host host.docker.internal:host-gateway --user "$(id -u):$(id -g)" \
-     -p 127.0.0.1:8908:4318 -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
-     -v "$WORK/col.yaml:/etc/otelcol-contrib/config.yaml:ro" -v "$WORK/col:/col" \
-     "$COL_IMAGE" > /dev/null
+   if docker inspect "$COL" > /dev/null 2>&1; then
+     echo "STOP: a container named $COL already exists"
+   else
+     S106_COL=1
+     AWS_ACCESS_KEY_ID="$S3_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET" \
+       docker run -d --name "$COL" \
+       --add-host host.docker.internal:host-gateway --user "$(id -u):$(id -g)" \
+       -p 127.0.0.1:8908:4318 -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
+       -v "$WORK/col.yaml:/etc/otelcol-contrib/config.yaml:ro" -v "$WORK/col:/col" \
+       "$COL_IMAGE" > /dev/null || echo "STOP: the container $COL was not started"
+   fi
    i=0
    while :; do
      code=$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' http://127.0.0.1:8908/v1/logs)
@@ -12031,6 +12052,16 @@ run as the invoking user, so the files they write under `$WORK` are removable.
    shows that the scenario's collector is the listener.
 
    Wrong outputs:
+   - `STOP: the bucket ... was not created` means the bucket already exists
+     or MinIO refused the request. An existing bucket of that name belongs to
+     an earlier shell with the same PID, so the cleanup leaves it in place.
+     Stop the scenario.
+   - `STOP: a container named ... already exists` means an earlier shell with
+     the same PID left that container. The cleanup leaves it in place. Stop
+     the scenario.
+   - `STOP: the container ... was not started` means the image could not be
+     pulled or the container could not start. The cleanup removes any
+     container this run created. Stop the scenario.
    - `collector running: false` means the collector refused its
      configuration. `docker logs podium-s106-col-<pid>` names the setting the
      pinned tag does not accept.
@@ -12256,10 +12287,11 @@ run as the invoking user, so the files they write under `$WORK` are removable.
      UUIDs False` means a value is missing or is not a version 4 UUID.
 
 **Cleanup.** Remove the bucket and its objects with the `rb` S3 client
-container, remove the collector container by its exact name, and remove
-`$WORK`. MinIO keeps running and the pulled images stay. When the bucket
-removal fails, the bucket `podium-s106-<pid>` stays in MinIO, and the operator
-removes it by that exact name and no other.
+container when step 2 created the bucket, remove the collector container by its
+exact name when step 2 created it, and remove `$WORK`. MinIO keeps running and
+the pulled images stay. When the bucket removal fails, the bucket
+`podium-s106-<pid>` stays in MinIO, and the operator removes it by that exact
+name and no other.
 
 ```bash
 s106_cleanup
