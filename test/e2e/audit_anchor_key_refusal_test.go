@@ -3,7 +3,8 @@ package e2e
 // Startup refusals for §8.6 local chain-head anchoring, and the negative
 // controls that pin where each refusal stops applying.
 //
-// The registry refuses to start when the audit log file cannot be opened
+// The registry refuses to start when its audit configuration is unusable, a
+// file destination that cannot be opened among the causes
 // (config.audit_sink_unavailable), whatever the anchoring setting. With
 // PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS above 0 it also refuses when the anchor
 // key cannot be read, parsed, or generated
@@ -24,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lennylabs/podium/internal/testharness/auditharness"
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
@@ -307,5 +309,106 @@ func TestAuditAnchor_NoFileDestinationDisablesAnchoring(t *testing.T) {
 	}, anchorStartArgs(t)...)
 	if !strings.Contains(srv.log(), "audit anchor disabled (no sink)") {
 		t.Errorf("start log does not report anchoring disabled:\n%s", srv.log())
+	}
+}
+
+// auditRefusal is one unusable audit configuration that refuses startup.
+type auditRefusal struct {
+	name string
+	// env returns the case's audit environment, built under dir, and the
+	// strings the refusal must name and must not contain.
+	env func(t *testing.T, dir string) (env, names, secrets []string)
+	// needsNonRoot marks a case whose file mode root bypasses.
+	needsNonRoot bool
+}
+
+// auditRefusals lists the causes of config.audit_sink_unavailable that reach
+// the binary, other than a lone file that NewFileSink cannot open, which
+// TestAuditAnchor_UnopenableSinkRefusesWithAnchoringOff covers. Credential
+// fixtures use values that occur in no temporary path and in no fixed error
+// text, so an absence check fails only on an echoed value.
+func auditRefusals() []auditRefusal {
+	const unreachable = "http://127.0.0.1:1/audit"
+	return []auditRefusal{
+		{name: "unreadable headers file", needsNonRoot: true, env: func(t *testing.T, dir string) ([]string, []string, []string) {
+			path := filepath.Join(dir, "audit-headers")
+			if err := os.WriteFile(path, []byte("Authorization: Bearer hv-7qzx\n"), 0o000); err != nil {
+				t.Fatal(err)
+			}
+			return []string{"PODIUM_AUDIT_HEADERS_FILE=" + path, "PODIUM_AUDIT_LOG_PATH=" + unreachable},
+				[]string{"PODIUM_AUDIT_HEADERS_FILE", path}, []string{"hv-7qzx"}
+		}},
+		{name: "URL userinfo", env: func(_ *testing.T, _ string) ([]string, []string, []string) {
+			return []string{"PODIUM_AUDIT_LOG_PATH=https://usr-k3wq:pw-q8zr@127.0.0.1:1/audit"},
+				[]string{"PODIUM_AUDIT_LOG_PATH"}, []string{"usr-k3wq", "pw-q8zr"}
+		}},
+		{name: "two file destinations", env: func(_ *testing.T, dir string) ([]string, []string, []string) {
+			return []string{"PODIUM_AUDIT_LOG_PATH=" + filepath.Join(dir, "a.log") + "," + filepath.Join(dir, "b.log")},
+				[]string{"PODIUM_AUDIT_LOG_PATH"}, nil
+		}},
+		{name: "repeated destination", env: func(_ *testing.T, _ string) ([]string, []string, []string) {
+			return []string{"PODIUM_AUDIT_LOG_PATH=" + unreachable + "," + unreachable},
+				[]string{"PODIUM_AUDIT_LOG_PATH"}, nil
+		}},
+		{name: "certificate without key", env: func(t *testing.T, dir string) ([]string, []string, []string) {
+			certPEM, _ := auditharness.NewCA(t).Issue(t)
+			cert := auditharness.WriteFile(t, dir, "client.pem", certPEM)
+			return []string{"PODIUM_AUDIT_TLS_CERT_FILE=" + cert, "PODIUM_AUDIT_LOG_PATH=" + unreachable},
+				[]string{"PODIUM_AUDIT_TLS_CERT_FILE", "PODIUM_AUDIT_TLS_KEY_FILE"}, nil
+		}},
+		{name: "stdout beside stdout tracing", env: func(_ *testing.T, _ string) ([]string, []string, []string) {
+			return []string{"PODIUM_AUDIT_LOG_PATH=stdout", "PODIUM_TRACING=stdout"},
+				[]string{"PODIUM_AUDIT_LOG_PATH"}, nil
+		}},
+		{name: "zero queue bound", env: func(_ *testing.T, dir string) ([]string, []string, []string) {
+			return []string{"PODIUM_AUDIT_QUEUE_MAX_BYTES=0", "PODIUM_AUDIT_LOG_PATH=" + filepath.Join(dir, "audit.log")},
+				[]string{"PODIUM_AUDIT_QUEUE_MAX_BYTES"}, nil
+		}},
+		{name: "unopenable file beside an HTTP destination", env: func(t *testing.T, dir string) ([]string, []string, []string) {
+			blocker := filepath.Join(dir, "blocker")
+			if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(blocker, "audit.log")
+			return []string{"PODIUM_AUDIT_LOG_PATH=" + path + "," + unreachable},
+				[]string{"PODIUM_AUDIT_LOG_PATH", path}, nil
+		}},
+		{name: "lone file not open for appending", needsNonRoot: true, env: func(t *testing.T, dir string) ([]string, []string, []string) {
+			path := filepath.Join(dir, "audit.log")
+			if err := os.WriteFile(path, nil, 0o444); err != nil {
+				t.Fatal(err)
+			}
+			return []string{"PODIUM_AUDIT_LOG_PATH=" + path},
+				[]string{"PODIUM_AUDIT_LOG_PATH", path}, nil
+		}},
+	}
+}
+
+// Spec: §13.12 — every unusable audit configuration refuses startup with
+// config.audit_sink_unavailable with anchoring off. The output names the
+// variable that holds the refused setting and echoes no credential.
+// Matrix: §6.10 (config.audit_sink_unavailable)
+func TestAuditSink_UnusableConfigurationRefusesStart(t *testing.T) {
+	t.Parallel()
+	for _, tc := range auditRefusals() {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if tc.needsNonRoot && os.Geteuid() == 0 {
+				t.Skip("root bypasses the file mode this case relies on")
+			}
+			env, names, secrets := tc.env(t, t.TempDir())
+			out := anchorExpectRefusal(t, "config.audit_sink_unavailable",
+				append(env, "PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS=0")...)
+			for _, want := range names {
+				if !strings.Contains(out, want) {
+					t.Errorf("refusal does not name %s:\n%s", want, out)
+				}
+			}
+			for _, secret := range secrets {
+				if strings.Contains(out, secret) {
+					t.Errorf("refusal echoes %q:\n%s", secret, out)
+				}
+			}
+		})
 	}
 }

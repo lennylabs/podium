@@ -1,115 +1,14 @@
 package audit
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"fmt"
-	"math/big"
-	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/lennylabs/podium/internal/testharness/auditharness"
 )
-
-// testCA is a throwaway certificate authority for the TLS fixtures.
-type testCA struct {
-	cert *x509.Certificate
-	key  *ecdsa.PrivateKey
-	pem  []byte
-}
-
-func newTestCA(t *testing.T) *testCA {
-	t.Helper()
-	key := newKey(t)
-	tmpl := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "podium test CA"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(time.Hour),
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-		KeyUsage:              x509.KeyUsageCertSign,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cert, err := x509.ParseCertificate(der)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &testCA{cert: cert, key: key, pem: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})}
-}
-
-func newKey(t *testing.T) *ecdsa.PrivateKey {
-	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return key
-}
-
-// issue returns a PEM certificate and key signed by the CA, valid for
-// 127.0.0.1 as a server and as a client.
-func (ca *testCA) issue(t *testing.T) (certPEM, keyPEM []byte) {
-	t.Helper()
-	key := newKey(t)
-	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(time.Now().UnixNano()),
-		Subject:      pkix.Name{CommonName: "127.0.0.1"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.cert, &key.PublicKey, ca.key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
-		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-}
-
-// serverTLS returns a server configuration presenting a certificate from
-// the CA.
-func (ca *testCA) serverTLS(t *testing.T) *tls.Config {
-	t.Helper()
-	certPEM, keyPEM := ca.issue(t)
-	pair, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &tls.Config{Certificates: []tls.Certificate{pair}}
-}
-
-func (ca *testCA) pool() *x509.CertPool {
-	p := x509.NewCertPool()
-	p.AddCert(ca.cert)
-	return p
-}
-
-func writeFixture(t *testing.T, dir, name string, data []byte) string {
-	t.Helper()
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
 
 // transportRow is one transport refusal of TestOpen_RefusesUnusableConfiguration.
 type transportRow struct {
@@ -123,13 +22,13 @@ type transportRow struct {
 // covers, and each refused header line is the third line of its file.
 func transportRefusals(t *testing.T, dir string) []transportRow {
 	t.Helper()
-	ca := newTestCA(t)
-	certPEM, keyPEM := ca.issue(t)
-	_, otherKeyPEM := ca.issue(t)
-	cert := writeFixture(t, dir, "client.crt", certPEM)
-	key := writeFixture(t, dir, "client.key", keyPEM)
-	otherKey := writeFixture(t, dir, "other.key", otherKeyPEM)
-	noPEM := writeFixture(t, dir, "nopem.crt", []byte("not a certificate\n"))
+	ca := auditharness.NewCA(t)
+	certPEM, keyPEM := ca.Issue(t)
+	_, otherKeyPEM := ca.Issue(t)
+	cert := auditharness.WriteFile(t, dir, "client.crt", certPEM)
+	key := auditharness.WriteFile(t, dir, "client.key", keyPEM)
+	otherKey := auditharness.WriteFile(t, dir, "other.key", otherKeyPEM)
+	noPEM := auditharness.WriteFile(t, dir, "nopem.crt", []byte("not a certificate\n"))
 	missing := filepath.Join(dir, "missing")
 
 	var rows []transportRow
@@ -137,7 +36,7 @@ func transportRefusals(t *testing.T, dir string) []transportRow {
 		// Number the files, because a case-insensitive file system folds
 		// names that differ only in the header name's case.
 		file := fmt.Sprintf("%d.headers", len(rows))
-		path := writeFixture(t, dir, file, []byte("# audit headers\nX-Audit-Token: zq7k\n"+line+"\n"))
+		path := auditharness.WriteFile(t, dir, file, []byte("# audit headers\nX-Audit-Token: zq7k\n"+line+"\n"))
 		rows = append(rows, transportRow{name, OpenOptions{HeadersFile: path}, append([]string{envHeadersFile, path + ":3"}, want...)})
 	}
 	for _, line := range []string{"Host: zq7k", "hOST: zq7k", "Content-Length: zq7k", "content-length: zq7k", "Content-Type: zq7k", "CONTENT-TYPE: zq7k"} {

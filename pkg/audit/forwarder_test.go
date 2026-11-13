@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lennylabs/podium/internal/clock"
+	"github.com/lennylabs/podium/internal/testharness/auditharness"
 )
 
 // repeatReader is a Rand that yields the same byte forever. 0xff drives
@@ -1044,16 +1045,16 @@ func TestHTTPDest_FailureLogNamesRedactedEndpoint(t *testing.T) {
 func TestHTTPDest_HeadersAndTLS(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	ca := newTestCA(t)
-	certPEM, keyPEM := ca.issue(t)
-	caFile := writeFixture(t, dir, "ca.pem", ca.pem)
-	certFile := writeFixture(t, dir, "client.crt", certPEM)
-	keyFile := writeFixture(t, dir, "client.key", keyPEM)
-	headersFile := writeFixture(t, dir, "headers", []byte("X-Audit-Token: zq7k\n"))
+	ca := auditharness.NewCA(t)
+	certPEM, keyPEM := ca.Issue(t)
+	caFile := auditharness.WriteFile(t, dir, "ca.pem", ca.PEM)
+	certFile := auditharness.WriteFile(t, dir, "client.crt", certPEM)
+	keyFile := auditharness.WriteFile(t, dir, "client.key", keyPEM)
+	headersFile := auditharness.WriteFile(t, dir, "headers", []byte("X-Audit-Token: zq7k\n"))
 
-	mtls := ca.serverTLS(t)
+	mtls := ca.ServerTLS(t)
 	mtls.ClientAuth = tls.RequireAndVerifyClientCert
-	mtls.ClientCAs = ca.pool()
+	mtls.ClientCAs = ca.Pool()
 	rcv := newTLSReceiver(t, mtls, nil)
 
 	s := openStream(t, rcv.srv.URL+"/p", OpenOptions{CAFile: caFile, CertFile: certFile, KeyFile: keyFile, HeadersFile: headersFile})
@@ -1083,7 +1084,7 @@ func TestHTTPDest_HeadersAndTLS(t *testing.T) {
 		})
 	}
 	refused("no client certificate", rcv.srv.URL+"/p", OpenOptions{CAFile: caFile}, rcv)
-	other := newTLSReceiver(t, newTestCA(t).serverTLS(t), nil)
+	other := newTLSReceiver(t, auditharness.NewCA(t).ServerTLS(t), nil)
 	refused("untrusted CA with CAFile set", other.srv.URL+"/p", OpenOptions{CAFile: caFile}, other)
 	// A nil configuration serves httptest's own certificate, which no
 	// system trust store holds.
@@ -1096,7 +1097,7 @@ func TestHTTPDest_HeadersAndTLS(t *testing.T) {
 // Spec: §13.12
 func TestHeadersFile_ParseRules(t *testing.T) {
 	t.Parallel()
-	headers := writeFixture(t, t.TempDir(), "headers", []byte("\n# comment: zq7k\n  \nX-Audit-Token: t1\r\n"))
+	headers := auditharness.WriteFile(t, t.TempDir(), "headers", []byte("\n# comment: zq7k\n  \nX-Audit-Token: t1\r\n"))
 	rcv := newReceiver(t, nil)
 	s := openStream(t, rcv.srv.URL+"/p", OpenOptions{HeadersFile: headers})
 	appendN(t, s, 1)

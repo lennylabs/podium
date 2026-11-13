@@ -434,15 +434,23 @@ func launchServer(t testing.TB, env []string, args ...string) *serverProc {
 		}
 	}
 	t.Cleanup(func() { stopProc(s.cmd) })
-	s.BaseURL = "http://" + loopbackProbeAddr(awaitBoundAddr(t, s))
+	s.awaitReady(t)
+	return s
+}
 
+// awaitReady sets BaseURL from the address the server reports in its log and
+// waits for /healthz to answer 200, failing the test when the server exits
+// first or the deadline passes.
+func (s *serverProc) awaitReady(t testing.TB) {
+	t.Helper()
+	s.BaseURL = "http://" + loopbackProbeAddr(awaitBoundAddr(t, s))
 	deadline := time.Now().Add(25 * time.Second)
 	for time.Now().Before(deadline) {
 		resp, err := httpClient.Get(s.BaseURL + "/healthz")
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == 200 {
-				return s
+				return
 			}
 		}
 		if s.hasExited() {
@@ -451,7 +459,6 @@ func launchServer(t testing.TB, env []string, args ...string) *serverProc {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("server not ready at %s within deadline\nlog:\n%s", s.BaseURL, s.log())
-	return nil
 }
 
 // startServer is the common standalone case: a fresh HOME, --standalone,

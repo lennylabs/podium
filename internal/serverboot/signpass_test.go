@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lennylabs/podium/internal/testharness/auditharness"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
@@ -1065,5 +1066,73 @@ func TestOpenSignPassDeps_UnopenableSinkRefuses(t *testing.T) {
 	}
 	if _, statErr := os.Stat(f.sqlitePath); !errors.Is(statErr, fs.ErrNotExist) {
 		t.Errorf("store %s exists or is unreadable (%v), want it absent", f.sqlitePath, statErr)
+	}
+}
+
+// Spec: §13.12 — sign-stored-rows refuses an unusable destination list, a
+// URL that carries userinfo and a list naming two files, with
+// config.audit_sink_unavailable before it opens the store, so the refused
+// command creates no store.
+//
+// Matrix: §6.10 (config.audit_sink_unavailable)
+func TestOpenSignPassDeps_RefusesUnusableAuditList(t *testing.T) {
+	for name, list := range map[string]func(f *bootFixture) string{
+		"userinfo URL": func(*bootFixture) string { return "https://alice:pw-q8zr@127.0.0.1:1/audit" },
+		"two files": func(f *bootFixture) string {
+			return filepath.Join(f.home, "a.log") + "," + filepath.Join(f.home, "b.log")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newBootFixture(t)
+			t.Setenv("PODIUM_AUDIT_LOG_PATH", list(f))
+			cfg, err := loadBootConfig()
+			if err != nil {
+				t.Fatalf("loadBootConfig: %v", err)
+			}
+			_, cleanup, err := openSignPassDeps(cfg, signStoredRowsOptions{dryRun: true})
+			if err == nil || !strings.HasPrefix(err.Error(), "config.audit_sink_unavailable:") {
+				t.Fatalf("openSignPassDeps err = %v, want a config.audit_sink_unavailable refusal", err)
+			}
+			if cleanup != nil {
+				t.Error("cleanup is non-nil for a refused command")
+			}
+			if _, statErr := os.Stat(f.sqlitePath); !errors.Is(statErr, fs.ErrNotExist) {
+				t.Errorf("store %s exists or is unreadable (%v), want it absent", f.sqlitePath, statErr)
+			}
+		})
+	}
+}
+
+// Spec: §8.3 — sign-stored-rows flushes its stream before it returns, so
+// every artifact.signed record has reached an HTTP destination that is the
+// only one listed.
+func TestRunSignStoredRows_FlushesQueuedAuditRecords(t *testing.T) {
+	current, retired := rotatedSigner(t)
+	f := newSignPassFixture(t, current)
+	seeds := []rowSeed{
+		{tenant: "acme", id: "alpha", version: "1.0.0", framed: true, signWith: retired},
+		{tenant: "acme", id: "beta", version: "1.0.0", framed: true, signWith: retired},
+	}
+	f.seed(t, true, seeds...)
+	rcv := auditharness.NewReceiver(t)
+	t.Setenv("PODIUM_AUDIT_LOG_PATH", rcv.URL())
+
+	if _, err := runCommand(t); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	targets := map[string]bool{}
+	for _, line := range rcv.Lines() {
+		var ev struct {
+			Type   string `json:"type"`
+			Target string `json:"target"`
+		}
+		if json.Unmarshal([]byte(line), &ev) == nil && ev.Type == "artifact.signed" {
+			targets[ev.Target] = true
+		}
+	}
+	for _, s := range seeds {
+		if !targets[s.id] {
+			t.Errorf("the receiver holds no artifact.signed record for %s when the command returns", s.id)
+		}
 	}
 }

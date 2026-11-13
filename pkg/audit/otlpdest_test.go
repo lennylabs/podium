@@ -19,6 +19,8 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/lennylabs/podium/internal/testharness/auditharness"
 )
 
 // otlpURL turns an httptest server URL into an OTLP destination element.
@@ -484,16 +486,16 @@ func TestOTLPDest_IgnoresOTELEnv(t *testing.T) {
 func TestOTLPDest_HeadersAndTLS(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	ca := newTestCA(t)
-	certPEM, keyPEM := ca.issue(t)
-	caFile := writeFixture(t, dir, "ca.pem", ca.pem)
-	certFile := writeFixture(t, dir, "client.crt", certPEM)
-	keyFile := writeFixture(t, dir, "client.key", keyPEM)
-	headersFile := writeFixture(t, dir, "headers", []byte("Authorization: Bearer zq7k\n"))
+	ca := auditharness.NewCA(t)
+	certPEM, keyPEM := ca.Issue(t)
+	caFile := auditharness.WriteFile(t, dir, "ca.pem", ca.PEM)
+	certFile := auditharness.WriteFile(t, dir, "client.crt", certPEM)
+	keyFile := auditharness.WriteFile(t, dir, "client.key", keyPEM)
+	headersFile := auditharness.WriteFile(t, dir, "headers", []byte("Authorization: Bearer zq7k\n"))
 
-	mtls := ca.serverTLS(t)
+	mtls := ca.ServerTLS(t)
 	mtls.ClientAuth = tls.RequireAndVerifyClientCert
-	mtls.ClientCAs = ca.pool()
+	mtls.ClientCAs = ca.Pool()
 	rcv := newTLSReceiver(t, mtls, nil)
 
 	s := openStream(t, otlpURL(rcv.srv.URL, ""), OpenOptions{CAFile: caFile, CertFile: certFile, KeyFile: keyFile, HeadersFile: headersFile})
@@ -531,7 +533,7 @@ func TestOTLPDest_HeadersAndTLS(t *testing.T) {
 		})
 	}
 	refused("no client certificate", otlpURL(rcv.srv.URL, ""), OpenOptions{CAFile: caFile}, rcv)
-	other := newTLSReceiver(t, newTestCA(t).serverTLS(t), nil)
+	other := newTLSReceiver(t, auditharness.NewCA(t).ServerTLS(t), nil)
 	refused("untrusted CA with CAFile set", otlpURL(other.srv.URL, ""), OpenOptions{CAFile: caFile}, other)
 	// A nil configuration serves httptest's own certificate, which no
 	// system trust store holds.
@@ -551,7 +553,7 @@ func TestOTLPDest_RedirectNotFollowed(t *testing.T) {
 		w.Header().Set("Location", second.srv.URL+"/v1/logs")
 		w.WriteHeader(http.StatusTemporaryRedirect)
 	})
-	headersFile := writeFixture(t, t.TempDir(), "headers", []byte("X-Audit-Token: zq7k\n"))
+	headersFile := auditharness.WriteFile(t, t.TempDir(), "headers", []byte("X-Audit-Token: zq7k\n"))
 	obs := &fakeObserver{}
 	s := openStream(t, otlpURL(first.srv.URL, ""), OpenOptions{HeadersFile: headersFile, Observer: obs})
 	appendN(t, s, 1)
