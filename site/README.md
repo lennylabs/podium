@@ -32,7 +32,6 @@ src/
   pages/          Landing, Doc, and NotFound
   client/         the browser bundle: theme, copy, search, islands, and the router
   styles/         design tokens and stylesheets
-design/           the design handoff: tokens, screens, and four mockups
 test/             fixtures and the test suite
 ```
 
@@ -323,10 +322,14 @@ trailing-slash URL does not match the published `<page>.html` output.
 
 ## Design
 
-`design/README.md` holds the tokens, the type scale, the screen compositions,
-and the interaction states. `design/podium-design-reference.html` holds four
-mockups covering the landing page and a documentation page in a light and a dark
-theme, and it is the source of truth for any value the README does not list.
+The design handoff lives in `web/design/site/`, beside the registry web UI's
+handoff in `web/design/app/`. `web/design/site/README.md` holds the tokens, the
+type scale, the screen compositions, and the interaction states.
+`web/design/site/podium-design-reference.html` holds the desktop mockups of the
+landing page and a documentation page in a light and a dark theme, and the
+mobile screens, and it is the source of truth for any value the README does not
+list. `web/design/site/logo/` holds the production SVGs of the mark, the
+lockups, and the tile.
 
 Components read the CSS variables in `src/styles/tokens.css` and never inline a
 color. The accent is a surface color carrying dark text, or text on the dark

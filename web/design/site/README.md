@@ -2,7 +2,7 @@
 
 ## Overview
 
-A marketing landing page and a documentation page template for **Podium**, an open source catalog for reusable AI agent artifacts (skills, agents, commands, rules, hooks, contexts, MCP server registrations) with tools that translate them into harness-specific formats. The current site is a stock Jekyll/Just-the-Docs theme; this design replaces it with an original identity covering both the marketing entry point and the docs reading experience, in light and dark themes.
+A marketing landing page and a documentation page template for **Podium**, an enterprise-grade **skill registry** for AI agents: a registry for reusable agent skills and other artifacts (agents, commands, rules, hooks, contexts, MCP server registrations), with signing, access control, audit, and harness-specific delivery. Use "registry" for the product and "catalog" only for the set of artifacts a registry holds. The current site is a stock Jekyll/Just-the-Docs theme; this design replaces it with an original identity covering both the marketing entry point and the docs reading experience, in light and dark themes.
 
 Two page types, two themes, at two breakpoints: four desktop mockups and five mobile mockups (390pt).
 
@@ -36,12 +36,12 @@ Both text families are on Google Fonts. Anton is used *only* for the logotype.
 
 | Element | Size / line-height / tracking / weight |
 | --- | --- |
-| Landing h1 | 64px / 1.01 / −0.042em / 700 |
+| Landing h1 | 60px / 1.01 / −0.042em / 700, `text-wrap: balance` |
 | Landing subtitle | 19px / 1.5 |
-| Section h2 (Features, Run it three ways, Server-side integrations) | 30px / — / −0.025em / 600 |
+| Section h2 (Features, Deployment modes, Server-side integrations) | 30px / — / −0.025em / 600 |
 | Feature card h3 | 17.5px / 600 |
 | Feature card body | 14.5px / 1.55 |
-| "Run it three ways" card title | 19px / 600 / −0.015em |
+| Deployment mode card title | 19px / 600 / −0.015em |
 | Deployment label / value | 12px mono `.06em` / 15px |
 | Integrations pill | 13.5px / 500 |
 | Docs h1 | 42px / 1.03 / −0.035em / 700 |
@@ -50,7 +50,7 @@ Both text families are on Google Fonts. Anton is used *only* for the logotype.
 | Docs step heading | 17px / 700 / −0.015em, preceded by an 11.5px mono number chip on the accent |
 | Sidebar nav | 13px / 1.95; group labels 10px mono 600 `.1em` |
 | On-this-page | 12.5px / 2.05 |
-| Terminal + code blocks | 12.5px/1.7 (hero terminal), 14px/1.75 (docs) mono |
+| Terminal + code blocks | 12px/1.5 (hero terminal), 10.5px/1.6 (mobile terminal), 14px/1.75 (docs) mono |
 | Inline code | 14–14.5px mono on a tinted chip, 4px radius |
 
 ### Color — light theme
@@ -78,7 +78,7 @@ Both text families are on Google Fonts. Anton is used *only* for the logotype.
 | `callout-border` | `#f5cd9b` | callout / pill borders |
 | **`link`** | **`#a8480a`** | link text and terminal flags (accent never carries small text on light) |
 
-Gradients: hero wash `radial-gradient(900px 420px at 88% 8%, rgba(255,164,36,.15), transparent 62%)` over `linear-gradient(180deg,#fdfdf8,#fbf9f5 70%)`; terminal glow `linear-gradient(140deg, rgba(255,164,36,.5), rgba(255,164,36,0) 58%)`, `blur(10px)`, `-14px` inset; primary button `linear-gradient(180deg,#232219,#14130f)`; adapter strip `linear-gradient(90deg,#ffeeda,#fbf9f5 45%)`; feature cards `linear-gradient(180deg,#fff,#fcfbf6)`.
+Gradients: hero wash `radial-gradient(900px 420px at 88% 8%, rgba(255,164,36,.15), transparent 62%)` over `linear-gradient(180deg,#fdfdf8,#fbf9f5 70%)`; terminal glow is a soft offset shadow on the card itself, `box-shadow: -22px -22px 70px -20px rgba(255,164,36,.45)` (no separate blurred layer, so there is no hard edge); primary button `linear-gradient(180deg,#232219,#14130f)`; adapter strip `linear-gradient(90deg,#ffeeda,#fbf9f5 45%)`; feature cards `linear-gradient(180deg,#fff,#fcfbf6)`.
 
 ### Color — dark theme
 
@@ -101,7 +101,7 @@ Gradients: hero wash `radial-gradient(900px 420px at 88% 8%, rgba(255,164,36,.15
 | `accent-soft` | `#ffcf7a` | second stop of the headline gradient |
 | `callout-border` | `#4a3a22` | callout / pill borders |
 
-Gradients: hero wash `radial-gradient(820px 400px at 86% 4%, rgba(255,164,36,.07), transparent 60%)` over `linear-gradient(180deg,#141824,#10131c 65%)`; terminal glow `rgba(255,164,36,.2)`, `blur(14px)`, `-16px` inset; primary button `linear-gradient(180deg,#ffb84d,#f59410)` with `#14130f` text and `0 8px 22px -12px rgba(255,164,36,.6)`; headline accent `linear-gradient(90deg,#ffa424,#ffcf7a)` via `background-clip: text`; pills `rgba(255,164,36,.12)` on `#4a3a22`.
+Gradients: hero wash `radial-gradient(820px 400px at 86% 4%, rgba(255,164,36,.07), transparent 60%)` over `linear-gradient(180deg,#141824,#10131c 65%)`; terminal glow `box-shadow: -22px -22px 70px -20px rgba(255,164,36,.18)`; primary button `linear-gradient(180deg,#ffb84d,#f59410)` with `#14130f` text and `0 8px 22px -12px rgba(255,164,36,.6)`; headline accent `linear-gradient(90deg,#ffa424,#ffcf7a)` via `background-clip: text`; pills `rgba(255,164,36,.12)` on `#4a3a22`.
 
 ### The accent rule
 
@@ -112,7 +112,7 @@ The orange is a **surface** color carrying dark text, or **text on the dark grou
 - Radii: cards, feature grid, deployment grid `13px`; code blocks and doc panels `11px`; terminal `13px`; buttons, inputs, callouts `9–10px`; chips and kbd `4–5px`; pills and status `100px`; sidebar active rail `3px` left border.
 - Gutters: `40px` landing, `22px` docs top bar, `46px` docs article.
 - Nav height: `66px` landing, `58px` docs.
-- Section rhythm: hero `76px 40px 66px`; Features `64px 40px 72px`; the two sections below it `0 40px 72px`.
+- Section rhythm: hero `76px 40px 66px`, columns **top-aligned** (`align-items: start`) because the terminal is taller than the headline block; Features `64px 40px 72px`; the two sections below it `0 40px 72px`.
 - Hairline grids: feature/deployment grids are CSS grid with a `1px` gap over a border-colored background, not per-card borders.
 - Shadows: terminal light `0 24px 50px -30px rgba(20,19,15,.5)`, dark `0 26px 54px -32px rgba(0,0,0,.9)`; light primary button `0 6px 16px -8px rgba(20,19,15,.6)`.
 
@@ -120,33 +120,69 @@ The orange is a **surface** color carrying dark text, or **text on the dark grou
 
 ## Screens
 
-### 1. Landing page (light `8a`, dark `8b`) — 1280px content width
+### 1. Landing page (light `21a`, dark `21b`) — 1280px content width
 
 1. **Top bar** — Beat mark + Anton wordmark "PODIUM"; right side `Docs`, `GitHub ↗` at 14px, then a mono `v0.1.7` pill.
-2. **Hero** — 2-column grid, 56px gap, accent wash top right.
-   - Left: status pill `0.1.x — early release` (6px accent dot with a soft ring); h1 `One catalog. / Every harness.` with "Every harness." highlighted (light: an accent band behind the text from 62% height; dark: accent gradient as clipped text); subtitle with `AI skills and other artifacts` given the same highlighter at 60%; an install field (`$ brew install lennylabs/tap/podium`, divider, `copy`); buttons `Quickstart` (primary), `Concepts` (bordered), `Fit & comparisons` (text).
-   - Right: terminal card titled `~/projects/foo` (three 9px dots, first accent). Transcript shows three `podium sync` invocations — `--harness claude-code`, `--harness cursor`, `--config marketplace.yaml` — flags in the link tone, output paths indented two spaces in body color, and a final `$` prompt with a blinking 8×14px block cursor (`blink 1.1s step-end infinite`, 50% duty). **Emit each transcript line as its own block element**; do not rely on newlines inside `<pre>`.
+2. **Hero** — 2-column grid, 56px gap, top-aligned, accent wash top right.
+   - Left: status pill `0.1.x — early release` (6px accent dot with a soft ring); h1 `The skill registry / for AI agents.` with **"skill registry"** highlighted (light: an accent band behind the text from 62% height; dark: `linear-gradient(90deg,#ffa424,#ffcf7a)` as clipped text). Subtitle: *An enterprise-grade registry for reusable **agent skills and other artifacts**.* with the bold phrase given the same highlighter at 60%. Then an install field (`$ brew install lennylabs/tap/podium`, divider, `copy`) and buttons `Quickstart` (primary), `Concepts` (bordered), `Fit & comparisons` (text).
+   - Right: terminal card titled `~/projects/foo` (three 9px dots, first accent). Body 12px/1.5 mono, `white-space: pre`. Three commands, each **command line in 600 weight**, a `.45em` gap under each command, and a `2.1em` gap between blocks. Colors: `$` prompt in `faint`, command and artifact IDs in `ink`/`text`, flags/args and `[type]` tags in `link` (light) / `accent` (dark), descriptions and labels (`subdomains:`, `adapter:`…) in `body`. Transcript, verbatim:
+
+```
+$ podium search "incident rollback"
+Showing 3 of 3 results
+
+  platform/rollback  [skill]
+      Roll back a bad deploy and verify the running revision.
+  platform/k8s/pod-forensics  [skill]
+      Capture pod state and logs before a rollback.
+  platform/incident-commander  [agent]
+      Coordinate incident response and rollback decisions.
+
+$ podium domain show platform
+platform
+  Platform operations and incident response.
+subdomains:
+  - platform/ci  ci
+      Build and release pipelines.
+  - platform/k8s  k8s
+      Kubernetes operations.
+
+$ podium sync --harness claude-code \
+              --include platform/rollback
+adapter: claude-code
+target:  /Users/alice/projects/foo
+artifacts:
+  - platform/rollback  [team-platform]
+      .claude/skills/rollback/SKILL.md
+      .claude/skills/rollback/scripts/verify_revision.py
+
+$ ▌
+```
+
+     The final `$` carries a blinking 8×14px block cursor (`blink 1.1s step-end infinite`, 50% duty). **Emit each transcript line as its own block element** so leading spaces survive; do not rely on newlines inside `<pre>`.
 3. **Adapter strip** — mono `ADAPTERS` label then Claude Code, Claude Desktop, Cursor, Codex, Gemini CLI, OpenCode, Pi, Hermes, `+ custom`, on a fading accent gradient with hairlines above and below.
-4. **Features** — h2 `Features`, then a **2 × 3** hairline grid. Each card is a horizontal flex: **diagram at left (200px wide, flex none), text at right** with 22px gap. Text block is mono number, 17.5px title, 14.5px body. No badges, no highlighted card. Content, in order:
+4. **Features** — h2 `Features`, then a **2 × 3** hairline grid. Each card is a horizontal flex: **diagram at left (200px wide, flex none), text at right** with 22px gap. Text block is mono number, 17.5px title, 14.5px body. No badges, no highlighted card. Content, in order (copy verbatim):
 
    | # | Title | Body |
    | --- | --- | --- |
-   | 01 | Cross-harness delivery | Write canonical artifacts once. Automatically translate into the format your runtime expects. |
-   | 02 | Domains and subdomains | Easy artifact maintenance and discoverability through the use of domains and sub-domains. |
-   | 03 | Selective materialization | Sync a subset of the catalog into a workspace. Define profiles to quickly and seamlessly switch between scopes. |
-   | 04 | Progressive discovery | Minimalistic set of tools for agents to traverse domains and find artifacts, materializing artifacts (including bundled files) lazily as they are needed. |
-   | 05 | Layered composition | Compose the catalog from multiple independent sources with deterministic merge and explicit precedence. |
-   | 06 | Access control | Declare who can see what: public, org-wide, scoped to OIDC groups, or specific users. |
+   | 01 | Domains and subdomains | Easy skill maintenance and discoverability through the use of domains and sub-domains. |
+   | 02 | Selective materialization | Sync a chosen subset of the catalog into a workspace ahead of time. Define profiles to quickly and seamlessly switch between scopes. |
+   | 03 | Progressive discovery | stdio MCP server with tools for agents to find skills and to lazily load them into the agent's workspace (including bundled files). |
+   | 04 | Layered composition | Compose the catalog from multiple independent sources with deterministic merge and explicit precedence. *Second paragraph, 8px above:* Use your own Git repos as sources. |
+   | 05 | Security and access control | Skills and other artifacts are signed at ingest and verified on every sync. Declare who can see what with RBAC. Audit logs. |
+   | 06 | Observability | See how often each artifact is searched for and downloaded. |
 
-   The six diagrams are inline SVG — copy them verbatim from the reference. Summary of each (see *Feature diagrams* below):
-   1. a source document fanning out along three curves, arrowheads, into three boxes badged `Claude Code` (disc), `Cursor` (square), `Codex` (triangle);
-   2. an indented domain tree: `catalog` → `Platform` → `ci` (nested) → `Analytics` → `Finance`;
-   3. a dashed catalog of eight rows, two ticked in accent, arrow, two matching accent rows at right;
-   4. a discovery walk — solid ink path with arrowheads through solid nodes, dotted branches to dashed unvisited nodes;
-   5. three overlapping circles filled `ink @ 12%`, solid outlines outside the overlaps and **dotted arcs where they overlap** (via per-circle SVG masks), labelled team / org / personal;
-   6. the same construction as 3, but the greyed rows carry lock glyphs and the unlocked pair is what travels to the right.
+   02 and 03 are deliberately contrasted: sync is proactive ("ahead of time"), discovery is lazy and agent-driven. Keep that distinction in any copy edit. Cross-harness delivery is no longer a landing feature (the adapter strip and the terminal carry it); it stays in the docs.
 
-5. **Run it three ways** — h2, then a 3-column hairline grid. Each card: icon + title row, hairline, three label/value pairs, then a "plus" list with accent bullet dots.
+   The six diagrams are inline SVG — copy them verbatim from the reference. Summary (see *Feature diagrams* below):
+   1. an indented domain tree: `catalog` → `Platform` → `ci` (nested) → `Analytics` → `Finance`;
+   2. a dashed catalog of eight rows, two ticked in accent, arrow, two matching accent rows at right;
+   3. a discovery walk — solid ink path with arrowheads through solid nodes, dotted branches to dashed unvisited nodes;
+   4. three overlapping circles filled `ink @ 12%`, solid outlines outside the overlaps and **dotted arcs where they overlap** (via per-circle SVG masks), labelled team / org / personal;
+   5. a signed artifact (document with an accent check seal at its corner), arrow, an audit-log panel of three entries with the newest marked by an accent dot;
+   6. a usage report — a framed card with a title bar, a small accent trend line top right, a rule, and three ranked bars, the top bar in accent.
+
+5. **Deployment modes** — h2, then a 3-column hairline grid. Each card: icon + title row, hairline, three label/value pairs, then a "plus" list with accent bullet dots. The **Local** title row carries a right-aligned pill `No server needed` (11px mono 600, `.06em`, 100px radius, `#ffeeda` on `#f5cd9b` with `#a8480a` text in light; `rgba(255,164,36,.12)` on `#4a3a22` with `#ffa424` in dark).
 
    | | Local | Single node | Clustered |
    | --- | --- | --- | --- |
@@ -157,9 +193,9 @@ The orange is a **surface** color carrying dark text, or **text on the dark grou
    | plus label | — | Everything in local, plus | Everything in single node, plus |
    | plus list | Author, lint, sync · Domains and profiles | Discovery via MCP or SDK · Hybrid search · Layers and visibility · One audit log | Multi-tenancy · SCIM group sync · Signing and transparency log · High availability |
 
-   Below the grid, a tinted callout with an accent `→`: *The artifacts never change. They are independent of Podium's deployment model.*
+   Below the grid, a tinted callout with an accent `→`: *Skills and other artifacts are independent of Podium's deployment model.*
 
-6. **Server-side integrations** — h2, then a three-column table (`210px / 190px / 1fr`) with mono column headers `Out of the box` and `Compatible alternatives`, hairline row separators, and alternating row backgrounds. Alternatives are accent-tinted pills; some rows carry a muted note beneath. **All three cells in a row are vertically centered** against each other (the tallest cell, usually the pills-plus-note one, sets the row height). Row padding is `18px 16px` — the first column carries the same 16px left inset as the others, so the row name is not flush to the section gutter.
+6. **Server-side integrations** — h2, then a three-column table (`210px / 190px / 1fr`) with mono column headers `Out of the box` and `Compatible alternatives`, hairline row separators, and alternating row backgrounds. Alternatives are accent-tinted pills; some rows carry a muted note beneath. **All three cells in a row are vertically centered** against each other. Row padding is `18px 16px` — the first column carries the same 16px left inset as the others.
 
    | Row | Icon | Out of the box | Alternatives | Note |
    | --- | --- | --- | --- | --- |
@@ -169,6 +205,9 @@ The orange is a **surface** color carrying dark text, or **text on the dark grou
    | Embeddings | sparkle | BM25 only | OpenAI, Voyage, Cohere, Ollama | Or let Pinecone, Weaviate, or Qdrant embed on ingest. Vectors are fused with BM25 hits via reciprocal rank fusion. |
    | Identity | padlock | None | OIDC device code, Gateway-forwarded JWT, SCIM | — |
    | Layer sources | branch | Git and local paths | Custom via SPI | S3 buckets, OCI registries, HTTP archives. |
+   | Audit log | scroll | Hash-chained file | stdout, HTTP receivers, OpenTelemetry Collector | List several destinations to write one hash-chained stream to each. |
+   | Tracing | pulse | None | OTLP/HTTP, stdout | Spans carry W3C Trace Context, and URL query strings are removed before export. |
+   | Notifications | bell | None | Webhook, Email (SMTP), Log | Delivers ingest-failure and operational alerts. Several providers can run together. |
 
    Closing line, muted: *Nothing in the right column is required to start. At cluster scale, Postgres and object storage become requirements. Easily re-embed during vector backend migrations.*
 
@@ -191,11 +230,11 @@ Same tokens, same content, same diagrams. Only structure changes. Design width 3
 ### Landing (light `13a`, dark `13b`)
 
 - **Top bar** 56pt: Beat mark (24px) + wordmark, version pill, hamburger. Desktop's inline nav links are gone — they live behind the menu.
-- **Hero**: h1 drops to **40px / 1.03 / −0.035em**, subtitle to 16.5px. The same two highlighter treatments apply. The install field is full-width with the command `text-overflow: ellipsis`-clipped and `copy` pinned right. Buttons stack: `Quickstart` full width, then `Concepts` and `Comparisons` (shortened from "Fit & comparisons") side by side at 50%. Each is 14px vertical padding ⇒ ~47pt tall. Hero radial wash shrinks to `520px 300px at 88% 2%`.
-- **Terminal**: full-bleed band (no card radius, no glow, no drop shadow — those read as noise at this width), hairline above and below. Type drops to **11px / 1.6**, the strip is `white-space: nowrap; overflow-x: auto`, and the title bar carries a mono `SWIPE →` affordance at its right. Same three-sync transcript, same blinking cursor. One line was dropped per block (the second and third `scripts/` paths) to keep the block from dominating the fold.
+- **Hero**: same h1 and subtitle copy as desktop; h1 drops to **40px / 1.03 / −0.035em**, subtitle to 16.5px. The same two highlighter treatments apply. The install field is full-width with the command `text-overflow: ellipsis`-clipped and `copy` pinned right. Buttons stack: `Quickstart` full width, then `Concepts` and `Comparisons` (shortened from "Fit & comparisons") side by side at 50%. Each is 14px vertical padding ⇒ ~47pt tall. Hero radial wash shrinks to `520px 300px at 88% 2%`.
+- **Terminal**: full-bleed band (no card radius, no glow, no drop shadow — those read as noise at this width), hairline above and below. Type drops to **10.5px / 1.6**, the strip is `white-space: pre; overflow-x: auto` (**not** `nowrap` — that collapses the leading spaces that carry the output's hierarchy), and the title bar carries a mono `SWIPE →` affordance at its right. Same transcript, spacing, weights, and cursor as desktop.
 - **Adapters**: the horizontal strip becomes a wrapping set of pills (4px 9px, 100px radius, `border-2`), under a mono `ADAPTERS` label, on a vertical accent-tint gradient.
-- **Features**: single column, hairline-separated (no outer card radius). Each card stacks **diagram above text**, diagram centered at 232px wide, 16px gap. Titles 17px, body 14.5px.
-- **Run it three ways**: three separate rounded cards (13px radius, 1px border) at 12px vertical spacing inside the gutters, each keeping the icon+title row, hairline, label/value pairs and bulleted "plus" list. The arrow callout follows as its own tinted card.
+- **Features**: the same six cards in the same order, single column, hairline-separated (no outer card radius). Each card stacks **diagram above text**, diagram centered at 232px wide, 16px gap. Titles 17px, body 14.5px.
+- **Deployment modes**: three separate rounded cards (13px radius, 1px border) at 12px vertical spacing inside the gutters, each keeping the icon+title row (Local keeps its `No server needed` pill, 10.5px), hairline, label/value pairs and bulleted "plus" list. The arrow callout follows as its own tinted card.
 - **Server-side integrations**: the table becomes one hairline-separated block per row — bold row name, then two label/value rows using a 96px mono label column (`OUT OF BOX`, `ALTERNATIVES`), pills wrapping in place, and the note beneath. The closing paragraph is reworded to "Nothing above is required to start…" since there is no right column on mobile.
 - **Footer**: stacked — licence line, then links wrapping in a 14px-gap row.
 
@@ -213,12 +252,12 @@ Two mockups, three states: mobile ≤ 720px, tablet 721–1099px (not mocked —
 
 ## Feature diagrams
 
-Six inline SVGs, one per feature card, on a 240-unit-wide viewBox (96 tall, except #5 at 116) rendered at 200px wide on desktop and 232px on mobile. Two palettes only: `ink`/`text` for primary shapes, `meta`/`muted` for connectors and de-emphasized shapes, `accent` for "selected/visible" states. Rules they follow — keep these if you redraw anything:
+Six inline SVGs, one per feature card, on a 240-unit-wide viewBox (96 tall, except #4 at 116) rendered at 200px wide on desktop and 232px on mobile. Two palettes only: `ink`/`text` for primary shapes, `meta`/`muted` for connectors and de-emphasized shapes, `accent` for "selected/visible" states. Rules they follow — keep these if you redraw anything:
 
 - Every connector starts and ends **at a node's edge**, never inside it.
 - Dashed strokes mean *not loaded* / *not permitted*; solid means *walked* / *permitted*.
-- Accent appears only in 03 and 06, where it marks the selected artifacts.
-- Diagram 05 uses one `<mask>` per circle (unique ids per theme — `lm0..2` light, `dm0..2` dark; the mobile copies in the reference are namespaced `moblm0..2` / `mobdm0..2`) so the overlapping arcs draw dotted and the outer arcs solid. **Mask ids must be unique per rendered instance** — generate them per component instance rather than hard-coding.
+- Accent marks the one thing each diagram is about: the selected artifacts (02), the signature seal and newest audit entry (05), the trend and top bar (06). 01, 03 and 04 carry no accent.
+- Diagram 04 uses one `<mask>` per circle (in the reference each frame's ids are prefixed with its frame id, e.g. `f21a-r21lm0`) so the overlapping arcs draw dotted and the outer arcs solid. **Mask ids must be unique per rendered instance** — generate them per component instance rather than hard-coding.
 
 ## Interactions & behavior
 
@@ -269,5 +308,5 @@ No other imagery: no photography, illustration, or icon fonts. The nav search gl
 
 ## Files
 
-- `podium-design-reference.html` — all nine mockups: the four desktop pages stacked, then the five mobile screens side by side. Source of truth for anything not listed above.
+- `podium-design-reference.html` — all nine mockups, each labelled with its frame id: the four desktop pages stacked (`21a`, `21b`, `8c`, `8d`), then the five mobile screens side by side (`13a`–`13e`). Source of truth for anything not listed above.
 - `logo/` — production SVGs.
