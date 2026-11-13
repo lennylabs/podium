@@ -735,7 +735,7 @@ There is no SCIM sync command. SCIM is a server-side push from the identity prov
 
 ### `podium admin erase`
 
-GDPR right-to-erasure. The user identity is positional and `--salt` is required (an empty salt yields a guessable tombstone). The default form calls the registry, which unregisters and purges the user's owned layers and redacts the user identity in the audit records of the tenant the request acts in when the registry's audit list names a file destination; the authenticated session identifies the invoking admin. On a registry started with `PODIUM_MULTI_TENANT=true`, the registry form acts in the tenant the caller's organization selects and redacts only that tenant's audit records. Records that carry no tenant are left unchanged, and the response reports nothing about them; the local form redacts them.
+GDPR right-to-erasure. The user identity is positional and `--salt` is required (an empty salt yields a guessable tombstone). The default form calls the registry, which unregisters and purges the user's owned layers and redacts the user identity in the audit records of the tenant the request acts in when the registry's audit list names a file destination; the authenticated session identifies the invoking admin. On a registry started with `PODIUM_MULTI_TENANT=true`, the registry form acts in the tenant the caller's organization selects and redacts only that tenant's audit records. Records that carry no tenant are left unchanged, and the response reports nothing about them. When the list names a file destination, the local form redacts them in that file, and otherwise the receiving system owns their redaction (see [Retention and erasure](audit-events#retention-and-erasure)).
 
 ```
 podium admin erase <user-id> --salt <salt> --registry <url>
