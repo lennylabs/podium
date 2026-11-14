@@ -1,15 +1,16 @@
 import type MiniSearchType from "minisearch";
 
 import { NAVIGATE_EVENT } from "./router";
+import {
+  SEARCH_FIELDS,
+  SEARCH_OPTIONS,
+  STORED_FIELDS,
+  describeHit,
+  type StoredFields,
+} from "./search-fields";
 import { processTerm } from "./search-terms";
 
-type Stored = {
-  page: string;
-  heading: string;
-  section: string;
-};
-
-let index: MiniSearchType<Stored> | null = null;
+let index: MiniSearchType<StoredFields> | null = null;
 let loading: Promise<void> | null = null;
 
 /**
@@ -28,11 +29,11 @@ async function load(basePath: string): Promise<void> {
     import("minisearch"),
     fetch(url).then((response) => response.text()),
   ]);
-  index = MiniSearch.loadJSON<Stored>(serialized, {
-    fields: ["page", "heading", "text"],
-    storeFields: ["page", "heading", "section"],
+  index = MiniSearch.loadJSON<StoredFields>(serialized, {
+    fields: SEARCH_FIELDS,
+    storeFields: STORED_FIELDS,
     processTerm,
-    searchOptions: { boost: { page: 3, heading: 2 }, prefix: true, fuzzy: 0.2 },
+    searchOptions: SEARCH_OPTIONS,
   });
 }
 
@@ -87,7 +88,7 @@ function open(overlay: HTMLElement, input: HTMLInputElement): void {
 }
 
 /** A search result: the stored fields plus the document ID, which is the route. */
-type Hit = Stored & { id: string; score: number };
+type Hit = StoredFields & { id: string; score: number };
 
 /**
  * The index keys each entry by its route as the site publishes it, without the
@@ -98,6 +99,7 @@ function render(
   results: HTMLElement,
   basePath: string,
   hits: Hit[],
+  lookup: (route: string) => StoredFields | undefined,
 ): void {
   if (hits.length === 0) {
     results.innerHTML = `<li class="search-empty">No matches.</li>`;
@@ -106,8 +108,7 @@ function render(
   results.innerHTML = hits
     .slice(0, 12)
     .map((hit) => {
-      const context = [hit.section, hit.page].filter((part) => part !== "").join(" · ");
-      const label = hit.heading === "" ? hit.page : hit.heading;
+      const { label, context } = describeHit(hit, lookup);
       const href = escape(`${basePath}${hit.id}`);
       return `<li class="search-result"><a href="${href}"><span class="search-result-title">${escape(label)}</span><span class="search-result-context">${escape(context)}</span></a></li>`;
     })
@@ -156,6 +157,7 @@ export function mountSearch(basePath: string): void {
       results,
       basePath,
       index.search(query) as unknown as Hit[],
+      (route) => index?.getStoredFields(route) as StoredFields | undefined,
     );
   };
 

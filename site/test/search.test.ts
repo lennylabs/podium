@@ -2,6 +2,12 @@ import MiniSearch from "minisearch";
 import { describe, expect, it } from "vitest";
 
 import { buildSearchIndex, documentsFor } from "../src/build/search";
+import {
+  SEARCH_FIELDS,
+  STORED_FIELDS,
+  describeHit,
+  type StoredFields,
+} from "../src/client/search-fields";
 import { processTerm } from "../src/client/search-terms";
 import type { PageModel } from "../src/build/types";
 import { toHast } from "./support/hast";
@@ -158,22 +164,51 @@ describe("buildSearchIndex", () => {
     expect(parsed.documentCount).toBe(3);
   });
 
-  it("returns the route as the hit ID and stores it in no field", () => {
-    const serialized = buildSearchIndex(pages, sectionTitles).serialized;
-    const loaded = MiniSearch.loadJSON(serialized, {
-      fields: ["page", "heading", "text"],
-      storeFields: ["page", "heading", "section"],
+  function load(): MiniSearch<StoredFields> {
+    return MiniSearch.loadJSON<StoredFields>(buildSearchIndex(pages, sectionTitles).serialized, {
+      fields: SEARCH_FIELDS,
+      storeFields: STORED_FIELDS,
+      processTerm,
     });
+  }
 
-    const [hit] = loaded.search("Linux");
+  it("returns the route as the hit ID and stores it in no field", () => {
+    const [hit] = load().search("Linux");
 
-    expect(hit).toMatchObject({
-      id: "/guide/install.html#requirements",
-      page: "Install",
-      heading: "Requirements",
+    expect(hit).toMatchObject({ id: "/guide/install.html#requirements", heading: "Requirements" });
+    expect(hit).not.toHaveProperty("route");
+  });
+
+  it("stores the page title and the section name on the page entry alone", () => {
+    const loaded = load();
+
+    expect(loaded.getStoredFields("/guide/install.html")).toEqual({
+      title: "Install",
       section: "Guide",
     });
-    expect(hit).not.toHaveProperty("route");
+    expect(loaded.getStoredFields("/guide/install.html#requirements")).toEqual({
+      heading: "Requirements",
+    });
+    expect(loaded.getStoredFields("/guide/index.html")).toEqual({ title: "Guide" });
+  });
+
+  it("still ranks a section by its page title", () => {
+    const ids = load()
+      .search("Install")
+      .map((hit) => hit.id);
+
+    expect(ids).toContain("/guide/install.html#requirements");
+  });
+
+  it("labels a section hit from its page entry", () => {
+    const loaded = load();
+    const [hit] = loaded.search("Linux");
+    const lookup = (route: string) => loaded.getStoredFields(route) as StoredFields | undefined;
+
+    expect(describeHit(hit as StoredFields & { id: string }, lookup)).toEqual({
+      label: "Requirements",
+      context: "Guide · Install",
+    });
   });
 
   it("leaves function words out of the index and still matches a query that carries them", () => {
@@ -181,8 +216,8 @@ describe("buildSearchIndex", () => {
     const parsed = JSON.parse(serialized) as { index: [string, unknown][] };
     const terms = parsed.index.map(([term]) => term);
     const loaded = MiniSearch.loadJSON(serialized, {
-      fields: ["page", "heading", "text"],
-      storeFields: ["page", "heading", "section"],
+      fields: SEARCH_FIELDS,
+      storeFields: STORED_FIELDS,
       processTerm,
     });
 
@@ -212,5 +247,34 @@ describe("buildSearchIndex", () => {
 
   it("indexes nothing for an empty corpus", () => {
     expect(buildSearchIndex([], sectionTitles).documentCount).toBe(0);
+  });
+});
+
+describe("describeHit", () => {
+  const pages: Record<string, StoredFields> = {
+    "/a.html": { title: "Alpha", section: "Guides" },
+    "/top.html": { title: "Top" },
+  };
+  const lookup = (route: string) => pages[route];
+
+  it("labels a page hit with its own title and section", () => {
+    expect(describeHit({ id: "/a.html", title: "Alpha", section: "Guides" }, lookup)).toEqual({
+      label: "Alpha",
+      context: "Guides · Alpha",
+    });
+  });
+
+  it("leaves the section out of the context of a top-level page", () => {
+    expect(describeHit({ id: "/top.html#x", heading: "X" }, lookup)).toEqual({
+      label: "X",
+      context: "Top",
+    });
+  });
+
+  it("falls back to empty strings when the page entry is missing", () => {
+    expect(describeHit({ id: "/gone.html#x", heading: "X" }, lookup)).toEqual({
+      label: "X",
+      context: "",
+    });
   });
 });
