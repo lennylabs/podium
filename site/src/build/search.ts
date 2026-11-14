@@ -1,6 +1,7 @@
 import type { Element, RootContent } from "hast";
 import MiniSearch from "minisearch";
 
+import { processTerm } from "../client/search-terms";
 import type { PageModel } from "./types";
 
 export type SearchDocument = {
@@ -19,7 +20,14 @@ export type SearchDocument = {
   text: string;
 };
 
-const HEADING_TAGS = new Set(["h2", "h3", "h4", "h5", "h6"]);
+/*
+ * Only h2 and h3 start a search entry. A deeper heading folds into the entry of
+ * the section above it, heading text included, so a hit still lands within one
+ * screen of the answer. Every entry adds its terms' postings to the serialized
+ * index, and reference pages carry many short h4 and h5 subsections, so an
+ * entry per subsection grows the index with headings rather than with prose.
+ */
+const HEADING_TAGS = new Set(["h2", "h3"]);
 const NON_PROSE = new Set(["pre", "script", "style"]);
 
 function textOf(node: RootContent): string {
@@ -111,6 +119,7 @@ export function buildSearchIndex(
   const index = new MiniSearch<SearchDocument>({
     fields: ["page", "heading", "text"],
     storeFields: ["page", "heading", "section"],
+    processTerm,
     searchOptions: {
       boost: { page: 3, heading: 2 },
       prefix: true,

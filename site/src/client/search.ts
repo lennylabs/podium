@@ -1,6 +1,7 @@
 import type MiniSearchType from "minisearch";
 
 import { NAVIGATE_EVENT } from "./router";
+import { processTerm } from "./search-terms";
 
 type Stored = {
   page: string;
@@ -30,6 +31,7 @@ async function load(basePath: string): Promise<void> {
   index = MiniSearch.loadJSON<Stored>(serialized, {
     fields: ["page", "heading", "text"],
     storeFields: ["page", "heading", "section"],
+    processTerm,
     searchOptions: { boost: { page: 3, heading: 2 }, prefix: true, fuzzy: 0.2 },
   });
 }

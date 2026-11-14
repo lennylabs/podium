@@ -2,6 +2,7 @@ import MiniSearch from "minisearch";
 import { describe, expect, it } from "vitest";
 
 import { buildSearchIndex, documentsFor } from "../src/build/search";
+import { processTerm } from "../src/client/search-terms";
 import type { PageModel } from "../src/build/types";
 import { toHast } from "./support/hast";
 
@@ -77,6 +78,19 @@ describe("documentsFor", () => {
       id: "/a.html#requirements",
       text: "A machine running Linux.",
     });
+  });
+
+  it("folds a deeper heading and its prose into the enclosing section", () => {
+    const docs = documentsFor(
+      page({
+        route: "/a.html",
+        body: "## Steps\n\nRun it.\n\n#### Exit codes\n\nZero on success.\n\n### Notes\n\nNone.\n",
+      }),
+      "",
+    );
+
+    expect(docs.map((doc) => doc.id)).toEqual(["/a.html", "/a.html#steps", "/a.html#notes"]);
+    expect(docs[1]?.text).toBe("Run it. Exit codes Zero on success.");
   });
 
   it("excludes fenced code from a section entry", () => {
@@ -160,6 +174,23 @@ describe("buildSearchIndex", () => {
       section: "Guide",
     });
     expect(hit).not.toHaveProperty("route");
+  });
+
+  it("leaves function words out of the index and still matches a query that carries them", () => {
+    const serialized = buildSearchIndex(pages, sectionTitles).serialized;
+    const parsed = JSON.parse(serialized) as { index: [string, unknown][] };
+    const terms = parsed.index.map(([term]) => term);
+    const loaded = MiniSearch.loadJSON(serialized, {
+      fields: ["page", "heading", "text"],
+      storeFields: ["page", "heading", "section"],
+      processTerm,
+    });
+
+    expect(terms).not.toContain("a");
+    expect(terms).toContain("linux");
+    expect(loaded.search("a machine running Linux")[0]?.id).toBe(
+      "/guide/install.html#requirements",
+    );
   });
 
   it("names the section each entry belongs to", () => {
