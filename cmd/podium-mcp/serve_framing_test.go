@@ -113,15 +113,37 @@ func TestServe_StopsCleanlyOnStdinEOF(t *testing.T) {
 	}
 }
 
-// spec: §6.8 — the host owns signal handling and shutdown. The bridge installs
-// no lifecycle (SIGINT/SIGTERM) handlers; the only signal it consults is
-// SIGHUP for the §6.3.2.1 token re-read, which is out of §6.8 scope.
+// Spec: §6.8 — once run has received SIGINT or SIGTERM, serve returns at the
+// next frame read without dispatching that frame, the oversized-frame reply
+// included, so no request is answered after the signal.
+func TestServe_StopDispatchDispatchesNoFurtherFrame(t *testing.T) {
+	t.Parallel()
+	for name, frame := range map[string]string{
+		"request":   `{"jsonrpc":"2.0","id":9,"method":"definitely/not/real"}`,
+		"oversized": strings.Repeat("x", maxFrameBytes+1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			srv := &mcpServer{cfg: &config{}}
+			srv.stopDispatch()
+			var out bytes.Buffer
+			if err := srv.serve(strings.NewReader(frame+"\n"), &out); err != nil {
+				t.Fatalf("serve: %v", err)
+			}
+			if out.Len() != 0 {
+				t.Errorf("serve answered after stopDispatch:\n%s", out.String())
+			}
+		})
+	}
+}
+
+// Spec: §6.8, §6.3.2.1 — SIGHUP forces the token re-read and never ends the bridge. SIGINT and SIGTERM end it through run's §6.8 handler, which registers them apart from the token watch, so neither may appear among the re-read signals.
 func TestHangupSignals_OnlyTokenReReadSignal(t *testing.T) {
 	t.Parallel()
 	for _, sig := range hangupSignals() {
 		name := sig.String()
 		if strings.Contains(name, "interrupt") || strings.Contains(name, "terminated") {
-			t.Errorf("bridge must not handle lifecycle signal %q; the host owns shutdown", name)
+			t.Errorf("lifecycle signal %q is among the token re-read signals; run handles it", name)
 		}
 	}
 }

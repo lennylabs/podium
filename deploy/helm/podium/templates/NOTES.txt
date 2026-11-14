@@ -7,7 +7,7 @@ row and no completion record; opening the store creates the empty data_migration
 
 The kubelet rotates container logs, and a read after the Job ends returns only
 the current file, so the review reads the log that step 3 of the upgrade
-procedure in docs/deployment/clustered.md streamed to dry-run.log while the Job
+procedure in docs/deployment/operations/upgrade-notes.md streamed to dry-run.log while the Job
 ran. A capture taken now is truncated on a large store; rerun the dry-run step
 with that background capture when dry-run.log is missing.
 
@@ -47,7 +47,7 @@ value from that line:
     --set migration.mode=run --set migration.planDigest=<digest> --timeout 6h
 {{- else if eq $mode "run" }}
 The migrate Job {{ $job }} ran `podium-server sign-stored-rows{{ if .Values.migration.includeUnsigned }} --include-unsigned{{ end }} --plan-digest={{ .Values.migration.planDigest }}`. Read the
-log that step 4 of the upgrade procedure in docs/deployment/clustered.md
+log that step 4 of the upgrade procedure in docs/deployment/operations/upgrade-notes.md
 streamed to run.log while the Job ran.
 
 Exit status 3 with `plan:` lines in the log means that the plan changed since

@@ -35,7 +35,7 @@ config:
   # credential. An install does need the signing key Secret named under
   # signing: below, or signing.mode set to none. Turn hybrid search on by setting both of the following
   # and supplying the provider's key in the secret: vectorBackend.type to
-  # pgvector (or pinecone/weaviate/qdrant, whose per-backend env vars from
+  # pgvector (or pinecone, weaviate-cloud, or qdrant-cloud, whose per-backend env vars from
   # §13.12 go in the same secret), and embeddingProvider.type to openai,
   # voyage, cohere, or ollama. A registry that selects an embedding provider
   # without its key exits at startup with
@@ -98,12 +98,32 @@ config:
   # body_unavailable, and the migration reports it.
   migrationObjectReadTimeout: ""
 
-  # PODIUM_AUDIT_LOG_PATH for both the registry and the migrate Job. Empty
-  # keeps the default file under the home directory, which the read-only root
-  # filesystem cannot hold, so the audit events of a pod are dropped. An
-  # http(s) endpoint ships them, including the artifact.signed events the
-  # migration run appends for every row it signs.
-  auditLogPath: ""
+  # PODIUM_AUDIT_LOG_PATH for both the registry and the migrate Job (§8.3).
+  # The default, stdout, writes each audit record as one JSON line to the
+  # container's standard output. The cluster's log pipeline then holds the
+  # records under the platform's retention, outside the reach of §8.5
+  # erasure. A file path on a writable volume, an http(s) URL, or an
+  # otlp+http(s) URL replaces the default or joins it in a comma-separated
+  # list, such as stdout,otlp+https://collector.acme.com:4318.
+  #
+  # The value renders as an env: entry, which overrides a
+  # PODIUM_AUDIT_LOG_PATH that existingSecret supplies through envFrom. An
+  # installation that sets the destination in the secret sets it here
+  # instead. An empty value renders no variable, so the secret's
+  # PODIUM_AUDIT_LOG_PATH applies when the secret carries one. Otherwise the
+  # pods keep the file under the home directory, which the read-only root
+  # filesystem cannot hold, and the registry pods and the migrate Job refuse
+  # startup with config.audit_sink_unavailable.
+  #
+  # An extraEnv entry that sets PODIUM_TRACING=stdout beside a stdout
+  # destination refuses startup with config.audit_sink_unavailable, because
+  # both would write to standard output.
+  #
+  # With stdout listed, the migrate Job's standard output carries the
+  # artifact.signed JSON lines of the rows it signs beside the plan:,
+  # dry-run:, and rehash: lines that the upgrade procedure in
+  # docs/deployment/operations/upgrade-notes.md reads. Each audit line begins with {.
+  auditLogPath: "stdout"
 
   # The §13.12 / §4.5.5 discovery block is config-file-only: it has no
   # environment variable, and this chart configures the registry through env.
@@ -180,6 +200,24 @@ affinity: {}
 
 extraEnv: []
 
+# Transport credentials for the HTTP and OTLP audit destinations that
+# config.auditLogPath names (§8.3, §13.12). When name is set, the chart mounts
+# that Secret read-only at /etc/podium/audit in the registry pods and the
+# migrate Job, and points one variable at each key that keys lists:
+#
+#   headers  PODIUM_AUDIT_HEADERS_FILE   one `Name: value` request header per line
+#   ca.crt   PODIUM_AUDIT_TLS_CA_FILE    PEM CA bundle that replaces the system trust store
+#   tls.crt  PODIUM_AUDIT_TLS_CERT_FILE  PEM client certificate for mutual TLS
+#   tls.key  PODIUM_AUDIT_TLS_KEY_FILE   PEM private key of that certificate
+#
+# An unlisted key sets no variable, because the registry refuses startup with
+# config.audit_sink_unavailable when a named file cannot be read. tls.crt and
+# tls.key are listed together or not at all, and the render fails otherwise.
+audit:
+  transportSecret:
+    name: ""
+    keys: []
+
 # Persistent volume for filesystem object store (config.objectStore.type: filesystem).
 # Volume backing a filesystem object store. Every replica mounts the same
 # claim, and ReadWriteOnce binds it to one node, so a multi-node cluster needs
@@ -240,7 +278,7 @@ runtimeKeys:
 # sign-stored-rows. The chart therefore needs no check between a serving render
 # and the store.
 #
-# The upgrade procedure in docs/deployment/clustered.md sets mode and
+# The upgrade procedure in docs/deployment/operations/upgrade-notes.md sets mode and
 # planDigest per step, with --set or as value commits to a GitOps repository;
 # keep those two at their defaults in a shared values file. The chart reads
 # nothing from the cluster, so helm template, helm install, helm upgrade, and a

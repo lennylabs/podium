@@ -1,55 +1,93 @@
 ---
 title: Deployment
 nav_order: 4
-description: The Podium deployment tiers. Local needs no server, single node runs one binary, and clustered runs replicas against Postgres and object storage. Covers the tiers, the server-side integrations, layered composition, and access control.
+description: Choose a Podium deployment mode, then connect content, configure identity, and operate the registry with the task pages in this section.
+actions:
+  - label: Choose a deployment mode
+    href: modes/
+  - label: Connecting layer sources
+    href: content/layer-sources
 ---
 
 # Deployment
 
-Podium runs in tiers. Each tier keeps everything the tier below it does and adds server-side capability.
+This section is for operators who run Podium. It covers choosing and installing a deployment mode, configuring how the registry identifies callers, connecting the content the registry serves, operating the registry once it runs, and the backing services it depends on. [Deployment modes](modes/) compares the local, single-node, and clustered modes and is the starting point for a new deployment.
 
-| Tier | Server-side deployment | Catalog source | Materialization | What the tier adds |
-|:--|:--|:--|:--|:--|
-| [Local](local) | None | A folder, read from disk | User-driven sync | Authoring, lint, sync, domains, profiles, and ordered layers from disk |
-| [Single node](single-node) | One binary | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in local, plus discovery through MCP or the SDKs, hybrid search, registered and remote layers with visibility, and one audit log |
-| [Clustered](clustered) | Replicas, Postgres, and object storage | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in single node, plus Postgres schema-per-org tenant isolation and high availability across registry replicas |
+## Common tasks
 
-Artifacts are the same in every tier. The catalog on disk does not change when the deployment changes, and the same shared Go library parses, composes, and materializes it everywhere, so a given target and profile produce bit-identical output. [Local](local#skills-that-declare-no-version) lists the exceptions for skills that declare no version.
+- Choose a deployment mode: [Deployment modes](modes/).
+- Run a registry on one machine: [Single node](modes/single-node).
+- Deploy replicated registries on Kubernetes: [Clustered](modes/clustered).
+- Move a catalog from one mode to another: [Moving between modes](modes/migrating).
+- Connect a Git repository or a local directory, and keep each layer current: [Connecting layer sources](content/layer-sources).
+- Restrict who sees each layer: [Access control](content/access-control).
+- Set up an OIDC identity provider: [OIDC](identity/oidc/).
+- Create tenants and grant admins: [Tenants and admins](identity/tenants).
+- Send audit records to a file, standard output, an HTTP receiver, or an OpenTelemetry Collector: [Audit and observability](operations/observability).
+- Generate, back up, or rotate the signing key: [Signing keys](operations/signing-keys).
+- Back up a registry and test a restore: [Backup and restore](operations/backup-restore).
+- Upgrade a registry: [Upgrading](operations/upgrading) and [Upgrade notes](operations/upgrade-notes).
+- Diagnose a startup refusal or an error code: [Troubleshooting](operations/troubleshooting).
 
-## What runs in each tier
+## Pages in this section
 
-- **Local** runs the `podium` CLI against a directory. There is no server process, no database, and no identity provider.
-- **Single node** runs `podium serve --standalone`, one process with SQLite, sqlite-vec, and filesystem object storage embedded.
-- **Clustered** runs the standard stack: stateless registry replicas behind a load balancer, Postgres, S3-compatible object storage, and an OIDC identity provider.
-
-`--standalone` and the standard stack are configurations of the same registry binary. They are not separate builds.
-
-## Moving between tiers
-
-Migration is mechanical in both directions of growth.
-
-- Local to single node: run `podium serve --standalone --layer-path /path/to/dir` against the same directory, then point each workspace's `defaults.registry` at the server URL. The directory layout and the authoring loop are unchanged.
-- Single node to clustered: run `podium admin migrate-to-standard --postgres <dsn> --object-store <url>` to export the single-node state into the standard stack.
-
----
-
-## Server-side capability
+### Deployment modes
 
 | Page | What it covers |
 |:--|:--|
-| [Server-side integrations](integrations) | The backing services a server-side tier uses: metadata store, object storage, vector index, embeddings, identity, and layer sources. Each row names what ships by default and what can replace it. |
-| [Layered composition](layers) | Composing one catalog from several independent sources, with deterministic merge and explicit precedence. Registering layers, ordering them, and reading the result. |
-| [Access control](access-control) | Declaring who can see each layer: public, organization-wide, scoped to OIDC groups, or scoped to named users. Includes the enforcement boundary and how to debug an effective view. |
+| [Deployment modes](modes/) | What runs in each mode and how to choose between them. |
+| [Local](modes/local) | Running the CLI against a directory of artifacts, with no server. |
+| [Single node](modes/single-node) | Running one registry process with embedded storage. |
+| [Clustered](modes/clustered) | Deploying replicated registries on Kubernetes with Postgres, object storage, and an OIDC identity provider. |
+| [Helm chart reference](modes/helm-chart) | The chart's values, how they reach the registry pod, and the startup refusals they produce. |
+| [Docker Compose evaluation](modes/docker-compose) | Running the clustered components on one machine for evaluation. |
+| [Moving between modes](modes/migrating) | Moving a catalog from local to single node or clustered, and from single node to clustered. |
 
----
-
-## Operations and extension
+### Identity
 
 | Page | What it covers |
 |:--|:--|
-| [Progressive adoption](progressive-adoption) | A staged on-ramp from a permissive single-node deployment to enforced governance. Adds identity, sensitivity labels, signing, and freeze windows in order. |
-| [Operator guide](operator-guide) | Day-two operations for a clustered deployment: capacity planning, monitoring, alerting, backup and restore, upgrades, the security review checklist, and common pitfalls. |
-| [Extending](extending) | The plugin SPIs, the forward-compatibility constraints that keep out-of-process plugins on the table, and the external-extension patterns. |
-| [Vector backends](vector-backends) | Configure Pinecone, Weaviate Cloud, or Qdrant Cloud as the registry's vector backend. Covers self-embedding and storage-only modes, switching backends on a running deployment, and the local-overlay side path. |
-| [Gateway-delegated identity](gateway-delegated-identity) | Run the registry behind a gateway that has already authenticated the caller, using the `oidc-jwt` and `trusted-headers` identity providers. |
-| [OIDC cookbooks](oidc/) | Per-IdP setup recipes for Okta, Entra ID, Google Workspace, Auth0, and Keycloak. |
+| [Identity](identity/) | The identity providers, the consumer and registry sides, the default layer visibility, the web UI, and the startup guards. |
+| [OIDC](identity/oidc/) | The `oidc-jwt` settings and per-provider recipes for Okta, Entra ID, Google Workspace, Auth0, and Keycloak. |
+| [Gateway (trusted headers)](identity/trusted-headers) | Running the registry behind a gateway that authenticates the caller. |
+| [Tenants and admins](identity/tenants) | Single-tenant and multi-tenant registries, the operator and admin roles, and provisioning tenants. |
+| [Groups and SCIM](identity/groups) | Resolving group membership from OIDC group claims or a SCIM 2.0 push. |
+
+### Catalog content
+
+| Page | What it covers |
+|:--|:--|
+| [Catalog content](content/) | An overview of the content pages. |
+| [Connecting layer sources](content/layer-sources) | Registering Git repositories, private remotes, local paths, and Agent Skills repositories as layers, and keeping each layer current. |
+| [Layered composition](content/layers) | How the registry merges layers in an explicit precedence order. |
+| [Access control](content/access-control) | Declaring who can read and change each layer, and debugging a caller's effective view. |
+| [Publishing marketplace repositories](content/publishing) | Rendering the catalog into harness marketplace repositories. |
+
+### Operations
+
+| Page | What it covers |
+|:--|:--|
+| [Operations](operations/) | An overview of the day-two operations pages. |
+| [Audit and observability](operations/observability) | Audit destinations, Prometheus metrics, tracing, notifications, and alerting. |
+| [Signing keys](operations/signing-keys) | Generating, distributing, backing up, and rotating the registry signing key, and the `sign-stored-rows` command. |
+| [Backup and restore](operations/backup-restore) | What to back up in each mode and how to test a restore. |
+| [Upgrading](operations/upgrading) | The upgrade procedure, mixed-version replicas, and rollback. |
+| [Upgrade notes](operations/upgrade-notes) | Release-specific upgrade steps. |
+| [Capacity and availability](operations/capacity) | Sizing a deployment and read-only mode. |
+| [Security review checklist](operations/security-review) | The checks to run before a security review. |
+| [Outbound webhooks](operations/outbound-webhooks) | Sending registry events to webhook receivers. |
+| [Troubleshooting](operations/troubleshooting) | Symptoms and error codes, with the page that resolves each. |
+
+### Backing services
+
+| Page | What it covers |
+|:--|:--|
+| [Backing services](services/) | The metadata store, object storage, vector index, embedding provider, and the other services a registry uses, with what can replace each one. |
+| [Vector backends](services/vector-backends) | Configuring Pinecone, Weaviate Cloud, or Qdrant Cloud, and switching backends on a running deployment. |
+| [Extending](services/extending) | The plugin SPIs and the patterns for tooling built on the HTTP API, SDKs, CLI, and webhooks. |
+
+### Progressive adoption
+
+| Page | What it covers |
+|:--|:--|
+| [Progressive adoption](progressive-adoption) | A staged path from a permissive single-node deployment to enforced governance: identity, sensitivity labels, signing, and freeze windows, in that order. |

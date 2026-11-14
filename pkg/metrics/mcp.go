@@ -14,7 +14,8 @@ import (
 // (PODIUM_MCP_METRICS_ADDR). It exposes per-tool request, error, and latency
 // series plus the resolution-cache hit/miss counters, reusing the shared
 // podium_cache_hits_total / podium_cache_misses_total names so the dashboard's
-// cache-hit-rate panel resolves against a bridge scrape too.
+// cache-hit-rate panel resolves against a bridge scrape too. It also exports
+// the §8.3 audit delivery series of the bridge's local stream.
 type MCPRegistry struct {
 	reg *prometheus.Registry
 
@@ -23,12 +24,15 @@ type MCPRegistry struct {
 	duration    *prometheus.HistogramVec
 	cacheHits   prometheus.Counter
 	cacheMisses prometheus.Counter
+
+	// auditSeries implements audit.Observer for the bridge's local stream.
+	auditSeries
 }
 
 // NewMCP builds and registers the MCP bridge metric set against a fresh
 // registry (plus the Go runtime and process collectors).
 func NewMCP() *MCPRegistry {
-	m := &MCPRegistry{reg: prometheus.NewRegistry()}
+	m := &MCPRegistry{reg: prometheus.NewRegistry(), auditSeries: newAuditSeries()}
 
 	m.requests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "podium_mcp_requests_total",
@@ -55,6 +59,7 @@ func NewMCP() *MCPRegistry {
 	m.reg.MustRegister(
 		m.requests, m.errors, m.duration,
 		m.cacheHits, m.cacheMisses,
+		m.queueDepth, m.dropped,
 		collectors(),
 	)
 	return m

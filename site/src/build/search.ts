@@ -1,6 +1,13 @@
 import type { Element, RootContent } from "hast";
 import MiniSearch from "minisearch";
 
+import {
+  SEARCH_FIELDS,
+  SEARCH_OPTIONS,
+  STORED_FIELDS,
+  type StoredFields,
+} from "../client/search-fields";
+import { processTerm } from "../client/search-terms";
 import type { PageModel } from "./types";
 
 export type SearchDocument = {
@@ -19,7 +26,14 @@ export type SearchDocument = {
   text: string;
 };
 
-const HEADING_TAGS = new Set(["h2", "h3", "h4", "h5", "h6"]);
+/*
+ * Only h2 and h3 start a search entry. A deeper heading folds into the entry of
+ * the section above it, heading text included, so a hit still lands within one
+ * screen of the answer. Every entry adds its terms' postings to the serialized
+ * index, and reference pages carry many short h4 and h5 subsections, so an
+ * entry per subsection grows the index with headings rather than with prose.
+ */
+const HEADING_TAGS = new Set(["h2", "h3"]);
 const NON_PROSE = new Set(["pre", "script", "style"]);
 
 function textOf(node: RootContent): string {
@@ -90,6 +104,24 @@ export function documentsFor(page: PageModel, sectionTitle: string): SearchDocum
 }
 
 /**
+ * What the index receives. Every entry is searched by its page title, so a
+ * section ranks with its page, but the title and the section name are stored
+ * on the page entry alone (search-fields.ts).
+ */
+type IndexedDocument = { id: string; page: string; text: string } & StoredFields;
+
+function toIndexed(doc: SearchDocument): IndexedDocument {
+  const indexed: IndexedDocument = { id: doc.id, page: doc.page, text: doc.text };
+  if (doc.id.includes("#")) {
+    indexed.heading = doc.heading;
+  } else {
+    indexed.title = doc.page;
+    if (doc.section !== "") indexed.section = doc.section;
+  }
+  return indexed;
+}
+
+/**
  * Builds the index the browser loads on the reader's first search.
  *
  * Hidden pages are published but excluded here, which is what `hidden: true`
@@ -108,17 +140,14 @@ export function buildSearchIndex(
       ),
     );
 
-  const index = new MiniSearch<SearchDocument>({
-    fields: ["page", "heading", "text"],
-    storeFields: ["page", "heading", "section"],
-    searchOptions: {
-      boost: { page: 3, heading: 2 },
-      prefix: true,
-      fuzzy: 0.2,
-    },
+  const index = new MiniSearch<IndexedDocument>({
+    fields: SEARCH_FIELDS,
+    storeFields: STORED_FIELDS,
+    processTerm,
+    searchOptions: SEARCH_OPTIONS,
   });
 
-  index.addAll(documents);
+  index.addAll(documents.map(toIndexed));
 
   return {
     serialized: JSON.stringify(index.toJSON()),

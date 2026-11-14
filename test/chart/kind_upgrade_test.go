@@ -4,7 +4,7 @@
 // nothing from the cluster. The hook Job's lifecycle, the plan-digest
 // binding of the run, and the registry's boot refusal over a store that
 // v0.4.0 wrote appear only on a cluster, so this test installs v0.4.0, seeds
-// its store, and walks the upgrade procedure docs/deployment/clustered.md
+// its store, and walks the upgrade procedure docs/deployment/operations/upgrade-notes.md
 // states, step by step, including every refusal the procedure relies on.
 //
 // It is opt-in: it runs only with PODIUM_LIVE_KIND=1 and with docker, kind,

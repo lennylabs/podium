@@ -79,29 +79,37 @@ func (q *QueryRetention) apply(e *Event, now time.Time) bool {
 	return false
 }
 
-// Enforce rewrites sink's underlying file with every event older
-// than its per-type policy removed. The hash chain is rebuilt over
-// the surviving events. When the rewrite changes the log it appends an
-// audit.retention_enforced marker recording the superseded chain head,
-// so an external anchor of the prior head can be reconciled and
-// re-anchored (§8.6).
+// EnforceResult reports what one Enforce pass changed.
+type EnforceResult struct {
+	// Dropped counts the events removed under their per-type Policy.
+	Dropped int
+	// QueriesRedacted counts the kept search events whose query text the
+	// §8.4 query-text window replaced with a placeholder or removed.
+	QueriesRedacted int
+}
+
+// changed reports whether the pass altered the log.
+func (r EnforceResult) changed() bool { return r.Dropped > 0 || r.QueriesRedacted > 0 }
+
+// Enforce rewrites the stream's file destination with every event older
+// than its per-type policy removed and the §8.4 query-text window applied
+// to the surviving search events. The hash chain is rebuilt over the
+// surviving events and closed by an audit.retention_enforced event that
+// records the drop count, the redaction count, and the superseded chain
+// head, so an external anchor of the prior head can be reconciled and the
+// new head re-anchored (§8.6). The closing event reaches every other
+// destination of the stream.
 //
-// When two policies cover the same Type, the most-restrictive
-// (smallest MaxAge) wins — the §8.4 retention-by-default behavior.
+// When two policies cover the same Type, the most-restrictive (smallest
+// MaxAge) wins, the §8.4 retention-by-default behavior. Pass a nil queryRet
+// to skip the query-text window.
 //
-// queryRet applies the §8.4 query-text window (placeholder at 7 days,
-// drop at 30 days) to the surviving search events; pass nil to skip it.
+// A pass that drops nothing and redacts nothing returns EnforceResult{} and
+// nil without touching the file. On a rewrite failure the file keeps its
+// prior state and the error is returned.
 //
-// Returns the number of events dropped (query-text redaction of a kept
-// event does not count as a drop). Errors are returned as-is; the file is
-// left in its prior state on rewrite failure.
-func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy, queryRet *QueryRetention) (int, error) {
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
-	events, err := readAllEvents(sink.path)
-	if err != nil {
-		return 0, err
-	}
+// Spec: §8.4, §8.6
+func Enforce(ctx context.Context, s *Stream, now time.Time, policies []Policy, queryRet *QueryRetention) (EnforceResult, error) {
 	maxAge := map[EventType]time.Duration{}
 	for _, p := range policies {
 		existing, ok := maxAge[p.Type]
@@ -109,57 +117,69 @@ func Enforce(_ context.Context, sink *FileSink, now time.Time, policies []Policy
 			maxAge[p.Type] = p.MaxAge
 		}
 	}
+	var res EnforceResult
+	err := s.rewrite(ctx, func(events []Event) ([]Event, *Event, bool, error) {
+		kept, pass := applyRetention(events, now, maxAge, queryRet)
+		if !pass.changed() {
+			return nil, nil, false, nil
+		}
+		res = pass
+		marker := retentionMarker(now, pass, headOf(events))
+		return kept, &marker, true, nil
+	})
+	if err != nil {
+		return EnforceResult{}, err
+	}
+	return res, nil
+}
+
+// applyRetention drops every event past its per-type maximum age and ages
+// out the query text of the survivors.
+func applyRetention(events []Event, now time.Time, maxAge map[EventType]time.Duration, queryRet *QueryRetention) ([]Event, EnforceResult) {
 	kept := events[:0:0]
-	dropped := 0
-	redacted := false
+	var res EnforceResult
 	for i := range events {
 		e := events[i]
 		if max, ok := maxAge[e.Type]; ok && now.Sub(e.Timestamp) > max {
-			dropped++
+			res.Dropped++
 			continue
 		}
-		// §8.4 query-text window: keep the event, age out its query field.
 		if queryRet.apply(&e, now) {
-			redacted = true
+			res.QueriesRedacted++
 		}
 		kept = append(kept, e)
 	}
-	if dropped == 0 && !redacted {
-		return 0, nil
+	return kept, res
+}
+
+// retentionMarker builds the audit.retention_enforced event that closes a
+// retention rewrite. Every rewrite closes with an event, a redaction-only
+// pass included, so a receiver can tell a rewrite from a loss (§8.6).
+//
+// Spec: §8.1, §8.6
+func retentionMarker(now time.Time, res EnforceResult, supersededHead string) Event {
+	// audit.retention_enforced describes the registry as a whole, so it
+	// records no tenant (§8.1).
+	return Event{
+		Type:      EventRetentionEnforced,
+		Timestamp: now,
+		Caller:    "system:retention",
+		Target:    supersededHead,
+		Context: map[string]string{
+			"dropped":          fmt.Sprintf("%d", res.Dropped),
+			"queries_redacted": fmt.Sprintf("%d", res.QueriesRedacted),
+			"superseded_head":  supersededHead,
+		},
 	}
-	// §8.4/§8.6: dropping events rebuilds the hash chain, which invalidates
-	// any external anchor of the prior chain head. Append a boundary marker
-	// recording the superseded head and the drop count so a verifier
-	// holding an older anchor can reconcile it with the truncated log and
-	// an anchor scheduler re-anchors the new head. Query-text
-	// redaction also rewrites the chain, but it removes no events; the
-	// marker is reserved for drops so a redaction-only pass stays quiet.
-	if dropped > 0 {
-		supersededHead := ""
-		if len(events) > 0 {
-			supersededHead = events[len(events)-1].Hash
-		}
-		// Spec: §8.1: audit.retention_enforced describes the registry as a whole, so it records no tenant.
-		kept = append(kept, Event{
-			Type:      EventRetentionEnforced,
-			Timestamp: now,
-			Caller:    "system:retention",
-			Target:    supersededHead,
-			Context: map[string]string{
-				"dropped":         fmt.Sprintf("%d", dropped),
-				"superseded_head": supersededHead,
-			},
-		})
+}
+
+// headOf returns the hash of the last event, the chain head a rewrite of
+// events supersedes, or "" for an empty log.
+func headOf(events []Event) string {
+	if len(events) == 0 {
+		return ""
 	}
-	if err := rewriteWithChain(sink.path, kept); err != nil {
-		return 0, err
-	}
-	if len(kept) > 0 {
-		sink.lastHash = kept[len(kept)-1].Hash
-	} else {
-		sink.lastHash = ""
-	}
-	return dropped, nil
+	return events[len(events)-1].Hash
 }
 
 // EraseScope selects the records an erasure reads and rewrites. A record is
@@ -230,19 +250,22 @@ func (s EraseScope) includes(recTenant string) bool {
 //
 // client is the §8.1 caller.client of the erase request, or nil when the
 // erasure serves no request (the offline CLI form) or the request named no
-// client. EraseUser normalizes it onto the user.erased event itself, because
-// rewriteWithChain hashes that event without going through Append. The
+// client. EraseUser normalizes it onto the user.erased event itself, because the
+// rewrite hashes that event without going through Append. The
 // client is a parameter of its own rather than a field of EraseScope: the
 // cross-tenant guard refuses only the zero EraseScope, so a header-derived
 // field there would let a scope with no tenant and Unlabeled false pass the
 // guard and select every tenant's records.
 //
+// The rewrite runs on the stream's file destination, and the user.erased
+// record that closes it reaches every other destination of the stream.
+//
 // Returns the number of in-scope events transformed (excludes the appended
 // user.erased event). The count covers nothing outside the scope, so it
 // carries no information about other tenants' records.
 //
-// Spec: §8.1, §8.5
-func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string, client *CallerClient, scope EraseScope) (int, error) {
+// Spec: §8.1, §8.5, §8.6
+func EraseUser(ctx context.Context, s *Stream, userID, salt, admin string, client *CallerClient, scope EraseScope) (int, error) {
 	if userID == "" {
 		return 0, fmt.Errorf("audit.erase: userID is required")
 	}
@@ -252,12 +275,28 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string, cl
 	if scope == (EraseScope{}) {
 		return 0, fmt.Errorf("audit.erase: %w", ErrEraseScope)
 	}
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
-	events, err := readAllEvents(sink.path)
+	transformed := 0
+	err := s.rewrite(ctx, func(events []Event) ([]Event, *Event, bool, error) {
+		transformed = redactUser(events, userID, salt, scope)
+		// The user.erased record names the head this rewrite supersedes so
+		// a verifier holding an anchor of it can reconcile (§8.6).
+		erased := UserErasedEvent(userID, salt, admin, scope.Tenant, transformed, headOf(events))
+		if client != nil {
+			erased.CallerClient = NormalizeClient(*client)
+		}
+		// Every erasure records user.erased and rewrites the file, so the
+		// pass always reports a change.
+		return events, &erased, true, nil
+	})
 	if err != nil {
 		return 0, err
 	}
+	return transformed, nil
+}
+
+// redactUser replaces every in-scope identifier of userID in events with
+// its salted tombstone and returns the number of events it changed.
+func redactUser(events []Event, userID, salt string, scope EraseScope) int {
 	aliases := eraseAliases(events, userID, scope)
 	tombstone := tombstoneFor(userID, salt)
 	transformed := 0
@@ -269,22 +308,7 @@ func EraseUser(_ context.Context, sink *FileSink, userID, salt, admin string, cl
 			transformed++
 		}
 	}
-	// Spec: §8.6: the user.erased record names the head this rewrite
-	// supersedes so a verifier holding an anchor of it can reconcile.
-	supersededHead := ""
-	if len(events) > 0 {
-		supersededHead = events[len(events)-1].Hash
-	}
-	erased := UserErasedEvent(userID, salt, admin, scope.Tenant, transformed, supersededHead)
-	if client != nil {
-		erased.CallerClient = NormalizeClient(*client)
-	}
-	events = append(events, erased)
-	if err := rewriteWithChain(sink.path, events); err != nil {
-		return 0, err
-	}
-	sink.lastHash = events[len(events)-1].Hash
-	return transformed, nil
+	return transformed
 }
 
 // eraseAliases is the §8.5 alias-discovery pass: an in-scope event belongs
@@ -346,13 +370,13 @@ func redactEvent(ev *Event, aliases map[string]bool, tombstone string) bool {
 }
 
 // UserErasedEvent builds the §8.5 user.erased record. EraseUser and the
-// registry's endpoint-sink path both call it, so the tombstone and the
+// registry's no-file-destination path both call it, so the tombstone and the
 // context layout are defined once. The invoking admin is recorded as the
 // event Caller and in the admin context field (§8.1: "Admin invoked the GDPR
 // erasure command"); with no admin (an internal call) the Caller falls back
 // to system:retention. supersededHead is the chain head the rewrite
-// replaced, recorded as superseded_head when non-empty; an endpoint-sink
-// erase rewrites no chain and passes "".
+// replaced, recorded as superseded_head when non-empty; an erase on a stream
+// with no file destination rewrites no chain and passes "".
 //
 // Spec: §8.5, §8.6
 func UserErasedEvent(userID, salt, admin, tenant string, transformed int, supersededHead string) Event {

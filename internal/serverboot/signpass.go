@@ -6,9 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
@@ -159,9 +159,12 @@ func checkSignStoredRowsFlags(opts signStoredRowsOptions) error {
 // which attests unsigned rows by signing them, is the only invocation refused
 // for it. The refusals run before the store opens, so a refused command writes
 // nothing, and the loader runs with generate unset, so an absent key file is
-// refused rather than generated. The returned func releases the store.
+// refused rather than generated. An unusable audit configuration refuses with
+// config.audit_sink_unavailable, so the pass never runs without an audit
+// stream. The returned func flushes and seals the audit stream and then
+// releases the store.
 //
-// Spec: §13.4, §13.12.
+// Spec: §8.3, §13.4, §13.12.
 func openSignPassDeps(cfg *Config, opts signStoredRowsOptions) (rehashDeps, func(), error) {
 	signingOn := registrySigningEnabled(cfg.signMode)
 	if !signingOn && opts.includeUnsigned {
@@ -179,20 +182,20 @@ func openSignPassDeps(cfg *Config, opts signStoredRowsOptions) (rehashDeps, func
 	if err != nil {
 		return rehashDeps{}, nil, fmt.Errorf("pii redaction config: %w", err)
 	}
+	stream, err := openAuditStream(cfg, nil)
+	if err != nil {
+		return rehashDeps{}, nil, auditSinkUnavailable(err)
+	}
 	st, err := openStore(cfg)
 	if err != nil {
+		stream.Shutdown()
 		return rehashDeps{}, nil, fmt.Errorf("open store: %w", err)
 	}
-	closeStore := func() {
+	cleanup := func() {
+		stream.Shutdown()
 		if closer, ok := st.(io.Closer); ok {
 			_ = closer.Close()
 		}
-	}
-	// sign-stored-rows never anchors, so an unopenable file sink is logged
-	// and the pass runs without one.
-	sink, _, sinkErr := openAuditSink(cfg)
-	if sinkErr != nil {
-		log.Printf("warning: audit sink disabled: %v", sinkErr)
 	}
 	d := rehashDeps{
 		Store:   st,
@@ -202,7 +205,7 @@ func openSignPassDeps(cfg *Config, opts signStoredRowsOptions) (rehashDeps, func
 		ReadTimeout:    cfg.migrationObjectReadTimeout,
 		AttestUnsigned: opts.includeUnsigned,
 		ReviewedPlan:   opts.planDigest,
-		Sink:           sink,
+		Sink:           audit.AsSink(stream),
 		Scrubber:       scrubber,
 	}
 	// Assign the signer only when signing is on: a zero RegistryManagedKey
@@ -212,7 +215,7 @@ func openSignPassDeps(cfg *Config, opts signStoredRowsOptions) (rehashDeps, func
 		d.Signer = key
 		d.MintUnsigned = mintUnsigned
 	}
-	return d, closeStore, nil
+	return d, cleanup, nil
 }
 
 // loadSignPassSigner loads the registry signing key without generating one and

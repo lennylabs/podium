@@ -67,9 +67,9 @@ func TestAuditScale_SamplingAlwaysRecordedRetentionAndVolume(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "audit.log")
-	sink, err := audit.NewFileSink(logPath)
+	sink, err := audit.OpenFile(logPath, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 
 	// The exact §8.4 sampler the parser produces from the env var, here over
@@ -193,12 +193,12 @@ func TestAuditScale_SamplingAlwaysRecordedRetentionAndVolume(t *testing.T) {
 	// Run the retention sweep with the production policy table (1-year metadata
 	// window), then re-anchor the moved head the way Run() wires it.
 	policies := defaultRetentionPolicies(365 * 24 * time.Hour)
-	dropped, err := audit.Enforce(ctx, sink, now, policies, audit.DefaultQueryRetention())
+	res, err := audit.Enforce(ctx, sink, now, policies, audit.DefaultQueryRetention())
 	if err != nil {
 		t.Fatalf("Enforce: %v", err)
 	}
-	if dropped < 50 {
-		t.Errorf("retention dropped %d events, want >= 50 aged artifact.loaded events", dropped)
+	if res.Dropped < 50 {
+		t.Errorf("retention dropped %d events, want >= 50 aged artifact.loaded events", res.Dropped)
 	}
 	if _, err := audit.Anchor(ctx, sink, signer); err != nil {
 		t.Fatalf("re-anchor after retention: %v", err)

@@ -2,10 +2,16 @@ package audit_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -31,9 +37,9 @@ func TestScheduler_RecordsAnchorFailedEvent(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, err := audit.NewFileSink(path)
+	sink, err := audit.OpenFile(path, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	// A non-empty chain so Anchor reaches the failing Sign step.
 	if err := sink.Append(context.Background(), audit.Event{
@@ -84,9 +90,9 @@ func TestVerifyScheduler_DetectsGapAndAlerts(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, err := audit.NewFileSink(path)
+	sink, err := audit.OpenFile(path, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	for i := 0; i < 3; i++ {
 		if err := sink.Append(context.Background(), audit.Event{
@@ -144,7 +150,7 @@ func TestVerifyScheduler_CleanChainNoAlert(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.log")
-	sink, _ := audit.NewFileSink(path)
+	sink, _ := audit.OpenFile(path, audit.OpenOptions{})
 	for i := 0; i < 3; i++ {
 		_ = sink.Append(context.Background(), audit.Event{
 			Type: audit.EventArtifactLoaded, Caller: "alice",
@@ -180,4 +186,136 @@ func TestVerifyScheduler_NilSinkNoOp(t *testing.T) {
 	if err := sched.Run(context.Background()); err != nil {
 		t.Errorf("Run with nil sink: %v, want nil", err)
 	}
+}
+
+// countingObserver records the Dropped calls a stream reports.
+type countingObserver struct{ dropped atomic.Int64 }
+
+func (o *countingObserver) AddQueued(string, int)      {}
+func (o *countingObserver) Dropped(_, _ string, n int) { o.dropped.Add(int64(n)) }
+
+// lineRecorder is an HTTP destination's receiver that decodes each NDJSON
+// line it receives.
+type lineRecorder struct {
+	mu      sync.Mutex
+	records []map[string]any
+}
+
+func (r *lineRecorder) ServeHTTP(_ http.ResponseWriter, req *http.Request) {
+	body, _ := io.ReadAll(req.Body)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, line := range strings.Split(string(body), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err == nil {
+			r.records = append(r.records, rec)
+		}
+	}
+}
+
+// hashOfType returns the hash of the first received record of typ, or "".
+func (r *lineRecorder) hashOfType(typ audit.EventType) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, rec := range r.records {
+		if rec["type"] == string(typ) {
+			h, _ := rec["hash"].(string)
+			return h
+		}
+	}
+	return ""
+}
+
+// lastLineHash returns the hash of the file's last line.
+func lastLineHash(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	var rec struct {
+		Hash string `json:"hash"`
+	}
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &rec); err != nil {
+		t.Fatalf("decode last line: %v", err)
+	}
+	return rec.Hash
+}
+
+// openReceivingStream opens a stream over a file and an HTTP receiver and
+// appends three records.
+func openReceivingStream(t *testing.T) (*audit.Stream, string, *lineRecorder, *countingObserver) {
+	t.Helper()
+	rcv := &lineRecorder{}
+	srv := httptest.NewServer(rcv)
+	t.Cleanup(srv.Close)
+	path := filepath.Join(t.TempDir(), "audit.log")
+	obs := &countingObserver{}
+	s, err := audit.Open(context.Background(), path+","+srv.URL, audit.OpenOptions{Observer: obs})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	for i := 0; i < 3; i++ {
+		if err := s.Append(context.Background(), audit.Event{
+			Type: audit.EventArtifactLoaded, Caller: "alice", Target: fmt.Sprintf("skill/%d", i),
+		}); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	return s, path, rcv, obs
+}
+
+// Spec: §8.6 — audit.gap_detected and audit.anchor_failed go through the
+// stream, so they reach every non-file destination with the hash the
+// file's line holds. A scheduler that wrote through the file alone would
+// leave the receiver without them.
+func TestVerifyScheduler_GapDetectedReachesEveryDestination(t *testing.T) {
+	t.Parallel()
+	t.Run("gap_detected", func(t *testing.T) {
+		t.Parallel()
+		s, path, rcv, obs := openReceivingStream(t)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Drop the middle line, so the third record's prev_hash names no
+		// earlier hash.
+		lines := strings.SplitAfter(string(raw), "\n")
+		if err := os.WriteFile(path, []byte(lines[0]+lines[2]), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		sched := &audit.VerifyScheduler{Sink: s, Interval: time.Hour, OnGap: func(error) { cancel() }}
+		_ = sched.Run(ctx)
+		if err := s.Close(context.Background()); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if got, want := rcv.hashOfType(audit.EventAuditGapDetected), lastLineHash(t, path); got == "" || got != want {
+			t.Errorf("receiver gap_detected hash = %q, want the file's last line %q", got, want)
+		}
+		if n := obs.dropped.Load(); n != 0 {
+			t.Errorf("dropped = %d, want 0", n)
+		}
+	})
+	t.Run("anchor_failed", func(t *testing.T) {
+		t.Parallel()
+		s, path, rcv, obs := openReceivingStream(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		sched := &audit.Scheduler{Sink: s, Signer: alwaysFailSigner{}, Interval: time.Hour, OnFailure: func(error) { cancel() }}
+		_ = sched.Run(ctx)
+		if err := s.Close(context.Background()); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if got, want := rcv.hashOfType(audit.EventAuditAnchorFailed), lastLineHash(t, path); got == "" || got != want {
+			t.Errorf("receiver anchor_failed hash = %q, want the file's last line %q", got, want)
+		}
+		if n := obs.dropped.Load(); n != 0 {
+			t.Errorf("dropped = %d, want 0", n)
+		}
+	})
 }

@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end tests for docs/deployment/clustered.md (D-clustered).
+// End-to-end tests for docs/deployment/modes/clustered.md (D-clustered).
 // The page documents the standard deployment topology: Postgres + object
 // storage + OIDC + replicated registry, with layer management, SCIM,
 // admin grants, GDPR erasure, runtime key registration, and migration.
@@ -1909,7 +1909,7 @@ func TestStandardDeploy_AdminNoSubcommand(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.9, §13.12 — the key-generation procedure docs/deployment/clustered.md
+// Spec: §4.7.9, §13.12 — the key-generation procedure docs/deployment/modes/clustered.md
 // publishes for the chart's signing Secret. The page's commands run verbatim
 // on a test HOME that already holds an unsigned standalone store.
 // `podium admin signing-key generate` writes a 0600 key file the key-file
@@ -1921,8 +1921,8 @@ func TestStandardDeploy_AdminNoSubcommand(t *testing.T) {
 // bridge loads under the always default.
 func TestStandardDeploy_SigningKeyFileFromGenerate(t *testing.T) {
 	t.Parallel()
-	keygen := docBashBlock(t, "docs/deployment/clustered.md", "signing-key generate")
-	extract := docBashBlock(t, "docs/deployment/clustered.md", "awk '/^public:/")
+	keygen := docBashBlock(t, "docs/deployment/modes/clustered.md", "signing-key generate")
+	extract := docBashBlock(t, "docs/deployment/modes/clustered.md", "awk '/^public:/")
 
 	// A pre-existing unsigned standalone store in the operator's home.
 	home := t.TempDir()

@@ -90,10 +90,11 @@ func TestRun_ReportsBindFailure(t *testing.T) {
 // instead of leaking the goroutine.
 func TestStartRetentionScheduler_StopsOnContextCancel(t *testing.T) {
 	defer goleak.VerifyNone(t)
-	sink, err := audit.NewFileSink(filepath.Join(t.TempDir(), "audit.log"))
+	sink, err := audit.OpenFile(filepath.Join(t.TempDir(), "audit.log"), audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
+	defer sink.Shutdown()
 	ctx, cancel := context.WithCancel(context.Background())
 	startRetentionScheduler(ctx, &Config{auditRetentionMaxAgeDays: 1, auditRetentionInterval: 3600}, sink, nil)
 	cancel()

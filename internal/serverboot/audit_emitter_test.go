@@ -1,7 +1,9 @@
 package serverboot
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -46,6 +48,51 @@ func TestAuditEmitterFor_AppendsToSink(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("audit log missing %q in:\n%s", want, got)
 		}
+	}
+}
+
+// Spec: §8.3, §8.4 — the emitter samples before the stream chains, so a
+// sampled-out event takes no place in the chain: the record after it links
+// to the record before it, and a receiver checking prev_hash sees no gap.
+func TestAuditEmitter_SampledEventNeverReachesStream(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	stream, err := audit.Open(context.Background(), path, audit.OpenOptions{})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(stream.Shutdown)
+	sampler := audit.NewSampler(map[audit.EventType]float64{audit.EventDomainLoaded: 0})
+	emit := auditEmitterFor(audit.AsSink(stream), audit.NewPIIScrubber(), sampler)
+	for _, typ := range []string{"artifact.published", "domain.loaded", "artifact.loaded"} {
+		emit(context.Background(), core.AuditEvent{Type: typ, Caller: "alice", Target: "skill/x"})
+	}
+
+	body, err := readBytes(path)
+	if err != nil {
+		t.Fatalf("readBytes: %v", err)
+	}
+	type record struct {
+		Type     string `json:"type"`
+		Hash     string `json:"hash"`
+		PrevHash string `json:"prev_hash"`
+	}
+	var recs []record
+	for _, line := range bytes.Split(bytes.TrimSpace(body), []byte("\n")) {
+		var r record
+		if err := json.Unmarshal(line, &r); err != nil {
+			t.Fatalf("decode %q: %v", line, err)
+		}
+		recs = append(recs, r)
+	}
+	if len(recs) != 2 || recs[0].Type != "artifact.published" || recs[1].Type != "artifact.loaded" {
+		t.Fatalf("file records = %+v, want artifact.published then artifact.loaded", recs)
+	}
+	if recs[1].PrevHash != recs[0].Hash {
+		t.Errorf("second prev_hash = %q, want the first record's hash %q", recs[1].PrevHash, recs[0].Hash)
+	}
+	if err := stream.Verify(context.Background()); err != nil {
+		t.Errorf("Verify: %v", err)
 	}
 }
 

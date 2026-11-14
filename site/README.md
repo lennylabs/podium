@@ -32,7 +32,6 @@ src/
   pages/          Landing, Doc, and NotFound
   client/         the browser bundle: theme, copy, search, islands, and the router
   styles/         design tokens and stylesheets
-design/           the design handoff: tokens, screens, and four mockups
 test/             fixtures and the test suite
 ```
 
@@ -308,6 +307,30 @@ Pages themselves are served with a short max-age. The router fetches them with
 nothing changed, so a client navigation never renders a page the reader has
 already been told is stale.
 
+## Moved pages
+
+GitHub Pages serves no redirects, so a page that moves leaves a forwarding page
+at its old route. `docs/_redirects.yaml` lists them. The underscore keeps the
+file out of the published tree.
+
+```yaml
+- from: deployment/operator-guide
+  to: deployment/operations/troubleshooting
+  anchors:
+    capacity-planning: deployment/operations/capacity#capacity-planning
+```
+
+`from` is the old docs-relative path without its extension, and a trailing `/`
+names a section index. `to` and every `anchors` target are written the way a
+link from the root of the docs tree is written, and the build resolves them
+like links, so a target that does not exist stops the build. A reader who
+arrives with a fragment listed under `anchors` lands on the page that now holds
+that section. Any other fragment is carried over to `to`.
+
+A route that a page still publishes cannot also redirect. Pages link to the new
+path, because the old routes join the route index only after links are
+rewritten.
+
 ## Checks
 
 `npm run check` fails on an unknown frontmatter key, a missing required key, an
@@ -323,10 +346,14 @@ trailing-slash URL does not match the published `<page>.html` output.
 
 ## Design
 
-`design/README.md` holds the tokens, the type scale, the screen compositions,
-and the interaction states. `design/podium-design-reference.html` holds four
-mockups covering the landing page and a documentation page in a light and a dark
-theme, and it is the source of truth for any value the README does not list.
+The design handoff lives in `web/design/site/`, beside the registry web UI's
+handoff in `web/design/app/`. `web/design/site/README.md` holds the tokens, the
+type scale, the screen compositions, and the interaction states.
+`web/design/site/podium-design-reference.html` holds the desktop mockups of the
+landing page and a documentation page in a light and a dark theme, and the
+mobile screens, and it is the source of truth for any value the README does not
+list. `web/design/site/logo/` holds the production SVGs of the mark, the
+lockups, and the tile.
 
 Components read the CSS variables in `src/styles/tokens.css` and never inline a
 color. The accent is a surface color carrying dark text, or text on the dark

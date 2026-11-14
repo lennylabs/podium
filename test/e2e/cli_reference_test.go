@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lennylabs/podium/internal/testharness/auditharness"
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/sign"
@@ -1860,6 +1861,27 @@ func TestCLI_AdminEraseAudited(t *testing.T) {
 		"--audit-path", logPath, "--salt", "tenant-salt", "--operator", "carol@acme.com",
 		"alice@acme.com"), 0, "erase")
 	cliContains(t, readFile(t, logPath), "user.erased", "user.erased event appended")
+}
+
+// Spec: §8.5 — the offline erase rewrites only the file it names. With
+// PODIUM_AUDIT_LOG_PATH naming an HTTP receiver, it writes its user.erased
+// record, with schema_version 1, to the file, and the receiver gets no
+// request.
+func TestCLI_AdminEraseLocalIgnoresAuditDestinations(t *testing.T) {
+	rcv := auditharness.NewReceiver(t)
+	logPath := filepath.Join(t.TempDir(), "audit.log")
+	cliSeedAudit(t, logPath, "alice@acme.com")
+	res := runPodium(t, "", []string{"PODIUM_AUDIT_LOG_PATH=" + rcv.URL()}, "admin", "erase", "--local",
+		"--audit-path", logPath, "--salt", "tenant-salt", "--operator", "carol@acme.com",
+		"alice@acme.com")
+	cliWantExit(t, res, 0, "admin erase --local")
+	erased := findRecordLine([]string{readFile(t, logPath)}, "user.erased")
+	if !strings.Contains(erased, `"schema_version":1`) {
+		t.Errorf("user.erased line lacks schema_version 1: %q", erased)
+	}
+	if n := len(rcv.Requests()); n != 0 {
+		t.Errorf("the receiver got %d request(s) from the offline erase, want 0", n)
+	}
 }
 
 // ===== Signing ======================================

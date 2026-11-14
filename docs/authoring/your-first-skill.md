@@ -1,16 +1,17 @@
 ---
 title: Your first skill
 nav_order: 1
-description: "From the quickstart's greet skill to a richer artifact with fuller frontmatter, an ARTIFACT.md overlay, a referenced script, runtime requirements, and a lint check before commit."
+description: "Extend the quickstart's greet skill with a sharper description, an ARTIFACT.md overlay, a referenced script, a runtime requirement, and a lint check before commit."
 ---
 
 # Your first skill
 
-This page picks up from the [quickstart](../getting-started/quickstart) and rounds out the same `greet` skill with fuller frontmatter, an `ARTIFACT.md` overlay for Podium-only fields, a body reference to its bundled script, watch-mode iteration, and a lint check. For non-skill walkthroughs, see [Your first command](your-first-command) and [Your first agent](your-first-agent).
+This tutorial continues the [quickstart](../getting-started/quickstart) and extends its `greet` skill into a complete artifact. It sharpens the description, adds an `ARTIFACT.md` overlay for Podium-only fields, points the body at the bundled script, declares a runtime requirement, and lints the result. For other artifact types, see [Your first command](your-first-command) and [Your first agent](your-first-agent).
 
----
+## Before you start
 
-## Starting point
+- Complete the [quickstart](../getting-started/quickstart). It installs `podium`, writes the `greet` skill, and sets Claude Code as the default harness with `podium init`.
+- Set `$EDITOR`, or substitute an editor in the commands below.
 
 The quickstart leaves the artifact directory like this:
 
@@ -21,13 +22,13 @@ The quickstart leaves the artifact directory like this:
     └── today.py
 ```
 
-The artifact is a skill named `greet`. `SKILL.md` is the [agentskills.io](https://agentskills.io/specification) standard manifest with the agent-facing prose, and `scripts/today.py` is the bundled script the quickstart added. A directory that holds `SKILL.md` is a complete skill, so the artifact has no `ARTIFACT.md` yet.
+The artifact is a skill named `greet`. `SKILL.md` is the [agentskills.io](https://agentskills.io/specification) standard manifest and holds the agent-facing prose. `scripts/today.py` is the bundled script the quickstart added. A directory that holds `SKILL.md` is a complete skill, so the artifact has no `ARTIFACT.md` yet.
 
 ---
 
-## Add fuller frontmatter
+## Step 1: Sharpen the description
 
-The minimum frontmatter that the registry ingests is `name` and `description` in `SKILL.md`. A `metadata.version` in `major.minor.patch` form is recommended: a skill that declares no version receives one that the registry assigns, and `podium lint` warns about it. The fields below pay off as the catalog grows.
+The quickstart's `SKILL.md` already declares `name`, `description`, `license`, and `metadata.version`. This step rewrites the `description` so that it names the situations in which the harness reaches for the skill.
 
 Open `SKILL.md`:
 
@@ -35,7 +36,7 @@ Open `SKILL.md`:
 $EDITOR ~/podium-artifacts/personal/hello/greet/SKILL.md
 ```
 
-The standard's frontmatter holds the discoverability fields and the version:
+Replace the frontmatter with this block. Only the `description` line differs from the quickstart:
 
 ```markdown
 ---
@@ -47,25 +48,23 @@ metadata:
 ---
 ```
 
-Notes on these fields:
+The `description` decides whether the harness reaches for the skill. A vague description such as "Helper skill" gets ignored. A specific one that states what the skill does and when to use it matches the prompts users write. The registry flags thin descriptions at ingest, and local `podium lint` does not run that check.
 
-- **`description`** decides whether the harness reaches for this skill. A vague description like "Helper skill" gets ignored; a specific one like "Greet the user by name and tell them today's date" matches against actual user prompts. The registry flags thin descriptions at ingest time; local `podium lint` does not run that check.
-- **`license`** names the license the skill is distributed under.
-- **`metadata.version`** is the skill's semver version. Bump it when the content changes, because an ingested version is immutable.
-
-The full frontmatter reference is in [Frontmatter reference](frontmatter-reference).
+The version stays `1.0.0`, because a filesystem catalog keeps no ingest history. Once a registry server ingests the skill, `(artifact_id, version)` is immutable, so bump `metadata.version` whenever the content changes after that. [Frontmatter reference](frontmatter-reference) lists every field.
 
 ---
 
-## Add Podium-only fields with an ARTIFACT.md overlay
+## Step 2: Add Podium-only fields in an ARTIFACT.md overlay
 
-Podium-only fields such as `when_to_use`, `tags`, and `sensitivity` never go in `SKILL.md`, which stays within the agentskills.io specification. They go in an optional `ARTIFACT.md` beside it, written by hand:
+`SKILL.md` stays within the agentskills.io specification, so Podium-only fields such as `when_to_use`, `tags`, and `sensitivity` never go in it. They go in an optional `ARTIFACT.md` beside it, which you write by hand.
+
+Create the overlay:
 
 ```bash
 $EDITOR ~/podium-artifacts/personal/hello/greet/ARTIFACT.md
 ```
 
-The overlay holds the indexing and governance fields:
+Add the indexing and governance fields:
 
 ```markdown
 ---
@@ -80,19 +79,19 @@ sensitivity: low
 <!-- Skill body lives in SKILL.md. -->
 ```
 
-Notes on the overlay:
+The overlay has these properties:
 
-- **`type: skill`** marks the package as a skill. The body is empty apart from the one-line HTML comment pointer, because the agent-facing prose lives in `SKILL.md`.
-- **`version`** is absent, so the skill's version stays the `metadata.version` in `SKILL.md`. When the overlay declares a `version`, that value is the skill's version, and it must equal `metadata.version` whenever `metadata.version` is a `major.minor.patch` value.
-- **`when_to_use`** is a list of explicit situations. Hybrid retrieval uses these as additional signal. Be concrete: "After month-end close" beats "When working on finance stuff."
+- `type: skill` marks the package as a skill. The body holds only the one-line HTML comment pointer, because the agent-facing prose lives in `SKILL.md`.
+- Leave `version` out of the overlay, so the `metadata.version` in `SKILL.md` stays the skill's version. If you add a `version` to the overlay, give it the same value as `metadata.version`, or lint reports an error. [Skill versions](frontmatter-reference#skill-versions) gives the precedence rules.
+- `when_to_use` lists concrete situations in which the skill applies. A registry with an embedding provider includes it in the embedding it computes at ingest. [`when_to_use` and search](frontmatter-reference#when_to_use-and-search) describes where the field counts.
 
 ---
 
-## Reference the bundled script
+## Step 3: Reference the bundled script
 
-The quickstart placed `scripts/today.py` beside `SKILL.md`. Anything in the artifact's directory other than the manifest files (`SKILL.md` and the optional `ARTIFACT.md`) is a bundled resource: Python scripts, Jinja templates, JSON schemas, eval datasets, and files as large as model weights. The agentskills.io spec recommends `scripts/`, `references/`, and `assets/` as conventional subfolders. The per-package soft cap is 10 MB; larger files use external resources, see [Bundled resources](bundled-resources).
+Every file in the artifact's directory other than the manifest files is a bundled resource, so `scripts/today.py` already ships with the skill. [Bundled resources](bundled-resources) covers the layout conventions and the size caps.
 
-Reference the script from the `SKILL.md` body:
+The quickstart's body asks for a friendly date format without mentioning the script. Replace the body of `SKILL.md` with these lines, so the agent knows to run it:
 
 ```markdown
 Greet the user by their first name (ask if you don't know it).
@@ -100,20 +99,22 @@ Tell them today's date by running [scripts/today.py](scripts/today.py).
 Keep it to one or two sentences.
 ```
 
-Lint resolves markdown links in the body against the artifact's bundled files at ingest, so a link to a path the package does not contain fails the check. A path written as inline code is not checked.
+Lint resolves markdown links in the body against the artifact's bundled files at ingest, so a link to a path the package does not contain fails the check. A path written as inline code is not checked. A skill's bundled files materialize inside the skill folder, so the link also resolves from the materialized `SKILL.md`.
 
 ---
 
-## Declare runtime requirements
+## Step 4: Declare runtime requirements
 
-The script needs Python. Declare the requirement so a host that advertises its runtime capabilities to the Podium MCP server refuses a `load_artifact` it cannot satisfy with `materialize.runtime_unavailable` instead of failing at execution time. A host that advertises no capabilities and does not opt into enforcement receives the requirement and proceeds, and `podium sync` materializes the artifact without checking it. `runtime_requirements` is a Podium-only field, so add it to the `ARTIFACT.md` overlay:
+The script needs Python. Declaring the requirement lets a consumer refuse the artifact up front instead of failing at execution time.
+
+`runtime_requirements` is a Podium-only field, so add it to the `ARTIFACT.md` overlay:
 
 ```yaml
 runtime_requirements:
   python: ">=3.10"
 ```
 
-Now the artifact's `ARTIFACT.md` overlay looks like this:
+The overlay now reads as follows:
 
 ```markdown
 ---
@@ -130,7 +131,7 @@ runtime_requirements:
 <!-- Skill body lives in SKILL.md. -->
 ```
 
-And the directory, with `ARTIFACT.md` as the overlay beside `SKILL.md`:
+The directory holds `ARTIFACT.md` as the overlay beside `SKILL.md`:
 
 ```
 ~/podium-artifacts/personal/hello/greet/
@@ -140,41 +141,52 @@ And the directory, with `ARTIFACT.md` as the overlay beside `SKILL.md`:
     └── today.py
 ```
 
+`podium sync` materializes the skill without checking the requirement. The Podium MCP server checks it when the host advertises its runtimes or opts into enforcement. [Execution model](bundled-resources#execution-model) describes each case.
+
 ---
 
-## Iterate with watch mode
+## Step 5: Iterate with watch mode
 
-Watch mode avoids manual `podium sync` runs after each edit:
+Run the watcher from your project directory, as the quickstart's [Watch mode](../getting-started/quickstart#watch-mode-optional) section describes:
 
 ```bash
 cd ~/projects/your-project
 podium sync --watch
 ```
 
-The watcher re-materializes on every save. Open Claude Code in another window; tweaks to the `SKILL.md` prose body show up on the next session.
-
-`Ctrl-C` to stop.
+Edit the `SKILL.md` body in another window, and start a new Claude Code session to see the change. Press `Ctrl-C` to stop the watcher.
 
 ---
 
-## Lint before you commit
+## Step 6: Lint before you commit
 
-Before committing or pushing, run lint:
+Run lint before committing or pushing:
 
 ```bash
 podium lint --registry ~/podium-artifacts/
 ```
 
-Lint checks the frontmatter against the type's schema in `SKILL.md` and, when present, `ARTIFACT.md`, validates that prose references in `SKILL.md` resolve to bundled files, runs the agentskills.io compliance checks on `SKILL.md` (name format, description constraints, parent-directory match), and runs type-specific rules. The thin-description check runs at registry ingest rather than in local `podium lint`. CI runs the same checks on PRs to a Git-source layer.
+A clean run prints `lint: no issues.` and exits 0.
 
-If lint passes, commit the artifact. Each diagnostic prints as `[<severity>] <artifact-id>: <message> (<rule-code>)`, for example `[error] personal/hello/greet: type is required (lint.required_field_missing)`. A clean run prints `lint: no issues.`. Warnings alone exit 0, and any error exits 1. A skill that declares no version draws the `lint.skill_version_assigned` warning, because the registry assigns its version; set `metadata.version` in `SKILL.md` to clear it.
+Lint runs these checks:
+
+- The frontmatter in `SKILL.md`, and in `ARTIFACT.md` when present, against the type's schema.
+- Prose references in `SKILL.md`, which must resolve to bundled files.
+- The agentskills.io compliance checks on `SKILL.md`: name format, description constraints, and parent-directory match.
+- The type-specific rules.
+
+When the catalog lives in a Git-source layer, CI runs the same checks on pull requests, and the registry adds the thin-description check at ingest (see [Connecting layer sources](../deployment/content/layer-sources#git-repositories)).
+
+Each diagnostic prints as `[<severity>] <artifact-id>: <message> (<rule-code>)`, for example `[error] personal/hello/greet: type is required (lint.required_field_missing)`. Warnings alone exit 0, and any error exits 1. [Skill lint checks](frontmatter-reference#skill-lint-checks) lists the checks that apply to a skill.
+
+When lint passes, commit the artifact.
 
 ---
 
-## What's next
+## Next steps
 
 - **Write a slash command.** A `command` is a parameterized prompt template the user invokes by name. See [Your first command](your-first-command).
 - **Write an agent.** An `agent` is a complete agent definition with its own instructions, dependencies, and optional bundled scripts. See [Your first agent](your-first-agent).
-- **Cover the other built-in types.** [Artifact types](artifact-types) covers `rule`, `hook`, `context`, and `mcp-server` alongside skills, commands, and agents.
-- **Organize multiple artifacts.** As they accumulate, group them with `DOMAIN.md` files: descriptions, keywords, featured artifacts. See [Domains](domains).
-- **Move from solo to team-shared.** [Deployment](../deployment/) walks the migration paths.
+- **Learn the other built-in types.** [Artifact types](artifact-types) covers `rule`, `hook`, `context`, and `mcp-server` alongside skills, commands, and agents.
+- **Organize multiple artifacts.** Group artifacts with `DOMAIN.md` files that add descriptions, keywords, and featured artifacts. See [Domains](domains).
+- **Share the catalog with a team.** [Progressive adoption](../deployment/progressive-adoption) covers moving from a local catalog to a shared registry, and [Connecting layer sources](../deployment/content/layer-sources) covers publishing from a Git repository.

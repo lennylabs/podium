@@ -282,7 +282,7 @@ func (f *trFixture) build(t *testing.T, opts trOptions) {
 	}
 	f.srv = New(reg, srvOpts...)
 	f.auditPath = filepath.Join(t.TempDir(), "audit.log")
-	sink, err := audit.NewFileSink(f.auditPath)
+	sink, err := audit.OpenFile(f.auditPath, audit.OpenOptions{})
 	trMust(t, err)
 	f.ep = NewLayerEndpoint(f.st, trPoison, NewModeTracker()).
 		WithTenantRouting().
@@ -829,7 +829,7 @@ func (f *trFixture) assertScopedErase(t *testing.T, caller trCaller, user string
 	t.Helper()
 	ctx := context.Background()
 	for _, tenant := range []string{trTenantA, trTenantB, ""} {
-		trMust(t, f.ep.auditFile.Append(ctx, audit.Event{Type: audit.EventArtifactLoaded,
+		trMust(t, f.ep.eraseStream.Append(ctx, audit.Event{Type: audit.EventArtifactLoaded,
 			Caller: user, Target: "skill/x", Tenant: tenant, Timestamp: time.Now().UTC()}))
 	}
 	before := trAuditRecords(t, f.auditPath)
@@ -927,7 +927,7 @@ func trSingleTenantEraseControl(t *testing.T) {
 	st := store.NewMemory()
 	trMust(t, st.CreateTenant(context.Background(), store.Tenant{ID: tenantS, Name: tenantS}))
 	auditPath := filepath.Join(t.TempDir(), "audit.log")
-	sink, err := audit.NewFileSink(auditPath)
+	sink, err := audit.OpenFile(auditPath, audit.OpenOptions{})
 	trMust(t, err)
 	ep := NewLayerEndpoint(st, tenantS, NewModeTracker()).
 		WithIdentityResolver(trVerify).WithAudit(sink).WithEraseSink(sink)

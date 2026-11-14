@@ -26,8 +26,19 @@ import (
 // (or -1 when the signer produced no transparency-log entry). The index is also recorded in
 // the audit.anchored event's Context so the chain itself can be
 // queried for past anchors.
-func Anchor(ctx context.Context, sink *FileSink, signer sign.Provider) (int64, error) {
-	chainHead, err := chainHeadOf(sink)
+//
+// Anchor reads the head from the stream's file destination under the
+// file's lock, releases it, signs with no lock held, and appends the
+// audit.anchored event through the stream, so a slow signer never blocks
+// Append and the event reaches every destination of the stream.
+//
+// Spec: §8.6
+func Anchor(ctx context.Context, s *Stream, signer sign.Provider) (int64, error) {
+	file := s.File()
+	if file == nil {
+		return 0, fmt.Errorf("audit.anchor: %w", errNoFileDestination)
+	}
+	chainHead, err := chainHeadOf(file)
 	if err != nil {
 		return 0, fmt.Errorf("audit.anchor: read chain head: %w", err)
 	}
@@ -44,7 +55,7 @@ func Anchor(ctx context.Context, sink *FileSink, signer sign.Provider) (int64, e
 	logIndex := extractRekorLogIndex(envelope)
 	now := time.Now().UTC()
 	// Spec: §8.1: audit.anchored describes the registry as a whole, so it records no tenant.
-	if err := sink.Append(ctx, Event{
+	if err := s.Append(ctx, Event{
 		Type:      EventAuditAnchored,
 		Timestamp: now,
 		Caller:    "system:anchor",
@@ -61,19 +72,17 @@ func Anchor(ctx context.Context, sink *FileSink, signer sign.Provider) (int64, e
 	return logIndex, nil
 }
 
-// chainHeadOf returns the Hash of the most recent event in sink, or
-// "" when the log is empty. Read-only; does not mutate the chain.
-func chainHeadOf(sink *FileSink) (string, error) {
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
-	events, err := readAllEvents(sink.path)
+// chainHeadOf returns the Hash of the most recent event in file, or
+// "" when the log is empty. It reads under file.mu and does not mutate
+// the chain.
+func chainHeadOf(file *FileSink) (string, error) {
+	file.mu.Lock()
+	defer file.mu.Unlock()
+	events, err := readAllEvents(file.path)
 	if err != nil {
 		return "", err
 	}
-	if len(events) == 0 {
-		return "", nil
-	}
-	return events[len(events)-1].Hash, nil
+	return headOf(events), nil
 }
 
 // extractRekorLogIndex pulls the Rekor log index out of a

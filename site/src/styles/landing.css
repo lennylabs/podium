@@ -13,14 +13,9 @@
   /* Accent that stays solid: light uses the deep tone, dark uses the accent. */
   --l-accent-solid: var(--accent-deep);
 
-  /* Secondary UI text: nav links, version pill, ghost button. */
+  /* Secondary UI text: nav links, version label, ghost button. */
   --l-text-muted: var(--secondary);
 
-  /* Status pill */
-  --l-pill-bg: linear-gradient(180deg, #ffffff, #f6f4ea);
-  --l-pill-border: #dcd9cc;
-  --l-pill-text: var(--secondary);
-  --l-pill-ring: rgba(242, 134, 26, 0.25);
 
   /* Headline highlighter. Light paints a marker band, dark clips a gradient. */
   --l-mark-bg: linear-gradient(180deg, transparent 62%, var(--accent) 62%);
@@ -68,10 +63,6 @@
     --l-accent-solid: var(--accent);
     --l-text-muted: var(--meta);
 
-    --l-pill-bg: linear-gradient(180deg, #212739, #181c28);
-    --l-pill-border: var(--border-2);
-    --l-pill-text: #ccd3e2;
-    --l-pill-ring: rgba(255, 164, 36, 0.18);
 
     --l-mark-bg: linear-gradient(90deg, var(--accent), var(--accent-soft));
     --l-mark-clip: text;
@@ -114,10 +105,6 @@
   --l-accent-solid: var(--accent);
   --l-text-muted: var(--meta);
 
-  --l-pill-bg: linear-gradient(180deg, #212739, #181c28);
-  --l-pill-border: var(--border-2);
-  --l-pill-text: #ccd3e2;
-  --l-pill-ring: rgba(255, 164, 36, 0.18);
 
   --l-mark-bg: linear-gradient(90deg, var(--accent), var(--accent-soft));
   --l-mark-clip: text;
@@ -281,7 +268,8 @@
   /* minmax(0, 1fr) keeps the mono transcript from widening the whole grid. */
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 56px;
-  align-items: center;
+  /* Top-aligned, because the transcript is taller than the headline block. */
+  align-items: start;
   max-width: var(--landing-width);
   margin: 0 auto;
   padding: 76px var(--gutter-landing) 66px;
@@ -291,32 +279,10 @@
   min-width: 0;
 }
 
-.l-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 24px;
-  padding: 5px 12px;
-  border: 1px solid var(--l-pill-border);
-  border-radius: var(--r-pill);
-  background: var(--l-pill-bg);
-  color: var(--l-pill-text);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.l-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--l-accent-solid);
-  box-shadow: 0 0 0 3px var(--l-pill-ring);
-}
 
 .l-headline {
   margin: 0 0 20px;
-  font-size: clamp(40px, 7vw, 64px);
+  font-size: clamp(40px, 7vw, 60px);
   line-height: 1.01;
   letter-spacing: -0.042em;
   font-weight: 700;
@@ -460,22 +426,15 @@
   margin: 0;
 }
 
-.l-terminal::before {
-  content: "";
-  position: absolute;
-  inset: var(--terminal-glow-inset);
-  border-radius: calc(var(--r-card) + 7px);
-  background: var(--terminal-glow);
-  filter: blur(var(--terminal-glow-blur));
-}
-
 .l-terminal-card {
   position: relative;
   overflow: hidden;
   border: 1px solid var(--l-term-border);
   border-radius: var(--r-card);
   background: var(--surface);
-  box-shadow: var(--terminal-shadow);
+  /* The glow is an offset shadow on the card itself rather than a blurred
+     layer behind it, so it has no hard edge where the blur ends. */
+  box-shadow: var(--terminal-glow), var(--terminal-shadow);
 }
 
 .l-terminal-bar {
@@ -506,21 +465,35 @@
 }
 
 .l-term {
-  padding: 20px;
+  padding: 18px 20px;
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.7;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--ink);
 }
 
-/* Each transcript line is its own block, and keeps the spaces it carries. */
+/* Each transcript line is its own block, and keeps the spaces it carries,
+   because the indentation is what shows the output's hierarchy. */
 .l-term-line {
   white-space: pre;
 }
 
-.l-term-gap {
-  height: 1.7em;
+.l-term-line--command {
+  font-weight: 600;
+}
+
+/* The space under a command, under a results header, and between blocks. */
+.l-term-gap--command {
+  height: 0.45em;
+}
+
+.l-term-gap--header {
+  height: 0.4em;
+}
+
+.l-term-gap--block {
+  height: 2.1em;
 }
 
 .l-term-prompt {
@@ -674,6 +647,10 @@
   color: var(--secondary);
 }
 
+.l-card-body + .l-card-body {
+  margin-top: 8px;
+}
+
 /* ------------------------------------------------------- feature diagrams */
 
 .l-dg {
@@ -752,6 +729,22 @@
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* The pill at the right of a deployment card's title row. It takes the
+   integrations pill's colours, which are the ones the design names. */
+.l-deploy-badge {
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--callout-border);
+  border-radius: var(--r-pill);
+  background: var(--l-pill-fill);
+  color: var(--link);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
 }
 
 .l-deploy-title {
@@ -1217,11 +1210,12 @@
     box-shadow: none;
   }
 
+  /* white-space stays pre, which each line sets: nowrap would collapse the
+     leading spaces that carry the output's hierarchy. */
   .l-term {
     padding: 16px;
-    font-size: 11px;
+    font-size: 10.5px;
     line-height: 1.6;
-    white-space: nowrap;
     overflow-x: auto;
   }
 
@@ -1317,6 +1311,10 @@
   .l-deploy-card {
     border: 1px solid var(--border);
     border-radius: 13px;
+  }
+
+  .l-deploy-badge {
+    font-size: 10.5px;
   }
 
   /*

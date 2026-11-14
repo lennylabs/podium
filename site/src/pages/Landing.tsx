@@ -16,6 +16,7 @@ import type {
   LinkTarget,
   NavLink,
   TerminalLine,
+  TerminalSpan,
 } from "../content/landing";
 import { landing } from "../content/landing";
 
@@ -97,19 +98,18 @@ export function Landing(props: { config: SiteConfig }): React.ReactElement {
       <section className="l-hero" aria-labelledby="l-headline">
         <div className="l-hero-inner">
           <div className="l-hero-copy">
-            <p className="l-status">
-              <span className="l-status-dot" aria-hidden="true" />
-              {`${series(config.version)} — ${hero.status.qualifier}`}
-            </p>
-
             <h1 className="l-headline" id="l-headline">
               {hero.headline.map((line, index) => (
-                <Fragment key={line.text}>
+                <Fragment key={index}>
                   {index > 0 ? <br /> : null}
-                  {line.marked ? (
-                    <span className="l-mark">{line.text}</span>
-                  ) : (
-                    line.text
+                  {line.map((run) =>
+                    run.marked ? (
+                      <span className="l-mark" key={run.text}>
+                        {run.text}
+                      </span>
+                    ) : (
+                      <Fragment key={run.text}>{run.text}</Fragment>
+                    ),
                   )}
                 </Fragment>
               ))}
@@ -207,7 +207,11 @@ export function Landing(props: { config: SiteConfig }): React.ReactElement {
                 <div className="l-card-text">
                   <p className="l-card-number">{card.number}</p>
                   <h3 className="l-card-title">{card.title}</h3>
-                  <p className="l-card-body">{card.body}</p>
+                  {card.body.map((paragraph) => (
+                    <p className="l-card-body" key={paragraph}>
+                      {paragraph}
+                    </p>
+                  ))}
                 </div>
               </article>
             );
@@ -228,6 +232,9 @@ export function Landing(props: { config: SiteConfig }): React.ReactElement {
                 <div className="l-deploy-head">
                   <Icon />
                   <h3 className="l-deploy-title">{card.title}</h3>
+                  {card.badge === null ? null : (
+                    <span className="l-deploy-badge">{card.badge}</span>
+                  )}
                 </div>
                 <div className="l-deploy-rule" />
                 <dl className="l-deploy-facts">
@@ -359,17 +366,6 @@ export function Landing(props: { config: SiteConfig }): React.ReactElement {
 }
 
 /** Turns a content link target into an href for this build. */
-/**
- * The release series a reader pins against, from the build's own version.
- *
- * "0.2.1" becomes "0.2.x". A version carrying a prerelease suffix keeps the
- * same series, since the suffix sits on the patch element.
- */
-function series(version: string): string {
-  const [major, minor] = version.split(".");
-  return major === undefined || minor === undefined ? version : `${major}.${minor}.x`;
-}
-
 function resolve(config: SiteConfig, target: LinkTarget): string {
   switch (target.kind) {
     case "doc":
@@ -388,9 +384,9 @@ function externalAttrs(target: LinkTarget): { rel?: string; target?: string } {
 }
 
 /**
- * One transcript line, as its own block element. The two spaces in front of a
- * materialized path are the indent the design calls for, and the line preserves
- * them because .l-term-line sets white-space: pre.
+ * One transcript line, as its own block element. Every span keeps its leading
+ * spaces, because .l-term-line sets white-space: pre and the indentation is
+ * what shows the hierarchy of the command's output.
  */
 function TranscriptLine(props: { line: TerminalLine; prompt: string }): React.ReactElement {
   const { line, prompt } = props;
@@ -398,20 +394,23 @@ function TranscriptLine(props: { line: TerminalLine; prompt: string }): React.Re
   switch (line.kind) {
     case "command":
       return (
-        <div className="l-term-line">
-          <span className="l-term-prompt">{prompt}</span> {line.command}{" "}
-          <span className="l-term-flag">{line.flag}</span>
+        <div className="l-term-line l-term-line--command">
+          {line.prompt ? (
+            <>
+              <span className="l-term-prompt">{prompt}</span>{" "}
+            </>
+          ) : null}
+          <Spans spans={line.spans} />
         </div>
       );
-    case "path":
+    case "output":
       return (
         <div className="l-term-line">
-          {"  "}
-          <span className="l-term-out">{line.text}</span>
+          <Spans spans={line.spans} />
         </div>
       );
     case "gap":
-      return <div className="l-term-gap" />;
+      return <div className={`l-term-gap l-term-gap--${line.size}`} />;
     case "cursor":
       return (
         <div className="l-term-line">
@@ -420,4 +419,28 @@ function TranscriptLine(props: { line: TerminalLine; prompt: string }): React.Re
         </div>
       );
   }
+}
+
+/** The tone classes a transcript span takes. Ink text inherits the colour. */
+const toneClass: Record<TerminalSpan["tone"], string | undefined> = {
+  ink: undefined,
+  arg: "l-term-flag",
+  out: "l-term-out",
+};
+
+function Spans(props: { spans: TerminalSpan[] }): React.ReactElement {
+  return (
+    <>
+      {props.spans.map((span, index) => {
+        const className = toneClass[span.tone];
+        return className === undefined ? (
+          <Fragment key={index}>{span.text}</Fragment>
+        ) : (
+          <span className={className} key={index}>
+            {span.text}
+          </span>
+        );
+      })}
+    </>
+  );
 }

@@ -234,7 +234,7 @@ test-auth-dex: dex-up
 # Run the chart's §13.4 upgrade procedure from v0.4.0 on a kind cluster. The
 # test (test/chart/kind_upgrade_test.go) builds the current image and the
 # v0.4.0 image from a git worktree, creates the kind cluster podium-live,
-# walks the upgrade procedure in docs/deployment/clustered.md, and deletes the
+# walks the upgrade procedure in docs/deployment/operations/upgrade-notes.md, and deletes the
 # cluster, the worktree, and both images. It needs docker with a running
 # daemon, kind, kubectl, helm, and git, and it skips without PODIUM_LIVE_KIND=1.
 test-live-kind:

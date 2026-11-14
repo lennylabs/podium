@@ -1,27 +1,33 @@
 ---
 title: Rule modes
-nav_order: 7
-description: The rule_mode values (always, glob, auto, explicit) and how each harness honors them.
+nav_order: 8
+description: The rule_mode values (always, glob, auto, and explicit), when to use each, and how each harness honors them.
 ---
 
 # Rule modes
 
-A `rule` artifact is passive context the harness loads automatically. The `rule_mode` field controls when:
+This page explains the `rule_mode` field of a `rule` artifact: what each mode does, when to choose it, and how each harness translates it.
 
-| Mode | Loaded when… | Required field |
+A `rule` artifact is passive context that the harness loads automatically. The `rule_mode` field controls when the harness loads it:
+
+| Mode | Loaded when | Required field |
 |:--|:--|:--|
-| `always` | The agent session starts (or every turn). | none |
+| `always` | The session starts. The rule stays in context for the whole session. | none |
 | `glob` | A file matching the glob pattern is touched in the session. | `rule_globs` |
-| `auto` | The harness's autoload heuristic decides this rule's `description` matches. | `rule_description` |
+| `auto` | The harness's autoload heuristic decides this rule's `rule_description` matches. | `rule_description` |
 | `explicit` | The user references the rule by name. | none |
 
-Default is `always` if you don't set the field.
+A rule that does not set the field uses `always`.
+
+Every harness that honors `always` natively loads the rule when a session starts and keeps it in context for that session. Claude Code reads a `.claude/rules/` file without `paths:` at launch, as it reads `CLAUDE.md`. Codex, OpenCode, Pi, and Gemini read the injected block with the rest of `AGENTS.md` or `GEMINI.md`. Cursor and Hermes attach a `.mdc` rule marked `alwaysApply: true` to every chat. [What each adapter writes](#what-each-adapter-writes) gives the output for each harness.
 
 ---
 
 ## When to use each mode
 
-**`always`** for project-wide guidance every session needs. Style guides, security policies, "you are a senior X engineer" framing.
+### always
+
+Use `always` for project-wide guidance every session needs, such as style guides, security policies, and "you are a senior X engineer" framing. Default to `always` for guidance that belongs in every session. It costs a few hundred tokens per session and gives consistent behavior.
 
 ```yaml
 type: rule
@@ -29,7 +35,9 @@ name: house-style
 rule_mode: always
 ```
 
-**`glob`** for type-specific guidance. Load the React rule only when `*.tsx` is involved; load the SQL rule only when `*.sql` is touched.
+### glob
+
+Use `glob` for guidance tied to file types, so it stays out of unrelated work. For example, load the React rule only when `*.tsx` is involved, and the SQL rule only when `*.sql` is touched. The working set stays smaller and the context sharper.
 
 ```yaml
 type: rule
@@ -38,7 +46,9 @@ rule_mode: glob
 rule_globs: "src/**/*.tsx,src/**/*.ts"
 ```
 
-**`auto`** for domain rules where the trigger is fuzzy. The harness's autoload heuristic uses the `description` to score relevance against the current situation.
+### auto
+
+Use `auto` for domain rules whose trigger is fuzzy. The harness's autoload heuristic scores the `rule_description` against the current situation. The heuristic varies by harness and cannot be tested deterministically, so use this mode with care. Write the `rule_description` as a clear trigger statement rather than a summary.
 
 ```yaml
 type: rule
@@ -47,7 +57,9 @@ rule_mode: auto
 rule_description: "Apply when working with database migrations or schema changes"
 ```
 
-**`explicit`** for rules so specific the user wants to invoke them deliberately. The harness materializes them but doesn't auto-load; the user references the rule by name (slash command, `@rule-name`, etc.).
+### explicit
+
+Use `explicit` for rules with sharp boundaries that the user invokes deliberately, such as incident response procedures and regulatory compliance checklists. The harness materializes the rule but does not load it automatically. The user references the rule by name, for example with a slash command or `@rule-name`.
 
 ```yaml
 type: rule
@@ -59,7 +71,7 @@ rule_mode: explicit
 
 ## How each harness honors them
 
-The harness adapter does the translation at materialization time. Each adapter writes the rule into the harness's native format using the closest equivalent it has. When a harness cannot honor a mode natively, the adapter falls back to an always-loaded block. A rule that declares `target_harnesses:` draws an ingest lint warning for a ⚠ mode and a lint error for a ✗ mode on a named harness. Without `target_harnesses:`, a ✗ mode is refused at materialization when the rule loads onto that harness (§6.9).
+The harness adapter translates the mode at materialization time. Each adapter writes the rule in the harness's native format, using the closest equivalent the harness has. When a harness has no native equivalent for a mode, the adapter falls back to an always-loaded block.
 
 | Mode | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi | hermes |
 |:--|:--|:--|:--|:--|:--|:--|:--|:--|:--|
@@ -68,7 +80,13 @@ The harness adapter does the translation at materialization time. Each adapter w
 | `auto` | ⚠ | ✗ | ✗ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
 | `explicit` | ⚠ | ✗ | ✗ | ✓ | ⚠ | ⚠ | ⚠ | ⚠ | ✓ |
 
-Legend: ✓ supported natively, ⚠ supported via fallback (ingest lint warns when a declared `target_harnesses:` names the harness, and materialization emits the degraded fallback), ✗ not supported (ingest lint errors when a declared `target_harnesses:` names the harness, and materialization onto that harness otherwise fails per §6.9). This table mirrors the `rule_mode` rows of the §6.7.1 capability matrix. The `claude-cowork` cells are ✗ for every mode because Cowork has no project-scope rule surface; a cowork user obtains a rule through the published Claude marketplace ([Publishing](../consuming/publishing)).
+| Symbol | Meaning | Lint, when `target_harnesses:` names the harness | Materialization |
+|:--|:--|:--|:--|
+| ✓ | Native | No diagnostic. | Writes the native form. |
+| ⚠ | Fallback | Warning. | Writes the degraded fallback. |
+| ✗ | Unavailable | Error. | Fails with `materialize.untranslatable`. |
+
+This table mirrors the `rule_mode` rows of the [capability matrix in §6.7.1 of the specification](https://github.com/lennylabs/podium/blob/main/spec/06-mcp-server.md#671-the-authors-burden). The `claude-cowork` cells are ✗ for every mode, because Cowork has no project-scope rule surface. A Cowork user obtains a rule through the published Claude marketplace ([Publishing](../deployment/content/publishing)).
 
 ---
 
@@ -76,34 +94,32 @@ Legend: ✓ supported natively, ⚠ supported via fallback (ingest lint warns wh
 
 | Adapter | Output |
 |:--|:--|
-| **claude-code** | A standalone `.claude/rules/<name>.md` for every mode, carrying the prose with the Podium-internal fields dropped. `always` loads at launch and `glob` writes the native `paths:` YAML list, both native. `auto` and `explicit` fall back to a load-always file (no scoping frontmatter) and draw a lint warning, because Claude Code's `.claude/rules/` files have no description-attach or mention-only mode. |
-| **cursor** | `.cursor/rules/<name>.mdc` for every mode, with the native key set per the mode: `always` writes `alwaysApply: true`, `glob` writes `globs: <rule_globs>`, `auto` writes `description: <rule_description>`, and `explicit` writes no auto-apply key. |
-| **hermes** | `.cursor/rules/<name>.mdc` in the Cursor `.mdc` format for every mode. Hermes natively reads `.cursor/rules/*.mdc`, root `AGENTS.md`, and `.cursorrules`; it does not read `.claude/rules/`. |
-| **codex, opencode, pi** | The rule body injects into root `AGENTS.md` between Podium-managed markers. `always` maps natively; `glob`, `auto`, and `explicit` fall back to always-loaded with a lint warning, because an injected block carries no per-file scoping. |
-| **gemini** | The rule body injects into root `GEMINI.md` between Podium-managed markers, with the same `always`-native, non-`always`-fallback behavior as the `AGENTS.md` harnesses. |
-| **claude-cowork** | No project-scope rule surface. A `type: rule` artifact on `claude-cowork` is a ✗ cell that fails materialization with `materialize.untranslatable` per §6.9, on both `podium sync` and `load_artifact`, including the default `always` mode. A cowork user obtains the rule through the published Claude marketplace ([Publishing](../consuming/publishing)). |
-| **claude-desktop** | No project-scope rule surface. Every `rule_mode` cell is ✗, so a `type: rule` artifact on `claude-desktop` fails materialization with `materialize.untranslatable` per §6.9, on both `podium sync` and `load_artifact`, including the default `always` mode. |
-
----
-
-## Authoring guidance
-
-- **Default to `always`** for guidance you'd want loaded every time. The cost is a few hundred tokens per session; the benefit is consistent behavior.
-- **Use `glob` for type-specific guidance** that doesn't need to be loaded for unrelated work. Sharper context, smaller working set.
-- **Use `auto` carefully.** It depends on the harness's autoload heuristic, which varies by harness and isn't something you can test deterministically. Write the `rule_description` as a clear trigger statement rather than a summary.
-- **Use `explicit` for rules with sharp boundaries**: incident response procedures, regulatory compliance checklists, anything you'd rather have the user invoke deliberately than have the harness load opportunistically.
+| **claude-code** | A standalone `.claude/rules/<name>.md` for every mode, carrying the prose with the Podium-internal fields dropped. `always` loads at launch, and `glob` writes the native `paths:` YAML list; both are native. `auto` and `explicit` fall back to a load-always file with no scoping frontmatter and draw a lint warning, because Claude Code's `.claude/rules/` files have no description-attach or mention-only mode. |
+| **cursor** | `.cursor/rules/<name>.mdc` for every mode, with the native key set per mode: `always` writes `alwaysApply: true`, `glob` writes `globs: <rule_globs>`, `auto` writes `description: <rule_description>`, and `explicit` writes no auto-apply key. |
+| **hermes** | `.cursor/rules/<name>.mdc` in the Cursor `.mdc` format for every mode. Hermes natively reads `.cursor/rules/*.mdc`, the root `AGENTS.md`, and `.cursorrules`. It does not read `.claude/rules/`. |
+| **codex, opencode, pi** | The rule body, injected into the root `AGENTS.md` between Podium-managed markers. `always` maps natively. `glob`, `auto`, and `explicit` fall back to always-loaded with a lint warning, because an injected block carries no per-file scoping. |
+| **gemini** | The rule body, injected into the root `GEMINI.md` between Podium-managed markers. The behavior matches the `AGENTS.md` harnesses: `always` is native, and the other modes fall back. |
+| **claude-cowork** | No project-scope rule surface. A `type: rule` artifact on `claude-cowork` is a ✗ cell and fails materialization with `materialize.untranslatable`, on both `podium sync` and `load_artifact`, including the default `always` mode. A Cowork user obtains the rule through the published Claude marketplace ([Publishing](../deployment/content/publishing)). |
+| **claude-desktop** | No project-scope rule surface. Every `rule_mode` cell is ✗, so a `type: rule` artifact on `claude-desktop` fails materialization with `materialize.untranslatable`, on both `podium sync` and `load_artifact`, including the default `always` mode. |
 
 ---
 
 ## Lint behavior
 
-Lint enforces the field requirements per mode:
+Lint enforces the field requirements for each mode:
 
-- `rule_mode: glob` requires `rule_globs`. Missing `rule_globs` is an ingest error.
-- `rule_mode: auto` requires `rule_description`. Missing `rule_description` is an ingest error.
-- `rule_mode: glob` with `rule_description` set: lint warning ("rule-mode 'glob' uses globs only; rule-description is ignored").
-- `rule_mode: auto` with `rule_globs` set: lint warning ("rule-mode 'auto' uses description only; rule-globs is ignored").
-- A type other than `rule` with `rule_mode` set: lint warning ("rule-mode is only applicable to type: rule").
-- A `rule_mode` value outside `always`, `glob`, `auto`, and `explicit` on a `type: rule` artifact: ingest error (`lint.unknown_rule_mode`).
+| Condition | Result |
+|:--|:--|
+| `rule_mode: glob` without `rule_globs` | Ingest error. |
+| `rule_mode: auto` without `rule_description` | Ingest error. |
+| `rule_mode: glob` with `rule_description` set | Warning: "rule-mode 'glob' uses globs only; rule-description is ignored". |
+| `rule_mode: auto` with `rule_globs` set | Warning: "rule-mode 'auto' uses description only; rule-globs is ignored". |
+| `rule_mode` set on a type other than `rule` | Warning: "rule-mode is only applicable to type: rule". |
+| A `rule_mode` value outside `always`, `glob`, `auto`, and `explicit` on a `type: rule` artifact | Ingest error (`lint.unknown_rule_mode`). |
 
-When an artifact declares `target_harnesses:`, ingest lint surfaces a mismatch for any named harness whose cell for the chosen mode is ⚠ (warning) or ✗ (error). When `target_harnesses:` is absent, ingest stays permissive and an unsupported mode is caught at materialization onto that harness (§6.9). Authors who must use a non-portable mode can declare `target_harnesses:` in frontmatter to opt out of cross-harness materialization for that artifact.
+Portability checks depend on `target_harnesses:`:
+
+- When an artifact declares `target_harnesses:`, ingest lint reports a mismatch for any named harness whose cell for the chosen mode is ⚠ (warning) or ✗ (error).
+- When `target_harnesses:` is absent, ingest stays permissive. Materialization catches an unsupported mode when the rule loads onto that harness.
+
+An author who needs a non-portable mode declares `target_harnesses:` in frontmatter to opt the artifact out of cross-harness materialization.

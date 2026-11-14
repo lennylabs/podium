@@ -492,45 +492,42 @@ func TestParseFlags_IgnoresUnknown(t *testing.T) {
 	}
 }
 
-// spec: §6.2 — PODIUM_AUDIT_SINK: unset leaves auditing to the registry;
+// Spec: §6.2 — PODIUM_AUDIT_SINK: unset leaves auditing to the registry;
 // "default" (or empty) selects ~/.podium/audit.log; a path selects that
 // file.
 func TestNewAuditSink(t *testing.T) {
 	t.Run("unset is nil", func(t *testing.T) {
-		sink, err := newAuditSink(&config{auditSinkSet: false})
+		stream, err := newAuditSink(&config{auditSinkSet: false}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if sink != nil {
-			t.Errorf("unset sink = %v, want nil", sink)
+		if stream != nil {
+			t.Errorf("unset stream = %v, want nil", stream)
 		}
 	})
 	t.Run("default path", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 		t.Setenv("USERPROFILE", home)
-		sink, err := newAuditSink(&config{auditSinkSet: true, auditSink: "default"})
+		stream, err := newAuditSink(&config{auditSinkSet: true, auditSink: "default"}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		fs, ok := sink.(*audit.FileSink)
-		if !ok {
-			t.Fatalf("sink type = %T", sink)
-		}
-		if want := filepath.Join(home, ".podium", "audit.log"); fs.Path() != want {
-			t.Errorf("path = %q, want %q", fs.Path(), want)
+		t.Cleanup(stream.Shutdown)
+		if want := filepath.Join(home, ".podium", "audit.log"); stream.File().Path() != want {
+			t.Errorf("path = %q, want %q", stream.File().Path(), want)
 		}
 	})
 	t.Run("explicit path", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "audit.log")
-		sink, err := newAuditSink(&config{auditSinkSet: true, auditSink: path})
+		stream, err := newAuditSink(&config{auditSinkSet: true, auditSink: path}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		fs := sink.(*audit.FileSink)
-		if fs.Path() != path {
-			t.Errorf("path = %q, want %q", fs.Path(), path)
+		t.Cleanup(stream.Shutdown)
+		if stream.File().Path() != path {
+			t.Errorf("path = %q, want %q", stream.File().Path(), path)
 		}
 	})
 }

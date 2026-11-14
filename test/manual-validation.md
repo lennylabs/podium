@@ -245,6 +245,8 @@ rm -rf "$WORK"
 | S102 | An ARTIFACT.md that declares extends: is refused, and a stored extends: child stops serving after an upgrade | solo then standalone | none | none | none |
 | S103 | A git layer's URL credential is held apart from `repo` in the metadata store, and a row in the earlier form keeps working | standalone | none | none | none |
 | S104 | The registry and the MCP server record the client that called them, and exported spans carry no query text | standalone | none | none | none |
+| S105 | A registry audit stream reaches a file and an HTTP receiver through one chain, survives a receiver outage, and never logs its credentials; `podium-mcp` flushes its local stream on SIGTERM | standalone | none | none | none |
+| S106 | A registry audit stream reaches an OpenTelemetry Collector, which decodes it and writes it to a file and to S3 | standalone | none | none | Docker, MinIO from `make services-up` |
 
 ---
 
@@ -2789,7 +2791,7 @@ through verification to resolved visibility.
   server such as `/oauth2/default` and an opaque token from the org server.
   Okta, Entra ID, and Auth0 each require tenant-side claim or scope
   configuration before a group claim reaches the access token, and Auth0 admits
-  a namespaced claim name only (`docs/deployment/oidc/auth0.md`). Step 7 sets
+  a namespaced claim name only (`docs/deployment/identity/oidc/auth0.md`). Step 7 sets
   `PODIUM_OAUTH_GROUPS_CLAIM` when the emitted claim carries a name other than
   `groups`. When the tenant cannot be configured to emit a group claim, run the
   baseline part without the group-scoped layer and record the skip and the
@@ -3183,18 +3185,20 @@ repository rather than in `$WORK`.
 applied before the event leaves the process, by reading what a receiver
 receives rather than what the local log file holds.
 
-**Covers.** §8.2 manifest-declared redaction and §8.3 audit sink selection.
+**Covers.** §8.2 manifest-declared redaction and §8.3 audit destinations.
 
 **Why by hand.** Redaction that is applied only on the way to the local file
-still leaks to an aggregator, and the two paths are different sinks: a
-filesystem `PODIUM_AUDIT_LOG_PATH` selects a file sink, an `http(s)` value
-selects an endpoint sink. A scenario that greps the local log cannot tell the
-two apart, and the aggregator is the copy that leaves the operator's machine.
+still leaks to an aggregator. A filesystem `PODIUM_AUDIT_LOG_PATH` lists a file
+destination, and an `http(s)` value lists an HTTP destination. A scenario that
+greps the local log cannot tell the two apart, and the aggregator is the copy
+that leaves the operator's machine.
 
 **Steps.**
 
 1. Run the isolation block, then start a receiver that records every forwarded
-   body verbatim.
+   body verbatim. Each request body is an NDJSON batch of one or more
+   records, and the parsers below skip blank lines, so they read a batch line
+   by line.
 
 ```bash
 cat > "$WORK/sink.py" <<'EOF'
@@ -3247,9 +3251,10 @@ sleep 2
 wc -l < "$WORK/forwarded.jsonl"
 ```
 
-   **Expect.** At least one forwarded line. Zero lines means the endpoint sink
-   was not selected and every later step is vacuous, so check `$WORK/srv.log`
-   for the sink it chose before reading anything into the result.
+   **Expect.** At least one forwarded line. Zero lines means the HTTP
+   destination was not listed and every later step is vacuous, so check
+   `$WORK/srv.log` for an audit delivery failure before reading anything into
+   the result.
 
 4. Read what the receiver got.
 
@@ -4218,7 +4223,7 @@ rather than trying to avoid them.
    **Expect.** `Bucket created successfully`.
 
 4. Generate the registry signing key with the command
-   `docs/deployment/clustered.md` gives, with the scratch directory under
+   `docs/deployment/modes/clustered.md` gives, with the scratch directory under
    `$WORK`, and create the Secret the chart's `signing.secretName` names.
    `podium admin signing-key generate` writes only the file `--key-file` names
    and opens no store.
@@ -7851,7 +7856,7 @@ reach `~/.podium/standalone/registry-signing.key`.
 ## S76: Chart upgrade from v0.4.0
 
 **Goal.** Validate that the chart's upgrade procedure in
-`docs/deployment/clustered.md` moves a clustered v0.4.0 install onto this
+`docs/deployment/operations/upgrade-notes.md` moves a clustered v0.4.0 install onto this
 release with no registry pod serving an unmigrated store, that the run Job
 refuses a plan other than the reviewed one, and that a registry pod refuses to
 start over an unmigrated store in either signing mode.
@@ -7873,7 +7878,7 @@ refusal and each log line as an operator does.
 daemon. When any is absent, skip and record the skip. The shell stays in
 `$WORK`, as the isolation block leaves it. Step 1 names the repository in
 `REPO` and the chart in `CHART`, and links `$WORK/deploy` to the repository's
-`deploy` directory. The procedure's commands in `docs/deployment/clustered.md`
+`deploy` directory. The procedure's commands in `docs/deployment/operations/upgrade-notes.md`
 name the chart as `./deploy/helm/podium` and read and write
 `podium-values.yaml`, `dry-run.log`, and `run.log` in the working directory, so
 they run verbatim from `$WORK`, and every file the scenario writes stays there.
@@ -8191,7 +8196,7 @@ The isolation block's `HOME` also keeps the kind cluster's kubeconfig under
    and this mirror.
 
 7. Run step 3 of the procedure from `$WORK`, exactly as
-   `docs/deployment/clustered.md` gives it, then run its completeness check
+   `docs/deployment/operations/upgrade-notes.md` gives it, then run its completeness check
    and read the digest from the last line.
 
    ```bash
@@ -11455,26 +11460,851 @@ this scenario catches.
 4. Sync against the registry with a different harness.
 
    ```bash
+   count_type() { jq -s --arg t "$1" '[.[] | select(.type == $t)] | length' "$WORK/forwarded.jsonl" 2>/dev/null || echo 0; }
+   wait_new() {
+     i=0
+     while [ "$(count_type "$1")" -le "$2" ]; do
+       [ "$i" -ge 50 ] && { echo "TIMEOUT: no new $1 record reached the receiver within 5 s"; return 1; }
+       sleep 0.1; i=$((i+1))
+     done
+     jq -c --arg t "$1" 'select(.type == $t) | .caller.client' "$WORK/forwarded.jsonl" | tail -1
+   }
+   BEFORE=$(count_type artifact.loaded)
    podium sync --registry "$PODIUM_REGISTRY" --target "$WORK/fs" --harness cursor; echo "exit=$?"
-   sleep 1
-   jq -c 'select(.type=="artifact.loaded") | .caller.client' "$WORK/forwarded.jsonl" | tail -1
+   wait_new artifact.loaded "$BEFORE"
    ```
 
    **Expect.** `exit=0`, and a `caller.client` with `kind` `sync`, `name`
-   `podium`, and `harness` `cursor`.
+   `podium`, and `harness` `cursor`. The HTTP audit destination delivers
+   asynchronously, about one second after the call, so the step waits for a
+   new record instead of reading the file at once. A timeout line means no new
+   record reached the receiver within 5 s, which is a delivery defect, and the
+   printed `caller.client` is then not evidence.
 
 5. Send a malformed header by hand.
 
    ```bash
+   BEFORE=$(count_type artifacts.searched)
    curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Podium-Client: %zz' \
      "$PODIUM_REGISTRY/v1/search_artifacts?query=x"
-   sleep 1
-   jq -c 'select(.type=="artifacts.searched") | .caller.client' "$WORK/forwarded.jsonl" | tail -1
+   wait_new artifacts.searched "$BEFORE"
    ```
 
    **Expect.** `200`, and `null` for the newest `artifacts.searched`. A 4xx
-   means a bad header fails the request, which §7.2.2 forbids.
+   means a bad header fails the request, which §7.2.2 forbids. The HTTP audit
+   destination delivers asynchronously, about one second after the call, so
+   the step waits for a new record instead of reading the file at once. A
+   timeout line means no new record reached the receiver within 5 s, which is
+   a delivery defect, and the printed `caller.client` is then not evidence.
 
 **Cleanup.** `kill "$SRV" "$OTLP" "$FWD"` and `rm -rf "$WORK"`.
+
+---
+
+## S105: A registry audit stream reaches a file and an HTTP receiver through one chain, survives a receiver outage, and never logs its credentials; `podium-mcp` flushes its local stream on SIGTERM
+
+**Goal.** Validate that a registry configured with a file destination and an
+HTTP destination writes the same records to both, holds them across a
+receiver outage and delivers them afterwards, sends the configured header
+without logging it or the URL's query, continues its chain from the file after
+a restart, and refuses a destination URL that carries userinfo. It also
+validates that `podium-mcp`, sent SIGTERM with its standard input open or while
+its stdin-EOF flush runs, delivers its queued local record to an HTTP receiver
+and exits with status 0.
+
+**Covers.** §6.8 MCP server exit, §8.1 record format, §8.3 destinations and
+delivery, §8.6 receiver checks, and the §13.12 audit transport settings and
+refusals, through the compiled `podium` and `podium-mcp` binaries.
+
+**Why by hand.** A leaked token is visible only in what an operator reads: the
+server log, the `/metrics` page, and the refusal message. Automated tests
+assert parsed fields and do not read those surfaces whole. The receiver copy is
+also the one that leaves the machine, so reading it directly across an outage
+catches a lost or reordered record that a file check misses. A host sees the
+bridge's exit status, and an operator sees the records a receiver holds after
+the host ends the bridge, so step 6 repeats the host's shutdown sequence on the
+compiled `podium-mcp` and reads both.
+
+S105 uses no Docker. Its ports are 8143 (the registry), 8144 (the refused
+start), 8904 (receiver R1), and 8909 (receiver R2).
+
+**Steps.**
+
+1. Run the isolation block. Confirm that the scenario's ports are free, write
+   the headers file, and start receiver R1 on port 8904. R1 answers 401 to a
+   request without the expected `Authorization` header, answers 503 while
+   `$WORK/up` does not exist, and otherwise records the request's
+   `Content-Type` to `$WORK/r1-ctype`, appends the body verbatim to
+   `$WORK/forwarded.jsonl`, and answers 204.
+
+   ```bash
+   for p in 8143 8144 8904 8909; do
+     curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$p/"; rc=$?
+     if [ "$rc" -eq 7 ]; then echo "port $p: free"; else echo "STOP: port $p in use (curl exit $rc)"; fi
+   done
+   printf '%s\n' 'Authorization: Bearer s105-secret-token' > "$WORK/headers"
+   cat > "$WORK/r1.py" <<'EOF'
+   import http.server, os, sys
+   W = sys.argv[1]
+   class H(http.server.BaseHTTPRequestHandler):
+       def do_POST(self):
+           body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+           if self.headers.get("Authorization") != "Bearer s105-secret-token":
+               code = 401
+           elif not os.path.exists(os.path.join(W, "up")):
+               code = 503
+           else:
+               with open(os.path.join(W, "r1-ctype"), "w") as f:
+                   f.write(self.headers.get("Content-Type", "") + "\n")
+               with open(os.path.join(W, "forwarded.jsonl"), "ab") as f:
+                   f.write(body)
+               code = 204
+           self.send_response(code); self.send_header("Content-Length", "0"); self.end_headers()
+       def log_message(self, *a): pass
+   http.server.ThreadingHTTPServer(("127.0.0.1", 8904), H).serve_forever()
+   EOF
+   python3 "$WORK/r1.py" "$WORK" > "$WORK/r1.log" 2>&1 &
+   R1=$!
+   sleep 1
+   kill -0 "$R1" 2>/dev/null && echo "R1 alive" || echo "FAIL: R1 exited; read $WORK/r1.log"
+   ```
+
+   **Expect.** `free` for each of the four ports, and `R1 alive`. A `STOP`
+   line means another process would answer the scenario's requests, so stop
+   the scenario there.
+
+2. Write one artifact and serve with a file destination and an HTTP
+   destination whose URL carries a query secret, with the headers file
+   configured. Load the artifact three times while R1 refuses, then wait 3
+   seconds.
+
+   ```bash
+   mkdir -p "$WORK/reg/team/ledger"
+   cat > "$WORK/reg/team/ledger/ARTIFACT.md" <<'EOF'
+   ---
+   type: context
+   version: 1.0.0
+   description: the ledger context
+   ---
+
+   ledger prose
+   EOF
+   s105_serve() {
+     PODIUM_AUDIT_LOG_PATH="$WORK/audit.log,http://127.0.0.1:8904/ingest?tok=s105-query-secret" \
+     PODIUM_AUDIT_HEADERS_FILE="$WORK/headers" \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+       --bind 127.0.0.1:8143 > "$WORK/srv.log" 2>&1 &
+     SRV=$!
+     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8143/healthz
+     server_alive "$SRV" "$WORK/srv.log"
+   }
+   s105_serve
+   for n in 1 2 3; do
+     curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:8143/v1/load_artifact?id=team/ledger"
+   done
+   sleep 3
+   echo "artifact.loaded in the file: $(jq -s '[.[] | select(.type == "artifact.loaded")] | length' "$WORK/audit.log")"
+   echo "lines without schema_version 1: $(grep -vc '"schema_version":1' "$WORK/audit.log")"
+   [ -s "$WORK/forwarded.jsonl" ] && echo "R1 holds records" || echo "R1 holds nothing"
+   ```
+
+   **Expect.** `server_alive` prints nothing, each load prints `200`, the file
+   holds `3` `artifact.loaded` records, `0` lines lack `"schema_version":1`, and
+   `R1 holds nothing`. A count other than 3 means the file destination lost or
+   duplicated a record. A line without `schema_version` means the record
+   format lacks the member. `R1 holds records` means R1 accepted a request it
+   should have refused, and the outage check in step 4 then proves nothing.
+
+3. While R1 still refuses, save `/metrics` and search the server log and the
+   metrics page for the two secrets, the destination name, and the queue
+   gauge.
+
+   ```bash
+   curl -s http://127.0.0.1:8143/metrics > "$WORK/metrics.txt"
+   for f in "$WORK/srv.log" "$WORK/metrics.txt"; do
+     echo "$(basename "$f"): header token $(grep -c s105-secret-token "$f"), query secret $(grep -c s105-query-secret "$f")"
+   done
+   echo "destination named: $(grep -c 'http://127.0.0.1:8904/ingest' "$WORK/srv.log")"
+   echo "ingest? in the log: $(grep -c 'ingest?' "$WORK/srv.log")"
+   grep '^podium_audit_queue_depth{destination="http"}' "$WORK/metrics.txt" || echo "no http queue gauge"
+   ```
+
+   **Expect.**
+   - `header token 0, query secret 0` for both `srv.log` and `metrics.txt`.
+   - `destination named` is at least 1, and `ingest? in the log` is `0`.
+   - The `podium_audit_queue_depth{destination="http"}` value is above 0.
+
+   Wrong outputs:
+   - A non-zero count of either secret is a credential leak.
+   - `destination named: 0` means the delivery failure was never logged. That
+     check is the positive control for the two absence checks, which pass
+     vacuously on an empty log.
+   - A non-zero `ingest?` count means the log echoes the URL query.
+   - `no http queue gauge` or a value of 0 means the records were not queued
+     for R1, or the gauge has no feeder.
+
+4. Let R1 accept, then poll for up to 90 seconds, which covers the 60-second
+   backoff cap, until every `hash` in the file appears at R1. Then read the
+   audit metrics and the content type R1 recorded.
+
+   ```bash
+   cat > "$WORK/s105.py" <<'EOF'
+   import json, os, sys
+   def records(path):
+       out = []
+       try:
+           for line in open(path, encoding="utf-8"):
+               if line.strip():
+                   try:
+                       out.append(json.loads(line))
+                   except ValueError:
+                       pass
+       except FileNotFoundError:
+           pass
+       return out
+   cmd, path = sys.argv[1], sys.argv[2]
+   if cmd == "missing":
+       held = {r.get("hash") for r in records(sys.argv[3])}
+       local = records(path)
+       missing = [r for r in local if r.get("hash") not in held]
+       print(f"{os.path.basename(path)}: {len(local)} records, missing at the receiver: {len(missing)}")
+       sys.exit(1 if missing else 0)
+   if cmd == "after":
+       recs = records(path)
+       idx = [i for i, r in enumerate(recs) if r.get("hash") == sys.argv[3]]
+       nxt = recs[idx[0] + 1] if idx and idx[0] + 1 < len(recs) else None
+       print("prev_hash of the record after the saved hash matches:", nxt is not None and nxt.get("prev_hash") == sys.argv[3])
+   if cmd == "dangling":
+       recs = records(path)
+       held = {r.get("hash") for r in recs}
+       print("dangling prev_hash at the receiver:", sum(1 for r in recs if r.get("prev_hash") and r["prev_hash"] not in held))
+   if cmd == "searched":
+       print(f"{os.path.basename(path)}: artifacts.searched records:", sum(1 for r in records(path) if r.get("type") == "artifacts.searched"))
+   EOF
+   touch "$WORK/up"
+   i=0
+   until python3 "$WORK/s105.py" missing "$WORK/audit.log" "$WORK/forwarded.jsonl" > /dev/null || [ "$i" -ge 90 ]; do
+     sleep 1; i=$((i+1))
+   done
+   python3 "$WORK/s105.py" missing "$WORK/audit.log" "$WORK/forwarded.jsonl"
+   curl -s http://127.0.0.1:8143/metrics | grep '^podium_audit_'
+   echo "content type: $(cat "$WORK/r1-ctype")"
+   ```
+
+   **Expect.** `missing at the receiver: 0`, the only `podium_audit_` line is
+   `podium_audit_queue_depth{destination="http"} 0`, and `content type:
+   application/x-ndjson`. Delivery is at-least-once, so R1 may hold a record
+   more than once, and the check compares sets of hashes.
+
+   Wrong outputs:
+   - A non-zero missing count means the outage lost records. Missing records
+     also result when the header was not sent, because R1 answers 401 and the
+     sender retries.
+   - A `podium_audit_dropped_total` line means the queue overflowed or a
+     record was refused.
+   - Another content type means the wrong media type.
+
+5. Save the hash of the file's last record, stop the registry with SIGINT,
+   and start it again with the same settings and a fresh log. Load the
+   artifact once and wait 3 seconds.
+
+   ```bash
+   LAST=$(tail -n 1 "$WORK/audit.log" | jq -r .hash)
+   kill -INT "$SRV"; wait "$SRV"; SRV=
+   mv "$WORK/srv.log" "$WORK/srv-run1.log"
+   s105_serve
+   curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:8143/v1/load_artifact?id=team/ledger"
+   sleep 3
+   python3 "$WORK/s105.py" after "$WORK/audit.log" "$LAST"
+   python3 "$WORK/s105.py" dangling "$WORK/forwarded.jsonl"
+   ```
+
+   **Expect.** `server_alive` prints nothing, the load prints `200`, the
+   `prev_hash` check prints `True`, and `dangling prev_hash at the receiver: 0`.
+   The scenario performs no retention or erasure, so no record carries the
+   unresolvable `prev_hash` that §8.6 permits after a rewrite.
+
+   Wrong outputs:
+   - `False` means the restarted registry did not recover its chain head from
+     the file.
+   - A non-zero dangling count means R1 is missing a record, or the restarted
+     process linked to a record it never delivered.
+
+6. Start receiver R2 on port 8909. While `$WORK/mcp-up` does not exist, R2
+   records one refusal to `$WORK/r2-refused` and answers 503 with
+   `Retry-After: 60`. Otherwise, while `$WORK/mcp-slow` exists, it records one
+   hold to `$WORK/r2-held` and waits 3 seconds. It then appends the body
+   verbatim to `$WORK/mcp-forwarded.jsonl` and answers 204. Then run
+   `podium-mcp` twice, each time on a FIFO the shell holds open for writing.
+   Run 1 sends SIGTERM with standard input still open. Run 2 closes standard
+   input, which starts the stdin-EOF flush, and sends SIGTERM while R2 holds
+   the flush's request.
+
+   ```bash
+   cat > "$WORK/r2.py" <<'EOF'
+   import http.server, os, sys, time
+   W = sys.argv[1]
+   def mark(name):
+       with open(os.path.join(W, name), "a") as f:
+           f.write("x\n")
+   class H(http.server.BaseHTTPRequestHandler):
+       def do_POST(self):
+           body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+           if not os.path.exists(os.path.join(W, "mcp-up")):
+               mark("r2-refused")
+               self.send_response(503); self.send_header("Retry-After", "60")
+           else:
+               if os.path.exists(os.path.join(W, "mcp-slow")):
+                   mark("r2-held"); time.sleep(3)
+               with open(os.path.join(W, "mcp-forwarded.jsonl"), "ab") as f:
+                   f.write(body)
+               self.send_response(204)
+           self.send_header("Content-Length", "0"); self.end_headers()
+       def log_message(self, *a): pass
+   http.server.ThreadingHTTPServer(("127.0.0.1", 8909), H).serve_forever()
+   EOF
+   python3 "$WORK/r2.py" "$WORK" > "$WORK/r2.log" 2>&1 &
+   R2=$!
+   mcp_start() {
+     rm -f "$WORK/mcp-up" "$WORK/mcp-slow" "$WORK/r2-refused" "$WORK/r2-held" "$WORK/mcp.in"
+     mkfifo "$WORK/mcp.in"
+     PODIUM_REGISTRY=http://127.0.0.1:8143 \
+     PODIUM_AUDIT_SINK="$WORK/mcp$1.log,http://127.0.0.1:8909/ingest" \
+       podium-mcp < "$WORK/mcp.in" > "$WORK/mcp$1.out" 2> "$WORK/mcp$1.err" &
+     MCP=$!
+     exec 3> "$WORK/mcp.in"
+     sleep 1
+     kill -0 "$MCP" 2>/dev/null && echo "run $1: alive at 1 s" || echo "FAIL: run $1: podium-mcp exited; read $WORK/mcp$1.err"
+     printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"s105-host","version":"1.0"}}}' >&3
+     printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_artifacts","arguments":{"query":"ledger"}}}' >&3
+     i=0
+     until { grep -q '"id":2' "$WORK/mcp$1.out" && [ -s "$WORK/r2-refused" ]; } || [ "$i" -ge 40 ]; do
+       sleep 0.5; i=$((i+1))
+     done
+     echo "run $1: id 2 responses $(grep -c '"id":2' "$WORK/mcp$1.out"), R2 refusals $(cat "$WORK/r2-refused" 2>/dev/null | grep -c x)"
+   }
+   mcp_start 1
+   touch "$WORK/mcp-up"
+   kill -TERM "$MCP"; wait "$MCP"; RC=$?; MCP=
+   echo "run 1: exit $RC"
+   exec 3>&-
+   mcp_start 2
+   touch "$WORK/mcp-up" "$WORK/mcp-slow"
+   exec 3>&-
+   i=0
+   until [ -s "$WORK/r2-held" ] || [ "$i" -ge 40 ]; do sleep 0.1; i=$((i+1)); done
+   T0=$(date +%s); kill -TERM "$MCP"; wait "$MCP"; RC=$?; T1=$(date +%s); MCP=
+   echo "run 2: exit $RC after $((T1 - T0)) s"
+   for n in 1 2; do
+     python3 "$WORK/s105.py" searched "$WORK/mcp$n.log"
+     python3 "$WORK/s105.py" missing "$WORK/mcp$n.log" "$WORK/mcp-forwarded.jsonl"
+     echo "mcp$n.err panic: $(grep -c 'panic:' "$WORK/mcp$n.err")"
+   done
+   kill "$R2"; wait "$R2"; R2=
+   ```
+
+   **Expect.**
+   - Each run prints `alive at 1 s`, `id 2 responses 1`, and `R2 refusals`
+     of at least 1. A missing response means the tool call failed. No refusal
+     means the run cannot show that only the shutdown flush delivered the
+     record. A `FAIL` line means `podium-mcp` refused to start, and its
+     stderr file names the cause.
+   - `run 1: exit 0`. Status 143 means SIGTERM ended the process by its
+     default action, so no SIGTERM handler is installed.
+   - `run 2: exit 0 after 2 s` or `after 3 s`. Status 143 means SIGTERM ended
+     the stdin-EOF flush by the default action, so the handler was
+     unregistered or never installed. Status 0 after 0 seconds means the
+     process exited without waiting for R2's answer.
+   - Each local log holds exactly 1 `artifacts.searched` record, and each
+     prints `missing at the receiver: 0`. R2 refused the first request with
+     `Retry-After: 60`, so a missing record after status 0 means the shutdown
+     flush did not deliver the queued record.
+   - `panic: 0` for both stderr files.
+
+7. Stop the registry with SIGINT, then start it on port 8144 with a
+   destination URL that carries userinfo. Wait up to 10 seconds for it to
+   exit, then stop R1.
+
+   ```bash
+   kill -INT "$SRV"; wait "$SRV"; SRV=
+   PODIUM_AUDIT_LOG_PATH="http://alice:s105-pass@127.0.0.1:8904/ingest" \
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8144 > "$WORK/refuse.log" 2>&1 &
+   BAD=$!
+   i=0
+   while kill -0 "$BAD" 2>/dev/null && [ "$i" -lt 10 ]; do sleep 1; i=$((i+1)); done
+   if kill -0 "$BAD" 2>/dev/null; then
+     echo "FAIL: the registry still runs after 10 s"; kill "$BAD"; wait "$BAD"; BAD=
+   else
+     wait "$BAD"; RC=$?; BAD=
+     echo "exit $RC"
+   fi
+   echo "config.audit_sink_unavailable: $(grep -c config.audit_sink_unavailable "$WORK/refuse.log")"
+   echo "s105-pass: $(grep -c s105-pass "$WORK/refuse.log")"
+   echo "listening lines: $(grep -c 'podium-server listening on' "$WORK/refuse.log")"
+   kill "$R1"; wait "$R1"; R1=
+   ```
+
+   **Expect.** A non-zero `exit` status, `config.audit_sink_unavailable` of
+   at least 1, `s105-pass: 0`, and `listening lines: 0`.
+
+   Wrong outputs:
+   - `exit 0`, the `FAIL` line, or a non-zero listening count means userinfo
+     is still accepted.
+   - A non-zero `s105-pass` count means the refusal leaks the password.
+
+**Cleanup.** Stop every process the scenario started that still runs by its
+recorded PID, then remove `$WORK`. Each step clears a PID variable once it has
+waited for that process, because the kernel can give a reaped process's PID to
+an unrelated process. On a complete run every variable is empty, and the loop
+signals nothing.
+
+```bash
+for p in "$SRV" "$BAD" "$R1" "$R2" "$MCP"; do
+  [ -n "$p" ] && kill -0 "$p" 2>/dev/null && kill "$p"
+done
+exec 3>&-
+rm -rf "$WORK"
+```
+
+---
+
+## S106: A registry audit stream reaches an OpenTelemetry Collector, which decodes it and writes it to a file and to S3
+
+**Goal.** Validate that a registry with a file destination and an OTLP
+destination delivers every record to a stock OpenTelemetry Collector, that the
+collector decodes each record into a log record whose body is the file's line
+and whose attributes, trace id, and resource follow the §8.3 OTLP mapping, and
+that the collector's `awss3` exporter writes the same records to a bucket that
+reads back whole.
+
+**Covers.** §8.1 record format and receiver checks, §8.3 OTLP destination and
+OTLP mapping, and §8.1 `caller.client` as a receiver reads it, through the
+compiled binary and `otel/opentelemetry-collector-contrib`.
+
+**Why by hand.** The automated tests decode the export request with the proto
+package that encodes it, so a mapping both sides get wrong passes them. A
+collector decodes the request independently, re-encodes it as OTLP JSON, and
+hands it to the exporters an operator deploys. A record carries no sequence
+number, so the scenario reads a stream's identity from the `service.instance.id`
+resource attribute and its order from `prev_hash` linkage, as a receiver does.
+
+**Prerequisites.** Docker, and the MinIO server that `make services-up` starts
+(container `podium-minio`), running before step 1. When `podium-minio` is not
+running, run `make services-up` from the repository root before the scenario.
+When it is running, do not run `make services-up`, which can recreate a compose
+container whose configuration differs from this checkout's. Skip the scenario
+and record the reason when Docker is absent or MinIO is not ready.
+Elasticsearch is not exercised.
+
+**Docker safety.** Other projects share the Docker daemon. Every container and
+bucket name carries the shell's PID, the one published port binds 127.0.0.1
+after a check that it is free, and the scenario removes only the containers and
+the bucket it created. The scenario's commands never run `docker compose`,
+`make services-up`, or `make services-down`. MinIO stays running and the pulled
+images stay after the scenario.
+
+S106 uses ports 8147 (the registry) and 8908 (the collector's OTLP/HTTP
+receiver, published on 127.0.0.1). The collector container is
+`podium-s106-col-<pid>`, each S3 client container is
+`podium-s106-mc-<pid>-<purpose>` for the purposes `mb`, `ls`, `get`, and `rb`,
+and the bucket is `podium-s106-<pid>`, where `<pid>` is the scenario shell's
+PID. The S3 client image is the `pgsty/mc` reference that `docker-compose.yml`
+pins for its `bootstrap` service. The collector image is
+`otel/opentelemetry-collector-contrib:0.105.0`. The containers reach MinIO at
+the MinIO endpoint with its host replaced by `host.docker.internal`, and they
+run as the invoking user, so the files they write under `$WORK` are removable.
+
+**Steps.**
+
+1. Run the isolation block. Set the names, read the MinIO settings from
+   `test.env` (or from `test.env.example` when `test.env` is absent) without
+   sourcing the file, and register the cleanup to run when the shell exits.
+   The cleanup removes the bucket only when `S106_BUCKET` is set and the
+   collector container only when `S106_COL` is set. Step 2 sets
+   `S106_BUCKET` when this run's `mb` exits 0, and sets `S106_COL` when no
+   container of the collector's name exists before this run's `docker run`.
+   A STOP or a skip in step 1 therefore leaves no bucket and no container for
+   the cleanup to remove.
+   Then check the ports and MinIO, and print the S3 client image and the
+   endpoint the containers use. The block sends the MinIO readiness request
+   only when the endpoint host is `localhost` or `127.0.0.1`.
+
+   ```bash
+   S106=$$
+   S106_BUCKET= S106_COL= S106_CLEANED= S3_LOCAL= SRV=
+   COL="podium-s106-col-$S106"
+   BUCKET="podium-s106-$S106"
+   COL_IMAGE=otel/opentelemetry-collector-contrib:0.105.0
+   ENVF="$PODIUM_REPO/test.env"; [ -f "$ENVF" ] || ENVF="$PODIUM_REPO/test.env.example"
+   s106_env() { sed -n "s/^$1=//p" "$ENVF" | tail -n 1; }
+   S3_ENDPOINT=$(s106_env PODIUM_S3_ENDPOINT)
+   S3_REGION=$(s106_env PODIUM_S3_REGION)
+   S3_KEY=$(s106_env PODIUM_S3_ACCESS_KEY_ID)
+   S3_SECRET=$(s106_env PODIUM_S3_SECRET_ACCESS_KEY)
+   S3_HOSTPORT=${S3_ENDPOINT#*://}; S3_HOSTPORT=${S3_HOSTPORT%%/*}
+   S3_HOST=${S3_HOSTPORT%%:*}
+   case "$S3_HOST" in
+     localhost|127.0.0.1) S3_LOCAL=1; echo "endpoint host: local" ;;
+     *) echo "STOP: the S3 endpoint host $S3_HOST is not local" ;;
+   esac
+   CEP="${S3_ENDPOINT%%://*}://host.docker.internal:${S3_HOSTPORT#*:}"
+   MC_IMAGE=$(awk '/^  bootstrap:/ {b=1; next} b && /^  [^ ]/ {b=0} b && $1 == "image:" {print $2; exit}' "$PODIUM_REPO/docker-compose.yml")
+   s106_mc() {
+     purpose=$1; shift
+     MC_HOST_s3="${CEP%%://*}://$S3_KEY:$S3_SECRET@${CEP#*://}" \
+       docker run --rm --name "podium-s106-mc-$S106-$purpose" \
+       --add-host host.docker.internal:host-gateway --user "$(id -u):$(id -g)" \
+       -e HOME=/tmp -e MC_HOST_s3 -v "$WORK:/work" "$MC_IMAGE" "$@"
+   }
+   s106_cleanup() {
+     [ -n "$S106_CLEANED" ] && return 0
+     S106_CLEANED=1
+     [ -n "$SRV" ] && kill -0 "$SRV" 2>/dev/null && kill "$SRV"
+     if [ -n "$S106_BUCKET" ]; then
+       s106_mc rb rb --force "s3/$BUCKET" > /dev/null 2>&1 || echo "the bucket $BUCKET was not removed; remove that bucket by name"
+     fi
+     if [ -n "$S106_COL" ]; then
+       docker rm -f "$COL" > /dev/null 2>&1
+     fi
+     rm -rf "$WORK"
+   }
+   trap s106_cleanup EXIT
+   for p in 8147 8908; do
+     curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$p/"; rc=$?
+     if [ "$rc" -eq 7 ]; then echo "port $p: free"; else echo "STOP: port $p in use (curl exit $rc)"; fi
+   done
+   echo "podium-minio running: $(docker inspect -f '{{.State.Running}}' podium-minio 2>/dev/null)"
+   if [ -n "$S3_LOCAL" ]; then
+     echo "MinIO ready: $(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "$S3_ENDPOINT/minio/health/ready")"
+     echo "container endpoint: $CEP"
+   else
+     echo "MinIO ready: skipped (non-local endpoint)"
+   fi
+   echo "S3 client image: $MC_IMAGE"
+   ```
+
+   **Expect.** `endpoint host: local`, `free` for both ports, `podium-minio
+   running: true`, `MinIO ready: 200`, `container endpoint:
+   http://host.docker.internal:9000` with the repository's settings, and an
+   image reference that begins `pgsty/mc:RELEASE.`.
+
+   Wrong outputs:
+   - A `STOP` line for a port means another process would answer the
+     scenario's requests, so stop the scenario.
+   - A `podium-minio running` value other than `true`, or a readiness status
+     other than 200, means the prerequisite is absent, so record a skip.
+   - An empty image reference means `docker-compose.yml` no longer pins the
+     image in the form the scenario reads.
+   - A `STOP` line for the endpoint host stops the scenario. That line comes
+     with `MinIO ready: skipped (non-local endpoint)` and no container
+     endpoint line, because the block sends no readiness request to a host
+     other than `localhost` or `127.0.0.1`.
+
+2. Create the scenario bucket, write the collector configuration, and start
+   the collector. The configuration has one `logs` pipeline from the `otlp`
+   receiver to the `file` and `awss3` exporters, with no processor, so the
+   exporters write the receiver's decoding without transformation. Poll until
+   `GET /v1/logs` answers or the container stops running.
+
+   ```bash
+   if s106_mc mb mb "s3/$BUCKET"; then S106_BUCKET=1; else echo "STOP: the bucket $BUCKET was not created"; fi
+   mkdir -p "$WORK/col" "$WORK/s3"
+   cat > "$WORK/col.yaml" <<EOF
+   receivers:
+     otlp:
+       protocols:
+         http:
+           endpoint: 0.0.0.0:4318
+   exporters:
+     file:
+       path: /col/logs.json
+     awss3:
+       marshaler: otlp_json
+       s3uploader:
+         region: $S3_REGION
+         s3_bucket: $BUCKET
+         endpoint: $CEP
+         s3_force_path_style: true
+         disable_ssl: true
+   service:
+     pipelines:
+       logs:
+         receivers: [otlp]
+         exporters: [file, awss3]
+   EOF
+   if docker inspect "$COL" > /dev/null 2>&1; then
+     echo "STOP: a container named $COL already exists"
+   else
+     S106_COL=1
+     AWS_ACCESS_KEY_ID="$S3_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET" \
+       docker run -d --name "$COL" \
+       --add-host host.docker.internal:host-gateway --user "$(id -u):$(id -g)" \
+       -p 127.0.0.1:8908:4318 -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
+       -v "$WORK/col.yaml:/etc/otelcol-contrib/config.yaml:ro" -v "$WORK/col:/col" \
+       "$COL_IMAGE" > /dev/null || echo "STOP: the container $COL was not started"
+   fi
+   i=0
+   while :; do
+     code=$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' http://127.0.0.1:8908/v1/logs)
+     running=$(docker inspect -f '{{.State.Running}}' "$COL" 2>/dev/null)
+     [ "$code" != 000 ] || [ "$running" != true ] || [ "$i" -ge 30 ] && break
+     sleep 1; i=$((i+1))
+   done
+   echo "collector running: $running, GET /v1/logs: $code"
+   ```
+
+   **Expect.** The bucket creation prints `Bucket created successfully` for
+   `podium-s106-<pid>`, and the last line is `collector running: true, GET
+   /v1/logs: 405`. The receiver answers a GET on its logs path with 405, which
+   shows that the scenario's collector is the listener.
+
+   Wrong outputs:
+   - `STOP: the bucket ... was not created` means the bucket already exists
+     or MinIO refused the request. An existing bucket of that name belongs to
+     an earlier shell with the same PID, so the cleanup leaves it in place.
+     Stop the scenario.
+   - `STOP: a container named ... already exists` means an earlier shell with
+     the same PID left that container. The cleanup leaves it in place. Stop
+     the scenario.
+   - `STOP: the container ... was not started` means the image could not be
+     pulled or the container could not start. The cleanup removes any
+     container this run created. Stop the scenario.
+   - `collector running: false` means the collector refused its
+     configuration. `docker logs podium-s106-col-<pid>` names the setting the
+     pinned tag does not accept.
+   - Another status from a running container means another listener answers,
+     or the receiver path differs from `/v1/logs`.
+
+3. Write one artifact and serve with a file destination and an OTLP
+   destination at the collector. Load the artifact once with a
+   `traceparent` header and an `X-Podium-Client` header, stop the registry
+   with SIGINT, start it again with a fresh log, repeat the probe with a
+   second trace id, stop it again, and wait 3 seconds.
+
+   ```bash
+   mkdir -p "$WORK/reg/team/ledger"
+   cat > "$WORK/reg/team/ledger/ARTIFACT.md" <<'EOF'
+   ---
+   type: context
+   version: 1.0.0
+   description: the ledger context
+   ---
+
+   ledger prose
+   EOF
+   s106_serve() {
+     PODIUM_AUDIT_LOG_PATH="$WORK/audit.log,otlp+http://127.0.0.1:8908" \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+       --bind 127.0.0.1:8147 > "$WORK/$1" 2>&1 &
+     SRV=$!
+     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8147/healthz
+     server_alive "$SRV" "$WORK/$1"
+   }
+   s106_probe() {
+     curl -s -o /dev/null -w "probe $1: %{http_code}\n" \
+       -H "traceparent: 00-$1-00f067aa0ba902b7-01" \
+       -H 'X-Podium-Client: kind=cli&name=s106-probe&version=1.0' \
+       "http://127.0.0.1:8147/v1/load_artifact?id=team/ledger"
+   }
+   TRACE1=4bf92f3577b34da6a3ce929d0e0e4736
+   TRACE2=0af7651916cd43dd8448eb211c80319c
+   s106_serve srv1.log
+   s106_probe "$TRACE1"
+   kill -INT "$SRV"; wait "$SRV"; SRV=
+   s106_serve srv2.log
+   s106_probe "$TRACE2"
+   kill -INT "$SRV"; wait "$SRV"; SRV=
+   sleep 3
+   echo "artifact.loaded in the file: $(jq -s '[.[] | select(.type == "artifact.loaded")] | length' "$WORK/audit.log")"
+   ```
+
+   **Expect.** `server_alive` prints nothing at either start, each probe line
+   ends in `200`, and the file holds `2` `artifact.loaded` records.
+
+   Wrong outputs:
+   - A probe other than 200 means no record carries that trace id, and the
+     probe check in step 5 proves nothing.
+   - Another count means the file destination lost or duplicated a record.
+
+4. List the bucket recursively, polling for up to 30 seconds until the
+   listing holds at least one object, because the `awss3` upload runs after
+   the collector accepts the export. Then copy every object into `$WORK/s3`.
+
+   ```bash
+   end=$((SECONDS + 30))
+   until s106_mc ls ls --recursive "s3/$BUCKET" 2>/dev/null | grep -q . || [ "$SECONDS" -ge "$end" ]; do
+     sleep 2
+   done
+   s106_mc ls ls --recursive "s3/$BUCKET"
+   s106_mc get cp --recursive "s3/$BUCKET/" /work/s3/ > /dev/null; echo "copy exit $?"
+   ```
+
+   **Expect.** At least one listed object whose key ends in `.json`, and
+   `copy exit 0`.
+
+   Wrong outputs:
+   - An empty listing at the deadline means the `awss3` exporter wrote
+     nothing. `docker logs podium-s106-col-<pid>` names the S3 error. When
+     the collector check in step 5 is clean, the fault lies in the collector
+     or MinIO setup rather than in Podium.
+
+5. Parse the collector's file output and the S3 copy. Each is a sequence of
+   OTLP JSON export documents, possibly concatenated without separators. The
+   parser reduces them to log records with their resource attributes and
+   compares them with the lines of `$WORK/audit.log`, whose line order is the
+   chain order. A body that is not a string value counts as a mismatch, and
+   the parser reports it rather than failing.
+
+   ```bash
+   cat > "$WORK/s106.py" <<'EOF'
+   import json, os, re, sys, uuid
+   work, traces = sys.argv[1], sys.argv[2:]
+   lines = [l.rstrip("\n") for l in open(os.path.join(work, "audit.log"), encoding="utf-8") if l.strip()]
+   file_recs = [json.loads(l) for l in lines]
+   by_hash = {r["hash"]: l for r, l in zip(file_recs, lines)}
+   print("file records:", len(lines))
+   def documents(root):
+       dec = json.JSONDecoder()
+       for d, _, names in os.walk(root):
+           for name in sorted(names):
+               text = open(os.path.join(d, name), encoding="utf-8").read()
+               i = 0
+               while True:
+                   while i < len(text) and text[i].isspace():
+                       i += 1
+                   if i >= len(text):
+                       break
+                   doc, i = dec.raw_decode(text, i)
+                   yield doc
+   def log_records(root):
+       out = []
+       for doc in documents(root):
+           for rl in doc.get("resourceLogs", []):
+               res = {a["key"]: a["value"] for a in rl.get("resource", {}).get("attributes", [])}
+               for sl in rl.get("scopeLogs", []):
+                   for lr in sl.get("logRecords", []):
+                       body = lr.get("body", {}).get("stringValue")
+                       try:
+                           ev = json.loads(body) if isinstance(body, str) else None
+                       except ValueError:
+                           ev = None
+                       out.append((lr, res, body, ev))
+       return out
+   def compare(name, recs):
+       seen, extra, mismatch = set(), 0, 0
+       for lr, res, body, ev in recs:
+           if not isinstance(ev, dict):
+               mismatch += 1
+               continue
+           h = ev.get("hash")
+           if h not in by_hash:
+               extra += 1
+               continue
+           seen.add(h)
+           if body != by_hash[h]:
+               mismatch += 1
+       print(f"{name}: log records {len(recs)}, missing {len(set(by_hash) - seen)}, extra {extra}, body mismatches {mismatch}")
+   col = log_records(os.path.join(work, "col"))
+   compare("collector", col)
+   compare("s3", log_records(os.path.join(work, "s3")))
+   for t in traces:
+       hits = [ev for lr, res, body, ev in col if lr.get("traceId") == t and isinstance(ev, dict) and ev.get("type") == "artifact.loaded"]
+       clients = sorted({json.dumps(ev.get("caller", {}).get("client"), sort_keys=True, separators=(",", ":")) for ev in hits})
+       print(f"probe {t}: artifact.loaded records {len(hits)}, caller.client {' '.join(clients)}")
+   bad = {"hash": 0, "prev_hash": 0, "schema_version": 0, "trace_id": 0}
+   for lr, res, body, ev in col:
+       if not isinstance(ev, dict):
+           continue
+       attrs = {a["key"]: a["value"] for a in lr.get("attributes", [])}
+       if attrs.get("podium.audit.hash") != {"stringValue": ev.get("hash")}:
+           bad["hash"] += 1
+       ph = ev.get("prev_hash", "")
+       if (attrs.get("podium.audit.prev_hash") != {"stringValue": ph}) if ph else ("podium.audit.prev_hash" in attrs):
+           bad["prev_hash"] += 1
+       if attrs.get("podium.audit.schema_version") != {"intValue": "1"} or ev.get("schema_version") != 1:
+           bad["schema_version"] += 1
+       tid = ev.get("trace_id") or ""
+       if lr.get("traceId", "") != (tid if re.fullmatch(r"[0-9a-f]{32}", tid) else ""):
+           bad["trace_id"] += 1
+   print("attribute mismatches:", ", ".join(f"{k} {v}" for k, v in bad.items()))
+   held = {ev.get("hash") for _, _, _, ev in col if isinstance(ev, dict)}
+   dangling = sum(1 for _, _, _, ev in col if isinstance(ev, dict) and ev.get("prev_hash") and ev["prev_hash"] not in held)
+   print("collector dangling prev_hash:", dangling)
+   print("service.name values:", sorted({json.dumps(res.get("service.name")) for _, res, _, _ in col}))
+   inst_by_hash = {ev.get("hash"): res.get("service.instance.id", {}).get("stringValue") for _, res, _, ev in col if isinstance(ev, dict)}
+   order = [inst_by_hash.get(r["hash"]) for r in file_recs]
+   def v4(v):
+       try:
+           return uuid.UUID(v).version == 4 and str(uuid.UUID(v)) == v
+       except (TypeError, ValueError):
+           return False
+   changes = sum(1 for a, b in zip(order, order[1:]) if a != b)
+   print(f"service.instance.id: distinct {len(set(order))}, changes along the file {changes}, all version 4 UUIDs {all(v4(v) for v in order)}")
+   EOF
+   python3 "$WORK/s106.py" "$WORK" "$TRACE1" "$TRACE2"
+   ```
+
+   **Expect.**
+   - `file records` is at least 2.
+   - `collector: ... missing 0, extra 0, body mismatches 0`, and the same
+     three results on the `s3` line.
+   - Each probe line reports at least 1 `artifact.loaded` record and
+     `caller.client {"kind":"cli","name":"s106-probe","version":"1.0"}`.
+   - `attribute mismatches: hash 0, prev_hash 0, schema_version 0, trace_id
+     0`. The checks are that `podium.audit.hash` is a string value equal to
+     the body's `hash`; that `podium.audit.prev_hash` is a string value equal
+     to the body's `prev_hash` when that is non-empty and is absent when it
+     is empty; that `podium.audit.schema_version` is an integer value of 1
+     (OTLP JSON writes an int64 as the string `"1"`) and the body's
+     `schema_version` is 1; and that `traceId` equals the body's `trace_id`
+     when that is 32 hexadecimal characters and is empty otherwise.
+   - `collector dangling prev_hash: 0`.
+   - `service.name values: ['{"stringValue": "podium-registry"}']`.
+   - `service.instance.id: distinct 2, changes along the file 1, all version
+     4 UUIDs True`.
+
+   Wrong outputs:
+   - A non-zero `missing` count means the OTLP destination lost records.
+     When every record is missing, `$WORK/srv1.log` names the delivery
+     failure: a 404 or 415 means a wrong path or content type, which the
+     sender retries rather than delivers.
+   - A non-zero `extra` count means an event was chained without being
+     written to the file.
+   - A non-zero `body mismatches` count means a re-serialization, from which
+     a downstream verifier cannot recompute the hash.
+   - An S3 shortfall with a clean collector result is an `awss3` or MinIO
+     fault.
+   - A probe line with 0 records means the record lost its `traceparent`
+     trace id or never arrived. `caller.client null` means the body dropped
+     the member.
+   - A non-zero `hash` or `prev_hash` mismatch means the attribute is absent,
+     carries another record's value, or (for `prev_hash`) is present on a
+     record with an empty `prev_hash`.
+   - A non-zero `schema_version` mismatch means the attribute is absent, is
+     not an integer, or is not 1.
+   - A non-zero `trace_id` mismatch means the trace id is empty or is not the
+     16 bytes the hex decodes to. The collector re-encodes it as hex, so an
+     encoding of the ASCII text or of base64 shows here.
+   - A non-zero dangling count is the §8.1 receiver gap check firing. On the
+     second process's first record, it means the first process did not
+     deliver its last records before it exited.
+   - `distinct 1` means the identifier is fixed per host or binary rather
+     than generated when the stream opens. More than 2 values, or more than
+     one change along the file, means it changes per batch. `all version 4
+     UUIDs False` means a value is missing or is not a version 4 UUID.
+
+**Cleanup.** Remove the bucket and its objects with the `rb` S3 client
+container when step 2 created the bucket, remove the collector container by its
+exact name when step 2 created it, and remove `$WORK`. MinIO keeps running and
+the pulled images stay. When the bucket removal fails, the bucket
+`podium-s106-<pid>` stays in MinIO, and the operator removes it by that exact
+name and no other.
+
+```bash
+s106_cleanup
+trap - EXIT
+docker ps -a --format '{{.Names}}' | grep '^podium-s106-' || echo "no podium-s106 container remains"
+```
 
 ---

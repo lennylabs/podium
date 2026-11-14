@@ -2,7 +2,7 @@
 title: Podium
 nav_title: Overview
 nav_order: 0
-description: The documentation home. One catalog, every harness, and where each feature, tier, and guide is documented.
+description: The documentation home for Podium, the skill registry for AI agents, with the page that covers each feature, deployment mode, and task.
 actions:
   - label: Quickstart
     href: getting-started/quickstart
@@ -10,22 +10,24 @@ actions:
     href: getting-started/concepts
   - label: Why Podium
     href: getting-started/why-podium
-  - label: Deployment tiers
+  - label: Deployment modes
     href: deployment/
 ---
 
 # Podium
 
-Podium holds reusable AI agent artifacts in one catalog and translates them into
-the file layout each runtime expects. An author writes an artifact once in the
-canonical format, and a harness adapter produces the Claude Code layout, the
-Cursor layout, or a published marketplace repository from it.
+Podium is the skill registry for AI agents: an enterprise-grade registry for
+reusable agent skills and other artifacts (agents, commands, rules, hooks,
+contexts, and MCP server registrations). It signs them, controls who can see
+them, audits their use, and delivers them into the native file layout of each
+harness. This page is the
+documentation home and names the page that covers each feature, deployment
+mode, and task.
 
-An artifact is a directory, and the directory carries its dependencies. A script
-bundled beside a `SKILL.md` reaches every layout the manifest reaches.
-
-This page is the documentation home. It names the pages that cover each feature,
-each deployment tier, and each task.
+An author writes an artifact once in the canonical format. A harness adapter
+produces the Claude Code layout, the Cursor layout, or a published marketplace
+repository from it. An artifact is a directory, so a script bundled beside a
+`SKILL.md` reaches every layout the manifest reaches.
 
 > [!NOTE]
 > **Status: early release.** The CLI, server, MCP bridge, and SDKs
@@ -40,10 +42,15 @@ each deployment tier, and each task.
 
 | Page | What it covers |
 |:--|:--|
-| [Why Podium](getting-started/why-podium) | What "one catalog, every harness" means feature by feature, when Podium applies, when a simpler alternative is enough, and how it compares to adjacent products. |
-| [Quickstart](getting-started/quickstart) | Install the CLI, write one skill, materialize it into Claude Code, and see it load. |
-| [Concepts](getting-started/concepts) | The vocabulary the rest of the docs link to: artifact, type, domain, registry, layer, visibility, harness, profile, materialization, and meta-tools. |
-| [How it works](getting-started/how-it-works) | The components, where each feature runs, the deployment tiers, and where state lives. |
+| [Why Podium](getting-started/why-podium) | The features, when Podium applies, when a simpler alternative is enough, and how Podium compares to adjacent products. |
+| [Quickstart](getting-started/quickstart) | Installing the CLI, writing one skill in a local catalog, materializing it into Claude Code and Cursor, and using it. |
+| [Concepts](getting-started/concepts) | The vocabulary the rest of the docs link to: registry, catalog, tenant, artifact, type, domain, layer, visibility, harness, materialization, profile, and the meta-tools. |
+| [How it works](getting-started/how-it-works) | The components, where each one runs, where state lives, and how an artifact travels from the registry to a harness. |
+
+To try Podium before reading about it, start with the
+[quickstart](getting-started/quickstart). It writes one skill into a local
+catalog and materializes it into Claude Code and Cursor with `podium init` and
+`podium sync`, with no server.
 
 ---
 
@@ -51,30 +58,31 @@ each deployment tier, and each task.
 
 | Feature | What it does | Covered in |
 |:--|:--|:--|
-| Cross-harness delivery | A harness adapter translates a canonical artifact into the layout one runtime expects, for a workspace tree or a published marketplace repository. | [Configure your harness](consuming/configure-your-harness), [Marketplace publishing](consuming/publishing) |
 | Domains and subdomains | The directory layout defines the domain hierarchy, and `DOMAIN.md` adds descriptions, keywords, and featured artifacts. | [Domains](authoring/domains) |
-| Selective materialization | `podium sync` materializes the subset named by include globs, exclude globs, and types, and a named profile replays that subset. | [Selective materialization](consuming/selective-materialization) |
-| Progressive discovery | An agent traverses domains and searches the catalog through the meta-tools, and materializes an artifact and its bundled files only when it loads one. | [Browsing the catalog](consuming/browsing-the-catalog) |
-| Layered composition | Several independent sources compose into one catalog with deterministic merge and explicit precedence. | [Layered composition](deployment/layers) |
-| Access control | Each layer declares who can see it, and the registry composes the caller's effective view from the layers that pass. | [Access control](deployment/access-control) |
+| Selective materialization | `podium sync` writes the subset named by include globs, exclude globs, and types ahead of time, and a named profile replays that subset. | [Selective materialization](consuming/selective-materialization) |
+| Progressive discovery | An agent walks domains and searches the catalog through the MCP server's meta-tools, and materializes an artifact and its bundled files only when it loads one. | [Browsing the catalog](consuming/browsing-the-catalog) |
+| Layered composition | Independent sources, including Git repositories, compose into one catalog with deterministic merge and explicit precedence. | [Connecting layer sources](deployment/content/layer-sources), [Layered composition](deployment/content/layers) |
+| Security and access control | The registry signs artifacts at ingest, and consumers verify the signature before they write an artifact. Each layer declares who can see it, and every call is audited. | [Access control](deployment/content/access-control) |
+| Observability | Audit events stream to a file, stdout, HTTP receivers, or an OpenTelemetry Collector. The registry also serves Prometheus metrics, exports OTLP traces, and sends ingest-failure notifications. | [Audit and observability](deployment/operations/observability) |
+| Cross-harness delivery | A harness adapter translates a canonical artifact into the layout one runtime expects, for a workspace tree or a published marketplace repository. | [Configure your harness](consuming/configure-your-harness), [Publishing marketplace repositories](deployment/content/publishing) |
 
 ---
 
-## Deployment tiers
+## Deployment modes
 
-Each tier keeps everything the tier below it does and adds server-side
-capability. The artifacts are the same in every tier.
+Each deployment mode keeps everything the mode before it does and adds
+server-side capability. The artifacts are the same in every mode.
 
-| Tier | Server-side deployment | What the tier adds |
+| Mode | Server-side deployment | What the mode adds |
 |:--|:--|:--|
-| [Local](deployment/local) | None | Authoring, lint, sync, domains, profiles, and ordered layers from disk |
-| [Single node](deployment/single-node) | One binary | Discovery through MCP or the SDKs, hybrid search, registered and remote layers with visibility, and one audit log |
-| [Clustered](deployment/clustered) | Replicas, Postgres, and object storage | Postgres schema-per-org tenant isolation and high availability across registry replicas |
+| [Local](deployment/modes/local) | None | Authoring, lint, sync, domains, profiles, and ordered layers from disk |
+| [Single node](deployment/modes/single-node) | One binary | Discovery through MCP or the SDKs, hybrid search, registered and remote layers with visibility, and one audit log |
+| [Clustered](deployment/modes/clustered) | Replicas, Postgres, and object storage | Postgres schema-per-org tenant isolation and high availability across registry replicas |
 
-[Server-side integrations](deployment/integrations) names the backing service
-behind each server-side concern: the metadata store, object storage, the vector
-index, embeddings, identity, and layer sources. Each row states what ships by
-default and what can replace it.
+[Backing services](deployment/services/) names the backing service
+behind each server-side concern, such as the metadata store, object storage,
+the vector index, embeddings, identity, and layer sources. Each row states what
+ships by default and what can replace it.
 
 ---
 
@@ -82,56 +90,12 @@ default and what can replace it.
 
 | Guide | What it covers |
 |:--|:--|
-| [Getting Started](getting-started/) | Positioning, the quickstart, the vocabulary, and the architecture. |
+| [Getting Started](getting-started/) | The reading order for the evaluation, the quickstart, the vocabulary, and the architecture. |
 | [Authoring](authoring/) | Writing artifacts: types, frontmatter, domains, bundled resources, rule modes, hooks, and hints. |
-| [Consuming](consuming/) | Delivering artifacts into a harness, narrowing what a workspace receives, runtime discovery, the SDKs, and marketplace publishing. |
-| [Deployment](deployment/) | Running each tier, the server-side integrations, layers, access control, day-two operations, and the OIDC cookbooks. |
-| [Reference](reference/) | CLI, HTTP API, frontmatter schema, error codes, and glossary. |
-| [Testing](testing/) | Setting up and running the integration and live-backend suites. |
-| [About](about/) | Implementation status, contributing, governance, and the changelog. |
-
----
-
-## 'Hello world' example
-
-The [full quickstart](getting-started/quickstart) covers the same flow with
-prerequisites and verification steps.
-
-Create a skill directory with a `SKILL.md` file from the
-[agentskills.io](https://agentskills.io/specification) standard. Its
-frontmatter carries the version in `metadata.version`, and its body holds the
-agent-facing instructions:
-
-```markdown
-~/podium-artifacts/personal/hello/greet/SKILL.md
-
----
-name: greet
-description: Greet the user by name and tell them today's date.
-metadata:
-  version: "1.0.0"
----
-
-Greet the user by their first name. Tell them today's date.
-```
-
-A hand-written `ARTIFACT.md` beside `SKILL.md` is optional. It carries
-Podium-only fields such as `tags` and `sensitivity`, and the
-[frontmatter reference](authoring/frontmatter-reference) lists them.
-
-Point Podium at the directory and set the harness:
-
-```bash
-cd ~/projects/your-project
-podium init --registry ~/podium-artifacts/ --harness claude-code
-podium sync
-```
-
-Open Claude Code in the project. Claude Code can discover the materialized
-skill in its native location. Changing the harness and running `podium sync`
-again writes the same artifact into another runtime's layout, and it removes the
-files the previous harness's run wrote, because each run reconciles the whole
-target against the lock file.
+| [Consuming](consuming/) | Delivering artifacts into a harness, narrowing what a workspace receives, runtime discovery, verifying deliveries, and the SDKs. |
+| [Deployment](deployment/) | Choosing and running a deployment mode, identity and tenants, layer sources and access control, marketplace publishing, day-two operations, and the backing services. |
+| [Reference](reference/) | The CLI, the HTTP API, the configuration keys, error codes, audit events, and the glossary. |
+| [About](about/) | Implementation status, contributing, the live vector backend tests, governance, and the changelog. |
 
 The source, the issue tracker, and the release history live at
 [lennylabs/podium](https://github.com/lennylabs/podium).

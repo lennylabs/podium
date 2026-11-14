@@ -29,11 +29,14 @@ import { remarkDirectives } from "./directives";
 import { checkHeadingOrder, checkImageAlt, collectHeadings, collectText } from "./headings";
 import { highlightTree, remarkCodeMeta } from "./highlight";
 import { isExternal, resolveLink, type RouteIndex } from "./links";
+import { loadRedirects, type Redirect } from "../redirects";
 
 export type BuiltCorpus = {
   pages: PageModel[];
   statics: StaticFile[];
   index: RouteIndex;
+  /** Old routes that forward to the page that replaced them. */
+  redirects: Redirect[];
   diagnostics: BuildDiagnostic[];
 };
 
@@ -131,7 +134,13 @@ export async function buildCorpus(
     });
   }
 
-  return { pages: models, statics, index, diagnostics };
+  // Resolved last, against the complete anchor set. The old routes join the
+  // published set only after every page's links were rewritten, so a page
+  // cannot link to a route that merely forwards.
+  const redirects = loadRedirects(config, index, diagnostics);
+  for (const redirect of redirects) index.routes.add(redirect.route);
+
+  return { pages: models, statics, index, redirects, diagnostics };
 }
 
 /** Runs the markdown transform for one page, up to but not including links. */

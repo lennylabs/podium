@@ -1,7 +1,7 @@
 /*
  * Design tokens for the Podium site.
  *
- * Values come from site/design/README.md. Components reference these variables
+ * Values come from web/design/site/README.md. Components reference these variables
  * and never inline a hex value, so a token change lands in one place.
  *
  * Theme resolution order:
@@ -54,9 +54,7 @@
   /* The same wash, sized for a 390pt viewport. */
   --hero-wash-mobile: radial-gradient(520px 300px at 88% 2%, rgba(255, 164, 36, 0.16), transparent 62%);
   --hero-base: linear-gradient(180deg, #fdfdf8, #fbf9f5 70%);
-  --terminal-glow: linear-gradient(140deg, rgba(255, 164, 36, 0.5), rgba(255, 164, 36, 0) 58%);
-  --terminal-glow-blur: 10px;
-  --terminal-glow-inset: -14px;
+  --terminal-glow: -22px -22px 70px -20px rgba(255, 164, 36, 0.45);
   --btn-primary-bg: linear-gradient(180deg, #232219, #14130f);
   --btn-primary-text: #fbf9f5;
   --btn-primary-shadow: 0 6px 16px -8px rgba(20, 19, 15, 0.6);
@@ -129,9 +127,7 @@
     --hero-wash: radial-gradient(820px 400px at 86% 4%, rgba(255, 164, 36, 0.07), transparent 60%);
     --hero-wash-mobile: radial-gradient(520px 300px at 88% 2%, rgba(255, 164, 36, 0.08), transparent 60%);
     --hero-base: linear-gradient(180deg, #141824, #10131c 65%);
-    --terminal-glow: linear-gradient(140deg, rgba(255, 164, 36, 0.2), rgba(255, 164, 36, 0) 60%);
-    --terminal-glow-blur: 14px;
-    --terminal-glow-inset: -16px;
+    --terminal-glow: -22px -22px 70px -20px rgba(255, 164, 36, 0.18);
     --btn-primary-bg: linear-gradient(180deg, #ffb84d, #f59410);
     --btn-primary-text: #14130f;
     --btn-primary-shadow: 0 8px 22px -12px rgba(255, 164, 36, 0.6);
@@ -176,9 +172,7 @@
   --hero-wash: radial-gradient(820px 400px at 86% 4%, rgba(255, 164, 36, 0.07), transparent 60%);
   --hero-wash-mobile: radial-gradient(520px 300px at 88% 2%, rgba(255, 164, 36, 0.08), transparent 60%);
   --hero-base: linear-gradient(180deg, #141824, #10131c 65%);
-  --terminal-glow: linear-gradient(140deg, rgba(255, 164, 36, 0.2), rgba(255, 164, 36, 0) 60%);
-  --terminal-glow-blur: 14px;
-  --terminal-glow-inset: -16px;
+  --terminal-glow: -22px -22px 70px -20px rgba(255, 164, 36, 0.18);
   --btn-primary-bg: linear-gradient(180deg, #ffb84d, #f59410);
   --btn-primary-text: #14130f;
   --btn-primary-shadow: 0 8px 22px -12px rgba(255, 164, 36, 0.6);

@@ -41,25 +41,25 @@ const GROUPS = [
   },
   {
     key: 'deployment-tiers',
-    pages: 'docs/deployment/ (index, local, single-node, clustered, integrations, layers, access-control)',
+    pages: 'docs/deployment/ (index, progressive-adoption), docs/deployment/modes/, docs/deployment/content/, docs/deployment/services/index.md',
     focus:
       'Which tier provides which capability, every PODIUM_* variable and its default, and every YAML config example against internal/serverboot.',
   },
   {
     key: 'deployment-ops',
-    pages: 'docs/deployment/ (operator-guide, extending, vector-backends, gateway-delegated-identity, progressive-adoption)',
+    pages: 'docs/deployment/operations/, docs/deployment/services/ (extending, vector-backends)',
     focus:
       'Operational commands that must exist with the flags shown, metric names, and backend selection against pkg/vector and pkg/embedding.',
   },
   {
     key: 'deployment-oidc',
-    pages: 'docs/deployment/oidc/ (index, okta, entra-id, google-workspace, auth0, keycloak)',
+    pages: 'docs/deployment/identity/ (index, trusted-headers, tenants, groups), docs/deployment/identity/oidc/ (index, okta, entra-id, google-workspace, auth0, keycloak)',
     focus:
       'Identity configuration against pkg/identity and internal/serverboot. Which provider values the registry accepts, and what each claim mapping actually reads.',
   },
   {
     key: 'reference-and-meta',
-    pages: 'docs/reference/ (cli, http-api, frontmatter-schema, error-codes, glossary, index), docs/about/, docs/testing/, docs/overview.md, README.md',
+    pages: 'docs/reference/ (cli, http-api, configuration, error-codes, audit-events, glossary, index), docs/about/, docs/overview.md, README.md',
     focus:
       'The densest factual surface. Every flag, route, status code, and error code, plus every "shipped" claim in about/status.md.',
   },

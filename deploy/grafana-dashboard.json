@@ -109,6 +109,37 @@
         {"expr": "podium_vector_outbox_depth", "legendFormat": "vector"}
       ],
       "gridPos": {"x": 0, "y": 16, "w": 24, "h": 8}
+    },
+    {
+      "title": "Audit delivery",
+      "type": "row",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {"x": 0, "y": 24, "w": 24, "h": 1}
+    },
+    {
+      "title": "Audit queue depth by destination",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum by (destination) (podium_audit_queue_depth)",
+          "legendFormat": "{{destination}}"
+        }
+      ],
+      "gridPos": {"x": 0, "y": 25, "w": 12, "h": 8}
+    },
+    {
+      "title": "Audit records dropped by destination and reason",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum by (destination, reason) (rate(podium_audit_dropped_total[5m]))",
+          "legendFormat": "{{destination}} {{reason}}"
+        }
+      ],
+      "gridPos": {"x": 12, "y": 25, "w": 12, "h": 8}
     }
   ],
   "templating": {"list": []},

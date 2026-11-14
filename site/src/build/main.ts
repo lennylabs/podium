@@ -22,6 +22,7 @@ import { buildCorpus } from "./content/pipeline";
 import { disposeHighlighter } from "./content/highlight";
 import { buildNav, flattenNav, neighbours } from "./nav";
 import { renderBody, renderDocument, resolveIslandComponents } from "./render";
+import { renderRedirect } from "./redirects";
 import { buildSearchIndex } from "./search";
 import { BuildError, type BuildDiagnostic, type NavNode, type PageModel, type SiteConfig } from "./types";
 
@@ -54,6 +55,7 @@ async function assemble(config: SiteConfig): Promise<{
   diagnostics: BuildDiagnostic[];
   index: Awaited<ReturnType<typeof buildCorpus>>["index"];
   statics: Awaited<ReturnType<typeof buildCorpus>>["statics"];
+  redirects: Awaited<ReturnType<typeof buildCorpus>>["redirects"];
   search: { serialized: string; documentCount: number };
 }> {
   const diagnostics: BuildDiagnostic[] = [...validateRegistry(registry)];
@@ -74,6 +76,7 @@ async function assemble(config: SiteConfig): Promise<{
     diagnostics,
     index: corpus.index,
     statics: corpus.statics,
+    redirects: corpus.redirects,
     search,
   };
 }
@@ -162,9 +165,9 @@ async function runBuild(config: SiteConfig): Promise<void> {
     join(config.outDir, "index.html"),
     renderDocument({
       config,
-      title: "Podium · One catalog. Every harness.",
+      title: "Podium · The skill registry for AI agents",
       description:
-        "Podium is a catalog for reusable AI agent artifacts, with tooling that translates them into harness-specific formats.",
+        "Podium is an enterprise-grade registry for reusable agent skills and other artifacts, with signing, access control, audit, and delivery into each harness's native format.",
       route: "/index.html",
       bodyClass: "landing",
       scriptSrc,
@@ -192,6 +195,10 @@ async function runBuild(config: SiteConfig): Promise<void> {
       children: createElement(NotFound, { config, nav: assembled.nav }),
     }),
   );
+
+  for (const redirect of assembled.redirects) {
+    writeFile(join(config.outDir, redirect.route), renderRedirect(redirect));
+  }
 
   copyStatics(config, assembled.statics);
   writeFile(join(config.outDir, ".nojekyll"), "");

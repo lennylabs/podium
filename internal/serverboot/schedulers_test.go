@@ -2,6 +2,7 @@ package serverboot
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/audit"
+	"github.com/lennylabs/podium/pkg/metrics"
 )
 
 // Spec: §8.6 — startAnchorScheduler runs the periodic anchor with the signer
@@ -16,9 +18,9 @@ import (
 func TestStartAnchorScheduler_RunsWithLoadedSigner(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	sink, err := audit.NewFileSink(filepath.Join(dir, "audit.log"))
+	sink, err := audit.OpenFile(filepath.Join(dir, "audit.log"), audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	signer, _, err := loadOrGenerateAuditSigner(filepath.Join(dir, "audit.key"))
 	if err != nil {
@@ -31,13 +33,62 @@ func TestStartAnchorScheduler_RunsWithLoadedSigner(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 }
 
+// Spec: §8.6 — a periodic anchor that cannot sign records audit.anchor_failed
+// through the stream, and the scheduler goroutine stops at the context's end.
+func TestStartAnchorScheduler_SignFailureRecordsAnchorFailed(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.log")
+	sink, err := audit.OpenFile(path, audit.OpenOptions{})
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	t.Cleanup(sink.Shutdown)
+	// An empty log has no head to anchor, so one record gives Anchor a head
+	// to sign.
+	if err := sink.Append(t.Context(), audit.Event{Type: audit.EventArtifactLoaded, Caller: "alice"}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	startAnchorScheduler(ctx, &Config{auditAnchorInterval: 3600}, sink, refusingSigner{})
+	for {
+		b, err := os.ReadFile(path)
+		if err == nil && strings.Contains(string(b), `"type":"audit.anchor_failed"`) {
+			if !strings.Contains(string(b), "signing key unavailable") {
+				t.Errorf("audit.anchor_failed does not carry the signing error:\n%s", b)
+			}
+			return
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("no audit.anchor_failed record before the deadline (read err %v):\n%s", err, b)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// refusingSigner is a sign.Provider whose every Sign call fails.
+type refusingSigner struct{}
+
+func (refusingSigner) ID() string { return "refusing" }
+
+func (refusingSigner) Sign(context.Context, string) (string, error) {
+	return "", errors.New("signing key unavailable")
+}
+
+func (refusingSigner) Verify(context.Context, string, string) error {
+	return errors.New("signing key unavailable")
+}
+
+// Spec: §8.4 — a nil stream reaches the scheduler's file check through the
+// nil-receiver-safe File, so retention is disabled without a panic.
 func TestStartRetentionScheduler_NilSink(t *testing.T) {
 	t.Parallel()
 	startRetentionScheduler(t.Context(), &Config{}, nil, nil)
 }
 
-// Spec: §8.6 — startVerifyScheduler tolerates a nil sink by
-// logging and returning without launching a goroutine.
+// Spec: §8.6 — startVerifyScheduler tolerates a nil stream, through the
+// nil-receiver-safe File, by logging and returning without launching a
+// goroutine.
 func TestStartVerifyScheduler_NilSink(t *testing.T) {
 	t.Parallel()
 	startVerifyScheduler(t.Context(), &Config{auditVerifyInterval: 1}, nil)
@@ -49,7 +100,7 @@ func TestStartVerifyScheduler_NilSink(t *testing.T) {
 func TestStartVerifyScheduler_Runs(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
+	sink, _ := audit.OpenFile(filepath.Join(dir, "audit.log"), audit.OpenOptions{})
 	_ = sink.Append(context.Background(), audit.Event{Type: audit.EventArtifactLoaded, Caller: "alice"})
 	startVerifyScheduler(t.Context(), &Config{auditVerifyInterval: 1}, sink)
 	// Allow the immediate pass to run, then let process exit reclaim the
@@ -60,14 +111,14 @@ func TestStartVerifyScheduler_Runs(t *testing.T) {
 func TestStartRetentionScheduler_ZeroMaxAge(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
+	sink, _ := audit.OpenFile(filepath.Join(dir, "audit.log"), audit.OpenOptions{})
 	startRetentionScheduler(t.Context(), &Config{auditRetentionMaxAgeDays: 0}, sink, nil)
 }
 
 func TestStartRetentionScheduler_ZeroInterval(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
+	sink, _ := audit.OpenFile(filepath.Join(dir, "audit.log"), audit.OpenOptions{})
 	cfg := &Config{auditRetentionMaxAgeDays: 1, auditRetentionInterval: 0}
 	startRetentionScheduler(t.Context(), cfg, sink, nil)
 }
@@ -75,7 +126,7 @@ func TestStartRetentionScheduler_ZeroInterval(t *testing.T) {
 func TestStartRetentionScheduler_Runs(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	sink, _ := audit.NewFileSink(filepath.Join(dir, "audit.log"))
+	sink, _ := audit.OpenFile(filepath.Join(dir, "audit.log"), audit.OpenOptions{})
 	cfg := &Config{auditRetentionMaxAgeDays: 1, auditRetentionInterval: 1}
 	startRetentionScheduler(t.Context(), cfg, sink, nil)
 	// Allow the immediate pass to run.
@@ -160,75 +211,61 @@ func TestRetentionPolicy_OmitsIntegrityAndErasureTypes(t *testing.T) {
 	}
 }
 
-func TestResolveAuditPath_ExpandsHome(t *testing.T) {
-	t.Parallel()
-	if got, err := resolveAuditPath("/explicit"); err != nil || got != "/explicit" {
-		t.Errorf("explicit: got %q err %v", got, err)
-	}
-	got, err := resolveAuditPath("")
+// openStreamForTest opens the registry stream for cfg and shuts it down when
+// the test ends.
+func openStreamForTest(t *testing.T, cfg *Config) *audit.Stream {
+	t.Helper()
+	stream, err := openAuditStream(cfg, nil)
 	if err != nil {
-		t.Fatalf("default: %v", err)
+		t.Fatalf("openAuditStream: %v", err)
 	}
-	if got == "" {
-		t.Errorf("empty path returned for default")
+	t.Cleanup(stream.Shutdown)
+	return stream
+}
+
+// Spec: §8.3 — a filesystem PODIUM_AUDIT_LOG_PATH opens a stream whose
+// file destination writes that path.
+func TestOpenAuditStream_WithExplicitPath(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "x.log")
+	stream := openStreamForTest(t, &Config{auditLogPath: path})
+	if stream.File() == nil || stream.File().Path() != path {
+		t.Errorf("file destination = %v, want %s", stream.File(), path)
 	}
 }
 
-func TestOpenAuditSink_WithExplicitPath(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	cfg := &Config{auditLogPath: filepath.Join(dir, "x.log")}
-	sink, file, err := openAuditSink(cfg)
-	if err != nil {
-		t.Fatalf("openAuditSink: %v", err)
-	}
-	if sink == nil {
-		t.Errorf("openAuditSink returned nil emit sink for writable path")
-	}
-	if file == nil {
-		t.Errorf("openAuditSink returned nil file sink for a filesystem path")
-	}
-}
-
-// Spec: §8.3 — an http(s) PODIUM_AUDIT_LOG_PATH redirects the
-// registry sink to an external endpoint, mirroring the local sink. The emit
-// sink is the EndpointSink; the file form is nil so the file-only schedulers
-// (anchor/verify/retention) and the §8.5 erasure pass stay disabled.
-func TestOpenAuditSink_EndpointRedirect(t *testing.T) {
+// Spec: §8.3 — an http(s) PODIUM_AUDIT_LOG_PATH opens a stream with no file
+// destination, so the file-only schedulers (anchor, verify, and retention)
+// and the §8.5 erasure rewrite stay disabled.
+func TestOpenAuditStream_EndpointRedirect(t *testing.T) {
 	t.Parallel()
 	for _, raw := range []string{"http://siem.example/audit", "https://siem.example/audit"} {
-		cfg := &Config{auditLogPath: raw}
-		sink, file, err := openAuditSink(cfg)
-		if err != nil {
-			t.Errorf("%s: openAuditSink error %v, want nil", raw, err)
+		stream := openStreamForTest(t, &Config{auditLogPath: raw})
+		if stream == nil {
+			t.Fatalf("%s: stream is nil", raw)
 		}
-		if sink == nil {
-			t.Errorf("%s: emit sink is nil, want EndpointSink", raw)
-		}
-		if _, ok := sink.(*audit.EndpointSink); !ok {
-			t.Errorf("%s: emit sink is %T, want *audit.EndpointSink", raw, sink)
-		}
-		if file != nil {
-			t.Errorf("%s: file sink is non-nil for an endpoint redirect", raw)
+		if stream.File() != nil {
+			t.Errorf("%s: file destination is non-nil for an HTTP destination", raw)
 		}
 	}
 }
 
-// Spec: §8.3 — a malformed endpoint value disables the sink
-// (both returns nil) rather than falling back to a file named like a URL.
-func TestOpenAuditSink_BadEndpointDisables(t *testing.T) {
+// Spec: §8.3, §13.12 — a URL element that does not parse refuses rather than
+// opening a file named like a URL. run refuses the error whatever the
+// anchoring setting.
+func TestOpenAuditStream_UnparseableURLRefuses(t *testing.T) {
 	t.Parallel()
-	cfg := &Config{auditLogPath: "http://%zz"}
-	sink, file, err := openAuditSink(cfg)
-	if sink != nil || file != nil || err != nil {
-		t.Errorf("bad endpoint: got (%v, %v, %v), want (nil, nil, nil)", sink, file, err)
+	stream, err := openAuditStream(&Config{auditLogPath: "http://%zz"}, nil)
+	if stream != nil || !errors.Is(err, audit.ErrConfig) {
+		t.Errorf("openAuditStream = (%v, %v), want (nil, an audit.ErrConfig error)", stream, err)
 	}
 }
 
-// Spec: §8.6, §13.12 — a file-path PODIUM_AUDIT_LOG_PATH that NewFileSink
-// cannot open returns an error naming the path, and both sinks are nil, so the
-// caller decides between refusing the start and warning.
-func TestOpenAuditSink_FileFailureReturnsError(t *testing.T) {
+// Spec: §8.6, §13.12 — a file destination that NewFileSink cannot open
+// returns an audit.ErrConfig error naming PODIUM_AUDIT_LOG_PATH and the path,
+// with a nil stream. run refuses the error whatever the anchoring setting,
+// so no registry runs with no audit stream.
+func TestOpenAuditStream_UnopenableFileRefuses(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	blocker := filepath.Join(dir, "blocker")
@@ -239,27 +276,50 @@ func TestOpenAuditSink_FileFailureReturnsError(t *testing.T) {
 		"existing directory":  dir,
 		"regular-file parent": filepath.Join(blocker, "audit.log"),
 	} {
-		sink, file, err := openAuditSink(&Config{auditLogPath: path})
-		if sink != nil || file != nil {
-			t.Errorf("%s: sinks = (%v, %v), want (nil, nil)", name, sink, file)
+		stream, err := openAuditStream(&Config{auditLogPath: path}, nil)
+		if stream != nil {
+			t.Errorf("%s: stream = %v, want nil", name, stream)
 		}
-		if err == nil || !strings.Contains(err.Error(), path) {
-			t.Errorf("%s: err = %v, want an error naming %s", name, err, path)
+		if !errors.Is(err, audit.ErrConfig) || !strings.Contains(err.Error(), "PODIUM_AUDIT_LOG_PATH") || !strings.Contains(err.Error(), path) {
+			t.Errorf("%s: err = %v, want an audit.ErrConfig error naming PODIUM_AUDIT_LOG_PATH and %s", name, err, path)
 		}
 	}
 }
 
 // Spec: §8.6, §13.12 — with PODIUM_AUDIT_LOG_PATH unset and no resolvable
 // home directory, the default ~/.podium/audit.log cannot be resolved, and
-// openAuditSink returns the error rather than logging it.
-func TestOpenAuditSink_UnresolvableHomeReturnsError(t *testing.T) {
+// openAuditStream returns an audit.ErrConfig error with a nil stream. run
+// refuses the error whatever the anchoring setting.
+func TestOpenAuditStream_UnresolvableHomeRefuses(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
-	sink, file, err := openAuditSink(&Config{})
-	if sink != nil || file != nil {
-		t.Errorf("sinks = (%v, %v), want (nil, nil)", sink, file)
+	stream, err := openAuditStream(&Config{}, nil)
+	if stream != nil {
+		t.Errorf("stream = %v, want nil", stream)
 	}
-	if err == nil || !strings.Contains(err.Error(), "~/.podium/audit.log") {
-		t.Errorf("err = %v, want an error naming ~/.podium/audit.log", err)
+	if !errors.Is(err, audit.ErrConfig) || !strings.Contains(err.Error(), "PODIUM_AUDIT_LOG_PATH") || !strings.Contains(err.Error(), "~/.podium/audit.log") {
+		t.Errorf("err = %v, want an audit.ErrConfig error naming PODIUM_AUDIT_LOG_PATH and ~/.podium/audit.log", err)
+	}
+}
+
+// Spec: §13.12 — an unusable PODIUM_AUDIT_QUEUE_MAX_BYTES refuses with an
+// audit.ErrConfig error naming the variable.
+func TestOpenAuditStream_UnusableQueueBoundRefuses(t *testing.T) {
+	t.Setenv("PODIUM_AUDIT_QUEUE_MAX_BYTES", "0")
+	stream, err := openAuditStream(&Config{auditLogPath: filepath.Join(t.TempDir(), "a.log")}, nil)
+	if stream != nil || !errors.Is(err, audit.ErrConfig) || !strings.Contains(err.Error(), "PODIUM_AUDIT_QUEUE_MAX_BYTES") {
+		t.Errorf("openAuditStream = (%v, %v), want (nil, an audit.ErrConfig error naming PODIUM_AUDIT_QUEUE_MAX_BYTES)", stream, err)
+	}
+}
+
+// Spec: §8.3, §13.8 — with metrics off the stream's observer is a nil
+// interface, never a typed-nil registry that would panic on the first count.
+func TestAuditObserver_NilRegistryIsNilInterface(t *testing.T) {
+	t.Parallel()
+	if obs := auditObserver(nil); obs != nil {
+		t.Errorf("auditObserver(nil) = %#v, want a nil interface", obs)
+	}
+	if obs := auditObserver(metrics.New()); obs == nil {
+		t.Error("auditObserver(registry) = nil, want the registry")
 	}
 }

@@ -33,9 +33,9 @@ func eraseTestEndpoint(t *testing.T, admin layer.Identity, authErr error) (*http
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	sinkPath := filepath.Join(t.TempDir(), "audit.log")
-	sink, err := audit.NewFileSink(sinkPath)
+	sink, err := audit.OpenFile(sinkPath, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	ep := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
 		WithAudit(sink).
@@ -230,17 +230,17 @@ func TestErase_MissingUserID(t *testing.T) {
 	}
 }
 
-// failingSink is an audit.Sink whose Append always fails, standing in for an
-// unreachable external endpoint.
+// failingSink is an audit.Sink whose Append always fails.
 type failingSink struct{ audit.Sink }
 
 func (failingSink) Append(context.Context, audit.Event) error {
-	return errors.New("endpoint unreachable")
+	return errors.New("append failed")
 }
 
-// endpointSinkErase builds a single-tenant endpoint redirected to an external
-// audit sink (no local file to rewrite) with an afterErase hook counter.
-func endpointSinkErase(t *testing.T, sink audit.Sink, hooks *int) *httptest.Server {
+// noFileDestinationErase builds a single-tenant endpoint whose audit stream
+// has no file destination (no local file to rewrite) with an afterErase hook
+// counter.
+func noFileDestinationErase(t *testing.T, sink audit.Sink, hooks *int) *httptest.Server {
 	t.Helper()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -258,14 +258,14 @@ func endpointSinkErase(t *testing.T, sink audit.Sink, hooks *int) *httptest.Serv
 	return ts
 }
 
-// Spec: §8.5, §8.6 — with an external endpoint sink the registry rewrites no
+// Spec: §8.5, §8.6 — with no file destination the registry rewrites no
 // record, appends a tenant-labeled user.erased naming the admin, and runs no
 // re-anchor because no local chain changed.
-func TestErase_EndpointSinkRecordsUserErased(t *testing.T) {
+func TestErase_NoFileDestinationRecordsUserErased(t *testing.T) {
 	t.Parallel()
 	sink := audit.NewMemory()
 	hooks := 0
-	ts := endpointSinkErase(t, sink, &hooks)
+	ts := noFileDestinationErase(t, sink, &hooks)
 	resp := postErase(t, ts.URL, map[string]any{"user_id": "alice@acme.com", "salt": "s"})
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -287,12 +287,12 @@ func TestErase_EndpointSinkRecordsUserErased(t *testing.T) {
 	}
 }
 
-// Spec: §8.5 — a failed user.erased delivery to the endpoint sink is reported
-// as 500 registry.unavailable rather than dropped.
-func TestErase_EndpointSinkAppendFailure(t *testing.T) {
+// Spec: §8.5 — with no file destination, an audit.Sink whose Append fails
+// while recording user.erased is reported as 500 registry.unavailable.
+func TestErase_NoFileDestinationAppendFailure(t *testing.T) {
 	t.Parallel()
 	hooks := 0
-	ts := endpointSinkErase(t, failingSink{}, &hooks)
+	ts := noFileDestinationErase(t, failingSink{}, &hooks)
 	resp := postErase(t, ts.URL, map[string]any{"user_id": "alice@acme.com", "salt": "s"})
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusInternalServerError {
@@ -345,13 +345,13 @@ func TestErase_FileSinkRecordsCallerClient(t *testing.T) {
 	}
 }
 
-// Spec: §7.2.2, §8.1, §8.5 — with an external endpoint sink, the user.erased
-// the registry appends records the request's caller.client.
-func TestErase_EndpointSinkRecordsCallerClient(t *testing.T) {
+// Spec: §7.2.2, §8.1, §8.5 — with no file destination, the user.erased the
+// registry appends records the request's caller.client.
+func TestErase_NoFileDestinationRecordsCallerClient(t *testing.T) {
 	t.Parallel()
 	sink := audit.NewMemory()
 	hooks := 0
-	ts := endpointSinkErase(t, sink, &hooks)
+	ts := noFileDestinationErase(t, sink, &hooks)
 	resp := postEraseWithClient(t, ts.URL, map[string]any{"user_id": "alice@acme.com", "salt": "s"}, eraseClientHeader)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -381,9 +381,9 @@ func TestErase_AfterEraseRunsOnceWithRequestContext(t *testing.T) {
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	sinkPath := filepath.Join(t.TempDir(), "audit.log")
-	sink, err := audit.NewFileSink(sinkPath)
+	sink, err := audit.OpenFile(sinkPath, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	if err := sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
@@ -424,7 +424,7 @@ func TestErase_AfterEraseRunsOnceWithRequestContext(t *testing.T) {
 // tenant P over tenants A and B, with an admin that every request admits.
 // Each request acts in the tenant its X-Test-Tenant header names, standing in
 // for the §6.3.1 router serverboot mounts the route behind.
-func multiTenantEraseServer(t *testing.T, st store.Store, sink *audit.FileSink) *httptest.Server {
+func multiTenantEraseServer(t *testing.T, st store.Store, sink *audit.Stream) *httptest.Server {
 	t.Helper()
 	for _, id := range []string{"A", "B"} {
 		if err := st.CreateTenant(context.Background(), store.Tenant{ID: id}); err != nil {
@@ -484,9 +484,9 @@ func TestErase_MultiTenantForeignUserMatchesAbsentUser(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemory()
 	sinkPath := filepath.Join(t.TempDir(), "audit.log")
-	sink, err := audit.NewFileSink(sinkPath)
+	sink, err := audit.OpenFile(sinkPath, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	ts := multiTenantEraseServer(t, st, sink)
 	if err := st.PutLayerConfig(ctx, store.LayerConfig{
@@ -541,9 +541,9 @@ func TestErase_SingleTenantReachesOwnLabels(t *testing.T) {
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	sinkPath := filepath.Join(t.TempDir(), "audit.log")
-	sink, err := audit.NewFileSink(sinkPath)
+	sink, err := audit.OpenFile(sinkPath, audit.OpenOptions{})
 	if err != nil {
-		t.Fatalf("NewFileSink: %v", err)
+		t.Fatalf("OpenFile: %v", err)
 	}
 	ep := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
 		WithAudit(sink).

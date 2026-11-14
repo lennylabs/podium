@@ -1,16 +1,28 @@
 ---
 title: Bundled resources
-nav_order: 10
-description: "Files that ship alongside ARTIFACT.md (and SKILL.md, for skills): scripts, references, assets, schemas, datasets, plus how to handle large files via external resources."
+nav_order: 6
+description: "Files that ship alongside an artifact's manifest: their layout, how prose references them, the size caps, where they land when materialized, how hosts run them, and external resources for large files."
 ---
 
 # Bundled resources
 
-Anything in an artifact's directory other than its manifest files (`SKILL.md` for a skill, with an optional `ARTIFACT.md`, and `ARTIFACT.md` for other types) is a bundled resource. Python scripts, Jinja templates, JSON schemas, evaluation datasets, binary blobs, model weights, all packaged together with the manifest and shipped to the host at materialization time.
+This page covers the files an artifact ships alongside its manifest: how to lay them out, reference them, and keep them within the size limits, where they land when materialized, and how hosts run them.
 
-The set is every file under the directory, including a file or a directory whose name begins with a dot, such as `.DS_Store` or an editor swap file. Only the package's own `ARTIFACT.md`, and for a skill its own `SKILL.md`, sit outside the set, so a file named `SKILL.md` in a subfolder such as `references/` is an ordinary bundled resource and starts no package. A nested directory that carries its own `ARTIFACT.md` is excluded from the enclosing artifact's set, and it is discovered as a separate artifact whose files belong to it unless its own name, or the name of a directory between it and the layer or overlay root, begins with a dot. Artifact discovery does not descend into a directory below the layer or overlay root whose name begins with a dot, so a manifest file (`ARTIFACT.md` or `SKILL.md`) anywhere below such a directory produces no artifact, and the files of that nested package ship nowhere and enter no content hash. A dot-prefixed directory inside a package that carries no `ARTIFACT.md` of its own is part of that package's set, together with every file below it outside a nested package. The root itself is walked even when its own name, or the name of a directory above it, begins with a dot, so a layer at `.podium/registry/` or an overlay at `.podium/overlay/` is discovered. No ignore file applies, and the size thresholds below never remove a file from the set. The registry's content hash covers every file in the set, so an incidental file in the directory changes the artifact's hash, and an author who does not want a file shipped removes it before ingest.
+A bundled resource is any file in an artifact's directory other than its manifest files. The manifest files are `SKILL.md` and the optional `ARTIFACT.md` for a skill, and `ARTIFACT.md` for every other type. Bundled resources include Python scripts, Jinja templates, JSON schemas, evaluation datasets, binary blobs, and model weights. They are packaged with the manifest and shipped to the host at materialization time.
 
-For skills, the [agentskills.io](https://agentskills.io/specification) standard recommends three conventional subfolders: `scripts/` for executable code, `references/` for documentation loaded on demand, and `assets/` for templates and data files. Other subfolder names are permitted; these three are recognized by SKILL.md-aware tools.
+There is no `resources:` list in frontmatter. Every file in the folder ships. The registry's content hash covers every file in the set, so an incidental file in the directory changes the artifact's hash. Remove any file that should not ship before ingest. [Which files are bundled](#which-files-are-bundled) covers the edge cases.
+
+---
+
+## Layout
+
+For skills, the [agentskills.io](https://agentskills.io/specification) standard recommends these conventional subfolders:
+
+- `scripts/` for executable code.
+- `references/` for documentation loaded on demand.
+- `assets/` for templates and data files.
+
+Other subfolder names are permitted. SKILL.md-aware tools recognize the conventional ones.
 
 ```
 finance/close-reporting/run-variance-analysis/   # type: skill
@@ -26,44 +38,43 @@ finance/close-reporting/run-variance-analysis/   # type: skill
     └── output-schema.json
 ```
 
-There is no `resources:` list in frontmatter. What's in the folder ships. Reference files inline in prose:
+---
+
+## Referencing files from prose
+
+Reference bundled files inline in the prose body:
 
 ```markdown
 Run `scripts/variance.py` against the closed period. Format the
 output using [the report template](assets/variance-report.md.j2).
 ```
 
-The ingest-time linter resolves every markdown link in the prose body (`[text](path)`). A relative link must name a bundled file, one of the artifact's own manifest files, or the canonical ID of another artifact in the catalog. An `http` or `https` link is validated with an HTTP HEAD that must return 200 or a 3xx redirect, a probe `podium lint --offline` skips. A link that resolves to none of these is an ingest error. A path written as inline code rather than as a markdown link is not checked.
+The ingest-time linter resolves every markdown link (`[text](path)`) in the prose body:
 
----
+- A relative link must name a bundled file, one of the artifact's own manifest files, or the canonical ID of another artifact in the catalog.
+- An `http` or `https` link is validated with an HTTP HEAD request that must return 200 or a 3xx redirect. `podium lint --offline` skips this probe.
+- A link that resolves to none of these is an ingest error.
 
-## Storage
-
-The registry stores bundled resources content-addressed by SHA-256 in object storage. Bytes are deduplicated across all artifact versions within an org's storage namespace; when two artifacts ship the same file (a shared schema, a vendored library), only one copy is stored.
-
-At materialization, the registry hands out a URL per resource. The S3 backend presigns it, and the filesystem backend serves the bytes from its own `/objects/<content-hash>` route, which requires the caller's token. The consumer (`podium sync`, the MCP server, or an SDK `materialize()` call) downloads each resource and writes it atomically (`.tmp` + rename) so partial downloads cannot corrupt a working set. The materialization pipeline is the same across all three; it runs in the consumer process rather than on the registry.
-
-An adapter writes an artifact's bundled files alongside its translated output: inside the skill folder for a skill, under `.podium/context/<artifact-id>/` for a context artifact, and in the harness-neutral `.podium/resources/<artifact-id>/` bucket for an agent, a command, or a hook (Claude Code places an agent's files under `.claude/podium/<artifact-id>/`). A `type: rule` artifact materializes into a workspace as a translated rule file or as a block injected into `AGENTS.md` or `GEMINI.md`, depending on the harness, and a `type: mcp-server` artifact as a merged config entry; the adapters write no bundled files for either. Ship those bytes as a separate artifact, or materialize with `harness: none`, which writes the canonical layout including bundled files.
+A path written as inline code rather than as a markdown link is not checked.
 
 ---
 
 ## Size thresholds
 
-Size thresholds:
-
 | Threshold | Limit | Behavior |
 |:--|:--|:--|
-| Inline cutoff | 256 KB | At or below this, resource bytes are returned in the `load_artifact` response body. Above it, the response carries a URL to fetch them from, unless the registry holds the resource inline, as it does for every resource of an artifact ingested while no object store was configured. |
-| Per-file soft cap | 1 MB | Ingest-time warning above this. |
-| Per-package soft cap | 10 MB | Ingest-time error above this. |
+| Per-file soft cap | 1 MB | Lint warning above this size. |
+| Per-package soft cap | 10 MB | Lint error above this size, which fails ingest. |
 
-Soft caps are configurable per deployment. Above the per-package cap, use `external_resources:` (below).
+An operator can change the caps with `PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES` and `PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES`. Above the per-package cap, use [external resources](#external-resources). The size thresholds never remove a file from the bundled set.
+
+A separate 256 KB cutoff decides whether a resource's bytes travel inside the `load_artifact` response or as a URL. It does not limit what an author ships. [The inline cutoff](../consuming/handling-artifact-responses#the-inline-cutoff) describes it.
 
 ---
 
 ## External resources
 
-For artifacts that ship bytes too large to bundle, reference pre-uploaded objects with hash and signature:
+An artifact whose bytes are too large to bundle references pre-uploaded objects, with a hash and a signature:
 
 ```yaml
 external_resources:
@@ -74,25 +85,15 @@ external_resources:
     signature: "sigstore:..."
 ```
 
-The registry stores the URL, hash, size, and signature. Bytes don't transit the registry, and no built-in consumer fetches them: `podium sync`, the MCP server, and the SDKs materialize bundled resources only. A host that needs the external bytes reads the `external_resources` entries from the served manifest and fetches and verifies them itself.
+The registry stores the URL, hash, size, and signature, and the bytes do not transit the registry. No built-in consumer fetches them: `podium sync`, the MCP server, and the SDKs materialize bundled resources only. A host that needs the external bytes reads the `external_resources` entries from the served manifest, then fetches and verifies them itself.
 
-Caps don't apply to external resources. They're the right answer for model files, large datasets, vendored binaries.
-
----
-
-## Trust model
-
-Bundled scripts inherit the artifact's `sensitivity` label. A high-sensitivity skill that bundles a Python script is shipping code that the host runtime executes; the registry treats it accordingly.
-
-Pre-merge CI run by the source repository (secret scanning, static analysis, dependency scanning, optional sandbox policy review) is the right place to enforce script-level controls. Podium reads no in-repo permission files and does not introspect bundle contents; the Git provider's branch protection is the gate.
-
-Authors who want to ship an SBOM bundle it as an ordinary resource (e.g. `bom.json` or `sbom.spdx.json`); the `sbom:` frontmatter field is informational and points consumers at the file. Podium does not parse the SBOM, does not enforce its presence, and does not run vulnerability scanning. Scanning belongs to the source-repo CI and the deployer's continuous scanning pipeline.
+The size caps do not apply to external resources. Use them for model files, large datasets, and vendored binaries.
 
 ---
 
 ## Execution model
 
-The consumer writes scripts to disk at materialization time; the host's runtime executes them. Authors declare runtime expectations in `runtime_requirements:`:
+The consumer writes scripts to disk at materialization time, and the host's runtime executes them. Declare runtime expectations in `runtime_requirements:`:
 
 ```yaml
 runtime_requirements:
@@ -101,7 +102,25 @@ runtime_requirements:
   system_packages: ["jq", "curl"]
 ```
 
-Adapters surface these requirements to the host where the harness's format carries them; a format that keeps only a fixed field set, such as the Codex agent TOML, drops them. A host that advertises its runtime capabilities to the Podium MCP server, or opts into enforcement, refuses a `load_artifact` it cannot satisfy with `materialize.runtime_unavailable`. A host that advertises no capabilities and does not opt in receives the requirement and proceeds, and `podium sync` materializes the artifact without checking it. `PODIUM_HOST_PYTHON`, `PODIUM_HOST_NODE`, and `PODIUM_HOST_PACKAGES` advertise capabilities, `PODIUM_ENFORCE_RUNTIME_REQUIREMENTS` opts into enforcement, and `PODIUM_IGNORE_RUNTIME_REQUIREMENTS` overrides the refusal; the [environment-variable reference](../reference/cli#environment-variables) gives each variable's format and precedence.
+Adapters pass these requirements to the host where the harness's format carries them. A format that keeps only a fixed field set, such as the Codex agent TOML, drops them.
+
+Enforcement depends on the consumer:
+
+- When the host advertises its runtime capabilities to the Podium MCP server, or opts into enforcement, the MCP server refuses a `load_artifact` whose requirements the host cannot satisfy, with `materialize.runtime_unavailable` naming the missing runtime or package.
+- When the host advertises no capabilities and does not opt in, the MCP server delivers the artifact with its requirements and does not check them.
+- `podium sync` materializes the artifact without checking the requirement.
+
+These environment variables control the MCP server's check:
+
+| Variable | Effect |
+|:--|:--|
+| `PODIUM_HOST_PYTHON`, `PODIUM_HOST_NODE`, and `PODIUM_HOST_PACKAGES` | Advertise the host's capabilities. |
+| `PODIUM_ENFORCE_RUNTIME_REQUIREMENTS` | Opts into enforcement. |
+| `PODIUM_IGNORE_RUNTIME_REQUIREMENTS` | Overrides the refusal. |
+
+The [environment-variable reference](../reference/cli#environment-variables) gives each variable's format and precedence.
+
+### Sandbox profiles
 
 The `sandbox_profile:` field declares execution constraints:
 
@@ -112,41 +131,37 @@ The `sandbox_profile:` field declares execution constraints:
 | `network-isolated` | No outbound network. |
 | `seccomp-strict` | Strict syscall allowlist (per a baseline profile shipped with Podium). |
 
-Hosts with sandbox capability honor the profile. Hosts without it refuse to materialize an artifact whose `sandbox_profile != unrestricted` unless explicitly configured to ignore (with a loud warning logged).
+Hosts with sandbox capability honor the profile. The Podium MCP server refuses to materialize an artifact whose `sandbox_profile` is other than `unrestricted` on a host that does not enforce that profile, unless the host is explicitly configured to ignore the profile, in which case the server logs a warning and proceeds.
+
+---
+
+## Trust model
+
+Bundled scripts inherit the artifact's `sensitivity` label. A high-sensitivity skill that bundles a Python script ships code that the host runtime executes, and the registry treats it accordingly.
+
+Enforce script-level controls in pre-merge CI run by the source repository: secret scanning, static analysis, dependency scanning, and optional sandbox policy review. Podium reads no in-repo permission files and does not introspect bundle contents. The Git provider's branch protection is the gate. [Connecting layer sources](../deployment/content/layer-sources#git-repositories) covers publishing from a Git repository.
+
+To ship an SBOM, bundle it as an ordinary resource, such as `bom.json` or `sbom.spdx.json`. The `sbom:` frontmatter field is informational and points consumers at the file. Podium does not parse the SBOM, enforce its presence, or run vulnerability scanning. Scanning belongs to the source-repository CI and the deployer's continuous scanning pipeline.
 
 ---
 
 ## Content provenance
 
-An artifact declares the provenance of its prose so the host can apply differential trust. The `source:` frontmatter field sets the document-level default and lives in `ARTIFACT.md` for every type, skills included:
-
-```markdown
----
-type: context
-version: 1.0.0
-source: authored
----
-```
-
-Inline markers in the prose body (`SKILL.md` for skills, `ARTIFACT.md` for non-skills) mark one region and override that default for the region they wrap:
-
-```markdown
-<authored prose>
-
-<!-- begin imported source="https://wiki.example.com/policy/payments" -->
-<imported text>
-<!-- end imported -->
-```
-
-Adapters propagate provenance markers to harnesses that support trust regions (Claude's `<untrusted-data>` convention, etc.). Hosts apply differential trust: imported content is treated as data rather than instruction. This is the primary defense against prompt injection from manifests that aggregate external content.
+Prose copied from an external source, such as a wiki page or a vendor document, belongs inside an imported-content marker, so the host treats it as data rather than as instructions. The `source:` frontmatter field marks a whole body, and `<!-- begin imported ... -->` and `<!-- end imported -->` comments mark one region. [Provenance markers](frontmatter-reference#provenance-markers) gives the syntax and the accepted values.
 
 ---
 
 ## Manifest size lint
 
-A reasonable cap on manifest content is around 20K tokens. For skills, the cap applies to the `SKILL.md` body; the agentskills.io spec recommends keeping that body under 5K tokens and ≤ 500 lines, with longer reference material moved into `references/`. Larger reference content can also be factored out as a separate `type: context` artifact and referenced from the prose body.
+Manifest content has a cap of about 20K tokens. For a skill, the cap applies to the `SKILL.md` body. The agentskills.io specification recommends keeping that body under 5K tokens and at most 500 lines, with longer reference material moved into `references/`. Larger reference content can also become a separate `type: context` artifact that the prose body references.
 
-Lint fails ingest with an error (`lint.manifest_size`) above the 20K-token cap. The 5K-token and 500-line SKILL.md thresholds are warnings. Authors who hit either should ask whether the prose is genuinely manifest-level (instructions, when_to_use details) or whether it's reference material that wants its own artifact.
+| Threshold | Lint result |
+|:--|:--|
+| 20K tokens of manifest content | Ingest error (`lint.manifest_size`). |
+| 5K tokens in a `SKILL.md` body | Warning. |
+| 500 lines in a `SKILL.md` body | Warning. |
+
+When an artifact hits a threshold, decide whether the prose is manifest-level material, such as instructions and `when_to_use` details, or reference material that belongs in its own artifact.
 
 ---
 
@@ -242,4 +257,41 @@ runtime_requirements:
   system_packages: [jq]
 ```
 
-Materialization writes every bundled file with mode 0644, so the action runs the script through an interpreter rather than executing it directly. Moving the body into a script keeps the YAML readable and makes the action testable in isolation.
+Materialization writes every bundled file with mode 0644, so the action runs the script through an interpreter rather than executing it directly. The adapter rewrites `scripts/log.sh` in `hook_action` to the installed path, as [Hooks](hooks#moving-the-action-into-a-bundled-script) describes. Moving the body into a script keeps the YAML readable and makes the action testable in isolation.
+
+---
+
+## Where bundled files land
+
+The consumer that materializes an artifact (`podium sync`, the MCP server, or an SDK `materialize()` call) writes its bundled files alongside the adapter's translated output:
+
+| Type | Location of bundled files |
+|:--|:--|
+| `skill` | Inside the skill folder. |
+| `context` | `.podium/context/<artifact-id>/`. |
+| `agent`, `command`, and `hook` | The harness-neutral `.podium/resources/<artifact-id>/` bucket. Claude Code places an agent's files under `.claude/podium/<artifact-id>/`. |
+| `rule` | None. The rule materializes as a translated rule file or as a block injected into `AGENTS.md` or `GEMINI.md`, depending on the harness. |
+| `mcp-server` | None. The registration materializes as a merged config entry. |
+
+To ship bytes with a `rule` or an `mcp-server`, ship them as a separate artifact, or materialize with `harness: none`, which writes the canonical layout including bundled files.
+
+A skill's prose finds its files at the package-relative paths it names, because they land inside the skill folder. The adapters copy `agent` and `command` prose verbatim and do not rewrite the paths in it, so a prose reference to a bundled file names the installed location when the agent needs to open the file. [Your first agent](your-first-agent#step-4-ship-a-helper-script) shows the pattern. A hook's `hook_action` is the one field the adapters rewrite to the installed location. [Configure your harness](../consuming/configure-your-harness) lists the locations for each harness, and [Handling artifact responses](../consuming/handling-artifact-responses#inline-content-and-materialized-files) describes how the bytes reach the consumer.
+
+---
+
+## Which files are bundled
+
+Every file under the artifact's directory ships, dot-files included, except the package's own manifest files and the files of a nested package. Podium reads no ignore file, so delete a file before ingest to keep it out of the package.
+
+These cases sit at the edges of that rule:
+
+| Case | Result |
+|:--|:--|
+| A dot-prefixed file, such as `.DS_Store` or an editor swap file | Bundled. |
+| A dot-prefixed directory inside the package with no `ARTIFACT.md` of its own | Bundled, together with every file below it outside a nested package. |
+| A file named `SKILL.md` in a subfolder, such as `references/SKILL.md` | Bundled as an ordinary resource. It starts no package. |
+| A subdirectory with its own `ARTIFACT.md` | Excluded from the enclosing package and discovered as a separate artifact that owns its files. |
+| A nested package whose own name, or the name of a directory between it and the layer or overlay root, begins with a dot | Excluded from the enclosing package and never discovered. Its files ship nowhere and enter no content hash. |
+| A manifest file anywhere below a dot-prefixed directory under the layer or overlay root | Produces no artifact, because discovery does not descend into that directory. |
+| A layer or overlay root whose own name, or the name of a directory above it, begins with a dot, such as `.podium/registry/` or `.podium/overlay/` | Walked. Discovery always walks the root. |
+| A file above the per-file or per-package cap | Bundled. Lint reports the size, and the thresholds never remove a file. |

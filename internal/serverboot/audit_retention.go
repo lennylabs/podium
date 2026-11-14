@@ -14,13 +14,16 @@ import (
 // every event the registry emits; deployers wanting fine-grained
 // per-event-type retention fork defaultRetentionPolicies.
 //
-// reAnchor, when non-nil, is invoked after a pass that drops events so
+// reAnchor, when non-nil, is invoked after a pass that changes the log so
 // the moved chain head is re-anchored immediately (§8.6).
+//
+// A stream with no file destination, or a nil stream, disables retention,
+// because each receiver owns retention of the records it holds (§8.4).
 //
 // The scheduler is best-effort: rewrite failures log a warning;
 // the next tick retries.
-func startRetentionScheduler(ctx context.Context, cfg *Config, sink *audit.FileSink, reAnchor func(context.Context)) {
-	if sink == nil {
+func startRetentionScheduler(ctx context.Context, cfg *Config, stream *audit.Stream, reAnchor func(context.Context)) {
+	if stream.File() == nil {
 		log.Printf("warning: audit retention disabled (no sink)")
 		return
 	}
@@ -41,7 +44,7 @@ func startRetentionScheduler(ctx context.Context, cfg *Config, sink *audit.FileS
 		// the first tick after bumping the env var, then one pass per tick until
 		// ctx is cancelled.
 		for {
-			runRetentionOnce(ctx, sink, policies, reAnchor)
+			runRetentionOnce(ctx, stream, policies, reAnchor)
 			select {
 			case <-ctx.Done():
 				return
@@ -53,19 +56,25 @@ func startRetentionScheduler(ctx context.Context, cfg *Config, sink *audit.FileS
 		cfg.auditRetentionInterval, cfg.auditRetentionMaxAgeDays)
 }
 
-func runRetentionOnce(ctx context.Context, sink *audit.FileSink, policies []audit.Policy, reAnchor func(context.Context)) {
+// runRetentionOnce runs one §8.4 retention pass over the stream's file
+// destination and re-anchors when the pass rewrote the chain.
+//
+// Spec: §8.4, §8.6
+func runRetentionOnce(ctx context.Context, stream *audit.Stream, policies []audit.Policy, reAnchor func(context.Context)) {
 	// §8.4 query-text window (placeholder at 7d, drop at 30d) runs in the
 	// same pass so the query field ages out independently of the event
 	// metadata kept under the per-type policies.
-	dropped, err := audit.Enforce(ctx, sink, time.Now(), policies, audit.DefaultQueryRetention())
-	if err != nil && !errors.Is(err, context.Canceled) {
-		log.Printf("audit retention failure: %v", err)
+	res, err := audit.Enforce(ctx, stream, time.Now(), policies, audit.DefaultQueryRetention())
+	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			log.Printf("audit retention failure: %v", err)
+		}
 		return
 	}
-	if dropped > 0 {
-		log.Printf("audit retention dropped %d event(s)", dropped)
-		// §8.6: dropping events rebuilt the hash chain, so any
-		// prior anchor of the old head is stale. Re-anchor the new head.
+	if res.Dropped+res.QueriesRedacted > 0 {
+		log.Printf("audit retention dropped %d event(s) and redacted %d query text(s)", res.Dropped, res.QueriesRedacted)
+		// §8.6: the pass rebuilt the hash chain, so any prior anchor of
+		// the old head is stale. Re-anchor the new head.
 		if reAnchor != nil {
 			reAnchor(ctx)
 		}
