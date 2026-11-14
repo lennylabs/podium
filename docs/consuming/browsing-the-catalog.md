@@ -295,7 +295,7 @@ following:
 
 Every call emits an audit event: `domain.loaded`, `domains.searched`,
 `artifacts.searched`, or `artifact.loaded`. Free-text queries are PII-scrubbed
-before audit. [Audit and observability](../deployment/observability#audit-log)
+before audit. [Audit and observability](../deployment/operations/observability#audit-log)
 covers the audit log.
 
 ---

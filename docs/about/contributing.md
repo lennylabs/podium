@@ -52,7 +52,7 @@ make test-live           # Postgres and MinIO, started by `make services-up`.
 make test-live-external  # Managed vector backends and embedding providers.
 ```
 
-`make test-live` points the suite at the local `docker-compose` services and sets `PODIUM_POSTGRES_DSN` and the `PODIUM_S3_*` variables. `make test-live-external` sets `PODIUM_LIVE_EXTERNAL=1` and forwards the per-service credentials from the environment. [Live vector backends](../testing/live-vector-backends) covers the accounts and credentials that lane needs. Each live test self-skips with a reason when its service is not configured.
+`make test-live` points the suite at the local `docker-compose` services and sets `PODIUM_POSTGRES_DSN` and the `PODIUM_S3_*` variables. `make test-live-external` sets `PODIUM_LIVE_EXTERNAL=1` and forwards the per-service credentials from the environment. [Live vector backends](live-vector-backends) covers the accounts and credentials that lane needs. Each live test self-skips with a reason when its service is not configured.
 
 The Sigstore live checks stay manual. `RELEASING.md` records the variables to set before a signing-path release.
 

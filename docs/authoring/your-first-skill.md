@@ -187,7 +187,7 @@ Lint runs these checks:
 - The agentskills.io compliance checks on `SKILL.md`: name format, description constraints, and parent-directory match.
 - The type-specific rules.
 
-The thin-description check runs at registry ingest rather than in local `podium lint`. When the catalog lives in a Git-source layer, CI runs the same checks on pull requests (see [Connecting layer sources](../deployment/layer-sources#git-repositories)).
+The thin-description check runs at registry ingest rather than in local `podium lint`. When the catalog lives in a Git-source layer, CI runs the same checks on pull requests (see [Connecting layer sources](../deployment/content/layer-sources#git-repositories)).
 
 Each diagnostic prints as `[<severity>] <artifact-id>: <message> (<rule-code>)`, for example `[error] personal/hello/greet: type is required (lint.required_field_missing)`. Warnings alone exit 0, and any error exits 1. A skill that declares no version draws the `lint.skill_version_assigned` warning, because the registry assigns its version. Set `metadata.version` in `SKILL.md` to clear it.
 
@@ -201,4 +201,4 @@ When lint passes, commit the artifact.
 - **Write an agent.** An `agent` is a complete agent definition with its own instructions, dependencies, and optional bundled scripts. See [Your first agent](your-first-agent).
 - **Learn the other built-in types.** [Artifact types](artifact-types) covers `rule`, `hook`, `context`, and `mcp-server` alongside skills, commands, and agents.
 - **Organize multiple artifacts.** Group artifacts with `DOMAIN.md` files that add descriptions, keywords, and featured artifacts. See [Domains](domains).
-- **Share the catalog with a team.** [Progressive adoption](../deployment/progressive-adoption) covers moving from a local catalog to a shared registry, and [Connecting layer sources](../deployment/layer-sources) covers publishing from a Git repository.
+- **Share the catalog with a team.** [Progressive adoption](../deployment/progressive-adoption) covers moving from a local catalog to a shared registry, and [Connecting layer sources](../deployment/content/layer-sources) covers publishing from a Git repository.

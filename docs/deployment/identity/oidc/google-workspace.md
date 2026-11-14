@@ -9,7 +9,7 @@ description: Configure a Podium registry to authenticate callers against Google 
 This cookbook configures a Podium registry to authenticate against Google Workspace. Workspace does not emit an OIDC `groups` claim natively. For group-based visibility, groups arrive either through SCIM 2.0 push or as OIDC group claims mapped by the `IdpGroupMapping` adapter. The [OIDC cookbooks overview](index) describes the identity model the steps rely on.
 
 > [!IMPORTANT]
-> The credential that `podium login` caches for Google is an opaque access token, and the registry cannot verify it. Step 5 describes how callers reach the registry instead: through [gateway-delegated identity](../gateway-delegated-identity), or by presenting the Google ID token directly.
+> The credential that `podium login` caches for Google is an opaque access token, and the registry cannot verify it. Step 5 describes how callers reach the registry instead: through [gateway-delegated identity](../trusted-headers), or by presenting the Google ID token directly.
 
 ## Prerequisites
 
@@ -89,7 +89,7 @@ Pass `--scopes` as shown so the request matches the scopes configured on the con
 
 Expected result: the verification URL is `https://www.google.com/device`. After the flow completes, `podium login` prints the `sub` and `email`.
 
-`podium login` sends no client secret on the device-authorization or token request, and it reads no client-secret environment variable. A Google OAuth client that requires the secret rejects the token exchange. The developer-side flow above therefore works only against a client configured to accept a public-client device grant. Where Google requires the secret, terminate the browser flow at an upstream identity-aware proxy and run the registry under [gateway-delegated identity](../gateway-delegated-identity) instead.
+`podium login` sends no client secret on the device-authorization or token request, and it reads no client-secret environment variable. A Google OAuth client that requires the secret rejects the token exchange. The developer-side flow above therefore works only against a client configured to accept a public-client device grant. Where Google requires the secret, terminate the browser flow at an upstream identity-aware proxy and run the registry under [gateway-delegated identity](../trusted-headers) instead.
 
 ## 5. Route callers to a verifiable credential
 
@@ -97,7 +97,7 @@ Expected result: the verification URL is `https://www.google.com/device`. After 
 
 The Google credential the registry can verify is the ID token. Its `iss` is `https://accounts.google.com`, and its `aud` is the client ID configured as `audience:` in step 3. `podium login` does not cache it. Choose one of these paths:
 
-- Run the registry under [gateway-delegated identity](../gateway-delegated-identity), and have the proxy authenticate the caller against Google.
+- Run the registry under [gateway-delegated identity](../trusted-headers), and have the proxy authenticate the caller against Google.
 - Where a client presents the credential itself, supply the ID token through `PODIUM_SESSION_TOKEN` or `PODIUM_SESSION_TOKEN_FILE`, and leave `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` unset. The MCP bridge reads the keychain token instead of the injected one whenever that endpoint is configured.
 
 ## 6. Test organization visibility
@@ -120,8 +120,8 @@ Expected result: a user from the Workspace domain sees the layer. To keep accoun
 
 ## Next steps
 
-- Declare visibility on the remaining layers with [Access control](../access-control).
-- Review the caller identities the registry records in the [audit log](../observability#audit-log).
+- Declare visibility on the remaining layers with [Access control](../../content/access-control).
+- Review the caller identities the registry records in the [audit log](../../operations/observability#audit-log).
 
 ## Troubleshooting
 

@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end tests for docs/deployment/extending.md (D-extending).
+// End-to-end tests for docs/deployment/services/extending.md (D-extending).
 //
 // The page documents the SPI table, the plugin distribution model, the
 // forward-compatibility constraints, and the external-extension patterns

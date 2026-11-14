@@ -30,4 +30,4 @@ Each tutorial builds one artifact step by step and runs it in Claude Code.
 | [Bundled resources](bundled-resources) | Scripts, references, assets, and other files that ship with the manifest, plus external resources for large files. |
 | [Hints](hints) | The advisory `effort_hint` and `model_class_hint` fields. |
 
-To publish artifacts from a Git repository to a registry server, see [Connecting layer sources](../deployment/layer-sources#git-repositories).
+To publish artifacts from a Git repository to a registry server, see [Connecting layer sources](../deployment/content/layer-sources#git-repositories).

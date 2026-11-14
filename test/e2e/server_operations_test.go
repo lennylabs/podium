@@ -1,7 +1,7 @@
 package e2e
 
-// End-to-end tests for docs/deployment/operator-guide.md
-// (D-operator-guide). The page covers day-two operations: health
+// End-to-end tests for docs/deployment/operations/index.md
+// (D-operator-guide). The operations pages cover day-two operations: health
 // endpoints, read-only mode, admin commands, public-mode detection and
 // mitigation, monitoring, alerting, backup/restore runbooks, and common
 // operational pitfalls.

@@ -308,7 +308,7 @@ flag does.
 
 Entries default to `kind: workspace`, which materializes the project-files
 layout a harness reads. The other kind, `kind: marketplace`, renders a git-repo
-distribution and is covered in [Publishing marketplace repositories](publishing).
+distribution and is covered in [Publishing marketplace repositories](../deployment/content/publishing).
 
 ---
 

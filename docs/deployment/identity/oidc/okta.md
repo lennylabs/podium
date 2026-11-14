@@ -126,8 +126,8 @@ On the registry side:
 
 ## Next steps
 
-- Declare visibility on the remaining layers with [Access control](../access-control).
-- Review the caller identities the registry records in the [audit log](../observability#audit-log).
+- Declare visibility on the remaining layers with [Access control](../../content/access-control).
+- Review the caller identities the registry records in the [audit log](../../operations/observability#audit-log).
 
 ## Troubleshooting
 

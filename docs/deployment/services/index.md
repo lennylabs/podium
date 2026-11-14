@@ -1,12 +1,12 @@
 ---
-title: Server-side integrations
-nav_order: 11
+title: Backing services
+nav_order: 5
 description: The backing services a Podium registry uses, from the metadata store to notifications, with what ships by default and what can replace each one.
 ---
 
-# Server-side integrations
+# Backing services
 
-This page lists the backing services a Podium registry process uses and how to select each one. It is for operators planning a [single-node](single-node) or [clustered](clustered) deployment. The [local](local) deployment mode runs no registry process, so nothing on this page applies to it.
+This page lists the backing services a Podium registry process uses and how to select each one. It is for operators planning a [single-node](../modes/single-node) or [clustered](../modes/clustered) deployment. The [local](../modes/local) deployment mode runs no registry process, so nothing on this page applies to it.
 
 ## Overview
 
@@ -31,7 +31,7 @@ Nothing in the alternatives column is required to start. At cluster scale, Postg
 The metadata store holds manifest metadata, dependency edges, layer config, and admin grants. `PODIUM_REGISTRY_STORE` selects it. Its interface is the `RegistryStore` SPI described in [Extending](extending).
 
 - **SQLite** is the default. The file lives at `~/.podium/standalone/podium.db` unless `PODIUM_SQLITE_PATH` moves it. One process owns the file, so it does not survive being shared between replicas.
-- **Postgres** is selected with `PODIUM_REGISTRY_STORE=postgres` and a DSN. Registry replicas share it, which is what makes horizontal scaling possible. The [clustered](clustered) deployment mode requires it.
+- **Postgres** is selected with `PODIUM_REGISTRY_STORE=postgres` and a DSN. Registry replicas share it, which is what makes horizontal scaling possible. The [clustered](../modes/clustered) deployment mode requires it.
 
 `podium admin migrate-to-standard --postgres <dsn> --object-store <url>` exports a SQLite-backed deployment into Postgres and object storage.
 
@@ -90,13 +90,13 @@ The registry process reads `PODIUM_IDENTITY_PROVIDER` for its own value. A consu
 
 | Registry `PODIUM_IDENTITY_PROVIDER` | What the registry does | Where it is documented |
 |:--|:--|:--|
-| unset | Every caller is anonymous. Admin-defined layers registered through the endpoint default to `public` visibility. | [Access control](access-control) |
-| `oidc-jwt` | Callers present a JWT the configured IdP issued, and the registry verifies it against the IdP's JWKS. A CLI, an SDK, or another API client obtains the token through the device-code flow. On a registry that enables the browser flow, a browser obtains it through the registry's own authorization-code exchange, which returns it in the `__Host-podium_session` cookie. | [OIDC cookbooks](oidc/) |
-| `oidc-jwt` | The registry verifies a gateway-forwarded IdP-signed JWT against the issuer's JWKS on every request. | [Gateway-delegated identity](gateway-delegated-identity) |
-| `trusted-headers` | The registry trusts gateway-injected identity headers without verifying them. | [Gateway-delegated identity](gateway-delegated-identity) |
-| `injected-session-token` | A managed runtime signs a per-session JWT, and the registry verifies it on every call. | [Clustered](clustered#identity-flow) |
+| unset | Every caller is anonymous. Admin-defined layers registered through the endpoint default to `public` visibility. | [Access control](../content/access-control) |
+| `oidc-jwt` | Callers present a JWT the configured IdP issued, and the registry verifies it against the IdP's JWKS. A CLI, an SDK, or another API client obtains the token through the device-code flow. On a registry that enables the browser flow, a browser obtains it through the registry's own authorization-code exchange, which returns it in the `__Host-podium_session` cookie. | [OIDC cookbooks](../identity/oidc/) |
+| `oidc-jwt` | The registry verifies a gateway-forwarded IdP-signed JWT against the issuer's JWKS on every request. | [Gateway-delegated identity](../identity/trusted-headers) |
+| `trusted-headers` | The registry trusts gateway-injected identity headers without verifying them. | [Gateway-delegated identity](../identity/trusted-headers) |
+| `injected-session-token` | A managed runtime signs a per-session JWT, and the registry verifies it on every call. | [Clustered](../modes/clustered#identity-flow) |
 
-Once an identity provider is configured, the default visibility for an endpoint-registered admin-defined layer changes from `public` to `private`, so those layers do not leak by accident. `PODIUM_DEFAULT_LAYER_VISIBILITY` overrides it. See [Access control](access-control#deployment-defaults).
+Once an identity provider is configured, the default visibility for an endpoint-registered admin-defined layer changes from `public` to `private`, so those layers do not leak by accident. `PODIUM_DEFAULT_LAYER_VISIBILITY` overrides it. See [Access control](../content/access-control#deployment-defaults).
 
 ### Group provisioning with SCIM
 
@@ -111,7 +111,7 @@ A layer's source is where the registry fetches that layer's artifacts. The built
 - `git` mirrors a tracked ref and ingests on webhook.
 - `local` reads a filesystem path the registry process can see.
 
-[Connecting layer sources](layer-sources) covers registering each kind, private repositories, and [keeping layers current](layer-sources#keeping-layers-current). [Layered composition](layers) covers how layers combine.
+[Connecting layer sources](../content/layer-sources) covers registering each kind, private repositories, and [keeping layers current](../content/layer-sources#keeping-layers-current). [Layered composition](../content/layers) covers how layers combine.
 
 Other sources are reachable through the `LayerSourceProvider` SPI, such as S3 versioned buckets, OCI registries, HTTP archives, and internal CMS bridges. A custom source is a Go module compiled into a registry build, which [Extending](extending) covers.
 
@@ -124,7 +124,7 @@ The registry writes every read, ingest, and admin action to a hash-chained audit
 - an `otlp+http://` or `otlp+https://` URL, such as an OpenTelemetry Collector, which receives them as OTLP logs
 - the token `stdout`
 
-Unset, the registry writes the file `~/.podium/audit.log`. Every destination in the list receives the same hash-chained stream. `PODIUM_AUDIT_LOG_PATH` has no `registry.yaml` key. [Audit destinations](observability#audit-destinations) covers each destination, its transport settings, and its delivery rules.
+Unset, the registry writes the file `~/.podium/audit.log`. Every destination in the list receives the same hash-chained stream. `PODIUM_AUDIT_LOG_PATH` has no `registry.yaml` key. [Audit destinations](../operations/observability#audit-destinations) covers each destination, its transport settings, and its delivery rules.
 
 ## Tracing
 
@@ -133,7 +133,7 @@ The registry and the MCP server export OpenTelemetry traces when tracing is on. 
 - `PODIUM_TRACING=otlp`, or a set `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, exports spans over OTLP/HTTP. The exporter reads the standard `OTEL_EXPORTER_OTLP_*` variables.
 - `PODIUM_TRACING=stdout` writes spans to standard output for local inspection.
 
-Spans carry W3C Trace Context, and the propagator is installed even when export is off. URL query strings are removed before export. [Tracing](observability#tracing) covers the span set and the export settings.
+Spans carry W3C Trace Context, and the propagator is installed even when export is off. URL query strings are removed before export. [Tracing](../operations/observability#tracing) covers the span set and the export settings.
 
 ## Notifications
 
@@ -146,4 +146,4 @@ A notification provider delivers an alert when an ingest of a layer fails, on ei
 | `email` or `smtp` | Sends an email over SMTP. | `PODIUM_NOTIFICATION_SMTP_HOST` and `PODIUM_NOTIFICATION_SMTP_FROM`, plus the recipient list `PODIUM_NOTIFICATION_SMTP_TO` |
 | `multi` | Runs the log provider, plus the webhook and email providers when each one's settings are present. | The settings of each provider to include |
 
-The email provider also reads `PODIUM_NOTIFICATION_SMTP_PORT`, which defaults to 587, and `PODIUM_NOTIFICATION_SMTP_USERNAME` and `PODIUM_NOTIFICATION_SMTP_PASSWORD` for SMTP authentication. A `webhook` or `email` value whose required settings are missing logs a warning, and the registry starts with no notification provider. [Notifications](observability#notifications) covers the notification payload.
+The email provider also reads `PODIUM_NOTIFICATION_SMTP_PORT`, which defaults to 587, and `PODIUM_NOTIFICATION_SMTP_USERNAME` and `PODIUM_NOTIFICATION_SMTP_PASSWORD` for SMTP authentication. A `webhook` or `email` value whose required settings are missing logs a warning, and the registry starts with no notification provider. [Notifications](../operations/observability#notifications) covers the notification payload.

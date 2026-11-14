@@ -36,10 +36,10 @@ server concept appears.
 | Domains and subdomains | [Domains](../authoring/domains) |
 | Selective materialization | [Selective materialization](../consuming/selective-materialization) |
 | Progressive discovery | [Browsing the catalog](../consuming/browsing-the-catalog) |
-| Layered composition | [Connecting layer sources](../deployment/layer-sources), [Layered composition](../deployment/layers) |
-| Security and access control | [Access control](../deployment/access-control) |
-| Observability | [Audit and observability](../deployment/observability) |
-| Cross-harness delivery | [Configure your harness](../consuming/configure-your-harness), [Publishing marketplace repositories](../consuming/publishing) |
+| Layered composition | [Connecting layer sources](../deployment/content/layer-sources), [Layered composition](../deployment/content/layers) |
+| Security and access control | [Access control](../deployment/content/access-control) |
+| Observability | [Audit and observability](../deployment/operations/observability) |
+| Cross-harness delivery | [Configure your harness](../consuming/configure-your-harness), [Publishing marketplace repositories](../deployment/content/publishing) |
 
 ---
 

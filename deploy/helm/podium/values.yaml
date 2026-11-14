@@ -122,7 +122,7 @@ config:
   # With stdout listed, the migrate Job's standard output carries the
   # artifact.signed JSON lines of the rows it signs beside the plan:,
   # dry-run:, and rehash: lines that the upgrade procedure in
-  # docs/deployment/clustered.md reads. Each audit line begins with {.
+  # docs/deployment/operations/upgrade-notes.md reads. Each audit line begins with {.
   auditLogPath: "stdout"
 
   # The §13.12 / §4.5.5 discovery block is config-file-only: it has no
@@ -278,7 +278,7 @@ runtimeKeys:
 # sign-stored-rows. The chart therefore needs no check between a serving render
 # and the store.
 #
-# The upgrade procedure in docs/deployment/clustered.md sets mode and
+# The upgrade procedure in docs/deployment/operations/upgrade-notes.md sets mode and
 # planDigest per step, with --set or as value commits to a GitOps repository;
 # keep those two at their defaults in a shared values file. The chart reads
 # nothing from the cluster, so helm template, helm install, helm upgrade, and a

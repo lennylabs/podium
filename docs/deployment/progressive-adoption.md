@@ -1,6 +1,6 @@
 ---
 title: Progressive adoption
-nav_order: 4
+nav_order: 6
 description: A staged plan for adopting governance features (identity, sensitivity labels, signing, and freeze windows) as a catalog and team grow, rather than enabling every control on day one.
 ---
 
@@ -8,7 +8,7 @@ description: A staged plan for adopting governance features (identity, sensitivi
 
 Podium ships with a full set of governance controls: per-layer visibility, sensitivity labels, sandbox profiles, signing, a hash-chained audit log, freeze windows, and SCIM. Turning all of them on at once usually delays adoption. This guide stages them, so each control arrives when the catalog and the team need it.
 
-The guide starts from a permissive [single-node](single-node) deployment, or an equally permissive [clustered](clustered) one. Each stage lists its goal, the changes to make, and the exit criteria for moving on. Skip ahead when an external constraint, such as compliance, a security review, or a contractual obligation, already requires a control. The order below works for most teams, and [Alternate ordering](#alternate-ordering) lists common variations.
+The guide starts from a permissive [single-node](modes/single-node) deployment, or an equally permissive [clustered](modes/clustered) one. Each stage lists its goal, the changes to make, and the exit criteria for moving on. Skip ahead when an external constraint, such as compliance, a security review, or a contractual obligation, already requires a control. The order below works for most teams, and [Alternate ordering](#alternate-ordering) lists common variations.
 
 ---
 
@@ -17,7 +17,7 @@ The guide starts from a permissive [single-node](single-node) deployment, or an 
 **Goal:** get artifacts flowing without governance gates.
 
 - Run `podium serve --standalone` on a single VM, or `podium serve --strict` against Postgres and object storage when those already exist.
-- Create one layer named `team-shared`, with `visibility: public` and a `git` source that points at one shared repository. Public visibility is the default when no identity provider is configured. [Connecting layer sources](layer-sources#git-repositories) covers declaring the layer.
+- Create one layer named `team-shared`, with `visibility: public` and a `git` source that points at one shared repository. Public visibility is the default when no identity provider is configured. [Connecting layer sources](content/layer-sources#git-repositories) covers declaring the layer.
 - Leave `PODIUM_VERIFY_SIGNATURES` unset on the registry, which does not read it. Each consumer verifies signatures, as [Signing from Day 0](#signing-from-day-0) describes.
 - Require no sensitivity labels. `sensitivity:` is optional and defaults to `low`.
 - Configure no SCIM and no freeze windows.
@@ -47,8 +47,8 @@ The `sensitivity` label plays no part in signature verification.
 
 **Goal:** get OAuth identity working so audit and visibility have an identity subject. Enforcement remains permissive.
 
-1. Stand up an OIDC IdP, or connect an existing one. Okta, Entra ID, Auth0, and Keycloak issue a token the registry's `oidc-jwt` verifier accepts. Google Workspace caches an opaque access token that the verifier cannot parse, so it routes callers through a gateway under `trusted-headers` instead. The [OIDC cookbooks](oidc/) have per-IdP setup steps and cover both paths.
-2. Configure `PODIUM_IDENTITY_PROVIDER=oidc-jwt` on the registry, with `PODIUM_OAUTH_ISSUER` set to the IdP issuer and `PODIUM_OAUTH_AUDIENCE` set to the registry endpoint. The registry then verifies each presented token against the issuer's JWKS. This works on either deployment mode, and moving to the Clustered deployment mode at the same time is optional. See [Access control](access-control).
+1. Stand up an OIDC IdP, or connect an existing one. Okta, Entra ID, Auth0, and Keycloak issue a token the registry's `oidc-jwt` verifier accepts. Google Workspace caches an opaque access token that the verifier cannot parse, so it routes callers through a gateway under `trusted-headers` instead. The [OIDC cookbooks](identity/oidc/) have per-IdP setup steps and cover both paths.
+2. Configure `PODIUM_IDENTITY_PROVIDER=oidc-jwt` on the registry, with `PODIUM_OAUTH_ISSUER` set to the IdP issuer and `PODIUM_OAUTH_AUDIENCE` set to the registry endpoint. The registry then verifies each presented token against the issuer's JWKS. This works on either deployment mode, and moving to the Clustered deployment mode at the same time is optional. See [Access control](content/access-control).
 3. Have each developer run `podium login` once. The CLI completes the device-code flow against the same IdP and caches the resulting token in the OS keychain. On the gateway path the gateway authenticates the caller, so this step does not apply.
 4. Keep `visibility: public` on the existing `team-shared` layer for now, so every authenticated user still sees everything.
 5. Register a user-defined layer per author, for example `alice-personal`. A user-defined layer carries implicit `users: [<registrant>]` visibility.
@@ -119,7 +119,7 @@ The registry signs at ingest with its registry-managed key. That key is one Ed25
 
 The flag attests every unsigned row the reviewed dry run lists. The run refuses with exit status 3, writing nothing, when its plan differs from the reviewed one.
 
-When the store holds no record that the first-start rewrite of stored content hashes has completed, the command performs that rewrite. It must therefore run only while no registry process on the previous release serves the store, and it cannot detect such a process ([The `sign-stored-rows` command](operator-guide#the-sign-stored-rows-command)).
+When the store holds no record that the first-start rewrite of stored content hashes has completed, the command performs that rewrite. It must therefore run only while no registry process on the previous release serves the store, and it cannot detect such a process ([The `sign-stored-rows` command](operations/signing-keys#the-sign-stored-rows-command)).
 
 **Exit criteria:** an unsigned artifact cannot be loaded through `podium-mcp`, and the registry's signing key is in the backup set.
 
@@ -157,7 +157,7 @@ The registry periodically signs the chain head with a dedicated anchor key (`POD
 - The signature covers the chain-head digest alone, and the operator holds the anchor key. The evidence therefore stays within the operator's trust domain and does not establish when an anchor was made.
 - Podium does not submit the chain head to a public transparency log.
 
-[Audit and observability](observability#audit-log) covers the audit log and its destinations.
+[Audit and observability](operations/observability#audit-log) covers the audit log and its destinations.
 
 ---
 
@@ -166,7 +166,7 @@ The registry periodically signs the chain head with a dedicated anchor key (`POD
 Common reorderings:
 
 - **Compliance-driven.** When SOC 2, ISO 27001, or a customer contract requires signed and audited artifacts before launch, go straight from Day 0 to the Month 3 signing posture, which is setting `always` against a registry that already signs. The intermediate stages ease rollout for teams without external pressure and are not required for correctness.
-- **Multi-tenant from the start.** A deployment that serves separate customer organizations runs in multi-tenant mode (`PODIUM_MULTI_TENANT`) from the start, with an identity provider that authenticates each caller. Start it on the [Clustered](clustered) deployment mode with a per-tenant layer plan, and skip the single-node phase. The Clustered deployment mode's Postgres backend isolates each org in its own schema.
+- **Multi-tenant from the start.** A deployment that serves separate customer organizations runs in multi-tenant mode (`PODIUM_MULTI_TENANT`) from the start, with an identity provider that authenticates each caller. Start it on the [Clustered](modes/clustered) deployment mode with a per-tenant layer plan, and skip the single-node phase. The Clustered deployment mode's Postgres backend isolates each org in its own schema.
 - **High-sensitivity domain only.** When the catalog contains only `sensitivity: high` content, such as security playbooks and compliance runbooks, enable identity on Day 1 and skip the advisory-sensitivity phase. Signing is already on from Day 0 by default. A registry that started with `PODIUM_SIGN=none` keeps every artifact ingested before signing is turned on unloadable, for every reader, until a reviewed `sign-stored-rows --include-unsigned` run signs it, or until a new version of it is ingested. [Signing from Day 0](#signing-from-day-0) lists the run's steps.
 
 The order in this guide moves from lower operational friction to more control. Choose the starting point from current requirements, and move forward as the requirements change.

@@ -315,7 +315,7 @@ A drop adds a cause for exit status 1 and leaves the command's other exit status
 - A `kind: marketplace` target renders the harness-native git-repo distribution into its `target` directory through the fixed `prepare`, `render`, `publish` pipeline. Podium owns the `render` phase. The target's `workflow` supplies the `prepare` and `publish` commands, which clone the repository into the working directory and push the rendered result to the remote.
 - The marketplace fields are reachable only through the `--config` path: the git remote and branch, the harness set, the commit message, the plugins, and the publishing identity.
 
-See [Publishing marketplace repositories](../consuming/publishing) for the model and the worked examples.
+See [Publishing marketplace repositories](../deployment/content/publishing) for the model and the worked examples.
 
 #### Dropped artifacts
 
@@ -637,7 +637,7 @@ podium impact <artifact-id> [--registry <url>]
 
 ## Layer management
 
-The `podium layer` commands register, list, order, update, and remove the layers a registry composes. [Connecting layer sources](../deployment/layer-sources) covers Git and local sources as a task, and [Layered composition](../deployment/layers) covers precedence and visibility.
+The `podium layer` commands register, list, order, update, and remove the layers a registry composes. [Connecting layer sources](../deployment/content/layer-sources) covers Git and local sources as a task, and [Layered composition](../deployment/content/layers) covers precedence and visibility.
 
 Every `podium layer` subcommand takes `--registry <url>`, which defaults to `PODIUM_REGISTRY` and is required. `register`, `reingest`, and `watch` also fall back to `defaults.registry` in the merged `sync.yaml`.
 
@@ -683,7 +683,7 @@ No flag takes the token as an argument value. The force-push policy is also sett
 
 #### Webhooks
 
-For Git sources, the registry returns the webhook URL and HMAC secret to configure on the source repository. On a multi-tenant registry, the webhook URL carries the tenant ID: `/v1/ingest/webhook/<tenant-id>/<layer-id>`. Without a webhook, the layer stays at its initial commit until the first manual reingest. [Keeping layers current](../deployment/layer-sources#keeping-layers-current) covers webhooks, polling, and manual reingest.
+For Git sources, the registry returns the webhook URL and HMAC secret to configure on the source repository. On a multi-tenant registry, the webhook URL carries the tenant ID: `/v1/ingest/webhook/<tenant-id>/<layer-id>`. Without a webhook, the layer stays at its initial commit until the first manual reingest. [Keeping layers current](../deployment/content/layer-sources#keeping-layers-current) covers webhooks, polling, and manual reingest.
 
 #### Repository credentials
 
@@ -697,7 +697,7 @@ The command exits 2 before it sends a request in these cases:
 | An empty token file | `error: --repo-token-file names an empty token` |
 | An unreadable token file | `error: layer: read --repo-token-file: <cause>` |
 
-A `--repo` that carries a credential in its URL is refused with `details.constraint: "url_credential"` (see the [HTTP API reference](http-api#layer-management)). [Re-registering a private layer](../deployment/layer-sources#re-registering-a-private-layer) states when a re-registration with the remote `podium layer list` reports keeps the stored credential, and [ssh:// remotes and the listed value](../deployment/layer-sources#ssh-remotes-and-the-listed-value) states why an `ssh://` layer is re-registered with its login name.
+A `--repo` that carries a credential in its URL is refused with `details.constraint: "url_credential"` (see the [HTTP API reference](http-api#layer-management)). [Re-registering a private layer](../deployment/content/layer-sources#re-registering-a-private-layer) states when a re-registration with the remote `podium layer list` reports keeps the stored credential, and [ssh:// remotes and the listed value](../deployment/content/layer-sources#ssh-remotes-and-the-listed-value) states why an `ssh://` layer is re-registered with its login name.
 
 #### Visibility and ownership
 
@@ -915,7 +915,7 @@ The command exits 2 before it sends any request in these cases:
 - Both `<id>` and `--id` are given with different values. The command prints `error: layer id "<positional>" conflicts with --id "<flag>"`.
 - A second positional argument is given. The command prints the usage line.
 
-On a registry that authenticates its callers, some watch loops fall under the local-source rule described in the [layer management](#layer-management) terms. A watch loop over a `local`-source layer, or over a `git` layer whose repository string resolves to the Git file transport, drives a reingest that the rule authorizes only to a caller holding the per-tenant `admin` role. Any other caller is refused on each tick with `auth.forbidden` carrying `details.constraint: "local_source"`. An unauthenticated registry admits each tick. See [Who may register a local-source layer](../deployment/layer-sources#who-may-register-a-local-source-layer).
+On a registry that authenticates its callers, some watch loops fall under the local-source rule described in the [layer management](#layer-management) terms. A watch loop over a `local`-source layer, or over a `git` layer whose repository string resolves to the Git file transport, drives a reingest that the rule authorizes only to a caller holding the per-tenant `admin` role. Any other caller is refused on each tick with `auth.forbidden` carrying `details.constraint: "local_source"`. An unauthenticated registry admits each tick. See [Who may register a local-source layer](../deployment/content/layer-sources#who-may-register-a-local-source-layer).
 
 ---
 
@@ -1052,7 +1052,7 @@ Both subcommands print the following:
 | `1` | Any other error. |
 | `2` | Usage error, including a missing `--key-file`. |
 
-The registry loads the key file once, at start, so a running registry picks a rotated key up at its next start. [Rotating the signing key](../deployment/operator-guide#rotating-the-signing-key) gives the procedure.
+The registry loads the key file once, at start, so a running registry picks a rotated key up at its next start. [Rotating the signing key](../deployment/operations/signing-keys#rotating-the-signing-key) gives the procedure.
 
 ### `podium admin sign-stored-rows`
 
@@ -1176,9 +1176,9 @@ The command copies each row as the source stores it and clears the target store'
 - Where the target is the SQLite store in the key file's directory, the target registry's next start runs the rewrite.
 - For any other target, such as a Postgres store, the target registry's start is refused in either signing mode until `sign-stored-rows` runs against the target store. That means a `--dry-run`, a review of its report, and a run with its `--plan-digest`. With signing on, the run repeats the dry run's `--include-unsigned` setting. With signing off, it runs with `PODIUM_SIGN=none` in its environment.
 
-A `git` layer's remote is an exception to the row-for-row copy. The command reads and writes layers through the store, so the target holds each layer's URL credential in the form the release that runs the command writes ([Rollback floor for the layer credential columns](../deployment/operator-guide#rollback-floor-for-the-layer-credential-columns)).
+A `git` layer's remote is an exception to the row-for-row copy. The command reads and writes layers through the store, so the target holds each layer's URL credential in the form the release that runs the command writes ([Rollback floor for the layer credential columns](../deployment/operations/upgrade-notes#rollback-floor-for-the-layer-credential-columns)).
 
-The target registry signs with the source's key. Before the target's first start after the migration, place the source's registry signing key at the target's `PODIUM_SIGN_KEY_PATH`, replacing any key file already there, or create the chart's signing Secret from it. [Single node](../deployment/single-node#migrating-to-clustered) gives the copy step and states both failure cases below.
+The target registry signs with the source's key. Before the target's first start after the migration, place the source's registry signing key at the target's `PODIUM_SIGN_KEY_PATH`, replacing any key file already there, or create the chart's signing Secret from it. [Single node](../deployment/modes/migrating#migrating-to-clustered) gives the copy step and states both failure cases below.
 
 | Target key state | Result |
 |:--|:--|
@@ -1446,7 +1446,7 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 
 ## Environment variables
 
-The tables below group the `PODIUM_*` variables by the process and concern that reads them. A row marked "environment only" has no config-file key. Server-side backend selection variables (`PODIUM_VECTOR_BACKEND`, `PODIUM_EMBEDDING_PROVIDER`, etc.) are documented alongside the corresponding backend in [Extending](../deployment/extending).
+The tables below group the `PODIUM_*` variables by the process and concern that reads them. A row marked "environment only" has no config-file key. Server-side backend selection variables (`PODIUM_VECTOR_BACKEND`, `PODIUM_EMBEDDING_PROVIDER`, etc.) are documented alongside the corresponding backend in [Extending](../deployment/services/extending).
 
 ### Client
 
@@ -1528,7 +1528,7 @@ OAuth provider notes:
 | `PODIUM_MULTI_TENANT` | Registry-process boot setting. See the notes below the table. |
 | `PODIUM_OPERATOR_ADMINS` | Registry-process boot setting. Comma-separated identities granted the instance-operator role at boot. The operator role authorizes the `podium admin tenant` commands and the `/v1/admin/tenants` endpoints, and it confers no per-tenant `admin` rights. Distinct from `PODIUM_BOOTSTRAP_ADMINS`, which seeds per-tenant `admin` grants. |
 | `PODIUM_RUNTIME_KEYS_PATH` | Registry-process boot setting. Path to the JSON file holding the trusted runtime signing keys, written with `podium admin runtime register --keys-file`. The registry reads it before it binds a listener and never writes it. A key added to the file takes effect at the next process start. A file the registry cannot read or parse aborts startup with `config.runtime_keys_unavailable` under every identity provider. Under `injected-session-token`, an unset path, or a path naming a file that carries no key, aborts startup with the same code. |
-| `PODIUM_SCIM_TOKENS` | Registry-process boot setting; environment only. Comma-separated list of the bearer tokens the SCIM 2.0 receiver at `/scim/v2/` accepts. Each entry is trimmed, and blank entries are dropped. With no token listed, the registry mounts no receiver. Whether the pushed directory feeds layer `groups:` filters depends on the identity provider, as [OIDC identity](../deployment/oidc/) states. |
+| `PODIUM_SCIM_TOKENS` | Registry-process boot setting; environment only. Comma-separated list of the bearer tokens the SCIM 2.0 receiver at `/scim/v2/` accepts. Each entry is trimmed, and blank entries are dropped. With no token listed, the registry mounts no receiver. Whether the pushed directory feeds layer `groups:` filters depends on the identity provider, as [OIDC identity](../deployment/identity/oidc/) states. |
 | `PODIUM_SCIM_STORE_PATH` | Registry-process boot setting; environment only. Path to the JSON file that persists the SCIM directory across restarts. Unset, the directory is held in memory and lost on restart. See the notes below the table. |
 | `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT` | Registry-process boot setting; environment only. Deadline on each object-storage read made by the first-start rewrite of stored content hashes, by `sign-stored-rows`, and by the registry when it admits a stored row before serving it. Default: 30 seconds. An unset, unparsable, or non-positive value takes the default, so no configuration removes the bound. |
 
@@ -1542,7 +1542,7 @@ Registry-process notes:
 
 ### Audit
 
-These variables configure the audit streams. [Audit and observability](../deployment/observability#audit-destinations) covers destination setup, and [Audit events](audit-events) is the format reference. `PODIUM_AUDIT_LOG_PATH` configures the registry stream, and `PODIUM_AUDIT_SINK` configures the separate `podium-mcp` local stream.
+These variables configure the audit streams. [Audit and observability](../deployment/operations/observability#audit-destinations) covers destination setup, and [Audit events](audit-events) is the format reference. `PODIUM_AUDIT_LOG_PATH` configures the registry stream, and `PODIUM_AUDIT_SINK` configures the separate `podium-mcp` local stream.
 
 | Variable | Purpose |
 |:--|:--|

@@ -105,7 +105,7 @@ setting exits with status 3. With signing off, run both commands with
 `podium serve --sign none` sets the mode only for its own process. On a
 Helm chart deployment, the migrate Job ran the rewrite; correct the
 object-store values in the values file and rerun steps 3 to 5 of the
-upgrade procedure in `docs/deployment/clustered.md` instead of
+upgrade procedure in `docs/deployment/operations/upgrade-notes.md` instead of
 restarting.
 
 **Mitigation.**
@@ -221,7 +221,7 @@ unaffected. A `podium-mcp` that refuses to start serves nothing.
    runs both commands as its migrate Job, and a `signing.mode=none`
    release runs the same Job with `migration.includeUnsigned=false`.
    Run steps 2 to 5 of the upgrade procedure in
-   `docs/deployment/clustered.md`: hold the Deployment at
+   `docs/deployment/operations/upgrade-notes.md`: hold the Deployment at
    `replicaCount=0` on the new image and back up the store, run the
    `migration.mode=dry-run` upgrade and review its log, run the
    `migration.mode=run` upgrade with `migration.planDigest` set to the
@@ -251,7 +251,7 @@ unaffected. A `podium-mcp` that refuses to start serves nothing.
    On a Helm chart deployment, hold the release at zero replicas
    before the command runs and run the rewrite in the migrate Job, as
    the Migration from single node section of
-   `docs/deployment/clustered.md` states.
+   `docs/deployment/operations/upgrade-notes.md` states.
 5. Where no copy of the signing key's public half survives, or the
    key was compromised, restore the rows from a backup or ingest a
    new version of each affected artifact.

@@ -1,14 +1,14 @@
 ---
 title: Connecting layer sources
-nav_order: 5
+nav_order: 1
 description: Connect Git repositories, private remotes, local paths, and Agent Skills repositories to a registry as layers, and keep each layer current.
 ---
 
 # Connecting layer sources
 
-A layer is one source of artifacts, such as a Git repository or a directory on the registry host. This page covers connecting sources to a server-backed registry, on a [single node](single-node) or a [clustered](clustered) deployment, and keeping each layer current after the connection. [Layered composition](layers) covers how the registry combines layers and which layer takes precedence.
+A layer is one source of artifacts, such as a Git repository or a directory on the registry host. This page covers connecting sources to a server-backed registry, on a [single node](../modes/single-node) or a [clustered](../modes/clustered) deployment, and keeping each layer current after the connection. [Layered composition](layers) covers how the registry combines layers and which layer takes precedence.
 
-On the [Local](local) deployment mode there is no server to register a source with. Each subdirectory of the registry path is a layer, as [Local → Directory layout](local#directory-layout) describes.
+On the [Local](../modes/local) deployment mode there is no server to register a source with. Each subdirectory of the registry path is a layer, as [Local → Directory layout](../modes/local#directory-layout) describes.
 
 ---
 
@@ -26,7 +26,7 @@ On the [Local](local) deployment mode there is no server to register a source wi
 |:--|:--|:--|
 | `git` | A tracked ref of a Git repository, optionally rooted at a subdirectory. | A webhook from the Git host, `podium layer watch`, or `podium layer reingest`. |
 | `local` | A filesystem path the registry process can read. | `podium layer reingest` or `podium layer watch`. |
-| Custom | A source a `LayerSourceProvider` plugin implements, such as an S3 bucket or an OCI registry. | The trigger model the plugin declares. See [Extending](extending). |
+| Custom | A source a `LayerSourceProvider` plugin implements, such as an S3 bucket or an OCI registry. | The trigger model the plugin declares. See [Extending](../services/extending). |
 
 ---
 
@@ -118,14 +118,14 @@ The same options are available in a declaration and on the command line, with th
 | `git_provider` | None | The Git host whose webhook signature scheme the registry applies. See [Choosing the Git provider](#choosing-the-git-provider). |
 | `username`, `token` | `--repo-username`, `--repo-token-file` | The repository credential. See [Private repositories](#private-repositories). |
 
-The full flag set is in the [CLI reference](../reference/cli#layer-management).
+The full flag set is in the [CLI reference](../../reference/cli#layer-management).
 
 ### Choosing the Git provider
 
 The registry verifies a `git` layer's inbound webhook deliveries against one Git provider's signature scheme. The default is `github`. The built-in providers are `github`, `gitlab`, and `bitbucket`, and a registry build can register more through the `GitProvider` SPI.
 
 - A declared layer names the provider in the `source.git.git_provider` key, beside `repo` and `ref`. A value that names no registered provider aborts startup with an error that names the layer. Because the registry re-seeds every declared entry at each start, the declaration restores its value over any other.
-- A layer registered at runtime names the provider in the `git_provider` field of the `POST /v1/layers` or `POST|PUT /v1/layers/update` request body, sent with an HTTP client such as `curl`. Neither `podium layer register` nor `podium layer update` carries the field, and no CLI flag sets it. The [HTTP API reference](../reference/http-api#layer-management) documents the field.
+- A layer registered at runtime names the provider in the `git_provider` field of the `POST /v1/layers` or `POST|PUT /v1/layers/update` request body, sent with an HTTP client such as `curl`. Neither `podium layer register` nor `podium layer update` carries the field, and no CLI flag sets it. The [HTTP API reference](../../reference/http-api#layer-management) documents the field.
 
 ---
 
@@ -197,7 +197,7 @@ The declaration is the place to set, rotate, or remove a declared layer's creden
 
 ### What the registry reports
 
-The [operator guide](operator-guide#rollback-floor-for-the-layer-credential-columns) states how the metadata store holds the credential. `podium layer list`, the register and update responses, the server log, and the `ingest.source_unreachable` message of a failed clone carry no part of it.
+The [operator guide](../operations/upgrade-notes#rollback-floor-for-the-layer-credential-columns) states how the metadata store holds the credential. `podium layer list`, the register and update responses, the server log, and the `ingest.source_unreachable` message of a failed clone carry no part of it.
 
 A `git` layer whose remote is an `http` or `https` URL, and is not listed as `[redacted]`, carries `repo_credential` in those responses. The field is `true` while a credential is stored. A layer on which the registry takes no credential, such as one on an `ssh://`, scp-like, or `[redacted]` remote, carries no `repo_credential`.
 
@@ -269,7 +269,7 @@ Registering a `git` source without configuring the webhook leaves the layer at i
 
 `podium layer reingest <id>` forces a fresh snapshot of the layer's source, whatever its trigger model. A tenant admin may reingest any layer, and the owner of a user-defined layer may reingest that layer. Run it by hand after editing a `local` source, or on a schedule for a `git` host that cannot reach the registry.
 
-During a freeze window, ingest is blocked unless the command passes `--break-glass` with `--justification` and two `--approver` identities. The command exits 1 when the cycle dropped at least one artifact. The [CLI reference](../reference/cli#podium-layer-reingest) describes its output and exit status.
+During a freeze window, ingest is blocked unless the command passes `--break-glass` with `--justification` and two `--approver` identities. The command exits 1 when the cycle dropped at least one artifact. The [CLI reference](../../reference/cli#podium-layer-reingest) describes its output and exit status.
 
 ---
 
@@ -279,7 +279,7 @@ A `local` layer reads a directory on the registry host. It suits a single-node r
 
 A registry takes local layers in three ways:
 
-- **At startup**, from `--layer-path`, `PODIUM_LAYER_PATH`, or the `registry.layer_path` key, as [Single node → Server side](single-node#server-side) describes. A directory whose `.registry-config` sets `multi_layer: true` yields one layer per subdirectory. Any other directory is one layer whose ID is the directory name. The layers from the path follow the declared layers in the layer list, so they take higher precedence.
+- **At startup**, from `--layer-path`, `PODIUM_LAYER_PATH`, or the `registry.layer_path` key, as [Single node → Server side](../modes/single-node#server-side) describes. A directory whose `.registry-config` sets `multi_layer: true` yields one layer per subdirectory. Any other directory is one layer whose ID is the directory name. The layers from the path follow the declared layers in the layer list, so they take higher precedence.
 - **In `registry.yaml`**, as a declared layer whose source is `source.local.path`. The registry ingests it at each start.
 - **At runtime**, with `podium layer register --local <path>`, as the example under [Register a layer at runtime](#register-a-layer-at-runtime) shows.
 
@@ -350,14 +350,14 @@ Register it as a `local` layer whose path holds a copy of the skill without its 
 | `podium layer restore <id>` | Recovers a layer unregistered inside the recovery window. |
 | `podium layer reorder <id> [<id> ...]` | Changes precedence. See [Changing the order](layers#changing-the-order). |
 
-The full flag set for each command is in the [CLI reference](../reference/cli#layer-management).
+The full flag set for each command is in the [CLI reference](../../reference/cli#layer-management).
 
 ### Which layers podium layer list shows
 
 - A caller holding the tenant `admin` role sees every layer in the tenant, as does every caller on a registry that authenticates none.
 - Any other authenticated caller sees the layers its identity admits, including its own user-defined layers.
 - A caller the registry resolves as anonymous sees none.
-- A caller whose credential fails verification is refused on the terms the [HTTP API reference](../reference/http-api#list-layers) states. Whether presenting no credential is itself a verification failure is the configured identity provider's rule.
+- A caller whose credential fails verification is refused on the terms the [HTTP API reference](../../reference/http-api#list-layers) states. Whether presenting no credential is itself a verification failure is the configured identity provider's rule.
 
 On a multi-tenant registry, `podium layer list` reads the tenant the caller's organization selects. A caller the registry rejects on its other endpoints with `401 auth.tenant_unknown`, because its verified organization names no provisioned tenant, receives the same rejection from `podium layer list`. Any other caller whose organization selects no tenant sees no layers.
 
@@ -446,13 +446,6 @@ A re-registration that changes the class, changes a user-defined layer's owner, 
 
 Release 0.6.0 refused a re-registration with the listed value with `details.constraint: "redacted_repo"`. An scp-like remote such as `git@git.acme.com:acme/x.git` is listed as registered, login name included.
 
-### Credentials stored by an earlier release
-
-- A layer whose stored remote carries its credential in the URL keeps cloning with it. `podium layer update --repo-token-file` or `--clear-repo-credential` replaces or removes that credential.
-- A stored username that contains `:`, `/`, `"`, a space, or a control character cannot be kept. A rotation of such a layer passes `--repo-username` with `--repo-token-file`.
-- A layer stored in the URL-token form `https://<token>@host` holds no username. A rotation of it passes `--repo-username` where the provider expects one.
-- A declaration that sets neither `username` nor `token` is written as declared. A credential in the userinfo of `source.git.repo`, which is the form 0.6.0 and earlier read, keeps working. Each start logs a line that names the layer and asks for the credential to move to the two keys.
-
 ### Layers listed as [redacted]
 
 A layer whose remote is listed as `[redacted]` reports a failed clone with a fixed message that carries no detail from the remote or the network. Re-register it with a `--repo` that parses as a URL:
@@ -468,5 +461,5 @@ Re-registering it with the listed `[redacted]` value keeps the stored remote on 
 
 - [Layered composition](layers) covers precedence, the workspace overlay, and reading the composed result.
 - [Access control](access-control) covers the visibility fields and layer write authorization.
-- [Clustered](clustered) covers the per-tenant layer list.
-- [HTTP API reference](../reference/http-api#layer-management) documents the layer endpoints.
+- [Clustered](../modes/clustered) covers the per-tenant layer list.
+- [HTTP API reference](../../reference/http-api#layer-management) documents the layer endpoints.

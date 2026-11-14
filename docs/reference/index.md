@@ -12,7 +12,7 @@ The reference pages describe each surface of the Podium registry for lookup: com
 |:--|:--|
 | [CLI](cli) | Every `podium` subcommand with its flags, defaults, and exit codes: setup, server, sync, layer management, search, admin, and signing. Also lists the `PODIUM_*` environment variables. |
 | [HTTP API](http-api) | The registry's wire surface: discovery endpoints, materialization, ingest webhooks, scope preview, and health. |
-| [Frontmatter schema](frontmatter-schema) | Field-by-field schema for `ARTIFACT.md`, `SKILL.md` (for skills), and `DOMAIN.md`. |
+| [Frontmatter schema](../authoring/frontmatter-reference) | Field-by-field schema for `ARTIFACT.md`, `SKILL.md` (for skills), and `DOMAIN.md`. |
 | [Error codes](error-codes) | The structured error envelope and the full namespace catalog. |
 | [Audit events](audit-events) | The audit record format; the file, HTTP, OTLP, and stdout destinations; delivery and loss accounting; receiver checks; and the OTLP and ECS field mappings. |
 | [Glossary](glossary) | Vocabulary used across the docs. |

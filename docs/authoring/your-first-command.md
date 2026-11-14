@@ -109,7 +109,7 @@ Claude Code substitutes the trailing text into `$ARGUMENTS`, sends the resulting
 podium lint --registry ~/podium-artifacts/
 ```
 
-Lint validates the frontmatter against the `command` schema. It also resolves prose references in the body, which are markdown links to bundled files or to other artifacts. A clean run prints `lint: no issues.` When the catalog lives in a Git-source layer, CI runs the same checks on pull requests (see [Connecting layer sources](../deployment/layer-sources#git-repositories)).
+Lint validates the frontmatter against the `command` schema. It also resolves prose references in the body, which are markdown links to bundled files or to other artifacts. A clean run prints `lint: no issues.` When the catalog lives in a Git-source layer, CI runs the same checks on pull requests (see [Connecting layer sources](../deployment/content/layer-sources#git-repositories)).
 
 ---
 

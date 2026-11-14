@@ -138,7 +138,7 @@ Hosts with sandbox capability honor the profile. A host without it refuses to ma
 
 Bundled scripts inherit the artifact's `sensitivity` label. A high-sensitivity skill that bundles a Python script ships code that the host runtime executes, and the registry treats it accordingly.
 
-Enforce script-level controls in pre-merge CI run by the source repository: secret scanning, static analysis, dependency scanning, and optional sandbox policy review. Podium reads no in-repo permission files and does not introspect bundle contents. The Git provider's branch protection is the gate. [Connecting layer sources](../deployment/layer-sources#git-repositories) covers publishing from a Git repository.
+Enforce script-level controls in pre-merge CI run by the source repository: secret scanning, static analysis, dependency scanning, and optional sandbox policy review. Podium reads no in-repo permission files and does not introspect bundle contents. The Git provider's branch protection is the gate. [Connecting layer sources](../deployment/content/layer-sources#git-repositories) covers publishing from a Git repository.
 
 To ship an SBOM, bundle it as an ordinary resource, such as `bom.json` or `sbom.spdx.json`. The `sbom:` frontmatter field is informational and points consumers at the file. Podium does not parse the SBOM, enforce its presence, or run vulnerability scanning. Scanning belongs to the source-repository CI and the deployer's continuous scanning pipeline.
 

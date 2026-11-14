@@ -94,7 +94,7 @@ Every server-side key nests under the top-level `registry:` mapping. A document 
 
 `oidc-jwt` is the registry's side of the flow. It verifies each presented token against the issuer's JWKS and validates the `aud` claim against `audience:`. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
 
-The Action from step 3 emits group membership under the namespaced claim path `https://podium.acme.com/groups`. Set `identity_provider.groups_claim` in the `identity_provider:` block, or `PODIUM_OAUTH_GROUPS_CLAIM` in the environment, to `https://podium.acme.com/groups` so the registry reads that path. Configure `IdpGroupMapping` as well when the claim values have to be rewritten to registry-side group names. The [`oidc-jwt` settings](../gateway-delegated-identity#oidc-jwt-settings) table lists both keys.
+The Action from step 3 emits group membership under the namespaced claim path `https://podium.acme.com/groups`. Set `identity_provider.groups_claim` in the `identity_provider:` block, or `PODIUM_OAUTH_GROUPS_CLAIM` in the environment, to `https://podium.acme.com/groups` so the registry reads that path. Configure `IdpGroupMapping` as well when the claim values have to be rewritten to registry-side group names. The [`oidc-jwt` settings](index#oidc-jwt-settings) table lists both keys.
 
 Restart the registry.
 
@@ -137,8 +137,8 @@ Expected result: a user with `engineering` in `app_metadata.groups` sees the lay
 
 ## Next steps
 
-- Declare visibility on the remaining layers with [Access control](../access-control).
-- Review the caller identities the registry records in the [audit log](../observability#audit-log).
+- Declare visibility on the remaining layers with [Access control](../../content/access-control).
+- Review the caller identities the registry records in the [audit log](../../operations/observability#audit-log).
 
 ## Troubleshooting
 

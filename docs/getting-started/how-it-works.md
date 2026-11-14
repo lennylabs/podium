@@ -41,9 +41,9 @@ deployment) or as a local directory. Most consumers work against a server, and
 | Domains and subdomains | The catalog's directory layout, plus the `DOMAIN.md` metadata read from it. | In the catalog, in every deployment mode. | [Domains](../authoring/domains) |
 | Selective materialization | Scope resolution in `podium sync`, from the merged `sync.yaml` and the CLI flags. | On the consumer, in every deployment mode. | [Selective materialization](../consuming/selective-materialization) |
 | Progressive discovery | The meta-tools, backed by the domain renderer and hybrid retrieval. | On the registry, reached through the MCP server or an SDK. Requires single node or clustered. | [Browsing the catalog](../consuming/browsing-the-catalog) |
-| Layered composition | The layer composer, fed by the layer source providers. | On the registry. A local directory composes ordered layers from one root. Identity-aware composition across independent sources requires a server. | [Connecting layer sources](../deployment/layer-sources), [Layered composition](../deployment/layers) |
-| Security and access control | Signing at ingest, the visibility evaluator run against the caller's attested identity, and the audit log. Consumers verify signatures during materialization. | On the registry, with verification on the consumer. Visibility requires single node or clustered with an identity provider configured. | [Access control](../deployment/access-control) |
-| Observability | The audit destinations, the Prometheus metrics endpoint, the OpenTelemetry tracer, and the notification provider. | On the registry. The MCP server can also write a local audit stream, serve metrics, and export traces. | [Audit and observability](../deployment/observability) |
+| Layered composition | The layer composer, fed by the layer source providers. | On the registry. A local directory composes ordered layers from one root. Identity-aware composition across independent sources requires a server. | [Connecting layer sources](../deployment/content/layer-sources), [Layered composition](../deployment/content/layers) |
+| Security and access control | Signing at ingest, the visibility evaluator run against the caller's attested identity, and the audit log. Consumers verify signatures during materialization. | On the registry, with verification on the consumer. Visibility requires single node or clustered with an identity provider configured. | [Access control](../deployment/content/access-control) |
+| Observability | The audit destinations, the Prometheus metrics endpoint, the OpenTelemetry tracer, and the notification provider. | On the registry. The MCP server can also write a local audit stream, serve metrics, and export traces. | [Audit and observability](../deployment/operations/observability) |
 | Cross-harness delivery | The `HarnessAdapter` step of the materialization pipeline, shared by `podium sync`, the MCP server, and the SDKs. | On the consumer, in every deployment mode. | [Configure your harness](../consuming/configure-your-harness) |
 
 ---
@@ -196,7 +196,7 @@ harness adapter, and writes to the harness's destination.
   to Git is the typical choice. The Git history doubles as the audit trail, and
   `git pull` is each developer's ingest. A network share or a file-sync service
   also works.
-- **Setup.** [Local](../deployment/local).
+- **Setup.** [Local](../deployment/modes/local).
 
 ### Single node
 
@@ -226,7 +226,7 @@ disable embeddings and run BM25-only search.
 - **Migration path.** Point `podium serve --standalone` at the same directory
   the local catalog uses, then change `defaults.registry` from a path to a URL.
   The authoring loop is unchanged.
-- **Setup.** [Single node](../deployment/single-node).
+- **Setup.** [Single node](../deployment/modes/single-node).
 
 ### Clustered
 
@@ -246,8 +246,8 @@ managed or self-run alongside.
 - **Migration path.** `podium admin migrate-to-standard` exports a single-node
   deployment into the clustered stack. The same artifact directory becomes a
   `local`-source layer until the cut-over to Git-source layers.
-- **Setup.** [Clustered](../deployment/clustered) and the
-  [Operator guide](../deployment/operator-guide).
+- **Setup.** [Clustered](../deployment/modes/clustered) and the
+  [Operator guide](../deployment/operations/troubleshooting).
 
 ---
 
@@ -395,7 +395,7 @@ ASCII fallback for the diagram above (publish flow):
   POST /repos/<owner>/<repo>/dispatches.
 -->
 
-[Publishing marketplace repositories](../consuming/publishing) covers the model, the
+[Publishing marketplace repositories](../deployment/content/publishing) covers the model, the
 marketplace target schema, and the worked GitHub Actions patterns.
 
 ---
@@ -446,7 +446,7 @@ identity providers are listed below.
 - **`trusted-headers`** is a registry-process provider for a registry behind a
   gateway that already authenticated the caller. It reads the identity that
   gateway injects as request headers. See
-  [Gateway-delegated identity](../deployment/gateway-delegated-identity).
+  [Gateway-delegated identity](../deployment/identity/trusted-headers).
 
 A filesystem-source registry has no identity by definition, so the visibility
 evaluator short-circuits to `true` for every layer. A single-node deployment
@@ -463,7 +463,7 @@ The registry signs each artifact version at ingest with a registry-managed
 Ed25519 key, and signing is on by default. Each response carries a delivery
 signature over the served record. The MCP server and server-source
 `podium sync` verify it before they write anything, as step 2 of the
-materialization pipeline. [Access control](../deployment/access-control)
+materialization pipeline. [Access control](../deployment/content/access-control)
 covers the verification policy a consumer applies.
 
 ### Audit
@@ -473,7 +473,7 @@ ingest, layer change, and admin grant, in a hash-chained audit log. The stream
 goes to the destinations `PODIUM_AUDIT_LOG_PATH` lists: a file, stdout, HTTP
 receivers, or an OpenTelemetry Collector. The MCP server can write its own
 local audit stream as well.
-[Audit and observability](../deployment/observability#audit-log) covers the
+[Audit and observability](../deployment/operations/observability#audit-log) covers the
 destinations, metrics, tracing, and notifications.
 
 ---
@@ -514,6 +514,6 @@ Continue with the guide that fits the task:
 - **Deliver them into a harness**: [Configure your harness](../consuming/configure-your-harness)
 - **Narrow what a workspace receives**: [Selective materialization](../consuming/selective-materialization)
 - **Let an agent find them at runtime**: [Browsing the catalog](../consuming/browsing-the-catalog)
-- **Connect Git repositories as layer sources**: [Connecting layer sources](../deployment/layer-sources)
+- **Connect Git repositories as layer sources**: [Connecting layer sources](../deployment/content/layer-sources)
 - **Run Podium for a team or organization**: [Deployment guide](../deployment/)
 - **Call the API directly**: [Reference](../reference/)

@@ -84,7 +84,7 @@ The harness adapter translates the mode at materialization time. Each adapter wr
 | ⚠ | Fallback | Warning. | Writes the degraded fallback. |
 | ✗ | Unavailable | Error. | Fails with `materialize.untranslatable`. |
 
-This table mirrors the `rule_mode` rows of the [capability matrix in §6.7.1 of the specification](https://github.com/lennylabs/podium/blob/main/spec/06-mcp-server.md#671-the-authors-burden). The `claude-cowork` cells are ✗ for every mode, because Cowork has no project-scope rule surface. A Cowork user obtains a rule through the published Claude marketplace ([Publishing](../consuming/publishing)).
+This table mirrors the `rule_mode` rows of the [capability matrix in §6.7.1 of the specification](https://github.com/lennylabs/podium/blob/main/spec/06-mcp-server.md#671-the-authors-burden). The `claude-cowork` cells are ✗ for every mode, because Cowork has no project-scope rule surface. A Cowork user obtains a rule through the published Claude marketplace ([Publishing](../deployment/content/publishing)).
 
 ---
 
@@ -97,7 +97,7 @@ This table mirrors the `rule_mode` rows of the [capability matrix in §6.7.1 of 
 | **hermes** | `.cursor/rules/<name>.mdc` in the Cursor `.mdc` format for every mode. Hermes natively reads `.cursor/rules/*.mdc`, the root `AGENTS.md`, and `.cursorrules`. It does not read `.claude/rules/`. |
 | **codex, opencode, pi** | The rule body, injected into the root `AGENTS.md` between Podium-managed markers. `always` maps natively. `glob`, `auto`, and `explicit` fall back to always-loaded with a lint warning, because an injected block carries no per-file scoping. |
 | **gemini** | The rule body, injected into the root `GEMINI.md` between Podium-managed markers. The behavior matches the `AGENTS.md` harnesses: `always` is native, and the other modes fall back. |
-| **claude-cowork** | No project-scope rule surface. A `type: rule` artifact on `claude-cowork` is a ✗ cell and fails materialization with `materialize.untranslatable`, on both `podium sync` and `load_artifact`, including the default `always` mode. A Cowork user obtains the rule through the published Claude marketplace ([Publishing](../consuming/publishing)). |
+| **claude-cowork** | No project-scope rule surface. A `type: rule` artifact on `claude-cowork` is a ✗ cell and fails materialization with `materialize.untranslatable`, on both `podium sync` and `load_artifact`, including the default `always` mode. A Cowork user obtains the rule through the published Claude marketplace ([Publishing](../deployment/content/publishing)). |
 | **claude-desktop** | No project-scope rule surface. Every `rule_mode` cell is ✗, so a `type: rule` artifact on `claude-desktop` fails materialization with `materialize.untranslatable`, on both `podium sync` and `load_artifact`, including the default `always` mode. |
 
 ---

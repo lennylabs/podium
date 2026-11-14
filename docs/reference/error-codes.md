@@ -279,7 +279,7 @@ The load stops before anything is cached or written (§4.7.10, §6.5).
 - **Scope.** A request that names a version, a range, or a content hash is never compared with the revision mark.
 - **Retry.** The error is not retryable, and a retry in the same session repeats it.
 - **Lagging replica or pinned session.** When the refusal came from a lagging replica while the registry was in read-only mode, or from a session pinned to an older version, start a new session. It loads the current `latest` once the registry is out of read-only mode. Pass a new `session_id`, or restart `podium-mcp` when the load passes none.
-- **Revision rollback.** Reset the revision marks after any of these events: the registry is restored from an earlier backup, a lagging replica is promoted, or the newest version is purged, erased, retired under the [no-inheritance rule](../deployment/layers#inheritance), or leaves the caller's view. Stop every MCP server that uses the cache directory, then run `podium cache reset-revisions <id>`.
+- **Revision rollback.** Reset the revision marks after any of these events: the registry is restored from an earlier backup, a lagging replica is promoted, or the newest version is purged, erased, retired under the [no-inheritance rule](../deployment/content/layers#inheritance), or leaves the caller's view. Stop every MCP server that uses the cache directory, then run `podium cache reset-revisions <id>`.
 
 #### Stored-row admission refusals
 

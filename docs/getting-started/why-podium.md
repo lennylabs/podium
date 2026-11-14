@@ -45,7 +45,7 @@ for each artifact type. Adapters cover Claude Code, Claude Desktop, Claude
 Cowork, Cursor, Codex, Gemini CLI, OpenCode, Pi, Hermes, and custom runtimes.
 Adding a harness to a team means adding an adapter to a sync configuration. See
 [Configure your harness](../consuming/configure-your-harness#supported-harnesses)
-and [Publishing marketplace repositories](../consuming/publishing).
+and [Publishing marketplace repositories](../deployment/content/publishing).
 
 ---
 
@@ -105,8 +105,8 @@ The sources available depend on the deployment mode:
   private ones) as sources, custom sources through the `LayerSourceProvider`
   SPI, and per-layer visibility.
 
-Covered in [Connecting layer sources](../deployment/layer-sources) and
-[Layered composition](../deployment/layers).
+Covered in [Connecting layer sources](../deployment/content/layer-sources) and
+[Layered composition](../deployment/content/layers).
 
 ### Security and access control
 
@@ -124,8 +124,8 @@ A registry server protects the catalog with signing, visibility, and audit:
 - **Audit.** The registry records every load, search, ingest, and admin change
   as an event in a hash-chained audit log.
 
-Covered in [Access control](../deployment/access-control) and
-[Audit and observability](../deployment/observability#audit-log).
+Covered in [Access control](../deployment/content/access-control) and
+[Audit and observability](../deployment/operations/observability#audit-log).
 
 ### Observability
 
@@ -140,7 +140,7 @@ The registry also exposes these signals:
 - OpenTelemetry traces exported over OTLP/HTTP when tracing is enabled.
 - Notifications by webhook, email, or log when a layer ingest fails.
 
-Covered in [Audit and observability](../deployment/observability).
+Covered in [Audit and observability](../deployment/operations/observability).
 
 ---
 

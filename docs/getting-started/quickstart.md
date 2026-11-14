@@ -248,13 +248,13 @@ change. A saved edit to `SKILL.md`, or to an `ARTIFACT.md` overlay, lands in
 - **Split the catalog into layers.** This quickstart uses one filesystem layer
   rooted at `~/podium-artifacts/`. To compose several layers from one
   directory, such as a shared team layer and a personal layer, add a
-  `.registry-config` with `multi_layer: true`. See [Local](../deployment/local).
+  `.registry-config` with `multi_layer: true`. See [Local](../deployment/modes/local).
 - **Move to a server.** Runtime discovery, where an agent finds artifacts with
   `load_domain`, `search_domains`, and `search_artifacts` and loads one with
   `load_artifact`, requires a server. So does a single audit log for a team.
   Start a single-node server on the same directory with
   `podium serve --standalone --layer-path ~/podium-artifacts/`. See
-  [Single node](../deployment/single-node) and
+  [Single node](../deployment/modes/single-node) and
   [Browsing the catalog](../consuming/browsing-the-catalog).
 
 ---

@@ -260,7 +260,7 @@ Configurable rules govern how `load_domain` renders its output. Tenant defaults 
 
 These commands call registry HTTP endpoints. Each requires a running registry server, passed with `--registry <url>` or the `PODIUM_REGISTRY` environment variable.
 
-A [Local](../deployment/local) deployment reads the catalog from disk and runs no server. These commands therefore need a [Single node](../deployment/single-node) or [Clustered](../deployment/clustered) deployment. `podium serve --standalone --layer-path <dir>` starts one against the same catalog directory.
+A [Local](../deployment/modes/local) deployment reads the catalog from disk and runs no server. These commands therefore need a [Single node](../deployment/modes/single-node) or [Clustered](../deployment/modes/clustered) deployment. `podium serve --standalone --layer-path <dir>` starts one against the same catalog directory.
 
 | Command | Use |
 |:--|:--|
@@ -272,7 +272,7 @@ A [Local](../deployment/local) deployment reads the catalog from disk and runs n
 
 ## DOMAIN.md across layers
 
-When several [layers](../deployment/layers) contribute a `DOMAIN.md` for the same path, the registry merges them field by field:
+When several [layers](../deployment/content/layers) contribute a `DOMAIN.md` for the same path, the registry merges them field by field:
 
 | Field | Merge |
 |:--|:--|

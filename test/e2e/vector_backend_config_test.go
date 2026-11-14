@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end tests for docs/deployment/vector-backends.md
+// End-to-end tests for docs/deployment/services/vector-backends.md
 // (D-vector-backends). The page documents Pinecone, Weaviate Cloud, and
 // Qdrant Cloud as vector backend choices for the registry process.
 //

@@ -18,9 +18,9 @@ page that covers it in operational detail.
 | Domains and subdomains | [Domain](#domain) | [Domains](../authoring/domains) |
 | Selective materialization | [Profile](#profile), [Materialization](#materialization) | [Selective materialization](../consuming/selective-materialization) |
 | Progressive discovery | [Meta-tools](#meta-tools) | [Browsing the catalog](../consuming/browsing-the-catalog) |
-| Layered composition | [Layer](#layer) | [Connecting layer sources](../deployment/layer-sources), [Layered composition](../deployment/layers) |
-| Security and access control | [Visibility](#visibility), [Signing and audit](#signing-and-audit) | [Access control](../deployment/access-control) |
-| Observability | [Signing and audit](#signing-and-audit) | [Audit and observability](../deployment/observability) |
+| Layered composition | [Layer](#layer) | [Connecting layer sources](../deployment/content/layer-sources), [Layered composition](../deployment/content/layers) |
+| Security and access control | [Visibility](#visibility), [Signing and audit](#signing-and-audit) | [Access control](../deployment/content/access-control) |
+| Observability | [Signing and audit](#signing-and-audit) | [Audit and observability](../deployment/operations/observability) |
 | Cross-harness delivery | [Harness](#harness), [Materialization](#materialization) | [Configure your harness](../consuming/configure-your-harness) |
 
 ---
@@ -158,8 +158,8 @@ custom source through the `LayerSourceProvider` SPI. Layers compose in the
 order the registry config defines. Podium imposes no fixed `org / team / user`
 hierarchy.
 
-[Connecting layer sources](../deployment/layer-sources) covers Git and local
-sources. [Layered composition](../deployment/layers) covers registering layers
+[Connecting layer sources](../deployment/content/layer-sources) covers Git and local
+sources. [Layered composition](../deployment/content/layers) covers registering layers
 and reading the composed result.
 
 A typical setup has these layers, from lowest to highest precedence:
@@ -177,7 +177,7 @@ When a caller asks for an artifact, Podium composes the caller's
 **effective view** from every visible layer, in precedence order. Two
 registry-side layers cannot contribute the same canonical ID. Ingest rejects
 the second contribution with `ingest.collision`, and no artifact inherits from
-another (see [Layered composition](../deployment/layers#inheritance)).
+another (see [Layered composition](../deployment/content/layers#inheritance)).
 
 ![Layer composition and precedence: an ordered layer stack on the left (lowest precedence at the bottom) composes into a single effective view for one caller identity on the right.](../assets/diagrams/layer-composition.svg)
 
@@ -217,7 +217,7 @@ Each layer declares its visibility independently:
 
 Multiple fields combine as a union. The registry enforces visibility on every
 call. It does not consult Git permissions or other source-side controls at
-request time. [Access control](../deployment/access-control) covers the
+request time. [Access control](../deployment/content/access-control) covers the
 enforcement boundary and how to debug an effective view.
 
 ![Identity and visibility flow: every registry call carries an OAuth token; the registry verifies it, resolves claims, then evaluates each layer against the caller's identity to produce the effective view.](../assets/diagrams/identity-visibility-flow.svg)
@@ -266,7 +266,7 @@ Declaring a layer is a separate rule from writing content into it. On a
 server-backed deployment mode, only a tenant admin may declare a layer that
 makes the registry read a given filesystem path. The registry process reads
 that path with its own rights rather than with the registrant's. See
-[Who may register a local-source layer](../deployment/layer-sources#who-may-register-a-local-source-layer).
+[Who may register a local-source layer](../deployment/content/layer-sources#who-may-register-a-local-source-layer).
 
 ---
 
@@ -282,7 +282,7 @@ A registry server also records significant events in a hash-chained **audit
 log**. Every `load_domain`, `search_domains`, `search_artifacts`, and
 `load_artifact` call is an audit event, as are ingests, layer changes, and
 admin grants. The audit stream can go to a file, stdout, HTTP receivers, or an
-OpenTelemetry Collector. [Audit and observability](../deployment/observability)
+OpenTelemetry Collector. [Audit and observability](../deployment/operations/observability)
 covers the destinations, metrics, tracing, and notifications.
 
 ---
@@ -440,7 +440,7 @@ SPIs make Podium's behavior pluggable. They cover storage, identity,
 composition, signing, audit, layer sources, and delivery. Plugins compile into
 a registry build today. The SPIs are designed to be wire-compatible with a
 future out-of-process plugin protocol.
-[Extending](../deployment/extending) covers the constraints that make that
+[Extending](../deployment/services/extending) covers the constraints that make that
 transition source-compatible.
 
 ---

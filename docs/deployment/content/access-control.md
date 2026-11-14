@@ -1,12 +1,12 @@
 ---
 title: Access control
-nav_order: 7
+nav_order: 3
 description: "Declare who can read each layer and who can change it, configure the deployment defaults, and debug a caller's effective view."
 ---
 
 # Access control
 
-This page covers how a server-backed registry decides which layers a caller can read and which layer operations a caller can perform. It is for operators who register layers and configure identity. [Concepts → Visibility](../getting-started/concepts#visibility) defines the underlying model.
+This page covers how a server-backed registry decides which layers a caller can read and which layer operations a caller can perform. It is for operators who register layers and configure identity. [Concepts → Visibility](../../getting-started/concepts#visibility) defines the underlying model.
 
 ---
 
@@ -29,7 +29,7 @@ Multiple fields combine as a union. A layer with `groups: [acme-finance]` and `u
 
 ### Enforcement
 
-The registry enforces visibility on every call. A call that visibility rejects returns the `visibility.denied` outcome, which mirrors a not-found result, so the rejection does not reveal that a hidden artifact exists. The [audit log](observability#audit-log) records each denial, and the `podium_visibility_denied_total` metric counts them.
+The registry enforces visibility on every call. A call that visibility rejects returns the `visibility.denied` outcome, which mirrors a not-found result, so the rejection does not reveal that a hidden artifact exists. The [audit log](../operations/observability#audit-log) records each denial, and the `podium_visibility_denied_total` metric counts them.
 
 > [!IMPORTANT]
 > A registry with no identity provider, a catalog read from a filesystem source, and a registry in public mode do not enforce visibility. [When visibility is not enforced](#when-visibility-is-not-enforced) lists each case.
@@ -38,8 +38,8 @@ The registry enforces visibility on every call. A call that visibility rejects r
 
 Layer visibility references OIDC group names. Group membership reaches the registry through either of these paths:
 
-- **The OIDC `groups` claim.** The token carries group membership, and the registry reads it directly. An IdP that emits group identifiers instead of names needs `PODIUM_IDP_GROUP_MAPPING` to translate them. The [OIDC cookbooks](oidc/) cover this per IdP.
-- **SCIM 2.0 push.** The IdP pushes membership to the registry. The registry mounts the SCIM receiver on a single-node or clustered deployment when `PODIUM_SCIM_TOKENS` lists a bearer token. The registry expands `groups:` filters against the pushed directory under `oidc-jwt` and `injected-session-token`. It does not expand them under `trusted-headers` (see [Gateway-delegated identity](gateway-delegated-identity)).
+- **The OIDC `groups` claim.** The token carries group membership, and the registry reads it directly. An IdP that emits group identifiers instead of names needs `PODIUM_IDP_GROUP_MAPPING` to translate them. The [OIDC cookbooks](../identity/oidc/) cover this per IdP.
+- **SCIM 2.0 push.** The IdP pushes membership to the registry. The registry mounts the SCIM receiver on a single-node or clustered deployment when `PODIUM_SCIM_TOKENS` lists a bearer token. The registry expands `groups:` filters against the pushed directory under `oidc-jwt` and `injected-session-token`. It does not expand them under `trusted-headers` (see [Gateway-delegated identity](../identity/trusted-headers)).
 
 SCIM is recommended once group-based visibility gates artifacts that matter.
 
@@ -102,11 +102,11 @@ podium layer register --id team-finance \
 podium layer update --id team-finance --user security-lead@acme.com
 ```
 
-`--group` and `--user` are repeatable. `podium layer update` patches only the fields supplied, and every other field keeps its prior value. The [CLI reference](../reference/cli#layer-management) lists the full flag set.
+`--group` and `--user` are repeatable. `podium layer update` patches only the fields supplied, and every other field keeps its prior value. The [CLI reference](../../reference/cli#layer-management) lists the full flag set.
 
 ### On a local deployment
 
-On the [local](local) deployment mode, a layer directory declares its visibility in an optional `.layer-config` file. `podium sync` ignores the file. The declaration takes effect once a server serves the same directory.
+On the [local](../modes/local) deployment mode, a layer directory declares its visibility in an optional `.layer-config` file. `podium sync` ignores the file. The declaration takes effect once a server serves the same directory.
 
 ---
 
@@ -128,9 +128,9 @@ When a caller reports a missing artifact, work through these checks in order:
 1. Confirm the artifact's layer is registered and current with `podium layer list`.
 2. Confirm the layer's visibility matches the caller's identity with `podium admin show-effective`.
 3. Confirm the caller's token carries the expected `groups` claim. A claim that arrives as an opaque identifier needs `PODIUM_IDP_GROUP_MAPPING`.
-4. Check the [audit log](observability#audit-log) for `visibility.denied` entries against that identity.
+4. Check the [audit log](../operations/observability#audit-log) for `visibility.denied` entries against that identity.
 
-An artifact can also be present in the view yet absent from search results. `search_visibility: direct-only` in the artifact's frontmatter keeps it out of `search_artifacts`, while `load_artifact` still returns it to an entitled caller. That setting is an authoring choice rather than an access-control decision, and the [frontmatter reference](../authoring/frontmatter-reference) documents it.
+An artifact can also be present in the view yet absent from search results. `search_visibility: direct-only` in the artifact's frontmatter keeps it out of `search_artifacts`, while `load_artifact` still returns it to an entitled caller. That setting is an authoring choice rather than an access-control decision, and the [frontmatter reference](../../authoring/frontmatter-reference) documents it.
 
 ---
 
@@ -183,7 +183,7 @@ Layer visibility decides who can read. The related concerns below are decided el
 | Who can publish to a layer | The layer's source. Branch protection and required reviewers on the Git ref, or filesystem permissions on a `local` path. Podium does not duplicate them. |
 | Who can administer the registry | The tenant `admin` role, managed with `podium admin grant` and `podium admin revoke`. Instance-operator rights for tenant management are separate and seeded through `PODIUM_OPERATOR_ADMINS`. |
 | How sensitive an artifact is | The `sensitivity:` frontmatter field, which feeds visibility, search, and audit. Signature verification does not read it. |
-| Whether a load requires a valid signature | `PODIUM_VERIFY_SIGNATURES` on each `podium-mcp` consumer, `always` by default, where every artifact the bridge loads requires a valid signature. A signing registry also verifies each stored signature before it serves the row. [Progressive adoption](progressive-adoption) covers rolling it out. |
+| Whether a load requires a valid signature | `PODIUM_VERIFY_SIGNATURES` on each `podium-mcp` consumer, `always` by default, where every artifact the bridge loads requires a valid signature. A signing registry also verifies each stored signature before it serves the row. [Progressive adoption](../progressive-adoption) covers rolling it out. |
 
 ---
 
@@ -193,9 +193,9 @@ The registry skips visibility enforcement in these cases:
 
 | Case | Behavior |
 |:--|:--|
-| No identity provider | A registry that boots without `PODIUM_IDENTITY_PROVIDER` treats every caller as anonymous, and the evaluator admits every layer. Configure an identity provider to make visibility meaningful. See [Server-side integrations](integrations#identity). |
+| No identity provider | A registry that boots without `PODIUM_IDENTITY_PROVIDER` treats every caller as anonymous, and the evaluator admits every layer. Configure an identity provider to make visibility meaningful. See [Server-side integrations](../services/#identity). |
 | Filesystem-source catalog | `podium sync` reading a directory has no registry process to enforce anything, so the evaluator returns `true` for every layer. The declarations stay in layer config, so the same catalog is portable to a server-backed deployment mode. |
-| Public mode | [Public mode](single-node#public-mode) bypasses both authentication and the visibility model. It refuses ingest of `sensitivity: medium` and `sensitivity: high` artifacts. It records `caller.identity = "system:public"` in the [audit log](observability#audit-log), so the audit trail shows that anonymous access was intended. |
+| Public mode | [Public mode](../modes/single-node#public-mode) bypasses both authentication and the visibility model. It refuses ingest of `sensitivity: medium` and `sensitivity: high` artifacts. It records `caller.identity = "system:public"` in the [audit log](../operations/observability#audit-log), so the audit trail shows that anonymous access was intended. |
 
 ---
 
@@ -214,7 +214,7 @@ The registry evaluates the admin-only-fields rule after the other layer authoriz
 
 ### Web UI layer controls
 
-The web UI reads the caller's own capabilities from the session posture read, `GET /v1/ui/session`. The response reports `layer_capabilities.manage_any_layer` and `email` for the requesting caller alone. The [HTTP API reference](../reference/http-api#session-posture) documents the body.
+The web UI reads the caller's own capabilities from the session posture read, `GET /v1/ui/session`. The response reports `layer_capabilities.manage_any_layer` and `email` for the requesting caller alone. The [HTTP API reference](../../reference/http-api#session-posture) documents the body.
 
 - `manage_any_layer` covers a write on a layer the caller does not own, and every operation the local-source rule governs.
 - The web UI renders a layer write control only where `manage_any_layer`, together with the target layer's class, stored owner, source type, and stored filesystem path, settles that the layer rules admit this caller on that operation.

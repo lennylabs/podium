@@ -1,6 +1,6 @@
 ---
 title: Vector backends
-nav_order: 12
+nav_order: 1
 description: Choose, configure, and migrate the vector backend a single-node or clustered registry uses for hybrid search.
 ---
 
@@ -41,7 +41,7 @@ The choice affects operations in these ways:
 
 A custom backend registers through the `RegistrySearchProvider` SPI, which [Extending](extending#spis) covers.
 
-The [local](local) deployment mode cannot use a managed vector backend, because `podium sync` materializes and never queries a vector store. For hybrid search against a managed backend without the full clustered stack, run `podium serve --standalone` against the same directory and configure the vector backend on that process.
+The [local](../modes/local) deployment mode cannot use a managed vector backend, because `podium sync` materializes and never queries a vector store. For hybrid search against a managed backend without the full clustered stack, run `podium serve --standalone` against the same directory and configure the vector backend on that process.
 
 ---
 
@@ -73,7 +73,7 @@ To force BM25-only search regardless of the configured backend, set `PODIUM_NO_E
 
 ## Prerequisites for a managed backend
 
-- A registry process, either on a [single node](single-node) through `podium serve --standalone` or on a [clustered](clustered) deployment.
+- A registry process, either on a [single node](../modes/single-node) through `podium serve --standalone` or on a [clustered](../modes/clustered) deployment.
 - An account on the managed service, with an empty index or collection prepared as that service's documentation describes.
 - The API key and endpoint for the index or collection.
 
@@ -151,7 +151,7 @@ registry:
 
 Environment variables and CLI flags override file values. Use `${ENV_VAR}` interpolation for secrets.
 
-`PODIUM_SIGN_KEY_PATH` has no config-file key. Set it in the registry's environment to name the deployment's one signing key file, or set `PODIUM_SIGN=none`. The registry refuses to start with signing on, a Postgres store, and no key path. [Clustered](clustered#2-deploy-the-registry) shows how to generate the key file.
+`PODIUM_SIGN_KEY_PATH` has no config-file key. Set it in the registry's environment to name the deployment's one signing key file, or set `PODIUM_SIGN=none`. The registry refuses to start with signing on, a Postgres store, and no key path. [Clustered](../modes/clustered#2-deploy-the-registry) shows how to generate the key file.
 
 ---
 
@@ -295,7 +295,7 @@ The MCP server can use a managed vector backend independently of the registry, t
 
 The overlay index also requires `PODIUM_EMBEDDING_PROVIDER` to name a provider, because the MCP server computes overlay vectors locally. The MCP server leaves the overlay BM25-only when either variable is unset or set to `none`. The self-embedding mode described above does not apply to this path.
 
-This index is independent of the registry-side backend and affects only how local-overlay manifests are indexed. The MCP server merges registry-side `search_artifacts` results in by reciprocal rank fusion regardless. The MCP server still requires a server-backed registry, so this path does not add search to the [local](local) deployment mode.
+This index is independent of the registry-side backend and affects only how local-overlay manifests are indexed. The MCP server merges registry-side `search_artifacts` results in by reciprocal rank fusion regardless. The MCP server still requires a server-backed registry, so this path does not add search to the [local](../modes/local) deployment mode.
 
 ---
 
@@ -306,4 +306,4 @@ This index is independent of the registry-side backend and affects only how loca
 - A caller cannot detect that fallback from the response. The `search_artifacts` and `search_domains` response bodies carry no degraded field, and no response header reports it.
 - The registry records the condition in its startup log: `warning: vector search disabled: <error>` when the backend fails to open, and `keyword search: embeddings disabled (BM25-only; no embedding provider)` when no backend is wired.
 - A backend that becomes unreachable after startup logs nothing per request, so alert on the backend service's own availability.
-- Search QPS, latency, and recall depend on the backend's index configuration (shard count, replicas, and dimensionality). The [Operator guide](operator-guide) covers capacity planning across the registry as a whole.
+- Search QPS, latency, and recall depend on the backend's index configuration (shard count, replicas, and dimensionality). The [Operator guide](../operations/troubleshooting) covers capacity planning across the registry as a whole.

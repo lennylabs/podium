@@ -27,7 +27,7 @@ runtimes. `podium sync` writes a workspace tree the harness reads directly, and
 a `kind: marketplace` target renders the plugin marketplace, extension,
 package, or tap repository a harness imports. See
 [Configure your harness](https://lennylabs.github.io/podium/consuming/configure-your-harness#supported-harnesses)
-and [Publishing marketplace repositories](https://lennylabs.github.io/podium/consuming/publishing).
+and [Publishing marketplace repositories](https://lennylabs.github.io/podium/deployment/content/publishing).
 
 An artifact is a directory, and the directory carries its dependencies. A skill
 that ships `scripts/verify_revision.py` beside its `SKILL.md` delivers that
@@ -116,8 +116,8 @@ cd podium && go build -o ~/.local/bin/podium ./cmd/podium
   ordered layers through `.registry-config`. A server adds registered layers
   and visibility, and a layer's source can be a Git repository, including a
   private one, or a local path. See
-  [Connecting layer sources](https://lennylabs.github.io/podium/deployment/layer-sources)
-  and [Layered composition](https://lennylabs.github.io/podium/deployment/layers).
+  [Connecting layer sources](https://lennylabs.github.io/podium/deployment/content/layer-sources)
+  and [Layered composition](https://lennylabs.github.io/podium/deployment/content/layers).
 - **Security and access control.** A Podium server signs each artifact
   version at ingest. The MCP server and `podium sync` against a server verify
   the signature before they write the artifact. Each layer declares who can see it:
@@ -125,13 +125,13 @@ cd podium && go build -o ~/.local/bin/podium ./cmd/podium
   OIDC groups, or named users. The registry evaluates visibility on every call,
   which requires an identity provider. Loads, searches, ingests, and admin
   changes are recorded in a hash-chained audit log. See
-  [Access control](https://lennylabs.github.io/podium/deployment/access-control).
+  [Access control](https://lennylabs.github.io/podium/deployment/content/access-control).
 - **Observability.** Audit events stream to a file, stdout, HTTP receivers
   that accept NDJSON, or an OpenTelemetry Collector over OTLP. The registry
   serves Prometheus metrics at `/metrics` and exports traces over OTLP when
   tracing is enabled. A configured notification provider reports a failed
   layer ingest by webhook, email, or log. See
-  [Audit and observability](https://lennylabs.github.io/podium/deployment/observability).
+  [Audit and observability](https://lennylabs.github.io/podium/deployment/operations/observability).
 
 [Why Podium](https://lennylabs.github.io/podium/getting-started/why-podium)
 covers each feature in more detail, when Podium applies, when a simpler
@@ -146,15 +146,15 @@ before it does and adds server-side capability.
 
 | Mode | Server-side deployment | Catalog source | Materialization | What the mode adds |
 |:--|:--|:--|:--|:--|
-| [Local](https://lennylabs.github.io/podium/deployment/local) | None | A folder, read from disk | User-driven sync | Authoring, lint, sync, domains, profiles, and ordered layers from disk |
-| [Single node](https://lennylabs.github.io/podium/deployment/single-node) | One binary | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in local, plus discovery through MCP or the SDKs, hybrid search, registered and remote layers with visibility, and one audit log |
-| [Clustered](https://lennylabs.github.io/podium/deployment/clustered) | Replicas, Postgres, and object storage | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in single node, plus Postgres schema-per-org tenant isolation and high availability across registry replicas |
+| [Local](https://lennylabs.github.io/podium/deployment/modes/local) | None | A folder, read from disk | User-driven sync | Authoring, lint, sync, domains, profiles, and ordered layers from disk |
+| [Single node](https://lennylabs.github.io/podium/deployment/modes/single-node) | One binary | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in local, plus discovery through MCP or the SDKs, hybrid search, registered and remote layers with visibility, and one audit log |
+| [Clustered](https://lennylabs.github.io/podium/deployment/modes/clustered) | Replicas, Postgres, and object storage | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in single node, plus Postgres schema-per-org tenant isolation and high availability across registry replicas |
 
 The artifacts are the same in every mode. The catalog on disk does not change
 when the deployment changes. The same shared Go library parses, composes, and
 materializes it everywhere, so a given target and profile produce
 bit-identical output.
-[Local](https://lennylabs.github.io/podium/deployment/local#skills-that-declare-no-version)
+[Local](https://lennylabs.github.io/podium/deployment/modes/migrating#skills-that-declare-no-version)
 lists the exceptions for skills that declare no version.
 [Deployment](https://lennylabs.github.io/podium/deployment/) covers choosing a
 mode and moving between modes.
@@ -201,8 +201,8 @@ state. The following details apply to specific rows:
 - **Audit log.** Listing several destinations writes one hash-chained stream
   to each.
 
-See [Server-side integrations](https://lennylabs.github.io/podium/deployment/integrations)
-and [Audit and observability](https://lennylabs.github.io/podium/deployment/observability).
+See [Server-side integrations](https://lennylabs.github.io/podium/deployment/services/)
+and [Audit and observability](https://lennylabs.github.io/podium/deployment/operations/observability).
 
 ---
 

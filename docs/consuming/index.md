@@ -20,7 +20,7 @@ adapter translates each artifact into the format the target harness reads.
 | Filesystem materialization | `podium sync` writes harness-native files into a workspace before the session starts. | [Configure your harness](configure-your-harness) |
 | Runtime discovery | The Podium MCP server exposes meta-tools that an agent calls mid-session to find and load artifacts. | [Browsing the catalog](browsing-the-catalog) |
 | Programmatic access | The `podium-py` and `podium-ts` SDKs call the registry from custom code. | [Building custom consumers with the SDK](custom-via-sdk) |
-| Git-repo distribution | A `kind: marketplace` sync target renders a marketplace repository that the harness imports. | [Publishing marketplace repositories](publishing) |
+| Git-repo distribution | A `kind: marketplace` sync target renders a marketplace repository that the harness imports. | [Publishing marketplace repositories](../deployment/content/publishing) |
 
 ## Pages in this section
 
@@ -31,7 +31,7 @@ adapter translates each artifact into the format the target harness reads.
 | [Browsing the catalog](browsing-the-catalog) | **Progressive discovery.** How an agent traverses domains and finds artifacts at runtime through `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact`, materializing artifacts and their bundled files only when it loads them. |
 | [Building custom consumers with the SDK](custom-via-sdk) | Building programmatic consumers (LangChain, Bedrock, OpenAI Assistants, custom orchestrators, and eval harnesses) with `podium-py` or `podium-ts`. |
 | [Handling artifact responses](handling-artifact-responses) | What a consumer does with the manifest and materialized files returned by `load_artifact`: which bytes arrive in the response and which are written to disk, routing by hints, safety and trust constraints, capability checks, dependency walks, and external resources. |
-| [Publishing marketplace repositories](publishing) | Rendering the catalog into harness-native git-repo distributions with a `kind: marketplace` sync target, and pushing them to a git remote. |
+| [Publishing marketplace repositories](../deployment/content/publishing) | Rendering the catalog into harness-native git-repo distributions with a `kind: marketplace` sync target, and pushing them to a git remote. |
 
 ## Where to start
 

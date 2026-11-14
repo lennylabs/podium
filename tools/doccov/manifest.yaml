@@ -38,43 +38,47 @@ pages:
     slug: D-hooks
   - path: docs/consuming/configure-your-harness.md
     slug: D-configure-harness
-  - path: docs/consuming/publishing.md
+  - path: docs/deployment/content/publishing.md
     slug: D-marketplace-sync
   - path: docs/consuming/selective-materialization.md
     slug: D-cli
-  - path: docs/deployment/local.md
+  - path: docs/deployment/modes/local.md
     slug: D-local
-  - path: docs/deployment/single-node.md
+  - path: docs/deployment/modes/single-node.md
     slug: D-single-node
-  - path: docs/deployment/clustered.md
+  - path: docs/deployment/modes/clustered.md
     slug: D-clustered
-  - path: docs/deployment/layers.md
+  - path: docs/deployment/modes/migrating.md
+    slug: D-single-node
+  - path: docs/deployment/content/layers.md
     slug: D-cli
-  - path: docs/deployment/layer-sources.md
+  - path: docs/deployment/content/layer-sources.md
     slug: D-cli
-  - path: docs/deployment/access-control.md
+  - path: docs/deployment/content/access-control.md
     slug: D-cli
-  - path: docs/deployment/vector-backends.md
+  - path: docs/deployment/services/vector-backends.md
     slug: D-vector-backends
 
   # The OIDC provider cookbook pages share one e2e file via a directory glob
-  # (D-oidc covers docs/deployment/oidc/*.md). Each runnable provider page maps
+  # (D-oidc covers docs/deployment/identity/oidc/*.md). Each runnable provider page maps
   # to the same slug.
-  - path: docs/deployment/oidc/okta.md
+  - path: docs/deployment/identity/oidc/okta.md
     slug: D-oidc
-  - path: docs/deployment/oidc/auth0.md
+  - path: docs/deployment/identity/oidc/auth0.md
     slug: D-oidc
-  - path: docs/deployment/oidc/keycloak.md
+  - path: docs/deployment/identity/oidc/keycloak.md
     slug: D-oidc
-  - path: docs/deployment/oidc/google-workspace.md
+  - path: docs/deployment/identity/oidc/google-workspace.md
     slug: D-oidc
-  - path: docs/deployment/oidc/entra-id.md
+  - path: docs/deployment/identity/oidc/entra-id.md
     slug: D-oidc
 
   # ----- Waived (runnable content, no independent behavioral e2e) -----------
   - path: docs/overview.md
     waiver: Documentation overview; the hello-world init/sync recap duplicates the quickstart and README, which are covered by D-quickstart and D-readme.
+  - path: docs/deployment/operations/upgrade-notes.md
+    waiver: Release-specific upgrade procedures; the chart upgrade runs on a kind cluster in test/chart/kind_upgrade_test.go (make test-live-kind) rather than in the hermetic e2e suite.
   - path: docs/about/contributing.md
     waiver: Contributor workflow page; the commands are dev/CI tasks (go build, make test, SDK installs) exercised by the build and CI gates rather than a behavioral e2e.
-  - path: docs/testing/live-vector-backends.md
+  - path: docs/about/live-vector-backends.md
     waiver: Test-setup page; the commands provision managed vector-backend accounts and collections and invoke the make test-live-external lane, which runs against external services rather than a hermetic e2e.

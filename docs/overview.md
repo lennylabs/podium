@@ -55,10 +55,10 @@ repository from it. An artifact is a directory, so a script bundled beside a
 | Domains and subdomains | The directory layout defines the domain hierarchy, and `DOMAIN.md` adds descriptions, keywords, and featured artifacts. | [Domains](authoring/domains) |
 | Selective materialization | `podium sync` writes the subset named by include globs, exclude globs, and types ahead of time, and a named profile replays that subset. | [Selective materialization](consuming/selective-materialization) |
 | Progressive discovery | An agent walks domains and searches the catalog through the MCP server's meta-tools, and materializes an artifact and its bundled files only when it loads one. | [Browsing the catalog](consuming/browsing-the-catalog) |
-| Layered composition | Independent sources, including Git repositories, compose into one catalog with deterministic merge and explicit precedence. | [Connecting layer sources](deployment/layer-sources), [Layered composition](deployment/layers) |
-| Security and access control | The registry signs artifacts at ingest and consumers verify them on sync. Each layer declares who can see it, and every call is audited. | [Access control](deployment/access-control) |
-| Observability | Audit events stream to a file, stdout, HTTP receivers, or an OpenTelemetry Collector. The registry also serves Prometheus metrics, exports OTLP traces, and sends ingest-failure notifications. | [Audit and observability](deployment/observability) |
-| Cross-harness delivery | A harness adapter translates a canonical artifact into the layout one runtime expects, for a workspace tree or a published marketplace repository. | [Configure your harness](consuming/configure-your-harness), [Publishing marketplace repositories](consuming/publishing) |
+| Layered composition | Independent sources, including Git repositories, compose into one catalog with deterministic merge and explicit precedence. | [Connecting layer sources](deployment/content/layer-sources), [Layered composition](deployment/content/layers) |
+| Security and access control | The registry signs artifacts at ingest and consumers verify them on sync. Each layer declares who can see it, and every call is audited. | [Access control](deployment/content/access-control) |
+| Observability | Audit events stream to a file, stdout, HTTP receivers, or an OpenTelemetry Collector. The registry also serves Prometheus metrics, exports OTLP traces, and sends ingest-failure notifications. | [Audit and observability](deployment/operations/observability) |
+| Cross-harness delivery | A harness adapter translates a canonical artifact into the layout one runtime expects, for a workspace tree or a published marketplace repository. | [Configure your harness](consuming/configure-your-harness), [Publishing marketplace repositories](deployment/content/publishing) |
 
 ---
 
@@ -69,11 +69,11 @@ server-side capability. The artifacts are the same in every mode.
 
 | Mode | Server-side deployment | What the mode adds |
 |:--|:--|:--|
-| [Local](deployment/local) | None | Authoring, lint, sync, domains, profiles, and ordered layers from disk |
-| [Single node](deployment/single-node) | One binary | Discovery through MCP or the SDKs, hybrid search, registered and remote layers with visibility, and one audit log |
-| [Clustered](deployment/clustered) | Replicas, Postgres, and object storage | Postgres schema-per-org tenant isolation and high availability across registry replicas |
+| [Local](deployment/modes/local) | None | Authoring, lint, sync, domains, profiles, and ordered layers from disk |
+| [Single node](deployment/modes/single-node) | One binary | Discovery through MCP or the SDKs, hybrid search, registered and remote layers with visibility, and one audit log |
+| [Clustered](deployment/modes/clustered) | Replicas, Postgres, and object storage | Postgres schema-per-org tenant isolation and high availability across registry replicas |
 
-[Server-side integrations](deployment/integrations) names the backing service
+[Server-side integrations](deployment/services/) names the backing service
 behind each server-side concern, such as the metadata store, object storage,
 the vector index, embeddings, identity, and layer sources. Each row states what
 ships by default and what can replace it.
@@ -89,7 +89,7 @@ ships by default and what can replace it.
 | [Consuming](consuming/) | Delivering artifacts into a harness, narrowing what a workspace receives, runtime discovery, the SDKs, and marketplace publishing. |
 | [Deployment](deployment/) | Running each deployment mode, connecting layer sources, access control, audit and observability, the server-side integrations, day-two operations, and the OIDC cookbooks. |
 | [Reference](reference/) | CLI, HTTP API, frontmatter schema, error codes, and glossary. |
-| [Testing](testing/) | Setting up and running the integration and live-backend suites. |
+| [Testing](about/contributing) | Setting up and running the integration and live-backend suites. |
 | [About](about/) | Implementation status, contributing, governance, and the changelog. |
 
 ---

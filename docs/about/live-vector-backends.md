@@ -1,12 +1,12 @@
 ---
-title: Live vector backends
-nav_order: 1
+title: Live vector backend tests
+nav_order: 5
 description: Set up Pinecone, Weaviate Cloud, and Qdrant Cloud for Podium's live integration tests, with storage-only and self-embedding collections.
 ---
 
-# Live vector backends
+# Live vector backend tests
 
-This page covers the setup for Podium's live integration tests against the managed vector backends Pinecone, Weaviate Cloud, and Qdrant Cloud. It lists the accounts, indexes, and collections to create and the environment variables to set. It is for contributors and maintainers who run the live-external lane. To configure a backend for a running deployment, see [Vector backends](../deployment/vector-backends).
+This page covers the setup for Podium's live integration tests against the managed vector backends Pinecone, Weaviate Cloud, and Qdrant Cloud. It lists the accounts, indexes, and collections to create and the environment variables to set. It is for contributors and maintainers who run the live-external lane. To configure a backend for a running deployment, see [Vector backends](../deployment/services/vector-backends).
 
 ## Credentials and the test lane
 

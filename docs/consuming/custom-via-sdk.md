@@ -269,7 +269,7 @@ Both SDKs run the same delivery check that `podium-mcp` and server-source `podiu
 1. It recomputes `delivery_hash` from the bytes it received, under every signature policy including `never`. It refuses a response whose recomputed hash differs, or that carries no `delivery_hash`, with `materialize.content_hash_mismatch`.
 2. It applies its signature policy to `delivery_signature` with the registry-managed verifier.
 
-A response loaded from the [workspace overlay](../deployment/layers#workspace-local-overlay) comes from the local filesystem, and the SDK runs no check on it. [Verifying a response](../reference/http-api#verifying-a-response) states the full procedure.
+A response loaded from the [workspace overlay](../deployment/content/layers#workspace-local-overlay) comes from the local filesystem, and the SDK runs no check on it. [Verifying a response](../reference/http-api#verifying-a-response) states the full procedure.
 
 ### Signature policy
 

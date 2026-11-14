@@ -6,7 +6,7 @@ description: Reference for the audit record format, the event types, the destina
 
 # Audit events
 
-This page is the reference for Podium's audit records: their format, the event types, and the rules that govern how each destination receives them. [Audit and observability](../deployment/observability#audit-destinations) describes how to configure the destinations, with examples.
+This page is the reference for Podium's audit records: their format, the event types, and the rules that govern how each destination receives them. [Audit and observability](../deployment/operations/observability#audit-destinations) describes how to configure the destinations, with examples.
 
 The registry and `podium-mcp` each write their own audit stream. Each process chains every event into a hash chain once and writes the chained record to every destination its configuration lists.
 
@@ -142,7 +142,7 @@ The sender follows these rules:
 
 A record leaves its queue only when it is delivered or counted as dropped. A batch the sender has sent without a 2xx response therefore stays queued and counts toward the bound. A persistent retryable failure drops nothing by itself: it holds the queue until `queue_full` drops begin, and the queue-depth gauge and a rate-limited log line report it.
 
-The HTTP and OTLP queues live in process memory, and Podium keeps no spool on disk. Records still queued when a process exits abnormally are lost, and records still queued when the shutdown flush ends are dropped, as [Shutdown](#shutdown) states. A deployment that needs delivery to survive a process restart points the HTTP or OTLP destination at a local collector that keeps a persistent queue, as [Keep records across restarts](../deployment/observability#keep-records-across-restarts) shows.
+The HTTP and OTLP queues live in process memory, and Podium keeps no spool on disk. Records still queued when a process exits abnormally are lost, and records still queued when the shutdown flush ends are dropped, as [Shutdown](#shutdown) states. A deployment that needs delivery to survive a process restart points the HTTP or OTLP destination at a local collector that keeps a persistent queue, as [Keep records across restarts](../deployment/operations/observability#keep-records-across-restarts) shows.
 
 ### Transport settings
 
@@ -274,7 +274,7 @@ An erasure through the registry rewrites the registry stream's file destination 
 
 With a list that names no file destination, the registry also runs no local chain-head anchoring and no scheduled verification. The receiving system applies the [gap check](#receiver-checks) to the shipped stream.
 
-[Retention and erasure](../deployment/observability#retention-and-erasure) lists the retention settings and the erasure commands.
+[Retention and erasure](../deployment/operations/observability#retention-and-erasure) lists the retention settings and the erasure commands.
 
 ---
 

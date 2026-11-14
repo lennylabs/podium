@@ -1,6 +1,6 @@
 ---
 title: Publishing marketplace repositories
-nav_order: 6
+nav_order: 4
 description: Render the catalog into harness-native marketplace repositories with a kind marketplace sync target, and push them to git remotes with podium sync.
 ---
 
@@ -73,7 +73,7 @@ The git diff after a render is the catalog delta. When the delta is empty, `skip
 
 ## Publishing identity and the effective view
 
-The published marketplace contains the publishing identity's effective view, intersected with the plugin scope filters. A principal that can see restricted layers renders them into the output, so the publishing identity is a security-relevant setting. Publish a public marketplace under an identity scoped to the artifacts intended for it. [Access control](../deployment/access-control) describes how the registry composes an effective view.
+The published marketplace contains the publishing identity's effective view, intersected with the plugin scope filters. A principal that can see restricted layers renders them into the output, so the publishing identity is a security-relevant setting. Publish a public marketplace under an identity scoped to the artifacts intended for it. [Access control](access-control) describes how the registry composes an effective view.
 
 A marketplace target declares the principal it publishes as in its `identity` field. When the target sets no `identity`, it inherits `defaults.identity`. This default applies only to marketplace targets: a `kind: workspace` target renders under the caller's own identity and carries no identity field. Because the identity lives in the same `sync.yaml` as the workflow, the effective-view rule stays enforceable from that file.
 
@@ -163,7 +163,7 @@ podium sync --config .podium/sync.yaml
 
 Podium runs the `prepare`, `render`, and `publish` pipeline for each marketplace target. With the example workflow, the remote branch receives a commit when the catalog changed. A successful run exits 0.
 
-6. Import the repository in each harness through its install path. [Configure your harness](configure-your-harness) lists the per-harness distribution paths and install commands.
+6. Import the repository in each harness through its install path. [Configure your harness](../../consuming/configure-your-harness) lists the per-harness distribution paths and install commands.
 
 ---
 
@@ -260,13 +260,13 @@ on:
 
 On dispatch, the workflow runs `podium sync --config <path>`.
 
-[HTTP API → Outbound webhooks](../reference/http-api#outbound-webhooks) describes the receiver fields and the batch envelope. [Extending → Webhook-driven integrations](../deployment/extending#webhook-driven-integrations) also describes the relay pattern.
+[HTTP API → Outbound webhooks](../../reference/http-api#outbound-webhooks) describes the receiver fields and the batch envelope. [Extending → Webhook-driven integrations](../operations/outbound-webhooks#webhook-driven-integrations) also describes the relay pattern.
 
 ---
 
 ## Configuration reference
 
-A marketplace target is one entry under `targets:` in `sync.yaml`, alongside any `kind: workspace` targets. The `kind:` field selects the output format: `workspace` (the default) materializes the project-files layout, and `marketplace` renders the git-repo distribution layout. The full `sync.yaml` schema is in [Configure your harness](configure-your-harness) and [Reference → CLI](../reference/cli#podium-sync).
+A marketplace target is one entry under `targets:` in `sync.yaml`, alongside any `kind: workspace` targets. The `kind:` field selects the output format: `workspace` (the default) materializes the project-files layout, and `marketplace` renders the git-repo distribution layout. The full `sync.yaml` schema is in [Configure your harness](../../consuming/configure-your-harness) and [Reference → CLI](../../reference/cli#podium-sync).
 
 ### Marketplace target fields
 
@@ -424,6 +424,6 @@ A server-side publisher is out of scope.
 
 ## Related pages
 
-- [Configure your harness](configure-your-harness): the per-harness distribution paths and install commands.
-- [Reference → CLI](../reference/cli#podium-sync): the `podium sync` command surface.
-- [HTTP API → Outbound webhooks](../reference/http-api#outbound-webhooks): the webhook receiver fields and the batch envelope.
+- [Configure your harness](../../consuming/configure-your-harness): the per-harness distribution paths and install commands.
+- [Reference → CLI](../../reference/cli#podium-sync): the `podium sync` command surface.
+- [HTTP API → Outbound webhooks](../../reference/http-api#outbound-webhooks): the webhook receiver fields and the batch envelope.

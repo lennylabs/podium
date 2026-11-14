@@ -20,7 +20,7 @@ The only running component is the `podium` CLI. There is no server process, no d
 
 ## What works
 
-- **Layer composition** across the registry's layer subdirectories plus the workspace overlay. See [Layered composition](layers).
+- **Layer composition** across the registry's layer subdirectories plus the workspace overlay. See [Layered composition](../content/layers).
 - **Materialization** through the configured harness adapter.
 - **Profiles and scoping.** `--include`, `--exclude`, and `--type` narrow the materialized set. `podium sync save-as --profile <name>` captures the current set as a named profile in `sync.yaml`, and `podium sync --profile <name>` replays it.
 - **Lock file** at `<target>/.podium/sync.lock`. `podium sync override` and `podium sync save-as` work the same way as they do against a server.
@@ -35,7 +35,7 @@ The only running component is the `podium` CLI. There is no server process, no d
 - The language SDKs speak HTTP only. Run a server for them.
 - The SDK-backed read CLI (`podium search`, `podium domain show`, `podium domain search`, and `podium artifact show`) is unavailable for the same reason.
 - Outbound webhooks are unavailable.
-- Identity-based visibility filtering does not run, because the visibility evaluator short-circuits to `true` for every layer. `visibility:` declarations stay in layer config so artifacts remain portable to server-backed deployment modes, and they are not enforced at request time. See [Access control](access-control).
+- Identity-based visibility filtering does not run, because the visibility evaluator short-circuits to `true` for every layer. `visibility:` declarations stay in layer config so artifacts remain portable to server-backed deployment modes, and they are not enforced at request time. See [Access control](../content/access-control).
 - `podium login` has no authentication to perform.
 
 When any of these capabilities is required, see [Single node](single-node) or [Clustered](clustered).
@@ -85,7 +85,7 @@ A filesystem registry rooted at `<registry-path>` is a directory of layer direct
     └── …
 ```
 
-[Skills that declare no version](#skills-that-declare-no-version) states the version each deployment mode records for a skill whose `SKILL.md` declares none.
+[Skills that declare no version](migrating#skills-that-declare-no-version) states the version each deployment mode records for a skill whose `SKILL.md` declares none.
 
 ### Layers and their order
 
@@ -111,11 +111,11 @@ visibility:
   groups: [acme-finance]
 ```
 
-`podium sync` ignores the file, because filesystem-source visibility is bypassed. The file takes effect once a server serves the same directory through `podium serve --standalone --layer-path`. A layer with a non-empty `visibility:` block boots with that visibility. A layer with no `.layer-config`, or an empty block, takes the deployment default (`PODIUM_DEFAULT_LAYER_VISIBILITY`). See [Access control](access-control).
+`podium sync` ignores the file, because filesystem-source visibility is bypassed. The file takes effect once a server serves the same directory through `podium serve --standalone --layer-path`. A layer with a non-empty `visibility:` block boots with that visibility. A layer with no `.layer-config`, or an empty block, takes the deployment default (`PODIUM_DEFAULT_LAYER_VISIBILITY`). See [Access control](../content/access-control).
 
 ### Overlay and collisions
 
-The workspace local overlay (`<workspace>/.podium/overlay/`) sits on top of the filesystem-registry layers, at the same precedence it has against a server. An overlay artifact replaces a registry artifact with the same ID without a collision error; see [Workspace local overlay](layers#workspace-local-overlay). A collision between two registry layers fails `podium sync` instead; see [Collisions](layers#collisions).
+The workspace local overlay (`<workspace>/.podium/overlay/`) sits on top of the filesystem-registry layers, at the same precedence it has against a server. An overlay artifact replaces a registry artifact with the same ID without a collision error; see [Workspace local overlay](../content/layers#workspace-local-overlay). A collision between two registry layers fails `podium sync` instead; see [Collisions](../content/layers#collisions).
 
 ---
 
@@ -167,35 +167,9 @@ When the catalog is shared through Git, run `podium lint` in CI on the registry 
 
 ---
 
-## Migration paths
-
-### To single node
-
-Single node becomes necessary when the team needs runtime discovery through the MCP server, identity-based visibility filtering, or a single audit log. Point a server at the same directory:
-
-```bash
-podium serve --standalone --layer-path ~/podium-artifacts/
-```
-
-Each developer's `<workspace>/.podium/sync.yaml` then switches `defaults.registry` from the path to `http://podium.your-team.example`, or wherever the server lives. The directory layout and the authoring loop are unchanged, and the consumer paths gain MCP and SDK support. See [Single node](single-node) and [Connecting layer sources](layer-sources).
-
-The shared library does the same parsing, composition, and adapter work in both deployment modes, so output is bit-identical for the same target and profile. Skills that declare no version are the exception that [Skills that declare no version](#skills-that-declare-no-version) describes.
-
-### To clustered
-
-When production availability or Postgres-backed tenant isolation is required, follow [Clustered](clustered) and use `podium admin migrate-to-standard` to export the single-node state.
-
-### Skills that declare no version
-
-A filesystem source records a skill that declares no version as `0.0.0-auto.0`. A registry ingesting the same directory for the first time assigns the same value. It assigns a higher N once it has ingested changed bytes for the skill, so the lock-file versions then differ between the deployment modes. While the registry serves the directory's current bytes as the skill's latest row, the content hash and every harness's output stay identical.
-
-A revert is the case where output differs. A registry rejects a change of such a skill back to content it already stored under another version, and it keeps serving its newer version, while a filesystem source serves the reverted content. After a revert, the content hash, the body, and every harness's output differ between the deployment modes until the author sets `metadata.version` in `SKILL.md` or changes the content.
-
----
-
 ## Limits worth knowing
 
-- Authoring rights for the catalog belong to whoever can write to the directory. Branch protection on a Git repository is the typical control. That statement covers writing content into a catalog directory the CLI already reads. Which caller may declare a layer naming a host path is a question only a server-backed deployment mode answers, and [Who may register a local-source layer](layer-sources#who-may-register-a-local-source-layer) covers it.
+- Authoring rights for the catalog belong to whoever can write to the directory. Branch protection on a Git repository is the typical control. That statement covers writing content into a catalog directory the CLI already reads. Which caller may declare a layer naming a host path is a question only a server-backed deployment mode answers, and [Who may register a local-source layer](../content/layer-sources#who-may-register-a-local-source-layer) covers it.
 - Visibility declarations in layer config are recorded and not enforced. Artifacts remain portable to server-backed deployment modes.
 - Audit is the Git history, when the catalog is committed to Git, or whatever the sharing mechanism preserves. There is no Podium-side audit stream.
 - Freeze windows and signing enforcement require a server.

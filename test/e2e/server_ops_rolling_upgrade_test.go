@@ -2,7 +2,7 @@ package e2e
 
 // Expand-contract rolling upgrade across two server binaries over one Postgres
 // metadata store, driving the upgrade procedure in
-// docs/deployment/operator-guide.md.
+// docs/deployment/operations/upgrading.md.
 //
 // The operator guide states that schema migrations are bundled in the registry
 // binary and applied additively on startup: a new version creates tables and

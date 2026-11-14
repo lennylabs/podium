@@ -1449,7 +1449,7 @@ POST /v1/admin/erase    body: { "user_id": "...", "salt": "..." }
 - Records of other tenants keep their content. Their `hash` and `prev_hash` values change when they follow a redacted record.
 - `user.erased` records the chain head the rewrite replaced as `context.superseded_head`. When local anchoring is enabled, the registry anchors the rewritten chain immediately.
 - When the registry stream lists no file destination, the registry records `user.erased` and rewrites no record.
-- No audit destination failure fails the request. A stdout failure and an HTTP or OTLP delivery failure are counted as dropped records. See the [audit events reference](audit-events#loss-accounting), and [Audit destinations](../deployment/observability#audit-destinations) for destination setup.
+- No audit destination failure fails the request. A stdout failure and an HTTP or OTLP delivery failure are counted as dropped records. See the [audit events reference](audit-events#loss-accounting), and [Audit destinations](../deployment/operations/observability#audit-destinations) for destination setup.
 
 ### Tenant management
 
@@ -1510,7 +1510,7 @@ The registry emits outbound webhooks for change events. Configure receivers per 
 | `artifact.published` | A new `(artifact_id, version)` was ingested. |
 | `artifact.deprecated` | An ingested manifest set `deprecated: true`. |
 | `domain.published` | A `DOMAIN.md` was added or changed. |
-| `layer.ingested` | A layer completed an ingest cycle. Fires once per cycle, so a CI job that runs `podium sync --config` against a `kind: marketplace` target subscribes to it (see [Publishing marketplace repositories](../consuming/publishing)). |
+| `layer.ingested` | A layer completed an ingest cycle. Fires once per cycle, so a CI job that runs `podium sync --config` against a `kind: marketplace` target subscribes to it (see [Publishing marketplace repositories](../deployment/content/publishing)). |
 | `layer.history_rewritten` | Force-push detected on a `git`-source layer. |
 
 Single-event schema:
@@ -1671,7 +1671,7 @@ A receiver cannot call GitHub's `repository_dispatch` endpoint directly. The reg
 3. The relay issues `POST https://api.github.com/repos/<owner>/<repo>/dispatches` with a GitHub token and `{"event_type":"podium-layer-ingested"}`.
 4. The CI workflow listens on `repository_dispatch` and runs `podium sync --config`.
 
-Set the receiver's `debounce` field to coalesce a burst of `layer.ingested` events into one batch delivery and one CI dispatch. With `debounce` unset, the relay fires per event, and the CI system's concurrency control collapses the burst. See [Publishing marketplace repositories](../consuming/publishing) for the worked patterns.
+Set the receiver's `debounce` field to coalesce a burst of `layer.ingested` events into one batch delivery and one CI dispatch. With `debounce` unset, the relay fires per event, and the CI system's concurrency control collapses the burst. See [Publishing marketplace repositories](../deployment/content/publishing) for the worked patterns.
 
 ---
 
@@ -1708,7 +1708,7 @@ A Prometheus scrape endpoint.
 GET /metrics
 ```
 
-**Availability.** Mounted by default. `PODIUM_METRICS=false` removes the endpoint and the per-request recording. See [Metrics](../deployment/observability#metrics) for what the registry records.
+**Availability.** Mounted by default. `PODIUM_METRICS=false` removes the endpoint and the per-request recording. See [Metrics](../deployment/operations/observability#metrics) for what the registry records.
 
 ---
 

@@ -1,12 +1,12 @@
 ---
 title: Audit and observability
-nav_order: 10
+nav_order: 1
 description: Configure where Podium writes its audit records, scrape its Prometheus metrics, export OpenTelemetry traces, send operational notifications, and set up alerts.
 ---
 
 # Audit and observability
 
-This page describes how to get audit records, metrics, traces, and operational notifications out of a Podium registry and out of the `podium-mcp` server. It is for operators of a [single-node](single-node) or [clustered](clustered) deployment. The [local](local) deployment mode runs no registry process, so only the `podium-mcp` settings on this page apply to it.
+This page describes how to get audit records, metrics, traces, and operational notifications out of a Podium registry and out of the `podium-mcp` server. It is for operators of a [single-node](../modes/single-node) or [clustered](../modes/clustered) deployment. The [local](../modes/local) deployment mode runs no registry process, so only the `podium-mcp` settings on this page apply to it.
 
 The following table summarizes each signal and the setting that turns it on.
 
@@ -19,15 +19,15 @@ The following table summarizes each signal and the setting that turns it on.
 | Traces | Registry and `podium-mcp` | `PODIUM_TRACING` or `OTEL_EXPORTER_OTLP_ENDPOINT` | Off |
 | Notifications | Registry | `PODIUM_NOTIFICATION_PROVIDER` | Off |
 
-The [audit events reference](../reference/audit-events) holds the record format, the event types, and the exact delivery and loss-accounting rules. This page covers configuration.
+The [audit events reference](../../reference/audit-events) holds the record format, the event types, and the exact delivery and loss-accounting rules. This page covers configuration.
 
 ---
 
 ## Audit log
 
-The registry and `podium-mcp` each write their own audit stream. The registry records every meta-tool read, every ingest outcome, every layer, grant, and tenant change, its read-only mode transitions, and its own audit-chain maintenance. `podium-mcp` records the meta-tool calls it serves when `PODIUM_AUDIT_SINK` enables its local stream. Records from both streams carry the W3C trace ID of the request, so a trace and its audit records can be joined. [Event types](../reference/audit-events#event-types) lists every event.
+The registry and `podium-mcp` each write their own audit stream. The registry records every meta-tool read, every ingest outcome, every layer, grant, and tenant change, its read-only mode transitions, and its own audit-chain maintenance. `podium-mcp` records the meta-tool calls it serves when `PODIUM_AUDIT_SINK` enables its local stream. Records from both streams carry the W3C trace ID of the request, so a trace and its audit records can be joined. [Event types](../../reference/audit-events#event-types) lists every event.
 
-Each record is one JSON object. It names the event type, the time, the caller, the target, and the tenant, as [Record format](../reference/audit-events#record-format) describes.
+Each record is one JSON object. It names the event type, the time, the caller, the target, and the tenant, as [Record format](../../reference/audit-events#record-format) describes.
 
 ### Hash chain
 
@@ -41,7 +41,7 @@ The registry checks the chain on a schedule when its stream lists a file destina
 - **Local chain-head anchoring.** When `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above `0`, the registry signs the chain head at that interval with a dedicated Ed25519 anchor key and appends an `audit.anchored` event. A failed periodic attempt records `audit.anchor_failed`. The default is `0`, which disables anchoring.
 - **Anchor key.** `PODIUM_AUDIT_SIGNING_KEY_PATH` names the anchor key file, `~/.podium/standalone/audit.key` by default. The registry generates the file when anchoring runs and the file is absent. The anchor key must be a separate keypair from the registry signing key. Keep its public half, because an auditor needs it to check the anchors.
 
-Local anchoring submits nothing to a public transparency log. When the stream lists no file destination, the registry runs neither verification nor anchoring, and the receiving system applies the [gap check](../reference/audit-events#receiver-checks) to the records it collects.
+Local anchoring submits nothing to a public transparency log. When the stream lists no file destination, the registry runs neither verification nor anchoring, and the receiving system applies the [gap check](../../reference/audit-events#receiver-checks) to the records it collects.
 
 ### Redaction and sampling
 
@@ -56,10 +56,10 @@ The registry applies redaction and sampling before it chains an event, so every 
 Retention and erasure act on the file destination only. The system that receives a stdout, HTTP, or OTLP destination owns the retention and redaction of the records it holds.
 
 - **Scheduled retention.** The registry runs a retention pass at start and then every `PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS` seconds, 86400 (one day) by default. The pass drops events older than `PODIUM_AUDIT_RETENTION_MAX_AGE_DAYS`, 365 by default. Query text is replaced with a placeholder after 7 days and removed after 30 days. Setting either variable to `0` disables the scheduled pass.
-- **Offline retention.** [`podium admin retention`](../reference/cli#podium-admin-retention) runs a pass against a file with explicit policies.
-- **Erasure.** [`podium admin erase`](../reference/cli#podium-admin-erase) redacts a user's identity for a right-to-erasure request and records a `user.erased` event.
+- **Offline retention.** [`podium admin retention`](../../reference/cli#podium-admin-retention) runs a pass against a file with explicit policies.
+- **Erasure.** [`podium admin erase`](../../reference/cli#podium-admin-erase) redacts a user's identity for a right-to-erasure request and records a `user.erased` event.
 
-A retention pass or an erasure rewrites the file by renaming a new file over the old one, and closes with an event that records the superseded chain head. [Retention and erasure](../reference/audit-events#retention-and-erasure) gives the rules for each destination.
+A retention pass or an erasure rewrites the file by renaming a new file over the old one, and closes with an event that records the superseded chain head. [Retention and erasure](../../reference/audit-events#retention-and-erasure) gives the rules for each destination.
 
 ---
 
@@ -91,7 +91,7 @@ PODIUM_AUDIT_LOG_PATH=stdout
 PODIUM_AUDIT_SINK=default,https://audit.acme.com/ingest
 ```
 
-A list names at most one file destination and names no element twice. An empty element, a trailing comma, an unknown `scheme://` prefix, and a URL that carries userinfo each refuse startup with `config.audit_sink_unavailable`. [Destinations](../reference/audit-events#destinations) gives the complete list rules.
+A list names at most one file destination and names no element twice. An empty element, a trailing comma, an unknown `scheme://` prefix, and a URL that carries userinfo each refuse startup with `config.audit_sink_unavailable`. [Destinations](../../reference/audit-events#destinations) gives the complete list rules.
 
 To ship the stream to another system, list a stdout, HTTP, or OTLP destination beside the file. Do not tail the file. Retention and erasure replace the file through a rename, so a tailer re-ships or skips records, and the records it already shipped keep their unredacted identities.
 
@@ -149,7 +149,7 @@ The OTLP destination sends OTLP/HTTP protobuf log export requests. Elasticsearch
 4. Restart the registry.
 5. Confirm that log records arrive with the `service.name` resource attribute `podium-registry`, or `podium-mcp` for the local stream.
 
-Each audit record becomes one log record. Its `body` holds the record's JSON exactly as the file destination writes the line, so a verifier can parse it as a file line. [OTLP](../reference/audit-events#otlp) lists the field mapping.
+Each audit record becomes one log record. Its `body` holds the record's JSON exactly as the file destination writes the line, so a verifier can parse it as a file line. [OTLP](../../reference/audit-events#otlp) lists the field mapping.
 
 The OTLP destination reads no `OTEL_EXPORTER_OTLP_*` variable and runs independently of `PODIUM_TRACING`. Audit export works with tracing off, and it leaves span export unchanged.
 
@@ -195,7 +195,7 @@ The stdout destination writes each record as one JSON line on the registry's sta
 - The registry ignores SIGPIPE while `stdout` is listed. A reader that goes away makes the write fail, the record is counted as dropped with reason `write_error`, and the registry keeps serving.
 - `stdout` cannot be combined with `PODIUM_TRACING=stdout`, because a span and an audit record could interleave within one line. The combination refuses startup with `config.audit_sink_unavailable`.
 
-[Stdout](../reference/audit-events#stdout) describes the ordering between the stdout write and the other destinations.
+[Stdout](../../reference/audit-events#stdout) describes the ordering between the stdout write and the other destinations.
 
 ### Configure the Helm chart
 
@@ -207,7 +207,7 @@ To change the default, set `config.auditLogPath` to one of the following, or to 
 - An `http(s)` URL, to send records to an HTTP receiver.
 - An `otlp+http(s)` URL, to send records to a collector.
 
-With the `stdout` default, or any list without a file destination, the registry runs no local chain-head anchoring and no scheduled verification. The receiving system then applies the `prev_hash` check to the shipped stream, as [Receiver checks](../reference/audit-events#receiver-checks) describes.
+With the `stdout` default, or any list without a file destination, the registry runs no local chain-head anchoring and no scheduled verification. The receiving system then applies the `prev_hash` check to the shipped stream, as [Receiver checks](../../reference/audit-events#receiver-checks) describes.
 
 For the HTTP and OTLP transport files, set `audit.transportSecret.name` to a Secret and list its keys in `audit.transportSecret.keys`. The chart mounts the Secret at `/etc/podium/audit` and sets the variable for each listed key:
 
@@ -218,7 +218,7 @@ For the HTTP and OTLP transport files, set `audit.transportSecret.name` to a Sec
 | `tls.crt` | `PODIUM_AUDIT_TLS_CERT_FILE` |
 | `tls.key` | `PODIUM_AUDIT_TLS_KEY_FILE` |
 
-List `tls.crt` and `tls.key` together or not at all. [Helm chart reference](clustered#helm-chart-reference) covers the chart values in context.
+List `tls.crt` and `tls.key` together or not at all. [Helm chart reference](../modes/helm-chart) covers the chart values in context.
 
 ### Record local audit from podium-mcp
 
@@ -251,7 +251,7 @@ Every record that does not reach a destination is counted in `podium_audit_dropp
 | `queue_full` | The record did not fit in the destination's queue. |
 | `shutdown` | The record was still queued when the shutdown flush ended. |
 
-Dropped records are also logged, whether or not metrics are enabled, in at most one line per destination and reason per minute. A failed file write is also reported to the operation that raised the event. [Loss accounting](../reference/audit-events#loss-accounting) gives the exact conditions and the cases that are not counted.
+Dropped records are also logged, whether or not metrics are enabled, in at most one line per destination and reason per minute. A failed file write is also reported to the operation that raised the event. [Loss accounting](../../reference/audit-events#loss-accounting) gives the exact conditions and the cases that are not counted.
 
 ### Shutdown flush
 
@@ -260,7 +260,7 @@ A process flushes its HTTP and OTLP queues once while it ends. The flush sends t
 - **Registry.** The first SIGINT or SIGTERM stops new connections, drains requests in flight for up to 15 seconds, and then flushes. A second SIGINT or SIGTERM ends the process at once, and the records still queued are lost without being counted.
 - **`podium-mcp`.** The server flushes when its standard input closes and when it receives SIGINT or SIGTERM, and then exits with status 0.
 
-SIGKILL, a crash, and other forced terminations skip the flush. [Shutdown](../reference/audit-events#shutdown) gives the complete rules.
+SIGKILL, a crash, and other forced terminations skip the flush. [Shutdown](../../reference/audit-events#shutdown) gives the complete rules.
 
 ---
 
@@ -402,13 +402,13 @@ Delivery is best effort:
 - The registry sends the notification before it answers the reingest request or the webhook delivery, so a slow notification target delays that response.
 - The `multi` provider delivers to its providers concurrently. A failure in one does not stop the others.
 
-Notifications are separate from the [outbound webhook receivers](operator-guide#outbound-webhook-receivers) that carry catalog change events to tooling.
+Notifications are separate from the [outbound webhook receivers](outbound-webhooks#outbound-webhook-receivers) that carry catalog change events to tooling.
 
 ---
 
 ## Alerting
 
-The following rules are a starting set, tuned for the baseline deployment that [Capacity planning](operator-guide#capacity-planning) describes:
+The following rules are a starting set, tuned for the baseline deployment that [Capacity planning](capacity#capacity-planning) describes:
 
 ```yaml
 # Critical: page on-call
@@ -444,7 +444,7 @@ For the audit stream, also alert on the following:
 
 - Any increase in `podium_audit_dropped_total`.
 - A `podium_audit_queue_depth` that keeps rising.
-- The `audit integrity ALERT` log line and the `audit.gap_detected` event. Treat a gap as a security incident, as [When to escalate](operator-guide#when-to-escalate) describes.
+- The `audit integrity ALERT` log line and the `audit.gap_detected` event. Treat a gap as a security incident, as [When to escalate](troubleshooting#when-to-escalate) describes.
 - The `audit.anchor_failed` event, when anchoring is on.
 
 ---
@@ -487,6 +487,18 @@ This refusal applies only when `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above `
 
 ## Related pages
 
-- [Audit events](../reference/audit-events): the record format, event types, and delivery rules.
-- [Operator guide](operator-guide): capacity planning, backup and restore, upgrades, and the security checklist.
-- [CLI reference](../reference/cli#environment-variables): every environment variable with its refusals.
+- [Audit events](../../reference/audit-events): the record format, event types, and delivery rules.
+- [Operator guide](troubleshooting): capacity planning, backup and restore, upgrades, and the security checklist.
+- [CLI reference](../../reference/cli#environment-variables): every environment variable with its refusals.
+
+## Monitoring, audit, and alerting
+
+[Audit and observability](observability) documents each of these signals:
+
+- [Audit log](#audit-log) and [Audit destinations](#audit-destinations): the hash-chained audit stream and where it is written.
+- [Metrics](#metrics): the Prometheus series and their latency targets.
+- [Tracing](#tracing): OpenTelemetry export.
+- [Notifications](#notifications): operational notifications for failed ingests.
+- [Alerting](#alerting): a starting set of Prometheus alert rules.
+
+---
