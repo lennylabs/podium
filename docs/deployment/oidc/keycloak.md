@@ -1,64 +1,63 @@
 ---
 title: Keycloak
 nav_order: 5
-description: Configure Podium to authenticate against self-hosted Keycloak via OIDC device-code flow.
+description: Configure a Podium registry to authenticate callers against self-hosted Keycloak through the OIDC device-code flow.
 ---
 
 # Keycloak
 
-This guide configures a Podium registry to authenticate against self-hosted Keycloak. Setup takes about 15 minutes. Self-hosting puts the IdP under your control, which suits air-gapped or sovereignty-constrained deployments. The Compose stack uses Dex for development; Keycloak is the production-equivalent IdP for the same niche.
+This cookbook configures a Podium registry to authenticate against self-hosted Keycloak. A self-hosted IdP stays under the operator's control, which suits air-gapped or sovereignty-constrained deployments. The Compose stack uses Dex for development, and Keycloak is the production-equivalent IdP for the same use. Setup takes about 15 minutes. The [OIDC cookbooks overview](index) describes the identity model the steps rely on.
 
 ## Prerequisites
 
-- Keycloak instance with admin access (Keycloak ≥ 20 recommended).
-- Podium registry running and reachable from developers' browsers.
-- A realm to host Podium users (often a shared `acme` realm, or a dedicated `podium` realm for stricter scoping).
+- A Keycloak instance with admin access. Keycloak 20 or later is recommended.
+- A Podium registry running and reachable from developers' browsers.
+- A realm to host Podium users, often a shared `acme` realm, or a dedicated `podium` realm for stricter scoping.
 
 ## 1. Create the client
 
-Keycloak admin console: **\[your realm\] → Clients → Create client**.
+1. In the Keycloak admin console, open **\[the realm\] → Clients → Create client**.
+2. Set **Client type** to OpenID Connect.
+3. Set **Client ID** to `podium`.
+4. Under the capability config, set **Client authentication** to Off. The device-code flow requires a public client.
+5. Under **Authentication flow**, enable **OAuth 2.0 Device Authorization Grant**. Disable **Standard flow** and **Direct access grants** unless other use cases require them.
+6. Save.
 
-- **Client type**: OpenID Connect.
-- **Client ID**: `podium`.
+Keycloak creates the client with no redirect URI requirements. The client ID is `podium`.
 
-Capability config:
+## 2. Add the groups claim mapper
 
-- **Client authentication**: Off (public client, required for device-code flow).
-- **Authentication flow**: enable **OAuth 2.0 Device Authorization Grant**. Disable **Standard flow** and **Direct access grants** unless other use cases require them.
+By default, Keycloak does not include group memberships in tokens.
 
-Save. The client is created with no redirect URI requirements.
+1. Open **Clients → podium → Client scopes → podium-dedicated → Add mapper → By configuration → Group Membership**.
+2. Set **Name** to groups.
+3. Set **Token Claim Name** to `groups`.
+4. Set **Full group path** to Off. Podium expects the group name rather than `/parent/child` paths.
+5. Set **Add to ID token**, **Add to access token**, and **Add to userinfo** to On.
+6. Save.
 
-Note the **Client ID** (`podium` per above).
+## 3. Add the audience mapper
 
-## 2. Configure the groups claim
+Keycloak's default `aud` claim is the client ID. To use a custom audience such as `podium`, add an Audience mapper.
 
-By default Keycloak does not include group memberships in tokens. Add a mapper:
+1. Open **Clients → podium → Client scopes → podium-dedicated → Add mapper → By configuration → Audience**.
+2. Set **Name** to podium-audience.
+3. Leave **Included Client Audience** empty.
+4. Set **Included Custom Audience** to `podium`.
+5. Set **Add to access token** to On.
+6. Save.
 
-**Clients → podium → Client scopes → podium-dedicated → Add mapper → By configuration → Group Membership**.
+Expected result: tokens include `podium` in their `aud` array.
 
-- **Name**: groups.
-- **Token Claim Name**: `groups`.
-- **Full group path**: Off. Podium expects the group name rather than `/parent/child` paths.
-- **Add to ID token**, **Add to access token**, **Add to userinfo**: all On.
+## 4. Create groups and assign users
 
-Save.
+1. In the Keycloak admin console, open **Groups → Create group**.
+2. Create the groups used in Podium layer config, for example `engineering`, `platform`, and `external-collaborators`.
+3. Open **Users → \[user\] → Groups → Join Group** to assign each user.
 
-## 3. Expose Podium as an audience
+## 5. Configure the registry
 
-Keycloak's default `aud` claim is the client ID. To use a custom audience like `podium`, add an Audience mapper:
-
-**Clients → podium → Client scopes → podium-dedicated → Add mapper → By configuration → Audience**.
-
-- **Name**: podium-audience.
-- **Included Client Audience**: leave empty.
-- **Included Custom Audience**: `podium`.
-- **Add to access token**: On.
-
-Save. Tokens now include `podium` in their `aud` array.
-
-## 4. Configure Podium
-
-Registry side (`registry.yaml`):
+On the registry host, add the `identity_provider:` block to `registry.yaml`:
 
 ```yaml
 registry:
@@ -68,13 +67,21 @@ registry:
     audience: podium
 ```
 
-Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config and the registry ignores it without reporting an error.
+Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config, and the registry ignores it without reporting an error.
 
-`oidc-jwt` is the registry's side of the flow: it verifies each presented token against the realm's JWKS and validates the `aud` claim against `audience:`. The issuer is the realm URL rather than the device-authorization endpoint, and the registry resolves the JWKS from `<issuer>/.well-known/openid-configuration`. A CLI, an SDK, or another API client obtains the token by completing the device-code flow the next step configures, and on a registry that enables the browser flow a browser obtains it through the registry's own authorization-code exchange, which the registry returns in the `__Host-podium_session` cookie. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
+`oidc-jwt` is the registry's side of the flow. It verifies each presented token against the realm's JWKS and validates the `aud` claim against `audience:`. The issuer is the realm URL rather than the device-authorization endpoint, and the registry resolves the JWKS from `<issuer>/.well-known/openid-configuration`.
 
-The Group Membership mapper from step 2 emits the `groups` claim with bare group names. The `IdpGroupMapping` adapter passes those names through, or the SCIM directory supplies membership when SCIM is configured. Restart the registry.
+- A CLI, an SDK, or another API client obtains the token through the device-code flow that the next step configures.
+- On a registry that enables the browser flow, a browser obtains the token through the registry's own authorization-code exchange, and the registry returns it in the `__Host-podium_session` cookie.
+- Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
 
-Developer side:
+The Group Membership mapper from step 2 emits the `groups` claim with bare group names. The `IdpGroupMapping` adapter passes those names through, or the SCIM directory supplies membership when SCIM is configured.
+
+Restart the registry.
+
+## 6. Configure developer machines
+
+On each developer machine, run:
 
 ```bash
 podium init --global --registry https://podium.acme.com
@@ -84,18 +91,13 @@ export PODIUM_OAUTH_TOKEN_URL=https://<keycloak-host>/realms/<realm-name>/protoc
 podium login --scopes "openid profile email"
 ```
 
-Set `PODIUM_OAUTH_TOKEN_URL` explicitly. With it unset, `podium login` rewrites the trailing `/device` of the device-authorization URL to `/token`, which produces `https://<keycloak-host>/realms/<realm-name>/protocol/openid-connect/auth/token` and the token exchange fails. The default scope set adds `groups`, which the client does not declare; the Group Membership mapper from step 2 emits the claim without it.
+Set `PODIUM_OAUTH_TOKEN_URL` explicitly. With it unset, `podium login` rewrites the trailing `/device` of the device-authorization URL to `/token`. That produces `https://<keycloak-host>/realms/<realm-name>/protocol/openid-connect/auth/token`, and the token exchange fails.
 
-The verification URL is `https://<keycloak-host>/realms/<realm-name>/device`. After completion, `podium login` prints the resolved identity.
+Pass `--scopes "openid profile email"`. The default scope set adds `groups`, which the client does not declare. The Group Membership mapper from step 2 emits the claim without it.
 
-## 5. Create groups and assign users
+Expected result: the verification URL is `https://<keycloak-host>/realms/<realm-name>/device`. After the flow completes, `podium login` prints the resolved identity.
 
-Keycloak admin console: **Groups → Create group**.
-
-- Create the groups used in Podium layer config, for example `engineering`, `platform`, and `external-collaborators`.
-- **Users → \[user\] → Groups → Join Group** to assign.
-
-## 6. Test
+## 7. Test group-based visibility
 
 Configure an admin layer scoped to the `engineering` group in `registry.yaml`. Group-scoped visibility is set in the registry layer config, or with `podium layer register --group <name>` (also `--public`, `--organization`, and `--user`). Layers registered with `--user-defined` are private to the registrant and cannot be widened.
 
@@ -111,17 +113,29 @@ registry:
         groups: [engineering]
 ```
 
-A member of the `engineering` group sees the layer; a non-member does not.
+Expected result: a member of the `engineering` group sees the layer, and a non-member does not.
 
-## SCIM (optional)
+## SCIM provisioning (optional)
 
-Keycloak does not ship a built-in SCIM server, but extensions exist (for example `keycloak-scim-server`). When one is installed, configure it to push user and group records to the registry's SCIM endpoint at `https://podium.acme.com/scim/v2`, authenticating with one of the bearer tokens listed in the registry's `PODIUM_SCIM_TOKENS` environment variable. The registry mounts `/scim/v2/` only when that variable is set to a comma-separated list of accepted tokens, and returns 404 for every SCIM request otherwise. Set `PODIUM_SCIM_STORE_PATH` to a writable file path so the pushed directory survives a restart. A set path that the registry cannot read, parse, or write refuses startup with `config.scim_store_unavailable`.
+For most Keycloak deployments, the OIDC `groups` claim is sufficient, and group changes apply on the user's next login.
 
-For most Keycloak users, the OIDC `groups` claim is sufficient. Group changes apply on the user's next login.
+Keycloak does not ship a built-in SCIM server, but extensions exist, for example `keycloak-scim-server`. When one is installed, configure it to push user and group records to the registry's SCIM endpoint at `https://podium.acme.com/scim/v2`. Authenticate with one of the bearer tokens listed in the registry's `PODIUM_SCIM_TOKENS` environment variable.
+
+On the registry side:
+
+- The registry mounts `/scim/v2/` only when `PODIUM_SCIM_TOKENS` is set to a comma-separated list of accepted tokens. Otherwise it returns 404 for every SCIM request.
+- Set `PODIUM_SCIM_STORE_PATH` to a writable file path so the pushed directory survives a restart. A set path that the registry cannot read, parse, or write refuses startup with `config.scim_store_unavailable`.
+
+## Next steps
+
+- Declare visibility on the remaining layers with [Access control](../access-control).
+- Review the caller identities the registry records in the [audit log](../observability#audit-log).
 
 ## Troubleshooting
 
-- **Token rejected with `auth.untrusted_token` on every call.** The token's `aud` array does not carry the value configured under `audience:`. Confirm the Audience mapper from step 3 is attached to the dedicated client scope under **Clients → podium → Client scopes → podium-dedicated → Mappers**, and that its **Included Custom Audience** is the same string as `audience:` in `registry.yaml`.
-- **Groups claim is missing.** The Group Membership mapper was not attached. Check the same place.
-- **Realm-issuer mismatch.** Keycloak's issuer is `https://<host>/realms/<realm>` rather than `https://<host>/auth/realms/<realm>`; the latter was the pre-Quarkus URL. Keycloak versions before 17 use the `/auth` prefix in the issuer URL.
-- **`podium login` connects but the token is rejected.** Confirm the token's `aud` matches the registry's `audience:`, and that the Audience and Group Membership mappers are attached to the dedicated client scope.
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Every call is rejected with `auth.untrusted_token`. | The token's `aud` array does not carry the value configured under `audience:`. | Confirm that the Audience mapper from step 3 is attached to the dedicated client scope under **Clients → podium → Client scopes → podium-dedicated → Mappers**, and that its **Included Custom Audience** is the same string as `audience:` in `registry.yaml`. |
+| The groups claim is missing. | The Group Membership mapper is not attached. | Check the mappers under the same path. |
+| The issuer does not match. | Keycloak's issuer is `https://<host>/realms/<realm>`. The `https://<host>/auth/realms/<realm>` form is the pre-Quarkus URL, which Keycloak versions before 17 use. | Configure `issuer:` with the form that the Keycloak version issues. |
+| `podium login` connects, but the token is rejected. | The token's `aud` does not match the registry's `audience:`, or a mapper is missing. | Confirm the `aud` value, and that the Audience and Group Membership mappers are attached to the dedicated client scope. |

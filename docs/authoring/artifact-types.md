@@ -1,30 +1,36 @@
 ---
 title: Artifact types
 nav_order: 4
-description: Built-in artifact types (skill, agent, context, command, rule, hook, mcp-server) and what each is for.
+description: The built-in artifact types (skill, agent, context, command, rule, hook, and mcp-server), what each is for, and how each reaches a harness.
 ---
 
 # Artifact types
 
-Every artifact declares a `type:` in its frontmatter. The type decides how the registry indexes it, what lint rules apply, and how the harness adapter translates it at delivery time. Built-in types include:
+This page describes the built-in artifact types and shows a minimal manifest for each. Read it to choose a type for a new artifact.
 
-- [`skill`](#skill): instructions loaded into the agent's context on demand.
-- [`agent`](#agent): a complete agent definition meant to run as a delegated child.
-- [`context`](#context): pure reference material.
-- [`command`](#command): parameterized templates a human invokes.
-- [`rule`](#rule): passive context loaded by the harness based on a `rule_mode`.
-- [`hook`](#hook): lifecycle observers with a shell action.
-- [`mcp-server`](#mcp-server): MCP server registrations.
+Every artifact declares a `type:` in its frontmatter. The type determines how the registry indexes the artifact, which lint rules apply, and how the harness adapter translates it at delivery time.
 
-Extension types register through the `TypeProvider` SPI; they get validation rules but no conformance commitment beyond what the type owner specifies.
+| Type | Purpose | Manifest |
+|:--|:--|:--|
+| [`skill`](#skill) | Instructions the agent loads into its context on demand. | `SKILL.md`, plus an optional `ARTIFACT.md` |
+| [`agent`](#agent) | A complete agent definition that runs as a delegated child. | `ARTIFACT.md` |
+| [`context`](#context) | Pure reference material. | `ARTIFACT.md` |
+| [`command`](#command) | A parameterized prompt template a human invokes. | `ARTIFACT.md` |
+| [`rule`](#rule) | Passive context the harness loads according to a `rule_mode`. | `ARTIFACT.md` |
+| [`hook`](#hook) | A lifecycle observer with a shell action. | `ARTIFACT.md` |
+| [`mcp-server`](#mcp-server) | An MCP server registration. | `ARTIFACT.md` |
+
+The types from `skill` through `hook` are first-class types. `mcp-server` is a built-in [extension type](#extension-types). A deployment registers further extension types through the `TypeProvider` SPI. An extension type carries validation rules and no conformance commitment beyond what the type owner specifies.
+
+[Frontmatter reference](frontmatter-reference) lists every field each type accepts.
 
 ---
 
 ## skill
 
-A `skill` is a chunk of instructions, optionally with bundled scripts, that the agent loads into its context when it decides the skill matches the situation.
+A `skill` is a set of instructions, optionally with bundled scripts, that the agent loads into its context when it decides the skill matches the situation.
 
-`SKILL.md`:
+A `SKILL.md` alone is a complete skill:
 
 ```markdown
 ---
@@ -38,9 +44,7 @@ your team's policy doc. Output a markdown table sorted by absolute
 variance.
 ```
 
-A `SKILL.md` alone is a complete skill.
-
-An optional `ARTIFACT.md` overlay, written by hand beside `SKILL.md`, carries the Podium-only fields:
+An optional `ARTIFACT.md` overlay beside `SKILL.md` carries the Podium-only fields. The author writes it by hand:
 
 ```markdown
 ---
@@ -57,13 +61,18 @@ runtime_requirements:
 <!-- Skill body lives in SKILL.md. -->
 ```
 
-The agent loads a skill via the harness's native discovery (Claude Code reads `.claude/skills/`, Cursor reads `.cursor/skills/`, etc.) or via the MCP `load_artifact` call. Skills can ship scripts that the host runtime executes; declare `runtime_requirements:` so the host can refuse to materialize when the runtime isn't available. See [Bundled resources](bundled-resources) for the file layout and [Hints](hints) for the optional `effort_hint` and `model_class_hint` fields.
+The agent loads a skill in one of two ways:
+
+- Through the harness's native discovery. Claude Code reads `.claude/skills/`, Cursor reads `.cursor/skills/`, and other harnesses read their own directories.
+- Through the MCP `load_artifact` call.
+
+A skill can ship scripts that the host runtime executes. Declare `runtime_requirements:` so the host can refuse the skill when the runtime is unavailable. [Bundled resources](bundled-resources) covers the file layout, and [Hints](hints) covers the optional `effort_hint` and `model_class_hint` fields.
 
 ---
 
 ## agent
 
-An `agent` is a complete agent definition, intended to run in isolation as a delegated child. Where a skill is a piece of instructions an agent reaches for, an agent is its own runnable unit.
+An `agent` is a complete agent definition that runs in isolation as a delegated child. A skill is a piece of instructions an agent reaches for. An agent is its own runnable unit.
 
 ```markdown
 ---
@@ -85,13 +94,18 @@ delegates_to:
 You are a vendor compliance reviewer. Given a vendor record...
 ```
 
-`input` and `output` declare JSON Schemas the agent expects and produces. `delegates_to` lists other agents this one can call. The field is advisory; the target may be any artifact type and is not enforced at ingest. The cross-type dependency graph uses these edges for impact analysis.
+The agent-specific fields:
+
+- `input` and `output` declare the JSON Schemas the agent expects and produces.
+- `delegates_to` lists other agents this one can call. The field is advisory. The target may be any artifact type, and ingest does not enforce it. The cross-type dependency graph uses these edges for impact analysis.
+
+[Your first agent](your-first-agent) builds an agent step by step.
 
 ---
 
 ## context
 
-A `context` artifact contains pure reference material such as style guides, glossaries, API references, and large knowledge bases.
+A `context` artifact holds pure reference material, such as style guides, glossaries, API references, and large knowledge bases.
 
 ```markdown
 ---
@@ -110,7 +124,7 @@ sensitivity: low
 **ARR.** Annual Recurring Revenue...
 ```
 
-`context` does not need the same safety review as a `skill` because instructions are more dangerous than reference data. The lint rules are correspondingly lighter.
+Instructions carry more risk than reference data, so a `context` artifact does not need the same safety review as a `skill`. Its lint rules are correspondingly lighter.
 
 ---
 
@@ -139,15 +153,15 @@ Analyze the specified module and refactor according to the user's input.
 ...
 ```
 
-Both `podium sync` and the MCP server materialize a command into the target harness's native command location (§6.7), so the harness's slash-command system surfaces it and applies the harness's own argument convention to the body. Podium does not project commands through MCP and defines no argument syntax of its own.
+Both `podium sync` and the MCP server materialize a command into the target harness's native command location. The harness's slash-command system surfaces it and applies the harness's own argument convention to the body. Podium does not project commands through MCP and defines no argument syntax of its own. [Your first command](your-first-command) builds a command step by step.
 
 ---
 
 ## rule
 
-A `rule` is passive context that the harness loads automatically, controlled by a `rule_mode`:
+A `rule` is passive context that the harness loads automatically. The `rule_mode` field controls when:
 
-| Mode | Loaded when… |
+| Mode | Loaded when |
 |:--|:--|
 | `always` | The agent session starts (or every turn). |
 | `glob` | A file matching the glob pattern is touched in the session. |
@@ -172,7 +186,17 @@ When reviewing or generating payment-handling code:
 - Never store PANs in plaintext...
 ```
 
-Each harness handles rule modes differently, and the harness adapter does the translation. Cursor and Hermes write `.cursor/rules/<name>.mdc` with the native `alwaysApply`, `globs`, or `description` key. Claude Code writes `.claude/rules/<name>.md`, using the native `paths:` list for `glob`. Codex, OpenCode, and Pi inject the rule body into `AGENTS.md`, and Gemini injects it into `GEMINI.md`. [Rule modes](rule-modes) has the full per-harness mapping.
+Each harness handles rule modes differently, and the harness adapter does the translation:
+
+| Harness | Output |
+|:--|:--|
+| Cursor and Hermes | `.cursor/rules/<name>.mdc` with the native `alwaysApply`, `globs`, or `description` key. |
+| Claude Code | `.claude/rules/<name>.md`, using the native `paths:` list for `glob`. |
+| Codex, OpenCode, and Pi | The rule body, injected into the root `AGENTS.md`. |
+| Gemini | The rule body, injected into the root `GEMINI.md`. |
+| Claude Desktop and Claude Cowork | Nothing. These harnesses have no project-scope rule surface, so materialization fails with `materialize.untranslatable`. |
+
+[Rule modes](rule-modes) has the full per-harness mapping.
 
 ---
 
@@ -196,15 +220,20 @@ hook_action: |
 ---
 ```
 
-`hook_event` is one of the canonical event names (session lifecycle, user prompts, tool calls in generic and subtype forms, permission events, subagent lifecycle, turn end, compaction, and notifications). The harness adapter translates the canonical name to the harness's native event. `hook_action` is a shell snippet executed when the event fires; the event payload comes in on stdin. See [Hooks](hooks) for the full event taxonomy.
+The hook-specific fields:
 
-Hook support varies by harness, and not every harness implements every canonical event. When an artifact declares `target_harnesses:`, lint rejects ingest if a named harness does not support the chosen event. When `target_harnesses:` is absent, ingest stays permissive and the unsupported event is caught at materialization onto a harness that cannot translate it (§6.9). For the events a specific harness emits, refer to the harness's own hook documentation. See [Hooks](hooks) for the full event taxonomy and authoring guidance.
+- `hook_event` is one of the canonical event names. The names cover session lifecycle, user prompts, tool calls in generic and subtype forms, permission events, subagent lifecycle, turn end, compaction, and notifications. The harness adapter translates the canonical name to the harness's native event.
+- `hook_action` is a shell snippet that runs when the event fires. The event payload arrives on stdin.
+
+Hook coverage varies by harness, and not every harness implements every canonical event. When an artifact declares `target_harnesses:`, lint rejects ingest if a named harness cannot translate the chosen event. When `target_harnesses:` is absent, ingest stays permissive, and materialization onto a harness that cannot translate the event fails. For the events a specific harness emits, refer to the harness's own hook documentation.
+
+[Hooks](hooks) covers the full event taxonomy and authoring guidance.
 
 ---
 
 ## mcp-server
 
-An `mcp-server` artifact registers an MCP server: name, endpoint, auth profile, description.
+An `mcp-server` artifact registers an MCP server: its name, endpoint, auth profile, and description.
 
 ```markdown
 ---
@@ -220,14 +249,33 @@ server_identifier: npx:@company/finance-warehouse-mcp
 Read-only SQL access to the finance warehouse...
 ```
 
-The `server_identifier` field is the registration's canonical identity. Each adapter that has an MCP surface derives the harness's native server entry from it: the Claude Code adapter merges `{"command": "npx", "args": ["@company/finance-warehouse-mcp"]}` under `mcpServers.finance-warehouse` into `.mcp.json`, keyed by the artifact's `name`. Cursor writes the same entry into `.cursor/mcp.json` and Gemini into `.gemini/settings.json`. OpenCode writes an equivalent entry under the `mcp` key in `opencode.json`, and Codex writes an `[mcp_servers.<name>]` table into `.codex/config.toml`. Claude Desktop, Claude Cowork, Pi, and Hermes have no project-level MCP surface and materialize nothing for this type. An `mcpServers:` list in the registration's own frontmatter is not read at materialization. `server_identifier` also keys the reverse index: when any artifact declares an `mcpServers:` entry that resolves to the same identifier, Podium records the dependency edge.
+The `server_identifier` field is the registration's canonical identity. Each adapter that has an MCP surface derives the harness's native server entry from it, keyed by the artifact's `name`:
 
-`mcp-server` artifacts are filtered out of the MCP bridge's `resources/list` mirror because Claude Desktop, Claude Code, Cursor, and similar harnesses fix their MCP server list at startup, so a server discovered mid-session cannot be connected. The bridge's `search_artifacts` and `load_artifact` still return them, as do the SDK and `podium sync` (which materializes them into the harness's on-disk config for the next launch).
+| Harness | Output |
+|:--|:--|
+| Claude Code | Merges `{"command": "npx", "args": ["@company/finance-warehouse-mcp"]}` under `mcpServers.finance-warehouse` into `.mcp.json`. |
+| Cursor | Writes the same entry into `.cursor/mcp.json`. |
+| Gemini | Writes the same entry into `.gemini/settings.json`. |
+| OpenCode | Writes an equivalent entry under the `mcp` key in `opencode.json`. |
+| Codex | Writes an `[mcp_servers.<name>]` table into `.codex/config.toml`. |
+| Claude Desktop, Claude Cowork, Pi, and Hermes | Nothing. These harnesses have no project-level MCP surface. |
+
+Materialization does not read an `mcpServers:` list in the registration's own frontmatter.
+
+`server_identifier` also keys the reverse index. When any artifact declares an `mcpServers:` entry that resolves to the same identifier, Podium records the dependency edge.
+
+### Discovery through the MCP bridge
+
+The MCP bridge filters `mcp-server` artifacts out of its `resources/list` mirror. Claude Desktop, Claude Code, Cursor, and similar harnesses fix their MCP server list at startup, so a server discovered mid-session cannot be connected. The bridge's `search_artifacts` and `load_artifact` still return `mcp-server` artifacts. The SDK and `podium sync` also return them, and `podium sync` materializes them into the harness's on-disk config for the next launch.
 
 ---
 
 ## Extension types
 
-Beyond the first-class types, Podium supports extension types: built-in or deployment-registered types with validation rules but no conformance commitment beyond what the type owner specifies. `mcp-server` is the only extension type Podium ships built-in. Names like `dataset`, `model`, `eval`, and `policy` are example identifiers a deployment can adopt by registering its own `TypeProvider`. The `workflow` identifier is reserved for future multi-agent flows.
+Extension types are built-in or deployment-registered types. Each carries validation rules and no conformance commitment beyond what the type owner specifies.
 
-Registering a type means supplying a `TypeProvider`. The implementation declares its `ID()` and its `Type()` and implements `Validate()`, whose diagnostics the linter surfaces under the `lint.type_provider` rule. See [Extending](../deployment/extending) for the SPI details.
+- `mcp-server` is the only extension type Podium ships built in.
+- `dataset`, `model`, `eval`, and `policy` are example identifiers a deployment can adopt by registering its own `TypeProvider`. Podium ships no implementation for them.
+- The `workflow` identifier is reserved for future multi-agent flows.
+
+To register a type, supply a `TypeProvider`. The implementation declares its `ID()` and its `Type()`, and it implements `Validate()`. The linter surfaces the `Validate()` diagnostics under the `lint.type_provider` rule. [Extending](../deployment/extending) covers the SPI details.

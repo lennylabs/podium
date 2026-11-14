@@ -1,56 +1,48 @@
 ---
-title: Entra ID
+title: Microsoft Entra ID
 nav_order: 2
-description: Configure Podium to authenticate against Microsoft Entra ID (formerly Azure AD) via OIDC device-code flow.
+description: Configure a Podium registry to authenticate callers against Microsoft Entra ID (formerly Azure AD) through the OIDC device-code flow.
 ---
 
-# Microsoft Entra ID (formerly Azure AD)
+# Microsoft Entra ID
 
-This guide configures a Podium registry to authenticate against Microsoft Entra ID. Setup takes about 20 minutes. Entra emits group object IDs (GUIDs) instead of names by default, so the `IdpGroupMapping` adapter resolves the GUIDs to group names.
+This cookbook configures a Podium registry to authenticate against Microsoft Entra ID, formerly Azure AD. By default Entra emits group object IDs (GUIDs) instead of names, so the `IdpGroupMapping` adapter resolves the GUIDs to group names. Setup takes about 20 minutes. The [OIDC cookbooks overview](index) describes the identity model the steps rely on.
 
 ## Prerequisites
 
-- Entra ID Global Administrator or Application Administrator role.
-- Podium registry running and reachable from your developers' browsers.
-- A naming convention for groups in Podium layer config. Use Entra group GUIDs directly, or set up a name mapping; see step 2.
+- The Entra ID Global Administrator or Application Administrator role.
+- A Podium registry running and reachable from developers' browsers.
+- A naming convention for groups in Podium layer config. Use Entra group GUIDs directly, or map them to names as step 2 describes.
 
 ## 1. Register the OIDC application
 
-Azure portal: **Microsoft Entra ID → App registrations → New registration**.
-
-- **Name**: Podium.
-- **Supported account types**: usually **Accounts in this organizational directory only** (single tenant). Multi-tenant only if Podium is a SaaS offering.
-- **Redirect URI**: not used for device-code, but Entra requires one. Set to **Public client/native** with `http://localhost`.
-
-After registration, note from the app overview:
-
-- **Application (client) ID** → `PODIUM_OAUTH_CLIENT_ID`.
-- **Directory (tenant) ID** → used in the issuer URL.
-
-Under **Authentication**:
-
-- Enable **Allow public client flows: Yes**.
-- Add platform: **Mobile and desktop applications**, with redirect `http://localhost`.
-
-Under **API permissions**: make sure **Microsoft Graph -> User.Read** is granted (default). Add **GroupMember.Read.All** for group-membership claims.
+1. In the Azure portal, open **Microsoft Entra ID → App registrations → New registration**.
+2. Set **Name** to Podium.
+3. Set **Supported account types**, usually to **Accounts in this organizational directory only** (single tenant). Choose multi-tenant only when Podium is a SaaS offering.
+4. Set **Redirect URI** to **Public client/native** with `http://localhost`. The device-code flow does not use it, but Entra requires one.
+5. After registration, note these values from the app overview:
+   - **Application (client) ID**, which is `PODIUM_OAUTH_CLIENT_ID`.
+   - **Directory (tenant) ID**, which forms part of the issuer URL.
+6. Under **Authentication**, set **Allow public client flows** to **Yes**.
+7. Under **Authentication**, add the **Mobile and desktop applications** platform with redirect `http://localhost`.
+8. Under **API permissions**, confirm that **Microsoft Graph -> User.Read** is granted (the default). Add **GroupMember.Read.All** for group-membership claims.
 
 ## 2. Configure the groups claim
 
-Entra emits group object IDs by default. Two options:
+Entra emits group object IDs by default. Choose one of the options below. Option A requires less setup, and `IdpGroupMapping` resolves the readability difference between GUIDs and names.
 
-**Option A: group object IDs in tokens** (simpler, GUIDs mapped to names registry-side):
+### Option A: group object IDs mapped to names
 
-- **Token configuration → Add groups claim**.
-- Select **Security groups** (or **All groups** if you also use distribution lists).
-- Customize for ID Token + Access Token: **Group ID** (the default).
-
-The token then carries group object IDs. Set `PODIUM_IDP_GROUP_MAPPING` on the registry to map each GUID to the group name used in layer visibility. The value is a comma-separated list of `<token-value>=<group-name>` pairs:
+1. Open **Token configuration → Add groups claim**.
+2. Select **Security groups**, or **All groups** when distribution lists are also in use.
+3. Under the ID Token and Access Token customization, keep **Group ID** (the default).
+4. Set `PODIUM_IDP_GROUP_MAPPING` on the registry to map each GUID to the group name used in layer visibility. The value is a comma-separated list of `<token-value>=<group-name>` pairs:
 
 ```bash
 PODIUM_IDP_GROUP_MAPPING=7c52a1d4-1111-2222-3333-444455556666=engineering,9ab3f0c2-7777-8888-9999-aaaabbbbcccc=platform
 ```
 
-A non-empty value that carries a malformed entry, or that resolves to no `<token-value>=<group-name>` entry at all, fails startup with `config.invalid_idp_group_mapping`. One malformed entry discards the well-formed entries beside it, so the registry refuses the whole setting instead of starting with a partial table. There is no `registry.yaml` key for the mapping.
+The mapping has no `registry.yaml` key. A non-empty value that carries a malformed entry, or that resolves to no `<token-value>=<group-name>` entry at all, fails startup with `config.invalid_idp_group_mapping`. The registry refuses the whole setting instead of starting with a partial table, so one malformed entry discards the well-formed entries beside it.
 
 The layer config then references the readable name:
 
@@ -60,31 +52,31 @@ visibility:
   groups: [engineering]
 ```
 
-**Option B: group display names** (requires onPremisesSamAccountName or a custom claims mapping policy):
+### Option B: group display names
 
-For groups synced from on-prem AD, Entra can emit `sAMAccountName` in the groups claim. Cloud-only groups require a custom claims mapping policy via PowerShell, which is outside the scope of this guide. When the token already carries names, the `IdpGroupMapping` entries pass them through unchanged.
+This option requires `onPremisesSamAccountName` or a custom claims mapping policy. For groups synced from on-premises AD, Entra can emit `sAMAccountName` in the groups claim. Cloud-only groups require a custom claims mapping policy set through PowerShell, which is outside the scope of this cookbook. When the token already carries names, `IdpGroupMapping` passes them through unchanged.
 
-Most teams find Option A faster; the GUID-versus-name tradeoff is a layer-config readability concern that `IdpGroupMapping` resolves.
+### Large group memberships
 
-**Large group memberships (overage).** When a user belongs to more than about 200 groups, Entra omits the groups claim from the token and instead emits a `_claim_names` and `_claim_sources` overage reference that points at Microsoft Graph. Podium reads groups from the token claim and does not call Graph, so a user in overage resolves to no groups from the token. Keep the emitted set small by selecting **Groups assigned to the application** in the groups-claim configuration rather than **All groups**, or resolve membership through SCIM (below) instead of the token claim.
+When a user belongs to more than about 200 groups, Entra omits the groups claim and emits an overage reference to Microsoft Graph instead. Podium does not call Graph, so such a user resolves to no groups from the token. Select **Groups assigned to the application** instead of **All groups** to keep the emitted set small, or resolve membership through [SCIM](#scim-provisioning-optional). [Troubleshooting](#troubleshooting) describes the symptom.
 
 ## 3. Expose Podium as an API
 
-Under **Expose an API**:
+1. Under **Expose an API**, set **Application ID URI** to `api://podium`, or to the tenant URI.
+2. Select **Add a scope** and set:
+   - **Name**: `Podium.Use`
+   - **Who can consent**: Admins and users
+   - The display text as appropriate.
+3. Under **Manage → Manifest**, set the access-token version to 2. In the AAD Graph manifest, set `accessTokenAcceptedVersion` to `2`. In the Microsoft Graph manifest, set `api.requestedAccessTokenVersion` to `2`.
 
-- **Set Application ID URI** → `api://podium` (or your tenant URI).
-- **Add a scope**:
-  - Name: `Podium.Use`
-  - Who can consent: Admins and users
-  - Display info as appropriate.
+The Application ID URI is the audience the registry validates against.
 
-This gives you the audience the registry will validate against.
+> [!IMPORTANT]
+> With the default access-token version, Entra issues v1.0 access tokens whose `iss` is `https://sts.windows.net/<tenant-id>/`. That value does not match the issuer configured in step 4, and the registry rejects every such token with `auth.untrusted_token`.
 
-Set the access-token version to 2 on the app registration. Under **Manage → Manifest**, set `accessTokenAcceptedVersion` to `2` in the AAD Graph manifest, or `api.requestedAccessTokenVersion` to `2` in the Microsoft Graph manifest. With the default value Entra issues v1.0 access tokens whose `iss` is `https://sts.windows.net/<tenant-id>/`, which does not match the issuer configured in step 4, and the registry rejects every such token with `auth.untrusted_token`.
+## 4. Configure the registry
 
-## 4. Configure Podium
-
-On the registry host, edit `registry.yaml`:
+On the registry host, add the `identity_provider:` block to `registry.yaml`:
 
 ```yaml
 registry:
@@ -94,13 +86,21 @@ registry:
     audience: api://podium
 ```
 
-Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config and the registry ignores it without reporting an error.
+Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config, and the registry ignores it without reporting an error.
 
-`oidc-jwt` is the registry's side of the flow: it verifies each presented token against the issuer's JWKS and requires the token's `aud` claim to carry one of the values configured under `audience:`. A CLI, an SDK, or another API client obtains that token by completing the device-code flow the next step configures, and on a registry that enables the browser flow a browser obtains it through the registry's own authorization-code exchange, which the registry returns in the `__Host-podium_session` cookie. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
+`oidc-jwt` is the registry's side of the flow. It verifies each presented token against the issuer's JWKS and requires the token's `aud` claim to carry one of the values configured under `audience:`.
 
-Entra carries the user principal name in the `preferred_username` claim, which the registry does not read. The registry takes the caller's email from the `email` claim alone, so add `email` under **Token configuration → Add optional claim → Access token** when layer visibility lists callers by email address. The `IdpGroupMapping` adapter resolves the group claim to group names (Option A above). Restart the registry.
+- A CLI, an SDK, or another API client obtains the token through the device-code flow that the next step configures.
+- On a registry that enables the browser flow, a browser obtains the token through the registry's own authorization-code exchange, and the registry returns it in the `__Host-podium_session` cookie.
+- Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
 
-On developer machines:
+Entra carries the user principal name in the `preferred_username` claim, which the registry does not read. The registry takes the caller's email from the `email` claim alone. When layer visibility lists callers by email address, add `email` under **Token configuration → Add optional claim → Access token**.
+
+The `IdpGroupMapping` adapter resolves the group claim to group names (Option A in step 2). Restart the registry.
+
+## 5. Configure developer machines
+
+On each developer machine, run:
 
 ```bash
 podium init --global --registry https://podium.acme.com
@@ -110,13 +110,17 @@ export PODIUM_OAUTH_TOKEN_URL=https://login.microsoftonline.com/<tenant-id>/oaut
 podium login --scopes "openid profile email api://podium/Podium.Use"
 ```
 
-Set `PODIUM_OAUTH_TOKEN_URL` explicitly. With it unset, `podium login` derives the token endpoint by appending `/token` to the device-authorization URL, which produces `https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/devicecode/token` and the token exchange fails.
+Set `PODIUM_OAUTH_TOKEN_URL` explicitly. With it unset, `podium login` derives the token endpoint by appending `/token` to the device-authorization URL. That produces `https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/devicecode/token`, and the token exchange fails.
 
-Request the API scope from step 3 in `--scopes`. The v2.0 endpoint sets the access token's `aud` from the resource named by the requested scope and ignores the `audience` form parameter that `PODIUM_OAUTH_AUDIENCE` sets, so that variable has no effect against Entra. With the default scope set (`openid profile email groups`) the issued access token is not audienced to `api://podium`, and the registry rejects it on the `aud` check. Because the requested scope's resource governs `aud`, the registry's `audience:` lists the resource identifiers Entra mints for the scopes the deployment's clients request, and a client that must present a differently-audienced token needs that value listed as well.
+Request the API scope from step 3 in `--scopes`. The v2.0 endpoint sets the access token's `aud` from the resource that the requested scope names:
 
-The browser device-flow page is hosted at `https://microsoft.com/devicelogin`. After completion, `podium login` prints the `sub`, `email`, and groups.
+- Entra ignores the `audience` form parameter that `PODIUM_OAUTH_AUDIENCE` sets, so that variable has no effect against Entra.
+- With the default scope set (`openid profile email groups`), the issued access token is not audienced to `api://podium`, and the registry rejects it on the `aud` check.
+- The registry's `audience:` lists the resource identifiers Entra mints for the scopes the deployment's clients request. A client that must present a token with a different audience needs that value listed as well.
 
-## 5. Test group-based visibility
+Expected result: the browser device-flow page opens at `https://microsoft.com/devicelogin`. After the flow completes, `podium login` prints the `sub`, `email`, and groups.
+
+## 6. Test group-based visibility
 
 Configure an admin layer scoped to the group in `registry.yaml`. With Option A, the `IdpGroupMapping` entry maps the GUID to the name `engineering`, and the layer references that name. Group-scoped visibility is set in the registry layer config, or with `podium layer register --group <name>` (also `--public`, `--organization`, and `--user`). Layers registered with `--user-defined` are private to the registrant and cannot be widened.
 
@@ -132,24 +136,40 @@ registry:
         groups: [engineering]
 ```
 
-Confirm a member of that group sees the layer; a non-member does not.
+Expected result: a member of that group sees the layer, and a non-member does not.
 
-## SCIM (optional)
+## SCIM provisioning (optional)
 
-Entra pushes user and group records to the registry's SCIM endpoint via the **Provisioning** tab on the enterprise application:
+Entra pushes user and group records to the registry's SCIM endpoint through the **Provisioning** tab on the enterprise application.
 
-1. **Enterprise applications → \[Podium\] → Provisioning → Get started**.
-2. **Provisioning Mode: Automatic**.
-3. **Tenant URL**: the registry's SCIM endpoint, `https://podium.acme.com/scim/v2`.
-4. **Secret Token**: one of the bearer tokens listed in the registry's `PODIUM_SCIM_TOKENS` environment variable. The registry mounts `/scim/v2/` only when that variable is set to a comma-separated list of accepted tokens, and returns 404 for every SCIM request otherwise. Set `PODIUM_SCIM_STORE_PATH` to a writable file path so the pushed directory survives a restart. A set path that the registry cannot read, parse, or write refuses startup with `config.scim_store_unavailable`.
-5. **Test connection**, then save and enable.
-6. Configure attribute mappings so each provisioned user's SCIM `userName` matches the `sub` or `email` claim its token carries, and each group's `displayName` matches the name used in the layer's `groups:` filter. The registry expands a `groups:` filter to the group's member `userName` values and compares them against the caller's `sub` and `email`.
+1. Open **Enterprise applications → \[Podium\] → Provisioning → Get started**.
+2. Set **Provisioning Mode** to **Automatic**.
+3. Set **Tenant URL** to the registry's SCIM endpoint, `https://podium.acme.com/scim/v2`.
+4. Set **Secret Token** to one of the bearer tokens listed in the registry's `PODIUM_SCIM_TOKENS` environment variable.
+5. Select **Test connection**, then save and enable provisioning.
+6. Configure attribute mappings so each provisioned user's SCIM `userName` matches the `sub` or `email` claim its token carries.
+7. Configure attribute mappings so each group's `displayName` matches the name used in the layer's `groups:` filter.
 
-The registry's SCIM receiver serves `GET`, `POST`, `PUT`, and `DELETE` on `/Users` and `/Groups`, and answers every other method with HTTP 405. Entra's provisioning service sends updates, including group-membership changes, as `PATCH`, so the pushed directory records what the create requests established and later updates are rejected. Confirm that a membership change reaches the registry before relying on SCIM for group visibility.
+On the registry side:
+
+- The registry mounts `/scim/v2/` only when `PODIUM_SCIM_TOKENS` is set to a comma-separated list of accepted tokens. Otherwise it returns 404 for every SCIM request.
+- Set `PODIUM_SCIM_STORE_PATH` to a writable file path so the pushed directory survives a restart. A set path that the registry cannot read, parse, or write refuses startup with `config.scim_store_unavailable`.
+- The registry expands a `groups:` filter to the group's member `userName` values and compares them against the caller's `sub` and `email`.
+
+> [!WARNING]
+> The registry's SCIM receiver serves `GET`, `POST`, `PUT`, and `DELETE` on `/Users` and `/Groups`, and answers every other method with HTTP 405. Entra's provisioning service sends updates, including group-membership changes, as `PATCH`. The pushed directory therefore records what the create requests established, and the registry rejects later updates. Confirm that a membership change reaches the registry before relying on SCIM for group visibility.
+
+## Next steps
+
+- Declare visibility on the remaining layers with [Access control](../access-control).
+- Review the caller identities the registry records in the [audit log](../observability#audit-log).
 
 ## Troubleshooting
 
-- **Tokens don't include the groups claim.** The user belongs to more groups than Entra emits in a token, so the token carries a `_claim_names` overage reference instead of the claim. The registry reads groups from the token's `groups` claim and makes no Microsoft Graph call, so a caller in overage resolves to no groups. Narrow the emitted set by selecting **Groups assigned to the application** in the groups-claim configuration, or resolve membership through SCIM.
-- **Token rejected.** Confirm the API URI from step 3 matches `audience:` in the `identity_provider:` block exactly, including the `api://` prefix.
-- **Device-flow times out.** Some corporate networks block Microsoft's device-flow domain. Test with `--no-browser` and a developer's personal device on a different network.
-- **Group object IDs are unreadable in layer config.** Map each GUID to a readable group name in the `IdpGroupMapping` configuration, then reference the readable name in `visibility:`. Entra's admin console shows both the GUID and the name.
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Tokens do not include the groups claim. | The user belongs to more groups than Entra emits in a token, so the token carries a `_claim_names` and `_claim_sources` overage reference instead of the claim. The registry reads groups from the token's `groups` claim and makes no Microsoft Graph call, so a caller in overage resolves to no groups. | Select **Groups assigned to the application** in the groups-claim configuration, or resolve membership through SCIM. |
+| Every token is rejected with `auth.untrusted_token`. | The access-token version is still 1, so the token's `iss` is `https://sts.windows.net/<tenant-id>/`. | Set the access-token version to 2 in the manifest (step 3). |
+| Tokens are rejected. | The API URI from step 3 does not match `audience:` in the `identity_provider:` block. | Make them match exactly, including the `api://` prefix. |
+| The device flow times out. | Some corporate networks block Microsoft's device-flow domain. | Test with `--no-browser` and a developer's personal device on a different network. |
+| Group object IDs are unreadable in layer config. | The token carries GUIDs. | Map each GUID to a readable group name in the `IdpGroupMapping` configuration, then reference the readable name in `visibility:`. Entra's admin console shows both the GUID and the name. |

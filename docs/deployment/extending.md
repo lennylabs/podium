@@ -1,120 +1,169 @@
 ---
 title: Extending
-nav_order: 9
-description: Plugin SPIs, the forward-compatibility constraints that keep out-of-process plugins on the table, and external-extension patterns built on the HTTP API.
+nav_order: 14
+description: Extend a Podium registry with tooling built on its HTTP API, SDKs, CLI, and webhooks, or with in-process plugins that implement its SPIs.
 ---
 
 # Extending
 
+This page covers the ways to extend a Podium registry, for operators and platform engineers who need behavior the built-in configuration does not provide. It describes the pluggable interfaces (SPIs), the extension patterns built on the registry's public surfaces, and the constraints a plugin author follows.
+
+---
+
+## Choosing an extension route
+
 Podium is extensible at two layers:
 
-- **In-process plugins.** Swap or augment the registry's own behavior (different stores, different identity providers, different lint rules) by implementing a Go interface and being compiled into a registry build. See [SPIs](#spis).
-- **External extensions.** Build on the registry's HTTP API, SDKs, and CLI without changing the registry itself: programmatic curation scripts, webhook receivers, custom CI checks, layer source bridges. See [External extensions](#external-extensions).
+- **External extensions** build on the registry's HTTP API, SDKs, CLI, and outbound webhooks. They leave the registry binary unchanged. Examples are curation scripts, webhook receivers, custom CI checks, and layer source bridges.
+- **In-process plugins** change the registry's own behavior, such as the store, the identity provider, or the lint rules. A plugin implements a Go interface and is compiled into a registry build.
 
-Most teams reach for external extensions first. SPI plugins are for cases where the registry's own behavior needs to change.
+Start with an external extension. Write an SPI plugin only when the registry's own behavior must change.
+
+| Goal | Route |
+|:--|:--|
+| Select artifacts with custom logic and materialize the selection | [Programmatic curation](#programmatic-curation-semantic-discovery--scoped-sync) |
+| Notify a channel, open a ticket, or start a CI job when the catalog changes | [Webhook-driven integrations](#webhook-driven-integrations) |
+| Enforce team-specific rules before a change merges | [Custom pre-merge CI](#custom-pre-merge-ci) |
+| Import content from another system into a layer | [Layer source bridges](#layer-source-bridges) |
+| Serve a runtime that the built-in consumers do not cover | [Custom consumer surfaces](#custom-consumer-surfaces) |
+| Replace a store, search backend, identity provider, signer, or other registry component | An [SPI plugin](#spis) |
 
 ---
 
 ## SPIs
 
-The registry's pluggable interfaces:
+The registry's pluggable interfaces are listed below. A plugin implements one of them in Go.
 
-| Interface | Purpose |
-|:--|:--|
-| `RegistryStore` | Manifest metadata, dependency edges, layer config, and admin grants. Built-ins: `sqlite` and `postgres`. |
-| `RegistryObjectStore` | Bundled resource bytes and presigned URLs. Built-ins: the local filesystem and S3-compatible storage. |
-| `RegistrySearchProvider` | Hybrid retrieval for `search_artifacts`. Built-ins: `pgvector`, `sqlite-vec`, `pinecone`, `weaviate-cloud`, `qdrant-cloud`. See [Vector backends](vector-backends) for the per-backend recipes. |
-| `EmbeddingProvider` | Generates embeddings for ingest text and query text. Built-ins: `openai`, `voyage`, `cohere`, `ollama`. |
-| `LocalSearchProvider` | Optional semantic backing for the local-overlay index. Same SPI as `RegistrySearchProvider`. |
-| `RegistryAuditSink` | Stream for catalogue events; logically distinct from `RegistryStore`, separately mockable, separately routable. The `audit.Sink` interface is the seam. An operator lists the stream's destinations (file, HTTP, OTLP, and stdout) in `PODIUM_AUDIT_LOG_PATH`, and the file destination `audit.FileSink` is the default in both deployment modes. See [Audit events](../reference/audit-events). |
-| `LayerComposer` | Resolves the caller's effective view from the configured layer list and applies the collision rule. |
-| `LayerSourceProvider` | Resolves and watches the source backing a layer. Built-ins: `git`, `local`. Custom backends: S3 versioned buckets, OCI registries, HTTP archives, internal CMS bridges. |
-| `GitProvider` | Webhook signature verification and Git fetch semantics, used by the built-in `git` `LayerSourceProvider`. Built-in support for GitHub, GitLab, Bitbucket. |
-| `TypeProvider` | Type definitions: frontmatter JSON Schema + lint rules + adapter hints. |
-| `IngestLinter` | Manifest validation, resource-reference checks, type-specific rules; runs pre-merge in CI and again at registry ingest. |
-| `IdentityProvider` | Attaches the caller's attested identity to every registry call. Client-side built-ins acquire the token at the consumer: `oauth-device-code` and `injected-session-token`. Registry-process built-ins resolve identity from the request at the registry: `oidc-jwt` and `trusted-headers`, covered in [Gateway-delegated identity](gateway-delegated-identity). |
-| `LocalOverlayProvider` | Source for the workspace-scoped local overlay layer. Default: workspace filesystem (`.podium/overlay/`). |
-| `LocalAuditSink` | Local audit log for meta-tool calls (when configured). Default: JSON Lines file at `~/.podium/audit.log`, user-wide and one file across all workspaces. Redirect it to a workspace-local path, or add HTTP and OTLP destinations, through `PODIUM_AUDIT_SINK`. |
-| `HarnessAdapter` | Translates canonical artifacts to the harness's native format at materialization time. The adapter `Source` carries a plugin descriptor (name, optional description, harness subtree prefix) so a marketplace emitter can render an artifact into a named plugin when `podium sync` renders a `kind: marketplace` target. |
-| `MaterializationHook` | Per-file pre-write transformation of materialized output. Use cases: redact secrets, rewrite paths, inject team-specific headers, enforce content policy. |
-| `NotificationProvider` | Delivery for ingest-failure and operational notifications. Built-ins: `log`, `webhook`, `email` (over SMTP, also accepted as `smtp`), and `multi`, which combines the log provider with whichever of webhook and email is configured. `PODIUM_NOTIFICATION_PROVIDER` selects one; an unset variable and `noop` both wire no notifier. |
-| `SignatureProvider` | Artifact signing and verification. Built-ins: `noop`, `registry-managed`, and `sigstore-keyless`. `podium sign`, `podium verify`, and `podium-mcp` read `PODIUM_SIGNATURE_PROVIDER` and fall back to `registry-managed`, and `podium-mcp` accepts `registry-managed` and `noop` only, because every delivery signature it verifies is registry-managed; and the `noop` provider refuses every signature it is asked to verify. The registry signs each accepted manifest at ingest with its registry-managed key by default; `PODIUM_SIGN=none` or `--sign none` turns ingest signing off. |
+| Interface | Purpose | Built-ins |
+|:--|:--|:--|
+| `RegistryStore` | Stores manifest metadata, dependency edges, layer config, and admin grants. | `sqlite`, `postgres` |
+| `RegistryObjectStore` | Stores bundled resource bytes and issues presigned URLs. | The local filesystem and S3-compatible storage |
+| `RegistrySearchProvider` | Runs hybrid retrieval for `search_artifacts`. [Vector backends](vector-backends) has the per-backend recipes. | `pgvector`, `sqlite-vec`, `pinecone`, `weaviate-cloud`, and `qdrant-cloud` |
+| `EmbeddingProvider` | Generates embeddings for ingest text and query text. | `openai`, `voyage`, `cohere`, and `ollama` |
+| `LocalSearchProvider` | Adds optional semantic backing to the local-overlay index. It uses the same SPI as `RegistrySearchProvider`. | The `RegistrySearchProvider` backends |
+| `RegistryAuditSink` | Writes the registry's stream of catalog events. See [Audit and observability](observability#audit-destinations). | File, HTTP, OTLP, and stdout destinations |
+| `LayerComposer` | Resolves the caller's effective view from the configured layer list and applies the collision rule. | The layer-list composer |
+| `LayerSourceProvider` | Resolves and watches the source backing a layer. Custom backends include S3 versioned buckets, OCI registries, HTTP archives, and internal CMS bridges. | `git`, `local` |
+| `GitProvider` | Verifies webhook signatures and implements Git fetch for the built-in `git` `LayerSourceProvider`. | GitHub, GitLab, and Bitbucket |
+| `TypeProvider` | Defines a type: its frontmatter JSON Schema, lint rules, and adapter hints. | The built-in first-class types |
+| `IngestLinter` | Validates manifests, checks resource references, and applies type-specific rules. It runs pre-merge in CI and again at registry ingest. | The built-in rule set |
+| `IdentityProvider` | Attaches the caller's attested identity to every registry call. | `oauth-device-code`, `injected-session-token`, `oidc-jwt`, and `trusted-headers` |
+| `LocalOverlayProvider` | Supplies the workspace-scoped local overlay layer. | The workspace filesystem (`.podium/overlay/`) |
+| `LocalAuditSink` | Writes the local audit log of meta-tool calls, when configured. | A JSON Lines file at `~/.podium/audit.log` |
+| `HarnessAdapter` | Translates canonical artifacts to a harness's native format at materialization time. | The built-in harness adapters |
+| `MaterializationHook` | Transforms each materialized file before it is written. Uses include redacting secrets, rewriting paths, injecting team-specific headers, and enforcing content policy. | None |
+| `NotificationProvider` | Delivers operational notifications. The registry sends one today when a layer ingest fails. See [Notifications](observability#notifications). | `log`, `webhook`, `email`, and `multi` |
+| `SignatureProvider` | Signs and verifies artifacts. | `noop`, `registry-managed`, and `sigstore-keyless` |
 
-Marketplace publishing adds no new SPI. The git workflow a `kind: marketplace` sync target runs is operator-configured shell commands rather than a pluggable interface, so there is no write-side git provider. The only SPI surface publishing touches is the `HarnessAdapter` `Source` plugin descriptor noted above. See [Consuming → Marketplace publishing](../consuming/publishing).
+### Configuration notes
 
----
+- **`RegistryAuditSink`.** The `audit.Sink` interface is the seam. The stream is logically distinct from `RegistryStore`, separately mockable, and separately routable. An operator lists its destinations (file, HTTP, OTLP, and stdout) in `PODIUM_AUDIT_LOG_PATH`. The file destination `audit.FileSink` is the default in both deployment modes. [Audit events](../reference/audit-events) lists the events.
+- **`LocalAuditSink`.** The default file is user-wide, with one file across all workspaces. Redirect it to a workspace-local path, or add HTTP and OTLP destinations, through `PODIUM_AUDIT_SINK`.
+- **`IdentityProvider`.** The client-side built-ins acquire the token at the consumer: `oauth-device-code` and `injected-session-token`. The registry-process built-ins resolve identity from the request at the registry: `oidc-jwt` and `trusted-headers`. [Gateway-delegated identity](gateway-delegated-identity) covers the registry-process providers.
+- **`HarnessAdapter`.** The adapter `Source` carries a plugin descriptor: the plugin name, an optional description, and the harness subtree prefix. A marketplace emitter uses it to render an artifact into a named plugin when `podium sync` renders a `kind: marketplace` target.
+- **`NotificationProvider`.** `PODIUM_NOTIFICATION_PROVIDER` selects the provider. An unset variable and `noop` both wire no notifier. `email` delivers over SMTP and is also accepted as `smtp`. `multi` combines the log provider with whichever of webhook and email is configured.
+- **`SignatureProvider`.** `podium sign`, `podium verify`, and `podium-mcp` read `PODIUM_SIGNATURE_PROVIDER` and fall back to `registry-managed`. `podium-mcp` accepts `registry-managed` and `noop` only, because every delivery signature it verifies is registry-managed. The `noop` provider refuses every signature it is asked to verify. The registry signs each accepted manifest at ingest with its registry-managed key by default, and `PODIUM_SIGN=none` or `--sign none` turns ingest signing off.
 
-## Plugin distribution
-
-Plugins ship as Go modules importable into a registry build. A deployment that needs a custom `IdentityProvider` or `GitProvider` builds a registry binary from source with the plugin imported.
-
----
-
-## Forward compatibility for out-of-process plugins
-
-Plugins today are in-process Go modules. A future release may add an out-of-process plugin protocol (subprocess over stdin/stdout, gRPC, or similar) so plugins can ship as separate binaries: closed-source plugins, plugins written in other languages, plugins distributed without a registry rebuild.
-
-The SPIs are designed today to make that transition source-compatible. Plugin authors who follow the constraints below will be able to ship the same plugin in-process now and out-of-process later, without code changes to the plugin's interface contract.
-
-**Constraints on every SPI method:**
-
-- **Cancellable.** Every method takes a `context.Context` (or equivalent) as the first parameter. Long-running work checks for cancellation; deadlines are respected.
-- **Wire-serializable inputs and outputs.** Every argument and return value is structurally serializable: primitives, slices, maps, and structs whose fields are themselves serializable. No Go channels, no closures, no `func` types, no `interface{}` without a stable encoding, and no opaque pointers to in-process state.
-- **No shared in-process state across calls.** State the plugin needs across calls is passed explicitly per method (e.g., a session token, a snapshot ID, a cursor). Plugins MUST NOT rely on package-level variables, singletons, or registered callbacks set at init time.
-- **Structured errors.** Failures use a structured envelope (`{code, message, retryable, details}`) rather than opaque Go error chains. Codes use the namespacing documented in [Error codes](../reference/error-codes).
-- **Restartable long-lived operations.** Subscriptions, watchers, and streaming results are modeled as cursor-style protocols (the registry holds the cursor; the plugin can be killed and respawned without losing track of where it was). Push-style callback registration is avoided in favor of pull-style polling or explicit re-subscribe with a resume token.
-- **Idempotent retries.** Methods are safe to retry on transient failure. Where a method has side effects, it accepts an idempotency key.
-- **Bounded payloads.** Method arguments and return values declare reasonable size limits. Payloads larger than the limit use a content-addressed reference (cache key, presigned URL) rather than inline bytes.
-
-The default implementations (`RegistryStore`, `HarnessAdapter`, `LayerSourceProvider`, etc.) conform to these constraints today, even though they run in-process. The motivation is forward compatibility rather than present-day distribution: when the out-of-process protocol lands, no built-in needs reshaping.
-
-This section commits to keeping SPIs wire-friendly. It does not commit to a specific transport (subprocess, gRPC, Wasm) or a timeline.
+Marketplace publishing adds no SPI. The git workflow of a `kind: marketplace` sync target is a set of operator-configured shell commands, so there is no write-side git provider. The only SPI surface publishing touches is the `HarnessAdapter` `Source` plugin descriptor. See [Publishing marketplace repositories](../consuming/publishing).
 
 ---
 
 ## External extensions
 
-The registry's HTTP API, SDKs, CLI, and outbound webhook stream are designed to be composed into team-specific tooling without touching the registry binary.
+The registry's HTTP API, SDKs, CLI, and outbound webhook stream compose into team-specific tooling without changes to the registry binary.
 
 ### Programmatic curation (semantic discovery + scoped sync)
 
-A script picks artifacts based on whatever context is meaningful (semantic match against a query, the user's recent work, the active project, an upstream ticket) and then invokes `podium sync` with `--include` flags to materialize the selected set. The script owns the discovery logic; Podium owns the materialization (visibility filtering, harness adaptation, and audit). The on-disk result is reproducible from the include list.
+A script selects artifacts by whatever context matters to the team: a semantic match against a query, the user's recent work, the active project, or an upstream ticket. The script then runs `podium sync` with `--include` flags to materialize the selected set.
 
-See [Custom consumers via the SDK → Programmatic curation](../consuming/custom-via-sdk#patterns) for a worked example.
+The script owns the discovery logic. Podium owns the materialization, which covers visibility filtering, harness adaptation, and audit. The on-disk result is reproducible from the include list.
+
+[Building custom consumers with the SDK](../consuming/custom-via-sdk#patterns) has a worked example.
 
 ### Webhook-driven integrations
 
-Receivers for the outbound webhooks feed Slack channels, ticket trackers, deployment pipelines, and internal dashboards. The registry delivers `artifact.published`, `artifact.deprecated`, `domain.published`, `layer.ingested`, and `layer.history_rewritten` to a receiver. Read events such as `domains.searched` are recorded in the audit log and are never delivered to a receiver. The registry emits the events; the receiver decides what to do.
+Receivers for the outbound webhooks feed Slack channels, ticket trackers, deployment pipelines, and internal dashboards. The registry emits the events, and the receiver decides what to do with them.
 
-Common targets:
+The registry delivers these events to a receiver:
+
+- `artifact.published`
+- `artifact.deprecated`
+- `domain.published`
+- `layer.ingested`
+- `layer.history_rewritten`
+
+Read events such as `domains.searched` are recorded in the audit log and are never delivered to a receiver.
+
+Common uses:
 
 - Notify owners on `artifact.deprecated`.
 - Page on-call on `layer.history_rewritten`.
-- Kick off a downstream rebuild on `artifact.published` matching certain paths.
+- Start a downstream rebuild on `artifact.published` for artifacts that match certain paths.
 
 #### Triggering CI from a webhook (repository_dispatch relay)
 
-A common receiver triggers a CI job from a registry event. The marketplace-publish trigger is one case: a receiver filtered to `layer.ingested` triggers a CI job that runs `podium sync --config` against a `kind: marketplace` target (see [Consuming → Marketplace publishing](../consuming/publishing)). GitHub starts a workflow from an external system only through the authenticated REST API (`repository_dispatch` or `workflow_dispatch`), and a Podium receiver posts an HMAC-signed event body that GitHub's dispatch endpoint does not accept. So a small operator relay bridges the two: the receiver posts the signed event to the relay, the relay verifies the HMAC against the receiver secret, and the relay calls `POST https://api.github.com/repos/<owner>/<repo>/dispatches` with `{"event_type":"podium-layer-ingested"}` and a GitHub token. The workflow listens on `repository_dispatch`.
+A common receiver starts a CI job from a registry event. Marketplace publishing is one case: a receiver filtered to `layer.ingested` starts a CI job that runs `podium sync --config` against a `kind: marketplace` target. [Publishing marketplace repositories](../consuming/publishing) covers that target.
 
-Set the receiver's `debounce` field to coalesce a burst of `layer.ingested` events into one batch delivery and one CI dispatch; with `debounce` unset the relay fires per event and the CI system's own concurrency control collapses the redundant runs. Registering the receiver requires the per-tenant admin role on the receiver CRUD endpoints, which return `auth.forbidden` for a non-admin caller. See [HTTP API → Outbound webhooks](../reference/http-api#outbound-webhooks) for the receiver fields, the SSRF policy on the receiver URL, and the batch envelope.
+GitHub starts a workflow from an external system only through its authenticated REST API (`repository_dispatch` or `workflow_dispatch`). A Podium receiver posts an HMAC-signed event body, which GitHub's dispatch endpoint does not accept. A small operator relay bridges the two:
+
+1. The receiver posts the signed event to the relay.
+2. The relay verifies the HMAC against the receiver secret.
+3. The relay calls `POST https://api.github.com/repos/<owner>/<repo>/dispatches` with `{"event_type":"podium-layer-ingested"}` and a GitHub token.
+4. The workflow, which listens on `repository_dispatch`, runs.
+
+Set the receiver's `debounce` field to coalesce a burst of `layer.ingested` events into one batch delivery and one CI dispatch. With `debounce` unset, the relay fires once per event, and the CI system's own concurrency control collapses the redundant runs.
+
+Registering the receiver requires the per-tenant admin role on the receiver CRUD endpoints. They return `auth.forbidden` to a caller without it. [HTTP API → Outbound webhooks](../reference/http-api#outbound-webhooks) documents the receiver fields, the SSRF policy on the receiver URL, and the batch envelope.
 
 ### Custom pre-merge CI
 
-Each layer's source repo runs whatever CI checks the team wants (naming conventions, sensitivity sign-off, banned dependencies, structural rules) using `podium lint` plus team-specific scripts. These checks are out of Podium's scope; they're ordinary CI in the layer's source repository, gated by branch protection.
+Each layer's source repository runs the CI checks the team chooses, such as naming conventions, sensitivity sign-off, banned dependencies, and structural rules. The checks combine `podium lint` with team-specific scripts. They are outside Podium's scope: they run as ordinary CI in the layer's source repository and are gated by branch protection.
 
 ### Layer source bridges
 
-A script that pulls content from another system (a vendor SaaS, an internal CMS, a documentation generator) and writes it into a `local`-source layer's filesystem path. The registry ingests via `podium layer reingest <id>` (manually or on a schedule the bridge controls). The bridge runs wherever the team wants; Podium serves what's in the layer's path at the time of ingest.
+A bridge is a script that pulls content from another system, such as a vendor SaaS, an internal CMS, or a documentation generator. It writes that content into the filesystem path of a `local`-source layer. The registry ingests it on `podium layer reingest <id>`, which an operator runs manually or the bridge runs on its own schedule.
 
-For a fuller integration that handles its own ingest semantics (signature verification, content addressing, fetch), implement `LayerSourceProvider` directly.
+The bridge runs wherever the team chooses. Podium serves the content present in the layer's path at the time of ingest. [Connecting layer sources](layer-sources#local-paths) covers `local`-source layers.
+
+For a fuller integration that handles its own ingest semantics (signature verification, content addressing, and fetch), implement `LayerSourceProvider` directly.
 
 ### Custom consumer surfaces
 
-A runtime that doesn't fit the built-in consumers (a specialized agent framework, an internal orchestrator, an evaluation harness) wraps the registry HTTP API directly. Identity attaches via the same OAuth flow used by the SDKs; visibility filtering and layer composition still happen server-side. The custom consumer is responsible for caching and any harness-native translation it needs.
+A runtime that does not fit the built-in consumers wraps the registry HTTP API directly. Examples are a specialized agent framework, an internal orchestrator, and an evaluation harness.
+
+Identity attaches through the same OAuth flow the SDKs use. Visibility filtering and layer composition still happen on the registry. The custom consumer is responsible for caching and for any harness-native translation it needs.
 
 ---
 
-## Where to learn more
+## Building an SPI plugin
 
-- [Configure your harness](../consuming/configure-your-harness): for runtime-specific extension via `PODIUM_HARNESS=none` plus custom consumer code.
-- [Custom consumers via the SDK](../consuming/custom-via-sdk): patterns for programmatic curation, eval pipelines, and custom consumer surfaces.
+### Plugin distribution
+
+Plugins ship as Go modules importable into a registry build. A deployment that needs a custom `IdentityProvider` or `GitProvider` builds a registry binary from source with the plugin imported.
+
+### Forward compatibility for out-of-process plugins
+
+Plugins today are in-process Go modules. A future release may add an out-of-process plugin protocol, such as a subprocess over stdin and stdout or gRPC. That protocol would let plugins ship as separate binaries: closed-source plugins, plugins written in other languages, and plugins distributed without a registry rebuild.
+
+The SPIs are designed to make that transition source-compatible. A plugin that follows the constraints below can ship in-process now and out-of-process later, without changes to its interface contract.
+
+Every SPI method meets these constraints:
+
+- **Cancellable.** Every method takes a `context.Context` (or equivalent) as the first parameter. Long-running work checks for cancellation and respects deadlines.
+- **Wire-serializable inputs and outputs.** Every argument and return value is structurally serializable: primitives, slices, maps, and structs whose fields are themselves serializable. Go channels, closures, `func` types, `interface{}` without a stable encoding, and opaque pointers to in-process state are excluded.
+- **No shared in-process state across calls.** State the plugin needs across calls is passed explicitly per method, for example a session token, a snapshot ID, or a cursor. Plugins MUST NOT rely on package-level variables, singletons, or callbacks registered at init time.
+- **Structured errors.** Failures use a structured envelope (`{code, message, retryable, details}`) rather than opaque Go error chains. Codes use the namespacing documented in [Error codes](../reference/error-codes).
+- **Restartable long-lived operations.** Subscriptions, watchers, and streaming results follow a cursor-style protocol. The registry holds the cursor, so the plugin can be killed and respawned without losing its position. Pull-style polling or an explicit re-subscribe with a resume token replaces push-style callback registration.
+- **Idempotent retries.** Methods are safe to retry on transient failure. A method with side effects accepts an idempotency key.
+- **Bounded payloads.** Method arguments and return values declare size limits. A payload larger than the limit uses a content-addressed reference (a cache key or a presigned URL) rather than inline bytes.
+
+The default implementations, such as `RegistryStore`, `HarnessAdapter`, and `LayerSourceProvider`, conform to these constraints today even though they run in-process. The purpose is forward compatibility rather than present-day distribution: when the out-of-process protocol lands, no built-in needs reworking.
+
+Podium commits to keeping the SPIs wire-friendly. It does not commit to a specific transport (subprocess, gRPC, or Wasm) or to a timeline.
+
+---
+
+## Related pages
+
+- [Configure your harness](../consuming/configure-your-harness) covers runtime-specific extension through `PODIUM_HARNESS=none` combined with custom consumer code.
+- [Building custom consumers with the SDK](../consuming/custom-via-sdk) covers programmatic curation, eval pipelines, and custom consumer surfaces.

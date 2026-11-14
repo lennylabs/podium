@@ -6,20 +6,29 @@ description: "Author a parameterized slash command that materializes into Claude
 
 # Your first command
 
-A `command` is a parameterized prompt template a human invokes, typically as a slash command in the harness UI. The harness substitutes the user's arguments into the template and sends the resulting prompt to the model; the agent never sees the template's source.
+This tutorial builds a slash command from an empty directory to a working entry in Claude Code's slash menu. The example is `/standup`, a command that reformats a free-text recap of yesterday's work into a team-standard standup post.
 
-This page walks through writing one slash command end to end: from a blank directory to the command showing up in Claude Code's slash menu. The example is `/standup`: a command that reformats a free-text recap of yesterday's work into a team-standard standup post.
+A `command` is a parameterized prompt template that a human invokes, typically as a slash command in the harness UI. The harness substitutes the user's arguments into the template and sends the resulting prompt to the model. The agent never sees the template's source.
+
+## Before you start
+
+- Complete the [quickstart](../getting-started/quickstart). It installs `podium`, creates the `~/podium-artifacts/` catalog, and sets Claude Code as the default harness.
+- Set `$EDITOR`, or substitute an editor in the commands below.
 
 ---
 
-## Create the artifact
+## Step 1: Create the artifact
 
-Commands do not use a `SKILL.md`. The prose body lives directly in `ARTIFACT.md`. Make the directory and write the manifest:
+A command has no `SKILL.md`. Its prose body lives directly in `ARTIFACT.md`.
+
+Make the directory and open the manifest:
 
 ```bash
 mkdir -p ~/podium-artifacts/personal/dev-loop/standup
 $EDITOR ~/podium-artifacts/personal/dev-loop/standup/ARTIFACT.md
 ```
+
+Write the frontmatter and the template body:
 
 ```markdown
 ---
@@ -57,34 +66,33 @@ Rules:
 - When the user did not mention blockers, write "None."
 ```
 
-A few field notes:
-
-- The command body is materialized verbatim into the target harness's native command location (§6.7), so the harness's own argument convention applies to the body. For example, Claude Code reads `$ARGUMENTS` and `$1` from `.claude/commands/<name>.md`. Podium does not define an argument syntax of its own; write the body for the harness you target, or stay within a portable form.
-- Podium does not project commands through MCP. Both `podium sync` and the MCP server materialize the command to disk in the harness-native format, and the harness's slash-command system surfaces it.
+Podium materializes the command body verbatim into the target harness's native command location. The harness's own argument convention therefore applies to the body. Claude Code, for example, reads `$ARGUMENTS` and `$1` from `.claude/commands/<name>.md`. Podium defines no argument syntax of its own, so write the body for the harness you target or stay within a portable form.
 
 ---
 
-## Materialize
+## Step 2: Materialize the command
+
+Run `podium sync` from your project directory:
 
 ```bash
 cd ~/projects/your-project
 podium sync
 ```
 
-Claude Code's adapter writes commands to `.claude/commands/<name>.md`. Verify:
+Claude Code's adapter writes commands to `.claude/commands/<name>.md`. Confirm that the file exists:
 
 ```bash
 ls .claude/commands/
 # standup.md
 ```
 
-The full per-harness destination table is in [Configure your harness](../consuming/configure-your-harness).
+Podium does not project commands through MCP. Both `podium sync` and the MCP server materialize the command to disk in the harness-native format, and the harness's slash-command system surfaces it. [Configure your harness](../consuming/configure-your-harness) lists the destination for every harness.
 
 ---
 
-## Use it
+## Step 3: Run the command
 
-In Claude Code's prompt:
+Type the command and its arguments in Claude Code's prompt:
 
 ```
 /standup yesterday I shipped the layer-composition PR, today I'm picking up
@@ -95,17 +103,17 @@ Claude Code substitutes the trailing text into `$ARGUMENTS`, sends the resulting
 
 ---
 
-## Lint
+## Step 4: Lint the command
 
 ```bash
 podium lint --registry ~/podium-artifacts/
 ```
 
-Lint validates frontmatter against the `command` schema and resolves prose references in the body (markdown links to bundled files or other artifacts). CI runs the same checks on PRs.
+Lint validates the frontmatter against the `command` schema. It also resolves prose references in the body, which are markdown links to bundled files or to other artifacts. A clean run prints `lint: no issues.` When the catalog lives in a Git-source layer, CI runs the same checks on pull requests (see [Connecting layer sources](../deployment/layer-sources#git-repositories)).
 
 ---
 
-## What's next
+## Next steps
 
-- **Move on to agents.** Commands are static prompts with a slot for user input. When the task needs to call tools, run scripts, or chain reasoning, write an `agent` instead. See [Your first agent](your-first-agent).
-- **Promote the command to a domain.** Commands shared across a team typically live in a tracked domain such as `engineering/dev-loop/` with a `DOMAIN.md` describing the set. See [Domains](domains).
+- **Move on to agents.** A command is a static prompt with a slot for user input. When the task calls tools, runs scripts, or chains reasoning, write an `agent` instead. See [Your first agent](your-first-agent).
+- **Promote the command to a domain.** Commands shared across a team typically live in a tracked domain such as `engineering/dev-loop/`, with a `DOMAIN.md` that describes the set. See [Domains](domains).

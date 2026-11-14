@@ -1,27 +1,29 @@
 ---
 title: Implementation status
 nav_order: 1
-description: What's built today, what's published, and where to track progress.
+description: What Podium implements today, where each release is published, and how to track progress.
 ---
 
 # Implementation status
 
+This page records what Podium implements today, where each release is published, and how to follow the work toward 1.0.
+
 Podium is at **0.6.x**, an early release. The v1 surface is implemented and published. The surface and its behavior may still change before 1.0, so pin a specific version in production and watch the [changelog](changelog) for breaking changes.
 
-Install the CLI via Homebrew, Scoop, a direct binary download, or a build from source. [Quickstart](../getting-started/quickstart#1-install-the-cli) has the commands. The published container image carries the `podium-server` registry binary only.
+Install the CLI through Homebrew, Scoop, a direct binary download, or a build from source. [Quickstart](../getting-started/quickstart#1-install-the-cli) has the commands. The published container image carries only the `podium-server` registry binary.
 
 ---
 
 ## What's built
 
-The implementation covers:
+The implementation covers the following surfaces:
 
-- **The local tier** end-to-end: `podium sync` against a catalog directory on disk, composing that directory's ordered layers, with the built-in harness adapters.
-- **The single-node and clustered tiers** end-to-end: `podium serve` (single node on embedded SQLite and `sqlite-vec`, clustered on Postgres, `pgvector`, and S3-compatible object storage), the registry HTTP API, `LayerComposer`, visibility filtering, OIDC and SCIM, domain composition, immutability and versioning, the layer CLI, signing, the workspace overlay with local BM25 search, the dependency graph and impact analysis, the registry audit log with hash-chain integrity, and the meta-tools (`search_domains`, `search_artifacts`, `load_domain`, `load_artifact`).
-- **MCP server**: `podium-mcp` with the meta-tool surface, materialization through the configured harness adapter, and identity-aware loading.
-- **Marketplace publishing**: a `podium sync` target of `kind: marketplace` renders the catalog into harness-native git-repo distributions (the Claude, Codex, and Cursor plugin marketplaces, the Gemini extension, the Pi package, and the Hermes tap) and runs an operator-configured git workflow to push them. See [Marketplace publishing](../consuming/publishing).
-- **SDKs**: `podium-py` and `@lennylabs/podium-sdk` (TypeScript) as thin HTTP clients for programmatic runtimes.
-- **Plugin surface**: every SPI documented in [Extending](../deployment/extending), including the `LayerSourceProvider`, `GitProvider`, `IdentityProvider`, `HarnessAdapter`, `MaterializationHook`, `SignatureProvider`, `NotificationProvider`, and search/embedding providers.
+- **The local deployment mode**, end to end. `podium sync` runs against a catalog directory on disk, composes that directory's ordered layers, and materializes through the built-in harness adapters.
+- **The single-node and clustered deployment modes**, end to end. `podium serve` runs a single node on embedded SQLite and `sqlite-vec`, and a clustered deployment on Postgres, `pgvector`, and S3-compatible object storage. Both modes include the registry HTTP API, `LayerComposer`, visibility filtering, OIDC and SCIM, domain composition, immutability and versioning, and the layer CLI. They also include signing, the workspace overlay with local BM25 search, the dependency graph and impact analysis, the registry audit log with hash-chain integrity, and the meta-tools (`search_domains`, `search_artifacts`, `load_domain`, and `load_artifact`).
+- **The MCP server.** `podium-mcp` serves the meta-tools, materializes through the configured harness adapter, and loads artifacts according to the caller's identity.
+- **Marketplace publishing.** A `podium sync` target of `kind: marketplace` renders the catalog into harness-native git-repo distributions: the Claude, Codex, and Cursor plugin marketplaces, the Gemini extension, the Pi package, and the Hermes tap. It then runs an operator-configured git workflow to push them. See [Publishing marketplace repositories](../consuming/publishing).
+- **SDKs.** `podium-py` and `@lennylabs/podium-sdk` (TypeScript) are thin HTTP clients for programmatic runtimes.
+- **The plugin surface.** Every SPI documented in [Extending](../deployment/extending) is implemented, including `LayerSourceProvider`, `GitProvider`, `IdentityProvider`, `HarnessAdapter`, `MaterializationHook`, `SignatureProvider`, `NotificationProvider`, and the search and embedding providers.
 
 ---
 
@@ -38,7 +40,7 @@ The implementation covers:
 
 ## On the roadmap toward 1.0
 
-Behavior between 0.6.x and 1.0 may break. Watch the [changelog](changelog) for specifics. Topics under active discussion:
+Behavior between 0.6.x and 1.0 may break, and the [changelog](changelog) records each change. These topics are under active discussion:
 
 - Tightening the spec where field semantics are still under-specified.
 - Adapters for harnesses outside the current built-in roster, with conformance coverage for each.
@@ -50,16 +52,16 @@ Behavior between 0.6.x and 1.0 may break. Watch the [changelog](changelog) for s
 ## What contributions help most today
 
 - **Run the suite.** Build from source, run `make test`, and report failures or environment-specific issues.
-- **Sketch a harness adapter.** Prototyping an adapter for a new harness helps validate the `HarnessAdapter` SPI.
-- **Sketch a `LayerSourceProvider` plugin.** A custom source backend (S3, OCI, internal CMS) helps validate that SPI surface.
+- **Sketch a harness adapter.** A prototype adapter for a new harness tests the `HarnessAdapter` SPI.
+- **Sketch a `LayerSourceProvider` plugin.** A custom source backend (S3, OCI, or an internal CMS) tests that SPI.
 - **Comparisons and use cases.** Report where Podium does or does not fit a workflow.
-- **Security review.** Threat-model the design and report findings related to identity, audit, signing, and visibility.
-- **Documentation fixes.** Small PRs for typos, broken links, or unclear passages are welcome anytime.
+- **Security review.** Threat-model the design, and report findings related to identity, audit, signing, and visibility.
+- **Documentation fixes.** Small PRs for typos, broken links, or unclear passages are welcome at any time.
 
 ---
 
 ## How to track progress
 
-- **Commits on `main`** show the current work: [github.com/lennylabs/podium/commits/main](https://github.com/lennylabs/podium/commits/main). Each tagged release has an entry in [`CHANGELOG.md`](https://github.com/lennylabs/podium/blob/main/CHANGELOG.md).
-- **Open issues and discussions** at [github.com/lennylabs/podium](https://github.com/lennylabs/podium) capture the current conversation about design and direction.
-- **The test suite** is the most precise picture of what's wired up. Run `make test` and inspect the reporters under `tools/` for coverage breakdowns.
+- **Commits on `main`** show the current work at [github.com/lennylabs/podium/commits/main](https://github.com/lennylabs/podium/commits/main). Each tagged release has an entry in [`CHANGELOG.md`](https://github.com/lennylabs/podium/blob/main/CHANGELOG.md).
+- **Open issues and discussions** at [github.com/lennylabs/podium](https://github.com/lennylabs/podium) record the current conversation about design and direction.
+- **The test suite** shows precisely what is wired up. Run `make test`, and inspect the reporters under `tools/` for coverage breakdowns.

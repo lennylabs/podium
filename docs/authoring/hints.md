@@ -1,27 +1,25 @@
 ---
 title: Hints
 nav_order: 11
-description: Advisory metadata fields (effort_hint and model_class_hint) that capture authoring intent about reasoning budget and model capability.
+description: The advisory effort_hint and model_class_hint fields, which record authoring intent about reasoning budget and model capability.
 ---
 
 # Hints
 
-Advisory fields capture authoring intent about the runtime resources an artifact ideally consumes:
+This page covers the hint fields, which record the runtime resources an artifact ideally consumes. Hints apply to `agent`, `skill`, and `command` artifacts.
 
 ```yaml
 effort_hint: low | medium | high | max
 model_class_hint: nano | small | medium | large | frontier
 ```
 
-Both are advisory only. Podium does not enforce them. Adapters and SDK consumers translate to host-native knobs (model selector, extended-thinking flag, retry budgets) where supported; otherwise ignored.
-
-Applicable to types `agent`, `skill`, and `command`. Ingest lint warns when set on other types.
+Both fields are advisory, and Podium does not enforce them. Adapters and SDK consumers can translate them to host-native settings, such as a model selector, an extended-thinking flag, or a retry budget. Consumers that have no such setting ignore them. Ingest lint warns when a hint is set on any other type.
 
 ---
 
 ## effort_hint
 
-Hint about the reasoning budget the artifact ideally consumes:
+`effort_hint` describes the reasoning budget the artifact ideally consumes:
 
 | Value | Meaning |
 |:--|:--|
@@ -30,13 +28,13 @@ Hint about the reasoning budget the artifact ideally consumes:
 | `high` | Deep reasoning. Extended thinking encouraged. Generous token budget. |
 | `max` | Maximum effort. Extended thinking, retry loops, validator strictness. |
 
-Use `low` for skills like greeting handlers or simple lookups, where time-to-first-token matters more than depth. Use `max` for agents that do open-ended investigation, multi-step planning, or anything where the right answer matters more than throughput.
+Use `low` for skills such as greeting handlers or simple lookups, where time-to-first-token matters more than depth. Use `max` for agents that do open-ended investigation or multi-step planning, or wherever the right answer matters more than throughput.
 
 ---
 
 ## model_class_hint
 
-Hint about the model capability tier:
+`model_class_hint` describes the model capability tier the artifact ideally runs on:
 
 | Value | Approximate tier (industry-standard) |
 |:--|:--|
@@ -46,38 +44,32 @@ Hint about the model capability tier:
 | `large` | Higher-capability tier. |
 | `frontier` | Top-of-line model (Opus, GPT-5, Gemini Ultra, etc.). |
 
-The mapping to specific models is harness- and deployment-dependent. The tiers are author-facing labels; deployment configuration decides which model name backs each tier.
+The tiers are author-facing labels. The mapping to specific models depends on the harness and the deployment, and deployment configuration decides which model name backs each tier.
 
 ---
 
 ## Advisory framing
 
-These fields are advisory:
+Hints record author intent without enforcement:
 
-- Authors set them based on what the artifact ideally wants.
-- Consumers (harness adapter, SDK caller) decide whether and how to honor them.
-- Hosts without a notion of "model class" or "effort" ignore the fields.
-- Podium itself never validates that a deployment has a model matching the hint.
+- Authors set them based on what the artifact ideally needs.
+- Consumers (the harness adapter or an SDK caller) decide whether and how to honor them.
+- Hosts without a notion of model class or effort ignore the fields.
+- Podium never validates that a deployment has a model matching the hint.
 
-Concretely: an artifact with `model_class_hint: frontier` does not fail to load when a deployment lacks a frontier-tier model. The host runtime makes the routing decision; the hint is one signal among many (cost budget, availability, user override).
+For example, an artifact with `model_class_hint: frontier` still loads when a deployment lacks a frontier-tier model. The host runtime makes the routing decision, and the hint is one signal among several, alongside cost budget, availability, and user override.
+
+The fields are advisory because authors do not know what models a consuming deployment has. An author at one company cannot tell whether the consuming team has access to frontier models, whether its cost budget allows them, or whether its runtime respects per-call model selection. Recording intent without enforcement keeps the artifact portable across deployments. Consumers with the relevant runtime settings can honor the hint, and consumers without them ignore it. The artifact works in both cases.
 
 ---
 
 ## Adapter support
 
-No built-in adapter currently translates these fields. Custom SDK consumers that build their own routing logic can read the hints from the manifest and route accordingly. Adapter-level honoring lands as adapters add the capability.
-
----
-
-## Why these fields are advisory
-
-Authors don't know what models the consumer's deployment has. A skill author at one company doesn't know whether the consuming team has access to frontier models, whether their cost budgets allow it, or whether the runtime they use respects per-call model selection.
-
-Recording author intent without enforcement keeps the artifact portable across deployments. Consumers with the relevant runtime knobs can opt to honor the hint; consumers without those knobs ignore it without breaking. The artifact still works either way.
+No built-in adapter currently translates these fields. A custom SDK consumer that builds its own routing logic can read the hints from the manifest and route accordingly. Adapter-level handling arrives as individual adapters add the capability.
 
 ---
 
 ## Lint behavior
 
-- `effort_hint` or `model_class_hint` on a `context`, `rule`, `hook`, or `mcp-server` artifact: lint warning ("hints apply only to agent / skill / command").
-- Both fields are optional. Missing fields produce no warnings.
+- Setting `effort_hint` or `model_class_hint` on a `context`, `rule`, `hook`, or `mcp-server` artifact draws a lint warning ("hints apply only to agent / skill / command").
+- Both fields are optional, and omitting them produces no warning.

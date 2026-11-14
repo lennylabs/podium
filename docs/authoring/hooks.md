@@ -1,10 +1,12 @@
 ---
 title: Hooks
 nav_order: 8
-description: Lifecycle observers with a canonical hook_event taxonomy and a shell hook_action.
+description: Hook artifacts run a shell hook_action when a canonical hook_event fires in the harness.
 ---
 
 # Hooks
+
+This page covers `hook` artifacts: the canonical event names, how to write a hook action, and how harness coverage differs.
 
 A `hook` artifact wires a shell action into a harness lifecycle event. Use it to log, notify, run a check, inject context, or otherwise observe and influence the agent loop.
 
@@ -20,32 +22,33 @@ hook_action: |
 ---
 ```
 
-`hook_event` is one of the canonical event names defined by Podium (see [Canonical events](#canonical-events) below). The harness adapter translates the canonical name into the harness's native event vocabulary at materialization time.
+A hook has two required fields:
 
-`hook_action` is a shell snippet executed when the event fires. The harness writes a JSON payload to the action's stdin.
+- `hook_event` is one of the canonical event names that Podium defines (see [Canonical events](#canonical-events)). The harness adapter translates the canonical name into the harness's native event vocabulary at materialization time.
+- `hook_action` is a shell snippet that runs when the event fires. The harness writes a JSON payload to the action's stdin.
 
 ---
 
 ## Canonical events
 
-The canonical event taxonomy stays harness-agnostic. The adapter does the translation. Events are grouped by concern.
+The canonical event names are harness-agnostic, and the adapter translates them. The tables below group the events by concern.
 
-**Session lifecycle**
+### Session lifecycle
 
 | `hook_event` | Fires when |
 |:--|:--|
 | `session_start` | An agent session begins or resumes. |
 | `session_end` | An agent session terminates. |
 
-**Prompt**
+### Prompt
 
 | `hook_event` | Fires when |
 |:--|:--|
 | `user_prompt_submit` | After the user submits a prompt, before the model processes it. Can inject context or block. |
 
-**Tool calls (generic)**
+### Tool calls (generic)
 
-These cover every tool call regardless of the underlying tool.
+These events cover every tool call regardless of the underlying tool.
 
 | `hook_event` | Fires when |
 |:--|:--|
@@ -53,11 +56,9 @@ These cover every tool call regardless of the underlying tool.
 | `post_tool_use` | After any tool call succeeds. |
 | `post_tool_use_failure` | After a tool call fails (error, timeout, denied). |
 
-**Tool calls (subtypes)**
+### Tool calls (subtypes)
 
-Subtype events target a specific kind of tool call. Use them when the action only applies to that category, such as a formatter on file edits or a secrets scanner on shell commands. When a harness exposes a native subtype event, the adapter wires the subtype straight onto it: Cursor maps `pre_shell_execution`, `pre_mcp_execution`, `pre_read_file`, and `post_file_edit` onto `beforeShellExecution`, `beforeMCPExecution`, `beforeReadFile`, and `afterFileEdit`. When a harness exposes only the generic tool events, the adapter maps the subtype onto the generic native event and installs a tool-name matcher, so only tool calls in that category fire the action. Claude Code receives a shell subtype as a `PreToolUse` or `PostToolUse` entry matching `^Bash$`, an MCP subtype matching `^mcp__`, `pre_read_file` matching `^Read$`, and `post_file_edit` matching `^(Edit|Write|NotebookEdit)$`. Codex matches its shell subtypes on `^Bash$`, and Gemini matches them on `^run_shell_command$`.
-
-The matcher narrows by tool name alone. An action that depends on the arguments of the call still reads them from the payload on stdin.
+Subtype events target one kind of tool call. Use them when the action applies only to that category, such as a formatter on file edits or a secrets scanner on shell commands.
 
 | `hook_event` | Fires when |
 |:--|:--|
@@ -68,34 +69,48 @@ The matcher narrows by tool name alone. An action that depends on the arguments 
 | `pre_read_file` | Before the agent reads a file. |
 | `post_file_edit` | After the agent edits a file. |
 
-**Permission**
+The adapter maps a subtype in one of two ways:
+
+- When the harness exposes a native subtype event, the adapter wires the subtype straight onto it.
+- When the harness exposes only the generic tool events, the adapter maps the subtype onto the generic native event and installs a tool-name matcher. Only tool calls in that category then fire the action.
+
+The mappings for specific harnesses:
+
+- **Cursor** has native events. `pre_shell_execution`, `pre_mcp_execution`, `pre_read_file`, and `post_file_edit` map onto `beforeShellExecution`, `beforeMCPExecution`, `beforeReadFile`, and `afterFileEdit`.
+- **Claude Code** receives a `PreToolUse` or `PostToolUse` entry with a matcher: `^Bash$` for a shell subtype, `^mcp__` for an MCP subtype, `^Read$` for `pre_read_file`, and `^(Edit|Write|NotebookEdit)$` for `post_file_edit`.
+- **Codex** matches its shell subtypes on `^Bash$`.
+- **Gemini** matches its shell subtypes on `^run_shell_command$`.
+
+The matcher narrows by tool name alone. An action that depends on the arguments of the call still reads them from the payload on stdin.
+
+### Permission
 
 | `hook_event` | Fires when |
 |:--|:--|
 | `permission_request` | The harness requests user permission for a sensitive action. |
 | `permission_denied` | A tool call is denied (by the user, by policy, or by an auto-deny classifier). |
 
-**Subagent**
+### Subagent
 
 | `hook_event` | Fires when |
 |:--|:--|
 | `subagent_start` | A subagent (delegated child) is spawned. |
 | `subagent_stop` | A subagent finishes. |
 
-**Turn**
+### Turn
 
 | `hook_event` | Fires when |
 |:--|:--|
 | `stop` | The agent finishes responding (end of turn). |
 
-**Compaction**
+### Compaction
 
 | `hook_event` | Fires when |
 |:--|:--|
 | `pre_compact` | Before context compaction. |
 | `post_compact` | After context compaction completes. |
 
-**Notifications**
+### Notifications
 
 | `hook_event` | Fires when |
 |:--|:--|
@@ -103,17 +118,9 @@ The matcher narrows by tool name alone. An action that depends on the arguments 
 
 ---
 
-## Coverage varies by harness
+## Reading the payload
 
-Not every harness implements every event in the canonical list. Coverage is graded per harness rather than per event. When an artifact declares `target_harnesses:`, ingest lint errors for a named harness whose `hook_event` grade is ✗ (`claude-desktop`, `claude-cowork`, `opencode`, `pi`, and `hermes`) and warns for the ⚠ grade (`cursor`). When `target_harnesses:` is absent, ingest stays permissive and a ✗ harness is caught at materialization: a `load_artifact` onto it fails with `materialize.untranslatable` (§6.9). A harness graded ✓ or ⚠ that has no native mapping for the specific canonical event writes no hook and reports no error, so confirm the event against the harness's own hook documentation before relying on a less common one.
-
-For the events a specific harness emits, refer to that harness's hook documentation. The harness's own docs are the source of truth, since each vendor's surface evolves independently. The full roster of supported harnesses (with adapter values and documentation links) is in [Configure your harness](../consuming/configure-your-harness#supported-harnesses).
-
----
-
-## Payload handling
-
-The harness writes a JSON payload to stdin. The schema is harness-defined and event-defined. Common fields appear across most harnesses (session identifier, working directory, tool name and arguments for tool events, prompt text for `user_prompt_submit`), but the exact field set varies.
+The harness writes a JSON payload to stdin, and the harness and the event define its schema. Most harnesses share common fields, such as the session identifier, the working directory, the tool name and arguments for tool events, and the prompt text for `user_prompt_submit`. The exact field set varies.
 
 A simple action reads the payload as a string:
 
@@ -123,7 +130,7 @@ hook_action: |
   echo "$INPUT" >> ~/.podium/sessions.log
 ```
 
-For structured handling, use `jq` with defaults so the action stays portable across harness versions:
+For structured handling, use `jq` with defaults, so the action stays portable across harness versions:
 
 ```bash
 hook_action: |
@@ -133,28 +140,20 @@ hook_action: |
     >> ~/.podium/session-stats.csv
 ```
 
-Declare the dependency:
+Declare the `jq` dependency:
 
 ```yaml
 runtime_requirements:
   system_packages: [jq]
 ```
 
-A Podium MCP server whose host advertises its runtime capabilities or opts into enforcement refuses a `load_artifact` when a declared system package is unavailable, with `materialize.runtime_unavailable`. `podium sync` does not check requirements. See [Bundled resources](bundled-resources).
+A Podium MCP server whose host advertises its runtime capabilities, or opts into enforcement, refuses a `load_artifact` when a declared system package is unavailable, with `materialize.runtime_unavailable`. `podium sync` does not check requirements. See [Bundled resources](bundled-resources#execution-model).
 
 ---
 
-## Authoring guidance
+## Moving the action into a bundled script
 
-- **Hooks ship code.** A hook's `hook_action` runs on the host with the user's privileges. Treat hooks like any other script the catalog ships: review, sign, and consider sandboxing. Set `sandbox_profile:` for sensitive hooks so a host with sandbox capability can constrain the action. The `sandbox_profile` row of the §6.7.1 capability matrix is ✗ for `codex`, so a hook that sets the field fails materialization onto Codex with `materialize.untranslatable` even though Codex translates the `hook_event` itself.
-- **Keep actions short.** A long shell action embedded in YAML gets ugly. Move complex logic into a bundled script (in `scripts/`) and have the action invoke it. The script lives alongside `ARTIFACT.md` and ships with the hook.
-- **Make the description specific.** "Log session-end events to a local audit file." is fine. "Lifecycle observer." is too vague to surface in search.
-- **Don't depend on payload fields.** Harnesses change their payload schema over time. Use `jq` defaults (`jq -r '.field // empty'`) or guard against missing fields in shell.
-- **Pick the canonical event closest to the intent.** `pre_tool_use` covers shell, MCP, file-edit, and any other tool call uniformly; the adapter translates to whichever native event the harness emits. Selecting a more specific harness-native event by working around the canonical taxonomy makes the artifact non-portable.
-
----
-
-## Example: bundled-script pattern
+A long shell action embedded in YAML is hard to read. Move complex logic into a bundled script in `scripts/` and have the action invoke it. The script lives alongside `ARTIFACT.md` and ships with the hook.
 
 ```
 finance/audit/log-session-end/
@@ -196,4 +195,31 @@ TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 echo "[${TIMESTAMP}] session end: ${CONV_ID}" >> "${LOG_FILE}"
 ```
 
-The hook is now testable in isolation (`bash scripts/log.sh < payload.json`), the logic is in one place, and the YAML stays readable. Bundled resources materialize with mode 0644, so the action invokes the interpreter explicitly rather than executing the script path directly.
+The logic now lives in one place, the YAML stays readable, and the hook is testable in isolation with `bash scripts/log.sh < payload.json`. Bundled resources materialize with mode 0644, so the action invokes the interpreter explicitly rather than executing the script path directly.
+
+---
+
+## Authoring guidance
+
+- **Treat hooks as shipped code.** A hook's `hook_action` runs on the host with the user's privileges. Review and sign hooks like any other script the catalog ships, and consider sandboxing. Set `sandbox_profile:` on a sensitive hook, so a host with sandbox capability can constrain the action.
+- **Keep actions short.** Move anything longer than a few lines into a bundled script, as shown in [Moving the action into a bundled script](#moving-the-action-into-a-bundled-script).
+- **Write a specific description.** "Log session-end events to a local audit file." surfaces in search. "Lifecycle observer." is too vague to surface.
+- **Guard against missing payload fields.** Harnesses change their payload schema over time. Use `jq` defaults (`jq -r '.field // empty'`) or guard against missing fields in shell.
+- **Pick the canonical event closest to the intent.** `pre_tool_use` covers shell, MCP, file-edit, and any other tool call uniformly, and the adapter translates it to whichever native event the harness emits. Selecting a harness-native event by working around the canonical names makes the artifact non-portable.
+
+---
+
+## Coverage varies by harness
+
+Not every harness implements every canonical event, and coverage is graded per harness rather than per event.
+
+| Grade | Harnesses | Lint, when `target_harnesses:` names the harness |
+|:--|:--|:--|
+| ✗ | `claude-desktop`, `claude-cowork`, `opencode`, `pi`, and `hermes` | Error. |
+| ⚠ | `cursor` | Warning. |
+
+When `target_harnesses:` is absent, ingest stays permissive, and materialization catches a ✗ harness: a `load_artifact` onto it fails with `materialize.untranslatable`.
+
+A harness graded ✓ or ⚠ that has no native mapping for a specific canonical event writes no hook and reports no error. Confirm the event against the harness's own hook documentation before relying on a less common one. Each vendor's hook surface evolves independently, so the harness's documentation is the source of truth for the events it emits. [Configure your harness](../consuming/configure-your-harness#supported-harnesses) lists every supported harness with its adapter value and documentation link.
+
+The `sandbox_profile` row of the [capability matrix in §6.7.1 of the specification](https://github.com/lennylabs/podium/blob/main/spec/06-mcp-server.md#671-the-authors-burden) is ✗ for `codex`. A hook that sets `sandbox_profile:` therefore fails materialization onto Codex with `materialize.untranslatable`, even though Codex translates the `hook_event` itself.

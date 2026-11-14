@@ -1,43 +1,87 @@
 ---
 title: Vector backends
-nav_order: 10
-description: Configure Pinecone, Weaviate Cloud, or Qdrant Cloud as the registry's vector backend, on a single-node or clustered deployment.
+nav_order: 12
+description: Choose, configure, and migrate the vector backend a single-node or clustered registry uses for hybrid search.
 ---
 
 # Vector backends
 
-Vector search runs inside the registry process. The vector backend is selected per deployment through `PODIUM_VECTOR_BACKEND`. The default is `pgvector` once the metadata store is Postgres and `sqlite-vec` otherwise. The default binary also ships adapters for Pinecone, Weaviate Cloud, and Qdrant Cloud. Custom backends register through the `RegistrySearchProvider` SPI, which [Extending](extending) covers.
-
-`podium sync`, the SDKs, and the MCP server never connect to the registry's vector backend directly. They reach the registry over HTTP, and the registry handles its own vector store. The MCP server opens a vector backend of its own only for the workspace-local overlay index described under [Local-overlay search on the MCP server](#local-overlay-search-on-the-mcp-server) below. A filesystem-source registry has no registry-side vector search at all because there is no registry process running to query.
+This page covers the vector backend behind the registry's hybrid search. It explains how to choose a backend, how to configure Pinecone, Weaviate Cloud, or Qdrant Cloud, and how to move a running deployment to another backend or embedding model. It is for operators of a single-node or clustered registry.
 
 ---
 
-## What you need
+## How vector search runs
 
-- A registry process, running either on the [single node](single-node) tier through `podium serve --standalone` or on the [clustered](clustered) tier.
-- An account on the managed service and an empty index or collection prepared per that service's documentation.
-- The API key and endpoint for the index or collection.
+Vector search runs inside the registry process. `podium sync`, the SDKs, and the MCP server never connect to the registry's vector backend directly. They reach the registry over HTTP, and the registry queries its own vector store.
 
-The [local](local) tier cannot use a managed vector backend. `podium sync` materializes and never queries a vector store. For hybrid search against a managed backend without standing up the full clustered stack, run `podium serve --standalone` against the same directory and configure the vector backend on that process.
+The MCP server opens a vector backend of its own only for the workspace-local overlay index. [Local-overlay search on the MCP server](#local-overlay-search-on-the-mcp-server) covers that path.
+
+A filesystem-source registry has no registry-side vector search, because no registry process runs to answer a query.
+
+---
+
+## Choosing a backend
+
+`PODIUM_VECTOR_BACKEND` selects the backend for a deployment. The default binary ships every backend in this table.
+
+| Backend | `PODIUM_VECTOR_BACKEND` | Default |
+|:--|:--|:--|
+| pgvector, collocated with the Postgres metadata store | `pgvector` | When the metadata store is Postgres |
+| sqlite-vec, collocated with the embedded SQLite metadata store | `sqlite-vec` | When the metadata store is not Postgres |
+| Pinecone | `pinecone` | No |
+| Weaviate Cloud | `weaviate-cloud` | No |
+| Qdrant Cloud | `qdrant-cloud` | No |
+
+The choice affects operations in these ways:
+
+- The collocated backends need no external service. They tag each vector with its embedding model, so `podium admin reembed` can change the model in place.
+- A managed backend needs a fresh index or collection for any embedding-model change. [Switching backends on a running deployment](#switching-backends-on-a-running-deployment) has the procedure.
+- A managed backend can compute embeddings itself, which removes the need for an external embedding provider. [Self-embedding and storage-only modes](#self-embedding-and-storage-only-modes) explains the two modes.
+- The managed service's costs, identity, and quotas are the operator's responsibility.
+
+A custom backend registers through the `RegistrySearchProvider` SPI, which [Extending](extending#spis) covers.
+
+The [local](local) deployment mode cannot use a managed vector backend, because `podium sync` materializes and never queries a vector store. For hybrid search against a managed backend without the full clustered stack, run `podium serve --standalone` against the same directory and configure the vector backend on that process.
 
 ---
 
 ## Self-embedding and storage-only modes
 
-Each managed backend supports two modes, selected by whether an inference-model variable is set:
+Each managed backend runs in one of two modes. The backend's inference-model variable selects the mode: set means self-embedding, unset means storage-only.
 
-- **Self-embedding.** The backend computes the embedding from the text projection the registry submits. Pinecone Integrated Inference, Weaviate Cloud vectorizers, and Qdrant Cloud Inference all support this. No external embedding provider is required.
-- **Storage-only.** The backend stores vectors that the registry computes through a configured `EmbeddingProvider`. The provider is selected via `PODIUM_EMBEDDING_PROVIDER` (`openai`, `voyage`, `cohere`, or `ollama`) and is required in this mode.
+| Mode | What computes the embeddings | Embedding provider |
+|:--|:--|:--|
+| Self-embedding | The backend, from the text projection the registry submits. Pinecone Integrated Inference, Weaviate Cloud vectorizers, and Qdrant Cloud Inference all provide this. | Not required |
+| Storage-only | The registry, through the configured `EmbeddingProvider`. The backend stores the vectors. | Required: `PODIUM_EMBEDDING_PROVIDER` set to `openai`, `voyage`, `cohere`, or `ollama` |
 
-An explicitly configured embedding provider overrides this selection. When `PODIUM_EMBEDDING_PROVIDER` names a provider, or `registry.yaml` carries an `embedding_provider:` block, the registry builds that embedder, opens the backend at the embedder's dimension, and writes vectors it computed itself even though the inference-model variable is set. The managed index is sized for the hosted model, so it rejects vectors of a different dimension. Leave `PODIUM_EMBEDDING_PROVIDER` unset, or set it to `none`, on a self-embedding deployment. The per-mode default (`ollama` on a single node, `openai` on a clustered deployment) applies only while the variable is unset and no `embedding_provider:` block is present, so the default is not an override.
+### Embedding-provider precedence
 
-Setting `PODIUM_EMBEDDING_PROVIDER` to the empty string, or to `none`, disables the registry-side embedder. On a storage-only backend, search then degrades to BM25 over manifest text. On a self-embedding backend (`pinecone`, `weaviate-cloud`, or `qdrant-cloud` with its inference-model or vectorizer variable set) the backend keeps embedding server-side, so hybrid search continues. Set `PODIUM_NO_EMBEDDINGS=true`, or pass `--no-embeddings` to `podium serve`, to force BM25-only regardless of the configured backend.
+An explicitly configured embedding provider overrides the mode selection. When `PODIUM_EMBEDDING_PROVIDER` names a provider, or `registry.yaml` carries an `embedding_provider:` block, the registry builds that embedder. It opens the backend at the embedder's dimension and writes vectors it computed itself, even though the inference-model variable is set. The managed index is sized for the hosted model, so it rejects vectors of a different dimension.
+
+On a self-embedding deployment, leave `PODIUM_EMBEDDING_PROVIDER` unset or set it to `none`. The per-mode default (`ollama` on a single node, `openai` on a clustered deployment) applies only while the variable is unset and no `embedding_provider:` block is present, so the default is not an override.
+
+### Disabling embeddings
+
+Setting `PODIUM_EMBEDDING_PROVIDER` to the empty string or to `none` disables the registry-side embedder. The effect depends on the backend:
+
+- On a storage-only backend, search degrades to BM25 over manifest text.
+- On a self-embedding backend (`pinecone`, `weaviate-cloud`, or `qdrant-cloud` with its inference-model or vectorizer variable set), the backend keeps embedding server-side, so hybrid search continues.
+
+To force BM25-only search regardless of the configured backend, set `PODIUM_NO_EMBEDDINGS=true` or pass `--no-embeddings` to `podium serve`.
+
+---
+
+## Prerequisites for a managed backend
+
+- A registry process, either on a [single node](single-node) through `podium serve --standalone` or on a [clustered](clustered) deployment.
+- An account on the managed service, with an empty index or collection prepared as that service's documentation describes.
+- The API key and endpoint for the index or collection.
 
 ---
 
 ## Pinecone
 
-Server-side environment variables:
+Set these variables in the registry's environment:
 
 | Variable | Description | Default |
 |:--|:--|:--|
@@ -59,7 +103,7 @@ export PODIUM_PINECONE_INFERENCE_MODEL=multilingual-e5-large  # optional
 podium serve --standalone --layer-path ~/podium-artifacts/
 ```
 
-This setup runs as a single binary with embedded SQLite metadata and filesystem object storage. Pinecone holds the artifact embeddings. Postgres is not required, and no separate embedding service is needed when self-embedding is on.
+This setup runs as a single binary with embedded SQLite metadata and filesystem object storage, and Pinecone holds the artifact embeddings. It requires no Postgres, and with self-embedding on it requires no separate embedding service.
 
 For storage-only mode, omit `PODIUM_PINECONE_INFERENCE_MODEL` and configure an embedding provider:
 
@@ -70,7 +114,7 @@ export OPENAI_API_KEY=sk-...
 
 ### Clustered with Pinecone
 
-In the registry's config file. The registry reads `~/.podium/registry.yaml` unless `PODIUM_CONFIG_FILE` names another path. The `podium-server` binary has no `--config` option, so a clustered deployment that keeps the file at `/etc/podium/registry.yaml` sets `PODIUM_CONFIG_FILE=/etc/podium/registry.yaml` in the registry's environment. `podium serve --config <path>` sets the same variable:
+Configure the backend in the registry's config file. The registry reads `~/.podium/registry.yaml` unless `PODIUM_CONFIG_FILE` names another path. The `podium-server` binary has no `--config` option. A clustered deployment that keeps the file at `/etc/podium/registry.yaml` therefore sets `PODIUM_CONFIG_FILE=/etc/podium/registry.yaml` in the registry's environment. `podium serve --config <path>` sets the same variable.
 
 ```yaml
 registry:
@@ -105,13 +149,15 @@ registry:
     audience: https://podium.acme.com
 ```
 
-Environment variables and CLI flags override file values. Use `${ENV_VAR}` interpolation for secrets. The registry's environment also carries `PODIUM_SIGN_KEY_PATH` naming the deployment's one signing key file, or `PODIUM_SIGN=none`, because the variable has no config-file key and a registry with signing on, a Postgres store, and no key path is refused at start. [Clustered](clustered#2-deploy-the-registry) shows how to generate the key file.
+Environment variables and CLI flags override file values. Use `${ENV_VAR}` interpolation for secrets.
+
+`PODIUM_SIGN_KEY_PATH` has no config-file key. Set it in the registry's environment to name the deployment's one signing key file, or set `PODIUM_SIGN=none`. The registry refuses to start with signing on, a Postgres store, and no key path. [Clustered](clustered#2-deploy-the-registry) shows how to generate the key file.
 
 ---
 
 ## Weaviate Cloud
 
-Server-side environment variables:
+Set these variables in the registry's environment:
 
 | Variable | Description | Default |
 |:--|:--|:--|
@@ -154,7 +200,7 @@ For storage-only mode, omit `inference_model:` and add an `embedding_provider:` 
 
 ## Qdrant Cloud
 
-Server-side environment variables:
+Set these variables in the registry's environment:
 
 | Variable | Description | Default |
 |:--|:--|:--|
@@ -193,7 +239,7 @@ podium serve --standalone --layer-path ~/podium-artifacts/
 
 ## Switching backends on a running deployment
 
-When the configured backend or embedding model changes, run `podium admin reembed` to repopulate:
+Migration between backends works in either direction. When the configured backend or embedding model changes, run `podium admin reembed` to repopulate the vectors from the canonical text projections:
 
 ```bash
 podium admin reembed --registry https://podium.acme.com
@@ -201,25 +247,63 @@ podium admin reembed --registry https://podium.acme.com
 podium admin reembed --since 2026-01-01T00:00:00Z --registry https://podium.acme.com
 ```
 
-With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` and `--since` compose to scope it. `--artifact` re-embeds a single artifact and requires `--version` alongside it.
+With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` and `--since` compose to scope it. `--artifact` re-embeds a single artifact and requires `--version` alongside it. The registry emits `embedding.reembed_in_progress` events for progress monitoring.
 
-The registry emits `embedding.reembed_in_progress` events for progress monitoring. Model versioning applies to the collocated backends only. `pgvector` and `sqlite-vec` tag each row with the embedding model, restrict a query to the current model while a re-embed is in flight, and drop the previous model's rows once a full pass completes; a pass scoped with `--only-missing` or `--since` purges nothing. Pinecone, Weaviate Cloud, and Qdrant Cloud carry no model tag, so the registry neither filters their query results by model nor purges the previous model's vectors. Any embedding-model change on one of them, whether or not it alters the dimension, needs a fresh index or collection (`PODIUM_PINECONE_INDEX`, `PODIUM_WEAVIATE_COLLECTION`, or `PODIUM_QDRANT_COLLECTION`) created for the new model's dimension and, on a self-embedding deployment, for its hosted model. When `PODIUM_PINECONE_HOST` is set explicitly, point it at the new index as well. A new `PODIUM_PINECONE_NAMESPACE` prefix does not substitute for a new index, because every namespace lives in the same index and shares its dimension and hosted model. Every tenant shares the configured index or collection, so repointing the registry affects every tenant at once, while a re-embed pass covers only the caller's tenant. Point the registry at the fresh index, restart the registry, and have an identity that holds the `admin` role in each provisioned tenant run `podium admin reembed` with no scoping flag for that tenant. The command returns when the pass ends. Check that the `failed` list in its result is empty, and re-run the command when it is not. Delete the old index only after every tenant's pass reports an empty `failed` list, because until then it is the only populated index to roll back to. Until a tenant's pass completes, that tenant's search fuses BM25 over the whole catalog with vector matches from only the artifacts already re-embedded, and a tenant whose pass has not started gets BM25 matches only. Re-embedding into the existing managed index scores vectors from both models together when the dimension is unchanged. When the dimension changes, the index rejects the new vectors and search runs BM25 only. The search response reports none of these conditions (see [Operational notes](#operational-notes)).
+The previous backend can stay in place during cut-over, or it can be torn down after re-embedding completes.
 
-For non-collocated backends (every managed service falls in this category), ingest writes are coordinated through a transactional outbox: the manifest commit and a `vector_pending` row land in the same metadata-store transaction, and a background worker drives the write to the vector backend. This keeps the metadata commit and the vector write consistent under failure.
+### Model changes on pgvector and sqlite-vec
+
+Model versioning applies to the collocated backends only. `pgvector` and `sqlite-vec` tag each row with the embedding model. While a re-embed is in flight, they restrict a query to the current model. They drop the previous model's rows once a full pass completes. A pass scoped with `--only-missing` or `--since` purges nothing.
+
+### Model changes on Pinecone, Weaviate Cloud, and Qdrant Cloud
+
+The managed backends carry no model tag, so the registry neither filters their query results by model nor purges the previous model's vectors. Any embedding-model change on one of them needs a fresh index or collection, whether or not the change alters the dimension.
+
+Every tenant shares the configured index or collection. Repointing the registry therefore affects every tenant at once, while a re-embed pass covers only the caller's tenant.
+
+To change the embedding model on a managed backend:
+
+1. Create a fresh index or collection for the new model's dimension and, on a self-embedding deployment, for its hosted model.
+2. Point the registry at it through `PODIUM_PINECONE_INDEX`, `PODIUM_WEAVIATE_COLLECTION`, or `PODIUM_QDRANT_COLLECTION`. When `PODIUM_PINECONE_HOST` is set explicitly, point it at the new index as well.
+3. Restart the registry.
+4. In each provisioned tenant, run `podium admin reembed` with no scoping flag, as an identity that holds the `admin` role in that tenant. The command returns when the pass ends.
+5. Check that the `failed` list in the result is empty. Re-run the command when it is not.
+6. Delete the old index only after every tenant's pass reports an empty `failed` list. Until then, the old index is the only populated index to roll back to.
+
+A new `PODIUM_PINECONE_NAMESPACE` prefix does not substitute for a new index, because every namespace lives in the same index and shares its dimension and hosted model.
+
+### Search during a re-embed
+
+| Situation | Search behavior |
+|:--|:--|
+| Fresh index, the tenant's pass is in progress | BM25 over the whole catalog, fused with vector matches from only the artifacts already re-embedded |
+| Fresh index, the tenant's pass has not started | BM25 matches only |
+| Existing managed index, dimension unchanged | Vectors from both models are scored together |
+| Existing managed index, dimension changed | The index rejects the new vectors, and search runs BM25 only |
+
+The search response reports none of these conditions (see [Operational notes](#operational-notes)).
+
+### Write consistency on managed backends
+
+Every managed service is a non-collocated backend. For these backends, ingest writes go through a transactional outbox. The manifest commit and a `vector_pending` row land in the same metadata-store transaction, and a background worker drives the write to the vector backend. The outbox keeps the metadata commit and the vector write consistent under failure.
 
 ---
 
 ## Local-overlay search on the MCP server
 
-The MCP server can use a managed vector backend independently of the registry, to give the workspace-local overlay (`.podium/overlay/`) better semantic recall. The same `PODIUM_VECTOR_BACKEND` and per-backend variables apply when the MCP server is configured with `LocalSearchProvider` against an external backend. The overlay index also requires `PODIUM_EMBEDDING_PROVIDER` to name a provider: the MCP server computes overlay vectors locally, and it leaves the overlay BM25-only when either variable is unset or set to `none`. The self-embedding mode above does not apply to this path.
+The MCP server can use a managed vector backend independently of the registry, to improve semantic recall for the workspace-local overlay (`.podium/overlay/`). The same `PODIUM_VECTOR_BACKEND` and per-backend variables apply when the MCP server is configured with `LocalSearchProvider` against an external backend.
 
-This is independent of the registry-side backend. It affects how local-overlay manifests are indexed, and registry-side `search_artifacts` results are merged in by reciprocal rank fusion regardless. The MCP server still requires a server-backed registry, so this side path does not enable search on the [local](local) tier.
+The overlay index also requires `PODIUM_EMBEDDING_PROVIDER` to name a provider, because the MCP server computes overlay vectors locally. The MCP server leaves the overlay BM25-only when either variable is unset or set to `none`. The self-embedding mode described above does not apply to this path.
+
+This index is independent of the registry-side backend and affects only how local-overlay manifests are indexed. The MCP server merges registry-side `search_artifacts` results in by reciprocal rank fusion regardless. The MCP server still requires a server-backed registry, so this path does not add search to the [local](local) deployment mode.
 
 ---
 
 ## Operational notes
 
-- The managed service's costs, identity, and quotas are the operator's responsibility. Podium does not proxy credentials and does not enforce per-tenant cost ceilings on the backend.
-- If the configured vector backend is unreachable and no embedding provider is configured for storage-only fallback, search degrades to BM25 over manifest text. The `search_artifacts` and `search_domains` response bodies carry no degraded field, and no response header reports the fallback, so a caller cannot detect it from the response. The registry records the condition in its startup log: `warning: vector search disabled: <error>` when the backend fails to open, and `keyword search: embeddings disabled (BM25-only; no embedding provider)` when no backend is wired. A backend that becomes unreachable after startup logs nothing per request, so alert on the backend service's own availability.
-- Migration in either direction is supported. `podium admin reembed` repopulates the newly-configured backend from the canonical text projections. The previous backend can stay in place during cut-over or be torn down after re-embedding completes.
-- Search QPS, latency, and recall depend on the backend's index configuration (shard count, replicas, dimensionality). The [Operator guide](operator-guide) covers capacity planning across the registry as a whole.
+- Podium does not proxy credentials to the managed service and does not enforce per-tenant cost ceilings on the backend.
+- If the configured vector backend is unreachable and no embedding provider is configured for storage-only fallback, search degrades to BM25 over manifest text.
+- A caller cannot detect that fallback from the response. The `search_artifacts` and `search_domains` response bodies carry no degraded field, and no response header reports it.
+- The registry records the condition in its startup log: `warning: vector search disabled: <error>` when the backend fails to open, and `keyword search: embeddings disabled (BM25-only; no embedding provider)` when no backend is wired.
+- A backend that becomes unreachable after startup logs nothing per request, so alert on the backend service's own availability.
+- Search QPS, latency, and recall depend on the backend's index configuration (shard count, replicas, and dimensionality). The [Operator guide](operator-guide) covers capacity planning across the registry as a whole.

@@ -1,12 +1,14 @@
 ---
 title: HTTP API
 nav_order: 2
-description: "The Podium registry's HTTP/JSON API: discovery, materialization, layer management, ingest webhooks, scope preview, and health."
+description: "Reference for the Podium registry's HTTP/JSON API: authentication, discovery, materialization, layer management, webhooks, administration, and health."
 ---
 
 # HTTP API
 
-The Podium registry exposes an HTTP/JSON API. Every consumer speaks this API: the MCP server, the language SDKs, `podium sync` against a server, and the read CLI. Direct MCP access to the registry is not supported; the MCP server is a consumer surface that translates HTTP responses into MCP messages.
+This page is the reference for the registry's HTTP/JSON API. Every consumer speaks this API: the MCP server, the language SDKs, `podium sync` against a server, and the read CLI. The registry accepts no direct MCP connections. The MCP server is a consumer that translates HTTP responses into MCP messages.
+
+Each endpoint entry gives the method and path, the authorization it requires, its parameters, the response, the endpoint-specific errors, and notes. Every error uses the envelope described in [Error codes](error-codes), which also catalogs every code.
 
 ---
 
@@ -18,26 +20,39 @@ Every call carries an OAuth-attested identity. The registry validates the JWT si
 |:--|:--|
 | `Authorization` | `Bearer <jwt>` |
 
-The registry resolves the caller through the provider named by its `PODIUM_IDENTITY_PROVIDER`. The registry-process values are `injected-session-token`, `oidc-jwt`, and `trusted-headers`.
+The registry resolves the caller through the provider named by its `PODIUM_IDENTITY_PROVIDER`. The registry-process values are below.
 
-- `injected-session-token`: runtime-issued signed JWT. The deployment configures the registry to trust the runtime's signing key at startup through `PODIUM_RUNTIME_KEYS_PATH`, which names a file written with `podium admin runtime register --keys-file`, and the registry verifies the signature on every call.
-- `oidc-jwt`: an IdP-signed token the registry verifies itself. The registry verifies the signature, `iss`, and `aud` against the issuer's JWKS. The token reaches the registry in one of two locations: in the configured token header, whether a gateway forwarded it or a CLI, an SDK, or another API client presents one it acquired through the device-code flow, or in the `__Host-podium_session` cookie, where the registry obtained it for a browser through the sign-in routes below. The registry reads the configured token header first, and it reads the cookie only where that header carries no `Bearer` credential and the browser flow is enabled on that registry. A request that carries a bearer credential in neither location is anonymous rather than rejected and sees public visibility only.
-- `trusted-headers`: an authenticating reverse proxy asserts the identity in `X-Podium-User-Sub`, `X-Podium-User-Email`, `X-Podium-User-Groups`, and `X-Podium-User-Org`, optionally authenticated with `X-Podium-Proxy-Secret`.
+| Provider | How the registry resolves the caller |
+|:--|:--|
+| `injected-session-token` | The caller presents a runtime-issued signed JWT. The deployment configures the registry at startup to trust the runtime's signing key through `PODIUM_RUNTIME_KEYS_PATH`, which names a file written with `podium admin runtime register --keys-file`. The registry verifies the signature on every call. |
+| `oidc-jwt` | The caller presents an IdP-signed token that the registry verifies itself. The registry checks the signature, `iss`, and `aud` against the issuer's JWKS. |
+| `trusted-headers` | An authenticating reverse proxy asserts the identity in `X-Podium-User-Sub`, `X-Podium-User-Email`, `X-Podium-User-Groups`, and `X-Podium-User-Org`, optionally authenticated with `X-Podium-Proxy-Secret`. |
 
-`oauth-device-code` is the consumer-side provider. The MCP server and the SDKs acquire the token through an interactive device-code flow on first use, cache it in the OS keychain, and refresh it transparently. The registry ships no request-time verifier for it, so setting it on the registry process aborts startup with `config.identity_provider_unverified`.
+Under `oidc-jwt`, the token reaches the registry in one of two locations:
 
-In public-mode deployments, the OAuth flow is skipped; the registry serves anonymously. The audit log records `caller.identity = "system:public"`.
+- **The configured token header.** A gateway forwards the token there, or a CLI, an SDK, or another API client presents a token it acquired through the device-code flow.
+- **The `__Host-podium_session` cookie.** The registry obtained the token for a browser through the sign-in routes in [Browser session](#browser-session).
+
+The registry reads the configured token header first. It reads the cookie only where that header carries no `Bearer` credential and the browser flow is enabled on that registry. A request that carries a bearer credential in neither location is anonymous rather than rejected, and it sees public visibility only.
+
+`oauth-device-code` is the consumer-side provider. The MCP server and the CLI run the interactive device-code flow on first use, cache the token in the OS keychain, and refresh it transparently. An SDK runs the flow only when the calling code invokes it, holds the token in memory, and neither persists nor refreshes it. The registry ships no request-time verifier for `oauth-device-code`, so setting it on the registry process aborts startup with `config.identity_provider_unverified`.
+
+In public-mode deployments, the OAuth flow is skipped and the registry serves anonymously. The audit log records `caller.identity = "system:public"`.
 
 ### Browser session
 
-Where the registry serves the web UI and the browser flow is enabled (`--web-ui-auth` / `PODIUM_WEB_UI_AUTH`), the registry signs the browser in itself. It redirects the browser to the identity provider, performs the authorization-code exchange server-side, and returns the resulting IdP-signed token to the browser in a cookie. That token is the same credential `oidc-jwt` accepts in the configured token header, so the browser flow adds no credential kind and the registry keeps no session record. The flow sets the two cookies below and no others. Both carry the `__Host-` prefix, `HttpOnly`, `Secure`, `Path=/`, and `SameSite=Lax`, so neither is readable from the page.
+Where the registry serves the web UI and the browser flow is enabled (`--web-ui-auth` / `PODIUM_WEB_UI_AUTH`), the registry signs the browser in itself. It redirects the browser to the identity provider, performs the authorization-code exchange server-side, and returns the resulting IdP-signed token to the browser in a cookie.
+
+That token is the same credential `oidc-jwt` accepts in the configured token header. The browser flow adds no credential kind, and the registry keeps no session record.
+
+The flow sets the two cookies below and no others. Both carry the `__Host-` prefix, `HttpOnly`, `Secure`, `Path=/`, and `SameSite=Lax`, so neither is readable from the page.
 
 | Cookie | Carries | Lifetime |
 |:--|:--|:--|
 | `__Host-podium_session` | the access token the callback obtained | the token's own `exp`, so the cookie carries no `Max-Age` |
 | `__Host-podium_auth` | the single-use pre-authorization transaction: the `state` and the PKCE `code_verifier` the sign-in route minted | the configured transaction TTL (`PODIUM_WEB_UI_AUTH_TRANSACTION_TTL`, 10 minutes by default) |
 
-The registry registers the three routes below only where the browser flow is enabled. A registry that boots with the flow disabled serves none of them, and a request for one of those paths is answered as any path the registry does not register is answered on that deployment.
+The registry registers the three routes below only where the browser flow is enabled. A registry that boots with the flow disabled serves none of them. It answers a request for one of those paths as it answers any path it does not register on that deployment.
 
 ```
 GET  /v1/ui/auth/sign-in     mint the transaction and redirect to the identity provider
@@ -45,21 +60,57 @@ GET  /v1/ui/auth/callback    exchange the authorization code and set the session
 POST /v1/ui/auth/sign-out    clear both cookies
 ```
 
-`GET /v1/ui/auth/sign-in` mints the `state` and the PKCE `code_verifier` for one transaction, returns both in `__Host-podium_auth`, and redirects the browser to the configured authorization endpoint.
+#### `GET /v1/ui/auth/sign-in`
 
-`GET /v1/ui/auth/callback` compares the returned `state` against `__Host-podium_auth` before inspecting anything else in the query. A callback whose cookie is absent, expired, or carries a different `state` is refused with `403 auth.csrf_invalid`. A query carrying the identity provider's `error` parameter runs no exchange, returns the browser to `/app/` without establishing or replacing a session, and takes no error code. Otherwise the callback exchanges the code at the configured token endpoint: an identity provider the registry cannot reach, and one whose token endpoint answers with a `5xx`, are each refused with `500 registry.unavailable`, and an exchange the identity provider answers and refuses is refused with `502 auth.exchange_failed`. On success the callback returns the access token in `__Host-podium_session`. Every response the callback emits clears `__Host-podium_auth`, which is what makes the transaction single-use.
+Mints the `state` and the PKCE `code_verifier` for one transaction, returns both in `__Host-podium_auth`, and redirects the browser to the configured authorization endpoint.
 
-`POST /v1/ui/auth/sign-out` clears both cookies on every request it serves.
+#### `GET /v1/ui/auth/callback`
 
-**Browser-origin gate.** The registry refuses a state-changing request that carries cross-site browser-origin evidence with `403 auth.csrf_invalid`, before the handler runs and whatever credential authenticated the request. A request is state-changing when its method is other than `GET`, `HEAD`, or `OPTIONS`. Browser-origin evidence is cross-site when the request carries a `Sec-Fetch-Site` header whose value is other than `same-origin` or `none`, or an `Origin` header whose host and port differ from the host and port the request's own `Host` header names. The scheme is not compared, because an HTTP `Host` header carries none and a registry behind a TLS-terminating gateway cannot observe the browser-facing one. A state-changing request carrying neither header carries no browser-origin evidence and is admitted, which is what a CLI, an SDK, or any other non-browser client sends. The sign-in and callback routes sit outside the gate: each answers on `GET`, and a browser that already holds `__Host-podium_session` sends it on both, so a gate covering them would refuse every re-sign-in. The gate reads the request rather than the deployment, so it runs on a registry that enables no browser flow and on one that serves no web UI.
+Completes the sign-in. The callback compares the returned `state` against `__Host-podium_auth` before it inspects anything else in the query. It then proceeds as follows:
+
+| Outcome | Response |
+|:--|:--|
+| The cookie is absent, expired, or carries a different `state`. | `403 auth.csrf_invalid` |
+| The query carries the identity provider's `error` parameter. | No exchange runs. The browser returns to `/app/` without a session being established or replaced, and no error code applies. |
+| The identity provider cannot be reached, or its token endpoint answers with a `5xx`. | `500 registry.unavailable` |
+| The identity provider answers the exchange and refuses it. | `502 auth.exchange_failed` |
+| The exchange succeeds. | The access token is returned in `__Host-podium_session`. |
+
+Every response the callback emits clears `__Host-podium_auth`, which makes the transaction single-use.
+
+#### `POST /v1/ui/auth/sign-out`
+
+Clears both cookies on every request it serves.
+
+#### Browser-origin gate
+
+The registry refuses a state-changing request that carries cross-site browser-origin evidence with `403 auth.csrf_invalid`. The refusal happens before the handler runs, whatever credential authenticated the request.
+
+| Term | Definition |
+|:--|:--|
+| State-changing request | A request whose method is other than `GET`, `HEAD`, or `OPTIONS`. |
+| Cross-site browser-origin evidence | A `Sec-Fetch-Site` header whose value is other than `same-origin` or `none`, or an `Origin` header whose host and port differ from the host and port the request's own `Host` header names. |
+
+Notes:
+
+- The scheme is not compared. An HTTP `Host` header carries none, and a registry behind a TLS-terminating gateway cannot observe the browser-facing one.
+- A state-changing request carrying neither header carries no browser-origin evidence and is admitted. A CLI, an SDK, or any other non-browser client sends such requests.
+- The sign-in and callback routes sit outside the gate. Each answers on `GET`, and a browser that already holds `__Host-podium_session` sends it on both, so a gate covering them would refuse every re-sign-in.
+- The gate reads the request rather than the deployment. It runs on a registry that enables no browser flow and on one that serves no web UI.
 
 ### Session posture
+
+Reports the deployment's identity posture, the caller's own resolved subject, and what that caller may do on the layer operations in [Layer management](#layer-management).
 
 ```
 GET /v1/ui/session
 ```
 
-Reports the deployment's identity posture, the caller's own resolved subject, and what that caller may do on the layer operations in [Layer management](#layer-management). The registry registers it wherever it serves the web UI, whether or not the browser flow is enabled. It requires no credential and refuses no request for lack of one; a request that carries one has it verified so the response can report `subject` and `email` and evaluate `layer_capabilities`, and for no other purpose, and a request that resolves no subject is answered `200` with `subject` absent.
+**Authorization.** None required. The endpoint refuses no request for lack of a credential. A credential the request carries is verified so the response can report `subject` and `email` and evaluate `layer_capabilities`, and for no other purpose. A request that resolves no subject is answered `200` with `subject` absent.
+
+**Availability.** The registry registers this path wherever it serves the web UI, whether or not the browser flow is enabled. A registry started without the web UI never registers it and answers a request for it as it answers any path it does not register.
+
+**Response.**
 
 ```json
 {
@@ -78,28 +129,58 @@ Reports the deployment's identity posture, the caller's own resolved subject, an
 }
 ```
 
-`identity_provider_configured` reports whether an identity provider is configured and never names which one. `public_mode` reports whether public mode is engaged. `browser_auth.enabled` reports whether the browser flow is enabled on this deployment, and `sign_in_path` and `sign_out_path` are present only when it is, because the flow's routes are registered only then. `subject` is the verified subject of the request that asked, present only when one resolves. `email` is the requesting caller's own email as the configured identity provider recorded it, present only where one resolves and is non-empty, and absent otherwise. It belongs to the caller that asked and to no other caller.
+| Field | Description |
+|:--|:--|
+| `identity_provider_configured` | Whether an identity provider is configured. It never names which one. |
+| `public_mode` | Whether public mode is engaged. |
+| `browser_auth.enabled` | Whether the browser flow is enabled on this deployment. |
+| `browser_auth.sign_in_path`, `browser_auth.sign_out_path` | Present only when the browser flow is enabled, because the flow's routes are registered only then. |
+| `subject` | The verified subject of the request that asked. Present only when one resolves. |
+| `email` | The requesting caller's own email as the configured identity provider recorded it. Present only where one resolves and is non-empty. It belongs to the caller that asked and to no other caller. |
+| `layer_capabilities.manage_any_layer` | Whether this deployment's layer endpoints admit this caller on the `admin` arm. See the notes below. |
 
-`layer_capabilities` reports what the requesting caller may do on the layer operations. It carries `manage_any_layer`, a boolean reporting whether this deployment's layer endpoints admit this caller on the `admin` arm, which is the arm that decides a write on a layer the caller does not own and every operation the [local-source authorization rule](#layer-management) governs. On a registry started with no identity provider configured, or one started in public mode, those endpoints admit every caller on that arm, so the member is true there, including on a request that resolves no subject. On a multi-tenant registry the member is evaluated in the tenant the caller's organization selects, and it is false for a request that resolves to no tenant. A caller that the layer endpoints reject with `401 auth.tenant_unknown` is answered `200` with the member false. The object and its member are always present, and where the deployment determines no capability for the request the member is false. The object predicts a server decision rather than reporting a grant: it is a snapshot taken when the read was answered, an operation a client offers on the strength of it can still be refused, and the envelope the operation's own endpoint returns remains the authority.
+The response carries no other field. In particular, it carries no issuer, client identifier, endpoint, filesystem path, or other configuration value. It carries no subject, email, or authorization belonging to any caller other than the one that asked.
 
-The response carries no other field, and in particular no issuer, client identifier, endpoint, filesystem path, or other configuration value, and no subject, email, or authorization belonging to any caller other than the one that asked. A registry started without the web UI never registers this path and answers a request for it as it answers any path it does not register.
+Notes on `layer_capabilities`:
+
+- The `admin` arm decides a write on a layer the caller does not own and every operation the [local-source authorization rule](#local-source-authorization) governs.
+- On a registry started with no identity provider configured, or one started in public mode, the layer endpoints admit every caller on that arm. The member is true there, including on a request that resolves no subject.
+- On a multi-tenant registry, the member is evaluated in the tenant the caller's organization selects. It is false for a request that resolves to no tenant.
+- A caller that the layer endpoints reject with `401 auth.tenant_unknown` is answered `200` with the member false.
+- The object and its member are always present. Where the deployment determines no capability for the request, the member is false.
+- The object predicts a server decision rather than reporting a grant. It is a snapshot taken when the read was answered, and an operation a client offers on the strength of it can still be refused. The envelope the operation's own endpoint returns remains the authority.
 
 ---
 
 ## Client identification
 
-A request to a `/v1/` control-plane route can name its client software in the `X-Podium-Client` header, an `application/x-www-form-urlencoded` value with the members `kind`, `name`, `version`, `host`, `host_version`, and `harness`, where `kind` is `mcp`, `sync`, `sdk`, or `cli`.
+A request to a `/v1/` control-plane route can name its client software in the `X-Podium-Client` header. The value is `application/x-www-form-urlencoded`.
 
 ```http
 GET /v1/search_artifacts?query=x HTTP/1.1
 X-Podium-Client: kind=sdk&name=acme-tool&version=1.2.0
 ```
 
-The registry ignores a value longer than 1024 bytes and a value that does not parse. When a member repeats, the registry uses its first occurrence, and it ignores unknown members. In each member, the registry replaces every byte other than an ASCII letter, a digit, a space, `.`, `_`, `-`, `+`, `/`, `(`, or `)` with `_`, and then truncates the member to 64 bytes. A value that leaves no non-empty member after sanitization is treated as absent and records no `caller.client`. Otherwise, the registry records `kind` as `other` when it is absent or is not exactly one of the values above.
+| Member | Description |
+|:--|:--|
+| `kind` | `mcp`, `sync`, `sdk`, or `cli`. |
+| `name` | The client software. |
+| `version` | The client software's release. |
+| `host` | The `clientInfo.name` of the MCP `initialize` request. Only the MCP server sends it. |
+| `host_version` | The `clientInfo.version` of the MCP `initialize` request. Only the MCP server sends it. |
+| `harness` | The harness adapter value of the sending process. |
+
+The registry parses and sanitizes the value as follows:
+
+- It ignores a value longer than 1024 bytes and a value that does not parse.
+- When a member repeats, it uses the first occurrence. It ignores unknown members.
+- In each member, it replaces every byte other than an ASCII letter, a digit, a space, `.`, `_`, `-`, `+`, `/`, `(`, or `)` with `_`, and then truncates the member to 64 bytes.
+- A value that leaves no non-empty member after sanitization is treated as absent and records no `caller.client`.
+- Otherwise, it records `kind` as `other` when `kind` is absent or is not exactly one of the values above.
 
 An absent or ignored value never causes a request to fail. The value is never an input to authentication, authorization, visibility, quotas, audit sampling, or tenant selection.
 
-The first-party clients send the header on every control-plane request and omit it on presigned links, on `/objects` links, and on `/healthz` and `/readyz`.
+The first-party clients send the header on every control-plane request. They omit it on presigned links, on `/objects` links, and on `/healthz` and `/readyz`.
 
 The value appears in audit records as `caller.client`, as described in [Client software](audit-events#client-software) on the audit events page. The values each first-party client sends are listed in [§7.2.2 of the specification](https://github.com/lennylabs/podium/blob/main/spec/07-external-integration.md#722-client-identification).
 
@@ -119,15 +200,24 @@ The value appears in audit records as `caller.client`, as described in [Client s
 
 ## Discovery
 
+The discovery endpoints answer from the caller's effective view.
+
 ### `load_domain`
+
+Returns the map for a domain path.
 
 ```
 GET /v1/load_domain?path={path}&depth={n}
 ```
 
-Returns the map for a path. An empty `path` returns the registry root.
+**Parameters.**
 
-Response:
+| Parameter | Description |
+|:--|:--|
+| `path` | The domain path. An empty `path` returns the registry root. |
+| `depth` | The rendering depth. It is bounded by the resolved `max_depth` ceiling. |
+
+**Response.**
 
 ```json
 {
@@ -152,19 +242,33 @@ Response:
 
 `note` is omitted when no reduction occurred.
 
-Output rendering (depth, folding, notable count, response budget) is governed by the discovery rules (see [Authoring → Domains](../authoring/domains)). Caller-passed `depth` is bounded by the resolved `max_depth` ceiling.
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `404 domain.not_found` | The path resolves to no visible domain. |
+
+**Notes.**
+
+- The discovery rules govern output rendering: depth, folding, notable count, and response budget. See [Authoring → Domains](../authoring/domains).
 
 ### `search_domains`
+
+Runs hybrid retrieval over each domain's projection: the frontmatter `description`, the `keywords`, and the truncated body.
 
 ```
 GET /v1/search_domains?query={q}&scope={path}&top_k={n}
 ```
 
-Hybrid retrieval over each domain's projection (frontmatter `description`, `keywords`, and truncated body). `top_k` defaults to 10.
+**Parameters.**
 
-Ranked domains are returned under the `domains` key.
+| Parameter | Description |
+|:--|:--|
+| `query` | The search text. |
+| `scope` | A domain path that restricts the search to a subtree. |
+| `top_k` | The number of results. Defaults to 10. The maximum is 50. |
 
-Response:
+**Response.** Ranked domains are returned under the `domains` key.
 
 ```json
 {
@@ -182,21 +286,36 @@ Response:
 }
 ```
 
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `400 registry.invalid_argument` | `top_k` is above 50. |
+| `429 quota.search_qps_exceeded` | The tenant's search QPS budget is exhausted. |
+
 ### `search_artifacts`
+
+Runs hybrid retrieval over artifact frontmatter.
 
 ```
 GET /v1/search_artifacts?query={q}&type={type}&tags={tag1},{tag2}&scope={path}&top_k={n}&session_id={uuid}&as_admin={bool}
 ```
 
-Hybrid retrieval over artifact frontmatter. Every argument is optional. When `query` is omitted, the endpoint returns artifacts matching the filters in default order, the browse call. `top_k` defaults to 10.
+**Authorization.** Any caller. `as_admin` requires the admin role.
 
-`as_admin=1` (or `as_admin=true`) requests the admin diagnostic visibility override, which searches across every layer regardless of the caller's visibility. A caller without the admin role is rejected with `403 auth.forbidden`.
+**Parameters.** Every parameter is optional.
 
-Each result's `frontmatter` is the frontmatter block of the artifact's served `ARTIFACT.md` document as a string. The result carries no `frontmatter` key when that block cannot be read, and the result itself is still returned.
+| Parameter | Description |
+|:--|:--|
+| `query` | The search text. When `query` is omitted, the endpoint returns artifacts matching the filters in default order. This is the browse call. |
+| `type` | Filters by artifact type. |
+| `tags` | A comma-separated tag filter. |
+| `scope` | A domain path that restricts the search to a subtree. |
+| `top_k` | The number of results. Defaults to 10. The maximum is 50. |
+| `session_id` | The session identifier. |
+| `as_admin` | `1` or `true` requests the admin diagnostic visibility override, which searches across every layer regardless of the caller's visibility. |
 
-For a skill with no `ARTIFACT.md`, a result's `frontmatter` is the frontmatter block of the synthesized document that `load_artifact` serves for it, `---\ntype: skill\nversion: <version>\n---\n`, where `<version>` is the result's `version`.
-
-Response:
+**Response.**
 
 ```json
 {
@@ -214,21 +333,42 @@ Response:
 }
 ```
 
+Each result's `frontmatter` is the frontmatter block of the artifact's served `ARTIFACT.md` document, as a string. For a skill with no `ARTIFACT.md`, it is the frontmatter block of the synthesized document that `load_artifact` serves for it, `---\ntype: skill\nversion: <version>\n---\n`, where `<version>` is the result's `version`. When the block cannot be read, the result carries no `frontmatter` key and is still returned.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `403 auth.forbidden` | `as_admin` was requested by a caller without the admin role. |
+| `400 registry.invalid_argument` | `top_k` is above 50. |
+| `429 quota.search_qps_exceeded` | The tenant's search QPS budget is exhausted. |
+
 ---
 
 ## Materialization
 
 ### `load_artifact`
 
+Returns one artifact: its manifest, its bundled resources, and the integrity fields a consumer verifies.
+
 ```
 GET /v1/load_artifact?id={id}&version={v}&session_id={uuid}&as_admin={bool}
 ```
 
-`version` is optional (default `latest`). `session_id` is optional; the first `latest` lookup within a session is recorded and reused for subsequent same-id lookups in the session, so the host sees a consistent snapshot. `as_admin=1` (or `as_admin=true`) requests the admin diagnostic visibility override; a caller without the admin role is rejected with `403 auth.forbidden`.
+**Authorization.** Any caller who can see the artifact. `as_admin` requires the admin role.
 
-A `HEAD` request revalidates the consumer's resolution cache: the registry returns the resolved content hash in the `X-Podium-Content-Hash` header (and the version in `X-Podium-Version`) with no body. A `GET` that carries a matching `If-None-Match` is answered `304 Not Modified`. The entity tag is the content-hash entity tag on a full response, a HEAD, and a 304 alike.
+**Parameters.**
 
-Response:
+| Parameter | Required | Description |
+|:--|:--|:--|
+| `id` | Yes | The artifact ID. |
+| `version` | No | The version to load. Defaults to `latest`. |
+| `session_id` | No | The session identifier. The first `latest` lookup within a session is recorded and reused for subsequent same-id lookups in the session, so the host sees a consistent snapshot. |
+| `as_admin` | No | `1` or `true` requests the admin diagnostic visibility override. |
+
+**Revalidation.** A `HEAD` request revalidates the consumer's resolution cache. The registry returns the resolved content hash in the `X-Podium-Content-Hash` header and the version in `X-Podium-Version`, with no body. A `GET` that carries a matching `If-None-Match` is answered `304 Not Modified`. The entity tag is the content-hash entity tag on a full response, a `HEAD`, and a `304` alike.
+
+**Response.**
 
 ```json
 {
@@ -262,41 +402,104 @@ The response carries these integrity and reference fields:
   <!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->
   ```
 
-  The registry does not store this document, and `delivery_hash` covers it while `content_hash` does not. A batch entry carries the same bytes. Read the version from the `version` member, because an authored `ARTIFACT.md` overlay may omit `version`.
+  The registry does not store this document. `delivery_hash` covers it, and `content_hash` does not. A batch entry carries the same bytes. Read the version from the `version` member, because an authored `ARTIFACT.md` overlay may omit `version`.
 - `content_hash` names the stored artifact. It is the resolution-cache key, the `sync.lock` value, and the target of an `@sha256:` pin.
-- `delivery_hash` is a SHA-256 digest over the record this response delivers: the identity, version, type, content hash, sensitivity, ingest time, served `ARTIFACT.md` document, manifest body, `SKILL.md`, and each bundled resource's path and content hash. It is present on every response, for every artifact. The record is framed under the tag `podium/delivery-record/2`, so every verifying consumer and the registry must run matching releases, or every load fails with `materialize.content_hash_mismatch`.
+- `delivery_hash` is a SHA-256 digest over the record this response delivers. The record covers the identity, version, type, content hash, sensitivity, ingest time, served `ARTIFACT.md` document, manifest body, `SKILL.md`, and each bundled resource's path and content hash. It is present on every response, for every artifact. The record is framed under the tag `podium/delivery-record/2`, so every verifying consumer and the registry must run matching releases, or every load fails with `materialize.content_hash_mismatch`.
 - `delivery_signature` is the registry's signature over `delivery_hash`, minted per response with the registry-managed key. It is absent when the registry runs without a signing key. It is a registry-managed envelope whatever key model signed the artifact at ingest, so a consumer verifies it with the registry-managed verifier under its verification key set.
 - `artifact_revision` is the time the registry stored the served version, an RFC 3339 UTC timestamp with six fractional digits, such as `2025-01-01T00:00:00.000000Z`. `delivery_hash` covers it. It is present on every response and on every `ok` batch item, and it does not enter the entity tag.
 
-`podium-mcp` recomputes `delivery_hash` from the bytes it received on every load and fails the load with `materialize.content_hash_mismatch` when the values differ, before it applies its signature policy to `delivery_signature`. Server-source `podium sync` and the language SDKs run the same check. [Verifying a response](#verifying-a-response) states the procedure every consumer follows.
-
-The delivery record carries no nonce, so a record captured from an earlier response verifies when it is replayed. `podium-mcp` refuses a replayed record that answers a `latest` load with an artifact revision below one it already accepted for that registry and artifact, and fails the load with `materialize.stale_resolution`. A replayed record that answers a pinned request is not detected. Server-source `podium sync` and the language SDKs verify `artifact_revision` as part of the delivery hash and compare it with no earlier value, so a replayed `latest` record they receive is not detected. A registry that stores no ingest time serves `1970-01-01T00:00:00.000000Z` for every version, and replays against it are not detected. The delivery record also attests that the registry composed and served the bytes.
-
 The response carries no `raw_frontmatter` or `signature` field. A registry configured with a signer verifies the signature it stored at ingest before it serves a row, and no registry serves that stored signature.
 
-A resource at or below the inline cutoff (256 KB) is returned in `resources`, a map of package-relative path to inline bytes. A larger resource is returned in `large_resources`, a map of path to a presigned URL into object storage that the consumer fetches directly; the registry does not proxy the bytes. A resource the registry holds inline on the manifest record, which includes every resource of a row ingested while no object store was configured, is returned in `resources` at any size. When any inline resource is binary, the whole `resources` map is base64-encoded and `resources_base64` is `true`. A canonical manifest above the cutoff is delivered the same way, as `manifest_body_url` with the inline `manifest_body` cleared. The `load_artifacts` batch endpoint below returns each artifact's resources as an array of objects rather than these maps.
+**Resource delivery.**
+
+| Resource | Where it arrives |
+|:--|:--|
+| At or below the inline cutoff (256 KB) | `resources`, a map of package-relative path to inline bytes. |
+| Above the inline cutoff | `large_resources`, a map of path to a presigned URL into object storage. The consumer fetches the URL directly, and the registry does not proxy the bytes. |
+| Held inline on the manifest record, at any size | `resources`. This includes every resource of a row ingested while no object store was configured. |
+| A canonical manifest above the cutoff | `manifest_body_url`, with the inline `manifest_body` cleared. |
+
+When any inline resource is binary, the whole `resources` map is base64-encoded and `resources_base64` is `true`. The [`load_artifacts` batch endpoint](#load_artifacts-bulk) returns each artifact's resources as an array of objects rather than these maps.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `400 registry.invalid_argument` | `id` is missing. |
+| `403 auth.forbidden` | `as_admin` was requested by a caller without the admin role. |
+| `404 registry.not_found` | The artifact does not exist, or the caller cannot see it. |
+| `405 registry.method_not_allowed` | The method is other than `GET` or `HEAD`. |
+| `429 quota.materialize_rate_exceeded` | The tenant's materialization rate is exhausted. |
+| `500 materialize.signature_invalid`, `500 materialize.signature_missing`, `500 materialize.content_hash_mismatch` | The registry's stored-row admission check refused the row. See [Stored-row admission refusals](error-codes#stored-row-admission-refusals). |
+
+**Notes.**
+
+- `podium-mcp` recomputes `delivery_hash` from the bytes it received on every load. It fails the load with `materialize.content_hash_mismatch` when the values differ, before it applies its signature policy to `delivery_signature`. Server-source `podium sync` and the language SDKs run the same check. [Verifying a response](#verifying-a-response) states the procedure every consumer follows.
+- The delivery record attests that the registry composed and served the bytes.
+- The delivery record carries no nonce, so a record captured from an earlier response verifies when it is replayed. See [Replay detection](#replay-detection).
+
+#### Replay detection
+
+| Consumer or case | Behavior on a replayed record |
+|:--|:--|
+| `podium-mcp`, `latest` load | Refuses a record whose artifact revision is below one it already accepted for that registry and artifact, and fails the load with `materialize.stale_resolution`. |
+| `podium-mcp`, pinned request | A replayed record is not detected. |
+| Server-source `podium sync` and the language SDKs | They verify `artifact_revision` as part of the delivery hash and compare it with no earlier value, so a replayed `latest` record they receive is not detected. |
+| A registry that stores no ingest time | It serves `1970-01-01T00:00:00.000000Z` for every version, and replays against it are not detected. |
 
 #### Verifying a response
 
 A client that reads the HTTP API directly verifies a `load_artifact` response body, and each `ok` item of a `load_artifacts` response body, by the steps below. `podium-mcp`, server-source `podium sync`, and both language SDKs follow the same steps. A refusal in steps 1 to 6 is `materialize.content_hash_mismatch`.
 
-1. **JSON rule.** The body is valid UTF-8 JSON with no byte order mark, nests arrays and objects no deeper than 64 levels, and has an object at the top level, or an array of objects for a batch body. The top-level array or object is level 1. `NaN` and `Infinity` are not JSON and fail the rule. A `\u` escape of a UTF-16 surrogate is valid only as a high surrogate escape followed directly by a low surrogate escape. The depth and surrogate conditions apply to the whole text, including a member that a later member of the same name replaces, and of two members with one name the later is used. A batch body that fails this rule refuses the whole call.
-2. **Members.** Read the record members by exact name: `id`, `version`, `type`, `content_hash`, `sensitivity`, `artifact_revision`, `frontmatter`, `manifest_body`, `skill_raw`, `delivery_hash`, and `delivery_signature` as strings, `resources` as an object of strings with the boolean `resources_base64`, `large_resources` as an object of link objects, and `manifest_body_url` as a link object. A link object carries the strings `presigned_url` and `content_hash`. A batch item's `resources` is an array of reference objects with the strings `path`, `content_hash`, `presigned_url`, and `inline` and the boolean `inline_base64`. Ignore every other member, including a member whose name differs only in letter case, `layer`, and a link's `size` and `content_type`. Treat `null` as absent, an absent string as empty, and an absent boolean as false. Refuse the body when a member has another JSON type, when a link's `presigned_url` is absent or empty, or when a batch reference has no `path`. A batch reference with a non-empty `presigned_url` is a link reference, and every other reference is an inline reference whose body is its `inline` value.
-3. **Base64.** Accept a base64 value only in canonical form: decoding it with the standard RFC 4648 alphabet and re-encoding the bytes with `=` padding reproduces the value exactly. A line break, whitespace, a URL-safe character, missing padding, or a non-zero pad bit is refused. Every `resources` value is base64 when `resources_base64` is true, and an inline reference's `inline` value is base64 when its `inline_base64` is true.
-4. **Paths.** Compare resource paths as the bytes of their UTF-8 encoding, without normalization. Refuse a `load_artifact` body whose `resources` and `large_resources` name the same path, and a batch item whose `resources` array names a path more than once.
-5. **Record.** Build the record from the members of step 2. The content hash of a `large_resources` path is its link's `content_hash`, including an empty one. The content hash of an inline `resources` path is `sha256:` followed by the lowercase hexadecimal SHA-256 digest of its body. A batch item takes each resource's content hash from its reference's `content_hash`. When the body carries `manifest_body_url`, fetch the document, check it by step 6, and place its bytes in `skill_raw` for a skill and in `frontmatter` for every other type. Derive the manifest body from the same bytes: the document opens with `---`, an optional CR, and an LF, the frontmatter closes at the earliest later CR-optional LF followed by `---`, and the body is every byte after that closing `---` with leading CR and LF characters removed. A document that does not open and close this way has an empty body. Batch items carry no `manifest_body_url`.
-6. **Bodies.** Check each body fetched through a link, and the decoded body of each inline batch reference, before returning or writing it: `sha256:` and the lowercase hexadecimal digest of the body must equal the `content_hash` as an exact string. A link or reference with an empty `content_hash` is not checked here. For a large resource or a batch reference, that empty value is the hash the record frames, so step 7 refuses it. A `manifest_body_url` document is framed into the record itself, so step 7 still covers its bytes.
-7. **Compare and verify.** Serialize the record in the order and framing the specification fixes under the tag `podium/delivery-record/2` and compare `sha256:` and the lowercase hexadecimal digest with `delivery_hash` as exact strings. An absent or empty `delivery_hash`, or any difference including letter case, is refused with `materialize.content_hash_mismatch`. Then apply the signature policy to `delivery_signature`. Decode the envelope by the envelope rule below only when the policy verifies a signature. The `never` policy decodes and checks nothing, including a signature the response carries.
+1. **JSON rule.** The body is valid UTF-8 JSON with no byte order mark, nests arrays and objects no deeper than 64 levels, and has an object at the top level, or an array of objects for a batch body. The top-level array or object is level 1. `NaN` and `Infinity` are not JSON and fail the rule. A `\u` escape of a UTF-16 surrogate is valid only as a high surrogate escape followed directly by a low surrogate escape. The depth and surrogate conditions apply to the whole text, including a member that a later member of the same name replaces. Of two members with one name, the later is used. A batch body that fails this rule refuses the whole call.
+2. **Members.** Read the record members by exact name:
+   - `id`, `version`, `type`, `content_hash`, `sensitivity`, `artifact_revision`, `frontmatter`, `manifest_body`, `skill_raw`, `delivery_hash`, and `delivery_signature` as strings.
+   - `resources` as an object of strings, with the boolean `resources_base64`.
+   - `large_resources` as an object of link objects, and `manifest_body_url` as a link object. A link object carries the strings `presigned_url` and `content_hash`.
+   - A batch item's `resources` as an array of reference objects with the strings `path`, `content_hash`, `presigned_url`, and `inline`, and the boolean `inline_base64`.
 
-`delivery_signature` is a registry-managed envelope. The registry writes it as `{"key_id":"<key_id>","signature":"<base64>"}` with no whitespace. Under a policy that verifies a signature, a verifier parses it under the step 1 JSON rule and requires an object at the top level. It reads `signature` and `key_id` by exact name, ignores every other member, and treats `null` as absent. `signature` is the canonical base64 encoding of a 64-byte Ed25519 signature, and `key_id` is the lowercase hexadecimal encoding of the first 8 bytes of the SHA-256 digest of the signing public key. An envelope that fails the JSON rule, whose top-level value is not an object, that has no `signature`, whose `signature` or `key_id` is present and not a string, or whose `signature` is not the canonical encoding of exactly 64 bytes is refused with `materialize.signature_invalid`. The signed message is the 32-byte SHA-256 digest that `delivery_hash` encodes, rather than the text of `delivery_hash`. The verifier tries the key of its verification key set that `key_id` names first and then every other key in the set, and accepts the envelope when any key verifies it. A signature that no key verifies is refused with `materialize.signature_invalid`, and a missing signature under the `always` policy is refused with `materialize.signature_missing`. The verification key set comes from `PODIUM_SIGNATURE_VERIFY_KEY`, or otherwise from the `public:` and `verify:` lines of the key file at `PODIUM_SIGN_KEY_PATH`.
+   Ignore every other member, including a member whose name differs only in letter case, `layer`, and a link's `size` and `content_type`. Treat `null` as absent, an absent string as empty, and an absent boolean as false. Refuse the body when a member has another JSON type, when a link's `presigned_url` is absent or empty, or when a batch reference has no `path`. A batch reference with a non-empty `presigned_url` is a link reference. Every other reference is an inline reference whose body is its `inline` value.
+3. **Base64.** Accept a base64 value only in canonical form: decoding it with the standard RFC 4648 alphabet and re-encoding the bytes with `=` padding reproduces the value exactly. A line break, whitespace, a URL-safe character, missing padding, or a non-zero pad bit is refused. Every `resources` value is base64 when `resources_base64` is true. An inline reference's `inline` value is base64 when its `inline_base64` is true.
+4. **Paths.** Compare resource paths as the bytes of their UTF-8 encoding, without normalization. Refuse a `load_artifact` body whose `resources` and `large_resources` name the same path. Refuse a batch item whose `resources` array names a path more than once.
+5. **Record.** Build the record from the members of step 2.
+   - The content hash of a `large_resources` path is its link's `content_hash`, including an empty one.
+   - The content hash of an inline `resources` path is `sha256:` followed by the lowercase hexadecimal SHA-256 digest of its body.
+   - A batch item takes each resource's content hash from its reference's `content_hash`.
+   - When the body carries `manifest_body_url`, fetch the document and check it by step 6. Place its bytes in `skill_raw` for a skill, and in `frontmatter` for every other type. Batch items carry no `manifest_body_url`.
+   - Derive the manifest body from the same bytes. The document opens with `---`, an optional CR, and an LF. The frontmatter closes at the earliest later CR-optional LF followed by `---`. The body is every byte after that closing `---`, with leading CR and LF characters removed. A document that does not open and close this way has an empty body.
+6. **Bodies.** Check each body fetched through a link, and the decoded body of each inline batch reference, before returning or writing it. `sha256:` and the lowercase hexadecimal digest of the body must equal the `content_hash` as an exact string. A link or reference with an empty `content_hash` is not checked here. For a large resource or a batch reference, that empty value is the hash the record frames, so step 7 refuses it. A `manifest_body_url` document is framed into the record itself, so step 7 still covers its bytes.
+7. **Compare and verify.** Serialize the record in the order and framing the specification fixes under the tag `podium/delivery-record/2`. Compare `sha256:` and the lowercase hexadecimal digest with `delivery_hash` as exact strings. An absent or empty `delivery_hash`, or any difference including letter case, is refused with `materialize.content_hash_mismatch`. Then apply the signature policy to `delivery_signature`. Decode the envelope by the envelope rule below only when the policy verifies a signature. The `never` policy decodes and checks nothing, including a signature the response carries.
+
+##### The `delivery_signature` envelope
+
+`delivery_signature` is a registry-managed envelope. The registry writes it as `{"key_id":"<key_id>","signature":"<base64>"}` with no whitespace.
+
+| Member | Content |
+|:--|:--|
+| `signature` | The canonical base64 encoding of a 64-byte Ed25519 signature. |
+| `key_id` | The lowercase hexadecimal encoding of the first 8 bytes of the SHA-256 digest of the signing public key. |
+
+Under a policy that verifies a signature, a verifier proceeds as follows:
+
+1. Parse the envelope under the step 1 JSON rule, and require an object at the top level.
+2. Read `signature` and `key_id` by exact name, ignore every other member, and treat `null` as absent.
+3. Refuse with `materialize.signature_invalid` an envelope that fails the JSON rule, whose top-level value is not an object, that has no `signature`, whose `signature` or `key_id` is present and not a string, or whose `signature` is not the canonical encoding of exactly 64 bytes.
+4. Verify the signature over the 32-byte SHA-256 digest that `delivery_hash` encodes, rather than over the text of `delivery_hash`.
+5. Try the key of the verification key set that `key_id` names first, then every other key in the set. Accept the envelope when any key verifies it.
+
+A signature that no key verifies is refused with `materialize.signature_invalid`. A missing signature under the `always` policy is refused with `materialize.signature_missing`. The verification key set comes from `PODIUM_SIGNATURE_VERIFY_KEY`, or otherwise from the `public:` and `verify:` lines of the key file at `PODIUM_SIGN_KEY_PATH`.
 
 ### `load_artifacts` (bulk)
+
+Loads several artifacts in one request and returns a per-item result for each.
 
 ```
 POST /v1/artifacts:batchLoad
 ```
 
-Body:
+**Authorization.** Any caller. Each item is visibility-filtered as `load_artifact` is.
+
+**Body.**
 
 ```json
 {
@@ -309,7 +512,13 @@ Body:
 }
 ```
 
-Response: an array of per-item envelopes. Each item has its own `status` (`ok` or `error`) and either the manifest payload or an error envelope. Hard cap: 50 IDs per batch.
+| Field | Description |
+|:--|:--|
+| `ids` | The artifact IDs to load. Hard cap: 50 IDs per batch. |
+| `session_id` | The session identifier. |
+| `version_pins` | A map of artifact ID to the version to load. |
+
+**Response.** An array of per-item envelopes. Each item has its own `status` (`ok` or `error`) and either the manifest payload or an error envelope.
 
 ```json
 [
@@ -333,15 +542,26 @@ Response: an array of per-item envelopes. Each item has its own `status` (`ok` o
 ]
 ```
 
-Each entry of an item's `resources` array carries `path` and `content_hash`, and either `presigned_url` or, for a resource the registry holds inline, `inline`, with `inline_base64: true` when the bytes are not valid UTF-8. On a deployment with an object store, a resource at or below the inline cutoff arrives in `inline`, and only a resource the registry read from object storage carries a `presigned_url`.
+Each entry of an item's `resources` array carries `path` and `content_hash`. It also carries either `presigned_url` or, for a resource the registry holds inline, `inline`, with `inline_base64: true` when the bytes are not valid UTF-8. On a deployment with an object store, a resource at or below the inline cutoff arrives in `inline`. Only a resource the registry read from object storage carries a `presigned_url`.
 
-Each `ok` item carries `delivery_hash`, `delivery_signature`, and `artifact_revision`, composed and signed by the same code as the `load_artifact` response, so both endpoints serve one delivery hash per artifact. Each `ok` item also carries `sensitivity`, absent when the artifact declares none, so a client rebuilds the item's delivery record from the item alone. Both language SDKs verify each `ok` item by the [verification procedure](#verifying-a-response) and return an item that fails it with `status: "error"` and the failure's code, while the other items load. The MCP server does not call this endpoint and performs no startup cache warm-up.
+Each `ok` item carries `delivery_hash`, `delivery_signature`, and `artifact_revision`, composed and signed by the same code as the `load_artifact` response, so both endpoints serve one delivery hash per artifact. Each `ok` item also carries `sensitivity`, absent when the artifact declares none, so a client rebuilds the item's delivery record from the item alone.
 
-Visibility is identical to `load_artifact`: items the caller can't see come back as `status: "error"` with `visibility.denied`. No leak about whether the artifact exists in some hidden layer.
+**Errors.** The batch status stays `200` when individual items fail. Item-level codes:
 
-Each item counts as one load against the materialization rate of the caller's tenant, the budget `load_artifact` also draws on. Items are charged in request order whatever their outcome, so an item that comes back with `visibility.denied` is charged. When the rate refuses an item, that item and every later item come back as `status: "error"` with `quota.materialize_rate_exceeded` and `retryable: true`. They are not loaded or charged, and the items before them are served as usual. The batch status stays 200. A request rejected as a whole, such as one with more than 50 IDs, is not charged.
+| Item code | When |
+|:--|:--|
+| `visibility.denied` | The caller cannot see the artifact. The response does not reveal whether the artifact exists in some hidden layer. |
+| `quota.materialize_rate_exceeded` | The materialization rate refused the item. The item carries `retryable: true`. |
+| `materialize.signature_invalid`, `materialize.signature_missing`, `materialize.content_hash_mismatch` | The registry's [stored-row admission check](error-codes#stored-row-admission-refusals) refused the row. The item carries `retryable: false`. |
+| `registry.unknown` | The item failed for a reason that maps to no more specific code. |
 
-Not exposed as an MCP meta-tool; bulk loading is a programmatic-runtime concern.
+A request rejected as a whole, such as one with more than 50 IDs or with an empty `ids`, returns `400 registry.invalid_argument`.
+
+**Notes.**
+
+- **Rate accounting.** Each item counts as one load against the materialization rate of the caller's tenant, the budget `load_artifact` also draws on. Items are charged in request order whatever their outcome, so an item that comes back with `visibility.denied` is charged. When the rate refuses an item, that item and every later item come back as `status: "error"` with `quota.materialize_rate_exceeded`. They are not loaded or charged, and the items before them are served as usual. A request rejected as a whole is not charged.
+- **SDK verification.** Both language SDKs verify each `ok` item by the [verification procedure](#verifying-a-response). They return an item that fails it with `status: "error"` and the failure's code, while the other items load.
+- **MCP.** The MCP server does not call this endpoint and performs no startup cache warm-up. The endpoint is not exposed as an MCP meta-tool, because bulk loading is a programmatic-runtime concern.
 
 ---
 
@@ -349,11 +569,21 @@ Not exposed as an MCP meta-tool; bulk loading is a programmatic-runtime concern.
 
 ### `catalog`
 
+Returns the caller's visible artifact catalog under a scope prefix, as a flat ID list plus a lean per-artifact descriptor.
+
 ```
 GET /v1/catalog?scope={path}
 ```
 
-Returns the caller's visible artifact catalog under the `scope` prefix as a flat ID list plus a lean per-artifact descriptor (`id`, `type`, and a short `summary`), visibility-filtered server-side. No manifest body rides along. The client-side `load_domain` merge resolves a workspace-local `DOMAIN.md`'s globs over this set.
+**Authorization.** Any caller. The catalog is visibility-filtered server-side.
+
+**Parameters.**
+
+| Parameter | Description |
+|:--|:--|
+| `scope` | The domain path prefix. |
+
+**Response.** Each descriptor carries `id`, `type`, and a short `summary`. No manifest body is included.
 
 ```json
 {
@@ -364,47 +594,125 @@ Returns the caller's visible artifact catalog under the `scope` prefix as a flat
 }
 ```
 
+**Notes.**
+
+- The client-side `load_domain` merge resolves a workspace-local `DOMAIN.md`'s globs over this set.
+
 ### `sync/manifest`
+
+Returns the caller's full effective view as a flat artifact list under the `artifacts` key.
 
 ```
 GET /v1/sync/manifest
 ```
 
-Returns the caller's full effective view as a flat artifact list under the `artifacts` key, visibility-filtered server-side. `podium sync` in server-source mode walks this to discover which artifacts to load, then materializes each via `load_artifact`. It carries no relevance ranking and no `top_k` cap, so a sync of more than 50 artifacts enumerates in one request.
+**Authorization.** Any caller. The list is visibility-filtered server-side.
+
+**Notes.**
+
+- `podium sync` in server-source mode walks this list to discover which artifacts to load, then materializes each one through `load_artifact`.
+- The list carries no relevance ranking and no `top_k` cap, so a sync of more than 50 artifacts enumerates in one request.
 
 ### `dependents`
+
+Returns the cross-artifact dependency edges that point at an artifact.
 
 ```
 GET /v1/dependents?id={id}
 ```
 
-Returns the cross-artifact dependency edges that point at the artifact, under the `edges` key. Each edge carries `from`, `to`, and `kind`. An edge's `kind` is `delegates_to` or `mcpServers`. A stored edge of any other kind is never returned and never counts toward the search ranking signal.
+**Authorization.** Any caller. Edges are filtered per caller.
 
-The edges are filtered per caller. An edge is returned only when the caller can see both of its endpoints: the artifact that declared the relation and the artifact it names. A query against an artifact the caller cannot see answers `200 {"edges":[]}`, the same response as a query against an artifact that does not exist or that nothing depends on. The endpoint filters rather than refuses, so it returns no `visibility.denied` error. The search ranking signal counts dependents across the tenant and is not filtered.
+**Parameters.**
+
+| Parameter | Required | Description |
+|:--|:--|:--|
+| `id` | Yes | The artifact ID. |
+
+**Response.** The edges are returned under the `edges` key. Each edge carries `from`, `to`, and `kind`. An edge's `kind` is `delegates_to` or `mcpServers`.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `400 registry.invalid_argument` | `id` is missing. |
+
+**Notes.**
+
+- A stored edge of any other kind is never returned and never counts toward the search ranking signal.
+- An edge is returned only when the caller can see both of its endpoints: the artifact that declared the relation and the artifact it names.
+- A query against an artifact the caller cannot see answers `200 {"edges":[]}`. That is the same response as a query against an artifact that does not exist or that nothing depends on. The endpoint filters rather than refuses, so it returns no `visibility.denied` error.
+- The search ranking signal counts dependents across the tenant and is not filtered.
 
 ### `domain/analyze`
+
+Returns the per-subtree domain analysis report for a path, the same report `podium domain analyze` prints.
 
 ```
 GET /v1/domain/analyze?path={path}
 ```
 
-Returns the per-subtree domain analysis report for the path (the same report `podium domain analyze` prints).
-
 ---
 
 ## Layer management
 
-**Layer write authorization.** The write operations in this section, meaning `POST /v1/layers`, `DELETE /v1/layers`, `/v1/layers/update`, `/v1/layers/restore`, `/v1/layers/reorder`, and `/v1/layers/reingest`, are gated. On a stored layer that is user-defined, the operation is authorized to that layer's stored `owner` or to a caller holding the per-tenant `admin` role. On a stored layer that is admin-defined, it is authorized to a tenant admin alone, whatever that layer's stored `owner` field names, because on an admin-defined layer that field is supplied by the requesting caller and names no authorized subject. On `POST /v1/layers` the gate applies when the request's `id` names a layer that already exists in the tenant, and the arm taken is decided by the stored layer's class and stored owner rather than by anything in the request body; a layer that is soft-deleted and still inside its recovery window is a layer that exists for this rule. A registration whose `id` names no stored layer is authorized to a caller the admin arm admits or to a caller who resolves a verified subject, and where that registration resolves to a user-defined layer and a subject resolves, the stored `owner` is that subject. A caller authorized by neither arm is refused with `403 auth.forbidden`, whether that caller resolves a different subject or resolves none at all. On `POST /v1/layers/reorder` a caller whose credential fails verification under the configured identity provider's rule is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime` before either authorization arm is evaluated, so on that operation `auth.forbidden` names a caller the registry verified and did not authorize; the other layer write operations answer such a caller `auth.forbidden` as before. A registration whose existence lookup fails is refused with `500 registry.unavailable` and writes nothing. A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so no caller can hold the admin role or resolve as an owner and these endpoints admit the request there.
+The layer endpoints register, list, update, reorder, reingest, unregister, and restore the layers a tenant composes. The rules below govern authorization and tenant selection for every endpoint in this section. The [layer object](#the-layer-object) is the representation each endpoint returns.
 
-**Local-source authorization.** Registering a layer whose source type is `local` or whose registration names a filesystem path on the registry host, patching a stored layer's filesystem path, restoring a stored layer that names one, and reingesting one are authorized to a caller holding the per-tenant `admin` role. A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so no caller can hold the admin role and these operations are admitted there, on the same reading the layer write authorization rule above states for its own arms. Any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`, and the refusal names no filesystem path. The rule applies to a user-defined and to an admin-defined layer alike, and it is evaluated on each of those operations rather than against the stored layer list, so a layer stored before this rule was in force is refused at its next such operation rather than at startup. An inbound webhook delivery triggers a reingest and is governed by this rule on the same arm: the delivery carries the per-layer secret rather than a caller the registry can place on the admin arm, so on a registry that authenticates its callers a webhook-triggered reingest of a layer that names a filesystem path is refused. `DELETE /v1/layers` and `POST /v1/layers/reorder` name no filesystem path and re-read none, so the rule does not reach them. A `git` source whose `repo` names a network endpoint is fetched through a network transport and yields tree objects rather than host files, so the rule does not reach it; a `git` source is placed on this rule's arm by its `repo` string alone, so a `local_path` stored beside a `git` source never places a restore, a reingest, or a webhook-triggered reingest on the arm. A `git` source whose `repo` resolves to the Git file transport names a repository path on the registry host and takes the same arm, and a `repo` string the registry cannot place as a network endpoint is treated as naming a host path.
+### Layer write authorization
 
-**The layer object.** Every endpoint in this section that returns a layer returns the same object, with lower snake_case field names:
+These write operations are gated: `POST /v1/layers`, `DELETE /v1/layers`, `/v1/layers/update`, `/v1/layers/restore`, `/v1/layers/reorder`, and `/v1/layers/reingest`.
+
+| Stored layer class | Authorized callers |
+|:--|:--|
+| User-defined | The layer's stored `owner`, or a caller holding the per-tenant `admin` role. |
+| Admin-defined | A tenant admin alone, whatever the layer's stored `owner` field names. On an admin-defined layer, that field is supplied by the requesting caller and names no authorized subject. |
+
+- A caller authorized by neither arm is refused with `403 auth.forbidden`, whether that caller resolves a different subject or resolves none at all.
+- On `POST /v1/layers`, the gate applies when the request's `id` names a layer that already exists in the tenant. The stored layer's class and stored owner decide the arm, and nothing in the request body does. A layer that is soft-deleted and still inside its recovery window exists for this rule.
+- A registration whose `id` names no stored layer is authorized to a caller the admin arm admits, or to a caller who resolves a verified subject. Where that registration resolves to a user-defined layer and a subject resolves, the stored `owner` is that subject.
+- A registration whose existence lookup fails is refused with `500 registry.unavailable` and writes nothing.
+- On `POST /v1/layers/reorder`, a caller whose credential fails verification under the configured identity provider's rule is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime` before either arm is evaluated. On that operation, `auth.forbidden` therefore names a caller the registry verified and did not authorize. The other layer write operations answer such a caller `auth.forbidden`.
+- A registry started with no identity provider configured, or one started in public mode, authenticates no caller. No caller can hold the admin role or resolve as an owner there, so these endpoints admit the request.
+
+### Local-source authorization
+
+The operations below are authorized to a caller holding the per-tenant `admin` role:
+
+- Registering a layer whose source type is `local`, or whose registration names a filesystem path on the registry host.
+- Patching a stored layer's filesystem path.
+- Restoring a stored layer that names a filesystem path.
+- Reingesting a stored layer that names a filesystem path.
+
+Any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`, and the refusal names no filesystem path. A registry started with no identity provider configured, or one started in public mode, authenticates no caller. No caller can hold the admin role there, so these operations are admitted, on the same reading the [layer write authorization](#layer-write-authorization) rule states for its own arms.
+
+Notes:
+
+- The rule applies to a user-defined and to an admin-defined layer alike.
+- The rule is evaluated on each of those operations rather than against the stored layer list. A layer stored before this rule was in force is refused at its next such operation rather than at startup.
+- An inbound webhook delivery triggers a reingest and is governed by this rule on the same arm. The delivery carries the per-layer secret rather than a caller the registry can place on the admin arm. On a registry that authenticates its callers, a webhook-triggered reingest of a layer that names a filesystem path is therefore refused.
+- `DELETE /v1/layers` and `POST /v1/layers/reorder` name no filesystem path and re-read none, so the rule does not reach them.
+- A `git` source whose `repo` names a network endpoint is fetched through a network transport and yields tree objects rather than host files, so the rule does not reach it.
+- A `git` source is placed on this rule's arm by its `repo` string alone. A `local_path` stored beside a `git` source never places a restore, a reingest, or a webhook-triggered reingest on the arm.
+- A `git` source whose `repo` resolves to the Git file transport names a repository path on the registry host and takes the same arm. A `repo` string the registry cannot place as a network endpoint is treated as naming a host path.
+
+### Tenant selection
+
+On a multi-tenant registry, each layer endpoint acts in the tenant the caller's organization selects. The admin check, the layer list, the user-defined layer cap, and the tenant whose change-event subscribers receive the operation's event all use that tenant.
+
+- A request the registry rejects on its other endpoints with `401 auth.tenant_unknown`, because its verified organization names no provisioned tenant, receives the same rejection on every layer endpoint.
+- Any other request that resolves to no tenant lists no layers, and every layer write is refused with `403 auth.forbidden`.
+- A credential that fails verification on `list` or `reorder` keeps its own error envelope.
+- `POST /v1/admin/erase` follows the same tenant selection, as [Erase a user](#erase-a-user-gdpr) states.
+
+### The layer object
+
+Every endpoint in this section that returns a layer returns the same object, with lower snake_case field names:
 
 | Field | Type | Notes |
 |:--|:--|:--|
 | `id` | string | The layer identifier, unique within the tenant. |
 | `source_type` | string | `git` or `local`. |
-| `repo` | string | The Git remote for a `git` source. A credential in the userinfo of the URL is not reported: a value written as a URL with a scheme is reported with its userinfo removed, for every caller. A value that is not written as a URL with a scheme, such as `git@github.com:acme/x.git`, is reported as stored. A value written with a scheme that does not parse as a URL, and an `http` or `https` value that carries `@` after its host, is reported as `[redacted]`. The layer object carries neither part of the repository credential, because `repo_username` and `repo_token` are write-only. |
+| `repo` | string | The Git remote for a `git` source. A credential in the userinfo of the URL is not reported; see the notes below the table. |
 | `ref` | string | The tracked ref for a `git` source. |
 | `root` | string | An optional subpath within the source. |
 | `local_path` | string | The filesystem path on the registry host for a `local` source. |
@@ -421,17 +729,41 @@ Returns the per-subtree domain analysis report for the path (the same report `po
 | `last_ingested_ref` | string | The commit SHA of the most recent completed ingest for a `git` source. |
 | `created_at` | string | RFC 3339 timestamp of the layer's registration. |
 | `deleted_at` | string | The soft-delete tombstone, or `null` on a live layer. A reader computes the remaining recovery window from it. |
-| `repo_credential` | boolean | Carried on a `git` layer whose stored `repo` is an `http` or `https` URL that a read does not report as `[redacted]`, which are the layers whose update takes `repo_token`, `repo_username`, and `clear_repo_credential`. Omitted on every other layer, including a `local` layer whatever its `repo` holds, an `ssh://` or scp-like remote, and a `repo` reported as `[redacted]`. True while that `repo` carries a credential, including one stored inside `repo` by an earlier release, and false otherwise. True exactly when `clear_repo_credential` on an update would change the stored `repo`. |
+| `repo_credential` | boolean | Whether the stored `repo` carries a credential. Carried only on some `git` layers; see the notes below the table. |
 
-The object carries no tenant identifier, because these endpoints serve the one tenant the request's organization selects. It carries the layer's inbound webhook HMAC secret under no name: that credential is returned once, in the `webhook_secret` field of the registration response and of an update that requests a rotation. Timestamps are RFC 3339 in UTC.
+Timestamps are RFC 3339 in UTC. The object carries no tenant identifier, because these endpoints serve the one tenant the request's organization selects.
+
+The object carries the layer's inbound webhook HMAC secret under no name. That credential is returned once, in the `webhook_secret` field of the registration response and of an update that requests a rotation.
+
+How `repo` is reported:
+
+| Stored `repo` | Reported value |
+|:--|:--|
+| Written as a URL with a scheme | The URL with its userinfo removed, for every caller. |
+| Not written as a URL with a scheme, such as `git@github.com:acme/x.git` | As stored. |
+| Written with a scheme that does not parse as a URL | `[redacted]` |
+| An `http` or `https` value that carries `@` after its host | `[redacted]` |
+
+The layer object carries neither part of the repository credential, because `repo_username` and `repo_token` are write-only.
+
+When `repo_credential` is present:
+
+- It is carried on a `git` layer whose stored `repo` is an `http` or `https` URL that a read does not report as `[redacted]`. These are the layers whose update takes `repo_token`, `repo_username`, and `clear_repo_credential`.
+- It is omitted on every other layer. That includes a `local` layer whatever its `repo` holds, an `ssh://` or scp-like remote, and a `repo` reported as `[redacted]`.
+- It is true while that `repo` carries a credential, including one stored inside `repo` by an earlier release, and false otherwise.
+- It is true exactly when `clear_repo_credential` on an update would change the stored `repo`.
 
 ### Register a layer
+
+Registers a layer in the caller's tenant, or replaces the stored record of an existing layer ID.
 
 ```
 POST /v1/layers
 ```
 
-Body:
+**Authorization.** A registration that names an existing layer ID is a write against that layer under [layer write authorization](#layer-write-authorization). A caller neither arm authorizes is refused with `403 auth.forbidden` rather than overwriting it. A registration can also fall under [local-source authorization](#local-source-authorization) and the [admin-only fields rule](#admin-only-fields).
+
+**Body.**
 
 ```json
 {
@@ -445,30 +777,22 @@ Body:
 }
 ```
 
-`id` and `source_type` are required. Visibility is set with the top-level `public`, `organization`, `groups`, and `users` fields. `git_provider` names the Git provider whose webhook signature scheme verifies this layer's inbound deliveries; it applies to a `git` source alone, and a value naming no registered provider, or any value on a `local` source, is refused with `400 registry.invalid_argument`. Omitting it resolves the layer to `github`. A request whose `id` names a layer that already exists in the tenant is a write against that layer and is authorized against it under the rule above, so a caller neither arm authorizes is refused with `403 auth.forbidden` rather than overwriting it.
+| Field | Required | Description |
+|:--|:--|:--|
+| `id` | Yes | The layer identifier. |
+| `source_type` | Yes | `git` or `local`. |
+| `repo` | No | The Git remote. An `http` or `https` `repo` carries no userinfo. |
+| `ref` | No | The tracked ref. |
+| `root` | No | A subpath within the source. |
+| `local_path` | No | The filesystem path on the registry host. |
+| `git_provider` | No | The Git provider whose webhook signature scheme verifies this layer's inbound deliveries. It applies to a `git` source alone. Omitting it resolves the layer to `github`. |
+| `force_push_policy` | No | `tolerant` or `strict`. |
+| `public`, `organization`, `groups`, `users` | No | Visibility. Read on a tenant admin's registration alone. |
+| `owner` | No | The layer owner. Read on a tenant admin's registration alone. |
+| `repo_username`, `repo_token` | No | The write-only repository credential. See [Repository credential](#repository-credential). |
+| `clear_repo_credential` | No | `true` stores no credential. |
 
-A `git` layer on an `http` or `https` remote takes its credential in the write-only members `repo_username` and `repo_token`, and `repo` carries no userinfo:
-
-```json
-{
-  "id": "team-private",
-  "source_type": "git",
-  "repo": "https://git.acme.com/acme/private.git",
-  "ref": "main",
-  "repo_username": "x-access-token",
-  "repo_token": "<token>"
-}
-```
-
-The registry joins the two into the URL it clones with, and no response, log line, audit event, or error message carries either. `repo_token` holds the token, or the password where the provider issues one. An omitted or empty `repo_username` is an empty username, and the registry supplies no default. `clear_repo_credential: true` stores no credential. The members apply to a `git` source whose `repo` is an `http` or `https` URL that a read would not report as `[redacted]`. Each of these is refused with `400 registry.invalid_argument` and a message naming the member: a non-empty `repo_token`, a non-empty `repo_username`, or `clear_repo_credential: true` on any other source or `repo`, a `repo_username` containing `:`, `/`, `"`, a space, or a control character, a `repo_token` containing a control character, a non-empty `repo_username` without `repo_token`, and `repo_token` together with `clear_repo_credential`. An empty `repo_username`, an empty `repo_token`, or a false `clear_repo_credential` on any other source or `repo` has no effect and is not refused. A registration of any source type whose `http` or `https` `repo` carries userinfo, an empty userinfo included, or whose `repo` a read would report as `[redacted]`, is refused with `400 registry.invalid_argument` carrying `details.constraint: "url_credential"`. These refusals are evaluated before the registry reads the stored layer, so they precede the layer write authorization rule.
-
-A registration that names an existing layer ID replaces the stored record. One whose `source_type` is `git`, over a stored `git` layer whose `repo` is an `http` or `https` URL that carries a credential or is reported as `[redacted]`, and whose `repo` equals the value a read reports for that stored `repo`, keeps the stored credential when it resolves to the stored layer's class and, for a user-defined layer, its owner, and carries neither `repo_token` nor `clear_repo_credential`. A registration that names another source type or replaces a layer of another source type, that resolves to another class, or on a user-defined layer to another owner, or that names a different remote, stores only the credential it carries. A `repo` of `[redacted]` names a filesystem path to the registry, so a re-registration that sends it back falls under the local-source rule, which refuses it with `403 auth.forbidden` and `details.constraint: "local_source"` from the owner of a user-defined layer who does not hold the tenant `admin` role. The layer write rule refuses any other caller without that role first, with `403 auth.forbidden` and no `details.constraint`. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits every caller on the admin arm, so neither rule refuses that re-registration there. A kept registration still resets the order, the registration time, and the ingest history, and returns a new webhook secret. A `repo` whose reported value itself carries `@` after its host cannot be sent back, because that value is refused with `url_credential`. The body has no `force_repo_overwrite` member, and an unknown member is ignored, so a client that still sends it has the credential kept.
-
-A registration also falls under the local-source rule above when its `source_type` is `local`, when it carries a `local_path` and its `source_type` is not `git`, or when its `repo` resolves to the Git file transport. A `git` registration is placed by its `repo` string alone, so a `local_path` sent beside a `git` `repo` naming a network endpoint does not place it on the arm. A registration the rule places on the arm and whose caller does not hold the `admin` role is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
-
-`owner`, `public`, `organization`, `groups`, and `users` are read on a tenant admin's registration alone. A caller without the `admin` role that asserts any of them is refused with `403 auth.forbidden` carrying `details.constraint: "admin_only_fields"`, and the refusal names the asserted fields in its message. A field is asserted by its value rather than by its presence: `public` or `organization` carrying false, an empty `groups` or `users`, an empty `owner`, and an `owner` naming the caller's own verified subject assert nothing. A registration that asserts none of them is resolved to a user-defined layer owned by the caller, as before. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits every caller on the admin arm, so the rule refuses nothing there. The registry evaluates this rule after the layer write authorization rule and after the local-source rule, so a registration either of those refuses keeps its own envelope: the layer write refusal carries a bare `403 auth.forbidden` with no `details.constraint`, including for a caller who resolves no subject, and a registration on the local-source arm carries `details.constraint: "local_source"`. The `admin_only_fields` refusal is returned only where neither earlier rule refuses.
-
-The response is `201 Created` with the stored layer and, for a `git` source, the webhook URL and HMAC secret to register on the source repo:
+**Response.** `201 Created` with the stored layer. For a `git` source, the response also carries the webhook URL and HMAC secret to register on the source repo:
 
 ```json
 {
@@ -502,15 +826,114 @@ On a multi-tenant registry, `webhook_url` carries the layer's tenant ID before t
 "webhook_url": "https://registry.acme.com/v1/ingest/webhook/<tenant-id>/team-finance"
 ```
 
-The registration has not ingested yet, so `last_ingested_at` is absent, and this registration sets no force-push policy, so `force_push_policy` is absent. A `local` registration, and an update that requests no secret rotation, return the layer alone without `webhook_url` and `webhook_secret`.
+The registration in the example has not ingested yet, so `last_ingested_at` is absent. It sets no force-push policy, so `force_push_policy` is absent. A `local` registration, and an update that requests no secret rotation, return the layer alone without `webhook_url` and `webhook_secret`.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `400 registry.invalid_argument` | `id` or `source_type` is missing; `force_push_policy` is not `tolerant` or `strict`; `git_provider` names no registered provider, or any `git_provider` is sent on a `local` source; or a [repository credential](#repository-credential) refusal applies. |
+| `400 registry.invalid_argument` with `details.constraint: "url_credential"` | The `http` or `https` `repo` carries userinfo, or a read would report the `repo` as `[redacted]`. |
+| `403 auth.forbidden` | [Layer write authorization](#layer-write-authorization) refuses the write. No `details.constraint`. |
+| `403 auth.forbidden` with `details.constraint: "local_source"` | [Local-source authorization](#local-source-authorization) refuses the registration. |
+| `403 auth.forbidden` with `details.constraint: "admin_only_fields"` | The [admin-only fields rule](#admin-only-fields) refuses the registration. |
+| `429 quota.layer_count_exceeded` | The caller has hit the per-identity user-defined-layer cap. |
+| `500 registry.unavailable` | The existence lookup for `id` failed. Nothing is written. |
+
+**Evaluation order.** The registry evaluates the checks in this order. A registration that an earlier check refuses keeps that check's envelope.
+
+1. The repository credential refusals and the `url_credential` refusal. These run before the registry reads the stored layer.
+2. Layer write authorization. Its refusal carries a bare `403 auth.forbidden` with no `details.constraint`, including for a caller who resolves no subject.
+3. Local-source authorization, with `details.constraint: "local_source"`.
+4. The admin-only fields rule, with `details.constraint: "admin_only_fields"`.
+
+#### Local-source registrations
+
+A registration falls under [local-source authorization](#local-source-authorization) when any of these holds:
+
+- Its `source_type` is `local`.
+- It carries a `local_path` and its `source_type` is not `git`.
+- Its `repo` resolves to the Git file transport.
+
+A `git` registration is placed by its `repo` string alone. A `local_path` sent beside a `git` `repo` naming a network endpoint does not place it on the arm. A registration the rule places on the arm, from a caller without the `admin` role, is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
+
+#### Admin-only fields
+
+`owner`, `public`, `organization`, `groups`, and `users` are read on a tenant admin's registration alone. A caller without the `admin` role that asserts any of them is refused with `403 auth.forbidden` carrying `details.constraint: "admin_only_fields"`. The refusal names the asserted fields in its message.
+
+- A field is asserted by its value rather than by its presence. `public` or `organization` carrying false, an empty `groups` or `users`, an empty `owner`, and an `owner` naming the caller's own verified subject assert nothing.
+- A registration that asserts none of these fields is resolved to a user-defined layer owned by the caller.
+- A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits every caller on the admin arm, so the rule refuses nothing there.
+- The `admin_only_fields` refusal is returned only where neither layer write authorization nor local-source authorization refuses.
+
+#### Repository credential
+
+A `git` layer on an `http` or `https` remote takes its credential in the write-only members `repo_username` and `repo_token`, and `repo` carries no userinfo:
+
+```json
+{
+  "id": "team-private",
+  "source_type": "git",
+  "repo": "https://git.acme.com/acme/private.git",
+  "ref": "main",
+  "repo_username": "x-access-token",
+  "repo_token": "<token>"
+}
+```
+
+The registry joins the two into the URL it clones with. No response, log line, audit event, or error message carries either member.
+
+| Member | Meaning |
+|:--|:--|
+| `repo_token` | The token, or the password where the provider issues one. |
+| `repo_username` | The username. An omitted or empty `repo_username` is an empty username, and the registry supplies no default. |
+| `clear_repo_credential` | `true` stores no credential. |
+
+The members apply to a `git` source whose `repo` is an `http` or `https` URL that a read would not report as `[redacted]`. Each of these is refused with `400 registry.invalid_argument` and a message naming the member:
+
+- A non-empty `repo_token`, a non-empty `repo_username`, or `clear_repo_credential: true` on any other source or `repo`.
+- A `repo_username` containing `:`, `/`, `"`, a space, or a control character.
+- A `repo_token` containing a control character.
+- A non-empty `repo_username` without `repo_token`.
+- `repo_token` together with `clear_repo_credential`.
+
+An empty `repo_username`, an empty `repo_token`, or a false `clear_repo_credential` on any other source or `repo` has no effect and is not refused.
+
+A registration of any source type is refused with `400 registry.invalid_argument` carrying `details.constraint: "url_credential"` when its `http` or `https` `repo` carries userinfo, an empty userinfo included, or when a read would report its `repo` as `[redacted]`. A `repo` whose reported value itself carries `@` after its host therefore cannot be sent back.
+
+These refusals are evaluated before the registry reads the stored layer, so they precede layer write authorization.
+
+#### Re-registering an existing layer
+
+A registration that names an existing layer ID replaces the stored record. It keeps the stored credential when all of these hold:
+
+- Its `source_type` is `git`, and the stored layer is a `git` layer whose `repo` is an `http` or `https` URL that carries a credential or is reported as `[redacted]`.
+- Its `repo` equals the value a read reports for that stored `repo`.
+- It resolves to the stored layer's class and, for a user-defined layer, to its owner.
+- It carries neither `repo_token` nor `clear_repo_credential`.
+
+A registration that names another source type, replaces a layer of another source type, resolves to another class or, on a user-defined layer, to another owner, or names a different remote, stores only the credential it carries.
+
+A kept registration still resets the order, the registration time, and the ingest history, and it returns a new webhook secret.
+
+Notes:
+
+- A `repo` of `[redacted]` names a filesystem path to the registry. A re-registration that sends it back falls under local-source authorization, which refuses it with `403 auth.forbidden` and `details.constraint: "local_source"` from the owner of a user-defined layer who does not hold the tenant `admin` role.
+- Layer write authorization refuses any other caller without that role first, with `403 auth.forbidden` and no `details.constraint`.
+- A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits every caller on the admin arm, so neither rule refuses that re-registration there.
+- The body has no `force_repo_overwrite` member, and an unknown member is ignored, so a client that still sends it has the credential kept.
 
 ### List layers
+
+Returns the layers the caller can read, as an array of the [layer object](#the-layer-object) under the `layers` key.
 
 ```
 GET /v1/layers
 ```
 
-Returns the layers the caller can read, as an array of the layer object under the `layers` key:
+**Authorization.** Any caller. The [layer read visibility](#layer-read-visibility) rule decides which layers the response includes.
+
+**Response.**
 
 ```json
 {
@@ -542,88 +965,254 @@ Returns the layers the caller can read, as an array of the layer object under th
 
 A caller who can read no layer receives `{"layers":[]}`.
 
-**Layer read visibility.** A caller holding the per-tenant `admin` role receives the tenant's whole layer list. Any other authenticated caller receives the layers that caller can see under the visibility rules, which include that caller's own user-defined layers through their implicit `users: [<registrant>]` visibility. A caller whose credential fails verification is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime`, the same refusal the registry answers on any other route that verifies the same credential. Whether presenting no credential is itself a verification failure is the configured identity provider's rule. A caller the registry resolves as anonymous rather than as a verification failure receives an empty list rather than a refusal. A layer the rule withholds is absent from the `200` response rather than refused with an error code, so the read discloses no identifier, source location, owner subject, or visibility declaration for it. A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so the read returns the tenant's whole layer list there, subject to the tenant selection rule below.
+**Errors.**
 
-**Tenant selection.** On a multi-tenant registry, each layer endpoint acts in the tenant the caller's organization selects. The admin check, the layer list, the user-defined layer cap, and the tenant whose change-event subscribers receive the operation's event all use that tenant. A request the registry rejects on its other endpoints with `401 auth.tenant_unknown`, because its verified organization names no provisioned tenant, receives the same rejection on every layer endpoint. Any other request that resolves to no tenant lists no layers, and every layer write is refused with `403 auth.forbidden`. A credential that fails verification on `list` or `reorder` keeps its own error envelope. `POST /v1/admin/erase` follows the same tenant selection, as [Erase a user](#erase-a-user-gdpr) states.
+| Code | When |
+|:--|:--|
+| `auth.token_expired`, `auth.untrusted_token`, `auth.untrusted_runtime` | The caller's credential fails verification. This is the same refusal the registry answers on any other route that verifies the same credential. |
+| `401 auth.tenant_unknown` | See [Tenant selection](#tenant-selection). |
+
+#### Layer read visibility
+
+| Caller | Layers returned |
+|:--|:--|
+| Holds the per-tenant `admin` role | The tenant's whole layer list. |
+| Any other authenticated caller | The layers that caller can see under the visibility rules, which include the caller's own user-defined layers through their implicit `users: [<registrant>]` visibility. |
+| Resolved as anonymous rather than as a verification failure | An empty list rather than a refusal. |
+| Any caller on a registry started with no identity provider configured, or in public mode | The tenant's whole layer list, subject to [tenant selection](#tenant-selection). That registry authenticates no caller. |
+
+- Whether presenting no credential is itself a verification failure is the configured identity provider's rule.
+- A layer the rule withholds is absent from the `200` response rather than refused with an error code. The read discloses no identifier, source location, owner subject, or visibility declaration for it.
 
 ### Reingest
+
+Forces a fresh snapshot of the layer regardless of the trigger model.
 
 ```
 POST /v1/layers/reingest?id={id}
 ```
 
-Forces a fresh snapshot of the layer regardless of the trigger model. Reingesting an admin-defined layer is authorized to a tenant admin, and reingesting a user-defined layer to its owner or a tenant admin, under the rule above; a caller authorized by neither arm is rejected with `auth.forbidden` before any Git fetch runs. On a layer that names a filesystem path on the registry host, the local-source rule above additionally requires the `admin` role, and any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`. The body is optional and carries a break-glass override during a freeze window:
+**Authorization.** [Layer write authorization](#layer-write-authorization): a tenant admin for an admin-defined layer, and the owner or a tenant admin for a user-defined layer. A caller authorized by neither arm is rejected with `auth.forbidden` before any Git fetch runs. On a layer that names a filesystem path on the registry host, [local-source authorization](#local-source-authorization) additionally requires the `admin` role.
+
+**Body.** Optional. It carries a break-glass override during a freeze window:
 
 ```json
 { "break_glass": true, "justification": "...", "approvers": ["...", "..."] }
 ```
 
-A `200` response reports each artifact the cycle dropped for a reason other than a lint failure or a same-version content conflict in a `rejected` array. Each entry carries `artifact_id`, `code`, and `reason`, and a `details` object when the rule that rejected it defines one. Same-version content conflicts are reported in the `conflicts` array, and lint failures only as the `lint_failures` count. The no-inheritance refusal runs before lint, so an `ARTIFACT.md` that declares `extends:` appears in `rejected` and is never counted in `lint_failures`, whatever lint rule it also fails. A cycle that accepts no artifact and classifies none unchanged is answered with the `409 ingest.immutable_violation` error envelope when it has a same-version content conflict, and with the `422 ingest.lint_failed` error envelope when it has a lint failure and no conflict. Neither envelope carries a `rejected` array, so it reports none of the cycle's other drops and no `details`.
+**Response.** A `200` response reports the cycle's results:
 
-An `ARTIFACT.md` that declares `extends:` is rejected with `details: {"constraint": "extends_removed"}`.
+| Field | Content |
+|:--|:--|
+| `rejected` | Each artifact the cycle dropped for a reason other than a lint failure or a same-version content conflict. Each entry carries `artifact_id`, `code`, and `reason`, and a `details` object when the rule that rejected it defines one. |
+| `conflicts` | Same-version content conflicts. |
+| `lint_failures` | The count of lint failures. Lint failures are reported only as this count. |
+
+An `ARTIFACT.md` that declares `extends:` is rejected with `details: {"constraint": "extends_removed"}`. The no-inheritance refusal runs before lint, so such an artifact appears in `rejected` and is never counted in `lint_failures`, whatever lint rule it also fails.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `403 auth.forbidden` | Layer write authorization refuses the caller. |
+| `403 auth.forbidden` with `details.constraint: "local_source"` | Local-source authorization refuses the caller. |
+| `409 ingest.immutable_violation` | The cycle accepted no artifact, classified none unchanged, and has a same-version content conflict. |
+| `422 ingest.lint_failed` | The cycle accepted no artifact, classified none unchanged, and has a lint failure and no conflict. |
+
+Neither the `409` nor the `422` envelope carries a `rejected` array, so it reports none of the cycle's other drops and no `details`.
 
 ### Reorder layers
+
+Re-sequences the named layers.
 
 ```
 POST /v1/layers/reorder
 ```
 
-Body: `{ "order": ["layer-a", "layer-b", "layer-c"] }`. The `order` array re-sequences the named layers. Reordering an admin-defined layer is authorized to a tenant admin, and reordering a user-defined layer to its owner or a tenant admin, under the rule above; a caller authorized by neither arm is rejected with `auth.forbidden`. A caller whose credential fails verification under the configured identity provider's rule is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime` before either arm is evaluated, so here `auth.forbidden` names a caller the registry verified and did not authorize; the other layer write operations answer such a caller `auth.forbidden` as before. The response reports the same set of layers the list read reports for that caller.
+**Authorization.** [Layer write authorization](#layer-write-authorization): a tenant admin for an admin-defined layer, and the owner or a tenant admin for a user-defined layer.
+
+**Body.** `{ "order": ["layer-a", "layer-b", "layer-c"] }`. The `order` array re-sequences the named layers.
+
+**Response.** The same set of layers the list read reports for that caller.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `auth.token_expired`, `auth.untrusted_token`, `auth.untrusted_runtime` | The caller's credential fails verification under the configured identity provider's rule. This is checked before either authorization arm is evaluated. |
+| `auth.forbidden` | The registry verified the caller and neither arm authorizes it. |
 
 ### Update a layer
+
+Patches a stored layer.
 
 ```
 POST /v1/layers/update?id={id}
 PUT  /v1/layers/update?id={id}
 ```
 
-Patches the layer. The visibility members (`public`, `organization`, `groups`, and `users`) are applied by presence: a member the body carries is applied and a member it omits keeps the layer's stored value, so `"public": false` withdraws the public axis, `"organization": false` withdraws the organization axis, and `"groups": []` and `"users": []` empty those lists. A member carrying JSON `null` is that member's empty value and withdraws on the same terms, because the layer object reports an empty list as `null`. Every other body field, apart from the repository credential members `repo_token`, `repo_username`, and `clear_repo_credential`, is applied by value: a non-zero field replaces the corresponding value and a zero field leaves it unchanged. The credential members apply as the paragraph on the repository credential below states. Withdrawing every visibility member leaves the stored record setting no visibility field, which the visibility evaluator reports as visible to no caller the registry resolves to a subject. The patchable fields are visibility (`public`, `organization`, `groups`, `users`), `ref`, `root`, `local_path`, `owner`, `git_provider`, `force_push_policy`, the repository credential (`repo_token`, `repo_username`, and `clear_repo_credential`, described in the paragraph on the repository credential below), and a webhook-secret rotation (`rotate_webhook_secret`). A `git_provider` naming no registered provider, and any `git_provider` on a layer whose stored source type is not `git`, are refused with `400 registry.invalid_argument`. On a stored user-defined layer the `owner` and visibility fields are fixed at registration, so a patch asserting `owner`, `public`, `organization`, `groups`, or `users` against such a layer is refused with `400 registry.invalid_argument` carrying `details.constraint: "immutable_visibility"`, and the refusal names the asserted fields. The refusal rejects the whole request, so no other field the same patch carries is applied, no webhook secret is minted, and the stored configuration is unchanged. A field is asserted by the value the patch would store rather than by its presence in the body, and a value that differs from what the layer stores is what asserts it: `public` or `organization` set to true, a non-empty `groups`, a `users` differing from the layer's stored `users`, and an `owner` naming a subject other than the layer's stored owner. A member whose applied value would equal the stored one asserts nothing, whether it is absent, false, empty, null, or a restatement, so a client that reads a layer object and returns it unchanged is admitted. Emptying a stored `users` differs from the stored value, so it is asserted and refused; a stored user-defined layer holds `users: [<owner>]`, which is that class's implicit visibility. The comparison against a stored value is exact, element for element and byte for byte, so a value differing from the stored one only in element order or in surrounding whitespace is an assertion and is refused. The rule reads the stored layer's class rather than the caller, so it binds every caller the layer write rule authorizes, a tenant admin included, and a registry started with no identity provider configured and one started in public mode refuse on the same terms. A tenant admin who needs the layer visible more widely re-registers its ID through `POST /v1/layers` as an admin-defined layer with the visibility they declare. The remaining fields apply as described. The identifying fields (`id`, `source_type`) are immutable.
+**Authorization.** [Layer write authorization](#layer-write-authorization). A patch carrying `local_path` also requires the `admin` role under [local-source authorization](#local-source-authorization).
 
-`repo_token` replaces the stored credential and keeps the rest of the stored `repo` byte for byte. `repo_username` applies together with `repo_token`: a `repo_username` the patch carries, the empty string and `null` included, sets the username, and an omitted one keeps the username of the stored credential. A patch that carries `repo_token` and omits `repo_username` is refused with `400 registry.invalid_argument` and a message naming `repo_username` when the stored username contains a character a `repo_username` may not carry, which a credential an earlier release accepted inside `repo` can hold; send `repo_username` with the token to replace it. A non-empty `repo_username` without `repo_token` is refused with `400 registry.invalid_argument`. `clear_repo_credential: true` removes the stored credential, and a patch that carries it together with `repo_token` is refused. A patch carrying neither keeps the stored credential. The credential members apply to a `git` layer whose stored `repo` is an `http` or `https` URL that a read does not report as `[redacted]`. On any other layer, a patch that carries a non-empty `repo_token`, a non-empty `repo_username`, or `clear_repo_credential: true` is refused, and an empty `repo_username`, an empty `repo_token`, or a false `clear_repo_credential` has no effect. Their refusals are evaluated after the immutable visibility rule and before any field is applied or a webhook secret is minted.
+**Body.** The identifying fields (`id`, `source_type`) are immutable. The patchable fields:
 
-A patch is classified by the fields it carries. A patch carrying `local_path` names a filesystem path on the registry host and falls under the local-source rule above, whatever the stored layer's source type, so a caller without the `admin` role is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`. The refusal rejects the whole request rather than one field of it, so the stored configuration is unchanged and no other field the same patch carries is applied. A patch carrying no `local_path` is not reached by that rule, because no member changes the remote: `source_type` is immutable, there is no patchable `repo` field, and the credential members change only the stored credential of an `http` or `https` remote, so they place no patch on the local-source arm. The immutable visibility rule is evaluated after the layer write authorization rule and after the local-source rule, so a patch either of those refuses keeps its own `auth.forbidden` envelope, and the `immutable_visibility` refusal is returned only where neither earlier rule refuses.
+| Field | How it applies |
+|:--|:--|
+| `public`, `organization`, `groups`, `users` | By presence. See [Visibility members](#visibility-members). |
+| `ref`, `root`, `local_path`, `owner`, `git_provider`, `force_push_policy` | By value. A non-zero field replaces the corresponding value, and a zero field leaves it unchanged. |
+| `repo_token`, `repo_username`, `clear_repo_credential` | See [Repository credential on update](#repository-credential-on-update). |
+| `rotate_webhook_secret` | Requests a webhook-secret rotation. The response then carries the new secret in `webhook_secret`. |
+
+**Response.** The layer. An update that requests no secret rotation returns the layer alone, without `webhook_url` and `webhook_secret`.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `400 registry.invalid_argument` | `git_provider` names no registered provider, or any `git_provider` is sent for a layer whose stored source type is not `git`; or a repository credential refusal applies. |
+| `400 registry.invalid_argument` with `details.constraint: "immutable_visibility"` | The patch asserts `owner` or a visibility field against a stored user-defined layer. |
+| `403 auth.forbidden` | Layer write authorization refuses the caller. |
+| `403 auth.forbidden` with `details.constraint: "local_source"` | The patch carries `local_path` and the caller does not hold the `admin` role. |
+
+**Evaluation order.**
+
+1. Layer write authorization.
+2. Local-source authorization.
+3. The immutable visibility rule.
+4. The repository credential refusals.
+5. Field application and webhook-secret minting.
+
+A patch that an earlier rule refuses keeps that rule's envelope. Each refusal rejects the whole request, so the stored configuration is unchanged and no other field the same patch carries is applied.
+
+#### Visibility members
+
+A visibility member the body carries is applied, and a member it omits keeps the layer's stored value.
+
+- `"public": false` withdraws the public axis, and `"organization": false` withdraws the organization axis.
+- `"groups": []` and `"users": []` empty those lists.
+- A member carrying JSON `null` is that member's empty value and withdraws on the same terms, because the layer object reports an empty list as `null`.
+- Withdrawing every visibility member leaves the stored record setting no visibility field. The visibility evaluator reports such a layer as visible to no caller the registry resolves to a subject.
+
+#### Immutable visibility on user-defined layers
+
+On a stored user-defined layer, the `owner` and visibility fields are fixed at registration. A patch asserting `owner`, `public`, `organization`, `groups`, or `users` against such a layer is refused with `400 registry.invalid_argument` carrying `details.constraint: "immutable_visibility"`. The refusal names the asserted fields. No webhook secret is minted, and the stored configuration is unchanged.
+
+A field is asserted by the value the patch would store rather than by its presence in the body. A value that differs from what the layer stores asserts the field:
+
+| Field | Asserted when |
+|:--|:--|
+| `public`, `organization` | Set to true. |
+| `groups` | Non-empty. |
+| `users` | Different from the layer's stored `users`. |
+| `owner` | Names a subject other than the layer's stored owner. |
+
+Notes:
+
+- A member whose applied value would equal the stored one asserts nothing, whether it is absent, false, empty, null, or a restatement. A client that reads a layer object and returns it unchanged is admitted.
+- Emptying a stored `users` differs from the stored value, so it is asserted and refused. A stored user-defined layer holds `users: [<owner>]`, which is that class's implicit visibility.
+- The comparison against a stored value is exact, element for element and byte for byte. A value differing from the stored one only in element order or in surrounding whitespace is an assertion and is refused.
+- The rule reads the stored layer's class rather than the caller. It binds every caller the layer write rule authorizes, a tenant admin included. A registry started with no identity provider configured, and one started in public mode, refuse on the same terms.
+- A tenant admin who needs the layer visible more widely re-registers its ID through `POST /v1/layers` as an admin-defined layer with the visibility they declare.
+
+#### Repository credential on update
+
+| Patch carries | Effect |
+|:--|:--|
+| `repo_token` | Replaces the stored credential and keeps the rest of the stored `repo` byte for byte. |
+| `repo_username` with `repo_token` | Sets the username. The empty string and `null` count as carried values. |
+| `repo_token` without `repo_username` | Keeps the username of the stored credential. |
+| `clear_repo_credential: true` | Removes the stored credential. |
+| Neither `repo_token` nor `clear_repo_credential` | Keeps the stored credential. |
+
+Refusals, each `400 registry.invalid_argument`:
+
+- A patch that carries `repo_token` and omits `repo_username`, when the stored username contains a character a `repo_username` may not carry. A credential an earlier release accepted inside `repo` can hold such a username. The message names `repo_username`. Send `repo_username` with the token to replace it.
+- A non-empty `repo_username` without `repo_token`.
+- `clear_repo_credential: true` together with `repo_token`.
+- On a layer other than a `git` layer whose stored `repo` is an `http` or `https` URL that a read does not report as `[redacted]`: a non-empty `repo_token`, a non-empty `repo_username`, or `clear_repo_credential: true`.
+
+On such other layers, an empty `repo_username`, an empty `repo_token`, or a false `clear_repo_credential` has no effect.
+
+#### Local-source classification of a patch
+
+A patch is classified by the fields it carries. A patch carrying `local_path` names a filesystem path on the registry host and falls under local-source authorization, whatever the stored layer's source type. A caller without the `admin` role is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
+
+A patch carrying no `local_path` is not reached by that rule, because no member changes the remote:
+
+- `source_type` is immutable.
+- There is no patchable `repo` field.
+- The credential members change only the stored credential of an `http` or `https` remote, so they place no patch on the local-source arm.
 
 ### Unregister
+
+Soft-deletes the layer and the artifacts ingested from it. They are recoverable within the retention window.
 
 ```
 DELETE /v1/layers?id={id}
 ```
 
-Soft-deletes the layer and the artifacts ingested from it, recoverable within the retention window. Unregistering an admin-defined layer is authorized to a tenant admin, and unregistering a user-defined layer to its owner or a tenant admin, under the rule above; a caller authorized by neither arm is rejected with `auth.forbidden`.
+**Authorization.** [Layer write authorization](#layer-write-authorization): a tenant admin for an admin-defined layer, and the owner or a tenant admin for a user-defined layer. A caller authorized by neither arm is rejected with `auth.forbidden`.
 
 ### List soft-deleted layers and restore
+
+Lists soft-deleted layers, and restores one.
 
 ```
 GET  /v1/layers?deleted=true
 POST /v1/layers/restore?id={id}
 ```
 
-`GET /v1/layers?deleted=true` lists the soft-deleted layers still inside the recovery window, filtered on the terms the layer read visibility rule under [List layers](#list-layers) states. `POST /v1/layers/restore?id={id}` clears the tombstone and recovers the layer and its artifacts. Restoring an admin-defined layer is authorized to a tenant admin, and restoring a user-defined layer to its owner or a tenant admin, under the rule above; a caller authorized by neither arm is rejected with `auth.forbidden`. On a layer that names a filesystem path on the registry host, the local-source rule above additionally requires the `admin` role, and any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
+`GET /v1/layers?deleted=true` lists the soft-deleted layers still inside the recovery window. It filters them on the terms of the [layer read visibility](#layer-read-visibility) rule.
+
+`POST /v1/layers/restore?id={id}` clears the tombstone and recovers the layer and its artifacts.
+
+**Authorization for restore.** [Layer write authorization](#layer-write-authorization): a tenant admin for an admin-defined layer, and the owner or a tenant admin for a user-defined layer. A caller authorized by neither arm is rejected with `auth.forbidden`. On a layer that names a filesystem path on the registry host, [local-source authorization](#local-source-authorization) additionally requires the `admin` role. Any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
 
 ---
 
 ## Ingest webhook
+
+Receives Git provider webhooks for a layer and runs an ingest.
 
 ```
 POST /v1/ingest/webhook/{layer-id}
 POST /v1/ingest/webhook/{tenant-id}/{layer-id}
 ```
 
-A single-tenant registry serves the first route. On a multi-tenant registry, the URL carries the layer's tenant ID, and a delivery naming a tenant that is not provisioned and active answers `404 registry.not_found`.
+**Routes.** A single-tenant registry serves the first route. On a multi-tenant registry, the URL carries the layer's tenant ID.
 
-Receives Git provider webhooks. The registry validates the HMAC signature against the layer's secret, fetches the new commit, walks the diff, runs lint, validates the immutability invariant, hashes content, stores manifest + bundled resources, indexes metadata, and emits the corresponding outbound event.
+**Authorization.** The HMAC signature of the delivery, validated against the layer's secret. [Local-source authorization](#local-source-authorization) governs a webhook-triggered reingest of a layer that names a filesystem path.
 
-Webhook signature verification failures return `ingest.webhook_invalid` and are logged but never reach the content store.
+**Processing.** The registry validates the HMAC signature against the layer's secret, then:
+
+1. Fetches the new commit.
+2. Walks the diff.
+3. Runs lint.
+4. Validates the immutability invariant.
+5. Hashes content.
+6. Stores the manifest and bundled resources.
+7. Indexes metadata.
+8. Emits the corresponding outbound event.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `401 ingest.webhook_invalid` | Signature verification failed. The failure is logged and never reaches the content store. |
+| `404 registry.not_found` | On a multi-tenant registry, the delivery names a tenant that is not provisioned and active. |
 
 ---
 
 ## Scope preview
 
+Returns aggregated metadata for the calling identity's effective view, with no manifest bodies and no resource transfers.
+
 ```
 GET /v1/scope/preview
 ```
 
-Returns aggregated metadata for the calling identity's effective view, with no manifest bodies and no resource transfers.
+**Authorization.** Any caller, when the tenant enables the endpoint.
+
+**Response.**
 
 ```json
 {
@@ -640,17 +1229,29 @@ Returns aggregated metadata for the calling identity's effective view, with no m
 }
 ```
 
-Gated by tenant config (`tenant.expose_scope_preview`). When `false`, returns `403 config.scope_preview_disabled`. Aggregate counts can hint at the existence of restricted content even when no individual artifact is leaked, so operators decide whether to expose this surface per tenant.
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `403 config.scope_preview_disabled` | The tenant config gate `tenant.expose_scope_preview` is `false`. |
+
+**Notes.**
+
+- Aggregate counts can hint at the existence of restricted content even when no individual artifact is leaked. Operators decide whether to expose this endpoint per tenant.
 
 ---
 
 ## Quota
 
+Returns the limits the registry enforces against the calling tenant and the tenant's current usage.
+
 ```
 GET /v1/quota
 ```
 
-Returns the limits the registry enforces against the calling tenant and the tenant's current usage. Read-only and not admin-gated, since quota visibility is informational.
+**Authorization.** Any caller. The endpoint is read-only and not admin-gated, because quota visibility is informational.
+
+**Response.**
 
 ```json
 {
@@ -666,73 +1267,193 @@ Returns the limits the registry enforces against the calling tenant and the tena
 }
 ```
 
-`limits` uses the five field names `GET /v1/admin/tenants` uses. For `search_qps`, `materialize_rate`, and `audit_volume_per_day`, it reports the limit the registry enforces against the calling tenant. A zero tenant value is replaced by the deployment default (`PODIUM_QUOTA_SEARCH_QPS`, `PODIUM_QUOTA_MATERIALIZE_RATE`, or `PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY`), and a negative tenant value disables the budget for that tenant. A `0` in these three fields means the budget is not enforced, so they can differ from the stored values that `GET /v1/admin/tenants` reports. `storage_bytes` and `max_user_layers` report the stored values. A change made through `PATCH /v1/admin/tenants/{id}` applies from the tenant's next request, and a changed rate does not refill the tenant's unspent allowance. Each item of a bulk load `POST /v1/artifacts:batchLoad` counts against the materialization rate. The bulk-load section describes how a refused item is reported. A positive `max_user_layers` is the enforced cap. A zero value selects the deployment default, which is `PODIUM_MAX_USER_LAYERS` when the deployment sets it and 3 otherwise, and a negative value disables the cap.
+`limits` uses the field names `GET /v1/admin/tenants` uses.
+
+| Field | Reported value |
+|:--|:--|
+| `search_qps`, `materialize_rate`, `audit_volume_per_day` | The limit the registry enforces against the calling tenant. A zero tenant value is replaced by the deployment default (`PODIUM_QUOTA_SEARCH_QPS`, `PODIUM_QUOTA_MATERIALIZE_RATE`, or `PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY`). A negative tenant value disables the budget for that tenant. A `0` in these fields means the budget is not enforced, so they can differ from the stored values that `GET /v1/admin/tenants` reports. |
+| `storage_bytes` | The stored value. |
+| `max_user_layers` | The stored value. A positive value is the enforced cap. A zero value selects the deployment default, which is `PODIUM_MAX_USER_LAYERS` when the deployment sets it and 3 otherwise. A negative value disables the cap. |
+
+**Notes.**
+
+- A change made through `PATCH /v1/admin/tenants/{id}` applies from the tenant's next request. A changed rate does not refill the tenant's unspent allowance.
+- Each item of a bulk load (`POST /v1/artifacts:batchLoad`) counts against the materialization rate. The [bulk-load section](#load_artifacts-bulk) describes how a refused item is reported.
 
 ---
 
 ## Events stream
 
+Streams change events as NDJSON (`Content-Type: application/x-ndjson`).
+
 ```
 GET /v1/events?type={event}&type={event}
 ```
 
-Streams change events as NDJSON (`Content-Type: application/x-ndjson`). The connection stays open until the client disconnects. Repeat `type` to filter by event name; omit it to receive every event type. The handler emits a `{"event":"_heartbeat"}` line every 30 seconds so a proxy-buffered consumer sees the connection stay alive. This is the wire surface the SDK `client.subscribe(events)` helper wraps. The registry delivers an event only when the caller's identity can see the layer the event names under the layer visibility rules. For each event, it reads the layer visibility once and each group's membership once, when a caller's delivery first needs them, and applies those reads to every caller of the event. The caller's path-scoped OAuth scopes also narrow artifact and domain events. A `layer.config_changed` also reaches a caller that could see the layer before the change. The event a reorder records names only the reordered layers the caller can see. An event of another tenant is withheld, and so is an event the registry cannot evaluate, for example because the layer list cannot be read. A withheld event leaves no trace on the stream, and the `_heartbeat` line reaches every caller. The registry resolves the caller's identity when the stream opens, so a credential that expires while the stream is open does not close it, and a group claim in that credential applies until the caller reconnects. The stream follows the caller's layer visibility rather than the layer list rule, so a caller with no verified subject on a registry that verifies callers receives the events of `public: true` layers although `GET /v1/layers` lists it no layers. A registry started in public mode or with no identity provider configured admits every layer, so a caller there receives every event its scopes permit.
+**Authorization.** Any caller. Each event is filtered by the caller's visibility, as described below.
+
+**Parameters.**
+
+| Parameter | Description |
+|:--|:--|
+| `type` | An event name to receive. Repeat it to filter by several names. Omit it to receive every event type. |
+
+**Response.** The connection stays open until the client disconnects. The handler emits a `{"event":"_heartbeat"}` line every 30 seconds, so a proxy-buffered consumer sees the connection stay alive. The `_heartbeat` line reaches every caller. This is the wire endpoint the SDK `client.subscribe(events)` helper wraps.
+
+**Visibility.**
+
+- The registry delivers an event only when the caller's identity can see the layer the event names under the layer visibility rules.
+- The caller's path-scoped OAuth scopes also narrow artifact and domain events.
+- A `layer.config_changed` event also reaches a caller that could see the layer before the change.
+- The event a reorder records names only the reordered layers the caller can see.
+- An event of another tenant is withheld. So is an event the registry cannot evaluate, for example because the layer list cannot be read. A withheld event leaves no trace on the stream.
+
+**Notes.**
+
+- For each event, the registry reads the layer visibility once and each group's membership once, when a caller's delivery first needs them, and applies those reads to every caller of the event.
+- The registry resolves the caller's identity when the stream opens. A credential that expires while the stream is open does not close it, and a group claim in that credential applies until the caller reconnects.
+- The stream follows the caller's layer visibility rather than the [layer read visibility](#layer-read-visibility) rule. A caller with no verified subject on a registry that verifies callers receives the events of `public: true` layers, although `GET /v1/layers` lists it no layers.
+- A registry started in public mode, or with no identity provider configured, admits every layer. A caller there receives every event its scopes permit.
 
 ---
 
 ## Object bytes
+
+Serves object bytes for the filesystem object-store backend.
 
 ```
 GET  /objects/{key}
 HEAD /objects/{key}
 ```
 
-Serves object bytes for the filesystem object-store backend. The `presigned_url` a `load_artifact` response returns for the filesystem backend points here, in `large_resources` and in `manifest_body_url`. The `key` is a content hash. The route serves a bundled resource to a caller who can see an artifact that bundles it, and it serves a manifest document to a caller who can see an artifact that serves that document through `manifest_body_url`: a skill's `SKILL.md`, or another type's stored `ARTIFACT.md`. A key the caller can see no owner of is answered as a key that does not exist. Visibility is re-checked on every fetch, so a caller who has lost access to the artifact can no longer follow a previously-issued URL. `HEAD` reports the size without streaming the body. The S3 backend returns its own presigned URLs instead and does not use this route.
+**Authorization.** A caller who can see an artifact that owns the object. Visibility is re-checked on every fetch, so a caller who has lost access to the artifact can no longer follow a previously-issued URL.
+
+**Parameters.**
+
+| Parameter | Description |
+|:--|:--|
+| `key` | A content hash. |
+
+**Response.** `GET` streams the bytes. `HEAD` reports the size without streaming the body.
+
+**Notes.**
+
+- The `presigned_url` a `load_artifact` response returns for the filesystem backend points here, in `large_resources` and in `manifest_body_url`.
+- The route serves a bundled resource to a caller who can see an artifact that bundles it.
+- It serves a manifest document to a caller who can see an artifact that serves that document through `manifest_body_url`: a skill's `SKILL.md`, or another type's stored `ARTIFACT.md`.
+- A key the caller can see no owner of is answered as a key that does not exist.
+- The S3 backend returns its own presigned URLs instead and does not use this route.
 
 ---
 
 ## Admin and operations
 
-These routes require an authenticated admin caller, resolved through the admin-grant table. The tenant-management routes are the exception: they take the instance-operator role instead. The mutating routes are rejected in read-only mode with `registry.read_only`; the read routes continue to serve.
+These routes require an authenticated admin caller, resolved through the admin-grant table. The tenant-management routes are the exception: they take the instance-operator role instead. In read-only mode, the mutating routes are rejected with `registry.read_only`, and the read routes continue to serve.
 
 ### Admin grants
+
+Grants or revokes the admin role.
 
 ```
 POST   /v1/admin/grants    body: { "user_id": "alice@acme.com" }
 DELETE /v1/admin/grants?user_id={id}
 ```
 
-`POST` grants the admin role to the named user and returns `201 Created`. `DELETE` revokes it and returns `204 No Content`.
+**Response.** `POST` grants the admin role to the named user and returns `201 Created`. `DELETE` revokes it and returns `204 No Content`.
 
 ### Show effective visibility
+
+Returns the per-layer visibility resolved for a named target identity, under the `layers` key.
 
 ```
 GET /v1/admin/show-effective?user_id={id}&group={g}
 ```
 
-Returns the per-layer visibility resolved for the named target identity, under the `layers` key. Repeat `group` to evaluate the target with additional group memberships. Admin-only because the visibility configuration is itself sensitive.
+**Authorization.** Admin. The endpoint is admin-only because the visibility configuration is itself sensitive.
+
+**Parameters.**
+
+| Parameter | Required | Description |
+|:--|:--|:--|
+| `user_id` | Yes | The target identity. |
+| `group` | No | An additional group membership to evaluate the target with. Repeat it for several groups. |
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `403 auth.forbidden` | The caller is not an admin. |
+| `400 registry.invalid_argument` | `user_id` is missing. |
 
 ### Reembed
+
+Recomputes embeddings over the tenant.
 
 ```
 POST /v1/admin/reembed?artifact={id}&version={v}&only_missing={bool}&since={rfc3339}
 ```
 
-Recomputes embeddings over the tenant. With no query parameters it reembeds every artifact. `artifact` (with a required `version`) scopes the run to one artifact; `only_missing=true` limits it to artifacts without a current embedding; `since` limits it to artifacts ingested at or after an RFC 3339 timestamp.
+**Authorization.** Admin. A registry started with no identity provider configured, or one started in public mode, authenticates no caller. No caller can hold the admin role there, so this endpoint admits the request. The layer write endpoints admit the request on such a registry for the same reason, which the [layer write authorization](#layer-write-authorization) rule states.
 
-A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so no caller can hold the admin role and this endpoint admits the request there. The layer write endpoints admit the request on such a registry for the same reason, which the layer write authorization rule under [Layer management](#layer-management) states.
+**Parameters.** With no query parameters, the endpoint reembeds every artifact.
+
+| Parameter | Description |
+|:--|:--|
+| `artifact` | Scopes the run to one artifact. Requires `version`. |
+| `version` | The artifact version. Required with `artifact`. |
+| `only_missing` | `true` limits the run to artifacts without a current embedding. |
+| `since` | Limits the run to artifacts ingested at or after an RFC 3339 timestamp. |
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `400 registry.invalid_argument` | `artifact` is set without `version`. |
 
 ### Erase a user (GDPR)
+
+Performs the right-to-erasure operation for a named user.
 
 ```
 POST /v1/admin/erase    body: { "user_id": "...", "salt": "..." }
 ```
 
-Performs the right-to-erasure operation for the named user: it unregisters and soft-deletes every user-defined layer the user owns, redacts the user identity in the audit records of the tenant the request acts in, and appends a `user.erased` event naming the invoking admin. Both `user_id` and `salt` are required.
+**Authorization.** Admin, in the tenant the request acts in.
 
-The response carries `erased`, `layers_purged`, and `audit_events_redacted`. On a registry started with `PODIUM_MULTI_TENANT=true`, the endpoint acts in the tenant the caller's organization selects: the admin check, the layer purge, and the redaction use that tenant, and alias discovery reads only that tenant's records. A request that resolves to no tenant is refused with `403 auth.forbidden` before the admin check, and under `oidc-jwt` an organization that names no provisioned tenant gets `401 auth.tenant_unknown`. Records that carry no tenant are left unchanged. The response reports nothing about them or about other tenants' records, so it is the same whether or not the user appears there. On a single-tenant registry, the endpoint redacts the tenant's records and the records that carry no tenant. Records of other tenants keep their content, and their `hash` and `prev_hash` values change when they follow a redacted record. `user.erased` records the chain head the rewrite replaced as `context.superseded_head`, and when local anchoring is enabled, the registry anchors the rewritten chain immediately. When the registry stream lists no file destination, the registry records `user.erased` and rewrites no record. No audit destination failure fails the request: a stdout failure and an HTTP or OTLP delivery failure are counted as dropped records (see the [audit events reference](audit-events#loss-accounting)).
+**Body.** Both `user_id` and `salt` are required.
+
+**Effect.** The operation:
+
+1. Unregisters and soft-deletes every user-defined layer the user owns.
+2. Redacts the user identity in the audit records of the tenant the request acts in.
+3. Appends a `user.erased` event naming the invoking admin.
+
+**Response.** The response carries `erased`, `layers_purged`, and `audit_events_redacted`.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `403 auth.forbidden` | On a multi-tenant registry, the request resolves to no tenant. This is checked before the admin check. |
+| `401 auth.tenant_unknown` | Under `oidc-jwt`, the organization names no provisioned tenant. |
+
+**Tenant scope.**
+
+| Registry | Records redacted |
+|:--|:--|
+| Started with `PODIUM_MULTI_TENANT=true` | The endpoint acts in the tenant the caller's organization selects. The admin check, the layer purge, and the redaction use that tenant, and alias discovery reads only that tenant's records. Records that carry no tenant are left unchanged. The response reports nothing about them or about other tenants' records, so it is the same whether or not the user appears there. |
+| Single-tenant | The tenant's records and the records that carry no tenant. |
+
+**Notes.**
+
+- Records of other tenants keep their content. Their `hash` and `prev_hash` values change when they follow a redacted record.
+- `user.erased` records the chain head the rewrite replaced as `context.superseded_head`. When local anchoring is enabled, the registry anchors the rewritten chain immediately.
+- When the registry stream lists no file destination, the registry records `user.erased` and rewrites no record.
+- No audit destination failure fails the request. A stdout failure and an HTTP or OTLP delivery failure are counted as dropped records. See the [audit events reference](audit-events#loss-accounting), and [Audit destinations](../deployment/observability#audit-destinations) for destination setup.
 
 ### Tenant management
+
+Creates, lists, updates, and deactivates tenants on a multi-tenant registry.
 
 ```
 GET    /v1/admin/tenants
@@ -741,9 +1462,11 @@ PATCH  /v1/admin/tenants/{id}   body: { "quota": {...}, "expose_scope_preview": 
 DELETE /v1/admin/tenants/{id}
 ```
 
-These routes are authorized by the instance-operator role rather than the per-tenant admin-grant table, and they are available only on a multi-tenant registry. A request on a single-tenant registry, one started without `PODIUM_MULTI_TENANT`, is rejected with `404 registry.tenant_management_unavailable`, before operator authorization. A caller without the operator role is rejected with `403 auth.forbidden`. `GET` serves in read-only mode; `POST`, `PATCH`, and `DELETE` are rejected with `registry.read_only`.
+**Authorization.** The instance-operator role rather than the per-tenant admin-grant table.
 
-`GET` returns the tenants under the `tenants` key. Every other method returns one tenant object:
+**Availability.** These routes are available only on a multi-tenant registry. `GET` serves in read-only mode.
+
+**Response.** `GET` returns the tenants under the `tenants` key. Every other method returns one tenant object:
 
 ```json
 {
@@ -761,22 +1484,33 @@ These routes are authorized by the instance-operator role rather than the per-te
 }
 ```
 
-`POST` requires `name` and derives the tenant ID from it. Creation is idempotent: a new tenant returns `201 Created`, and re-creating an already-provisioned name returns `200 OK` with the existing tenant unchanged.
+| Method | Behavior |
+|:--|:--|
+| `POST` | Requires `name` and derives the tenant ID from it. Creation is idempotent: a new tenant returns `201 Created`, and re-creating an already-provisioned name returns `200 OK` with the existing tenant unchanged. |
+| `PATCH` | Overlays only the keys present in the body, so an omitted key keeps its current value. A present `expose_scope_preview: null` clears the gate. `active` reactivates (`true`) or deactivates (`false`) the tenant. The name is fixed at creation and cannot be patched. |
+| `DELETE` | Deactivates the tenant and returns `204 No Content`. The data persists while the tenant stops resolving. |
 
-`PATCH` overlays only the keys present in the body, so an omitted key keeps its current value. A present `expose_scope_preview: null` clears the gate. `active` reactivates (`true`) or deactivates (`false`) the tenant. The name is fixed at creation and cannot be patched. `DELETE` deactivates the tenant and returns `204 No Content`; the data persists while the tenant stops resolving. A `PATCH` or `DELETE` naming an unknown tenant returns `404 registry.tenant_not_found`.
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `404 registry.tenant_management_unavailable` | The registry is single-tenant, started without `PODIUM_MULTI_TENANT`. This is checked before operator authorization. |
+| `403 auth.forbidden` | The caller does not hold the operator role. |
+| `404 registry.tenant_not_found` | A `PATCH` or `DELETE` names an unknown tenant. |
+| `503 registry.read_only` | A `POST`, `PATCH`, or `DELETE` reached a registry in read-only mode. |
 
 ---
 
 ## Outbound webhooks
 
-The registry emits outbound webhooks for change events. Configure receivers per org (URL + HMAC secret). Each receiver belongs to the tenant whose admin registered it. The receiver CRUD routes read and write only the receivers of the tenant the request resolves to, and the registry delivers an event only to the receivers of the event's tenant. An event with no tenant reaches no receiver. A layer or ingest event belongs to the tenant whose layer it names, so on a multi-tenant registry only that tenant's receivers receive it. Layer visibility does not narrow receiver delivery. A receiver receives every event of its tenant that its event filter matches, whatever layer the event names, and it carries no layer scope.
+The registry emits outbound webhooks for change events. Configure receivers per org (URL + HMAC secret). The registry signs webhook deliveries with the receiver's configured HMAC secret.
 
 | Event | When |
 |:--|:--|
 | `artifact.published` | A new `(artifact_id, version)` was ingested. |
 | `artifact.deprecated` | An ingested manifest set `deprecated: true`. |
 | `domain.published` | A `DOMAIN.md` was added or changed. |
-| `layer.ingested` | A layer completed an ingest cycle. Fires once per cycle, so a CI job that runs `podium sync --config` against a `kind: marketplace` target subscribes to it (see [Marketplace publishing](../consuming/publishing)). |
+| `layer.ingested` | A layer completed an ingest cycle. Fires once per cycle, so a CI job that runs `podium sync --config` against a `kind: marketplace` target subscribes to it (see [Publishing marketplace repositories](../consuming/publishing)). |
 | `layer.history_rewritten` | Force-push detected on a `git`-source layer. |
 
 Single-event schema:
@@ -791,9 +1525,17 @@ Single-event schema:
 }
 ```
 
-The registry signs webhook deliveries with the receiver's configured HMAC secret.
+**Tenant scope.**
+
+- Each receiver belongs to the tenant whose admin registered it.
+- The receiver CRUD routes read and write only the receivers of the tenant the request resolves to.
+- The registry delivers an event only to the receivers of the event's tenant. An event with no tenant reaches no receiver.
+- A layer or ingest event belongs to the tenant whose layer it names. On a multi-tenant registry, only that tenant's receivers receive it.
+- Layer visibility does not narrow receiver delivery. A receiver receives every event of its tenant that its event filter matches, whatever layer the event names, and it carries no layer scope.
 
 ### Receiver CRUD
+
+Manages the webhook receivers of the caller's tenant.
 
 ```
 GET    /v1/webhooks            list receivers
@@ -803,13 +1545,49 @@ PUT    /v1/webhooks/{id}       update one receiver
 DELETE /v1/webhooks/{id}       remove one receiver
 ```
 
-Every method on these routes requires the per-tenant admin role and returns `auth.forbidden` for a non-admin caller, because a receiver is an org-level configuration. The mutating methods are also rejected in read-only mode with `registry.read_only`. A standalone or no-auth deployment follows the same authorization path as the admin-grant endpoints: receiver registration requires an admin grant plus a token rather than remaining open.
+**Authorization.** Every method requires the per-tenant admin role, because a receiver is an org-level configuration. A standalone or no-auth deployment follows the same authorization path as the admin-grant endpoints: receiver registration requires an admin grant plus a token rather than remaining open.
 
-On a multi-tenant registry, a request routed to no provisioned tenant is refused before any receiver is read. Under `oidc-jwt`, a token whose `org_id` names no provisioned tenant returns `401 auth.tenant_unknown`. A token without an `org_id`, and any request under `trusted-headers` whose organization resolves to no tenant, returns `403 auth.forbidden`. A single-tenant registry does not consult the organization value and serves every request against its sole tenant. A `GET` or `PUT` of another tenant's receiver `id` returns `404 registry.not_found`, and a `DELETE` of one returns `204 No Content` and leaves the receiver in place.
+**Body.** `POST` accepts `{ "url": "...", "secret": "...", "event_filter": ["..."], "debounce": "30s", "disabled": false }`. `PUT` accepts the same fields and applies the ones present.
 
-`POST` accepts `{ "url": "...", "secret": "...", "event_filter": ["..."], "debounce": "30s", "disabled": false }` and returns `201 Created` with the receiver including its secret, so the operator can record it. The registry generates a secret when the body omits one. `url` is required. `PUT` accepts the same fields and applies the ones present; re-enabling a receiver (`disabled: false`) clears its failure counter. `GET` and `DELETE` of a single receiver address it by `id`. The list response returns the receivers under the `receivers` key. List, single-read, and `PUT` responses mask the secret as `***`. `DELETE` returns `204 No Content`. The registry wires the outbound webhook worker at startup, so these routes are mounted on every deployment. Receivers are held in memory unless `PODIUM_WEBHOOK_STORE_PATH` names a file, in which case the store reloads them on restart. The file stores each receiver under the ID of the tenant that registered it. The registry loads a row that carries no tenant ID and neither lists it nor delivers to it.
+| Field | Required | Description |
+|:--|:--|:--|
+| `url` | Yes, on `POST` | The delivery target. It must satisfy the [receiver URL policy](#receiver-url-policy-ssrf). |
+| `secret` | No | The HMAC secret. The registry generates a secret when the body omits one. |
+| `event_filter` | No | The event names the receiver matches. |
+| `debounce` | No | A trailing-window duration string. See [Debounce and batch delivery](#debounce-and-batch-delivery). |
+| `disabled` | No | Suspends delivery. On `PUT`, re-enabling a receiver (`disabled: false`) clears its failure counter. |
 
-**The receiver object.** Every method that returns a receiver returns the same object, with lower snake_case field names:
+**Response.**
+
+| Method | Response |
+|:--|:--|
+| `POST` | `201 Created` with the receiver, including its secret, so the operator can record it. |
+| `GET /v1/webhooks` | The receivers under the `receivers` key. |
+| `GET /v1/webhooks/{id}`, `PUT` | The receiver. |
+| `DELETE` | `204 No Content`. |
+
+List, single-read, and `PUT` responses mask the secret as `***`. `GET` and `DELETE` of a single receiver address it by `id`.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `403 auth.forbidden` | The caller does not hold the per-tenant admin role. On a multi-tenant registry, also a token without an `org_id`, and any request under `trusted-headers` whose organization resolves to no tenant. |
+| `401 auth.tenant_unknown` | On a multi-tenant registry under `oidc-jwt`, a token whose `org_id` names no provisioned tenant. |
+| `400 registry.invalid_argument` | `url` is missing, or the [receiver URL policy](#receiver-url-policy-ssrf) rejects it. |
+| `404 registry.not_found` | A `GET` or `PUT` names an `id` that does not exist or that belongs to another tenant. |
+| `503 registry.read_only` | A mutating method reached a registry in read-only mode. |
+
+**Notes.**
+
+- On a multi-tenant registry, a request routed to no provisioned tenant is refused before any receiver is read. A single-tenant registry does not consult the organization value and serves every request against its sole tenant.
+- A `DELETE` of another tenant's receiver `id` returns `204 No Content` and leaves the receiver in place.
+- The registry wires the outbound webhook worker at startup, so these routes are mounted on every deployment.
+- Receivers are held in memory unless `PODIUM_WEBHOOK_STORE_PATH` names a file. With a file, the store reloads them on restart. The file stores each receiver under the ID of the tenant that registered it. The registry loads a row that carries no tenant ID and neither lists it nor delivers to it.
+
+#### The receiver object
+
+Every method that returns a receiver returns the same object, with lower snake_case field names:
 
 | Field | Type | Notes |
 |:--|:--|:--|
@@ -843,11 +1621,29 @@ The object carries no tenant identifier, because these endpoints serve one tenan
 
 #### Receiver URL policy (SSRF)
 
-The registry originates the delivery request, so it validates `url` at registration and re-checks it at delivery. By default the registry requires the `https` scheme and rejects a URL that resolves to a loopback, link-local, or private address (for example `127.0.0.0/8`, `::1`, `169.254.0.0/16`, and the RFC 1918 ranges), and it does not follow a redirect to such a target. A rejected target returns `registry.invalid_argument` with a message naming the disallowed host. A deployment whose receiver is legitimately internal, such as an in-cluster relay, sets an allowlist of permitted hosts or CIDRs through the `PODIUM_WEBHOOK_ALLOWED_TARGETS` registry config, which the validation consults.
+The registry originates the delivery request, so it validates `url` at registration and re-checks it at delivery.
+
+- By default, the registry requires the `https` scheme.
+- It rejects a URL that resolves to a loopback, link-local, or private address, for example `127.0.0.0/8`, `::1`, `169.254.0.0/16`, and the RFC 1918 ranges.
+- It does not follow a redirect to such a target.
+- A rejected target returns `registry.invalid_argument` with a message naming the disallowed host.
+
+A deployment whose receiver is legitimately internal, such as an in-cluster relay, sets an allowlist of permitted hosts or CIDRs through the `PODIUM_WEBHOOK_ALLOWED_TARGETS` registry config. The validation consults that allowlist.
 
 #### Debounce and batch delivery
 
-The optional `debounce` field is a duration string (for example `"30s"`). A receiver with `debounce` unset receives one delivery per matched event. A receiver with `debounce` set holds the events it matches in a trailing window that opens on the first matched event, deduplicates them by event type and key, and on window expiry delivers them as one batch. The key is the artifact ID for `artifact.published` and `artifact.deprecated`, the layer ID for `layer.ingested` and `layer.history_rewritten`, and the domain path for `domain.published`. The registry delivers the batch directly to that one buffered receiver and signs it with the receiver's HMAC secret, so the batch inherits the same retry, backoff, concurrency limit, and signing as a single-event delivery. The debounce buffer is in-process, and a registry restart mid-window may drop a buffered batch, consistent with the best-effort delivery the subsystem provides through retries.
+The optional `debounce` field is a duration string, for example `"30s"`.
+
+- A receiver with `debounce` unset receives one delivery per matched event.
+- A receiver with `debounce` set holds the events it matches in a trailing window that opens on the first matched event. It deduplicates them by event type and key, and on window expiry delivers them as one batch.
+
+| Event | Deduplication key |
+|:--|:--|
+| `artifact.published`, `artifact.deprecated` | The artifact ID. |
+| `layer.ingested`, `layer.history_rewritten` | The layer ID. |
+| `domain.published` | The domain path. |
+
+The registry delivers the batch directly to that one buffered receiver and signs it with the receiver's HMAC secret. The batch inherits the same retry, backoff, concurrency limit, and signing as a single-event delivery. The debounce buffer is in-process, and a registry restart mid-window may drop a buffered batch, consistent with the best-effort delivery the subsystem provides through retries.
 
 The batch delivery body is an envelope:
 
@@ -864,55 +1660,93 @@ The batch delivery body is an envelope:
 }
 ```
 
-Each element of `events` is the complete single-event body, carrying the same `event`, `trace_id`, `timestamp`, `actor`, and `data` fields as the single-event schema above. The top-level `trace_id` identifies the batch delivery, and each element's `trace_id` identifies its coalesced event. The batch body is additive and scoped to receivers that set `debounce`; the single-event body is unchanged for a receiver without a debounce window.
+Each element of `events` is the complete single-event body, carrying the same `event`, `trace_id`, `timestamp`, `actor`, and `data` fields as the single-event schema above. The top-level `trace_id` identifies the batch delivery, and each element's `trace_id` identifies its coalesced event. The batch body is additive and scoped to receivers that set `debounce`. The single-event body is unchanged for a receiver without a debounce window.
 
 #### Triggering GitHub CI from a receiver (repository_dispatch relay)
 
-A receiver cannot call GitHub's `repository_dispatch` endpoint directly: the registry signs each delivery with the receiver's HMAC secret (the `secret` above), and that signed body differs from the body the GitHub dispatch endpoint accepts. So an operator relay bridges the two. Register a receiver filtered to `layer.ingested` whose `url` points at the relay; the relay verifies the HMAC against the receiver secret and then issues `POST https://api.github.com/repos/<owner>/<repo>/dispatches` with a GitHub token and `{"event_type":"podium-layer-ingested"}`. The CI workflow listens on `repository_dispatch` and runs `podium sync --config`. Set the receiver's `debounce` field to coalesce a burst of `layer.ingested` events into one batch delivery and one CI dispatch; with `debounce` unset the relay fires per event, and the CI system's concurrency control collapses the burst. Registering the receiver requires the admin role on these CRUD endpoints. See [Marketplace publishing](../consuming/publishing) for the worked patterns.
+A receiver cannot call GitHub's `repository_dispatch` endpoint directly. The registry signs each delivery with the receiver's HMAC secret (the `secret` above), and that signed body differs from the body the GitHub dispatch endpoint accepts. An operator relay bridges the two:
+
+1. Register a receiver filtered to `layer.ingested` whose `url` points at the relay. Registering the receiver requires the admin role on the CRUD endpoints.
+2. The relay verifies the HMAC against the receiver secret.
+3. The relay issues `POST https://api.github.com/repos/<owner>/<repo>/dispatches` with a GitHub token and `{"event_type":"podium-layer-ingested"}`.
+4. The CI workflow listens on `repository_dispatch` and runs `podium sync --config`.
+
+Set the receiver's `debounce` field to coalesce a burst of `layer.ingested` events into one batch delivery and one CI dispatch. With `debounce` unset, the relay fires per event, and the CI system's concurrency control collapses the burst. See [Publishing marketplace repositories](../consuming/publishing) for the worked patterns.
 
 ---
 
 ## Subscriptions (SDK)
 
-The SDKs expose `client.subscribe(events)` for in-process consumers that don't want to run their own webhook receiver. The wire surface is the `/v1/events` streaming endpoint; the SDK abstracts the connection and reconnection logic. The stream applies the caller's layer visibility, as the Events stream section describes.
+The SDKs expose `client.subscribe(events)` for in-process consumers that do not run their own webhook receiver. The wire endpoint is the `/v1/events` streaming endpoint, and the SDK handles the connection and reconnection logic. The stream applies the caller's layer visibility, as the [Events stream](#events-stream) section describes.
 
-Useful for sync watchers, downstream rebuild triggers, and eval pipelines reacting to new artifact versions.
+Typical consumers are sync watchers, downstream rebuild triggers, and eval pipelines reacting to new artifact versions.
 
 ---
 
 ## SCIM provisioning
 
+A SCIM 2.0 receiver that the configured identity provider pushes Users and Groups to.
+
 ```
 /scim/v2/
 ```
 
-A SCIM 2.0 receiver the configured identity provider pushes Users and Groups to. The visibility evaluator resolves `groups:` filters against the membership this endpoint records under the identity providers that verify the caller's credential. Under `trusted-headers` a `groups:` filter matches the `X-Podium-User-Groups` value alone, and the receiver keeps recording what the identity provider pushes. The route is mounted only when the deployment configures a SCIM receiver.
+**Availability.** The route is mounted only when the deployment configures a SCIM receiver.
+
+**Notes.**
+
+- Under the identity providers that verify the caller's credential, the visibility evaluator resolves `groups:` filters against the membership this endpoint records.
+- Under `trusted-headers`, a `groups:` filter matches the `X-Podium-User-Groups` value alone. The receiver keeps recording what the identity provider pushes.
 
 ---
 
 ## Metrics
 
+A Prometheus scrape endpoint.
+
 ```
 GET /metrics
 ```
 
-A Prometheus scrape endpoint. Mounted by default; `PODIUM_METRICS=false` removes the endpoint and the per-request recording.
+**Availability.** Mounted by default. `PODIUM_METRICS=false` removes the endpoint and the per-request recording. See [Metrics](../deployment/observability#metrics) for what the registry records.
 
 ---
 
 ## Health
 
+### `/healthz`
+
+A liveness signal.
+
 ```
 GET /healthz
 ```
 
-Returns `{ "mode": "ready" | "read_only" | "public" }`. The endpoint is a liveness signal: a `200` status conveys liveness, and `mode` reports the serving state (`ready` by default, `read_only` when the registry has fallen back to a read replica, `public` in public mode). The body carries no readiness boolean and no `read_only` field; read-only is signaled by the `X-Podium-Read-Only` response header.
+**Response.** `{ "mode": "ready" | "read_only" | "public" }`. A `200` status conveys liveness.
+
+| `mode` | Meaning |
+|:--|:--|
+| `ready` | The default serving state. |
+| `read_only` | The registry has fallen back to a read replica. |
+| `public` | The registry runs in public mode. |
+
+The body carries no readiness boolean and no `read_only` field. Read-only is signaled by the `X-Podium-Read-Only` response header.
+
+### `/readyz`
+
+Reports readiness for load-balancer rotation.
 
 ```
 GET /readyz
 ```
 
-Reports readiness for load-balancer rotation. The body is `{ "mode": "ready" | "read_only" | "not_ready", "replication_lag_seconds": <n> }`. A `ready` or `read_only` mode returns `200` so the registry stays in rotation; `not_ready` (a failing dependency probe) returns `503`.
+**Response.** `{ "mode": "ready" | "read_only" | "not_ready", "replication_lag_seconds": <n> }`.
+
+| `mode` | Status | Meaning |
+|:--|:--|:--|
+| `ready` | `200` | The registry stays in rotation. |
+| `read_only` | `200` | The registry stays in rotation. |
+| `not_ready` | `503` | A dependency probe is failing. |
 
 ---
 
@@ -922,20 +1756,19 @@ Reports readiness for load-balancer rotation. The body is `{ "mode": "ready" | "
 
 | Mode | Behavior |
 |:--|:--|
-| `always-revalidate` | Fresh calls return `{status: "offline", served_from_cache: true}` alongside cached results; if no cache, structured error `network.registry_unreachable`. |
+| `always-revalidate` | Fresh calls return `{status: "offline", served_from_cache: true}` alongside cached results. With no cache, the call returns the structured error `network.registry_unreachable`. |
 | `offline-first` | No error; serve cached results silently. |
 | `offline-only` | Never contact the registry; structured error if cache miss. |
 
-Hosts can surface the offline status to the agent so it can adjust behavior (e.g., warn the user about staleness).
+Hosts can surface the offline status to the agent so it can adjust behavior, for example by warning the user about staleness.
 
 ---
 
 ## Read-only mode
 
-When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to read-only mode. Read endpoints continue to serve from the replica; write endpoints (ingest webhooks, layer admin operations, admin grants, and tenant management) are rejected with `registry.read_only`.
+When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to read-only mode. Read endpoints continue to serve from the replica. Write endpoints (ingest webhooks, layer admin operations, admin grants, and tenant management) are rejected with `registry.read_only`.
 
 Read responses carry two headers:
 
 - `X-Podium-Read-Only: true`
 - `X-Podium-Read-Only-Lag-Seconds: <n>`: observed replication lag.
-
