@@ -16,7 +16,7 @@
 //   node site/test/fixtures/capture-routes.mjs docs > \
 //     site/test/fixtures/published-routes.json
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 const EXCLUDED_DIRS = new Set(["_site", ".jekyll-cache", ".sass-cache"]);
@@ -80,6 +80,16 @@ for (const file of walk(root).sort()) {
     continue;
   }
   routes.push("/" + rel.replace(/\.md$/, ".html"));
+}
+
+// A page that moved leaves a forwarding page at its old route. The list sits
+// in an underscore file the walk skips, and each entry opens with "- from:".
+const redirects = join(root, "_redirects.yaml");
+if (existsSync(redirects)) {
+  for (const match of readFileSync(redirects, "utf8").matchAll(/^- from:\s*(\S+)\s*$/gm)) {
+    const from = match[1].replace(/^\/+/, "").replace(/\.md$/, "");
+    routes.push(from.endsWith("/") ? `/${from}index.html` : `/${from}.html`);
+  }
 }
 
 process.stdout.write(JSON.stringify(routes.sort(), null, 2) + "\n");
