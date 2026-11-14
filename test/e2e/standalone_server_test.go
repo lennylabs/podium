@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end tests for docs/deployment/single-node.md (D-single-node).
+// End-to-end tests for docs/deployment/modes/single-node.md (D-single-node).
 // The page documents the standalone server: startup, layer ingestion,
 // config precedence, public mode, client init, layer management, MCP
 // discovery, lint, impact analysis, audit, and admin migrate-to-standard.
@@ -1166,7 +1166,7 @@ func TestStandaloneServer_MigrateToStandardSQLite(t *testing.T) {
 }
 
 // Spec: §4.7.9, §13.4, §13.12 — the migration key-copy step
-// docs/deployment/single-node.md publishes. A default-mode source signs its
+// docs/deployment/modes/single-node.md publishes. A default-mode source signs its
 // fixture, and migrate-to-standard copies the signed row into a SQLite target.
 // A target start without the source's key is refused naming
 // PODIUM_SIGN_KEY_PATH and writes no key, whether the key path is unset (the
@@ -1176,7 +1176,7 @@ func TestStandaloneServer_MigrateToStandardSQLite(t *testing.T) {
 // under the source's public key.
 func TestStandaloneServer_MigrateToStandardWithTheSourceKey(t *testing.T) {
 	t.Parallel()
-	copyStep := docBashBlock(t, "docs/deployment/single-node.md", "TARGET_SIGN_KEY_PATH")
+	copyStep := docBashBlock(t, "docs/deployment/modes/migrating.md", "TARGET_SIGN_KEY_PATH")
 
 	srcHome := t.TempDir()
 	src := startServerArgs(t, []string{"HOME=" + srcHome}, "serve", "--standalone",

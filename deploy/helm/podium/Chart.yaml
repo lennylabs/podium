@@ -1,9 +1,9 @@
 apiVersion: v2
 name: podium
 description: |
-  Podium registry service — a control plane for AI agent artifacts
-  (skills, agents, contexts, commands, rules, hooks, MCP server
-  registrations) per the Podium specification.
+  Podium registry service, the skill registry for AI agents. It holds
+  reusable agent skills and other artifacts (agents, contexts, commands,
+  rules, hooks, MCP server registrations) per the Podium specification.
 
   This chart deploys the standard topology described in spec §13.1:
   stateless registry replicas, Postgres for metadata, S3-compatible

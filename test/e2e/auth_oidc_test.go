@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end tests for docs/deployment/oidc/*.md (D-oidc).
+// End-to-end tests for docs/deployment/identity/oidc/*.md (D-oidc).
 //
 // These tests cover the CLI device-code login flow, SCIM HTTP endpoints,
 // config-show and status surface, and not-implemented admin subcommands.

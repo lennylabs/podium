@@ -55,7 +55,15 @@ export function loadConfig(overrides: Partial<SiteConfig> = {}): SiteConfig {
     // taken rather than paid for by dropping reference content. When the
     // Agent Skills layer and version pages carried it past 768kB, the index
     // stopped storing each route as a field beside the identical document ID
-    // (search.ts), which recovered the headroom without a third raise.
+    // (search.ts), which recovered the headroom without a third raise. When a
+    // documentation rewrite added the layer-sources and observability pages
+    // and many short reference subsections, two more reductions held the
+    // budget again: only h2 and h3 headings start an entry (search.ts), and
+    // common function words stay out of the index (client/search-terms.ts).
+    // When the restructure that split the deployment pages and added the
+    // configuration reference carried it past again, the page title and the
+    // section name stopped being stored on every section entry and are now
+    // stored once per page (client/search-fields.ts).
     //
     // The headroom here is deliberate so a routine documentation change does
     // not fail the gate. A third raise is the signal to stop raising it and

@@ -454,7 +454,7 @@ func TestChart_MigrationGuards(t *testing.T) {
 	mustFail(t, "an unknown mode", with("--set", "replicaCount=0", "--set", "migration.mode=off"),
 		"migration.mode", "disabled", "dry-run", "run")
 	mustFail(t, "a mode with serving replicas", with("--set", "replicaCount=3", "--set", "migration.mode=dry-run"),
-		"replicaCount=0", "stopped", "docs/deployment/clustered.md")
+		"replicaCount=0", "stopped", "docs/deployment/operations/upgrade-notes.md")
 
 	// With signing off the command refuses --include-unsigned, so the chart
 	// refuses the default includeUnsigned=true and renders false.

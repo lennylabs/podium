@@ -1,22 +1,27 @@
 ---
 title: Handling artifact responses
-nav_order: 5
-description: "What a consumer does with the manifest and materialized files returned by load_artifact: route by hints, honor safety constraints, verify requirements, register MCP servers, walk dependencies, fetch external resources."
+nav_order: 4
+description: "What a consumer does with the manifest and materialized files returned by load_artifact: route by hints, honor safety constraints, verify requirements, register MCP servers, walk dependencies, and fetch external resources."
 ---
 
 # Handling artifact responses
 
-Once `load_artifact` returns, the consumer has a manifest plus a materialized file tree. Several manifest fields are advisory signals the consumer should act on, and a few are safety constraints the consumer must honor. This page covers what to do with each, grouped by concern.
+This page is a reference for what a consumer receives from `load_artifact` and what it does with each manifest field. It is for developers of SDK consumers and of hosts that run artifacts loaded through the MCP server.
 
-The [Frontmatter reference](../authoring/frontmatter-reference) defines the schema. This page assumes you know what each field contains and focuses on the consumer-side action. [Bundled resources](../authoring/bundled-resources) covers the file-tree layout returned alongside the manifest.
+A loaded artifact consists of a manifest and a file tree of bundled resources. Some manifest fields are advisory signals the consumer acts on when it can. Other fields are safety constraints the consumer must honor. The sections below group the fields by concern and state the consumer-side action for each.
+
+Related references:
+
+- [Frontmatter reference](../authoring/frontmatter-reference) defines the schema and the contents of each field.
+- [Bundled resources](../authoring/bundled-resources) covers the layout of the file tree returned with the manifest.
 
 ---
 
 ## Inline content and materialized files
 
-`load_artifact` returns the manifest separately from the bundled resources, and the consumer path determines what arrives in the response and what is written to the filesystem.
+`load_artifact` returns the manifest separately from the bundled resources. The consumer path determines which content arrives in the response and which content is written to the filesystem.
 
-![Two columns compare what load_artifact yields to each consumer. Through the MCP server, the agent's tool result holds the manifest body and the paths of the materialized files, with every resource written to disk. Through the SDK, load_artifact returns the manifest body with inline resources and references in memory, and a later materialize call writes the files. Bytes at or below 256 KB ride inline, while larger bytes and large manifests arrive as presigned URLs from object storage.](../assets/diagrams/materialization-consumer-views.svg)
+![Two columns compare what load_artifact yields to each consumer. Through the MCP server, the agent's tool result holds the manifest body and the paths of the materialized files, with every resource written to disk. Through the SDK, load_artifact returns the manifest body with inline resources and references in memory, and a later materialize call writes the files. Bytes at or below 256 KB ride inline, while larger bytes and large manifests arrive as URLs into object storage.](../assets/diagrams/materialization-consumer-views.svg)
 
 <!--
 ASCII fallback for the diagram above (load_artifact: what the consumer holds):
@@ -40,65 +45,140 @@ ASCII fallback for the diagram above (load_artifact: what the consumer holds):
     writes the files when it chooses.
 
   Bytes at or below 256 KB ride inline in the response. A larger resource, and
-  a manifest above the cutoff, arrive as a presigned URL the consumer fetches
-  from content-addressed object storage.
+  a manifest above the cutoff, arrive as a URL the consumer fetches from
+  content-addressed object storage.
 -->
 
-**Through the MCP server.** The tool result carries the manifest body inline together with the paths of the files the server wrote. The server fetches every bundled resource, runs the harness adapter, and writes the resources to the host filesystem before returning. The agent opens a resource from its file path, so the resource bytes stay out of the model's context window. An individual resource's size does not change this: the agent receives the manifest body and the file paths whatever the resources contain.
+### Through the MCP server
 
-**Through the SDK.** `load_artifact` returns an in-memory object that holds the manifest body and the bundled resources small enough to travel inline. A resource above the inline cutoff arrives as a reference rather than bytes, except for a resource the registry holds inline, as the inline-cutoff paragraph below states. Nothing reaches the filesystem until a separate `materialize(to=...)` call, which writes the canonical layout and fetches each referenced resource. A programmatic consumer can therefore inspect the manifest and write the resources only when it chooses.
+The tool result carries the manifest body inline, together with the paths of the files the server wrote. Before it returns, the server fetches every bundled resource, runs the harness adapter, and writes the resources to the host filesystem under the destination that [Where `load_artifact` writes](configure-your-harness#where-load_artifact-writes) describes.
 
-**The inline cutoff.** The boundary between an inline byte payload and an out-of-band reference is a fixed threshold of 256 KB. A resource at or below the threshold travels in the response body. A larger resource travels as a presigned URL into content-addressed object storage, which the consumer fetches directly; the registry does not proxy the bytes. The same rule covers the manifest document when it exceeds the threshold. A bundled resource the registry holds inline on the manifest record, which includes every resource of an artifact ingested while no object store was configured, travels in the response body at any size. [The HTTP API reference](../reference/http-api) lists the response fields, and [Bundled resources](../authoring/bundled-resources#size-thresholds) covers the size limits an author works within.
+The agent opens a resource from its file path, so the resource bytes stay out of the model's context window. The size of an individual resource does not change this. The agent receives the manifest body and the file paths whatever the resources contain.
 
-This arrangement keeps the registry response small and large content out of the model's context window. A small fixture rides inline, so a load does not pay a second round-trip for it. Large bytes live in object storage, content-addressed and cacheable, and reach the consumer through a presigned URL. Materialization writes each file atomically (`.tmp` + rename), so a destination is consistent once the write completes.
+### Through the SDK
+
+`load_artifact` returns an in-memory object that holds the manifest body and the bundled resources that travel inline. A resource that travels by URL arrives as a reference rather than as bytes. [Resource transport](#resource-transport) states which resources take each route.
+
+Nothing reaches the filesystem until a separate `materialize(to=...)` call. That call writes the canonical layout and fetches each referenced resource. A programmatic consumer can therefore inspect the manifest first and write the resources only when it chooses.
+
+---
+
+## Resource transport
+
+The registry sends each bundled resource of a `load_artifact` response either inline in the response body or as a URL into object storage. The consumer fetches each URL itself before it writes the files.
+
+### The inline cutoff
+
+The inline cutoff is 256 KB (262,144 bytes), and it is fixed.
+
+| Content | How it arrives |
+|:--|:--|
+| A resource at or below the cutoff | Inline, in the `resources` map of the response body. A small file therefore costs no second round-trip. |
+| A resource above the cutoff | In the `large_resources` map, as a link that carries a URL, the resource's content hash, and its size. The consumer fetches the URL. |
+| A resource the registry holds inline on the manifest record, at any size | Inline, in `resources`. The registry holds inline every resource of an artifact ingested while no object store was configured. |
+| A manifest document above the cutoff | Through `manifest_body_url`, with the inline `manifest_body` cleared. A registry with no object store returns the manifest inline at any size. |
+
+When any inline resource is binary, the registry base64-encodes the whole `resources` map and sets `resources_base64` to `true`. The MCP server and the SDKs decode the map before they use it. The [`load_artifacts` batch endpoint](../reference/http-api#load_artifacts-bulk) returns each artifact's resources as an array of objects instead of these maps.
+
+### URLs into object storage
+
+The URL in a link depends on the registry's object-store backend:
+
+- **S3.** The URL is presigned into the bucket. The consumer fetches the bytes directly, and the registry does not proxy them. A presigned URL expires after the registry's `PODIUM_PRESIGN_TTL_SECONDS`, 3600 by default.
+- **Filesystem.** The URL points at the registry's [`/objects/<content-hash>` route](../reference/http-api#object-bytes). It carries no signature and no expiry. The consumer sends the same credential it used for `load_artifact`, and the registry re-checks the caller's visibility on every fetch.
+
+The consumer checks each fetched body against the content hash its link carries and refuses a mismatch with `materialize.content_hash_mismatch`. When a fetch fails with `403` or an expired URL, the MCP server requests a fresh set of URLs and retries, up to 3 attempts with exponential backoff.
+
+The arrangement keeps the registry response small and keeps large content out of the model's context window. The registry stores each resource body in object storage under its SHA-256 digest, so a file that several artifacts or versions ship, such as a shared schema or a vendored library, is stored once. The [HTTP API reference](../reference/http-api#load_artifact) lists the response fields, and [Bundled resources](../authoring/bundled-resources#size-thresholds) covers the size limits an author works within.
+
+---
+
+## Quick reference
+
+| Field | Consumer action |
+|:--|:--|
+| `model_class_hint` | Route to a model in the named tier or above. |
+| `effort_hint` | Set the thinking budget when the runtime has a thinking-budget control. |
+| `target_harnesses` | Skip when the consumer's harness is not in the list. |
+| `sensitivity` | Apply trust region; gate high-sensitivity execution. |
+| `sandbox_profile` | Honor the profile when executing bundled scripts. |
+| `requiresApproval` | Prompt before invoking the named tools. |
+| `runtime_requirements` | Verify before materializing. Reject on mismatch. |
+| `mcpServers` | Register the named servers with the host. |
+| `delegates_to` | Walk the dependency. Apply the same handling to each. |
+| `hook_event` / `hook_action` | Wire into the agent loop at the canonical event. |
+| `rule_mode` | Load via the rule discipline (always, glob, auto, explicit). |
+| `external_resources` | Fetch from `url` and verify against `sha256` and `signature`. |
+| `description` / `when_to_use` | Surface to the user or agent for selection. |
+| `tags` | Filter and group views. |
+| `deprecated` / `replaced_by` | Warn or offer the replacement. |
+| Provenance markers in prose | Wrap imported regions in the host's trust-region marker. |
 
 ---
 
 ## Routing and model selection
 
-The manifest carries advisory hints about the model tier and reasoning budget the artifact assumes. Consumers should route accordingly when the runtime exposes the relevant knob and ignore the hint when it does not. Hints never fail a load.
+The routing fields are advisory hints about the model tier and reasoning budget the artifact assumes. Route accordingly when the runtime exposes the relevant control, and ignore the hint when it does not. A hint never fails a load. [Hints](../authoring/hints) lists the values and the author-side rationale.
 
-**`model_class_hint`** (`nano | small | medium | large | frontier`)
+### `model_class_hint`
 
-- Route the artifact to a model in the named tier or above. Fall back to the best available tier when the named one is not configured; do not refuse the load.
-- LangChain and Bedrock callers map the tier to a specific model id. Custom orchestrators pick from their configured model pool.
+Values: `nano`, `small`, `medium`, `large`, or `frontier`.
 
-**`effort_hint`** (`low | medium | high | max`)
+- Route the artifact to a model in the named tier or above.
+- When the named tier is not configured, fall back to the best available tier. Do not refuse the load.
+- LangChain and Bedrock callers map the tier to a specific model ID. Custom orchestrators pick from their configured model pool.
 
-- Set the reasoning budget when the runtime has a thinking-budget control (extended thinking, reasoning effort, and similar). Higher tiers can also justify longer timeouts and larger retry budgets on the consumer side.
+### `effort_hint`
 
-**`target_harnesses`** (list of harness ids, optional)
+Values: `low`, `medium`, `high`, or `max`.
 
-- Skip the artifact when the consumer's harness is not in the list, and surface the skip in logs. Authors set this when an artifact assumes harness-specific features.
+- Set the reasoning budget when the runtime has a thinking-budget control, such as extended thinking or reasoning effort.
+- A higher tier can also justify longer timeouts and larger retry budgets on the consumer side.
 
-See [Hints](../authoring/hints) for the values and the author-side rationale.
+### `target_harnesses`
+
+An optional list of harness IDs. Authors set it when an artifact assumes harness-specific features.
+
+- Skip the artifact when the consumer's harness is not in the list.
+- Record the skip in the logs.
 
 ---
 
 ## Safety and trust
 
-The fields below constrain what the consumer is allowed to do with the artifact. They are not advisory.
+The safety fields constrain what the consumer may do with the artifact. They are mandatory.
 
-**`sensitivity`** (`low | medium | high`)
+### `sensitivity`
 
-- Apply the trust region the host runtime uses for content of this level. High-sensitivity prose is displayed to the user or logged before any action it implies is taken.
-- Bundled scripts inherit the artifact's sensitivity. A high-sensitivity skill that ships a Python script is shipping high-sensitivity code.
+Values: `low`, `medium`, or `high`.
 
-**`sandbox_profile`** (`unrestricted | read-only-fs | network-isolated | seccomp-strict`)
+- Apply the trust region the host runtime uses for content of this level.
+- Display high-sensitivity prose to the user, or log it, before taking any action it implies.
+- Treat bundled scripts at the artifact's sensitivity. A high-sensitivity skill that ships a Python script ships high-sensitivity code.
 
-- Honor the profile when executing bundled scripts. Refuse to execute under a profile the consumer cannot enforce unless explicitly overridden with a loud warning logged.
-- `read-only-fs` keeps the filesystem read-only outside the materialization destination.
-- `network-isolated` blocks outbound network from the script.
-- `seccomp-strict` applies the strict syscall allowlist that ships with Podium.
+### `sandbox_profile`
 
-**`requiresApproval`** (list of `{tool, reason}` entries; `reason` is optional)
+Values: `unrestricted`, `read-only-fs`, `network-isolated`, or `seccomp-strict`.
 
-- Prompt the user before invoking each named tool from within the artifact's execution. This is independent of any approval prompts the harness applies by default.
-- Common uses: irreversible actions (payment submission, data deletion, outbound notifications).
+Honor the profile when executing bundled scripts. Refuse to execute under a profile the consumer cannot enforce, unless an explicit override is set, in which case log a prominent warning.
 
-**Content provenance markers in prose**
+| Profile | Restriction |
+|:--|:--|
+| `unrestricted` | None. |
+| `read-only-fs` | The filesystem is read-only outside the materialization destination. |
+| `network-isolated` | Outbound network from the script is blocked. |
+| `seccomp-strict` | The strict syscall allowlist that ships with Podium applies. |
 
-The manifest body can wrap regions of imported content:
+### `requiresApproval`
+
+A list of `{tool, reason}` entries, where `reason` is optional.
+
+- Prompt the user before the artifact's execution invokes each named tool. This prompt is independent of any approval prompts the harness applies by default.
+- Typical uses are irreversible actions, such as payment submission, data deletion, and outbound notifications.
+
+### Content provenance markers in prose
+
+The manifest body can wrap regions of imported content in provenance markers:
 
 ```markdown
 <!-- begin imported source="https://wiki.example.com/policy/payments" -->
@@ -106,93 +186,110 @@ imported text
 <!-- end imported -->
 ```
 
-Treat imported regions as data rather than instruction. Hosts that implement trust regions (Claude's `<untrusted-data>` convention and similar) wrap the imported text in the corresponding marker before passing the prose to the model. This is the primary defense against prompt injection from manifests that aggregate external content.
+Treat an imported region as data rather than instruction. A host that implements trust regions, such as Claude's `<untrusted-data>` convention, wraps the imported text in the corresponding marker before passing the prose to the model. This wrapping is the primary defense against prompt injection from manifests that aggregate external content.
 
 ---
 
 ## Capability declarations
 
-These fields tell the consumer what the artifact needs in order to run.
+The capability fields state what the artifact needs in order to run.
 
-**`runtime_requirements`** (map of runtime names to version constraints)
+### `runtime_requirements`
 
-- Verify each requirement before materializing. Reject the load with a structured code when any is unavailable; the consumer surfaces the failure to the user.
-- Common keys: `python`, `node`, `system_packages`. Extension keys are accepted; consumers ignore keys they do not recognize.
+A map of runtime names to version constraints.
 
-**`mcpServers`** (list of MCP server registration objects)
+- Verify each requirement before materializing.
+- When any requirement is unavailable, reject the load with a structured code, and surface the failure to the user.
+- Typical keys are `python`, `node`, and `system_packages`. Extension keys are accepted, and a consumer ignores keys it does not recognize.
+
+### `mcpServers`
+
+A list of MCP server registration objects.
 
 - Register the named servers with the host's MCP plugin layer so the agent can reach them.
-- The registry resolves each entry to an `mcp-server`-type artifact by deriving a `server_identifier` from it and matching that identifier against the `server_identifier` of the ingested `mcp-server` artifacts. The derived identifier is `<command>:<first non-flag argument>` (for example `npx:@acme/finance-warehouse-mcp`), the bare command when every argument is a flag, or the entry's `transport` value when it declares no command. A match records the cross-type dependency edge, and an entry that resolves to nothing records none. The matched `mcp-server` artifact carries the canonical registration when the host wants the full record.
 - Long-running agent sessions restart when a registered server's record changes.
+- When the host wants the full registration record, read it from the matched `mcp-server` artifact, which carries the canonical registration.
 
-**`delegates_to`** (list of canonical artifact IDs)
+The registry resolves each entry to an `mcp-server`-type artifact. It derives a `server_identifier` from the entry and matches it against the `server_identifier` of the ingested `mcp-server` artifacts. The derived identifier is one of the following:
 
-- Walk the dependency: loop over the delegate IDs, call `load_artifact` on each, and apply the same response-handling pipeline to the result. The SDK does not provide a forward-walk helper; the caller implements the loop and decides the traversal depth.
-- The only dependency helper on the client is `dependents_of(id)`, which returns the reverse edges (the artifacts that depend on a given artifact) for impact analysis. It does not walk forward.
-- Visibility filtering applies: delegates the caller cannot see are silently excluded, the same as on the registry-side discovery surface.
+- `<command>:<first non-flag argument>`, for example `npx:@acme/finance-warehouse-mcp`.
+- The bare command, when every argument is a flag.
+- The entry's `transport` value, when the entry declares no command.
 
-**`hook_event`** and **`hook_action`** (for `type: hook` artifacts)
+A match records the cross-type dependency edge. An entry that resolves to nothing records no edge.
 
-- Wire the hook into the agent loop at the named event. The [Hooks](../authoring/hooks) page covers the canonical event taxonomy; the harness adapter translates each canonical name to the host's native event vocabulary.
-- The `hook_action` is a shell snippet. Execute it under the artifact's sandbox profile.
+### `delegates_to`
 
-**`rule_mode`** (for `type: rule` artifacts)
+A list of canonical artifact IDs.
 
-- `always`: load on every session or every turn.
-- `glob`: load when a file matching `rule_globs:` is touched in the session.
-- `auto`: let the harness's autoload heuristic decide based on `rule_description`.
-- `explicit`: load only when the user references the rule by name (slash command, `@rule-name`, or similar).
+- Walk the dependency: loop over the delegate IDs, call `load_artifact` on each, and apply the same response handling to each result.
+- The caller implements the loop and decides the traversal depth. The SDK provides no forward-walk helper.
+- Visibility filtering applies. Delegates the caller cannot see are silently excluded, as they are on the registry-side discovery surface.
+
+The only dependency helper on the client is `dependents_of(id)`. It returns the reverse edges, which are the artifacts that depend on a given artifact, for impact analysis. It does not walk forward.
+
+### `hook_event` and `hook_action`
+
+These fields apply to `type: hook` artifacts.
+
+- Wire the hook into the agent loop at the named event. The [Hooks](../authoring/hooks) page covers the canonical event taxonomy. The harness adapter translates each canonical name to the host's native event vocabulary.
+- `hook_action` is a shell snippet. Execute it under the artifact's sandbox profile.
+
+### `rule_mode`
+
+This field applies to `type: rule` artifacts.
+
+| Value | Load behavior |
+|:--|:--|
+| `always` | Load on every session or every turn. |
+| `glob` | Load when the session touches a file that matches `rule_globs:`. |
+| `auto` | Let the harness's autoload heuristic decide, based on `rule_description`. |
+| `explicit` | Load only when the user references the rule by name, such as through a slash command or `@rule-name`. |
 
 ---
 
 ## Bundled files and external resources
 
-The materialized file tree lands at the configured destination path; [Inline content and materialized files](#inline-content-and-materialized-files) covers which bytes arrive in the response and which are written to disk. The manifest references the files inline in prose; there is no separate manifest list.
+The materialized file tree lands at the configured destination path. The manifest references the files inline in its prose, and there is no separate file list. [Inline content and materialized files](#inline-content-and-materialized-files) covers which bytes arrive in the response and which are written to disk.
 
-**Bundled files**
+### Bundled files
 
-- The materialization pipeline writes files atomically (`.tmp` + rename), so the destination is consistent once `load_artifact` returns.
-- Prose references resolve relative to the artifact root in the materialized tree (`scripts/variance.py`, `assets/template.j2`, and so on).
-- See [Bundled resources](../authoring/bundled-resources) for the file-layout conventions.
+- Resolve prose references relative to the artifact root in the materialized tree, for example `scripts/variance.py` or `assets/template.j2`.
+- The MCP server writes each file atomically (`.tmp` + rename), so the destination is consistent once `load_artifact` returns.
+- [Bundled resources](../authoring/bundled-resources) covers the file-layout conventions.
 
-**`external_resources`** (list of pointer objects)
+### `external_resources`
 
-- Each entry has `path`, `url`, `sha256`, `size`, and optionally `signature`.
-- The registry stores the pointer record rather than the bytes, and the bytes never transit the registry. Materialization writes the bundled resources in the artifact directory and does not fetch the external ones.
-- The consumer fetches each entry from `url`, verifies the bytes against `sha256`, and verifies `signature` when the entry carries one.
+A list of pointer objects. Each entry has `path`, `url`, `sha256`, and `size`, and optionally `signature`.
+
+The registry stores the pointer record and never the bytes, which do not transit the registry. Materialization writes the bundled resources in the artifact directory and does not fetch external resources. For each entry, the consumer does the following:
+
+1. Fetch the bytes from `url`.
+2. Verify the bytes against `sha256`.
+3. Verify `signature`, when the entry carries one.
 
 ---
 
 ## Discoverability and presentation
 
-These fields are for surfacing artifacts to the user or the agent during selection. They carry no execution semantics.
+The presentation fields help the user or the agent select an artifact. They carry no execution semantics.
 
-**`description`** and **`when_to_use`**
-
-- Show in artifact pickers, slash-command lists, and search-result summaries.
-- `when_to_use` is the canonical "should I pick this?" signal for runtime selection.
-
-**`tags`**
-
-- Filter and group views.
-
-**`deprecated`** and **`replaced_by`**
-
-- Warn the user when loading a deprecated artifact. Surface `replaced_by` as a suggested upgrade target; auto-redirect only when the consumer is explicitly configured to do so.
-
-**`release_notes`**
-
-- Surface on update prompts and in audit logs.
+| Field | Consumer action |
+|:--|:--|
+| `description` and `when_to_use` | Show in artifact pickers, slash-command lists, and search-result summaries. `when_to_use` is the canonical signal for deciding at runtime whether to pick the artifact. |
+| `tags` | Filter and group views. |
+| `deprecated` and `replaced_by` | Warn the user when loading a deprecated artifact. Offer `replaced_by` as a suggested upgrade target. Redirect automatically only when the consumer is explicitly configured to do so. |
+| `release_notes` | Show on update prompts and record in audit logs. |
 
 ---
 
 ## Composing multiple artifacts in one session
 
-When a consumer loads several artifacts in the same session (typical for agents walking dependencies or pre-loading a working set), it composes the constraints across them:
+A consumer that loads several artifacts in one session composes their constraints. Agents that walk dependencies or preload a working set do this routinely.
 
 | Aspect | Composition rule |
 |:--|:--|
-| `sandbox_profile` | Keep each artifact's profile and apply it when that artifact's bundled scripts run (see the per-artifact rule below). The profiles restrict different resources, so no profile stands in for another. |
+| `sandbox_profile` | Keep each artifact's profile and apply it when that artifact's bundled scripts run. The profiles restrict different resources, so no profile stands in for another. |
 | `sensitivity` | Take the highest value. |
 | `requiresApproval` | Union the tool lists. |
 | `mcpServers` | Union by `name`; deep-merge the per-name record. |
@@ -200,13 +297,13 @@ When a consumer loads several artifacts in the same session (typical for agents 
 | `target_harnesses` | Intersect; surface an empty intersection as an inconsistency. |
 | `model_class_hint`, `effort_hint` | Take the highest tier; route once for the session. |
 
-When the host prefers per-artifact routing (different artifacts answered by different models in one session), the consumer keeps the constraints per artifact and applies them at invocation time rather than at session start.
+A host can instead route per artifact, so that different models answer different artifacts in one session. Such a consumer keeps the constraints per artifact and applies them at invocation time rather than at session start.
 
 ---
 
 ## End-to-end SDK example
 
-A consumer reads the manifest fields off the response and feeds them to the runtime. The SDK `LoadedArtifact` exposes the prose body as `manifest_body` and the raw frontmatter as the `frontmatter` string; the consumer parses the frontmatter to read the advisory and constraint fields.
+The example reads the manifest fields from a response and passes them to the runtime. The SDK's `LoadedArtifact` exposes the prose body as `manifest_body` and the raw frontmatter as the `frontmatter` string. The consumer parses the frontmatter to read the advisory and constraint fields.
 
 ```python
 import yaml
@@ -240,13 +337,13 @@ for dep_id in fm.get("delegates_to", []):
     handle_response(client.load_artifact(dep_id))
 ```
 
-The TypeScript SDK `LoadedArtifact` exposes the same two fields, `manifest_body` and `frontmatter`.
+The TypeScript SDK's `LoadedArtifact` exposes the same two fields, `manifest_body` and `frontmatter`.
 
 ---
 
 ## Error handling
 
-`load_artifact` returns structured codes the consumer maps onto retry, fallback, or surface behavior. The full namespace is in [Error codes](../reference/error-codes); common consumer-side handling:
+`load_artifact` returns structured error codes. The consumer maps each code onto a retry, fallback, or surface behavior. [Error codes](../reference/error-codes) lists the full namespace. The codes below are the ones a consumer typically handles.
 
 | Code | Consumer action |
 |:--|:--|
@@ -258,26 +355,3 @@ The TypeScript SDK `LoadedArtifact` exposes the same two fields, `manifest_body`
 | `visibility.denied` | The caller lacks visibility for the artifact. Refuse and surface. |
 | `quota.materialize_rate_exceeded` | Back off and retry. Surface the quota state to the user. |
 | `registry.read_only` | The registry is degraded. Continue serving cached content; mark subsequent loads as cache-only. |
-
----
-
-## Quick reference
-
-| Field | Consumer action |
-|:--|:--|
-| `model_class_hint` | Route to a model in the named tier or above. |
-| `effort_hint` | Set thinking budget when the runtime supports it. |
-| `target_harnesses` | Skip when the consumer's harness is not in the list. |
-| `sensitivity` | Apply trust region; gate high-sensitivity execution. |
-| `sandbox_profile` | Honor the profile when executing bundled scripts. |
-| `requiresApproval` | Prompt before invoking the named tools. |
-| `runtime_requirements` | Verify before materializing. Reject on mismatch. |
-| `mcpServers` | Register the named servers with the host. |
-| `delegates_to` | Walk the dependency. Apply the same handling to each. |
-| `hook_event` / `hook_action` | Wire into the agent loop at the canonical event. |
-| `rule_mode` | Load via the rule discipline (always, glob, auto, explicit). |
-| `external_resources` | Fetch from `url` and verify against `sha256` and `signature`. |
-| `description` / `when_to_use` | Surface to the user or agent for selection. |
-| `tags` | Filter and group views. |
-| `deprecated` / `replaced_by` | Warn or offer the replacement. |
-| Provenance markers in prose | Wrap imported regions in the host's trust-region marker. |

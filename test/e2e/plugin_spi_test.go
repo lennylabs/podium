@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end tests for docs/deployment/extending.md (D-extending).
+// End-to-end tests for docs/deployment/services/extending.md (D-extending).
 //
 // The page documents the SPI table, the plugin distribution model, the
 // forward-compatibility constraints, and the external-extension patterns
@@ -1225,7 +1225,7 @@ func TestPluginSPI_DependentsOfEmpty(t *testing.T) {
 // Spec: §9.2
 func TestPluginSPI_PluginDistributionGoModulesOnly(t *testing.T) {
 	t.Parallel()
-	docPath := filepath.Join(repoRoot(t), "docs", "deployment", "extending.md")
+	docPath := filepath.Join(repoRoot(t), "docs", "deployment", "services", "extending.md")
 	content := readFile(t, docPath)
 	for _, banned := range []string{"community plugin registry", "hosted at the project's public URL"} {
 		if strings.Contains(content, banned) {

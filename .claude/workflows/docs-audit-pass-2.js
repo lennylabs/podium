@@ -22,16 +22,16 @@ const GROUPS = [
   {
     key: 'first-contact',
     pages:
-      'README.md, docs/overview.md, docs/getting-started/index.md, docs/getting-started/why-podium.md, docs/getting-started/quickstart.md, docs/deployment/local.md',
+      'README.md, docs/overview.md, docs/getting-started/index.md, docs/getting-started/why-podium.md, docs/getting-started/quickstart.md, docs/deployment/modes/local.md',
     focus:
-      'The path from install to a materialized artifact. Every command must run as written, in the order written, and produce the output shown. The local tier claims here must match what docs/deployment/local.md says about the same tier.',
+      'The path from install to a materialized artifact. Every command must run as written, in the order written, and produce the output shown. The local tier claims here must match what docs/deployment/modes/local.md says about the same tier.',
   },
   {
     key: 'model-and-vocabulary',
     pages:
-      'docs/getting-started/concepts.md, docs/getting-started/how-it-works.md, docs/authoring/artifact-types.md, docs/reference/glossary.md, docs/reference/frontmatter-schema.md',
+      'docs/getting-started/concepts.md, docs/getting-started/how-it-works.md, docs/authoring/artifact-types.md, docs/reference/glossary.md',
     focus:
-      'These five define the same nouns. A term defined one way in concepts.md and another way in glossary.md is a finding even when neither is wrong on its own. Check every type and every field against pkg/manifest.',
+      'These pages define the same nouns. A term defined one way in concepts.md and another way in glossary.md is a finding even when neither is wrong on its own. Check every type and every field against pkg/manifest.',
   },
   {
     key: 'authoring-walkthroughs',
@@ -50,28 +50,28 @@ const GROUPS = [
   {
     key: 'delivery',
     pages:
-      'docs/consuming/index.md, docs/consuming/configure-your-harness.md, docs/consuming/selective-materialization.md, docs/consuming/browsing-the-catalog.md, docs/consuming/custom-via-sdk.md, docs/consuming/handling-artifact-responses.md, docs/consuming/publishing.md, docs/reference/cli.md',
+      'docs/consuming/index.md, docs/consuming/configure-your-harness.md, docs/consuming/selective-materialization.md, docs/consuming/browsing-the-catalog.md, docs/consuming/custom-via-sdk.md, docs/consuming/handling-artifact-responses.md, docs/consuming/verifying-deliveries.md, docs/deployment/content/publishing.md, docs/reference/cli.md',
     focus:
       'Per-harness destination tables against pkg/adapter, every SDK call against the real signatures in sdks/, and every flag in cli.md against its command. A flag documented in a consuming page but absent from cli.md, or the reverse, is a finding.',
   },
   {
     key: 'serving',
     pages:
-      'docs/deployment/index.md, docs/deployment/single-node.md, docs/deployment/clustered.md, docs/deployment/layers.md, docs/deployment/access-control.md, docs/deployment/integrations.md, docs/deployment/progressive-adoption.md, docs/reference/http-api.md, docs/reference/error-codes.md',
+      'docs/deployment/index.md, docs/deployment/modes/index.md, docs/deployment/modes/single-node.md, docs/deployment/modes/clustered.md, docs/deployment/modes/helm-chart.md, docs/deployment/modes/docker-compose.md, docs/deployment/modes/migrating.md, docs/deployment/content/index.md, docs/deployment/content/layer-sources.md, docs/deployment/content/layers.md, docs/deployment/content/access-control.md, docs/deployment/services/index.md, docs/deployment/progressive-adoption.md, docs/reference/http-api.md, docs/reference/error-codes.md, docs/reference/configuration.md',
     focus:
-      'Which tier provides which capability, every PODIUM_* variable and its default against internal/serverboot, and every route, method, status code, and error code against pkg/registry/server. A capability claimed for a tier in deployment/index.md must match the tier page for that tier.',
+      'Which tier provides which capability, every PODIUM_* variable and its default against internal/serverboot, and every route, method, status code, and error code against pkg/registry/server. A capability claimed for a tier in deployment/modes/index.md must match the tier page for that tier.',
   },
   {
     key: 'identity',
     pages:
-      'docs/deployment/oidc/index.md, docs/deployment/oidc/okta.md, docs/deployment/oidc/entra-id.md, docs/deployment/oidc/google-workspace.md, docs/deployment/oidc/auth0.md, docs/deployment/oidc/keycloak.md, docs/deployment/gateway-delegated-identity.md',
+      'docs/deployment/identity/index.md, docs/deployment/identity/oidc/index.md, docs/deployment/identity/oidc/okta.md, docs/deployment/identity/oidc/entra-id.md, docs/deployment/identity/oidc/google-workspace.md, docs/deployment/identity/oidc/auth0.md, docs/deployment/identity/oidc/keycloak.md, docs/deployment/identity/trusted-headers.md, docs/deployment/identity/tenants.md, docs/deployment/identity/groups.md',
     focus:
       'Identity configuration against pkg/identity and internal/serverboot. Which provider values the registry accepts, which settings each provider requires, what each claim mapping reads, and whether the per-provider walkthroughs agree with one another where they configure the same thing.',
   },
   {
     key: 'operations-and-meta',
     pages:
-      'docs/deployment/operator-guide.md, docs/deployment/extending.md, docs/deployment/vector-backends.md, docs/testing/index.md, docs/testing/live-vector-backends.md, docs/about/index.md, docs/about/status.md, docs/about/contributing.md, docs/about/governance.md, docs/about/changelog.md, docs/reference/index.md, docs/rfc/README.md',
+      'docs/deployment/operations/index.md, docs/deployment/operations/observability.md, docs/deployment/operations/signing-keys.md, docs/deployment/operations/backup-restore.md, docs/deployment/operations/upgrading.md, docs/deployment/operations/upgrade-notes.md, docs/deployment/operations/capacity.md, docs/deployment/operations/security-review.md, docs/deployment/operations/outbound-webhooks.md, docs/deployment/operations/troubleshooting.md, docs/deployment/services/extending.md, docs/deployment/services/vector-backends.md, docs/about/live-vector-backends.md, docs/about/index.md, docs/about/status.md, docs/about/contributing.md, docs/about/governance.md, docs/about/changelog.md, docs/reference/index.md, docs/rfc/README.md',
     focus:
       'Operational commands with the flags shown, metric names, backend selection against pkg/vector and pkg/embedding, and every "shipped" or "planned" claim in about/status.md against what is actually in the tree.',
   },
@@ -89,7 +89,7 @@ Where the spec and the code disagree, that is a finding in its own right. Report
 
 An earlier pass verified the items below. They are known, they are recorded, and they are **not** being fixed in this pass. Documentation that describes the current behaviour accurately is **correct** and must be left alone. Rewriting a page to describe the behaviour these will have once fixed would make the page wrong.
 
-- \`deploy/helm/podium/values.yaml\` defaults to \`oauth-device-code\`, defaults the embedding provider to \`openai\`, and sets a \`config.bind\` no template renders. \`docs/deployment/clustered.md\` documents the three workarounds on purpose.
+- \`deploy/helm/podium/values.yaml\` defaults to \`oauth-device-code\`, defaults the embedding provider to \`openai\`, and sets a \`config.bind\` no template renders. \`docs/deployment/modes/clustered.md\` and \`docs/deployment/modes/helm-chart.md\` document the three workarounds on purpose.
 - \`pkg/identity/oidc_jwt.go\` trims a trailing slash from the configured issuer but not from the token claim, so an issuer URL ending in \`/\` cannot verify.
 - The spec's \`spec/13-deployment.md:467\` and \`:547\` describe device-code support the code does not provide.
 
@@ -390,9 +390,9 @@ ${GROUPS.map((g) => `- **${g.key}**: ${g.pages}`).join('\n')}
 
 Concentrate on the subjects that appear in more than one group:
 
-- What each deployment tier can do, stated in docs/deployment/index.md, in each tier page, in docs/getting-started/why-podium.md, and in README.md.
+- What each deployment tier can do, stated in docs/deployment/modes/index.md, in each tier page, in docs/getting-started/why-podium.md, and in README.md.
 - Where each harness adapter writes each artifact type, stated in docs/consuming/configure-your-harness.md and again in the authoring walkthroughs.
-- Frontmatter fields, requiredness, and defaults, stated in docs/authoring/frontmatter-reference.md and again in docs/reference/frontmatter-schema.md.
+- Frontmatter fields, requiredness, and defaults, stated in docs/authoring/frontmatter-reference.md and again in the authoring walkthroughs.
 - Command flags, stated in docs/reference/cli.md and again wherever a page shows the command.
 - Terms defined in docs/reference/glossary.md and used elsewhere with a different meaning.
 - What is described as shipped, in docs/about/status.md against claims made anywhere else.

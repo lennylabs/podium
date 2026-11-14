@@ -1,10 +1,10 @@
 import type * as React from "react";
 
 /*
- * The landing page's inline SVG artwork: the six feature diagrams, the three
- * deployment icons, and the six server-side integration icons.
+ * The landing page's inline SVG artwork: the feature diagrams, the deployment
+ * icons, and the server-side integration icons.
  *
- * The geometry is transcribed from site/design/podium-design-reference.html.
+ * The geometry is transcribed from web/design/site/podium-design-reference.html.
  * The reference carries one copy per theme with hard-coded fills; this module
  * carries one copy whose colours come from classes defined in landing.css, so
  * a single set of markup serves both themes:
@@ -21,12 +21,12 @@ import type * as React from "react";
 
 /** Names the diagram a feature card shows. */
 export type FeatureDiagramKey =
-  | "delivery"
   | "domains"
   | "materialization"
   | "discovery"
   | "layers"
-  | "access";
+  | "security"
+  | "observability";
 
 /** Names the icon a deployment card shows. */
 export type DeploymentIconKey = "folder" | "database" | "asterisk";
@@ -38,82 +38,12 @@ export type IntegrationIconKey =
   | "nodes"
   | "sparkle"
   | "padlock"
-  | "branch";
+  | "branch"
+  | "scroll"
+  | "pulse"
+  | "bell";
 
 /* --------------------------------------------------------- feature diagrams */
-
-/** One canonical artifact fanning out into three harness-specific formats. */
-export function DeliveryDiagram(): React.ReactElement {
-  return (
-    <svg className="l-dg" width="200" height="80" viewBox="0 0 240 96" aria-hidden="true">
-      <rect
-        className="l-dg-paper l-dg-ink"
-        x="4"
-        y="30"
-        width="44"
-        height="36"
-        rx="4"
-        strokeWidth="1.8"
-      />
-      <rect className="l-dg-ink-fill" x="12" y="41" width="28" height="3" rx="1.5" opacity=".5" />
-      <rect className="l-dg-ink-fill" x="12" y="49" width="20" height="3" rx="1.5" opacity=".5" />
-      <g className="l-dg-meta" fill="none" strokeWidth="1.8">
-        <path d="M48 48h22c8 0 8-30 16-30h14" />
-        <path d="M48 48h52" />
-        <path d="M48 48h22c8 0 8 30 16 30h14" />
-      </g>
-      <g className="l-dg-meta" fill="none" strokeWidth="1.8" strokeLinejoin="round">
-        <path d="M94 14l6 4-6 4" />
-        <path d="M94 44l6 4-6 4" />
-        <path d="M94 74l6 4-6 4" />
-      </g>
-      <g className="l-dg-mono l-dg-ink-fill" fontSize="10">
-        <rect
-          className="l-dg-ink"
-          x="104"
-          y="7"
-          width="96"
-          height="22"
-          rx="4"
-          fill="none"
-          strokeWidth="1.6"
-        />
-        <circle className="l-dg-accent-fill" cx="115" cy="18" r="4.5" />
-        <text x="126" y="22">
-          Claude Code
-        </text>
-        <rect
-          className="l-dg-ink"
-          x="104"
-          y="37"
-          width="96"
-          height="22"
-          rx="4"
-          fill="none"
-          strokeWidth="1.6"
-        />
-        <rect className="l-dg-accent-fill" x="110.5" y="43.5" width="9" height="9" />
-        <text x="126" y="52">
-          Cursor
-        </text>
-        <rect
-          className="l-dg-ink"
-          x="104"
-          y="67"
-          width="96"
-          height="22"
-          rx="4"
-          fill="none"
-          strokeWidth="1.6"
-        />
-        <path className="l-dg-accent-fill" d="M115 73l5 9h-10z" />
-        <text x="126" y="82">
-          Codex
-        </text>
-      </g>
-    </svg>
-  );
-}
 
 /** A catalog whose folders nest into domains and subdomains. */
 export function DomainsDiagram(): React.ReactElement {
@@ -422,126 +352,111 @@ export function LayersDiagram(): React.ReactElement {
   );
 }
 
-/** A catalog whose locked rows stay behind and whose visible pair travels. */
-export function AccessDiagram(): React.ReactElement {
+/**
+ * A signed artifact, its seal in the accent, travelling into an audit log whose
+ * newest entry carries the accent dot.
+ */
+export function SecurityDiagram(): React.ReactElement {
   return (
     <svg className="l-dg" width="200" height="80" viewBox="0 0 240 96" aria-hidden="true">
-      <g className="l-dg-meta" strokeWidth="1.6" strokeDasharray="5 4" fill="none">
-        <rect x="4" y="8" width="96" height="80" rx="5" />
-      </g>
       <rect
-        className="l-dg-meta"
-        x="12"
-        y="14"
-        width="38"
-        height="14"
-        rx="3"
-        fill="none"
-        strokeWidth="1.4"
-        opacity=".45"
+        className="l-dg-paper l-dg-ink"
+        x="4"
+        y="22"
+        width="46"
+        height="52"
+        rx="4"
+        strokeWidth="1.8"
       />
-      <Padlock x={37} y={20.2} />
-      <rect className="l-dg-accent-fill" x="56" y="14" width="38" height="14" rx="3" />
+      <rect className="l-dg-ink-fill" x="12" y="33" width="28" height="3" rx="1.5" opacity=".5" />
+      <rect className="l-dg-ink-fill" x="12" y="41" width="20" height="3" rx="1.5" opacity=".5" />
+      <rect className="l-dg-ink-fill" x="12" y="49" width="24" height="3" rx="1.5" opacity=".5" />
+      <circle className="l-dg-accent-fill" cx="47" cy="71" r="11" />
+      <path
+        className="l-dg-tick"
+        d="M41.5 71l3.5 3.5 7-7"
+        fill="none"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path className="l-dg-meta" d="M68 48h26m-6-5l6 5-6 5" fill="none" strokeWidth="1.6" />
       <rect
-        className="l-dg-meta"
-        x="12"
-        y="32"
-        width="38"
-        height="14"
-        rx="3"
+        className="l-dg-ink"
+        x="104"
+        y="12"
+        width="132"
+        height="72"
+        rx="5"
         fill="none"
-        strokeWidth="1.4"
-        opacity=".45"
+        strokeWidth="1.6"
       />
-      <Padlock x={37} y={38.2} />
-      <rect
-        className="l-dg-meta"
-        x="56"
-        y="32"
-        width="38"
-        height="14"
-        rx="3"
-        fill="none"
-        strokeWidth="1.4"
-        opacity=".45"
-      />
-      <Padlock x={81} y={38.2} />
-      <rect className="l-dg-accent-fill" x="12" y="50" width="38" height="14" rx="3" />
-      <rect
-        className="l-dg-meta"
-        x="56"
-        y="50"
-        width="38"
-        height="14"
-        rx="3"
-        fill="none"
-        strokeWidth="1.4"
-        opacity=".45"
-      />
-      <Padlock x={81} y={56.2} />
-      <rect
-        className="l-dg-meta"
-        x="12"
-        y="68"
-        width="38"
-        height="14"
-        rx="3"
-        fill="none"
-        strokeWidth="1.4"
-        opacity=".45"
-      />
-      <Padlock x={37} y={74.2} />
-      <rect
-        className="l-dg-meta"
-        x="56"
-        y="68"
-        width="38"
-        height="14"
-        rx="3"
-        fill="none"
-        strokeWidth="1.4"
-        opacity=".45"
-      />
-      <Padlock x={81} y={74.2} />
-      <path className="l-dg-meta" d="M108 48h16m-5-4l5 4-5 4" strokeWidth="1.6" fill="none" />
-      <rect className="l-dg-accent-fill" x="136" y="31" width="38" height="14" rx="3" />
-      <rect className="l-dg-accent-fill" x="136" y="51" width="38" height="14" rx="3" />
+      <AuditEntry y={30} width={62} newest />
+      <AuditEntry y={48} width={48} newest={false} />
+      <AuditEntry y={66} width={70} newest={false} />
     </svg>
   );
 }
 
-/**
- * The padlock glyph the access diagram repeats. The shackle sits 1.4 units above
- * the body's top-left corner, which is what the reference draws at each row.
- */
-function Padlock(props: { x: number; y: number }): React.ReactElement {
-  const { x, y } = props;
-  // Rounded to one decimal, because the offsets are exact in the reference and
-  // the binary sum of 20.2 and 2.3 is not.
-  const shackleX = Math.round((x + 1.4) * 10) / 10;
-  const shackleY = Math.round((y + 2.3) * 10) / 10;
+/** One audit-log row: a status dot, a timestamp bar, and a message bar. */
+function AuditEntry(props: { y: number; width: number; newest: boolean }): React.ReactElement {
+  const { y, width, newest } = props;
 
   return (
     <>
-      <path
-        className="l-dg-meta"
-        d={`M${shackleX} ${shackleY}v-1.6a2.1 2.1 0 014.2 0v1.6`}
-        fill="none"
-        strokeWidth="1.4"
-      />
-      <rect className="l-dg-meta-fill" x={x} y={y} width="7" height="5.4" rx="1.2" />
+      <circle className={newest ? "l-dg-accent-fill" : "l-dg-meta-fill"} cx="117" cy={y} r="3" />
+      <rect className="l-dg-meta-fill" x="127" y={y - 1.5} width="22" height="3" rx="1.5" opacity=".6" />
+      <rect className="l-dg-ink-fill" x="155" y={y - 1.5} width={width} height="3" rx="1.5" opacity=".5" />
     </>
+  );
+}
+
+/**
+ * A usage report: a framed card with a title, a trend line in the accent, a
+ * rule, and three ranked bars with the top bar in the accent.
+ */
+export function ObservabilityDiagram(): React.ReactElement {
+  return (
+    <svg className="l-dg" width="200" height="80" viewBox="0 0 240 96" aria-hidden="true">
+      <rect
+        className="l-dg-paper l-dg-ink"
+        x="20"
+        y="5"
+        width="200"
+        height="86"
+        rx="5"
+        strokeWidth="1.6"
+      />
+      <rect className="l-dg-ink-fill" x="34" y="18" width="58" height="4" rx="2" opacity=".7" />
+      <rect className="l-dg-meta-fill" x="34" y="27" width="36" height="3" rx="1.5" opacity=".6" />
+      <polyline
+        className="l-dg-accent"
+        points="148,31 160,26 172,28 184,20 196,23 206,15"
+        fill="none"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      <circle className="l-dg-accent-fill" cx="206" cy="15" r="2.6" />
+      <path className="l-dg-meta" d="M34 40h172" strokeWidth="1" opacity=".45" />
+      <rect className="l-dg-meta-fill" x="34" y="50.5" width="32" height="3" rx="1.5" opacity=".6" />
+      <rect className="l-dg-accent-fill" x="76" y="49" width="118" height="6" rx="1.5" />
+      <rect className="l-dg-meta-fill" x="34" y="63.5" width="32" height="3" rx="1.5" opacity=".6" />
+      <rect className="l-dg-meta-fill" x="76" y="62" width="80" height="6" rx="1.5" opacity=".5" />
+      <rect className="l-dg-meta-fill" x="34" y="76.5" width="32" height="3" rx="1.5" opacity=".6" />
+      <rect className="l-dg-meta-fill" x="76" y="75" width="44" height="6" rx="1.5" opacity=".5" />
+    </svg>
   );
 }
 
 /** The diagram each feature card names, keyed by the content model's value. */
 export const featureDiagrams: Record<FeatureDiagramKey, () => React.ReactElement> = {
-  delivery: DeliveryDiagram,
   domains: DomainsDiagram,
   materialization: MaterializationDiagram,
   discovery: DiscoveryDiagram,
   layers: LayersDiagram,
-  access: AccessDiagram,
+  security: SecurityDiagram,
+  observability: ObservabilityDiagram,
 };
 
 /* -------------------------------------------------------- deployment icons */
@@ -683,6 +598,59 @@ export function BranchIcon(): React.ReactElement {
   );
 }
 
+/** A page with ruled lines, for the audit log row. */
+export function ScrollIcon(): React.ReactElement {
+  return (
+    <svg className="l-dg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        className="l-dg-meta"
+        d="M3.5 2h8.3a1.5 1.5 0 0 1 1.5 1.5V14H5a1.5 1.5 0 0 1-1.5-1.5z"
+        fill="none"
+        strokeWidth="1.5"
+      />
+      <path className="l-dg-meta" d="M6.2 5.6h4.6M6.2 8.4h4.6M6.2 11.2h2.8" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+/** A pulse line, for the tracing row. */
+export function PulseIcon(): React.ReactElement {
+  return (
+    <svg className="l-dg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        className="l-dg-meta"
+        d="M1 8.5h3.2l2-5.3 3.2 9.6 2-4.3H15"
+        fill="none"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** A bell, for the notifications row. */
+export function BellIcon(): React.ReactElement {
+  return (
+    <svg className="l-dg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        className="l-dg-meta"
+        d="M4 11.3V7.2a4 4 0 0 1 8 0v4.1l1.4 1.5H2.6z"
+        fill="none"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <path
+        className="l-dg-meta"
+        d="M6.4 14.4a1.7 1.7 0 0 0 3.2 0"
+        fill="none"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 /** The icon each integration row names, keyed by the content model's value. */
 export const integrationIcons: Record<IntegrationIconKey, () => React.ReactElement> = {
   cylinder: CylinderIcon,
@@ -691,4 +659,7 @@ export const integrationIcons: Record<IntegrationIconKey, () => React.ReactEleme
   sparkle: SparkleIcon,
   padlock: PadlockIcon,
   branch: BranchIcon,
+  scroll: ScrollIcon,
+  pulse: PulseIcon,
+  bell: BellIcon,
 };

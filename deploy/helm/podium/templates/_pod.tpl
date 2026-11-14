@@ -36,7 +36,7 @@ Spec: §13.4
 {{- end }}
 {{- $migrating := ne $mode "disabled" }}
 {{- if and $migrating (ne $replicas 0) }}
-{{- fail (printf "migration.mode=%s requires replicaCount=0, and replicaCount is %d: the §13.4 rewrite requires every registry process stopped; follow the upgrade procedure in docs/deployment/clustered.md" $mode $replicas) }}
+{{- fail (printf "migration.mode=%s requires replicaCount=0, and replicaCount is %d: the §13.4 rewrite requires every registry process stopped; follow the upgrade procedure in docs/deployment/operations/upgrade-notes.md" $mode $replicas) }}
 {{- end }}
 {{- if and $migrating (eq .Values.signing.mode "none") .Values.migration.includeUnsigned }}
 {{- fail (printf "migration.mode=%s with signing.mode=none requires migration.includeUnsigned=false: sign-stored-rows refuses --include-unsigned with signing off (config.signature_provider_unavailable), because it signs no row" $mode) }}

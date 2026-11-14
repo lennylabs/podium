@@ -33,15 +33,6 @@ export type MarkedText = {
   marked: boolean;
 };
 
-export type StatusPill = {
-  /**
-   * Follows the release series, which the page derives from the version the
-   * build read out of the Go source. Naming the series here as well would put
-   * a second number in the page that has to be remembered on every bump.
-   */
-  qualifier: string;
-};
-
 export type InstallCommand = {
   /** The shell prompt glyph shown before the command. */
   prompt: string;
@@ -61,18 +52,30 @@ export type Action = {
 };
 
 /**
+ * A run of transcript text in one tone. "ink" is a command name or an artifact
+ * ID, "arg" is a flag, an argument, or a [type] tag in the link tone, and "out"
+ * is a description, a label, or a path in the body tone.
+ */
+export type TerminalSpan = {
+  text: string;
+  tone: "ink" | "arg" | "out";
+};
+
+/**
  * One line of the hero transcript. Each line renders as its own block element,
- * so the transcript never depends on newlines inside a preformatted block.
+ * so the transcript never depends on newlines inside a preformatted block, and
+ * the leading spaces each span carries survive.
  *
- * A "command" line renders behind a prompt glyph, with its flag run in the link
- * tone. A "path" line is a materialized file path, indented under the command
- * that wrote it. A "gap" line is the blank line between two invocations, and a
- * "cursor" line is the trailing prompt and its blinking block.
+ * A "command" line is set in the heavier weight, behind a prompt glyph unless
+ * it continues the previous line. An "output" line is what the command
+ * printed. A "gap" is vertical space: under a command, under a results header,
+ * or between two invocations. A "cursor" line is the trailing prompt and its
+ * blinking block.
  */
 export type TerminalLine =
-  | { kind: "command"; command: string; flag: string }
-  | { kind: "path"; text: string }
-  | { kind: "gap" }
+  | { kind: "command"; prompt: boolean; spans: TerminalSpan[] }
+  | { kind: "output"; spans: TerminalSpan[] }
+  | { kind: "gap"; size: "command" | "header" | "block" }
   | { kind: "cursor" };
 
 export type Terminal = {
@@ -88,7 +91,8 @@ export type FeatureCard = {
   /** Two-digit ordinal, shown in mono above the title. */
   number: string;
   title: string;
-  body: string;
+  /** One or more paragraphs, rendered 8px apart. */
+  body: string[];
   /** The decorative diagram drawn to the left of the text. */
   diagram: FeatureDiagramKey;
 };
@@ -102,6 +106,8 @@ export type DeploymentFact = {
 export type DeploymentCard = {
   icon: DeploymentIconKey;
   title: string;
+  /** A short pill at the right of the title row, or null. */
+  badge: string | null;
   facts: DeploymentFact[];
   /** Heading over the bullet list, null on the card that inherits nothing. */
   plusLabel: string | null;
@@ -146,9 +152,9 @@ export type LandingContent = {
     versionPrefix: string;
   };
   hero: {
-    status: StatusPill;
-    /** One entry per headline line. The marked entry takes the highlighter. */
-    headline: MarkedText[];
+    /** One entry per headline line, each a list of runs. A marked run takes
+        the highlighter. */
+    headline: MarkedText[][];
     /** Inline runs of the subtitle, in order. */
     subtitle: MarkedText[];
     install: InstallCommand;
@@ -212,20 +218,17 @@ export const landing: LandingContent = {
     versionPrefix: "v",
   },
   hero: {
-    status: {
-      qualifier: "early release",
-    },
     headline: [
-      { text: "One catalog.", marked: false },
-      { text: "Every harness.", marked: true },
+      [
+        { text: "The ", marked: false },
+        { text: "skill registry", marked: true },
+      ],
+      [{ text: "for AI agents.", marked: false }],
     ],
     subtitle: [
-      { text: "A catalog for reusable ", marked: false },
-      { text: "AI skills and other artifacts", marked: true },
-      {
-        text: ", with tools to translate them into harness-specific formats.",
-        marked: false,
-      },
+      { text: "An enterprise-grade registry for reusable ", marked: false },
+      { text: "agent skills and other artifacts", marked: true },
+      { text: ".", marked: false },
     ],
     install: {
       prompt: "$",
@@ -254,26 +257,39 @@ export const landing: LandingContent = {
       directory: "~/projects/foo",
       prompt: "$",
       caption:
-        "Terminal transcript. Three podium sync runs materialize the same artifacts three ways: into the Claude Code layout, into the Cursor layout, and into the marketplace layout a shared configuration file describes.",
+        "Terminal transcript. podium search finds three artifacts for an incident rollback, podium domain show lists the subdomains of the platform domain, and podium sync writes the rollback skill and its bundled script into the Claude Code layout.",
       lines: [
-        { kind: "command", command: "podium sync", flag: "--harness claude-code" },
-        { kind: "path", text: ".claude/skills/rollback/SKILL.md" },
-        { kind: "path", text: ".claude/skills/rollback/scripts/verify_revision.py" },
-        { kind: "path", text: ".claude/commands/query-review.md" },
-        { kind: "path", text: ".mcp.json" },
-        { kind: "gap" },
-        { kind: "command", command: "podium sync", flag: "--harness cursor" },
-        { kind: "path", text: ".cursor/skills/rollback/SKILL.md" },
-        { kind: "path", text: ".cursor/skills/rollback/scripts/verify_revision.py" },
-        { kind: "path", text: ".cursor/commands/query-review.md" },
-        { kind: "path", text: ".cursor/mcp.json" },
-        { kind: "gap" },
-        { kind: "command", command: "podium sync", flag: "--config marketplace.yaml" },
-        { kind: "path", text: ".claude-plugin/marketplace.json" },
-        { kind: "path", text: "claude/acme/skills/rollback/SKILL.md" },
-        { kind: "path", text: "claude/acme/skills/rollback/scripts/verify_revision.py" },
-        { kind: "path", text: "cursor/acme/skills/rollback/SKILL.md" },
-        { kind: "gap" },
+        command(true, ink("podium search "), arg('"incident rollback"')),
+        { kind: "gap", size: "command" },
+        output(out("Showing 3 of 3 results")),
+        { kind: "gap", size: "header" },
+        output(ink("  platform/rollback  "), arg("[skill]")),
+        output(out("      Roll back a bad deploy and verify the running revision.")),
+        output(ink("  platform/k8s/pod-forensics  "), arg("[skill]")),
+        output(out("      Capture pod state and logs before a rollback.")),
+        output(ink("  platform/incident-commander  "), arg("[agent]")),
+        output(out("      Coordinate incident response and rollback decisions.")),
+        { kind: "gap", size: "block" },
+        command(true, ink("podium domain show "), arg("platform")),
+        { kind: "gap", size: "command" },
+        output(ink("platform")),
+        output(out("  Platform operations and incident response.")),
+        output(out("subdomains:")),
+        output(ink("  - platform/ci"), out("  ci")),
+        output(out("      Build and release pipelines.")),
+        output(ink("  - platform/k8s"), out("  k8s")),
+        output(out("      Kubernetes operations.")),
+        { kind: "gap", size: "block" },
+        command(true, ink("podium sync "), arg("--harness claude-code"), ink(" \\")),
+        command(false, ink("              "), arg("--include platform/rollback")),
+        { kind: "gap", size: "command" },
+        output(out("adapter: claude-code")),
+        output(out("target:  /Users/alice/projects/foo")),
+        output(out("artifacts:")),
+        output(ink("  - platform/rollback"), out("  [team-platform]")),
+        output(out("      .claude/skills/rollback/SKILL.md")),
+        output(out("      .claude/skills/rollback/scripts/verify_revision.py")),
+        { kind: "gap", size: "block" },
         { kind: "cursor" },
       ],
     },
@@ -298,48 +314,62 @@ export const landing: LandingContent = {
     cards: [
       {
         number: "01",
-        title: "Cross-harness delivery",
-        body: "Write canonical artifacts once. Automatically translate into the format your runtime expects.",
-        diagram: "delivery",
-      },
-      {
-        number: "02",
         title: "Domains and subdomains",
-        body: "Easy artifact maintenance and discoverability through the use of domains and sub-domains.",
+        body: [
+          "Easy skill maintenance and discoverability through the use of domains and sub-domains.",
+        ],
         diagram: "domains",
       },
       {
-        number: "03",
+        number: "02",
         title: "Selective materialization",
-        body: "Sync a subset of the catalog into a workspace. Define profiles to quickly and seamlessly switch between scopes.",
+        body: [
+          "Sync a chosen subset of the catalog into a workspace ahead of time. Define profiles to quickly and seamlessly switch between scopes.",
+        ],
         diagram: "materialization",
       },
       {
-        number: "04",
+        number: "03",
         title: "Progressive discovery",
-        body: "Minimalistic set of tools for agents to traverse domains and find artifacts, materializing artifacts (including bundled files) lazily as they are needed.",
+        body: [
+          "stdio MCP server with tools for agents to find skills and to lazily load them into the agent's workspace (including bundled files).",
+        ],
         diagram: "discovery",
       },
       {
-        number: "05",
+        number: "04",
         title: "Layered composition",
-        body: "Compose the catalog from multiple independent sources with deterministic merge and explicit precedence.",
+        body: [
+          "Compose the catalog from multiple independent sources with deterministic merge and explicit precedence.",
+          "Use your own Git repos as sources.",
+        ],
         diagram: "layers",
       },
       {
+        number: "05",
+        title: "Security and access control",
+        body: [
+          "Skills and other artifacts are signed at ingest and verified on every sync. Declare who can see what with RBAC. Audit logs.",
+        ],
+        diagram: "security",
+      },
+      {
         number: "06",
-        title: "Access control",
-        body: "Declare who can see what: public, org-wide, scoped to OIDC groups, or specific users.",
-        diagram: "access",
+        title: "Observability",
+        body: [
+          "Every artifact load and every search is an audit event. Stream the events to your log pipeline to see which artifacts agents load and how often.",
+        ],
+        diagram: "observability",
       },
     ],
   },
   deployment: {
-    heading: "Run it three ways",
+    heading: "Deployment modes",
     cards: [
       {
         icon: "folder",
         title: "Local",
+        badge: "No server needed",
         facts: [
           { label: "Server-side deployment", value: "None" },
           { label: "Catalog source", value: "A folder, read from disk" },
@@ -351,6 +381,7 @@ export const landing: LandingContent = {
       {
         icon: "database",
         title: "Single node",
+        badge: null,
         facts: [
           { label: "Server-side deployment", value: "One binary" },
           {
@@ -373,6 +404,7 @@ export const landing: LandingContent = {
       {
         icon: "asterisk",
         title: "Clustered",
+        badge: null,
         facts: [
           { label: "Server-side deployment", value: "Replicas, Postgres, storage" },
           {
@@ -393,7 +425,7 @@ export const landing: LandingContent = {
     ],
     callout: {
       glyph: "→",
-      text: "The artifacts never change. They are independent of Podium's deployment model.",
+      text: "Skills and other artifacts are independent of Podium's deployment model.",
     },
   },
   integrations: {
@@ -446,6 +478,27 @@ export const landing: LandingContent = {
         alternatives: ["Custom via SPI"],
         note: "S3 buckets, OCI registries, HTTP archives.",
       },
+      {
+        icon: "scroll",
+        name: "Audit log",
+        builtIn: "Hash-chained file",
+        alternatives: ["stdout", "HTTP receivers", "OpenTelemetry Collector"],
+        note: "List several destinations to write one hash-chained stream to each.",
+      },
+      {
+        icon: "pulse",
+        name: "Tracing",
+        builtIn: "None",
+        alternatives: ["OTLP/HTTP", "stdout"],
+        note: "Spans carry W3C Trace Context, and URL query strings are removed before export.",
+      },
+      {
+        icon: "bell",
+        name: "Notifications",
+        builtIn: "None",
+        alternatives: ["Webhook", "Email (SMTP)", "Log"],
+        note: "Delivers layer ingest-failure alerts. Several providers can run together.",
+      },
     ],
     note: "Nothing in the right column is required to start. At cluster scale, Postgres and object storage become requirements. Easily re-embed during vector backend migrations.",
   },
@@ -461,3 +514,25 @@ export const landing: LandingContent = {
     ],
   },
 };
+
+/** A transcript command line, set in the heavier weight. */
+function command(prompt: boolean, ...spans: TerminalSpan[]): TerminalLine {
+  return { kind: "command", prompt, spans };
+}
+
+/** A transcript line the command printed. */
+function output(...spans: TerminalSpan[]): TerminalLine {
+  return { kind: "output", spans };
+}
+
+function ink(text: string): TerminalSpan {
+  return { text, tone: "ink" };
+}
+
+function arg(text: string): TerminalSpan {
+  return { text, tone: "arg" };
+}
+
+function out(text: string): TerminalSpan {
+  return { text, tone: "out" };
+}
