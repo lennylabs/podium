@@ -1,6 +1,6 @@
 ---
 title: Domains
-nav_order: 6
+nav_order: 7
 description: How folders and subfolders define the catalog hierarchy, and how DOMAIN.md adds descriptions, keywords, featured artifacts, imports, and discovery settings.
 ---
 
@@ -16,6 +16,8 @@ Every subdirectory of the registry path is a domain by default, with no configur
 - Keywords and featured artifacts for discovery.
 - `include:` patterns that pull in artifacts from elsewhere, and `exclude:` patterns that remove paths.
 - Discovery rendering settings for the subtree.
+
+Domain metadata affects only the `load_domain` and `search_domains` meta-tools and the `podium domain` commands, and those call a registry server. `podium sync` materializes by the `sync.yaml` scope and ignores `DOMAIN.md`, so domain metadata has no effect on a catalog consumed only through `podium sync`. [Checking a domain](#checking-a-domain) names the deployments that run a server.
 
 ---
 
@@ -112,13 +114,13 @@ vendors.
 For inbound payments and AR, see `finance/ar/`.
 ```
 
-| Field | Description |
-|:--|:--|
-| `unlisted` | When `true`, removes the folder and its subtree from `load_domain` enumeration. See [Unlisted folders](#unlisted-folders). Default `false`. |
-| `description` | One-line summary, used wherever this domain appears as a child or sibling in another `load_domain` response. |
-| `discovery.*` | Per-domain overrides of the discovery rendering rules. See [Discovery rendering](#discovery-rendering). |
-| `include` | List of glob patterns and artifact IDs to import into this domain. Imported artifacts keep their canonical home and appear here as well. See [Imports](#imports). |
-| `exclude` | List of paths to remove, applied after `include`. |
+| Field | Type | Description |
+|:--|:--|:--|
+| `unlisted` | bool | When `true`, removes the folder and its subtree from `load_domain` enumeration. See [Unlisted folders](#unlisted-folders). Default `false`. |
+| `description` | string | One-line summary, used wherever this domain appears as a child or sibling in another `load_domain` response. See [Descriptions](#descriptions). |
+| `discovery` | object | Per-domain overrides of the discovery rendering rules, plus `featured`, `deprioritize`, and `keywords`. See [Discovery rendering](#discovery-rendering). |
+| `include` | list of glob patterns or artifact IDs | Artifacts to import into this domain. Imported artifacts keep their canonical home and appear here as well. See [Imports](#imports). |
+| `exclude` | list of glob patterns | Paths to remove, applied after `include`. |
 
 The prose body below the frontmatter is long-form context. `load_domain` returns it only when this domain is the requested path.
 
@@ -171,7 +173,14 @@ Featured entries appear before any signal-driven entries in the notable list. If
 
 ## Imports
 
-`include:` brings artifacts from other domains into this one for discovery purposes. The glob syntax is `*` for one segment, `**` for a recursive match, and `{a,b,c}` for alternatives.
+`include:` brings artifacts from other domains into this one for discovery purposes. Each entry is a glob pattern or a canonical artifact ID:
+
+| Syntax | Matches |
+|:--|:--|
+| `*` | One path segment. |
+| `**` | Any number of path segments. |
+| `{a,b,c}` | Any one of the listed alternatives. |
+| A bare canonical artifact ID | That artifact exactly. |
 
 ```yaml
 include:
@@ -241,18 +250,20 @@ unlisted: true
 
 ## Discovery rendering
 
-Configurable rules govern how `load_domain` renders its output. Tenant defaults live in `registry.yaml`, and per-domain overrides live in the `discovery:` block of `DOMAIN.md`.
+Configurable rules govern how `load_domain` renders its output. The tenant defaults for `max_depth`, `fold_below_artifacts`, `fold_passthrough_chains`, `notable_count`, and `target_response_tokens` live in the `discovery:` block of the server's `registry.yaml`, which nests under `registry:` like every server key ([File layout](../reference/configuration#file-layout)). The `discovery:` block of a `DOMAIN.md` overrides them for the subtree rooted at that domain.
+
+An operator who sets `allow_per_domain_overrides: false` in the tenant `discovery:` block disables per-domain overrides registry-wide. Lint then warns on any `DOMAIN.md` that carries a `discovery:` block, and ingest still succeeds.
 
 | Setting | Type | Effect |
 |:--|:--|:--|
 | `max_depth` | int (≥1) | Caps the depth of the rendered subtree below the requested path. Default 3. |
 | `fold_below_artifacts` | int (≥0) | A subdomain whose visible artifact count (recursive) is below this threshold collapses into its parent's leaf set. Default 0 (no folding). |
-| `fold_passthrough_chains` | bool | Collapses single-child intermediate domains. Default `true`. |
+| `fold_passthrough_chains` | bool | Collapses single-child intermediate domains into the deepest ancestor that is not a pass-through. Default `true`. |
 | `notable_count` | int (≥0) | Caps the notable list per domain. Default 10. |
 | `target_response_tokens` | int | Soft budget per `load_domain` response. The renderer tightens depth and notable count to fit. Default 4000. |
-| `featured` | list of canonical artifact IDs | Surfaced first in the notable list. |
-| `deprioritize` | list of glob patterns | Matching children rank last and are excluded from the notable list unless space permits. |
-| `keywords` | list of strings | Author-curated terms. Per-domain only, with no tenant default. |
+| `featured` | list of canonical artifact IDs | Surfaced first in the notable list. See [Featured artifacts](#featured-artifacts). Per-domain only. |
+| `deprioritize` | list of glob patterns | Matching children rank last and are excluded from the notable list unless space permits. Per-domain only. |
+| `keywords` | list of strings | Author-curated terms. See [Keywords](#keywords). Per-domain only, with no tenant default. |
 
 ---
 

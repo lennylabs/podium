@@ -32,6 +32,11 @@ parts apply in this order:
    matches the same ID.
 3. `type` keeps only the listed artifact types.
 
+A scope selects whole artifacts. A selected artifact brings the files bundled in
+its directory, and the scope has no separate filter for them.
+[Bundled files](configure-your-harness#bundled-files) covers where each harness
+writes them.
+
 ### Pattern syntax
 
 Patterns match the canonical artifact ID, which is the artifact's directory path
@@ -169,7 +174,7 @@ edit the profile.
 
 ### Where profiles live
 
-`podium sync` merges three configuration files, listed here from lowest to
+`podium sync` merges the following configuration files, listed from lowest to
 highest precedence:
 
 | Scope | Path |
@@ -181,7 +186,7 @@ highest precedence:
 The workspace is the nearest ancestor directory holding a `.podium/` directory,
 found the way `git` finds `.git`.
 
-- Profiles from all three files form one set.
+- Profiles from all the files form one set.
 - A profile defined in more than one file is replaced whole by the
   highest-precedence definition. Invoking it prints a warning naming the files
   that defined it.
@@ -320,27 +325,6 @@ distribution and is covered in [Publishing marketplace repositories](../deployme
 | `podium sync --check` | Validation warnings for the merged configuration: profile references that resolve to nothing, malformed globs, duplicate target ids, and profiles defined in more than one file. |
 | `podium sync --preview` | Aggregate counts for the caller's whole effective view, from a server registry. The scope is not applied. |
 | `podium sync --json` | The resolved run as a structured envelope, including `.profile`, `.scope.include`, and the per-artifact list. |
-
----
-
-## Bundled resources follow the artifact
-
-Selecting an artifact selects its directory. When a scope keeps
-`finance/close-reporting/run-variance-analysis`, the scripts, references, and
-assets bundled in that directory are materialized alongside its manifest, in
-the layout the harness adapter assigns them.
-
-- A `rule` or `mcp-server` artifact is the exception. A harness adapter renders
-  it as a single file, an injected block, or a config-merge fragment, so files
-  bundled in those directories are not written.
-- The canonical layout (`--harness none`) writes those files under
-  `<destination>/<artifact-id>/`.
-- A scope has no separate filter for bundled files, and it cannot keep a
-  manifest while dropping its dependencies.
-
-[Bundled resources](../authoring/bundled-resources) covers what ships, and
-[Configure your harness](configure-your-harness#bundled-files) covers where each
-harness puts it.
 
 ---
 

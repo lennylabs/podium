@@ -1,6 +1,6 @@
 ---
 title: Rule modes
-nav_order: 7
+nav_order: 8
 description: The rule_mode values (always, glob, auto, and explicit), when to use each, and how each harness honors them.
 ---
 
@@ -12,12 +12,14 @@ A `rule` artifact is passive context that the harness loads automatically. The `
 
 | Mode | Loaded when | Required field |
 |:--|:--|:--|
-| `always` | The agent session starts (or every turn). | none |
+| `always` | The session starts. The rule stays in context for the whole session. | none |
 | `glob` | A file matching the glob pattern is touched in the session. | `rule_globs` |
-| `auto` | The harness's autoload heuristic decides this rule's `description` matches. | `rule_description` |
+| `auto` | The harness's autoload heuristic decides this rule's `rule_description` matches. | `rule_description` |
 | `explicit` | The user references the rule by name. | none |
 
 A rule that does not set the field uses `always`.
+
+Every harness that honors `always` natively loads the rule when a session starts and keeps it in context for that session. Claude Code reads a `.claude/rules/` file without `paths:` at launch, as it reads `CLAUDE.md`. Codex, OpenCode, Pi, and Gemini read the injected block with the rest of `AGENTS.md` or `GEMINI.md`. Cursor and Hermes attach a `.mdc` rule marked `alwaysApply: true` to every chat. [What each adapter writes](#what-each-adapter-writes) gives the output for each harness.
 
 ---
 

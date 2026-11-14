@@ -6,7 +6,7 @@ description: The structured error envelope that Podium returns on failure, and t
 
 # Error codes
 
-This page lists the error codes that the registry, the MCP server, `podium sync`, the CLI, and the language SDKs return. Use it to look up what a code means, where it comes from, and what to do about it. Codes are grouped by namespace.
+This page lists the error codes that the registry, the MCP server, `podium sync`, the CLI, and the language SDKs return. Use it to look up what a code means, where it comes from, and what to do about it. Codes are grouped by namespace. [Troubleshooting](../deployment/operations/troubleshooting) indexes the same failures by symptom.
 
 ---
 
@@ -186,7 +186,7 @@ Destination list and file causes:
 
 Transport and queue causes:
 
-- A `PODIUM_AUDIT_HEADERS_FILE`, `PODIUM_AUDIT_TLS_CA_FILE`, `PODIUM_AUDIT_TLS_CERT_FILE`, or `PODIUM_AUDIT_TLS_KEY_FILE` setting that the [CLI reference](cli#environment-variables) rows refuse.
+- A `PODIUM_AUDIT_HEADERS_FILE`, `PODIUM_AUDIT_TLS_CA_FILE`, `PODIUM_AUDIT_TLS_CERT_FILE`, or `PODIUM_AUDIT_TLS_KEY_FILE` setting that the [Configuration](configuration#audit) rows refuse.
 - A non-empty `PODIUM_AUDIT_QUEUE_MAX_BYTES` that is not a positive base-10 integer.
 
 `podium-mcp` also refuses `stdout` in `PODIUM_AUDIT_SINK`, because its standard output carries the MCP protocol. It reads the transport and queue variables only when `PODIUM_AUDIT_SINK` is set.

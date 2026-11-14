@@ -6,7 +6,7 @@ description: Configure a Podium registry to authenticate callers against Microso
 
 # Microsoft Entra ID
 
-This cookbook configures a Podium registry to authenticate against Microsoft Entra ID, formerly Azure AD. By default Entra emits group object IDs (GUIDs) instead of names, so the `IdpGroupMapping` adapter resolves the GUIDs to group names. Setup takes about 20 minutes. The [OIDC cookbooks overview](index) describes the identity model the steps rely on.
+This cookbook configures a Podium registry to verify Microsoft Entra ID tokens under `oidc-jwt`, and configures developer machines to acquire them through the device-code flow. Entra ID was formerly Azure AD. By default Entra emits group object IDs (GUIDs) instead of names, so the `IdpGroupMapping` adapter resolves the GUIDs to group names. Setup takes about 20 minutes. [OIDC](index) is the reference for the `oidc-jwt` settings these steps use.
 
 ## Prerequisites
 
@@ -42,7 +42,7 @@ Entra emits group object IDs by default. Choose one of the options below. Option
 PODIUM_IDP_GROUP_MAPPING=7c52a1d4-1111-2222-3333-444455556666=engineering,9ab3f0c2-7777-8888-9999-aaaabbbbcccc=platform
 ```
 
-The mapping has no `registry.yaml` key. A non-empty value that carries a malformed entry, or that resolves to no `<token-value>=<group-name>` entry at all, fails startup with `config.invalid_idp_group_mapping`. The registry refuses the whole setting instead of starting with a partial table, so one malformed entry discards the well-formed entries beside it.
+The mapping is environment-only, and a malformed value fails startup with `config.invalid_idp_group_mapping`. [OIDC group claims with IdpGroupMapping](../groups#oidc-group-claims-with-idpgroupmapping) describes the format and the validation.
 
 The layer config then references the readable name:
 
@@ -76,7 +76,7 @@ The Application ID URI is the audience the registry validates against.
 
 ## 4. Configure the registry
 
-On the registry host, add the `identity_provider:` block to `registry.yaml`:
+On the registry host, add the `identity_provider:` block to `registry.yaml`, nested under `registry:` as [File layout](../../../reference/configuration#file-layout) describes:
 
 ```yaml
 registry:
@@ -86,13 +86,7 @@ registry:
     audience: api://podium
 ```
 
-Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config, and the registry ignores it without reporting an error.
-
-`oidc-jwt` is the registry's side of the flow. It verifies each presented token against the issuer's JWKS and requires the token's `aud` claim to carry one of the values configured under `audience:`.
-
-- A CLI, an SDK, or another API client obtains the token through the device-code flow that the next step configures.
-- On a registry that enables the browser flow, a browser obtains the token through the registry's own authorization-code exchange, and the registry returns it in the `__Host-podium_session` cookie.
-- Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
+The registry verifies each presented token against the issuer's JWKS and requires its `aud` claim to carry `api://podium`.
 
 Entra carries the user principal name in the `preferred_username` claim, which the registry does not read. The registry takes the caller's email from the `email` claim alone. When layer visibility lists callers by email address, add `email` under **Token configuration → Add optional claim → Access token**.
 
@@ -122,7 +116,7 @@ Expected result: the browser device-flow page opens at `https://microsoft.com/de
 
 ## 6. Test group-based visibility
 
-Configure an admin layer scoped to the group in `registry.yaml`. With Option A, the `IdpGroupMapping` entry maps the GUID to the name `engineering`, and the layer references that name. Group-scoped visibility is set in the registry layer config, or with `podium layer register --group <name>` (also `--public`, `--organization`, and `--user`). Layers registered with `--user-defined` are private to the registrant and cannot be widened.
+Configure an admin layer scoped to the group in `registry.yaml`. With Option A, the `IdpGroupMapping` entry maps the GUID to the name `engineering`, and the layer references that name. [Declaring visibility](../../content/access-control#declaring-visibility) describes the other ways to set a layer's visibility.
 
 ```yaml
 registry:
@@ -150,11 +144,7 @@ Entra pushes user and group records to the registry's SCIM endpoint through the 
 6. Configure attribute mappings so each provisioned user's SCIM `userName` matches the `sub` or `email` claim its token carries.
 7. Configure attribute mappings so each group's `displayName` matches the name used in the layer's `groups:` filter.
 
-On the registry side:
-
-- The registry mounts `/scim/v2/` only when `PODIUM_SCIM_TOKENS` is set to a comma-separated list of accepted tokens. Otherwise it returns 404 for every SCIM request.
-- Set `PODIUM_SCIM_STORE_PATH` to a writable file path so the pushed directory survives a restart. A set path that the registry cannot read, parse, or write refuses startup with `config.scim_store_unavailable`.
-- The registry expands a `groups:` filter to the group's member `userName` values and compares them against the caller's `sub` and `email`.
+On the registry, enable the receiver with `PODIUM_SCIM_TOKENS` and `PODIUM_SCIM_STORE_PATH`, as [Enable the receiver](../groups#enable-the-receiver) describes. The registry compares each group member's `userName` against the caller's `sub` and `email`, as [Matching users and groups](../groups#matching-users-and-groups) describes.
 
 > [!WARNING]
 > The registry's SCIM receiver serves `GET`, `POST`, `PUT`, and `DELETE` on `/Users` and `/Groups`, and answers every other method with HTTP 405. Entra's provisioning service sends updates, including group-membership changes, as `PATCH`. The pushed directory therefore records what the create requests established, and the registry rejects later updates. Confirm that a membership change reaches the registry before relying on SCIM for group visibility.

@@ -57,7 +57,7 @@ precedence. To run a suite hermetically while a `test.env` is present, set
 `PODIUM_TEST_ENV_FILE` to a path that does not exist; the live paths then skip.
 The managed vector backends, their collections, and the CI secrets that supply
 them are documented in
-[`../docs/testing/live-vector-backends.md`](../docs/testing/live-vector-backends.md).
+[`../docs/about/live-vector-backends.md`](../docs/about/live-vector-backends.md).
 
 ## Reusable harnesses
 

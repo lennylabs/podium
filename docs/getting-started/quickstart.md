@@ -9,7 +9,7 @@ description: Install Podium, write one skill in a local catalog, and load it in 
 This quickstart installs the Podium CLI, writes one skill into a local catalog,
 and materializes it into Claude Code. It uses the local deployment mode, where
 the catalog is a directory on disk and no server runs. That mode fits any
-catalog that needs no access control or progressive discovery.
+catalog that needs no access control and no runtime search by the agent.
 
 > [!NOTE]
 > Podium is an early release. The surface and its behavior may
@@ -99,8 +99,9 @@ The merged configuration shows the registry path and the harness.
 
 A skill is a directory with a `SKILL.md` from the
 [agentskills.io](https://agentskills.io/specification) standard at its root.
-The registry path is one filesystem layer, and artifacts and intermediate
-domain directories live underneath it.
+Everything lives under the catalog directory, `~/podium-artifacts/`. A
+directory that holds a manifest file is an artifact, and the directories above
+it, such as `personal/hello/`, are domains that group artifacts.
 
 Create a `greet` skill under the `personal/hello/` domain path:
 
@@ -177,6 +178,11 @@ result where Claude Code expects it. The default sync target is the current
 directory, and a skill lands in `.claude/skills/<name>/SKILL.md` with its
 bundled script beside it.
 
+The bracket after the artifact ID names the layer the artifact came from. A
+layer is one source of artifacts in the catalog. A catalog directory without a
+`.registry-config` file is a single layer named after the directory, so every
+artifact here reports `[podium-artifacts]`.
+
 ---
 
 ## 5. Materialize into a second harness
@@ -196,9 +202,11 @@ artifacts:
       .cursor/skills/greet/scripts/today.py
 ```
 
-Nothing in the catalog changed between the two runs. Each run reconciles the
-whole target against the lock file, so this run removed the `.claude/` files
-the previous run wrote. Restore them before the next step:
+Nothing in the catalog changed between the two runs. Each run records the
+files it wrote in a lock file, `.podium/sync.lock` in the target directory, and
+the next run removes the files that the lock file lists and the new run does
+not write. This run therefore removed the `.claude/` files the previous run
+wrote. Restore them before the next step:
 
 ```bash
 podium sync
@@ -245,8 +253,8 @@ change. A saved edit to `SKILL.md`, or to an `ARTIFACT.md` overlay, lands in
 - **Materialize part of the catalog.** Narrow the sync with include, exclude,
   and type filters, and save the result as a profile. See
   [Selective materialization](../consuming/selective-materialization).
-- **Split the catalog into layers.** This quickstart uses one filesystem layer
-  rooted at `~/podium-artifacts/`. To compose several layers from one
+- **Split the catalog into layers.** This quickstart uses one layer rooted at
+  `~/podium-artifacts/`. To compose several layers from one
   directory, such as a shared team layer and a personal layer, add a
   `.registry-config` with `multi_layer: true`. See [Local](../deployment/modes/local).
 - **Move to a server.** Runtime discovery, where an agent finds artifacts with
@@ -266,4 +274,4 @@ change. A saved edit to `SKILL.md`, or to an `ARTIFACT.md` overlay, lands in
 | `config.no_registry` error | `podium init` did not run, or the resolved `defaults.registry` is empty. | Re-run step 2. |
 | `podium sync` reports no artifacts | The artifact directory does not hold `SKILL.md` (for a skill) or `ARTIFACT.md` (for other types) at its immediate root. Intermediate directories without manifest files are domain nodes rather than artifacts. | Move the manifest to the root of the artifact directory. The directory path beneath `~/podium-artifacts/` is the canonical artifact ID. |
 | Claude Code does not see the skill | `.claude/skills/greet/SKILL.md` is missing, or Claude Code has not re-read its directory. | Confirm the file exists, then restart Claude Code. |
-| The skill is found but not used | Claude Code reads the `description:` field to decide whether the skill matches the prompt, and a vague description does not match. | Make the description specific. The [authoring guide](../authoring/) covers description quality. |
+| The skill is found but not used | Claude Code reads the `description:` field to decide whether the skill matches the prompt, and a vague description does not match. | Make the description specific. [Your first skill](../authoring/your-first-skill#step-1-sharpen-the-description) covers how to write the description. |

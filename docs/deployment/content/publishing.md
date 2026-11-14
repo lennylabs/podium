@@ -8,7 +8,7 @@ description: Render the catalog into harness-native marketplace repositories wit
 
 This page describes how to publish the catalog as harness-native git repositories, such as plugin marketplaces, extensions, packages, and taps. It is for operators who distribute artifacts to users through a harness's own install path rather than through `podium sync` on each workstation.
 
-A `podium sync` target of `kind: marketplace` renders the catalog into a git-repo distribution and runs an operator-configured workflow that commits and pushes it. A harness then imports the published repository through its own install path.
+A `podium sync` target of `kind: marketplace` renders the catalog into a git-repo distribution and runs an operator-configured workflow that commits and pushes it. The run happens on an operator machine or in a CI job and holds two credentials: a registry credential whose effective view becomes the published content, and the git push credential of the destination repository. Triggering the run from catalog changes also takes a webhook receiver, which only a tenant admin can register, and a relay that verifies the receiver's HMAC signature. A harness then imports the published repository through its own install path, which [Configure your harness](../../consuming/configure-your-harness) describes for each harness.
 
 ---
 
@@ -245,7 +245,7 @@ curl -X POST https://podium.acme.com/v1/webhooks -H "Authorization: Bearer $PODI
   -d '{"url":"https://relay.acme.com/podium","event_filter":["layer.ingested"],"debounce":"30s"}'
 ```
 
-The receiver `url` must use `https` and must resolve to a public address. The registry rejects a loopback, link-local, or private target with `registry.invalid_argument`, unless the host or CIDR is listed in the registry's `PODIUM_WEBHOOK_ALLOWED_TARGETS` allowlist. An in-cluster relay needs an allowlist entry. The `debounce` field sets a trailing window, so a burst of `layer.ingested` events coalesces into one batch delivery and one CI dispatch.
+The receiver `url` must use `https` and must resolve to a public address, so an in-cluster relay needs an entry in the registry's `PODIUM_WEBHOOK_ALLOWED_TARGETS` allowlist. [Outbound webhooks → Receiver URL policy](../operations/outbound-webhooks#receiver-url-policy) states the policy. The `debounce` field sets a trailing window, so a burst of `layer.ingested` events coalesces into one batch delivery and one CI dispatch.
 
 2. Deploy the relay. The relay verifies the HMAC against the receiver secret, then calls `POST https://api.github.com/repos/acme/agent-marketplace/dispatches` with `Authorization: Bearer <token>` and `{"event_type":"podium-layer-ingested"}`.
 
@@ -260,7 +260,7 @@ on:
 
 On dispatch, the workflow runs `podium sync --config <path>`.
 
-[HTTP API → Outbound webhooks](../../reference/http-api#outbound-webhooks) describes the receiver fields and the batch envelope. [Extending → Webhook-driven integrations](../operations/outbound-webhooks#webhook-driven-integrations) also describes the relay pattern.
+[HTTP API → Outbound webhooks](../../reference/http-api#outbound-webhooks) describes the receiver fields and the batch envelope. [Outbound webhooks → Triggering CI from a webhook](../operations/outbound-webhooks#triggering-ci-from-a-webhook-repository_dispatch-relay) also describes the relay pattern.
 
 ---
 
@@ -427,3 +427,4 @@ A server-side publisher is out of scope.
 - [Configure your harness](../../consuming/configure-your-harness): the per-harness distribution paths and install commands.
 - [Reference → CLI](../../reference/cli#podium-sync): the `podium sync` command surface.
 - [HTTP API → Outbound webhooks](../../reference/http-api#outbound-webhooks): the webhook receiver fields and the batch envelope.
+- [Outbound webhooks](../operations/outbound-webhooks): registering receivers and the receiver URL policy.

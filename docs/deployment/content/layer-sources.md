@@ -77,6 +77,8 @@ A document that starts at `layers:` parses to an empty config, and the registry 
 
 The registry re-seeds every declared layer from `registry.yaml` at each start, in list order. The declaration is authoritative for the fields it carries, so a change made over the CLI or the API to a declared layer reverts at the next start. A declared `git` layer is seeded without an ingest. Run `podium layer reingest <id>` after the first start, or use one of the mechanisms under [Keeping layers current](#keeping-layers-current).
 
+A declared layer never holds a webhook secret, so a Git host cannot push to it. [Webhooks](#webhooks) states the consequence and the alternatives.
+
 ### Register a layer at runtime
 
 `podium layer register` adds a layer to a running registry:
@@ -130,6 +132,9 @@ The registry verifies a `git` layer's inbound webhook deliveries against one Git
 ---
 
 ## Private repositories
+
+> [!NOTE]
+> The credential handling in this section is unreleased behaviour on `main`. It covers the credential flags, the `username` and `token` keys, and the refusal of a credential in the URL. Release 0.6.0 takes a private repository's credential in the userinfo of `--repo` or `source.git.repo`. [Upgrade notes](../operations/upgrade-notes#rollback-floor-for-the-layer-credential-columns) covers moving between the two forms.
 
 A `git` layer for a private HTTPS repository takes its credential in flags of its own, apart from `--repo`:
 
@@ -197,7 +202,7 @@ The declaration is the place to set, rotate, or remove a declared layer's creden
 
 ### What the registry reports
 
-The [operator guide](../operations/upgrade-notes#rollback-floor-for-the-layer-credential-columns) states how the metadata store holds the credential. `podium layer list`, the register and update responses, the server log, and the `ingest.source_unreachable` message of a failed clone carry no part of it.
+[Upgrade notes](../operations/upgrade-notes#rollback-floor-for-the-layer-credential-columns) states how the metadata store holds the credential. `podium layer list`, the register and update responses, the server log, and the `ingest.source_unreachable` message of a failed clone carry no part of it.
 
 A `git` layer whose remote is an `http` or `https` URL, and is not listed as `[redacted]`, carries `repo_credential` in those responses. The field is `true` while a credential is stored. A layer on which the registry takes no credential, such as one on an `ssh://`, scp-like, or `[redacted]` remote, carries no `repo_credential`.
 
@@ -205,7 +210,7 @@ A `git` layer whose remote is an `http` or `https` URL, and is not listed as `[r
 
 A `--repo` that carries a credential in its URL, as in `https://user:token@host/x.git`, is refused with `registry.invalid_argument` carrying `details.constraint: "url_credential"`. The same refusal applies to a `--repo` with `@` after its host and to one with a scheme that does not parse as a URL. Percent-encode an `@` that belongs to the path.
 
-[Edge cases](#edge-cases) covers re-registering a private layer and credentials stored by earlier releases.
+[Edge cases](#edge-cases) covers re-registering a private layer. [Upgrade notes](../operations/upgrade-notes#credentials-stored-by-an-earlier-release) covers credentials that an earlier release stored.
 
 ---
 
@@ -215,13 +220,18 @@ Each layer refreshes from its source independently. A webhook needs a Git host t
 
 | Mechanism | When to use it |
 |:--|:--|
-| Git webhook | A `git` layer whose host can reach the registry. The registry ingests on each push to the tracked ref. |
+| Git webhook | A `git` layer registered at runtime whose host can reach the registry. The registry ingests on each push to the tracked ref. A layer declared in `registry.yaml` cannot use a webhook. |
 | `podium layer watch <id>` | A polling loop at an interval set with `--interval` (default 1m). Use it for `local` sources and for `git` sources with no webhook, such as on a developer machine without a public ingress. |
 | `podium layer reingest <id>` | A manual or scheduled pull. Use it for offline mirrors, internal Git that cannot reach the registry, and any host without a public ingress. |
 
 Each registered layer reports `last_ingested_at` in `podium layer list` once it has completed an ingest, so a monitor can detect a stale layer.
 
 ### Webhooks
+
+A webhook works only for a `git` layer registered at runtime with `podium layer register`, because the registration response is what issues the secret.
+
+> [!IMPORTANT]
+> A layer declared in `registry.yaml` is re-seeded at every start without a webhook secret, so every delivery to it fails verification. A secret issued for it with `--rotate-webhook-secret` lasts only until the next start. Keep a declared `git` layer current with [`podium layer watch`](#polling-with-podium-layer-watch) or a scheduled [`podium layer reingest`](#manual-reingest), or remove its declaration and register it at runtime when it needs a webhook.
 
 Configure the webhook on the source repository with the URL and secret that `podium layer register` returned:
 
@@ -251,9 +261,6 @@ A delivery whose signature does not verify is answered `401 ingest.webhook_inval
 
 `podium layer update --id <id> --rotate-webhook-secret` issues a new secret and prints it. Register the new value at the Git host in place of the old one. Re-registering a layer's ID also issues a new secret.
 
-> [!NOTE]
-> A layer declared in `registry.yaml` is re-seeded at every start without a webhook secret, and a delivery to it fails verification. A secret issued with `--rotate-webhook-secret` lasts until the next start. Keep a declared `git` layer current with `podium layer watch` or a scheduled `podium layer reingest`, or register the layer at runtime when it needs a webhook.
-
 Registering a `git` source without configuring the webhook leaves the layer at its initial commit until the first manual reingest.
 
 ### Polling with podium layer watch
@@ -269,7 +276,7 @@ Registering a `git` source without configuring the webhook leaves the layer at i
 
 `podium layer reingest <id>` forces a fresh snapshot of the layer's source, whatever its trigger model. A tenant admin may reingest any layer, and the owner of a user-defined layer may reingest that layer. Run it by hand after editing a `local` source, or on a schedule for a `git` host that cannot reach the registry.
 
-During a freeze window, ingest is blocked unless the command passes `--break-glass` with `--justification` and two `--approver` identities. The command exits 1 when the cycle dropped at least one artifact. The [CLI reference](../../reference/cli#podium-layer-reingest) describes its output and exit status.
+During a [freeze window](../progressive-adoption#month-6-freeze-windows-for-production-impacting-changes), ingest is blocked unless the command passes `--break-glass` with `--justification` and two `--approver` identities. The command exits 1 when the cycle dropped at least one artifact. The [CLI reference](../../reference/cli#podium-layer-reingest) describes its output and exit status.
 
 ---
 
@@ -444,7 +451,7 @@ A re-registration that changes the class, changes a user-defined layer's owner, 
 
 `podium layer list` reports an `ssh://` remote without its login name. A re-registration with that listed value stores the remote without the login name, and the registry then connects as the operating-system user of the registry process. A remote that expects the login name `git` then fails the next ingest. Re-register an `ssh://` layer with its full `--repo`, login name included.
 
-Release 0.6.0 refused a re-registration with the listed value with `details.constraint: "redacted_repo"`. An scp-like remote such as `git@git.acme.com:acme/x.git` is listed as registered, login name included.
+An scp-like remote such as `git@git.acme.com:acme/x.git` is listed as registered, login name included.
 
 ### Layers listed as [redacted]
 

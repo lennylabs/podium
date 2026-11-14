@@ -6,9 +6,9 @@ description: Deploy replicated Podium registries on Kubernetes behind a load bal
 
 # Clustered
 
-The clustered deployment mode runs the standard stack: Podium registry replicas behind a load balancer, backed by Postgres, object storage, and an OIDC identity provider. It fits organizations with 20 or more users, multi-tenant requirements, governed environments, or compliance constraints. This page covers the reference topology, what the mode adds over [single node](single-node), the setup procedure with the Helm chart, and the chart upgrade from v0.4.0.
+The clustered deployment mode runs the standard stack: Podium registry replicas behind a load balancer, backed by Postgres, object storage, and an OIDC identity provider. It fits organizations with 20 or more users, multi-tenant requirements, governed environments, or compliance constraints. This page covers the reference topology, what the mode adds over [single node](single-node), and the setup procedure with the Helm chart.
 
-For day-two operations covering capacity, backup, and upgrades, see [Operator guide](../operations/troubleshooting). For audit destinations, metrics, tracing, and alerts, see [Audit and observability](../operations/observability). For a staged on-ramp from a permissive deployment to enforced governance, see [Progressive adoption](../progressive-adoption).
+[Helm chart reference](helm-chart) documents the chart's values. To try the stack on one machine first, see [Docker Compose evaluation](docker-compose). To move an existing single-node deployment here, see [Moving between modes](migrating). For a staged on-ramp from a permissive deployment to enforced governance, see [Progressive adoption](../progressive-adoption).
 
 ---
 
@@ -23,15 +23,19 @@ For day-two operations covering capacity, backup, and upgrades, see [Operator gu
 - **Audit destinations.** Each replica writes its audit records to the destinations that `PODIUM_AUDIT_LOG_PATH` lists, and the Helm chart sets `stdout` by default. [Audit across replicas](#audit-across-replicas) describes the options.
 - **Helm chart** at `deploy/helm/podium` in the repository, alongside the failure-scenario runbook at `deploy/runbook.md`.
 
-[Server-side integrations](../services/) lists each backing service with what ships by default and what can replace it.
+[Backing services](../services/) lists each backing service with what ships by default and what can replace it.
 
 ---
 
 ## What clustered adds over single node
 
-| Capability | What it provides |
+A clustered deployment runs several registry replicas against one Postgres store and one object store, so the registry stays available when a replica fails. On Postgres, each org has its own schema, and cross-org tables use row-level security. A single node runs one process, and its SQLite store scopes each row by its tenant without schema-per-org isolation.
+
+The governance features below run on a clustered deployment. Each of them also runs on a single-node deployment once it is configured for it.
+
+| Feature | What it provides |
 |:--|:--|
-| [Multi-tenancy and quotas](#multi-tenancy-and-quotas) | Per-tenant layer lists, admin grants, audit streams, and quotas, with one Postgres schema per org. |
+| [Multi-tenancy and quotas](#multi-tenancy-and-quotas) | Per-tenant layer lists, admin grants, audit streams, and quotas. |
 | [Visibility against a verified identity](#visibility-against-a-verified-identity) | Layer visibility evaluated against a verified caller on every call. |
 | [Audit across replicas](#audit-across-replicas) | A hash-chained audit stream from every replica, delivered to the destinations each replica lists. |
 | [Freeze windows](#freeze-windows) | Ingest rejected during declared critical periods, with a two-approver override. |
@@ -39,52 +43,44 @@ For day-two operations covering capacity, backup, and upgrades, see [Operator gu
 | [SCIM 2.0](#scim-20) | Group membership pushed from the IdP for layer visibility to reference. |
 | [GDPR erasure](#gdpr-erasure) | One command that unregisters a user's layers and redacts the user's identity in the audit records. |
 
-Several of these capabilities also run on a single-node deployment once it is configured for them. Each subsection says which.
-
 ### Multi-tenancy and quotas
 
-The tenant boundary is the org. Each tenant has its own layer list, admin grants, audit stream, and quotas.
-
-Multi-tenant mode runs on any registry server started with `PODIUM_MULTI_TENANT=true` and an identity provider the registry verifies. The registry routes each request to the tenant its organization names. On the clustered Postgres backend, each org has its own schema and cross-org tables use row-level security. A single-node SQLite store scopes each row by its tenant.
+The tenant boundary is the org. Each tenant has its own layer list, admin grants, audit stream, and quotas. A registry started with `PODIUM_MULTI_TENANT=true` and an identity provider the registry verifies routes each request to the tenant its organization names. Without `PODIUM_MULTI_TENANT`, the registry serves one tenant, the `default` org. [Tenants and admins](../identity/tenants) covers both modes and provisioning.
 
 Quotas are per-tenant limits on storage, search QPS, materialization rate, and audit volume. Search QPS, materialization rate, and audit volume are charged to the tenant each request resolves to. Requests that resolve to no tenant share one set of budgets at the deployment defaults.
 
 ### Visibility against a verified identity
 
-A clustered deployment sets the registry's own identity provider to `oidc-jwt` or `trusted-headers`. The registry then evaluates `public`, `organization`, OIDC `groups`, and `users` against a verified caller on every call. A single-node deployment runs the same evaluator once it configures one of those providers.
+A clustered deployment sets the registry's own identity provider to `oidc-jwt` or `trusted-headers`. The registry then evaluates `public`, `organization`, OIDC `groups`, and `users` against a verified caller on every call.
 
-Authoring rights stay in the Git provider's branch protection. That scope covers writing content into a source the registry already reads. Declaring a layer that makes the registry read a given filesystem path is authorized to a tenant admin, because the registry process reads that path with its own rights rather than with the registrant's. See [Access control](../content/access-control) and [Who may register a local-source layer](../content/layer-sources#who-may-register-a-local-source-layer).
+Authoring rights stay in the Git provider's branch protection. That scope covers writing content into a source the registry already reads. Declaring a layer that makes the registry read a given filesystem path is authorized to a tenant admin, because the registry process reads that path with its own rights rather than with the registrant's. See [Access control](../content/access-control) and [Connecting layer sources](../content/layer-sources).
 
 ### Audit across replicas
 
-Every read, ingest, and admin action carries the same hash-chain integrity a single-node deployment writes. Each replica chains its own records and delivers them to the destinations its list names. A receiver that collects every replica's stream therefore holds one chain per replica process.
+Each replica chains its own audit records and delivers them to the destinations its list names, so a receiver that collects every replica's stream holds one chain per replica process.
 
-The chart sets `config.auditLogPath`, which renders `PODIUM_AUDIT_LOG_PATH`, to `stdout` by default. Each pod then writes its audit records to the container log, and the cluster's log pipeline holds them under the platform's retention and outside the reach of erasure. A file path on a writable volume, an `http(s)` URL, or an `otlp+http(s)` URL replaces the default or joins it in a comma-separated list. [Audit destinations](../operations/observability#audit-destinations) covers the setup of each destination, and [Audit events](../../reference/audit-events) describes each destination and the delivery rules.
+The chart sets `config.auditLogPath`, which renders `PODIUM_AUDIT_LOG_PATH`, to `stdout` by default. Each pod then writes its audit records to the container log, and the cluster's log pipeline holds them under the platform's retention and outside the reach of erasure. A file path on a writable volume, an `http(s)` URL, or an `otlp+http(s)` URL replaces the default or joins it in a comma-separated list. [Audit destinations](../operations/observability#audit-destinations) covers each destination, including why a shipper should read a stdout, HTTP, or OTLP destination rather than tail the file.
 
 Chain verification depends on whether the list includes a file destination:
 
 - With the chart's `stdout` default, or any list without a file destination, the registry runs no local chain-head anchoring and no scheduled verification. The receiving system applies the `prev_hash` check to the shipped stream, as [Receiver checks](../../reference/audit-events#receiver-checks) describes.
-- Local chain-head anchoring (`PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS`) runs only on a replica whose list includes a file destination, because the anchor and verify passes walk the file. It signs the chain head with the replica's anchor key and submits nothing to a public transparency log.
-
-Retention and erasure rewrite the file destination, so ship the stream through a stdout, HTTP, or OTLP destination listed beside the file rather than by tailing the file. A tool that tails the file re-ships or skips records when a retention or erasure rewrite renames a new file over the old one. The records it already shipped keep their unredacted identities, because erasure rewrites only the file.
+- Local chain-head anchoring (`PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS`) runs only on a replica whose list includes a file destination, because the anchor and verify passes walk the file.
 
 Each registry audit record carries a `tenant` attribute naming the org whose audit stream it belongs to, and a SIEM separates the per-tenant streams by filtering on it. The following records carry no tenant: records that describe the registry as a whole, operator `tenant.managed` records, records of requests that resolve to no provisioned tenant, and records written before the attribute existed.
 
 ### Freeze windows
 
-A `freeze_windows:` list under `registry:` in `registry.yaml` rejects ingest with `ingest.frozen` during critical periods, such as year-end close and release cuts. A single-node deployment reads the same list.
+A `freeze_windows:` list under `registry:` in `registry.yaml` rejects ingest with `ingest.frozen` during critical periods, such as year-end close and release cuts. The list has no environment variable, so the registry reads it only from a `registry.yaml` file, and the Helm chart has no value that mounts one.
 
 `podium layer reingest --break-glass --justification <text> --approver <approver-id> --approver <approver-id> <layer-id>` overrides an active window. The override needs a justification and two distinct approvers, each named by its own `--approver` flag. The caller who runs the command does not count as an approver.
 
 ### Signing
 
-The registry signs every artifact at ingest with its registry-managed Ed25519 key by default. In steady state every replica signs under the one key the chart mounts from one Secret, as [Deploy the registry](#2-deploy-the-registry) shows. During a rotation, every replica trusts the new key before any replica signs under it, as [Rotating the signing key across replicas](../operations/signing-keys#rotating-the-signing-key-across-replicas) states. No registry signing mode produces a Sigstore-keyless envelope.
-
-Each `podium-mcp` consumer verifies what it loads under `PODIUM_VERIFY_SIGNATURES`, whose values are `always`, the default, and `never`.
+The registry signs every artifact at ingest with its registry-managed Ed25519 key by default, and every replica signs under the one key the chart mounts from one Secret, as [Deploy the registry](#2-deploy-the-registry) shows. [Signing keys](../operations/signing-keys) covers rotation across replicas and recovery.
 
 ### SCIM 2.0
 
-An OIDC IdP that supports SCIM pushes group membership to the registry, and layer visibility references group claims directly. A single-node deployment mounts the same receiver when `PODIUM_SCIM_TOKENS` lists a bearer token.
+An IdP that supports SCIM pushes group membership to the registry for layer visibility to reference. [Groups and SCIM](../identity/groups) covers the receiver and its configuration.
 
 ### GDPR erasure
 
@@ -101,88 +97,50 @@ On a registry started with `PODIUM_MULTI_TENANT=true`, the erase acts in the ten
 
 ---
 
-## Per-tenant layer model
-
-Each tenant has its own layer list. On a multi-tenant registry, the layer endpoints act in the tenant the caller's organization selects, and a tenant's admin manages that tenant's layer list. Layers are an explicit ordered list configured per tenant, with no fixed `org / team / user` hierarchy. [Layered composition](../content/layers) covers the composition rules that apply in every deployment mode, and [Connecting layer sources](../content/layer-sources) covers each source type.
-
-```yaml
-# Tenant layer config, the `layers:` list alone. This is not a registry.yaml
-# document; a registry.yaml nests every server-side key under `registry:`.
-layers:
-  - id: org-defaults
-    source:
-      git:
-        repo: git@github.com:acme/podium-org-defaults.git
-        ref: main
-        root: artifacts/
-    visibility:
-      organization: true
-
-  - id: team-finance
-    source:
-      git:
-        repo: git@github.com:acme/podium-finance.git
-        ref: main
-    visibility:
-      groups: [acme-finance, acme-finance-leads]
-
-  - id: platform-shared
-    source:
-      git:
-        repo: git@github.com:acme/podium-platform.git
-        ref: main
-    visibility:
-      groups: [acme-engineering]
-      users: [security-lead@acme.com]
-
-  - id: public-marketing
-    source:
-      git:
-        repo: git@github.com:acme/podium-public.git
-        ref: main
-    visibility:
-      public: true
-```
-
-User-defined layers, which individual users register at runtime, sit above admin-defined layers in precedence. The workspace local overlay sits above those. The default cap is 3 user-defined layers per identity, configurable per tenant. `PODIUM_MAX_USER_LAYERS` sets the cap for a tenant whose own value is zero.
-
----
-
 ## Setup
 
-The procedure below deploys the registry on Kubernetes with the Helm chart. To try the standard stack on one machine first, see [Evaluating with Docker Compose](docker-compose#evaluating-with-docker-compose).
+The procedure below deploys the registry on Kubernetes with the Helm chart.
 
 ### Before you start
 
 - A Kubernetes cluster, with `kubectl` and `helm` configured against it.
 - A checkout of the Podium repository, which holds the chart at `deploy/helm/podium`.
-- The `podium` CLI, which generates the signing key and administers tenants.
+- The `podium` CLI, which generates the signing key and administers the registry.
 
 > [!IMPORTANT]
 > A store that a v0.4.0 registry wrote needs the stored-row migration before any pod of this release serves it. Follow [Upgrading the chart from v0.4.0](../operations/upgrade-notes#upgrading-the-chart-from-v040) instead of step 2 for such a store.
 
-### 1. Provision dependencies
+### 1. Provision dependencies and the IdP
 
-- Postgres 14+ with the pgvector extension, or the vector backend chosen instead.
+Provision the backing services:
+
+- Postgres with the pgvector extension, or the vector backend chosen instead.
 - An object storage bucket on S3, GCS, MinIO, or R2.
 - An OIDC IdP with device-code flow support.
 
+Register the registry with the IdP by following the cookbook for the provider: [Okta](../identity/oidc/okta), [Entra ID](../identity/oidc/entra-id), [Google Workspace](../identity/oidc/google-workspace), [Auth0](../identity/oidc/auth0), or [Keycloak](../identity/oidc/keycloak). Each cookbook covers client registration, scopes and audience, group claim mapping, and optional SCIM push, and it produces the issuer and audience that step 2 puts in the secret.
+
+The cookbooks write the registry's settings as `registry.yaml` keys. The chart configures the registry through environment variables instead, so put each setting in the secret under its variable: `identity_provider.issuer` is `PODIUM_OAUTH_ISSUER`, and `identity_provider.audience` is `PODIUM_OAUTH_AUDIENCE`. [Configuration](../../reference/configuration) lists the variable for each key. An environment variable takes precedence over the same key in a `registry.yaml`.
+
 ### 2. Deploy the registry
 
-The chart's templates render the backend selectors from the `config.*.type` values. They read every credential and per-backend setting from the Kubernetes secret that `existingSecret` names.
+**Choose the tenancy mode.** A registry started without `PODIUM_MULTI_TENANT` is single-tenant: it serves the `default` org and resolves every authenticated caller to it. A multi-tenant registry routes each request to the tenant its organization names, and an instance operator provisions each tenant at runtime. [Tenants and admins](../identity/tenants) compares the modes. The choice sets which admin variables the install carries:
 
-The registry signs at ingest by default, and every replica signs under a key that every other replica's verification key set contains. In steady state every replica signs under the one key the chart mounts from one Secret. During a rotation, every replica trusts the new key before any replica signs under it (see [Rotating the signing key across replicas](../operations/signing-keys#rotating-the-signing-key-across-replicas)). The chart therefore mounts an operator-supplied signing key from a Secret rather than letting each pod generate its own.
+| Mode | Variables |
+|:--|:--|
+| Single-tenant | `PODIUM_BOOTSTRAP_ADMINS`, the identities granted the admin role in the `default` tenant at each start. Set it with `--set config.bootstrapAdmins=alice@acme.com` or in the secret. |
+| Multi-tenant | `PODIUM_MULTI_TENANT=true`, and `PODIUM_OPERATOR_ADMINS`, the identities granted the instance-operator role at each start. The chart has no value for either, so put both in the secret. [Multi-tenant startup refusals](helm-chart#multi-tenant-startup-refusals) lists the configurations a multi-tenant registry refuses. |
 
-**Generate the signing key.** Write the key file in a scratch directory:
+Each identity is the subject the IdP's tokens carry, the `sub` claim unless `PODIUM_OAUTH_SUBJECT_CLAIM` names another claim.
+
+**Generate the signing key.** The chart mounts one operator-supplied signing key from a Secret, so every replica signs under the same key. Write the key file in a scratch directory:
 
 ```bash
 KEY_DIR="$(mktemp -d)"
 podium admin signing-key generate --key-file "$KEY_DIR/registry-signing.key"
 ```
 
-`podium admin signing-key generate` writes only the file `--key-file` names. It reads no environment variable and no default path, opens no store, and refuses to replace an existing file. Its first line is the registry's verification key set, which is one key for a new file, and a `key_id=<hex> role=signing` line follows it. The key file, `$KEY_DIR/registry-signing.key`, is written with mode `0600` and carries a `private:` line and a `public:` line.
-
-Copy the key file into the deployment's backup. Once the key is lost, the registry refuses every row the key signed unless a `verify:` line lists its public half. Delete `$KEY_DIR` after the Secret below is created.
+`podium admin signing-key generate` writes only the file `--key-file` names, with mode `0600`, and refuses to replace an existing file. Its first line is the registry's verification key set. Copy the key file into the deployment's backup, and delete `$KEY_DIR` after the Secret below is created. [Signing keys](../operations/signing-keys) covers why the key is shared, rotation across replicas, and recovery from a lost key.
 
 **Extract the public key.** Every consumer of the deployment verifies under the public half:
 
@@ -190,7 +148,7 @@ Copy the key file into the deployment's backup. Once the key is lost, the regist
 awk '/^public:/{print $2}' "$KEY_DIR/registry-signing.key"
 ```
 
-The output is the base64 text after the `public:` prefix, without the prefix. It is the form `PODIUM_SIGNATURE_VERIFY_KEY` requires, and the same key as the first line `generate` printed. Every consumer sets it in `PODIUM_SIGNATURE_VERIFY_KEY` (see [Configure your harness](../../consuming/configure-your-harness)).
+The output is the base64 text after the `public:` prefix, which is the form `PODIUM_SIGNATURE_VERIFY_KEY` requires, and the same key as the first line `generate` printed. Every consumer sets it in `PODIUM_SIGNATURE_VERIFY_KEY` (see [Configure your harness](../../consuming/configure-your-harness)).
 
 **Create the Secrets and install the chart:**
 
@@ -216,50 +174,88 @@ helm install podium ./deploy/helm/podium \
   --set signing.secretName=podium-signing-key
 ```
 
-The chart runs `ghcr.io/lennylabs/podium-server` at the chart's `appVersion`, which is the release the checkout is at. Set `image.tag` to run another published release, or `image.repository` and `image.tag` to run an image from a private registry.
+The chart renders the backend selectors from the `config.*.type` values and reads every credential and per-backend setting from the secret that `existingSecret` names, which reaches the pod through `envFrom`. Add the following entries to the secret as further `--from-literal` arguments where they apply:
 
-Among the chart's other defaults, `config.identityProvider.type` is `oidc-jwt`, which the registry verifies at request time. Supply its issuer and audience through the secret named in `existingSecret`, which reaches the pod via `envFrom`. Hybrid search is off by default: `config.vectorBackend.type` and `config.embeddingProvider.type` are both `none`, so the registry starts without an embedding-provider credential. Set both and supply the key in the same secret to turn it on.
+| Variable | When to set it |
+|:--|:--|
+| `PODIUM_PUBLIC_URL` | Always. It is the registry's external URL from step 3, such as `https://podium.acme.com`. |
+| `PODIUM_S3_ACCESS_KEY_ID` and `PODIUM_S3_SECRET_ACCESS_KEY` | When the pods have no cloud credentials. With both unset, the registry reads the AWS credential chain: the environment, the shared credentials file, then the instance role. |
+| `PODIUM_MULTI_TENANT` and `PODIUM_OPERATOR_ADMINS` | On a multi-tenant registry. |
+| `PODIUM_BOOTSTRAP_ADMINS` | On a single-tenant registry, unless `config.bootstrapAdmins` carries the value. |
 
-[Helm chart reference](helm-chart) covers the signing values, which values reach the pod from `--set` and which from the secret, and the audit destination values.
+Hybrid search is off by default, because `config.vectorBackend.type` and `config.embeddingProvider.type` both default to `none`. The command above selects `pgvector`. To turn hybrid search on, also set `config.embeddingProvider.type`, for example to `openai`, which reads the `OPENAI_API_KEY` the secret carries.
 
-Alternatively, run the binary directly with a `registry.yaml` config file (see [CLI reference](../../reference/cli) for the environment variables a registry.yaml maps to).
+The chart runs `ghcr.io/lennylabs/podium-server` at the chart's `appVersion`. [Helm chart reference](helm-chart) covers the image values, the signing values, which values reach the pod from `--set` and which from the secret, and the audit destination values.
 
-### 3. Configure the IdP
+### 3. Expose the registry
 
-See the [OIDC cookbooks](../identity/oidc/) for per-IdP setup steps:
+The chart's Service is `ClusterIP`, so the registry is reachable only inside the cluster, and the registry listens on plain HTTP. Expose it through an Ingress that terminates TLS. Write the Ingress values to a file:
 
-- [Okta](../identity/oidc/okta)
-- [Entra ID](../identity/oidc/entra-id)
-- [Google Workspace](../identity/oidc/google-workspace)
-- [Auth0](../identity/oidc/auth0)
-- [Keycloak](../identity/oidc/keycloak)
+```yaml
+# podium-ingress.yaml
+ingress:
+  enabled: true
+  className: nginx
+  host: podium.acme.com
+  tls:
+    - hosts: [podium.acme.com]
+      secretName: podium-tls
+```
 
-Each cookbook covers client registration, scopes and audience, group claim mapping, and optional SCIM push.
+`podium-tls` is a `kubernetes.io/tls` Secret that holds the certificate for the host, created with `kubectl create secret tls` or issued by cert-manager through `ingress.annotations`. Apply the values to the release:
 
-### 4. Create the first tenant and admin
+```bash
+helm upgrade podium ./deploy/helm/podium --reuse-values -f podium-ingress.yaml
+```
 
-Run the registry in multi-tenant mode with `PODIUM_MULTI_TENANT=true`, and seed the first instance operator with `PODIUM_OPERATOR_ADMINS` (comma-separated identities). The operator role authorizes tenant management. It is distinct from the per-tenant `admin` role and from `PODIUM_BOOTSTRAP_ADMINS`.
+Point DNS for the host at the ingress controller, and confirm that `PODIUM_PUBLIC_URL` in the secret is the `https://` URL. [Exposing the registry](helm-chart#exposing-the-registry) describes the Ingress values and the `LoadBalancer` alternative.
 
-A registry started with `PODIUM_MULTI_TENANT=true` needs an identity provider it verifies. [Multi-tenant startup refusals](helm-chart#multi-tenant-startup-refusals) lists the configurations it refuses.
+### 4. Grant the first admin
 
-With the registry running, the operator provisions a tenant at runtime and grants the first per-tenant admin:
+The `podium admin` commands call the registry's admin API with the caller's token, so the caller runs `podium login` against the registry first. `podium login` completes the device-code flow against the IdP. The registry does not publish the IdP's endpoints, so set `PODIUM_OAUTH_CLIENT_ID`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT`, and `PODIUM_OAUTH_TOKEN_URL` to the values the cookbook gives, then run `podium login --registry https://podium.acme.com`. The cookbook for each provider shows the full command.
+
+On a single-tenant registry, every identity in `PODIUM_BOOTSTRAP_ADMINS` holds the admin role once the registry starts. An admin grants the role to further identities:
+
+```bash
+podium admin grant --registry https://podium.acme.com bob@acme.com
+```
+
+On a multi-tenant registry, an identity in `PODIUM_OPERATOR_ADMINS` provisions each tenant at runtime:
 
 ```bash
 podium admin tenant create acme --registry https://podium.acme.com
-podium admin grant --registry https://podium.acme.com alice@acme.com
 ```
 
-`podium admin tenant create` derives the org ID from the name and is idempotent. Use `podium admin tenant list`, `podium admin tenant update <id>`, and `podium admin tenant deactivate <id>` to list, adjust, and deactivate tenants. See the [CLI reference](../../reference/cli#podium-admin-tenant) for the full flag set.
+`podium admin tenant create` derives the org ID from the name and is idempotent. [Tenants and admins](../identity/tenants#provisioning-tenants) lists the commands that list, update, and deactivate tenants.
 
-### 5. Configure the tenant's layer list
+The operator role confers no admin rights in a tenant. `podium admin grant` grants the admin role in the tenant the caller's organization selects, and only a caller that already holds the admin role there may run it. `PODIUM_BOOTSTRAP_ADMINS` seeds grants in the `default` tenant only, so neither variable grants the first admin of a tenant created at runtime, and the registry offers no other path that does. [Tenants and admins](../identity/tenants) describes this limit.
 
-Register the org's layer sources and their visibility with `podium layer register`, or with `POST /v1/layers` directly. `podium layer update` patches a registered layer afterwards. [Connecting layer sources](../content/layer-sources#git-repositories) covers registering Git repositories and local paths.
+### 5. Register the tenant's layers
 
-Each request acts in the tenant the caller's organization selects, so the tenant's admin manages that tenant's layer list. [Per-tenant layer model](#per-tenant-layer-model) shows an example list.
+Each tenant has its own ordered list of admin-defined layers, with no fixed `org / team / user` hierarchy. On a multi-tenant registry, the layer endpoints act in the tenant the caller's organization selects, and a tenant's admin manages that tenant's list. Register each layer source with `podium layer register`, or with `POST /v1/layers` directly. Each registration appends the layer above the layers registered before it, so register the lowest-precedence layer first:
+
+```bash
+podium layer register --registry https://podium.acme.com --id org-defaults \
+  --repo git@github.com:acme/podium-org-defaults.git --ref main --root artifacts/ \
+  --organization
+podium layer register --registry https://podium.acme.com --id team-finance \
+  --repo git@github.com:acme/podium-finance.git --ref main \
+  --group acme-finance --group acme-finance-leads
+podium layer register --registry https://podium.acme.com --id platform-shared \
+  --repo git@github.com:acme/podium-platform.git --ref main \
+  --group acme-engineering --user security-lead@acme.com
+podium layer register --registry https://podium.acme.com --id public-marketing \
+  --repo git@github.com:acme/podium-public.git --ref main \
+  --public
+```
+
+`podium layer update` patches a registered layer afterwards, and `podium layer reorder` changes the order. [Connecting layer sources](../content/layer-sources) covers each source type and private repositories, and [Layered composition](../content/layers) covers the composition rules. A `layers:` list in a `registry.yaml` declares layers for the `default` tenant at each start instead, and it needs a configuration file that the chart does not mount.
+
+User-defined layers, which individual users register at runtime, sit above admin-defined layers in precedence. The workspace local overlay sits above those. The default cap is 3 user-defined layers per identity, configurable per tenant. `PODIUM_MAX_USER_LAYERS` sets the cap for a tenant whose own value is zero.
 
 ### 6. Set up Git webhooks
 
-For each `git`-source layer, register the webhook URL the registry returned at layer creation on the source repository. The registry validates the webhook signature and ingests on each merge to the tracked ref. On a multi-tenant registry the webhook URL carries the layer's tenant ID: `/v1/ingest/webhook/<tenant-id>/<layer-id>`.
+For each `git`-source layer, register the webhook URL and secret that `podium layer register` returned on the source repository. The registry validates the webhook signature and ingests on each merge to the tracked ref. On a multi-tenant registry the webhook URL carries the layer's tenant ID: `/v1/ingest/webhook/<tenant-id>/<layer-id>`.
 
 [Keeping layers current](../content/layer-sources#keeping-layers-current) covers webhooks and the other ways to keep a layer current.
 
@@ -271,7 +267,7 @@ Each layer's source repo runs `podium lint` as a required check on PRs. Use the 
 
 - Follow the [authoring loop](#authoring-loop) to publish the first artifacts.
 - Configure audit destinations, metrics, and tracing in [Audit and observability](../operations/observability).
-- Plan capacity, alerting, and backups with the [Operator guide](../operations/troubleshooting).
+- Plan capacity and backups with [Capacity and availability](../operations/capacity) and [Backup and restore](../operations/backup-restore).
 
 ---
 
@@ -282,9 +278,9 @@ The MCP server, SDKs, and `podium sync` use the same identity providers:
 - **`oauth-device-code`** for developer machines. The interactive device-code flow runs on first use, and tokens are cached in the OS keychain and refreshed transparently. The MCP server surfaces the verification URL via MCP elicitation, and the CLI prints it to stderr.
 - **`injected-session-token`** for managed runtimes, such as Bedrock Agents, OpenAI Assistants, and custom orchestrators. The runtime issues a signed JWT per session, and the registry verifies the signature on every call.
 
-The registry process reads its own `PODIUM_IDENTITY_PROVIDER` separately. Set it to `oidc-jwt` to verify the IdP-issued tokens developer machines present, or to `trusted-headers` when a gateway authenticates callers and forwards identity headers. Setting the registry's provider to `oauth-device-code` stops startup with `config.identity_provider_unverified`, because that value names the acquisition flow a consumer completes. See [Gateway-delegated identity](../identity/trusted-headers) and the [OIDC cookbooks](../identity/oidc/).
+The registry process reads its own `PODIUM_IDENTITY_PROVIDER` separately. Set it to `oidc-jwt` to verify the IdP-issued tokens developer machines present, or to `trusted-headers` when a gateway authenticates callers and forwards identity headers. Setting the registry's provider to `oauth-device-code` stops startup with `config.identity_provider_unverified`, because that value names the acquisition flow a consumer completes. See [Gateway (trusted headers)](../identity/trusted-headers) and [OIDC](../identity/oidc/).
 
-Setting the registry's provider to `injected-session-token` also requires `PODIUM_RUNTIME_KEYS_PATH`, which names the JSON file holding the trusted runtime signing keys. Write a record into it with `podium admin runtime register --keys-file`, ship the same file to every replica, and restart the process to pick a new key up. A registry that cannot read or parse the file aborts startup with `config.runtime_keys_unavailable`, as does an `injected-session-token` registry whose key set is empty.
+Setting the registry's provider to `injected-session-token` also requires `PODIUM_RUNTIME_KEYS_PATH`, which names the JSON file holding the trusted runtime signing keys. Write a record into it with `podium admin runtime register --keys-file`, ship the same file to every replica, and restart the process to pick a new key up. On the chart, `runtimeKeys.enabled` and `runtimeKeys.secretName` mount the file from a Secret. A registry that cannot read or parse the file aborts startup with `config.runtime_keys_unavailable`, as does an `injected-session-token` registry whose key set is empty.
 
 For each identity, the registry composes the caller's effective view from every layer that identity is entitled to see, in precedence order. When two layers hold the same artifact ID, ingest rejects the second contribution with `ingest.collision`.
 
@@ -311,13 +307,13 @@ Each consumer is set up as follows:
 
 ## Related pages
 
-- [Server-side integrations](../services/): the backing services and their alternatives.
+- [Helm chart reference](helm-chart): the chart's values and how they reach the pod.
+- [Backing services](../services/): the backing services and their alternatives.
 - [Connecting layer sources](../content/layer-sources): hooking Git repositories and local paths into a registry.
 - [Layered composition](../content/layers): composing the catalog from several sources.
 - [Access control](../content/access-control): declaring and debugging who can see what.
-- [Audit and observability](../operations/observability): audit destinations, metrics, tracing, and notifications.
-- [Operator guide](../operations/troubleshooting): capacity, backup and restore, upgrades, security review, and troubleshooting.
 - [Audit and observability](../operations/observability): audit destinations, metrics, tracing, notifications, and alerts.
+- [Operations](../operations/): signing keys, backup and restore, upgrades, capacity, security review, and troubleshooting.
 - [Progressive adoption](../progressive-adoption): staged on-ramp for governance features.
 - [Extending](../services/extending): SPI plugins, the forward-compatibility constraints, and external-extension patterns.
-- [OIDC cookbooks](../identity/oidc/): per-IdP setup recipes.
+- [OIDC](../identity/oidc/): per-IdP setup recipes.

@@ -1,25 +1,28 @@
 ---
 title: Frontmatter reference
 nav_order: 5
-description: "Every field in Podium artifact frontmatter (ARTIFACT.md and, for skills, SKILL.md): universal fields, caller-interpreted fields, and type-specific fields."
+description: "Every frontmatter field an artifact manifest accepts, with the file that holds it, its value type, its effect, and the lint checks that apply to skills."
 ---
 
 # Frontmatter reference
 
-This page lists every frontmatter field an artifact manifest accepts, which file holds it, and what it does. [Frontmatter schema](frontmatter-reference) is the condensed version of the same schema.
+This page lists every frontmatter field an artifact manifest accepts, the file that holds it, and what it does. Frontmatter is YAML between two `---` lines at the top of a manifest file. `DOMAIN.md` organizes a folder of artifacts rather than describing one, and [Domains](domains#domainmd-schema) lists its fields.
 
-Frontmatter is YAML between two `---` lines at the top of a manifest file. An artifact has one or two manifest files:
+## Manifest files
+
+An artifact has one or two manifest files:
 
 | File | Used by | Contents |
 |:--|:--|:--|
 | `ARTIFACT.md` | Every non-skill type. Optional overlay for a skill. | Podium's canonical schema: universal, caller-interpreted, and type-specific fields. For a non-skill type, the prose body below the frontmatter is what the agent reads at load time. |
 | `SKILL.md` | Skill directories (`type: skill`). | The [agentskills.io](https://agentskills.io/specification) standard's frontmatter: `name` and `description`, plus the optional `license`, `compatibility`, `metadata`, and `allowed-tools`. Its prose body is what the agent reads at load time. |
 
-A directory that holds a `SKILL.md` and no `ARTIFACT.md` is a complete skill. When a skill has an `ARTIFACT.md`, that file's body is empty.
+A directory that holds a `SKILL.md` and no `ARTIFACT.md` is a complete skill. When a skill has an `ARTIFACT.md`, the author writes it by hand, and its body is empty or a single one-line HTML comment.
 
 The fields fall into these groups:
 
 - [Universal fields](#universal-fields) apply to every artifact regardless of type.
+- [SKILL.md-only fields](#skillmd-only-fields) come from the agentskills.io standard and apply to skills only.
 - [Caller-interpreted fields](#caller-interpreted-fields) are stored verbatim and read by the host (the harness adapter, the runtime, and similar consumers) at delivery time.
 - [Type-specific fields](#type-specific-fields) apply to certain types only.
 
@@ -39,7 +42,7 @@ A skill's `SKILL.md` carries the agentskills.io fields, and an optional hand-wri
 | `allowed-tools` | Optional (experimental) | Not used | Not used |
 | `type` | Not used | Yes (`type: skill`); implied when `ARTIFACT.md` is absent | Yes |
 | `version` | As `metadata.version` (string) | Optional; equal to `metadata.version` when that is a `major.minor.patch` value | Yes |
-| `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, `audit_redact`, `lint_suppress` | Not used | Yes | Yes |
+| `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, `audit_redact`, `lint_suppress`, `source` | Not used | Yes | Yes |
 | `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `external_resources`, `target_harnesses` | Not used | Yes | Yes |
 | Type-specific fields (`input`, `output`, `delegates_to`, `rule_*`, `hook_*`, `server_identifier`) | Not used | Yes (when applicable) | Yes (when applicable) |
 
@@ -85,22 +88,29 @@ audit_redact: [bank_account, ssn]  # frontmatter field names to mask in audit lo
 lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence for this artifact
 ```
 
-| Field | Required | Description |
-|:--|:--|:--|
-| `type` | Yes (implied for a skill with no `ARTIFACT.md`) | Artifact type. See [Artifact types](artifact-types). |
-| `name` | Yes | Short identifier. For a skill, it must match the parent directory name (per agentskills.io). The canonical artifact ID is the directory path under the registry root and is separate from this field. |
-| `version` | Yes, except for a skill | Semver. Once `(artifact_id, version)` is ingested, it is bit-for-bit immutable. A skill's version is its `ARTIFACT.md` `version` or its `SKILL.md` `metadata.version`, and the registry assigns one when neither declares a usable value. See [Skill versions](#skill-versions). |
-| `description` | Yes | States when to use the artifact. The harness uses it to decide whether the artifact matches a prompt, and vague descriptions get ignored. At most 1024 characters for a skill (per agentskills.io). |
-| `when_to_use` | Optional | List of explicit situations. Additional retrieval signal. |
-| `tags` | Optional | List of strings. Used for filtering in `search_artifacts`. |
-| `sensitivity` | Optional | `low` (default), `medium`, or `high`. Exposed in search and load responses. A registry in public mode rejects ingest of an artifact at or above its configured floor. A private deployment treats the field as metadata. The Git provider's branch protection enforces any reviewer requirements based on sensitivity. |
-| `license` | Optional | SPDX identifier. |
-| `search_visibility` | Optional | `indexed` (default) or `direct-only`. A `direct-only` artifact does not appear in `search_artifacts` results. A caller that knows its ID still reaches it through `load_artifact`. |
-| `deprecated` | Optional | Boolean. When `true`, `load_artifact` returns a warning, and default search results exclude the artifact. |
-| `replaced_by` | Optional | Suggested upgrade target. Every `load_artifact` of the artifact returns it, and it accompanies the deprecation warning when the artifact is deprecated. |
-| `release_notes` | Optional | Free text. |
-| `audit_redact` | Optional | List of frontmatter field names whose values the registry replaces with `[redacted]` in audit log entries that reference this artifact. |
-| `lint_suppress` | Optional | List of lint rule codes to silence for this artifact. Only advisory (non-error) rules honor the list, and hard-error rules still fire. |
+| Field | Type | Required | Description |
+|:--|:--|:--|:--|
+| `type` | enum | Yes (implied for a skill with no `ARTIFACT.md`) | `skill`, `agent`, `context`, `command`, `rule`, `hook`, `mcp-server`, or an extension type. See [Artifact types](artifact-types). |
+| `name` | string | Yes | Short identifier that follows the [name constraints](#name-constraints). For a skill, it must match the parent directory name. The canonical artifact ID is the directory path under the registry root and is separate from this field. |
+| `version` | semver | Yes, except for a skill | An authored version is `major.minor.patch`, chosen by the author. Once `(artifact_id, version)` is ingested, it is bit-for-bit immutable, so bump the version whenever the content changes. A skill's version comes from `ARTIFACT.md` or `SKILL.md`, or the registry assigns one. See [Skill versions](#skill-versions). |
+| `description` | string | Yes | States what the artifact does and when to use it. The harness uses it to decide whether the artifact matches a prompt, and a vague description gets ignored. At most 1024 characters for a skill. |
+| `when_to_use` | list of strings | No | Explicit situations the artifact applies to. See [`when_to_use` and search](#when_to_use-and-search). |
+| `tags` | list of strings | No | Filter target for `search_artifacts`. |
+| `sensitivity` | enum | No | `low` (default), `medium`, or `high`. Exposed in search and load responses. A registry in public mode rejects ingest of an artifact at or above its configured floor. A private deployment treats the field as metadata. The Git provider's branch protection enforces any reviewer requirements based on sensitivity. |
+| `license` | string | No | SPDX identifier. |
+| `search_visibility` | enum | No | `indexed` (default) or `direct-only`. A `direct-only` artifact does not appear in `search_artifacts` results. A caller that knows its ID still reaches it through `load_artifact`. |
+| `deprecated` | bool | No | When `true`, `load_artifact` returns a deprecation warning, and default search results exclude the artifact. |
+| `replaced_by` | string | No | Canonical ID of the suggested upgrade target. Every `load_artifact` of the artifact returns it, and it accompanies the deprecation warning when the artifact is deprecated. |
+| `release_notes` | string | No | Free text. |
+| `audit_redact` | list of strings | No | Frontmatter field names whose values the registry replaces with `[redacted]` in audit log entries that reference this artifact. |
+| `lint_suppress` | list of strings | No | Lint rule codes to silence for this artifact. Only advisory (non-error) rules honor the list, and hard-error rules still fire. |
+| `source` | string | No | Document-level provenance of the prose body. See [Provenance markers](#provenance-markers). |
+
+### `when_to_use` and search
+
+When the registry has an embedding provider, it computes an embedding for each artifact at ingest from the artifact's `name`, `description`, `when_to_use`, and `tags`. `when_to_use` therefore contributes to the vector half of hybrid search through the embedding computed at ingest.
+
+The SQLite and Postgres metadata stores do not persist `when_to_use`. Lexical (BM25) matching against those stores never sees the field, and `podium admin reembed` recomputes each vector without it. Put the terms a search must match in `description` and `tags`, and use `when_to_use` for concrete situations, such as "After month-end close" rather than "When working on finance stuff."
 
 ### Skill versions
 
@@ -110,42 +120,19 @@ A skill's version comes from the first of these that applies:
 2. A `SKILL.md` `metadata.version` in `major.minor.patch` form. A `metadata.version` in any other form, such as `1.0`, is ignored.
 3. A registry-assigned version, when the skill declares no usable version.
 
-When both are set and `metadata.version` is a `major.minor.patch` value, the two must be equal (`lint.skill_artifact_field_mismatch`).
+When both files set a version and `metadata.version` is a `major.minor.patch` value, the two must be equal (`lint.skill_artifact_field_mismatch`).
 
-A registry-assigned version has the form `0.0.0-auto.<N>`, a semver prerelease of `0.0.0`. Lint reports the `lint.skill_version_assigned` warning for a skill that carries one. The form is reserved to the registry, so an authored version in that form fails lint with `lint.invalid_version`.
+A registry-assigned version has the form `0.0.0-auto.<N>`, a semver prerelease of `0.0.0`. Lint reports the `lint.skill_version_assigned` warning for a skill that carries one, and the diagnostic names any ignored `metadata.version` value. Set `metadata.version` in `SKILL.md` to clear the warning. The form is reserved to the registry, so an authored version in that form fails lint with `lint.invalid_version`.
 
-The registry derives `<N>` at ingest from the rows it stores for the artifact:
-
-| Ingested bytes | Result |
-|:--|:--|
-| Match the layer's most recently ingested non-deleted row of the artifact, other than a row the [no-inheritance rule](../deployment/content/layers#inheritance) retires | The ingest reuses that row's version and is a no-op. |
-| Match no stored or soft-deleted row of the artifact | `<N>` is one more than the highest `<N>` any such row carries, or `0` when none carries one. |
-| Match another stored or soft-deleted row of the artifact under a different version | Rejected with `ingest.invalid_artifact` and `details.constraint: "auto_version_duplicate_content"`. |
-
-The third case rejects a revert to earlier bytes, including a revert across an interval in which the skill declared a version. `latest` keeps serving the newer row. To publish such a skill, set `metadata.version` in `SKILL.md` or change the content.
-
-Pinning behaves as follows. `<id>@0.0.0-auto.<N>` pins an assigned version exactly. A range pin such as `<id>@1.x` never selects one. Assigned versions are candidates for `latest`.
-
-A filesystem source keeps no ingest history and reports `0.0.0-auto.0` for every skill whose version is assigned.
-
-#### Assigned versions after deletes and purges
-
-A soft-deleted row counts toward these rules, because `podium layer restore` serves it again. The consequences:
-
-- A layer unregistered and registered again under its ID rejects its unchanged version-less skills until the retention purge removes the earlier rows or the author sets `metadata.version`. Within the recovery window, `podium layer restore` serves the earlier rows instead.
-- A purge that removes the row holding the highest `<N>` lets a later ingest assign that `<N>` again.
-- A purge of every row carrying rejected bytes lets a later ingest accept them.
-- An MCP server whose content cache held the purged row for those bytes keeps reporting the purged version for them until the cache drops the record.
-
-#### Removing ARTIFACT.md from an ingested skill
+`<id>@0.0.0-auto.<N>` pins an assigned version exactly. A range pin such as `<id>@1.x` never selects one. Assigned versions are candidates for `latest`. [Registry-assigned versions](#registry-assigned-versions) describes how the registry numbers them.
 
 Removing `ARTIFACT.md` from an ingested skill changes its content hash, so a reingest at an unchanged `metadata.version` is rejected with `ingest.immutable_violation`. Bump `metadata.version`, or remove it to let the registry assign a version.
 
 ---
 
-## SKILL.md-only fields (skills)
+## SKILL.md-only fields
 
-These fields appear only in `SKILL.md` and only for skills. They come from the agentskills.io specification.
+These fields appear only in `SKILL.md` and only for skills. They come from the agentskills.io specification. `name`, `description`, and `license` also live in `SKILL.md` for a skill and are listed under [Universal fields](#universal-fields).
 
 ```markdown
 ---
@@ -162,17 +149,38 @@ allowed-tools:
 ---
 ```
 
-| Field | Description |
+| Field | Type | Description |
+|:--|:--|:--|
+| `compatibility` | string | Free-form environment notes, at most 500 characters. SKILL.md-aware tools read it to show preconditions to a reader. When it is omitted, every harness adapter that writes a skill's `SKILL.md` derives a compatibility string from `runtime_requirements` and `sandbox_profile` and adds it to the materialized `SKILL.md`. The `none` adapter copies `SKILL.md` unchanged and leaves the field absent. Published marketplace output carries the same line. |
+| `metadata` | map (string to string) | Open-ended map for client-specific properties that the agentskills.io specification does not define. `metadata.version` carries the skill's version (see [Skill versions](#skill-versions)). |
+| `allowed-tools` | list of strings | Experimental. Tools the skill is pre-approved to call. Podium's parser rejects a bare string, so write one list entry per tool. Adapter coverage varies by harness. |
+
+The body is the Markdown after the frontmatter. The agentskills.io specification recommends at most 5K tokens and 500 lines, with longer reference content factored into `references/`. [Manifest size lint](bundled-resources#manifest-size-lint) gives the thresholds lint enforces.
+
+### Skill lint checks
+
+`SKILL.md` must exist for `type: skill`. `ARTIFACT.md` is optional, and the `ARTIFACT.md` checks below apply only when it exists. Lint enforces these checks:
+
+| Check | Severity |
 |:--|:--|
-| `compatibility` | Free-form environment notes (≤ 500 chars). SKILL.md-aware tools read it to show preconditions to a reader. When it is omitted, every harness adapter that writes a skill's `SKILL.md` derives a compatibility string from `runtime_requirements` and `sandbox_profile` and adds it to the materialized `SKILL.md`. The `none` adapter copies `SKILL.md` unchanged. Published marketplace output carries the same line. |
-| `metadata` | Open-ended string-to-string map for client-specific properties that the agentskills.io specification does not define. `metadata.version` carries the skill's version (see [Skill versions](#skill-versions)). |
-| `allowed-tools` | Experimental. YAML list of tools the skill is pre-approved to call. Podium's parser rejects a bare string, so write one list entry per tool. Adapter coverage varies by harness. |
+| `SKILL.md` exists for `type: skill`. | Error |
+| `SKILL.md` `name` matches the parent directory. | Error |
+| `SKILL.md` `name` syntax follows the agentskills.io constraints. | Error |
+| `SKILL.md` `description` is non-empty. The 1024-character cap is checked by the `skills-ref validate` check below and reported as a warning. | Error |
+| `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, etc.). The diagnostic recommends `metadata.version` for a version and the `ARTIFACT.md` overlay for every other field. | Error |
+| `ARTIFACT.md` does not contain `name`, `description`, or `license`. | Warning |
+| When `ARTIFACT.md` does contain `name`, `description`, or `license`, the values match `SKILL.md` exactly. | Error on mismatch |
+| A `version` in `ARTIFACT.md` equals `SKILL.md` `metadata.version` when both are set and `metadata.version` is a `major.minor.patch` value. | Error on mismatch (`lint.skill_artifact_field_mismatch`) |
+| The `ARTIFACT.md` body is empty or a single HTML comment. | Warning |
+| A skill that declares no usable version has its version assigned. | Warning (`lint.skill_version_assigned`) |
+| An authored version in the reserved `0.0.0-auto.<N>` form, in either file, is invalid. | Error (`lint.invalid_version`) |
+| `skills-ref validate` passes against `SKILL.md`. | Warning; a suppression flag is available |
 
 ---
 
 ## Caller-interpreted fields
 
-These fields live in `ARTIFACT.md`. The registry stores them verbatim, and the host (the harness adapter, the runtime, and similar consumers) reads them at delivery time. Podium does not enforce them. The host decides whether and how to honor them.
+These fields live in `ARTIFACT.md`. The registry stores them verbatim, and the host (the harness adapter, the runtime, and similar consumers) reads them at delivery time. The registry does not enforce them, and the host decides whether and how to honor them.
 
 ```yaml
 mcpServers:
@@ -200,15 +208,15 @@ sbom:                              # author-supplied passthrough
   ref: ./sbom.json                 # consumers fetch the SBOM via the bundled-resource path
 ```
 
-| Field | Description |
-|:--|:--|
-| `mcpServers` | List of MCP servers the artifact wants registered when loaded. The host registers them. |
-| `requiresApproval` | List of tools that require user approval before execution. The host enforces it. |
-| `runtime_requirements` | Map of runtime versions and system packages the bundled scripts depend on. A Podium MCP server whose host advertises its runtime capabilities, or opts into enforcement, refuses a `load_artifact` whose requirements those capabilities do not satisfy, with `materialize.runtime_unavailable`. `podium sync` does not check requirements. See [Bundled resources](bundled-resources#execution-model). |
-| `sandbox_profile` | Execution sandbox. Hosts with sandbox capability honor it. Hosts without it refuse to materialize an artifact whose `sandbox_profile != unrestricted` unless explicitly configured to ignore it. |
-| `effort_hint` | Advisory hint about the reasoning budget the artifact ideally consumes. See [Hints](hints). |
-| `model_class_hint` | Advisory hint about the model capability tier. See [Hints](hints). |
-| `sbom` | Author-supplied SBOM hint, informational only. Podium stores the field verbatim and exposes it on `load_artifact`. It does not parse, validate, or scan the referenced SBOM. Consumers that want vulnerability scanning fetch the SBOM through the bundled-resource path and feed their own pipeline. |
+| Field | Type | Description |
+|:--|:--|:--|
+| `mcpServers` | list of objects | MCP servers the artifact wants registered when loaded. The host registers them. |
+| `requiresApproval` | list of objects | Tools that require user approval before execution. The host enforces the list. |
+| `runtime_requirements` | map | Runtime versions and system packages the bundled scripts depend on. [Execution model](bundled-resources#execution-model) describes which consumers check it. |
+| `sandbox_profile` | enum | `unrestricted` (default), `read-only-fs`, `network-isolated`, or `seccomp-strict`. [Sandbox profiles](bundled-resources#sandbox-profiles) describes each profile and what a host without sandbox capability does. |
+| `effort_hint` | enum | `low`, `medium`, `high`, or `max`. Advisory hint about the reasoning budget the artifact ideally consumes. See [Hints](hints). |
+| `model_class_hint` | enum | `nano`, `small`, `medium`, `large`, or `frontier`. Advisory hint about the model capability tier. See [Hints](hints). |
+| `sbom` | object | Author-supplied SBOM hint, informational only. Podium stores the field verbatim and exposes it on `load_artifact`. It does not parse, validate, or scan the referenced SBOM. A consumer that wants vulnerability scanning fetches the SBOM through the bundled-resource path and feeds its own pipeline. |
 
 ---
 
@@ -231,18 +239,7 @@ rule_globs: "src/**/*.ts,src/**/*.tsx"        # required when rule_mode: glob
 rule_description: "Apply when working with database migrations"  # required when rule_mode: auto
 
 # For type: hook — lifecycle observer
-# `hook_event` is one of the canonical event names; the adapter translates to the harness's native event.
-# Session: session_start, session_end.
-# Prompt: user_prompt_submit.
-# Tool (generic): pre_tool_use, post_tool_use, post_tool_use_failure.
-# Tool (subtype): pre_shell_execution, post_shell_execution, pre_mcp_execution, post_mcp_execution,
-#                 pre_read_file, post_file_edit.
-# Permission: permission_request, permission_denied.
-# Subagent: subagent_start, subagent_stop.
-# Turn: stop.
-# Compaction: pre_compact, post_compact.
-# Notification: notification.
-# See [Hooks](hooks) for descriptions and the per-event coverage caveat.
+# hook_event is a canonical event name; the Hooks page lists them.
 hook_event: stop
 hook_action: |                    # shell snippet executed when the event fires
   echo "[hook] $hook_event triggered"
@@ -256,21 +253,22 @@ target_harnesses: [claude-code, opencode]
 
 | Field | Applies to | Description |
 |:--|:--|:--|
-| `input` / `output` | `agent` | JSON Schemas the agent expects (input) and produces (output). |
-| `delegates_to` | `agent` | List of agent IDs this agent can delegate to. Advisory: the target may be any artifact type, and ingest does not enforce it. |
+| `input` | `agent` | Reference to the JSON Schema the agent expects as input, written as `{ $ref: ./schemas/input.json }`. A bare path scalar also parses. |
+| `output` | `agent` | Reference to the JSON Schema the agent produces, in the same form as `input`. |
+| `delegates_to` | `agent` | List of canonical artifact IDs this agent delegates to, usually other agents. The field is advisory: ingest records the dependency edges and checks neither the target's type nor that the target resolves. |
 | `rule_mode` | `rule` | One of `always` (default), `glob`, `auto`, or `explicit`. See [Rule modes](rule-modes). |
 | `rule_globs` | `rule` | Comma-separated glob patterns. Required when `rule_mode: glob`. |
 | `rule_description` | `rule` | Trigger statement for the harness's autoload heuristic. Required when `rule_mode: auto`. |
-| `hook_event` | `hook` | Required. One of the canonical event names listed in the YAML comments above and described in [Hooks](hooks#canonical-events). A missing value, or a value outside the list, is an ingest error. The adapter translates the name to the harness's native event. |
-| `hook_action` | `hook` | Required; a missing value is an ingest error. Shell snippet that runs when the event fires and receives the event payload on stdin. |
-| `server_identifier` | `mcp-server` | Canonical server identifier. Keys the reverse index that links artifacts referencing the server through `mcpServers:`. |
+| `hook_event` | `hook` | Required. One of the canonical event names that [Hooks](hooks#canonical-events) lists. A missing value, or a value outside the list, is an ingest error. The adapter translates the name to the harness's native event. |
+| `hook_action` | `hook` | Required; a missing value is an ingest error. Shell snippet that runs when the event fires and receives the event payload on stdin. [Hooks](hooks#moving-the-action-into-a-bundled-script) describes how the adapter rewrites a reference to a bundled script. |
+| `server_identifier` | `mcp-server` | Canonical server identifier. It keys the reverse index: any artifact whose `mcpServers:` entry resolves to this identifier gets a dependency edge to the registration, whatever the referencing artifact's type. |
 | `target_harnesses` | Any | Opts the artifact out of cross-harness materialization. Set it to a list of harness names, and the artifact materializes only for harnesses on the list. |
 
 ---
 
 ## External resources
 
-An artifact whose bytes are too large to bundle (the per-package soft cap is 10 MB) references pre-uploaded objects in `ARTIFACT.md`:
+An artifact whose bytes are too large to bundle references pre-uploaded objects in `ARTIFACT.md`. Each entry carries the path the file would have in the package, the URL, the SHA-256, the size in bytes, and an optional signature:
 
 ```yaml
 external_resources:
@@ -281,7 +279,7 @@ external_resources:
     signature: "sigstore:..."
 ```
 
-The registry stores the URL, hash, size, and signature, and the bytes do not transit the registry. [Bundled resources](bundled-resources#external-resources) covers when to bundle and when to reference externally.
+The registry stores the URL, hash, size, and signature, and the bytes do not transit the registry. [External resources](bundled-resources#external-resources) covers when to reference a file externally and who fetches it.
 
 ---
 
@@ -315,236 +313,36 @@ Adapters propagate provenance markers to harnesses that recognize trust regions,
 
 ---
 
+## Registry-assigned versions
+
+This section describes how a registry numbers the versions it assigns to skills that declare none, for operators who reason about stored rows, deletes, and restores. [Skill versions](#skill-versions) covers what an author needs.
+
+The registry derives `<N>` in `0.0.0-auto.<N>` at ingest from the rows it stores for the artifact:
+
+| Ingested bytes | Result |
+|:--|:--|
+| Match the layer's most recently ingested non-deleted row of the artifact, other than a row the [no-inheritance rule](../deployment/content/layers#inheritance) retires | The ingest reuses that row's version and is a no-op. |
+| Match no stored or soft-deleted row of the artifact | `<N>` is one more than the highest `<N>` any such row carries, or `0` when none carries one. |
+| Match another stored or soft-deleted row of the artifact under a different version | Rejected with `ingest.invalid_artifact` and `details.constraint: "auto_version_duplicate_content"`. |
+
+The third case rejects a revert to earlier bytes, including a revert across an interval in which the skill declared a version. `latest` keeps serving the newer row. To publish such a skill, set `metadata.version` in `SKILL.md` or change the content.
+
+A filesystem source keeps no ingest history and reports `0.0.0-auto.0` for every skill whose version is assigned.
+
+### Assigned versions after deletes and purges
+
+A soft-deleted row counts toward these rules, because `podium layer restore` serves it again. The rule has these consequences:
+
+- A layer unregistered and registered again under its ID rejects its unchanged version-less skills until the retention purge removes the earlier rows or the author sets `metadata.version`. Within the recovery window, `podium layer restore` serves the earlier rows instead.
+- A purge that removes the row holding the highest `<N>` lets a later ingest assign that `<N>` again.
+- A purge of every row carrying rejected bytes lets a later ingest accept them.
+- An MCP server whose content cache held the purged row for those bytes keeps reporting the purged version for them until the cache drops the record.
+
+---
+
 ## Related pages
 
 - [Artifact types](artifact-types) explains what each `type:` is for.
 - [Domains](domains) covers `DOMAIN.md`, the file that organizes artifacts in a folder hierarchy.
 - [Bundled resources](bundled-resources) covers the layout and size caps for files alongside `ARTIFACT.md` and `SKILL.md`.
-
-## Schema reference
-
-### Manifest files
-
-An artifact directory holds one or two manifest files, depending on its type:
-
-| Artifact | Manifest files |
-|:--|:--|
-| Any type other than `skill` | An `ARTIFACT.md`, which carries every field listed below. |
-| A skill (`type: skill`) | A `SKILL.md` that complies with the [agentskills.io](https://agentskills.io/specification) standard, plus an optional `ARTIFACT.md` overlay that the author writes by hand for the Podium-only fields. |
-
-A directory that holds a `SKILL.md` and no `ARTIFACT.md` is a complete skill. The [SKILL.md](#skillmd-for-type-skill) section below summarizes how a skill's fields are split across the two files.
-
-### ARTIFACT.md
-
-#### Universal fields
-
-The last column states where each field lives for a skill.
-
-| Field | Type | Required | Description | For skills |
-|:--|:--|:--|:--|:--|
-| `type` | enum | yes (implied for a skill with no `ARTIFACT.md`) | `skill`, `agent`, `context`, `command`, `rule`, `hook`, `mcp-server`, or an extension type. | In `ARTIFACT.md` when present; implied otherwise |
-| `name` | string | yes | Short identifier. For skills, it must match the parent directory name (per agentskills.io). | In `SKILL.md` |
-| `version` | semver | yes, except for a skill | An authored version is `major.minor.patch` and chosen by the author. A skill that declares no usable version carries a registry-assigned `0.0.0-auto.<N>`. Once `(artifact_id, version)` is ingested, it is bit-for-bit immutable. | `metadata.version` in `SKILL.md`, or `version` in `ARTIFACT.md`; assigned when neither declares a usable one |
-| `description` | string | yes | "When should I use this?" At most 1024 characters for skills. | In `SKILL.md` |
-| `when_to_use` | list of strings | no | Explicit situations the artifact applies to. | In `ARTIFACT.md` |
-| `tags` | list of strings | no | Filter target for `search_artifacts`. | In `ARTIFACT.md` |
-| `sensitivity` | enum | no | `low` (default), `medium`, or `high`. | In `ARTIFACT.md` |
-| `license` | string | no | SPDX identifier. | In `SKILL.md` |
-| `search_visibility` | enum | no | `indexed` (default) or `direct-only`. | In `ARTIFACT.md` |
-| `deprecated` | bool | no | When `true`, `load_artifact` returns a deprecation warning. | In `ARTIFACT.md` |
-| `replaced_by` | string | no | Suggested upgrade target (canonical artifact ID). | In `ARTIFACT.md` |
-| `release_notes` | string | no | Free text. | In `ARTIFACT.md` |
-| `audit_redact` | list of strings | no | Frontmatter field names whose values the registry replaces with `[redacted]` in audit log entries that reference this artifact. | In `ARTIFACT.md` |
-| `lint_suppress` | list of strings | no | Lint rule codes to silence for this artifact. Only advisory rules honor the list. | In `ARTIFACT.md` |
-| `source` | string | no | Document-level provenance of the prose body. `authored` is the documented value. Any other value marks the body's default trust region as untrusted. Inline `<!-- begin imported ... -->` blocks override it per region. | In `ARTIFACT.md` |
-
-#### Caller-interpreted fields
-
-| Field | Type | Description |
-|:--|:--|:--|
-| `mcpServers` | list of objects | MCP servers the artifact wants registered when loaded. |
-| `requiresApproval` | list of objects | Tools that require user approval before execution. |
-| `runtime_requirements` | map | Runtime versions and system packages that bundled scripts depend on. |
-| `sandbox_profile` | enum | `unrestricted` (default), `read-only-fs`, `network-isolated`, or `seccomp-strict`. |
-| `effort_hint` | enum | `low`, `medium`, `high`, or `max`. Advisory. |
-| `model_class_hint` | enum | `nano`, `small`, `medium`, `large`, or `frontier`. Advisory. |
-| `sbom` | object | Author-supplied SBOM hint (e.g. `{format: cyclonedx-1.5, ref: ./sbom.json}`). Stored verbatim and exposed on `load_artifact`. Podium does not parse, validate, or scan it. Vulnerability scanning is a CI/CD concern. |
-
-#### Type-specific fields
-
-| Field | Applies to | Description |
-|:--|:--|:--|
-| `input` | `agent` | Reference to the agent's input JSON Schema document, written as `{ $ref: ./schemas/input.json }`. A bare path scalar also parses. |
-| `output` | `agent` | Reference to the agent's output JSON Schema document, in the same form as `input`. |
-| `delegates_to` | `agent` | List of artifact IDs this agent delegates to. Advisory. Ingest records the edges and does not constrain the target's type. |
-| `rule_mode` | `rule` | `always` (default), `glob`, `auto`, or `explicit`. |
-| `rule_globs` | `rule` | Required when `rule_mode: glob`. Comma-separated glob patterns. |
-| `rule_description` | `rule` | Required when `rule_mode: auto`. The harness's autoload heuristic reads it. |
-| `hook_event` | `hook` | Canonical lifecycle event name. See [Hook events](#hook-events). |
-| `hook_action` | `hook` | Shell snippet executed when the event fires. |
-| `server_identifier` | `mcp-server` | Canonical server identifier. It feeds the reverse index: any artifact whose `mcpServers:` entry resolves to this identifier gets a dependency edge to the registration, regardless of the referencing artifact's type. |
-
-#### Hook events
-
-`hook_event` takes one of the canonical event names below. The adapter translates the name to the harness's native event, and coverage varies by harness.
-
-| Category | Events |
-|:--|:--|
-| Session | `session_start`, `session_end` |
-| Prompt | `user_prompt_submit` |
-| Generic tool | `pre_tool_use`, `post_tool_use`, `post_tool_use_failure` |
-| Tool subtypes | `pre_shell_execution`, `post_shell_execution`, `pre_mcp_execution`, `post_mcp_execution`, `pre_read_file`, `post_file_edit` |
-| Permission | `permission_request`, `permission_denied` |
-| Subagent | `subagent_start`, `subagent_stop` |
-| Turn | `stop` |
-| Compaction | `pre_compact`, `post_compact` |
-| Notification | `notification` |
-
-#### Cross-cutting fields
-
-| Field | Type | Description |
-|:--|:--|:--|
-| `target_harnesses` | list of strings | Opts the artifact out of cross-harness materialization. Set it to a list of harness names, and the artifact materializes only for harnesses on the list. |
-| `external_resources` | list of objects | External resources too large to bundle, each with a URL, a sha256, a size, and a signature. |
-
-#### External resources object schema
-
-```yaml
-external_resources:
-  - path: ./model.onnx
-    url: s3://company-models/variance/v1/model.onnx
-    sha256: 9f2c...
-    size: 145000000
-    signature: "sigstore:..."
-```
-
-#### Provenance markers (in prose body)
-
-```markdown
-<authored prose>
-
-<!-- begin imported source="https://wiki.example.com/policy/payments" -->
-<imported text>
-<!-- end imported -->
-```
-
-For skills, the prose body lives in `SKILL.md`. For other types, it lives in `ARTIFACT.md`.
-
----
-
-### SKILL.md (for type: skill)
-
-A `SKILL.md` carries the [agentskills.io](https://agentskills.io/specification) standard's frontmatter and the agent-facing prose body. When a skill has an `ARTIFACT.md`, that file's body is empty; a one-line HTML comment pointer is allowed.
-
-#### Top-level fields (per agentskills.io)
-
-| Field | Type | Required | Description |
-|:--|:--|:--|:--|
-| `name` | string | yes | 1–64 characters: lowercase Unicode alphanumerics and hyphens, with no leading, trailing, or consecutive hyphens. Must match the parent directory name. |
-| `description` | string | yes | 1–1024 characters. Describes what the skill does and when to use it. |
-| `license` | string | no | License name or reference to a bundled license file. |
-| `compatibility` | string | no | At most 500 characters. Free-form environment notes. See the note below the table. |
-| `metadata` | map (string → string) | no | Open-ended map for client-specific extension. |
-| `allowed-tools` | list of strings | no | Experimental. Pre-approved tools, one per entry. A scalar fails to parse. |
-
-When `compatibility` is omitted, every harness adapter that writes a skill's `SKILL.md` derives a string from `runtime_requirements` and `sandbox_profile` at materialization time and adds it to the materialized `SKILL.md`. The `none` adapter copies `SKILL.md` unchanged and leaves the field absent. Published marketplace output carries the same line.
-
-#### Skill versions
-
-A skill's version comes from the first of these sources that applies:
-
-1. The `ARTIFACT.md` `version`, when that file declares one.
-2. A `SKILL.md` `metadata.version` in `major.minor.patch` form.
-3. A version the registry assigns.
-
-A `metadata.version` in any other form, such as `1.0`, is ignored. When both files set a version and `metadata.version` is a `major.minor.patch` value, the two must be equal; `lint.skill_artifact_field_mismatch` reports a difference.
-
-#### Body
-
-The body is the Markdown after the frontmatter. The agentskills.io specification recommends at most 5K tokens and 500 lines, with longer reference content factored into `references/`.
-
-#### Lint rules
-
-`SKILL.md` must exist for `type: skill`. `ARTIFACT.md` is optional, and the `ARTIFACT.md` checks below apply only when it exists. Lint enforces these checks:
-
-| Check | Severity |
-|:--|:--|
-| `SKILL.md` exists for `type: skill`. | Error |
-| `SKILL.md` `name` matches the parent directory. | Error |
-| `SKILL.md` `name` syntax follows the agentskills.io constraints. | Error |
-| `SKILL.md` `description` is non-empty. The 1024-character cap is checked by the `skills-ref validate` check below and reported as a warning. | Error |
-| `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, etc.). The diagnostic recommends `metadata.version` for a version and the `ARTIFACT.md` overlay for every other field. | Error |
-| `ARTIFACT.md` does not contain `name`, `description`, or `license`. | Warning |
-| When `ARTIFACT.md` does contain `name`, `description`, or `license`, the values match `SKILL.md` exactly. | Error on mismatch |
-| A `version` in `ARTIFACT.md` equals `SKILL.md` `metadata.version` when both are set and `metadata.version` is a `major.minor.patch` value. | Error on mismatch (`lint.skill_artifact_field_mismatch`) |
-| The `ARTIFACT.md` body is empty or a single HTML comment. | Warning |
-| A skill that declares no usable version has its version assigned. The diagnostic names any ignored `metadata.version` value and the fix. | Warning (`lint.skill_version_assigned`) |
-| An authored version in the reserved `0.0.0-auto.<N>` form, in either file, is invalid. | Error (`lint.invalid_version`) |
-| `skills-ref validate` passes against `SKILL.md`. | Warning; a suppression flag is available |
-
----
-
-### DOMAIN.md
-
-#### Top-level fields
-
-| Field | Type | Description |
-|:--|:--|:--|
-| `unlisted` | bool | When `true`, removes this folder and its subtree from `load_domain` enumeration. Default `false`. |
-| `description` | string | One-line summary used wherever the domain appears as a child or sibling in another `load_domain` response. |
-| `discovery` | object | Per-domain overrides of the discovery rendering rules. See the [`discovery` block](#discovery-block). |
-| `include` | list of glob patterns or artifact IDs | Imports artifacts from elsewhere into this domain. |
-| `exclude` | list of glob patterns | Removes paths. Applied after `include`. |
-
-The prose body below the frontmatter is long-form context. `load_domain` returns it only when this domain is the requested path.
-
-#### `discovery` block
-
-| Field | Type | Description |
-|:--|:--|:--|
-| `max_depth` | int (≥1) | Cap on the depth of the rendered subtree below the requested path. |
-| `fold_below_artifacts` | int (≥0) | A subdomain whose visible artifact count (recursive) is below this threshold collapses into its parent's leaf set. |
-| `fold_passthrough_chains` | bool | Collapse single-child intermediate domains into the deepest non-passthrough ancestor. |
-| `notable_count` | int (≥0) | Cap on the notable list per domain in `load_domain` output. |
-| `target_response_tokens` | int | Soft budget per `load_domain` response. |
-| `featured` | list of canonical artifact IDs | Surfaced first in the notable list. |
-| `deprioritize` | list of glob patterns | Matching children are ranked last and excluded from the notable list unless space permits. |
-| `keywords` | list of strings | Author-curated terms agents should associate with this domain. Per-domain only, with no tenant default. |
-
-Tenant-level defaults for `max_depth`, `fold_below_artifacts`, `fold_passthrough_chains`, `notable_count`, and `target_response_tokens` live in `registry.yaml`. Per-domain overrides apply to the subtree rooted at the `DOMAIN.md`. A tenant-level `discovery.allow_per_domain_overrides: false` disables per-domain overrides registry-wide.
-
-#### Glob syntax
-
-| Syntax | Matches |
-|:--|:--|
-| `*` | One path segment. |
-| `**` | Recursive (any number of segments). |
-| `{a,b,c}` | Brace alternation. |
-
-A bare canonical artifact ID matches that artifact exactly.
-
----
-
-### DOMAIN.md merge across layers
-
-When two layers contribute a `DOMAIN.md` for the same path, the fields merge as follows:
-
-| Field | Merge |
-|:--|:--|
-| `description` and prose body | Last-layer-wins. |
-| `include` | Additive across layers. |
-| `exclude` | Additive across layers; applied after the merged include set. |
-| `unlisted` | Most-restrictive-wins. |
-| `discovery.max_depth`, `discovery.notable_count`, `discovery.target_response_tokens` | Most-restrictive-wins (lowest value). |
-| `discovery.fold_below_artifacts` | Most-restrictive-wins (highest value). |
-| `discovery.fold_passthrough_chains` | Most-restrictive-wins (`true` over `false`). |
-| `discovery.featured`, `discovery.deprioritize`, `discovery.keywords` | Append-unique. |
-
----
-
-### See also
-
-- [Authoring → Frontmatter reference](frontmatter-reference).
-- [Authoring → Artifact types](artifact-types).
-- [Authoring → Domains](domains).
-- agentskills.io standard: [agentskills.io/specification](https://agentskills.io/specification).
+- The agentskills.io standard is at [agentskills.io/specification](https://agentskills.io/specification).

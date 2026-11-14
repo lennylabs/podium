@@ -154,10 +154,10 @@ The artifacts are the same in every mode. The catalog on disk does not change
 when the deployment changes. The same shared Go library parses, composes, and
 materializes it everywhere, so a given target and profile produce
 bit-identical output.
-[Local](https://lennylabs.github.io/podium/deployment/modes/migrating#skills-that-declare-no-version)
+[Moving between modes](https://lennylabs.github.io/podium/deployment/modes/migrating#skills-that-declare-no-version)
 lists the exceptions for skills that declare no version.
-[Deployment](https://lennylabs.github.io/podium/deployment/) covers choosing a
-mode and moving between modes.
+[Deployment modes](https://lennylabs.github.io/podium/deployment/modes/) covers
+choosing a mode.
 
 ---
 
@@ -201,7 +201,7 @@ state. The following details apply to specific rows:
 - **Audit log.** Listing several destinations writes one hash-chained stream
   to each.
 
-See [Server-side integrations](https://lennylabs.github.io/podium/deployment/services/)
+See [Backing services](https://lennylabs.github.io/podium/deployment/services/)
 and [Audit and observability](https://lennylabs.github.io/podium/deployment/operations/observability).
 
 ---
@@ -288,8 +288,10 @@ came from, which is the basename of the registry directory.
 ## Documentation
 
 - **[Documentation site](https://lennylabs.github.io/podium)**: the docs home
-  is [Overview](https://lennylabs.github.io/podium/overview), and the sections
-  are organized by task (author, consume, deploy, and reference).
+  is [Overview](https://lennylabs.github.io/podium/overview). The sections are
+  Getting Started, Authoring, Consuming, Deployment, Reference, and About.
+  Deployment groups its pages into deployment modes, identity, catalog
+  content, operations, and backing services.
 - **Start here**:
   [Why Podium](https://lennylabs.github.io/podium/getting-started/why-podium) for
   the features and the comparisons,
@@ -299,6 +301,11 @@ came from, which is the basename of the registry directory.
   vocabulary, and
   [How it works](https://lennylabs.github.io/podium/getting-started/how-it-works)
   for the architecture.
+- **Reference**:
+  [CLI](https://lennylabs.github.io/podium/reference/cli),
+  [Configuration](https://lennylabs.github.io/podium/reference/configuration),
+  [Error codes](https://lennylabs.github.io/podium/reference/error-codes), and
+  [Glossary](https://lennylabs.github.io/podium/reference/glossary).
 - **Project**: [Contributing](CONTRIBUTING.md),
   [Governance](GOVERNANCE.md), [Security](SECURITY.md), and
   [Implementation status](https://lennylabs.github.io/podium/about/status).
@@ -338,7 +345,9 @@ npm test
 
 The complete Go suite runs in one to two minutes on a recent laptop.
 The full development setup is in
-[`docs/about/contributing.md`](https://lennylabs.github.io/podium/about/contributing).
+[Contributing](https://lennylabs.github.io/podium/about/contributing), and
+[Live vector backend tests](https://lennylabs.github.io/podium/about/live-vector-backends)
+covers the accounts and credentials the `make test-live-external` lane needs.
 
 ## Contributing
 

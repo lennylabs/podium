@@ -155,7 +155,7 @@ The transport and queue settings are process-wide and apply to every HTTP and OT
 | `PODIUM_AUDIT_TLS_CERT_FILE`, `PODIUM_AUDIT_TLS_KEY_FILE` | The PEM client certificate and its private key for mutual TLS. Set them together. |
 | `PODIUM_AUDIT_QUEUE_MAX_BYTES` | The queue bound in bytes. Default `67108864` (64 MiB). |
 
-Secrets come from files only, and a destination URL that carries userinfo refuses startup. The Helm chart sets the file variables from the Secret that `audit.transportSecret` names. A header value and URL userinfo are never logged, and a log line or an error names a destination by its scheme, host, and path. The [CLI reference](cli#environment-variables) rows give each variable's refusals.
+Secrets come from files only, and a destination URL that carries userinfo refuses startup. The Helm chart sets the file variables from the Secret that `audit.transportSecret` names. A header value and URL userinfo are never logged, and a log line or an error names a destination by its scheme, host, and path. The [Configuration](configuration#audit) rows give each variable's refusals.
 
 ### Metrics and drop logging
 

@@ -74,8 +74,6 @@ pages:
     slug: D-oidc
 
   # ----- Waived (runnable content, no independent behavioral e2e) -----------
-  - path: docs/overview.md
-    waiver: Documentation overview; the hello-world init/sync recap duplicates the quickstart and README, which are covered by D-quickstart and D-readme.
   - path: docs/deployment/operations/upgrade-notes.md
     waiver: Release-specific upgrade procedures; the chart upgrade runs on a kind cluster in test/chart/kind_upgrade_test.go (make test-live-kind) rather than in the hermetic e2e suite.
   - path: docs/about/contributing.md

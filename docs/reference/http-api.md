@@ -1628,7 +1628,7 @@ The registry originates the delivery request, so it validates `url` at registrat
 - It does not follow a redirect to such a target.
 - A rejected target returns `registry.invalid_argument` with a message naming the disallowed host.
 
-A deployment whose receiver is legitimately internal, such as an in-cluster relay, sets an allowlist of permitted hosts or CIDRs through the `PODIUM_WEBHOOK_ALLOWED_TARGETS` registry config. The validation consults that allowlist.
+A deployment whose receiver is legitimately internal, such as an in-cluster relay, lists the permitted hosts or CIDRs in the `PODIUM_WEBHOOK_ALLOWED_TARGETS` environment variable of the registry process. The validation consults that allowlist. [Allowing internal receivers](../deployment/operations/outbound-webhooks#allowing-internal-receivers) gives the entry format.
 
 #### Debounce and batch delivery
 
@@ -1664,14 +1664,9 @@ Each element of `events` is the complete single-event body, carrying the same `e
 
 #### Triggering GitHub CI from a receiver (repository_dispatch relay)
 
-A receiver cannot call GitHub's `repository_dispatch` endpoint directly. The registry signs each delivery with the receiver's HMAC secret (the `secret` above), and that signed body differs from the body the GitHub dispatch endpoint accepts. An operator relay bridges the two:
+A receiver cannot call GitHub's `repository_dispatch` endpoint directly. The registry signs each delivery with the receiver's HMAC secret (the `secret` above), and that signed body differs from the body the GitHub dispatch endpoint accepts. A relay that verifies the HMAC and then calls the dispatch endpoint bridges the two. [Triggering CI from a webhook](../deployment/operations/outbound-webhooks#triggering-ci-from-a-webhook-repository_dispatch-relay) gives the relay steps, and [Publishing marketplace repositories](../deployment/content/publishing) gives the worked patterns.
 
-1. Register a receiver filtered to `layer.ingested` whose `url` points at the relay. Registering the receiver requires the admin role on the CRUD endpoints.
-2. The relay verifies the HMAC against the receiver secret.
-3. The relay issues `POST https://api.github.com/repos/<owner>/<repo>/dispatches` with a GitHub token and `{"event_type":"podium-layer-ingested"}`.
-4. The CI workflow listens on `repository_dispatch` and runs `podium sync --config`.
-
-Set the receiver's `debounce` field to coalesce a burst of `layer.ingested` events into one batch delivery and one CI dispatch. With `debounce` unset, the relay fires per event, and the CI system's concurrency control collapses the burst. See [Publishing marketplace repositories](../deployment/content/publishing) for the worked patterns.
+Set the receiver's `debounce` field to coalesce a burst of `layer.ingested` events into one batch delivery and one CI dispatch.
 
 ---
 
@@ -1691,7 +1686,7 @@ A SCIM 2.0 receiver that the configured identity provider pushes Users and Group
 /scim/v2/
 ```
 
-**Availability.** The route is mounted only when the deployment configures a SCIM receiver.
+**Availability.** The route is mounted only when `PODIUM_SCIM_TOKENS` lists a bearer token, as [Configuration](configuration#identity) states. [Groups](../deployment/identity/groups) describes the receiver.
 
 **Notes.**
 
@@ -1772,3 +1767,5 @@ Read responses carry two headers:
 
 - `X-Podium-Read-Only: true`
 - `X-Podium-Read-Only-Lag-Seconds: <n>`: observed replication lag.
+
+[Read-only mode](../deployment/operations/capacity#read-only-mode) describes the fallback, and [Configuration](configuration#read-only-mode) lists the probe settings.

@@ -35,7 +35,7 @@ config:
   # credential. An install does need the signing key Secret named under
   # signing: below, or signing.mode set to none. Turn hybrid search on by setting both of the following
   # and supplying the provider's key in the secret: vectorBackend.type to
-  # pgvector (or pinecone/weaviate/qdrant, whose per-backend env vars from
+  # pgvector (or pinecone, weaviate-cloud, or qdrant-cloud, whose per-backend env vars from
   # §13.12 go in the same secret), and embeddingProvider.type to openai,
   # voyage, cohere, or ollama. A registry that selects an embedding provider
   # without its key exits at startup with

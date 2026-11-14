@@ -114,7 +114,9 @@ export OPENAI_API_KEY=sk-...
 
 ### Clustered with Pinecone
 
-Configure the backend in the registry's config file. The registry reads `~/.podium/registry.yaml` unless `PODIUM_CONFIG_FILE` names another path. The `podium-server` binary has no `--config` option. A clustered deployment that keeps the file at `/etc/podium/registry.yaml` therefore sets `PODIUM_CONFIG_FILE=/etc/podium/registry.yaml` in the registry's environment. `podium serve --config <path>` sets the same variable.
+A clustered deployment configures the backend in the registry's config file, or, on the [Helm chart](#pinecone-on-the-helm-chart), through chart values and the chart's Secret.
+
+The registry reads `~/.podium/registry.yaml` unless `PODIUM_CONFIG_FILE` names another path. The `podium-server` binary has no `--config` option. A hand-rolled clustered deployment that keeps the file at `/etc/podium/registry.yaml` therefore sets `PODIUM_CONFIG_FILE=/etc/podium/registry.yaml` in the registry's environment. `podium serve --config <path>` sets the same variable. Every server key nests under `registry:`, as [Configuration → File layout](../../reference/configuration#file-layout) states.
 
 ```yaml
 registry:
@@ -151,7 +153,24 @@ registry:
 
 Environment variables and CLI flags override file values. Use `${ENV_VAR}` interpolation for secrets.
 
-`PODIUM_SIGN_KEY_PATH` has no config-file key. Set it in the registry's environment to name the deployment's one signing key file, or set `PODIUM_SIGN=none`. The registry refuses to start with signing on, a Postgres store, and no key path. [Clustered](../modes/clustered#2-deploy-the-registry) shows how to generate the key file.
+`PODIUM_SIGN_KEY_PATH` has no config-file key. Set it in the registry's environment to name the deployment's one signing key file, or set `PODIUM_SIGN=none`. The registry refuses to start with signing on, a Postgres store, and no key path. [Clustered → Deploy the registry](../modes/clustered#2-deploy-the-registry) shows how to generate the key file, and [Signing keys](../operations/signing-keys) covers backing it up and rotating it.
+
+#### Pinecone on the Helm chart
+
+The Helm chart configures the registry through environment variables and mounts no `registry.yaml`, so the config file above and `PODIUM_CONFIG_FILE` do not apply to a chart deployment. Select the backend in the chart values:
+
+```yaml
+# values.yaml overrides
+config:
+  vectorBackend:
+    type: pinecone    # renders PODIUM_VECTOR_BACKEND
+  embeddingProvider:
+    type: none        # the chart default; Pinecone embeds with its hosted model
+```
+
+Put `PODIUM_PINECONE_API_KEY`, `PODIUM_PINECONE_INDEX`, and, as needed, `PODIUM_PINECONE_NAMESPACE`, `PODIUM_PINECONE_HOST`, and `PODIUM_PINECONE_INFERENCE_MODEL` in the Secret that `existingSecret` names. The chart passes that Secret to the pod through `envFrom`. A non-secret value such as the index name can go in `extraEnv` instead, which takes precedence over the Secret.
+
+For storage-only mode, omit `PODIUM_PINECONE_INFERENCE_MODEL`, set `config.embeddingProvider.type` to `openai`, `voyage`, `cohere`, or `ollama`, and add that provider's key to the same Secret. A Weaviate Cloud or Qdrant Cloud backend follows the same pattern with `config.vectorBackend.type` set to `weaviate-cloud` or `qdrant-cloud` and that backend's variables in the Secret. [Helm chart reference → How values reach the pod](../modes/helm-chart#how-values-reach-the-pod) covers which values the chart renders and how they interact with the Secret.
 
 ---
 
@@ -306,4 +325,4 @@ This index is independent of the registry-side backend and affects only how loca
 - A caller cannot detect that fallback from the response. The `search_artifacts` and `search_domains` response bodies carry no degraded field, and no response header reports it.
 - The registry records the condition in its startup log: `warning: vector search disabled: <error>` when the backend fails to open, and `keyword search: embeddings disabled (BM25-only; no embedding provider)` when no backend is wired.
 - A backend that becomes unreachable after startup logs nothing per request, so alert on the backend service's own availability.
-- Search QPS, latency, and recall depend on the backend's index configuration (shard count, replicas, and dimensionality). The [Operator guide](../operations/troubleshooting) covers capacity planning across the registry as a whole.
+- Search QPS, latency, and recall depend on the backend's index configuration (shard count, replicas, and dimensionality). [Capacity](../operations/capacity) covers capacity planning across the registry as a whole.

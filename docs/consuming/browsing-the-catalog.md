@@ -9,7 +9,8 @@ description: Progressive discovery. How an agent traverses domains and finds art
 This page describes progressive discovery: how an agent finds and loads artifacts
 from the registry during a session. It is for developers who connect a harness
 through the Podium MCP server, and for authors who want their artifacts to be
-found.
+found. [Set up the MCP server](configure-your-harness#set-up-the-mcp-server)
+covers connecting a harness.
 
 The Podium MCP server exposes a set of meta-tools to harnesses that speak MCP.
 The agent calls them mid-session to traverse domains, find artifacts, and load
@@ -158,7 +159,7 @@ score.
 The response includes `total_matched`, so the caller knows when more results
 exist.
 
-Two cases keep a domain out of the results:
+The following cases keep a domain out of the results:
 
 - A domain without a `DOMAIN.md` is not embedded and does not appear in
   `search_domains` results. It is reachable through `load_domain` enumeration
@@ -201,7 +202,7 @@ ASCII fallback for the diagram above (hybrid retrieval):
 
 | Arg | Use |
 |:--|:--|
-| `query` | Free-text search target. Embedded and matched against the artifact projection (name, description, when_to_use, tags). |
+| `query` | Free-text search target. Matched lexically and by embedding similarity against the artifact's `name`, `description`, `when_to_use`, and `tags`, with the exceptions the note below states. |
 | `type` | Filter by artifact type. |
 | `tags` | Filter by tag. |
 | `scope` | Constrain to a domain path prefix. |
@@ -220,9 +221,10 @@ exist than were returned. When more exist, the agent can narrow with filters,
 drill into a subdomain, or run a more specific query.
 
 > [!NOTE]
-> The SQL metadata stores persist neither the `name` nor the `when_to_use`
-> column. Lexical matching therefore sees neither field, and a later
-> `podium admin reembed` drops both from the vector as well.
+> The registry computes an artifact's embedding at ingest from its `name`,
+> `description`, `when_to_use`, and `tags`. The SQL metadata stores persist
+> neither `name` nor `when_to_use`, so lexical matching sees neither field, and
+> a later `podium admin reembed` recomputes the vector without them.
 
 ---
 
@@ -239,10 +241,12 @@ load_artifact("finance/ap/pay-invoice", version="1.2.0")
 
 The tool result carries the manifest body inline and the paths of the
 materialized files. Every [bundled resource](../authoring/bundled-resources) in
-the artifact's directory is written atomically to the host's filesystem at a
-host-configured destination path. The agent reads a resource from its file
-rather than from the response. Materialization runs through the configured
-harness adapter, so the on-disk layout matches what the harness expects.
+the artifact's directory is written atomically to the host's filesystem, under
+the destination that
+[Where `load_artifact` writes](configure-your-harness#where-load_artifact-writes)
+describes. The agent reads a resource from its file rather than from the
+response. Materialization runs through the configured harness adapter, so the
+on-disk layout matches what the harness expects.
 
 | Arg | Use |
 |:--|:--|
@@ -260,14 +264,10 @@ consumer-side action for each field.
 
 ### Resource transport
 
-The MCP server fetches each resource from the registry. A resource at or below
-the 256 KB cutoff arrives inline, and a larger one arrives through a presigned
-URL. The cutoff is a transport detail the agent does not see.
-
-A resource the registry holds inline arrives inline at any size. This includes
-every resource of a row ingested while no object store was configured.
-[Inline content and materialized files](handling-artifact-responses#inline-content-and-materialized-files)
-covers the inline cutoff and the consumer-side model.
+The MCP server fetches each resource from the registry before it writes the
+files, so the agent does not see how the bytes travelled.
+[Resource transport](handling-artifact-responses#resource-transport) states which
+resources arrive inline and which arrive through a URL into object storage.
 
 ### `mcp-server` artifacts
 
@@ -308,8 +308,11 @@ domains:
 - **Artifact `description`** decides whether the harness reaches for the
   artifact at all. A specific description matches against actual user prompts,
   and a vague one gets ignored.
-- **Artifact `when_to_use`** is additional retrieval signal. Concrete
-  situational triggers rank better than abstract framings.
+- **Artifact `when_to_use`** feeds the embedding the registry computes at
+  ingest. Concrete situational triggers match better than abstract framings.
+  On the SQL metadata stores, lexical matching does not see the field and
+  `podium admin reembed` drops it, as the
+  [note under `search_artifacts`](#search_artifacts) states.
 - **Domain `description` and `keywords`** are the text `search_domains`
   retrieves over. Without keywords, a query that uses no words from the
   description can miss the domain.

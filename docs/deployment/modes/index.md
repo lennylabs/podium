@@ -6,9 +6,11 @@ description: "The local, single-node, and clustered deployment modes, what runs 
 
 # Deployment modes
 
+Podium runs in local, single-node, and clustered deployment modes. This page compares them and links to the page that sets up each one. The artifacts and the catalog directory are the same in every mode, so a deployment can start small and move to a larger mode later, as [Moving between modes](migrating) describes.
+
 ## Choosing a deployment mode
 
-The deployment modes are Local, Single node, and Clustered. Each mode keeps everything the mode before it does and adds server-side capability.
+Each mode keeps everything the mode before it does and adds server-side capability.
 
 | Deployment mode | Server-side deployment | Catalog source | Materialization | What the mode adds |
 |:--|:--|:--|:--|:--|
@@ -22,7 +24,7 @@ Pick the mode that matches the requirement:
 - **Single node** fits a team that wants agents to discover artifacts at runtime through MCP, or wants one audit log for every load, without running Postgres, object storage, and an identity provider.
 - **Clustered** fits an organization with 20 or more users, multi-tenant requirements, a governed environment, or compliance constraints.
 
-Artifacts are the same in every mode. The catalog on disk does not change when the deployment changes. The same shared Go library parses, composes, and materializes it everywhere, so a given target and profile produce bit-identical output. [Local](migrating#skills-that-declare-no-version) lists the exceptions for skills that declare no version.
+The catalog on disk does not change when the deployment changes. The same shared Go library parses, composes, and materializes it in every mode, so a given target and profile produce bit-identical output. [Skills that declare no version](migrating#skills-that-declare-no-version) describes the exception.
 
 ## What runs in each mode
 
@@ -31,3 +33,14 @@ Artifacts are the same in every mode. The catalog on disk does not change when t
 - **Clustered** runs the standard stack: stateless registry replicas behind a load balancer, Postgres, S3-compatible object storage, and an OIDC identity provider.
 
 `--standalone` and the standard stack are configurations of the same registry binary. They are not separate builds.
+
+## Pages in this section
+
+| Page | What it covers |
+|:--|:--|
+| [Local](local) | Setting up a catalog directory and syncing it into a project with no server. |
+| [Single node](single-node) | Running `podium serve --standalone` on one host, behind a TLS proxy, with clients pointed at it. |
+| [Clustered](clustered) | Deploying the registry on Kubernetes with the Helm chart, Postgres, object storage, and an OIDC identity provider. |
+| [Helm chart reference](helm-chart) | The chart's values, how they reach the registry pod, and the startup refusals they produce. |
+| [Docker Compose evaluation](docker-compose) | Running the clustered components on one machine to evaluate them before a Kubernetes deployment. |
+| [Moving between modes](migrating) | Moving a catalog from local to single node or clustered, and from single node to clustered with its signing key. |

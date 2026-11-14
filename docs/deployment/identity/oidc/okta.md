@@ -6,7 +6,7 @@ description: Configure a Podium registry to authenticate callers against Okta th
 
 # Okta
 
-This cookbook configures a Podium registry to authenticate against Okta. Okta emits group names in the `groups` claim natively and supports SCIM provisioning. Setup takes about 15 minutes with admin access. The [OIDC cookbooks overview](index) describes the identity model the steps rely on.
+This cookbook configures a Podium registry to verify Okta-issued tokens under `oidc-jwt`, and configures developer machines to acquire them through the device-code flow. Okta emits group names in the `groups` claim natively and supports SCIM provisioning. Setup takes about 15 minutes with admin access. [OIDC](index) is the reference for the `oidc-jwt` settings these steps use.
 
 ## Prerequisites
 
@@ -40,7 +40,7 @@ Tokens now carry the user's group memberships under the `groups` claim as an arr
 
 ## 3. Configure the registry
 
-On the registry host, add the `identity_provider:` block to `registry.yaml`. The registry reads `~/.podium/registry.yaml` unless `PODIUM_CONFIG_FILE` names another path, and `podium serve --config <path>` sets that variable. A file at `/etc/podium/registry.yaml` is read only when the server is started with `--config /etc/podium/registry.yaml` or with `PODIUM_CONFIG_FILE` set to it.
+On the registry host, add the `identity_provider:` block to `registry.yaml`, nested under `registry:`. [File layout](../../../reference/configuration#file-layout) describes the nesting rule and which file the registry reads.
 
 ```yaml
 registry:
@@ -50,15 +50,7 @@ registry:
     audience: podium
 ```
 
-Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config, and the registry ignores it without reporting an error.
-
-`oidc-jwt` is the registry's side of the flow. It verifies each presented token against the issuer's JWKS and validates the `aud` claim against `audience:`.
-
-- A CLI, an SDK, or another API client obtains the token through the device-code flow that the next step configures.
-- On a registry that enables the browser flow, a browser obtains the token through the registry's own authorization-code exchange, and the registry returns it in the `__Host-podium_session` cookie.
-- Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
-
-The registry reads group membership from the token's `groups` claim, mapped to group names by the `IdpGroupMapping` adapter. When SCIM is configured, the registry also reads the SCIM directory (see [SCIM provisioning](#scim-provisioning-optional)).
+The registry verifies each presented token against the issuer's JWKS and requires its `aud` claim to carry `podium`. It reads group membership from the token's `groups` claim, and also from the SCIM directory when [SCIM provisioning](#scim-provisioning-optional) is configured.
 
 Restart the registry.
 
@@ -82,7 +74,7 @@ Expected result: `podium login` shows the device verification URL and code. Afte
 
 ## 5. Test group-based visibility
 
-Configure an admin layer scoped to an Okta group in `registry.yaml`. Group-scoped visibility is set in the registry layer config, or with `podium layer register --group <name>` (also `--public`, `--organization`, and `--user`). Layers registered with `--user-defined` are private to the registrant and cannot be widened.
+Configure an admin layer scoped to an Okta group in `registry.yaml`. [Declaring visibility](../../content/access-control#declaring-visibility) describes the other ways to set a layer's visibility.
 
 ```yaml
 registry:
@@ -115,11 +107,7 @@ SCIM 2.0 push applies group-membership changes without waiting for the user's ne
 6. Map each provisioned user's SCIM `userName` to the `sub` or `email` claim its token carries.
 7. Map each pushed group's `displayName` to the name that the layer's `groups:` filter declares.
 
-On the registry side:
-
-- The registry mounts `/scim/v2/` only when `PODIUM_SCIM_TOKENS` is set to a comma-separated list of accepted tokens. Otherwise it returns 404 for every SCIM request.
-- Set `PODIUM_SCIM_STORE_PATH` to a writable file path so the pushed directory survives a restart. A set path that the registry cannot read, parse, or write refuses startup with `config.scim_store_unavailable`.
-- The registry expands a `groups:` filter to the group's member `userName` values and compares them against the caller's `sub` and `email`. A `userName` that matches neither claim resolves to no group visibility and reports no error.
+On the registry, enable the receiver with `PODIUM_SCIM_TOKENS` and `PODIUM_SCIM_STORE_PATH`, as [Enable the receiver](../groups#enable-the-receiver) describes. A `userName` that matches neither the caller's `sub` nor `email` resolves to no group visibility and reports no error, as [Matching users and groups](../groups#matching-users-and-groups) describes.
 
 > [!WARNING]
 > The registry's SCIM receiver serves `GET`, `POST`, `PUT`, and `DELETE` on `/Users` and `/Groups`, and answers every other method with HTTP 405. Okta sends group-membership changes and user deactivations as `PATCH`, so the registry rejects those requests, and the pushed directory keeps the state the create requests established. Confirm that a membership change reaches the registry before relying on SCIM for group visibility. The token's `groups` claim resolves membership as of each login.

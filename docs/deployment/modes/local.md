@@ -14,7 +14,7 @@ The Local deployment mode has no server-side component. The catalog is a directo
 
 The only running component is the `podium` CLI. There is no server process, no database, and no identity provider.
 
-`podium sync` runs the same shared Go library functions the server runs behind its HTTP API: the parsers, the glob resolver, the layer composer, the harness adapters, and atomic materialization. `podium lint` runs the same ingest lint rules the server applies. The library is the single behavioral surface across the deployment modes, so moving to a server preserves output.
+`podium sync` runs the same shared Go library functions the server runs behind its HTTP API: the parsers, the glob resolver, the layer composer, the harness adapters, and atomic materialization. `podium lint` runs the same ingest lint rules the server applies. The library is the single behavioral surface across the deployment modes, so moving to a server preserves output, with the exception [Skills that declare no version](migrating#skills-that-declare-no-version) describes.
 
 ---
 
@@ -84,8 +84,6 @@ A filesystem registry rooted at `<registry-path>` is a directory of layer direct
 └── personal/                   # another layer
     └── …
 ```
-
-[Skills that declare no version](migrating#skills-that-declare-no-version) states the version each deployment mode records for a skill whose `SKILL.md` declares none.
 
 ### Layers and their order
 
@@ -173,3 +171,9 @@ When the catalog is shared through Git, run `podium lint` in CI on the registry 
 - Visibility declarations in layer config are recorded and not enforced. Artifacts remain portable to server-backed deployment modes.
 - Audit is the Git history, when the catalog is committed to Git, or whatever the sharing mechanism preserves. There is no Podium-side audit stream.
 - Freeze windows and signing enforcement require a server.
+
+---
+
+## Moving to a server
+
+A catalog directory moves to a server without changes to its layout or to the authoring loop. [Moving between modes](migrating) covers pointing a single-node server at the same directory and registering the catalog's repository with a clustered registry.

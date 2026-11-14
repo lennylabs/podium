@@ -1,7 +1,7 @@
 ---
 title: Concepts
 nav_order: 3
-description: "The vocabulary used throughout the docs: registry, catalog, artifacts, domains, layers, visibility, harnesses, profiles, materialization, and meta-tools."
+description: "The vocabulary used throughout the docs: registry, catalog, tenant, progressive discovery and up-front sync, artifacts, domains, layers, visibility, harnesses, materialization, profiles, and meta-tools."
 ---
 
 # Concepts
@@ -9,19 +9,6 @@ description: "The vocabulary used throughout the docs: registry, catalog, artifa
 This page defines the terms the rest of the documentation uses. Other pages
 link here for a definition instead of restating it. The
 [glossary](../reference/glossary) has a one-line entry for each term.
-
-The table maps each Podium feature to the terms it is built from and to the
-page that covers it in operational detail.
-
-| Feature | Terms | Covered in |
-|:--|:--|:--|
-| Domains and subdomains | [Domain](#domain) | [Domains](../authoring/domains) |
-| Selective materialization | [Profile](#profile), [Materialization](#materialization) | [Selective materialization](../consuming/selective-materialization) |
-| Progressive discovery | [Meta-tools](#meta-tools) | [Browsing the catalog](../consuming/browsing-the-catalog) |
-| Layered composition | [Layer](#layer) | [Connecting layer sources](../deployment/content/layer-sources), [Layered composition](../deployment/content/layers) |
-| Security and access control | [Visibility](#visibility), [Signing and audit](#signing-and-audit) | [Access control](../deployment/content/access-control) |
-| Observability | [Signing and audit](#signing-and-audit) | [Audit and observability](../deployment/operations/observability) |
-| Cross-harness delivery | [Harness](#harness), [Materialization](#materialization) | [Configure your harness](../consuming/configure-your-harness) |
 
 ---
 
@@ -32,18 +19,51 @@ from their sources and serves them to consumers. The **catalog** is the set of
 artifacts a registry holds. Podium is the registry, and a team's skills,
 agents, and other artifacts form its catalog.
 
-A registry runs in one of the deployment modes below:
+A consumer reads the catalog from one of two kinds of source:
 
-| Mode | What runs |
-|:--|:--|
-| Local | A directory tree on disk, read by the CLI. There is no server process, no database, and no identity provider. |
-| Single node | One binary on one machine, with SQLite, sqlite-vec, and filesystem object storage embedded. |
-| Clustered | Registry replicas behind a load balancer, with Postgres, S3-compatible object storage, and OIDC. |
+- A **filesystem source** is a catalog directory on disk that the `podium`
+  CLI reads directly, with no server process, database, or identity provider.
+  This is the local deployment mode.
+- A **server source** is a Podium registry server that consumers reach over
+  HTTP. One process with embedded storage is the single-node deployment mode,
+  and registry replicas with Postgres, object storage, and an OIDC identity
+  provider are the clustered deployment mode.
 
-Every mode applies the same layer composition and serves the same artifacts.
-Migration between modes is mechanical, because the same shared Go library
-parses, composes, and adapts artifacts in every case.
-[Deployment](../deployment/) covers the modes and the migration steps.
+Every mode applies the same layer composition and serves the same artifacts,
+because the same shared Go library parses, composes, and adapts artifacts in
+every case. [Deployment modes](../deployment/modes/) covers choosing a mode,
+and [Moving between modes](../deployment/modes/migrating) covers the
+migration steps.
+
+### Tenant
+
+A **tenant** is an organization (an org) that a registry server serves. Each
+tenant has its own layer list, its own admins, its own audit stream, and its
+own quotas. A registry serves one tenant, named `default`, unless it runs in
+multi-tenant mode, where each request resolves to the tenant its caller's
+organization names. [Tenants and admins](../deployment/identity/tenants)
+covers both modes and the roles that manage them.
+
+---
+
+## Progressive discovery and up-front sync
+
+Artifacts reach a host along one of two paths. Both paths share the same
+registry, identity providers, layer composition, and harness adapters.
+
+**Progressive discovery** is the MCP and SDK path. The session starts empty.
+The agent calls `load_domain` and `search_domains` to traverse the catalog,
+`search_artifacts` to query it, and `load_artifact` to materialize one selected
+artifact together with its bundled files. The agent's context window stays
+small even when the catalog holds thousands of entries. This path requires a
+server source. [Meta-tools](#meta-tools) lists the calls.
+
+**Up-front sync** is the `podium sync` path. It materializes the caller's
+[effective view](#layer), or the subset an active [profile](#profile)
+selects, onto disk before the session starts, once or in watch mode. The
+harness then uses its own native discovery under `.claude/skills/`,
+`.cursor/rules/`, and the other directories it reads. This path works against
+a server source or a filesystem source.
 
 ---
 
@@ -124,7 +144,9 @@ Every artifact has a `type:`. A skill with no `ARTIFACT.md` has the type
 
 The type determines indexing, lint rules, and how the harness adapter
 translates the artifact at delivery time. Extension types register through the
-`TypeProvider` SPI.
+`TypeProvider` SPI. An **SPI** (service provider interface) is a Go interface
+that a plugin implements to replace or extend one part of the registry's
+behavior. [Extensibility](#extensibility) lists the areas the SPIs cover.
 
 ---
 
@@ -140,13 +162,9 @@ keywords, featured artifacts, imports from elsewhere, and discovery-rendering
 hints. A domain without `DOMAIN.md` still works, and the directory remains
 navigable.
 
-Configurable rules govern how `load_domain` renders a domain: `max_depth`,
-folding of sparse subdomains, `notable_count`, and a soft response-token
-budget. Tenant-level defaults live in `registry.yaml`, and per-domain overrides
-live in `DOMAIN.md`.
-
-[Domains](../authoring/domains) covers the `DOMAIN.md` schema and how to
-structure a hierarchy.
+[Domains](../authoring/domains) covers the `DOMAIN.md` schema, how to
+structure a hierarchy, and the settings that control how `load_domain` renders
+a domain.
 
 ---
 
@@ -262,11 +280,9 @@ a layer's tracked Git ref publishes there. Whoever can write to a
 required reviewers, and signing requirements live in the Git host, and Podium
 does not duplicate them.
 
-Declaring a layer is a separate rule from writing content into it. On a
-server-backed deployment mode, only a tenant admin may declare a layer that
-makes the registry read a given filesystem path. The registry process reads
-that path with its own rights rather than with the registrant's. See
-[Who may register a local-source layer](../deployment/content/layer-sources#who-may-register-a-local-source-layer).
+Registering a layer is governed separately from writing content into it.
+[Who can change a layer](../deployment/content/access-control#who-can-change-a-layer)
+covers the rules for declaring and changing layers.
 
 ---
 
@@ -312,10 +328,9 @@ raw output for a custom runtime or an evaluation pipeline.
 filesystem. For `load_artifact`, the MCP server runs these steps:
 
 1. **Fetch**: download bytes (or read from cache).
-2. **Verify**: recompute the delivery hash over the served record, then check
-   the registry's signature over it. Bundle contents are not introspected,
-   because vulnerability scanning is a CI/CD concern rather than a registry
-   one.
+2. **Verify**: check the served record against the registry's signature.
+   [Verifying deliveries](../consuming/verifying-deliveries) covers the check
+   and the settings that control it.
 3. **Adapt**: run the harness adapter to translate to native format.
 4. **Hook**: run any configured `MaterializationHook` plugins for
    per-file rewrites.
@@ -324,41 +339,16 @@ filesystem. For `load_artifact`, the MCP server runs these steps:
 Through the MCP server these steps run during the call, so the agent receives
 the manifest body and the file paths. The SDKs split them. They return the
 manifest in memory and write the files on a later `materialize()` call.
+Bundled resources above an inline size cutoff arrive as URLs that the consumer
+fetches rather than inside the response.
+[Handling artifact responses](../consuming/handling-artifact-responses) covers
+what each consumer receives.
 
-### Materialization with `podium sync`
-
-`podium sync` runs the fetch, adapt, hook, and write steps in batch. It covers
-the caller's effective view or the subset an active scope selects.
-
-- **Server source.** `podium sync` runs the same delivery check and signature
-  policy that `podium-mcp` runs, under `PODIUM_VERIFY_SIGNATURES` and the same
-  key resolution. It also checks every fetched manifest-body document and
-  bundled-resource body against the content hash the registry served for it,
-  and fails with `materialize.content_hash_mismatch` when a body does not
-  match.
-- **Filesystem source.** `podium sync` composes and materializes in one
-  process and runs no delivery check.
-
-A signing registry verifies each stored row before it serves it to any reader,
-`podium sync` included.
-
-### Large resources
-
-The `load_artifact` response delivers the manifest body and the bundled
-resources below the inline cutoff directly. The rest depends on how the
-registry stores them:
-
-- On a registry with an object store, a larger resource, and a manifest above
-  the cutoff, arrive as a URL into object storage.
-- A resource the registry holds inline on the manifest record is returned
-  inline at any size. That includes every resource of an artifact ingested
-  while no object store was configured.
-- With the S3 backend, an object-storage URL is presigned and time-limited.
-- With the filesystem backend a single node uses by default, the URL is the
-  registry's own `/objects/<content-hash>` route, authorized by the caller's
-  session token.
-
-Materialization is the write step that lands all of it on disk.
+`podium sync` runs the fetch, adapt, hook, and write steps in batch over the
+caller's effective view or the subset an active scope selects. Against a
+server source it runs the same verification as the MCP server. Against a
+filesystem source it composes and materializes in one process and runs no
+verification, because nothing is signed.
 
 ---
 
@@ -388,10 +378,10 @@ The MCP server exposes these tools to harnesses that speak MCP:
 
 | Tool | What it does |
 |:--|:--|
-| `load_domain(path?)` | Returns a map of a domain: subdomains, notable artifacts, keywords, the requested domain's description. The agent's primary navigation tool. |
-| `search_domains(query)` | Hybrid retrieval over each domain's projection (description + keywords + truncated body). For when the agent doesn't know the right neighborhood. |
-| `search_artifacts(query?, scope?, type?, tags?)` | Hybrid retrieval over artifact frontmatter. With a query, ranks by relevance; without, browses by filter (the canonical "list all artifacts in this domain" move). |
-| `load_artifact(id)` | Loads a specific artifact by ID, runs the harness adapter, materializes bundled resources to disk. This is the expensive operation; call it after the artifact has been selected. |
+| `load_domain(path?)` | Returns a map of a domain: its subdomains, notable artifacts, keywords, and description. It is the agent's primary navigation tool. |
+| `search_domains(query)` | Runs hybrid retrieval over each domain's description, keywords, and truncated body. The agent calls it when it does not know which domain holds what it needs. |
+| `search_artifacts(query?, scope?, type?, tags?)` | Runs hybrid retrieval over artifact frontmatter. With a query, it ranks by relevance. Without one, it lists the artifacts that match the filters, such as every artifact in a domain. |
+| `load_artifact(id)` | Loads one artifact by ID, runs the harness adapter, and materializes the bundled resources to disk. It is the most expensive call, so the agent makes it after it has selected the artifact. |
 
 The MCP server advertises further entries in `tools/list` beside the
 meta-tools:
@@ -414,29 +404,9 @@ what it returns, and what it costs.
 
 ---
 
-## Progressive discovery and up-front sync
-
-Artifacts reach a host along one of two paths. Both paths share the same
-registry, identity providers, layer composition, and harness adapters.
-
-**Progressive discovery** is the MCP and SDK path. The session starts empty.
-The agent calls `load_domain` and `search_domains` to traverse the catalog,
-`search_artifacts` to query it, and `load_artifact` to materialize one selected
-artifact together with its bundled files. The agent's context window stays
-small even when the catalog holds thousands of entries. This path requires a
-server.
-
-**Up-front sync** is the `podium sync` path. It materializes the caller's
-effective view, or the subset an active profile selects, onto disk before the
-session starts, once or in watch mode. The harness then uses its own native
-discovery under `.cursor/rules/`, `.claude/agents/`, and the other directories
-it reads. This path works against a server or a local directory.
-
----
-
 ## Extensibility
 
-SPIs make Podium's behavior pluggable. They cover storage, identity,
+The SPIs make Podium's behavior pluggable. They cover storage, identity,
 composition, signing, audit, layer sources, and delivery. Plugins compile into
 a registry build today. The SPIs are designed to be wire-compatible with a
 future out-of-process plugin protocol.

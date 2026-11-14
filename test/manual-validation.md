@@ -2791,7 +2791,7 @@ through verification to resolved visibility.
   server such as `/oauth2/default` and an opaque token from the org server.
   Okta, Entra ID, and Auth0 each require tenant-side claim or scope
   configuration before a group claim reaches the access token, and Auth0 admits
-  a namespaced claim name only (`docs/deployment/oidc/auth0.md`). Step 7 sets
+  a namespaced claim name only (`docs/deployment/identity/oidc/auth0.md`). Step 7 sets
   `PODIUM_OAUTH_GROUPS_CLAIM` when the emitted claim carries a name other than
   `groups`. When the tenant cannot be configured to emit a group claim, run the
   baseline part without the group-scoped layer and record the skip and the
@@ -4223,7 +4223,7 @@ rather than trying to avoid them.
    **Expect.** `Bucket created successfully`.
 
 4. Generate the registry signing key with the command
-   `docs/deployment/clustered.md` gives, with the scratch directory under
+   `docs/deployment/modes/clustered.md` gives, with the scratch directory under
    `$WORK`, and create the Secret the chart's `signing.secretName` names.
    `podium admin signing-key generate` writes only the file `--key-file` names
    and opens no store.
@@ -7856,7 +7856,7 @@ reach `~/.podium/standalone/registry-signing.key`.
 ## S76: Chart upgrade from v0.4.0
 
 **Goal.** Validate that the chart's upgrade procedure in
-`docs/deployment/clustered.md` moves a clustered v0.4.0 install onto this
+`docs/deployment/operations/upgrade-notes.md` moves a clustered v0.4.0 install onto this
 release with no registry pod serving an unmigrated store, that the run Job
 refuses a plan other than the reviewed one, and that a registry pod refuses to
 start over an unmigrated store in either signing mode.
@@ -7878,7 +7878,7 @@ refusal and each log line as an operator does.
 daemon. When any is absent, skip and record the skip. The shell stays in
 `$WORK`, as the isolation block leaves it. Step 1 names the repository in
 `REPO` and the chart in `CHART`, and links `$WORK/deploy` to the repository's
-`deploy` directory. The procedure's commands in `docs/deployment/clustered.md`
+`deploy` directory. The procedure's commands in `docs/deployment/operations/upgrade-notes.md`
 name the chart as `./deploy/helm/podium` and read and write
 `podium-values.yaml`, `dry-run.log`, and `run.log` in the working directory, so
 they run verbatim from `$WORK`, and every file the scenario writes stays there.
@@ -8196,7 +8196,7 @@ The isolation block's `HOME` also keeps the kind cluster's kubeconfig under
    and this mirror.
 
 7. Run step 3 of the procedure from `$WORK`, exactly as
-   `docs/deployment/clustered.md` gives it, then run its completeness check
+   `docs/deployment/operations/upgrade-notes.md` gives it, then run its completeness check
    and read the digest from the last line.
 
    ```bash

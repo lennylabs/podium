@@ -1,18 +1,153 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first."
+description: "Release-specific upgrade steps, newest release first: the 0.7.0 layer credential columns, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
 
-## Upgrading the chart from v0.4.0
+This page lists the upgrade steps that belong to one release, newest release first. [Upgrading](upgrading) gives the general procedure that every upgrade follows. Each release's entry in `CHANGELOG.md` is the authoritative statement of its changes.
 
-This section applies to a clustered deployment whose store a v0.4.0 registry wrote. It moves the store onto this release through a migrate Job that runs before any pod of this release serves. A deployment already past this migration follows [Later upgrades](#later-upgrades).
+## 0.7.0 (unreleased)
 
-### How the upgrade works
+The current release is 0.6.0. The notes in this section describe behavior on `main` that ships in 0.7.0.
 
-This release changes the stored content hash of every row (see the upgrade note in `CHANGELOG.md`). Outside the SQLite store in the key file's directory, a registry start over a store that holds manifest rows and no record that the rewrite of stored content hashes completed is refused, in either signing mode. The pod exits at start, rewriting no manifest row, signing no row, and recording no completion. A store that holds no manifest row records the rewrite at its first start.
+### Rollback floor for the layer credential columns
+
+From 0.7.0, the SQLite and Postgres metadata stores write a `git` layer's URL credential apart from the rest of its remote. The lowest version that runs against a database 0.7.0 has written to is 0.6.0, both for a rollback and for mixed-version replicas.
+
+#### How 0.7.0 stores the credential
+
+- For a `repo` that is a URL with a scheme and userinfo, and that a layer read does not report as `[redacted]`, `layer_configs.repo_userinfo` receives the userinfo and `layer_configs.repo` receives the rest of the URL.
+- Every other `repo` is held whole in `repo`. This covers an scp-like remote, a filesystem path, and a value reported as `[redacted]`.
+- `repo_userinfo` holds the credential unencrypted. A SQL export of `layer_configs` needs both columns to reproduce a layer's remote, and it carries a secret when it includes `repo_userinfo`.
+
+Before it serves, each 0.7.0 start whose listener binds rewrites every row that holds such a URL whole in `repo` into that form, a soft-deleted layer's row included. It logs how many rows it rewrote.
+
+- The same start sets to NULL a `repo_userinfo` that sits beside a `repo` held whole, such as an scp-like remote or a path, because the registry ignores that column when it reads such a row. The logged count includes those rows.
+- The start changes no other column, and the layer is reported and cloned as before.
+- A row that another process writes while the start runs is left as that process wrote it.
+- The rewrite moves the credential between two columns of one row. It does not remove the credential from a backup, a replica, or storage the database has not yet reused.
+
+The rewrite changes the stored form of a value that 0.6.0 already reads in both forms. It records no completion and needs no `sign-stored-rows` run. [Releases that migrate stored values](upgrading#releases-that-migrate-stored-values) does not apply: the canary phase runs as usual, and the store needs no backup restore to roll back.
+
+#### Mixed 0.6.0 and 0.7.0 replicas
+
+Replicas on 0.6.0 and on 0.7.0 that share a Postgres store read and clone identically. A 0.6.0 replica writes the whole URL to `repo` on every layer write it makes, so a row can change form in either direction during the roll. A row that a 0.6.0 replica writes after the last 0.7.0 replica started holds the whole URL until its next 0.7.0 write or the next 0.7.0 start. Restart a 0.7.0 replica after the last 0.6.0 replica has stopped to rewrite those rows at once.
+
+A request that a 0.6.0 replica serves during the roll is answered as 0.6.0 answers it:
+
+- 0.6.0 accepts a `repo` that carries the credential in its URL, which 0.7.0 refuses.
+- 0.6.0 ignores the `repo_username`, `repo_token`, and `clear_repo_credential` members. A registration that carries those members therefore stores the remote with no credential. An update that carries them reports success and leaves the stored credential as it was.
+- A registration that sends back the remote `podium layer list` reports for a layer that holds a credential is refused with `details.constraint: "redacted_repo"`.
+
+Make every request that sets, rotates, or removes a credential, or that re-registers a layer holding one, after the last 0.6.0 replica has stopped. Repeat at that point any such request made during the roll.
+
+#### Declared layers
+
+0.6.0 and earlier ignore the `source.git.username` and `source.git.token` keys of a declared layer. 0.7.0 reads a credential either in the userinfo of `source.git.repo` or in the two keys.
+
+- Keep a declared private layer's credential in `source.git.repo` through the rollout, and for as long as a 0.6.0 process may start on the configuration. Then move it to the two keys.
+- A 0.6.0 process that starts on a configuration that uses the keys, on a rollback or as a replica that restarts during the roll, writes the declared layer with no credential. Its private remote then fails with `ingest.source_unreachable` on every replica that shares the store until a 0.7.0 process starts.
+- Before rolling back to 0.6.0, move each declared credential back into the percent-encoded userinfo of `source.git.repo` and remove both keys.
+
+#### Upgrading directly from 0.5.2 or earlier
+
+An upgrade from 0.5.2 or earlier directly to 0.7.0 stops every replica before the first 0.7.0 replica starts, and its rollback target is 0.6.0. On a Helm chart deployment, such an upgrade passes neither `--rollback-on-failure` nor `--atomic`, because an automatic rollback reinstalls a binary below the floor. An upgrade through 0.6.0 has neither restriction.
+
+#### Running 0.5.2 against a database 0.7.0 has written to
+
+This combination is unsupported. A 0.5.2 process does not read `repo_userinfo`, with the following effects:
+
+- **Layers registered through the API or the CLI.** After the first 0.7.0 start, every such layer whose `repo` is a URL with a scheme and userinfo holds its credential apart. 0.5.2 clones such a layer without the credential, so a private remote fails with `ingest.source_unreachable`. A registration that carries the layer's listed remote is not refused.
+- **Layers declared with the credential in `source.git.repo`.** The layer is written from the configured URL at each start and clones as before.
+- **Layers declared with `source.git.username` and `source.git.token`.** The layer is written with no credential, because 0.5.2 ignores both keys.
+
+On SQLite, a 0.5.2 write of the layer clears `repo_userinfo`. Such a write is an update, a reorder, a re-registration, a start for a declared layer, or a completed ingest. The layer then needs its credential set again:
+
+- On 0.6.0, by a registration with the full URL.
+- On 0.7.0, for an `http` or `https` remote, with `podium layer update --repo-username <name> --repo-token-file <path>`. `--repo-username` names the username the provider expects, because the cleared row holds none.
+- On 0.7.0, for an `ssh://` remote, by a registration with the full `ssh://` URL, login name included, because `podium layer update` takes no credential member on such a layer.
+
+On Postgres, a 0.5.2 write leaves the column as it is. If a re-registration under 0.5.2 replaced the layer's `repo` with a different URL that carries no userinfo, the column still holds the earlier credential, and 0.6.0 or later joins it to the new remote when it reads the row. Before that layer is ingested on 0.6.0 or later, remove or replace the stale credential:
+
+- **On 0.6.0.** Re-register the layer with the full URL of the new remote, or with the userinfo-free URL and `--force-repo-overwrite` (`force_repo_overwrite: true`). A re-registration with the userinfo-free URL and no override is refused with `details.constraint: "redacted_repo"`. The 0.6.0 CLI has neither update flag, and a 0.6.0 registry answers an update that carries either member with success and changes nothing.
+- **On 0.7.0, for an `http` or `https` remote.** Remove the credential with `podium layer update --clear-repo-credential`, or replace it with `podium layer update --repo-username <name> --repo-token-file <path>`. The replacement names the username because an update that omits it keeps the stale one. A re-registration with the userinfo-free URL alone is the re-registration with the listed remote that [Private repositories](../content/layer-sources#private-repositories) describes, and it keeps the stored credential, here the stale one. One that also passes `--clear-repo-credential`, or `--repo-username` with `--repo-token-file`, stores only what it carries.
+- **On 0.7.0, for an `ssh://` remote.** Re-register the layer with that URL as wanted, without userinfo or with its login name, which stores no stale credential, because `podium layer update` takes no credential member on such a layer.
+
+An update does not change `repo`, so a layer that was only updated under 0.5.2 needs no re-registration. A layer declared in the registry configuration needs none either, because each start writes both columns from the declaration. 0.6.0 reads the declaration from `source.git.repo` alone, and 0.7.0 reads it from `source.git.repo` or from `source.git.username` and `source.git.token`.
+
+### Credentials stored by an earlier release
+
+0.7.0 sets a `git` layer's credential through separate username and token members, and it refuses a new `http` or `https` `repo` that carries URL userinfo. Credentials that 0.6.0 or earlier stored behave as follows:
+
+- A layer whose stored remote carries its credential in the URL keeps cloning with it. `podium layer update --repo-token-file` or `--clear-repo-credential` replaces or removes that credential.
+- A stored username that contains `:`, `/`, `"`, a space, or a control character cannot be kept. A rotation of such a layer passes `--repo-username` with `--repo-token-file`.
+- A layer stored in the URL-token form `https://<token>@host` holds no username. A rotation of it passes `--repo-username` where the provider expects one.
+- A declaration that sets neither `username` nor `token` is written as declared. A credential in the userinfo of `source.git.repo`, which is the form 0.6.0 and earlier read, keeps working. Each start logs a line that names the layer and asks for the credential to move to the two keys.
+
+[Private repositories](../content/layer-sources#private-repositories) describes how to set, rotate, and remove a credential.
+
+## 0.6.0: `extends:` removal
+
+0.6.0 removes `extends:`. Ingest rejects an `ARTIFACT.md` whose frontmatter carries a top-level `extends` key, and every same-ID collision between registry-side layers is rejected with `ingest.collision`. The sections below apply to a store that holds rows an earlier release ingested from an `ARTIFACT.md` that declares `extends:`. This note calls such a row a retired row.
+
+### What readers see
+
+- No read path serves a retired row. `latest` resolves to the artifact's most recent other version.
+- An ID whose retired row overlaid a lower layer's artifact serves the lower layer's copy when no other layer holds a served row of the ID.
+- An artifact with no other version answers `registry.not_found`.
+- A retired version's `delegates_to` and `mcpServers` references stay in impact analysis while another version of the artifact is served.
+
+### Ingesting the ID again
+
+A retired row is not a collision:
+
+- When only one layer holds a served row of the ID, that layer ingests new versions of the artifact ID without `ingest.collision`.
+- Any layer can ingest an ID with no served row without `ingest.collision`.
+- The retired row still holds its `(id, version)`, so other bytes at that version are rejected with `ingest.immutable_violation`.
+
+### Copies admitted from several layers
+
+An earlier release also admitted a plain copy of the ID from a further layer while an overlay row was stored. When served rows of the ID remain in two or more layers, `latest` serves the most recently ingested of them. Every later ingest of the ID from those layers is rejected with `ingest.collision`, including a re-ingest of unchanged bytes.
+
+To recover, keep one of those layers:
+
+1. Remove the declaration of each layer to drop from the registry configuration. A declared layer is re-seeded at each start.
+2. Unregister all but one of those layers with `podium layer unregister`. Unregistering soft-deletes every row of each unregistered layer, so its other artifacts stop serving too.
+3. Wait until the recovery window ends and the purge removes the soft-deleted rows.
+4. Register a removed source again, without the artifact, and declare it again if it was declared.
+
+Before the purge, the soft-deleted rows still hold their artifacts' versions. A registration under any layer ID then serves none of the source's artifacts at an unchanged version, even when the ingest reports them accepted, and it rejects a skill with no declared version as `auto_version_duplicate_content`.
+
+### Clients that loaded a retired version
+
+Retiring an artifact's newest rows lowers the version `latest` resolves to. A `podium-mcp` that loaded a retired version as `latest` refuses the older one with `materialize.stale_resolution`.
+
+1. Stop every MCP server that uses the cache directory.
+2. Run `podium cache reset-revisions <id>`.
+3. For a `podium-mcp` in `offline-first` or `offline-only` that cached a merged artifact, also run `podium cache prune --days 0`. That command leaves the revision marks in place.
+
+## 0.5.0: rewrite of stored content hashes
+
+0.5.0 changes how the content hash is computed, so the stored content hash of every row changes. Every registry process on 0.4.0 stops before the first process on 0.5.0 starts, and the store is backed up after the stop. Restoring that backup is the only route back to 0.4.0.
+
+Where the rewrite runs depends on the store:
+
+- **The SQLite store in the key file's directory,** which is the default single-node layout under `~/.podium/standalone/`, is rewritten by the first start of 0.5.0. Stop the registry, back up the directory, replace the binary, and start it.
+- **Every other store** is rewritten by `sign-stored-rows` before the first start, in either signing mode, as [Releases that migrate stored values](upgrading#releases-that-migrate-stored-values) describes. 0.4.0 stored every row unsigned by default, so with signing on, the dry run and the run pass `--include-unsigned` to attest the unsigned rows the dry run lists.
+- **A Helm chart deployment** runs `sign-stored-rows` through the chart's migrate Job, as [Upgrading the chart from v0.4.0](#upgrading-the-chart-from-v040) describes.
+- **A Docker Compose evaluation stack** follows [Upgrade a Docker Compose evaluation stack](#upgrade-a-docker-compose-evaluation-stack).
+
+[Stores that need `sign-stored-rows` before a start](signing-keys#stores-that-need-sign-stored-rows-before-a-start) states which stores a start refuses and what a refused start leaves behind. The 0.5.0 entry of `CHANGELOG.md` also states the order in which consumers roll.
+
+### Upgrading the chart from v0.4.0
+
+This procedure applies to a clustered deployment whose store a v0.4.0 registry wrote. It moves the store onto this release through a migrate Job that runs before any pod of this release serves. A deployment already past this migration follows [Later upgrades](#later-upgrades).
+
+#### How the upgrade works
+
+A registry pod over a store that a v0.4.0 registry wrote, with no record that the rewrite of stored content hashes has completed, exits at start in either signing mode and names `sign-stored-rows` in its log. [Stores that need `sign-stored-rows` before a start](signing-keys#stores-that-need-sign-stored-rows-before-a-start) states what such a start leaves behind. A serving render over an unmigrated store therefore starts no pod that serves or rewrites, and its rollout does not progress. A store that holds no manifest row records the rewrite at its first start.
 
 The rewrite requires every registry process on the previous release to be stopped first. The chart runs it as a Kubernetes Job while the Deployment is held at zero replicas, so no probe restarts the pass and no v0.4.0 pod writes beside it. The procedure runs the Job before any pod of this release starts, with signing on and with signing off. The Job runs `podium-server sign-stored-rows`, which performs the whole rewrite when the store holds no record of it, and records its completion. Registry pods that start afterwards find the record and skip the pass.
 
@@ -23,9 +158,7 @@ The chart renders the Job as a Helm `post-install` and `post-upgrade` hook when 
 - With `signing.mode=none` it requires `migration.includeUnsigned=false`.
 - A `run` render requires `migration.planDigest`, the value on the reviewed dry run's last line.
 
-The chart reads nothing from the cluster, so the binding between the reviewed dry run and the run lives in the command. Given the plan digest, the run refuses with exit status 3 and writes nothing when any value the digest covers differs from the dry run's. The digest covers the completion-record mode, the `--include-unsigned` setting, the signing and verification `key_id`s, and each covered row's tenant, ID, version, stored hash, outcome, target, sign decision, and signature state. The digest covers every row except a row the dry run reports as `class=migrated`: one whose stored bytes reproduce its stored hash, whose signature is absent or verifies under the signing key (with signing off, whose signature is not checked), and that the run neither writes nor signs. A store, DSN, bucket, or Secret change that leaves those values identical is not detected by the digest.
-
-In either signing mode, a registry pod over a store that holds manifest rows and no completion record exits at start and names `sign-stored-rows` in its log. Before it exits, it applies this release's additive schema and seeds the default tenant and the bootstrap grants. It rewrites no manifest row, signs no row, and records no completion. A serving render over an unmigrated store therefore starts no pod that serves or rewrites, and its rollout does not progress.
+The chart reads nothing from the cluster, so the binding between the reviewed dry run and the run lives in the command. Given the plan digest, the run refuses with exit status 3 and writes nothing when any value the digest covers differs from the dry run's. The digest covers the completion-record mode, the `--include-unsigned` setting, the signing and verification `key_id`s, and each covered row's tenant, ID, version, stored hash, outcome, target, sign decision, and signature state. It covers every row except a row the dry run reports as `class=migrated`: one whose stored bytes reproduce its stored hash, whose signature is absent or verifies under the signing key (with signing off, whose signature is not checked), and that the run neither writes nor signs. The digest does not detect a store, DSN, bucket, or Secret change that leaves those values identical.
 
 Nothing checks that registry processes are stopped, so step 2 waits for them. A registry process on the same store under another release name, in another namespace, or outside Kubernetes is outside that wait, so stop every such process before step 3. A process that writes a row the digest covers between the dry run and the run changes the plan, and the run refuses. A process that writes after the run builds its plan leaves its rows at the previous content hash, and admission refuses them with `materialize.content_hash_mismatch`.
 
@@ -33,7 +166,7 @@ Every step below passes the same values file with `-f` and sets its per-step val
 
 The commands assume the release `podium` in the current namespace, the signing Secret `podium-signing-key`, and the values file `podium-values.yaml`.
 
-### Upgrade with signing on
+#### Upgrade with signing on
 
 **Step 1.** Prepare the values file and the signing Secret.
 
@@ -146,15 +279,15 @@ The second command prints both plan headers, and the `diff` lists the rows that 
 helm upgrade podium ./deploy/helm/podium -f podium-values.yaml
 ```
 
-The Deployment scales to `replicaCount`. The pods find the completion record and skip the pass, so the chart's startup budget covers their start. A pod over a store without the record exits at start and names `sign-stored-rows` in its log, rewriting no manifest row, signing no row, and recording no completion. In that case, return the release to zero replicas as step 2 shows, and rerun steps 3 and 4.
+The Deployment scales to `replicaCount`. The pods find the completion record and skip the pass, so the chart's startup budget covers their start. A pod over a store without the record exits at start and names `sign-stored-rows` in its log. In that case, return the release to zero replicas as step 2 shows, and rerun steps 3 and 4.
 
-### Upgrade with signing off
+#### Upgrade with signing off
 
 A deployment with `signing.mode=none` follows [Upgrade with signing on](#upgrade-with-signing-on), with `signing.mode: none` and `migration.includeUnsigned: false` in the values file in place of the signing Secret. The chart renders `PODIUM_SIGN=none` into the migrate Job, so the command rewrites without signing. The command refuses `--include-unsigned` with signing off, which is why the value is false.
 
-The dry run reports every row with `sign=false`, a signed row with `signed_by=unchecked`, and a header with `signing_key=-`. A dry run that exits 1 naming `PODIUM_SIGN=none` means a signed row needs its hash rewritten. The deployment then supplies the key that signed it, by turning signing on with the signing Secret. A serving render that skips the migrate Job starts pods that exit at start and name `sign-stored-rows`, rewriting no manifest row, signing no row, and recording no completion, as with signing on.
+The dry run reports every row with `sign=false`, a signed row with `signed_by=unchecked`, and a header with `signing_key=-`. A dry run that exits 1 naming `PODIUM_SIGN=none` means a signed row needs its hash rewritten. The deployment then supplies the key that signed it, by turning signing on with the signing Secret. As with signing on, a serving render that skips the migrate Job starts pods that exit at start and name `sign-stored-rows`.
 
-### Install over an existing v0.4.0 store
+#### Install over an existing v0.4.0 store
 
 A new release name, a new namespace, or a reinstall after `helm uninstall` over a store v0.4.0 wrote is an upgrade from the store's point of view. The objects volume carries `helm.sh/resource-policy: keep`, and the bundled Postgres keeps its volume claim, so both survive `helm uninstall`.
 
@@ -166,48 +299,9 @@ helm install podium ./deploy/helm/podium -f podium-values.yaml --set replicaCoun
 
 Then follow [Upgrade with signing on](#upgrade-with-signing-on) from step 2, with either signing mode. An install at zero replicas starts no registry pod. Adding `--set migration.mode=dry-run` to the install, in place of the separate step, runs step 3's dry run as a `post-install` hook. Take the backup before such an install, and capture its log as step 3 does, with `helm install` in place of `helm upgrade`.
 
-### Upgrade a Docker Compose evaluation stack
+#### Recovering from a failed run
 
-Signing off does not exempt the [Docker Compose evaluation stack](../modes/docker-compose#evaluating-with-docker-compose) from the stored-row migration of this release. A stack whose `postgres_data` volume holds rows a v0.4.0 registry wrote is refused at the upgraded registry's first start. A registry start outside the SQLite store in the key file's directory does not rewrite stored content hashes over a store that holds manifest rows, in either signing mode. The refused start applies the additive schema and seeds the default tenant and the bootstrap grants, and it rewrites no manifest row, signs no row, and records no completion.
-
-Upgrade such a stack by stopping the registry, rebuilding its image, running `sign-stored-rows` once through the registry service, and then starting the stack:
-
-```bash
-docker compose stop registry
-docker compose build registry
-docker compose run --rm registry sign-stored-rows --dry-run
-docker compose run --rm registry sign-stored-rows --plan-digest=<digest>
-docker compose up -d
-```
-
-Review the dry run's report before the run, and pass the `sha256:` value from its last line, `dry-run: plan digest <digest> over <K> row(s)`, as `<digest>`. The service environment carries `PODIUM_SIGN: "none"`, so the command rewrites without signing and needs no other setting. A stack started on a new volume holds no manifest row at its first start and records the migration then.
-
-### Layers and webhooks registered before 0.5.0
-
-On a multi-tenant registry, each layer request acts in the tenant the caller's organization selects. Layers and webhooks registered on a multi-tenant registry before 0.5.0 need the following changes:
-
-- **Layers.** Layers that a caller registered before 0.5.0 remain in the default tenant, because the registry previously stored every layer there. The owner registers the layer again from the owning tenant. An admin of the default tenant, such as a bootstrap admin whose organization is `default`, removes the stale row with `podium layer unregister`, because the owner's own requests no longer reach the default tenant.
-- **Git webhooks.** Git layers registered before 0.5.0 need their webhook re-registered on the source repository with the URL `/v1/ingest/webhook/<tenant-id>/<layer-id>`. This includes the default tenant's layers, whose segment is the default tenant's ID rather than the name `default`.
-
-### Later upgrades
-
-A later upgrade runs `helm upgrade podium ./deploy/helm/podium -f podium-values.yaml` with the new image tag. No Job renders, and the default rolling update applies.
-
-- A release whose changelog names a new stored-value migration follows this procedure again.
-- A release whose changelog names a rollback floor rolls with the default rolling update from a version at or above the floor. From a version below the floor, scale the Deployment to zero replicas before the upgrade, and pass neither `--rollback-on-failure` nor `--atomic`. [Rollback floor for the layer credential columns](#rollback-floor-for-the-layer-credential-columns) states the floor for 0.7.0.
-
-Key rotation runs `sign-stored-rows` on a serving pod with `kubectl exec`, as [Rotating the signing key across replicas](signing-keys#rotating-the-signing-key-across-replicas) shows. A rerun of the migration command after step 5 takes the same route, with a dry run first and its plan digest passed to the run:
-
-```bash
-kubectl exec deployment/podium-podium -- /usr/local/bin/podium-server sign-stored-rows --include-unsigned --dry-run
-kubectl exec deployment/podium-podium -- /usr/local/bin/podium-server sign-stored-rows --include-unsigned --plan-digest=<digest>
-```
-
-Over the migrated store, the rerun rewrites no content hash. `--include-unsigned` attests every unsigned row the reviewed dry run lists, such as a row a failed run held back. Review each row the dry run lists with `signed_by=unsigned` and `sign=true`, and pass the `sha256:` value from its last line as `<digest>`. The run refuses with exit status 3, writing nothing, when its plan differs from the reviewed one. A deployment that set `migration.includeUnsigned=false`, including every deployment with `signing.mode=none`, drops `--include-unsigned` from both commands, and its run then takes `--plan-digest` optionally.
-
-### Recovering from a failed run
-
-A run Job that fails leaves the completion record unset and the Deployment at zero replicas, and `helm upgrade` exits non-zero. A serving render before a later run succeeds starts pods that exit at start, rewriting no manifest row, signing no row, and recording no completion.
+A run Job that fails leaves the completion record unset and the Deployment at zero replicas, and `helm upgrade` exits non-zero. Until a later run succeeds, a serving render starts pods that exit at start.
 
 | Symptom | Cause | Fix |
 |:--|:--|:--|
@@ -222,13 +316,13 @@ The command reads object storage only while it builds its plan. It logs the per-
 
 When Helm stops waiting while the Job still runs, the Job keeps running. Wait for it with `kubectl wait job/podium-podium-migrate --for=condition=Complete --timeout=6h`. When that wait times out, read `kubectl get job podium-podium-migrate -o jsonpath='{.status.failed}'`: a value of `1` or more means the run failed, and the rows above apply. Run step 5 only after the wait returns `condition met`.
 
-### Service mesh sidecars
+#### Service mesh sidecars
 
 On a service mesh that injects a sidecar into the Job pod, a sidecar that keeps running after the command exits holds the Job open until Helm times out. Native sidecars, on Kubernetes 1.28 or later with the mesh's native-sidecar mode, stop with the main container and need no change.
 
 Otherwise, set the mesh's opt-out in `migration.podAnnotations`, such as `sidecar.istio.io/inject: "false"` or `linkerd.io/inject: disabled`, when the store is reachable without the mesh. Istio reads the `sidecar.istio.io/inject` pod label ahead of the annotation of the same name. When `podLabels` enables injection through that label, set the opt-out label in `migration.podLabels` instead. The Job pod takes `podLabels` and `podAnnotations`, and `migration.podLabels` and `migration.podAnnotations` win over them per key. The chart sets no opt-out by default, because a mesh that enforces mTLS to Postgres or to the object store would then block the Job.
 
-### Rollback
+#### Rollback
 
 `helm rollback` after step 4 reinstalls the v0.4.0 binary over rows it cannot read, and the chart cannot block it. Roll back only through the step 2 backup:
 
@@ -243,9 +337,9 @@ kubectl delete job -l app.kubernetes.io/instance=podium,app.kubernetes.io/compon
 
 The hook Job is outside the release manifest, so it also remains after `helm uninstall`, and the same command removes it.
 
-### GitOps controllers
+#### GitOps controllers
 
-The chart reads nothing from the cluster, so a controller that renders it with `helm template`, such as Argo CD, renders the manifests `helm upgrade` renders from the same values. Argo CD runs the migrate Job, a Helm `post-install` and `post-upgrade` hook, as a PostSync hook, and applies `before-hook-creation` to it, so each sync that renders the Job replaces the previous one. Run the upgrade as four value commits, and let each sync finish before the next commit:
+The chart reads nothing from the cluster, so a controller that renders it with `helm template`, such as Argo CD, renders the manifests `helm upgrade` renders from the same values. Argo CD runs the migrate Job, a Helm `post-install` and `post-upgrade` hook, as a PostSync hook, and applies `before-hook-creation` to it, so each sync that renders the Job replaces the previous one. Run the upgrade as the following value commits, and let each sync finish before the next commit:
 
 1. Commit `replicaCount: 0` with this release's image, the signing Secret, or `signing.mode: none` with `migration.includeUnsigned: false`, and `migration.previousImage`. After the sync, run the `kubectl wait` of step 2 and take the backup.
 2. Commit `migration.mode: dry-run`, and capture the Job's log to `dry-run.log` as step 3 does once the Job appears. Review it as step 3 states.
@@ -262,120 +356,42 @@ kubectl logs -f job/podium-podium-migrate --pod-running-timeout=10m > dry-run.lo
 
 A sync that repeats a hook reruns the committed step. A repeated dry run writes nothing, and a repeated run after a successful one exits with status 3 and writes nothing, because the recorded completion changes its plan.
 
----
+#### Later upgrades
 
-## Upgrading from an earlier release
+A later upgrade runs `helm upgrade podium ./deploy/helm/podium -f podium-values.yaml` with the new image tag. No Job renders, and the default rolling update applies.
 
-### Rollback floor for the layer credential columns
+- A release whose changelog names a new stored-value migration follows this procedure again.
+- A release whose changelog names a rollback floor rolls with the default rolling update from a version at or above the floor. From a version below the floor, scale the Deployment to zero replicas before the upgrade, and pass neither `--rollback-on-failure` nor `--atomic`. [Rollback floor for the layer credential columns](#rollback-floor-for-the-layer-credential-columns) states the floor for 0.7.0.
 
-From 0.7.0, the SQLite and Postgres metadata stores write a `git` layer's URL credential apart from the rest of its remote. The lowest version that runs against a database 0.7.0 has written to is 0.6.0, both for a rollback and for mixed-version replicas.
+Key rotation runs `sign-stored-rows` on a serving pod with `kubectl exec`, as [Rotating the signing key across replicas](signing-keys#rotating-the-signing-key-across-replicas) shows. A rerun of the migration command after step 5 takes the same route, with a dry run first and its plan digest passed to the run:
 
-#### How 0.7.0 stores the credential
+```bash
+kubectl exec deployment/podium-podium -- /usr/local/bin/podium-server sign-stored-rows --include-unsigned --dry-run
+kubectl exec deployment/podium-podium -- /usr/local/bin/podium-server sign-stored-rows --include-unsigned --plan-digest=<digest>
+```
 
-- For a `repo` that is a URL with a scheme and userinfo, and that a layer read does not report as `[redacted]`, `layer_configs.repo_userinfo` receives the userinfo and `layer_configs.repo` receives the rest of the URL.
-- Every other `repo` is held whole in `repo`. This covers an scp-like remote, a filesystem path, and a value reported as `[redacted]`.
-- `repo_userinfo` holds the credential unencrypted. A SQL export of `layer_configs` needs both columns to reproduce a layer's remote, and it carries a secret when it includes `repo_userinfo`.
+Over the migrated store, the rerun rewrites no content hash. `--include-unsigned` attests every unsigned row the reviewed dry run lists, such as a row a failed run held back. Review each row the dry run lists with `signed_by=unsigned` and `sign=true`, and pass the `sha256:` value from its last line as `<digest>`. The run refuses with exit status 3, writing nothing, when its plan differs from the reviewed one. A deployment that set `migration.includeUnsigned=false`, including every deployment with `signing.mode=none`, drops `--include-unsigned` from both commands, and its run then takes `--plan-digest` optionally.
 
-Each 0.7.0 start whose listener binds rewrites, before it serves, every row that holds such a URL whole in `repo` into that form, a soft-deleted layer's row included. It logs how many rows it rewrote.
+### Upgrade a Docker Compose evaluation stack
 
-- The same start sets to NULL a `repo_userinfo` that sits beside a `repo` held whole, such as an scp-like remote or a path, because the registry ignores that column when it reads such a row. The logged count includes those rows.
-- The start changes no other column, and the layer is reported and cloned as before.
-- A row that another process writes while the start runs is left as that process wrote it.
-- The rewrite moves the credential between two columns of one row. It does not remove the credential from a backup, a replica, or storage the database has not yet reused.
+Signing off does not exempt the [Docker Compose evaluation stack](../modes/docker-compose#evaluating-with-docker-compose) from the stored-row migration of 0.5.0. Its store is Postgres, which a start does not rewrite, so a stack whose `postgres_data` volume holds rows a v0.4.0 registry wrote is refused at the upgraded registry's first start, as [Stores that need `sign-stored-rows` before a start](signing-keys#stores-that-need-sign-stored-rows-before-a-start) describes.
 
-The rewrite is a change of stored form that 0.6.0 already reads. It records no completion and needs no `sign-stored-rows` run. [Releases that migrate stored values](upgrading#releases-that-migrate-stored-values) does not apply: the canary phase runs as usual, and the store needs no backup restore to roll back.
+Upgrade such a stack by stopping the registry, rebuilding its image, running `sign-stored-rows` once through the registry service, and then starting the stack:
 
-#### Mixed 0.6.0 and 0.7.0 replicas
+```bash
+docker compose stop registry
+docker compose build registry
+docker compose run --rm registry sign-stored-rows --dry-run
+docker compose run --rm registry sign-stored-rows --plan-digest=<digest>
+docker compose up -d
+```
 
-Replicas on 0.6.0 and on 0.7.0 that share a Postgres store read and clone identically. A 0.6.0 replica writes the whole URL to `repo` on every layer write it makes, so a row can change form in either direction during the roll. A row that a 0.6.0 replica writes after the last 0.7.0 replica started holds the whole URL until its next 0.7.0 write or the next 0.7.0 start. Restart a 0.7.0 replica after the last 0.6.0 replica has stopped to rewrite those rows at once.
+Review the dry run's report before the run, and pass the `sha256:` value from its last line, `dry-run: plan digest <digest> over <K> row(s)`, as `<digest>`. The service environment carries `PODIUM_SIGN: "none"`, so the command rewrites without signing and needs no other setting. A stack started on a new volume holds no manifest row at its first start and records the migration then.
 
-A request that a 0.6.0 replica serves during the roll is answered as 0.6.0 answers it:
+### Layers and webhooks registered before 0.5.0
 
-- 0.6.0 accepts a `repo` that carries the credential in its URL, which 0.7.0 refuses.
-- 0.6.0 ignores the `repo_username`, `repo_token`, and `clear_repo_credential` members. A registration that carries those members therefore stores the remote with no credential. An update that carries them reports success and leaves the stored credential as it was.
-- A registration that sends back the remote `podium layer list` reports for a layer that holds a credential is refused with `details.constraint: "redacted_repo"`.
+From 0.5.0, each layer request on a multi-tenant registry acts in the tenant the caller's organization selects. Layers and webhooks registered before 0.5.0 need the following changes:
 
-Make every request that sets, rotates, or removes a credential, or that re-registers a layer holding one, after the last 0.6.0 replica has stopped. Repeat at that point any such request made during the roll.
-
-#### Declared layers
-
-0.6.0 and earlier ignore the `source.git.username` and `source.git.token` keys of a declared layer. 0.7.0 reads a credential in the userinfo of `source.git.repo` and one in the two keys.
-
-- Keep a declared private layer's credential in `source.git.repo` through the rollout, and for as long as a 0.6.0 process may start on the configuration. Then move it to the two keys.
-- A 0.6.0 process that starts on a configuration that uses the keys, on a rollback or as a replica that restarts during the roll, writes the declared layer with no credential. Its private remote then fails with `ingest.source_unreachable` on every replica that shares the store until a 0.7.0 process starts.
-- Before rolling back to 0.6.0, move each declared credential back into the percent-encoded userinfo of `source.git.repo` and remove both keys.
-
-#### Upgrading directly from 0.5.2 or earlier
-
-An upgrade from 0.5.2 or earlier directly to 0.7.0 stops every replica before the first 0.7.0 replica starts, and its rollback target is 0.6.0. On a Helm chart deployment, such an upgrade passes neither `--rollback-on-failure` nor `--atomic`, because an automatic rollback reinstalls a binary below the floor. An upgrade through 0.6.0 has neither restriction.
-
-#### Running 0.5.2 against a database 0.7.0 has written to
-
-This combination is unsupported. A 0.5.2 process does not read `repo_userinfo`, with the following effects:
-
-- **Layers registered through the API or the CLI.** After the first 0.7.0 start, every such layer whose `repo` is a URL with a scheme and userinfo holds its credential apart. 0.5.2 clones such a layer without the credential, so a private remote fails with `ingest.source_unreachable`. A registration that carries the layer's listed remote is not refused.
-- **Layers declared with the credential in `source.git.repo`.** The layer is written from the configured URL at each start and clones as before.
-- **Layers declared with `source.git.username` and `source.git.token`.** The layer is written with no credential, because 0.5.2 ignores both keys.
-
-On SQLite, a 0.5.2 write of the layer clears `repo_userinfo`. Such a write is an update, a reorder, a re-registration, a start for a declared layer, or a completed ingest. The layer then needs its credential set again:
-
-- On 0.6.0, by a registration with the full URL.
-- On 0.7.0, for an `http` or `https` remote, with `podium layer update --repo-username <name> --repo-token-file <path>`. `--repo-username` names the username the provider expects, because the cleared row holds none.
-- On 0.7.0, for an `ssh://` remote, by a registration with the full `ssh://` URL, login name included, because `podium layer update` takes no credential member on such a layer.
-
-On Postgres, a 0.5.2 write leaves the column as it is. If a re-registration under 0.5.2 replaced the layer's `repo` with a different URL that carries no userinfo, the column still holds the earlier credential, and 0.6.0 or later joins it to the new remote when it reads the row. Before that layer is ingested on 0.6.0 or later, remove or replace the stale credential:
-
-- **On 0.6.0.** Re-register the layer with the full URL of the new remote, or with the userinfo-free URL and `--force-repo-overwrite` (`force_repo_overwrite: true`). A re-registration with the userinfo-free URL and no override is refused with `details.constraint: "redacted_repo"`. The 0.6.0 CLI has neither update flag, and a 0.6.0 registry answers an update that carries either member with success and changes nothing.
-- **On 0.7.0, for an `http` or `https` remote.** Remove the credential with `podium layer update --clear-repo-credential`, or replace it with `podium layer update --repo-username <name> --repo-token-file <path>`. The replacement names the username because an update that omits it keeps the stale one. A re-registration with the userinfo-free URL alone is the re-registration with the listed remote that [Private repositories](../content/layer-sources#private-repositories) describes, and it keeps the stored credential, here the stale one. One that also passes `--clear-repo-credential`, or `--repo-username` with `--repo-token-file`, stores only what it carries.
-- **On 0.7.0, for an `ssh://` remote.** Re-register the layer with that URL as wanted, without userinfo or with its login name, which stores no stale credential, because `podium layer update` takes no credential member on such a layer.
-
-An update does not change `repo`, so a layer that was only updated under 0.5.2 needs no re-registration. A layer declared in the registry configuration needs none either, because each start writes both columns from the declaration. 0.6.0 reads the declaration from `source.git.repo` alone, and 0.7.0 reads it from `source.git.repo` or from `source.git.username` and `source.git.token`.
-
----
-
-## Upgrading from an earlier release
-
-These facts apply to a store that holds rows an earlier release ingested from an `ARTIFACT.md` that declares `extends:`.
-
-### What readers see
-
-- No read path serves such a row. `latest` resolves to the artifact's most recent other version.
-- An ID whose retired row overlaid a lower layer's artifact serves the lower layer's copy when no other layer holds a served row of the ID.
-- An artifact with no other version answers `registry.not_found`.
-- A retired version's `delegates_to` and `mcpServers` references stay in impact analysis while another version of the artifact is served.
-
-### Ingesting the ID again
-
-A retired row is not a collision:
-
-- When only one layer holds a served row of the ID, that layer ingests new versions of the artifact ID without `ingest.collision`.
-- An ID with no served row is ingested by any layer without `ingest.collision`.
-- The retired row still holds its `(id, version)`, so other bytes at that version are rejected with `ingest.immutable_violation`.
-
-### Copies admitted from several layers
-
-An earlier release also admitted a plain copy of the ID from a further layer while an overlay row was stored. When served rows of the ID remain in two or more layers, `latest` serves the most recently ingested of them. Every later ingest of the ID from those layers is rejected with `ingest.collision`, including a re-ingest of unchanged bytes.
-
-To recover, keep one of those layers:
-
-1. Remove the declaration of each layer to drop from the registry configuration. A declared layer is re-seeded at each start.
-2. Unregister all but one of those layers with `podium layer unregister`. Unregistering soft-deletes every row of each unregistered layer, so its other artifacts stop serving too.
-3. Wait until the recovery window ends and the purge removes the soft-deleted rows.
-4. Register a removed source again, without the artifact, and declare it again if it was declared.
-
-Before the purge, the soft-deleted rows still hold their artifacts' versions. A registration under any layer ID then serves none of the source's artifacts at an unchanged version, even when the ingest reports them accepted, and it rejects a skill with no declared version as `auto_version_duplicate_content`.
-
-### Clients that loaded a retired version
-
-Retiring an artifact's newest rows lowers the version `latest` resolves to. A `podium-mcp` that loaded a retired version as `latest` refuses the older one with `materialize.stale_resolution`.
-
-1. Stop every MCP server that uses the cache directory.
-2. Run `podium cache reset-revisions <id>`.
-3. For a `podium-mcp` in `offline-first` or `offline-only` that cached a merged artifact, also run `podium cache prune --days 0`. That command leaves the revision marks in place.
-
-## Credentials stored by an earlier release
-
-- A layer whose stored remote carries its credential in the URL keeps cloning with it. `podium layer update --repo-token-file` or `--clear-repo-credential` replaces or removes that credential.
-- A stored username that contains `:`, `/`, `"`, a space, or a control character cannot be kept. A rotation of such a layer passes `--repo-username` with `--repo-token-file`.
-- A layer stored in the URL-token form `https://<token>@host` holds no username. A rotation of it passes `--repo-username` where the provider expects one.
-- A declaration that sets neither `username` nor `token` is written as declared. A credential in the userinfo of `source.git.repo`, which is the form 0.6.0 and earlier read, keeps working. Each start logs a line that names the layer and asks for the credential to move to the two keys.
+- **Layers.** On a multi-tenant registry, layers that a caller registered before 0.5.0 remain in the default tenant, because the registry previously stored every layer there. The owner registers the layer again from the owning tenant. An admin of the default tenant, such as a bootstrap admin whose organization is `default`, removes the stale row with `podium layer unregister`, because the owner's own requests no longer reach the default tenant.
+- **Git webhooks.** On a multi-tenant registry, Git layers registered before 0.5.0 need their webhook re-registered on the source repository with the URL `/v1/ingest/webhook/<tenant-id>/<layer-id>`. This includes the default tenant's layers, whose segment is the default tenant's ID rather than the name `default`. Single-tenant registries keep `/v1/ingest/webhook/<layer-id>`.
+- **Outbound webhook receivers.** A `PODIUM_WEBHOOK_STORE_PATH` file written before 0.5.0 keys every receiver under a key that matches no tenant, so after the upgrade those receivers are neither listed nor delivered to. Before upgrading, record each receiver's `url`, `event_filter`, and `debounce` from `GET /v1/webhooks`, and its secret from the store file, because the API returns the secret masked. After upgrading, register each receiver again with `POST /v1/webhooks`, passing the recorded `secret`. A deployment without `PODIUM_WEBHOOK_STORE_PATH` keeps receivers in memory and re-registers them after every restart in any case.

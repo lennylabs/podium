@@ -100,10 +100,7 @@ runtime_requirements:
   system_packages: [git]
 ```
 
-Re-run `podium sync`. The requirement ships with the artifact, and consumers treat it as follows:
-
-- A host that advertises its runtime capabilities to the Podium MCP server refuses a `load_artifact` it cannot satisfy, with `materialize.runtime_unavailable` naming the missing package.
-- A host that advertises no capabilities and does not opt into enforcement receives the requirement and proceeds.
+Re-run `podium sync`. The requirement ships with the artifact. `podium sync` does not check it, and the Podium MCP server refuses the load with `materialize.runtime_unavailable` naming the missing package when the host advertises its packages or opts into enforcement. [Execution model](bundled-resources#execution-model) describes each case.
 
 ---
 
@@ -123,17 +120,18 @@ EOF
 chmod +x ~/podium-artifacts/personal/dev-loop/commit-message-writer/scripts/staged-diff.sh
 ```
 
-Reference the script from the prose body by its package-relative path:
+Replace the "Read the staged diff using your shell tools." sentence in the prose body with these two sentences:
 
 ```markdown
-Read the staged diff by running [scripts/staged-diff.sh](scripts/staged-diff.sh).
+Read the staged diff by running [scripts/staged-diff.sh](scripts/staged-diff.sh). Run it from the project root as `bash .claude/podium/personal/dev-loop/commit-message-writer/scripts/staged-diff.sh`.
 ```
 
-Lint resolves markdown links in the body against the artifact's bundled files at ingest, so a link to a path the package does not contain fails the check. A path written as inline code is not checked.
+The two sentences name the script in two forms, each with its own purpose:
 
-The script materializes into the harness's bundled-resource location rather than next to the agent file. For Claude Code, the path is `.claude/podium/personal/dev-loop/commit-message-writer/scripts/staged-diff.sh`.
+- The markdown link uses the package-relative path, so lint confirms that the script ships with the package. [Referencing files from prose](bundled-resources#referencing-files-from-prose) describes how lint resolves links. Lint does not check a path written as inline code.
+- The inline path is where Claude Code installs the script. Claude Code writes the agent to `.claude/agents/commit-message-writer.md` and its bundled files under `.claude/podium/personal/dev-loop/commit-message-writer/`. The adapter copies agent prose verbatim and does not rewrite resource paths in it, so the link target does not exist beside the materialized agent file, and the agent runs the installed path instead.
 
-Materialization writes every bundled file with mode 0644, so the executable bit set on the registry copy does not carry over. The agent therefore runs the script through an interpreter: `bash .claude/podium/personal/dev-loop/commit-message-writer/scripts/staged-diff.sh`. [Bundled resources](bundled-resources) covers the file-layout conventions.
+Materialization writes every bundled file with mode 0644, so the executable bit set on the registry copy does not carry over, and the second sentence runs the script through `bash`. The other adapters that write agents install an agent's bundled files under `.podium/resources/<artifact-id>/`, so an agent written for another harness names that location instead. [Configure your harness](../consuming/configure-your-harness) lists the location for every harness.
 
 ---
 
@@ -177,7 +175,7 @@ delegates_to:
 
 You write conventional-commit messages.
 
-Read the staged diff by running [scripts/staged-diff.sh](scripts/staged-diff.sh). Identify the dominant change type and the affected area or module. Consult the `conventional-commits` reference for type meanings and scope conventions.
+Read the staged diff by running [scripts/staged-diff.sh](scripts/staged-diff.sh). Run it from the project root as `bash .claude/podium/personal/dev-loop/commit-message-writer/scripts/staged-diff.sh`. Identify the dominant change type and the affected area or module. Consult the `conventional-commits` reference for type meanings and scope conventions.
 
 Output one commit message in the form:
 

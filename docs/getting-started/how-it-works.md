@@ -36,15 +36,18 @@ deployment) or as a local directory. Most consumers work against a server, and
 
 ## Where each feature runs
 
-| Feature | What implements it | Where it runs | Covered in |
-|:--|:--|:--|:--|
-| Domains and subdomains | The catalog's directory layout, plus the `DOMAIN.md` metadata read from it. | In the catalog, in every deployment mode. | [Domains](../authoring/domains) |
-| Selective materialization | Scope resolution in `podium sync`, from the merged `sync.yaml` and the CLI flags. | On the consumer, in every deployment mode. | [Selective materialization](../consuming/selective-materialization) |
-| Progressive discovery | The meta-tools, backed by the domain renderer and hybrid retrieval. | On the registry, reached through the MCP server or an SDK. Requires single node or clustered. | [Browsing the catalog](../consuming/browsing-the-catalog) |
-| Layered composition | The layer composer, fed by the layer source providers. | On the registry. A local directory composes ordered layers from one root. Identity-aware composition across independent sources requires a server. | [Connecting layer sources](../deployment/content/layer-sources), [Layered composition](../deployment/content/layers) |
-| Security and access control | Signing at ingest, the visibility evaluator run against the caller's attested identity, and the audit log. Consumers verify signatures during materialization. | On the registry, with verification on the consumer. Visibility requires single node or clustered with an identity provider configured. | [Access control](../deployment/content/access-control) |
-| Observability | The audit destinations, the Prometheus metrics endpoint, the OpenTelemetry tracer, and the notification provider. | On the registry. The MCP server can also write a local audit stream, serve metrics, and export traces. | [Audit and observability](../deployment/operations/observability) |
-| Cross-harness delivery | The `HarnessAdapter` step of the materialization pipeline, shared by `podium sync`, the MCP server, and the SDKs. | On the consumer, in every deployment mode. | [Configure your harness](../consuming/configure-your-harness) |
+The table names the component that implements each feature and the side it
+runs on. [Why Podium](why-podium#features) describes the features themselves.
+
+| Feature | What implements it | Where it runs |
+|:--|:--|:--|
+| Domains and subdomains | The catalog's directory layout, plus the `DOMAIN.md` metadata read from it. | In the catalog, in every deployment mode. |
+| Selective materialization | Scope resolution in `podium sync`, from the merged `sync.yaml` and the CLI flags. | On the consumer, in every deployment mode. |
+| Progressive discovery | The meta-tools, backed by the domain renderer and hybrid retrieval. | On the registry server, reached through the MCP server or an SDK. |
+| Layered composition | The layer composer, fed by the layer source providers. | On the registry. A filesystem source composes ordered layers from one root, and identity-aware composition across independent sources runs on a server. |
+| Security and access control | Signing at ingest, the visibility evaluator run against the caller's verified identity, and the audit log. | On the registry server, with signature verification on the consumer. |
+| Observability | The audit destinations, the Prometheus metrics endpoint, the OpenTelemetry tracer, and the notification provider. | On the registry server. The MCP server can also write a local audit stream, serve metrics, and export traces. |
+| Cross-harness delivery | The `HarnessAdapter` step of the materialization pipeline, shared by `podium sync`, the MCP server, and the SDKs. | On the consumer, in every deployment mode. |
 
 ---
 
@@ -172,82 +175,21 @@ authentication, and no registry process.
 
 ## Deployment modes
 
-Podium runs in the deployment modes below. Each mode keeps what the mode before
-it does and adds server-side capability. Choose the mode that fits today and
-move to the next one when the catalog outgrows it.
-[Deployment](../deployment/) has the setup for each mode.
+The registry runs in the local, single-node, or clustered deployment mode.
+Each mode keeps what the mode before it does and adds server-side capability.
 
-### Local
+| Mode | What runs |
+|:--|:--|
+| Local | The `podium` CLI, reading a catalog directory. There is no server process, database, or identity provider. |
+| Single node | One registry process, started with `podium serve --standalone`, with SQLite, `sqlite-vec`, and filesystem object storage embedded. |
+| Clustered | Registry replicas behind a load balancer, with Postgres, S3-compatible object storage, and an OIDC identity provider. A Helm chart ships for Kubernetes. |
 
-The catalog is a directory of files, with no daemon and no authentication.
-`podium sync` reads the directory directly, applies layer composition and the
-harness adapter, and writes to the harness's destination.
-
-- **Who it is for.** Any team or individual whose catalog does not require
-  access control or progressive discovery. Solo workflows keep the directory
-  local, and teams commit it to Git so every developer runs `podium sync`
-  against their clone.
-- **What runs.** The `podium` CLI.
-- **What it covers.** Authoring, lint, sync, domains, and profiles. The
-  harness's own filesystem discovery does the loading at runtime.
-- **What it does not cover.** Progressive discovery through MCP or an SDK,
-  centralized audit, and identity-based visibility filtering.
-- **Multi-user.** Share the directory the way any folder is shared. Committing
-  to Git is the typical choice. The Git history doubles as the audit trail, and
-  `git pull` is each developer's ingest. A network share or a file-sync service
-  also works.
-- **Setup.** [Local](../deployment/modes/local).
-
-### Single node
-
-A single binary runs on one machine, with SQLite, sqlite-vec, and filesystem
-object storage embedded. Bind it to localhost or to a private network.
-
-Semantic search uses the embedding provider that `PODIUM_EMBEDDING_PROVIDER`
-selects:
-
-- `ollama`, pointed at a local model server, for offline or air-gapped use.
-- A cloud provider: `openai`, `voyage`, or `cohere`.
-
-When neither the variable nor `registry.yaml`'s `embedding_provider.type` is
-set, the provider defaults to `ollama` at `http://localhost:11434`. An
-unreachable provider degrades search to BM25 at runtime. Pass
-`--no-embeddings` to `podium serve`, or set `PODIUM_NO_EMBEDDINGS=true`, to
-disable embeddings and run BM25-only search.
-
-- **Who it is for.** A team of any size that wants progressive discovery
-  (agents calling the meta-tools mid-session) or a single audit log without
-  running the clustered stack. A team can stay local until runtime discovery
-  or centralized audit becomes necessary.
-- **What runs.** `podium serve --standalone --layer-path /path/to/dir`
-  plus the CLI.
-- **What it adds.** Progressive discovery through the MCP server and the SDKs,
-  hybrid search, layers and visibility, and one audit log covering every load.
-- **Migration path.** Point `podium serve --standalone` at the same directory
-  the local catalog uses, then change `defaults.registry` from a path to a URL.
-  The authoring loop is unchanged.
-- **Setup.** [Single node](../deployment/modes/single-node).
-
-### Clustered
-
-Registry replicas run behind a load balancer, with Postgres, pgvector, S3, and
-OIDC. A Helm chart ships with the registry, and the supporting services are
-managed or self-run alongside.
-
-- **Who it is for.** Larger teams and organizations, multi-tenant deployments,
-  governed environments, and anything with compliance constraints or
-  identity-based visibility requirements.
-- **What runs.** Registry replicas behind a load balancer, Postgres (managed or
-  self-run), object storage, and an OIDC IdP.
-- **What it adds.** High availability across registry replicas and Postgres
-  schema-per-org tenant isolation. Multi-tenancy, SCIM group push, freeze
-  windows, outbound webhooks, the hash-chained audit log, and its local
-  chain-head anchoring run on a single node as well.
-- **Migration path.** `podium admin migrate-to-standard` exports a single-node
-  deployment into the clustered stack. The same artifact directory becomes a
-  `local`-source layer until the cut-over to Git-source layers.
-- **Setup.** [Clustered](../deployment/modes/clustered) and the
-  [Operator guide](../deployment/operations/troubleshooting).
+Multi-tenancy, SCIM group push, freeze windows, outbound webhooks, and the
+hash-chained audit log run on a single node as well. The clustered mode adds
+high availability across registry replicas and Postgres schema-per-org tenant
+isolation. [Deployment modes](../deployment/modes/) covers choosing a mode, and
+[Moving between modes](../deployment/modes/migrating) covers the migration
+from one mode to the next.
 
 ---
 
@@ -315,26 +257,16 @@ network calls, spawn subprocesses, or write outside the destination.
 
 ### How resource bytes reach the consumer
 
-The registry returns metadata and the resource bytes below the inline cutoff
-in the response. Larger content follows these rules:
-
-- On a registry with an object store, a resource above the cutoff, and a
-  manifest above it, live in content-addressed object storage. They reach the
-  consumer as a URL the consumer fetches.
-- A registry without an object store keeps such a resource inline on the
-  manifest record and returns it inline. A resource held inline is returned
-  inline at any size.
-- With the S3 backend, the URL is presigned and expires after the configured
-  TTL. The fetch goes to object storage without passing through the registry.
-- With the filesystem backend, which a single node uses by default, the URL is
-  the registry's own `/objects/<content-hash>` route. It carries no signature
-  and no expiry. The consumer sends the session token it used for
-  `load_artifact`, and the registry re-checks visibility before streaming the
-  bytes.
-
-The MCP server resolves those URLs and writes every resource to disk, so the
-agent's result holds the manifest body and the file paths. The SDKs return the
-manifest in memory and resolve the references on a later `materialize()` call.
+The registry returns the manifest body and every bundled resource at or below
+the inline cutoff inside the `load_artifact` response. On a registry with an
+object store, each larger resource, and a manifest document above the cutoff,
+arrives as a URL into content-addressed object storage that the consumer
+fetches. The MCP server fetches those URLs and writes every resource to disk
+before it returns, while the SDKs return the manifest in memory and fetch the
+URLs on a later `materialize()` call.
+[Handling artifact responses](../consuming/handling-artifact-responses) covers
+the cutoff, the URL that each object-storage backend serves, and the resources
+that arrive inline at any size.
 
 ---
 
@@ -424,38 +356,26 @@ Python and TypeScript, and they work only against a Podium server.
 
 ## Identity and trust
 
-The registry attaches an OAuth-attested identity to every call. The built-in
-identity providers are listed below.
+With an identity provider configured, the registry verifies the caller's
+identity on every call. The registry-side identity providers are `oidc-jwt`,
+`trusted-headers`, and `injected-session-token`:
 
-- **`oauth-device-code`** is a client-side provider. The consumer runs the
-  interactive device-code flow (`podium login`) and caches the tokens in the
-  OS keychain. The registry ships no request-time verifier for it, so setting
-  `PODIUM_IDENTITY_PROVIDER=oauth-device-code` on the registry aborts startup
-  with `config.identity_provider_unverified`. The registry verifies
-  `injected-session-token`, `oidc-jwt`, and `trusted-headers`.
-- **`injected-session-token`** is a runtime-issued signed JWT for managed
-  agent runtimes (Bedrock Agents, OpenAI Assistants, and custom orchestrators).
-  The deployment configures the registry to trust the runtime's signing key at
-  startup through `PODIUM_RUNTIME_KEYS_PATH`, which
-  `podium admin runtime register --keys-file` writes. The registry verifies
-  signatures on every call.
-- **`oidc-jwt`** is a registry-process provider. The registry verifies the
-  caller's IdP-signed token itself on every request. A gateway may forward that
-  token, or the registry may obtain it for a browser through its own
+- **`oidc-jwt`** verifies an IdP-signed token on every request. A CLI or an SDK
+  obtains that token through the device-code flow (`podium login`), a gateway
+  may forward it, or the registry obtains it for a browser through its own
   authorization-code exchange.
-- **`trusted-headers`** is a registry-process provider for a registry behind a
-  gateway that already authenticated the caller. It reads the identity that
-  gateway injects as request headers. See
-  [Gateway-delegated identity](../deployment/identity/trusted-headers).
+- **`trusted-headers`** reads the identity that a fronting gateway injects as
+  request headers, for a registry behind a gateway that already authenticated
+  the caller.
+- **`injected-session-token`** verifies a JWT that a managed agent runtime
+  signs, against the runtime keys the registry trusts.
 
-A filesystem-source registry has no identity by definition, so the visibility
-evaluator short-circuits to `true` for every layer. A single-node deployment
-runs with or without auth, and with auth it uses the same OIDC machinery as a
-clustered deployment.
-
-`tenant.expose_scope_preview` controls whether aggregate visibility counts
-(artifact count, by-type, and by-sensitivity) are exposed to callers. Turning
-it off suits tenants where even those aggregates would leak signal.
+The registry composes each caller's effective view from the layers whose
+visibility matches that identity. A filesystem source has no identity, so the
+visibility evaluator admits every layer. A single-node deployment runs with or
+without an identity provider, and with one it uses the same machinery as a
+clustered deployment. [Identity](../deployment/identity/) covers each provider
+and its configuration.
 
 ### Signing
 
@@ -463,8 +383,9 @@ The registry signs each artifact version at ingest with a registry-managed
 Ed25519 key, and signing is on by default. Each response carries a delivery
 signature over the served record. The MCP server and server-source
 `podium sync` verify it before they write anything, as step 2 of the
-materialization pipeline. [Access control](../deployment/content/access-control)
-covers the verification policy a consumer applies.
+materialization pipeline. [Verifying deliveries](../consuming/verifying-deliveries)
+covers the verification policy a consumer applies, and
+[Signing keys](../deployment/operations/signing-keys) covers the key itself.
 
 ### Audit
 

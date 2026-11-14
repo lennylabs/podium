@@ -16,16 +16,16 @@
     install-over-an-existing-v040-store: deployment/operations/upgrade-notes#install-over-an-existing-v040-store
     later-upgrades: deployment/operations/upgrade-notes#later-upgrades
     layers-and-webhooks-registered-before-050: deployment/operations/upgrade-notes#layers-and-webhooks-registered-before-050
-    migration-from-single-node: deployment/modes/migrating#migration-from-single-node
+    migration-from-single-node: deployment/modes/migrating#single-node-to-clustered
     multi-tenant-startup-refusals: deployment/modes/helm-chart#multi-tenant-startup-refusals
     recovering-from-a-failed-run: deployment/operations/upgrade-notes#recovering-from-a-failed-run
     rollback: deployment/operations/upgrade-notes#rollback
     rotating-the-signing-key-across-replicas: deployment/operations/signing-keys#rotating-the-signing-key-across-replicas
     service-mesh-sidecars: deployment/operations/upgrade-notes#service-mesh-sidecars
-    signing-key-mismatches-after-migration: deployment/modes/migrating#signing-key-mismatches-after-migration
-    signing-key-operations: deployment/operations/signing-keys#signing-key-operations
+    signing-key-mismatches-after-migration: deployment/modes/migrating#if-the-key-step-was-skipped
+    signing-key-operations: deployment/operations/signing-keys#rotating-the-signing-key
     signing-values: deployment/modes/helm-chart#signing-values
-    stored-row-migration-at-start: deployment/modes/helm-chart#stored-row-migration-at-start
+    stored-row-migration-at-start: deployment/modes/helm-chart#stored-row-migration
     upgrade-a-docker-compose-evaluation-stack: deployment/operations/upgrade-notes#upgrade-a-docker-compose-evaluation-stack
     upgrade-with-signing-off: deployment/operations/upgrade-notes#upgrade-with-signing-off
     upgrade-with-signing-on: deployment/operations/upgrade-notes#upgrade-with-signing-on
@@ -38,14 +38,13 @@
 - from: deployment/gateway-delegated-identity
   to: deployment/identity/trusted-headers
   anchors:
-    a-gateway-that-rewrites-host: deployment/identity/#a-gateway-that-rewrites-host
     configure-oidc-jwt: deployment/identity/oidc/#configure-oidc-jwt
     group-membership-under-oidc-jwt: deployment/identity/oidc/#group-membership-under-oidc-jwt
-    how-it-works: deployment/identity/#how-it-works
+    how-it-works: deployment/identity/#identity-providers
     issuer-matching: deployment/identity/oidc/#issuer-matching
     layer-visibility-default: deployment/identity/#layer-visibility-default
     multiple-audiences: deployment/identity/oidc/#multiple-audiences
-    oidc-jwt: deployment/identity/oidc/#oidc-jwt
+    oidc-jwt: deployment/identity/oidc/#how-oidc-identity-works
     oidc-jwt-settings: deployment/identity/oidc/#oidc-jwt-settings
     provisioning-tenants: deployment/identity/tenants#provisioning-tenants
     request-outcomes: deployment/identity/oidc/#request-outcomes
@@ -65,15 +64,15 @@
     clients-that-loaded-a-retired-version: deployment/operations/upgrade-notes#clients-that-loaded-a-retired-version
     copies-admitted-from-several-layers: deployment/operations/upgrade-notes#copies-admitted-from-several-layers
     ingesting-the-id-again: deployment/operations/upgrade-notes#ingesting-the-id-again
-    upgrading-from-an-earlier-release: deployment/operations/upgrade-notes#upgrading-from-an-earlier-release
+    upgrading-from-an-earlier-release: deployment/operations/upgrade-notes#060-extends-removal
     what-readers-see: deployment/operations/upgrade-notes#what-readers-see
 - from: deployment/local
   to: deployment/modes/local
   anchors:
-    migration-paths: deployment/modes/migrating#migration-paths
+    migration-paths: deployment/modes/migrating#local-to-single-node
     skills-that-declare-no-version: deployment/modes/migrating#skills-that-declare-no-version
-    to-clustered: deployment/modes/migrating#to-clustered
-    to-single-node: deployment/modes/migrating#to-single-node
+    to-clustered: deployment/modes/migrating#local-to-clustered
+    to-single-node: deployment/modes/migrating#local-to-single-node
 - from: deployment/observability
   to: deployment/operations/observability
 - from: deployment/oidc/
@@ -104,7 +103,7 @@
     loads-fail-with-materializesignature_missing: deployment/operations/signing-keys#loads-fail-with-materializesignature_missing
     mixed-060-and-070-replicas: deployment/operations/upgrade-notes#mixed-060-and-070-replicas
     mixed-version-replicas: deployment/operations/upgrading#mixed-version-replicas
-    monitoring-audit-and-alerting: deployment/operations/observability#monitoring-audit-and-alerting
+    monitoring-audit-and-alerting: deployment/operations/observability
     outbound-webhook-receivers: deployment/operations/outbound-webhooks#outbound-webhook-receivers
     output-and-exit-status: deployment/operations/signing-keys#output-and-exit-status
     podium-mcp-refuses-to-start-with-configsignature_provider_unavailable: deployment/operations/signing-keys#podium-mcp-refuses-to-start-with-configsignature_provider_unavailable
@@ -125,7 +124,7 @@
     signing-unsigned-rows: deployment/operations/signing-keys#signing-unsigned-rows
     tamper-checks: deployment/operations/security-review#tamper-checks
     test-a-restore: deployment/operations/backup-restore#test-a-restore
-    the-key-file-is-lost-after-the-first-start-rewrite-has-completed: deployment/operations/signing-keys#the-key-file-is-lost-after-the-first-start-rewrite-has-completed
+    the-key-file-is-lost-after-the-first-start-rewrite-has-completed: deployment/operations/signing-keys#losing-the-signing-key
     the-key-file-is-present-but-is-not-the-key-that-signed-the-stored-rows: deployment/operations/signing-keys#the-key-file-is-present-but-is-not-the-key-that-signed-the-stored-rows
     the-registry-or-sign-stored-rows-refuses-with-configsignature_provider_unavailable-naming-the-key-file: deployment/operations/signing-keys#the-registry-or-sign-stored-rows-refuses-with-configsignature_provider_unavailable-naming-the-key-file
     the-registry-refuses-to-start-and-names-sign-stored-rows: deployment/operations/signing-keys#the-registry-refuses-to-start-and-names-sign-stored-rows
@@ -134,18 +133,16 @@
     troubleshooting: deployment/operations/observability#troubleshooting
     upgrade-procedure: deployment/operations/upgrading#upgrade-procedure
     upgrading-directly-from-052-or-earlier: deployment/operations/upgrade-notes#upgrading-directly-from-052-or-earlier
-    upgrading-from-an-earlier-release: deployment/operations/upgrade-notes#upgrading-from-an-earlier-release
+    upgrading-from-an-earlier-release: deployment/operations/upgrade-notes#070-unreleased
     what-to-back-up: deployment/operations/backup-restore#what-to-back-up
 - from: deployment/single-node
   to: deployment/modes/single-node
   anchors:
-    backup: deployment/operations/backup-restore#backup
     carry-the-signing-key: deployment/modes/migrating#carry-the-signing-key
     if-the-key-step-was-skipped: deployment/modes/migrating#if-the-key-step-was-skipped
     losing-the-signing-key: deployment/operations/signing-keys#losing-the-signing-key
-    migrating-to-clustered: deployment/modes/migrating#migrating-to-clustered
+    migrating-to-clustered: deployment/modes/migrating#single-node-to-clustered
     rewrite-of-stored-content-hashes: deployment/modes/migrating#rewrite-of-stored-content-hashes
-    upgrades: deployment/operations/upgrading#upgrades
 - from: deployment/vector-backends
   to: deployment/services/vector-backends
 - from: reference/frontmatter-schema

@@ -6,7 +6,7 @@ description: Extend a Podium registry with tooling built on its HTTP API, SDKs, 
 
 # Extending
 
-This page covers the ways to extend a Podium registry, for operators and platform engineers who need behavior the built-in configuration does not provide. It describes the pluggable interfaces (SPIs), the extension patterns built on the registry's public surfaces, and the constraints a plugin author follows.
+This page covers the ways to extend a Podium registry, for operators and platform engineers who need behavior the built-in configuration does not provide. It describes the pluggable interfaces (SPIs), the extension patterns built on the registry's public surfaces, and how a plugin ships. The last section states the constraints that keep a plugin compatible with a future out-of-process protocol.
 
 ---
 
@@ -52,14 +52,14 @@ The registry's pluggable interfaces are listed below. A plugin implements one of
 | `LocalAuditSink` | Writes the local audit log of meta-tool calls, when configured. | A JSON Lines file at `~/.podium/audit.log` |
 | `HarnessAdapter` | Translates canonical artifacts to a harness's native format at materialization time. | The built-in harness adapters |
 | `MaterializationHook` | Transforms each materialized file before it is written. Uses include redacting secrets, rewriting paths, injecting team-specific headers, and enforcing content policy. | None |
-| `NotificationProvider` | Delivers operational notifications. The registry sends one today when a layer ingest fails. See [Notifications](../operations/observability#notifications). | `log`, `webhook`, `email`, and `multi` |
+| `NotificationProvider` | Delivers operational notifications. The registry sends one when a layer ingest fails. See [Notifications](../operations/observability#notifications). | `log`, `webhook`, `email`, and `multi` |
 | `SignatureProvider` | Signs and verifies artifacts. | `noop`, `registry-managed`, and `sigstore-keyless` |
 
 ### Configuration notes
 
 - **`RegistryAuditSink`.** The `audit.Sink` interface is the seam. The stream is logically distinct from `RegistryStore`, separately mockable, and separately routable. An operator lists its destinations (file, HTTP, OTLP, and stdout) in `PODIUM_AUDIT_LOG_PATH`. The file destination `audit.FileSink` is the default in both deployment modes. [Audit events](../../reference/audit-events) lists the events.
 - **`LocalAuditSink`.** The default file is user-wide, with one file across all workspaces. Redirect it to a workspace-local path, or add HTTP and OTLP destinations, through `PODIUM_AUDIT_SINK`.
-- **`IdentityProvider`.** The client-side built-ins acquire the token at the consumer: `oauth-device-code` and `injected-session-token`. The registry-process built-ins resolve identity from the request at the registry: `oidc-jwt` and `trusted-headers`. [Gateway-delegated identity](../identity/trusted-headers) covers the registry-process providers.
+- **`IdentityProvider`.** The client-side built-ins acquire the token at the consumer: `oauth-device-code` and `injected-session-token`. The registry-process built-ins resolve identity from the request at the registry: `oidc-jwt` and `trusted-headers`. [Identity](../identity/) covers the registry-process providers.
 - **`HarnessAdapter`.** The adapter `Source` carries a plugin descriptor: the plugin name, an optional description, and the harness subtree prefix. A marketplace emitter uses it to render an artifact into a named plugin when `podium sync` renders a `kind: marketplace` target.
 - **`NotificationProvider`.** `PODIUM_NOTIFICATION_PROVIDER` selects the provider. An unset variable and `noop` both wire no notifier. `email` delivers over SMTP and is also accepted as `smtp`. `multi` combines the log provider with whichever of webhook and email is configured.
 - **`SignatureProvider`.** `podium sign`, `podium verify`, and `podium-mcp` read `PODIUM_SIGNATURE_PROVIDER` and fall back to `registry-managed`. `podium-mcp` accepts `registry-managed` and `noop` only, because every delivery signature it verifies is registry-managed. The `noop` provider refuses every signature it is asked to verify. The registry signs each accepted manifest at ingest with its registry-managed key by default, and `PODIUM_SIGN=none` or `--sign none` turns ingest signing off.
@@ -79,6 +79,10 @@ A script selects artifacts by whatever context matters to the team: a semantic m
 The script owns the discovery logic. Podium owns the materialization, which covers visibility filtering, harness adaptation, and audit. The on-disk result is reproducible from the include list.
 
 [Building custom consumers with the SDK](../../consuming/custom-via-sdk#patterns) has a worked example.
+
+### Webhook-driven integrations
+
+An outbound webhook receiver gets the registry's catalog change events, such as `artifact.published` and `layer.ingested`, and acts on them: it notifies a channel, opens a ticket, or starts a CI job. [Outbound webhooks](../operations/outbound-webhooks#webhook-driven-integrations) covers registering a receiver, the events it receives, and the relay that starts a GitHub Actions workflow.
 
 ### Custom pre-merge CI
 
@@ -106,9 +110,20 @@ Identity attaches through the same OAuth flow the SDKs use. Visibility filtering
 
 Plugins ship as Go modules importable into a registry build. A deployment that needs a custom `IdentityProvider` or `GitProvider` builds a registry binary from source with the plugin imported.
 
-### Forward compatibility for out-of-process plugins
+---
 
-Plugins today are in-process Go modules. A future release may add an out-of-process plugin protocol, such as a subprocess over stdin and stdout or gRPC. That protocol would let plugins ship as separate binaries: closed-source plugins, plugins written in other languages, and plugins distributed without a registry rebuild.
+## Related pages
+
+- [Configure your harness](../../consuming/configure-your-harness) covers runtime-specific extension through `PODIUM_HARNESS=none` combined with custom consumer code.
+- [Building custom consumers with the SDK](../../consuming/custom-via-sdk) covers programmatic curation, eval pipelines, and custom consumer surfaces.
+
+---
+
+## Forward compatibility for out-of-process plugins
+
+This section is for plugin authors and Podium contributors who write or change an SPI. An operator who only selects built-in backends does not need it.
+
+Plugins are in-process Go modules. A future release may add an out-of-process plugin protocol, such as a subprocess over stdin and stdout or gRPC. That protocol would let plugins ship as separate binaries: closed-source plugins, plugins written in other languages, and plugins distributed without a registry rebuild.
 
 The SPIs are designed to make that transition source-compatible. A plugin that follows the constraints below can ship in-process now and out-of-process later, without changes to its interface contract.
 
@@ -122,13 +137,6 @@ Every SPI method meets these constraints:
 - **Idempotent retries.** Methods are safe to retry on transient failure. A method with side effects accepts an idempotency key.
 - **Bounded payloads.** Method arguments and return values declare size limits. A payload larger than the limit uses a content-addressed reference (a cache key or a presigned URL) rather than inline bytes.
 
-The default implementations, such as `RegistryStore`, `HarnessAdapter`, and `LayerSourceProvider`, conform to these constraints today even though they run in-process. The purpose is forward compatibility rather than present-day distribution: when the out-of-process protocol lands, no built-in needs reworking.
+The default implementations, such as `RegistryStore`, `HarnessAdapter`, and `LayerSourceProvider`, conform to these constraints even though they run in-process. The purpose is forward compatibility rather than present-day distribution: when the out-of-process protocol lands, no built-in needs reworking.
 
 Podium commits to keeping the SPIs wire-friendly. It does not commit to a specific transport (subprocess, gRPC, or Wasm) or to a timeline.
-
----
-
-## Related pages
-
-- [Configure your harness](../../consuming/configure-your-harness) covers runtime-specific extension through `PODIUM_HARNESS=none` combined with custom consumer code.
-- [Building custom consumers with the SDK](../../consuming/custom-via-sdk) covers programmatic curation, eval pipelines, and custom consumer surfaces.

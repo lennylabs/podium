@@ -20,7 +20,7 @@ Every artifact declares a `type:` in its frontmatter. The type determines how th
 | [`hook`](#hook) | A lifecycle observer with a shell action. | `ARTIFACT.md` |
 | [`mcp-server`](#mcp-server) | An MCP server registration. | `ARTIFACT.md` |
 
-The types from `skill` through `hook` are first-class types. `mcp-server` is a built-in [extension type](#extension-types). A deployment registers further extension types through the `TypeProvider` SPI. An extension type carries validation rules and no conformance commitment beyond what the type owner specifies.
+The types from `skill` through `hook` are first-class types, which Podium lints fully, tests in its conformance suite, and supports across the built-in adapters. `mcp-server` is a built-in [extension type](#extension-types), and a deployment registers further extension types through the `TypeProvider` SPI.
 
 [Frontmatter reference](frontmatter-reference) lists every field each type accepts.
 
@@ -97,7 +97,7 @@ You are a vendor compliance reviewer. Given a vendor record...
 The agent-specific fields:
 
 - `input` and `output` declare the JSON Schemas the agent expects and produces.
-- `delegates_to` lists other agents this one can call. The field is advisory. The target may be any artifact type, and ingest does not enforce it. The cross-type dependency graph uses these edges for impact analysis.
+- `delegates_to` lists the canonical IDs of the artifacts this agent can hand work to, usually other agents. The field is advisory: ingest accepts a target of any type and does not check that it resolves. The cross-type dependency graph uses these edges for impact analysis.
 
 [Your first agent](your-first-agent) builds an agent step by step.
 
@@ -159,14 +159,7 @@ Both `podium sync` and the MCP server materialize a command into the target harn
 
 ## rule
 
-A `rule` is passive context that the harness loads automatically. The `rule_mode` field controls when:
-
-| Mode | Loaded when |
-|:--|:--|
-| `always` | The agent session starts (or every turn). |
-| `glob` | A file matching the glob pattern is touched in the session. |
-| `auto` | The harness's autoload heuristic decides the rule's `rule_description` matches. `rule_description` is required for this mode. |
-| `explicit` | The user references it by name. |
+A `rule` is passive context that the harness loads automatically. The `rule_mode` field controls when: `always` (the default) loads it in every session, `glob` loads it when a matching file is involved, `auto` lets the harness decide from `rule_description`, and `explicit` loads it only when the user names it.
 
 ```markdown
 ---
@@ -186,17 +179,7 @@ When reviewing or generating payment-handling code:
 - Never store PANs in plaintext...
 ```
 
-Each harness handles rule modes differently, and the harness adapter does the translation:
-
-| Harness | Output |
-|:--|:--|
-| Cursor and Hermes | `.cursor/rules/<name>.mdc` with the native `alwaysApply`, `globs`, or `description` key. |
-| Claude Code | `.claude/rules/<name>.md`, using the native `paths:` list for `glob`. |
-| Codex, OpenCode, and Pi | The rule body, injected into the root `AGENTS.md`. |
-| Gemini | The rule body, injected into the root `GEMINI.md`. |
-| Claude Desktop and Claude Cowork | Nothing. These harnesses have no project-scope rule surface, so materialization fails with `materialize.untranslatable`. |
-
-[Rule modes](rule-modes) has the full per-harness mapping.
+The harness adapter translates the mode into the harness's native rule format, and some harnesses fall back to an always-loaded rule for the scoped modes. [Rule modes](rule-modes) describes each mode and what every harness writes for it.
 
 ---
 
@@ -222,12 +205,10 @@ hook_action: |
 
 The hook-specific fields:
 
-- `hook_event` is one of the canonical event names. The names cover session lifecycle, user prompts, tool calls in generic and subtype forms, permission events, subagent lifecycle, turn end, compaction, and notifications. The harness adapter translates the canonical name to the harness's native event.
+- `hook_event` is one of the canonical event names, which the harness adapter translates to the harness's native event.
 - `hook_action` is a shell snippet that runs when the event fires. The event payload arrives on stdin.
 
-Hook coverage varies by harness, and not every harness implements every canonical event. When an artifact declares `target_harnesses:`, lint rejects ingest if a named harness cannot translate the chosen event. When `target_harnesses:` is absent, ingest stays permissive, and materialization onto a harness that cannot translate the event fails. For the events a specific harness emits, refer to the harness's own hook documentation.
-
-[Hooks](hooks) covers the full event taxonomy and authoring guidance.
+[Hooks](hooks) lists the canonical events, describes how coverage varies by harness, and gives authoring guidance.
 
 ---
 
@@ -272,7 +253,7 @@ The MCP bridge filters `mcp-server` artifacts out of its `resources/list` mirror
 
 ## Extension types
 
-Extension types are built-in or deployment-registered types. Each carries validation rules and no conformance commitment beyond what the type owner specifies.
+Extension types are built-in or deployment-registered types. An extension type comes with a schema and lint rules. Podium's conformance suite does not test it, and any further guarantee about its behavior comes from the type's owner.
 
 - `mcp-server` is the only extension type Podium ships built in.
 - `dataset`, `model`, `eval`, and `policy` are example identifiers a deployment can adopt by registering its own `TypeProvider`. Podium ships no implementation for them.

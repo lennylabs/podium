@@ -6,7 +6,7 @@ description: Configure a Podium registry to authenticate callers against self-ho
 
 # Keycloak
 
-This cookbook configures a Podium registry to authenticate against self-hosted Keycloak. A self-hosted IdP stays under the operator's control, which suits air-gapped or sovereignty-constrained deployments. The Compose stack uses Dex for development, and Keycloak is the production-equivalent IdP for the same use. Setup takes about 15 minutes. The [OIDC cookbooks overview](index) describes the identity model the steps rely on.
+This cookbook configures a Podium registry to verify tokens from a self-hosted Keycloak under `oidc-jwt`, and configures developer machines to acquire them through the device-code flow. A self-hosted IdP stays under the operator's control, which suits air-gapped or sovereignty-constrained deployments. The Docker Compose evaluation stack uses Dex, and Keycloak serves the same role in production. Setup takes about 15 minutes. [OIDC](index) is the reference for the `oidc-jwt` settings these steps use.
 
 ## Prerequisites
 
@@ -57,7 +57,7 @@ Expected result: tokens include `podium` in their `aud` array.
 
 ## 5. Configure the registry
 
-On the registry host, add the `identity_provider:` block to `registry.yaml`:
+On the registry host, add the `identity_provider:` block to `registry.yaml`, nested under `registry:` as [File layout](../../../reference/configuration#file-layout) describes:
 
 ```yaml
 registry:
@@ -67,13 +67,7 @@ registry:
     audience: podium
 ```
 
-Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config, and the registry ignores it without reporting an error.
-
-`oidc-jwt` is the registry's side of the flow. It verifies each presented token against the realm's JWKS and validates the `aud` claim against `audience:`. The issuer is the realm URL rather than the device-authorization endpoint, and the registry resolves the JWKS from `<issuer>/.well-known/openid-configuration`.
-
-- A CLI, an SDK, or another API client obtains the token through the device-code flow that the next step configures.
-- On a registry that enables the browser flow, a browser obtains the token through the registry's own authorization-code exchange, and the registry returns it in the `__Host-podium_session` cookie.
-- Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
+The issuer is the realm URL rather than the device-authorization endpoint. The registry resolves the realm's JWKS from `<issuer>/.well-known/openid-configuration`, verifies each presented token against it, and requires the token's `aud` claim to carry `podium`.
 
 The Group Membership mapper from step 2 emits the `groups` claim with bare group names. The `IdpGroupMapping` adapter passes those names through, or the SCIM directory supplies membership when SCIM is configured.
 
@@ -99,7 +93,7 @@ Expected result: the verification URL is `https://<keycloak-host>/realms/<realm-
 
 ## 7. Test group-based visibility
 
-Configure an admin layer scoped to the `engineering` group in `registry.yaml`. Group-scoped visibility is set in the registry layer config, or with `podium layer register --group <name>` (also `--public`, `--organization`, and `--user`). Layers registered with `--user-defined` are private to the registrant and cannot be widened.
+Configure an admin layer scoped to the `engineering` group in `registry.yaml`. [Declaring visibility](../../content/access-control#declaring-visibility) describes the other ways to set a layer's visibility.
 
 ```yaml
 registry:
@@ -121,10 +115,7 @@ For most Keycloak deployments, the OIDC `groups` claim is sufficient, and group 
 
 Keycloak does not ship a built-in SCIM server, but extensions exist, for example `keycloak-scim-server`. When one is installed, configure it to push user and group records to the registry's SCIM endpoint at `https://podium.acme.com/scim/v2`. Authenticate with one of the bearer tokens listed in the registry's `PODIUM_SCIM_TOKENS` environment variable.
 
-On the registry side:
-
-- The registry mounts `/scim/v2/` only when `PODIUM_SCIM_TOKENS` is set to a comma-separated list of accepted tokens. Otherwise it returns 404 for every SCIM request.
-- Set `PODIUM_SCIM_STORE_PATH` to a writable file path so the pushed directory survives a restart. A set path that the registry cannot read, parse, or write refuses startup with `config.scim_store_unavailable`.
+On the registry, enable the receiver as [Enable the receiver](../groups#enable-the-receiver) describes. The receiver answers `PATCH` with HTTP 405, so confirm which methods the extension sends, as [Endpoints](../groups#endpoints) describes.
 
 ## Next steps
 

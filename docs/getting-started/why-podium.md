@@ -144,15 +144,6 @@ Covered in [Audit and observability](../deployment/operations/observability).
 
 ---
 
-## Boundaries
-
-Podium catalogs authored artifacts and delivers them to harnesses. LLM
-application development platforms, evaluation frameworks, observability
-products, prompt-version-as-program-artifact tools, and agent runtimes solve
-different problems.
-
----
-
 ## When Podium applies
 
 Podium becomes useful as any of these dimensions grow:
@@ -182,7 +173,7 @@ sufficient.
 
 The comparisons below cover products that catalog or distribute authored AI agent artifacts into the harnesses an organization runs. The adjacent landscape splits into the categories below. Product details are current as of November 2026.
 
-LLM application development frameworks, evaluation suites, observability and tracing products, prompt-version-as-program-artifact tools, RAG-over-corpora knowledge bases, and agent runtimes solve different problems and are out of scope.
+Podium catalogs authored artifacts and delivers them to harnesses. LLM application development frameworks, evaluation suites, observability and tracing products, prompt-version-as-program-artifact tools, RAG-over-corpora knowledge bases, and agent runtimes solve different problems and are out of scope for this comparison.
 
 ### Self-hosted and managed registries
 
@@ -196,7 +187,7 @@ These products store and govern agent artifacts centrally. They differ in artifa
 | **Google Cloud Agent Registry** ([docs](https://docs.cloud.google.com/agent-registry/concepts)) | Managed (Google Cloud) | Agents, MCP servers, and skills (skill governance in preview) | Discovery through the registry's search API | None | Skill governance (preview); vulnerability scanning of skills |
 | **JFrog AI Catalog** ([skills registry](https://jfrog.com/ai-catalog/skills-registry/)) | Commercial; SaaS or self-hosted | Skills, plugins, MCP servers, and models | CLI and MCP | None | Policy-driven approval; scanning; signing of approved skills |
 | **Tessl** ([tessl.io](https://tessl.io/registry)) | Commercial; SaaS | Skills, docs, rules, and commands in tiles | Package manager; MCP tools to install | None | Workspace-scoped; evaluation of skill effect |
-| **Podium** | MIT; self-hosted in the local, single-node, or clustered deployment mode | Skills, agents, contexts, commands, rules, hooks, MCP server registrations, and extension types | Native project files through the built-in adapters, for each type a harness's project-level surface carries; marketplace repositories; MCP discovery tools; SDKs | Ordered layers | Per-OIDC-group and per-user visibility evaluated per request; SCIM; multi-tenant mode |
+| **Podium** | MIT; self-hosted in the local, single-node, or clustered deployment mode | Skills, agents, contexts, commands, rules, hooks, MCP server registrations, and extension types | Native project files through the built-in adapters, for each artifact type a harness reads from a project directory; marketplace repositories; MCP discovery tools; SDKs | Ordered layers | Per-OIDC-group and per-user visibility evaluated per request; SCIM; multi-tenant mode |
 
 **Where each applies.**
 
@@ -211,7 +202,7 @@ These products store and govern agent artifacts centrally. They differ in artifa
 - The catalog holds agents, contexts, commands, rules, and hooks beside skills and MCP server registrations.
 - Ordered layers compose several sources.
 - Visibility is evaluated per OIDC group at request time.
-- The built-in adapters write native project files for each type a harness's project-level surface carries.
+- The built-in adapters translate each artifact into a harness's native project files, for every artifact type that the harness reads from a project directory.
 - Consumers verify the signature of what they receive.
 - The registry is self-hosted under the MIT license in any deployment mode.
 
@@ -232,7 +223,7 @@ The coding agents below offer plugin bundles and an admin-managed private market
 
 **Where Podium applies.** Podium applies when an organization sanctions more than one coding agent and wants one source and one visibility policy across them, or when the catalog must be deployed on-prem.
 
-Podium renders marketplace repositories for Claude, Codex, Cursor, Gemini, Pi, and Hermes from the same catalog (§7.8 in the spec). The Claude, Codex, and Cursor marketplaces coexist in one repository. A Gemini extension occupies a repository of its own. A Hermes tap defaults to a root `skills/` directory and usually takes its own repository. Podium has no GitHub Copilot adapter, so it writes no Copilot custom agents, hooks, or plugin marketplaces.
+Podium renders marketplace repositories for Claude, Codex, Cursor, Gemini, Pi, and Hermes from the same catalog. The Claude, Codex, and Cursor marketplaces coexist in one repository. A Gemini extension occupies a repository of its own. A Hermes tap defaults to a root `skills/` directory and usually takes its own repository. Podium has no GitHub Copilot adapter, so it writes no Copilot custom agents, hooks, or plugin marketplaces.
 
 ### Gateways and MCP server registries
 
@@ -289,7 +280,7 @@ A Git repository that holds each harness's native directories is the baseline. A
 
 - Several repositories compose into one effective view with deterministic merge.
 - Visibility differs per layer across teams.
-- Each artifact type needs translation into the native format of each harness whose project-level surface carries it.
+- Each artifact type needs translation into the native format of each harness that reads that type from a project directory.
 - Impact analysis must follow dependency edges across types.
 - The catalog is too large to load in full and needs lazy discovery.
 
@@ -311,6 +302,6 @@ Several open specifications define parts of this space. The table states what Po
 
 - **License.** MIT.
 - **Governance.** Maintainer model with an RFC process for spec changes. See [Governance](../about/governance).
-- **Distribution.** OSS-first development, with an optional commercial managed offering by the sponsoring entity (separate doc).
+- **Distribution.** OSS-first development, with an optional commercial managed offering by the sponsoring entity.
 - **Multi-vendor neutrality.** The project does not adopt contributions, governance changes, or roadmap pressure that would bind it to a single harness vendor's surface.
 - **Standards engagement.** Where adjacent open standards (MCP, AAIF-governed standards) overlap with Podium's concerns, the project participates upstream and harmonizes where doing so does not compromise the broader scope across artifact types.

@@ -74,7 +74,7 @@ A refused artifact is not stored, which has two consequences:
 - Another artifact of the same reingest whose prose links to the refused artifact fails `lint.prose_reference`.
 - A refused artifact collides with no other artifact. The other copy of its ID is materialized or ingested, and no `ingest.collision` line is printed for it.
 
-An earlier release stored rows from an `ARTIFACT.md` that declared `extends:`. The registry no longer serves those rows. [Upgrading from an earlier release](../operations/upgrade-notes#upgrading-from-an-earlier-release) describes what a reader sees and how to recover.
+Release 0.6.0 removed `extends:`. A store that an earlier release wrote can still hold rows ingested from an `ARTIFACT.md` that declared it, and the registry no longer serves those rows. [Upgrade notes](../operations/upgrade-notes#what-readers-see) describes what a reader sees and how to recover.
 
 ---
 
@@ -122,7 +122,7 @@ podium layer reorder alice-scratch alice-personal
 - An argument list that names an admin-defined layer requires the tenant `admin` role, and the registry answers `auth.forbidden` otherwise.
 - A deployment with no identity provider has no authenticated callers, so the local operator reorders any layer.
 
-A layer declared in the `registry:` `layers:` list is re-seeded from that file in list order at every restart. Change its position in `registry.yaml` to make a new order durable.
+A layer declared in the `registry.layers` list of `registry.yaml` is re-seeded from that file in list order at every restart, so a reorder of it reverts. Change its position in `registry.yaml` to make a new order durable.
 
 ---
 
@@ -138,6 +138,6 @@ On a server-backed deployment, `podium admin show-effective [--group <g>]... <us
 
 - **Overlay artifact with `extends`.** An overlay `ARTIFACT.md` that carries an `extends` key is served as authored, and the key has no effect.
 - **Lint and the overlay.** `podium lint` reports an `ARTIFACT.md` that the no-inheritance rule refuses. `podium lint` contacts no registry, so it does not report a collision with an artifact that only a registry holds.
-- **Reorder by a caller whose credential fails verification.** Such a caller is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime` before either authorization arm is evaluated. On this operation, `auth.forbidden` therefore names a caller the registry verified and did not authorize. The other layer write operations answer such a caller `auth.forbidden` as before.
+- **Reorder by a caller whose credential fails verification.** Such a caller is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime` before either authorization arm is evaluated. On this operation, `auth.forbidden` therefore names a caller the registry verified and did not authorize. The other layer write operations answer such a caller `auth.forbidden`.
 
 ---

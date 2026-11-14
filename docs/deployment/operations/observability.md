@@ -8,16 +8,16 @@ description: Configure where Podium writes its audit records, scrape its Prometh
 
 This page describes how to get audit records, metrics, traces, and operational notifications out of a Podium registry and out of the `podium-mcp` server. It is for operators of a [single-node](../modes/single-node) or [clustered](../modes/clustered) deployment. The [local](../modes/local) deployment mode runs no registry process, so only the `podium-mcp` settings on this page apply to it.
 
-The following table summarizes each signal and the setting that turns it on.
+The following table summarizes each signal, the setting that turns it on, and the section that covers it. [Alerting](#alerting) gives a starting set of Prometheus alert rules over these signals.
 
-| Signal | Produced by | Setting | Default |
-|:--|:--|:--|:--|
-| Audit records | Registry | `PODIUM_AUDIT_LOG_PATH` | The file `~/.podium/audit.log` |
-| Audit records | `podium-mcp` | `PODIUM_AUDIT_SINK` | Off |
-| Prometheus metrics | Registry | `PODIUM_METRICS` | On, at `/metrics` |
-| Prometheus metrics | `podium-mcp` | `PODIUM_MCP_METRICS_ADDR` | Off |
-| Traces | Registry and `podium-mcp` | `PODIUM_TRACING` or `OTEL_EXPORTER_OTLP_ENDPOINT` | Off |
-| Notifications | Registry | `PODIUM_NOTIFICATION_PROVIDER` | Off |
+| Signal | Produced by | Setting | Default | Section |
+|:--|:--|:--|:--|:--|
+| Audit records | Registry | `PODIUM_AUDIT_LOG_PATH` | The file `~/.podium/audit.log` | [Audit log](#audit-log), [Audit destinations](#audit-destinations) |
+| Audit records | `podium-mcp` | `PODIUM_AUDIT_SINK` | Off | [Record local audit from podium-mcp](#record-local-audit-from-podium-mcp) |
+| Prometheus metrics | Registry | `PODIUM_METRICS` | On, at `/metrics` | [Registry metrics](#registry-metrics) |
+| Prometheus metrics | `podium-mcp` | `PODIUM_MCP_METRICS_ADDR` | Off | [podium-mcp metrics](#podium-mcp-metrics) |
+| Traces | Registry and `podium-mcp` | `PODIUM_TRACING` or `OTEL_EXPORTER_OTLP_ENDPOINT` | Off | [Tracing](#tracing) |
+| Notifications | Registry | `PODIUM_NOTIFICATION_PROVIDER` | Off | [Notifications](#notifications) |
 
 The [audit events reference](../../reference/audit-events) holds the record format, the event types, and the exact delivery and loss-accounting rules. This page covers configuration.
 
@@ -93,7 +93,10 @@ PODIUM_AUDIT_SINK=default,https://audit.acme.com/ingest
 
 A list names at most one file destination and names no element twice. An empty element, a trailing comma, an unknown `scheme://` prefix, and a URL that carries userinfo each refuse startup with `config.audit_sink_unavailable`. [Destinations](../../reference/audit-events#destinations) gives the complete list rules.
 
-To ship the stream to another system, list a stdout, HTTP, or OTLP destination beside the file. Do not tail the file. Retention and erasure replace the file through a rename, so a tailer re-ships or skips records, and the records it already shipped keep their unredacted identities.
+To ship the stream to another system, list a stdout, HTTP, or OTLP destination beside the file.
+
+> [!WARNING]
+> Do not tail the audit file to ship it. Retention and erasure replace the file through a rename, so a tailer re-ships or skips records, and the records it already shipped keep their unredacted identities.
 
 ### Write to a file
 
@@ -438,7 +441,7 @@ The following rules are a starting set, tuned for the baseline deployment that [
   expr: sum(rate(podium_cache_hits_total[1h])) / (sum(rate(podium_cache_hits_total[1h])) + sum(rate(podium_cache_misses_total[1h]))) < 0.5
 ```
 
-The chart at `deploy/helm/podium` does not carry alert rules. Add these to your own Prometheus rule set and tune the thresholds to your SLOs.
+The chart at `deploy/helm/podium` does not carry alert rules. Add the rules to the deployment's own Prometheus rule set, and tune the thresholds to its SLOs.
 
 For the audit stream, also alert on the following:
 
@@ -485,20 +488,11 @@ This refusal applies only when `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above `
 - **Cause.** The HTTP or OTLP receiver refuses batches or does not answer. A persistent retryable failure drops nothing by itself. It holds the queue until `queue_full` drops begin, and a rate-limited log line reports it.
 - **Fix.** Check the receiver's availability and the transport settings. Each request times out after 10 seconds and follows no redirect, so a receiver that answers with a 3xx status is retried until the queue fills.
 
+---
+
 ## Related pages
 
 - [Audit events](../../reference/audit-events): the record format, event types, and delivery rules.
-- [Operator guide](troubleshooting): capacity planning, backup and restore, upgrades, and the security checklist.
-- [CLI reference](../../reference/cli#environment-variables): every environment variable with its refusals.
-
-## Monitoring, audit, and alerting
-
-[Audit and observability](observability) documents each of these signals:
-
-- [Audit log](#audit-log) and [Audit destinations](#audit-destinations): the hash-chained audit stream and where it is written.
-- [Metrics](#metrics): the Prometheus series and their latency targets.
-- [Tracing](#tracing): OpenTelemetry export.
-- [Notifications](#notifications): operational notifications for failed ingests.
-- [Alerting](#alerting): a starting set of Prometheus alert rules.
-
----
+- [Capacity and availability](capacity): the baseline deployment the alert thresholds assume, and read-only mode.
+- [Troubleshooting](troubleshooting): symptoms and error codes across the registry, and when to escalate.
+- [Configuration](../../reference/configuration#audit): every audit key and environment variable, with its default.

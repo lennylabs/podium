@@ -6,7 +6,7 @@ description: Configure a Podium registry to authenticate callers against Auth0 t
 
 # Auth0
 
-This cookbook configures a Podium registry to authenticate against Auth0. Group claims are not native to Auth0, so an Action adds them, or a legacy Rule does. Setup takes about 15 minutes. The [OIDC cookbooks overview](index) describes the identity model the steps rely on.
+This cookbook configures a Podium registry to verify Auth0-issued tokens under `oidc-jwt`, and configures developer machines to acquire them through the device-code flow. Group claims are not native to Auth0, so a post-login Action adds them. Setup takes about 15 minutes. [OIDC](index) is the reference for the `oidc-jwt` settings these steps use.
 
 ## Prerequisites
 
@@ -80,7 +80,7 @@ For larger setups, populate `app_metadata` through SCIM (Auth0 Enterprise) or a 
 
 ## 5. Configure the registry
 
-On the registry host, add the `identity_provider:` block to `registry.yaml`:
+On the registry host, add the `identity_provider:` block to `registry.yaml`, nested under `registry:` as [File layout](../../../reference/configuration#file-layout) describes:
 
 ```yaml
 registry:
@@ -90,9 +90,7 @@ registry:
     audience: https://podium.acme.com
 ```
 
-Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config, and the registry ignores it without reporting an error.
-
-`oidc-jwt` is the registry's side of the flow. It verifies each presented token against the issuer's JWKS and validates the `aud` claim against `audience:`. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
+The registry verifies each presented token against the issuer's JWKS and requires its `aud` claim to carry `https://podium.acme.com`. Auth0 issues `iss` with a trailing slash, and the registry trims a trailing slash from both values before comparing them.
 
 The Action from step 3 emits group membership under the namespaced claim path `https://podium.acme.com/groups`. Set `identity_provider.groups_claim` in the `identity_provider:` block, or `PODIUM_OAUTH_GROUPS_CLAIM` in the environment, to `https://podium.acme.com/groups` so the registry reads that path. Configure `IdpGroupMapping` as well when the claim values have to be rewritten to registry-side group names. The [`oidc-jwt` settings](index#oidc-jwt-settings) table lists both keys.
 
@@ -117,7 +115,7 @@ Expected result: the device-flow verification URL is `https://<your-tenant>.auth
 
 ## 7. Test group-based visibility
 
-Configure an admin layer scoped to a group in `registry.yaml`. Group-scoped visibility is set in the registry layer config, or with `podium layer register --group <name>` (also `--public`, `--organization`, and `--user`). Layers registered with `--user-defined` are private to the registrant and cannot be widened.
+Configure an admin layer scoped to a group in `registry.yaml`. [Declaring visibility](../../content/access-control#declaring-visibility) describes the other ways to set a layer's visibility.
 
 ```yaml
 registry:

@@ -36,12 +36,9 @@ The registry enforces visibility on every call. A call that visibility rejects r
 
 ### Where group membership comes from
 
-Layer visibility references OIDC group names. Group membership reaches the registry through either of these paths:
+Layer visibility references group names. Group membership reaches the registry through the OIDC `groups` claim of the caller's token, or through a SCIM 2.0 push from the IdP. An IdP that emits group identifiers instead of names needs `PODIUM_IDP_GROUP_MAPPING` to translate them. Under `trusted-headers`, the registry does not expand `groups:` filters against a SCIM directory, as [Gateway (trusted headers)](../identity/trusted-headers) describes. [Groups and SCIM](../identity/groups) covers both paths and their settings.
 
-- **The OIDC `groups` claim.** The token carries group membership, and the registry reads it directly. An IdP that emits group identifiers instead of names needs `PODIUM_IDP_GROUP_MAPPING` to translate them. The [OIDC cookbooks](../identity/oidc/) cover this per IdP.
-- **SCIM 2.0 push.** The IdP pushes membership to the registry. The registry mounts the SCIM receiver on a single-node or clustered deployment when `PODIUM_SCIM_TOKENS` lists a bearer token. The registry expands `groups:` filters against the pushed directory under `oidc-jwt` and `injected-session-token`. It does not expand them under `trusted-headers` (see [Gateway-delegated identity](../identity/trusted-headers)).
-
-SCIM is recommended once group-based visibility gates artifacts that matter.
+SCIM is recommended once group-based visibility gates artifacts that matter, because a claim reflects membership at login time and a push applies a change at once.
 
 ### Deployment defaults
 
@@ -182,7 +179,7 @@ Layer visibility decides who can read. The related concerns below are decided el
 |:--|:--|
 | Who can publish to a layer | The layer's source. Branch protection and required reviewers on the Git ref, or filesystem permissions on a `local` path. Podium does not duplicate them. |
 | Who can administer the registry | The tenant `admin` role, managed with `podium admin grant` and `podium admin revoke`. Instance-operator rights for tenant management are separate and seeded through `PODIUM_OPERATOR_ADMINS`. |
-| How sensitive an artifact is | The `sensitivity:` frontmatter field, which feeds visibility, search, and audit. Signature verification does not read it. |
+| How sensitive an artifact is | The `sensitivity:` frontmatter field. `search_artifacts` and `load_artifact` responses expose it, and [public mode](#when-visibility-is-not-enforced) refuses ingest of `medium` and `high`. It grants or withholds no visibility, and signature verification does not read it. Reviewer requirements based on it belong in the Git host's branch protection. |
 | Whether a load requires a valid signature | `PODIUM_VERIFY_SIGNATURES` on each `podium-mcp` consumer, `always` by default, where every artifact the bridge loads requires a valid signature. A signing registry also verifies each stored signature before it serves the row. [Progressive adoption](../progressive-adoption) covers rolling it out. |
 
 ---
@@ -193,7 +190,7 @@ The registry skips visibility enforcement in these cases:
 
 | Case | Behavior |
 |:--|:--|
-| No identity provider | A registry that boots without `PODIUM_IDENTITY_PROVIDER` treats every caller as anonymous, and the evaluator admits every layer. Configure an identity provider to make visibility meaningful. See [Server-side integrations](../services/#identity). |
+| No identity provider | A registry that boots without `PODIUM_IDENTITY_PROVIDER` treats every caller as anonymous, and the evaluator admits every layer. Configure an identity provider to make visibility meaningful. See [Identity](../identity/). |
 | Filesystem-source catalog | `podium sync` reading a directory has no registry process to enforce anything, so the evaluator returns `true` for every layer. The declarations stay in layer config, so the same catalog is portable to a server-backed deployment mode. |
 | Public mode | [Public mode](../modes/single-node#public-mode) bypasses both authentication and the visibility model. It refuses ingest of `sensitivity: medium` and `sensitivity: high` artifacts. It records `caller.identity = "system:public"` in the [audit log](../operations/observability#audit-log), so the audit trail shows that anonymous access was intended. |
 

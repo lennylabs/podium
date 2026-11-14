@@ -1,6 +1,6 @@
 ---
 title: Hooks
-nav_order: 8
+nav_order: 9
 description: Hook artifacts run a shell hook_action when a canonical hook_event fires in the harness.
 ---
 
@@ -147,13 +147,13 @@ runtime_requirements:
   system_packages: [jq]
 ```
 
-A Podium MCP server whose host advertises its runtime capabilities, or opts into enforcement, refuses a `load_artifact` when a declared system package is unavailable, with `materialize.runtime_unavailable`. `podium sync` does not check requirements. See [Bundled resources](bundled-resources#execution-model).
+[Execution model](bundled-resources#execution-model) describes which consumers check the requirement.
 
 ---
 
 ## Moving the action into a bundled script
 
-A long shell action embedded in YAML is hard to read. Move complex logic into a bundled script in `scripts/` and have the action invoke it. The script lives alongside `ARTIFACT.md` and ships with the hook.
+A long shell action embedded in YAML is hard to read. Move complex logic into a bundled script in `scripts/` and have the action invoke it by its package-relative path. The script lives alongside `ARTIFACT.md` and ships with the hook.
 
 ```
 finance/audit/log-session-end/
@@ -195,13 +195,17 @@ TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 echo "[${TIMESTAMP}] session end: ${CONV_ID}" >> "${LOG_FILE}"
 ```
 
-The logic now lives in one place, the YAML stays readable, and the hook is testable in isolation with `bash scripts/log.sh < payload.json`. Bundled resources materialize with mode 0644, so the action invokes the interpreter explicitly rather than executing the script path directly.
+The logic now lives in one place, the YAML stays readable, and the hook is testable in isolation with `bash scripts/log.sh < payload.json`.
+
+The adapter installs the action into the harness's hook configuration, where it resolves from the project root and `scripts/log.sh` does not exist. Each adapter that writes a hook therefore installs the hook's bundled files under `.podium/resources/<artifact-id>/` and rewrites every occurrence of a bundled file's package-relative path in `hook_action` to the installed path. On Claude Code, the action above becomes `bash .podium/resources/finance/audit/log-session-end/scripts/log.sh` in `.claude/settings.json`. `hook_action` is the only field the adapters rewrite this way; the prose of an `agent` or `command` keeps the paths the author wrote. Write the script's path in `hook_action` exactly as it appears in the package, so the rewrite matches it.
+
+Bundled resources materialize with mode 0644, so the action invokes the interpreter explicitly rather than executing the script path directly.
 
 ---
 
 ## Authoring guidance
 
-- **Treat hooks as shipped code.** A hook's `hook_action` runs on the host with the user's privileges. Review and sign hooks like any other script the catalog ships, and consider sandboxing. Set `sandbox_profile:` on a sensitive hook, so a host with sandbox capability can constrain the action.
+- **Treat hooks as shipped code.** A hook's `hook_action` runs on the host with the user's privileges. Review hooks in the source repository's pre-merge CI like any other script the catalog ships. The registry signs each artifact version at ingest by default. The signature shows that the bytes are the ones the registry ingested and says nothing about whether the action is safe. Set `sandbox_profile:` on a sensitive hook, so a host with sandbox capability can constrain the action.
 - **Keep actions short.** Move anything longer than a few lines into a bundled script, as shown in [Moving the action into a bundled script](#moving-the-action-into-a-bundled-script).
 - **Write a specific description.** "Log session-end events to a local audit file." surfaces in search. "Lifecycle observer." is too vague to surface.
 - **Guard against missing payload fields.** Harnesses change their payload schema over time. Use `jq` defaults (`jq -r '.field // empty'`) or guard against missing fields in shell.

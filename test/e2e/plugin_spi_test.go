@@ -1225,7 +1225,7 @@ func TestPluginSPI_DependentsOfEmpty(t *testing.T) {
 // Spec: §9.2
 func TestPluginSPI_PluginDistributionGoModulesOnly(t *testing.T) {
 	t.Parallel()
-	docPath := filepath.Join(repoRoot(t), "docs", "deployment", "extending.md")
+	docPath := filepath.Join(repoRoot(t), "docs", "deployment", "services", "extending.md")
 	content := readFile(t, docPath)
 	for _, banned := range []string{"community plugin registry", "hosted at the project's public URL"} {
 		if strings.Contains(content, banned) {

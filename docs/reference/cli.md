@@ -182,7 +182,7 @@ Notes:
 - `--layer-path` is polymorphic. When `<path>/.registry-config` exists with `multi_layer: true` and no top-level manifest files are present, each subdirectory becomes a `local`-source layer per the filesystem-registry layout. Otherwise the path is registered as a single `local`-source layer.
 - `--sign registry-key` signs each accepted manifest with the registry-managed key at `PODIUM_SIGN_KEY_PATH` (default `~/.podium/standalone/registry-signing.key`). The registry generates the keypair on first run.
 - `--sign none` turns ingest signing off and generates no key file. A `podium-mcp` consumer or a server-source `podium sync` on that machine then sets `PODIUM_VERIFY_SIGNATURES=never`. Without that setting, on a home that carries no key file, the bridge refuses to start and the sync exits with status 2, both with `config.signature_provider_unavailable`.
-- `--web-ui-auth` requires `--web-ui`, `PODIUM_IDENTITY_PROVIDER=oidc-jwt`, public mode off, and the browser-flow acquisition values in the [environment-variable tables](#identity-and-sign-in). `PODIUM_WEB_UI_REDIRECT_URI` must be an `https` URL or an `http` URL whose host is a loopback address. A configuration that fails one of these conditions aborts startup with `config.web_ui_auth_unconfigured`. The [error-code catalog](error-codes) states the whole guard.
+- `--web-ui-auth` requires `--web-ui`, `PODIUM_IDENTITY_PROVIDER=oidc-jwt`, public mode off, and the browser-flow acquisition values that [Configuration](configuration#web-ui) lists. `PODIUM_WEB_UI_REDIRECT_URI` must be an `https` URL or an `http` URL whose host is a loopback address. A configuration that fails one of these conditions aborts startup with `config.web_ui_auth_unconfigured`. The [error-code catalog](error-codes) states the whole guard.
 
 ### `podium status`
 
@@ -927,7 +927,7 @@ Admin commands require the `admin` role on the tenant. Admin grants are recorded
 
 Manages tenants at runtime on a multi-tenant registry.
 
-- The instance-operator role authorizes the group. It is distinct from the per-tenant `admin` role. An operator is seeded at boot through `PODIUM_OPERATOR_ADMINS` (see [CLI environment variables](#environment-variables)) and authenticates as any caller does.
+- The instance-operator role authorizes the group. It is distinct from the per-tenant `admin` role. An operator is seeded at boot through `PODIUM_OPERATOR_ADMINS`, which [Configuration](configuration#tenancy-and-administrators) describes, and authenticates as any caller does.
 - The commands are available only when the registry runs in multi-tenant mode (`PODIUM_MULTI_TENANT`). A single-tenant registry rejects them with `registry.tenant_management_unavailable`.
 - `--registry` is required on each command and defaults to `PODIUM_REGISTRY`.
 
@@ -1167,7 +1167,7 @@ It does not copy instance-operator grants; the target seeds them from its own `P
 
 When the target store already holds a tenant under a source tenant's ID, the command writes the source's quotas, `expose_scope_preview` setting, and active state over it. Apart from its record of the rewrite of stored content hashes, which the next section describes, the command removes nothing from the target store.
 
-A tenant other than the `default` org receives requests on the target only when the target runs in multi-tenant mode with an identity provider it verifies (see `PODIUM_MULTI_TENANT` under [CLI environment variables](#environment-variables)).
+A tenant other than the `default` org receives requests on the target only when the target runs in multi-tenant mode with an identity provider it verifies (see `PODIUM_MULTI_TENANT` in [Configuration](configuration#tenancy-and-administrators)).
 
 #### Content hashes and signing
 
@@ -1178,7 +1178,7 @@ The command copies each row as the source stores it and clears the target store'
 
 A `git` layer's remote is an exception to the row-for-row copy. The command reads and writes layers through the store, so the target holds each layer's URL credential in the form the release that runs the command writes ([Rollback floor for the layer credential columns](../deployment/operations/upgrade-notes#rollback-floor-for-the-layer-credential-columns)).
 
-The target registry signs with the source's key. Before the target's first start after the migration, place the source's registry signing key at the target's `PODIUM_SIGN_KEY_PATH`, replacing any key file already there, or create the chart's signing Secret from it. [Single node](../deployment/modes/migrating#migrating-to-clustered) gives the copy step and states both failure cases below.
+The target registry signs with the source's key. Before the target's first start after the migration, place the source's registry signing key at the target's `PODIUM_SIGN_KEY_PATH`, replacing any key file already there, or create the chart's signing Secret from it. [Migrating to clustered](../deployment/modes/migrating#single-node-to-clustered) gives the copy step. The failure cases are these:
 
 | Target key state | Result |
 |:--|:--|
@@ -1204,7 +1204,7 @@ When `PODIUM_AUDIT_LOG_PATH` lists a file destination, the registry verifies aud
 
 ### SCIM provisioning
 
-There is no SCIM sync command. SCIM is a server-side push from the identity provider to `/scim/v2/`, and the IdP sends group and membership updates.
+There is no SCIM sync command. SCIM is a server-side push from the identity provider to `/scim/v2/`, and the IdP sends group and membership updates. [Groups](../deployment/identity/groups) describes the receiver and its settings.
 
 ### `podium admin erase`
 
@@ -1446,7 +1446,7 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 
 ## Environment variables
 
-The tables below group the `PODIUM_*` variables by the process and concern that reads them. A row marked "environment only" has no config-file key. Server-side backend selection variables (`PODIUM_VECTOR_BACKEND`, `PODIUM_EMBEDDING_PROVIDER`, etc.) are documented alongside the corresponding backend in [Extending](../deployment/services/extending).
+The tables below list the variables that client processes read: the CLI, `podium-mcp`, and the language SDKs. They are grouped by concern. [Configuration](configuration) lists the variables and `registry.yaml` keys of the registry process, including the backend selection variables such as `PODIUM_VECTOR_BACKEND` and `PODIUM_EMBEDDING_PROVIDER`, the web UI settings, the audit settings, and the quotas.
 
 ### Client
 
@@ -1502,11 +1502,8 @@ These variables control the `podium-mcp` runtime gate, which checks an artifact'
 
 | Variable | Purpose |
 |:--|:--|
-| `PODIUM_IDENTITY_PROVIDER` | Consumer side (MCP server and SDKs): `oauth-device-code` (default) or `injected-session-token`. Registry process: `injected-session-token`, `oidc-jwt`, or `trusted-headers`. `oauth-device-code` has no server-side verifier, so setting it on the registry aborts startup with `config.identity_provider_unverified`. |
+| `PODIUM_IDENTITY_PROVIDER` | Consumer side (MCP server and SDKs): `oauth-device-code` (default) or `injected-session-token`. The registry process reads the same variable for its own provider, as [Configuration](configuration#identity) lists. |
 | `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` | OAuth provider configuration. See the notes below the table. |
-| `PODIUM_WEB_UI_OAUTH_CLIENT_ID`, `PODIUM_WEB_UI_OAUTH_CLIENT_SECRET`, `PODIUM_WEB_UI_REDIRECT_URI`, `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT`, `PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT` | Registry-process boot settings; environment only, with no `podium serve` flag. The browser flow's acquisition values: the OAuth client identifier and credential the registry presents, the callback URL the IdP returns the browser to, and the IdP endpoints the sign-in route redirects to and the callback exchanges the code at. Each is required where `--web-ui-auth` is set. |
-| `PODIUM_WEB_UI_OAUTH_SCOPES` | Registry-process boot setting; environment only. Space-delimited scope set the browser sign-in redirect sends. Default `openid profile email groups`, which is the set both shipped acquisition paths default to. A token issued without the scope that carries the group claim narrows every group-scoped visibility decision for that caller. |
-| `PODIUM_WEB_UI_OAUTH_EXCHANGE_TIMEOUT` | Registry-process boot setting; environment only. Deadline on the callback's token-endpoint request, 10 seconds by default. An unset, unparsable, or non-positive value takes the default, so no configuration removes the bound. |
 | `PODIUM_SESSION_TOKEN`, `PODIUM_SESSION_TOKEN_ENV`, `PODIUM_SESSION_TOKEN_FILE` | Injected-token sources. `PODIUM_SESSION_TOKEN` is the default variable the CLI, the MCP server, and the SDKs read. `PODIUM_SESSION_TOKEN_ENV` names a different variable to read it from, and `PODIUM_SESSION_TOKEN_FILE` names a file to read it from. |
 | `PODIUM_TOKEN` | Registry credential a `kind: marketplace` sync target renders under. When set, it takes precedence over the session token and the `podium login` keychain token for that render. |
 
@@ -1514,72 +1511,21 @@ OAuth provider notes:
 
 - `PODIUM_OAUTH_AUDIENCE` carries the audience both acquisition flows send. The device-code flow sends the value the client resolves, and the registry's browser sign-in redirect sends the first value the registry resolved.
 - The registry process reads `PODIUM_OAUTH_AUDIENCE` as a comma-separated set of audiences it accepts. A client process sends the value verbatim as the one audience it asks for. A client that shares the registry's environment therefore needs `--audience` or an environment of its own.
-- `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` is the device-authorization endpoint of the device-code flow, and the browser flow does not read it. The browser flow redirects to `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT` alone.
-- A configuration that sets the device-code key and leaves the web-UI one empty aborts startup with `config.web_ui_auth_unconfigured`.
+- `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` is the device-authorization endpoint of the device-code flow, and the browser flow does not read it. The browser flow redirects to `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT` alone, which [Configuration](configuration#web-ui) lists with the other browser-flow settings.
 
-### Registry process
+### Local audit stream
 
-| Variable | Purpose |
-|:--|:--|
-| `PODIUM_PUBLIC_MODE` | Equivalent of `--public-mode`. |
-| `PODIUM_NO_AUTOSTANDALONE` | Disable the zero-flag standalone fallback. |
-| `PODIUM_PRESIGN_TTL_SECONDS` | Override for the presigned URL TTL. |
-| `PODIUM_CONFIG_FILE` | Registry-process boot setting. Path of the `registry.yaml` the registry reads. When it is unset, the registry reads `~/.podium/registry.yaml`. `podium serve --config <path>` sets it for the process, and `podium-server` has no `--config` option. A named file that does not exist aborts startup. |
-| `PODIUM_MULTI_TENANT` | Registry-process boot setting. See the notes below the table. |
-| `PODIUM_OPERATOR_ADMINS` | Registry-process boot setting. Comma-separated identities granted the instance-operator role at boot. The operator role authorizes the `podium admin tenant` commands and the `/v1/admin/tenants` endpoints, and it confers no per-tenant `admin` rights. Distinct from `PODIUM_BOOTSTRAP_ADMINS`, which seeds per-tenant `admin` grants. |
-| `PODIUM_RUNTIME_KEYS_PATH` | Registry-process boot setting. Path to the JSON file holding the trusted runtime signing keys, written with `podium admin runtime register --keys-file`. The registry reads it before it binds a listener and never writes it. A key added to the file takes effect at the next process start. A file the registry cannot read or parse aborts startup with `config.runtime_keys_unavailable` under every identity provider. Under `injected-session-token`, an unset path, or a path naming a file that carries no key, aborts startup with the same code. |
-| `PODIUM_SCIM_TOKENS` | Registry-process boot setting; environment only. Comma-separated list of the bearer tokens the SCIM 2.0 receiver at `/scim/v2/` accepts. Each entry is trimmed, and blank entries are dropped. With no token listed, the registry mounts no receiver. Whether the pushed directory feeds layer `groups:` filters depends on the identity provider, as [OIDC identity](../deployment/identity/oidc/) states. |
-| `PODIUM_SCIM_STORE_PATH` | Registry-process boot setting; environment only. Path to the JSON file that persists the SCIM directory across restarts. Unset, the directory is held in memory and lost on restart. See the notes below the table. |
-| `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT` | Registry-process boot setting; environment only. Deadline on each object-storage read made by the first-start rewrite of stored content hashes, by `sign-stored-rows`, and by the registry when it admits a stored row before serving it. Default: 30 seconds. An unset, unparsable, or non-positive value takes the default, so no configuration removes the bound. |
-
-Registry-process notes:
-
-- `PODIUM_MULTI_TENANT`: when `true` and the registry runs an identity provider it verifies, the registry routes each request to the tenant its organization names. The `podium admin tenant` commands and the `/v1/admin/tenants` endpoints are then available.
-- `PODIUM_MULTI_TENANT`: when `true` with no provider, with a provider value the registry does not recognize, or in public mode with no provider, the registry fails to start with `config.multitenant_no_verifier`, unless another startup check refuses the configuration first. The providers the registry verifies are `injected-session-token`, `oidc-jwt`, and `trusted-headers`.
-- `PODIUM_MULTI_TENANT`: when unset, every request binds to the single `default` org, and tenant management is rejected.
-- `PODIUM_SCIM_STORE_PATH`: the registry creates the parent directory at startup and the file on the first push. A missing or empty file loads as an empty directory.
-- `PODIUM_SCIM_STORE_PATH`: these conditions abort startup with `config.scim_store_unavailable`, under every identity provider and whether or not the receiver is mounted: a file the registry cannot read for a reason other than its absence, a non-empty file that does not parse, a parent directory it cannot create, and a parent directory in which it cannot create a file.
-
-### Audit
-
-These variables configure the audit streams. [Audit and observability](../deployment/operations/observability#audit-destinations) covers destination setup, and [Audit events](audit-events) is the format reference. `PODIUM_AUDIT_LOG_PATH` configures the registry stream, and `PODIUM_AUDIT_SINK` configures the separate `podium-mcp` local stream.
+`podium-mcp` writes a local audit stream, separate from the registry's stream. [Audit and observability](../deployment/operations/observability#audit-destinations) covers destination setup, and [Audit events](audit-events) is the format reference.
 
 | Variable | Purpose |
 |:--|:--|
-| `PODIUM_AUDIT_LOG_PATH` | Registry-process boot setting; environment only. The registry stream's destination list: a comma-separated list of file paths, `http://` and `https://` URLs, `otlp+http://` and `otlp+https://` URLs, and the token `stdout`. A list names at most one file destination and names no element twice, and a file path that contains a comma cannot be listed. Unset or empty, the registry writes the single file destination `~/.podium/audit.log`. `PODIUM_AUDIT_SINK` does not set this list. Two conditions refuse startup with `config.audit_sink_unavailable`, whatever the anchoring setting: a list that [Audit events](audit-events#destinations) does not admit, and a file destination the registry cannot open or cannot open for appending, even when the file is the only destination. The [error code catalog](error-codes#config) lists the causes. |
-| `PODIUM_AUDIT_SINK` | Read by `podium-mcp`. The local audit stream's destination list: a comma-separated list of file paths, `http://` and `https://` URLs, `otlp+http://` and `otlp+https://` URLs, and the token `default`, which names the file `~/.podium/audit.log`. Set without a value, it names that file. Unset, it disables the local stream. The `--audit-sink` flag and the `audit-sink` config-file key take the same list. See the notes below the table for the values that refuse startup. |
-| `PODIUM_AUDIT_HEADERS_FILE` | Path to a file of request headers that every HTTP and OTLP audit destination of the process sends. Each line is one `Name: value` header, and blank lines and lines that begin with `#` are ignored. HTTP Basic authentication is supplied as an `Authorization: Basic` line. Unset, no headers are added. A file that cannot be read, a line without a colon, an empty name, and the names `Host`, `Content-Length`, and `Content-Type` refuse startup with `config.audit_sink_unavailable`. The error names the file and the line number and never a value. |
-| `PODIUM_AUDIT_TLS_CA_FILE` | Path to a PEM bundle of CA certificates that replaces the system trust store for the HTTP and OTLP audit destinations. Unset, the system trust store applies. A file that cannot be read or holds no certificate refuses startup with `config.audit_sink_unavailable`. |
-| `PODIUM_AUDIT_TLS_CERT_FILE` | Path to the PEM client certificate the HTTP and OTLP audit destinations present for mutual TLS. It is set together with `PODIUM_AUDIT_TLS_KEY_FILE`. Unset, no client certificate is presented. Only one of the two set, or a pair that cannot be loaded, refuses startup with `config.audit_sink_unavailable`. |
-| `PODIUM_AUDIT_TLS_KEY_FILE` | Path to the PEM private key of `PODIUM_AUDIT_TLS_CERT_FILE`, under the same rules. |
-| `PODIUM_AUDIT_QUEUE_MAX_BYTES` | Upper bound, in bytes of serialized records, on the queue of each HTTP and OTLP audit destination. Default `67108864` (64 MiB). A record that does not fit is dropped for that destination with reason `queue_full`, as [Audit events](audit-events#loss-accounting) states. An empty value takes the default. Any other value that is not a positive base-10 integer refuses startup with `config.audit_sink_unavailable`. |
-| `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` | Registry-process boot setting; environment only. Interval in seconds between local chain-head anchors. `0`, the default, disables anchoring, and a negative or non-integer value is treated as `0`. See the notes below the table. |
-| `PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS` | Registry-process boot setting; environment only. Interval in seconds between verifications of the registry stream's file destination, default `3600`. `0` disables verification. A negative or non-integer value is ignored, so the default applies. Verification runs only when `PODIUM_AUDIT_LOG_PATH` lists a file destination. |
-| `PODIUM_AUDIT_SIGNING_KEY_PATH` | Registry-process boot setting; environment only. Path to the anchor key file, default `~/.podium/standalone/audit.key`, generated when anchoring runs and the file is absent. Read only when anchoring runs. A file that cannot be read, parsed, or generated aborts startup with `config.audit_anchor_key_unavailable`. While registry signing is on (`PODIUM_SIGN` or `podium serve --sign` resolves to `registry-key`), an anchor key that the `PODIUM_SIGN_KEY_PATH` file also carries as its `public:` key or a `verify:` key aborts startup with `config.audit_anchor_key_shared`. |
+| `PODIUM_AUDIT_SINK` | Read by `podium-mcp`. The local audit stream's destination list: a comma-separated list of file paths, `http://` and `https://` URLs, `otlp+http://` and `otlp+https://` URLs, and the token `default`, which names the file `~/.podium/audit.log`. Set without a value, it names that file. Unset, it disables the local stream. The `--audit-sink` flag and the `audit-sink` config-file key take the same list. See the list below the table for the values that refuse startup. |
 
-The transport and queue variables (`PODIUM_AUDIT_HEADERS_FILE`, `PODIUM_AUDIT_TLS_CA_FILE`, `PODIUM_AUDIT_TLS_CERT_FILE`, `PODIUM_AUDIT_TLS_KEY_FILE`, and `PODIUM_AUDIT_QUEUE_MAX_BYTES`) are environment only, with no config-file key. The registry reads them, and `podium-mcp` reads them when `PODIUM_AUDIT_SINK` is set.
+When `PODIUM_AUDIT_SINK` is set, `podium-mcp` also reads the audit transport and queue variables that [Configuration](configuration#audit) lists: `PODIUM_AUDIT_HEADERS_FILE`, `PODIUM_AUDIT_TLS_CA_FILE`, `PODIUM_AUDIT_TLS_CERT_FILE`, `PODIUM_AUDIT_TLS_KEY_FILE`, and `PODIUM_AUDIT_QUEUE_MAX_BYTES`.
 
 `PODIUM_AUDIT_SINK` refuses `podium-mcp` startup with `config.audit_sink_unavailable` in these cases:
 
 - The list contains `stdout`, because standard output carries the MCP protocol.
 - The list is one that [Audit events](audit-events#destinations) does not admit.
-- A transport or queue setting is one that the `PODIUM_AUDIT_*_FILE` and `PODIUM_AUDIT_QUEUE_MAX_BYTES` rows refuse.
+- A transport or queue setting is one that the rows in [Configuration](configuration#audit) refuse.
 - A file destination cannot be opened, or cannot be opened for appending.
-
-Anchoring notes:
-
-- Anchoring runs only when the registry stream named by `PODIUM_AUDIT_LOG_PATH` lists a file destination. A list without one logs that anchoring is disabled, and the registry starts.
-- A file destination the registry cannot open, or cannot open for appending, refuses startup with `config.audit_sink_unavailable` whatever the anchoring setting, alone or beside another destination.
-- The registry checks the destinations before it reads the anchor key, so a refused start reads and generates no anchor key.
-- `PODIUM_AUDIT_SINK` does not affect anchoring.
-
-### Quotas
-
-These are registry-process boot settings, environment only. `podium admin tenant` sets the per-tenant values.
-
-| Variable | Purpose |
-|:--|:--|
-| `PODIUM_QUOTA_SEARCH_QPS` | Deployment default for the search QPS limit. It applies to every tenant whose own `search_qps` is zero, and on a multi-tenant registry to requests that resolve to no tenant. A request over the limit is refused with `quota.search_qps_exceeded`. `0`, the default, sets no deployment default, and a negative or non-integer value is treated as `0`. On a single-tenant registry it is the search QPS limit. |
-| `PODIUM_QUOTA_MATERIALIZE_RATE` | Deployment default for the materialization rate limit. It applies to every tenant whose own `materialize_rate` is zero, and on a multi-tenant registry to requests that resolve to no tenant. A `load_artifact` request over the limit is refused with `quota.materialize_rate_exceeded`. A bulk-load item over the limit is reported with that code inside the batch's 200 response. `0`, the default, sets no deployment default, and a negative or non-integer value is treated as `0`. On a single-tenant registry it is the materialization rate limit. |
-| `PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY` | Deployment default for the daily audit-event cap. It applies to every tenant whose own `audit_volume_per_day` is zero. Once a tenant's count for the current UTC day reaches the limit, new ingest writes to that tenant's layers are refused with `quota.audit_volume_exceeded`, and reads continue to serve. `0`, the default, sets no deployment default, and a negative or non-integer value is treated as `0`. On a single-tenant registry it is the audit volume limit. |
-| `PODIUM_MAX_USER_LAYERS` | Deployment default for the per-identity user-defined-layer cap. It applies to every tenant whose own `max_user_layers` is zero. `0`, the default, selects 3. A negative or non-integer value is treated as `0`, so the variable cannot disable the cap. A single-tenant registry reads its tenant's stored `max_user_layers`, so a non-zero stored value applies there ahead of this variable. |

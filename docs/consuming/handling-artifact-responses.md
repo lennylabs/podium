@@ -1,6 +1,6 @@
 ---
 title: Handling artifact responses
-nav_order: 5
+nav_order: 4
 description: "What a consumer does with the manifest and materialized files returned by load_artifact: route by hints, honor safety constraints, verify requirements, register MCP servers, walk dependencies, and fetch external resources."
 ---
 
@@ -21,7 +21,7 @@ Related references:
 
 `load_artifact` returns the manifest separately from the bundled resources. The consumer path determines which content arrives in the response and which content is written to the filesystem.
 
-![Two columns compare what load_artifact yields to each consumer. Through the MCP server, the agent's tool result holds the manifest body and the paths of the materialized files, with every resource written to disk. Through the SDK, load_artifact returns the manifest body with inline resources and references in memory, and a later materialize call writes the files. Bytes at or below 256 KB ride inline, while larger bytes and large manifests arrive as presigned URLs from object storage.](../assets/diagrams/materialization-consumer-views.svg)
+![Two columns compare what load_artifact yields to each consumer. Through the MCP server, the agent's tool result holds the manifest body and the paths of the materialized files, with every resource written to disk. Through the SDK, load_artifact returns the manifest body with inline resources and references in memory, and a later materialize call writes the files. Bytes at or below 256 KB ride inline, while larger bytes and large manifests arrive as URLs into object storage.](../assets/diagrams/materialization-consumer-views.svg)
 
 <!--
 ASCII fallback for the diagram above (load_artifact: what the consumer holds):
@@ -45,33 +45,51 @@ ASCII fallback for the diagram above (load_artifact: what the consumer holds):
     writes the files when it chooses.
 
   Bytes at or below 256 KB ride inline in the response. A larger resource, and
-  a manifest above the cutoff, arrive as a presigned URL the consumer fetches
-  from content-addressed object storage.
+  a manifest above the cutoff, arrive as a URL the consumer fetches from
+  content-addressed object storage.
 -->
 
 ### Through the MCP server
 
-The tool result carries the manifest body inline, together with the paths of the files the server wrote. Before it returns, the server fetches every bundled resource, runs the harness adapter, and writes the resources to the host filesystem.
+The tool result carries the manifest body inline, together with the paths of the files the server wrote. Before it returns, the server fetches every bundled resource, runs the harness adapter, and writes the resources to the host filesystem under the destination that [Where `load_artifact` writes](configure-your-harness#where-load_artifact-writes) describes.
 
 The agent opens a resource from its file path, so the resource bytes stay out of the model's context window. The size of an individual resource does not change this. The agent receives the manifest body and the file paths whatever the resources contain.
 
 ### Through the SDK
 
-`load_artifact` returns an in-memory object that holds the manifest body and the bundled resources small enough to travel inline. A resource above the inline cutoff arrives as a reference rather than as bytes, with the exception that [Edge cases](#edge-cases) lists.
+`load_artifact` returns an in-memory object that holds the manifest body and the bundled resources that travel inline. A resource that travels by URL arrives as a reference rather than as bytes. [Resource transport](#resource-transport) states which resources take each route.
 
 Nothing reaches the filesystem until a separate `materialize(to=...)` call. That call writes the canonical layout and fetches each referenced resource. A programmatic consumer can therefore inspect the manifest first and write the resources only when it chooses.
 
+---
+
+## Resource transport
+
+The registry sends each bundled resource of a `load_artifact` response either inline in the response body or as a URL into object storage. The consumer fetches each URL itself before it writes the files.
+
 ### The inline cutoff
 
-The boundary between an inline byte payload and an out-of-band reference is a fixed threshold of 256 KB:
+The inline cutoff is 256 KB (262,144 bytes), and it is fixed.
 
-- A resource at or below the threshold travels in the response body. A small fixture therefore costs no second round-trip.
-- A larger resource travels as a presigned URL into content-addressed object storage. The consumer fetches it directly, and the registry does not proxy the bytes.
-- A manifest document above the threshold follows the same rule.
+| Content | How it arrives |
+|:--|:--|
+| A resource at or below the cutoff | Inline, in the `resources` map of the response body. A small file therefore costs no second round-trip. |
+| A resource above the cutoff | In the `large_resources` map, as a link that carries a URL, the resource's content hash, and its size. The consumer fetches the URL. |
+| A resource the registry holds inline on the manifest record, at any size | Inline, in `resources`. The registry holds inline every resource of an artifact ingested while no object store was configured. |
+| A manifest document above the cutoff | Through `manifest_body_url`, with the inline `manifest_body` cleared. A registry with no object store returns the manifest inline at any size. |
 
-This arrangement keeps the registry response small and keeps large content out of the model's context window. Large bytes live in object storage, where they are content-addressed and cacheable.
+When any inline resource is binary, the registry base64-encodes the whole `resources` map and sets `resources_base64` to `true`. The MCP server and the SDKs decode the map before they use it. The [`load_artifacts` batch endpoint](../reference/http-api#load_artifacts-bulk) returns each artifact's resources as an array of objects instead of these maps.
 
-[The HTTP API reference](../reference/http-api) lists the response fields. [Bundled resources](../authoring/bundled-resources#size-thresholds) covers the size limits an author works within.
+### URLs into object storage
+
+The URL in a link depends on the registry's object-store backend:
+
+- **S3.** The URL is presigned into the bucket. The consumer fetches the bytes directly, and the registry does not proxy them. A presigned URL expires after the registry's `PODIUM_PRESIGN_TTL_SECONDS`, 3600 by default.
+- **Filesystem.** The URL points at the registry's [`/objects/<content-hash>` route](../reference/http-api#object-bytes). It carries no signature and no expiry. The consumer sends the same credential it used for `load_artifact`, and the registry re-checks the caller's visibility on every fetch.
+
+The consumer checks each fetched body against the content hash its link carries and refuses a mismatch with `materialize.content_hash_mismatch`. When a fetch fails with `403` or an expired URL, the MCP server requests a fresh set of URLs and retries, up to 3 attempts with exponential backoff.
+
+The arrangement keeps the registry response small and keeps large content out of the model's context window. The registry stores each resource body in object storage under its SHA-256 digest, so a file that several artifacts or versions ship, such as a shared schema or a vendored library, is stored once. The [HTTP API reference](../reference/http-api#load_artifact) lists the response fields, and [Bundled resources](../authoring/bundled-resources#size-thresholds) covers the size limits an author works within.
 
 ---
 
@@ -337,9 +355,3 @@ The TypeScript SDK's `LoadedArtifact` exposes the same two fields, `manifest_bod
 | `visibility.denied` | The caller lacks visibility for the artifact. Refuse and surface. |
 | `quota.materialize_rate_exceeded` | Back off and retry. Surface the quota state to the user. |
 | `registry.read_only` | The registry is degraded. Continue serving cached content; mark subsequent loads as cache-only. |
-
----
-
-## Edge cases
-
-**Resources held inline.** A bundled resource the registry holds inline on the manifest record travels in the response body at any size. Every resource of an artifact ingested while no object store was configured is held this way.

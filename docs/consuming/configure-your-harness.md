@@ -11,9 +11,11 @@ artifact type lands once it arrives. A harness is the AI runtime that hosts an
 agent, such as Claude Code, Cursor, or Codex. The page is for developers and
 platform engineers who set up a workspace or a harness to consume the catalog.
 
-The page opens with the consumption paths and the harness roster, then gives the
-setup procedures, a reference section per harness, and the signature and cache
-behavior of the MCP server.
+The page covers the consumption paths and the harness roster, the setup of
+`podium sync`, authentication against a server registry, the setup of the Podium
+MCP server, and a reference section per harness.
+[Verifying deliveries](verifying-deliveries) covers the signature and freshness
+checks the MCP server runs on each load.
 
 ---
 
@@ -41,15 +43,19 @@ harnesses accept both filesystem materialization and runtime discovery.
 | Marketplace publishing (a `kind: marketplace` sync target) | Renders the catalog into a git-repo plugin marketplace, extension, package, or tap that the harness imports. | Either source. Available for Claude Code, Claude Desktop, Claude Cowork, Codex, Cursor, Gemini, Pi, and Hermes. |
 
 [Browsing the catalog](browsing-the-catalog) covers the runtime discovery calls,
-and [Publishing marketplace repositories](../deployment/content/publishing) covers the marketplace path. To deliver
-a subset of the catalog instead of the whole effective view, see
-[Selective materialization](selective-materialization).
+and [Publishing marketplace repositories](../deployment/content/publishing)
+covers the marketplace path. To deliver a subset of the catalog instead of the
+whole effective view, see [Selective materialization](selective-materialization).
 
 ### Bundled files
 
-Materialization delivers an artifact's bundled files wherever the target layout
-has a place for them. [Bundled resources](../authoring/bundled-resources) covers
-what an artifact directory may contain.
+Materializing an artifact materializes its directory. When `podium sync` or
+`load_artifact` writes an artifact, the scripts, references, and assets bundled
+in its directory are written with the manifest wherever the target layout has a
+place for them. A sync scope has no separate filter for bundled files, and it
+cannot keep a manifest while dropping the files bundled with it.
+[Bundled resources](../authoring/bundled-resources) covers what an artifact
+directory may contain.
 
 | Artifact type | Where its bundled files go under a harness adapter |
 |:--|:--|
@@ -89,29 +95,136 @@ documentation is the source of truth.
 The following table shows which of the other two paths each harness accepts. The
 [harness reference](#harness-reference) gives the details.
 
-| Adapter value | Podium MCP server | Workspace `podium sync` |
+| Adapter value | Workspace `podium sync` | Podium MCP server |
 |:--|:--|:--|
-| `none` | Yes | Yes, in the canonical layout. |
+| `none` | Yes, in the canonical layout. | Yes |
 | `claude-code` | Yes | Yes |
-| `claude-desktop` | Yes | No project-level surface. |
-| `claude-cowork` | Not applicable. | `context` artifacts only. |
+| `claude-desktop` | No project-level surface. | Yes |
+| `claude-cowork` | `context` artifacts only. | Not applicable. |
 | `cursor` | Yes | Yes |
 | `codex` | Yes | Yes |
 | `gemini` | Yes | Yes |
 | `opencode` | Yes | Yes |
-| `pi` | Not applicable. | Yes |
-| `hermes` | Yes | `rule` and `context` artifacts only. |
+| `pi` | Yes | Not applicable. |
+| `hermes` | `rule` and `context` artifacts only. | Yes |
 
 Claude Code, Claude Desktop, and Claude Cowork read the same
-`.claude-plugin/marketplace.json`, so one Claude marketplace serves all three.
+`.claude-plugin/marketplace.json`, so one Claude marketplace serves each of them.
 The Claude, Codex, and Cursor manifests sit at distinct fixed locations and
 coexist in one repository. A `kind: marketplace` sync target produces these
-distributions, and [Publishing marketplace repositories](../deployment/content/publishing) covers the model and the
-workflow. OpenCode and `none` have no git-repo distribution and are not publish
-targets.
+distributions, and
+[Publishing marketplace repositories](../deployment/content/publishing) covers
+the model and the workflow. OpenCode and `none` have no git-repo distribution
+and are not publish targets.
 
 The adapter set grows as new harnesses appear. Custom adapters register through
-the `HarnessAdapter` SPI, as [Extending](../deployment/services/extending) describes.
+the `HarnessAdapter` SPI, as [Extending](../deployment/services/extending)
+describes.
+
+---
+
+## Set up `podium sync`
+
+`podium sync` writes harness-native files into a workspace. Its configuration
+lives in `<workspace>/.podium/sync.yaml`, or in `~/.podium/sync.yaml` for
+per-developer defaults.
+
+1. Change into the workspace directory.
+2. Run `podium init` with the registry and the adapter value. This writes the
+   workspace's `sync.yaml`.
+3. When the registry is a server that authenticates its callers, run
+   `podium login`, as
+   [Authenticate to a server registry](#authenticate-to-a-server-registry)
+   describes.
+4. Run `podium sync`.
+
+Each harness section in the [harness reference](#harness-reference) carries the
+commands for that harness.
+
+`podium sync` resolves the harness from the first of these that is set:
+`--harness`, then `PODIUM_HARNESS`, then the active profile's `harness`, then
+`defaults.harness`, then `none`. A workspace initialized with
+`podium init --harness <name>` therefore needs neither the flag nor the
+variable.
+
+Server-source `podium sync` checks each delivery the way the MCP server does. It
+reads `PODIUM_VERIFY_SIGNATURES`, `PODIUM_SIGNATURE_VERIFY_KEY`, and
+`PODIUM_SIGN_KEY_PATH` with the same defaults, and it does not read
+`PODIUM_SIGNATURE_PROVIDER`, because every delivery signature is
+registry-managed. [Delivery verification](../reference/cli#delivery-verification)
+in the CLI reference lists how a failed check surfaces in each mode.
+
+### Watch mode
+
+`podium sync` runs once by default. With `--watch`, it runs one sync at startup
+and then waits for change triggers. A burst of triggers coalesces into a single
+run through a debounce window, and that run reruns the whole sync:
+
+1. It re-reads the effective view.
+2. It applies the active profile's scope and the toggles recorded in the lock
+   file.
+3. It writes every selected artifact.
+4. It deletes the paths the prior run wrote that this run did not.
+5. It rewrites the lock file.
+
+No artifact is materialized per event. Against a server registry, the watcher
+subscribes to the registry's change-event stream and receives only the events
+the caller's identity can see, as the
+[Events stream](../reference/http-api#events-stream) section of the HTTP API
+reference describes. Against a filesystem registry, it watches the registry path
+and the workspace overlay with `fsnotify`, and it polls both trees every 500 ms
+when `fsnotify` cannot start.
+
+---
+
+## Authenticate to a server registry
+
+A server registry that verifies its callers needs a credential from each
+consumer. The following registries need none:
+
+- A filesystem registry.
+- A standalone registry at `http://127.0.0.1:8080` or `http://localhost:8080`.
+  `podium login` reports that the registry needs no authentication and exits.
+- A registry behind a gateway that authenticates the caller. The gateway
+  supplies the identity, and the consumer sends no credential of its own.
+
+On a developer machine, authenticate once with `podium login`:
+
+1. Run `podium login`. It resolves the registry from `--registry`, then
+   `PODIUM_REGISTRY`, then `defaults.registry` in the merged `sync.yaml`, so a
+   workspace that `podium init` configured needs no flag.
+2. When the registry URL serves no OAuth authorization-server metadata at
+   `/.well-known/oauth-authorization-server`, set
+   `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` to the identity provider's
+   device-authorization endpoint and `PODIUM_OAUTH_TOKEN_URL` to its token
+   endpoint, or pass `--issuer` and `--token-url`. The registry process does not
+   serve that document itself, so the variables are needed unless a proxy in
+   front of the registry publishes it.
+3. Open the verification URL the command prints, enter the user code, and
+   complete the sign-in at the identity provider.
+
+`podium login` caches the access token and the refresh token in the OS keychain
+under the registry URL. The consumers use the cached token as follows:
+
+- Server-source `podium sync` and the read commands send the cached token for
+  the registry URL they resolve. They do not refresh it. When a command fails
+  with `auth.token_expired`, run `podium login` again.
+- The MCP server reads the cached token only when
+  `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` is set in its environment. It then
+  refreshes an expired token, and when no token is cached, it runs the
+  device-code flow itself and shows the URL and the code through the harness.
+  Without the variable, it sends an injected session token when one is
+  configured, and otherwise no credential.
+- Set `PODIUM_REGISTRY` in the MCP entry to the URL `podium login` used, because
+  the token is cached under that exact URL.
+
+The [`podium login` reference](../reference/cli#podium-login--podium-logout)
+lists the client ID, audience, and scope options, and each
+[OIDC provider cookbook](../deployment/identity/oidc/) gives the values for one
+identity provider. A managed runtime that issues its own credentials sets
+`PODIUM_IDENTITY_PROVIDER=injected-session-token` and supplies the token through
+`PODIUM_SESSION_TOKEN`, `PODIUM_SESSION_TOKEN_FILE`, or the variable
+`PODIUM_SESSION_TOKEN_ENV` names.
 
 ---
 
@@ -141,12 +254,34 @@ every harness.
    harness.
 3. Set `PODIUM_REGISTRY` to the server URL and `PODIUM_HARNESS` to the adapter
    value from [Supported harnesses](#supported-harnesses).
-4. Set `PODIUM_SIGNATURE_PROVIDER` to `registry-managed` and
+4. Set `PODIUM_MATERIALIZE_ROOT` to the directory `load_artifact` writes into,
+   usually the workspace root.
+5. Set `PODIUM_SIGNATURE_PROVIDER` to `registry-managed` and
    `PODIUM_SIGNATURE_VERIFY_KEY` to the registry's public key. A
    [standalone registry](#standalone-registry) consumer skips this step.
+6. When the registry authenticates its callers, set
+   `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` so the MCP server uses the token
+   `podium login` cached, as
+   [Authenticate to a server registry](#authenticate-to-a-server-registry)
+   describes.
 
 When the harness spawns `podium-mcp`, the agent gains the meta-tools that
 [Browsing the catalog](browsing-the-catalog) describes.
+
+### Where `load_artifact` writes
+
+`load_artifact` writes an artifact's files under the `destination` argument of
+the call, or under `PODIUM_MATERIALIZE_ROOT` when the call passes none. The
+harness adapter's paths are relative to that root, so with `claude-code` and the
+root set to the workspace, a skill lands at
+`<workspace>/.claude/skills/<name>/SKILL.md`. A relative root resolves against
+the working directory of the `podium-mcp` process, and the `materialized_at`
+paths the tool returns are absolute.
+
+When neither the argument nor the variable is set, `load_artifact` returns the
+manifest body and writes no file. The recipes in the
+[harness reference](#harness-reference) omit the variable, so add it to the
+entry when the agent needs the bundled files on disk.
 
 ### Environment variables
 
@@ -154,19 +289,20 @@ When the harness spawns `podium-mcp`, the agent gains the meta-tools that
 |:--|:--|
 | `PODIUM_REGISTRY` | Registry source. The MCP server requires a server URL (`http://` or `https://`) and aborts startup with `config.filesystem_registry_unsupported` when given a filesystem path. `podium sync` accepts a URL or a filesystem path. |
 | `PODIUM_HARNESS` | Harness adapter to use. Pass `none` for canonical raw output. |
+| `PODIUM_MATERIALIZE_ROOT` | Optional. Default directory `load_artifact` writes into. A per-call `destination` argument overrides it. Unset, a call without `destination` writes no file. |
 | `PODIUM_OVERLAY_PATH` | Optional. Workspace local-overlay path. Falls back to `<workspace>/.podium/overlay/` when MCP roots resolve. |
 | `PODIUM_IDENTITY_PROVIDER` | `oauth-device-code` (developer hosts, default) or `injected-session-token` (managed runtimes). |
+| `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT`, `PODIUM_OAUTH_TOKEN_URL` | Optional. The identity provider's device-authorization and token endpoints. Under `oauth-device-code`, the MCP server uses a cached `podium login` token, or runs the device-code flow, only when the authorization endpoint is set. The token endpoint defaults to the authorization endpoint followed by `/token`. |
 | `PODIUM_VERIFY_SIGNATURES` | Signature policy: `always` (default) or `never`. |
 | `PODIUM_SIGNATURE_PROVIDER` | Verifier: `registry-managed` (default) or `noop`. |
 | `PODIUM_SIGNATURE_VERIFY_KEY` | The registry's verification key set: one base64 Ed25519 public key, or a comma-separated list of them during a key rotation. |
 | `PODIUM_SIGN_KEY_PATH` | Optional. The registry key file that supplies the verification key set when `PODIUM_SIGNATURE_VERIFY_KEY` is unset. Default `~/.podium/standalone/registry-signing.key`. |
 
-Server-source `podium sync` reads the same variables with the same defaults,
-except `PODIUM_SIGNATURE_PROVIDER`. It does not read that variable because it
-verifies with the registry-managed verifier.
-
-[Signature verification](verifying-deliveries#signature-verification) gives the full rules for the
-signature variables.
+[Verifying deliveries](verifying-deliveries) gives the rules for the signature
+variables and the cache settings that affect verification. The
+[environment variable reference](../reference/cli#environment-variables) lists
+every variable the MCP server reads, including the cache and runtime-requirement
+settings.
 
 ### Standalone registry
 
@@ -184,7 +320,7 @@ the `public:` line and every `verify:` line of the registry key file at
 wrote. A standalone recipe therefore omits `PODIUM_SIGNATURE_PROVIDER` and
 `PODIUM_SIGNATURE_VERIFY_KEY`.
 
-Two settings still need attention:
+The following settings still need attention:
 
 - **Harness.** The MCP server reads `PODIUM_HARNESS` and falls back to the
   `none` adapter. It does not read `defaults.harness` from `sync.yaml`, so a
@@ -194,156 +330,6 @@ Two settings still need attention:
   shell exports another value for `podium sign` or `podium verify`, such as
   `sigstore-keyless`, set `PODIUM_SIGNATURE_PROVIDER=registry-managed` in the
   MCP entry. Otherwise the MCP server refuses to start with `config.invalid`.
-
----
-
-## Set up `podium sync`
-
-`podium sync` writes harness-native files into a workspace. Its configuration
-lives in `<workspace>/.podium/sync.yaml`, or in `~/.podium/sync.yaml` for
-per-developer defaults.
-
-1. Change into the workspace directory.
-2. Run `podium init` with the registry and the adapter value. This writes the
-   workspace's `sync.yaml`.
-3. Run `podium sync`.
-
-Each harness section in the [harness reference](#harness-reference) carries the
-commands for that harness.
-
-`podium sync` resolves the harness from the first of these that is set:
-`--harness`, then `PODIUM_HARNESS`, then the active profile's `harness`, then
-`defaults.harness`, then `none`. A workspace initialized with
-`podium init --harness <name>` therefore needs neither the flag nor the
-variable.
-
-### Watch mode
-
-`podium sync` runs once by default. With the watch flag, it runs in long-running
-watch mode: it runs one sync at startup and then waits for change triggers.
-
-A burst of triggers coalesces into a single run through a debounce window. That
-run reruns the whole sync:
-
-1. It re-reads the effective view.
-2. It applies the active profile's scope and the toggles recorded in the lock
-   file.
-3. It writes every selected artifact.
-4. It deletes the paths the prior run wrote that this run did not.
-5. It rewrites the lock file.
-
-No artifact is materialized per event. The trigger source differs between
-server-source and filesystem-source registries, and the run itself is identical.
-
-#### Server-source registry
-
-The watcher subscribes to the registry change-event stream. The stream is a
-long-lived `GET /v1/events` that requests the `artifact.published`,
-`artifact.deprecated`, and `layer.config_changed` event types. It returns
-newline-delimited JSON (`application/x-ndjson`), one event per line.
-
-- The watcher reads each line's `event` field, skips the `_heartbeat`
-  keepalive, and treats every other line as one trigger. The rest of the
-  payload is not inspected.
-- A dropped stream is reopened after 500 ms.
-- The registry delivers an event only when the caller's identity can see the
-  layer the event names. The caller's path-scoped OAuth scopes also narrow the
-  artifact events.
-- A `layer.config_changed` that removes a layer from the caller's view still
-  reaches a caller that could see the layer before the change. The triggered
-  run then deletes what it materialized from that layer.
-- Each triggered run re-reads the caller's effective view.
-
-The [Events stream](../reference/http-api#events-stream) section of the HTTP API
-reference states the full delivery rule.
-
-![podium sync watch mode against a server-source registry: the watcher subscribes to the registry change-event stream, debounces the triggers it receives, and reruns the whole sync, which resolves the caller's effective view, adapts each artifact, writes atomically, deletes stale paths, and rewrites the lock file.](../assets/diagrams/sync-watch.svg)
-
-<!--
-ASCII fallback for the diagram above (podium sync watch mode, server-source registry):
-
-  podium server
-    GET /v1/events                      the watcher reconnects 500 ms
-    newline-delimited JSON,             after a dropped stream
-    one line per event
-             |
-             |  only the event type is read
-             v
-  +----------------------------+
-  | Debounce                   |   one timer for the whole stream;
-  | a burst of events          |   a burst becomes one run
-  +-------------+--------------+
-                |
-                v
-  +---------------------------------------------------------+
-  | one full sync run                                        |
-  |   1 Resolve   the caller's effective view over HTTP      |
-  |   2 Adapt     each selected artifact, harness writer     |
-  |   3 Write     every file staged .tmp, then renamed       |
-  |   4 Delete    every prior path this run did not write    |
-  |   5 Lock      one .podium/sync.lock entry per path       |
-  +----------------------------+----------------------------+
-                               |
-                               v
-  target tree:
-    .claude/agents/, .cursor/rules/, etc.
-
-  The run then awaits the next trigger, which re-arms the debounce.
-  Every run applies the active profile's scope and re-reads the lock
-  file's toggles. A deprecated artifact keeps materializing; a file
-  leaves the target when its artifact leaves the effective view.
--->
-
-#### Filesystem-source registry
-
-The catalog is a directory on disk. The watcher registers an `fsnotify` watch on
-the registry path, the workspace overlay path, and every subdirectory beneath
-them, and it adds new subdirectories as they appear.
-
-- Any event under either tree is one trigger. The changed path is not
-  inspected.
-- When `fsnotify` cannot initialize, the watcher polls instead. It fingerprints
-  both trees every 500 ms from each entry's path, modification time, and size,
-  and it reruns when the fingerprint moves.
-- Identity and visibility are not evaluated, because the directory is
-  canonical.
-
-![podium sync watch mode against a filesystem-source registry: fsnotify over the registry path and the workspace overlay path, with a fingerprint-poll fallback, feeds a debounce that triggers one full sync run, which resolves the local layers and the overlay, adapts each artifact, writes atomically, deletes stale paths, and rewrites the lock file.](../assets/diagrams/sync-watch-filesystem.svg)
-
-<!--
-ASCII fallback for the diagram above (podium sync watch mode, filesystem-source registry):
-
-  filesystem catalog
-    ~/podium-artifacts/ + .podium/overlay/    poll fallback when fsnotify
-    fsnotify over both trees, recursively     cannot start: it fingerprints
-                                              both trees every 500 ms
-             |
-             |  the changed path is not inspected
-             v
-  +----------------------------+
-  | Debounce                   |   one timer for both trees;
-  | a burst of edits           |   a burst becomes one run
-  +-------------+--------------+
-                |
-                v
-  +---------------------------------------------------------+
-  | one full sync run                                        |
-  |   1 Resolve   the local layers, then the overlay         |
-  |   2 Adapt     each selected artifact, harness writer     |
-  |   3 Write     every file staged .tmp, then renamed       |
-  |   4 Delete    every prior path this run did not write    |
-  |   5 Lock      one .podium/sync.lock entry per path       |
-  +----------------------------+----------------------------+
-                               |
-                               v
-  target tree:
-    .claude/agents/, .cursor/rules/, etc.
-
-  The run then awaits the next trigger, which re-arms the debounce.
-  Every run applies the active profile's scope and re-reads the lock
-  file's toggles. The directory is canonical, so the run evaluates no
-  caller identity and no layer visibility.
--->
 
 ---
 
@@ -406,8 +392,9 @@ podium sync
 - `rule_mode: always` loads at launch, and `glob` writes the native `paths:`
   YAML list. Both modes map fully.
 - `auto` and `explicit` fall back to a load-always file and draw a lint warning.
-  `.claude/rules/` files have no description-attach or mention-only mode, and a
-  rule without `paths:` loads on every turn.
+  `.claude/rules/` files have no description-attach or mention-only mode, and
+  Claude Code reads a rule file without `paths:` at launch, as it reads
+  `CLAUDE.md`.
 - The adapter does not rewrite resource paths inside an `agent` or `command`
   file. A path the artifact's prose references keeps the registry-relative form
   the author wrote. Only a `hook`'s `hook_action` is rewritten to the
@@ -464,7 +451,7 @@ imports.
 
 **Marketplace.** Marketplace publishing is the delivery path for Cowork. A
 `kind: marketplace` sync target renders the Claude marketplace, which Cowork
-imports along with Claude Code and Claude Desktop, because the three Claude
+imports along with Claude Code and Claude Desktop, because the Claude
 surfaces read the same `.claude-plugin/marketplace.json`.
 
 1. Declare a marketplace target whose harness set names a Claude surface.
