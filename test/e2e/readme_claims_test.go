@@ -83,7 +83,7 @@ func TestReadme_PythonSDKPytest(t *testing.T) {
 
 // TypeScript SDK installs and tests.
 func TestReadme_TypeScriptSDK(t *testing.T) {
-	t.Skip("requires Node.js 20+ and npm in sdks/podium-ts; not available in the test sandbox")
+	t.Skip("requires Node.js 22+ and npm in sdks/podium-ts; not available in the test sandbox")
 }
 
 // hello world: create the documented skill file, a SKILL.md that carries

@@ -22,7 +22,7 @@ This page covers how to contribute to Podium: the ways to take part, the develop
 
 - Go 1.26 or later for the registry, CLI, and MCP server.
 - Python 3.10 or later for the `podium-py` SDK.
-- Node.js 20 or later for the `@lennylabs/podium-sdk` TypeScript SDK.
+- Node.js 22 or later to build and test the `@lennylabs/podium-sdk` TypeScript SDK. The published SDK runs on Node.js 20 or later.
 - GNU make.
 
 ### Build
