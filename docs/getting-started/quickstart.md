@@ -1,17 +1,15 @@
 ---
 title: Quickstart
 nav_order: 2
-description: Install Podium, write one skill, and see it load in Claude Code. The local tier uses the CLI without a daemon or authentication.
+description: Install Podium, write one skill in a local catalog, and load it in Claude Code, with no daemon or authentication.
 ---
 
 # Quickstart
 
-This page shows the local setup. The catalog is a directory on disk, and
-`podium sync` writes harness-native files into a project. The same catalog
-serves any other harness by changing one setting, which is the point of the
-walkthrough below. This path fits any team or individual whose catalog does not
-require access control or progressive discovery, including solo work,
-prototypes, first evaluation, and Git-shared team catalogs.
+This quickstart installs the Podium CLI, writes one skill into a local catalog,
+and materializes it into Claude Code. It uses the local deployment mode, where
+the catalog is a directory on disk and no server runs. That mode fits any
+catalog that needs no access control or progressive discovery.
 
 > [!NOTE]
 > Podium is an early release. The surface and its behavior may
@@ -23,17 +21,18 @@ prototypes, first evaluation, and Git-shared team catalogs.
 ## Prerequisites
 
 - A terminal.
-- [Claude Code](https://www.anthropic.com/claude-code) installed
-  (or any other harness Podium supports; see [Configure your
-  harness](../consuming/configure-your-harness)). The walkthrough
-  below uses Claude Code; the commands are identical for other
-  harnesses with `--harness <name>` swapped.
+- [Claude Code](https://www.anthropic.com/claude-code), or any other harness
+  listed in [Configure your harness](../consuming/configure-your-harness). The
+  steps use Claude Code. For another harness, pass its name as
+  `--harness <name>`.
 
 ---
 
 ## 1. Install the CLI
 
-Pick the channel that matches your platform. Homebrew, Scoop, and the release archives install the `podium`, `podium-server`, and `podium-mcp` binaries on PATH. The source build below writes the `podium` binary only. Run `go build -o ~/.local/bin/ ./cmd/...` to build all three.
+Install Podium through the channel that matches the platform. Homebrew, Scoop,
+and the release archives put the `podium`, `podium-server`, and `podium-mcp`
+binaries on PATH.
 
 **macOS / Linux (Homebrew):**
 
@@ -51,7 +50,7 @@ scoop install podium
 podium version
 ```
 
-**Direct binary download:** grab `podium-<os>-<arch>` (or the `.tar.gz` / `.zip` bundle that includes every binary) from the [latest release](https://github.com/lennylabs/podium/releases/latest).
+**Direct binary download:** download `podium-<os>-<arch>`, or the `.tar.gz` or `.zip` bundle that includes every binary, from the [latest release](https://github.com/lennylabs/podium/releases/latest).
 
 **From source** (Go 1.26+ required):
 
@@ -61,15 +60,20 @@ cd podium
 go build -o ~/.local/bin/podium ./cmd/podium
 ```
 
-The [development setup](../about/contributing#development-setup) has the full prerequisites and the SDK build steps.
+The source build writes the `podium` binary only. Run
+`go build -o ~/.local/bin/ ./cmd/...` to build all three binaries. The
+[development setup](../about/contributing#development-setup) has the full
+prerequisites and the SDK build steps.
+
+`podium version` prints the installed version.
 
 ---
 
-## 2. Tell Podium where the catalog lives
+## 2. Point Podium at the catalog
 
-Pick a directory for artifacts. The examples use `~/podium-artifacts/`.
-From the project that will consume the artifacts, point Podium at that
-directory and set Claude Code as the default harness:
+Create a directory for artifacts, then configure the project that consumes
+them. The examples use `~/podium-artifacts/` and set Claude Code as the default
+harness:
 
 ```bash
 mkdir -p ~/podium-artifacts/personal
@@ -77,30 +81,28 @@ cd ~/projects/your-project
 podium init --registry ~/podium-artifacts/ --harness claude-code
 ```
 
-That writes `<workspace>/.podium/sync.yaml` with two defaults: a
-registry pointing at the directory (so the client reads from disk
-directly, with no server) and a harness telling Podium how to format
-outputs for Claude Code. Verify:
+`podium init` writes `<workspace>/.podium/sync.yaml` with two defaults. The
+registry default points at the directory, so the client reads from disk with
+no server. The harness default tells Podium to format output for Claude Code.
+
+Confirm the configuration:
 
 ```bash
 podium config show
 ```
 
-The merged config should show the registry path and the harness. To share
-these defaults with teammates, commit
-`.podium/sync.yaml`. For a per-developer config that follows you
-across projects, run `podium init --global` instead.
+The merged configuration shows the registry path and the harness.
 
 ---
 
-## 3. Write your first skill
+## 3. Write a skill
 
 A skill is a directory with a `SKILL.md` from the
 [agentskills.io](https://agentskills.io/specification) standard at its root.
-An optional `ARTIFACT.md` beside it carries Podium-only fields. The registry
-path is one filesystem layer; artifacts and intermediate domain directories
-live underneath. The example below creates a `greet` skill under a `personal/hello/`
-domain path:
+The registry path is one filesystem layer, and artifacts and intermediate
+domain directories live underneath it.
+
+Create a `greet` skill under the `personal/hello/` domain path:
 
 ```bash
 mkdir -p ~/podium-artifacts/personal/hello/greet
@@ -120,8 +122,8 @@ two sentences.
 EOF
 ```
 
-Add a script the skill can call. Anything beside the manifest files is a bundled
-resource, and `scripts/` is the convention for executable helpers:
+Add a script the skill can call. Anything beside the manifest files is a
+bundled resource, and `scripts/` is the convention for executable helpers:
 
 ```bash
 mkdir -p ~/podium-artifacts/personal/hello/greet/scripts
@@ -137,17 +139,17 @@ EOF
 
 The files have these roles:
 
-- **`SKILL.md` carries the agent-facing content and the version in `metadata.version`.** The standard's required `name` and `description` sit in its frontmatter, and the prose body is what the agent reads.
-- **An optional, hand-written `ARTIFACT.md` carries Podium-only fields such as `when_to_use`, `tags`, and `sensitivity`.** See the [frontmatter reference](../authoring/frontmatter-reference).
-- **The directory path is the canonical artifact ID.** Above, that is `personal/hello/greet`. References from other artifacts use this ID.
-
-The unit is the directory. Anything else placed in `greet/` is a bundled
-resource: a `scripts/` folder the skill calls, a `references/` folder it reads,
-or an `assets/` folder it templates from. Bundled files are materialized
-wherever the artifact is materialized, so a script written once reaches Claude
-Code, Cursor, and a published marketplace alike. See
-[Bundled resources](../authoring/bundled-resources) for the conventions and the
-size limits.
+- **`SKILL.md`** carries the agent-facing content. Its frontmatter holds the
+  standard's required `name` and `description` and the version in
+  `metadata.version`. Its prose body is what the agent reads.
+- **An optional, hand-written `ARTIFACT.md`** beside it carries Podium-only
+  fields such as `when_to_use`, `tags`, and `sensitivity`. See the
+  [frontmatter reference](../authoring/frontmatter-reference).
+- **The directory path** is the canonical artifact ID, here
+  `personal/hello/greet`. References from other artifacts use this ID.
+- **Everything else in `greet/`** is a bundled resource, such as `scripts/`,
+  `references/`, or `assets/`. Bundled files are materialized wherever the
+  artifact is. See [Bundled resources](../authoring/bundled-resources).
 
 ---
 
@@ -170,15 +172,16 @@ artifacts:
       .claude/skills/greet/scripts/today.py
 ```
 
-Podium reads the registry, finds the artifact, runs the Claude Code
-harness adapter on it, and writes the result to the path Claude Code
-expects. The default sync target is the
-current directory, and the adapter writes a skill into
-`.claude/skills/<name>/SKILL.md` underneath. The bundled script travels with it,
-because the unit is the directory.
+Podium runs the Claude Code harness adapter on the artifact and writes the
+result where Claude Code expects it. The default sync target is the current
+directory, and a skill lands in `.claude/skills/<name>/SKILL.md` with its
+bundled script beside it.
 
-The adapter decides those paths. Point the same command at another harness and
-the same source artifact lands where that runtime expects it:
+---
+
+## 5. Materialize into a second harness
+
+The adapter decides the destination paths. Sync the same catalog for Cursor:
 
 ```bash
 podium sync --harness cursor
@@ -193,10 +196,9 @@ artifacts:
       .cursor/skills/greet/scripts/today.py
 ```
 
-Nothing in the catalog changed between those two runs.
-
-Each run reconciles the whole target against the lock file, so this one removed
-the `.claude/` files the previous run wrote. Put them back before the next step:
+Nothing in the catalog changed between the two runs. Each run reconciles the
+whole target against the lock file, so this run removed the `.claude/` files
+the previous run wrote. Restore them before the next step:
 
 ```bash
 podium sync
@@ -207,90 +209,61 @@ the destination table for each artifact type.
 
 ---
 
-## 5. Use it
+## 6. Use the skill
 
-Open Claude Code in that project. Type:
+Open Claude Code in the project and type:
 
 ```
 hello!
 ```
 
-Claude Code natively discovers `.claude/skills/greet/SKILL.md`. The local tier
-does not require MCP. Claude Code recognizes that the skill's description
-matches the prompt and uses it to produce a greeting with the current date.
+Claude Code discovers `.claude/skills/greet/SKILL.md` natively, so the local
+mode needs no MCP server. Claude Code matches the skill's description to the
+prompt and replies with a greeting and the current date.
 
 ---
 
 ## Watch mode (optional)
 
-For iterative authoring, run `podium sync --watch` instead of
-`podium sync`. It watches the registry directory with `fsnotify` and
-re-materializes on every change. A saved edit to `SKILL.md`, or to an
-`ARTIFACT.md` overlay, lands in `.claude/` immediately.
+For iterative authoring, run `podium sync --watch` instead of `podium sync`. It
+watches the registry directory with `fsnotify` and re-materializes on every
+change. A saved edit to `SKILL.md`, or to an `ARTIFACT.md` overlay, lands in
+`.claude/` immediately.
 
 ---
 
-## What's next
+## Next steps
 
-After the local loop works, continue with one of these paths:
-
-- **Deliver to a second harness.** The same catalog serves every supported
-  runtime. Re-run the sync with a different `--harness` value, or set one per
-  target, and the adapter writes the layout that runtime reads.
-  [Configure your harness](../consuming/configure-your-harness) has the roster,
-  the per-type destinations, and the MCP setup for each.
-- **Add more artifacts.** Drop more directories under
-  `~/podium-artifacts/personal/`, each with a `SKILL.md` for a skill or an
-  `ARTIFACT.md` for other types.
-  Try a different `type:`: `command`, `context`, `rule`, `hook`,
-  `agent`, or `mcp-server`. The [authoring guide](../authoring/) has
-  the field reference and recipes for each.
-- **Materialize only part of the catalog.** As the catalog grows past what one
-  workspace needs, narrow the sync with include, exclude, and type filters, and
-  name the result as a profile so one flag switches between scopes. See
+- **Share settings with teammates.** Commit `<workspace>/.podium/sync.yaml` so
+  teammates inherit the harness, the target, and any profiles defined there.
+  For a per-developer configuration that applies across projects, run
+  `podium init --global` instead.
+- **Add more artifacts.** Add directories under `~/podium-artifacts/personal/`,
+  each with a `SKILL.md` for a skill or an `ARTIFACT.md` for a `command`,
+  `context`, `rule`, `hook`, `agent`, or `mcp-server`. See the
+  [authoring guide](../authoring/).
+- **Materialize part of the catalog.** Narrow the sync with include, exclude,
+  and type filters, and save the result as a profile. See
   [Selective materialization](../consuming/selective-materialization).
-- **Share settings with teammates.** Commit the
-  `<workspace>/.podium/sync.yaml` created above so teammates
-  inherit the harness, the target, and any profiles defined there. For a
-  per-developer config that follows you across projects, use
-  `podium init --global`.
-- **Browse the catalog from the agent.** As the registry grows, the
-  agent can traverse domains with `load_domain` and find artifacts with
-  `search_domains` and `search_artifacts`, then materialize one with
-  `load_artifact`. Runtime browsing requires a server. See
+- **Split the catalog into layers.** This quickstart uses one filesystem layer
+  rooted at `~/podium-artifacts/`. To compose several layers from one
+  directory, such as a shared team layer and a personal layer, add a
+  `.registry-config` with `multi_layer: true`. See [Local](../deployment/local).
+- **Move to a server.** Runtime discovery, where an agent finds artifacts with
+  `load_domain`, `search_domains`, and `search_artifacts` and loads one with
+  `load_artifact`, requires a server. So does a single audit log for a team.
+  Start a single-node server on the same directory with
+  `podium serve --standalone --layer-path ~/podium-artifacts/`. See
+  [Single node](../deployment/single-node) and
   [Browsing the catalog](../consuming/browsing-the-catalog).
-- **Split the catalog into multiple layers.** This quickstart uses a
-  single-layer setup, one filesystem layer rooted at `~/podium-artifacts/`.
-  To compose several layers from one directory (for example, a shared
-  team layer alongside a personal layer), opt the directory into
-  multi-layer mode by adding a `.registry-config` with
-  `multi_layer: true`. See [Local](../deployment/local)
-  for the layout and the `.registry-config` reference.
-- **Outgrow the local tier.** When runtime discovery (agents loading
-  capabilities mid-session) or a single audit log for a team becomes
-  necessary, move to a single-node server:
-  `podium serve --standalone --layer-path ~/podium-artifacts/`. The same
-  directory and artifacts work behind the server. See
-  [Single node](../deployment/single-node).
 
 ---
 
 ## Troubleshooting
 
-**`config.no_registry` error.** `podium init` didn't run, or the
-resolved `defaults.registry` is empty. Re-run step 2.
-
-**`podium sync` says no artifacts.** Confirm that the artifact directory
-holds `SKILL.md` (for a skill) or `ARTIFACT.md` (for other types) at its
-immediate root. The directory path beneath `~/podium-artifacts/` is the canonical
-artifact ID; intermediate directories without manifest files are domain
-nodes, not artifacts.
-
-**Claude Code doesn't see the skill.** Check that
-`.claude/skills/greet/SKILL.md` actually exists. If it does, restart Claude
-Code so it re-reads its directory.
-
-**Skill is found but not loaded.** Claude reads the `description:`
-field to decide whether the skill matches your prompt. Vague
-descriptions don't get used. The
-[authoring guide](../authoring/) has more on description quality.
+| Symptom | Cause | Fix |
+|:--|:--|:--|
+| `config.no_registry` error | `podium init` did not run, or the resolved `defaults.registry` is empty. | Re-run step 2. |
+| `podium sync` reports no artifacts | The artifact directory does not hold `SKILL.md` (for a skill) or `ARTIFACT.md` (for other types) at its immediate root. Intermediate directories without manifest files are domain nodes rather than artifacts. | Move the manifest to the root of the artifact directory. The directory path beneath `~/podium-artifacts/` is the canonical artifact ID. |
+| Claude Code does not see the skill | `.claude/skills/greet/SKILL.md` is missing, or Claude Code has not re-read its directory. | Confirm the file exists, then restart Claude Code. |
+| The skill is found but not used | Claude Code reads the `description:` field to decide whether the skill matches the prompt, and a vague description does not match. | Make the description specific. The [authoring guide](../authoring/) covers description quality. |
