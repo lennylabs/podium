@@ -50,6 +50,8 @@ pages:
     slug: D-clustered
   - path: docs/deployment/layers.md
     slug: D-cli
+  - path: docs/deployment/layer-sources.md
+    slug: D-cli
   - path: docs/deployment/access-control.md
     slug: D-cli
   - path: docs/deployment/vector-backends.md
