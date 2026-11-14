@@ -33,15 +33,6 @@ export type MarkedText = {
   marked: boolean;
 };
 
-export type StatusPill = {
-  /**
-   * Follows the release series, which the page derives from the version the
-   * build read out of the Go source. Naming the series here as well would put
-   * a second number in the page that has to be remembered on every bump.
-   */
-  qualifier: string;
-};
-
 export type InstallCommand = {
   /** The shell prompt glyph shown before the command. */
   prompt: string;
@@ -161,7 +152,6 @@ export type LandingContent = {
     versionPrefix: string;
   };
   hero: {
-    status: StatusPill;
     /** One entry per headline line, each a list of runs. A marked run takes
         the highlighter. */
     headline: MarkedText[][];
@@ -228,9 +218,6 @@ export const landing: LandingContent = {
     versionPrefix: "v",
   },
   hero: {
-    status: {
-      qualifier: "early release",
-    },
     headline: [
       [
         { text: "The ", marked: false },

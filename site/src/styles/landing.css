@@ -13,14 +13,9 @@
   /* Accent that stays solid: light uses the deep tone, dark uses the accent. */
   --l-accent-solid: var(--accent-deep);
 
-  /* Secondary UI text: nav links, version pill, ghost button. */
+  /* Secondary UI text: nav links, version label, ghost button. */
   --l-text-muted: var(--secondary);
 
-  /* Status pill */
-  --l-pill-bg: linear-gradient(180deg, #ffffff, #f6f4ea);
-  --l-pill-border: #dcd9cc;
-  --l-pill-text: var(--secondary);
-  --l-pill-ring: rgba(242, 134, 26, 0.25);
 
   /* Headline highlighter. Light paints a marker band, dark clips a gradient. */
   --l-mark-bg: linear-gradient(180deg, transparent 62%, var(--accent) 62%);
@@ -68,10 +63,6 @@
     --l-accent-solid: var(--accent);
     --l-text-muted: var(--meta);
 
-    --l-pill-bg: linear-gradient(180deg, #212739, #181c28);
-    --l-pill-border: var(--border-2);
-    --l-pill-text: #ccd3e2;
-    --l-pill-ring: rgba(255, 164, 36, 0.18);
 
     --l-mark-bg: linear-gradient(90deg, var(--accent), var(--accent-soft));
     --l-mark-clip: text;
@@ -114,10 +105,6 @@
   --l-accent-solid: var(--accent);
   --l-text-muted: var(--meta);
 
-  --l-pill-bg: linear-gradient(180deg, #212739, #181c28);
-  --l-pill-border: var(--border-2);
-  --l-pill-text: #ccd3e2;
-  --l-pill-ring: rgba(255, 164, 36, 0.18);
 
   --l-mark-bg: linear-gradient(90deg, var(--accent), var(--accent-soft));
   --l-mark-clip: text;
@@ -292,28 +279,6 @@
   min-width: 0;
 }
 
-.l-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 24px;
-  padding: 5px 12px;
-  border: 1px solid var(--l-pill-border);
-  border-radius: var(--r-pill);
-  background: var(--l-pill-bg);
-  color: var(--l-pill-text);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.l-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--l-accent-solid);
-  box-shadow: 0 0 0 3px var(--l-pill-ring);
-}
 
 .l-headline {
   margin: 0 0 20px;
