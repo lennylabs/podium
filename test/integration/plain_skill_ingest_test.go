@@ -595,3 +595,120 @@ func TestPlainSkillIngest_MetadataDeprecatedFiresEvent(t *testing.T) {
 		})
 	}
 }
+
+// psEarlierSkill is the SKILL.md of the plain skill name whose metadata
+// declares version v and the extra metadata lines.
+func psEarlierSkill(name, v, extra string) string {
+	return "---\nname: " + name + "\ndescription: " + name + " skill\nmetadata:\n  version: \"" + v + "\"\n" +
+		extra + "---\n\n" + name + " prose\n"
+}
+
+// psEarlierNotes is the SKILL.md of notes at v, whose metadata carries tags
+// and a sensitivity that an earlier release did not resolve.
+func psEarlierNotes(v string) string {
+	return psEarlierSkill("notes", v, "  tags: \"release, notes\"\n  sensitivity: medium\n")
+}
+
+// seedEarlierRow stores a plain-skill row of id@v in layerID as an earlier
+// release stored it: the tags, sensitivity, search-visibility, and
+// deprecation columns are empty, and the content hash covers the bytes with
+// no signature.
+func (e *psEnv) seedEarlierRow(t *testing.T, id, v, layerID, skill string, at time.Time) {
+	t.Helper()
+	e.putRow(t, storetest.Seal(t, store.ManifestRecord{
+		TenantID: psTenant, ArtifactID: id, Version: v, Layer: layerID, Type: "skill",
+		Description: id + " skill", SkillRaw: []byte(skill), IngestedAt: at,
+	}, nil, nil))
+}
+
+// search issues GET /v1/search_artifacts with the empty browse query and, when
+// tags is non-empty, the tags filter, and returns the result descriptors.
+func (e *psEnv) search(t *testing.T, tags string) []server.ArtifactDescriptor {
+	t.Helper()
+	q := url.Values{"query": {""}}
+	if tags != "" {
+		q.Set("tags", tags)
+	}
+	resp, err := http.Get(e.ts.URL + "/v1/search_artifacts?" + q.Encode())
+	if err != nil {
+		t.Fatalf("search tags=%q: %v", tags, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("search tags=%q = %d %s, want 200", tags, resp.StatusCode, raw)
+	}
+	var out server.SearchResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode search: %v (%s)", err, raw)
+	}
+	return out.Results
+}
+
+// psDescriptor returns the descriptor of id in ds.
+func psDescriptor(ds []server.ArtifactDescriptor, id string) (server.ArtifactDescriptor, bool) {
+	for _, d := range ds {
+		if d.ID == id {
+			return d, true
+		}
+	}
+	return server.ArtifactDescriptor{}, false
+}
+
+// Spec: §13.4, §4.3.4, §4.7.4, §4.7.6 — the tags, sensitivity, and
+// deprecation flag of a skill row that an earlier release stored are exempt
+// from the §13.4 rewrite rule. Search and latest resolution read them as
+// stored, while a load admits the row and serves the values its SKILL.md
+// metadata resolves to. An identical re-ingest rewrites no column, and
+// publishing at a new version stores the resolved values. The row of old is
+// in its own layer so the re-ingests of notes leave it in place.
+func TestPlainSkillIngest_EarlierReleaseRowKeepsStoredColumns(t *testing.T) {
+	t.Parallel()
+	for _, f := range ingestConvergenceStores(t) {
+		t.Run(f.name, func(t *testing.T) {
+			t.Parallel()
+			e := newPSEnv(t, f, "L", "M")
+			at := time.Now().UTC().Add(-time.Hour)
+			notes := psEarlierNotes("1.0.0")
+			e.seedEarlierRow(t, "notes", "1.0.0", "L", notes, at)
+			e.seedEarlierRow(t, "old", "1.0.0", "M", psEarlierSkill("old", "1.0.0", ""), at)
+			e.seedEarlierRow(t, "old", "1.1.0", "M", psEarlierSkill("old", "1.1.0", "  deprecated: \"true\"\n"), at.Add(time.Minute))
+
+			if _, ok := psDescriptor(e.search(t, "notes"), "notes"); ok {
+				t.Error("tag filter notes returned notes, want the stored empty tags to govern search")
+			}
+			all := e.search(t, "")
+			for _, id := range []string{"notes", "old"} {
+				d, ok := psDescriptor(all, id)
+				if !ok {
+					t.Fatalf("default search = %+v, want %s listed", all, id)
+				}
+				if len(d.Tags) != 0 || d.Sensitivity != "" {
+					t.Errorf("%s descriptor tags=%v sensitivity=%q, want the stored empty columns", id, d.Tags, d.Sensitivity)
+				}
+			}
+
+			if status, got := e.load(t, "notes", ""); status != http.StatusOK || got.Sensitivity != "medium" {
+				t.Errorf("latest notes = %d sensitivity %q, want 200 with the metadata medium", status, got.Sensitivity)
+			}
+			status, got := e.load(t, "old", "")
+			if status != http.StatusOK || got.Version != "1.1.0" || got.DeprecationWarning == "" {
+				t.Errorf("latest old = %d version %q warning %q, want 200 at 1.1.0 with a deprecation_warning",
+					status, got.Version, got.DeprecationWarning)
+			}
+
+			wantIdempotent(t, e.ingest(t, "L", psFS("notes", notes, "")), "notes", "1.0.0")
+			if m := e.row(t, "notes", "1.0.0"); len(m.Tags) != 0 || m.Sensitivity != "" {
+				t.Errorf("notes@1.0.0 after the identical re-ingest: tags %v sensitivity %q, want the stored empty columns", m.Tags, m.Sensitivity)
+			}
+
+			wantAccepted(t, e.ingest(t, "L", psFS("notes", psEarlierNotes("1.0.1"), "")), "notes", "1.0.1")
+			if m := e.row(t, "notes", "1.0.1"); !reflect.DeepEqual(m.Tags, []string{"release", "notes"}) || m.Sensitivity != "medium" {
+				t.Errorf("notes@1.0.1 columns: tags %v sensitivity %q, want the resolved [release notes] and medium", m.Tags, m.Sensitivity)
+			}
+			if d, ok := psDescriptor(e.search(t, "notes"), "notes"); !ok || d.Version != "1.0.1" {
+				t.Errorf("tag filter notes after the new version = %+v (found %v), want notes at 1.0.1", d, ok)
+			}
+		})
+	}
+}

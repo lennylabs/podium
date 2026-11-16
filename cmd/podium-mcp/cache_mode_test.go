@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -814,5 +815,67 @@ func TestCacheServedLoad_RewrittenVersionOrTypeFails(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// ----- records cached under an earlier release ------------------------------
+
+// metadataSkillRecord is a sealed record of the plain skill team/notes, whose
+// SKILL.md metadata states sensitivity medium, served at sensitivity. The
+// content hash frames the stored bytes alone, so the record a registry served
+// before it resolved the metadata fields and the one it serves after share it.
+func metadataSkillRecord(t *testing.T, sensitivity string) loadArtifactResponse {
+	t.Helper()
+	skillRaw := "---\nname: notes\ndescription: notes\nmetadata:\n  version: \"1.0.0\"\n  sensitivity: medium\n---\nnotes prose\n"
+	return sealDelivery(loadArtifactResponse{
+		ID: "team/notes", Type: "skill", Version: "1.0.0", Sensitivity: sensitivity,
+		Frontmatter:      synthesizedSkillDocument(t, "1.0.0"),
+		SkillRaw:         skillRaw,
+		ManifestBody:     "notes prose\n",
+		ContentHash:      "sha256:" + version.CanonicalContentHash(nil, []byte(skillRaw), nil),
+		ArtifactRevision: cachedRevision,
+	})
+}
+
+// Spec: §6.5 — a record cached under a release that resolved the §4.3.4
+// metadata fields differently keeps its cached sensitivity and delivery
+// record. Under always-revalidate the registry's HEAD answers the unchanged
+// content hash while its live record carries medium, so the bridge serves the
+// cached record, which passes the §6.6 delivery check, without fetching the
+// live one, and the cache keeps the empty sensitivity and the earlier delivery
+// hash. A change that refetches on a matching hash changes §6.5 with it.
+func TestCache_RevalidatedRecordKeepsCachedSensitivity(t *testing.T) {
+	t.Parallel()
+	earlier, live := metadataSkillRecord(t, ""), metadataSkillRecord(t, "medium")
+	if earlier.ContentHash != live.ContentHash || earlier.DeliveryHash == live.DeliveryHash {
+		t.Fatal("fixture: the records must share a content hash and differ in their delivery hash")
+	}
+	stub := &cacheStub{records: map[string]loadArtifactResponse{earlier.ID: earlier}}
+	var gets atomic.Int32
+	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			gets.Add(1)
+		}
+		stub.ServeHTTP(w, r)
+	}))
+	t.Cleanup(registry.Close)
+	dir := t.TempDir()
+	s := cacheServer(t, dir, registry.URL, "always-revalidate")
+	args := map[string]any{"id": earlier.ID, "version": "1.0.0"}
+	primeLive(t, s, earlier, args)
+
+	stub.records[live.ID] = live
+	gets.Store(0)
+	wantServed(t, s.loadArtifact(args), earlier.ManifestBody)
+	if n := gets.Load(); n != 0 {
+		t.Errorf("registry GETs = %d after a matching HEAD, want 0", n)
+	}
+	cached, err := s.loadArtifactFromCache(earlier.ContentHash, earlier.ID)
+	if err != nil {
+		t.Fatalf("loadArtifactFromCache: %v", err)
+	}
+	if cached.Sensitivity != "" || cached.DeliveryHash != earlier.DeliveryHash {
+		t.Errorf("cached sensitivity %q delivery_hash %q, want the earlier empty value and %q",
+			cached.Sensitivity, cached.DeliveryHash, earlier.DeliveryHash)
 	}
 }
