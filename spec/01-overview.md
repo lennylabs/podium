@@ -112,7 +112,7 @@ The skill manifest (`SKILL.md`) follows the Agent Skills specification, which th
 ## 1.6 Project Model
 
 - **License.** MIT.
-- **Governance.** Maintainer model + RFC process for spec changes; see `GOVERNANCE.md`.
+- **Governance.** Maintainer model and a proposal process for spec changes; see `GOVERNANCE.md`.
 - **Distribution.** OSS-first development; optional commercial managed offering by the sponsoring entity (separate doc).
 - **Reference registry.** A multi-layer example registry with curated artifacts across every first-class type ships in the repository as the §11 example artifact registry.
 - **Multi-vendor neutrality.** The project does not adopt contributions, governance changes, or roadmap pressure that would bind it to a single harness vendor's surface.
