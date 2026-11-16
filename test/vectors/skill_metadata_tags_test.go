@@ -78,8 +78,9 @@ func unreadableForm(name, skillMD string) tagsForm {
 	return tagsForm{name: name, skillMD: skillMD}
 }
 
-// readableTagsForms are the cases the readable form admits. Each case whose
-// SKILL.md Go parses must resolve to the declared reading.
+// readableTagsForms are the cases TEST-1 declares readable, each with its
+// declared reading. Each case whose SKILL.md Go parses must resolve to that
+// reading.
 func readableTagsForms() []tagsForm {
 	return []tagsForm{
 		readableForm("plain finance close", withTags("  tags: finance, close\n"), "finance", "close"),
@@ -93,6 +94,12 @@ func readableTagsForms() []tagsForm {
 		readableForm("double-quoted punctuation", withTags("  tags: \"c++, q&a: x # y\"\n"), "c++", "q&a: x # y"),
 		readableForm("double-quoted null", withTags("  tags: \"null\"\n"), "null"),
 		readableForm("double-quoted tilde", withTags("  tags: \"~\"\n"), "~"),
+		// TEST-1 lists these as readable with the reading []. Condition 7
+		// gives the overlay no tag for an empty element, and D-3 leaves Go
+		// none, so declaring the empty reading makes the generator check
+		// that yaml.v3 and the D-3 rule resolve each value to [].
+		readableForm("plain empty element", withTags("  tags: a,,b\n")),
+		readableForm("double-quoted empty", withTags("  tags: \"\"\n")),
 		readableForm("doc example with sensitivity and when_to_use",
 			skillDoc("name: run-variance\ndescription: Compare actuals against forecast for a close period.\n"+
 				"metadata:\n  version: \"1.0.0\"\n  tags: \"finance, close\"\n  sensitivity: medium\n"+
@@ -127,11 +134,6 @@ func readableTagsForms() []tagsForm {
 func unreadableTagsForms() []tagsForm {
 	const owner = "  owner: &k tags\n  tags: a, b\n"
 	return []tagsForm{
-		// Each meets every condition but 7, which an empty element fails.
-		// D-3 leaves Go no tag for either value, so go_tags and sdk_tags
-		// agree on [].
-		unreadableForm("plain empty element", withTags("  tags: a,,b\n")),
-		unreadableForm("double-quoted empty", withTags("  tags: \"\"\n")),
 		unreadableForm("no value", withTags("  tags:\n")),
 		unreadableForm("plain tilde", withTags("  tags: ~\n")),
 		unreadableForm("plain null", withTags("  tags: null\n")),

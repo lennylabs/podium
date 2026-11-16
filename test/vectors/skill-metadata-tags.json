@@ -180,7 +180,7 @@
     {
       "name": "double-quoted empty",
       "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: \"\"\n---\nGreet the user by name.\n",
-      "readable": false,
+      "readable": true,
       "go_tags": [],
       "sdk_tags": []
     },
@@ -471,7 +471,7 @@
     {
       "name": "plain empty element",
       "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: a,,b\n---\nGreet the user by name.\n",
-      "readable": false,
+      "readable": true,
       "go_tags": [],
       "sdk_tags": []
     },
