@@ -163,7 +163,7 @@ func nonStringMetadataKey(fm []byte) (string, bool) {
 	if yaml.Unmarshal(fm, &doc) != nil || len(doc.Content) == 0 {
 		return "", false
 	}
-	md := mappingValue(doc.Content[0], "metadata")
+	md := findMappingKey(doc.Content[0], "metadata", map[*yaml.Node]bool{})
 	if md == nil || md.Kind != yaml.MappingNode {
 		return "", false
 	}
@@ -228,16 +228,41 @@ func (w metadataWalker) firstNonScalarKey(m *yaml.Node) (string, bool) {
 	return "", false
 }
 
-// mappingValue returns the alias-resolved value of key in the mapping node m,
-// or nil when m is not a mapping or does not hold key.
-func mappingValue(m *yaml.Node, key string) *yaml.Node {
+// findMappingKey returns the alias-resolved value of key in the mapping node
+// m, or nil when no mapping reached from m holds key. It applies the rules
+// firstNonScalarKey applies, because yaml.v3 decodes a top-level metadata key
+// reached through an alias key or a `<<` merge key into Skill.Metadata, and a
+// sequence under that metadata fails the decode the same way. Keys are
+// alias-resolved, the direct keys are checked before the merge sources, and
+// each merge source, a mapping or a sequence of mappings, is searched in
+// order, matching the precedence yaml.v3 decodes. visited holds the mappings
+// already searched, so a cyclic merge ends the search.
+func findMappingKey(m *yaml.Node, key string, visited map[*yaml.Node]bool) *yaml.Node {
 	m = resolveAlias(m)
-	if m.Kind != yaml.MappingNode {
+	if m.Kind != yaml.MappingNode || visited[m] {
 		return nil
 	}
+	visited[m] = true
+	var merges []*yaml.Node
 	for i := 0; i+1 < len(m.Content); i += 2 {
-		if m.Content[i].Value == key {
+		kn := resolveAlias(m.Content[i])
+		if kn.ShortTag() == "!!merge" {
+			merges = append(merges, resolveAlias(m.Content[i+1]))
+			continue
+		}
+		if kn.Value == key {
 			return resolveAlias(m.Content[i+1])
+		}
+	}
+	for _, mn := range merges {
+		sources := []*yaml.Node{mn}
+		if mn.Kind == yaml.SequenceNode {
+			sources = mn.Content
+		}
+		for _, src := range sources {
+			if v := findMappingKey(src, key, visited); v != nil {
+				return v
+			}
 		}
 	}
 	return nil

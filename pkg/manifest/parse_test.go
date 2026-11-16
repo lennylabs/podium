@@ -233,6 +233,32 @@ func TestParseSkill_NonStringMetadataNamesKey(t *testing.T) {
 			contains: []string{"metadata.tags is not a string", "tags is comma-separated"},
 		},
 		{
+			name:     "top-level merge key brings metadata",
+			fm:       "name: x\n<<: {metadata: {tags: [a, b]}}\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
+		},
+		{
+			name:     "top-level alias key names metadata",
+			fm:       "name: x\nk: &k metadata\n*k : {tags: [a, b]}\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
+		},
+		{
+			name:     "top-level merge sequence brings metadata",
+			fm:       "name: x\n<<: [{owner: a}, {metadata: {tags: [a, b]}}]\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated"},
+		},
+		{
+			name:     "direct metadata takes precedence over a merged one",
+			fm:       "name: x\nmetadata: {owner: [a]}\n<<: {metadata: {tags: [a]}}\n",
+			contains: []string{"metadata.owner is not a string"},
+			absent:   []string{"metadata.tags"},
+		},
+		{
+			name:   "self-referencing top-level merge keeps the unchanged error",
+			fm:     "--- &r\nname: [x]\n<<: *r\n",
+			absent: []string{"metadata.", "is not a string"},
+		},
+		{
 			name:     "second error stays visible",
 			fm:       "name: [x]\nmetadata:\n  tags: [a, b]\n",
 			contains: []string{"metadata.tags is not a string", "line 1", "line 3"},
