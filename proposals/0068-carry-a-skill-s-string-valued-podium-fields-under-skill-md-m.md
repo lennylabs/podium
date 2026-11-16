@@ -1,7 +1,7 @@
 # Proposal 0068: Carry a skill's string-valued Podium fields under SKILL.md metadata, and serve the resolved values on every read path
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-15). Verified after 4 adversarial review rounds (2 findings fixed).
+- Status: Implemented (2026-11-15). Verified after 4 adversarial review rounds (2 findings fixed).
 - Date: 2026-11-15
 
 This document stages spec, code, test, manual-validation, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change reverses maintainer decision D2.5 and the matching non-goal of proposal 0058 (see "Relationship to D2.5 and proposal 0058"; the maintainer confirmed the reversal on 2026-11-15). It is backward-incompatible: `SKILL.md` `metadata` keys that Podium ignored become meaningful, and a stored row that carries them changes the values a load serves while its search columns keep the values the earlier release stored (D-9). It ships in a MINOR release.
@@ -53,27 +53,27 @@ Proposal numbering note: SPEC-3 was dropped in review, and its reasons are recor
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2, SPEC-4, SPEC-5, SPEC-6. The §4.3.4 allocation, encodings, precedence, and lint, the §13.4 admission sentences and stored-row exemption paragraph, the §4.7, §4.7.4, and §4.7.6 sentences on a row an earlier release stored, the §13.2.2 and §13.10 public-mode sentences, the overview sentences, the §7.3.2 and §8.1 trigger, and the §6.5 cache exception land in one commit, because §13.4, §4.7, §13.2.2, §13.10, §6.5, and the overview sentences cite the new §4.3.4 paragraph or the §13.4 exemption.
+- [x] **S1 · spec** — SPEC-1, SPEC-2, SPEC-4, SPEC-5, SPEC-6. The §4.3.4 allocation, encodings, precedence, and lint, the §13.4 admission sentences and stored-row exemption paragraph, the §4.7, §4.7.4, and §4.7.6 sentences on a row an earlier release stored, the §13.2.2 and §13.10 public-mode sentences, the overview sentences, the §7.3.2 and §8.1 trigger, and the §6.5 cache exception land in one commit, because §13.4, §4.7, §13.2.2, §13.10, §6.5, and the overview sentences cite the new §4.3.4 paragraph or the §13.4 exemption.
       Levels: unit. Depends on: —
-- [ ] **S2 · code** — CODE-1. `pkg/manifest` gains the decoder, `ResolveSkillFields`, `ResolveStoredSkill`, `StatedKeys`, `IsSkillMetadataField`, and the `ParseSkill` message that names a non-string metadata key. `ResolveSkillVersion` keeps its rule and its existing tests, and its only callers move in S3.
+- [x] **S2 · code** — CODE-1. `pkg/manifest` gains the decoder, `ResolveSkillFields`, `ResolveStoredSkill`, `StatedKeys`, `IsSkillMetadataField`, and the `ParseSkill` message that names a non-string metadata key. `ResolveSkillVersion` keeps its rule and its existing tests, and its only callers move in S3.
       Levels: unit. Depends on: S1
-- [ ] **S3 · code** — CODE-2. The walk and ingest call `ArtifactRecord.ResolveSkillFields`, so the stored columns, the public-mode floor, the deprecation flip, the embedding, and the Go workspace overlay read the resolved values.
+- [x] **S3 · code** — CODE-2. The walk and ingest call `ArtifactRecord.ResolveSkillFields`, so the stored columns, the public-mode floor, the deprecation flip, the embedding, and the Go workspace overlay read the resolved values.
       Levels: unit, integration, e2e. Depends on: S2
-- [ ] **S4 · code** — CODE-3. Lint gains `lint.skill_metadata_field_ignored`, the metadata mismatch check inside `ruleSkillArtifactFields`, and the revised Podium-only message. The mismatch check's doc comment cites the walk's `ArtifactRecord.ResolveSkillFields`, which S3 adds.
+- [x] **S4 · code** — CODE-3. Lint gains `lint.skill_metadata_field_ignored`, the metadata mismatch check inside `ruleSkillArtifactFields`, and the revised Podium-only message. The mismatch check's doc comment cites the walk's `ArtifactRecord.ResolveSkillFields`, which S3 adds.
       Levels: unit, e2e. Depends on: S3
-- [ ] **S5 · code** — CODE-4. §13.4 admission resolves the fields for every skill row through `manifest.ResolveStoredSkill`.
+- [x] **S5 · code** — CODE-4. §13.4 admission resolves the fields for every skill row through `manifest.ResolveStoredSkill`.
       Levels: unit, integration, e2e. Depends on: S2
-- [ ] **S8 · code** — SDK-1. The TypeScript and Python overlays read `metadata.tags` of a skill with no `ARTIFACT.md` in the SDK-1 readable form. The generator of `test/vectors/skill-metadata-tags.json` and both SDK runners land in this commit, because the corpus is the check on the form.
+- [x] **S8 · code** — SDK-1. The TypeScript and Python overlays read `metadata.tags` of a skill with no `ARTIFACT.md` in the SDK-1 readable form. The generator of `test/vectors/skill-metadata-tags.json` and both SDK runners land in this commit, because the corpus is the check on the form.
       Levels: unit, integration. Depends on: S2
-- [ ] **S9 · code** — CODE-7. The skill scaffold writes the three flags under `metadata`. The existing unit and end-to-end tests that assert the refusal are rewritten in this commit, as CODE-7 lists them, because the suite is otherwise red at this step.
+- [x] **S9 · code** — CODE-7. The skill scaffold writes the three flags under `metadata`. The existing unit and end-to-end tests that assert the refusal are rewritten in this commit, as CODE-7 lists them, because the suite is otherwise red at this step.
       Levels: unit, e2e. Depends on: S4
-- [ ] **S10 · test** — TEST-1. Unit and integration tests for the resolver and the `ParseSkill` message, lint, walk, ingest, the reingest wire code, admission, search, the stored-row exemption, the scaffold, the `podium-mcp` cache exception, the Go overlay, the SDK overlay integration cases, and the Python overlay line ends. The SDK tag corpus lands in S8, and the rewritten scaffold refusal tests land in S9.
+- [x] **S10 · test** — TEST-1. Unit and integration tests for the resolver and the `ParseSkill` message, lint, walk, ingest, the reingest wire code, admission, search, the stored-row exemption, the scaffold, the `podium-mcp` cache exception, the Go overlay, the SDK overlay integration cases, and the Python overlay line ends. The SDK tag corpus lands in S8, and the rewritten scaffold refusal tests land in S9.
       Levels: unit, integration. Depends on: S3, S4, S5, S8, S9
-- [ ] **S11 · test** — TEST-2. End-to-end tests for served values, lint exit codes, and a start over a row an earlier release stored, through the compiled binaries. The scaffold write assertions land in S9.
+- [x] **S11 · test** — TEST-2. End-to-end tests for served values, lint exit codes, and a start over a row an earlier release stored, through the compiled binaries. The scaffold write assertions land in S9.
       Levels: e2e. Depends on: S3, S4, S5, S9
-- [ ] **S12 · test** — MV-1. S107, its index row, and the S01, S17, S18, and S19 edits in `test/manual-validation.md`. The implementor writes the commands and runs every edited and new scenario under zsh and bash.
+- [x] **S12 · test** — MV-1. S107, its index row, and the S01, S17, S18, and S19 edits in `test/manual-validation.md`. The implementor writes the commands and runs every edited and new scenario under zsh and bash.
       Levels: e2e. Depends on: S11
-- [ ] **S13 · docs** — DOC-1. The authoring, reference, deployment, upgrade-notes, and getting-started pages, the README, and the CHANGELOG entry, which lands last.
+- [x] **S13 · docs** — DOC-1. The authoring, reference, deployment, upgrade-notes, and getting-started pages, the README, and the CHANGELOG entry, which lands last.
       Levels: e2e. Depends on: S1, S8, S9, S12
 
 ## Current state and the gap
