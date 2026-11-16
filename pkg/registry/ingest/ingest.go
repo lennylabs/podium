@@ -601,7 +601,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			continue
 		}
 
-		// Sensitivity floor (public mode) per §13.10, on the authored value.
+		// Sensitivity floor (public mode) per §13.10, on the §4.3.4 resolved value.
 		if rej, over := sensitivityRejection(rec.ID, req.RejectAtOrAbove, rec.Artifact.Sensitivity); over {
 			res.Rejected = append(res.Rejected, rej)
 			continue
@@ -1204,7 +1204,7 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 	if err := captureResources(fsys, dir, &rec); err != nil {
 		return filesystem.ArtifactRecord{}, err
 	}
-	rec.ResolveSkillVersion()
+	rec.ResolveSkillFields()
 	return rec, nil
 }
 
@@ -1239,7 +1239,7 @@ func loadPlainSkill(fsys fs.FS, skillPath, layerID string) (filesystem.ArtifactR
 	if err := captureResources(fsys, dirOf(skillPath), &rec); err != nil {
 		return filesystem.ArtifactRecord{}, err
 	}
-	rec.ResolveSkillVersion()
+	rec.ResolveSkillFields()
 	return rec, nil
 }
 

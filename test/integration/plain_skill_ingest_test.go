@@ -3,6 +3,8 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -442,6 +444,153 @@ func TestPlainSkillIngest_RemovedArtifactManifestConflicts(t *testing.T) {
 			status, got := e.load(t, "y", "")
 			if status != http.StatusOK || got.Version != "1.0.0" || got.Frontmatter != authored {
 				t.Errorf("latest = %d %q %q, want 200 at 1.0.0 with the authored ARTIFACT.md", status, got.Version, got.Frontmatter)
+			}
+		})
+	}
+}
+
+// psMetadataSkill is the SKILL.md of the plain skill name whose metadata
+// carries version, tags, sensitivity, search visibility, and, when deprecated
+// is set, the deprecation flag, each in its §4.3.4 encoding.
+func psMetadataSkill(name, metaVersion, sensitivity string, deprecated bool) string {
+	meta := "metadata:\n  version: \"" + metaVersion + "\"\n  tags: \"finance, close\"\n" +
+		"  sensitivity: " + sensitivity + "\n  search_visibility: direct-only\n"
+	if deprecated {
+		meta += "  deprecated: \"true\"\n"
+	}
+	return "---\nname: " + name + "\ndescription: " + name + " skill\n" + meta + "---\n\nbody\n"
+}
+
+// Spec: §4.3.4, §4.7 — ingest stores a plain skill's SKILL.md metadata values
+// in the tags, sensitivity, search-visibility, and deprecation columns, keeps
+// the stored manifest empty, and embeds a projection that carries the tags.
+func TestPlainSkillIngest_MetadataFieldsReachColumns(t *testing.T) {
+	t.Parallel()
+	for _, f := range ingestConvergenceStores(t) {
+		t.Run(f.name, func(t *testing.T) {
+			t.Parallel()
+			e := newPSEnv(t, f, "L")
+			var embedded []string
+			res, err := ingest.Ingest(context.Background(), e.st, ingest.Request{
+				TenantID: psTenant, LayerID: "L",
+				Files: psFS("x", psMetadataSkill("x", "1.0.0", "medium", true), ""),
+				Embedder: func(_ context.Context, text string) ([]float32, error) {
+					embedded = append(embedded, text)
+					return []float32{1}, nil
+				},
+				VectorPut: func(context.Context, string, string, string, []float32) error { return nil },
+			})
+			if err != nil {
+				t.Fatalf("Ingest: %v", err)
+			}
+			wantAccepted(t, res, "x", "1.0.0")
+			m := e.row(t, "x", "1.0.0")
+			if !reflect.DeepEqual(m.Tags, []string{"finance", "close"}) || m.Sensitivity != "medium" ||
+				m.SearchVisibility != "direct-only" || !m.Deprecated {
+				t.Errorf("columns = tags %q sensitivity %q search_visibility %q deprecated %v, want the metadata values",
+					m.Tags, m.Sensitivity, m.SearchVisibility, m.Deprecated)
+			}
+			if len(m.Frontmatter) != 0 {
+				t.Errorf("stored Frontmatter = %q, want empty for a plain skill", m.Frontmatter)
+			}
+			if len(embedded) != 1 || !strings.Contains(embedded[0], "finance close") {
+				t.Errorf("embedded texts = %q, want one projection carrying the tags", embedded)
+			}
+		})
+	}
+}
+
+// Spec: §13.2.2, §4.3.4 — the public-mode sensitivity floor reads the
+// resolved value, so a plain skill whose metadata.sensitivity is high is
+// refused with ingest.public_mode_rejects_sensitive and stores no row.
+func TestPlainSkillIngest_PublicModeRefusesMetadataSensitivity(t *testing.T) {
+	t.Parallel()
+	for _, f := range ingestConvergenceStores(t) {
+		t.Run(f.name, func(t *testing.T) {
+			t.Parallel()
+			e := newPSEnv(t, f, "L")
+			res, err := ingest.Ingest(context.Background(), e.st, ingest.Request{
+				TenantID: psTenant, LayerID: "L", RejectAtOrAbove: manifest.SensitivityMedium,
+				Files: psFS("x", psMetadataSkill("x", "1.0.0", "high", false), ""),
+			})
+			if err != nil {
+				t.Fatalf("Ingest: %v", err)
+			}
+			if res.Accepted != 0 || len(res.Rejected) != 1 ||
+				res.Rejected[0].ArtifactID != "x" || res.Rejected[0].Code != "ingest.public_mode_rejects_sensitive" {
+				t.Fatalf("result = %+v, want x rejected with ingest.public_mode_rejects_sensitive", res)
+			}
+			if rows := e.rows(t, "x"); len(rows) != 0 {
+				t.Errorf("stored rows = %+v, want none", rows)
+			}
+		})
+	}
+}
+
+// psListTagsLayer is a layer snapshot holding the valid plain skill good and
+// the plain skill bad, whose metadata.tags is a YAML sequence.
+func psListTagsLayer() fstest.MapFS {
+	fs := psFS("good", psNamedSkill("good", "valid", "1.0.0"), "")
+	fs["bad/SKILL.md"] = &fstest.MapFile{Data: []byte(psListTagsSkill)}
+	return fs
+}
+
+// psListTagsSkill is a plain SKILL.md whose metadata.tags is a YAML sequence,
+// which the map[string]string metadata decoder refuses.
+const psListTagsSkill = "---\nname: bad\ndescription: bad skill\nmetadata:\n  tags: [a, b]\n---\n\nbody\n"
+
+// Spec: §4.3.4 — a sequence under SKILL.md metadata is a parse failure that
+// fails the whole layer ingest: the error wraps ingest.ErrInvalidArtifact and
+// names metadata.tags, and the valid sibling skill stores no row either.
+func TestPlainSkillIngest_ListMetadataValueRefused(t *testing.T) {
+	t.Parallel()
+	for _, f := range ingestConvergenceStores(t) {
+		t.Run(f.name, func(t *testing.T) {
+			t.Parallel()
+			e := newPSEnv(t, f, "L")
+			_, err := ingest.Ingest(context.Background(), e.st, ingest.Request{
+				TenantID: psTenant, LayerID: "L", Files: psListTagsLayer(),
+			})
+			if !errors.Is(err, ingest.ErrInvalidArtifact) || !strings.Contains(err.Error(), "metadata.tags") {
+				t.Fatalf("Ingest err = %v, want an ingest.ErrInvalidArtifact error naming metadata.tags", err)
+			}
+			all, err := e.st.ListManifestsIncludingDeleted(context.Background(), psTenant)
+			if err != nil {
+				t.Fatalf("ListManifestsIncludingDeleted: %v", err)
+			}
+			if len(all) != 0 {
+				t.Errorf("stored rows = %d, want none from the refused ingest", len(all))
+			}
+		})
+	}
+}
+
+// Spec: §7.3.2, §8.1, §4.3.4 — a new version whose SKILL.md
+// metadata.deprecated is "true" flips the skill to deprecated, so ingest fires
+// artifact.deprecated as it does for an ARTIFACT.md deprecated: true.
+func TestPlainSkillIngest_MetadataDeprecatedFiresEvent(t *testing.T) {
+	t.Parallel()
+	for _, f := range ingestConvergenceStores(t) {
+		t.Run(f.name, func(t *testing.T) {
+			t.Parallel()
+			e := newPSEnv(t, f, "L")
+			var events []string
+			emit := func(_ context.Context, _ core.EventScope, eventType string, data map[string]any) {
+				events = append(events, fmt.Sprintf("%s@%v", eventType, data["version"]))
+			}
+			for _, skill := range []string{
+				psMetadataSkill("x", "1.0.0", "low", false),
+				psMetadataSkill("x", "1.1.0", "low", true),
+			} {
+				if _, err := ingest.Ingest(context.Background(), e.st, ingest.Request{
+					TenantID: psTenant, LayerID: "L", Files: psFS("x", skill, ""), PublishEvent: emit,
+				}); err != nil {
+					t.Fatalf("Ingest: %v", err)
+				}
+			}
+			want := []string{"artifact.published@1.0.0", "artifact.published@1.1.0", "artifact.deprecated@1.1.0"}
+			if !reflect.DeepEqual(events, want) {
+				t.Errorf("events = %q, want %q", events, want)
 			}
 		})
 	}

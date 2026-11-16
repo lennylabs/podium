@@ -373,6 +373,31 @@ func TestReingestPipeline_RootLevelSkillIsLintFailure(t *testing.T) {
 	}
 }
 
+// Spec: §4.3.4, §7.3.1 — a layer holding a plain skill whose metadata.tags is
+// a YAML sequence beside a valid skill fails the reingest as a whole with 422
+// ingest.lint_failed, the message names metadata.tags, and no row is stored.
+func TestReingest_ListMetadataValueAnswersLintFailed(t *testing.T) {
+	t.Parallel()
+	layerDir := t.TempDir()
+	writeFile(t, filepath.Join(layerDir, "good", "SKILL.md"), psNamedSkill("good", "valid", "1.0.0"))
+	writeFile(t, filepath.Join(layerDir, "bad", "SKILL.md"), psListTagsSkill)
+	st, reingest := localReingest(t, layerDir)
+	status, m := reingest()
+	if status != http.StatusUnprocessableEntity || m["code"] != "ingest.lint_failed" {
+		t.Fatalf("reingest = %d %v, want 422 ingest.lint_failed", status, m)
+	}
+	if msg, _ := m["message"].(string); !strings.Contains(msg, "metadata.tags") {
+		t.Errorf("message = %q, want it to name metadata.tags", msg)
+	}
+	all, err := st.ListManifestsIncludingDeleted(context.Background(), "t")
+	if err != nil {
+		t.Fatalf("ListManifestsIncludingDeleted: %v", err)
+	}
+	if len(all) != 0 {
+		t.Errorf("stored rows = %d, want none from the refused reingest", len(all))
+	}
+}
+
 // Spec: §7.3.1, §6.10, §4.2 — a local layer whose only package is a SKILL.md
 // symlink to a file outside the layer directory fails the reingest with 502
 // ingest.source_unreachable under local-source confinement, and stores no
