@@ -213,6 +213,26 @@ func TestParseSkill_NonStringMetadataNamesKey(t *testing.T) {
 			absent:   []string{"metadata.owner"},
 		},
 		{
+			name:   "self-referencing merge keeps the unchanged error",
+			fm:     "name: x\ndescription: d\nmetadata: &m\n  <<: *m\n  a: b\n",
+			absent: []string{"metadata.", "is not a string"},
+		},
+		{
+			name:   "nested self-referencing merge keeps the unchanged error",
+			fm:     "name: x\ndescription: d\nmetadata: &m\n  <<: {<<: *m}\n  a: b\n",
+			absent: []string{"metadata.", "is not a string"},
+		},
+		{
+			name:   "merge sequence holding its own mapping keeps the unchanged error",
+			fm:     "name: x\ndescription: d\nmetadata: &m\n  <<: [*m]\n  a: b\n",
+			absent: []string{"metadata.", "is not a string"},
+		},
+		{
+			name:     "self-referencing merge still names a sequence",
+			fm:       "name: x\nmetadata: &m\n  <<: *m\n  tags: [a]\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated"},
+		},
+		{
 			name:     "second error stays visible",
 			fm:       "name: [x]\nmetadata:\n  tags: [a, b]\n",
 			contains: []string{"metadata.tags is not a string", "line 1", "line 3"},

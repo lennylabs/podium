@@ -167,7 +167,19 @@ func nonStringMetadataKey(fm []byte) (string, bool) {
 	if md == nil || md.Kind != yaml.MappingNode {
 		return "", false
 	}
-	return firstNonScalarKey(md, map[string]bool{})
+	w := metadataWalker{seen: map[string]bool{}, visited: map[*yaml.Node]bool{}}
+	return w.firstNonScalarKey(md)
+}
+
+// metadataWalker holds the state of one walk over a metadata mapping and the
+// mappings merged into it. seen holds the keys already checked. visited holds
+// the mapping nodes already walked: yaml.v3 registers an anchor before it
+// parses the anchored node's children, so `metadata: &m {<<: *m}` merges a
+// mapping into itself, and without visited that cycle recurses until the
+// runtime aborts with a stack overflow that no caller can recover from.
+type metadataWalker struct {
+	seen    map[string]bool
+	visited map[*yaml.Node]bool
 }
 
 // firstNonScalarKey returns the first key of the mapping node m whose
@@ -178,8 +190,11 @@ func nonStringMetadataKey(fm []byte) (string, bool) {
 // that reaches metadata through `<<` is named by its merged key. The direct
 // keys are checked before the merged ones and seen skips a key already
 // checked, because yaml.v3 decodes a direct key in place of a merged one and
-// an earlier merged mapping in place of a later one.
-func firstNonScalarKey(m *yaml.Node, seen map[string]bool) (string, bool) {
+// an earlier merged mapping in place of a later one. A mapping already walked
+// is skipped, so a cyclic merge ends the walk and the caller keeps the
+// unchanged decode error.
+func (w metadataWalker) firstNonScalarKey(m *yaml.Node) (string, bool) {
+	w.visited[m] = true
 	var merges []*yaml.Node
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		kn := resolveAlias(m.Content[i])
@@ -188,10 +203,10 @@ func firstNonScalarKey(m *yaml.Node, seen map[string]bool) (string, bool) {
 			merges = append(merges, vn)
 			continue
 		}
-		if seen[kn.Value] {
+		if w.seen[kn.Value] {
 			continue
 		}
-		seen[kn.Value] = true
+		w.seen[kn.Value] = true
 		if vn.Kind != yaml.ScalarNode {
 			return kn.Value, true
 		}
@@ -202,10 +217,10 @@ func firstNonScalarKey(m *yaml.Node, seen map[string]bool) (string, bool) {
 			sources = mn.Content
 		}
 		for _, src := range sources {
-			if src = resolveAlias(src); src.Kind != yaml.MappingNode {
+			if src = resolveAlias(src); src.Kind != yaml.MappingNode || w.visited[src] {
 				continue
 			}
-			if key, ok := firstNonScalarKey(src, seen); ok {
+			if key, ok := w.firstNonScalarKey(src); ok {
 				return key, true
 			}
 		}
