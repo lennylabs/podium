@@ -1,7 +1,7 @@
 # Proposal 0069: Name the proposal process as the spec-change mechanism in §1.6 and the governance pages, and remove the unused RFC process
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-16). Verified after 6 adversarial review rounds (4 findings fixed).
+- Status: Applied to spec (2026-11-16). Verified after 6 adversarial review rounds (4 findings fixed).
 - Date: 2026-11-16
 
 This document stages the proposed spec, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change alters no product behavior. It removes one published documentation route, `/rfc/README.md`, and the CHANGELOG records the removal under Documentation.
