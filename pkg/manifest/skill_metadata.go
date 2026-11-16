@@ -123,23 +123,24 @@ func DecodeSkillMetadata(s *Skill) SkillMetadataFields {
 }
 
 // StatedKeys returns the set of top-level keys an ARTIFACT.md frontmatter
-// states, whatever their values. A key stated through a merge key or an alias
-// key counts under the name ParseArtifact decodes, because ParseArtifact
-// applies the merge or the alias, and a key missing from the set would let
-// metadata overwrite the ARTIFACT.md value. Empty input states nothing and
-// returns a nil map and no error.
+// states, whatever their values. It reads the raw key nodes through
+// TopLevelFrontmatterKeys, the same set the lint metadata mismatch check
+// reads, so the resolver and lint agree on which keys ARTIFACT.md states. A
+// key that reaches the frontmatter only through a merge key or an alias key is
+// therefore not stated. Empty input states nothing and returns a nil map and
+// no error.
 //
 // Spec: §4.3.4
 func StatedKeys(artifactMD []byte) (map[string]bool, error) {
 	if len(artifactMD) == 0 {
 		return nil, nil
 	}
-	all, err := frontmatterKeyMap(artifactMD)
+	keys, err := TopLevelFrontmatterKeys(artifactMD)
 	if err != nil {
 		return nil, fmt.Errorf("manifest: stated keys: %w", err)
 	}
-	stated := make(map[string]bool, len(all))
-	for k := range all {
+	stated := make(map[string]bool, len(keys))
+	for _, k := range keys {
 		stated[k] = true
 	}
 	return stated, nil
@@ -209,10 +210,12 @@ func ResolveStoredSkill(artifactMD, skillMD []byte) (a *Artifact, s *Skill, fill
 }
 
 // decodeWhenToUse reads one situation per line, trimming each line and
-// dropping empty ones. At least one line must remain.
+// dropping empty ones. At least one line must remain. A line ends at a line
+// feed or a carriage return, the same set hasLineBreak checks for tags and
+// replaced_by, so no decoded situation holds a line break.
 func decodeWhenToUse(v string, out *Artifact) bool {
 	var lines []string
-	for _, line := range strings.Split(v, "\n") {
+	for _, line := range strings.FieldsFunc(v, isLineBreak) {
 		if line = strings.TrimSpace(line); line != "" {
 			lines = append(lines, line)
 		}
@@ -288,5 +291,10 @@ func decodeReleaseNotes(v string, out *Artifact) bool {
 
 // hasLineBreak reports whether v holds a line feed or a carriage return.
 func hasLineBreak(v string) bool {
-	return strings.ContainsAny(v, "\r\n")
+	return strings.IndexFunc(v, isLineBreak) >= 0
+}
+
+// isLineBreak reports whether r ends a line in a metadata value.
+func isLineBreak(r rune) bool {
+	return r == '\n' || r == '\r'
 }
