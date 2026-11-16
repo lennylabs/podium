@@ -250,6 +250,66 @@ func TestScaffold_Skill_WritesFieldsInFixedOrder(t *testing.T) {
 	}
 }
 
+// Spec: §4.3.4, §7.3.1 — the YAML reader ends a line in the when_to_use
+// literal block at U+0085, U+2028, and U+2029 as well as at a line feed or
+// a carriage return. A --when-to-use entry that holds any of them is
+// written as one block line per part, so SKILL.md parses and lints clean.
+func TestScaffold_Skill_WhenToUseSplitsOnYAMLLineBreaks(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "greet")
+	skill := scaffoldSkillMD(t, target, "--when-to-use", "a\u2028b, c\u0085d\u2029e")
+	want := "  when_to_use: |\n    a\n    b\n    c\n    d\n    e\n---\n"
+	if !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md missing %q:\n%s", want, skill)
+	}
+	if got := strings.Join(resolveScaffoldedSkill(t, root).WhenToUse, "|"); got != "a|b|c|d|e" {
+		t.Errorf("when_to_use = %q, want a|b|c|d|e", got)
+	}
+}
+
+// Spec: §4.3.4, §7.3.1 — the when_to_use literal block carries each
+// situation unescaped, so a --when-to-use situation that holds a character
+// the YAML reader rejects is refused with exit 2 before any file is
+// written. Every other character is written, and the SKILL.md parses and
+// lints clean. Tags are written as quoted scalars, which escape every such
+// character, so the same characters in --tags are written.
+func TestScaffold_Skill_WhenToUseRefusesYAMLControlCharacters(t *testing.T) {
+	refused := []string{"\x00", "\x01", "\x0b", "\x1f", "\x7f", "\u0080", "\u0084", "\u0086", "\u009f", "\ufffe", "\uffff", "\xff", "\xed\xa0\x80"}
+	written := []string{"\t", " ", "~", "\u00a0", "\ud7ff", "\ue000", "\ufeff", "\ufffd", "\U00010000", "\U0001f600", "\U0010ffff"}
+	for _, c := range refused {
+		target := filepath.Join(t.TempDir(), "personal", "greet")
+		exit, _, stderr := runScaffold([]string{
+			"--type", "skill",
+			"--description", "Greet the user by name.",
+			"--when-to-use", "a" + c + "b",
+			"--yes",
+			target,
+		}, "")
+		if exit != 2 || !strings.Contains(stderr, "--when-to-use situation") {
+			t.Errorf("%q: exit=%d stderr=%q, want exit 2 naming the situation", c, exit, stderr)
+		}
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Errorf("%q: refusal must create no directory (stat err=%v)", c, err)
+		}
+	}
+	for _, c := range written {
+		root := t.TempDir()
+		target := filepath.Join(root, "personal", "greet")
+		skill := scaffoldSkillMD(t, target, "--when-to-use", "a"+c+"b")
+		if want := "  when_to_use: |\n    a" + c + "b\n"; !strings.Contains(skill, want) {
+			t.Errorf("%q: SKILL.md missing %q:\n%s", c, want, skill)
+		}
+		if got := resolveScaffoldedSkill(t, root).WhenToUse; len(got) != 1 || got[0] != "a"+c+"b" {
+			t.Errorf("%q: when_to_use = %q, want one situation", c, got)
+		}
+	}
+	root := t.TempDir()
+	scaffoldSkillMD(t, filepath.Join(root, "personal", "greet"), "--tags", "a\x01b,c\u2028d")
+	if got := strings.Join(resolveScaffoldedSkill(t, root).Tags, "|"); got != "a\x01b|c\u2028d" {
+		t.Errorf("tags = %q, want the control characters kept", got)
+	}
+}
+
 // Spec: §4.3.4 — an invalid --sensitivity value is rejected by the value
 // check for a skill as for every other type, before any file is written.
 func TestScaffold_Skill_BadSensitivityReportsHint(t *testing.T) {

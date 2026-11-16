@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // firstClassTypes mirrors spec §4.3's enum. Extension types are
@@ -155,6 +156,12 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 		return 2
 	}
 	opts.sensitivitySet = flagPassed(fs, "sensitivity")
+	if opts.typ == "skill" {
+		if err := validateSkillWhenToUse(opts.whenToUse); err != nil {
+			_, _ = fmt.Fprintf(errOut, "error: %v\n", err)
+			return 2
+		}
+	}
 
 	if _, statErr := os.Stat(opts.path); statErr == nil && !opts.force {
 		_, _ = fmt.Fprintf(errOut, "error: %s already exists; pass --force to overwrite\n", opts.path)
@@ -364,7 +371,7 @@ func renderSkillMD(name string, o *scaffoldOpts) string {
 	}
 	sb.WriteString("metadata:\n")
 	fmt.Fprintf(&sb, "  version: %q\n", o.version)
-	if tags := splitCSVLines(o.tags); len(tags) > 0 {
+	if tags := splitCSVLines(o.tags, isLineBreak); len(tags) > 0 {
 		fmt.Fprintf(&sb, "  tags: %q\n", strings.Join(tags, ", "))
 	}
 	if o.sensitivitySet {
@@ -381,11 +388,12 @@ func renderSkillMD(name string, o *scaffoldOpts) string {
 
 // writeSkillWhenToUse writes the --when-to-use entries as a
 // metadata.when_to_use literal block, one situation per line, indented
-// under the metadata key.
+// under the metadata key. validateSkillWhenToUse has already refused a
+// situation the block cannot carry.
 //
 // Spec: §4.3.4
 func writeSkillWhenToUse(sb *strings.Builder, raw string) {
-	lines := splitCSVLines(raw)
+	lines := splitCSVLines(raw, isYAMLLineBreak)
 	if len(lines) == 0 {
 		return
 	}
@@ -395,19 +403,56 @@ func writeSkillWhenToUse(sb *strings.Builder, raw string) {
 	}
 }
 
+// validateSkillWhenToUse refuses a --when-to-use situation that holds a
+// character the YAML reader rejects anywhere in a document. The literal
+// block carries each situation unescaped, so such a character would leave
+// a SKILL.md that does not parse, and the skill would fail ingest.
+//
+// Spec: §4.3.4, §7.3.1
+func validateSkillWhenToUse(raw string) error {
+	for _, line := range splitCSVLines(raw, isYAMLLineBreak) {
+		if !utf8.ValidString(line) {
+			return fmt.Errorf("--when-to-use situation %q is not valid UTF-8", line)
+		}
+		if i := strings.IndexFunc(line, notYAMLBlockRune); i >= 0 {
+			r, _ := utf8.DecodeRuneInString(line[i:])
+			return fmt.Errorf("--when-to-use situation %q holds U+%04X, which a SKILL.md metadata.when_to_use block cannot carry", line, r)
+		}
+	}
+	return nil
+}
+
+// notYAMLBlockRune reports whether r falls outside the characters a YAML
+// 1.2 document may hold (tab, line feed, carriage return, U+0020 to
+// U+007E, U+0085, U+00A0 to U+D7FF, U+E000 to U+FFFD, and U+10000 and
+// above). The YAML reader refuses any other character with "control
+// characters are not allowed", so a block scalar cannot carry it.
+func notYAMLBlockRune(r rune) bool {
+	switch {
+	case r == '\t', r == '\n', r == '\r', r == 0x85:
+		return false
+	case r >= 0x20 && r <= 0x7E,
+		r >= 0xA0 && r <= 0xD7FF,
+		r >= 0xE000 && r <= 0xFFFD,
+		r >= 0x10000 && r <= utf8.MaxRune:
+		return false
+	}
+	return true
+}
+
 // splitCSVLines splits a comma-separated flag value for a skill metadata
-// value and then splits each element on line breaks, keeping each
-// non-empty trimmed part. The §4.3.4 tags encoding holds no line break,
-// so a tag that kept one would be ignored with
-// lint.skill_metadata_field_ignored. A when_to_use situation that kept
-// one would put an unindented continuation line in the literal block,
-// which ends the block and breaks the frontmatter.
+// value and then splits each element at every rune isBreak reports,
+// keeping each non-empty trimmed part. The §4.3.4 tags encoding holds no
+// line feed or carriage return, so a tag that kept one would be ignored
+// with lint.skill_metadata_field_ignored. A when_to_use situation that
+// kept any YAML line break would put an unindented continuation line in
+// the literal block, which ends the block and breaks the frontmatter.
 //
 // Spec: §4.3.4
-func splitCSVLines(raw string) []string {
+func splitCSVLines(raw string, isBreak func(rune) bool) []string {
 	var out []string
 	for _, entry := range splitCSV(raw) {
-		for _, part := range strings.FieldsFunc(entry, isLineBreak) {
+		for _, part := range strings.FieldsFunc(entry, isBreak) {
 			if part = strings.TrimSpace(part); part != "" {
 				out = append(out, part)
 			}
@@ -416,9 +461,24 @@ func splitCSVLines(raw string) []string {
 	return out
 }
 
-// isLineBreak reports whether r ends a line in a skill metadata value,
-// matching the line ends the §4.3.4 decoder treats as line breaks.
+// isLineBreak reports whether r is a line feed or a carriage return, the
+// line ends the §4.3.4 tags decoder refuses in a tag. The tags line is a
+// %q-quoted scalar, which escapes every other YAML line break, so this set
+// keeps the written tags equal to what the decoder reads.
 func isLineBreak(r rune) bool { return r == '\n' || r == '\r' }
+
+// isYAMLLineBreak reports whether r ends a line in a YAML document: a line
+// feed, a carriage return, U+0085, U+2028, or U+2029. The when_to_use
+// literal block writes each situation unescaped, so the YAML reader, which
+// parses the block before the §4.3.4 decoder sees it, ends a line at each
+// of these.
+func isYAMLLineBreak(r rune) bool {
+	switch r {
+	case '\n', '\r', 0x85, 0x2028, 0x2029:
+		return true
+	}
+	return false
+}
 
 func writeWhenToUse(sb *strings.Builder, raw string) {
 	entries := splitCSV(raw)

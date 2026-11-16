@@ -33,7 +33,9 @@ func fmSkillMD(name, desc string) string {
 // metadata in the §4.3.4 encodings, a sensitivity line appears only when
 // --sensitivity is passed, and the output lints with no issues. A --tags
 // element that holds a line break is written as one tag per line, because
-// the tags encoding holds no line break.
+// the tags encoding holds no line break. A --when-to-use situation that
+// holds a YAML line break such as U+2028 is written as one block line per
+// part.
 func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/close/run-variance-analysis")
@@ -55,6 +57,7 @@ func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 		{"--tags", "finance\nclose", "  tags: \"finance, close\"\n"},
 		{"--sensitivity", "medium", "  sensitivity: \"medium\"\n"},
 		{"--when-to-use", "After month-end close", "  when_to_use: |\n    After month-end close\n"},
+		{"--when-to-use", "After month-end close\u2028Before audit", "  when_to_use: |\n    After month-end close\n    Before audit\n"},
 	} {
 		root := t.TempDir()
 		dir := filepath.Join(root, "finance/close/metadata-skill")
@@ -67,6 +70,23 @@ func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 		if tc.flag != "--sensitivity" && strings.Contains(skill, "sensitivity") {
 			t.Errorf("%s: SKILL.md carries a sensitivity line without --sensitivity:\n%s", tc.flag, skill)
 		}
+	}
+}
+
+// Spec: §4.3.4, §7.3.1 — the when_to_use literal block carries each
+// situation unescaped, so the skill scaffold refuses a --when-to-use
+// situation holding a character the YAML reader rejects with exit 2 and
+// writes no file, rather than leaving a SKILL.md that fails to parse.
+func TestFrontmatter_SkillScaffoldRefusesWhenToUseControlCharacter(t *testing.T) {
+	t.Parallel()
+	for _, c := range []string{"\x01", "\x7f"} {
+		dir := filepath.Join(t.TempDir(), "finance/close/metadata-skill")
+		res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
+			"--description", "Metadata fields.", "--when-to-use", "a"+c+"b", "--yes", dir)
+		if res.Exit != 2 || !strings.Contains(res.Stderr, "--when-to-use situation") {
+			t.Errorf("%q: scaffold exit=%d stderr=%s, want exit 2 naming the situation", c, res.Exit, res.Stderr)
+		}
+		mustNotExist(t, dir)
 	}
 }
 
