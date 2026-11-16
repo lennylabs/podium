@@ -155,6 +155,20 @@ func TestStatedKeys(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("StatedKeys = %v, want %v", got, want)
 	}
+	for name, in := range map[string]string{
+		"merge key":          "---\ntype: skill\n<<: {tags: [x]}\n---\n",
+		"merge sequence":     "---\ntype: skill\n<<: [{tags: [x]}]\n---\n",
+		"aliased merge":      "---\nbase: &b {tags: [x]}\ntype: skill\n<<: *b\n---\n",
+		"alias key resolved": "---\ntype: skill\ndescription: &k tags\n*k : [x]\n---\n",
+	} {
+		got, err := StatedKeys([]byte(in))
+		if err != nil || !got["tags"] {
+			t.Errorf("%s: StatedKeys = %v, %v; want tags stated", name, got, err)
+		}
+		if got["<<"] || got["k"] {
+			t.Errorf("%s: StatedKeys = %v, want no raw merge or anchor key", name, got)
+		}
+	}
 	for _, in := range [][]byte{nil, {}} {
 		got, err := StatedKeys(in)
 		if got != nil || err != nil {
@@ -304,6 +318,25 @@ func TestResolveStoredSkill_Forms(t *testing.T) {
 			t.Errorf("filled = %v, want [tags]", filled)
 		}
 	})
+
+	for name, artifactMD := range map[string]string{
+		"merge key": "---\ntype: skill\nversion: 1.0.0\n<<: {tags: [x]}\n---\nBody.\n",
+		"alias key": "---\ntype: skill\nversion: 1.0.0\ndescription: &k tags\n*k : [x]\n---\nBody.\n",
+	} {
+		t.Run("both files keep tags stated through a "+name, func(t *testing.T) {
+			t.Parallel()
+			a, _, filled, ok := ResolveStoredSkill([]byte(artifactMD), []byte(skillMD))
+			if !ok {
+				t.Fatal("ok = false, want true")
+			}
+			if !reflect.DeepEqual(a.Tags, []string{"x"}) {
+				t.Errorf("Tags = %v, want the ARTIFACT.md [x]", a.Tags)
+			}
+			if !reflect.DeepEqual(filled, []string{"sensitivity"}) {
+				t.Errorf("filled = %v, want [sensitivity]", filled)
+			}
+		})
+	}
 
 	refused := []struct {
 		name       string

@@ -196,6 +196,23 @@ func TestParseSkill_NonStringMetadataNamesKey(t *testing.T) {
 			absent:   []string{"metadata.k "},
 		},
 		{
+			name:     "merge key brings a sequence",
+			fm:       "name: x\nmetadata:\n  owner: a\n  <<: {tags: [a, b]}\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
+			absent:   []string{"metadata.<<"},
+		},
+		{
+			name:     "aliased merge mapping",
+			fm:       "name: x\nbase: &m {tags: [a]}\nmetadata:\n  <<: *m\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated"},
+		},
+		{
+			name:     "merge sequence skips an overridden key",
+			fm:       "name: x\nmetadata:\n  owner: a\n  <<: [{owner: [x]}, {team: {a: b}}]\n",
+			contains: []string{"metadata.team is not a string", "cannot unmarshal !!map into string"},
+			absent:   []string{"metadata.owner"},
+		},
+		{
 			name:     "second error stays visible",
 			fm:       "name: [x]\nmetadata:\n  tags: [a, b]\n",
 			contains: []string{"metadata.tags is not a string", "line 1", "line 3"},

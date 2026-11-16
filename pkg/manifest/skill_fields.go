@@ -146,14 +146,28 @@ func TopLevelFrontmatterKeys(src []byte) ([]string, error) {
 //
 // Spec: §4.6
 func DeclaresExtends(src []byte) bool {
-	fm, _, err := SplitFrontmatter(src)
+	all, err := frontmatterKeyMap(src)
 	if err != nil {
-		return false
-	}
-	var all map[string]yaml.Node
-	if err := yaml.Unmarshal(fm, &all); err != nil {
 		return false
 	}
 	_, ok := all["extends"]
 	return ok
+}
+
+// frontmatterKeyMap decodes a manifest's frontmatter block into a map keyed by
+// the top-level keys the typed decoders see. yaml.v3 applies merge keys and
+// resolves alias keys during the map decode, so a key stated through `<<` or
+// through an alias key appears under its decoded name, which a walk of the raw
+// key nodes would miss. Returns ErrNoFrontmatter when src has no frontmatter
+// block and ErrInvalidYAML when the frontmatter does not decode as a mapping.
+func frontmatterKeyMap(src []byte) (map[string]yaml.Node, error) {
+	fm, _, err := SplitFrontmatter(src)
+	if err != nil {
+		return nil, err
+	}
+	var all map[string]yaml.Node
+	if err := yaml.Unmarshal(fm, &all); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidYAML, err)
+	}
+	return all, nil
 }

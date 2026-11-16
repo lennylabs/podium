@@ -157,11 +157,7 @@ func skillDecodeError(fm []byte, err error) error {
 }
 
 // nonStringMetadataKey returns the first key of the frontmatter's metadata
-// mapping whose value, after alias resolution, is not a scalar. A merge key is
-// skipped, because yaml.v3 applies it when decoding the map rather than
-// decoding its value as a string. The key is alias-resolved too, because an
-// alias key's own Value is the anchor name rather than the key yaml.v3
-// decodes.
+// mapping whose value, after alias resolution, is not a scalar.
 func nonStringMetadataKey(fm []byte) (string, bool) {
 	var doc yaml.Node
 	if yaml.Unmarshal(fm, &doc) != nil || len(doc.Content) == 0 {
@@ -171,13 +167,47 @@ func nonStringMetadataKey(fm []byte) (string, bool) {
 	if md == nil || md.Kind != yaml.MappingNode {
 		return "", false
 	}
-	for i := 0; i+1 < len(md.Content); i += 2 {
-		kn := resolveAlias(md.Content[i])
+	return firstNonScalarKey(md, map[string]bool{})
+}
+
+// firstNonScalarKey returns the first key of the mapping node m whose
+// alias-resolved value is not a scalar, skipping the keys in seen and adding
+// each key it checks. Keys are alias-resolved, because an alias key's own
+// Value is the anchor name rather than the key yaml.v3 decodes. A merge key's
+// value, a mapping or a sequence of mappings, is descended into, so a sequence
+// that reaches metadata through `<<` is named by its merged key. The direct
+// keys are checked before the merged ones and seen skips a key already
+// checked, because yaml.v3 decodes a direct key in place of a merged one and
+// an earlier merged mapping in place of a later one.
+func firstNonScalarKey(m *yaml.Node, seen map[string]bool) (string, bool) {
+	var merges []*yaml.Node
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		kn := resolveAlias(m.Content[i])
+		vn := resolveAlias(m.Content[i+1])
 		if kn.ShortTag() == "!!merge" {
+			merges = append(merges, vn)
 			continue
 		}
-		if resolveAlias(md.Content[i+1]).Kind != yaml.ScalarNode {
+		if seen[kn.Value] {
+			continue
+		}
+		seen[kn.Value] = true
+		if vn.Kind != yaml.ScalarNode {
 			return kn.Value, true
+		}
+	}
+	for _, mn := range merges {
+		sources := []*yaml.Node{mn}
+		if mn.Kind == yaml.SequenceNode {
+			sources = mn.Content
+		}
+		for _, src := range sources {
+			if src = resolveAlias(src); src.Kind != yaml.MappingNode {
+				continue
+			}
+			if key, ok := firstNonScalarKey(src, seen); ok {
+				return key, true
+			}
 		}
 	}
 	return "", false

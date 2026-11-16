@@ -123,20 +123,23 @@ func DecodeSkillMetadata(s *Skill) SkillMetadataFields {
 }
 
 // StatedKeys returns the set of top-level keys an ARTIFACT.md frontmatter
-// states, whatever their values. Empty input states nothing and returns a nil
-// map and no error.
+// states, whatever their values. A key stated through a merge key or an alias
+// key counts under the name ParseArtifact decodes, because ParseArtifact
+// applies the merge or the alias, and a key missing from the set would let
+// metadata overwrite the ARTIFACT.md value. Empty input states nothing and
+// returns a nil map and no error.
 //
 // Spec: §4.3.4
 func StatedKeys(artifactMD []byte) (map[string]bool, error) {
 	if len(artifactMD) == 0 {
 		return nil, nil
 	}
-	keys, err := TopLevelFrontmatterKeys(artifactMD)
+	all, err := frontmatterKeyMap(artifactMD)
 	if err != nil {
 		return nil, fmt.Errorf("manifest: stated keys: %w", err)
 	}
-	stated := make(map[string]bool, len(keys))
-	for _, k := range keys {
+	stated := make(map[string]bool, len(all))
+	for k := range all {
 		stated[k] = true
 	}
 	return stated, nil
