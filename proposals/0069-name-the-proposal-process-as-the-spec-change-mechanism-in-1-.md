@@ -1,7 +1,7 @@
 # Proposal 0069: Name the proposal process as the spec-change mechanism in §1.6 and the governance pages, and remove the unused RFC process
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-16). Verified after 6 adversarial review rounds (4 findings fixed).
+- Status: Implemented (2026-11-16). Verified after 6 adversarial review rounds (4 findings fixed).
 - Date: 2026-11-16
 
 This document stages the proposed spec, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change alters no product behavior. It removes one published documentation route, `/rfc/README.md`, and the CHANGELOG records the removal under Documentation.
@@ -41,13 +41,13 @@ This document stages the proposed spec, test, and documentation changes. It does
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. The §1.6 Governance bullet names a proposal process for spec changes. This commit leaves `TestGovernanceDocs_UseRFCProcessTerminology` failing until S2.
+- [x] **S1 · spec** — SPEC-1. The §1.6 Governance bullet names a proposal process for spec changes. This commit leaves `TestGovernanceDocs_UseRFCProcessTerminology` failing until S2.
       Levels: conformance. Depends on: —
-- [ ] **S2 · test** — TEST-1, DOC-1, DOC-2, DOC-3. The rewritten conformance test, both governance pages, the deletion of `docs/rfc/README.md`, and the fixture line land in one commit, because the new test passes only when both pages and the spec are present and the site fixture must move with the deletion. Separating them leaves a red commit at each split.
+- [x] **S2 · test** — TEST-1, DOC-1, DOC-2, DOC-3. The rewritten conformance test, both governance pages, the deletion of `docs/rfc/README.md`, and the fixture line land in one commit, because the new test passes only when both pages and the spec are present and the site fixture must move with the deletion. Separating them leaves a red commit at each split.
       Levels: conformance, unit (the `site/` suite). Depends on: S1
-- [ ] **S3 · docs** — DOC-4. `why-podium.md`, the issue-template contact link, and the docs-audit workflow page list drop their RFC wording or their reference to the deleted page.
+- [x] **S3 · docs** — DOC-4. `why-podium.md`, the issue-template contact link, and the docs-audit workflow page list drop their RFC wording or their reference to the deleted page.
       Levels: unit (the `site/` suite). Depends on: S2
-- [ ] **S4 · docs** — DOC-5. The CHANGELOG Documentation entry lands, and the acceptance grep and `make coverage-gate` run over the finished tree.
+- [x] **S4 · docs** — DOC-5. The CHANGELOG Documentation entry lands, and the acceptance grep and `make coverage-gate` run over the finished tree.
       Levels: conformance, unit (the `site/` suite, whose build reads `CHANGELOG.md` for the changelog page). Depends on: S2, S3
 
 ## Current state and the gap
