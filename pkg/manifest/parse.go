@@ -130,10 +130,78 @@ func ParseSkill(src []byte) (*Skill, error) {
 	}
 	s := &Skill{}
 	if err := yaml.Unmarshal(fm, s); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidYAML, err)
+		return nil, skillDecodeError(fm, err)
 	}
 	s.Body = string(body)
 	return s, nil
+}
+
+// skillDecodeError wraps a SKILL.md frontmatter decode failure. yaml.v3
+// reports a sequence or mapping under metadata as "cannot unmarshal !!seq
+// into string" with no key name, so when the metadata mapping holds a value
+// that is not a scalar, the error names the first such key. The YAML error
+// stays in the message, so a second error in the same frontmatter is still
+// reported.
+//
+// Spec: §4.3.4
+func skillDecodeError(fm []byte, err error) error {
+	key, ok := nonStringMetadataKey(fm)
+	if !ok {
+		return fmt.Errorf("%w: %v", ErrInvalidYAML, err)
+	}
+	hint := ""
+	if key == "tags" {
+		hint = "; tags is comma-separated"
+	}
+	return fmt.Errorf("%w: metadata.%s is not a string (metadata values are strings%s): %v", ErrInvalidYAML, key, hint, err)
+}
+
+// nonStringMetadataKey returns the first key of the frontmatter's metadata
+// mapping whose value, after alias resolution, is not a scalar. A merge key is
+// skipped, because yaml.v3 applies it when decoding the map rather than
+// decoding its value as a string.
+func nonStringMetadataKey(fm []byte) (string, bool) {
+	var doc yaml.Node
+	if yaml.Unmarshal(fm, &doc) != nil || len(doc.Content) == 0 {
+		return "", false
+	}
+	md := mappingValue(doc.Content[0], "metadata")
+	if md == nil || md.Kind != yaml.MappingNode {
+		return "", false
+	}
+	for i := 0; i+1 < len(md.Content); i += 2 {
+		k := md.Content[i]
+		if k.ShortTag() == "!!merge" {
+			continue
+		}
+		if resolveAlias(md.Content[i+1]).Kind != yaml.ScalarNode {
+			return k.Value, true
+		}
+	}
+	return "", false
+}
+
+// mappingValue returns the alias-resolved value of key in the mapping node m,
+// or nil when m is not a mapping or does not hold key.
+func mappingValue(m *yaml.Node, key string) *yaml.Node {
+	m = resolveAlias(m)
+	if m.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return resolveAlias(m.Content[i+1])
+		}
+	}
+	return nil
+}
+
+// resolveAlias follows an alias node to its anchored target.
+func resolveAlias(n *yaml.Node) *yaml.Node {
+	for n.Kind == yaml.AliasNode && n.Alias != nil {
+		n = n.Alias
+	}
+	return n
 }
 
 // UnmarshalYAML decodes a SchemaRef from either the documented mapping

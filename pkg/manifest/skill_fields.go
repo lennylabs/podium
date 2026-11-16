@@ -26,7 +26,10 @@ var skillMDAllowedFields = map[string]bool{
 // fields, so a stray hook_event or rule_mode in SKILL.md is flagged too. A
 // top-level version is flagged because a skill's version lives in SKILL.md
 // metadata.version, with the ARTIFACT.md version taking precedence when the
-// overlay sets one (ResolveSkillVersion).
+// overlay sets one (ResolveSkillVersion). The fields IsSkillMetadataField
+// names (when_to_use, tags, sensitivity, search_visibility, deprecated,
+// replaced_by, and release_notes) live under metadata.<key> or in ARTIFACT.md.
+// They stay in this list because a top-level SKILL.md key is still an error.
 var podiumOnlySkillFields = []string{
 	"type",
 	"version",
