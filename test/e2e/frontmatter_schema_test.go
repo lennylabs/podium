@@ -76,15 +76,21 @@ func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 // Spec: §4.3.4, §7.3.1 — the when_to_use literal block carries each
 // situation unescaped, so the skill scaffold refuses a --when-to-use
 // situation holding a character the YAML reader rejects with exit 2 and
-// writes no file, rather than leaving a SKILL.md that fails to parse.
-func TestFrontmatter_SkillScaffoldRefusesWhenToUseControlCharacter(t *testing.T) {
+// writes no file, rather than leaving a SKILL.md that fails to parse. A
+// --tags element that is not valid UTF-8 is refused the same way, because
+// its quoted escape would read back as a different tag.
+func TestFrontmatter_SkillScaffoldRefusesUnwritableMetadata(t *testing.T) {
 	t.Parallel()
-	for _, c := range []string{"\x01", "\x7f"} {
+	for _, tc := range []struct{ flag, value, stderr string }{
+		{"--when-to-use", "a\x01b", "--when-to-use situation"},
+		{"--when-to-use", "a\x7fb", "--when-to-use situation"},
+		{"--tags", "finance,a\xffb", "--tags element"},
+	} {
 		dir := filepath.Join(t.TempDir(), "finance/close/metadata-skill")
 		res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
-			"--description", "Metadata fields.", "--when-to-use", "a"+c+"b", "--yes", dir)
-		if res.Exit != 2 || !strings.Contains(res.Stderr, "--when-to-use situation") {
-			t.Errorf("%q: scaffold exit=%d stderr=%s, want exit 2 naming the situation", c, res.Exit, res.Stderr)
+			"--description", "Metadata fields.", tc.flag, tc.value, "--yes", dir)
+		if res.Exit != 2 || !strings.Contains(res.Stderr, tc.stderr) {
+			t.Errorf("%s %q: scaffold exit=%d stderr=%s, want exit 2 naming %q", tc.flag, tc.value, res.Exit, res.Stderr, tc.stderr)
 		}
 		mustNotExist(t, dir)
 	}

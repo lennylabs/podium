@@ -272,7 +272,9 @@ func TestScaffold_Skill_WhenToUseSplitsOnYAMLLineBreaks(t *testing.T) {
 // the YAML reader rejects is refused with exit 2 before any file is
 // written. Every other character is written, and the SKILL.md parses and
 // lints clean. Tags are written as quoted scalars, which escape every such
-// character, so the same characters in --tags are written.
+// character, so the same characters in --tags are written, while a --tags
+// element that is not valid UTF-8 is refused because its escape would
+// read back as a different tag.
 func TestScaffold_Skill_WhenToUseRefusesYAMLControlCharacters(t *testing.T) {
 	refused := []string{"\x00", "\x01", "\x0b", "\x1f", "\x7f", "\u0080", "\u0084", "\u0086", "\u009f", "\ufffe", "\uffff", "\xff", "\xed\xa0\x80"}
 	written := []string{"\t", " ", "~", "\u00a0", "\ud7ff", "\ue000", "\ufeff", "\ufffd", "\U00010000", "\U0001f600", "\U0010ffff"}
@@ -301,6 +303,22 @@ func TestScaffold_Skill_WhenToUseRefusesYAMLControlCharacters(t *testing.T) {
 		}
 		if got := resolveScaffoldedSkill(t, root).WhenToUse; len(got) != 1 || got[0] != "a"+c+"b" {
 			t.Errorf("%q: when_to_use = %q, want one situation", c, got)
+		}
+	}
+	for _, c := range []string{"\xff", "\xed\xa0\x80"} {
+		target := filepath.Join(t.TempDir(), "personal", "greet")
+		exit, _, stderr := runScaffold([]string{
+			"--type", "skill",
+			"--description", "Greet the user by name.",
+			"--tags", "ok,a" + c + "b",
+			"--yes",
+			target,
+		}, "")
+		if exit != 2 || !strings.Contains(stderr, "--tags element") {
+			t.Errorf("tags %q: exit=%d stderr=%q, want exit 2 naming the element", c, exit, stderr)
+		}
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Errorf("tags %q: refusal must create no directory (stat err=%v)", c, err)
 		}
 	}
 	root := t.TempDir()

@@ -157,7 +157,7 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 	}
 	opts.sensitivitySet = flagPassed(fs, "sensitivity")
 	if opts.typ == "skill" {
-		if err := validateSkillWhenToUse(opts.whenToUse); err != nil {
+		if err := validateSkillMetadata(opts); err != nil {
 			_, _ = fmt.Fprintf(errOut, "error: %v\n", err)
 			return 2
 		}
@@ -403,6 +403,35 @@ func writeSkillWhenToUse(sb *strings.Builder, raw string) {
 	}
 }
 
+// validateSkillMetadata refuses a --tags or --when-to-use value that the
+// skill's SKILL.md metadata cannot carry unchanged, before any file is
+// written.
+//
+// Spec: §4.3.4, §7.3.1
+func validateSkillMetadata(o *scaffoldOpts) error {
+	if err := validateSkillTags(o.tags); err != nil {
+		return err
+	}
+	return validateSkillWhenToUse(o.whenToUse)
+}
+
+// validateSkillTags refuses a --tags element that is not valid UTF-8. The
+// tags line is a %q-quoted scalar, and strconv.Quote writes an invalid
+// byte as a \xNN escape, which a YAML double-quoted scalar reads as the
+// code point U+00NN. Writing such an element would store a tag that
+// differs from the one passed, so the scaffold refuses it, as
+// validateSkillWhenToUse refuses the same input to --when-to-use.
+//
+// Spec: §4.3.4, §7.3.1
+func validateSkillTags(raw string) error {
+	for _, tag := range splitCSVLines(raw, isLineBreak) {
+		if !utf8.ValidString(tag) {
+			return fmt.Errorf("--tags element %q is not valid UTF-8", tag)
+		}
+	}
+	return nil
+}
+
 // validateSkillWhenToUse refuses a --when-to-use situation that holds a
 // character the YAML reader rejects anywhere in a document. The literal
 // block carries each situation unescaped, so such a character would leave
@@ -463,8 +492,9 @@ func splitCSVLines(raw string, isBreak func(rune) bool) []string {
 
 // isLineBreak reports whether r is a line feed or a carriage return, the
 // line ends the §4.3.4 tags decoder refuses in a tag. The tags line is a
-// %q-quoted scalar, which escapes every other YAML line break, so this set
-// keeps the written tags equal to what the decoder reads.
+// %q-quoted scalar, which escapes every other YAML line break. This set,
+// together with validateSkillTags refusing an element that is not valid
+// UTF-8, keeps the written tags equal to what the decoder reads.
 func isLineBreak(r rune) bool { return r == '\n' || r == '\r' }
 
 // isYAMLLineBreak reports whether r ends a line in a YAML document: a line
