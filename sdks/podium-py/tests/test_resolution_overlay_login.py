@@ -474,6 +474,52 @@ def test_overlay_finds_a_skill_md_only_package_by_description(tmp_path):
     assert [a.id for a in index.search("", type_filter="skill")] == ["team/greet"]
 
 
+# Spec: §6.4, §4.3.4 — a plain skill's metadata.tags in the readable form
+# reaches the overlay tag filter and the search descriptor.
+def test_overlay_filters_a_skill_md_only_package_by_metadata_tags(artifacts_server, tmp_path):
+    overlay = tmp_path / "overlay"
+    _write(str(overlay / "team" / "greet" / "SKILL.md"), _skill_md('metadata:\n  tags: "finance, close"\n'))
+    _overlay_artifact(str(overlay), "team/other", desc="unrelated helper")
+    artifacts_server.next_response = {"total_matched": 0, "results": []}
+    base = f"http://127.0.0.1:{artifacts_server.server_address[1]}"
+    res = Client(registry=base, overlay_path=str(overlay)).search_artifacts("", tags=["close"])
+    assert [(r.id, r.tags) for r in res.results] == [("team/greet", ["finance", "close"])]
+
+
+# Spec: §6.4, §4.3.4 — the overlay takes no tag from SKILL.md metadata for a
+# skill that has an ARTIFACT.md, so a both-files skill whose ARTIFACT.md states
+# no tags has none.
+def test_overlay_takes_no_metadata_tags_for_a_both_files_skill(artifacts_server, tmp_path):
+    overlay = tmp_path / "overlay"
+    _write(
+        str(overlay / "team" / "greet" / "ARTIFACT.md"),
+        "---\ntype: skill\nversion: 1.0.0\n---\n<!-- overlay -->\n",
+    )
+    _write(str(overlay / "team" / "greet" / "SKILL.md"), _skill_md('metadata:\n  tags: "a, b"\n'))
+    assert _overlay.LocalOverlay(str(overlay)).artifacts["team/greet"].tags == []
+    artifacts_server.next_response = {"total_matched": 0, "results": []}
+    base = f"http://127.0.0.1:{artifacts_server.server_address[1]}"
+    res = Client(registry=base, overlay_path=str(overlay)).search_artifacts("", tags=["a"])
+    assert "team/greet" not in [r.id for r in res.results]
+
+
+# Spec: §6.4, §4.3.4 — the overlay reads a plain skill's SKILL.md with its line
+# ends unchanged, so skill_raw and the materialized SKILL.md keep CR LF.
+def test_overlay_plain_skill_keeps_crlf_skill_raw(tmp_path):
+    overlay = tmp_path / "overlay"
+    raw = _skill_md('metadata:\n  version: "1.0.0"\n').replace("\n", "\r\n").encode("utf-8")
+    pkg = overlay / "team" / "greet"
+    pkg.mkdir(parents=True)
+    (pkg / "SKILL.md").write_bytes(raw)
+    rec = _overlay.LocalOverlay(str(overlay)).artifacts["team/greet"]
+    assert rec.skill_raw == raw.decode("utf-8")
+
+    client = Client(registry="http://127.0.0.1:1", overlay_path=str(overlay))
+    out = tmp_path / "out"
+    client.load_artifact("team/greet").materialize(to=str(out))
+    assert (out / "team" / "greet" / "SKILL.md").read_bytes() == raw
+
+
 def test_overlay_path_cwd_fallback(tmp_path, monkeypatch):
     # spec §6.4 step 3 — <CWD>/.podium/overlay/ fallback when no env/explicit.
     monkeypatch.delenv("PODIUM_OVERLAY_PATH", raising=False)

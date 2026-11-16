@@ -6,7 +6,7 @@ An artifact is a directory with one or two manifest files at its root.
 
 **Every non-skill artifact has an `ARTIFACT.md`.** It is a markdown file with YAML frontmatter that carries Podium's canonical schema (universal fields, caller-interpreted fields, and type-specific fields). The frontmatter is what the registry indexes. For non-skill types, the prose body is what the host reads when the artifact is loaded.
 
-**Skill artifacts (`type: skill`) have a `SKILL.md`** that complies with the [Agent Skills specification](https://agentskills.io/specification). `SKILL.md` carries the standard's required frontmatter (`name`, `description`) and any of the standard's optional fields (`license`, `compatibility`, `metadata`, `allowed-tools`); its prose body holds the agent-facing skill instructions. A package (§4.2) whose root holds a `SKILL.md` and no `ARTIFACT.md` is a skill artifact, and the registry indexes its `SKILL.md` frontmatter. An optional `ARTIFACT.md` beside `SKILL.md` carries Podium-only structured frontmatter and omits the prose body (a one-line pointer comment is allowed). Field allocation, version precedence, and lint are in §4.3.4.
+**Skill artifacts (`type: skill`) have a `SKILL.md`** that complies with the [Agent Skills specification](https://agentskills.io/specification). `SKILL.md` carries the standard's required frontmatter (`name`, `description`) and any of the standard's optional fields (`license`, `compatibility`, `metadata`, `allowed-tools`); its prose body holds the agent-facing skill instructions. A package (§4.2) whose root holds a `SKILL.md` and no `ARTIFACT.md` is a skill artifact, and the registry indexes its `SKILL.md` frontmatter. `SKILL.md` `metadata` can carry the Podium-only fields that §4.3.4 lists under **Podium fields in `metadata`**. An optional `ARTIFACT.md` beside `SKILL.md` carries Podium-only frontmatter and omits the prose body (a one-line pointer comment is allowed). Field allocation, version precedence, and lint are in §4.3.4.
 
 **Bundled resources alongside the manifest are arbitrary files.** Python scripts, shell scripts, templates, JSON / YAML schemas, evaluation datasets, model weights, binary blobs, or anything else the host needs at runtime. The registry treats these as opaque versioned blobs.
 
@@ -131,7 +131,7 @@ Each layer (§4.6) is rooted at a Git repo or local filesystem path; the directo
 
 The manifest frontmatter is YAML; the prose body is markdown. The registry indexes frontmatter for `search_artifacts` and `load_domain`. The prose body is returned inline by `load_artifact`.
 
-For non-skill types, frontmatter and prose both live in `ARTIFACT.md`. For skills, the Agent Skills fields and the prose body live in `SKILL.md`, and the Podium-only fields live in an optional `ARTIFACT.md` (§4.3.4).
+For non-skill types, frontmatter and prose both live in `ARTIFACT.md`. For skills, the Agent Skills fields and the prose body live in `SKILL.md`, and the Podium-only fields live under `SKILL.md` `metadata` or in an optional `ARTIFACT.md`, as §4.3.4 allocates them.
 
 ### Universal fields (any artifact type)
 
@@ -252,7 +252,7 @@ Skill artifacts comply with the [agentskills.io specification](https://agentskil
 
 **Manifest files.** A skill artifact directory contains a `SKILL.md` and may contain an `ARTIFACT.md`. `SKILL.md` is the agentskills.io manifest read by every SKILL.md-aware tool (the `npx skills` CLI, the public Vercel skills.sh registry, third-party skill validators, and any harness that consumes SKILL.md directly). `ARTIFACT.md` is an optional overlay that the author writes by hand to carry Podium-only fields, and no Podium tool generates one for a skill. The registry, the MCP server, the SDKs, and `podium sync` read both files when both are present.
 
-**Field allocation.** The split keeps `SKILL.md` strictly within the agentskills.io spec. Podium-specific fields stay in `ARTIFACT.md` so they retain their YAML types and so the spec's `skills-ref validate` check passes without warnings.
+**Field allocation.** The split keeps `SKILL.md` strictly within the agentskills.io spec. `SKILL.md` carries a Podium field only as a `metadata` value, which the standard defines as a string, so the spec's `skills-ref validate` check passes without warnings. `version`, which the **Version** paragraph governs, and the fields that **Podium fields in `metadata`** lists can live in either file. Every other Podium field stays in `ARTIFACT.md`: a structured field keeps its YAML type there, and `sandbox_profile`, `effort_hint`, `model_class_hint`, and `source` are read from the served `ARTIFACT.md` document, which for a skill with no `ARTIFACT.md` is the synthesized document below.
 
 | Field | SKILL.md | ARTIFACT.md (optional overlay) |
 | --- | --- | --- |
@@ -260,14 +260,30 @@ Skill artifacts comply with the [agentskills.io specification](https://agentskil
 | `description` | Top-level (per spec; ≤ 1024 chars) | Omitted (Podium reads from SKILL.md) |
 | `license` | Top-level (per spec) | Omitted (Podium reads from SKILL.md) |
 | `compatibility` | Top-level (per spec; ≤ 500 chars; human-readable string) | Omitted. When `SKILL.md` does not author it, every harness adapter that writes a skill's `SKILL.md` (§6.7) and every marketplace emitter that writes one (§7.8) derives it from `runtime_requirements` and `sandbox_profile` at materialization time and adds it to the materialized `SKILL.md`. An authored value is kept unchanged. The `none` adapter writes `SKILL.md` without translation (§6.7) and derives nothing. |
-| `metadata` | Top-level (per spec; string-to-string map for free-form extension) | Omitted |
+| `metadata` | Top-level (per spec; string-to-string map for free-form extension). Podium reads `version` and the keys that **Podium fields in `metadata`** lists | Omitted |
 | `allowed-tools` | Top-level (per spec; experimental) | Omitted |
 | `type` | Not present | Top-level (`type: skill`); implied when `ARTIFACT.md` is absent |
 | `version` | As `metadata.version` (string) | Top-level; equal to `metadata.version` when `metadata.version` is a `major.minor.patch` value |
-| `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes` | Not present | Top-level |
+| `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes` | Optional, as `metadata` values in the encodings of **Podium fields in `metadata`** | Top-level; takes precedence over the `metadata` value when stated |
 | `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `target_harnesses`, `external_resources` | Not present | Top-level |
 
 **Version.** A skill's version is `SKILL.md` `metadata.version`, the `ARTIFACT.md` `version`, or both. When `ARTIFACT.md` declares `version`, that value is the version. Otherwise a `metadata.version` in `major.minor.patch` form is the version. A `metadata.version` in any other form is ignored, because `metadata` is free-form in the Agent Skills standard. When `ARTIFACT.md` declares `version` and `metadata.version` is a `major.minor.patch` value, the two are equal. A skill that declares no usable version carries an assigned version in the reserved form of §4.7.6 (§7.3.1, §13.11.3).
+
+**Podium fields in `metadata`.** `SKILL.md` `metadata` can carry `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, and `release_notes`, each under the key that names the field and as a string in the encoding the table below states. Apart from `version`, which the **Version** paragraph governs, `metadata` carries no other Podium field. A `metadata` key that names any other Podium field is a free-form value, and Podium ignores it.
+
+| Key | Encoding | Value |
+| --- | --- | --- |
+| `when_to_use` | One situation per line. Each line is trimmed of white space, and empty lines are dropped. At least one line remains. | The lines, in order |
+| `tags` | Comma-separated. Each element is trimmed of white space, and no element is empty. The value holds no line break. | The elements, in order |
+| `sensitivity` | `low`, `medium`, or `high` | That label |
+| `search_visibility` | `indexed` or `direct-only` | That value |
+| `deprecated` | `true` or `false` | That boolean |
+| `replaced_by` | One line | That value |
+| `release_notes` | Any string | That value |
+
+A field takes its `ARTIFACT.md` value when `ARTIFACT.md` states the key, and otherwise takes the `metadata` value. A `metadata` value that is the empty string or a YAML null is absent. A `metadata` value that does not follow its encoding is ignored, and the field takes no value from `metadata`. `metadata` values are strings, so a `SKILL.md` whose `metadata` holds a sequence or a mapping does not parse, and the ingest that reads it fails as it does for any other `SKILL.md` that does not parse.
+
+The value a field resolves to is the skill's value for that field. Ingest, the §13.2.2 public-mode sensitivity floor, search and its filters, the §4.7 embedding projection, and §13.4 stored-row admission read the resolved value, and `search_artifacts` and `load_artifact` serve it in the members that carry the field (§4.7.4, §4.7.10, §7.2). For a skill row that a release which did not resolve these fields stored, §13.4 states which readers read the values that release stored. A workspace overlay (§6.4) reads the resolved value of each field it reads, with one exception. An overlay that reads frontmatter without a YAML parser takes a field from `metadata` only for a skill with no `ARTIFACT.md`, and only from a value written on one line in a restricted form, in a frontmatter whose other lines meet the restrictions that make the line reading of that value equal its YAML decoding. It takes nothing from `metadata` for any other value. For a `SKILL.md` whose frontmatter decodes, it therefore reports the decoded `metadata` value or no value, and never a value the YAML decoding does not produce. A `SKILL.md` whose frontmatter does not decode fails ingest, and such an overlay reports the value its line reading finds for it.
 
 **Synthesized `ARTIFACT.md`.** For a skill with no `ARTIFACT.md`, every response or record that serves an `ARTIFACT.md` document carries exactly these bytes, where `<version>` is the resolved version. Each line ends with a single line feed, and the document ends with the line feed after the comment.
 
@@ -279,7 +295,7 @@ version: <version>
 <!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->
 ```
 
-The document is not part of the authored package. The §4.7.6 content hash frames a zero-length value in its position, the registry does not store it, and no adapter or SDK writer materializes it (§6.7, §7.6). Those writers also omit an authored `ARTIFACT.md` whose bytes equal this document for the version it names.
+The document is not part of the authored package. The §4.7.6 content hash frames a zero-length value in its position, the registry does not store it, and no adapter or SDK writer materializes it (§6.7, §7.6). Those writers also omit an authored `ARTIFACT.md` whose bytes equal this document for the version it names. The document carries the version and no other resolved field. A field that **Podium fields in `metadata`** resolves for such a skill reaches consumers in the response members and record fields that carry it (§4.7.4, §4.7.10, §7.2).
 
 **Body content.** `SKILL.md` carries the agent-facing skill prose body. `ARTIFACT.md` for skills has no prose body; a one-line HTML comment pointer (`<!-- Skill body lives in SKILL.md. -->`) is allowed and ignored by the linter.
 
@@ -300,8 +316,10 @@ The document is not part of the authored package. The §4.7.6 content hash frame
 - `SKILL.md` is present (error if missing).
 - `SKILL.md` has top-level `name` matching the parent directory and `description` non-empty (error).
 - `SKILL.md` `name` follows the agentskills.io syntax constraints (error).
-- `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, `tags`, etc.); if present, error. The diagnostic recommends `metadata.version` for a version and the `ARTIFACT.md` overlay for every other field.
+- `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, `tags`, etc.) at the top level; if present, error. The diagnostic recommends `metadata.version` for a version, the `metadata` key of the same name for a field that **Podium fields in `metadata`** lists, and the `ARTIFACT.md` overlay for every other field.
 - When `ARTIFACT.md` is present, it does not contain `name`, `description`, or `license` fields (warning); if present, the values must match `SKILL.md` exactly (error on mismatch). A `version` in `ARTIFACT.md` equals `SKILL.md` `metadata.version` when both are set and `metadata.version` is a `major.minor.patch` value (error on mismatch).
+- When `ARTIFACT.md` states a key that **Podium fields in `metadata`** lists and `SKILL.md` `metadata` carries a value for that key that follows its encoding, the two values are equal (error on mismatch). `tags` and `when_to_use` compare as ordered lists.
+- A `SKILL.md` `metadata` value for a key that **Podium fields in `metadata`** lists and that does not follow its encoding is ignored (warning that names the key, the value, and the encoding).
 - When `ARTIFACT.md` is present, its body is empty or a single HTML comment (warning otherwise).
 - A skill that declares no usable version has its version assigned (warning that names any ignored `metadata.version` value and the fix).
 - An authored version in the reserved form of §4.7.6, in either file, is an error (`lint.invalid_version`).
@@ -720,7 +738,7 @@ Hybrid retrieval (BM25 + vectors via RRF) needs an embedding for every artifact 
 - `when_to_use` (joined with newlines)
 - `tags` (joined)
 
-The projection is built from the frontmatter the registry serves for the artifact, so an artifact is indexed under the same `description` and `tags` that `load_artifact` and `search_artifacts` serve for it. The requirement is over `description` and `tags`; a registry whose metadata store persists no resolved `name` or `when_to_use` is under no obligation for those two fields.
+The projection is built from the frontmatter the registry serves for the artifact, so an artifact is indexed under the same `description` and `tags` that `load_artifact` and `search_artifacts` serve for it. The requirement is over `description` and `tags`; a registry whose metadata store persists no resolved `name` or `when_to_use` is under no obligation for those two fields. A skill row that a release which did not resolve the §4.3.4 `metadata` fields stored keeps the vector that release wrote, which can omit tags that §4.3.4 resolves from `SKILL.md` `metadata`, until a new version of the skill is ingested (§13.4).
 
 The prose body is **not** embedded (the `SKILL.md` body for skills, the `ARTIFACT.md` body for other types). The body is noisy for retrieval and risks busting embedding-model context limits at the long-tail end. Authors who want richer search recall put discoverability content in `description` and `when_to_use`. The same projection is applied to `search_artifacts` queries when the caller passes a text `query` (the `query` is treated as a free-text search target rather than concatenated with the projection).
 
@@ -835,7 +853,7 @@ Each artifact carries:
 
 - **Sensitivity label.** `low` / `medium` / `high`, declared in frontmatter. Informational metadata exposed in `search_artifacts` and `load_artifact` responses for filtering and display. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection (e.g., path-scoped CODEOWNERS plus required-reviewer counts), not by the registry.
 - **Ownership.** Authoring rights flow through the source layer's Git permissions. The artifact's manifest can name owners informationally for routing ingest-failure notifications via the `NotificationProvider` SPI.
-- **Lifecycle.** An ingested artifact is live until a subsequent ingest sets `deprecated: true`. Deprecated artifacts return a warning when loaded and are excluded from default search results. When the manifest sets `replaced_by:`, every load of the artifact returns the upgrade target, and a load of a deprecated artifact returns it alongside the warning.
+- **Lifecycle.** An ingested artifact is live until a subsequent ingest sets `deprecated: true`. Deprecated artifacts return a warning when loaded and are excluded from default search results. When the manifest sets `replaced_by:`, every load of the artifact returns the upgrade target, and a load of a deprecated artifact returns it alongside the warning. For a skill row that a release which did not resolve the §4.3.4 `metadata` fields stored, default search reads the deprecation flag that release stored (§13.4), so a row that only its `SKILL.md` `metadata` deprecates returns the warning when loaded and stays in default search results.
 
 ### 4.7.5 Audit
 
@@ -865,7 +883,7 @@ Pinning syntax in references (`delegates_to:`, `mcpServers:`):
 - `<id>@<semver>.x`: minor or patch range (e.g., `1.2.x`, `1.x`). A range never selects a registry-assigned version.
 - `<id>@sha256:<hash>`: content-pinned.
 
-`load_artifact(<id>)` resolves to `latest` = "the most recently ingested non-deprecated version visible under the caller's effective view, at resolution time." Resolution is registry-side. Registry-assigned versions are candidates for `latest`. §4.6 states which stored rows are not candidates for resolution.
+`load_artifact(<id>)` resolves to `latest` = "the most recently ingested non-deprecated version visible under the caller's effective view, at resolution time." Resolution is registry-side. Registry-assigned versions are candidates for `latest`. §4.6 states which stored rows are not candidates for resolution. For a skill row that a release which did not resolve the §4.3.4 `metadata` fields stored, resolution reads the deprecation flag that release stored (§13.4).
 
 For session consistency, the meta-tools accept an optional `session_id` argument (UUID generated by the host per agent session). The first `latest` lookup within a session is recorded and reused for all subsequent same-id lookups in that session, so the host sees a consistent snapshot.
 

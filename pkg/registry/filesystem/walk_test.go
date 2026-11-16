@@ -1035,3 +1035,92 @@ func TestSynthesizeSkillDocuments_RefusesUnsynthesizableVersion(t *testing.T) {
 		t.Errorf("non-skill record ArtifactBytes = %q, want nil", recs[0].ArtifactBytes)
 	}
 }
+
+// metadataFieldsSkill is a plain SKILL.md that carries every metadata-eligible
+// Podium field of §4.3.4 in its documented encoding.
+const metadataFieldsSkill = `---
+name: close
+description: Month-end close.
+metadata:
+  version: "1.2.3"
+  when_to_use: |
+    After month-end close
+    When reconciling a variance
+  tags: "finance, close"
+  sensitivity: medium
+  search_visibility: direct-only
+  deprecated: "true"
+  replaced_by: finance/close-v2
+  release_notes: Moved to v2.
+---
+
+Body.
+`
+
+// Spec: §4.3.4 — the walk resolves every metadata-eligible field of a plain
+// skill from SKILL.md metadata into rec.Artifact, while ArtifactBytes stays
+// the synthesized document that states only type and version.
+func TestWalk_PlainSkillResolvesMetadataFields(t *testing.T) {
+	t.Parallel()
+	_, reg := openTree(t, testharness.WriteTreeOption{Path: "finance/close/SKILL.md", Content: metadataFieldsSkill})
+	recs, err := reg.Walk(WalkOptions{})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	rec := recordByID(t, recs, "finance/close")
+	a := rec.Artifact
+	if !reflect.DeepEqual(a.WhenToUse, []string{"After month-end close", "When reconciling a variance"}) {
+		t.Errorf("WhenToUse = %q", a.WhenToUse)
+	}
+	if !reflect.DeepEqual(a.Tags, []string{"finance", "close"}) {
+		t.Errorf("Tags = %q", a.Tags)
+	}
+	if a.Sensitivity != manifest.SensitivityMedium || a.SearchVisibility != manifest.SearchVisibilityDirectOnly {
+		t.Errorf("Sensitivity %q SearchVisibility %q, want medium direct-only", a.Sensitivity, a.SearchVisibility)
+	}
+	if !a.Deprecated || a.ReplacedBy != "finance/close-v2" || a.ReleaseNotes != "Moved to v2." {
+		t.Errorf("Deprecated %v ReplacedBy %q ReleaseNotes %q", a.Deprecated, a.ReplacedBy, a.ReleaseNotes)
+	}
+	if a.Version != "1.2.3" || rec.VersionAssigned {
+		t.Errorf("version %q assigned %v, want 1.2.3 false", a.Version, rec.VersionAssigned)
+	}
+	if want := synthesizedDoc(t, "1.2.3"); string(rec.ArtifactBytes) != string(want) {
+		t.Errorf("ArtifactBytes = %q, want the synthesized document %q", rec.ArtifactBytes, want)
+	}
+	if rec.AuthoredBytes != nil {
+		t.Errorf("AuthoredBytes = %q, want nil", rec.AuthoredBytes)
+	}
+}
+
+// Spec: §4.3.4 — precedence is by key presence: a both-files skill whose
+// ARTIFACT.md states tags keeps them over metadata.tags, an explicit
+// deprecated: false keeps the skill current over metadata.deprecated, and a
+// key ARTIFACT.md does not state is filled from metadata.
+func TestWalk_StatedArtifactKeyWins(t *testing.T) {
+	t.Parallel()
+	authored := "---\ntype: skill\nversion: 1.0.0\ntags: [ops]\ndeprecated: false\n---\n"
+	_, reg := openTree(t,
+		testharness.WriteTreeOption{Path: "finance/close/ARTIFACT.md", Content: authored},
+		testharness.WriteTreeOption{Path: "finance/close/SKILL.md", Content: metadataFieldsSkill},
+	)
+	recs, err := reg.Walk(WalkOptions{})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	rec := recordByID(t, recs, "finance/close")
+	if !reflect.DeepEqual(rec.Artifact.Tags, []string{"ops"}) {
+		t.Errorf("Tags = %q, want the ARTIFACT.md tags [ops]", rec.Artifact.Tags)
+	}
+	if rec.Artifact.Deprecated {
+		t.Error("Deprecated = true, want the stated ARTIFACT.md false")
+	}
+	if rec.Artifact.Sensitivity != manifest.SensitivityMedium {
+		t.Errorf("Sensitivity = %q, want the metadata value medium for an unstated key", rec.Artifact.Sensitivity)
+	}
+	if rec.Artifact.Version != "1.0.0" {
+		t.Errorf("Version = %q, want the ARTIFACT.md version 1.0.0", rec.Artifact.Version)
+	}
+	if string(rec.AuthoredBytes) != authored {
+		t.Errorf("AuthoredBytes = %q, want the authored ARTIFACT.md", rec.AuthoredBytes)
+	}
+}

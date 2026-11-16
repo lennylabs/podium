@@ -207,6 +207,97 @@ func TestSkillTutorial_ArtifactFieldMismatchErrors(t *testing.T) {
 	}
 }
 
+// greetSkillMetadataFields is the SKILL.md from the end of "Step 2": the
+// overlay's when_to_use, tags, and sensitivity set under metadata instead.
+const greetSkillMetadataFields = "---\n" +
+	"name: greet\n" +
+	"description: Greet the user by name and tell them today's date in a friendly format. Use when the user opens a session with a greeting or asks who you are.\n" +
+	"license: MIT\n" +
+	"metadata:\n" +
+	"  version: \"1.0.0\"\n" +
+	"  tags: \"demo, hello-world, greeting\"\n" +
+	"  sensitivity: low\n" +
+	"  when_to_use: |\n" +
+	"    When the user opens a session with a greeting like 'hi' or 'hello'.\n" +
+	"    When the user asks who you are at session start.\n" +
+	"---\n\nGreet the user warmly and state today's date.\n"
+
+// Spec: §4.3.4 — the tutorial's metadata form of the Step 2 fields lints
+// with no issues alone and beside the Step 2 overlay, whose values it
+// matches, and lint reports skill_artifact_field_mismatch once the overlay's
+// tags differ from the metadata tags.
+func TestSkillTutorial_MetadataFieldsForm(t *testing.T) {
+	t.Parallel()
+	differentTags := strings.Replace(greetArtifactFuller, "tags: [demo, hello-world, greeting]", "tags: [demo]", 1)
+	for _, tc := range []struct {
+		name     string
+		artifact string
+		exit     int
+		want     string
+	}{
+		{"metadata alone", "", 0, "lint: no issues."},
+		{"beside the matching overlay", greetArtifactFuller, 0, "lint: no issues."},
+		{"beside an overlay with other tags", differentTags, 1, "lint.skill_artifact_field_mismatch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			files := map[string]string{"personal/hello/greet/SKILL.md": greetSkillMetadataFields}
+			if tc.artifact != "" {
+				files["personal/hello/greet/ARTIFACT.md"] = tc.artifact
+			}
+			res := runPodium(t, "", nil, "lint", "--registry", writeRegistry(t, files))
+			if res.Exit != tc.exit || !strings.Contains(res.Stdout, tc.want) {
+				t.Errorf("lint exit=%d, want %d with %q\nstdout=%s\nstderr=%s", res.Exit, tc.exit, tc.want, res.Stdout, res.Stderr)
+			}
+		})
+	}
+}
+
+// greetSkillMetadataSensitivity returns the tutorial's SKILL.md with
+// metadata.version 1.0.0 and the given metadata.sensitivity.
+func greetSkillMetadataSensitivity(level string) string {
+	return strings.Replace(greetSkillVersioned, "  version: \"1.0.0\"\n",
+		"  version: \"1.0.0\"\n  sensitivity: "+level+"\n", 1)
+}
+
+// Spec: §4.3.4 — a SKILL.md metadata.sensitivity that differs from the
+// sensitivity ARTIFACT.md states fails lint with exit 1 and
+// skill_artifact_field_mismatch, and a metadata.sensitivity outside the enum
+// on a skill with no ARTIFACT.md is ignored under a
+// lint.skill_metadata_field_ignored warning that leaves the exit at 0.
+func TestSkillTutorial_MetadataSensitivityLint(t *testing.T) {
+	t.Parallel()
+	t.Run("ARTIFACT.md value differs", func(t *testing.T) {
+		t.Parallel()
+		reg := writeRegistry(t, map[string]string{
+			"personal/hello/greet/ARTIFACT.md": "---\ntype: skill\nsensitivity: high\n---\n\n<!-- Skill body lives in SKILL.md. -->\n",
+			"personal/hello/greet/SKILL.md":    greetSkillMetadataSensitivity("low"),
+		})
+		res := runPodium(t, "", nil, "lint", "--registry", reg)
+		if res.Exit != 1 {
+			t.Fatalf("lint exit=%d, want 1 (error)\nstdout=%s", res.Exit, res.Stdout)
+		}
+		if !strings.Contains(res.Stdout, "skill_artifact_field_mismatch") || !strings.Contains(res.Stdout, "sensitivity") {
+			t.Errorf("expected a skill_artifact_field_mismatch error naming sensitivity:\n%s", res.Stdout)
+		}
+	})
+	t.Run("metadata value outside the enum", func(t *testing.T) {
+		t.Parallel()
+		reg := writeRegistry(t, map[string]string{
+			"personal/hello/greet/SKILL.md": greetSkillMetadataSensitivity("secret"),
+		})
+		res := runPodium(t, "", nil, "lint", "--registry", reg)
+		if res.Exit != 0 {
+			t.Fatalf("lint exit=%d, want 0 (warning only)\nstdout=%s", res.Exit, res.Stdout)
+		}
+		for _, want := range []string{"[warning]", "lint.skill_metadata_field_ignored", "metadata.sensitivity", "secret"} {
+			if !strings.Contains(res.Stdout, want) {
+				t.Errorf("lint output does not name %s:\n%s", want, res.Stdout)
+			}
+		}
+	})
+}
+
 // a non-comment ARTIFACT.md body for a skill warns
 // (lint.skill_artifact_body) but does not fail. spec: §4.3.4.
 func TestSkillTutorial_ArtifactBodyMustBeComment(t *testing.T) {

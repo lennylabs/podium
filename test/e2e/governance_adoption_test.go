@@ -1053,10 +1053,10 @@ func TestGovernance_HighSensitivityDomainSigning(t *testing.T) {
 // TestProgressive_43_ScaffoldSensitivityHigh verifies that
 // `podium artifact scaffold --type context --sensitivity high --yes <path>`
 // produces an ARTIFACT.md with sensitivity:high in the frontmatter, and that
-// a skill scaffold refuses --sensitivity because a skill carries it in a
-// hand-written ARTIFACT.md overlay.
+// a skill scaffold writes --sensitivity high as a quoted SKILL.md
+// metadata.sensitivity value that lints clean.
 //
-// Spec: §4.3.4
+// Spec: §4.3.4, §7.3.1
 func TestGovernance_ScaffoldSensitivityHigh(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "my-context")
@@ -1077,14 +1077,18 @@ func TestGovernance_ScaffoldSensitivityHigh(t *testing.T) {
 		}
 	}
 
-	skill := filepath.Join(t.TempDir(), "my-skill")
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "my-skill")
 	res = runPodium(t, "", nil, "artifact", "scaffold",
 		"--type", "skill",
 		"--description", "A high-sensitivity skill for testing.",
 		"--sensitivity", "high",
 		"--yes",
-		skill)
-	assertSkillOverlayRefusal(t, res, skill, "--sensitivity")
+		skillDir)
+	skill := assertSkillScaffoldLintsClean(t, res, root, skillDir)
+	if want := "metadata:\n  version: \"0.1.0\"\n  sensitivity: \"high\"\n---\n"; !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md missing %q:\n%s", want, skill)
+	}
 }
 
 // ---- — scaffold rejects invalid sensitivity ---------------

@@ -226,8 +226,10 @@ metadata:
 Greet the user by their first name. Tell them today's date.
 ```
 
-A hand-written `ARTIFACT.md` beside `SKILL.md` is optional. It carries
-Podium-only fields such as `tags` and `sensitivity`, and the
+`SKILL.md` `metadata` can also carry Podium-only fields such as `tags` and
+`sensitivity` as strings. A hand-written `ARTIFACT.md` beside `SKILL.md` is
+optional. It can carry any Podium-only field, and it is the only place for the
+fields that `metadata` does not carry. The
 [frontmatter reference](https://lennylabs.github.io/podium/authoring/frontmatter-reference)
 lists them.
 

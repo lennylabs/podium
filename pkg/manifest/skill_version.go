@@ -52,7 +52,8 @@ func IsAutoVersion(s string) (n int, ok bool) {
 // otherwise "". A metadata.version in any other form, the reserved
 // 0.0.0-auto.<N> form included, is ignored because metadata is free-form in
 // the Agent Skills standard. Callers treat "" as a version the registry
-// assigns.
+// assigns. ResolveSkillFields is its only caller outside tests, so every
+// reader resolves the version together with the metadata fields.
 //
 // Spec: §4.3.4
 func ResolveSkillVersion(a *Artifact, s *Skill) string {

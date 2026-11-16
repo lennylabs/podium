@@ -58,10 +58,10 @@ func (r *Registry) admit(ctx context.Context, rec store.ManifestRecord) (store.M
 }
 
 // admitBytes runs the content check, (1), and returns the parsed manifest the
-// derived fields come from. A plain-skill row yields the value the filesystem
-// loader builds for a skill with no ARTIFACT.md: type skill and the SKILL.md
-// description. The artifact is nil for any other row whose manifest is empty
-// or does not parse.
+// derived fields come from. A skill row yields the artifact §4.3.4 resolves
+// from its admitted manifest and SKILL.md, which for a plain-skill row is the
+// value the filesystem loader builds for a skill with no ARTIFACT.md. The
+// artifact is nil for any other row whose manifest is empty or does not parse.
 func (r *Registry) admitBytes(ctx context.Context, rec store.ManifestRecord) (*manifest.Artifact, error) {
 	if err := distinctResourcePaths(rec.Resources); err != nil {
 		return nil, err
@@ -82,21 +82,25 @@ func (r *Registry) admitBytes(ctx context.Context, rec store.ManifestRecord) (*m
 	return admittedArtifact(rec), nil
 }
 
-// admittedArtifact parses the row's admitted manifest. A plain-skill row has
-// no manifest, so its artifact is built from its admitted SKILL.md rather
-// than left nil, which would serve the row's unhashed columns.
+// admittedArtifact parses the row's admitted manifest. A skill row resolves
+// its §4.3.4 fields from the admitted SKILL.md metadata, with an ARTIFACT.md
+// key taking precedence when the manifest states it, so a load serves the
+// values ingest resolved rather than dropping the metadata ones. A plain-skill
+// row has no manifest, so its artifact is built from its admitted SKILL.md
+// rather than left nil, which would serve the row's unhashed columns. A
+// both-files row whose SKILL.md does not parse falls through to its manifest.
 //
-// Spec: §13.4 — a row whose manifest is empty and whose SKILL.md parses is a
-// skill with no ARTIFACT.md.
+// Spec: §4.3.4, §13.4 — a row whose manifest is empty and whose SKILL.md
+// parses is a skill with no ARTIFACT.md, and a skill row's sensitivity,
+// deprecation flag, and replacement are the values §4.3.4 resolves.
 func admittedArtifact(rec store.ManifestRecord) *manifest.Artifact {
+	if a, _, _, ok := manifest.ResolveStoredSkill(rec.Frontmatter, rec.SkillRaw); ok {
+		return a
+	}
 	if a, err := manifest.ParseArtifact(rec.Frontmatter); err == nil {
 		return a
 	}
-	s, ok := plainSkillOf(rec)
-	if !ok {
-		return nil
-	}
-	return &manifest.Artifact{Type: manifest.TypeSkill, Description: s.Description}
+	return nil
 }
 
 // distinctResourcePaths refuses a row with two refs under one path. The hash
@@ -195,10 +199,12 @@ func (r *Registry) admitSignature(ctx context.Context, rec store.ManifestRecord)
 // admitted bytes. A plain-skill row also takes its description and tags from
 // them, because parsedArtifact reads both columns for a row with no manifest,
 // so an edited column never reaches the served result or the revalidation key
-// set. Any other row whose manifest is empty or does not parse keeps its
-// stored values, because its bytes state none.
+// set. Its tags are the ones its admitted SKILL.md metadata resolves to, and
+// none when the metadata states no tags. A both-files row keeps its stored
+// tags column, which ingest filled with the resolved value. Any other row whose manifest is empty or does not parse keeps its stored
+// values, because its bytes state none.
 //
-// Spec: §13.4
+// Spec: §4.3.4, §13.4
 func withAdmittedFields(rec store.ManifestRecord, a *manifest.Artifact) store.ManifestRecord {
 	if a == nil {
 		return rec
@@ -207,7 +213,7 @@ func withAdmittedFields(rec store.ManifestRecord, a *manifest.Artifact) store.Ma
 	setManifestFields(&rec, a)
 	if plainSkillRow(rec) {
 		rec.Description = a.Description
-		rec.Tags = nil
+		rec.Tags = append([]string(nil), a.Tags...)
 	}
 	return rec
 }

@@ -1508,7 +1508,7 @@ The registry emits outbound webhooks for change events. Configure receivers per 
 | Event | When |
 |:--|:--|
 | `artifact.published` | A new `(artifact_id, version)` was ingested. |
-| `artifact.deprecated` | An ingested manifest set `deprecated: true`. |
+| `artifact.deprecated` | An ingested manifest set `deprecated: true`, or, for a skill, the `deprecated` value that its `SKILL.md` `metadata` and `ARTIFACT.md` resolve to is `true`. |
 | `domain.published` | A `DOMAIN.md` was added or changed. |
 | `layer.ingested` | A layer completed an ingest cycle. Fires once per cycle, so a CI job that runs `podium sync --config` against a `kind: marketplace` target subscribes to it (see [Publishing marketplace repositories](../deployment/content/publishing)). |
 | `layer.history_rewritten` | Force-push detected on a `git`-source layer. |

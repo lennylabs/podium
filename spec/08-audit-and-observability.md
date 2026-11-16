@@ -11,7 +11,7 @@ Every significant event, each carrying a trace ID (W3C Trace Context):
 | `artifacts.searched`           | Host invoked `search_artifacts`                                    | Registry |
 | `artifact.loaded`              | Host invoked `load_artifact`                                       | Registry |
 | `artifact.published`           | A new `(artifact_id, version)` was ingested                        | Registry |
-| `artifact.deprecated`          | An ingested manifest set `deprecated: true`                        | Registry |
+| `artifact.deprecated`          | An ingested manifest set `deprecated: true`, or, for a skill, the `deprecated` value §4.3.4 resolves is `true` | Registry |
 | `artifact.signed`              | Artifact version signed                                            | Registry |
 | `domain.published`             | A `DOMAIN.md` was added or changed                                 | Registry |
 | `layer.ingested`               | A layer completed an ingest cycle                                  | Registry |

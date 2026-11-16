@@ -564,21 +564,21 @@ podium artifact scaffold --type <type> --description <text>
 |:--|:--|
 | `--type <type>` | Artifact type. Required. The type table below lists the accepted values. |
 | `--description <text>` | One-line description. Required; without `--yes`, the command prompts for it. |
-| `--tags <a,b,c>` | Comma-separated tags. Refused for `--type skill`. |
-| `--sensitivity <low\|medium\|high>` | Sensitivity. Default: `low` for types other than `skill`. An explicitly passed value is refused for `--type skill`. |
+| `--tags <a,b,c>` | Comma-separated tags. For `--type skill`, written as `SKILL.md` `metadata.tags`. |
+| `--sensitivity <low\|medium\|high>` | Sensitivity. Default: `low` for types other than `skill`. For `--type skill`, a passed value is written as `SKILL.md` `metadata.sensitivity`, and a skill gets no default. |
 | `--license <spdx>` | SPDX license identifier. |
-| `--when-to-use <a,b,c>` | Comma-separated `when_to_use` entries. Refused for `--type skill`. |
+| `--when-to-use <a,b,c>` | Comma-separated `when_to_use` entries. For `--type skill`, written as a `SKILL.md` `metadata.when_to_use` literal block, one entry per line. |
 | `--version <semver>` | Starting version. Default: `0.1.0`. |
 | `--force` | Overwrite an existing directory. |
 | `--yes` | Fail instead of prompting when a required value is missing. |
 
-For `--type skill`, the command refuses `--tags`, `--when-to-use`, and an explicitly passed `--sensitivity` with exit 2. These are Podium-only fields that belong in a hand-written `ARTIFACT.md` overlay (see the [frontmatter reference](../authoring/frontmatter-reference)).
+For `--type skill`, the command writes `SKILL.md` alone. `--tags`, `--sensitivity`, and `--when-to-use` become `metadata` keys in the encodings that [Podium fields in SKILL.md metadata](../authoring/frontmatter-reference#podium-fields-in-skillmd-metadata) defines, and the command writes no `ARTIFACT.md`. The command exits 2, before it writes any file, when a `--tags` element is not valid UTF-8 or a `--when-to-use` entry holds a character that a YAML block cannot carry.
 
 `--type` accepts the first-class artifact types and `mcp-server`, the extension type Podium ships built-in:
 
 | Type | Files written | Type-specific flags |
 |---|---|---|
-| `skill` | `SKILL.md` (with `metadata.version`) | — |
+| `skill` | `SKILL.md` (with `metadata.version`, and `metadata.tags`, `metadata.sensitivity`, and `metadata.when_to_use` when those flags are passed) | — |
 | `agent` | ARTIFACT.md | `--input-schema`, `--output-schema`, `--delegates-to` |
 | `context` | ARTIFACT.md | — |
 | `command` | ARTIFACT.md | — |

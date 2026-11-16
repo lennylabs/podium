@@ -143,8 +143,13 @@ The files have these roles:
 - **`SKILL.md`** carries the agent-facing content. Its frontmatter holds the
   standard's required `name` and `description` and the version in
   `metadata.version`. Its prose body is what the agent reads.
-- **An optional, hand-written `ARTIFACT.md`** beside it carries Podium-only
-  fields such as `when_to_use`, `tags`, and `sensitivity`. See the
+- **`SKILL.md` `metadata`** can also carry Podium fields such as
+  `when_to_use`, `tags`, and `sensitivity`, in the string encodings that the
+  [frontmatter reference](../authoring/frontmatter-reference#podium-fields-in-skillmd-metadata)
+  defines.
+- **An optional, hand-written `ARTIFACT.md`** beside it can carry any
+  Podium-only field, and it is the only place for the fields that `metadata`
+  does not carry. See the
   [frontmatter reference](../authoring/frontmatter-reference).
 - **The directory path** is the canonical artifact ID, here
   `personal/hello/greet`. References from other artifacts use this ID.

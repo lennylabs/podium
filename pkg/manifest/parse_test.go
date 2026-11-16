@@ -3,6 +3,7 @@ package manifest
 import (
 	"encoding/binary"
 	"errors"
+	"strings"
 	"testing"
 	"unicode/utf16"
 )
@@ -153,5 +154,161 @@ func TestDeclaresExtends(t *testing.T) {
 				t.Errorf("DeclaresExtends(%q) = true, want false", tc.src)
 			}
 		})
+	}
+}
+
+// Spec: §4.3.4 — metadata values are strings, so a sequence or mapping under
+// metadata fails ParseSkill, and the error names the key, keeps the YAML text,
+// and adds the comma hint only for tags.
+func TestParseSkill_NonStringMetadataNamesKey(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		fm       string
+		contains []string
+		absent   []string
+	}{
+		{
+			name:     "tags list",
+			fm:       "name: x\nmetadata:\n  tags: [a, b]\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
+		},
+		{
+			name:     "mapping value",
+			fm:       "name: x\nmetadata:\n  owner: {team: x}\n",
+			contains: []string{"metadata.owner is not a string", "cannot unmarshal !!map into string"},
+			absent:   []string{"comma-separated"},
+		},
+		{
+			name:     "alias to a sequence",
+			fm:       "name: x\nlist: &l [a, b]\nmetadata:\n  tags: *l\n",
+			contains: []string{"metadata.tags is not a string"},
+		},
+		{
+			name:     "aliased metadata mapping",
+			fm:       "name: x\nbase: &m\n  owner: [a]\nmetadata: *m\n",
+			contains: []string{"metadata.owner is not a string"},
+		},
+		{
+			name:     "alias key names the resolved key",
+			fm:       "name: x\nmetadata:\n  owner: &k tags\n  *k : [a, b]\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
+			absent:   []string{"metadata.k "},
+		},
+		{
+			name:     "merge key brings a sequence",
+			fm:       "name: x\nmetadata:\n  owner: a\n  <<: {tags: [a, b]}\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
+			absent:   []string{"metadata.<<"},
+		},
+		{
+			name:     "aliased merge mapping",
+			fm:       "name: x\nbase: &m {tags: [a]}\nmetadata:\n  <<: *m\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated"},
+		},
+		{
+			name:     "merge sequence skips an overridden key",
+			fm:       "name: x\nmetadata:\n  owner: a\n  <<: [{owner: [x]}, {team: {a: b}}]\n",
+			contains: []string{"metadata.team is not a string", "cannot unmarshal !!map into string"},
+			absent:   []string{"metadata.owner"},
+		},
+		{
+			name:   "self-referencing merge keeps the unchanged error",
+			fm:     "name: x\ndescription: d\nmetadata: &m\n  <<: *m\n  a: b\n",
+			absent: []string{"metadata.", "is not a string"},
+		},
+		{
+			name:   "nested self-referencing merge keeps the unchanged error",
+			fm:     "name: x\ndescription: d\nmetadata: &m\n  <<: {<<: *m}\n  a: b\n",
+			absent: []string{"metadata.", "is not a string"},
+		},
+		{
+			name:   "merge sequence holding its own mapping keeps the unchanged error",
+			fm:     "name: x\ndescription: d\nmetadata: &m\n  <<: [*m]\n  a: b\n",
+			absent: []string{"metadata.", "is not a string"},
+		},
+		{
+			name:     "self-referencing merge still names a sequence",
+			fm:       "name: x\nmetadata: &m\n  <<: *m\n  tags: [a]\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated"},
+		},
+		{
+			name:     "top-level merge key brings metadata",
+			fm:       "name: x\n<<: {metadata: {tags: [a, b]}}\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
+		},
+		{
+			name:     "top-level alias key names metadata",
+			fm:       "name: x\nk: &k metadata\n*k : {tags: [a, b]}\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
+		},
+		{
+			name:     "top-level merge sequence brings metadata",
+			fm:       "name: x\n<<: [{owner: a}, {metadata: {tags: [a, b]}}]\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated"},
+		},
+		{
+			name:     "direct metadata takes precedence over a merged one",
+			fm:       "name: x\nmetadata: {owner: [a]}\n<<: {metadata: {tags: [a]}}\n",
+			contains: []string{"metadata.owner is not a string"},
+			absent:   []string{"metadata.tags"},
+		},
+		{
+			name:   "self-referencing top-level merge keeps the unchanged error",
+			fm:     "--- &r\nname: [x]\n<<: *r\n",
+			absent: []string{"metadata.", "is not a string"},
+		},
+		{
+			name:     "second error stays visible",
+			fm:       "name: [x]\nmetadata:\n  tags: [a, b]\n",
+			contains: []string{"metadata.tags is not a string", "line 1", "line 3"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := ParseSkill([]byte("---\n" + tc.fm + "---\nBody.\n"))
+			if !errors.Is(err, ErrInvalidYAML) {
+				t.Fatalf("err = %v, want ErrInvalidYAML", err)
+			}
+			for _, s := range tc.contains {
+				if !strings.Contains(err.Error(), s) {
+					t.Errorf("err = %q, want it to contain %q", err, s)
+				}
+			}
+			for _, s := range tc.absent {
+				if strings.Contains(err.Error(), s) {
+					t.Errorf("err = %q, want no %q", err, s)
+				}
+			}
+		})
+	}
+}
+
+// Spec: §4.3.4 — an alias to a scalar is a string and parses, and a decode
+// failure outside metadata keeps the unchanged error with no metadata key.
+func TestParseSkill_MetadataScalarsAndOtherFailures(t *testing.T) {
+	t.Parallel()
+	s, err := ParseSkill([]byte("---\nname: x\ndescription: &d \"a, b\"\nmetadata:\n  tags: *d\n  <<: {owner: finance}\n---\nBody.\n"))
+	if err != nil {
+		t.Fatalf("alias to a scalar: %v", err)
+	}
+	if s.Metadata["tags"] != "a, b" || s.Metadata["owner"] != "finance" {
+		t.Errorf("metadata = %v, want tags %q and merged owner", s.Metadata, "a, b")
+	}
+	for _, fm := range []string{
+		"name: [x]\nmetadata:\n  tags: a\n  <<: {owner: finance}\n",
+		"name: [x]\nmetadata: [a]\n",
+		"name: [x]\n",
+		"- a\n- b\n",
+		"name: [x\nmetadata:\n  tags: [a, b]\n",
+	} {
+		_, err := ParseSkill([]byte("---\n" + fm + "---\nBody.\n"))
+		if !errors.Is(err, ErrInvalidYAML) {
+			t.Fatalf("%q: err = %v, want ErrInvalidYAML", fm, err)
+		}
+		if strings.Contains(err.Error(), "metadata.") {
+			t.Errorf("%q: err = %q, want no metadata key", fm, err)
+		}
 	}
 }

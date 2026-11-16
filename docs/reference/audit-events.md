@@ -70,7 +70,7 @@ The registry stream records the following events. Each carries the trace ID of t
 | `artifacts.searched` | A caller invoked `search_artifacts`. |
 | `artifact.loaded` | A caller invoked `load_artifact`. |
 | `artifact.published` | A new `(artifact_id, version)` was ingested. |
-| `artifact.deprecated` | An ingested manifest set `deprecated: true`. |
+| `artifact.deprecated` | An ingested manifest set `deprecated: true`, or, for a skill, the `deprecated` value that its `SKILL.md` `metadata` and `ARTIFACT.md` resolve to is `true`. |
 | `artifact.signed` | An artifact version was signed. |
 | `domain.published` | A `DOMAIN.md` was added or changed. |
 | `layer.ingested` | A layer completed an ingest cycle. |

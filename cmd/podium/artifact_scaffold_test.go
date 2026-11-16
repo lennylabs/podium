@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/lint"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
@@ -97,57 +98,238 @@ func assertSkillMDAlone(t *testing.T, dir string) {
 	}
 }
 
-// Spec: §4.3.4 — --tags with --type skill is refused with exit 2, the
-// message points at the ARTIFACT.md overlay, and no directory is created.
-func TestScaffold_Skill_RefusesTags(t *testing.T) {
+// scaffoldSkillMD runs the skill scaffold with args before the target
+// directory and returns the SKILL.md it wrote, failing on a non-zero exit.
+func scaffoldSkillMD(t *testing.T, target string, args ...string) string {
+	t.Helper()
+	full := append([]string{"--type", "skill", "--description", "Greet the user by name.", "--yes"}, args...)
+	exit, _, stderr := runScaffold(append(full, target), "")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+	assertSkillMDAlone(t, target)
+	body, err := os.ReadFile(filepath.Join(target, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read SKILL.md: %v", err)
+	}
+	return string(body)
+}
+
+// resolveScaffoldedSkill walks the registry at root, which must hold one
+// skill, fails the test on any lint diagnostic, and returns the skill's
+// resolved fields. A metadata value outside its §4.3.4 encoding raises
+// lint.skill_metadata_field_ignored, so a run with no diagnostic shows that
+// every value the scaffold wrote decodes.
+func resolveScaffoldedSkill(t *testing.T, root string) *manifest.Artifact {
+	t.Helper()
+	reg, err := filesystem.Open(root)
+	if err != nil {
+		t.Fatalf("filesystem.Open(%s): %v", root, err)
+	}
+	records, err := reg.Walk(filesystem.WalkOptions{
+		CollisionPolicy: filesystem.CollisionPolicyHighestWins,
+	})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	for _, d := range (&lint.Linter{}).Lint(context.Background(), reg, records) {
+		t.Errorf("lint diagnostic: %s", d)
+	}
+	return records[0].Artifact
+}
+
+// Spec: §4.3.4, §7.3.1 — --tags, --sensitivity, and --when-to-use with
+// --type skill are written under SKILL.md metadata after the version:
+// tags and sensitivity as quoted strings, and when_to_use as a literal
+// block with one situation per line. The output lints with no diagnostic
+// and resolves to the passed values.
+func TestScaffold_Skill_WritesMetadataFields(t *testing.T) {
 	root := t.TempDir()
-	target := filepath.Join(root, "personal", "greet")
-	exit, _, stderr := runScaffold([]string{
-		"--type", "skill",
-		"--description", "Greet the user by name.",
-		"--tags", "demo,greeting",
-		"--yes",
-		target,
-	}, "")
-	if exit != 2 {
-		t.Fatalf("exit=%d, want 2 (stderr=%s)", exit, stderr)
+	target := filepath.Join(root, "finance", "close-report")
+	skill := scaffoldSkillMD(t, target,
+		"--tags", "finance, close",
+		"--sensitivity", "medium",
+		"--when-to-use", "a,b")
+	want := "metadata:\n" +
+		"  version: \"0.1.0\"\n" +
+		"  tags: \"finance, close\"\n" +
+		"  sensitivity: \"medium\"\n" +
+		"  when_to_use: |\n" +
+		"    a\n" +
+		"    b\n" +
+		"---\n"
+	if !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md missing metadata block %q:\n%s", want, skill)
 	}
-	if !strings.Contains(stderr, "--tags") || !strings.Contains(stderr, "ARTIFACT.md overlay") {
-		t.Errorf("stderr must name --tags and the ARTIFACT.md overlay: %s", stderr)
+	a := resolveScaffoldedSkill(t, root)
+	if got := strings.Join(a.Tags, "|"); got != "finance|close" {
+		t.Errorf("tags = %q, want finance|close", got)
 	}
-	if _, err := os.Stat(filepath.Join(root, "personal")); !os.IsNotExist(err) {
-		t.Errorf("refusal must create no directory (stat err=%v)", err)
+	if a.Sensitivity != manifest.SensitivityMedium {
+		t.Errorf("sensitivity = %q, want medium", a.Sensitivity)
+	}
+	if got := strings.Join(a.WhenToUse, "|"); got != "a|b" {
+		t.Errorf("when_to_use = %q, want a|b", got)
 	}
 }
 
-// Spec: §4.3.4 — every refused flag is reported in one message, named in
-// flag-definition order whatever order the command line used.
-func TestScaffold_Skill_RefusesFlagsInDefinitionOrder(t *testing.T) {
+// Spec: §4.3.4, §7.3.1 — a skill gets no default sensitivity. Without
+// --sensitivity, SKILL.md carries no sensitivity line, and the tags line
+// sits directly before the when_to_use block.
+func TestScaffold_Skill_NoSensitivityWithoutFlag(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "greet")
-	exit, _, stderr := runScaffold([]string{
-		"--type", "skill",
-		"--description", "Greet the user by name.",
-		"--when-to-use", "greeting",
-		"--sensitivity", "high",
+	skill := scaffoldSkillMD(t, target,
 		"--tags", "demo",
-		"--yes",
-		target,
-	}, "")
-	if exit != 2 {
-		t.Fatalf("exit=%d, want 2 (stderr=%s)", exit, stderr)
+		"--when-to-use", "greeting")
+	if strings.Contains(skill, "sensitivity") {
+		t.Errorf("SKILL.md must carry no sensitivity without --sensitivity:\n%s", skill)
 	}
-	want := "error: --tags, --sensitivity, --when-to-use set Podium-only fields; write them in a hand-written ARTIFACT.md overlay (see docs/authoring/frontmatter-reference.md)\n"
-	if stderr != want {
-		t.Errorf("stderr = %q, want %q", stderr, want)
+	if want := "  tags: \"demo\"\n  when_to_use: |\n    greeting\n---\n"; !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md missing %q:\n%s", want, skill)
 	}
-	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Errorf("refusal must create no directory (stat err=%v)", err)
+	if a := resolveScaffoldedSkill(t, root); a.Sensitivity != "" {
+		t.Errorf("sensitivity = %q, want none", a.Sensitivity)
 	}
 }
 
-// Spec: §4.3.4 — an invalid --sensitivity value is reported by the value
-// check, which runs before the skill refusal.
+// Spec: §4.3.4 — --tags with --type skill writes a quoted metadata.tags
+// value, the splitCSV result joined with ", ".
+func TestScaffold_Skill_WritesTags(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "greet")
+	skill := scaffoldSkillMD(t, target, "--tags", "demo,greeting")
+	if want := "metadata:\n  version: \"0.1.0\"\n  tags: \"demo, greeting\"\n---\n"; !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md missing %q:\n%s", want, skill)
+	}
+	resolveScaffoldedSkill(t, root)
+}
+
+// Spec: §4.3.4, §7.3.1 — the tags encoding holds no line break, so a
+// --tags element that holds one is written as one tag per non-empty part.
+// The value decodes and lints clean instead of being ignored.
+func TestScaffold_Skill_TagsSplitOnLineBreak(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "greet")
+	skill := scaffoldSkillMD(t, target, "--tags", "a\nb, x\r\ny\r, \n")
+	if want := "  tags: \"a, b, x, y\"\n"; !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md missing %q:\n%s", want, skill)
+	}
+	if got := strings.Join(resolveScaffoldedSkill(t, root).Tags, "|"); got != "a|b|x|y" {
+		t.Errorf("tags = %q, want a|b|x|y", got)
+	}
+}
+
+// Spec: §4.3.4 — the metadata fields follow a fixed order whatever order
+// the command line used. An explicitly passed --sensitivity low is written
+// although it equals the flag default, and a --when-to-use entry that
+// holds a line break becomes one block line per part.
+func TestScaffold_Skill_WritesFieldsInFixedOrder(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "greet")
+	skill := scaffoldSkillMD(t, target,
+		"--when-to-use", "greeting\r\nfarewell, ",
+		"--sensitivity", "low",
+		"--tags", "demo")
+	want := "metadata:\n" +
+		"  version: \"0.1.0\"\n" +
+		"  tags: \"demo\"\n" +
+		"  sensitivity: \"low\"\n" +
+		"  when_to_use: |\n" +
+		"    greeting\n" +
+		"    farewell\n" +
+		"---\n"
+	if !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md missing %q:\n%s", want, skill)
+	}
+	if got := strings.Join(resolveScaffoldedSkill(t, root).WhenToUse, "|"); got != "greeting|farewell" {
+		t.Errorf("when_to_use = %q, want greeting|farewell", got)
+	}
+}
+
+// Spec: §4.3.4, §7.3.1 — the YAML reader ends a line in the when_to_use
+// literal block at U+0085, U+2028, and U+2029 as well as at a line feed or
+// a carriage return. A --when-to-use entry that holds any of them is
+// written as one block line per part, so SKILL.md parses and lints clean.
+func TestScaffold_Skill_WhenToUseSplitsOnYAMLLineBreaks(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "greet")
+	skill := scaffoldSkillMD(t, target, "--when-to-use", "a\u2028b, c\u0085d\u2029e")
+	want := "  when_to_use: |\n    a\n    b\n    c\n    d\n    e\n---\n"
+	if !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md missing %q:\n%s", want, skill)
+	}
+	if got := strings.Join(resolveScaffoldedSkill(t, root).WhenToUse, "|"); got != "a|b|c|d|e" {
+		t.Errorf("when_to_use = %q, want a|b|c|d|e", got)
+	}
+}
+
+// Spec: §4.3.4, §7.3.1 — the when_to_use literal block carries each
+// situation unescaped, so a --when-to-use situation that holds a character
+// the YAML reader rejects is refused with exit 2 before any file is
+// written. Every other character is written, and the SKILL.md parses and
+// lints clean. Tags are written as quoted scalars, which escape every such
+// character, so the same characters in --tags are written, while a --tags
+// element that is not valid UTF-8 is refused because its escape would
+// read back as a different tag.
+func TestScaffold_Skill_WhenToUseRefusesYAMLControlCharacters(t *testing.T) {
+	refused := []string{"\x00", "\x01", "\x0b", "\x1f", "\x7f", "\u0080", "\u0084", "\u0086", "\u009f", "\ufffe", "\uffff", "\xff", "\xed\xa0\x80"}
+	written := []string{"\t", " ", "~", "\u00a0", "\ud7ff", "\ue000", "\ufeff", "\ufffd", "\U00010000", "\U0001f600", "\U0010ffff"}
+	for _, c := range refused {
+		target := filepath.Join(t.TempDir(), "personal", "greet")
+		exit, _, stderr := runScaffold([]string{
+			"--type", "skill",
+			"--description", "Greet the user by name.",
+			"--when-to-use", "a" + c + "b",
+			"--yes",
+			target,
+		}, "")
+		if exit != 2 || !strings.Contains(stderr, "--when-to-use situation") {
+			t.Errorf("%q: exit=%d stderr=%q, want exit 2 naming the situation", c, exit, stderr)
+		}
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Errorf("%q: refusal must create no directory (stat err=%v)", c, err)
+		}
+	}
+	for _, c := range written {
+		root := t.TempDir()
+		target := filepath.Join(root, "personal", "greet")
+		skill := scaffoldSkillMD(t, target, "--when-to-use", "a"+c+"b")
+		if want := "  when_to_use: |\n    a" + c + "b\n"; !strings.Contains(skill, want) {
+			t.Errorf("%q: SKILL.md missing %q:\n%s", c, want, skill)
+		}
+		if got := resolveScaffoldedSkill(t, root).WhenToUse; len(got) != 1 || got[0] != "a"+c+"b" {
+			t.Errorf("%q: when_to_use = %q, want one situation", c, got)
+		}
+	}
+	for _, c := range []string{"\xff", "\xed\xa0\x80"} {
+		target := filepath.Join(t.TempDir(), "personal", "greet")
+		exit, _, stderr := runScaffold([]string{
+			"--type", "skill",
+			"--description", "Greet the user by name.",
+			"--tags", "ok,a" + c + "b",
+			"--yes",
+			target,
+		}, "")
+		if exit != 2 || !strings.Contains(stderr, "--tags element") {
+			t.Errorf("tags %q: exit=%d stderr=%q, want exit 2 naming the element", c, exit, stderr)
+		}
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Errorf("tags %q: refusal must create no directory (stat err=%v)", c, err)
+		}
+	}
+	root := t.TempDir()
+	scaffoldSkillMD(t, filepath.Join(root, "personal", "greet"), "--tags", "a\x01b,c\u2028d")
+	if got := strings.Join(resolveScaffoldedSkill(t, root).Tags, "|"); got != "a\x01b|c\u2028d" {
+		t.Errorf("tags = %q, want the control characters kept", got)
+	}
+}
+
+// Spec: §4.3.4 — an invalid --sensitivity value is rejected by the value
+// check for a skill as for every other type, before any file is written.
 func TestScaffold_Skill_BadSensitivityReportsHint(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "greet")
@@ -161,8 +343,8 @@ func TestScaffold_Skill_BadSensitivityReportsHint(t *testing.T) {
 	if exit != 2 {
 		t.Fatalf("exit=%d, want 2", exit)
 	}
-	if !strings.Contains(stderr, "low|medium|high") || strings.Contains(stderr, "overlay") {
-		t.Errorf("stderr must carry the sensitivity hint alone: %s", stderr)
+	if !strings.Contains(stderr, "low|medium|high") {
+		t.Errorf("stderr must carry the sensitivity hint: %s", stderr)
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Errorf("rejection must create no directory (stat err=%v)", err)

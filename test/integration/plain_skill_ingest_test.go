@@ -3,6 +3,8 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -442,6 +444,270 @@ func TestPlainSkillIngest_RemovedArtifactManifestConflicts(t *testing.T) {
 			status, got := e.load(t, "y", "")
 			if status != http.StatusOK || got.Version != "1.0.0" || got.Frontmatter != authored {
 				t.Errorf("latest = %d %q %q, want 200 at 1.0.0 with the authored ARTIFACT.md", status, got.Version, got.Frontmatter)
+			}
+		})
+	}
+}
+
+// psMetadataSkill is the SKILL.md of the plain skill name whose metadata
+// carries version, tags, sensitivity, search visibility, and, when deprecated
+// is set, the deprecation flag, each in its §4.3.4 encoding.
+func psMetadataSkill(name, metaVersion, sensitivity string, deprecated bool) string {
+	meta := "metadata:\n  version: \"" + metaVersion + "\"\n  tags: \"finance, close\"\n" +
+		"  sensitivity: " + sensitivity + "\n  search_visibility: direct-only\n"
+	if deprecated {
+		meta += "  deprecated: \"true\"\n"
+	}
+	return "---\nname: " + name + "\ndescription: " + name + " skill\n" + meta + "---\n\nbody\n"
+}
+
+// Spec: §4.3.4, §4.7 — ingest stores a plain skill's SKILL.md metadata values
+// in the tags, sensitivity, search-visibility, and deprecation columns, keeps
+// the stored manifest empty, and embeds a projection that carries the tags.
+func TestPlainSkillIngest_MetadataFieldsReachColumns(t *testing.T) {
+	t.Parallel()
+	for _, f := range ingestConvergenceStores(t) {
+		t.Run(f.name, func(t *testing.T) {
+			t.Parallel()
+			e := newPSEnv(t, f, "L")
+			var embedded []string
+			res, err := ingest.Ingest(context.Background(), e.st, ingest.Request{
+				TenantID: psTenant, LayerID: "L",
+				Files: psFS("x", psMetadataSkill("x", "1.0.0", "medium", true), ""),
+				Embedder: func(_ context.Context, text string) ([]float32, error) {
+					embedded = append(embedded, text)
+					return []float32{1}, nil
+				},
+				VectorPut: func(context.Context, string, string, string, []float32) error { return nil },
+			})
+			if err != nil {
+				t.Fatalf("Ingest: %v", err)
+			}
+			wantAccepted(t, res, "x", "1.0.0")
+			m := e.row(t, "x", "1.0.0")
+			if !reflect.DeepEqual(m.Tags, []string{"finance", "close"}) || m.Sensitivity != "medium" ||
+				m.SearchVisibility != "direct-only" || !m.Deprecated {
+				t.Errorf("columns = tags %q sensitivity %q search_visibility %q deprecated %v, want the metadata values",
+					m.Tags, m.Sensitivity, m.SearchVisibility, m.Deprecated)
+			}
+			if len(m.Frontmatter) != 0 {
+				t.Errorf("stored Frontmatter = %q, want empty for a plain skill", m.Frontmatter)
+			}
+			if len(embedded) != 1 || !strings.Contains(embedded[0], "finance close") {
+				t.Errorf("embedded texts = %q, want one projection carrying the tags", embedded)
+			}
+		})
+	}
+}
+
+// Spec: §13.2.2, §4.3.4 — the public-mode sensitivity floor reads the
+// resolved value, so a plain skill whose metadata.sensitivity is high is
+// refused with ingest.public_mode_rejects_sensitive and stores no row.
+func TestPlainSkillIngest_PublicModeRefusesMetadataSensitivity(t *testing.T) {
+	t.Parallel()
+	for _, f := range ingestConvergenceStores(t) {
+		t.Run(f.name, func(t *testing.T) {
+			t.Parallel()
+			e := newPSEnv(t, f, "L")
+			res, err := ingest.Ingest(context.Background(), e.st, ingest.Request{
+				TenantID: psTenant, LayerID: "L", RejectAtOrAbove: manifest.SensitivityMedium,
+				Files: psFS("x", psMetadataSkill("x", "1.0.0", "high", false), ""),
+			})
+			if err != nil {
+				t.Fatalf("Ingest: %v", err)
+			}
+			if res.Accepted != 0 || len(res.Rejected) != 1 ||
+				res.Rejected[0].ArtifactID != "x" || res.Rejected[0].Code != "ingest.public_mode_rejects_sensitive" {
+				t.Fatalf("result = %+v, want x rejected with ingest.public_mode_rejects_sensitive", res)
+			}
+			if rows := e.rows(t, "x"); len(rows) != 0 {
+				t.Errorf("stored rows = %+v, want none", rows)
+			}
+		})
+	}
+}
+
+// psListTagsLayer is a layer snapshot holding the valid plain skill good and
+// the plain skill bad, whose metadata.tags is a YAML sequence.
+func psListTagsLayer() fstest.MapFS {
+	fs := psFS("good", psNamedSkill("good", "valid", "1.0.0"), "")
+	fs["bad/SKILL.md"] = &fstest.MapFile{Data: []byte(psListTagsSkill)}
+	return fs
+}
+
+// psListTagsSkill is a plain SKILL.md whose metadata.tags is a YAML sequence,
+// which the map[string]string metadata decoder refuses.
+const psListTagsSkill = "---\nname: bad\ndescription: bad skill\nmetadata:\n  tags: [a, b]\n---\n\nbody\n"
+
+// Spec: §4.3.4 — a sequence under SKILL.md metadata is a parse failure that
+// fails the whole layer ingest: the error wraps ingest.ErrInvalidArtifact and
+// names metadata.tags, and the valid sibling skill stores no row either.
+func TestPlainSkillIngest_ListMetadataValueRefused(t *testing.T) {
+	t.Parallel()
+	for _, f := range ingestConvergenceStores(t) {
+		t.Run(f.name, func(t *testing.T) {
+			t.Parallel()
+			e := newPSEnv(t, f, "L")
+			_, err := ingest.Ingest(context.Background(), e.st, ingest.Request{
+				TenantID: psTenant, LayerID: "L", Files: psListTagsLayer(),
+			})
+			if !errors.Is(err, ingest.ErrInvalidArtifact) || !strings.Contains(err.Error(), "metadata.tags") {
+				t.Fatalf("Ingest err = %v, want an ingest.ErrInvalidArtifact error naming metadata.tags", err)
+			}
+			all, err := e.st.ListManifestsIncludingDeleted(context.Background(), psTenant)
+			if err != nil {
+				t.Fatalf("ListManifestsIncludingDeleted: %v", err)
+			}
+			if len(all) != 0 {
+				t.Errorf("stored rows = %d, want none from the refused ingest", len(all))
+			}
+		})
+	}
+}
+
+// Spec: §7.3.2, §8.1, §4.3.4 — a new version whose SKILL.md
+// metadata.deprecated is "true" flips the skill to deprecated, so ingest fires
+// artifact.deprecated as it does for an ARTIFACT.md deprecated: true.
+func TestPlainSkillIngest_MetadataDeprecatedFiresEvent(t *testing.T) {
+	t.Parallel()
+	for _, f := range ingestConvergenceStores(t) {
+		t.Run(f.name, func(t *testing.T) {
+			t.Parallel()
+			e := newPSEnv(t, f, "L")
+			var events []string
+			emit := func(_ context.Context, _ core.EventScope, eventType string, data map[string]any) {
+				events = append(events, fmt.Sprintf("%s@%v", eventType, data["version"]))
+			}
+			for _, skill := range []string{
+				psMetadataSkill("x", "1.0.0", "low", false),
+				psMetadataSkill("x", "1.1.0", "low", true),
+			} {
+				if _, err := ingest.Ingest(context.Background(), e.st, ingest.Request{
+					TenantID: psTenant, LayerID: "L", Files: psFS("x", skill, ""), PublishEvent: emit,
+				}); err != nil {
+					t.Fatalf("Ingest: %v", err)
+				}
+			}
+			want := []string{"artifact.published@1.0.0", "artifact.published@1.1.0", "artifact.deprecated@1.1.0"}
+			if !reflect.DeepEqual(events, want) {
+				t.Errorf("events = %q, want %q", events, want)
+			}
+		})
+	}
+}
+
+// psEarlierSkill is the SKILL.md of the plain skill name whose metadata
+// declares version v and the extra metadata lines.
+func psEarlierSkill(name, v, extra string) string {
+	return "---\nname: " + name + "\ndescription: " + name + " skill\nmetadata:\n  version: \"" + v + "\"\n" +
+		extra + "---\n\n" + name + " prose\n"
+}
+
+// psEarlierNotes is the SKILL.md of notes at v, whose metadata carries tags
+// and a sensitivity that an earlier release did not resolve.
+func psEarlierNotes(v string) string {
+	return psEarlierSkill("notes", v, "  tags: \"release, notes\"\n  sensitivity: medium\n")
+}
+
+// seedEarlierRow stores a plain-skill row of id@v in layerID as an earlier
+// release stored it: the tags, sensitivity, search-visibility, and
+// deprecation columns are empty, and the content hash covers the bytes with
+// no signature.
+func (e *psEnv) seedEarlierRow(t *testing.T, id, v, layerID, skill string, at time.Time) {
+	t.Helper()
+	e.putRow(t, storetest.Seal(t, store.ManifestRecord{
+		TenantID: psTenant, ArtifactID: id, Version: v, Layer: layerID, Type: "skill",
+		Description: id + " skill", SkillRaw: []byte(skill), IngestedAt: at,
+	}, nil, nil))
+}
+
+// search issues GET /v1/search_artifacts with the empty browse query and, when
+// tags is non-empty, the tags filter, and returns the result descriptors.
+func (e *psEnv) search(t *testing.T, tags string) []server.ArtifactDescriptor {
+	t.Helper()
+	q := url.Values{"query": {""}}
+	if tags != "" {
+		q.Set("tags", tags)
+	}
+	resp, err := http.Get(e.ts.URL + "/v1/search_artifacts?" + q.Encode())
+	if err != nil {
+		t.Fatalf("search tags=%q: %v", tags, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("search tags=%q = %d %s, want 200", tags, resp.StatusCode, raw)
+	}
+	var out server.SearchResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode search: %v (%s)", err, raw)
+	}
+	return out.Results
+}
+
+// psDescriptor returns the descriptor of id in ds.
+func psDescriptor(ds []server.ArtifactDescriptor, id string) (server.ArtifactDescriptor, bool) {
+	for _, d := range ds {
+		if d.ID == id {
+			return d, true
+		}
+	}
+	return server.ArtifactDescriptor{}, false
+}
+
+// Spec: §13.4, §4.3.4, §4.7.4, §4.7.6 — the tags, sensitivity, and
+// deprecation flag of a skill row that an earlier release stored are exempt
+// from the §13.4 rewrite rule. Search and latest resolution read them as
+// stored, while a load admits the row and serves the values its SKILL.md
+// metadata resolves to. An identical re-ingest rewrites no column, and
+// publishing at a new version stores the resolved values. The row of old is
+// in its own layer so the re-ingests of notes leave it in place.
+func TestPlainSkillIngest_EarlierReleaseRowKeepsStoredColumns(t *testing.T) {
+	t.Parallel()
+	for _, f := range ingestConvergenceStores(t) {
+		t.Run(f.name, func(t *testing.T) {
+			t.Parallel()
+			e := newPSEnv(t, f, "L", "M")
+			at := time.Now().UTC().Add(-time.Hour)
+			notes := psEarlierNotes("1.0.0")
+			e.seedEarlierRow(t, "notes", "1.0.0", "L", notes, at)
+			e.seedEarlierRow(t, "old", "1.0.0", "M", psEarlierSkill("old", "1.0.0", ""), at)
+			e.seedEarlierRow(t, "old", "1.1.0", "M", psEarlierSkill("old", "1.1.0", "  deprecated: \"true\"\n"), at.Add(time.Minute))
+
+			if _, ok := psDescriptor(e.search(t, "notes"), "notes"); ok {
+				t.Error("tag filter notes returned notes, want the stored empty tags to govern search")
+			}
+			all := e.search(t, "")
+			for _, id := range []string{"notes", "old"} {
+				d, ok := psDescriptor(all, id)
+				if !ok {
+					t.Fatalf("default search = %+v, want %s listed", all, id)
+				}
+				if len(d.Tags) != 0 || d.Sensitivity != "" {
+					t.Errorf("%s descriptor tags=%v sensitivity=%q, want the stored empty columns", id, d.Tags, d.Sensitivity)
+				}
+			}
+
+			if status, got := e.load(t, "notes", ""); status != http.StatusOK || got.Sensitivity != "medium" {
+				t.Errorf("latest notes = %d sensitivity %q, want 200 with the metadata medium", status, got.Sensitivity)
+			}
+			status, got := e.load(t, "old", "")
+			if status != http.StatusOK || got.Version != "1.1.0" || got.DeprecationWarning == "" {
+				t.Errorf("latest old = %d version %q warning %q, want 200 at 1.1.0 with a deprecation_warning",
+					status, got.Version, got.DeprecationWarning)
+			}
+
+			wantIdempotent(t, e.ingest(t, "L", psFS("notes", notes, "")), "notes", "1.0.0")
+			if m := e.row(t, "notes", "1.0.0"); len(m.Tags) != 0 || m.Sensitivity != "" {
+				t.Errorf("notes@1.0.0 after the identical re-ingest: tags %v sensitivity %q, want the stored empty columns", m.Tags, m.Sensitivity)
+			}
+
+			wantAccepted(t, e.ingest(t, "L", psFS("notes", psEarlierNotes("1.0.1"), "")), "notes", "1.0.1")
+			if m := e.row(t, "notes", "1.0.1"); !reflect.DeepEqual(m.Tags, []string{"release", "notes"}) || m.Sensitivity != "medium" {
+				t.Errorf("notes@1.0.1 columns: tags %v sensitivity %q, want the resolved [release notes] and medium", m.Tags, m.Sensitivity)
+			}
+			if d, ok := psDescriptor(e.search(t, "notes"), "notes"); !ok || d.Version != "1.0.1" {
+				t.Errorf("tag filter notes after the new version = %+v (found %v), want notes at 1.0.1", d, ok)
 			}
 		})
 	}

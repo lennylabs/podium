@@ -116,6 +116,7 @@ func AllRulesWithClient(client *http.Client) []Rule {
 		ruleTypeProviderValidate{},
 		ruleSkillCompliance{},
 		ruleSkillVersionAssigned{},
+		ruleSkillMetadataFields{},
 		ruleSkillReservedVersion{},
 		ruleSkillPodiumOnlyFields{},
 		ruleSkillArtifactFields{},
@@ -351,8 +352,9 @@ func (r ruleNameSyntax) Check(_ context.Context, _ *filesystem.Registry, records
 // authored version. A record whose version is assigned is skipped, because
 // under `podium lint` it carries the registry-reserved 0.0.0-auto.<N> form,
 // which no author wrote. An ARTIFACT.md version in the reserved form still
-// fails here, because manifest.ResolveSkillVersion returns the authored
-// ARTIFACT.md value first and leaves VersionAssigned false.
+// fails here, because manifest.ResolveSkillFields keeps the authored
+// ARTIFACT.md value, so ArtifactRecord.ResolveSkillFields leaves
+// VersionAssigned false.
 //
 // Spec: §4.7.6, §4.3.4
 type ruleVersionSemver struct{}

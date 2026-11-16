@@ -1,12 +1,12 @@
 ---
 title: Your first skill
 nav_order: 1
-description: "Extend the quickstart's greet skill with a sharper description, an ARTIFACT.md overlay, a referenced script, a runtime requirement, and a lint check before commit."
+description: "Extend the quickstart's greet skill with a sharper description, Podium-only fields in an ARTIFACT.md overlay or in SKILL.md metadata, a referenced script, a runtime requirement, and a lint check before commit."
 ---
 
 # Your first skill
 
-This tutorial continues the [quickstart](../getting-started/quickstart) and extends its `greet` skill into a complete artifact. It sharpens the description, adds an `ARTIFACT.md` overlay for Podium-only fields, points the body at the bundled script, declares a runtime requirement, and lints the result. For other artifact types, see [Your first command](your-first-command) and [Your first agent](your-first-agent).
+This tutorial continues the [quickstart](../getting-started/quickstart) and extends its `greet` skill into a complete artifact. It sharpens the description, adds Podium-only fields in an `ARTIFACT.md` overlay, shows the `SKILL.md` `metadata` form of the fields that `metadata` can carry, points the body at the bundled script, declares a runtime requirement, and lints the result. For other artifact types, see [Your first command](your-first-command) and [Your first agent](your-first-agent).
 
 ## Before you start
 
@@ -56,7 +56,7 @@ The version stays `1.0.0`, because a filesystem catalog keeps no ingest history.
 
 ## Step 2: Add Podium-only fields in an ARTIFACT.md overlay
 
-`SKILL.md` stays within the agentskills.io specification, so Podium-only fields such as `when_to_use`, `tags`, and `sensitivity` never go in it. They go in an optional `ARTIFACT.md` beside it, which you write by hand.
+`SKILL.md` stays within the agentskills.io specification, so a Podium-only field never sits at its top level. Fields such as `when_to_use`, `tags`, and `sensitivity` can go under `SKILL.md` `metadata` as strings, or in an optional `ARTIFACT.md` beside `SKILL.md`, which the author writes by hand. The overlay carries every Podium-only field with its YAML type, and it is the only place for fields such as `runtime_requirements` that `metadata` does not carry. This step writes the overlay, and the end of the step shows the `metadata` form.
 
 Create the overlay:
 
@@ -84,6 +84,25 @@ The overlay has these properties:
 - `type: skill` marks the package as a skill. The body holds only the one-line HTML comment pointer, because the agent-facing prose lives in `SKILL.md`.
 - Leave `version` out of the overlay, so the `metadata.version` in `SKILL.md` stays the skill's version. If you add a `version` to the overlay, give it the same value as `metadata.version`, or lint reports an error. [Skill versions](frontmatter-reference#skill-versions) gives the precedence rules.
 - `when_to_use` lists concrete situations in which the skill applies. A registry with an embedding provider includes it in the embedding it computes at ingest. [`when_to_use` and search](frontmatter-reference#when_to_use-and-search) describes where the field counts.
+
+The same three fields can live under `SKILL.md` `metadata` instead, with no `ARTIFACT.md`. Each value is a string: `tags` is comma-separated, and `when_to_use` is a `|` literal block with one situation per line. This `SKILL.md` frontmatter sets the values the overlay above sets:
+
+```markdown
+---
+name: greet
+description: Greet the user by name and tell them today's date in a friendly format. Use when the user opens a session with a greeting or asks who you are.
+license: MIT
+metadata:
+  version: "1.0.0"
+  tags: "demo, hello-world, greeting"
+  sensitivity: low
+  when_to_use: |
+    When the user opens a session with a greeting like 'hi' or 'hello'.
+    When the user asks who you are at session start.
+---
+```
+
+When both files set one of these fields, the `ARTIFACT.md` value takes precedence, and lint reports `lint.skill_artifact_field_mismatch` as an error when the `metadata` value differs from it. [Podium fields in SKILL.md metadata](frontmatter-reference#podium-fields-in-skillmd-metadata) lists the keys, their encodings, and the values lint ignores. The rest of this tutorial keeps the overlay, because Step 4 adds `runtime_requirements`, which only `ARTIFACT.md` carries.
 
 ---
 

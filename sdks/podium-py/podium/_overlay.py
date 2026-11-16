@@ -183,6 +183,212 @@ def _read_metadata_version(raw: str, metadata_indent: int, fields: dict[str, obj
     return child_indent
 
 
+# The SKILL.md metadata.tags readable form. A line reader cannot reproduce
+# YAML, so _metadata_tags reads metadata.tags only from one restricted
+# single-line form, in a frontmatter laid out so that the line reading equals
+# the yaml.v3 decoding Go applies, and returns [] for every other input.
+# test/vectors/skill-metadata-tags.json, generated from
+# manifest.ResolveStoredSkill, pins the form to Go. The frontmatter is
+# delimited as Go's SplitFrontmatter delimits it: the text begins with "---"
+# and a line end, lines split at LF with a CR before an LF removed, and the
+# frontmatter ends at the first later line that begins with "---". A value is
+# in the form when every numbered condition holds:
+#   1. Exactly one frontmatter line begins with "metadata:", and nothing but
+#      white space follows it.
+#   2. The block runs to the next column-0 line that is not a comment. The
+#      child indent is the space indentation of its first line that is neither
+#      blank nor a comment.
+#   3. Exactly one block line at the child indent has the key "tags" (the text
+#      before the first ":", trailing spaces and one pair of quotes removed).
+#   4. That line is the child indent, "tags:", one or more spaces, the value,
+#      and optional trailing spaces, with no tab.
+#   5. The value is plain (_TAGS_PLAIN_RE and not a null word), or double- or
+#      single-quoted printable ASCII with no escape and no inner quote.
+#   6. Every later line is blank up to the next block line at or above the
+#      child indent, and no later block line holds a "*" that starts an alias:
+#      yaml.v3 lets an alias key that resolves to "tags" replace the value
+#      with no error.
+#   7. Splitting the content on "," and trimming spaces leaves no empty
+#      element. The elements, in order, are the tags.
+#   8. The frontmatter holds no CR, U+0085, U+2028, U+2029, or U+FEFF, which
+#      yaml.v3 reads as, or skips at, a line start the line reader cannot see.
+#   9. The first frontmatter line that is neither blank nor a comment begins
+#      at column 0, since yaml.v3 decodes only the first document.
+#  10. No line before the tags line begins with "..." or "%", holds "[" or
+#      "{", or holds a quote at a token start, because each can end the
+#      document or open a scalar that swallows later lines. A key followed by
+#      a quoted value of the condition 5 form is exempt.
+# White space here is the space and the tab only, so no check uses strip() or
+# splitlines(), which also treat characters yaml.v3 does not as white space or
+# as line breaks.
+_TAGS_PLAIN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ,._/-]*")
+_TAGS_DOUBLE_RE = re.compile(r'"([\x20\x21\x23-\x5b\x5d-\x7e]*)"')
+_TAGS_SINGLE_RE = re.compile(r"'([\x20-\x26\x28-\x7e]*)'")
+_TAGS_NULLS = frozenset({"null", "Null", "NULL"})
+# A key and a quoted scalar with no escape and no inner quote, which leaves no
+# quoted scalar open; condition 10 exempts such a line before the tags line.
+_QUOTED_PAIR_LINE_RE = re.compile(
+    r" *[A-Za-z][A-Za-z0-9_-]*: +"
+    r"(\"[\x20\x21\x23-\x5b\x5d-\x7e]*\"|'[\x20-\x26\x28-\x7e]*') *"
+)
+# yaml.v3 reads the first four as line breaks and skips a U+FEFF at the start
+# of a line, so each can start a line the line reader does not see.
+_HIDDEN_BREAK_RE = re.compile("[\r\u0085\u2028\u2029\ufeff]")
+_WHITE = " \t"
+
+
+def _is_blank_line(line: str) -> bool:
+    return all(ch in _WHITE for ch in line)
+
+
+def _indent_of(line: str) -> str:
+    return line[: len(line) - len(line.lstrip(_WHITE))]
+
+
+def _is_comment_line(line: str) -> bool:
+    return line[len(_indent_of(line)) :].startswith("#")
+
+
+def _trim_spaces(s: str) -> str:
+    return s.strip(" ")
+
+
+def _frontmatter_lines(text: str) -> list[str] | None:
+    """Delimit the frontmatter as Go's SplitFrontmatter does.
+
+    The text begins with ``---`` and an LF or a CR LF, and the frontmatter
+    ends at the first later line that begins with ``---``. Lines split at each
+    LF, with a CR directly before the LF removed. Returns ``None`` when there
+    is no frontmatter.
+    """
+    if not (text.startswith("---\n") or text.startswith("---\r\n")):
+        return None
+    parts = text.split("\n")
+    lines = [p[:-1] if i < len(parts) - 1 and p.endswith("\r") else p for i, p in enumerate(parts)]
+    for end in range(1, len(lines)):
+        if lines[end].startswith("---"):
+            return lines[1:end]
+    return None
+
+
+def _line_key(rest: str) -> str | None:
+    """Return the text before the first ``:``, unquoted once, or ``None``."""
+    key, sep, _ = rest.partition(":")
+    if not sep:
+        return None
+    key = key.rstrip(" ")
+    if len(key) >= 2 and key[0] in "\"'" and key[-1] == key[0]:
+        return key[1:-1]
+    return key
+
+
+def _tags_content(line: str, indent: str) -> str | None:
+    """Return the tags line's value content (conditions 4 and 5), or ``None``."""
+    if "\t" in line or not line.startswith(indent + "tags:"):
+        return None
+    rest = line[len(indent) + len("tags:") :]
+    if not rest.startswith(" "):
+        return None
+    value = _trim_spaces(rest)
+    if _TAGS_PLAIN_RE.fullmatch(value):
+        return None if value in _TAGS_NULLS else value
+    quoted = _TAGS_DOUBLE_RE.fullmatch(value) or _TAGS_SINGLE_RE.fullmatch(value)
+    return quoted.group(1) if quoted else None
+
+
+def _blank_until_sibling(lines: list[str], indent_len: int) -> bool:
+    """Report whether no continuation line extends the tags value (condition 6).
+
+    Every line up to the next line indented no deeper than ``indent_len``
+    that is neither blank nor a comment must be blank.
+    """
+    for line in lines:
+        if _is_blank_line(line):
+            continue
+        return not _is_comment_line(line) and len(_indent_of(line)) <= indent_len
+    return True
+
+
+def _holds_alias(line: str) -> bool:
+    """Report whether a line holds a ``*`` that starts an alias (condition 6).
+
+    yaml.v3 compares mapping keys for duplicates only between nodes of one
+    kind, so an alias key resolving to ``tags`` would replace the tags value
+    with no error.
+    """
+    for i, ch in enumerate(line):
+        if ch != "*" or (i > 0 and line[i - 1] not in _WHITE):
+            continue
+        if i + 1 < len(line) and line[i + 1] not in _WHITE:
+            return True
+    return False
+
+
+def _opens_scalar_or_document_end(line: str) -> bool:
+    """Report whether a line before the tags line breaks the reading (condition 10).
+
+    Such a line can end the YAML document, or open a quoted scalar or a flow
+    collection that continues across later lines and holds the metadata or
+    tags line as text.
+    """
+    if line.startswith("...") or line.startswith("%"):
+        return True
+    if _QUOTED_PAIR_LINE_RE.fullmatch(line):
+        return False
+    if "[" in line or "{" in line:
+        return True
+    return any(ch in "\"'" and (i == 0 or line[i - 1] in _WHITE) for i, ch in enumerate(line))
+
+
+def _metadata_tags(skill_md: str) -> list[str]:
+    """Return the tags of a SKILL.md in the readable form, and [] otherwise.
+
+    Spec: §4.3.4, §6.4. The caller passes the file's text with its line ends
+    unchanged. The overlay runs no lint, so a dropped value raises nothing;
+    ``podium lint`` reports it under the Go rules.
+    """
+    fm = _frontmatter_lines(skill_md)
+    if fm is None or any(_HIDDEN_BREAK_RE.search(line) for line in fm):
+        return []
+    first = next((line for line in fm if not _is_blank_line(line) and not _is_comment_line(line)), None)
+    if first is None or first[0] in _WHITE:
+        return []
+    meta_at = [i for i, line in enumerate(fm) if line.startswith("metadata:")]
+    if len(meta_at) != 1 or not _is_blank_line(fm[meta_at[0]][len("metadata:") :]):
+        return []
+    start = meta_at[0] + 1
+    stop = start
+    while stop < len(fm) and not (fm[stop] and fm[stop][0] not in _WHITE and fm[stop][0] != "#"):
+        stop += 1
+    child = next(
+        (line for line in fm[start:stop] if not _is_blank_line(line) and not _is_comment_line(line)),
+        None,
+    )
+    if child is None:
+        return []
+    indent = _indent_of(child)
+    if indent.strip(" "):
+        return []
+    tags_at = [
+        i
+        for i in range(start, stop)
+        if _indent_of(fm[i]) == indent and _line_key(fm[i][len(indent) :]) == "tags"
+    ]
+    if len(tags_at) != 1:
+        return []
+    at = tags_at[0]
+    content = _tags_content(fm[at], indent)
+    if content is None:
+        return []
+    after = fm[at + 1 : stop]
+    if not _blank_until_sibling(after, len(indent)) or any(_holds_alias(line) for line in after):
+        return []
+    if any(_opens_scalar_or_document_end(line) for line in fm[:at]):
+        return []
+    tags = [_trim_spaces(t) for t in content.split(",")]
+    return [] if "" in tags else tags
+
+
 def _parse_domain(text: str) -> "OverlayDomain | None":
     """Parse one DOMAIN.md document into an OverlayDomain (§4.5.4).
 
@@ -431,12 +637,18 @@ class LocalOverlay:
     def _read_plain_skill(self, dirpath: str, artifact_id: str) -> OverlayArtifact | None:
         """Load a package whose root holds SKILL.md and no ARTIFACT.md.
 
-        Spec: §4.3.4, §6.4. The description, the search tokens, and the body
-        come from SKILL.md, and the frontmatter is the synthesized document,
-        which is never parsed for a field.
+        Spec: §4.3.4, §6.4. The description, the search tokens, the body,
+        and the tags come from SKILL.md, the tags from a ``metadata.tags``
+        value in the readable form, and the frontmatter is the synthesized
+        document, which is never parsed for a field. The file is read with
+        ``newline=""`` so ``skill_raw`` keeps its line ends. Universal-newline
+        mode would turn a lone CR into an LF, which hides from
+        ``_metadata_tags`` the CR that puts the frontmatter outside the
+        readable form, and the overlay would materialize SKILL.md with bytes
+        the file does not hold.
         """
         try:
-            with open(os.path.join(dirpath, "SKILL.md"), encoding="utf-8") as fh:
+            with open(os.path.join(dirpath, "SKILL.md"), encoding="utf-8", newline="") as fh:
                 skill_raw = fh.read()
         except OSError:
             return None
@@ -448,7 +660,7 @@ class LocalOverlay:
             "type": "skill",
             "version": version,
             "description": skill_fields.get("description", ""),
-            "tags": [],
+            "tags": _metadata_tags(skill_raw),
         }
         resources = _collect_resources(dirpath, {"SKILL.md"})
         frontmatter = _skill_document.synthesized_skill_document(version)

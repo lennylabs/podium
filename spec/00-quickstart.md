@@ -23,7 +23,7 @@ item, flag variances above the threshold defined in your team's policy doc.
 Output a markdown table sorted by absolute variance.
 ```
 
-`metadata.version` sets the version. An optional `ARTIFACT.md` beside `SKILL.md` carries Podium-only fields such as `when_to_use`, `tags`, and `sensitivity` (§4.3.4).
+`metadata.version` sets the version. `metadata` can also carry Podium fields such as `when_to_use`, `tags`, and `sensitivity` in the string encodings that §4.3.4 defines. An optional `ARTIFACT.md` beside `SKILL.md` can carry any Podium-only field, and it is the only place for the fields that §4.3.4 keeps out of `metadata`.
 
 Ingest:
 

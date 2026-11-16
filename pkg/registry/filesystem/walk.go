@@ -37,17 +37,26 @@ type ArtifactRecord struct {
 	VersionAssigned bool
 }
 
-// ResolveSkillVersion sets a skill record's version by the §4.3.4
-// precedence, the ARTIFACT.md version and then a major.minor.patch SKILL.md
-// metadata.version, and sets VersionAssigned when neither declares one. A
-// record of any other type is unchanged.
+// ResolveSkillFields resolves a skill record's fields by the §4.3.4
+// precedence through manifest.ResolveSkillFields: the version from the
+// ARTIFACT.md version and then a major.minor.patch SKILL.md metadata.version,
+// and each metadata-eligible field from SKILL.md metadata when ARTIFACT.md
+// does not state its key. It sets VersionAssigned when neither file declares a
+// version. A record of any other type is unchanged.
+//
+// After this call r.Artifact holds the §4.3.4 resolved values; the authored
+// ARTIFACT.md values remain only in r.AuthoredBytes.
 //
 // Spec: §4.3.4
-func (r *ArtifactRecord) ResolveSkillVersion() {
+func (r *ArtifactRecord) ResolveSkillFields() {
 	if r.Artifact == nil || r.Artifact.Type != manifest.TypeSkill {
 		return
 	}
-	r.Artifact.Version = manifest.ResolveSkillVersion(r.Artifact, r.Skill)
+	// The error is unreachable: every caller has already parsed
+	// AuthoredBytes with manifest.ParseArtifact, which decodes the same
+	// frontmatter, and a plain skill's nil AuthoredBytes states nothing.
+	stated, _ := manifest.StatedKeys(r.AuthoredBytes)
+	manifest.ResolveSkillFields(r.Artifact, stated, r.Skill)
 	r.VersionAssigned = r.Artifact.Version == ""
 }
 
@@ -371,7 +380,7 @@ func loadArtifactRecord(layer Layer, artifactPath string) (ArtifactRecord, error
 	if err := captureResources(&rec, layer.Path, dir); err != nil {
 		return ArtifactRecord{}, err
 	}
-	rec.ResolveSkillVersion()
+	rec.ResolveSkillFields()
 	assignSourceSkillFields(&rec)
 	return rec, nil
 }
@@ -406,7 +415,7 @@ func loadPlainSkillRecord(layer Layer, dir string) (ArtifactRecord, error) {
 	if err := captureResources(&rec, layer.Path, dir); err != nil {
 		return ArtifactRecord{}, err
 	}
-	rec.ResolveSkillVersion()
+	rec.ResolveSkillFields()
 	assignSourceSkillFields(&rec)
 	return rec, nil
 }

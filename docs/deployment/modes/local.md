@@ -145,7 +145,7 @@ Edit artifacts in the registry directory, then sync the consuming project:
 ```bash
 # Create or edit a skill artifact in the registry
 $EDITOR ~/podium-artifacts/team-shared/finance/close-reporting/run-variance-analysis/SKILL.md
-# Edit the optional ARTIFACT.md overlay when the skill carries Podium-only fields
+# Edit the optional ARTIFACT.md overlay for Podium-only fields kept outside SKILL.md metadata
 $EDITOR ~/podium-artifacts/team-shared/finance/close-reporting/run-variance-analysis/ARTIFACT.md
 
 # In the consuming project

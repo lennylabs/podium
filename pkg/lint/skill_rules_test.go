@@ -2,6 +2,7 @@ package lint
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -362,7 +363,9 @@ func TestLint_SkillSynthesizedDocumentLintsClean(t *testing.T) {
 }
 
 // Spec: §4.3.4 — "The diagnostic recommends `metadata.version` for a
-// version and the `ARTIFACT.md` overlay for every other field."
+// version, the `metadata` key of the same name for a field that **Podium
+// fields in `metadata`** lists, and the `ARTIFACT.md` overlay for every other
+// field."
 func TestLint_SkillPodiumOnlyVersionRecommendsMetadataVersion(t *testing.T) {
 	t.Parallel()
 	reg, records := openFixture(t, skillTree(
@@ -379,14 +382,14 @@ func TestLint_SkillPodiumOnlyVersionRecommendsMetadataVersion(t *testing.T) {
 		case strings.Contains(d.Message, `"version"`):
 			sawVersion = strings.Contains(d.Message, "metadata.version")
 		case strings.Contains(d.Message, `"tags"`):
-			sawTags = strings.Contains(d.Message, "ARTIFACT.md")
+			sawTags = strings.Contains(d.Message, "metadata.tags")
 		}
 	}
 	if !sawVersion {
 		t.Errorf("expected the version diagnostic to recommend metadata.version: %v", diags)
 	}
 	if !sawTags {
-		t.Errorf("expected the tags diagnostic to recommend ARTIFACT.md: %v", diags)
+		t.Errorf("expected the tags diagnostic to recommend metadata.tags: %v", diags)
 	}
 }
 
@@ -409,5 +412,214 @@ func TestLint_SkillMDExtendsKeyIsNotPodiumOnly(t *testing.T) {
 				t.Errorf("SKILL.md extends drew %d lint.skill_podium_only_field diagnostics: %v", n, diags)
 			}
 		})
+	}
+}
+
+// messagesFor returns the messages of the diagnostics carrying code at sev.
+func messagesFor(diags []Diagnostic, code string, sev Severity) []string {
+	var out []string
+	for _, d := range diags {
+		if d.Code == code && d.Severity == sev {
+			out = append(out, d.Message)
+		}
+	}
+	return out
+}
+
+// Spec: §4.3.4 — "The diagnostic recommends ... the `metadata` key of the
+// same name for a field that **Podium fields in `metadata`** lists, and the
+// `ARTIFACT.md` overlay for every other field."
+func TestLint_SkillPodiumOnlyFieldNamesMetadataKey(t *testing.T) {
+	t.Parallel()
+	reg, records := openFixture(t, skillTree(
+		"type: skill\nversion: 1.0.0\n",
+		"name: hello\ndescription: Greet the user.\ntags: demo\nsandbox_profile: read-only-fs\n",
+	)...)
+	msgs := messagesFor((&Linter{}).Lint(context.Background(), reg, records), "lint.skill_podium_only_field", SeverityError)
+	want := []string{
+		`SKILL.md contains Podium-only field "tags" at the top level; set metadata.tags in SKILL.md or move it to ARTIFACT.md`,
+		`SKILL.md contains Podium-only field "sandbox_profile"; move it to ARTIFACT.md`,
+	}
+	for _, msg := range want {
+		if !slices.Contains(msgs, msg) {
+			t.Errorf("want message %q, got %q", msg, msgs)
+		}
+	}
+	if len(msgs) != len(want) {
+		t.Errorf("want %d diagnostics, got %d: %q", len(want), len(msgs), msgs)
+	}
+}
+
+// Spec: §4.3.4 — "A `SKILL.md` `metadata` value for a key that **Podium
+// fields in `metadata`** lists and that does not follow its encoding is
+// ignored (warning that names the key, the value, and the encoding)." The
+// warning carries no suppression, so a lint_suppress entry does not silence
+// it.
+func TestLint_SkillMetadataFieldIgnoredWarns(t *testing.T) {
+	t.Parallel()
+	trees := map[string][]testharness.WriteTreeOption{
+		"plain": plainSkillTree(
+			"name: hello\ndescription: Greet the user.\nmetadata:\n  version: \"1.0.0\"\n  sensitivity: secret\n",
+		),
+		"suppressed": skillTree(
+			"type: skill\nversion: 1.0.0\nlint_suppress:\n  - lint.skill_metadata_field_ignored\n",
+			"name: hello\ndescription: Greet the user.\nmetadata:\n  sensitivity: secret\n",
+		),
+	}
+	for name, tree := range trees {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			reg, records := openFixture(t, tree...)
+			diags := (&Linter{}).Lint(context.Background(), reg, records)
+			got := messagesFor(diags, "lint.skill_metadata_field_ignored", SeverityWarning)
+			want := `metadata.sensitivity "secret" is ignored: the value must be low, medium, or high`
+			if len(got) != 1 || got[0] != want {
+				t.Errorf("want one warning %q, got %q", want, got)
+			}
+			if hasAnySeverity(diags, SeverityError) {
+				t.Errorf("an ignored metadata value must not error: %v", diags)
+			}
+			if records[0].Artifact.Sensitivity != "" {
+				t.Errorf("ignored value reached the artifact: sensitivity %q", records[0].Artifact.Sensitivity)
+			}
+		})
+	}
+}
+
+// Spec: §4.3.4 — "When `ARTIFACT.md` states a key that **Podium fields in
+// `metadata`** lists and `SKILL.md` `metadata` carries a value for that key
+// that follows its encoding, the two values are equal (error on mismatch).
+// `tags` and `when_to_use` compare as ordered lists." Before linting, each
+// case overwrites the record's artifact with the values resolved as if
+// ARTIFACT.md stated nothing, so a check that compared metadata with
+// rec.Artifact instead of the authored ARTIFACT.md would report no mismatch.
+func TestLint_SkillMetadataMismatch(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		artifactFM string
+		metadata   string
+		want       string
+	}{
+		{
+			name:       "explicit deprecated false",
+			artifactFM: "deprecated: false\n",
+			metadata:   "  deprecated: \"true\"\n",
+			want:       "ARTIFACT.md deprecated false does not match SKILL.md metadata.deprecated true",
+		},
+		{
+			name:       "explicit empty sensitivity",
+			artifactFM: "sensitivity: \"\"\n",
+			metadata:   "  sensitivity: medium\n",
+			want:       "ARTIFACT.md sensitivity  does not match SKILL.md metadata.sensitivity medium",
+		},
+		{
+			name:       "explicit empty tags",
+			artifactFM: "tags: []\n",
+			metadata:   "  tags: \"a\"\n",
+			want:       "ARTIFACT.md tags [] does not match SKILL.md metadata.tags [a]",
+		},
+		{
+			name:       "different sensitivity",
+			artifactFM: "sensitivity: high\n",
+			metadata:   "  sensitivity: low\n",
+			want:       "ARTIFACT.md sensitivity high does not match SKILL.md metadata.sensitivity low",
+		},
+		{
+			name:       "tags in another order",
+			artifactFM: "tags: [b, a]\n",
+			metadata:   "  tags: \"a, b\"\n",
+			want:       "ARTIFACT.md tags [b a] does not match SKILL.md metadata.tags [a b]",
+		},
+		{
+			name:       "different when_to_use",
+			artifactFM: "when_to_use:\n  - After close\n",
+			metadata:   "  when_to_use: |\n    After close\n    On variance\n",
+			want:       "ARTIFACT.md when_to_use [After close] does not match SKILL.md metadata.when_to_use [After close On variance]",
+		},
+		{
+			name:       "different search_visibility",
+			artifactFM: "search_visibility: indexed\n",
+			metadata:   "  search_visibility: direct-only\n",
+			want:       "ARTIFACT.md search_visibility indexed does not match SKILL.md metadata.search_visibility direct-only",
+		},
+		{
+			name:       "different replaced_by",
+			artifactFM: "replaced_by: greetings/hi\n",
+			metadata:   "  replaced_by: greetings/hey\n",
+			want:       "ARTIFACT.md replaced_by greetings/hi does not match SKILL.md metadata.replaced_by greetings/hey",
+		},
+		{
+			name:       "different release_notes",
+			artifactFM: "release_notes: First.\n",
+			metadata:   "  release_notes: Second.\n",
+			want:       "ARTIFACT.md release_notes First. does not match SKILL.md metadata.release_notes Second.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			reg, records := openFixture(t, skillTree(
+				"type: skill\nversion: 1.0.0\n"+tc.artifactFM,
+				"name: hello\ndescription: Greet the user.\nmetadata:\n"+tc.metadata,
+			)...)
+			manifest.ResolveSkillFields(records[0].Artifact, nil, records[0].Skill)
+			diags := (&Linter{}).Lint(context.Background(), reg, records)
+			got := messagesFor(diags, "lint.skill_artifact_field_mismatch", SeverityError)
+			if len(got) != 1 || got[0] != tc.want {
+				t.Errorf("want one mismatch %q, got %q", tc.want, got)
+			}
+		})
+	}
+}
+
+// Spec: §4.3.4 — the metadata mismatch check errors only on a stated
+// ARTIFACT.md key beside a metadata value that decodes to a different value.
+// Equal values, a metadata value that does not follow its encoding, a key
+// ARTIFACT.md does not state, and a plain skill draw no mismatch.
+func TestLint_SkillMetadataMismatchClean(t *testing.T) {
+	t.Parallel()
+	trees := map[string][]testharness.WriteTreeOption{
+		"equal values": skillTree(
+			"type: skill\nversion: 1.0.0\ntags: [a, b]\ndeprecated: true\nsensitivity: low\nwhen_to_use:\n  - After close\n",
+			"name: hello\ndescription: Greet the user.\nmetadata:\n  tags: \"a, b\"\n  deprecated: \"true\"\n  sensitivity: low\n  when_to_use: After close\n",
+		),
+		"invalid metadata value": skillTree(
+			"type: skill\nversion: 1.0.0\nsensitivity: high\n",
+			"name: hello\ndescription: Greet the user.\nmetadata:\n  sensitivity: secret\n",
+		),
+		"key not stated": skillTree(
+			"type: skill\nversion: 1.0.0\n",
+			"name: hello\ndescription: Greet the user.\nmetadata:\n  sensitivity: high\n",
+		),
+		"plain skill": plainSkillTree(
+			"name: hello\ndescription: Greet the user.\nmetadata:\n  version: \"1.0.0\"\n  deprecated: \"true\"\n  tags: \"a\"\n",
+		),
+	}
+	for name, tree := range trees {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			reg, records := openFixture(t, tree...)
+			diags := (&Linter{}).Lint(context.Background(), reg, records)
+			if hasCode(diags, "lint.skill_artifact_field_mismatch") {
+				t.Errorf("unexpected mismatch: %v", diags)
+			}
+		})
+	}
+}
+
+// Spec: §4.3.4 — the equality check compares lists element by element, so a
+// list never equals a scalar and a nil list equals an empty one, and a key
+// outside the metadata-eligible set has no value.
+func TestSkillMetadataValuesEqual(t *testing.T) {
+	t.Parallel()
+	if !skillMetadataValuesEqual([]string(nil), []string{}) {
+		t.Error("a nil list must equal an empty list")
+	}
+	if skillMetadataValuesEqual([]string{"a"}, "a") {
+		t.Error("a list must not equal a string")
+	}
+	if got := skillMetadataFieldValue(&manifest.Artifact{}, "sandbox_profile"); got != nil {
+		t.Errorf("sandbox_profile value = %v, want nil", got)
 	}
 }

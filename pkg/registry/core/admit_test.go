@@ -490,7 +490,7 @@ var admDispositions = map[string]string{
 	"ManifestRecord.Name":             "search-only",
 	"ManifestRecord.Description":      "search-only; derived for a plain-skill row",
 	"ManifestRecord.WhenToUse":        "search-only",
-	"ManifestRecord.Tags":             "search-only; derived for a plain-skill row",
+	"ManifestRecord.Tags":             "search-only; derived from SKILL.md metadata for a plain-skill row",
 	"ManifestRecord.SearchVisibility": "search-only",
 	"ResourceRef.ContentType":         "served as stored",
 }
@@ -737,6 +737,128 @@ func TestAdmit_PlainSkillRowServesItsAdmittedSkill(t *testing.T) {
 	ev := f.events.ofType("artifact.loaded")
 	if len(ev) != 1 || len(ev[0].RedactKeys) != 0 {
 		t.Errorf("read event = %+v, want no audit_redact keys", ev)
+	}
+}
+
+// admPlainSkillMetadataMD is the SKILL.md of a plain skill whose metadata
+// carries Podium fields in their §4.3.4 encodings. Every value differs from
+// the one admTamperedPlainSkill injects into the matching column, except the
+// deprecation flag, which the replacement and the warning tell apart.
+const admPlainSkillMetadataMD = "---\nname: plain\ndescription: The admitted description.\nmetadata:\n" +
+	"  version: \"1.0.0\"\n  sensitivity: medium\n  deprecated: \"true\"\n" +
+	"  replaced_by: ops/successor\n  tags: \"release, notes\"\n---\n\nAdmitted skill prose.\n"
+
+// Spec: §4.3.4, §13.4 — a plain-skill row's tags, sensitivity, deprecation
+// flag, and replacement are the values §4.3.4 resolves from its admitted
+// SKILL.md metadata, whatever the stored columns say, and its served
+// ARTIFACT.md stays the synthesized document of the version alone.
+func TestAdmit_PlainSkillRowServesItsMetadataFields(t *testing.T) {
+	t.Parallel()
+	f := newAdmFixture(t)
+	rec := admTamperedPlainSkill(t, "ops/plain", admPlainSkillMetadataMD)
+	f.put(t, rec)
+	reg := f.registry(nil)
+	res, err := admLoadVersion(reg, "ops/plain", "1.0.0")
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	if res.Type != "skill" || res.ManifestBody != "Admitted skill prose.\n" {
+		t.Errorf("type=%q body=%q, want skill and the SKILL.md body", res.Type, res.ManifestBody)
+	}
+	if res.Sensitivity != "medium" || !res.Deprecated || res.ReplacedBy != "ops/successor" {
+		t.Errorf("sensitivity=%q deprecated=%v replaced_by=%q, want the metadata medium, true, and ops/successor",
+			res.Sensitivity, res.Deprecated, res.ReplacedBy)
+	}
+	if !strings.Contains(res.DeprecationWarning, "ops/successor") {
+		t.Errorf("deprecation warning = %q, want it to name the metadata replacement", res.DeprecationWarning)
+	}
+	want, err := manifest.SynthesizedSkillDocument("1.0.0")
+	if err != nil {
+		t.Fatalf("SynthesizedSkillDocument: %v", err)
+	}
+	if !bytes.Equal(res.Frontmatter, want) {
+		t.Errorf("frontmatter = %q, want the synthesized %q", res.Frontmatter, want)
+	}
+	if ev := f.events.ofType("artifact.loaded"); len(ev) != 1 || len(ev[0].RedactKeys) != 0 {
+		t.Errorf("read event = %+v, want no audit_redact keys", ev)
+	}
+	tags, err := core.AdmittedTags(context.Background(), reg, rec)
+	if err != nil {
+		t.Fatalf("AdmittedTags: %v", err)
+	}
+	if !reflect.DeepEqual(tags, []string{"release", "notes"}) {
+		t.Errorf("admitted tags = %v, want the metadata [release notes] in place of the injected column", tags)
+	}
+}
+
+// Spec: §4.3.4, §13.4 — a field the SKILL.md metadata of a plain skill does
+// not state resolves empty. Admission never falls back to a stored column for
+// it, so the injected sensitivity, deprecation, and replacement serve empty.
+func TestAdmit_PlainSkillRowWithTagsOnlyServesEmptyFields(t *testing.T) {
+	t.Parallel()
+	f := newAdmFixture(t)
+	skill := "---\nname: plain\ndescription: The admitted description.\nmetadata:\n  tags: \"one, two\"\n---\n\nAdmitted skill prose.\n"
+	rec := admTamperedPlainSkill(t, "ops/tags", skill)
+	f.put(t, rec)
+	reg := f.registry(nil)
+	res, err := admLoadVersion(reg, "ops/tags", "1.0.0")
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	if res.Sensitivity != "" || res.Deprecated || res.ReplacedBy != "" || res.DeprecationWarning != "" {
+		t.Errorf("sensitivity=%q deprecated=%v replaced_by=%q warning=%q, want empty values",
+			res.Sensitivity, res.Deprecated, res.ReplacedBy, res.DeprecationWarning)
+	}
+	tags, err := core.AdmittedTags(context.Background(), reg, rec)
+	if err != nil {
+		t.Fatalf("AdmittedTags: %v", err)
+	}
+	if !reflect.DeepEqual(tags, []string{"one", "two"}) {
+		t.Errorf("admitted tags = %v, want the metadata [one two]", tags)
+	}
+}
+
+// admBothFilesSkill is a sealed skill row with an ARTIFACT.md and a SKILL.md
+// whose metadata states sensitivity high. The stored sensitivity column is
+// set after sealing, as a metadata-store writer would set it, because the
+// content hash covers the bytes alone.
+func admBothFilesSkill(t *testing.T, id, artifactExtra, column string) store.ManifestRecord {
+	t.Helper()
+	rec := storetest.Seal(t, store.ManifestRecord{
+		TenantID: admTenant, ArtifactID: id, Version: "1.0.0", Layer: "L", Type: "skill",
+		Frontmatter: []byte("---\ntype: skill\nversion: 1.0.0\n" + artifactExtra + "---\n"),
+		SkillRaw:    []byte("---\nname: both\ndescription: Both files.\nmetadata:\n  sensitivity: high\n---\n\nBoth-files prose.\n"),
+	}, nil, nil)
+	rec.Sensitivity = column
+	return rec
+}
+
+// Spec: §4.3.4, §13.4 — admission resolves a both-files skill row by key
+// presence in its admitted ARTIFACT.md: a key the manifest omits takes the
+// SKILL.md metadata value, and a key it states keeps the stated value.
+func TestAdmit_BothFilesSkillRowResolvesByKeyPresence(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, extra, column, want string
+	}{
+		{name: "ARTIFACT.md omits sensitivity", column: "low", want: "high"},
+		{name: "ARTIFACT.md states sensitivity", extra: "sensitivity: low\n", column: "high", want: "low"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newAdmFixture(t)
+			f.put(t, admBothFilesSkill(t, "ops/both", tc.extra, tc.column))
+			res, err := admLoadVersion(f.registry(nil), "ops/both", "1.0.0")
+			if err != nil {
+				t.Fatalf("LoadArtifact: %v", err)
+			}
+			if res.Sensitivity != tc.want {
+				t.Errorf("sensitivity = %q, want %q (stored column %q)", res.Sensitivity, tc.want, tc.column)
+			}
+			if res.Type != "skill" || res.ManifestBody != "Both-files prose.\n" {
+				t.Errorf("type=%q body=%q, want skill and the SKILL.md body", res.Type, res.ManifestBody)
+			}
+		})
 	}
 }
 

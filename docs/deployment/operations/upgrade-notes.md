@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.7.0 layer credential columns, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.7.0 layer credential columns and skill metadata fields in stored rows, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -87,6 +87,55 @@ An update does not change `repo`, so a layer that was only updated under 0.5.2 n
 - A declaration that sets neither `username` nor `token` is written as declared. A credential in the userinfo of `source.git.repo`, which is the form 0.6.0 and earlier read, keeps working. Each start logs a line that names the layer and asks for the credential to move to the two keys.
 
 [Private repositories](../content/layer-sources#private-repositories) describes how to set, rotate, and remove a credential.
+
+### Skill metadata fields in stored rows
+
+0.7.0 reads `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, and `release_notes` from a skill's `SKILL.md` `metadata`, which earlier releases ignored. [Podium fields in SKILL.md metadata](../../authoring/frontmatter-reference#podium-fields-in-skillmd-metadata) gives the encodings and the precedence of `ARTIFACT.md`. The notes below cover a skill row stored before the upgrade whose `SKILL.md` `metadata` already holds one of these keys.
+
+#### What a load serves
+
+A load from 0.7.0 resolves the fields from the row's stored bytes. Such a row changes its served sensitivity, deprecation, replacement, and delivery_hash at its first load from 0.7.0. Its content hash and signature do not change.
+
+#### What search reads
+
+0.7.0 does not recompute stored rows. Such a row keeps the tags, sensitivity, search visibility, and deprecation flag that the earlier release stored, so search and load can disagree for it:
+
+- A tag filter on a `metadata` tag misses the row.
+- Search results report the stored `tags` and `sensitivity`.
+- A `direct-only` value does not hide the row from search.
+- A `metadata` deprecation neither removes the row from default search nor stops `latest` from resolving to it, while its load carries the `deprecation_warning`.
+- The stored deprecation flag stays unset when only `metadata` deprecates the row, so the 90-day retention window for deprecated versions does not start for that version.
+- Semantic search ranks the row by the vector that the earlier release built from the stored tags.
+
+When a later version of such a skill sets `deprecated`, the registry emits `artifact.deprecated` for it, even when the earlier version's `metadata` already carried `deprecated: "true"`, because the earlier row's stored flag is unset.
+
+#### Publishing an affected skill at a new version
+
+Re-ingesting the same bytes does not change the row, and `podium admin reembed` writes no column. Publish each affected skill at a new version, which stores the resolved values. The field to raise depends on the file layout:
+
+- For a skill whose `ARTIFACT.md` declares `version`, raise that `version`. When `SKILL.md` also carries a `major.minor.patch` `metadata.version`, set it to the same value, because the `ARTIFACT.md` value is the version and lint refuses a mismatch.
+- For a skill whose `ARTIFACT.md` declares no `version` and whose `metadata.version` is a `major.minor.patch` value, raise `metadata.version`.
+- For a skill that declares no usable version, change its content, and the registry assigns the next version.
+
+#### Emptying the `podium-mcp` content cache
+
+A `podium-mcp` that cached such a skill before the upgrade keeps reporting the cached sensitivity and delivery record until its cache is emptied, because a revalidation confirms the unchanged content hash. After every registry replica runs 0.7.0, and again after a rollback, stop each `podium-mcp` and run `podium cache prune --days 0` on its cache directory before restarting it:
+
+```bash
+podium cache prune --dir ~/.podium/cache --days 0
+```
+
+#### Public mode
+
+A public-mode registry refuses a new ingest that carries `metadata.sensitivity` at or above its floor and keeps serving rows that are already stored. A load from 0.7.0 serves a row at its `metadata.sensitivity`, even when that value is `medium` or `high`, when 0.6.0 stored the row while public mode was enabled or when a 0.6.0 replica stores it during the roll or after a rollback.
+
+#### Rolling upgrade and rollback
+
+The rolling upgrade from 0.6.0 and the rollback to 0.6.0 follow [Rollback floor for the layer credential columns](#rollback-floor-for-the-layer-credential-columns), and the store needs no backup restore for this change.
+
+- A row that a 0.6.0 replica stores during the roll is treated as any row an earlier release stored.
+- A load that a 0.6.0 replica serves during the roll ignores `metadata`. Until the last 0.6.0 replica stops, the sensitivity, deprecation, and replacement that a load serves for such a skill depend on the replica that answers.
+- During the roll and after a rollback to 0.6.0, a row that 0.7.0 stored keeps the tags, sensitivity, search visibility, and deprecation flag that 0.7.0 resolved from `metadata`. 0.6.0 search reports and filters on those values, while a 0.6.0 load ignores `metadata`, so 0.6.0 search can report a sensitivity or a deprecation that a 0.6.0 load of the same row does not serve.
 
 ## 0.6.0: `extends:` removal
 

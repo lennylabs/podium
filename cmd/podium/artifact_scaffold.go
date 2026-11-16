@@ -4,8 +4,9 @@
 // becomes the artifact name; preceding components form the §4.2
 // domain hierarchy) and the artifact type (per spec §4.3); the
 // scaffolder produces lint-clean starting files. A skill gets a
-// SKILL.md alone, carrying the Agent Skills fields and the version
-// under metadata (§4.3.4); every other type gets an ARTIFACT.md with
+// SKILL.md alone, carrying the Agent Skills fields and, under metadata,
+// the version and any tags, sensitivity, and when_to_use the caller
+// passed (§4.3.4); every other type gets an ARTIFACT.md with
 // the universal frontmatter populated.
 package main
 
@@ -19,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // firstClassTypes mirrors spec §4.3's enum. Extension types are
@@ -37,16 +39,6 @@ var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // validRuleModes mirrors pkg/manifest.RuleMode values per §4.3.
 var validRuleModes = []string{"always", "glob", "auto", "explicit"}
 
-// skillRefusedFlags names the flags that set Podium-only fields, in
-// flag-definition order. §4.3.4 keeps those fields out of SKILL.md
-// and states that no Podium tool generates a skill's ARTIFACT.md, so
-// --type skill refuses them. The refusal walks this list rather than
-// the flag.FlagSet, because fs.Visit reports flags in lexicographical
-// order and the message names them in definition order.
-//
-// Spec: §4.3.4
-var skillRefusedFlags = []string{"tags", "sensitivity", "when-to-use"}
-
 type scaffoldOpts struct {
 	// Positional and identifying.
 	path string // destination directory; last component is the artifact name
@@ -59,6 +51,11 @@ type scaffoldOpts struct {
 	license     string
 	whenToUse   string
 	version     string
+
+	// sensitivitySet records whether the caller passed --sensitivity. A
+	// skill carries a sensitivity only when it was passed, because the
+	// flag's low default applies to the other types alone.
+	sensitivitySet bool
 
 	// Type-specific.
 	inputSchema  string
@@ -88,10 +85,10 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 	opts := &scaffoldOpts{}
 	fs.StringVar(&opts.typ, "type", "", "artifact type ("+strings.Join(firstClassTypes, "|")+"); required")
 	fs.StringVar(&opts.description, "description", "", "one-line description (required)")
-	fs.StringVar(&opts.tags, "tags", "", "comma-separated tags; not accepted with --type skill")
-	fs.StringVar(&opts.sensitivity, "sensitivity", "low", "sensitivity (low|medium|high); not accepted with --type skill")
+	fs.StringVar(&opts.tags, "tags", "", "comma-separated tags; a skill gets them as SKILL.md metadata.tags")
+	fs.StringVar(&opts.sensitivity, "sensitivity", "low", "sensitivity (low|medium|high); a skill gets it as SKILL.md metadata.sensitivity, only when passed")
 	fs.StringVar(&opts.license, "license", "", "SPDX license identifier")
-	fs.StringVar(&opts.whenToUse, "when-to-use", "", "comma-separated when_to_use entries; not accepted with --type skill")
+	fs.StringVar(&opts.whenToUse, "when-to-use", "", "comma-separated when_to_use entries; a skill gets them as SKILL.md metadata.when_to_use, one per line")
 	fs.StringVar(&opts.version, "version", "0.1.0", "starting semver")
 	// Type-specific.
 	fs.StringVar(&opts.inputSchema, "input-schema", "", "type=agent: relative path to input JSON schema")
@@ -158,9 +155,10 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 		_, _ = fmt.Fprintf(errOut, "error: %v\n", err)
 		return 2
 	}
+	opts.sensitivitySet = flagPassed(fs, "sensitivity")
 	if opts.typ == "skill" {
-		if passed := passedSkillRefusedFlags(fs); len(passed) > 0 {
-			_, _ = fmt.Fprintf(errOut, "error: %s set Podium-only fields; write them in a hand-written ARTIFACT.md overlay (see docs/authoring/frontmatter-reference.md)\n", strings.Join(passed, ", "))
+		if err := validateSkillMetadata(opts); err != nil {
+			_, _ = fmt.Fprintf(errOut, "error: %v\n", err)
 			return 2
 		}
 	}
@@ -233,21 +231,16 @@ func validateName(name, typ string) error {
 	return nil
 }
 
-// passedSkillRefusedFlags returns the skillRefusedFlags the caller set
-// explicitly, as "--name" strings in definition order. A flag left at
-// its default (such as --sensitivity low) is absent from fs.Visit and
-// therefore never refused.
-//
-// Spec: §4.3.4
-func passedSkillRefusedFlags(fs *flag.FlagSet) []string {
-	set := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
-	var passed []string
-	for _, name := range skillRefusedFlags {
-		if set[name] {
-			passed = append(passed, "--"+name)
+// flagPassed reports whether the caller set the named flag on the command
+// line. A flag left at its default is absent from fs.Visit, so passing
+// --sensitivity low is distinguishable from omitting it.
+func flagPassed(fs *flag.FlagSet, name string) bool {
+	passed := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			passed = true
 		}
-	}
+	})
 	return passed
 }
 
@@ -361,9 +354,13 @@ func renderArtifactMD(name string, o *scaffoldOpts) string {
 // renderSkillMD writes SKILL.md per the agentskills.io spec. The
 // version goes in metadata.version as a quoted string, because the
 // standard types metadata as a string-to-string map and §4.3.4 reads
-// a major.minor.patch metadata.version as the skill's version.
+// a major.minor.patch metadata.version as the skill's version. The
+// Podium fields the scaffold accepts follow it under metadata in their
+// §4.3.4 encodings: tags and sensitivity as quoted strings, and
+// when_to_use as a literal block with one situation per line. A skill
+// gets a sensitivity only when --sensitivity was passed.
 //
-// Spec: §4.3.4
+// Spec: §4.3.4, §7.3.1
 func renderSkillMD(name string, o *scaffoldOpts) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
@@ -374,12 +371,143 @@ func renderSkillMD(name string, o *scaffoldOpts) string {
 	}
 	sb.WriteString("metadata:\n")
 	fmt.Fprintf(&sb, "  version: %q\n", o.version)
+	if tags := splitCSVLines(o.tags, isLineBreak); len(tags) > 0 {
+		fmt.Fprintf(&sb, "  tags: %q\n", strings.Join(tags, ", "))
+	}
+	if o.sensitivitySet {
+		fmt.Fprintf(&sb, "  sensitivity: %q\n", o.sensitivity)
+	}
+	writeSkillWhenToUse(&sb, o.whenToUse)
 	sb.WriteString("---\n\n")
 	fmt.Fprintf(&sb, "# %s\n\n", name)
 	sb.WriteString("When the user asks for X, do Y.\n\n")
 	sb.WriteString("## Behavior\n\nDescribe what the agent should do here, step by step.\n\n")
 	sb.WriteString("## Output format\n\n```\n<exact format to render>\n```\n")
 	return sb.String()
+}
+
+// writeSkillWhenToUse writes the --when-to-use entries as a
+// metadata.when_to_use literal block, one situation per line, indented
+// under the metadata key. validateSkillWhenToUse has already refused a
+// situation the block cannot carry.
+//
+// Spec: §4.3.4
+func writeSkillWhenToUse(sb *strings.Builder, raw string) {
+	lines := splitCSVLines(raw, isYAMLLineBreak)
+	if len(lines) == 0 {
+		return
+	}
+	sb.WriteString("  when_to_use: |\n")
+	for _, line := range lines {
+		fmt.Fprintf(sb, "    %s\n", line)
+	}
+}
+
+// validateSkillMetadata refuses a --tags or --when-to-use value that the
+// skill's SKILL.md metadata cannot carry unchanged, before any file is
+// written.
+//
+// Spec: §4.3.4, §7.3.1
+func validateSkillMetadata(o *scaffoldOpts) error {
+	if err := validateSkillTags(o.tags); err != nil {
+		return err
+	}
+	return validateSkillWhenToUse(o.whenToUse)
+}
+
+// validateSkillTags refuses a --tags element that is not valid UTF-8. The
+// tags line is a %q-quoted scalar, and strconv.Quote writes an invalid
+// byte as a \xNN escape, which a YAML double-quoted scalar reads as the
+// code point U+00NN. Writing such an element would store a tag that
+// differs from the one passed, so the scaffold refuses it, as
+// validateSkillWhenToUse refuses the same input to --when-to-use.
+//
+// Spec: §4.3.4, §7.3.1
+func validateSkillTags(raw string) error {
+	for _, tag := range splitCSVLines(raw, isLineBreak) {
+		if !utf8.ValidString(tag) {
+			return fmt.Errorf("--tags element %q is not valid UTF-8", tag)
+		}
+	}
+	return nil
+}
+
+// validateSkillWhenToUse refuses a --when-to-use situation that holds a
+// character the YAML reader rejects anywhere in a document. The literal
+// block carries each situation unescaped, so such a character would leave
+// a SKILL.md that does not parse, and the skill would fail ingest.
+//
+// Spec: §4.3.4, §7.3.1
+func validateSkillWhenToUse(raw string) error {
+	for _, line := range splitCSVLines(raw, isYAMLLineBreak) {
+		if !utf8.ValidString(line) {
+			return fmt.Errorf("--when-to-use situation %q is not valid UTF-8", line)
+		}
+		if i := strings.IndexFunc(line, notYAMLBlockRune); i >= 0 {
+			r, _ := utf8.DecodeRuneInString(line[i:])
+			return fmt.Errorf("--when-to-use situation %q holds U+%04X, which a SKILL.md metadata.when_to_use block cannot carry", line, r)
+		}
+	}
+	return nil
+}
+
+// notYAMLBlockRune reports whether r falls outside the characters a YAML
+// 1.2 document may hold (tab, line feed, carriage return, U+0020 to
+// U+007E, U+0085, U+00A0 to U+D7FF, U+E000 to U+FFFD, and U+10000 and
+// above). The YAML reader refuses any other character with "control
+// characters are not allowed", so a block scalar cannot carry it.
+func notYAMLBlockRune(r rune) bool {
+	switch {
+	case r == '\t', r == '\n', r == '\r', r == 0x85:
+		return false
+	case r >= 0x20 && r <= 0x7E,
+		r >= 0xA0 && r <= 0xD7FF,
+		r >= 0xE000 && r <= 0xFFFD,
+		r >= 0x10000 && r <= utf8.MaxRune:
+		return false
+	}
+	return true
+}
+
+// splitCSVLines splits a comma-separated flag value for a skill metadata
+// value and then splits each element at every rune isBreak reports,
+// keeping each non-empty trimmed part. The §4.3.4 tags encoding holds no
+// line feed or carriage return, so a tag that kept one would be ignored
+// with lint.skill_metadata_field_ignored. A when_to_use situation that
+// kept any YAML line break would put an unindented continuation line in
+// the literal block, which ends the block and breaks the frontmatter.
+//
+// Spec: §4.3.4
+func splitCSVLines(raw string, isBreak func(rune) bool) []string {
+	var out []string
+	for _, entry := range splitCSV(raw) {
+		for _, part := range strings.FieldsFunc(entry, isBreak) {
+			if part = strings.TrimSpace(part); part != "" {
+				out = append(out, part)
+			}
+		}
+	}
+	return out
+}
+
+// isLineBreak reports whether r is a line feed or a carriage return, the
+// line ends the §4.3.4 tags decoder refuses in a tag. The tags line is a
+// %q-quoted scalar, which escapes every other YAML line break. This set,
+// together with validateSkillTags refusing an element that is not valid
+// UTF-8, keeps the written tags equal to what the decoder reads.
+func isLineBreak(r rune) bool { return r == '\n' || r == '\r' }
+
+// isYAMLLineBreak reports whether r ends a line in a YAML document: a line
+// feed, a carriage return, U+0085, U+2028, or U+2029. The when_to_use
+// literal block writes each situation unescaped, so the YAML reader, which
+// parses the block before the §4.3.4 decoder sees it, ends a line at each
+// of these.
+func isYAMLLineBreak(r rune) bool {
+	switch r {
+	case '\n', '\r', 0x85, 0x2028, 0x2029:
+		return true
+	}
+	return false
 }
 
 func writeWhenToUse(sb *strings.Builder, raw string) {

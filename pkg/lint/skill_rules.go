@@ -3,6 +3,7 @@ package lint
 import (
 	"context"
 	"fmt"
+	"slices"
 	"unicode/utf8"
 
 	"github.com/lennylabs/podium/pkg/manifest"
@@ -21,12 +22,14 @@ const (
 )
 
 // ruleSkillPodiumOnlyFields enforces spec §4.3.4: "SKILL.md does not contain
-// Podium-only fields (`type`, `version`, `when_to_use`, `tags`, etc.); if
-// present, error. The diagnostic recommends `metadata.version` for a version
-// and the `ARTIFACT.md` overlay for every other field." SKILL.md stays within
-// the agentskills.io subset so the standard's skills-ref validator passes.
-// ParseSkill drops unknown keys silently, so the rule scans the raw SKILL.md
-// frontmatter keys rather than the typed Skill value.
+// Podium-only fields (`type`, `version`, `when_to_use`, `tags`, etc.) at the
+// top level; if present, error. The diagnostic recommends `metadata.version`
+// for a version, the `metadata` key of the same name for a field that
+// **Podium fields in `metadata`** lists, and the `ARTIFACT.md` overlay for
+// every other field." SKILL.md stays within the agentskills.io subset so the
+// standard's skills-ref validator passes. ParseSkill drops unknown keys
+// silently, so the rule scans the raw SKILL.md frontmatter keys rather than
+// the typed Skill value.
 //
 // Spec: §4.3.4
 type ruleSkillPodiumOnlyFields struct{}
@@ -53,15 +56,18 @@ func (r ruleSkillPodiumOnlyFields) Check(_ context.Context, _ *filesystem.Regist
 	return out
 }
 
-// podiumOnlyFieldMessage names the home of a Podium-only field found in
-// SKILL.md. A version stays in SKILL.md as metadata.version, which keeps the
-// file within the Agent Skills standard; every other field moves to the
-// ARTIFACT.md overlay.
+// podiumOnlyFieldMessage names the home of a Podium-only field found at the
+// top level of SKILL.md. A version and a metadata-eligible field stay in
+// SKILL.md under metadata, which keeps the file within the Agent Skills
+// standard; every other field moves to the ARTIFACT.md overlay.
 //
 // Spec: §4.3.4
 func podiumOnlyFieldMessage(key string) string {
 	if key == "version" {
 		return fmt.Sprintf("SKILL.md contains Podium-only field %q; set metadata.version in SKILL.md instead", key)
+	}
+	if manifest.IsSkillMetadataField(key) {
+		return fmt.Sprintf("SKILL.md contains Podium-only field %q at the top level; set metadata.%s in SKILL.md or move it to ARTIFACT.md", key, key)
 	}
 	return fmt.Sprintf("SKILL.md contains Podium-only field %q; move it to ARTIFACT.md", key)
 }
@@ -71,11 +77,14 @@ func podiumOnlyFieldMessage(key string) string {
 // (warning); if present, the values must match `SKILL.md` exactly (error on
 // mismatch). A `version` in `ARTIFACT.md` equals `SKILL.md` `metadata.version`
 // when both are set and `metadata.version` is a `major.minor.patch` value
+// (error on mismatch)." It also enforces "When `ARTIFACT.md` states a key that
+// **Podium fields in `metadata`** lists and `SKILL.md` `metadata` carries a
+// value for that key that follows its encoding, the two values are equal
 // (error on mismatch)." Presence is read from the raw ARTIFACT.md frontmatter
-// keys so an explicit empty value still warns; the value comparison uses the
-// parsed Artifact and Skill. A skill with no ARTIFACT.md has nil
-// ArtifactBytes, which yields no keys, or the synthesized document, which
-// carries only type and version.
+// keys so an explicit empty value still warns or compares; the value
+// comparison uses the parsed Artifact and Skill. A skill with no ARTIFACT.md
+// has nil ArtifactBytes, which yields no keys, or the synthesized document,
+// which carries only type and version.
 //
 // Spec: §4.3.4
 type ruleSkillArtifactFields struct{}
@@ -123,16 +132,17 @@ func (r ruleSkillArtifactFields) Check(_ context.Context, _ *filesystem.Registry
 		if d, ok := skillVersionMismatch(rec); ok {
 			out = append(out, d)
 		}
+		out = append(out, skillMetadataMismatches(rec, keys)...)
 	}
 	return out
 }
 
 // skillVersionMismatch reports an ARTIFACT.md version that differs from a
-// major.minor.patch SKILL.md metadata.version. manifest.ResolveSkillVersion
-// copies metadata.version into the record when ARTIFACT.md declares no
-// version, so a difference arises only from an authored mismatch. A
-// metadata.version in any other form is ignored by §4.3.4 and never
-// mismatches.
+// major.minor.patch SKILL.md metadata.version. The walk's
+// ArtifactRecord.ResolveSkillFields copies metadata.version into the record
+// when ARTIFACT.md declares no version, so a difference arises only from an
+// authored mismatch. A metadata.version in any other form is ignored by §4.3.4
+// and never mismatches.
 //
 // Spec: §4.3.4
 func skillVersionMismatch(rec filesystem.ArtifactRecord) (Diagnostic, bool) {
@@ -150,6 +160,113 @@ func skillVersionMismatch(rec filesystem.ArtifactRecord) (Diagnostic, bool) {
 		Message: fmt.Sprintf("ARTIFACT.md version %q does not match SKILL.md metadata.version %q",
 			rec.Artifact.Version, mv),
 	}, true
+}
+
+// skillMetadataMismatches reports each metadata-eligible key that ARTIFACT.md
+// states, in the order of keys, whose authored value differs from the decoded
+// SKILL.md metadata value. tags and when_to_use compare as ordered lists,
+// deprecated as a bool, and the rest as strings. A metadata value that does
+// not decode never mismatches; ruleSkillMetadataFields warns on it instead.
+//
+// The check re-parses rec.AuthoredBytes rather than reading rec.Artifact,
+// because the walk's ArtifactRecord.ResolveSkillFields has already written the
+// resolved values into rec.Artifact. A comparison with rec.Artifact would miss
+// an explicit deprecated: false, sensitivity: "", or tags: [] in ARTIFACT.md,
+// which the resolver keeps and which lint must still compare. A plain skill
+// has empty AuthoredBytes and its synthesized document states only type and
+// version, so it is skipped.
+//
+// Spec: §4.3.4
+func skillMetadataMismatches(rec filesystem.ArtifactRecord, keys []string) []Diagnostic {
+	if rec.Skill == nil || len(rec.AuthoredBytes) == 0 {
+		return nil
+	}
+	authored, err := manifest.ParseArtifact(rec.AuthoredBytes)
+	if err != nil {
+		// The walk parsed the same bytes before lint runs.
+		return nil
+	}
+	dec := manifest.DecodeSkillMetadata(rec.Skill)
+	var out []Diagnostic
+	for _, k := range keys {
+		if !dec.Decoded[k] {
+			continue
+		}
+		av, mv := skillMetadataFieldValue(authored, k), skillMetadataFieldValue(&dec.Values, k)
+		if skillMetadataValuesEqual(av, mv) {
+			continue
+		}
+		out = append(out, Diagnostic{
+			ArtifactID: rec.ID,
+			Code:       "lint.skill_artifact_field_mismatch",
+			Severity:   SeverityError,
+			Message:    fmt.Sprintf("ARTIFACT.md %s %v does not match SKILL.md metadata.%s %v", k, av, k, mv),
+		})
+	}
+	return out
+}
+
+// skillMetadataFieldValue returns the field of a that the metadata-eligible
+// key names, in the form the §4.3.4 equality check compares: a []string for
+// tags and when_to_use, a bool for deprecated, and a string for the rest. Any
+// other key returns nil.
+//
+// Spec: §4.3.4
+func skillMetadataFieldValue(a *manifest.Artifact, key string) any {
+	switch key {
+	case "when_to_use":
+		return a.WhenToUse
+	case "tags":
+		return a.Tags
+	case "sensitivity":
+		return string(a.Sensitivity)
+	case "search_visibility":
+		return string(a.SearchVisibility)
+	case "deprecated":
+		return a.Deprecated
+	case "replaced_by":
+		return a.ReplacedBy
+	case "release_notes":
+		return a.ReleaseNotes
+	}
+	return nil
+}
+
+// skillMetadataValuesEqual compares two skillMetadataFieldValue results. Lists
+// compare element by element in order, so a nil list equals an empty one;
+// every other value compares with ==, which a []string would panic on.
+func skillMetadataValuesEqual(x, y any) bool {
+	xs, xList := x.([]string)
+	ys, yList := y.([]string)
+	if xList || yList {
+		return xList && yList && slices.Equal(xs, ys)
+	}
+	return x == y
+}
+
+// ruleSkillMetadataFields enforces spec §4.3.4: "A `SKILL.md` `metadata` value
+// for a key that **Podium fields in `metadata`** lists and that does not
+// follow its encoding is ignored (warning that names the key, the value, and
+// the encoding)." The warning honors no lint_suppress entry, because §4.3.4
+// grants a suppression flag only for the skills-ref check.
+//
+// Spec: §4.3.4
+type ruleSkillMetadataFields struct{}
+
+func (ruleSkillMetadataFields) Code() string { return "lint.skill_metadata_field_ignored" }
+
+func (r ruleSkillMetadataFields) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+	var out []Diagnostic
+	for _, rec := range records {
+		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill || rec.Skill == nil {
+			continue
+		}
+		for _, is := range manifest.DecodeSkillMetadata(rec.Skill).Issues {
+			out = append(out, warn(rec.ID, r.Code(),
+				fmt.Sprintf("metadata.%s %q is ignored: the value must be %s", is.Key, is.Value, is.Encoding)))
+		}
+	}
+	return out
 }
 
 // ruleSkillVersionAssigned enforces spec §4.3.4: "A skill that declares no
@@ -183,7 +300,7 @@ func (r ruleSkillVersionAssigned) Check(_ context.Context, _ *filesystem.Registr
 
 // ruleSkillReservedVersion enforces spec §4.3.4: "An authored version in the
 // reserved form of §4.7.6, in either file, is an error." It covers SKILL.md
-// metadata.version, which manifest.ResolveSkillVersion ignores because the
+// metadata.version, which manifest.ResolveSkillFields ignores because the
 // value is not major.minor.patch, so no other rule sees it. An ARTIFACT.md
 // version in the reserved form fails ruleVersionSemver.
 //

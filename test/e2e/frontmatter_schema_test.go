@@ -13,6 +13,7 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -27,10 +28,15 @@ func fmSkillMD(name, desc string) string {
 
 // ---- File allocation for skills (scaffold split) ---------------------------
 
-// Spec: §4.3.4 — a skill scaffold writes SKILL.md alone, with name and
-// description at the top level and the version under metadata. The
-// Podium-only flags are refused with exit 2, because a skill's ARTIFACT.md
-// is a hand-written overlay that no Podium tool generates.
+// Spec: §4.3.4, §7.3.1 — a skill scaffold writes SKILL.md alone, with name
+// and description at the top level and the version under metadata. The
+// --tags, --sensitivity, and --when-to-use flags write their fields under
+// metadata in the §4.3.4 encodings, a sensitivity line appears only when
+// --sensitivity is passed, and the output lints with no issues. A --tags
+// element that holds a line break is written as one tag per line, because
+// the tags encoding holds no line break. A --when-to-use situation that
+// holds a YAML line break such as U+2028 is written as one block line per
+// part.
 func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/close/run-variance-analysis")
@@ -47,15 +53,47 @@ func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 		t.Errorf("SKILL.md must not carry type:\n%s", skill)
 	}
 
-	for _, tc := range []struct{ flag, value string }{
-		{"--tags", "finance,close"},
-		{"--sensitivity", "medium"},
-		{"--when-to-use", "After month-end close"},
+	for _, tc := range []struct{ flag, value, want string }{
+		{"--tags", "finance,close", "  tags: \"finance, close\"\n"},
+		{"--tags", "finance\nclose", "  tags: \"finance, close\"\n"},
+		{"--sensitivity", "medium", "  sensitivity: \"medium\"\n"},
+		{"--when-to-use", "After month-end close", "  when_to_use: |\n    After month-end close\n"},
+		{"--when-to-use", "After month-end close\u2028Before audit", "  when_to_use: |\n    After month-end close\n    Before audit\n"},
 	} {
-		refused := filepath.Join(t.TempDir(), "finance/close/refused-skill")
+		root := t.TempDir()
+		dir := filepath.Join(root, "finance/close/metadata-skill")
 		res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
-			"--description", "Refused.", tc.flag, tc.value, "--yes", refused)
-		assertSkillOverlayRefusal(t, res, refused, tc.flag)
+			"--description", "Metadata fields.", tc.flag, tc.value, "--yes", dir)
+		skill := assertSkillScaffoldLintsClean(t, res, root, dir)
+		if want := "metadata:\n  version: \"0.1.0\"\n" + tc.want + "---\n"; !strings.Contains(skill, want) {
+			t.Errorf("%s: SKILL.md missing %q:\n%s", tc.flag, want, skill)
+		}
+		if tc.flag != "--sensitivity" && strings.Contains(skill, "sensitivity") {
+			t.Errorf("%s: SKILL.md carries a sensitivity line without --sensitivity:\n%s", tc.flag, skill)
+		}
+	}
+}
+
+// Spec: §4.3.4, §7.3.1 — the when_to_use literal block carries each
+// situation unescaped, so the skill scaffold refuses a --when-to-use
+// situation holding a character the YAML reader rejects with exit 2 and
+// writes no file, rather than leaving a SKILL.md that fails to parse. A
+// --tags element that is not valid UTF-8 is refused the same way, because
+// its quoted escape would read back as a different tag.
+func TestFrontmatter_SkillScaffoldRefusesUnwritableMetadata(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ flag, value, stderr string }{
+		{"--when-to-use", "a\x01b", "--when-to-use situation"},
+		{"--when-to-use", "a\x7fb", "--when-to-use situation"},
+		{"--tags", "finance,a\xffb", "--tags element"},
+	} {
+		dir := filepath.Join(t.TempDir(), "finance/close/metadata-skill")
+		res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
+			"--description", "Metadata fields.", tc.flag, tc.value, "--yes", dir)
+		if res.Exit != 2 || !strings.Contains(res.Stderr, tc.stderr) {
+			t.Errorf("%s %q: scaffold exit=%d stderr=%s, want exit 2 naming %q", tc.flag, tc.value, res.Exit, res.Stderr, tc.stderr)
+		}
+		mustNotExist(t, dir)
 	}
 }
 
@@ -72,20 +110,21 @@ func assertScaffoldedSkillAlone(t testing.TB, dir, version string) string {
 	return skill
 }
 
-// assertSkillOverlayRefusal fails the test unless res is the exit-2 refusal
-// that names every flag in flags, in that order, and points at the
-// ARTIFACT.md overlay, and the refused scaffold created no directory at dir
-// (§4.3.4).
-func assertSkillOverlayRefusal(t testing.TB, res cliResult, dir string, flags ...string) {
+// assertSkillScaffoldLintsClean fails the test unless res is a successful
+// skill scaffold that wrote SKILL.md alone at dir and `podium lint` over
+// root reports no issues, so every metadata value the scaffold wrote
+// follows its §4.3.4 encoding. It returns the SKILL.md text.
+func assertSkillScaffoldLintsClean(t testing.TB, res cliResult, root, dir string) string {
 	t.Helper()
-	if res.Exit != 2 {
-		t.Errorf("scaffold %v exit=%d, want 2\nstderr=%s", flags, res.Exit, res.Stderr)
+	if res.Exit != 0 {
+		t.Fatalf("scaffold exit=%d\nstderr=%s", res.Exit, res.Stderr)
 	}
-	want := "error: " + strings.Join(flags, ", ") + " set Podium-only fields; write them in a hand-written ARTIFACT.md overlay"
-	if !strings.Contains(res.Stderr, want) {
-		t.Errorf("stderr missing %q:\n%s", want, res.Stderr)
+	mustNotExist(t, filepath.Join(dir, "ARTIFACT.md"))
+	l := runPodium(t, "", nil, "lint", "--registry", root)
+	if l.Exit != 0 || !strings.Contains(l.Stdout, "lint: no issues.") {
+		t.Errorf("lint exit=%d, want 0 with no issues\nstdout=%s\nstderr=%s", l.Exit, l.Stdout, l.Stderr)
 	}
-	mustNotExist(t, dir)
+	return readFile(t, filepath.Join(dir, "SKILL.md"))
 }
 
 // a non-skill scaffold emits a single ARTIFACT.md with the
@@ -349,6 +388,57 @@ func TestFrontmatter_SkillMetadataStored(t *testing.T) {
 	srv := startServer(t, reg)
 	if st := getStatus(t, srv.BaseURL+"/v1/load_artifact?id=finance/close/run-variance-analysis"); st != 200 {
 		t.Errorf("load = HTTP %d, want 200", st)
+	}
+}
+
+// fmRunVarianceSkill is the run-variance example from the page's "Podium
+// fields in SKILL.md metadata" section, with a one-line body.
+const fmRunVarianceSkill = "---\n" +
+	"name: run-variance\n" +
+	"description: Compare actuals against forecast for a close period.\n" +
+	"metadata:\n" +
+	"  version: \"1.0.0\"\n" +
+	"  tags: \"finance, close\"\n" +
+	"  sensitivity: medium\n" +
+	"  when_to_use: |\n" +
+	"    After month-end close\n" +
+	"    When reconciling a variance\n" +
+	"---\n\nCompare actuals against forecast.\n"
+
+// Spec: §4.3.4 — the page's run-variance example, a SKILL.md with no
+// ARTIFACT.md that sets its Podium fields under metadata, lints with no
+// issues, and a registry that ingests it finds it by a metadata tag and
+// serves the metadata sensitivity on load.
+func TestFrontmatter_SkillMetadataFieldsExample(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{"finance/run-variance/SKILL.md": fmRunVarianceSkill})
+	if l := runPodium(t, "", nil, "lint", "--registry", reg); l.Exit != 0 || !strings.Contains(l.Stdout, "lint: no issues.") {
+		t.Fatalf("lint exit=%d stdout=%q stderr=%q", l.Exit, l.Stdout, l.Stderr)
+	}
+	srv := startServer(t, reg)
+	if got := tagSearchIDs(t, srv.BaseURL, "close"); !slices.Contains(got, "finance/run-variance") {
+		t.Errorf("search --tags close = %v, want finance/run-variance", got)
+	}
+	if r := hrLoad(t, srv.BaseURL, "finance/run-variance"); r.Sensitivity != "medium" {
+		t.Errorf("load sensitivity = %q, want medium", r.Sensitivity)
+	}
+}
+
+// Spec: §4.3.4 — a metadata value is a string, so a YAML sequence under
+// metadata.tags makes SKILL.md fail to parse. podium lint exits 1 with a
+// message that names the key and the comma-separated encoding.
+func TestFrontmatter_SkillMetadataListValueFails(t *testing.T) {
+	t.Parallel()
+	skill := strings.Replace(fmRunVarianceSkill, `tags: "finance, close"`, "tags: [finance, close]", 1)
+	reg := writeRegistry(t, map[string]string{"finance/run-variance/SKILL.md": skill})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	for _, want := range []string{"metadata.tags is not a string", "tags is comma-separated"} {
+		if !strings.Contains(res.Stderr, want) {
+			t.Errorf("lint stderr does not contain %q:\n%s", want, res.Stderr)
+		}
 	}
 }
 
