@@ -208,6 +208,21 @@ func TestScaffold_Skill_WritesTags(t *testing.T) {
 	resolveScaffoldedSkill(t, root)
 }
 
+// Spec: §4.3.4, §7.3.1 — the tags encoding holds no line break, so a
+// --tags element that holds one is written as one tag per non-empty part.
+// The value decodes and lints clean instead of being ignored.
+func TestScaffold_Skill_TagsSplitOnLineBreak(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "greet")
+	skill := scaffoldSkillMD(t, target, "--tags", "a\nb, x\r\ny\r, \n")
+	if want := "  tags: \"a, b, x, y\"\n"; !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md missing %q:\n%s", want, skill)
+	}
+	if got := strings.Join(resolveScaffoldedSkill(t, root).Tags, "|"); got != "a|b|x|y" {
+		t.Errorf("tags = %q, want a|b|x|y", got)
+	}
+}
+
 // Spec: §4.3.4 — the metadata fields follow a fixed order whatever order
 // the command line used. An explicitly passed --sensitivity low is written
 // although it equals the flag default, and a --when-to-use entry that

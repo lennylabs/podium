@@ -31,7 +31,9 @@ func fmSkillMD(name, desc string) string {
 // and description at the top level and the version under metadata. The
 // --tags, --sensitivity, and --when-to-use flags write their fields under
 // metadata in the §4.3.4 encodings, a sensitivity line appears only when
-// --sensitivity is passed, and the output lints with no issues.
+// --sensitivity is passed, and the output lints with no issues. A --tags
+// element that holds a line break is written as one tag per line, because
+// the tags encoding holds no line break.
 func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/close/run-variance-analysis")
@@ -50,6 +52,7 @@ func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 
 	for _, tc := range []struct{ flag, value, want string }{
 		{"--tags", "finance,close", "  tags: \"finance, close\"\n"},
+		{"--tags", "finance\nclose", "  tags: \"finance, close\"\n"},
 		{"--sensitivity", "medium", "  sensitivity: \"medium\"\n"},
 		{"--when-to-use", "After month-end close", "  when_to_use: |\n    After month-end close\n"},
 	} {

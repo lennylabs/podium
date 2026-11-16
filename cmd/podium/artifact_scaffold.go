@@ -364,7 +364,7 @@ func renderSkillMD(name string, o *scaffoldOpts) string {
 	}
 	sb.WriteString("metadata:\n")
 	fmt.Fprintf(&sb, "  version: %q\n", o.version)
-	if tags := splitCSV(o.tags); len(tags) > 0 {
+	if tags := splitCSVLines(o.tags); len(tags) > 0 {
 		fmt.Fprintf(&sb, "  tags: %q\n", strings.Join(tags, ", "))
 	}
 	if o.sensitivitySet {
@@ -381,20 +381,11 @@ func renderSkillMD(name string, o *scaffoldOpts) string {
 
 // writeSkillWhenToUse writes the --when-to-use entries as a
 // metadata.when_to_use literal block, one situation per line, indented
-// under the metadata key. An entry that holds a line break becomes one
-// line per non-empty part, because an unindented continuation line
-// would end the block and break the frontmatter.
+// under the metadata key.
 //
 // Spec: §4.3.4
 func writeSkillWhenToUse(sb *strings.Builder, raw string) {
-	var lines []string
-	for _, entry := range splitCSV(raw) {
-		for _, line := range strings.FieldsFunc(entry, isLineBreak) {
-			if line = strings.TrimSpace(line); line != "" {
-				lines = append(lines, line)
-			}
-		}
-	}
+	lines := splitCSVLines(raw)
 	if len(lines) == 0 {
 		return
 	}
@@ -404,8 +395,29 @@ func writeSkillWhenToUse(sb *strings.Builder, raw string) {
 	}
 }
 
-// isLineBreak reports whether r ends a line in a when_to_use literal
-// block, matching the line ends the §4.3.4 decoder splits on.
+// splitCSVLines splits a comma-separated flag value for a skill metadata
+// value and then splits each element on line breaks, keeping each
+// non-empty trimmed part. The §4.3.4 tags encoding holds no line break,
+// so a tag that kept one would be ignored with
+// lint.skill_metadata_field_ignored. A when_to_use situation that kept
+// one would put an unindented continuation line in the literal block,
+// which ends the block and breaks the frontmatter.
+//
+// Spec: §4.3.4
+func splitCSVLines(raw string) []string {
+	var out []string
+	for _, entry := range splitCSV(raw) {
+		for _, part := range strings.FieldsFunc(entry, isLineBreak) {
+			if part = strings.TrimSpace(part); part != "" {
+				out = append(out, part)
+			}
+		}
+	}
+	return out
+}
+
+// isLineBreak reports whether r ends a line in a skill metadata value,
+// matching the line ends the §4.3.4 decoder treats as line breaks.
 func isLineBreak(r rune) bool { return r == '\n' || r == '\r' }
 
 func writeWhenToUse(sb *strings.Builder, raw string) {
