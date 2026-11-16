@@ -6,7 +6,7 @@ An artifact is a directory with one or two manifest files at its root.
 
 **Every non-skill artifact has an `ARTIFACT.md`.** It is a markdown file with YAML frontmatter that carries Podium's canonical schema (universal fields, caller-interpreted fields, and type-specific fields). The frontmatter is what the registry indexes. For non-skill types, the prose body is what the host reads when the artifact is loaded.
 
-**Skill artifacts (`type: skill`) have a `SKILL.md`** that complies with the [Agent Skills specification](https://agentskills.io/specification). `SKILL.md` carries the standard's required frontmatter (`name`, `description`) and any of the standard's optional fields (`license`, `compatibility`, `metadata`, `allowed-tools`); its prose body holds the agent-facing skill instructions. A package (§4.2) whose root holds a `SKILL.md` and no `ARTIFACT.md` is a skill artifact, and the registry indexes its `SKILL.md` frontmatter. An optional `ARTIFACT.md` beside `SKILL.md` carries Podium-only structured frontmatter and omits the prose body (a one-line pointer comment is allowed). Field allocation, version precedence, and lint are in §4.3.4.
+**Skill artifacts (`type: skill`) have a `SKILL.md`** that complies with the [Agent Skills specification](https://agentskills.io/specification). `SKILL.md` carries the standard's required frontmatter (`name`, `description`) and any of the standard's optional fields (`license`, `compatibility`, `metadata`, `allowed-tools`); its prose body holds the agent-facing skill instructions. A package (§4.2) whose root holds a `SKILL.md` and no `ARTIFACT.md` is a skill artifact, and the registry indexes its `SKILL.md` frontmatter. `SKILL.md` `metadata` can carry the Podium-only fields that §4.3.4 lists under **Podium fields in `metadata`**. An optional `ARTIFACT.md` beside `SKILL.md` carries Podium-only frontmatter and omits the prose body (a one-line pointer comment is allowed). Field allocation, version precedence, and lint are in §4.3.4.
 
 **Bundled resources alongside the manifest are arbitrary files.** Python scripts, shell scripts, templates, JSON / YAML schemas, evaluation datasets, model weights, binary blobs, or anything else the host needs at runtime. The registry treats these as opaque versioned blobs.
 
@@ -131,7 +131,7 @@ Each layer (§4.6) is rooted at a Git repo or local filesystem path; the directo
 
 The manifest frontmatter is YAML; the prose body is markdown. The registry indexes frontmatter for `search_artifacts` and `load_domain`. The prose body is returned inline by `load_artifact`.
 
-For non-skill types, frontmatter and prose both live in `ARTIFACT.md`. For skills, the Agent Skills fields and the prose body live in `SKILL.md`, and the Podium-only fields live in an optional `ARTIFACT.md` (§4.3.4).
+For non-skill types, frontmatter and prose both live in `ARTIFACT.md`. For skills, the Agent Skills fields and the prose body live in `SKILL.md`, and the Podium-only fields live under `SKILL.md` `metadata` or in an optional `ARTIFACT.md`, as §4.3.4 allocates them.
 
 ### Universal fields (any artifact type)
 
