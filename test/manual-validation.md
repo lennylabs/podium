@@ -247,6 +247,7 @@ rm -rf "$WORK"
 | S104 | The registry and the MCP server record the client that called them, and exported spans carry no query text | standalone | none | none | none |
 | S105 | A registry audit stream reaches a file and an HTTP receiver through one chain, survives a receiver outage, and never logs its credentials; `podium-mcp` flushes its local stream on SIGTERM | standalone | none | none | none |
 | S106 | A registry audit stream reaches an OpenTelemetry Collector, which decodes it and writes it to a file and to S3 | standalone | none | none | Docker, MinIO from `make services-up` |
+| S107 | A skill's Podium fields under `SKILL.md` `metadata` reach search, load, and lint, and a stored row from an earlier release keeps its search columns until a new version | standalone | none | none | none |
 
 ---
 
@@ -268,10 +269,15 @@ Claude Code adapter.
    podium artifact scaffold --type skill --description "Greet a user politely" "$WORK/reg/greet"
    ```
 
-3. Confirm the skill scaffold refuses a Podium-only field.
+3. Confirm the skill scaffold writes a Podium field under `metadata`. The
+   skill goes into `$WORK/scratch`, outside the `$WORK/reg` registry that steps
+   4 and 5 read, so the later steps still see `greet` alone.
 
    ```bash
-   podium artifact scaffold --type skill --tags x --description "Tagged" "$WORK/reg/tagged"; echo "exit=$?"
+   podium artifact scaffold --type skill --tags x --description "Tagged" "$WORK/scratch/tagged"; echo "exit=$?"
+   ls "$WORK/scratch/tagged"
+   sed -n '/^metadata:/,/^---/p' "$WORK/scratch/tagged/SKILL.md"
+   podium lint --registry "$WORK/scratch"; echo "lint exit=$?"
    ```
 
 4. Create a project and write its project-local configuration. `podium init`
@@ -305,8 +311,9 @@ Claude Code adapter.
 
 - Step 2 reports `Scaffolded skill at .../reg/greet/` and the directory holds
   `SKILL.md` alone, with `version: "0.1.0"` under `metadata:`.
-- Step 3 prints `exit=2` and a message that names `--tags` and the
-  `ARTIFACT.md` overlay. `$WORK/reg/tagged` is not created.
+- Step 3 prints `exit=0`, and `ls` lists `SKILL.md` alone. The `metadata:`
+  block holds `version: "0.1.0"` and `tags: "x"` and no `sensitivity` line.
+  `podium lint` prints `lint: no issues.` and `lint exit=0`.
 - Step 4 writes `$WORK/proj/.podium/sync.yaml`.
 - Step 5 reports one artifact materialized through the `claude-code` adapter.
 - Step 6 lists a `greet` skill file under `$WORK/proj/.claude/` (the Claude Code
@@ -1258,21 +1265,13 @@ ingest-time sensitivity ceiling.
 
 1. Run the isolation block.
 2. Author a registry with a low-sensitivity artifact and a high-sensitivity
-   artifact. The skill scaffold writes `SKILL.md` alone and refuses
-   `--sensitivity`, so the `incident` skill carries `sensitivity: high` in a
-   hand-written `ARTIFACT.md` overlay.
+   artifact. The skill scaffold writes `SKILL.md` alone and writes
+   `--sensitivity high` as `metadata.sensitivity`, so the `incident` skill
+   reaches the public-mode floor through its `SKILL.md` `metadata`.
 
    ```bash
    podium artifact scaffold --type context --sensitivity low  --description "Public FAQ" "$WORK/reg/faq"
-   podium artifact scaffold --type skill   --description "Production incident runbook" "$WORK/reg/incident"
-   cat > "$WORK/reg/incident/ARTIFACT.md" <<'MD'
-   ---
-   type: skill
-   version: 0.1.0
-   sensitivity: high
-   ---
-   <!-- Skill body lives in SKILL.md. -->
-   MD
+   podium artifact scaffold --type skill   --sensitivity high --description "Production incident runbook" "$WORK/reg/incident"
    ```
 
 3. Serve in public mode and query anonymously.
@@ -1357,21 +1356,27 @@ that loading a deprecated artifact surfaces the replacement.
    `(artifact_id, version)` is immutable by content hash (§4.7.6), so an
    already-published version cannot be re-published with a changed `deprecated`
    flag. Deprecation is published as a new version that carries
-   `deprecated: true` and a `replaced_by` upgrade target. `deprecated` and
-   `replaced_by` are Podium-only fields, so set the `SKILL.md`
-   `metadata.version` to 3.0.0 and write a hand-written `ARTIFACT.md` overlay
-   that declares the same version and the two fields. Stage the new file with
-   `git add -A`, because `commit -a` does not stage it. Commit, re-ingest, then
-   observe search and an explicit load of the deprecated version. Flags precede
-   the positional id, so `--version 3.0.0` comes before `deploy`.
+   `deprecated: true` and a `replaced_by` upgrade target. A skill carries both
+   fields as strings under `SKILL.md` `metadata` (§4.3.4), so the `awk` line
+   sets `metadata.version` to 3.0.0 and adds `deprecated: "true"` and
+   `replaced_by: deploy@2.0.0` beside it, and the skill keeps no
+   `ARTIFACT.md`. It writes the new file outside the repository before moving
+   it into place, so no temporary file lands in the commit. Commit, re-ingest,
+   then observe search, an explicit load of the deprecated version, and the
+   raw `load_artifact` response for that version. Flags precede the
+   positional id, so `--version 3.0.0` comes before `deploy`.
 
    ```bash
-   sed -i.bak 's/^  version: ".*"$/  version: "3.0.0"/' "$WORK/repo/deploy/SKILL.md" && rm "$WORK/repo/deploy/SKILL.md.bak"
-   printf -- '---\ntype: skill\nversion: 3.0.0\ndeprecated: true\nreplaced_by: deploy@2.0.0\n---\n<!-- Skill body lives in SKILL.md. -->\n' > "$WORK/repo/deploy/ARTIFACT.md"
-   cd "$WORK/repo" && git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "deploy 3.0.0 deprecated"
+   awk '/^  version: "/ { print "  version: \"3.0.0\""; print "  deprecated: \"true\""; print "  replaced_by: deploy@2.0.0"; next } { print }' \
+     "$WORK/repo/deploy/SKILL.md" > "$WORK/SKILL.md.new" && mv "$WORK/SKILL.md.new" "$WORK/repo/deploy/SKILL.md"
+   sed -n '/^metadata:/,/^---/p' "$WORK/repo/deploy/SKILL.md"
+   cd "$WORK/repo" && git -c user.email=alice@acme.com -c user.name=alice commit -aqm "deploy 3.0.0 deprecated"
    podium layer reingest --registry "$PODIUM_REGISTRY" team
+   podium artifact show --registry "$PODIUM_REGISTRY" deploy
    podium search --registry "$PODIUM_REGISTRY" "deploy"
    podium artifact show --registry "$PODIUM_REGISTRY" --version 3.0.0 deploy
+   curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=deploy&version=3.0.0" \
+     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(repr(d["frontmatter"])); print(d.get("replaced_by")); print(d.get("deprecation_warning"))'
    ```
 
 **Expected.**
@@ -1382,9 +1387,14 @@ that loading a deprecated artifact surfaces the replacement.
   2.0.0, because `latest` skips the deprecated 3.0.0 (§4.7.6).
 - Search returns the current 2.0.0, and the deprecated 3.0.0 is excluded from
   default results.
-- An explicit load of the deprecated 3.0.0 surfaces the `replaced_by` pointer
-  to `deploy@2.0.0` in the frontmatter, and the wire response carries a
-  `deprecation_warning` that names the upgrade target.
+- The `sed` output shows `version: "3.0.0"`, `deprecated: "true"`, and
+  `replaced_by: deploy@2.0.0` under `metadata:`.
+- An explicit load of the deprecated 3.0.0 serves the synthesized frontmatter,
+  which states `type` and `version` alone. The first `curl` line is
+  `'---\ntype: skill\nversion: 3.0.0\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n'`.
+  The wire response carries `replaced_by: deploy@2.0.0`, so the second line is
+  `deploy@2.0.0`, and the third line is a `deprecation_warning` that names
+  `deploy@2.0.0`.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
@@ -1403,21 +1413,14 @@ is refused.
 
 1. Run the isolation block.
 2. Author one high-sensitivity artifact and serve it with ingest signing
-   enabled. The skill carries `sensitivity: high` in a hand-written
-   `ARTIFACT.md` overlay, because the skill scaffold refuses `--sensitivity`.
+   enabled. The skill scaffold writes `--sensitivity high` as
+   `metadata.sensitivity` in `SKILL.md`, so the skill carries its sensitivity
+   with no `ARTIFACT.md`.
    The server log reports `ingest signing: registry-managed key` and
    the signing keypair is written to `PODIUM_SIGN_KEY_PATH` on first run.
 
    ```bash
-   podium artifact scaffold --type skill --description "Signed runbook" "$WORK/reg/signed-runbook"
-   cat > "$WORK/reg/signed-runbook/ARTIFACT.md" <<'MD'
-   ---
-   type: skill
-   version: 0.1.0
-   sensitivity: high
-   ---
-   <!-- Skill body lives in SKILL.md. -->
-   MD
+   podium artifact scaffold --type skill --sensitivity high --description "Signed runbook" "$WORK/reg/signed-runbook"
    export PODIUM_SIGN_KEY_PATH="$WORK/registry-sign.key"
    podium serve --standalone --no-embeddings --sign registry-key --layer-path "$WORK/reg" --bind 127.0.0.1:8115 > "$WORK/srv.log" 2>&1 &
    SRV=$!
@@ -1463,15 +1466,7 @@ is refused.
    is refused.
 
    ```bash
-   podium artifact scaffold --type skill --description "Unsigned runbook" "$WORK/reg-unsigned/unsigned-runbook"
-   cat > "$WORK/reg-unsigned/unsigned-runbook/ARTIFACT.md" <<'MD'
-   ---
-   type: skill
-   version: 0.1.0
-   sensitivity: high
-   ---
-   <!-- Skill body lives in SKILL.md. -->
-   MD
+   podium artifact scaffold --type skill --sensitivity high --description "Unsigned runbook" "$WORK/reg-unsigned/unsigned-runbook"
    PODIUM_SIGN=none PODIUM_SIGN_KEY_PATH="$WORK/registry-sign2.key" \
    PODIUM_SQLITE_PATH="$WORK/podium2.db" PODIUM_FILESYSTEM_ROOT="$WORK/objects2" \
      podium serve --standalone --no-embeddings --layer-path "$WORK/reg-unsigned" \
@@ -12306,5 +12301,164 @@ s106_cleanup
 trap - EXIT
 docker ps -a --format '{{.Names}}' | grep '^podium-s106-' || echo "no podium-s106 container remains"
 ```
+
+---
+
+## S107: A skill's Podium fields under `SKILL.md` `metadata` reach search, load, and lint, and a stored row from an earlier release keeps its search columns until a new version
+
+**Goal.** Validate that a plain skill whose `SKILL.md` `metadata` carries
+`tags`, `sensitivity`, and `when_to_use` is found by a tag search and serves its
+sensitivity on load while its served `ARTIFACT.md` stays the synthesized
+document, that lint rejects a disagreeing `ARTIFACT.md` value and warns on an
+invalid `metadata` value, and that a row stored before the change keeps its
+search columns, while its load serves the resolved values, until the skill is
+published at a new version.
+
+**Covers.** §4.3.4 Podium fields in `metadata`, the §4.3.4 lint rules, §13.4
+stored-row admission, and the §13.4 exemption for rows an earlier release
+stored, through the compiled `podium` binary.
+
+**Why by hand.** An operator reads the search output, the raw load response,
+the lint output, and the stored columns together. A tag search that misses the
+skill, a `frontmatter` that differs from the synthesized bytes, a missing
+`sensitivity` member, a mismatch that lints clean, a search that finds the
+predated row by a `metadata` tag before it is republished, or a search that
+still misses it after it is published at a new version is the defect this
+scenario catches.
+
+**Prerequisites.** None beyond the isolation block. The scenario binds
+127.0.0.1:8148 and 127.0.0.1:8149.
+
+**Steps.**
+
+1. Run the isolation block. Build a skills directory with a plain skill
+   `notes` whose `SKILL.md` carries `metadata` with `version`, `tags`,
+   `sensitivity`, and a `when_to_use` literal block of two lines. The
+   `write_notes` function takes the version and the sensitivity, so later
+   steps rewrite the file with one call. Lint the directory.
+
+   ```bash
+   mkdir -p "$WORK/skills/notes"
+   write_notes() {
+     printf -- '---\nname: notes\ndescription: Summarize the release notes\nmetadata:\n  version: "%s"\n  tags: "release, notes"\n  sensitivity: %s\n  when_to_use: |\n    Summarize a release.\n    Draft release notes from a changelog.\n---\n\nSummarize the release notes.\n' "$1" "$2" \
+       > "$WORK/skills/notes/SKILL.md"
+   }
+   write_notes 1.0.0 medium
+   podium lint --registry "$WORK/skills"; echo "lint exit=$?"
+   ```
+
+   **Expect.** `podium lint` prints `lint: no issues.` and `lint exit=0`.
+
+2. Serve the directory, run a tag search, and read the raw `load_artifact`
+   response for `notes`. The empty query operand is the browse form, so the
+   tag filter alone decides the listing. `podium search` with no operand exits
+   2 with a usage line. Stop the server.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/skills" --bind 127.0.0.1:8148 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8148/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export PODIUM_REGISTRY=http://127.0.0.1:8148
+   tag_search() {
+     podium search --registry "$PODIUM_REGISTRY" --json --tags notes "" \
+       | python3 -c 'import json,sys; print(sorted((r["id"], r["version"]) for r in json.load(sys.stdin)["results"]))'
+   }
+   load_notes() {
+     curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=notes" > "$WORK/load.json"
+     grep -o '"sensitivity": *"[a-z]*"' "$WORK/load.json"
+     python3 -c 'import json,sys; print(repr(json.load(open(sys.argv[1]))["frontmatter"]))' "$WORK/load.json"
+   }
+   tag_search
+   load_notes
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** The search prints `[('notes', '1.0.0')]`. The load prints
+   `"sensitivity": "medium"`, and a `frontmatter` of
+   `'---\ntype: skill\nversion: 1.0.0\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n'`,
+   the synthesized document for version `1.0.0` byte for byte. An empty
+   listing means the tag search did not read `metadata.tags`. A `tags:`,
+   `sensitivity:`, or `when_to_use:` line in the `frontmatter` means a
+   resolved field leaked into the synthesized document.
+
+3. Add an `ARTIFACT.md` that states a different sensitivity, and lint. Then
+   delete it, set `metadata.sensitivity` to a value outside the enum, and lint
+   again.
+
+   ```bash
+   printf -- '---\ntype: skill\nsensitivity: high\n---\n<!-- Skill body lives in SKILL.md. -->\n' > "$WORK/skills/notes/ARTIFACT.md"
+   podium lint --registry "$WORK/skills"; echo "lint exit=$?"
+   rm "$WORK/skills/notes/ARTIFACT.md"
+   write_notes 1.0.0 secret
+   podium lint --registry "$WORK/skills"; echo "lint exit=$?"
+   ```
+
+   **Expect.** The first run prints a `lint.skill_artifact_field_mismatch`
+   error that names `sensitivity`, and `lint exit=1`. The second run prints a
+   `lint.skill_metadata_field_ignored` warning that names
+   `metadata.sensitivity`, the value `secret`, and the allowed values `low`,
+   `medium`, and `high`, and `lint exit=0`. A clean first run means lint does
+   not compare a stated `ARTIFACT.md` value with the decoded `metadata` value.
+
+4. Restore `metadata.sensitivity: medium` and produce a fresh store whose
+   `notes` row stands in for a row an earlier release stored. Step 2 stored
+   `notes` 1.0.0 with the resolved columns in `$WORK/podium.db`, and an ingest
+   of identical bytes leaves a stored row unchanged, so this step and step 5
+   use a second store at `$WORK/upgrade.db`, as S19 points a second registry
+   at `$WORK/podium2.db`. The step serves the directory into that store once,
+   stops the server, and empties the `notes` row's tags and sensitivity
+   columns with `sqlite3`, as S64 edits its store. The row's bytes, content
+   hash, and signature stay in place, so admission still verifies it.
+
+   ```bash
+   write_notes 1.0.0 medium
+   export PODIUM_SQLITE_PATH="$WORK/upgrade.db" PODIUM_FILESYSTEM_ROOT="$WORK/upgrade-objects"
+   export PODIUM_REGISTRY=http://127.0.0.1:8149
+   serve_upgrade() {
+     podium serve --standalone --no-embeddings --layer-path "$WORK/skills" --bind 127.0.0.1:8149 > "$WORK/$1.log" 2>&1 &
+     SRV=$!
+     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8149/healthz
+     server_alive "$SRV" "$WORK/$1.log"
+   }
+   serve_upgrade seed
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   sqlite3 "$PODIUM_SQLITE_PATH" "update manifests set tags = '', sensitivity = '' where artifact_id = 'notes';"
+   sqlite3 "$PODIUM_SQLITE_PATH" "select version, quote(tags), quote(sensitivity) from manifests where artifact_id = 'notes';"
+   ```
+
+   **Expect.** The `select` prints `1.0.0|''|''`: the tags and sensitivity
+   columns for `notes` in `$WORK/upgrade.db` are empty.
+
+5. Start the registry on the step 4 store and the same directory, run the tag
+   search, and read the raw load response. Stop the registry, publish `notes`
+   at a new version by raising `metadata.version`, start it again on the same
+   store, and repeat the search.
+
+   ```bash
+   serve_upgrade before
+   tag_search
+   load_notes
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   write_notes 1.0.1 medium
+   serve_upgrade after
+   tag_search
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   sqlite3 "$PODIUM_SQLITE_PATH" "select version, quote(tags), quote(sensitivity) from manifests where artifact_id = 'notes' order by version;"
+   ```
+
+   **Expect.** The first search prints `[]`, and the load prints
+   `"sensitivity": "medium"` and the same synthesized `frontmatter` as step 2.
+   After the version change, the search prints `[('notes', '1.0.1')]`. The
+   `select` prints `1.0.0|''|''` and then a `1.0.1` row whose tags hold
+   `release` and `notes` on two lines and whose sensitivity is `'medium'`. A
+   first search that lists `notes` means the start recomputed the stored
+   columns of a row an earlier release stored. A load without
+   `"sensitivity": "medium"` means admission served the stored column instead
+   of the value the admitted bytes resolve to. A second search that misses
+   `notes` means the new version was stored without its resolved columns.
+
+**Cleanup.** `rm -rf "$WORK"`. Each step stops its server before the next one
+starts.
 
 ---
