@@ -20,10 +20,10 @@ import (
 
 // ---- skill -----------------------------------------------------------------
 
-// Spec: §4.3.4 — scaffold skill writes SKILL.md alone, carrying name,
-// description, and metadata.version, and the result lints clean. The
-// Podium-only flags are refused in one exit-2 message that names each flag
-// passed, so the author writes those fields in an ARTIFACT.md overlay.
+// Spec: §4.3.4, §7.3.1 — scaffold skill writes SKILL.md alone, carrying
+// name, description, and metadata.version, and the result lints clean. With
+// --tags, --sensitivity, and --when-to-use, the scaffold writes those fields
+// under metadata in their §4.3.4 encodings, and the result still lints clean.
 func TestArtifactTypes_ScaffoldSkillSplit(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -44,15 +44,23 @@ func TestArtifactTypes_ScaffoldSkillSplit(t *testing.T) {
 		t.Errorf("lint exit=%d stdout=%q", l.Exit, l.Stdout)
 	}
 
-	refused := filepath.Join(t.TempDir(), "finance/close/run-variance-analysis")
+	withFields := t.TempDir()
+	dir := filepath.Join(withFields, "finance/close/run-variance-analysis")
 	res := runPodium(t, "", nil, "artifact", "scaffold",
 		"--type", "skill",
 		"--description", "Flag unusual variance vs. forecast after month-end close.",
 		"--tags", "finance,close,variance",
 		"--sensitivity", "low",
 		"--when-to-use", "After month-end close",
-		"--yes", refused)
-	assertSkillOverlayRefusal(t, res, refused, "--tags", "--sensitivity", "--when-to-use")
+		"--yes", dir)
+	skill = assertSkillScaffoldLintsClean(t, res, withFields, dir)
+	want := "metadata:\n  version: \"0.1.0\"\n" +
+		"  tags: \"finance, close, variance\"\n" +
+		"  sensitivity: \"low\"\n" +
+		"  when_to_use: |\n    After month-end close\n---\n"
+	if !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md missing %q:\n%s", want, skill)
+	}
 }
 
 // the doc's skill example (with runtime_requirements)

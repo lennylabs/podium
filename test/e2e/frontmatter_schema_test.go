@@ -27,10 +27,11 @@ func fmSkillMD(name, desc string) string {
 
 // ---- File allocation for skills (scaffold split) ---------------------------
 
-// Spec: §4.3.4 — a skill scaffold writes SKILL.md alone, with name and
-// description at the top level and the version under metadata. The
-// Podium-only flags are refused with exit 2, because a skill's ARTIFACT.md
-// is a hand-written overlay that no Podium tool generates.
+// Spec: §4.3.4, §7.3.1 — a skill scaffold writes SKILL.md alone, with name
+// and description at the top level and the version under metadata. The
+// --tags, --sensitivity, and --when-to-use flags write their fields under
+// metadata in the §4.3.4 encodings, a sensitivity line appears only when
+// --sensitivity is passed, and the output lints with no issues.
 func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/close/run-variance-analysis")
@@ -47,15 +48,22 @@ func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 		t.Errorf("SKILL.md must not carry type:\n%s", skill)
 	}
 
-	for _, tc := range []struct{ flag, value string }{
-		{"--tags", "finance,close"},
-		{"--sensitivity", "medium"},
-		{"--when-to-use", "After month-end close"},
+	for _, tc := range []struct{ flag, value, want string }{
+		{"--tags", "finance,close", "  tags: \"finance, close\"\n"},
+		{"--sensitivity", "medium", "  sensitivity: \"medium\"\n"},
+		{"--when-to-use", "After month-end close", "  when_to_use: |\n    After month-end close\n"},
 	} {
-		refused := filepath.Join(t.TempDir(), "finance/close/refused-skill")
+		root := t.TempDir()
+		dir := filepath.Join(root, "finance/close/metadata-skill")
 		res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
-			"--description", "Refused.", tc.flag, tc.value, "--yes", refused)
-		assertSkillOverlayRefusal(t, res, refused, tc.flag)
+			"--description", "Metadata fields.", tc.flag, tc.value, "--yes", dir)
+		skill := assertSkillScaffoldLintsClean(t, res, root, dir)
+		if want := "metadata:\n  version: \"0.1.0\"\n" + tc.want + "---\n"; !strings.Contains(skill, want) {
+			t.Errorf("%s: SKILL.md missing %q:\n%s", tc.flag, want, skill)
+		}
+		if tc.flag != "--sensitivity" && strings.Contains(skill, "sensitivity") {
+			t.Errorf("%s: SKILL.md carries a sensitivity line without --sensitivity:\n%s", tc.flag, skill)
+		}
 	}
 }
 
@@ -72,20 +80,21 @@ func assertScaffoldedSkillAlone(t testing.TB, dir, version string) string {
 	return skill
 }
 
-// assertSkillOverlayRefusal fails the test unless res is the exit-2 refusal
-// that names every flag in flags, in that order, and points at the
-// ARTIFACT.md overlay, and the refused scaffold created no directory at dir
-// (§4.3.4).
-func assertSkillOverlayRefusal(t testing.TB, res cliResult, dir string, flags ...string) {
+// assertSkillScaffoldLintsClean fails the test unless res is a successful
+// skill scaffold that wrote SKILL.md alone at dir and `podium lint` over
+// root reports no issues, so every metadata value the scaffold wrote
+// follows its §4.3.4 encoding. It returns the SKILL.md text.
+func assertSkillScaffoldLintsClean(t testing.TB, res cliResult, root, dir string) string {
 	t.Helper()
-	if res.Exit != 2 {
-		t.Errorf("scaffold %v exit=%d, want 2\nstderr=%s", flags, res.Exit, res.Stderr)
+	if res.Exit != 0 {
+		t.Fatalf("scaffold exit=%d\nstderr=%s", res.Exit, res.Stderr)
 	}
-	want := "error: " + strings.Join(flags, ", ") + " set Podium-only fields; write them in a hand-written ARTIFACT.md overlay"
-	if !strings.Contains(res.Stderr, want) {
-		t.Errorf("stderr missing %q:\n%s", want, res.Stderr)
+	mustNotExist(t, filepath.Join(dir, "ARTIFACT.md"))
+	l := runPodium(t, "", nil, "lint", "--registry", root)
+	if l.Exit != 0 || !strings.Contains(l.Stdout, "lint: no issues.") {
+		t.Errorf("lint exit=%d, want 0 with no issues\nstdout=%s\nstderr=%s", l.Exit, l.Stdout, l.Stderr)
 	}
-	mustNotExist(t, dir)
+	return readFile(t, filepath.Join(dir, "SKILL.md"))
 }
 
 // a non-skill scaffold emits a single ARTIFACT.md with the

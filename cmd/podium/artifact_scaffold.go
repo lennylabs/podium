@@ -4,8 +4,9 @@
 // becomes the artifact name; preceding components form the §4.2
 // domain hierarchy) and the artifact type (per spec §4.3); the
 // scaffolder produces lint-clean starting files. A skill gets a
-// SKILL.md alone, carrying the Agent Skills fields and the version
-// under metadata (§4.3.4); every other type gets an ARTIFACT.md with
+// SKILL.md alone, carrying the Agent Skills fields and, under metadata,
+// the version and any tags, sensitivity, and when_to_use the caller
+// passed (§4.3.4); every other type gets an ARTIFACT.md with
 // the universal frontmatter populated.
 package main
 
@@ -37,16 +38,6 @@ var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // validRuleModes mirrors pkg/manifest.RuleMode values per §4.3.
 var validRuleModes = []string{"always", "glob", "auto", "explicit"}
 
-// skillRefusedFlags names the flags that set Podium-only fields, in
-// flag-definition order. §4.3.4 keeps those fields out of SKILL.md
-// and states that no Podium tool generates a skill's ARTIFACT.md, so
-// --type skill refuses them. The refusal walks this list rather than
-// the flag.FlagSet, because fs.Visit reports flags in lexicographical
-// order and the message names them in definition order.
-//
-// Spec: §4.3.4
-var skillRefusedFlags = []string{"tags", "sensitivity", "when-to-use"}
-
 type scaffoldOpts struct {
 	// Positional and identifying.
 	path string // destination directory; last component is the artifact name
@@ -59,6 +50,11 @@ type scaffoldOpts struct {
 	license     string
 	whenToUse   string
 	version     string
+
+	// sensitivitySet records whether the caller passed --sensitivity. A
+	// skill carries a sensitivity only when it was passed, because the
+	// flag's low default applies to the other types alone.
+	sensitivitySet bool
 
 	// Type-specific.
 	inputSchema  string
@@ -88,10 +84,10 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 	opts := &scaffoldOpts{}
 	fs.StringVar(&opts.typ, "type", "", "artifact type ("+strings.Join(firstClassTypes, "|")+"); required")
 	fs.StringVar(&opts.description, "description", "", "one-line description (required)")
-	fs.StringVar(&opts.tags, "tags", "", "comma-separated tags; not accepted with --type skill")
-	fs.StringVar(&opts.sensitivity, "sensitivity", "low", "sensitivity (low|medium|high); not accepted with --type skill")
+	fs.StringVar(&opts.tags, "tags", "", "comma-separated tags; a skill gets them as SKILL.md metadata.tags")
+	fs.StringVar(&opts.sensitivity, "sensitivity", "low", "sensitivity (low|medium|high); a skill gets it as SKILL.md metadata.sensitivity, only when passed")
 	fs.StringVar(&opts.license, "license", "", "SPDX license identifier")
-	fs.StringVar(&opts.whenToUse, "when-to-use", "", "comma-separated when_to_use entries; not accepted with --type skill")
+	fs.StringVar(&opts.whenToUse, "when-to-use", "", "comma-separated when_to_use entries; a skill gets them as SKILL.md metadata.when_to_use, one per line")
 	fs.StringVar(&opts.version, "version", "0.1.0", "starting semver")
 	// Type-specific.
 	fs.StringVar(&opts.inputSchema, "input-schema", "", "type=agent: relative path to input JSON schema")
@@ -158,12 +154,7 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 		_, _ = fmt.Fprintf(errOut, "error: %v\n", err)
 		return 2
 	}
-	if opts.typ == "skill" {
-		if passed := passedSkillRefusedFlags(fs); len(passed) > 0 {
-			_, _ = fmt.Fprintf(errOut, "error: %s set Podium-only fields; write them in a hand-written ARTIFACT.md overlay (see docs/authoring/frontmatter-reference.md)\n", strings.Join(passed, ", "))
-			return 2
-		}
-	}
+	opts.sensitivitySet = flagPassed(fs, "sensitivity")
 
 	if _, statErr := os.Stat(opts.path); statErr == nil && !opts.force {
 		_, _ = fmt.Fprintf(errOut, "error: %s already exists; pass --force to overwrite\n", opts.path)
@@ -233,21 +224,16 @@ func validateName(name, typ string) error {
 	return nil
 }
 
-// passedSkillRefusedFlags returns the skillRefusedFlags the caller set
-// explicitly, as "--name" strings in definition order. A flag left at
-// its default (such as --sensitivity low) is absent from fs.Visit and
-// therefore never refused.
-//
-// Spec: §4.3.4
-func passedSkillRefusedFlags(fs *flag.FlagSet) []string {
-	set := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
-	var passed []string
-	for _, name := range skillRefusedFlags {
-		if set[name] {
-			passed = append(passed, "--"+name)
+// flagPassed reports whether the caller set the named flag on the command
+// line. A flag left at its default is absent from fs.Visit, so passing
+// --sensitivity low is distinguishable from omitting it.
+func flagPassed(fs *flag.FlagSet, name string) bool {
+	passed := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			passed = true
 		}
-	}
+	})
 	return passed
 }
 
@@ -361,9 +347,13 @@ func renderArtifactMD(name string, o *scaffoldOpts) string {
 // renderSkillMD writes SKILL.md per the agentskills.io spec. The
 // version goes in metadata.version as a quoted string, because the
 // standard types metadata as a string-to-string map and §4.3.4 reads
-// a major.minor.patch metadata.version as the skill's version.
+// a major.minor.patch metadata.version as the skill's version. The
+// Podium fields the scaffold accepts follow it under metadata in their
+// §4.3.4 encodings: tags and sensitivity as quoted strings, and
+// when_to_use as a literal block with one situation per line. A skill
+// gets a sensitivity only when --sensitivity was passed.
 //
-// Spec: §4.3.4
+// Spec: §4.3.4, §7.3.1
 func renderSkillMD(name string, o *scaffoldOpts) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
@@ -374,6 +364,13 @@ func renderSkillMD(name string, o *scaffoldOpts) string {
 	}
 	sb.WriteString("metadata:\n")
 	fmt.Fprintf(&sb, "  version: %q\n", o.version)
+	if tags := splitCSV(o.tags); len(tags) > 0 {
+		fmt.Fprintf(&sb, "  tags: %q\n", strings.Join(tags, ", "))
+	}
+	if o.sensitivitySet {
+		fmt.Fprintf(&sb, "  sensitivity: %q\n", o.sensitivity)
+	}
+	writeSkillWhenToUse(&sb, o.whenToUse)
 	sb.WriteString("---\n\n")
 	fmt.Fprintf(&sb, "# %s\n\n", name)
 	sb.WriteString("When the user asks for X, do Y.\n\n")
@@ -381,6 +378,35 @@ func renderSkillMD(name string, o *scaffoldOpts) string {
 	sb.WriteString("## Output format\n\n```\n<exact format to render>\n```\n")
 	return sb.String()
 }
+
+// writeSkillWhenToUse writes the --when-to-use entries as a
+// metadata.when_to_use literal block, one situation per line, indented
+// under the metadata key. An entry that holds a line break becomes one
+// line per non-empty part, because an unindented continuation line
+// would end the block and break the frontmatter.
+//
+// Spec: §4.3.4
+func writeSkillWhenToUse(sb *strings.Builder, raw string) {
+	var lines []string
+	for _, entry := range splitCSV(raw) {
+		for _, line := range strings.FieldsFunc(entry, isLineBreak) {
+			if line = strings.TrimSpace(line); line != "" {
+				lines = append(lines, line)
+			}
+		}
+	}
+	if len(lines) == 0 {
+		return
+	}
+	sb.WriteString("  when_to_use: |\n")
+	for _, line := range lines {
+		fmt.Fprintf(sb, "    %s\n", line)
+	}
+}
+
+// isLineBreak reports whether r ends a line in a when_to_use literal
+// block, matching the line ends the §4.3.4 decoder splits on.
+func isLineBreak(r rune) bool { return r == '\n' || r == '\r' }
 
 func writeWhenToUse(sb *strings.Builder, raw string) {
 	entries := splitCSV(raw)

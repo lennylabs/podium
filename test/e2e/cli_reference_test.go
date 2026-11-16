@@ -1307,8 +1307,9 @@ func TestCLI_ArtifactShowNoSideEffects(t *testing.T) {
 
 // spec: doc "Read CLI — podium artifact scaffold", skill row. The skill
 // package holds SKILL.md alone, and the intermediate domains are created.
+// --tags writes a quoted metadata.tags value that lints clean.
 //
-// Spec: §4.3.4
+// Spec: §4.3.4, §7.3.1
 func TestCLI_ScaffoldSkill(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "finance/release/release-notes")
@@ -1320,14 +1321,17 @@ func TestCLI_ScaffoldSkill(t *testing.T) {
 	mustExist(t, filepath.Join(root, "finance/release"))
 	cliWantExit(t, runPodium(t, "", nil, "lint", "--registry", root), 0, "lint scaffolded")
 
-	refused := filepath.Join(t.TempDir(), "finance/release/release-notes")
-	res = runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Draft release notes.", "--tags", "release", "--yes", refused)
-	assertSkillOverlayRefusal(t, res, refused, "--tags")
+	tagged := t.TempDir()
+	dir := filepath.Join(tagged, "finance/release/release-notes")
+	res = runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Draft release notes.", "--tags", "release", "--yes", dir)
+	skill := assertSkillScaffoldLintsClean(t, res, tagged, dir)
+	cliContains(t, skill, "metadata:\n  version: \"0.1.0\"\n  tags: \"release\"\n---\n", "--tags under metadata")
 }
 
-// spec: doc "podium artifact scaffold", "Non-interactive example".
+// spec: doc "podium artifact scaffold", "Non-interactive example". With
+// --tags, the example writes the tags under metadata and still lints clean.
 //
-// Spec: §4.3.4
+// Spec: §4.3.4, §7.3.1
 func TestCLI_ScaffoldSkillExample(t *testing.T) {
 	root := t.TempDir()
 	dst := filepath.Join(root, "finance/release/release-notes")
@@ -1343,13 +1347,15 @@ func TestCLI_ScaffoldSkillExample(t *testing.T) {
 	// The scaffolded tree lints clean.
 	cliWantExit(t, runPodium(t, "", nil, "lint", "--registry", root), 0, "lint scaffolded")
 
-	refused := filepath.Join(t.TempDir(), "finance/release/release-notes")
+	tagged := t.TempDir()
+	dir := filepath.Join(tagged, "finance/release/release-notes")
 	res = runPodium(t, "", nil, "artifact", "scaffold",
 		"--type", "skill",
 		"--description", "Draft release notes from a list of ticket keys.",
 		"--tags", "release,workflow",
-		"--license", "MIT", "--yes", refused)
-	assertSkillOverlayRefusal(t, res, refused, "--tags")
+		"--license", "MIT", "--yes", dir)
+	skill = assertSkillScaffoldLintsClean(t, res, tagged, dir)
+	cliContains(t, skill, "metadata:\n  version: \"0.1.0\"\n  tags: \"release, workflow\"\n---\n", "--tags under metadata")
 }
 
 // spec: doc "podium artifact scaffold", agent row (ARTIFACT.md only).
