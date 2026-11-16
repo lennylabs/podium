@@ -176,7 +176,7 @@ A layer declared in the registry config, which §4.6 defines as the admin-define
 The registry emits outbound webhooks for:
 
 - `artifact.published`: a new `(artifact_id, version)` was ingested.
-- `artifact.deprecated`: a manifest update flipped `deprecated: true`.
+- `artifact.deprecated`: a manifest update flipped `deprecated: true`. A skill's `deprecated` is the value §4.3.4 resolves, so a new version whose `SKILL.md` `metadata` carries `deprecated: "true"` flips it as an `ARTIFACT.md` `deprecated: true` does.
 - `domain.published`: a `DOMAIN.md` was added or changed.
 - `layer.ingested`: a layer completed an ingest cycle (with summary counts).
 - `layer.history_rewritten`: force-push detected in a `git` layer.
