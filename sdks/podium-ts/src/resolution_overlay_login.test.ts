@@ -398,6 +398,37 @@ describe("overlay merge", () => {
     expect(index.search("", { type: "skill" }).map((a) => a.id)).toEqual(["team/greet"]);
   });
 
+  // emptyRegistry answers every search with no registry result, so only
+  // overlay hits reach the fused result.
+  const emptyRegistry: typeof fetch = async () =>
+    new Response(JSON.stringify({ total_matched: 0, results: [] }), { status: 200 });
+
+  // Spec: §6.4, §4.3.4 — a plain skill's metadata.tags in the readable form
+  // reaches the overlay tag filter and the search descriptor.
+  it("filters a SKILL.md-only package by its metadata.tags", async () => {
+    const overlay = join(dir, "overlay");
+    await writeOverlay(overlay, { "team/greet/SKILL.md": skillMD('metadata:\n  tags: "finance, close"\n') });
+    await overlayArtifact(overlay, "team/other", { desc: "unrelated helper" });
+    const c = new Client({ registry: "http://reg", overlayPath: overlay, fetcher: emptyRegistry });
+    const res = await c.searchArtifacts("", { tags: ["close"] });
+    expect((res.results ?? []).map((r) => [r.id, r.tags])).toEqual([["team/greet", ["finance", "close"]]]);
+  });
+
+  // Spec: §6.4, §4.3.4 — the overlay takes no tag from SKILL.md metadata for a
+  // skill that has an ARTIFACT.md, so a both-files skill whose ARTIFACT.md
+  // states no tags has none (D-10).
+  it("takes no metadata.tags for a both-files skill whose ARTIFACT.md states no tags", async () => {
+    const overlay = join(dir, "overlay");
+    await writeOverlay(overlay, {
+      "team/greet/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n<!-- overlay -->\n",
+      "team/greet/SKILL.md": skillMD('metadata:\n  tags: "a, b"\n'),
+    });
+    expect((await LocalOverlay.load(overlay)).get("team/greet")!.tags).toEqual([]);
+    const c = new Client({ registry: "http://reg", overlayPath: overlay, fetcher: emptyRegistry });
+    const res = await c.searchArtifacts("", { tags: ["a"] });
+    expect((res.results ?? []).map((r) => r.id)).not.toContain("team/greet");
+  });
+
   it("rrfFuse ranks an id present in both lists highest", () => {
     const fused = rrfFuse([["a", "b"], ["b", "c"]]);
     const top = [...fused.entries()].sort((x, y) => y[1] - x[1])[0][0];

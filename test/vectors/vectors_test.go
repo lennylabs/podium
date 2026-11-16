@@ -85,7 +85,7 @@ func TestDeliveryVectors_MatchGo(t *testing.T) {
 // encodeVectors marshals the file with two-space indentation, no HTML
 // escaping, and a trailing newline, so a regeneration that changes no case
 // rewrites identical bytes.
-func encodeVectors(t testing.TB, file vectorFile) []byte {
+func encodeVectors(t testing.TB, file any) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

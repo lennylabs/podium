@@ -178,6 +178,140 @@ function readMetadataVersion(
   return childIndent;
 }
 
+// The SKILL.md metadata.tags readable form. A line reader cannot reproduce
+// YAML, so metadataTags reads metadata.tags only from one restricted
+// single-line form, in a frontmatter laid out so that the line reading equals
+// the yaml.v3 decoding Go applies, and returns [] for every other input.
+// test/vectors/skill-metadata-tags.json, generated from
+// manifest.ResolveStoredSkill, pins the form to Go. The numbered conditions
+// cited below are the SDK-1 conditions of
+// proposals/0068-carry-a-skill-s-string-valued-podium-fields-under-skill-md-m.md.
+// White space here is the space and the tab only, so no check uses trim(),
+// which also strips characters yaml.v3 does not treat as white space.
+const TAGS_PLAIN = /^[A-Za-z0-9][A-Za-z0-9 ,._/-]*$/;
+const TAGS_DOUBLE = /^"([\x20\x21\x23-\x5b\x5d-\x7e]*)"$/;
+const TAGS_SINGLE = /^'([\x20-\x26\x28-\x7e]*)'$/;
+const TAGS_NULLS = new Set(["null", "Null", "NULL"]);
+// A key and a quoted scalar with no escape and no inner quote, which leaves no
+// quoted scalar open; condition 10 exempts such a line before the tags line.
+const QUOTED_PAIR_LINE = /^ *[A-Za-z][A-Za-z0-9_-]*: +("[\x20\x21\x23-\x5b\x5d-\x7e]*"|'[\x20-\x26\x28-\x7e]*') *$/;
+// yaml.v3 reads the first four as line breaks and skips a U+FEFF at the start
+// of a line, so each can start a line the line reader does not see.
+const HIDDEN_BREAK = /[\r\u0085\u2028\u2029\ufeff]/;
+
+const isWhite = (ch: string | undefined): boolean => ch === " " || ch === "\t";
+const isBlankLine = (line: string): boolean => [...line].every((ch) => isWhite(ch));
+const indentOf = (line: string): string => line.slice(0, line.length - line.replace(/^[ \t]+/, "").length);
+const isCommentLine = (line: string): boolean => line[indentOf(line).length] === "#";
+const trimSpaces = (s: string): string => s.replace(/^ +| +$/g, "");
+
+// frontmatterLines delimits the frontmatter as Go's SplitFrontmatter does: the
+// text begins with "---" and an LF or a CR LF, and the frontmatter ends at the
+// first later line that begins with "---". Lines split at each LF, with a CR
+// directly before the LF removed. It returns null when there is no frontmatter.
+function frontmatterLines(text: string): string[] | null {
+  if (!text.startsWith("---\n") && !text.startsWith("---\r\n")) return null;
+  const parts = text.split("\n");
+  const lines = parts.map((l, i) => (i < parts.length - 1 && l.endsWith("\r") ? l.slice(0, -1) : l));
+  const end = lines.findIndex((l, i) => i > 0 && l.startsWith("---"));
+  return end === -1 ? null : lines.slice(1, end);
+}
+
+// lineKey returns the text before the first ":" with trailing spaces and one
+// pair of matching surrounding quotes removed, or null with no ":".
+function lineKey(rest: string): string | null {
+  const sep = rest.indexOf(":");
+  if (sep === -1) return null;
+  const key = rest.slice(0, sep).replace(/ +$/, "");
+  const q = key[0];
+  return key.length >= 2 && (q === '"' || q === "'") && key.endsWith(q) ? key.slice(1, -1) : key;
+}
+
+// tagsContent returns the content of the tags line's value (conditions 4 and
+// 5), or null when the line or the value is outside the form.
+function tagsContent(line: string, indent: string): string | null {
+  if (line.includes("\t") || !line.startsWith(`${indent}tags:`)) return null;
+  const rest = line.slice(indent.length + "tags:".length);
+  if (!rest.startsWith(" ")) return null;
+  const value = trimSpaces(rest);
+  if (TAGS_PLAIN.test(value)) return TAGS_NULLS.has(value) ? null : value;
+  const quoted = TAGS_DOUBLE.exec(value) ?? TAGS_SINGLE.exec(value);
+  return quoted ? quoted[1] : null;
+}
+
+// blankUntilSibling reports whether every line from lines[0] up to the next
+// line indented no deeper than indentLen that is neither blank nor a comment
+// is blank, so no continuation line extends the tags value (condition 6).
+function blankUntilSibling(lines: string[], indentLen: number): boolean {
+  for (const line of lines) {
+    if (isBlankLine(line)) continue;
+    return !isCommentLine(line) && indentOf(line).length <= indentLen;
+  }
+  return true;
+}
+
+// holdsAlias reports whether a line holds a "*" that begins a token and that a
+// non-white character follows. yaml.v3 compares mapping keys for duplicates
+// only between nodes of one kind, so an alias key resolving to tags would
+// replace the tags value with no error (condition 6).
+function holdsAlias(line: string): boolean {
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === "*" && (i === 0 || isWhite(line[i - 1])) && i + 1 < line.length && !isWhite(line[i + 1])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// opensScalarOrDocumentEnd reports whether a frontmatter line before the tags
+// line can end the YAML document or open a quoted scalar or a flow collection
+// that continues across later lines and holds the metadata or tags line as
+// text (condition 10).
+function opensScalarOrDocumentEnd(line: string): boolean {
+  if (line.startsWith("...") || line.startsWith("%")) return true;
+  if (QUOTED_PAIR_LINE.test(line)) return false;
+  if (line.includes("[") || line.includes("{")) return true;
+  for (let i = 0; i < line.length; i++) {
+    if ((line[i] === '"' || line[i] === "'") && (i === 0 || isWhite(line[i - 1]))) return true;
+  }
+  return false;
+}
+
+// metadataTags returns the tags of a SKILL.md whose metadata.tags value and
+// frontmatter are in the readable form, and [] for every input outside it.
+// The overlay runs no lint, so a dropped value raises nothing; podium lint
+// reports it under the Go rules.
+//
+// Spec: §4.3.4, §6.4
+export function metadataTags(skillMD: string): string[] {
+  const fm = frontmatterLines(skillMD);
+  if (fm === null || fm.some((l) => HIDDEN_BREAK.test(l))) return [];
+  const first = fm.find((l) => !isBlankLine(l) && !isCommentLine(l));
+  if (first === undefined || isWhite(first[0])) return [];
+  const metaAt = fm.flatMap((l, i) => (l.startsWith("metadata:") ? [i] : []));
+  if (metaAt.length !== 1 || !isBlankLine(fm[metaAt[0]].slice("metadata:".length))) return [];
+  const start = metaAt[0] + 1;
+  let stop = start;
+  while (stop < fm.length && !(fm[stop] !== "" && !isWhite(fm[stop][0]) && fm[stop][0] !== "#")) stop++;
+  const child = fm.slice(start, stop).find((l) => !isBlankLine(l) && !isCommentLine(l));
+  if (child === undefined) return [];
+  const indent = indentOf(child);
+  if (!/^ +$/.test(indent)) return [];
+  const tagsAt: number[] = [];
+  for (let i = start; i < stop; i++) {
+    if (indentOf(fm[i]) === indent && lineKey(fm[i].slice(indent.length)) === "tags") tagsAt.push(i);
+  }
+  if (tagsAt.length !== 1) return [];
+  const at = tagsAt[0];
+  const content = tagsContent(fm[at], indent);
+  if (content === null) return [];
+  const after = fm.slice(at + 1, stop);
+  if (!blankUntilSibling(after, indent.length) || after.some(holdsAlias)) return [];
+  if (fm.slice(0, at).some(opensScalarOrDocumentEnd)) return [];
+  const tags = content.split(",").map(trimSpaces);
+  return tags.some((t) => t === "") ? [] : tags;
+}
+
 export interface OverlayArtifact {
   id: string;
   type: string;
@@ -590,8 +724,9 @@ export class LocalOverlay {
   }
 
   // readPlainSkill loads a package whose root holds SKILL.md and no
-  // ARTIFACT.md. The description, the search tokens, and the body come from
-  // SKILL.md, and the frontmatter is the synthesized document, which is never
+  // ARTIFACT.md. The description, the search tokens, the body, and the tags
+  // come from SKILL.md, the tags from a metadata.tags value in the readable
+  // form, and the frontmatter is the synthesized document, which is never
   // parsed for a field.
   //
   // Spec: §4.3.4, §6.4
@@ -613,7 +748,7 @@ export class LocalOverlay {
       type: "skill",
       version,
       description: skill.description,
-      tags: [],
+      tags: metadataTags(skillRaw),
       metadataVersion: skill.metadataVersion,
     };
     const resources = await collectResources(fs, path, dir, new Set(["SKILL.md"]));
