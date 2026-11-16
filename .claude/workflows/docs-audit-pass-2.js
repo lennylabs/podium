@@ -71,7 +71,7 @@ const GROUPS = [
   {
     key: 'operations-and-meta',
     pages:
-      'docs/deployment/operations/index.md, docs/deployment/operations/observability.md, docs/deployment/operations/signing-keys.md, docs/deployment/operations/backup-restore.md, docs/deployment/operations/upgrading.md, docs/deployment/operations/upgrade-notes.md, docs/deployment/operations/capacity.md, docs/deployment/operations/security-review.md, docs/deployment/operations/outbound-webhooks.md, docs/deployment/operations/troubleshooting.md, docs/deployment/services/extending.md, docs/deployment/services/vector-backends.md, docs/about/live-vector-backends.md, docs/about/index.md, docs/about/status.md, docs/about/contributing.md, docs/about/governance.md, docs/about/changelog.md, docs/reference/index.md, docs/rfc/README.md',
+      'docs/deployment/operations/index.md, docs/deployment/operations/observability.md, docs/deployment/operations/signing-keys.md, docs/deployment/operations/backup-restore.md, docs/deployment/operations/upgrading.md, docs/deployment/operations/upgrade-notes.md, docs/deployment/operations/capacity.md, docs/deployment/operations/security-review.md, docs/deployment/operations/outbound-webhooks.md, docs/deployment/operations/troubleshooting.md, docs/deployment/services/extending.md, docs/deployment/services/vector-backends.md, docs/about/live-vector-backends.md, docs/about/index.md, docs/about/status.md, docs/about/contributing.md, docs/about/governance.md, docs/about/changelog.md, docs/reference/index.md',
     focus:
       'Operational commands with the flags shown, metric names, backend selection against pkg/vector and pkg/embedding, and every "shipped" or "planned" claim in about/status.md against what is actually in the tree.',
   },
