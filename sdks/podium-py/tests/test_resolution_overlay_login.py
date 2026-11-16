@@ -488,7 +488,7 @@ def test_overlay_filters_a_skill_md_only_package_by_metadata_tags(artifacts_serv
 
 # Spec: §6.4, §4.3.4 — the overlay takes no tag from SKILL.md metadata for a
 # skill that has an ARTIFACT.md, so a both-files skill whose ARTIFACT.md states
-# no tags has none (D-10).
+# no tags has none.
 def test_overlay_takes_no_metadata_tags_for_a_both_files_skill(artifacts_server, tmp_path):
     overlay = tmp_path / "overlay"
     _write(

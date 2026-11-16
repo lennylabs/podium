@@ -416,7 +416,7 @@ describe("overlay merge", () => {
 
   // Spec: §6.4, §4.3.4 — the overlay takes no tag from SKILL.md metadata for a
   // skill that has an ARTIFACT.md, so a both-files skill whose ARTIFACT.md
-  // states no tags has none (D-10).
+  // states no tags has none.
   it("takes no metadata.tags for a both-files skill whose ARTIFACT.md states no tags", async () => {
     const overlay = join(dir, "overlay");
     await writeOverlay(overlay, {

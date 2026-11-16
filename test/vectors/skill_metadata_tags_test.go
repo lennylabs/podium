@@ -41,8 +41,9 @@ type tagsCase struct {
 
 // tagsForm is a declared case: a SKILL.md, whether the readable form admits
 // it, and the form's reading when it does. The readable form and its
-// numbered conditions are the SDK-1 form of
-// proposals/0068-carry-a-skill-s-string-valued-podium-fields-under-skill-md-m.md.
+// numbered conditions are listed beside metadataTags in
+// sdks/podium-ts/src/overlay.ts and _metadata_tags in
+// sdks/podium-py/podium/_overlay.py.
 type tagsForm struct {
 	name     string
 	skillMD  string
@@ -78,7 +79,7 @@ func unreadableForm(name, skillMD string) tagsForm {
 	return tagsForm{name: name, skillMD: skillMD}
 }
 
-// readableTagsForms are the cases TEST-1 declares readable, each with its
+// readableTagsForms are the cases declared readable, each with its
 // declared reading. Each case whose SKILL.md Go parses must resolve to that
 // reading.
 func readableTagsForms() []tagsForm {
@@ -94,10 +95,10 @@ func readableTagsForms() []tagsForm {
 		readableForm("double-quoted punctuation", withTags("  tags: \"c++, q&a: x # y\"\n"), "c++", "q&a: x # y"),
 		readableForm("double-quoted null", withTags("  tags: \"null\"\n"), "null"),
 		readableForm("double-quoted tilde", withTags("  tags: \"~\"\n"), "~"),
-		// TEST-1 lists these as readable with the reading []. Condition 7
-		// gives the overlay no tag for an empty element, and D-3 leaves Go
-		// none, so declaring the empty reading makes the generator check
-		// that yaml.v3 and the D-3 rule resolve each value to [].
+		// These are readable with the reading []. Condition 7 gives the
+		// overlay no tag for an empty element, and §4.3.4 treats an empty
+		// tags value as absent, so declaring the empty reading makes the
+		// generator check that yaml.v3 and that rule resolve each value to [].
 		readableForm("plain empty element", withTags("  tags: a,,b\n")),
 		readableForm("double-quoted empty", withTags("  tags: \"\"\n")),
 		readableForm("doc example with sensitivity and when_to_use",

@@ -183,9 +183,36 @@ function readMetadataVersion(
 // single-line form, in a frontmatter laid out so that the line reading equals
 // the yaml.v3 decoding Go applies, and returns [] for every other input.
 // test/vectors/skill-metadata-tags.json, generated from
-// manifest.ResolveStoredSkill, pins the form to Go. The numbered conditions
-// cited below are the SDK-1 conditions of
-// proposals/0068-carry-a-skill-s-string-valued-podium-fields-under-skill-md-m.md.
+// manifest.ResolveStoredSkill, pins the form to Go. The frontmatter is
+// delimited as Go's SplitFrontmatter delimits it: the text begins with "---"
+// and a line end, lines split at LF with a CR before an LF removed, and the
+// frontmatter ends at the first later line that begins with "---". A value is
+// in the form when every numbered condition holds:
+//   1. Exactly one frontmatter line begins with "metadata:", and nothing but
+//      white space follows it.
+//   2. The block runs to the next column-0 line that is not a comment. The
+//      child indent is the space indentation of its first line that is neither
+//      blank nor a comment.
+//   3. Exactly one block line at the child indent has the key "tags" (the text
+//      before the first ":", trailing spaces and one pair of quotes removed).
+//   4. That line is the child indent, "tags:", one or more spaces, the value,
+//      and optional trailing spaces, with no tab.
+//   5. The value is plain (TAGS_PLAIN and not a null word), or double- or
+//      single-quoted printable ASCII with no escape and no inner quote.
+//   6. Every later line is blank up to the next block line at or above the
+//      child indent, and no later block line holds a "*" that starts an alias:
+//      yaml.v3 lets an alias key that resolves to "tags" replace the value
+//      with no error.
+//   7. Splitting the content on "," and trimming spaces leaves no empty
+//      element. The elements, in order, are the tags.
+//   8. The frontmatter holds no CR, U+0085, U+2028, U+2029, or U+FEFF, which
+//      yaml.v3 reads as, or skips at, a line start the line reader cannot see.
+//   9. The first frontmatter line that is neither blank nor a comment begins
+//      at column 0, since yaml.v3 decodes only the first document.
+//  10. No line before the tags line begins with "..." or "%", holds "[" or
+//      "{", or holds a quote at a token start, because each can end the
+//      document or open a scalar that swallows later lines. A key followed by
+//      a quoted value of the condition 5 form is exempt.
 // White space here is the space and the tab only, so no check uses trim(),
 // which also strips characters yaml.v3 does not treat as white space.
 const TAGS_PLAIN = /^[A-Za-z0-9][A-Za-z0-9 ,._/-]*$/;
