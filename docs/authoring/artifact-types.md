@@ -44,7 +44,7 @@ your team's policy doc. Output a markdown table sorted by absolute
 variance.
 ```
 
-An optional `ARTIFACT.md` overlay beside `SKILL.md` carries the Podium-only fields. The author writes it by hand:
+`SKILL.md` `metadata` can carry the Podium-only fields that [Podium fields in SKILL.md metadata](frontmatter-reference#podium-fields-in-skillmd-metadata) lists, as strings. An optional `ARTIFACT.md` overlay beside `SKILL.md` can carry every Podium-only field, and it is the only place for the fields that `metadata` does not carry, such as `runtime_requirements`. The author writes it by hand:
 
 ```markdown
 ---

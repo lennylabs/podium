@@ -13,6 +13,7 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -387,6 +388,57 @@ func TestFrontmatter_SkillMetadataStored(t *testing.T) {
 	srv := startServer(t, reg)
 	if st := getStatus(t, srv.BaseURL+"/v1/load_artifact?id=finance/close/run-variance-analysis"); st != 200 {
 		t.Errorf("load = HTTP %d, want 200", st)
+	}
+}
+
+// fmRunVarianceSkill is the run-variance example from the page's "Podium
+// fields in SKILL.md metadata" section, with a one-line body.
+const fmRunVarianceSkill = "---\n" +
+	"name: run-variance\n" +
+	"description: Compare actuals against forecast for a close period.\n" +
+	"metadata:\n" +
+	"  version: \"1.0.0\"\n" +
+	"  tags: \"finance, close\"\n" +
+	"  sensitivity: medium\n" +
+	"  when_to_use: |\n" +
+	"    After month-end close\n" +
+	"    When reconciling a variance\n" +
+	"---\n\nCompare actuals against forecast.\n"
+
+// Spec: §4.3.4 — the page's run-variance example, a SKILL.md with no
+// ARTIFACT.md that sets its Podium fields under metadata, lints with no
+// issues, and a registry that ingests it finds it by a metadata tag and
+// serves the metadata sensitivity on load.
+func TestFrontmatter_SkillMetadataFieldsExample(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{"finance/run-variance/SKILL.md": fmRunVarianceSkill})
+	if l := runPodium(t, "", nil, "lint", "--registry", reg); l.Exit != 0 || !strings.Contains(l.Stdout, "lint: no issues.") {
+		t.Fatalf("lint exit=%d stdout=%q stderr=%q", l.Exit, l.Stdout, l.Stderr)
+	}
+	srv := startServer(t, reg)
+	if got := tagSearchIDs(t, srv.BaseURL, "close"); !slices.Contains(got, "finance/run-variance") {
+		t.Errorf("search --tags close = %v, want finance/run-variance", got)
+	}
+	if r := hrLoad(t, srv.BaseURL, "finance/run-variance"); r.Sensitivity != "medium" {
+		t.Errorf("load sensitivity = %q, want medium", r.Sensitivity)
+	}
+}
+
+// Spec: §4.3.4 — a metadata value is a string, so a YAML sequence under
+// metadata.tags makes SKILL.md fail to parse. podium lint exits 1 with a
+// message that names the key and the comma-separated encoding.
+func TestFrontmatter_SkillMetadataListValueFails(t *testing.T) {
+	t.Parallel()
+	skill := strings.Replace(fmRunVarianceSkill, `tags: "finance, close"`, "tags: [finance, close]", 1)
+	reg := writeRegistry(t, map[string]string{"finance/run-variance/SKILL.md": skill})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	for _, want := range []string{"metadata.tags is not a string", "tags is comma-separated"} {
+		if !strings.Contains(res.Stderr, want) {
+			t.Errorf("lint stderr does not contain %q:\n%s", want, res.Stderr)
+		}
 	}
 }
 

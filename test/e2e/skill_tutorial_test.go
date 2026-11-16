@@ -207,6 +207,52 @@ func TestSkillTutorial_ArtifactFieldMismatchErrors(t *testing.T) {
 	}
 }
 
+// greetSkillMetadataFields is the SKILL.md from the end of "Step 2": the
+// overlay's when_to_use, tags, and sensitivity set under metadata instead.
+const greetSkillMetadataFields = "---\n" +
+	"name: greet\n" +
+	"description: Greet the user by name and tell them today's date in a friendly format. Use when the user opens a session with a greeting or asks who you are.\n" +
+	"license: MIT\n" +
+	"metadata:\n" +
+	"  version: \"1.0.0\"\n" +
+	"  tags: \"demo, hello-world, greeting\"\n" +
+	"  sensitivity: low\n" +
+	"  when_to_use: |\n" +
+	"    When the user opens a session with a greeting like 'hi' or 'hello'.\n" +
+	"    When the user asks who you are at session start.\n" +
+	"---\n\nGreet the user warmly and state today's date.\n"
+
+// Spec: §4.3.4 — the tutorial's metadata form of the Step 2 fields lints
+// with no issues alone and beside the Step 2 overlay, whose values it
+// matches, and lint reports skill_artifact_field_mismatch once the overlay's
+// tags differ from the metadata tags.
+func TestSkillTutorial_MetadataFieldsForm(t *testing.T) {
+	t.Parallel()
+	differentTags := strings.Replace(greetArtifactFuller, "tags: [demo, hello-world, greeting]", "tags: [demo]", 1)
+	for _, tc := range []struct {
+		name     string
+		artifact string
+		exit     int
+		want     string
+	}{
+		{"metadata alone", "", 0, "lint: no issues."},
+		{"beside the matching overlay", greetArtifactFuller, 0, "lint: no issues."},
+		{"beside an overlay with other tags", differentTags, 1, "lint.skill_artifact_field_mismatch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			files := map[string]string{"personal/hello/greet/SKILL.md": greetSkillMetadataFields}
+			if tc.artifact != "" {
+				files["personal/hello/greet/ARTIFACT.md"] = tc.artifact
+			}
+			res := runPodium(t, "", nil, "lint", "--registry", writeRegistry(t, files))
+			if res.Exit != tc.exit || !strings.Contains(res.Stdout, tc.want) {
+				t.Errorf("lint exit=%d, want %d with %q\nstdout=%s\nstderr=%s", res.Exit, tc.exit, tc.want, res.Stdout, res.Stderr)
+			}
+		})
+	}
+}
+
 // greetSkillMetadataSensitivity returns the tutorial's SKILL.md with
 // metadata.version 1.0.0 and the given metadata.sensitivity.
 func greetSkillMetadataSensitivity(level string) string {

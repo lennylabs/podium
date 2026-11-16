@@ -290,7 +290,7 @@ Several open specifications define parts of this space. The table states what Po
 
 | Specification | Status | What it defines | What Podium implements |
 |:--|:--|:--|:--|
-| **Agent Skills** ([specification](https://agentskills.io/specification)) | Specification governed by the Agentic AI Foundation (AAIF) | The `SKILL.md` skill directory format | A `type: skill` artifact carries a `SKILL.md` that follows the specification. Podium-only fields, such as `when_to_use` and `sensitivity`, live in an `ARTIFACT.md` beside it. |
+| **Agent Skills** ([specification](https://agentskills.io/specification)) | Specification governed by the Agentic AI Foundation (AAIF) | The `SKILL.md` skill directory format | A `type: skill` artifact carries a `SKILL.md` that follows the specification. Podium-only fields, such as `when_to_use` and `sensitivity`, live under `SKILL.md` `metadata` as strings or in an `ARTIFACT.md` beside it, and the fields that `metadata` does not carry live in `ARTIFACT.md`. |
 | **AGENTS.md** ([agents.md](https://agents.md/)) | Open convention | Repository-wide instructions for coding agents | The Codex, OpenCode, and Pi adapters inject rule artifacts into `AGENTS.md` between Podium-managed markers. |
 | **Agent Plugins 1.0** ([agent-plugins.org](https://agent-plugins.org/)) | Published specification, version 1.0.0 | A portable package format for skills, tools, and other agent components | Podium writes no Agent Plugins packages. |
 | **MCP Skills Extension, SEP-2640** ([SEP](https://modelcontextprotocol.io/seps/2640-skills-extension)) | Final MCP extension (`io.modelcontextprotocol/skills`) | Serving skills from MCP servers | The Podium MCP server mirrors artifact bodies as read-only MCP resources and does not implement the skills extension. |
