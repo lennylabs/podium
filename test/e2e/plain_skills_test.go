@@ -15,10 +15,12 @@ package e2e
 // Spec: §4.2, §4.3.4, §4.4, §6.7, §13.11.3.
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -230,4 +232,162 @@ func materializedSkillDir(t *testing.T, root string) string {
 	}
 	t.Fatalf("no materialized greet SKILL.md under %s: %v", root, relFiles(t, root))
 	return ""
+}
+
+// plainSkillVersion100Document is the synthesized ARTIFACT.md the registry
+// serves for a plain skill whose SKILL.md metadata.version is 1.0.0. It is
+// copied from the §4.3.4 bytes, so a resolved metadata field that leaks into
+// the synthesized document fails the comparison.
+const plainSkillVersion100Document = "---\ntype: skill\nversion: 1.0.0\n---\n" +
+	"<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n"
+
+// notesSkillMetadata is the metadata block of the notes skill. Its tags and
+// its sensitivity come from SKILL.md metadata alone, because notes has no
+// ARTIFACT.md.
+const notesSkillMetadata = "  version: \"1.0.0\"\n  tags: \"release, notes\"\n  sensitivity: medium\n"
+
+// plainMetadataSkill returns a plain SKILL.md for name whose metadata block is
+// metadata, given as indented YAML lines.
+func plainMetadataSkill(name, metadata string) string {
+	return "---\nname: " + name + "\ndescription: The " + name + " skill for the metadata-field tests.\n" +
+		"metadata:\n" + metadata + "---\n\nSummarize the release notes.\n"
+}
+
+// tagSearchIDs runs `podium search --json --tags <tags> ""` against baseURL and
+// returns the result IDs. The empty operand is the browse form, so the tag
+// filter alone decides the listing.
+func tagSearchIDs(t *testing.T, baseURL, tags string) []string {
+	t.Helper()
+	res := runPodium(t, "", brEnv(baseURL), "search", "--json", "--tags", tags, "")
+	cliWantExit(t, res, 0, "search --tags "+tags)
+	var ids []string
+	for _, r := range cliResults(t, res.Stdout) {
+		id, _ := r["id"].(string)
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// Spec: §4.3.4, §13.4, §4.7.10 — a plain skill's tags, sensitivity,
+// deprecated, and replaced_by under SKILL.md metadata reach search and load
+// on a standalone server that signs at ingest. A tag search finds notes by a
+// metadata tag, default search omits the deprecated changes skill, the load
+// of notes serves the metadata sensitivity beside the unchanged synthesized
+// document, the load of changes warns with its replaced_by target, and the
+// bridge verifies the delivery signature of notes under always.
+func TestPlainSkills_MetadataFieldsServed(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"notes/SKILL.md":   plainMetadataSkill("notes", notesSkillMetadata),
+		"changes/SKILL.md": plainMetadataSkill("changes", "  version: \"1.0.0\"\n  tags: \"release\"\n  deprecated: \"true\"\n  replaced_by: notes\n"),
+	})
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()},
+		"serve", "--standalone", "--sign", "registry-key", "--layer-path", reg)
+
+	t.Run("tag search reads metadata tags", func(t *testing.T) {
+		if got := tagSearchIDs(t, srv.BaseURL, "notes"); !slices.Contains(got, "notes") {
+			t.Errorf("search --tags notes = %v, want notes", got)
+		}
+		got := tagSearchIDs(t, srv.BaseURL, "release")
+		if !slices.Contains(got, "notes") || slices.Contains(got, "changes") {
+			t.Errorf("search --tags release = %v, want notes and no deprecated changes", got)
+		}
+	})
+	t.Run("load serves the metadata sensitivity", func(t *testing.T) {
+		r := hrLoad(t, srv.BaseURL, "notes")
+		if r.Sensitivity != "medium" {
+			t.Errorf("sensitivity = %q, want medium", r.Sensitivity)
+		}
+		if r.Frontmatter != plainSkillVersion100Document {
+			t.Errorf("frontmatter = %q, want the synthesized %q", r.Frontmatter, plainSkillVersion100Document)
+		}
+	})
+	t.Run("load warns on the metadata deprecation", func(t *testing.T) {
+		r := hrLoad(t, srv.BaseURL, "changes")
+		if !r.Deprecated || r.ReplacedBy != "notes" || !strings.Contains(r.DeprecationWarning, "notes") {
+			t.Errorf("deprecated=%v replaced_by=%q deprecation_warning=%q, want a warning naming notes",
+				r.Deprecated, r.ReplacedBy, r.DeprecationWarning)
+		}
+	})
+	t.Run("bridge load verifies under always", func(t *testing.T) {
+		kf, err := sign.ReadKeyFile(homeKeyFile(srv.Home))
+		if err != nil {
+			t.Fatalf("read the registry key: %v", err)
+		}
+		errStr, res := bridgeLoad(t, srv.BaseURL, "notes",
+			"PODIUM_SIGNATURE_PROVIDER=registry-managed",
+			"PODIUM_SIGNATURE_VERIFY_KEY="+base64.StdEncoding.EncodeToString(kf.Public),
+			"PODIUM_VERIFY_SIGNATURES=always")
+		if errStr != "" {
+			t.Fatalf("load of notes = %q, want success\nstderr: %s", errStr, res.Stderr)
+		}
+	})
+}
+
+// Spec: §13.4 — the tags and sensitivity of a skill row that an earlier
+// release stored are exempt from the rewrite rule. The test stands such a row
+// in by emptying the stored columns of notes while no server holds the store,
+// and it leaves the row's bytes, hash, and signature in place. A start over
+// identical bytes recomputes no column: a tag search still misses notes, a
+// load admits the row and serves the sensitivity its SKILL.md metadata
+// resolves to, and the columns read back empty after the server stops.
+func TestPlainSkills_StartKeepsEarlierReleaseColumns(t *testing.T) {
+	home := t.TempDir()
+	// The store sits beside the default signing key, so the default start
+	// signs without PODIUM_SIGN_KEY_PATH (§13.12 Signing).
+	sqlitePath := filepath.Join(home, ".podium", "standalone", "podium.db")
+	env := []string{"HOME=" + home, "PODIUM_REGISTRY_STORE=sqlite", "PODIUM_SQLITE_PATH=" + sqlitePath}
+	reg := writeRegistry(t, map[string]string{"notes/SKILL.md": plainMetadataSkill("notes", notesSkillMetadata)})
+	args := []string{"serve", "--standalone", "--no-embeddings", "--layer-path", reg}
+
+	first := startServerArgs(t, env, args...)
+	if got := tagSearchIDs(t, first.BaseURL, "notes"); !slices.Contains(got, "notes") {
+		t.Fatalf("search --tags notes before the edit = %v, want notes", got)
+	}
+	stopProc(first.cmd)
+
+	blankSkillColumns(t, sqlitePath, "notes")
+
+	second := startServerArgs(t, env, args...)
+	if got := tagSearchIDs(t, second.BaseURL, "notes"); slices.Contains(got, "notes") {
+		t.Errorf("search --tags notes after the restart = %v, want the stored empty tags to miss notes", got)
+	}
+	if r := hrLoad(t, second.BaseURL, "notes"); r.Sensitivity != "medium" {
+		t.Errorf("load sensitivity = %q, want the resolved medium", r.Sensitivity)
+	}
+	stopProc(second.cmd)
+
+	found := false
+	for _, rec := range storedRows(t, sqlitePath) {
+		if rec.ArtifactID != "notes" {
+			continue
+		}
+		found = true
+		if len(rec.Tags) != 0 || rec.Sensitivity != "" {
+			t.Errorf("stored notes row tags=%v sensitivity=%q, want both still empty", rec.Tags, rec.Sensitivity)
+		}
+	}
+	if !found {
+		t.Fatal("the store holds no notes row")
+	}
+}
+
+// blankSkillColumns empties the tags and sensitivity columns of id in the
+// SQLite file and leaves the stored bytes, the content hash, and the envelope
+// in place, so admission still verifies the row. It runs while no server holds
+// the store.
+func blankSkillColumns(t *testing.T, sqlitePath, id string) {
+	t.Helper()
+	db, err := sql.Open("sqlite3", sqlitePath)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	res, err := db.Exec(`UPDATE manifests SET tags = '', sensitivity = '' WHERE artifact_id = ?`, id)
+	if err != nil {
+		t.Fatalf("blank the %s columns: %v", id, err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		t.Fatalf("blank the %s columns: %d row(s) affected, err %v", id, n, err)
+	}
 }

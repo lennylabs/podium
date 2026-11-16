@@ -207,6 +207,51 @@ func TestSkillTutorial_ArtifactFieldMismatchErrors(t *testing.T) {
 	}
 }
 
+// greetSkillMetadataSensitivity returns the tutorial's SKILL.md with
+// metadata.version 1.0.0 and the given metadata.sensitivity.
+func greetSkillMetadataSensitivity(level string) string {
+	return strings.Replace(greetSkillVersioned, "  version: \"1.0.0\"\n",
+		"  version: \"1.0.0\"\n  sensitivity: "+level+"\n", 1)
+}
+
+// Spec: §4.3.4 — a SKILL.md metadata.sensitivity that differs from the
+// sensitivity ARTIFACT.md states fails lint with exit 1 and
+// skill_artifact_field_mismatch, and a metadata.sensitivity outside the enum
+// on a skill with no ARTIFACT.md is ignored under a
+// lint.skill_metadata_field_ignored warning that leaves the exit at 0.
+func TestSkillTutorial_MetadataSensitivityLint(t *testing.T) {
+	t.Parallel()
+	t.Run("ARTIFACT.md value differs", func(t *testing.T) {
+		t.Parallel()
+		reg := writeRegistry(t, map[string]string{
+			"personal/hello/greet/ARTIFACT.md": "---\ntype: skill\nsensitivity: high\n---\n\n<!-- Skill body lives in SKILL.md. -->\n",
+			"personal/hello/greet/SKILL.md":    greetSkillMetadataSensitivity("low"),
+		})
+		res := runPodium(t, "", nil, "lint", "--registry", reg)
+		if res.Exit != 1 {
+			t.Fatalf("lint exit=%d, want 1 (error)\nstdout=%s", res.Exit, res.Stdout)
+		}
+		if !strings.Contains(res.Stdout, "skill_artifact_field_mismatch") || !strings.Contains(res.Stdout, "sensitivity") {
+			t.Errorf("expected a skill_artifact_field_mismatch error naming sensitivity:\n%s", res.Stdout)
+		}
+	})
+	t.Run("metadata value outside the enum", func(t *testing.T) {
+		t.Parallel()
+		reg := writeRegistry(t, map[string]string{
+			"personal/hello/greet/SKILL.md": greetSkillMetadataSensitivity("secret"),
+		})
+		res := runPodium(t, "", nil, "lint", "--registry", reg)
+		if res.Exit != 0 {
+			t.Fatalf("lint exit=%d, want 0 (warning only)\nstdout=%s", res.Exit, res.Stdout)
+		}
+		for _, want := range []string{"[warning]", "lint.skill_metadata_field_ignored", "metadata.sensitivity", "secret"} {
+			if !strings.Contains(res.Stdout, want) {
+				t.Errorf("lint output does not name %s:\n%s", want, res.Stdout)
+			}
+		}
+	})
+}
+
 // a non-comment ARTIFACT.md body for a skill warns
 // (lint.skill_artifact_body) but does not fail. spec: §4.3.4.
 func TestSkillTutorial_ArtifactBodyMustBeComment(t *testing.T) {
