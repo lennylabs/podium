@@ -190,6 +190,12 @@ func TestParseSkill_NonStringMetadataNamesKey(t *testing.T) {
 			contains: []string{"metadata.owner is not a string"},
 		},
 		{
+			name:     "alias key names the resolved key",
+			fm:       "name: x\nmetadata:\n  owner: &k tags\n  *k : [a, b]\n",
+			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
+			absent:   []string{"metadata.k "},
+		},
+		{
 			name:     "second error stays visible",
 			fm:       "name: [x]\nmetadata:\n  tags: [a, b]\n",
 			contains: []string{"metadata.tags is not a string", "line 1", "line 3"},

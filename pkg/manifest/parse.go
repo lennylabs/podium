@@ -159,7 +159,9 @@ func skillDecodeError(fm []byte, err error) error {
 // nonStringMetadataKey returns the first key of the frontmatter's metadata
 // mapping whose value, after alias resolution, is not a scalar. A merge key is
 // skipped, because yaml.v3 applies it when decoding the map rather than
-// decoding its value as a string.
+// decoding its value as a string. The key is alias-resolved too, because an
+// alias key's own Value is the anchor name rather than the key yaml.v3
+// decodes.
 func nonStringMetadataKey(fm []byte) (string, bool) {
 	var doc yaml.Node
 	if yaml.Unmarshal(fm, &doc) != nil || len(doc.Content) == 0 {
@@ -170,12 +172,12 @@ func nonStringMetadataKey(fm []byte) (string, bool) {
 		return "", false
 	}
 	for i := 0; i+1 < len(md.Content); i += 2 {
-		k := md.Content[i]
-		if k.ShortTag() == "!!merge" {
+		kn := resolveAlias(md.Content[i])
+		if kn.ShortTag() == "!!merge" {
 			continue
 		}
 		if resolveAlias(md.Content[i+1]).Kind != yaml.ScalarNode {
-			return k.Value, true
+			return kn.Value, true
 		}
 	}
 	return "", false
