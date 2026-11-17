@@ -218,20 +218,28 @@ func TestNearDuplicate_RemedyText(t *testing.T) {
 
 // Spec: §7.3.1 — a prose resource ends in .md, .markdown, .txt, or .rst
 // without regard to case and is not a license file. A license file's name,
-// lowercased and without its final extension, has license, licence, copying,
-// notice, or ofl among its -, _, and . separated parts.
+// lowercased, without its final extension, and split at its -, _, and .
+// characters, is license, licence, copying, or notice alone or followed by
+// one more part, or has ofl as its first or last part. A prose file whose
+// name only contains a license word is a prose resource.
 func TestIsProseResource_Names(t *testing.T) {
 	t.Parallel()
 	text := []byte(prose("w", 60))
 	cases := map[string]bool{
 		// Prose resources.
-		"references/api.md":       true,
-		"notes.txt":               true,
-		"licensing-guide.md":      true,
-		"docs/GUIDE.MD":           true,
-		"docs/intro.markdown":     true,
-		"docs/index.rst":          true,
-		"docs/unlicensed-tips.md": true,
+		"references/api.md":            true,
+		"notes.txt":                    true,
+		"licensing-guide.md":           true,
+		"docs/GUIDE.MD":                true,
+		"docs/intro.markdown":          true,
+		"docs/index.rst":               true,
+		"docs/unlicensed-tips.md":      true,
+		"notice-of-changes.md":         true,
+		"docs/privacy-notice.md":       true,
+		"license-compliance-guide.md":  true,
+		"third_party/foo.license.md":   true,
+		"docs/copying-files-safely.md": true,
+		"fonts/sofl-notes.md":          true,
 		// License files.
 		"LICENSE.txt":                    false,
 		"LICENSE":                        false,
@@ -242,8 +250,10 @@ func TestIsProseResource_Names(t *testing.T) {
 		"NOTICE.md":                      false,
 		"third_party/licence.md":         false,
 		"third_party/license_apache.txt": false,
-		"third_party/foo.license.md":     false,
 		"Copying.rst":                    false,
+		"fonts/OFL.txt":                  false,
+		"NOTICE":                         false,
+		"LICENSE.MIT.md":                 false,
 		// Scripts and data files.
 		"scripts/build.py":   false,
 		"scripts/run.js":     false,
@@ -263,6 +273,27 @@ func TestIsProseResource_Names(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.1 — a license file's name, lowercased, without its final
+// extension, and split at its -, _, and . characters, is license, licence,
+// copying, or notice alone or followed by one more part, or has ofl as its
+// first or last part. notice-of-changes.md and privacy-notice.md are prose
+// resources.
+func TestIsLicenseFile_Names(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"LICENSE.txt", "LICENSE", "LICENSE-MIT", "COPYING", "NOTICE", "OFL.txt",
+		"OFL-eb-garamond.txt", "ArsenalSC-OFL.txt", "fonts/ofl_inter.txt", "Licence.md", "license.apache.txt"} {
+		if !isLicenseFile(name) {
+			t.Errorf("isLicenseFile(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []string{"notice-of-changes.md", "privacy-notice.md", "license-compliance-guide.md",
+		"licensing-guide.md", "foo.license.md", "my-ofl-notes.md", "notes.md", ".md", "-.txt"} {
+		if isLicenseFile(name) {
+			t.Errorf("isLicenseFile(%q) = true, want false", name)
+		}
+	}
+}
+
 // Spec: §7.3.1 — a script, a data file, and a license file bundled unchanged
 // in two artifacts are not compared, while the same text in a Markdown
 // resource is reported.
@@ -278,13 +309,13 @@ func TestNearDuplicate_ComparesProseResourcesOnly(t *testing.T) {
 		return []filesystem.ArtifactRecord{a, b}
 	}
 	excluded := []string{"scripts/build.py", "scripts/run.js", "data/table.json", "assets/page.html",
-		"LICENSE.txt", "LICENSE", "LICENSE-MIT", "COPYING", "fonts/ArsenalSC-OFL.txt", "fonts/OFL-eb-garamond.txt", "NOTICE.md"}
+		"LICENSE.txt", "LICENSE", "LICENSE-MIT", "COPYING", "fonts/ArsenalSC-OFL.txt", "fonts/OFL-eb-garamond.txt", "NOTICE.md", "NOTICE", "fonts/OFL.txt"}
 	for _, p := range excluded {
 		if diags := nearDup(bundle(p), DefaultContentSimilarity); len(diags) != 0 {
 			t.Errorf("%s compared: %v", p, diags)
 		}
 	}
-	for _, p := range []string{"references/api.md", "notes.txt", "licensing-guide.md"} {
+	for _, p := range []string{"references/api.md", "notes.txt", "licensing-guide.md", "notice-of-changes.md", "privacy-notice.md", "license-compliance-guide.md"} {
 		msgs := nearDupMessages(nearDup(bundle(p), DefaultContentSimilarity))
 		want := p + " nearly duplicates pkg/b " + p + " (100%); " + nearDuplicateRemedy
 		if got := msgs["pkg/a"]; len(got) != 1 || got[0] != want {

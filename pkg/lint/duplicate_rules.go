@@ -135,14 +135,18 @@ func recordUnits(i int, rec filesystem.ArtifactRecord) []textUnit {
 // in lower case.
 var proseResourceExts = []string{".md", ".markdown", ".txt", ".rst"}
 
-// licenseNameParts are the file-name parts that mark a license file.
-var licenseNameParts = map[string]bool{
+// licenseWords are the file-name parts that mark a license file when they
+// stand alone or lead a two-part name, such as LICENSE and LICENSE-MIT.
+var licenseWords = map[string]bool{
 	"license": true,
 	"licence": true,
 	"copying": true,
 	"notice":  true,
-	"ofl":     true,
 }
+
+// fontLicensePart marks a font license file when it is the first or the last
+// part of the name, such as OFL.txt and ArsenalSC-OFL.txt.
+const fontLicensePart = "ofl"
 
 // isProseResource reports whether the bundled resource at resourcePath with
 // content b is a prose resource: its file name ends in .md, .markdown, .txt,
@@ -165,20 +169,26 @@ func isProseResource(resourcePath string, b []byte) bool {
 	return prose && !isLicenseFile(name) && utf8.Valid(b) && bytes.IndexByte(b, 0) < 0
 }
 
-// isLicenseFile reports whether a file name is a license file: lowercased and
-// without its final extension, the name has license, licence, copying,
-// notice, or ofl among the parts that its -, _, and . characters separate.
-// LICENSE, LICENSE-MIT, COPYING, NOTICE.md, and ArsenalSC-OFL.txt are license
-// files; licensing-guide.md is not, because no part equals a marker.
+// isLicenseFile reports whether a file name is a license file. The base name,
+// lowercased and without its final extension, is split into parts at its -,
+// _, and . characters. It is a license file when the parts are license,
+// licence, copying, or notice alone or followed by one more part, or when ofl
+// is the first or the last part. LICENSE, LICENSE-MIT, COPYING, NOTICE.md,
+// OFL.txt, and ArsenalSC-OFL.txt are license files. notice-of-changes.md,
+// privacy-notice.md, and licensing-guide.md are not: a license word that
+// leads a longer name, or that follows another word, names a document about
+// the subject rather than the license each package carries.
 //
 // Spec: §7.3.1
 func isLicenseFile(name string) bool {
 	name = strings.ToLower(path.Base(name))
 	name = strings.TrimSuffix(name, path.Ext(name))
-	for _, part := range strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' || r == '.' }) {
-		if licenseNameParts[part] {
-			return true
-		}
+	parts := strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' || r == '.' })
+	if len(parts) == 0 {
+		return false
 	}
-	return false
+	if licenseWords[parts[0]] && len(parts) <= 2 {
+		return true
+	}
+	return parts[0] == fontLicensePart || parts[len(parts)-1] == fontLicensePart
 }
