@@ -253,7 +253,7 @@ type Skill struct {
 	License       string            `yaml:"license,omitempty"`
 	Compatibility string            `yaml:"compatibility,omitempty"`
 	Metadata      map[string]string `yaml:"metadata,omitempty"`
-	AllowedTools  []string          `yaml:"allowed-tools,omitempty"`
+	AllowedTools  AllowedTools      `yaml:"allowed-tools,omitempty"`
 
 	// Body is the agent-facing skill prose body.
 	Body string `yaml:"-"`
