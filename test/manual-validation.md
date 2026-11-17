@@ -251,6 +251,7 @@ rm -rf "$WORK"
 | S108 | Catalog advisories in `podium lint` and at ingest, the lint JSON envelope, and the `podium sync` listing budget | standalone | none | none | none |
 | S109 | `command` and `context` are refused, stored rows of either type stop serving after an upgrade, hand-converted skills lint clean and serve, and user-invoked skills carry each harness's control | solo then standalone | none | none | none |
 | S110 | Published Agent Skills parse and lint without false errors, and an unparseable manifest is refused on its own by lint, sync, and ingest | solo then standalone | none | none | none |
+| S111 | The catalog overlap report reads across layers with structured peers, validates its threshold, and the semantic check refuses to start without an embedding source | standalone | none | none | none |
 
 ---
 
@@ -13135,5 +13136,120 @@ diagnostic that fails `--fail-on warning` is the defect this scenario catches.
    which a server that failed the whole layer would not serve.
 
 **Cleanup.** `rm -rf "$WORK"`. Step 5 stops the server.
+
+---
+
+## S111: The catalog overlap report reads across layers with structured peers, validates its threshold, and the semantic check refuses to start without an embedding source
+
+**Goal.** Validate that `podium overlap` and `GET /v1/overlap` report
+description overlap across every layer a caller can see, with a structured
+`peers` list and a per-artifact filter, that an out-of-range threshold is
+rejected by both, that the rebuild endpoint answers `registry.unavailable`
+while the semantic check is off, and that a registry started with the check on
+and no embedding source refuses to start.
+
+**Covers.** The §7.3.1 catalog overlap report, the rebuild endpoint and
+`podium admin rebuild-overlap`, the §7.3.1 startup refusal, and the §13.12
+`PODIUM_LINT_SEMANTIC_*` variables, through the compiled `podium` binary.
+
+**Why by hand.** An operator reads the report lines, the JSON object, the
+error envelopes, and the refusal message together. A report that misses a
+cross-layer pair, a `peers` list that is missing or abbreviated, an
+`artifact` filter that returns other artifacts, a threshold outside 0.5 to
+1.0 that is accepted, a rebuild that claims to compute with the check off, or
+a registry that starts with the check on and nothing to embed with is the
+defect this scenario catches. Computing similarity needs an embedding model,
+so the end-to-end test with a mock embedder covers the semantic records; this
+scenario covers what an operator sees without one.
+
+**Prerequisites.** None beyond the isolation block. The scenario binds
+127.0.0.1:8175.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above. Build a
+   two-layer registry root. `team/finance/reconcile` and
+   `shared/finance/match-invoices` carry descriptions that differ by one word,
+   and `team/finance/close` has a thin description. Serve the root with the
+   semantic check off, and read the report.
+
+   ```bash
+   mkdir -p "$WORK/root/team" "$WORK/root/shared"
+   printf 'multi_layer: true\nlayer_order:\n  - shared\n  - team\n' > "$WORK/root/.registry-config"
+   for L in team shared; do printf 'visibility:\n  public: true\n' > "$WORK/root/$L/.layer-config"; done
+   skill() {
+     mkdir -p "$WORK/root/$1/$2"
+     printf -- '---\nname: %s\ndescription: %s\nmetadata:\n  version: "1.0.0"\n---\n\nBody.\n' "${2##*/}" "$3" > "$WORK/root/$1/$2/SKILL.md"
+   }
+   skill team finance/reconcile "Reconcile vendor invoices against purchase orders before the monthly close."
+   skill shared finance/match-invoices "Reconcile supplier invoices against purchase orders before the monthly close."
+   skill team finance/close "Close books"
+   podium serve --standalone --no-embeddings --layer-path "$WORK/root" --bind 127.0.0.1:8175 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8175/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   URL=http://127.0.0.1:8175
+   podium overlap --registry "$URL"; echo "overlap exit=$?"
+   podium overlap --registry "$URL" --fail-on warning > /dev/null; echo "fail-on warning exit=$?"
+   ```
+
+   **Expect.** The output carries a `[warning] finance/close: description is
+   thin` line ending in `(lint.thin_description)`, and a `[warning]
+   finance/match-invoices: description overlaps finance/reconcile` line and
+   its mirror for `finance/reconcile`, each with a percentage of at least 70
+   and ending in `(lint.colliding_descriptions)`. The two artifacts sit in
+   different layers, so a missing overlap line means the report did not read
+   across layers. The run prints `overlap exit=0`, and the second run prints
+   `fail-on warning exit=1`.
+
+2. Read the JSON object, then filter it to one artifact.
+
+   ```bash
+   podium overlap --registry "$URL" --json > "$WORK/overlap.json"; echo "json exit=$?"
+   jq -c '.semantic_overlap' "$WORK/overlap.json"
+   jq -c '.diagnostics[] | select(.code == "lint.colliding_descriptions") | {artifact_id, peers}' "$WORK/overlap.json"
+   jq -c '.counts' "$WORK/overlap.json"
+   curl -s "$URL/v1/overlap?artifact=finance/reconcile" | jq -c '([.diagnostics[].artifact_id] | unique), .counts'
+   ```
+
+   **Expect.** `json exit=0`. `semantic_overlap` is
+   `{"state":"off","threshold":null,"model":null}`. Each overlap diagnostic
+   carries `peers` with one entry, the other artifact, and a `similarity`
+   between 0.7 and 1, for example
+   `{"artifact_id":"finance/reconcile","peers":[{"artifact_id":"finance/match-invoices","similarity":0.81...}]}`.
+   `counts` is `{"error":0,"warning":3,"info":0}`. The filtered read prints
+   `["finance/reconcile"]` and `{"error":0,"warning":1,"info":0}`. A filtered
+   read that lists another artifact means the filter does not apply.
+
+3. Pass a threshold outside the allowed range to the endpoint and to the
+   command, and call the rebuild while the check is off.
+
+   ```bash
+   curl -s -o "$WORK/bad.json" -w '%{http_code}\n' "$URL/v1/overlap?threshold=0.3"
+   jq -r '.code' "$WORK/bad.json"
+   podium overlap --registry "$URL" --threshold 0.3; echo "bad threshold exit=$?"
+   podium admin rebuild-overlap --registry "$URL"; echo "rebuild exit=$?"
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** The endpoint answers `400` with `registry.invalid_argument`.
+   The command prints `error: --threshold must be a number from 0.5 to 1.0`
+   and `bad threshold exit=2`. The rebuild prints an error envelope whose code
+   is `registry.unavailable` and `rebuild exit=1`, because the semantic check
+   is off. A rebuild that reports computed artifacts here is the defect.
+
+4. Start a registry with the semantic check on and no embedding source.
+
+   ```bash
+   PODIUM_LINT_SEMANTIC_OVERLAP=on podium serve --standalone --no-embeddings --layer-path "$WORK/root" --bind 127.0.0.1:8175 > "$WORK/refused.log" 2>&1; echo "serve exit=$?"
+   grep -o 'config.invalid: PODIUM_LINT_SEMANTIC_OVERLAP=on needs an embedding source' "$WORK/refused.log"
+   ```
+
+   **Expect.** `serve exit=` prints a non-zero status, the server never binds,
+   and the `grep` prints `config.invalid: PODIUM_LINT_SEMANTIC_OVERLAP=on needs
+   an embedding source`. A server that starts means the check would run with
+   no vectors to compare.
+
+**Cleanup.** `rm -rf "$WORK"`. Step 3 stops the server.
 
 ---
