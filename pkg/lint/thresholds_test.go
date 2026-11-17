@@ -150,9 +150,10 @@ func TestThresholdsFromEnv(t *testing.T) {
 	}
 }
 
-// Spec: §13.12, §4.3.4 — a zero Linter, and one that sets a single
+// Spec: §13.12, §4.3.4, §7.3.1 — a zero Linter, and one that sets a single
 // threshold, apply the default size thresholds: a 5,001-token SKILL.md
-// body warns and a 5,000-token body does not.
+// body warns and a 5,000-token body does not. Their AdvisoryRules keep the
+// thin-description default, so a 14-code-point description warns.
 func TestLinter_ZeroValueUsesDefaults(t *testing.T) {
 	t.Parallel()
 	skill := func(tokens int) []filesystem.ArtifactRecord {
@@ -180,5 +181,17 @@ func TestLinter_ZeroValueUsesDefaults(t *testing.T) {
 		if tokenWarn(l.Lint(context.Background(), nil, skill(5000))) {
 			t.Errorf("%s linter: a 5,000-token body warned", name)
 		}
+		// Spec: §7.3.1 — the advisories keep the 15-code-point default.
+		thin := []filesystem.ArtifactRecord{{
+			ID:       "x",
+			Artifact: &manifest.Artifact{Type: manifest.TypeContext, Description: "abcd efgh ijkl"},
+		}}
+		if !hasCode((&Linter{Rules: l.AdvisoryRules()}).Lint(context.Background(), nil, thin), "lint.thin_description") {
+			t.Errorf("%s linter: a 14-code-point description did not warn", name)
+		}
+	}
+	var nilLinter *Linter
+	if got := len(nilLinter.AdvisoryRules()); got != 3 {
+		t.Errorf("nil linter: %d advisory rules, want 3", got)
 	}
 }

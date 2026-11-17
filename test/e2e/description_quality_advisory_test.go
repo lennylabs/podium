@@ -2,21 +2,19 @@ package e2e
 
 // Description-quality ingest advisory, end to end.
 //
-// Spec §3.3 ("The registry lints for thin descriptions and flags clusters of
-// artifacts whose summaries collide") and §12 ("Ingest-time lint flags thin
-// descriptions and clusters of artifacts with colliding summaries") attribute
-// the description-quality checks to the registry ingest path. The checks are
-// advisory: §3.3 states the flags inform the author, and ingest still accepts
-// the artifacts. The observable §7.3.1 / §3.3 surface for these flags is the
-// per-artifact `advisories` array the ingest pipeline returns, which `podium
-// layer reingest` prints as `advisory: <id> [warning] <message> (<code>)` and
-// which the boot path logs.
+// Spec §7.3.1 defines the catalog advisories, lint.thin_description and
+// lint.colliding_descriptions among them, and states that registry ingest runs
+// them over the artifacts of the layer it ingests and reports their diagnostics
+// as non-blocking advisories. The observable surface is the per-artifact
+// `advisories` array the ingest pipeline returns, which `podium layer reingest`
+// prints as `advisory: <id> [warning] <message> (<code>)` and which the boot
+// path logs.
 //
 // These tests drive the real `podium` CLI against a standalone server: register
 // a local-source layer (the runtime-republish foundation), stage a
 // vague, a precise, and a borderline-acceptable artifact, reingest, and assert
 // the thin-description advisory fires on the vague artifact only with no false
-// positive on the borderline one that sits exactly at the §3.3 bound. Ingest
+// positive on the borderline one that sits exactly at the default bound. Ingest
 // accepts all three (every artifact is loadable afterward), proving the advisory
 // does not gate ingest.
 
@@ -52,9 +50,9 @@ func reingestArtifacts(t testing.TB, l *republishLayer, files map[string]string)
 	return ri
 }
 
-// the §3.3 / §12 thin-description advisory fires through the real
+// Spec: §7.3.1 — the thin-description advisory fires through the real
 // ingest path on a vague description only, draws no false positive on a
-// borderline-acceptable description at the §3.3 bound, and never gates ingest:
+// borderline-acceptable description at the §7.3.1 bound, and never gates ingest:
 // the standalone server accepts and serves all three artifacts.
 func TestDescriptionQuality_ThinAdvisoryEndToEnd(t *testing.T) {
 	t.Parallel()
@@ -62,11 +60,11 @@ func TestDescriptionQuality_ThinAdvisoryEndToEnd(t *testing.T) {
 	layer := newRepublishLayer(t, srv, "doc-quality-thin")
 
 	ri := reingestArtifacts(t, layer, map[string]string{
-		// Vague: 1 word / 4 chars, below both §3.3 bounds. Flagged.
+		// Vague: 1 word / 4 chars, below both §7.3.1 bounds. Flagged.
 		"finance/vague/ARTIFACT.md": contextArtifact("demo"),
 		// Precise: a rich summary that answers "when should I use this?".
 		"finance/precise/ARTIFACT.md": contextArtifact("Reconcile vendor invoices at month-end close."),
-		// Borderline-acceptable: exactly 3 words and 15 chars, at the §3.3
+		// Borderline-acceptable: exactly 3 words and 15 chars, at the §7.3.1
 		// bound (MinDescriptionChars=15, MinDescriptionWords=3). The
 		// false-positive guard: this must NOT be flagged.
 		"finance/borderline/ARTIFACT.md": contextArtifact("Greet the user."),
@@ -92,17 +90,18 @@ func TestDescriptionQuality_ThinAdvisoryEndToEnd(t *testing.T) {
 	}
 }
 
-// (colliding-summary half) — the §3.3 cross-artifact colliding-summary
-// advisory fires through the real ingest path on every member of a normalized
-// collision, naming each colliding peer, while a distinct summary draws no flag
-// and ingest accepts all three.
+// Spec: §7.3.1 — lint.colliding_descriptions reports two artifacts whose
+// normalized descriptions have word sets with a similarity of 0.7 or higher.
+// Through the real ingest path, each artifact of an identical-after-normalization
+// pair is flagged and names its peer at 100%, while a distinct summary draws no
+// flag and ingest accepts all three.
 func TestDescriptionQuality_CollidingAdvisoryEndToEnd(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
 	layer := newRepublishLayer(t, srv, "doc-quality-collide")
 
 	ri := reingestArtifacts(t, layer, map[string]string{
-		// Two summaries that collide after §3.3 normalization
+		// Two summaries with equal word sets after §7.3.1 normalization
 		// (case, punctuation, and whitespace folded).
 		"finance/close-a/ARTIFACT.md": contextArtifact("Close the monthly books."),
 		"ops/close-b/ARTIFACT.md":     contextArtifact("close   the   monthly   books"),
@@ -111,11 +110,11 @@ func TestDescriptionQuality_CollidingAdvisoryEndToEnd(t *testing.T) {
 	})
 
 	cliContains(t, ri.Stdout, "lint.colliding_descriptions", "colliding-summary advisory surfaced")
-	// Every member of the cluster is flagged and names its peer.
+	// Each artifact of the pair is flagged and names its peer.
 	cliContains(t, ri.Stdout, "advisory: finance/close-a", "close-a flagged as colliding")
 	cliContains(t, ri.Stdout, "advisory: ops/close-b", "close-b flagged as colliding")
-	if !strings.Contains(ri.Stdout, "collides with ops/close-b") {
-		t.Errorf("collision advisory on close-a does not name its peer\nstdout=%s", ri.Stdout)
+	if !closeAOverlap(ri.Stdout) {
+		t.Errorf("overlap advisory on close-a does not name its peer at 100%%\nstdout=%s", ri.Stdout)
 	}
 	// The distinct payment summary draws no colliding-summary advisory.
 	for _, line := range strings.Split(ri.Stdout, "\n") {
@@ -132,4 +131,15 @@ func TestDescriptionQuality_CollidingAdvisoryEndToEnd(t *testing.T) {
 			t.Errorf("load %s: id=%v, want %q (advisory must not gate ingest)", id, resp["id"], id)
 		}
 	}
+}
+
+// closeAOverlap reports whether the finance/close-a advisory line names
+// ops/close-b at 100% similarity.
+func closeAOverlap(stdout string) bool {
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(line, "advisory: finance/close-a") && strings.Contains(line, "overlaps ops/close-b (100%)") {
+			return true
+		}
+	}
+	return false
 }

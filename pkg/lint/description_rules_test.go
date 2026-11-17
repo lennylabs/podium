@@ -2,6 +2,7 @@ package lint
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -112,9 +113,8 @@ func TestThinDescription_HonorsSuppress(t *testing.T) {
 	}
 }
 
-// Spec: §3.3 / §12 — "flags clusters of artifacts whose summaries
-// collide." Descriptions that match after case/punctuation/whitespace
-// normalization cluster, and every member draws a warning naming the
+// Spec: §7.3.1 — descriptions whose normalized word sets are equal have
+// similarity 1, and every artifact of the group draws a warning naming its
 // peers.
 func TestCollidingDescriptions_ClustersNormalizedEqual(t *testing.T) {
 	t.Parallel()
@@ -145,9 +145,9 @@ func TestCollidingDescriptions_ClustersNormalizedEqual(t *testing.T) {
 	}
 }
 
-// Spec: §3.3 — an empty description is not a collision (otherwise every
-// artifact without a summary would cluster). Two empty descriptions draw
-// no colliding-summary warning.
+// Spec: §7.3.1 — an empty description has an empty word set and overlaps
+// nothing, so two empty descriptions draw no lint.colliding_descriptions
+// warning.
 func TestCollidingDescriptions_EmptyNeverCollides(t *testing.T) {
 	t.Parallel()
 	records := []filesystem.ArtifactRecord{rec("a", ""), rec("b", "")}
@@ -184,6 +184,77 @@ func TestCollidingDescriptions_HonorsSuppress(t *testing.T) {
 	}
 	if !hasCode(diags, "lint.colliding_descriptions") {
 		t.Errorf("non-suppressed peer should still be flagged")
+	}
+}
+
+// collidingMessages maps each artifact to its lint.colliding_descriptions
+// message.
+func collidingMessages(diags []Diagnostic) map[string]string {
+	out := map[string]string{}
+	for _, d := range diags {
+		if d.Code == "lint.colliding_descriptions" {
+			out[d.ArtifactID] = d.Message
+		}
+	}
+	return out
+}
+
+// Spec: §7.3.1 — "two artifacts whose normalized descriptions have word
+// sets with a similarity of 0.7 or higher." Two six-word descriptions that
+// differ by one substituted word share 5 of 7 words (71%) and overlap at
+// the default threshold; the message names the peer and its percentage.
+func TestCollidingDescriptions_ParaphraseAtDefault(t *testing.T) {
+	t.Parallel()
+	msgs := collidingMessages(runAdvisory([]filesystem.ArtifactRecord{
+		rec("finance/close-monthly", "Close the monthly books for finance."),
+		rec("finance/close-quarterly", "Close the quarterly books for finance."),
+	}))
+	if !strings.Contains(msgs["finance/close-monthly"], "description overlaps finance/close-quarterly (71%)") {
+		t.Errorf("monthly message = %q", msgs["finance/close-monthly"])
+	}
+	if !strings.Contains(msgs["finance/close-quarterly"], "description overlaps finance/close-monthly (71%)") {
+		t.Errorf("quarterly message = %q", msgs["finance/close-quarterly"])
+	}
+}
+
+// Spec: §7.3.1 — descriptions that follow one template share most of their
+// words: "create" and "merge" variants share 8 of 10 words, 80%.
+func TestCollidingDescriptions_TemplateDescriptions(t *testing.T) {
+	t.Parallel()
+	msgs := collidingMessages(runAdvisory([]filesystem.ArtifactRecord{
+		rec("pdf/create", "Use when the user asks to create a pdf"),
+		rec("pdf/merge", "Use when the user asks to merge a pdf"),
+	}))
+	if !strings.Contains(msgs["pdf/create"], "pdf/merge (80%)") {
+		t.Errorf("create message = %q", msgs["pdf/create"])
+	}
+}
+
+// Spec: §7.3.1 — peers are named by descending similarity and then by
+// identifier, and more than 10 peers print the first 10 and a count of the
+// rest.
+func TestCollidingDescriptions_PeerOrderAndCap(t *testing.T) {
+	t.Parallel()
+	ordered := collidingMessages(runAdvisory([]filesystem.ArtifactRecord{
+		rec("m/base", "alpha bravo charlie delta echo foxtrot golf hotel india juliet"),
+		rec("a/low", "alpha bravo charlie delta echo foxtrot golf hotel"),
+		rec("z/high", "alpha bravo charlie delta echo foxtrot golf hotel india"),
+	}))
+	if want := "description overlaps z/high (90%), a/low (80%);"; !strings.Contains(ordered["m/base"], want) {
+		t.Errorf("base message = %q, want it to contain %q", ordered["m/base"], want)
+	}
+
+	var records []filesystem.ArtifactRecord
+	for i := 12; i >= 0; i-- {
+		records = append(records, rec(fmt.Sprintf("dup/%02d", i), "Reconcile vendor invoices at month-end close."))
+	}
+	msg := collidingMessages(runAdvisory(records))["dup/00"]
+	var peers []string
+	for i := 1; i <= 10; i++ {
+		peers = append(peers, fmt.Sprintf("dup/%02d (100%%)", i))
+	}
+	if want := "description overlaps " + strings.Join(peers, ", ") + ", and 2 more;"; !strings.Contains(msg, want) {
+		t.Errorf("capped message = %q, want it to contain %q", msg, want)
 	}
 }
 

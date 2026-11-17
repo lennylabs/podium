@@ -171,8 +171,8 @@ func NewIngestLinter(offline bool) *Linter {
 }
 
 // Lint runs every configured rule against the registry and returns the
-// concatenated diagnostics, sorted by ArtifactID then Code so output is
-// deterministic.
+// concatenated diagnostics, sorted by ArtifactID, then Code, then Message so
+// output is deterministic.
 func (l *Linter) Lint(ctx context.Context, reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	rules := l.Rules
 	if len(rules) == 0 {
@@ -183,6 +183,9 @@ func (l *Linter) Lint(ctx context.Context, reg *filesystem.Registry, records []f
 		if l.AllowPerDomainOverrides != nil && !*l.AllowPerDomainOverrides {
 			rules = append(rules, ruleDomainDiscoveryOverrideDisallowed{})
 		}
+		if l.IncludeAdvisories {
+			rules = append(rules, l.AdvisoryRules()...)
+		}
 	}
 	var out []Diagnostic
 	for _, r := range rules {
@@ -192,7 +195,13 @@ func (l *Linter) Lint(ctx context.Context, reg *filesystem.Registry, records []f
 		if out[i].ArtifactID != out[j].ArtifactID {
 			return out[i].ArtifactID < out[j].ArtifactID
 		}
-		return out[i].Code < out[j].Code
+		if out[i].Code != out[j].Code {
+			return out[i].Code < out[j].Code
+		}
+		// Spec: §7.3.1 — one artifact can draw several diagnostics of one
+		// code, such as a near-duplicate warning per unit, and the message
+		// fixes their order.
+		return out[i].Message < out[j].Message
 	})
 	return out
 }
