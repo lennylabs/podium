@@ -301,7 +301,7 @@ Several open specifications define parts of this space. The table states what Po
 ## Project model
 
 - **License.** MIT.
-- **Governance.** Maintainer model with an RFC process for spec changes. See [Governance](../about/governance).
+- **Governance.** Maintainer model with a proposal process for spec changes. See [Governance](../about/governance).
 - **Distribution.** OSS-first development, with an optional commercial managed offering by the sponsoring entity.
 - **Multi-vendor neutrality.** The project does not adopt contributions, governance changes, or roadmap pressure that would bind it to a single harness vendor's surface.
 - **Standards engagement.** Where adjacent open standards (MCP, AAIF-governed standards) overlap with Podium's concerns, the project participates upstream and harmonizes where doing so does not compromise the broader scope across artifact types.

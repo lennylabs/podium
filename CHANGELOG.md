@@ -33,6 +33,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Exported trace spans no longer carry URL query strings** (§13.8): every exporter, including `PODIUM_TRACING=stdout` and OTLP, receives each span attribute that holds an `http` or `https` URL, `url.full` among them, with the query and fragment removed. This holds for calls that succeed and calls that fail. Search text, `session_id`, and presigned-URL signatures that the MCP server sent as query parameters no longer reach the trace backend.
 
+### Documentation
+
+- **Governance names the proposal process for spec changes** (§1.6): `GOVERNANCE.md` and the Governance page describe the numbered proposals under `proposals/`, their review and approval states, and the rule that spec edits land before the code that depends on them. The unused `docs/rfc/` index and its published page are removed.
+
 ## [0.6.0] - 2026-11-10
 
 ### Added
