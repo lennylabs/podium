@@ -3,6 +3,8 @@ package adapter
 import (
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/lennylabs/podium/pkg/manifest"
 )
 
@@ -17,7 +19,8 @@ const skillCompatibilityMaxChars = 500
 // adapter writes SKILL.md without translation and derives nothing. A harness
 // reads SKILL.md but not ARTIFACT.md, so the runtime constraints declared in
 // ARTIFACT.md are otherwise invisible to it. The derived value is injected
-// as the first SKILL.md frontmatter line. skillBytes is returned unchanged
+// as the first SKILL.md frontmatter line, at the indentation of the top-level
+// keys, so an indented block mapping still decodes. skillBytes is returned unchanged
 // when the author already authored compatibility, when ARTIFACT.md carries
 // nothing to derive from, or when either manifest fails to parse.
 func deriveSkillCompatibility(skillBytes, artifactBytes []byte) []byte {
@@ -36,7 +39,23 @@ func deriveSkillCompatibility(skillBytes, artifactBytes []byte) []byte {
 	if compat == "" {
 		return skillBytes
 	}
-	return injectFrontmatterLine(skillBytes, "compatibility", compat)
+	return injectFrontmatterLine(skillBytes, frontmatterIndent(skillBytes), "compatibility", yamlQuoteScalar(compat))
+}
+
+// frontmatterIndent returns the indentation of the top-level keys of src's
+// frontmatter when it is a block mapping that blockKeyIndent accepts, and ""
+// otherwise, which keeps the column-1 injection for every other layout.
+func frontmatterIndent(src []byte) string {
+	fm, _, err := manifest.SplitFrontmatter(src)
+	if err != nil {
+		return ""
+	}
+	var doc yaml.Node
+	if yaml.Unmarshal(fm, &doc) != nil || len(doc.Content) == 0 {
+		return ""
+	}
+	indent, _ := blockKeyIndent(strings.SplitAfter(string(src), "\n"), doc.Content[0])
+	return indent
 }
 
 // buildSkillCompatibility renders a human-readable compatibility string from
@@ -69,12 +88,19 @@ func buildSkillCompatibility(req *manifest.RuntimeRequirements, sandbox manifest
 	return s
 }
 
-// injectFrontmatterLine inserts `key: "value"` as the first line of src's YAML
-// frontmatter, immediately after the opening "---" delimiter. The caller must
-// have verified key is absent. value is double-quoted and escaped so a colon
-// or other YAML metacharacter stays part of the scalar. src is returned
-// unchanged when it has no recognizable leading frontmatter delimiter.
-func injectFrontmatterLine(src []byte, key, value string) []byte {
+// injectFrontmatterLine inserts `key: scalar`, prefixed with indent, as the
+// first line of src's YAML frontmatter, immediately after the opening "---"
+// delimiter, and leaves every other line byte-identical. indent is the
+// indentation of the frontmatter's top-level keys, so the line joins their
+// mapping. The caller must
+// have verified key is absent and passes scalar already rendered: the derived
+// compatibility string goes through yamlQuoteScalar so a colon stays part of
+// the string, and the user-only control passes the bare boolean `true`, which
+// a quoted "true" would turn into a string a harness can reject. src is
+// returned unchanged when it has no recognizable leading frontmatter delimiter.
+//
+// Spec: §4.3.4, §6.7
+func injectFrontmatterLine(src []byte, indent, key, scalar string) []byte {
 	s := string(src)
 	var delim, eol string
 	switch {
@@ -85,7 +111,7 @@ func injectFrontmatterLine(src []byte, key, value string) []byte {
 	default:
 		return src
 	}
-	line := key + ": " + yamlQuoteScalar(value) + eol
+	line := indent + key + ": " + scalar + eol
 	return []byte(delim + line + s[len(delim):])
 }
 

@@ -12,7 +12,7 @@ import (
 // results.
 func TestSearchArtifacts_SensitivityOwnValue(t *testing.T) {
 	t.Parallel()
-	body := "---\ntype: context\nversion: 1.0.0\ndescription: solo\nsensitivity: medium\n---\n\nbody\n"
+	body := "---\ntype: agent\nversion: 1.0.0\ndescription: solo\nsensitivity: medium\n---\n\nbody\n"
 	reg := setupRegistry(t, fstest.MapFS{
 		"finance/solo/ARTIFACT.md": &fstest.MapFile{Data: []byte(body)},
 	}, "L1")

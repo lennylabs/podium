@@ -49,7 +49,7 @@ func multiTenantServer(t *testing.T, verify func(*http.Request) (layer.Identity,
 		t.Helper()
 		if err := st.PutManifest(t.Context(), storetest.Seal(t, store.ManifestRecord{
 			TenantID: orgIDForName(org), ArtifactID: artifactID, Version: "1.0.0",
-			Frontmatter: []byte(label), Type: "context", Description: artifactID, Layer: "pub",
+			Frontmatter: []byte(label), Type: "agent", Description: artifactID, Layer: "pub",
 			IngestedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		}, nil, nil)); err != nil {
 			t.Fatalf("PutManifest(%s/%s): %v", org, artifactID, err)

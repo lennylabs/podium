@@ -17,8 +17,8 @@ actions:
 # Podium
 
 Podium is the skill registry for AI agents: an enterprise-grade registry for
-reusable agent skills and other artifacts (agents, commands, rules, hooks,
-contexts, and MCP server registrations). It signs them, controls who can see
+reusable agent skills and other artifacts (agents, rules, hooks, and MCP server
+registrations). It signs them, controls who can see
 them, audits their use, and delivers them into the native file layout of each
 harness. This page is the
 documentation home and names the page that covers each feature, deployment

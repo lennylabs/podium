@@ -21,7 +21,7 @@ func TestIngest_ArtifactCountQuotaEnforced(t *testing.T) {
 	for _, id := range []string{"a", "b"} {
 		_ = st.PutManifest(context.Background(), store.ManifestRecord{
 			TenantID: "t", ArtifactID: id, Version: "1.0.0",
-			ContentHash: "sha256:seed-" + id, Type: "context",
+			ContentHash: "sha256:seed-" + id, Type: "agent",
 			Description: id, Sensitivity: "low", Layer: "L",
 		})
 	}
@@ -30,7 +30,7 @@ func TestIngest_ArtifactCountQuotaEnforced(t *testing.T) {
 	// the cap, so it must be rejected.
 	files := fstest.MapFS{
 		"c/ARTIFACT.md": &fstest.MapFile{
-			Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: c\nsensitivity: low\n---\n\nbody\n"),
+			Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: c\nsensitivity: low\n---\n\nbody\n"),
 		},
 	}
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -64,12 +64,12 @@ func TestIngest_ArtifactCountQuotaIgnoresExisting(t *testing.T) {
 	// Pre-seed "a" so tenantHasArtifact reports it.
 	_ = st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: "t", ArtifactID: "a", Version: "1.0.0",
-		ContentHash: "sha256:seed-a", Type: "context",
+		ContentHash: "sha256:seed-a", Type: "agent",
 		Description: "a", Sensitivity: "low", Layer: "L",
 	})
 	files := fstest.MapFS{
 		"a/ARTIFACT.md": &fstest.MapFile{
-			Data: []byte("---\ntype: context\nversion: 2.0.0\ndescription: a-v2\nsensitivity: low\n---\n\nbody\n"),
+			Data: []byte("---\ntype: agent\nversion: 2.0.0\ndescription: a-v2\nsensitivity: low\n---\n\nbody\n"),
 		},
 	}
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -98,7 +98,7 @@ func TestIngest_ArtifactCountQuotaDisabled(t *testing.T) {
 	files := fstest.MapFS{}
 	for _, name := range []string{"a", "b", "c", "d"} {
 		files[name+"/ARTIFACT.md"] = &fstest.MapFile{
-			Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
+			Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
 		}
 	}
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{

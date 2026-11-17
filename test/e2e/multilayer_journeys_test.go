@@ -19,7 +19,7 @@ import (
 // removing a layer drives a re-sync that cleans the removed layer's outputs.
 //
 // Two local-source layers contribute distinct artifacts: layer-base holds the
-// context ctx/notes, and layer-overlay holds a standalone context ctx/extra and
+// agent ctx/notes, and layer-overlay holds a standalone agent ctx/extra and
 // an mcp-server servers/warehouse that config-merges into .mcp.json. Two
 // layers cannot contribute the same ID, because §4.6 rejects every same-ID
 // collision between registry-side layers.
@@ -42,13 +42,13 @@ func TestMultiLayer_LayerRemovalReSyncCleansPriorOutputs(t *testing.T) {
 	overlay := newRepublishLayer(t, srv, "layer-overlay")
 
 	base.publishVersion(t, versionSpec{
-		ID: "ctx/notes", Version: "1.0.0", Type: "context",
+		ID: "ctx/notes", Version: "1.0.0", Type: "agent",
 		Description: "BASE notes body marker",
 	})
-	// Two overlay artifacts: a standalone context and an mcp-server.
+	// Two overlay artifacts: a standalone agent and an mcp-server.
 	overlay.writeArtifact(t, versionSpec{
-		ID: "ctx/extra", Version: "1.0.0", Type: "context",
-		Description: "overlay-only extra context",
+		ID: "ctx/extra", Version: "1.0.0", Type: "agent",
+		Description: "overlay-only extra agent",
 	})
 	mlWriteMCPServer(t, overlay.dir, "servers/warehouse", "warehouse-mcp", "npx:@acme/warehouse-mcp")
 	mlReingest(t, srv, "layer-overlay")
@@ -69,8 +69,8 @@ func TestMultiLayer_LayerRemovalReSyncCleansPriorOutputs(t *testing.T) {
 	target := t.TempDir()
 	mlSyncServer(t, srv, target, "claude-code")
 
-	notesPath := filepath.Join(target, ".podium", "context", "ctx", "notes", "ARTIFACT.md")
-	extraPath := filepath.Join(target, ".podium", "context", "ctx", "extra", "ARTIFACT.md")
+	notesPath := filepath.Join(target, ".claude", "agents", "notes.md")
+	extraPath := filepath.Join(target, ".claude", "agents", "extra.md")
 	mcpPath := filepath.Join(target, ".mcp.json")
 
 	if body := readFile(t, notesPath); !strings.Contains(body, "BASE notes body marker") {
@@ -193,10 +193,10 @@ func TestMultiLayer_ConflictingDomainListsMergeAndOverlaySearch(t *testing.T) {
 	reg := dmMultiLayer(t, map[string]string{
 		// Four artifacts under finance/ap, two featured and two deprioritized
 		// across the conflicting layers.
-		"layer-admin/finance/ap/alpha/ARTIFACT.md": contextArtifact("alpha"),
-		"layer-admin/finance/ap/beta/ARTIFACT.md":  contextArtifact("beta"),
-		"layer-user/finance/ap/gamma/ARTIFACT.md":  contextArtifact("gamma"),
-		"layer-user/finance/ap/delta/ARTIFACT.md":  contextArtifact("delta"),
+		"layer-admin/finance/ap/alpha/ARTIFACT.md": agentArtifact("alpha"),
+		"layer-admin/finance/ap/beta/ARTIFACT.md":  agentArtifact("beta"),
+		"layer-user/finance/ap/gamma/ARTIFACT.md":  agentArtifact("gamma"),
+		"layer-user/finance/ap/delta/ARTIFACT.md":  agentArtifact("delta"),
 		// Conflicting DOMAIN.md featured/deprioritize plus differing notable_count.
 		"layer-admin/finance/ap/DOMAIN.md": "---\ndescription: AP admin\ndiscovery:\n" +
 			"  notable_count: 10\n  featured:\n    - finance/ap/alpha\n  deprioritize:\n    - finance/ap/beta\n---\n\n# AP\n",
@@ -242,7 +242,7 @@ func TestMultiLayer_ConflictingDomainListsMergeAndOverlaySearch(t *testing.T) {
 	// keyword. Driven through the bridge, search_artifacts fuses it in.
 	overlay := t.TempDir()
 	writeOverlayFile(t, overlay, "finance/overlay-helper/ARTIFACT.md",
-		"---\ntype: context\nversion: 0.1.0\ndescription: zircon reconciliation overlay helper\nsensitivity: low\n---\n\noverlay body\n")
+		"---\ntype: agent\nversion: 0.1.0\ndescription: zircon reconciliation overlay helper\nsensitivity: low\n---\n\noverlay body\n")
 
 	res := mcpExec(t, chMCPEnv(t, reg, "PODIUM_HARNESS=none", "PODIUM_OVERLAY_PATH="+overlay),
 		toolCall(1, "search_artifacts", map[string]any{"query": "zircon"}))

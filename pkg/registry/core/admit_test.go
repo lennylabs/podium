@@ -118,7 +118,7 @@ func admDigest(b []byte) string {
 
 // admManifest is an ARTIFACT.md with the given extra frontmatter lines.
 func admManifest(ver, extra string) []byte {
-	return []byte("---\ntype: context\nversion: " + ver + "\ndescription: admitted context\n" + extra + "---\n\nbody for " + ver + "\n")
+	return []byte("---\ntype: agent\nversion: " + ver + "\ndescription: admitted context\n" + extra + "---\n\nbody for " + ver + "\n")
 }
 
 // admRow is a sealed, signed row with one inline resource and one object-held
@@ -128,7 +128,7 @@ func (f *admFixture) admRow(t *testing.T, id string) store.ManifestRecord {
 	big := bytes.Repeat([]byte("z"), objectstore.InlineCutoff+16)
 	return storetest.Seal(t, store.ManifestRecord{
 		TenantID: admTenant, ArtifactID: id, Version: "1.0.0", Layer: "L",
-		Type: "context", Frontmatter: admManifest("1.0.0", "sensitivity: medium\n"),
+		Type: "agent", Frontmatter: admManifest("1.0.0", "sensitivity: medium\n"),
 		Resources: []store.ResourceRef{
 			{Path: "a.txt", Inline: []byte("small inline bytes")},
 			{Path: "big.bin", ContentHash: f.object(t, big)},
@@ -182,7 +182,7 @@ func TestAdmit_RefusesAndAdmitsStoredRows(t *testing.T) {
 		t.Parallel()
 		f := newAdmFixture(t)
 		big := strings.Repeat("y", objectstore.InlineCutoff+32)
-		art := "---\ntype: context\nversion: 1.0.0\ndescription: ingested\nsensitivity: high\ndeprecated: true\nreplaced_by: other/next\naudit_redact: [version]\n---\n\ningested body\n"
+		art := "---\ntype: agent\nversion: 1.0.0\ndescription: ingested\nsensitivity: high\ndeprecated: true\nreplaced_by: other/next\naudit_redact: [version]\n---\n\ningested body\n"
 		if _, err := ingest.Ingest(context.Background(), f.st, ingest.Request{
 			TenantID: admTenant, LayerID: "L",
 			Files: fstest.MapFS{
@@ -199,7 +199,7 @@ func TestAdmit_RefusesAndAdmitsStoredRows(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadArtifact: %v", err)
 		}
-		if res.Type != "context" || res.Sensitivity != "high" || !res.Deprecated || res.ReplacedBy != "other/next" || res.ManifestBody != "ingested body\n" {
+		if res.Type != "agent" || res.Sensitivity != "high" || !res.Deprecated || res.ReplacedBy != "other/next" || res.ManifestBody != "ingested body\n" {
 			t.Errorf("derived fields = %q %q %v %q %q", res.Type, res.Sensitivity, res.Deprecated, res.ReplacedBy, res.ManifestBody)
 		}
 		ev := f.events.ofType("artifact.loaded")
@@ -401,7 +401,7 @@ func TestAdmit_RefusesAndAdmitsStoredRows(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadArtifact: %v", err)
 		}
-		if res.ManifestBody != "body for 1.0.0\n" || res.Type != "context" || res.Sensitivity != "medium" || res.Deprecated || res.ReplacedBy != "" || res.DeprecationWarning != "" {
+		if res.ManifestBody != "body for 1.0.0\n" || res.Type != "agent" || res.Sensitivity != "medium" || res.Deprecated || res.ReplacedBy != "" || res.DeprecationWarning != "" {
 			t.Errorf("served %q %q %q %v %q, want the parsed values", res.ManifestBody, res.Type, res.Sensitivity, res.Deprecated, res.ReplacedBy)
 		}
 		if ev := f.events.ofType("artifact.loaded"); len(ev) != 1 || len(ev[0].RedactKeys) != 0 {
@@ -430,7 +430,7 @@ func TestAdmit_RefusesAndAdmitsStoredRows(t *testing.T) {
 		f := newAdmFixture(t)
 		rec := storetest.Seal(t, store.ManifestRecord{
 			TenantID: admTenant, ArtifactID: "ops/bare", Version: "1.0.0", Layer: "L",
-			Type: "context", Sensitivity: "high", ReplacedBy: "ops/next", Body: []byte("stored body"),
+			Type: "agent", Sensitivity: "high", ReplacedBy: "ops/next", Body: []byte("stored body"),
 		}, nil, f.key)
 		f.put(t, rec)
 		res, err := admLoad(f.registry(f.key), "ops/bare")
@@ -452,12 +452,12 @@ func (f *admFixture) registryWithFaults(signer sign.Provider) *core.Registry {
 		WithAudit(f.events.emit)
 }
 
-// admPlainRow is a sealed, signed context row whose manifest carries extra
+// admPlainRow is a sealed, signed agent row whose manifest carries extra
 // beside its type and version.
 func (f *admFixture) admPlainRow(t *testing.T, id, ver, extra string, signer sign.Provider) store.ManifestRecord {
 	t.Helper()
 	return storetest.Seal(t, store.ManifestRecord{
-		TenantID: admTenant, ArtifactID: id, Version: ver, Layer: "L", Type: "context",
+		TenantID: admTenant, ArtifactID: id, Version: ver, Layer: "L", Type: "agent",
 		Frontmatter: admManifest(ver, extra),
 	}, nil, signer)
 }
@@ -579,7 +579,7 @@ func TestLoadArtifact_RevalidatedReadEventRedactsKeys(t *testing.T) {
 		t.Parallel()
 		f := newAdmFixture(t)
 		f.put(t, storetest.Seal(t, store.ManifestRecord{
-			TenantID: admTenant, ArtifactID: "ops/broken", Version: "1.0.0", Layer: "L", Type: "context",
+			TenantID: admTenant, ArtifactID: "ops/broken", Version: "1.0.0", Layer: "L", Type: "agent",
 			Frontmatter: []byte("---\ntype: [unclosed\n---\n\nbody\n"),
 			AuditRedact: []string{"version"},
 		}, nil, nil))
@@ -597,7 +597,7 @@ func TestLoadArtifact_EmptyManifestKeepsStoredFields(t *testing.T) {
 	t.Parallel()
 	f := newAdmFixture(t)
 	f.put(t, storetest.Seal(t, store.ManifestRecord{
-		TenantID: admTenant, ArtifactID: "base/p", Version: "1.0.0", Layer: "L", Type: "context",
+		TenantID: admTenant, ArtifactID: "base/p", Version: "1.0.0", Layer: "L", Type: "agent",
 		Frontmatter: nil,
 		AuditRedact: []string{"version"}, Deprecated: true, ReplacedBy: "base/q",
 	}, nil, nil))

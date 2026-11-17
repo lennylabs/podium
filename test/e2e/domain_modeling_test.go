@@ -29,8 +29,9 @@ import (
 // name and description live in the adjacent SKILL.md (see skillBody).
 const dmSkillArtifact = "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- Skill body lives in SKILL.md. -->\n"
 
-// dmCommandArtifact is a minimal type:command ARTIFACT.md (no SKILL.md).
-const dmCommandArtifact = "---\ntype: command\nversion: 1.0.0\ndescription: Check deploy configuration.\n---\n\n$ARGUMENTS\n"
+// dmUserSkill is a plain SKILL.md (no ARTIFACT.md) for a user-invoked skill:
+// its metadata carries the version and invocation "user".
+const dmUserSkill = "---\nname: check-config\ndescription: Check deploy configuration.\nmetadata:\n  version: \"1.0.0\"\n  invocation: \"user\"\n---\n\nCheck the deploy configuration for the environment in $ARGUMENTS.\n"
 
 // dmNotableIDs decodes a load_domain response map's notable list into the set
 // of canonical artifact IDs it reports.
@@ -107,13 +108,13 @@ func dmMultiLayer(t *testing.T, files map[string]string) string {
 }
 
 // dmNoDomainRegistry stages the doc's "When you don't need DOMAIN.md" tree:
-// personal/hello/greet (skill) and personal/deploy/check-config (command), with
-// no DOMAIN.md anywhere.
+// personal/hello/greet (skill) and personal/deploy/check-config (a user-invoked
+// skill), with no DOMAIN.md anywhere.
 func dmNoDomainRegistry(t *testing.T) string {
 	return writeRegistry(t, map[string]string{
-		"personal/hello/greet/ARTIFACT.md":         dmSkillArtifact,
-		"personal/hello/greet/SKILL.md":            skillBody("greet"),
-		"personal/deploy/check-config/ARTIFACT.md": dmCommandArtifact,
+		"personal/hello/greet/ARTIFACT.md":      dmSkillArtifact,
+		"personal/hello/greet/SKILL.md":         skillBody("greet"),
+		"personal/deploy/check-config/SKILL.md": dmUserSkill,
 	})
 }
 
@@ -512,7 +513,7 @@ func TestDomainModel_ExcludeRemovesFromInclude(t *testing.T) {
 func TestDomainModel_UnlistedRemovedFromEnumeration(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/x/ARTIFACT.md": contextArtifact("x"),
+		"finance/x/ARTIFACT.md": agentArtifact("x"),
 		"_shared/DOMAIN.md":     "---\nunlisted: true\n---\n",
 		"_shared/payment-helpers/routing-validator/ARTIFACT.md": dmSkillArtifact,
 		"_shared/payment-helpers/routing-validator/SKILL.md":    skillBody("routing-validator"),
@@ -854,7 +855,7 @@ func TestDomainModel_CLIShowSurfacesDomainMD(t *testing.T) {
 // `podium domain show --json` emits valid JSON.
 func TestDomainModel_CLIShowJSON(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	res := runPodium(t, "", nil, "domain", "show", "--registry", srv.BaseURL, "--json")
 	if res.Exit != 0 {
 		t.Fatalf("domain show --json exit=%d stderr=%s", res.Exit, res.Stderr)
@@ -933,7 +934,7 @@ func TestDomainModel_CLIShowMissingRegistry(t *testing.T) {
 // usage guidance (exit 2).
 func TestDomainModel_CLISearchMissingQuery(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	res := runPodium(t, "", nil, "domain", "search", "--registry", srv.BaseURL)
 	if res.Exit != 2 {
 		t.Fatalf("domain search exit=%d, want 2\nstdout=%s stderr=%s", res.Exit, res.Stdout, res.Stderr)
@@ -968,8 +969,8 @@ func TestDomainModel_LintImportCycle(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"finance/DOMAIN.md":      "---\ninclude:\n  - treasury/**\n---\n\n# Finance\n",
 		"treasury/DOMAIN.md":     "---\ninclude:\n  - finance/**\n---\n\n# Treasury\n",
-		"finance/x/ARTIFACT.md":  contextArtifact("finance context"),
-		"treasury/y/ARTIFACT.md": contextArtifact("treasury context"),
+		"finance/x/ARTIFACT.md":  agentArtifact("finance context"),
+		"treasury/y/ARTIFACT.md": agentArtifact("treasury context"),
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 {
@@ -1110,7 +1111,7 @@ func TestDomainModel_MCPSearchDomains(t *testing.T) {
 // load_domain on an unknown path returns 404 domain.not_found.
 func TestDomainModel_LoadDomainNotFound(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_domain?path=nonexistent/path")
 	if st != 404 {
 		t.Fatalf("load_domain = HTTP %d, want 404\n%s", st, body)
@@ -1123,7 +1124,7 @@ func TestDomainModel_LoadDomainNotFound(t *testing.T) {
 // POST /v1/domain/analyze returns 405 (GET only).
 func TestDomainModel_AnalyzePostNotAllowed(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	st, _ := postJSON(t, srv.BaseURL+"/v1/domain/analyze", map[string]any{})
 	if st != 405 {
 		t.Errorf("POST /v1/domain/analyze = HTTP %d, want 405", st)

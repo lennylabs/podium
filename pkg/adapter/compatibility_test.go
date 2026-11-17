@@ -100,6 +100,13 @@ func TestAdapters_SkillCompatibilityDerivation(t *testing.T) {
 			t.Run("derives_runtime_requirements", func(t *testing.T) {
 				assertDerived(t, adaptSkill(t, harness, artifactWithRuntime(""), []byte(skillNoCompat)), "Requires Python >=3.10")
 			})
+			t.Run("derives_into_indented_frontmatter", func(t *testing.T) {
+				in := "---\n  name: aggregate\n  description: Aggregate data.\n---\n\nSkill body.\n"
+				want := "---\n  compatibility: \"Requires Python >=3.10\"\n" + in[4:]
+				if got := adaptSkill(t, harness, artifactWithRuntime(""), []byte(in)); got != want {
+					t.Errorf("got %q, want %q", got, want)
+				}
+			})
 			if sandboxOK[harness] {
 				t.Run("derives_sandbox_profile", func(t *testing.T) {
 					got := adaptSkill(t, harness, artifactWithRuntime("read-only-fs"), []byte(skillNoCompat))
@@ -124,6 +131,29 @@ func TestAdapters_SkillCompatibilityDerivation(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// Spec: §4.3.4 — the derived compatibility line takes the indentation of the
+// frontmatter's top-level keys when they form a block mapping, and column 1
+// for every other input.
+func TestFrontmatterIndent(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"---\nname: a\n---\n":          "",
+		"---\n  name: a\n---\n":        "  ",
+		"---\n# c\n    name: a\n---\n": "    ",
+		"---\n{name: a}\n---\n":        "",
+		"---\n---\nbody\n":             "",
+		"---\nname: [a\n---\n":         "",
+		"no frontmatter\n":             "",
+		"---\r\n   name: a\r\n---\r\n": "   ",
+		"---\n? name\n: a\n---\n":      "",
+		"---\n!!map\n  name: a\n---\n": "",
+	} {
+		if got := frontmatterIndent([]byte(in)); got != want {
+			t.Errorf("frontmatterIndent(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

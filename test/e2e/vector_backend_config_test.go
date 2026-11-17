@@ -48,11 +48,11 @@ func vbExpectRefuseToStart(t *testing.T, reg, wantKey string, extra ...string) {
 
 // ---- package-level helpers (prefixed vb) ------------------------------------
 
-// vbReg returns a minimal filesystem registry with one context artifact.
+// vbReg returns a minimal filesystem registry with one agent artifact.
 func vbReg(t *testing.T) string {
 	t.Helper()
 	return writeRegistry(t, map[string]string{
-		"glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"glossary/ARTIFACT.md": agentArtifact("glossary"),
 	})
 }
 
@@ -818,10 +818,10 @@ func TestVectorBackend_OpenAIMissingAPIKey(t *testing.T) {
 func TestVectorBackend_MCPOverlaySearchBM25Regardless(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"registry-item/ARTIFACT.md": contextArtifact("registry-item"),
+		"registry-item/ARTIFACT.md": agentArtifact("registry-item"),
 	})
 	overlay := writeRegistry(t, map[string]string{
-		"overlay-item/ARTIFACT.md": contextArtifact("overlay-item"),
+		"overlay-item/ARTIFACT.md": agentArtifact("overlay-item"),
 	})
 	srv := startServer(t, reg)
 
@@ -860,10 +860,10 @@ func TestVectorBackend_MCPOverlaySearchBM25Regardless(t *testing.T) {
 func TestVectorBackend_MCPMergesRegistryAndOverlayResults(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"registry-artifact/ARTIFACT.md": contextArtifact("unique-registry-term"),
+		"registry-artifact/ARTIFACT.md": agentArtifact("unique-registry-term"),
 	})
 	overlay := writeRegistry(t, map[string]string{
-		"overlay-artifact/ARTIFACT.md": contextArtifact("unique-overlay-term"),
+		"overlay-artifact/ARTIFACT.md": agentArtifact("unique-overlay-term"),
 	})
 	srv := startServer(t, reg)
 

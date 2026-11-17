@@ -27,7 +27,7 @@ func TestDeclarativeLayers_LocalLayerBootsAndServes(t *testing.T) {
 
 	// The declared local layer's artifact tree.
 	layerRoot := writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: pay vendor invoices\nsensitivity: low\n---\n\nbody\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: pay vendor invoices\nsensitivity: low\n---\n\nbody\n",
 	})
 
 	cfgPath := filepath.Join(home, "registry.yaml")
@@ -208,7 +208,7 @@ func deliverAs(t *testing.T, url, providerID, body, secret string) (int, string)
 func TestDeclarativeLayers_DeclaredGitProviderSurvivesRestart(t *testing.T) {
 	t.Parallel()
 	repo := newGitJourneyRepo(t)
-	repo.commitContextArtifact(t, "finance/ap/pay-invoice", "1.0.0",
+	repo.commitAgentArtifact(t, "finance/ap/pay-invoice", "1.0.0",
 		"pay vendor invoices from the declared git layer", "seed")
 
 	home := t.TempDir()
@@ -500,7 +500,7 @@ func TestDeclarativeLayers_HTTPVisibilityNarrowingRevertsToDeclared(t *testing.T
 	t.Parallel()
 	home := t.TempDir()
 	layerRoot := writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: pay vendor invoices\nsensitivity: low\n---\n\nbody\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: pay vendor invoices\nsensitivity: low\n---\n\nbody\n",
 	})
 	cfgPath := filepath.Join(home, "registry.yaml")
 	cfg := "" +

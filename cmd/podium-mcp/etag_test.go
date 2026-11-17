@@ -22,10 +22,10 @@ import (
 // conditional GET is the revalidation round-trip.
 func TestLoadArtifact_SendsIfNoneMatchAndServes304FromCache(t *testing.T) {
 	t.Parallel()
-	const fm = "---\ntype: context\nversion: 1.0.0\n---\n"
+	const fm = "---\ntype: agent\nversion: 1.0.0\n---\n"
 	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil)
 	cached := sealDelivery(loadArtifactResponse{
-		ID: "team/x", Type: "context", Version: "1.0.0", ContentHash: hash,
+		ID: "team/x", Type: "agent", Version: "1.0.0", ContentHash: hash,
 		Frontmatter: fm, ManifestBody: "cached-body",
 	})
 
@@ -82,12 +82,12 @@ func TestLoadArtifact_SendsIfNoneMatchAndServes304FromCache(t *testing.T) {
 // serving the stale cache entry.
 func TestLoadArtifact_ConditionalGET200ServesFreshBody(t *testing.T) {
 	t.Parallel()
-	const cachedFM = "---\ntype: context\nversion: 1.0.0\n---\n"
+	const cachedFM = "---\ntype: agent\nversion: 1.0.0\n---\n"
 	cachedHash := "sha256:" + version.CanonicalContentHash([]byte(cachedFM), nil, nil)
-	const freshFM = "---\ntype: context\nversion: 2.0.0\n---\n"
+	const freshFM = "---\ntype: agent\nversion: 2.0.0\n---\n"
 	freshHash := "sha256:" + version.CanonicalContentHash([]byte(freshFM), nil, nil)
 	respBody := loadArtifactJSON(t, map[string]any{
-		"id": "team/x", "type": "context", "version": "2.0.0",
+		"id": "team/x", "type": "agent", "version": "2.0.0",
 		"content_hash": freshHash, "manifest_body": "fresh-body", "frontmatter": freshFM,
 	})
 
@@ -204,7 +204,7 @@ func newRotationFixture(t *testing.T, registry, mode string) *rotationFixture {
 		return sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub}
 	}
 	f := &rotationFixture{keyA: gen(), keyB: gen(), keyC: gen()}
-	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "cached-body", nil)
+	rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\n---\nbody\n", "cached-body", nil)
 	f.cached = signDelivery(t, f.keyA, rec)
 	f.underB = signDelivery(t, f.keyB, rec)
 	f.underC = signDelivery(t, f.keyC, rec)

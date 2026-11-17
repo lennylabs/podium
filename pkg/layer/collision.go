@@ -35,10 +35,11 @@ func (c Collision) Reason() string {
 }
 
 // Drop is one artifact a filesystem-source composition dropped, with the
-// §6.10 code and reason it reports. A collision and a §4.6 no-inheritance
-// refusal both report through it, so a caller prints every drop the same way.
+// §6.10 code and reason it reports. A collision, a §4.6 no-inheritance
+// refusal, and a §4.1 removed-type refusal all report through it, so a caller
+// prints every drop the same way.
 //
-// Spec: §4.6, §13.11.3
+// Spec: §4.1, §4.6, §13.11.3
 type Drop struct {
 	// ArtifactID is the canonical ID of the dropped artifact.
 	ArtifactID string

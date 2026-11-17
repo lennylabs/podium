@@ -21,7 +21,7 @@ func TestScopeFilter_Select(t *testing.T) {
 		rec("finance/ap/pay-invoice", "agent"),
 		rec("finance/experimental/draft", "skill"),
 		rec("security/baseline/lockdown", "skill"),
-		rec("notes/journal", "context"),
+		rec("notes/journal", "agent"),
 	}
 
 	cases := []struct {

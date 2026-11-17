@@ -15,7 +15,7 @@ import (
 )
 
 const ctxArtifactInternal = "---\n" +
-	"type: context\n" +
+	"type: agent\n" +
 	"version: 1.0.0\n" +
 	"description: d\n" +
 	"sensitivity: low\n" +
@@ -107,7 +107,7 @@ func mapKeys(m map[string][]byte) []string {
 func TestLoadOne_MalformedFrontmatterIsInvalidArtifact(t *testing.T) {
 	t.Parallel()
 	const malformed = "---\n" +
-		"type: context\n" +
+		"type: agent\n" +
 		"version: 1.0.0\n" +
 		"description: d\n" +
 		"weird: [unclosed\n" +

@@ -26,7 +26,7 @@ func hiwSkillRegistry(t *testing.T) string {
 	return writeRegistry(t, map[string]string{
 		"greetings/hello/ARTIFACT.md":  greetSkillArtifact,
 		"greetings/hello/SKILL.md":     skillBody("hello"),
-		"company-glossary/ARTIFACT.md": contextArtifact("Company glossary"),
+		"company-glossary/ARTIFACT.md": agentArtifact("Company glossary"),
 	})
 }
 
@@ -77,7 +77,7 @@ func TestDeployment_FilesystemSyncClaudeCodeLayout(t *testing.T) {
 // server: a tool call surfaces an error.
 func TestDeployment_MCPRejectsFilesystemPath(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"y/ARTIFACT.md": contextArtifact("y")})
+	reg := writeRegistry(t, map[string]string{"y/ARTIFACT.md": agentArtifact("y")})
 	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + reg, "PODIUM_CACHE_DIR=" + t.TempDir()},
 		rpcReq{ID: 1, Method: "initialize"},
 		toolCall(2, "search_artifacts", map[string]any{}),
@@ -148,7 +148,7 @@ func TestDeployment_StandaloneExplicit(t *testing.T) {
 // standalone state lives under ~/.podium/standalone/.
 func TestDeployment_StandaloneStateFiles(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	db := filepath.Join(srv.Home, ".podium", "standalone", "podium.db")
 	magic := readFileBytes(t, db)
 	if len(magic) < 16 || string(magic[:15]) != "SQLite format 3" {
@@ -162,7 +162,7 @@ func TestDeployment_StandaloneStateFiles(t *testing.T) {
 // /healthz and /readyz return the documented JSON.
 func TestDeployment_HealthReadyJSON(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	var health map[string]any
 	getJSON(t, srv.BaseURL+"/healthz", &health)
 	// §13.9: /healthz reports the mode; liveness is the 200 status, and
@@ -187,7 +187,7 @@ func TestDeployment_HealthReadyJSON(t *testing.T) {
 // capabilities.tools and capabilities.sessionCorrelation.
 func TestDeployment_MCPMetaToolsAndCapabilities(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL},
 		rpcReq{ID: 1, Method: "initialize"},
 		rpcReq{ID: 2, Method: "tools/list"},
@@ -262,7 +262,7 @@ func TestDeployment_MCPLoadArtifactMaterializes(t *testing.T) {
 // structured error and writes nothing; the bridge stays usable.
 func TestDeployment_MCPLoadArtifactNotFound(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	mat := t.TempDir()
 	res := mcpExec(t, []string{
 		"PODIUM_VERIFY_SIGNATURES=never",
@@ -295,7 +295,7 @@ func TestDeployment_SyncServerSource(t *testing.T) {
 // sync writes an independent .podium/sync.lock per target.
 func TestDeployment_SyncLockPerTarget(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	t1, t2 := t.TempDir(), t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", t1, "--harness", "none")
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", t2, "--harness", "none")
@@ -307,7 +307,7 @@ func TestDeployment_SyncLockPerTarget(t *testing.T) {
 // configured cache dir, shared across processes.
 func TestDeployment_ContentCacheShared(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	cache := t.TempDir()
 	run := func() string {
 		res := mcpExec(t, []string{
@@ -341,10 +341,10 @@ func TestDeployment_ContentCacheShared(t *testing.T) {
 func TestDeployment_OverlayHighestPrecedence(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"greetings/hello/ARTIFACT.md": contextArtifact("registry-version"),
+		"greetings/hello/ARTIFACT.md": agentArtifact("registry-version"),
 	}))
 	overlay := writeRegistry(t, map[string]string{
-		"greetings/hello/ARTIFACT.md": contextArtifact("overlay-version"),
+		"greetings/hello/ARTIFACT.md": agentArtifact("overlay-version"),
 	})
 	res := mcpExec(t, []string{
 		"PODIUM_VERIFY_SIGNATURES=never",
@@ -365,7 +365,7 @@ func TestDeployment_OverlayHighestPrecedence(t *testing.T) {
 func TestDeployment_VersionPinning(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"greetings/hello/ARTIFACT.md": contextArtifact("v1"),
+		"greetings/hello/ARTIFACT.md": agentArtifact("v1"),
 	}))
 	var pinned map[string]any
 	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=greetings/hello&version=1.0.0", &pinned)
@@ -403,7 +403,7 @@ func TestDeployment_StandardDeviceCodeLogin(t *testing.T) {
 func TestDeployment_FilesystemNoVisibilityFilter(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"secret/tool/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: secret\nsensitivity: high\n---\n\nbody\n",
+		"secret/tool/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: secret\nsensitivity: high\n---\n\nbody\n",
 	})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
@@ -607,8 +607,8 @@ func TestDeployment_LoadDomainStructure(t *testing.T) {
 	// A direct artifact under finance (glossary) plus the ap subtree keeps
 	// finance from being folded into its single child at the root level.
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/glossary/ARTIFACT.md":       contextArtifact("finance glossary"),
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
+		"finance/glossary/ARTIFACT.md":       agentArtifact("finance glossary"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay invoice"),
 	}))
 	var root map[string]any
 	getJSON(t, srv.BaseURL+"/v1/load_domain", &root)
@@ -671,7 +671,7 @@ func TestDeployment_SearchArtifactsDescriptors(t *testing.T) {
 func TestDeployment_LoadArtifactFields(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"greetings/hello/ARTIFACT.md": contextArtifact("greeting"),
+		"greetings/hello/ARTIFACT.md": agentArtifact("greeting"),
 	}))
 	var resp struct {
 		ID           string `json:"id"`
@@ -702,8 +702,8 @@ func TestDeployment_LoadArtifactFields(t *testing.T) {
 func TestDeployment_BatchLoad(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"a/ARTIFACT.md": contextArtifact("a"),
-		"b/ARTIFACT.md": contextArtifact("b"),
+		"a/ARTIFACT.md": agentArtifact("a"),
+		"b/ARTIFACT.md": agentArtifact("b"),
 	}))
 	st, body := postJSON(t, srv.BaseURL+"/v1/artifacts:batchLoad", map[string]any{"ids": []string{"a", "b"}})
 	if st != 200 {
@@ -724,7 +724,7 @@ func TestDeployment_Dependents(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":               "multi_layer: true\nlayer_order:\n  - org\n  - team\n",
-		"org/shared/parent/ARTIFACT.md":  "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nbody\n",
+		"org/shared/parent/ARTIFACT.md":  "---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nbody\n",
 		"team/finance/child/ARTIFACT.md": "---\ntype: agent\nversion: 2.0.0\ndescription: child\ndelegates_to: [shared/parent]\n---\n\nbody\n",
 	})
 	srv := startServer(t, reg)
@@ -741,7 +741,7 @@ func TestDeployment_Dependents(t *testing.T) {
 func TestDeployment_ScopePreview(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"a/ARTIFACT.md": contextArtifact("a"),
+		"a/ARTIFACT.md": agentArtifact("a"),
 		"b/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n",
 		"b/SKILL.md":    skillBody("b"),
 	}))
@@ -761,7 +761,7 @@ func TestDeployment_ScopePreview(t *testing.T) {
 // sync --dry-run resolves and writes nothing.
 func TestDeployment_SyncDryRun(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--dry-run")
 	if res.Exit != 0 || !strings.Contains(res.Stdout, "dry-run") {
@@ -807,7 +807,7 @@ func TestDeployment_NoAutostandalone(t *testing.T) {
 // but /healthz reports mode=public and reads need no token.
 func TestDeployment_PublicMode(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()}, "serve", "--public-mode", "--layer-path", reg)
 	var health map[string]any
 	getJSON(t, srv.BaseURL+"/healthz", &health)
@@ -900,7 +900,7 @@ func TestDeployment_ConfigShowDeploymentMode(t *testing.T) {
 func TestDeployment_MetricsEndpoint(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"obs/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: observability demo artifact\nsensitivity: low\n---\n\nbody\n",
+		"obs/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: observability demo artifact\nsensitivity: low\n---\n\nbody\n",
 	}))
 	assertMetricsScrape(t, srv.BaseURL)
 }
@@ -947,7 +947,7 @@ type standaloneDB struct{ db, objects string }
 // paths for migration tests.
 func makeStandaloneDB(t *testing.T) standaloneDB {
 	t.Helper()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	srv := startServer(t, reg)
 	stopProc(srv.cmd)
 	db := filepath.Join(srv.Home, ".podium", "standalone", "podium.db")
@@ -976,7 +976,7 @@ func mkdirOld(t testing.TB, dir string, daysAgo int) {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
 	fm := filepath.Join(dir, "frontmatter")
-	if err := os.WriteFile(fm, []byte("---\ntype: context\nversion: 1.0.0\n---\n"), 0o644); err != nil {
+	if err := os.WriteFile(fm, []byte("---\ntype: agent\nversion: 1.0.0\n---\n"), 0o644); err != nil {
 		t.Fatalf("write frontmatter: %v", err)
 	}
 	old := time.Now().Add(-time.Duration(daysAgo) * 24 * time.Hour)

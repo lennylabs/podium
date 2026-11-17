@@ -25,7 +25,7 @@ func TestPodiumMCP_LoadDomainOverlayIncludeMergedView(t *testing.T) {
 		// Registry-side artifact the local include: must pull in via the catalog.
 		testharness.WriteTreeOption{
 			Path:    "finance/ap/registry-pay/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: registry pay\n---\n\nbody\n",
+			Content: "---\ntype: agent\nversion: 1.0.0\ndescription: registry pay\n---\n\nbody\n",
 		},
 	)
 	ws := t.TempDir()
@@ -38,7 +38,7 @@ func TestPodiumMCP_LoadDomainOverlayIncludeMergedView(t *testing.T) {
 		},
 		testharness.WriteTreeOption{
 			Path:    ".podium/overlay/finance/ap/overlay-pay/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 0.1.0\ndescription: overlay pay\n---\n\nbody\n",
+			Content: "---\ntype: agent\nversion: 0.1.0\ndescription: overlay pay\n---\n\nbody\n",
 		},
 	)
 

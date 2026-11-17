@@ -153,10 +153,10 @@ const hybridLexicalAnchor = "ops/quarterly"
 func paraphraseRegistry(t *testing.T) string {
 	t.Helper()
 	return writeRegistry(t, map[string]string{
-		hybridTarget + "/ARTIFACT.md":        contextArtifact("invoice reconciliation matching vendor payments against purchase orders"),
-		hybridLexicalAnchor + "/ARTIFACT.md": contextArtifact("quarterly compliance audit schedule and signoff"),
-		"hr/onboarding/ARTIFACT.md":          contextArtifact("employee onboarding checklist for new hire orientation"),
-		"infra/deploy/ARTIFACT.md":           contextArtifact("kubernetes deployment rollout and pod autoscaling"),
+		hybridTarget + "/ARTIFACT.md":        agentArtifact("invoice reconciliation matching vendor payments against purchase orders"),
+		hybridLexicalAnchor + "/ARTIFACT.md": agentArtifact("quarterly compliance audit schedule and signoff"),
+		"hr/onboarding/ARTIFACT.md":          agentArtifact("employee onboarding checklist for new hire orientation"),
+		"infra/deploy/ARTIFACT.md":           agentArtifact("kubernetes deployment rollout and pod autoscaling"),
 	})
 }
 

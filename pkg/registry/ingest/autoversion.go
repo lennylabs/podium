@@ -50,11 +50,12 @@ func listManifestRows(ctx context.Context, st store.Store, tenantID string) (map
 	return byID, nil
 }
 
-// retired reports whether a stored row's ARTIFACT.md declares extends:, so
-// the §4.6 no-inheritance rule serves it on no read path.
+// retired reports whether a stored row is retired: its type is one the §4.1
+// removed-type rule names, or its ARTIFACT.md declares extends:, which the
+// §4.6 no-inheritance rule retires. A retired row is served on no read path.
 //
-// Spec: §4.6, §7.3.1
-func retired(m store.ManifestRecord) bool { return manifest.DeclaresExtends(m.Frontmatter) }
+// Spec: §4.1, §4.6, §7.3.1
+func retired(m store.ManifestRecord) bool { return manifest.RetiredRow(m.Frontmatter, m.Type) }
 
 // crossLayerRows returns the non-deleted, non-retired rows of rowsByID that a
 // layer other than layerID contributed, grouped by artifact ID. A soft-deleted

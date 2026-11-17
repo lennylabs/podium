@@ -28,7 +28,7 @@ func TestStandaloneLayer_ResolvesBootstrappedRegistry(t *testing.T) {
 
 	// A local layer staged with one artifact so reingest has content to load.
 	lp := writeRegistry(t, map[string]string{
-		"finance/forecast/ARTIFACT.md": contextArtifact("A standalone local layer artifact for the section 14.10 fallback test."),
+		"finance/forecast/ARTIFACT.md": agentArtifact("A standalone local layer artifact for the section 14.10 fallback test."),
 	})
 
 	// register (no --registry) resolves the registry from the bootstrapped sync.yaml.
@@ -76,7 +76,7 @@ func TestStandaloneLayer_NoRegistryAnywhereRefuses(t *testing.T) {
 func TestStandaloneLayer_UserDefinedOwnerManagedByLocalOperator(t *testing.T) {
 	t.Parallel()
 	lp := writeRegistry(t, map[string]string{
-		"finance/forecast/ARTIFACT.md": contextArtifact("An artifact in alice's user-defined layer."),
+		"finance/forecast/ARTIFACT.md": agentArtifact("An artifact in alice's user-defined layer."),
 	})
 	srv := startServer(t, "")
 

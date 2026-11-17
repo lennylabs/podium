@@ -66,6 +66,34 @@ func TestToolsList_DescriptionsAreCanonicalVerbatim(t *testing.T) {
 	}
 }
 
+// Spec: §5.1, §4.1 — the search_artifacts description and its `type`
+// property name the remaining first-class types and neither removed type.
+// The expected strings are literals rather than the Go constants, so a
+// change that leaves either string naming context or command fails here.
+func TestToolsList_SearchArtifactsTypeFilterNamesRemainingTypes(t *testing.T) {
+	t.Parallel()
+	tool, ok := toolsByName(t)["search_artifacts"]
+	if !ok {
+		t.Fatal("tool search_artifacts missing from tools/list")
+	}
+	desc, _ := tool["description"].(string)
+	if want := "Filters: `type` (skill, agent, rule, hook),"; !strings.Contains(desc, want) {
+		t.Errorf("search_artifacts description missing %q:\n%s", want, desc)
+	}
+	props := tool["inputSchema"].(map[string]any)["properties"].(map[string]any)
+	typeDesc, _ := props["type"].(map[string]any)["description"].(string)
+	if want := "Artifact type filter: skill, agent, rule, or hook."; typeDesc != want {
+		t.Errorf("type property description = %q, want %q", typeDesc, want)
+	}
+	for _, s := range []string{desc, typeDesc} {
+		for _, removed := range []string{"context", "command"} {
+			if strings.Contains(s, removed) {
+				t.Errorf("string names removed type %q: %q", removed, s)
+			}
+		}
+	}
+}
+
 // spec: §5.1 / §5 — under MCP protocol 2024-11-05 each tools/list entry
 // carries an inputSchema describing its parameters. Every meta-tool must
 // declare the documented arguments.

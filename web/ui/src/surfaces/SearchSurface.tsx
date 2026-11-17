@@ -47,8 +47,6 @@ const scopeDepth = 2;
 const firstClassTypes = [
   "skill",
   "agent",
-  "context",
-  "command",
   "rule",
   "hook",
   "mcp-server",

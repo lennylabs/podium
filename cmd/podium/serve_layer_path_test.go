@@ -73,7 +73,7 @@ func TestServe_LayerPathBootstrap_E2E(t *testing.T) {
 		},
 		testharness.WriteTreeOption{
 			Path:    "alice-personal/notes/welcome/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: hello-from-alice\nsensitivity: low\n---\n\nbody\n",
+			Content: "---\ntype: agent\nversion: 1.0.0\ndescription: hello-from-alice\nsensitivity: low\n---\n\nbody\n",
 		},
 	)
 

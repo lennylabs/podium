@@ -37,17 +37,17 @@ func setupRegistry(t *testing.T, fsys fstest.MapFS, layerID string) *core.Regist
 	})
 }
 
-func contextManifest(desc string) string {
-	return "---\ntype: context\nversion: 1.0.0\ndescription: " + desc + "\nsensitivity: low\n---\n\nbody of " + desc + "\n"
+func agentManifest(desc string) string {
+	return "---\ntype: agent\nversion: 1.0.0\ndescription: " + desc + "\nsensitivity: low\n---\n\nbody of " + desc + "\n"
 }
 
 // Spec: §5 load_domain — root call returns top-level subdomains.
 func TestLoadDomain_RootReturnsTopLevelSubdomains(t *testing.T) {
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{
-		"finance/ap/pay/ARTIFACT.md":    &fstest.MapFile{Data: []byte(contextManifest("pay"))},
-		"finance/close/run/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("variance"))},
-		"company-glossary/ARTIFACT.md":  &fstest.MapFile{Data: []byte(contextManifest("glossary"))},
+		"finance/ap/pay/ARTIFACT.md":    &fstest.MapFile{Data: []byte(agentManifest("pay"))},
+		"finance/close/run/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("variance"))},
+		"company-glossary/ARTIFACT.md":  &fstest.MapFile{Data: []byte(agentManifest("glossary"))},
 	}, "team-shared")
 
 	got, err := reg.LoadDomain(context.Background(), publicID, "", core.LoadDomainOptions{})
@@ -78,9 +78,9 @@ func TestLoadDomain_RootReturnsTopLevelSubdomains(t *testing.T) {
 func TestLoadDomain_DrillIn(t *testing.T) {
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{
-		"finance/ap/pay/ARTIFACT.md":    &fstest.MapFile{Data: []byte(contextManifest("pay"))},
-		"finance/close/run/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("variance"))},
-		"finance/notes/ARTIFACT.md":     &fstest.MapFile{Data: []byte(contextManifest("notes"))},
+		"finance/ap/pay/ARTIFACT.md":    &fstest.MapFile{Data: []byte(agentManifest("pay"))},
+		"finance/close/run/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("variance"))},
+		"finance/notes/ARTIFACT.md":     &fstest.MapFile{Data: []byte(agentManifest("notes"))},
 	}, "team-shared")
 
 	got, err := reg.LoadDomain(context.Background(), publicID, "finance", core.LoadDomainOptions{})
@@ -111,7 +111,7 @@ func TestLoadDomain_DrillIn(t *testing.T) {
 func TestLoadDomain_UnknownPathFails(t *testing.T) {
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{
-		"finance/notes/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("notes"))},
+		"finance/notes/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("notes"))},
 	}, "team-shared")
 	_, err := reg.LoadDomain(context.Background(), publicID, "marketing", core.LoadDomainOptions{})
 	if !errors.Is(err, core.ErrDomainNotFound) {
@@ -124,9 +124,9 @@ func TestLoadDomain_UnknownPathFails(t *testing.T) {
 func TestSearchArtifacts_RanksByRelevance(t *testing.T) {
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{
-		"finance/run/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("Variance analysis after close"))},
-		"finance/pay/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("Pay an invoice"))},
-		"misc/random/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("Unrelated content"))},
+		"finance/run/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("Variance analysis after close"))},
+		"finance/pay/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("Pay an invoice"))},
+		"misc/random/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("Unrelated content"))},
 	}, "team-shared")
 	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{
 		Query: "variance",
@@ -146,11 +146,11 @@ func TestSearchArtifacts_RanksByRelevance(t *testing.T) {
 func TestSearchArtifacts_TypeFilter(t *testing.T) {
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{
-		"finance/notes/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("notes"))},
-		"finance/agent/ARTIFACT.md": &fstest.MapFile{Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: agent\nsensitivity: low\n---\n\nagent body\n")},
+		"finance/notes/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("notes"))},
+		"finance/rule/ARTIFACT.md":  &fstest.MapFile{Data: []byte("---\ntype: rule\nversion: 1.0.0\ndescription: rule\nrule_mode: always\nsensitivity: low\n---\n\nrule body\n")},
 	}, "team-shared")
 	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{
-		Type: "context",
+		Type: "agent",
 	})
 	if err != nil {
 		t.Fatalf("SearchArtifacts: %v", err)
@@ -167,9 +167,9 @@ func TestSearchArtifacts_TypeFilter(t *testing.T) {
 // honored by the search filter.
 func TestSearchArtifacts_DirectOnlyExcluded(t *testing.T) {
 	t.Parallel()
-	directOnly := "---\ntype: context\nversion: 1.0.0\ndescription: secret tool\nsensitivity: low\nsearch_visibility: direct-only\n---\n\nbody\n"
+	directOnly := "---\ntype: agent\nversion: 1.0.0\ndescription: secret tool\nsensitivity: low\nsearch_visibility: direct-only\n---\n\nbody\n"
 	reg := setupRegistry(t, fstest.MapFS{
-		"finance/indexed-tool/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("tool"))},
+		"finance/indexed-tool/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("tool"))},
 		"finance/secret-tool/ARTIFACT.md":  &fstest.MapFile{Data: []byte(directOnly)},
 	}, "team-shared")
 	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{
@@ -198,8 +198,8 @@ func TestSearchArtifacts_DirectOnlyExcluded(t *testing.T) {
 func TestSearchArtifacts_ScopeFilter(t *testing.T) {
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{
-		"finance/x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("x"))},
-		"misc/y/ARTIFACT.md":    &fstest.MapFile{Data: []byte(contextManifest("y"))},
+		"finance/x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("x"))},
+		"misc/y/ARTIFACT.md":    &fstest.MapFile{Data: []byte(agentManifest("y"))},
 	}, "team-shared")
 	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{
 		Scope: "finance",
@@ -232,7 +232,7 @@ func TestSearchArtifacts_TotalMatchedAccurate(t *testing.T) {
 	files := fstest.MapFS{}
 	for i := 0; i < 12; i++ {
 		path := "x/a" + string(rune('a'+i)) + "/ARTIFACT.md"
-		files[path] = &fstest.MapFile{Data: []byte(contextManifest("desc"))}
+		files[path] = &fstest.MapFile{Data: []byte(agentManifest("desc"))}
 	}
 	reg := setupRegistry(t, files, "team-shared")
 	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{
@@ -256,17 +256,17 @@ func TestLoadArtifact_LatestResolution(t *testing.T) {
 	_ = st2.CreateTenant(context.Background(), store.Tenant{ID: tenant})
 	_ = st2.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "x", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Body: []byte("v1"),
+		ContentHash: "sha256:a", Type: "agent", Body: []byte("v1"),
 		Layer: "team-shared",
 	}, nil, nil))
 	_ = st2.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "x", Version: "2.1.0",
-		ContentHash: "sha256:b", Type: "context", Body: []byte("v2"),
+		ContentHash: "sha256:b", Type: "agent", Body: []byte("v2"),
 		Layer: "team-shared",
 	}, nil, nil))
 	_ = st2.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "x", Version: "1.5.0",
-		ContentHash: "sha256:c", Type: "context", Body: []byte("v15"),
+		ContentHash: "sha256:c", Type: "agent", Body: []byte("v15"),
 		Layer: "team-shared",
 	}, nil, nil))
 	reg2 := core.New(st2, tenant, []layer.Layer{
@@ -289,7 +289,7 @@ func TestLoadArtifact_MajorPin(t *testing.T) {
 	for _, v := range []string{"1.0.0", "1.5.2", "1.5.10", "2.0.0"} {
 		_ = st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 			TenantID: tenant, ArtifactID: "x", Version: v,
-			ContentHash: "sha256:" + v, Type: "context", Layer: "L",
+			ContentHash: "sha256:" + v, Type: "agent", Layer: "L",
 		}, nil, nil))
 	}
 	reg := core.New(st, tenant, []layer.Layer{
@@ -325,11 +325,11 @@ func TestVisibility_FiltersByLayer(t *testing.T) {
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenant})
 	_ = st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "public-x", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Layer: "public",
+		ContentHash: "sha256:a", Type: "agent", Layer: "public",
 	}, nil, nil))
 	_ = st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "private-y", Version: "1.0.0",
-		ContentHash: "sha256:b", Type: "context", Layer: "private",
+		ContentHash: "sha256:b", Type: "agent", Layer: "private",
 	}, nil, nil))
 	reg := core.New(st, tenant, []layer.Layer{
 		{ID: "public", Visibility: layer.Visibility{Public: true}, Precedence: 1},

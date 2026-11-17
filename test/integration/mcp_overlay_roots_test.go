@@ -22,7 +22,7 @@ func TestPodiumMCP_RootsListResolvesWorkspaceOverlay(t *testing.T) {
 	ws := t.TempDir()
 	testharness.WriteTree(t, ws, testharness.WriteTreeOption{
 		Path:    ".podium/overlay/draft/ARTIFACT.md",
-		Content: "---\ntype: context\nversion: 0.1.0\n---\n\noverlay draft body\n",
+		Content: "---\ntype: agent\nversion: 0.1.0\n---\n\noverlay draft body\n",
 	})
 
 	bin := buildMCP(t)

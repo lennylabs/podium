@@ -217,15 +217,15 @@ func TestConfigZeroFlag_BootstrapDefaults(t *testing.T) {
 	}
 }
 
-// zeroFlagSearchRegistry stages three context artifacts whose descriptions are
+// zeroFlagSearchRegistry stages three agent artifacts whose descriptions are
 // lexically and semantically distinct, so a query matching one of them ranks
 // that artifact first through the standalone default sqlite-vec + ollama path.
 func zeroFlagSearchRegistry(t *testing.T) string {
 	t.Helper()
 	return writeRegistry(t, map[string]string{
-		"finance/reconcile/ARTIFACT.md": contextArtifact("invoice reconciliation matching vendor payments against purchase orders"),
-		"hr/onboarding/ARTIFACT.md":     contextArtifact("employee onboarding checklist for new hire orientation"),
-		"infra/deploy/ARTIFACT.md":      contextArtifact("kubernetes deployment rollout and pod autoscaling"),
+		"finance/reconcile/ARTIFACT.md": agentArtifact("invoice reconciliation matching vendor payments against purchase orders"),
+		"hr/onboarding/ARTIFACT.md":     agentArtifact("employee onboarding checklist for new hire orientation"),
+		"infra/deploy/ARTIFACT.md":      agentArtifact("kubernetes deployment rollout and pod autoscaling"),
 	})
 }
 

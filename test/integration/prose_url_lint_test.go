@@ -37,8 +37,8 @@ func TestIngest_ProseURLHeadValidated(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	live := "---\ntype: context\nversion: 1.0.0\ndescription: live\nsensitivity: low\n---\n\nSee [policy](" + ts.URL + "/ok).\n"
-	dead := "---\ntype: context\nversion: 1.0.0\ndescription: dead\nsensitivity: low\n---\n\nSee [policy](" + ts.URL + "/missing).\n"
+	live := "---\ntype: agent\nversion: 1.0.0\ndescription: live\nsensitivity: low\n---\n\nSee [policy](" + ts.URL + "/ok).\n"
+	dead := "---\ntype: agent\nversion: 1.0.0\ndescription: dead\nsensitivity: low\n---\n\nSee [policy](" + ts.URL + "/missing).\n"
 	files := fstest.MapFS{
 		"team/live/ARTIFACT.md": &fstest.MapFile{Data: []byte(live)},
 		"team/dead/ARTIFACT.md": &fstest.MapFile{Data: []byte(dead)},
@@ -91,9 +91,9 @@ func TestIngest_ProseURLHeadValidated(t *testing.T) {
 func TestIngest_ProseReferenceResolvesAgainstCatalog(t *testing.T) {
 	t.Parallel()
 
-	payInvoice := "---\ntype: context\nversion: 1.0.0\ndescription: pay invoice\nsensitivity: low\n---\n\nSee [the reconciler](finance/ap/reconcile).\n"
-	reconcile := "---\ntype: context\nversion: 1.0.0\ndescription: reconcile\nsensitivity: low\n---\n\nNo references here.\n"
-	broken := "---\ntype: context\nversion: 1.0.0\ndescription: broken\nsensitivity: low\n---\n\nSee [ghost](finance/ap/does-not-exist).\n"
+	payInvoice := "---\ntype: agent\nversion: 1.0.0\ndescription: pay invoice\nsensitivity: low\n---\n\nSee [the reconciler](finance/ap/reconcile).\n"
+	reconcile := "---\ntype: agent\nversion: 1.0.0\ndescription: reconcile\nsensitivity: low\n---\n\nNo references here.\n"
+	broken := "---\ntype: agent\nversion: 1.0.0\ndescription: broken\nsensitivity: low\n---\n\nSee [ghost](finance/ap/does-not-exist).\n"
 	files := fstest.MapFS{
 		"finance/ap/pay-invoice/ARTIFACT.md": &fstest.MapFile{Data: []byte(payInvoice)},
 		"finance/ap/reconcile/ARTIFACT.md":   &fstest.MapFile{Data: []byte(reconcile)},
@@ -153,8 +153,8 @@ func TestIngest_ProseURLRejectsNonOK2xx(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ncArt := "---\ntype: context\nversion: 1.0.0\ndescription: noContent\nsensitivity: low\n---\n\nSee [policy](" + ts.URL + "/nc).\n"
-	okArt := "---\ntype: context\nversion: 1.0.0\ndescription: ok\nsensitivity: low\n---\n\nSee [policy](" + ts.URL + "/ok).\n"
+	ncArt := "---\ntype: agent\nversion: 1.0.0\ndescription: noContent\nsensitivity: low\n---\n\nSee [policy](" + ts.URL + "/nc).\n"
+	okArt := "---\ntype: agent\nversion: 1.0.0\ndescription: ok\nsensitivity: low\n---\n\nSee [policy](" + ts.URL + "/ok).\n"
 	files := fstest.MapFS{
 		"team/nc/ARTIFACT.md": &fstest.MapFile{Data: []byte(ncArt)},
 		"team/ok/ARTIFACT.md": &fstest.MapFile{Data: []byte(okArt)},
@@ -210,7 +210,7 @@ func TestIngest_ProseURLOfflineSkipsProbe(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	dead := "---\ntype: context\nversion: 1.0.0\ndescription: dead\nsensitivity: low\n---\n\nSee [policy](" + ts.URL + "/missing).\n"
+	dead := "---\ntype: agent\nversion: 1.0.0\ndescription: dead\nsensitivity: low\n---\n\nSee [policy](" + ts.URL + "/missing).\n"
 	files := fstest.MapFS{"team/dead/ARTIFACT.md": &fstest.MapFile{Data: []byte(dead)}}
 
 	ctx := context.Background()

@@ -210,7 +210,7 @@ func TestMarketplace_NArtifactPluginYieldsOneEntry(t *testing.T) {
 	// Render three artifacts' components into the plugin.
 	arts := []Source{
 		{ArtifactID: "finance/a", ArtifactBytes: []byte("---\ntype: agent\nversion: 1.0.0\n---\n\nA\n"), Plugin: plugin},
-		{ArtifactID: "finance/b", ArtifactBytes: []byte("---\ntype: command\nversion: 1.0.0\n---\n\nB\n"), Plugin: plugin},
+		{ArtifactID: "finance/b", ArtifactBytes: []byte("---\ntype: mcp-server\nversion: 1.0.0\nserver_identifier: https://mcp.acme.com\n---\n\nB\n"), Plugin: plugin},
 		{ArtifactID: "finance/c", SkillBytes: []byte("---\nname: c\ndescription: d\n---\n\nC\n"), ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\n---\n\nC\n"), Plugin: plugin},
 	}
 	for _, a := range arts {
@@ -255,9 +255,9 @@ func TestClaudeMarketplace_ComponentRouting(t *testing.T) {
 			"claude/finance-pack/agents/ag.md",
 		},
 		{
-			"command",
-			Source{ArtifactID: "finance/cmd", ArtifactBytes: []byte("---\ntype: command\nversion: 1.0.0\n---\n\nbody\n"), Plugin: plugin},
-			"claude/finance-pack/commands/cmd.md",
+			"user-invoked skill",
+			Source{ArtifactID: "finance/cmd", SkillBytes: []byte("---\nname: cmd\ndescription: d\nmetadata:\n  invocation: \"user\"\n---\n\nbody\n"), ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\n---\n"), Plugin: plugin},
+			"claude/finance-pack/skills/cmd/SKILL.md",
 		},
 		{
 			"mcp-server",
@@ -600,21 +600,22 @@ func TestGeminiExtension_ManifestIdempotentAcrossPlugins(t *testing.T) {
 }
 
 // Spec: §6.7, §7.8 — the Gemini extension component set is commands, the context
-// file, and mcpServers. A command writes a root commands/<name>.toml, a rule
-// injects into the root context file, and an mcp-server merges into the
-// extension manifest's mcpServers, all at the repository root with no plugin
-// subtree.
+// file, and mcpServers. A user-invoked skill writes a root
+// commands/<name>.toml, a rule injects into the root context file, and an
+// mcp-server merges into the extension manifest's mcpServers, all at the
+// repository root with no plugin subtree.
 func TestGeminiExtension_ComponentRouting(t *testing.T) {
 	t.Parallel()
 	plugin := finPlugin("gemini")
 	cmd := Source{
 		ArtifactID:    "finance/review",
-		ArtifactBytes: []byte("---\ntype: command\nversion: 1.0.0\ndescription: Review.\n---\n\nDo the review.\n"),
+		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\ninvocation: user\n---\n"),
+		SkillBytes:    []byte("---\nname: review\ndescription: Review.\n---\n\nDo the review.\n"),
 		Plugin:        plugin,
 	}
 	out, err := GeminiExtension{}.Component(context.Background(), cmd)
 	if err != nil {
-		t.Fatalf("Component(command): %v", err)
+		t.Fatalf("Component(user-invoked skill): %v", err)
 	}
 	toml := fileByPath(t, out, "commands/review.toml")
 	if !strings.Contains(string(toml.Content), "prompt =") {

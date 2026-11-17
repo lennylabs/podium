@@ -30,9 +30,9 @@ import (
 // that request and no /v1/artifacts:batchLoad request.
 func TestMCPBridge_StartupNeverCallsBatchLoad(t *testing.T) {
 	t.Parallel()
-	fm := "---\ntype: context\nversion: 1.0.0\ndescription: warm\n---\n\nwarm body\n"
+	fm := "---\ntype: agent\nversion: 1.0.0\ndescription: warm\n---\n\nwarm body\n"
 	body, _ := json.Marshal(testharness.SealDelivery(map[string]any{
-		"id": "team/warm", "type": "context", "version": "1.0.0",
+		"id": "team/warm", "type": "agent", "version": "1.0.0",
 		"content_hash":  "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
 		"frontmatter":   fm,
 		"manifest_body": "warm body\n",
@@ -136,9 +136,9 @@ func showRegistry(t *testing.T) string {
 	root := t.TempDir()
 	testharness.WriteTree(t, root,
 		testharness.WriteTreeOption{Path: "base/shared/note/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: note\n---\n\nnote prose\n"},
+			Content: "---\ntype: agent\nversion: 1.0.0\ndescription: note\n---\n\nnote prose\n"},
 		testharness.WriteTreeOption{Path: "top/team/big/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: big context\ntags: [big-tag]\nx_owner: platform\n---\n\n" + showBigBody},
+			Content: "---\ntype: agent\nversion: 1.0.0\ndescription: big context\ntags: [big-tag]\nx_owner: platform\n---\n\n" + showBigBody},
 		testharness.WriteTreeOption{Path: "top/team/bigskill/ARTIFACT.md",
 			Content: "---\ntype: skill\nversion: 1.0.0\ndescription: big skill\n---\n"},
 		testharness.WriteTreeOption{Path: "top/team/bigskill/SKILL.md",
@@ -207,7 +207,7 @@ type showStub struct {
 	auths []string
 }
 
-const showDoc = "---\ntype: context\nversion: 1.0.0\ndescription: stub doc\n---\n\nstub body\n"
+const showDoc = "---\ntype: agent\nversion: 1.0.0\ndescription: stub doc\n---\n\nstub body\n"
 
 func newShowStub(t *testing.T, query, requireAuth string, status int, linkHash string) *showStub {
 	t.Helper()
@@ -232,7 +232,7 @@ func newShowStub(t *testing.T, query, requireAuth string, status int, linkHash s
 	mux.HandleFunc("/v1/load_artifact", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "team/stub", "type": "context", "version": "1.0.0", "content_hash": "sha256:c",
+			"id": "team/stub", "type": "agent", "version": "1.0.0", "content_hash": "sha256:c",
 			"frontmatter": "", "manifest_body": "",
 			"manifest_body_url": map[string]any{"presigned_url": "http://" + r.Host + "/objects/doc" + query, "content_hash": linkHash},
 		})
@@ -305,7 +305,7 @@ func unkeyedSyncEnv() []string {
 }
 
 // syncStub is an httptest registry that counts every request, /v1/events
-// included, and serves one context artifact with a version.DeliveryHash-correct
+// included, and serves one agent artifact with a version.DeliveryHash-correct
 // delivery_hash and no delivery_signature.
 type syncStub struct {
 	*httptest.Server
@@ -330,18 +330,18 @@ func newSyncStub(t *testing.T, opts syncStubOpts) *syncStub {
 		case "/v1/sync/manifest":
 			list := []map[string]any{}
 			if !opts.empty {
-				list = append(list, map[string]any{"id": syncDeliveryArtifact, "type": "context", "version": "1.0.0", "layer": "team"})
+				list = append(list, map[string]any{"id": syncDeliveryArtifact, "type": "agent", "version": "1.0.0", "layer": "team"})
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"artifacts": list})
 		case "/v1/load_artifact":
 			resp := testharness.SealDelivery(map[string]any{
-				"id": syncDeliveryArtifact, "version": "1.0.0", "type": "context", "layer": "team",
-				"frontmatter":       contextArtifact("glossary"),
+				"id": syncDeliveryArtifact, "version": "1.0.0", "type": "agent", "layer": "team",
+				"frontmatter":       agentArtifact("glossary"),
 				"manifest_body":     "glossary body.\n",
 				"artifact_revision": "2025-01-01T00:00:00.000000Z",
 			})
 			if opts.tamper {
-				resp["frontmatter"] = contextArtifact("tampered")
+				resp["frontmatter"] = agentArtifact("tampered")
 			}
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
@@ -364,7 +364,7 @@ func (s *syncStub) assertNoRequests(t *testing.T) {
 func bootSyncServer(t *testing.T) *serverProc {
 	t.Helper()
 	return startServer(t, writeRegistry(t, map[string]string{
-		syncDeliveryArtifact + "/ARTIFACT.md": contextArtifact("glossary"),
+		syncDeliveryArtifact + "/ARTIFACT.md": agentArtifact("glossary"),
 	}))
 }
 

@@ -47,7 +47,7 @@ func TestAuthAdminRBAC_GrantRevokeShowEffectiveGated(t *testing.T) {
 	// A restricted layer (visible only to bob) gives show-effective a layer
 	// whose visibility differs per target, so the response is observable.
 	layerRoot := writeRegistry(t, map[string]string{
-		"finance/ledger/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: restricted ledger\n---\n\nbody\n",
+		"finance/ledger/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: restricted ledger\n---\n\nbody\n",
 	})
 	cfgPath := filepath.Join(home, "registry.yaml")
 	cfg := "" +
@@ -184,7 +184,7 @@ func TestAuthAdminRBAC_LoadOverrideGated(t *testing.T) {
 	priv, pemPath := injKeyPair(t)
 
 	layerRoot := writeRegistry(t, map[string]string{
-		"hr/secret/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: restricted hr record\n---\n\nbody\n",
+		"hr/secret/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: restricted hr record\n---\n\nbody\n",
 	})
 	cfgPath := filepath.Join(home, "registry.yaml")
 	cfg := "" +

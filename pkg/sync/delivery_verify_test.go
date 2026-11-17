@@ -17,9 +17,9 @@ import (
 // glossaryStub is the one-artifact effective view most delivery cases serve.
 func glossaryStub() stubArtifact {
 	return stubArtifact{
-		typ:          "context",
+		typ:          "agent",
 		layer:        "team-shared",
-		frontmatter:  contextArtifactSrc,
+		frontmatter:  agentArtifactSrc,
 		manifestBody: "Glossary body.\n",
 	}
 }
@@ -148,7 +148,7 @@ func TestRun_ServerSourceRefusesUnverifiedRecords(t *testing.T) {
 			art: func() stubArtifact {
 				a := glossaryStub()
 				a.mutate = func(r map[string]any) {
-					r["frontmatter"] = strings.Replace(contextArtifactSrc, "glossary", "Glossary", 1)
+					r["frontmatter"] = strings.Replace(agentArtifactSrc, "glossary", "Glossary", 1)
 				}
 				return a
 			}(),
@@ -277,7 +277,7 @@ func TestRun_ServerSourceManifestLinkWithEmptyContentHash(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-		if got := readFileT(t, filepath.Join(target, "team", "glossary", "ARTIFACT.md")); got != contextArtifactSrc {
+		if got := readFileT(t, filepath.Join(target, "team", "glossary", "ARTIFACT.md")); got != agentArtifactSrc {
 			t.Errorf("ARTIFACT.md = %q, want the linked document", got)
 		}
 	})
@@ -286,7 +286,7 @@ func TestRun_ServerSourceManifestLinkWithEmptyContentHash(t *testing.T) {
 		art := glossaryStub()
 		art.manifestURL = true
 		art.mutate = emptyLinkHash
-		art.blobOverride = map[string]string{stubManifestPath: strings.Replace(contextArtifactSrc, "glossary", "Glossary", 1)}
+		art.blobOverride = map[string]string{stubManifestPath: strings.Replace(agentArtifactSrc, "glossary", "Glossary", 1)}
 		srv := newStubRegistry(t, map[string]stubArtifact{"team/glossary": art})
 		target, err := runStub(t, srv.URL, neverDelivery)
 		assertRefused(t, err, "materialize.content_hash_mismatch: recomputed delivery hash", target)

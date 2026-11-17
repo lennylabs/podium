@@ -10,7 +10,7 @@ import (
 )
 
 func sandboxArtifact(profile string) string {
-	fm := "---\ntype: context\nversion: 1.0.0\ndescription: A sandboxed widget.\nsensitivity: low\n"
+	fm := "---\ntype: agent\nversion: 1.0.0\ndescription: A sandboxed widget.\nsensitivity: low\n"
 	if profile != "" {
 		fm += "sandbox_profile: " + profile + "\n"
 	}

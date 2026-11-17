@@ -1,9 +1,10 @@
 ---
-type: command
-version: 1.0.0
+name: quick-variance
 description: Variance check shortcut for the close period.
-sensitivity: low
-expose_as_mcp_prompt: true
+metadata:
+  version: "1.1.0"
+  invocation: "user"
+  sensitivity: "low"
 ---
 
 # /quick-variance

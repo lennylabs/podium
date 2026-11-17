@@ -28,7 +28,7 @@ func TestQuota_ReturnsLimitsAndUsage(t *testing.T) {
 	body := []byte("frontmatter+body bytes")
 	if err := st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: "default", ArtifactID: "x", Version: "1.0.0",
-		ContentHash: "sha256:x", Type: "context", Layer: "L",
+		ContentHash: "sha256:x", Type: "agent", Layer: "L",
 		Frontmatter: body, Body: body,
 	}); err != nil {
 		t.Fatalf("PutManifest: %v", err)

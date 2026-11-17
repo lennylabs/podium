@@ -72,7 +72,7 @@ func TestAuditSigningJourney_SignAnchorVerifyRedact(t *testing.T) {
 		// is self-describing.
 		"PODIUM_PII_REDACTION=true",
 	}, "serve", "--standalone", "--layer-path", writeRegistry(t, map[string]string{
-		"finance/ledger/ARTIFACT.md": contextArtifact("quarterly ledger for finance"),
+		"finance/ledger/ARTIFACT.md": agentArtifact("quarterly ledger for finance"),
 	}))
 
 	// A freeform query carrying an email address (PII). The query also matches

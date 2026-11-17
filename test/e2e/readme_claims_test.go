@@ -236,7 +236,7 @@ func TestReadme_InitForce(t *testing.T) {
 func TestReadme_SyncConfigFallback(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "init", "--registry", reg)
 	tgt := t.TempDir()
 	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "sync", "--target", tgt)
@@ -249,7 +249,7 @@ func TestReadme_SyncConfigFallback(t *testing.T) {
 // sync --dry-run writes nothing.
 func TestReadme_SyncDryRun(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--dry-run")
 	if res.Exit != 0 || !strings.Contains(res.Stdout, "dry-run") {
@@ -265,7 +265,7 @@ func TestReadme_SyncDryRun(t *testing.T) {
 // materialize under the target.
 func TestReadme_SyncJSON(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--json")
 	var env struct {
@@ -293,8 +293,8 @@ func TestReadme_SyncJSON(t *testing.T) {
 func TestReadme_SyncIdempotent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"a/ARTIFACT.md": contextArtifact("a"),
-		"b/ARTIFACT.md": contextArtifact("b"),
+		"a/ARTIFACT.md": agentArtifact("a"),
+		"b/ARTIFACT.md": agentArtifact("b"),
 	})
 	tgt := t.TempDir()
 	first := syncAndSnapshot(t, reg, tgt)
@@ -313,7 +313,7 @@ func TestReadme_SyncIdempotent(t *testing.T) {
 // config.unknown_harness.
 func TestReadme_SyncUnknownHarness(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", t.TempDir(), "--harness", "not-a-real-harness")
 	if res.Exit == 0 || !strings.Contains(res.Stderr, "config.unknown_harness") {
 		t.Errorf("exit=%d stderr=%q", res.Exit, res.Stderr)
@@ -382,7 +382,7 @@ func TestReadme_Status(t *testing.T) {
 // status against a reachable registry shows OK and the mode.
 func TestReadme_StatusReachable(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	res := runPodium(t, "", nil, "status", "--registry", srv.BaseURL)
 	if !strings.Contains(res.Stdout, "reachability:") || !strings.Contains(res.Stdout, "OK") {
 		t.Errorf("status missing reachability OK:\n%s", res.Stdout)
@@ -469,7 +469,7 @@ func TestReadme_ScaffoldRefuseOverwrite(t *testing.T) {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "A context.", "--yes", out)
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "A context.", "--yes", out)
 	if res.Exit == 0 {
 		t.Fatalf("expected non-zero exit")
 	}
@@ -482,8 +482,8 @@ func TestReadme_ScaffoldRefuseOverwrite(t *testing.T) {
 func TestReadme_FilesystemCatalog(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"a/ARTIFACT.md": contextArtifact("a"),
-		"b/ARTIFACT.md": contextArtifact("b"),
+		"a/ARTIFACT.md": agentArtifact("a"),
+		"b/ARTIFACT.md": agentArtifact("b"),
 	})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
@@ -497,7 +497,7 @@ func TestReadme_FilesystemCatalog(t *testing.T) {
 // /healthz returns 200 with a mode/status field.
 func TestReadme_Healthz(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	var body map[string]any
 	getJSON(t, srv.BaseURL+"/healthz", &body)
 	if _, ok := body["mode"]; !ok {
@@ -508,7 +508,7 @@ func TestReadme_Healthz(t *testing.T) {
 // /readyz returns 200.
 func TestReadme_Readyz(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	if st := getStatus(t, srv.BaseURL+"/readyz"); st != 200 {
 		t.Errorf("/readyz = HTTP %d, want 200", st)
 	}
@@ -517,7 +517,7 @@ func TestReadme_Readyz(t *testing.T) {
 // MCP initialize returns capabilities with tools.
 func TestReadme_MCPInitialize(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "initialize"})
 	caps, _ := rpcResult(t, res.Stdout, 1)["capabilities"].(map[string]any)
 	if _, ok := caps["tools"]; !ok {
@@ -528,7 +528,7 @@ func TestReadme_MCPInitialize(t *testing.T) {
 // MCP tools/list returns the four meta-tools.
 func TestReadme_MCPToolsList(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "tools/list"})
 	for _, tool := range []string{"load_domain", "search_domains", "search_artifacts", "load_artifact"} {
 		if !strings.Contains(res.Stdout, tool) {
@@ -578,7 +578,7 @@ func TestReadme_MCPLoadArtifact(t *testing.T) {
 func TestReadme_MCPLoadDomain(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/close-reporting/run/ARTIFACT.md": contextArtifact("run"),
+		"finance/close-reporting/run/ARTIFACT.md": agentArtifact("run"),
 	}))
 	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL},
 		toolCall(1, "load_domain", map[string]any{"path": "finance/close-reporting"}))
@@ -595,7 +595,7 @@ func TestReadme_MCPLoadDomain(t *testing.T) {
 func TestReadme_HTTPSearch(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"greet/ARTIFACT.md": contextArtifact("greet the user"),
+		"greet/ARTIFACT.md": agentArtifact("greet the user"),
 	}))
 	var resp struct {
 		TotalMatched int   `json:"total_matched"`
@@ -610,7 +610,7 @@ func TestReadme_HTTPSearch(t *testing.T) {
 // /v1/load_artifact returns the manifest.
 func TestReadme_HTTPLoadArtifact(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"a/b/ARTIFACT.md": contextArtifact("ab")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"a/b/ARTIFACT.md": agentArtifact("ab")}))
 	var resp struct {
 		ID           string `json:"id"`
 		Type         string `json:"type"`
@@ -619,7 +619,7 @@ func TestReadme_HTTPLoadArtifact(t *testing.T) {
 		Frontmatter  string `json:"frontmatter"`
 	}
 	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=a/b", &resp)
-	if resp.ID != "a/b" || resp.Type != "context" || resp.Version != "1.0.0" || resp.ManifestBody == "" || resp.Frontmatter == "" {
+	if resp.ID != "a/b" || resp.Type != "agent" || resp.Version != "1.0.0" || resp.ManifestBody == "" || resp.Frontmatter == "" {
 		t.Errorf("incomplete load_artifact response: %+v", resp)
 	}
 }
@@ -627,7 +627,7 @@ func TestReadme_HTTPLoadArtifact(t *testing.T) {
 // /v1/load_domain returns the domain map (subdomains/notable).
 func TestReadme_HTTPLoadDomain(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	var resp map[string]any
 	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", &resp)
 	_, hasSub := resp["subdomains"]
@@ -640,7 +640,7 @@ func TestReadme_HTTPLoadDomain(t *testing.T) {
 // /v1/layers lists registered layers, each with an ID field.
 func TestReadme_HTTPLayers(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	var resp struct {
 		Layers []map[string]any `json:"layers"`
 	}
@@ -658,8 +658,8 @@ func TestReadme_LayerReingest(t *testing.T) {
 	t.Parallel()
 	// §0 quickstart: `podium layer reingest <id>` prints a per-artifact
 	// confirmation line `artifact: <id>@<version>   layer: <layer>`.
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
-	extra := writeRegistry(t, map[string]string{"docs/note/ARTIFACT.md": contextArtifact("note")})
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
+	extra := writeRegistry(t, map[string]string{"docs/note/ARTIFACT.md": agentArtifact("note")})
 	reg := runPodium(t, "", nil, "layer", "register", "--id", "reingest-layer", "--local", extra, "--registry", srv.BaseURL)
 	if reg.Exit != 0 {
 		t.Fatalf("layer register exit=%d stderr=%s", reg.Exit, reg.Stderr)
@@ -677,8 +677,8 @@ func TestReadme_LayerReingest(t *testing.T) {
 // layer register registers a local layer; list shows it.
 func TestReadme_LayerRegister(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
-	extra := writeRegistry(t, map[string]string{"extra/note/ARTIFACT.md": contextArtifact("note")})
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
+	extra := writeRegistry(t, map[string]string{"extra/note/ARTIFACT.md": agentArtifact("note")})
 	reg := runPodium(t, "", nil, "layer", "register", "--id", "test-layer", "--local", extra, "--registry", srv.BaseURL)
 	if reg.Exit != 0 {
 		t.Fatalf("layer register exit=%d stderr=%s", reg.Exit, reg.Stderr)
@@ -692,7 +692,7 @@ func TestReadme_LayerRegister(t *testing.T) {
 // podium search returns human-readable results.
 func TestReadme_SearchCLI(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"greet/ARTIFACT.md": contextArtifact("greet the user")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"greet/ARTIFACT.md": agentArtifact("greet the user")}))
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=" + srv.BaseURL}, "search", "greet")
 	if res.Exit != 0 {
 		t.Fatalf("search exit=%d stderr=%s", res.Exit, res.Stderr)
@@ -705,7 +705,7 @@ func TestReadme_SearchCLI(t *testing.T) {
 // podium search --json emits a JSON envelope.
 func TestReadme_SearchJSON(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"greet/ARTIFACT.md": contextArtifact("greet the user")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"greet/ARTIFACT.md": agentArtifact("greet the user")}))
 	res := runPodium(t, "", nil, "search", "--json", "--registry", srv.BaseURL, "greet")
 	var env struct {
 		TotalMatched int   `json:"total_matched"`
@@ -750,7 +750,7 @@ func TestReadme_MultiLayerFilesystem(t *testing.T) {
 		".registry-config":                        "multi_layer: true\n",
 		"team-shared/greetings/hello/ARTIFACT.md": greetSkillArtifact,
 		"team-shared/greetings/hello/SKILL.md":    skillBody("hello"),
-		"personal/my-stuff/note/ARTIFACT.md":      contextArtifact("note"),
+		"personal/my-stuff/note/ARTIFACT.md":      agentArtifact("note"),
 	})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
@@ -767,7 +767,7 @@ func TestReadme_MultiLayerAmbiguous(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config": "multi_layer: true\n",
-		"ARTIFACT.md":      contextArtifact("top"),
+		"ARTIFACT.md":      agentArtifact("top"),
 	})
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", t.TempDir())
 	if res.Exit == 0 || !strings.Contains(res.Stderr, "ambiguous") {
@@ -830,7 +830,7 @@ func TestReadme_LogoutNoRegistry(t *testing.T) {
 // quota prints tenant quota information.
 func TestReadme_Quota(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	res := runPodium(t, "", nil, "quota", "--registry", srv.BaseURL)
 	if res.Exit != 0 {
 		t.Fatalf("quota exit=%d stderr=%s", res.Exit, res.Stderr)
@@ -843,7 +843,7 @@ func TestReadme_Quota(t *testing.T) {
 // domain show returns the domain map via HTTP.
 func TestReadme_DomainShow(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	res := runPodium(t, "", nil, "domain", "show", "--registry", srv.BaseURL, "finance")
 	if res.Exit != 0 {
 		t.Fatalf("domain show exit=%d stderr=%s", res.Exit, res.Stderr)
@@ -856,7 +856,7 @@ func TestReadme_DomainShow(t *testing.T) {
 // domain analyze returns discovery metrics.
 func TestReadme_DomainAnalyze(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	res := runPodium(t, "", nil, "domain", "analyze", "--registry", srv.BaseURL, "--path", "finance")
 	if res.Exit != 0 {
 		t.Fatalf("domain analyze exit=%d stderr=%s", res.Exit, res.Stderr)
@@ -874,7 +874,7 @@ func TestReadme_DomainAnalyze(t *testing.T) {
 // sibling commands `domain show <path>` and `domain search <query>`.
 func TestReadme_DomainAnalyzePositional(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	res := runPodium(t, "", nil, "domain", "analyze", "--registry", srv.BaseURL, "finance")
 	if res.Exit != 0 {
 		t.Fatalf("domain analyze <path> exit=%d stderr=%s", res.Exit, res.Stderr)
@@ -895,7 +895,7 @@ func TestReadme_Impact(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":               "multi_layer: true\nlayer_order:\n  - org\n  - team\n",
-		"org/shared/parent/ARTIFACT.md":  "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nbody\n",
+		"org/shared/parent/ARTIFACT.md":  "---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nbody\n",
 		"team/finance/child/ARTIFACT.md": "---\ntype: agent\nversion: 2.0.0\ndescription: child\ndelegates_to: [shared/parent]\n---\n\nbody\n",
 	})
 	srv := startServer(t, reg)
@@ -927,7 +927,7 @@ func TestReadme_AdminGrantRevoke(t *testing.T) {
 func TestReadme_ServeLayerPath(t *testing.T) {
 	t.Parallel()
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()}, "serve", "--standalone", "--layer-path",
-		writeRegistry(t, map[string]string{"greet/ARTIFACT.md": contextArtifact("greet the user")}))
+		writeRegistry(t, map[string]string{"greet/ARTIFACT.md": agentArtifact("greet the user")}))
 	if st := getStatus(t, srv.BaseURL+"/healthz"); st != 200 {
 		t.Errorf("/healthz = HTTP %d", st)
 	}
@@ -945,7 +945,7 @@ func TestReadme_ServeLayerPath(t *testing.T) {
 func TestReadme_SyncOverrideAdd(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
-	reg := writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")})
 	runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "init", "--registry", reg)
 	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "sync", "override", "--add", "finance/x", "--target", t.TempDir())
 	if res.Exit != 0 {
@@ -966,8 +966,8 @@ func TestReadme_SyncSaveAs(t *testing.T) {
 	tgt := t.TempDir()
 	env := []string{"HOME=" + t.TempDir()}
 	reg := writeRegistry(t, map[string]string{
-		"finance/invoice/ARTIFACT.md": contextArtifact("Vendor invoice variance reference for the finance team here."),
-		"personal/note/ARTIFACT.md":   contextArtifact("Personal note about variance tracking and reminders for later."),
+		"finance/invoice/ARTIFACT.md": agentArtifact("Vendor invoice variance reference for the finance team here."),
+		"personal/note/ARTIFACT.md":   agentArtifact("Personal note about variance tracking and reminders for later."),
 	})
 	// Seed: a real sync scoped to finance/** writes the lock's scope.include.
 	seed := runPodium(t, ws, env, "sync", "--registry", reg, "--target", tgt, "--harness", "none", "--include", "finance/**")
@@ -1056,7 +1056,7 @@ func TestReadme_Import(t *testing.T) {
 func TestReadme_ProfileEdit(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
-	reg := writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")})
 	runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "init", "--registry", reg)
 	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "profile", "edit", "dev-focus", "--add-include", "finance/**", "--target", t.TempDir())
 	if res.Exit != 0 {
@@ -1075,8 +1075,8 @@ func TestReadme_ProfileEdit(t *testing.T) {
 // watcher loops forever, so the test backgrounds it and owns teardown.
 func TestReadme_LayerWatch(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
-	extra := writeRegistry(t, map[string]string{"extra/note/ARTIFACT.md": contextArtifact("note")})
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
+	extra := writeRegistry(t, map[string]string{"extra/note/ARTIFACT.md": agentArtifact("note")})
 	reg := runPodium(t, "", nil, "layer", "register", "--id", "watch-layer", "--local", extra, "--registry", srv.BaseURL)
 	if reg.Exit != 0 {
 		t.Fatalf("layer register exit=%d stderr=%s", reg.Exit, reg.Stderr)

@@ -14,10 +14,8 @@ An artifact is a directory with one or two manifest files at its root.
 
 Full lint coverage, conformance suite participation, broad adapter support:
 
-- `skill`: instructions (and optional scripts) loaded into the host agent's context on demand.
+- `skill`: instructions (and optional scripts) loaded into the host agent's context on demand. A skill whose `invocation` is `user` (§4.3.4) is meant for a human to invoke, typically as a slash command. Adapters materialize it with the harness's user-only control or as the harness's native command file (§5.2, §6.7), so the harness does not load it on its own. It stays discoverable and loadable through the meta-tools (§5).
 - `agent`: a complete agent definition meant to run in isolation as a delegated child.
-- `context`: pure reference material (style guides, glossaries, API references, large knowledge bases).
-- `command`: parameterized prompt templates a human invokes (typically as a slash command).
 - `rule`: passive context loaded by the harness based on its `rule_mode` (`always`, `glob`, `auto`, `explicit`); see §6.7.1 for adapter mapping.
 - `hook`: a lifecycle observer for the agent loop with a declared `hook_event` from the canonical taxonomy (§4.3.5) and a shell `hook_action`.
 
@@ -36,9 +34,13 @@ Names a deployment can register through the `TypeProvider` SPI (§9) when it has
 
 The type system is extensible: deployments register additional types with their own lint rules. Podium treats every type uniformly for discovery, search, and load; type-specific runtime behaviour lives in hosts.
 
-The type determines indexing, loading semantics, governance requirements, and search ranking. A `context` artifact does not need the same safety review as a `skill` because instructions are more dangerous than reference data.
+**Removed types.** `command` and `context` are not artifact types. A command is a skill whose `invocation` is `user` (§4.3.4, §5.2). Reference material is a skill's `references/` resources, a skill that carries reference material and whose description says so, or a `DOMAIN.md` body (§4.5). An `ARTIFACT.md` whose frontmatter `type` is `command` or `context` is refused. Ingest rejects it with `ingest.invalid_artifact` (§6.10) before lint and before every other per-artifact ingest rule except the §4.6 no-inheritance rule, which is applied first (§7.3.1), so an `ARTIFACT.md` that both declares `extends:` and names a removed type reports the §4.6 rejection. The rejection carries `details.constraint: "type_removed"` and no other `details` member, and its reason names the replacement and names no layer. The rejected artifact is not stored, so it collides with no other artifact under the §4.6 collision rule. A filesystem-source `podium sync` drops it before it applies the collision rule (§13.11.3), and `podium lint` reports it as an error. The rule applies whatever `TypeProvider` is registered. The workspace local overlay applies no ingest rule (§6.4). A consumer materializes an overlay artifact of a removed type as follows: the `none` adapter writes the canonical layout, the `claude-code` adapter writes its `ARTIFACT.md` and bundled resources under `.claude/podium/<artifact-id>/`, and every other adapter writes nothing for it.
 
-**Manifest size lint.** Lint estimates a token count as the byte length divided by four, rounded up. Lint errors when manifest content exceeds 20,000 estimated tokens by default, and the cap is configurable (§13.12). Larger reference content should be factored out as a separate `type: context` artifact. For skills, the cap applies to the `SKILL.md` body; the agentskills.io spec recommends keeping `SKILL.md` body content under 5K tokens and ≤ 500 lines, with longer reference material moved into `references/`.
+A stored row whose type is `command` or `context` is retired. The registry treats it as §4.6 treats a stored row whose `ARTIFACT.md` declares `extends:`: no read path serves it, the ingest collision check and the registry-assigned-version rules (§7.3.1) treat it as a soft-deleted row (§8.4), it is not served again when its layer is restored, the §4.7.8 quota read counts it, and ingest counts it as a stored earlier version of its ID when it decides whether a new version flipped `deprecated: true` (§7.3.2). Its `(artifact_id, version)` stays immutable, so a converted artifact is ingested at a new version. §4.7.3 states when the reverse index admits its edges. This rule rewrites and deletes no stored row.
+
+The type determines indexing, loading semantics, governance requirements, and search ranking.
+
+**Manifest size lint.** Lint estimates a token count as the byte length divided by four, rounded up. Lint errors when manifest content exceeds 20,000 estimated tokens by default, and the cap is configurable (§13.12). Larger reference content belongs in a skill's `references/` directory (§4.3.4), or, when no single skill owns it, in a skill that carries reference material and whose description says so. For skills, the cap applies to the `SKILL.md` body; the agentskills.io spec recommends keeping `SKILL.md` body content under 5K tokens and ≤ 500 lines, with longer reference material moved into `references/`.
 
 **Package layout example (skill).** A skill that ships with a Python script and a Jinja template, following the agentskills.io directory conventions (`scripts/`, `references/`, `assets/`):
 
@@ -89,8 +91,8 @@ The registry's authoring layout is a domain hierarchy. Directories are domain pa
 ASCII fallback for the diagram above (registry layout on disk):
 
   registry/
-    company-glossary/                  [type: context]
-      ARTIFACT.md
+    company-glossary/                  [type: skill]
+      SKILL.md
     finance/
       DOMAIN.md
       ap/
@@ -117,8 +119,8 @@ ASCII fallback for the diagram above (registry layout on disk):
           SKILL.md
         swift-bic-parser/              [type: skill]
           SKILL.md
-    engineering/platform/code-change-pr/    [type: command]
-      ARTIFACT.md
+    engineering/platform/code-change-pr/    [type: skill, invocation: user]
+      SKILL.md
 -->
 
 A directory below the layer root is an artifact package when it directly contains a file named `ARTIFACT.md`, or when it directly contains a file named `SKILL.md` and no directory between it and the layer root is itself a package (§4.1). A `SKILL.md` below a package's root is a bundled resource of that package (§4.4) and starts no package. Package discovery does not descend into a directory below the layer root whose name begins with a dot, so no package is discovered inside one. Files under a dot-prefixed subdirectory of a package remain that package's bundled resources (§4.4). A layer whose skills sit under `.claude/skills/` or `.agents/skills/` therefore places its root at that directory or at the dot-prefixed directory itself: a `git` source sets `root` (§4.6), and a `local` source, `--layer-path`, or a `podium sync` path names the directory as its path. A manifest file directly at the layer root is an error, because the canonical ID is the non-empty directory path under the root.
@@ -137,7 +139,7 @@ For non-skill types, frontmatter and prose both live in `ARTIFACT.md`. For skill
 
 ```yaml
 ---
-type: skill | agent | context | command | rule | hook | mcp-server | <extension type>
+type: skill | agent | rule | hook | mcp-server | <extension type>
 name: run-variance-analysis
 version: 1.0.0 # semver, author-chosen
 description: One-line "when should I use this?"
@@ -177,7 +179,7 @@ sandbox_profile: unrestricted | read-only-fs | network-isolated | seccomp-strict
 # Author hints about the runtime resources this artifact ideally consumes.
 # Both are advisory only — Podium never enforces them; the host (or a custom
 # SDK consumer) decides whether and how to honor them. Applicable to types
-# `agent`, `skill`, and `command`; ingest lint warns if set on other types.
+# `agent` and `skill`; ingest lint warns if set on other types.
 effort_hint: low | medium | high | max
 model_class_hint: nano | small | medium | large | frontier
 
@@ -191,6 +193,11 @@ The `sbom:` field is informational. Podium stores whatever YAML the author write
 ### Type-specific fields
 
 ```yaml
+# For type: skill — who starts the skill (§4.3.4). `any` lets the agent load it on
+# its own and lets a human invoke it; `user` means a human invokes it. Ingest lint
+# warns if set on other types.
+invocation: any | user  # default: any
+
 # For type: agent — declared input/output schemas
 input: { $ref: ./schemas/input.json }
 output: { $ref: ./schemas/output.json }
@@ -265,12 +272,12 @@ Skill artifacts comply with the [agentskills.io specification](https://agentskil
 | `allowed-tools` | Top-level (per spec; experimental) | Omitted |
 | `type` | Not present | Top-level (`type: skill`); implied when `ARTIFACT.md` is absent |
 | `version` | As `metadata.version` (string) | Top-level; equal to `metadata.version` when `metadata.version` is a `major.minor.patch` value |
-| `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes` | Optional, as `metadata` values in the encodings of **Podium fields in `metadata`** | Top-level; takes precedence over the `metadata` value when stated |
+| `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, `invocation` | Optional, as `metadata` values in the encodings of **Podium fields in `metadata`** | Top-level; takes precedence over the `metadata` value when stated |
 | `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `target_harnesses`, `external_resources`, `lint_suppress` | Not present | Top-level |
 
 **Version.** A skill's version is `SKILL.md` `metadata.version`, the `ARTIFACT.md` `version`, or both. When `ARTIFACT.md` declares `version`, that value is the version. Otherwise a `metadata.version` in `major.minor.patch` form is the version. A `metadata.version` in any other form is ignored, because `metadata` is free-form in the Agent Skills standard. When `ARTIFACT.md` declares `version` and `metadata.version` is a `major.minor.patch` value, the two are equal. A skill that declares no usable version carries an assigned version in the reserved form of §4.7.6 (§7.3.1, §13.11.3).
 
-**Podium fields in `metadata`.** `SKILL.md` `metadata` can carry `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, and `release_notes`, each under the key that names the field and as a string in the encoding the table below states. Apart from `version`, which the **Version** paragraph governs, `metadata` carries no other Podium field. A `metadata` key that names any other Podium field is a free-form value, and Podium ignores it.
+**Podium fields in `metadata`.** `SKILL.md` `metadata` can carry `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, and `invocation`, each under the key that names the field and as a string in the encoding the table below states. Apart from `version`, which the **Version** paragraph governs, `metadata` carries no other Podium field. A `metadata` key that names any other Podium field is a free-form value, and Podium ignores it.
 
 | Key | Encoding | Value |
 | --- | --- | --- |
@@ -281,10 +288,13 @@ Skill artifacts comply with the [agentskills.io specification](https://agentskil
 | `deprecated` | `true` or `false` | That boolean |
 | `replaced_by` | One line | That value |
 | `release_notes` | Any string | That value |
+| `invocation` | `any` or `user` | That value |
 
 A field takes its `ARTIFACT.md` value when `ARTIFACT.md` states the key, and otherwise takes the `metadata` value. A `metadata` value that is the empty string or a YAML null is absent. A `metadata` value that does not follow its encoding is ignored, and the field takes no value from `metadata`. `metadata` values are strings, so a `SKILL.md` whose `metadata` holds a sequence or a mapping does not parse, and the ingest that reads it fails as it does for any other `SKILL.md` that does not parse.
 
-The value a field resolves to is the skill's value for that field. Ingest, the §13.2.2 public-mode sensitivity floor, search and its filters, the §4.7 embedding projection, and §13.4 stored-row admission read the resolved value, and `search_artifacts` and `load_artifact` serve it in the members that carry the field (§4.7.4, §4.7.10, §7.2). For a skill row that a release which did not resolve these fields stored, §13.4 states which readers read the values that release stored. A workspace overlay (§6.4) reads the resolved value of each field it reads, with one exception. An overlay that reads frontmatter without a YAML parser takes a field from `metadata` only for a skill with no `ARTIFACT.md`, and only from a value written on one line in a restricted form, in a frontmatter whose other lines meet the restrictions that make the line reading of that value equal its YAML decoding. It takes nothing from `metadata` for any other value. For a `SKILL.md` whose frontmatter decodes, it therefore reports the decoded `metadata` value or no value, and never a value the YAML decoding does not produce. A `SKILL.md` whose frontmatter does not decode fails ingest, and such an overlay reports the value its line reading finds for it.
+The value a field resolves to is the skill's value for that field. Ingest, the §13.2.2 public-mode sensitivity floor, search and its filters, the §4.7 embedding projection, §13.4 stored-row admission, the §6.7 adapters, and the §7.8 marketplace emitters read the resolved value, and `search_artifacts` and `load_artifact` serve it in the members that carry the field (§4.7.4, §4.7.10, §7.2). For a skill row that a release which did not resolve these fields stored, §13.4 states which readers read the values that release stored. A workspace overlay (§6.4) reads the resolved value of each field it reads, with one exception. An overlay that reads frontmatter without a YAML parser takes a field from `metadata` only for a skill with no `ARTIFACT.md`, and only from a value written on one line in a restricted form, in a frontmatter whose other lines meet the restrictions that make the line reading of that value equal its YAML decoding. It takes nothing from `metadata` for any other value. For a `SKILL.md` whose frontmatter decodes, it therefore reports the decoded `metadata` value or no value, and never a value the YAML decoding does not produce. A `SKILL.md` whose frontmatter does not decode fails ingest, and such an overlay reports the value its line reading finds for it.
+
+**Invocation.** `invocation` applies to `type: skill`. A skill whose `invocation` is `user` is meant for a human to invoke (§5.2), and the §6.7 adapters and the §7.8 marketplace emitters materialize it with the harness's user-only control, as the harness's native command file, or not at all. Every other skill has `invocation` `any`: the agent can load it on its own, and a human can invoke it. `any` is the default. It applies when the field is absent and when the resolved value is anything other than `user`, including the empty string, a YAML null, a value in another case such as `User`, and an unknown word. `invocation` resolves under the precedence above with no exception. When `ARTIFACT.md` states the key, its value decides, whatever `metadata` holds. Otherwise a `metadata` value of `any` or `user` decides. Every reader that resolves the field resolves it this way whether or not lint runs, including the §6.4 workspace overlay, a filesystem-source `podium sync` (§13.11.3), and a §13.4 admitted row. Ingest lint warns on an invalid value in either file (below) and does not change the resolved value.
 
 **Synthesized `ARTIFACT.md`.** For a skill with no `ARTIFACT.md`, every response or record that serves an `ARTIFACT.md` document carries exactly these bytes, where `<version>` is the resolved version. Each line ends with a single line feed, and the document ends with the line feed after the comment.
 
@@ -323,6 +333,7 @@ The document is not part of the authored package. The §4.7.6 content hash frame
 - When `ARTIFACT.md` is present, it does not contain `name`, `description`, or `license` fields (warning); if present, the values must match `SKILL.md` exactly (error on mismatch). A `version` in `ARTIFACT.md` equals `SKILL.md` `metadata.version` when both are set and `metadata.version` is a `major.minor.patch` value (error on mismatch).
 - When `ARTIFACT.md` states a key that **Podium fields in `metadata`** lists and `SKILL.md` `metadata` carries a value for that key that follows its encoding, the two values are equal (error on mismatch). `tags` and `when_to_use` compare as ordered lists.
 - A `SKILL.md` `metadata` value for a key that **Podium fields in `metadata`** lists and that does not follow its encoding is ignored (warning that names the key, the value, and the encoding).
+- A non-empty `ARTIFACT.md` `invocation` value other than `any` or `user` resolves to `any` (warning that names the value and the allowed values).
 - When `ARTIFACT.md` is present, its body is empty or a single HTML comment (warning otherwise).
 - A skill that declares no usable version has its version assigned (warning that names any ignored `metadata.version` value and the fix).
 - An authored version in the reserved form of §4.7.6, in either file, is an error (`lint.invalid_version`).
@@ -846,7 +857,7 @@ The index drives:
 - **Impact analysis.** Before deprecating an artifact, list everything that depends on it.
 - **Search ranking signals.** Frequently-depended-on artifacts surface higher.
 
-**Visibility.** Edge queries against the reverse index are filtered per caller. An edge is returned only when the requesting identity can see both of its endpoints under §4.7.2 per-layer visibility: the artifact that declared the relation and the artifact the relation names. The index admits no edge whose source ID has no row other than rows the §4.6 no-inheritance rule retires. The search ranking signal above is exempt from this filter: it counts an artifact's dependents across the tenant, including dependents in layers the caller cannot see.
+**Visibility.** Edge queries against the reverse index are filtered per caller. An edge is returned only when the requesting identity can see both of its endpoints under §4.7.2 per-layer visibility: the artifact that declared the relation and the artifact the relation names. The index admits no edge whose source ID has no row other than rows the §4.6 no-inheritance rule or the §4.1 removed-type rule retires. The search ranking signal above is exempt from this filter: it counts an artifact's dependents across the tenant, including dependents in layers the caller cannot see.
 
 A query against an artifact the caller cannot see returns an empty edge list. It does not return an error, and it is not distinguishable from a query against an artifact that does not exist or one that nothing depends on. The query is filtered rather than refused, so the §6.9 visibility-denial row and the §8.1 `visibility.denied` event do not apply to it. Impact analysis is therefore a view of the caller's effective composition rather than of the whole tenant, and an operator assessing the blast radius of a deprecation sees the dependents in the layers that operator can read.
 
@@ -886,7 +897,7 @@ Pinning syntax in references (`delegates_to:`, `mcpServers:`):
 - `<id>@<semver>.x`: minor or patch range (e.g., `1.2.x`, `1.x`). A range never selects a registry-assigned version.
 - `<id>@sha256:<hash>`: content-pinned.
 
-`load_artifact(<id>)` resolves to `latest` = "the most recently ingested non-deprecated version visible under the caller's effective view, at resolution time." Resolution is registry-side. Registry-assigned versions are candidates for `latest`. §4.6 states which stored rows are not candidates for resolution. For a skill row that a release which did not resolve the §4.3.4 `metadata` fields stored, resolution reads the deprecation flag that release stored (§13.4).
+`load_artifact(<id>)` resolves to `latest` = "the most recently ingested non-deprecated version visible under the caller's effective view, at resolution time." Resolution is registry-side. Registry-assigned versions are candidates for `latest`. §4.6 and the §4.1 removed-type rule state which stored rows are not candidates for resolution. For a skill row that a release which did not resolve the §4.3.4 `metadata` fields stored, resolution reads the deprecation flag that release stored (§13.4).
 
 For session consistency, the meta-tools accept an optional `session_id` argument (UUID generated by the host per agent session). The first `latest` lookup within a session is recorded and reused for all subsequent same-id lookups in that session, so the host sees a consistent snapshot.
 
@@ -977,4 +988,4 @@ The MCP server (§6.6), server-source `podium sync` (§7.5), and the language SD
 
 The steps run before any policy input is read out of the record and before anything is cached, returned, or written. Every resource body, manifest document, and record field the consumer returns or writes is framed into the record or checked against a content hash the record frames. A member the steps do not read, such as `layer`, a link object's `size` and `content_type`, and the §4.7.4 lifecycle members `deprecated`, `replaced_by`, and `deprecation_warning`, lies outside the record, and a consumer that returns it returns it unattested. The steps fix the outcome for every member they read. A consumer that also reads a member outside them by exact name, such as `layer`, may refuse a body in which that member does not have the type §7.2 "Other response members" gives it. Reading such a member does not change the outcome of steps 1 and 2: a member whose name differs from it only in letter case is still ignored, and of two members with its name only the later is read.
 
-The attestation states that the registry composed and served these bytes. Between the registry's response and the consumer's disk, the attestation binds the record against every party that holds the private half of no key in the consumer's §4.7.9 verification key set. During a rotation that set includes the retired key, and a key that is lost or compromised stays in it until the operator removes it (§4.7.9). It carries no nonce, and its ingest time names when the served version was stored rather than when the response was made, so a record captured from an earlier response verifies when it is replayed. The MCP server refuses a record that answers a `latest` resolution with an ingest time below one it already accepted for that registry and artifact (§6.5). Within one session, it compares a `latest` answer with the first `latest` answer it accepted for that artifact in that session. A replayed record that answers a pinned request, a replayed record that server-source `podium sync` or a language SDK receives, and any record a consumer that does not verify receives are not detected. An honest registry serves a `latest` ingest time below one it served earlier when it answers a §4.7.6 session pin, after it is restored from an earlier backup, after a purge or erasure removes the newest versions (§8.4, §8.5), after an upgrade retires them under the §4.6 no-inheritance rule, when the caller's view loses them, and when it serves from a read replica that lags the primary, either in read-only mode or after that replica is promoted (§13.2.1). §6.5 states which of these the MCP server refuses and the remedy for each. It binds what the registry served, and the §13.4 stored-row admission check decides which stored rows the registry may compose a record from.
+The attestation states that the registry composed and served these bytes. Between the registry's response and the consumer's disk, the attestation binds the record against every party that holds the private half of no key in the consumer's §4.7.9 verification key set. During a rotation that set includes the retired key, and a key that is lost or compromised stays in it until the operator removes it (§4.7.9). It carries no nonce, and its ingest time names when the served version was stored rather than when the response was made, so a record captured from an earlier response verifies when it is replayed. The MCP server refuses a record that answers a `latest` resolution with an ingest time below one it already accepted for that registry and artifact (§6.5). Within one session, it compares a `latest` answer with the first `latest` answer it accepted for that artifact in that session. A replayed record that answers a pinned request, a replayed record that server-source `podium sync` or a language SDK receives, and any record a consumer that does not verify receives are not detected. An honest registry serves a `latest` ingest time below one it served earlier when it answers a §4.7.6 session pin, after it is restored from an earlier backup, after a purge or erasure removes the newest versions (§8.4, §8.5), after an upgrade retires them under the §4.6 no-inheritance rule or the §4.1 removed-type rule, when the caller's view loses them, and when it serves from a read replica that lags the primary, either in read-only mode or after that replica is promoted (§13.2.1). §6.5 states which of these the MCP server refuses and the remedy for each. It binds what the registry served, and the §13.4 stored-row admission check decides which stored rows the registry may compose a record from.

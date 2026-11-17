@@ -156,14 +156,14 @@ func (e *admEnv) object(t *testing.T, body []byte) string {
 }
 
 func admEnvManifest(ver, extra string) []byte {
-	return []byte("---\ntype: context\nversion: " + ver + "\ndescription: admission fixture\n" + extra + "---\n\nbody " + ver + "\n")
+	return []byte("---\ntype: agent\nversion: " + ver + "\ndescription: admission fixture\n" + extra + "---\n\nbody " + ver + "\n")
 }
 
-// row is a sealed context row, signed by signer when it is non-nil.
+// row is a sealed agent row, signed by signer when it is non-nil.
 func (e *admEnv) row(t *testing.T, id string, signer sign.Provider, resources ...store.ResourceRef) store.ManifestRecord {
 	t.Helper()
 	return storetest.Seal(t, store.ManifestRecord{
-		TenantID: "default", ArtifactID: id, Version: "1.0.0", Type: "context", Layer: "L",
+		TenantID: "default", ArtifactID: id, Version: "1.0.0", Type: "agent", Layer: "L",
 		Frontmatter: admEnvManifest("1.0.0", ""), Resources: resources,
 		IngestedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}, e.objects, signer)

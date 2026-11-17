@@ -104,10 +104,10 @@ func TestRuntimePolicy_NoRequirementsAlwaysAllowed(t *testing.T) {
 // unrestricted; it backs the §4.4.1 seccomp baseline delivery decision.
 func TestSandboxProfileOf(t *testing.T) {
 	t.Parallel()
-	if got := sandboxProfileOf("---\ntype: context\nversion: 1.0.0\nsandbox_profile: seccomp-strict\n---\n"); got != "seccomp-strict" {
+	if got := sandboxProfileOf("---\ntype: agent\nversion: 1.0.0\nsandbox_profile: seccomp-strict\n---\n"); got != "seccomp-strict" {
 		t.Errorf("got %q, want seccomp-strict", got)
 	}
-	if got := sandboxProfileOf("---\ntype: context\nversion: 1.0.0\n---\n"); got != "unrestricted" {
+	if got := sandboxProfileOf("---\ntype: agent\nversion: 1.0.0\n---\n"); got != "unrestricted" {
 		t.Errorf("absent profile = %q, want unrestricted", got)
 	}
 }

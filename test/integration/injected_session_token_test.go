@@ -110,7 +110,7 @@ func istServer(t *testing.T, audiences ...string) (*httptest.Server, *rsa.Privat
 	for _, r := range []store.ManifestRecord{
 		{TenantID: "default", ArtifactID: "finance/ap/pay-invoice", Version: "1.0.0", ContentHash: "sha256:f1", Type: "skill", Description: "pay invoice", Layer: "shared", IngestedAt: base},
 		{TenantID: "default", ArtifactID: "finance/ap/pay-invoice", Version: "2.0.0", ContentHash: "sha256:f2", Type: "skill", Description: "pay invoice", Layer: "shared", IngestedAt: base.Add(time.Hour)},
-		{TenantID: "default", ArtifactID: "hr/policies", Version: "1.0.0", ContentHash: "sha256:h1", Type: "context", Description: "hr policies", Layer: "shared", IngestedAt: base},
+		{TenantID: "default", ArtifactID: "hr/policies", Version: "1.0.0", ContentHash: "sha256:h1", Type: "agent", Description: "hr policies", Layer: "shared", IngestedAt: base},
 	} {
 		if err := st.PutManifest(ctx, storetest.Seal(t, r, nil, nil)); err != nil {
 			t.Fatalf("PutManifest: %v", err)

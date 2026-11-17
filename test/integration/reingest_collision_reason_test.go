@@ -66,7 +66,7 @@ func rcReingestStatus(t *testing.T, aliceTree map[string]string) (store.Store, i
 	}
 
 	coreDir := t.TempDir()
-	rcWrite(t, coreDir, "shared/note", rcArtifact("context", "1.0.0", "", ""))
+	rcWrite(t, coreDir, "shared/note", rcArtifact("agent", "1.0.0", "", ""))
 	core := store.LayerConfig{
 		TenantID: "t", ID: rcHiddenLayer, Order: 1, SourceType: "local", LocalPath: coreDir,
 		Users: []string{"ops@acme.com"},
@@ -129,7 +129,7 @@ func rcReingest(t *testing.T, aliceTree map[string]string) ([]byte, map[string]r
 func TestReingest_CollisionReasonNamesNoLayer(t *testing.T) {
 	t.Parallel()
 	body, rejected := rcReingest(t, map[string]string{
-		"shared/note": rcArtifact("context", "2.0.0", "", ""),
+		"shared/note": rcArtifact("agent", "2.0.0", "", ""),
 	})
 	got, ok := rejected["shared/note"]
 	if !ok {
@@ -160,8 +160,8 @@ func TestReingest_CollisionReasonNamesNoLayer(t *testing.T) {
 func TestReingest_ExtendsRemovedDetails(t *testing.T) {
 	t.Parallel()
 	body, rejected := rcReingest(t, map[string]string{
-		"mine/child":  rcArtifact("context", "1.0.0", "shared/note", ""),
-		"shared/note": rcArtifact("context", "2.0.0", "", ""),
+		"mine/child":  rcArtifact("agent", "1.0.0", "shared/note", ""),
+		"shared/note": rcArtifact("agent", "2.0.0", "", ""),
 	})
 	got, ok := rejected["mine/child"]
 	if !ok {
@@ -174,31 +174,85 @@ func TestReingest_ExtendsRemovedDetails(t *testing.T) {
 		t.Errorf("reingest response names the hidden layer %q: %s", rcHiddenLayer, body)
 	}
 
+	details := rcDetails(t, body)
+	if got, ok := details["mine/child"]; !ok || got != `{"constraint":"extends_removed"}` {
+		t.Errorf("mine/child details = %q (present %v), want exactly {\"constraint\":\"extends_removed\"}", got, ok)
+	}
+	if got, ok := details["shared/note"]; !ok || got != "" {
+		t.Errorf("shared/note collision entry details = %q (present %v), want an entry with no details key", got, ok)
+	}
+}
+
+// rcDetails returns the compacted details member of every rejected entry in
+// a reingest body, keyed by artifact ID, with the empty string for an entry
+// that carries no details key. Reading the raw member rather than a decoded
+// map pins the exact wire form, so an extra key fails the comparison.
+func rcDetails(t *testing.T, body []byte) map[string]string {
+	t.Helper()
 	var raw struct {
-		Rejected []map[string]json.RawMessage `json:"rejected"`
+		Rejected []struct {
+			ArtifactID string          `json:"artifact_id"`
+			Details    json.RawMessage `json:"details"`
+		} `json:"rejected"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		t.Fatalf("decode reingest response %s: %v", body, err)
 	}
-	seen := map[string]bool{}
+	out := map[string]string{}
 	for _, entry := range raw.Rejected {
-		d, has := entry["details"]
-		switch id := string(entry["artifact_id"]); id {
-		case `"mine/child"`:
-			seen[id] = true
-			var compact bytes.Buffer
-			if err := json.Compact(&compact, d); err != nil || compact.String() != `{"constraint":"extends_removed"}` {
-				t.Errorf("mine/child details = %s (%v), want exactly {\"constraint\":\"extends_removed\"}", d, err)
-			}
-		case `"shared/note"`:
-			seen[id] = true
-			if has {
-				t.Errorf("shared/note collision entry carries details %s, want no details key", d)
-			}
+		if entry.Details == nil {
+			out[entry.ArtifactID] = ""
+			continue
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, entry.Details); err != nil {
+			t.Fatalf("compact details of %s: %v", entry.ArtifactID, err)
+		}
+		out[entry.ArtifactID] = compact.String()
+	}
+	return out
+}
+
+// Spec: §4.1, §4.6, §7.3.1 — POST /v1/layers/reingest refuses an ARTIFACT.md
+// of a removed type with ingest.invalid_artifact, the removed-type reason, and
+// details that are exactly {"constraint":"type_removed"}. An ARTIFACT.md that
+// declares extends: beside type: context reports extends_removed, because the
+// §4.6 check runs first. A valid sibling is accepted in the same cycle.
+func TestReingest_TypeRemovedDetails(t *testing.T) {
+	t.Parallel()
+	body, rejected := rcReingest(t, map[string]string{
+		"mine/cmd":     rcArtifact("command", "1.0.0", "", ""),
+		"mine/ref":     rcArtifact("context", "1.0.0", "", ""),
+		"mine/both":    rcArtifact("context", "1.0.0", "shared/note", ""),
+		"mine/sibling": rcArtifact("agent", "1.0.0", "", ""),
+	})
+	want := map[string]struct{ reason, details string }{
+		"mine/cmd":  {layer.TypeRemovedReason("command"), `{"constraint":"type_removed"}`},
+		"mine/ref":  {layer.TypeRemovedReason("context"), `{"constraint":"type_removed"}`},
+		"mine/both": {layer.ExtendsRemovedReason, `{"constraint":"extends_removed"}`},
+	}
+	details := rcDetails(t, body)
+	for id, w := range want {
+		got, ok := rejected[id]
+		if !ok {
+			t.Errorf("%s not rejected: %s", id, body)
+			continue
+		}
+		if got.Code != layer.InvalidArtifactCode || got.Reason != w.reason {
+			t.Errorf("%s rejection = %+v, want %s with reason %q", id, got, layer.InvalidArtifactCode, w.reason)
+		}
+		if details[id] != w.details {
+			t.Errorf("%s details = %q, want exactly %s", id, details[id], w.details)
 		}
 	}
-	if len(seen) != 2 {
-		t.Errorf("rejected entries seen = %v, want mine/child and shared/note: %s", seen, body)
+	if _, ok := rejected["mine/sibling"]; ok {
+		t.Errorf("mine/sibling rejected, want it accepted: %s", body)
+	}
+	var counts struct {
+		Accepted int `json:"accepted"`
+	}
+	if err := json.Unmarshal(body, &counts); err != nil || counts.Accepted != 1 {
+		t.Errorf("accepted = %d (%v), want the sibling alone: %s", counts.Accepted, err, body)
 	}
 }
 
@@ -215,7 +269,7 @@ func TestReingest_ExtendsRemovedUnderLintEnvelope(t *testing.T) {
 	hook := "---\ntype: hook\nversion: 1.0.0\ndescription: fixture hook\nsensitivity: low\n" +
 		"hook_event: stop\n---\n\nbody\n"
 	st, status, body := rcReingestStatus(t, map[string]string{
-		"mine/child": rcArtifact("context", "1.0.0", "shared/note", ""),
+		"mine/child": rcArtifact("agent", "1.0.0", "shared/note", ""),
 		"mine/hook":  hook,
 	})
 	if status != http.StatusUnprocessableEntity {

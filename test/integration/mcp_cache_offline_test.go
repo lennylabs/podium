@@ -67,7 +67,7 @@ func TestPodiumMCP_OfflineFirstServesFromPersistedIndex(t *testing.T) {
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
 			Path: "x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\n" +
+			Content: "---\ntype: agent\nversion: 1.0.0\n" +
 				"description: x\n---\n\nbody-text\n",
 		},
 	)
@@ -105,7 +105,7 @@ func TestPodiumMCP_AlwaysRevalidateHeadRoundTrip(t *testing.T) {
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
 			Path: "x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\n" +
+			Content: "---\ntype: agent\nversion: 1.0.0\n" +
 				"description: x\n---\n\nbody-text\n",
 		},
 	)

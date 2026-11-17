@@ -4657,7 +4657,7 @@ label:has(> input:disabled) {
    right edge and a version whose left edge each land on one x down the whole
    list. The pair is held at the panel's right edge, so a version rendered at
    its intrinsic width drags the badge left by however many glyphs that
-   version happens to carry, and v1.10.0 beside v1.2.0 puts the two CONTEXT
+   version happens to carry, and v1.10.0 beside v1.2.0 puts the two RULE
    badges at different x. The version column therefore carries a floor wide
    enough for an ordinary semver string, which fixes both edges for every row
    that fits it. */

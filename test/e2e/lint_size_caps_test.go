@@ -20,9 +20,9 @@ func TestLintSizeCaps_ConfigurablePerPackageCapRejects(t *testing.T) {
 	// 8 KB bundled resource: under the 10 MB default, over a 4 KB cap.
 	bigResource := strings.Repeat("x", 8*1024)
 	files := map[string]string{
-		"finance/big/ARTIFACT.md":   "---\ntype: context\nversion: 1.0.0\ndescription: Oversized bundled package reference content here.\nsensitivity: low\n---\n\nbody\n",
+		"finance/big/ARTIFACT.md":   "---\ntype: agent\nversion: 1.0.0\ndescription: Oversized bundled package reference content here.\nsensitivity: low\n---\n\nbody\n",
 		"finance/big/data.bin":      bigResource,
-		"finance/small/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: A small clean reference artifact for coverage here.\nsensitivity: low\n---\n\nbody\n",
+		"finance/small/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: A small clean reference artifact for coverage here.\nsensitivity: low\n---\n\nbody\n",
 	}
 
 	// Lowered per-package cap: the big package is rejected, the small one loads.

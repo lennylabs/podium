@@ -25,7 +25,7 @@ func scopeRegistry(t *testing.T) (*core.Registry, *recorder) {
 	put := func(id, ver string) {
 		if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 			TenantID: tenantID, ArtifactID: id, Version: ver,
-			ContentHash: "sha256:" + id + ver, Type: "context",
+			ContentHash: "sha256:" + id + ver, Type: "agent",
 			Description: id, Layer: "shared",
 		}, nil, nil)); err != nil {
 			t.Fatalf("PutManifest(%s@%s): %v", id, ver, err)

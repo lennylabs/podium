@@ -232,7 +232,7 @@ func TestLoadArtifactFromOverlay_ServesTheCanonicalContentHash(t *testing.T) {
 func TestLoadArtifactFromOverlay_ExtendsKeyIsServedAsAuthored(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	authored := []byte("---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: acme/base@1.0.0\n---\n\nchild body\n")
+	authored := []byte("---\ntype: agent\nversion: 2.0.0\ndescription: child\nextends: acme/base@1.0.0\n---\n\nchild body\n")
 	path := filepath.Join(dir, "team", "child", "ARTIFACT.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -288,7 +288,7 @@ func TestLoadArtifactFromOverlay_SkillServesSkillBody(t *testing.T) {
 	files := map[string]string{
 		"team/greet/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- Skill body lives in SKILL.md. -->\n",
 		"team/greet/SKILL.md":    "---\nname: greet\ndescription: Greets\n---\n\nSay hello.\n",
-		"team/notes/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Notes\n---\n\nThe notes.\n",
+		"team/notes/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Notes\n---\n\nThe notes.\n",
 	}
 	for rel, content := range files {
 		path := filepath.Join(dir, filepath.FromSlash(rel))

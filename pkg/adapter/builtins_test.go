@@ -38,13 +38,13 @@ func TestDefaultRegistry_AllAdaptersRegistered(t *testing.T) {
 	}
 }
 
-// Spec: §6.7 — every built-in adapter produces output for a basic
-// context-type artifact and emits files in deterministic order.
+// Spec: §6.7 — every built-in adapter emits files for an always-mode rule
+// with bundled resources in deterministic order.
 func TestEveryAdapter_ProducesDeterministicOutput(t *testing.T) {
 	t.Parallel()
 	src := Source{
 		ArtifactID:    "company/glossary",
-		ArtifactBytes: []byte("---\ntype: context\nversion: 1.0.0\n---\n\nbody\n"),
+		ArtifactBytes: []byte("---\ntype: rule\nversion: 1.0.0\nrule_mode: always\n---\n\nbody\n"),
 		Resources: map[string][]byte{
 			"r/x.md": []byte("x"),
 			"r/y.md": []byte("y"),

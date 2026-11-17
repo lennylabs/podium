@@ -82,7 +82,7 @@ func anchorAssertNoAnchorEvent(t *testing.T, path string) {
 func anchorStartArgs(t *testing.T) []string {
 	t.Helper()
 	return []string{"serve", "--standalone", "--layer-path", writeRegistry(t, map[string]string{
-		"seed/ARTIFACT.md": contextArtifact("seed"),
+		"seed/ARTIFACT.md": agentArtifact("seed"),
 	})}
 }
 

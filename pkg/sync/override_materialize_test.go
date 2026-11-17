@@ -8,7 +8,7 @@ import (
 )
 
 const ctxArtifact = `---
-type: context
+type: agent
 version: 1.0.0
 description: a context
 ---

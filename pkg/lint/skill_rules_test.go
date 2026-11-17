@@ -623,3 +623,145 @@ func TestSkillMetadataValuesEqual(t *testing.T) {
 		t.Errorf("sandbox_profile value = %v, want nil", got)
 	}
 }
+
+// Spec: §4.3, §4.3.4 — an invalid invocation value resolves to any and draws
+// one warning, in the file that holds it: lint.skill_invocation for an
+// ARTIFACT.md value and lint.skill_metadata_field_ignored for a metadata
+// value. Neither warning honors lint_suppress, and a valid ARTIFACT.md value
+// draws no diagnostic. The test fails against a rule that reports the
+// resolved value, one that errors, and one that warns on every set value.
+func TestLint_SkillInvocationInvalid(t *testing.T) {
+	t.Parallel()
+	const (
+		skillMD     = "name: hello\ndescription: Greet the user.\n"
+		invokeMsg   = `invocation "yes" is not a valid value; valid values: any, user. The skill resolves to any`
+		metadataMsg = `metadata.invocation "User" is ignored: the value must be any or user`
+	)
+	cases := []struct {
+		name         string
+		tree         []testharness.WriteTreeOption
+		wantInvoke   []string
+		wantMetadata []string
+		wantUser     bool
+	}{
+		{
+			name:       "artifact value",
+			tree:       skillTree("type: skill\nversion: 1.0.0\ninvocation: yes\n", skillMD),
+			wantInvoke: []string{invokeMsg},
+		},
+		{
+			name:         "metadata value",
+			tree:         plainSkillTree(skillMD + "metadata:\n  version: \"1.0.0\"\n  invocation: User\n"),
+			wantMetadata: []string{metadataMsg},
+		},
+		{
+			name:         "both values",
+			tree:         skillTree("type: skill\nversion: 1.0.0\ninvocation: yes\n", skillMD+"metadata:\n  invocation: User\n"),
+			wantInvoke:   []string{invokeMsg},
+			wantMetadata: []string{metadataMsg},
+		},
+		{
+			name: "suppressed",
+			tree: skillTree(
+				"type: skill\nversion: 1.0.0\ninvocation: yes\nlint_suppress:\n  - lint.skill_invocation\n", skillMD),
+			wantInvoke: []string{invokeMsg},
+		},
+		{name: "valid user", tree: skillTree("type: skill\nversion: 1.0.0\ninvocation: user\n", skillMD), wantUser: true},
+		{name: "valid any", tree: skillTree("type: skill\nversion: 1.0.0\ninvocation: any\n", skillMD)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			reg, records := openFixture(t, tc.tree...)
+			diags := (&Linter{}).Lint(context.Background(), reg, records)
+			if got := messagesFor(diags, "lint.skill_invocation", SeverityWarning); !slices.Equal(got, tc.wantInvoke) {
+				t.Errorf("lint.skill_invocation = %q, want %q", got, tc.wantInvoke)
+			}
+			if got := messagesFor(diags, "lint.skill_metadata_field_ignored", SeverityWarning); !slices.Equal(got, tc.wantMetadata) {
+				t.Errorf("lint.skill_metadata_field_ignored = %q, want %q", got, tc.wantMetadata)
+			}
+			if want := len(tc.wantInvoke) + len(tc.wantMetadata); len(diags) != want {
+				t.Errorf("want %d diagnostics, got %d: %v", want, len(diags), diags)
+			}
+			if got := records[0].Artifact.UserInvoked(); got != tc.wantUser {
+				t.Errorf("UserInvoked = %v, want %v (invocation %q)", got, tc.wantUser, records[0].Artifact.Invocation)
+			}
+		})
+	}
+}
+
+// Spec: §4.3 — invocation applies to type: skill only, so a value set on any
+// other type draws a lint.skill_invocation warning, and an unset value draws
+// none.
+func TestLint_InvocationOnAgentWarns(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, frontmatter string
+		want              []string
+	}{
+		{"agent set", "type: agent\nversion: 1.0.0\ndescription: Close the books.\ninvocation: user\n",
+			[]string{`invocation set on type "agent"; invocation applies only to skill`}},
+		{"rule set", "type: rule\nversion: 1.0.0\ndescription: Style.\nrule_mode: always\ninvocation: any\n",
+			[]string{`invocation set on type "rule"; invocation applies only to skill`}},
+		{"agent unset", "type: agent\nversion: 1.0.0\ndescription: Close the books.\n", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			reg, records := openFixture(t, testharness.WriteTreeOption{
+				Path: "x/ARTIFACT.md", Content: "---\n" + tc.frontmatter + "---\n\nbody\n",
+			})
+			diags := (&Linter{}).Lint(context.Background(), reg, records)
+			if got := messagesFor(diags, "lint.skill_invocation", SeverityWarning); !slices.Equal(got, tc.want) {
+				t.Errorf("lint.skill_invocation = %q, want %q", got, tc.want)
+			}
+			if countCode(diags, "lint.skill_invocation") != len(tc.want) {
+				t.Errorf("lint.skill_invocation must be a warning: %v", diags)
+			}
+		})
+	}
+}
+
+// Spec: §4.3.4 — invocation joins the ARTIFACT.md-versus-metadata equality
+// check. A stated ARTIFACT.md value of any, or a stated null, beside
+// metadata.invocation: user is a lint.skill_artifact_field_mismatch error,
+// and the stated value decides the resolved field. Without the invocation arm
+// of skillMetadataFieldValue the check compares nil with nil and reports
+// nothing.
+func TestLint_InvocationMismatch(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, artifactFM, want string }{
+		{"stated any", "invocation: any\n", "ARTIFACT.md invocation any does not match SKILL.md metadata.invocation user"},
+		{"stated null", "invocation:\n", "ARTIFACT.md invocation  does not match SKILL.md metadata.invocation user"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			reg, records := openFixture(t, skillTree(
+				"type: skill\nversion: 1.0.0\n"+tc.artifactFM,
+				"name: hello\ndescription: Greet the user.\nmetadata:\n  invocation: user\n",
+			)...)
+			diags := (&Linter{}).Lint(context.Background(), reg, records)
+			got := messagesFor(diags, "lint.skill_artifact_field_mismatch", SeverityError)
+			if len(got) != 1 || got[0] != tc.want {
+				t.Errorf("want one mismatch %q, got %q", tc.want, got)
+			}
+			if records[0].Artifact.UserInvoked() {
+				t.Errorf("the stated ARTIFACT.md value must decide: resolved %q", records[0].Artifact.Invocation)
+			}
+		})
+	}
+}
+
+// Spec: §4.3.4 — a top-level invocation in SKILL.md is a Podium-only field,
+// and the error recommends metadata.invocation.
+func TestLint_TopLevelInvocationNamesMetadataKey(t *testing.T) {
+	t.Parallel()
+	reg, records := openFixture(t, skillTree(
+		"type: skill\nversion: 1.0.0\n",
+		"name: hello\ndescription: Greet the user.\ninvocation: user\n",
+	)...)
+	got := messagesFor((&Linter{}).Lint(context.Background(), reg, records), "lint.skill_podium_only_field", SeverityError)
+	want := `SKILL.md contains Podium-only field "invocation" at the top level; set metadata.invocation in SKILL.md or move it to ARTIFACT.md`
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("want one error %q, got %q", want, got)
+	}
+}

@@ -71,8 +71,8 @@ func gwTrustedHeadersServer(t *testing.T, proxySecret, scimToken string) *server
 func gwTrustedHeadersRegistry(t *testing.T, extraEnv ...string) (*serverProc, string) {
 	t.Helper()
 	home := t.TempDir()
-	pubRoot := writeRegistry(t, map[string]string{"welcome/ARTIFACT.md": contextArtifact("public welcome")})
-	engRoot := writeRegistry(t, map[string]string{"secret/ARTIFACT.md": contextArtifact("engineering secret")})
+	pubRoot := writeRegistry(t, map[string]string{"welcome/ARTIFACT.md": agentArtifact("public welcome")})
+	engRoot := writeRegistry(t, map[string]string{"secret/ARTIFACT.md": agentArtifact("engineering secret")})
 	cfg := "" +
 		"registry:\n" +
 		"  layers:\n" +
@@ -171,7 +171,7 @@ func gwExpectStartupFailure(t *testing.T, wantCode string, extraEnv ...string) s
 	bin := cmdharness.Bin(t, "podium")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": agentArtifact("seed")})
 	cmd := exec.CommandContext(ctx, bin, "serve", "--standalone", "--layer-path", reg)
 	cmd.Env = mergeEnv(append([]string{"HOME=" + t.TempDir()}, extraEnv...)...)
 	cmd.Stdin = bytes.NewReader(nil)
@@ -397,7 +397,7 @@ func TestGateway_TrustedHeadersNonLoopbackBindRefused(t *testing.T) {
 	bin := cmdharness.Bin(t, "podium")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": agentArtifact("seed")})
 	cmd := exec.CommandContext(ctx, bin, "serve", "--standalone", "--layer-path", reg, "--bind", "0.0.0.0:0")
 	cmd.Env = mergeEnv("HOME="+t.TempDir(), "PODIUM_IDENTITY_PROVIDER=trusted-headers")
 	cmd.Stdin = bytes.NewReader(nil)

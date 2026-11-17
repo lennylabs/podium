@@ -21,7 +21,7 @@ type FileOp int
 const (
 	// OpWrite writes Content as a standalone file, replacing any prior
 	// content. This is the default (zero value) and covers skill folders,
-	// agent/command/rule files, and bundled resources.
+	// agent and rule files, command-file fallbacks, and bundled resources.
 	OpWrite FileOp = iota
 	// OpInject merges Content into a shared text file (markdown or TOML)
 	// between Podium-managed markers keyed by Key, so the operator's other

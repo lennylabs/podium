@@ -64,7 +64,7 @@ func TestResolutionCache_DisabledCache(t *testing.T) {
 // defaulted the revision fails the delivery check of the record it reads back.
 const cachedRevision = "2026-01-02T03:04:05.000006Z"
 
-// cachedRecord returns a sealed context record for id whose content hash is the
+// cachedRecord returns a sealed record for id whose content hash is the
 // §4.7.6 digest of its frontmatter and resources, served at cachedRevision.
 func cachedRecord(id, frontmatter, body string, resources map[string]string) loadArtifactResponse {
 	raw := make(map[string][]byte, len(resources))
@@ -204,7 +204,7 @@ func TestLoadArtifactFromCache_RecoversBytes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	s := cacheServer(t, dir, "", "")
-	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n",
+	rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\n---\nbody\n", "body\n",
 		map[string]string{"scripts/run.py": "print('x')\n"})
 	if err := s.cacheVerifiedRecord(rec); err != nil {
 		t.Fatalf("cacheVerifiedRecord: %v", err)
@@ -213,7 +213,7 @@ func TestLoadArtifactFromCache_RecoversBytes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadArtifactFromCache: %v", err)
 	}
-	if got.ID != "team/x" || got.Version != "1.0.0" || got.Type != "context" {
+	if got.ID != "team/x" || got.Version != "1.0.0" || got.Type != "agent" {
 		t.Errorf("identity = %q %q %q, want team/x 1.0.0 context", got.ID, got.Version, got.Type)
 	}
 	if got.Frontmatter != rec.Frontmatter || got.ManifestBody != rec.ManifestBody {
@@ -345,7 +345,7 @@ func TestEnforceSignaturePolicy_CacheServedHighSensitivityUnsignedRefused(t *tes
 	s := cacheServer(t, dir, "", "")
 	s.cfg.verifyPolicy = sign.PolicyAlways
 	s.cfg.signatureProvider = "noop"
-	rec := cachedRecord("x", "---\ntype: context\nversion: 1.0.0\nsensitivity: high\n---\n\nbody\n", "\nbody\n", nil)
+	rec := cachedRecord("x", "---\ntype: agent\nversion: 1.0.0\nsensitivity: high\n---\n\nbody\n", "\nbody\n", nil)
 	if err := s.cacheVerifiedRecord(rec); err != nil {
 		t.Fatalf("cacheVerifiedRecord: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestLoadArtifactFromCache_Missing(t *testing.T) {
 // live and serves the verified record.
 func TestOfflineFirst_PreUpgradeCacheBucketIsAMiss(t *testing.T) {
 	t.Parallel()
-	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\n", "cached-body",
+	rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\n---\n", "cached-body",
 		map[string]string{"references/notes.md": "notes\n"})
 	registry, _ := newCacheStub(t, rec)
 	dir := t.TempDir()
@@ -410,7 +410,7 @@ func TestOfflineFirst_PreUpgradeCacheBucketIsAMiss(t *testing.T) {
 // the record.
 func TestOfflineOnly_CacheHitReverifiesThePerIDRecord(t *testing.T) {
 	t.Parallel()
-	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+	rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
 	registry, _ := newCacheStub(t, rec)
 	dir := t.TempDir()
 	s := cacheServer(t, dir, registry.URL, "offline-only")
@@ -429,7 +429,7 @@ func TestOfflineOnly_CacheHitReverifiesThePerIDRecord(t *testing.T) {
 // a/b_c and a_b/c collide under a separator-replacing segment mapping.
 func TestOfflineOnly_SharedBucketKeepsEachIDsRecord(t *testing.T) {
 	t.Parallel()
-	const fm = "---\ntype: context\nversion: 1.0.0\n---\nshared\n"
+	const fm = "---\ntype: agent\nversion: 1.0.0\n---\nshared\n"
 	first := cachedRecord("a/b_c", fm, "shared\n", nil)
 	second := cachedRecord("a_b/c", fm, "shared\n", nil)
 	if first.ContentHash != second.ContentHash {
@@ -475,7 +475,7 @@ func TestOfflineOnly_LongIDLoadsLiveAndCacheServed(t *testing.T) {
 	if len(id) <= 255 {
 		t.Fatal("fixture: the ID must exceed 255 bytes")
 	}
-	rec := cachedRecord(id, "---\ntype: context\nversion: 1.0.0\n---\nlong\n", "long\n", nil)
+	rec := cachedRecord(id, "---\ntype: agent\nversion: 1.0.0\n---\nlong\n", "long\n", nil)
 	registry, _ := newCacheStub(t, rec)
 	s := cacheServer(t, t.TempDir(), registry.URL, "offline-only")
 	args := map[string]any{"id": id, "version": "1.0.0"}
@@ -487,7 +487,7 @@ func TestOfflineOnly_LongIDLoadsLiveAndCacheServed(t *testing.T) {
 // artifact is a miss, so a reader never serves another ID's document.
 func TestOfflineOnly_ForeignIDFileIsAMiss(t *testing.T) {
 	t.Parallel()
-	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+	rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
 	registry, _ := newCacheStub(t, rec)
 	dir := t.TempDir()
 	s := cacheServer(t, dir, registry.URL, "offline-only")
@@ -505,7 +505,7 @@ func TestOfflineOnly_ForeignIDFileIsAMiss(t *testing.T) {
 // than failing the delivery check of a record that frames an empty revision.
 func TestOfflineOnly_MissingRevisionFileIsAMiss(t *testing.T) {
 	t.Parallel()
-	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+	rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
 	registry, _ := newCacheStub(t, rec)
 	dir := t.TempDir()
 	s := cacheServer(t, dir, registry.URL, "offline-only")
@@ -522,7 +522,7 @@ func TestOfflineOnly_MissingRevisionFileIsAMiss(t *testing.T) {
 // because the record frames the served revision.
 func TestOfflineOnly_RewrittenRevisionFails(t *testing.T) {
 	t.Parallel()
-	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+	rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
 	registry, _ := newCacheStub(t, rec)
 	dir := t.TempDir()
 	s := cacheServer(t, dir, registry.URL, "offline-only")
@@ -543,7 +543,7 @@ func TestOfflineOnly_RewrittenRevisionFails(t *testing.T) {
 // the served sensitivity rather than a value parsed from the frontmatter.
 func TestOfflineOnly_RewrittenSensitivityFails(t *testing.T) {
 	t.Parallel()
-	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\nsensitivity: high\n---\nbody\n", "body\n", nil)
+	rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\nsensitivity: high\n---\nbody\n", "body\n", nil)
 	registry, _ := newCacheStub(t, rec)
 	dir := t.TempDir()
 	s := cacheServer(t, dir, registry.URL, "offline-only")
@@ -560,7 +560,7 @@ func TestOfflineOnly_RewrittenSensitivityFails(t *testing.T) {
 // body rather than one re-derived from the cached document.
 func TestOfflineOnly_RewrittenBodyFails(t *testing.T) {
 	t.Parallel()
-	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+	rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
 	registry, _ := newCacheStub(t, rec)
 	dir := t.TempDir()
 	s := cacheServer(t, dir, registry.URL, "offline-only")
@@ -599,7 +599,7 @@ func TestRevalidatedLatest_RefreshesOnlyAfterVerification(t *testing.T) {
 		for _, tamper := range []bool{true, false} {
 			t.Run(path.name+map[bool]string{true: " refused", false: " verified"}[tamper], func(t *testing.T) {
 				t.Parallel()
-				rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+				rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
 				registry, stub := newCacheStub(t, rec)
 				dir := t.TempDir()
 				s := cacheServer(t, dir, registry.URL, path.mode)
@@ -691,7 +691,7 @@ func TestCacheVerifiedRecord_DisabledCacheIsANoOp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+	rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
 	if err := (&mcpServer{cache: cache}).cacheVerifiedRecord(rec); err != nil {
 		t.Errorf("cacheVerifiedRecord on a disabled cache: %v", err)
 	}
@@ -796,7 +796,7 @@ func TestCacheServedLoad_RewrittenVersionOrTypeFails(t *testing.T) {
 		} {
 			t.Run(file.name+" "+path.mode, func(t *testing.T) {
 				t.Parallel()
-				rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+				rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
 				registry, _ := newCacheStub(t, rec)
 				dir := t.TempDir()
 				s := cacheServer(t, dir, registry.URL, path.mode)

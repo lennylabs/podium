@@ -115,9 +115,9 @@ manifest is a **bundled resource**, and where it lands depends on the type:
   that ships the skill. These destinations are a workspace tree written by
   `podium sync`, a lazily loaded artifact written by `load_artifact`, and a
   published marketplace repository.
-- Workspace materialization of an `agent`, `command`, `context`, or `hook`
-  artifact writes the resources to a bucket beside the native file, such as
-  `.podium/resources/<id>/` or `.podium/context/<id>/`.
+- Workspace materialization of an `agent` or `hook` artifact writes the
+  resources to a bucket beside the native file, such as
+  `.podium/resources/<id>/`.
 - Workspace materialization of a `type: rule` or `type: mcp-server` artifact
   writes only the rule file or the config-file entry, so those two types drop
   their bundled resources.
@@ -134,13 +134,16 @@ Every artifact has a `type:`. A skill with no `ARTIFACT.md` has the type
 
 | Type | What it is |
 |:--|:--|
-| `skill` | Instructions (and optional scripts) loaded into the agent's context on demand. |
+| `skill` | Instructions (and optional scripts) loaded into the agent's context on demand. A skill whose `invocation` is `user` is a prompt a human invokes, typically as a slash command. |
 | `agent` | A complete agent definition meant to run as a delegated child. |
-| `context` | Pure reference material: style guides, glossaries, API references. |
-| `command` | Parameterized prompt templates a human invokes (typically as a slash command). |
 | `rule` | Passive context the harness loads based on a `rule_mode` (`always`, `glob`, `auto`, `explicit`). |
 | `hook` | A lifecycle observer with a declared `hook_event` and a shell `hook_action`. |
 | `mcp-server` | An MCP server registration: the universal `name` and `description`, plus a `server_identifier` that resolves to the server's command or URL. |
+
+`command` and `context` are removed types, which ingest refuses. A command is a
+skill whose `invocation` is `user`, and reference material travels with a skill
+or a domain. [Removed types](../authoring/artifact-types#removed-types) states
+the replacements.
 
 The type determines indexing, lint rules, and how the harness adapter
 translates the artifact at delivery time. Extension types register through the

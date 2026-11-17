@@ -247,7 +247,7 @@ func TestResourceDelivery_InlineRefAboveCutoffServedInlineWithObjectStore(t *tes
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
-		TenantID: "default", ArtifactID: "finance/run", Version: "1.0.0", Type: "context", Layer: "L",
+		TenantID: "default", ArtifactID: "finance/run", Version: "1.0.0", Type: "agent", Layer: "L",
 		Resources: []store.ResourceRef{{Path: "data/big.txt", Inline: big}},
 	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
@@ -355,7 +355,7 @@ func objectHeldFixture(t *testing.T, path string, body []byte) *httptest.Server 
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
-		TenantID: "default", ArtifactID: "finance/run", Version: "1.0.0", Type: "context", Layer: "L",
+		TenantID: "default", ArtifactID: "finance/run", Version: "1.0.0", Type: "agent", Layer: "L",
 		Resources: []store.ResourceRef{{
 			Path:        path,
 			ContentHash: "sha256:" + digest,

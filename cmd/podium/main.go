@@ -163,7 +163,7 @@ func parseOperands(fs *flag.FlagSet, args []string) ([]string, error) {
 // parsePositional parses args into fs while tolerating the command's positional
 // argument anywhere among the flags, and reports how many positionals were
 // given. The count matters: a command may take an empty operand as meaningful,
-// as `podium search --type context ""` does to browse a type, and a sentinel
+// as `podium search --type rule ""` does to browse a type, and a sentinel
 // empty string cannot tell that apart from an operand nobody supplied.
 //
 // It returns the first positional and the total count. A command taking exactly
@@ -1174,7 +1174,7 @@ func lintCmd(args []string) int {
 // artifact with the ingest rules and the §7.3.1 catalog advisories, and
 // writes the result to stdout and stderr. It returns the exit status.
 //
-// Spec: §7.3.1, §4.6
+// Spec: §7.3.1, §4.1, §4.6
 func runLint(ctx context.Context, stdout, stderr io.Writer, registry string, offline, asJSON bool, failOn lint.Severity) int {
 	reg, err := filesystem.Open(registry)
 	if err != nil {
@@ -1184,9 +1184,10 @@ func runLint(ctx context.Context, stdout, stderr io.Writer, registry string, off
 	// spec: §4.6 — lint validates the registry, so it fails on a
 	// same-canonical-ID cross-layer collision ("silent shadowing is never
 	// permitted"): the default policy fails the walk on one. OnDrop collects
-	// every ARTIFACT.md that declares extends:, each is reported as a
-	// refused artifact, and the remaining artifacts are linted, as ingest
-	// does (§4.6, §7.3.1), so lint names every refused artifact and every
+	// every ARTIFACT.md that declares extends: (§4.6) or a removed type
+	// (§4.1), each is reported as a refused artifact, and the remaining
+	// artifacts are linted, as ingest does (§4.1, §4.6, §7.3.1), so lint
+	// names every refused artifact and every
 	// diagnostic of the rest. sync uses CollisionPolicyDrop, which drops and
 	// reports both (§13.11.3). The walk calls OnDrop synchronously, so drops
 	// needs no lock.

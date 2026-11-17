@@ -39,9 +39,9 @@ import (
 func matrixRegistry(t *testing.T) string {
 	t.Helper()
 	return writeRegistry(t, map[string]string{
-		"matrix/astronomy/ARTIFACT.md": contextArtifact("telescope astronomy observing distant galaxies nebulae and star clusters at night"),
-		"matrix/gardening/ARTIFACT.md": contextArtifact("gardening planting vegetables pruning shrubs and composting soil"),
-		"matrix/taxes/ARTIFACT.md":     contextArtifact("income tax filing deductions credits and quarterly estimated payments"),
+		"matrix/astronomy/ARTIFACT.md": agentArtifact("telescope astronomy observing distant galaxies nebulae and star clusters at night"),
+		"matrix/gardening/ARTIFACT.md": agentArtifact("gardening planting vegetables pruning shrubs and composting soil"),
+		"matrix/taxes/ARTIFACT.md":     agentArtifact("income tax filing deductions credits and quarterly estimated payments"),
 	})
 }
 

@@ -252,9 +252,9 @@ func TestRun_ServerSource_MaterializesEffectiveView(t *testing.T) {
 	t.Parallel()
 	srv := newStubRegistry(t, map[string]stubArtifact{
 		"team/glossary": {
-			typ:          "context",
+			typ:          "agent",
 			layer:        "team-shared",
-			frontmatter:  contextArtifactSrc,
+			frontmatter:  agentArtifactSrc,
 			manifestBody: "Glossary body.\n",
 		},
 	})
@@ -276,7 +276,7 @@ func TestRun_ServerSource_MaterializesEffectiveView(t *testing.T) {
 		t.Errorf("layer = %q, want team-shared", res.Artifacts[0].Layer)
 	}
 	got := readFileT(t, filepath.Join(target, "team", "glossary", "ARTIFACT.md"))
-	if got != contextArtifactSrc {
+	if got != agentArtifactSrc {
 		t.Errorf("ARTIFACT.md = %q, want the served frontmatter", got)
 	}
 }
@@ -392,9 +392,9 @@ func TestRun_ServerSource_FetchesLargeResources(t *testing.T) {
 	t.Parallel()
 	srv := newStubRegistry(t, map[string]stubArtifact{
 		"team/glossary": {
-			typ:           "context",
+			typ:           "agent",
 			layer:         "local",
-			frontmatter:   contextArtifactSrc,
+			frontmatter:   agentArtifactSrc,
 			manifestBody:  "body",
 			largeResource: map[string]string{"data/big.bin": "BIGDATA"},
 		},
@@ -457,8 +457,8 @@ func TestRun_ServerSource_PropagatesError(t *testing.T) {
 func TestRun_ServerSource_ScopeIncludeNarrows(t *testing.T) {
 	t.Parallel()
 	srv := newStubRegistry(t, map[string]stubArtifact{
-		"finance/invoice": {typ: "context", layer: "team-shared", frontmatter: contextArtifactSrc, manifestBody: "Invoice body.\n"},
-		"personal/greet":  {typ: "context", layer: "local", frontmatter: contextArtifactSrc, manifestBody: "Greet body.\n"},
+		"finance/invoice": {typ: "agent", layer: "team-shared", frontmatter: agentArtifactSrc, manifestBody: "Invoice body.\n"},
+		"personal/greet":  {typ: "agent", layer: "local", frontmatter: agentArtifactSrc, manifestBody: "Greet body.\n"},
 	})
 	target := t.TempDir()
 	res, err := Run(Options{
@@ -491,7 +491,7 @@ func TestRun_FilesystemSourceStillMaterializes(t *testing.T) {
 	registry := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\n"},
-		testharness.WriteTreeOption{Path: "team/glossary/ARTIFACT.md", Content: contextArtifactSrc},
+		testharness.WriteTreeOption{Path: "team/glossary/ARTIFACT.md", Content: agentArtifactSrc},
 	)
 	if _, err := Run(Options{RegistryPath: registry, Target: t.TempDir(), AdapterID: "none"}); err != nil {
 		t.Fatalf("filesystem Run: %v", err)
@@ -506,13 +506,13 @@ func TestWatch_ServerSource_RerunsOnEvent(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/sync/manifest", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONTest(w, map[string]any{"artifacts": []map[string]string{
-			{"id": "team/glossary", "type": "context", "version": "1.0.0", "layer": "local"},
+			{"id": "team/glossary", "type": "agent", "version": "1.0.0", "layer": "local"},
 		}})
 	})
 	mux.HandleFunc("/v1/load_artifact", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONTest(w, testharness.SealDelivery(map[string]any{
-			"id": "team/glossary", "type": "context", "layer": "local",
-			"manifest_body": "body", "frontmatter": contextArtifactSrc,
+			"id": "team/glossary", "type": "agent", "layer": "local",
+			"manifest_body": "body", "frontmatter": agentArtifactSrc,
 		}))
 	})
 	mux.HandleFunc("/v1/events", func(w http.ResponseWriter, r *http.Request) {

@@ -93,17 +93,18 @@ func mzPollGone(path string, within time.Duration) bool {
 func TestMaterialize_AllFirstClassTypesClaudeCodeSinglePass(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		// skill (folder + SKILL.md), agent, context, command, rule (always),
-		// hook (config-merge into settings.json), mcp-server (config-merge into
-		// .mcp.json).
-		"tools/analyzer/ARTIFACT.md":   "---\ntype: skill\nversion: 1.0.0\ndescription: A skill.\n---\n\nbody\n",
-		"tools/analyzer/SKILL.md":      skillBody("analyzer"),
-		"agents/planner/ARTIFACT.md":   "---\ntype: agent\nname: planner\nversion: 1.0.0\ndescription: An agent.\n---\n\nAgent body.\n",
-		"context/glossary/ARTIFACT.md": contextArtifact("glossary"),
-		"commands/deploy/ARTIFACT.md":  "---\ntype: command\nname: deploy\nversion: 1.0.0\ndescription: Deploy.\n---\n\n$ARGUMENTS\n",
-		"rules/house/ARTIFACT.md":      "---\ntype: rule\nname: house\nversion: 1.0.0\nrule_mode: always\ndescription: House rule.\n---\n\nHouse style.\n",
-		"hooks/stop-hook/ARTIFACT.md":  "---\ntype: hook\nname: stop-hook\nversion: 1.0.0\ndescription: Stop hook.\nhook_event: stop\nhook_action: echo done\n---\n\nbody\n",
-		"servers/finance/ARTIFACT.md":  "---\ntype: mcp-server\nname: finance-warehouse\nversion: 1.0.0\ndescription: Finance MCP.\nserver_identifier: npx:@company/finance-mcp\n---\n\nbody\n",
+		// skill (folder + SKILL.md), agent, a reference skill and a
+		// user-invoked skill (the replacements for context and command, §4.1),
+		// rule (always), hook (config-merge into settings.json), mcp-server
+		// (config-merge into .mcp.json).
+		"tools/analyzer/ARTIFACT.md":  "---\ntype: skill\nversion: 1.0.0\ndescription: A skill.\n---\n\nbody\n",
+		"tools/analyzer/SKILL.md":     skillBody("analyzer"),
+		"agents/planner/ARTIFACT.md":  "---\ntype: agent\nname: planner\nversion: 1.0.0\ndescription: An agent.\n---\n\nAgent body.\n",
+		"context/glossary/SKILL.md":   referenceSkill("glossary", "the company glossary"),
+		"commands/deploy/SKILL.md":    userInvokedSkill("deploy", "Deploy the current branch.", "$ARGUMENTS\n"),
+		"rules/house/ARTIFACT.md":     "---\ntype: rule\nname: house\nversion: 1.0.0\nrule_mode: always\ndescription: House rule.\n---\n\nHouse style.\n",
+		"hooks/stop-hook/ARTIFACT.md": "---\ntype: hook\nname: stop-hook\nversion: 1.0.0\ndescription: Stop hook.\nhook_event: stop\nhook_action: echo done\n---\n\nbody\n",
+		"servers/finance/ARTIFACT.md": "---\ntype: mcp-server\nname: finance-warehouse\nversion: 1.0.0\ndescription: Finance MCP.\nserver_identifier: npx:@company/finance-mcp\n---\n\nbody\n",
 	})
 	target := t.TempDir()
 	chSync(t, reg, target, "claude-code")
@@ -111,8 +112,8 @@ func TestMaterialize_AllFirstClassTypesClaudeCodeSinglePass(t *testing.T) {
 	// Standalone per-type outputs.
 	mustExist(t, filepath.Join(target, ".claude", "skills", "analyzer", "SKILL.md"))
 	mustExist(t, filepath.Join(target, ".claude", "agents", "planner.md"))
-	mustExist(t, filepath.Join(target, ".podium", "context", "context", "glossary", "ARTIFACT.md"))
-	mustExist(t, filepath.Join(target, ".claude", "commands", "deploy.md"))
+	mustExist(t, filepath.Join(target, ".claude", "skills", "glossary", "SKILL.md"))
+	mustExist(t, filepath.Join(target, ".claude", "skills", "deploy", "SKILL.md"))
 	mustExist(t, filepath.Join(target, ".claude", "rules", "house.md"))
 
 	// Hook config-merge into .claude/settings.json, with the ownership marker.
@@ -267,19 +268,19 @@ func assertLockHashesStable(t *testing.T, before, after string) {
 func TestMaterialize_WatchEditAndStaleCleanupInOneSession(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"rules/house/ARTIFACT.md":     "---\ntype: rule\nname: house\nversion: 1.0.0\nrule_mode: always\ndescription: House rule.\n---\n\nORIGINAL house style.\n",
-		"commands/deploy/ARTIFACT.md": "---\ntype: command\nname: deploy\nversion: 1.0.0\ndescription: Deploy.\n---\n\n$ARGUMENTS\n",
+		"rules/house/ARTIFACT.md":  "---\ntype: rule\nname: house\nversion: 1.0.0\nrule_mode: always\ndescription: House rule.\n---\n\nORIGINAL house style.\n",
+		"commands/deploy/SKILL.md": userInvokedSkill("deploy", "Deploy the current branch.", "$ARGUMENTS\n"),
 	})
 	target := t.TempDir()
 	w := startWatch(t, reg, target, "claude-code")
 
 	rulePath := filepath.Join(target, ".claude", "rules", "house.md")
-	cmdPath := filepath.Join(target, ".claude", "commands", "deploy.md")
+	cmdPath := filepath.Join(target, ".claude", "skills", "deploy", "SKILL.md")
 	if !mzPollContains(rulePath, "ORIGINAL house style", 15*time.Second) {
 		t.Fatalf("initial sync did not materialize the rule\nlog:\n%s", w.log())
 	}
 	if !pollFile(cmdPath, 15*time.Second) {
-		t.Fatalf("initial sync did not materialize the command\nlog:\n%s", w.log())
+		t.Fatalf("initial sync did not materialize the user-invoked skill\nlog:\n%s", w.log())
 	}
 
 	// Edit the rule body in place; the watcher must rematerialize the new body.
@@ -289,12 +290,12 @@ func TestMaterialize_WatchEditAndStaleCleanupInOneSession(t *testing.T) {
 		t.Errorf("watcher did not rematerialize the edited rule body\nlog:\n%s", w.log())
 	}
 
-	// Delete the command artifact; the watcher must clean its standalone output.
+	// Delete the user-invoked skill; the watcher must clean its standalone output.
 	if err := os.RemoveAll(filepath.Join(reg, "commands", "deploy")); err != nil {
-		t.Fatalf("remove command artifact: %v", err)
+		t.Fatalf("remove user-invoked skill: %v", err)
 	}
 	if !mzPollGone(cmdPath, 15*time.Second) {
-		t.Errorf("watcher did not remove the deleted command's output\nlog:\n%s", w.log())
+		t.Errorf("watcher did not remove the deleted skill's output\nlog:\n%s", w.log())
 	}
 
 	if code := w.stop(t); code != 0 {
@@ -305,21 +306,25 @@ func TestMaterialize_WatchEditAndStaleCleanupInOneSession(t *testing.T) {
 // ------------------------------------------------------------------------
 
 // the §6.7.1 unsupported-type matrix is enforced through real
-// sync and lint for pi and claude-desktop: pi materializes a command to
-// .pi/prompts/<name>.md, an agent targeting pi (a ✗ cell) fails sync with the
-// §6.9 untranslatable guard, claude-desktop writes nothing project-level, and a
+// sync and lint for pi and claude-desktop: pi materializes a user-invoked
+// skill to .pi/skills/<name>/SKILL.md, an agent targeting pi (a ✗ cell) fails
+// sync with the §6.9 untranslatable guard, claude-desktop writes nothing
+// project-level, and a
 // declared-but-unsupported combination (agent target_harnesses:[pi]) surfaces a
 // lint.harness_capability diagnostic.
 // spec: §6.7 (pi type routing), §6.7.1 (capability matrix), §6.9, §4.3.5.
 func TestMaterialize_UnsupportedTypeMatrixPiAndClaudeDesktop(t *testing.T) {
 	t.Parallel()
-	// pi materializes a command to .pi/prompts/<name>.md.
+	// pi materializes a user-invoked skill to .pi/skills/<name>/SKILL.md.
 	piCmdReg := writeRegistry(t, map[string]string{
-		"commands/deploy/ARTIFACT.md": "---\ntype: command\nname: deploy\nversion: 1.0.0\ndescription: Deploy.\n---\n\n$ARGUMENTS\n",
+		"commands/deploy/SKILL.md": userInvokedSkill("deploy", "Deploy the current branch.", "$ARGUMENTS\n"),
 	})
 	piCmdTarget := t.TempDir()
 	chSync(t, piCmdReg, piCmdTarget, "pi")
-	mustExist(t, filepath.Join(piCmdTarget, ".pi", "prompts", "deploy.md"))
+	if got := readFile(t, filepath.Join(piCmdTarget, ".pi", "skills", "deploy", "SKILL.md")); !strings.HasSuffix(got, "---\n\n$ARGUMENTS\n") {
+		t.Errorf("pi SKILL.md body is not the authored $ARGUMENTS body:\n%s", got)
+	}
+	mustNotExist(t, filepath.Join(piCmdTarget, ".pi", "prompts"))
 
 	// An agent declares target_harnesses:[pi], which is a ✗ cell. The §6.9
 	// untranslatable guard in podium sync fails it with
@@ -583,22 +588,23 @@ func TestMaterialize_CodexResyncInjectAndTomlReconcile(t *testing.T) {
 
 // ------------------------------------------------------------------------
 
-// `podium sync --harness opencode --type rule,context` over an
-// all-types registry materializes only the selected types and stays idempotent:
-// AGENTS.md injected rules and .podium/context buckets exist while the excluded
-// .opencode/commands and opencode.json mcp outputs are absent, and a second run
-// is byte-identical. The §7.5.1 / spec §7.5 --type flag is comma-separated
-// (`--type rule,context`). spec: §7.5.1 (type filter), §7.5.
+// `podium sync --harness opencode --type rule,skill` over an all-types
+// registry materializes only the selected types and stays idempotent: AGENTS.md
+// injected rules, the reference skill, and the user-invoked skill's command
+// file exist while the excluded opencode.json mcp output is absent, and a
+// second run is byte-identical. The §7.5.1 / spec §7.5 --type flag is
+// comma-separated (`--type rule,skill`). spec: §7.5.1 (type filter), §7.5,
+// §6.7.
 func TestMaterialize_OpenCodeTypeFilteredIdempotent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"rules/house/ARTIFACT.md":      "---\ntype: rule\nname: house\nversion: 1.0.0\nrule_mode: always\ndescription: House.\n---\n\nHouse style.\n",
-		"context/glossary/ARTIFACT.md": contextArtifact("glossary"),
-		"commands/deploy/ARTIFACT.md":  "---\ntype: command\nname: deploy\nversion: 1.0.0\ndescription: Deploy.\n---\n\n$ARGUMENTS\n",
-		"tools/finance/ARTIFACT.md":    "---\ntype: mcp-server\nname: finance-warehouse\nversion: 1.0.0\ndescription: MCP.\nserver_identifier: npx:@company/finance-mcp\n---\n\nbody\n",
+		"rules/house/ARTIFACT.md":   "---\ntype: rule\nname: house\nversion: 1.0.0\nrule_mode: always\ndescription: House.\n---\n\nHouse style.\n",
+		"context/glossary/SKILL.md": referenceSkill("glossary", "the company glossary"),
+		"commands/deploy/SKILL.md":  userInvokedSkill("deploy", "Deploy the current branch.", "$ARGUMENTS\n"),
+		"tools/finance/ARTIFACT.md": "---\ntype: mcp-server\nname: finance-warehouse\nversion: 1.0.0\ndescription: MCP.\nserver_identifier: npx:@company/finance-mcp\n---\n\nbody\n",
 	})
 	target := t.TempDir()
-	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "opencode", "--type", "rule,context")
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "opencode", "--type", "rule,skill")
 	if res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
@@ -607,16 +613,18 @@ func TestMaterialize_OpenCodeTypeFilteredIdempotent(t *testing.T) {
 	if !strings.Contains(agents, "House style") || !strings.Contains(agents, "podium:begin:rules/house") {
 		t.Errorf("AGENTS.md missing the filtered rule injection:\n%s", agents)
 	}
-	mustExist(t, filepath.Join(target, ".podium", "context", "context", "glossary", "ARTIFACT.md"))
+	mustExist(t, filepath.Join(target, ".opencode", "skills", "glossary", "SKILL.md"))
+	// Spec: §6.7 — the skill filter selects the user-invoked skill, which
+	// opencode writes as its command-file fallback rather than as a skill.
+	mustExist(t, filepath.Join(target, ".opencode", "commands", "deploy.md"))
+	mustNotExist(t, filepath.Join(target, ".opencode", "skills", "deploy", "SKILL.md"))
 	// Excluded types absent.
-	mustNotExist(t, filepath.Join(target, ".opencode", "commands", "deploy.md"))
-	mustNotExist(t, filepath.Join(target, ".opencode", "commands"))
 	mustNotExist(t, filepath.Join(target, "opencode.json"))
 
 	// Re-run with the same filter: the whole tree (excluding the lock, whose
 	// timestamp changes) is byte-identical.
 	before := snapshotTree(t, target)
-	res2 := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "opencode", "--type", "rule,context")
+	res2 := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "opencode", "--type", "rule,skill")
 	if res2.Exit != 0 {
 		t.Fatalf("re-sync exit=%d stderr=%s", res2.Exit, res2.Stderr)
 	}

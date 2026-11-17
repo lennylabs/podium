@@ -21,7 +21,7 @@ func TestIngest_EmbedsDomainProjection(t *testing.T) {
 	fsys := fstest.MapFS{
 		"finance/ap/DOMAIN.md":         &fstest.MapFile{Data: []byte("---\ndescription: AP ops\ndiscovery:\n  keywords:\n    - reconciliation\n---\n# AP\nbody\n")},
 		"finance/ap/imports/DOMAIN.md": &fstest.MapFile{Data: []byte("---\ninclude:\n  - x/*\n---\n")},
-		"finance/ap/pay/ARTIFACT.md":   &fstest.MapFile{Data: []byte(contextArtifact("pay"))},
+		"finance/ap/pay/ARTIFACT.md":   &fstest.MapFile{Data: []byte(agentArtifact("pay"))},
 	}
 	embedded := map[string]bool{}
 	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -56,7 +56,7 @@ func TestIngest_PersistsDomainMD(t *testing.T) {
 	fsys := fstest.MapFS{
 		"DOMAIN.md":                          &fstest.MapFile{Data: []byte("---\ndescription: root\n---\n")},
 		"finance/ap/DOMAIN.md":               &fstest.MapFile{Data: []byte("---\ndescription: AP\n---\n\n# AP\n")},
-		"finance/ap/pay-invoice/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("pay"))},
+		"finance/ap/pay-invoice/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("pay"))},
 	}
 	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "t", LayerID: "L", Files: fsys,
@@ -91,7 +91,7 @@ func TestIngest_DomainMDReingestReplaces(t *testing.T) {
 	mk := func(desc string) fstest.MapFS {
 		return fstest.MapFS{
 			"finance/DOMAIN.md":     &fstest.MapFile{Data: []byte("---\ndescription: " + desc + "\n---\n")},
-			"finance/x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("x"))},
+			"finance/x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("x"))},
 		}
 	}
 	for _, desc := range []string{"first", "second"} {

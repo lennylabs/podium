@@ -16,9 +16,9 @@ import (
 func TestSearchDomains_AllParams(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("finance/run-variance/ARTIFACT.md", contextFor("Variance", "finance")),
-		fixture("finance/pay-invoice/ARTIFACT.md", contextFor("Pay invoice", "finance,ap")),
-		fixture("ops/restart/ARTIFACT.md", contextFor("Restart runner", "ops")),
+		fixture("finance/run-variance/ARTIFACT.md", agentFor("Variance", "finance")),
+		fixture("finance/pay-invoice/ARTIFACT.md", agentFor("Pay invoice", "finance,ap")),
+		fixture("ops/restart/ARTIFACT.md", agentFor("Restart runner", "ops")),
 	)
 	body := mustGet(t, h.URL, "/v1/search_domains?query=finance&scope=finance&top_k=5")
 	var resp server.SearchResponse
@@ -44,7 +44,7 @@ func TestSearchDomains_InvalidArgumentTopK(t *testing.T) {
 func TestScopePreview_HappyPath(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("finance/run/ARTIFACT.md", contextFor("Run", "finance")),
+		fixture("finance/run/ARTIFACT.md", agentFor("Run", "finance")),
 	)
 	resp, err := http.Get(h.URL + "/v1/scope/preview")
 	if err != nil {
@@ -75,7 +75,7 @@ func TestLoadArtifact_MissingIDReturns400(t *testing.T) {
 func TestLoadArtifact_UnknownIDReturns404(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("finance/run/ARTIFACT.md", contextFor("Run", "finance")),
+		fixture("finance/run/ARTIFACT.md", agentFor("Run", "finance")),
 	)
 	resp, err := http.Get(h.URL + "/v1/load_artifact?id=does/not/exist")
 	if err != nil {
@@ -95,7 +95,7 @@ func TestLoadArtifact_UnknownIDReturns404(t *testing.T) {
 func TestLoadDomain_UnknownPathReturns404(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("finance/run/ARTIFACT.md", contextFor("Run", "finance")),
+		fixture("finance/run/ARTIFACT.md", agentFor("Run", "finance")),
 	)
 	resp, err := http.Get(h.URL + "/v1/load_domain?path=does-not-exist")
 	if err != nil {
@@ -111,7 +111,7 @@ func TestLoadDomain_UnknownPathReturns404(t *testing.T) {
 func TestSearchArtifacts_TagFilterNoMatches(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("a/ARTIFACT.md", contextFor("A", "finance")),
+		fixture("a/ARTIFACT.md", agentFor("A", "finance")),
 	)
 	body := mustGet(t, h.URL, "/v1/search_artifacts?tags=nonexistent")
 	var resp server.SearchResponse
@@ -128,8 +128,8 @@ func TestSearchArtifacts_TagFilterNoMatches(t *testing.T) {
 func TestSearchArtifacts_EmptyQuery(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("a/ARTIFACT.md", contextFor("A", "")),
-		fixture("b/ARTIFACT.md", contextFor("B", "")),
+		fixture("a/ARTIFACT.md", agentFor("A", "")),
+		fixture("b/ARTIFACT.md", agentFor("B", "")),
 	)
 	body := mustGet(t, h.URL, "/v1/search_artifacts?query=")
 	var resp server.SearchResponse

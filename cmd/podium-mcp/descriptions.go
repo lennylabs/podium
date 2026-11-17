@@ -14,7 +14,7 @@ const descLoadDomain = "Browse the artifact catalog hierarchically. Call with no
 const descSearchDomains = "Search the catalog for relevant domains by query. Use this when you don't know the right domain path and want to find candidate neighborhoods to drill into, e.g., \"vendor payments,\" \"observability,\" \"release management.\" Filters: `scope` (a domain path to constrain the search). Returns ranked domain descriptors only: `path`, `name`, short `description`, `keywords`, score. To explore one of the results, call `load_domain` with its path. Use `search_artifacts` instead when you're already in the right neighborhood and want a specific artifact."
 
 // spec: §5.1 — canonical `search_artifacts` description, verbatim.
-const descSearchArtifacts = "Search or browse the artifact catalog. Pass a `query` for relevance ranking when you know the topic but not the exact ID. Omit `query` and pass `scope` alone to browse all artifacts in a domain; useful when a domain's notable list and description don't tell you enough and you want to list everything. Filters: `type` (skill, agent, context, command, rule, hook), `tags`, `scope` (a domain path). Optional `top_k` (default 10, max 50). The response includes `total_matched`; when more results exist than were returned, narrow with filters, drill into a subdomain, or run a more specific query. Returns ranked descriptors only; no manifest bodies. To use a result, call `load_artifact` with its id."
+const descSearchArtifacts = "Search or browse the artifact catalog. Pass a `query` for relevance ranking when you know the topic but not the exact ID. Omit `query` and pass `scope` alone to browse all artifacts in a domain; useful when a domain's notable list and description don't tell you enough and you want to list everything. Filters: `type` (skill, agent, rule, hook), `tags`, `scope` (a domain path). Optional `top_k` (default 10, max 50). The response includes `total_matched`; when more results exist than were returned, narrow with filters, drill into a subdomain, or run a more specific query. Returns ranked descriptors only; no manifest bodies. To use a result, call `load_artifact` with its id."
 
 // spec: §5.1 — canonical `load_artifact` description, verbatim.
 const descLoadArtifact = "Load a specific artifact by ID. Returns the manifest body and materializes any bundled resources (scripts, templates, schemas, etc.) onto the local filesystem at a configured path. Use this only when you've decided to actually use the artifact; loading is the expensive operation. The returned `materialized_at` paths are absolute and ready to use."
@@ -77,7 +77,7 @@ func metaToolDescriptors() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"query":      map[string]any{"type": "string", "description": "Free-text query for relevance ranking. Omit to browse by filter."},
-					"type":       map[string]any{"type": "string", "description": "Artifact type filter: skill, agent, context, command, rule, or hook."},
+					"type":       map[string]any{"type": "string", "description": "Artifact type filter: skill, agent, rule, or hook."},
 					"tags":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Tag filters."},
 					"scope":      map[string]any{"type": "string", "description": "Domain path prefix to constrain the search."},
 					"top_k":      map[string]any{"type": "integer", "description": "Maximum results (default 10, max 50)."},

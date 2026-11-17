@@ -38,7 +38,7 @@ func TestPodiumMCP_AdvertisesAndThreadsSession(t *testing.T) {
 		case "/v1/search_artifacts":
 			_, _ = w.Write([]byte(`{"query":"x","total_matched":0,"results":[]}`))
 		case "/v1/load_artifact":
-			_, _ = w.Write([]byte(`{"id":"finance/a","version":"1.0.0","content_hash":"sha256:x","type":"context"}`))
+			_, _ = w.Write([]byte(`{"id":"finance/a","version":"1.0.0","content_hash":"sha256:x","type":"agent"}`))
 		default:
 			_, _ = w.Write([]byte(`{}`))
 		}
@@ -105,11 +105,11 @@ func TestPodiumMCP_SessionPinsLatestEndToEnd(t *testing.T) {
 	// ContentHash is the canonical hash of the served frontmatter so the
 	// bridge's §6.6 step 2 content-hash check accepts the load.
 	put := func(ver string, at time.Time) {
-		fm := "---\ntype: context\nversion: " + ver +
+		fm := "---\ntype: agent\nversion: " + ver +
 			"\ndescription: A reusable finance context for the team.\nsensitivity: low\n---\n"
 		if err := st.PutManifest(context.Background(), store.ManifestRecord{
 			TenantID: "default", ArtifactID: "finance/a", Version: ver,
-			ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil), Type: "context",
+			ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil), Type: "agent",
 			Sensitivity: "low", Layer: "L", IngestedAt: at, Frontmatter: []byte(fm),
 		}); err != nil {
 			t.Fatalf("PutManifest %s: %v", ver, err)

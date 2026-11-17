@@ -18,10 +18,10 @@ delivers them into each harness's native format.
 
 The registry holds these artifact types:
 
-- Skills, which are repeatable procedures.
+- Skills, which are repeatable procedures. A user-invoked skill is a prompt
+  that a human starts as a slash command, and a skill can also carry reference
+  material.
 - Agents, which are delegated workers.
-- Contexts, which hold reference material.
-- Commands, which are parameterized prompts.
 - Rules, which carry policy.
 - Hooks, which observe lifecycle events.
 - MCP server registrations.
@@ -150,7 +150,7 @@ Podium becomes useful as any of these dimensions grow:
 
 - **Catalog size.** Progressive discovery and per-domain navigation handle catalogs that exceed what fits in a system prompt.
 - **Cross-harness delivery.** A canonical artifact format pays off as soon as a team targets more than one harness.
-- **Multiple artifact types.** A dependency graph across skills, agents, contexts, commands, rules, hooks, and MCP server registrations covers cross-type edges (`delegates_to:` and `mcpServers:`) that type-specific stores do not model.
+- **Multiple artifact types.** A dependency graph across skills, agents, rules, hooks, and MCP server registrations covers cross-type edges (`delegates_to:` and `mcpServers:`) that type-specific stores do not model.
 - **Multiple contributors and audiences.** Per-layer access control, classification, and audit address contributor and audience diversity.
 - **Audiences beyond engineering.** The same catalog feeds developers in coding harnesses and non-developers in desktop chat clients.
 
@@ -187,7 +187,7 @@ These products store and govern agent artifacts centrally. They differ in artifa
 | **Google Cloud Agent Registry** ([docs](https://docs.cloud.google.com/agent-registry/concepts)) | Managed (Google Cloud) | Agents, MCP servers, and skills (skill governance in preview) | Discovery through the registry's search API | None | Skill governance (preview); vulnerability scanning of skills |
 | **JFrog AI Catalog** ([skills registry](https://jfrog.com/ai-catalog/skills-registry/)) | Commercial; SaaS or self-hosted | Skills, plugins, MCP servers, and models | CLI and MCP | None | Policy-driven approval; scanning; signing of approved skills |
 | **Tessl** ([tessl.io](https://tessl.io/registry)) | Commercial; SaaS | Skills, docs, rules, and commands in tiles | Package manager; MCP tools to install | None | Workspace-scoped; evaluation of skill effect |
-| **Podium** | MIT; self-hosted in the local, single-node, or clustered deployment mode | Skills, agents, contexts, commands, rules, hooks, MCP server registrations, and extension types | Native project files through the built-in adapters, for each artifact type a harness reads from a project directory; marketplace repositories; MCP discovery tools; SDKs | Ordered layers | Per-OIDC-group and per-user visibility evaluated per request; SCIM; multi-tenant mode |
+| **Podium** | MIT; self-hosted in the local, single-node, or clustered deployment mode | Skills, agents, rules, hooks, MCP server registrations, and extension types | Native project files through the built-in adapters, for each artifact type a harness reads from a project directory; marketplace repositories; MCP discovery tools; SDKs | Ordered layers | Per-OIDC-group and per-user visibility evaluated per request; SCIM; multi-tenant mode |
 
 **Where each applies.**
 
@@ -199,7 +199,7 @@ These products store and govern agent artifacts centrally. They differ in artifa
 
 **Where Podium applies.** Podium applies in any of these cases:
 
-- The catalog holds agents, contexts, commands, rules, and hooks beside skills and MCP server registrations.
+- The catalog holds agents, rules, and hooks beside skills and MCP server registrations.
 - Ordered layers compose several sources.
 - Visibility is evaluated per OIDC group at request time.
 - The built-in adapters translate each artifact into a harness's native project files, for every artifact type that the harness reads from a project directory.
@@ -244,7 +244,7 @@ These products overlap with Podium's `mcp-server` type and with the governance a
 
 **Where Podium applies.** Podium applies in any of these cases:
 
-- Agents, contexts, commands, rules, and hooks need the same governance as MCP server registrations.
+- Agents, rules, and hooks need the same governance as MCP server registrations.
 - `mcpServers:` references from skills and agents must resolve to `mcp-server` artifacts as dependency edges.
 - Ordered layers compose several sources.
 

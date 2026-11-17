@@ -1,7 +1,7 @@
 ---
 title: Artifact types
 nav_order: 4
-description: The built-in artifact types (skill, agent, context, command, rule, hook, and mcp-server), what each is for, and how each reaches a harness.
+description: The built-in artifact types (skill, agent, rule, hook, and mcp-server), what each is for, how each reaches a harness, and what replaced the removed command and context types.
 ---
 
 # Artifact types
@@ -14,15 +14,13 @@ Every artifact declares a `type:` in its frontmatter. The type determines how th
 |:--|:--|:--|
 | [`skill`](#skill) | Instructions the agent loads into its context on demand. | `SKILL.md`, plus an optional `ARTIFACT.md` |
 | [`agent`](#agent) | A complete agent definition that runs as a delegated child. | `ARTIFACT.md` |
-| [`context`](#context) | Pure reference material. | `ARTIFACT.md` |
-| [`command`](#command) | A parameterized prompt template a human invokes. | `ARTIFACT.md` |
 | [`rule`](#rule) | Passive context the harness loads according to a `rule_mode`. | `ARTIFACT.md` |
 | [`hook`](#hook) | A lifecycle observer with a shell action. | `ARTIFACT.md` |
 | [`mcp-server`](#mcp-server) | An MCP server registration. | `ARTIFACT.md` |
 
 The types from `skill` through `hook` are first-class types, which Podium lints fully, tests in its conformance suite, and supports across the built-in adapters. `mcp-server` is a built-in [extension type](#extension-types), and a deployment registers further extension types through the `TypeProvider` SPI.
 
-[Frontmatter reference](frontmatter-reference) lists every field each type accepts.
+[Frontmatter reference](frontmatter-reference) lists every field each type accepts. `command` and `context` are no longer artifact types, and [Removed types](#removed-types) states what replaced them.
 
 ---
 
@@ -68,6 +66,50 @@ The agent loads a skill in one of two ways:
 
 A skill can ship scripts that the host runtime executes. Declare `runtime_requirements:` so the host can refuse the skill when the runtime is unavailable. [Bundled resources](bundled-resources) covers the file layout, and [Hints](hints) covers the optional `effort_hint` and `model_class_hint` fields.
 
+### User-invoked skills
+
+A skill whose `invocation` is `user` is meant for a human to invoke, typically as a slash command. Set it as `SKILL.md` `metadata.invocation: "user"` or as the top-level `invocation: user` in an `ARTIFACT.md` overlay. `invocation` accepts `any` and `user`. `any` is the default, and it also applies to an absent value and to every value other than `user`, so only the exact value `user` makes a skill user-invoked.
+
+```markdown
+---
+name: refactor-module
+description: Guided module refactoring with configurable focus areas.
+metadata:
+  version: "1.0.0"
+  invocation: "user"
+---
+
+# Refactor Module
+
+## User input
+$ARGUMENTS
+
+## Instructions
+Analyze the specified module and refactor according to the user's input.
+```
+
+Both `podium sync` and the MCP server materialize a user-invoked skill with the harness's user-only control, or as the harness's native command file on a harness whose skills have no such control:
+
+| Harness | Output |
+|:--|:--|
+| Claude Code | `.claude/skills/<n>/SKILL.md` with `disable-model-invocation: true` |
+| Cursor | `.cursor/skills/<n>/SKILL.md` with `disable-model-invocation: true` |
+| Codex | `.agents/skills/<n>/SKILL.md` and `.agents/skills/<n>/agents/openai.yaml` with `policy.allow_implicit_invocation: false` |
+| OpenCode | The command file `.opencode/commands/<n>.md` |
+| Gemini | The command file `.gemini/commands/<n>.toml` |
+| Pi | `.pi/skills/<n>/SKILL.md` with `disable-model-invocation: true` |
+| Claude Desktop, Claude Cowork, and Hermes | Nothing. Materialization fails with `materialize.untranslatable`, because these harnesses have no project-scope skill surface. |
+
+Podium writes the body unchanged and defines no argument syntax of its own, so the harness's own argument convention applies and a placeholder expands only on the harnesses whose convention it follows. Podium does not project a user-invoked skill through MCP as a prompt. The user-only control governs only whether the harness invokes the skill by itself, so `search_artifacts` lists the skill and `load_artifact` returns its body as for any other artifact. [Your first command](your-first-command) builds a user-invoked skill step by step.
+
+### Reference material
+
+Reference material, such as a style guide, a glossary, an API reference, or a knowledge base, travels with a skill. Place it in one of these locations:
+
+- The `references/` directory of the skill that uses it. The agent reads the files on demand, and [Bundled resources](bundled-resources) covers the layout.
+- A model-invocable skill whose description says that it carries reference material, when no single skill owns the material. The agent loads it like any other skill.
+- A `DOMAIN.md` body, when the material describes a whole domain. [Domains](domains) covers the file.
+
 ---
 
 ## agent
@@ -100,60 +142,6 @@ The agent-specific fields:
 - `delegates_to` lists the canonical IDs of the artifacts this agent can hand work to, usually other agents. The field is advisory: ingest accepts a target of any type and does not check that it resolves. The cross-type dependency graph uses these edges for impact analysis.
 
 [Your first agent](your-first-agent) builds an agent step by step.
-
----
-
-## context
-
-A `context` artifact holds pure reference material, such as style guides, glossaries, API references, and large knowledge bases.
-
-```markdown
----
-type: context
-name: company-glossary
-version: 1.4.0
-description: Internal terminology and acronyms used at the company.
-tags: [reference, glossary]
-sensitivity: low
----
-
-# Glossary
-
-**ACV.** Annual Contract Value. The yearly subscription value...
-
-**ARR.** Annual Recurring Revenue...
-```
-
-Instructions carry more risk than reference data, so a `context` artifact does not need the same safety review as a `skill`. Its lint rules are correspondingly lighter.
-
----
-
-## command
-
-A `command` is a parameterized prompt template a human invokes, typically as a slash command in the harness UI.
-
-```markdown
----
-type: command
-name: refactor-module
-version: 1.0.0
-description: Guided module refactoring with configurable focus areas.
-tags: [command, refactoring]
-sensitivity: low
----
-
-# Refactor Module
-
-## User Input
-$ARGUMENTS
-
-## Instructions
-Analyze the specified module and refactor according to the user's input.
-
-...
-```
-
-Both `podium sync` and the MCP server materialize a command into the target harness's native command location. The harness's slash-command system surfaces it and applies the harness's own argument convention to the body. Podium does not project commands through MCP and defines no argument syntax of its own. [Your first command](your-first-command) builds a command step by step.
 
 ---
 
@@ -260,3 +248,13 @@ Extension types are built-in or deployment-registered types. An extension type c
 - The `workflow` identifier is reserved for future multi-agent flows.
 
 To register a type, supply a `TypeProvider`. The implementation declares its `ID()` and its `Type()`, and it implements `Validate()`. The linter surfaces the `Validate()` diagnostics under the `lint.type_provider` rule. [Extending](../deployment/services/extending) covers the SPI details.
+
+---
+
+## Removed types
+
+`command` and `context` are not artifact types. A command is a skill whose `invocation` is `user` ([User-invoked skills](#user-invoked-skills)), and reference material travels with a skill or a domain ([Reference material](#reference-material)).
+
+Ingest refuses an `ARTIFACT.md` whose `type` is `command` or `context` with `ingest.invalid_artifact` and `details.constraint: "type_removed"`, before lint. `podium lint` reports it as an error, and a filesystem-source `podium sync` drops it. A stored row of either type is retired: no read path serves it, and `latest` falls back to the newest other served version of its ID. `podium artifact scaffold` refuses `--type command` and `--type context`.
+
+Podium ships no conversion command. [Upgrade notes](../deployment/operations/upgrade-notes#command-and-context-removal) states the procedure that converts a package by hand. The procedure publishes each converted skill at the next minor version, because the retired row keeps its version. It also keeps an `ARTIFACT.md` holding `type: skill` in a converted package that sits below another package, because a directory there that holds a `SKILL.md` and no `ARTIFACT.md` is a bundled resource of the enclosing package.

@@ -48,7 +48,7 @@ func TestNone_OmitsMissingSkill(t *testing.T) {
 	t.Parallel()
 	src := Source{
 		ArtifactID:    "company-glossary",
-		ArtifactBytes: []byte("---\ntype: context\n---\nbody\n"),
+		ArtifactBytes: []byte("---\ntype: agent\n---\nbody\n"),
 	}
 	out, err := None{}.Adapt(context.Background(), src)
 	if err != nil {

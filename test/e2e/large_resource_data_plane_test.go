@@ -211,7 +211,7 @@ func TestLargeResourceDataPlane_FilesystemObjectsRoute(t *testing.T) {
 		Layers: []authLayer{{
 			ID: "finance",
 			Files: map[string]string{
-				id + "/ARTIFACT.md":         authContext("variance bundle with a large dataset"),
+				id + "/ARTIFACT.md":         authAgent("variance bundle with a large dataset"),
 				id + "/data/big.bin":        above,
 				id + "/scripts/variance.py": lrBelow,
 			},

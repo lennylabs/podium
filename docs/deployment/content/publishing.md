@@ -119,7 +119,7 @@ targets:
       - name: finance-pack
         include: ["finance/**"]
         exclude: ["finance/experimental/**"]
-        type: [skill, command, rule]
+        type: [skill, rule]
       - name: security-baseline
         include: ["security/baseline/**"]
     workflow:
@@ -368,7 +368,7 @@ acme-agents/
   .claude-plugin/marketplace.json        # Claude Code, Desktop, Cowork; references ./claude/<plugin>
   .agents/plugins/marketplace.json       # Codex; references ./codex/<plugin>
   .cursor-plugin/marketplace.json        # Cursor; references ./cursor/<plugin>
-  claude/finance-pack/.claude-plugin/plugin.json + skills/ agents/ commands/ hooks/ .mcp.json
+  claude/finance-pack/.claude-plugin/plugin.json + skills/ agents/ hooks/ .mcp.json
   codex/finance-pack/.codex-plugin/plugin.json   + skills/ hooks/ .mcp.json
   cursor/finance-pack/.cursor-plugin/plugin.json + skills/ rules/ mcp.json
   claude/security-baseline/...  codex/security-baseline/...  cursor/security-baseline/...
@@ -378,12 +378,19 @@ Each vendor manifest lists the same plugin set and points its entries at that ve
 
 | Format | Root manifest | Per-plugin manifest | Components |
 |:--|:--|:--|:--|
-| Claude (Code, Desktop, Cowork) | `.claude-plugin/marketplace.json` | `.claude-plugin/plugin.json` | `skills/`, `agents/`, `commands/`, `hooks/hooks.json`, `.mcp.json` |
+| Claude (Code, Desktop, Cowork) | `.claude-plugin/marketplace.json` | `.claude-plugin/plugin.json` | `skills/`, `agents/`, `hooks/hooks.json`, `.mcp.json` |
 | Codex | `.agents/plugins/marketplace.json` | `.codex-plugin/plugin.json` | `skills/`, `hooks/hooks.json`, `.mcp.json` |
 | Cursor | `.cursor-plugin/marketplace.json` | `.cursor-plugin/plugin.json` | `skills/`, `rules/*.mdc`, `mcp.json` |
-| Gemini | `gemini-extension.json` (one per repository) | n/a | `commands/*.toml`, context file, `mcpServers` |
+| Gemini | `gemini-extension.json` (one per repository) | n/a | `commands/*.toml` for user-invoked skills, context file, `mcpServers` |
 | Pi | root `package.json` (`pi-package` keyword, `pi.skills` array) | n/a | `skills/<name>/SKILL.md` |
 | Hermes | none (skills discovered under root `skills/`) | n/a | `skills/<name>/SKILL.md` with `references/`, `scripts/`, `assets/` |
+
+A skill whose `invocation` is `user` ([User-invoked skills](../../authoring/artifact-types#user-invoked-skills)) is emitted with each format's user-only control:
+
+- The Claude, Cursor, and Pi emitters write `disable-model-invocation: true` in the skill's `SKILL.md`.
+- The Codex emitter writes `skills/<name>/agents/openai.yaml` with `policy.allow_implicit_invocation: false` beside the skill.
+- The Gemini emitter writes the skill as `commands/<name>.toml` and omits its bundled resources, which have no extension location. A skill whose `invocation` is `any` has no Gemini extension component.
+- The Hermes emitter omits the skill, because the tap's skills are model-invocable.
 
 ### Sharing a repository between formats
 

@@ -21,9 +21,9 @@ func orderRegistry(t *testing.T) string {
 			Path:    ".registry-config",
 			Content: "multi_layer: true\nlayer_order:\n  - org-defaults\n  - team-finance\n",
 		},
-		testharness.WriteTreeOption{Path: "org-defaults/z-tools/lint/ARTIFACT.md", Content: contextArtifactSrc},
-		testharness.WriteTreeOption{Path: "org-defaults/a-audit/check/ARTIFACT.md", Content: contextArtifactSrc},
-		testharness.WriteTreeOption{Path: "team-finance/a-finance/close/ARTIFACT.md", Content: contextArtifactSrc},
+		testharness.WriteTreeOption{Path: "org-defaults/z-tools/lint/ARTIFACT.md", Content: agentArtifactSrc},
+		testharness.WriteTreeOption{Path: "org-defaults/a-audit/check/ARTIFACT.md", Content: agentArtifactSrc},
+		testharness.WriteTreeOption{Path: "team-finance/a-finance/close/ARTIFACT.md", Content: agentArtifactSrc},
 	)
 	return registry
 }

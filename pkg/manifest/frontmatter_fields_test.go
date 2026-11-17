@@ -9,7 +9,7 @@ import "testing"
 func TestFrontmatterFields(t *testing.T) {
 	t.Parallel()
 	src := []byte("---\n" +
-		"type: context\n" +
+		"type: agent\n" +
 		"version: 1.0.0\n" +
 		"bank_account: \"1234-5678\"\n" +
 		"ssn: 000-11-2222\n" +
@@ -37,7 +37,7 @@ func TestFrontmatterFields(t *testing.T) {
 // each yield nil so callers add nothing to the audit context.
 func TestFrontmatterFields_Empty(t *testing.T) {
 	t.Parallel()
-	const fm = "---\ntype: context\nversion: 1.0.0\n---\n\nbody\n"
+	const fm = "---\ntype: agent\nversion: 1.0.0\n---\n\nbody\n"
 	if got := FrontmatterFields([]byte(fm), nil); got != nil {
 		t.Errorf("nil names: got %v, want nil", got)
 	}

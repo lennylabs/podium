@@ -133,17 +133,17 @@ func nonSkillProvenanceArtifact(ty string) []byte {
 }
 
 // Spec: §4.4.2 — provenance rewriting must cover every type the
-// Claude Code adapter materializes, not just skills. A context, agent, or
-// rule body that aggregates external content carries imported blocks that
-// must become <untrusted-data> regions so the host can apply differential
-// trust. Before the fix only the skill path was rewritten.
+// Claude Code adapter materializes, not just skills. An agent, rule, or
+// extension-type body that aggregates external content carries imported
+// blocks that must become <untrusted-data> regions so the host can apply
+// differential trust. Before the fix only the skill path was rewritten.
 func TestClaudeCode_RewritesProvenanceForNonSkillTypes(t *testing.T) {
 	t.Parallel()
-	// agent, rule, and command materialize as Claude-native files with the
-	// §4.4.2 provenance rewrite. context goes to the harness-neutral
-	// .podium/context/ bucket (canonical markers, no Claude rewrite) and hook
-	// is a config-merge with no prose body, so neither is covered here.
-	for _, ty := range []string{"agent", "rule", "command"} {
+	// agent and rule materialize as Claude-native files, and an extension
+	// type (dataset) lands under .claude/podium/<id>/, each with the §4.4.2
+	// provenance rewrite. hook is a config-merge with no prose body, so it is
+	// not covered here.
+	for _, ty := range []string{"agent", "rule", "dataset"} {
 		ty := ty
 		t.Run(ty, func(t *testing.T) {
 			t.Parallel()

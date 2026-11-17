@@ -231,16 +231,19 @@ func TestTargetsHarness(t *testing.T) {
 }
 
 // Spec: §4.1 first-class types — IsFirstClassType reports true for the
-// first-class types (skill, agent, context, command, rule, hook) and
-// false for the built-in extension type mcp-server, which §4.1 lists
-// separately under "Built-in extension types".
+// first-class types (skill, agent, rule, hook), false for the types §4.1
+// removed (command, context), and false for the built-in extension type
+// mcp-server, which §4.1 lists separately under "Built-in extension types".
 func TestIsFirstClassType(t *testing.T) {
 	t.Parallel()
-	for _, ty := range []ArtifactType{
-		TypeSkill, TypeAgent, TypeContext, TypeCommand, TypeRule, TypeHook,
-	} {
+	for _, ty := range []ArtifactType{TypeSkill, TypeAgent, TypeRule, TypeHook} {
 		if !IsFirstClassType(ty) {
 			t.Errorf("%q should be first-class", ty)
+		}
+	}
+	for _, ty := range []ArtifactType{ArtifactType("command"), ArtifactType("context")} {
+		if IsFirstClassType(ty) {
+			t.Errorf("%q is a removed type, not first-class", ty)
 		}
 	}
 	if IsFirstClassType(TypeMCPServer) {
@@ -263,7 +266,7 @@ func TestIsBuiltinExtensionType(t *testing.T) {
 		t.Errorf("mcp-server should be a built-in extension type")
 	}
 	for _, ty := range []ArtifactType{
-		TypeSkill, TypeAgent, TypeContext, TypeCommand, TypeRule, TypeHook, "dataset", "",
+		TypeSkill, TypeAgent, ArtifactType("context"), ArtifactType("command"), TypeRule, TypeHook, "dataset", "",
 	} {
 		if IsBuiltinExtensionType(ty) {
 			t.Errorf("%q should not be a built-in extension type", ty)

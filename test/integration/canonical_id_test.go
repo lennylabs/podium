@@ -17,7 +17,7 @@ func TestPodiumSync_AtSegmentRejected(t *testing.T) {
 	registry := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{
-			Path: "finance/pay@v2/ARTIFACT.md", Content: contextArtifact,
+			Path: "finance/pay@v2/ARTIFACT.md", Content: agentArtifact,
 		},
 	)
 	res := cmdharness.Run(t, "podium", "",
@@ -40,7 +40,7 @@ func TestPodiumSync_RootLevelArtifactRejected(t *testing.T) {
 	registry := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{
-			Path: "ARTIFACT.md", Content: contextArtifact,
+			Path: "ARTIFACT.md", Content: agentArtifact,
 		},
 	)
 	res := cmdharness.Run(t, "podium", "",
@@ -64,10 +64,10 @@ func TestPodiumSync_NestedArtifactsMaterializeSeparately(t *testing.T) {
 	target := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{
-			Path: "outer/ARTIFACT.md", Content: contextArtifact,
+			Path: "outer/ARTIFACT.md", Content: agentArtifact,
 		},
 		testharness.WriteTreeOption{
-			Path: "outer/inner/ARTIFACT.md", Content: contextArtifact,
+			Path: "outer/inner/ARTIFACT.md", Content: agentArtifact,
 		},
 	)
 	res := cmdharness.Run(t, "podium", "",

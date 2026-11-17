@@ -15,7 +15,7 @@ import (
 func rec(id, desc string) filesystem.ArtifactRecord {
 	return filesystem.ArtifactRecord{
 		ID:       id,
-		Artifact: &manifest.Artifact{Type: manifest.TypeContext, Version: "1.0.0", Description: desc},
+		Artifact: &manifest.Artifact{Type: manifest.TypeAgent, Version: "1.0.0", Description: desc},
 	}
 }
 

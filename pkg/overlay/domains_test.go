@@ -17,7 +17,7 @@ func TestResolveDomains_Populated(t *testing.T) {
 	testharness.WriteTree(t, root,
 		testharness.WriteTreeOption{Path: "DOMAIN.md", Content: "---\ndescription: Root\n---\n"},
 		testharness.WriteTreeOption{Path: "finance/DOMAIN.md", Content: "---\ndescription: Finance\ndiscovery:\n  keywords:\n    - money\n---\n\nBody\n"},
-		testharness.WriteTreeOption{Path: "finance/x/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\n---\n\nbody\n"},
+		testharness.WriteTreeOption{Path: "finance/x/ARTIFACT.md", Content: "---\ntype: agent\nversion: 1.0.0\n---\n\nbody\n"},
 	)
 	got, err := (Filesystem{Path: root}).ResolveDomains(context.Background())
 	if err != nil {
@@ -49,7 +49,7 @@ func TestResolveDomains_NoDomainFiles(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	testharness.WriteTree(t, root,
-		testharness.WriteTreeOption{Path: "x/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\n---\n\nbody\n"},
+		testharness.WriteTreeOption{Path: "x/ARTIFACT.md", Content: "---\ntype: agent\nversion: 1.0.0\n---\n\nbody\n"},
 	)
 	got, err := (Filesystem{Path: root}).ResolveDomains(context.Background())
 	if err != nil {

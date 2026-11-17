@@ -203,7 +203,7 @@ ASCII fallback for the diagram above (hybrid retrieval):
 | Arg | Use |
 |:--|:--|
 | `query` | Free-text search target. Matched lexically and by embedding similarity against the artifact's `name`, `description`, `when_to_use`, and `tags`, with the exceptions the note below states. |
-| `type` | Filter by artifact type. |
+| `type` | Filter by artifact type. A filter that names the removed `command` or `context` type matches nothing and returns no error. User-invoked skills match `type="skill"`. |
 | `tags` | Filter by tag. |
 | `scope` | Constrain to a domain path prefix. |
 | `top_k` | Result count cap. Default 10, max 50. |
@@ -320,6 +320,6 @@ domains:
   which artifacts surface first in `load_domain`'s notable list.
 
 For authoring guidance, see [Your first skill](../authoring/your-first-skill),
-[Your first command](../authoring/your-first-command),
+[Your first command](../authoring/your-first-command) for a user-invoked skill,
 [Your first agent](../authoring/your-first-agent), and
 [Domains](../authoring/domains).

@@ -14,7 +14,7 @@ import (
 func TestCanonicalID_LintRejectsAtSegment(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"finance/pay@v2/ARTIFACT.md": contextArtifact("Pay"),
+		"finance/pay@v2/ARTIFACT.md": agentArtifact("Pay"),
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit == 0 {
@@ -30,7 +30,7 @@ func TestCanonicalID_LintRejectsAtSegment(t *testing.T) {
 func TestCanonicalID_LintRejectsRootLevel(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"ARTIFACT.md": contextArtifact("Root"),
+		"ARTIFACT.md": agentArtifact("Root"),
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit == 0 {
@@ -48,8 +48,8 @@ func TestCanonicalID_LintRejectsRootLevel(t *testing.T) {
 func TestCanonicalID_LintNestedArtifactsClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"outer/ARTIFACT.md":       contextArtifact("Outer"),
-		"outer/inner/ARTIFACT.md": contextArtifact("Inner"),
+		"outer/ARTIFACT.md":       agentArtifact("Outer"),
+		"outer/inner/ARTIFACT.md": agentArtifact("Inner"),
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 {

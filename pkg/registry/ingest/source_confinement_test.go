@@ -23,7 +23,7 @@ func escapingLayerTree(t *testing.T) (parent, root string) {
 	root = filepath.Join(parent, "layer")
 	testharness.WriteTree(t, root,
 		testharness.WriteTreeOption{Path: "finance/DOMAIN.md", Content: "---\nname: Finance\n---\n\nFinance domain.\n"},
-		testharness.WriteTreeOption{Path: "finance/pay-invoice/ARTIFACT.md", Content: contextArtifact("Pay an invoice")},
+		testharness.WriteTreeOption{Path: "finance/pay-invoice/ARTIFACT.md", Content: agentArtifact("Pay an invoice")},
 	)
 	if err := os.WriteFile(filepath.Join(parent, "outside.txt"), []byte("outside secret\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile outside: %v", err)
@@ -185,7 +185,7 @@ func TestSourceIngest_EscapingManifestFailsTheLayer(t *testing.T) {
 		link func(t *testing.T, parent, root string)
 	}{
 		{name: "escaping ARTIFACT.md", link: func(t *testing.T, parent, root string) {
-			writeOutside(t, parent, "ARTIFACT.md", contextArtifact("outside"))
+			writeOutside(t, parent, "ARTIFACT.md", agentArtifact("outside"))
 			symlink(t, filepath.Join("..", "..", "ARTIFACT.md"), filepath.Join(root, "x", "ARTIFACT.md"))
 		}},
 		{name: "escaping sole SKILL.md", link: func(t *testing.T, parent, root string) {
@@ -193,7 +193,7 @@ func TestSourceIngest_EscapingManifestFailsTheLayer(t *testing.T) {
 			symlink(t, filepath.Join("..", "..", "SKILL.md"), filepath.Join(root, "y", "SKILL.md"))
 		}},
 		{name: "escaping nested ARTIFACT.md below a package", link: func(t *testing.T, parent, root string) {
-			writeOutside(t, parent, "ARTIFACT.md", contextArtifact("outside"))
+			writeOutside(t, parent, "ARTIFACT.md", agentArtifact("outside"))
 			symlink(t, filepath.Join("..", "..", "..", "..", "ARTIFACT.md"), filepath.Join(root, "finance", "pay-invoice", "sub", "ARTIFACT.md"))
 		}},
 		{name: "absolute-target sole SKILL.md", link: func(t *testing.T, _, root string) {
@@ -211,7 +211,7 @@ func TestSourceIngest_EscapingManifestFailsTheLayer(t *testing.T) {
 			parent := t.TempDir()
 			root := filepath.Join(parent, "layer")
 			testharness.WriteTree(t, root,
-				testharness.WriteTreeOption{Path: "finance/pay-invoice/ARTIFACT.md", Content: contextArtifact("Pay an invoice")},
+				testharness.WriteTreeOption{Path: "finance/pay-invoice/ARTIFACT.md", Content: agentArtifact("Pay an invoice")},
 				testharness.WriteTreeOption{Path: "inside/README.txt", Content: "inside\n"},
 			)
 			for _, dir := range []string{"x", "y", "z", "finance/pay-invoice/sub"} {
@@ -251,7 +251,7 @@ func TestSourceIngest_DanglingSkillManifestIsAbsent(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "layer")
 	testharness.WriteTree(t, root,
-		testharness.WriteTreeOption{Path: "finance/pay-invoice/ARTIFACT.md", Content: contextArtifact("Pay an invoice")},
+		testharness.WriteTreeOption{Path: "finance/pay-invoice/ARTIFACT.md", Content: agentArtifact("Pay an invoice")},
 	)
 	if err := os.MkdirAll(filepath.Join(root, "w"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)

@@ -642,12 +642,13 @@ func printRejected(w io.Writer, id, code, reason string) {
 }
 
 // reportDropped prints a rejected line for each artifact a filesystem-source
-// composition dropped under the §4.6 collision rule or the §4.6
-// no-inheritance rule, with the code and reason each drop carries, and
+// composition dropped under the §4.6 collision rule, the §4.6
+// no-inheritance rule, or the §4.1 removed-type rule, with the code and
+// reason each drop carries, and
 // reports whether it printed anything, so the caller can set a non-zero exit
 // status. The sync commands and podium lint call it.
 //
-// Spec: §4.6, §13.11.3
+// Spec: §4.1, §4.6, §13.11.3
 func reportDropped(w io.Writer, dropped []layer.Drop) bool {
 	for _, d := range dropped {
 		printRejected(w, d.ArtifactID, d.Code, d.Reason)

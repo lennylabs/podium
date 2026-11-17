@@ -232,7 +232,7 @@ func TestQuickstart_SyncOutputFormat(t *testing.T) {
 func TestQuickstart_SyncReadsConfigRegistry(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "init", "--registry", reg)
 	tgt := t.TempDir()
 	res := runPodium(t, ws, []string{"HOME=" + t.TempDir()}, "sync", "--target", tgt)
@@ -320,16 +320,22 @@ func TestQuickstart_SyncClaudeCodeRule(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".claude/rules/code-style.md"))
 }
 
-// sync claude-code places a context artifact in the
-// harness-neutral .podium/context/<id>/ bucket. Doc: quickstart § What's next.
+// sync claude-code places a reference skill, the replacement for a context
+// artifact (§4.1), at .claude/skills/<name>/SKILL.md with its body.
+// Doc: quickstart § What's next.
 func TestQuickstart_SyncClaudeCodeFallbackPath(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"personal/hello/ctx-demo/ARTIFACT.md": contextArtifact("ctx"),
+		"personal/hello/ctx-demo/SKILL.md": referenceSkill("ctx-demo", "the hello domain"),
 	})
 	tgt := t.TempDir()
-	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code")
-	mustExist(t, filepath.Join(tgt, ".podium/context/personal/hello/ctx-demo/ARTIFACT.md"))
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	got := readFile(t, filepath.Join(tgt, ".claude/skills/ctx-demo/SKILL.md"))
+	if !strings.Contains(got, "the hello domain body.") {
+		t.Errorf("reference skill body missing:\n%s", got)
+	}
 }
 
 // sync --watch performs an initial sync and exits 0 on
@@ -401,7 +407,7 @@ func TestQuickstart_SyncIdempotent(t *testing.T) {
 // quickstart § 4 (negative).
 func TestQuickstart_SyncUnknownHarness(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", t.TempDir(), "--harness", "not-a-real-harness")
 	if res.Exit == 0 {
 		t.Fatalf("expected non-zero exit\nstdout=%s", res.Stdout)
@@ -623,7 +629,7 @@ func TestQuickstart_MultiLayerStripsPrefix(t *testing.T) {
 		".registry-config":                        "multi_layer: true\n",
 		"team-shared/greetings/hello/ARTIFACT.md": greetSkillArtifact,
 		"team-shared/greetings/hello/SKILL.md":    greetSkillBody,
-		"personal/notes/ctx/ARTIFACT.md":          contextArtifact("note"),
+		"personal/notes/ctx/ARTIFACT.md":          agentArtifact("note"),
 	})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
@@ -643,7 +649,7 @@ func TestQuickstart_MultiLayerTopLevelManifestRejected(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config": "multi_layer: true\n",
-		"ARTIFACT.md":      contextArtifact("top"),
+		"ARTIFACT.md":      agentArtifact("top"),
 	})
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", t.TempDir())
 	if res.Exit == 0 {
@@ -658,7 +664,7 @@ func TestQuickstart_MultiLayerTopLevelManifestRejected(t *testing.T) {
 // Doc: quickstart § What's next.
 func TestQuickstart_ServeStandaloneHealth(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	srv := startServer(t, reg)
 	if st := getStatus(t, srv.BaseURL+"/readyz"); st != 200 {
 		t.Errorf("/readyz = %d, want 200", st)
@@ -717,13 +723,13 @@ func TestQuickstart_WatchUsesFsnotify(t *testing.T) {
 	}
 	// Behavioral confirmation: an edit is picked up (via fsnotify, or the poll
 	// fallback on filesystems where fsnotify cannot initialize).
-	reg := writeRegistry(t, map[string]string{"a/ARTIFACT.md": contextArtifact("a")})
+	reg := writeRegistry(t, map[string]string{"a/ARTIFACT.md": agentArtifact("a")})
 	tgt := t.TempDir()
 	w := startWatch(t, reg, tgt, "none")
 	if !pollFile(filepath.Join(tgt, "a/ARTIFACT.md"), 5*time.Second) {
 		t.Fatalf("initial sync missing\nlog:\n%s", w.log())
 	}
-	mkArtifact(t, filepath.Join(reg, "b"), contextArtifact("b"))
+	mkArtifact(t, filepath.Join(reg, "b"), agentArtifact("b"))
 	got := pollFile(filepath.Join(tgt, "b/ARTIFACT.md"), 5*time.Second)
 	w.stop(t)
 	if !got {

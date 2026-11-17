@@ -26,7 +26,7 @@ func TestIngest_ConcurrentSameContentEmitsOnce(t *testing.T) {
 	}
 	files := fstest.MapFS{
 		"x/ARTIFACT.md": &fstest.MapFile{
-			Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
+			Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
 		},
 	}
 
@@ -114,7 +114,7 @@ func TestIngest_ConcurrentDifferentContentOneAcceptsRestConflict(t *testing.T) {
 		wg.Add(1)
 		// Each goroutine ingests the same (id, version) but with a
 		// different body so the content_hash differs.
-		body := []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody variant\n")
+		body := []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody variant\n")
 		body[len(body)-2] = byte('A' + i) // perturb to ensure distinct hashes
 		files := fstest.MapFS{
 			"x/ARTIFACT.md": &fstest.MapFile{Data: body},

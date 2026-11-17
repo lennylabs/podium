@@ -29,7 +29,7 @@ func writeFilesystemRegistry(t *testing.T) string {
 	t.Helper()
 	reg := t.TempDir()
 	testharness.WriteTree(t, reg,
-		testharness.WriteTreeOption{Path: "team-shared/company-glossary/ARTIFACT.md", Content: contextArtifactSrc},
+		testharness.WriteTreeOption{Path: "team-shared/company-glossary/ARTIFACT.md", Content: agentArtifactSrc},
 	)
 	return reg
 }
@@ -86,9 +86,9 @@ func TestRun_OfflineFirstServerUnreachableIsNoop(t *testing.T) {
 	t.Parallel()
 	srv := newStubRegistry(t, map[string]stubArtifact{
 		"team/glossary": {
-			typ:          "context",
+			typ:          "agent",
 			layer:        "team-shared",
-			frontmatter:  contextArtifactSrc,
+			frontmatter:  agentArtifactSrc,
 			manifestBody: "Glossary body.\n",
 		},
 	})
@@ -98,7 +98,7 @@ func TestRun_OfflineFirstServerUnreachableIsNoop(t *testing.T) {
 		t.Fatalf("warm sync: %v", err)
 	}
 	artifactPath := filepath.Join(target, "team", "glossary", "ARTIFACT.md")
-	if readFileT(t, artifactPath) != contextArtifactSrc {
+	if readFileT(t, artifactPath) != agentArtifactSrc {
 		t.Fatalf("warm sync did not materialize the artifact")
 	}
 
@@ -120,7 +120,7 @@ func TestRun_OfflineFirstServerUnreachableIsNoop(t *testing.T) {
 	}
 	// The previously materialized file must survive the offline-first no-op
 	// (no stale-file cleanup runs).
-	if readFileT(t, artifactPath) != contextArtifactSrc {
+	if readFileT(t, artifactPath) != agentArtifactSrc {
 		t.Errorf("offline-first no-op removed or altered the materialized artifact")
 	}
 	if len(res.Artifacts) != 1 || res.Artifacts[0].ID != "team/glossary" {

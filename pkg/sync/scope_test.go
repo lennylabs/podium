@@ -85,7 +85,7 @@ func TestScopeFilter_TypeFilter(t *testing.T) {
 	t.Parallel()
 	records := mkRecordsWithTypes(
 		[2]string{"finance/run/skill", "skill"},
-		[2]string{"notes/x", "context"},
+		[2]string{"notes/x", "agent"},
 	)
 	got := ScopeFilter{Types: []string{"skill"}}.Apply(records)
 	if len(got) != 1 || got[0].ID != "finance/run/skill" {

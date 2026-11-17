@@ -19,9 +19,9 @@ import (
 var publicVis = layer.Visibility{Public: true}
 
 // artifactBody is a minimal §4.5.1-shaped manifest the ingest
-// pipeline accepts. type:context avoids the SKILL.md requirement
+// pipeline accepts. type:agent avoids the SKILL.md requirement
 // that type:skill carries.
-const artifactBody = "---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"
+const artifactBody = "---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"
 
 func newMemoryStoreWithTenant(t testing.TB) store.Store {
 	t.Helper()

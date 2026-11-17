@@ -3,9 +3,9 @@ package e2e
 // End-to-end coverage for the §5.0 resource mirror and the
 // MCP server's initialize capability set. The resource mirror exposes
 // artifact bodies through MCP's resources/list + resources/read as a
-// read-only mirror of load_artifact. Command artifacts are delivered
-// through harness-native materialization (§5.2, §6.7), not an MCP prompt
-// projection, so initialize advertises no `prompts` capability. Tests
+// read-only mirror of load_artifact. User-invoked skills are delivered
+// through harness-native materialization (§5.2, §6.7) rather than an MCP
+// prompt projection, so initialize advertises no `prompts` capability. Tests
 // drive the podium-mcp bridge against a standalone server.
 
 import (
@@ -18,7 +18,7 @@ import (
 func TestMCPResources_MirrorListAndRead(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"reference/glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"reference/glossary/ARTIFACT.md": agentArtifact("glossary"),
 	}))
 	env := mcpServerEnv(t, srv.BaseURL)
 
@@ -35,7 +35,7 @@ func TestMCPResources_MirrorListAndRead(t *testing.T) {
 		t.Fatalf("resources/read returned no contents: %v", result)
 	}
 	first, _ := contents[0].(map[string]any)
-	if text, _ := first["text"].(string); !strings.Contains(text, "type: context") {
+	if text, _ := first["text"].(string); !strings.Contains(text, "type: agent") {
 		t.Errorf("resources/read content missing manifest frontmatter: %q", text)
 	}
 	if mt, _ := first["mimeType"].(string); mt != "text/markdown" {
@@ -48,7 +48,7 @@ func TestMCPResources_MirrorListAndRead(t *testing.T) {
 func TestMCPResources_ReadRejectsBadURI(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"reference/glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"reference/glossary/ARTIFACT.md": agentArtifact("glossary"),
 	}))
 	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), rpcReq{ID: 1, Method: "resources/read", Params: map[string]any{"uri": "file:///etc/passwd"}})
 	result := rpcResult(t, res.Stdout, 1)
@@ -57,15 +57,15 @@ func TestMCPResources_ReadRejectsBadURI(t *testing.T) {
 	}
 }
 
-// Covers: spec §5.2 (Command Materialization), §5.0 — MCP prompt projection of
-// commands was removed; commands materialize through the harness adapters (§6.7)
+// Covers: spec §5.2 (User-Invoked Skills), §5.0 — the MCP server projects no
+// prompts; user-invoked skills materialize through the harness adapters (§6.7)
 // instead. initialize advertises {tools, resources, sessionCorrelation} and no
-// `prompts` capability, even when a command artifact is present.
+// `prompts` capability, even when a user-invoked skill is present.
 func TestMCPInitialize_AdvertisesNoPromptsCapability(t *testing.T) {
 	t.Parallel()
 
-	// A command artifact in the view does not add a prompts capability.
-	withCommand := startServer(t, writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact}))
+	// A user-invoked skill in the view does not add a prompts capability.
+	withCommand := startServer(t, writeRegistry(t, map[string]string{standupFile: standupSkill}))
 	res := mcpExec(t, mcpServerEnv(t, withCommand.BaseURL),
 		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{"protocolVersion": "2024-11-05"}})
 	caps, _ := rpcResult(t, res.Stdout, 1)["capabilities"].(map[string]any)
@@ -74,9 +74,9 @@ func TestMCPInitialize_AdvertisesNoPromptsCapability(t *testing.T) {
 	}
 
 	// The advertised set is tools + resources + sessionCorrelation, both with
-	// and without a command artifact.
+	// and without a user-invoked skill.
 	plain := startServer(t, writeRegistry(t, map[string]string{
-		"reference/glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"reference/glossary/ARTIFACT.md": agentArtifact("glossary"),
 	}))
 	res2 := mcpExec(t, mcpServerEnv(t, plain.BaseURL),
 		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{"protocolVersion": "2024-11-05"}})

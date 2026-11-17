@@ -86,7 +86,7 @@ func ingestConvergenceStores(t *testing.T) []ingestConvergenceFactory {
 // the marker, so distinct markers yield distinct content hashes for the same
 // (id, version).
 func artifactBytes(marker byte) []byte {
-	body := []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody _\n")
+	body := []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody _\n")
 	body[len(body)-2] = marker
 	return body
 }

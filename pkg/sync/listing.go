@@ -40,10 +40,14 @@ type OversizedEntry struct {
 // for a §7.4 offline-first run that left the existing output in place, and
 // when no type in b.Types counts for the adapter. Otherwise the entries are
 // the artifacts whose listing type is in b.Types and counts for the adapter,
-// and the cost is the sum over them of the code points of the last identifier
-// segment, the code points of the description, and b.EntryOverheadChars.
+// other than a user-invoked skill, and the cost is the sum over them of the
+// code points of the last identifier segment, the code points of the
+// description, and b.EntryOverheadChars. A user-invoked skill is never an
+// entry: opencode and gemini write it as a command file, and the other
+// adapters add the harness's user-only control, so leaving it out keeps the
+// estimate a lower bound.
 //
-// Spec: §7.5.8
+// Spec: §7.5.8, §4.3.4
 func Listing(res *Result, b EffectiveListingBudget) *ListingReport {
 	if res == nil || b.Check == ListingCheckOff || res.Adapter == "none" || res.Offline {
 		return nil
@@ -64,7 +68,7 @@ func Listing(res *Result, b EffectiveListingBudget) *ListingReport {
 		Check:         b.Check,
 	}
 	for _, a := range res.Artifacts {
-		if !counted[a.ListingType] {
+		if !counted[a.ListingType] || a.UserInvoked {
 			continue
 		}
 		descChars := utf8.RuneCountInString(a.ListingDescription)

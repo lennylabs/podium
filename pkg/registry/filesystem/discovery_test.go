@@ -143,7 +143,7 @@ func TestWalk_ManifestStatFailureFailsTheWalk(t *testing.T) {
 		{
 			name: "nested boundary",
 			tree: []testharness.WriteTreeOption{
-				{Path: "x/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\ndescription: d\n---\n\nbody\n"},
+				{Path: "x/ARTIFACT.md", Content: "---\ntype: agent\nversion: 1.0.0\ndescription: d\n---\n\nbody\n"},
 				{Path: "x/sub/notes.md", Content: "notes\n"},
 			},
 			locked: "x/sub",

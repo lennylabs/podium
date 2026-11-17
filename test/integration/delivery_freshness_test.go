@@ -182,7 +182,7 @@ func newDFFixture(t *testing.T) *dfFixture {
 // born deprecated when deprecated is set, and returns its served revision.
 func (f *dfFixture) put(t *testing.T, v string, offset int, deprecated bool) string {
 	t.Helper()
-	fm := "---\ntype: context\nversion: " + v + "\ndescription: x\n"
+	fm := "---\ntype: agent\nversion: " + v + "\ndescription: x\n"
 	if deprecated {
 		fm += "deprecated: true\n"
 	}
@@ -190,7 +190,7 @@ func (f *dfFixture) put(t *testing.T, v string, offset int, deprecated bool) str
 	at := dfBase.Add(time.Duration(offset) * time.Second)
 	rec := storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: dfArtifact, Version: v, Layer: "L",
-		Type: "context", Deprecated: deprecated, IngestedAt: at, Frontmatter: []byte(fm),
+		Type: "agent", Deprecated: deprecated, IngestedAt: at, Frontmatter: []byte(fm),
 	}, nil, nil)
 	if err := f.st.PutManifest(context.Background(), rec); err != nil {
 		t.Fatalf("PutManifest %s: %v", v, err)

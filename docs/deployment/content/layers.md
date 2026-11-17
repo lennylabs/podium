@@ -54,7 +54,7 @@ The workspace local overlay (`<workspace>/.podium/overlay/`) holds a developer's
 - The overlay is per-developer and is never ingested or shared, so a replacement affects only the developer who wrote it.
 - Copying an overlay artifact into a shared layer subjects it to the collision rule and to the [no-inheritance rule](#inheritance).
 
-[Edge cases](#edge-cases) covers an overlay artifact that carries an `extends` key and what `podium lint` reports for the overlay.
+[Edge cases](#edge-cases) covers an overlay artifact that carries an `extends` key or a removed type and what `podium lint` reports for the overlay.
 
 ---
 
@@ -75,6 +75,20 @@ A refused artifact is not stored, which has two consequences:
 - A refused artifact collides with no other artifact. The other copy of its ID is materialized or ingested, and no `ingest.collision` line is printed for it.
 
 Release 0.6.0 removed `extends:`. A store that an earlier release wrote can still hold rows ingested from an `ARTIFACT.md` that declared it, and the registry no longer serves those rows. [Upgrade notes](../operations/upgrade-notes#what-readers-see) describes what a reader sees and how to recover.
+
+---
+
+## Removed types
+
+`command` and `context` are removed artifact types. Ingest rejects an `ARTIFACT.md` whose `type` is either of them:
+
+- The refusal is `ingest.invalid_artifact` with `details.constraint: "type_removed"`.
+- The refusal runs before lint and after the no-inheritance check, so an `ARTIFACT.md` that declares both `extends:` and a removed type reports `extends_removed`.
+- A filesystem-source `podium sync` drops such an artifact and exits 1, and `podium lint` reports it as an error.
+
+A refused artifact is not stored, with the same consequences as an artifact the no-inheritance rule refuses.
+
+Release 0.7.0 removed both types. A store that an earlier release wrote can still hold rows of either type, and the registry no longer serves those rows. `latest` resolves to the newest other served version of the ID, and an ID with no other served row answers `registry.not_found`. [Artifact types](../../authoring/artifact-types#removed-types) names the replacements, and [Upgrade notes](../operations/upgrade-notes#command-and-context-removal) describes the conversion and the recovery steps.
 
 ---
 
@@ -137,7 +151,8 @@ On a server-backed deployment, `podium admin show-effective [--group <g>]... <us
 ## Edge cases
 
 - **Overlay artifact with `extends`.** An overlay `ARTIFACT.md` that carries an `extends` key is served as authored, and the key has no effect.
-- **Lint and the overlay.** `podium lint` reports an `ARTIFACT.md` that the no-inheritance rule refuses. `podium lint` contacts no registry, so it does not report a collision with an artifact that only a registry holds.
+- **Overlay artifact of a removed type.** An overlay `ARTIFACT.md` whose `type` is `command` or `context` is served as authored. The `none` adapter writes the canonical layout, the `claude-code` adapter writes it and its bundled resources under `.claude/podium/<artifact-id>/`, and every other adapter writes nothing for it.
+- **Lint and the overlay.** `podium lint` reports an `ARTIFACT.md` that the no-inheritance rule or the removed-type rule refuses. `podium lint` contacts no registry, so it does not report a collision with an artifact that only a registry holds.
 - **Reorder by a caller whose credential fails verification.** Such a caller is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime` before either authorization arm is evaluated. On this operation, `auth.forbidden` therefore names a caller the registry verified and did not authorize. The other layer write operations answer such a caller `auth.forbidden`.
 
 ---

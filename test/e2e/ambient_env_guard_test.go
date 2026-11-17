@@ -214,7 +214,7 @@ func TestServe_AmbientIdentityEnvDoesNotGateAnonymousRead(t *testing.T) {
 	t.Setenv("PODIUM_SESSION_TOKEN", "ambient-should-be-scrubbed")
 
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"eng/sample/ARTIFACT.md": contextArtifact("sample"),
+		"eng/sample/ARTIFACT.md": agentArtifact("sample"),
 	}))
 	if st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=sample"); st != 200 {
 		t.Fatalf("anonymous search = HTTP %d, want 200; ambient identity configuration reached the server\n%s", st, body)

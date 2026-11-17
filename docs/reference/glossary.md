@@ -10,7 +10,7 @@ This page defines the terms used across the documentation, in alphabetical
 order. [Concepts](../getting-started/concepts) explains the main terms in more
 depth, and each entry below links to the page that covers its term.
 
-- **Artifact**: a packaged authoring unit: a skill, agent, context, command, rule, hook, MCP server registration, or extension type. The term is distinct from a build artifact or an ML artifact. See [Artifact](../getting-started/concepts#artifact).
+- **Artifact**: a packaged authoring unit: a skill, agent, rule, hook, MCP server registration, or extension type. The term is distinct from a build artifact or an ML artifact. See [Artifact](../getting-started/concepts#artifact).
 - **Bootstrap admin**: an identity listed in `PODIUM_BOOTSTRAP_ADMINS`. The registry grants each listed identity the tenant `admin` role on the `default` tenant at boot, so a new deployment has an admin before anyone runs `podium admin grant`. The grant is distinct from the instance-operator role. See [Bootstrap admin](../deployment/identity/tenants#bootstrap-admin).
 - **Canonical artifact ID**: the directory path under the registry root, such as `finance/ap/pay-invoice`. All references use this ID, optionally suffixed with `@<semver>` or `@sha256:<hash>`.
 - **Catalog**: the set of artifacts a registry holds. Podium is the registry, and the catalog is its content. A caller sees the part of the catalog its effective view includes.

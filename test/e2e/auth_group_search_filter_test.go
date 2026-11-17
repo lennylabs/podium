@@ -60,16 +60,16 @@ func TestAuthGroupSearchFilter_GroupAndPublicLayers(t *testing.T) {
 			{
 				ID: "finance",
 				Files: map[string]string{
-					finReport + "/ARTIFACT.md": authContext("quarterly close report for finance"),
-					finLedger + "/ARTIFACT.md": authContext("general ledger detail for finance"),
+					finReport + "/ARTIFACT.md": authAgent("quarterly close report for finance"),
+					finLedger + "/ARTIFACT.md": authAgent("general ledger detail for finance"),
 				},
 				Visibility: authVisibility{Groups: []string{"finance"}},
 			},
 			{
 				ID: "public",
 				Files: map[string]string{
-					pubNote + "/ARTIFACT.md":  authContext("release note for everyone"),
-					pubGuide + "/ARTIFACT.md": authContext("onboarding guide for everyone"),
+					pubNote + "/ARTIFACT.md":  authAgent("release note for everyone"),
+					pubGuide + "/ARTIFACT.md": authAgent("onboarding guide for everyone"),
 				},
 				Visibility: authVisibility{Public: true},
 			},

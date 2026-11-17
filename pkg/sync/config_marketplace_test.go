@@ -91,10 +91,10 @@ func TestMarketplaceTarget_RoundTrips(t *testing.T) {
 				Plugins: []sync.PluginFilter{
 					{
 						Name:        "finance-pack",
-						Description: "Accounts-payable skills and commands.",
+						Description: "Accounts-payable skills and agents.",
 						Include:     []string{"finance/**"},
 						Exclude:     []string{"finance/experimental/**"},
-						Type:        []string{"skill", "command"},
+						Type:        []string{"skill", "agent"},
 					},
 				},
 				Workflow: sync.Workflow{

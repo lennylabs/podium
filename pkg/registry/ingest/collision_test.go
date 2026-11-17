@@ -29,8 +29,8 @@ func ingestOne(t *testing.T, st store.Store, layerID, id, src string) *ingest.Re
 func TestIngest_CrossLayerCollisionRejected(t *testing.T) {
 	t.Parallel()
 	st := newStore(t)
-	ingestOne(t, st, "org-defaults", "finance/pay", contextArtifact("base"))
-	res := ingestOne(t, st, "team-foo", "finance/pay", "---\ntype: context\nversion: 2.0.0\ndescription: shadow\nsensitivity: low\n---\n\nbody\n")
+	ingestOne(t, st, "org-defaults", "finance/pay", agentArtifact("base"))
+	res := ingestOne(t, st, "team-foo", "finance/pay", "---\ntype: agent\nversion: 2.0.0\ndescription: shadow\nsensitivity: low\n---\n\nbody\n")
 	if len(res.Rejected) != 1 {
 		t.Fatalf("got %d rejections, want 1: %+v", len(res.Rejected), res.Rejected)
 	}
@@ -48,8 +48,8 @@ func TestIngest_CrossLayerCollisionRejected(t *testing.T) {
 func TestIngest_SameLayerVersionBumpNotCollision(t *testing.T) {
 	t.Parallel()
 	st := newStore(t)
-	ingestOne(t, st, "L1", "finance/pay", contextArtifact("v1"))
-	res := ingestOne(t, st, "L1", "finance/pay", "---\ntype: context\nversion: 2.0.0\ndescription: v2\nsensitivity: low\n---\n\nbody\n")
+	ingestOne(t, st, "L1", "finance/pay", agentArtifact("v1"))
+	res := ingestOne(t, st, "L1", "finance/pay", "---\ntype: agent\nversion: 2.0.0\ndescription: v2\nsensitivity: low\n---\n\nbody\n")
 	if res.Accepted != 1 || len(res.Rejected) != 0 {
 		t.Fatalf("same-layer version bump: accepted=%d rejected=%+v, want clean accept", res.Accepted, res.Rejected)
 	}

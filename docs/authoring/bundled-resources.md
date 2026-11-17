@@ -153,7 +153,7 @@ Prose copied from an external source, such as a wiki page or a vendor document, 
 
 ## Manifest size lint
 
-Manifest content has a cap of 20,000 estimated tokens by default. For a skill, the cap applies to the `SKILL.md` body. The agentskills.io specification recommends keeping that body under 5K tokens and at most 500 lines, with longer reference material moved into `references/`. Larger reference content can also become a separate `type: context` artifact that the prose body references.
+Manifest content has a cap of 20,000 estimated tokens by default. For a skill, the cap applies to the `SKILL.md` body. The agentskills.io specification recommends keeping that body under 5K tokens and at most 500 lines, with longer reference material moved into `references/`. Reference material that no single skill owns can become a separate skill whose description says that it carries reference material, and a domain-wide description belongs in a `DOMAIN.md` body. [Reference material](artifact-types#reference-material) lists the locations.
 
 Lint estimates a token count as the byte length divided by four, rounded up. Each threshold below is a default, and the variable in its row changes it:
 
@@ -277,15 +277,14 @@ The consumer that materializes an artifact (`podium sync`, the MCP server, or an
 
 | Type | Location of bundled files |
 |:--|:--|
-| `skill` | Inside the skill folder. |
-| `context` | `.podium/context/<artifact-id>/`. |
-| `agent`, `command`, and `hook` | The harness-neutral `.podium/resources/<artifact-id>/` bucket. Claude Code places an agent's files under `.claude/podium/<artifact-id>/`. |
+| `skill` | Inside the skill folder. A skill whose `invocation` is `user` materializes on OpenCode and Gemini as a command file, and its bundled files go to the `.podium/resources/<artifact-id>/` bucket. |
+| `agent` and `hook` | The harness-neutral `.podium/resources/<artifact-id>/` bucket. Claude Code places an agent's files under `.claude/podium/<artifact-id>/`. |
 | `rule` | None. The rule materializes as a translated rule file or as a block injected into `AGENTS.md` or `GEMINI.md`, depending on the harness. |
 | `mcp-server` | None. The registration materializes as a merged config entry. |
 
 To ship bytes with a `rule` or an `mcp-server`, ship them as a separate artifact, or materialize with `harness: none`, which writes the canonical layout including bundled files.
 
-A skill's prose finds its files at the package-relative paths it names, because they land inside the skill folder. The adapters copy `agent` and `command` prose verbatim and do not rewrite the paths in it, so a prose reference to a bundled file names the installed location when the agent needs to open the file. [Your first agent](your-first-agent#step-4-ship-a-helper-script) shows the pattern. A hook's `hook_action` is the one field the adapters rewrite to the installed location. [Configure your harness](../consuming/configure-your-harness) lists the locations for each harness, and [Handling artifact responses](../consuming/handling-artifact-responses#inline-content-and-materialized-files) describes how the bytes reach the consumer.
+A skill's prose finds its files at the package-relative paths it names, because they land inside the skill folder. The adapters copy `agent` prose verbatim and do not rewrite the paths in it, so a prose reference to a bundled file names the installed location when the agent needs to open the file. [Your first agent](your-first-agent#step-4-ship-a-helper-script) shows the pattern. A hook's `hook_action` is the one field the adapters rewrite to the installed location. [Configure your harness](../consuming/configure-your-harness) lists the locations for each harness, and [Handling artifact responses](../consuming/handling-artifact-responses#inline-content-and-materialized-files) describes how the bytes reach the consumer.
 
 ---
 

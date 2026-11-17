@@ -16,6 +16,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/lennylabs/podium/internal/testharness"
 )
 
 // fmSkillArtifact is a minimal skill ARTIFACT.md (Podium frontmatter only).
@@ -132,7 +134,7 @@ func assertSkillScaffoldLintsClean(t testing.TB, res cliResult, root, dir string
 func TestFrontmatter_NonSkillScaffoldSingleFile(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/glossary")
-	sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context",
+	sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent",
 		"--description", "Glossary of finance terms.", "--yes", out)
 	if sc.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
@@ -141,7 +143,7 @@ func TestFrontmatter_NonSkillScaffoldSingleFile(t *testing.T) {
 		t.Errorf("context must not have a SKILL.md")
 	}
 	art := readFile(t, filepath.Join(out, "ARTIFACT.md"))
-	for _, want := range []string{"type: context", "description:", "version:"} {
+	for _, want := range []string{"type: agent", "description:", "version:"} {
 		if !strings.Contains(art, want) {
 			t.Errorf("ARTIFACT.md missing %q:\n%s", want, art)
 		}
@@ -247,7 +249,7 @@ func TestFrontmatter_MissingType(t *testing.T) {
 func TestFrontmatter_MissingVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"tools/my-tool/ARTIFACT.md": "---\ntype: context\ndescription: Tool.\n---\n\nbody\n",
+		"tools/my-tool/ARTIFACT.md": "---\ntype: agent\ndescription: Tool.\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 1 {
@@ -262,7 +264,7 @@ func TestFrontmatter_MissingVersion(t *testing.T) {
 func TestFrontmatter_NonSemverVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"tools/my-tool/ARTIFACT.md": "---\ntype: context\nversion: not-semver\ndescription: Tool.\n---\n\nbody\n",
+		"tools/my-tool/ARTIFACT.md": "---\ntype: agent\nversion: not-semver\ndescription: Tool.\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 1 {
@@ -273,11 +275,11 @@ func TestFrontmatter_NonSemverVersion(t *testing.T) {
 	}
 }
 
-// fmDeprecationRegistry stages an active and a deprecated context artifact.
+// fmDeprecationRegistry stages an active and a deprecated agent artifact.
 func fmDeprecationRegistry(t *testing.T) string {
 	return writeRegistry(t, map[string]string{
-		"finance/active-tool/ARTIFACT.md": "---\ntype: context\nname: active-tool\nversion: 1.0.0\ndescription: Current variance tool.\n---\n\nbody\n",
-		"finance/old-tool/ARTIFACT.md":    "---\ntype: context\nname: old-tool\nversion: 1.0.0\ndescription: Old variance tool.\ndeprecated: true\nreplaced_by: finance/active-tool\n---\n\nbody\n",
+		"finance/active-tool/ARTIFACT.md": "---\ntype: agent\nname: active-tool\nversion: 1.0.0\ndescription: Current variance tool.\n---\n\nbody\n",
+		"finance/old-tool/ARTIFACT.md":    "---\ntype: agent\nname: old-tool\nversion: 1.0.0\ndescription: Old variance tool.\ndeprecated: true\nreplaced_by: finance/active-tool\n---\n\nbody\n",
 	})
 }
 
@@ -285,7 +287,7 @@ func fmDeprecationRegistry(t *testing.T) string {
 func TestFrontmatter_DeprecatedExcludedFromSearch(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, fmDeprecationRegistry(t))
-	_, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=tool&type=context")
+	_, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=tool&type=agent")
 	if strings.Contains(string(body), "finance/old-tool") {
 		t.Errorf("deprecated artifact appeared in search:\n%s", body)
 	}
@@ -325,8 +327,8 @@ func TestFrontmatter_DeprecatedReachableWithWarning(t *testing.T) {
 func TestFrontmatter_DirectOnlyHiddenFromSearch(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/public-tool/ARTIFACT.md": "---\ntype: context\nname: public-tool\nversion: 1.0.0\ndescription: Public payments tool.\n---\n\nbody\n",
-		"finance/secret-tool/ARTIFACT.md": "---\ntype: context\nname: secret-tool\nversion: 1.0.0\ndescription: Secret payments tool.\nsearch_visibility: direct-only\n---\n\nbody\n",
+		"finance/public-tool/ARTIFACT.md": "---\ntype: agent\nname: public-tool\nversion: 1.0.0\ndescription: Public payments tool.\n---\n\nbody\n",
+		"finance/secret-tool/ARTIFACT.md": "---\ntype: agent\nname: secret-tool\nversion: 1.0.0\ndescription: Secret payments tool.\nsearch_visibility: direct-only\n---\n\nbody\n",
 	}))
 	_, sbody := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=payments")
 	if strings.Contains(string(sbody), "finance/secret-tool") {
@@ -342,7 +344,7 @@ func TestFrontmatter_DirectOnlyHiddenFromSearch(t *testing.T) {
 func TestFrontmatter_DirectOnlyReachableByID(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/secret-tool/ARTIFACT.md": "---\ntype: context\nname: secret-tool\nversion: 1.0.0\ndescription: Secret tool.\nsearch_visibility: direct-only\n---\n\nbody\n",
+		"finance/secret-tool/ARTIFACT.md": "---\ntype: agent\nname: secret-tool\nversion: 1.0.0\ndescription: Secret tool.\nsearch_visibility: direct-only\n---\n\nbody\n",
 	}))
 	var load struct {
 		ID string `json:"id"`
@@ -487,7 +489,7 @@ func TestFrontmatter_RequiresApprovalVerbatim(t *testing.T) {
 // parse the referenced file.
 func TestFrontmatter_SbomVerbatim(t *testing.T) {
 	t.Parallel()
-	art := "---\ntype: context\nname: bom-ctx\nversion: 1.0.0\ndescription: Context with SBOM.\nsbom:\n  format: cyclonedx-1.5\n  ref: ./sbom.json\n---\n\nbody\n"
+	art := "---\ntype: agent\nname: bom-ctx\nversion: 1.0.0\ndescription: Context with SBOM.\nsbom:\n  format: cyclonedx-1.5\n  ref: ./sbom.json\n---\n\nbody\n"
 	srv := startServer(t, writeRegistry(t, map[string]string{"tools/bom-ctx/ARTIFACT.md": art}))
 	fm := fmLoadFrontmatter(t, srv.BaseURL, "tools/bom-ctx")
 	for _, want := range []string{"sbom", "cyclonedx-1.5", "sbom.json"} {
@@ -509,7 +511,7 @@ func TestFrontmatter_HintsVerbatim(t *testing.T) {
 	}
 }
 
-// effort_hint on a non-agent/skill/command type warns.
+// effort_hint on a non-agent/skill type warns.
 func TestFrontmatter_HintOnUnsupportedTypeWarns(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -521,6 +523,42 @@ func TestFrontmatter_HintOnUnsupportedTypeWarns(t *testing.T) {
 	}
 	if !strings.Contains(res.Stdout, "lint.hint_on_unsupported_type") || !strings.Contains(res.Stdout, "[warning]") {
 		t.Errorf("missing hint_on_unsupported_type warning:\n%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "hints apply only to agent / skill") {
+		t.Errorf("hint warning does not name agent / skill:\n%s", res.Stdout)
+	}
+}
+
+// Spec: §4.3, §4.3.4 — `podium lint` warns on an invalid ARTIFACT.md
+// invocation value on a skill and on an invocation set on another type, and
+// exits 0 because both are warnings. A valid value on a skill draws no
+// lint.skill_invocation warning.
+func TestFrontmatter_InvocationWarnings(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"finance/bad/ARTIFACT.md":   "---\ntype: skill\nversion: 1.0.0\ninvocation: yes\n---\n\n",
+		"finance/bad/SKILL.md":      "---\nname: bad\ndescription: Reconcile the quarterly ledger before the audit.\n---\n\nBody.\n",
+		"finance/good/ARTIFACT.md":  "---\ntype: skill\nversion: 1.0.0\ninvocation: user\n---\n\n",
+		"finance/good/SKILL.md":     "---\nname: good\ndescription: Draft the vendor payment schedule for next month.\n---\n\nBody.\n",
+		"finance/close/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Run the month-end close across every subsidiary.\ninvocation: user\n---\n\nAgent body.\n",
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0 (warnings)\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	for _, want := range []string{
+		`invocation "yes" is not a valid value; valid values: any, user. The skill resolves to any`,
+		`invocation set on type "agent"; invocation applies only to skill`,
+	} {
+		if !strings.Contains(res.Stdout, want) {
+			t.Errorf("lint output missing %q:\n%s", want, res.Stdout)
+		}
+	}
+	if n := strings.Count(res.Stdout, "lint.skill_invocation"); n != 2 {
+		t.Errorf("want 2 lint.skill_invocation warnings, got %d:\n%s", n, res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "finance/good") {
+		t.Errorf("a valid invocation drew a diagnostic:\n%s", res.Stdout)
 	}
 }
 
@@ -567,37 +605,41 @@ func TestFrontmatter_AgentScaffoldDelegatesTo(t *testing.T) {
 
 // TestFrontmatter_CommandScaffoldRejectsExposeFlag covers the realigned
 // `--expose-as-mcp-prompt` is not a defined scaffold flag,
-// so the flag parse fails with exit 2, and a valid command scaffold writes an
-// ARTIFACT.md that carries no `expose_as_mcp_prompt` field.
+// so the flag parse fails with exit 2, and a valid skill scaffold writes a
+// package that carries no `expose_as_mcp_prompt` field.
 func TestFrontmatter_CommandScaffoldRejectsExposeFlag(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	bad := runPodium(t, "", nil, "artifact", "scaffold", "--type", "command",
-		"--description", "A slash command.", "--expose-as-mcp-prompt", "--yes",
+	bad := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
+		"--description", "A user-invoked skill.", "--expose-as-mcp-prompt", "--yes",
 		filepath.Join(root, "eng/my-cmd"))
 	if bad.Exit != 2 {
 		t.Errorf("scaffold with unknown --expose-as-mcp-prompt flag: exit=%d, want 2; stderr=%s", bad.Exit, bad.Stderr)
 	}
 	out := filepath.Join(root, "eng/valid-cmd")
-	good := runPodium(t, "", nil, "artifact", "scaffold", "--type", "command",
-		"--description", "A slash command.", "--yes", out)
+	good := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
+		"--description", "A user-invoked skill.", "--yes", out)
 	if good.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", good.Exit, good.Stderr)
 	}
-	if art := readFile(t, filepath.Join(out, "ARTIFACT.md")); strings.Contains(art, "expose_as_mcp_prompt") {
-		t.Errorf("scaffolded command ARTIFACT.md unexpectedly contains expose_as_mcp_prompt:\n%s", art)
+	files := testharness.ReadTree(t, out)
+	if len(files) == 0 {
+		t.Fatalf("scaffold wrote no files under %s", out)
+	}
+	for rel, body := range files {
+		if strings.Contains(body, "expose_as_mcp_prompt") {
+			t.Errorf("scaffolded %s unexpectedly contains expose_as_mcp_prompt:\n%s", rel, body)
+		}
 	}
 }
 
-// TestFrontmatter_CommandNotProjectedThroughMCP covers the realigned
-// behavior, which collapses to one
-// observable now that the opt-in field is gone: the MCP server defines no
-// `prompts/list` method, so the request returns JSON-RPC -32601 ("method not
-// found") regardless of any command in the registry.
+// TestFrontmatter_CommandNotProjectedThroughMCP asserts that the MCP server
+// defines no `prompts/list` method, so the request returns JSON-RPC -32601
+// ("method not found") regardless of any user-invoked skill in the registry.
 // spec: §5.2 (no MCP projection); cmd/podium-mcp/main.go default case.
 func TestFrontmatter_CommandNotProjectedThroughMCP(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact}))
+	srv := startServer(t, writeRegistry(t, map[string]string{standupFile: standupSkill}))
 	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL),
 		rpcReq{ID: 1, Method: "prompts/list", Params: map[string]any{}},
 	)
@@ -704,7 +746,7 @@ func TestFrontmatter_McpServerScaffold(t *testing.T) {
 func TestFrontmatter_TargetHarnessesLintsClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"eng/my-context/ARTIFACT.md": "---\ntype: context\nname: my-context\nversion: 1.0.0\ndescription: Engineering conventions for the platform team.\ntarget_harnesses: [claude-code, opencode]\n---\n\nbody\n",
+		"eng/my-context/ARTIFACT.md": "---\ntype: agent\nname: my-context\nversion: 1.0.0\ndescription: Engineering conventions for the platform team.\ntarget_harnesses: [claude-code, opencode]\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 || !strings.Contains(res.Stdout, "lint: no issues.") {
@@ -718,19 +760,19 @@ func TestFrontmatter_TargetHarnessesExcludesSkips(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		// Targets opencode only; a claude-code sync must skip it.
-		"eng/scoped/ARTIFACT.md": "---\ntype: context\nname: scoped\nversion: 1.0.0\ndescription: Engineering conventions for the platform team.\ntarget_harnesses: [opencode]\n---\n\nbody\n",
+		"eng/scoped/ARTIFACT.md": "---\ntype: agent\nname: scoped\nversion: 1.0.0\ndescription: Engineering conventions for the platform team.\ntarget_harnesses: [opencode]\n---\n\nbody\n",
 		// A second artifact with no target_harnesses materializes normally,
 		// so the run still produces output and the skip is isolated.
-		"eng/open/ARTIFACT.md": "---\ntype: context\nname: open\nversion: 1.0.0\ndescription: Context.\n---\n\nbody\n",
+		"eng/open/ARTIFACT.md": "---\ntype: agent\nname: open\nversion: 1.0.0\ndescription: Context.\n---\n\nbody\n",
 	})
 	tgt := t.TempDir()
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	if _, err := os.Stat(filepath.Join(tgt, ".podium/context/eng/scoped/ARTIFACT.md")); err == nil {
+	if _, err := os.Stat(filepath.Join(tgt, ".claude/agents/scoped.md")); err == nil {
 		t.Errorf("artifact excluded by target_harnesses must not materialize for claude-code")
 	}
-	mustExist(t, filepath.Join(tgt, ".podium/context/eng/open/ARTIFACT.md"))
+	mustExist(t, filepath.Join(tgt, ".claude/agents/open.md"))
 }
 
 // sync materializes an artifact whose target_harnesses
@@ -739,20 +781,20 @@ func TestFrontmatter_TargetHarnessesExcludesSkips(t *testing.T) {
 func TestFrontmatter_TargetHarnessesIncludesMaterializes(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"eng/my-context/ARTIFACT.md": "---\ntype: context\nname: my-context\nversion: 1.0.0\ndescription: Engineering conventions for the platform team.\ntarget_harnesses: [claude-code]\n---\n\nbody\n",
+		"eng/my-context/ARTIFACT.md": "---\ntype: agent\nname: my-context\nversion: 1.0.0\ndescription: Engineering conventions for the platform team.\ntarget_harnesses: [claude-code]\n---\n\nbody\n",
 	})
 	tgt := t.TempDir()
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	mustExist(t, filepath.Join(tgt, ".podium/context/eng/my-context/ARTIFACT.md"))
+	mustExist(t, filepath.Join(tgt, ".claude/agents/my-context.md"))
 }
 
 // external_resources metadata is stored verbatim and
 // returned on load; the binary object does not transit the registry.
 func TestFrontmatter_ExternalResourcesVerbatim(t *testing.T) {
 	t.Parallel()
-	art := "---\ntype: context\nname: model-ctx\nversion: 1.0.0\ndescription: Model context.\nexternal_resources:\n  - path: ./model.onnx\n    url: s3://company-models/variance/v1/model.onnx\n    sha256: 9f2caabbccddeeff00112233445566778899aabbccddeeff0011223344556677\n    size: 145000000\n    signature: \"sigstore:abc123\"\n---\n\nbody\n"
+	art := "---\ntype: agent\nname: model-ctx\nversion: 1.0.0\ndescription: Model context.\nexternal_resources:\n  - path: ./model.onnx\n    url: s3://company-models/variance/v1/model.onnx\n    sha256: 9f2caabbccddeeff00112233445566778899aabbccddeeff0011223344556677\n    size: 145000000\n    signature: \"sigstore:abc123\"\n---\n\nbody\n"
 	srv := startServer(t, writeRegistry(t, map[string]string{"data/model-ctx/ARTIFACT.md": art}))
 	fm := fmLoadFrontmatter(t, srv.BaseURL, "data/model-ctx")
 	for _, want := range []string{"external_resources", "model.onnx", "s3://company-models", "145000000", "sigstore:abc123"} {
@@ -889,7 +931,7 @@ func TestFrontmatter_ManifestOverHardCapErrors(t *testing.T) {
 func TestFrontmatter_ScaffoldSensitivityHigh(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/sensitive-context")
-	sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "Sensitive context.",
+	sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "Sensitive context.",
 		"--sensitivity", "high", "--yes", out)
 	if sc.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
@@ -903,7 +945,7 @@ func TestFrontmatter_ScaffoldSensitivityHigh(t *testing.T) {
 func TestFrontmatter_ScaffoldWhenToUseList(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/close-context")
-	sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "Close context.",
+	sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "Close context.",
 		"--when-to-use", "After month-end close,When reviewing financial performance", "--yes", out)
 	if sc.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
@@ -918,7 +960,7 @@ func TestFrontmatter_ScaffoldWhenToUseList(t *testing.T) {
 func TestFrontmatter_ScaffoldTagsList(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "finance/tagged-context")
-	sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "Finance context.",
+	sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "Finance context.",
 		"--tags", "finance,close,variance", "--yes", out)
 	if sc.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
@@ -932,8 +974,8 @@ func TestFrontmatter_ScaffoldTagsList(t *testing.T) {
 func TestFrontmatter_SearchTagsFilter(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/close-tool/ARTIFACT.md": "---\ntype: context\nname: close-tool\nversion: 1.0.0\ndescription: Close tool.\ntags: [finance, close]\n---\n\nbody\n",
-		"eng/build-tool/ARTIFACT.md":     "---\ntype: context\nname: build-tool\nversion: 1.0.0\ndescription: Build tool.\ntags: [engineering]\n---\n\nbody\n",
+		"finance/close-tool/ARTIFACT.md": "---\ntype: agent\nname: close-tool\nversion: 1.0.0\ndescription: Close tool.\ntags: [finance, close]\n---\n\nbody\n",
+		"eng/build-tool/ARTIFACT.md":     "---\ntype: agent\nname: build-tool\nversion: 1.0.0\ndescription: Build tool.\ntags: [engineering]\n---\n\nbody\n",
 	}))
 	_, all := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=tool")
 	if !strings.Contains(string(all), "finance/close-tool") || !strings.Contains(string(all), "eng/build-tool") {
@@ -953,7 +995,7 @@ func TestFrontmatter_SearchTagsFilter(t *testing.T) {
 func TestFrontmatter_LoadNotFound(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/real/ARTIFACT.md": "---\ntype: context\nname: real\nversion: 1.0.0\ndescription: Real.\n---\n\nbody\n",
+		"finance/real/ARTIFACT.md": "---\ntype: agent\nname: real\nversion: 1.0.0\ndescription: Real.\n---\n\nbody\n",
 	}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=finance/does-not-exist")
 	if st != 404 {
@@ -967,7 +1009,7 @@ func TestFrontmatter_LoadNotFound(t *testing.T) {
 // release_notes is stored verbatim and returned on load.
 func TestFrontmatter_ReleaseNotesVerbatim(t *testing.T) {
 	t.Parallel()
-	art := "---\ntype: context\nname: notes-ctx\nversion: 1.0.0\ndescription: Notes context.\nrelease_notes: \"Initial release.\"\n---\n\nbody\n"
+	art := "---\ntype: agent\nname: notes-ctx\nversion: 1.0.0\ndescription: Notes context.\nrelease_notes: \"Initial release.\"\n---\n\nbody\n"
 	srv := startServer(t, writeRegistry(t, map[string]string{"tools/notes-ctx/ARTIFACT.md": art}))
 	fm := fmLoadFrontmatter(t, srv.BaseURL, "tools/notes-ctx")
 	if !strings.Contains(fm, "release_notes") || !strings.Contains(fm, "Initial release.") {
@@ -984,7 +1026,7 @@ func TestFrontmatter_ReleaseNotesVerbatim(t *testing.T) {
 func TestFrontmatter_ReplacedBySurfaced(t *testing.T) {
 	t.Parallel()
 	const target = "finance/close-reporting/run-variance-analysis-v2"
-	art := "---\ntype: context\nname: old-tool\nversion: 1.0.0\ndescription: Old tool.\ndeprecated: true\nreplaced_by: " + target + "\n---\n\nbody\n"
+	art := "---\ntype: agent\nname: old-tool\nversion: 1.0.0\ndescription: Old tool.\ndeprecated: true\nreplaced_by: " + target + "\n---\n\nbody\n"
 	srv := startServer(t, writeRegistry(t, map[string]string{"finance/old-tool/ARTIFACT.md": art}))
 	var load struct {
 		Deprecated         bool   `json:"deprecated"`

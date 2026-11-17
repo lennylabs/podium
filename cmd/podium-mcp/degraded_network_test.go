@@ -17,7 +17,7 @@ import (
 func TestLoadArtifact_AlwaysRevalidateFallsBackToCacheOnNetworkError(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+	rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
 	srv := cacheServer(t, dir, "http://127.0.0.1:1", "always-revalidate") // unbound port → connect refused
 	if err := srv.cacheVerifiedRecord(rec); err != nil {
 		t.Fatalf("cacheVerifiedRecord: %v", err)
@@ -43,7 +43,7 @@ func TestLoadArtifact_AlwaysRevalidateFallbackRefusesAnEditedCacheRecord(t *test
 	t.Parallel()
 	dir := t.TempDir()
 	dest := t.TempDir()
-	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+	rec := cachedRecord("team/x", "---\ntype: agent\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
 	srv := cacheServer(t, dir, "http://127.0.0.1:1", "always-revalidate")
 	if err := srv.cacheVerifiedRecord(rec); err != nil {
 		t.Fatalf("cacheVerifiedRecord: %v", err)

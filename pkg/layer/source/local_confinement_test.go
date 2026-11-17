@@ -12,7 +12,7 @@ import (
 	"github.com/lennylabs/podium/internal/testharness"
 )
 
-const confinementArtifact = "---\ntype: context\nversion: 1.0.0\n---\nbody\n"
+const confinementArtifact = "---\ntype: agent\nversion: 1.0.0\n---\nbody\n"
 
 // confinedLayer builds a layer directory under a parent that also holds a
 // secret one level above the layer root, and returns the parent and the root.

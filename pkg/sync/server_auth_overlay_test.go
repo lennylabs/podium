@@ -26,12 +26,12 @@ func TestRun_ServerSource_ForwardsBearerToken(t *testing.T) {
 	mux.HandleFunc("/v1/sync/manifest", func(w http.ResponseWriter, r *http.Request) {
 		seen["manifest"] = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"artifacts":[{"id":"team/glossary","type":"context","version":"1.0.0","layer":"org"}]}`))
+		_, _ = w.Write([]byte(`{"artifacts":[{"id":"team/glossary","type":"agent","version":"1.0.0","layer":"org"}]}`))
 	})
 	mux.HandleFunc("/v1/load_artifact", func(w http.ResponseWriter, r *http.Request) {
 		seen["load"] = r.Header.Get("Authorization")
 		writeJSONTest(w, testharness.SealDelivery(map[string]any{
-			"id": "team/glossary", "type": "context", "layer": "org", "frontmatter": contextArtifactSrc,
+			"id": "team/glossary", "type": "agent", "layer": "org", "frontmatter": agentArtifactSrc,
 		}))
 	})
 	srv := httptest.NewServer(mux)
@@ -208,9 +208,9 @@ func TestRun_ServerSource_OverlayOverridesServer(t *testing.T) {
 	t.Parallel()
 	srv := newStubRegistry(t, map[string]stubArtifact{
 		"finance/intro": {
-			typ:          "context",
+			typ:          "agent",
 			layer:        "org",
-			frontmatter:  "---\ntype: context\nversion: 1.0.0\ndescription: from server\nsensitivity: low\n---\n\nfrom server\n",
+			frontmatter:  "---\ntype: agent\nversion: 1.0.0\ndescription: from server\nsensitivity: low\n---\n\nfrom server\n",
 			manifestBody: "from server\n",
 		},
 	})
@@ -220,7 +220,7 @@ func TestRun_ServerSource_OverlayOverridesServer(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(overlayDir, "finance", "intro"), 0o755); err != nil {
 		t.Fatalf("mkdir overlay: %v", err)
 	}
-	overlayBody := "---\ntype: context\nversion: 1.0.0\ndescription: from overlay\nsensitivity: low\n---\n\nfrom overlay\n"
+	overlayBody := "---\ntype: agent\nversion: 1.0.0\ndescription: from overlay\nsensitivity: low\n---\n\nfrom overlay\n"
 	if err := os.WriteFile(filepath.Join(overlayDir, "finance", "intro", "ARTIFACT.md"), []byte(overlayBody), 0o644); err != nil {
 		t.Fatalf("write overlay artifact: %v", err)
 	}

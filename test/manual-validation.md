@@ -249,6 +249,7 @@ rm -rf "$WORK"
 | S106 | A registry audit stream reaches an OpenTelemetry Collector, which decodes it and writes it to a file and to S3 | standalone | none | none | Docker, MinIO from `make services-up` |
 | S107 | A skill's Podium fields under `SKILL.md` `metadata` reach search, load, and lint, and a stored row from an earlier release keeps its search columns until a new version | standalone | none | none | none |
 | S108 | Catalog advisories in `podium lint` and at ingest, the lint JSON envelope, and the `podium sync` listing budget | standalone | none | none | none |
+| S109 | `command` and `context` are refused, stored rows of either type stop serving after an upgrade, hand-converted skills lint clean and serve, and user-invoked skills carry each harness's control | solo then standalone | none | none | none |
 
 ---
 
@@ -329,8 +330,8 @@ Claude Code adapter.
 
 **Goal.** Validate that each artifact type ingests and materializes.
 
-**Covers.** Skill, command, context, rule, hook, agent, and mcp-server types;
-the Claude Code adapter across all of them.
+**Covers.** Skill, rule, hook, agent, and mcp-server types, a user-invoked
+skill and a reference skill, and the Claude Code adapter across all of them.
 
 **Steps.**
 
@@ -339,8 +340,8 @@ the Claude Code adapter across all of them.
 
    ```bash
    podium artifact scaffold --type skill   --description "Summarize the release notes for a sprint" "$WORK/reg/my-skill"
-   podium artifact scaffold --type command --description "Open a pull request from the current branch" "$WORK/reg/my-command"
-   podium artifact scaffold --type context --description "Coding conventions for the Go services" "$WORK/reg/my-context"
+   podium artifact scaffold --type skill   --invocation user --description "Open a pull request from the current branch" "$WORK/reg/open-pr"
+   podium artifact scaffold --type skill   --description "Reference material for the coding conventions of the Go services" "$WORK/reg/go-conventions"
    podium artifact scaffold --type rule --description "Go files pass gofmt before every commit" --rule-globs "**/*.go" --rule-mode always "$WORK/reg/my-rule"
    podium artifact scaffold --type hook --hook-event pre_tool_use --hook-action "echo hi" --description "Print a greeting before each tool call" "$WORK/reg/my-hook"
    podium artifact scaffold --type agent --delegates-to my-skill --description "Coordinate a release by delegating to helpers" "$WORK/reg/my-agent"
@@ -355,8 +356,10 @@ the Claude Code adapter across all of them.
    cd "$WORK/proj"
    podium init --target "$WORK/proj" --registry "$WORK/reg" --harness claude-code
    podium sync
-   find "$WORK/proj/.claude" "$WORK/proj/.podium/context" -type f | sort
+   find "$WORK/proj/.claude" -type f | sort
    ls "$WORK/proj/.mcp.json"
+   sed -n 2p "$WORK/proj/.claude/skills/open-pr/SKILL.md"
+   grep -c disable-model-invocation "$WORK/proj/.claude/skills/go-conventions/SKILL.md"
    ```
 
 **Expected.**
@@ -366,14 +369,16 @@ the Claude Code adapter across all of them.
 - `podium sync` lists every scaffolded artifact under the `claude-code` adapter
   with its materialized path.
 - The Claude Code adapter writes a file for each type at its per-type location.
-  The skill, command, agent, and rule each land under `.claude/` (at
-  `.claude/skills/my-skill/SKILL.md`, `.claude/commands/my-command.md`,
-  `.claude/agents/my-agent.md`, and `.claude/rules/my-rule.md`). The hook merges
-  into `.claude/settings.json`. The mcp-server writes the workspace-root
-  `.mcp.json`. The context materializes to the harness-neutral
-  `.podium/context/my-context/` directory that every adapter shares. The first
-  `find` lists the `.claude/` and `.podium/context/` files, and the `ls` confirms
-  the workspace-root `.mcp.json`.
+  The three skills, the agent, and the rule each land under `.claude/` (at
+  `.claude/skills/my-skill/SKILL.md`, `.claude/skills/open-pr/SKILL.md`,
+  `.claude/skills/go-conventions/SKILL.md`, `.claude/agents/my-agent.md`, and
+  `.claude/rules/my-rule.md`). The hook merges into `.claude/settings.json`.
+  The mcp-server writes the workspace-root `.mcp.json`. The `find` lists the
+  six `.claude/` files, and the `ls` confirms the workspace-root `.mcp.json`.
+- The scaffolded `open-pr/SKILL.md` carries `invocation: "user"` under
+  `metadata`, and its materialized copy's first frontmatter line is
+  `disable-model-invocation: true` with no quotes, so the `sed` prints that
+  line. The reference skill carries no control, so the `grep` prints `0`.
 
 **Cleanup.** `rm -rf "$WORK"`.
 
@@ -395,7 +400,7 @@ adapter.
 
    ```bash
    podium artifact scaffold --type skill --description "Greet a user" "$WORK/reg/greet"
-   podium artifact scaffold --type context --description "House style" "$WORK/reg/style"
+   podium artifact scaffold --type agent --description "House style" "$WORK/reg/style"
    ```
 
 3. Materialize once per harness into a separate target.
@@ -564,7 +569,7 @@ show`, `artifact show`, and the HTTP endpoints.
    ```bash
    podium artifact scaffold --type skill --description "Run the monthly finance close" "$WORK/reg/finance/run-close"
    podium artifact scaffold --type skill --description "Open a customer support ticket" "$WORK/reg/support/open-ticket"
-   podium artifact scaffold --type context --description "Engineering deploy runbook" "$WORK/reg/eng/deploy-runbook"
+   podium artifact scaffold --type agent --description "Engineering deploy runbook" "$WORK/reg/eng/deploy-runbook"
    ```
 
 3. Serve and query.
@@ -897,7 +902,7 @@ visibility, the mint helper in `tools/minttoken`.
 
    ```bash
    mkdir -p "$WORK/pub/handbook" "$WORK/eng/deploy"
-   podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
+   podium artifact scaffold --type agent --description "Company handbook" --force "$WORK/pub/handbook"
    podium artifact scaffold --type skill --description "Engineering deploy" --force "$WORK/eng/deploy"
    cat > "$WORK/registry.yaml" <<YAML
    registry:
@@ -1271,7 +1276,7 @@ ingest-time sensitivity ceiling.
    reaches the public-mode floor through its `SKILL.md` `metadata`.
 
    ```bash
-   podium artifact scaffold --type context --sensitivity low  --description "Public FAQ" "$WORK/reg/faq"
+   podium artifact scaffold --type agent   --sensitivity low  --description "Public FAQ" "$WORK/reg/faq"
    podium artifact scaffold --type skill   --sensitivity high --description "Production incident runbook" "$WORK/reg/incident"
    ```
 
@@ -1292,7 +1297,7 @@ ingest-time sensitivity ceiling.
 **Expected.**
 
 - `podium status` reports `registry mode: public`. The scope preview lists one
-  artifact (`faq`, `context`, `low`), confirming the `high` artifact never
+  artifact (`faq`, `agent`, `low`), confirming the `high` artifact never
   entered the catalog.
 - The anonymous search and `artifact show faq` succeed. Public mode bypasses the
   visibility model (§4.6), so the anonymous caller reads the catalog without
@@ -1926,7 +1931,7 @@ materialize only the requested subset.
 
    ```bash
    podium artifact scaffold --type skill   --description "Close the books" "$WORK/reg/finance/close"
-   podium artifact scaffold --type context --description "Finance policy"  "$WORK/reg/finance/policy"
+   podium artifact scaffold --type agent   --description "Finance policy"  "$WORK/reg/finance/policy"
    podium artifact scaffold --type skill   --description "Deploy service"  "$WORK/reg/eng/deploy"
    mkdir -p "$WORK/proj" && cd "$WORK/proj"
    podium init --registry "$WORK/reg" --harness claude-code --target "$WORK/proj"
@@ -1955,7 +1960,7 @@ materialize only the requested subset.
 - `--exclude 'eng/**'` materializes the two finance artifacts and omits
   `eng/deploy`.
 - `--type skill` materializes only the skills (`finance/close` and `eng/deploy`)
-  and omits the `finance/policy` context.
+  and omits the `finance/policy` agent.
 
 **Cleanup.** `rm -rf "$WORK"`.
 
@@ -2324,7 +2329,7 @@ the matching proxy secret.
 
    ```bash
    mkdir -p "$WORK/pub/handbook" "$WORK/eng/deploy"
-   podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
+   podium artifact scaffold --type agent --description "Company handbook" --force "$WORK/pub/handbook"
    podium artifact scaffold --type skill --description "Engineering deploy" --force "$WORK/eng/deploy"
    cat > "$WORK/registry.yaml" <<YAML
    registry:
@@ -2398,7 +2403,7 @@ that resolves to no entry (§6.3.1, §6.3.3, §13.10, §13.12).
 
    ```bash
    mkdir -p "$WORK/reg/seed"
-   podium artifact scaffold --type context --description "seed" --force "$WORK/reg/seed"
+   podium artifact scaffold --type agent --description "seed" --force "$WORK/reg/seed"
    ```
 
 2. `oidc-jwt` with a non-`https` issuer is refused. This runs in the foreground
@@ -2901,7 +2906,7 @@ with `curl`.
    ```bash
    export GROUP='<raw group value from step 5>'
    mkdir -p "$WORK/pub/handbook" "$WORK/eng/deploy"
-   podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
+   podium artifact scaffold --type agent --description "Company handbook" --force "$WORK/pub/handbook"
    podium artifact scaffold --type skill --description "Engineering deploy" --force "$WORK/eng/deploy"
    cat > "$WORK/registry.yaml" <<YAML
    registry:
@@ -3077,9 +3082,9 @@ FS farm is available.
    export GROUP='<group value from step 3>'
    export SUBJECT='<subject-claim value from step 3>'
    mkdir -p "$WORK/pub/handbook" "$WORK/eng/deploy" "$WORK/own/notes"
-   podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
+   podium artifact scaffold --type agent --description "Company handbook" --force "$WORK/pub/handbook"
    podium artifact scaffold --type skill --description "Engineering deploy" --force "$WORK/eng/deploy"
-   podium artifact scaffold --type context --description "Personal notes" --force "$WORK/own/notes"
+   podium artifact scaffold --type agent --description "Personal notes" --force "$WORK/own/notes"
    cat > "$WORK/adfs.yaml" <<YAML
    registry:
      layers:
@@ -3220,9 +3225,9 @@ sleep 1
 mkdir -p "$WORK/reg/team/ledger"
 cat > "$WORK/reg/team/ledger/ARTIFACT.md" <<'EOF'
 ---
-type: context
+type: agent
 version: 1.0.0
-description: the ledger context
+description: the ledger agent
 sensitivity: medium
 x_account: GB29-NWBK-0000
 audit_redact: [x_account]
@@ -3764,9 +3769,9 @@ misconfigured:
 
    ```bash
    mkdir -p "$WORK/pub/handbook" "$WORK/priv/salary-bands" "$WORK/comp/comp-policy"
-   podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
-   podium artifact scaffold --type context --description "Salary bands" --force "$WORK/priv/salary-bands"
-   podium artifact scaffold --type context --description "Compensation policy" --force "$WORK/comp/comp-policy"
+   podium artifact scaffold --type agent --description "Company handbook" --force "$WORK/pub/handbook"
+   podium artifact scaffold --type agent --description "Salary bands" --force "$WORK/priv/salary-bands"
+   podium artifact scaffold --type agent --description "Compensation policy" --force "$WORK/comp/comp-policy"
    cat > "$WORK/registry.yaml" <<YAML
    registry:
      identity_provider:
@@ -4929,14 +4934,15 @@ enough subdomains to change the presentation, and
 ```bash
 mk() { podium artifact scaffold --type "$1" --description "$2" --force "$WORK/reg/$3" >/dev/null; }
 mkdir -p "$WORK/reg"
-mk context "How a production deploy runs, stage by stage, and when to roll back." eng/platform/deploy-runbook
-mk context "The deploy runbook with the canary stage made mandatory for tier-1 services." eng/platform/deploy-runbook-strict
-mk command "Roll a service back to its previous released image." eng/platform/rollback
+mk agent "How a production deploy runs, stage by stage, and when to roll back." eng/platform/deploy-runbook
+mk agent "The deploy runbook with the canary stage made mandatory for tier-1 services." eng/platform/deploy-runbook-strict
+podium artifact scaffold --type skill --invocation user --description "Roll a service back to its previous released image." \
+  --force "$WORK/reg/eng/platform/rollback" >/dev/null
 mk rule "Secrets never live in an artifact body, a manifest, or a bundled file." eng/security/secrets-policy
 mk skill "Pay an approved vendor invoice through the finance warehouse." finance/ap/pay-invoice
 mk agent "Reconcile a supplier ledger entry against the general ledger." ops/regional/emea/payables/reconcile
 for t in ads api billing checkout content core data growth identity infra loyalty media mobile notify payments pricing reporting risk search shipping storefront support tax trust; do
-  mk context "Paging policy for $t." "eng/teams/$t/oncall-guide"
+  mk agent "Paging policy for $t." "eng/teams/$t/oncall-guide"
 done
 ```
 
@@ -4946,7 +4952,7 @@ another artifact, and bundle a file beside it. S53 reads this artifact.
 ````bash
 cat > "$WORK/reg/eng/platform/deploy-runbook/ARTIFACT.md" <<'YAML'
 ---
-type: context
+type: agent
 name: deploy-runbook
 version: 2.3.0
 description: How a production deploy runs, stage by stage, and when to roll back.
@@ -4970,7 +4976,7 @@ Start the deploy from the release branch:
 ./scripts/deploy.sh --env production --canary 5
 ```
 
-Roll back with [the rollback command](eng/platform/rollback) rather than
+Roll back with [the rollback skill](eng/platform/rollback) rather than
 reverting the branch.
 YAML
 mkdir -p "$WORK/reg/eng/platform/deploy-runbook/scripts"
@@ -4983,7 +4989,7 @@ S52 and S53 both read the difference.
 ```bash
 cat > "$WORK/reg/eng/platform/deploy-runbook-strict/ARTIFACT.md" <<'YAML'
 ---
-type: context
+type: agent
 name: deploy-runbook-strict
 version: 1.0.0
 description: The deploy runbook with the canary stage made mandatory for tier-1 services.
@@ -5132,7 +5138,7 @@ reader.
    R=http://127.0.0.1:8462
    ids() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["total_matched"], [x["id"] for x in d["results"]])'; }
    podium search --registry $R --json "deploy"                    | ids
-   podium search --registry $R --json --type command "deploy"     | ids
+   podium search --registry $R --json --type skill "deploy"       | ids
    podium search --registry $R --json --tags runbook "deploy"     | ids
    podium search --registry $R --json --tags nosuchtag "deploy"   | ids
    podium search --registry $R --json --scope finance "invoice"   | ids
@@ -5158,18 +5164,18 @@ reader.
    **Expect.** The page reports `Showing 2 of 2 matches` and lists both
    runbooks, matching the CLI's first line.
 
-3. Apply the type filter on the search surface and set it to `command`.
+3. Apply the type filter on the search surface and set it to `skill`.
 
    **Expect.** The count falls to `Showing 0 of 0 matches`, matching the CLI's
-   second line, and the type control reads `command` rather than `all`. Return
-   it to `all` and the two matches come back.
+   second line, because both runbooks are agents, and the type control reads
+   `skill` rather than `all`. Return it to `all` and the two matches come back.
 
 4. Type the filter as an inline token instead of using the control. Clear the
-   field, type `type:command deploy`, and press Return.
+   field, type `type:skill deploy`, and press Return.
 
    **Expect.** The token is lifted out of the query and applied as the type
-   filter: the type control reads `command`, the field holds `deploy` alone, and
-   the count is `Showing 0 of 0 matches`. The literal string `type:command` must
+   filter: the type control reads `skill`, the field holds `deploy` alone, and
+   the count is `Showing 0 of 0 matches`. The literal string `type:skill` must
    not remain in the field and must not be searched as keyword text.
 
 5. Reload the page on the address the previous step produced.
@@ -5221,7 +5227,7 @@ observes a script that failed to run.
 
 2. Follow the reference the body carries to another artifact.
 
-   **Expect.** The words "the rollback command" are a link, and following it
+   **Expect.** The words "the rollback skill" are a link, and following it
    opens `eng/platform/rollback` inside the viewer. The reference is authored as
    the artifact ID `eng/platform/rollback`; a link that leaves the page for a
    registry error rather than opening the artifact has not been resolved to a
@@ -5249,12 +5255,12 @@ observes a script that failed to run.
    ingest it.
 
    ```bash
-   podium artifact scaffold --type context \
+   podium artifact scaffold --type agent \
      --description "A probe artifact whose body carries markup a reader must never execute." \
      --force "$WORK/reg/eng/security/render-probe" >/dev/null
    cat > "$WORK/reg/eng/security/render-probe/ARTIFACT.md" <<'YAML'
 ---
-type: context
+type: agent
 name: render-probe
 version: 1.0.0
 description: A probe artifact whose body carries markup a reader must never execute.
@@ -5336,7 +5342,7 @@ ingested.
    terminal; the panel does it in the next step.
 
    ```bash
-   podium artifact scaffold --type command \
+   podium artifact scaffold --type agent \
      --description "Freeze deploys for the duration of an incident." \
      --force "$WORK/reg/eng/platform/freeze"
    ```
@@ -5502,7 +5508,7 @@ in to the UI; she exists so the first grant has an issuer.
    curl -sS -X POST "http://127.0.0.1:8153/v1/admin/grants" \
      -H "Authorization: Bearer $CAROL_TOKEN" -H 'Content-Type: application/json' \
      -d "{\"user_id\":\"$SUBJECT\"}" -w '\nstatus=%{http_code}\n'
-   mkdir -p "$WORK/notes" && printf -- '---\nid: note\ntype: context\n---\nnote\n' \
+   mkdir -p "$WORK/notes" && printf -- '---\nid: note\ntype: agent\n---\nnote\n' \
      > "$WORK/notes/ARTIFACT.md"
    PODIUM_SESSION_TOKEN="$TOKEN" podium layer register \
      --registry http://127.0.0.1:8153 \
@@ -6390,7 +6396,7 @@ certificate is needed.
 
    ```bash
    mkdir -p "$WORK/pub/handbook" "$WORK/eng/deploy"
-   podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
+   podium artifact scaffold --type agent --description "Company handbook" --force "$WORK/pub/handbook"
    podium artifact scaffold --type skill --description "Engineering deploy" --force "$WORK/eng/deploy"
    cat > "$WORK/registry.yaml" <<YAML
    registry:
@@ -6540,7 +6546,7 @@ container, or certificate is required.
    write_artifact() {
      cat > "$1" <<EOF
    ---
-   type: context
+   type: agent
    version: 1.0.0
    description: $2
    sensitivity: $3
@@ -6662,8 +6668,9 @@ matches, which is what kept the divergence out of the suite.
    the comparison non-vacuous: within one layer the filesystem walk already
    emits alphabetically by canonical ID, which is the order the server source
    produces globally, so a pair sitting inside one layer folds identically
-   under both modes whatever the build does. No artifact is `type: command`,
-   which is the §6.7.1 cell codex cannot translate.
+   under both modes whatever the build does. Every artifact is a hook or a
+   rule, and no §6.7.1 cell either type reaches is `✗` on `claude-code` or
+   `codex`, so neither harness refuses an artifact.
 
 ```bash
 mkdir -p "$WORK/reg/org-defaults" "$WORK/reg/team-finance"
@@ -8574,11 +8581,11 @@ what a CI step gates on.
      > "$WORK/reg/.registry-config"
    printf 'visibility:\n  public: true\n' > "$WORK/reg/org-defaults/.layer-config"
    printf 'visibility:\n  public: true\n' > "$WORK/reg/team-finance/.layer-config"
-   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: from-org\n---\n\nfrom-org\n' \
+   printf -- '---\ntype: agent\nversion: 1.0.0\ndescription: from-org\n---\n\nfrom-org\n' \
      > "$WORK/reg/org-defaults/shared/clash/ARTIFACT.md"
-   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: other\n---\n\nother\n' \
+   printf -- '---\ntype: agent\nversion: 1.0.0\ndescription: other\n---\n\nother\n' \
      > "$WORK/reg/org-defaults/shared/other/ARTIFACT.md"
-   printf -- '---\ntype: context\nversion: 1.1.0\ndescription: from-team\n---\n\nfrom-team\n' \
+   printf -- '---\ntype: agent\nversion: 1.1.0\ndescription: from-team\n---\n\nfrom-team\n' \
      > "$WORK/reg/team-finance/shared/clash/ARTIFACT.md"
    ```
 
@@ -8633,7 +8640,7 @@ what a CI step gates on.
    filesystem target again.
 
    ```bash
-   printf -- '---\ntype: context\nversion: 1.1.0\ndescription: from-team\nextends: shared/clash\n---\n\nfrom-team\n' \
+   printf -- '---\ntype: agent\nversion: 1.1.0\ndescription: from-team\nextends: shared/clash\n---\n\nfrom-team\n' \
      > "$WORK/reg/team-finance/shared/clash/ARTIFACT.md"
    podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none 2> "$WORK/err5.txt"; echo "exit=$?"
    cat "$WORK/err5.txt"
@@ -8652,7 +8659,7 @@ what a CI step gates on.
    ```bash
    rm -rf "$WORK/reg/team-finance/shared/clash"
    mkdir -p "$WORK/overlay/shared/clash"
-   printf -- '---\ntype: context\nversion: 9.0.0\ndescription: from-overlay\nextends: shared/clash\n---\n\nfrom-overlay\n' \
+   printf -- '---\ntype: agent\nversion: 9.0.0\ndescription: from-overlay\nextends: shared/clash\n---\n\nfrom-overlay\n' \
      > "$WORK/overlay/shared/clash/ARTIFACT.md"
    podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none \
      --overlay "$WORK/overlay" 2> "$WORK/err6.txt"; echo "exit=$?"
@@ -8697,7 +8704,7 @@ not show the operator's terminal: that the message names the path or the
 
    ```bash
    mkdir -p "$WORK/reg/seed"
-   podium artifact scaffold --type context --description "seed" --force "$WORK/reg/seed"
+   podium artifact scaffold --type agent --description "seed" --force "$WORK/reg/seed"
    ```
 
    **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and
@@ -9099,8 +9106,8 @@ confirms that it names the canonical layout and points at `podium sync`.
    cat > "$WORK/mat.py" <<'PY'
    import os, sys
    from podium import BatchResult, LoadedArtifact, RegistryError
-   art = LoadedArtifact(id="a/b", type="context", version="1.0.0",
-                        manifest_body="x\n", frontmatter="---\ntype: context\n---\n")
+   art = LoadedArtifact(id="a/b", type="agent", version="1.0.0",
+                        manifest_body="x\n", frontmatter="---\ntype: agent\n---\n")
    bad = BatchResult(id="x/y", status="error",
                      error=RegistryError("visibility.denied", "no"))
    out = os.path.join(os.environ["WORK"], "out")
@@ -9150,7 +9157,7 @@ confirms that it names the canonical layout and points at `podium sync`.
    ```
 
    **Expect.** A `WROTE` line naming `.../out/a/b/ARTIFACT.md`, `FILES ['a']`,
-   and the file prints `---`, `type: context`, `---`.
+   and the file prints `---`, `type: agent`, `---`.
 
 **Cleanup.** `cd /` and `rm -rf "$WORK"`.
 
@@ -10223,7 +10230,7 @@ step 7 catches.
 
    ```bash
    S=$$
-   podium artifact scaffold --type context --description "Public welcome" "$WORK/pub/welcome"
+   podium artifact scaffold --type agent --description "Public welcome" "$WORK/pub/welcome"
    cat > "$WORK/registry.yaml" <<EOF
    registry:
      layers:
@@ -10710,7 +10717,7 @@ service is required.
 
    ```bash
    S=$$
-   podium artifact scaffold --type context --description "Public welcome" "$WORK/pub/welcome" > /dev/null
+   podium artifact scaffold --type agent --description "Public welcome" "$WORK/pub/welcome" > /dev/null
    cat > "$WORK/registry.yaml" <<EOF
    registry:
      layers:
@@ -11042,11 +11049,11 @@ still serves `extends:`.
    for L in org team; do
      printf 'visibility:\n  public: true\n' > "$WORK/reg/$L/.layer-config"
    done
-   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Org base.\ntags: [base]\n---\n\nOrg base.\n' \
+   printf -- '---\ntype: agent\nversion: 1.0.0\ndescription: Org base.\ntags: [base]\n---\n\nOrg base.\n' \
      > "$WORK/reg/org/ops/base/ARTIFACT.md"
-   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Org x.\n---\n\nOrg x.\n' \
+   printf -- '---\ntype: agent\nversion: 1.0.0\ndescription: Org x.\n---\n\nOrg x.\n' \
      > "$WORK/reg/org/ops/x/ARTIFACT.md"
-   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Team c.\n---\n\nTeam c.\n' \
+   printf -- '---\ntype: agent\nversion: 1.0.0\ndescription: Team c.\n---\n\nTeam c.\n' \
      > "$WORK/reg/team/ops/c/ARTIFACT.md"
    ```
 
@@ -11064,10 +11071,10 @@ still serves `extends:`.
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8207/healthz
    server_alive "$SRV" "$WORK/old.log"
    export URL=http://127.0.0.1:8207
-   printf -- '---\ntype: context\nversion: 2.0.0\ndescription: Team c.\nextends: ops/base\n---\n\nTeam c two.\n' \
+   printf -- '---\ntype: agent\nversion: 2.0.0\ndescription: Team c.\nextends: ops/base\n---\n\nTeam c two.\n' \
      > "$WORK/reg/team/ops/c/ARTIFACT.md"
    mkdir -p "$WORK/reg/team/ops/x"
-   printf -- '---\ntype: context\nversion: 2.0.0\ndescription: Team x.\nextends: ops/x\n---\n\nTeam x.\n' \
+   printf -- '---\ntype: agent\nversion: 2.0.0\ndescription: Team x.\nextends: ops/x\n---\n\nTeam x.\n' \
      > "$WORK/reg/team/ops/x/ARTIFACT.md"
    "$WORK/old/podium" layer reingest --registry "$URL" team; echo "exit=$?"
    for ID in ops/c ops/x; do
@@ -11153,7 +11160,7 @@ still serves `extends:`.
    ```bash
    curl -s -X POST "$URL/v1/layers/reingest?id=team" > "$WORK/body.json"
    python3 -c 'import json,sys; print(json.dumps(sorted(json.load(open(sys.argv[1]))["rejected"], key=lambda r: r["artifact_id"])))' "$WORK/body.json"
-   printf -- '---\ntype: context\nversion: 1.1.0\ndescription: Org x.\n---\n\nOrg x one.\n' \
+   printf -- '---\ntype: agent\nversion: 1.1.0\ndescription: Org x.\n---\n\nOrg x one.\n' \
      > "$WORK/reg/org/ops/x/ARTIFACT.md"
    podium layer reingest --registry "$URL" org; echo "exit=$?"
    curl -s "$URL/v1/load_artifact?id=ops/x" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'
@@ -11388,7 +11395,7 @@ this scenario catches.
    mkdir -p "$WORK/reg/team/budget-guide"
    cat > "$WORK/reg/team/budget-guide/ARTIFACT.md" <<'EOF'
    ---
-   type: context
+   type: agent
    version: 1.0.0
    description: how to prepare the quarterly budget
    ---
@@ -11578,9 +11585,9 @@ start), 8904 (receiver R1), and 8909 (receiver R2).
    mkdir -p "$WORK/reg/team/ledger"
    cat > "$WORK/reg/team/ledger/ARTIFACT.md" <<'EOF'
    ---
-   type: context
+   type: agent
    version: 1.0.0
-   description: the ledger context
+   description: the ledger agent
    ---
 
    ledger prose
@@ -12082,9 +12089,9 @@ run as the invoking user, so the files they write under `$WORK` are removable.
    mkdir -p "$WORK/reg/team/ledger"
    cat > "$WORK/reg/team/ledger/ARTIFACT.md" <<'EOF'
    ---
-   type: context
+   type: agent
    version: 1.0.0
-   description: the ledger context
+   description: the ledger agent
    ---
 
    ledger prose
@@ -12706,5 +12713,273 @@ scenario catches.
     place of `error:`, and `check exit=0`. The server stops.
 
 **Cleanup.** `rm -rf "$WORK"`. Step 10 stops the server.
+
+---
+
+## S109: `command` and `context` are refused, stored rows of either type stop serving after an upgrade, hand-converted skills lint clean and serve, and user-invoked skills carry each harness's control
+
+**Goal.** Validate that lint, a filesystem-source sync, and ingest refuse an
+`ARTIFACT.md` of a removed type with `type_removed`, that a 0.7.0 registry
+serves no row of a removed type that 0.6.0 stored and that a cached newer
+`latest` is refused until its revision mark is reset, that
+a layer converted by hand as the upgrade notes describe lints clean and
+serves, and that each harness receives the user-only control or the command-file
+fallback for a user-invoked skill.
+
+**Covers.** The §4.1 removed-type rule, §5.2, the §6.7 and §6.7.1
+`invocation: user` row, §13.11.3, and the §6.5
+revision marks, through the compiled `podium` and `podium-mcp` binaries.
+
+**Why by hand.** An operator reads the lint and sync output, the raw load
+responses, the MCP refusal, and the materialized files together. A removed type
+that ingests, a retired row that still serves, a converted skill that fails
+lint, a quoted `"true"`, a model-invocable `SKILL.md` on opencode or gemini, or
+a missing `agents/openai.yaml` is the defect this scenario catches.
+
+**Prerequisites.** The scenario needs Go to build the `v0.6.0` `podium`
+binary from the tag, as S102 builds v0.5.2. The scenario binds
+127.0.0.1:8910 for the old and then the current registry, as S102 binds one
+address for both, because a revision mark is keyed by the registry URL.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above. Build a layer
+   directory holding `ops/cmd` as `type: command` 1.0.0 with a bundled
+   `scripts/run.sh`, `ops/ref` as `type: context` 1.0.0, and `ops/mixed` as
+   `type: skill` 1.0.0 with a `SKILL.md`. Build the `v0.6.0` `podium` binary
+   into `$WORK/old`, and serve the layer with it on 127.0.0.1:8910 with a
+   store of its own. Then change `ops/mixed` to `type: command` at 2.0.0 by
+   deleting its `SKILL.md` and writing its description and body into an
+   `ARTIFACT.md` that declares `type: command` and `version: 2.0.0`, and
+   reingest the layer. Deleting the `SKILL.md` matters, because a 0.6.0 walk
+   would keep it as a bundled resource of the command, and step 6 writes the
+   converted `SKILL.md` in its place.
+
+   ```bash
+   mkdir -p "$WORK/src" "$WORK/old" "$WORK/reg/ops/cmd/scripts" "$WORK/reg/ops/ref" "$WORK/reg/ops/mixed"
+   git -C "$PODIUM_REPO" archive v0.6.0 | tar -x -C "$WORK/src"
+   go -C "$WORK/src" build -o "$WORK/old/" ./cmd/podium
+   "$WORK/old/podium" version
+   printf -- '---\ntype: command\nversion: 1.0.0\ndescription: Open a pull request from the current branch.\n---\n\nRun scripts/run.sh, then open the pull request.\n' \
+     > "$WORK/reg/ops/cmd/ARTIFACT.md"
+   printf '#!/bin/sh\necho run\n' > "$WORK/reg/ops/cmd/scripts/run.sh"
+   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Reference material for the Go service conventions.\n---\n\nGo services wrap every error with its operation.\n' \
+     > "$WORK/reg/ops/ref/ARTIFACT.md"
+   printf -- '---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- Skill body lives in SKILL.md. -->\n' \
+     > "$WORK/reg/ops/mixed/ARTIFACT.md"
+   printf -- '---\nname: mixed\ndescription: Rotate the staging credentials and confirm each service reconnects.\n---\n\nMixed skill body.\n' \
+     > "$WORK/reg/ops/mixed/SKILL.md"
+   export URL=http://127.0.0.1:8910
+   PODIUM_SQLITE_PATH="$WORK/upgrade.db" PODIUM_FILESYSTEM_ROOT="$WORK/upgrade-objects" \
+     "$WORK/old/podium" serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8910 > "$WORK/old.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null "$URL/healthz"
+   server_alive "$SRV" "$WORK/old.log"
+   rm "$WORK/reg/ops/mixed/SKILL.md"
+   printf -- '---\ntype: command\nversion: 2.0.0\ndescription: Rotate the staging credentials and confirm each service reconnects.\n---\n\nMixed command body.\n' \
+     > "$WORK/reg/ops/mixed/ARTIFACT.md"
+   "$WORK/old/podium" layer reingest --registry "$URL" reg; echo "exit=$?"
+   for ID in ops/cmd ops/ref ops/mixed; do
+     curl -s "$URL/v1/load_artifact?id=$ID" \
+       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["id"], d["type"], d["version"])'
+   done
+   ```
+
+   **Expect.** The old binary prints `podium 0.6.0`. The reingest prints an
+   `artifact:` line for each of `ops/cmd@1.0.0`, `ops/mixed@2.0.0`, and
+   `ops/ref@1.0.0`, no `rejected:` line, and `exit=0`. The loads print
+   `ops/cmd command 1.0.0`, `ops/ref context 1.0.0`, and
+   `ops/mixed command 2.0.0`: the old registry serves all three IDs, and
+   `latest` of `ops/mixed` is 2.0.0.
+
+2. Load `ops/mixed` with no version from the old registry through the current
+   `podium-mcp` in `offline-first` mode, with `PODIUM_HARNESS=none` and its
+   cache directory at `$WORK/mcp-cache`. Stop the old registry. The cache is
+   warmed by the current binary, as S102 warms its cache, so the cache layout
+   matches the later loads. `mcp_load` starts and stops its own `podium-mcp`
+   on each call, so no process holds the cache during the cache commands of
+   step 5.
+
+   ```bash
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"ops/mixed"}}}'
+   mcp_load() {
+     printf '%s\n%s\n' "$INIT" "$LOAD" | PODIUM_REGISTRY="$URL" PODIUM_CACHE_DIR="$WORK/mcp-cache" \
+       PODIUM_CACHE_MODE=offline-first PODIUM_HARNESS=none PODIUM_MATERIALIZE_ROOT="$1" \
+       podium-mcp > "$1.out" 2> "$1.err"
+     grep -e '^type:' -e '^version:' "$1/ops/mixed/ARTIFACT.md"
+   }
+   mcp_load "$WORK/out-old"
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** `type: command` and `version: 2.0.0`: the load returns
+   version 2.0.0, and the bridge records a revision mark for `ops/mixed` at
+   that row's ingest time. A missing `ARTIFACT.md` means the load failed; read
+   `$WORK/out-old.err`.
+
+3. Run the current `podium lint` on the layer directory, once in text form
+   and once with `--json`, and a current filesystem-source `podium sync
+   --harness none` from it into `$WORK/out`.
+
+   ```bash
+   podium lint --registry "$WORK/reg" 2> "$WORK/lint.txt"; echo "lint exit=$?"
+   cat "$WORK/lint.txt"
+   podium lint --registry "$WORK/reg" --json 2> /dev/null \
+     | jq -c '.rejected[] | [.artifact_id, .code, .details]'
+   podium sync --registry "$WORK/reg" --target "$WORK/out" --harness none 2> "$WORK/sync.txt"; echo "sync exit=$?"
+   cat "$WORK/sync.txt"
+   grep -c -e ops/cmd -e ops/ref -e ops/mixed "$WORK/out/.podium/sync.lock"
+   ```
+
+   **Expect.** `lint exit=1` and `sync exit=1`. `$WORK/lint.txt` and
+   `$WORK/sync.txt` each hold one standard-error line
+   `rejected: <id> (ingest.invalid_artifact): <reason>` for `ops/cmd`,
+   `ops/mixed`, and `ops/ref`, in that order, where the reason is the
+   `layer.TypeRemovedReason` text for the artifact's type: it begins
+   `type: command is not supported;` or `type: context is not supported;`
+   and ends `the 0.7.0 upgrade notes describe how to convert an existing
+   package`. The human-readable CLI line carries no constraint. The `--json`
+   run prints the three IDs in the same order, each with
+   `"ingest.invalid_artifact"` and `{"constraint":"type_removed"}`. The sync
+   lock lists none of the three, so the `grep` prints `0`.
+
+4. Serve the same store and layer with the current `podium serve` on the same
+   address, 127.0.0.1:8910, with the same `PODIUM_SQLITE_PATH` and
+   `PODIUM_FILESYSTEM_ROOT`. Read the raw `/v1/load_artifact` response for
+   each ID, and run `podium search` with `--type command`. Then read the raw
+   `POST /v1/layers/reingest` response body for the layer, as S102 step 6
+   reads it.
+
+   ```bash
+   PODIUM_SQLITE_PATH="$WORK/upgrade.db" PODIUM_FILESYSTEM_ROOT="$WORK/upgrade-objects" \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8910 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null "$URL/healthz"
+   server_alive "$SRV" "$WORK/srv.log"
+   for ID in ops/cmd ops/ref ops/mixed; do
+     curl -s -o "$WORK/load.json" -w '%{http_code} ' "$URL/v1/load_artifact?id=$ID"
+     python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("code") or (d["id"], d["version"]))' "$WORK/load.json"
+   done
+   podium search --registry "$URL" --type command ""; echo "search exit=$?"
+   curl -s -X POST "$URL/v1/layers/reingest?id=reg" > "$WORK/body.json"
+   python3 -c 'import json,sys; [print(r["artifact_id"], r["code"], json.dumps(r["details"])) for r in sorted(json.load(open(sys.argv[1]))["rejected"], key=lambda r: r["artifact_id"])]' "$WORK/body.json"
+   ```
+
+   **Expect.** `ops/cmd` and `ops/ref` answer `404 registry.not_found`.
+   `ops/mixed` answers `200 ('ops/mixed', '1.0.0')`: it resolves to the
+   stored 1.0.0 skill row. The search prints `Showing 0 of 0 results` and
+   `search exit=0`. The reingest body rejects `ops/cmd`, `ops/mixed`, and
+   `ops/ref`, each with `ingest.invalid_artifact` and
+   `{"constraint": "type_removed"}` and no other `details` member. A `200`
+   for `ops/cmd` or `ops/ref`, or `2.0.0` for `ops/mixed`, means a retired
+   row is still served.
+
+5. Load `ops/mixed` through the warm `offline-first` cache against the
+   current registry. Prune the cache and load again. Reset the revision mark
+   and load a third time.
+
+   ```bash
+   mcp_load "$WORK/out-warm"
+   podium cache prune --dir "$WORK/mcp-cache" --days 0
+   mcp_load "$WORK/out-pruned"
+   grep -o 'materialize.stale_resolution' "$WORK/out-pruned.out" | sort -u
+   podium cache reset-revisions --dir "$WORK/mcp-cache" ops/mixed; echo "exit=$?"
+   mcp_load "$WORK/out-reset"
+   ```
+
+   **Expect.** The warm load prints `type: command` and `version: 2.0.0`,
+   the cached command body, because `offline-first` serves a cached record
+   without calling the registry, as the upgrade notes state. After the prune
+   the bridge calls the registry, which serves `ops/mixed` 1.0.0 at an ingest
+   time below the mark step 2 recorded. The bridge refuses the load and
+   writes no file, so the pruned load's `grep` reports a missing
+   `ARTIFACT.md`, and the next line prints `materialize.stale_resolution`.
+   The reset prints `cache: reset 1 revision mark(s)` and `exit=0`, and the
+   third load prints `type: skill` and `version: 1.0.0`. `version: 1.0.0`
+   before the reset means the bridge did not compare the answer with its
+   revision mark.
+
+6. Convert `ops/cmd`, `ops/ref`, and `ops/mixed` by hand as the upgrade-notes
+   procedure describes. Each `SKILL.md` takes the directory name as `name`,
+   the `ARTIFACT.md` description, and the `ARTIFACT.md` body unchanged, sets
+   `metadata.version` to the next minor version, and sets
+   `metadata.invocation: "user"` for a former command. Each `ARTIFACT.md`
+   then holds no field other than `type`, and no directory between a package
+   and the layer root is a package, so `convert` deletes it. Bundled
+   resources stay at their paths. Run `podium lint` on the layer directory,
+   and reingest the layer.
+
+   ```bash
+   convert() {
+     printf -- '---\nname: %s\ndescription: %s\nmetadata:\n  version: "%s"\n%b---\n\n%s\n' \
+       "${1##*/}" "$2" "$3" "$4" "$5" > "$WORK/reg/$1/SKILL.md"
+     rm "$WORK/reg/$1/ARTIFACT.md"
+   }
+   convert ops/cmd "Open a pull request from the current branch." 1.1.0 '  invocation: "user"\n' \
+     "Run scripts/run.sh, then open the pull request."
+   convert ops/ref "Reference material for the Go service conventions." 1.1.0 '' \
+     "Go services wrap every error with its operation."
+   convert ops/mixed "Rotate the staging credentials and confirm each service reconnects." 2.1.0 '  invocation: "user"\n' \
+     "Mixed command body."
+   find "$WORK/reg" -type f | sed "s|$WORK/reg/||" | sort
+   for ID in ops/cmd ops/ref ops/mixed; do
+     echo "$ID: $(grep -o -e 'version: "[^"]*"' -e 'invocation: "[^"]*"' "$WORK/reg/$ID/SKILL.md" | paste -sd ' ' -)"
+   done
+   podium lint --registry "$WORK/reg"; echo "lint exit=$?"
+   podium layer reingest --registry "$URL" reg; echo "exit=$?"
+   for ID in ops/cmd ops/ref ops/mixed; do
+     curl -s "$URL/v1/load_artifact?id=$ID" \
+       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["id"], d["type"], d["version"])'
+   done
+   ```
+
+   **Expect.** The `find` lists `ops/cmd/SKILL.md`, `ops/cmd/scripts/run.sh`,
+   `ops/mixed/SKILL.md`, and `ops/ref/SKILL.md` and no `ARTIFACT.md`, so
+   `ops/cmd/scripts/run.sh` stays at its path. The `metadata` lines read
+   `version: "1.1.0" invocation: "user"` for `ops/cmd`, `version: "1.1.0"`
+   for `ops/ref`, and `version: "2.1.0" invocation: "user"` for `ops/mixed`.
+   Lint prints `lint: no issues.` and `lint exit=0`. The reingest prints an
+   `artifact:` line for each of `ops/cmd@1.1.0`, `ops/mixed@2.1.0`, and
+   `ops/ref@1.1.0` and `exit=0`, and the loads print `ops/cmd skill 1.1.0`,
+   `ops/ref skill 1.1.0`, and `ops/mixed skill 2.1.0`. An
+   `ingest.immutable_violation` means a converted skill kept the version of
+   its retired row.
+
+7. Sync from the registry with `--harness` set in turn to `claude-code`,
+   `codex`, `gemini`, and `opencode`, each into its own directory, and read
+   the files for `ops/cmd` and `ops/ref`. Stop the server.
+
+   ```bash
+   for H in claude-code codex gemini opencode; do
+     podium sync --registry "$URL" --harness "$H" --target "$WORK/h-$H" > /dev/null; echo "$H exit=$?"
+     (cd "$WORK/h-$H" && find . -type f ! -name sync.lock | sort)
+   done
+   sed -n 2p "$WORK/h-claude-code/.claude/skills/cmd/SKILL.md"
+   cat "$WORK/h-codex/.agents/skills/cmd/agents/openai.yaml"
+   grep -c disable-model-invocation "$WORK/h-claude-code/.claude/skills/ref/SKILL.md"
+   ls "$WORK/h-codex/.agents/skills/ref"
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** Each sync prints `exit=0`. claude-code writes
+   `.claude/skills/cmd/SKILL.md`, whose first frontmatter line, printed by the
+   `sed`, is `disable-model-invocation: true` with no quotes, and
+   `.claude/skills/cmd/scripts/run.sh` beside it. Codex writes
+   `.agents/skills/cmd/agents/openai.yaml`, which the `cat` prints as
+   `policy:` and `allow_implicit_invocation: false`, and
+   `.agents/skills/cmd/scripts/run.sh`. Gemini writes
+   `.gemini/commands/cmd.toml`, and opencode writes
+   `.opencode/commands/cmd.md`, each with no `SKILL.md` for `cmd` and with
+   `scripts/run.sh` under `.podium/resources/ops/cmd/`. `ops/mixed` follows
+   `ops/cmd` on every harness. `ops/ref` appears as a skill without the key on
+   every harness: the `grep` prints `0`, the `ls` prints `SKILL.md` alone,
+   and gemini and opencode write `skills/ref/SKILL.md`. A quoted `"true"`, a
+   `SKILL.md` for `cmd` on gemini or opencode, or a missing
+   `agents/openai.yaml` is the defect.
+
+**Cleanup.** `rm -rf "$WORK"`. Step 7 stops the server.
 
 ---

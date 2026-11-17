@@ -38,10 +38,10 @@ targets:
     identity: marketplace@acme.com
     plugins:
       - name: finance-pack
-        description: Accounts-payable skills and commands.
+        description: Accounts-payable skills and agents.
         include: ["finance/**"]
         exclude: ["finance/experimental/**"]
-        type: [skill, command]
+        type: [skill, agent]
     workflow:
       prepare:
         - run: ["git", "clone", "$PODIUM_GIT_REMOTE", "$PODIUM_WORKDIR"]
@@ -114,7 +114,7 @@ func TestReadConfigFile_MixedKindTargets(t *testing.T) {
 		t.Fatalf("marketplace plugins len = %d, want 1", got)
 	}
 	finance := mp.Plugins[0]
-	if finance.Name != "finance-pack" || finance.Description != "Accounts-payable skills and commands." {
+	if finance.Name != "finance-pack" || finance.Description != "Accounts-payable skills and agents." {
 		t.Errorf("plugin = %+v, want finance-pack with its description", finance)
 	}
 	if !reflect.DeepEqual(finance.Include, []string{"finance/**"}) {
@@ -123,8 +123,8 @@ func TestReadConfigFile_MixedKindTargets(t *testing.T) {
 	if !reflect.DeepEqual(finance.Exclude, []string{"finance/experimental/**"}) {
 		t.Errorf("plugin exclude = %v, want [finance/experimental/**]", finance.Exclude)
 	}
-	if !reflect.DeepEqual(finance.Type, []string{"skill", "command"}) {
-		t.Errorf("plugin type = %v, want [skill command]", finance.Type)
+	if !reflect.DeepEqual(finance.Type, []string{"skill", "agent"}) {
+		t.Errorf("plugin type = %v, want [skill agent]", finance.Type)
 	}
 
 	if mp.Workflow.IsZero() {
@@ -149,7 +149,7 @@ func TestPluginFilter_ScopeFilterRoundTrips(t *testing.T) {
 		Name:    "finance-pack",
 		Include: []string{"finance/**"},
 		Exclude: []string{"finance/experimental/**"},
-		Type:    []string{"skill", "command"},
+		Type:    []string{"skill", "agent"},
 	}
 	sf := p.ScopeFilter()
 	if !reflect.DeepEqual(sf.Include, p.Include) {

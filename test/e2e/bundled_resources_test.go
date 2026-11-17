@@ -39,10 +39,10 @@ func brSkillMD(name, desc, body string) string {
 // brVarianceDesc is the description used by the run-variance-analysis fixtures.
 const brVarianceDesc = "Flag unusual variance vs. forecast after month-end close."
 
-// brExternalArtifact is a context ARTIFACT.md declaring an external resource
+// brExternalArtifact is an agent ARTIFACT.md declaring an external resource
 // whose bytes are not bundled locally; size is parameterized.
 func brExternalArtifact(size string) string {
-	return "---\ntype: context\nversion: 1.0.0\ndescription: Model context.\n" +
+	return "---\ntype: agent\nversion: 1.0.0\ndescription: Model context.\n" +
 		"external_resources:\n" +
 		"  - path: ./model.onnx\n" +
 		"    url: s3://company-models/variance/v1/model.onnx\n" +
@@ -121,14 +121,14 @@ func TestBundled_ClaudeCodeSkillLayout(t *testing.T) {
 	}
 }
 
-// a context artifact ships a bundled file with no
+// an agent artifact ships a bundled file with no
 // resources: key; lint emits no missing-resources error and sync places the
 // file alongside ARTIFACT.md.
 func TestBundled_NoResourcesKeyRequired(t *testing.T) {
 	t.Parallel()
 	id := "finance/glossary"
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md":  contextArtifact("Glossary of finance terms."),
+		id + "/ARTIFACT.md":  agentArtifact("Glossary of finance terms."),
 		id + "/glossary.csv": "term,definition\nebitda,earnings\n",
 	})
 	lint := runPodium(t, "", nil, "lint", "--registry", reg)
@@ -337,13 +337,13 @@ func TestBundled_ProseURLRejectsNonOK2xx(t *testing.T) {
 func TestBundled_DocumentSourceImportedWrapsProse(t *testing.T) {
 	t.Parallel()
 	id := "finance/policy/payments-imported"
-	art := "---\ntype: command\nname: payments-imported\nversion: 1.0.0\ndescription: Imported payments policy.\nsource: imported\n---\n\nAggregated external policy text.\n"
+	art := "---\ntype: agent\nname: payments-imported\nversion: 1.0.0\ndescription: Imported payments policy.\nsource: imported\n---\n\nAggregated external policy text.\n"
 	reg := writeRegistry(t, map[string]string{id + "/ARTIFACT.md": art})
 	tgt := t.TempDir()
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	got := readFile(t, filepath.Join(tgt, ".claude/commands/payments-imported.md"))
+	got := readFile(t, filepath.Join(tgt, ".claude/agents/payments-imported.md"))
 	if !strings.Contains(got, "<untrusted-data source=\"imported\">") {
 		t.Errorf("imported document source should wrap the prose:\n%s", got)
 	}
@@ -432,7 +432,7 @@ func TestBundled_PerFileSoftCapWarns(t *testing.T) {
 	t.Parallel()
 	id := "finance/glossary"
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": contextArtifact("Big-data context."),
+		id + "/ARTIFACT.md": agentArtifact("Big-data context."),
 		id + "/data.bin":    strings.Repeat("a", 1024*1024+1),
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
@@ -454,7 +454,7 @@ func TestBundled_PerPackageCapErrors(t *testing.T) {
 	id := "finance/glossary"
 	chunk := strings.Repeat("b", 6*1024*1024)
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": contextArtifact("Oversized context."),
+		id + "/ARTIFACT.md": agentArtifact("Oversized context."),
 		id + "/a.bin":       chunk,
 		id + "/b.bin":       chunk,
 	})
@@ -692,7 +692,7 @@ func TestBundled_SandboxUnrestrictedMaterializes(t *testing.T) {
 	t.Parallel()
 	id := "finance/unrestricted-ctx"
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Unrestricted context.\nsandbox_profile: unrestricted\n---\n\nbody\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Unrestricted context.\nsandbox_profile: unrestricted\n---\n\nbody\n",
 	}))
 	mat := t.TempDir()
 	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT="+mat),
@@ -713,7 +713,7 @@ func TestBundled_SandboxRefusedWithoutCapability(t *testing.T) {
 	t.Parallel()
 	id := "finance/restricted-ctx"
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Restricted context.\nsandbox_profile: read-only-fs\n---\n\nbody\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Restricted context.\nsandbox_profile: read-only-fs\n---\n\nbody\n",
 	}))
 	mat := t.TempDir()
 	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT="+mat),
@@ -731,7 +731,7 @@ func TestBundled_SandboxIgnoreOverride(t *testing.T) {
 	t.Parallel()
 	id := "finance/restricted-ctx"
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Restricted context.\nsandbox_profile: read-only-fs\n---\n\nbody\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Restricted context.\nsandbox_profile: read-only-fs\n---\n\nbody\n",
 	}))
 	mat := t.TempDir()
 	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT="+mat, "PODIUM_IGNORE_SANDBOX=true"),
@@ -751,7 +751,7 @@ func TestBundled_SandboxAbsentDefaultsUnrestricted(t *testing.T) {
 	t.Parallel()
 	id := "finance/plain-ctx"
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": contextArtifact("Plain context with no sandbox profile."),
+		id + "/ARTIFACT.md": agentArtifact("Plain context with no sandbox profile."),
 	}))
 	mat := t.TempDir()
 	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT="+mat),
@@ -770,7 +770,7 @@ func TestBundled_SeccompBaselineDelivered(t *testing.T) {
 	t.Parallel()
 	id := "finance/strict-ctx"
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Strict context.\nsandbox_profile: seccomp-strict\n---\n\nbody\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Strict context.\nsandbox_profile: seccomp-strict\n---\n\nbody\n",
 	}))
 	mat := t.TempDir()
 	// Host declares it honors seccomp-strict so the sandbox gate passes.
@@ -855,49 +855,25 @@ func TestBundled_ProvenanceAuthoredOnlyPassthrough(t *testing.T) {
 	}
 }
 
-// the claude-code adapter rewrites imported
-// provenance in a claude-native non-skill body (command), not just skills
-// (§4.4.2). The materialized .claude/commands/<n>.md carries the
-// <untrusted-data> region. A `type: context` body is excluded here because it
-// materializes to the harness-neutral .podium/context/ bucket, which keeps the
-// canonical markers rather than the Claude rewrite (see the context case below).
+// TestBundled_ProvenanceClaudeCodeNonSkill pins that the claude-code adapter
+// rewrites imported provenance in a claude-native non-skill (agent) body as
+// well as in a skill body (§4.4.2). The materialized .claude/agents/<n>.md
+// carries the <untrusted-data> region in place of the begin-imported marker.
 func TestBundled_ProvenanceClaudeCodeNonSkill(t *testing.T) {
 	t.Parallel()
-	id := "finance/policy/payments-command"
-	art := "---\ntype: command\nname: payments-command\nversion: 1.0.0\ndescription: Aggregated payments policy.\n---\n\nAuthored intro.\n\n" + brProvenanceBody
+	id := "finance/policy/payments-agent"
+	art := "---\ntype: agent\nname: payments-agent\nversion: 1.0.0\ndescription: Aggregated payments policy.\n---\n\nAuthored intro.\n\n" + brProvenanceBody
 	reg := writeRegistry(t, map[string]string{id + "/ARTIFACT.md": art})
 	tgt := t.TempDir()
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	got := readFile(t, filepath.Join(tgt, ".claude/commands/payments-command.md"))
+	got := readFile(t, filepath.Join(tgt, ".claude/agents/payments-agent.md"))
 	if !strings.Contains(got, "<untrusted-data source=\"https://wiki.example.com/policy/payments\">") {
 		t.Errorf("non-skill body missing untrusted-data region:\n%s", got)
 	}
 	if strings.Contains(got, "begin imported") {
 		t.Errorf("begin-imported marker should be rewritten in a non-skill body:\n%s", got)
-	}
-}
-
-// a `type: context` body materializes to the
-// harness-neutral .podium/context/<id>/ bucket and keeps the canonical
-// provenance markers. The bucket is identical across every adapter, so it does
-// not receive the Claude-specific <untrusted-data> rewrite (§6.7).
-func TestBundled_ProvenanceContextNeutralBucket(t *testing.T) {
-	t.Parallel()
-	id := "finance/policy/payments-context"
-	art := "---\ntype: context\nname: payments-context\nversion: 1.0.0\ndescription: Aggregated payments policy.\n---\n\nAuthored intro.\n\n" + brProvenanceBody
-	reg := writeRegistry(t, map[string]string{id + "/ARTIFACT.md": art})
-	tgt := t.TempDir()
-	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
-		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
-	}
-	got := readFile(t, filepath.Join(tgt, ".podium/context", id, "ARTIFACT.md"))
-	if !strings.Contains(got, "begin imported") {
-		t.Errorf("canonical provenance markers should be preserved in the neutral bucket:\n%s", got)
-	}
-	if strings.Contains(got, "<untrusted-data") {
-		t.Errorf("the neutral context bucket should not receive the Claude rewrite:\n%s", got)
 	}
 }
 
@@ -1260,7 +1236,7 @@ func TestBundled_SbomBundledResource(t *testing.T) {
 	t.Parallel()
 	id := "finance/bom-ctx"
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Context with SBOM.\nsbom:\n  format: cyclonedx\n  ref: bom.json\n---\n\nbody\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Context with SBOM.\nsbom:\n  format: cyclonedx\n  ref: bom.json\n---\n\nbody\n",
 		id + "/bom.json":    "{\"bomFormat\":\"CycloneDX\"}\n",
 	})
 	if lint := runPodium(t, "", nil, "lint", "--registry", reg); lint.Exit != 0 {
@@ -1279,7 +1255,7 @@ func TestBundled_SbomRefNoFile(t *testing.T) {
 	t.Parallel()
 	id := "finance/bom-ctx"
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Context with SBOM.\nsbom:\n  format: cyclonedx\n  ref: bom.json\n---\n\nbody\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Context with SBOM.\nsbom:\n  format: cyclonedx\n  ref: bom.json\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 {
@@ -1320,7 +1296,7 @@ func TestBundled_PublicModeRejectsSensitive(t *testing.T) {
 		hi + "/ARTIFACT.md":     "---\ntype: skill\nversion: 1.0.0\nsensitivity: high\n---\n\n<!-- Skill body lives in SKILL.md. -->\n",
 		hi + "/SKILL.md":        brSkillMD("run-variance-analysis", brVarianceDesc, "Run the analysis.\n"),
 		hi + "/scripts/run.py":  "print('run')\n",
-		"ctx/intro/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: low intro\nsensitivity: low\n---\n\nIntro.\n",
+		"ctx/intro/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: low intro\nsensitivity: low\n---\n\nIntro.\n",
 	})
 	srv := startServerArgs(t,
 		[]string{"HOME=" + t.TempDir(), "PODIUM_PUBLIC_MODE=true"},
@@ -1454,7 +1430,7 @@ func TestBundled_ImportRefusals(t *testing.T) {
 		"nested ARTIFACT.md": {
 			files: map[string]string{
 				"bad/SKILL.md":        "---\nname: bad\n---\nbody\n",
-				"bad/sub/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n---\n",
+				"bad/sub/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\n---\n",
 			},
 			want: "sub/ARTIFACT.md",
 		},
@@ -1545,7 +1521,7 @@ func TestBundled_ImportInvalidVersionExits2(t *testing.T) {
 func TestBundled_ObjectsUnknownHash(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/real/ARTIFACT.md": contextArtifact("Real context."),
+		"finance/real/ARTIFACT.md": agentArtifact("Real context."),
 	}))
 	if st := getStatus(t, srv.BaseURL+"/objects/"+strings.Repeat("0", 64)); st != 404 {
 		t.Errorf("unknown hash = HTTP %d, want 404", st)
@@ -1557,7 +1533,7 @@ func TestBundled_ObjectsUnknownHash(t *testing.T) {
 func TestBundled_ObjectsPathTraversal(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/real/ARTIFACT.md": contextArtifact("Real context."),
+		"finance/real/ARTIFACT.md": agentArtifact("Real context."),
 	}))
 	if st := getStatus(t, srv.BaseURL+"/objects/..%2Fescape"); st != 400 {
 		t.Errorf("traversal key = HTTP %d, want 400", st)
@@ -1569,7 +1545,7 @@ func TestBundled_ObjectsPathTraversal(t *testing.T) {
 func TestBundled_ObjectsUnknownReturns404(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/real/ARTIFACT.md": contextArtifact("Real context."),
+		"finance/real/ARTIFACT.md": agentArtifact("Real context."),
 	}))
 	if st := getStatus(t, srv.BaseURL+"/objects/anything"); st != 404 {
 		t.Errorf("unknown object = HTTP %d, want 404", st)
@@ -1582,9 +1558,9 @@ func TestBundled_ContentDedup(t *testing.T) {
 	t.Parallel()
 	shared := strings.Repeat("D", 256*1024+777) // large → routed to the object store
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/a/ARTIFACT.md":  contextArtifact("A"),
+		"finance/a/ARTIFACT.md":  agentArtifact("A"),
 		"finance/a/data/big.bin": shared,
-		"finance/b/ARTIFACT.md":  contextArtifact("B"),
+		"finance/b/ARTIFACT.md":  agentArtifact("B"),
 		"finance/b/data/big.bin": shared,
 	}))
 	// Both artifacts reference the same content-addressed key.
@@ -1623,7 +1599,7 @@ func TestBundled_ContentDedup(t *testing.T) {
 func TestBundled_SyncUnknownHarness(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"finance/glossary/ARTIFACT.md": contextArtifact("Glossary context."),
+		"finance/glossary/ARTIFACT.md": agentArtifact("Glossary context."),
 	})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "not-a-real-harness")

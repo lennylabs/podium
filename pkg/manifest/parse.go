@@ -362,12 +362,12 @@ func ValidateVersion(v string) error {
 // / IsBuiltinExtensionType predicates and for the default TypeProvider
 // registry seeded in pkg/typeprovider.
 var (
-	firstClassTypes       = []ArtifactType{TypeSkill, TypeAgent, TypeContext, TypeCommand, TypeRule, TypeHook}
+	firstClassTypes       = []ArtifactType{TypeSkill, TypeAgent, TypeRule, TypeHook}
 	builtinExtensionTypes = []ArtifactType{TypeMCPServer}
 )
 
 // FirstClassTypes returns the first-class artifact types listed in §4.1
-// (skill, agent, context, command, rule, hook). These types carry full
+// (skill, agent, rule, hook). These types carry full
 // lint coverage and conformance-suite participation. The returned slice
 // is a copy the caller may modify.
 func FirstClassTypes() []ArtifactType {
@@ -384,7 +384,7 @@ func BuiltinExtensionTypes() []ArtifactType {
 }
 
 // IsFirstClassType reports whether t is one of the first-class types
-// listed in §4.1 (skill, agent, context, command, rule, hook). Per §4.1
+// listed in §4.1 (skill, agent, rule, hook). Per §4.1
 // mcp-server is a built-in extension type, not first-class; use
 // IsBuiltinExtensionType for it.
 func IsFirstClassType(t ArtifactType) bool {
@@ -405,6 +405,43 @@ func IsBuiltinExtensionType(t ArtifactType) bool {
 		}
 	}
 	return false
+}
+
+// removedTypes maps each type that §4.1 removed to the replacement phrase a
+// refusal names. The removed types have no ArtifactType constant, so the keys
+// are string literals.
+//
+// Spec: §4.1
+var removedTypes = map[ArtifactType]string{
+	"command": `a command is a skill whose metadata.invocation is "user"`,
+	"context": "reference material is a skill's references/ resources or a skill that carries reference material",
+}
+
+// IsRemovedType reports whether t is a type that §4.1 removed. An ARTIFACT.md
+// of a removed type is refused at ingest, and a stored row of one is retired.
+//
+// Spec: §4.1
+func IsRemovedType(t ArtifactType) bool {
+	_, ok := removedTypes[t]
+	return ok
+}
+
+// RemovedTypeReplacement returns the phrase that names what replaces the
+// removed type t, or the empty string when t is not a removed type.
+//
+// Spec: §4.1
+func RemovedTypeReplacement(t ArtifactType) string {
+	return removedTypes[t]
+}
+
+// RetiredRow reports whether a stored row stops serving: its type is a removed
+// type, or its frontmatter declares extends:. The type check runs first
+// because it is a map lookup, and DeclaresExtends decodes the frontmatter on
+// every listed row.
+//
+// Spec: §4.1, §4.6
+func RetiredRow(frontmatter []byte, typ string) bool {
+	return IsRemovedType(ArtifactType(typ)) || DeclaresExtends(frontmatter)
 }
 
 // TargetsHarness reports whether an artifact whose target_harnesses field

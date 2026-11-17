@@ -65,7 +65,7 @@ func TestE2E_StoreEditedRowIsRefused(t *testing.T) {
 	sqlitePath := filepath.Join(home, ".podium", "standalone", "podium.db")
 	env := []string{"HOME=" + home, "PODIUM_REGISTRY_STORE=sqlite", "PODIUM_SQLITE_PATH=" + sqlitePath}
 	reg := writeRegistry(t, map[string]string{
-		editedRowID + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\nsensitivity: high\ndescription: A runbook the store edit targets in this test.\n---\n\nOriginal body.\n",
+		editedRowID + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\nsensitivity: high\ndescription: A runbook the store edit targets in this test.\n---\n\nOriginal body.\n",
 	})
 
 	first := startServerArgs(t, env, "serve", "--standalone", "--layer-path", reg)
@@ -74,7 +74,7 @@ func TestE2E_StoreEditedRowIsRefused(t *testing.T) {
 	}
 	stopProc(first.cmd)
 
-	editStoredRow(t, sqlitePath, editedRowID, []byte("---\ntype: context\nversion: 1.0.0\nsensitivity: low\ndescription: A runbook the store edit targets in this test.\n---\n\nInjected body.\n"))
+	editStoredRow(t, sqlitePath, editedRowID, []byte("---\ntype: agent\nversion: 1.0.0\nsensitivity: low\ndescription: A runbook the store edit targets in this test.\n---\n\nInjected body.\n"))
 
 	second := startServerArgs(t, env, "serve", "--standalone", "--layer-path", reg)
 	st, body := getRaw(t, second.BaseURL+"/v1/load_artifact?id="+editedRowID)

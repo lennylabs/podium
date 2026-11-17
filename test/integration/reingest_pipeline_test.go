@@ -42,7 +42,7 @@ func gitLayerRepo(t *testing.T, desc string) string {
 	if err := os.MkdirAll(filepath.Join(dir, "alpha"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	body := "---\ntype: context\nversion: 1.0.0\ndescription: " + desc + "\nsensitivity: low\n---\n\nbody\n"
+	body := "---\ntype: agent\nversion: 1.0.0\ndescription: " + desc + "\nsensitivity: low\n---\n\nbody\n"
 	if err := os.WriteFile(filepath.Join(dir, "alpha", "ARTIFACT.md"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write artifact: %v", err)
 	}
@@ -132,7 +132,7 @@ func writeArtifact(t *testing.T, dir, desc string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	body := "---\ntype: context\nversion: 1.0.0\ndescription: " + desc + "\nsensitivity: low\n---\n\nbody\n"
+	body := "---\ntype: agent\nversion: 1.0.0\ndescription: " + desc + "\nsensitivity: low\n---\n\nbody\n"
 	if err := os.WriteFile(filepath.Join(dir, "ARTIFACT.md"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write artifact: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestReingestPipeline_MalformedFrontmatterIsContentFault(t *testing.T) {
 	if err := os.MkdirAll(artDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	malformed := "---\ntype: context\nversion: 1.0.0\ndescription: d\nweird: [unclosed\n---\n\nbody\n"
+	malformed := "---\ntype: agent\nversion: 1.0.0\ndescription: d\nweird: [unclosed\n---\n\nbody\n"
 	if err := os.WriteFile(filepath.Join(artDir, "ARTIFACT.md"), []byte(malformed), 0o644); err != nil {
 		t.Fatalf("write artifact: %v", err)
 	}

@@ -85,7 +85,7 @@ func TestApplyRootsResponse_ResolvesOverlay(t *testing.T) {
 	ws := t.TempDir()
 	testharness.WriteTree(t, ws, testharness.WriteTreeOption{
 		Path:    ".podium/overlay/draft/ARTIFACT.md",
-		Content: "---\ntype: context\nversion: 0.1.0\n---\n\ndraft body\n",
+		Content: "---\ntype: agent\nversion: 0.1.0\n---\n\ndraft body\n",
 	})
 	s := newTestServer(t, &config{})
 	line, _ := json.Marshal(map[string]any{
@@ -159,7 +159,7 @@ func TestServe_RootsListResolvesWorkspaceOverlay(t *testing.T) {
 	ws := t.TempDir()
 	testharness.WriteTree(t, ws, testharness.WriteTreeOption{
 		Path:    ".podium/overlay/draft/ARTIFACT.md",
-		Content: "---\ntype: context\nversion: 0.1.0\n---\n\ndraft body\n",
+		Content: "---\ntype: agent\nversion: 0.1.0\n---\n\ndraft body\n",
 	})
 	s := newTestServer(t, &config{})
 

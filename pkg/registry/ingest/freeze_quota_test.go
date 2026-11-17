@@ -26,7 +26,7 @@ func TestIngest_FreezeWindowBlocks(t *testing.T) {
 	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "t", LayerID: "L",
 		Files: fstest.MapFS{
-			"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("x"))},
+			"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("x"))},
 		},
 		FreezeWindows: []ingest.FreezeWindow{{
 			Name:   "year-end-close",
@@ -52,7 +52,7 @@ func TestIngest_FreezeWindowOutsideRangeAllows(t *testing.T) {
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "t", LayerID: "L",
 		Files: fstest.MapFS{
-			"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("x"))},
+			"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("x"))},
 		},
 		FreezeWindows: []ingest.FreezeWindow{{
 			Name:   "year-end",
@@ -81,7 +81,7 @@ func TestIngest_FreezeBreakGlassBypass(t *testing.T) {
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "t", LayerID: "L",
 		Files: fstest.MapFS{
-			"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("x"))},
+			"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("x"))},
 		},
 		FreezeWindows: []ingest.FreezeWindow{{
 			Name:          "year-end",
@@ -115,7 +115,7 @@ func TestIngest_StorageQuotaExceeded(t *testing.T) {
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "t", LayerID: "L",
 		Files: fstest.MapFS{
-			"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("x"))},
+			"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("x"))},
 		},
 		StorageQuotaBytes:   50,
 		CurrentStorageBytes: 0,
@@ -140,7 +140,7 @@ func TestIngest_StorageQuotaGenerousAllows(t *testing.T) {
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "t", LayerID: "L",
 		Files: fstest.MapFS{
-			"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("x"))},
+			"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("x"))},
 		},
 		StorageQuotaBytes: 1 << 30, // 1 GiB
 	})

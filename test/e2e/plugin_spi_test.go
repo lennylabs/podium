@@ -222,10 +222,6 @@ func TestPluginSPI_FirstClassTypesPassLint(t *testing.T) {
 		"types/my-skill/SKILL.md":    skillBody("my-skill"),
 		// agent
 		"types/my-agent/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: My agent for tests.\n---\n\nbody\n",
-		// context
-		"types/my-context/ARTIFACT.md": contextArtifact("Reference notes for the plugin tests"),
-		// command
-		"types/my-command/ARTIFACT.md": "---\ntype: command\nversion: 1.0.0\ndescription: My command for tests.\n---\n\n$ARGUMENTS\n",
 		// rule
 		"types/my-rule/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: My rule for tests.\nrule_mode: always\n---\n\nAlways follow this rule.\n",
 		// hook (hook_event + hook_action are the required §4.3 hook fields)
@@ -248,7 +244,7 @@ func TestPluginSPI_LintMissingRequired(t *testing.T) {
 	t.Parallel()
 	// version: is absent
 	reg := writeRegistry(t, map[string]string{
-		"finance/no-version/ARTIFACT.md": "---\ntype: context\ndescription: Missing version.\n---\n\nbody\n",
+		"finance/no-version/ARTIFACT.md": "---\ntype: agent\ndescription: Missing version.\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit == 0 {
@@ -535,7 +531,7 @@ func extDeprecatedArtifact(version string, deprecated bool) []byte {
 	if deprecated {
 		dep = "deprecated: true\nreplaced_by: finance/run\n"
 	}
-	return []byte("---\ntype: context\nversion: " + version +
+	return []byte("---\ntype: agent\nversion: " + version +
 		"\ndescription: Variance helper for vendor payments month-end close here today.\nsensitivity: low\n" +
 		dep + "---\n\nBody.\n")
 }
@@ -785,7 +781,7 @@ func TestPluginSPI_SyncIncludeOne(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md":   greetSkillArtifact,
 		"finance/ap/pay-invoice/SKILL.md":      skillBody("pay-invoice"),
-		"finance/ap/send-reminder/ARTIFACT.md": contextArtifact("send reminder"),
+		"finance/ap/send-reminder/ARTIFACT.md": agentArtifact("send reminder"),
 	})
 	srv := startServer(t, reg)
 	tgt := t.TempDir()
@@ -820,8 +816,8 @@ func TestPluginSPI_SyncIncludeMultiple(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md":   greetSkillArtifact,
 		"finance/ap/pay-invoice/SKILL.md":      skillBody("pay-invoice"),
-		"finance/ap/send-reminder/ARTIFACT.md": contextArtifact("send reminder"),
-		"finance/gl/post-entry/ARTIFACT.md":    contextArtifact("post entry"),
+		"finance/ap/send-reminder/ARTIFACT.md": agentArtifact("send reminder"),
+		"finance/gl/post-entry/ARTIFACT.md":    agentArtifact("post entry"),
 	})
 	srv := startServer(t, reg)
 	tgt := t.TempDir()
@@ -901,7 +897,7 @@ func TestPluginSPI_LintStructuralError(t *testing.T) {
 	t.Parallel()
 	// A manifest missing the required version field is a lint error.
 	reg := writeRegistry(t, map[string]string{
-		"finance/bad/ARTIFACT.md": "---\ntype: context\ndescription: missing version.\n---\n\nbody\n",
+		"finance/bad/ARTIFACT.md": "---\ntype: agent\ndescription: missing version.\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit == 0 {
@@ -975,12 +971,12 @@ func TestPluginSPI_VisibilityFilteringDirect(t *testing.T) {
 		Layers: []authLayer{
 			{
 				ID:         "public",
-				Files:      map[string]string{publicID + "/ARTIFACT.md": authContext("public overview")},
+				Files:      map[string]string{publicID + "/ARTIFACT.md": authAgent("public overview")},
 				Visibility: authVisibility{Public: true},
 			},
 			{
 				ID:         "private",
-				Files:      map[string]string{privateID + "/ARTIFACT.md": authContext("private ledger detail")},
+				Files:      map[string]string{privateID + "/ARTIFACT.md": authAgent("private ledger detail")},
 				Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 			},
 		},
@@ -1102,7 +1098,7 @@ func TestPluginSPI_BatchLoadPerItemStatus(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md":                        greetSkillArtifact,
 		"finance/ap/pay-invoice/SKILL.md":                           skillBody("pay-invoice"),
-		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": contextArtifact("variance analysis"),
+		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": agentArtifact("variance analysis"),
 	})
 	srv := startServer(t, reg)
 
@@ -1201,7 +1197,7 @@ func TestPluginSPI_DependentsOfDelegatesTo(t *testing.T) {
 func TestPluginSPI_DependentsOfEmpty(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"finance/standalone/artifact/ARTIFACT.md": contextArtifact("standalone artifact"),
+		"finance/standalone/artifact/ARTIFACT.md": agentArtifact("standalone artifact"),
 	})
 	srv := startServer(t, reg)
 
@@ -1255,9 +1251,9 @@ func TestPluginSPI_NoOutOfProcessTransport(t *testing.T) {
 func TestPluginSPI_AuditLayerIngested(t *testing.T) {
 	t.Parallel()
 	layerDir := t.TempDir()
-	// A context artifact needs no SKILL.md sibling, so the reingest pipeline
+	// An agent artifact needs no SKILL.md sibling, so the reingest pipeline
 	// accepts it without the skill dual-file requirement.
-	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), contextArtifact("auditlayeringested"))
+	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), agentArtifact("auditlayeringested"))
 
 	srv, auditPath := extAuditServer(t, "")
 
@@ -1290,9 +1286,9 @@ func TestPluginSPI_AuditLayerIngested(t *testing.T) {
 func TestPluginSPI_AuditArtifactPublished(t *testing.T) {
 	t.Parallel()
 	layerDir := t.TempDir()
-	// A context artifact needs no SKILL.md sibling, so the reingest pipeline
+	// An agent artifact needs no SKILL.md sibling, so the reingest pipeline
 	// accepts it without the skill dual-file requirement.
-	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), contextArtifact("auditartifactpublished"))
+	mkArtifact(t, filepath.Join(layerDir, "finance/ap/pay-invoice"), agentArtifact("auditartifactpublished"))
 
 	srv, auditPath := extAuditServer(t, "")
 
@@ -1375,7 +1371,7 @@ func TestPluginSPI_IngestImmutableViolation(t *testing.T) {
 func TestPluginSPI_PublicModeRejectsSensitive(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"low-ok/ARTIFACT.md":    contextArtifact("publiclowokkw"),
+		"low-ok/ARTIFACT.md":    agentArtifact("publiclowokkw"),
 		"medium-no/ARTIFACT.md": smallteamMediumArtifact("publicmediumnokw"),
 	})
 	srv := startServerArgs(t,

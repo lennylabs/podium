@@ -252,7 +252,7 @@ func TestPodiumMCP_ToolsCallProxiesSearchArtifacts(t *testing.T) {
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
 			Path:    "finance/run/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: Variance analysis\n---\n\nbody\n",
+			Content: "---\ntype: agent\nversion: 1.0.0\ndescription: Variance analysis\n---\n\nbody\n",
 		},
 	)
 	bin := buildMCP(t)
@@ -322,7 +322,7 @@ func TestPodiumMCP_ResourcesMirror(t *testing.T) {
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
 			Path:    "finance/run/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: Variance analysis\n---\n\nthe body text\n",
+			Content: "---\ntype: agent\nversion: 1.0.0\ndescription: Variance analysis\n---\n\nthe body text\n",
 		},
 	)
 	bin := buildMCP(t)

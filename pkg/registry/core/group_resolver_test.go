@@ -21,7 +21,7 @@ func TestRegistry_WithGroupResolver_ExpandsGroupMembership(t *testing.T) {
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenant})
 	_ = st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "team-x", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Layer: "team",
+		ContentHash: "sha256:a", Type: "agent", Layer: "team",
 	})
 
 	resolver := func(g string) []string {
@@ -64,7 +64,7 @@ func TestRegistry_NoGroupResolver_FallsBackToJWTClaims(t *testing.T) {
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenant})
 	_ = st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "team-x", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Layer: "team",
+		ContentHash: "sha256:a", Type: "agent", Layer: "team",
 	})
 	reg := core.New(st, tenant, []layer.Layer{
 		{ID: "team", Precedence: 1, Visibility: layer.Visibility{Groups: []string{"engineering"}}},

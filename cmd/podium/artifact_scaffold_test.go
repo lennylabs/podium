@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
@@ -250,6 +251,83 @@ func TestScaffold_Skill_WritesFieldsInFixedOrder(t *testing.T) {
 	}
 }
 
+// Spec: §4.3, §4.3.4, §7.3.1 — --invocation user with --type skill writes
+// invocation: "user" under SKILL.md metadata, between sensitivity and
+// when_to_use. The output lints with no diagnostic and resolves to a
+// user-invoked skill.
+func TestScaffold_Skill_InvocationUserWritesMetadata(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "dev-loop", "standup")
+	skill := scaffoldSkillMD(t, target,
+		"--invocation", "user",
+		"--sensitivity", "low",
+		"--when-to-use", "daily standup")
+	want := "metadata:\n" +
+		"  version: \"0.1.0\"\n" +
+		"  sensitivity: \"low\"\n" +
+		"  invocation: \"user\"\n" +
+		"  when_to_use: |\n" +
+		"    daily standup\n" +
+		"---\n"
+	if !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md missing %q:\n%s", want, skill)
+	}
+	art := resolveScaffoldedSkill(t, root)
+	if art.Invocation != manifest.InvocationUser || !art.UserInvoked() {
+		t.Errorf("invocation = %q, UserInvoked = %v; want user, true", art.Invocation, art.UserInvoked())
+	}
+}
+
+// Spec: §4.3.4 — --invocation any writes no invocation key, because an
+// absent field already resolves to the default any.
+func TestScaffold_Skill_InvocationAnyWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "greet")
+	skill := scaffoldSkillMD(t, target, "--invocation", "any")
+	if strings.Contains(skill, "invocation") {
+		t.Errorf("--invocation any must write no invocation key:\n%s", skill)
+	}
+	if art := resolveScaffoldedSkill(t, root); art.UserInvoked() {
+		t.Errorf("skill resolved as user-invoked; want the default any")
+	}
+}
+
+// Spec: §4.3, §4.3.4, §7.3.1 — --invocation is valid only with --type
+// skill and only with the values any and user. Any other combination
+// exits 2 with an error naming the flag and writes no directory.
+func TestScaffold_InvocationRefused(t *testing.T) {
+	cases := []struct {
+		name, typ, value, want string
+	}{
+		{"user on agent", "agent", "user", "--invocation applies only to --type skill"},
+		{"any on rule", "rule", "any", "--invocation applies only to --type skill"},
+		{"invalid value", "skill", "maybe", `--invocation "maybe" must be one of any|user`},
+		{"empty value", "skill", "", `--invocation "" must be one of any|user`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			target := filepath.Join(root, "personal", "standup")
+			exit, _, stderr := runScaffold([]string{
+				"--type", tc.typ,
+				"--description", "Format a standup update.",
+				"--invocation", tc.value,
+				"--yes",
+				target,
+			}, "")
+			if exit != 2 {
+				t.Fatalf("exit=%d, want 2; stderr=%s", exit, stderr)
+			}
+			if !strings.HasPrefix(stderr, "error: ") || !strings.Contains(stderr, tc.want) {
+				t.Errorf("stderr = %q, want an error containing %q", stderr, tc.want)
+			}
+			if _, err := os.Stat(target); !os.IsNotExist(err) {
+				t.Errorf("refusal must create no directory (stat err=%v)", err)
+			}
+		})
+	}
+}
+
 // Spec: §4.3.4, §7.3.1 — the YAML reader ends a line in the when_to_use
 // literal block at U+0085, U+2028, and U+2029 as well as at a line feed or
 // a carriage return. A --when-to-use entry that holds any of them is
@@ -351,48 +429,44 @@ func TestScaffold_Skill_BadSensitivityReportsHint(t *testing.T) {
 	}
 }
 
-func TestScaffold_Context_LintClean(t *testing.T) {
-	root := t.TempDir()
-	target := filepath.Join(root, "personal", "company-glossary")
-	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
-		"--description", "Company glossary of acronyms.",
-		"--tags", "glossary,reference",
-		"--yes",
-		target,
-	}, "")
-	if exit != 0 {
-		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
-	}
-	if _, err := os.Stat(filepath.Join(target, "SKILL.md")); err == nil {
-		t.Errorf("context type should not produce SKILL.md")
-	}
-	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
-	if !bytes.Contains(body, []byte("type: context")) {
-		t.Errorf("ARTIFACT.md missing type: %s", body)
-	}
-	if !bytes.Contains(body, []byte("tags: [glossary, reference]")) {
-		t.Errorf("ARTIFACT.md missing tags: %s", body)
-	}
-	if !bytes.Contains(body, []byte("name: company-glossary")) {
-		t.Errorf("ARTIFACT.md missing name: %s", body)
-	}
-	assertLintClean(t, root)
-}
+// Spec: §4.1, §4.3, §7.3.1 — scaffold refuses a type §4.1 removed with exit
+// 2 and the removed-type reason, writes nothing, and refuses before the
+// existing-directory guard, so --force does not write the package either.
+func TestScaffold_RemovedTypesRefused(t *testing.T) {
+	for _, typ := range []string{"command", "context"} {
+		t.Run(typ, func(t *testing.T) {
+			root := t.TempDir()
+			target := filepath.Join(root, "personal", "x")
+			exit, _, stderr := runScaffold([]string{
+				"--type", typ,
+				"--description", "Removed type.",
+				"--yes",
+				target,
+			}, "")
+			if exit != 2 {
+				t.Fatalf("exit=%d, want 2; stderr=%s", exit, stderr)
+			}
+			if want := "error: " + layer.TypeRemovedReason(typ) + "\n"; stderr != want {
+				t.Errorf("stderr = %q, want %q", stderr, want)
+			}
+			if _, err := os.Stat(target); !os.IsNotExist(err) {
+				t.Errorf("refusal must create no directory (stat err=%v)", err)
+			}
 
-func TestScaffold_Command_LintClean(t *testing.T) {
-	root := t.TempDir()
-	target := filepath.Join(root, "personal", "code-change-pr")
-	exit, _, stderr := runScaffold([]string{
-		"--type", "command",
-		"--description", "Open a PR from the working tree.",
-		"--yes",
-		target,
-	}, "")
-	if exit != 0 {
-		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				t.Fatalf("setup: %v", err)
+			}
+			exit, _, stderr = runScaffold([]string{
+				"--type", typ, "--description", "Removed type.", "--yes", "--force", target,
+			}, "")
+			if exit != 2 || !strings.Contains(stderr, layer.TypeRemovedReason(typ)) {
+				t.Errorf("existing dir with --force: exit=%d stderr=%s, want exit 2 and the reason", exit, stderr)
+			}
+			if _, err := os.Stat(filepath.Join(target, "ARTIFACT.md")); !os.IsNotExist(err) {
+				t.Errorf("refusal must write no ARTIFACT.md (stat err=%v)", err)
+			}
+		})
 	}
-	assertLintClean(t, root)
 }
 
 func TestScaffold_Agent_LintClean(t *testing.T) {
@@ -598,7 +672,7 @@ func TestScaffold_RejectsMissingDescription(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--yes",
 		target,
 	}, "")
@@ -612,7 +686,7 @@ func TestScaffold_RejectsMissingDescription(t *testing.T) {
 
 func TestScaffold_RejectsMissingPath(t *testing.T) {
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--yes",
 	}, "")
@@ -628,7 +702,7 @@ func TestScaffold_RejectsBadName(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "Bad_Name") // underscore + uppercase
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--yes",
 		target,
@@ -662,7 +736,7 @@ func TestScaffold_RejectsBadSensitivity(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--sensitivity", "ultra",
 		"--yes",
@@ -683,7 +757,7 @@ func TestScaffold_RefusesExistingDir(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--yes",
 		target,
@@ -706,7 +780,7 @@ func TestScaffold_ForceOverwrites(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "fresh",
 		"--force",
 		"--yes",
@@ -724,17 +798,17 @@ func TestScaffold_ForceOverwrites(t *testing.T) {
 func TestScaffold_Interactive_TypePrompt(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
-	// Pick option 3 (context).
+	// Pick option 2 (agent).
 	exit, _, stderr := runScaffold([]string{
 		"--description", "x",
 		target,
-	}, "3\n")
+	}, "2\n")
 	if exit != 0 {
 		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
 	}
 	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
-	if !bytes.Contains(body, []byte("type: context")) {
-		t.Errorf("interactive type pick did not yield context: %s", body)
+	if !bytes.Contains(body, []byte("type: agent")) {
+		t.Errorf("interactive type pick did not yield agent: %s", body)
 	}
 }
 
@@ -747,7 +821,7 @@ func TestScaffold_Interactive_DescriptionPrompt(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		target,
 	}, "Reference content for the catalog.\n")
 	if exit != 0 {
@@ -954,7 +1028,7 @@ func TestScaffold_Interactive_DescriptionEmptyErrors(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		target,
 	}, "\n")
 	if exit != 2 {
@@ -1008,7 +1082,7 @@ func TestScaffold_UnknownFlagErrors(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, _ := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--yes",
 		"--no-such-flag",
@@ -1076,7 +1150,7 @@ func TestScaffold_WhenToUsePopulated(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--when-to-use", "first situation,second situation",
 		"--yes",
@@ -1124,7 +1198,7 @@ func TestScaffold_Hook_DefaultActionPlaceholder(t *testing.T) {
 // ---------- Render helpers ----------
 
 func TestPlaceholderBody_AllTypes(t *testing.T) {
-	cases := []string{"context", "command", "agent", "rule", "hook", "mcp-server", "unknown-extension"}
+	cases := []string{"agent", "rule", "hook", "mcp-server", "unknown-extension"}
 	for _, typ := range cases {
 		t.Run(typ, func(t *testing.T) {
 			got := placeholderBody(typ)
@@ -1167,11 +1241,11 @@ func TestSplitCSV(t *testing.T) {
 // --license on a non-skill type populates ARTIFACT.md (license
 // lives in SKILL.md for skills, so this branch only fires for
 // other types).
-func TestScaffold_LicenseOnContext(t *testing.T) {
+func TestScaffold_LicenseOnAgent(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--license", "Apache-2.0",
 		"--yes",
@@ -1192,7 +1266,7 @@ func TestScaffold_Interactive_DescriptionEOF(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		target,
 	}, "")
 	if exit != 2 {
@@ -1210,7 +1284,7 @@ func TestArtifactScaffoldWrapper(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit := artifactScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--yes",
 		target,
@@ -1258,7 +1332,7 @@ func TestScaffold_WriteFileFailsCleanly(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--force",
 		"--yes",

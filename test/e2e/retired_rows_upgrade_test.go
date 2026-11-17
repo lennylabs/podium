@@ -45,12 +45,12 @@ func seedUpgradedStore(t *testing.T, sqlitePath string) {
 		t.Fatalf("the first start stored no %s row", upgradeParentID)
 	}
 	rows := map[string]string{
-		upgradeChildID:   "---\ntype: context\nversion: 1.0.0\nextends: " + upgradeParentID + "\ndescription: A child an earlier release merged.\n---\n\nChild body.\n",
-		upgradeControlID: "---\ntype: context\nversion: 1.0.0\ndescription: A plain row in the legacy layer.\n---\n\nPlain body.\n",
+		upgradeChildID:   "---\ntype: agent\nversion: 1.0.0\nextends: " + upgradeParentID + "\ndescription: A child an earlier release merged.\n---\n\nChild body.\n",
+		upgradeControlID: "---\ntype: agent\nversion: 1.0.0\ndescription: A plain row in the legacy layer.\n---\n\nPlain body.\n",
 	}
 	for id, doc := range rows {
 		rec := store.ManifestRecord{
-			TenantID: parent.TenantID, ArtifactID: id, Version: "1.0.0", Type: "context",
+			TenantID: parent.TenantID, ArtifactID: id, Version: "1.0.0", Type: "agent",
 			Layer: upgradeLegacyLayer, Frontmatter: []byte(doc), IngestedAt: time.Now().UTC(),
 			ContentHash: "sha256:" + version.CanonicalContentHash([]byte(doc), nil, nil),
 		}
@@ -97,7 +97,7 @@ func TestE2E_RetiredRowsAfterUpgrade(t *testing.T) {
 	sqlitePath := filepath.Join(home, "podium.db")
 	env := []string{"HOME=" + home, "PODIUM_REGISTRY_STORE=sqlite", "PODIUM_SQLITE_PATH=" + sqlitePath, "PODIUM_SIGN=none"}
 	reg := writeRegistry(t, map[string]string{
-		upgradeParentID + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: The parent an earlier child extended.\n---\n\nParent body.\n",
+		upgradeParentID + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: The parent an earlier child extended.\n---\n\nParent body.\n",
 	})
 
 	first := startServerArgs(t, env, "serve", "--standalone", "--layer-path", reg)

@@ -621,8 +621,8 @@ func TestLoadConfig_IgnoresPresignTTL(t *testing.T) {
 func TestLoadArtifact_PerCallDestinationMaterializes(t *testing.T) {
 	t.Parallel()
 	respBody := loadArtifactJSON(t, map[string]any{
-		"id": "acme/widget", "type": "context", "version": "1.0.0",
-		"manifest_body": "body", "frontmatter": "---\ntype: context\n---\n",
+		"id": "acme/widget", "type": "agent", "version": "1.0.0",
+		"manifest_body": "body", "frontmatter": "---\ntype: agent\n---\n",
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(respBody))

@@ -26,7 +26,7 @@ func TestRun_RemovesFilesForDroppedArtifact(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(registry, "beta"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	body := "---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"
+	body := "---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"
 	for _, name := range []string{"alpha", "beta"} {
 		if err := os.WriteFile(
 			filepath.Join(registry, name, "ARTIFACT.md"),
@@ -115,36 +115,39 @@ func TestRun_OrphanedConfigMergeReconciledNotDeleted(t *testing.T) {
 }
 
 // Spec: §7.5 — removing an artifact whose materialized output sits in a nested
-// directory tree (the harness-neutral .podium/context/<id>/ bucket, keyed by the
-// full artifact ID) cleans the whole emptied subtree, not just the file's
-// immediate parent. A sibling directory the operator still populates is left
-// intact.
+// directory tree (the claude-code .claude/podium/<id>/ bucket for a non-skill
+// artifact's bundled resources, keyed by the full artifact ID) cleans the whole
+// emptied subtree, not just the file's immediate parent. A sibling directory the
+// operator still populates is left intact.
 func TestRun_RemovesEmptyParentTreeForDroppedArtifact(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	registry := filepath.Join(dir, "registry")
 	target := filepath.Join(dir, "out")
 
-	// One context artifact under a nested ID; every adapter materializes it into
-	// the .podium/context/<id>/ARTIFACT.md tree, so the dropped artifact leaves
-	// several empty ancestors to prune.
+	// One agent artifact under a nested ID with a bundled resource; claude-code
+	// materializes the resource into the .claude/podium/<id>/notes/ref.md tree,
+	// so the dropped artifact leaves several empty ancestors to prune.
 	artifactDir := filepath.Join(registry, "tools", "greet")
-	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(artifactDir, "notes"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(artifactDir, "ARTIFACT.md"),
-		[]byte("---\ntype: context\nversion: 1.0.0\ndescription: x\n---\n\nbody\n"), 0o644); err != nil {
+		[]byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\n---\n\nbody\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile artifact: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "notes", "ref.md"), []byte("ref\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile resource: %v", err)
 	}
 	if _, err := sync.Run(sync.Options{RegistryPath: registry, Target: target, AdapterID: "claude-code"}); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	contextTree := filepath.Join(target, ".podium", "context", "tools", "greet")
-	if _, err := os.Stat(filepath.Join(contextTree, "ARTIFACT.md")); err != nil {
-		t.Fatalf("expected the context artifact materialized: %v", err)
+	podiumTree := filepath.Join(target, ".claude", "podium", "tools", "greet")
+	if _, err := os.Stat(filepath.Join(podiumTree, "notes", "ref.md")); err != nil {
+		t.Fatalf("expected the agent's bundled resource materialized: %v", err)
 	}
-	// An operator file in a sibling context directory that must survive cleanup.
-	operatorDir := filepath.Join(target, ".podium", "context", "operator")
+	// An operator file in a sibling .claude/podium directory that must survive cleanup.
+	operatorDir := filepath.Join(target, ".claude", "podium", "operator")
 	if err := os.MkdirAll(operatorDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll operator: %v", err)
 	}
@@ -153,21 +156,21 @@ func TestRun_RemovesEmptyParentTreeForDroppedArtifact(t *testing.T) {
 	}
 
 	// Drop the artifact; the second sync must clean the entire emptied subtree,
-	// including the .podium/context/tools/greet parent.
+	// including the .claude/podium/tools/greet parent.
 	if err := os.RemoveAll(artifactDir); err != nil {
 		t.Fatalf("RemoveAll artifact: %v", err)
 	}
 	if _, err := sync.Run(sync.Options{RegistryPath: registry, Target: target, AdapterID: "claude-code"}); err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
-	if _, err := os.Stat(contextTree); !os.IsNotExist(err) {
-		t.Errorf("emptied context tree %s not cleaned; stat err=%v", contextTree, err)
+	if _, err := os.Stat(podiumTree); !os.IsNotExist(err) {
+		t.Errorf("emptied resource tree %s not cleaned; stat err=%v", podiumTree, err)
 	}
-	// The intermediate .podium/context/tools directory is also emptied and removed.
-	if _, err := os.Stat(filepath.Join(target, ".podium", "context", "tools")); !os.IsNotExist(err) {
-		t.Errorf("emptied .podium/context/tools not cleaned; stat err=%v", err)
+	// The intermediate .claude/podium/tools directory is also emptied and removed.
+	if _, err := os.Stat(filepath.Join(target, ".claude", "podium", "tools")); !os.IsNotExist(err) {
+		t.Errorf("emptied .claude/podium/tools not cleaned; stat err=%v", err)
 	}
-	// The operator's sibling directory survives (.podium/context/ is not empty).
+	// The operator's sibling directory survives (.claude/podium/ is not empty).
 	if _, err := os.Stat(filepath.Join(operatorDir, "keep.txt")); err != nil {
 		t.Errorf("operator sibling file lost during cleanup: %v", err)
 	}
@@ -194,7 +197,7 @@ func TestRun_WritesLockFileWithMaterializedPaths(t *testing.T) {
 	}
 	if err := os.WriteFile(
 		filepath.Join(registry, "x", "ARTIFACT.md"),
-		[]byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\n"),
+		[]byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\n"),
 		0o644,
 	); err != nil {
 		t.Fatalf("WriteFile: %v", err)

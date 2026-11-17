@@ -12,7 +12,7 @@ func mkRecords(ids ...string) []filesystem.ArtifactRecord {
 		out[i] = filesystem.ArtifactRecord{
 			ID: id,
 			Artifact: &manifest.Artifact{
-				Type:    manifest.TypeContext,
+				Type:    manifest.TypeAgent,
 				Version: "1.0.0",
 			},
 		}

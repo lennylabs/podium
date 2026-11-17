@@ -21,7 +21,7 @@ func TestReindexOverlay_PicksUpAddedAndRemoved(t *testing.T) {
 	overlayDir := filepath.Join(ws, ".podium", "overlay")
 	testharness.WriteTree(t, ws, testharness.WriteTreeOption{
 		Path:    ".podium/overlay/first/ARTIFACT.md",
-		Content: "---\ntype: context\nversion: 0.1.0\n---\n\nfirst body\n",
+		Content: "---\ntype: agent\nversion: 0.1.0\n---\n\nfirst body\n",
 	})
 
 	s := newTestServer(t, &config{overlayPath: overlayDir})
@@ -33,7 +33,7 @@ func TestReindexOverlay_PicksUpAddedAndRemoved(t *testing.T) {
 	// A second draft added at runtime becomes visible on the next reindex.
 	testharness.WriteTree(t, ws, testharness.WriteTreeOption{
 		Path:    ".podium/overlay/second/ARTIFACT.md",
-		Content: "---\ntype: context\nversion: 0.1.0\n---\n\nsecond body\n",
+		Content: "---\ntype: agent\nversion: 0.1.0\n---\n\nsecond body\n",
 	})
 	s.reindexOverlay(overlayDir)
 	if got := len(s.overlaySnapshot()); got != 2 {
@@ -167,7 +167,7 @@ func TestOverlayWatchLoop_WatchesNewSubdirectory(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("watcher did not reindex on subdirectory creation")
 	}
-	if err := os.WriteFile(filepath.Join(pkg, "ARTIFACT.md"), []byte("---\ntype: context\n---\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(pkg, "ARTIFACT.md"), []byte("---\ntype: agent\n---\n"), 0o644); err != nil {
 		t.Fatalf("write into new pkg: %v", err)
 	}
 	select {

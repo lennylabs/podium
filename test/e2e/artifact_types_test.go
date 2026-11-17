@@ -1,11 +1,12 @@
 package e2e
 
 // End-to-end tests for docs/authoring/artifact-types.md (D-artifact-types).
-// Covers every built-in type (skill, agent, context, command, rule, hook,
-// mcp-server) plus the extension-type path: scaffolding, lint acceptance
-// and rejection, the per-harness materialization layout, and the
-// registry-side behaviors (search type filtering, deprecation, dependents)
-// including the documented absence of MCP prompt projection for commands.
+// Covers every built-in type (skill, agent, rule, hook, mcp-server) plus the
+// extension-type path and the scaffold refusal of the removed command and
+// context types: scaffolding, lint acceptance and rejection, the per-harness
+// materialization layout, and the registry-side behaviors (search type
+// filtering, deprecation, dependents) including the documented absence of
+// MCP prompt projection for user-invoked skills.
 // Tests drive the podium CLI, the standalone
 // server, and the podium-mcp bridge. Behaviors blocked by a known
 // implementation-gap finding are encoded as skips so the acceptance criterion is
@@ -178,114 +179,75 @@ func TestArtifactTypes_AgentClaudeCodeLayout(t *testing.T) {
 	}
 }
 
-// ---- context ---------------------------------------------------------------
+// ---- removed types -----------------------------------------------------------
 
-// scaffold context produces no SKILL.md and lints clean.
+// Spec: §4.1, §7.3.1 — scaffold --type context exits 2 with the removed-type
+// reason and writes no package.
 func TestArtifactTypes_ScaffoldContext(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
-	out := filepath.Join(root, "reference/company-glossary")
-	sc := runPodium(t, "", nil, "artifact", "scaffold",
-		"--type", "context",
-		"--description", "Internal terminology and acronyms used at the company.",
-		"--tags", "reference,glossary",
-		"--sensitivity", "low",
-		"--yes", out)
-	if sc.Exit != 0 {
-		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
-	}
-	if _, err := os.Stat(filepath.Join(out, "SKILL.md")); err == nil {
-		t.Errorf("context must not have a SKILL.md")
-	}
-	art := readFile(t, filepath.Join(out, "ARTIFACT.md"))
-	if !strings.Contains(art, "type: context") || !strings.Contains(art, "name: company-glossary") {
-		t.Errorf("ARTIFACT.md missing type/name:\n%s", art)
-	}
-	if l := runPodium(t, "", nil, "lint", "--registry", root); l.Exit != 0 {
-		t.Errorf("lint exit=%d stdout=%q", l.Exit, l.Stdout)
-	}
+	assertScaffoldRemovedType(t, "context")
 }
 
-// the doc's context example (version 1.4.0) lints clean.
-func TestArtifactTypes_ContextExampleLints(t *testing.T) {
-	t.Parallel()
-	art := "---\ntype: context\nname: company-glossary\nversion: 1.4.0\n" +
-		"description: Internal terminology and acronyms used at the company.\n" +
-		"tags: [reference, glossary]\nsensitivity: low\n---\n\n# Glossary\n\n**ACV.** Annual Contract Value.\n"
-	reg := writeRegistry(t, map[string]string{"reference/company-glossary/ARTIFACT.md": art})
-	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 0 || !strings.Contains(res.Stdout, "lint: no issues.") {
-		t.Fatalf("lint exit=%d stdout=%q", res.Exit, res.Stdout)
-	}
-}
-
-// claude-code places a context in the harness-neutral
-// .podium/context/<id>/ bucket.
-func TestArtifactTypes_ContextClaudeCodeLayout(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"reference/company-glossary/ARTIFACT.md": "---\ntype: context\nname: company-glossary\nversion: 1.4.0\ndescription: Glossary.\n---\n\nbody\n",
-	})
-	tgt := t.TempDir()
-	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code")
-	mustExist(t, filepath.Join(tgt, ".podium/context/reference/company-glossary/ARTIFACT.md"))
-}
-
-// ---- command ---------------------------------------------------------------
-
-// scaffold command lints clean.
+// Spec: §4.1, §7.3.1 — scaffold --type command exits 2 with the removed-type
+// reason and writes no package.
 func TestArtifactTypes_ScaffoldCommand(t *testing.T) {
 	t.Parallel()
+	assertScaffoldRemovedType(t, "command")
+}
+
+// ---- user-invoked skill -----------------------------------------------------
+
+// Spec: §4.3.4, §7.3.1 — scaffold --type skill --invocation user writes
+// SKILL.md metadata.invocation "user", the replacement for a command (§4.1),
+// and the package lints clean.
+func TestArtifactTypes_ScaffoldUserInvokedSkill(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	out := filepath.Join(root, "tools/refactor-module")
-	sc := runPodium(t, "", nil, "artifact", "scaffold",
-		"--type", "command",
-		"--description", "Guided module refactoring with configurable focus areas.",
-		"--tags", "command,refactoring",
-		"--sensitivity", "low",
-		"--yes", out)
-	if sc.Exit != 0 {
-		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
-	}
-	art := readFile(t, filepath.Join(out, "ARTIFACT.md"))
-	if !strings.Contains(art, "type: command") {
-		t.Errorf("ARTIFACT.md missing type: command:\n%s", art)
-	}
-	if l := runPodium(t, "", nil, "lint", "--registry", root); l.Exit != 0 {
-		t.Errorf("lint exit=%d stdout=%q", l.Exit, l.Stdout)
+	dir := filepath.Join(root, "tools", "deploy")
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
+		"--description", "Deploy the current branch to an environment.",
+		"--invocation", "user", "--yes", dir)
+	skill := assertSkillScaffoldLintsClean(t, res, root, dir)
+	cliContains(t, skill, "metadata:\n  version: \"0.1.0\"\n  invocation: \"user\"\n---\n", "metadata.invocation")
+}
+
+// Spec: §4.1, §4.3.4, §7.3.1 — --invocation applies to a skill alone, so
+// passing it with another type, or passing a value other than any or user,
+// exits 2 and writes no package.
+func TestArtifactTypes_ScaffoldInvocationRefused(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, typ, value, want string
+	}{
+		{"agent", "agent", "user", "--invocation applies only to --type skill"},
+		{"rule", "rule", "user", "--invocation applies only to --type skill"},
+		{"invalid value", "skill", "User", "must be one of any|user"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := filepath.Join(t.TempDir(), "tools", "deploy")
+			res := runPodium(t, "", nil, "artifact", "scaffold", "--type", tc.typ,
+				"--description", "Deploy the current branch.", "--invocation", tc.value, "--yes", out)
+			cliWantExit(t, res, 2, "scaffold --type "+tc.typ+" --invocation "+tc.value)
+			cliContains(t, res.Stderr, tc.want, "the --invocation refusal")
+			mustNotExist(t, out)
+		})
 	}
 }
 
-// and earlier coverage was written against an
-// earlier draft in which a command opted into MCP prompt projection via an
-// `expose_as_mcp_prompt` frontmatter field: an opted-in command appeared in the
-// MCP `prompts/list` response (-12) and a non-opted-in command did not (-13).
-// That feature was removed. The doc now states the canonical behavior in its
-// command section: "Both `podium sync` and the MCP server materialize a command
-// into the target harness's native command location ... Podium does not project
-// commands through MCP" (docs/authoring/artifact-types.md § command). The spec
-// agrees (spec/05-meta-tools.md § command), the manifest schema carries no
-// `expose_as_mcp_prompt` field, and the MCP server advertises no `prompts`
-// capability and defines no `prompts/list` JSON-RPC method (§5.2
-// reviewed §5.2 and recorded "No findings"). Both specs therefore collapse to a
-// single observable: `prompts/list` is an unknown method.
-//
 // TestArtifactTypes_CommandNotProjectedThroughMCP drives podium-mcp against a
-// standalone server holding a command artifact and asserts that `prompts/list`
-// returns JSON-RPC -32601 ("method not found"), the absence the doc claims.
-// spec: §5.2 (no MCP projection); cmd/podium-mcp/main.go default case.
+// standalone server holding a user-invoked skill, the replacement for a
+// command, and asserts that `prompts/list` returns JSON-RPC -32601 ("method
+// not found"): the MCP server defines no prompt projection, so a user-invoked
+// skill reaches a harness through materialization alone.
+// Spec: §5.2 (User-Invoked Skills); cmd/podium-mcp/main.go default case.
 func TestArtifactTypes_CommandNotProjectedThroughMCP(t *testing.T) {
 	t.Parallel()
-	const cmdID = "tools/refactor-module"
-	const cmdArtifact = "---\n" +
-		"type: command\n" +
-		"name: refactor-module\n" +
-		"version: 1.0.0\n" +
-		"description: Guided module refactoring with configurable focus areas.\n" +
-		"tags: [command, refactoring]\n" +
-		"sensitivity: low\n" +
-		"---\n\n# Refactor Module\n\n## User Input\n$ARGUMENTS\n"
-	srv := startServer(t, writeRegistry(t, map[string]string{cmdID + "/ARTIFACT.md": cmdArtifact}))
+	const id = "tools/refactor-module"
+	skill := userInvokedSkill("refactor-module",
+		"Guided module refactoring with configurable focus areas.",
+		"# Refactor Module\n\n## User Input\n$ARGUMENTS\n")
+	srv := startServer(t, writeRegistry(t, map[string]string{id + "/SKILL.md": skill}))
 	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL),
 		rpcReq{ID: 1, Method: "prompts/list", Params: map[string]any{}},
 	)
@@ -762,8 +724,8 @@ func TestArtifactTypes_SearchTypeAgent(t *testing.T) {
 func TestArtifactTypes_SearchVisibilityDirectOnly(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/indexed-glossary/ARTIFACT.md": "---\ntype: context\nname: indexed-glossary\nversion: 1.0.0\ndescription: Indexed variance glossary.\n---\n\nbody\n",
-		"finance/secret-glossary/ARTIFACT.md":  "---\ntype: context\nname: secret-glossary\nversion: 1.0.0\ndescription: Secret variance glossary.\nsearch_visibility: direct-only\n---\n\nbody\n",
+		"finance/indexed-glossary/ARTIFACT.md": "---\ntype: agent\nname: indexed-glossary\nversion: 1.0.0\ndescription: Indexed variance glossary.\n---\n\nbody\n",
+		"finance/secret-glossary/ARTIFACT.md":  "---\ntype: agent\nname: secret-glossary\nversion: 1.0.0\ndescription: Secret variance glossary.\nsearch_visibility: direct-only\n---\n\nbody\n",
 	}))
 	_, sbody := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=variance")
 	if strings.Contains(string(sbody), "finance/secret-glossary") {
@@ -792,8 +754,8 @@ func TestArtifactTypes_SearchVisibilityDirectOnly(t *testing.T) {
 func TestArtifactTypes_DeprecatedLifecycle(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/new-glossary/ARTIFACT.md": "---\ntype: context\nname: new-glossary\nversion: 1.0.0\ndescription: Current variance glossary.\n---\n\nbody\n",
-		"finance/old-glossary/ARTIFACT.md": "---\ntype: context\nname: old-glossary\nversion: 1.0.0\ndescription: Old variance glossary.\ndeprecated: true\nreplaced_by: finance/new-glossary\n---\n\nbody\n",
+		"finance/new-glossary/ARTIFACT.md": "---\ntype: agent\nname: new-glossary\nversion: 1.0.0\ndescription: Current variance glossary.\n---\n\nbody\n",
+		"finance/old-glossary/ARTIFACT.md": "---\ntype: agent\nname: old-glossary\nversion: 1.0.0\ndescription: Old variance glossary.\ndeprecated: true\nreplaced_by: finance/new-glossary\n---\n\nbody\n",
 	}))
 	_, sbody := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=variance")
 	if strings.Contains(string(sbody), "finance/old-glossary") {
@@ -854,7 +816,7 @@ func TestArtifactTypes_HookBundledScript(t *testing.T) {
 func TestArtifactTypes_MissingVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"tools/my-context/ARTIFACT.md": "---\ntype: context\nname: my-context\ndescription: Test.\n---\n\nbody\n",
+		"tools/my-context/ARTIFACT.md": "---\ntype: agent\nname: my-context\ndescription: Test.\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 1 {
@@ -869,7 +831,7 @@ func TestArtifactTypes_MissingVersion(t *testing.T) {
 func TestArtifactTypes_InvalidVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"tools/my-context/ARTIFACT.md": "---\ntype: context\nname: my-context\nversion: not-a-semver\ndescription: Test.\n---\n\nbody\n",
+		"tools/my-context/ARTIFACT.md": "---\ntype: agent\nname: my-context\nversion: not-a-semver\ndescription: Test.\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 1 {
@@ -881,7 +843,7 @@ func TestArtifactTypes_InvalidVersion(t *testing.T) {
 }
 
 // effort_hint on a rule warns (hints apply only to
-// agent / skill / command).
+// agent / skill).
 func TestArtifactTypes_EffortHintOnRuleWarns(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -920,16 +882,16 @@ func TestArtifactTypes_RuntimeRequirementsPassThrough(t *testing.T) {
 func TestArtifactTypes_TargetHarnessesRestrictsSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"reference/glossary/ARTIFACT.md": "---\ntype: context\nname: glossary\nversion: 1.0.0\ndescription: Glossary.\ntarget_harnesses: [claude-code]\n---\n\nbody\n",
+		"reference/glossary/ARTIFACT.md": "---\ntype: agent\nname: glossary\nversion: 1.0.0\ndescription: Glossary.\ntarget_harnesses: [claude-code]\n---\n\nbody\n",
 	})
-	// Listed harness materializes it (context lands in the neutral bucket).
+	// Listed harness materializes it (an agent lands in .claude/agents/).
 	included := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", included, "--harness", "claude-code")
-	mustExist(t, filepath.Join(included, ".podium/context/reference/glossary/ARTIFACT.md"))
+	mustExist(t, filepath.Join(included, ".claude/agents/glossary.md"))
 	// Unlisted harness skips it.
 	excluded := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", excluded, "--harness", "codex")
-	if _, err := os.Stat(filepath.Join(excluded, ".podium/context/reference/glossary/ARTIFACT.md")); err == nil {
+	if _, err := os.Stat(filepath.Join(excluded, ".codex/agents/glossary.toml")); err == nil {
 		t.Errorf("artifact excluded by target_harnesses must not materialize for codex")
 	}
 }
@@ -938,7 +900,7 @@ func TestArtifactTypes_TargetHarnessesRestrictsSync(t *testing.T) {
 func TestArtifactTypes_InvalidSensitivity(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "tools/x")
-	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "x", "--sensitivity", "ultra", "--yes", out)
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "x", "--sensitivity", "ultra", "--yes", out)
 	if res.Exit != 2 {
 		t.Fatalf("exit=%d, want 2\nstderr=%s", res.Exit, res.Stderr)
 	}
@@ -950,7 +912,7 @@ func TestArtifactTypes_InvalidSensitivity(t *testing.T) {
 // scaffold with no positional path exits 2.
 func TestArtifactTypes_ScaffoldNoPath(t *testing.T) {
 	t.Parallel()
-	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "x", "--yes")
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "x", "--yes")
 	if res.Exit != 2 {
 		t.Fatalf("exit=%d, want 2\nstderr=%s", res.Exit, res.Stderr)
 	}
@@ -967,7 +929,7 @@ func TestArtifactTypes_ScaffoldNoOverwrite(t *testing.T) {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "x", "--yes", out)
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "x", "--yes", out)
 	if res.Exit != 1 {
 		t.Fatalf("exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
 	}
@@ -986,7 +948,7 @@ func TestArtifactTypes_ScaffoldForce(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(out, "ARTIFACT.md"), []byte("stale content\n"), 0o644); err != nil {
 		t.Fatalf("write stale: %v", err)
 	}
-	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "fresh content", "--force", "--yes", out)
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "fresh content", "--force", "--yes", out)
 	if res.Exit != 0 {
 		t.Fatalf("exit=%d, want 0\nstderr=%s", res.Exit, res.Stderr)
 	}
@@ -1039,7 +1001,7 @@ func TestArtifactTypes_DomainHierarchy(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	out := filepath.Join(root, "team-shared/finance/ap/company-glossary")
-	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "Company glossary.", "--yes", out)
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "Company glossary.", "--yes", out)
 	if res.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", res.Exit, res.Stderr)
 	}

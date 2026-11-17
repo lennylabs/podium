@@ -21,7 +21,7 @@ func TestPodiumMCP_LoadArtifactMaterializes(t *testing.T) {
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
 			Path: "company-glossary/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\n" +
+			Content: "---\ntype: agent\nversion: 1.0.0\n" +
 				"description: Company glossary\n---\n\n" +
 				"# Glossary\n\nbody\n",
 		},
@@ -93,7 +93,7 @@ func TestPodiumMCP_TargetHarnessesSuppressesMaterialize(t *testing.T) {
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
 			Path: "tools/cc-only/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\n" +
+			Content: "---\ntype: agent\nversion: 1.0.0\n" +
 				"description: claude-code only\n" +
 				"target_harnesses: [claude-code]\n---\n\nbody\n",
 		},
@@ -211,6 +211,62 @@ func TestPodiumMCP_UntranslatableFieldFailsMaterialize(t *testing.T) {
 	}
 }
 
+// Spec: §6.9, §4.3.4 — podium-mcp resolves a skill from both manifests
+// before the guard runs, so a plain skill whose SKILL.md metadata states
+// invocation: user fails on hermes with a materialize.untranslatable message
+// that names invocation: user beside type: skill. A guard that parses only
+// the served ARTIFACT.md names type: skill alone.
+func TestPodiumMCP_UserInvokedSkillGuardNamesInvocation(t *testing.T) {
+	t.Parallel()
+
+	h := registryharness.New(t,
+		testharness.WriteTreeOption{
+			Path: "ops/ping/SKILL.md",
+			Content: "---\nname: ping\ndescription: Ping a teammate.\n" +
+				"metadata:\n  invocation: \"user\"\n---\n\nPing $ARGUMENTS.\n",
+		},
+	)
+	target := t.TempDir()
+	cmd := exec.Command(buildMCP(t))
+	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
+		"PODIUM_REGISTRY="+h.URL,
+		"PODIUM_HARNESS=hermes",
+		"PODIUM_MATERIALIZE_ROOT="+target,
+		"PODIUM_CACHE_DIR="+t.TempDir(),
+	)
+	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
+		{Method: "tools/call", ID: 1, Params: map[string]any{
+			"name":      "load_artifact",
+			"arguments": map[string]any{"id": "ops/ping"},
+		}},
+	}))
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run mcp: %v\nstdout:\n%s", err, stdout.String())
+	}
+	var resp struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Error string `json:"error"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(&stdout).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v\nstdout: %s", err, stdout.String())
+	}
+	msg := resp.Result.StructuredContent.Error
+	if !resp.Result.IsError || !strings.Contains(msg, "materialize.untranslatable") ||
+		!strings.Contains(msg, "invocation: user, type: skill") {
+		t.Errorf("isError=%v error = %q, want materialize.untranslatable naming invocation: user, type: skill", resp.Result.IsError, msg)
+	}
+	if files := testharness.ReadTree(t, target); len(files) != 0 {
+		t.Errorf("an untranslatable load must write nothing, got: %v", keysOf(files))
+	}
+}
+
 // Spec: §6.6 — selecting the claude-code adapter via PODIUM_HARNESS
 // drives the corresponding harness-native layout.
 func TestPodiumMCP_LoadArtifactWithClaudeCodeAdapter(t *testing.T) {
@@ -305,7 +361,7 @@ func TestPodiumMCP_LoadArtifactPopulatesContentCache(t *testing.T) {
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
 			Path: "x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\n" +
+			Content: "---\ntype: agent\nversion: 1.0.0\n" +
 				"description: x\n---\n\nbody\n",
 		},
 	)
@@ -354,7 +410,7 @@ func TestPodiumMCP_NoMaterializeRootReturnsManifestOnly(t *testing.T) {
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
 			Path:    "x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\n---\n\nbody\n",
+			Content: "---\ntype: agent\nversion: 1.0.0\n---\n\nbody\n",
 		},
 	)
 	bin := buildMCP(t)

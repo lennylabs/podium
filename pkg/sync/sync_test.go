@@ -21,8 +21,8 @@ description: Say hello.
 
 Body.
 `
-	contextArtifactSrc = `---
-type: context
+	agentArtifactSrc = `---
+type: agent
 version: 1.0.0
 description: glossary
 ---
@@ -48,7 +48,7 @@ func TestRun_SyncsArtifactsToTarget(t *testing.T) {
 			Path: "team-shared/greetings/hello/SKILL.md", Content: skillBodySrc,
 		},
 		testharness.WriteTreeOption{
-			Path: "team-shared/company-glossary/ARTIFACT.md", Content: contextArtifactSrc,
+			Path: "team-shared/company-glossary/ARTIFACT.md", Content: agentArtifactSrc,
 		},
 	)
 	res, err := Run(Options{
@@ -82,7 +82,7 @@ func TestRun_SyncsArtifactsToTarget(t *testing.T) {
 func TestRun_TargetHarnessesFiltersAdapter(t *testing.T) {
 	t.Parallel()
 	ccOnly := `---
-type: context
+type: agent
 version: 1.0.0
 description: claude-code only
 target_harnesses: [claude-code]
@@ -91,7 +91,7 @@ target_harnesses: [claude-code]
 body
 `
 	noneTargeted := `---
-type: context
+type: agent
 version: 1.0.0
 description: targets none adapter
 target_harnesses: [none]
@@ -104,7 +104,7 @@ body
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{Path: "team/cc-only/ARTIFACT.md", Content: ccOnly},
 		testharness.WriteTreeOption{Path: "team/none-targeted/ARTIFACT.md", Content: noneTargeted},
-		testharness.WriteTreeOption{Path: "team/everywhere/ARTIFACT.md", Content: contextArtifactSrc},
+		testharness.WriteTreeOption{Path: "team/everywhere/ARTIFACT.md", Content: agentArtifactSrc},
 	)
 	res, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"})
 	if err != nil {
@@ -132,7 +132,7 @@ func TestRun_DryRunWritesNothing(t *testing.T) {
 	target := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{
-			Path: "company-glossary/ARTIFACT.md", Content: contextArtifactSrc,
+			Path: "company-glossary/ARTIFACT.md", Content: agentArtifactSrc,
 		},
 	)
 	res, err := Run(Options{
@@ -161,7 +161,7 @@ func TestRun_ChangedTracksOnDiskDelta(t *testing.T) {
 	registry := t.TempDir()
 	target := t.TempDir()
 	testharness.WriteTree(t, registry,
-		testharness.WriteTreeOption{Path: "company-glossary/ARTIFACT.md", Content: contextArtifactSrc},
+		testharness.WriteTreeOption{Path: "company-glossary/ARTIFACT.md", Content: agentArtifactSrc},
 	)
 
 	first, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"})
@@ -192,7 +192,7 @@ func TestRun_ChangedTracksOnDiskDelta(t *testing.T) {
 	// Editing the artifact changes the materialized content, so the next sync
 	// reports Changed=true again.
 	edited := `---
-type: context
+type: agent
 version: 1.0.1
 description: glossary edited
 ---
@@ -219,7 +219,7 @@ func TestRun_DefaultAdapterIsNone(t *testing.T) {
 	target := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{
-			Path: "x/ARTIFACT.md", Content: contextArtifactSrc,
+			Path: "x/ARTIFACT.md", Content: agentArtifactSrc,
 		},
 	)
 	res, err := Run(Options{RegistryPath: registry, Target: target})
@@ -238,7 +238,7 @@ func TestRun_UnknownAdapterFails(t *testing.T) {
 	registry := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{
-			Path: "x/ARTIFACT.md", Content: contextArtifactSrc,
+			Path: "x/ARTIFACT.md", Content: agentArtifactSrc,
 		},
 	)
 	_, err := Run(Options{
@@ -309,28 +309,6 @@ func TestRun_CoworkPluginLayoutTypeFailsUntranslatable(t *testing.T) {
 				t.Errorf("target had %d files after a failed sync, want 0: %v", len(got), keys(got))
 			}
 		})
-	}
-}
-
-// Spec: §6.7 / §6.7.1 — the cowork context cell stays ✓, so a type: context
-// artifact still materializes onto claude-cowork through the §6.9 guard.
-func TestRun_CoworkContextStillMaterializes(t *testing.T) {
-	t.Parallel()
-	registry := t.TempDir()
-	target := t.TempDir()
-	testharness.WriteTree(t, registry,
-		testharness.WriteTreeOption{Path: "team/glossary/ARTIFACT.md", Content: contextArtifactSrc},
-	)
-	res, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "claude-cowork"})
-	if err != nil {
-		t.Fatalf("Run on claude-cowork over a context artifact: %v", err)
-	}
-	if len(res.Artifacts) != 1 {
-		t.Fatalf("got %d artifacts, want 1", len(res.Artifacts))
-	}
-	got := testharness.ReadTree(t, target)
-	if _, ok := got[".podium/context/team/glossary/ARTIFACT.md"]; !ok {
-		t.Errorf("cowork context did not materialize to .podium/context/, got: %v", keys(got))
 	}
 }
 

@@ -51,7 +51,7 @@ func TestResources_ListMirrorsEffectiveView(t *testing.T) {
 	t.Parallel()
 	ts := resourcesFixture(t, map[string]map[string]any{
 		"finance/close/checklist": {
-			"id": "finance/close/checklist", "type": "context",
+			"id": "finance/close/checklist", "type": "agent",
 		},
 		"ops/deploy-mcp": {
 			"id": "ops/deploy-mcp", "type": "mcp-server",
@@ -81,16 +81,16 @@ func TestResources_ListMirrorsEffectiveView(t *testing.T) {
 // as the resource content, the read-only mirror of load_artifact.
 func TestResources_ReadReturnsManifestBody(t *testing.T) {
 	t.Parallel()
-	fm := "---\ntype: context\nname: glossary\nversion: 1.0.0\n---\n"
+	fm := "---\ntype: agent\nname: glossary\nversion: 1.0.0\n---\n"
 	ts := resourcesFixture(t, map[string]map[string]any{
 		"docs/glossary": {
 			"id":            "docs/glossary",
-			"type":          "context",
+			"type":          "agent",
 			"frontmatter":   fm,
 			"manifest_body": "Term definitions.",
 			"content_hash":  "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
 			"delivery_hash": deliveryHashOf(loadArtifactResponse{
-				ID: "docs/glossary", Type: "context", Frontmatter: fm, ManifestBody: "Term definitions.",
+				ID: "docs/glossary", Type: "agent", Frontmatter: fm, ManifestBody: "Term definitions.",
 				ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
 			}),
 		},
@@ -109,7 +109,7 @@ func TestResources_ReadReturnsManifestBody(t *testing.T) {
 		t.Fatalf("len(contents) = %d, want 1", len(contents))
 	}
 	text, _ := contents[0]["text"].(string)
-	if !strings.Contains(text, "type: context") || !strings.Contains(text, "Term definitions.") {
+	if !strings.Contains(text, "type: agent") || !strings.Contains(text, "Term definitions.") {
 		t.Errorf("text missing manifest content: %q", text)
 	}
 	if contents[0]["uri"] != "podium://artifact/docs/glossary" {

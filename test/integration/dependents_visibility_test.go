@@ -36,7 +36,7 @@ func TestDependents_InvisibleTargetReturnsEmpty200(t *testing.T) {
 	rlvLayer(t, st, store.LayerConfig{TenantID: "default", ID: "hidden", Order: 1, Users: []string{"alice"}})
 	rlvLayer(t, st, store.LayerConfig{TenantID: "default", ID: "team", Order: 2, Users: []string{"alice", "bob"}})
 	rlvManifest(t, st, store.ManifestRecord{
-		TenantID: "default", ArtifactID: "acme/hidden-target", Version: "1.0.0", Layer: "hidden", Type: "context",
+		TenantID: "default", ArtifactID: "acme/hidden-target", Version: "1.0.0", Layer: "hidden", Type: "agent",
 	})
 	rlvManifest(t, st, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "acme/child", Version: "1.0.0", Layer: "team", Type: "agent",
@@ -124,8 +124,8 @@ func TestDependents_AllRetiredSourceEdgeNotReturned(t *testing.T) {
 	}
 	rlvLayer(t, st, store.LayerConfig{TenantID: "default", ID: "team", Order: 1, Public: true})
 	rlvManifest(t, st, store.ManifestRecord{
-		TenantID: "default", ArtifactID: "acme/target", Version: "1.0.0", Layer: "team", Type: "context",
-		Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\n---\n\nTarget.\n"),
+		TenantID: "default", ArtifactID: "acme/target", Version: "1.0.0", Layer: "team", Type: "agent",
+		Frontmatter: []byte("---\ntype: agent\nversion: 1.0.0\n---\n\nTarget.\n"),
 	})
 	rlvManifest(t, st, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "acme/live", Version: "1.0.0", Layer: "team", Type: "agent",

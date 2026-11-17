@@ -11,14 +11,14 @@ import (
 )
 
 // publicSensitivityRegistry writes a filesystem registry with a low-sensitivity
-// context artifact and a high-sensitivity skill, returning the directory.
+// agent artifact and a high-sensitivity skill, returning the directory.
 func publicSensitivityRegistry(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	testharness.WriteTree(t, dir,
 		testharness.WriteTreeOption{
 			Path:    "ctx/intro/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: low sensitivity intro\nsensitivity: low\n---\n\nIntro body.\n",
+			Content: "---\ntype: agent\nversion: 1.0.0\ndescription: low sensitivity intro\nsensitivity: low\n---\n\nIntro body.\n",
 		},
 		testharness.WriteTreeOption{
 			Path:    "finance/close/run/ARTIFACT.md",

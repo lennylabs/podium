@@ -83,8 +83,6 @@ var capabilityMatrix = map[Capability][]Support{
 	// type at project scope? rule and hook are graded by their dedicated rows.
 	{Field: "type", Value: "skill"}:      row("NXXNNNNNX"),
 	{Field: "type", Value: "agent"}:      row("NXXNNNNXX"),
-	{Field: "type", Value: "context"}:    row("NXNNNNNNN"),
-	{Field: "type", Value: "command"}:    row("NXXNXNNNX"),
 	{Field: "type", Value: "mcp-server"}: row("NXXNNNNXX"),
 	// Frontmatter-field fidelity, exercised on a type: agent carrier: does the
 	// field survive the harness's agent output? Pass-through .md preserves
@@ -115,6 +113,13 @@ var capabilityMatrix = map[Capability][]Support{
 	// are unsupported (✗), as is cowork, whose hooks ship through the published
 	// Claude marketplace rather than a project-scope surface.
 	{Field: "hook_event"}: row("NXXFNXNXX"),
+	// invocation: user (type: skill). ✓ where the adapter writes the harness's
+	// user-only skill control (disable-model-invocation on claude-code,
+	// cursor, and pi; agents/openai.yaml on codex), ⚠ where it writes the
+	// harness's native command file instead (opencode, gemini), and ✗ where
+	// the harness has no project-scope skill surface. Every ✗ cell is also ✗
+	// in the skill type row, so the row adds no §6.9 guard failure.
+	{Field: "invocation", Value: "user"}: row("NXXNNFFNX"),
 }
 
 // row decodes a 9-rune capability string into per-harness Support values.
@@ -164,9 +169,10 @@ func Cell(c Capability, harness string) (level Support, ok bool) {
 
 // UsedCapabilities returns the §6.7.1 capability rows the artifact exercises
 // that can carry a non-native cell. The artifact's type is emitted as a
-// `type` capability for the types graded by a type row (skill, agent, context,
-// command, mcp-server); rule and hook are graded by their dedicated rule_mode
-// and hook_event rows instead. The frontmatter-field rows (mcpServers,
+// `type` capability for the types graded by a type row (skill, agent,
+// mcp-server); rule and hook are graded by their dedicated rule_mode and
+// hook_event rows instead. A skill whose resolved invocation is user also
+// emits the `invocation: user` row. The frontmatter-field rows (mcpServers,
 // delegates_to, requiresApproval, sandbox_profile) are emitted when the field
 // is set.
 func UsedCapabilities(art *manifest.Artifact) []Capability {
@@ -175,9 +181,14 @@ func UsedCapabilities(art *manifest.Artifact) []Capability {
 	}
 	var out []Capability
 	switch art.Type {
-	case manifest.TypeSkill, manifest.TypeAgent, manifest.TypeContext,
-		manifest.TypeCommand, manifest.TypeMCPServer:
+	case manifest.TypeSkill, manifest.TypeAgent, manifest.TypeMCPServer:
 		out = append(out, Capability{Field: "type", Value: string(art.Type)})
+	}
+	// Spec: §6.7.1, §4.3.4 — a user-invoked skill is graded by the
+	// invocation: user row, so the target_harnesses lint warns on its ⚠
+	// command-file fallbacks and the §6.9 guard names the row.
+	if art.UserInvoked() {
+		out = append(out, Capability{Field: "invocation", Value: "user"})
 	}
 	// spec: §6.7.1 — mcpServers is a graded frontmatter-field row (✗ for codex,
 	// pi, hermes). Emit it when the agent carries it so the §6.7.1 lint and the

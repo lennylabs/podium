@@ -17,7 +17,7 @@ func TestFilesystem_PopulatedOverlay(t *testing.T) {
 	testharness.WriteTree(t, root,
 		testharness.WriteTreeOption{
 			Path:    "x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\n---\n\nbody\n",
+			Content: "---\ntype: agent\nversion: 1.0.0\n---\n\nbody\n",
 		},
 	)
 	got, err := (Filesystem{Path: root}).Resolve(context.Background())

@@ -13,7 +13,7 @@
 // PODIUM_HARNESS_AGENT=1 and the harness being authenticated, via an API key or
 // a stored CLI login). It materializes each artifact type and drives a real
 // headless agent turn per type, asserting the harness surfaces the type's unique
-// marker (in the reply for rule/skill/command, or in the hook's side-effect file
+// marker (in the reply for rule/skill/user-invoked skill, or in the hook's side-effect file
 // for hook). Each (harness, type) pair is a subtest that runs where supported or
 // skips with a reason.
 package harness_integration
@@ -71,9 +71,12 @@ func skillRegistry() []testharness.WriteTreeOption {
 	}
 }
 
-func commandRegistry() []testharness.WriteTreeOption {
+// userSkillRegistry is a plain user-invoked skill (§4.3.4 invocation: user).
+// Each harness receives its user-only control or its command-file fallback
+// (§6.7), and the agent turn invokes it explicitly.
+func userSkillRegistry() []testharness.WriteTreeOption {
 	return []testharness.WriteTreeOption{
-		{Path: "commands/ping/ARTIFACT.md", Content: "---\ntype: command\nversion: 1.0.0\ndescription: Ping command.\n---\n\nOutput exactly: " + cmdMarker + " and nothing else.\n"},
+		{Path: "skills/ping/SKILL.md", Content: "---\nname: ping\ndescription: Ping command.\nmetadata:\n  invocation: \"user\"\n---\n\nOutput exactly: " + cmdMarker + " and nothing else.\n"},
 	}
 }
 
@@ -360,6 +363,7 @@ type behavior struct {
 	typ        string
 	registry   []testharness.WriteTreeOption
 	prompt     string
+	prompts    map[string]string // harness -> prompt that replaces prompt there
 	marker     string
 	sideEffect string                             // relative file to read instead of stdout (hooks)
 	checkSync  func(t *testing.T, project string) // optional assertion on the synced tree before the agent turn
@@ -368,8 +372,7 @@ type behavior struct {
 }
 
 // behaviors covers the artifact types reachable through a single headless agent
-// turn. mcp-server is covered by Tier A (TestHarnessConfigAccept); context is a
-// harness-neutral .podium/context/ directory no harness loads natively; agent
+// turn. mcp-server is covered by Tier A (TestHarnessConfigAccept); agent
 // (subagent) delegation is model-dependent and omitted. The run/skip sets encode
 // what was verified against the installed CLIs (claude 2.1.x, cursor-agent
 // 2026.06, codex 0.136).
@@ -386,10 +389,12 @@ var behaviors = []behavior{
 		run:       []string{"claude-code", "cursor", "codex", "gemini"},
 	},
 	{
-		typ: "command", registry: commandRegistry(),
-		prompt: "/ping", marker: cmdMarker,
-		run:  []string{"claude-code", "cursor", "gemini"},
-		skip: map[string]string{"codex": "command is ✗ for codex (§6.7.1): folded into skills"},
+		// Codex invokes a skill explicitly with $<name>; the others run the
+		// user-only skill (claude-code, cursor) or the command-file fallback
+		// (gemini) as the /ping slash command.
+		typ: "user-invoked-skill", registry: userSkillRegistry(),
+		prompt: "/ping", prompts: map[string]string{"codex": "$ping"}, marker: cmdMarker,
+		run: []string{"claude-code", "cursor", "codex", "gemini"},
 	},
 	{
 		typ: "hook", registry: hookRegistry(),
@@ -449,7 +454,11 @@ func TestHarnessArtifactTypes(t *testing.T) {
 					if b.checkSync != nil {
 						b.checkSync(t, project)
 					}
-					res, ok := runExternal(t, project, os.Environ(), 180*time.Second, d.bin, d.agentExec(b.prompt)...)
+					prompt := b.prompt
+					if p, ok := b.prompts[harness]; ok {
+						prompt = p
+					}
+					res, ok := runExternal(t, project, os.Environ(), 180*time.Second, d.bin, d.agentExec(prompt)...)
 					if !ok {
 						t.Skipf("%s: binary %q not installed", harness, d.bin)
 					}
@@ -525,6 +534,9 @@ func harnessAuthError(out string) string {
 	for _, sig := range []string{
 		"token_revoked", "invalidated oauth token", "401 unauthorized",
 		"invalid_api_key", "invalid api key", "authentication_error", "not logged in",
+		// cursor-agent prints this when its stored login has lapsed even though
+		// `cursor-agent status` still reports "Logged in".
+		"authentication required",
 	} {
 		if strings.Contains(lower, sig) {
 			return sig

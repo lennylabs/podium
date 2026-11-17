@@ -12,7 +12,7 @@ import (
 )
 
 func redactManifest(desc string, redact string) string {
-	return "---\ntype: context\nversion: 1.0.0\ndescription: " + desc +
+	return "---\ntype: agent\nversion: 1.0.0\ndescription: " + desc +
 		"\nsensitivity: low\naudit_redact:\n  - " + redact + "\n---\n\nbody of " + desc + "\n"
 }
 

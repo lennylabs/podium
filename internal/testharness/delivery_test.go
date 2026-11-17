@@ -17,7 +17,7 @@ func TestSealDelivery_FramesTheServedRecord(t *testing.T) {
 	blob := []byte{0x00, 0xff}
 	sum := sha256.Sum256(blob)
 	got := SealDelivery(map[string]any{
-		"id": "team/x", "version": "1.0.0", "type": "context", "content_hash": "sha256:c",
+		"id": "team/x", "version": "1.0.0", "type": "agent", "content_hash": "sha256:c",
 		"sensitivity": "low", "frontmatter": "fm", "manifest_body": "body",
 		"resources":        map[string]string{"bin": base64.StdEncoding.EncodeToString(blob)},
 		"resources_base64": true,
@@ -28,7 +28,7 @@ func TestSealDelivery_FramesTheServedRecord(t *testing.T) {
 		t.Errorf("artifact_revision = %v, want %s", got["artifact_revision"], epoch)
 	}
 	want := version.DeliveryHash(version.DeliveryRecord{
-		ID: "team/x", Version: "1.0.0", Type: "context", ContentHash: "sha256:c",
+		ID: "team/x", Version: "1.0.0", Type: "agent", ContentHash: "sha256:c",
 		Sensitivity: "low", ArtifactRevision: epoch, Frontmatter: "fm", ManifestBody: "body",
 		Resources: map[string]string{"bin": "sha256:" + hex.EncodeToString(sum[:]), "big": "sha256:big"},
 	})
@@ -43,14 +43,14 @@ func TestSealDelivery_FramesAnExplicitRevision(t *testing.T) {
 	t.Parallel()
 	const rev = "2026-01-02T03:04:05.000006Z"
 	got := SealDelivery(map[string]any{
-		"id": "team/x", "version": "1.0.0", "type": "context", "content_hash": "sha256:c",
+		"id": "team/x", "version": "1.0.0", "type": "agent", "content_hash": "sha256:c",
 		"artifact_revision": rev, "frontmatter": "fm", "manifest_body": "body",
 	})
 	if got["artifact_revision"] != rev {
 		t.Errorf("artifact_revision = %v, want %s", got["artifact_revision"], rev)
 	}
 	want := version.DeliveryHash(version.DeliveryRecord{
-		ID: "team/x", Version: "1.0.0", Type: "context", ContentHash: "sha256:c",
+		ID: "team/x", Version: "1.0.0", Type: "agent", ContentHash: "sha256:c",
 		ArtifactRevision: rev, Frontmatter: "fm", ManifestBody: "body",
 		Resources: map[string]string{},
 	})

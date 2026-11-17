@@ -15,10 +15,11 @@ import (
 	"github.com/lennylabs/podium/pkg/lint"
 )
 
-// Spec: §7.3.1 — the --json envelope carries registry, diagnostics,
-// rejected, and counts; empty members render as [], rejected is sorted by
-// artifact ID with details only where the refusing rule defines them, and
-// counts carries every severity.
+// Spec: §7.3.1, §4.1, §4.6 — the --json envelope carries registry,
+// diagnostics, rejected, and counts; empty members render as [], rejected is
+// sorted by artifact ID with details only where the refusing rule defines
+// them, so every removed-feature drop carries its constraint and a collision
+// drop carries none, and counts carries every severity.
 func TestWriteLintEnvelope(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		var buf bytes.Buffer
@@ -46,7 +47,8 @@ func TestWriteLintEnvelope(t *testing.T) {
 			{ArtifactID: "b/two", Code: "x.info", Severity: lint.SeverityInfo, Message: "note"},
 		}
 		drops := []layer.Drop{
-			layer.ExtendsRemovedDrop("z/ext"),
+			layer.RemovedFeatureDrop("z/ext", layer.ExtendsRemovedConstraint, layer.ExtendsRemovedReason),
+			layer.RemovedFeatureDrop("m/cmd", layer.TypeRemovedConstraint, layer.TypeRemovedReason("command")),
 			layer.Collision{ArtifactID: "c/dup", Layer: "l2", ExistingLayer: "l1"}.Drop(),
 		}
 		var buf bytes.Buffer
@@ -65,13 +67,15 @@ func TestWriteLintEnvelope(t *testing.T) {
 			t.Errorf("diagnostics = %v, want %v", got["diagnostics"], wantDiags)
 		}
 		rejected, _ := got["rejected"].([]any)
-		if len(rejected) != 2 {
-			t.Fatalf("rejected = %v, want two entries", got["rejected"])
+		if len(rejected) != 3 {
+			t.Fatalf("rejected = %v, want three entries", got["rejected"])
 		}
 		first, _ := rejected[0].(map[string]any)
-		second, _ := rejected[1].(map[string]any)
-		if first["artifact_id"] != "c/dup" || second["artifact_id"] != "z/ext" {
-			t.Errorf("rejected order = %v, %v; want c/dup then z/ext", first["artifact_id"], second["artifact_id"])
+		removed, _ := rejected[1].(map[string]any)
+		second, _ := rejected[2].(map[string]any)
+		if first["artifact_id"] != "c/dup" || removed["artifact_id"] != "m/cmd" || second["artifact_id"] != "z/ext" {
+			t.Errorf("rejected order = %v, %v, %v; want c/dup, m/cmd, z/ext",
+				first["artifact_id"], removed["artifact_id"], second["artifact_id"])
 		}
 		if _, ok := first["details"]; ok {
 			t.Errorf("collision entry carries details: %v", first)
@@ -82,6 +86,11 @@ func TestWriteLintEnvelope(t *testing.T) {
 		wantDetails := map[string]any{"constraint": "extends_removed"}
 		if !reflect.DeepEqual(second["details"], wantDetails) || second["code"] != "ingest.invalid_artifact" {
 			t.Errorf("extends entry = %v, want ingest.invalid_artifact with details %v", second, wantDetails)
+		}
+		wantRemoved := map[string]any{"constraint": "type_removed"}
+		if !reflect.DeepEqual(removed["details"], wantRemoved) || removed["code"] != "ingest.invalid_artifact" ||
+			removed["reason"] != layer.TypeRemovedReason("command") {
+			t.Errorf("removed-type entry = %v, want ingest.invalid_artifact with details %v", removed, wantRemoved)
 		}
 		wantCounts := map[string]any{"error": float64(0), "warning": float64(1), "info": float64(1)}
 		if !reflect.DeepEqual(got["counts"], wantCounts) {
@@ -278,6 +287,55 @@ func TestRunLint_JSONRejectedNotOnStderr(t *testing.T) {
 	}
 }
 
+// Spec: §4.1, §4.6, §7.3.1 — under --json the walk reports each refused
+// artifact in rejected, in identifier order, with ingest.invalid_artifact, its
+// reason, and details holding exactly the constraint of the rule that refused
+// it: type_removed for a command and a context, and extends_removed for an
+// ARTIFACT.md that declares both extends: and type: context, because the
+// §4.6 check runs first. The run exits 1 and names no refusal on standard
+// error, and the valid sibling is not rejected.
+func TestRunLint_RemovedFeatureJSON(t *testing.T) {
+	root := writeLintRegistry(t, map[string][2]string{
+		"close-books": {"Reconcile the general ledger at month end", "Body.\n"},
+	})
+	refused := map[string]string{
+		"cmd":  "---\ntype: command\nversion: 1.0.0\ndescription: Run the variance check\n---\n\nBody.\n",
+		"ref":  "---\ntype: context\nversion: 1.0.0\ndescription: Finance glossary terms\n---\n\nBody.\n",
+		"both": "---\ntype: context\nversion: 1.0.0\ndescription: Glossary overlay\nextends: team/finance/ref\n---\n\nBody.\n",
+	}
+	for name, art := range refused {
+		dir := filepath.Join(root, "team", "finance", name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "ARTIFACT.md"), []byte(art), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if rc := runLint(context.Background(), &stdout, &stderr, root, true, true, lint.SeverityError); rc != 1 {
+		t.Errorf("runLint = %d, want 1", rc)
+	}
+	if strings.Contains(stderr.String(), "rejected") || strings.Contains(stderr.String(), layer.InvalidArtifactCode) {
+		t.Errorf("stderr = %q, want no rejected line under --json", stderr.String())
+	}
+	var env lintEnvelopeJSON
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode %q: %v", stdout.String(), err)
+	}
+	want := []lintRejectedJSON{
+		{ArtifactID: "team/finance/both", Code: layer.InvalidArtifactCode, Reason: layer.ExtendsRemovedReason,
+			Details: map[string]any{"constraint": layer.ExtendsRemovedConstraint}},
+		{ArtifactID: "team/finance/cmd", Code: layer.InvalidArtifactCode, Reason: layer.TypeRemovedReason("command"),
+			Details: map[string]any{"constraint": layer.TypeRemovedConstraint}},
+		{ArtifactID: "team/finance/ref", Code: layer.InvalidArtifactCode, Reason: layer.TypeRemovedReason("context"),
+			Details: map[string]any{"constraint": layer.TypeRemovedConstraint}},
+	}
+	if !reflect.DeepEqual(env.Rejected, want) {
+		t.Errorf("rejected = %+v, want %+v", env.Rejected, want)
+	}
+}
+
 // Spec: §7.3.1 — a registry that cannot be opened writes no JSON object,
 // and a failing standard output is reported as an error.
 func TestRunLint_OpenFailureAndWriteFailure(t *testing.T) {
@@ -295,9 +353,9 @@ func TestRunLint_OpenFailureAndWriteFailure(t *testing.T) {
 	collide := t.TempDir()
 	files := map[string]string{
 		".registry-config":               "multi_layer: true\nlayer_order:\n  - org\n  - team\n",
-		"org/ops/close/ARTIFACT.md":      "---\ntype: context\nversion: 1.0.0\ndescription: Close the books for the org layer\n---\n\nOrg.\n",
-		"team/ops/close/ARTIFACT.md":     "---\ntype: context\nversion: 1.0.0\ndescription: Close the books for the team layer\n---\n\nTeam.\n",
-		"team/ops/unrelated/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Notes kept beside the colliding copy\n---\n\nNotes.\n",
+		"org/ops/close/ARTIFACT.md":      "---\ntype: agent\nversion: 1.0.0\ndescription: Close the books for the org layer\n---\n\nOrg.\n",
+		"team/ops/close/ARTIFACT.md":     "---\ntype: agent\nversion: 1.0.0\ndescription: Close the books for the team layer\n---\n\nTeam.\n",
+		"team/ops/unrelated/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Notes kept beside the colliding copy\n---\n\nNotes.\n",
 	}
 	for rel, body := range files {
 		p := filepath.Join(collide, rel)

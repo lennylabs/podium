@@ -201,7 +201,7 @@ func ruStageLegacyDatabase(t *testing.T, dsn string) (id, version, contentHash s
 	if _, err := db.ExecContext(context.Background(),
 		`INSERT INTO manifests (tenant_id, artifact_id, version, content_hash, type, description, layer, ingested_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
-		tenantID, id, version, contentHash, "context", "restart the gateway", ruLegacyLayer); err != nil {
+		tenantID, id, version, contentHash, "agent", "restart the gateway", ruLegacyLayer); err != nil {
 		t.Fatalf("seed legacy manifest row: %v", err)
 	}
 	// Register the seeded artifact's layer as a public admin layer so the booted
@@ -366,7 +366,7 @@ func ruLoad(t *testing.T, srv *serverProc, token, id, version string) (int, lcLo
 func ruIngestLayer(t *testing.T, srv *serverProc, token, layerID, artifactID, body string) string {
 	t.Helper()
 	reg := writeRegistry(t, map[string]string{
-		artifactID + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: " + body + "\n---\n\n" + body + " body.\n",
+		artifactID + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: " + body + "\n---\n\n" + body + " body.\n",
 	})
 	msPublishGitLayer(t, srv.BaseURL, token, layerID, reg)
 
@@ -593,7 +593,7 @@ func TestServerOps_RollbackBeforeFinalize(t *testing.T) {
 	if _, err := db.ExecContext(context.Background(),
 		`INSERT INTO manifests (tenant_id, artifact_id, version, content_hash, type, description, layer, ingested_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
-		lcDefaultOrgID(), rolledBackID, "2.0.0", legacyEmptyRowHash, "context", "failover the db", ruLegacyLayer); err != nil {
+		lcDefaultOrgID(), rolledBackID, "2.0.0", legacyEmptyRowHash, "agent", "failover the db", ruLegacyLayer); err != nil {
 		t.Fatalf("rolled-back write (legacy column set) failed against migrated table: %v", err)
 	}
 	// The row carries no signature, so a signing registry's §13.4 admission

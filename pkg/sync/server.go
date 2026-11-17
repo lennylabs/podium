@@ -225,16 +225,6 @@ func recordFromServed(rec version.DeliveryRecord, id, layerID string, resources 
 		AuthoredBytes: []byte(rec.Frontmatter),
 		Resources:     resources,
 	}
-	// Parse the served frontmatter so the §4.3 target_harnesses gate runs.
-	// A parse failure leaves Artifact nil; the artifact then materializes
-	// for every harness (the gate only excludes opt-outs).
-	if a, perr := manifest.ParseArtifact([]byte(rec.Frontmatter)); perr == nil {
-		// Spec: §7.5, §13.4 — the lock version is the served version member,
-		// which the delivery check verified. An ARTIFACT.md overlay may omit
-		// version (§4.3.4), so the served document does not state it.
-		a.Version = rec.Version
-		out.Artifact = a
-	}
 	// spec: §4.3.4 / §11 — a skill's SKILL.md is delivered verbatim so the
 	// materialized file is byte-identical to the filesystem-source consumer.
 	// The authored SKILL.md frontmatter (name, description, compatibility,
@@ -242,6 +232,20 @@ func recordFromServed(rec version.DeliveryRecord, id, layerID string, resources 
 	// plus body, so the registry ships the original bytes in skill_raw.
 	if rec.Type == string(manifest.TypeSkill) {
 		out.SkillBytes = []byte(rec.SkillRaw)
+	}
+	// Resolve the served manifests so the §4.3 target_harnesses gate, the
+	// §6.9 guard, and the §7.5.8 listing read the artifact. Spec: §4.3.4,
+	// §6.9 — a skill resolves from both manifests, so a metadata-only
+	// invocation: user reaches the guard as the adapter reads it, as on a
+	// filesystem-source record. A parse failure leaves Artifact nil; the
+	// artifact then materializes for every harness (the gate only excludes
+	// opt-outs).
+	if a, perr := manifest.ResolveArtifact(out.ArtifactBytes, out.SkillBytes); perr == nil {
+		// Spec: §7.5, §13.4 — the lock version is the served version member,
+		// which the delivery check verified. An ARTIFACT.md overlay may omit
+		// version (§4.3.4), so the served document does not state it.
+		a.Version = rec.Version
+		out.Artifact = a
 	}
 	return out
 }

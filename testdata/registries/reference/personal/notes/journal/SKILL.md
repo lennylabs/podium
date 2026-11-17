@@ -1,9 +1,10 @@
 ---
-type: context
-version: 0.1.0
+name: journal
 description: Personal journal of in-progress notes.
-sensitivity: low
 license: MIT
+metadata:
+  version: "0.2.0"
+  sensitivity: "low"
 ---
 
 # Journal

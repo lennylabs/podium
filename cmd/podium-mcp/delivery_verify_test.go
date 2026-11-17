@@ -17,11 +17,11 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
-// liveRecord is the untampered context record the TEST-10 live-path arms serve.
+// liveRecord is the untampered agent record the live-path arms serve.
 func liveRecord(frontmatter string) loadArtifactResponse {
 	a := manifestFields(frontmatter)
 	return sealDelivery(loadArtifactResponse{
-		ID: "team/x", Type: "context", Version: "1.0.0", Sensitivity: a["sensitivity"],
+		ID: "team/x", Type: "agent", Version: "1.0.0", Sensitivity: a["sensitivity"],
 		Frontmatter:  frontmatter,
 		ManifestBody: splitBody(frontmatter),
 		ContentHash:  "sha256:" + version.CanonicalContentHash([]byte(frontmatter), nil, nil),
@@ -109,7 +109,7 @@ func wantNothingRecorded(t *testing.T, s *mcpServer, contentHash, version string
 // Matrix: §6.10 (materialize.content_hash_mismatch)
 func TestLoadArtifact_TamperedMergedFrontmatterRefused(t *testing.T) {
 	t.Parallel()
-	rec := liveRecord("---\ntype: context\nversion: 1.0.0\ndescription: merged\n---\nbody\n")
+	rec := liveRecord("---\ntype: agent\nversion: 1.0.0\ndescription: merged\n---\nbody\n")
 	fields := fieldsOf(t, rec)
 	fields["frontmatter"] = strings.Replace(rec.Frontmatter, "merged", "forged", 1)
 	for v, got := range loadLiveBoth(t, fields, sign.PolicyNever) {
@@ -124,7 +124,7 @@ func TestLoadArtifact_TamperedMergedFrontmatterRefused(t *testing.T) {
 // nothing is cached or recorded.
 func TestLoadArtifact_ForgedManifestBodyRefused(t *testing.T) {
 	t.Parallel()
-	rec := liveRecord("---\ntype: context\nversion: 1.0.0\n---\nreal body\n")
+	rec := liveRecord("---\ntype: agent\nversion: 1.0.0\n---\nreal body\n")
 	for _, got := range loadLiveBoth(t, fieldsOf(t, rec), sign.PolicyNever) {
 		wantServed(t, got.out, "real body\n")
 	}
@@ -141,7 +141,7 @@ func TestLoadArtifact_ForgedManifestBodyRefused(t *testing.T) {
 // an empty-hash early return would pass.
 func TestLoadArtifact_AbsentOrEmptyDeliveryHashRefused(t *testing.T) {
 	t.Parallel()
-	rec := liveRecord("---\ntype: context\nversion: 1.0.0\n---\nbody\n")
+	rec := liveRecord("---\ntype: agent\nversion: 1.0.0\n---\nbody\n")
 	absent := fieldsOf(t, rec)
 	delete(absent, "delivery_hash")
 	empty := fieldsOf(t, rec)
@@ -159,7 +159,7 @@ func TestLoadArtifact_AbsentOrEmptyDeliveryHashRefused(t *testing.T) {
 // frontmatter and delivery_hash unchanged, fails the comparison under never.
 func TestLoadArtifact_SensitivityDowngradeRefused(t *testing.T) {
 	t.Parallel()
-	rec := liveRecord("---\ntype: context\nversion: 1.0.0\nsensitivity: high\n---\nbody\n")
+	rec := liveRecord("---\ntype: agent\nversion: 1.0.0\nsensitivity: high\n---\nbody\n")
 	fields := fieldsOf(t, rec)
 	fields["sensitivity"] = "low"
 	for v, got := range loadLiveBoth(t, fields, sign.PolicyNever) {
@@ -173,7 +173,7 @@ func TestLoadArtifact_SensitivityDowngradeRefused(t *testing.T) {
 // policy gate, and the local audit sink records no artifact.loaded event.
 func TestDeliverLoadArtifact_TamperedPolicyInputRefusedBeforeTheReadEvent(t *testing.T) {
 	t.Parallel()
-	rec := liveRecord("---\ntype: context\nversion: 1.0.0\naudit_redact: [account]\naccount: \"123\"\nsandbox_profile: unrestricted\n---\nbody\n")
+	rec := liveRecord("---\ntype: agent\nversion: 1.0.0\naudit_redact: [account]\naccount: \"123\"\nsandbox_profile: unrestricted\n---\nbody\n")
 	rec.Frontmatter = strings.Replace(rec.Frontmatter, "unrestricted", "seccomp-strict", 1)
 	s, path := orderServer(t, &config{harness: "none", verifyPolicy: sign.PolicyNever})
 	wantRefused(t, s.deliverLoadArtifact(rec), "materialize.content_hash_mismatch")
@@ -213,8 +213,8 @@ func signDelivery(t *testing.T, key sign.RegistryManagedKey, rec loadArtifactRes
 func TestDeliverLoadArtifact_SignatureOverAnotherDeliveryHashRefused(t *testing.T) {
 	t.Parallel()
 	s, key, _ := signedServer(t)
-	rec := liveRecord("---\ntype: context\nversion: 1.0.0\n---\nbody\n")
-	other := signDelivery(t, key, liveRecord("---\ntype: context\nversion: 1.0.0\n---\nother\n"))
+	rec := liveRecord("---\ntype: agent\nversion: 1.0.0\n---\nbody\n")
+	other := signDelivery(t, key, liveRecord("---\ntype: agent\nversion: 1.0.0\n---\nother\n"))
 	rec.DeliverySignature = other.DeliverySignature
 	wantRefused(t, s.deliverLoadArtifact(rec), "materialize.signature_invalid")
 	wantServed(t, s.deliverLoadArtifact(signDelivery(t, key, rec)), "body\n")
@@ -234,7 +234,7 @@ func TestDeliverLoadArtifact_LargeResourceLinkIsFramed(t *testing.T) {
 		return ts.URL
 	}
 	sealed := func() loadArtifactResponse {
-		rec := liveRecord("---\ntype: context\nversion: 1.0.0\n---\nbody\n")
+		rec := liveRecord("---\ntype: agent\nversion: 1.0.0\n---\nbody\n")
 		rec.LargeResources = map[string]largeResourceLink{"data/big.bin": {URL: serveBytes(served), ContentHash: sha256Hex(served)}}
 		return sealDelivery(rec)
 	}
@@ -281,7 +281,7 @@ func TestDeliverLoadArtifact_LargeResourceLinkIsFramed(t *testing.T) {
 func TestDeliverLoadArtifact_EmptyDeliverySignatureMissing(t *testing.T) {
 	t.Parallel()
 	s, _, path := signedServer(t)
-	wantRefused(t, s.deliverLoadArtifact(liveRecord("---\ntype: context\nversion: 1.0.0\n---\nbody\n")), "materialize.signature_missing")
+	wantRefused(t, s.deliverLoadArtifact(liveRecord("---\ntype: agent\nversion: 1.0.0\n---\nbody\n")), "materialize.signature_missing")
 	if n := loadedEventCount(t, path); n != 0 {
 		t.Errorf("artifact.loaded events = %d, want 0", n)
 	}
@@ -298,7 +298,7 @@ func TestDeliverLoadArtifact_InvalidDeliverySignatureInvalid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	rec := signDelivery(t, sign.RegistryManagedKey{PrivateKey: otherPriv}, liveRecord("---\ntype: context\nversion: 1.0.0\n---\nbody\n"))
+	rec := signDelivery(t, sign.RegistryManagedKey{PrivateKey: otherPriv}, liveRecord("---\ntype: agent\nversion: 1.0.0\n---\nbody\n"))
 	wantRefused(t, s.deliverLoadArtifact(rec), "materialize.signature_invalid")
 	if n := loadedEventCount(t, path); n != 0 {
 		t.Errorf("artifact.loaded events = %d, want 0", n)
@@ -319,7 +319,7 @@ func TestLoadArtifact_DeliveryComparisonRunsBeforeTheSignaturePolicy(t *testing.
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	base := liveRecord("---\ntype: context\nversion: 1.0.0\n---\nbody\n")
+	base := liveRecord("---\ntype: agent\nversion: 1.0.0\n---\nbody\n")
 	invalid := signDelivery(t, sign.RegistryManagedKey{PrivateKey: otherPriv}, base)
 	for name, rec := range map[string]loadArtifactResponse{"invalid signature": invalid, "empty signature": base} {
 		t.Run(name, func(t *testing.T) {

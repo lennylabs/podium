@@ -10,8 +10,8 @@ import "testing"
 func TestStandalone_SandboxProfileIngestGateEnforced(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"eng/restricted/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Restricted widget.\nsensitivity: low\nsandbox_profile: seccomp-strict\n---\n\nbody\n",
-		"eng/open/ARTIFACT.md":       "---\ntype: context\nversion: 1.0.0\ndescription: Open widget.\nsensitivity: low\nsandbox_profile: unrestricted\n---\n\nbody\n",
+		"eng/restricted/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Restricted widget.\nsensitivity: low\nsandbox_profile: seccomp-strict\n---\n\nbody\n",
+		"eng/open/ARTIFACT.md":       "---\ntype: agent\nversion: 1.0.0\ndescription: Open widget.\nsensitivity: low\nsandbox_profile: unrestricted\n---\n\nbody\n",
 	})
 	home := t.TempDir()
 	srv := startServerArgs(t, []string{
@@ -33,7 +33,7 @@ func TestStandalone_SandboxProfileIngestGateEnforced(t *testing.T) {
 func TestStandalone_SandboxProfileInformationalByDefault(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"eng/restricted/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Restricted widget.\nsensitivity: low\nsandbox_profile: seccomp-strict\n---\n\nbody\n",
+		"eng/restricted/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Restricted widget.\nsensitivity: low\nsandbox_profile: seccomp-strict\n---\n\nbody\n",
 	})
 	home := t.TempDir()
 	srv := startServerArgs(t, []string{"HOME=" + home}, "serve", "--standalone", "--layer-path", reg)

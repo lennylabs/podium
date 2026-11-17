@@ -11,12 +11,12 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// largeContextDoc returns an ARTIFACT.md whose bytes exceed the §4.2 inline
+// largeAgentDoc returns an ARTIFACT.md whose bytes exceed the §4.2 inline
 // cutoff, so its canonical document is delivered via the §6.6 presigned
 // manifest-body channel.
-func largeContextDoc() []byte {
+func largeAgentDoc() []byte {
 	body := strings.Repeat("glossary line\n", objectstore.InlineCutoff/14+200)
-	return []byte("---\ntype: context\nversion: 1.0.0\ndescription: Big glossary.\n---\n\n" + body)
+	return []byte("---\ntype: agent\nversion: 1.0.0\ndescription: Big glossary.\n---\n\n" + body)
 }
 
 // largeSkillRaw returns a SKILL.md whose bytes exceed the inline cutoff.
@@ -37,10 +37,10 @@ func TestResolveResourceOwner_ManifestBodyVisibility(t *testing.T) {
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: tenantID}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	doc := largeContextDoc()
+	doc := largeAgentDoc()
 	if err := st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: tenantID, ArtifactID: "team/secret", Version: "1.0.0",
-		ContentHash: "sha256:m", Type: "context", Layer: "private",
+		ContentHash: "sha256:m", Type: "agent", Layer: "private",
 		Frontmatter: doc, Body: []byte("glossary line\n"),
 	}); err != nil {
 		t.Fatalf("PutManifest: %v", err)
@@ -109,7 +109,7 @@ func TestCanonicalManifestDoc_SelectsByType(t *testing.T) {
 	if got := core.CanonicalManifestDoc("skill", front, skill); string(got) != "SKILL" {
 		t.Errorf("skill canonical doc = %q, want SKILL", got)
 	}
-	for _, typ := range []string{"context", "command", "agent", "rule"} {
+	for _, typ := range []string{"agent", "rule", "hook", "mcp-server"} {
 		if got := core.CanonicalManifestDoc(typ, front, skill); string(got) != "ARTIFACT" {
 			t.Errorf("%s canonical doc = %q, want ARTIFACT", typ, got)
 		}

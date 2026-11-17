@@ -31,7 +31,7 @@ func TestCatalog_ScopeAndDescriptors(t *testing.T) {
 		})
 	}
 	put("finance/ap/pay", "skill", "pay vendors")
-	put("finance/close/run", "context", "close the books")
+	put("finance/close/run", "agent", "close the books")
 	put("other/thing", "skill", "unrelated")
 	reg := core.New(st, tenant, []layer.Layer{{ID: "L", Visibility: layer.Visibility{Public: true}, Precedence: 1}})
 
@@ -66,7 +66,7 @@ func TestCatalog_LatestVersionOnly(t *testing.T) {
 	for _, v := range []string{"1.0.0", "2.0.0"} {
 		_ = st.PutManifest(context.Background(), store.ManifestRecord{
 			TenantID: tenant, ArtifactID: "finance/x", Version: v, ContentHash: "sha256:" + v,
-			Type: "context", Description: "v" + v, Layer: "L",
+			Type: "agent", Description: "v" + v, Layer: "L",
 		})
 	}
 	reg := core.New(st, tenant, []layer.Layer{{ID: "L", Visibility: layer.Visibility{Public: true}, Precedence: 1}})
@@ -87,11 +87,11 @@ func TestCatalog_VisibilityFiltered(t *testing.T) {
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenant})
 	_ = st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "finance/public-x", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Layer: "public",
+		ContentHash: "sha256:a", Type: "agent", Layer: "public",
 	})
 	_ = st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "finance/private-y", Version: "1.0.0",
-		ContentHash: "sha256:b", Type: "context", Layer: "private",
+		ContentHash: "sha256:b", Type: "agent", Layer: "private",
 	})
 	reg := core.New(st, tenant, []layer.Layer{
 		{ID: "public", Visibility: layer.Visibility{Public: true}, Precedence: 1},

@@ -72,7 +72,7 @@ func (h ctxHook) Apply(_ context.Context, m map[string]any, f hook.File) (hook.R
 func fixtureResp(id, frontmatter string) loadArtifactResponse {
 	return sealDelivery(loadArtifactResponse{
 		ID:          id,
-		Type:        "context",
+		Type:        "agent",
 		Version:     "1.0.0",
 		Frontmatter: frontmatter,
 		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(frontmatter), nil, nil),
@@ -90,7 +90,7 @@ func TestDeliver_HookChainRunsInOrder(t *testing.T) {
 		tagHook{tag: "A", order: &order},
 		tagHook{tag: "B", order: &order},
 	}
-	fm := "---\ntype: context\n---\nbody"
+	fm := "---\ntype: agent\n---\nbody"
 	out := s.deliverLoadArtifact(fixtureResp("team/x", fm), deliverOpts{harness: "none", destination: dest})
 	m, ok := out.(map[string]any)
 	if !ok {
@@ -114,7 +114,7 @@ func TestDeliver_HookDropsFile(t *testing.T) {
 	dest := t.TempDir()
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
 	s.hooks = []hook.Hook{dropHook{match: "ARTIFACT.md"}}
-	fm := "---\ntype: context\n---\nbody"
+	fm := "---\ntype: agent\n---\nbody"
 	out := s.deliverLoadArtifact(fixtureResp("team/x", fm), deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
 	paths, _ := m["materialized_at"].([]string)
@@ -132,7 +132,7 @@ func TestDeliver_HookErrorAbortsWrite(t *testing.T) {
 	dest := t.TempDir()
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
 	s.hooks = []hook.Hook{errHook{}}
-	fm := "---\ntype: context\n---\nbody"
+	fm := "---\ntype: agent\n---\nbody"
 	out := s.deliverLoadArtifact(fixtureResp("team/x", fm), deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
 	if code, _ := m["code"].(string); code != "materialize.hook_failed" {
@@ -149,7 +149,7 @@ func TestDeliver_NoHooksIsNoOp(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
-	fm := "---\ntype: context\n---\nbody"
+	fm := "---\ntype: agent\n---\nbody"
 	s.deliverLoadArtifact(fixtureResp("team/x", fm), deliverOpts{harness: "none", destination: dest})
 	got, err := os.ReadFile(filepath.Join(dest, "team/x", "ARTIFACT.md"))
 	if err != nil {
@@ -167,7 +167,7 @@ func TestDeliver_HookWarningsSurface(t *testing.T) {
 	dest := t.TempDir()
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
 	s.hooks = []hook.Hook{warnHook{msg: "heads up"}}
-	fm := "---\ntype: context\n---\nbody"
+	fm := "---\ntype: agent\n---\nbody"
 	out := s.deliverLoadArtifact(fixtureResp("team/x", fm), deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
 	warns, _ := m["warnings"].([]string)
@@ -183,9 +183,9 @@ func TestDeliver_HookReceivesManifestContext(t *testing.T) {
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
 	var seen map[string]any
 	s.hooks = []hook.Hook{ctxHook{seen: &seen}}
-	fm := "---\ntype: context\ndescription: hi\n---\nbody"
+	fm := "---\ntype: agent\ndescription: hi\n---\nbody"
 	s.deliverLoadArtifact(fixtureResp("team/x", fm), deliverOpts{harness: "none", destination: dest})
-	if seen["type"] != "context" || seen["description"] != "hi" {
+	if seen["type"] != "agent" || seen["description"] != "hi" {
 		t.Errorf("manifest context = %v, want type/description populated", seen)
 	}
 }
@@ -199,7 +199,7 @@ func TestDeliver_HookRunsForHarnessNone(t *testing.T) {
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
 	var order []string
 	s.hooks = []hook.Hook{tagHook{tag: "H", order: &order}}
-	fm := "---\ntype: context\n---\nbody"
+	fm := "---\ntype: agent\n---\nbody"
 	s.deliverLoadArtifact(fixtureResp("team/x", fm), deliverOpts{harness: "none", destination: dest})
 	if len(order) != 1 {
 		t.Errorf("hook did not run for harness none: order=%v", order)
@@ -214,7 +214,7 @@ func TestDeliver_ContentHashMismatchRejected(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
-	resp := fixtureResp("team/x", "---\ntype: context\n---\nbody")
+	resp := fixtureResp("team/x", "---\ntype: agent\n---\nbody")
 	resp.ContentHash = "sha256:" + strings.Repeat("0", 64) // tampered
 	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
@@ -232,9 +232,9 @@ func TestDeliver_TamperedInlineResourceRejected(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
-	fm := "---\ntype: context\n---\nbody"
+	fm := "---\ntype: agent\n---\nbody"
 	resp := loadArtifactResponse{
-		ID: "team/x", Type: "context", Version: "1.0.0", Frontmatter: fm,
+		ID: "team/x", Type: "agent", Version: "1.0.0", Frontmatter: fm,
 		Resources: map[string]string{"data/a.txt": "original"},
 	}
 	resp.ContentHash = "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{"data/a.txt": []byte("original")})
@@ -254,9 +254,9 @@ func TestDeliver_ContentHashMatchAccepts(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
-	fm := "---\ntype: context\n---\nbody"
+	fm := "---\ntype: agent\n---\nbody"
 	resp := loadArtifactResponse{
-		ID: "team/x", Type: "context", Version: "1.0.0", Frontmatter: fm,
+		ID: "team/x", Type: "agent", Version: "1.0.0", Frontmatter: fm,
 		Resources: map[string]string{"data/a.txt": "hello"},
 	}
 	resp.ContentHash = "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{"data/a.txt": []byte("hello")})
@@ -391,7 +391,7 @@ func TestDeliver_SynthesizedSkillTamperedRejected(t *testing.T) {
 func TestDeliver_MaterializedAtAbsoluteForRelativeDest(t *testing.T) {
 	t.Chdir(t.TempDir()) // relative dest resolves against this dir; not parallel-safe
 	s := newTestServer(t, &config{harness: "none", verifyPolicy: sign.PolicyNever})
-	resp := fixtureResp("team/x", "---\ntype: context\n---\nbody")
+	resp := fixtureResp("team/x", "---\ntype: agent\n---\nbody")
 	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: "out/dir"})
 	m := out.(map[string]any)
 	paths, _ := m["materialized_at"].([]string)
@@ -454,7 +454,7 @@ func TestDeliver_Base64InlineResourceDecoded(t *testing.T) {
 // materialization.
 func TestDeliver_MultiResourceContentHashRoundTrip(t *testing.T) {
 	t.Parallel()
-	fm := "---\ntype: context\n---\nbody"
+	fm := "---\ntype: agent\n---\nbody"
 	resources := map[string]string{
 		"data/b.txt":  "second",
 		"data/a.txt":  "first",
@@ -473,7 +473,7 @@ func TestDeliver_MultiResourceContentHashRoundTrip(t *testing.T) {
 			copied[k] = v
 		}
 		return sealDelivery(loadArtifactResponse{
-			ID: "team/x", Type: "context", Version: "1.0.0",
+			ID: "team/x", Type: "agent", Version: "1.0.0",
 			Frontmatter: fm, Resources: copied, ContentHash: hash,
 		})
 	}

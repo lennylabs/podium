@@ -205,8 +205,8 @@ When lint passes, commit the artifact.
 
 ## Next steps
 
-- **Write a slash command.** A `command` is a parameterized prompt template the user invokes by name. See [Your first command](your-first-command).
+- **Write a slash command.** A skill whose `invocation` is `user` is a prompt template the user invokes by name. See [Your first command](your-first-command).
 - **Write an agent.** An `agent` is a complete agent definition with its own instructions, dependencies, and optional bundled scripts. See [Your first agent](your-first-agent).
-- **Learn the other built-in types.** [Artifact types](artifact-types) covers `rule`, `hook`, `context`, and `mcp-server` alongside skills, commands, and agents.
+- **Learn the other built-in types.** [Artifact types](artifact-types) covers `rule`, `hook`, and `mcp-server` alongside skills and agents.
 - **Organize multiple artifacts.** Group artifacts with `DOMAIN.md` files that add descriptions, keywords, and featured artifacts. See [Domains](domains).
 - **Share the catalog with a team.** [Progressive adoption](../deployment/progressive-adoption) covers moving from a local catalog to a shared registry, and [Connecting layer sources](../deployment/content/layer-sources) covers publishing from a Git repository.

@@ -194,7 +194,7 @@ func TestRun_FilesystemExtendsDeclarationDropped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if want := []layer.Drop{layer.ExtendsRemovedDrop(legacyID)}; !reflect.DeepEqual(res.Dropped, want) {
+	if want := []layer.Drop{layer.RemovedFeatureDrop(legacyID, layer.ExtendsRemovedConstraint, layer.ExtendsRemovedReason)}; !reflect.DeepEqual(res.Dropped, want) {
 		t.Errorf("Dropped = %+v, want %+v", res.Dropped, want)
 	}
 	if got, want := lockIDs(t, target), []string{collisionOtherID}; !equalStrings(got, want) {

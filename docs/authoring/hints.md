@@ -6,7 +6,7 @@ description: The advisory effort_hint and model_class_hint fields, which record 
 
 # Hints
 
-This page covers the hint fields, which record the runtime resources an artifact ideally consumes. Hints apply to `agent`, `skill`, and `command` artifacts. No built-in adapter currently translates these fields, so a hint has an effect only for a custom SDK consumer that reads it from the manifest and routes accordingly.
+This page covers the hint fields, which record the runtime resources an artifact ideally consumes. Hints apply to `agent` and `skill` artifacts. No built-in adapter currently translates these fields, so a hint has an effect only for a custom SDK consumer that reads it from the manifest and routes accordingly.
 
 ```yaml
 effort_hint: low | medium | high | max
@@ -65,5 +65,5 @@ The fields are advisory because authors do not know what models a consuming depl
 
 ## Lint behavior
 
-- Setting `effort_hint` or `model_class_hint` on a `context`, `rule`, `hook`, or `mcp-server` artifact draws a lint warning ("hints apply only to agent / skill / command").
+- Setting `effort_hint` or `model_class_hint` on a `rule`, `hook`, or `mcp-server` artifact draws a lint warning ("hints apply only to agent / skill").
 - Both fields are optional, and omitting them produces no warning.

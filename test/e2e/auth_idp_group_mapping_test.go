@@ -45,7 +45,7 @@ func TestAuthIdpGroupMapping_RawClaimMapsToLayerGroup(t *testing.T) {
 
 	// A layer restricted to the friendly group name "finance".
 	layerRoot := writeRegistry(t, map[string]string{
-		"finance/forecast/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: finance forecast\n---\n\nbody\n",
+		"finance/forecast/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: finance forecast\n---\n\nbody\n",
 	})
 	cfgPath := filepath.Join(home, "registry.yaml")
 	cfg := "" +

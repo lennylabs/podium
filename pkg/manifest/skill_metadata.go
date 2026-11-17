@@ -19,6 +19,7 @@ var skillMetadataFields = []string{
 	"deprecated",
 	"replaced_by",
 	"release_notes",
+	"invocation",
 }
 
 // skillMetadataCodec decodes one metadata-eligible field. decode reports
@@ -66,6 +67,11 @@ var skillMetadataCodecs = map[string]skillMetadataCodec{
 		encoding: "any string",
 		decode:   decodeReleaseNotes,
 		assign:   func(dst, src *Artifact) { dst.ReleaseNotes = src.ReleaseNotes },
+	},
+	"invocation": {
+		encoding: "any or user",
+		decode:   decodeInvocation,
+		assign:   func(dst, src *Artifact) { dst.Invocation = src.Invocation },
 	},
 }
 
@@ -209,6 +215,21 @@ func ResolveStoredSkill(artifactMD, skillMD []byte) (a *Artifact, s *Skill, fill
 	return a, s, ResolveSkillFields(a, stated, s), true
 }
 
+// ResolveArtifact resolves the artifact a reader acts on from a stored or
+// served pair of manifests. A skill resolves through ResolveStoredSkill, so
+// a SKILL.md metadata value such as invocation counts. Every other input,
+// including a skill whose SKILL.md does not parse, falls back to ARTIFACT.md
+// alone. Admission, the adapters, and the §6.9 guard sites share it so they
+// read one value for the same bytes.
+//
+// Spec: §4.3.4, §6.9, §13.4
+func ResolveArtifact(artifactMD, skillMD []byte) (*Artifact, error) {
+	if a, _, _, ok := ResolveStoredSkill(artifactMD, skillMD); ok {
+		return a, nil
+	}
+	return ParseArtifact(artifactMD)
+}
+
 // decodeWhenToUse reads one situation per line, trimming each line and
 // dropping empty ones. At least one line must remain. A line ends at a line
 // feed or a carriage return, the same set hasLineBreak checks for tags and
@@ -287,6 +308,20 @@ func decodeReplacedBy(v string, out *Artifact) bool {
 func decodeReleaseNotes(v string, out *Artifact) bool {
 	out.ReleaseNotes = v
 	return true
+}
+
+// decodeInvocation accepts exactly any and user. Any other value writes
+// nothing, so an invalid metadata value never reaches the resolved field and
+// the skill resolves to any unless ARTIFACT.md states the key.
+//
+// Spec: §4.3.4
+func decodeInvocation(v string, out *Artifact) bool {
+	switch inv := Invocation(v); inv {
+	case InvocationAny, InvocationUser:
+		out.Invocation = inv
+		return true
+	}
+	return false
 }
 
 // hasLineBreak reports whether v holds a line feed or a carriage return.

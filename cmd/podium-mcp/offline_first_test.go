@@ -19,7 +19,7 @@ import (
 // force a registry call in offline-first.
 func TestLoadArtifact_OfflineFirst_StaleLatestServedFromCache(t *testing.T) {
 	t.Parallel()
-	const fm = "---\ntype: context\nversion: 1.0.0\n---\n"
+	const fm = "---\ntype: agent\nversion: 1.0.0\n---\n"
 	var calls int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -62,8 +62,8 @@ func TestLoadArtifact_OfflineFirst_StaleLatestServedFromCache(t *testing.T) {
 func TestLoadArtifact_OfflineFirst_TrueMissCallsRegistry(t *testing.T) {
 	t.Parallel()
 	respBody := loadArtifactJSON(t, map[string]any{
-		"id": "team/x", "type": "context", "version": "1.0.0",
-		"manifest_body": "fresh-body", "frontmatter": "---\ntype: context\n---\n",
+		"id": "team/x", "type": "agent", "version": "1.0.0",
+		"manifest_body": "fresh-body", "frontmatter": "---\ntype: agent\n---\n",
 	})
 	var calls int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

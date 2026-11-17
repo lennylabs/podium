@@ -29,12 +29,12 @@ func mbServe(t *testing.T, body []byte) string {
 // Spec: §6.6 step 1 — a non-skill manifest body delivered above the cutoff is
 // fetched from its presigned URL, the frontmatter is restored, and the inline
 // manifest_body is re-derived from it (byte-identical to ingest's split).
-func TestFetchManifestBody_ReconstitutesContext(t *testing.T) {
+func TestFetchManifestBody_ReconstitutesAgent(t *testing.T) {
 	t.Parallel()
-	doc := []byte("---\ntype: context\nversion: 1.0.0\ndescription: Glossary.\n---\n\nThe full glossary body.\n")
+	doc := []byte("---\ntype: agent\nversion: 1.0.0\ndescription: Glossary.\n---\n\nThe full glossary body.\n")
 	srv := &mcpServer{cfg: &config{}, http: &http.Client{}}
 	resp := loadArtifactResponse{
-		ID: "finance/glossary", Type: "context",
+		ID: "finance/glossary", Type: "agent",
 		ManifestBodyURL: &largeResourceLink{URL: mbServe(t, doc), ContentHash: mbHash(doc), Size: int64(len(doc))},
 	}
 	if err := srv.fetchManifestBody(&resp, nil); err != nil {
@@ -82,7 +82,7 @@ func TestFetchManifestBody_HashMismatchAborts(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{cfg: &config{}, http: &http.Client{}}
 	resp := loadArtifactResponse{
-		ID: "x", Type: "context",
+		ID: "x", Type: "agent",
 		ManifestBodyURL: &largeResourceLink{URL: mbServe(t, []byte("tampered")), ContentHash: "sha256:" + strings.Repeat("a", 64)},
 	}
 	err := srv.fetchManifestBody(&resp, nil)
@@ -96,7 +96,7 @@ func TestFetchManifestBody_HashMismatchAborts(t *testing.T) {
 func TestFetchManifestBody_NoURLNoop(t *testing.T) {
 	t.Parallel()
 	srv := &mcpServer{cfg: &config{}, http: &http.Client{}}
-	resp := loadArtifactResponse{ID: "x", Type: "context", Frontmatter: "FM", ManifestBody: "B"}
+	resp := loadArtifactResponse{ID: "x", Type: "agent", Frontmatter: "FM", ManifestBody: "B"}
 	if err := srv.fetchManifestBody(&resp, nil); err != nil {
 		t.Fatalf("fetchManifestBody: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestFetchManifestBody_DerivesBodyByDelimiterRule(t *testing.T) {
 	doc := []byte("---\ntype: [unclosed\n---\r\n\nDelimited body.\n")
 	srv := &mcpServer{cfg: &config{}, http: &http.Client{}}
 	resp := loadArtifactResponse{
-		ID: "x", Type: "context",
+		ID: "x", Type: "agent",
 		ManifestBodyURL: &largeResourceLink{URL: mbServe(t, doc), ContentHash: mbHash(doc)},
 	}
 	if err := srv.fetchManifestBody(&resp, nil); err != nil {

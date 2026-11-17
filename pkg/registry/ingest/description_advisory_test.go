@@ -51,7 +51,7 @@ func ctxArtifact(version, desc string) string {
 }
 
 func ctxArtifactBody(version, desc, body string) string {
-	return "---\ntype: context\nversion: " + version + "\ndescription: " + desc + "\n---\n\n" + body + "\n"
+	return "---\ntype: agent\nversion: " + version + "\ndescription: " + desc + "\n---\n\n" + body + "\n"
 }
 
 // Spec: §7.3.1 — the registry flags thin descriptions and pairs of

@@ -126,6 +126,7 @@ func rulesWith(client *http.Client, th Thresholds) []Rule {
 		ruleSkillReservedVersion{},
 		ruleSkillPodiumOnlyFields{},
 		ruleSkillArtifactFields{},
+		ruleSkillInvocation{},
 		ruleSkillRefValidate{},
 		ruleNameSyntax{},
 		ruleVersionSemver{},
@@ -388,6 +389,11 @@ func (r ruleHookEventCanonical) Check(_ context.Context, _ *filesystem.Registry,
 	return out
 }
 
+// ruleEffortHintAppliesToType enforces spec §4.3: effort_hint and
+// model_class_hint apply to agent and skill, so a hint on any other type
+// draws a warning.
+//
+// Spec: §4.3
 type ruleEffortHintAppliesToType struct{}
 
 func (ruleEffortHintAppliesToType) Code() string { return "lint.hint_on_unsupported_type" }
@@ -396,19 +402,16 @@ func (r ruleEffortHintAppliesToType) Check(_ context.Context, _ *filesystem.Regi
 	var out []Diagnostic
 	for _, rec := range records {
 		ty := rec.Artifact.Type
-		isHintTarget := ty == manifest.TypeAgent ||
-			ty == manifest.TypeSkill ||
-			ty == manifest.TypeCommand
-		if isHintTarget {
+		if ty == manifest.TypeAgent || ty == manifest.TypeSkill {
 			continue
 		}
 		if rec.Artifact.EffortHint != "" {
 			out = append(out, warn(rec.ID, r.Code(),
-				fmt.Sprintf("effort_hint set on type %q; hints apply only to agent / skill / command", ty)))
+				fmt.Sprintf("effort_hint set on type %q; hints apply only to agent / skill", ty)))
 		}
 		if rec.Artifact.ModelClassHint != "" {
 			out = append(out, warn(rec.ID, r.Code(),
-				fmt.Sprintf("model_class_hint set on type %q; hints apply only to agent / skill / command", ty)))
+				fmt.Sprintf("model_class_hint set on type %q; hints apply only to agent / skill", ty)))
 		}
 	}
 	return out

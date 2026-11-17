@@ -49,7 +49,7 @@ func TestPodiumSync_RefusesBelowMinServerVersion(t *testing.T) {
 	registry := t.TempDir()
 	testharness.WriteTree(t, registry, testharness.WriteTreeOption{
 		Path:    "glossary/ARTIFACT.md",
-		Content: contextArtifact,
+		Content: agentArtifact,
 	})
 	ws := t.TempDir()
 	// The min_server_version pin lives in the workspace sync.yaml and is read
@@ -73,7 +73,7 @@ func TestPodiumSync_AllowsAtOrAboveMinServerVersion(t *testing.T) {
 	registry := t.TempDir()
 	testharness.WriteTree(t, registry, testharness.WriteTreeOption{
 		Path:    "glossary/ARTIFACT.md",
-		Content: contextArtifact,
+		Content: agentArtifact,
 	})
 	ws := t.TempDir()
 	target := t.TempDir()
@@ -98,7 +98,7 @@ func TestPodiumSync_ProfilePinRefusesOlderAdapter(t *testing.T) {
 	registry := t.TempDir()
 	testharness.WriteTree(t, registry, testharness.WriteTreeOption{
 		Path:    "glossary/ARTIFACT.md",
-		Content: contextArtifact,
+		Content: agentArtifact,
 	})
 	ws := t.TempDir()
 	// The pin lives on the profile, not defaults, and the run selects it.

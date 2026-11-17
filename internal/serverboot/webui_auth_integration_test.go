@@ -226,7 +226,7 @@ func newBrowserStack(t *testing.T, opts stackOpts) *browserStack {
 	}
 	if err := st.PutManifest(t.Context(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "eng/secret", Version: "1.0.0",
-		ContentHash: "sha256:eng", Type: "context", Description: "eng secret", Layer: "eng",
+		ContentHash: "sha256:eng", Type: "agent", Description: "eng secret", Layer: "eng",
 		IngestedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)

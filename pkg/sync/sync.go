@@ -166,9 +166,9 @@ type Result struct {
 	// rather than silently omitting it.
 	Skipped []string
 	// Dropped lists the artifacts a filesystem-source composition dropped
-	// under the §4.6 collision rule or the §4.6 no-inheritance rule
-	// (§13.11.3). Callers render each entry with its Code and Reason; a
-	// server source never reports one.
+	// under the §4.6 collision rule, the §4.6 no-inheritance rule, or the
+	// §4.1 removed-type rule (§13.11.3). Callers render each entry with its
+	// Code and Reason; a server source never reports one.
 	Dropped []layer.Drop
 	// Offline is set when a §7.4 offline-first sync could not reach the
 	// server-source registry and left the existing materialized output in
@@ -203,6 +203,11 @@ type ArtifactResult struct {
 	// description for a skill and the ARTIFACT.md description otherwise.
 	ListingType        string
 	ListingDescription string
+	// UserInvoked reports a skill whose resolved §4.3.4 invocation is user.
+	// Run sets it from the record's resolved artifact, and Listing never
+	// counts such a skill as an entry (§7.5.8). It is not part of the
+	// --json artifacts array.
+	UserInvoked bool
 }
 
 // listingEntry returns the §7.5.8 listing type and description of rec. A
@@ -356,6 +361,7 @@ func Run(opts Options) (*Result, error) {
 			Files:              paths,
 			ListingType:        listingType,
 			ListingDescription: listingDesc,
+			UserInvoked:        rec.Artifact.UserInvoked(),
 		})
 		allFiles = append(allFiles, out...)
 	}
@@ -514,7 +520,8 @@ func offlineFirstNoop(opts Options, adapterID string) *Result {
 // source-neutral records to materialize. A server URL reads the effective
 // view over HTTP; any other value reads the local filesystem registry. The
 // second return lists the artifacts a filesystem-source composition dropped
-// under the §4.6 collision rule or the §4.6 no-inheritance rule (§13.11.3). A
+// under the §4.6 collision rule, the §4.6 no-inheritance rule, or the §4.1
+// removed-type rule (§13.11.3). A
 // server source contributes none, because ingest already rejected the artifact
 // (§7.3.1).
 func resolveRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
@@ -592,8 +599,8 @@ func applyOverlay(base []materialRecord, overlayPath string) ([]materialRecord, 
 // filesystemRecords reads the filesystem registry and converts the result to
 // source-neutral records. The §6.4 workspace overlay is merged by the caller
 // (resolveRecords) so both registry sources honor it identically. The
-// second return lists the artifacts dropped under the §4.6 collision rule or
-// the §4.6 no-inheritance rule (§13.11.3).
+// second return lists the artifacts dropped under the §4.6 collision rule,
+// the §4.6 no-inheritance rule, or the §4.1 removed-type rule (§13.11.3).
 func filesystemRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
 	reg, err := filesystem.Open(opts.RegistryPath)
 	if err != nil {
@@ -604,8 +611,9 @@ func filesystemRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
 	// the same artifact directory (the §13.11.6 migration equivalence). A
 	// cross-layer collision drops the higher-precedence artifact, which a
 	// server would have rejected at ingest, and the walk continues with the
-	// rest. Each artifact whose ARTIFACT.md declares extends: is dropped
-	// before the collision rule, as a server never stores it.
+	// rest. Each artifact whose ARTIFACT.md declares extends: (§4.6) or a
+	// removed type (§4.1) is dropped before the collision rule, as a server
+	// never stores it.
 	var dropped []layer.Drop
 	records, err := reg.Walk(filesystem.WalkOptions{
 		CollisionPolicy: filesystem.CollisionPolicyDrop,
@@ -810,12 +818,12 @@ func removeStalePaths(target string, prior map[string]string, current map[string
 			continue
 		}
 		// Prune the now-empty parent directories up the chain, stopping at the
-		// target root. A nested layout (a skill's .claude/skills/<name>/, the
-		// harness-neutral .podium/context/<id>/) leaves several empty ancestors
-		// when its only file is removed; pruning a single level would strip the
-		// leaf directory but orphan its parent. os.Remove fails on a non-empty
-		// directory naturally, so the walk halts at the first ancestor that still
-		// holds an operator file or a sibling artifact's output.
+		// target root. A nested layout (a skill's .claude/skills/<name>/, a
+		// bundled resource under .podium/resources/<id>/) leaves several empty
+		// ancestors when its only file is removed; pruning a single level would
+		// strip the leaf directory but orphan its parent. os.Remove fails on a
+		// non-empty directory naturally, so the walk halts at the first ancestor
+		// that still holds an operator file or a sibling artifact's output.
 		pruneEmptyParents(target, filepath.Dir(full))
 	}
 }

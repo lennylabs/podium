@@ -268,8 +268,8 @@ func TestSyncEquivalence_SharedMergeTargetsAreByteIdentical(t *testing.T) {
 	t.Parallel()
 	dir := collidingRegistry(t)
 
-	// codex cannot translate the §6.7.1 command cell, so the fixture carries
-	// no type: command artifact and both harnesses materialize the whole set.
+	// The fixture uses only types both harnesses grade ✓ in §6.7.1, so both
+	// materialize the whole set.
 	for _, adapterID := range []string{"claude-code", "codex"} {
 		adapterID := adapterID
 		t.Run(adapterID, func(t *testing.T) {
@@ -471,7 +471,7 @@ func TestSyncEquivalence_LayerCollisionIsByteIdentical(t *testing.T) {
 			}
 
 			want := []layer.Drop{
-				layer.ExtendsRemovedDrop("shared/legacy"),
+				layer.RemovedFeatureDrop("shared/legacy", layer.ExtendsRemovedConstraint, layer.ExtendsRemovedReason),
 				layer.Collision{ArtifactID: "shared/clash", Layer: "team-finance", ExistingLayer: "org-defaults"}.Drop(),
 			}
 			if !reflect.DeepEqual(fsRes.Dropped, want) {
@@ -493,8 +493,8 @@ func TestSyncEquivalence_LayerCollisionIsByteIdentical(t *testing.T) {
 func crossLayerCollisionRegistry(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	contextArtifact := func(description, extends string) string {
-		fm := "---\ntype: context\nversion: 1.0.0\ndescription: " + description + "\nsensitivity: low\n"
+	standInArtifact := func(description, extends string) string {
+		fm := "---\ntype: agent\nversion: 1.0.0\ndescription: " + description + "\nsensitivity: low\n"
 		if extends != "" {
 			fm += "extends: " + extends + "\n"
 		}
@@ -507,22 +507,24 @@ func crossLayerCollisionRegistry(t *testing.T) string {
 		},
 		testharness.WriteTreeOption{Path: "org-defaults/.layer-config", Content: "visibility:\n  public: true\n"},
 		testharness.WriteTreeOption{Path: "team-finance/.layer-config", Content: "visibility:\n  public: true\n"},
-		testharness.WriteTreeOption{Path: "org-defaults/shared/clash/ARTIFACT.md", Content: contextArtifact("from-org clash", "")},
-		testharness.WriteTreeOption{Path: "team-finance/shared/clash/ARTIFACT.md", Content: contextArtifact("from-team clash", "")},
-		testharness.WriteTreeOption{Path: "team-finance/finance/ledger/ARTIFACT.md", Content: contextArtifact("finance ledger", "")},
-		testharness.WriteTreeOption{Path: "org-defaults/shared/legacy/ARTIFACT.md", Content: contextArtifact("from-org legacy", "finance/ledger")},
-		testharness.WriteTreeOption{Path: "team-finance/shared/legacy/ARTIFACT.md", Content: contextArtifact("from-team legacy", "")},
+		testharness.WriteTreeOption{Path: "org-defaults/shared/clash/ARTIFACT.md", Content: standInArtifact("from-org clash", "")},
+		testharness.WriteTreeOption{Path: "team-finance/shared/clash/ARTIFACT.md", Content: standInArtifact("from-team clash", "")},
+		testharness.WriteTreeOption{Path: "team-finance/finance/ledger/ARTIFACT.md", Content: standInArtifact("finance ledger", "")},
+		testharness.WriteTreeOption{Path: "org-defaults/shared/legacy/ARTIFACT.md", Content: standInArtifact("from-org legacy", "finance/ledger")},
+		testharness.WriteTreeOption{Path: "team-finance/shared/legacy/ARTIFACT.md", Content: standInArtifact("from-team legacy", "")},
 	)
 	return dir
 }
 
 // assertTreeHolds asserts that some materialized file under a path naming the
-// artifact ID carries the given text. It reads the adapter-specific layout
-// loosely so the same check serves every adapter.
+// artifact's leaf name carries the given text. It reads the adapter-specific
+// layout loosely so the same check serves every adapter: none writes the agent
+// under <id>/, and claude-code writes it as .claude/agents/<leaf>.md.
 func assertTreeHolds(t *testing.T, tree map[string]string, id, text string) {
 	t.Helper()
+	leaf := id[strings.LastIndex(id, "/")+1:]
 	for path, body := range tree {
-		if strings.Contains(path, id) && strings.Contains(body, text) {
+		if strings.Contains(path, leaf) && strings.Contains(body, text) {
 			return
 		}
 	}
@@ -599,7 +601,7 @@ func TestSyncServerSource_WorkspaceOverlayWins(t *testing.T) {
 	// Stage a workspace overlay overriding notes/journal (served by the
 	// reference fixture's personal layer) with a distinct body.
 	overlayDir := t.TempDir()
-	overlayBody := "---\ntype: context\nversion: 9.9.9\ndescription: overlay override\nsensitivity: low\n---\n\noverlay wins\n"
+	overlayBody := "---\ntype: agent\nversion: 9.9.9\ndescription: overlay override\nsensitivity: low\n---\n\noverlay wins\n"
 	testharness.WriteTree(t, overlayDir, testharness.WriteTreeOption{
 		Path:    "notes/journal/ARTIFACT.md",
 		Content: overlayBody,

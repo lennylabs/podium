@@ -49,9 +49,9 @@ func advisoryRegistry(t *testing.T) string {
 	t.Helper()
 	return writeRegistry(t, map[string]string{
 		".registry-config":                       solofsRegistryConfig("layer-a", "layer-b"),
-		"layer-a/finance/vague/ARTIFACT.md":      contextArtifact("demo"),
-		"layer-a/finance/reconcile/ARTIFACT.md":  contextArtifact(advisoryReconcileDesc),
-		"layer-b/ops/reconcile-copy/ARTIFACT.md": contextArtifact(advisoryReconcileCopyDesc),
+		"layer-a/finance/vague/ARTIFACT.md":      agentArtifact("demo"),
+		"layer-a/finance/reconcile/ARTIFACT.md":  agentArtifact(advisoryReconcileDesc),
+		"layer-b/ops/reconcile-copy/ARTIFACT.md": agentArtifact(advisoryReconcileCopyDesc),
 		"layer-a/ops/rotate-a/SKILL.md": advisorySkill("rotate-a",
 			"Rotate the staging database credentials and confirm each service reconnects.",
 			"Page the on-call database engineer when a read replica lags behind the primary."),
@@ -206,8 +206,8 @@ func TestCatalogAdvisories_JSONRejectsExtends(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                 solofsRegistryConfig("base-layer", "team-layer"),
-		"base-layer/core/note/ARTIFACT.md": contextArtifact("Core note describing the shared finance glossary terms."),
-		"team-layer/team/note/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Team note that extends the shared finance glossary.\nextends: core/note\n---\n\nTeam note body.\n",
+		"base-layer/core/note/ARTIFACT.md": agentArtifact("Core note describing the shared finance glossary terms."),
+		"team-layer/team/note/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Team note that extends the shared finance glossary.\nextends: core/note\n---\n\nTeam note body.\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg, "--json")
 	cliWantExit(t, res, 1, "lint --json with an extends: artifact")
@@ -245,8 +245,8 @@ func TestCatalogAdvisories_JSONCollisionWritesNoEnvelope(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                solofsMultiLayerConfig,
-		"layer-a/shared/note/ARTIFACT.md": contextArtifact("Shared note for the finance close checklist owners."),
-		"layer-b/shared/note/ARTIFACT.md": contextArtifact("Shared note for the treasury payment approval owners."),
+		"layer-a/shared/note/ARTIFACT.md": agentArtifact("Shared note for the finance close checklist owners."),
+		"layer-b/shared/note/ARTIFACT.md": agentArtifact("Shared note for the treasury payment approval owners."),
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg, "--json")
 	cliWantExit(t, res, 1, "lint --json over a collision")

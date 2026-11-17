@@ -94,13 +94,11 @@ func (r *Registry) admitBytes(ctx context.Context, rec store.ManifestRecord) (*m
 // parses is a skill with no ARTIFACT.md, and a skill row's sensitivity,
 // deprecation flag, and replacement are the values §4.3.4 resolves.
 func admittedArtifact(rec store.ManifestRecord) *manifest.Artifact {
-	if a, _, _, ok := manifest.ResolveStoredSkill(rec.Frontmatter, rec.SkillRaw); ok {
-		return a
+	a, err := manifest.ResolveArtifact(rec.Frontmatter, rec.SkillRaw)
+	if err != nil {
+		return nil
 	}
-	if a, err := manifest.ParseArtifact(rec.Frontmatter); err == nil {
-		return a
-	}
-	return nil
+	return a
 }
 
 // distinctResourcePaths refuses a row with two refs under one path. The hash

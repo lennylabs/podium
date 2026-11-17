@@ -34,9 +34,9 @@ import (
 func pineconeRouteRegistry(t *testing.T) string {
 	t.Helper()
 	return writeRegistry(t, map[string]string{
-		"weather/forecast/ARTIFACT.md": contextArtifact("weather forecasting rainfall temperature and wind predictions for tomorrow"),
-		"finance/payroll/ARTIFACT.md":  contextArtifact("employee payroll salary tax withholding and direct deposit"),
-		"cooking/recipes/ARTIFACT.md":  contextArtifact("recipe ingredients cooking instructions and meal preparation steps"),
+		"weather/forecast/ARTIFACT.md": agentArtifact("weather forecasting rainfall temperature and wind predictions for tomorrow"),
+		"finance/payroll/ARTIFACT.md":  agentArtifact("employee payroll salary tax withholding and direct deposit"),
+		"cooking/recipes/ARTIFACT.md":  agentArtifact("recipe ingredients cooking instructions and meal preparation steps"),
 	})
 }
 

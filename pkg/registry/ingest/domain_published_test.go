@@ -50,7 +50,7 @@ func TestIngest_EmitsDomainPublished(t *testing.T) {
 		AuditEmit: collectDomainAudit(&emits),
 		Files: fstest.MapFS{
 			"finance/ap/DOMAIN.md":       &fstest.MapFile{Data: []byte("---\ndescription: AP\n---\n\n# AP\n")},
-			"finance/ap/pay/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("pay"))},
+			"finance/ap/pay/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("pay"))},
 		},
 	})
 	if err != nil {
@@ -84,7 +84,7 @@ func TestIngest_DomainPublishedSilentOnUnchangedReingest(t *testing.T) {
 	}
 	files := fstest.MapFS{
 		"finance/DOMAIN.md":     &fstest.MapFile{Data: []byte("---\ndescription: finance\n---\n")},
-		"finance/x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("x"))},
+		"finance/x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("x"))},
 	}
 	var emits []domainAuditEvent
 	for i := 0; i < 3; i++ {
@@ -111,7 +111,7 @@ func TestIngest_DomainPublishedOnContentChange(t *testing.T) {
 	mk := func(desc string) fstest.MapFS {
 		return fstest.MapFS{
 			"finance/DOMAIN.md":     &fstest.MapFile{Data: []byte("---\ndescription: " + desc + "\n---\n")},
-			"finance/x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("x"))},
+			"finance/x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("x"))},
 		}
 	}
 	var emits []domainAuditEvent
@@ -140,7 +140,7 @@ func TestIngest_RootDomainMDDoesNotPublish(t *testing.T) {
 		TenantID: "t", LayerID: "L", AuditEmit: collectDomainAudit(&emits),
 		Files: fstest.MapFS{
 			"DOMAIN.md":           &fstest.MapFile{Data: []byte("---\ndescription: root\n---\n")},
-			"finance/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("x"))},
+			"finance/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("x"))},
 		},
 	}); err != nil {
 		t.Fatalf("Ingest: %v", err)

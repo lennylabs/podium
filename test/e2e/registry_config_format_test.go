@@ -134,7 +134,7 @@ func TestRegistryConfig_OAuthAudienceListFromEnv(t *testing.T) {
 // required bucket refuses startup, naming the missing key.
 func TestRegistryConfig_S3MissingBucketRefusesStart(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"a/ARTIFACT.md": contextArtifact("a")})
+	reg := writeRegistry(t, map[string]string{"a/ARTIFACT.md": agentArtifact("a")})
 	// The missing-bucket refusal fires before the listener binds, so port 0
 	// carries it.
 	res := runPodium(t, "", []string{

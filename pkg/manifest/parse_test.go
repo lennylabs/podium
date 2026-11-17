@@ -110,21 +110,21 @@ func TestDeclaresExtends(t *testing.T) {
 		name string
 		src  []byte
 	}{
-		{"block", []byte("---\ntype: context\nextends: a\n---\n" + body)},
+		{"block", []byte("---\ntype: agent\nextends: a\n---\n" + body)},
 		{"flow mapping", []byte("---\n{type: skill, extends: a}\n---\n" + body)},
-		{"quoted key", []byte("---\ntype: context\n\"extends\": a\n---\n" + body)},
-		{"hex escape", []byte("---\ntype: context\n\"\\x65xtends\": a\n---\n" + body)},
-		{"unicode escape", []byte("---\ntype: context\n\"ext\\u0065nds\": a\n---\n" + body)},
-		{"explicit key continuation", []byte("---\ntype: context\n? \"ext\\\n  ends\"\n: a\n---\n" + body)},
-		{"binary implicit", []byte("---\ntype: context\n!!binary ZXh0ZW5kcw==: a\n---\n" + body)},
-		{"binary explicit key", []byte("---\ntype: context\n? !!binary ZXh0ZW5kcw==\n: a\n---\n" + body)},
-		{"binary verbose tag", []byte("---\ntype: context\n!<tag:yaml.org,2002:binary> ZXh0ZW5kcw==: a\n---\n" + body)},
-		{"utf-16le", utf16Frontmatter("type: context\nextends: a\n", binary.LittleEndian, []byte{0xff, 0xfe})},
-		{"utf-16be", utf16Frontmatter("type: context\nextends: a\n", binary.BigEndian, []byte{0xfe, 0xff})},
-		{"empty value", []byte("---\ntype: context\nextends:\n---\n" + body)},
-		{"empty string value", []byte("---\ntype: context\nextends: \"\"\n---\n" + body)},
-		{"merge key", []byte("---\ntype: context\n<<: {extends: a}\n---\n" + body)},
-		{"beside a typed-decode failure", []byte("---\ntype: context\ndescription: [x]\nextends: a\n---\n" + body)},
+		{"quoted key", []byte("---\ntype: agent\n\"extends\": a\n---\n" + body)},
+		{"hex escape", []byte("---\ntype: agent\n\"\\x65xtends\": a\n---\n" + body)},
+		{"unicode escape", []byte("---\ntype: agent\n\"ext\\u0065nds\": a\n---\n" + body)},
+		{"explicit key continuation", []byte("---\ntype: agent\n? \"ext\\\n  ends\"\n: a\n---\n" + body)},
+		{"binary implicit", []byte("---\ntype: agent\n!!binary ZXh0ZW5kcw==: a\n---\n" + body)},
+		{"binary explicit key", []byte("---\ntype: agent\n? !!binary ZXh0ZW5kcw==\n: a\n---\n" + body)},
+		{"binary verbose tag", []byte("---\ntype: agent\n!<tag:yaml.org,2002:binary> ZXh0ZW5kcw==: a\n---\n" + body)},
+		{"utf-16le", utf16Frontmatter("type: agent\nextends: a\n", binary.LittleEndian, []byte{0xff, 0xfe})},
+		{"utf-16be", utf16Frontmatter("type: agent\nextends: a\n", binary.BigEndian, []byte{0xfe, 0xff})},
+		{"empty value", []byte("---\ntype: agent\nextends:\n---\n" + body)},
+		{"empty string value", []byte("---\ntype: agent\nextends: \"\"\n---\n" + body)},
+		{"merge key", []byte("---\ntype: agent\n<<: {extends: a}\n---\n" + body)},
+		{"beside a typed-decode failure", []byte("---\ntype: agent\ndescription: [x]\nextends: a\n---\n" + body)},
 	}
 	for _, tc := range trueCases {
 		t.Run("true/"+tc.name, func(t *testing.T) {
@@ -140,11 +140,11 @@ func TestDeclaresExtends(t *testing.T) {
 	}{
 		{"nil", nil},
 		{"empty", []byte{}},
-		{"implicit split quoted key", []byte("---\ntype: context\n\"ext\\\n  ends\": a\n---\n" + body)},
-		{"nested", []byte("---\ntype: context\nmetadata:\n  extends: a\n---\n" + body)},
-		{"value substring", []byte("---\ntype: context\ndescription: never extends anything\n---\n" + body)},
-		{"body only", []byte("---\ntype: context\n---\n\nextends: a\n")},
-		{"no frontmatter", []byte("type: context\nextends: a\n")},
+		{"implicit split quoted key", []byte("---\ntype: agent\n\"ext\\\n  ends\": a\n---\n" + body)},
+		{"nested", []byte("---\ntype: agent\nmetadata:\n  extends: a\n---\n" + body)},
+		{"value substring", []byte("---\ntype: agent\ndescription: never extends anything\n---\n" + body)},
+		{"body only", []byte("---\ntype: agent\n---\n\nextends: a\n")},
+		{"no frontmatter", []byte("type: agent\nextends: a\n")},
 		{"malformed flow mapping", []byte("---\n{type: skill, extends: a\n---\n" + body)},
 	}
 	for _, tc := range falseCases {
@@ -152,6 +152,66 @@ func TestDeclaresExtends(t *testing.T) {
 			t.Parallel()
 			if DeclaresExtends(tc.src) {
 				t.Errorf("DeclaresExtends(%q) = true, want false", tc.src)
+			}
+		})
+	}
+}
+
+// Spec: §4.1 — command and context are removed types, each with a non-empty
+// replacement phrase, and the five remaining types are not. It fails against a
+// predicate keyed on the type list rather than on the removed set.
+func TestIsRemovedType(t *testing.T) {
+	t.Parallel()
+	for _, typ := range []ArtifactType{"command", "context"} {
+		if !IsRemovedType(typ) {
+			t.Errorf("IsRemovedType(%q) = false, want true", typ)
+		}
+		if RemovedTypeReplacement(typ) == "" {
+			t.Errorf("RemovedTypeReplacement(%q) is empty", typ)
+		}
+	}
+	if got := RemovedTypeReplacement("command"); !strings.Contains(got, `metadata.invocation is "user"`) {
+		t.Errorf("command replacement = %q, want it to name metadata.invocation", got)
+	}
+	if got := RemovedTypeReplacement("context"); !strings.Contains(got, "references/") {
+		t.Errorf("context replacement = %q, want it to name references/", got)
+	}
+	for _, typ := range []ArtifactType{TypeSkill, TypeAgent, TypeRule, TypeHook, TypeMCPServer, "Command", ""} {
+		if IsRemovedType(typ) {
+			t.Errorf("IsRemovedType(%q) = true, want false", typ)
+		}
+		if got := RemovedTypeReplacement(typ); got != "" {
+			t.Errorf("RemovedTypeReplacement(%q) = %q, want empty", typ, got)
+		}
+	}
+}
+
+// Spec: §4.1, §4.6 — a stored row retires when its type is a removed type or
+// its frontmatter declares extends:, and serves otherwise. It fails against a
+// predicate that reads only DeclaresExtends or only the type.
+func TestRetiredRow(t *testing.T) {
+	t.Parallel()
+	plain := []byte("---\ntype: skill\nversion: 1.0.0\n---\n\nbody\n")
+	extends := []byte("---\ntype: agent\nextends: a/b\n---\n\nbody\n")
+	cases := []struct {
+		name string
+		fm   []byte
+		typ  string
+		want bool
+	}{
+		{"extends", extends, "agent", true},
+		{"command", []byte("---\ntype: command\n---\n\nbody\n"), "command", true},
+		{"context", []byte("---\ntype: context\n---\n\nbody\n"), "context", true},
+		{"removed type column with empty frontmatter", nil, "context", true},
+		{"plain skill", plain, "skill", false},
+		{"plain agent", []byte("---\ntype: agent\n---\n\nbody\n"), "agent", false},
+		{"empty", nil, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := RetiredRow(tc.fm, tc.typ); got != tc.want {
+				t.Errorf("RetiredRow(%q, %q) = %v, want %v", tc.fm, tc.typ, got, tc.want)
 			}
 		})
 	}

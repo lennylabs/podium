@@ -231,9 +231,10 @@ The code applies when `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above 0 and the 
 |:--|:--|
 | The manifest could not be decoded into an artifact record. | none |
 | An `ARTIFACT.md` declares the removed `extends` key. The registry refuses it before lint. | `"extends_removed"` |
+| An `ARTIFACT.md` declares the removed type `command` or `context`. The registry refuses it before lint and after the `extends` check, so an `ARTIFACT.md` that declares both reports `extends_removed`. | `"type_removed"` |
 | A skill with no declared version has content that a stored or soft-deleted row of the artifact already holds under another version. Set `metadata.version` in `SKILL.md`, or change the content, to publish such a skill. | `"auto_version_duplicate_content"` |
 
-A filesystem-source `podium sync` reports the same code for an `ARTIFACT.md` that declares `extends:`. It drops that artifact before the collision rule, materializes the rest, and exits 1.
+A filesystem-source `podium sync` reports the same code for an `ARTIFACT.md` that declares `extends:` or a removed type. It drops that artifact before the collision rule, materializes the rest, and exits 1.
 
 ### materialize.*
 
@@ -246,7 +247,7 @@ A filesystem-source `podium sync` reports the same code for an `ARTIFACT.md` tha
 | `materialize.stale_resolution` | `podium-mcp` received a validly signed record for a `latest` load whose artifact revision is below one it already accepted, or is absent or malformed. See [materialize.stale_resolution details](#materializestale_resolution-details). |
 | `materialize.hook_failed` | A materialization hook returned an error, so the artifact is not written. |
 | `materialize.sandbox_violation` | A hook attempted an action its sandbox profile does not permit. |
-| `materialize.untranslatable` | The selected harness adapter cannot translate the artifact's type, mode, or one or more of its fields onto that harness (a §6.7.1 ✗ cell). Use `harness: none` for raw output, or `target_harnesses:` to opt the artifact out of that harness. For example, a plugin-layout type (`skill`, `agent`, `command`, `rule`, `hook`, `mcp-server`) on `claude-cowork` fails on both `podium sync` and `load_artifact`. Cowork has no project-scope surface, so the artifact ships through the published Claude marketplace instead. |
+| `materialize.untranslatable` | The selected harness adapter cannot translate the artifact's type, mode, or one or more of its fields onto that harness (a §6.7.1 ✗ cell). Use `harness: none` for raw output, or `target_harnesses:` to opt the artifact out of that harness. For example, every type on `claude-cowork` fails on both `podium sync` and `load_artifact`. Cowork has no project-scope surface, so the artifact ships through the published Claude marketplace instead. |
 
 #### materialize.signature_invalid causes
 
@@ -279,7 +280,7 @@ The load stops before anything is cached or written (§4.7.10, §6.5).
 - **Scope.** A request that names a version, a range, or a content hash is never compared with the revision mark.
 - **Retry.** The error is not retryable, and a retry in the same session repeats it.
 - **Lagging replica or pinned session.** When the refusal came from a lagging replica while the registry was in read-only mode, or from a session pinned to an older version, start a new session. It loads the current `latest` once the registry is out of read-only mode. Pass a new `session_id`, or restart `podium-mcp` when the load passes none.
-- **Revision rollback.** Reset the revision marks after any of these events: the registry is restored from an earlier backup, a lagging replica is promoted, or the newest version is purged, erased, retired under the [no-inheritance rule](../deployment/content/layers#inheritance), or leaves the caller's view. Stop every MCP server that uses the cache directory, then run `podium cache reset-revisions <id>`.
+- **Revision rollback.** Reset the revision marks after any of these events: the registry is restored from an earlier backup, a lagging replica is promoted, or the newest version is purged, erased, retired under the [no-inheritance rule](../deployment/content/layers#inheritance) or the [removed-type rule](../deployment/content/layers#removed-types), or leaves the caller's view. Stop every MCP server that uses the cache directory, then run `podium cache reset-revisions <id>`.
 
 #### Stored-row admission refusals
 

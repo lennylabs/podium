@@ -53,7 +53,7 @@ func TestAuditSink_RegistryEndpointRedirect(t *testing.T) {
 	}))
 	t.Cleanup(recorder.Close)
 
-	reg := writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")})
 	home := t.TempDir()
 	headers := filepath.Join(t.TempDir(), "audit-headers")
 	if err := os.WriteFile(headers, []byte("Authorization: Bearer hv-3mzt\n"), 0o600); err != nil {
@@ -579,7 +579,7 @@ func TestAuditSink_MCPFlushesOnSignal(t *testing.T) {
 		t.Parallel()
 		rcv := refusingReceiver(t)
 		const id = "finance/glossary"
-		stub, _ := mbStubRegistry(t, id, contextArtifact("Glossary"), http.StatusOK)
+		stub, _ := mbStubRegistry(t, id, agentArtifact("Glossary"), http.StatusOK)
 		registry, arrived, release := holdingRegistry(t, "/v1/load_artifact", stub)
 		logPath := filepath.Join(t.TempDir(), "mcp.log")
 		p := startMCP(t, append(mcpEnv(t, "PODIUM_AUDIT_SINK="+logPath+","+rcv.URL()),

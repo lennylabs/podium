@@ -10,10 +10,10 @@ import (
 )
 
 // This file holds the shared §6.7 materialization helpers used by the
-// per-harness adapters: type routing to native locations, the harness-neutral
-// context bucket, skill folders, rule injection into shared context files, the
-// hook and mcp-server config-merge fragments, and the small format
-// translations (Gemini command TOML, Codex agent TOML).
+// per-harness adapters: type routing to native locations, skill folders, rule
+// injection into shared context files, the hook and mcp-server config-merge
+// fragments, and the small format translations (Gemini command TOML, Codex
+// agent TOML).
 
 func sortFiles(out []File) {
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
@@ -36,37 +36,32 @@ func parsed(src Source) *manifest.Artifact {
 	return art
 }
 
-// contextOut materializes a `type: context` artifact to the harness-neutral
-// `.podium/context/<id>/` directory (§6.7), identical for every adapter.
-func contextOut(src Source) []File {
-	dir := path.Join(".podium", "context", src.ArtifactID)
-	out := []File{}
-	if len(src.ArtifactBytes) > 0 {
-		out = append(out, File{Path: path.Join(dir, "ARTIFACT.md"), Content: src.ArtifactBytes})
-	}
-	out = appendResources(out, dir, src.Resources)
-	sortFiles(out)
-	return out
-}
-
-// skillOut materializes a skill folder at dir: SKILL.md, with compatibility
-// derived per §4.3.4 when the author omitted it, plus the bundled scripts/,
-// references/, and assets/ resources alongside it.
-func skillOut(dir string, src Source) []File {
+// skillOut materializes a skill folder at dir: the SKILL.md skillMarkdown
+// renders for ctl, plus the bundled scripts/, references/, and assets/
+// resources alongside it. For controlOpenAIYAML on a user-invoked skill it
+// also writes the agents/openai.yaml policy file in place of an authored one,
+// so the folder holds exactly one.
+//
+// Spec: §4.3.4, §6.7
+func skillOut(dir string, src Source, ctl userOnlyControl) []File {
 	out := []File{}
 	if len(src.SkillBytes) > 0 {
-		// Spec: §4.3.4: every adapter that writes a skill's SKILL.md derives
-		// compatibility when the author omitted it.
-		out = append(out, File{Path: path.Join(dir, "SKILL.md"), Content: deriveSkillCompatibility(src.SkillBytes, src.ArtifactBytes)})
+		out = append(out, File{Path: path.Join(dir, "SKILL.md"), Content: skillMarkdown(src, ctl)})
 	}
-	out = appendResources(out, dir, src.Resources)
+	res := src.Resources
+	if ctl == controlOpenAIYAML && userInvoked(src) {
+		out = append(out, openAIYAMLFile(dir, src))
+		res = withoutResource(res, openAIYAMLPath)
+	}
+	out = appendResources(out, dir, res)
 	sortFiles(out)
 	return out
 }
 
 // singleFileOut writes content to primaryPath and any bundled resources to the
-// harness-neutral `.podium/resources/<id>/` bucket (non-skill single-file types
-// have no native home for resources).
+// harness-neutral `.podium/resources/<id>/` bucket, because a single-file
+// output (an agent file, or the command file a user-invoked skill falls back
+// to) has no native home for resources.
 func singleFileOut(primaryPath string, content []byte, src Source) []File {
 	out := []File{{Path: primaryPath, Content: content}}
 	out = appendResources(out, path.Join(".podium", "resources", src.ArtifactID), src.Resources)
@@ -92,15 +87,14 @@ func injectRule(file string, src Source) File {
 
 // --- format translations -----------------------------------------------------
 
-// geminiCommandTOML renders a command as Gemini CLI's TOML custom-command
-// format: a one-line description and a prompt multiline string.
-func geminiCommandTOML(src Source) []byte {
-	art := parsed(src)
+// geminiCommandTOML renders Gemini CLI's TOML custom-command format: a
+// one-line description, omitted when empty, and a prompt multiline string.
+func geminiCommandTOML(description, prompt string) []byte {
 	var b strings.Builder
-	if art.Description != "" {
-		b.WriteString("description = " + tomlBasic(art.Description) + "\n")
+	if description != "" {
+		b.WriteString("description = " + tomlBasic(description) + "\n")
 	}
-	b.WriteString("prompt = " + tomlMultiline(art.Body) + "\n")
+	b.WriteString("prompt = " + tomlMultiline(prompt) + "\n")
 	return []byte(b.String())
 }
 

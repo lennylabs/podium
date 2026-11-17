@@ -97,7 +97,7 @@ func TestRuntimeLayerVisibility_SQLiteReadPath(t *testing.T) {
 	rlvLayer(t, st, store.LayerConfig{TenantID: "default", ID: "org", Order: 1, Organization: true})
 	rlvManifest(t, st, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "org/x", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Layer: "org",
+		ContentHash: "sha256:a", Type: "agent", Layer: "org",
 	})
 
 	// Boot-time slice carries only the admin layer (alice's layer does not yet
@@ -123,7 +123,7 @@ func TestRuntimeLayerVisibility_SQLiteReadPath(t *testing.T) {
 	// A reingest would populate it; put the layer's artifact directly.
 	rlvManifest(t, st, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "alice/y", Version: "1.0.0",
-		ContentHash: "sha256:b", Type: "context", Layer: "alice-personal",
+		ContentHash: "sha256:b", Type: "agent", Layer: "alice-personal",
 	})
 
 	// Read servers over the same store, one per identity.

@@ -420,11 +420,12 @@ type RejectedArtifact struct {
 	Reason     string
 	Code       string // §6.10 namespaced code
 	// Details carries the structured detail the rejecting rule defines: the
-	// constraint of the §4.6 no-inheritance rule (extends_removed) and of the
-	// §7.3.1 registry-assigned-version rule (auto_version_duplicate_content).
-	// It is nil for every rule that defines none.
+	// constraint of the §4.6 no-inheritance rule (extends_removed), of the
+	// §4.1 removed-type rule (type_removed), and of the §7.3.1
+	// registry-assigned-version rule (auto_version_duplicate_content). It is
+	// nil for every rule that defines none.
 	//
-	// Spec: §4.6, §7.3.1
+	// Spec: §4.1, §4.6, §7.3.1
 	Details map[string]any
 }
 
@@ -534,11 +535,12 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		return nil, err
 	}
 
-	// The §4.6 no-inheritance rule runs before lint and before every other
-	// per-artifact rule, and the refused records leave the set lint, the
-	// description advisories, and the server_identifier index read, so a
-	// refused mcp-server never resolves an mcpServers edge.
-	records, refused := refuseExtends(records)
+	// The §4.6 no-inheritance rule and the §4.1 removed-type rule run before
+	// lint and before every other per-artifact rule, and the refused records
+	// leave the set lint, the description advisories, and the
+	// server_identifier index read, so a refused mcp-server never resolves an
+	// mcpServers edge.
+	records, refused := refuseRemovedFeatures(records)
 
 	// Run lint over the collected set; diagnostics with severity Error
 	// abort their artifact's ingest.
@@ -1507,27 +1509,30 @@ func collisionRejection(tenantID, layerID, id, existingLayer string) RejectedArt
 	}
 }
 
-// refuseExtends partitions the walked records under the §4.6 no-inheritance
-// rule. Each record whose authored ARTIFACT.md declares extends: becomes an
-// ingest.invalid_artifact rejection with the extends_removed constraint, and
-// the rest are returned in walk order. A plain skill's AuthoredBytes is empty,
-// so its synthesized document is never tested for the key; AuthoredBytes is
-// read for parity with filesystem.Walk.
+// refuseRemovedFeatures partitions the walked records under the §4.6
+// no-inheritance rule and the §4.1 removed-type rule. Each record that
+// layer.RemovedFeature refuses becomes an ingest.invalid_artifact rejection
+// whose details carry the classifier's constraint, and the rest are returned
+// in walk order. A plain skill's AuthoredBytes is empty, so its synthesized
+// document is never tested for the key; AuthoredBytes is read for parity with
+// filesystem.Walk.
 //
-// Spec: §4.6, §7.3.1
-func refuseExtends(records []filesystem.ArtifactRecord) ([]filesystem.ArtifactRecord, []RejectedArtifact) {
+// Spec: §4.1, §4.6, §7.3.1
+func refuseRemovedFeatures(records []filesystem.ArtifactRecord) ([]filesystem.ArtifactRecord, []RejectedArtifact) {
 	var refused []RejectedArtifact
 	kept := records[:0:0]
-	for _, rec := range records {
-		if !manifest.DeclaresExtends(rec.AuthoredBytes) {
+	for i := range records {
+		rec := records[i]
+		constraint, reason, ok := layer.RemovedFeature(rec.AuthoredBytes, rec.Type())
+		if !ok {
 			kept = append(kept, rec)
 			continue
 		}
 		refused = append(refused, RejectedArtifact{
 			ArtifactID: rec.ID,
-			Reason:     layer.ExtendsRemovedReason,
+			Reason:     reason,
 			Code:       layer.InvalidArtifactCode,
-			Details:    map[string]any{"constraint": layer.ExtendsRemovedConstraint},
+			Details:    map[string]any{"constraint": constraint},
 		})
 	}
 	return kept, refused

@@ -42,12 +42,12 @@ A skill's `SKILL.md` carries the agentskills.io fields. Its `metadata` map can a
 | `allowed-tools` | Optional (experimental) | Not used | Not used |
 | `type` | Not used | Yes (`type: skill`); implied when `ARTIFACT.md` is absent | Yes |
 | `version` | As `metadata.version` (string) | Optional; equal to `metadata.version` when that is a `major.minor.patch` value | Yes |
-| `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes` | Optional, as `metadata` values in the encodings of [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) | Optional; takes precedence over the `metadata` value when stated | Yes |
+| `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, `invocation` | Optional, as `metadata` values in the encodings of [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) | Optional; takes precedence over the `metadata` value when stated | Yes |
 | `audit_redact`, `lint_suppress`, `source` | Not used | Yes | Yes |
 | `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `external_resources`, `target_harnesses` | Not used | Yes | Yes |
 | Type-specific fields (`input`, `output`, `delegates_to`, `rule_*`, `hook_*`, `server_identifier`) | Not used | Yes (when applicable) | Yes (when applicable) |
 
-Non-skill types (`agent`, `context`, `command`, `rule`, `hook`, `mcp-server`, and extension types) have no `SKILL.md`, and `ARTIFACT.md` carries every field.
+Non-skill types (`agent`, `rule`, `hook`, `mcp-server`, and extension types) have no `SKILL.md`, and `ARTIFACT.md` carries every field.
 
 ### Name constraints
 
@@ -64,7 +64,7 @@ Lint applies these constraints to any `name:` an artifact declares, whatever its
 
 ## Podium fields in SKILL.md metadata
 
-A skill's `SKILL.md` `metadata` can carry `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, and `release_notes`. Each key is the field name, and each value is a string in the encoding the table below states. A skill that sets its Podium fields this way needs no `ARTIFACT.md`:
+A skill's `SKILL.md` `metadata` can carry `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, and `invocation`. Each key is the field name, and each value is a string in the encoding the table below states. A skill that sets its Podium fields this way needs no `ARTIFACT.md`:
 
 ```yaml
 ---
@@ -89,6 +89,7 @@ metadata:
 | `deprecated` | `true` or `false` | That boolean |
 | `replaced_by` | One line | That value |
 | `release_notes` | Any string | That value |
+| `invocation` | `any` or `user` | That value |
 
 A `metadata` value that is the empty string counts as absent, and so does a YAML null such as `~`, which reads as the empty string under `metadata`. YAML reads an unquoted `deprecated: true` as the string `true` under `metadata`, so the value follows its encoding without quotes.
 
@@ -106,6 +107,16 @@ When `ARTIFACT.md` states a key and the `metadata` value for that key follows it
 - `metadata` values are strings, so a sequence or a mapping under `metadata`, such as `tags: [a, b]`, makes `SKILL.md` fail to parse. The error names the key, for example `metadata.tags is not a string`, and for `tags` it adds that the value is comma-separated. The layer ingest that reads such a skill fails as a whole and stores no row from that ingest, `POST /v1/layers/reingest` answers `422 ingest.lint_failed` with a message that names the key, and `podium lint` reports the parse error and exits 1.
 - A `metadata` key that names one of these fields takes the Podium meaning, whichever tool wrote it. A value that another tool writes in a different encoding is read in the Podium encoding, so `tags: "a;b"` is the single tag `a;b`.
 - Apart from `version`, a `metadata` key that names any other Podium field, such as `sandbox_profile`, `effort_hint`, `model_class_hint`, `source`, or `runtime_requirements`, is a free-form value. Podium ignores it, and lint reports nothing. Set those fields in `ARTIFACT.md`.
+
+### Invocation
+
+`invocation` applies to `type: skill` and states who starts the skill. A skill whose `invocation` is `user` is meant for a human to invoke, typically as a slash command, and the harness adapters materialize it with the harness's user-only control or as the harness's native command file. [User-invoked skills](artifact-types#user-invoked-skills) lists the output for each harness. Every other skill has `invocation` `any`: the agent can load it on its own, and a human can invoke it.
+
+`any` is the default. It applies when the field is absent and when the resolved value is anything other than `user`, including the empty string, a YAML null, a value in another case such as `User`, and an unknown word. The field follows the [precedence](#precedence) of the other fields in this table: when `ARTIFACT.md` states `invocation`, its value decides whatever `metadata` holds, and otherwise a `metadata` value of `any` or `user` decides. Every reader resolves the field this way whether or not lint runs, including the workspace overlay and a filesystem-source `podium sync`.
+
+An invalid value draws a warning and leaves the resolved value at `any`. An `ARTIFACT.md` value draws `lint.skill_invocation`, which names the value and the allowed values, and a `metadata` value draws `lint.skill_metadata_field_ignored`. `invocation` set on a type other than `skill` draws `lint.skill_invocation`, and Podium ignores the value. An `ARTIFACT.md` that states `any`, an empty value, or an invalid value beside `metadata.invocation: "user"` draws `lint.skill_artifact_field_mismatch`, because the stated key decides.
+
+A harness control that the author writes in `SKILL.md`, such as `disable-model-invocation: true`, passes through unchanged on a skill whose `invocation` is `any`, so the harness that reads the key treats the skill as user-only and every other harness does not. On a skill whose `invocation` is `user`, the claude-code, cursor, and pi adapters write `disable-model-invocation: true` as the YAML boolean. They keep an authored value that is already the boolean `true` and replace any other authored value, including `false` and the quoted string `"true"`. An authored `agents/openai.yaml` in the skill folder is copied unchanged on a skill whose `invocation` is `any`. On a skill whose `invocation` is `user`, the codex adapter keeps the file's other keys and sets `policy.allow_implicit_invocation` to the YAML boolean `false`. Lint reports nothing for an authored control, because it does not read harness-native keys.
 
 ### Multi-line `when_to_use`
 
@@ -130,7 +141,7 @@ license: MIT                       # SPDX identifier
 
 ```yaml
 # In ARTIFACT.md (every non-skill type; optional overlay for skills):
-type: skill | agent | context | command | rule | hook | mcp-server | <extension type>
+type: skill | agent | rule | hook | mcp-server | <extension type>
 version: 1.0.0                     # semver, author-chosen
 when_to_use:
   - "After month-end close, to flag unusual variance vs. forecast"
@@ -146,7 +157,7 @@ lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence
 
 | Field | Type | Required | Description |
 |:--|:--|:--|:--|
-| `type` | enum | Yes (implied for a skill with no `ARTIFACT.md`) | `skill`, `agent`, `context`, `command`, `rule`, `hook`, `mcp-server`, or an extension type. See [Artifact types](artifact-types). |
+| `type` | enum | Yes (implied for a skill with no `ARTIFACT.md`) | `skill`, `agent`, `rule`, `hook`, `mcp-server`, or an extension type. `command` and `context` are [removed types](artifact-types#removed-types), which ingest refuses. See [Artifact types](artifact-types). |
 | `name` | string | Yes | Short identifier that follows the [name constraints](#name-constraints). For a skill, it must match the parent directory name. The canonical artifact ID is the directory path under the registry root and is separate from this field. |
 | `version` | semver | Yes, except for a skill | An authored version is `major.minor.patch`, chosen by the author. Once `(artifact_id, version)` is ingested, it is bit-for-bit immutable, so bump the version whenever the content changes. A skill's version comes from `ARTIFACT.md` or `SKILL.md`, or the registry assigns one. See [Skill versions](#skill-versions). |
 | `description` | string | Yes | States what the artifact does and when to use it. The harness uses it to decide whether the artifact matches a prompt, and a vague description gets ignored. At most 1024 characters for a skill. |
@@ -208,7 +219,7 @@ allowed-tools:
 | Field | Type | Description |
 |:--|:--|:--|
 | `compatibility` | string | Free-form environment notes, at most 500 characters. SKILL.md-aware tools read it to show preconditions to a reader. When it is omitted, every harness adapter that writes a skill's `SKILL.md` derives a compatibility string from `runtime_requirements` and `sandbox_profile` and adds it to the materialized `SKILL.md`. The `none` adapter copies `SKILL.md` unchanged and leaves the field absent. Published marketplace output carries the same line. |
-| `metadata` | map (string to string) | Open-ended map for client-specific properties that the agentskills.io specification does not define. Podium reads `version`, which carries the skill's version (see [Skill versions](#skill-versions)), and `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, and `release_notes` (see [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata)). Podium ignores every other key. |
+| `metadata` | map (string to string) | Open-ended map for client-specific properties that the agentskills.io specification does not define. Podium reads `version`, which carries the skill's version (see [Skill versions](#skill-versions)), and `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, and `invocation` (see [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata)). Podium ignores every other key. |
 | `allowed-tools` | list of strings | Experimental. Tools the skill is pre-approved to call. Podium's parser rejects a bare string, so write one list entry per tool. Adapter coverage varies by harness. |
 
 The body is the Markdown after the frontmatter. The agentskills.io specification recommends at most 5K tokens and 500 lines, with longer reference content factored into `references/`. [Manifest size lint](bundled-resources#manifest-size-lint) gives the thresholds lint enforces.
@@ -229,6 +240,7 @@ The body is the Markdown after the frontmatter. The agentskills.io specification
 | A `version` in `ARTIFACT.md` equals `SKILL.md` `metadata.version` when both are set and `metadata.version` is a `major.minor.patch` value. | Error on mismatch (`lint.skill_artifact_field_mismatch`) |
 | When `ARTIFACT.md` states a key that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists and the `SKILL.md` `metadata` value for that key follows its encoding, the two values are equal. `tags` and `when_to_use` compare as ordered lists. | Error on mismatch (`lint.skill_artifact_field_mismatch`) |
 | A `SKILL.md` `metadata` value for a key that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists follows its encoding. A value that does not is ignored, and the diagnostic names the key, the value, and the encoding. | Warning (`lint.skill_metadata_field_ignored`); `lint_suppress` does not silence it |
+| A non-empty `ARTIFACT.md` `invocation` value is `any` or `user`. Another value resolves to `any`, and the diagnostic names the value and the allowed values. | Warning (`lint.skill_invocation`) |
 | The `ARTIFACT.md` body is empty or a single HTML comment. | Warning |
 | A skill that declares no usable version has its version assigned. | Warning (`lint.skill_version_assigned`) |
 | An authored version in the reserved `0.0.0-auto.<N>` form, in either file, is invalid. | Error (`lint.invalid_version`) |
@@ -287,9 +299,12 @@ sbom:                              # author-supplied passthrough
 
 ## Type-specific fields
 
-These fields live in `ARTIFACT.md` and apply to specific types only.
+These fields live in `ARTIFACT.md` and apply to specific types only. A skill can also carry `invocation` in `SKILL.md` `metadata`.
 
 ```yaml
+# For type: skill — who starts the skill; default: any
+invocation: any | user
+
 # For type: agent — declared input/output schemas
 input: { $ref: ./schemas/input.json }
 output: { $ref: ./schemas/output.json }
@@ -318,6 +333,7 @@ target_harnesses: [claude-code, opencode]
 
 | Field | Applies to | Description |
 |:--|:--|:--|
+| `invocation` | `skill` | `any` (default) or `user`. Only `user` makes the skill user-invoked, and every other value resolves to `any`. A skill can also carry it as `SKILL.md` `metadata.invocation`. See [Invocation](#invocation). |
 | `input` | `agent` | Reference to the JSON Schema the agent expects as input, written as `{ $ref: ./schemas/input.json }`. A bare path scalar also parses. |
 | `output` | `agent` | Reference to the JSON Schema the agent produces, in the same form as `input`. |
 | `delegates_to` | `agent` | List of canonical artifact IDs this agent delegates to, usually other agents. The field is advisory: ingest records the dependency edges and checks neither the target's type nor that the target resolves. |
@@ -356,7 +372,7 @@ The `source:` frontmatter field sets the document-level default. It lives in `AR
 
 ```markdown
 ---
-type: context
+type: agent
 version: 1.0.0
 source: authored
 ---
@@ -386,7 +402,7 @@ The registry derives `<N>` in `0.0.0-auto.<N>` at ingest from the rows it stores
 
 | Ingested bytes | Result |
 |:--|:--|
-| Match the layer's most recently ingested non-deleted row of the artifact, other than a row the [no-inheritance rule](../deployment/content/layers#inheritance) retires | The ingest reuses that row's version and is a no-op. |
+| Match the layer's most recently ingested non-deleted row of the artifact, other than a row the [no-inheritance rule](../deployment/content/layers#inheritance) or the [removed-type rule](../deployment/content/layers#removed-types) retires | The ingest reuses that row's version and is a no-op. |
 | Match no stored or soft-deleted row of the artifact | `<N>` is one more than the highest `<N>` any such row carries, or `0` when none carries one. |
 | Match another stored or soft-deleted row of the artifact under a different version | Rejected with `ingest.invalid_artifact` and `details.constraint: "auto_version_duplicate_content"`. |
 

@@ -5,8 +5,8 @@
 // domain hierarchy) and the artifact type (per spec §4.3); the
 // scaffolder produces lint-clean starting files. A skill gets a
 // SKILL.md alone, carrying the Agent Skills fields and, under metadata,
-// the version and any tags, sensitivity, and when_to_use the caller
-// passed (§4.3.4); every other type gets an ARTIFACT.md with
+// the version and any tags, sensitivity, invocation, and when_to_use the
+// caller passed (§4.3.4); every other type gets an ARTIFACT.md with
 // the universal frontmatter populated.
 package main
 
@@ -21,13 +21,17 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // firstClassTypes mirrors spec §4.3's enum. Extension types are
 // permitted but produce a warning since the scaffolder cannot know
-// the extension's type-specific frontmatter shape.
+// the extension's type-specific frontmatter fields. The types §4.1
+// removed are refused rather than scaffolded as extension types.
 var firstClassTypes = []string{
-	"skill", "agent", "context", "command", "rule", "hook", "mcp-server",
+	"skill", "agent", "rule", "hook", "mcp-server",
 }
 
 // nameRe enforces the §4.2 canonical-ID syntax: lowercase
@@ -67,6 +71,7 @@ type scaffoldOpts struct {
 	hookEvent    string
 	hookAction   string
 	serverID     string
+	invocation   string
 
 	// Behavior.
 	force          bool
@@ -100,6 +105,7 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 	fs.StringVar(&opts.hookEvent, "hook-event", "", "type=hook: canonical event name (required)")
 	fs.StringVar(&opts.hookAction, "hook-action", "", "type=hook: shell snippet body")
 	fs.StringVar(&opts.serverID, "server-identifier", "", "type=mcp-server: canonical server id (required)")
+	fs.StringVar(&opts.invocation, "invocation", "", "type=skill: who starts the skill (any|user); user writes SKILL.md metadata.invocation")
 	// Behavior.
 	fs.BoolVar(&opts.force, "force", false, "overwrite an existing directory")
 	fs.BoolVar(&opts.nonInteractive, "yes", false, "fail instead of prompting when a required value is missing")
@@ -126,6 +132,10 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 		opts.typ = promptChoice(reader, out, "Type", firstClassTypes, "")
 	}
 	if err := validateType(opts.typ, errOut); err != nil {
+		return 2
+	}
+	if err := validateInvocation(opts.invocation, opts.typ, flagPassed(fs, "invocation")); err != nil {
+		_, _ = fmt.Fprintf(errOut, "error: %v\n", err)
 		return 2
 	}
 
@@ -192,7 +202,11 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 // validateType checks the type against the first-class enum and
 // warns (but does not reject) extension types. An empty type is an
 // error so a missed interactive prompt (closed stdin under --yes,
-// or a typo) fails fast instead of writing a malformed manifest.
+// or a typo) fails fast instead of writing a malformed manifest. A
+// type §4.1 removed is an error naming its replacement, because
+// ingest refuses the package the scaffolder would write.
+//
+// Spec: §4.1, §4.3, §7.3.1
 func validateType(t string, errOut io.Writer) error {
 	if t == "" {
 		_, _ = fmt.Fprintln(errOut, "error: --type is required")
@@ -202,6 +216,10 @@ func validateType(t string, errOut io.Writer) error {
 		if t == k {
 			return nil
 		}
+	}
+	if manifest.IsRemovedType(manifest.ArtifactType(t)) {
+		_, _ = fmt.Fprintln(errOut, "error: "+layer.TypeRemovedReason(t))
+		return fmt.Errorf("removed type %q", t)
 	}
 	// Extension types are allowed by spec §4.3 (`<extension type>`).
 	// Warn so the author knows the scaffolder cannot supply the
@@ -250,6 +268,27 @@ func validateSensitivity(s string) error {
 		return nil
 	}
 	return fmt.Errorf("sensitivity %q must be one of low|medium|high", s)
+}
+
+// validateInvocation refuses an --invocation flag on a type other than
+// skill, because §4.3.4 defines the field for skills alone, and refuses a
+// value other than any or user. The scaffold writes only values the
+// manifest codec accepts, so the written field never draws
+// lint.skill_invocation.
+//
+// Spec: §4.3, §4.3.4, §7.3.1
+func validateInvocation(inv, typ string, passed bool) error {
+	if !passed {
+		return nil
+	}
+	if typ != string(manifest.TypeSkill) {
+		return fmt.Errorf("--invocation applies only to --type skill, got --type %s", typ)
+	}
+	switch manifest.Invocation(inv) {
+	case manifest.InvocationAny, manifest.InvocationUser:
+		return nil
+	}
+	return fmt.Errorf("--invocation %q must be one of any|user", inv)
 }
 
 // collectTypeSpecific prompts for or rejects type-specific required
@@ -356,9 +395,11 @@ func renderArtifactMD(name string, o *scaffoldOpts) string {
 // standard types metadata as a string-to-string map and §4.3.4 reads
 // a major.minor.patch metadata.version as the skill's version. The
 // Podium fields the scaffold accepts follow it under metadata in their
-// §4.3.4 encodings: tags and sensitivity as quoted strings, and
-// when_to_use as a literal block with one situation per line. A skill
-// gets a sensitivity only when --sensitivity was passed.
+// §4.3.4 encodings: tags, sensitivity, and invocation as quoted strings,
+// and when_to_use as a literal block with one situation per line. A skill
+// gets a sensitivity only when --sensitivity was passed, and an invocation
+// only for --invocation user, because an absent field already resolves to
+// the default any.
 //
 // Spec: §4.3.4, §7.3.1
 func renderSkillMD(name string, o *scaffoldOpts) string {
@@ -376,6 +417,9 @@ func renderSkillMD(name string, o *scaffoldOpts) string {
 	}
 	if o.sensitivitySet {
 		fmt.Fprintf(&sb, "  sensitivity: %q\n", o.sensitivity)
+	}
+	if manifest.Invocation(o.invocation) == manifest.InvocationUser {
+		fmt.Fprintf(&sb, "  invocation: %q\n", o.invocation)
 	}
 	writeSkillWhenToUse(&sb, o.whenToUse)
 	sb.WriteString("---\n\n")
@@ -576,10 +620,6 @@ func writeTypeSpecific(sb *strings.Builder, o *scaffoldOpts) {
 // bodies live in SKILL.md and are produced by renderSkillMD.
 func placeholderBody(typ string) string {
 	switch typ {
-	case "context":
-		return "Reference content the agent loads on demand. Replace this paragraph with the actual reference material.\n"
-	case "command":
-		return "Slash-command body. Describe the command's prompt template here.\n"
 	case "agent":
 		return "Agent definition body. Describe the agent's role, tools, and behavior here.\n"
 	case "rule":

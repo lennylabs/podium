@@ -21,7 +21,7 @@ import (
 func TestAudit_LoadArtifactSurfacesRedactTarget(t *testing.T) {
 	t.Parallel()
 	const body = "---\n" +
-		"type: context\n" +
+		"type: agent\n" +
 		"version: 1.0.0\n" +
 		"description: payroll record\n" +
 		"sensitivity: low\n" +

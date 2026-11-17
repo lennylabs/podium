@@ -23,7 +23,7 @@ func makeRegistry(t *testing.T, dir string) string {
 	if err := os.WriteFile(filepath.Join(root, ".registry-config"), []byte(configBody), 0o644); err != nil {
 		t.Fatalf("WriteFile config: %v", err)
 	}
-	body := "---\ntype: context\nversion: 1.0.0\ndescription: intro\nsensitivity: low\n---\n\nbody\n"
+	body := "---\ntype: agent\nversion: 1.0.0\ndescription: intro\nsensitivity: low\n---\n\nbody\n"
 	if err := os.WriteFile(
 		filepath.Join(root, "_default", "finance", "intro", "ARTIFACT.md"),
 		[]byte(body), 0o644,
@@ -72,7 +72,7 @@ func TestWatch_RerunsAfterRegistryEdit(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(registry, "_default", "marketing", "deck"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	body := "---\ntype: context\nversion: 1.0.0\ndescription: deck\nsensitivity: low\n---\n\nbody\n"
+	body := "---\ntype: agent\nversion: 1.0.0\ndescription: deck\nsensitivity: low\n---\n\nbody\n"
 	if err := os.WriteFile(
 		filepath.Join(registry, "_default", "marketing", "deck", "ARTIFACT.md"),
 		[]byte(body), 0o644,
@@ -126,7 +126,7 @@ func TestWatch_RerunsAfterInPlaceEdit(t *testing.T) {
 		t.Fatalf("initial = %+v, want one artifact at 1.0.0", first.Result.Artifacts)
 	}
 	// Bump the version in place.
-	body := "---\ntype: context\nversion: 2.0.0\ndescription: intro\nsensitivity: low\n---\n\nbody\n"
+	body := "---\ntype: agent\nversion: 2.0.0\ndescription: intro\nsensitivity: low\n---\n\nbody\n"
 	if err := os.WriteFile(artifact, []byte(body), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}

@@ -40,7 +40,7 @@ func setupRegistryWithAudit(t *testing.T) (*core.Registry, *recorder) {
 	}
 	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "t", LayerID: "L", Files: fstest.MapFS{
-			"finance/x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("variance"))},
+			"finance/x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("variance"))},
 		},
 	}); err != nil {
 		t.Fatalf("Ingest: %v", err)
@@ -75,7 +75,7 @@ func TestAudit_SearchArtifacts(t *testing.T) {
 	reg, rec := setupRegistryWithAudit(t)
 	if _, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{
 		Query: "variance",
-		Type:  "context",
+		Type:  "agent",
 		Scope: "finance",
 	}); err != nil {
 		t.Fatalf("SearchArtifacts: %v", err)
@@ -86,7 +86,7 @@ func TestAudit_SearchArtifacts(t *testing.T) {
 	}
 	if events[0].Context["query"] != "variance" ||
 		events[0].Context["scope"] != "finance" ||
-		events[0].Context["type"] != "context" {
+		events[0].Context["type"] != "agent" {
 		t.Errorf("Context = %v", events[0].Context)
 	}
 }

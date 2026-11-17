@@ -26,12 +26,12 @@ func TestDomainComposition_IngestToLoadDomain(t *testing.T) {
 			Path:    "finance/ap/DOMAIN.md",
 			Content: "---\ndescription: \"AP-related operations\"\ndiscovery:\n  keywords:\n    - invoice\n    - 1099\ninclude:\n  - _shared/regex/**\nexclude:\n  - _shared/regex/iban\n---\n\n# Accounts Payable\n\nLong-form AP context body.\n",
 		},
-		testharness.WriteTreeOption{Path: "finance/ap/pay-invoice/ARTIFACT.md", Content: contextArtifact},
-		testharness.WriteTreeOption{Path: "_shared/regex/ssn/ARTIFACT.md", Content: contextArtifact},
-		testharness.WriteTreeOption{Path: "_shared/regex/iban/ARTIFACT.md", Content: contextArtifact},
+		testharness.WriteTreeOption{Path: "finance/ap/pay-invoice/ARTIFACT.md", Content: agentArtifact},
+		testharness.WriteTreeOption{Path: "_shared/regex/ssn/ARTIFACT.md", Content: agentArtifact},
+		testharness.WriteTreeOption{Path: "_shared/regex/iban/ARTIFACT.md", Content: agentArtifact},
 		// An unlisted helper subtree that stays out of enumeration.
 		testharness.WriteTreeOption{Path: "_archive/DOMAIN.md", Content: "---\nunlisted: true\n---\n"},
-		testharness.WriteTreeOption{Path: "_archive/old/ARTIFACT.md", Content: contextArtifact},
+		testharness.WriteTreeOption{Path: "_archive/old/ARTIFACT.md", Content: agentArtifact},
 	)
 
 	st := store.NewMemory()
@@ -107,9 +107,9 @@ func TestDomainComposition_AllowPerDomainOverridesGate(t *testing.T) {
 			Path:    "finance/ap/DOMAIN.md",
 			Content: "---\ndescription: AP\ndiscovery:\n  notable_count: 1\n---\n",
 		},
-		testharness.WriteTreeOption{Path: "finance/ap/a/ARTIFACT.md", Content: contextArtifact},
-		testharness.WriteTreeOption{Path: "finance/ap/b/ARTIFACT.md", Content: contextArtifact},
-		testharness.WriteTreeOption{Path: "finance/ap/c/ARTIFACT.md", Content: contextArtifact},
+		testharness.WriteTreeOption{Path: "finance/ap/a/ARTIFACT.md", Content: agentArtifact},
+		testharness.WriteTreeOption{Path: "finance/ap/b/ARTIFACT.md", Content: agentArtifact},
+		testharness.WriteTreeOption{Path: "finance/ap/c/ARTIFACT.md", Content: agentArtifact},
 	)
 	st := store.NewMemory()
 	ctx := context.Background()
@@ -162,9 +162,9 @@ func TestDomainComposition_ImportedMembersPreserveDomain(t *testing.T) {
 			Path:    "finance/hub/DOMAIN.md",
 			Content: "---\ninclude:\n  - _shared/lib/**\n---\n",
 		},
-		testharness.WriteTreeOption{Path: "finance/hub/sub/leaf/ARTIFACT.md", Content: contextArtifact},
-		testharness.WriteTreeOption{Path: "_shared/lib/a/ARTIFACT.md", Content: contextArtifact},
-		testharness.WriteTreeOption{Path: "_shared/lib/b/ARTIFACT.md", Content: contextArtifact},
+		testharness.WriteTreeOption{Path: "finance/hub/sub/leaf/ARTIFACT.md", Content: agentArtifact},
+		testharness.WriteTreeOption{Path: "_shared/lib/a/ARTIFACT.md", Content: agentArtifact},
+		testharness.WriteTreeOption{Path: "_shared/lib/b/ARTIFACT.md", Content: agentArtifact},
 	)
 	st := store.NewMemory()
 	ctx := context.Background()

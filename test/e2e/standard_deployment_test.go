@@ -81,7 +81,7 @@ import (
 func orgLocalReg(t *testing.T) string {
 	t.Helper()
 	return writeRegistry(t, map[string]string{
-		"hello/ARTIFACT.md": contextArtifact("hello"),
+		"hello/ARTIFACT.md": agentArtifact("hello"),
 	})
 }
 
@@ -344,7 +344,7 @@ func TestStandardDeploy_AdminGrantHappyPath(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "restricted",
-			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("restricted ledger")},
 			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 		}},
 	})
@@ -734,7 +734,7 @@ func TestStandardDeploy_ShowEffectiveHappyPath(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "restricted",
-			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("restricted ledger")},
 			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 		}},
 	})
@@ -775,7 +775,7 @@ func TestStandardDeploy_ShowEffectiveWithGroups(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "team-finance",
-			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("team finance ledger")},
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("team finance ledger")},
 			Visibility: authVisibility{Groups: []string{"acme-finance"}},
 		}},
 	})
@@ -835,7 +835,7 @@ func TestStandardDeploy_RevokeHappyPath(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "restricted",
-			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("restricted ledger")},
 			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 		}},
 	})
@@ -1179,7 +1179,7 @@ func TestStandardDeploy_MCPSessionToken(t *testing.T) {
 	t.Parallel()
 	priv, pem := injKeyPair(t)
 	reg := writeRegistry(t, map[string]string{
-		"finance/run/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Run variance analysis for month-end close across vendor payments.\n---\n\nbody\n",
+		"finance/run/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Run variance analysis for month-end close across vendor payments.\n---\n\nbody\n",
 	})
 	srv := injServer(t, reg, priv, pem)
 	token := injSignJWT(t, priv, injClaims("alice"))
@@ -1218,7 +1218,7 @@ func TestStandardDeploy_MCPSessionTokenFile(t *testing.T) {
 	t.Parallel()
 	priv, pem := injKeyPair(t)
 	reg := writeRegistry(t, map[string]string{
-		"finance/run/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Run variance analysis for month-end close across vendor payments.\n---\n\nbody\n",
+		"finance/run/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Run variance analysis for month-end close across vendor payments.\n---\n\nbody\n",
 	})
 	srv := injServer(t, reg, priv, pem)
 	token := injSignJWT(t, priv, injClaims("alice"))

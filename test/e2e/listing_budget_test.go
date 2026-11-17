@@ -64,12 +64,12 @@ func listingCost(skills []listingSkill) int {
 }
 
 // writeListingRegistry writes a filesystem registry holding skills and one
-// context artifact, which the default `types: [skill]` leaves out of the
+// agent artifact, which the default `types: [skill]` leaves out of the
 // listing.
 func writeListingRegistry(t *testing.T, skills []listingSkill) string {
 	t.Helper()
 	files := map[string]string{
-		"finance/policy/ARTIFACT.md": contextArtifact("Travel and expense policy reference for the finance team and its approvers."),
+		"finance/policy/ARTIFACT.md": agentArtifact("Travel and expense policy reference for the finance team and its approvers."),
 	}
 	for _, s := range skills {
 		name := path.Base(s.id)

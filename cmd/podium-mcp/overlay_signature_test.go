@@ -46,11 +46,11 @@ func TestLoadArtifactFromOverlay_PolicyAlwaysStillAllowsOverlay(t *testing.T) {
 	rec := &filesystem.ArtifactRecord{
 		ID: "personal/draft",
 		ArtifactBytes: []byte(
-			"---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"),
+			"---\ntype: agent\nversion: 1.0.0\nsensitivity: low\n---\n"),
 		AuthoredBytes: []byte(
-			"---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"),
+			"---\ntype: agent\nversion: 1.0.0\nsensitivity: low\n---\n"),
 		Artifact: &manifest.Artifact{
-			Type:        manifest.TypeContext,
+			Type:        manifest.TypeAgent,
 			Version:     "1.0.0",
 			Sensitivity: manifest.SensitivityLow,
 		},
@@ -78,10 +78,10 @@ func TestLoadArtifactFromOverlay_PolicyAlwaysStillAllowsOverlay(t *testing.T) {
 func TestDeliverLoadArtifact_PolicyAlwaysRejectsUnsigned(t *testing.T) {
 	t.Parallel()
 	s := overlayTestServer(t, sign.PolicyAlways)
-	fm := "---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"
+	fm := "---\ntype: agent\nversion: 1.0.0\nsensitivity: low\n---\n"
 	resp := sealDelivery(loadArtifactResponse{
 		ID:          "team/x",
-		Type:        "context",
+		Type:        "agent",
 		Version:     "1.0.0",
 		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
 		Frontmatter: fm,
@@ -106,11 +106,11 @@ func TestLoadArtifactFromOverlay_HighSensitivityAllowedOnLocalAuthor(t *testing.
 	rec := &filesystem.ArtifactRecord{
 		ID: "personal/high",
 		ArtifactBytes: []byte(
-			"---\ntype: context\nversion: 1.0.0\nsensitivity: high\n---\n"),
+			"---\ntype: agent\nversion: 1.0.0\nsensitivity: high\n---\n"),
 		AuthoredBytes: []byte(
-			"---\ntype: context\nversion: 1.0.0\nsensitivity: high\n---\n"),
+			"---\ntype: agent\nversion: 1.0.0\nsensitivity: high\n---\n"),
 		Artifact: &manifest.Artifact{
-			Type:        manifest.TypeContext,
+			Type:        manifest.TypeAgent,
 			Version:     "1.0.0",
 			Sensitivity: manifest.SensitivityHigh,
 		},

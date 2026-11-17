@@ -21,7 +21,7 @@ import (
 // unchanged, the bridge serves the cached content and issues no full GET.
 func TestLoadArtifact_AlwaysRevalidate_HeadMatchServesCache(t *testing.T) {
 	t.Parallel()
-	const fm = "---\ntype: context\nversion: 1.0.0\n---\n"
+	const fm = "---\ntype: agent\nversion: 1.0.0\n---\n"
 	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil)
 	var gets, heads int32
 
@@ -77,7 +77,7 @@ func TestLoadArtifact_AlwaysRevalidate_HeadMatchServesCache(t *testing.T) {
 // Spec: §6.5, §4.4.1
 func TestLoadArtifact_HeadMatchServesCachedSandboxProfile(t *testing.T) {
 	t.Parallel()
-	const fm = "---\ntype: context\nversion: 1.0.0\ndescription: tool\nsandbox_profile: seccomp-strict\n---\n"
+	const fm = "---\ntype: agent\nversion: 1.0.0\ndescription: tool\nsandbox_profile: seccomp-strict\n---\n"
 	var gets int32
 	dir := t.TempDir()
 	cache, _ := newContentCache(dir)
@@ -136,11 +136,11 @@ func TestLoadArtifact_HeadMatchServesCachedSandboxProfile(t *testing.T) {
 // content is stale and the bridge performs a full GET.
 func TestLoadArtifact_AlwaysRevalidate_HeadMismatchFullFetches(t *testing.T) {
 	t.Parallel()
-	const cachedFM = "---\ntype: context\nversion: 1.0.0\n---\n"
+	const cachedFM = "---\ntype: agent\nversion: 1.0.0\n---\n"
 	cachedHash := "sha256:" + version.CanonicalContentHash([]byte(cachedFM), nil, nil)
 	respBody := loadArtifactJSON(t, map[string]any{
-		"id": "team/x", "type": "context", "version": "2.0.0",
-		"manifest_body": "fresh-body", "frontmatter": "---\ntype: context\nversion: 2.0.0\n---\n",
+		"id": "team/x", "type": "agent", "version": "2.0.0",
+		"manifest_body": "fresh-body", "frontmatter": "---\ntype: agent\nversion: 2.0.0\n---\n",
 	})
 	var gets, heads int32
 

@@ -63,14 +63,14 @@ func TestOverlayDomainMerge_DescriptionAndDirectChild(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		// Establishes the finance and finance/ap domains registry-side.
-		"finance/ap/pay/ARTIFACT.md": contextArtifact("pay"),
+		"finance/ap/pay/ARTIFACT.md": agentArtifact("pay"),
 		"finance/DOMAIN.md":          "---\ndescription: Registry finance\n---\n\nRegistry finance body.\n",
 	})
 	overlay := t.TempDir()
 	writeOverlayFile(t, overlay, "finance/DOMAIN.md",
 		"---\ndescription: Local finance overlay\n---\n\nLocal working notes for finance.\n")
 	writeOverlayFile(t, overlay, "finance/draft-helper/ARTIFACT.md",
-		"---\ntype: context\nversion: 0.1.0\ndescription: in-progress finance helper\nsensitivity: low\n---\n\ndraft body\n")
+		"---\ntype: agent\nversion: 0.1.0\ndescription: in-progress finance helper\nsensitivity: low\n---\n\ndraft body\n")
 
 	result := loadDomainResult(t, reg, overlay, "finance")
 
@@ -92,13 +92,13 @@ func TestOverlayDomainMerge_DescriptionAndDirectChild(t *testing.T) {
 func TestOverlayDomainMerge_NewSubdomainAndUnlisted(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"finance/ap/pay/ARTIFACT.md":     contextArtifact("pay"),
-		"finance/secret/key/ARTIFACT.md": contextArtifact("key"),
+		"finance/ap/pay/ARTIFACT.md":     agentArtifact("pay"),
+		"finance/secret/key/ARTIFACT.md": agentArtifact("key"),
 	})
 	overlay := t.TempDir()
 	// A draft below a brand-new child folder introduces finance/newteam.
 	writeOverlayFile(t, overlay, "finance/newteam/draft/ARTIFACT.md",
-		"---\ntype: context\nversion: 0.1.0\ndescription: new team draft\nsensitivity: low\n---\n\nbody\n")
+		"---\ntype: agent\nversion: 0.1.0\ndescription: new team draft\nsensitivity: low\n---\n\nbody\n")
 	writeOverlayFile(t, overlay, "finance/newteam/DOMAIN.md",
 		"---\ndescription: New team workspace\n---\n")
 	// The overlay unlists the registry's finance/secret subtree.

@@ -56,9 +56,9 @@ import (
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
 )
 
-// opguideSimpleArtifact returns an ARTIFACT.md body for a context artifact.
+// opguideSimpleArtifact returns an ARTIFACT.md body for an agent artifact.
 func opguideSimpleArtifact() string {
-	return "---\ntype: context\nversion: 1.0.0\ndescription: test context\nsensitivity: low\n---\n\nTest context body.\n"
+	return "---\ntype: agent\nversion: 1.0.0\ndescription: test context\nsensitivity: low\n---\n\nTest context body.\n"
 }
 
 // opguideStartStandalone starts a standalone server with the given extra env
@@ -525,7 +525,7 @@ func TestServerOps_VisibilityDeniedAuditEvent(t *testing.T) {
 			{
 				ID: "restricted",
 				Files: map[string]string{
-					restrictedID + "/ARTIFACT.md": authContext("secret rotation runbook, restricted to the on-call owner"),
+					restrictedID + "/ARTIFACT.md": authAgent("secret rotation runbook, restricted to the on-call owner"),
 				},
 				Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 			},
@@ -642,7 +642,7 @@ func TestServerOps_PerLayerVisibilityInjectedToken(t *testing.T) {
 	// A finance-only layer (visibility: groups: [finance]) declared in
 	// registry.yaml so its visibility is explicit rather than the default.
 	layerRoot := writeRegistry(t, map[string]string{
-		"finance/secret/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Finance-only month-end variance secret.\n---\n\nbody\n",
+		"finance/secret/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Finance-only month-end variance secret.\n---\n\nbody\n",
 	})
 	cfgPath := filepath.Join(home, "registry.yaml")
 	cfg := "" +
@@ -1111,7 +1111,7 @@ tests:
 func TestOpGuide_AccessLogLatencySurface(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"finance/run/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ntags: [finance]\ndescription: Run variance analysis for vendor payments here today.\n---\n\nBody.\n",
+		"finance/run/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ntags: [finance]\ndescription: Run variance analysis for vendor payments here today.\n---\n\nBody.\n",
 	})
 	srv := opguideStartStandalone(t, []string{"HOME=" + t.TempDir()}, reg)
 

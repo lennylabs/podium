@@ -35,7 +35,8 @@ type fixture struct {
 }
 
 // canonicalArtifacts is the fixed input set: one artifact per first-class type,
-// plus one rule per mode, exercising the fields the adapters translate
+// a user-invoked skill, and a skill that carries reference material, plus one
+// rule per mode, exercising the fields the adapters translate
 // (rule_mode/rule_globs/rule_description, hook_event/hook_action,
 // server_identifier, description, bundled resources, and runtime_requirements
 // through the derived SKILL.md compatibility line).
@@ -50,7 +51,11 @@ type fixture struct {
 // 0.0.0-auto.0, written out as a literal so a change to the synthesized bytes
 // fails here rather than regenerating silently. The none adapter omits that
 // document, so none.golden carries the SKILL.md and the resource for it and no
-// ARTIFACT.md, and every other adapter treats it as any other skill.
+// ARTIFACT.md, and every other adapter treats it as any other skill. The
+// team/glossary and team/deploy skills have no authored ARTIFACT.md either.
+// team/deploy sets metadata.invocation: user and bundles a script, so each
+// harness writes its user-only control or its command-file fallback with the
+// script in .podium/resources/<id>/.
 //
 // Spec: §4.3.4, §6.7
 var canonicalArtifacts = []fixture{
@@ -72,11 +77,14 @@ var canonicalArtifacts = []fixture{
 	},
 	{
 		id:       "team/glossary",
-		artifact: "---\ntype: context\nversion: 1.0.0\ndescription: Company glossary.\n---\n\nARR means annual recurring revenue.\n",
+		artifact: "---\ntype: skill\nversion: 0.0.0-auto.0\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n",
+		skill:    "---\nname: glossary\ndescription: Reference material that defines company terms such as ARR.\n---\n\nARR means annual recurring revenue.\n",
 	},
 	{
-		id:       "team/deploy",
-		artifact: "---\ntype: command\nversion: 1.0.0\ndescription: Deploy the service.\n---\n\nRun the deploy pipeline for the named environment.\n",
+		id:        "team/deploy",
+		artifact:  "---\ntype: skill\nversion: 0.0.0-auto.0\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n",
+		skill:     "---\nname: deploy\ndescription: Deploy the service.\nmetadata:\n  invocation: \"user\"\n---\n\nRun the deploy pipeline for the environment in $ARGUMENTS.\n",
+		resources: map[string]string{"scripts/deploy.sh": "#!/bin/sh\necho deploy \"$1\"\n"},
 	},
 	{
 		id:       "team/tabs-always",

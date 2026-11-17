@@ -18,9 +18,11 @@ import (
 //   - .claude/skills/<name>/SKILL.md    for type: skill (agentskills.io layout)
 //   - .claude/skills/<name>/<resource>  for skill bundled resources
 //   - .claude/rules/<name>.md           for type: rule
-//   - .claude/podium/<artifact-id>/...  for non-skill bundled resources
+//   - .claude/podium/<artifact-id>/...  for agent bundled resources and
+//     extension types
 //
-// Frontmatter mapping follows the §6.7.1 capability matrix.
+// A skill whose invocation is user carries disable-model-invocation: true in
+// its SKILL.md. Frontmatter mapping follows the §6.7.1 capability matrix.
 type ClaudeCode struct{}
 
 // ID returns "claude-code".
@@ -41,12 +43,11 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 	case "skill":
 		skillRoot := path.Join(".claude", "skills", name)
 		if len(src.SkillBytes) > 0 {
-			// Spec: §4.3.4: like every adapter that writes a skill's
-			// SKILL.md, derive compatibility from runtime_requirements
-			// and sandbox_profile when the author omits it. The
-			// derivation runs before the §4.4.2 provenance rewrite, so
-			// the rewrite sees the derived line.
-			skill := deriveSkillCompatibility(src.SkillBytes, src.ArtifactBytes)
+			// Spec: §4.3.4, §6.7: skillMarkdown derives compatibility like
+			// every SKILL.md writer and adds disable-model-invocation for a
+			// user-invoked skill. Both run before the §4.4.2 provenance
+			// rewrite, so the rewrite sees the final frontmatter.
+			skill := skillMarkdown(src, controlFrontmatter)
 			// §4.4.2 — rewrite imported provenance blocks into
 			// Claude Code <untrusted-data> regions so the host
 			// can apply differential trust at read time.
@@ -57,11 +58,10 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 		}
 	// §4.4.2 — every type's materialized body has its imported
 	// provenance blocks rewritten into Claude Code <untrusted-data>
-	// regions, not just skills. context bodies in particular aggregate
-	// external knowledge, so the prompt-injection defense must cover
-	// them. rewriteProvenanceForClaude only touches imported blocks, so
-	// passing the full ARTIFACT.md (frontmatter included) is a no-op when
-	// none are present.
+	// regions, not just skills, so the prompt-injection defense covers
+	// every body the harness reads. rewriteProvenanceForClaude only
+	// touches imported blocks, so passing the full ARTIFACT.md
+	// (frontmatter included) is a no-op when none are present.
 	case "rule":
 		// A Claude Code rule file carries the rule prose under Claude-native
 		// scoping frontmatter (paths for glob, description for auto). The
@@ -84,14 +84,6 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 				Content: data,
 			})
 		}
-	case "command":
-		out = append(out, File{
-			Path:    path.Join(".claude", "commands", name+".md"),
-			Content: rewriteProvenanceForClaude(src.ArtifactBytes, source),
-		})
-		out = appendResources(out, path.Join(".podium", "resources", src.ArtifactID), src.Resources)
-	case "context":
-		return contextOut(src), nil
 	case "hook":
 		// §6.7 — a hook config-merges its registration into the shared
 		// settings.json; bundled scripts materialize to the harness-neutral
@@ -100,8 +92,10 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 	case "mcp-server":
 		return []File{{Path: ".mcp.json", Op: OpMergeJSON, Content: mcpFragmentJSON(src)}}, nil
 	default:
-		// extension types land under .claude/podium/<id>/ with the canonical
-		// layout.
+		// Spec: §4.1, §6.7 — extension types land under .claude/podium/<id>/
+		// with the canonical layout. A workspace-overlay artifact of a
+		// removed type (command, context) reaches this arm too, because the
+		// overlay applies no ingest refusal.
 		out = append(out, File{
 			Path:    path.Join(".claude", "podium", src.ArtifactID, "ARTIFACT.md"),
 			Content: rewriteProvenanceForClaude(src.ArtifactBytes, source),

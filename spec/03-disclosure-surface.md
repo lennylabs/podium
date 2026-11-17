@@ -49,7 +49,7 @@ preview = client.preview_scope()
 # {
 #   "layers": ["admin-finance", "alice-personal", "workspace-overlay"],
 #   "artifact_count": 1234,
-#   "by_type": {"skill": 800, "agent": 200, "context": 200, "command": 30, "rule": 4},
+#   "by_type": {"skill": 1030, "agent": 200, "rule": 4},
 #   "by_sensitivity": {"low": 1100, "medium": 100, "high": 34}
 # }
 ```

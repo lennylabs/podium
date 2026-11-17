@@ -59,7 +59,7 @@ func TestManifestBody_LivePresignedOverS3(t *testing.T) {
 	s3 := liveS3Store(t)
 
 	body := strings.Repeat("glossary line\n", objectstore.InlineCutoff/14+200)
-	doc := []byte("---\ntype: context\nversion: 1.0.0\ndescription: Big glossary.\n---\n\n" + body)
+	doc := []byte("---\ntype: agent\nversion: 1.0.0\ndescription: Big glossary.\n---\n\n" + body)
 	sum := sha256.Sum256(doc)
 	key := hex.EncodeToString(sum[:])
 	t.Cleanup(func() { _ = s3.Delete(t.Context(), key) })
@@ -70,7 +70,7 @@ func TestManifestBody_LivePresignedOverS3(t *testing.T) {
 	}
 	if err := st.PutManifest(t.Context(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "finance/glossary", Version: "1.0.0",
-		ContentHash: "sha256:c", Type: "context", Layer: "L",
+		ContentHash: "sha256:c", Type: "agent", Layer: "L",
 		Frontmatter: doc, Body: []byte(body),
 	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
