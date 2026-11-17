@@ -333,6 +333,7 @@ The document is not part of the authored package. The §4.7.6 content hash frame
 - When `ARTIFACT.md` is present, it does not contain `name`, `description`, or `license` fields (warning); if present, the values must match `SKILL.md` exactly (error on mismatch). A `version` in `ARTIFACT.md` equals `SKILL.md` `metadata.version` when both are set and `metadata.version` is a `major.minor.patch` value (error on mismatch).
 - When `ARTIFACT.md` states a key that **Podium fields in `metadata`** lists and `SKILL.md` `metadata` carries a value for that key that follows its encoding, the two values are equal (error on mismatch). `tags` and `when_to_use` compare as ordered lists.
 - A `SKILL.md` `metadata` value for a key that **Podium fields in `metadata`** lists and that does not follow its encoding is ignored (warning that names the key, the value, and the encoding).
+- A non-empty `ARTIFACT.md` `invocation` value other than `any` or `user` resolves to `any` (warning that names the value and the allowed values).
 - When `ARTIFACT.md` is present, its body is empty or a single HTML comment (warning otherwise).
 - A skill that declares no usable version has its version assigned (warning that names any ignored `metadata.version` value and the fix).
 - An authored version in the reserved form of §4.7.6, in either file, is an error (`lint.invalid_version`).
