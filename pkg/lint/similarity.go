@@ -386,23 +386,64 @@ func (p *peerIndex) summary(s int) ([]peer, int) {
 		return nil, 0
 	}
 	owner := p.sets[s].owner
-	total := p.eligible(g, owner)
-	first := p.take(nil, []int{g}, owner, 100)
-	for k := 0; k < len(p.edges[g]); {
-		tier := []int{p.edges[g][k].group}
-		end := k + 1
-		for end < len(p.edges[g]) && compareSimilarity(p.edges[g][k], p.edges[g][end]) == 0 {
-			tier = append(tier, p.edges[g][end].group)
-			end++
-		}
-		for _, grp := range tier {
+	var first []peer
+	total := 0
+	for _, t := range p.tiers(g) {
+		for _, grp := range t.groups {
 			total += p.eligible(grp, owner)
 		}
-		e := p.edges[g][k]
-		first = p.take(first, tier, owner, 100*e.inter/e.union)
-		k = end
+		first = p.take(first, t.groups, owner, 100*t.inter/t.union)
 	}
 	return first, total
+}
+
+// rankedPeer is one peer of a set with its exact similarity.
+type rankedPeer struct {
+	set        int
+	similarity float64
+}
+
+// all returns every peer of set s in the order summary lists them, each with
+// its exact similarity: 1 within s's group and inter/union across groups.
+func (p *peerIndex) all(s int) []rankedPeer {
+	g := p.groupOf[s]
+	if g < 0 {
+		return nil
+	}
+	owner := p.sets[s].owner
+	var out []rankedPeer
+	for _, t := range p.tiers(g) {
+		sim := float64(t.inter) / float64(t.union)
+		for _, m := range p.tierMembers(t.groups, owner, -1) {
+			out = append(out, rankedPeer{set: m, similarity: sim})
+		}
+	}
+	return out
+}
+
+// peerTier is a run of groups paired with one group at an equal similarity,
+// inter/union. A group's own tier has inter equal to union.
+type peerTier struct {
+	groups       []int
+	inter, union int
+}
+
+// tiers returns group g itself and then its paired groups, gathered into runs
+// of equal similarity in descending order.
+func (p *peerIndex) tiers(g int) []peerTier {
+	out := []peerTier{{groups: []int{g}, inter: 1, union: 1}}
+	es := p.edges[g]
+	for k := 0; k < len(es); {
+		t := peerTier{groups: []int{es[k].group}, inter: es[k].inter, union: es[k].union}
+		end := k + 1
+		for end < len(es) && compareSimilarity(es[k], es[end]) == 0 {
+			t.groups = append(t.groups, es[end].group)
+			end++
+		}
+		out = append(out, t)
+		k = end
+	}
+	return out
 }
 
 // eligible counts the members of group g that another owner holds.
@@ -417,11 +458,25 @@ func (p *peerIndex) take(first []peer, tier []int, owner, pct int) []peer {
 	if need <= 0 {
 		return first
 	}
+	cand := p.tierMembers(tier, owner, need)
+	if len(cand) > need {
+		cand = cand[:need]
+	}
+	for _, m := range cand {
+		first = append(first, peer{set: m, pct: pct})
+	}
+	return first
+}
+
+// tierMembers returns the members of the groups in tier that owner does not
+// hold, ordered by identifier, taking at most perGroup from each group. A
+// negative perGroup takes every member.
+func (p *peerIndex) tierMembers(tier []int, owner, perGroup int) []int {
 	var cand []int
 	for _, g := range tier {
 		n := 0
 		for _, m := range p.byIdent[g] {
-			if n == need {
+			if n == perGroup {
 				break
 			}
 			if p.sets[m].owner == owner {
@@ -432,13 +487,7 @@ func (p *peerIndex) take(first []peer, tier []int, owner, pct int) []peer {
 		}
 	}
 	p.sortByIdent(cand)
-	if len(cand) > need {
-		cand = cand[:need]
-	}
-	for _, m := range cand {
-		first = append(first, peer{set: m, pct: pct})
-	}
-	return first
+	return cand
 }
 
 // formatPeers renders "<name> (<pct>%)" for each listed peer, joined by

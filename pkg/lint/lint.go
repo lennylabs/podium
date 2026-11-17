@@ -15,7 +15,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -46,6 +45,11 @@ type Diagnostic struct {
 	Severity Severity
 	// Message is a human-readable description.
 	Message string
+	// Peers lists every artifact a pairwise description diagnostic
+	// (lint.colliding_descriptions, lint.semantic_overlap) names or
+	// abbreviates, in the message's order, so a client reads the overlap
+	// without parsing Message (§7.3.1). Nil on every other diagnostic.
+	Peers []Peer
 }
 
 // String returns a one-line representation suitable for CLI output.
@@ -193,18 +197,10 @@ func (l *Linter) Lint(ctx context.Context, reg *filesystem.Registry, records []f
 	for _, r := range rules {
 		out = append(out, r.Check(ctx, reg, records)...)
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].ArtifactID != out[j].ArtifactID {
-			return out[i].ArtifactID < out[j].ArtifactID
-		}
-		if out[i].Code != out[j].Code {
-			return out[i].Code < out[j].Code
-		}
-		// Spec: §7.3.1 — one artifact can draw several diagnostics of one
-		// code, such as a near-duplicate warning per unit, and the message
-		// fixes their order.
-		return out[i].Message < out[j].Message
-	})
+	// Spec: §7.3.1 — one artifact can draw several diagnostics of one code,
+	// such as a near-duplicate warning per unit, and the message fixes their
+	// order.
+	SortDiagnostics(out)
 	return out
 }
 
