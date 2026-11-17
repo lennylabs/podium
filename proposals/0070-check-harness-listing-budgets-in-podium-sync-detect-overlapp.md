@@ -1,7 +1,7 @@
 # Proposal 0070: Check harness listing budgets in podium sync, detect overlapping descriptions and near-duplicate content in lint, make the lint thresholds configurable, and define the podium lint output for CI
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-16). Verified after 15 adversarial review rounds (54 findings fixed). The open questions are resolved as recommended.
+- Status: Implemented (2026-11-16). Verified after 15 adversarial review rounds (54 findings fixed). The open questions are resolved as recommended.
 - Date: 2026-11-16
 
 This document stages spec, code, test, manual-validation, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: `podium lint` reports warnings it did not report before, `lint.colliding_descriptions` reports overlapping descriptions where it reported equal ones, and the `pkg/lint` Go API changes (D-13). It ships in a MINOR release.
@@ -58,27 +58,27 @@ This document stages spec, code, test, manual-validation, and documentation chan
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4, SPEC-5, SPEC-6, SPEC-7. Every spec edit lands in one commit, because §3.3, §12, §4.1, §4.3.4, §4.5.5, §7.5, §7.5.2, and §11 cite the new §7.3.1 paragraphs, §7.5.8, or the §13.12 Lint subsection.
+- [x] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4, SPEC-5, SPEC-6, SPEC-7. Every spec edit lands in one commit, because §3.3, §12, §4.1, §4.3.4, §4.5.5, §7.5, §7.5.2, and §11 cite the new §7.3.1 paragraphs, §7.5.8, or the §13.12 Lint subsection.
       Levels: unit. Depends on: —
-- [ ] **S2 · code** — CODE-1. `lint.Thresholds`, `DefaultThresholds`, `ThresholdsFromEnv`, field-by-field resolution, the `IncludeAdvisories` field, and the rules reading the injected values; `bundled_cap_config_test.go` is rewritten in this commit because it references the removed fields.
+- [x] **S2 · code** — CODE-1. `lint.Thresholds`, `DefaultThresholds`, `ThresholdsFromEnv`, field-by-field resolution, the `IncludeAdvisories` field, and the rules reading the injected values; `bundled_cap_config_test.go` is rewritten in this commit because it references the removed fields.
       Levels: unit. Depends on: S1
-- [ ] **S3 · code** — CODE-2. `similarity.go`, the refined `lint.colliding_descriptions`, `lint.near_duplicate_content`, `(*Linter).AdvisoryRules()`, `Lint` appending them under `IncludeAdvisories`, and the third sort key; `TestDescriptionQuality_CollidingAdvisoryEndToEnd` is rewritten in this commit because it asserts the replaced `collides with` message.
+- [x] **S3 · code** — CODE-2. `similarity.go`, the refined `lint.colliding_descriptions`, `lint.near_duplicate_content`, `(*Linter).AdvisoryRules()`, `Lint` appending them under `IncludeAdvisories`, and the third sort key; `TestDescriptionQuality_CollidingAdvisoryEndToEnd` is rewritten in this commit because it asserts the replaced `collides with` message.
       Levels: unit, e2e. Depends on: S2
-- [ ] **S4 · code** — CODE-3. Ingest runs `req.Linter.AdvisoryRules()`, and `DescriptionAdvisoryRules` is removed; the test helper and `TestDescriptionAdvisories_NotInAllRules`, which reference it, are rewritten in this commit.
+- [x] **S4 · code** — CODE-3. Ingest runs `req.Linter.AdvisoryRules()`, and `DescriptionAdvisoryRules` is removed; the test helper and `TestDescriptionAdvisories_NotInAllRules`, which reference it, are rewritten in this commit.
       Levels: unit, integration. Depends on: S3
-- [ ] **S5 · code** — CODE-4. `podium lint` runs the advisories and gains `--json` and `--fail-on`; `layer.Drop` gains `Details`, and `pkg/layer/invalid_test.go`, `pkg/layer/collision_test.go`, and `assertOneCollision` in `pkg/sync/sync_collision_test.go` are rewritten to compare it with `reflect.DeepEqual`; fixtures, tutorial examples, and manual scenarios S01, S02, S23, and S51 that now draw an advisory are updated in this commit, and S53, which lints the S51 registry, is re-checked.
+- [x] **S5 · code** — CODE-4. `podium lint` runs the advisories and gains `--json` and `--fail-on`; `layer.Drop` gains `Details`, and `pkg/layer/invalid_test.go`, `pkg/layer/collision_test.go`, and `assertOneCollision` in `pkg/sync/sync_collision_test.go` are rewritten to compare it with `reflect.DeepEqual`; fixtures, tutorial examples, and manual scenarios S01, S02, S23, and S51 that now draw an advisory are updated in this commit, and S53, which lints the S51 registry, is re-checked.
       Levels: unit, e2e. Depends on: S4
-- [ ] **S6 · code** — CODE-5. `pkg/sync` keeps `listing_budgets` as an undecoded node in `SyncConfig`, encodes it through `detachNode` on `SaveAs`, type-checks, decodes, merges, and validates it in `LoadMergedConfig` and `ListingBudgetFor`, records each artifact's listing type and description, sets `OverrideResult.Materialized`, and computes the listing report; `sync.Check` takes an adapter registry, and `runSyncCheck` and `check_test.go` are updated in this commit because the signature changes.
+- [x] **S6 · code** — CODE-5. `pkg/sync` keeps `listing_budgets` as an undecoded node in `SyncConfig`, encodes it through `detachNode` on `SaveAs`, type-checks, decodes, merges, and validates it in `LoadMergedConfig` and `ListingBudgetFor`, records each artifact's listing type and description, sets `OverrideResult.Materialized`, and computes the listing report; `sync.Check` takes an adapter registry, and `runSyncCheck` and `check_test.go` are updated in this commit because the signature changes.
       Levels: unit, integration. Depends on: S1
-- [ ] **S7 · code** — CODE-6. `podium sync` resolves the budget on every path, prints the report, adds `listing` to the `--json` envelope, and maps `check: error` to the exit status.
+- [x] **S7 · code** — CODE-6. `podium sync` resolves the budget on every path, prints the report, adds `listing` to the `--json` envelope, and maps `check: error` to the exit status.
       Levels: unit, e2e. Depends on: S6
-- [ ] **S8 · test** — TEST-1. Unit and integration tests for thresholds, similarity, the advisory rules, ingest, the lint envelope and exit code, the listing and the `listing_budgets` configuration, save-as, `podium config show`, the signature policy, the interactive override, and sync equivalence. The `TestDescriptionAdvisories_NotInAllRules` rewrite lands in S4.
+- [x] **S8 · test** — TEST-1. Unit and integration tests for thresholds, similarity, the advisory rules, ingest, the lint envelope and exit code, the listing and the `listing_budgets` configuration, save-as, `podium config show`, the signature policy, the interactive override, and sync equivalence. The `TestDescriptionAdvisories_NotInAllRules` rewrite lands in S4.
       Levels: unit, integration. Depends on: S2, S3, S4, S5, S6, S7
-- [ ] **S9 · test** — TEST-2. End-to-end tests for `podium lint`, the reingest advisory, the sync listing, and the `TestCLI_SyncJSON` `listing` key through the binaries. The `TestDescriptionQuality_CollidingAdvisoryEndToEnd` rewrite lands in S3.
+- [x] **S9 · test** — TEST-2. End-to-end tests for `podium lint`, the reingest advisory, the sync listing, and the `TestCLI_SyncJSON` `listing` key through the binaries. The `TestDescriptionQuality_CollidingAdvisoryEndToEnd` rewrite lands in S3.
       Levels: e2e. Depends on: S5, S7
-- [ ] **S10 · test** — MV-1. Scenario S108 and its index row in `test/manual-validation.md`; the implementor writes the commands and runs the scenario under zsh and bash.
+- [x] **S10 · test** — MV-1. Scenario S108 and its index row in `test/manual-validation.md`; the implementor writes the commands and runs the scenario under zsh and bash.
       Levels: e2e. Depends on: S9
-- [ ] **S11 · docs** — DOC-1. The CLI and configuration references, the authoring and harness pages, the `LintSuppress` doc comment in `pkg/manifest/types.go`, the upgrade notes, and the CHANGELOG entry, which lands last.
+- [x] **S11 · docs** — DOC-1. The CLI and configuration references, the authoring and harness pages, the `LintSuppress` doc comment in `pkg/manifest/types.go`, the upgrade notes, and the CHANGELOG entry, which lands last.
       Levels: e2e. Depends on: S1, S5, S7, S10
 
 ## Current state and the gap
