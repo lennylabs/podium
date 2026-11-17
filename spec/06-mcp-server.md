@@ -323,7 +323,7 @@ The target for each remaining type, by adapter (paths are project-relative; `<n>
 Notes on partial and migrating surfaces:
 
 - Codex custom prompts are user-scope (`~/.codex/prompts/`) and are being folded into skills. Codex has no project-scope command file, so a user-invoked skill reaches Codex as a skill with its `agents/openai.yaml`.
-- Hermes reads project-level `.cursor/rules/*.mdc`, `AGENTS.md`, and `.cursorrules`, so its `rule` output reuses the Cursor `.mdc` format. Its skill, command, hook, and MCP surfaces live under user-scope `~/.hermes/`, so they are `✗` for project-level materialization.
+- Hermes reads project-level `.cursor/rules/*.mdc`, `AGENTS.md`, and `.cursorrules`, so its `rule` output reuses the Cursor `.mdc` format. Its skill, hook, and MCP surfaces live under user-scope `~/.hermes/`, so they are `✗` for project-level materialization.
 - Claude Desktop configures MCP servers at user or operating-system scope (`claude_desktop_config.json`, or a `.mcpb` bundle) and exposes no project-level surface, so project materialization produces no Claude Desktop output. Configure it out of band.
 - OpenCode hooks are JavaScript or TypeScript plugin modules and Pi hooks are extension code, so `hook` is `✗` for both.
 
