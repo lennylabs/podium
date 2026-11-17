@@ -169,8 +169,13 @@ func TestSkillMarkdown_Control(t *testing.T) {
 			head: "---\r\n", tail: "---\r\n\r\nBody.\r\n",
 		},
 		{
-			name: "indented block mapping",
-			in:   "---\n  name: ship\n  description: d\n---\nBody.\n",
+			name: "mapping whose first key is explicit",
+			in:   "---\n? name\n: ship\ndescription: d\n---\nBody.\n",
+			head: "---\n", tail: "---\nBody.\n",
+		},
+		{
+			name: "mapping that opens with a tag line",
+			in:   "---\n!!map\n  name: ship\n  description: d\n---\nBody.\n",
 			head: "---\n", tail: "---\nBody.\n",
 		},
 	} {
@@ -189,6 +194,47 @@ func TestSkillMarkdown_Control(t *testing.T) {
 			}
 		})
 	}
+	for _, tc := range []struct{ name, in, want string }{
+		{
+			name: "indented block mapping",
+			in:   "---\n  name: ship\n  description: d\n---\nBody.\n",
+			want: "---\n  disable-model-invocation: true\n  name: ship\n  description: d\n---\nBody.\n",
+		},
+		{
+			name: "indented block mapping with crlf, comments, and a block scalar",
+			in:   "---\r\n# leading comment\r\n    name: 'ship'   # quoted\r\n    description: |\r\n      Ship it.\r\n\r\n    metadata: {a: 1}\r\n---\r\nBody.\r\n",
+			want: "---\r\n    disable-model-invocation: true\r\n# leading comment\r\n    name: 'ship'   # quoted\r\n    description: |\r\n      Ship it.\r\n\r\n    metadata: {a: 1}\r\n---\r\nBody.\r\n",
+		},
+	} {
+		tc := tc
+		t.Run("absent key injected first in "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := string(skillMarkdown(userSkillSource(tc.in), controlFrontmatter))
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+			if fm := frontmatterOf(t, []byte(strings.ReplaceAll(got, "\r\n", "\n"))); fm[userOnlyKey] != true || fm["name"] != "ship" {
+				t.Errorf("frontmatter = %#v, want name ship and the control true", fm)
+			}
+		})
+	}
+	t.Run("control precedes derived compatibility in an indented block mapping", func(t *testing.T) {
+		t.Parallel()
+		src := Source{
+			ArtifactID:    "team/ship",
+			ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\ninvocation: user\nruntime_requirements:\n  python: \">=3.10\"\n---\n"),
+			SkillBytes:    []byte("---\n  name: ship\n  # keep this comment\n  description: \"d\"\n---\nBody.\n"),
+		}
+		got := string(skillMarkdown(src, controlFrontmatter))
+		want := "---\n  disable-model-invocation: true\n  compatibility: \"Requires Python >=3.10\"\n  name: ship\n  # keep this comment\n  description: \"d\"\n---\nBody.\n"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+		fm := frontmatterOf(t, []byte(got))
+		if fm[userOnlyKey] != true || fm["compatibility"] != "Requires Python >=3.10" || fm["description"] != "d" {
+			t.Errorf("frontmatter = %#v", fm)
+		}
+	})
 	t.Run("absent key added to an empty flow mapping", func(t *testing.T) {
 		t.Parallel()
 		got := skillMarkdown(userSkillSource("---\n{}\n---\nBody.\n"), controlFrontmatter)

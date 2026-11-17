@@ -81,9 +81,10 @@ func skillMarkdown(src Source, ctl userOnlyControl) []byte {
 
 // withUserOnlyFrontmatter makes `disable-model-invocation: true` the single
 // top-level occurrence of the key in b's frontmatter. An absent key is
-// injected as the first line of a block mapping whose keys start at column 1,
-// and is added to any other mapping, such as a flow mapping or an indented
-// block mapping, by re-encoding the frontmatter. A frontmatter that has
+// injected as the first line of a block mapping, at the indentation of its
+// keys, which keeps every other line byte-identical. It is added to any other
+// mapping, such as a flow mapping, by re-encoding the frontmatter. A
+// frontmatter that has
 // no closing delimiter, or does not decode to a mapping, takes the injected
 // line anyway, because the skill is user-invoked and a lenient harness reader
 // still sees the control. injectFrontmatterLine leaves b unchanged when it has
@@ -91,11 +92,11 @@ func skillMarkdown(src Source, ctl userOnlyControl) []byte {
 func withUserOnlyFrontmatter(b []byte) []byte {
 	fm, _, err := manifest.SplitFrontmatter(b)
 	if err != nil {
-		return injectFrontmatterLine(b, userOnlyKey, "true")
+		return injectFrontmatterLine(b, "", userOnlyKey, "true")
 	}
 	var doc yaml.Node
 	if yaml.Unmarshal(fm, &doc) != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return injectFrontmatterLine(b, userOnlyKey, "true")
+		return injectFrontmatterLine(b, "", userOnlyKey, "true")
 	}
 	root := doc.Content[0]
 	var keys []int
@@ -110,12 +111,13 @@ func withUserOnlyFrontmatter(b []byte) []byte {
 	lines := strings.SplitAfter(string(b), "\n")
 	closing := closingDelimiterLine(fm)
 	if len(keys) == 0 {
-		if startsAtColumnOne(root) {
-			return injectFrontmatterLine(b, userOnlyKey, "true")
+		if indent, ok := blockKeyIndent(lines, root); ok {
+			return injectFrontmatterLine(b, indent, userOnlyKey, "true")
 		}
-		// A column-0 line ahead of a flow mapping or an indented block
-		// mapping leaves frontmatter that does not decode, so the key joins
-		// the mapping and the frontmatter is re-encoded instead.
+		// No injected line joins a flow mapping, a mapping whose first key
+		// is explicit, or one that opens with a tag or anchor line without
+		// breaking the decode, so the key joins the mapping and the
+		// frontmatter is re-encoded instead.
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: userOnlyKey},
 			&yaml.Node{Kind: yaml.ScalarNode})
@@ -147,11 +149,27 @@ func closingDelimiterLine(fm []byte) int {
 	return bytes.Count(fm, []byte("\n")) + 2
 }
 
-// startsAtColumnOne reports whether root is a non-empty block mapping whose
-// keys start at column 1, the one layout where a line injected after the
-// opening delimiter becomes another top-level key of the same mapping.
-func startsAtColumnOne(root *yaml.Node) bool {
-	return !keysShareLine(root) && len(root.Content) > 0 && root.Content[0].Column == 1
+// blockKeyIndent returns the indentation of root's keys when root is a
+// non-empty block mapping that a line injected after the opening delimiter,
+// at that indentation, joins as another top-level key. lines is the document
+// split into lines. The first key's line must start with the indentation
+// alone, which rules out an explicit `? key`, and the mapping must start on
+// that line, which rules out a tag or anchor on a line of its own ahead of
+// the keys. Comment and blank lines between the delimiter and the first key
+// do not matter, because YAML ignores them at any indentation.
+func blockKeyIndent(lines []string, root *yaml.Node) (string, bool) {
+	if root.Kind != yaml.MappingNode || keysShareLine(root) || len(root.Content) == 0 {
+		return "", false
+	}
+	first := root.Content[0]
+	if root.Line != first.Line || first.Line >= len(lines) {
+		return "", false
+	}
+	line, indent := lines[first.Line], first.Column-1
+	if indent > len(line) || strings.TrimLeft(line[:indent], " ") != "" {
+		return "", false
+	}
+	return line[:indent], true
 }
 
 // keysShareLine reports whether root is a flow mapping, the one layout whose
@@ -216,7 +234,7 @@ func lineEnding(line string) string {
 
 // reencodeUserOnly handles a frontmatter the line replacement cannot edit,
 // such as a flow mapping whose keys share a line, and one the line injection
-// would break, such as an indented block mapping. It sets the first
+// would break, such as a mapping whose first key is explicit. It sets the first
 // occurrence to the boolean true, drops later ones, and re-encodes the
 // frontmatter between the delimiters. The re-encoding normalizes the layout
 // of the frontmatter alone: the opening delimiter line, the frontmatter's
