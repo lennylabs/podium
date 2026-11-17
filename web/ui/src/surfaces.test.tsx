@@ -2414,7 +2414,7 @@ describe("the domain browser", () => {
           notable: [
             {
               id: "platform/deploy",
-              type: "context",
+              type: "rule",
               version: "0.1.0",
               source: "featured",
             },
@@ -2426,8 +2426,8 @@ describe("the domain browser", () => {
     render(<App />);
     const browser = await screen.findByLabelText("Domain browser");
     const row = within(browser).getByRole("listitem");
-    expect(within(row).getByText("CONTEXT")).toBeTruthy();
-    expect(within(row).queryByText("context")).toBeNull();
+    expect(within(row).getByText("RULE")).toBeTruthy();
+    expect(within(row).queryByText("rule")).toBeNull();
     expect(within(row).getByText("v0.1.0")).toBeTruthy();
     expect(within(row).queryByText("0.1.0")).toBeNull();
     const curated = within(row).getByText("\u2605 CURATED");
@@ -2496,10 +2496,10 @@ describe("the domain browser", () => {
           notable: [
             {
               id: "platform/deploy",
-              type: "context",
+              type: "rule",
               description: "Deploy runbook.",
             },
-            { id: "platform/nodesc", type: "context" },
+            { id: "platform/nodesc", type: "rule" },
           ],
         },
       },
@@ -2532,7 +2532,7 @@ describe("the domain browser", () => {
         body: {
           path: "platform",
           subdomains: [{ path: "platform/ci", name: "ci" }],
-          notable: [{ id: "platform/nodesc", type: "context" }],
+          notable: [{ id: "platform/nodesc", type: "rule" }],
         },
       },
     });
@@ -2554,7 +2554,7 @@ describe("the domain browser", () => {
         body: {
           path: "platform",
           subdomains: wide,
-          notable: [{ id: "platform/nodesc", type: "context" }],
+          notable: [{ id: "platform/nodesc", type: "rule" }],
         },
       },
     });
@@ -3080,7 +3080,7 @@ describe("the domain browser", () => {
           path: "ops",
           description: "Ops.",
           subdomains: [],
-          notable: [{ id: "ops/runbook", type: "context" }],
+          notable: [{ id: "ops/runbook", type: "rule" }],
         },
       },
     });
@@ -3401,7 +3401,7 @@ describe("search", () => {
     render(<App />);
     await screen.findByLabelText("Search");
     expect(screen.getByText("Filters")).toBeTruthy();
-    for (const name of ["skill", "agent", "context", "mcp-server"]) {
+    for (const name of ["skill", "agent", "rule", "mcp-server"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
     expect(screen.queryByRole("button", { name: "+ type" })).toBeNull();
@@ -3426,6 +3426,26 @@ describe("search", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("Filter by type")).toBeTruthy();
     });
+  });
+
+  // Spec: §4.3, §13.10 — the type dropdown offers the first-class types in
+  // their §4.3 order. `command` and `context` left the type system, so the
+  // dropdown names neither, and a filter on a registered extension type still
+  // arrives through the palette's `type:` syntax.
+  it("offers the first-class types in the type dropdown", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: rootDomains },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/review");
+    render(<App />);
+    const type = await screen.findByLabelText("Filter by type");
+    expect(
+      within(type)
+        .getAllByRole("option")
+        .map((option) => option.getAttribute("value")),
+    ).toEqual(["", "skill", "agent", "rule", "hook", "mcp-server"]);
   });
 
   // The dashed pill states what the control takes, and it is gone once the
@@ -3763,8 +3783,8 @@ describe("search", () => {
           query: "alpha",
           total_matched: 2,
           results: [
-            { id: "boundary/other", type: "context", score: 0.18 },
-            { id: "team/alpha", type: "context", score: 0.3 },
+            { id: "boundary/other", type: "rule", score: 0.18 },
+            { id: "team/alpha", type: "rule", score: 0.3 },
           ],
         },
       },
@@ -4066,7 +4086,7 @@ describe("search", () => {
           results: [
             {
               id: "eng/deploy",
-              type: "context",
+              type: "rule",
               description: "Deploy runbook",
             },
             { id: "finance/ap/pay-invoice", type: "skill" },
@@ -4285,12 +4305,12 @@ describe("search", () => {
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": { body: emptyDomain },
       "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
-      "/v1/search_artifacts?query=deploy&type=context&top_k=1": {
+      "/v1/search_artifacts?query=deploy&type=rule&top_k=1": {
         body: { total_matched: 1, results: [{ id: "eng/deploy" }] },
       },
       "/v1/catalog": { body: { ids: ["eng/deploy"] } },
     });
-    goTo("#/search/type:context deploi");
+    goTo("#/search/type:rule deploi");
     render(<App />);
     const correction = await screen.findByTestId("search-correction");
     // The filter is drawn as a pill beside the field, so the chip names the
@@ -4298,7 +4318,7 @@ describe("search", () => {
     expect(correction.textContent).toBe("Did you mean deploy");
     fireEvent.click(within(correction).getByRole("button", { name: "deploy" }));
     await waitFor(() => {
-      expect(window.location.hash).toBe(searchHref("type:context deploy"));
+      expect(window.location.hash).toBe(searchHref("type:rule deploy"));
     });
   });
 
@@ -5055,7 +5075,7 @@ describe("the artifact viewer", () => {
 
     stubs["/v1/layers"] = { body: { layers: [ingestedLayer()] } };
     stubs["/v1/load_artifact"] = {
-      body: { ...payInvoice(), id: "eng/deploy", type: "context" },
+      body: { ...payInvoice(), id: "eng/deploy", type: "rule" },
     };
     goTo("#/artifact/eng%2Fdeploy");
 
@@ -5079,7 +5099,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -5111,7 +5131,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -5258,7 +5278,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -5324,7 +5344,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -5359,7 +5379,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -5403,7 +5423,7 @@ describe("the artifact viewer", () => {
         "/v1/load_artifact": {
           body: {
             id: "platform/review",
-            type: "context",
+            type: "rule",
             version: "1.0.0",
             content_hash: "sha256:abc",
             manifest_body: "# Review\n",
@@ -5456,7 +5476,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/broken",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "# Broken\n",
@@ -5493,7 +5513,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -5532,7 +5552,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -5550,7 +5570,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:old",
           manifest_body: "# Review\n",
@@ -5583,7 +5603,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact?id=platform%2Freview": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -5593,7 +5613,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact?id=platform%2Freview&version=1.0.0": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:old",
           manifest_body: "# Review\n",
@@ -5632,7 +5652,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact?id=platform%2Freview": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Latest review\n",
@@ -5642,7 +5662,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact?id=platform%2Freview&version=1.0.0": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:old",
           manifest_body: "# Older review\n",
@@ -5676,7 +5696,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "eng/old-deploy",
-          type: "context",
+          type: "rule",
           version: "0.1.0",
           content_hash: "sha256:abc",
           manifest_body: "# Superseded\n",
@@ -5706,7 +5726,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "eng/old-deploy",
-          type: "context",
+          type: "rule",
           version: "0.1.0",
           content_hash: "sha256:abc",
           manifest_body: "# Superseded\n",
@@ -5734,7 +5754,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "eng/deploy",
-          type: "context",
+          type: "rule",
           version: "0.1.0",
           content_hash: "sha256:abc",
           manifest_body: "# Deploy\n",
@@ -5759,7 +5779,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -5776,7 +5796,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:old",
           manifest_body: "# Review\n",
@@ -5806,7 +5826,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -5843,7 +5863,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -5877,7 +5897,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -5924,7 +5944,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -5963,7 +5983,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -6000,7 +6020,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -6031,7 +6051,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -6051,7 +6071,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:old",
           manifest_body: "# Review\n",
@@ -6113,7 +6133,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact?id=eng%2Fdeploy": {
         body: {
           id: "eng/deploy",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Deploy\n",
@@ -6123,7 +6143,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact?id=eng%2Fxss": {
         body: {
           id: "eng/xss",
-          type: "context",
+          type: "rule",
           version: "0.1.0",
           content_hash: "sha256:def",
           manifest_body: "# Escaping\n",
@@ -6166,7 +6186,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact?id=eng%2Fdeploy": {
         body: {
           id: "eng/deploy",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Deploy\n",
@@ -6176,7 +6196,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact?id=eng%2Fxss": {
         body: {
           id: "eng/xss",
-          type: "context",
+          type: "rule",
           version: "0.1.0",
           content_hash: "sha256:def",
           manifest_body: "# Escaping\n",
@@ -6223,7 +6243,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -6276,7 +6296,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "2.3.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -6322,7 +6342,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "",
@@ -6358,7 +6378,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/notes",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "Body.\n",
@@ -6379,7 +6399,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/bare",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "",
@@ -6442,12 +6462,12 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "eng/yamly",
-          type: "context",
+          type: "rule",
           version: "0.1.0",
           content_hash: "sha256:abc",
           manifest_body: "Body.\n",
           frontmatter:
-            "---\ntype: context\nmapping:\n  inner_key: inner value\n  other: 2\nnotes: |\n  A literal block\n  across two lines\n---\n",
+            "---\ntype: rule\nmapping:\n  inner_key: inner value\n  other: 2\nnotes: |\n  A literal block\n  across two lines\n---\n",
         },
       },
       "/v1/dependents": { body: { edges: [] } },
@@ -6476,12 +6496,12 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "eng/scalars",
-          type: "context",
+          type: "rule",
           version: "0.1.0",
           content_hash: "sha256:abc",
           manifest_body: "Body.\n",
           frontmatter:
-            '---\ntype: context\nnum: 007\nrelease: 1.10\nlabel: "quoted text"\n---\n',
+            '---\ntype: rule\nnum: 007\nrelease: 1.10\nlabel: "quoted text"\n---\n',
         },
       },
       "/v1/dependents": { body: { edges: [] } },
@@ -6515,12 +6535,12 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "eng/anchored",
-          type: "context",
+          type: "rule",
           version: "0.1.0",
           content_hash: "sha256:abc",
           manifest_body: "Body.\n",
           frontmatter:
-            "---\ntype: context\nanchors: &anch base\nref: *anch\nblock: &blk\n  inner: one\nblockref: *blk\nlist:\n  - *anch\n---\n",
+            "---\ntype: rule\nanchors: &anch base\nref: *anch\nblock: &blk\n  inner: one\nblockref: *blk\nlist:\n  - *anch\n---\n",
         },
       },
       "/v1/dependents": { body: { edges: [] } },
@@ -6545,7 +6565,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "Body.\n",
@@ -6578,7 +6598,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "Body.\n",
@@ -6626,7 +6646,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "Body.\n",
@@ -6685,7 +6705,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "ops/ledger-reconciliation",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "Body.\n",
@@ -6765,7 +6785,7 @@ describe("the artifact viewer", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "Body.\n",
@@ -6875,7 +6895,7 @@ describe("the artifact viewer", () => {
         "/v1/load_artifact": {
           body: {
             id: "edge/many-tags",
-            type: "context",
+            type: "rule",
             version: "0.1.0",
             content_hash: "sha256:abc",
             manifest_body: "# Many tags\n",
@@ -6896,7 +6916,7 @@ describe("the artifact viewer", () => {
         "/v1/load_artifact": {
           body: {
             id: "edge/many-tags",
-            type: "context",
+            type: "rule",
             version: "0.1.0",
             content_hash: "sha256:abc",
             manifest_body: "# Many tags\n",
@@ -6957,7 +6977,7 @@ describe("the artifact viewer", () => {
         return {
           body: {
             id,
-            type: "context",
+            type: "rule",
             version: "0.1.0",
             content_hash: "sha256:abc",
             manifest_body: "# Viewed\n",
@@ -7045,7 +7065,7 @@ describe("the artifact viewer", () => {
         "/v1/load_artifact": {
           body: {
             id: "edge/no-description",
-            type: "context",
+            type: "rule",
             version: "0.1.0",
             content_hash: "sha256:abc",
             manifest_body: "# No description\n",
@@ -7244,7 +7264,7 @@ describe("the artifact viewer", () => {
         "/v1/load_artifact": {
           body: {
             id: "eng/odd",
-            type: "context",
+            type: "rule",
             version: "0.1.0",
             content_hash: "sha256:abc",
             manifest_body: "# Odd\n",
@@ -7290,7 +7310,7 @@ describe("the artifact viewer", () => {
         "/v1/load_artifact": {
           body: {
             id: "finance/pay-invoice",
-            type: "context",
+            type: "rule",
             version: "0.1.0",
             content_hash: "sha256:abc",
             manifest_body: "# Pay invoice\n",
@@ -15943,7 +15963,7 @@ describe("the command palette", () => {
   // search surface behind the scrim, which is listing the results of one the
   // reader just ran there.
   it("names what fills the recent queries rather than denying a query the page ran", async () => {
-    palettePage([{ id: "eng/deploy", type: "context" }], 1);
+    palettePage([{ id: "eng/deploy", type: "rule" }], 1);
     goTo(searchHref(""));
     render(<App />);
     const surface = await screen.findByLabelText("Search");
@@ -17220,7 +17240,7 @@ describe("the trimmed listing", () => {
               source: "featured",
             },
             { id: "platform/lint", type: "rule", version: "1.0.0" },
-            { id: "platform/notes", type: "context", version: "1.2.0" },
+            { id: "platform/notes", type: "agent", version: "1.2.0" },
           ],
         },
       },
@@ -17828,7 +17848,7 @@ describe("the artifact viewer’s resources", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: manifestBody,
@@ -17910,7 +17930,7 @@ describe("the artifact viewer’s resources", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -18099,7 +18119,7 @@ describe("the artifact viewer’s resources", () => {
       "/v1/load_artifact": {
         body: {
           id: "platform/review",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "# Review\n",
@@ -19159,7 +19179,7 @@ describe("keyboard semantics", () => {
       "/v1/load_artifact": {
         body: {
           id: "eng/deploy",
-          type: "context",
+          type: "rule",
           version: "1.0.0",
           content_hash: "sha256:abc",
           manifest_body: "Reference content the agent loads on demand.\n",
