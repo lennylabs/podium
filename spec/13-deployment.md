@@ -626,7 +626,7 @@ These variables set the lint thresholds (§4.1, §4.3.4, §4.5.5, §7.3.1). The 
 | `PODIUM_LINT_CONTENT_SIMILARITY` | §7.3.1 near-duplicate content threshold, from 0.5 to 1.0 | `0.8` |
 | `PODIUM_LINT_SEMANTIC_OVERLAP` | §7.3.1 semantic overlap check, `on` or `off`: computes and stores overlap records and reports them at ingest and in the catalog overlap report; read by the registry only | `off` |
 | `PODIUM_LINT_SEMANTIC_SIMILARITY` | §7.3.1 default threshold applied to stored overlap records when they are read, a cosine similarity from 0.5 to 1.0; changing it needs no recomputation; read by the registry only | `0.85` |
-| `PODIUM_LINT_SEMANTIC_NEIGHBORS` | §7.3.1 most overlap records one computation stores, from 1 to 100; the computation queries one more index row, because the artifact's own row is among its nearest; read by the registry only | `10` |
+| `PODIUM_LINT_SEMANTIC_NEIGHBORS` | §7.3.1 number of nearest peer artifacts one computation finds and stores records for, from 1 to 100; the computation widens its index query past rows of earlier versions to find them; read by the registry only | `10` |
 | `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL` | §7.3.1 interval of the sweep that computes artifacts with missing or stale overlap records, as a duration of at least `1m`, or `0` to turn the sweep off; read by the registry only | `24h` |
 
 ### Config file format
