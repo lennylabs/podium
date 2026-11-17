@@ -47,6 +47,43 @@ func extendsRejected(id string) string {
 	return "rejected: " + id + " (" + layer.InvalidArtifactCode + "): " + layer.ExtendsRemovedReason
 }
 
+// removedTypeArtifact returns a low-sensitivity ARTIFACT.md of type typ,
+// which callers set to a type §4.1 removed.
+func removedTypeArtifact(typ, desc string) string {
+	return fmt.Sprintf("---\ntype: %s\nversion: 1.0.0\ndescription: %s\nsensitivity: low\n---\n\n%s body.\n", typ, desc, desc)
+}
+
+// typeRemovedRejected returns the standard-error line podium lint, podium
+// layer reingest, and a filesystem-source podium sync print for an
+// ARTIFACT.md whose type t §4.1 removed.
+func typeRemovedRejected(id, t string) string {
+	return "rejected: " + id + " (" + layer.InvalidArtifactCode + "): " + layer.TypeRemovedReason(t)
+}
+
+// assertRejectedLines fails the test unless the "rejected: " lines on
+// stderr are exactly want, in any order. The line carries the code and the
+// reason and no constraint, so an exact comparison is what pins which rule
+// refused each artifact.
+func assertRejectedLines(t *testing.T, stderr string, want ...string) {
+	t.Helper()
+	missing := map[string]bool{}
+	for _, w := range want {
+		missing[w] = true
+	}
+	for _, line := range strings.Split(stderr, "\n") {
+		if !strings.HasPrefix(line, "rejected: ") {
+			continue
+		}
+		if !missing[line] {
+			t.Errorf("unexpected rejected line %q\nstderr:\n%s", line, stderr)
+		}
+		delete(missing, line)
+	}
+	for w := range missing {
+		t.Errorf("stderr missing rejected line %q\nstderr:\n%s", w, stderr)
+	}
+}
+
 // smallteamLowArtifact returns a valid low-sensitivity agent ARTIFACT.md.
 func smallteamLowArtifact(desc string) string {
 	return fmt.Sprintf("---\ntype: agent\nversion: 1.0.0\ndescription: %s\nsensitivity: low\n---\n\n%s body.\n", desc, desc)
@@ -1417,7 +1454,7 @@ func TestStandaloneServer_LintValidInvalid(t *testing.T) {
 // error and lints the rest, so a lint failure beside a refusal still reports
 // its diagnostic, and a refusal alone fails the run.
 //
-// Spec: §4.6, §7.3.1
+// Spec: §4.1, §4.6, §7.3.1
 func TestLint_ExtendsRefusalBesideLintFailure(t *testing.T) {
 	t.Parallel()
 	t.Run("beside a lint failure", func(t *testing.T) {
@@ -1439,6 +1476,10 @@ func TestLint_ExtendsRefusalBesideLintFailure(t *testing.T) {
 		if !lintErrorNames(res.Stdout, "invalid") {
 			t.Errorf("stdout missing an error diagnostic naming invalid:\n%s", res.Stdout)
 		}
+		// Each fixture is a context artifact that declares extends:, and the
+		// §4.6 check runs before the §4.1 removed-type check.
+		assertRejectedLines(t, res.Stderr, extendsRejected("ops/c"), extendsRejected("ops/d"))
+		cliNotContains(t, res.Stderr, layer.TypeRemovedReason("context"), "the removed-type reason")
 	})
 	t.Run("refusal alone", func(t *testing.T) {
 		t.Parallel()
@@ -1447,9 +1488,92 @@ func TestLint_ExtendsRefusalBesideLintFailure(t *testing.T) {
 		})
 		res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "lint", "--registry", reg)
 		cliWantExit(t, res, 1, "lint over a refused artifact alone")
-		cliContains(t, res.Stderr, extendsRejected("ops/c"), "the refused ops/c")
+		assertRejectedLines(t, res.Stderr, extendsRejected("ops/c"))
+		cliNotContains(t, res.Stderr, layer.TypeRemovedReason("context"), "the removed-type reason")
 		cliNotContains(t, res.Stdout, "lint: no issues.", "the clean-run line")
 	})
+}
+
+// podium lint refuses an ARTIFACT.md whose type §4.1 removed, names it on
+// standard error, and lints the rest, so a refusal fails the run alone and
+// beside a lint failure. Under --json the refused artifacts move from
+// standard error to the envelope's rejected list, where details.constraint
+// names the rule. An artifact that trips both rules reports extends_removed,
+// because the §4.6 check runs first.
+//
+// Spec: §4.1, §7.3.1
+func TestLint_RemovedTypeRefused(t *testing.T) {
+	t.Parallel()
+	for _, typ := range []string{"command", "context"} {
+		t.Run(typ+" alone", func(t *testing.T) {
+			t.Parallel()
+			reg := writeRegistry(t, map[string]string{
+				"ops/old/ARTIFACT.md": removedTypeArtifact(typ, "old artifact"),
+			})
+			res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "lint", "--registry", reg)
+			cliWantExit(t, res, 1, "lint over a "+typ+" artifact alone")
+			assertRejectedLines(t, res.Stderr, typeRemovedRejected("ops/old", typ))
+			cliNotContains(t, res.Stdout, "lint: no issues.", "the clean-run line")
+		})
+	}
+	t.Run("beside a lint failure", func(t *testing.T) {
+		t.Parallel()
+		reg := writeRegistry(t, map[string]string{
+			"ops/base/ARTIFACT.md":     smallteamLowArtifact("base artifact"),
+			"ops/standup/ARTIFACT.md":  removedTypeArtifact("command", "standup command"),
+			"ops/glossary/ARTIFACT.md": removedTypeArtifact("context", "glossary context"),
+			// Invalid: missing the required version field, which the linter rejects.
+			"invalid/ARTIFACT.md": "---\ntype: agent\ndescription: missing version\n---\n\nbody.\n",
+		})
+		res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "lint", "--registry", reg)
+		cliWantExit(t, res, 1, "lint beside a lint failure")
+		assertRejectedLines(t, res.Stderr,
+			typeRemovedRejected("ops/standup", "command"),
+			typeRemovedRejected("ops/glossary", "context"))
+		if !lintErrorNames(res.Stdout, "invalid") {
+			t.Errorf("stdout missing an error diagnostic naming invalid:\n%s", res.Stdout)
+		}
+	})
+	t.Run("json", func(t *testing.T) {
+		t.Parallel()
+		reg := writeRegistry(t, map[string]string{
+			"ops/base/ARTIFACT.md":     smallteamLowArtifact("base artifact"),
+			"ops/standup/ARTIFACT.md":  removedTypeArtifact("command", "standup command"),
+			"ops/glossary/ARTIFACT.md": removedTypeArtifact("context", "glossary context"),
+			"ops/child/ARTIFACT.md":    extendsContextArtifact("child artifact", "ops/base"),
+		})
+		res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "lint", "--registry", reg, "--json")
+		cliWantExit(t, res, 1, "lint --json over removed-type artifacts")
+		cliNotContains(t, res.Stderr, "rejected:", "--json keeps refused artifacts off stderr")
+		assertRejectedConstraints(t, decodeLintEnvelope(t, res.Stdout), map[string]string{
+			"ops/standup":  layer.TypeRemovedConstraint,
+			"ops/glossary": layer.TypeRemovedConstraint,
+			"ops/child":    layer.ExtendsRemovedConstraint,
+		})
+	})
+}
+
+// assertRejectedConstraints fails the test unless the envelope's rejected
+// list holds exactly the ids in want, each with ingest.invalid_artifact and
+// details equal to {"constraint": want[id]} and nothing else.
+func assertRejectedConstraints(t *testing.T, env lintEnvelope, want map[string]string) {
+	t.Helper()
+	if len(env.Rejected) != len(want) {
+		t.Fatalf("rejected = %+v, want %d entries", env.Rejected, len(want))
+	}
+	for _, r := range env.Rejected {
+		constraint, ok := want[r.ArtifactID]
+		if !ok {
+			t.Errorf("rejected names %s, which no rule refuses", r.ArtifactID)
+			continue
+		}
+		if r.Code != layer.InvalidArtifactCode {
+			t.Errorf("rejected %s code = %s, want %s", r.ArtifactID, r.Code, layer.InvalidArtifactCode)
+		}
+		if len(r.Details) != 1 || r.Details["constraint"] != constraint {
+			t.Errorf("rejected %s details = %v, want exactly {constraint: %s}", r.ArtifactID, r.Details, constraint)
+		}
+	}
 }
 
 // lintErrorNames reports whether a podium lint stdout line is an error
@@ -1485,7 +1609,7 @@ func TestLint_SkillMDExtendsKeyPasses(t *testing.T) {
 // no rejection details, so the extends_removed constraint is pinned over
 // HTTP by the ingest wire tests.
 //
-// Spec: §4.6, §7.3.1
+// Spec: §4.1, §4.6, §7.3.1
 func TestStandaloneServer_ExtendsArtifactRefused(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -1511,7 +1635,51 @@ func TestStandaloneServer_ExtendsArtifactRefused(t *testing.T) {
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
 		"layer", "reingest", "--registry", srv.BaseURL, smallteamLayerID(t, srv.BaseURL))
 	cliWantNonZero(t, res, "layer reingest over a refused artifact")
-	cliContains(t, res.Stderr, extendsRejected("ops/child"), "the refused ops/child")
+	// ops/child is a context artifact that declares extends:, and the §4.6
+	// check runs before the §4.1 removed-type check.
+	assertRejectedLines(t, res.Stderr, extendsRejected("ops/child"))
+	cliNotContains(t, res.Stderr, layer.TypeRemovedReason("context"), "the removed-type reason")
+}
+
+// A standalone server boots over a layer that holds a command and a context
+// ARTIFACT.md, refuses both at ingest so search and load_artifact do not
+// return them, and serves the rest. podium layer reingest then exits
+// non-zero and names each refused artifact on standard error. The
+// type_removed constraint is pinned over HTTP by the ingest wire tests.
+//
+// Spec: §4.1, §7.3.1
+func TestStandaloneServer_RemovedTypeRefused(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"ops/base/ARTIFACT.md":     smallteamLowArtifact("quarterly base runbook"),
+		"ops/standup/ARTIFACT.md":  removedTypeArtifact("command", "quarterly standup runbook"),
+		"ops/glossary/ARTIFACT.md": removedTypeArtifact("context", "quarterly glossary runbook"),
+	})
+	srv := startServer(t, reg)
+
+	st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=quarterly+runbook")
+	if st != 200 {
+		t.Fatalf("search HTTP %d: %s", st, body)
+	}
+	if !strings.Contains(string(body), "ops/base") {
+		t.Errorf("search must return ops/base: %s", body)
+	}
+	for _, id := range []string{"ops/standup", "ops/glossary"} {
+		if strings.Contains(string(body), id) {
+			t.Errorf("search returned the refused %s: %s", id, body)
+		}
+		st, load := getRaw(t, srv.BaseURL+"/v1/load_artifact?id="+id)
+		if st != 404 || !strings.Contains(string(load), "registry.not_found") {
+			t.Errorf("load the refused %s = HTTP %d %s, want 404 registry.not_found", id, st, load)
+		}
+	}
+
+	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
+		"layer", "reingest", "--registry", srv.BaseURL, smallteamLayerID(t, srv.BaseURL))
+	cliWantNonZero(t, res, "layer reingest over removed-type artifacts")
+	assertRejectedLines(t, res.Stderr,
+		typeRemovedRejected("ops/standup", "command"),
+		typeRemovedRejected("ops/glossary", "context"))
 }
 
 // cross-type dependency graph: podium impact lists an agent that declares

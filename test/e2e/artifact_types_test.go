@@ -195,6 +195,46 @@ func TestArtifactTypes_ScaffoldCommand(t *testing.T) {
 	assertScaffoldRemovedType(t, "command")
 }
 
+// ---- user-invoked skill -----------------------------------------------------
+
+// Spec: §4.3.4, §7.3.1 — scaffold --type skill --invocation user writes
+// SKILL.md metadata.invocation "user", the replacement for a command (§4.1),
+// and the package lints clean.
+func TestArtifactTypes_ScaffoldUserInvokedSkill(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := filepath.Join(root, "tools", "deploy")
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
+		"--description", "Deploy the current branch to an environment.",
+		"--invocation", "user", "--yes", dir)
+	skill := assertSkillScaffoldLintsClean(t, res, root, dir)
+	cliContains(t, skill, "metadata:\n  version: \"0.1.0\"\n  invocation: \"user\"\n---\n", "metadata.invocation")
+}
+
+// Spec: §4.1, §4.3.4, §7.3.1 — --invocation applies to a skill alone, so
+// passing it with another type, or passing a value other than any or user,
+// exits 2 and writes no package.
+func TestArtifactTypes_ScaffoldInvocationRefused(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, typ, value, want string
+	}{
+		{"agent", "agent", "user", "--invocation applies only to --type skill"},
+		{"rule", "rule", "user", "--invocation applies only to --type skill"},
+		{"invalid value", "skill", "User", "must be one of any|user"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := filepath.Join(t.TempDir(), "tools", "deploy")
+			res := runPodium(t, "", nil, "artifact", "scaffold", "--type", tc.typ,
+				"--description", "Deploy the current branch.", "--invocation", tc.value, "--yes", out)
+			cliWantExit(t, res, 2, "scaffold --type "+tc.typ+" --invocation "+tc.value)
+			cliContains(t, res.Stderr, tc.want, "the --invocation refusal")
+			mustNotExist(t, out)
+		})
+	}
+}
+
 // TestArtifactTypes_CommandNotProjectedThroughMCP drives podium-mcp against a
 // standalone server holding a user-invoked skill, the replacement for a
 // command, and asserts that `prompts/list` returns JSON-RPC -32601 ("method

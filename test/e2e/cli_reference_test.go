@@ -1405,6 +1405,31 @@ func TestCLI_ScaffoldCommand(t *testing.T) {
 	assertScaffoldRemovedType(t, "command")
 }
 
+// spec: doc "podium artifact scaffold", skill row and flag table,
+// `--invocation`. --invocation user writes SKILL.md metadata.invocation
+// "user" and lints clean, --invocation any writes no invocation key because
+// an absent value resolves to any, and --invocation with another type exits
+// 2.
+//
+// Spec: §4.3.4, §7.3.1
+func TestCLI_ScaffoldUserInvokedSkill(t *testing.T) {
+	root := t.TempDir()
+	dst := filepath.Join(root, "personal/standup")
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Format a daily standup update.", "--invocation", "user", "--yes", dst)
+	skill := assertSkillScaffoldLintsClean(t, res, root, dst)
+	cliContains(t, skill, "  invocation: \"user\"\n", "metadata.invocation")
+
+	anyRoot := t.TempDir()
+	anyDst := filepath.Join(anyRoot, "personal/standup")
+	res = runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill", "--description", "Format a daily standup update.", "--invocation", "any", "--yes", anyDst)
+	cliNotContains(t, assertSkillScaffoldLintsClean(t, res, anyRoot, anyDst), "invocation", "an invocation key for any")
+
+	agentDst := filepath.Join(t.TempDir(), "personal/standup")
+	res = runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "Format a daily standup update.", "--invocation", "user", "--yes", agentDst)
+	cliWantExit(t, res, 2, "scaffold --type agent --invocation user")
+	mustNotExist(t, agentDst)
+}
+
 // spec: doc "podium artifact scaffold", rule row, `--rule-mode`/`--rule-globs`.
 func TestCLI_ScaffoldRuleGlob(t *testing.T) {
 	root := t.TempDir()

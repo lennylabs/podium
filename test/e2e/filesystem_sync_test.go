@@ -1223,6 +1223,151 @@ func TestFilesystemSync_ExtendsDeclarationDropsArtifact(t *testing.T) {
 	})
 }
 
+// removedTypeSyncRegistry writes a filesystem registry that holds a command
+// team/standup and a context team/glossary beside the agent shared/other.
+// The filesystem source runs no lint, so both reach the §4.1 removed-type
+// rule.
+func removedTypeSyncRegistry(t *testing.T) string {
+	t.Helper()
+	return writeRegistry(t, map[string]string{
+		"shared/other/ARTIFACT.md":  agentArtifact("other"),
+		"team/standup/ARTIFACT.md":  removedTypeArtifact("command", "standup command"),
+		"team/glossary/ARTIFACT.md": removedTypeArtifact("context", "glossary context"),
+	})
+}
+
+// assertRemovedTypeRejected checks that stderr names exactly the command and
+// the context of removedTypeSyncRegistry as refused.
+func assertRemovedTypeRejected(t *testing.T, stderr string) {
+	t.Helper()
+	assertRejectedLines(t, stderr,
+		typeRemovedRejected("team/standup", "command"),
+		typeRemovedRejected("team/glossary", "context"))
+}
+
+// assertRemovedTypeRefusedOnly checks that target holds shared/other and
+// neither refused artifact.
+func assertRemovedTypeRefusedOnly(t *testing.T, target string) {
+	t.Helper()
+	mustExist(t, filepath.Join(target, "shared", "other", "ARTIFACT.md"))
+	mustNotExist(t, filepath.Join(target, "team", "standup"))
+	mustNotExist(t, filepath.Join(target, "team", "glossary"))
+}
+
+// A filesystem-source sync refuses an ARTIFACT.md whose type §4.1 removed,
+// reports it on standard error with ingest.invalid_artifact and the
+// removed-type reason, materializes the rest, and exits 1.
+//
+// Spec: §4.1, §13.11.3
+func TestFilesystemSync_RemovedTypeDropsArtifact(t *testing.T) {
+	t.Parallel()
+	reg := removedTypeSyncRegistry(t)
+
+	t.Run("one-shot", func(t *testing.T) {
+		t.Parallel()
+		target := t.TempDir()
+		res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
+		if res.Exit != 1 {
+			t.Fatalf("sync exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
+		}
+		assertRemovedTypeRejected(t, res.Stderr)
+		assertRemovedTypeRefusedOnly(t, target)
+		lock := readFile(t, filepath.Join(target, ".podium", "sync.lock"))
+		for _, refused := range []string{"team/standup", "team/glossary"} {
+			if strings.Contains(lock, refused) {
+				t.Errorf("lock records the refused %s:\n%s", refused, lock)
+			}
+		}
+		if !strings.Contains(lock, "shared/other") {
+			t.Errorf("lock missing shared/other:\n%s", lock)
+		}
+	})
+
+	t.Run("dry-run", func(t *testing.T) {
+		t.Parallel()
+		target := t.TempDir()
+		res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none", "--dry-run")
+		if res.Exit != 1 {
+			t.Fatalf("sync --dry-run exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
+		}
+		assertRemovedTypeRejected(t, res.Stderr)
+		if entries, _ := os.ReadDir(target); len(entries) != 0 {
+			t.Errorf("--dry-run wrote into the target: %v", entries)
+		}
+	})
+
+	t.Run("config workspace target", func(t *testing.T) {
+		t.Parallel()
+		ws := t.TempDir()
+		target := filepath.Join(ws, "out")
+		cfg := writeCollisionWorkspaceConfig(t, ws, reg, target)
+		res := runPodium(t, "", nil, "sync", "--config", cfg)
+		if res.Exit != 1 {
+			t.Fatalf("sync --config exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
+		}
+		assertRemovedTypeRejected(t, res.Stderr)
+		if !strings.Contains(res.Stderr, "target collide-ws:") {
+			t.Errorf("stderr missing the target failure line:\n%s", res.Stderr)
+		}
+		assertRemovedTypeRefusedOnly(t, target)
+	})
+}
+
+// A filesystem-source sync runs no lint, and a metadata.invocation value
+// other than any or user resolves to any on every reader, so claude-code
+// writes the skill with no user-only control. podium lint over the same
+// layer exits 0 and reports the ignored value as a warning.
+//
+// Spec: §4.3.4, §6.7, §13.11.3
+func TestFilesystemSync_InvalidInvocationResolvesToAny(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"tools/standup/SKILL.md": "---\nname: standup\ndescription: Format a daily standup update.\nmetadata:\n  version: \"1.0.0\"\n  invocation: User\n---\n\n$ARGUMENTS\n",
+	})
+	target := t.TempDir()
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "claude-code")
+	cliWantExit(t, res, 0, "sync over an invalid invocation value")
+	skill := readFile(t, filepath.Join(target, ".claude", "skills", "standup", "SKILL.md"))
+	cliNotContains(t, skill, "disable-model-invocation", "the user-only control")
+
+	lint := runPodium(t, "", nil, "lint", "--registry", reg)
+	cliWantExit(t, lint, 0, "lint over an invalid invocation value")
+	var warned bool
+	for _, line := range strings.Split(lint.Stdout, "\n") {
+		if strings.Contains(line, "[warning] tools/standup:") &&
+			strings.Contains(line, `metadata.invocation "User" is ignored`) &&
+			strings.Contains(line, "(lint.skill_metadata_field_ignored)") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("lint stdout missing the metadata.invocation warning:\n%s", lint.Stdout)
+	}
+	cliNotContains(t, lint.Stdout, "[error]", "an error diagnostic")
+}
+
+// A user-invoked skill whose bundled agents/openai.yaml is a YAML sequence
+// does not fail a codex sync: the adapter replaces the file with the minimal
+// policy file and the sibling skill still materializes.
+//
+// Spec: §6.7
+func TestFilesystemSync_CodexMalformedOpenAIYAML(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"tools/deploy/SKILL.md":           userInvokedSkill("deploy", "Deploy the current branch.", "$ARGUMENTS\n"),
+		"tools/deploy/agents/openai.yaml": "- not\n- a mapping\n",
+		"tools/greet/SKILL.md":            skillBody("greet"),
+	})
+	target := t.TempDir()
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "codex")
+	cliWantExit(t, res, 0, "codex sync over a malformed agents/openai.yaml")
+	mustExist(t, filepath.Join(target, ".agents", "skills", "greet", "SKILL.md"))
+	const minimal = "policy:\n  allow_implicit_invocation: false\n"
+	if got := readFile(t, filepath.Join(target, ".agents", "skills", "deploy", "agents", "openai.yaml")); got != minimal {
+		t.Errorf("agents/openai.yaml = %q, want the minimal policy file %q", got, minimal)
+	}
+}
+
 // DOMAIN.md files at layer root are not treated as artifacts.
 func TestFilesystemSync_DomainMDInLayerNotTreatedAsArtifact(t *testing.T) {
 	t.Parallel()

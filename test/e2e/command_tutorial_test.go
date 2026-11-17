@@ -190,9 +190,10 @@ func TestCommandTutorial_NoneCanonical(t *testing.T) {
 	}
 }
 
-// claude-code places a user-invoked skill at .claude/skills/<n>/SKILL.md
-// (§6.7 type-target table), and writes neither .claude/commands/ nor the
-// .claude/podium/ extension bucket.
+// Spec: §5.2, §6.7 — claude-code places a user-invoked skill at
+// .claude/skills/<n>/SKILL.md with the user-only control
+// `disable-model-invocation: true`, and writes neither .claude/commands/ nor
+// the .claude/podium/ extension bucket.
 func TestCommandTutorial_ClaudeCodePodiumNotCommands(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupFile: standupSkill})
@@ -201,7 +202,8 @@ func TestCommandTutorial_ClaudeCodePodiumNotCommands(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	mustExist(t, filepath.Join(tgt, ".claude/skills/standup/SKILL.md"))
+	skill := readFile(t, filepath.Join(tgt, ".claude/skills/standup/SKILL.md"))
+	cliContains(t, skill, "\ndisable-model-invocation: true\n", "the user-only control")
 	mustNotExist(t, filepath.Join(tgt, ".claude/commands"))
 	if _, err := os.Stat(filepath.Join(tgt, ".claude/podium", standupID, "ARTIFACT.md")); err == nil {
 		t.Errorf("a user-invoked skill must not land under the .claude/podium/ extension bucket")
@@ -321,15 +323,16 @@ func TestCommandTutorial_SyncHumanOutput(t *testing.T) {
 	}
 }
 
-// $ARGUMENTS is preserved verbatim through sync.
+// Spec: §5.2, §4.3.4 — $ARGUMENTS is preserved verbatim through sync:
+// Podium adds no argument layer, so the none adapter writes the whole
+// SKILL.md byte for byte.
 func TestCommandTutorial_ArgumentsPreserved(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{standupFile: standupSkill})
 	tgt := t.TempDir()
-	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
-	got := readFile(t, filepath.Join(tgt, standupFile))
-	if !strings.Contains(got, "$ARGUMENTS") {
-		t.Errorf("materialized skill lost $ARGUMENTS:\n%s", got)
+	cliWantExit(t, runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none"), 0, "sync none")
+	if got := readFile(t, filepath.Join(tgt, standupFile)); got != standupSkill {
+		t.Errorf("materialized SKILL.md differs from the authored file:\n--- got ---\n%s\n--- want ---\n%s", got, standupSkill)
 	}
 }
 

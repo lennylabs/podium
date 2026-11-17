@@ -319,18 +319,18 @@ func TestHarness_ClaudeCodeRule(t *testing.T) {
 
 // Spec: §5.2, §6.7 — claude-code writes a user-invoked skill, the
 // replacement for a command (§4.1), at .claude/skills/<name>/SKILL.md with
-// its $ARGUMENTS body unchanged. The test compares the body, because the
-// adapter adds the harness control to the frontmatter.
+// its $ARGUMENTS body unchanged. The adapter adds the user-only control
+// `disable-model-invocation: true` as an unquoted boolean, so a harness reads
+// a boolean rather than a string, and leaves every authored byte in place.
 func TestHarness_ClaudeCodeCommandDefaultCase(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"tools/deploy/SKILL.md": userInvokedSkill("deploy", "Deploy the current branch.", "$ARGUMENTS\n"),
-	})
+	authored := userInvokedSkill("deploy", "Deploy the current branch.", "$ARGUMENTS\n")
+	reg := writeRegistry(t, map[string]string{"tools/deploy/SKILL.md": authored})
 	target := t.TempDir()
 	chSync(t, reg, target, "claude-code")
 	got := readFile(t, filepath.Join(target, ".claude", "skills", "deploy", "SKILL.md"))
-	if !strings.HasSuffix(got, "---\n\n$ARGUMENTS\n") {
-		t.Errorf("SKILL.md body is not the authored $ARGUMENTS body:\n%s", got)
+	if want := "---\ndisable-model-invocation: true\n" + strings.TrimPrefix(authored, "---\n"); got != want {
+		t.Errorf("SKILL.md = %q, want the authored file with the unquoted control %q", got, want)
 	}
 	mustNotExist(t, filepath.Join(target, ".claude", "commands"))
 }
@@ -497,23 +497,45 @@ func TestHarness_MCPClaudeCowork(t *testing.T) {
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=claude-cowork"))
 }
 
-// claude-cowork is a §6.7.1 ✗ cell for the plugin-layout types (skill, agent,
-// command, rule, hook, mcp-server): the plugin and marketplace layout ships
-// through marketplace publishing (§6.7, §7.8), not the project-files path. Both
-// canonical-Adapt consumers (§2.2) run the one cowork Adapt, so both must fail a
-// plugin-layout type identically. This test drives a type: skill artifact
-// through `podium sync` and through the MCP server `load_artifact` against the
-// same registry and asserts each fails with materialize.untranslatable (§6.9),
-// locking the two consumers at parity through the compiled binaries.
+// claude-cowork's Adapt returns nothing for every type, so the skill cell is a
+// §6.7.1 ✗ cell: the plugin and marketplace layout ships through marketplace
+// publishing (§6.7, §7.8) rather than the project-files path. Both
+// canonical-Adapt consumers (§2.2) run the one cowork Adapt, so both must fail
+// a skill identically. This test drives a skill with an authored ARTIFACT.md
+// and a reference skill, the replacement for a context artifact (§4.1),
+// through `podium sync` and through the MCP server `load_artifact` against
+// the same registry and asserts each fails with materialize.untranslatable
+// (§6.9), locking the two consumers at parity through the compiled binaries.
+//
+// Spec: §6.7, §6.9
 func TestHarness_ClaudeCoworkPluginLayoutTypeUntranslatableParity(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"greet/ARTIFACT.md": greetSkillArtifact,
-		"greet/SKILL.md":    skillBody("greet"),
-	})
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+	}{
+		{"skill", map[string]string{
+			"greet/ARTIFACT.md": greetSkillArtifact,
+			"greet/SKILL.md":    skillBody("greet"),
+		}},
+		{"reference skill", map[string]string{
+			"greet/SKILL.md": referenceSkill("greet", "the greeting conventions"),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assertCoworkUntranslatableParity(t, writeRegistry(t, tc.files))
+		})
+	}
+}
 
+// assertCoworkUntranslatableParity asserts that podium sync and the MCP
+// server load_artifact both fail the skill greet in reg on claude-cowork with
+// materialize.untranslatable and write nothing.
+func assertCoworkUntranslatableParity(t *testing.T, reg string) {
+	t.Helper()
 	// Consumer 1: podium sync calls the cowork Adapt directly (§7.5), guarded by
-	// the §6.9 untranslatable check added for the plugin-layout types.
+	// the §6.9 untranslatable check.
 	target := t.TempDir()
 	sync := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "claude-cowork")
 	if sync.Exit == 0 {
@@ -812,6 +834,31 @@ func TestHarness_GeminiAlwaysNativeClean(t *testing.T) {
 	}
 }
 
+// Spec: §5.2, §6.7 — gemini writes a user-invoked skill as its native command
+// file .gemini/commands/<name>.toml, which carries the $ARGUMENTS body, and
+// places the bundled resources in .podium/resources/<id>/ because a
+// single-file command has no directory of its own. No skill directory is
+// written.
+func TestHarness_GeminiUserInvokedSkillCommandFile(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"tools/deploy/SKILL.md":          userInvokedSkill("deploy", "Deploy the current branch.", "Deploy to $ARGUMENTS.\n"),
+		"tools/deploy/scripts/deploy.sh": "#!/bin/sh\necho deploy\n",
+	})
+	target := t.TempDir()
+	chSync(t, reg, target, "gemini")
+	toml := readFile(t, filepath.Join(target, ".gemini", "commands", "deploy.toml"))
+	for _, want := range []string{`description = "Deploy the current branch."`, "Deploy to $ARGUMENTS."} {
+		if !strings.Contains(toml, want) {
+			t.Errorf("deploy.toml missing %q:\n%s", want, toml)
+		}
+	}
+	if got := readFile(t, filepath.Join(target, ".podium", "resources", "tools", "deploy", "scripts", "deploy.sh")); got != "#!/bin/sh\necho deploy\n" {
+		t.Errorf("bundled script = %q, want the authored bytes", got)
+	}
+	mustNotExist(t, filepath.Join(target, ".gemini", "skills", "deploy"))
+}
+
 // gemini init+sync two-step.
 func TestHarness_GeminiInitSync(t *testing.T) {
 	t.Parallel()
@@ -1050,6 +1097,32 @@ func TestHarness_SyncAutoResolvesWorkspaceOverlay(t *testing.T) {
 	if !strings.Contains(got, "from overlay") {
 		t.Errorf("overlay did not auto-resolve; materialized:\n%s", got)
 	}
+}
+
+// The workspace overlay is never ingested, so the §4.1 removed-type refusal
+// does not apply to it (§6.4). A type: context artifact there is an
+// extension type: claude-code writes it to the .claude/podium/<id>/ bucket
+// and writes no .podium/context/ path, because no adapter keeps a context
+// arm.
+//
+// Spec: §4.1, §6.4
+func TestHarness_SyncOverlayRemovedTypeAsExtension(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"finance/intro/ARTIFACT.md": smallteamLowArtifact("from registry"),
+	})
+	ws := t.TempDir()
+	solofsWriteFile(t, filepath.Join(ws, ".podium", "overlay", "finance", "glossary", "ARTIFACT.md"),
+		removedTypeArtifact("context", "overlay glossary"))
+	target := t.TempDir()
+	res := runPodium(t, ws, nil, "sync", "--registry", reg, "--target", target, "--harness", "claude-code")
+	cliWantExit(t, res, 0, "sync over an overlay context artifact")
+	cliNotContains(t, res.Stderr, "rejected:", "a refusal of the overlay artifact")
+	got := readFile(t, filepath.Join(target, ".claude", "podium", "finance", "glossary", "ARTIFACT.md"))
+	if !strings.Contains(got, "overlay glossary body.") {
+		t.Errorf("extension bucket missing the overlay body:\n%s", got)
+	}
+	mustNotExist(t, filepath.Join(target, ".podium", "context"))
 }
 
 // sync --dry-run resolves a server source from
