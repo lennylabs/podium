@@ -317,14 +317,6 @@ func Run(opts Options) (*Result, error) {
 	// §7.5.1 scope + §7.5.5 toggles select the records to materialize.
 	records := selectRecords(opts.Scope, all, toggles)
 
-	// §13.11.3: a drop does not stop the sync. The caller reports each
-	// dropped artifact, and the rest is materialized, stale-file cleanup
-	// runs, and the lock omits the dropped copy. The exception, under the keep
-	// setting, is a drop under the unparseable-manifest rule of an artifact the
-	// prior lock records: its previous files and lock entries are kept. It is
-	// computed before the dry-run return so a dry run reports the drops a real
-	// run would keep.
-	kept := keepPreviousOutput(dropped, priorLock, all, opts.OnUnparseable)
 	res := &Result{Adapter: a.ID(), Target: opts.Target, Profile: opts.Profile, Scope: opts.Scope, Dropped: dropped}
 
 	allFiles := []adapter.File{}
@@ -382,6 +374,25 @@ func Run(opts Options) (*Result, error) {
 		allFiles = append(allFiles, out...)
 	}
 
+	// §13.11.3: a drop does not stop the sync. The caller reports each
+	// dropped artifact, and the rest is materialized, stale-file cleanup
+	// runs, and the lock omits the dropped copy. The exception, under the keep
+	// setting, is a drop under the unparseable-manifest rule of an artifact the
+	// prior lock records whose output still belongs in the target: its previous
+	// files and lock entries are kept. It is computed after the run's output is
+	// known, because an artifact that now writes a kept path ends the keep, and
+	// before the dry-run return, so a dry run reports the drops a real run
+	// would keep.
+	kept := keepPreviousOutput(dropped, priorLock, keepRun{
+		adapterID: a.ID(),
+		policy:    opts.OnUnparseable,
+		scope:     opts.Scope,
+		toggles:   toggles,
+		resolved:  all,
+		files:     allFiles,
+		target:    opts.Target,
+	})
+
 	if opts.DryRun {
 		return res, nil
 	}
@@ -438,6 +449,7 @@ func Run(opts Options) (*Result, error) {
 			lock.Artifacts = append(lock.Artifacts, LockArtifact{
 				ID:               art.ID,
 				Version:          art.Version,
+				Type:             art.Type,
 				ContentHash:      art.ContentHash,
 				Layer:            art.Layer,
 				MaterializedPath: p,

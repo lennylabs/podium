@@ -9,6 +9,24 @@ import (
 	"github.com/lennylabs/podium/pkg/adapter"
 )
 
+// Spec: §6.7, §13.11.3 — IndexedEntries reads the artifact ID -> entry path
+// index of a config document or fragment, skipping an index value that is not
+// a non-empty list of strings, and returns nothing for a document with no
+// index or one that is not a JSON object.
+func TestIndexedEntries(t *testing.T) {
+	t.Parallel()
+	doc := []byte(`{"mcpServers":{"alpha":{}},"x-podium":{"s/a":["mcpServers","alpha"],"s/b":"bad","s/c":[],"s/d":["mcpServers",1]}}`)
+	got := IndexedEntries(doc)
+	if len(got) != 1 || strings.Join(got["s/a"], "/") != "mcpServers/alpha" {
+		t.Errorf("IndexedEntries = %v, want only s/a at mcpServers/alpha", got)
+	}
+	for _, in := range []string{`{"mcpServers":{}}`, `[1]`, `not json`, `{"x-podium":"bad"}`} {
+		if got := IndexedEntries([]byte(in)); len(got) != 0 {
+			t.Errorf("IndexedEntries(%s) = %v, want none", in, got)
+		}
+	}
+}
+
 // keepOnly returns a keep predicate that reports exactly id.
 func keepOnly(id string) func(string) bool {
 	return func(got string) bool { return got == id }

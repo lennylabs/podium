@@ -333,6 +333,46 @@ func stripIndexedEntries(root map[string]any, keep func(id string) bool) {
 	}
 }
 
+// IndexedEntries returns the keyed config-map entries that a JSON config
+// document or a config-merge fragment records in its top-level
+// adapter.PodiumIndexKey object, as artifact ID -> entry path ([container,
+// key]). Two artifacts can write one entry, because the key is the artifact's
+// name rather than its ID, so a caller compares these paths to find an entry
+// another artifact takes over. A document that is not a JSON object, a missing
+// index, and an index value that is not a list of strings contribute nothing.
+//
+// Spec: §6.7, §13.11.3
+func IndexedEntries(doc []byte) map[string][]string {
+	var root map[string]any
+	if err := json.Unmarshal(doc, &root); err != nil {
+		return nil
+	}
+	idx, ok := root[adapter.PodiumIndexKey].(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string][]string, len(idx))
+	for id, loc := range idx {
+		raw, ok := loc.([]any)
+		if !ok || len(raw) == 0 {
+			continue
+		}
+		path := make([]string, 0, len(raw))
+		for _, el := range raw {
+			s, ok := el.(string)
+			if !ok {
+				path = nil
+				break
+			}
+			path = append(path, s)
+		}
+		if path != nil {
+			out[id] = path
+		}
+	}
+	return out
+}
+
 // deleteAtPath walks the string path from root and deletes the leaf key from its
 // parent object. A non-string path element, or a parent that is not an object,
 // stops the walk without deleting.
