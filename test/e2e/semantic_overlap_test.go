@@ -39,7 +39,8 @@ func overlapServer(t *testing.T) *serverProc {
 // Spec: §7.3.1 — a reingest prints the lint.semantic_overlap advisory for two
 // artifacts that say the same thing in different words, and podium overlap
 // prints the stored overlap in the podium lint format, writes the response
-// object under --json, applies --threshold with no recomputation, and exits as
+// object under --json with each diagnostic's and each peer's description,
+// type, and layer, applies --threshold with no recomputation, and exits as
 // --fail-on directs; podium admin rebuild-overlap prints the counts.
 func TestSemanticOverlap_EndToEnd(t *testing.T) {
 	t.Parallel()
@@ -76,31 +77,39 @@ func TestSemanticOverlap_EndToEnd(t *testing.T) {
 			Threshold float64 `json:"threshold"`
 		} `json:"semantic_overlap"`
 		Diagnostics []struct {
-			ArtifactID string `json:"artifact_id"`
-			Code       string `json:"code"`
-			Peers      []struct {
-				ArtifactID string  `json:"artifact_id"`
-				Similarity float64 `json:"similarity"`
-				ComputedAt string  `json:"computed_at"`
+			ArtifactID  string `json:"artifact_id"`
+			Description string `json:"description"`
+			Type        string `json:"type"`
+			Layer       string `json:"layer"`
+			Code        string `json:"code"`
+			Peers       []struct {
+				ArtifactID  string  `json:"artifact_id"`
+				Description string  `json:"description"`
+				Type        string  `json:"type"`
+				Layer       string  `json:"layer"`
+				Similarity  float64 `json:"similarity"`
+				ComputedAt  string  `json:"computed_at"`
 			} `json:"peers"`
 		} `json:"diagnostics"`
 	}
 	if err := json.Unmarshal([]byte(low.Stdout), &report); err != nil {
 		t.Fatalf("--json stdout is not one object: %v\n%s", err, low.Stdout)
 	}
-	mixedPeer := false
+	mixedPeer, settleFields := false, false
 	for _, d := range report.Diagnostics {
 		if d.ArtifactID != "finance/settle" || d.Code != "lint.semantic_overlap" {
 			continue
 		}
+		settleFields = d.Description == "invoice reconciliation against vendor payments" && d.Type == "agent" && d.Layer == "overlap-team"
 		for _, p := range d.Peers {
-			if p.ArtifactID == "ops/mixed" && p.Similarity > 0.69 && p.Similarity < 0.72 && p.ComputedAt != "" {
+			if p.ArtifactID == "ops/mixed" && p.Similarity > 0.69 && p.Similarity < 0.72 && p.ComputedAt != "" &&
+				p.Description == "invoice reconciliation for employee onboarding" && p.Type == "agent" && p.Layer == "overlap-team" {
 				mixedPeer = true
 			}
 		}
 	}
-	if report.SemanticOverlap.State != "on" || report.SemanticOverlap.Threshold != 0.7 || !mixedPeer {
-		t.Errorf("at --threshold 0.7 the report = %+v, want finance/settle to list ops/mixed near 0.71", report)
+	if report.SemanticOverlap.State != "on" || report.SemanticOverlap.Threshold != 0.7 || !mixedPeer || !settleFields {
+		t.Errorf("at --threshold 0.7 the report = %+v, want finance/settle and its peer ops/mixed near 0.71 with their descriptions, type agent, and layer overlap-team", report)
 	}
 
 	if strict := runPodium(t, "", srv.cliEnv(), "overlap", "--registry", srv.BaseURL, "--fail-on", "warning"); strict.Exit != 1 {

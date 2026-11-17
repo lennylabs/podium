@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/layer"
@@ -36,21 +37,36 @@ type OverlapState struct {
 	Model     *string  `json:"model"`
 }
 
-// OverlapDiagnostic is one entry of the report's diagnostics. Peers is set on
-// lint.colliding_descriptions and lint.semantic_overlap and lists every peer
-// the message names or abbreviates, in the message's order.
-type OverlapDiagnostic struct {
-	ArtifactID string        `json:"artifact_id"`
-	Code       string        `json:"code"`
-	Severity   string        `json:"severity"`
-	Message    string        `json:"message"`
-	Peers      []OverlapPeer `json:"peers,omitempty"`
+// OverlapArtifact names one artifact of the report so a client can show it
+// without loading it: its identifier, its description as the catalog
+// advisories read it, its artifact type, and the identifier of the layer that
+// serves its current version. A diagnostic and each of its peers carry it.
+//
+// Spec: §7.3.1
+type OverlapArtifact struct {
+	ArtifactID  string `json:"artifact_id"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+	Layer       string `json:"layer"`
 }
 
-// OverlapPeer is one peer of an overlap diagnostic. ComputedAt is the time the
-// overlap record was computed, set on a lint.semantic_overlap peer only.
+// OverlapDiagnostic is one entry of the report's diagnostics, naming its
+// artifact. Peers is set on lint.colliding_descriptions and
+// lint.semantic_overlap and lists every peer the message names or
+// abbreviates, in the message's order.
+type OverlapDiagnostic struct {
+	OverlapArtifact
+	Code     string        `json:"code"`
+	Severity string        `json:"severity"`
+	Message  string        `json:"message"`
+	Peers    []OverlapPeer `json:"peers,omitempty"`
+}
+
+// OverlapPeer is one peer of an overlap diagnostic, naming the peer artifact.
+// ComputedAt is the time the overlap record was computed, set on a
+// lint.semantic_overlap peer only.
 type OverlapPeer struct {
-	ArtifactID string     `json:"artifact_id"`
+	OverlapArtifact
 	Similarity float64    `json:"similarity"`
 	ComputedAt *time.Time `json:"computed_at,omitempty"`
 }
@@ -111,23 +127,53 @@ func (r *Registry) CatalogOverlap(ctx context.Context, id layer.Identity, q Over
 		diags = append(diags, semantic...)
 		lint.SortDiagnostics(diags)
 	}
-	return newOverlapReport(state, diags, q.ArtifactID), nil
+	return newOverlapReport(state, diags, q.ArtifactID, overlapArtifacts(served)), nil
+}
+
+// overlapArtifacts maps the identifier of each served record the caller can
+// see to the artifact fields the report gives a diagnostic or a peer. The
+// report names only those artifacts, so the map holds every artifact it
+// names and no other.
+//
+// Spec: §7.3.1
+func overlapArtifacts(served []store.ManifestRecord) map[string]OverlapArtifact {
+	out := make(map[string]OverlapArtifact, len(served))
+	for _, m := range served {
+		out[m.ArtifactID] = OverlapArtifact{
+			ArtifactID:  m.ArtifactID,
+			Description: advisoryDescription(m),
+			Type:        m.Type,
+			Layer:       m.Layer,
+		}
+	}
+	return out
+}
+
+// overlapArtifactOf returns the report fields of id. An identifier missing
+// from artifacts, which a diagnostic over the caller's served set never
+// names, carries its identifier alone.
+func overlapArtifactOf(artifacts map[string]OverlapArtifact, id string) OverlapArtifact {
+	if a, ok := artifacts[id]; ok {
+		return a
+	}
+	return OverlapArtifact{ArtifactID: id}
 }
 
 // newOverlapReport renders diagnostics into the response, keeping only those
-// of artifactID when it is set and counting the ones it keeps.
-func newOverlapReport(state OverlapState, diags []lint.Diagnostic, artifactID string) *OverlapReport {
+// of artifactID when it is set and counting the ones it keeps. artifacts
+// gives each diagnostic and each peer its description, type, and layer.
+func newOverlapReport(state OverlapState, diags []lint.Diagnostic, artifactID string, artifacts map[string]OverlapArtifact) *OverlapReport {
 	report := &OverlapReport{SemanticOverlap: state, Diagnostics: []OverlapDiagnostic{}}
 	for _, d := range diags {
 		if artifactID != "" && d.ArtifactID != artifactID {
 			continue
 		}
 		report.Diagnostics = append(report.Diagnostics, OverlapDiagnostic{
-			ArtifactID: d.ArtifactID,
-			Code:       d.Code,
-			Severity:   string(d.Severity),
-			Message:    d.Message,
-			Peers:      overlapPeers(d.Peers),
+			OverlapArtifact: overlapArtifactOf(artifacts, d.ArtifactID),
+			Code:            d.Code,
+			Severity:        string(d.Severity),
+			Message:         d.Message,
+			Peers:           overlapPeers(d.Peers, artifacts),
 		})
 		switch d.Severity {
 		case lint.SeverityError:
@@ -141,15 +187,15 @@ func newOverlapReport(state OverlapState, diags []lint.Diagnostic, artifactID st
 	return report
 }
 
-// overlapPeers renders lint peers, carrying computed_at only when the peer
-// came from a stored record.
-func overlapPeers(peers []lint.Peer) []OverlapPeer {
+// overlapPeers renders lint peers with their artifact fields, carrying
+// computed_at only when the peer came from a stored record.
+func overlapPeers(peers []lint.Peer, artifacts map[string]OverlapArtifact) []OverlapPeer {
 	if len(peers) == 0 {
 		return nil
 	}
 	out := make([]OverlapPeer, 0, len(peers))
 	for _, p := range peers {
-		op := OverlapPeer{ArtifactID: p.ArtifactID, Similarity: p.Similarity}
+		op := OverlapPeer{OverlapArtifact: overlapArtifactOf(artifacts, p.ArtifactID), Similarity: p.Similarity}
 		if !p.ComputedAt.IsZero() {
 			at := p.ComputedAt.UTC()
 			op.ComputedAt = &at
@@ -320,11 +366,25 @@ func (r *Registry) ingestPeerLayers(ctx context.Context, layerID string) map[str
 }
 
 // descriptionRecord projects a stored record onto the lint record the
-// description checks read: its identifier, its lint_suppress, and the
-// description the registry serves for it, which for a skill is the SKILL.md
-// description (§4.7 embedding projection).
+// description checks read: its identifier, its lint_suppress, and its
+// description as advisoryDescription defines it.
 func descriptionRecord(m store.ManifestRecord) filesystem.ArtifactRecord {
 	a := parsedArtifact(m)
-	a.Description = m.Description
+	a.Description = advisoryDescription(m)
 	return filesystem.ArtifactRecord{ID: m.ArtifactID, Artifact: a}
+}
+
+// advisoryDescription returns m's description as the catalog advisories
+// define it: the ARTIFACT.md description, or the SKILL.md description when
+// ARTIFACT.md states none. The stored description of a skill is its SKILL.md
+// description when SKILL.md states one (§4.7 embedding projection), so the
+// ARTIFACT.md description is read from the stored frontmatter first; `podium
+// lint` applies the same order to a checkout.
+//
+// Spec: §7.3.1
+func advisoryDescription(m store.ManifestRecord) string {
+	if d := parsedArtifact(m).Description; strings.TrimSpace(d) != "" {
+		return d
+	}
+	return m.Description
 }
