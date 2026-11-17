@@ -608,6 +608,23 @@ podium admin tenant deactivate <id> --registry <url>
 
 A single-tenant registry rejects `/v1/admin/tenants` (§7.3.3) and does not read its tenant's stored search QPS, materialization rate, or audit volume values, so these variables set its limits for those budgets.
 
+### Lint
+
+These variables set the lint thresholds (§4.1, §4.3.4, §4.5.5, §7.3.1). The registry reads these variables for ingest, and `podium lint` reads the same variables, so a CI run and the registry apply the same threshold when both set it. Registry ingest does not apply the §4.5.5 `DOMAIN.md` body-size warning, which `podium lint` reports (§7.3.1), so `PODIUM_LINT_DOMAIN_BODY_WARN_TOKENS` takes effect in `podium lint` only. They are environment variables only and have no `registry.yaml` key, because `podium lint` does not read `registry.yaml`. An unset or empty variable keeps the default. A value that does not parse or falls outside its range keeps the default, and the process logs a warning that names the variable. Integer values are positive. A token count is the estimate of §4.1.
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES` | §4.1 per-file bundled-resource soft cap, in bytes (warning above) | `1048576` |
+| `PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES` | §4.1 per-package bundled-resource cap, in bytes (error above) | `10485760` |
+| `PODIUM_LINT_SKILL_BODY_WARN_TOKENS` | §4.3.4 `SKILL.md` body warning, in estimated tokens (§4.1) | `5000` |
+| `PODIUM_LINT_SKILL_BODY_WARN_LINES` | §4.3.4 `SKILL.md` body warning, in lines | `500` |
+| `PODIUM_LINT_MANIFEST_ERROR_TOKENS` | §4.1 manifest cap, in estimated tokens (§4.1) (error above) | `20000` |
+| `PODIUM_LINT_DOMAIN_BODY_WARN_TOKENS` | §4.5.5 `DOMAIN.md` body warning, in estimated tokens (§4.1); applied by `podium lint` only | `2000` |
+| `PODIUM_LINT_MIN_DESCRIPTION_CHARS` | §7.3.1 thin-description bound, in code points | `15` |
+| `PODIUM_LINT_MIN_DESCRIPTION_WORDS` | §7.3.1 thin-description bound, in words | `3` |
+| `PODIUM_LINT_DESCRIPTION_SIMILARITY` | §7.3.1 description overlap threshold, from 0.5 to 1.0 | `0.7` |
+| `PODIUM_LINT_CONTENT_SIMILARITY` | §7.3.1 near-duplicate content threshold, from 0.5 to 1.0 | `0.8` |
+
 ### Config file format
 
 ```yaml
