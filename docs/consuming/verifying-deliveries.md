@@ -253,7 +253,8 @@ the marks after any of them:
 - The registry is restored from a backup.
 - A lagging read replica is promoted to primary.
 - The newest version is purged, erased, retired under the
-  [no-inheritance rule](../deployment/content/layers#inheritance), or leaves the
+  [no-inheritance rule](../deployment/content/layers#inheritance) or the
+  [removed-type rule](../deployment/content/layers#removed-types), or leaves the
   caller's view.
 - An identity in another organization, using the same registry URL and cache
   directory, loads an artifact with the same ID.

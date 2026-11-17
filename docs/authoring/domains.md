@@ -33,8 +33,8 @@ For a small or in-progress catalog, nest folders and add nothing else. The direc
     │       ├── SKILL.md
     │       └── ARTIFACT.md
     └── deploy/
-        └── check-config/          # type: command
-            └── ARTIFACT.md
+        └── check-config/          # type: skill, invocation: user
+            └── SKILL.md
 ```
 
 In this tree, `load_domain("personal")` returns the two subdomains, and `load_domain("personal/hello")` returns the `greet` artifact.
@@ -123,6 +123,8 @@ For inbound payments and AR, see `finance/ar/`.
 | `exclude` | list of glob patterns | Paths to remove, applied after `include`. |
 
 The prose body below the frontmatter is long-form context. `load_domain` returns it only when this domain is the requested path.
+
+The body is one place for reference material that describes the whole domain, such as its terminology or its conventions. Reference material that a skill uses belongs in that skill's `references/` directory, and material that no single skill owns belongs in a skill whose description says that it carries reference material. [Reference material](artifact-types#reference-material) lists the locations.
 
 ---
 

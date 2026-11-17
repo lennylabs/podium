@@ -252,8 +252,9 @@ change. A saved edit to `SKILL.md`, or to an `ARTIFACT.md` overlay, lands in
   For a per-developer configuration that applies across projects, run
   `podium init --global` instead.
 - **Add more artifacts.** Add directories under `~/podium-artifacts/personal/`,
-  each with a `SKILL.md` for a skill or an `ARTIFACT.md` for a `command`,
-  `context`, `rule`, `hook`, `agent`, or `mcp-server`. See the
+  each with a `SKILL.md` for a skill or an `ARTIFACT.md` for a `rule`, `hook`,
+  `agent`, or `mcp-server`. A user-invoked skill and a skill that carries
+  reference material are skills as well. See the
   [authoring guide](../authoring/).
 - **Materialize part of the catalog.** Narrow the sync with include, exclude,
   and type filters, and save the result as a profile. See

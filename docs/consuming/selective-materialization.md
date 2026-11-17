@@ -74,8 +74,8 @@ podium sync --include 'finance/**'
 podium sync --include 'finance/**' --include 'platform/observability/**' \
             --exclude 'finance/legacy/**'
 
-# Only skills and commands, anywhere in the catalog.
-podium sync --type skill,command
+# Only skills and rules, anywhere in the catalog.
+podium sync --type skill,rule
 
 # Skills under one domain.
 podium sync --include 'finance/**' --type skill
@@ -124,7 +124,7 @@ profiles:
       - "finance/legacy/**"
     type:
       - skill
-      - command
+      - rule
 
   rules-only:
     type:

@@ -11,8 +11,8 @@
 
 An enterprise-grade registry for reusable agent skills and other artifacts.
 
-Podium stores skills, agents, commands, rules, hooks, contexts, and MCP server
-registrations as canonical artifacts. A Podium server signs each artifact at
+Podium stores skills, agents, rules, hooks, and MCP server registrations as
+canonical artifacts. A Podium server signs each artifact at
 ingest, decides which callers can see it, and records every load and search in
 an audit log. Podium delivers each artifact into the native format of every
 harness that uses it.

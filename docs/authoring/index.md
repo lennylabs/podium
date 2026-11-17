@@ -15,14 +15,14 @@ Each tutorial builds one artifact step by step and runs it in Claude Code.
 | Page | What it builds |
 |:--|:--|
 | [Your first skill](your-first-skill) | Extends the [quickstart](../getting-started/quickstart) `greet` skill with a sharper description, an `ARTIFACT.md` overlay, a reference to its bundled script, a runtime requirement, and lint. |
-| [Your first command](your-first-command) | A parameterized slash command that substitutes the user's arguments and appears in the harness's slash menu. |
+| [Your first command](your-first-command) | A user-invoked skill that a human starts as a slash command, which substitutes the user's arguments and appears in the harness's slash menu. |
 | [Your first agent](your-first-agent) | A minimal agent definition that runs end to end, then a runtime requirement, a bundled script, and a delegated artifact. |
 
 ## Topics
 
 | Page | What it covers |
 |:--|:--|
-| [Artifact types](artifact-types) | The built-in types (`skill`, `agent`, `context`, `command`, `rule`, `hook`, and `mcp-server`) and what each is for. |
+| [Artifact types](artifact-types) | The built-in types (`skill`, `agent`, `rule`, `hook`, and `mcp-server`), what each is for, and what replaced the removed `command` and `context` types. |
 | [Frontmatter reference](frontmatter-reference) | Every frontmatter field, and which file holds it: `SKILL.md` and the optional `ARTIFACT.md` for a skill, or `ARTIFACT.md` for every other type. |
 | [Bundled resources](bundled-resources) | Scripts, references, assets, and other files that ship with the manifest, where they land, how hosts run them, and external resources for large files. |
 | [Domains](domains) | How folders define the catalog hierarchy, and how `DOMAIN.md` adds descriptions, keywords, featured artifacts, imports, and discovery settings. |

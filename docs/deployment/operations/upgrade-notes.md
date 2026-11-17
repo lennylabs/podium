@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.7.0 layer credential columns, skill metadata fields in stored rows, and catalog lint advisories and listing budgets, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -152,6 +152,50 @@ The rolling upgrade from 0.6.0 and the rollback to 0.6.0 follow [Rollback floor 
 
 - `podium sync` estimates the skill listing of each `kind: workspace` target and, by default, writes a warning on standard error when the estimate exceeds 8,000 characters for an adapter that writes skills. The warning leaves the exit status unchanged. Set `check: off` for the adapter under `listing_budgets` in `sync.yaml` to turn the check off, or raise `max_chars`, as [Listing budget](../../consuming/configure-your-harness#listing-budget) describes.
 - `listing_budgets` is a new top-level `sync.yaml` key. A 0.6.0 `podium sync` ignores it, and a 0.6.0 `podium sync save-as` drops it from the `sync.yaml` it rewrites.
+
+### `command` and `context` removal
+
+0.7.0 removes the `command` and `context` artifact types. Ingest rejects an `ARTIFACT.md` whose `type` is either of them with `ingest.invalid_artifact` and `details.constraint: "type_removed"`, and `podium artifact scaffold` refuses both types. A command becomes a skill whose `invocation` is `user`, and reference material moves into a skill or a `DOMAIN.md` body. [Artifact types](../../authoring/artifact-types#removed-types) describes the replacements. The notes below cover converting a package and the stored rows and caches that an earlier release wrote.
+
+#### Retired command and context rows
+
+The registry retires every stored row of either type, under the mechanism that retires a row whose `ARTIFACT.md` declares `extends:`:
+
+- No read path serves a retired row. `latest` resolves to the newest other served version of the ID.
+- An ID whose every row is retired answers `registry.not_found`.
+- A retired row still counts toward quota and still holds its `(id, version)`, so other bytes at that version are rejected with `ingest.immutable_violation`.
+
+#### Converting a package by hand
+
+Podium ships no conversion command. Convert each package whose `ARTIFACT.md` declares `type: command` or `type: context` with these steps:
+
+1. Write a `SKILL.md` in the package directory. Its `name` is the directory name, its `description` and `license` are the `ARTIFACT.md` values, and its body is the `ARTIFACT.md` body, unchanged. A directory name that fails the [name constraints](../../authoring/frontmatter-reference#name-constraints) needs a rename, which changes the artifact ID.
+2. Set `metadata.version` to the next minor version after the `ARTIFACT.md` `version`, so `1.2.3` becomes `1.3.0`. The retired row keeps its `(id, version)`, so ingest rejects other bytes at that version with `ingest.immutable_violation`.
+3. For a former command, set `metadata.invocation: "user"`.
+4. Move each of `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, and `release_notes` into `metadata`, in the encoding that [Podium fields in SKILL.md metadata](../../authoring/frontmatter-reference#podium-fields-in-skillmd-metadata) states. A value that the encoding cannot carry, such as a tag that contains a comma, stays in `ARTIFACT.md`.
+5. Rewrite `ARTIFACT.md` as a skill overlay. Set `type: skill`, and delete `name`, `version`, `description`, `license`, the moved fields, and `expose_as_mcp_prompt`, which no Podium reader reads. Replace the body with the pointer comment `<!-- Skill body lives in SKILL.md. -->`. Every other field stays.
+6. Delete `ARTIFACT.md` when it holds no field other than `type`, unless a directory between the package and the layer root is itself a package. In that case, keep `ARTIFACT.md` with `type: skill` and the pointer comment. Below another package, a directory that holds a `SKILL.md` and no `ARTIFACT.md` is a bundled resource of that package, so deleting the file removes the skill from the catalog and adds its files to the enclosing artifact. The enclosing artifact's content hash then changes, so re-ingesting it at an unchanged declared version fails with `ingest.immutable_violation`.
+7. Leave the bundled resources at their paths. Run `podium lint` on the layer, and commit and re-ingest once lint exits 0.
+
+#### Consumer upgrade order
+
+Upgrade every `podium-mcp` and every `podium sync` consumer to 0.7.0 before ingesting converted user-invoked skills. The adapters run in the consumer, and a 0.6.0 consumer materializes such a skill without the user-only control. The registry version does not affect the control, because a 0.6.0 registry accepts the converted `SKILL.md` and serves its bytes unchanged.
+
+#### Rolling back to 0.6.0
+
+A 0.6.0 registry serves the retired command and context rows again. A 0.7.0 consumer still applies each converted skill's user-only control, because the adapter reads `invocation` from the served bytes. It materializes a served command or context row as an extension type: the `none` adapter writes the canonical layout, the `claude-code` adapter writes it under `.claude/podium/<artifact-id>/`, and the other adapters write nothing. A consumer rolled back to 0.6.0 materializes converted user-invoked skills as model-invocable skills.
+
+#### Clients that loaded a retired command or context
+
+Retiring an artifact's newest rows lowers the version `latest` resolves to. A `podium-mcp` that loaded a retired version as `latest` refuses the older one with `materialize.stale_resolution`.
+
+1. Stop every MCP server that uses the cache directory.
+2. Run `podium cache reset-revisions <id>` for each ID whose `latest` fell back to an older served row and was not re-ingested at a newer version.
+3. For a `podium-mcp` in `offline-first` or `offline-only`, also run `podium cache prune --days 0`, because those modes keep serving the cached command or context body. That command leaves the revision marks in place.
+
+#### Claude Cowork
+
+The `claude-cowork` adapter writes nothing for any type. A `podium sync` or `load_artifact` that targets `claude-cowork` fails with `materialize.untranslatable` for every artifact, including a former `context` artifact, which 0.6.0 materialized to `.podium/context/<artifact-id>/`. A Cowork user obtains the artifacts by importing the published Claude marketplace.
 
 ## 0.6.0: `extends:` removal
 

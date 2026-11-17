@@ -235,7 +235,7 @@ The command walks every artifact of every layer under the root. To lint a single
 - The `DOMAIN.md` body-size warning, which registry ingest does not apply. The command does not run the warning on a `DOMAIN.md` `discovery:` block, which applies when the registry's `discovery.allow_per_domain_overrides` setting is false, because the command does not read that setting.
 - The catalog advisories: `lint.thin_description`, `lint.colliding_descriptions`, and `lint.near_duplicate_content`. Each is a warning. Registry ingest runs them over the layer it ingests and reports them without blocking the ingest, and the command runs them over every artifact it walks. [Skill lint checks](../authoring/frontmatter-reference#skill-lint-checks) describes each one and the `lint_suppress` field that silences it.
 
-The command refuses each artifact whose `ARTIFACT.md` declares `extends:`. Without `--json`, it prints a `rejected: <id> (ingest.invalid_artifact): <reason>` line on standard error for each one. With `--json`, the artifact appears in `rejected` with `details.constraint: "extends_removed"`. In both cases the command lints the remaining artifacts and exits 1. `PODIUM_LINT_*` environment variables set the size and similarity thresholds, as [Lint](configuration#lint) in the configuration reference lists.
+The command refuses each artifact whose `ARTIFACT.md` declares `extends:` or a removed type (`command` or `context`). Without `--json`, it prints a `rejected: <id> (ingest.invalid_artifact): <reason>` line on standard error for each one. With `--json`, the artifact appears in `rejected` with `details.constraint: "extends_removed"` for an `extends:` refusal and `details.constraint: "type_removed"` for a removed type. An `ARTIFACT.md` that declares both reports `extends_removed`. In both cases the command lints the remaining artifacts and exits 1. `PODIUM_LINT_*` environment variables set the size and similarity thresholds, as [Lint](configuration#lint) in the configuration reference lists.
 
 Without `--json`, each diagnostic prints on standard output as `[<severity>] <artifact-id>: <message> (<rule-code>)`, and each refused artifact prints on standard error as `rejected: <id> (<code>): <reason>`. A run with no diagnostic and no refused artifact prints `lint: no issues.`.
 
@@ -262,7 +262,7 @@ With `--json`, standard output carries one JSON object and nothing else, and a r
 | Exit code | Meaning |
 |:--|:--|
 | `0` | No diagnostic reaches the `--fail-on` severity, and no artifact was refused. Warnings alone exit 0 under the default `--fail-on error`. |
-| `1` | A diagnostic reaches the `--fail-on` severity, an artifact was refused, the registry could not be opened or walked, or the run was interrupted. |
+| `1` | A diagnostic reaches the `--fail-on` severity, an artifact was refused because its `ARTIFACT.md` declares `extends:` or a removed type, the registry could not be opened or walked, or the run was interrupted. |
 | `2` | A usage error: `--registry` is absent, or `--fail-on` is neither `error` nor `warning`. |
 
 An `info` diagnostic never fails the run. When the registry cannot be opened or walked, including on a collision between two layers, the command writes the error on standard error, writes no JSON object, and exits 1. An interrupted run writes no JSON object and exits 1, so an interrupted run never reports a clean catalog.
@@ -356,18 +356,19 @@ See [Publishing marketplace repositories](../deployment/content/publishing) for 
 
 #### Dropped artifacts
 
-Against a local catalog, `podium sync` drops two kinds of artifact and reports each one on standard error, in the format `podium layer reingest` uses:
+Against a local catalog, `podium sync` drops the artifacts the table below lists and reports each one on standard error, in the format `podium layer reingest` uses:
 
 | Cause | Artifact dropped | Report line |
 |:--|:--|:--|
 | An `ARTIFACT.md` declares `extends:` | The declaring artifact. | `rejected: <id> (ingest.invalid_artifact): <reason>` |
+| An `ARTIFACT.md` declares a removed type (`command` or `context`) | The declaring artifact. | `rejected: <id> (ingest.invalid_artifact): <reason>` |
 | Two registry layers contribute the same ID (a collision) | The higher-precedence copy. | `rejected: <id> (ingest.collision): <reason>` |
 
-The rules below apply to both kinds of drop:
+The rules below apply to every drop in the table:
 
 - The command materializes every other artifact, writes the lock file without the dropped artifact, and exits 1.
 - `--dry-run` reports the drop and exits 1 without writing.
-- An `extends:` drop happens before the collision rule. A dropped artifact collides with no other artifact, so the other copy of its ID is materialized and no `ingest.collision` line is printed for it.
+- An `extends:` drop and a removed-type drop happen before the collision rule, in that order, so an `ARTIFACT.md` that declares both reports the `extends:` reason. A dropped artifact collides with no other artifact, so the other copy of its ID is materialized and no `ingest.collision` line is printed for it.
 - Under `--config`, a target that dropped an artifact counts as a failed target, and the command exits 1. This includes a `kind: workspace` target under `--check`. A target's workflow still runs before the target is marked failed.
 - `--check` without `--config` validates `sync.yaml` only and reports no drop. A `kind: marketplace` target under `--check` renders nothing.
 - Under `--json`, the report stays on standard error.
@@ -493,7 +494,7 @@ podium sync override --add <id> --dry-run
 
 With no flags, the command opens an interactive checklist.
 
-When a registry is configured, override re-materializes the target through the same composition as `podium sync`. Against a local catalog, a collision between two registry layers or an `ARTIFACT.md` that declares `extends:` drops the artifact. The command then prints the same `rejected: <id> (ingest.collision): <reason>` or `rejected: <id> (ingest.invalid_artifact): <reason>` line for each dropped artifact, keeps the recorded toggles, and exits 1.
+When a registry is configured, override re-materializes the target through the same composition as `podium sync`. Against a local catalog, a collision between two registry layers or an `ARTIFACT.md` that declares `extends:` or a removed type drops the artifact. The command then prints the same `rejected: <id> (ingest.collision): <reason>` or `rejected: <id> (ingest.invalid_artifact): <reason>` line for each dropped artifact, keeps the recorded toggles, and exits 1.
 
 The re-materialization also reports the [listing budget](#listing-budget) of the harness. Under `check: error`, an excess or an oversized entry exits 1 and keeps the recorded toggles. Before it records a toggle, an override that re-materializes validates the `listing_budgets` entry for its harness, and an invalid entry exits 2 with no toggle recorded. An override that does not re-materialize validates no entry and computes no listing. `--dry-run`, an override with no registry, and an interactive checklist that is cancelled, saves no change, or runs with neither a terminal nor piped commands are such overrides. A `sync.yaml` that does not load, including on a `listing_budgets` value of the wrong YAML type, is ignored as before: the registry and the harness come from the flags, the environment, or the lock, and the listing uses the default budget.
 
@@ -632,6 +633,7 @@ podium artifact scaffold --type <type> --description <text>
                          [--license <spdx>]
                          [--when-to-use <a,b,c>]
                          [--version <semver>]
+                         [--invocation <any|user>]
                          [type-specific flags]
                          [--force] [--yes]
                          <path>
@@ -655,16 +657,15 @@ For `--type skill`, the command writes `SKILL.md` alone. `--tags`, `--sensitivit
 
 | Type | Files written | Type-specific flags |
 |---|---|---|
-| `skill` | `SKILL.md` (with `metadata.version`, and `metadata.tags`, `metadata.sensitivity`, and `metadata.when_to_use` when those flags are passed) | — |
+| `skill` | `SKILL.md` (with `metadata.version`, and `metadata.tags`, `metadata.sensitivity`, and `metadata.when_to_use` when those flags are passed, and `metadata.invocation` for `--invocation user`) | `--invocation` |
 | `agent` | ARTIFACT.md | `--input-schema`, `--output-schema`, `--delegates-to` |
-| `context` | ARTIFACT.md | — |
-| `command` | ARTIFACT.md | — |
 | `rule` | ARTIFACT.md | `--rule-mode` (default `always`), `--rule-globs`, `--rule-description` |
 | `hook` | ARTIFACT.md | `--hook-event` (required), `--hook-action` |
 | `mcp-server` | ARTIFACT.md | `--server-identifier` (required) |
 
 | Type-specific flag | Effect |
 |:--|:--|
+| `--invocation <any\|user>` | `skill`: who starts the skill. `user` writes `SKILL.md` `metadata.invocation: "user"`, which makes the skill user-invoked. `any`, the default, writes no key. Any other value, or the flag on another type, exits 2 before the command writes a file. |
 | `--input-schema <path>` | `agent`: relative path to the input JSON Schema. |
 | `--output-schema <path>` | `agent`: relative path to the output JSON Schema. |
 | `--delegates-to <ids>` | `agent`: comma-separated delegation targets. |
@@ -675,7 +676,7 @@ For `--type skill`, the command writes `SKILL.md` alone. `--tags`, `--sensitivit
 | `--hook-action <snippet>` | `hook`: shell snippet body. |
 | `--server-identifier <id>` | `mcp-server`: canonical server identifier. Required. |
 
-The command accepts an extension type (any type outside the first-class enum) with a warning. It writes a generic ARTIFACT.md and leaves the extension's bespoke fields for the author to add.
+The command accepts an extension type (any type outside the first-class enum other than the removed `command` and `context`) with a warning. It writes a generic ARTIFACT.md and leaves the extension's bespoke fields for the author to add. `--type command` and `--type context` exit 2 with the removed-type reason, which names the replacement, and write no file.
 
 When `--yes` is set, missing values fail the command instead of prompting:
 

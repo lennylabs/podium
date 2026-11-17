@@ -1008,7 +1008,7 @@ POST /v1/layers/reingest?id={id}
 | `conflicts` | Same-version content conflicts. |
 | `lint_failures` | The count of lint failures. Lint failures are reported only as this count. |
 
-An `ARTIFACT.md` that declares `extends:` is rejected with `details: {"constraint": "extends_removed"}`. The no-inheritance refusal runs before lint, so such an artifact appears in `rejected` and is never counted in `lint_failures`, whatever lint rule it also fails.
+An `ARTIFACT.md` that declares `extends:` is rejected with `details: {"constraint": "extends_removed"}`. An `ARTIFACT.md` that declares the removed type `command` or `context` is rejected with `details: {"constraint": "type_removed"}`. The no-inheritance refusal runs first, so an `ARTIFACT.md` that declares both reports `extends_removed`. Both refusals run before lint, so such an artifact appears in `rejected` and is never counted in `lint_failures`, whatever lint rule it also fails.
 
 **Errors.**
 
@@ -1219,10 +1219,8 @@ GET /v1/scope/preview
   "layers": ["admin-finance", "alice-personal", "workspace-overlay"],
   "artifact_count": 1234,
   "by_type": {
-    "skill": 800,
+    "skill": 1030,
     "agent": 200,
-    "context": 200,
-    "command": 30,
     "rule": 4
   },
   "by_sensitivity": { "low": 1100, "medium": 100, "high": 34 }
