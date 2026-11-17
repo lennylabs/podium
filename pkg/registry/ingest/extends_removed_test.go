@@ -114,6 +114,35 @@ func erAssertExtendsRemoved(t *testing.T, res *ingest.Result, id string) {
 	}
 }
 
+// erCauses are the retirement causes every retired-row case runs under: the
+// §4.6 extends: declaration and the two types §4.1 removed.
+var erCauses = []string{"extends", "command", "context"}
+
+// erRetiredRow builds a row of id at ver in layerID that cause retires,
+// ingested hour hours after erEpoch. Under extends its ARTIFACT.md declares
+// extends:; under a removed type both its type column and its frontmatter
+// type name the cause.
+func erRetiredRow(cause, id, ver, layerID string, hour int) store.ManifestRecord {
+	if cause == "extends" {
+		return erRow(id, ver, layerID, erDoc("agent", ver, "extends: ops/base\n", "Retired body."), hour)
+	}
+	rec := erRow(id, ver, layerID, erDoc(cause, ver, "", "Retired body."), hour)
+	rec.Type = cause
+	return rec
+}
+
+// erAssertRetiredRefusal fails unless res rejects id under the rule cause
+// names: the §4.6 no-inheritance rule for extends, and the §4.1 removed-type
+// rule for a removed type.
+func erAssertRetiredRefusal(t *testing.T, res *ingest.Result, id, cause string) {
+	t.Helper()
+	if cause == "extends" {
+		erAssertExtendsRemoved(t, res, id)
+		return
+	}
+	erAssertTypeRemoved(t, res, id, cause)
+}
+
 // erAssertNotIngested fails when res lists id among the ingested pairs.
 func erAssertNotIngested(t *testing.T, res *ingest.Result, id string) {
 	t.Helper()
@@ -238,57 +267,72 @@ func TestIngest_ExtendsRemovedMCPServerResolvesNoEdge(t *testing.T) {
 	erAssertNoDependents(t, st, "infra/mcp/warehouse")
 }
 
-// Spec: §4.6, §7.3.1 — a stored row whose ARTIFACT.md declares extends: is
-// retired, and a retired row in one layer is no §4.6 collision for a new
-// version of the same ID ingested in another layer.
+// Spec: §4.1, §4.6, §7.3.1 — a stored row whose ARTIFACT.md declares
+// extends:, or whose type is a removed type, is retired, and a retired row in
+// one layer is no §4.6 collision for a new version of the same ID ingested in
+// another layer.
 func TestIngest_RetiredRowIsNoCollision(t *testing.T) {
 	t.Parallel()
-	st := newStore(t)
-	erSeed(t, st, erRow("ops/doc", "1.0.0", "team",
-		erDoc("agent", "1.0.0", "extends: ops/base\n", "Retired body."), 1))
-	res := erIngest(t, st, "base", map[string]string{
-		"ops/doc/ARTIFACT.md": erDoc("agent", "2.0.0", "", "Plain body."),
-	})
-	if res.Accepted != 1 || len(res.Rejected) != 0 {
-		t.Fatalf("result = %+v, want ops/doc@2.0.0 accepted with no rejection", res)
+	for _, cause := range erCauses {
+		t.Run(cause, func(t *testing.T) {
+			t.Parallel()
+			st := newStore(t)
+			erSeed(t, st, erRetiredRow(cause, "ops/doc", "1.0.0", "team", 1))
+			res := erIngest(t, st, "base", map[string]string{
+				"ops/doc/ARTIFACT.md": erDoc("agent", "2.0.0", "", "Plain body."),
+			})
+			if res.Accepted != 1 || len(res.Rejected) != 0 {
+				t.Fatalf("result = %+v, want ops/doc@2.0.0 accepted with no rejection", res)
+			}
+		})
 	}
 }
 
-// Spec: §4.6, §7.3.1 — bytes identical to a stored retired row are refused
-// before placement, so they are never an idempotent no-op.
+// Spec: §4.1, §4.6, §7.3.1 — bytes identical to a stored retired row are
+// refused before placement under the rule that retired the row, so they are
+// never an idempotent no-op.
 func TestIngest_RetiredRowBytesAreRefused(t *testing.T) {
 	t.Parallel()
-	st := newStore(t)
-	doc := erDoc("agent", "1.0.0", "extends: ops/base\n", "Retired body.")
-	erSeed(t, st, erRow("ops/doc", "1.0.0", "team", doc, 1))
-	res := erIngest(t, st, "team", map[string]string{"ops/doc/ARTIFACT.md": doc})
-	if res.Idempotent != 0 || res.Accepted != 0 || len(res.Conflicts) != 0 {
-		t.Errorf("result = %+v, want no idempotent, accepted, or conflicting pair", res)
+	for _, cause := range erCauses {
+		t.Run(cause, func(t *testing.T) {
+			t.Parallel()
+			st := newStore(t)
+			row := erRetiredRow(cause, "ops/doc", "1.0.0", "team", 1)
+			erSeed(t, st, row)
+			res := erIngest(t, st, "team", map[string]string{"ops/doc/ARTIFACT.md": string(row.Frontmatter)})
+			if res.Idempotent != 0 || res.Accepted != 0 || len(res.Conflicts) != 0 {
+				t.Errorf("result = %+v, want no idempotent, accepted, or conflicting pair", res)
+			}
+			erAssertNotIngested(t, res, "ops/doc")
+			erAssertRetiredRefusal(t, res, "ops/doc", cause)
+		})
 	}
-	erAssertNotIngested(t, res, "ops/doc")
-	erAssertExtendsRemoved(t, res, "ops/doc")
 }
 
-// Spec: §4.6, §7.3.1, §4.7 — a retired row keeps its (id, version). Plain
-// bytes at that pair conflict with the stored hash, which the reingest
+// Spec: §4.1, §4.6, §7.3.1, §4.7 — a retired row keeps its (id, version).
+// Plain bytes at that pair conflict with the stored hash, which the reingest
 // endpoint reports as ingest.immutable_violation.
 func TestIngest_RetiredRowVersionIsImmutable(t *testing.T) {
 	t.Parallel()
-	st := newStore(t)
-	retired := erSeed(t, st, erRow("ops/doc", "1.0.0", "team",
-		erDoc("agent", "1.0.0", "extends: ops/base\n", "Retired body."), 1))
-	res := erIngest(t, st, "base", map[string]string{
-		"ops/doc/ARTIFACT.md": erDoc("agent", "1.0.0", "", "Plain body."),
-	})
-	if len(res.Conflicts) != 1 {
-		t.Fatalf("Conflicts = %+v, want one: %+v", res.Conflicts, res)
-	}
-	c := res.Conflicts[0]
-	if c.ArtifactID != "ops/doc" || c.Version != "1.0.0" || c.OldHash != retired.ContentHash || c.NewHash == retired.ContentHash {
-		t.Errorf("conflict = %+v, want ops/doc@1.0.0 against the retired hash %s", c, retired.ContentHash)
-	}
-	if res.Accepted != 0 || len(res.Rejected) != 0 {
-		t.Errorf("result = %+v, want only the conflict", res)
+	for _, cause := range erCauses {
+		t.Run(cause, func(t *testing.T) {
+			t.Parallel()
+			st := newStore(t)
+			retired := erSeed(t, st, erRetiredRow(cause, "ops/doc", "1.0.0", "team", 1))
+			res := erIngest(t, st, "base", map[string]string{
+				"ops/doc/ARTIFACT.md": erDoc("agent", "1.0.0", "", "Plain body."),
+			})
+			if len(res.Conflicts) != 1 {
+				t.Fatalf("Conflicts = %+v, want one: %+v", res.Conflicts, res)
+			}
+			c := res.Conflicts[0]
+			if c.ArtifactID != "ops/doc" || c.Version != "1.0.0" || c.OldHash != retired.ContentHash || c.NewHash == retired.ContentHash {
+				t.Errorf("conflict = %+v, want ops/doc@1.0.0 against the retired hash %s", c, retired.ContentHash)
+			}
+			if res.Accepted != 0 || len(res.Rejected) != 0 {
+				t.Errorf("result = %+v, want only the conflict", res)
+			}
+		})
 	}
 }
 
@@ -327,19 +371,30 @@ func TestIngest_AutoVersionRevertSkipsRetiredRow(t *testing.T) {
 	}
 }
 
-// Spec: §4.6, §7.3.1, §4.7.6 — a retired row counts toward the N derivation,
-// because it still occupies its (id, version), so a skill with no declared
-// version whose ID holds a retired 0.0.0-auto.1 receives 0.0.0-auto.2.
+// Spec: §4.1, §4.6, §7.3.1, §4.7.6 — a retired row counts toward the N
+// derivation, because it still occupies its (id, version), so a skill with no
+// declared version whose ID holds a retired 0.0.0-auto.1 receives
+// 0.0.0-auto.2, whether extends: or a removed type retired the row.
 func TestIngest_AutoVersionCountsRetiredRow(t *testing.T) {
 	t.Parallel()
-	st := newStore(t)
-	erSeed(t, st, erRetiredSkillRow("0.0.0-auto.1", "team", erEpoch))
-	res := erIngest(t, st, "team", map[string]string{"ops/s/SKILL.md": erSkill("s", "")})
-	if res.Accepted != 1 || len(res.Ingested) != 1 {
-		t.Fatalf("result = %+v, want one accepted pair", res)
+	rows := map[string]store.ManifestRecord{
+		"extends": erRetiredSkillRow("0.0.0-auto.1", "team", erEpoch),
+		"command": erRetiredRow("command", "ops/s", "0.0.0-auto.1", "team", 0),
+		"context": erRetiredRow("context", "ops/s", "0.0.0-auto.1", "team", 0),
 	}
-	if v := res.Ingested[0].Version; v != "0.0.0-auto.2" {
-		t.Errorf("assigned version = %s, want 0.0.0-auto.2", v)
+	for cause, row := range rows {
+		t.Run(cause, func(t *testing.T) {
+			t.Parallel()
+			st := newStore(t)
+			erSeed(t, st, row)
+			res := erIngest(t, st, "team", map[string]string{"ops/s/SKILL.md": erSkill("s", "")})
+			if res.Accepted != 1 || len(res.Ingested) != 1 {
+				t.Fatalf("result = %+v, want one accepted pair", res)
+			}
+			if v := res.Ingested[0].Version; v != "0.0.0-auto.2" {
+				t.Errorf("assigned version = %s, want 0.0.0-auto.2", v)
+			}
+		})
 	}
 }
 

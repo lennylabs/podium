@@ -63,11 +63,13 @@ func TestTypeRemovedReason(t *testing.T) {
 }
 
 // Spec: §4.1, §4.6 — the classifier checks extends: before the removed type,
-// so an artifact that trips both reports extends_removed, and an artifact
-// that trips neither is admitted.
-func TestRemovedFeature(t *testing.T) {
+// so an artifact that trips both reports extends_removed, an artifact that
+// trips one reports that rule, and an artifact that trips neither is
+// admitted.
+func TestRemovedFeature_Order(t *testing.T) {
 	t.Parallel()
 	extends := []byte("---\ntype: command\nversion: 1.0.0\nextends: a/b@1.0.0\n---\n\nbody\n")
+	extendsOnly := []byte("---\ntype: agent\nversion: 1.0.0\nextends: a/b@1.0.0\n---\n\nbody\n")
 	plain := []byte("---\ntype: agent\nversion: 1.0.0\n---\n\nbody\n")
 	cases := []struct {
 		name           string
@@ -78,6 +80,7 @@ func TestRemovedFeature(t *testing.T) {
 		wantOK         bool
 	}{
 		{"extends wins over a removed type", extends, "command", ExtendsRemovedConstraint, ExtendsRemovedReason, true},
+		{"extends only", extendsOnly, manifest.TypeAgent, ExtendsRemovedConstraint, ExtendsRemovedReason, true},
 		{"command", plain, "command", TypeRemovedConstraint, TypeRemovedReason("command"), true},
 		{"context", plain, "context", TypeRemovedConstraint, TypeRemovedReason("context"), true},
 		{"remaining type", plain, manifest.TypeAgent, "", "", false},

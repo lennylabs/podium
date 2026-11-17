@@ -287,6 +287,55 @@ func TestRunLint_JSONRejectedNotOnStderr(t *testing.T) {
 	}
 }
 
+// Spec: §4.1, §4.6, §7.3.1 — under --json the walk reports each refused
+// artifact in rejected, in identifier order, with ingest.invalid_artifact, its
+// reason, and details holding exactly the constraint of the rule that refused
+// it: type_removed for a command and a context, and extends_removed for an
+// ARTIFACT.md that declares both extends: and type: context, because the
+// §4.6 check runs first. The run exits 1 and names no refusal on standard
+// error, and the valid sibling is not rejected.
+func TestRunLint_RemovedFeatureJSON(t *testing.T) {
+	root := writeLintRegistry(t, map[string][2]string{
+		"close-books": {"Reconcile the general ledger at month end", "Body.\n"},
+	})
+	refused := map[string]string{
+		"cmd":  "---\ntype: command\nversion: 1.0.0\ndescription: Run the variance check\n---\n\nBody.\n",
+		"ref":  "---\ntype: context\nversion: 1.0.0\ndescription: Finance glossary terms\n---\n\nBody.\n",
+		"both": "---\ntype: context\nversion: 1.0.0\ndescription: Glossary overlay\nextends: team/finance/ref\n---\n\nBody.\n",
+	}
+	for name, art := range refused {
+		dir := filepath.Join(root, "team", "finance", name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "ARTIFACT.md"), []byte(art), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if rc := runLint(context.Background(), &stdout, &stderr, root, true, true, lint.SeverityError); rc != 1 {
+		t.Errorf("runLint = %d, want 1", rc)
+	}
+	if strings.Contains(stderr.String(), "rejected") || strings.Contains(stderr.String(), layer.InvalidArtifactCode) {
+		t.Errorf("stderr = %q, want no rejected line under --json", stderr.String())
+	}
+	var env lintEnvelopeJSON
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode %q: %v", stdout.String(), err)
+	}
+	want := []lintRejectedJSON{
+		{ArtifactID: "team/finance/both", Code: layer.InvalidArtifactCode, Reason: layer.ExtendsRemovedReason,
+			Details: map[string]any{"constraint": layer.ExtendsRemovedConstraint}},
+		{ArtifactID: "team/finance/cmd", Code: layer.InvalidArtifactCode, Reason: layer.TypeRemovedReason("command"),
+			Details: map[string]any{"constraint": layer.TypeRemovedConstraint}},
+		{ArtifactID: "team/finance/ref", Code: layer.InvalidArtifactCode, Reason: layer.TypeRemovedReason("context"),
+			Details: map[string]any{"constraint": layer.TypeRemovedConstraint}},
+	}
+	if !reflect.DeepEqual(env.Rejected, want) {
+		t.Errorf("rejected = %+v, want %+v", env.Rejected, want)
+	}
+}
+
 // Spec: §7.3.1 — a registry that cannot be opened writes no JSON object,
 // and a failing standard output is reported as an error.
 func TestRunLint_OpenFailureAndWriteFailure(t *testing.T) {

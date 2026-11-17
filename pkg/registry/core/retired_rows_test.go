@@ -45,8 +45,10 @@ const (
 	rtG      = "ops/plain-g"
 )
 
-// rtRetiredIDs are the IDs whose every row the §4.6 no-inheritance rule
-// retires, so no read path returns them.
+// rtRetiredIDs are the IDs whose every row is retired, so no read path
+// returns them. R's row is retired by the cause a case runs under, and E, F,
+// and U are always retired by an extends: key in an encoding the §4.6 check
+// must still recognize.
 var rtRetiredIDs = []string{rtR, rtE, rtF, rtU}
 
 // rtServedIDs are the IDs with a servable row in fixtures (a) to (d).
@@ -88,6 +90,23 @@ func rtRow(id, ver, lay string, hour int, doc []byte, resources ...store.Resourc
 	}
 }
 
+// rtCauses are the retirement causes the retired-row cases run under: the
+// §4.6 extends: declaration and the two types §4.1 removed.
+var rtCauses = []string{"extends", "command", "context"}
+
+// rtRetired builds a row of id at ver that cause retires. Under extends its
+// frontmatter declares extends: parent; under a removed type both its type
+// column and its frontmatter type name the cause and parent is unused. extra
+// holds further frontmatter lines.
+func rtRetired(cause, id, ver, lay string, hour int, parent, extra, body string, resources ...store.ResourceRef) store.ManifestRecord {
+	if cause == "extends" {
+		return rtRow(id, ver, lay, hour, rtDoc("type: agent\nversion: "+ver+"\nextends: "+parent+"\n"+extra, body), resources...)
+	}
+	rec := rtRow(id, ver, lay, hour, rtDoc("type: "+cause+"\nversion: "+ver+"\n"+extra, body), resources...)
+	rec.Type = cause
+	return rec
+}
+
 // rtPlain builds a plain agent row whose manifest parses and admits.
 func rtPlain(id, ver, lay string, hour int, resources ...store.ResourceRef) store.ManifestRecord {
 	doc := rtDoc("type: agent\nversion: "+ver+"\ndescription: Fixture "+id+" "+ver+".\n", "Body of "+id+"@"+ver+".\n")
@@ -100,25 +119,26 @@ func rtResource(body string) store.ResourceRef {
 }
 
 // rtFixtures returns the rows of each fixture, keyed by its TEST-4 letter,
-// and "g" for the plain two-version G.
-func rtFixtures() map[string][]store.ManifestRecord {
+// and "g" for the plain two-version G. cause retires the retired rows of
+// fixtures (a) to (d).
+func rtFixtures(cause string) map[string][]store.ManifestRecord {
 	return map[string][]store.ManifestRecord{
 		"a": {
 			rtPlain(rtP, "1.0.0", "base", 1, rtResource("parent resource\n")),
 			rtPlain(rtC, "1.0.0", "base", 2),
-			rtRow(rtC, "2.0.0", "base", 3, rtDoc("type: agent\nversion: 2.0.0\nextends: "+rtP+"\n", "Child body.\n")),
+			rtRetired(cause, rtC, "2.0.0", "base", 3, rtP, "", "Child body.\n"),
 		},
 		"b": {
 			rtPlain(rtX, "1.0.0", "base", 4),
-			rtRow(rtX, "2.0.0", "team", 5, rtDoc("type: agent\nversion: 2.0.0\nextends: "+rtX+"\n", "Overlay body.\n")),
+			rtRetired(cause, rtX, "2.0.0", "team", 5, rtX, "", "Overlay body.\n"),
 		},
 		"c": {
-			rtRow(rtR, "1.0.0", "team", 6, rtDoc("type: agent\nversion: 1.0.0\nextends: "+rtP+"\n", "Retired body.\n"), rtResource("retired resource\n")),
+			rtRetired(cause, rtR, "1.0.0", "team", 6, rtP, "", "Retired body.\n", rtResource("retired resource\n")),
 		},
 		"d": {
 			rtPlain(rtT, "1.0.0", "base", 7),
 			rtPlain(rtD, "1.0.0", "base", 8),
-			rtRow(rtD, "2.0.0", "base", 9, rtDoc("type: agent\nversion: 2.0.0\nextends: "+rtP+"\ndelegates_to: ["+rtT+"]\n", "Delegator body.\n")),
+			rtRetired(cause, rtD, "2.0.0", "base", 9, rtP, "delegates_to: ["+rtT+"]\n", "Delegator body.\n"),
 		},
 		"e": {
 			rtRow(rtE, "1.0.0", "team", 10, rtDoc("type: agent\nversion: 1.0.0\n\"\\x65xtends\": "+rtP+"\n", "Escaped body.\n")),
@@ -142,17 +162,17 @@ var rtLayers = []layer.Layer{
 	{ID: "team", Precedence: 2, Visibility: layer.Visibility{Public: true}},
 }
 
-// rtSeed stores the sealed rows of the named fixtures and returns them by
-// "id@version". Fixture (d) also stores the D→T delegates_to edge, and (c)
-// stores an R→T edge, which no dependents_of answer returns because R has no
-// servable row.
-func rtSeed(t *testing.T, st store.Store, letters ...string) map[string]store.ManifestRecord {
+// rtSeed stores the sealed rows of the named fixtures, retired by cause, and
+// returns them by "id@version". Fixture (d) also stores the D→T delegates_to
+// edge, and (c) stores an R→T edge, which no dependents_of answer returns
+// because R has no servable row.
+func rtSeed(t *testing.T, st store.Store, cause string, letters ...string) map[string]store.ManifestRecord {
 	t.Helper()
 	ctx := context.Background()
 	if err := st.CreateTenant(ctx, store.Tenant{ID: rtTenant}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	fixtures := rtFixtures()
+	fixtures := rtFixtures(cause)
 	out := map[string]store.ManifestRecord{}
 	for _, letter := range letters {
 		for _, rec := range fixtures[letter] {
@@ -187,12 +207,12 @@ func rtPut(t testing.TB, st store.Store, rec store.ManifestRecord) store.Manifes
 // rtAllLetters names every fixture.
 var rtAllLetters = []string{"a", "b", "c", "d", "e", "f", "g", "u"}
 
-// rtRegistry builds a registry over a store holding every fixture, with an
-// audit recorder, and returns the seeded rows.
-func rtRegistry(t *testing.T) (*core.Registry, *store.Memory, *recorder, map[string]store.ManifestRecord) {
+// rtRegistry builds a registry over a store holding every fixture, retired
+// by cause, with an audit recorder, and returns the seeded rows.
+func rtRegistry(t *testing.T, cause string) (*core.Registry, *store.Memory, *recorder, map[string]store.ManifestRecord) {
 	t.Helper()
 	st := store.NewMemory()
-	rows := rtSeed(t, st, rtAllLetters...)
+	rows := rtSeed(t, st, cause, rtAllLetters...)
 	rec := &recorder{}
 	return core.New(st, rtTenant, rtLayers).WithAudit(rec.emit), st, rec, rows
 }
@@ -219,16 +239,28 @@ func rtWantNotFound(t *testing.T, what string, err error) {
 	}
 }
 
-// Spec: §4.6, §13.4 — a stored row whose ARTIFACT.md declares extends: is
-// retired: version resolution falls back to the newest other row of its ID, an
-// exact or content-hash load of it is not found, and an ID whose every row is
-// retired is absent from every core read path, with no visibility.denied
-// event, because the rule reads the stored bytes and never a pin. The quota
-// read still counts the retired bytes.
+// Spec: §4.1, §4.6, §4.7.3, §4.7.6, §13.4 — a stored row whose ARTIFACT.md
+// declares extends:, or whose type is a removed type, is retired: version
+// resolution falls back to the newest other row of its ID, an exact or
+// content-hash load of it is not found, and an ID whose every row is retired
+// is absent from every core read path, with no visibility.denied event,
+// because the rule reads the stored row and never a pin. The quota read still
+// counts the retired bytes.
 func TestRetiredRows_CoreReadPaths(t *testing.T) {
 	t.Parallel()
+	for _, cause := range rtCauses {
+		t.Run(cause, func(t *testing.T) {
+			t.Parallel()
+			rtAssertCoreReadPaths(t, cause)
+		})
+	}
+}
+
+// rtAssertCoreReadPaths runs the TestRetiredRows_CoreReadPaths assertions
+// over the fixtures retired by cause.
+func rtAssertCoreReadPaths(t *testing.T, cause string) {
 	ctx := context.Background()
-	reg, st, rec, rows := rtRegistry(t)
+	reg, st, rec, rows := rtRegistry(t, cause)
 
 	// (a) latest falls back to C@1.0.0; the retired C@2.0.0 is not found by
 	// exact version or by content hash.
@@ -368,11 +400,12 @@ func rtETag(rec store.ManifestRecord) string {
 	return `"` + rec.ContentHash + `"`
 }
 
-// rtServer serves a registry over every fixture through the HTTP handler,
-// with a filesystem object store holding the bytes of each fixture resource.
-func rtServer(t *testing.T) (string, map[string]store.ManifestRecord) {
+// rtServer serves a registry over every fixture, retired by cause, through
+// the HTTP handler, with a filesystem object store holding the bytes of each
+// fixture resource.
+func rtServer(t *testing.T, cause string) (string, map[string]store.ManifestRecord) {
 	t.Helper()
-	reg, _, _, rows := rtRegistry(t)
+	reg, _, _, rows := rtRegistry(t, cause)
 	objs, err := objectstore.Open(t.TempDir())
 	if err != nil {
 		t.Fatalf("objectstore.Open: %v", err)
@@ -391,14 +424,26 @@ func rtServer(t *testing.T) (string, map[string]store.ManifestRecord) {
 	return ts.URL, rows
 }
 
-// Spec: §4.6, §13.4, §7.2 — over HTTP a retired row is answered 404, never
-// 304, on a HEAD and on a conditional GET by exact version and by content
-// hash, a latest GET that carries the retired row's ETag gets a full 200 for
-// the served row, and an all-retired ID is absent from HEAD, the batch load,
-// and the object route.
+// Spec: §4.1, §4.6, §4.7.10, §13.4, §7.2 — over HTTP a row that extends: or a
+// removed type retires is answered 404, never 304, on a HEAD and on a
+// conditional GET by exact version and by content hash, a latest GET that
+// carries the retired row's ETag gets a full 200 for the served row, and an
+// all-retired ID is absent from HEAD, the batch load, and the object route.
 func TestRetiredRows_HTTPValidatorsAndRoutes(t *testing.T) {
 	t.Parallel()
-	base, rows := rtServer(t)
+	for _, cause := range rtCauses {
+		t.Run(cause, func(t *testing.T) {
+			t.Parallel()
+			rtAssertHTTPValidatorsAndRoutes(t, cause)
+		})
+	}
+}
+
+// rtAssertHTTPValidatorsAndRoutes runs the
+// TestRetiredRows_HTTPValidatorsAndRoutes assertions over the fixtures
+// retired by cause.
+func rtAssertHTTPValidatorsAndRoutes(t *testing.T, cause string) {
+	base, rows := rtServer(t, cause)
 	retired := rows[rtC+"@2.0.0"]
 	served := rows[rtC+"@1.0.0"]
 	load := base + "/v1/load_artifact?id=" + rtC
@@ -482,13 +527,26 @@ func rtPutConcurrent(t *testing.T, st store.Store, rec store.ManifestRecord) {
 	}
 }
 
-// Spec: §4.6 — the memoized verdict is stable across listings, and it is
-// keyed by the content hash, so a row stored under a purged and reused
-// (id, version) with other bytes is judged afresh in both directions.
+// Spec: §4.1, §4.6 — the memoized verdict is stable across listings, and it
+// is keyed by the content hash, so a row stored under a purged and reused
+// (id, version) with other bytes is judged afresh in both directions, whether
+// extends: or a removed type retires the reused row.
 func TestRetiredRows_MemoKeyedByContentHash(t *testing.T) {
 	t.Parallel()
+	for _, cause := range rtCauses {
+		t.Run(cause, func(t *testing.T) {
+			t.Parallel()
+			rtAssertMemoKeyedByContentHash(t, cause)
+		})
+	}
+}
+
+// rtAssertMemoKeyedByContentHash runs the
+// TestRetiredRows_MemoKeyedByContentHash assertions over the fixtures and
+// reused rows retired by cause.
+func rtAssertMemoKeyedByContentHash(t *testing.T, cause string) {
 	ctx := context.Background()
-	reg, st, _, _ := rtRegistry(t)
+	reg, st, _, _ := rtRegistry(t, cause)
 
 	first := rtSearchIDs(t, reg, publicID, false)
 	second := rtSearchIDs(t, reg, publicID, false)
@@ -510,12 +568,12 @@ func TestRetiredRows_MemoKeyedByContentHash(t *testing.T) {
 	if _, err := st.PurgeDeprecatedManifests(ctx, time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("PurgeDeprecatedManifests: %v", err)
 	}
-	rtPut(t, st, rtRow(toRetired, "1.0.0", "base", 21, rtDoc("type: agent\nversion: 1.0.0\nextends: "+rtP+"\n", "Reused body.\n")))
+	rtPut(t, st, rtRetired(cause, toRetired, "1.0.0", "base", 21, rtP, "", "Reused body.\n"))
 	_, err := reg.LoadArtifact(ctx, publicID, toRetired, core.LoadArtifactOptions{})
 	rtWantNotFound(t, "the retired row under a reused key", err)
 
 	// A retired row is not served, then a plain row under the same key is.
-	retired := rtRow(toPlain, "1.0.0", "base", 22, rtDoc("type: agent\nversion: 1.0.0\nextends: "+rtP+"\n", "Retired first.\n"))
+	retired := rtRetired(cause, toPlain, "1.0.0", "base", 22, rtP, "", "Retired first.\n")
 	retired.Deprecated = true
 	rtPut(t, st, retired)
 	_, err = reg.LoadArtifact(ctx, publicID, toPlain, core.LoadArtifactOptions{})
@@ -538,7 +596,7 @@ func TestSearchArtifacts_RetiredRowVectorsDoNotSurface(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	st := store.NewMemory()
-	rtSeed(t, st, "a", "b", "g")
+	rtSeed(t, st, "extends", "a", "b", "g")
 	const dim = 8
 	query := basis(dim, 0)
 	vec := vector.NewMemory(dim)
@@ -576,7 +634,7 @@ func TestSearchArtifacts_RetiredRowVectorsDoNotSurface(t *testing.T) {
 func TestServableRows_ConcurrentListingsAndIngest(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	reg, st, _, _ := rtRegistry(t)
+	reg, st, _, _ := rtRegistry(t, "extends")
 	const reused = "ops/reused"
 	reusedPlain := rtPlain(reused, "1.0.0", "base", 30)
 	reusedPlain.Deprecated = true

@@ -124,6 +124,49 @@ func TestHarnessCapability_MCPServersTargetingClaudeCodeClean(t *testing.T) {
 	}
 }
 
+// capSkillDiags runs only the §6.7.1 capability rule over one skill whose
+// ARTIFACT.md declares target_harnesses and whose SKILL.md states
+// metadata.invocation as invocation, so the user-only value reaches the rule
+// only through the §4.3.4 resolution.
+func capSkillDiags(t *testing.T, harness, invocation string) []Diagnostic {
+	t.Helper()
+	reg, records := openFixture(t,
+		testharness.WriteTreeOption{
+			Path:    "team/standup/ARTIFACT.md",
+			Content: "---\ntype: skill\nversion: 1.0.0\ntarget_harnesses: [" + harness + "]\n---\n",
+		},
+		testharness.WriteTreeOption{
+			Path: "team/standup/SKILL.md",
+			Content: "---\nname: standup\ndescription: Format a standup update.\nmetadata:\n  invocation: \"" +
+				invocation + "\"\n---\n\nbody\n",
+		},
+	)
+	return (&Linter{Rules: []Rule{ruleHarnessCapability{}}}).Lint(context.Background(), reg, records)
+}
+
+// Spec: §6.7.1, §4.3.4 — a skill whose SKILL.md metadata resolves invocation
+// to user uses the invocation: user row. gemini is ⚠ for the row (the
+// native command file), so targeting it warns, and hermes is ✗, so
+// targeting it is an error that names invocation: user. A skill whose
+// invocation is any draws no diagnostic for the row on gemini.
+func TestHarnessCapability_InvocationUser(t *testing.T) {
+	t.Parallel()
+	diags := capSkillDiags(t, "gemini", "user")
+	if hasErrorMessage(diags, capCode, "") {
+		t.Errorf("invocation: user on gemini is ⚠, must not error: %v", diags)
+	}
+	if !hasWarnMessage(diags, capCode, "invocation: user") {
+		t.Errorf("expected a fallback warning naming invocation: user for gemini, got: %v", diags)
+	}
+	diags = capSkillDiags(t, "hermes", "user")
+	if !hasErrorMessage(diags, capCode, "invocation: user") || !hasErrorMessage(diags, capCode, "hermes") {
+		t.Errorf("expected a capability error naming invocation: user and hermes, got: %v", diags)
+	}
+	if diags := capSkillDiags(t, "gemini", "any"); hasCode(diags, capCode) {
+		t.Errorf("an any skill on gemini must draw no capability diagnostic, got: %v", diags)
+	}
+}
+
 // The capability rule ships in the default rule set so both `podium lint`
 // and ingest enforce it (§6.7.1 "ingest-time lint").
 func TestHarnessCapability_RegisteredInAllRules(t *testing.T) {
