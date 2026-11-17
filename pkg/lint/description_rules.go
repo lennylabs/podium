@@ -27,22 +27,6 @@ const (
 	MinDescriptionWords = 3
 )
 
-// DescriptionAdvisoryRules returns the §3.3 / §12 registry ingest-time
-// description-quality checks: a thin-description flag and a
-// colliding-summaries flag. Both are advisory (warning severity).
-//
-// They are intentionally NOT part of AllRules(): the spec attributes the
-// behavior to "the registry" (§3.3 "The registry lints for thin
-// descriptions and flags clusters of artifacts whose summaries collide")
-// and to "ingest-time lint" (§12), so the registry ingest pipeline runs
-// them over the ingested record set, while the author-facing `podium lint`
-// keeps the per-artifact schema rules in AllRules(). The colliding-summary
-// check is inherently cross-artifact and only carries meaning over a set
-// of artifacts, which the ingest batch supplies.
-func DescriptionAdvisoryRules() []Rule {
-	return descriptionRules(DefaultThresholds())
-}
-
 // descriptionRules builds the description-quality rules from th, which
 // the caller has already resolved.
 func descriptionRules(th Thresholds) []Rule {

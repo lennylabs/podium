@@ -19,9 +19,9 @@ func rec(id, desc string) filesystem.ArtifactRecord {
 	}
 }
 
-// runAdvisory runs only the §3.3 / §12 description-quality rules.
+// runAdvisory runs only the §7.3.1 catalog advisories at their defaults.
 func runAdvisory(records []filesystem.ArtifactRecord) []Diagnostic {
-	return (&Linter{Rules: DescriptionAdvisoryRules()}).Lint(context.Background(), nil, records)
+	return (&Linter{Rules: (&Linter{}).AdvisoryRules()}).Lint(context.Background(), nil, records)
 }
 
 // Spec: §3.3 / §12 — "The registry lints for thin descriptions." A
@@ -258,15 +258,33 @@ func TestCollidingDescriptions_PeerOrderAndCap(t *testing.T) {
 	}
 }
 
-// Spec: §3.3 — the advisory rules are deliberately absent from AllRules()
-// so the author-facing `podium lint` keeps the per-artifact schema rules;
-// the registry runs DescriptionAdvisoryRules() at ingest time.
+// Spec: §7.3.1 — AllRules() excludes the catalog advisories, and
+// AdvisoryRules() returns them. Registry ingest runs AdvisoryRules() over
+// the ingested layer, and `podium lint` adds them to its pass through
+// IncludeAdvisories.
 func TestDescriptionAdvisories_NotInAllRules(t *testing.T) {
 	t.Parallel()
+	advisories := map[string]bool{
+		"lint.thin_description":       true,
+		"lint.colliding_descriptions": true,
+		"lint.near_duplicate_content": true,
+	}
 	for _, r := range AllRules() {
-		if r.Code() == "lint.thin_description" || r.Code() == "lint.colliding_descriptions" {
+		if advisories[r.Code()] {
 			t.Errorf("advisory rule %s must not be in AllRules()", r.Code())
 		}
+	}
+	got := map[string]bool{}
+	for _, r := range (&Linter{}).AdvisoryRules() {
+		got[r.Code()] = true
+	}
+	for code := range advisories {
+		if !got[code] {
+			t.Errorf("AdvisoryRules() lacks %s; got %v", code, got)
+		}
+	}
+	if len(got) != len(advisories) {
+		t.Errorf("AdvisoryRules() codes = %v, want exactly %v", got, advisories)
 	}
 }
 

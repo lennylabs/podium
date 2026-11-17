@@ -543,12 +543,13 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	res := &Result{Rejected: refused}
 	errsByID := groupLintErrors(diags)
 
-	// §3.3 / §12 — the registry flags thin descriptions and clusters of
-	// artifacts whose summaries collide. These checks are advisory and do
-	// not gate ingest, so they run independently of req.Linter (which the
-	// author-facing `podium lint` shares) over the ingested record set;
-	// the colliding-summary check needs that set to spot a cluster.
-	res.Advisories = (&lint.Linter{Rules: lint.DescriptionAdvisoryRules()}).Lint(ctx, nil, records)
+	// The §7.3.1 catalog advisories run over the ingested layer's records,
+	// so the pairwise checks compare artifacts within this layer only. They
+	// do not gate ingest. req.Linter supplies the thresholds, so an
+	// operator's PODIUM_LINT_* values apply here as in `podium lint`.
+	//
+	// Spec: §7.3.1
+	res.Advisories = (&lint.Linter{Rules: req.Linter.AdvisoryRules()}).Lint(ctx, nil, records)
 	// §12: carry the newly-set unlisted: true advisories
 	// collected while persisting DOMAIN.md records. DOMAIN.md is not an
 	// artifact, so the check runs in the domain loop above rather than as
