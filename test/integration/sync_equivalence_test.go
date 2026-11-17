@@ -143,7 +143,7 @@ func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 			// §7.5.8: the listing report is a function of the resolved set, so
 			// both sources report the same listing for one budget. The none
 			// adapter computes no listing.
-			b := sync.DefaultListingBudget()
+			b := sync.DefaultListingBudget(adapterID)
 			b.MaxEntryChars = 20
 			fsListing, srvListing := sync.Listing(fsRes, b), sync.Listing(srvRes, b)
 			if adapterID == "none" {

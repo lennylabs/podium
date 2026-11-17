@@ -35,9 +35,10 @@ func listingSkills() *Result {
 	}
 }
 
-// budget returns the §7.5.8 defaults with the given overrides applied.
+// budget returns the §7.5.8 defaults of an adapter other than claude-code,
+// which leave max_entry_chars unset, with the given overrides applied.
 func budget(mut func(*EffectiveListingBudget)) EffectiveListingBudget {
-	b := DefaultListingBudget()
+	b := DefaultListingBudget("cursor")
 	if mut != nil {
 		mut(&b)
 	}
@@ -80,25 +81,51 @@ func TestListing_Cost(t *testing.T) {
 	}
 }
 
-// Spec: §7.5.8 — the defaults are max_chars 8000, entry_overhead_chars 5, no
-// max_entry_chars, types [skill], and check warning, for every adapter.
+// Spec: §7.5.8 — the defaults are max_chars 8000, entry_overhead_chars 5,
+// types [skill], and check warning, for every adapter. max_entry_chars is
+// 1536 for claude-code and unset for every other adapter.
 func TestDefaultListingBudget(t *testing.T) {
 	t.Parallel()
 	want := EffectiveListingBudget{MaxChars: 8000, EntryOverheadChars: 5, MaxEntryChars: 0, Types: []string{"skill"}, Check: "warning"}
-	if got := DefaultListingBudget(); !reflect.DeepEqual(got, want) {
-		t.Errorf("DefaultListingBudget() = %+v, want %+v", got, want)
+	wantClaude := want
+	wantClaude.MaxEntryChars = 1536
+	for _, id := range []string{"cursor", "codex", "gemini", "opencode", "pi"} {
+		if got := DefaultListingBudget(id); !reflect.DeepEqual(got, want) {
+			t.Errorf("DefaultListingBudget(%s) = %+v, want %+v", id, got, want)
+		}
+	}
+	if got := DefaultListingBudget("claude-code"); !reflect.DeepEqual(got, wantClaude) {
+		t.Errorf("DefaultListingBudget(claude-code) = %+v, want %+v", got, wantClaude)
 	}
 	reg := adapter.DefaultRegistry()
 	var nilCfg *MergedConfig
 	got, err := nilCfg.ListingBudgetFor("claude-code", reg)
+	if err != nil || !reflect.DeepEqual(got, wantClaude) {
+		t.Errorf("nil config: %+v, %v; want %+v", got, err, wantClaude)
+	}
+	got, err = nilCfg.ListingBudgetFor("cursor", reg)
 	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Errorf("nil config: %+v, %v; want %+v", got, err, want)
+		t.Errorf("nil config, cursor: %+v, %v; want %+v", got, err, want)
 	}
 	max := 100
 	other := &MergedConfig{ListingBudgets: map[string]ListingBudget{"codex": {MaxChars: &max}}}
 	got, err = other.ListingBudgetFor("claude-code", reg)
-	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Errorf("entry for codex only: %+v, %v; want %+v", got, err, want)
+	if err != nil || !reflect.DeepEqual(got, wantClaude) {
+		t.Errorf("entry for codex only: %+v, %v; want %+v", got, err, wantClaude)
+	}
+}
+
+// Spec: §7.5.8 — under the claude-code defaults an entry whose description is
+// longer than 1536 code points is reported as oversized, and one at 1536 is not.
+func TestListing_ClaudeCodeDefaultEntryCap(t *testing.T) {
+	t.Parallel()
+	res := &Result{Adapter: "claude-code", Artifacts: []ArtifactResult{
+		{ID: "team/long", ListingType: "skill", ListingDescription: strings.Repeat("a", 1537)},
+		{ID: "team/edge", ListingType: "skill", ListingDescription: strings.Repeat("a", 1536)},
+	}}
+	rep := Listing(res, DefaultListingBudget("claude-code"))
+	if rep == nil || len(rep.Oversized) != 1 || rep.Oversized[0].ID != "team/long" || rep.Oversized[0].Chars != 1537 {
+		t.Fatalf("Listing oversized = %+v, want only team/long at 1537", rep)
 	}
 }
 
@@ -325,7 +352,7 @@ func TestListingBudgetFor_Invalid(t *testing.T) {
 	clean := &MergedConfig{ListingBudgets: map[string]ListingBudget{"codex": {Check: &maybe}}}
 	for _, id := range []string{"acme-harness", "claude-code"} {
 		got, err := clean.ListingBudgetFor(id, nil)
-		if err != nil || !reflect.DeepEqual(got, DefaultListingBudget()) {
+		if err != nil || !reflect.DeepEqual(got, DefaultListingBudget(id)) {
 			t.Errorf("ListingBudgetFor(%q) with no entry = %+v, %v; want the defaults", id, got, err)
 		}
 	}

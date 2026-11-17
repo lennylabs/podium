@@ -217,18 +217,28 @@ type EffectiveListingBudget struct {
 	Check              string
 }
 
-// DefaultListingBudget returns the §7.5.8 defaults, which are the same for
-// every adapter.
+// claudeCodeMaxEntryChars is the length at which Claude Code shortens a
+// skill's description text in its listing, which is the §7.5.8 claude-code
+// default for max_entry_chars.
+const claudeCodeMaxEntryChars = 1536
+
+// DefaultListingBudget returns the §7.5.8 defaults for adapterID. They are
+// the same for every adapter except max_entry_chars, which is 1536 for
+// claude-code and unset (0) for every other adapter.
 //
 // Spec: §7.5.8
-func DefaultListingBudget() EffectiveListingBudget {
-	return EffectiveListingBudget{
+func DefaultListingBudget(adapterID string) EffectiveListingBudget {
+	b := EffectiveListingBudget{
 		MaxChars:           8000,
 		EntryOverheadChars: 5,
 		MaxEntryChars:      0,
 		Types:              []string{"skill"},
 		Check:              ListingCheckWarning,
 	}
+	if adapterID == "claude-code" {
+		b.MaxEntryChars = claudeCodeMaxEntryChars
+	}
+	return b
 }
 
 // ErrInvalidListingBudget marks a `listing_budgets` entry that §7.5.2 makes
@@ -285,7 +295,7 @@ func validateListingBudget(adapterID string, lb ListingBudget, reg *adapter.Regi
 //
 // Spec: §7.5.2, §7.5.8
 func (m *MergedConfig) ListingBudgetFor(adapterID string, reg *adapter.Registry) (EffectiveListingBudget, error) {
-	out := DefaultListingBudget()
+	out := DefaultListingBudget(adapterID)
 	if m == nil {
 		return out, nil
 	}

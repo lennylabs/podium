@@ -55,7 +55,7 @@ func TestLoadMergedConfig_ListingBudgetsPerKey(t *testing.T) {
 		t.Fatalf("ListingBudgetFor: %v", err)
 	}
 	want := sync.EffectiveListingBudget{
-		MaxChars: 12000, EntryOverheadChars: 12, MaxEntryChars: 0,
+		MaxChars: 12000, EntryOverheadChars: 12, MaxEntryChars: 1536,
 		Types: []string{"skill", "agent"}, Check: "off",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -173,15 +173,15 @@ func TestLoadMergedConfig_ListingBudgetsMistyped(t *testing.T) {
 		name, doc string
 		want      sync.EffectiveListingBudget
 	}{
-		{"null", "listing_budgets:\n  claude-code:\n    max_chars: ~\n", sync.DefaultListingBudget()},
+		{"null", "listing_budgets:\n  claude-code:\n    max_chars: ~\n", sync.DefaultListingBudget("claude-code")},
 		{"off and underscores", "listing_budgets:\n  claude-code:\n    check: off\n    max_chars: 1_000\n    unknown_key: [1]\n",
-			sync.EffectiveListingBudget{MaxChars: 1000, EntryOverheadChars: 5, Types: []string{"skill"}, Check: "off"}},
+			sync.EffectiveListingBudget{MaxChars: 1000, EntryOverheadChars: 5, MaxEntryChars: 1536, Types: []string{"skill"}, Check: "off"}},
 		{"valid merge", "x-ok: &ok {max_chars: 12000}\nlisting_budgets:\n  claude-code:\n    <<: *ok\n    check: error\n",
-			sync.EffectiveListingBudget{MaxChars: 12000, EntryOverheadChars: 5, Types: []string{"skill"}, Check: "error"}},
+			sync.EffectiveListingBudget{MaxChars: 12000, EntryOverheadChars: 5, MaxEntryChars: 1536, Types: []string{"skill"}, Check: "error"}},
 		{"non-string keys", "listing_budgets:\n  claude-code:\n    max_chars: 12000\n    1: x\n    true: y\n  1: {max_chars: 5}\n",
-			sync.EffectiveListingBudget{MaxChars: 12000, EntryOverheadChars: 5, Types: []string{"skill"}, Check: "warning"}},
+			sync.EffectiveListingBudget{MaxChars: 12000, EntryOverheadChars: 5, MaxEntryChars: 1536, Types: []string{"skill"}, Check: "warning"}},
 		{"aliased item", "x-t: &t agent\nlisting_budgets:\n  claude-code:\n    types: [skill, *t]\n",
-			sync.EffectiveListingBudget{MaxChars: 8000, EntryOverheadChars: 5, Types: []string{"skill", "agent"}, Check: "warning"}},
+			sync.EffectiveListingBudget{MaxChars: 8000, EntryOverheadChars: 5, MaxEntryChars: 1536, Types: []string{"skill", "agent"}, Check: "warning"}},
 	}
 	for _, tc := range loads {
 		ws, home := listingWorkspace(t)
