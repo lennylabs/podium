@@ -139,7 +139,7 @@ For non-skill types, frontmatter and prose both live in `ARTIFACT.md`. For skill
 
 ```yaml
 ---
-type: skill | agent | context | command | rule | hook | mcp-server | <extension type>
+type: skill | agent | rule | hook | mcp-server | <extension type>
 name: run-variance-analysis
 version: 1.0.0 # semver, author-chosen
 description: One-line "when should I use this?"
@@ -179,7 +179,7 @@ sandbox_profile: unrestricted | read-only-fs | network-isolated | seccomp-strict
 # Author hints about the runtime resources this artifact ideally consumes.
 # Both are advisory only — Podium never enforces them; the host (or a custom
 # SDK consumer) decides whether and how to honor them. Applicable to types
-# `agent`, `skill`, and `command`; ingest lint warns if set on other types.
+# `agent` and `skill`; ingest lint warns if set on other types.
 effort_hint: low | medium | high | max
 model_class_hint: nano | small | medium | large | frontier
 
@@ -193,6 +193,11 @@ The `sbom:` field is informational. Podium stores whatever YAML the author write
 ### Type-specific fields
 
 ```yaml
+# For type: skill — who starts the skill (§4.3.4). `any` lets the agent load it on
+# its own and lets a human invoke it; `user` means a human invokes it. Ingest lint
+# warns if set on other types.
+invocation: any | user  # default: any
+
 # For type: agent — declared input/output schemas
 input: { $ref: ./schemas/input.json }
 output: { $ref: ./schemas/output.json }
