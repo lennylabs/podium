@@ -389,8 +389,9 @@ func TestSkillTutorial_ProseRefBrokenFails(t *testing.T) {
 	}
 }
 
-// a prose reference escaping the artifact package
-// fails lint. spec: ruleProseReferenceResolution.checkBundled.
+// A prose reference that leaves the artifact package is a warning that
+// recommends the canonical ID, so lint exits 0 under the default --fail-on.
+// Spec: §4.4
 func TestSkillTutorial_ProseRefEscapesPackage(t *testing.T) {
 	t.Parallel()
 	body := "See [secret](../../../etc/passwd) for details.\n"
@@ -399,11 +400,12 @@ func TestSkillTutorial_ProseRefEscapesPackage(t *testing.T) {
 		"personal/hello/greet/SKILL.md":    greetSkillWithBody(body),
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 1 {
-		t.Fatalf("lint exit=%d, want 1\nstdout=%s", res.Exit, res.Stdout)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
 	}
-	if !strings.Contains(res.Stdout, "lint.prose_reference") || !strings.Contains(res.Stdout, "escapes the artifact package") {
-		t.Errorf("missing escapes-package diagnostic:\n%s", res.Stdout)
+	if !strings.Contains(res.Stdout, "[warning]") || !strings.Contains(res.Stdout, "lint.prose_reference") ||
+		!strings.Contains(res.Stdout, "leaves the artifact package") || !strings.Contains(res.Stdout, "canonical ID") {
+		t.Errorf("missing leaves-the-package warning:\n%s", res.Stdout)
 	}
 }
 

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"regexp"
 	"strings"
 	"time"
 
@@ -79,12 +78,13 @@ func bodyAfterFrontmatter(src []byte) []byte {
 	return body
 }
 
-// ruleProseReferenceResolution implements §4.4 lines 336-342:
-// prose references in the manifest body must resolve to bundled
-// files (existence check), URLs (HTTP HEAD returning 200/3xx),
-// or other artifacts (registry-side resolution). The default
-// linter checks bundled files; URL HEAD checks are gated behind
-// the rule's HTTPClient field for tests + offline ingest.
+// ruleProseReferenceResolution implements §4.4: prose references in the
+// manifest body must resolve to bundled files (existence check), URLs (HTTP
+// HEAD returning 200/3xx), or other artifacts (registry-side resolution). A
+// prose reference is the target of a Markdown inline link outside code
+// (proseLinkTargets). The default linter checks bundled files; URL HEAD
+// checks are gated behind the rule's HTTPClient field for tests + offline
+// ingest.
 type ruleProseReferenceResolution struct {
 	// HTTPClient drives URL HEAD checks. When nil, URL references
 	// are not validated; offline ingest sees a single notice.
@@ -100,12 +100,6 @@ func NewProseReferenceRule(client *http.Client) Rule {
 }
 
 func (ruleProseReferenceResolution) Code() string { return "lint.prose_reference" }
-
-// proseLinkPattern matches Markdown links of the form [text](href)
-// without escaped backslashes. The HTTP / HTTPS branch matches
-// absolute URLs; everything else is treated as a relative bundled
-// path.
-var proseLinkPattern = regexp.MustCompile(`\[[^\]]+\]\(([^)]+)\)`)
 
 func (r ruleProseReferenceResolution) Check(ctx context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
@@ -127,11 +121,7 @@ func (r ruleProseReferenceResolution) Check(ctx context.Context, _ *filesystem.R
 		if len(body) == 0 {
 			continue
 		}
-		for _, match := range proseLinkPattern.FindAllSubmatch(body, -1) {
-			href := strings.TrimSpace(string(match[1]))
-			if href == "" {
-				continue
-			}
+		for _, href := range proseLinkTargets(body) {
 			if isAbsoluteURL(href) {
 				if d := r.checkURL(ctx, rec.ID, href); d != nil {
 					out = append(out, *d)
@@ -139,7 +129,8 @@ func (r ruleProseReferenceResolution) Check(ctx context.Context, _ *filesystem.R
 				continue
 			}
 			if strings.HasPrefix(href, "#") {
-				// Pure anchor — references the same document.
+				// Spec: §4.4 — a target that is only a fragment refers to
+				// the same document and is not checked.
 				continue
 			}
 			if d := r.checkReference(rec, href, catalog); d != nil {
@@ -172,22 +163,31 @@ func (r ruleProseReferenceResolution) relevantBody(rec filesystem.ArtifactRecord
 // checkReference resolves a non-URL prose reference against the three §4.4
 // targets in order: bundled files (existence check), the artifact's own
 // manifest files, and other artifacts (registry-side resolution against the
-// current visible catalog). It returns a diagnostic only when the reference
-// escapes the package or matches none of the three.
+// current visible catalog). The lookups read the target without its fragment
+// and query and with its percent-encoding decoded (referenceLookupPath). It
+// returns a warning when the reference leaves the package and an error when
+// it matches none of the three; the message quotes the target as written.
+//
+// Spec: §4.4
 func (r ruleProseReferenceResolution) checkReference(rec filesystem.ArtifactRecord, href string, catalog map[string]bool) *Diagnostic {
-	clean := path.Clean(strings.TrimPrefix(href, "./"))
+	clean := path.Clean(strings.TrimPrefix(referenceLookupPath(href), "./"))
 	if clean == "." || clean == "" {
 		return nil
 	}
 	if strings.HasPrefix(clean, "../") || clean == ".." {
+		// A target outside the package names no bundled file. It resolves
+		// only while the artifacts sit side by side in one source tree, which
+		// a consumer that installs one of them does not reproduce, so it is a
+		// warning that points at the canonical-ID form rather than an error.
 		return &Diagnostic{
 			ArtifactID: rec.ID,
 			Code:       "lint.prose_reference",
-			Severity:   SeverityError,
-			Message:    fmt.Sprintf("prose reference %q escapes the artifact package", href),
+			Severity:   SeverityWarning,
+			Message: fmt.Sprintf("prose reference %q leaves the artifact package; it resolves only while the artifacts sit side by side in one source tree. "+
+				"Name the other artifact by its canonical ID instead", href),
 		}
 	}
-	// §4.4 line 346: bundled files (existence check).
+	// §4.4: bundled files (existence check).
 	if _, ok := rec.Resources[clean]; ok {
 		return nil
 	}
@@ -196,10 +196,10 @@ func (r ruleProseReferenceResolution) checkReference(rec filesystem.ArtifactReco
 	case "ARTIFACT.md", "SKILL.md":
 		return nil
 	}
-	// §4.4 line 348: other artifacts (registry-side resolution against the
-	// current visible catalog). A reference that names another artifact by
-	// its canonical ID resolves; an unknown ID is the ingest error §4.4
-	// line 350 mandates. Strip any §4.7.6 version pin before the lookup.
+	// §4.4: other artifacts (registry-side resolution against the current
+	// visible catalog). A reference that names another artifact by its
+	// canonical ID resolves; an unknown ID is the ingest error §4.4 mandates.
+	// Strip any §4.7.6 version pin before the lookup.
 	if catalog[version.StripPin(clean)] {
 		return nil
 	}
