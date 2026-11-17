@@ -508,6 +508,11 @@ podium sync
 
 **Behavior notes.**
 
+- For a skill whose `invocation` is `user`, the adapter writes
+  `disable-model-invocation: true` as the YAML boolean. An authored value that
+  is already the boolean `true` stays as written. Any other authored value,
+  including `false` and the quoted string `"true"`, is replaced with the
+  boolean, and lint reports nothing for it.
 - The rule file carries the prose with the Podium-internal fields dropped.
 - `rule_mode: always` loads at launch, and `glob` writes the native `paths:`
   YAML list. Both modes map fully.
@@ -643,6 +648,11 @@ podium sync
 
 **Behavior notes.**
 
+- For a skill whose `invocation` is `user`, the adapter writes
+  `disable-model-invocation: true` as the YAML boolean. An authored value that
+  is already the boolean `true` stays as written. Any other authored value,
+  including `false` and the quoted string `"true"`, is replaced with the
+  boolean, and lint reports nothing for it.
 - Every `rule_mode` value maps natively to the `.mdc` frontmatter.
 - The adapter rewrites the resource reference only for a `hook`, whose
   `hook_action` points at the `.podium/resources/` bucket. An `agent` is written
@@ -847,6 +857,11 @@ directory.
 
 **Behavior notes.**
 
+- For a skill whose `invocation` is `user`, the adapter writes
+  `disable-model-invocation: true` as the YAML boolean. An authored value that
+  is already the boolean `true` stays as written. Any other authored value,
+  including `false` and the quoted string `"true"`, is replaced with the
+  boolean, and lint reports nothing for it.
 - `rule_mode: glob`, `auto`, and `explicit` degrade to the always-loaded
   `AGENTS.md` block, because an injected block carries no per-file scoping.
   Ingest warns when an artifact's `target_harnesses:` names pi.
