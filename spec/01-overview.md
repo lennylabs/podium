@@ -66,7 +66,7 @@ Podium is overkill for a small catalog in a single harness with one author. A fl
 
 - **Catalog size.** Browsing-by-directory and listing artifacts in a system prompt both degrade as the catalog grows. Lazy discovery (§3) and per-domain navigation help once the working set no longer fits comfortably in context.
 - **Cross-harness delivery.** "Author once, deliver anywhere" is useful even at small scale once a team is targeting more than one harness; anything beats forking per harness.
-- **Multiple artifact types.** A single dependency graph across skills, agents, contexts, commands, rules, hooks, and MCP server registrations beats N type-specific stores once a catalog has more than one type.
+- **Multiple artifact types.** A single dependency graph across skills, agents, rules, hooks, and MCP server registrations beats N type-specific stores once a catalog has more than one type.
 - **Multiple contributors.** Per-layer visibility, classification, and audit start to pay off as the number of contributors and the diversity of audiences grow.
 
 A solo developer with a handful of skills in one harness doesn't need Podium. A large team with mixed artifact types across several harnesses, contributing to a catalog used by many audiences, can get substantial value from it.
