@@ -670,7 +670,7 @@ results = client.search_artifacts(
 
 # Type-specific lookups
 agents = client.search_artifacts("payment workflow", type="agent")
-contexts = client.search_artifacts("style guide", type="context")
+skills = client.search_artifacts("style guide", type="skill")
 mcp_servers = client.search_artifacts(type="mcp-server")
 
 # Browse: no query, scope only — list artifacts in a domain
