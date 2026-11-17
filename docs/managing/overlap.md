@@ -82,7 +82,7 @@ A `lint.colliding_descriptions` similarity is the word-set similarity of two nor
 
 ### What the caller sees
 
-The report names only artifacts the caller can see. A semantic record with an artifact the caller cannot see is not reported and is not counted in an abbreviated peer list, so the report reveals nothing a search would not. Two callers with different views therefore read different reports. Run the report as an identity whose view covers the layers under review.
+The report names only artifacts the caller can see. A semantic record with an artifact the caller cannot see is not reported and is not counted in an abbreviated peer list, so the report names only artifacts the caller can load. Two callers with different views therefore read different reports. Run the report as an identity whose view covers the layers under review.
 
 [`podium overlap`](../reference/cli#podium-overlap) gives the command's exit codes, and [Catalog overlap report](../reference/http-api#catalog-overlap-report) gives every response field and error.
 

@@ -1517,7 +1517,7 @@ POST /v1/admin/overlap/rebuild
 { "computed": 42, "failed": 0 }
 ```
 
-A computation replaces every stored record that names the artifact. A failed computation leaves the artifact's existing records in place, and the next sweep computes it again.
+A computation replaces the records the artifact owns and leaves the records its peers own. A failed computation leaves the artifact's existing records in place, and the next sweep computes it again.
 
 **Errors.**
 
