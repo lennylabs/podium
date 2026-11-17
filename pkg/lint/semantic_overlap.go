@@ -41,8 +41,9 @@ type SemanticConfig struct {
 	Enabled bool
 	// Similarity is the default read threshold, from 0.5 to 1.0.
 	Similarity float64
-	// Neighbors is the number of nearest index rows queried per computed
-	// artifact, from 1 to 100.
+	// Neighbors is the most overlap records one computation stores, from 1
+	// to 100. The computation queries one more index row, because the
+	// artifact's own row is among its nearest.
 	Neighbors int
 	// RefreshInterval is the sweep interval: at least one minute, or zero
 	// for no sweep.

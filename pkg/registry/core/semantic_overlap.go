@@ -184,7 +184,10 @@ func cosineNeighbors(ctx context.Context, scorer vector.CosineScorer, tenant str
 //
 // Spec: §7.3.1
 func (r *Registry) computeOverlap(ctx context.Context, rec store.ManifestRecord, served map[string]string) error {
-	rows, err := r.semanticNeighbors(ctx, rec, r.overlap.semantic.Neighbors)
+	// The artifact's own row is normally among its nearest rows, so one more
+	// row is queried than the configured count, which is the most records a
+	// computation stores (§13.12).
+	rows, err := r.semanticNeighbors(ctx, rec, r.overlap.semantic.Neighbors+1)
 	if err != nil {
 		return fmt.Errorf("index query for %s@%s: %w", rec.ArtifactID, rec.Version, err)
 	}

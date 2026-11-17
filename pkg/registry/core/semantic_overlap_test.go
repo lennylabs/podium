@@ -158,6 +158,26 @@ func TestComputeOverlap_StoresEveryServedNeighbour(t *testing.T) {
 	}
 }
 
+// Spec: §13.12 — PODIUM_LINT_SEMANTIC_NEIGHBORS is the number of records a
+// computation stores. The artifact's own row is among its nearest rows, so a
+// query of exactly that many rows would store one record fewer, and a count of
+// 1 would store none.
+func TestComputeOverlap_NeighborCountIsRecordsStored(t *testing.T) {
+	t.Parallel()
+	f := newOverlapFixture(t, []layer.Layer{publicLayer("L")})
+	f.reg.WithOverlapChecks(lint.Thresholds{}, lint.SemanticConfig{Enabled: true, Neighbors: 1})
+	f.put("a", "1.0.0", "L", "alpha", "", true)
+	f.put("b", "1.0.0", "L", "bravo", "", true)
+	f.put("c", "1.0.0", "L", "charlie", "", true)
+	res, err := f.reg.ComputeOverlap(f.ctx, []vector.RowKey{{ArtifactID: "a", Version: "1.0.0"}})
+	if err != nil || res != (OverlapComputeResult{Computed: 1}) {
+		t.Fatalf("ComputeOverlap = %+v, %v", res, err)
+	}
+	if recs := f.records(); len(recs) != 1 || recs[0].ArtifactA != "a" {
+		t.Fatalf("records = %+v, want exactly one record naming a", recs)
+	}
+}
+
 // Spec: §7.3.1 — a failed index query leaves the artifact's records in
 // place, as do an artifact with no stored vector and one whose stored vector
 // carries another model; each counts as a failure.
