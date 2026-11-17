@@ -934,7 +934,7 @@ acme-agents/
   .claude-plugin/marketplace.json        # Claude Code, Desktop, Cowork; references ./claude/<plugin>
   .agents/plugins/marketplace.json       # Codex; references ./codex/<plugin>
   .cursor-plugin/marketplace.json        # Cursor; references ./cursor/<plugin>
-  claude/finance-pack/.claude-plugin/plugin.json + skills/ agents/ commands/ hooks/ .mcp.json
+  claude/finance-pack/.claude-plugin/plugin.json + skills/ agents/ hooks/ .mcp.json
   codex/finance-pack/.codex-plugin/plugin.json   + skills/ hooks/ .mcp.json
   cursor/finance-pack/.cursor-plugin/plugin.json + skills/ rules/ mcp.json
   claude/security-baseline/...  codex/security-baseline/...  cursor/security-baseline/...
