@@ -2,7 +2,7 @@
 
 ## 1.1 What Podium Is
 
-**Podium is a control plane for managing and serving AI agent artifacts at scale**: skills, agents, contexts, commands, rules, hooks, MCP server registrations, and any extension type a deployment registers. One catalog, one identity model, one ordered set of layers, one dependency graph, one audit stream, one signing scheme, applied across every artifact type the catalog holds.
+**Podium is a control plane for managing and serving AI agent artifacts at scale**: skills, agents, rules, hooks, MCP server registrations, and any extension type a deployment registers. One catalog, one identity model, one ordered set of layers, one dependency graph, one audit stream, one signing scheme, applied across every artifact type the catalog holds.
 
 Two pieces:
 
@@ -17,7 +17,7 @@ Authoring lives in Git (or, for standalone and small-team installations, in a lo
 What Podium provides:
 
 - **Layered composition with deterministic merge.** An ordered list of layers (admin-defined, user-defined, and the workspace local overlay) composes per request with explicit precedence. Registry-side layers admit no silent shadowing, and the per-developer workspace overlay is an exception (§6.4). `DOMAIN.md` files merge across layers (§4.5.4): most-restrictive-wins for `unlisted` and the discovery bounds, last-layer-wins for descriptions.
-- **Type heterogeneity as a first principle.** Skills are one of several first-class types. Agents, contexts, commands, rules, hooks, and MCP server registrations sit alongside; extension types register through a `TypeProvider` SPI. Cross-type dependency edges (an agent's `delegates_to:` another agent; a skill's `mcpServers:` references that resolve to `mcp-server`-type artifacts) feed impact analysis.
+- **Type heterogeneity as a first principle.** Skills are one of several first-class types. Agents, rules, hooks, and MCP server registrations sit alongside; extension types register through a `TypeProvider` SPI. Cross-type dependency edges (an agent's `delegates_to:` another agent; a skill's `mcpServers:` references that resolve to `mcp-server`-type artifacts) feed impact analysis.
 - **Governance built in.** Per-layer visibility, classification metadata, freeze windows, signing, and hash-chained audit are first-class. Authoring controls (review requirements, code ownership) live in the Git provider's branch protection. Podium does not duplicate them.
 - **Lazy materialization at scale.** Sessions can start empty (MCP path) or with the user's effective view pre-synced (file path). Catalogs of thousands of artifacts don't pollute the system prompt; the agent navigates and loads what it needs.
 - **One canonical authoring format, multiple delivery formats.** Artifacts are authored in a uniform Podium format. The configured `HarnessAdapter` translates at delivery time for harnesses that have native conventions (and is a no-op for runtimes that prefer the canonical layout).
