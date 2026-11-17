@@ -248,6 +248,7 @@ rm -rf "$WORK"
 | S105 | A registry audit stream reaches a file and an HTTP receiver through one chain, survives a receiver outage, and never logs its credentials; `podium-mcp` flushes its local stream on SIGTERM | standalone | none | none | none |
 | S106 | A registry audit stream reaches an OpenTelemetry Collector, which decodes it and writes it to a file and to S3 | standalone | none | none | Docker, MinIO from `make services-up` |
 | S107 | A skill's Podium fields under `SKILL.md` `metadata` reach search, load, and lint, and a stored row from an earlier release keeps its search columns until a new version | standalone | none | none | none |
+| S108 | Catalog advisories in `podium lint` and at ingest, the lint JSON envelope, and the `podium sync` listing budget | standalone | none | none | none |
 
 ---
 
@@ -12460,5 +12461,250 @@ scenario catches.
 
 **Cleanup.** `rm -rf "$WORK"`. Each step stops its server before the next one
 starts.
+
+---
+
+## S108: Catalog advisories in `podium lint` and at ingest, the lint JSON envelope, and the `podium sync` listing budget
+
+**Goal.** Validate that `podium lint` reports thin descriptions, overlapping
+descriptions across layers, and near-duplicate skill bodies, that `--fail-on`
+and `--json` give CI a stable exit status and envelope, that the thresholds
+follow the `PODIUM_LINT_*` variables, that a layer reingest reports the
+single-layer advisories, and that `podium sync` reports a listing over its
+configured budget identically from a filesystem source and a server source.
+
+**Covers.** §7.3.1 catalog advisories and `podium lint` output, §4.3.4
+`lint_suppress`, §13.12 Lint, §7.5.2 `listing_budgets`, and §7.5.8, through the
+compiled `podium` binary.
+
+**Why by hand.** An operator reads the split between standard output and
+standard error, the reingest `advisory:` lines, and the sync `listing:` line
+together, and compares a filesystem source and a server source of one
+directory side by side. A warning that lands on standard output under
+`--json`, an overlap that ingest reports across layers, a near-duplicate that
+survives suppression on the suppressing side, a listing line that changes the
+written files, or two sources that disagree on the listing is the defect this
+scenario catches.
+
+**Prerequisites.** None beyond the isolation block. The scenario binds
+127.0.0.1:8160.
+
+**Steps.**
+
+1. Run the isolation block. Build a two-layer registry root. `team` holds
+   `finance/close`, whose description `Close books` is thin, and
+   `ops/rotate-staging` and `ops/rotate-prod`, whose `SKILL.md` bodies share
+   the two runbook paragraphs `P1` and `P2` and differ in a third.
+   `team/finance/reconcile` and `shared/finance/match-invoices` carry
+   descriptions of ten words that differ by one substituted word. Every skill
+   carries an `ARTIFACT.md`. `write_skill` writes both files of a skill, and
+   `write_skillmd` rewrites its `SKILL.md` alone, so later steps reuse them.
+   Lint the root.
+
+   ```bash
+   mkdir -p "$WORK/root/team" "$WORK/root/shared"
+   printf 'multi_layer: true\nlayer_order:\n  - shared\n  - team\n' > "$WORK/root/.registry-config"
+   for L in team shared; do
+     printf 'visibility:\n  public: true\n' > "$WORK/root/$L/.layer-config"
+   done
+   write_skillmd() {
+     printf -- '---\nname: %s\ndescription: %s\n---\n\n%s\n' "${2##*/}" "$3" "$4" > "$WORK/root/$1/$2/SKILL.md"
+   }
+   write_skill() {
+     mkdir -p "$WORK/root/$1/$2"
+     printf -- '---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- Skill body lives in SKILL.md. -->\n' > "$WORK/root/$1/$2/ARTIFACT.md"
+     write_skillmd "$@"
+   }
+   P1="Start by confirming which environment the request targets and record the ticket number in the change log. Open the secrets manager console with your own account and never with a shared administrator login. Generate the replacement value with the approved generator so the length and the character classes meet policy. Store the new value as a pending version and leave the current version active until every consumer is ready. Update the deployment manifests that reference the secret and roll them out one service at a time."
+   P2="Watch the error dashboards for five minutes after each rollout and stop if the authentication failures climb. Promote the pending version to active once every service reports healthy connections with the new value. Disable the previous version but keep it recoverable for seven days in case a forgotten consumer appears. Write a short summary in the ticket that lists the services touched and the time each one switched over. Close the ticket only after the owner of each affected service confirms that their alerts stayed quiet."
+   STAGING_DESC="Rotate the staging database credentials and confirm each service reconnects."
+   STAGING_BODY="$(printf '%s\n\n%s\n\n%s' "$P1" "$P2" "Page the on-call database engineer when a read replica lags behind the primary.")"
+   PROD_DESC="Replace production API signing keys after a suspected compromise is reported."
+   PROD_BODY="$(printf '%s\n\n%s\n\n%s' "$P1" "$P2" "Notify the security channel whenever a signing key is revoked ahead of schedule.")"
+   write_skill team finance/close "Close books" "Post the closing journal entries for the period."
+   write_skill team ops/rotate-staging "$STAGING_DESC" "$STAGING_BODY"
+   write_skill team ops/rotate-prod "$PROD_DESC" "$PROD_BODY"
+   write_skill team finance/reconcile "Reconcile vendor invoices against purchase orders before the monthly close." \
+     "Match each vendor invoice to its purchase order and flag the differences."
+   write_skill shared finance/match-invoices "Reconcile supplier invoices against purchase orders before the monthly close." \
+     "Pair supplier invoices with their orders and list any unmatched amounts."
+   podium lint --registry "$WORK/root"; echo "lint exit=$?"
+   ```
+
+   **Expect.** Standard output carries a `[warning] finance/close: description
+   is thin` line ending in `(lint.thin_description)`, a `[warning]
+   finance/reconcile: description overlaps finance/match-invoices` line and its
+   mirror for `finance/match-invoices`, each with a percentage of at least 70
+   and ending in `(lint.colliding_descriptions)`, and a `[warning]
+   ops/rotate-staging: SKILL.md body nearly duplicates ops/rotate-prod SKILL.md
+   body` line and its mirror for `ops/rotate-prod`, each ending in
+   `(lint.near_duplicate_content)`. The run prints `lint exit=0`, because each
+   advisory is a warning and `--fail-on` defaults to `error`. A missing overlap
+   line means lint did not compare descriptions across layers.
+
+2. Fail the run on a warning, then pass a `--fail-on` value outside the
+   allowed set.
+
+   ```bash
+   podium lint --registry "$WORK/root" --fail-on warning > /dev/null; echo "fail-on warning exit=$?"
+   podium lint --registry "$WORK/root" --fail-on bogus; echo "fail-on bogus exit=$?"
+   ```
+
+   **Expect.** `fail-on warning exit=1`. The second run prints `error:
+   --fail-on must be error or warning` and `fail-on bogus exit=2`.
+
+3. Write the JSON envelope with standard output and standard error in
+   separate files, and read standard output with `jq`.
+
+   ```bash
+   podium lint --registry "$WORK/root" --json > "$WORK/lint.json" 2> "$WORK/lint.err"; echo "json exit=$?"
+   jq -s 'length' "$WORK/lint.json"
+   jq -c 'keys' "$WORK/lint.json"
+   jq '([.diagnostics[] | select(.severity == "warning")] | length) == .counts.warning' "$WORK/lint.json"
+   jq -c '.counts' "$WORK/lint.json"
+   if [ -s "$WORK/lint.err" ]; then echo "STDERR NOT EMPTY"; cat "$WORK/lint.err"; else echo "stderr empty"; fi
+   ```
+
+   **Expect.** `json exit=0`, `1` (one JSON value), and
+   `["counts","diagnostics","registry","rejected"]`. The comparison prints
+   `true`, and `counts` prints `{"error":0,"warning":5,"info":0}`: one thin
+   description, two overlap warnings, and two near-duplicate warnings. The
+   last line is `stderr empty`. A diagnostic or a progress line on standard
+   error, or a second JSON value on standard output, is the defect.
+
+4. Suppress the near-duplicate warning on `ops/rotate-prod` and lint.
+
+   ```bash
+   printf -- '---\ntype: skill\nversion: 1.0.0\nlint_suppress: [lint.near_duplicate_content]\n---\n\n<!-- Skill body lives in SKILL.md. -->\n' \
+     > "$WORK/root/team/ops/rotate-prod/ARTIFACT.md"
+   podium lint --registry "$WORK/root" | grep lint.near_duplicate_content
+   ```
+
+   **Expect.** One line, `[warning] ops/rotate-staging: SKILL.md body nearly
+   duplicates ops/rotate-prod SKILL.md body`, ending in
+   `(lint.near_duplicate_content)`. The suppression is one-sided: the
+   suppressing skill draws no warning, and its peer still names it.
+
+5. Raise the similarity threshold to 1.0 and lint, make the two bodies
+   byte-identical and lint again, then set the variable to a value that does
+   not parse and lint a third time.
+
+   ```bash
+   PODIUM_LINT_CONTENT_SIMILARITY=1.0 podium lint --registry "$WORK/root" | grep -c lint.near_duplicate_content
+   write_skillmd team ops/rotate-prod "$PROD_DESC" "$STAGING_BODY"
+   PODIUM_LINT_CONTENT_SIMILARITY=1.0 podium lint --registry "$WORK/root" | grep lint.near_duplicate_content
+   PODIUM_LINT_CONTENT_SIMILARITY=abc podium lint --registry "$WORK/root" 2> "$WORK/abc.err" | grep lint.near_duplicate_content
+   cat "$WORK/abc.err"
+   ```
+
+   **Expect.** The first run prints `0`. The second prints the
+   `ops/rotate-staging` warning naming `ops/rotate-prod`, so identical bodies
+   are reported at a threshold of 1.0. The third prints the same warning at
+   the default threshold, and `$WORK/abc.err` holds a warning that names
+   `PODIUM_LINT_CONTENT_SIMILARITY` and the value `abc`.
+
+6. Serve the root on 127.0.0.1:8160 and reingest `team`.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/root" --bind 127.0.0.1:8160 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8160/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   podium layer reingest --registry http://127.0.0.1:8160 team > "$WORK/reingest.out"; echo "reingest exit=$?"
+   grep '^advisory:' "$WORK/reingest.out"
+   grep -c lint.colliding_descriptions "$WORK/reingest.out"
+   ```
+
+   **Expect.** `reingest exit=0`. The `advisory:` lines include `advisory:
+   finance/close [warning] description is thin` ending in
+   `(lint.thin_description)` and `advisory: ops/rotate-staging [warning]
+   SKILL.md body nearly duplicates ops/rotate-prod SKILL.md body` ending in
+   `(lint.near_duplicate_content)`. The count prints `0`: ingest lints one
+   layer, so the cross-layer pair draws no overlap advisory.
+
+7. Write a workspace whose `sync.yaml` names the root as the registry and sets
+   a `claude-code` `listing_budgets` entry with `max_chars: 100`, below the
+   fixture's listing cost, and `check: error`. `write_sync` takes the
+   registry and the check, so later steps rewrite the file with one call. Run
+   a dry-run sync with `--json` from the workspace.
+
+   ```bash
+   mkdir -p "$WORK/ws/.podium" "$WORK/dry-fs"
+   write_sync() {
+     printf 'defaults:\n  registry: %s\nlisting_budgets:\n  claude-code:\n    max_chars: 100\n    check: %s\n' "$1" "$2" \
+       > "$WORK/ws/.podium/sync.yaml"
+   }
+   write_sync "$WORK/root" error
+   (cd "$WORK/ws" && podium sync --harness claude-code --target "$WORK/dry-fs" --dry-run --json > "$WORK/fs.json" 2> "$WORK/fs.err"); echo "dry-run exit=$?"
+   grep 'listing:' "$WORK/fs.err"
+   jq -c '.listing' "$WORK/fs.json"
+   ```
+
+   **Expect.** `dry-run exit=1`. Standard error carries `listing: claude-code
+   listing estimate is <cost> characters against a configured budget of 100
+   (5 entries)` with no `warning:` prefix. The `listing` member carries
+   `"harness":"claude-code"`, `"budget_chars":100`, `"cost_chars"` equal to
+   the cost on standard error, `"entries":5`, `"over":true`, and
+   `"check":"error"`.
+
+8. Sync into an empty target under `check: error`, then set `check: off` and
+   sync into a second empty target. Compare the two trees and the two locks.
+
+   ```bash
+   (cd "$WORK/ws" && podium sync --harness claude-code --target "$WORK/t-error" > /dev/null); echo "error exit=$?"
+   write_sync "$WORK/root" off
+   (cd "$WORK/ws" && podium sync --harness claude-code --target "$WORK/t-off" > /dev/null 2> "$WORK/off.err"); echo "off exit=$?"
+   grep -c 'listing:' "$WORK/off.err"
+   find "$WORK/t-error" -type f ! -name sync.lock | wc -l      # must be 5, not 0
+   diff -r -x sync.lock "$WORK/t-error" "$WORK/t-off" && echo "TREES IDENTICAL"
+   diff "$WORK/t-error/.podium/sync.lock" "$WORK/t-off/.podium/sync.lock" | grep '^[<>]' | cut -c3- | cut -d: -f1 | sort -u
+   diff <(grep -v -e '^target:' -e '^last_synced_at:' "$WORK/t-error/.podium/sync.lock") \
+        <(grep -v -e '^target:' -e '^last_synced_at:' "$WORK/t-off/.podium/sync.lock") && echo "LOCKS IDENTICAL"
+   ```
+
+   **Expect.** `error exit=1`, after the `listing:` line on standard error,
+   and `off exit=0` with a count of `0` `listing:` lines. The file count is
+   `5`, one `.claude/skills/<name>/SKILL.md` for each skill, so the failing
+   run wrote the skills. `TREES IDENTICAL` follows. The count runs before the
+   comparison, because two empty trees also compare identical. The lock diff names only
+   `last_synced_at` and `target`, because each lock records its own absolute
+   target path and its sync time, and the filtered comparison prints `LOCKS
+   IDENTICAL`. A tree that differs means the listing check changed what sync
+   writes.
+
+9. Set `check: error` again, point the workspace's registry at the server,
+   and repeat step 7.
+
+   ```bash
+   mkdir -p "$WORK/dry-srv"
+   write_sync http://127.0.0.1:8160 error
+   (cd "$WORK/ws" && podium sync --harness claude-code --target "$WORK/dry-srv" --dry-run --json > "$WORK/srv.json" 2> "$WORK/srv.err"); echo "dry-run exit=$?"
+   grep 'listing:' "$WORK/srv.err"
+   diff <(jq -S '.listing' "$WORK/fs.json") <(jq -S '.listing' "$WORK/srv.json") && echo "LISTINGS IDENTICAL"
+   ```
+
+   **Expect.** `dry-run exit=1`, the same `listing:` line as step 7, and
+   `LISTINGS IDENTICAL`. A difference means the two sources disagree on the
+   materialized set or on the cost.
+
+10. Set `check: maybe` and sync, then run `podium sync --check`. Stop the
+    server.
+
+    ```bash
+    mkdir -p "$WORK/t-maybe"
+    write_sync http://127.0.0.1:8160 maybe
+    (cd "$WORK/ws" && podium sync --harness claude-code --target "$WORK/t-maybe"); echo "maybe exit=$?"
+    find "$WORK/t-maybe" -type f | wc -l
+    (cd "$WORK/ws" && podium sync --check); echo "check exit=$?"
+    kill "$SRV"; wait "$SRV" 2>/dev/null
+    ```
+
+    **Expect.** The sync prints `error: sync.yaml:
+    listing_budgets.claude-code.check: "maybe" is not off, warning, or error`
+    followed by the reason, and `maybe exit=2`, and the file count is `0`.
+    `podium sync --check` prints the same message with a `warning:` prefix in
+    place of `error:`, and `check exit=0`. The server stops.
+
+**Cleanup.** `rm -rf "$WORK"`. Step 10 stops the server.
 
 ---
