@@ -8,69 +8,87 @@ import (
 	"github.com/lennylabs/podium/pkg/spi"
 )
 
-// ErrInvalidOverlapRecord is returned by ReplaceOverlapRecords when a record
-// does not name the computed artifact on exactly one side, which a correct
-// computation never produces.
+// ErrInvalidOverlapRecord is returned by ReplaceOverlapRecords when the
+// computation entry names no artifact or a record is not owned by the
+// computed artifact or names it as its own peer, which a correct computation
+// never produces.
 var ErrInvalidOverlapRecord = &spi.Error{Code: "registry.invalid_argument", Message: "store: invalid overlap record"}
 
 // OverlapRecord is one §7.3.1 semantic overlap record: the cosine similarity
-// of two artifacts' embedding projections at two versions, under one embedding
-// model, at the time it was computed. A record is keyed by the unordered pair
-// of identifiers; a store returns it with ArtifactA ordered before ArtifactB.
+// of the owner's embedding projection at OwnerVersion and the peer's at
+// PeerVersion, under one embedding model, at the time it was computed. The
+// owner is the artifact whose computation stored the record, and a record is
+// keyed by (Owner, Peer), so computing one artifact never replaces a record
+// its peer owns.
 //
 // Spec: §7.3.1
 type OverlapRecord struct {
-	TenantID   string
-	ArtifactA  string
-	VersionA   string
-	ArtifactB  string
-	VersionB   string
-	Similarity float64
+	TenantID     string
+	Owner        string
+	OwnerVersion string
+	Peer         string
+	PeerVersion  string
+	Similarity   float64
 	// ModelID is the embedding model identifier the similarity was computed
 	// under. A read reports the record only while it is the configured model.
 	ModelID    string
 	ComputedAt time.Time
 }
 
-// Names reports whether the record names artifactID on either side.
-func (r OverlapRecord) Names(artifactID string) bool {
-	return r.ArtifactA == artifactID || r.ArtifactB == artifactID
+// OverlapComputation is the §7.3.1 computation entry of one artifact: the
+// version and the model of its last successful computation. The sweep reads
+// it to tell a current artifact whose computation found no peer, and so owns
+// no record, from one that was never computed.
+//
+// Spec: §7.3.1
+type OverlapComputation struct {
+	TenantID   string
+	ArtifactID string
+	Version    string
+	ModelID    string
+	ComputedAt time.Time
 }
 
-// normalizeOverlapRecords validates the records one computation of artifactID
-// stores and returns them in canonical form: TenantID set to tenantID, the
-// pair ordered so ArtifactA < ArtifactB, the time in UTC, and one record per
-// pair, the last given winning. Every backend applies it, so the stored key is
-// the same whichever side computed the pair.
-func normalizeOverlapRecords(tenantID, artifactID string, recs []OverlapRecord) ([]OverlapRecord, error) {
-	byPair := map[[2]string]OverlapRecord{}
+// normalizeOverlapComputation validates one computation's entry and records
+// and returns them in canonical form: TenantID set to tenantID, times in UTC,
+// and one record per peer, the last given winning, ordered by peer. Every
+// backend applies it, so the backends store the same rows.
+func normalizeOverlapComputation(tenantID string, comp OverlapComputation, recs []OverlapRecord) (OverlapComputation, []OverlapRecord, error) {
+	if comp.ArtifactID == "" {
+		return comp, nil, fmt.Errorf("%w: a computation entry names no artifact", ErrInvalidOverlapRecord)
+	}
+	comp.TenantID = tenantID
+	comp.ComputedAt = comp.ComputedAt.UTC()
+	byPeer := map[string]OverlapRecord{}
 	for _, r := range recs {
-		if !r.Names(artifactID) || r.ArtifactA == r.ArtifactB {
-			return nil, fmt.Errorf("%w: %s and %s from a computation of %s", ErrInvalidOverlapRecord, r.ArtifactA, r.ArtifactB, artifactID)
-		}
-		if r.ArtifactB < r.ArtifactA {
-			r.ArtifactA, r.ArtifactB = r.ArtifactB, r.ArtifactA
-			r.VersionA, r.VersionB = r.VersionB, r.VersionA
+		if r.Owner != comp.ArtifactID || r.Peer == "" || r.Peer == r.Owner {
+			return comp, nil, fmt.Errorf("%w: owner %s and peer %s from a computation of %s", ErrInvalidOverlapRecord, r.Owner, r.Peer, comp.ArtifactID)
 		}
 		r.TenantID = tenantID
 		r.ComputedAt = r.ComputedAt.UTC()
-		byPair[[2]string{r.ArtifactA, r.ArtifactB}] = r
+		byPeer[r.Peer] = r
 	}
-	out := make([]OverlapRecord, 0, len(byPair))
-	for _, r := range byPair {
+	out := make([]OverlapRecord, 0, len(byPeer))
+	for _, r := range byPeer {
 		out = append(out, r)
 	}
 	sortOverlapRecords(out)
-	return out, nil
+	return comp, out, nil
 }
 
-// sortOverlapRecords orders records by pair, the order ListOverlapRecords
-// returns on every backend.
+// sortOverlapRecords orders records by owner and then peer, the order
+// ListOverlapRecords returns on every backend.
 func sortOverlapRecords(recs []OverlapRecord) {
 	sort.Slice(recs, func(i, j int) bool {
-		if recs[i].ArtifactA != recs[j].ArtifactA {
-			return recs[i].ArtifactA < recs[j].ArtifactA
+		if recs[i].Owner != recs[j].Owner {
+			return recs[i].Owner < recs[j].Owner
 		}
-		return recs[i].ArtifactB < recs[j].ArtifactB
+		return recs[i].Peer < recs[j].Peer
 	})
+}
+
+// sortOverlapComputations orders entries by artifact, the order
+// ListOverlapComputations returns on every backend.
+func sortOverlapComputations(entries []OverlapComputation) {
+	sort.Slice(entries, func(i, j int) bool { return entries[i].ArtifactID < entries[j].ArtifactID })
 }

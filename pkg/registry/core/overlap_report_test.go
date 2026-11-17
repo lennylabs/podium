@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/lint"
@@ -26,21 +27,22 @@ func reportFixture(t *testing.T) *overlapFixture {
 	f.put("old", "1.0.0", "L", "older release of a thing", "", false)
 	f.put("old", "2.0.0", "L", "newer release of a thing", "", false)
 	f.put("h", "1.0.0", "R", "hidden twin of alpha", "", false)
-	write := func(id string, recs ...store.OverlapRecord) {
-		for i := range recs {
-			recs[i].ModelID, recs[i].ComputedAt = "m1", overlapNow
-		}
-		if err := f.st.ReplaceOverlapRecords(f.ctx, "t", id, recs); err != nil {
-			t.Fatalf("ReplaceOverlapRecords: %v", err)
-		}
-	}
-	write("a",
-		store.OverlapRecord{ArtifactA: "a", VersionA: "1.0.0", ArtifactB: "b", VersionB: "1.0.0", Similarity: 0.90},
-		store.OverlapRecord{ArtifactA: "a", VersionA: "1.0.0", ArtifactB: "h", VersionB: "1.0.0", Similarity: 0.97},
-		store.OverlapRecord{ArtifactA: "a", VersionA: "1.0.0", ArtifactB: "s", VersionB: "1.0.0", Similarity: 0.86},
-		store.OverlapRecord{ArtifactA: "a", VersionA: "1.0.0", ArtifactB: "old", VersionB: "1.0.0", Similarity: 0.99},
-	)
+	f.writeOwned("a", "1.0.0", overlapNow, map[string]float64{"b": 0.90, "h": 0.97, "s": 0.86, "old": 0.99})
 	return f
+}
+
+// writeOwned stores one computation of owner at version, computed at at, with
+// a record for each peer at version 1.0.0 and the given similarity.
+func (f *overlapFixture) writeOwned(owner, version string, at time.Time, peers map[string]float64) {
+	f.t.Helper()
+	recs := make([]store.OverlapRecord, 0, len(peers))
+	for peer, sim := range peers {
+		recs = append(recs, store.OverlapRecord{Owner: owner, OwnerVersion: version, Peer: peer, PeerVersion: "1.0.0", Similarity: sim, ModelID: "m1", ComputedAt: at})
+	}
+	comp := store.OverlapComputation{ArtifactID: owner, Version: version, ModelID: "m1", ComputedAt: at}
+	if err := f.st.ReplaceOverlapRecords(f.ctx, "t", comp, recs); err != nil {
+		f.t.Fatalf("ReplaceOverlapRecords: %v", err)
+	}
 }
 
 func semanticOf(r *OverlapReport, id string) *OverlapDiagnostic {
@@ -207,4 +209,60 @@ func peerIDsLint(d lint.Diagnostic) string {
 		ids = append(ids, p.ArtifactID)
 	}
 	return strings.Join(ids, ",")
+}
+
+// Spec: §7.3.1 — a cycle a source webhook triggers names only peers in the
+// ingested layer, because the git host records the response; the same cycle
+// without the trigger also names a peer in a public layer. Both store the
+// same records.
+func TestIngestSemanticOverlap_WebhookNamesOnlyIngestedLayer(t *testing.T) {
+	t.Parallel()
+	f := newOverlapFixture(t, []layer.Layer{publicLayer("L"), publicLayer("P")})
+	f.put("a", "1.0.0", "L", "alpha", "", true)
+	f.put("d", "1.0.0", "L", "delta", "", true)
+	f.put("b", "1.0.0", "P", "bravo", "", true)
+	key := []vector.RowKey{{ArtifactID: "a", Version: "1.0.0"}}
+	manual := f.reg.IngestSemanticOverlap(f.ctx, "L", key)
+	hooked := f.reg.IngestSemanticOverlap(ContextWithWebhookTrigger(f.ctx), "L", key)
+	if len(manual) != 1 || peerIDsLint(manual[0]) != "b,d" || len(hooked) != 1 || peerIDsLint(hooked[0]) != "d" {
+		t.Errorf("manual = %+v, webhook = %+v; want b,d and d alone", manual, hooked)
+	}
+	if got := ownedSummary(f.records()); got != "a>b a>d" {
+		t.Errorf("records = %q, want a>b a>d whatever the trigger", got)
+	}
+}
+
+// Spec: §7.3.1 — when both artifacts own a record naming the other, the pair
+// is reported once, with the similarity and the computed time of the more
+// recently computed record, and a record whose owner's version is no longer
+// served is not reported.
+func TestCatalogOverlap_BothDirectionsReportOnce(t *testing.T) {
+	t.Parallel()
+	f := reportFixture(t)
+	later := overlapNow.Add(time.Hour)
+	f.writeOwned("b", "1.0.0", later, map[string]float64{"a": 0.95})
+	f.writeOwned("old", "1.0.0", later, map[string]float64{"b": 0.99})
+	r, err := f.reg.CatalogOverlap(f.ctx, layer.Identity{Sub: "alice", IsAuthenticated: true}, OverlapQuery{})
+	if err != nil {
+		t.Fatalf("CatalogOverlap: %v", err)
+	}
+	a, b := semanticOf(r, "a"), semanticOf(r, "b")
+	if peerIDs(a) != "b,s" || peerIDs(b) != "a" || a.Peers[0].Similarity != 0.95 || !a.Peers[0].ComputedAt.Equal(later) ||
+		b.Peers[0].Similarity != 0.95 {
+		t.Errorf("a = %+v, b = %+v; want the pair once at 0.95 computed at %s, and old@1.0.0 never named", a, b, later)
+	}
+}
+
+// Spec: §7.3.1 — two records of one pair computed at the same time report the
+// record whose owner sorts first, so the read does not depend on store order.
+func TestReportablePairs_EqualTimesPickTheFirstOwner(t *testing.T) {
+	t.Parallel()
+	served := map[string]store.ManifestRecord{"a": {ArtifactID: "a", Version: "1"}, "b": {ArtifactID: "b", Version: "1"}}
+	ab := store.OverlapRecord{Owner: "a", OwnerVersion: "1", Peer: "b", PeerVersion: "1", Similarity: 0.91, ModelID: "m1", ComputedAt: overlapNow}
+	ba := store.OverlapRecord{Owner: "b", OwnerVersion: "1", Peer: "a", PeerVersion: "1", Similarity: 0.92, ModelID: "m1", ComputedAt: overlapNow}
+	first := reportablePairs([]store.OverlapRecord{ab, ba}, served, "m1")
+	second := reportablePairs([]store.OverlapRecord{ba, ab}, served, "m1")
+	if len(first) != 1 || len(second) != 1 || first[0] != second[0] || first[0].Similarity != 0.91 || first[0].A != "a" || first[0].B != "b" {
+		t.Errorf("pairs = %+v and %+v, want one (a, b) pair at 0.91 in both orders", first, second)
+	}
 }

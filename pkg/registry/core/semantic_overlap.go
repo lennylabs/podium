@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 
 	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/lint"
@@ -83,43 +84,57 @@ type overlapNeighbor struct {
 	similarity float64
 }
 
-// semanticNeighbors queries the §4.7 index for the k rows nearest rec's
-// projection and reports each row's cosine similarity to it. A self-embedding
-// backend is queried with the projection text and a storage-only backend with
-// rec's stored vector, restricted to the configured model on a model-versioned
+// overlapQueryRowFactor bounds how far a computation widens its index query:
+// at most this many times one more than PODIUM_LINT_SEMANTIC_NEIGHBORS rows.
+// The factor is fixed by §7.3.1 rather than operator-tunable.
+const overlapQueryRowFactor = 50
+
+// neighborSource answers the index queries of one artifact's computation:
+// query returns the k rows nearest the artifact's projection, and score
+// reports the cosine similarity of each given row to it.
+type neighborSource struct {
+	query func(ctx context.Context, k int) ([]vector.Match, error)
+	score func(ctx context.Context, matches []vector.Match) ([]overlapNeighbor, error)
+}
+
+// neighborSourceFor prepares rec's index queries. A self-embedding backend is
+// queried with the projection text and a storage-only backend with rec's
+// stored vector, restricted to the configured model on a model-versioned
 // backend, as search restricts its queries. A collocated backend scores each
 // row from the stored vectors, because sqlite-vec's index orders by L2
 // distance; a managed backend's similarity is one minus the distance it
 // reports.
 //
 // Spec: §7.3.1, §4.7
-func (r *Registry) semanticNeighbors(ctx context.Context, rec store.ManifestRecord, k int) ([]overlapNeighbor, error) {
+func (r *Registry) neighborSourceFor(ctx context.Context, rec store.ManifestRecord) (neighborSource, error) {
 	tenant := r.TenantFor(ctx)
 	if r.embedder == nil {
-		matches, err := r.vector.(vector.TextVectorizer).QueryText(ctx, tenant, projection.Artifact(rec), k)
-		if err != nil {
-			return nil, err
-		}
-		return neighborsFromDistance(matches), nil
+		tv := r.vector.(vector.TextVectorizer)
+		text := projection.Artifact(rec)
+		return neighborSource{
+			query: func(ctx context.Context, k int) ([]vector.Match, error) { return tv.QueryText(ctx, tenant, text, k) },
+			score: scoreByDistance,
+		}, nil
 	}
 	vec, err := r.currentStoredVector(ctx, tenant, rec)
 	if err != nil {
-		return nil, err
+		return neighborSource{}, err
 	}
-	var matches []vector.Match
+	src := neighborSource{score: scoreByDistance}
 	if mv, ok := vector.ModelVersionedOf(r.vector); ok {
-		matches, err = mv.QueryModel(ctx, tenant, vec, k, r.embedder.Model())
+		model := r.embedder.Model()
+		src.query = func(ctx context.Context, k int) ([]vector.Match, error) {
+			return mv.QueryModel(ctx, tenant, vec, k, model)
+		}
 	} else {
-		matches, err = r.vector.Query(ctx, tenant, vec, k)
+		src.query = func(ctx context.Context, k int) ([]vector.Match, error) { return r.vector.Query(ctx, tenant, vec, k) }
 	}
-	if err != nil {
-		return nil, err
+	if scorer, ok := r.vector.(vector.CosineScorer); ok {
+		src.score = func(ctx context.Context, matches []vector.Match) ([]overlapNeighbor, error) {
+			return cosineNeighbors(ctx, scorer, tenant, vec, matches)
+		}
 	}
-	scorer, ok := r.vector.(vector.CosineScorer)
-	if !ok {
-		return neighborsFromDistance(matches), nil
-	}
-	return cosineNeighbors(ctx, scorer, tenant, vec, matches)
+	return src, nil
 }
 
 // currentStoredVector returns rec's stored vector when the backend holds one
@@ -143,15 +158,15 @@ func (r *Registry) currentStoredVector(ctx context.Context, tenant string, rec s
 	return vec, nil
 }
 
-// neighborsFromDistance takes one minus each reported distance as the
-// similarity, which is the cosine similarity when the managed index was
-// created with the cosine metric (§7.3.1).
-func neighborsFromDistance(matches []vector.Match) []overlapNeighbor {
+// scoreByDistance takes one minus each reported distance as the similarity,
+// which is the cosine similarity when the managed index was created with the
+// cosine metric (§7.3.1).
+func scoreByDistance(_ context.Context, matches []vector.Match) ([]overlapNeighbor, error) {
 	out := make([]overlapNeighbor, 0, len(matches))
 	for _, m := range matches {
 		out = append(out, overlapNeighbor{artifactID: m.ArtifactID, version: m.Version, similarity: 1 - float64(m.Distance)})
 	}
-	return out
+	return out, nil
 }
 
 // cosineNeighbors scores each match from the stored vectors through the
@@ -175,43 +190,90 @@ func cosineNeighbors(ctx context.Context, scorer vector.CosineScorer, tenant str
 	return out, nil
 }
 
+// nearestServedPeers finds rec's nearest peers: the configured number of
+// artifacts other than rec's whose current served versions (served maps an
+// identifier to it) have the rows nearest rec's projection. The index keeps a
+// row for every ingested version, and rows of earlier versions, rec's own
+// included, often lie nearest, so a query of exactly that many rows can come
+// back with no peer at all. The computation therefore starts at one more row
+// than the configured count and doubles the query until it has found that
+// many distinct artifacts, the index returns fewer rows than asked, or the
+// query reaches overlapQueryRowFactor times its first size. A peer's nearest
+// row is kept, and the peers come back by descending similarity and then by
+// identifier.
+//
+// Spec: §7.3.1
+func (r *Registry) nearestServedPeers(ctx context.Context, rec store.ManifestRecord, served map[string]string) ([]overlapNeighbor, error) {
+	src, err := r.neighborSourceFor(ctx, rec)
+	if err != nil {
+		return nil, err
+	}
+	n := r.overlap.semantic.Neighbors
+	limit := overlapQueryRowFactor * (n + 1)
+	for k := n + 1; ; k = min(2*k, limit) {
+		matches, err := src.query(ctx, k)
+		if err != nil {
+			return nil, err
+		}
+		rows := servedPeerRows(matches, rec.ArtifactID, served)
+		if len(rows) < n && len(matches) >= k && k < limit {
+			continue
+		}
+		peers, err := src.score(ctx, rows)
+		if err != nil {
+			return nil, err
+		}
+		sort.Slice(peers, func(i, j int) bool {
+			if peers[i].similarity != peers[j].similarity {
+				return peers[i].similarity > peers[j].similarity
+			}
+			return peers[i].artifactID < peers[j].artifactID
+		})
+		return peers[:min(len(peers), n)], nil
+	}
+}
+
+// servedPeerRows keeps the rows that are the served version of an artifact
+// other than self, one per artifact: the first, which the index returned as
+// the nearest.
+func servedPeerRows(matches []vector.Match, self string, served map[string]string) []vector.Match {
+	seen := map[string]bool{}
+	out := make([]vector.Match, 0, len(matches))
+	for _, m := range matches {
+		if m.ArtifactID == self || seen[m.ArtifactID] || served[m.ArtifactID] != m.Version {
+			continue
+		}
+		seen[m.ArtifactID] = true
+		out = append(out, m)
+	}
+	return out
+}
+
 // computeOverlap computes the overlap records of rec, the current served
-// version of its artifact. It queries the index for the configured number of
-// nearest rows and stores one record for each row that is the served version
-// (served maps an identifier to it) of another artifact, whatever its
-// similarity, replacing every record that names rec's artifact. A failed index
-// query returns its error and leaves the stored records in place.
+// version of its artifact. It finds rec's nearest served peers and stores one
+// record for each, whatever its similarity, owned by rec's artifact; the
+// store replaces only the records rec's artifact owns and records the
+// computation's version and model. A failed index query returns its error and
+// leaves the stored records and the computation entry in place.
 //
 // Spec: §7.3.1
 func (r *Registry) computeOverlap(ctx context.Context, rec store.ManifestRecord, served map[string]string) error {
-	// The artifact's own row is normally among its nearest rows, so one more
-	// row is queried than the configured count, which is the most records a
-	// computation stores (§13.12).
-	rows, err := r.semanticNeighbors(ctx, rec, r.overlap.semantic.Neighbors+1)
+	peers, err := r.nearestServedPeers(ctx, rec, served)
 	if err != nil {
 		return fmt.Errorf("index query for %s@%s: %w", rec.ArtifactID, rec.Version, err)
 	}
 	now := r.overlap.clock.Now()
 	model := r.overlapModel()
-	byPeer := map[string]store.OverlapRecord{}
-	for _, row := range rows {
-		if row.artifactID == rec.ArtifactID || served[row.artifactID] != row.version {
-			continue
-		}
-		if prev, seen := byPeer[row.artifactID]; seen && prev.Similarity >= row.similarity {
-			continue
-		}
-		byPeer[row.artifactID] = store.OverlapRecord{
-			ArtifactA: rec.ArtifactID, VersionA: rec.Version,
-			ArtifactB: row.artifactID, VersionB: row.version,
-			Similarity: row.similarity, ModelID: model, ComputedAt: now,
-		}
+	recs := make([]store.OverlapRecord, 0, len(peers))
+	for _, p := range peers {
+		recs = append(recs, store.OverlapRecord{
+			Owner: rec.ArtifactID, OwnerVersion: rec.Version,
+			Peer: p.artifactID, PeerVersion: p.version,
+			Similarity: p.similarity, ModelID: model, ComputedAt: now,
+		})
 	}
-	recs := make([]store.OverlapRecord, 0, len(byPeer))
-	for _, o := range byPeer {
-		recs = append(recs, o)
-	}
-	if err := r.store.ReplaceOverlapRecords(ctx, r.TenantFor(ctx), rec.ArtifactID, recs); err != nil {
+	comp := store.OverlapComputation{ArtifactID: rec.ArtifactID, Version: rec.Version, ModelID: model, ComputedAt: now}
+	if err := r.store.ReplaceOverlapRecords(ctx, r.TenantFor(ctx), comp, recs); err != nil {
 		return fmt.Errorf("store overlap records for %s: %w", rec.ArtifactID, err)
 	}
 	return nil
@@ -271,25 +333,27 @@ func (r *Registry) computeOverlapBatch(ctx context.Context, subjects []store.Man
 
 // ComputeOverlap computes the §7.3.1 overlap records of each (artifact,
 // version) in keys that is the current served version of its artifact; a key
-// at any other version is skipped. The registry calls it when the §4.7 outbox
-// writes an artifact's vector to a managed backend, and the ingest cycle calls
-// it through IngestSemanticOverlap on a collocated one. A failure is logged
-// and counted and leaves that artifact's records in place.
+// at any other version is skipped. It lists the tenant's served set once for
+// all of keys, so the §4.7 outbox drain passes every key one pass wrote to a
+// managed backend in one call, and the ingest cycle calls it through
+// IngestSemanticOverlap on a collocated one. A failure is logged and counted
+// and leaves that artifact's records in place.
 //
 // Spec: §7.3.1
 func (r *Registry) ComputeOverlap(ctx context.Context, keys []vector.RowKey) (OverlapComputeResult, error) {
-	computed, failed, err := r.computeOverlapKeys(ctx, keys)
+	computed, failed, _, err := r.computeOverlapKeys(ctx, keys)
 	return OverlapComputeResult{Computed: len(computed), Failed: failed}, err
 }
 
-// computeOverlapKeys is ComputeOverlap returning the computed identifiers.
-func (r *Registry) computeOverlapKeys(ctx context.Context, keys []vector.RowKey) ([]string, int, error) {
+// computeOverlapKeys is ComputeOverlap returning the computed identifiers and
+// the served set it computed against.
+func (r *Registry) computeOverlapKeys(ctx context.Context, keys []vector.RowKey) ([]string, int, map[string]store.ManifestRecord, error) {
 	if err := r.overlapReady(); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	served, err := r.servedArtifacts(ctx)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	var subjects []store.ManifestRecord
 	seen := map[string]bool{}
@@ -300,5 +364,5 @@ func (r *Registry) computeOverlapKeys(ctx context.Context, keys []vector.RowKey)
 		}
 	}
 	computed, failed := r.computeOverlapBatch(ctx, subjects, served)
-	return computed, failed, nil
+	return computed, failed, served, nil
 }

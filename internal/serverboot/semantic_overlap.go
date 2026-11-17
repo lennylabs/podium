@@ -47,41 +47,65 @@ func buildSemanticOverlap(st store.Store, vec vector.Provider, emb embedding.Pro
 }
 
 // overlapOutboxHook returns the callback the §4.7 outbox drain worker runs
-// after it writes an artifact's vector to a managed backend, or nil when the
-// check is off. It computes the artifact's overlap records then, so two
-// artifacts of one cycle find each other once both vectors are written. A
-// failure is logged by the computation and left to the sweep.
+// after each pass that wrote vectors to a managed backend, or nil when the
+// check is off. It computes the overlap records of the artifacts the pass
+// wrote, so two artifacts of one cycle find each other once both vectors are
+// written. The rows are grouped by tenant and each tenant's rows go to one
+// ComputeOverlap call, which lists that tenant's served set once for the
+// pass. The drain has already marked every row of the pass done, so a failed
+// computation never holds a row back: the computation logs it and leaves it
+// to the sweep.
 //
 // Spec: §7.3.1
-func overlapOutboxHook(reg *core.Registry) func(context.Context, store.VectorPending) {
+func overlapOutboxHook(reg *core.Registry) func(context.Context, []store.VectorPending) {
 	if !reg.SemanticOverlapEnabled() {
 		return nil
 	}
-	return func(ctx context.Context, p store.VectorPending) {
-		key := []vector.RowKey{{ArtifactID: p.ArtifactID, Version: p.Version}}
-		if _, err := reg.ComputeOverlap(core.ContextWithTenant(ctx, p.TenantID), key); err != nil {
-			log.Printf("%s: %s@%s after the outbox write: %v", lint.SemanticOverlapCode, p.ArtifactID, p.Version, err)
+	return func(ctx context.Context, written []store.VectorPending) {
+		byTenant := map[string][]vector.RowKey{}
+		var tenants []string
+		for _, p := range written {
+			if _, seen := byTenant[p.TenantID]; !seen {
+				tenants = append(tenants, p.TenantID)
+			}
+			byTenant[p.TenantID] = append(byTenant[p.TenantID], vector.RowKey{ArtifactID: p.ArtifactID, Version: p.Version})
+		}
+		for _, tenant := range tenants {
+			if ctx.Err() != nil {
+				return
+			}
+			if _, err := reg.ComputeOverlap(core.ContextWithTenant(ctx, tenant), byTenant[tenant]); err != nil {
+				log.Printf("%s: tenant %s after the outbox write of %d vectors: %v", lint.SemanticOverlapCode, tenant, len(byTenant[tenant]), err)
+			}
 		}
 	}
 }
 
-// overlapSweepJitterCap bounds the random delay before a replica's first
-// sweep, so replicas started together do not all compute at once.
-const overlapSweepJitterCap = time.Minute
-
 // startOverlapSweep launches the §7.3.1 periodic sweep when the check is on
 // and PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL is not zero. Every replica runs
-// it: the first pass follows a random delay of up to a minute, and then one
-// pass runs per interval until ctx is cancelled.
+// it: the first pass follows a random delay of up to a tenth of the interval
+// (firstSweepDelay), and then one pass runs per interval until ctx is
+// cancelled.
 //
 // Spec: §7.3.1, §13.12
 func startOverlapSweep(ctx context.Context, sem lint.SemanticConfig, st store.Store, reg *core.Registry) {
 	if !sem.Enabled || sem.RefreshInterval <= 0 {
 		return
 	}
-	jitter := time.Duration(rand.Int64N(int64(min(sem.RefreshInterval, overlapSweepJitterCap))))
-	go sweepLoop(ctx, jitter, sem.RefreshInterval, func(ctx context.Context) { runOverlapSweep(ctx, st, reg) })
-	log.Printf("%s: sweep running (interval=%s)", lint.SemanticOverlapCode, sem.RefreshInterval)
+	first := firstSweepDelay(sem.RefreshInterval, rand.Int64N)
+	go sweepLoop(ctx, first, sem.RefreshInterval, func(ctx context.Context) { runOverlapSweep(ctx, st, reg) })
+	log.Printf("%s: sweep running (interval=%s, first pass in %s)", lint.SemanticOverlapCode, sem.RefreshInterval, first.Round(time.Second))
+}
+
+// firstSweepDelay returns the random delay before a replica's first sweep:
+// from zero up to a tenth of the interval, drawn with randN (rand.Int64N in
+// production). Replicas started together then spread their first passes
+// instead of all computing at once. The bound derives from the configured
+// interval, so PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL is the one setting that
+// tunes it, and it never exceeds the interval.
+func firstSweepDelay(interval time.Duration, randN func(int64) int64) time.Duration {
+	bound := max(interval/10, 1)
+	return time.Duration(randN(int64(bound)))
 }
 
 // sweepLoop runs pass after first and then once per interval, returning when

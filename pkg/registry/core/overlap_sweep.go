@@ -2,8 +2,10 @@ package core
 
 import (
 	"context"
+	"log"
 	"sort"
 
+	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -27,11 +29,14 @@ func (r *Registry) RebuildOverlap(ctx context.Context) (OverlapComputeResult, er
 }
 
 // RefreshOverlap is one pass of the §7.3.1 periodic sweep over the request's
-// tenant: it computes every served artifact that has no stored records, whose
-// records carry another model identifier, or whose records name a version
-// that is no longer served, and leaves current artifacts alone. Replicas run
-// it independently, and because a computation replaces records by key, two
-// replicas computing one artifact store the same result.
+// tenant. It deletes the records and computation entries of artifacts that
+// are no longer served, then computes every served artifact whose last
+// successful computation is missing or was for another version or model, or
+// that owns a record naming a version that is no longer served, and leaves
+// current artifacts alone, including one whose computation found no peer.
+// Replicas run it independently, and because a computation replaces records
+// by key, two replicas computing one artifact store the same result. A failed
+// deletion is logged and does not stop the computations.
 //
 // Spec: §7.3.1
 func (r *Registry) RefreshOverlap(ctx context.Context) (OverlapComputeResult, error) {
@@ -42,41 +47,82 @@ func (r *Registry) RefreshOverlap(ctx context.Context) (OverlapComputeResult, er
 	if err != nil {
 		return OverlapComputeResult{}, err
 	}
-	records, err := r.store.ListOverlapRecords(ctx, r.TenantFor(ctx))
+	tenant := r.TenantFor(ctx)
+	records, err := r.store.ListOverlapRecords(ctx, tenant)
 	if err != nil {
 		return OverlapComputeResult{}, err
 	}
-	stale := staleOverlapArtifacts(served, records, r.overlapModel())
+	runs, err := r.store.ListOverlapComputations(ctx, tenant)
+	if err != nil {
+		return OverlapComputeResult{}, err
+	}
+	if gone := unservedOverlapArtifacts(served, records, runs); len(gone) > 0 {
+		if err := r.store.DeleteOverlapArtifacts(ctx, tenant, gone); err != nil {
+			log.Printf("%s: sweep: delete the records of %d artifacts no longer served: %v", lint.SemanticOverlapCode, len(gone), err)
+		}
+	}
+	stale := staleOverlapArtifacts(served, records, runs, r.overlapModel())
 	computed, failed := r.computeOverlapBatch(ctx, sortedServed(served, stale), served)
 	return OverlapComputeResult{Computed: len(computed), Failed: failed}, nil
 }
 
 // staleOverlapArtifacts returns the served artifacts the sweep computes: one
-// that no record names, and one named by a record that carries a model other
-// than model or that names a version that is no longer served, on either
-// side. A record naming a removed artifact therefore makes its live peer
-// stale, and recomputing the peer deletes the record.
+// with no computation entry, one whose entry is for another version or for a
+// model other than model, and one that owns a record naming a version that is
+// no longer served, its own or its peer's. A record naming a removed peer
+// therefore makes its owner stale, and recomputing the owner replaces the
+// record. An artifact whose current computation found no peer owns no record
+// and has a current entry, so it is left alone.
 //
 // Spec: §7.3.1
-func staleOverlapArtifacts(served map[string]store.ManifestRecord, records []store.OverlapRecord, model string) map[string]bool {
-	named := map[string]bool{}
-	stale := map[string]bool{}
+func staleOverlapArtifacts(served map[string]store.ManifestRecord, records []store.OverlapRecord, runs []store.OverlapComputation, model string) map[string]bool {
+	entries := make(map[string]store.OverlapComputation, len(runs))
+	for _, c := range runs {
+		entries[c.ArtifactID] = c
+	}
 	isServed := func(id, version string) bool {
 		m, ok := served[id]
 		return ok && m.Version == version
 	}
+	stale := map[string]bool{}
+	for id, m := range served {
+		if c, ok := entries[id]; !ok || c.Version != m.Version || c.ModelID != model {
+			stale[id] = true
+		}
+	}
 	for _, rec := range records {
-		named[rec.ArtifactA], named[rec.ArtifactB] = true, true
-		if rec.ModelID != model || !isServed(rec.ArtifactA, rec.VersionA) || !isServed(rec.ArtifactB, rec.VersionB) {
-			stale[rec.ArtifactA], stale[rec.ArtifactB] = true, true
+		if _, ok := served[rec.Owner]; !ok {
+			continue
+		}
+		if !isServed(rec.Owner, rec.OwnerVersion) || !isServed(rec.Peer, rec.PeerVersion) {
+			stale[rec.Owner] = true
 		}
 	}
-	out := map[string]bool{}
-	for id := range served {
-		if !named[id] || stale[id] {
-			out[id] = true
+	return stale
+}
+
+// unservedOverlapArtifacts returns, in identifier order, the artifacts that
+// own a record or have a computation entry and are no longer served at any
+// version. The sweep deletes their records and entries.
+//
+// Spec: §7.3.1
+func unservedOverlapArtifacts(served map[string]store.ManifestRecord, records []store.OverlapRecord, runs []store.OverlapComputation) []string {
+	gone := map[string]bool{}
+	for _, rec := range records {
+		if _, ok := served[rec.Owner]; !ok {
+			gone[rec.Owner] = true
 		}
 	}
+	for _, c := range runs {
+		if _, ok := served[c.ArtifactID]; !ok {
+			gone[c.ArtifactID] = true
+		}
+	}
+	out := make([]string, 0, len(gone))
+	for id := range gone {
+		out = append(out, id)
+	}
+	sort.Strings(out)
 	return out
 }
 

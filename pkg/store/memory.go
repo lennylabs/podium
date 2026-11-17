@@ -29,8 +29,10 @@ type Memory struct {
 	// other map here.
 	migrations map[string]bool
 	// overlaps holds the §7.3.1 semantic overlap records per tenant, keyed by
-	// the canonical (ArtifactA, ArtifactB) pair.
-	overlaps map[string]map[[2]string]OverlapRecord
+	// (owner, peer), and overlapRuns the computation entries per tenant,
+	// keyed by artifact.
+	overlaps    map[string]map[[2]string]OverlapRecord
+	overlapRuns map[string]map[string]OverlapComputation
 }
 
 // NewMemory returns a fresh in-memory Store.
@@ -46,6 +48,7 @@ func NewMemory() *Memory {
 		vectorPending: map[string]VectorPending{},
 		migrations:    map[string]bool{},
 		overlaps:      map[string]map[[2]string]OverlapRecord{},
+		overlapRuns:   map[string]map[string]OverlapComputation{},
 	}
 }
 
@@ -588,10 +591,11 @@ func (s *Memory) PurgeExpiredLayerDeletions(_ context.Context, before time.Time)
 	return n, nil
 }
 
-// ReplaceOverlapRecords removes every record of the tenant naming artifactID
-// and stores recs, under the store lock so the swap is atomic.
-func (s *Memory) ReplaceOverlapRecords(_ context.Context, tenantID, artifactID string, recs []OverlapRecord) error {
-	norm, err := normalizeOverlapRecords(tenantID, artifactID, recs)
+// ReplaceOverlapRecords removes the records the computed artifact owns,
+// stores recs, and records the computation, under the store lock so the swap
+// is atomic.
+func (s *Memory) ReplaceOverlapRecords(_ context.Context, tenantID string, comp OverlapComputation, recs []OverlapRecord) error {
+	comp, norm, err := normalizeOverlapComputation(tenantID, comp, recs)
 	if err != nil {
 		return err
 	}
@@ -602,18 +606,30 @@ func (s *Memory) ReplaceOverlapRecords(_ context.Context, tenantID, artifactID s
 		bucket = map[[2]string]OverlapRecord{}
 		s.overlaps[tenantID] = bucket
 	}
-	for k, r := range bucket {
-		if r.Names(artifactID) {
-			delete(bucket, k)
-		}
-	}
+	s.deleteOwnedLocked(tenantID, comp.ArtifactID)
 	for _, r := range norm {
-		bucket[[2]string{r.ArtifactA, r.ArtifactB}] = r
+		bucket[[2]string{r.Owner, r.Peer}] = r
 	}
+	runs := s.overlapRuns[tenantID]
+	if runs == nil {
+		runs = map[string]OverlapComputation{}
+		s.overlapRuns[tenantID] = runs
+	}
+	runs[comp.ArtifactID] = comp
 	return nil
 }
 
-// ListOverlapRecords returns the tenant's records ordered by pair.
+// deleteOwnedLocked removes the records artifactID owns in the tenant. The
+// caller holds s.mu.
+func (s *Memory) deleteOwnedLocked(tenantID, artifactID string) {
+	for k := range s.overlaps[tenantID] {
+		if k[0] == artifactID {
+			delete(s.overlaps[tenantID], k)
+		}
+	}
+}
+
+// ListOverlapRecords returns the tenant's records ordered by owner and peer.
 func (s *Memory) ListOverlapRecords(_ context.Context, tenantID string) ([]OverlapRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -623,4 +639,29 @@ func (s *Memory) ListOverlapRecords(_ context.Context, tenantID string) ([]Overl
 	}
 	sortOverlapRecords(out)
 	return out, nil
+}
+
+// ListOverlapComputations returns the tenant's computation entries ordered by
+// artifact.
+func (s *Memory) ListOverlapComputations(_ context.Context, tenantID string) ([]OverlapComputation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]OverlapComputation, 0, len(s.overlapRuns[tenantID]))
+	for _, c := range s.overlapRuns[tenantID] {
+		out = append(out, c)
+	}
+	sortOverlapComputations(out)
+	return out, nil
+}
+
+// DeleteOverlapArtifacts removes the records owned by and the computation
+// entries of each named artifact, under the store lock.
+func (s *Memory) DeleteOverlapArtifacts(_ context.Context, tenantID string, artifactIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range artifactIDs {
+		s.deleteOwnedLocked(tenantID, id)
+		delete(s.overlapRuns[tenantID], id)
+	}
+	return nil
 }

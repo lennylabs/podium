@@ -134,18 +134,28 @@ var orgTableStmts = []string{
 		repo_userinfo TEXT,
 		PRIMARY KEY (tenant_id, id)
 	)`,
-	// §7.3.1 semantic overlap records, keyed by the unordered pair stored as
-	// artifact_a < artifact_b.
-	`CREATE TABLE IF NOT EXISTS overlap_records (
+	// §7.3.1 semantic overlap records, keyed by owner and peer, and the
+	// per-artifact computation entries. The names differ from the pair-keyed
+	// overlap_records table an earlier build of this release created, so
+	// CREATE TABLE IF NOT EXISTS never meets that layout.
+	`CREATE TABLE IF NOT EXISTS semantic_overlap_records (
 		tenant_id TEXT NOT NULL,
-		artifact_a TEXT NOT NULL,
-		version_a TEXT NOT NULL,
-		artifact_b TEXT NOT NULL,
-		version_b TEXT NOT NULL,
+		owner_id TEXT NOT NULL,
+		owner_version TEXT NOT NULL,
+		peer_id TEXT NOT NULL,
+		peer_version TEXT NOT NULL,
 		similarity DOUBLE PRECISION NOT NULL,
 		model_id TEXT NOT NULL DEFAULT '',
 		computed_at TIMESTAMPTZ NOT NULL,
-		PRIMARY KEY (tenant_id, artifact_a, artifact_b)
+		PRIMARY KEY (tenant_id, owner_id, peer_id)
+	)`,
+	`CREATE TABLE IF NOT EXISTS semantic_overlap_computations (
+		tenant_id TEXT NOT NULL,
+		artifact_id TEXT NOT NULL,
+		version TEXT NOT NULL,
+		model_id TEXT NOT NULL DEFAULT '',
+		computed_at TIMESTAMPTZ NOT NULL,
+		PRIMARY KEY (tenant_id, artifact_id)
 	)`,
 }
 
@@ -162,10 +172,6 @@ var orgIndexStmts = []string{
 		ON domains(tenant_id, path)`,
 	`CREATE INDEX IF NOT EXISTS idx_deps_to
 		ON dependencies(tenant_id, to_artifact)`,
-	// The primary key serves the artifact_a side of a replace; this index
-	// serves the artifact_b side.
-	`CREATE INDEX IF NOT EXISTS idx_overlap_records_b
-		ON overlap_records(tenant_id, artifact_b)`,
 }
 
 // sharedTableStmts create the cross-org tables in public: the tenants registry
@@ -1610,12 +1616,12 @@ func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 	return cfg, nil
 }
 
-// ReplaceOverlapRecords removes every record of the tenant naming artifactID
-// and stores recs in one transaction in the org schema. The insert upserts on
-// the pair key, so two replicas that compute the two artifacts of one pair at
-// the same time leave one record.
-func (p *Postgres) ReplaceOverlapRecords(ctx context.Context, tenantID, artifactID string, recs []OverlapRecord) error {
-	norm, err := normalizeOverlapRecords(tenantID, artifactID, recs)
+// ReplaceOverlapRecords removes the records the computed artifact owns,
+// stores recs, and upserts the computation entry in one transaction in the
+// org schema. Two replicas that compute one artifact at the same time write
+// the same keys, and the later commit wins.
+func (p *Postgres) ReplaceOverlapRecords(ctx context.Context, tenantID string, comp OverlapComputation, recs []OverlapRecord) error {
+	comp, norm, err := normalizeOverlapComputation(tenantID, comp, recs)
 	if err != nil {
 		return err
 	}
@@ -1630,28 +1636,37 @@ func (p *Postgres) ReplaceOverlapRecords(ctx context.Context, tenantID, artifact
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM overlap_records
-		WHERE tenant_id = $1 AND (artifact_a = $2 OR artifact_b = $2)`,
-		tenantID, artifactID); err != nil {
+		DELETE FROM semantic_overlap_records WHERE tenant_id = $1 AND owner_id = $2`,
+		tenantID, comp.ArtifactID); err != nil {
 		return err
 	}
 	for _, r := range norm {
+		// The upsert covers a concurrent computation of the same owner that
+		// committed between this transaction's delete and its insert.
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO overlap_records
-				(tenant_id, artifact_a, version_a, artifact_b, version_b, similarity, model_id, computed_at)
+			INSERT INTO semantic_overlap_records
+				(tenant_id, owner_id, owner_version, peer_id, peer_version, similarity, model_id, computed_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-			ON CONFLICT (tenant_id, artifact_a, artifact_b) DO UPDATE SET
-				version_a = EXCLUDED.version_a, version_b = EXCLUDED.version_b,
+			ON CONFLICT (tenant_id, owner_id, peer_id) DO UPDATE SET
+				owner_version = EXCLUDED.owner_version, peer_version = EXCLUDED.peer_version,
 				similarity = EXCLUDED.similarity, model_id = EXCLUDED.model_id,
 				computed_at = EXCLUDED.computed_at`,
-			r.TenantID, r.ArtifactA, r.VersionA, r.ArtifactB, r.VersionB, r.Similarity, r.ModelID, r.ComputedAt); err != nil {
+			r.TenantID, r.Owner, r.OwnerVersion, r.Peer, r.PeerVersion, r.Similarity, r.ModelID, r.ComputedAt); err != nil {
 			return err
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO semantic_overlap_computations (tenant_id, artifact_id, version, model_id, computed_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (tenant_id, artifact_id) DO UPDATE SET
+			version = EXCLUDED.version, model_id = EXCLUDED.model_id, computed_at = EXCLUDED.computed_at`,
+		comp.TenantID, comp.ArtifactID, comp.Version, comp.ModelID, comp.ComputedAt); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
 
-// ListOverlapRecords returns the tenant's records ordered by pair.
+// ListOverlapRecords returns the tenant's records ordered by owner and peer.
 func (p *Postgres) ListOverlapRecords(ctx context.Context, tenantID string) ([]OverlapRecord, error) {
 	conn, release, err := p.org(ctx, tenantID)
 	if err != nil {
@@ -1659,10 +1674,10 @@ func (p *Postgres) ListOverlapRecords(ctx context.Context, tenantID string) ([]O
 	}
 	defer release()
 	rows, err := conn.QueryContext(ctx, `
-		SELECT tenant_id, artifact_a, version_a, artifact_b, version_b, similarity, model_id, computed_at
-		FROM overlap_records
+		SELECT tenant_id, owner_id, owner_version, peer_id, peer_version, similarity, model_id, computed_at
+		FROM semantic_overlap_records
 		WHERE tenant_id = $1
-		ORDER BY artifact_a, artifact_b`, tenantID)
+		ORDER BY owner_id, peer_id`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -1670,11 +1685,66 @@ func (p *Postgres) ListOverlapRecords(ctx context.Context, tenantID string) ([]O
 	out := []OverlapRecord{}
 	for rows.Next() {
 		var r OverlapRecord
-		if err := rows.Scan(&r.TenantID, &r.ArtifactA, &r.VersionA, &r.ArtifactB, &r.VersionB, &r.Similarity, &r.ModelID, &r.ComputedAt); err != nil {
+		if err := rows.Scan(&r.TenantID, &r.Owner, &r.OwnerVersion, &r.Peer, &r.PeerVersion, &r.Similarity, &r.ModelID, &r.ComputedAt); err != nil {
 			return nil, err
 		}
 		r.ComputedAt = r.ComputedAt.UTC()
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// ListOverlapComputations returns the tenant's computation entries ordered by
+// artifact.
+func (p *Postgres) ListOverlapComputations(ctx context.Context, tenantID string) ([]OverlapComputation, error) {
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	rows, err := conn.QueryContext(ctx, `
+		SELECT tenant_id, artifact_id, version, model_id, computed_at
+		FROM semantic_overlap_computations
+		WHERE tenant_id = $1
+		ORDER BY artifact_id`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []OverlapComputation{}
+	for rows.Next() {
+		var c OverlapComputation
+		if err := rows.Scan(&c.TenantID, &c.ArtifactID, &c.Version, &c.ModelID, &c.ComputedAt); err != nil {
+			return nil, err
+		}
+		c.ComputedAt = c.ComputedAt.UTC()
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// DeleteOverlapArtifacts removes the records owned by and the computation
+// entries of each named artifact in one transaction in the org schema.
+func (p *Postgres) DeleteOverlapArtifacts(ctx context.Context, tenantID string, artifactIDs []string) error {
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, id := range artifactIDs {
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM semantic_overlap_records WHERE tenant_id = $1 AND owner_id = $2`, tenantID, id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM semantic_overlap_computations WHERE tenant_id = $1 AND artifact_id = $2`, tenantID, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

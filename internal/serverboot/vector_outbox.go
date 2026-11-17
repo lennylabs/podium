@@ -30,10 +30,12 @@ type vectorDrainWorker struct {
 	lagAge    time.Duration
 	metrics   *metrics.Registry
 	onLagging func(depth int, oldestAge time.Duration)
-	// onWritten runs after a row's vector reaches the backend and the row is
-	// marked done. The §7.3.1 overlap computation hooks here so it runs once
-	// the artifact's vector is in the managed index. Nil runs nothing.
-	onWritten func(ctx context.Context, p store.VectorPending)
+	// onWritten runs once per pass, after every row of the pass is drained,
+	// with the rows whose vectors reached the backend and were marked done.
+	// The §7.3.1 overlap computation hooks here so it runs once the
+	// artifacts' vectors are in the managed index and reads the served set
+	// once per pass rather than once per row. Nil runs nothing.
+	onWritten func(ctx context.Context, written []store.VectorPending)
 
 	wasLagging bool
 }
@@ -45,6 +47,7 @@ func (w *vectorDrainWorker) runOnce(ctx context.Context, now time.Time) {
 		log.Printf("vector outbox: list pending: %v", err)
 		return
 	}
+	var written []store.VectorPending
 	for _, p := range rows {
 		if err := w.drainRow(ctx, p); err != nil {
 			backoff := w.backoff(p.Attempts)
@@ -54,9 +57,10 @@ func (w *vectorDrainWorker) runOnce(ctx context.Context, now time.Time) {
 			continue
 		}
 		_ = w.outbox.MarkVectorPendingDone(ctx, p.TenantID, p.ArtifactID, p.Version)
-		if w.onWritten != nil {
-			w.onWritten(ctx, p)
-		}
+		written = append(written, p)
+	}
+	if w.onWritten != nil && len(written) > 0 {
+		w.onWritten(ctx, written)
 	}
 	w.publishStats(ctx, now)
 }
@@ -120,7 +124,7 @@ func (w *vectorDrainWorker) publishStats(ctx context.Context, now time.Time) {
 // retention/anchor scheduler goroutine pattern: an immediate pass, then one per
 // tick, until ctx is cancelled (the server's lifecycle context), so a graceful
 // shutdown stops the worker rather than leaking the goroutine.
-func startVectorOutboxWorker(ctx context.Context, cfg *Config, st store.Store, vec vector.Provider, embedder embedding.Provider, mreg *metrics.Registry, auditSink audit.Sink, tenantID string, onWritten func(context.Context, store.VectorPending)) {
+func startVectorOutboxWorker(ctx context.Context, cfg *Config, st store.Store, vec vector.Provider, embedder embedding.Provider, mreg *metrics.Registry, auditSink audit.Sink, tenantID string, onWritten func(context.Context, []store.VectorPending)) {
 	ob, ok := st.(store.VectorOutbox)
 	if !ok {
 		return

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/layer"
@@ -185,21 +186,55 @@ func (r *Registry) storedSemanticDiagnostics(ctx context.Context, subjects, name
 	return lint.SemanticDiagnostics(subs, pairs, threshold), nil
 }
 
-// reportablePairs keeps the records whose two artifacts are in nameable at
-// the served versions nameable holds and whose model is model.
+// reportablePairs keeps the records whose owner and peer are in nameable at
+// the served versions nameable holds and whose model is model, and returns
+// one pair per two artifacts. When both artifacts own a record naming the
+// other, the more recently computed record gives the pair its similarity and
+// its computed time; a tie goes to the record whose owner sorts first, so the
+// read is deterministic.
+//
+// Spec: §7.3.1
 func reportablePairs(records []store.OverlapRecord, nameable map[string]store.ManifestRecord, model string) []lint.SemanticPair {
 	at := func(id, version string) bool {
 		m, ok := nameable[id]
 		return ok && m.Version == version
 	}
-	var out []lint.SemanticPair
+	byPair := map[[2]string]store.OverlapRecord{}
 	for _, rec := range records {
-		if rec.ModelID != model || !at(rec.ArtifactA, rec.VersionA) || !at(rec.ArtifactB, rec.VersionB) {
+		if rec.ModelID != model || !at(rec.Owner, rec.OwnerVersion) || !at(rec.Peer, rec.PeerVersion) {
 			continue
 		}
-		out = append(out, lint.SemanticPair{A: rec.ArtifactA, B: rec.ArtifactB, Similarity: rec.Similarity, ComputedAt: rec.ComputedAt})
+		key := [2]string{min(rec.Owner, rec.Peer), max(rec.Owner, rec.Peer)}
+		if prev, seen := byPair[key]; seen && !supersedes(rec, prev) {
+			continue
+		}
+		byPair[key] = rec
+	}
+	keys := make([][2]string, 0, len(byPair))
+	for k := range byPair {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i][0] != keys[j][0] {
+			return keys[i][0] < keys[j][0]
+		}
+		return keys[i][1] < keys[j][1]
+	})
+	out := make([]lint.SemanticPair, 0, len(keys))
+	for _, k := range keys {
+		rec := byPair[k]
+		out = append(out, lint.SemanticPair{A: k[0], B: k[1], Similarity: rec.Similarity, ComputedAt: rec.ComputedAt})
 	}
 	return out
+}
+
+// supersedes reports whether rec, a record of the same two artifacts as prev
+// owned by the other side, is the one a read reports.
+func supersedes(rec, prev store.OverlapRecord) bool {
+	if !rec.ComputedAt.Equal(prev.ComputedAt) {
+		return rec.ComputedAt.After(prev.ComputedAt)
+	}
+	return rec.Owner < prev.Owner
 }
 
 // IngestSemanticOverlap computes the overlap records of each row an ingest
@@ -207,26 +242,23 @@ func reportablePairs(records []store.OverlapRecord, nameable map[string]store.Ma
 // lint.semantic_overlap for each artifact it computed. A diagnostic names a
 // peer only when the peer is in the ingested layer or in a layer whose
 // visibility includes public or organization, so a reingest response never
-// names an artifact of a layer restricted to groups or users. A failed
-// computation produces no diagnostic for that artifact, and nothing here
-// fails the cycle: a store read that fails is logged and reports nothing.
+// names an artifact of a layer restricted to groups or users; a cycle a
+// source webhook triggered (ctx carries ContextWithWebhookTrigger) names only
+// peers in the ingested layer. A failed computation produces no diagnostic
+// for that artifact, and nothing here fails the cycle: a store read that
+// fails is logged and reports nothing.
 //
 // Spec: §7.3.1
 func (r *Registry) IngestSemanticOverlap(ctx context.Context, layerID string, stored []vector.RowKey) []lint.Diagnostic {
 	if len(stored) == 0 {
 		return nil
 	}
-	computed, _, err := r.computeOverlapKeys(ctx, stored)
+	computed, _, served, err := r.computeOverlapKeys(ctx, stored)
 	if err != nil {
 		log.Printf("%s: layer %s: %v", lint.SemanticOverlapCode, layerID, err)
 		return nil
 	}
 	if len(computed) == 0 {
-		return nil
-	}
-	served, err := r.servedArtifacts(ctx)
-	if err != nil {
-		log.Printf("%s: layer %s: %v", lint.SemanticOverlapCode, layerID, err)
 		return nil
 	}
 	eligible := r.ingestPeerLayers(ctx, layerID)
@@ -247,11 +279,38 @@ func (r *Registry) IngestSemanticOverlap(ctx context.Context, layerID string, st
 	return diags
 }
 
+// webhookTriggerKey marks a context whose ingest cycle a source webhook
+// triggered.
+type webhookTriggerKey struct{}
+
+// ContextWithWebhookTrigger marks ctx as carrying an ingest cycle that a
+// source webhook triggered. The git host records the webhook response, so
+// IngestSemanticOverlap then names only peers in the ingested layer. The
+// inbound webhook handler sets it on the request context it passes to the
+// ingest runner.
+//
+// Spec: §7.3.1
+func ContextWithWebhookTrigger(ctx context.Context) context.Context {
+	return context.WithValue(ctx, webhookTriggerKey{}, true)
+}
+
+// webhookTriggered reports whether ctx carries ContextWithWebhookTrigger.
+func webhookTriggered(ctx context.Context) bool {
+	v, _ := ctx.Value(webhookTriggerKey{}).(bool)
+	return v
+}
+
 // ingestPeerLayers returns the layers whose artifacts an ingest diagnostic may
-// name: the ingested layer, and every layer of the tenant whose visibility
-// includes public or organization (§4.6).
+// name: the ingested layer, and, unless a source webhook triggered the cycle,
+// every layer of the tenant whose visibility includes public or organization
+// (§4.6).
+//
+// Spec: §7.3.1
 func (r *Registry) ingestPeerLayers(ctx context.Context, layerID string) map[string]bool {
 	allowed := map[string]bool{layerID: true}
+	if webhookTriggered(ctx) {
+		return allowed
+	}
 	for _, l := range r.resolveLayers(ctx) {
 		if l.Visibility.Public || l.Visibility.Organization {
 			allowed[l.ID] = true

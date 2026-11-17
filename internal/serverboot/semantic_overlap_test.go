@@ -2,9 +2,11 @@ package serverboot
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,6 +45,21 @@ func TestSemanticOverlapGuard(t *testing.T) {
 		if err != nil && (!strings.HasPrefix(err.Error(), "config.invalid:") || !strings.Contains(err.Error(), "PODIUM_LINT_SEMANTIC_OVERLAP")) {
 			t.Errorf("%s: message %q does not carry config.invalid and the variable", c.name, err)
 		}
+	}
+}
+
+// Spec: §7.3.1 — the refusal names the configured PODIUM_EMBEDDING_PROVIDER
+// value, so a deployment that set none is not told the variable is empty.
+func TestSemanticOverlapGuard_NamesTheProviderValue(t *testing.T) {
+	t.Parallel()
+	on := lint.SemanticConfig{Enabled: true}
+	none := (&Config{semanticOverlap: on, embeddingProvider: "none"}).semanticOverlapGuard()
+	empty := (&Config{semanticOverlap: on}).semanticOverlapGuard()
+	if none == nil || !strings.Contains(none.Error(), `PODIUM_EMBEDDING_PROVIDER is "none"`) || strings.Contains(none.Error(), "is empty") {
+		t.Errorf("refusal with none = %v, want it to name \"none\"", none)
+	}
+	if empty == nil || !strings.Contains(empty.Error(), `PODIUM_EMBEDDING_PROVIDER is ""`) {
+		t.Errorf("refusal with an empty provider = %v, want it to name the empty value", empty)
 	}
 }
 
@@ -151,8 +168,9 @@ func TestSemanticOverlap_OutboxWriteComputes(t *testing.T) {
 	w := &vectorDrainWorker{outbox: st, vec: idx, interval: time.Second, batch: 10, onWritten: overlapOutboxHook(reg)}
 	w.runOnce(ctx, time.Now().UTC().Add(time.Minute))
 	recs, err := st.ListOverlapRecords(ctx, "default")
-	if err != nil || len(recs) != 1 || recs[0].ModelID != "hosted-1" || recs[0].Similarity < 0.98 {
-		t.Fatalf("records after the outbox drain = %+v, %v; want one (fin-invoices, fin-payables) record", recs, err)
+	if err != nil || len(recs) != 2 || recs[0].Owner != "fin-invoices" || recs[1].Owner != "fin-payables" ||
+		recs[0].ModelID != "hosted-1" || recs[0].Similarity < 0.98 {
+		t.Fatalf("records after the outbox drain = %+v, %v; want each artifact to own one record naming the other", recs, err)
 	}
 	report, err := reg.CatalogOverlap(ctx, layer.Identity{IsPublic: true}, core.OverlapQuery{})
 	if err != nil {
@@ -221,8 +239,8 @@ func TestRunOverlapSweep(t *testing.T) {
 	runOverlapSweep(ctx, st, reg)
 	acme, _ := st.ListOverlapRecords(ctx, "acme")
 	globex, _ := st.ListOverlapRecords(ctx, "globex")
-	if len(acme) != 1 || len(globex) != 0 {
-		t.Errorf("records acme=%d globex=%d, want 1 and 0 (globex inactive)", len(acme), len(globex))
+	if len(acme) != 2 || len(globex) != 0 {
+		t.Errorf("records acme=%d globex=%d, want 2 (one owned by each artifact) and 0 (globex inactive)", len(acme), len(globex))
 	}
 	// A registry with the check off logs the refusal per tenant and stores
 	// nothing.
@@ -270,5 +288,107 @@ func TestSweepLoop(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("sweepLoop did not return after cancellation")
+	}
+}
+
+// listingStore counts the full-tenant manifest listings a registry issues and
+// fails them on demand, so a test can assert how often the served set is read.
+type listingStore struct {
+	store.Store
+	listings atomic.Int64
+	fail     atomic.Bool
+}
+
+func (s *listingStore) ListManifests(ctx context.Context, tenantID string) ([]store.ManifestRecord, error) {
+	s.listings.Add(1)
+	if s.fail.Load() {
+		return nil, errors.New("store unreachable")
+	}
+	return s.Store.ListManifests(ctx, tenantID)
+}
+
+// outboxCycle ingests three artifacts through the §4.7.2 outbox into a fresh
+// SQLite store and returns the store, the self-embedding index, and the
+// registry over a listing-counting wrapper of the store.
+func outboxCycle(t *testing.T) (*store.SQLite, *hostedIndex, *listingStore, *core.Registry) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "reg.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "default"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	dir := t.TempDir()
+	for id, desc := range map[string]string{"fin-invoices": "reconciles invoices", "fin-payables": "reconciles payables", "fin-ledger": "closes the ledger"} {
+		if err := os.MkdirAll(filepath.Join(dir, id), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "---\ntype: agent\nversion: 1.0.0\ndescription: " + desc + "\nsensitivity: low\n---\n\nbody\n"
+		if err := os.WriteFile(filepath.Join(dir, id, "ARTIFACT.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lc := store.LayerConfig{TenantID: "default", ID: "team", SourceType: "local", LocalPath: dir, Public: true}
+	if err := st.PutLayerConfig(ctx, lc); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
+	if _, err := ingest.SourceIngestWithOptions(ctx, st, source.Local{}, lc, ingest.SourceIngestOptions{UseVectorOutbox: true}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	idx := newHostedIndex()
+	counted := &listingStore{Store: st}
+	reg := core.New(counted, "default", nil).WithVectorSearch(idx, nil).WithOverlapChecks(lint.Thresholds{}, lint.SemanticConfig{Enabled: true})
+	return st, idx, counted, reg
+}
+
+// Spec: §7.3.1 — the outbox drain computes every artifact one pass wrote and
+// reads the tenant's served set once for the pass rather than once per row.
+func TestOverlapOutboxHook_OneListingPerPass(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st, idx, counted, reg := outboxCycle(t)
+	w := &vectorDrainWorker{outbox: st, vec: idx, interval: time.Second, batch: 10, onWritten: overlapOutboxHook(reg)}
+	w.runOnce(ctx, time.Now().UTC().Add(time.Minute))
+	runs, err := st.ListOverlapComputations(ctx, "default")
+	if err != nil || len(runs) != 3 || counted.listings.Load() != 1 {
+		t.Errorf("after one drain pass: %d computation entries (%v) and %d served-set listings, want 3 and 1", len(runs), err, counted.listings.Load())
+	}
+}
+
+// Spec: §7.3.1 — a failed computation after the outbox write does not hold
+// back the drain: every written row is already marked done, and the sweep
+// computes the artifacts later.
+func TestOverlapOutboxHook_FailureDoesNotBlockTheDrain(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st, idx, counted, reg := outboxCycle(t)
+	counted.fail.Store(true)
+	w := &vectorDrainWorker{outbox: st, vec: idx, interval: time.Second, batch: 10, onWritten: overlapOutboxHook(reg)}
+	w.runOnce(ctx, time.Now().UTC().Add(time.Minute))
+	depth, _, err := st.VectorOutboxStats(ctx)
+	runs, _ := st.ListOverlapComputations(ctx, "default")
+	if err != nil || depth != 0 || len(runs) != 0 {
+		t.Errorf("outbox depth %d (%v) and %d computation entries after a failed computation, want 0 and 0", depth, err, len(runs))
+	}
+}
+
+// Spec: §7.3.1, §13.12 — the first sweep waits a random delay of up to a
+// tenth of PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL, so the bound follows the
+// configured interval and never exceeds it.
+func TestFirstSweepDelay(t *testing.T) {
+	t.Parallel()
+	var bounds []int64
+	top := func(n int64) int64 { bounds = append(bounds, n); return n - 1 }
+	day := firstSweepDelay(24*time.Hour, top)
+	minute := firstSweepDelay(time.Minute, top)
+	tiny := firstSweepDelay(time.Nanosecond, top)
+	if day != 144*time.Minute-1 || minute != 6*time.Second-1 || tiny != 0 {
+		t.Errorf("delays = %s, %s, %s; want just under 144m, just under 6s, and 0", day, minute, tiny)
+	}
+	if bounds[0] != int64(144*time.Minute) || bounds[1] != int64(6*time.Second) || bounds[2] != 1 {
+		t.Errorf("bounds = %v, want a tenth of each interval and at least 1", bounds)
 	}
 }

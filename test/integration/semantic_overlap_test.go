@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/layer/source"
+	"github.com/lennylabs/podium/pkg/layer/webhook"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
@@ -108,6 +110,10 @@ func newOverlapHarnessOn(t *testing.T, st store.Store, tenant string, opts ...se
 	for _, l := range []store.LayerConfig{
 		{TenantID: tenant, ID: "team", SourceType: "local", Public: true},
 		{TenantID: tenant, ID: "secret", SourceType: "local", Groups: []string{"eng"}, Order: 1},
+		// hook is a public git layer a source webhook triggers. The runner
+		// below snapshots every layer from its local directory, so the
+		// delivery needs no reachable repository.
+		{TenantID: tenant, ID: "hook", SourceType: "git", Repo: "https://git.example.invalid/acme/hook.git", WebhookSecret: overlapWebhookSecret, Public: true, Order: 2},
 	} {
 		l.LocalPath = t.TempDir()
 		h.dirs[l.ID] = l.LocalPath
@@ -133,7 +139,12 @@ func newOverlapHarnessOn(t *testing.T, st store.Store, tenant string, opts ...se
 			},
 		})
 	}
-	h.layers = httptest.NewServer(server.NewLayerEndpoint(st, tenant, h.mode).WithReingestRunner(runner).Handler())
+	endpoint := server.NewLayerEndpoint(st, tenant, h.mode).WithReingestRunner(runner)
+	mux := http.NewServeMux()
+	mux.Handle("/v1/layers", endpoint.Handler())
+	mux.Handle("/v1/layers/", endpoint.Handler())
+	mux.Handle("/v1/ingest/webhook/", endpoint.WebhookHandler())
+	h.layers = httptest.NewServer(mux)
 	t.Cleanup(h.layers.Close)
 	all := append([]server.Option{
 		server.WithMode(h.mode),
@@ -178,11 +189,38 @@ func (h *overlapHarness) reingest(layerID string) reingestBody {
 	if err != nil {
 		h.t.Fatalf("reingest: %v", err)
 	}
+	return h.decodeIngest(resp, "reingest "+layerID)
+}
+
+// overlapWebhookSecret is the hook layer's webhook secret.
+const overlapWebhookSecret = "hook-secret"
+
+// webhook delivers a signed push event for layerID through the inbound
+// webhook route and returns the ingest response the git host would record.
+func (h *overlapHarness) webhook(layerID string) reingestBody {
+	h.t.Helper()
+	delivery := []byte(`{"ref":"refs/heads/main"}`)
+	signature, err := webhook.Sign("github", delivery, overlapWebhookSecret)
+	if err != nil {
+		h.t.Fatalf("Sign: %v", err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, h.layers.URL+"/v1/ingest/webhook/"+layerID, bytes.NewReader(delivery))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", signature)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		h.t.Fatalf("webhook delivery: %v", err)
+	}
+	return h.decodeIngest(resp, "webhook "+layerID)
+}
+
+func (h *overlapHarness) decodeIngest(resp *http.Response, what string) reingestBody {
+	h.t.Helper()
 	defer func() { _ = resp.Body.Close() }()
 	var body reingestBody
 	_ = json.NewDecoder(resp.Body).Decode(&body)
 	if resp.StatusCode != http.StatusOK {
-		h.t.Fatalf("reingest %s: status %d %+v", layerID, resp.StatusCode, body)
+		h.t.Fatalf("%s: status %d %+v", what, resp.StatusCode, body)
 	}
 	return body
 }
@@ -294,9 +332,11 @@ func checkIngestStoresRecords(t *testing.T, h *overlapHarness) {
 	if err != nil {
 		t.Fatalf("ListOverlapRecords: %v", err)
 	}
-	// Every pair among the four artifacts is a neighbour within 10 rows.
-	if len(recs) != 6 {
-		t.Errorf("stored %d records, want 6 (one per pair, whatever the similarity)", len(recs))
+	// Each of the three artifacts the team cycle stored owns a record for
+	// each of the other three artifacts, whatever the similarity; sec/twin
+	// was computed alone and owns none.
+	if len(recs) != 9 {
+		t.Errorf("stored %d records, want 9 (three owned by each artifact the cycle computed)", len(recs))
 	}
 }
 
@@ -366,8 +406,54 @@ func TestSemanticOverlap_FailedQueryKeepsRecords(t *testing.T) {
 		t.Errorf("cycle with a failing index: accepted %d, advisory %q", res.Accepted, res.semantic("fin/invoices"))
 	}
 	recs, _ := h.st.ListOverlapRecords(context.Background(), h.tenant)
-	if len(recs) != 1 || recs[0].VersionA != "1.0.0" {
-		t.Errorf("records = %+v, want the 1.0.0 record kept", recs)
+	if len(recs) != 2 || recs[0].Owner != "fin/invoices" || recs[0].OwnerVersion != "1.0.0" {
+		t.Errorf("records = %+v, want the record fin/invoices@1.0.0 owns kept", recs)
+	}
+}
+
+// Spec: §7.3.1 — an artifact with more earlier versions than
+// PODIUM_LINT_SEMANTIC_NEIGHBORS still finds its peers through ingest on a
+// SQLite store: after eleven cycles each artifact has eleven index rows with
+// one vector, and the computation reads past its own rows to the peer's
+// served row.
+func TestSemanticOverlap_ManyEarlierVersionsStillFindPeers(t *testing.T) {
+	t.Parallel()
+	h := newOverlapHarness(t)
+	var res reingestBody
+	var latest string
+	for i := 0; i <= 10; i++ {
+		latest = fmt.Sprintf("1.0.%d", i)
+		h.write("team", "fin/invoices", latest, "reconciles invoices")
+		h.write("team", "fin/payables", latest, "reconciles payables")
+		res = h.reingest("team")
+	}
+	if !strings.Contains(res.semantic("fin/invoices"), "fin/payables (") || !strings.Contains(res.semantic("fin/payables"), "fin/invoices (") {
+		t.Errorf("last cycle advisories = %+v, want each artifact to name the other", res.Advisories)
+	}
+	recs, err := h.st.ListOverlapRecords(context.Background(), h.tenant)
+	if err != nil || len(recs) != 2 || recs[0].PeerVersion != latest || recs[1].PeerVersion != latest || recs[0].Similarity < 0.99 {
+		t.Errorf("records = %+v (%v), want each artifact to own one record naming the other at %s", recs, err, latest)
+	}
+}
+
+// Spec: §7.3.1 — a cycle a source webhook triggers names only peers in the
+// ingested layer, because the git host records the response. The cycle still
+// stores the records naming peers of other layers, and the catalog overlap
+// report shows them.
+func TestSemanticOverlap_WebhookNamesOnlyIngestedLayer(t *testing.T) {
+	t.Parallel()
+	h := newOverlapHarness(t)
+	h.write("team", "fin/invoices", "1.0.0", "reconciles invoices")
+	h.reingest("team")
+	h.write("hook", "hook/payables", "1.0.0", "reconciles payables")
+	h.write("hook", "hook/twin", "1.0.0", "a secretive copy")
+	res := h.webhook("hook")
+	msg := res.semantic("hook/payables")
+	if res.Accepted != 2 || !strings.Contains(msg, "hook/twin (") || strings.Contains(msg, "fin/invoices") {
+		t.Errorf("webhook response: accepted %d, hook/payables advisory %q; want hook/twin named and fin/invoices not", res.Accepted, msg)
+	}
+	if _, report := h.overlap("?artifact=hook/payables", "alice", ""); !strings.Contains(report.semanticPeers("hook/payables"), "fin/invoices") {
+		t.Errorf("report peers of hook/payables = %q, want fin/invoices included", report.semanticPeers("hook/payables"))
 	}
 }
 

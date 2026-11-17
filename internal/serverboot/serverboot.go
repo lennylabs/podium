@@ -2753,7 +2753,7 @@ func (c *Config) semanticOverlapGuard() error {
 	if c.embeddingProvider != "" && c.embeddingProvider != "none" {
 		return nil
 	}
-	return fmt.Errorf("config.invalid: PODIUM_LINT_SEMANTIC_OVERLAP=on needs an embedding source, but PODIUM_EMBEDDING_PROVIDER is empty and the vector backend does not self-embed; set PODIUM_EMBEDDING_PROVIDER, select a self-embedding backend, or set PODIUM_LINT_SEMANTIC_OVERLAP=off")
+	return fmt.Errorf("config.invalid: PODIUM_LINT_SEMANTIC_OVERLAP=on needs an embedding source, but PODIUM_EMBEDDING_PROVIDER is %q and the vector backend does not self-embed; set PODIUM_EMBEDDING_PROVIDER, select a self-embedding backend, or set PODIUM_LINT_SEMANTIC_OVERLAP=off", c.embeddingProvider)
 }
 
 // missingBackendValues returns the env-var names that a selected backend

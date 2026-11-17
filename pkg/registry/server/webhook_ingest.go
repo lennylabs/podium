@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/lennylabs/podium/pkg/layer/webhook"
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -84,7 +85,9 @@ func (e *LayerEndpoint) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// §7.3.1: a verified delivery "fetches the new commit, ingests". Drive
 	// the ingest pipeline (no break-glass on the webhook path) and return its
 	// result summary. Without a runner wired the handler records the intent.
-	e.runIngestAndRespond(w, r, cfg, nil)
+	// The git host records the response, so the cycle's semantic overlap
+	// advisories name only peers in the ingested layer.
+	e.runIngestAndRespond(w, r.WithContext(core.ContextWithWebhookTrigger(r.Context())), cfg, nil)
 }
 
 // webhookLayer loads the layer a delivery names and writes the refusal when

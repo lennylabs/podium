@@ -70,7 +70,8 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("ResourcesRoundTrip", func(t *testing.T) { resourcesRoundTrip(t, factory(t)) })
 	t.Run("DomainRecordRoundTrip", func(t *testing.T) { domainRecordRoundTrip(t, factory(t)) })
 	t.Run("DomainPutReplacesPerLayer", func(t *testing.T) { domainPutReplacesPerLayer(t, factory(t)) })
-	t.Run("OverlapRecordsReplaceByArtifact", func(t *testing.T) { overlapRecordsReplaceByArtifact(t, factory(t)) })
+	t.Run("OverlapRecordsReplaceByOwner", func(t *testing.T) { overlapRecordsReplaceByOwner(t, factory(t)) })
+	t.Run("OverlapComputationEntries", func(t *testing.T) { overlapComputationEntries(t, factory(t)) })
 	t.Run("OverlapRecordsScopedToTenant", func(t *testing.T) { overlapRecordsScopedToTenant(t, factory(t)) })
 }
 

@@ -515,19 +515,28 @@ type Store interface {
 	// search index and keeps them in the tenant's metadata store so a read
 	// applies its threshold without querying the index.
 	//
-	// ReplaceOverlapRecords removes every record of tenantID that names
-	// artifactID on either side and stores recs, in one transaction, so the
-	// artifact's records always come from one computation. Each record must
-	// name artifactID on exactly one side, or the call returns
-	// ErrInvalidOverlapRecord and changes nothing. A record is keyed by the
-	// unordered pair of identifiers, so a stored record for the same pair,
-	// written by a concurrent computation of the other artifact, is replaced
-	// rather than duplicated. An empty recs leaves the artifact with no
-	// records.
-	ReplaceOverlapRecords(ctx context.Context, tenantID, artifactID string, recs []OverlapRecord) error
-	// ListOverlapRecords returns every record of tenantID ordered by pair,
-	// each with ArtifactA ordered before ArtifactB.
+	// ReplaceOverlapRecords stores one successful computation of
+	// comp.ArtifactID: it removes every record of tenantID that artifact
+	// owns, stores recs, and upserts comp as the artifact's computation
+	// entry, in one transaction, so the artifact's records always come from
+	// one computation. Records other artifacts own are left in place, so a
+	// pair one side found survives the other side's recomputation. Each
+	// record must be owned by comp.ArtifactID and name another artifact as
+	// its peer, or the call returns ErrInvalidOverlapRecord and changes
+	// nothing. An empty recs leaves the artifact owning no record and still
+	// records the computation.
+	ReplaceOverlapRecords(ctx context.Context, tenantID string, comp OverlapComputation, recs []OverlapRecord) error
+	// ListOverlapRecords returns every record of tenantID ordered by owner
+	// and then peer.
 	ListOverlapRecords(ctx context.Context, tenantID string) ([]OverlapRecord, error)
+	// ListOverlapComputations returns every computation entry of tenantID
+	// ordered by artifact.
+	ListOverlapComputations(ctx context.Context, tenantID string) ([]OverlapComputation, error)
+	// DeleteOverlapArtifacts removes the records owned by and the computation
+	// entries of each artifact in artifactIDs, in one transaction. The sweep
+	// calls it for artifacts that are no longer served; a record naming such
+	// an artifact as its peer is removed when its owner is recomputed.
+	DeleteOverlapArtifacts(ctx context.Context, tenantID string, artifactIDs []string) error
 }
 
 // DataMigrationContentHashFraming names the one-time rewrite of every stored

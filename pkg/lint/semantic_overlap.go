@@ -17,14 +17,15 @@ const (
 	// records when they are read. Similarity values depend on the embedding
 	// model, so a deployment tunes it against its own catalog.
 	DefaultSemanticSimilarity = 0.85
-	// DefaultSemanticNeighbors is the number of nearest index rows queried
-	// per computed artifact.
+	// DefaultSemanticNeighbors is the number of nearest peer artifacts one
+	// computation finds and stores records for.
 	DefaultSemanticNeighbors = 10
 	// DefaultSemanticRefreshInterval is the interval of the sweep that
 	// computes artifacts with missing or stale overlap records.
 	DefaultSemanticRefreshInterval = 24 * time.Hour
 	// maxSemanticNeighbors bounds PODIUM_LINT_SEMANTIC_NEIGHBORS, because a
-	// computation issues one index query of this size per artifact.
+	// computation's index query grows with it, up to 50 times one more than
+	// the count when rows of earlier versions crowd out the peers.
 	maxSemanticNeighbors = 100
 	// minSemanticRefreshInterval is the shortest sweep interval; a shorter
 	// one would recompute a large catalog faster than it can finish.
@@ -41,9 +42,10 @@ type SemanticConfig struct {
 	Enabled bool
 	// Similarity is the default read threshold, from 0.5 to 1.0.
 	Similarity float64
-	// Neighbors is the most overlap records one computation stores, from 1
-	// to 100. The computation queries one more index row, because the
-	// artifact's own row is among its nearest.
+	// Neighbors is the number of nearest peer artifacts one computation
+	// finds and stores records for, from 1 to 100. The computation widens
+	// its index query past rows of earlier versions, the artifact's own
+	// included, to find them.
 	Neighbors int
 	// RefreshInterval is the sweep interval: at least one minute, or zero
 	// for no sweep.
