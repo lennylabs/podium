@@ -24,6 +24,7 @@ import (
 	"syscall"
 
 	"github.com/lennylabs/podium/internal/buildinfo"
+	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
@@ -788,7 +789,7 @@ func runSyncCheck() int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	warns := sync.Check(merged)
+	warns := sync.Check(merged, adapter.DefaultRegistry())
 	if len(warns) == 0 {
 		fmt.Println("sync.yaml: ok (no warnings)")
 		return 0

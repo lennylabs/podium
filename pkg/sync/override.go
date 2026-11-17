@@ -64,6 +64,10 @@ type OverrideResult struct {
 	// §4.6 collision rule or the §4.6 no-inheritance rule (§13.11.3);
 	// empty under DryRun, without a RegistryPath, and for a server source.
 	Dropped []layer.Drop
+	// Materialized is the re-materialization's Result, which the caller reads
+	// for the §7.5.8 listing report. It is nil under DryRun and without a
+	// RegistryPath, which run no re-materialization.
+	Materialized *Result
 }
 
 // Override applies the §7.5.5 toggle semantics to the lock file at
@@ -152,7 +156,7 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 	// Re-materialize the target from the lock's scope + the updated toggles
 	// so the on-disk set matches. PreserveToggles keeps the toggles we just
 	// wrote and rewrites the lock with the new materialized paths.
-	var dropped []layer.Drop
+	var remat *Result
 	if !opts.DryRun && opts.RegistryPath != "" {
 		res, err := Run(Options{
 			RegistryPath:    opts.RegistryPath,
@@ -178,14 +182,18 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 		}
 		// The toggles and the lock are already written, so a drop does not
 		// roll the override back; the caller reports it (§13.11.3).
-		dropped = res.Dropped
+		remat = res
 		// Reflect the rewritten lock (materialized paths, last_synced_at) in
 		// the returned state.
 		if reread, rerr := ReadLock(opts.Target); rerr == nil && reread != nil {
 			lock = reread
 		}
 	}
-	return &OverrideResult{Lock: lock, Changed: changed, Warnings: warnings, Dropped: dropped}, nil
+	out := &OverrideResult{Lock: lock, Changed: changed, Warnings: warnings, Materialized: remat}
+	if remat != nil {
+		out.Dropped = remat.Dropped
+	}
+	return out, nil
 }
 
 // alreadyAdded reports whether id appears in the toggle list.

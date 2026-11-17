@@ -3,8 +3,11 @@ package sync
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -24,9 +27,17 @@ var (
 // through Read/Write so handcrafted comments and scalar formatting
 // stay intact across edits.
 type SyncConfig struct {
-	Defaults Defaults           `yaml:"defaults,omitempty"`
-	Profiles map[string]Profile `yaml:"profiles,omitempty"`
-	Targets  []TargetEntry      `yaml:"targets,omitempty"`
+	Defaults Defaults `yaml:"defaults,omitempty"`
+	// ListingBudgets is the `listing_budgets:` block (§7.5.2, §7.5.8), held
+	// undecoded. Readers that decode the whole file (the MCP server, the
+	// bridge, the §4.7.9 policy resolution, `podium config show`) must keep
+	// working when the block holds a value of the wrong YAML type, and
+	// `podium sync save-as` must write the block back as it read it, so only
+	// LoadMergedConfig type-checks and decodes it through listingBudgets. A
+	// Kind of 0 means the file has no `listing_budgets` key.
+	ListingBudgets yaml.Node          `yaml:"listing_budgets,omitempty"`
+	Profiles       map[string]Profile `yaml:"profiles,omitempty"`
+	Targets        []TargetEntry      `yaml:"targets,omitempty"`
 }
 
 // Defaults is the `defaults:` block.
@@ -96,6 +107,168 @@ type TargetEntry struct {
 	// Workflow is the per-target prepare/publish command lists, available to
 	// either kind (§7.5.2).
 	Workflow Workflow `yaml:"workflow,omitempty"`
+}
+
+// ListingBudget is one decoded `listing_budgets` entry (§7.5.2), keyed in the
+// file by adapter value, with the yaml keys max_chars, entry_overhead_chars,
+// max_entry_chars, types, and check. A nil field is unset. A non-nil empty
+// Types (`types: []`) and a non-nil pointer to "" (`check: ""`) are set and
+// invalid, so validation can tell them from an absent key. It is never
+// encoded: SyncConfig carries the block as an undecoded node.
+type ListingBudget struct {
+	MaxChars           *int
+	EntryOverheadChars *int
+	MaxEntryChars      *int
+	Types              []string
+	Check              *string
+}
+
+// listingBudgets type-checks and decodes the `listing_budgets` block. It
+// returns nil for a file without the block or with a null block.
+//
+// yaml.v3 coerces a scalar into the Go kind it decodes to, loading
+// `max_chars: 1.5` as 1 and `check: 1` as "1" without an error, so a typed
+// decode cannot enforce the §7.5.2 rule that each value's resolved YAML type
+// matches its key. The block is therefore decoded into interface values, which
+// lets yaml.v3 resolve aliases and `<<` merges while keeping each value's
+// resolved type, and each value is type-switched. A key outside the schema is
+// ignored, as an unknown key is anywhere in SyncConfig. The error names the
+// adapter and the key; LoadMergedConfig wraps it with the file path and
+// listing_budgets.
+//
+// Spec: §7.5.2
+func (c *SyncConfig) listingBudgets() (map[string]ListingBudget, error) {
+	if c.ListingBudgets.Kind == 0 {
+		return nil, nil
+	}
+	var raw any
+	if err := c.ListingBudgets.Decode(&raw); err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		return nil, nil
+	}
+	entries, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("want a mapping keyed by adapter name, got %s", yamlTypeName(raw))
+	}
+	out := make(map[string]ListingBudget, len(entries))
+	// Sorted so a file with several mistyped entries reports the same one on
+	// every run.
+	for _, adapterID := range slices.Sorted(maps.Keys(entries)) {
+		lb, err := decodeListingBudget(adapterID, entries[adapterID])
+		if err != nil {
+			return nil, err
+		}
+		out[adapterID] = lb
+	}
+	return out, nil
+}
+
+// decodeListingBudget type-checks one entry. A null entry sets no key.
+func decodeListingBudget(adapterID string, v any) (ListingBudget, error) {
+	var lb ListingBudget
+	if v == nil {
+		return lb, nil
+	}
+	fields, ok := v.(map[string]any)
+	if !ok {
+		return lb, fmt.Errorf("%s: want a mapping, got %s", adapterID, yamlTypeName(v))
+	}
+	var err error
+	for _, f := range []struct {
+		key string
+		dst **int
+	}{
+		{"max_chars", &lb.MaxChars},
+		{"entry_overhead_chars", &lb.EntryOverheadChars},
+		{"max_entry_chars", &lb.MaxEntryChars},
+	} {
+		if *f.dst, err = yamlInt(fields[f.key]); err != nil {
+			return lb, fmt.Errorf("%s.%s: %w", adapterID, f.key, err)
+		}
+	}
+	if lb.Types, err = yamlStrings(fields["types"]); err != nil {
+		return lb, fmt.Errorf("%s.types: %w", adapterID, err)
+	}
+	if lb.Check, err = yamlString(fields["check"]); err != nil {
+		return lb, fmt.Errorf("%s.check: %w", adapterID, err)
+	}
+	return lb, nil
+}
+
+// yamlInt accepts a value yaml.v3 resolved as an integer, or null for unset.
+func yamlInt(v any) (*int, error) {
+	switch n := v.(type) {
+	case nil:
+		return nil, nil
+	case int:
+		return &n, nil
+	case int64, uint64:
+		return nil, fmt.Errorf("integer %v is out of range", n)
+	default:
+		return nil, fmt.Errorf("want an integer, got %s", yamlTypeName(v))
+	}
+}
+
+// yamlString accepts a value yaml.v3 resolved as a string, or null for unset.
+func yamlString(v any) (*string, error) {
+	switch s := v.(type) {
+	case nil:
+		return nil, nil
+	case string:
+		return &s, nil
+	default:
+		return nil, fmt.Errorf("want a string, got %s", yamlTypeName(v))
+	}
+}
+
+// yamlStrings accepts a sequence of strings, or null for unset. An empty
+// sequence returns a non-nil empty slice.
+func yamlStrings(v any) ([]string, error) {
+	if v == nil {
+		return nil, nil
+	}
+	seq, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("want a list of strings, got %s", yamlTypeName(v))
+	}
+	out := make([]string, 0, len(seq))
+	for _, item := range seq {
+		s, ok := item.(string)
+		if !ok {
+			return nil, fmt.Errorf("want a list of strings, got an item that is %s", yamlTypeName(item))
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+// yamlTypeName names the resolved YAML type of a decoded value for an error
+// message.
+func yamlTypeName(v any) string {
+	switch v.(type) {
+	case nil:
+		return "null"
+	case bool:
+		return "a boolean"
+	case int, int64, uint64:
+		return "an integer"
+	case float64:
+		return "a float"
+	case string:
+		return "a string"
+	case []any:
+		return "a list"
+	case map[string]any:
+		return "a mapping"
+	case map[any]any:
+		return "a mapping with a key that is not a string"
+	case time.Time:
+		return "a timestamp"
+	default:
+		return fmt.Sprintf("a value of type %T", v)
+	}
 }
 
 // ConfigPath returns the canonical path to a workspace's sync.yaml.
@@ -210,7 +383,20 @@ func writeConfig(workspace string, cfg *SyncConfig, ensureDefaults bool) error {
 //
 // spec: §7.5.6 — a fresh sync.yaml is created "with the new profile and an
 // empty defaults: block".
+//
+// A `listing_budgets` block is encoded through a detached copy (detachNode),
+// because an alias in it can name an anchor under a key SyncConfig does not
+// hold, which the encoder would otherwise fail to resolve.
 func marshalConfig(cfg *SyncConfig, ensureDefaults bool) ([]byte, error) {
+	if cfg.ListingBudgets.Kind != 0 {
+		detached, err := detachNode(&cfg.ListingBudgets)
+		if err != nil {
+			return nil, fmt.Errorf("sync.yaml: listing_budgets: %w", err)
+		}
+		cp := *cfg
+		cp.ListingBudgets = *detached
+		cfg = &cp
+	}
 	var node yaml.Node
 	if err := node.Encode(cfg); err != nil {
 		return nil, err
@@ -222,6 +408,46 @@ func marshalConfig(cfg *SyncConfig, ensureDefaults bool) ([]byte, error) {
 		}, node.Content...)
 	}
 	return yaml.Marshal(&node)
+}
+
+// detachNode returns a deep copy of n in which every alias is replaced by a
+// detached copy of the node it names and every anchor is cleared, so the copy
+// encodes without reference to any anchor outside it. Scalars, tags, styles,
+// `<<` merge keys, and values of the wrong type are copied as they are, and
+// yaml.v3 merges an inline `<<` mapping as it merged the alias. An alias that
+// names a node enclosing it is an error: yaml.v3 parses it into a cycle, which
+// has no finite copy.
+//
+// Spec: §7.5.6, §7.5.2
+func detachNode(n *yaml.Node) (*yaml.Node, error) {
+	return detachOnPath(n, map[*yaml.Node]bool{})
+}
+
+// detachOnPath copies n, where onPath holds the nodes on the copy path from
+// the root to n. The set is what detects an alias to an enclosing node.
+func detachOnPath(n *yaml.Node, onPath map[*yaml.Node]bool) (*yaml.Node, error) {
+	if n.Kind == yaml.AliasNode {
+		if n.Alias == nil {
+			return nil, fmt.Errorf("unknown anchor %q referenced", n.Value)
+		}
+		if onPath[n.Alias] {
+			return nil, fmt.Errorf("alias *%s names a node that encloses it", n.Value)
+		}
+		return detachOnPath(n.Alias, onPath)
+	}
+	onPath[n] = true
+	defer delete(onPath, n)
+	cp := *n
+	cp.Anchor = ""
+	cp.Content = make([]*yaml.Node, len(n.Content))
+	for i, child := range n.Content {
+		c, err := detachOnPath(child, onPath)
+		if err != nil {
+			return nil, err
+		}
+		cp.Content[i] = c
+	}
+	return &cp, nil
 }
 
 // findConfigKey returns the value node for key in a mapping node, or nil.

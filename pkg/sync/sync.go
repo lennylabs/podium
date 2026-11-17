@@ -197,6 +197,33 @@ type ArtifactResult struct {
 	ContentHash string
 	Layer       string
 	Files       []string
+	// ListingType and ListingDescription feed the §7.5.8 listing estimate.
+	// ListingType is the manifest type, or skill when the ARTIFACT.md does
+	// not parse and the SKILL.md does. ListingDescription is the SKILL.md
+	// description for a skill and the ARTIFACT.md description otherwise.
+	ListingType        string
+	ListingDescription string
+}
+
+// listingEntry returns the §7.5.8 listing type and description of rec. A
+// harness lists a skill under its SKILL.md description, which can differ from
+// the ARTIFACT.md one, so a skill reads its SKILL.md. A record whose SKILL.md
+// does not parse lists an empty description.
+//
+// Spec: §7.5.8
+func listingEntry(rec materialRecord) (listingType, description string) {
+	if rec.Artifact != nil && rec.Artifact.Type != manifest.TypeSkill {
+		return string(rec.Artifact.Type), rec.Artifact.Description
+	}
+	skill, err := manifest.ParseSkill(rec.SkillBytes)
+	switch {
+	case err == nil:
+		return string(manifest.TypeSkill), skill.Description
+	case rec.Artifact != nil:
+		return string(manifest.TypeSkill), ""
+	default:
+		return "", ""
+	}
 }
 
 // Run executes one sync. The registry source is dispatched per §7.5.2: an
@@ -319,13 +346,16 @@ func Run(opts Options) (*Result, error) {
 			ver = rec.Artifact.Version
 			artType = string(rec.Artifact.Type)
 		}
+		listingType, listingDesc := listingEntry(rec)
 		res.Artifacts = append(res.Artifacts, ArtifactResult{
-			ID:          rec.ID,
-			Version:     ver,
-			Type:        artType,
-			ContentHash: lockContentHash(rec),
-			Layer:       rec.LayerID,
-			Files:       paths,
+			ID:                 rec.ID,
+			Version:            ver,
+			Type:               artType,
+			ContentHash:        lockContentHash(rec),
+			Layer:              rec.LayerID,
+			Files:              paths,
+			ListingType:        listingType,
+			ListingDescription: listingDesc,
 		})
 		allFiles = append(allFiles, out...)
 	}

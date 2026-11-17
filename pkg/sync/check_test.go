@@ -25,7 +25,7 @@ func TestCheck_ReportsAllWarningClasses(t *testing.T) {
 			"finance": {scopeUserGlobal, scopeProjectShared}, // multi-scope profile
 		},
 	}
-	warns := Check(merged)
+	warns := Check(merged, nil)
 	joined := strings.Join(warns, "\n")
 	for _, want := range []string{
 		"defaults.profile references undefined profile \"ghost\"",
@@ -51,14 +51,42 @@ func TestCheck_CleanConfigNoWarnings(t *testing.T) {
 		},
 		Targets: []TargetEntry{{ID: "claude", Profile: "finance"}},
 	}
-	if warns := Check(merged); len(warns) != 0 {
+	if warns := Check(merged, nil); len(warns) != 0 {
 		t.Errorf("clean config produced warnings: %v", warns)
+	}
+}
+
+// Spec: §7.5.2 — `podium sync --check` reports every invalid listing_budgets
+// entry as a warning: an unregistered adapter, the none adapter, and an
+// invalid key value. A valid entry draws nothing.
+func TestCheck_ReportsListingBudgetProblems(t *testing.T) {
+	t.Parallel()
+	max, maybe := 100, "maybe"
+	merged := &MergedConfig{ListingBudgets: map[string]ListingBudget{
+		"acme-harness": {MaxChars: &max},
+		"none":         {MaxChars: &max},
+		"claude-code":  {Check: &maybe},
+		"codex":        {MaxChars: &max},
+	}}
+	warns := Check(merged, nil)
+	if len(warns) != 3 {
+		t.Fatalf("Check = %q, want three warnings", warns)
+	}
+	joined := strings.Join(warns, "\n")
+	for _, want := range []string{
+		"listing_budgets.acme-harness: no adapter of that name is registered",
+		"listing_budgets.none: the none adapter feeds no harness listing",
+		"listing_budgets.claude-code.check",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing warning %q in:\n%s", want, joined)
+		}
 	}
 }
 
 func TestCheck_NilIsEmpty(t *testing.T) {
 	t.Parallel()
-	if warns := Check(nil); len(warns) != 0 {
+	if warns := Check(nil, nil); len(warns) != 0 {
 		t.Errorf("Check(nil) = %v, want empty", warns)
 	}
 }

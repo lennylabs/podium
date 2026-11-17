@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,6 +45,11 @@ type MergedConfig struct {
 	Defaults Defaults
 	Profiles map[string]Profile
 	Targets  []TargetEntry
+	// ListingBudgets holds the `listing_budgets` entries of the three scopes,
+	// merged by adapter value and, within an entry, per key by scope
+	// precedence (§7.5.2). Entries are type-checked but not validated;
+	// ListingBudgetFor validates the entry of the run's harness.
+	ListingBudgets map[string]ListingBudget
 	// Collisions maps a profile name defined in more than one scope to the
 	// scopes that defined it, ordered low to high precedence. §7.5.2 warns
 	// when such a profile is invoked.
@@ -97,33 +103,30 @@ func LoadMergedConfig(startDir, homeDir string) (*MergedConfig, string, error) {
 
 	type scoped struct {
 		scope configFileScope
+		path  string
 		cfg   *SyncConfig
 	}
 	var files []scoped
-
 	if homeDir != "" {
-		cfg, err := ReadConfigFile(filepath.Join(homeDir, ".podium", "sync.yaml"))
-		if err != nil {
-			return nil, workspace, err
-		}
-		files = append(files, scoped{scopeUserGlobal, cfg})
+		files = append(files, scoped{scope: scopeUserGlobal, path: filepath.Join(homeDir, ".podium", "sync.yaml")})
 	}
 	if workspace != "" {
-		shared, err := ReadConfigFile(filepath.Join(workspace, ".podium", "sync.yaml"))
+		files = append(files,
+			scoped{scope: scopeProjectShared, path: filepath.Join(workspace, ".podium", "sync.yaml")},
+			scoped{scope: scopeProjectLocal, path: filepath.Join(workspace, ".podium", "sync.local.yaml")})
+	}
+	for i := range files {
+		cfg, err := ReadConfigFile(files[i].path)
 		if err != nil {
 			return nil, workspace, err
 		}
-		files = append(files, scoped{scopeProjectShared, shared})
-		local, err := ReadConfigFile(filepath.Join(workspace, ".podium", "sync.local.yaml"))
-		if err != nil {
-			return nil, workspace, err
-		}
-		files = append(files, scoped{scopeProjectLocal, local})
+		files[i].cfg = cfg
 	}
 
 	merged := &MergedConfig{
-		Profiles:   map[string]Profile{},
-		Collisions: map[string][]configFileScope{},
+		Profiles:       map[string]Profile{},
+		ListingBudgets: map[string]ListingBudget{},
+		Collisions:     map[string][]configFileScope{},
 	}
 	profileScopes := map[string][]configFileScope{}
 
@@ -132,6 +135,13 @@ func LoadMergedConfig(startDir, homeDir string) (*MergedConfig, string, error) {
 	for _, f := range files {
 		if f.cfg == nil {
 			continue
+		}
+		budgets, err := f.cfg.listingBudgets()
+		if err != nil {
+			return nil, workspace, fmt.Errorf("%s: listing_budgets: %w", f.path, err)
+		}
+		for id, lb := range budgets {
+			merged.ListingBudgets[id] = mergeListingBudget(merged.ListingBudgets[id], lb)
 		}
 		mergeDefaults(&merged.Defaults, f.cfg.Defaults)
 		if len(f.cfg.Targets) > 0 {
@@ -167,6 +177,167 @@ func mergeDefaults(dst *Defaults, src Defaults) {
 	if src.MinServerVersion != "" {
 		dst.MinServerVersion = src.MinServerVersion
 	}
+}
+
+// mergeListingBudget overlays src onto dst per key, keeping each key src sets.
+// A nil field is unset; a non-nil empty Types or pointer to "" is set.
+func mergeListingBudget(dst, src ListingBudget) ListingBudget {
+	if src.MaxChars != nil {
+		dst.MaxChars = src.MaxChars
+	}
+	if src.EntryOverheadChars != nil {
+		dst.EntryOverheadChars = src.EntryOverheadChars
+	}
+	if src.MaxEntryChars != nil {
+		dst.MaxEntryChars = src.MaxEntryChars
+	}
+	if src.Types != nil {
+		dst.Types = src.Types
+	}
+	if src.Check != nil {
+		dst.Check = src.Check
+	}
+	return dst
+}
+
+// Listing check values (§7.5.8).
+const (
+	ListingCheckOff     = "off"
+	ListingCheckWarning = "warning"
+	ListingCheckError   = "error"
+)
+
+// EffectiveListingBudget is a `listing_budgets` entry resolved over the §7.5.8
+// defaults. MaxEntryChars 0 means unset: no per-entry report.
+type EffectiveListingBudget struct {
+	MaxChars           int
+	EntryOverheadChars int
+	MaxEntryChars      int
+	Types              []string
+	Check              string
+}
+
+// DefaultListingBudget returns the §7.5.8 defaults, which are the same for
+// every adapter.
+//
+// Spec: §7.5.8
+func DefaultListingBudget() EffectiveListingBudget {
+	return EffectiveListingBudget{
+		MaxChars:           8000,
+		EntryOverheadChars: 5,
+		MaxEntryChars:      0,
+		Types:              []string{"skill"},
+		Check:              ListingCheckWarning,
+	}
+}
+
+// ErrInvalidListingBudget marks a `listing_budgets` entry that §7.5.2 makes
+// invalid. A sync whose harness has one exits 2.
+var ErrInvalidListingBudget = errors.New("invalid listing_budgets entry")
+
+// validateListingBudget applies the §7.5.2 validity rule to one entry: the
+// adapter is registered and is not `none`, each integer key is 1 or more,
+// `types` is not empty, and `check` is off, warning, or error. The keys are
+// checked in schema order and the first invalid one is named.
+//
+// Spec: §7.5.2
+func validateListingBudget(adapterID string, lb ListingBudget, reg *adapter.Registry) error {
+	if adapterID == "none" {
+		return fmt.Errorf("sync.yaml: listing_budgets.none: the none adapter feeds no harness listing: %w", ErrInvalidListingBudget)
+	}
+	if _, err := reg.Get(adapterID); err != nil {
+		return fmt.Errorf("sync.yaml: listing_budgets.%s: no adapter of that name is registered: %w", adapterID, ErrInvalidListingBudget)
+	}
+	invalid := func(key, reason string) error {
+		return fmt.Errorf("sync.yaml: listing_budgets.%s.%s: %s: %w", adapterID, key, reason, ErrInvalidListingBudget)
+	}
+	for _, f := range []struct {
+		key string
+		v   *int
+	}{
+		{"max_chars", lb.MaxChars},
+		{"entry_overhead_chars", lb.EntryOverheadChars},
+		{"max_entry_chars", lb.MaxEntryChars},
+	} {
+		if f.v != nil && *f.v < 1 {
+			return invalid(f.key, fmt.Sprintf("%d is below 1", *f.v))
+		}
+	}
+	if lb.Types != nil && len(lb.Types) == 0 {
+		return invalid("types", "the list is empty")
+	}
+	if lb.Check != nil {
+		switch *lb.Check {
+		case ListingCheckOff, ListingCheckWarning, ListingCheckError:
+		default:
+			return invalid("check", fmt.Sprintf("%q is not off, warning, or error", *lb.Check))
+		}
+	}
+	return nil
+}
+
+// ListingBudgetFor resolves the listing budget of adapterID: the §7.5.8
+// defaults when m is nil or holds no entry for it, otherwise the entry over
+// the defaults. An invalid entry returns an error wrapping
+// ErrInvalidListingBudget. The caller passes the run's resolved harness, which
+// is `none` when nothing sets one, so an entry for `none` fails a sync that
+// sets no harness. A nil reg uses adapter.DefaultRegistry.
+//
+// Spec: §7.5.2, §7.5.8
+func (m *MergedConfig) ListingBudgetFor(adapterID string, reg *adapter.Registry) (EffectiveListingBudget, error) {
+	out := DefaultListingBudget()
+	if m == nil {
+		return out, nil
+	}
+	lb, ok := m.ListingBudgets[adapterID]
+	if !ok {
+		return out, nil
+	}
+	if reg == nil {
+		reg = adapter.DefaultRegistry()
+	}
+	if err := validateListingBudget(adapterID, lb, reg); err != nil {
+		return EffectiveListingBudget{}, err
+	}
+	if lb.MaxChars != nil {
+		out.MaxChars = *lb.MaxChars
+	}
+	if lb.EntryOverheadChars != nil {
+		out.EntryOverheadChars = *lb.EntryOverheadChars
+	}
+	if lb.MaxEntryChars != nil {
+		out.MaxEntryChars = *lb.MaxEntryChars
+	}
+	if lb.Types != nil {
+		out.Types = append([]string(nil), lb.Types...)
+	}
+	if lb.Check != nil {
+		out.Check = *lb.Check
+	}
+	return out, nil
+}
+
+// listingBudgetProblems validates every `listing_budgets` entry, in adapter
+// order, and returns each invalid entry's message for `podium sync --check`.
+// A nil reg uses adapter.DefaultRegistry.
+//
+// Spec: §7.5.2
+func listingBudgetProblems(m *MergedConfig, reg *adapter.Registry) []string {
+	if reg == nil {
+		reg = adapter.DefaultRegistry()
+	}
+	ids := make([]string, 0, len(m.ListingBudgets))
+	for id := range m.ListingBudgets {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var out []string
+	for _, id := range ids {
+		if err := validateListingBudget(id, m.ListingBudgets[id], reg); err != nil {
+			out = append(out, err.Error())
+		}
+	}
+	return out
 }
 
 // ResolveInput carries the sync CLI flag values. An empty string or slice
@@ -252,17 +423,20 @@ func Resolve(in ResolveInput, merged *MergedConfig, env func(string) string) (*R
 // Check validates a merged config per §7.5.2 `podium sync --check` and returns
 // the warnings (never errors): unresolved profile references (defaults.profile
 // and per-target profile names), malformed include/exclude globs, duplicate
-// target ids, and profile-name collisions across scopes. The returned slice is
-// sorted for deterministic output and is empty when the config is clean.
+// target ids, profile-name collisions across scopes, and every invalid
+// `listing_budgets` entry, judged against reg (nil uses
+// adapter.DefaultRegistry). The returned slice is sorted for deterministic
+// output and is empty when the config is clean.
 //
 // spec: §7.5.2 — "validate the merged config against the schema and report
-// unresolved profile references, malformed globs, target collisions, and
-// profile-name collisions across scopes (warning, not error)".
-func Check(merged *MergedConfig) []string {
+// unresolved profile references, malformed globs, target collisions,
+// profile-name collisions across scopes, and every invalid listing_budgets
+// entry (warning, not error)".
+func Check(merged *MergedConfig, reg *adapter.Registry) []string {
 	if merged == nil {
 		return nil
 	}
-	var warns []string
+	warns := listingBudgetProblems(merged, reg)
 
 	for name, scopes := range merged.Collisions {
 		if len(scopes) > 1 {

@@ -45,6 +45,9 @@ func referenceRegistryPath(t testing.TB) string {
 // pi are absent because the reference fixture carries §6.9 untranslatable
 // cells for them, so sync.Run fails before any comparison.
 //
+// Spec: §7.5.8 — both sources emit the same listing report for the same
+// target and budget, and the none adapter emits none.
+//
 // Spec: §11, §2.2, §4.3.4, §13.11.3 — the fixture's plain skills, the overlay
 // that omits version, and the overlay that declares it report the same
 // versions and materialize the same bytes under both registry sources. The
@@ -136,6 +139,25 @@ func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 			// enclosing LockFile is not compared, because its target path,
 			// timestamps, and source provenance legitimately differ.
 			assertLockArtifactsEqual(t, fsTarget, srvTarget)
+
+			// §7.5.8: the listing report is a function of the resolved set, so
+			// both sources report the same listing for one budget. The none
+			// adapter computes no listing.
+			b := sync.DefaultListingBudget()
+			b.MaxEntryChars = 20
+			fsListing, srvListing := sync.Listing(fsRes, b), sync.Listing(srvRes, b)
+			if adapterID == "none" {
+				if fsListing != nil || srvListing != nil {
+					t.Errorf("none listing = %+v / %+v, want nil for both", fsListing, srvListing)
+				}
+				return
+			}
+			if fsListing == nil || fsListing.Entries == 0 {
+				t.Fatalf("filesystem listing = %+v, want entries", fsListing)
+			}
+			if !reflect.DeepEqual(fsListing, srvListing) {
+				t.Errorf("listing mismatch:\n filesystem=%+v\n server=    %+v", fsListing, srvListing)
+			}
 		})
 	}
 }
