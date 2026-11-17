@@ -604,6 +604,30 @@ podium profile edit finance-team --add-include "finance/foo" --dry-run
 
 The flag names are distinct from `podium sync --include` / `--exclude` (ephemeral scope flags applied at sync time) and from `podium sync override --add` / `--remove` (ephemeral toggles on exact IDs). `podium profile edit` writes patterns into the profile YAML; the other two never touch `sync.yaml`.
 
+### 7.5.8 Harness Listing Budget
+
+Some harnesses place the name and description of each installed skill in a listing in the model's context and limit the listing's size. The harness's documentation (§6.7) defines whether a limit exists, how it is derived, and what the harness does above it. A harness can shorten descriptions or omit entries without reporting an error.
+
+`podium sync` estimates the listing that each `kind: workspace` target contributes and compares it with the budget that `listing_budgets` (§7.5.2) configures for the target's adapter. The estimate runs on a one-shot sync, on `--dry-run`, on each `--watch` cycle, on each `kind: workspace` target of a `--config` run including under `--check`, and on the re-materialization of `podium sync override` (§7.5.5). It covers the artifact set the run materializes, after the scope filters (§7.5.1), the toggles, the workspace overlay (§6.4), and the `target_harnesses` exclusion (§4.3). The listing a harness builds can also hold skills from sources outside the target, such as user-level directories and plugins, so the estimate covers the entries the target contributes and is a lower bound on the harness's listing.
+
+The entries are the artifacts of that set whose type is in `types` and counts for the target's adapter. A type counts for an adapter unless the §6.7.1 matrix marks the adapter ✗ for it, reading a `rule` from the `rule_mode: always` row, a `hook` from the `hook_event` row, and every other type from its type row. A type the matrix does not grade, such as an extension type (§9), counts for every adapter. An entry's name is the last segment of its canonical identifier, which for a skill equals its `SKILL.md` `name` (§4.3.4). Its description is the `SKILL.md` `description` for a skill and the `ARTIFACT.md` `description` for any other type. The listing cost is the sum over the entries of the Unicode code points in the name, the code points in the description, and `entry_overhead_chars`. The run reports an excess when the cost exceeds `max_chars`. When `max_entry_chars` is set, the run also reports each entry whose description has more code points than `max_entry_chars`. The report compares Podium's estimate with the configured budget. It does not predict which entries a harness shortens or omits, because that depends on the harness version and on per-user state that Podium cannot observe.
+
+| Key | Meaning | Default |
+| --- | --- | --- |
+| `max_chars` | Listing budget, in code points | `8000` |
+| `entry_overhead_chars` | Code points counted per entry for the harness's separators and formatting | `5` |
+| `max_entry_chars` | Description length, in code points, above which an entry is reported | unset (no per-entry report) |
+| `types` | Artifact types that count as entries | `[skill]` |
+| `check` | `off`, `warning`, or `error` | `warning` |
+
+The defaults are the same for every adapter. The run computes no listing under `check: off`, for the `none` adapter, which feeds no harness listing, for an adapter for which no type in `types` counts, and for a §7.4 offline-first run that leaves the existing output in place. For `types: [skill]`, the adapters for which no type counts are `claude-desktop`, `claude-cowork`, and `hermes`. The `--json` envelope (§7.5) then carries `listing: null`. Otherwise it carries `listing` as `{harness, budget_chars, cost_chars, entries, over, check, oversized: [{id, chars}]}`. `over` reports whether the cost exceeds `max_chars`, and `oversized` lists the entries above `max_entry_chars` in identifier order and is empty when `max_entry_chars` is unset. The run writes each excess and each oversized entry on standard error, with or without `--json`.
+
+The check never changes what sync writes, and a run writes the same files under every `check` value. Under `check: warning`, a report leaves the exit status unchanged. Under `check: error`, a run that reports an excess or an oversized entry fails after it writes the target, or after it prints the resolved set under `--dry-run`. It fails as §13.11.3 states for a drop: a one-shot sync, `--dry-run`, and `podium sync override` exit 1, and a `--config` run counts the target as failed, including a `kind: workspace` target under `--check`. A `--watch` run reports the cycle and keeps watching, and the cycle counts toward exit status 1 on interrupt (§13.11.4). `podium sync override --dry-run`, and `podium sync override` with no registry configured, run no re-materialization, compute no listing, and validate no `listing_budgets` entry.
+
+The check reads only the artifact set the run resolves. A filesystem-source sync and a server-source sync of the same directory therefore report the same listing when the caller's view admits every artifact (§4.6) and the registry serves the directory's current bytes (§13.11.3).
+
+The estimate covers neither a `kind: marketplace` target (§7.8), whose consumers install a subset of its plugins, nor the skills that `load_artifact` materializes one at a time into a directory the host chooses (§6.6). No sync of a target resolves either.
+
 ## 7.6 Language SDKs
 
 Two thin language SDKs are provided, both backed by the registry's HTTP API:
