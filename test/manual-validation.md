@@ -250,6 +250,7 @@ rm -rf "$WORK"
 | S107 | A skill's Podium fields under `SKILL.md` `metadata` reach search, load, and lint, and a stored row from an earlier release keeps its search columns until a new version | standalone | none | none | none |
 | S108 | Catalog advisories in `podium lint` and at ingest, the lint JSON envelope, and the `podium sync` listing budget | standalone | none | none | none |
 | S109 | `command` and `context` are refused, stored rows of either type stop serving after an upgrade, hand-converted skills lint clean and serve, and user-invoked skills carry each harness's control | solo then standalone | none | none | none |
+| S110 | Published Agent Skills parse and lint without false errors, and an unparseable manifest is refused on its own by lint, sync, and ingest | solo then standalone | none | none | none |
 
 ---
 
@@ -12981,5 +12982,144 @@ address for both, because a revision mark is keyed by the registry URL.
    `agents/openai.yaml` is the defect.
 
 **Cleanup.** `rm -rf "$WORK"`. Step 7 stops the server.
+
+---
+
+## S110: Published Agent Skills parse and lint without false errors, and an unparseable manifest is refused on its own by lint, sync, and ingest
+
+**Goal.** Validate that a `SKILL.md` written the way published Agent Skills
+are written parses and lints without false errors, and that a `SKILL.md` whose
+frontmatter does not parse is refused alone while lint, a filesystem-source
+sync, and a registry reingest still process every other artifact of its layer.
+
+**Covers.** The §4.1 unparseable-manifest rule, the §4.3.4 `allowed-tools`
+row and skill-artifact lint severities, the §4.4 prose-reference rule, the
+§7.3.1 `lint.near_duplicate_content` units, §13.11.3, and the §7.3.1 ingest
+outcome, through the compiled `podium` binary.
+
+**Why by hand.** An operator reads the lint lines, the `--json` envelope, the
+sync's `rejected:` line, the written tree, and the reingest output together.
+A whole layer that fails on one file, a space-separated `allowed-tools` that
+does not parse, a `#section` link reported as missing, an example link inside
+code reported at all, a license file reported as a duplicate, or an info
+diagnostic that fails `--fail-on warning` is the defect this scenario catches.
+
+**Prerequisites.** None beyond the isolation block. The scenario binds
+127.0.0.1:8170.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above. Build a layer
+   with four skills and no `ARTIFACT.md` anywhere. `team/history` sets
+   `allowed-tools` as the Agent Skills standard writes it, links to a section
+   of a bundled reference, shows link syntax inside inline code and inside a
+   fenced block, and declares no version. `team/history-copy` links to its
+   sibling through `../`, sets a top-level `version`, and bundles the same
+   `LICENSE.txt` as `team/history`. `team/broken` nests a mapping under
+   `metadata`, which the standard does not allow. Lint the layer.
+
+   ```bash
+   mkdir -p "$WORK/reg/team/history/references" "$WORK/reg/team/history-copy" "$WORK/reg/team/broken"
+   LICENSE_TEXT="$(for i in 1 2 3 4 5 6 7 8; do printf 'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files, to deal in the software without restriction. '; done)"
+   printf '%s\n' "$LICENSE_TEXT" > "$WORK/reg/team/history/LICENSE.txt"
+   printf '%s\n' "$LICENSE_TEXT" > "$WORK/reg/team/history-copy/LICENSE.txt"
+   printf '# API\n\n## Errors\n\nEach error carries a code.\n' > "$WORK/reg/team/history/references/api.md"
+   printf -- '---\nname: history\ndescription: Summarizes repository history with git and jq for a weekly engineering report.\nallowed-tools: Bash(git:*) Bash(jq:*) Read\n---\n\nRead [the error codes](references/api.md#errors) first.\nWrite links as `[text](url)` in the report.\n\n\140\140\140markdown\n[example](missing/file.md)\n\140\140\140\n' > "$WORK/reg/team/history/SKILL.md"
+   printf -- '---\nname: history-copy\ndescription: Drafts release notes from merged pull requests for the product changelog page.\nversion: 1.2.0\n---\n\nSee [the history skill](../history/SKILL.md) for the git queries.\n' > "$WORK/reg/team/history-copy/SKILL.md"
+   printf -- '---\nname: broken\ndescription: Checks that browser automation prerequisites are installed before a run.\nmetadata:\n  requires:\n    bins: [node]\n---\n\nRun the checks.\n' > "$WORK/reg/team/broken/SKILL.md"
+   podium lint --registry "$WORK/reg"; echo "lint exit=$?"
+   ```
+
+   **Expect.** Standard output carries an `[info]` line for `team/history` and
+   one for `team/history-copy`, each ending in `(lint.skill_version_assigned)`
+   (Podium ignores the top-level `version`, so `team/history-copy` declares no
+   usable version either), a `[warning] team/history-copy: prose
+   reference "../history/SKILL.md" leaves the artifact package` line that
+   recommends the canonical ID, and a `[warning] team/history-copy:` line for
+   the top-level `version` ending in `(lint.skill_podium_only_field)`.
+   Standard error carries one `rejected:` line naming `team/broken` with
+   `ingest.invalid_artifact` and `metadata.requires is not a string`. No line
+   reports `references/api.md#errors`, `url`, `missing/file.md`, or
+   `LICENSE.txt`, and no line reports `allowed-tools`. The run prints
+   `lint exit=1`, because a refused artifact fails the run. A missing
+   `team/history` line, or no output beyond an error naming
+   `team/broken/SKILL.md`, means one file still stops the layer.
+
+2. Read the `--json` envelope, then move `team/broken` out of the layer and
+   lint under `--fail-on warning` and under the default.
+
+   ```bash
+   podium lint --registry "$WORK/reg" --json > "$WORK/lint.json"; echo "json exit=$?"
+   jq -c '.rejected' "$WORK/lint.json"
+   jq -c '.counts' "$WORK/lint.json"
+   mv "$WORK/reg/team/broken" "$WORK/broken-aside"
+   podium lint --registry "$WORK/reg" --fail-on warning > /dev/null; echo "fail-on warning exit=$?"
+   podium lint --registry "$WORK/reg" > /dev/null; echo "default exit=$?"
+   mv "$WORK/broken-aside" "$WORK/reg/team/broken"
+   ```
+
+   **Expect.** `json exit=1`. `rejected` is one entry for `team/broken` whose
+   `code` is `ingest.invalid_artifact` and whose `details` is exactly
+   `{"constraint":"manifest_unparseable"}`. `counts` is
+   `{"error":0,"warning":2,"info":2}`. `fail-on warning exit=1`, from the two
+   warnings, and `default exit=0`.
+
+3. Remove the two warnings, so the layer carries only the info diagnostics,
+   and lint under `--fail-on warning`.
+
+   ```bash
+   mv "$WORK/reg/team/broken" "$WORK/broken-aside"
+   cp "$WORK/reg/team/history-copy/SKILL.md" "$WORK/history-copy.SKILL.md"
+   printf -- '---\nname: history-copy\ndescription: Drafts release notes from merged pull requests for the product changelog page.\n---\n\nUse the git queries of team/history.\n' > "$WORK/reg/team/history-copy/SKILL.md"
+   podium lint --registry "$WORK/reg" --fail-on warning; echo "info only exit=$?"
+   cp "$WORK/history-copy.SKILL.md" "$WORK/reg/team/history-copy/SKILL.md"
+   mv "$WORK/broken-aside" "$WORK/reg/team/broken"
+   ```
+
+   **Expect.** The output is the two `[info]` lines alone, and the run prints
+   `info only exit=0`. An exit of 1 means an info diagnostic fails
+   `--fail-on warning`.
+
+4. Sync the layer through claude-code and read the tree and the first lines of
+   the materialized `SKILL.md`.
+
+   ```bash
+   podium sync --registry "$WORK/reg" --harness claude-code --target "$WORK/ws" 2> "$WORK/sync.err"; echo "sync exit=$?"
+   cat "$WORK/sync.err"
+   (cd "$WORK/ws" && find .claude -type f | sort)
+   sed -n 4p "$WORK/ws/.claude/skills/history/SKILL.md"
+   ```
+
+   **Expect.** `sync exit=1`, and `$WORK/sync.err` holds one `rejected:
+   team/broken (ingest.invalid_artifact):` line. The tree lists
+   `.claude/skills/history/SKILL.md`,
+   `.claude/skills/history/LICENSE.txt`,
+   `.claude/skills/history/references/api.md`,
+   `.claude/skills/history-copy/SKILL.md`, and
+   `.claude/skills/history-copy/LICENSE.txt`, and nothing for `broken`. The
+   `sed` prints `allowed-tools: Bash(git:*) Bash(jq:*) Read`, the authored
+   line. An empty tree means the sync still fails the layer.
+
+5. Serve the layer on 127.0.0.1:8170 and reingest it. A single `--layer-path`
+   directory registers one layer named after its base name, `reg`.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8170 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8170/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   podium layer reingest --registry http://127.0.0.1:8170 reg > "$WORK/reingest.out" 2> "$WORK/reingest.err"; echo "reingest exit=$?"
+   cat "$WORK/reingest.err"
+   podium search --registry http://127.0.0.1:8170 --type skill "" | grep -c 'team/'
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** `reingest exit=1`, because the cycle dropped an artifact.
+   `$WORK/reingest.err` names `team/broken` with `ingest.invalid_artifact`
+   and a reason that names `team/broken/SKILL.md`. The search count prints
+   `2`: `team/history` and `team/history-copy` were ingested, which a server
+   that failed the whole layer would not serve.
+
+**Cleanup.** `rm -rf "$WORK"`. Step 5 stops the server.
 
 ---
