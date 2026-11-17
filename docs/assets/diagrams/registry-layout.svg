@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 660" class="dg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 686" class="dg">
   <!--
     Registry layout on disk. Directories form the domain hierarchy. Leaves are
     artifact packages. Type tags annotate each artifact directory. The canonical
@@ -96,12 +96,12 @@
     </style>
   </defs>
 
-  <rect class="dg-bg" width="1080" height="660"/>
+  <rect class="dg-bg" width="1080" height="686"/>
 
   <text class="dg-title" x="40" y="42">Registry layout on disk</text>
   <text class="dg-lead" x="40" y="64">Directories form the domain hierarchy. Leaves are artifact packages.</text>
 
-  <rect class="dg-panel" x="40" y="84" width="1000" height="492" rx="10"/>
+  <rect class="dg-panel" x="40" y="84" width="1000" height="518" rx="10"/>
 
   <!-- Root -->
   <text class="dg-mono dg-t-m" x="60" y="116">registry/</text>
@@ -156,11 +156,12 @@
 
   <!-- depth 1 -->
   <text class="dg-mono" x="104" y="146">company-glossary/</text>
-  <text class="dg-label dg-t-xs" x="540" y="146">type: context</text>
+  <text class="dg-label dg-t-xs" x="540" y="146">type: skill</text>
 
   <!-- depth 2 (under company-glossary) -->
+  <path class="dg-guide" d="M 116 146 L 116 168"/>
   <path class="dg-guide" d="M 116 168 L 136 168"/>
-  <text class="dg-mono" x="144" y="172">ARTIFACT.md</text>
+  <text class="dg-mono" x="144" y="172">SKILL.md</text>
 
   <text class="dg-mono" x="104" y="208">finance/</text>
 
@@ -190,8 +191,13 @@
   <text class="dg-label dg-t-xs" x="540" y="520">type: skill</text>
 
   <text class="dg-mono" x="104" y="556">engineering/platform/code-change-pr/</text>
-  <text class="dg-label dg-t-xs" x="540" y="556">type: command</text>
+  <text class="dg-label dg-t-xs" x="540" y="556">type: skill, invocation: user</text>
 
-  <text class="dg-foot" x="40" y="616">The canonical artifact ID is the directory path under the registry root, for example finance/ap/pay-invoice.</text>
-  <text class="dg-foot" x="40" y="636">References (delegates_to: and glob patterns) use this ID, optionally suffixed with @version or @sha256:hash.</text>
+  <!-- depth 2 (under code-change-pr) -->
+  <path class="dg-guide" d="M 116 556 L 116 578"/>
+  <path class="dg-guide" d="M 116 578 L 136 578"/>
+  <text class="dg-mono" x="144" y="582">SKILL.md</text>
+
+  <text class="dg-foot" x="40" y="642">The canonical artifact ID is the directory path under the registry root, for example finance/ap/pay-invoice.</text>
+  <text class="dg-foot" x="40" y="662">References (delegates_to: and glob patterns) use this ID, optionally suffixed with @version or @sha256:hash.</text>
 </svg>
