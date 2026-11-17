@@ -233,7 +233,7 @@ The body is the Markdown after the frontmatter. The agentskills.io specification
 | A skill that declares no usable version has its version assigned. | Warning (`lint.skill_version_assigned`) |
 | An authored version in the reserved `0.0.0-auto.<N>` form, in either file, is invalid. | Error (`lint.invalid_version`) |
 | `skills-ref validate` passes against `SKILL.md`. | Warning (`lint.skill_ref_validate`); an `ARTIFACT.md` that lists the code under `lint_suppress` silences it |
-| The description has at least 15 code points and at least 3 words after surrounding white space is trimmed. `PODIUM_LINT_MIN_DESCRIPTION_CHARS` and `PODIUM_LINT_MIN_DESCRIPTION_WORDS` change the bounds. | Warning (`lint.thin_description`); `lint_suppress` honored |
+| A non-empty description has at least 15 code points and at least 3 words after surrounding white space is trimmed. An empty description does not draw `lint.thin_description`. `PODIUM_LINT_MIN_DESCRIPTION_CHARS` and `PODIUM_LINT_MIN_DESCRIPTION_WORDS` change the bounds. | Warning (`lint.thin_description`); `lint_suppress` honored |
 | No two artifacts have descriptions whose normalized word sets have a similarity of 0.7 or higher. `PODIUM_LINT_DESCRIPTION_SIMILARITY` changes the threshold. | Warning (`lint.colliding_descriptions`); `lint_suppress` honored, one-sided |
 | No prose body or text resource has a near duplicate in another artifact: two units whose five-word shingle sets have a similarity of 0.8 or higher. `PODIUM_LINT_CONTENT_SIMILARITY` changes the threshold. | Warning (`lint.near_duplicate_content`); `lint_suppress` honored, one-sided |
 
