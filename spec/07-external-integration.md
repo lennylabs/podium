@@ -402,6 +402,7 @@ defaults:
   target: ~/.claude/
   profile: project-default # default profile when --profile is not passed
   verify_signatures: always # never | always — see §4.7.9
+  on_unparseable: keep # keep | remove — see §13.11.3
 
 # Harness listing budgets (§7.5.8), keyed by adapter value.
 listing_budgets:
