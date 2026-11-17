@@ -14,26 +14,83 @@ let index: MiniSearchType<StoredFields> | null = null;
 let loading: Promise<void> | null = null;
 
 /**
- * Fetches the prebuilt index on the reader's first interaction with the search
- * field, so a page that is only read never pays for it.
+ * Fetches the prebuilt index and the search engine. The page schedules this
+ * when it is idle (prefetchWhenIdle), and the reader's first interaction with
+ * the search field starts it if it has not run, so the first search rarely
+ * waits on the download.
  */
 async function load(basePath: string): Promise<void> {
   if (index !== null) return;
   // The engine is fetched alongside the index rather than in the page bundle,
-  // so a reader who never searches never downloads it.
+  // so neither delays the page's first render.
   // The build writes the index under a hashed name and names it on the body,
   // so the file is immutable and the fetch never returns a stale corpus.
   const url =
     document.body.dataset["searchIndex"] ?? `${basePath}/assets/search-index.json`;
   const [{ default: MiniSearch }, serialized] = await Promise.all([
     import("minisearch"),
-    fetch(url).then((response) => response.text()),
+    fetch(url).then((response) => {
+      if (!response.ok) throw new Error(`search index: HTTP ${response.status}`);
+      return response.text();
+    }),
   ]);
   index = MiniSearch.loadJSON<StoredFields>(serialized, {
     fields: SEARCH_FIELDS,
     storeFields: STORED_FIELDS,
     processTerm,
     searchOptions: SEARCH_OPTIONS,
+  });
+}
+
+/**
+ * Starts the load once and shares it. A failed load clears the shared promise,
+ * so a prefetch that fails in the background, or a dropped connection, does
+ * not leave search broken for the rest of the visit: the next interaction
+ * retries.
+ */
+function ensureLoading(basePath: string): Promise<void> {
+  loading ??= load(basePath).catch((error: unknown) => {
+    loading = null;
+    throw error;
+  });
+  return loading;
+}
+
+/** Runs task once the page has loaded and the browser reports idle time. */
+function whenIdle(task: () => void): void {
+  const schedule = (): void => {
+    if (typeof window.requestIdleCallback === "function") {
+      // The timeout bounds the wait on a page that never goes idle.
+      window.requestIdleCallback(() => task(), { timeout: 5000 });
+    } else {
+      // A browser without requestIdleCallback waits a fixed delay instead.
+      window.setTimeout(task, 2000);
+    }
+  };
+  if (document.readyState === "complete") schedule();
+  else window.addEventListener("load", schedule, { once: true });
+}
+
+/** Reports whether the reader's browser asks pages to reduce data use. */
+function savesData(): boolean {
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean } })
+    .connection;
+  return connection?.saveData === true;
+}
+
+/**
+ * Downloads the index when the page is idle, so the reader's first search does
+ * not wait on it. The download waits for the load event and idle time, so it
+ * does not compete with the page's own resources, and the content-hashed file
+ * lets later pages reuse the cached copy. A browser that asks to save data
+ * keeps the on-demand fetch.
+ */
+function prefetchWhenIdle(basePath: string): void {
+  if (savesData()) return;
+  whenIdle(() => {
+    void ensureLoading(basePath).catch(() => {
+      // The reader's first interaction retries; nothing to report here.
+    });
   });
 }
 
@@ -142,8 +199,12 @@ export function mountSearch(basePath: string): void {
 
   const begin = (): void => {
     open(overlay, input);
-    loading ??= load(basePath);
-    void loading.then(() => run());
+    ensureLoading(basePath).then(
+      () => run(),
+      () => {
+        // The field stays open with no results; the next interaction retries.
+      },
+    );
   };
 
   const run = (): void => {
@@ -180,4 +241,6 @@ export function mountSearch(basePath: string): void {
     }
     if (event.key === "Escape" && !overlay.hidden) close(overlay);
   });
+
+  prefetchWhenIdle(basePath);
 }
