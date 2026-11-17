@@ -1,6 +1,6 @@
 ---
 title: About
-nav_order: 6
+nav_order: 7
 description: "Project context for Podium: implementation status, contributing, the live vector backend tests, governance, and the changelog."
 ---
 

@@ -1,12 +1,12 @@
 ---
 title: Reference
-nav_order: 5
+nav_order: 6
 description: Lookup pages for the CLI, the HTTP API, the registry configuration keys, error codes, audit events, and the glossary.
 ---
 
 # Reference
 
-The reference pages describe each surface of the Podium registry for lookup: commands, endpoints, configuration keys, error codes, and audit records. For task-oriented guides, start from [Authoring](../authoring/), [Consuming](../consuming/), or [Deployment](../deployment/).
+The reference pages describe each surface of the Podium registry for lookup: commands, endpoints, configuration keys, error codes, and audit records. For task-oriented guides, start from [Authoring](../authoring/), [Consuming](../consuming/), [Managing the catalog](../managing/), or [Deployment](../deployment/).
 
 | Page | What it covers |
 |:--|:--|

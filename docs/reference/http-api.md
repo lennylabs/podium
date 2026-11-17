@@ -729,7 +729,7 @@ A `lint.colliding_descriptions` similarity is the word-set similarity of the two
 **Notes.**
 
 - The endpoint is a read endpoint, so a registry in read-only mode serves it.
-- [Overlap report](../consuming/browsing-the-catalog#overlap-report) describes how to read the report.
+- [Finding overlapping artifacts](../managing/overlap#check-the-live-catalog) describes how to read the report.
 
 ### `domain/analyze`
 

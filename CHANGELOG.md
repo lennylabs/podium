@@ -42,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Documentation
 
+- **A Managing the catalog section covers catalog upkeep**: the new `docs/managing/` section, placed between Consuming and Deployment, covers finding overlapping artifacts with `podium lint` and the catalog overlap report, answering usage questions from the audit records, changing and retiring artifacts and layers, and keeping lint results and harness listing budgets in check. Each page names the access a task needs: any user, the per-tenant `admin` role, or the operator. The semantic overlap explainer moves from the frontmatter reference, and the overlap report section moves from Browsing the catalog, into Finding overlapping artifacts.
 - **Governance names the proposal process for spec changes** (§1.6): `GOVERNANCE.md` and the Governance page describe the numbered proposals under `proposals/`, their review and approval states, and the rule that spec edits land before the code that depends on them. The unused `docs/rfc/` index and its published page are removed.
 
 ## [0.6.0] - 2026-11-10

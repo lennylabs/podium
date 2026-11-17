@@ -312,7 +312,7 @@ Every managed service is a non-collocated backend. For these backends, ingest wr
 
 ## Semantic overlap
 
-The `lint.semantic_overlap` check reads the search index this page configures. It is off by default, and `PODIUM_LINT_SEMANTIC_OVERLAP=on` turns it on. The check uses the backend and the embedding model that search uses, so it adds no second index and no second embedding of the catalog. Computing an artifact queries the index for its nearest rows and stores one overlap record per neighbour in the metadata store. [Semantic overlap](../../authoring/frontmatter-reference#semantic-overlap) describes the check, and [Lint](../../reference/configuration#lint) in the configuration reference lists its variables.
+The `lint.semantic_overlap` check reads the search index this page configures. It is off by default, and `PODIUM_LINT_SEMANTIC_OVERLAP=on` turns it on. The check uses the backend and the embedding model that search uses, so it adds no second index and no second embedding of the catalog. Computing an artifact queries the index for its nearest rows and stores one overlap record per neighbour in the metadata store. [Finding overlapping artifacts](../../managing/overlap#turn-on-the-semantic-check) describes the check, and [Lint](../../reference/configuration#lint) in the configuration reference lists its variables.
 
 Each backend computes the similarity as follows:
 

@@ -6,7 +6,7 @@ description: "Every podium subcommand with its usage, flags, defaults, and exit 
 
 # CLI
 
-This page lists every `podium` subcommand, grouped by purpose, with its usage, flags, defaults, and exit behavior. It is a lookup reference. For task-oriented guides, see [Quickstart](../getting-started/quickstart), [Authoring](../authoring/), [Consuming](../consuming/), and [Deployment](../deployment/).
+This page lists every `podium` subcommand, grouped by purpose, with its usage, flags, defaults, and exit behavior. It is a lookup reference. For task-oriented guides, see [Quickstart](../getting-started/quickstart), [Authoring](../authoring/), [Consuming](../consuming/), [Managing the catalog](../managing/), and [Deployment](../deployment/).
 
 The `podium` CLI is a single binary.
 

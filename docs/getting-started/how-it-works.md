@@ -435,6 +435,7 @@ Continue with the guide that fits the task:
 - **Deliver them into a harness**: [Configure your harness](../consuming/configure-your-harness)
 - **Narrow what a workspace receives**: [Selective materialization](../consuming/selective-materialization)
 - **Let an agent find them at runtime**: [Browsing the catalog](../consuming/browsing-the-catalog)
+- **Look after the catalog once it is in use**: [Managing the catalog](../managing/)
 - **Connect Git repositories as layer sources**: [Connecting layer sources](../deployment/content/layer-sources)
 - **Run Podium for a team or organization**: [Deployment guide](../deployment/)
 - **Call the API directly**: [Reference](../reference/)

@@ -93,6 +93,7 @@ ships by default and what can replace it.
 | [Getting Started](getting-started/) | The reading order for the evaluation, the quickstart, the vocabulary, and the architecture. |
 | [Authoring](authoring/) | Writing artifacts: types, frontmatter, domains, bundled resources, rule modes, hooks, and hints. |
 | [Consuming](consuming/) | Delivering artifacts into a harness, narrowing what a workspace receives, runtime discovery, verifying deliveries, and the SDKs. |
+| [Managing the catalog](managing/) | Finding overlapping artifacts, reading usage from the audit records, changing and retiring artifacts, and keeping the catalog within lint and listing limits. |
 | [Deployment](deployment/) | Choosing and running a deployment mode, identity and tenants, layer sources and access control, marketplace publishing, day-two operations, and the backing services. |
 | [Reference](reference/) | The CLI, the HTTP API, the configuration keys, error codes, audit events, and the glossary. |
 | [About](about/) | Implementation status, contributing, the live vector backend tests, governance, and the changelog. |

@@ -262,7 +262,7 @@ An unset or empty variable keeps the default. A value that does not parse, or th
 
 `podium lint` reads no search index, so the `PODIUM_LINT_SEMANTIC_*` variables take effect in the registry only, which reads them at startup. With `PODIUM_LINT_SEMANTIC_OVERLAP=on`, a registry whose embedding provider is empty or `none` and whose vector backend does not embed text itself refuses to start with `config.invalid`.
 
-[Skill lint checks](../authoring/frontmatter-reference#skill-lint-checks) describes the catalog advisories, and [Semantic overlap](../authoring/frontmatter-reference#semantic-overlap) describes the semantic check.
+[Skill lint checks](../authoring/frontmatter-reference#skill-lint-checks) describes the catalog advisories, and [Finding overlapping artifacts](../managing/overlap#turn-on-the-semantic-check) describes the semantic check.
 
 ## Vector index and embeddings
 

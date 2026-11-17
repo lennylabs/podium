@@ -1,6 +1,6 @@
 ---
 title: Deployment
-nav_order: 4
+nav_order: 5
 description: Choose a Podium deployment mode, then connect content, configure identity, and operate the registry with the task pages in this section.
 actions:
   - label: Choose a deployment mode

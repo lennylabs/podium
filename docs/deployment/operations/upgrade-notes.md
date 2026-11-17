@@ -190,7 +190,7 @@ A skill that 0.6.0 refused for nested metadata ingests at the next reingest of i
 
 ### Semantic overlap check
 
-0.7.0 adds the `lint.semantic_overlap` check, the catalog overlap report, and `podium admin rebuild-overlap`. [Semantic overlap](../../authoring/frontmatter-reference#semantic-overlap) describes the check.
+0.7.0 adds the `lint.semantic_overlap` check, the catalog overlap report, and `podium admin rebuild-overlap`. [Finding overlapping artifacts](../../managing/overlap) describes the check and the report.
 
 - Each 0.7.0 start creates the `overlap_records` table in the SQLite database and in each Postgres org schema if it is absent. The change is additive, and no existing table changes. A 0.6.0 process does not read the table, so a rollback leaves it in place unused.
 - The check is off by default, and a registry that leaves `PODIUM_LINT_SEMANTIC_OVERLAP` unset writes no records and runs no sweep.

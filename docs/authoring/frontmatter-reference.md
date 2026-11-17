@@ -255,17 +255,7 @@ The `lint.thin_description`, `lint.colliding_descriptions`, and `lint.near_dupli
 
 Descriptions that follow one template overlap. "Use when the user asks to create a pdf" and "Use when the user asks to merge a pdf" share 8 of their 10 distinct words, a similarity of 0.8, so `lint.colliding_descriptions` reports the pair. Rewrite one description to state what distinguishes the skill, raise `PODIUM_LINT_DESCRIPTION_SIMILARITY`, or list the code under `lint_suppress` in the `ARTIFACT.md` of both artifacts. Suppression is one-sided: listing the code in one artifact silences that artifact's warning, and the other artifact still draws a warning that names it. A skill with no `ARTIFACT.md` cannot suppress a code, so add an `ARTIFACT.md` that lists it.
 
-### Semantic overlap
-
-`lint.colliding_descriptions` compares the words of two descriptions, so it finds copies and descriptions built from one template. It does not find two descriptions that say the same thing in different words, such as "Pay a vendor invoice from accounts payable" and "Settle a supplier bill". A registry finds those with the `lint.semantic_overlap` warning, which compares the embedding vectors that search already computes for each artifact. Two artifacts whose vectors have a cosine similarity at or above the threshold are peers, and the warning names each peer with its similarity as a percentage.
-
-The check runs in the registry alone. `podium lint` reads no search index and does not run it. It is off by default, and an operator turns it on with `PODIUM_LINT_SEMANTIC_OVERLAP=on`. The registry needs a search index and an embedding source: an embedding provider, or a vector backend that embeds text with its own hosted model. A registry with the check on and neither source refuses to start with `config.invalid`. A managed index (Pinecone, Weaviate Cloud, or Qdrant Cloud) must use the cosine metric, as [Vector backends](../deployment/services/vector-backends#semantic-overlap) describes.
-
-The registry stores the similarity of each artifact to its nearest neighbours and applies the threshold when it reads the records. It computes an artifact at ingest, through a periodic sweep, after a full re-embed, and on demand with `podium admin rebuild-overlap`. On a collocated backend (pgvector or sqlite-vec), an ingest computes within the cycle and reports the warning among its non-blocking advisories. On a managed backend, the registry computes when the vector reaches the index, after the ingest answers. In both cases the [catalog overlap report](../consuming/browsing-the-catalog#overlap-report) shows the stored result across every layer the caller can see.
-
-Similarity values depend on the embedding model, so the default threshold of 0.85 is an uncalibrated starting point. To tune it, run `podium overlap --threshold <n>` against the catalog at a few values, since the threshold applies when records are read and a new value needs no recomputation. Read the pairs each value reports, and set `PODIUM_LINT_SEMANTIC_SIMILARITY` to the value whose pairs are true overlaps. [Lint](../reference/configuration#lint) in the configuration reference lists the variables, including the number of neighbours stored per artifact and the sweep interval.
-
-An artifact whose `ARTIFACT.md` lists `lint.semantic_overlap` under `lint_suppress` raises no diagnostic of that code, and its peers still name it.
+The registry also runs `lint.semantic_overlap`, which finds two descriptions that say the same thing in different words, as [Finding overlapping artifacts](../managing/overlap) describes.
 
 ---
 
