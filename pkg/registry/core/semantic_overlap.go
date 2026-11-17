@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"time"
 
 	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/lint"
@@ -192,15 +193,8 @@ func cosineNeighbors(ctx context.Context, scorer vector.CosineScorer, tenant str
 
 // nearestServedPeers finds rec's nearest peers: the configured number of
 // artifacts other than rec's whose current served versions (served maps an
-// identifier to it) have the rows nearest rec's projection. The index keeps a
-// row for every ingested version, and rows of earlier versions, rec's own
-// included, often lie nearest, so a query of exactly that many rows can come
-// back with no peer at all. The computation therefore starts at one more row
-// than the configured count and doubles the query until it has found that
-// many distinct artifacts, the index returns fewer rows than asked, or the
-// query reaches overlapQueryRowFactor times its first size. A peer's nearest
-// row is kept, and the peers come back by descending similarity and then by
-// identifier.
+// identifier to it) have the rows nearest rec's projection, by descending
+// similarity and then by identifier. A peer's nearest row is kept.
 //
 // Spec: §7.3.1
 func (r *Registry) nearestServedPeers(ctx context.Context, rec store.ManifestRecord, served map[string]string) ([]overlapNeighbor, error) {
@@ -208,28 +202,67 @@ func (r *Registry) nearestServedPeers(ctx context.Context, rec store.ManifestRec
 	if err != nil {
 		return nil, err
 	}
+	rows, err := r.widenedPeerRows(ctx, src, rec.ArtifactID, served)
+	if err != nil {
+		return nil, err
+	}
+	peers, err := src.score(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(peers, func(i, j int) bool {
+		if peers[i].similarity != peers[j].similarity {
+			return peers[i].similarity > peers[j].similarity
+		}
+		return peers[i].artifactID < peers[j].artifactID
+	})
+	return peers[:min(len(peers), r.overlap.semantic.Neighbors)], nil
+}
+
+// overlapRowLimit returns the most rows one query of a computation asks:
+// overlapQueryRowFactor times one more than the configured neighbour count,
+// and no more than the backend accepts in one query.
+//
+// Spec: §7.3.1
+func (r *Registry) overlapRowLimit() int {
+	limit := overlapQueryRowFactor * (r.overlap.semantic.Neighbors + 1)
+	if backend := vector.MaxQueryRowsOf(r.vector); backend > 0 {
+		limit = min(limit, backend)
+	}
+	return limit
+}
+
+// widenedPeerRows returns the served peer rows of self's nearest index rows.
+// The index keeps a row for every ingested version, and rows of earlier
+// versions, self's own included, often lie nearest, so a query of exactly the
+// configured count can come back with no peer at all. The computation
+// therefore starts at one more row than the configured count and doubles the
+// query until it has found that many distinct artifacts, the index returns
+// fewer rows than asked, or the query reaches overlapRowLimit. Only the first
+// query's failure fails the computation: a later one ends the widening, and
+// the rows the previous query found are kept, because they are the nearest
+// rows of a smaller query that succeeded and the larger query would only add
+// rows after them.
+//
+// Spec: §7.3.1
+func (r *Registry) widenedPeerRows(ctx context.Context, src neighborSource, self string, served map[string]string) ([]vector.Match, error) {
 	n := r.overlap.semantic.Neighbors
-	limit := overlapQueryRowFactor * (n + 1)
-	for k := n + 1; ; k = min(2*k, limit) {
+	limit := r.overlapRowLimit()
+	var rows []vector.Match
+	for k, first := min(n+1, limit), true; ; k, first = min(2*k, limit), false {
 		matches, err := src.query(ctx, k)
 		if err != nil {
-			return nil, err
-		}
-		rows := servedPeerRows(matches, rec.ArtifactID, served)
-		if len(rows) < n && len(matches) >= k && k < limit {
-			continue
-		}
-		peers, err := src.score(ctx, rows)
-		if err != nil {
-			return nil, err
-		}
-		sort.Slice(peers, func(i, j int) bool {
-			if peers[i].similarity != peers[j].similarity {
-				return peers[i].similarity > peers[j].similarity
+			if first {
+				return nil, err
 			}
-			return peers[i].artifactID < peers[j].artifactID
-		})
-		return peers[:min(len(peers), n)], nil
+			log.Printf("%s: %s: the widened query of %d rows failed, keeping the %d peers found: %v",
+				lint.SemanticOverlapCode, self, k, len(rows), err)
+			return rows, nil
+		}
+		rows = servedPeerRows(matches, self, served)
+		if len(rows) >= n || len(matches) < k || k >= limit {
+			return rows, nil
+		}
 	}
 }
 
@@ -249,32 +282,42 @@ func servedPeerRows(matches []vector.Match, self string, served map[string]strin
 	return out
 }
 
-// computeOverlap computes the overlap records of rec, the current served
-// version of its artifact. It finds rec's nearest served peers and stores one
-// record for each, whatever its similarity, owned by rec's artifact; the
-// store replaces only the records rec's artifact owns and records the
-// computation's version and model. A failed index query returns its error and
-// leaves the stored records and the computation entry in place.
+// errOverlapSuperseded reports a computation that stored nothing because a
+// computation of a newer version of its artifact stored first. It is not a
+// failure.
+var errOverlapSuperseded = errors.New("a computation of a newer version is stored")
+
+// pendingOverlap is one computation whose index queries are done and whose
+// records are not yet stored: rec, the version computed, and its peers.
+type pendingOverlap struct {
+	rec   store.ManifestRecord
+	peers []overlapNeighbor
+}
+
+// storeOverlap stores the overlap records of p, one for each peer, whatever
+// its similarity, owned by p's artifact and stamped now; the store replaces
+// only the records that artifact owns and records the computation's version
+// and model. It returns errOverlapSuperseded when the store refuses the
+// computation because a computation of another version stored after now.
 //
 // Spec: §7.3.1
-func (r *Registry) computeOverlap(ctx context.Context, rec store.ManifestRecord, served map[string]string) error {
-	peers, err := r.nearestServedPeers(ctx, rec, served)
-	if err != nil {
-		return fmt.Errorf("index query for %s@%s: %w", rec.ArtifactID, rec.Version, err)
-	}
-	now := r.overlap.clock.Now()
+func (r *Registry) storeOverlap(ctx context.Context, p pendingOverlap, now time.Time) error {
 	model := r.overlapModel()
-	recs := make([]store.OverlapRecord, 0, len(peers))
-	for _, p := range peers {
+	recs := make([]store.OverlapRecord, 0, len(p.peers))
+	for _, peer := range p.peers {
 		recs = append(recs, store.OverlapRecord{
-			Owner: rec.ArtifactID, OwnerVersion: rec.Version,
-			Peer: p.artifactID, PeerVersion: p.version,
-			Similarity: p.similarity, ModelID: model, ComputedAt: now,
+			Owner: p.rec.ArtifactID, OwnerVersion: p.rec.Version,
+			Peer: peer.artifactID, PeerVersion: peer.version,
+			Similarity: peer.similarity, ModelID: model, ComputedAt: now,
 		})
 	}
-	comp := store.OverlapComputation{ArtifactID: rec.ArtifactID, Version: rec.Version, ModelID: model, ComputedAt: now}
-	if err := r.store.ReplaceOverlapRecords(ctx, r.TenantFor(ctx), comp, recs); err != nil {
-		return fmt.Errorf("store overlap records for %s: %w", rec.ArtifactID, err)
+	comp := store.OverlapComputation{ArtifactID: p.rec.ArtifactID, Version: p.rec.Version, ModelID: model, ComputedAt: now}
+	err := r.store.ReplaceOverlapRecords(ctx, r.TenantFor(ctx), comp, recs)
+	if errors.Is(err, store.ErrOverlapSuperseded) {
+		return fmt.Errorf("%w: %s@%s", errOverlapSuperseded, p.rec.ArtifactID, p.rec.Version)
+	}
+	if err != nil {
+		return fmt.Errorf("store overlap records for %s: %w", p.rec.ArtifactID, err)
 	}
 	return nil
 }
@@ -309,26 +352,103 @@ type OverlapComputeResult struct {
 	Failed   int `json:"failed"`
 }
 
+// overlapConfirmChunk is the number of computations of a batch whose index
+// queries run before the registry re-reads the served set to confirm their
+// versions and stores their records. It bounds the time between a
+// computation's confirmation and its store to a chunk's store writes, and
+// keeps the served-set listings of a batch to one per chunk rather than one
+// per computation. It sets no observable result, so it is not operator-tunable.
+const overlapConfirmChunk = 32
+
 // computeOverlapBatch computes each record in subjects, in order, and returns
-// the identifiers it computed and the count of failures. A failure is logged
-// with the artifact identifier and does not stop the batch; a cancelled
-// context stops it.
+// the identifiers it computed and the count of failures. The batch runs in
+// chunks of overlapConfirmChunk: it queries the index for each computation of
+// a chunk against served, then stores the chunk's records. A failure is
+// logged with the artifact identifier and does not stop the batch; a
+// cancelled context stops it.
+//
+// Spec: §7.3.1
 func (r *Registry) computeOverlapBatch(ctx context.Context, subjects []store.ManifestRecord, served map[string]store.ManifestRecord) ([]string, int) {
 	versions := servedVersions(served)
 	var computed []string
 	failed := 0
-	for _, m := range subjects {
+	for start := 0; start < len(subjects) && ctx.Err() == nil; start += overlapConfirmChunk {
+		chunk := subjects[start:min(start+overlapConfirmChunk, len(subjects))]
+		pending, queryFailed := r.findOverlapPeers(ctx, chunk, versions)
+		ids, storeFailed := r.storeOverlapChunk(ctx, pending)
+		computed = append(computed, ids...)
+		failed += queryFailed + storeFailed
+	}
+	return computed, failed
+}
+
+// findOverlapPeers runs the index queries of each record in chunk and returns
+// the computations that found their peers and the count that failed. A failed
+// first index query is logged and leaves that artifact's stored records and
+// computation entry in place.
+func (r *Registry) findOverlapPeers(ctx context.Context, chunk []store.ManifestRecord, versions map[string]string) ([]pendingOverlap, int) {
+	out := make([]pendingOverlap, 0, len(chunk))
+	failed := 0
+	for _, m := range chunk {
 		if ctx.Err() != nil {
 			break
 		}
-		if err := r.computeOverlap(ctx, m, versions); err != nil {
+		peers, err := r.nearestServedPeers(ctx, m, versions)
+		if err != nil {
+			log.Printf("%s: index query for %s@%s: %v", lint.SemanticOverlapCode, m.ArtifactID, m.Version, err)
+			failed++
+			continue
+		}
+		out = append(out, pendingOverlap{rec: m, peers: peers})
+	}
+	return out, failed
+}
+
+// storeOverlapChunk stores the records of each computation in pending whose
+// version is still its artifact's current served version, and returns the
+// identifiers stored and the count that failed.
+//
+// The served set a batch reads at its start can be stale by the time its
+// computations store, and §7.3.1 requires a computation to store nothing when
+// its version is no longer served by then, so the chunk re-reads the served
+// set first and skips a computation whose version it no longer finds; a later
+// computation of the newer version is due. The chunk's time is stamped before
+// that read. A computation of a newer version that stores after the read was
+// stamped later, so the store refuses this chunk's computation of the older
+// version (store.ErrOverlapSuperseded) rather than overwrite it. A skipped or
+// refused computation stored nothing and counts as neither stored nor failed.
+//
+// Spec: §7.3.1
+func (r *Registry) storeOverlapChunk(ctx context.Context, pending []pendingOverlap) ([]string, int) {
+	if len(pending) == 0 || ctx.Err() != nil {
+		return nil, 0
+	}
+	now := r.overlap.clock.Now()
+	current, err := r.servedArtifacts(ctx)
+	if err != nil {
+		log.Printf("%s: confirm the served versions of %d computations: %v", lint.SemanticOverlapCode, len(pending), err)
+		return nil, len(pending)
+	}
+	var stored []string
+	failed := 0
+	for _, p := range pending {
+		if cur, ok := current[p.rec.ArtifactID]; !ok || cur.Version != p.rec.Version {
+			log.Printf("%s: skipped %s@%s: the version is no longer served", lint.SemanticOverlapCode, p.rec.ArtifactID, p.rec.Version)
+			continue
+		}
+		err := r.storeOverlap(ctx, p, now)
+		if errors.Is(err, errOverlapSuperseded) {
+			log.Printf("%s: skipped: %v", lint.SemanticOverlapCode, err)
+			continue
+		}
+		if err != nil {
 			log.Printf("%s: %v", lint.SemanticOverlapCode, err)
 			failed++
 			continue
 		}
-		computed = append(computed, m.ArtifactID)
+		stored = append(stored, p.rec.ArtifactID)
 	}
-	return computed, failed
+	return stored, failed
 }
 
 // ComputeOverlap computes the §7.3.1 overlap records of each (artifact,

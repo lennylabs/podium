@@ -1618,8 +1618,15 @@ func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 
 // ReplaceOverlapRecords removes the records the computed artifact owns,
 // stores recs, and upserts the computation entry in one transaction in the
-// org schema. Two replicas that compute one artifact at the same time write
-// the same keys, and the later commit wins.
+// org schema. It returns ErrOverlapSuperseded, changing nothing, when the
+// stored entry supersedes comp.
+//
+// At READ COMMITTED, two concurrent calls for one artifact would each delete
+// the rows committed before they started and insert their own, leaving the
+// union of both peer sets. The transaction therefore first takes a
+// transaction-scoped advisory lock on the (tenant, artifact) pair, so the
+// calls run one after the other, the later one deletes the earlier one's
+// rows, and the entry it reads is the latest committed one.
 func (p *Postgres) ReplaceOverlapRecords(ctx context.Context, tenantID string, comp OverlapComputation, recs []OverlapRecord) error {
 	comp, norm, err := normalizeOverlapComputation(tenantID, comp, recs)
 	if err != nil {
@@ -1635,14 +1642,25 @@ func (p *Postgres) ReplaceOverlapRecords(ctx context.Context, tenantID string, c
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockOverlapOwner(ctx, tx, tenantID, comp.ArtifactID); err != nil {
+		return err
+	}
+	var prev OverlapComputation
+	err = tx.QueryRowContext(ctx, `
+		SELECT version, computed_at FROM semantic_overlap_computations
+		WHERE tenant_id = $1 AND artifact_id = $2`, tenantID, comp.ArtifactID).Scan(&prev.Version, &prev.ComputedAt)
+	switch {
+	case err == nil && supersededBy(prev, comp):
+		return ErrOverlapSuperseded
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM semantic_overlap_records WHERE tenant_id = $1 AND owner_id = $2`,
 		tenantID, comp.ArtifactID); err != nil {
 		return err
 	}
 	for _, r := range norm {
-		// The upsert covers a concurrent computation of the same owner that
-		// committed between this transaction's delete and its insert.
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO semantic_overlap_records
 				(tenant_id, owner_id, owner_version, peer_id, peer_version, similarity, model_id, computed_at)
@@ -1664,6 +1682,19 @@ func (p *Postgres) ReplaceOverlapRecords(ctx context.Context, tenantID string, c
 		return err
 	}
 	return tx.Commit()
+}
+
+// lockOverlapOwner takes the transaction-scoped advisory lock that serializes
+// the overlap writes of one (tenant, artifact) pair. The key is a 64-bit hash
+// of a namespaced string (Postgres text holds no NUL, so the parts are joined
+// by the unit separator), and a collision with another pair only serializes
+// two unrelated writes.
+func lockOverlapOwner(ctx context.Context, tx *sql.Tx, tenantID, artifactID string) error {
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		"podium.semantic_overlap\x1f"+tenantID+"\x1f"+artifactID); err != nil {
+		return fmt.Errorf("store: lock the overlap records of %s: %w", artifactID, err)
+	}
+	return nil
 }
 
 // ListOverlapRecords returns the tenant's records ordered by owner and peer.
@@ -1737,6 +1768,9 @@ func (p *Postgres) DeleteOverlapArtifacts(ctx context.Context, tenantID string, 
 	}
 	defer func() { _ = tx.Rollback() }()
 	for _, id := range artifactIDs {
+		if err := lockOverlapOwner(ctx, tx, tenantID, id); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `
 			DELETE FROM semantic_overlap_records WHERE tenant_id = $1 AND owner_id = $2`, tenantID, id); err != nil {
 			return err

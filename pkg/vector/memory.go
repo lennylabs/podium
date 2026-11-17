@@ -35,6 +35,10 @@ func NewMemory(dim int) *Memory {
 // ID returns "memory".
 func (m *Memory) ID() string { return "memory" }
 
+// MaxQueryRows returns 0: the in-process index ranks every row of the tenant
+// and returns any topK.
+func (*Memory) MaxQueryRows() int { return 0 }
+
 // Dimensions returns the configured dimension.
 func (m *Memory) Dimensions() int { return m.dim }
 

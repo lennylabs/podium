@@ -11,11 +11,13 @@ import (
 // overlapStatementFailures breaks the overlap tables of tenant step by step
 // through exec and asserts that every overlap call whose statement fails
 // returns the error rather than reporting success or an empty result. The
-// computation table goes first, so a replace fails at the entry upsert and a
-// delete at the entry delete; the record table is then replaced by one that
-// lacks the record columns, so a replace fails at the record insert and a
-// list at its query; dropping it makes a replace fail at the record delete
-// and a delete at its first statement.
+// computation table is first replaced by one that lacks the model column, so
+// a replace reads no stored entry and fails at the entry upsert; dropping it
+// makes a replace fail at the entry read and a delete at the entry delete.
+// The record table is then replaced by one that lacks the record columns, so
+// a replace fails at the record insert and a list at its query; dropping it
+// makes a replace fail at the record delete and a delete at its first
+// statement.
 func overlapStatementFailures(t *testing.T, s Store, tenant string, exec func(stmt string)) {
 	t.Helper()
 	ctx := context.Background()
@@ -24,6 +26,9 @@ func overlapStatementFailures(t *testing.T, s Store, tenant string, exec func(st
 	listRecs := func() error { _, err := s.ListOverlapRecords(ctx, tenant); return err }
 	listRuns := func() error { _, err := s.ListOverlapComputations(ctx, tenant); return err }
 	var errs []error
+	exec(`DROP TABLE semantic_overlap_computations`)
+	exec(`CREATE TABLE semantic_overlap_computations (tenant_id TEXT, artifact_id TEXT, version TEXT, computed_at TEXT)`)
+	errs = append(errs, s.ReplaceOverlapRecords(ctx, tenant, comp, recs))
 	exec(`DROP TABLE semantic_overlap_computations`)
 	errs = append(errs, s.ReplaceOverlapRecords(ctx, tenant, comp, recs), s.DeleteOverlapArtifacts(ctx, tenant, []string{"a"}), listRuns())
 	exec(`DROP TABLE semantic_overlap_records`)

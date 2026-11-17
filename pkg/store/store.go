@@ -524,7 +524,11 @@ type Store interface {
 	// record must be owned by comp.ArtifactID and name another artifact as
 	// its peer, or the call returns ErrInvalidOverlapRecord and changes
 	// nothing. An empty recs leaves the artifact owning no record and still
-	// records the computation.
+	// records the computation. When the stored entry is for another version
+	// and its ComputedAt is after comp.ComputedAt, the call returns
+	// ErrOverlapSuperseded and changes nothing, because a computation of a
+	// newer served version stored first. Concurrent calls for one artifact
+	// are serialized, so the artifact's records come from one of them.
 	ReplaceOverlapRecords(ctx context.Context, tenantID string, comp OverlapComputation, recs []OverlapRecord) error
 	// ListOverlapRecords returns every record of tenantID ordered by owner
 	// and then peer.

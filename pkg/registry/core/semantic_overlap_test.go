@@ -56,15 +56,20 @@ var overlapVectors = map[string][]float32{
 
 // failingIndex is the memory backend with a query that fails on demand. It
 // records the row count of each query, so a test can follow a widening
-// computation.
+// computation, and runs onQuery, when set, before each query, so a test can
+// change the catalog while a computation is in flight.
 type failingIndex struct {
 	*vector.Memory
-	fail bool
-	ks   []int
+	fail    bool
+	ks      []int
+	onQuery func()
 }
 
 func (f *failingIndex) QueryModel(ctx context.Context, tenant string, vec []float32, k int, model string) ([]vector.Match, error) {
 	f.ks = append(f.ks, k)
+	if f.onQuery != nil {
+		f.onQuery()
+	}
 	if f.fail {
 		return nil, errors.New("index unreachable")
 	}

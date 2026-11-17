@@ -593,7 +593,9 @@ func (s *Memory) PurgeExpiredLayerDeletions(_ context.Context, before time.Time)
 
 // ReplaceOverlapRecords removes the records the computed artifact owns,
 // stores recs, and records the computation, under the store lock so the swap
-// is atomic.
+// is atomic and concurrent calls for one artifact store one call's records.
+// It returns ErrOverlapSuperseded, changing nothing, when the stored entry
+// supersedes comp.
 func (s *Memory) ReplaceOverlapRecords(_ context.Context, tenantID string, comp OverlapComputation, recs []OverlapRecord) error {
 	comp, norm, err := normalizeOverlapComputation(tenantID, comp, recs)
 	if err != nil {
@@ -601,6 +603,9 @@ func (s *Memory) ReplaceOverlapRecords(_ context.Context, tenantID string, comp 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if prev, ok := s.overlapRuns[tenantID][comp.ArtifactID]; ok && supersededBy(prev, comp) {
+		return ErrOverlapSuperseded
+	}
 	bucket := s.overlaps[tenantID]
 	if bucket == nil {
 		bucket = map[[2]string]OverlapRecord{}

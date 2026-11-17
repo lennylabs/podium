@@ -38,13 +38,17 @@ func (r *Registry) RebuildOverlap(ctx context.Context) (OverlapComputeResult, er
 // by key, two replicas computing one artifact store the same result. A failed
 // deletion is logged and does not stop the computations.
 //
+// The pass reads the records and the computation entries before the served
+// set. An artifact ingested and computed while the pass runs is then either
+// absent from the records the pass read or present in the served set, so the
+// pass never deletes it as unserved. Reading the served set first would let
+// such an artifact's fresh records be deleted. A computation of the pass
+// whose version was superseded during the pass stores nothing (see
+// storeOverlapChunk).
+//
 // Spec: §7.3.1
 func (r *Registry) RefreshOverlap(ctx context.Context) (OverlapComputeResult, error) {
 	if err := r.overlapReady(); err != nil {
-		return OverlapComputeResult{}, err
-	}
-	served, err := r.servedArtifacts(ctx)
-	if err != nil {
 		return OverlapComputeResult{}, err
 	}
 	tenant := r.TenantFor(ctx)
@@ -53,6 +57,10 @@ func (r *Registry) RefreshOverlap(ctx context.Context) (OverlapComputeResult, er
 		return OverlapComputeResult{}, err
 	}
 	runs, err := r.store.ListOverlapComputations(ctx, tenant)
+	if err != nil {
+		return OverlapComputeResult{}, err
+	}
+	served, err := r.servedArtifacts(ctx)
 	if err != nil {
 		return OverlapComputeResult{}, err
 	}

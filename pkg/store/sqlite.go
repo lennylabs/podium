@@ -1116,7 +1116,13 @@ func boolToInt(b bool) int {
 }
 
 // ReplaceOverlapRecords removes the records the computed artifact owns,
-// stores recs, and upserts the computation entry in one transaction.
+// stores recs, and upserts the computation entry in one transaction. It
+// returns ErrOverlapSuperseded, changing nothing, when the stored entry
+// supersedes comp. The transaction's first statement is the delete, a write,
+// so SQLite grants it the database's single write lock before it reads the
+// entry: a concurrent call for the same artifact waits under the busy timeout
+// and then replaces this call's records whole, and the entry read is the
+// latest committed one.
 func (s *SQLite) ReplaceOverlapRecords(ctx context.Context, tenantID string, comp OverlapComputation, recs []OverlapRecord) error {
 	comp, norm, err := normalizeOverlapComputation(tenantID, comp, recs)
 	if err != nil {
@@ -1130,6 +1136,12 @@ func (s *SQLite) ReplaceOverlapRecords(ctx context.Context, tenantID string, com
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM semantic_overlap_records WHERE tenant_id = ? AND owner_id = ?`,
 		tenantID, comp.ArtifactID); err != nil {
+		return err
+	}
+	if superseded, err := s.overlapSupersededTx(ctx, tx, comp); err != nil || superseded {
+		if err == nil {
+			err = ErrOverlapSuperseded
+		}
 		return err
 	}
 	for _, r := range norm {
@@ -1150,6 +1162,26 @@ func (s *SQLite) ReplaceOverlapRecords(ctx context.Context, tenantID string, com
 		return err
 	}
 	return tx.Commit()
+}
+
+// overlapSupersededTx reports whether the computation entry stored for
+// comp's artifact supersedes comp, reading it inside tx.
+func (s *SQLite) overlapSupersededTx(ctx context.Context, tx *sql.Tx, comp OverlapComputation) (bool, error) {
+	var prev OverlapComputation
+	var at string
+	err := tx.QueryRowContext(ctx, `
+		SELECT version, computed_at FROM semantic_overlap_computations
+		WHERE tenant_id = ? AND artifact_id = ?`, comp.TenantID, comp.ArtifactID).Scan(&prev.Version, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if prev.ComputedAt, err = time.Parse(time.RFC3339Nano, at); err != nil {
+		return false, fmt.Errorf("store: parse overlap computed_at %q: %w", at, err)
+	}
+	return supersededBy(prev, comp), nil
 }
 
 // ListOverlapRecords returns the tenant's records ordered by owner and peer.

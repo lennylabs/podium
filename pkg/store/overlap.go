@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -13,6 +14,24 @@ import (
 // computed artifact or names it as its own peer, which a correct computation
 // never produces.
 var ErrInvalidOverlapRecord = &spi.Error{Code: "registry.invalid_argument", Message: "store: invalid overlap record"}
+
+// ErrOverlapSuperseded is returned by ReplaceOverlapRecords when the stored
+// computation entry of the artifact is for another version and was computed
+// after the given one. The call changes nothing. It is never reported to a
+// client: the registry treats it as a computation that stored nothing.
+var ErrOverlapSuperseded = errors.New("store: a later computation of another version is stored")
+
+// supersededBy reports whether the stored entry prev supersedes comp: it is
+// for another version and was computed after comp. The registry stamps a
+// computation before it confirms its version is still served, so a
+// computation of a newer version that stored after that confirmation carries
+// the later time. The same version is never superseded, so two computations
+// of one version both store, one after the other.
+//
+// Spec: §7.3.1
+func supersededBy(prev, comp OverlapComputation) bool {
+	return prev.Version != comp.Version && prev.ComputedAt.After(comp.ComputedAt)
+}
 
 // OverlapRecord is one §7.3.1 semantic overlap record: the cosine similarity
 // of the owner's embedding projection at OwnerVersion and the peer's at

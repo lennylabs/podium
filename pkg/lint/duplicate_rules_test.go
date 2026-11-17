@@ -276,18 +276,21 @@ func TestIsProseResource_Names(t *testing.T) {
 // Spec: §7.3.1 — a license file's name, lowercased, without its final
 // extension, and split at its -, _, and . characters, is license, licence,
 // copying, or notice alone or followed by one more part, or has ofl as its
-// first or last part. notice-of-changes.md and privacy-notice.md are prose
-// resources.
+// first or last part, after every part that consists only of digits is
+// removed, so LICENSE_1_0.txt and LICENSE-APACHE-2.0.txt are license files.
+// notice-of-changes.md and privacy-notice.md are prose resources.
 func TestIsLicenseFile_Names(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"LICENSE.txt", "LICENSE", "LICENSE-MIT", "COPYING", "NOTICE", "OFL.txt",
-		"OFL-eb-garamond.txt", "ArsenalSC-OFL.txt", "fonts/ofl_inter.txt", "Licence.md", "license.apache.txt"} {
+		"OFL-eb-garamond.txt", "ArsenalSC-OFL.txt", "fonts/ofl_inter.txt", "Licence.md", "license.apache.txt",
+		"LICENSE_1_0.txt", "LICENSE-APACHE-2.0.txt", "COPYING.3", "licenses/LICENSE-2.0.md", "OFL-1.1.txt"} {
 		if !isLicenseFile(name) {
 			t.Errorf("isLicenseFile(%q) = false, want true", name)
 		}
 	}
 	for _, name := range []string{"notice-of-changes.md", "privacy-notice.md", "license-compliance-guide.md",
-		"licensing-guide.md", "foo.license.md", "my-ofl-notes.md", "notes.md", ".md", "-.txt"} {
+		"licensing-guide.md", "foo.license.md", "my-ofl-notes.md", "notes.md", ".md", "-.txt", "2024.md",
+		"1-2-3.txt", "notice-of-changes-2.md", "license-compliance-guide-2026.md"} {
 		if isLicenseFile(name) {
 			t.Errorf("isLicenseFile(%q) = true, want false", name)
 		}

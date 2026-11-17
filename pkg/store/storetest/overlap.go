@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -120,5 +121,73 @@ func overlapRecordsScopedToTenant(t *testing.T, s store.Store) {
 	got := overlapSummary(t, s, "a") + " | " + overlapSummary(t, s, "b")
 	if want := "a|x@1>y@1=0.90/m1/2026-11-17T12:00:00Z a|run:x@1/m1/2026-11-17T12:00:00Z | "; got != want {
 		t.Errorf("tenant-scoped records = %q, want %q", got, want)
+	}
+}
+
+// Spec: §7.3.1 — a computation stores nothing when its version is no longer
+// served by the time it would store. The store refuses an entry over a stored
+// entry of another version computed later, changing nothing, and accepts one
+// of the same version and one computed after the stored entry.
+func overlapSupersededComputation(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	at := func(id, version string, d time.Duration) store.OverlapComputation {
+		c := overlapRun(id, version, "m1")
+		c.ComputedAt = overlapAt.Add(d)
+		return c
+	}
+	must(t, s.ReplaceOverlapRecords(ctx, "a", at("x", "2.0.0", 0), []store.OverlapRecord{overlapRec("x", "2.0.0", "y", "1.0.0", 0.9)}))
+	stale := s.ReplaceOverlapRecords(ctx, "a", at("x", "1.0.0", -time.Minute), []store.OverlapRecord{overlapRec("x", "1.0.0", "z", "1.0.0", 0.8)})
+	refused := overlapSummary(t, s, "a")
+	must(t, s.ReplaceOverlapRecords(ctx, "a", at("x", "2.0.0", -time.Hour), []store.OverlapRecord{overlapRec("x", "2.0.0", "w", "1.0.0", 0.7)}))
+	must(t, s.ReplaceOverlapRecords(ctx, "a", at("x", "1.0.0", time.Minute), nil))
+	got := overlapSummary(t, s, "a")
+	wantRefused := "a|x@2.0.0>y@1.0.0=0.90/m1/2026-11-17T12:00:00Z a|run:x@2.0.0/m1/2026-11-17T12:00:00Z"
+	if !errors.Is(stale, store.ErrOverlapSuperseded) || refused != wantRefused || got != "a|run:x@1.0.0/m1/2026-11-17T12:01:00Z" {
+		t.Errorf("superseded computation: error %v\n after refusal %s\n want          %s\n final         %s",
+			stale, refused, wantRefused, got)
+	}
+}
+
+// Spec: §7.3.1 — two computations of one artifact at the same time store the
+// records of one of them. Concurrent replacements with disjoint peer sets
+// leave exactly one writer's peers.
+func overlapConcurrentReplace(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	const writers, rounds = 8, 5
+	var bad []string
+	for round := 0; round < rounds; round++ {
+		ready := make(chan struct{})
+		errs := make([]error, writers)
+		var wg sync.WaitGroup
+		for i := 0; i < writers; i++ {
+			wg.Add(1)
+			recs := []store.OverlapRecord{
+				overlapRec("x", "1.0.0", fmt.Sprintf("p%d-%d-a", round, i), "1.0.0", 0.9),
+				overlapRec("x", "1.0.0", fmt.Sprintf("p%d-%d-b", round, i), "1.0.0", 0.8),
+			}
+			go func() {
+				defer wg.Done()
+				<-ready
+				errs[i] = s.ReplaceOverlapRecords(ctx, "a", overlapRun("x", "1.0.0", "m1"), recs)
+			}()
+		}
+		close(ready)
+		wg.Wait()
+		recs, err := s.ListOverlapRecords(ctx, "a")
+		must(t, errors.Join(append(errs, err)...))
+		peers := make([]string, 0, len(recs))
+		for _, r := range recs {
+			peers = append(peers, r.Peer)
+		}
+		if len(peers) != 2 || strings.TrimSuffix(peers[0], "-a") != strings.TrimSuffix(peers[1], "-b") {
+			bad = append(bad, fmt.Sprintf("round %d: %v", round, peers))
+		}
+	}
+	if len(bad) > 0 {
+		t.Errorf("concurrent replacements left peers of more than one writer: %v", bad)
 	}
 }

@@ -345,7 +345,8 @@ func outboxCycle(t *testing.T) (*store.SQLite, *hostedIndex, *listingStore, *cor
 }
 
 // Spec: §7.3.1 — the outbox drain computes every artifact one pass wrote and
-// reads the tenant's served set once for the pass rather than once per row.
+// reads the tenant's served set once to select the computations and once to
+// confirm their versions before storing, rather than once per row.
 func TestOverlapOutboxHook_OneListingPerPass(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -353,8 +354,8 @@ func TestOverlapOutboxHook_OneListingPerPass(t *testing.T) {
 	w := &vectorDrainWorker{outbox: st, vec: idx, interval: time.Second, batch: 10, onWritten: overlapOutboxHook(reg)}
 	w.runOnce(ctx, time.Now().UTC().Add(time.Minute))
 	runs, err := st.ListOverlapComputations(ctx, "default")
-	if err != nil || len(runs) != 3 || counted.listings.Load() != 1 {
-		t.Errorf("after one drain pass: %d computation entries (%v) and %d served-set listings, want 3 and 1", len(runs), err, counted.listings.Load())
+	if err != nil || len(runs) != 3 || counted.listings.Load() != 2 {
+		t.Errorf("after one drain pass: %d computation entries (%v) and %d served-set listings, want 3 and 2", len(runs), err, counted.listings.Load())
 	}
 }
 

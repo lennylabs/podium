@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -171,19 +172,24 @@ func isProseResource(resourcePath string, b []byte) bool {
 
 // isLicenseFile reports whether a file name is a license file. The base name,
 // lowercased and without its final extension, is split into parts at its -,
-// _, and . characters. It is a license file when the parts are license,
+// _, and . characters, and every part that consists only of digits is
+// removed. It is a license file when the remaining parts are license,
 // licence, copying, or notice alone or followed by one more part, or when ofl
 // is the first or the last part. LICENSE, LICENSE-MIT, COPYING, NOTICE.md,
-// OFL.txt, and ArsenalSC-OFL.txt are license files. notice-of-changes.md,
-// privacy-notice.md, and licensing-guide.md are not: a license word that
-// leads a longer name, or that follows another word, names a document about
-// the subject rather than the license each package carries.
+// OFL.txt, ArsenalSC-OFL.txt, LICENSE_1_0.txt, and LICENSE-APACHE-2.0.txt are
+// license files: a version number in the name does not count as a part, so
+// the Boost and Apache file names match like their unversioned forms.
+// notice-of-changes.md, privacy-notice.md, and licensing-guide.md are not: a
+// license word that leads a longer name, or that follows another word, names
+// a document about the subject rather than the license each package carries.
 //
 // Spec: §7.3.1
 func isLicenseFile(name string) bool {
 	name = strings.ToLower(path.Base(name))
 	name = strings.TrimSuffix(name, path.Ext(name))
-	parts := strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' || r == '.' })
+	parts := slices.DeleteFunc(
+		strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' || r == '.' }),
+		isDigits)
 	if len(parts) == 0 {
 		return false
 	}
@@ -191,4 +197,11 @@ func isLicenseFile(name string) bool {
 		return true
 	}
 	return parts[0] == fontLicensePart || parts[len(parts)-1] == fontLicensePart
+}
+
+// isDigits reports whether a name part consists only of ASCII digits, as the
+// version numbers in LICENSE_1_0 and LICENSE-APACHE-2.0 do. FieldsFunc never
+// yields an empty part, so an empty string does not reach it.
+func isDigits(part string) bool {
+	return strings.Trim(part, "0123456789") == ""
 }

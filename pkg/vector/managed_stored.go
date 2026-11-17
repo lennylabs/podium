@@ -101,3 +101,13 @@ func (q *Qdrant) HostedModel() string { return q.InferenceModel }
 // HostedModel returns the Weaviate vectorizer module, or "" when the class is
 // storage-only.
 func (w *Weaviate) HostedModel() string { return w.Vectorizer }
+
+// MaxQueryRows returns the largest topK a Pinecone query accepts with
+// metadata included.
+func (*Pinecone) MaxQueryRows() int { return managedMaxQueryRows }
+
+// MaxQueryRows returns the conservative topK limit the managed backends share.
+func (*Qdrant) MaxQueryRows() int { return managedMaxQueryRows }
+
+// MaxQueryRows returns the conservative topK limit the managed backends share.
+func (*Weaviate) MaxQueryRows() int { return managedMaxQueryRows }
