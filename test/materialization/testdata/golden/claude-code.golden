@@ -7,15 +7,6 @@ description: Reviews pull requests for bugs.
 
 Review the diff and report defects.
 
-=== .claude/commands/deploy.md ===
----
-type: command
-version: 1.0.0
-description: Deploy the service.
----
-
-Run the deploy pipeline for the named environment.
-
 === .claude/rules/deep-review.md ===
 Perform a deep architectural review when invoked.
 
@@ -72,6 +63,29 @@ Enable strict type-checking in TypeScript files.
   }
 }
 
+=== .claude/skills/deploy/SKILL.md ===
+---
+disable-model-invocation: true
+name: deploy
+description: Deploy the service.
+metadata:
+  invocation: "user"
+---
+
+Run the deploy pipeline for the environment in $ARGUMENTS.
+
+=== .claude/skills/deploy/scripts/deploy.sh ===
+#!/bin/sh
+echo deploy "$1"
+
+=== .claude/skills/glossary/SKILL.md ===
+---
+name: glossary
+description: Reference material that defines company terms such as ARR.
+---
+
+ARR means annual recurring revenue.
+
 === .claude/skills/hello/SKILL.md ===
 ---
 compatibility: "Requires Python >=3.10"
@@ -115,13 +129,4 @@ List what changed yesterday and what is planned today.
     ]
   }
 }
-
-=== .podium/context/team/glossary/ARTIFACT.md ===
----
-type: context
-version: 1.0.0
-description: Company glossary.
----
-
-ARR means annual recurring revenue.
 

@@ -268,8 +268,8 @@ func TestSyncEquivalence_SharedMergeTargetsAreByteIdentical(t *testing.T) {
 	t.Parallel()
 	dir := collidingRegistry(t)
 
-	// codex cannot translate the §6.7.1 command cell, so the fixture carries
-	// no type: command artifact and both harnesses materialize the whole set.
+	// The fixture uses only types both harnesses grade ✓ in §6.7.1, so both
+	// materialize the whole set.
 	for _, adapterID := range []string{"claude-code", "codex"} {
 		adapterID := adapterID
 		t.Run(adapterID, func(t *testing.T) {

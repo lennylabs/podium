@@ -1,3 +1,29 @@
+=== .agents/skills/deploy/SKILL.md ===
+---
+name: deploy
+description: Deploy the service.
+metadata:
+  invocation: "user"
+---
+
+Run the deploy pipeline for the environment in $ARGUMENTS.
+
+=== .agents/skills/deploy/agents/openai.yaml ===
+policy:
+  allow_implicit_invocation: false
+
+=== .agents/skills/deploy/scripts/deploy.sh ===
+#!/bin/sh
+echo deploy "$1"
+
+=== .agents/skills/glossary/SKILL.md ===
+---
+name: glossary
+description: Reference material that defines company terms such as ARR.
+---
+
+ARR means annual recurring revenue.
+
 === .agents/skills/hello/SKILL.md ===
 ---
 compatibility: "Requires Python >=3.10"
@@ -60,15 +86,6 @@ command = "./scripts/fmt.sh"
 command = "npx"
 args = ["@acme/warehouse-mcp"]
 # podium:end:team/warehouse
-
-=== .podium/context/team/glossary/ARTIFACT.md ===
----
-type: context
-version: 1.0.0
-description: Company glossary.
----
-
-ARR means annual recurring revenue.
 
 === AGENTS.md ===
 <!-- podium:begin:team/tabs-always -->

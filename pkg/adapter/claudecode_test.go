@@ -79,20 +79,19 @@ func TestClaudeCode_AgentLayout(t *testing.T) {
 	}
 }
 
-// Spec: §6.7 — non-skill / non-rule / non-agent types land under
-// .claude/podium/<artifact-id>/ with the canonical layout.
+// Spec: §6.7 — an extension type lands under .claude/podium/<artifact-id>/
+// with the canonical layout.
 func TestClaudeCode_FallbackPathForOtherTypes(t *testing.T) {
 	t.Parallel()
 	src := Source{
-		ArtifactID:    "company-glossary",
-		ArtifactBytes: []byte("---\ntype: context\nversion: 1.0.0\n---\nbody\n"),
+		ArtifactID:    "company-sales",
+		ArtifactBytes: []byte("---\ntype: dataset\nversion: 1.0.0\n---\nbody\n"),
 	}
 	out, err := ClaudeCode{}.Adapt(context.Background(), src)
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)
 	}
-	// type: context materializes to the harness-neutral .podium/context/ bucket.
-	if len(out) != 1 || out[0].Path != ".podium/context/company-glossary/ARTIFACT.md" {
+	if len(out) != 1 || out[0].Path != ".claude/podium/company-sales/ARTIFACT.md" {
 		t.Errorf("got %+v", out)
 	}
 }

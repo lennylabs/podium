@@ -17,8 +17,6 @@ import (
 var wantGrid = map[Capability]string{
 	{Field: "type", Value: "skill"}:         "NXXNNNNNX",
 	{Field: "type", Value: "agent"}:         "NXXNNNNXX",
-	{Field: "type", Value: "context"}:       "NXNNNNNNN",
-	{Field: "type", Value: "command"}:       "NXXNXNNNX",
 	{Field: "type", Value: "mcp-server"}:    "NXXNNNNXX",
 	{Field: "description"}:                  "NXXNNNNXX",
 	{Field: "mcpServers"}:                   "NXXNXNNXX",
@@ -30,6 +28,7 @@ var wantGrid = map[Capability]string{
 	{Field: "rule_mode", Value: "auto"}:     "FXXNFFFFN",
 	{Field: "rule_mode", Value: "explicit"}: "FXXNFFFFN",
 	{Field: "hook_event"}:                   "NXXFNXNXX",
+	{Field: "invocation", Value: "user"}:    "NXXNNFFNX",
 }
 
 func wantSupport(r byte) Support {
@@ -155,12 +154,47 @@ func TestCapability_UsedCapabilities(t *testing.T) {
 	}
 	// A type with a type row emits it; a stray rule_mode on a non-rule type is
 	// ignored (the hygiene rule covers it).
-	ctx := &manifest.Artifact{Type: manifest.TypeContext, RuleMode: manifest.RuleModeGlob}
-	if got := UsedCapabilities(ctx); len(got) != 1 || got[0] != (Capability{Field: "type", Value: "context"}) {
-		t.Errorf("UsedCapabilities(context) = %v, want [type: context]", got)
+	srv := &manifest.Artifact{Type: manifest.TypeMCPServer, RuleMode: manifest.RuleModeGlob}
+	if got := UsedCapabilities(srv); len(got) != 1 || got[0] != (Capability{Field: "type", Value: "mcp-server"}) {
+		t.Errorf("UsedCapabilities(mcp-server) = %v, want [type: mcp-server]", got)
 	}
 	if got := UsedCapabilities(nil); got != nil {
 		t.Errorf("UsedCapabilities(nil) = %v", got)
+	}
+}
+
+// Spec: §6.7.1, §4.3.4 — UsedCapabilities emits the invocation: user row for a
+// skill whose resolved invocation is exactly user, and for no other value or
+// type, so an invalid value resolves to any on the guard path as well.
+func TestCapability_UsedCapabilitiesInvocation(t *testing.T) {
+	t.Parallel()
+	row := Capability{Field: "invocation", Value: "user"}
+	cases := []struct {
+		name string
+		art  *manifest.Artifact
+		want bool
+	}{
+		{"user skill", &manifest.Artifact{Type: manifest.TypeSkill, Invocation: manifest.InvocationUser}, true},
+		{"any skill", &manifest.Artifact{Type: manifest.TypeSkill, Invocation: manifest.InvocationAny}, false},
+		{"unset skill", &manifest.Artifact{Type: manifest.TypeSkill}, false},
+		{"User skill", &manifest.Artifact{Type: manifest.TypeSkill, Invocation: "User"}, false},
+		{"user agent", &manifest.Artifact{Type: manifest.TypeAgent, Invocation: manifest.InvocationUser}, false},
+	}
+	for _, tc := range cases {
+		got := false
+		for _, c := range UsedCapabilities(tc.art) {
+			if c == row {
+				got = true
+			}
+		}
+		if got != tc.want {
+			t.Errorf("%s: invocation: user emitted = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	// The guard names the row beside the skill row on a harness where both are ✗.
+	err := TranslationError("hermes", &manifest.Artifact{Type: manifest.TypeSkill, Invocation: manifest.InvocationUser})
+	if err == nil || !strings.Contains(err.Error(), "invocation: user, type: skill") {
+		t.Errorf("TranslationError(hermes, user skill) = %v, want it to name invocation: user, type: skill", err)
 	}
 }
 

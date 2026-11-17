@@ -117,7 +117,7 @@ func typeSource(artType string) Source {
 
 func TestCapabilityMatrix_Types(t *testing.T) {
 	t.Parallel()
-	for _, ty := range []string{"skill", "agent", "context", "command", "mcp-server"} {
+	for _, ty := range []string{"skill", "agent", "mcp-server"} {
 		src := typeSource(ty)
 		for _, id := range firstClassAdapters {
 			assertTypeCell(t, id, Capability{Field: "type", Value: ty}, src)
@@ -347,5 +347,144 @@ func TestCapabilityMatrix_HookEvent(t *testing.T) {
 	}
 	for _, id := range firstClassAdapters {
 		assertTypeCell(t, id, Capability{Field: "hook_event"}, src)
+	}
+}
+
+// --- invocation: user (type: skill) ------------------------------------------
+
+// invocationSkill builds the plain user-invoked skill team/ping with one
+// bundled resource. Its ARTIFACT.md is the synthesized document the registry
+// serves for a plain skill, and the field is SKILL.md metadata.invocation.
+// inArtifact states the field in an authored ARTIFACT.md instead.
+func invocationSkill(inArtifact bool) Source {
+	art := "---\ntype: skill\nversion: 0.0.0-auto.0\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n"
+	skill := "---\nname: ping\ndescription: Ping a teammate.\nmetadata:\n  invocation: \"user\"\n---\n\nPing $ARGUMENTS.\n"
+	if inArtifact {
+		art = "---\ntype: skill\nversion: 1.0.0\ninvocation: user\n---\n"
+		skill = "---\nname: ping\ndescription: Ping a teammate.\n---\n\nPing $ARGUMENTS.\n"
+	}
+	return Source{
+		ArtifactID:    "team/ping",
+		ArtifactBytes: []byte(art),
+		SkillBytes:    []byte(skill),
+		Resources:     map[string][]byte{"scripts/ping.sh": []byte("echo ping\n")},
+	}
+}
+
+// invocationTargets names, per harness with a ✓ or ⚠ invocation: user cell,
+// the file that carries the user-only control or the command-file fallback,
+// and the control line that file must hold (empty for a fallback).
+var invocationTargets = map[string]struct{ file, control string }{
+	"claude-code": {".claude/skills/ping/SKILL.md", "disable-model-invocation: true"},
+	"cursor":      {".cursor/skills/ping/SKILL.md", "disable-model-invocation: true"},
+	"pi":          {".pi/skills/ping/SKILL.md", "disable-model-invocation: true"},
+	"codex":       {".agents/skills/ping/agents/openai.yaml", "  allow_implicit_invocation: false"},
+	"opencode":    {".opencode/commands/ping.md", ""},
+	"gemini":      {".gemini/commands/ping.toml", ""},
+}
+
+// assertInvocationCell checks an invocation: user cell. ✓ needs the
+// harness's SKILL.md and the control line, unquoted, in the control file. ⚠
+// needs the native command file, the resource under .podium/resources/<id>/,
+// and no SKILL.md at all, which catches a fallback that also writes a
+// model-invocable skill. ✗ needs no output.
+func assertInvocationCell(t *testing.T, adapterID string, src Source) {
+	t.Helper()
+	out := adaptSrc(t, adapterID, src)
+	grade, ok := Cell(Capability{Field: "invocation", Value: "user"}, adapterID)
+	if !ok {
+		t.Fatalf("%s: invocation: user not graded", adapterID)
+	}
+	if grade == SupportUnsupported {
+		if len(out) > 0 {
+			t.Errorf("%s invocation: user: grade ✗ but produced %v", adapterID, filePaths(out))
+		}
+		return
+	}
+	want := invocationTargets[adapterID]
+	f, found := findFile(out, want.file)
+	if !found {
+		t.Fatalf("%s invocation: user: no %s in %v", adapterID, want.file, filePaths(out))
+	}
+	skillMDs := 0
+	for _, o := range out {
+		if strings.HasSuffix(o.Path, "SKILL.md") {
+			skillMDs++
+		}
+	}
+	if grade == SupportFallback {
+		if skillMDs != 0 {
+			t.Errorf("%s invocation: user: ⚠ fallback also wrote a SKILL.md: %v", adapterID, filePaths(out))
+		}
+		if _, ok := findFile(out, ".podium/resources/team/ping/scripts/ping.sh"); !ok {
+			t.Errorf("%s invocation: user: resource not in .podium/resources/: %v", adapterID, filePaths(out))
+		}
+		return
+	}
+	if skillMDs != 1 {
+		t.Errorf("%s invocation: user: want one SKILL.md, got %v", adapterID, filePaths(out))
+	}
+	if !hasLine(f.Content, want.control) {
+		t.Errorf("%s invocation: user: %s lacks the line %q:\n%s", adapterID, want.file, want.control, f.Content)
+	}
+}
+
+func findFile(out []File, p string) (File, bool) {
+	for _, f := range out {
+		if f.Path == p {
+			return f, true
+		}
+	}
+	return File{}, false
+}
+
+func filePaths(out []File) []string {
+	paths := make([]string, len(out))
+	for i, f := range out {
+		paths[i] = f.Path
+	}
+	return paths
+}
+
+func hasLine(content []byte, line string) bool {
+	for _, l := range strings.Split(string(content), "\n") {
+		if l == line {
+			return true
+		}
+	}
+	return false
+}
+
+// Matrix: §6.7.1 (claude-code, invocation_user)
+// Matrix: §6.7.1 (claude-desktop, invocation_user)
+// Matrix: §6.7.1 (claude-cowork, invocation_user)
+// Matrix: §6.7.1 (cursor, invocation_user)
+// Matrix: §6.7.1 (codex, invocation_user)
+// Matrix: §6.7.1 (opencode, invocation_user)
+// Matrix: §6.7.1 (gemini, invocation_user)
+// Matrix: §6.7.1 (pi, invocation_user)
+// Matrix: §6.7.1 (hermes, invocation_user)
+func TestCapabilityMatrix_InvocationUser(t *testing.T) {
+	t.Parallel()
+	for _, id := range firstClassAdapters {
+		t.Run(id, func(t *testing.T) {
+			t.Parallel()
+			assertInvocationCell(t, id, invocationSkill(false))
+		})
+	}
+}
+
+// Spec: §6.7.1, §4.3.4 — a skill that states invocation: user in ARTIFACT.md
+// rather than in SKILL.md metadata takes the same control on every ✓ harness.
+func TestCapabilityMatrix_InvocationUserStatedInArtifact(t *testing.T) {
+	t.Parallel()
+	for _, id := range firstClassAdapters {
+		if grade, _ := Cell(Capability{Field: "invocation", Value: "user"}, id); grade != SupportNative {
+			continue
+		}
+		t.Run(id, func(t *testing.T) {
+			t.Parallel()
+			assertInvocationCell(t, id, invocationSkill(true))
+		})
 	}
 }

@@ -439,3 +439,37 @@ func TestResolveStoredSkill_InvocationPrecedence(t *testing.T) {
 		}
 	})
 }
+
+// Spec: §4.3.4, §6.9, §13.4 — ResolveArtifact resolves a skill from both
+// manifests and falls back to ARTIFACT.md alone when SKILL.md does not
+// resolve, so a metadata-only invocation counts and a skill whose SKILL.md
+// does not parse takes its ARTIFACT.md value.
+func TestResolveArtifact(t *testing.T) {
+	t.Parallel()
+	userMeta := []byte("---\nname: s\ndescription: d\nmetadata:\n  invocation: \"user\"\n---\nBody.\n")
+	bad := []byte("---\nname: [s\n---\nBody.\n")
+	cases := []struct {
+		name          string
+		art, skill    []byte
+		wantType      ArtifactType
+		wantUser, err bool
+	}{
+		{"plain skill with metadata", nil, userMeta, TypeSkill, true, false},
+		{"stated beside unparseable SKILL.md", []byte("---\ntype: skill\ninvocation: user\n---\n"), bad, TypeSkill, true, false},
+		{"unstated beside unparseable SKILL.md", []byte("---\ntype: skill\n---\n"), bad, TypeSkill, false, false},
+		{"agent", []byte("---\ntype: agent\ninvocation: user\n---\nBody.\n"), nil, TypeAgent, false, false},
+		{"nothing parses", []byte("no frontmatter"), bad, "", false, true},
+	}
+	for _, tc := range cases {
+		a, err := ResolveArtifact(tc.art, tc.skill)
+		if (err != nil) != tc.err {
+			t.Fatalf("%s: err = %v, want error %v", tc.name, err, tc.err)
+		}
+		if err != nil {
+			continue
+		}
+		if a.Type != tc.wantType || a.UserInvoked() != tc.wantUser {
+			t.Errorf("%s: type %q user %v, want %q %v", tc.name, a.Type, a.UserInvoked(), tc.wantType, tc.wantUser)
+		}
+	}
+}

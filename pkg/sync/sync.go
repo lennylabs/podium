@@ -203,6 +203,11 @@ type ArtifactResult struct {
 	// description for a skill and the ARTIFACT.md description otherwise.
 	ListingType        string
 	ListingDescription string
+	// UserInvoked reports a skill whose resolved §4.3.4 invocation is user.
+	// Run sets it from the record's resolved artifact, and Listing never
+	// counts such a skill as an entry (§7.5.8). It is not part of the
+	// --json artifacts array.
+	UserInvoked bool
 }
 
 // listingEntry returns the §7.5.8 listing type and description of rec. A
@@ -356,6 +361,7 @@ func Run(opts Options) (*Result, error) {
 			Files:              paths,
 			ListingType:        listingType,
 			ListingDescription: listingDesc,
+			UserInvoked:        rec.Artifact.UserInvoked(),
 		})
 		allFiles = append(allFiles, out...)
 	}
@@ -812,12 +818,12 @@ func removeStalePaths(target string, prior map[string]string, current map[string
 			continue
 		}
 		// Prune the now-empty parent directories up the chain, stopping at the
-		// target root. A nested layout (a skill's .claude/skills/<name>/, the
-		// harness-neutral .podium/context/<id>/) leaves several empty ancestors
-		// when its only file is removed; pruning a single level would strip the
-		// leaf directory but orphan its parent. os.Remove fails on a non-empty
-		// directory naturally, so the walk halts at the first ancestor that still
-		// holds an operator file or a sibling artifact's output.
+		// target root. A nested layout (a skill's .claude/skills/<name>/, a
+		// bundled resource under .podium/resources/<id>/) leaves several empty
+		// ancestors when its only file is removed; pruning a single level would
+		// strip the leaf directory but orphan its parent. os.Remove fails on a
+		// non-empty directory naturally, so the walk halts at the first ancestor
+		// that still holds an operator file or a sibling artifact's output.
 		pruneEmptyParents(target, filepath.Dir(full))
 	}
 }

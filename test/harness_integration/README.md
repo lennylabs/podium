@@ -33,8 +33,8 @@ product) is listed and skipped with a reason rather than silently omitted.
 
 `TestHarnessArtifactTypes` materializes each artifact type through the real
 `podium sync` and drives the real harness agent to confirm it loads and applies
-the artifact. Each type carries a **unique marker**; a `rule` / `skill` /
-`command` is verified by the marker in the agent's reply, a `hook` by the marker
+the artifact. Each type carries a **unique marker**; a `rule`, a `skill`, or a
+user-invoked skill is verified by the marker in the agent's reply, a `hook` by the marker
 in the side-effect file its command writes. A match can only come from Podium's
 output, so it is a true end-to-end check per type.
 
@@ -92,10 +92,9 @@ reason.
 | `mcp-server` | ✅ | approval-gated | ✅ | ✅ | Tier A: `<harness> mcp list` reads back the synced server |
 | `rule` | ✅ | ✅ | ✅ | ✅ | agent emits the always-rule marker |
 | `skill` | ✅ | ✅ | ✅ | ✅ | agent loads SKILL.md on a triggering prompt |
-| `command` | ✅ | ✅ | ✗ (by design) | ✅ | agent runs the slash command (`/ping`) |
+| user-invoked `skill` (`invocation: user`) | ✅ | ✅ | ✅ | ✅ | agent runs the skill explicitly (`/ping`, or `$ping` on codex) |
 | `hook` | ✅ | ✗ (headless runtime) | ✗ (exec runtime) | ✗ (headless runtime) | the stop hook's command writes a marker file |
 | `agent` (subagent) | not covered | not covered | not covered | not covered | delegation is model-dependent; no deterministic marker |
-| `context` | n/a | n/a | n/a | n/a | harness-neutral `.podium/context/`; no harness loads it natively |
 
 Gemini needs `--skip-trust` for the agent runs (it gates project config, skills,
 and hooks behind folder trust).
@@ -130,8 +129,14 @@ Findings worth noting:
     maps `stop -> AfterAgent`. The `.gemini/settings.json` hook materializes
     correctly (gemini tolerates the in-entry `x-podium-id` on hook arrays), but
     `gemini -p` does not fire the `AfterAgent` lifecycle hook in headless mode.
-- **command**: `command` is `✗` for codex (§6.7.1), folded into skills. Gemini
-  runs custom `.gemini/commands/<n>.toml` slash commands in headless `-p` mode.
+- **user-invoked skill**: claude-code and cursor receive the skill with
+  `disable-model-invocation: true`, codex receives it with
+  `agents/openai.yaml` setting `policy.allow_implicit_invocation: false` and
+  runs it through explicit `$ping` invocation, and gemini receives the
+  `.gemini/commands/<n>.toml` fallback, which it runs as a slash command in
+  headless `-p` mode (§6.7). The 2026-11-17 run of this row consumed the skill
+  on claude-code; cursor, codex, and gemini were not authenticated in that run
+  and skipped.
 - **config-merge reconciliation marker**: gemini's `.gemini/settings.json`
   `mcpServers` schema is strict and rejects unknown keys *inside* an entry, so
   Podium's `x-podium-id` tag previously made the config read as invalid.

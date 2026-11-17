@@ -2061,16 +2061,6 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		// artifact opts out of this harness. The manifest content is
 		// still returned to the caller; only materialization is skipped.
 		if materializeTargetsHarness(resp.Frontmatter, harnessID) {
-			// §6.9 "Adapter cannot translate an artifact": when the
-			// selected harness has no §6.7.1 equivalent for a field the
-			// artifact uses (a ✗ cell), fail with a structured error
-			// naming the field instead of writing an unannotated verbatim
-			// copy.
-			if art, perr := manifest.ParseArtifact([]byte(resp.Frontmatter)); perr == nil {
-				if terr := adapter.TranslationError(harnessID, art); terr != nil {
-					return errorResult(terr.Error())
-				}
-			}
 			src := adapter.Source{
 				ArtifactID:    resp.ID,
 				ArtifactBytes: []byte(resp.Frontmatter),
@@ -2078,6 +2068,18 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 			}
 			if resp.Type == "skill" {
 				src.SkillBytes = []byte(synthesizeSkillMD(resp))
+			}
+			// §6.9 "Adapter cannot translate an artifact": when the
+			// selected harness has no §6.7.1 equivalent for a field the
+			// artifact uses (a ✗ cell), fail with a structured error
+			// naming the field instead of writing an unannotated verbatim
+			// copy. Spec: §6.9, §4.3.4 — a skill resolves from both
+			// manifests, so a metadata-only invocation: user reaches the
+			// guard as the adapter reads it.
+			if art, perr := manifest.ResolveArtifact(src.ArtifactBytes, src.SkillBytes); perr == nil {
+				if terr := adapter.TranslationError(harnessID, art); terr != nil {
+					return errorResult(terr.Error())
+				}
 			}
 			// §13.8: child span for the §6.7 adapter translation stage.
 			adaptCtx, adaptSpan := tracing.Tracer().Start(s.reqCtx(), "adapter.translate")

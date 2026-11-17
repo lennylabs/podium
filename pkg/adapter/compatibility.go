@@ -36,7 +36,7 @@ func deriveSkillCompatibility(skillBytes, artifactBytes []byte) []byte {
 	if compat == "" {
 		return skillBytes
 	}
-	return injectFrontmatterLine(skillBytes, "compatibility", compat)
+	return injectFrontmatterLine(skillBytes, "compatibility", yamlQuoteScalar(compat))
 }
 
 // buildSkillCompatibility renders a human-readable compatibility string from
@@ -69,12 +69,16 @@ func buildSkillCompatibility(req *manifest.RuntimeRequirements, sandbox manifest
 	return s
 }
 
-// injectFrontmatterLine inserts `key: "value"` as the first line of src's YAML
+// injectFrontmatterLine inserts `key: scalar` as the first line of src's YAML
 // frontmatter, immediately after the opening "---" delimiter. The caller must
-// have verified key is absent. value is double-quoted and escaped so a colon
-// or other YAML metacharacter stays part of the scalar. src is returned
-// unchanged when it has no recognizable leading frontmatter delimiter.
-func injectFrontmatterLine(src []byte, key, value string) []byte {
+// have verified key is absent and passes scalar already rendered: the derived
+// compatibility string goes through yamlQuoteScalar so a colon stays part of
+// the string, and the user-only control passes the bare boolean `true`, which
+// a quoted "true" would turn into a string a harness can reject. src is
+// returned unchanged when it has no recognizable leading frontmatter delimiter.
+//
+// Spec: §4.3.4, §6.7
+func injectFrontmatterLine(src []byte, key, scalar string) []byte {
 	s := string(src)
 	var delim, eol string
 	switch {
@@ -85,7 +89,7 @@ func injectFrontmatterLine(src []byte, key, value string) []byte {
 	default:
 		return src
 	}
-	line := key + ": " + yamlQuoteScalar(value) + eol
+	line := key + ": " + scalar + eol
 	return []byte(delim + line + s[len(delim):])
 }
 

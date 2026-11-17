@@ -7,15 +7,6 @@ description: Reviews pull requests for bugs.
 
 Review the diff and report defects.
 
-=== .cursor/commands/deploy.md ===
----
-type: command
-version: 1.0.0
-description: Deploy the service.
----
-
-Run the deploy pipeline for the named environment.
-
 === .cursor/hooks.json ===
 {
   "hooks": {
@@ -80,6 +71,29 @@ globs: "*.ts,*.tsx"
 
 Enable strict type-checking in TypeScript files.
 
+=== .cursor/skills/deploy/SKILL.md ===
+---
+disable-model-invocation: true
+name: deploy
+description: Deploy the service.
+metadata:
+  invocation: "user"
+---
+
+Run the deploy pipeline for the environment in $ARGUMENTS.
+
+=== .cursor/skills/deploy/scripts/deploy.sh ===
+#!/bin/sh
+echo deploy "$1"
+
+=== .cursor/skills/glossary/SKILL.md ===
+---
+name: glossary
+description: Reference material that defines company terms such as ARR.
+---
+
+ARR means annual recurring revenue.
+
 === .cursor/skills/hello/SKILL.md ===
 ---
 compatibility: "Requires Python >=3.10"
@@ -105,13 +119,4 @@ List what changed yesterday and what is planned today.
 
 - Yesterday:
 - Today:
-
-=== .podium/context/team/glossary/ARTIFACT.md ===
----
-type: context
-version: 1.0.0
-description: Company glossary.
----
-
-ARR means annual recurring revenue.
 

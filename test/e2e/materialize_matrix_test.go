@@ -590,10 +590,11 @@ func TestMaterialize_CodexResyncInjectAndTomlReconcile(t *testing.T) {
 
 // `podium sync --harness opencode --type rule,skill` over an all-types
 // registry materializes only the selected types and stays idempotent: AGENTS.md
-// injected rules and the reference skill exist while the excluded opencode.json
-// mcp output is absent, and a second run is byte-identical. The §7.5.1 / spec
-// §7.5 --type flag is comma-separated (`--type rule,skill`). spec: §7.5.1
-// (type filter), §7.5.
+// injected rules, the reference skill, and the user-invoked skill's command
+// file exist while the excluded opencode.json mcp output is absent, and a
+// second run is byte-identical. The §7.5.1 / spec §7.5 --type flag is
+// comma-separated (`--type rule,skill`). spec: §7.5.1 (type filter), §7.5,
+// §6.7.
 func TestMaterialize_OpenCodeTypeFilteredIdempotent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -613,6 +614,10 @@ func TestMaterialize_OpenCodeTypeFilteredIdempotent(t *testing.T) {
 		t.Errorf("AGENTS.md missing the filtered rule injection:\n%s", agents)
 	}
 	mustExist(t, filepath.Join(target, ".opencode", "skills", "glossary", "SKILL.md"))
+	// Spec: §6.7 — the skill filter selects the user-invoked skill, which
+	// opencode writes as its command-file fallback rather than as a skill.
+	mustExist(t, filepath.Join(target, ".opencode", "commands", "deploy.md"))
+	mustNotExist(t, filepath.Join(target, ".opencode", "skills", "deploy", "SKILL.md"))
 	// Excluded types absent.
 	mustNotExist(t, filepath.Join(target, "opencode.json"))
 

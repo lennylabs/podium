@@ -336,7 +336,6 @@ func TestQuickstart_SyncClaudeCodeFallbackPath(t *testing.T) {
 	if !strings.Contains(got, "the hello domain body.") {
 		t.Errorf("reference skill body missing:\n%s", got)
 	}
-	mustNotExist(t, filepath.Join(tgt, ".podium/context"))
 }
 
 // sync --watch performs an initial sync and exits 0 on

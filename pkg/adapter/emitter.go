@@ -123,7 +123,8 @@ const (
 // Desktop, and Claude Cowork (§7.8). The three surfaces read the same
 // .claude-plugin/marketplace.json, so one emitter serves all three. It writes
 // the root marketplace manifest and a per-plugin .claude-plugin/plugin.json,
-// with skills/, agents/, commands/, hooks/, and .mcp.json components.
+// with skills/, agents/, hooks/, and .mcp.json components. A user-invoked
+// skill carries disable-model-invocation: true in its SKILL.md.
 type ClaudeMarketplace struct{}
 
 // ID returns "claude".
@@ -139,8 +140,6 @@ func (ClaudeMarketplace) Component(ctx context.Context, src Source) ([]File, err
 		return claudePluginSkill(root, src), nil
 	case "agent":
 		return []File{{Path: path.Join(root, "agents", lastSeg(src.ArtifactID)+".md"), Content: src.ArtifactBytes}}, nil
-	case "command":
-		return []File{{Path: path.Join(root, "commands", lastSeg(src.ArtifactID)+".md"), Content: src.ArtifactBytes}}, nil
 	case "hook":
 		return hookConfigOut(path.Join(root, "hooks", "hooks.json"), hookFragmentJSON(claudeHooks, src), src), nil
 	case "mcp-server":
@@ -170,9 +169,10 @@ func claudePluginSkill(root string, src Source) []File {
 	body := src.SkillBytes
 	if len(body) > 0 {
 		// Spec: §4.3.4, §7.8: the plugin's SKILL.md carries the derived
-		// compatibility line. The rule and ARTIFACT.md fallbacks below derive
-		// nothing, because §4.3.4 allocates the field only to a skill's SKILL.md.
-		body = deriveSkillCompatibility(body, src.ArtifactBytes)
+		// compatibility line and, for a user-invoked skill, the user-only
+		// control. The rule and ARTIFACT.md fallbacks below add neither,
+		// because §4.3.4 allocates both only to a skill's SKILL.md.
+		body = skillMarkdown(src, controlFrontmatter)
 	}
 	if len(body) == 0 {
 		if frontmatterType(src.ArtifactBytes) == "rule" {
@@ -217,6 +217,8 @@ func ruleSkillBody(src Source) []byte {
 // plugin.json, with skills/, hooks/hooks.json, and .mcp.json components, the
 // component set the §7.8 "Marketplace emitters" prose
 // (spec/07-external-integration.md) specifies for the Codex marketplace layout.
+// A user-invoked skill carries skills/<name>/agents/openai.yaml with
+// policy.allow_implicit_invocation: false.
 type CodexMarketplace struct{}
 
 // ID returns "codex".
@@ -224,14 +226,13 @@ func (CodexMarketplace) ID() string { return "codex" }
 
 // Component renders one artifact into the Codex plugin layout under the plugin
 // subtree. A skill ships natively; a hook config-merges into hooks/hooks.json;
-// an mcp-server writes .mcp.json. agent, command, and rule have no Codex
-// marketplace component (skills are the Codex install unit), so they return no
-// files.
+// an mcp-server writes .mcp.json. agent and rule have no Codex marketplace
+// component (skills are the Codex install unit), so they return no files.
 func (CodexMarketplace) Component(ctx context.Context, src Source) ([]File, error) {
 	root := pluginSubtree(src.Plugin)
 	switch frontmatterType(src.ArtifactBytes) {
 	case "skill":
-		return skillOut(path.Join(root, "skills", lastSeg(src.ArtifactID)), src), nil
+		return skillOut(path.Join(root, "skills", lastSeg(src.ArtifactID)), src, controlOpenAIYAML), nil
 	case "hook":
 		return hookConfigOut(path.Join(root, "hooks", "hooks.json"), hookFragmentJSON(codexHooks, src), src), nil
 	case "mcp-server":
@@ -255,7 +256,8 @@ func (CodexMarketplace) Manifest(ctx context.Context, marketplaceName string, pl
 
 // CursorMarketplace is the marketplace emitter for Cursor (§7.8). It writes the
 // root .cursor-plugin/marketplace.json and a per-plugin .cursor-plugin/
-// plugin.json, with skills/, rules/*.mdc, and mcp.json components.
+// plugin.json, with skills/, rules/*.mdc, and mcp.json components. A
+// user-invoked skill carries disable-model-invocation: true in its SKILL.md.
 type CursorMarketplace struct{}
 
 // ID returns "cursor".
@@ -263,14 +265,14 @@ func (CursorMarketplace) ID() string { return "cursor" }
 
 // Component renders one artifact into the Cursor plugin layout under the plugin
 // subtree. A skill ships natively; a rule writes rules/<name>.mdc with the
-// rule_mode-derived frontmatter; an mcp-server writes mcp.json. agent, command,
-// and hook have no Cursor marketplace component, so they return no files.
+// rule_mode-derived frontmatter; an mcp-server writes mcp.json. agent and hook
+// have no Cursor marketplace component, so they return no files.
 func (CursorMarketplace) Component(ctx context.Context, src Source) ([]File, error) {
 	root := pluginSubtree(src.Plugin)
 	name := lastSeg(src.ArtifactID)
 	switch frontmatterType(src.ArtifactBytes) {
 	case "skill":
-		return skillOut(path.Join(root, "skills", name), src), nil
+		return skillOut(path.Join(root, "skills", name), src, controlFrontmatter), nil
 	case "rule":
 		return []File{{Path: path.Join(root, "rules", name+".mdc"), Content: cursorRuleBody(src)}}, nil
 	case "mcp-server":
@@ -308,16 +310,23 @@ type GeminiExtension struct{}
 func (GeminiExtension) ID() string { return "gemini" }
 
 // Component renders one artifact into the root extension layout, ignoring the
-// plugin subtree because a Gemini repository holds one extension. A command
-// writes commands/<name>.toml; a rule injects into the context file; an
-// mcp-server merges into the manifest's mcpServers. The extension component set
-// is commands, the context file, and mcpServers, so skill, agent, and hook have
-// no Gemini extension component and return no files.
+// plugin subtree because a Gemini repository holds one extension. A
+// user-invoked skill writes commands/<name>.toml, and its bundled resources
+// have no extension location and are omitted; a rule injects into the context
+// file; an mcp-server merges into the manifest's mcpServers. The extension
+// component set is commands, the context file, and mcpServers, so a skill whose
+// invocation is any, an agent, and a hook have no Gemini extension component
+// and return no files.
+//
+// Spec: §7.8
 func (GeminiExtension) Component(ctx context.Context, src Source) ([]File, error) {
 	name := lastSeg(src.ArtifactID)
 	switch frontmatterType(src.ArtifactBytes) {
-	case "command":
-		return []File{{Path: path.Join("commands", name+".toml"), Content: geminiCommandTOML(src)}}, nil
+	case "skill":
+		if !userInvoked(src) {
+			return nil, nil
+		}
+		return []File{{Path: path.Join("commands", name+".toml"), Content: geminiSkillCommandTOML(src)}}, nil
 	case "rule":
 		return []File{injectRule(geminiContextFile, src)}, nil
 	case "mcp-server":
@@ -360,10 +369,11 @@ func (PiPackage) ID() string { return "pi" }
 
 // Component renders one skill into the package's skills subtree. The install
 // unit is the skill, so only type: skill contributes a component; the other
-// types have no Pi package component and return no files.
+// types have no Pi package component and return no files. A user-invoked skill
+// carries disable-model-invocation: true in its SKILL.md.
 func (PiPackage) Component(ctx context.Context, src Source) ([]File, error) {
 	if frontmatterType(src.ArtifactBytes) == "skill" {
-		return skillOut(path.Join(piSkillsDir, lastSeg(src.ArtifactID)), src), nil
+		return skillOut(path.Join(piSkillsDir, lastSeg(src.ArtifactID)), src, controlFrontmatter), nil
 	}
 	return nil, nil
 }
@@ -406,9 +416,13 @@ func (HermesTap) ID() string { return "hermes" }
 // Component renders one skill into the tap's skills directory with its bundled
 // resources. The install unit is the skill, so only type: skill contributes a
 // component; the other types have no Hermes tap component and return no files.
+// A user-invoked skill is omitted, because the tap's skills are
+// model-invocable and Hermes documents no user-only control.
+//
+// Spec: §7.8
 func (HermesTap) Component(ctx context.Context, src Source) ([]File, error) {
-	if frontmatterType(src.ArtifactBytes) == "skill" {
-		return skillOut(path.Join(hermesSkillsDir, lastSeg(src.ArtifactID)), src), nil
+	if frontmatterType(src.ArtifactBytes) == "skill" && !userInvoked(src) {
+		return skillOut(path.Join(hermesSkillsDir, lastSeg(src.ArtifactID)), src, controlNone), nil
 	}
 	return nil, nil
 }
