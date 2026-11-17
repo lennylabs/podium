@@ -103,7 +103,7 @@ func TestReferenceRegistry_SyncsThroughClaudeCode(t *testing.T) {
 	}
 }
 
-// convertedFixture is one reference package FIX-1 converted by hand from a
+// convertedFixture is one reference package converted by hand from a
 // removed type to a skill: its layer, its layer-relative ID, the version
 // the conversion published, and whether it is user-invoked.
 type convertedFixture struct {

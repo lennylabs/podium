@@ -17,7 +17,7 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
-// liveRecord is the untampered agent record the TEST-10 live-path arms serve.
+// liveRecord is the untampered agent record the live-path arms serve.
 func liveRecord(frontmatter string) loadArtifactResponse {
 	a := manifestFields(frontmatter)
 	return sealDelivery(loadArtifactResponse{
