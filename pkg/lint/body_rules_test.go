@@ -186,7 +186,8 @@ func TestRuleProseReference_BundledDirectoryResolves(t *testing.T) {
 		t.Fatalf("want the empty directory and the prefix-only name reported, got %+v", diags)
 	}
 	for _, d := range diags {
-		if d.Severity != lint.SeverityError || !(strings.Contains(d.Message, `"assets/none/"`) || strings.Contains(d.Message, `"assets/temp"`)) {
+		named := strings.Contains(d.Message, `"assets/none/"`) || strings.Contains(d.Message, `"assets/temp"`)
+		if d.Severity != lint.SeverityError || !named {
 			t.Errorf("unexpected diagnostic %+v", d)
 		}
 	}
