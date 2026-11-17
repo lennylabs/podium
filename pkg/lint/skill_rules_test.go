@@ -383,7 +383,7 @@ func TestLint_SkillPodiumOnlyVersionRecommendsMetadataVersion(t *testing.T) {
 		"name: hello\ndescription: Greet the user.\nversion: 1.0.0\ntags: [demo]\n",
 	)...)
 	diags := (&Linter{}).Lint(context.Background(), reg, records)
-	wantWarn := []string{`SKILL.md contains Podium-only field "version"; set metadata.version in SKILL.md instead`}
+	wantWarn := []string{`SKILL.md contains Podium-only field "version", which Podium ignores; set metadata.version in SKILL.md instead`}
 	if got := messagesFor(diags, "lint.skill_podium_only_field", SeverityWarning); !slices.Equal(got, wantWarn) {
 		t.Errorf("warnings = %q, want %q", got, wantWarn)
 	}

@@ -71,6 +71,11 @@ func TestIngest_PublishedSkillPatternsAreIngested(t *testing.T) {
 	stored := map[string]bool{}
 	for _, r := range rows {
 		stored[r.ArtifactID] = true
+		// §4.3.4: Podium ignores a top-level SKILL.md version, so ops/greet's
+		// authored `version: 1.0.0` must not become the stored version.
+		if r.ArtifactID == "ops/greet" && r.Version != "0.0.0-auto.0" {
+			t.Errorf("ops/greet stored at %q, want 0.0.0-auto.0 (the top-level version is ignored)", r.Version)
+		}
 	}
 	for _, id := range []string{"ops/greet", "ops/farewell"} {
 		if !stored[id] {

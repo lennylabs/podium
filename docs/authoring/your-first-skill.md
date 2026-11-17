@@ -197,7 +197,7 @@ Lint runs these checks:
 
 When the catalog lives in a Git-source layer, CI runs the same checks on pull requests (see [Connecting layer sources](../deployment/content/layer-sources#git-repositories)). The registry runs the artifact checks again at ingest and runs the catalog advisories over the layer it ingests, so only `podium lint` reports an overlap between artifacts in different layers.
 
-Each diagnostic prints as `[<severity>] <artifact-id>: <message> (<rule-code>)`, for example `[error] personal/hello/greet: type is required (lint.required_field_missing)`. Warnings alone exit 0, and any error exits 1. With `--fail-on warning`, a warning also exits 1. [Skill lint checks](frontmatter-reference#skill-lint-checks) lists the checks that apply to a skill.
+Each diagnostic prints as `[<severity>] <artifact-id>: <message> (<rule-code>)`, for example `[error] personal/hello/greet: type is required (lint.required_field_missing)`. Info and warning diagnostics alone exit 0, and any error exits 1. With `--fail-on warning`, a warning also exits 1, and an info diagnostic still exits 0. [Skill lint checks](frontmatter-reference#skill-lint-checks) lists the checks that apply to a skill.
 
 When lint passes, commit the artifact.
 

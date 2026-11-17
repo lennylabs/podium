@@ -71,7 +71,7 @@ func (r ruleSkillPodiumOnlyFields) Check(_ context.Context, _ *filesystem.Regist
 // Spec: §4.3.4
 func podiumOnlyFieldMessage(key string) string {
 	if key == "version" {
-		return fmt.Sprintf("SKILL.md contains Podium-only field %q; set metadata.version in SKILL.md instead", key)
+		return fmt.Sprintf("SKILL.md contains Podium-only field %q, which Podium ignores; set metadata.version in SKILL.md instead", key)
 	}
 	if manifest.IsSkillMetadataField(key) {
 		return fmt.Sprintf("SKILL.md contains Podium-only field %q at the top level; set metadata.%s in SKILL.md or move it to ARTIFACT.md", key, key)
