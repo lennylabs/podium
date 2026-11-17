@@ -289,7 +289,7 @@ func urlScheme(href string) (string, bool) {
 		return "", false
 	}
 	for _, c := range []byte(href[1:i]) {
-		if !isASCIILetter(c) && !('0' <= c && c <= '9') && c != '+' && c != '-' && c != '.' {
+		if !isSchemeByte(c) {
 			return "", false
 		}
 	}
@@ -298,4 +298,9 @@ func urlScheme(href string) (string, bool) {
 
 func isASCIILetter(c byte) bool {
 	return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
+}
+
+// isSchemeByte reports whether c can follow the first letter of a scheme.
+func isSchemeByte(c byte) bool {
+	return isASCIILetter(c) || ('0' <= c && c <= '9') || c == '+' || c == '-' || c == '.'
 }
