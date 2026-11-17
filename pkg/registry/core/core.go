@@ -119,8 +119,9 @@ type Registry struct {
 	admitSigner      sign.Provider
 	admitObjects     objectstore.Provider
 	admitReadTimeout time.Duration
-	// retiredMu guards retired, the memo of the §4.6 no-inheritance verdict
-	// keyed by (tenant, content hash). An entry is written once and never
+	// retiredMu guards retired, the memo of the manifest.RetiredRow verdict
+	// (the §4.1 removed-type and §4.6 no-inheritance rules) keyed by
+	// (tenant, content hash). An entry is written once and never
 	// changed or evicted, so the map holds one boolean per distinct stored
 	// content hash the registry has listed. The content hash is injective
 	// over the ARTIFACT.md bytes (§4.7.6), so a key names one verdict even
@@ -1356,11 +1357,11 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 // outside the caller's view never surfaces. servable is the listing the
 // candidates came from, which servableRows already filtered: a match is kept
 // only when its (ArtifactID, Version) names a servable row, so the vector of
-// a row the §4.6 no-inheritance rule retires, which the index still holds,
-// never returns or ranks its ID. The vector of an older servable version
-// still surfaces its ID.
+// a row the §4.1 removed-type rule or the §4.6 no-inheritance rule retires,
+// which the index still holds, never returns or ranks its ID. The vector of an
+// older servable version still surfaces its ID.
 //
-// Spec: §4.6
+// Spec: §4.1, §4.6
 func (r *Registry) vectorRanks(ctx context.Context, query string, candidates, servable []store.ManifestRecord, topK int) ([]string, error) {
 	matches, err := r.queryVector(ctx, query, topK*4)
 	if err != nil {
@@ -1839,11 +1840,11 @@ func ManifestBodyKey(doc []byte) string {
 // An artifact owns each resource it bundles and the §6.6 presigned manifest
 // document it serves: the stored SKILL.md for a skill and the stored
 // ARTIFACT.md otherwise. The candidates are the caller's servable rows, so a
-// row the §4.6 no-inheritance rule retires owns nothing. Only documents above
-// the inline cutoff are stored externally, so the hash is computed for those
-// alone.
+// row the §4.1 removed-type rule or the §4.6 no-inheritance rule retires owns
+// nothing. Only documents above the inline cutoff are stored externally, so
+// the hash is computed for those alone.
 //
-// Spec: §13.12 filesystem backend, §4.6.
+// Spec: §13.12 filesystem backend, §4.1, §4.6.
 func (r *Registry) ResolveResourceOwner(ctx context.Context, id layer.Identity, key string) (string, bool) {
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {

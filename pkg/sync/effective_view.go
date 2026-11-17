@@ -42,9 +42,10 @@ func ResolveEffectiveView(opts Options) ([]EffectiveArtifact, error) {
 	}
 
 	if opts.RegistryPath != "" {
-		// An artifact dropped under the §4.6 collision rule or the §4.6
-		// no-inheritance rule (§13.11.3) is outside the effective view, as it is on a
-		// server that rejected it at ingest, so the checklist omits it. The
+		// An artifact dropped under the §4.6 collision rule, the §4.6
+		// no-inheritance rule, or the §4.1 removed-type rule (§13.11.3) is
+		// outside the effective view, as it is on a server that rejected it
+		// at ingest, so the checklist omits it. The
 		// override's apply step reports the drops through
 		// OverrideResult.Dropped.
 		all, _, err := resolveRecords(opts)

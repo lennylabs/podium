@@ -84,8 +84,8 @@ func (f ScopeFilter) Select(records []Record) []Record {
 // view as a workspace sync).
 //
 // The second return lists the artifacts a filesystem-source composition
-// dropped under the §4.6 collision rule or the §4.6 no-inheritance rule
-// (§13.11.3); a server source returns none.
+// dropped under the §4.6 collision rule, the §4.6 no-inheritance rule, or the
+// §4.1 removed-type rule (§13.11.3); a server source returns none.
 func FetchRecords(opts Options) ([]Record, []layer.Drop, error) {
 	if opts.RegistryPath == "" {
 		return nil, nil, ErrNoRegistry
