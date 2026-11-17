@@ -229,15 +229,15 @@ func cosineNeighbors(ctx context.Context, scorer vector.CosineScorer, tenant str
 func (r *Registry) nearestServedPeers(ctx context.Context, rec store.ManifestRecord, served map[string]string) ([]overlapNeighbor, error) {
 	src, err := r.neighborSourceFor(ctx, rec)
 	if err != nil {
-		return nil, err
+		return nil, &overlapStepError{step: stepStoredVector, err: err}
 	}
 	rows, err := r.widenedPeerRows(ctx, src, rec.ArtifactID, served)
 	if err != nil {
-		return nil, err
+		return nil, &overlapStepError{step: stepNeighborQuery, err: err}
 	}
 	peers, err := src.score(ctx, rows)
 	if err != nil {
-		return nil, err
+		return nil, &overlapStepError{step: stepScoring, err: err}
 	}
 	sort.Slice(peers, func(i, j int) bool {
 		if peers[i].similarity != peers[j].similarity {
@@ -246,6 +246,38 @@ func (r *Registry) nearestServedPeers(ctx context.Context, rec store.ManifestRec
 		return peers[i].artifactID < peers[j].artifactID
 	})
 	return peers[:min(len(peers), r.overlap.semantic.Neighbors)], nil
+}
+
+// The steps of one computation's index work, which the failure log names so
+// an operator can tell a stored-vector read that failed from a neighbour
+// query or a scoring call that failed.
+const (
+	stepStoredVector  = "stored-vector read"
+	stepNeighborQuery = "neighbour query"
+	stepScoring       = "scoring"
+)
+
+// overlapStepError is a failed computation step: step names the call, and
+// err is its error.
+type overlapStepError struct {
+	step string
+	err  error
+}
+
+func (e *overlapStepError) Error() string { return e.step + ": " + e.err.Error() }
+func (e *overlapStepError) Unwrap() error { return e.err }
+
+// logOverlapFailure logs a failed computation of rec with the step that
+// failed and the artifact identifier.
+//
+// Spec: §7.3.1
+func logOverlapFailure(rec store.ManifestRecord, err error) {
+	step, cause := "computation", err
+	var se *overlapStepError
+	if errors.As(err, &se) {
+		step, cause = se.step, se.err
+	}
+	log.Printf("%s: %s for %s@%s failed: %v", lint.SemanticOverlapCode, step, rec.ArtifactID, rec.Version, cause)
 }
 
 // overlapRowLimit returns the most rows one query of a computation asks:
@@ -413,7 +445,8 @@ func (r *Registry) computeOverlapBatch(ctx context.Context, subjects []store.Man
 
 // findOverlapPeers runs the index queries of each record in chunk and returns
 // the computations that found their peers and the count that failed. A failed
-// first index query is logged and leaves that artifact's stored records and
+// stored-vector read, first neighbour query, or scoring call is logged with
+// the step that failed and leaves that artifact's stored records and
 // computation entry in place.
 func (r *Registry) findOverlapPeers(ctx context.Context, chunk []store.ManifestRecord, versions map[string]string) ([]pendingOverlap, int) {
 	out := make([]pendingOverlap, 0, len(chunk))
@@ -424,7 +457,7 @@ func (r *Registry) findOverlapPeers(ctx context.Context, chunk []store.ManifestR
 		}
 		peers, err := r.nearestServedPeers(ctx, m, versions)
 		if err != nil {
-			log.Printf("%s: index query for %s@%s: %v", lint.SemanticOverlapCode, m.ArtifactID, m.Version, err)
+			logOverlapFailure(m, err)
 			failed++
 			continue
 		}
