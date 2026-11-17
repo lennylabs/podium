@@ -91,8 +91,8 @@ The registry's authoring layout is a domain hierarchy. Directories are domain pa
 ASCII fallback for the diagram above (registry layout on disk):
 
   registry/
-    company-glossary/                  [type: context]
-      ARTIFACT.md
+    company-glossary/                  [type: skill]
+      SKILL.md
     finance/
       DOMAIN.md
       ap/
@@ -119,8 +119,8 @@ ASCII fallback for the diagram above (registry layout on disk):
           SKILL.md
         swift-bic-parser/              [type: skill]
           SKILL.md
-    engineering/platform/code-change-pr/    [type: command]
-      ARTIFACT.md
+    engineering/platform/code-change-pr/    [type: skill, invocation: user]
+      SKILL.md
 -->
 
 A directory below the layer root is an artifact package when it directly contains a file named `ARTIFACT.md`, or when it directly contains a file named `SKILL.md` and no directory between it and the layer root is itself a package (§4.1). A `SKILL.md` below a package's root is a bundled resource of that package (§4.4) and starts no package. Package discovery does not descend into a directory below the layer root whose name begins with a dot, so no package is discovered inside one. Files under a dot-prefixed subdirectory of a package remain that package's bundled resources (§4.4). A layer whose skills sit under `.claude/skills/` or `.agents/skills/` therefore places its root at that directory or at the dot-prefixed directory itself: a `git` source sets `root` (§4.6), and a `local` source, `--layer-path`, or a `podium sync` path names the directory as its path. A manifest file directly at the layer root is an error, because the canonical ID is the non-empty directory path under the root.
