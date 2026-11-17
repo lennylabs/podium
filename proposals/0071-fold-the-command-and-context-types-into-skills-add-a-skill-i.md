@@ -1,7 +1,7 @@
 # Proposal 0071: Fold the command and context types into skills: add a skill invocation field and remove both types
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-16). Verified after a redesign and 12 adversarial review rounds (22 findings fixed), following 8 earlier rounds (36 findings fixed).
+- Status: Applied to spec (2026-11-17). Verified after a redesign and 12 adversarial review rounds (22 findings fixed), following 8 earlier rounds (36 findings fixed).
 - Date: 2026-11-16
 
 This document stages spec, code, test, manual-validation, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: ingest refuses an `ARTIFACT.md` that declares `type: command` or `type: context`, stored rows of those types stop serving, and `claude-cowork` loses its only project-scope output. It ships in 0.7.0 as a MINOR bump.
