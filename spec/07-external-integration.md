@@ -513,11 +513,13 @@ artifacts:
     version: 1.2.0
     content_hash: sha256:abc123…
     layer: team-finance
+    type: agent
     materialized_path: agents/pay-invoice.md
   - id: finance/close/run-variance
     version: 1.0.0
     content_hash: sha256:def456…
     layer: team-finance
+    type: agent
     materialized_path: agents/run-variance.md
 
 # Ephemeral overrides applied since the last full sync.
@@ -531,7 +533,7 @@ toggles:
       removed_at: 2026-05-05T14:36:00Z
 ```
 
-The lock file is written atomically (`.tmp` + rename) on every sync, watch event, and override invocation. An artifact that materializes more than one file contributes one `artifacts:` entry per file. The list is ordered by `id`, and the entries an artifact contributes are ordered among themselves by `materialized_path`. The `profile:` field is the **active profile** for that target. `override`, `save-as`, and `profile edit` use it as the default when no `--profile` flag is given. Concurrent writers against the same target's lock file (e.g., two `podium sync --watch` processes pointed at one directory) are undefined; operators are expected to keep a single sync owner per target.
+The lock file is written atomically (`.tmp` + rename) on every sync, watch event, and override invocation. An artifact that materializes more than one file contributes one `artifacts:` entry per file. Each entry records the artifact's `id`, `version`, `content_hash`, `layer`, and `type`, the `materialized_path`, and, for a path the §6.7 config merge shares with the operator, `merge` (`json` for a JSON config merge, `inject` for a marker-based inject). A §13.11.3 sync reads the recorded `type` to apply the scope type filter to an artifact whose manifest no longer parses, and an entry written before `type` was recorded fails any non-empty type filter. The list is ordered by `id`, and the entries an artifact contributes are ordered among themselves by `materialized_path`. The `profile:` field is the **active profile** for that target. `override`, `save-as`, and `profile edit` use it as the default when no `--profile` flag is given. Concurrent writers against the same target's lock file (e.g., two `podium sync --watch` processes pointed at one directory) are undefined; operators are expected to keep a single sync owner per target.
 
 The target directory is created if it doesn't exist. The same is true for `<target>/.podium/`. `podium sync` errors only when the target path exists but is not writable.
 
