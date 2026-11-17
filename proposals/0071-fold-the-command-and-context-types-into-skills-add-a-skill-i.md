@@ -1,7 +1,7 @@
 # Proposal 0071: Fold the command and context types into skills: add a skill invocation field and remove both types
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-11-17). Verified after a redesign and 12 adversarial review rounds (22 findings fixed), following 8 earlier rounds (36 findings fixed).
+- Status: Implemented (2026-11-17). Verified after a redesign and 12 adversarial review rounds (22 findings fixed), following 8 earlier rounds (36 findings fixed).
 - Date: 2026-11-16
 
 This document stages spec, code, test, manual-validation, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: ingest refuses an `ARTIFACT.md` that declares `type: command` or `type: context`, stored rows of those types stop serving, and `claude-cowork` loses its only project-scope output. It ships in 0.7.0 as a MINOR bump.
@@ -54,30 +54,30 @@ This document stages spec, code, test, manual-validation, and documentation chan
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4, SPEC-5, SPEC-6. The type removal, the `invocation` field, §5.2, the §6.7 and §6.7.1 rows, the ingest, `podium lint`, emitter, and sync text, the §7.5.8 listing entries, the retired-row sentences, and the overview lists land in one commit, because each section cites the §4.1 **Removed types** paragraph or the §4.3.4 **Invocation** paragraph. The `registry-layout.svg` diagram lands in this commit.
+- [x] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3, SPEC-4, SPEC-5, SPEC-6. The type removal, the `invocation` field, §5.2, the §6.7 and §6.7.1 rows, the ingest, `podium lint`, emitter, and sync text, the §7.5.8 listing entries, the retired-row sentences, and the overview lists land in one commit, because each section cites the §4.1 **Removed types** paragraph or the §4.3.4 **Invocation** paragraph. The `registry-layout.svg` diagram lands in this commit.
       Levels: unit. Depends on: proposal 0070 implemented (D-17), because SPEC-4 Edits 9 and 10 edit the §7.5.8 and §7.3.1 `podium lint` text that 0070 inserts, CODE-3 edits the `pkg/sync` listing code that 0070 adds, and CODE-2 sets the `layer.Drop.Details` field that 0070 adds.
-- [ ] **S2 · test** — FIX-1. Stand-in fixtures switch to a remaining type under the FIX-1 stand-in criterion, including store and wire records whose type is the string literal `"context"` or `"command"`, with the stand-in callers of the e2e `contextArtifact` moving to the new `agentArtifact` helper and the package-local `contextArtifact` helpers in `pkg/registry/ingest` and `test/integration/sync_equivalence_test.go` renamed to `agentArtifact` and `standInArtifact`. The tests in the FIX-1 "Existing tests (S2)" list switch or are removed as it states, and the reference registry's four fixtures are converted by hand to the skill form FIX-1 states. Acceptance is a green `go test ./...` at this and every later step.
+- [x] **S2 · test** — FIX-1. Stand-in fixtures switch to a remaining type under the FIX-1 stand-in criterion, including store and wire records whose type is the string literal `"context"` or `"command"`, with the stand-in callers of the e2e `contextArtifact` moving to the new `agentArtifact` helper and the package-local `contextArtifact` helpers in `pkg/registry/ingest` and `test/integration/sync_equivalence_test.go` renamed to `agentArtifact` and `standInArtifact`. The tests in the FIX-1 "Existing tests (S2)" list switch or are removed as it states, and the reference registry's four fixtures are converted by hand to the skill form FIX-1 states. Acceptance is a green `go test ./...` at this and every later step.
       Interleave: this test step precedes the code steps because every edit is valid under the current code and keeps S4 and later steps green.
       Levels: unit, integration, e2e, conformance. Depends on: S1
-- [ ] **S3 · code** — CODE-1. `pkg/manifest` gains `Invocation`, `UserInvoked`, the `invocation` metadata codec, `IsRemovedType`, `RemovedTypeReplacement`, and `RetiredRow`, and the existing test the CODE-1 "Existing tests (S3)" list names. The type list keeps both names until S4, and the constants are deleted in S6.
+- [x] **S3 · code** — CODE-1. `pkg/manifest` gains `Invocation`, `UserInvoked`, the `invocation` metadata codec, `IsRemovedType`, `RemovedTypeReplacement`, and `RetiredRow`, and the existing test the CODE-1 "Existing tests (S3)" list names. The type list keeps both names until S4, and the constants are deleted in S6.
       Levels: unit. Depends on: S1
-- [ ] **S4 · code** — CODE-2. The shared classifier refuses removed types in ingest and the walk, `RetiredRow` retires stored rows, both names leave `firstClassTypes`, and `podium artifact scaffold` refuses them. This commit removes or rewrites every existing test the CODE-2 "Existing tests (S4)" list names, including the TEST-2 (b) removals and the base rewrites that TEST-2 (c), (d), and (e) extend, and deletes the `contextArtifact` helper.
+- [x] **S4 · code** — CODE-2. The shared classifier refuses removed types in ingest and the walk, `RetiredRow` retires stored rows, both names leave `firstClassTypes`, and `podium artifact scaffold` refuses them. This commit removes or rewrites every existing test the CODE-2 "Existing tests (S4)" list names, including the TEST-2 (b) removals and the base rewrites that TEST-2 (c), (d), and (e) extend, and deletes the `contextArtifact` helper.
       Levels: unit, integration, e2e. Depends on: S2, S3
-- [ ] **S5 · code** — CODE-3, FIX-2. `skillMarkdown`, the per-harness controls and fallbacks, `claude-cowork`, the emitters, the capability row, the guard input at `podium-mcp` and the registry-backed `podium sync` record, the `pkg/sync` listing skip of a user-invoked skill, the regenerated golden files, and the existing tests the CODE-3 "Existing tests (S5)" list names, `TestCapabilityMatrix_Types` and `TestCapability_CellMatchesSpecGrid` among them, and the closing search that list ends with. CODE-3 and FIX-2 are bundled because the golden files are the review surface of the adapter change.
+- [x] **S5 · code** — CODE-3, FIX-2. `skillMarkdown`, the per-harness controls and fallbacks, `claude-cowork`, the emitters, the capability row, the guard input at `podium-mcp` and the registry-backed `podium sync` record, the `pkg/sync` listing skip of a user-invoked skill, the regenerated golden files, and the existing tests the CODE-3 "Existing tests (S5)" list names, `TestCapabilityMatrix_Types` and `TestCapability_CellMatchesSpecGrid` among them, and the closing search that list ends with. CODE-3 and FIX-2 are bundled because the golden files are the review surface of the adapter change.
       Levels: unit, materialization, e2e, e2e (opt-in `harness_integration`). Depends on: S3, S4
-- [ ] **S6 · code** — CODE-4. `lint.skill_invocation`, the `invocation` arm of the §4.3.4 mismatch check, the hint rule, the deletion of `TypeContext` and `TypeCommand`, whose last references go in S5 and in this step, and the existing tests the CODE-4 "Existing tests (S6)" list names.
+- [x] **S6 · code** — CODE-4. `lint.skill_invocation`, the `invocation` arm of the §4.3.4 mismatch check, the hint rule, the deletion of `TypeContext` and `TypeCommand`, whose last references go in S5 and in this step, and the existing tests the CODE-4 "Existing tests (S6)" list names.
       Levels: unit, e2e. Depends on: S3, S5
-- [ ] **S7 · code** — CODE-5. `scaffold --invocation`, the `search_artifacts` descriptions, and `TestToolsList_SearchArtifactsTypeFilterNamesRemainingTypes`, which pins both description strings to the edited §5.1 text.
+- [x] **S7 · code** — CODE-5. `scaffold --invocation`, the `search_artifacts` descriptions, and `TestToolsList_SearchArtifactsTypeFilterNamesRemainingTypes`, which pins both description strings to the edited §5.1 text.
       Levels: unit, e2e. Depends on: S4, S6
-- [ ] **S8 · code** — CODE-6. The web UI dropdown, its test, the fixture renames, and the rebuilt `web/bundle`.
+- [x] **S8 · code** — CODE-6. The web UI dropdown, its test, the fixture renames, and the rebuilt `web/bundle`.
       Levels: unit. Depends on: S1
-- [ ] **S9 · test** — TEST-1. Unit, integration, and conformance tests, including a test for each `invocation_user` matrix cell and `TestReferenceRegistry_ConvertedFixtures`.
+- [x] **S9 · test** — TEST-1. Unit, integration, and conformance tests, including a test for each `invocation_user` matrix cell and `TestReferenceRegistry_ConvertedFixtures`.
       Levels: unit, integration, materialization, conformance. Depends on: S4, S5, S6, S7
-- [ ] **S10 · test** — TEST-2. End-to-end tests through the compiled binaries.
+- [x] **S10 · test** — TEST-2. End-to-end tests through the compiled binaries.
       Levels: e2e. Depends on: S4, S5, S6, S7
-- [ ] **S11 · test** — MV-1. S108, its index row, and the edits to every scenario that uses a removed type.
+- [x] **S11 · test** — MV-1. S108, its index row, and the edits to every scenario that uses a removed type.
       Levels: manual. Depends on: S8, S10, because the edited UI search steps read the type dropdown that S8 rebuilds.
-- [ ] **S12 · docs** — DOC-1. The authoring, consuming, reference, deployment, and upgrade-notes pages, the README, and the CHANGELOG entry, which lands last.
+- [x] **S12 · docs** — DOC-1. The authoring, consuming, reference, deployment, and upgrade-notes pages, the README, and the CHANGELOG entry, which lands last.
       Levels: e2e. Depends on: S7, S8, S11
 
 ## Current state and the gap
