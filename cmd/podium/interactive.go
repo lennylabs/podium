@@ -293,13 +293,14 @@ func appendUnique(list []string, s string) []string {
 // path the --add/--remove flags drive). A non-terminal invocation with no
 // scripted input prints actionable guidance instead of blocking.
 func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun bool) int {
-	registryPath := resolveOverrideRegistry(registryFlag)
+	merged, workspace := loadOverrideConfig()
+	registryPath := resolveOverrideRegistry(merged, workspace, registryFlag)
 	// One resolver serves both the view and the override, so the check
 	// resolves once, before the checklist (§7.5).
 	delivery := newSyncDeliveryCheck(workingDir())
 	// Spec: §7.2.2. The view and the apply step send the same harness, so one
 	// invocation never records its loads both with and without it.
-	harness := resolveOverrideHarness(harnessFlag, target)
+	harness := resolveOverrideHarness(merged, harnessFlag, target)
 	view, err := sync.ResolveEffectiveView(sync.Options{
 		RegistryPath: registryPath,
 		Target:       target,
@@ -327,6 +328,16 @@ func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun
 		fmt.Println("(no change)")
 		return 0
 	}
+	// Spec: §7.5.2, §7.5.8 — only an applied change with a registry and without
+	// --dry-run re-materializes, so the listing_budgets entry is validated
+	// after the early returns above and before Override records a toggle.
+	var budget sync.EffectiveListingBudget
+	if registryPath != "" && !dryRun {
+		var ok bool
+		if budget, ok = overrideListingBudget(merged, harness); !ok {
+			return 2
+		}
+	}
 	ovr, err := sync.Override(sync.OverrideOptions{
 		Target:       target,
 		Add:          res.Add,
@@ -351,11 +362,9 @@ func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun
 	}
 	fmt.Printf("toggles.add:    %s\n", formatToggles(ovr.Lock.Toggles.Add))
 	fmt.Printf("toggles.remove: %s\n", formatToggles(ovr.Lock.Toggles.Remove))
-	// Spec: §13.11.3 — the re-materialization's drops are reported and exit 1.
-	if reportDropped(os.Stderr, ovr.Dropped) {
-		return 1
-	}
-	return 0
+	// Spec: §13.11.3, §7.5.8 — the re-materialization's drops and listing
+	// report are written and exit 1 (the listing under `check: error`).
+	return overrideExit(ovr, budget)
 }
 
 // runProfileEditInteractive implements the §7.5.7 `podium profile edit` TUI

@@ -445,3 +445,115 @@ func readLockString(t *testing.T, target string) string {
 	}
 	return string(b)
 }
+
+// listingOverrideFixture writes a filesystem registry holding one skill and a
+// workspace whose sync.yaml sets the claude-code listing_budgets entry to
+// entry. It isolates HOME and the PODIUM_* harness and registry variables so
+// only the workspace scope applies, and returns the registry and workspace.
+func listingOverrideFixture(t *testing.T, entry string) (registry, ws string) {
+	t.Helper()
+	registry = t.TempDir()
+	testharness.WriteTree(t, registry,
+		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\n"},
+		testharness.WriteTreeOption{Path: "team/docs/writer/ARTIFACT.md",
+			Content: "---\ntype: skill\nversion: 1.0.0\ndescription: Draft release notes from merged pull requests.\n---\n\n"},
+		testharness.WriteTreeOption{Path: "team/docs/writer/SKILL.md",
+			Content: "---\nname: writer\ndescription: Draft release notes from merged pull requests.\n---\n\nBody.\n"},
+	)
+	ws = t.TempDir()
+	testharness.WriteTree(t, ws, testharness.WriteTreeOption{
+		Path:    ".podium/sync.yaml",
+		Content: "listing_budgets:\n  claude-code:\n" + entry,
+	})
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PODIUM_HARNESS", "")
+	t.Setenv("PODIUM_REGISTRY", "")
+	return registry, ws
+}
+
+// runInteractiveOverride runs runSyncOverrideInteractive from ws with the
+// scripted input and returns its exit code, standard output, and standard
+// error.
+func runInteractiveOverride(t *testing.T, ws, script, target, registry string, dryRun bool) (rc int, stdout, stderr string) {
+	t.Helper()
+	withInteractiveStdin(t, script, true)
+	withCwd(t, ws, func() {
+		stderr = captureStderr(t, func() {
+			stdout = captureStdout(t, func() {
+				rc = runSyncOverrideInteractive(target, registry, "claude-code", dryRun)
+			})
+		})
+	})
+	return rc, stdout, stderr
+}
+
+// Spec: §7.5.8, §7.5.5 — a toggle applied from the checklist re-materializes
+// the target, and a listing over its budget under `check: error` writes the
+// listing line on standard error and exits 1 with the toggle kept. The
+// skill's cost is len("writer") + 46 description code points + 5 = 57.
+func TestRunSyncOverrideInteractive_ListingOverBudgetExits1(t *testing.T) {
+	registry, ws := listingOverrideFixture(t, "    max_chars: 10\n    check: error\n")
+	target := t.TempDir()
+
+	rc, _, stderr := runInteractiveOverride(t, ws, "1\nsave\n", target, registry, false)
+	if rc != 1 {
+		t.Errorf("rc = %d, want 1\nstderr:\n%s", rc, stderr)
+	}
+	want := "listing: claude-code listing estimate is 57 characters against a configured budget of 10 (1 entries)"
+	if !strings.Contains(stderr, want) {
+		t.Errorf("stderr missing %q:\n%s", want, stderr)
+	}
+	if strings.Contains(stderr, "warning: listing:") {
+		t.Errorf("check: error line carries the warning prefix:\n%s", stderr)
+	}
+	if !strings.Contains(readLockString(t, target), "docs/writer") {
+		t.Errorf("lock toggles.add missing the checked artifact")
+	}
+}
+
+// Spec: §7.5.8, §7.5.5, §7.5.2 — a re-materializing override exits 2 on an
+// invalid listing_budgets entry for its harness before it records a toggle.
+// An override that does not re-materialize validates no entry: --dry-run, a
+// quit checklist, and a save with no toggle exit 0.
+func TestRunSyncOverrideInteractive_InvalidListingBudgetExits2(t *testing.T) {
+	registry, ws := listingOverrideFixture(t, "    check: maybe\n")
+	const keyErr = "listing_budgets.claude-code.check"
+
+	t.Run("re-materializes", func(t *testing.T) {
+		target := t.TempDir()
+		rc, _, stderr := runInteractiveOverride(t, ws, "1\nsave\n", target, registry, false)
+		if rc != 2 {
+			t.Errorf("rc = %d, want 2", rc)
+		}
+		if !strings.Contains(stderr, keyErr) {
+			t.Errorf("stderr does not name %s:\n%s", keyErr, stderr)
+		}
+		if _, err := os.Stat(filepath.Join(target, ".podium", "sync.lock")); !os.IsNotExist(err) {
+			t.Errorf("a toggle was recorded: sync.lock stat err = %v", err)
+		}
+	})
+	t.Run("dry-run", func(t *testing.T) {
+		rc, _, stderr := runInteractiveOverride(t, ws, "1\nsave\n", t.TempDir(), registry, true)
+		if rc != 0 || strings.Contains(stderr, keyErr) {
+			t.Errorf("rc = %d, want 0 with no %s error\nstderr:\n%s", rc, keyErr, stderr)
+		}
+	})
+	t.Run("quit", func(t *testing.T) {
+		rc, _, stderr := runInteractiveOverride(t, ws, "1\nquit\n", t.TempDir(), registry, false)
+		if rc != 0 || strings.Contains(stderr, keyErr) {
+			t.Errorf("rc = %d, want 0 with no %s error\nstderr:\n%s", rc, keyErr, stderr)
+		}
+		if !strings.Contains(stderr, "override: cancelled; no changes written") {
+			t.Errorf("stderr missing the cancel line:\n%s", stderr)
+		}
+	})
+	t.Run("save with no toggle", func(t *testing.T) {
+		rc, stdout, stderr := runInteractiveOverride(t, ws, "save\n", t.TempDir(), registry, false)
+		if rc != 0 || strings.Contains(stderr, keyErr) {
+			t.Errorf("rc = %d, want 0 with no %s error\nstderr:\n%s", rc, keyErr, stderr)
+		}
+		if !strings.Contains(stdout, "(no change)") {
+			t.Errorf("stdout missing (no change):\n%s", stdout)
+		}
+	})
+}

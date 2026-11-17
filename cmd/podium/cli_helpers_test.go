@@ -275,7 +275,7 @@ func TestPrintJSON_EmitsSpecEnvelope(t *testing.T) {
 				{ID: "personal/a", Version: "1.0.0", Type: "agent", Layer: "personal", Files: []string{".claude/agents/a.md"}},
 				{ID: "personal/b", Version: "2.1.0", Type: "skill", Layer: "personal", Files: []string{".claude/agents/b.md"}},
 			},
-		})
+		}, nil)
 	})
 	var envelope struct {
 		Profile string `json:"profile"`
@@ -311,6 +311,10 @@ func TestPrintJSON_EmitsSpecEnvelope(t *testing.T) {
 	// The non-spec "files" key is gone.
 	if strings.Contains(got, "\"files\"") || strings.Contains(got, "\"adapter\"") {
 		t.Errorf("envelope still carries adapter/files keys:\n%s", got)
+	}
+	// Spec: §7.5.8 — a run that computes no listing carries listing: null.
+	if !strings.Contains(got, "\"listing\": null") {
+		t.Errorf("envelope lacks listing: null:\n%s", got)
 	}
 }
 
