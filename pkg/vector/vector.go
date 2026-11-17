@@ -166,6 +166,21 @@ func MaxQueryRowsOf(v Provider) int {
 // 1,000 rows stays within the limits a hosted instance applies by default.
 const managedMaxQueryRows = 1000
 
+// validateQueryDim checks a query vector against the configured dimension. A
+// self-embedding backend opened with no local dimension (dim 0) accepts a
+// non-empty vector of any length: its hosted model fixes the dimension, and
+// the §7.3.1 overlap computation queries it with a vector the index itself
+// returned (VectorReader).
+func validateQueryDim(v []float32, dim int) error {
+	if len(v) == 0 {
+		return ErrDimensionMismatch
+	}
+	if dim == 0 {
+		return nil
+	}
+	return validateDim(v, dim)
+}
+
 // validateDim returns ErrDimensionMismatch when v's length doesn't
 // match the configured dimension. Backends call this on every Put /
 // Query so the error surface is consistent.

@@ -223,7 +223,7 @@ func (p *Pinecone) Query(ctx context.Context, tenantID string, vec []float32, to
 	if tenantID == "" || topK < 1 {
 		return nil, ErrInvalidArgument
 	}
-	if err := validateDim(vec, p.Dim); err != nil {
+	if err := validateQueryDim(vec, p.Dim); err != nil {
 		return nil, err
 	}
 	body := map[string]any{

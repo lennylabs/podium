@@ -8,10 +8,15 @@ import (
 	"net/url"
 )
 
-// The managed backends implement VectorReader for their storage-only mode, so
-// the §7.3.1 semantic overlap check queries them with an artifact's stored
-// vector rather than embedding its projection a second time. They record no
-// model per row (§4.7), so the model they report is empty.
+// The managed backends implement VectorReader in both modes, so the §7.3.1
+// semantic overlap check queries them with an artifact's stored vector rather
+// than embedding its projection a second time. A self-embedding index returns
+// the vector its hosted model computed: Pinecone's fetch returns the values of
+// an integrated-inference record, Qdrant returns the point's vector under
+// with_vector, and Weaviate returns the object's vector under include=vector.
+// The query is then symmetric cosine, where a text query would report an
+// asymmetric query-to-passage score. They record no model per row (§4.7), so
+// the model they report is empty.
 
 // StoredVector fetches the (tenant, id, version) vector through
 // GET /vectors/fetch in the tenant's namespace.
@@ -79,15 +84,26 @@ func (w *Weaviate) StoredVector(ctx context.Context, tenantID, artifactID, versi
 		return nil, "", err
 	}
 	var parsed struct {
-		Vector []float32 `json:"vector"`
+		Vector  []float32            `json:"vector"`
+		Vectors map[string][]float32 `json:"vectors"`
 	}
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return nil, "", fmt.Errorf("weaviate: decode object: %w", err)
 	}
-	if len(parsed.Vector) == 0 {
+	vec := parsed.Vector
+	// A collection configured with one named vector, which a vectorizer set
+	// through the collection API produces, returns it under vectors. A
+	// nearVector query targets it without naming it only when it is the sole
+	// named vector, so more than one is treated as no usable vector.
+	if len(vec) == 0 && len(parsed.Vectors) == 1 {
+		for _, v := range parsed.Vectors {
+			vec = v
+		}
+	}
+	if len(vec) == 0 {
 		return nil, "", ErrNotFound
 	}
-	return parsed.Vector, "", nil
+	return vec, "", nil
 }
 
 // HostedModel returns the Pinecone Integrated Inference model, or "" when the

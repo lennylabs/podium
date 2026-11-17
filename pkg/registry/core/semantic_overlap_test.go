@@ -217,33 +217,45 @@ func TestComputeOverlap_FailureKeepsRecords(t *testing.T) {
 	}
 }
 
-// managedIndex is a storage-only managed backend fake: it returns stored
-// vectors and reports a distance, and scores nothing itself. A query returns
-// the first k of its matches, which it holds nearest first.
-type managedIndex struct {
+// managedRows is a managed backend fake that reports a distance and scores
+// nothing itself. A query returns the first k of its matches, which it holds
+// nearest first. It returns no stored vector.
+type managedRows struct {
 	matches []vector.Match
 }
 
-func (m managedIndex) firstK(k int) []vector.Match { return m.matches[:min(k, len(m.matches))] }
+func (m managedRows) firstK(k int) []vector.Match { return m.matches[:min(k, len(m.matches))] }
 
-func (managedIndex) ID() string      { return "pinecone" }
-func (managedIndex) Dimensions() int { return 4 }
-func (managedIndex) Put(context.Context, string, string, string, []float32) error {
+func (managedRows) ID() string      { return "pinecone" }
+func (managedRows) Dimensions() int { return 4 }
+func (managedRows) Put(context.Context, string, string, string, []float32) error {
 	return nil
 }
-func (m managedIndex) Query(_ context.Context, _ string, _ []float32, k int) ([]vector.Match, error) {
+func (m managedRows) Query(_ context.Context, _ string, _ []float32, k int) ([]vector.Match, error) {
 	return m.firstK(k), nil
 }
-func (managedIndex) Delete(context.Context, string, string, string) error { return nil }
-func (managedIndex) Close() error                                         { return nil }
+func (managedRows) Delete(context.Context, string, string, string) error { return nil }
+func (managedRows) Close() error                                         { return nil }
+
+// managedIndex is a storage-only managed backend fake: managedRows that also
+// returns stored vectors.
+type managedIndex struct {
+	managedRows
+}
+
+func newManagedIndex(matches []vector.Match) managedIndex {
+	return managedIndex{managedRows{matches: matches}}
+}
+
 func (managedIndex) StoredVector(context.Context, string, string, string) ([]float32, string, error) {
 	return []float32{1, 0, 0, 0}, "", nil
 }
 
-// hostedIndex is a self-embedding backend fake that records the text and the
-// row count it is queried with.
+// hostedIndex is a self-embedding backend fake that cannot return a stored
+// vector, so the overlap computation queries it with the projection text. It
+// records the text and the row count of each text query.
 type hostedIndex struct {
-	managedIndex
+	managedRows
 	queried []string
 	ks      []int
 }
@@ -261,8 +273,8 @@ func (h *hostedIndex) QueryText(_ context.Context, _, text string, k int) ([]vec
 
 // Spec: §7.3.1 — a managed backend's similarity is one minus the distance it
 // reports, a storage-only managed backend is queried with the stored vector,
-// and a self-embedding backend is queried with the projection text and stamps
-// records with its hosted model.
+// and a self-embedding backend that cannot return a stored vector is queried
+// with the projection text and stamps records with its hosted model.
 func TestComputeOverlap_ManagedAndSelfEmbedding(t *testing.T) {
 	t.Parallel()
 	matches := []vector.Match{{ArtifactID: "a", Version: "1.0.0", Distance: 0}, {ArtifactID: "b", Version: "1.0.0", Distance: 0.12}}
@@ -271,8 +283,8 @@ func TestComputeOverlap_ManagedAndSelfEmbedding(t *testing.T) {
 		emb   bool
 		model string
 	}{
-		"storage-only": {idx: managedIndex{matches: matches}, emb: true, model: "m1"},
-		"self-embed":   {idx: &hostedIndex{managedIndex: managedIndex{matches: matches}}, model: "hosted-1"},
+		"storage-only": {idx: newManagedIndex(matches), emb: true, model: "m1"},
+		"self-embed":   {idx: &hostedIndex{managedRows: managedRows{matches: matches}}, model: "hosted-1"},
 	} {
 		f := newOverlapFixture(t, []layer.Layer{publicLayer("L")})
 		f.put("a", "1.0.0", "L", "alpha", "", false)
@@ -490,8 +502,8 @@ func TestComputeOverlap_WideningIsBounded(t *testing.T) {
 }
 
 // Spec: §7.3.1 — the widening applies on a storage-only managed backend that
-// is not model-versioned and on a self-embedding backend, which is queried
-// with the projection text each time.
+// is not model-versioned and on a self-embedding backend that cannot return a
+// stored vector, which is queried with the projection text each time.
 func TestComputeOverlap_WidensOnManagedBackends(t *testing.T) {
 	t.Parallel()
 	matches := []vector.Match{
@@ -500,12 +512,12 @@ func TestComputeOverlap_WidensOnManagedBackends(t *testing.T) {
 		{ArtifactID: "a", Version: "0.8.0", Distance: 0},
 		{ArtifactID: "b", Version: "1.0.0", Distance: 0.12},
 	}
-	hosted := &hostedIndex{managedIndex: managedIndex{matches: matches}}
+	hosted := &hostedIndex{managedRows: managedRows{matches: matches}}
 	for name, tc := range map[string]struct {
 		idx vector.Provider
 		emb embedding.Provider
 	}{
-		"storage-only": {idx: managedIndex{matches: matches}, emb: overlapEmbedder{model: "m1"}},
+		"storage-only": {idx: newManagedIndex(matches), emb: overlapEmbedder{model: "m1"}},
 		"self-embed":   {idx: hosted},
 	} {
 		f := newOverlapFixture(t, []layer.Layer{publicLayer("L")})

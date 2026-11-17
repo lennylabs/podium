@@ -98,18 +98,21 @@ type neighborSource struct {
 	score func(ctx context.Context, matches []vector.Match) ([]overlapNeighbor, error)
 }
 
-// neighborSourceFor prepares rec's index queries. A self-embedding backend is
-// queried with the projection text and a storage-only backend with rec's
-// stored vector, restricted to the configured model on a model-versioned
-// backend, as search restricts its queries. A collocated backend scores each
-// row from the stored vectors, because sqlite-vec's index orders by L2
-// distance; a managed backend's similarity is one minus the distance it
-// reports.
+// neighborSourceFor prepares rec's index queries. Every backend that can
+// return rec's stored vector (vector.VectorReader) is queried with it, a
+// self-embedding backend included, restricted to the configured model on a
+// model-versioned backend as search restricts its queries. A self-embedding
+// backend that cannot return a stored vector is queried with the projection
+// text instead. A text query reports a query-to-passage score, which is not
+// symmetric and does not reach 1 for identical texts, so it is the fallback
+// rather than the default. A collocated backend scores each row from the
+// stored vectors, because sqlite-vec's index orders by L2 distance; a managed
+// backend's similarity is one minus the distance it reports.
 //
 // Spec: §7.3.1, §4.7
 func (r *Registry) neighborSourceFor(ctx context.Context, rec store.ManifestRecord) (neighborSource, error) {
 	tenant := r.TenantFor(ctx)
-	if r.embedder == nil {
+	if _, canRead := r.vector.(vector.VectorReader); !canRead && r.embedder == nil {
 		tv := r.vector.(vector.TextVectorizer)
 		text := projection.Artifact(rec)
 		return neighborSource{
@@ -122,7 +125,7 @@ func (r *Registry) neighborSourceFor(ctx context.Context, rec store.ManifestReco
 		return neighborSource{}, err
 	}
 	src := neighborSource{score: scoreByDistance}
-	if mv, ok := vector.ModelVersionedOf(r.vector); ok {
+	if mv, ok := vector.ModelVersionedOf(r.vector); ok && r.embedder != nil {
 		model := r.embedder.Model()
 		src.query = func(ctx context.Context, k int) ([]vector.Match, error) {
 			return mv.QueryModel(ctx, tenant, vec, k, model)
@@ -139,8 +142,9 @@ func (r *Registry) neighborSourceFor(ctx context.Context, rec store.ManifestReco
 }
 
 // currentStoredVector returns rec's stored vector when the backend holds one
-// under the configured model. A backend that cannot return stored vectors, a
-// missing row, and a row of another model all fail the computation.
+// under the configured model (overlapModel). A backend that cannot return
+// stored vectors, a missing row, and a row of another model all fail the
+// computation.
 func (r *Registry) currentStoredVector(ctx context.Context, tenant string, rec store.ManifestRecord) ([]float32, error) {
 	reader, ok := r.vector.(vector.VectorReader)
 	if !ok {
@@ -153,7 +157,7 @@ func (r *Registry) currentStoredVector(ctx context.Context, tenant string, rec s
 	if err != nil {
 		return nil, err
 	}
-	if current := r.embedder.Model(); model != "" && model != current {
+	if current := r.overlapModel(); model != "" && model != current {
 		return nil, fmt.Errorf("%w: the row carries model %s, the configured model is %s", errNoStoredVector, model, current)
 	}
 	return vec, nil

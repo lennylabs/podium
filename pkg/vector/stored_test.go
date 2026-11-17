@@ -214,3 +214,85 @@ func TestManaged_StoredVectorAndHostedModel(t *testing.T) {
 		t.Errorf("hosted models = %v", got)
 	}
 }
+
+// selfEmbedFake serves a self-embedding index: the stored-vector read returns
+// the vector the hosted model computed, and a vector query answers one row
+// with a similarity score. It counts the vector queries.
+func selfEmbedFake(t *testing.T, named bool) (*httptest.Server, *int) {
+	t.Helper()
+	queries := 0
+	vec := []float32{0.1, 0.2, 0.3, 0.4, 0.5}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/vectors/fetch":
+			_ = json.NewEncoder(w).Encode(map[string]any{"vectors": map[string]any{r.URL.Query().Get("ids"): map[string]any{"values": vec}}})
+		case strings.HasSuffix(r.URL.Path, "/points"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []any{map[string]any{"vector": vec}}})
+		case strings.HasPrefix(r.URL.Path, "/v1/objects/"):
+			if named {
+				_ = json.NewEncoder(w).Encode(map[string]any{"vectors": map[string]any{"default": vec}})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"vector": vec})
+		case r.URL.Path == "/query":
+			queries++
+			_ = json.NewEncoder(w).Encode(map[string]any{"matches": []any{map[string]any{"score": 0.75, "metadata": map[string]any{"artifact_id": "b", "version": "1"}}}})
+		case strings.HasSuffix(r.URL.Path, "/points/search"):
+			queries++
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []any{map[string]any{"score": 0.75, "payload": map[string]any{"artifact_id": "b", "version": "1"}}}})
+		case r.URL.Path == "/v1/graphql":
+			queries++
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"Get": map[string]any{"C": []any{
+				map[string]any{"artifactId": "b", "version": "1", "_additional": map[string]any{"distance": 0.25}},
+			}}}})
+		default:
+			http.Error(w, "unhandled path "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &queries
+}
+
+// Spec: §7.3.1 — a self-embedding Pinecone, Qdrant, or Weaviate index returns
+// the vector its hosted model stored and accepts that vector as a query,
+// although it was opened with no local dimension, so the overlap computation
+// scores a pair as one minus the reported distance of a vector query. A
+// Weaviate object that carries its vector as its sole named vector is read
+// the same way, and one with several named vectors has no usable vector.
+func TestManaged_SelfEmbeddingStoredVectorQuery(t *testing.T) {
+	t.Parallel()
+	for _, named := range []bool{false, true} {
+		srv, queries := selfEmbedFake(t, named)
+		pc, _ := vector.NewPinecone(vector.PineconeConfig{APIKey: "k", Host: srv.URL, InferenceModel: "multilingual-e5-large"})
+		qd, _ := vector.NewQdrant(vector.QdrantConfig{URL: srv.URL, Collection: "c", InferenceModel: "m"})
+		wv, _ := vector.NewWeaviate(vector.WeaviateConfig{URL: srv.URL, Collection: "C", Vectorizer: "text2vec-weaviate"})
+		backends := map[string]vector.Provider{"pinecone": pc, "qdrant": qd, "weaviate": wv}
+		for name, b := range backends {
+			if named && name != "weaviate" {
+				continue
+			}
+			vec, _, err := b.(vector.VectorReader).StoredVector(context.Background(), "t", "a", "1")
+			if err != nil || len(vec) != 5 {
+				t.Fatalf("%s (named=%v) StoredVector = %v, %v; want the 5-dimension hosted vector", name, named, vec, err)
+			}
+			matches, err := b.Query(context.Background(), "t", vec, 3)
+			if err != nil || len(matches) != 1 || matches[0].ArtifactID != "b" || math.Abs(float64(matches[0].Distance)-0.25) > 1e-6 {
+				t.Errorf("%s Query with the stored vector = %+v, %v; want b at distance 0.25", name, matches, err)
+			}
+			if _, err := b.Query(context.Background(), "t", nil, 3); !errors.Is(err, vector.ErrDimensionMismatch) {
+				t.Errorf("%s Query with an empty vector = %v, want ErrDimensionMismatch", name, err)
+			}
+		}
+		if want := map[bool]int{false: 3, true: 1}[named]; *queries != want {
+			t.Errorf("named=%v: vector queries = %d, want %d", named, *queries, want)
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"vectors": map[string]any{"a": []float32{1}, "b": []float32{2}}})
+	}))
+	t.Cleanup(srv.Close)
+	wv, _ := vector.NewWeaviate(vector.WeaviateConfig{URL: srv.URL, Collection: "C", Vectorizer: "text2vec-weaviate"})
+	if _, _, err := wv.StoredVector(context.Background(), "t", "a", "1"); !errors.Is(err, vector.ErrNotFound) {
+		t.Errorf("Weaviate StoredVector with two named vectors = %v, want ErrNotFound", err)
+	}
+}

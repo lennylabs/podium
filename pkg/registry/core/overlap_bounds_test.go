@@ -62,8 +62,8 @@ func limitedFixture(t *testing.T, idx *limitedIndex, neighbors int) *overlapFixt
 func TestComputeOverlap_WideningClampedToBackendLimit(t *testing.T) {
 	t.Parallel()
 	idx := &limitedIndex{
-		managedIndex: managedIndex{matches: selfRowsThen(7, vector.Match{ArtifactID: "b", Version: "1.0.0", Distance: 0.1},
-			vector.Match{ArtifactID: "c", Version: "1.0.0", Distance: 0.2})},
+		managedIndex: newManagedIndex(selfRowsThen(7, vector.Match{ArtifactID: "b", Version: "1.0.0", Distance: 0.1},
+			vector.Match{ArtifactID: "c", Version: "1.0.0", Distance: 0.2})),
 		maxRows: 8, failAbove: 8,
 	}
 	f := limitedFixture(t, idx, 2)
@@ -93,7 +93,7 @@ func TestComputeOverlap_LaterQueryFailureKeepsPeers(t *testing.T) {
 		{ArtifactID: "a", Version: "0.7.0"},
 		{ArtifactID: "c", Version: "1.0.0", Distance: 0.3},
 	}
-	idx := &limitedIndex{managedIndex: managedIndex{matches: matches}, failAbove: 3}
+	idx := &limitedIndex{managedIndex: newManagedIndex(matches), failAbove: 3}
 	f := limitedFixture(t, idx, 2)
 	key := []vector.RowKey{{ArtifactID: "a", Version: "1.0.0"}}
 	res, err := f.reg.ComputeOverlap(f.ctx, key)

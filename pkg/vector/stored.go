@@ -16,12 +16,13 @@ type RowKey struct {
 	Version    string
 }
 
-// VectorReader is the optional capability a storage-only backend implements
-// to return the vector it stores for one row. The §7.3.1 semantic overlap
-// check queries the index with an artifact's stored vector, so it adds no
-// second embedding of the catalog. A self-embedding backend computes the
-// vector from text server-side and the check queries it with the projection
-// text instead, so the capability is not consulted for one.
+// VectorReader is the optional capability a backend implements to return the
+// vector it stores for one row. The §7.3.1 semantic overlap check queries the
+// index with an artifact's stored vector, so it adds no second embedding of
+// the catalog, and two artifacts score the same in either direction. A
+// self-embedding backend that implements it is queried with the stored vector
+// too; one that does not is queried with the projection text, whose
+// query-to-passage score is not symmetric.
 type VectorReader interface {
 	// StoredVector returns the stored vector of the (tenant, id, version) row
 	// and the embedding model the row is tagged with. modelID is empty on a
