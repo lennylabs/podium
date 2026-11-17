@@ -338,10 +338,10 @@ The lock file is written to `<target>/.podium/sync.lock`.
 
 | Status | Cause |
 |:--|:--|
-| `1` | The run dropped an artifact (see [Dropped artifacts](#dropped-artifacts)), the listing estimate exceeded its budget under `check: error` (see [Listing budget](#listing-budget)), a delivery check failed on a one-shot sync, a `--config` target failed, or a `sync.yaml` scope failed to load, including on a `listing_budgets` value of the wrong YAML type. Under `--watch`, the command exits 1 on interrupt when any cycle it reported failed, dropped an artifact, or exceeded its budget under `check: error`. |
+| `1` | The run dropped an artifact (see [Dropped artifacts](#dropped-artifacts)), the listing estimate exceeded its budget or an entry exceeded `max_entry_chars` under `check: error` (see [Listing budget](#listing-budget)), a delivery check failed on a one-shot sync, a `--config` target failed, or a `sync.yaml` scope failed to load, including on a `listing_budgets` value of the wrong YAML type. Under `--watch`, the command exits 1 on interrupt when any cycle it reported failed, dropped an artifact, or reported a listing excess or an entry that exceeded `max_entry_chars` under `check: error`. |
 | `2` | The signature policy or the verification key set did not resolve (see [Delivery verification](#delivery-verification)), or the `listing_budgets` entry for the run's harness is invalid. The entry check covers `--preview`, and a run that sets no harness runs the `none` adapter, so a `listing_budgets.none` entry exits 2 on it. |
 
-A drop and a listing excess each add a cause for exit status 1 and leave the command's other exit statuses unchanged.
+A drop and a listing report under `check: error` each add a cause for exit status 1 and leave the command's other exit statuses unchanged.
 
 #### Config targets
 
@@ -405,8 +405,8 @@ Under `--json`, the envelope carries a `listing` member:
 Under `check: warning`, a report leaves the exit status unchanged. Under `check: error`, a report fails the run as a drop does:
 
 - A one-shot sync writes the target and exits 1. `--dry-run` prints the resolved set and exits 1.
-- Under `--watch`, each over-budget cycle prints its report and the watch continues. The command exits 1 on interrupt.
-- Under `--config`, the estimate runs for each `kind: workspace` target, including under `--check`, and an over-budget target counts as a failed target after its workflow runs. A `kind: marketplace` target gets no estimate.
+- Under `--watch`, a cycle that reports an excess or an oversized entry prints its report and the watch continues. The command exits 1 on interrupt.
+- Under `--config`, the estimate runs for each `kind: workspace` target, including under `--check`, and a target that reports an excess or an oversized entry counts as a failed target after its workflow runs. A `kind: marketplace` target gets no estimate.
 - `podium sync override` reports the listing of its re-materialization, as [`podium sync override`](#podium-sync-override) describes.
 
 An invalid `listing_budgets` entry for the run's harness exits 2 before the view is resolved, and the message names the adapter and, when a key holds an invalid value, the key. An invalid entry for another adapter does not affect the run. `podium sync --preview` validates the `listing_budgets` entry for the run's harness and exits 2 on an invalid one, but it computes no listing and prints no report. `podium sync --check` without `--config` computes no listing and reports every invalid entry as a warning. A `--config` run resolves `listing_budgets` from the `sync.yaml` scopes, discovering the workspace from the `.podium/` directory that holds the configuration file, and an invalid entry for the harness of any `kind: workspace` target exits 2 before the first target runs, with or without `--check`.
