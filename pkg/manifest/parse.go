@@ -407,6 +407,43 @@ func IsBuiltinExtensionType(t ArtifactType) bool {
 	return false
 }
 
+// removedTypes maps each type that §4.1 removed to the replacement phrase a
+// refusal names. The keys are string literals rather than the TypeCommand and
+// TypeContext constants, so the predicates outlive those constants.
+//
+// Spec: §4.1
+var removedTypes = map[ArtifactType]string{
+	"command": `a command is a skill whose metadata.invocation is "user"`,
+	"context": "reference material is a skill's references/ resources or a skill that carries reference material",
+}
+
+// IsRemovedType reports whether t is a type that §4.1 removed. An ARTIFACT.md
+// of a removed type is refused at ingest, and a stored row of one is retired.
+//
+// Spec: §4.1
+func IsRemovedType(t ArtifactType) bool {
+	_, ok := removedTypes[t]
+	return ok
+}
+
+// RemovedTypeReplacement returns the phrase that names what replaces the
+// removed type t, or the empty string when t is not a removed type.
+//
+// Spec: §4.1
+func RemovedTypeReplacement(t ArtifactType) string {
+	return removedTypes[t]
+}
+
+// RetiredRow reports whether a stored row stops serving: its type is a removed
+// type, or its frontmatter declares extends:. The type check runs first
+// because it is a map lookup, and DeclaresExtends decodes the frontmatter on
+// every listed row.
+//
+// Spec: §4.1, §4.6
+func RetiredRow(frontmatter []byte, typ string) bool {
+	return IsRemovedType(ArtifactType(typ)) || DeclaresExtends(frontmatter)
+}
+
 // TargetsHarness reports whether an artifact whose target_harnesses field
 // is targets should materialize for harnessID. Per §4.3 the field is an
 // opt-out of cross-harness materialization: an empty (or absent) list

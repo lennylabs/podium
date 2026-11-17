@@ -91,6 +91,19 @@ const (
 	RuleModeExplicit RuleMode = "explicit"
 )
 
+// Invocation records who starts a type: skill artifact (spec §4.3
+// type-specific fields, §4.3.4 Invocation). The resolved value keeps the raw
+// authored string, so an invalid value survives resolution; every reader
+// decides through Artifact.UserInvoked, which treats only InvocationUser as
+// user-only.
+type Invocation string
+
+// Invocation values per §4.3.4. InvocationAny is the default.
+const (
+	InvocationAny  Invocation = "any"
+	InvocationUser Invocation = "user"
+)
+
 // Artifact is the canonical decoded representation of an ARTIFACT.md file's
 // frontmatter, per the universal fields (§4.3) plus all caller-interpreted
 // and type-specific fields. The body field carries the prose body (empty
@@ -143,6 +156,10 @@ type Artifact struct {
 
 	// Type-specific (§4.3).
 	//
+	// Invocation (type: skill) states who starts the skill. Read it
+	// through UserInvoked rather than comparing the raw value.
+	Invocation Invocation `yaml:"invocation,omitempty"`
+
 	// Input and Output (type: agent) reference external JSON Schema
 	// documents. The documented YAML form is a mapping with a $ref key
 	// (input: { $ref: ./schemas/input.json }); SchemaRef.UnmarshalYAML
@@ -166,6 +183,16 @@ type Artifact struct {
 	// Body is the markdown prose below the frontmatter. Empty for
 	// type: skill (the body lives in SKILL.md).
 	Body string `yaml:"-"`
+}
+
+// UserInvoked reports whether a is a skill meant for a human to invoke. Only
+// the exact resolved value "user" on a type: skill artifact is user-only. An
+// absent value, "any", and every other value, including "User" and an unknown
+// word, resolve to any, whether or not lint ran. A nil a reports false.
+//
+// Spec: §4.3, §4.3.4
+func (a *Artifact) UserInvoked() bool {
+	return a != nil && a.Type == TypeSkill && a.Invocation == InvocationUser
 }
 
 // SchemaRef references an external JSON Schema document. It backs the

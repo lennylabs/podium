@@ -3,6 +3,7 @@ package manifest
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -53,6 +54,10 @@ func TestDecodeSkillMetadata_Encodings(t *testing.T) {
 		{"replaced_by", "a\nb", Artifact{}, false},
 		{"replaced_by", "a\rb", Artifact{}, false},
 		{"release_notes", "line one\nline two\n", Artifact{ReleaseNotes: "line one\nline two\n"}, true},
+		{"invocation", "any", Artifact{Invocation: InvocationAny}, true},
+		{"invocation", "user", Artifact{Invocation: InvocationUser}, true},
+		{"invocation", "User", Artifact{}, false},
+		{"invocation", "yes", Artifact{}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.key+"="+tc.value, func(t *testing.T) {
@@ -131,7 +136,7 @@ func TestDecodeSkillMetadata_DecodedKeysRecordsFalse(t *testing.T) {
 // every key in it has a codec.
 func TestIsSkillMetadataField(t *testing.T) {
 	t.Parallel()
-	for _, key := range []string{"when_to_use", "tags", "sensitivity", "search_visibility", "deprecated", "replaced_by", "release_notes"} {
+	for _, key := range []string{"when_to_use", "tags", "sensitivity", "search_visibility", "deprecated", "replaced_by", "release_notes", "invocation"} {
 		if !IsSkillMetadataField(key) {
 			t.Errorf("IsSkillMetadataField(%q) = false, want true", key)
 		}
@@ -196,15 +201,19 @@ func TestResolveSkillFields_PrecedenceByKeyPresence(t *testing.T) {
 		"deprecated", "true",
 		"replaced_by", "finance/close-v2",
 		"release_notes", "notes",
+		"invocation", "user",
 	)
 
 	t.Run("stated empty and false values win", func(t *testing.T) {
 		t.Parallel()
 		a := &Artifact{Type: TypeSkill}
-		stated := map[string]bool{"deprecated": true, "sensitivity": true, "tags": true}
+		stated := map[string]bool{"deprecated": true, "sensitivity": true, "tags": true, "invocation": true}
 		filled := ResolveSkillFields(a, stated, s)
 		if a.Deprecated || a.Sensitivity != "" || a.Tags != nil {
 			t.Errorf("stated keys overridden: %+v", a)
+		}
+		if a.Invocation != "" || a.UserInvoked() {
+			t.Errorf("stated invocation overridden: Invocation = %q, UserInvoked = %v", a.Invocation, a.UserInvoked())
 		}
 		want := []string{"when_to_use", "search_visibility", "replaced_by", "release_notes"}
 		if !reflect.DeepEqual(filled, want) {
@@ -229,13 +238,16 @@ func TestResolveSkillFields_PrecedenceByKeyPresence(t *testing.T) {
 		if !a.Deprecated || a.Sensitivity != SensitivityHigh || !reflect.DeepEqual(a.Tags, []string{"finance", "close"}) {
 			t.Errorf("resolved = %+v", a)
 		}
+		if a.Invocation != InvocationUser {
+			t.Errorf("Invocation = %q, want %q", a.Invocation, InvocationUser)
+		}
 	})
 
 	t.Run("undecodable metadata fills nothing", func(t *testing.T) {
 		t.Parallel()
 		a := &Artifact{Type: TypeSkill, Sensitivity: SensitivityLow}
-		filled := ResolveSkillFields(a, nil, metaSkill("sensitivity", "secret", "tags", ""))
-		if filled != nil || a.Sensitivity != SensitivityLow || a.Tags != nil {
+		filled := ResolveSkillFields(a, nil, metaSkill("sensitivity", "secret", "tags", "", "invocation", "User"))
+		if filled != nil || a.Sensitivity != SensitivityLow || a.Tags != nil || a.Invocation != "" {
 			t.Errorf("filled = %v, a = %+v; want nothing filled", filled, a)
 		}
 	})
@@ -337,4 +349,93 @@ func TestResolveStoredSkill_Forms(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Spec: §4.3.4 — only the exact value user on a skill is user-invoked. An
+// absent value, any, a value in another case, an unknown word, a non-skill
+// type, and a nil artifact are not. It fails against a predicate that treats
+// every value other than any as user-only.
+func TestUserInvoked_Values(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		a    *Artifact
+		want bool
+	}{
+		{&Artifact{Type: TypeSkill, Invocation: "user"}, true},
+		{&Artifact{Type: TypeSkill}, false},
+		{&Artifact{Type: TypeSkill, Invocation: "any"}, false},
+		{&Artifact{Type: TypeSkill, Invocation: "User"}, false},
+		{&Artifact{Type: TypeSkill, Invocation: "yes"}, false},
+		{&Artifact{Type: TypeAgent, Invocation: "user"}, false},
+		{nil, false},
+	}
+	for _, tc := range cases {
+		if got := tc.a.UserInvoked(); got != tc.want {
+			t.Errorf("UserInvoked(%+v) = %v, want %v", tc.a, got, tc.want)
+		}
+	}
+}
+
+// Spec: §4.3.4 — invocation resolves under key-presence precedence from the
+// stored bytes. A stated ARTIFACT.md key decides whatever its value, an
+// unstated key takes a metadata value that decodes, and an invalid metadata
+// value records an issue and resolves to any. It fails against a resolution
+// that lets metadata user override a stated key and against a decode that
+// keeps an invalid value.
+func TestResolveStoredSkill_InvocationPrecedence(t *testing.T) {
+	t.Parallel()
+	skillMD := func(inv string) []byte {
+		return []byte("---\nname: close\ndescription: Close the books.\nmetadata:\n  invocation: " + inv + "\n---\nBody.\n")
+	}
+	artifactMD := func(line string) []byte {
+		return []byte("---\ntype: skill\nversion: 1.0.0\n" + line + "---\n")
+	}
+	cases := []struct {
+		name       string
+		artifactMD []byte
+		skillMD    []byte
+		want       bool
+		wantFilled bool
+	}{
+		{"stated empty string", artifactMD("invocation: \"\"\n"), skillMD("user"), false, false},
+		{"stated null", artifactMD("invocation:\n"), skillMD("user"), false, false},
+		{"stated any", artifactMD("invocation: any\n"), skillMD("user"), false, false},
+		{"stated invalid", artifactMD("invocation: yes\n"), skillMD("user"), false, false},
+		{"unstated takes metadata user", artifactMD(""), skillMD("user"), true, true},
+		{"stated user beside metadata any", artifactMD("invocation: user\n"), skillMD("any"), true, false},
+		{"plain skill metadata user", nil, skillMD("user"), true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a, _, filled, ok := ResolveStoredSkill(tc.artifactMD, tc.skillMD)
+			if !ok {
+				t.Fatal("ok = false, want true")
+			}
+			if got := a.UserInvoked(); got != tc.want {
+				t.Errorf("UserInvoked = %v (Invocation %q), want %v", got, a.Invocation, tc.want)
+			}
+			if got := slices.Contains(filled, "invocation"); got != tc.wantFilled {
+				t.Errorf("filled = %v, invocation filled = %v, want %v", filled, got, tc.wantFilled)
+			}
+		})
+	}
+
+	t.Run("invalid metadata value", func(t *testing.T) {
+		t.Parallel()
+		a, s, filled, ok := ResolveStoredSkill(nil, skillMD("User"))
+		if !ok {
+			t.Fatal("ok = false, want true")
+		}
+		if a.UserInvoked() || a.Invocation != "" {
+			t.Errorf("Invocation = %q, UserInvoked = %v; want empty and false", a.Invocation, a.UserInvoked())
+		}
+		if slices.Contains(filled, "invocation") {
+			t.Errorf("filled = %v, want no invocation", filled)
+		}
+		want := []SkillMetadataIssue{{Key: "invocation", Value: "User", Encoding: "any or user"}}
+		if got := DecodeSkillMetadata(s).Issues; !reflect.DeepEqual(got, want) {
+			t.Errorf("Issues = %+v, want %+v", got, want)
+		}
+	})
 }

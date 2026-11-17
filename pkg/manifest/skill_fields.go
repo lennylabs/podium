@@ -28,8 +28,9 @@ var skillMDAllowedFields = map[string]bool{
 // metadata.version, with the ARTIFACT.md version taking precedence when the
 // overlay sets one (ResolveSkillVersion). The fields IsSkillMetadataField
 // names (when_to_use, tags, sensitivity, search_visibility, deprecated,
-// replaced_by, and release_notes) live under metadata.<key> or in ARTIFACT.md.
-// They stay in this list because a top-level SKILL.md key is still an error.
+// replaced_by, release_notes, and invocation) live under metadata.<key> or in
+// ARTIFACT.md. They stay in this list because a top-level SKILL.md key is
+// still an error.
 var podiumOnlySkillFields = []string{
 	"type",
 	"version",
@@ -40,6 +41,7 @@ var podiumOnlySkillFields = []string{
 	"deprecated",
 	"replaced_by",
 	"release_notes",
+	"invocation",
 	"audit_redact",
 	"mcpServers",
 	"requiresApproval",

@@ -157,6 +157,66 @@ func TestDeclaresExtends(t *testing.T) {
 	}
 }
 
+// Spec: §4.1 — command and context are removed types, each with a non-empty
+// replacement phrase, and the five remaining types are not. It fails against a
+// predicate keyed on the type list rather than on the removed set.
+func TestIsRemovedType(t *testing.T) {
+	t.Parallel()
+	for _, typ := range []ArtifactType{"command", "context"} {
+		if !IsRemovedType(typ) {
+			t.Errorf("IsRemovedType(%q) = false, want true", typ)
+		}
+		if RemovedTypeReplacement(typ) == "" {
+			t.Errorf("RemovedTypeReplacement(%q) is empty", typ)
+		}
+	}
+	if got := RemovedTypeReplacement("command"); !strings.Contains(got, `metadata.invocation is "user"`) {
+		t.Errorf("command replacement = %q, want it to name metadata.invocation", got)
+	}
+	if got := RemovedTypeReplacement("context"); !strings.Contains(got, "references/") {
+		t.Errorf("context replacement = %q, want it to name references/", got)
+	}
+	for _, typ := range []ArtifactType{TypeSkill, TypeAgent, TypeRule, TypeHook, TypeMCPServer, "Command", ""} {
+		if IsRemovedType(typ) {
+			t.Errorf("IsRemovedType(%q) = true, want false", typ)
+		}
+		if got := RemovedTypeReplacement(typ); got != "" {
+			t.Errorf("RemovedTypeReplacement(%q) = %q, want empty", typ, got)
+		}
+	}
+}
+
+// Spec: §4.1, §4.6 — a stored row retires when its type is a removed type or
+// its frontmatter declares extends:, and serves otherwise. It fails against a
+// predicate that reads only DeclaresExtends or only the type.
+func TestRetiredRow(t *testing.T) {
+	t.Parallel()
+	plain := []byte("---\ntype: skill\nversion: 1.0.0\n---\n\nbody\n")
+	extends := []byte("---\ntype: agent\nextends: a/b\n---\n\nbody\n")
+	cases := []struct {
+		name string
+		fm   []byte
+		typ  string
+		want bool
+	}{
+		{"extends", extends, "agent", true},
+		{"command", []byte("---\ntype: command\n---\n\nbody\n"), "command", true},
+		{"context", []byte("---\ntype: context\n---\n\nbody\n"), "context", true},
+		{"removed type column with empty frontmatter", nil, "context", true},
+		{"plain skill", plain, "skill", false},
+		{"plain agent", []byte("---\ntype: agent\n---\n\nbody\n"), "agent", false},
+		{"empty", nil, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := RetiredRow(tc.fm, tc.typ); got != tc.want {
+				t.Errorf("RetiredRow(%q, %q) = %v, want %v", tc.fm, tc.typ, got, tc.want)
+			}
+		})
+	}
+}
+
 // Spec: §4.3.4 — metadata values are strings, so a sequence or mapping under
 // metadata fails ParseSkill, and the error names the key, keeps the YAML text,
 // and adds the comma hint only for tags.
