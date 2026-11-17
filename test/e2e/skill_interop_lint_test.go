@@ -9,6 +9,7 @@ package e2e
 // `podium` binary over registries that hold them.
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -18,6 +19,7 @@ import (
 var interopDescriptions = map[string]string{
 	"greet":    "Greet the user by name when they say hello.",
 	"farewell": "Say goodbye politely when the conversation ends.",
+	"history":  "Summarize repository history with git and jq for a weekly engineering report.",
 }
 
 // interopSkill returns a SKILL.md with the given name, extra frontmatter
@@ -188,5 +190,92 @@ func TestInteropLint_NearDuplicateComparesProseResourcesOnly(t *testing.T) {
 	want := "references/guide.md nearly duplicates ops/greet references/guide.md (100%); the copies can drift"
 	if d := env.Diagnostics[0]; d.ArtifactID != "ops/farewell" || d.Code != "lint.near_duplicate_content" || !strings.HasPrefix(d.Message, want) {
 		t.Errorf("diagnostic = %+v, want ops/farewell near-duplicate with prefix %q", d, want)
+	}
+}
+
+// Prose references follow CommonMark parsing. A fence nested in a list item,
+// an indented code block, an escaped bracket, a mailto: link, and a
+// reference-style link are not checked, so the missing files they name draw
+// nothing. A link whose text holds nested brackets is a link, so the missing
+// file it names is the one error, and lint exits 1.
+//
+// Spec: §4.4
+func TestInteropLint_ProseReferencesFollowCommonMark(t *testing.T) {
+	t.Parallel()
+	body := "1. Write the summary.\n\n    ~~~markdown\n    - [Template](templates/missing.md)\n    ~~~\n\n" +
+		"Example:\n\n    [Example](examples/missing.md)\n\n" +
+		"Write \\[text](references/escaped.md) for a link, mail [the team](mailto:team@acme.com), " +
+		"and read [the guide][guide].\n\n[guide]: references/guide.md\n\n" +
+		"See [the [draft] notes](references/notes.md).\n"
+	reg := writeRegistry(t, map[string]string{
+		"ops/greet/SKILL.md": interopSkill("greet", interopVersioned, body),
+	})
+	res, env := lintJSON(t, reg)
+	cliWantExit(t, res, 1, "lint over CommonMark prose references")
+	if len(env.Diagnostics) != 1 {
+		t.Fatalf("diagnostics = %+v, want exactly one", env.Diagnostics)
+	}
+	d := env.Diagnostics[0]
+	if d.Code != "lint.prose_reference" || d.Severity != "error" || !strings.Contains(d.Message, `"references/notes.md"`) {
+		t.Errorf("diagnostic = %+v, want a lint.prose_reference error naming references/notes.md", d)
+	}
+}
+
+// A prose file whose name only contains a license word is a prose resource,
+// so a copy shared by two skills draws a near-duplicate warning, while a
+// NOTICE.md and an OFL.txt font license shared the same way draw nothing.
+//
+// Spec: §7.3.1
+func TestInteropLint_NoticeNamedProseFileIsCompared(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"ops/greet/SKILL.md":         interopSkill("greet", interopVersioned, "Greet the user.\n"),
+		"ops/greet/NOTICE.md":        interopSharedText,
+		"ops/greet/fonts/OFL.txt":    interopSharedText,
+		"ops/farewell/SKILL.md":      interopSkill("farewell", interopVersioned, "Say goodbye.\n"),
+		"ops/farewell/NOTICE.md":     interopSharedText,
+		"ops/farewell/fonts/OFL.txt": interopSharedText,
+	}
+	res, env := lintJSON(t, writeRegistry(t, files), "--fail-on", "warning")
+	cliWantExit(t, res, 0, "lint over shared license files")
+	if len(env.Diagnostics) != 0 {
+		t.Errorf("diagnostics = %+v, want none", env.Diagnostics)
+	}
+
+	files["ops/greet/privacy-notice.md"] = interopSharedText
+	files["ops/farewell/privacy-notice.md"] = interopSharedText
+	res, env = lintJSON(t, writeRegistry(t, files))
+	cliWantExit(t, res, 0, "lint over a shared privacy notice")
+	if len(env.Diagnostics) != 2 {
+		t.Fatalf("diagnostics = %+v, want one near-duplicate warning per skill", env.Diagnostics)
+	}
+	for _, d := range env.Diagnostics {
+		if d.Code != "lint.near_duplicate_content" || !strings.HasPrefix(d.Message, "privacy-notice.md nearly duplicates") {
+			t.Errorf("diagnostic = %+v, want a near-duplicate of privacy-notice.md", d)
+		}
+	}
+}
+
+// A skill whose allowed-tools is the Agent Skills space-separated string
+// lints clean and syncs to Claude Code with its SKILL.md unchanged.
+//
+// Spec: §4.3.4, §6.7
+func TestInteropSync_AllowedToolsStringFormIsKept(t *testing.T) {
+	t.Parallel()
+	skill := interopSkill("history", interopVersioned+"allowed-tools: Bash(git:*) Bash(jq:*) Read\n",
+		"Summarize the commits of the past week.\n")
+	reg := writeRegistry(t, map[string]string{"ops/history/SKILL.md": skill})
+
+	res, env := lintJSON(t, reg, "--fail-on", "warning")
+	cliWantExit(t, res, 0, "lint over an allowed-tools string")
+	if len(env.Diagnostics) != 0 {
+		t.Errorf("diagnostics = %+v, want none", env.Diagnostics)
+	}
+
+	tgt := t.TempDir()
+	sync := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code")
+	cliWantExit(t, sync, 0, "sync of an allowed-tools string")
+	if got := readFile(t, filepath.Join(tgt, ".claude/skills/history/SKILL.md")); got != skill {
+		t.Errorf("materialized SKILL.md != authored bytes:\nwant %q\n got %q", skill, got)
 	}
 }
