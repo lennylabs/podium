@@ -63,13 +63,13 @@ func TestUnparseableReason(t *testing.T) {
 	if want := "ops/greet/SKILL.md: manifest: missing YAML frontmatter"; got != want {
 		t.Errorf("UnparseableReason = %q, want %q", got, want)
 	}
-	_, err := manifest.ParseSkill([]byte("---\nname: g\nmetadata:\n  author:\n    name: alice\n---\n\nbody\n"))
+	_, err := manifest.ParseSkill([]byte("---\nname: g\ndescription:\n  text: alice\n---\n\nbody\n"))
 	if err == nil || !strings.Contains(err.Error(), "\n") {
 		t.Fatalf("fixture error = %v, want a multi-line decoder error", err)
 	}
 	got = UnparseableReason("ops/g/SKILL.md", err)
 	if strings.Contains(got, "\n") || strings.Contains(got, "  ") ||
-		!strings.HasPrefix(got, "ops/g/SKILL.md: manifest: invalid YAML frontmatter: metadata.author") ||
+		!strings.HasPrefix(got, "ops/g/SKILL.md: manifest: invalid YAML frontmatter: yaml: unmarshal errors:") ||
 		!strings.HasSuffix(got, "cannot unmarshal !!map into string") {
 		t.Errorf("UnparseableReason of a multi-line error = %q, want one line naming the file and the error", got)
 	}

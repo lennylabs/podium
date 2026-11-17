@@ -244,6 +244,39 @@ func TestImport_MalformedMetadataFails(t *testing.T) {
 	}
 }
 
+// Spec: §4.3.4, §4.7.6 — a SKILL.md whose metadata nests a mapping and a
+// sequence under keys Podium does not read imports: a metadata.version equal
+// to --version copies the bytes unchanged, and a missing one is added beside
+// the nested values, which the re-encoded header keeps.
+func TestImport_NestedMetadataKept(t *testing.T) {
+	source := t.TempDir()
+	pinned := "---\nname: x\nmetadata:\n  version: \"1.0.0\"\n  requires:\n    bins: [\"lark-cli\"]\n---\nbody\n"
+	unpinned := "---\nname: y\nmetadata:\n  requires:\n    bins: [\"lark-cli\"]\n  credits:\n    - alice\n---\nbody\n"
+	mustWrite(t, filepath.Join(source, "x", "SKILL.md"), pinned)
+	mustWrite(t, filepath.Join(source, "y", "SKILL.md"), unpinned)
+	target := t.TempDir()
+	if rc, stderr := runImport(t, "--source", source, "--target", target); rc != 0 {
+		t.Fatalf("rc = %d, want 0; stderr=%s", rc, stderr)
+	}
+	if got := importedSkillMD(t, target, "x"); string(got) != pinned {
+		t.Errorf("x SKILL.md = %q, want the source bytes %q", got, pinned)
+	}
+	s, err := manifest.ParseSkill(importedSkillMD(t, target, "y"))
+	if err != nil {
+		t.Fatalf("y SKILL.md does not parse: %v", err)
+	}
+	if s.Metadata["version"] != "1.0.0" {
+		t.Errorf("y metadata.version = %q, want 1.0.0", s.Metadata["version"])
+	}
+	want := []manifest.NonStringMetadata{
+		{Key: "requires", Kind: "mapping", Value: `{bins: ["lark-cli"]}`},
+		{Key: "credits", Kind: "sequence", Value: "[alice]"},
+	}
+	if len(s.NonStringMetadata) != 2 || s.NonStringMetadata[0] != want[0] || s.NonStringMetadata[1] != want[1] {
+		t.Errorf("y NonStringMetadata = %+v, want %+v", s.NonStringMetadata, want)
+	}
+}
+
 // Spec: §4.3.4, §4.7.6 — a SKILL.md whose metadata.version already equals
 // --version is copied byte for byte, formatting and key order included.
 func TestImport_EqualVersionCopiesBytes(t *testing.T) {

@@ -123,6 +123,7 @@ func rulesWith(client *http.Client, th Thresholds) []Rule {
 		ruleSkillCompliance{},
 		ruleSkillVersionAssigned{},
 		ruleSkillMetadataFields{},
+		ruleSkillMetadataNonString{},
 		ruleSkillReservedVersion{},
 		ruleSkillPodiumOnlyFields{},
 		ruleSkillArtifactFields{},

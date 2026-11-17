@@ -246,17 +246,39 @@ type ExternalResource struct {
 
 // Skill is the agentskills.io-compliant manifest contained in SKILL.md, per
 // §4.3.4. Skills carry their prose body here; the corresponding ARTIFACT.md
-// has frontmatter only.
+// has frontmatter only. Skill.UnmarshalYAML decodes the metadata mapping, so
+// Metadata and NonStringMetadata carry the yaml "-" tag.
 type Skill struct {
-	Name          string            `yaml:"name"`
-	Description   string            `yaml:"description"`
-	License       string            `yaml:"license,omitempty"`
-	Compatibility string            `yaml:"compatibility,omitempty"`
-	Metadata      map[string]string `yaml:"metadata,omitempty"`
-	AllowedTools  AllowedTools      `yaml:"allowed-tools,omitempty"`
+	Name          string       `yaml:"name"`
+	Description   string       `yaml:"description"`
+	License       string       `yaml:"license,omitempty"`
+	Compatibility string       `yaml:"compatibility,omitempty"`
+	AllowedTools  AllowedTools `yaml:"allowed-tools,omitempty"`
+
+	// Metadata holds each metadata key whose value is a scalar, decoded as a
+	// string. A YAML null decodes to the empty string.
+	Metadata map[string]string `yaml:"-"`
+	// NonStringMetadata lists each metadata key whose value is a sequence or
+	// a mapping, in document order with merged keys after direct ones.
+	// Podium reads none of these values, and the authored bytes keep them.
+	NonStringMetadata []NonStringMetadata `yaml:"-"`
 
 	// Body is the agent-facing skill prose body.
 	Body string `yaml:"-"`
+}
+
+// NonStringMetadata is a SKILL.md metadata value that is a sequence or a
+// mapping. The Agent Skills standard defines metadata values as strings, and
+// published skills nest values under keys of their own, so the value parses
+// and is reported by lint rather than refused (§4.3.4).
+type NonStringMetadata struct {
+	// Key is the metadata key, after alias resolution.
+	Key string
+	// Kind is "sequence" or "mapping".
+	Kind string
+	// Value is the value re-encoded as single-line YAML flow, for a
+	// diagnostic to name.
+	Value string
 }
 
 // Domain is the parsed DOMAIN.md, per §4.5.1.

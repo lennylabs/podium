@@ -122,10 +122,17 @@ func readableTagsForms() []tagsForm {
 			strings.ReplaceAll(withTags("  tags: a, b\n"), "\n", "\r\n"), "a", "b"),
 		readableForm("merge key after tags", withTags("  tags: a, b\n  <<: {tags: z}\n"), "a", "b"),
 		readableForm("document end after tags block", withTags("  tags: a, b\n...\n"), "a", "b"),
-		// Go refuses each of these, so go_tags is null.
-		readableForm("go refuses sibling sequence after tags", withTags("  tags: a, b\n  owner: [a]\n"), "a", "b"),
-		readableForm("go refuses sibling mapping after tags",
+		// A sequence or a mapping under another metadata key parses and is
+		// not read (§4.3.4), so Go resolves the tags beside it. A nested
+		// version key does not read as metadata.version.
+		readableForm("nested sibling sequence after tags", withTags("  tags: a, b\n  owner: [a]\n"), "a", "b"),
+		readableForm("nested sibling mapping after tags",
 			withTags("  tags: a, b\n  build:\n    version: 9.9.9\n"), "a", "b"),
+		readableForm("nested block mapping before tags",
+			withTags("  requires:\n    bins: lark-cli\n  tags: a, b\n"), "a", "b"),
+		readableForm("nested block sequence before tags",
+			withTags("  credits:\n    - alice\n    - bob\n  tags: a, b\n"), "a", "b"),
+		// Go refuses this one, a repeated key, so go_tags is null.
 		readableForm("go refuses escaped second tags key", withTags("  tags: a, b\n  \"ta\\x67s\": c\n"), "a", "b"),
 	}
 }
@@ -166,6 +173,10 @@ func unreadableTagsForms() []tagsForm {
 		unreadableForm("tab after colon", withTags("  tags:\ta, b\n")),
 		unreadableForm("tags nested below another child", withTags("  build:\n    tags: a, b\n")),
 		unreadableForm("flow-form metadata", skillDoc(skillHead+"metadata: {tags: \"a, b\"}\n")),
+		unreadableForm("flow-form metadata with a nested mapping",
+			skillDoc(skillHead+"metadata: {\"openclaw\": {\"requires\": {\"bins\": [\"uv\"]}}, \"tags\": \"a, b\"}\n")),
+		unreadableForm("block sequence under tags", withTags("  tags:\n    - a\n    - b\n")),
+		unreadableForm("block mapping under tags", withTags("  tags:\n    a: b\n")),
 		unreadableForm("metadata line with comment", skillDoc(skillHead+"metadata: # info\n  tags: a, b\n")),
 		unreadableForm("top-level tags key", skillDoc(skillHead+"tags: a, b\n")),
 		unreadableForm("alias key after tags", withTags(owner+"  *k : z\n")),

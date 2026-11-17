@@ -426,21 +426,25 @@ func TestFrontmatter_SkillMetadataFieldsExample(t *testing.T) {
 	}
 }
 
-// Spec: §4.3.4 — a metadata value is a string, so a YAML sequence under
-// metadata.tags makes SKILL.md fail to parse. podium lint exits 1 with a
-// message that names the key and the comma-separated encoding.
-func TestFrontmatter_SkillMetadataListValueFails(t *testing.T) {
+// Spec: §4.3.4 — a YAML sequence under metadata.tags does not follow the
+// comma-separated encoding, so it is ignored: SKILL.md parses, podium lint
+// exits 0 with the lint.skill_metadata_field_ignored warning naming the key,
+// the sequence, and the encoding, and refuses nothing.
+func TestFrontmatter_SkillMetadataListValueIgnored(t *testing.T) {
 	t.Parallel()
 	skill := strings.Replace(fmRunVarianceSkill, `tags: "finance, close"`, "tags: [finance, close]", 1)
 	reg := writeRegistry(t, map[string]string{"finance/run-variance/SKILL.md": skill})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 1 {
-		t.Fatalf("lint exit=%d, want 1\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
 	}
-	for _, want := range []string{"metadata.tags is not a string", "tags is comma-separated"} {
-		if !strings.Contains(res.Stderr, want) {
-			t.Errorf("lint stderr does not contain %q:\n%s", want, res.Stderr)
+	for _, want := range []string{"[warning]", "lint.skill_metadata_field_ignored", "metadata.tags is a sequence ([finance, close])", "comma-separated"} {
+		if !strings.Contains(res.Stdout, want) {
+			t.Errorf("lint stdout does not contain %q:\n%s", want, res.Stdout)
 		}
+	}
+	if strings.Contains(res.Stderr, "rejected:") {
+		t.Errorf("lint refused the skill:\n%s", res.Stderr)
 	}
 }
 

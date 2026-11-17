@@ -309,7 +309,9 @@ _SYNTHESIZED_100 = (
 # Spec: §4.3.4, §6.4 — a SKILL.md-only overlay package loads as a skill whose
 # frontmatter is the synthesized document for its resolved version, and whose
 # manifest_body is the SKILL.md body rather than the document's pointer
-# comment.
+# comment. A sequence or a mapping under a metadata key keeps its bytes in
+# skill_raw and is not read, and one under version declares no usable
+# version.
 @pytest.mark.parametrize(
     ("metadata", "version", "doc"),
     [
@@ -333,6 +335,23 @@ _SYNTHESIZED_100 = (
         ('metadata: {note: "say \\"hi\\", bob", version: 1.0.0}\n', "1.0.0", _SYNTHESIZED_100),
         ('metadata: {version: "1.0"}\n', "0.0.0-auto.0", _SYNTHESIZED_AUTO),
         ("metadata: # build info\n  version: 1.0.0\n", "1.0.0", _SYNTHESIZED_100),
+        (
+            'metadata:\n  requires:\n    bins: ["lark-cli"]\n  version: "1.0.0"\n',
+            "1.0.0",
+            _SYNTHESIZED_100,
+        ),
+        (
+            'metadata: {"openclaw": {"requires": {"bins": ["uv"]}}, "version": "1.0.0"}\n',
+            "1.0.0",
+            _SYNTHESIZED_100,
+        ),
+        (
+            "metadata:\n  version:\n    major: 1\n  credits:\n    - alice\n",
+            "0.0.0-auto.0",
+            _SYNTHESIZED_AUTO,
+        ),
+        ("metadata:\n  version: [1, 0, 0]\n", "0.0.0-auto.0", _SYNTHESIZED_AUTO),
+        ("metadata: {version: {major: 1}}\n", "0.0.0-auto.0", _SYNTHESIZED_AUTO),
     ],
     ids=[
         "no-metadata",
@@ -347,6 +366,11 @@ _SYNTHESIZED_100 = (
         "flow-form-escaped-quote",
         "flow-form-non-semver",
         "commented-metadata-line",
+        "nested-mapping-beside-version",
+        "flow-form-nested-mapping-beside-version",
+        "mapping-under-version",
+        "sequence-under-version",
+        "flow-form-mapping-under-version",
     ],
 )
 def test_overlay_loads_a_skill_md_only_package(tmp_path, metadata, version, doc):

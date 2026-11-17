@@ -273,7 +273,7 @@ func TestReingest_TypeRemovedDetails(t *testing.T) {
 // the rejections rather than as a lint failure.
 func TestReingest_ManifestUnparseableDetails(t *testing.T) {
 	t.Parallel()
-	nested := "---\nname: nested\ndescription: Nested metadata.\nmetadata:\n  author:\n    name: alice\n---\n\nBody.\n"
+	nested := "---\nname: nested\ndescription:\n  text: A mapping.\n---\n\nBody.\n"
 	extendsSkill := "---\ntype: skill\nversion: 1.0.0\ndescription: fixture skill\nsensitivity: low\nextends: shared/note\n---\n\n"
 	body, rejected := rcReingest(t, map[string]string{
 		"mine/nested/SKILL.md":  nested,
@@ -283,9 +283,9 @@ func TestReingest_ManifestUnparseableDetails(t *testing.T) {
 		"mine/sibling":          rcArtifact("agent", "1.0.0", "", ""),
 	})
 	want := map[string]string{
-		"mine/nested":  "mine/nested/SKILL.md: manifest: invalid YAML frontmatter: metadata.author is not a string",
+		"mine/nested":  "mine/nested/SKILL.md: manifest: invalid YAML frontmatter: yaml: unmarshal errors:",
 		"mine/badyaml": "mine/badyaml/ARTIFACT.md: manifest: invalid YAML frontmatter: ",
-		"mine/ordered": "mine/ordered/SKILL.md: manifest: invalid YAML frontmatter: metadata.author is not a string",
+		"mine/ordered": "mine/ordered/SKILL.md: manifest: invalid YAML frontmatter: yaml: unmarshal errors:",
 	}
 	details := rcDetails(t, body)
 	for id, prefix := range want {

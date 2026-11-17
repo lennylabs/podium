@@ -121,8 +121,9 @@ func ParseArtifact(src []byte) (*Artifact, error) {
 }
 
 // ParseSkill decodes a SKILL.md source per §4.3.4. The frontmatter populates
-// Skill fields; the prose body populates Skill.Body. Name validation and
-// the agentskills.io spec checks happen in pkg/lint at ingest time.
+// Skill fields through Skill.UnmarshalYAML; the prose body populates
+// Skill.Body. Name validation and the agentskills.io spec checks happen in
+// pkg/lint at ingest time.
 func ParseSkill(src []byte) (*Skill, error) {
 	fm, body, err := SplitFrontmatter(src)
 	if err != nil {
@@ -130,142 +131,10 @@ func ParseSkill(src []byte) (*Skill, error) {
 	}
 	s := &Skill{}
 	if err := yaml.Unmarshal(fm, s); err != nil {
-		return nil, skillDecodeError(fm, err)
+		return nil, fmt.Errorf("%w: %v", ErrInvalidYAML, err)
 	}
 	s.Body = string(body)
 	return s, nil
-}
-
-// skillDecodeError wraps a SKILL.md frontmatter decode failure. yaml.v3
-// reports a sequence or mapping under metadata as "cannot unmarshal !!seq
-// into string" with no key name, so when the metadata mapping holds a value
-// that is not a scalar, the error names the first such key. The YAML error
-// stays in the message, so a second error in the same frontmatter is still
-// reported.
-//
-// Spec: §4.3.4
-func skillDecodeError(fm []byte, err error) error {
-	key, ok := nonStringMetadataKey(fm)
-	if !ok {
-		return fmt.Errorf("%w: %v", ErrInvalidYAML, err)
-	}
-	hint := ""
-	if key == "tags" {
-		hint = "; tags is comma-separated"
-	}
-	return fmt.Errorf("%w: metadata.%s is not a string (metadata values are strings%s): %v", ErrInvalidYAML, key, hint, err)
-}
-
-// nonStringMetadataKey returns the first key of the frontmatter's metadata
-// mapping whose value, after alias resolution, is not a scalar.
-func nonStringMetadataKey(fm []byte) (string, bool) {
-	var doc yaml.Node
-	if yaml.Unmarshal(fm, &doc) != nil || len(doc.Content) == 0 {
-		return "", false
-	}
-	md := findMappingKey(doc.Content[0], "metadata", map[*yaml.Node]bool{})
-	if md == nil || md.Kind != yaml.MappingNode {
-		return "", false
-	}
-	w := metadataWalker{seen: map[string]bool{}, visited: map[*yaml.Node]bool{}}
-	return w.firstNonScalarKey(md)
-}
-
-// metadataWalker holds the state of one walk over a metadata mapping and the
-// mappings merged into it. seen holds the keys already checked. visited holds
-// the mapping nodes already walked: yaml.v3 registers an anchor before it
-// parses the anchored node's children, so `metadata: &m {<<: *m}` merges a
-// mapping into itself, and without visited that cycle recurses until the
-// runtime aborts with a stack overflow that no caller can recover from.
-type metadataWalker struct {
-	seen    map[string]bool
-	visited map[*yaml.Node]bool
-}
-
-// firstNonScalarKey returns the first key of the mapping node m whose
-// alias-resolved value is not a scalar, skipping the keys in seen and adding
-// each key it checks. Keys are alias-resolved, because an alias key's own
-// Value is the anchor name rather than the key yaml.v3 decodes. A merge key's
-// value, a mapping or a sequence of mappings, is descended into, so a sequence
-// that reaches metadata through `<<` is named by its merged key. The direct
-// keys are checked before the merged ones and seen skips a key already
-// checked, because yaml.v3 decodes a direct key in place of a merged one and
-// an earlier merged mapping in place of a later one. A mapping already walked
-// is skipped, so a cyclic merge ends the walk and the caller keeps the
-// unchanged decode error.
-func (w metadataWalker) firstNonScalarKey(m *yaml.Node) (string, bool) {
-	w.visited[m] = true
-	var merges []*yaml.Node
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		kn := resolveAlias(m.Content[i])
-		vn := resolveAlias(m.Content[i+1])
-		if kn.ShortTag() == "!!merge" {
-			merges = append(merges, vn)
-			continue
-		}
-		if w.seen[kn.Value] {
-			continue
-		}
-		w.seen[kn.Value] = true
-		if vn.Kind != yaml.ScalarNode {
-			return kn.Value, true
-		}
-	}
-	for _, mn := range merges {
-		sources := []*yaml.Node{mn}
-		if mn.Kind == yaml.SequenceNode {
-			sources = mn.Content
-		}
-		for _, src := range sources {
-			if src = resolveAlias(src); src.Kind != yaml.MappingNode || w.visited[src] {
-				continue
-			}
-			if key, ok := w.firstNonScalarKey(src); ok {
-				return key, true
-			}
-		}
-	}
-	return "", false
-}
-
-// findMappingKey returns the alias-resolved value of key in the mapping node
-// m, or nil when no mapping reached from m holds key. It applies the rules
-// firstNonScalarKey applies, because yaml.v3 decodes a top-level metadata key
-// reached through an alias key or a `<<` merge key into Skill.Metadata, and a
-// sequence under that metadata fails the decode the same way. Keys are
-// alias-resolved, the direct keys are checked before the merge sources, and
-// each merge source, a mapping or a sequence of mappings, is searched in
-// order, matching the precedence yaml.v3 decodes. visited holds the mappings
-// already searched, so a cyclic merge ends the search.
-func findMappingKey(m *yaml.Node, key string, visited map[*yaml.Node]bool) *yaml.Node {
-	m = resolveAlias(m)
-	if m.Kind != yaml.MappingNode || visited[m] {
-		return nil
-	}
-	visited[m] = true
-	var merges []*yaml.Node
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		kn := resolveAlias(m.Content[i])
-		if kn.ShortTag() == "!!merge" {
-			merges = append(merges, resolveAlias(m.Content[i+1]))
-			continue
-		}
-		if kn.Value == key {
-			return resolveAlias(m.Content[i+1])
-		}
-	}
-	for _, mn := range merges {
-		sources := []*yaml.Node{mn}
-		if mn.Kind == yaml.SequenceNode {
-			sources = mn.Content
-		}
-		for _, src := range sources {
-			if v := findMappingKey(src, key, visited); v != nil {
-				return v
-			}
-		}
-	}
-	return nil
 }
 
 // resolveAlias follows an alias node to its anchored target.

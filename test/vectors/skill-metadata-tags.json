@@ -40,6 +40,13 @@
       ]
     },
     {
+      "name": "block mapping under tags",
+      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags:\n    a: b\n---\nGreet the user by name.\n",
+      "readable": false,
+      "go_tags": [],
+      "sdk_tags": []
+    },
+    {
       "name": "block scalar before metadata",
       "skill_md": "---\nname: greet\ndescription: |\n  Greet the user\n  politely\nmetadata:\n  tags: a, b\n---\nGreet the user by name.\n",
       "readable": true,
@@ -51,6 +58,13 @@
         "a",
         "b"
       ]
+    },
+    {
+      "name": "block sequence under tags",
+      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags:\n    - a\n    - b\n---\nGreet the user by name.\n",
+      "readable": false,
+      "go_tags": [],
+      "sdk_tags": []
     },
     {
       "name": "child-indent comment after tags",
@@ -265,19 +279,29 @@
       "name": "flow mapping",
       "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: {x: y}\n---\nGreet the user by name.\n",
       "readable": false,
-      "go_tags": null,
+      "go_tags": [],
       "sdk_tags": []
     },
     {
       "name": "flow sequence",
       "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: [a, b]\n---\nGreet the user by name.\n",
       "readable": false,
-      "go_tags": null,
+      "go_tags": [],
       "sdk_tags": []
     },
     {
       "name": "flow-form metadata",
       "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata: {tags: \"a, b\"}\n---\nGreet the user by name.\n",
+      "readable": false,
+      "go_tags": [
+        "a",
+        "b"
+      ],
+      "sdk_tags": []
+    },
+    {
+      "name": "flow-form metadata with a nested mapping",
+      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata: {\"openclaw\": {\"requires\": {\"bins\": [\"uv\"]}}, \"tags\": \"a, b\"}\n---\nGreet the user by name.\n",
       "readable": false,
       "go_tags": [
         "a",
@@ -305,26 +329,6 @@
     {
       "name": "go refuses escaped second tags key",
       "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: a, b\n  \"ta\\x67s\": c\n---\nGreet the user by name.\n",
-      "readable": true,
-      "go_tags": null,
-      "sdk_tags": [
-        "a",
-        "b"
-      ]
-    },
-    {
-      "name": "go refuses sibling mapping after tags",
-      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: a, b\n  build:\n    version: 9.9.9\n---\nGreet the user by name.\n",
-      "readable": true,
-      "go_tags": null,
-      "sdk_tags": [
-        "a",
-        "b"
-      ]
-    },
-    {
-      "name": "go refuses sibling sequence after tags",
-      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: a, b\n  owner: [a]\n---\nGreet the user by name.\n",
       "readable": true,
       "go_tags": null,
       "sdk_tags": [
@@ -417,6 +421,58 @@
         "b"
       ],
       "sdk_tags": []
+    },
+    {
+      "name": "nested block mapping before tags",
+      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  requires:\n    bins: lark-cli\n  tags: a, b\n---\nGreet the user by name.\n",
+      "readable": true,
+      "go_tags": [
+        "a",
+        "b"
+      ],
+      "sdk_tags": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "name": "nested block sequence before tags",
+      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  credits:\n    - alice\n    - bob\n  tags: a, b\n---\nGreet the user by name.\n",
+      "readable": true,
+      "go_tags": [
+        "a",
+        "b"
+      ],
+      "sdk_tags": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "name": "nested sibling mapping after tags",
+      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: a, b\n  build:\n    version: 9.9.9\n---\nGreet the user by name.\n",
+      "readable": true,
+      "go_tags": [
+        "a",
+        "b"
+      ],
+      "sdk_tags": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "name": "nested sibling sequence after tags",
+      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: a, b\n  owner: [a]\n---\nGreet the user by name.\n",
+      "readable": true,
+      "go_tags": [
+        "a",
+        "b"
+      ],
+      "sdk_tags": [
+        "a",
+        "b"
+      ]
     },
     {
       "name": "no value",
@@ -623,7 +679,10 @@
       "name": "sibling sequence before tags",
       "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  owner: [a]\n  tags: a, b\n---\nGreet the user by name.\n",
       "readable": false,
-      "go_tags": null,
+      "go_tags": [
+        "a",
+        "b"
+      ],
       "sdk_tags": []
     },
     {
@@ -711,7 +770,7 @@
       "name": "tags nested below another child",
       "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  build:\n    tags: a, b\n---\nGreet the user by name.\n",
       "readable": false,
-      "go_tags": null,
+      "go_tags": [],
       "sdk_tags": []
     },
     {

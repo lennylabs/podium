@@ -3,6 +3,7 @@ package manifest
 import (
 	"encoding/binary"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -217,112 +218,166 @@ func TestRetiredRow(t *testing.T) {
 	}
 }
 
-// Spec: §4.3.4 — metadata values are strings, so a sequence or mapping under
-// metadata fails ParseSkill, and the error names the key, keeps the YAML text,
-// and adds the comma hint only for tags.
-func TestParseSkill_NonStringMetadataNamesKey(t *testing.T) {
+// Spec: §4.1, §4.3.4 — a sequence or a mapping under a metadata key does not
+// make the frontmatter unparseable. ParseSkill keeps every scalar value in
+// Metadata and lists each nested value in NonStringMetadata, in document
+// order with merged keys after direct ones, through aliases, alias keys, and
+// merge keys. It fails against a parser that refuses the nested value, drops
+// the scalar siblings, or loses the key order.
+func TestParseSkill_NonStringMetadataParses(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		fm         string
+		wantNested []NonStringMetadata
+		wantScalar map[string]string
+	}{
+		{
+			name: "block mapping and sequence under unread keys",
+			fm:   "name: x\ndescription: d\nmetadata:\n  requires:\n    bins: [\"lark-cli\"]\n  cliHelp: \"lark-cli docs --help\"\n  credits:\n    - alice\n    - bob\n",
+			wantNested: []NonStringMetadata{
+				{Key: "requires", Kind: "mapping", Value: `{bins: ["lark-cli"]}`},
+				{Key: "credits", Kind: "sequence", Value: "[alice, bob]"},
+			},
+			wantScalar: map[string]string{"cliHelp": "lark-cli docs --help"},
+		},
+		{
+			name:       "flow-style metadata",
+			fm:         "name: x\ndescription: d\nmetadata: {\"openclaw\": {\"emoji\": \"x\", \"requires\": {\"bins\": [\"uv\"]}}, \"version\": \"1.0.0\"}\n",
+			wantNested: []NonStringMetadata{{Key: "openclaw", Kind: "mapping", Value: `{"emoji": "x", "requires": {"bins": ["uv"]}}`}},
+			wantScalar: map[string]string{"version": "1.0.0"},
+		},
+		{
+			name:       "mapping under version",
+			fm:         "name: x\nmetadata:\n  version:\n    major: 1\n",
+			wantNested: []NonStringMetadata{{Key: "version", Kind: "mapping", Value: "{major: 1}"}},
+		},
+		{
+			name:       "sequence under tags",
+			fm:         "name: x\nmetadata:\n  tags: [a, b]\n",
+			wantNested: []NonStringMetadata{{Key: "tags", Kind: "sequence", Value: "[a, b]"}},
+		},
+		{
+			name:       "alias to a sequence",
+			fm:         "name: x\nlist: &l [a, b]\nmetadata:\n  tags: *l\n",
+			wantNested: []NonStringMetadata{{Key: "tags", Kind: "sequence", Value: "&l [a, b]"}},
+		},
+		{
+			name:       "aliased metadata mapping",
+			fm:         "name: x\nbase: &m\n  owner: [a]\nmetadata: *m\n",
+			wantNested: []NonStringMetadata{{Key: "owner", Kind: "sequence", Value: "[a]"}},
+		},
+		{
+			name:       "alias key names the resolved key",
+			fm:         "name: x\nmetadata:\n  owner: &k tags\n  *k : [a, b]\n",
+			wantNested: []NonStringMetadata{{Key: "tags", Kind: "sequence", Value: "[a, b]"}},
+			wantScalar: map[string]string{"owner": "tags"},
+		},
+		{
+			name:       "merge key brings a sequence after the direct keys",
+			fm:         "name: x\nmetadata:\n  <<: {tags: [a, b]}\n  owner: {team: x}\n",
+			wantNested: []NonStringMetadata{{Key: "owner", Kind: "mapping", Value: "{team: x}"}, {Key: "tags", Kind: "sequence", Value: "[a, b]"}},
+		},
+		{
+			name:       "merge sequence skips an overridden key",
+			fm:         "name: x\nmetadata:\n  owner: a\n  <<: [{owner: [x]}, {team: {a: b}}]\n",
+			wantNested: []NonStringMetadata{{Key: "team", Kind: "mapping", Value: "{a: b}"}},
+			wantScalar: map[string]string{"owner": "a"},
+		},
+		{
+			name:       "top-level merge key brings metadata",
+			fm:         "name: x\n<<: {metadata: {tags: [a, b]}}\n",
+			wantNested: []NonStringMetadata{{Key: "tags", Kind: "sequence", Value: "[a, b]"}},
+		},
+		{
+			name:       "top-level alias key names metadata",
+			fm:         "name: x\nk: &k metadata\n*k : {tags: [a, b]}\n",
+			wantNested: []NonStringMetadata{{Key: "tags", Kind: "sequence", Value: "[a, b]"}},
+		},
+		{
+			name:       "direct metadata takes precedence over a merged one",
+			fm:         "name: x\nmetadata: {owner: [a]}\n<<: {metadata: {tags: [a]}}\n",
+			wantNested: []NonStringMetadata{{Key: "owner", Kind: "sequence", Value: "[a]"}},
+		},
+		{
+			name:       "a merge source listed twice is walked once",
+			fm:         "name: x\nbase: &b {owner: [a]}\nmetadata:\n  <<: [*b, *b]\n",
+			wantNested: []NonStringMetadata{{Key: "owner", Kind: "sequence", Value: "[a]"}},
+		},
+		{
+			name:       "a null key is dropped as yaml.v3 drops it",
+			fm:         "name: x\nmetadata:\n  ~: [a]\n  owner: alice\n",
+			wantScalar: map[string]string{"owner": "alice"},
+		},
+		{
+			name:       "comments are not part of the named value",
+			fm:         "name: x\nmetadata:\n  requires: # tools\n    bins: # list\n      - uv # runner\n",
+			wantNested: []NonStringMetadata{{Key: "requires", Kind: "mapping", Value: "{bins: [uv]}"}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s, err := ParseSkill([]byte("---\n" + tc.fm + "---\nBody.\n"))
+			if err != nil {
+				t.Fatalf("ParseSkill: %v", err)
+			}
+			if !reflect.DeepEqual(s.NonStringMetadata, tc.wantNested) {
+				t.Errorf("NonStringMetadata = %+v, want %+v", s.NonStringMetadata, tc.wantNested)
+			}
+			for _, nv := range tc.wantNested {
+				if _, ok := s.Metadata[nv.Key]; ok {
+					t.Errorf("Metadata holds the nested key %q", nv.Key)
+				}
+			}
+			for k, v := range tc.wantScalar {
+				if s.Metadata[k] != v {
+					t.Errorf("Metadata[%q] = %q, want %q", k, s.Metadata[k], v)
+				}
+			}
+			if s.Body != "Body.\n" {
+				t.Errorf("Body = %q", s.Body)
+			}
+		})
+	}
+}
+
+// Spec: §4.1, §4.3.4 — a long nested value is named by a capped single-line
+// rendering, so a diagnostic stays one readable line.
+func TestParseSkill_NonStringMetadataValueCapped(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("abcdefghij, ", 30)
+	s, err := ParseSkill([]byte("---\nname: x\nmetadata:\n  notes: [" + long + "z]\n---\n"))
+	if err != nil {
+		t.Fatalf("ParseSkill: %v", err)
+	}
+	v := s.NonStringMetadata[0].Value
+	if !strings.HasSuffix(v, "...") || len([]rune(v)) != nonStringValueMaxRunes+3 {
+		t.Errorf("Value = %q (%d runes), want %d runes and an ellipsis", v, len([]rune(v)), nonStringValueMaxRunes+3)
+	}
+}
+
+// Spec: §4.1 — a field whose value has a kind its definition does not allow
+// still makes the frontmatter unparseable: a description or a name that is a
+// mapping, a metadata that is not a mapping, a root that is not a mapping, and
+// a cyclic merge. A nested metadata value beside such a field does not hide
+// the error. It fails against a parser that accepts any of them.
+func TestParseSkill_KindErrorsStillFail(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name     string
 		fm       string
-		contains []string
-		absent   []string
+		contains string
 	}{
-		{
-			name:     "tags list",
-			fm:       "name: x\nmetadata:\n  tags: [a, b]\n",
-			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
-		},
-		{
-			name:     "mapping value",
-			fm:       "name: x\nmetadata:\n  owner: {team: x}\n",
-			contains: []string{"metadata.owner is not a string", "cannot unmarshal !!map into string"},
-			absent:   []string{"comma-separated"},
-		},
-		{
-			name:     "alias to a sequence",
-			fm:       "name: x\nlist: &l [a, b]\nmetadata:\n  tags: *l\n",
-			contains: []string{"metadata.tags is not a string"},
-		},
-		{
-			name:     "aliased metadata mapping",
-			fm:       "name: x\nbase: &m\n  owner: [a]\nmetadata: *m\n",
-			contains: []string{"metadata.owner is not a string"},
-		},
-		{
-			name:     "alias key names the resolved key",
-			fm:       "name: x\nmetadata:\n  owner: &k tags\n  *k : [a, b]\n",
-			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
-			absent:   []string{"metadata.k "},
-		},
-		{
-			name:     "merge key brings a sequence",
-			fm:       "name: x\nmetadata:\n  owner: a\n  <<: {tags: [a, b]}\n",
-			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
-			absent:   []string{"metadata.<<"},
-		},
-		{
-			name:     "aliased merge mapping",
-			fm:       "name: x\nbase: &m {tags: [a]}\nmetadata:\n  <<: *m\n",
-			contains: []string{"metadata.tags is not a string", "tags is comma-separated"},
-		},
-		{
-			name:     "merge sequence skips an overridden key",
-			fm:       "name: x\nmetadata:\n  owner: a\n  <<: [{owner: [x]}, {team: {a: b}}]\n",
-			contains: []string{"metadata.team is not a string", "cannot unmarshal !!map into string"},
-			absent:   []string{"metadata.owner"},
-		},
-		{
-			name:   "self-referencing merge keeps the unchanged error",
-			fm:     "name: x\ndescription: d\nmetadata: &m\n  <<: *m\n  a: b\n",
-			absent: []string{"metadata.", "is not a string"},
-		},
-		{
-			name:   "nested self-referencing merge keeps the unchanged error",
-			fm:     "name: x\ndescription: d\nmetadata: &m\n  <<: {<<: *m}\n  a: b\n",
-			absent: []string{"metadata.", "is not a string"},
-		},
-		{
-			name:   "merge sequence holding its own mapping keeps the unchanged error",
-			fm:     "name: x\ndescription: d\nmetadata: &m\n  <<: [*m]\n  a: b\n",
-			absent: []string{"metadata.", "is not a string"},
-		},
-		{
-			name:     "self-referencing merge still names a sequence",
-			fm:       "name: x\nmetadata: &m\n  <<: *m\n  tags: [a]\n",
-			contains: []string{"metadata.tags is not a string", "tags is comma-separated"},
-		},
-		{
-			name:     "top-level merge key brings metadata",
-			fm:       "name: x\n<<: {metadata: {tags: [a, b]}}\n",
-			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
-		},
-		{
-			name:     "top-level alias key names metadata",
-			fm:       "name: x\nk: &k metadata\n*k : {tags: [a, b]}\n",
-			contains: []string{"metadata.tags is not a string", "tags is comma-separated", "cannot unmarshal !!seq into string"},
-		},
-		{
-			name:     "top-level merge sequence brings metadata",
-			fm:       "name: x\n<<: [{owner: a}, {metadata: {tags: [a, b]}}]\n",
-			contains: []string{"metadata.tags is not a string", "tags is comma-separated"},
-		},
-		{
-			name:     "direct metadata takes precedence over a merged one",
-			fm:       "name: x\nmetadata: {owner: [a]}\n<<: {metadata: {tags: [a]}}\n",
-			contains: []string{"metadata.owner is not a string"},
-			absent:   []string{"metadata.tags"},
-		},
-		{
-			name:   "self-referencing top-level merge keeps the unchanged error",
-			fm:     "--- &r\nname: [x]\n<<: *r\n",
-			absent: []string{"metadata.", "is not a string"},
-		},
-		{
-			name:     "second error stays visible",
-			fm:       "name: [x]\nmetadata:\n  tags: [a, b]\n",
-			contains: []string{"metadata.tags is not a string", "line 1", "line 3"},
-		},
+		{"description mapping", "name: x\ndescription:\n  text: d\n", "cannot unmarshal !!map into string"},
+		{"name sequence beside nested metadata", "name: [x]\nmetadata:\n  tags: [a, b]\n", "line 1: cannot unmarshal !!seq into string"},
+		{"metadata sequence", "name: x\nmetadata: [a]\n", "line 2: metadata is not a mapping"},
+		{"metadata string", "name: x\nmetadata: a\n", "metadata is not a mapping"},
+		{"root sequence", "- a\n- b\n", "cannot unmarshal !!seq into a SKILL.md frontmatter mapping"},
+		{"repeated metadata key", "name: x\nmetadata:\n  a: b\n  a: c\n", "already defined"},
+		{"scalar that does not decode", "name: x\nmetadata:\n  a: !!binary \"%%%\"\n", "!!binary value contains invalid base64 data"},
+		{"self-referencing metadata merge", "name: x\nmetadata: &m\n  <<: *m\n  tags: [a]\n", "contains itself"},
+		{"self-referencing top-level merge", "--- &r\nname: [x]\n<<: *r\n", "contains itself"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -331,15 +386,8 @@ func TestParseSkill_NonStringMetadataNamesKey(t *testing.T) {
 			if !errors.Is(err, ErrInvalidYAML) {
 				t.Fatalf("err = %v, want ErrInvalidYAML", err)
 			}
-			for _, s := range tc.contains {
-				if !strings.Contains(err.Error(), s) {
-					t.Errorf("err = %q, want it to contain %q", err, s)
-				}
-			}
-			for _, s := range tc.absent {
-				if strings.Contains(err.Error(), s) {
-					t.Errorf("err = %q, want no %q", err, s)
-				}
+			if !strings.Contains(err.Error(), tc.contains) {
+				t.Errorf("err = %q, want it to contain %q", err, tc.contains)
 			}
 		})
 	}

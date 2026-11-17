@@ -12,9 +12,11 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 )
 
-// upNestedMetadata is SKILL.md metadata that holds a mapping, which §4.3.4
-// does not allow, so the SKILL.md does not parse.
-const upNestedMetadata = "metadata:\n  author:\n    name: alice\n"
+// upUnparseableSkill returns a SKILL.md named name whose description is a
+// mapping, a kind §4.3.4 does not allow, so it does not parse.
+func upUnparseableSkill(name string) string {
+	return "---\nname: " + name + "\ndescription:\n  text: A mapping.\n---\n\nSkill body of " + name + ".\n"
+}
 
 // erAssertUnparseable fails unless res rejects id under the §4.1
 // unparseable-manifest rule with exactly the manifest_unparseable constraint
@@ -48,11 +50,11 @@ func TestIngest_UnparseableManifestRefusedPerArtifact(t *testing.T) {
 	t.Parallel()
 	st := newStore(t)
 	res := erIngest(t, st, "team", map[string]string{
-		"ops/nested/SKILL.md":     erSkill("nested", upNestedMetadata),
+		"ops/nested/SKILL.md":     upUnparseableSkill("nested"),
 		"ops/badyaml/ARTIFACT.md": "---\ntype: agent\nweird: [unclosed\n---\n\nbody\n",
 		"ops/nofm/ARTIFACT.md":    "no frontmatter here\n",
 		"ops/ordered/ARTIFACT.md": erDoc("skill", "1.0.0", "extends: ops/sibling\n", ""),
-		"ops/ordered/SKILL.md":    erSkill("ordered", upNestedMetadata),
+		"ops/ordered/SKILL.md":    upUnparseableSkill("ordered"),
 		"ops/sibling/ARTIFACT.md": erDoc("agent", "1.0.0", "", "Sibling body."),
 		"ops/linker/SKILL.md": "---\nname: linker\ndescription: Fixture skill linker.\n---\n\n" +
 			"See [the nested skill](ops/nested) and [the sibling](ops/sibling).\n",
@@ -60,7 +62,7 @@ func TestIngest_UnparseableManifestRefusedPerArtifact(t *testing.T) {
 	if res.Accepted != 1 || len(res.Rejected) != 4 {
 		t.Fatalf("result = %+v, want the sibling accepted and four refusals", res)
 	}
-	_, skillErr := manifest.ParseSkill([]byte(erSkill("nested", upNestedMetadata)))
+	_, skillErr := manifest.ParseSkill([]byte(upUnparseableSkill("nested")))
 	_, yamlErr := manifest.ParseArtifact([]byte("---\ntype: agent\nweird: [unclosed\n---\n\nbody\n"))
 	if skillErr == nil || yamlErr == nil {
 		t.Fatalf("fixtures parse: SKILL.md %v, ARTIFACT.md %v", skillErr, yamlErr)
@@ -93,10 +95,35 @@ func TestIngest_StructuralFailureStillFailsTheLayer(t *testing.T) {
 	_, err := ingest.Ingest(context.Background(), newStore(t), ingest.Request{
 		TenantID: erTenant, LayerID: "team", Files: erFS(map[string]string{
 			"SKILL.md":            erSkill("root", ""),
-			"ops/nested/SKILL.md": erSkill("nested", upNestedMetadata),
+			"ops/nested/SKILL.md": upUnparseableSkill("nested"),
 		}),
 	})
 	if !errors.Is(err, ingest.ErrInvalidArtifact) || !strings.Contains(err.Error(), "subdirectory") {
 		t.Fatalf("Ingest = %v, want the root-level manifest to fail the call with ErrInvalidArtifact", err)
+	}
+}
+
+// Spec: §4.1, §4.3.4 — a SKILL.md whose metadata nests a mapping or a sequence
+// under a key Podium does not read parses, so ingest accepts and stores the
+// skill with its authored bytes. A sequence under tags is ignored, so the
+// stored row carries no tag. It fails against an ingest that refuses the
+// nested value as manifest_unparseable.
+func TestIngest_NestedMetadataAccepted(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	skillMD := erSkill("nested", "metadata:\n  version: \"1.0.0\"\n  requires:\n    bins: [\"lark-cli\"]\n  tags: [a, b]\n")
+	res := erIngest(t, st, "team", map[string]string{"ops/nested/SKILL.md": skillMD})
+	if res.Accepted != 1 || len(res.Rejected) != 0 || len(res.LintFailures) != 0 {
+		t.Fatalf("result = %+v, want the nested-metadata skill accepted", res)
+	}
+	rec, err := st.GetManifest(context.Background(), erTenant, "ops/nested", "1.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if string(rec.SkillRaw) != skillMD {
+		t.Errorf("stored SKILL.md = %q, want the authored bytes %q", rec.SkillRaw, skillMD)
+	}
+	if len(rec.Tags) != 0 {
+		t.Errorf("stored tags = %q, want none from a nested tags value", rec.Tags)
 	}
 }

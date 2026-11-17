@@ -304,9 +304,10 @@ func invocationProblem(ty manifest.ArtifactType, inv manifest.Invocation) string
 
 // ruleSkillMetadataFields enforces spec §4.3.4: "A `SKILL.md` `metadata` value
 // for a key that **Podium fields in `metadata`** lists and that does not
-// follow its encoding is ignored (warning that names the key, the value, and
-// the encoding)." The warning honors no lint_suppress entry, because §4.3.4
-// grants a suppression flag only for the skills-ref check.
+// follow its encoding, including a sequence or a mapping, is ignored (warning
+// that names the key, the value, and the encoding)." The warning honors no
+// lint_suppress entry, because §4.3.4 grants the list only to the skills-ref
+// check and the catalog advisories.
 //
 // Spec: §4.3.4
 type ruleSkillMetadataFields struct{}
@@ -320,8 +321,51 @@ func (r ruleSkillMetadataFields) Check(_ context.Context, _ *filesystem.Registry
 			continue
 		}
 		for _, is := range manifest.DecodeSkillMetadata(rec.Skill).Issues {
-			out = append(out, warn(rec.ID, r.Code(),
-				fmt.Sprintf("metadata.%s %q is ignored: the value must be %s", is.Key, is.Value, is.Encoding)))
+			out = append(out, warn(rec.ID, r.Code(), metadataIssueMessage(is)))
+		}
+	}
+	return out
+}
+
+// metadataIssueMessage names the key, the value, and the encoding of an
+// ignored metadata value. A string value is quoted, and a sequence or a
+// mapping is named by its kind and its single-line YAML flow encoding, so the
+// two never read alike.
+//
+// Spec: §4.3.4
+func metadataIssueMessage(is manifest.SkillMetadataIssue) string {
+	if is.Kind != "" {
+		return fmt.Sprintf("metadata.%s is a %s (%s) and is ignored: the value must be %s", is.Key, is.Kind, is.Value, is.Encoding)
+	}
+	return fmt.Sprintf("metadata.%s %q is ignored: the value must be %s", is.Key, is.Value, is.Encoding)
+}
+
+// ruleSkillMetadataNonString enforces spec §4.3.4: "A `SKILL.md` `metadata`
+// value that is a sequence or a mapping under a key that is neither `version`
+// nor a key **Podium fields in `metadata`** lists is kept and not read
+// (warning `lint.skill_metadata_nonstring` that names the key and says the
+// Agent Skills standard defines `metadata` values as strings)." Published
+// skills nest values under keys of their own, such as requires and openclaw,
+// so the SKILL.md parses and its bytes reach every materialized copy. A
+// sequence or a mapping under a key Podium reads is reported by
+// ruleSkillMetadataFields, and one under version by ruleSkillVersionAssigned.
+// The warning honors no lint_suppress entry (§4.3.4).
+//
+// Spec: §4.3.4
+type ruleSkillMetadataNonString struct{}
+
+func (ruleSkillMetadataNonString) Code() string { return "lint.skill_metadata_nonstring" }
+
+func (r ruleSkillMetadataNonString) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+	var out []Diagnostic
+	for _, rec := range records {
+		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill {
+			continue
+		}
+		for _, nv := range rec.Skill.UnreadNonStringMetadata() {
+			out = append(out, warn(rec.ID, r.Code(), fmt.Sprintf(
+				"metadata.%s is a %s; Podium keeps it unchanged and does not read it, but the Agent Skills standard defines metadata values as strings",
+				nv.Key, nv.Kind)))
 		}
 	}
 	return out
@@ -329,7 +373,8 @@ func (r ruleSkillMetadataFields) Check(_ context.Context, _ *filesystem.Registry
 
 // ruleSkillVersionAssigned enforces spec §4.3.4: "A skill that declares no
 // usable version has its version assigned (info that names any ignored
-// `metadata.version` value and the fix)." The diagnostic is informational
+// `metadata.version` value and the fix)." A sequence or a mapping under
+// version is such an ignored value. The diagnostic is informational
 // because a plain Agent Skill commonly declares no version, and an info
 // diagnostic never fails `podium lint` under either --fail-on value (§7.3.1)
 // and never blocks ingest. The record's VersionAssigned flag is set by the
@@ -352,6 +397,8 @@ func (r ruleSkillVersionAssigned) Check(_ context.Context, _ *filesystem.Registr
 		if rec.Skill != nil {
 			if mv := rec.Skill.Metadata["version"]; mv != "" {
 				msg = fmt.Sprintf("metadata.version %q is not major.minor.patch and is ignored; ", mv) + msg
+			} else if nv, ok := rec.Skill.NonStringMetadataValue("version"); ok {
+				msg = fmt.Sprintf("metadata.version is a %s (%s), not a string, and is ignored; ", nv.Kind, nv.Value) + msg
 			}
 		}
 		out = append(out, Diagnostic{ArtifactID: rec.ID, Code: r.Code(), Severity: SeverityInfo, Message: msg})

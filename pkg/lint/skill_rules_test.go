@@ -518,6 +518,79 @@ func TestLint_SkillMetadataFieldIgnoredWarns(t *testing.T) {
 	}
 }
 
+// nestedMetadataSkillFM is a SKILL.md frontmatter that nests a mapping, a
+// flow sequence, and a block sequence under metadata keys: two keys Podium
+// does not read, a key it reads, and version.
+const nestedMetadataSkillFM = "name: hello\ndescription: Greet the user.\nmetadata:\n" +
+	"  requires:\n    bins: [\"lark-cli\"]\n" +
+	"  cliHelp: \"lark-cli docs --help\"\n" +
+	"  tags: [a, b]\n" +
+	"  credits:\n    - alice\n" +
+	"  version:\n    major: 1\n"
+
+// Spec: §4.3.4 — "A `SKILL.md` `metadata` value that is a sequence or a
+// mapping under a key that is neither `version` nor a key **Podium fields in
+// `metadata`** lists is kept and not read (warning `lint.skill_metadata_nonstring`
+// that names the key and says the Agent Skills standard defines `metadata`
+// values as strings). A sequence or a mapping under `version` is ignored, and
+// the skill declares no usable version." A sequence under tags draws the
+// encoding warning instead, and no case errors. The rule honors no
+// lint_suppress entry, because §4.3.4 grants the list only to the skills-ref
+// check and the catalog advisories. It fails against a rule that reports the
+// read keys or version, that errors, or that a lint_suppress entry silences.
+func TestLint_SkillMetadataNonStringWarns(t *testing.T) {
+	t.Parallel()
+	trees := map[string][]testharness.WriteTreeOption{
+		"plain": plainSkillTree(nestedMetadataSkillFM),
+		"suppressed": skillTree(
+			"type: skill\nlint_suppress:\n  - lint.skill_metadata_nonstring\n  - lint.skill_metadata_field_ignored\n",
+			nestedMetadataSkillFM,
+		),
+	}
+	for name, tree := range trees {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			reg, records := openFixture(t, tree...)
+			diags := (&Linter{}).Lint(context.Background(), reg, records)
+			const standard = "Podium keeps it unchanged and does not read it, but the Agent Skills standard defines metadata values as strings"
+			// Linter.Lint sorts diagnostics by message within a code.
+			wantNonString := []string{
+				"metadata.credits is a sequence; " + standard,
+				"metadata.requires is a mapping; " + standard,
+			}
+			if got := messagesFor(diags, "lint.skill_metadata_nonstring", SeverityWarning); !slices.Equal(got, wantNonString) {
+				t.Errorf("lint.skill_metadata_nonstring = %q, want %q", got, wantNonString)
+			}
+			wantIgnored := []string{"metadata.tags is a sequence ([a, b]) and is ignored: the value must be comma-separated, with no empty element and no line break"}
+			if got := messagesFor(diags, "lint.skill_metadata_field_ignored", SeverityWarning); !slices.Equal(got, wantIgnored) {
+				t.Errorf("lint.skill_metadata_field_ignored = %q, want %q", got, wantIgnored)
+			}
+			if hasAnySeverity(diags, SeverityError) {
+				t.Errorf("nested metadata must not error: %v", diags)
+			}
+			if records[0].Artifact.Tags != nil {
+				t.Errorf("a nested tags value reached the artifact: %q", records[0].Artifact.Tags)
+			}
+		})
+	}
+}
+
+// Spec: §4.3.4 — a mapping under metadata.version declares no usable version,
+// so the skill's version is assigned and the info diagnostic names the
+// ignored mapping. It fails against a walker that reads a nested version.
+func TestLint_SkillVersionAssignedNamesNestedVersion(t *testing.T) {
+	t.Parallel()
+	reg, records := openFixture(t, plainSkillTree(nestedMetadataSkillFM)...)
+	got := messagesFor((&Linter{}).Lint(context.Background(), reg, records), "lint.skill_version_assigned", SeverityInfo)
+	want := "metadata.version is a mapping ({major: 1}), not a string, and is ignored; no usable version declared"
+	if len(got) != 1 || !strings.HasPrefix(got[0], want) {
+		t.Errorf("lint.skill_version_assigned = %q, want one starting %q", got, want)
+	}
+	if !records[0].VersionAssigned {
+		t.Error("VersionAssigned = false, want the version assigned")
+	}
+}
+
 // Spec: §4.3.4 — "When `ARTIFACT.md` states a key that **Podium fields in
 // `metadata`** lists and `SKILL.md` `metadata` carries a value for that key
 // that follows its encoding, the two values are equal (error on mismatch).

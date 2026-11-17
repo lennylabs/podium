@@ -115,7 +115,7 @@ func TestLoadOne_MalformedFrontmatterIsRefusedPerArtifact(t *testing.T) {
 		"description: d\n" +
 		"weird: [unclosed\n" +
 		"---\n\nbody\n"
-	const nestedMetadata = "---\nname: s\ndescription: d\nmetadata:\n  author:\n    name: alice\n---\n\nbody\n"
+	const mappingDescription = "---\nname: s\ndescription:\n  text: d\n---\n\nbody\n"
 	cases := []struct {
 		name, manifestPath, wantFile string
 		fsys                         fstest.MapFS
@@ -125,7 +125,7 @@ func TestLoadOne_MalformedFrontmatterIsRefusedPerArtifact(t *testing.T) {
 		}},
 		{"SKILL.md of a skill package", "x/s/ARTIFACT.md", "x/s/SKILL.md: ", fstest.MapFS{
 			"x/s/ARTIFACT.md": &fstest.MapFile{Data: []byte(skillArtifactInternal)},
-			"x/s/SKILL.md":    &fstest.MapFile{Data: []byte(nestedMetadata)},
+			"x/s/SKILL.md":    &fstest.MapFile{Data: []byte(mappingDescription)},
 		}},
 	}
 	for _, tc := range cases {
@@ -194,8 +194,16 @@ const agentArtifactInternal = "---\n" +
 	"description: d\n" +
 	"---\n\nagent body\n"
 
-// nestedMetadataSkillInternal is a SKILL.md whose metadata holds a mapping,
-// which §4.3.4 does not allow, so it does not parse.
+// mappingDescriptionSkillInternal is a SKILL.md whose description is a
+// mapping, a kind §4.3.4 does not allow, so it does not parse.
+const mappingDescriptionSkillInternal = "---\n" +
+	"name: nested\n" +
+	"description:\n" +
+	"  text: A mapping\n" +
+	"---\n\nBody for nested.\n"
+
+// nestedMetadataSkillInternal is a SKILL.md whose metadata nests a mapping
+// under a key Podium does not read, which parses (§4.3.4).
 const nestedMetadataSkillInternal = "---\n" +
 	"name: nested\n" +
 	"description: Nested metadata\n" +
@@ -372,13 +380,24 @@ func walkParityCases() []walkParityCase {
 			wantRefused: map[string]string{"loose": "loose/SKILL.md: manifest: missing YAML frontmatter"},
 		},
 		{
-			name: "SKILL.md with nested metadata beside a valid skill",
+			name: "SKILL.md with a mapping description beside a valid skill",
 			tree: []testharness.WriteTreeOption{
-				{Path: "bad/SKILL.md", Content: nestedMetadataSkillInternal},
+				{Path: "bad/SKILL.md", Content: mappingDescriptionSkillInternal},
 				{Path: "good/SKILL.md", Content: plainSkillInternal},
 			},
 			want:        []walkParityPackage{{id: "good", resources: map[string]string{}, versionAssigned: true}},
-			wantRefused: map[string]string{"bad": skillReason("bad/SKILL.md", nestedMetadataSkillInternal)},
+			wantRefused: map[string]string{"bad": skillReason("bad/SKILL.md", mappingDescriptionSkillInternal)},
+		},
+		{
+			name: "SKILL.md with nested metadata beside a valid skill",
+			tree: []testharness.WriteTreeOption{
+				{Path: "nested/SKILL.md", Content: nestedMetadataSkillInternal},
+				{Path: "good/SKILL.md", Content: plainSkillInternal},
+			},
+			want: []walkParityPackage{
+				{id: "good", resources: map[string]string{}, versionAssigned: true},
+				{id: "nested", resources: map[string]string{}, versionAssigned: true},
+			},
 		},
 		{
 			name: "ARTIFACT.md with invalid YAML beside a valid artifact",
@@ -403,9 +422,9 @@ func walkParityCases() []walkParityCase {
 			name: "skill ARTIFACT.md whose SKILL.md does not parse",
 			tree: []testharness.WriteTreeOption{
 				{Path: "both/ARTIFACT.md", Content: skillArtifactInternal},
-				{Path: "both/SKILL.md", Content: nestedMetadataSkillInternal},
+				{Path: "both/SKILL.md", Content: mappingDescriptionSkillInternal},
 			},
-			wantRefused: map[string]string{"both": skillReason("both/SKILL.md", nestedMetadataSkillInternal)},
+			wantRefused: map[string]string{"both": skillReason("both/SKILL.md", mappingDescriptionSkillInternal)},
 		},
 		{
 			name: "agent ARTIFACT.md beside its root SKILL.md",

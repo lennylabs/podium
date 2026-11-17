@@ -10,11 +10,10 @@ import (
 	"github.com/lennylabs/podium/pkg/manifest"
 )
 
-// nestedMetadataSkill is a SKILL.md whose metadata holds a mapping, the
-// authoring pattern a validation run over published skills found most often.
-// §4.3.4 allows only string metadata values, so it does not parse.
-const nestedMetadataSkill = "---\nname: bad\ndescription: The bad skill for tests. Use when the user needs bad.\n" +
-	"metadata:\n  author:\n    name: alice\n    url: https://acme.com\n---\n\nbad body.\n"
+// mappingDescriptionSkill is a SKILL.md whose description is a mapping, a
+// kind §4.3.4 does not allow, so it does not parse.
+const mappingDescriptionSkill = "---\nname: bad\ndescription:\n  text: The bad skill for tests.\n  use: When the user needs bad.\n" +
+	"---\n\nbad body.\n"
 
 // unparseableRejected returns the standard-error line podium lint, podium
 // layer reingest, and a filesystem-source podium sync print for the package
@@ -34,7 +33,7 @@ func unparseableRejected(t *testing.T, id, src string) string {
 func unparseableRegistry(t *testing.T) string {
 	t.Helper()
 	return writeRegistry(t, map[string]string{
-		"tools/bad/SKILL.md":   nestedMetadataSkill,
+		"tools/bad/SKILL.md":   mappingDescriptionSkill,
 		"tools/good/SKILL.md":  skillBody("good"),
 		"tools/other/SKILL.md": skillBody("other"),
 	})
@@ -50,10 +49,10 @@ func unparseableRegistry(t *testing.T) string {
 // Spec: §4.1, §7.3.1
 func TestLint_UnparseableManifestRefused(t *testing.T) {
 	t.Parallel()
-	bad := unparseableRejected(t, "tools/bad", nestedMetadataSkill)
+	bad := unparseableRejected(t, "tools/bad", mappingDescriptionSkill)
 	t.Run("alone", func(t *testing.T) {
 		t.Parallel()
-		reg := writeRegistry(t, map[string]string{"tools/bad/SKILL.md": nestedMetadataSkill})
+		reg := writeRegistry(t, map[string]string{"tools/bad/SKILL.md": mappingDescriptionSkill})
 		res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "lint", "--registry", reg)
 		cliWantExit(t, res, 1, "lint over an unparseable SKILL.md alone")
 		assertRejectedLines(t, res.Stderr, bad)
@@ -62,7 +61,7 @@ func TestLint_UnparseableManifestRefused(t *testing.T) {
 	t.Run("beside a lint failure", func(t *testing.T) {
 		t.Parallel()
 		reg := writeRegistry(t, map[string]string{
-			"tools/bad/SKILL.md":  nestedMetadataSkill,
+			"tools/bad/SKILL.md":  mappingDescriptionSkill,
 			"tools/good/SKILL.md": skillBody("good"),
 			// Invalid: missing the required version field, which the linter rejects.
 			"invalid/ARTIFACT.md": "---\ntype: agent\ndescription: missing version\n---\n\nbody.\n",
@@ -77,7 +76,7 @@ func TestLint_UnparseableManifestRefused(t *testing.T) {
 	t.Run("json", func(t *testing.T) {
 		t.Parallel()
 		reg := writeRegistry(t, map[string]string{
-			"tools/bad/SKILL.md":  nestedMetadataSkill,
+			"tools/bad/SKILL.md":  mappingDescriptionSkill,
 			"tools/good/SKILL.md": skillBody("good"),
 			"invalid/ARTIFACT.md": "---\ntype: agent\ndescription: missing version\n---\n\nbody.\n",
 		})
@@ -114,7 +113,7 @@ func TestLint_UnparseableManifestRefused(t *testing.T) {
 func TestFilesystemSync_UnparseableManifestDropsArtifact(t *testing.T) {
 	t.Parallel()
 	reg := unparseableRegistry(t)
-	bad := unparseableRejected(t, "tools/bad", nestedMetadataSkill)
+	bad := unparseableRejected(t, "tools/bad", mappingDescriptionSkill)
 
 	t.Run("one-shot", func(t *testing.T) {
 		t.Parallel()
@@ -178,7 +177,7 @@ func TestStandaloneServer_UnparseableManifestRefused(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"ops/base/ARTIFACT.md": smallteamLowArtifact("quarterly base runbook"),
-		"ops/bad/SKILL.md":     nestedMetadataSkill,
+		"ops/bad/SKILL.md":     mappingDescriptionSkill,
 	})
 	srv := startServer(t, reg)
 
@@ -216,5 +215,5 @@ func TestStandaloneServer_UnparseableManifestRefused(t *testing.T) {
 
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "layer", "reingest", "--registry", srv.BaseURL, layerID)
 	cliWantNonZero(t, res, "layer reingest over an unparseable SKILL.md")
-	assertRejectedLines(t, res.Stderr, unparseableRejected(t, "ops/bad", nestedMetadataSkill))
+	assertRejectedLines(t, res.Stderr, unparseableRejected(t, "ops/bad", mappingDescriptionSkill))
 }

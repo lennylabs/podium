@@ -10,8 +10,12 @@ import (
 	"github.com/lennylabs/podium/pkg/manifest"
 )
 
-// nestedMetadataSkill is a SKILL.md whose metadata holds a mapping, which
-// §4.3.4 does not allow, so it does not parse.
+// mappingDescriptionSkill is a SKILL.md whose description is a mapping, a
+// kind §4.3.4 does not allow, so it does not parse.
+const mappingDescriptionSkill = "---\nname: nested\ndescription:\n  text: A mapping.\n---\n\nBody.\n"
+
+// nestedMetadataSkill is a SKILL.md whose metadata nests a mapping under a key
+// Podium does not read, which parses (§4.3.4).
 const nestedMetadataSkill = "---\nname: nested\ndescription: Nested metadata.\nmetadata:\n  author:\n    name: alice\n---\n\nBody.\n"
 
 // invalidYAMLArtifact is an ARTIFACT.md whose frontmatter is not valid YAML.
@@ -70,8 +74,8 @@ func TestArtifactRecord_Refusal(t *testing.T) {
 	}
 }
 
-// Spec: §4.1, §13.11.3 — the walk drops a plain SKILL.md with nested
-// metadata, an ARTIFACT.md that is not valid YAML, an ARTIFACT.md with no
+// Spec: §4.1, §13.11.3 — the walk drops a plain SKILL.md whose description is
+// a mapping, an ARTIFACT.md that is not valid YAML, an ARTIFACT.md with no
 // frontmatter, and a skill package whose SKILL.md does not parse beside an
 // ARTIFACT.md that declares extends:, and returns the valid siblings. Each
 // drop carries manifest_unparseable, never extends_removed. The refusing
@@ -83,19 +87,19 @@ func TestWalk_UnparseableManifestDropped(t *testing.T) {
 	t.Parallel()
 	extendsSkill := "---\ntype: skill\nversion: 1.0.0\nextends: l1/keep\n---\n\n"
 	files := map[string]string{
-		"l1/plain/SKILL.md":     nestedMetadataSkill,
+		"l1/plain/SKILL.md":     mappingDescriptionSkill,
 		"l1/yaml/ARTIFACT.md":   invalidYAMLArtifact,
 		"l1/nofm/ARTIFACT.md":   "no frontmatter\n",
 		"l1/nofm/refs/SKILL.md": plainSkill("refs", "Refs skill.", ""),
 		"l1/order/ARTIFACT.md":  extendsSkill,
-		"l1/order/SKILL.md":     nestedMetadataSkill,
+		"l1/order/SKILL.md":     mappingDescriptionSkill,
 		"l1/keep/ARTIFACT.md":   dropFixtureArtifact("plain", ""),
 		"l1/good/SKILL.md":      plainSkill("good", "Good skill.", ""),
 	}
 	want := []layer.Drop{
 		unparseableDrop(t, "nofm", "ARTIFACT.md", "no frontmatter\n", false),
-		unparseableDrop(t, "order", "SKILL.md", nestedMetadataSkill, true),
-		unparseableDrop(t, "plain", "SKILL.md", nestedMetadataSkill, true),
+		unparseableDrop(t, "order", "SKILL.md", mappingDescriptionSkill, true),
+		unparseableDrop(t, "plain", "SKILL.md", mappingDescriptionSkill, true),
 		unparseableDrop(t, "yaml", "ARTIFACT.md", invalidYAMLArtifact, false),
 	}
 	reg := openLayeredTree(t, []string{"l1"}, files)
@@ -114,7 +118,7 @@ func TestWalk_UnparseableManifestDropped(t *testing.T) {
 		}
 	}
 
-	single := openLayeredTree(t, []string{"l1"}, map[string]string{"l1/plain/SKILL.md": nestedMetadataSkill})
+	single := openLayeredTree(t, []string{"l1"}, map[string]string{"l1/plain/SKILL.md": mappingDescriptionSkill})
 	_, _, err := walkCollecting(single, CollisionPolicyDefault, false)
 	if err == nil || !strings.Contains(err.Error(), layer.InvalidArtifactCode) ||
 		!strings.Contains(err.Error(), "plain/SKILL.md: manifest: invalid YAML frontmatter") {
@@ -141,14 +145,14 @@ func TestWalk_UnparseableManifestCollidesWithNothing(t *testing.T) {
 			good = "lower"
 		}
 		reg := openLayeredTree(t, []string{"lower", "upper"}, map[string]string{
-			bad + "/x/SKILL.md":  nestedMetadataSkill,
+			bad + "/x/SKILL.md":  mappingDescriptionSkill,
 			good + "/x/SKILL.md": plainSkill("x", "Parsed skill.", ""),
 		})
 		got, drops, err := walkCollecting(reg, CollisionPolicyDefault, true)
 		if err != nil {
 			t.Fatalf("unparseable in %s: Walk: %v", bad, err)
 		}
-		if want := []layer.Drop{unparseableDrop(t, "x", "SKILL.md", nestedMetadataSkill, true)}; !reflect.DeepEqual(drops, want) {
+		if want := []layer.Drop{unparseableDrop(t, "x", "SKILL.md", mappingDescriptionSkill, true)}; !reflect.DeepEqual(drops, want) {
 			t.Errorf("unparseable in %s: OnDrop calls = %+v, want %+v", bad, drops, want)
 		}
 		if len(got) != 1 || got[0].Layer.ID != good {
@@ -165,7 +169,7 @@ func TestWalk_StructuralFailureStillFailsBesideUnparseable(t *testing.T) {
 	t.Parallel()
 	reg := openLayeredTree(t, []string{"l1"}, map[string]string{
 		"l1/SKILL.md":       plainSkill("root", "Root skill.", ""),
-		"l1/plain/SKILL.md": nestedMetadataSkill,
+		"l1/plain/SKILL.md": mappingDescriptionSkill,
 	})
 	_, drops, err := walkCollecting(reg, CollisionPolicyDrop, true)
 	if err == nil || !strings.Contains(err.Error(), "subdirectory") {
@@ -176,5 +180,27 @@ func TestWalk_StructuralFailureStillFailsBesideUnparseable(t *testing.T) {
 	}
 	if errors.Is(err, manifest.ErrInvalidYAML) {
 		t.Errorf("Walk err = %v reports the sibling's parse failure", err)
+	}
+}
+
+// Spec: §4.1, §4.3.4 — a SKILL.md whose metadata nests a mapping under a key
+// Podium does not read parses, so the walk keeps the artifact, refuses
+// nothing, and records the nested key on the parsed skill. It fails against a
+// walk that refuses the nested value as unparseable.
+func TestWalk_NestedMetadataKept(t *testing.T) {
+	t.Parallel()
+	reg := openLayeredTree(t, []string{"l1"}, map[string]string{"l1/nested/SKILL.md": nestedMetadataSkill})
+	got, drops, err := walkCollecting(reg, CollisionPolicyDefault, true)
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(drops) != 0 || len(got) != 1 || got[0].ID != "nested" {
+		t.Fatalf("kept %v, drops %+v; want nested kept and nothing refused", idsOf(got), drops)
+	}
+	if nv := got[0].Skill.UnreadNonStringMetadata(); len(nv) != 1 || nv[0].Key != "author" {
+		t.Errorf("UnreadNonStringMetadata = %+v, want author", nv)
+	}
+	if string(got[0].SkillBytes) != nestedMetadataSkill {
+		t.Errorf("SkillBytes = %q, want the authored bytes", got[0].SkillBytes)
 	}
 }

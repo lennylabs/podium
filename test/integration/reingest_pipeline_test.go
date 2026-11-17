@@ -332,7 +332,7 @@ func TestReingestPipeline_RootLevelSkillIsLintFailure(t *testing.T) {
 	t.Parallel()
 	layerDir := t.TempDir()
 	writeFile(t, filepath.Join(layerDir, "SKILL.md"), "---\nname: root\ndescription: A skill at the layer root.\n---\n\nbody\n")
-	writeFile(t, filepath.Join(layerDir, "bad", "SKILL.md"), psListTagsSkill)
+	writeFile(t, filepath.Join(layerDir, "bad", "SKILL.md"), psMappingDescriptionSkill)
 	_, reingest := localReingest(t, layerDir)
 	status, m := reingest()
 	if status != http.StatusUnprocessableEntity || m["code"] != "ingest.lint_failed" {
@@ -350,37 +350,34 @@ func TestReingestPipeline_RootLevelSkillIsLintFailure(t *testing.T) {
 	}
 }
 
-// Spec: §4.1, §4.3.4, §7.3.1 — a layer holding a plain skill whose
-// metadata.tags is a YAML sequence beside a valid skill answers the reingest
-// with 200, reports the malformed skill among the rejections with a reason
-// naming metadata.tags and the manifest_unparseable constraint, and stores
-// the valid skill alone.
-func TestReingest_ListMetadataValueRefusedPerArtifact(t *testing.T) {
+// Spec: §4.1, §4.3.4, §7.3.1 — a layer holding a plain skill whose metadata
+// nests a mapping and a sequence beside a valid skill answers the reingest
+// with 200, rejects nothing, and stores both skills, the nested one with its
+// SKILL.md bytes unchanged.
+func TestReingest_NestedMetadataAccepted(t *testing.T) {
 	t.Parallel()
 	layerDir := t.TempDir()
 	writeFile(t, filepath.Join(layerDir, "good", "SKILL.md"), psNamedSkill("good", "valid", "1.0.0"))
-	writeFile(t, filepath.Join(layerDir, "bad", "SKILL.md"), psListTagsSkill)
+	writeFile(t, filepath.Join(layerDir, "bad", "SKILL.md"), psNestedMetadataSkill)
 	st, reingest := localReingest(t, layerDir)
 	status, m := reingest()
-	if status != http.StatusOK || m["accepted"] != float64(1) {
-		t.Fatalf("reingest = %d %v, want 200 with good accepted", status, m)
+	if status != http.StatusOK || m["accepted"] != float64(2) {
+		t.Fatalf("reingest = %d %v, want 200 with both skills accepted", status, m)
 	}
-	rejected, _ := m["rejected"].([]any)
-	if len(rejected) != 1 {
-		t.Fatalf("rejected = %v, want bad alone", m["rejected"])
-	}
-	r, _ := rejected[0].(map[string]any)
-	details, _ := r["details"].(map[string]any)
-	if reason, _ := r["reason"].(string); r["artifact_id"] != "bad" || !strings.Contains(reason, "metadata.tags") ||
-		details["constraint"] != "manifest_unparseable" {
-		t.Errorf("rejected[0] = %v, want bad refused with manifest_unparseable naming metadata.tags", r)
+	if rejected, _ := m["rejected"].([]any); len(rejected) != 0 {
+		t.Errorf("rejected = %v, want none", m["rejected"])
 	}
 	all, err := st.ListManifestsIncludingDeleted(context.Background(), "t")
 	if err != nil {
 		t.Fatalf("ListManifestsIncludingDeleted: %v", err)
 	}
-	if len(all) != 1 || all[0].ArtifactID != "good" {
-		t.Errorf("stored rows = %+v, want good alone", all)
+	if len(all) != 2 {
+		t.Fatalf("stored rows = %+v, want good and bad", all)
+	}
+	for _, rec := range all {
+		if rec.ArtifactID == "bad" && string(rec.SkillRaw) != psNestedMetadataSkill {
+			t.Errorf("bad SkillRaw = %q, want the authored bytes", rec.SkillRaw)
+		}
 	}
 }
 
