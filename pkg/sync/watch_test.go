@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -241,4 +242,91 @@ func waitFor(t *testing.T, ch <-chan sync.WatchEvent, timeout time.Duration) syn
 		t.Fatal("timed out waiting for watch event")
 	}
 	return sync.WatchEvent{}
+}
+
+// waitUntil reads events until one satisfies ok and returns it, failing the
+// test when the channel closes or the deadline passes first. A watcher can
+// emit an extra cycle for an intermediate state of an edit, so the tests that
+// follow an edit wait for the cycle that reflects it.
+func waitUntil(t *testing.T, ch <-chan sync.WatchEvent, timeout time.Duration, ok func(sync.WatchEvent) bool) sync.WatchEvent {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case ev, open := <-ch:
+			if !open {
+				t.Fatal("channel closed before the expected event arrived")
+			}
+			if ok(ev) {
+				return ev
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for the expected watch event")
+		}
+	}
+}
+
+// Spec: §13.11.3, §13.11.4 — a watch cycle that finds tools/a's SKILL.md
+// unparseable keeps the files the previous cycle wrote for it under the keep
+// default and reports the drop marked kept, and the cycle after the fix
+// rewrites tools/a.
+func TestWatch_UnparseableManifestKeepsThenRewrites(t *testing.T) {
+	// Not parallel: shares the package's poll-based watcher timing budget.
+	dir := t.TempDir()
+	registry := filepath.Join(dir, "registry")
+	target := filepath.Join(dir, "out")
+	skill := func(name, marker string) string {
+		return "---\nname: " + name + "\ndescription: " + marker + " skill.\n---\n\n" + marker + " body\n"
+	}
+	write := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(registry, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+	write(".registry-config", "multi_layer: true\nlayer_order:\n  - team\n")
+	write("team/tools/a/SKILL.md", skill("a", "a-v1"))
+	write("team/tools/b/SKILL.md", skill("b", "b-v1"))
+	skillA := filepath.Join(target, "tools", "a", "SKILL.md")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, err := sync.Watch(ctx, sync.WatchOptions{
+		Sync:     sync.Options{RegistryPath: registry, Target: target, AdapterID: "none"},
+		Period:   50 * time.Millisecond,
+		Debounce: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	if first := waitFor(t, events, 5*time.Second); first.Err != nil || len(first.Result.Artifacts) != 2 {
+		t.Fatalf("initial sync = %+v, want two artifacts", first)
+	}
+	before, err := os.ReadFile(skillA)
+	if err != nil {
+		t.Fatalf("initial sync wrote no tools/a: %v", err)
+	}
+
+	write("team/tools/a/SKILL.md", "---\nname: a\ndescription:\n  text: A mapping.\n---\n\nhalf-saved body\n")
+	broken := waitUntil(t, events, 30*time.Second, func(ev sync.WatchEvent) bool {
+		return ev.Err == nil && len(ev.Result.Dropped) > 0
+	})
+	if d := broken.Result.Dropped; len(d) != 1 || d[0].ArtifactID != "tools/a" || !d[0].PreviousOutputKept {
+		t.Errorf("broken cycle Dropped = %+v, want tools/a marked kept", d)
+	}
+	if got, err := os.ReadFile(skillA); err != nil || string(got) != string(before) {
+		t.Errorf("tools/a/SKILL.md after the broken cycle = %q (%v), want the previous output %q", got, err, before)
+	}
+
+	write("team/tools/a/SKILL.md", skill("a", "a-v2"))
+	waitUntil(t, events, 30*time.Second, func(ev sync.WatchEvent) bool {
+		return ev.Err == nil && len(ev.Result.Dropped) == 0
+	})
+	if got, err := os.ReadFile(skillA); err != nil || !strings.Contains(string(got), "a-v2 body") {
+		t.Errorf("tools/a/SKILL.md after the fix = %q (%v), want the fixed copy", got, err)
+	}
 }

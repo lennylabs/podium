@@ -177,6 +177,9 @@ func mergeDefaults(dst *Defaults, src Defaults) {
 	if src.MinServerVersion != "" {
 		dst.MinServerVersion = src.MinServerVersion
 	}
+	if src.OnUnparseable != "" {
+		dst.OnUnparseable = src.OnUnparseable
+	}
 }
 
 // mergeListingBudget overlays src onto dst per key, keeping each key src sets.

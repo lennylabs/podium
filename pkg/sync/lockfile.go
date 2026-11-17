@@ -115,9 +115,10 @@ func ReadLock(target string) (*LockFile, error) {
 // every writer of the file passes, covering sync.Run, the §7.5.5 override
 // paths, and the §7.8 publish render.
 //
-// The sync path already hands over the set in this order, so the sort is a
-// no-op there. It stays because it is what normalizes a lock an override
-// rewrites in place and a lock an older build wrote in a different order.
+// The sync path hands over its materialized set in this order and appends the
+// entries of any artifact whose previous output it kept (§13.11.3), which the
+// sort places. The sort also normalizes a lock an override rewrites in place
+// and a lock an older build wrote in a different order.
 //
 // The normalization applies to a copy. Every step after it can fail, and a
 // caller that sorted the slice it passed in would find its own entries

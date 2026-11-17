@@ -22,8 +22,10 @@ type writeItem struct {
 // destination path. OpWrite files keep their content (last write to a path
 // wins). OpInject and OpMergeJSON files fold into the target's current bytes:
 // the on-disk file (when present) plus any earlier ops in this batch, applied
-// in input order. resolved[i] is the absolute destination for files[i].
-func foldOps(files []adapter.File, resolved []string) ([]writeItem, error) {
+// in input order. resolved[i] is the absolute destination for files[i]. keep
+// names the artifacts whose prior entries and blocks the strip leaves in place
+// (see WriteKeeping); nil keeps none.
+func foldOps(files []adapter.File, resolved []string, keep func(id string) bool) ([]writeItem, error) {
 	idx := map[string]int{}
 	items := make([]writeItem, 0, len(files))
 	for i, f := range files {
@@ -47,13 +49,13 @@ func foldOps(files []adapter.File, resolved []string) ([]writeItem, error) {
 			// fragment, so accumulating fragments are not re-stripped.
 			switch f.Op {
 			case adapter.OpMergeJSON:
-				base = stripPodiumOwnedBytes(base)
+				base = stripPodiumOwnedBytes(base, keep)
 			case adapter.OpInject:
 				// Symmetric reconciliation for the marker-based inject files
 				// (AGENTS.md / GEMINI.md / config.toml): drop every prior
 				// Podium block so a removed artifact's block does not linger,
 				// then the current fragments re-add only the live blocks.
-				base = stripPodiumBlocks(base, commentStyleFor(f.Path))
+				base = stripPodiumBlocks(base, commentStyleFor(f.Path), keep)
 			}
 			items = append(items, writeItem{resolved: rp, content: base, mode: modeOf(f)})
 			j = len(items) - 1
@@ -138,16 +140,19 @@ func injectBlock(base []byte, key string, block []byte, cs commentStyle) []byte 
 // given comment style) from a text file, leaving the operator's surrounding
 // content intact. It is the inject counterpart to stripPodiumOwnedBytes: the
 // prior sync's blocks are removed before the current fragments re-add the live
-// ones, so a removed artifact's block does not survive.
-func stripPodiumBlocks(base []byte, cs commentStyle) []byte {
+// ones, so a removed artifact's block does not survive. A block whose key keep
+// reports stays in place; a nil keep strips every block.
+func stripPodiumBlocks(base []byte, cs commentStyle, keep func(id string) bool) []byte {
 	s := string(base)
 	beginTag := cs.open + "podium:begin:"
 	endTag := cs.open + "podium:end:"
+	from := 0
 	for {
-		bi := strings.Index(s, beginTag)
-		if bi < 0 {
+		rel := strings.Index(s[from:], beginTag)
+		if rel < 0 {
 			break
 		}
+		bi := from + rel
 		ej := strings.Index(s[bi:], endTag)
 		if ej < 0 {
 			break
@@ -170,6 +175,10 @@ func stripPodiumBlocks(base []byte, cs commentStyle) []byte {
 		if ee < len(s) && s[ee] == '\n' {
 			ee++
 		}
+		if keep != nil && keep(blockKey(s[bi+len(beginTag):], cs)) {
+			from = ee
+			continue
+		}
 		start := bi
 		for start > 0 && s[start-1] == '\n' {
 			start--
@@ -179,21 +188,40 @@ func stripPodiumBlocks(base []byte, cs commentStyle) []byte {
 			sep = "\n"
 		}
 		s = s[:start] + sep + s[ee:]
+		from = start + len(sep)
 	}
 	return []byte(s)
+}
+
+// blockKey returns the key of the begin marker whose text after the
+// `podium:begin:` prefix is rest. The key runs to the comment close, or to the
+// end of the line in a style with no close (TOML).
+func blockKey(rest string, cs commentStyle) string {
+	stop := "\n"
+	if cs.close != "" {
+		stop = cs.close
+	}
+	if i := strings.Index(rest, stop); i >= 0 {
+		return rest[:i]
+	}
+	return rest
 }
 
 // StripPodiumOwnedBytes is the exported form of the §6.7 config-merge JSON
 // reconciliation: it removes every Podium-owned entry from a JSON config
 // document, leaving the operator's entries intact. The sync layer calls it to
-// clean an orphaned config file whose last contributing artifact is gone.
-func StripPodiumOwnedBytes(base []byte) []byte { return stripPodiumOwnedBytes(base) }
+// clean an orphaned config file whose last contributing artifact is gone. An
+// entry owned by an artifact keep reports stays; a nil keep strips them all.
+func StripPodiumOwnedBytes(base []byte, keep func(id string) bool) []byte {
+	return stripPodiumOwnedBytes(base, keep)
+}
 
 // StripPodiumBlocks is the exported form of the inject reconciliation: it
 // removes every Podium-managed block from a text inject file (AGENTS.md /
-// GEMINI.md / config.toml), selecting the marker style from the path.
-func StripPodiumBlocks(base []byte, path string) []byte {
-	return stripPodiumBlocks(base, commentStyleFor(path))
+// GEMINI.md / config.toml), selecting the marker style from the path. A block
+// keyed by an artifact keep reports stays; a nil keep strips them all.
+func StripPodiumBlocks(base []byte, path string, keep func(id string) bool) []byte {
+	return stripPodiumBlocks(base, commentStyleFor(path), keep)
 }
 
 // mergeJSON deep-merges the fragment object into the existing JSON document,
@@ -251,8 +279,9 @@ func deepMerge(dst, src map[string]any) {
 // the §6.7 config-merge reconciliation: the prior sync's Podium entries are
 // removed before the current sync's fragments are merged. A document that is
 // empty or not valid JSON is returned unchanged (the merge step then reports
-// the parse error).
-func stripPodiumOwnedBytes(base []byte) []byte {
+// the parse error). An entry owned by an artifact keep reports stays in place,
+// with its index entry; a nil keep strips every Podium-owned entry.
+func stripPodiumOwnedBytes(base []byte, keep func(id string) bool) []byte {
 	if len(bytes.TrimSpace(base)) == 0 {
 		return base
 	}
@@ -265,9 +294,9 @@ func stripPodiumOwnedBytes(base []byte) []byte {
 	// in-entry-tagged entries (hook arrays, marketplace plugins, and legacy
 	// in-entry mcp tags written before the index existed).
 	if root, ok := v.(map[string]any); ok {
-		stripIndexedEntries(root)
+		stripIndexedEntries(root, keep)
 	}
-	stripped := stripPodiumOwned(v)
+	stripped := stripPodiumOwned(v, keep)
 	out, err := json.MarshalIndent(stripped, "", "  ")
 	if err != nil {
 		return base
@@ -280,20 +309,28 @@ func stripPodiumOwnedBytes(base []byte) []byte {
 // is a path ([container, key]) into the document; the entry it points at is the
 // Podium-owned one to drop before the current sync's fragments merge in. A
 // missing or malformed index, or a path to an entry that no longer exists, is a
-// no-op so the strip is safe on a hand-edited file.
-func stripIndexedEntries(root map[string]any) {
+// no-op so the strip is safe on a hand-edited file. The index is keyed by
+// artifact ID, so an entry keep reports stays together with its index entry,
+// and the index is removed only when no kept entry remains in it.
+func stripIndexedEntries(root map[string]any, keep func(id string) bool) {
 	idx, ok := root[adapter.PodiumIndexKey].(map[string]any)
 	if !ok {
 		return
 	}
-	for _, loc := range idx {
+	for id, loc := range idx {
+		if keep != nil && keep(id) {
+			continue
+		}
+		delete(idx, id)
 		path, ok := loc.([]any)
 		if !ok || len(path) == 0 {
 			continue
 		}
 		deleteAtPath(root, path)
 	}
-	delete(root, adapter.PodiumIndexKey)
+	if len(idx) == 0 {
+		delete(root, adapter.PodiumIndexKey)
+	}
 }
 
 // deleteAtPath walks the string path from root and deletes the leaf key from its
@@ -325,9 +362,10 @@ func deleteAtPath(root map[string]any, path []any) {
 // a changed hook_event does not leave a stale empty native-event key behind
 // (for example .gemini/settings.json {"hooks": {"BeforeTool": []}} after the
 // event moved to AfterTool). An array the operator left empty carried no Podium
-// element, so it is preserved.
-func stripPodiumOwned(v any) any {
-	out, _ := stripPodiumOwnedTracked(v)
+// element, so it is preserved. An object whose tag names an artifact keep
+// reports is left in place.
+func stripPodiumOwned(v any, keep func(id string) bool) any {
+	out, _ := stripPodiumOwnedTracked(v, keep)
 	return out
 }
 
@@ -336,15 +374,17 @@ func stripPodiumOwned(v any) any {
 // element. The map case uses that signal to delete a key whose array value was
 // emptied by stripping while keeping a key whose array the operator already left
 // empty.
-func stripPodiumOwnedTracked(v any) (any, bool) {
+func stripPodiumOwnedTracked(v any, keep func(id string) bool) (any, bool) {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, val := range t {
-			if podiumOwned(val) {
-				delete(t, k)
+			if owner, ok := podiumOwner(val); ok {
+				if keep == nil || !keep(owner) {
+					delete(t, k)
+				}
 				continue
 			}
-			nv, emptied := stripPodiumOwnedTracked(val)
+			nv, emptied := stripPodiumOwnedTracked(val, keep)
 			if emptied {
 				delete(t, k)
 				continue
@@ -356,11 +396,15 @@ func stripPodiumOwnedTracked(v any) (any, bool) {
 		out := make([]any, 0, len(t))
 		removed := false
 		for _, el := range t {
-			if podiumOwned(el) {
-				removed = true
+			if owner, ok := podiumOwner(el); ok {
+				if keep != nil && keep(owner) {
+					out = append(out, el)
+				} else {
+					removed = true
+				}
 				continue
 			}
-			nv, _ := stripPodiumOwnedTracked(el)
+			nv, _ := stripPodiumOwnedTracked(el, keep)
 			out = append(out, nv)
 		}
 		return out, removed && len(out) == 0
@@ -369,13 +413,19 @@ func stripPodiumOwnedTracked(v any) (any, bool) {
 	}
 }
 
-// podiumOwned reports whether v is a JSON object carrying the
-// adapter.PodiumOwnedKey tag.
-func podiumOwned(v any) bool {
+// podiumOwner reports whether v is a JSON object carrying the
+// adapter.PodiumOwnedKey tag, and returns the tag's value, which is the owning
+// artifact ID (or a marketplace plugin name). A tag whose value is not a string
+// still marks the object as Podium-owned and names no owner.
+func podiumOwner(v any) (string, bool) {
 	m, ok := v.(map[string]any)
 	if !ok {
-		return false
+		return "", false
 	}
-	_, has := m[adapter.PodiumOwnedKey]
-	return has
+	tag, has := m[adapter.PodiumOwnedKey]
+	if !has {
+		return "", false
+	}
+	owner, _ := tag.(string)
+	return owner, true
 }

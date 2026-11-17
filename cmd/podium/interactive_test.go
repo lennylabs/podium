@@ -273,7 +273,7 @@ func TestRunSyncOverrideInteractive_AddsAndMaterializes(t *testing.T) {
 	withCwd(t, t.TempDir(), func() {
 		withStderr(t, func() {
 			captureStdout(t, func() {
-				if rc := runSyncOverrideInteractive(target, registry, "none", false); rc != 0 {
+				if rc := runSyncOverrideInteractive(target, registry, "none", false, sync.OnUnparseableKeep); rc != 0 {
 					t.Errorf("rc = %d, want 0", rc)
 				}
 			})
@@ -312,7 +312,7 @@ func TestRunSyncOverrideInteractive_SendsResolvedHarness(t *testing.T) {
 			withCwd(t, t.TempDir(), func() {
 				withStderr(t, func() {
 					captureStdout(t, func() {
-						if rc := runSyncOverrideInteractive(t.TempDir(), reg.srv.URL, tc.harnessFlag, false); rc != 0 {
+						if rc := runSyncOverrideInteractive(t.TempDir(), reg.srv.URL, tc.harnessFlag, false, sync.OnUnparseableKeep); rc != 0 {
 							t.Errorf("rc = %d, want 0", rc)
 						}
 					})
@@ -415,7 +415,7 @@ func TestRunSyncOverrideInteractive_CollisionExits1(t *testing.T) {
 	withCwd(t, t.TempDir(), func() {
 		stderr = captureStderr(t, func() {
 			captureStdout(t, func() {
-				if rc := runSyncOverrideInteractive(target, registry, "none", false); rc != 1 {
+				if rc := runSyncOverrideInteractive(target, registry, "none", false, sync.OnUnparseableKeep); rc != 1 {
 					t.Errorf("rc = %d, want 1", rc)
 				}
 			})
@@ -480,7 +480,7 @@ func runInteractiveOverride(t *testing.T, ws, script, target, registry string, d
 	withCwd(t, ws, func() {
 		stderr = captureStderr(t, func() {
 			stdout = captureStdout(t, func() {
-				rc = runSyncOverrideInteractive(target, registry, "claude-code", dryRun)
+				rc = runSyncOverrideInteractive(target, registry, "claude-code", dryRun, sync.OnUnparseableKeep)
 			})
 		})
 	})

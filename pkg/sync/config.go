@@ -56,6 +56,11 @@ type Defaults struct {
 	// §7.5.2 scopes like every other defaults key; PODIUM_VERIFY_SIGNATURES
 	// overrides it, and the §6.2 default when no scope sets it is always.
 	VerifySignatures string `yaml:"verify_signatures,omitempty"`
+	// OnUnparseable is what a filesystem-source sync does with the previous
+	// output of an artifact whose manifest does not parse (keep | remove,
+	// §13.11.3). The --on-unparseable flag and PODIUM_SYNC_ON_UNPARSEABLE
+	// override it, and ResolveOnUnparseable validates it.
+	OnUnparseable string `yaml:"on_unparseable,omitempty"`
 	// MinServerVersion pins the minimum MCP server / CLI binary version this
 	// configuration requires (§6.7 "Versioning": a profile or harness
 	// combination that needs a newer adapter behavior pins a minimum, and an

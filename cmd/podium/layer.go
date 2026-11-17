@@ -642,19 +642,32 @@ func printRejected(w io.Writer, id, code, reason string) {
 }
 
 // reportDropped prints a rejected line for each artifact a filesystem-source
-// composition dropped under the §4.6 collision rule, the §4.6
-// no-inheritance rule, or the §4.1 removed-type rule, with the code and
-// reason each drop carries, and
-// reports whether it printed anything, so the caller can set a non-zero exit
-// status. The sync commands and podium lint call it.
+// composition dropped under the §4.6 collision rule, the §4.1
+// unparseable-manifest rule, the §4.6 no-inheritance rule, or the §4.1
+// removed-type rule, with the code and reason each drop carries, and reports
+// whether it printed anything, so the caller can set a non-zero exit status.
+// A drop whose previous sync output was kept reports that too, and still
+// counts as a drop. The sync commands and podium lint call it.
 //
 // Spec: §4.1, §4.6, §13.11.3
 func reportDropped(w io.Writer, dropped []layer.Drop) bool {
 	for _, d := range dropped {
-		printRejected(w, d.ArtifactID, d.Code, d.Reason)
+		reason := d.Reason
+		// Spec: §13.11.3 — a sync that kept an unparseable artifact's previous
+		// output says so on the artifact's rejected line.
+		if d.PreviousOutputKept {
+			reason += keptOutputNote
+		}
+		printRejected(w, d.ArtifactID, d.Code, reason)
 	}
 	return len(dropped) > 0
 }
+
+// keptOutputNote is the suffix of the rejected line of an artifact whose
+// previous sync output the sync kept.
+//
+// Spec: §13.11.3
+const keptOutputNote = "; the previous sync output was kept"
 
 // resolveLayerRegistry resolves the registry URL for the standalone `podium
 // layer` subcommands. flagVal is the --registry flag value (already defaulted

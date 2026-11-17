@@ -53,6 +53,31 @@ func TestRemovedFeatureDrop(t *testing.T) {
 	}
 }
 
+// Spec: §4.1, §13.11.3 — Unparseable singles out the drop whose previous sync
+// output a filesystem-source sync keeps: an ingest.invalid_artifact drop with
+// the manifest_unparseable constraint. The other pre-lint drops and a
+// collision drop are not unparseable.
+func TestDrop_Unparseable(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		drop Drop
+		want bool
+	}{
+		{"manifest unparseable", RemovedFeatureDrop("a/b", ManifestUnparseableConstraint, "r"), true},
+		{"extends", RemovedFeatureDrop("a/b", ExtendsRemovedConstraint, ExtendsRemovedReason), false},
+		{"type removed", RemovedFeatureDrop("a/b", TypeRemovedConstraint, TypeRemovedReason("command")), false},
+		{"collision", Collision{ArtifactID: "a/b", Layer: "l2", ExistingLayer: "l1"}.Drop(), false},
+		{"constraint under another code", Drop{ArtifactID: "a/b", Code: CollisionCode,
+			Details: map[string]any{"constraint": ManifestUnparseableConstraint}}, false},
+	}
+	for _, tc := range cases {
+		if got := tc.drop.Unparseable(); got != tc.want {
+			t.Errorf("%s: Unparseable() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // Spec: §4.1, §7.3.1 — the unparseable-manifest reason names the manifest
 // file and the parse error, and it names no layer. A multi-line decoder error
 // becomes one line, so the CLI prints each refusal on one standard-error

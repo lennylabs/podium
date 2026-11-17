@@ -186,6 +186,34 @@ func TestConfigClientShow_ExplainVerifySignatures(t *testing.T) {
 	}
 }
 
+// Spec: §7.7, §7.5.2, §13.11.3 — podium config show prints
+// defaults.on_unparseable with the scope that set it, and --explain resolves
+// it across the scopes: a project-shared keep outranks a home-global remove.
+func TestConfigClientShow_OnUnparseable(t *testing.T) {
+	home := t.TempDir()
+	ws := t.TempDir()
+	mustWrite(t, filepath.Join(home, ".podium", "sync.yaml"), "defaults:\n  on_unparseable: remove\n")
+
+	out := captureStdout(t, func() {
+		if rc := configClientShowAt(ws, home, false, ""); rc != 0 {
+			t.Errorf("rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "defaults.on_unparseable:") || !strings.Contains(out, "remove") {
+		t.Errorf("config show should list defaults.on_unparseable:\n%s", out)
+	}
+
+	mustWrite(t, filepath.Join(ws, ".podium", "sync.yaml"), "defaults:\n  on_unparseable: keep\n")
+	out = captureStdout(t, func() {
+		if rc := configClientShowAt(ws, home, false, "on_unparseable"); rc != 0 {
+			t.Errorf("rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "resolved: keep") {
+		t.Errorf("explain should resolve keep:\n%s", out)
+	}
+}
+
 // spec: §6.10 — JSON output stays structured for tooling.
 func TestConfigClientShow_JSON(t *testing.T) {
 	home := t.TempDir()

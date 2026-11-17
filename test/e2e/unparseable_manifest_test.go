@@ -108,6 +108,9 @@ func TestLint_UnparseableManifestRefused(t *testing.T) {
 // writes the other skills for claude-code, and exits 1 as a collision drop
 // does. --dry-run reports the drop and writes nothing, a --config target
 // fails the same way, and podium sync override reports the drop and exits 1.
+// No target here ever synced tools/bad, so the drop writes no files for it and
+// its rejected line carries no kept note; unparseable_kept_output_test.go
+// covers a target whose lock records the artifact.
 //
 // Spec: §4.1, §13.11.3
 func TestFilesystemSync_UnparseableManifestDropsArtifact(t *testing.T) {

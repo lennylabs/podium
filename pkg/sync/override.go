@@ -51,6 +51,10 @@ type OverrideOptions struct {
 	// server-source load. It is copied into the Run call, so a resolution
 	// refusal arrives after the toggle change is written (§7.5).
 	Delivery DeliveryCheckFunc
+	// OnUnparseable is copied into the re-materialization's Run call, so an
+	// override keeps or removes an unparseable artifact's previous output as
+	// a sync does (§13.11.3).
+	OnUnparseable OnUnparseable
 }
 
 // OverrideResult is what Override returns: the new lock state, whether
@@ -78,6 +82,11 @@ type OverrideResult struct {
 func Override(opts OverrideOptions) (*OverrideResult, error) {
 	if opts.Target == "" {
 		return nil, ErrNoTarget
+	}
+	// An invalid setting is refused before a toggle is recorded, rather than
+	// by the re-materialization after the lock is written.
+	if err := opts.OnUnparseable.check(); err != nil {
+		return nil, err
 	}
 	if opts.Clock == nil {
 		opts.Clock = clock.Real{}
@@ -167,6 +176,7 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 			OverlayPath:     opts.OverlayPath,
 			HTTPClient:      opts.HTTPClient,
 			Delivery:        opts.Delivery,
+			OnUnparseable:   opts.OnUnparseable,
 			Profile:         string(lock.Profile),
 			Scope: ScopeFilter{
 				Include: lock.Scope.Include,

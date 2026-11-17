@@ -256,6 +256,7 @@ func syncCmd(args []string) int {
 	profile := fs.String("profile", "", "load a named scope from sync.yaml profiles")
 	configPath := fs.String("config", "", "run one sync per entry in a sync.yaml targets: list")
 	typeStr := fs.String("type", "", "restrict to a comma-separated artifact type list")
+	onUnparseable := fs.String("on-unparseable", "", onUnparseableUsage)
 	var include, exclude stringSliceFlag
 	fs.Var(&include, "include", "glob over canonical IDs to include (repeatable)")
 	fs.Var(&exclude, "exclude", "glob over canonical IDs to exclude (repeatable)")
@@ -280,7 +281,7 @@ func syncCmd(args []string) int {
 	// is threaded through so PlanMultiTarget rejects a kind: marketplace target
 	// under watch mode (§7.5.4).
 	if *configPath != "" {
-		return runMultiTargetSync(*configPath, *registry, *dryRun, *check, *watch, *asJSON)
+		return runMultiTargetSync(*configPath, *registry, *onUnparseable, *dryRun, *check, *watch, *asJSON)
 	}
 
 	// §7.5.2 resolution: merge the three sync.yaml scopes by per-key
@@ -328,6 +329,10 @@ func syncCmd(args []string) int {
 	budget, berr := merged.ListingBudgetFor(resolved.Harness, adapter.DefaultRegistry())
 	if berr != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", berr)
+		return 2
+	}
+	onUnparseablePolicy, ok := resolveOnUnparseable(*onUnparseable, merged)
+	if !ok {
 		return 2
 	}
 
@@ -410,6 +415,9 @@ func syncCmd(args []string) int {
 		CacheMode:    cacheMode,
 		Token:        token,
 		Delivery:     newSyncDeliveryCheck(ws),
+		// The setting has no effect on a server source, which reports no
+		// drop (§13.11.3).
+		OnUnparseable: onUnparseablePolicy,
 	}
 	if *watch {
 		return runWatchLoop(syncOpts, overlayPath, budget, *asJSON)
@@ -533,7 +541,11 @@ func runWatchLoop(opts sync.Options, overlay string, budget sync.EffectiveListin
 // rejected with config.invalid before any target renders (§7.5.2, §7.5.4). The
 // multi-target path itself runs one sync per target rather than a watch loop, so
 // a watch over a workspace-only config is a single pass.
-func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watch, asJSON bool) int {
+//
+// onUnparseableFlag is the --on-unparseable value. It resolves against
+// PODIUM_SYNC_ON_UNPARSEABLE and the three file scopes at the configuration
+// file's workspace, and an invalid value exits 2 before the first target runs.
+func runMultiTargetSync(configPath, registryOverride, onUnparseableFlag string, dryRun, check, watch, asJSON bool) int {
 	cfg, err := sync.ReadConfigFile(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -572,6 +584,10 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watc
 	if code != 0 {
 		return code
 	}
+	onUnparseable, ok := resolveOnUnparseable(onUnparseableFlag, merged)
+	if !ok {
+		return 2
+	}
 	cacheMode, cmErr := resolveCacheMode(os.Getenv("PODIUM_CACHE_MODE"))
 	if cmErr != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", cmErr)
@@ -596,7 +612,7 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watc
 		case sync.KindMarketplace:
 			rerr = runMarketplaceTarget(ctx, p, delivery, dryRun, check, asJSON)
 		default:
-			rerr = runWorkspaceTarget(ctx, p, delivery, budgets[i], cacheMode, dryRun, check, asJSON)
+			rerr = runWorkspaceTarget(ctx, p, delivery, budgets[i], cacheMode, onUnparseable, dryRun, check, asJSON)
 		}
 		// Spec: §7.5 — a resolution refusal is the same for every later
 		// target, so the run stops at the refused target and exits 2.
@@ -631,7 +647,7 @@ var errDropped = errors.New("dropped at least one artifact")
 // budget is the target's resolved §7.5.8 listing budget. A listing report that
 // fails under `check: error` fails the target after its publish phase, as a
 // drop does (§13.11.3).
-func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sync.DeliveryCheckFunc, budget sync.EffectiveListingBudget, cacheMode string, dryRun, check, asJSON bool) error {
+func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sync.DeliveryCheckFunc, budget sync.EffectiveListingBudget, cacheMode string, onUnparseable sync.OnUnparseable, dryRun, check, asJSON bool) error {
 	abs, err := filepath.Abs(p.Target)
 	if err != nil {
 		return err
@@ -649,14 +665,15 @@ func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sy
 		}
 	}
 	res, err := sync.Run(sync.Options{
-		RegistryPath: p.Registry,
-		Target:       abs,
-		AdapterID:    p.Harness,
-		DryRun:       dryRun || check,
-		Profile:      p.Profile,
-		Scope:        p.Scope,
-		CacheMode:    cacheMode,
-		Delivery:     delivery,
+		RegistryPath:  p.Registry,
+		Target:        abs,
+		AdapterID:     p.Harness,
+		DryRun:        dryRun || check,
+		Profile:       p.Profile,
+		Scope:         p.Scope,
+		CacheMode:     cacheMode,
+		Delivery:      delivery,
+		OnUnparseable: onUnparseable,
 	})
 	if err != nil {
 		return err
@@ -886,6 +903,7 @@ func syncOverrideCmd(args []string) int {
 	fs.Var(&remove, "remove", "artifact id to drop from the profile (repeatable)")
 	reset := fs.Bool("reset", false, "clear all toggles")
 	dryRun := fs.Bool("dry-run", false, "resolve and report; write nothing")
+	onUnparseableFlag := fs.String("on-unparseable", "", onUnparseableUsage)
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -895,17 +913,22 @@ func syncOverrideCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}
+	// §7.5.5: override writes/deletes files through the active adapter. Resolve
+	// the registry the same way sync does so --add materializes and --remove
+	// deletes. A missing registry leaves materialization off; the toggles are
+	// still recorded. An invalid --on-unparseable exits 2 before either mode
+	// records a toggle (§13.11.3).
+	merged, workspace := loadOverrideConfig()
+	onUnparseable, ok := resolveOnUnparseable(*onUnparseableFlag, merged)
+	if !ok {
+		return 2
+	}
 	// §7.5.5 TUI mode: no batch flags launches the interactive checklist over
 	// the caller's effective view. The resulting toggles are applied through the
 	// same Override path the --add/--remove flags use.
 	if len(add) == 0 && len(remove) == 0 && !*reset {
-		return runSyncOverrideInteractive(abs, *registry, *harness, *dryRun)
+		return runSyncOverrideInteractive(abs, *registry, *harness, *dryRun, onUnparseable)
 	}
-	// §7.5.5: override writes/deletes files through the active adapter. Resolve
-	// the registry the same way sync does so --add materializes and --remove
-	// deletes. A missing registry leaves materialization off; the toggles are
-	// still recorded.
-	merged, workspace := loadOverrideConfig()
 	registryPath := resolveOverrideRegistry(merged, workspace, *registry)
 	harnessID := resolveOverrideHarness(merged, *harness, abs)
 	// Spec: §7.5.2, §7.5.8 — with a registry and without --dry-run, Override
@@ -922,9 +945,10 @@ func syncOverrideCmd(args []string) int {
 		Target: abs,
 		Add:    []string(add), Remove: []string(remove),
 		Reset: *reset, DryRun: *dryRun,
-		RegistryPath: registryPath,
-		AdapterID:    harnessID,
-		Delivery:     newSyncDeliveryCheck(workingDir()),
+		RegistryPath:  registryPath,
+		AdapterID:     harnessID,
+		Delivery:      newSyncDeliveryCheck(workingDir()),
+		OnUnparseable: onUnparseable,
 	})
 	if err != nil {
 		// Spec: §7.5 — the resolution refusal arrives wrapped as
@@ -952,6 +976,25 @@ func syncOverrideCmd(args []string) int {
 	// report are written and exit 1 (the listing under `check: error`); the
 	// toggles stay recorded.
 	return overrideExit(res, budget)
+}
+
+// onUnparseableUsage is the --on-unparseable help text of podium sync and
+// podium sync override.
+const onUnparseableUsage = "keep | remove: what a filesystem-source sync does with the previous output of an artifact whose manifest does not parse (default: PODIUM_SYNC_ON_UNPARSEABLE, sync.yaml, then keep)"
+
+// resolveOnUnparseable resolves the --on-unparseable value against
+// PODIUM_SYNC_ON_UNPARSEABLE and defaults.on_unparseable in merged, which may
+// be nil. On an invalid value it prints `error: <err>` and returns false, and
+// the caller exits 2 as for any usage error.
+//
+// Spec: §7.5.2, §13.11.3
+func resolveOnUnparseable(flagVal string, merged *sync.MergedConfig) (sync.OnUnparseable, bool) {
+	o, err := sync.ResolveOnUnparseable(flagVal, os.Getenv, merged)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return "", false
+	}
+	return o, true
 }
 
 // loadOverrideConfig loads the merged sync.yaml for `podium sync override` and

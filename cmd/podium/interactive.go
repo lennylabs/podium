@@ -291,8 +291,9 @@ func appendUnique(list []string, s string) []string {
 // mode: it resolves the caller's effective view, runs the checklist over it,
 // and applies the resulting add/remove toggles through sync.Override (the same
 // path the --add/--remove flags drive). A non-terminal invocation with no
-// scripted input prints actionable guidance instead of blocking.
-func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun bool) int {
+// scripted input prints actionable guidance instead of blocking. onUnparseable
+// is the resolved §13.11.3 setting the re-materialization applies.
+func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun bool, onUnparseable sync.OnUnparseable) int {
 	merged, workspace := loadOverrideConfig()
 	registryPath := resolveOverrideRegistry(merged, workspace, registryFlag)
 	// One resolver serves both the view and the override, so the check
@@ -339,13 +340,14 @@ func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun
 		}
 	}
 	ovr, err := sync.Override(sync.OverrideOptions{
-		Target:       target,
-		Add:          res.Add,
-		Remove:       res.Remove,
-		DryRun:       dryRun,
-		RegistryPath: registryPath,
-		AdapterID:    harness,
-		Delivery:     delivery,
+		Target:        target,
+		Add:           res.Add,
+		Remove:        res.Remove,
+		DryRun:        dryRun,
+		RegistryPath:  registryPath,
+		AdapterID:     harness,
+		Delivery:      delivery,
+		OnUnparseable: onUnparseable,
 	})
 	if err != nil {
 		if reportDeliveryConfigError(err, "") {

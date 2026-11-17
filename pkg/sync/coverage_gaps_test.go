@@ -258,7 +258,7 @@ func TestReconcileOrphanConfig(t *testing.T) {
 	t.Run("missing file is a no-op", func(t *testing.T) {
 		t.Parallel()
 		full := filepath.Join(t.TempDir(), "settings.json")
-		reconcileOrphanConfig(full, "json")
+		reconcileOrphanConfig(full, "json", nil)
 		if _, err := os.Stat(full); !os.IsNotExist(err) {
 			t.Errorf("missing file must not be created; stat err = %v", err)
 		}
@@ -271,7 +271,7 @@ func TestReconcileOrphanConfig(t *testing.T) {
 		if err := os.WriteFile(full, []byte(original), 0o644); err != nil {
 			t.Fatalf("write: %v", err)
 		}
-		reconcileOrphanConfig(full, "bogus")
+		reconcileOrphanConfig(full, "bogus", nil)
 		got, err := os.ReadFile(full)
 		if err != nil {
 			t.Fatalf("read: %v", err)
@@ -290,7 +290,7 @@ func TestReconcileOrphanConfig(t *testing.T) {
 		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
 			t.Fatalf("write: %v", err)
 		}
-		reconcileOrphanConfig(full, "json")
+		reconcileOrphanConfig(full, "json", nil)
 		got, err := os.ReadFile(full)
 		if err != nil {
 			t.Fatalf("read: %v", err)
@@ -313,7 +313,7 @@ func TestReconcileOrphanConfig(t *testing.T) {
 		if err := os.Mkdir(dirAsFile, 0o755); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
-		reconcileOrphanConfig(dirAsFile, "json")
+		reconcileOrphanConfig(dirAsFile, "json", nil)
 		if info, err := os.Stat(dirAsFile); err != nil || !info.IsDir() {
 			t.Errorf("path should be unchanged; stat err=%v", err)
 		}
@@ -337,7 +337,7 @@ func TestReconcileOrphanConfig(t *testing.T) {
 		}
 		// reconcileOrphanConfig reads (succeeds), strips, then fails to write and
 		// logs to stderr without panicking.
-		reconcileOrphanConfig(full, "json")
+		reconcileOrphanConfig(full, "json", nil)
 		_ = os.Chmod(full, 0o644)
 	})
 
@@ -348,7 +348,7 @@ func TestReconcileOrphanConfig(t *testing.T) {
 		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
 			t.Fatalf("write: %v", err)
 		}
-		reconcileOrphanConfig(full, "inject")
+		reconcileOrphanConfig(full, "inject", nil)
 		got, err := os.ReadFile(full)
 		if err != nil {
 			t.Fatalf("read: %v", err)
