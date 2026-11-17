@@ -3,7 +3,6 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -539,27 +538,38 @@ func psListTagsLayer() fstest.MapFS {
 // which the map[string]string metadata decoder refuses.
 const psListTagsSkill = "---\nname: bad\ndescription: bad skill\nmetadata:\n  tags: [a, b]\n---\n\nbody\n"
 
-// Spec: §4.3.4 — a sequence under SKILL.md metadata is a parse failure that
-// fails the whole layer ingest: the error wraps ingest.ErrInvalidArtifact and
-// names metadata.tags, and the valid sibling skill stores no row either.
+// Spec: §4.1, §4.3.4 — a sequence under SKILL.md metadata is a parse failure
+// that refuses that skill alone: ingest rejects it with
+// ingest.invalid_artifact, a reason naming bad/SKILL.md and metadata.tags,
+// and exactly the manifest_unparseable constraint, stores no row for it, and
+// stores the valid sibling skill.
 func TestPlainSkillIngest_ListMetadataValueRefused(t *testing.T) {
 	t.Parallel()
 	for _, f := range ingestConvergenceStores(t) {
 		t.Run(f.name, func(t *testing.T) {
 			t.Parallel()
 			e := newPSEnv(t, f, "L")
-			_, err := ingest.Ingest(context.Background(), e.st, ingest.Request{
+			res, err := ingest.Ingest(context.Background(), e.st, ingest.Request{
 				TenantID: psTenant, LayerID: "L", Files: psListTagsLayer(),
 			})
-			if !errors.Is(err, ingest.ErrInvalidArtifact) || !strings.Contains(err.Error(), "metadata.tags") {
-				t.Fatalf("Ingest err = %v, want an ingest.ErrInvalidArtifact error naming metadata.tags", err)
+			if err != nil {
+				t.Fatalf("Ingest err = %v, want the malformed skill refused on its own", err)
+			}
+			if res.Accepted != 1 || len(res.Rejected) != 1 {
+				t.Fatalf("result = %+v, want good accepted and bad refused", res)
+			}
+			rj := res.Rejected[0]
+			want := map[string]any{"constraint": layer.ManifestUnparseableConstraint}
+			if rj.ArtifactID != "bad" || rj.Code != layer.InvalidArtifactCode || !reflect.DeepEqual(rj.Details, want) ||
+				!strings.HasPrefix(rj.Reason, "bad/SKILL.md: ") || !strings.Contains(rj.Reason, "metadata.tags") {
+				t.Errorf("rejection = %+v, want bad refused with manifest_unparseable naming bad/SKILL.md and metadata.tags", rj)
 			}
 			all, err := e.st.ListManifestsIncludingDeleted(context.Background(), psTenant)
 			if err != nil {
 				t.Fatalf("ListManifestsIncludingDeleted: %v", err)
 			}
-			if len(all) != 0 {
-				t.Errorf("stored rows = %d, want none from the refused ingest", len(all))
+			if len(all) != 1 || all[0].ArtifactID != "good" {
+				t.Errorf("stored rows = %+v, want good alone", all)
 			}
 		})
 	}

@@ -1,14 +1,42 @@
 package layer
 
-import "github.com/lennylabs/podium/pkg/manifest"
+import (
+	"strings"
+
+	"github.com/lennylabs/podium/pkg/manifest"
+)
 
 // InvalidArtifactCode is the §6.10 code ingest returns for an artifact it
 // cannot accept as authored (including the §7.3.1 registry-assigned-version
-// rule), and the code both modes report for an ARTIFACT.md the §4.6
-// no-inheritance rule or the §4.1 removed-type rule refuses.
+// rule), and the code both modes report for an artifact the §4.1
+// unparseable-manifest rule, the §4.6 no-inheritance rule, or the §4.1
+// removed-type rule refuses.
 //
 // Spec: §4.1, §4.6, §7.3.1, §13.11.3
 const InvalidArtifactCode = "ingest.invalid_artifact"
+
+// ManifestUnparseableConstraint is the details.constraint value of a §4.1
+// unparseable-manifest rejection: an ARTIFACT.md or SKILL.md whose
+// frontmatter does not parse.
+//
+// Spec: §4.1, §7.3.1, §13.11.3
+const ManifestUnparseableConstraint = "manifest_unparseable"
+
+// UnparseableReason is the reason both modes give an artifact whose manifest
+// does not parse. file is the manifest's slash path under the layer root and
+// err is the parse error, so the reason names the file and the error and
+// names no layer. The YAML decoder reports a type error with one indented
+// line per failure, and the CLI prints each refusal as one standard-error
+// line, so the error's lines are joined with single spaces.
+//
+// Spec: §4.1, §7.3.1, §13.11.3
+func UnparseableReason(file string, err error) string {
+	lines := strings.Split(err.Error(), "\n")
+	for i := range lines {
+		lines[i] = strings.TrimSpace(lines[i])
+	}
+	return file + ": " + strings.Join(lines, " ")
+}
 
 // ExtendsRemovedConstraint is the details.constraint value of a §4.6
 // no-inheritance rejection.
@@ -58,8 +86,9 @@ func RemovedFeature(authored []byte, t manifest.ArtifactType) (constraint, reaso
 }
 
 // RemovedFeatureDrop returns the drop a filesystem-source composition
-// reports for an ARTIFACT.md that RemovedFeature refuses. Its details carry
-// the same constraint ingest reports for the same artifact.
+// reports for an artifact a pre-lint rule refuses: the §4.1
+// unparseable-manifest rule or a rule RemovedFeature applies. Its details
+// carry the same constraint ingest reports for the same artifact.
 //
 // Spec: §4.1, §4.6, §13.11.3
 func RemovedFeatureDrop(id, constraint, reason string) Drop {

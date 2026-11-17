@@ -49,8 +49,10 @@ var (
 	// configured with PODIUM_ENFORCE_SANDBOX_PROFILE=true and the artifact's
 	// sandbox_profile cannot be honored by the local host.
 	ErrSandboxProfileUnenforceable = errors.New("ingest.sandbox_profile_unenforceable")
-	// ErrInvalidArtifact wraps parse / structural errors that surface at
-	// ingest as ingest.lint_failed.
+	// ErrInvalidArtifact wraps structural package errors, such as a
+	// root-level manifest with no canonical ID, that fail the layer's ingest
+	// and surface as ingest.lint_failed. A manifest that does not parse is a
+	// per-artifact rejection in Result.Rejected instead (§4.1).
 	ErrInvalidArtifact = errors.New(layer.InvalidArtifactCode)
 	// ErrQuotaExceeded maps to quota.storage_exceeded (§4.7.8).
 	ErrQuotaExceeded = errors.New("quota.storage_exceeded")
@@ -420,10 +422,12 @@ type RejectedArtifact struct {
 	Reason     string
 	Code       string // §6.10 namespaced code
 	// Details carries the structured detail the rejecting rule defines: the
-	// constraint of the §4.6 no-inheritance rule (extends_removed), of the
-	// §4.1 removed-type rule (type_removed), and of the §7.3.1
-	// registry-assigned-version rule (auto_version_duplicate_content). It is
-	// nil for every rule that defines none.
+	// constraint of the §4.1 unparseable-manifest rule
+	// (manifest_unparseable), of the §4.6 no-inheritance rule
+	// (extends_removed), of the §4.1 removed-type rule (type_removed), and of
+	// the §7.3.1 registry-assigned-version rule
+	// (auto_version_duplicate_content). It is nil for every rule that defines
+	// none.
 	//
 	// Spec: §4.1, §4.6, §7.3.1
 	Details map[string]any
@@ -535,12 +539,13 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		return nil, err
 	}
 
-	// The §4.6 no-inheritance rule and the §4.1 removed-type rule run before
-	// lint and before every other per-artifact rule, and the refused records
-	// leave the set lint, the description advisories, and the
-	// server_identifier index read, so a refused mcp-server never resolves an
-	// mcpServers edge.
-	records, refused := refuseRemovedFeatures(records)
+	// The §4.1 unparseable-manifest rule, the §4.6 no-inheritance rule, and
+	// the §4.1 removed-type rule run before lint and before every other
+	// per-artifact rule, and the refused records leave the set lint, the
+	// description advisories, and the server_identifier index read, so a
+	// refused mcp-server never resolves an mcpServers edge and an unparseable
+	// record, which carries no parsed fields, reaches no later rule.
+	records, refused := refuseInvalidArtifacts(records)
 
 	// Run lint over the collected set; diagnostics with severity Error
 	// abort their artifact's ingest.
@@ -1108,21 +1113,22 @@ func newlyUnlistedAdvisory(dr store.DomainRecord, prevRaw string, seen bool) *li
 	}
 }
 
-// invalidArtifactError carries a manifest-parse failure under
-// ErrInvalidArtifact without spelling the sentinel into the message. The
-// message is the operator-facing text, and it already names the artifact and
-// the parse position; repeating the code there would duplicate the envelope's
-// own code field.
+// invalidArtifactError carries a structural package failure, such as a
+// canonical-ID violation, under ErrInvalidArtifact without spelling the
+// sentinel into the message. The message is the operator-facing text, and it
+// already names the manifest; repeating the code there would duplicate the
+// envelope's own code field. A manifest that does not parse is refused per
+// artifact instead (§4.1), so it never reaches this type.
 type invalidArtifactError struct{ cause error }
 
 func (e invalidArtifactError) Error() string   { return e.cause.Error() }
 func (e invalidArtifactError) Unwrap() []error { return []error{ErrInvalidArtifact, e.cause} }
 
-// invalidArtifact classifies a manifest the parser cannot decode as a fault in
-// the layer's content. spec: §7.3.1 — the refusal is an ingest rejection of the
-// artifact. Without the sentinel the failure reaches the server's unclassified
-// default, which reports the registry as unavailable and advises a retry that
-// reproduces the same parse failure until the source is corrected.
+// invalidArtifact classifies a package the walk cannot hold as an artifact as
+// a fault in the layer's content. spec: §7.3.1 — without the sentinel the
+// failure reaches the server's unclassified default, which reports the
+// registry as unavailable and advises a retry that reproduces the same
+// failure until the source is corrected.
 func invalidArtifact(cause error) error { return invalidArtifactError{cause: cause} }
 
 // loadPackage applies the §4.2 discovery rule to the directory dir and loads
@@ -1164,6 +1170,12 @@ func packageID(manifestPath string) (string, error) {
 	return id, nil
 }
 
+// loadOne loads the package whose ARTIFACT.md is at artifactPath, with its
+// SKILL.md when the type is skill and every other file as a bundled
+// resource. A manifest that does not parse yields an unparseable record that
+// Ingest refuses on its own, so the other artifacts of the layer proceed.
+//
+// Spec: §4.1, §4.2
 func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecord, error) {
 	dir := dirOf(artifactPath)
 	id, err := packageID(artifactPath)
@@ -1177,7 +1189,7 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 	}
 	a, err := manifest.ParseArtifact(bytes)
 	if err != nil {
-		return filesystem.ArtifactRecord{}, fmt.Errorf("%s: %w", id, invalidArtifact(err))
+		return filesystem.UnparseableRecord(id, filesystem.Layer{ID: layerID}, "ARTIFACT.md", err), nil
 	}
 	rec := filesystem.ArtifactRecord{
 		ID:            id,
@@ -1203,7 +1215,7 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		}
 		s, err := manifest.ParseSkill(skillBytes)
 		if err != nil {
-			return filesystem.ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, invalidArtifact(err))
+			return filesystem.UnparseableRecord(id, rec.Layer, "SKILL.md", err), nil
 		}
 		rec.Skill = s
 		rec.SkillBytes = skillBytes
@@ -1218,10 +1230,10 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 // loadPlainSkill loads a package that holds SKILL.md and no ARTIFACT.md as a
 // type: skill artifact. ArtifactBytes and AuthoredBytes stay nil, so the
 // §4.7.6 digest frames a zero-length first value and the stored manifest is
-// empty. A SKILL.md that does not parse is a content fault that fails the
-// call, as an unparseable ARTIFACT.md does.
+// empty. A SKILL.md that does not parse yields an unparseable record that
+// Ingest refuses on its own, as an unparseable ARTIFACT.md does (§4.1).
 //
-// Spec: §4.2, §4.3.4, §4.7.6
+// Spec: §4.1, §4.2, §4.3.4, §4.7.6
 func loadPlainSkill(fsys fs.FS, skillPath, layerID string) (filesystem.ArtifactRecord, error) {
 	id, err := packageID(skillPath)
 	if err != nil {
@@ -1233,7 +1245,7 @@ func loadPlainSkill(fsys fs.FS, skillPath, layerID string) (filesystem.ArtifactR
 	}
 	s, err := manifest.ParseSkill(skillBytes)
 	if err != nil {
-		return filesystem.ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, invalidArtifact(err))
+		return filesystem.UnparseableRecord(id, filesystem.Layer{ID: layerID}, "SKILL.md", err), nil
 	}
 	rec := filesystem.ArtifactRecord{
 		ID:         id,
@@ -1509,21 +1521,22 @@ func collisionRejection(tenantID, layerID, id, existingLayer string) RejectedArt
 	}
 }
 
-// refuseRemovedFeatures partitions the walked records under the §4.6
-// no-inheritance rule and the §4.1 removed-type rule. Each record that
-// layer.RemovedFeature refuses becomes an ingest.invalid_artifact rejection
-// whose details carry the classifier's constraint, and the rest are returned
-// in walk order. A plain skill's AuthoredBytes is empty, so its synthesized
-// document is never tested for the key; AuthoredBytes is read for parity with
-// filesystem.Walk.
+// refuseInvalidArtifacts partitions the walked records under the §4.1
+// unparseable-manifest rule, the §4.6 no-inheritance rule, and the §4.1
+// removed-type rule, in that order. Each record that
+// filesystem.ArtifactRecord.Refusal refuses becomes an
+// ingest.invalid_artifact rejection whose details carry the refusing rule's
+// constraint, and the rest are returned in walk order. filesystem.Walk calls
+// the same classifier, so both deployment modes refuse the same artifacts
+// with the same details.
 //
 // Spec: §4.1, §4.6, §7.3.1
-func refuseRemovedFeatures(records []filesystem.ArtifactRecord) ([]filesystem.ArtifactRecord, []RejectedArtifact) {
+func refuseInvalidArtifacts(records []filesystem.ArtifactRecord) ([]filesystem.ArtifactRecord, []RejectedArtifact) {
 	var refused []RejectedArtifact
 	kept := records[:0:0]
 	for i := range records {
 		rec := records[i]
-		constraint, reason, ok := layer.RemovedFeature(rec.AuthoredBytes, rec.Type())
+		constraint, reason, ok := rec.Refusal()
 		if !ok {
 			kept = append(kept, rec)
 			continue

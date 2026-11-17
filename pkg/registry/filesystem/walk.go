@@ -36,6 +36,46 @@ type ArtifactRecord struct {
 	// VersionAssigned reports that the skill declares no usable version
 	// (§4.3.4), so the version is assigned.
 	VersionAssigned bool
+	// Unparseable is the §4.1 unparseable-manifest reason of a package whose
+	// ARTIFACT.md or SKILL.md frontmatter does not parse, and is empty for
+	// every other record. A record that carries it holds only ID and Layer.
+	// Walk and registry ingest refuse it through Refusal before any rule that
+	// reads the parsed fields, so Walk never returns one.
+	Unparseable string
+}
+
+// UnparseableRecord returns the record of package id in layer l whose
+// manifest file, ARTIFACT.md or SKILL.md, does not parse with err. The walk
+// keeps the record so the refusal reaches the caller through the same
+// channel as the other pre-lint refusals, and so the package still claims its
+// directory under the §4.2 discovery rule. Both deployment modes build the
+// record here, so they give the same reason.
+//
+// Spec: §4.1, §4.2, §13.11.3
+func UnparseableRecord(id string, l Layer, file string, err error) ArtifactRecord {
+	return ArtifactRecord{
+		ID:          id,
+		Layer:       l,
+		Unparseable: layer.UnparseableReason(id+"/"+file, err),
+	}
+}
+
+// Refusal classifies the record against the per-artifact rules both
+// deployment modes apply before lint, in the order the spec fixes: the §4.1
+// unparseable-manifest rule, then the §4.6 no-inheritance rule, then the §4.1
+// removed-type rule. Neither later rule can be evaluated without the parsed
+// frontmatter, so an unparseable record always reports
+// manifest_unparseable. It returns the refusing rule's constraint and reason,
+// or ok false when no rule refuses the record. AuthoredBytes is nil for a
+// plain skill, so its synthesized document is never tested for the extends
+// key or a removed type.
+//
+// Spec: §4.1, §4.6, §7.3.1, §13.11.3
+func (r *ArtifactRecord) Refusal() (constraint, reason string, ok bool) {
+	if r.Unparseable != "" {
+		return layer.ManifestUnparseableConstraint, r.Unparseable, true
+	}
+	return layer.RemovedFeature(r.AuthoredBytes, r.Type())
 }
 
 // ResolveSkillFields resolves a skill record's fields by the §4.3.4
@@ -79,17 +119,21 @@ func (r *ArtifactRecord) Type() manifest.ArtifactType {
 // stable order: layer order first, alphabetical canonical-ID within each
 // layer.
 //
-// An ARTIFACT.md that declares extends: is refused under the §4.6
-// no-inheritance rule, an ARTIFACT.md whose type is command or context is
-// refused under the §4.1 removed-type rule, and two layers that contribute
-// the same canonical ID collide (§4.6). Under every policy except
-// CollisionPolicyHighestWins, Walk removes each refused record before it
-// applies the collision rule, reporting it through OnDrop when OnDrop is set
-// and failing the walk when it is not. WalkOptions.CollisionPolicy selects
-// the outcome of a collision: an ingest.collision error (the default), a drop
-// reported through OnDrop (filesystem-source sync, §13.11.3), or
-// highest-precedence-wins (the workspace overlay's walk of its own
-// directory, §6.4), which applies no ingest rule.
+// An ARTIFACT.md or SKILL.md whose frontmatter does not parse is refused
+// under the §4.1 unparseable-manifest rule, an ARTIFACT.md that declares
+// extends: is refused under the §4.6 no-inheritance rule, an ARTIFACT.md
+// whose type is command or context is refused under the §4.1 removed-type
+// rule, and two layers that contribute the same canonical ID collide (§4.6).
+// Under every policy except CollisionPolicyHighestWins, Walk removes each
+// refused record before it applies the collision rule, reporting it through
+// OnDrop when OnDrop is set and failing the walk when it is not. A package
+// that cannot hold an artifact at all, such as a root-level manifest with no
+// canonical ID (§4.2), and an I/O failure still fail the walk.
+// WalkOptions.CollisionPolicy selects the outcome of a collision: an
+// ingest.collision error (the default), a drop reported through OnDrop
+// (filesystem-source sync, §13.11.3), or highest-precedence-wins (the
+// workspace overlay's walk of its own directory, §6.4), which applies no
+// ingest rule and fails on an unparseable manifest it cannot serve.
 func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 	if opts.CollisionPolicy == CollisionPolicyDrop && opts.OnDrop == nil {
 		return nil, errors.New("filesystem: CollisionPolicyDrop requires OnDrop")
@@ -106,7 +150,7 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 	// spec: §13.11.3 — the filesystem source applies the same §4.1 and §4.6
 	// rules as the server, so a source materializes the artifacts a server
 	// stores from it.
-	kept, refused, err := refuseRemovedFeatures(all, opts)
+	kept, refused, err := refuseInvalidArtifacts(all, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -123,26 +167,26 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 	return records, nil
 }
 
-// refuseRemovedFeatures applies the §4.6 no-inheritance rule and the §4.1
-// removed-type rule to all, which is in layer order and then canonical-ID
-// order. Under CollisionPolicyHighestWins it returns all unchanged, because
-// the workspace overlay serves an artifact as authored (§6.4). Under every
-// other policy it removes each record that layer.RemovedFeature refuses. With
-// OnDrop set, it returns the removed records' drops in the order it met them;
-// with OnDrop nil, the first such record fails the walk. AuthoredBytes is nil
-// for a plain skill, so its synthesized document is never tested for the key
-// or the type.
+// refuseInvalidArtifacts applies the §4.1 unparseable-manifest rule, the §4.6
+// no-inheritance rule, and the §4.1 removed-type rule to all, which is in
+// layer order and then canonical-ID order. Under CollisionPolicyHighestWins
+// it applies none of them, because the workspace overlay serves an artifact
+// as authored (§6.4), and it fails on the first unparseable record, which
+// the overlay has nothing to serve from. Under every other policy it removes
+// each record that ArtifactRecord.Refusal refuses. With OnDrop set, it
+// returns the removed records' drops in the order it met them; with OnDrop
+// nil, the first such record fails the walk.
 //
 // Spec: §4.1, §4.6, §13.11.3
-func refuseRemovedFeatures(all []ArtifactRecord, opts WalkOptions) ([]ArtifactRecord, []layer.Drop, error) {
+func refuseInvalidArtifacts(all []ArtifactRecord, opts WalkOptions) ([]ArtifactRecord, []layer.Drop, error) {
 	if opts.CollisionPolicy == CollisionPolicyHighestWins {
-		return all, nil, nil
+		return all, nil, firstUnparseable(all)
 	}
 	var drops []layer.Drop
 	kept := make([]ArtifactRecord, 0, len(all))
 	for i := range all {
 		rec := all[i]
-		constraint, reason, refused := layer.RemovedFeature(rec.AuthoredBytes, rec.Type())
+		constraint, reason, refused := rec.Refusal()
 		if !refused {
 			kept = append(kept, rec)
 			continue
@@ -154,6 +198,19 @@ func refuseRemovedFeatures(all []ArtifactRecord, opts WalkOptions) ([]ArtifactRe
 		drops = append(drops, layer.RemovedFeatureDrop(rec.ID, constraint, reason))
 	}
 	return kept, drops, nil
+}
+
+// firstUnparseable returns the reason of the first record in all whose
+// manifest does not parse, as an error, or nil when every manifest parses.
+//
+// Spec: §4.1, §6.4
+func firstUnparseable(all []ArtifactRecord) error {
+	for i := range all {
+		if all[i].Unparseable != "" {
+			return errors.New(all[i].Unparseable)
+		}
+	}
+	return nil
 }
 
 // assignSourceSkillFields applies the filesystem-source values to a skill
@@ -180,7 +237,7 @@ func assignSourceSkillFields(rec *ArtifactRecord) {
 // synthesizeSkillDocuments sets the ArtifactBytes of every skill record with
 // no ARTIFACT.md to the synthesized document of §4.3.4, so adapters dispatch
 // a plain skill as a skill in every mode. Walk calls it on the slice dedupe
-// returns, and refuseRemovedFeatures reads AuthoredBytes, so a plain skill's
+// returns, and refuseInvalidArtifacts reads AuthoredBytes, so a plain skill's
 // synthesized document is never tested for the extends key or a removed type. The version is a
 // validated metadata.version or the auto form, so an error marks a broken
 // invariant rather than an authoring fault.
@@ -203,9 +260,10 @@ func synthesizeSkillDocuments(records []ArtifactRecord) error {
 
 // reportDrops passes each drop to opts.OnDrop in order. A non-empty drops
 // slice arises under CollisionPolicyDrop, which Walk refuses without OnDrop,
-// and for a removed-feature refusal (the §4.6 no-inheritance rule or the §4.1
-// removed-type rule) under any refusing policy with OnDrop set, because a
-// refusal with OnDrop nil fails the walk before reportDrops runs.
+// and for a pre-lint refusal (the §4.1 unparseable-manifest rule, the §4.6
+// no-inheritance rule, or the §4.1 removed-type rule) under any refusing
+// policy with OnDrop set, because a refusal with OnDrop nil fails the walk
+// before reportDrops runs.
 func reportDrops(opts WalkOptions, drops []layer.Drop) {
 	for _, d := range drops {
 		opts.OnDrop(d)
@@ -256,14 +314,16 @@ const (
 	// CollisionPolicyDefault is alias for CollisionPolicyError.
 	CollisionPolicyDefault CollisionPolicy = iota
 	// CollisionPolicyError makes Walk return ingest.collision on duplicate
-	// IDs across layers (§4.6), and fail on an ARTIFACT.md that declares
-	// extends: (§4.6) or a removed type (§4.1) when OnDrop is nil.
+	// IDs across layers (§4.6), and fail on a manifest that does not parse
+	// (§4.1) or an ARTIFACT.md that declares extends: (§4.6) or a removed
+	// type (§4.1) when OnDrop is nil.
 	CollisionPolicyError
 	// CollisionPolicyHighestWins keeps the highest-precedence layer's
 	// record and drops earlier ones. Used by the workspace overlay's walk
 	// of its own directory (pkg/overlay, §6.4), which applies no ingest
 	// rule: neither the §4.6 collision rule, the §4.6 no-inheritance rule,
-	// nor the §4.1 removed-type rule.
+	// nor the §4.1 removed-type rule. A manifest that does not parse fails
+	// the walk, because the overlay has no parsed artifact to serve.
 	CollisionPolicyHighestWins
 	// CollisionPolicyDrop keeps the lower-precedence record, drops every
 	// higher-precedence one with the same ID, and reports it through
@@ -274,14 +334,16 @@ const (
 // WalkOptions configures Walk behavior.
 type WalkOptions struct {
 	CollisionPolicy CollisionPolicy
-	// OnDrop receives each record the walk drops: a removed-feature drop
-	// (the §4.6 no-inheritance rule, then the §4.1 removed-type rule, with
-	// details.constraint extends_removed or type_removed) under
+	// OnDrop receives each record the walk drops: a pre-lint refusal (the
+	// §4.1 unparseable-manifest rule, then the §4.6 no-inheritance rule,
+	// then the §4.1 removed-type rule, with details.constraint
+	// manifest_unparseable, extends_removed, or type_removed) under
 	// CollisionPolicyDefault, CollisionPolicyError, and CollisionPolicyDrop,
 	// and a collision drop under CollisionPolicyDrop only. Walk refuses
 	// CollisionPolicyDrop when it is nil, so no drop goes unreported. Under
-	// CollisionPolicyDefault or CollisionPolicyError with OnDrop nil, an
-	// ARTIFACT.md that declares extends: or a removed type fails the walk.
+	// CollisionPolicyDefault or CollisionPolicyError with OnDrop nil, a
+	// manifest that does not parse and an ARTIFACT.md that declares extends:
+	// or a removed type fail the walk.
 	// Walk calls it synchronously in the calling goroutine.
 	OnDrop func(layer.Drop)
 }
@@ -353,7 +415,11 @@ func loadPackage(layer Layer, fsys fs.FS, packages map[string]bool, rel, dir str
 
 // loadArtifactRecord reads ARTIFACT.md and (for skills) SKILL.md from the
 // containing directory, parses both, captures every other file in the
-// directory tree as a bundled resource, and returns the assembled record.
+// directory tree as a bundled resource, and returns the assembled record. A
+// manifest that does not parse yields an UnparseableRecord rather than an
+// error, so the refusal stops only this artifact (§4.1).
+//
+// Spec: §4.1, §4.2
 func loadArtifactRecord(layer Layer, artifactPath string) (ArtifactRecord, error) {
 	dir := filepath.Dir(artifactPath)
 	id, err := canonicalID(layer.Path, dir)
@@ -366,7 +432,7 @@ func loadArtifactRecord(layer Layer, artifactPath string) (ArtifactRecord, error
 	}
 	a, err := manifest.ParseArtifact(artifactBytes)
 	if err != nil {
-		return ArtifactRecord{}, fmt.Errorf("%s: %w", id, err)
+		return UnparseableRecord(id, layer, "ARTIFACT.md", err), nil
 	}
 	rec := ArtifactRecord{
 		ID:            id,
@@ -388,7 +454,7 @@ func loadArtifactRecord(layer Layer, artifactPath string) (ArtifactRecord, error
 		}
 		s, err := manifest.ParseSkill(skillBytes)
 		if err != nil {
-			return ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, err)
+			return UnparseableRecord(id, layer, "SKILL.md", err), nil
 		}
 		rec.Skill = s
 		rec.SkillBytes = skillBytes
@@ -405,9 +471,10 @@ func loadArtifactRecord(layer Layer, artifactPath string) (ArtifactRecord, error
 // loadPlainSkillRecord loads a package that holds SKILL.md and no
 // ARTIFACT.md as a type: skill artifact. ArtifactBytes and AuthoredBytes stay
 // nil, so the §4.7.6 digest frames a zero-length first value. A SKILL.md that
-// does not parse fails the walk, as an unparseable ARTIFACT.md does.
+// does not parse yields an UnparseableRecord, as an unparseable ARTIFACT.md
+// does.
 //
-// Spec: §4.2, §4.3.4
+// Spec: §4.1, §4.2, §4.3.4
 func loadPlainSkillRecord(layer Layer, dir string) (ArtifactRecord, error) {
 	id, err := canonicalID(layer.Path, dir)
 	if err != nil {
@@ -419,7 +486,7 @@ func loadPlainSkillRecord(layer Layer, dir string) (ArtifactRecord, error) {
 	}
 	s, err := manifest.ParseSkill(skillBytes)
 	if err != nil {
-		return ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, err)
+		return UnparseableRecord(id, layer, "SKILL.md", err), nil
 	}
 	rec := ArtifactRecord{
 		ID:         id,
