@@ -159,7 +159,7 @@ lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence
 | `replaced_by` | string | No | Canonical ID of the suggested upgrade target. Every `load_artifact` of the artifact returns it, and it accompanies the deprecation warning when the artifact is deprecated. |
 | `release_notes` | string | No | Free text. |
 | `audit_redact` | list of strings | No | Frontmatter field names whose values the registry replaces with `[redacted]` in audit log entries that reference this artifact. |
-| `lint_suppress` | list of strings | No | Lint rule codes to silence for this artifact. Only advisory (non-error) rules honor the list, and hard-error rules still fire. |
+| `lint_suppress` | list of strings | No | Lint rule codes to silence for this artifact. The rules that honor the list are `lint.skill_ref_validate` and the catalog advisories (`lint.thin_description`, `lint.colliding_descriptions`, and `lint.near_duplicate_content`). Every other rule ignores it. For the pairwise advisories the suppression is one-sided: the other artifact of the pair still names this one. A skill with no `ARTIFACT.md` lists no code. |
 | `source` | string | No | Document-level provenance of the prose body. See [Provenance markers](#provenance-markers). |
 
 ### `when_to_use` and search
@@ -232,7 +232,14 @@ The body is the Markdown after the frontmatter. The agentskills.io specification
 | The `ARTIFACT.md` body is empty or a single HTML comment. | Warning |
 | A skill that declares no usable version has its version assigned. | Warning (`lint.skill_version_assigned`) |
 | An authored version in the reserved `0.0.0-auto.<N>` form, in either file, is invalid. | Error (`lint.invalid_version`) |
-| `skills-ref validate` passes against `SKILL.md`. | Warning; a suppression flag is available |
+| `skills-ref validate` passes against `SKILL.md`. | Warning (`lint.skill_ref_validate`); an `ARTIFACT.md` that lists the code under `lint_suppress` silences it |
+| The description has at least 15 code points and at least 3 words after surrounding white space is trimmed. `PODIUM_LINT_MIN_DESCRIPTION_CHARS` and `PODIUM_LINT_MIN_DESCRIPTION_WORDS` change the bounds. | Warning (`lint.thin_description`); `lint_suppress` honored |
+| No two artifacts have descriptions whose normalized word sets have a similarity of 0.7 or higher. `PODIUM_LINT_DESCRIPTION_SIMILARITY` changes the threshold. | Warning (`lint.colliding_descriptions`); `lint_suppress` honored, one-sided |
+| No prose body or text resource has a near duplicate in another artifact: two units whose five-word shingle sets have a similarity of 0.8 or higher. `PODIUM_LINT_CONTENT_SIMILARITY` changes the threshold. | Warning (`lint.near_duplicate_content`); `lint_suppress` honored, one-sided |
+
+The `lint.thin_description`, `lint.colliding_descriptions`, and `lint.near_duplicate_content` checks are the catalog advisories. They apply to every artifact type and compare artifacts with each other, so `podium lint` runs them over every artifact of every layer it walks, and registry ingest runs them over the layer it ingests without blocking the ingest. A skill's description is its `ARTIFACT.md` `description`, or its `SKILL.md` `description` when `ARTIFACT.md` states none. Normalizing a description lowercases it and replaces each run of characters other than letters and digits with a single space. The similarity of two sets is the size of their intersection divided by the size of their union. A diagnostic names the artifacts it overlaps, in order of descending similarity, and abbreviates a list of more than 10 to the first 10 and a count of the rest. [Near-duplicate content](bundled-resources#near-duplicate-content) describes the units that `lint.near_duplicate_content` compares.
+
+Descriptions that follow one template overlap. "Use when the user asks to create a pdf" and "Use when the user asks to merge a pdf" share 8 of their 10 distinct words, a similarity of 0.8, so `lint.colliding_descriptions` reports the pair. Rewrite one description to state what distinguishes the skill, raise `PODIUM_LINT_DESCRIPTION_SIMILARITY`, or list the code under `lint_suppress` in the `ARTIFACT.md` of one artifact. A skill with no `ARTIFACT.md` cannot suppress a code, so add an `ARTIFACT.md` that lists it.
 
 ---
 

@@ -263,6 +263,26 @@ func TestCLI_ServeHelp(t *testing.T) {
 	}
 }
 
+// spec: doc "Subcommand help" — the `podium lint --help` block lists the
+// §7.3.1 CI flags beside -offline and -registry.
+//
+// Spec: §7.3.1
+func TestCLI_LintHelp(t *testing.T) {
+	res := runPodium(t, "", nil, "lint", "--help")
+	cliWantExit(t, res, 0, "lint --help")
+	out := res.Stdout + res.Stderr
+	cliContains(t, out, "podium lint - Validate manifests in a filesystem-source registry.", "lint help")
+	for _, line := range []string{
+		"lowest severity that fails the run: error or warning (default \"error\")",
+		"write one JSON object with the diagnostics, the refused artifacts, and the counts",
+	} {
+		cliContains(t, out, line, "lint flag description")
+	}
+	for _, f := range []string{"-fail-on", "-json", "-offline", "-registry"} {
+		cliContains(t, out, f, "lint flag")
+	}
+}
+
 // spec: doc "Subcommand help" — `podium admin --help` subcommand list.
 func TestCLI_AdminHelp(t *testing.T) {
 	for _, form := range [][]string{{"admin", "--help"}, {"admin", "-h"}, {"admin", "help"}} {

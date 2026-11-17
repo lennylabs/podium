@@ -12,8 +12,8 @@ agent, such as Claude Code, Cursor, or Codex. The page is for developers and
 platform engineers who set up a workspace or a harness to consume the catalog.
 
 The page covers the consumption paths and the harness roster, the setup of
-`podium sync`, authentication against a server registry, the setup of the Podium
-MCP server, and a reference section per harness.
+`podium sync` and its listing budget, authentication against a server registry,
+the setup of the Podium MCP server, and a reference section per harness.
 [Verifying deliveries](verifying-deliveries) covers the signature and freshness
 checks the MCP server runs on each load.
 
@@ -174,6 +174,119 @@ the caller's identity can see, as the
 reference describes. Against a filesystem registry, it watches the registry path
 and the workspace overlay with `fsnotify`, and it polls both trees every 500 ms
 when `fsnotify` cannot start.
+
+---
+
+## Listing budget
+
+Some harnesses place the name and description of each installed skill in a
+listing in the model's context and limit the listing's size. Above the limit, a
+harness can shorten descriptions or omit entries without reporting an error.
+`podium sync` estimates the listing that each `kind: workspace` target
+contributes and compares the estimate with a budget that `sync.yaml` configures
+per adapter.
+
+### What the estimate counts
+
+The estimate covers the artifacts the run materializes, after the profile's
+scope, the toggles, the workspace overlay, and the `target_harnesses` exclusion.
+Each artifact whose type is in `types` and counts for the target's adapter is
+one entry. An entry's cost is the code points of its name, the code points of
+its description, and `entry_overhead_chars`. The name is the last segment of
+the artifact's ID, which for a skill equals its `SKILL.md` `name`. The
+description is the `SKILL.md` `description` for a skill and the `ARTIFACT.md`
+`description` for any other type. The listing cost is the sum over the entries.
+
+A type counts for an adapter unless the capability matrix marks the adapter ✗
+for it. The matrix reads a `rule` from its `rule_mode: always` row and a `hook`
+from its `hook_event` row. A type the matrix does not
+grade, such as an extension type, counts for every adapter. With the default
+`types: [skill]`, no type counts for `claude-desktop`, `claude-cowork`, or
+`hermes`, so those targets get no estimate.
+
+The harness's listing can also hold skills from outside the target, such as
+user-level skill directories and plugins, so the estimate is a lower bound on
+the harness's listing. The report compares Podium's estimate with the configured
+budget, and it does not predict which entries a harness shortens or omits.
+
+The estimate covers the artifact set the run resolves. A server-source sync
+reflects the caller's view, so a run with an injected session token
+(`PODIUM_SESSION_TOKEN`, `PODIUM_SESSION_TOKEN_FILE`, or the variable
+`PODIUM_SESSION_TOKEN_ENV` names) whose identity carries a team's group
+memberships checks that team's view. The estimate does not cover a
+`kind: marketplace` target, or the skills that `load_artifact` writes into a
+directory one at a time during a session.
+
+### Configuration
+
+The top-level `listing_budgets:` map in `sync.yaml` is keyed by adapter value.
+Entries merge by adapter across the `sync.yaml` scopes, and each key
+resolves by the usual precedence. A key that no scope sets takes its default:
+
+| Key | Meaning | Default |
+|:--|:--|:--|
+| `max_chars` | Listing budget, in code points. | `8000` |
+| `entry_overhead_chars` | Code points counted per entry for the harness's separators and formatting. | `5` |
+| `max_entry_chars` | Description length, in code points, above which an entry is reported. | unset (no per-entry report) |
+| `types` | Artifact types that count as entries. | `[skill]` |
+| `check` | `off`, `warning`, or `error`. | `warning` |
+
+The defaults are the same for every adapter. The `none` adapter feeds no harness
+listing and gets no estimate.
+
+```yaml
+# Harness listing budgets, keyed by adapter value.
+listing_budgets:
+  claude-code:
+    max_chars: 12000
+    max_entry_chars: 1024
+    check: error # off | warning | error
+```
+
+An entry is invalid when it names an adapter this binary does not register or
+names `none`, sets `max_chars`, `entry_overhead_chars`, or `max_entry_chars` to
+an integer below 1, sets an empty `types` list, or sets `check` to a string
+other than `off`, `warning`, or `error`. An invalid entry for the run's harness
+makes `podium sync` exit 2, and a run that sets no harness runs the `none`
+adapter, so a `listing_budgets.none` entry fails it. An invalid entry for
+another adapter does not affect the run, and `podium sync --check` reports it as
+a warning.
+
+A value of the wrong YAML type, such as `max_chars: 1.5`, `max_chars: abc`,
+`check: 1`, or `types: skill`, makes the file that holds it fail to load in
+`podium sync`, which exits 1. The MCP server does not decode `listing_budgets`,
+so it still reads the registry, the version pin, and the signature policy from
+that file.
+
+### Choosing a budget
+
+Derive `max_chars` from the budget the harness documents, and set it for the
+adapter. The following harnesses illustrate the arithmetic:
+
+- Claude Code allots 1% of the model's context window to the skill listing by
+  default. For a 200,000-token window at about four characters per token, 1% is
+  about 2,000 tokens, or 8,000 characters, which is the default. A
+  1,000,000-token window gives about 40,000 characters, so a workspace on such a
+  model sets `max_chars: 40000` for `claude-code`.
+- Codex allots about 2% of the context window, and 8,000 characters when the
+  window is unknown, which is also the default.
+
+A harness's budget can change between versions and with the user's settings, so
+re-check the harness documentation when the harness or the model changes.
+
+### Check modes
+
+- `check: off` computes no estimate.
+- `check: warning`, the default, writes each excess and each oversized entry on
+  standard error and leaves the exit status unchanged.
+- `check: error` writes the same lines and fails the run after it writes the
+  target. A one-shot sync exits 1, a `--watch` cycle counts toward exit status 1
+  on interrupt, and a `--config` target counts as failed.
+
+The check never changes what `podium sync` writes. The
+[Listing budget](../reference/cli#listing-budget) section of the CLI reference
+gives the report lines, the `listing` member of the `--json` envelope, and the
+outcome under `--dry-run`, `--config`, and `podium sync override`.
 
 ---
 

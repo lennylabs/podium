@@ -223,8 +223,6 @@ A value of `0` in an integer key leaves the default in force.
 |:--|:--|:--|:--|:--|
 | `freeze_windows` | (none) | list | (none) | Windows during which ingest is refused with `ingest.frozen`. See the table below. |
 | (none) | `PODIUM_INGEST_OFFLINE` | boolean | `false` | `true` skips the HEAD request that checks each URL in artifact prose at ingest. |
-| (none) | `PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES` | integer | `1048576` | Per-file soft cap on a bundled resource. An unset or non-positive value keeps the default. [Bundled resources](../authoring/bundled-resources) describes the caps. |
-| (none) | `PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES` | integer | `10485760` | Per-package soft cap on bundled resources. An unset or non-positive value keeps the default. |
 | (none) | `PODIUM_ENFORCE_SANDBOX_PROFILE` | boolean | `false` | `true` rejects at ingest an artifact whose `sandbox_profile` the host cannot honor, with `ingest.sandbox_profile_unenforceable`. |
 | (none) | `PODIUM_HOST_SANDBOXES` | string | `unrestricted` | Comma-separated sandbox profiles the host can enforce. |
 
@@ -238,6 +236,27 @@ Each entry of `freeze_windows` takes these keys:
 | `break_glass_role` | string | Accepted and not read in this release. |
 
 [Progressive adoption](../deployment/progressive-adoption) describes rolling out freeze windows.
+
+## Lint
+
+These variables set the lint thresholds. Registry ingest reads them, and `podium lint` reads the same variables, so a CI run and the registry apply the same threshold when both environments set it. They have no `registry.yaml` key, because `podium lint` does not read `registry.yaml`.
+
+An unset or empty variable keeps the default. A value that does not parse, or that falls outside its range, keeps the default, and the process logs a warning that names the variable. Integer values are positive, and the similarity thresholds range from 0.5 to 1.0. A token count is the estimate of the byte length divided by four, rounded up.
+
+| Variable | Type | Default | Description |
+|:--|:--|:--|:--|
+| `PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES` | integer | `1048576` | Per-file soft cap on a bundled resource, in bytes. Lint warns above it. [Bundled resources](../authoring/bundled-resources#size-thresholds) describes the caps. |
+| `PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES` | integer | `10485760` | Per-package cap on bundled resources, in bytes. Lint errors above it. |
+| `PODIUM_LINT_SKILL_BODY_WARN_TOKENS` | integer | `5000` | `SKILL.md` body size, in estimated tokens, above which lint warns. |
+| `PODIUM_LINT_SKILL_BODY_WARN_LINES` | integer | `500` | `SKILL.md` body length, in lines, above which lint warns. |
+| `PODIUM_LINT_MANIFEST_ERROR_TOKENS` | integer | `20000` | Manifest content size, in estimated tokens, above which lint errors. [Manifest size lint](../authoring/bundled-resources#manifest-size-lint) describes the thresholds. |
+| `PODIUM_LINT_DOMAIN_BODY_WARN_TOKENS` | integer | `2000` | `DOMAIN.md` body size, in estimated tokens, above which lint warns. Only `podium lint` applies it, because registry ingest does not apply the `DOMAIN.md` body-size warning. |
+| `PODIUM_LINT_MIN_DESCRIPTION_CHARS` | integer | `15` | `lint.thin_description` flags a description with fewer code points. |
+| `PODIUM_LINT_MIN_DESCRIPTION_WORDS` | integer | `3` | `lint.thin_description` flags a description with fewer words. |
+| `PODIUM_LINT_DESCRIPTION_SIMILARITY` | number | `0.7` | `lint.colliding_descriptions` reports two descriptions whose word sets have at least this similarity. |
+| `PODIUM_LINT_CONTENT_SIMILARITY` | number | `0.8` | `lint.near_duplicate_content` reports two units of different artifacts whose five-word shingle sets have at least this similarity. |
+
+[Skill lint checks](../authoring/frontmatter-reference#skill-lint-checks) describes the catalog advisories.
 
 ## Vector index and embeddings
 

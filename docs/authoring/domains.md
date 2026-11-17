@@ -143,7 +143,7 @@ For the requested domain, `load_domain` resolves the description in this order:
 
 For example, a `load_domain("finance", depth=2)` call returns the body of `finance`, because `finance` is the requested path. It also returns a two-level subtree of subdomains, each with its short `description` only. To read another domain's body, the agent calls `load_domain` on that domain directly.
 
-Keep the body at or below 2000 tokens. Lint warns above that length.
+Keep the body at or below 2,000 estimated tokens. `podium lint` warns above that length with `lint.domain_body_size`, and registry ingest does not apply the check. The 2,000-token threshold is a default that `PODIUM_LINT_DOMAIN_BODY_WARN_TOKENS` changes.
 
 ---
 
