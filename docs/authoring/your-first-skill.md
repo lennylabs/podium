@@ -118,7 +118,7 @@ Tell them today's date by running [scripts/today.py](scripts/today.py).
 Keep it to one or two sentences.
 ```
 
-Lint resolves markdown links in the body against the artifact's bundled files at ingest, so a link to a path the package does not contain fails the check. A path written as inline code is not checked. A skill's bundled files materialize inside the skill folder, so the link also resolves from the materialized `SKILL.md`.
+Lint resolves inline markdown links and images in the body against the artifact's bundled files at ingest, so a link to a path the package does not contain fails the check. A path written as inline code and link syntax inside code are not checked. A skill's bundled files materialize inside the skill folder, so the link also resolves from the materialized `SKILL.md`.
 
 ---
 

@@ -111,7 +111,7 @@ podium config show [--explain <key>] [--server] [--json]
 | `--server` | Print the resolved server configuration instead of the client `sync.yaml`. Each value shows its source: an environment variable, `registry.yaml`, or the default. API keys and DSNs are redacted. |
 | `--json` | Emit the output as JSON. |
 
-The command does not display `listing_budgets`. A `listing_budgets` value of the wrong YAML type fails the `sync.yaml` load in `podium sync` (see [Listing budget](#listing-budget)), and `podium config show` still displays the file's other keys and exits 0.
+The command displays each `defaults` key that a scope sets, in the order `registry`, `harness`, `target`, `profile`, `verify_signatures`, and `on_unparseable`. It does not display `listing_budgets`. A `listing_budgets` value of the wrong YAML type fails the `sync.yaml` load in `podium sync` (see [Listing budget](#listing-budget)), and `podium config show` still displays the file's other keys and exits 0.
 
 ### `podium login` / `podium logout`
 
@@ -312,7 +312,7 @@ Materializes the caller's effective view to disk through the configured harness 
 podium sync [--registry <url-or-path>] [--target <path>] [--harness <name>]
             [--profile <name>] [--config <path>]
             [--include <pattern>] [--exclude <pattern>] [--type <t1,t2>]
-            [--overlay <path>]
+            [--overlay <path>] [--on-unparseable keep|remove]
             [--watch] [--dry-run] [--preview] [--check] [--json]
 ```
 
@@ -327,6 +327,7 @@ podium sync [--registry <url-or-path>] [--target <path>] [--harness <name>]
 | `--exclude <pattern>` | Glob to exclude. Applied after include. Repeatable. |
 | `--type <t1,t2,...>` | Restrict to a comma-separated list of artifact types. |
 | `--overlay <path>` | Workspace overlay path watched alongside the registry. |
+| `--on-unparseable keep\|remove` | What a filesystem-source sync does with the previous output of an artifact whose manifest does not parse. See [Previous output of an unparseable artifact](#previous-output-of-an-unparseable-artifact). |
 | `--watch` | Run continuously. Re-materialize on registry change events, or on fsnotify events against a filesystem source. |
 | `--dry-run` | Print the resolved set; write nothing. |
 | `--preview` | Print the scope-preview aggregate counts and exit; write nothing. Requires a server-source registry, because the counts come from `GET /v1/scope/preview`. |
@@ -340,7 +341,7 @@ The lock file is written to `<target>/.podium/sync.lock`.
 | Status | Cause |
 |:--|:--|
 | `1` | The run dropped an artifact (see [Dropped artifacts](#dropped-artifacts)), the listing estimate exceeded its budget or an entry exceeded `max_entry_chars` under `check: error` (see [Listing budget](#listing-budget)), a delivery check failed on a one-shot sync, a `--config` target failed, or a `sync.yaml` scope failed to load, including on a `listing_budgets` value of the wrong YAML type. Under `--watch`, the command exits 1 on interrupt when any cycle it reported failed, dropped an artifact, or reported a listing excess or an entry that exceeded `max_entry_chars` under `check: error`. |
-| `2` | The signature policy or the verification key set did not resolve (see [Delivery verification](#delivery-verification)), or the `listing_budgets` entry for the run's harness is invalid. The entry check covers `--preview`, and a run that sets no harness runs the `none` adapter, so a `listing_budgets.none` entry exits 2 on it. |
+| `2` | `--on-unparseable`, `PODIUM_SYNC_ON_UNPARSEABLE`, or `defaults.on_unparseable` holds a value other than `keep` or `remove`, the signature policy or the verification key set did not resolve (see [Delivery verification](#delivery-verification)), or the `listing_budgets` entry for the run's harness is invalid. The entry check covers `--preview`, and a run that sets no harness runs the `none` adapter, so a `listing_budgets.none` entry exits 2 on it. |
 
 A drop and a listing report under `check: error` each add a cause for exit status 1 and leave the command's other exit statuses unchanged.
 
@@ -368,7 +369,7 @@ Against a local catalog, `podium sync` drops the artifacts the table below lists
 
 The rules below apply to every drop in the table:
 
-- The command materializes every other artifact, writes the lock file without the dropped artifact, and exits 1.
+- The command materializes every other artifact, writes the lock file without the dropped artifact except as [Previous output of an unparseable artifact](#previous-output-of-an-unparseable-artifact) describes, and exits 1.
 - `--dry-run` reports the drop and exits 1 without writing.
 - An unparseable-manifest drop, an `extends:` drop, and a removed-type drop happen before the collision rule, in that order, so an `ARTIFACT.md` that declares both `extends:` and a removed type reports the `extends:` reason. A dropped artifact collides with no other artifact, so the other copy of its ID is materialized and no `ingest.collision` line is printed for it.
 - Under `--config`, a target that dropped an artifact counts as a failed target, and the command exits 1. This includes a `kind: workspace` target under `--check`. A target's workflow still runs before the target is marked failed.
@@ -377,6 +378,17 @@ The rules below apply to every drop in the table:
 - Under `--watch`, each cycle prints its report. A cycle still running when the interrupt arrives can finish without a report, and the next `podium sync` reports its drops.
 
 A sync against a server reports no drop, because the server rejected the artifact at ingest.
+
+##### Previous output of an unparseable artifact
+
+An unparseable manifest is usually a file in the middle of an edit. `--on-unparseable` selects what a filesystem-source sync does with the output an earlier run wrote for an artifact dropped because its frontmatter does not parse. The flag takes precedence over `PODIUM_SYNC_ON_UNPARSEABLE`, which takes precedence over `defaults.on_unparseable` in the merged `sync.yaml`. The default is `keep`. A value other than `keep` or `remove` exits 2 with an error that names its source.
+
+- Under `keep`, when the target's lock file records the artifact from an earlier run, the command leaves the files that run wrote for it, including its entries in shared files such as `.mcp.json`, and its lock entry unchanged. It reconciles every other artifact as usual, and the report line reads `rejected: <id> (ingest.invalid_artifact): <reason>; the previous sync output was kept`. An artifact the lock file does not record gets no files.
+- When another copy of the ID parses, from a lower-precedence layer or the workspace overlay, the command materializes that copy.
+- Under `remove`, the command removes the previous output, as it does for the other drops.
+- Under either value, the artifact counts as a drop for the exit status, `--dry-run`, `--config` targets, and `podium sync override`.
+- An `extends:` drop, a removed-type drop, and a collision drop always remove the previous output.
+- The setting has no effect on a sync against a server, where the registry keeps serving the earlier version.
 
 #### Listing budget
 
@@ -493,6 +505,7 @@ podium sync override --add <id> --dry-run
 | `--target <path>` | Materialized directory. Default: the current directory. |
 | `--registry <url-or-path>` | Registry for the toggle's materialization. When unset: `PODIUM_REGISTRY`, then the merged `sync.yaml`. |
 | `--harness <name>` | Adapter for the toggle's materialization. When unset: `PODIUM_HARNESS`, then the harness recorded in the target's lock file, then the merged `sync.yaml`, then the built-in `none` adapter. |
+| `--on-unparseable keep\|remove` | What the re-materialization does with the previous output of an artifact whose manifest does not parse, as for [`podium sync`](#previous-output-of-an-unparseable-artifact). An invalid value exits 2 before any toggle is recorded. |
 
 With no flags, the command opens an interactive checklist.
 
@@ -1580,6 +1593,7 @@ The tables below list the variables that client processes read: the CLI, `podium
 | `PODIUM_CACHE_DIR` | Content-addressed cache directory. Default `~/.podium/cache/`. |
 | `PODIUM_CACHE_MODE` | `always-revalidate` (default), `offline-first`, or `offline-only`. |
 | `PODIUM_MATERIALIZE_ROOT` | Default destination for `load_artifact` materialization. |
+| `PODIUM_SYNC_ON_UNPARSEABLE` | `keep` (default) or `remove`: what a filesystem-source `podium sync` does with the previous output of an artifact whose manifest does not parse. `--on-unparseable` overrides it. |
 
 ### Lint
 

@@ -152,7 +152,7 @@ The browser flow requires every condition below:
 
 `podium-mcp` also returns `config.invalid` at startup when `PODIUM_SIGNATURE_PROVIDER` names a value other than `registry-managed` or `noop`. This includes `sigstore-keyless`, which only `podium sign` and `podium verify` accept.
 
-The registry refuses to start with `config.invalid` when `PODIUM_LINT_SEMANTIC_OVERLAP` is `on` and it has no embedding source: `PODIUM_EMBEDDING_PROVIDER` is the empty string or `none`, which `PODIUM_NO_EMBEDDINGS` also selects, and the vector backend does not embed text with its own hosted model. The message names `PODIUM_LINT_SEMANTIC_OVERLAP`. Set `PODIUM_EMBEDDING_PROVIDER`, select a self-embedding backend, or set `PODIUM_LINT_SEMANTIC_OVERLAP=off`.
+The registry refuses to start with `config.invalid` when `PODIUM_LINT_SEMANTIC_OVERLAP` is `on` and it has no embedding source: `PODIUM_EMBEDDING_PROVIDER` is the empty string or `none`, which `PODIUM_NO_EMBEDDINGS` also selects, and the vector backend does not embed text with its own hosted model. The message names `PODIUM_LINT_SEMANTIC_OVERLAP` and the configured `PODIUM_EMBEDDING_PROVIDER` value, such as `PODIUM_EMBEDDING_PROVIDER is "none"`. Set `PODIUM_EMBEDDING_PROVIDER`, select a self-embedding backend, or set `PODIUM_LINT_SEMANTIC_OVERLAP=off`.
 
 #### config.signature_provider_unavailable causes
 

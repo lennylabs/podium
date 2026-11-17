@@ -664,8 +664,8 @@ GET /v1/overlap?threshold={n}&artifact={id}
 **Behavior.**
 
 - The registry runs `lint.thin_description` and `lint.colliding_descriptions` over the current served version of every artifact the caller can see, across layers.
-- When the registry runs with `PODIUM_LINT_SEMANTIC_OVERLAP=on`, it also reports `lint.semantic_overlap` from its stored overlap records. A record is reported when the caller can see both of its artifacts, both of its versions are the current served versions, its embedding model is the configured model, and its similarity is at or above the read's threshold.
-- A record with an artifact the caller cannot see is not reported and is not counted in an abbreviated peer list, so the report reveals nothing a search would not.
+- When the registry runs with `PODIUM_LINT_SEMANTIC_OVERLAP=on`, it also reports `lint.semantic_overlap` from its stored overlap records. A record is reported when the caller can see both of its artifacts, both of its versions are the current served versions, its embedding model is the configured model, and its similarity is at or above the read's threshold. When both artifacts own a reported record naming the other, the pair is reported once, with the similarity of the more recently computed record.
+- A record with an artifact the caller cannot see is not reported and is not counted in an abbreviated peer list, so the report names only artifacts the caller can load.
 - The endpoint reads stored records and descriptions and issues no index query, so a request costs no embedding call.
 - The report reads descriptions alone, so it omits `lint.near_duplicate_content`, which `podium lint` reports over a checkout of the layer sources.
 
@@ -1279,6 +1279,8 @@ POST /v1/ingest/webhook/{tenant-id}/{layer-id}
 6. Stores the manifest and bundled resources.
 7. Indexes metadata.
 8. Emits the corresponding outbound event.
+
+The response summarizes the cycle. Its `lint.semantic_overlap` advisories name only peers in the ingested layer, because the git host records the response.
 
 **Errors.**
 

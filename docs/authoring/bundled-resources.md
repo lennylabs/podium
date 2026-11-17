@@ -49,16 +49,16 @@ Run `scripts/variance.py` against the closed period. Format the
 output using [the report template](assets/variance-report.md.j2).
 ```
 
-The ingest-time linter resolves every markdown link (`[text](path)`) in the prose body outside inline code spans and fenced code blocks:
+The ingest-time linter resolves the target of every inline link and image (`[text](path)` and `![alt](path)`) in the prose body, as CommonMark parses it:
 
 - A relative link must name a bundled file, a directory of the package, one of the artifact's own manifest files, or the canonical ID of another artifact in the catalog. A link to a directory, with or without a trailing `/`, resolves when at least one bundled file lies below it, so `[templates](assets/templates/)` names the bundled templates. A directory that holds no bundled file does not resolve.
 - An `http` or `https` link is validated with an HTTP HEAD request that must return 200 or a 3xx redirect. `podium lint --offline` skips this probe.
 - A link that resolves to none of these is an ingest error. A link to a bundled file the package does not contain is such an error.
 - A relative link that leaves the package, such as `../other-skill/SKILL.md`, is a warning. It names no bundled file, and it resolves only while the artifacts sit side by side in one source tree, which a consumer that installs one of them does not reproduce. The diagnostic recommends naming the other artifact by its canonical ID.
 
-Before the lookup, the linter removes the link's fragment (from `#`) and query (from `?`) and decodes its percent-encoding, so `references/api.md#errors` resolves to the bundled file `references/api.md`. A link that is only a fragment, such as `#usage`, refers to the same document and is not checked. A link whose target begins with `/`, such as `[analytics](/features/analytics)`, is root-relative. It names a path on a website and never a bundled file or an artifact, because bundled-file and artifact references are relative to the package, so it is not checked.
+Before the lookup, the linter removes the link's fragment (from `#`) and query (from `?`) and decodes its percent-encoding, so `references/api.md#errors` resolves to the bundled file `references/api.md`. A link that is only a fragment, such as `#usage`, refers to the same document and is not checked. A target with a scheme other than `http` or `https`, such as `mailto:`, is not checked. A link whose target begins with `/`, such as `[analytics](/features/analytics)`, is root-relative. It names a path on a website and never a bundled file or an artifact, because bundled-file and artifact references are relative to the package, so it is not checked.
 
-A path written as inline code rather than as a markdown link is not checked. Link syntax inside an inline code span or a fenced code block is example text and is not checked either.
+A path written as inline code rather than as a markdown link is not checked. Link syntax inside a code span, a fenced code block, or an indented code block is example text and is not checked, including a block nested in a list item or a block quote. A link whose bracket is escaped, such as `\[text](path)`, is text. A reference-style link, such as `[text][ref]`, is not checked.
 
 ---
 
@@ -176,7 +176,7 @@ When an artifact hits a threshold, decide whether the prose is manifest-level ma
 
 - Its file name ends in `.md`, `.markdown`, `.txt`, or `.rst`, compared without regard to case.
 - It is valid UTF-8 and contains no NUL byte.
-- It is not a license file. The linter lowercases the file name, removes its final extension, and splits the rest on `-`, `_`, and `.`. A name with `license`, `licence`, `copying`, `notice`, or `ofl` among those parts is a license file, so `LICENSE.txt`, `LICENSE-MIT`, and `ArsenalSC-OFL.txt` are not compared.
+- It is not a license file. The linter lowercases the file name, removes its final extension, and splits the rest on `-`, `_`, and `.`. The name is a license file when its parts are `license`, `licence`, `copying`, or `notice` alone or followed by exactly one more part, or when `ofl` is its first or last part. `LICENSE.txt`, `LICENSE-MIT`, `NOTICE.md`, `OFL.txt`, and `ArsenalSC-OFL.txt` are license files and are not compared. `notice-of-changes.md`, `privacy-notice.md`, and `license-compliance-guide.md` are prose resources.
 
 Scripts, data files, and binary resources are not units. A skill carries its own copy of every file it runs, and every package carries its own license file, so neither is reported. A unit's shingles are the sequences of five consecutive words of its normalized text, and two units of different artifacts whose shingle sets have a similarity of 0.8 or higher draw the warning. `PODIUM_LINT_CONTENT_SIMILARITY` changes the threshold. A unit of fewer than 50 words is not compared, and two units of one artifact are not compared.
 
