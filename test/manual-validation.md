@@ -10908,7 +10908,7 @@ instead of rejected, or a modified source tree is the defect this scenario catch
    ```
 
    **Expect.** `lint exit=0`, and the output carries one
-   `lint.skill_version_assigned` warning, for `greet` only.
+   `lint.skill_version_assigned` info diagnostic, for `greet` only.
 
 3. Sync through filesystem source, then inspect the output, the lock, and the
    source tree.

@@ -46,7 +46,7 @@ func (r ruleSkillPodiumOnlyFields) Check(_ context.Context, _ *filesystem.Regist
 		}
 		keys, err := manifest.TopLevelFrontmatterKeys(rec.SkillBytes)
 		if err != nil {
-			// A malformed SKILL.md already fails Walk/ParseSkill upstream.
+			// An unparseable SKILL.md is refused before lint (§4.1), so it never reaches this rule.
 			continue
 		}
 		for _, k := range keys {
