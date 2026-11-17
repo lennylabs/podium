@@ -520,8 +520,9 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			Embedder:        collocatedVec.Embedder,
 			VectorPut:       collocatedVec.VectorPut,
 			DomainVectorPut: collocatedVec.DomainVectorPut,
-			// §7.3.1 semantic overlap, nil when the check is off or the backend is managed.
-			SemanticOverlap: collocatedVec.SemanticOverlap,
+			// §7.3.1: no SemanticOverlap. The startup ingest computes no
+			// overlap, so readiness never waits on it; the startup pass
+			// computes these artifacts once every bootstrap layer is in.
 		})
 		if err != nil {
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
@@ -674,8 +675,8 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 				Embedder:        collocatedVec.Embedder,
 				VectorPut:       collocatedVec.VectorPut,
 				DomainVectorPut: collocatedVec.DomainVectorPut,
-				// §7.3.1 semantic overlap, nil when the check is off or the backend is managed.
-				SemanticOverlap: collocatedVec.SemanticOverlap,
+				// §7.3.1: no SemanticOverlap. The startup ingest computes no
+				// overlap; the startup pass computes these artifacts.
 			})
 			if err != nil {
 				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
@@ -1196,9 +1197,11 @@ func run(ctx context.Context, stop func()) error {
 	// backend) writes no vector inline; the outbox or self-embed path handles
 	// those.
 	collocatedVec := buildCollocatedVectorIngest(vecProvider, embedProvider, useVectorOutbox)
-	// §7.3.1: with PODIUM_LINT_SEMANTIC_OVERLAP on, every ingest path
+	// §7.3.1: with PODIUM_LINT_SEMANTIC_OVERLAP on, every reingest path
 	// computes and reports semantic overlap after its writes on a collocated
 	// backend; a managed backend computes when the outbox writes the vector.
+	// The bootstrap ingests below do not run the hook (startup computes no
+	// overlap), and the startup pass computes their artifacts.
 	collocatedVec.SemanticOverlap = buildSemanticOverlap(st, vecProvider, embedProvider, cfg.semanticOverlap, isManagedVectorBackend(cfg.vectorBackend))
 
 	// §4.6 declarative layers: the registry.yaml `layers:` list seeds an
@@ -1832,8 +1835,10 @@ func run(ctx context.Context, stop func()) error {
 	if useVectorOutbox {
 		startVectorOutboxWorker(ctx, cfg, st, vecProvider, embedProvider, mreg, auditSink, tenantID, overlapOutboxHook(registry))
 	}
-	// §7.3.1: the periodic sweep computes artifacts with missing or stale
-	// overlap records on every replica.
+	// §7.3.1: the startup pass computes the artifacts the startup ingest
+	// stored, in the background and at once, and the periodic sweep then
+	// computes artifacts with missing or stale overlap records on every
+	// replica. This is the one call, after every bootstrap layer.
 	startOverlapSweep(ctx, cfg.semanticOverlap, st, registry)
 
 	// §8.6 local chain-head anchoring: with PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS

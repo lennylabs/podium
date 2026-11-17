@@ -236,7 +236,7 @@ func TestRunOverlapSweep(t *testing.T) {
 	if err := st.DeactivateTenant(ctx, "globex"); err != nil {
 		t.Fatal(err)
 	}
-	runOverlapSweep(ctx, st, reg)
+	runOverlapSweep(ctx, st, reg, periodicPassLabel)
 	acme, _ := st.ListOverlapRecords(ctx, "acme")
 	globex, _ := st.ListOverlapRecords(ctx, "globex")
 	if len(acme) != 2 || len(globex) != 0 {
@@ -244,11 +244,15 @@ func TestRunOverlapSweep(t *testing.T) {
 	}
 	// A registry with the check off logs the refusal per tenant and stores
 	// nothing.
-	runOverlapSweep(ctx, st, core.New(st, "", nil))
+	runOverlapSweep(ctx, st, core.New(st, "", nil), periodicPassLabel)
+	// A cancelled context stops the pass before it lists the tenants.
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	runOverlapSweep(cancelled, st, reg, startupPassLabel)
 }
 
-// Spec: §7.3.1, §13.12 — the sweep starts only with the check on and a
-// non-zero interval, and its goroutine exits when the context ends.
+// Spec: §7.3.1, §13.12 — the startup pass and the sweep start only with the
+// check on, and the goroutine exits when the context ends.
 func TestStartOverlapSweep_StopsWithContext(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -259,26 +263,31 @@ func TestStartOverlapSweep_StopsWithContext(t *testing.T) {
 	startOverlapSweep(ctx, lint.SemanticConfig{Enabled: true, RefreshInterval: time.Minute}, store.NewMemory(), reg)
 }
 
-// Spec: §7.3.1 — the sweep runs a pass after its first delay and then once
-// per interval, and stops when the context ends, whether it is waiting for
-// the first pass or between passes. It runs a goroutine and is -race clean.
+// Spec: §7.3.1 — the loop runs the startup pass at once, then a periodic pass
+// after the interval plus the offset and once per interval after that, and
+// stops when the context ends, whether it is waiting for the first periodic
+// pass or between passes. With the periodic sweep off it runs the startup
+// pass alone and returns. It runs a goroutine and is -race clean.
 func TestSweepLoop(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
-	passes := make(chan struct{}, 8)
+	passes := make(chan string, 8)
 	done := make(chan struct{})
 	go func() {
-		sweepLoop(ctx, time.Millisecond, time.Millisecond, func(context.Context) {
+		sweepLoop(ctx, time.Millisecond, time.Millisecond, func(_ context.Context, label string) {
 			select {
-			case passes <- struct{}{}:
+			case passes <- label:
 			default:
 			}
 		})
 		close(done)
 	}()
-	for i := 0; i < 2; i++ {
+	for i, want := range []string{startupPassLabel, periodicPassLabel, periodicPassLabel} {
 		select {
-		case <-passes:
+		case got := <-passes:
+			if got != want {
+				t.Errorf("pass %d label = %q, want %q", i+1, got, want)
+			}
 		case <-time.After(5 * time.Second):
 			t.Fatalf("pass %d did not run", i+1)
 		}
@@ -288,6 +297,125 @@ func TestSweepLoop(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("sweepLoop did not return after cancellation")
+	}
+
+	var labels []string
+	sweepLoop(context.Background(), 0, 0, func(_ context.Context, label string) { labels = append(labels, label) })
+	if len(labels) != 1 || labels[0] != startupPassLabel {
+		t.Errorf("with the periodic sweep off the loop ran %v, want the startup pass alone", labels)
+	}
+
+	waiting, stop := context.WithCancel(context.Background())
+	returned := make(chan struct{})
+	go func() {
+		sweepLoop(waiting, time.Hour, 0, func(context.Context, string) {})
+		close(returned)
+	}()
+	stop()
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sweepLoop did not return when cancelled before its first periodic pass")
+	}
+}
+
+// gatedTenants is a store whose tenant listing, the first call of every pass,
+// waits for release and counts each call, so a test can hold a pass in flight
+// and count the passes. released is closed once.
+type gatedTenants struct {
+	store.Store
+	release chan struct{}
+	calls   atomic.Int64
+}
+
+func (g *gatedTenants) ListTenants(ctx context.Context) ([]store.Tenant, error) {
+	g.calls.Add(1)
+	select {
+	case <-g.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return g.Store.ListTenants(ctx)
+}
+
+// sweepFixture stores two embedded artifacts in tenant acme and returns the
+// store, a gated wrapper of it, and a registry over the gated store.
+func sweepFixture(t *testing.T) (*store.Memory, *gatedTenants, *core.Registry) {
+	t.Helper()
+	ctx := context.Background()
+	st := store.NewMemory()
+	gated := &gatedTenants{Store: st, release: make(chan struct{})}
+	reg := core.New(gated, "", nil).WithVectorSearch(vector.NewMemory(8), fakeEmbedder{dim: 8}).WithOverlapChecks(lint.Thresholds{}, lint.SemanticConfig{Enabled: true})
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "acme"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a", "b"} {
+		rec := store.ManifestRecord{TenantID: "acme", ArtifactID: id, Version: "1", ContentHash: "sha256:" + id, Type: "agent", Description: "d " + id}
+		if err := st.PutManifest(ctx, rec); err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.ReembedOne(core.ContextWithTenant(ctx, "acme"), id, "1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return st, gated, reg
+}
+
+// waitComputations waits until tenant acme holds n computation entries.
+func waitComputations(t *testing.T, st store.Store, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if runs, _ := st.ListOverlapComputations(context.Background(), "acme"); len(runs) == n {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("tenant acme did not reach %d computation entries", n)
+}
+
+// Spec: §7.3.1, §13.12 — startOverlapSweep returns while the startup pass is
+// still in flight, so readiness never waits on it. The startup pass runs at
+// once with the periodic sweep on and with it off, computes every artifact
+// whose computation is missing, and runs once: a periodic pass waits a whole
+// interval. The goroutine exits on cancellation while the pass is held.
+func TestStartOverlapSweep_StartupPassInBackground(t *testing.T) {
+	t.Parallel()
+	for _, interval := range []time.Duration{0, time.Hour} {
+		st, gated, reg := sweepFixture(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		returned := make(chan struct{})
+		go func() {
+			startOverlapSweep(ctx, lint.SemanticConfig{Enabled: true, RefreshInterval: interval}, gated, reg)
+			close(returned)
+		}()
+		select {
+		case <-returned:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("interval %s: startOverlapSweep blocked on the startup pass", interval)
+		}
+		if runs, _ := st.ListOverlapComputations(ctx, "acme"); len(runs) != 0 {
+			t.Errorf("interval %s: %d computations before the held pass was released", interval, len(runs))
+		}
+		close(gated.release)
+		waitComputations(t, st, 2)
+		time.Sleep(20 * time.Millisecond)
+		if n := gated.calls.Load(); n != 1 {
+			t.Errorf("interval %s: %d passes ran, want the startup pass alone", interval, n)
+		}
+		cancel()
+	}
+
+	_, held, reg := sweepFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	startOverlapSweep(ctx, lint.SemanticConfig{Enabled: true, RefreshInterval: time.Hour}, held, reg)
+	deadline := time.Now().Add(5 * time.Second)
+	for held.calls.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	if held.calls.Load() != 1 {
+		t.Errorf("the held startup pass listed tenants %d times, want 1", held.calls.Load())
 	}
 }
 

@@ -13,9 +13,106 @@ package e2e
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
+
+// Spec: §7.3.1, §13.12 — a standalone registry started with a layer path and
+// the check on serves before its startup ingest's artifacts are computed: the
+// startup ingest computes no overlap, and the startup pass computes them in
+// the background with the periodic sweep off. The server becomes ready, and
+// podium overlap --json eventually reports computed equal to total and the
+// paraphrase pair as peers, with no reingest and no rebuild.
+func TestSemanticOverlap_StartupPassComputesLayerPath(t *testing.T) {
+	t.Parallel()
+	emb := newControllableEmbedder(t)
+	reg := writeRegistry(t, map[string]string{
+		"finance/settle/ARTIFACT.md": agentArtifact("invoice reconciliation against vendor payments"),
+		"finance/remit/ARTIFACT.md":  agentArtifact("remit settlement of amounts owed"),
+		"hr/welcome/ARTIFACT.md":     agentArtifact("welcoming staff with new hire orientation"),
+	})
+	srv := startServerArgs(t, []string{
+		"HOME=" + t.TempDir(),
+		"PODIUM_VECTOR_BACKEND=sqlite-vec",
+		"PODIUM_EMBEDDING_PROVIDER=openai",
+		"OPENAI_API_KEY=sk-test",
+		"PODIUM_OPENAI_BASE_URL=" + emb.url(),
+		"PODIUM_LINT_SEMANTIC_OVERLAP=on",
+		"PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL=0",
+		"PODIUM_INGEST_OFFLINE=true",
+	}, "serve", "--standalone", "--layer-path", reg)
+
+	readyDeadline := time.Now().Add(30 * time.Second)
+	for {
+		resp, err := http.Get(srv.BaseURL + "/readyz")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(readyDeadline) {
+			t.Fatalf("/readyz never answered 200\n%s", srv.log())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	type report struct {
+		SemanticOverlap struct {
+			State    string `json:"state"`
+			Computed *int   `json:"computed"`
+			Total    *int   `json:"total"`
+		} `json:"semantic_overlap"`
+		Diagnostics []struct {
+			ArtifactID string `json:"artifact_id"`
+			Code       string `json:"code"`
+			Peers      []struct {
+				ArtifactID string `json:"artifact_id"`
+			} `json:"peers"`
+		} `json:"diagnostics"`
+	}
+	var got report
+	var last cliResult
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		last = runPodium(t, "", srv.cliEnv(), "overlap", "--registry", srv.BaseURL, "--json")
+		got = report{}
+		if err := json.Unmarshal([]byte(last.Stdout), &got); err != nil {
+			t.Fatalf("--json stdout is not one object: %v\n%s", err, last.Stdout)
+		}
+		st := got.SemanticOverlap
+		if st.Computed != nil && st.Total != nil && *st.Computed == *st.Total {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	st := got.SemanticOverlap
+	if st.State != "on" || st.Computed == nil || st.Total == nil || *st.Total != 3 || *st.Computed != 3 {
+		t.Fatalf("semantic_overlap = %+v, want state on and computed == total == 3\nstderr=%s\n%s", st, last.Stderr, srv.log())
+	}
+	if strings.Contains(last.Stderr, "warning: semantic overlap is computed for") {
+		t.Errorf("a complete report printed the coverage warning: %s", last.Stderr)
+	}
+	peersOf := map[string]string{}
+	for _, d := range got.Diagnostics {
+		if d.Code != "lint.semantic_overlap" {
+			continue
+		}
+		ids := make([]string, 0, len(d.Peers))
+		for _, p := range d.Peers {
+			ids = append(ids, p.ArtifactID)
+		}
+		peersOf[d.ArtifactID] = strings.Join(ids, ",")
+	}
+	if peersOf["finance/settle"] != "finance/remit" || peersOf["finance/remit"] != "finance/settle" || peersOf["hr/welcome"] != "" {
+		t.Errorf("semantic peers = %v, want finance/settle and finance/remit as each other's only peer", peersOf)
+	}
+	if !strings.Contains(srv.log(), "lint.semantic_overlap: startup pass of tenant") {
+		t.Errorf("the server log does not record the startup pass\n%s", srv.log())
+	}
+}
 
 // overlapServer boots a standalone server with the semantic overlap check on
 // over sqlite-vec and the topic-routed mock embedder.
