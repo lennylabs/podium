@@ -376,7 +376,7 @@ Two mitigations:
 
 Authors who must use a non-portable feature can declare `target_harnesses:` in frontmatter to opt out of cross-harness materialization for that artifact.
 
-**Capability matrix (maintained in sync with adapter implementations).** Legend: ✓ supported natively, ⚠ supported via fallback (ingest lint warns when a declared `target_harnesses:` names the harness, and materialization emits the degraded fallback), ✗ not supported (ingest lint errors when a declared `target_harnesses:` names the harness, and materialization onto that harness otherwise fails per §6.9). When `target_harnesses:` is absent, ingest applies no capability diagnostic and the per-harness grade is enforced at materialization. The matrix grades type-level materialization, frontmatter-field fidelity, and the `rule_mode` and `hook_event` rows. `rule` and `hook` are graded by their dedicated rows rather than a type row.
+**Capability matrix (maintained in sync with adapter implementations).** Legend: ✓ supported natively, ⚠ supported via fallback (ingest lint warns when a declared `target_harnesses:` names the harness, and materialization emits the degraded fallback), ✗ not supported (ingest lint errors when a declared `target_harnesses:` names the harness, and materialization onto that harness otherwise fails per §6.9). When `target_harnesses:` is absent, ingest applies no capability diagnostic and the per-harness grade is enforced at materialization. The matrix grades type-level materialization, frontmatter-field fidelity, and the `rule_mode`, `hook_event`, and `invocation: user` rows. `rule` and `hook` are graded by their dedicated rows rather than a type row.
 
 Type materialization (can the harness materialize an artifact of this type at project scope):
 
