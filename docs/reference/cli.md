@@ -232,7 +232,7 @@ The command walks every artifact of every layer under the root. To lint a single
 
 - The artifact lint rules that registry ingest runs, which validate each `SKILL.md` and each `ARTIFACT.md` against the type's schema.
 - The `DOMAIN.md` import checks.
-- The `DOMAIN.md` body-size warning, which registry ingest does not apply. The command does not check the size of a `DOMAIN.md` `discovery:` block, because that check depends on the registry's `discovery.allow_per_domain_overrides` setting, which the command does not read.
+- The `DOMAIN.md` body-size warning, which registry ingest does not apply. The command does not run the warning on a `DOMAIN.md` `discovery:` block, which applies when the registry's `discovery.allow_per_domain_overrides` setting is false, because the command does not read that setting.
 - The catalog advisories: `lint.thin_description`, `lint.colliding_descriptions`, and `lint.near_duplicate_content`. Each is a warning. Registry ingest runs them over the layer it ingests and reports them without blocking the ingest, and the command runs them over every artifact it walks. [Skill lint checks](../authoring/frontmatter-reference#skill-lint-checks) describes each one and the `lint_suppress` field that silences it.
 
 The command refuses each artifact whose `ARTIFACT.md` declares `extends:`. Without `--json`, it prints a `rejected: <id> (ingest.invalid_artifact): <reason>` line on standard error for each one. With `--json`, the artifact appears in `rejected` with `details.constraint: "extends_removed"`. In both cases the command lints the remaining artifacts and exits 1. `PODIUM_LINT_*` environment variables set the size and similarity thresholds, as [Lint](configuration#lint) in the configuration reference lists.

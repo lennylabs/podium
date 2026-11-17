@@ -241,7 +241,7 @@ Each entry of `freeze_windows` takes these keys:
 
 These variables set the lint thresholds. Registry ingest reads them, and `podium lint` reads the same variables, so a CI run and the registry apply the same threshold when both environments set it. They have no `registry.yaml` key, because `podium lint` does not read `registry.yaml`.
 
-An unset or empty variable keeps the default. A value that does not parse, or that falls outside its range, keeps the default, and the process logs a warning that names the variable. Integer values are positive, and the similarity thresholds range from 0.5 to 1.0. A token count is the estimate of the byte length divided by four, rounded up.
+An unset or empty variable keeps the default. A value that does not parse, or that falls outside its range, keeps the default, and the process logs a warning that names the variable on standard error. The registry reads the variables for every ingest, so it logs the warning on each ingest. Integer values are positive, and the similarity thresholds range from 0.5 to 1.0. A token count is the estimate of the byte length divided by four, rounded up.
 
 | Variable | Type | Default | Description |
 |:--|:--|:--|:--|

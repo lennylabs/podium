@@ -283,6 +283,11 @@ re-check the harness documentation when the harness or the model changes.
   target. A one-shot sync exits 1, a `--watch` cycle counts toward exit status 1
   on interrupt, and a `--config` target counts as failed.
 
+An offline-first run that leaves the existing output in place computes no
+estimate under any check mode. A run that computes no estimate, for this reason
+or for one of the reasons above, carries `listing: null` in its `--json`
+envelope.
+
 The check never changes what `podium sync` writes. The
 [Listing budget](../reference/cli#listing-budget) section of the CLI reference
 gives the report lines, the `listing` member of the `--json` envelope, and the
