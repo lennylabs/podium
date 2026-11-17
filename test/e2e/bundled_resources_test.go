@@ -855,12 +855,10 @@ func TestBundled_ProvenanceAuthoredOnlyPassthrough(t *testing.T) {
 	}
 }
 
-// the claude-code adapter rewrites imported
-// provenance in a claude-native non-skill body (agent), not just skills
-// (§4.4.2). The materialized .claude/agents/<n>.md carries the
-// <untrusted-data> region. A `type: context` body is excluded here because it
-// materializes to the harness-neutral .podium/context/ bucket, which keeps the
-// canonical markers rather than the Claude rewrite (see the context case below).
+// TestBundled_ProvenanceClaudeCodeNonSkill pins that the claude-code adapter
+// rewrites imported provenance in a claude-native non-skill (agent) body as
+// well as in a skill body (§4.4.2). The materialized .claude/agents/<n>.md
+// carries the <untrusted-data> region in place of the begin-imported marker.
 func TestBundled_ProvenanceClaudeCodeNonSkill(t *testing.T) {
 	t.Parallel()
 	id := "finance/policy/payments-agent"
