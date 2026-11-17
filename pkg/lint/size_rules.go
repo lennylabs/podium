@@ -8,8 +8,8 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
-// Spec §4.1 thresholds. Constants exposed so tests can reference
-// the same numbers the rule emits.
+// Default size thresholds (§4.1, §4.3.4, §4.5.5). Each is configurable
+// through Thresholds (§13.12); the constants are the defaults.
 const (
 	// PerFileSoftCapBytes is the §4.1 per-file soft cap. Above
 	// this, ingest emits a warning.
@@ -18,7 +18,7 @@ const (
 	// Above this, ingest emits an error.
 	PerPackageSoftCapBytes = 10 * 1024 * 1024
 	// SkillBodyWarnTokens is the §4.3.4 SKILL.md body warning
-	// threshold (in tokens, 4-bytes-per-token approximation).
+	// threshold, in estimated tokens (§4.1).
 	SkillBodyWarnTokens = 5_000
 	// SkillBodyWarnLines is the §4.3.4 SKILL.md body line warning
 	// threshold.
@@ -28,15 +28,18 @@ const (
 	// type it applies to the ARTIFACT.md content.
 	ManifestErrTokens = 20_000
 	// DomainBodyWarnTokens is the §4.5.5 DOMAIN.md prose-body warning
-	// threshold: "Body length is recommended <= 2000 tokens; lint warns
-	// above."
+	// threshold: "Body length is recommended ≤ 2000 tokens. By default
+	// lint warns above 2,000 estimated tokens (§4.1), and the threshold
+	// is configurable (§13.12)."
 	DomainBodyWarnTokens = 2_000
 )
 
-// approxTokenCount estimates GPT-style token count from a byte
-// stream by dividing by four — the de facto rule of thumb that
-// matches OpenAI tokenizer averages on English prose. Lint
-// thresholds in §4 are coarse, so an estimate suffices.
+// approxTokenCount returns the §4.1 estimated token count: the byte
+// length divided by four, rounded up. Four bytes per token matches
+// tokenizer averages on English prose, and the §4 thresholds are coarse
+// enough that an estimate suffices.
+//
+// Spec: §4.1
 func approxTokenCount(b []byte) int {
 	if len(b) == 0 {
 		return 0
@@ -64,10 +67,8 @@ func countLines(b []byte) int {
 
 // ruleBundledResourceSize implements §4.1's per-file and
 // per-package soft caps for bundled resources. The caps are
-// configurable per §12 ("soft cap is configurable"):
-// perFileCap and perPackageCap override the package-default
-// constants when non-zero, threaded from Linter.PerFileSoftCapBytes /
-// Linter.PerPackageSoftCapBytes.
+// configurable (§12, §13.12); rulesWith fills perFileCap and
+// perPackageCap from the resolved Thresholds.
 type ruleBundledResourceSize struct {
 	perFileCap    int64
 	perPackageCap int64
@@ -75,27 +76,9 @@ type ruleBundledResourceSize struct {
 
 func (ruleBundledResourceSize) Code() string { return "lint.bundled_resource_size" }
 
-// perFile returns the effective per-file soft cap: the configured
-// override when set, else the §4.1 default.
-func (r ruleBundledResourceSize) perFile() int64 {
-	if r.perFileCap > 0 {
-		return r.perFileCap
-	}
-	return PerFileSoftCapBytes
-}
-
-// perPackage returns the effective per-package soft cap: the
-// configured override when set, else the §4.1 default.
-func (r ruleBundledResourceSize) perPackage() int64 {
-	if r.perPackageCap > 0 {
-		return r.perPackageCap
-	}
-	return PerPackageSoftCapBytes
-}
-
 func (r ruleBundledResourceSize) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
-	perFile := r.perFile()
-	perPackage := r.perPackage()
+	perFile := r.perFileCap
+	perPackage := r.perPackageCap
 	var out []Diagnostic
 	for _, rec := range records {
 		total := int64(0)
@@ -127,13 +110,14 @@ func (r ruleBundledResourceSize) Check(_ context.Context, _ *filesystem.Registry
 	return out
 }
 
-// ruleDomainBodySize implements §4.5.5: the DOMAIN.md prose body is
-// "recommended <= 2000 tokens; lint warns above". It walks every
-// DOMAIN.md in the registry and warns when the parsed body exceeds
-// DomainBodyWarnTokens, using the same 4-bytes-per-token approximation
-// as the manifest size rules. The warning is advisory; ingest still
-// succeeds. Author-facing (reg-driven), like the other DOMAIN.md rules.
-type ruleDomainBodySize struct{}
+// ruleDomainBodySize implements the §4.5.5 DOMAIN.md body-length
+// warning. It walks every DOMAIN.md in the registry and warns when the
+// parsed body exceeds th.DomainBodyWarnTokens estimated tokens (§4.1).
+// The warning is advisory. Ingest lints with a nil registry, so only
+// `podium lint` reports it (§13.12).
+type ruleDomainBodySize struct {
+	th Thresholds
+}
 
 func (ruleDomainBodySize) Code() string { return "lint.domain_body_size" }
 
@@ -152,14 +136,14 @@ func (r ruleDomainBodySize) Check(ctx context.Context, reg *filesystem.Registry,
 			if dom == nil {
 				continue
 			}
-			if tokens := approxTokenCount([]byte(dom.Body)); tokens > DomainBodyWarnTokens {
+			if tokens := approxTokenCount([]byte(dom.Body)); tokens > r.th.DomainBodyWarnTokens {
 				out = append(out, Diagnostic{
 					ArtifactID: path,
 					Code:       r.Code(),
 					Severity:   SeverityWarning,
 					Message: fmt.Sprintf(
-						"DOMAIN.md body is approximately %d tokens; §4.5.5 recommends <= %d",
-						tokens, DomainBodyWarnTokens),
+						"DOMAIN.md body is approximately %d tokens; lint warns above %d",
+						tokens, r.th.DomainBodyWarnTokens),
 				})
 			}
 		}
@@ -167,14 +151,16 @@ func (r ruleDomainBodySize) Check(ctx context.Context, reg *filesystem.Registry,
 	return out
 }
 
-// ruleManifestSize implements §4.1's manifest-token cap and
-// §4.3.4's SKILL.md body 5K-token / 500-line warning + 20K-token
-// error.
+// ruleManifestSize implements §4.1's manifest-token cap and the
+// §4.3.4 SKILL.md body token and line warnings, at the thresholds th
+// carries (§13.12).
 //
 // Per §4.1 the manifest-size cap applies to the SKILL.md body for
 // skills (the parsed prose body, excluding YAML frontmatter), and to
 // the ARTIFACT.md content for every other type.
-type ruleManifestSize struct{}
+type ruleManifestSize struct {
+	th Thresholds
+}
 
 func (ruleManifestSize) Code() string { return "lint.manifest_size" }
 
@@ -196,7 +182,7 @@ func (r ruleManifestSize) Check(_ context.Context, _ *filesystem.Registry, recor
 			capBody = rec.ArtifactBytes
 		}
 
-		if tokens := approxTokenCount(capBody); tokens > ManifestErrTokens {
+		if tokens := approxTokenCount(capBody); tokens > r.th.ManifestErrTokens {
 			subject := "manifest"
 			if isSkill {
 				subject = "SKILL.md body"
@@ -207,31 +193,31 @@ func (r ruleManifestSize) Check(_ context.Context, _ *filesystem.Registry, recor
 				Severity:   SeverityError,
 				Message: fmt.Sprintf(
 					"%s is approximately %d tokens, exceeding the cap of %d tokens",
-					subject, tokens, ManifestErrTokens),
+					subject, tokens, r.th.ManifestErrTokens),
 			})
 		}
 
 		// §4.3.4 SKILL.md body soft caps, measured on the parsed body.
 		if isSkill && rec.Skill != nil {
 			body := []byte(rec.Skill.Body)
-			if bodyTokens := approxTokenCount(body); bodyTokens > SkillBodyWarnTokens {
+			if bodyTokens := approxTokenCount(body); bodyTokens > r.th.SkillBodyWarnTokens {
 				out = append(out, Diagnostic{
 					ArtifactID: rec.ID,
 					Code:       r.Code(),
 					Severity:   SeverityWarning,
 					Message: fmt.Sprintf(
-						"SKILL.md body is approximately %d tokens; the guidance recommends <= %d",
-						bodyTokens, SkillBodyWarnTokens),
+						"SKILL.md body is approximately %d tokens; lint warns above %d",
+						bodyTokens, r.th.SkillBodyWarnTokens),
 				})
 			}
-			if bodyLines := countLines(body); bodyLines > SkillBodyWarnLines {
+			if bodyLines := countLines(body); bodyLines > r.th.SkillBodyWarnLines {
 				out = append(out, Diagnostic{
 					ArtifactID: rec.ID,
 					Code:       r.Code(),
 					Severity:   SeverityWarning,
 					Message: fmt.Sprintf(
-						"SKILL.md body is %d lines; the guidance recommends <= %d",
-						bodyLines, SkillBodyWarnLines),
+						"SKILL.md body is %d lines; lint warns above %d",
+						bodyLines, r.th.SkillBodyWarnLines),
 				})
 			}
 		}

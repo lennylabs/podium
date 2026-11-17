@@ -19,11 +19,12 @@ import (
 // description that clears either bound is left alone, so only genuinely
 // thin summaries draw the advisory.
 const (
-	// MinDescriptionChars is the lower bound, in runes, below which a
-	// non-empty description is treated as thin.
+	// MinDescriptionChars is the default lower bound, in code points,
+	// below which a non-empty description is treated as thin.
 	MinDescriptionChars = 15
-	// MinDescriptionWords is the lower bound, in whitespace-separated
-	// words, below which a description is treated as thin.
+	// MinDescriptionWords is the default lower bound, in
+	// white-space-separated words, below which a description is treated
+	// as thin.
 	MinDescriptionWords = 3
 )
 
@@ -40,8 +41,14 @@ const (
 // check is inherently cross-artifact and only carries meaning over a set
 // of artifacts, which the ingest batch supplies.
 func DescriptionAdvisoryRules() []Rule {
+	return descriptionRules(DefaultThresholds())
+}
+
+// descriptionRules builds the description-quality rules from th, which
+// the caller has already resolved.
+func descriptionRules(th Thresholds) []Rule {
 	return []Rule{
-		ruleThinDescription{},
+		ruleThinDescription{minChars: th.MinDescriptionChars, minWords: th.MinDescriptionWords},
 		ruleCollidingDescriptions{},
 	}
 }
@@ -69,8 +76,12 @@ func effectiveDescription(rec filesystem.ArtifactRecord) string {
 // §12). An absent description is left to the per-type required-field rules
 // (a skill with an empty description is already a hard error via
 // lint.skill_md_compliance); this rule targets the present-but-inadequate
-// case. Honors the per-artifact lint_suppress flag.
-type ruleThinDescription struct{}
+// case. minChars counts code points and minWords counts white-space-separated
+// words (§7.3.1, §13.12). Honors the per-artifact lint_suppress flag.
+type ruleThinDescription struct {
+	minChars int
+	minWords int
+}
 
 func (ruleThinDescription) Code() string { return "lint.thin_description" }
 
@@ -86,10 +97,10 @@ func (r ruleThinDescription) Check(_ context.Context, _ *filesystem.Registry, re
 		}
 		chars := utf8.RuneCountInString(desc)
 		words := len(strings.Fields(desc))
-		if chars < MinDescriptionChars || words < MinDescriptionWords {
+		if chars < r.minChars || words < r.minWords {
 			out = append(out, warn(rec.ID, r.Code(),
 				fmt.Sprintf("description is thin (%d chars, %d words); answer \"when should I use this?\" in one or two sentences (want at least %d chars and %d words)",
-					chars, words, MinDescriptionChars, MinDescriptionWords)))
+					chars, words, r.minChars, r.minWords)))
 		}
 	}
 	return out

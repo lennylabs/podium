@@ -72,6 +72,35 @@ func TestThinDescription_UsesSkillDescription(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.1, §13.12 — the thin-description bounds are configurable,
+// and the character bound counts code points. At the default bound the
+// 14-code-point, 26-byte description "éé éé éééééééé" is thin, which a
+// rule comparing len(desc) with the bound misses. A configured word bound
+// replaces the MinDescriptionWords constant.
+func TestThinDescription_ConfiguredBounds(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		th   Thresholds
+		desc string
+		thin bool
+	}{
+		{"chars 20: 19 code points", Thresholds{MinDescriptionChars: 20}, "abcd efgh ijkl mnop", true},
+		{"chars 20: 20 code points", Thresholds{MinDescriptionChars: 20}, "abcd efgh ijkl mnopq", false},
+		{"default: 14 code points in 26 bytes", Thresholds{}, "éé éé éééééééé", true},
+		{"default: 15 code points of multi-byte runes", Thresholds{}, "éé éé ééééééééé", false},
+		{"words 5: 4 words", Thresholds{MinDescriptionWords: 5}, "alpha bravo charlie delta", true},
+		{"words 5: 5 words", Thresholds{MinDescriptionWords: 5}, "alpha bravo charlie delta echo", false},
+	}
+	for _, c := range cases {
+		rules := descriptionRules(c.th.resolved())
+		diags := (&Linter{Rules: rules}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec("x", c.desc)})
+		if got := hasCode(diags, "lint.thin_description"); got != c.thin {
+			t.Errorf("%s: %q thin=%v, want %v (%v)", c.name, c.desc, got, c.thin, diags)
+		}
+	}
+}
+
 // Spec: §4.3.4 lint_suppress — the advisory rules are non-error, so a
 // per-artifact lint_suppress entry silences them.
 func TestThinDescription_HonorsSuppress(t *testing.T) {
