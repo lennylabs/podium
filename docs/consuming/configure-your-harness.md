@@ -766,17 +766,20 @@ skill, subagent, and hook surfaces. Skills live at `.agents/skills/` rather than
   Ingest warns when an artifact's `target_harnesses:` names codex.
 - Codex reads hooks from the `[hooks]` table in `.codex/config.toml`, so `hook`
   artifacts materialize instead of failing ingest.
+- Codex runs these hooks in its interactive mode. `codex exec` does not fire
+  lifecycle hooks in codex-cli 0.136.0.
 - Codex custom prompts are user-scope (`~/.codex/prompts/`), so Codex has no
   project-scope command file. A user-invoked skill reaches Codex as a skill
   with its `agents/openai.yaml`.
-- The adapter keeps every other key of an authored `agents/openai.yaml` and
-  sets `policy.allow_implicit_invocation` to the YAML boolean `false`. A
-  `policy` value that is not a mapping becomes a mapping that holds only that
-  key. An authored file that does not parse as YAML, repeats a mapping key, or
-  is not a YAML mapping is replaced with a file that holds only that policy, so
-  a malformed file fails no sync or publish.
-- Codex runs these hooks in its interactive mode. `codex exec` does not fire
-  lifecycle hooks in codex-cli 0.136.0.
+- For a skill whose `invocation` is `user`, the adapter keeps every other key
+  of an authored `agents/openai.yaml` and sets
+  `policy.allow_implicit_invocation` to the YAML boolean `false`. A `policy`
+  value that is not a mapping becomes a mapping that holds only that key. An
+  authored file that does not parse as YAML, repeats a mapping key, or is not a
+  YAML mapping is replaced with a file that holds only that policy, so a
+  malformed file fails no sync or publish.
+- For a skill whose `invocation` is `any`, an authored `agents/openai.yaml` is
+  copied unchanged, and the adapter writes none when the author wrote none.
 
 **Marketplace.** Codex has a git-repo marketplace. A `kind: marketplace` sync
 target writes `.agents/plugins/marketplace.json` at the repository root and a
