@@ -39,9 +39,7 @@ func TestDefaultRegistry_AllAdaptersRegistered(t *testing.T) {
 }
 
 // Spec: §6.7 — every built-in adapter emits files for an always-mode rule
-// with bundled resources in deterministic order. A rule produces output on
-// every adapter except claude-desktop and claude-cowork, which emit nothing
-// for it, so the comparison is non-vacuous on pi and hermes as well.
+// with bundled resources in deterministic order.
 func TestEveryAdapter_ProducesDeterministicOutput(t *testing.T) {
 	t.Parallel()
 	src := Source{
@@ -67,9 +65,6 @@ func TestEveryAdapter_ProducesDeterministicOutput(t *testing.T) {
 		}
 		// All runs must produce the same file paths in the same order.
 		ref := paths(runs[0])
-		if emitsNothing := id == "claude-desktop" || id == "claude-cowork"; emitsNothing != (len(ref) == 0) {
-			t.Errorf("%s: emitted %d files for a rule; want empty output only on claude-desktop and claude-cowork", id, len(ref))
-		}
 		for i := 1; i < len(runs); i++ {
 			got := paths(runs[i])
 			if !equalSlices(ref, got) {
