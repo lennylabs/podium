@@ -34,7 +34,7 @@ Names a deployment can register through the `TypeProvider` SPI (§9) when it has
 
 The type system is extensible: deployments register additional types with their own lint rules. Podium treats every type uniformly for discovery, search, and load; type-specific runtime behaviour lives in hosts.
 
-The type determines indexing, loading semantics, governance requirements, and search ranking. A `context` artifact does not need the same safety review as a `skill` because instructions are more dangerous than reference data.
+The type determines indexing, loading semantics, governance requirements, and search ranking.
 
 **Manifest size lint.** Lint estimates a token count as the byte length divided by four, rounded up. Lint errors when manifest content exceeds 20,000 estimated tokens by default, and the cap is configurable (§13.12). Larger reference content should be factored out as a separate `type: context` artifact. For skills, the cap applies to the `SKILL.md` body; the agentskills.io spec recommends keeping `SKILL.md` body content under 5K tokens and ≤ 500 lines, with longer reference material moved into `references/`.
 
