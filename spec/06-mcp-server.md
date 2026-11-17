@@ -331,7 +331,7 @@ Notes on partial and migrating surfaces:
 
 | Harness | Git-repo distribution | Manifest (fixed location) | Components | Publish target |
 | --- | --- | --- | --- | --- |
-| `claude-code`, `claude-desktop`, `claude-cowork` | marketplace, shared format | `.claude-plugin/marketplace.json` (root) | `skills/`, `agents/`, `commands/`, `hooks/`, and `.mcp.json` | yes (one Claude marketplace) |
+| `claude-code`, `claude-desktop`, `claude-cowork` | marketplace, shared format | `.claude-plugin/marketplace.json` (root) | `skills/`, `agents/`, `hooks/`, and `.mcp.json` | yes (one Claude marketplace) |
 | `codex` | marketplace | `.agents/plugins/marketplace.json` (root) | `skills/`, `hooks/hooks.json`, `.app.json`, and `.mcp.json` | yes |
 | `cursor` | team marketplace | `.cursor-plugin/marketplace.json` (root) | `skills/`, `rules/*.mdc`, and `mcp.json` | yes |
 | `gemini` | extension | `gemini-extension.json` (root); one extension per repository | `commands/*.toml`, the context file, and `mcpServers` | yes |
