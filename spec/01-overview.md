@@ -39,7 +39,7 @@ Organizations adopting AI accumulate large libraries of authored content of many
 3. **Visibility control.** Different users see different subsets of the catalog. The registry is the central enforcement point on every read.
 4. **Layered composition.** Organization-wide content, team-specific content, individuals' personal artifacts, and workspace experiments need to compose deterministically with clear precedence and no silent shadowing between registry-side layers.
 5. **Governance, classification, lifecycle.** Sensitivity labels, ownership, deprecation paths, and reverse-dependency impact analysis need to be first-class.
-6. **Type heterogeneity.** Every artifact type fits in one registry: skills, agents, contexts, commands, rules, hooks, MCP server registrations, eval datasets, and model files. One storage and discovery model, plus dependency edges that cross types (e.g., an agent's `delegates_to:` another agent; a skill's `mcpServers:` resolving to `mcp-server`-type artifacts).
+6. **Type heterogeneity.** Every artifact type fits in one registry: skills, agents, rules, hooks, MCP server registrations, eval datasets, and model files. One storage and discovery model, plus dependency edges that cross types (e.g., an agent's `delegates_to:` another agent; a skill's `mcpServers:` resolving to `mcp-server`-type artifacts).
 7. **Heterogeneous consumers.** Agent runtimes, build pipelines, terminal CLIs, evaluation harnesses, and other AI systems all read from the same catalogue; none should need its own copy. Some speak MCP; many do not.
 8. **Cross-harness portability.** The same artifact should be deliverable into Claude Code, Cursor, Codex, Gemini, or a custom runtime without forking per harness. Per-harness convention sprawl is an authoring tax.
 
