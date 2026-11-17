@@ -80,13 +80,15 @@ func skillMarkdown(src Source, ctl userOnlyControl) []byte {
 }
 
 // withUserOnlyFrontmatter makes `disable-model-invocation: true` the single
-// top-level occurrence of the key in b's frontmatter. A frontmatter that does
-// not decode to a mapping takes the injected line anyway, because the skill
-// is user-invoked and a lenient harness reader still sees the control.
+// top-level occurrence of the key in b's frontmatter. A frontmatter that has
+// no closing delimiter, or does not decode to a mapping, takes the injected
+// line anyway, because the skill is user-invoked and a lenient harness reader
+// still sees the control. injectFrontmatterLine leaves b unchanged when it has
+// no opening delimiter, which no harness reads as frontmatter.
 func withUserOnlyFrontmatter(b []byte) []byte {
 	fm, _, err := manifest.SplitFrontmatter(b)
 	if err != nil {
-		return b
+		return injectFrontmatterLine(b, userOnlyKey, "true")
 	}
 	var doc yaml.Node
 	if yaml.Unmarshal(fm, &doc) != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
@@ -99,15 +101,20 @@ func withUserOnlyFrontmatter(b []byte) []byte {
 			keys = append(keys, i)
 		}
 	}
-	switch {
-	case len(keys) == 0:
+	if len(keys) == 0 {
 		return injectFrontmatterLine(b, userOnlyKey, "true")
-	case len(keys) == 1 && isYAMLTrue(root.Content[keys[0]+1]):
-		return b
-	case blockKeyLines(root, keys):
-		return replaceUserOnlyLines(b, fm, root, keys)
 	}
-	return reencodeUserOnly(b, &doc, keys)
+	if len(keys) == 1 && isYAMLTrue(root.Content[keys[0]+1]) {
+		return b
+	}
+	lines := strings.SplitAfter(string(b), "\n")
+	closing := closingDelimiterLine(fm)
+	if !keysShareLine(root) {
+		if out, ok := replaceUserOnlyLines(lines, closing, root, keys); ok {
+			return out
+		}
+	}
+	return reencodeUserOnly(lines, closing, &doc, keys)
 }
 
 // isYAMLTrue reports whether v is the YAML boolean true (after alias
@@ -119,67 +126,83 @@ func isYAMLTrue(v *yaml.Node) bool {
 	return v.Kind == yaml.ScalarNode && v.ShortTag() == "!!bool" && strings.EqualFold(v.Value, "true")
 }
 
-// blockKeyLines reports whether every key at the given root.Content indices
-// starts its own column-one line in a block mapping, which is the layout the
-// line replacement can edit without touching another key.
-func blockKeyLines(root *yaml.Node, keys []int) bool {
-	if root.Style&yaml.FlowStyle != 0 {
-		return false
-	}
-	for _, i := range keys {
-		if root.Content[i].Column != 1 {
-			return false
-		}
-		if i+2 < len(root.Content) && root.Content[i+2].Line <= root.Content[i].Line {
-			return false
-		}
-	}
-	return true
+// closingDelimiterLine returns the index, in the document split into lines,
+// of the closing "---" of the frontmatter fm that manifest.SplitFrontmatter
+// returned. The opening delimiter is line 0 and fm carries no trailing line
+// break, so frontmatter line n, which yaml.v3 reports as Line n, is line n of
+// the document.
+func closingDelimiterLine(fm []byte) int {
+	return bytes.Count(fm, []byte("\n")) + 2
+}
+
+// keysShareLine reports whether root is a flow mapping, the one layout whose
+// top-level keys can share a line, which the line replacement cannot edit
+// without touching another key. YAML starts every key of a block mapping, at
+// any indentation, on its own line.
+func keysShareLine(root *yaml.Node) bool {
+	return root.Style&yaml.FlowStyle != 0
 }
 
 // replaceUserOnlyLines rewrites the lines each occurrence of the key spans:
-// the first occurrence becomes `disable-model-invocation: true` and later
-// occurrences are removed. An occurrence spans from its key line to the line
-// before the next top-level key, less trailing blank and comment lines, so
-// every other frontmatter line stays byte-identical. Frontmatter line n is
-// line n of b, because the opening delimiter is line 0.
-func replaceUserOnlyLines(b, fm []byte, root *yaml.Node, keys []int) []byte {
-	lines := strings.SplitAfter(string(b), "\n")
-	closing := bytes.Count(fm, []byte("\n")) + 2 // index of the closing "---"
+// the first occurrence becomes `disable-model-invocation: true` at the
+// indentation and line ending of its own key line, and later occurrences are
+// removed. An occurrence spans from its key line to the line before the next
+// top-level key, less trailing blank lines and comments indented no deeper
+// than the key, so every other line stays byte-identical. It reports false
+// when a key line does not start with its indentation, as with an explicit
+// `? key`, and the caller re-encodes that frontmatter instead.
+func replaceUserOnlyLines(lines []string, closing int, root *yaml.Node, keys []int) ([]byte, bool) {
+	out := append([]string(nil), lines...)
 	for k := len(keys) - 1; k >= 0; k-- {
 		i := keys[k]
-		start := root.Content[i].Line
+		start, indent := root.Content[i].Line, root.Content[i].Column-1
+		if indent > len(out[start]) || strings.TrimLeft(out[start][:indent], " ") != "" {
+			return nil, false
+		}
 		end := closing
 		if i+2 < len(root.Content) {
 			end = root.Content[i+2].Line
 		}
-		for end-1 > start && isBlankOrComment(lines[end-1]) {
+		for end-1 > start && isTrailingTrivia(out[end-1], indent) {
 			end--
 		}
 		var repl []string
 		if k == 0 {
-			eol := "\n"
-			if strings.HasSuffix(lines[start], "\r\n") {
-				eol = "\r\n"
-			}
-			repl = []string{userOnlyKey + ": true" + eol}
+			repl = []string{out[start][:indent] + userOnlyKey + ": true" + lineEnding(out[start])}
 		}
-		lines = append(lines[:start], append(repl, lines[end:]...)...)
+		out = append(out[:start], append(repl, out[end:]...)...)
 	}
-	return []byte(strings.Join(lines, ""))
+	return []byte(strings.Join(out, "")), true
 }
 
-// isBlankOrComment reports whether line is empty or a column-one comment.
-func isBlankOrComment(line string) bool {
+// isTrailingTrivia reports whether line is blank or a comment whose "#" sits
+// no deeper than indent. A deeper "#" line can be content of the key's block
+// scalar, so it stays inside the replaced span.
+func isTrailingTrivia(line string, indent int) bool {
 	t := strings.TrimRight(line, "\r\n")
-	return strings.TrimSpace(t) == "" || strings.HasPrefix(t, "#")
+	trimmed := strings.TrimLeft(t, " ")
+	if strings.TrimSpace(trimmed) == "" {
+		return true
+	}
+	return strings.HasPrefix(trimmed, "#") && len(t)-len(trimmed) <= indent
 }
 
-// reencodeUserOnly handles a frontmatter whose keys share a line, such as a
-// flow mapping, which the line replacement cannot edit. It sets the first
+// lineEnding returns the line break that ends line: CRLF or LF.
+func lineEnding(line string) string {
+	if strings.HasSuffix(line, "\r\n") {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+// reencodeUserOnly handles a frontmatter the line replacement cannot edit,
+// such as a flow mapping whose keys share a line. It sets the first
 // occurrence to the boolean true, drops later ones, and re-encodes the
-// frontmatter. The re-encoding normalizes that frontmatter's layout.
-func reencodeUserOnly(b []byte, doc *yaml.Node, keys []int) []byte {
+// frontmatter between the delimiters. The re-encoding normalizes the layout
+// of the frontmatter alone: the opening delimiter line, the frontmatter's
+// line ending, and every byte from the closing delimiter on, including the
+// authored separator before the body, are kept.
+func reencodeUserOnly(lines []string, closing int, doc *yaml.Node, keys []int) []byte {
 	root := doc.Content[0]
 	for k := len(keys) - 1; k > 0; k-- {
 		i := keys[k]
@@ -190,10 +213,13 @@ func reencodeUserOnly(b []byte, doc *yaml.Node, keys []int) []byte {
 	if err != nil {
 		// Unreachable for a node tree yaml.v3 just decoded; kept so a future
 		// encoder failure leaves the authored bytes rather than an empty file.
-		return b
+		return []byte(strings.Join(lines, ""))
 	}
-	_, body, _ := manifest.SplitFrontmatter(b)
-	return append([]byte("---\n"+string(out)+"---\n\n"), body...)
+	fm := string(out)
+	if eol := lineEnding(lines[0]); eol != "\n" {
+		fm = strings.ReplaceAll(fm, "\n", eol)
+	}
+	return []byte(lines[0] + fm + strings.Join(lines[closing:], ""))
 }
 
 // openAIYAMLFile returns the Codex agents/openai.yaml for a user-invoked

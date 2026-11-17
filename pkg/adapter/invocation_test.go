@@ -101,19 +101,68 @@ func TestSkillMarkdown_Control(t *testing.T) {
 			t.Errorf("body lost:\n%s", got)
 		}
 	})
-	t.Run("indented and duplicated flow keys are re-encoded", func(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{
+			name: "indented block mapping",
+			in:   "---\n  name: ship\n  description: d\n  disable-model-invocation: false\n---\nBody.\n",
+			want: "---\n  name: ship\n  description: d\n  disable-model-invocation: true\n---\nBody.\n",
+		},
+		{
+			name: "indented block mapping with crlf, comments, and a duplicate",
+			in:   "---\r\n  name: ship\r\n  disable-model-invocation: |\r\n    false\r\n    # block content\r\n  # keep this comment\r\n  description: d\r\n  disable-model-invocation: no\r\n---\r\nBody.\r\n",
+			want: "---\r\n  name: ship\r\n  disable-model-invocation: true\r\n  # keep this comment\r\n  description: d\r\n---\r\nBody.\r\n",
+		},
+	} {
+		tc := tc
+		t.Run(tc.name+" is edited line by line", func(t *testing.T) {
+			t.Parallel()
+			got := string(skillMarkdown(userSkillSource(tc.in), controlFrontmatter))
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+	for _, tc := range []struct{ name, in, head, tail string }{
+		{
+			name: "duplicated flow keys",
+			in:   "---\n{name: ship, disable-model-invocation: false, description: d, disable-model-invocation: no}\n---\nBody.\n",
+			head: "---\n", tail: "---\nBody.\n",
+		},
+		{
+			name: "crlf flow mapping",
+			in:   "---\r\n{name: ship, description: d, disable-model-invocation: false}\r\n---\r\n\r\nBody.\r\n",
+			head: "---\r\n", tail: "---\r\n\r\nBody.\r\n",
+		},
+		{
+			name: "explicit key",
+			in:   "---\nname: ship\n? disable-model-invocation\n: false\ndescription: d\n---\nBody.\n",
+			head: "---\n", tail: "---\nBody.\n",
+		},
+	} {
+		tc := tc
+		t.Run(tc.name+" is re-encoded between the delimiters", func(t *testing.T) {
+			t.Parallel()
+			got := string(skillMarkdown(userSkillSource(tc.in), controlFrontmatter))
+			if !strings.HasPrefix(got, tc.head) || !strings.HasSuffix(got, tc.tail) {
+				t.Errorf("got %q, want the opening line %q and the authored tail %q", got, tc.head, tc.tail)
+			}
+			if fm := frontmatterOf(t, []byte(strings.ReplaceAll(got, "\r\n", "\n"))); fm[userOnlyKey] != true || fm["description"] != "d" || fm["name"] != "ship" {
+				t.Errorf("frontmatter = %#v", fm)
+			}
+			if n := strings.Count(got, userOnlyKey); n != 1 {
+				t.Errorf("%d control keys in %q", n, got)
+			}
+			if eol := tc.head[3:]; strings.Count(got, "\n") != strings.Count(got, eol) {
+				t.Errorf("line endings mixed in %q", got)
+			}
+		})
+	}
+	t.Run("unterminated frontmatter takes the injected line", func(t *testing.T) {
 		t.Parallel()
-		for _, in := range []string{
-			"---\n  name: ship\n  description: d\n  disable-model-invocation: false\n---\nBody.\n",
-			"---\n{name: ship, disable-model-invocation: false, description: d, disable-model-invocation: no}\n---\nBody.\n",
-		} {
-			got := skillMarkdown(userSkillSource(in), controlFrontmatter)
-			if fm := frontmatterOf(t, got); fm[userOnlyKey] != true || fm["description"] != "d" {
-				t.Errorf("%q: frontmatter = %#v", in, fm)
-			}
-			if n := strings.Count(string(got), userOnlyKey); n != 1 {
-				t.Errorf("%q: %d control keys in:\n%s", in, n, got)
-			}
+		in := "---\nname: ship\ndescription: d\nBody.\n"
+		got := string(skillMarkdown(userSkillSource(in), controlFrontmatter))
+		if want := "---\ndisable-model-invocation: true\n" + in[4:]; got != want {
+			t.Errorf("got %q, want %q", got, want)
 		}
 	})
 	for _, in := range []string{
