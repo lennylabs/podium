@@ -308,6 +308,16 @@ const referenceScheme = /^[a-z][a-z0-9+.\-]*:/i;
  * artifact the viewer has a route for, or a file this artifact bundles. */
 type Reference = { kind: 'artifact'; id: string } | { kind: 'resource'; name: string };
 
+/** decodeReferencePath decodes the percent-encoding of a reference path, and
+ * returns the path as written when it holds a malformed escape. */
+function decodeReferencePath(path: string): string {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+}
+
 /** resolveReference returns what a relative href names, or null when the href
  * names something this UI has no answer for: a fragment, a root-relative
  * path, an absolute URL, or one of the artifact's own manifest files. It
@@ -320,7 +330,10 @@ function resolveReference(href: string, resources: ReadonlySet<string>): Referen
   }
   // A query or a fragment is not part of an artifact ID, and neither is a
   // §4.7.6 version pin, which the linter strips before the catalog lookup.
-  const target = trimmed.split(/[?#]/, 1)[0].replace(/^\.\//, '');
+  // The linter then decodes percent-encoding (§4.4), so `my%20notes.md`
+  // names the bundled file `my notes.md`; a target that does not decode is
+  // looked up as written, as the linter does.
+  const target = decodeReferencePath(trimmed.split(/[?#]/, 1)[0]).replace(/^\.\//, '');
   if (target === '' || target === '.' || target === '..' || target.startsWith('../')) {
     return null;
   }
