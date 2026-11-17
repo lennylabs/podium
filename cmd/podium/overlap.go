@@ -13,9 +13,22 @@ import (
 )
 
 // overlapResponseJSON is the part of the GET /v1/overlap response the text
-// output and the exit status read. --json writes the response itself.
+// output, the coverage warning, and the exit status read. --json writes the
+// response itself.
 type overlapResponseJSON struct {
+	SemanticOverlap struct {
+		Computed *int `json:"computed"`
+		Total    *int `json:"total"`
+	} `json:"semantic_overlap"`
 	Diagnostics []lintDiagnosticJSON `json:"diagnostics"`
+}
+
+// incomplete reports whether the response says some visible artifacts have
+// no current semantic overlap computation: computed below total. Both are
+// null when the check is off, which is not incomplete.
+func (r overlapResponseJSON) incomplete() bool {
+	c, t := r.SemanticOverlap.Computed, r.SemanticOverlap.Total
+	return c != nil && t != nil && *c < *t
 }
 
 // overlapCmd calls the §7.3.1 catalog overlap report.
@@ -61,7 +74,10 @@ func overlapCmd(args []string) int {
 
 // renderOverlap writes the overlap response and returns the exit status: 1
 // for an error envelope or an unreadable body, and otherwise the `podium
-// lint` status for the diagnostics under failOn.
+// lint` status for the diagnostics under failOn. When computed is below total
+// it prints a warning naming both numbers on stderr, under --json too, and
+// counts it as a warning for failOn, so a report with pending or failed
+// computations is not read as clean.
 //
 // Spec: §7.3.1
 func renderOverlap(stdout, stderr io.Writer, body []byte, status int, asJSON bool, failOn lint.Severity) int {
@@ -84,6 +100,13 @@ func renderOverlap(stdout, stderr io.Writer, body []byte, status int, asJSON boo
 		})
 	}
 	exit := lintExitCode(diags, false, failOn)
+	if resp.incomplete() {
+		c, t := *resp.SemanticOverlap.Computed, *resp.SemanticOverlap.Total
+		_, _ = fmt.Fprintf(stderr, "warning: semantic overlap is computed for %d of %d artifacts; the report can miss overlap of the other %d until their computation succeeds\n", c, t, t-c)
+		if failOn == lint.SeverityWarning {
+			exit = 1
+		}
+	}
 	if asJSON {
 		var out bytes.Buffer
 		if err := json.Indent(&out, body, "", "  "); err != nil {

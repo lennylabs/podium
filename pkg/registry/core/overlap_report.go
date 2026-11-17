@@ -29,12 +29,21 @@ type OverlapReport struct {
 }
 
 // OverlapState reports whether the read included lint.semantic_overlap, the
-// threshold it applied, and the model identifier it filtered records by.
-// Threshold and Model are null when the check is off.
+// threshold it applied, the model identifier it filtered records by, and how
+// many of the artifacts the caller can see have a current computation.
+// Computed counts the visible artifacts whose last successful computation is
+// for their current served version and the configured model, and Total counts
+// the visible artifacts, so a Computed below Total tells a client the report
+// can miss overlap of artifacts not computed yet or whose computation failed.
+// Threshold, Model, Computed, and Total are null when the check is off.
+//
+// Spec: §7.3.1
 type OverlapState struct {
 	State     string   `json:"state"`
 	Threshold *float64 `json:"threshold"`
 	Model     *string  `json:"model"`
+	Computed  *int     `json:"computed"`
+	Total     *int     `json:"total"`
 }
 
 // OverlapArtifact names one artifact of the report so a client can show it
@@ -119,7 +128,12 @@ func (r *Registry) CatalogOverlap(ctx context.Context, id layer.Identity, q Over
 	state := OverlapState{State: "off"}
 	if r.overlap.semantic.Enabled {
 		model := r.overlapModel()
-		state = OverlapState{State: "on", Threshold: &threshold, Model: &model}
+		computed, err := r.computedCount(ctx, served, model)
+		if err != nil {
+			return nil, err
+		}
+		total := len(served)
+		state = OverlapState{State: "on", Threshold: &threshold, Model: &model, Computed: &computed, Total: &total}
 		semantic, err := r.storedSemanticDiagnostics(ctx, served, served, threshold)
 		if err != nil {
 			return nil, err
@@ -128,6 +142,29 @@ func (r *Registry) CatalogOverlap(ctx context.Context, id layer.Identity, q Over
 		lint.SortDiagnostics(diags)
 	}
 	return newOverlapReport(state, diags, q.ArtifactID, overlapArtifacts(served)), nil
+}
+
+// computedCount returns how many of served, the current served versions the
+// caller can see, have a last successful computation for that version and
+// model.
+//
+// Spec: §7.3.1
+func (r *Registry) computedCount(ctx context.Context, served []store.ManifestRecord, model string) (int, error) {
+	runs, err := r.store.ListOverlapComputations(ctx, r.TenantFor(ctx))
+	if err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	entries := make(map[string]store.OverlapComputation, len(runs))
+	for _, c := range runs {
+		entries[c.ArtifactID] = c
+	}
+	n := 0
+	for _, m := range served {
+		if c, ok := entries[m.ArtifactID]; ok && c.Version == m.Version && c.ModelID == model {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // overlapArtifacts maps the identifier of each served record the caller can

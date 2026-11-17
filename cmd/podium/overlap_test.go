@@ -49,6 +49,43 @@ func TestRenderOverlap(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.1 — when computed is below total, podium overlap prints a
+// warning on standard error naming both numbers, with and without --json,
+// and counts it as a warning: --fail-on warning exits 1 and the default
+// --fail-on error keeps exit 0. computed equal to total, and the check off,
+// print no warning.
+func TestRenderOverlap_IncompleteComputation(t *testing.T) {
+	partial := `{"semantic_overlap":{"state":"on","threshold":0.85,"model":"m1","computed":3,"total":5},"diagnostics":[],"counts":{"error":0,"warning":0,"info":0}}`
+	for _, asJSON := range []bool{false, true} {
+		var out, errOut bytes.Buffer
+		if code := renderOverlap(&out, &errOut, []byte(partial), 200, asJSON, lint.SeverityError); code != 0 {
+			t.Errorf("json=%v --fail-on error: exit %d, want 0", asJSON, code)
+		}
+		if !strings.Contains(errOut.String(), "warning: semantic overlap is computed for 3 of 5 artifacts") {
+			t.Errorf("json=%v stderr = %q, want the warning naming 3 and 5", asJSON, errOut.String())
+		}
+		if asJSON {
+			var obj map[string]any
+			if err := json.Unmarshal(out.Bytes(), &obj); err != nil {
+				t.Errorf("--json stdout carries more than the response object: %q (%v)", out.String(), err)
+			}
+		}
+		errOut.Reset()
+		if code := renderOverlap(&out, &errOut, []byte(partial), 200, asJSON, lint.SeverityWarning); code != 1 {
+			t.Errorf("json=%v --fail-on warning: exit %d, want 1", asJSON, code)
+		}
+	}
+	for _, body := range []string{
+		`{"semantic_overlap":{"state":"on","threshold":0.85,"model":"m1","computed":5,"total":5},"diagnostics":[],"counts":{"error":0,"warning":0,"info":0}}`,
+		`{"semantic_overlap":{"state":"off","threshold":null,"model":null,"computed":null,"total":null},"diagnostics":[],"counts":{"error":0,"warning":0,"info":0}}`,
+	} {
+		var out, errOut bytes.Buffer
+		if code := renderOverlap(&out, &errOut, []byte(body), 200, false, lint.SeverityWarning); code != 0 || errOut.Len() != 0 {
+			t.Errorf("complete or off report: exit %d stderr %q, want 0 and no warning", code, errOut.String())
+		}
+	}
+}
+
 // Spec: §7.3.1 — podium admin rebuild-overlap prints the counts and exits 1
 // when the response is an error envelope or failed is not zero.
 func TestRenderRebuildOverlap(t *testing.T) {

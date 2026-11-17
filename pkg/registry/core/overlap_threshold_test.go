@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/layer"
@@ -20,6 +21,53 @@ func (f *overlapFixture) writeOwnedModel(model string, peers map[string]float64)
 	comp := store.OverlapComputation{ArtifactID: "a", Version: "1.0.0", ModelID: model, ComputedAt: overlapNow}
 	if err := f.st.ReplaceOverlapRecords(f.ctx, "t", comp, recs); err != nil {
 		f.t.Fatalf("ReplaceOverlapRecords: %v", err)
+	}
+}
+
+// Spec: §7.3.1 — the report gives total, the number of artifacts the caller
+// can see, and computed, the number of those whose last successful
+// computation is for their current served version and the configured model.
+// A hidden artifact counts toward neither, a computation of an earlier
+// version or of another model is not counted, and both are null when the
+// check is off.
+func TestCatalogOverlap_ComputedAndTotal(t *testing.T) {
+	t.Parallel()
+	f := reportFixture(t)
+	f.writeOwned("b", "1.0.0", overlapNow, nil)
+	f.writeOwned("h", "1.0.0", overlapNow, nil)
+	f.writeOwned("s", "0.9.0", overlapNow, nil)
+	other := store.OverlapComputation{ArtifactID: "old", Version: "2.0.0", ModelID: "m2", ComputedAt: overlapNow}
+	if err := f.st.ReplaceOverlapRecords(f.ctx, "t", other, nil); err != nil {
+		t.Fatalf("ReplaceOverlapRecords: %v", err)
+	}
+	alice := layer.Identity{Sub: "alice", IsAuthenticated: true}
+	bob := layer.Identity{Sub: "bob", IsAuthenticated: true, Groups: []string{"eng"}}
+	for name, tc := range map[string]struct {
+		id              layer.Identity
+		computed, total int
+	}{
+		"alice": {id: alice, computed: 2, total: 4},
+		"bob":   {id: bob, computed: 3, total: 5},
+	} {
+		r, err := f.reg.CatalogOverlap(f.ctx, tc.id, OverlapQuery{ArtifactID: "a"})
+		if err != nil {
+			t.Fatalf("%s: CatalogOverlap: %v", name, err)
+		}
+		st := r.SemanticOverlap
+		if st.Computed == nil || st.Total == nil || *st.Computed != tc.computed || *st.Total != tc.total {
+			t.Errorf("%s: computed/total = %v/%v, want %d/%d", name, st.Computed, st.Total, tc.computed, tc.total)
+		}
+	}
+	f.reg.WithOverlapChecks(lint.Thresholds{}, lint.SemanticConfig{})
+	r, err := f.reg.CatalogOverlap(f.ctx, alice, OverlapQuery{})
+	if err != nil || r.SemanticOverlap.Computed != nil || r.SemanticOverlap.Total != nil {
+		t.Errorf("off: computed/total = %v/%v (%v), want null", r.SemanticOverlap.Computed, r.SemanticOverlap.Total, err)
+	}
+	failing := &faultyOverlapStore{Memory: f.st, failRuns: true}
+	broken := New(failing, "t", []layer.Layer{publicLayer("L")}).WithVectorSearch(f.idx, overlapEmbedder{model: "m1"}).
+		WithOverlapChecks(lint.Thresholds{}, lint.SemanticConfig{Enabled: true})
+	if _, err := broken.CatalogOverlap(f.ctx, alice, OverlapQuery{}); !errors.Is(err, ErrUnavailable) {
+		t.Errorf("CatalogOverlap with a failing computation listing = %v, want ErrUnavailable", err)
 	}
 }
 
