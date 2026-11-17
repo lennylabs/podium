@@ -342,7 +342,7 @@ Notes on partial and migrating surfaces:
 
 Claude Code, Claude Desktop, and Claude Cowork read the same `.claude-plugin/marketplace.json`, so one Claude marketplace serves all three. The Claude, Codex, and Cursor manifests sit at distinct fixed locations, so they do not collide and can coexist in one repository, each read only by its own harness. OpenCode distributes through npm packages and `none` writes raw canonical output, so neither is a publish target.
 
-`claude-cowork` is a publish consumer of the Claude marketplace. Its only remaining project-scope materialization output is the `type: context` directory. A plugin-layout type on `claude-cowork` (`skill`, `agent`, `command`, `rule`, `hook`, or `mcp-server`) is a `✗` cell, which both `podium sync` and `load_artifact` fail per §6.9. A cowork user obtains those artifacts by importing the published Claude marketplace.
+`claude-cowork` is a publish consumer of the Claude marketplace and has no project-scope materialization output. A `skill`, `agent`, `rule`, `hook`, or `mcp-server` artifact on `claude-cowork` is a `✗` cell, which both `podium sync` and `load_artifact` fail per §6.9. A cowork user obtains those artifacts by importing the published Claude marketplace.
 
 **What an adapter does.** Mechanical translation:
 
