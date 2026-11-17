@@ -14,10 +14,8 @@ An artifact is a directory with one or two manifest files at its root.
 
 Full lint coverage, conformance suite participation, broad adapter support:
 
-- `skill`: instructions (and optional scripts) loaded into the host agent's context on demand.
+- `skill`: instructions (and optional scripts) loaded into the host agent's context on demand. A skill whose `invocation` is `user` (§4.3.4) is meant for a human to invoke, typically as a slash command. Adapters materialize it with the harness's user-only control or as the harness's native command file (§5.2, §6.7), so the harness does not load it on its own. It stays discoverable and loadable through the meta-tools (§5).
 - `agent`: a complete agent definition meant to run in isolation as a delegated child.
-- `context`: pure reference material (style guides, glossaries, API references, large knowledge bases).
-- `command`: parameterized prompt templates a human invokes (typically as a slash command).
 - `rule`: passive context loaded by the harness based on its `rule_mode` (`always`, `glob`, `auto`, `explicit`); see §6.7.1 for adapter mapping.
 - `hook`: a lifecycle observer for the agent loop with a declared `hook_event` from the canonical taxonomy (§4.3.5) and a shell `hook_action`.
 
