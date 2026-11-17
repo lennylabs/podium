@@ -158,6 +158,21 @@ func TestRuleProseReference_FragmentQueryAndEncodingResolve(t *testing.T) {
 	}
 }
 
+// Spec: §4.4 — a target that begins with / is root-relative: it names a path
+// on a website and is not checked, whether or not a bundled file or an
+// artifact shares the path. The missing relative reference beside them is
+// still an error, so the rule ran. It fails against a rule that resolves a
+// root-relative target against the package or the catalog.
+func TestRuleProseReference_RootRelativeTargetNotChecked(t *testing.T) {
+	t.Parallel()
+	body := "See [analytics](/features/analytics), [docs](/docs/guide.md#setup), [api](/references/api.md), " +
+		"[home](/), [peer](/finance/ap/reconcile), and [missing](references/missing.md)."
+	diags := proseDiags(proseRec("team/example", body, "references/api.md"))
+	if len(diags) != 1 || diags[0].Severity != lint.SeverityError || !strings.Contains(diags[0].Message, `"references/missing.md"`) {
+		t.Errorf("want only the missing relative reference reported, got %+v", diags)
+	}
+}
+
 // Spec: §4.4 — the fragment is removed before the artifact lookup as well,
 // so a reference to another artifact with a fragment resolves.
 func TestRuleProseReference_FragmentOnArtifactReferenceResolves(t *testing.T) {

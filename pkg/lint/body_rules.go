@@ -133,6 +133,13 @@ func (r ruleProseReferenceResolution) Check(ctx context.Context, _ *filesystem.R
 				// the same document and is not checked.
 				continue
 			}
+			if strings.HasPrefix(href, "/") {
+				// Spec: §4.4 — a root-relative target names a path on a
+				// website, such as /features/analytics. Bundled-file and
+				// artifact references are relative to the package, so it
+				// names neither and is not checked.
+				continue
+			}
 			if d := r.checkReference(rec, href, catalog); d != nil {
 				out = append(out, *d)
 			}
