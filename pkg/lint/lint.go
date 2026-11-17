@@ -236,7 +236,7 @@ func (r ruleRequiredFields) Check(_ context.Context, _ *filesystem.Registry, rec
 				fmt.Sprintf("type %q is not registered with any TypeProvider; register an extension TypeProvider for it", a.Type)))
 		}
 		// Spec: §4.3.4 — a skill that declares no usable version has its
-		// version assigned, so its absence is a warning from
+		// version assigned, so its absence is an info diagnostic from
 		// ruleSkillVersionAssigned. Lint runs before ingest assigns the
 		// version, so the check reads VersionAssigned rather than Version.
 		if a.Version == "" && !rec.VersionAssigned {

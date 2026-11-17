@@ -61,10 +61,10 @@ body
 }
 
 // Spec: §4.3.4 — a skill whose version is assigned draws the
-// lint.skill_version_assigned warning and neither the required-version nor
-// the semver error, in the ingest state (Version empty, because lint runs
-// before ingest assigns it) and in the `podium lint` state (Version in the
-// registry-reserved form the filesystem source reports).
+// lint.skill_version_assigned info diagnostic and neither the
+// required-version nor the semver error, in the ingest state (Version empty,
+// because lint runs before ingest assigns it) and in the `podium lint` state
+// (Version in the registry-reserved form the filesystem source reports).
 func TestLint_AssignedVersionSkipsRequiredAndSemver(t *testing.T) {
 	t.Parallel()
 	for _, version := range []string{"", manifest.AutoVersion(0)} {
@@ -79,8 +79,8 @@ func TestLint_AssignedVersionSkipsRequiredAndSemver(t *testing.T) {
 			}
 			records[0].Artifact.Version = version
 			diags := (&Linter{}).Lint(context.Background(), reg, records)
-			if !hasSeverity(diags, "lint.skill_version_assigned", SeverityWarning) {
-				t.Errorf("expected lint.skill_version_assigned warning, got: %v", diags)
+			if !hasSeverity(diags, "lint.skill_version_assigned", SeverityInfo) {
+				t.Errorf("expected lint.skill_version_assigned info, got: %v", diags)
 			}
 			for _, code := range []string{"lint.required_field_missing", "lint.invalid_version"} {
 				if hasCode(diags, code) {

@@ -22,14 +22,16 @@ const (
 )
 
 // ruleSkillPodiumOnlyFields enforces spec §4.3.4: "SKILL.md does not contain
-// Podium-only fields (`type`, `version`, `when_to_use`, `tags`, etc.) at the
-// top level; if present, error. The diagnostic recommends `metadata.version`
-// for a version, the `metadata` key of the same name for a field that
-// **Podium fields in `metadata`** lists, and the `ARTIFACT.md` overlay for
-// every other field." SKILL.md stays within the agentskills.io subset so the
-// standard's skills-ref validator passes. ParseSkill drops unknown keys
-// silently, so the rule scans the raw SKILL.md frontmatter keys rather than
-// the typed Skill value.
+// Podium-only fields (`type`, `when_to_use`, `tags`, etc.) at the top level;
+// if present, error. A top-level `version` is a warning rather than an error,
+// because many published skills carry one: Podium ignores it and takes the
+// version from `metadata.version` or `ARTIFACT.md`. The diagnostic recommends
+// `metadata.version` for a version, the `metadata` key of the same name for a
+// field that **Podium fields in `metadata`** lists, and the `ARTIFACT.md`
+// overlay for every other field." SKILL.md stays within the agentskills.io
+// subset so the standard's skills-ref validator passes. ParseSkill drops
+// unknown keys silently, so the rule scans the raw SKILL.md frontmatter keys
+// rather than the typed Skill value.
 //
 // Spec: §4.3.4
 type ruleSkillPodiumOnlyFields struct{}
@@ -48,9 +50,14 @@ func (r ruleSkillPodiumOnlyFields) Check(_ context.Context, _ *filesystem.Regist
 			continue
 		}
 		for _, k := range keys {
-			if manifest.IsPodiumOnlySkillField(k) {
-				out = append(out, errMsg(rec.ID, r, podiumOnlyFieldMessage(k)))
+			if !manifest.IsPodiumOnlySkillField(k) {
+				continue
 			}
+			if k == "version" {
+				out = append(out, warn(rec.ID, r.Code(), podiumOnlyFieldMessage(k)))
+				continue
+			}
+			out = append(out, errMsg(rec.ID, r, podiumOnlyFieldMessage(k)))
 		}
 	}
 	return out
@@ -321,11 +328,14 @@ func (r ruleSkillMetadataFields) Check(_ context.Context, _ *filesystem.Registry
 }
 
 // ruleSkillVersionAssigned enforces spec §4.3.4: "A skill that declares no
-// usable version has its version assigned (warning that names any ignored
-// `metadata.version` value and the fix)." The record's VersionAssigned flag
-// is set by the walker, so the rule fires the same way before ingest assigns
-// the version and under `podium lint`, where the filesystem source reports
-// the reserved form.
+// usable version has its version assigned (info that names any ignored
+// `metadata.version` value and the fix)." The diagnostic is informational
+// because a plain Agent Skill commonly declares no version, and an info
+// diagnostic never fails `podium lint` under either --fail-on value (§7.3.1)
+// and never blocks ingest. The record's VersionAssigned flag is set by the
+// walker, so the rule fires the same way before ingest assigns the version
+// and under `podium lint`, where the filesystem source reports the reserved
+// form.
 //
 // Spec: §4.3.4
 type ruleSkillVersionAssigned struct{}
@@ -344,7 +354,7 @@ func (r ruleSkillVersionAssigned) Check(_ context.Context, _ *filesystem.Registr
 				msg = fmt.Sprintf("metadata.version %q is not major.minor.patch and is ignored; ", mv) + msg
 			}
 		}
-		out = append(out, warn(rec.ID, r.Code(), msg))
+		out = append(out, Diagnostic{ArtifactID: rec.ID, Code: r.Code(), Severity: SeverityInfo, Message: msg})
 	}
 	return out
 }
