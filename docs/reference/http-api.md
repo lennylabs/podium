@@ -644,6 +644,93 @@ GET /v1/dependents?id={id}
 - A query against an artifact the caller cannot see answers `200 {"edges":[]}`. That is the same response as a query against an artifact that does not exist or that nothing depends on. The endpoint filters rather than refuses, so it returns no `visibility.denied` error.
 - The search ranking signal counts dependents across the tenant and is not filtered.
 
+### Catalog overlap report
+
+Reports description overlap across every layer of the caller's tenant in one request. `podium overlap` calls it.
+
+```
+GET /v1/overlap?threshold={n}&artifact={id}
+```
+
+**Authorization.** Any caller that can search the registry. The request passes through the identity verification, tenant routing, and browser-session handling of `search_artifacts`, and the report covers only the artifacts the caller can see.
+
+**Parameters.** Both parameters are optional.
+
+| Parameter | Description |
+|:--|:--|
+| `threshold` | Semantic overlap threshold for this read, a number from 0.5 to 1.0. It replaces `PODIUM_LINT_SEMANTIC_SIMILARITY`. |
+| `artifact` | A canonical artifact ID. The response keeps only the diagnostics whose `artifact_id` is that ID, and `counts` counts those diagnostics. |
+
+**Behavior.**
+
+- The registry runs `lint.thin_description` and `lint.colliding_descriptions` over the current served version of every artifact the caller can see, across layers.
+- When the registry runs with `PODIUM_LINT_SEMANTIC_OVERLAP=on`, it also reports `lint.semantic_overlap` from its stored overlap records. A record is reported when the caller can see both of its artifacts, both of its versions are the current served versions, its embedding model is the configured model, and its similarity is at or above the read's threshold.
+- A record with an artifact the caller cannot see is not reported and is not counted in an abbreviated peer list, so the report reveals nothing a search would not.
+- The endpoint reads stored records and descriptions and issues no index query, so a request costs no embedding call.
+- The report reads descriptions alone, so it omits `lint.near_duplicate_content`, which `podium lint` reports over a checkout of the layer sources.
+
+**Response.**
+
+```json
+{
+  "semantic_overlap": {
+    "state": "on",
+    "threshold": 0.85,
+    "model": "text-embedding-3-small"
+  },
+  "diagnostics": [
+    {
+      "artifact_id": "finance/ap/pay-invoice",
+      "code": "lint.colliding_descriptions",
+      "severity": "warning",
+      "message": "description overlaps finance/ap/submit-invoice (80%); give each artifact a distinct summary so search and load_domain can tell them apart",
+      "peers": [
+        { "artifact_id": "finance/ap/submit-invoice", "similarity": 0.8 }
+      ]
+    },
+    {
+      "artifact_id": "finance/ap/pay-invoice",
+      "code": "lint.semantic_overlap",
+      "severity": "warning",
+      "message": "description is semantically similar to finance/payments/settle-bill (91%); give each artifact a distinct summary so search and load_domain can tell them apart",
+      "peers": [
+        {
+          "artifact_id": "finance/payments/settle-bill",
+          "similarity": 0.912,
+          "computed_at": "2026-11-16T03:00:12Z"
+        }
+      ]
+    }
+  ],
+  "counts": { "error": 0, "warning": 2, "info": 0 }
+}
+```
+
+The example answers `GET /v1/overlap?artifact=finance/ap/pay-invoice`.
+
+| Field | Content |
+|:--|:--|
+| `semantic_overlap.state` | `"on"` or `"off"`. |
+| `semantic_overlap.threshold` | The threshold the read applied. `null` when the check is off. |
+| `semantic_overlap.model` | The configured embedding model identifier. `null` when the check is off. |
+| `diagnostics` | One entry per diagnostic, ordered by artifact ID, then by code, then by message, as `podium lint` orders them. |
+| `diagnostics[].peers` | Present on `lint.colliding_descriptions` and `lint.semantic_overlap`. It lists every peer the message names or abbreviates, in the message's order, as `{artifact_id, similarity}` objects with `similarity` a number from 0 to 1. A `lint.semantic_overlap` peer also carries `computed_at`, the time its record was computed. The list is never abbreviated and holds only artifacts the caller can see. |
+| `counts` | The diagnostics counted by severity. |
+
+A `lint.colliding_descriptions` similarity is the word-set similarity of the two normalized descriptions. A `lint.semantic_overlap` similarity is the cosine similarity of the two embedding vectors. When the check is off, the response carries no `lint.semantic_overlap` diagnostic.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `400 registry.invalid_argument` | `threshold` is not a number from 0.5 to 1.0. |
+| `500 registry.unavailable` | The registry cannot read its metadata store. |
+
+**Notes.**
+
+- The endpoint is a read endpoint, so a registry in read-only mode serves it.
+- [Overlap report](../consuming/browsing-the-catalog#overlap-report) describes how to read the report.
+
 ### `domain/analyze`
 
 Returns the per-subtree domain analysis report for a path, the same report `podium domain analyze` prints.
@@ -1407,6 +1494,40 @@ POST /v1/admin/reembed?artifact={id}&version={v}&only_missing={bool}&since={rfc3
 | Code | When |
 |:--|:--|
 | `400 registry.invalid_argument` | `artifact` is set without `version`. |
+
+**Notes.**
+
+- When `PODIUM_LINT_SEMANTIC_OVERLAP` is `on`, a full pass also recomputes the semantic overlap records of every artifact it re-embeds.
+
+### Rebuild overlap records
+
+Recomputes the semantic overlap records of every served artifact of the caller's tenant. `podium admin rebuild-overlap` calls it.
+
+```
+POST /v1/admin/overlap/rebuild
+```
+
+**Authorization.** The same as [Reembed](#reembed): the admin role, except on a registry that authenticates no caller, which admits the request.
+
+**Response.** The number of artifacts computed and the number whose index query failed.
+
+```json
+{ "computed": 42, "failed": 0 }
+```
+
+A computation replaces every stored record that names the artifact. A failed computation leaves the artifact's existing records in place, and the next sweep computes it again.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `403 auth.forbidden` | The caller is not an admin. |
+| `500 registry.unavailable` | `PODIUM_LINT_SEMANTIC_OVERLAP` is off or no search index is configured. The registry computes nothing. |
+| `503 registry.read_only` | The registry is in read-only mode. The endpoint is a write endpoint. |
+
+**Notes.**
+
+- The registry keeps the records current without this call: at ingest, through the sweep every `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL`, and after a full re-embed.
 
 ### Erase a user (GDPR)
 

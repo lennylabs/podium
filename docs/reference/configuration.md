@@ -255,8 +255,14 @@ An unset or empty variable keeps the default. A value that does not parse, or th
 | `PODIUM_LINT_MIN_DESCRIPTION_WORDS` | integer | `3` | `lint.thin_description` flags a description with fewer words. |
 | `PODIUM_LINT_DESCRIPTION_SIMILARITY` | number | `0.7` | `lint.colliding_descriptions` reports two descriptions whose word sets have at least this similarity. |
 | `PODIUM_LINT_CONTENT_SIMILARITY` | number | `0.8` | `lint.near_duplicate_content` reports two units of different artifacts whose five-word shingle sets have at least this similarity. A unit is a prose body or a prose resource, which is a bundled `.md`, `.markdown`, `.txt`, or `.rst` file other than a license file. [Near-duplicate content](../authoring/bundled-resources#near-duplicate-content) describes the units. |
+| `PODIUM_LINT_SEMANTIC_OVERLAP` | `on` or `off` | `off` | Turns on the `lint.semantic_overlap` check, which stores overlap records computed from the search index and reports them at ingest and in the catalog overlap report. Read by the registry only. |
+| `PODIUM_LINT_SEMANTIC_SIMILARITY` | number | `0.85` | Default threshold applied to stored overlap records when they are read, as a cosine similarity. Changing it needs no recomputation. The default is an uncalibrated starting point. Read by the registry only. |
+| `PODIUM_LINT_SEMANTIC_NEIGHBORS` | integer | `10` | Most overlap records one computation stores for an artifact, from 1 to 100. Read by the registry only. |
+| `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL` | duration | `24h` | Interval of the sweep that computes artifacts with missing or stale overlap records, at least `1m`. `0` turns the sweep off. Read by the registry only. |
 
-[Skill lint checks](../authoring/frontmatter-reference#skill-lint-checks) describes the catalog advisories.
+`podium lint` reads no search index, so the `PODIUM_LINT_SEMANTIC_*` variables take effect in the registry only, which reads them at startup. With `PODIUM_LINT_SEMANTIC_OVERLAP=on`, a registry whose embedding provider is empty or `none` and whose vector backend does not embed text itself refuses to start with `config.invalid`.
+
+[Skill lint checks](../authoring/frontmatter-reference#skill-lint-checks) describes the catalog advisories, and [Semantic overlap](../authoring/frontmatter-reference#semantic-overlap) describes the semantic check.
 
 ## Vector index and embeddings
 

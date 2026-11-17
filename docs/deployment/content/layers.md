@@ -94,7 +94,7 @@ Release 0.7.0 removed both types. A store that an earlier release wrote can stil
 
 ## Unparseable manifests
 
-Ingest refuses an artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter does not parse. Frontmatter does not parse when the file has none, when it is not valid YAML, when its root is not a mapping, or when a field holds a value of a kind its definition does not allow, such as a `SKILL.md` `metadata` value that is a sequence or a mapping.
+Ingest refuses an artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter does not parse. Frontmatter does not parse when the file has none, when it is not valid YAML, when its root is not a mapping, or when a field holds a value of a kind its definition does not allow, such as a `SKILL.md` `name` or `description` that is a mapping. A sequence or a mapping under a `SKILL.md` `metadata` key does not make the frontmatter unparseable, as [Values Podium ignores or keeps](../../authoring/frontmatter-reference#values-podium-ignores-or-keeps) describes.
 
 - The refusal is `ingest.invalid_artifact` with `details.constraint: "manifest_unparseable"`. Its reason names the file and the parse error.
 - The refusal runs before every other per-artifact rule, including the no-inheritance and removed-type checks, because neither can be evaluated without the parsed frontmatter.

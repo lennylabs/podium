@@ -49,6 +49,7 @@ Subcommands:
   erase                GDPR right-to-erasure: purge a user's layers and redact their audit identity.
   retention            Apply audit retention policies to the local audit log.
   reembed              Re-run vector embeddings against the configured registry.
+  rebuild-overlap      Recompute the semantic overlap records of every served artifact.
   runtime              Manage trusted runtime signing keys.
   tenant               Manage tenants (operator role).
   migrate-to-standard  Pump standalone state into a standard deployment.
@@ -550,7 +551,7 @@ Passing none of the add and remove flags opens the interactive editor. The comma
 
 The read CLI maps one-to-one to the SDK's read operations. It uses the same identity, cache, layer composition, and server-side visibility filtering.
 
-Each command that queries the registry takes `--registry <url>`, which defaults to `PODIUM_REGISTRY` and is required. These commands are `search`, `domain show`, `domain search`, `domain analyze`, `artifact show`, and `impact`. `artifact scaffold` works on the filesystem only and takes no `--registry`.
+Each command that queries the registry takes `--registry <url>`, which defaults to `PODIUM_REGISTRY` and is required. These commands are `search`, `overlap`, `domain show`, `domain search`, `domain analyze`, `artifact show`, and `impact`. `artifact scaffold` works on the filesystem only and takes no `--registry`.
 
 ### `podium search`
 
@@ -569,6 +570,27 @@ podium search <query> [--type <t>] [--tags <tag1,tag2>]
 | `--scope <path>` | Constrain results to a path prefix. |
 | `--top-k <n>` | Maximum number of results. Default: `10`. |
 | `--json` | JSON output. See [JSON output](#json-output). |
+
+### `podium overlap`
+
+Reports description overlap across every layer the caller can see. The command calls `GET /v1/overlap`, which [Catalog overlap report](http-api#catalog-overlap-report) describes, so any caller that can search the registry can run it.
+
+```
+podium overlap --registry <url> [--threshold <n>] [--json] [--fail-on error|warning]
+```
+
+| Flag | Effect |
+|:--|:--|
+| `--registry <url>` | Registry URL. Required; defaults to `PODIUM_REGISTRY`. |
+| `--threshold <n>` | Semantic overlap threshold for this read, a number from 0.5 to 1.0. It replaces `PODIUM_LINT_SEMANTIC_SIMILARITY` for the request. |
+| `--json` | Write the response object on standard output instead of one line per diagnostic. |
+| `--fail-on <severity>` | Lowest severity that fails the run: `error` (the default) or `warning`. |
+
+The report covers the current served version of every artifact the caller can see. It contains `lint.thin_description` and `lint.colliding_descriptions`, and `lint.semantic_overlap` when the registry runs with `PODIUM_LINT_SEMANTIC_OVERLAP=on`. It omits `lint.near_duplicate_content`, which `podium lint` reports over a checkout of the layer sources.
+
+Without `--json`, each diagnostic prints on standard output in the `podium lint` format, `[<severity>] <artifact-id>: <message> (<rule-code>)`, and a report with no diagnostic prints `overlap: no issues.`. With `--json`, standard output carries the response object alone, indented.
+
+The command exits 0 when no diagnostic reaches the `--fail-on` severity, and 1 when one does. Every overlap diagnostic is a warning, so the default `--fail-on error` exits 0 on any report, and `--fail-on warning` exits 1 when the report contains a diagnostic. A response that carries an error envelope prints on standard error, and the command exits 1. A usage error exits 2, including a missing `--registry`, a `--fail-on` value other than `error` or `warning`, and a `--threshold` outside 0.5 to 1.0.
 
 ### `podium domain show`
 
@@ -1076,7 +1098,28 @@ podium admin reembed [--artifact <id> --version <semver>]
 | `--since <rfc3339>` | Re-embed only artifacts ingested at or after this RFC3339 timestamp. Scopes a tenant-wide pass. |
 | `--registry <url>` | Registry URL. Required; defaults to `PODIUM_REGISTRY`. |
 
-With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` and `--since` compose to scope it.
+With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` and `--since` compose to scope it. When `PODIUM_LINT_SEMANTIC_OVERLAP` is `on`, a full pass also recomputes the semantic overlap records of every artifact it re-embeds.
+
+### `podium admin rebuild-overlap`
+
+Recomputes the semantic overlap records of every served artifact of the caller's tenant. The registry keeps the records current on its own, at ingest, through its periodic sweep, and after a full re-embed, so this command is for a recomputation that cannot wait for the next sweep.
+
+```
+podium admin rebuild-overlap --registry <url>
+```
+
+| Flag | Effect |
+|:--|:--|
+| `--registry <url>` | Registry URL. Required; defaults to `PODIUM_REGISTRY`. |
+
+The command calls `POST /v1/admin/overlap/rebuild`, which [Rebuild overlap records](http-api#rebuild-overlap-records) describes, and prints the two counts of the response:
+
+```
+computed: 42
+failed: 0
+```
+
+The command exits 0 when `failed` is zero. It exits 1 when `failed` is not zero, and when the response is an error envelope, which it prints on standard error. A registry with the semantic overlap check off, or with no search index, answers `registry.unavailable`. A missing `--registry` exits 2.
 
 ### `podium admin runtime`
 
@@ -1540,7 +1583,7 @@ The tables below list the variables that client processes read: the CLI, `podium
 
 ### Lint
 
-`podium lint` reads the `PODIUM_LINT_*` threshold variables that registry ingest reads, so a CI run and the registry apply the same thresholds when both environments set them. [Lint](configuration#lint) in the configuration reference lists each variable and its default.
+`podium lint` reads the `PODIUM_LINT_*` threshold variables that registry ingest reads, so a CI run and the registry apply the same thresholds when both environments set them. The `PODIUM_LINT_SEMANTIC_*` variables are the exception: `podium lint` reads no search index, so only the registry reads them. [Lint](configuration#lint) in the configuration reference lists each variable and its default.
 
 ### Signing and verification
 

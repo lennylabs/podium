@@ -111,7 +111,7 @@ Notes on the layer arms:
 | `config.injected_token_audience_unset` | `PODIUM_IDENTITY_PROVIDER=injected-session-token` with `PODIUM_OAUTH_AUDIENCE` resolving to no audience, because it is unset, empty, or blank after each entry is trimmed. The variable must name at least one audience this registry answers to, so the required `aud` claim is verified on every token. |
 | `config.runtime_keys_unavailable` | `PODIUM_IDENTITY_PROVIDER=injected-session-token` with no trusted runtime signing key: `PODIUM_RUNTIME_KEYS_PATH` is unset or names a file with no key. Also raised under any provider when the named file cannot be read or parsed. |
 | `config.unknown_harness` | `PODIUM_HARNESS` (or `--harness`) names a harness with no registered adapter. |
-| `config.invalid` | A `sync.yaml` marketplace or workspace target is malformed, or `podium-mcp` was started with an unsupported signature provider. See [config.invalid causes](#configinvalid-causes). |
+| `config.invalid` | A `sync.yaml` marketplace or workspace target is malformed, `podium-mcp` was started with an unsupported signature provider, or the registry was started with `PODIUM_LINT_SEMANTIC_OVERLAP=on` and no embedding source. See [config.invalid causes](#configinvalid-causes). |
 | `config.trusted_headers_public_bind` | `trusted-headers` on a single-tenant registry bound to a non-loopback address without `PODIUM_TRUSTED_PROXY_SECRET` or `--allow-public-bind`. |
 | `config.trusted_headers_multitenant_no_secret` | `trusted-headers` on a multi-tenant registry without `PODIUM_TRUSTED_PROXY_SECRET`, which is required on every request regardless of bind. |
 | `config.multitenant_no_verifier` | A registry started with `PODIUM_MULTI_TENANT` has no request-time identity verifier to select each request's tenant. This happens when it configures no identity provider, names a provider value the registry does not recognize, or runs in public mode with no identity provider. The message names the providers the registry verifies: `injected-session-token`, `oidc-jwt`, and `trusted-headers`. A configuration that `config.public_mode_with_idp`, `config.public_bind_refused`, `config.web_ui_public_bind_refused`, or `config.web_ui_auth_unconfigured` also refuses fails with that code instead. |
@@ -151,6 +151,8 @@ The browser flow requires every condition below:
 - A `kind: marketplace` target is combined with `--watch`.
 
 `podium-mcp` also returns `config.invalid` at startup when `PODIUM_SIGNATURE_PROVIDER` names a value other than `registry-managed` or `noop`. This includes `sigstore-keyless`, which only `podium sign` and `podium verify` accept.
+
+The registry refuses to start with `config.invalid` when `PODIUM_LINT_SEMANTIC_OVERLAP` is `on` and it has no embedding source: `PODIUM_EMBEDDING_PROVIDER` is the empty string or `none`, which `PODIUM_NO_EMBEDDINGS` also selects, and the vector backend does not embed text with its own hosted model. The message names `PODIUM_LINT_SEMANTIC_OVERLAP`. Set `PODIUM_EMBEDDING_PROVIDER`, select a self-embedding backend, or set `PODIUM_LINT_SEMANTIC_OVERLAP=off`.
 
 #### config.signature_provider_unavailable causes
 
@@ -230,7 +232,7 @@ The code applies when `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above 0 and the 
 | Cause | `details.constraint` |
 |:--|:--|
 | The manifest could not be decoded into an artifact record. | none |
-| The artifact's `ARTIFACT.md` or `SKILL.md` frontmatter does not parse: the file has no frontmatter, the frontmatter is not valid YAML, its root is not a mapping, or a field holds a value of a kind its definition does not allow, such as a `SKILL.md` `metadata` value that is a sequence or a mapping. The registry refuses it before every other per-artifact rule, including the `extends` and removed-type checks, and the reason names the file and the parse error. The other artifacts of the layer are ingested. | `"manifest_unparseable"` |
+| The artifact's `ARTIFACT.md` or `SKILL.md` frontmatter does not parse: the file has no frontmatter, the frontmatter is not valid YAML, its root is not a mapping, or a field holds a value of a kind its definition does not allow, such as a `SKILL.md` `name` or `description` that is a mapping. A sequence or a mapping under a `SKILL.md` `metadata` key does not make the frontmatter unparseable. The registry refuses it before every other per-artifact rule, including the `extends` and removed-type checks, and the reason names the file and the parse error. The other artifacts of the layer are ingested. | `"manifest_unparseable"` |
 | An `ARTIFACT.md` declares the removed `extends` key. The registry refuses it before lint and after the frontmatter parse. | `"extends_removed"` |
 | An `ARTIFACT.md` declares the removed type `command` or `context`. The registry refuses it before lint and after the `extends` check, so an `ARTIFACT.md` that declares both reports `extends_removed`. | `"type_removed"` |
 | A skill with no declared version has content that a stored or soft-deleted row of the artifact already holds under another version. Set `metadata.version` in `SKILL.md`, or change the content, to publish such a skill. | `"auto_version_duplicate_content"` |

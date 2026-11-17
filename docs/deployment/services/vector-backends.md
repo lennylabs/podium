@@ -270,6 +270,8 @@ With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` 
 
 The previous backend can stay in place during cut-over, or it can be torn down after re-embedding completes.
 
+When the [semantic overlap](#semantic-overlap) check is on, a re-embed pass also recomputes the overlap records of every artifact it re-embeds. A pass scoped with `--only-missing` or `--since` recomputes no records and leaves them to the periodic sweep.
+
 ### Model changes on pgvector and sqlite-vec
 
 Model versioning applies to the collocated backends only. `pgvector` and `sqlite-vec` tag each row with the embedding model. While a re-embed is in flight, they restrict a query to the current model. They drop the previous model's rows once a full pass completes. A pass scoped with `--only-missing` or `--since` purges nothing.
@@ -305,6 +307,28 @@ The search response reports none of these conditions (see [Operational notes](#o
 ### Write consistency on managed backends
 
 Every managed service is a non-collocated backend. For these backends, ingest writes go through a transactional outbox. The manifest commit and a `vector_pending` row land in the same metadata-store transaction, and a background worker drives the write to the vector backend. The outbox keeps the metadata commit and the vector write consistent under failure.
+
+---
+
+## Semantic overlap
+
+The `lint.semantic_overlap` check reads the search index this page configures. It is off by default, and `PODIUM_LINT_SEMANTIC_OVERLAP=on` turns it on. The check uses the backend and the embedding model that search uses, so it adds no second index and no second embedding of the catalog. Computing an artifact queries the index for its nearest rows and stores one overlap record per neighbour in the metadata store. [Semantic overlap](../../authoring/frontmatter-reference#semantic-overlap) describes the check, and [Lint](../../reference/configuration#lint) in the configuration reference lists its variables.
+
+Each backend computes the similarity as follows:
+
+- `pgvector` and `sqlite-vec` compute the cosine similarity from the stored vectors, whatever distance their nearest-neighbour index orders by.
+- A managed backend reports a score in the metric its index or collection was created with, and the registry takes one minus the reported distance as the similarity. That value is the cosine similarity only when the metric is cosine. Create the Pinecone index, the Weaviate Cloud collection, or the Qdrant Cloud collection with the cosine metric before turning the check on, and leave the check off on an index that uses another metric.
+
+The check needs an embedding source. A registry with `PODIUM_LINT_SEMANTIC_OVERLAP=on`, a storage-only or collocated backend, and `PODIUM_EMBEDDING_PROVIDER` set to the empty string or `none` refuses to start with `config.invalid`. A self-embedding backend is its own embedding source.
+
+When the registry computes depends on the backend:
+
+- On `pgvector` and `sqlite-vec`, an ingest computes each artifact it stores as a new version within the cycle and reports `lint.semantic_overlap` among its non-blocking advisories.
+- On a managed backend, including a self-embedding one, the registry computes an artifact when the outbox writes its vector. An ingest on a managed backend therefore reports no `lint.semantic_overlap` diagnostic, and two artifacts of one cycle find each other once both vectors are written.
+- On every backend, a sweep runs every `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL` (24 hours by default) and computes each served artifact that has no records, whose records carry another embedding model, or whose records name a version that is no longer served. Every replica runs the sweep, and replicas that compute one artifact at once store the same result.
+- A full `podium admin reembed` pass recomputes every artifact it re-embeds, and `podium admin rebuild-overlap` recomputes every served artifact of the tenant.
+
+A failed index query leaves the artifact's existing records in place and does not fail the ingest. The registry logs the failure with the artifact ID, and the next sweep computes the artifact again. A record whose embedding model is not the configured model is not reported, so an embedding-model change hides the old records until the sweep or a re-embed replaces them. `podium admin migrate-to-standard` copies no overlap records, and the target registry's sweep computes them.
 
 ---
 

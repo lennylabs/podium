@@ -51,12 +51,12 @@ output using [the report template](assets/variance-report.md.j2).
 
 The ingest-time linter resolves every markdown link (`[text](path)`) in the prose body outside inline code spans and fenced code blocks:
 
-- A relative link must name a bundled file, one of the artifact's own manifest files, or the canonical ID of another artifact in the catalog.
+- A relative link must name a bundled file, a directory of the package, one of the artifact's own manifest files, or the canonical ID of another artifact in the catalog. A link to a directory, with or without a trailing `/`, resolves when at least one bundled file lies below it, so `[templates](assets/templates/)` names the bundled templates. A directory that holds no bundled file does not resolve.
 - An `http` or `https` link is validated with an HTTP HEAD request that must return 200 or a 3xx redirect. `podium lint --offline` skips this probe.
 - A link that resolves to none of these is an ingest error. A link to a bundled file the package does not contain is such an error.
 - A relative link that leaves the package, such as `../other-skill/SKILL.md`, is a warning. It names no bundled file, and it resolves only while the artifacts sit side by side in one source tree, which a consumer that installs one of them does not reproduce. The diagnostic recommends naming the other artifact by its canonical ID.
 
-Before the lookup, the linter removes the link's fragment (from `#`) and query (from `?`) and decodes its percent-encoding, so `references/api.md#errors` resolves to the bundled file `references/api.md`. A link that is only a fragment, such as `#usage`, refers to the same document and is not checked.
+Before the lookup, the linter removes the link's fragment (from `#`) and query (from `?`) and decodes its percent-encoding, so `references/api.md#errors` resolves to the bundled file `references/api.md`. A link that is only a fragment, such as `#usage`, refers to the same document and is not checked. A link whose target begins with `/`, such as `[analytics](/features/analytics)`, is root-relative. It names a path on a website and never a bundled file or an artifact, because bundled-file and artifact references are relative to the package, so it is not checked.
 
 A path written as inline code rather than as a markdown link is not checked. Link syntax inside an inline code span or a fenced code block is example text and is not checked either.
 

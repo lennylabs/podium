@@ -323,3 +323,42 @@ For authoring guidance, see [Your first skill](../authoring/your-first-skill),
 [Your first command](../authoring/your-first-command) for a user-invoked skill,
 [Your first agent](../authoring/your-first-agent), and
 [Domains](../authoring/domains).
+
+---
+
+## Overlap report
+
+Two artifacts with overlapping descriptions compete for the same prompts, and
+an agent that sees both cannot tell which one to load. The catalog overlap
+report lists those artifacts across every layer the caller can see. Any caller
+that can search the registry can read it, through `podium overlap --registry
+<url>` or `GET /v1/overlap`, and it names only artifacts the caller can see.
+
+The report contains these warnings:
+
+| Code | What it reports |
+|:--|:--|
+| `lint.thin_description` | A description too short to tell a harness when to use the artifact. |
+| `lint.colliding_descriptions` | Two descriptions that share most of their words, such as copies or descriptions written from one template. |
+| `lint.semantic_overlap` | Two descriptions that say nearly the same thing in different words. The registry reports it only when the operator turned the check on. |
+
+`semantic_overlap.state` in the response says whether the semantic check is
+on, and `semantic_overlap.threshold` gives the cosine similarity a pair had to
+reach. Each overlap diagnostic carries a `peers` list with every artifact it
+overlaps and the similarity of the pair, from 0 to 1. A semantic peer also
+carries `computed_at`, the time the registry computed the pair, because the
+registry stores semantic scores and recomputes them on its own schedule.
+
+`--threshold` replaces the operator's threshold for one read. A higher value
+reports fewer pairs, and a lower value reports more. The `artifact` query
+parameter of `GET /v1/overlap` restricts the response to one artifact's
+diagnostics. [`podium overlap`](../reference/cli#podium-overlap) describes the
+command and its exit codes, and
+[Catalog overlap report](../reference/http-api#catalog-overlap-report)
+describes the response fields.
+
+An author resolves a reported pair by rewriting one description to state what
+distinguishes the artifact, or by listing the code under `lint_suppress` in the
+artifact's `ARTIFACT.md`, as
+[Semantic overlap](../authoring/frontmatter-reference#semantic-overlap)
+describes.
