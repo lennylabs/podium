@@ -65,6 +65,17 @@ func (r *Registry) overlapModel() string {
 	return ""
 }
 
+// semanticThreshold returns the read threshold applied when a request names
+// none: PODIUM_LINT_SEMANTIC_SIMILARITY when it is set, and otherwise the
+// default of the configured model identifier the records are stamped with
+// (overlapModel), so a self-embedding backend takes its hosted model's
+// default.
+//
+// Spec: §7.3.1, §13.12
+func (r *Registry) semanticThreshold() float64 {
+	return r.overlap.semantic.Threshold(r.overlapModel())
+}
+
 // overlapReady reports whether the registry can compute overlap records: the
 // check is on and the §4.7 vector path is wired.
 func (r *Registry) overlapReady() error {

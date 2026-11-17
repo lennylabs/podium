@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -14,8 +15,10 @@ const SemanticOverlapCode = "lint.semantic_overlap"
 // Defaults and bounds of the §7.3.1 semantic overlap check (§13.12).
 const (
 	// DefaultSemanticSimilarity is the threshold applied to stored overlap
-	// records when they are read. Similarity values depend on the embedding
-	// model, so a deployment tunes it against its own catalog.
+	// records when they are read, for an embedding model that
+	// modelSemanticSimilarity names no default for. Similarity values depend
+	// on the embedding model, so a deployment tunes it against its own
+	// catalog.
 	DefaultSemanticSimilarity = 0.85
 	// DefaultSemanticNeighbors is the number of nearest peer artifacts one
 	// computation finds and stores records for.
@@ -32,6 +35,51 @@ const (
 	minSemanticRefreshInterval = time.Minute
 )
 
+// modelSemanticSimilarity holds the §13.12 default read threshold of each
+// embedding model the spec names, keyed by the normalized model name
+// (normalizeModelName).
+var modelSemanticSimilarity = map[string]float64{
+	"text-embedding-3-small": 0.80,
+	"nomic-embed-text":       0.86,
+	"multilingual-e5-large":  0.90,
+}
+
+// DefaultSemanticSimilarityFor returns the default read threshold for the
+// configured embedding model identifier: 0.80 for text-embedding-3-small,
+// 0.86 for nomic-embed-text, 0.90 for multilingual-e5-large, and
+// DefaultSemanticSimilarity for any other model, an empty identifier
+// included. The identifier is matched after normalizeModelName, so a
+// provider prefix or an Ollama tag selects the same default as the bare
+// name.
+//
+// Spec: §13.12
+func DefaultSemanticSimilarityFor(model string) float64 {
+	if v, ok := modelSemanticSimilarity[normalizeModelName(model)]; ok {
+		return v
+	}
+	return DefaultSemanticSimilarity
+}
+
+// normalizeModelName reduces a configured model identifier to the bare model
+// name the defaults are keyed by. It trims surrounding space and lowercases
+// the identifier, drops everything up to the last '/', which removes a
+// provider or organization prefix such as "intfloat/multilingual-e5-large"
+// or "openai/text-embedding-3-small", and drops everything from the first ':'
+// after that, which removes an Ollama tag such as "nomic-embed-text:latest"
+// or "nomic-embed-text:v1.5". What remains must equal a known name exactly,
+// so a different model that shares a prefix, such as "nomic-embed-text-v2",
+// takes the general default.
+func normalizeModelName(model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if i := strings.LastIndex(m, "/"); i >= 0 {
+		m = m[i+1:]
+	}
+	if i := strings.Index(m, ":"); i >= 0 {
+		m = m[:i]
+	}
+	return m
+}
+
 // SemanticConfig configures the §7.3.1 semantic overlap check. The registry
 // reads it; `podium lint` reads no search index and never runs the check.
 //
@@ -40,7 +88,9 @@ type SemanticConfig struct {
 	// Enabled is PODIUM_LINT_SEMANTIC_OVERLAP=on. The check is off by
 	// default.
 	Enabled bool
-	// Similarity is the default read threshold, from 0.5 to 1.0.
+	// Similarity is the configured read threshold, from 0.5 to 1.0, or zero
+	// when PODIUM_LINT_SEMANTIC_SIMILARITY is unset and the threshold is the
+	// configured model's default (Threshold).
 	Similarity float64
 	// Neighbors is the number of nearest peer artifacts one computation
 	// finds and stores records for, from 1 to 100. The computation widens
@@ -52,20 +102,35 @@ type SemanticConfig struct {
 	RefreshInterval time.Duration
 }
 
-// DefaultSemanticConfig returns the spec defaults: off, 0.85, 10, and 24h.
+// DefaultSemanticConfig returns the spec defaults: off, the configured
+// model's threshold (a zero Similarity), 10, and 24h.
 //
 // Spec: §13.12
 func DefaultSemanticConfig() SemanticConfig {
 	return SemanticConfig{
-		Similarity:      DefaultSemanticSimilarity,
 		Neighbors:       DefaultSemanticNeighbors,
 		RefreshInterval: DefaultSemanticRefreshInterval,
 	}
 }
 
+// Threshold returns the read threshold the registry applies when a request
+// names none: the configured Similarity when it is set, and otherwise the
+// default of model, the configured embedding model identifier
+// (DefaultSemanticSimilarityFor).
+//
+// Spec: §7.3.1, §13.12
+func (c SemanticConfig) Threshold(model string) float64 {
+	if validSimilarity(c.Similarity) {
+		return c.Similarity
+	}
+	return DefaultSemanticSimilarityFor(model)
+}
+
 // Resolved replaces each out-of-range numeric field with its default, so a
 // zero or partly filled value behaves as the defaults for the fields left
-// unset. A zero RefreshInterval stays zero, because zero turns the sweep off.
+// unset. An out-of-range Similarity becomes zero, which selects the model's
+// default. A zero RefreshInterval stays zero, because zero turns the sweep
+// off.
 func (c SemanticConfig) Resolved() SemanticConfig {
 	d := DefaultSemanticConfig()
 	if !validSimilarity(c.Similarity) {
@@ -92,7 +157,7 @@ func SemanticConfigFromEnv(getenv func(string) string, logf func(format string, 
 	d := DefaultSemanticConfig()
 	return SemanticConfig{
 		Enabled:         e.onOff("PODIUM_LINT_SEMANTIC_OVERLAP", d.Enabled),
-		Similarity:      e.similarity("PODIUM_LINT_SEMANTIC_SIMILARITY", d.Similarity),
+		Similarity:      e.semanticSimilarity("PODIUM_LINT_SEMANTIC_SIMILARITY"),
 		Neighbors:       e.boundedInt("PODIUM_LINT_SEMANTIC_NEIGHBORS", 1, maxSemanticNeighbors, d.Neighbors),
 		RefreshInterval: e.refreshInterval("PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL", d.RefreshInterval),
 	}
@@ -114,6 +179,22 @@ func ParseSimilarity(v string) (float64, bool) {
 // ValidSimilarity reports whether f lies from 0.5 to 1.0, the range of every
 // §7.3.1 threshold.
 func ValidSimilarity(f float64) bool { return validSimilarity(f) }
+
+// semanticSimilarity parses name as a number in [0.5, 1.0]. An unset, empty,
+// or invalid value returns zero, which selects the configured model's
+// default, and an invalid one logs a line naming the variable.
+func (e thresholdEnv) semanticSimilarity(name string) float64 {
+	v := e.lookup(name)
+	if v == "" {
+		return 0
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || !validSimilarity(f) {
+		e.invalid(name, v, "want a number from 0.5 to 1.0", "for the configured embedding model")
+		return 0
+	}
+	return f
+}
 
 // onOff parses name as on or off.
 func (e thresholdEnv) onOff(name string, def bool) bool {

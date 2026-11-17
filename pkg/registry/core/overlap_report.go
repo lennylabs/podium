@@ -98,7 +98,7 @@ type OverlapQuery struct {
 //
 // Spec: §7.3.1
 func (r *Registry) CatalogOverlap(ctx context.Context, id layer.Identity, q OverlapQuery) (*OverlapReport, error) {
-	threshold := r.overlap.semantic.Similarity
+	threshold := r.semanticThreshold()
 	if q.Threshold != nil {
 		if !lint.ValidSimilarity(*q.Threshold) {
 			return nil, fmt.Errorf("%w: threshold must be a number from 0.5 to 1.0", ErrInvalidArgument)
@@ -317,7 +317,7 @@ func (r *Registry) IngestSemanticOverlap(ctx context.Context, layerID string, st
 	for _, id := range computed {
 		subjects = append(subjects, served[id])
 	}
-	diags, err := r.storedSemanticDiagnostics(ctx, subjects, nameable, r.overlap.semantic.Similarity)
+	diags, err := r.storedSemanticDiagnostics(ctx, subjects, nameable, r.semanticThreshold())
 	if err != nil {
 		log.Printf("%s: layer %s: %v", lint.SemanticOverlapCode, layerID, err)
 		return nil

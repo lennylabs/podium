@@ -9,15 +9,53 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
-// Spec: §13.12 — the semantic overlap check is off by default, with a 0.85
-// threshold, 10 neighbours, and a 24h sweep.
+// Spec: §13.12 — the semantic overlap check is off by default, with the
+// configured model's threshold (a zero Similarity), 10 neighbours, and a 24h
+// sweep.
 func TestSemanticConfig_DefaultsWhenUnset(t *testing.T) {
 	t.Parallel()
 	var logged []string
 	got := SemanticConfigFromEnv(func(string) string { return "" }, func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) })
-	want := SemanticConfig{Similarity: 0.85, Neighbors: 10, RefreshInterval: 24 * time.Hour}
+	want := SemanticConfig{Neighbors: 10, RefreshInterval: 24 * time.Hour}
 	if got != want || len(logged) != 0 {
 		t.Fatalf("defaults = %+v (logged %v), want %+v and no log", got, logged, want)
+	}
+}
+
+// Spec: §13.12 — the default threshold depends on the configured embedding
+// model: 0.80 for text-embedding-3-small, 0.86 for nomic-embed-text, 0.90 for
+// multilingual-e5-large, and 0.85 for any other model. A provider prefix, an
+// Ollama tag, case, and surrounding space select the bare name's default, a
+// different model that shares a prefix does not, and a configured
+// PODIUM_LINT_SEMANTIC_SIMILARITY wins over every model default.
+func TestSemanticConfig_ModelAwareThreshold(t *testing.T) {
+	t.Parallel()
+	unset := DefaultSemanticConfig()
+	for model, want := range map[string]float64{
+		"text-embedding-3-small":         0.80,
+		"openai/text-embedding-3-small":  0.80,
+		"nomic-embed-text":               0.86,
+		"nomic-embed-text:latest":        0.86,
+		"nomic-embed-text:v1.5":          0.86,
+		" Nomic-Embed-Text ":             0.86,
+		"multilingual-e5-large":          0.90,
+		"intfloat/multilingual-e5-large": 0.90,
+		"text-embedding-3-large":         0.85,
+		"nomic-embed-text-v2":            0.85,
+		"multilingual-e5-large-instruct": 0.85,
+		"voyage-3":                       0.85,
+		"":                               0.85,
+	} {
+		if got := unset.Threshold(model); got != want {
+			t.Errorf("Threshold(%q) = %v, want %v", model, got, want)
+		}
+		if got := (SemanticConfig{Similarity: 0.93}).Threshold(model); got != 0.93 {
+			t.Errorf("Threshold(%q) with 0.93 configured = %v, want the configured value", model, got)
+		}
+	}
+	env := func(k string) string { return map[string]string{"PODIUM_LINT_SEMANTIC_SIMILARITY": "0.7"}[k] }
+	if got := SemanticConfigFromEnv(env, func(string, ...any) {}).Threshold("multilingual-e5-large"); got != 0.7 {
+		t.Errorf("an explicit PODIUM_LINT_SEMANTIC_SIMILARITY=0.7 gave %v on multilingual-e5-large, want 0.7", got)
 	}
 }
 
@@ -45,7 +83,7 @@ func TestSemanticConfig_FromEnv(t *testing.T) {
 		{
 			name: "off and a zero sweep",
 			env:  map[string]string{"PODIUM_LINT_SEMANTIC_OVERLAP": "off", "PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL": "0"},
-			want: SemanticConfig{Similarity: 0.85, Neighbors: 10},
+			want: SemanticConfig{Neighbors: 10},
 		},
 		{
 			name: "invalid values keep their defaults",
@@ -55,13 +93,13 @@ func TestSemanticConfig_FromEnv(t *testing.T) {
 				"PODIUM_LINT_SEMANTIC_NEIGHBORS":        "101",
 				"PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL": "30s",
 			},
-			want: SemanticConfig{Similarity: 0.85, Neighbors: 10, RefreshInterval: 24 * time.Hour},
+			want: SemanticConfig{Neighbors: 10, RefreshInterval: 24 * time.Hour},
 			logs: []string{"PODIUM_LINT_SEMANTIC_OVERLAP", "PODIUM_LINT_SEMANTIC_SIMILARITY", "PODIUM_LINT_SEMANTIC_NEIGHBORS", "PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL"},
 		},
 		{
 			name: "unparseable numbers",
 			env:  map[string]string{"PODIUM_LINT_SEMANTIC_NEIGHBORS": "ten", "PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL": "daily"},
-			want: SemanticConfig{Similarity: 0.85, Neighbors: 10, RefreshInterval: 24 * time.Hour},
+			want: SemanticConfig{Neighbors: 10, RefreshInterval: 24 * time.Hour},
 			logs: []string{"PODIUM_LINT_SEMANTIC_NEIGHBORS", "PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL"},
 		},
 	}
@@ -89,8 +127,8 @@ func TestSemanticConfig_FromEnv(t *testing.T) {
 // the fields left unset, and a zero sweep interval stays off.
 func TestSemanticConfig_Resolved(t *testing.T) {
 	t.Parallel()
-	got := SemanticConfig{Enabled: true, RefreshInterval: time.Second}.Resolved()
-	want := SemanticConfig{Enabled: true, Similarity: 0.85, Neighbors: 10, RefreshInterval: 24 * time.Hour}
+	got := SemanticConfig{Enabled: true, Similarity: 1.5, RefreshInterval: time.Second}.Resolved()
+	want := SemanticConfig{Enabled: true, Neighbors: 10, RefreshInterval: 24 * time.Hour}
 	if got != want {
 		t.Errorf("Resolved = %+v, want %+v", got, want)
 	}
