@@ -72,6 +72,10 @@ func TestComputeOverlap_FailureLogNamesTheStep(t *testing.T) {
 	if strings.Contains(out, "index query for") {
 		t.Errorf("log still calls a failure an index query:\n%s", out)
 	}
+	stepErr := error(&overlapStepError{step: stepStoredVector, err: errNoStoredVector})
+	if !errors.Is(stepErr, errNoStoredVector) || stepErr.Error() != "stored-vector read: "+errNoStoredVector.Error() {
+		t.Errorf("step error = %q, want it to wrap the cause after the step name", stepErr)
+	}
 	logOverlapFailure(f.put("z", "1.0.0", "L", "zulu", "", false), errors.New("plain"))
 	if !strings.Contains(buf.String(), "computation for z@1.0.0 failed: plain") {
 		t.Errorf("an error without a step is not logged as a computation failure:\n%s", buf.String())
