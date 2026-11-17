@@ -173,6 +173,25 @@ func TestRuleProseReference_RootRelativeTargetNotChecked(t *testing.T) {
 	}
 }
 
+// Spec: §4.4 — a reference to a directory of the package resolves when a
+// bundled file lies below it, with or without a trailing slash. A directory
+// with no bundled file below it, and a name that only shares a prefix with a
+// directory, are still errors.
+func TestRuleProseReference_BundledDirectoryResolves(t *testing.T) {
+	t.Parallel()
+	body := "See [templates](assets/templates/), [also](./assets/templates), " +
+		"[empty](assets/none/), and [prefix](assets/temp)."
+	diags := proseDiags(proseRec("team/mail", body, "assets/templates/weekly.html", "assets/templates/brief.html"))
+	if len(diags) != 2 {
+		t.Fatalf("want the empty directory and the prefix-only name reported, got %+v", diags)
+	}
+	for _, d := range diags {
+		if d.Severity != lint.SeverityError || !(strings.Contains(d.Message, `"assets/none/"`) || strings.Contains(d.Message, `"assets/temp"`)) {
+			t.Errorf("unexpected diagnostic %+v", d)
+		}
+	}
+}
+
 // Spec: §4.4 — the fragment is removed before the artifact lookup as well,
 // so a reference to another artifact with a fragment resolves.
 func TestRuleProseReference_FragmentOnArtifactReferenceResolves(t *testing.T) {

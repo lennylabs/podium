@@ -343,6 +343,15 @@ function resolveReference(href: string, resources: ReadonlySet<string>): Referen
   if (target === 'ARTIFACT.md' || target === 'SKILL.md') {
     return null;
   }
+  // A directory of the package that holds bundled files resolves in the
+  // linter (§4.4). The viewer has no single file to open for it, and the
+  // name is not an artifact ID, so the link is left as authored.
+  const dir = target.replace(/\/+$/, '') + '/';
+  for (const name of resources) {
+    if (name.startsWith(dir)) {
+      return null;
+    }
+  }
   const pin = target.indexOf('@');
   const id = pin < 0 ? target : target.slice(0, pin);
   return id === '' ? null : { kind: 'artifact', id };

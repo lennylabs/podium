@@ -198,6 +198,12 @@ func (r ruleProseReferenceResolution) checkReference(rec filesystem.ArtifactReco
 	if _, ok := rec.Resources[clean]; ok {
 		return nil
 	}
+	// §4.4: a directory of the package resolves when a bundled file lies
+	// below it, so `[templates](assets/templates/)` names the bundled
+	// templates. path.Clean already dropped the trailing slash.
+	if bundledDirectory(rec.Resources, clean) {
+		return nil
+	}
 	// Tolerate references to the artifact's own manifest files.
 	switch clean {
 	case "ARTIFACT.md", "SKILL.md":
@@ -216,6 +222,18 @@ func (r ruleProseReferenceResolution) checkReference(rec filesystem.ArtifactReco
 		Severity:   SeverityError,
 		Message:    fmt.Sprintf("prose reference %q does not resolve to a bundled file or a known artifact", href),
 	}
+}
+
+// bundledDirectory reports whether dir names a directory of the package that
+// holds at least one bundled file.
+func bundledDirectory(resources map[string][]byte, dir string) bool {
+	prefix := dir + "/"
+	for name := range resources {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r ruleProseReferenceResolution) checkURL(ctx context.Context, artifactID, href string) *Diagnostic {
