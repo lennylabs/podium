@@ -174,13 +174,27 @@ func (r *Registry) currentStoredVector(ctx context.Context, tenant string, rec s
 	return vec, nil
 }
 
+// clampSimilarity limits a similarity to the range 0 to 1. Float32 vectors
+// and a managed backend's float32 score put identical texts slightly above 1
+// (1.0000006 on sqlite-vec and 1.0000222 on Pinecone were observed), and a
+// cosine of opposed vectors is negative; neither is a similarity the report
+// can show. A NaN, which a zero-magnitude vector can produce, becomes 0.
+//
+// Spec: §7.3.1
+func clampSimilarity(s float64) float64 {
+	if !(s > 0) {
+		return 0
+	}
+	return min(s, 1)
+}
+
 // scoreByDistance takes one minus each reported distance as the similarity,
 // which is the cosine similarity when the managed index was created with the
 // cosine metric (§7.3.1).
 func scoreByDistance(_ context.Context, matches []vector.Match) ([]overlapNeighbor, error) {
 	out := make([]overlapNeighbor, 0, len(matches))
 	for _, m := range matches {
-		out = append(out, overlapNeighbor{artifactID: m.ArtifactID, version: m.Version, similarity: 1 - float64(m.Distance)})
+		out = append(out, overlapNeighbor{artifactID: m.ArtifactID, version: m.Version, similarity: clampSimilarity(1 - float64(m.Distance))})
 	}
 	return out, nil
 }
@@ -200,7 +214,7 @@ func cosineNeighbors(ctx context.Context, scorer vector.CosineScorer, tenant str
 	out := make([]overlapNeighbor, 0, len(keys))
 	for _, k := range keys {
 		if s, ok := sims[k]; ok {
-			out = append(out, overlapNeighbor{artifactID: k.ArtifactID, version: k.Version, similarity: s})
+			out = append(out, overlapNeighbor{artifactID: k.ArtifactID, version: k.Version, similarity: clampSimilarity(s)})
 		}
 	}
 	return out, nil
@@ -323,7 +337,7 @@ func (r *Registry) storeOverlap(ctx context.Context, p pendingOverlap, now time.
 		recs = append(recs, store.OverlapRecord{
 			Owner: p.rec.ArtifactID, OwnerVersion: p.rec.Version,
 			Peer: peer.artifactID, PeerVersion: peer.version,
-			Similarity: peer.similarity, ModelID: model, ComputedAt: now,
+			Similarity: clampSimilarity(peer.similarity), ModelID: model, ComputedAt: now,
 		})
 	}
 	comp := store.OverlapComputation{ArtifactID: p.rec.ArtifactID, Version: p.rec.Version, ModelID: model, ComputedAt: now}
