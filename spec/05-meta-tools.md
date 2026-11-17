@@ -57,8 +57,8 @@ you're ready to use the artifact; it's the operation that puts content in
 your context.
 ```
 
-## 5.2 Command Materialization
+## 5.2 User-Invoked Skills
 
-A `type: command` artifact is a parameterized prompt template a human invokes, typically as a slash command. Podium does not project commands through MCP. Both `podium sync` and the MCP server materialize a command into the target harness's native command location and format (§6.7), so the harness's own slash-command system surfaces it and applies the harness's native argument convention to the command body. Podium adds no argument layer of its own.
+A skill whose `invocation` is `user` (§4.3.4) is meant to be started by a human, typically as a slash command. Podium does not project it through MCP as a prompt. `podium sync` and `load_artifact` materialize it into the target harness's native skill location with the harness's user-only control, or, on a harness whose skills have no such control, into the harness's native command location. They write nothing on a harness whose §6.7.1 `invocation: user` cell is `✗` (§6.7). The control governs whether the harness invokes the skill by itself. The meta-tools still list the skill in `search_artifacts` and return its body from `load_artifact`, as they do for every other artifact (§5.1). The harness applies its native argument convention to the body, which Podium writes unchanged. Podium adds no argument layer of its own, so a placeholder expands only on the harnesses whose convention it follows.
 
 The MCP tools declared in a loaded artifact's manifest (`mcpServers:`) are stored by Podium but registered by the host's runtime. Podium stores the declarations and exposes them via `load_artifact`; hosts decide whether and how to wire them up.
