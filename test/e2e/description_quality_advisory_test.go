@@ -143,3 +143,38 @@ func closeAOverlap(stdout string) bool {
 	}
 	return false
 }
+
+// Spec: §7.3.1 — registry ingest runs lint.near_duplicate_content over the
+// ingested layer. Two context artifacts whose prose bodies share all but one
+// sentence each draw the advisory naming the other, and the reingest exits 0
+// because the advisory does not gate ingest.
+func TestDescriptionQuality_NearDuplicateAdvisoryEndToEnd(t *testing.T) {
+	t.Parallel()
+	srv := startServer(t, "")
+	layer := newRepublishLayer(t, srv, "doc-quality-near-dup")
+
+	body := func(desc, own string) string {
+		return "---\ntype: context\nversion: 1.0.0\ndescription: " + desc + "\n---\n\n" + advisorySharedRunbook + own + "\n"
+	}
+	ri := reingestArtifacts(t, layer, map[string]string{
+		"ops/rotate-staging/ARTIFACT.md": body("Rotate the staging database credentials and confirm each service reconnects.",
+			"Page the on-call database engineer when a read replica lags behind the primary."),
+		"ops/rotate-signing/ARTIFACT.md": body("Replace production API signing keys after a suspected compromise is reported.",
+			"Notify the security channel whenever a signing key is revoked ahead of schedule."),
+	})
+
+	cliContains(t, ri.Stdout, "lint.near_duplicate_content", "near-duplicate advisory surfaced")
+	for _, want := range []string{
+		"advisory: ops/rotate-signing [warning] ARTIFACT.md body nearly duplicates ops/rotate-staging ARTIFACT.md body",
+		"advisory: ops/rotate-staging [warning] ARTIFACT.md body nearly duplicates ops/rotate-signing ARTIFACT.md body",
+	} {
+		cliContains(t, ri.Stdout, want, "each artifact of the pair names its peer")
+	}
+	for _, id := range []string{"ops/rotate-staging", "ops/rotate-signing"} {
+		var resp map[string]any
+		getJSON(t, srv.BaseURL+"/v1/load_artifact?id="+id, &resp)
+		if resp["id"] != id {
+			t.Errorf("load %s: id=%v, want %q (advisory must not gate ingest)", id, resp["id"], id)
+		}
+	}
+}

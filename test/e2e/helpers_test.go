@@ -555,17 +555,29 @@ func (w *watchProc) log() string {
 // appended to the subprocess environment.
 func startWatch(t testing.TB, registry, target, harness string, env ...string) *watchProc {
 	t.Helper()
+	return startWatchIn(t, "", env, "--registry", registry, "--target", target, "--harness", harness)
+}
+
+// startWatchIn is startWatch for a caller that picks the working directory
+// and the flags: it launches `podium sync <args> --watch` from cwd, so a case
+// can run the watcher inside a workspace whose .podium/sync.yaml it wrote. An
+// empty cwd runs in the isolated HOME, as startWatch does.
+func startWatchIn(t testing.TB, cwd string, env []string, args ...string) *watchProc {
+	t.Helper()
 	logf, err := os.CreateTemp(t.TempDir(), "watch-*.log")
 	if err != nil {
 		t.Fatalf("watch log: %v", err)
 	}
 	cmd := exec.Command(cmdharness.Bin(t, "podium"),
-		"sync", "--registry", registry, "--target", target, "--harness", harness, "--watch")
+		append(append([]string{"sync"}, args...), "--watch")...)
 	// Run in an isolated HOME, as runBin does, so §7.5.2 workspace discovery
 	// does not climb from the package directory into the developer's
 	// ~/.podium and read its defaults (verify_signatures among them).
 	home := cmdharness.IsolatedHome(t)
 	cmd.Dir = home
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
 	cmd.Env = mergeEnv(withIsolatedHome(append([]string{"PODIUM_NO_AUTOSTANDALONE=1"}, env...), home)...)
 	cmd.Stdin = bytes.NewReader(nil)
 	cmd.Stdout = logf
