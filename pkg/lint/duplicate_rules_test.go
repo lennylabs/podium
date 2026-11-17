@@ -76,7 +76,7 @@ func TestNearDuplicate_BodiesAcrossArtifacts(t *testing.T) {
 	if got := msgs["ops/a"]; len(got) != 1 || !strings.HasPrefix(got[0], "SKILL.md body nearly duplicates ops/b SKILL.md body (83%); ") {
 		t.Errorf("ops/a messages = %q", got)
 	}
-	if got := msgs["ops/b"]; len(got) != 1 || !strings.Contains(got[0], "nearly duplicates ops/a SKILL.md body (83%); keep one copy, or move the shared text") {
+	if got := msgs["ops/b"]; len(got) != 1 || !strings.HasSuffix(got[0], "nearly duplicates ops/a SKILL.md body (83%); "+nearDuplicateRemedy) {
 		t.Errorf("ops/b messages = %q", got)
 	}
 }
@@ -134,13 +134,13 @@ func TestNearDuplicate_ThresholdOne(t *testing.T) {
 }
 
 // sharedResourceRecords returns n agent artifacts that each bundle the
-// same resource of the given word count at references/license.md.
+// same resource of the given word count at references/runbook.md.
 func sharedResourceRecords(n, words int) []filesystem.ArtifactRecord {
-	res := []byte(prose("license", words))
+	res := []byte(prose("runbook", words))
 	out := make([]filesystem.ArtifactRecord, n)
 	for i := range out {
 		r := agentRec(fmt.Sprintf("pkg/a%03d", i), "")
-		r.Resources = map[string][]byte{"references/license.md": res}
+		r.Resources = map[string][]byte{"references/runbook.md": res}
 		out[i] = r
 	}
 	return out
@@ -167,39 +167,128 @@ func TestNearDuplicate_SharedResourceCluster(t *testing.T) {
 	}
 	var peers []string
 	for i := 1; i <= 10; i++ {
-		peers = append(peers, fmt.Sprintf("pkg/a%03d references/license.md (100%%)", i))
+		peers = append(peers, fmt.Sprintf("pkg/a%03d references/runbook.md (100%%)", i))
 	}
-	want := "references/license.md nearly duplicates " + strings.Join(peers, ", ") + ", and 489 more; keep one copy if the artifacts can share it"
+	want := "references/runbook.md nearly duplicates " + strings.Join(peers, ", ") + ", and 489 more; " + nearDuplicateRemedy
 	if got := msgs["pkg/a000"]; len(got) != 1 || got[0] != want {
 		t.Errorf("pkg/a000 messages = %q\nwant %q", got, want)
 	}
 }
 
-// Spec: §7.3.1 — a bundled resource that is valid UTF-8 with no NUL byte is
-// a unit and draws the resource remedy; a resource holding a NUL byte and
-// one that is not valid UTF-8 are not compared.
+// Spec: §7.3.1 — a prose resource that is valid UTF-8 with no NUL byte is a
+// unit and draws the remedy; a resource holding a NUL byte and one that is
+// not valid UTF-8 are not compared.
 func TestNearDuplicate_ResourceUnits(t *testing.T) {
 	t.Parallel()
 	text := prose("guide", 60)
 	resources := func() map[string][]byte {
 		return map[string][]byte{
 			"references/guide.md": []byte(text),
-			"assets/blob.bin":     []byte(text + "\x00"),
+			"assets/blob.md":      []byte(text + "\x00"),
 			"assets/latin1.txt":   []byte(text + " \xff"),
 		}
 	}
 	a, b := agentRec("docs/a", ""), agentRec("docs/b", "")
 	a.Resources, b.Resources = resources(), resources()
 	msgs := nearDupMessages(nearDup([]filesystem.ArtifactRecord{a, b}, DefaultContentSimilarity))
-	want := "references/guide.md nearly duplicates docs/b references/guide.md (100%); keep one copy if the artifacts can share it"
+	want := "references/guide.md nearly duplicates docs/b references/guide.md (100%); " + nearDuplicateRemedy
 	if got := msgs["docs/a"]; len(got) != 1 || got[0] != want {
 		t.Errorf("docs/a messages = %q, want [%q]", got, want)
 	}
 	for _, ms := range msgs {
 		for _, m := range ms {
-			if strings.Contains(m, "blob.bin") || strings.Contains(m, "latin1.txt") {
+			if strings.Contains(m, "blob.md") || strings.Contains(m, "latin1.txt") {
 				t.Errorf("binary resource compared: %q", m)
 			}
+		}
+	}
+}
+
+// Spec: §7.3.1 — the remedy says the copies can drift and recommends keeping
+// them in step or moving the shared text into one artifact referenced by its
+// canonical ID, because a skill must be self-contained and cannot share one
+// copy.
+func TestNearDuplicate_RemedyText(t *testing.T) {
+	t.Parallel()
+	want := "the copies can drift; keep them in step, or move the shared text into one artifact and reference that artifact by its canonical ID"
+	if nearDuplicateRemedy != want {
+		t.Errorf("remedy = %q, want %q", nearDuplicateRemedy, want)
+	}
+}
+
+// Spec: §7.3.1 — a prose resource ends in .md, .markdown, .txt, or .rst
+// without regard to case and is not a license file. A license file's name,
+// lowercased and without its final extension, has license, licence, copying,
+// notice, or ofl among its -, _, and . separated parts.
+func TestIsProseResource_Names(t *testing.T) {
+	t.Parallel()
+	text := []byte(prose("w", 60))
+	cases := map[string]bool{
+		// Prose resources.
+		"references/api.md":       true,
+		"notes.txt":               true,
+		"licensing-guide.md":      true,
+		"docs/GUIDE.MD":           true,
+		"docs/intro.markdown":     true,
+		"docs/index.rst":          true,
+		"docs/unlicensed-tips.md": true,
+		// License files.
+		"LICENSE.txt":                    false,
+		"LICENSE":                        false,
+		"LICENSE-MIT":                    false,
+		"COPYING":                        false,
+		"fonts/ArsenalSC-OFL.txt":        false,
+		"fonts/OFL-eb-garamond.txt":      false,
+		"NOTICE.md":                      false,
+		"third_party/licence.md":         false,
+		"third_party/license_apache.txt": false,
+		"third_party/foo.license.md":     false,
+		"Copying.rst":                    false,
+		// Scripts and data files.
+		"scripts/build.py":   false,
+		"scripts/run.js":     false,
+		"data/config.json":   false,
+		"assets/page.html":   false,
+		"scripts/run.sh":     false,
+		"references/md":      false,
+		"references/api.mdx": false,
+	}
+	for name, want := range cases {
+		if got := isProseResource(name, text); got != want {
+			t.Errorf("isProseResource(%q) = %v, want %v", name, got, want)
+		}
+	}
+	if isProseResource("notes.txt", []byte("a\x00b")) || isProseResource("notes.txt", []byte{0xff, 'a'}) {
+		t.Errorf("a resource with a NUL byte or invalid UTF-8 is not a prose resource")
+	}
+}
+
+// Spec: §7.3.1 — a script, a data file, and a license file bundled unchanged
+// in two artifacts are not compared, while the same text in a Markdown
+// resource is reported.
+func TestNearDuplicate_ComparesProseResourcesOnly(t *testing.T) {
+	t.Parallel()
+	text := []byte(prose("shared", 80))
+	bundle := func(paths ...string) []filesystem.ArtifactRecord {
+		a, b := agentRec("pkg/a", ""), agentRec("pkg/b", "")
+		a.Resources, b.Resources = map[string][]byte{}, map[string][]byte{}
+		for _, p := range paths {
+			a.Resources[p], b.Resources[p] = text, text
+		}
+		return []filesystem.ArtifactRecord{a, b}
+	}
+	excluded := []string{"scripts/build.py", "scripts/run.js", "data/table.json", "assets/page.html",
+		"LICENSE.txt", "LICENSE", "LICENSE-MIT", "COPYING", "fonts/ArsenalSC-OFL.txt", "fonts/OFL-eb-garamond.txt", "NOTICE.md"}
+	for _, p := range excluded {
+		if diags := nearDup(bundle(p), DefaultContentSimilarity); len(diags) != 0 {
+			t.Errorf("%s compared: %v", p, diags)
+		}
+	}
+	for _, p := range []string{"references/api.md", "notes.txt", "licensing-guide.md"} {
+		msgs := nearDupMessages(nearDup(bundle(p), DefaultContentSimilarity))
+		want := p + " nearly duplicates pkg/b " + p + " (100%); " + nearDuplicateRemedy
+		if got := msgs["pkg/a"]; len(got) != 1 || got[0] != want {
+			t.Errorf("%s: pkg/a messages = %q, want [%q]", p, got, want)
 		}
 	}
 }
