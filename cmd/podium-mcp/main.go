@@ -1281,9 +1281,9 @@ func (s *mcpServer) handle(req rpcRequest) rpcResponse {
 		// objects ({} = present, no listChanged/subscribe sub-features);
 		// sessionCorrelation is a Podium extension carried as a boolean. The
 		// `resources` capability backs the §5.0 read-only mirror of
-		// load_artifact. Command artifacts are delivered through
-		// harness-native materialization (§6.7), not an MCP prompt
-		// projection, so no `prompts` capability is advertised.
+		// load_artifact. User-invoked skills are delivered through
+		// harness-native materialization (§5.2, §6.7) rather than an MCP
+		// prompt projection, so no `prompts` capability is advertised.
 		caps := map[string]any{
 			"tools":              map[string]any{},
 			"sessionCorrelation": true,

@@ -3,9 +3,9 @@ package e2e
 // End-to-end coverage for the §5.0 resource mirror and the
 // MCP server's initialize capability set. The resource mirror exposes
 // artifact bodies through MCP's resources/list + resources/read as a
-// read-only mirror of load_artifact. Command artifacts are delivered
-// through harness-native materialization (§5.2, §6.7), not an MCP prompt
-// projection, so initialize advertises no `prompts` capability. Tests
+// read-only mirror of load_artifact. User-invoked skills are delivered
+// through harness-native materialization (§5.2, §6.7) rather than an MCP
+// prompt projection, so initialize advertises no `prompts` capability. Tests
 // drive the podium-mcp bridge against a standalone server.
 
 import (

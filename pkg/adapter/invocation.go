@@ -80,7 +80,10 @@ func skillMarkdown(src Source, ctl userOnlyControl) []byte {
 }
 
 // withUserOnlyFrontmatter makes `disable-model-invocation: true` the single
-// top-level occurrence of the key in b's frontmatter. A frontmatter that has
+// top-level occurrence of the key in b's frontmatter. An absent key is
+// injected as the first line of a block mapping whose keys start at column 1,
+// and is added to any other mapping, such as a flow mapping or an indented
+// block mapping, by re-encoding the frontmatter. A frontmatter that has
 // no closing delimiter, or does not decode to a mapping, takes the injected
 // line anyway, because the skill is user-invoked and a lenient harness reader
 // still sees the control. injectFrontmatterLine leaves b unchanged when it has
@@ -101,14 +104,23 @@ func withUserOnlyFrontmatter(b []byte) []byte {
 			keys = append(keys, i)
 		}
 	}
-	if len(keys) == 0 {
-		return injectFrontmatterLine(b, userOnlyKey, "true")
-	}
 	if len(keys) == 1 && isYAMLTrue(root.Content[keys[0]+1]) {
 		return b
 	}
 	lines := strings.SplitAfter(string(b), "\n")
 	closing := closingDelimiterLine(fm)
+	if len(keys) == 0 {
+		if startsAtColumnOne(root) {
+			return injectFrontmatterLine(b, userOnlyKey, "true")
+		}
+		// A column-0 line ahead of a flow mapping or an indented block
+		// mapping leaves frontmatter that does not decode, so the key joins
+		// the mapping and the frontmatter is re-encoded instead.
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: userOnlyKey},
+			&yaml.Node{Kind: yaml.ScalarNode})
+		return reencodeUserOnly(lines, closing, &doc, []int{len(root.Content) - 2})
+	}
 	if !keysShareLine(root) {
 		if out, ok := replaceUserOnlyLines(lines, closing, root, keys); ok {
 			return out
@@ -133,6 +145,13 @@ func isYAMLTrue(v *yaml.Node) bool {
 // the document.
 func closingDelimiterLine(fm []byte) int {
 	return bytes.Count(fm, []byte("\n")) + 2
+}
+
+// startsAtColumnOne reports whether root is a non-empty block mapping whose
+// keys start at column 1, the one layout where a line injected after the
+// opening delimiter becomes another top-level key of the same mapping.
+func startsAtColumnOne(root *yaml.Node) bool {
+	return !keysShareLine(root) && len(root.Content) > 0 && root.Content[0].Column == 1
 }
 
 // keysShareLine reports whether root is a flow mapping, the one layout whose
@@ -196,7 +215,8 @@ func lineEnding(line string) string {
 }
 
 // reencodeUserOnly handles a frontmatter the line replacement cannot edit,
-// such as a flow mapping whose keys share a line. It sets the first
+// such as a flow mapping whose keys share a line, and one the line injection
+// would break, such as an indented block mapping. It sets the first
 // occurrence to the boolean true, drops later ones, and re-encodes the
 // frontmatter between the delimiters. The re-encoding normalizes the layout
 // of the frontmatter alone: the opening delimiter line, the frontmatter's

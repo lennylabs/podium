@@ -157,6 +157,48 @@ func TestSkillMarkdown_Control(t *testing.T) {
 			}
 		})
 	}
+	for _, tc := range []struct{ name, in, head, tail string }{
+		{
+			name: "flow mapping",
+			in:   "---\n{name: ship, description: d}\n---\nBody.\n",
+			head: "---\n", tail: "---\nBody.\n",
+		},
+		{
+			name: "crlf flow mapping",
+			in:   "---\r\n{name: ship, description: d}\r\n---\r\n\r\nBody.\r\n",
+			head: "---\r\n", tail: "---\r\n\r\nBody.\r\n",
+		},
+		{
+			name: "indented block mapping",
+			in:   "---\n  name: ship\n  description: d\n---\nBody.\n",
+			head: "---\n", tail: "---\nBody.\n",
+		},
+	} {
+		tc := tc
+		t.Run("absent key added to "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := string(skillMarkdown(userSkillSource(tc.in), controlFrontmatter))
+			if !strings.HasPrefix(got, tc.head) || !strings.HasSuffix(got, tc.tail) {
+				t.Errorf("got %q, want the opening line %q and the authored tail %q", got, tc.head, tc.tail)
+			}
+			if fm := frontmatterOf(t, []byte(strings.ReplaceAll(got, "\r\n", "\n"))); fm[userOnlyKey] != true || fm["description"] != "d" || fm["name"] != "ship" {
+				t.Errorf("frontmatter = %#v", fm)
+			}
+			if n := strings.Count(got, userOnlyKey); n != 1 {
+				t.Errorf("%d control keys in %q", n, got)
+			}
+		})
+	}
+	t.Run("absent key added to an empty flow mapping", func(t *testing.T) {
+		t.Parallel()
+		got := skillMarkdown(userSkillSource("---\n{}\n---\nBody.\n"), controlFrontmatter)
+		if fm := frontmatterOf(t, got); len(fm) != 1 || fm[userOnlyKey] != true {
+			t.Errorf("frontmatter = %#v, want only the control true", fm)
+		}
+		if !strings.HasSuffix(string(got), "---\nBody.\n") {
+			t.Errorf("body lost:\n%s", got)
+		}
+	})
 	t.Run("unterminated frontmatter takes the injected line", func(t *testing.T) {
 		t.Parallel()
 		in := "---\nname: ship\ndescription: d\nBody.\n"
