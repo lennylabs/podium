@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -15,9 +14,8 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
-// ruleArtifactBodyForSkill enforces §4.3.4 line 286: a skill's
-// ARTIFACT.md body must be empty or a single HTML comment;
-// anything else warns.
+// ruleArtifactBodyForSkill enforces §4.3.4: a skill's ARTIFACT.md body
+// must be empty or a single HTML comment; anything else warns.
 type ruleArtifactBodyForSkill struct{}
 
 func (ruleArtifactBodyForSkill) Code() string { return "lint.skill_artifact_body" }
@@ -43,7 +41,7 @@ func (r ruleArtifactBodyForSkill) Check(_ context.Context, _ *filesystem.Registr
 
 // skillArtifactBodyIsAllowed returns true when body is whitespace
 // only or a single HTML-comment block (with optional surrounding
-// whitespace) per §4.3.4 line 286.
+// whitespace) per §4.3.4.
 func skillArtifactBodyIsAllowed(body []byte) bool {
 	stripped := bytes.TrimSpace(body)
 	if len(stripped) == 0 {
@@ -81,10 +79,10 @@ func bodyAfterFrontmatter(src []byte) []byte {
 // ruleProseReferenceResolution implements §4.4: prose references in the
 // manifest body must resolve to bundled files (existence check), URLs (HTTP
 // HEAD returning 200/3xx), or other artifacts (registry-side resolution). A
-// prose reference is the target of a Markdown inline link outside code
-// (proseLinkTargets). The default linter checks bundled files; URL HEAD
-// checks are gated behind the rule's HTTPClient field for tests + offline
-// ingest.
+// prose reference is the destination of a Markdown inline link or image as
+// CommonMark parses the body (proseLinkTargets). The default linter checks
+// bundled files; URL HEAD checks are gated behind the rule's HTTPClient field
+// for tests + offline ingest.
 type ruleProseReferenceResolution struct {
 	// HTTPClient drives URL HEAD checks. When nil, URL references
 	// are not validated; offline ingest sees a single notice.
@@ -103,7 +101,7 @@ func (ruleProseReferenceResolution) Code() string { return "lint.prose_reference
 
 func (r ruleProseReferenceResolution) Check(ctx context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	var out []Diagnostic
-	// spec: §4.4 line 348 — a prose reference may resolve to another
+	// Spec: §4.4 — a prose reference may resolve to another
 	// artifact, so build the visible catalog once up front and resolve
 	// non-bundled references against it. The registry argument is nil at
 	// ingest (pkg/registry/ingest/ingest.go), so the catalog is the linted
@@ -122,9 +120,13 @@ func (r ruleProseReferenceResolution) Check(ctx context.Context, _ *filesystem.R
 			continue
 		}
 		for _, href := range proseLinkTargets(body) {
-			if isAbsoluteURL(href) {
-				if d := r.checkURL(ctx, rec.ID, href); d != nil {
-					out = append(out, *d)
+			if scheme, ok := urlScheme(href); ok {
+				// Spec: §4.4 — an http or https target is a URL reference. A
+				// target with any other scheme, such as mailto:, is not checked.
+				if scheme == "http" || scheme == "https" {
+					if d := r.checkURL(ctx, rec.ID, href); d != nil {
+						out = append(out, *d)
+					}
 				}
 				continue
 			}
@@ -261,7 +263,7 @@ func (r ruleProseReferenceResolution) checkURL(ctx context.Context, artifactID, 
 		}
 	}
 	defer func() { _ = resp.Body.Close() }()
-	// spec: §4.4 line 347 — a URL reference is valid when HEAD returns 200
+	// Spec: §4.4 — a URL reference is valid when HEAD returns 200
 	// or any 3xx redirect. Other 2xx codes (201, 204, 206) do not confirm
 	// the named resource is served, so they are rejected.
 	if resp.StatusCode == http.StatusOK || (resp.StatusCode >= 300 && resp.StatusCode < 400) {
@@ -275,13 +277,25 @@ func (r ruleProseReferenceResolution) checkURL(ctx context.Context, artifactID, 
 	}
 }
 
-func isAbsoluteURL(href string) bool {
-	u, err := url.Parse(href)
-	if err != nil {
-		return false
+// urlScheme returns the lowercased URL scheme of href and true when href
+// begins with one: the RFC 3986 production, a letter followed by letters,
+// digits, "+", "-", or ".", and then ":". A relative path such as
+// `references/a:b.md` carries no scheme, because its "/" comes before the
+// ":". The web viewer applies the same production when it decides that a
+// reference addresses something outside the registry.
+func urlScheme(href string) (string, bool) {
+	i := strings.IndexByte(href, ':')
+	if i < 1 || !isASCIILetter(href[0]) {
+		return "", false
 	}
-	if u.Scheme == "http" || u.Scheme == "https" {
-		return true
+	for _, c := range []byte(href[1:i]) {
+		if !isASCIILetter(c) && !('0' <= c && c <= '9') && c != '+' && c != '-' && c != '.' {
+			return "", false
+		}
 	}
-	return false
+	return strings.ToLower(href[:i]), true
+}
+
+func isASCIILetter(c byte) bool {
+	return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
 }

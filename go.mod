@@ -14,6 +14,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.53
 	github.com/minio/minio-go/v7 v7.4.1
 	github.com/prometheus/client_golang v1.25.0
+	github.com/yuin/goldmark v1.7.13
 	github.com/zalando/go-keyring v0.2.8
 	go.etcd.io/bbolt v1.5.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0

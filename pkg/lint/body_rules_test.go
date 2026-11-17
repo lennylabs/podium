@@ -2,6 +2,7 @@ package lint_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +14,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
-// Spec: §4.3.4 line 286 — a skill's ARTIFACT.md body is empty
+// Spec: §4.3.4 — a skill's ARTIFACT.md body is empty
 // or a single HTML comment; anything else warns.
 func TestRuleArtifactBodyForSkill_AcceptsEmptyOrSingleComment(t *testing.T) {
 	t.Parallel()
@@ -48,7 +49,7 @@ func TestRuleArtifactBodyForSkill_AcceptsEmptyOrSingleComment(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 lines 336-342 — bundled-file references must
+// Spec: §4.4 — bundled-file references must
 // resolve. References to missing files are an ingest error.
 func TestRuleProseReference_BundledFileResolves(t *testing.T) {
 	t.Parallel()
@@ -237,9 +238,9 @@ func TestRuleProseReference_UndecodableTargetLooksUpAsWritten(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 — link syntax inside an inline code span or a fenced code block
-// is example text and is not checked, while a link outside code in the same
-// body still is.
+// Spec: §4.4 — link syntax inside a code span or a fenced code block is not a
+// link and is not checked, while a link outside code in the same body still
+// is.
 func TestRuleProseReference_SkipsLinksInCode(t *testing.T) {
 	t.Parallel()
 	body := "Write a link as `[text](url)`.\n\n" +
@@ -267,7 +268,88 @@ func TestRuleProseReference_UnterminatedFenceInSkillBody(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 line 348 — a prose reference that names another
+// Spec: §4.4 — prose references follow CommonMark parsing. A fenced code
+// block nested in a list item, an indented code block, a fence in a block
+// quote, and an escaped bracket are not links, so the missing files they name
+// are not reported. A backtick in one list item does not pair with one in the
+// next, and link text may hold nested brackets, so the missing files those
+// links name are reported.
+func TestRuleProseReference_FollowsCommonMark(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"fence indented in a list item", "1. Run it\n\n    ```markdown\n    - [Guide](references/guide.md)\n    ```\n", nil},
+		{"indented code block", "Example:\n\n    [Template](templates/{{name}}.md)\n", nil},
+		{"fence in a block quote", "> ```\n> [x](references/x.md)\n> ```\n", nil},
+		{"tilde fence indented in a list item", "1. Run it\n\n    ~~~markdown\n    - [Guide](references/guide.md)\n    ~~~\n", nil},
+		{"tilde fence in a block quote", "> ~~~\n> [x](references/x.md)\n> ~~~\n", nil},
+		{"escaped bracket", "Write \\[text](references/x.md) for a link.\n", nil},
+		{"backticks in separate list items", "- run `make\n- see [setup](references/setup.md) and `go`\n", []string{"references/setup.md"}},
+		{"nested brackets in link text", "See [the [draft] notes](references/notes.md).\n", []string{"references/notes.md"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			diags := proseDiags(proseRec("team/example", tc.body))
+			if len(diags) != len(tc.want) {
+				t.Fatalf("want %d diagnostics naming %q, got %+v", len(tc.want), tc.want, diags)
+			}
+			for i, target := range tc.want {
+				if diags[i].Severity != lint.SeverityError || !strings.Contains(diags[i].Message, `"`+target+`"`) {
+					t.Errorf("diagnostic %d = %+v, want an error naming %q", i, diags[i], target)
+				}
+			}
+		})
+	}
+}
+
+// Spec: §4.4 — a target with a URL scheme other than http or https is not
+// checked, and it is not looked up as a bundled file either. The HTTP client
+// fails every request, so a scheme sent to the URL check would be reported. A
+// relative path whose "/" precedes a ":" carries no scheme and resolves to the
+// bundled file it names.
+func TestRuleProseReference_NonHTTPSchemeNotChecked(t *testing.T) {
+	t.Parallel()
+	body := "Write to [us](mailto:team@acme.com), call [support](tel:+15550100), open " +
+		"[the file](file:///etc/hosts), [the editor](vscode://file/a.md), [the mirror](ftp://acme.com/a.md), " +
+		"[the timed note](references/09:30.md), and see [the missing file](references/missing.md).\n"
+	rule := lint.NewProseReferenceRule(&http.Client{Transport: failingTransport{}})
+	rec := proseRec("team/example", body, "references/09:30.md")
+	var diags []lint.Diagnostic
+	for _, d := range (&lint.Linter{Rules: []lint.Rule{rule}}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec}) {
+		if d.Code == "lint.prose_reference" {
+			diags = append(diags, d)
+		}
+	}
+	if len(diags) != 1 || !strings.Contains(diags[0].Message, `"references/missing.md"`) {
+		t.Errorf("want only the missing relative reference reported, got %+v", diags)
+	}
+}
+
+// failingTransport fails every request it is handed.
+type failingTransport struct{}
+
+func (failingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf("unexpected request to %s", r.URL)
+}
+
+// Spec: §4.4 — a prose reference is the destination of an inline link or
+// image, so a reference-style link whose definition names a missing file is
+// not checked, while an inline link to a missing file in the same body is.
+func TestRuleProseReference_ReferenceStyleLinkNotChecked(t *testing.T) {
+	t.Parallel()
+	body := "See [the guide][guide] and [the notes].\n\n[guide]: references/guide.md\n[the notes]: references/notes.md\n\n" +
+		"Then [the missing file](references/missing.md).\n"
+	diags := proseDiags(proseRec("team/example", body))
+	if len(diags) != 1 || !strings.Contains(diags[0].Message, `"references/missing.md"`) {
+		t.Errorf("want only the inline link reported, got %+v", diags)
+	}
+}
+
+// Spec: §4.4 — a prose reference that names another
 // artifact resolves against the current visible catalog rather than being
 // reported as a missing bundled file. The catalog is the linted record set.
 func TestRuleProseReference_ResolvesAgainstCatalog(t *testing.T) {
@@ -291,7 +373,7 @@ func TestRuleProseReference_ResolvesAgainstCatalog(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 line 348 — an artifact reference carrying a §4.7.6
+// Spec: §4.4 — an artifact reference carrying a §4.7.6
 // version pin resolves against the catalog after the pin is stripped.
 func TestRuleProseReference_ResolvesPinnedArtifact(t *testing.T) {
 	t.Parallel()
@@ -314,7 +396,7 @@ func TestRuleProseReference_ResolvesPinnedArtifact(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 lines 348-350 — a reference that matches neither a
+// Spec: §4.4 — a reference that matches neither a
 // bundled file nor any artifact in the catalog is an ingest error.
 func TestRuleProseReference_UnknownArtifactErrors(t *testing.T) {
 	t.Parallel()
@@ -338,7 +420,7 @@ func TestRuleProseReference_UnknownArtifactErrors(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 line 347 — a URL reference is valid only when HEAD
+// Spec: §4.4 — a URL reference is valid only when HEAD
 // returns 200 or a 3xx redirect. Other 2xx codes (201/204/206) do not
 // confirm the named resource and are rejected.
 func TestRuleProseReference_URLStatusRange(t *testing.T) {
