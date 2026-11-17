@@ -441,7 +441,7 @@ func syncCmd(args []string) int {
 	// Spec: §13.11.3, §7.5.8 — a drop and a listing report are written on
 	// standard error, so the --json envelope on standard output stays valid. A
 	// drop fails the sync, and so does a listing report under `check: error`.
-	dropped := reportDropped(os.Stderr, res.Dropped)
+	dropped := reportDropped(os.Stderr, res.Dropped, *dryRun)
 	overBudget := reportListing(os.Stderr, listing)
 	if dropped || overBudget {
 		return 1
@@ -503,7 +503,7 @@ func runWatchLoop(opts sync.Options, overlay string, budget sync.EffectiveListin
 		// or failed its listing under `check: error` counts toward the exit
 		// status on interrupt. A cycle whose event the watcher discarded on
 		// cancellation is reported by the next podium sync.
-		if reportDropped(os.Stderr, ev.Result.Dropped) {
+		if reportDropped(os.Stderr, ev.Result.Dropped, opts.DryRun) {
 			failures++
 		}
 		if reportListing(os.Stderr, listing) {
@@ -682,7 +682,7 @@ func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sy
 	// --check return, because a --check run of a kind: workspace target
 	// composes the layers and estimates its listing too.
 	listing := sync.Listing(res, budget)
-	dropped := reportDropped(os.Stderr, res.Dropped)
+	dropped := reportDropped(os.Stderr, res.Dropped, dryRun || check)
 	overBudget := reportListing(os.Stderr, listing)
 	if check {
 		// A --check run resolves the artifact set without materializing; do not
@@ -802,7 +802,7 @@ func runMarketplaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery 
 	if res.Render == nil {
 		return nil
 	}
-	return droppedErr(reportDropped(os.Stderr, res.Render.Dropped))
+	return droppedErr(reportDropped(os.Stderr, res.Render.Dropped, dryRun))
 }
 
 // marketplaceStdout selects the stream the marketplace pipeline's diagnostic
@@ -1266,7 +1266,7 @@ func runLint(ctx context.Context, stdout, stderr io.Writer, registry string, off
 		}
 		return exit
 	}
-	reportDropped(stderr, drops)
+	reportDropped(stderr, drops, false)
 	if len(diags) == 0 && len(drops) == 0 {
 		_, _ = fmt.Fprintln(stdout, "lint: no issues.")
 		return exit

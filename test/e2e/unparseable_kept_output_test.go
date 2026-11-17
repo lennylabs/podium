@@ -11,8 +11,12 @@ import (
 )
 
 // keptNote is the suffix podium sync adds to the rejected line of an
-// unparseable artifact whose previous output it kept.
-const keptNote = "; the previous sync output was kept"
+// unparseable artifact whose previous output it kept, and dryRunKeptNote the
+// suffix under --dry-run, which writes nothing.
+const (
+	keptNote       = "; the previous sync output was kept"
+	dryRunKeptNote = "; the previous sync output would be kept"
+)
 
 // brokenA is the SKILL.md of tools/a after an edit that writes its
 // description as a mapping, so it no longer parses.
@@ -163,7 +167,7 @@ func writeTreeFile(t *testing.T, path, content string) {
 // A filesystem-source podium sync that finds tools/a's SKILL.md unparseable
 // keeps the files and lock entry an earlier sync wrote for tools/a under the
 // keep default, names the drop with the kept note, updates tools/b, and exits
-// 1; --dry-run reports the same line and writes nothing. --on-unparseable
+// 1; --dry-run says the output would be kept and writes nothing. --on-unparseable
 // remove, PODIUM_SYNC_ON_UNPARSEABLE, and defaults.on_unparseable select
 // removal by the §7.5.2 precedence, and a removal drops the files and the lock
 // entry.
@@ -177,7 +181,7 @@ func TestFilesystemSync_UnparseableManifestKeepsPreviousOutput(t *testing.T) {
 		f := newKeptFixture(t)
 		dry := f.sync(t, nil, "--dry-run")
 		cliWantExit(t, dry, 1, "dry run over the broken SKILL.md")
-		assertRejectedLines(t, dry.Stderr, f.rejected+keptNote)
+		assertRejectedLines(t, dry.Stderr, f.rejected+dryRunKeptNote)
 		if b := readFile(t, filepath.Join(f.skillDir("b"), "SKILL.md")); strings.Contains(b, "second revision") {
 			t.Errorf("dry run wrote tools/b: %q", b)
 		}
