@@ -1065,6 +1065,8 @@ func lintCmd(args []string) int {
 	// by default; --offline (or PODIUM_INGEST_OFFLINE=true) skips the
 	// network probe and validates only bundled-file references.
 	offline := fs.Bool("offline", false, "skip the §4.4 URL HEAD check (validate bundled files only)")
+	asJSON := fs.Bool("json", false, "write one JSON object with the diagnostics, the refused artifacts, and the counts")
+	failOnFlag := fs.String("fail-on", string(lint.SeverityError), "lowest severity that fails the run: error or warning")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -1073,17 +1075,35 @@ func lintCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
+	// Spec: §7.3.1 — a --fail-on value other than error or warning is a
+	// usage error, reported before the registry is opened.
+	failOn := lint.Severity(*failOnFlag)
+	if failOn != lint.SeverityError && failOn != lint.SeverityWarning {
+		fmt.Fprintln(os.Stderr, "error: --fail-on must be error or warning")
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	offlineMode := *offline || os.Getenv("PODIUM_INGEST_OFFLINE") == "true"
+	return runLint(ctx, os.Stdout, os.Stderr, *registry, offlineMode, *asJSON, failOn)
+}
 
-	reg, err := filesystem.Open(*registry)
+// runLint walks the filesystem registry at registry, lints every walked
+// artifact with the ingest rules and the §7.3.1 catalog advisories, and
+// writes the result to stdout and stderr. It returns the exit status.
+//
+// Spec: §7.3.1, §4.6
+func runLint(ctx context.Context, stdout, stderr io.Writer, registry string, offline, asJSON bool, failOn lint.Severity) int {
+	reg, err := filesystem.Open(registry)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 	// spec: §4.6 — lint validates the registry, so it fails on a
 	// same-canonical-ID cross-layer collision ("silent shadowing is never
 	// permitted"): the default policy fails the walk on one. OnDrop collects
 	// every ARTIFACT.md that declares extends:, each is reported as a
-	// rejected: error line, and the remaining artifacts are linted, as ingest
+	// refused artifact, and the remaining artifacts are linted, as ingest
 	// does (§4.6, §7.3.1), so lint names every refused artifact and every
 	// diagnostic of the rest. sync uses CollisionPolicyDrop, which drops and
 	// reports both (§13.11.3). The walk calls OnDrop synchronously, so drops
@@ -1094,25 +1114,35 @@ func lintCmd(args []string) int {
 		OnDrop:          func(d layer.Drop) { drops = append(drops, d) },
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	exit := 0
-	if reportDropped(os.Stderr, drops) {
-		exit = 1
-	}
 
-	linter := lint.NewIngestLinter(*offline || os.Getenv("PODIUM_INGEST_OFFLINE") == "true")
-	diags := linter.Lint(context.Background(), reg, records)
-	if len(diags) == 0 && exit == 0 {
-		fmt.Println("lint: no issues.")
-		return 0
+	linter := lint.NewIngestLinter(offline)
+	linter.IncludeAdvisories = true
+	diags := linter.Lint(ctx, reg, records)
+	// A rule returns no error, so a cancelled near-duplicate pass returns
+	// fewer diagnostics rather than failing. Reporting them would present an
+	// interrupted run as a clean catalog, so the interrupt is checked here.
+	if ctx.Err() != nil {
+		_, _ = fmt.Fprintln(stderr, "error: lint interrupted")
+		return 1
+	}
+	exit := lintExitCode(diags, len(drops) > 0, failOn)
+	if asJSON {
+		if err := writeLintEnvelope(stdout, registry, diags, drops); err != nil {
+			_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+		return exit
+	}
+	reportDropped(stderr, drops)
+	if len(diags) == 0 && len(drops) == 0 {
+		_, _ = fmt.Fprintln(stdout, "lint: no issues.")
+		return exit
 	}
 	for _, d := range diags {
-		_, _ = fmt.Fprintln(os.Stdout, d.String())
-		if d.Severity == lint.SeverityError {
-			exit = 1
-		}
+		_, _ = fmt.Fprintln(stdout, d.String())
 	}
 	return exit
 }

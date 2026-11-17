@@ -274,7 +274,7 @@ Claude Code adapter.
    4 and 5 read, so the later steps still see `greet` alone.
 
    ```bash
-   podium artifact scaffold --type skill --tags x --description "Tagged" "$WORK/scratch/tagged"; echo "exit=$?"
+   podium artifact scaffold --type skill --tags x --description "Show where the scaffold writes tags" "$WORK/scratch/tagged"; echo "exit=$?"
    ls "$WORK/scratch/tagged"
    sed -n '/^metadata:/,/^---/p' "$WORK/scratch/tagged/SKILL.md"
    podium lint --registry "$WORK/scratch"; echo "lint exit=$?"
@@ -337,13 +337,13 @@ the Claude Code adapter across all of them.
 2. Scaffold one artifact of each type.
 
    ```bash
-   podium artifact scaffold --type skill   --description "A skill"   "$WORK/reg/my-skill"
-   podium artifact scaffold --type command --description "A command" "$WORK/reg/my-command"
-   podium artifact scaffold --type context --description "A context" "$WORK/reg/my-context"
-   podium artifact scaffold --type rule --description "A rule" --rule-globs "**/*.go" --rule-mode always "$WORK/reg/my-rule"
-   podium artifact scaffold --type hook --hook-event pre_tool_use --hook-action "echo hi" --description "A hook" "$WORK/reg/my-hook"
-   podium artifact scaffold --type agent --delegates-to my-skill --description "An agent" "$WORK/reg/my-agent"
-   podium artifact scaffold --type mcp-server --server-identifier acme-tools --description "An MCP server" "$WORK/reg/my-mcp"
+   podium artifact scaffold --type skill   --description "Summarize the release notes for a sprint" "$WORK/reg/my-skill"
+   podium artifact scaffold --type command --description "Open a pull request from the current branch" "$WORK/reg/my-command"
+   podium artifact scaffold --type context --description "Coding conventions for the Go services" "$WORK/reg/my-context"
+   podium artifact scaffold --type rule --description "Go files pass gofmt before every commit" --rule-globs "**/*.go" --rule-mode always "$WORK/reg/my-rule"
+   podium artifact scaffold --type hook --hook-event pre_tool_use --hook-action "echo hi" --description "Print a greeting before each tool call" "$WORK/reg/my-hook"
+   podium artifact scaffold --type agent --delegates-to my-skill --description "Coordinate a release by delegating to helpers" "$WORK/reg/my-agent"
+   podium artifact scaffold --type mcp-server --server-identifier acme-tools --description "Expose the Acme internal tools over MCP" "$WORK/reg/my-mcp"
    ```
 
 3. Validate the registry and materialize.
@@ -1795,7 +1795,7 @@ name-match rule.
 2. Author one valid skill and two invalid ones by hand.
 
    ```bash
-   podium artifact scaffold --type skill --description "A valid skill" "$WORK/reg/good"
+   podium artifact scaffold --type skill --description "Validate a sample manifest for the lint scenario" "$WORK/reg/good"
 
    # Invalid: SKILL.md has no description (a required field).
    mkdir -p "$WORK/reg/nodesc"
@@ -4935,7 +4935,7 @@ mk rule "Secrets never live in an artifact body, a manifest, or a bundled file."
 mk skill "Pay an approved vendor invoice through the finance warehouse." finance/ap/pay-invoice
 mk agent "Reconcile a supplier ledger entry against the general ledger." ops/regional/emea/payables/reconcile
 for t in ads api billing checkout content core data growth identity infra loyalty media mobile notify payments pricing reporting risk search shipping storefront support tax trust; do
-  mk context "How the $t team runs its on-call rotation and what it pages for." "eng/teams/$t/oncall-guide"
+  mk context "Paging policy for $t." "eng/teams/$t/oncall-guide"
 done
 ```
 

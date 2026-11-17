@@ -68,7 +68,7 @@ func assertOneCollision(t *testing.T, dropped []layer.Drop) {
 	}
 	got := dropped[0]
 	want := layer.Collision{ArtifactID: collisionID, Layer: "personal", ExistingLayer: "team-shared"}.Drop()
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Dropped[0] = %+v, want %+v", got, want)
 	}
 	if !strings.Contains(got.Reason, "rename") || strings.Contains(got.Reason, "extends") {

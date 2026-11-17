@@ -1,6 +1,7 @@
 package layer
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -33,7 +34,7 @@ func TestCollision_Drop(t *testing.T) {
 	t.Parallel()
 	c := Collision{ArtifactID: "finance/close", Layer: "team-finance", ExistingLayer: "org-defaults"}
 	want := Drop{ArtifactID: "finance/close", Code: "ingest.collision", Reason: c.Reason()}
-	if got := c.Drop(); got != want {
+	if got := c.Drop(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Drop() = %+v, want %+v", got, want)
 	}
 }

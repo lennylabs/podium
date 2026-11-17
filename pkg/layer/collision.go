@@ -46,6 +46,10 @@ type Drop struct {
 	Code string
 	// Reason is the human-readable text the drop reports.
 	Reason string
+	// Details is the structured detail object the refusing rule defines,
+	// the value a reingest response and `podium lint --json` report as
+	// `details`. It is nil when the rule defines none, as for a collision.
+	Details map[string]any
 }
 
 // Drop returns the drop record for c: its artifact ID, CollisionCode, and

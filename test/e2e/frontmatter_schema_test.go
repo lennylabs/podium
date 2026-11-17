@@ -63,7 +63,7 @@ func TestFrontmatter_SkillScaffoldSplit(t *testing.T) {
 		root := t.TempDir()
 		dir := filepath.Join(root, "finance/close/metadata-skill")
 		res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
-			"--description", "Metadata fields.", tc.flag, tc.value, "--yes", dir)
+			"--description", "Record the skill metadata fields.", tc.flag, tc.value, "--yes", dir)
 		skill := assertSkillScaffoldLintsClean(t, res, root, dir)
 		if want := "metadata:\n  version: \"0.1.0\"\n" + tc.want + "---\n"; !strings.Contains(skill, want) {
 			t.Errorf("%s: SKILL.md missing %q:\n%s", tc.flag, want, skill)
@@ -89,7 +89,7 @@ func TestFrontmatter_SkillScaffoldRefusesUnwritableMetadata(t *testing.T) {
 	} {
 		dir := filepath.Join(t.TempDir(), "finance/close/metadata-skill")
 		res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "skill",
-			"--description", "Metadata fields.", tc.flag, tc.value, "--yes", dir)
+			"--description", "Record the skill metadata fields.", tc.flag, tc.value, "--yes", dir)
 		if res.Exit != 2 || !strings.Contains(res.Stderr, tc.stderr) {
 			t.Errorf("%s %q: scaffold exit=%d stderr=%s, want exit 2 naming %q", tc.flag, tc.value, res.Exit, res.Stderr, tc.stderr)
 		}
@@ -359,7 +359,7 @@ func TestFrontmatter_DirectOnlyReachableByID(t *testing.T) {
 // response, so the test asserts ingest acceptance and reachability.
 func TestFrontmatter_SkillCompatibilityStored(t *testing.T) {
 	t.Parallel()
-	skill := "---\nname: run-variance-analysis\ndescription: Flag variance.\ncompatibility: Requires Python 3.10+ and pandas. Designed for Claude Code or similar.\n---\n\nbody\n"
+	skill := "---\nname: run-variance-analysis\ndescription: Flag budget variance in the monthly close.\ncompatibility: Requires Python 3.10+ and pandas. Designed for Claude Code or similar.\n---\n\nbody\n"
 	reg := writeRegistry(t, map[string]string{
 		"finance/close/run-variance-analysis/ARTIFACT.md": fmSkillArtifact,
 		"finance/close/run-variance-analysis/SKILL.md":    skill,
@@ -377,7 +377,7 @@ func TestFrontmatter_SkillCompatibilityStored(t *testing.T) {
 // skill loads (same surfacing caveat as compatibility).
 func TestFrontmatter_SkillMetadataStored(t *testing.T) {
 	t.Parallel()
-	skill := "---\nname: run-variance-analysis\ndescription: Flag variance.\nmetadata:\n  author: acme-org\n---\n\nbody\n"
+	skill := "---\nname: run-variance-analysis\ndescription: Flag budget variance in the monthly close.\nmetadata:\n  author: acme-org\n---\n\nbody\n"
 	reg := writeRegistry(t, map[string]string{
 		"finance/close/run-variance-analysis/ARTIFACT.md": fmSkillArtifact,
 		"finance/close/run-variance-analysis/SKILL.md":    skill,
@@ -704,7 +704,7 @@ func TestFrontmatter_McpServerScaffold(t *testing.T) {
 func TestFrontmatter_TargetHarnessesLintsClean(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"eng/my-context/ARTIFACT.md": "---\ntype: context\nname: my-context\nversion: 1.0.0\ndescription: Context.\ntarget_harnesses: [claude-code, opencode]\n---\n\nbody\n",
+		"eng/my-context/ARTIFACT.md": "---\ntype: context\nname: my-context\nversion: 1.0.0\ndescription: Engineering conventions for the platform team.\ntarget_harnesses: [claude-code, opencode]\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 || !strings.Contains(res.Stdout, "lint: no issues.") {
@@ -718,7 +718,7 @@ func TestFrontmatter_TargetHarnessesExcludesSkips(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		// Targets opencode only; a claude-code sync must skip it.
-		"eng/scoped/ARTIFACT.md": "---\ntype: context\nname: scoped\nversion: 1.0.0\ndescription: Context.\ntarget_harnesses: [opencode]\n---\n\nbody\n",
+		"eng/scoped/ARTIFACT.md": "---\ntype: context\nname: scoped\nversion: 1.0.0\ndescription: Engineering conventions for the platform team.\ntarget_harnesses: [opencode]\n---\n\nbody\n",
 		// A second artifact with no target_harnesses materializes normally,
 		// so the run still produces output and the skip is isolated.
 		"eng/open/ARTIFACT.md": "---\ntype: context\nname: open\nversion: 1.0.0\ndescription: Context.\n---\n\nbody\n",
@@ -739,7 +739,7 @@ func TestFrontmatter_TargetHarnessesExcludesSkips(t *testing.T) {
 func TestFrontmatter_TargetHarnessesIncludesMaterializes(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"eng/my-context/ARTIFACT.md": "---\ntype: context\nname: my-context\nversion: 1.0.0\ndescription: Context.\ntarget_harnesses: [claude-code]\n---\n\nbody\n",
+		"eng/my-context/ARTIFACT.md": "---\ntype: context\nname: my-context\nversion: 1.0.0\ndescription: Engineering conventions for the platform team.\ntarget_harnesses: [claude-code]\n---\n\nbody\n",
 	})
 	tgt := t.TempDir()
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
@@ -826,7 +826,7 @@ func TestFrontmatter_SkillArtifactBodyWarns(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/close/run-variance-analysis/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n# Hello world, this is prose, not a comment.\n",
-		"finance/close/run-variance-analysis/SKILL.md":    fmSkillMD("run-variance-analysis", "Flag variance."),
+		"finance/close/run-variance-analysis/SKILL.md":    fmSkillMD("run-variance-analysis", "Flag budget variance in the monthly close."),
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 {
@@ -843,7 +843,7 @@ func TestFrontmatter_SkillArtifactBodyComment(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"finance/close/run-variance-analysis/ARTIFACT.md": fmSkillArtifact,
-		"finance/close/run-variance-analysis/SKILL.md":    fmSkillMD("run-variance-analysis", "Flag variance."),
+		"finance/close/run-variance-analysis/SKILL.md":    fmSkillMD("run-variance-analysis", "Flag budget variance in the monthly close."),
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 || strings.Contains(res.Stdout, "lint.skill_artifact_body") {
@@ -857,7 +857,7 @@ func TestFrontmatter_SkillBodyOverSoftCapWarns(t *testing.T) {
 	body := strings.Repeat("word ", 5200) // ~26000 bytes => ~6500 tokens > 5000
 	reg := writeRegistry(t, map[string]string{
 		"finance/close/run-variance-analysis/ARTIFACT.md": fmSkillArtifact,
-		"finance/close/run-variance-analysis/SKILL.md":    "---\nname: run-variance-analysis\ndescription: Flag variance.\n---\n\n" + body,
+		"finance/close/run-variance-analysis/SKILL.md":    "---\nname: run-variance-analysis\ndescription: Flag budget variance in the monthly close.\n---\n\n" + body,
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 {
@@ -874,7 +874,7 @@ func TestFrontmatter_ManifestOverHardCapErrors(t *testing.T) {
 	body := strings.Repeat("word ", 21000) // ~105000 bytes => ~26000 tokens > 20000
 	reg := writeRegistry(t, map[string]string{
 		"finance/close/run-variance-analysis/ARTIFACT.md": fmSkillArtifact,
-		"finance/close/run-variance-analysis/SKILL.md":    "---\nname: run-variance-analysis\ndescription: Flag variance.\n---\n\n" + body,
+		"finance/close/run-variance-analysis/SKILL.md":    "---\nname: run-variance-analysis\ndescription: Flag budget variance in the monthly close.\n---\n\n" + body,
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 1 {
@@ -1009,7 +1009,7 @@ func TestFrontmatter_BundledPerFileSoftCapWarns(t *testing.T) {
 	big := strings.Repeat("a", 1024*1024+1)
 	reg := writeRegistry(t, map[string]string{
 		"finance/close/run-variance-analysis/ARTIFACT.md":       fmSkillArtifact,
-		"finance/close/run-variance-analysis/SKILL.md":          fmSkillMD("run-variance-analysis", "Flag variance."),
+		"finance/close/run-variance-analysis/SKILL.md":          fmSkillMD("run-variance-analysis", "Flag budget variance in the monthly close."),
 		"finance/close/run-variance-analysis/scripts/large.bin": big,
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
@@ -1027,7 +1027,7 @@ func TestFrontmatter_BundledPerPackageCapErrors(t *testing.T) {
 	chunk := strings.Repeat("b", 6*1024*1024)
 	reg := writeRegistry(t, map[string]string{
 		"finance/close/run-variance-analysis/ARTIFACT.md":   fmSkillArtifact,
-		"finance/close/run-variance-analysis/SKILL.md":      fmSkillMD("run-variance-analysis", "Flag variance."),
+		"finance/close/run-variance-analysis/SKILL.md":      fmSkillMD("run-variance-analysis", "Flag budget variance in the monthly close."),
 		"finance/close/run-variance-analysis/scripts/a.bin": chunk,
 		"finance/close/run-variance-analysis/scripts/b.bin": chunk,
 	})
