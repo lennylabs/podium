@@ -510,6 +510,24 @@ type Store interface {
 	// SQLite store in the signing key file's directory, and otherwise
 	// through sign-stored-rows.
 	SetDataMigrationApplied(ctx context.Context, name string, applied bool) error
+
+	// Semantic overlap records (§7.3.1). The registry derives them from the
+	// search index and keeps them in the tenant's metadata store so a read
+	// applies its threshold without querying the index.
+	//
+	// ReplaceOverlapRecords removes every record of tenantID that names
+	// artifactID on either side and stores recs, in one transaction, so the
+	// artifact's records always come from one computation. Each record must
+	// name artifactID on exactly one side, or the call returns
+	// ErrInvalidOverlapRecord and changes nothing. A record is keyed by the
+	// unordered pair of identifiers, so a stored record for the same pair,
+	// written by a concurrent computation of the other artifact, is replaced
+	// rather than duplicated. An empty recs leaves the artifact with no
+	// records.
+	ReplaceOverlapRecords(ctx context.Context, tenantID, artifactID string, recs []OverlapRecord) error
+	// ListOverlapRecords returns every record of tenantID ordered by pair,
+	// each with ArtifactA ordered before ArtifactB.
+	ListOverlapRecords(ctx context.Context, tenantID string) ([]OverlapRecord, error)
 }
 
 // DataMigrationContentHashFraming names the one-time rewrite of every stored

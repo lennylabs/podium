@@ -28,6 +28,9 @@ type Memory struct {
 	// is store-wide rather than per tenant, and mu guards it like every
 	// other map here.
 	migrations map[string]bool
+	// overlaps holds the §7.3.1 semantic overlap records per tenant, keyed by
+	// the canonical (ArtifactA, ArtifactB) pair.
+	overlaps map[string]map[[2]string]OverlapRecord
 }
 
 // NewMemory returns a fresh in-memory Store.
@@ -42,6 +45,7 @@ func NewMemory() *Memory {
 		domains:       map[string]DomainRecord{},
 		vectorPending: map[string]VectorPending{},
 		migrations:    map[string]bool{},
+		overlaps:      map[string]map[[2]string]OverlapRecord{},
 	}
 }
 
@@ -582,4 +586,41 @@ func (s *Memory) PurgeExpiredLayerDeletions(_ context.Context, before time.Time)
 		}
 	}
 	return n, nil
+}
+
+// ReplaceOverlapRecords removes every record of the tenant naming artifactID
+// and stores recs, under the store lock so the swap is atomic.
+func (s *Memory) ReplaceOverlapRecords(_ context.Context, tenantID, artifactID string, recs []OverlapRecord) error {
+	norm, err := normalizeOverlapRecords(tenantID, artifactID, recs)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	bucket := s.overlaps[tenantID]
+	if bucket == nil {
+		bucket = map[[2]string]OverlapRecord{}
+		s.overlaps[tenantID] = bucket
+	}
+	for k, r := range bucket {
+		if r.Names(artifactID) {
+			delete(bucket, k)
+		}
+	}
+	for _, r := range norm {
+		bucket[[2]string{r.ArtifactA, r.ArtifactB}] = r
+	}
+	return nil
+}
+
+// ListOverlapRecords returns the tenant's records ordered by pair.
+func (s *Memory) ListOverlapRecords(_ context.Context, tenantID string) ([]OverlapRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]OverlapRecord, 0, len(s.overlaps[tenantID]))
+	for _, r := range s.overlaps[tenantID] {
+		out = append(out, r)
+	}
+	sortOverlapRecords(out)
+	return out, nil
 }

@@ -162,6 +162,19 @@ func (s *SQLite) applySchema() error {
 			name TEXT PRIMARY KEY,
 			applied_at TEXT NOT NULL
 		)`,
+		// §7.3.1 semantic overlap records, keyed by the unordered pair stored
+		// as artifact_a < artifact_b.
+		`CREATE TABLE IF NOT EXISTS overlap_records (
+			tenant_id TEXT NOT NULL,
+			artifact_a TEXT NOT NULL,
+			version_a TEXT NOT NULL,
+			artifact_b TEXT NOT NULL,
+			version_b TEXT NOT NULL,
+			similarity REAL NOT NULL,
+			model_id TEXT NOT NULL DEFAULT '',
+			computed_at TEXT NOT NULL,
+			PRIMARY KEY (tenant_id, artifact_a, artifact_b)
+		)`,
 	}
 	// Indexes are created after the additive column migration because
 	// idx_manifests_tenant_layer references the `layer` column, which the
@@ -177,6 +190,10 @@ func (s *SQLite) applySchema() error {
 			ON dependencies(tenant_id, to_artifact)`,
 		`CREATE INDEX IF NOT EXISTS idx_vector_pending_next_retry
 			ON vector_pending(next_retry_at)`,
+		// The primary key serves the artifact_a side of a replace; this
+		// index serves the artifact_b side.
+		`CREATE INDEX IF NOT EXISTS idx_overlap_records_b
+			ON overlap_records(tenant_id, artifact_b)`,
 	}
 	for _, sql := range tableStmts {
 		if _, err := s.db.Exec(sql); err != nil {
@@ -1090,4 +1107,61 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// ReplaceOverlapRecords removes every record of the tenant naming artifactID
+// and stores recs in one transaction.
+func (s *SQLite) ReplaceOverlapRecords(ctx context.Context, tenantID, artifactID string, recs []OverlapRecord) error {
+	norm, err := normalizeOverlapRecords(tenantID, artifactID, recs)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM overlap_records
+		WHERE tenant_id = ? AND (artifact_a = ? OR artifact_b = ?)`,
+		tenantID, artifactID, artifactID); err != nil {
+		return err
+	}
+	for _, r := range norm {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR REPLACE INTO overlap_records
+				(tenant_id, artifact_a, version_a, artifact_b, version_b, similarity, model_id, computed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			r.TenantID, r.ArtifactA, r.VersionA, r.ArtifactB, r.VersionB, r.Similarity, r.ModelID,
+			r.ComputedAt.Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ListOverlapRecords returns the tenant's records ordered by pair.
+func (s *SQLite) ListOverlapRecords(ctx context.Context, tenantID string) ([]OverlapRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT tenant_id, artifact_a, version_a, artifact_b, version_b, similarity, model_id, computed_at
+		FROM overlap_records
+		WHERE tenant_id = ?
+		ORDER BY artifact_a, artifact_b`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []OverlapRecord{}
+	for rows.Next() {
+		var r OverlapRecord
+		var at string
+		if err := rows.Scan(&r.TenantID, &r.ArtifactA, &r.VersionA, &r.ArtifactB, &r.VersionB, &r.Similarity, &r.ModelID, &at); err != nil {
+			return nil, err
+		}
+		if r.ComputedAt, err = time.Parse(time.RFC3339Nano, at); err != nil {
+			return nil, fmt.Errorf("store: parse overlap computed_at %q: %w", at, err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }

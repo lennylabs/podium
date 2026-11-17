@@ -134,6 +134,19 @@ var orgTableStmts = []string{
 		repo_userinfo TEXT,
 		PRIMARY KEY (tenant_id, id)
 	)`,
+	// §7.3.1 semantic overlap records, keyed by the unordered pair stored as
+	// artifact_a < artifact_b.
+	`CREATE TABLE IF NOT EXISTS overlap_records (
+		tenant_id TEXT NOT NULL,
+		artifact_a TEXT NOT NULL,
+		version_a TEXT NOT NULL,
+		artifact_b TEXT NOT NULL,
+		version_b TEXT NOT NULL,
+		similarity DOUBLE PRECISION NOT NULL,
+		model_id TEXT NOT NULL DEFAULT '',
+		computed_at TIMESTAMPTZ NOT NULL,
+		PRIMARY KEY (tenant_id, artifact_a, artifact_b)
+	)`,
 }
 
 // orgIndexStmts create the per-org indexes after the org tables and the
@@ -149,6 +162,10 @@ var orgIndexStmts = []string{
 		ON domains(tenant_id, path)`,
 	`CREATE INDEX IF NOT EXISTS idx_deps_to
 		ON dependencies(tenant_id, to_artifact)`,
+	// The primary key serves the artifact_a side of a replace; this index
+	// serves the artifact_b side.
+	`CREATE INDEX IF NOT EXISTS idx_overlap_records_b
+		ON overlap_records(tenant_id, artifact_b)`,
 }
 
 // sharedTableStmts create the cross-org tables in public: the tenants registry
@@ -1591,4 +1608,73 @@ func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 	cfg.DeletedAt = ptrFromNullTime(deletedAt)
 	cfg.LastIngestedAt = ptrFromNullTime(lastIngestedAt)
 	return cfg, nil
+}
+
+// ReplaceOverlapRecords removes every record of the tenant naming artifactID
+// and stores recs in one transaction in the org schema. The insert upserts on
+// the pair key, so two replicas that compute the two artifacts of one pair at
+// the same time leave one record.
+func (p *Postgres) ReplaceOverlapRecords(ctx context.Context, tenantID, artifactID string, recs []OverlapRecord) error {
+	norm, err := normalizeOverlapRecords(tenantID, artifactID, recs)
+	if err != nil {
+		return err
+	}
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM overlap_records
+		WHERE tenant_id = $1 AND (artifact_a = $2 OR artifact_b = $2)`,
+		tenantID, artifactID); err != nil {
+		return err
+	}
+	for _, r := range norm {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO overlap_records
+				(tenant_id, artifact_a, version_a, artifact_b, version_b, similarity, model_id, computed_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (tenant_id, artifact_a, artifact_b) DO UPDATE SET
+				version_a = EXCLUDED.version_a, version_b = EXCLUDED.version_b,
+				similarity = EXCLUDED.similarity, model_id = EXCLUDED.model_id,
+				computed_at = EXCLUDED.computed_at`,
+			r.TenantID, r.ArtifactA, r.VersionA, r.ArtifactB, r.VersionB, r.Similarity, r.ModelID, r.ComputedAt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ListOverlapRecords returns the tenant's records ordered by pair.
+func (p *Postgres) ListOverlapRecords(ctx context.Context, tenantID string) ([]OverlapRecord, error) {
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	rows, err := conn.QueryContext(ctx, `
+		SELECT tenant_id, artifact_a, version_a, artifact_b, version_b, similarity, model_id, computed_at
+		FROM overlap_records
+		WHERE tenant_id = $1
+		ORDER BY artifact_a, artifact_b`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []OverlapRecord{}
+	for rows.Next() {
+		var r OverlapRecord
+		if err := rows.Scan(&r.TenantID, &r.ArtifactA, &r.VersionA, &r.ArtifactB, &r.VersionB, &r.Similarity, &r.ModelID, &r.ComputedAt); err != nil {
+			return nil, err
+		}
+		r.ComputedAt = r.ComputedAt.UTC()
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
