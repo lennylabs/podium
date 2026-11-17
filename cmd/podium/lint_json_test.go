@@ -92,6 +92,27 @@ func TestWriteLintEnvelope(t *testing.T) {
 		}
 	})
 
+	t.Run("error counted", func(t *testing.T) {
+		diags := []lint.Diagnostic{
+			{ArtifactID: "a/one", Code: "lint.manifest_size", Severity: lint.SeverityError, Message: "too large"},
+			{ArtifactID: "a/one", Code: "lint.thin_description", Severity: lint.SeverityWarning, Message: "thin"},
+		}
+		var buf bytes.Buffer
+		if err := writeLintEnvelope(&buf, "reg", diags, nil); err != nil {
+			t.Fatalf("writeLintEnvelope: %v", err)
+		}
+		var got struct {
+			Counts map[string]int `json:"counts"`
+		}
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatalf("decode %q: %v", buf.String(), err)
+		}
+		want := map[string]int{"error": 1, "warning": 1, "info": 0}
+		if !reflect.DeepEqual(got.Counts, want) {
+			t.Errorf("counts = %v, want %v", got.Counts, want)
+		}
+	})
+
 	t.Run("write failure", func(t *testing.T) {
 		if err := writeLintEnvelope(failingWriter{}, "reg", nil, nil); err == nil {
 			t.Error("writeLintEnvelope to a failing writer returned nil")

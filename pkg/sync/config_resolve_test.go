@@ -63,6 +63,46 @@ func TestLoadMergedConfig_ListingBudgetsPerKey(t *testing.T) {
 	}
 }
 
+// Spec: §7.5.2, §7.5.8 — max_entry_chars merges per key like the other
+// listing_budgets keys: a project-local value replaces the project-shared one
+// while the project-shared max_chars stays, and a project-shared value reaches
+// the effective budget when no higher scope sets it. A nil adapter registry
+// validates against the default registry. A merge or ListingBudgetFor that
+// dropped max_entry_chars would leave it unset at 0.
+func TestLoadMergedConfig_ListingBudgetsMaxEntryChars(t *testing.T) {
+	t.Parallel()
+	ws, home := listingWorkspace(t)
+	writePodiumFile(t, ws, "sync.yaml", `listing_budgets:
+  claude-code:
+    max_chars: 12000
+    max_entry_chars: 300
+  cursor:
+    max_entry_chars: 400
+`)
+	writePodiumFile(t, ws, "sync.local.yaml", "listing_budgets:\n  claude-code:\n    max_entry_chars: 250\n")
+	merged, _, err := sync.LoadMergedConfig(ws, home)
+	if err != nil {
+		t.Fatalf("LoadMergedConfig: %v", err)
+	}
+	for _, tc := range []struct {
+		adapter       string
+		maxChars      int
+		maxEntryChars int
+	}{
+		{"claude-code", 12000, 250},
+		{"cursor", 8000, 400},
+	} {
+		got, err := merged.ListingBudgetFor(tc.adapter, nil)
+		if err != nil {
+			t.Fatalf("ListingBudgetFor(%s, nil): %v", tc.adapter, err)
+		}
+		if got.MaxChars != tc.maxChars || got.MaxEntryChars != tc.maxEntryChars {
+			t.Errorf("ListingBudgetFor(%s) = %+v, want MaxChars %d and MaxEntryChars %d",
+				tc.adapter, got, tc.maxChars, tc.maxEntryChars)
+		}
+	}
+}
+
 // Spec: §7.5.2 — the readers that do not decode listing_budgets load a file
 // whose block holds a value of the wrong YAML type, keeping the rest of the
 // file, while LoadMergedConfig fails naming the file and listing_budgets.
