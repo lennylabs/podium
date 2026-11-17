@@ -797,7 +797,7 @@ When `RegistrySearchProvider` is configured to a backend outside the metadata st
 2. A background worker drains the outbox by writing to the vector backend with exponential-backoff retry, marking each row complete on success.
 3. Ingest itself never blocks on the external service. If the vector backend is down, ingest succeeds, the outbox grows, and the metadata store stays the source of truth.
 
-While an outbox row is unresolved, the affected artifact remains discoverable via BM25 and direct `load_artifact` calls; only its semantic-search recall is degraded until the vector lands. Operators monitor outbox depth via a Prometheus gauge; a `vector.outbox_lagging` event fires when depth or oldest-row age exceeds an operator-configured threshold.
+While an outbox row is unresolved, the affected artifact remains discoverable via BM25 and direct `load_artifact` calls; only its semantic-search recall is degraded until the vector lands. An outbox row records the error of its last failed attempt. The recorded text carries no credential: the registry removes URL userinfo, query strings, and every configured secret value from it before it stores or logs it. Operators monitor outbox depth via a Prometheus gauge; a `vector.outbox_lagging` event fires when depth or oldest-row age exceeds an operator-configured threshold.
 
 Self-embedding backends collapse the embedding step into the same call (text-in instead of vector-in), so they avoid a separate inference round-trip from the registry but the outbox semantics are otherwise identical.
 
