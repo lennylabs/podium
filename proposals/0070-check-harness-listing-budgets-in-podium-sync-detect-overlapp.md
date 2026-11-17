@@ -1,7 +1,7 @@
 # Proposal 0070: Check harness listing budgets in podium sync, detect overlapping descriptions and near-duplicate content in lint, make the lint thresholds configurable, and define the podium lint output for CI
 
 - Issue: (to be filed)
-- Status: Approved (2026-11-16). Verified after 15 adversarial review rounds (54 findings fixed). The open questions are resolved as recommended.
+- Status: Applied to spec (2026-11-16). Verified after 15 adversarial review rounds (54 findings fixed). The open questions are resolved as recommended.
 - Date: 2026-11-16
 
 This document stages spec, code, test, manual-validation, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off. The change is backward-incompatible: `podium lint` reports warnings it did not report before, `lint.colliding_descriptions` reports overlapping descriptions where it reported equal ones, and the `pkg/lint` Go API changes (D-13). It ships in a MINOR release.
