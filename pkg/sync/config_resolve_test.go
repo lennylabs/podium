@@ -110,6 +110,9 @@ func TestLoadMergedConfig_ListingBudgetsMistyped(t *testing.T) {
 		{"value alias", "x-half: &half 1.5\nlisting_budgets:\n  claude-code:\n    max_chars: *half\n", "max_chars"},
 		{"entry alias", "x-base: &base {max_chars: 1.5}\nlisting_budgets:\n  claude-code: *base\n", "max_chars"},
 		{"block alias", "x-all: &all {claude-code: {max_chars: 1.5}}\nlisting_budgets: *all\n", "max_chars"},
+		{"binary check", "listing_budgets:\n  claude-code:\n    check: !!binary b2Zm\n", "check"},
+		{"binary item", "listing_budgets:\n  claude-code:\n    types: [!!binary c2tpbGw=]\n", "types"},
+		{"null item", "listing_budgets:\n  claude-code:\n    types: [skill, ~]\n", "types"},
 	}
 	for _, tc := range mistyped {
 		ws, home := listingWorkspace(t)
@@ -135,6 +138,10 @@ func TestLoadMergedConfig_ListingBudgetsMistyped(t *testing.T) {
 			sync.EffectiveListingBudget{MaxChars: 1000, EntryOverheadChars: 5, Types: []string{"skill"}, Check: "off"}},
 		{"valid merge", "x-ok: &ok {max_chars: 12000}\nlisting_budgets:\n  claude-code:\n    <<: *ok\n    check: error\n",
 			sync.EffectiveListingBudget{MaxChars: 12000, EntryOverheadChars: 5, Types: []string{"skill"}, Check: "error"}},
+		{"non-string keys", "listing_budgets:\n  claude-code:\n    max_chars: 12000\n    1: x\n    true: y\n  1: {max_chars: 5}\n",
+			sync.EffectiveListingBudget{MaxChars: 12000, EntryOverheadChars: 5, Types: []string{"skill"}, Check: "warning"}},
+		{"aliased item", "x-t: &t command\nlisting_budgets:\n  claude-code:\n    types: [skill, *t]\n",
+			sync.EffectiveListingBudget{MaxChars: 8000, EntryOverheadChars: 5, Types: []string{"skill", "command"}, Check: "warning"}},
 	}
 	for _, tc := range loads {
 		ws, home := listingWorkspace(t)

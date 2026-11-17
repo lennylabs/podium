@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -127,36 +126,41 @@ type ListingBudget struct {
 // returns nil for a file without the block or with a null block.
 //
 // yaml.v3 coerces a scalar into the Go kind it decodes to, loading
-// `max_chars: 1.5` as 1 and `check: 1` as "1" without an error, so a typed
-// decode cannot enforce the §7.5.2 rule that each value's resolved YAML type
-// matches its key. The block is therefore decoded into interface values, which
-// lets yaml.v3 resolve aliases and `<<` merges while keeping each value's
-// resolved type, and each value is type-switched. A key outside the schema is
-// ignored, as an unknown key is anywhere in SyncConfig. The error names the
-// adapter and the key; LoadMergedConfig wraps it with the file path and
-// listing_budgets.
+// `max_chars: 1.5` as 1 and `check: 1` as "1" without an error, and it
+// decodes a `!!binary` scalar into a Go string, so neither a typed decode nor
+// a decode into interface values enforces the §7.5.2 rule that each value's
+// resolved YAML tag matches its key. The block is therefore decoded into
+// yamlNode values: the decoder still follows aliases and applies `<<` merges,
+// and each value keeps the node it resolved to, so its tag is checked
+// directly. A key outside the schema is ignored, as an unknown key is anywhere
+// in SyncConfig. The error names the adapter and the key; LoadMergedConfig
+// wraps it with the file path and listing_budgets.
 //
 // Spec: §7.5.2
 func (c *SyncConfig) listingBudgets() (map[string]ListingBudget, error) {
 	if c.ListingBudgets.Kind == 0 {
 		return nil, nil
 	}
-	var raw any
-	if err := c.ListingBudgets.Decode(&raw); err != nil {
+	var block yamlNode
+	if err := c.ListingBudgets.Decode(&block); err != nil {
 		return nil, err
 	}
-	if raw == nil {
+	if block.n == nil {
 		return nil, nil
 	}
-	entries, ok := raw.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("want a mapping keyed by adapter name, got %s", yamlTypeName(raw))
+	if block.n.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("want a mapping keyed by adapter name, got %s", yamlTypeName(block.n))
+	}
+	var entries map[adapterKey]yamlNode
+	if err := block.n.Decode(&entries); err != nil {
+		return nil, err
 	}
 	out := make(map[string]ListingBudget, len(entries))
 	// Sorted so a file with several mistyped entries reports the same one on
 	// every run.
-	for _, adapterID := range slices.Sorted(maps.Keys(entries)) {
-		lb, err := decodeListingBudget(adapterID, entries[adapterID])
+	for _, k := range slices.Sorted(maps.Keys(entries)) {
+		adapterID := string(k)
+		lb, err := decodeListingBudget(adapterID, entries[k].n)
 		if err != nil {
 			return nil, err
 		}
@@ -165,109 +169,162 @@ func (c *SyncConfig) listingBudgets() (map[string]ListingBudget, error) {
 	return out, nil
 }
 
+// yamlNode captures the node a value resolved to. The decoder follows an
+// alias before it calls UnmarshalYAML, so n is never an alias node. A null
+// value never reaches UnmarshalYAML and leaves n nil.
+type yamlNode struct{ n *yaml.Node }
+
+// UnmarshalYAML implements yaml.Unmarshaler.
+func (v *yamlNode) UnmarshalYAML(n *yaml.Node) error {
+	v.n = n
+	return nil
+}
+
+// adapterKey is a `listing_budgets` key read as its scalar text. A key that
+// does not resolve to a string, such as `1` or `true`, still names an entry,
+// which §7.5.2 treats as an entry for an adapter this binary does not
+// register: a run for another harness ignores it and `podium sync --check`
+// reports it. A null key reads as "".
+type adapterKey string
+
+// UnmarshalYAML implements yaml.Unmarshaler. A collection key has no scalar
+// text, so it reads as its type and position, which no adapter matches.
+func (k *adapterKey) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		*k = adapterKey(n.Value)
+		return nil
+	}
+	*k = adapterKey(fmt.Sprintf("%s at line %d", yamlTypeName(n), n.Line))
+	return nil
+}
+
+// entryKey is a key inside one `listing_budgets` entry. Only a key that
+// resolves to a string can match a schema key, so any other key reads as ""
+// and is ignored with the other unknown keys.
+type entryKey string
+
+// UnmarshalYAML implements yaml.Unmarshaler.
+func (k *entryKey) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode && n.ShortTag() == "!!str" {
+		*k = entryKey(n.Value)
+	}
+	return nil
+}
+
 // decodeListingBudget type-checks one entry. A null entry sets no key.
-func decodeListingBudget(adapterID string, v any) (ListingBudget, error) {
+func decodeListingBudget(adapterID string, n *yaml.Node) (ListingBudget, error) {
 	var lb ListingBudget
-	if v == nil {
+	if n == nil {
 		return lb, nil
 	}
-	fields, ok := v.(map[string]any)
-	if !ok {
-		return lb, fmt.Errorf("%s: want a mapping, got %s", adapterID, yamlTypeName(v))
+	if n.Kind != yaml.MappingNode {
+		return lb, fmt.Errorf("%s: want a mapping, got %s", adapterID, yamlTypeName(n))
+	}
+	var fields map[entryKey]yamlNode
+	if err := n.Decode(&fields); err != nil {
+		return lb, fmt.Errorf("%s: %w", adapterID, err)
 	}
 	var err error
 	for _, f := range []struct {
-		key string
+		key entryKey
 		dst **int
 	}{
 		{"max_chars", &lb.MaxChars},
 		{"entry_overhead_chars", &lb.EntryOverheadChars},
 		{"max_entry_chars", &lb.MaxEntryChars},
 	} {
-		if *f.dst, err = yamlInt(fields[f.key]); err != nil {
+		if *f.dst, err = yamlInt(fields[f.key].n); err != nil {
 			return lb, fmt.Errorf("%s.%s: %w", adapterID, f.key, err)
 		}
 	}
-	if lb.Types, err = yamlStrings(fields["types"]); err != nil {
+	if lb.Types, err = yamlStrings(fields["types"].n); err != nil {
 		return lb, fmt.Errorf("%s.types: %w", adapterID, err)
 	}
-	if lb.Check, err = yamlString(fields["check"]); err != nil {
+	if lb.Check, err = yamlString(fields["check"].n); err != nil {
 		return lb, fmt.Errorf("%s.check: %w", adapterID, err)
 	}
 	return lb, nil
 }
 
-// yamlInt accepts a value yaml.v3 resolved as an integer, or null for unset.
-func yamlInt(v any) (*int, error) {
-	switch n := v.(type) {
-	case nil:
+// yamlInt accepts a node whose resolved tag is !!int, or null for unset.
+func yamlInt(n *yaml.Node) (*int, error) {
+	if n == nil {
 		return nil, nil
-	case int:
-		return &n, nil
-	case int64, uint64:
-		return nil, fmt.Errorf("integer %v is out of range", n)
-	default:
-		return nil, fmt.Errorf("want an integer, got %s", yamlTypeName(v))
 	}
+	if n.ShortTag() != "!!int" {
+		return nil, fmt.Errorf("want an integer, got %s", yamlTypeName(n))
+	}
+	var i int
+	if err := n.Decode(&i); err != nil {
+		return nil, fmt.Errorf("integer %s is out of range", n.Value)
+	}
+	return &i, nil
 }
 
-// yamlString accepts a value yaml.v3 resolved as a string, or null for unset.
-func yamlString(v any) (*string, error) {
-	switch s := v.(type) {
-	case nil:
+// yamlString accepts a node whose resolved tag is !!str, or null for unset.
+func yamlString(n *yaml.Node) (*string, error) {
+	if n == nil {
 		return nil, nil
-	case string:
-		return &s, nil
-	default:
-		return nil, fmt.Errorf("want a string, got %s", yamlTypeName(v))
 	}
+	if n.ShortTag() != "!!str" {
+		return nil, fmt.Errorf("want a string, got %s", yamlTypeName(n))
+	}
+	s := n.Value
+	return &s, nil
 }
 
-// yamlStrings accepts a sequence of strings, or null for unset. An empty
-// sequence returns a non-nil empty slice.
-func yamlStrings(v any) ([]string, error) {
-	if v == nil {
+// yamlStrings accepts a sequence whose items all resolve to !!str, or null
+// for unset. An empty sequence returns a non-nil empty slice.
+func yamlStrings(n *yaml.Node) ([]string, error) {
+	if n == nil {
 		return nil, nil
 	}
-	seq, ok := v.([]any)
-	if !ok {
-		return nil, fmt.Errorf("want a list of strings, got %s", yamlTypeName(v))
+	if n.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("want a list of strings, got %s", yamlTypeName(n))
 	}
-	out := make([]string, 0, len(seq))
-	for _, item := range seq {
-		s, ok := item.(string)
-		if !ok {
+	// The items are walked rather than decoded, because a decode into a
+	// slice drops a null item and would read `[~]` as an empty list. An
+	// anchor cannot sit on an alias, so one step resolves an aliased item.
+	out := make([]string, 0, len(n.Content))
+	for _, item := range n.Content {
+		if item.Kind == yaml.AliasNode {
+			item = item.Alias
+		}
+		if item.ShortTag() != "!!str" {
 			return nil, fmt.Errorf("want a list of strings, got an item that is %s", yamlTypeName(item))
 		}
-		out = append(out, s)
+		out = append(out, item.Value)
 	}
 	return out, nil
 }
 
-// yamlTypeName names the resolved YAML type of a decoded value for an error
-// message.
-func yamlTypeName(v any) string {
-	switch v.(type) {
-	case nil:
+// yamlTypeName names the resolved YAML type of a node for an error message.
+// A nil node is a null value.
+func yamlTypeName(n *yaml.Node) string {
+	if n == nil {
 		return "null"
-	case bool:
+	}
+	switch tag := n.ShortTag(); tag {
+	case "!!null":
+		return "null"
+	case "!!bool":
 		return "a boolean"
-	case int, int64, uint64:
+	case "!!int":
 		return "an integer"
-	case float64:
+	case "!!float":
 		return "a float"
-	case string:
+	case "!!str":
 		return "a string"
-	case []any:
-		return "a list"
-	case map[string]any:
-		return "a mapping"
-	case map[any]any:
-		return "a mapping with a key that is not a string"
-	case time.Time:
+	case "!!binary":
+		return "a binary value"
+	case "!!timestamp":
 		return "a timestamp"
+	case "!!seq":
+		return "a list"
+	case "!!map":
+		return "a mapping"
 	default:
-		return fmt.Sprintf("a value of type %T", v)
+		return "a value tagged " + tag
 	}
 }
 

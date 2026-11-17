@@ -339,7 +339,6 @@ func TestListingBudgets_TypeErrors(t *testing.T) {
 	errCases := map[string]string{
 		"listing_budgets: abc\n":                                             "want a mapping keyed by adapter name, got a string",
 		"listing_budgets: [1]\n":                                             "got a list",
-		"listing_budgets: {1: {max_chars: 5}}\n":                             "got a mapping with a key that is not a string",
 		"listing_budgets: {claude-code: 5}\n":                                "claude-code: want a mapping, got an integer",
 		"listing_budgets: {claude-code: {max_chars: 9223372036854775808}}\n": "claude-code.max_chars: integer 9223372036854775808 is out of range",
 		"listing_budgets: {claude-code: {max_chars: 2001-12-14}}\n":          "claude-code.max_chars: want an integer, got a timestamp",
@@ -348,6 +347,11 @@ func TestListingBudgets_TypeErrors(t *testing.T) {
 		"listing_budgets: {claude-code: {max_chars: 1.5}}\n":                 "got a float",
 		"listing_budgets: {claude-code: {check: [a]}}\n":                     "claude-code.check: want a string, got a list",
 		"listing_budgets: {claude-code: {types: [~]}}\n":                     "claude-code.types: want a list of strings, got an item that is null",
+		"listing_budgets: {claude-code: {check: !!binary b2Zm}}\n":           "claude-code.check: want a string, got a binary value",
+		"listing_budgets: {claude-code: {types: [!!binary c2tpbGw=]}}\n":     "claude-code.types: want a list of strings, got an item that is a binary value",
+		"listing_budgets: {claude-code: {check: !local off}}\n":              "claude-code.check: want a string, got a value tagged !local",
+		"listing_budgets: {claude-code: {}, claude-code: {}}\n":              "already defined",
+		"listing_budgets: {claude-code: {check: off, check: off}}\n":         "claude-code: yaml: unmarshal errors",
 	}
 	for doc, want := range errCases {
 		cfg := &SyncConfig{}
@@ -372,6 +376,21 @@ func TestListingBudgets_TypeErrors(t *testing.T) {
 			if !reflect.DeepEqual(lb, ListingBudget{}) {
 				t.Errorf("%q: entry %s = %+v, want no key set", doc, id, lb)
 			}
+		}
+	}
+	// A key that is not a string names an entry by its scalar text, and a
+	// collection key, which has no scalar text, by its type and line.
+	cfg := &SyncConfig{}
+	if err := yaml.Unmarshal([]byte("listing_budgets:\n  1: ~\n  ? [a]\n  : ~\n"), cfg); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	got, err := cfg.listingBudgets()
+	if err != nil {
+		t.Fatalf("listingBudgets: %v", err)
+	}
+	for _, id := range []string{"1", "a list at line 3"} {
+		if _, ok := got[id]; !ok {
+			t.Errorf("listingBudgets = %v, want an entry keyed %q", got, id)
 		}
 	}
 }

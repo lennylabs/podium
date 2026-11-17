@@ -1,6 +1,8 @@
 package sync
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -81,6 +83,26 @@ func TestCheck_ReportsListingBudgetProblems(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing warning %q in:\n%s", want, joined)
 		}
+	}
+
+	// An adapter key that resolves to an integer still loads as an entry,
+	// for an adapter no binary registers, and an entry key that is not a
+	// string is ignored as any unknown key is.
+	ws, home := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ws, ".podium"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doc := "listing_budgets:\n  claude-code: {max_chars: 12000, 1: x, true: y}\n  1: {max_chars: 5}\n"
+	if err := os.WriteFile(filepath.Join(ws, ".podium", "sync.yaml"), []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, err := LoadMergedConfig(ws, home)
+	if err != nil {
+		t.Fatalf("LoadMergedConfig: %v", err)
+	}
+	warns = Check(loaded, nil)
+	if len(warns) != 1 || !strings.Contains(warns[0], "listing_budgets.1: no adapter of that name is registered") {
+		t.Errorf("Check = %q, want one warning for the unregistered adapter 1", warns)
 	}
 }
 
