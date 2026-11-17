@@ -610,7 +610,7 @@ A single-tenant registry rejects `/v1/admin/tenants` (§7.3.3) and does not read
 
 ### Lint
 
-These variables set the lint thresholds (§4.1, §4.3.4, §4.5.5, §7.3.1). The registry reads these variables for ingest, and `podium lint` reads the same variables, so a CI run and the registry apply the same threshold when both set it. Registry ingest does not apply the §4.5.5 `DOMAIN.md` body-size warning, which `podium lint` reports (§7.3.1), so `PODIUM_LINT_DOMAIN_BODY_WARN_TOKENS` takes effect in `podium lint` only. They are environment variables only and have no `registry.yaml` key, because `podium lint` does not read `registry.yaml`. An unset or empty variable keeps the default. A value that does not parse or falls outside its range keeps the default, and the process logs a warning that names the variable. Integer values are positive. A token count is the estimate of §4.1.
+These variables set the lint thresholds (§4.1, §4.3.4, §4.5.5, §7.3.1). The registry reads these variables for ingest, and `podium lint` reads the same variables, so a CI run and the registry apply the same threshold when both set it. Registry ingest does not apply the §4.5.5 `DOMAIN.md` body-size warning, which `podium lint` reports (§7.3.1), so `PODIUM_LINT_DOMAIN_BODY_WARN_TOKENS` takes effect in `podium lint` only. `podium lint` reads no search index, so the `PODIUM_LINT_SEMANTIC_*` variables take effect in the registry only. They are environment variables only and have no `registry.yaml` key, because `podium lint` does not read `registry.yaml`. An unset or empty variable keeps the default. A value that does not parse or falls outside its range keeps the default, and the process logs a warning that names the variable. Integer values are positive. A token count is the estimate of §4.1.
 
 | Var | Description | Default |
 | --- | --- | --- |
@@ -624,6 +624,9 @@ These variables set the lint thresholds (§4.1, §4.3.4, §4.5.5, §7.3.1). The 
 | `PODIUM_LINT_MIN_DESCRIPTION_WORDS` | §7.3.1 thin-description bound, in words | `3` |
 | `PODIUM_LINT_DESCRIPTION_SIMILARITY` | §7.3.1 description overlap threshold, from 0.5 to 1.0 | `0.7` |
 | `PODIUM_LINT_CONTENT_SIMILARITY` | §7.3.1 near-duplicate content threshold, from 0.5 to 1.0 | `0.8` |
+| `PODIUM_LINT_SEMANTIC_OVERLAP` | §7.3.1 semantic overlap check, `on` or `off`, at ingest and in the catalog overlap report; read by the registry only | `off` |
+| `PODIUM_LINT_SEMANTIC_SIMILARITY` | §7.3.1 semantic overlap threshold, a cosine similarity from 0.5 to 1.0; read by the registry only | `0.85` |
+| `PODIUM_LINT_SEMANTIC_NEIGHBORS` | §7.3.1 nearest index rows queried per artifact, from 1 to 100; read by the registry only | `10` |
 
 ### Config file format
 
