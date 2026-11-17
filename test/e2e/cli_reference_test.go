@@ -263,6 +263,26 @@ func TestCLI_ServeHelp(t *testing.T) {
 	}
 }
 
+// spec: doc "Subcommand help" — the `podium lint --help` block lists the
+// §7.3.1 CI flags beside -offline and -registry.
+//
+// Spec: §7.3.1
+func TestCLI_LintHelp(t *testing.T) {
+	res := runPodium(t, "", nil, "lint", "--help")
+	cliWantExit(t, res, 0, "lint --help")
+	out := res.Stdout + res.Stderr
+	cliContains(t, out, "podium lint - Validate manifests in a filesystem-source registry.", "lint help")
+	for _, line := range []string{
+		"lowest severity that fails the run: error or warning (default \"error\")",
+		"write one JSON object with the diagnostics, the refused artifacts, and the counts",
+	} {
+		cliContains(t, out, line, "lint flag description")
+	}
+	for _, f := range []string{"-fail-on", "-json", "-offline", "-registry"} {
+		cliContains(t, out, f, "lint flag")
+	}
+}
+
 // spec: doc "Subcommand help" — `podium admin --help` subcommand list.
 func TestCLI_AdminHelp(t *testing.T) {
 	for _, form := range [][]string{{"admin", "--help"}, {"admin", "-h"}, {"admin", "help"}} {
@@ -699,10 +719,11 @@ func TestCLI_LintTreeRecurses(t *testing.T) {
 	cliWantExit(t, res, 0, "lint tree")
 }
 
-// spec: §4.5.5 — "Body length is recommended <= 2000 tokens; lint
-// warns above." `podium lint` over a registry whose DOMAIN.md prose body
-// exceeds the recommendation emits a warning naming the lint.domain_body_size
-// rule, and exits 0 because the diagnostic is advisory.
+// spec: §4.5.5 — "By default lint warns above 2,000 estimated tokens
+// (§4.1), and the threshold is configurable (§13.12)." `podium lint` over a
+// registry whose DOMAIN.md prose body exceeds the default threshold emits a
+// warning naming the lint.domain_body_size rule, and exits 0 because the
+// diagnostic is advisory.
 func TestCLI_LintDomainBodyOverCapWarns(t *testing.T) {
 	// ~2750 tokens of body (well over the 2000-token recommendation).
 	bigBody := strings.Repeat("word ", 2200)
@@ -783,6 +804,8 @@ func TestCLI_SyncDryRun(t *testing.T) {
 }
 
 // spec: doc "podium sync", `--json` flag.
+// Spec: §7.5.8 — the envelope always carries `listing`, which is null for the
+// none adapter because it feeds no harness listing.
 func TestCLI_SyncJSON(t *testing.T) {
 	reg := cliReg(t)
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", t.TempDir(), "--harness", "none", "--dry-run", "--json")
@@ -790,6 +813,13 @@ func TestCLI_SyncJSON(t *testing.T) {
 	m := cliJSON(t, res.Stdout)
 	if _, ok := m["artifacts"]; !ok {
 		t.Fatalf("sync --json missing artifacts key: %v", m)
+	}
+	listing, ok := m["listing"]
+	if !ok {
+		t.Fatalf("sync --json missing listing key: %v", m)
+	}
+	if listing != nil {
+		t.Fatalf("sync --json listing = %v, want null for the none adapter", listing)
 	}
 }
 

@@ -373,11 +373,15 @@ type Result struct {
 	// store down). The manifest is searchable via BM25 only until
 	// `podium admin reembed` retries.
 	EmbeddingFailures []EmbeddingFailure
-	// Advisories collects the §3.3 / §12 description-quality flags the
-	// registry raises at ingest time: thin descriptions and clusters of
-	// artifacts whose summaries collide. They are advisory (warning
-	// severity) and never block ingest; they surface to domain owners so
-	// authored descriptions can be improved.
+	// Advisories collects the §7.3.1 catalog advisories that ingest runs
+	// over the ingested layer's records: lint.thin_description,
+	// lint.colliding_descriptions, and lint.near_duplicate_content. It
+	// also carries the §12 DOMAIN.md advisories raised while persisting
+	// domain records. They are warnings that never block ingest; they
+	// surface to domain owners so authored descriptions and content can
+	// be improved.
+	//
+	// Spec: §7.3.1
 	Advisories []lint.Diagnostic
 }
 
@@ -543,12 +547,13 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	res := &Result{Rejected: refused}
 	errsByID := groupLintErrors(diags)
 
-	// §3.3 / §12 — the registry flags thin descriptions and clusters of
-	// artifacts whose summaries collide. These checks are advisory and do
-	// not gate ingest, so they run independently of req.Linter (which the
-	// author-facing `podium lint` shares) over the ingested record set;
-	// the colliding-summary check needs that set to spot a cluster.
-	res.Advisories = (&lint.Linter{Rules: lint.DescriptionAdvisoryRules()}).Lint(ctx, nil, records)
+	// The §7.3.1 catalog advisories run over the ingested layer's records,
+	// so the pairwise checks compare artifacts within this layer only. They
+	// do not gate ingest. req.Linter supplies the thresholds, so an
+	// operator's PODIUM_LINT_* values apply here as in `podium lint`.
+	//
+	// Spec: §7.3.1
+	res.Advisories = (&lint.Linter{Rules: req.Linter.AdvisoryRules()}).Lint(ctx, nil, records)
 	// §12: carry the newly-set unlisted: true advisories
 	// collected while persisting DOMAIN.md records. DOMAIN.md is not an
 	// artifact, so the check runs in the domain loop above rather than as

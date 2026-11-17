@@ -74,7 +74,7 @@ const hkBundledArtifact = "---\n" +
 // hkArtifact builds a minimal hook ARTIFACT.md with the given event and a
 // simple echo action plus any extra frontmatter lines.
 func hkArtifact(name, event string, extra ...string) string {
-	b := "---\ntype: hook\nname: " + name + "\nversion: 1.0.0\ndescription: A hook.\n"
+	b := "---\ntype: hook\nname: " + name + "\nversion: 1.0.0\ndescription: Echo a greeting when the hook event fires.\n"
 	for _, e := range extra {
 		b += e + "\n"
 	}

@@ -77,6 +77,23 @@ func TestResolveVerifyPolicy_ScopePrecedence(t *testing.T) {
 	}
 }
 
+// Spec: §4.7.9, §7.5.2 — the policy resolution does not decode
+// listing_budgets, so a value of the wrong YAML type in it leaves the file's
+// verify_signatures in force rather than skipping the file.
+func TestResolveVerifyPolicy_MistypedListingBudgetsKeepsScope(t *testing.T) {
+	t.Parallel()
+	start, home, local, _, global := verifyScopes(t)
+	writeVerifySyncFile(t, global, "never")
+	body := "defaults:\n  verify_signatures: always\nlisting_budgets: abc\n"
+	if err := os.WriteFile(local, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	policy, source, _, err := podsync.ResolveVerifyPolicy("", start, home)
+	if err != nil || policy != sign.PolicyAlways || source != local {
+		t.Errorf("policy = %q from %q, %v; want always from %s", policy, source, err, local)
+	}
+}
+
 // Spec: §4.7.9, §7.5.2 — a non-empty environment value outranks every
 // sync.yaml scope and logs no warning, and an empty one counts as unset.
 func TestResolveVerifyPolicy_EnvironmentValue(t *testing.T) {

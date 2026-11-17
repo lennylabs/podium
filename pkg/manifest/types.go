@@ -114,10 +114,16 @@ type Artifact struct {
 	// artifact (§8.2 manifest-declared redaction surface).
 	AuditRedact []string `yaml:"audit_redact,omitempty"`
 	// LintSuppress lists lint rule codes to suppress for this artifact.
-	// Per §4.3.4 the agentskills.io `skills-ref validate` reference check
-	// ships a suppression flag "for cases where the standard's validator
-	// is overly strict"; listing lint.skill_ref_validate here silences
-	// that warning. Only advisory (non-error) rules honor the list.
+	// The rules that honor the list are the agentskills.io `skills-ref
+	// validate` check (lint.skill_ref_validate), for cases where the
+	// standard's validator is overly strict, and the §7.3.1 catalog
+	// advisories (lint.thin_description, lint.colliding_descriptions, and
+	// lint.near_duplicate_content). Every other rule ignores the list. For
+	// the pairwise advisories the suppression is one-sided: the other
+	// artifact of the pair still names this one. A skill with no
+	// ARTIFACT.md lists no code.
+	//
+	// Spec: §4.3.4, §7.3.1
 	LintSuppress []string `yaml:"lint_suppress,omitempty"`
 	// Source declares the document-level provenance of the manifest's
 	// prose (§4.4.2). The documented value is `authored`; a non-authored

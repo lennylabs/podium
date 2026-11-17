@@ -21,9 +21,15 @@ const ExtendsRemovedConstraint = "extends_removed"
 const ExtendsRemovedReason = "extends: is not supported; remove the extends: key and declare every field this artifact needs in its own frontmatter"
 
 // ExtendsRemovedDrop returns the drop a filesystem-source composition
-// reports for an ARTIFACT.md the §4.6 no-inheritance rule refuses.
+// reports for an ARTIFACT.md the §4.6 no-inheritance rule refuses. Its
+// details carry the extends_removed constraint that ingest also reports.
 //
 // Spec: §4.6, §13.11.3
 func ExtendsRemovedDrop(id string) Drop {
-	return Drop{ArtifactID: id, Code: InvalidArtifactCode, Reason: ExtendsRemovedReason}
+	return Drop{
+		ArtifactID: id,
+		Code:       InvalidArtifactCode,
+		Reason:     ExtendsRemovedReason,
+		Details:    map[string]any{"constraint": ExtendsRemovedConstraint},
+	}
 }

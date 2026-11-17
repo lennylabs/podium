@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.7.0 layer credential columns and skill metadata fields in stored rows, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.7.0 layer credential columns, skill metadata fields in stored rows, and catalog lint advisories and listing budgets, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -136,6 +136,22 @@ The rolling upgrade from 0.6.0 and the rollback to 0.6.0 follow [Rollback floor 
 - A row that a 0.6.0 replica stores during the roll is treated as any row an earlier release stored.
 - A load that a 0.6.0 replica serves during the roll ignores `metadata`. Until the last 0.6.0 replica stops, the sensitivity, deprecation, and replacement that a load serves for such a skill depend on the replica that answers.
 - During the roll and after a rollback to 0.6.0, a row that 0.7.0 stored keeps the tags, sensitivity, search visibility, and deprecation flag that 0.7.0 resolved from `metadata`. 0.6.0 search reports and filters on those values, while a 0.6.0 load ignores `metadata`, so 0.6.0 search can report a sensitivity or a deprecation that a 0.6.0 load of the same row does not serve.
+
+### Catalog lint advisories and listing budgets
+
+0.7.0 adds catalog advisories to `podium lint` and a listing-budget check to `podium sync`. Neither changes what ingest accepts or what sync writes. The notes below cover the output and exit statuses an existing catalog and workspace can see after the upgrade.
+
+#### `podium lint`
+
+- `podium lint` now reports the catalog advisories `lint.thin_description`, `lint.colliding_descriptions`, and `lint.near_duplicate_content`, which registry ingest also runs over the layer it ingests. Each is a warning, so a catalog that linted clean can print new warnings and still exits 0 under the default `--fail-on error`.
+- `lint.colliding_descriptions` now reports two descriptions whose normalized word sets have a similarity of 0.7 or higher, so descriptions that follow one template draw it.
+- `lint.near_duplicate_content` warns in every artifact that bundles a shared text file of 50 words or more, such as a `LICENSE` file.
+- A CI pipeline that must stay green does not pass `--fail-on warning` until the catalog is clean. Clear the warnings by rewriting the descriptions, by raising a threshold through the `PODIUM_LINT_*` variables, or through `lint_suppress`, as [Skill lint checks](../../authoring/frontmatter-reference#skill-lint-checks) describes.
+
+#### `podium sync`
+
+- `podium sync` estimates the skill listing of each `kind: workspace` target and, by default, writes a warning on standard error when the estimate exceeds 8,000 characters for an adapter that writes skills. The warning leaves the exit status unchanged. Set `check: off` for the adapter under `listing_budgets` in `sync.yaml` to turn the check off, or raise `max_chars`, as [Listing budget](../../consuming/configure-your-harness#listing-budget) describes.
+- `listing_budgets` is a new top-level `sync.yaml` key. A 0.6.0 `podium sync` ignores it, and a 0.6.0 `podium sync save-as` drops it from the `sync.yaml` it rewrites.
 
 ## 0.6.0: `extends:` removal
 

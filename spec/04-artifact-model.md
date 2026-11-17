@@ -38,7 +38,7 @@ The type system is extensible: deployments register additional types with their 
 
 The type determines indexing, loading semantics, governance requirements, and search ranking. A `context` artifact does not need the same safety review as a `skill` because instructions are more dangerous than reference data.
 
-**Manifest size lint.** A reasonable cap is ~20K tokens of manifest content. Larger reference content should be factored out as a separate `type: context` artifact. For skills, the cap applies to the `SKILL.md` body; the agentskills.io spec recommends keeping `SKILL.md` body content under 5K tokens and ≤ 500 lines, with longer reference material moved into `references/`.
+**Manifest size lint.** Lint estimates a token count as the byte length divided by four, rounded up. Lint errors when manifest content exceeds 20,000 estimated tokens by default, and the cap is configurable (§13.12). Larger reference content should be factored out as a separate `type: context` artifact. For skills, the cap applies to the `SKILL.md` body; the agentskills.io spec recommends keeping `SKILL.md` body content under 5K tokens and ≤ 500 lines, with longer reference material moved into `references/`.
 
 **Package layout example (skill).** A skill that ships with a Python script and a Jinja template, following the agentskills.io directory conventions (`scripts/`, `references/`, `assets/`):
 
@@ -74,8 +74,8 @@ finance/procurement/vendor-compliance-check/
 **Three size thresholds with distinct roles:**
 
 - **Inline cutoff (256 KB, 262144 bytes)**: a resource at or below this size is returned in the `load_artifact` response body; a resource above it is returned as a presigned URL. A resource the registry holds inline on the manifest record is returned inline at any size (§7.2).
-- **Per-file soft cap (1 MB)**: ingest-time warning above this.
-- **Per-package soft cap (10 MB)**: ingest-time error above this.
+- **Per-file soft cap (1 MB, configurable, §13.12)**: ingest-time warning above this.
+- **Per-package soft cap (10 MB, configurable, §13.12)**: ingest-time error above this.
 
 For resources larger than the per-package cap (model files, datasets), use the `external_resources:` mechanism (§4.3): the manifest references pre-uploaded object-storage URLs with content hashes and signatures; bytes don't transit the registry. Caps don't apply to external resources.
 
@@ -150,6 +150,7 @@ search_visibility: indexed | direct-only # default: indexed
 deprecated: false # set to true to mark this version deprecated
 replaced_by: finance/close-reporting/run-variance-analysis-v2 # optional, suggested upgrade target
 release_notes: "Initial release."
+lint_suppress: [lint.thin_description] # lint codes this artifact silences (§4.3.4)
 ---
 ```
 
@@ -265,7 +266,7 @@ Skill artifacts comply with the [agentskills.io specification](https://agentskil
 | `type` | Not present | Top-level (`type: skill`); implied when `ARTIFACT.md` is absent |
 | `version` | As `metadata.version` (string) | Top-level; equal to `metadata.version` when `metadata.version` is a `major.minor.patch` value |
 | `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes` | Optional, as `metadata` values in the encodings of **Podium fields in `metadata`** | Top-level; takes precedence over the `metadata` value when stated |
-| `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `target_harnesses`, `external_resources` | Not present | Top-level |
+| `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `target_harnesses`, `external_resources`, `lint_suppress` | Not present | Top-level |
 
 **Version.** A skill's version is `SKILL.md` `metadata.version`, the `ARTIFACT.md` `version`, or both. When `ARTIFACT.md` declares `version`, that value is the version. Otherwise a `metadata.version` in `major.minor.patch` form is the version. A `metadata.version` in any other form is ignored, because `metadata` is free-form in the Agent Skills standard. When `ARTIFACT.md` declares `version` and `metadata.version` is a `major.minor.patch` value, the two are equal. A skill that declares no usable version carries an assigned version in the reserved form of §4.7.6 (§7.3.1, §13.11.3).
 
@@ -309,7 +310,9 @@ The document is not part of the authored package. The §4.7.6 content hash frame
 
 **Directory conventions.** Subfolders inside a skill package follow the agentskills.io conventions: `scripts/` for executable code, `references/` for documentation loaded on demand, `assets/` for templates and data files. Other subfolders are permitted; these three are recognized by the spec and by adapter targets.
 
-**Body size guidance.** The agentskills.io spec recommends the SKILL.md body stay under 5K tokens and ≤ 500 lines, with longer reference content factored into `references/`. Podium's manifest size lint (§4.1) applies to the SKILL.md body for skills; lint warns above 5K tokens and 500 lines, errors above 20K tokens.
+**Body size guidance.** The agentskills.io spec recommends the SKILL.md body stay under 5K tokens and ≤ 500 lines, with longer reference content factored into `references/`. Podium's manifest size lint (§4.1) applies to the SKILL.md body for skills. By default lint warns above 5,000 estimated tokens (§4.1) and above 500 lines, and errors above 20,000 estimated tokens. Each threshold is configurable (§13.12).
+
+**Lint suppression.** `lint_suppress` is an `ARTIFACT.md` field that lists lint codes. An artifact that lists a code raises no diagnostic of that code from the rules that honor the list: the `skills-ref validate` check below and the catalog advisories of §7.3.1. Every other rule ignores the list. A skill with no `ARTIFACT.md` lists no code.
 
 **Skill-artifact ingest lint.** For every artifact with `type: skill`:
 
@@ -323,7 +326,7 @@ The document is not part of the authored package. The §4.7.6 content hash frame
 - When `ARTIFACT.md` is present, its body is empty or a single HTML comment (warning otherwise).
 - A skill that declares no usable version has its version assigned (warning that names any ignored `metadata.version` value and the fix).
 - An authored version in the reserved form of §4.7.6, in either file, is an error (`lint.invalid_version`).
-- The `skills-ref validate` reference check from the agentskills.io project passes against `SKILL.md` (warning on failure; lint suppression flag available for cases where the standard's validator is overly strict).
+- The `skills-ref validate` reference check from the agentskills.io project passes against `SKILL.md` (warning on failure, `lint.skill_ref_validate`; an `ARTIFACT.md` that lists that code under `lint_suppress` silences it for cases where the standard's validator is overly strict).
 
 ### 4.3.5 Canonical hook events
 
@@ -553,7 +556,7 @@ Concrete: `load_domain("finance", depth=2)` returns finance's body plus a two-le
 
 Each subdomain entry's `name` field is the directory basename; `path` is the full canonical path. Both are populated even when the subdomain has no `DOMAIN.md`.
 
-Body length is recommended ≤ 2000 tokens; lint warns above. Cross-layer merge of the body follows §4.5.4 (last-layer-wins).
+Body length is recommended ≤ 2000 tokens. By default lint warns above 2,000 estimated tokens (§4.1), and the threshold is configurable (§13.12). Cross-layer merge of the body follows §4.5.4 (last-layer-wins).
 
 **Notable selection.** Notable artifacts surfaced by `load_domain` are the union of:
 

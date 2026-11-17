@@ -66,12 +66,12 @@ func TestCoreConcept_AllFirstClassTypesLint(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"sk/ARTIFACT.md":  greetSkillArtifact,
 		"sk/SKILL.md":     skillBody("sk"),
-		"ag/ARTIFACT.md":  "---\ntype: agent\nversion: 1.0.0\ndescription: an agent\n---\n\nbody\n",
-		"ctx/ARTIFACT.md": contextArtifact("a context"),
-		"cmd/ARTIFACT.md": "---\ntype: command\nversion: 1.0.0\ndescription: a command\n---\n\nbody\n",
-		"rl/ARTIFACT.md":  "---\ntype: rule\nversion: 1.0.0\ndescription: a rule\nrule_mode: always\n---\n\nbody\n",
-		"hk/ARTIFACT.md":  "---\ntype: hook\nversion: 1.0.0\ndescription: a hook\nhook_event: stop\nhook_action: echo ok\n---\n\nbody\n",
-		"ms/ARTIFACT.md":  "---\ntype: mcp-server\nversion: 1.0.0\ndescription: a server\nserver_identifier: ms\n---\n\nbody\n",
+		"ag/ARTIFACT.md":  "---\ntype: agent\nversion: 1.0.0\ndescription: Delegate the close checklist to helpers\n---\n\nbody\n",
+		"ctx/ARTIFACT.md": contextArtifact("Reference notes on the ledger layout"),
+		"cmd/ARTIFACT.md": "---\ntype: command\nversion: 1.0.0\ndescription: Open a pull request for review\n---\n\nbody\n",
+		"rl/ARTIFACT.md":  "---\ntype: rule\nversion: 1.0.0\ndescription: Require gofmt on every Go file\nrule_mode: always\n---\n\nbody\n",
+		"hk/ARTIFACT.md":  "---\ntype: hook\nversion: 1.0.0\ndescription: Echo ok when the session stops\nhook_event: stop\nhook_action: echo ok\n---\n\nbody\n",
+		"ms/ARTIFACT.md":  "---\ntype: mcp-server\nversion: 1.0.0\ndescription: Expose the ms tool server\nserver_identifier: ms\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 || !strings.Contains(res.Stdout, "lint: no issues.") {
@@ -445,7 +445,7 @@ func TestCoreConcept_SearchArtifactsType(t *testing.T) {
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"sk/ARTIFACT.md":  greetSkillArtifact,
 		"sk/SKILL.md":     skillBody("sk"),
-		"ctx/ARTIFACT.md": contextArtifact("a context"),
+		"ctx/ARTIFACT.md": contextArtifact("Reference notes on the ledger layout"),
 	}))
 	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL},
 		toolCall(1, "search_artifacts", map[string]any{"type": "context"}))

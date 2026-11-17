@@ -12,10 +12,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -59,7 +59,8 @@ func (d Diagnostic) String() string {
 // Linter applies the configured rules to a registry.
 type Linter struct {
 	// Rules is the ordered set of rules to apply. Defaults to the
-	// rule set from AllRulesWithClient(HTTPClient) when empty.
+	// rule set from AllRulesWithClient(HTTPClient) when empty, with the
+	// size rules reading Thresholds.
 	Rules []Rule
 	// HTTPClient, when non-nil, enables the §4.4 URL HEAD check in the
 	// default rule set: prose references to URLs are validated by an
@@ -75,15 +76,14 @@ type Linter struct {
 	// (the default) leaves overrides allowed and skips the check. Ignored
 	// when Rules is set explicitly.
 	AllowPerDomainOverrides *bool
-	// PerFileSoftCapBytes overrides the §4.1 per-file bundled-resource
-	// soft cap (the warning threshold) so an operator can tune it per §12
-	// ("soft cap is configurable"). Zero uses the default
-	// PerFileSoftCapBytes constant. Ignored when Rules is set explicitly.
-	PerFileSoftCapBytes int64
-	// PerPackageSoftCapBytes overrides the §4.1 per-package bundled-resource
-	// soft cap (the error threshold). Zero uses the default
-	// PerPackageSoftCapBytes constant. Ignored when Rules is set explicitly.
-	PerPackageSoftCapBytes int64
+	// Thresholds holds the configurable size and catalog-advisory
+	// thresholds (§13.12). A zero or partly filled value takes the
+	// default for every field left unset. Ignored when Rules is set
+	// explicitly.
+	Thresholds Thresholds
+	// IncludeAdvisories adds the §7.3.1 catalog advisories to the default
+	// rule set. Ignored when Rules is set explicitly.
+	IncludeAdvisories bool
 }
 
 // Rule is one lint check. Receiving the registry plus parsed records
@@ -108,6 +108,12 @@ func AllRules() []Rule {
 // HEAD validation, a nil client skips it. Every other rule is
 // client-independent.
 func AllRulesWithClient(client *http.Client) []Rule {
+	return rulesWith(client, DefaultThresholds())
+}
+
+// rulesWith builds the AllRulesWithClient rule set with the size rules
+// reading th, which the caller has already resolved.
+func rulesWith(client *http.Client, th Thresholds) []Rule {
 	return []Rule{
 		ruleRequiredFields{},
 		ruleTypeRequiredFields{},
@@ -126,14 +132,17 @@ func AllRulesWithClient(client *http.Client) []Rule {
 		ruleHookEventCanonical{},
 		ruleHarnessCapability{},
 		ruleEffortHintAppliesToType{},
-		ruleBundledResourceSize{},
-		ruleManifestSize{},
+		ruleBundledResourceSize{
+			perFileCap:    th.PerFileSoftCapBytes,
+			perPackageCap: th.PerPackageSoftCapBytes,
+		},
+		ruleManifestSize{th: th},
 		ruleArtifactBodyForSkill{},
 		ruleProseReferenceResolution{HTTPClient: client},
 		ruleDomainImportsResolve{},
 		ruleDomainImportCycle{},
 		ruleDomainImportBroadGlob{},
-		ruleDomainBodySize{},
+		ruleDomainBodySize{th: th},
 	}
 }
 
@@ -150,60 +159,32 @@ func DefaultHTTPClient() *http.Client {
 // still runs). Callers supply offline from their own deployment config
 // (for example PODIUM_INGEST_OFFLINE or a --offline flag).
 //
-// The §4.1 bundled-resource soft caps are configurable per §12 via
-// PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES and
-// PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES; an unset or
-// non-positive value leaves the default constant in force.
+// The thresholds come from the §13.12 PODIUM_LINT_* variables, read on
+// every call. An invalid value logs a warning through log.Printf, which
+// writes to standard error, so a `--json` standard output stays clean.
 func NewIngestLinter(offline bool) *Linter {
-	l := &Linter{
-		PerFileSoftCapBytes:    envInt64("PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES"),
-		PerPackageSoftCapBytes: envInt64("PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES"),
-	}
+	l := &Linter{Thresholds: ThresholdsFromEnv(os.Getenv, log.Printf)}
 	if !offline {
 		l.HTTPClient = DefaultHTTPClient()
 	}
 	return l
 }
 
-// envInt64 parses a non-negative int64 from the named environment
-// variable, returning 0 when unset or unparseable so the caller's
-// default applies.
-func envInt64(name string) int64 {
-	v := strings.TrimSpace(os.Getenv(name))
-	if v == "" {
-		return 0
-	}
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || n < 0 {
-		return 0
-	}
-	return n
-}
-
 // Lint runs every configured rule against the registry and returns the
-// concatenated diagnostics, sorted by ArtifactID then Code so output is
-// deterministic.
+// concatenated diagnostics, sorted by ArtifactID, then Code, then Message so
+// output is deterministic.
 func (l *Linter) Lint(ctx context.Context, reg *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
 	rules := l.Rules
 	if len(rules) == 0 {
-		rules = AllRulesWithClient(l.HTTPClient)
-		// §12: apply the configured bundled-resource soft caps.
-		// Zero values fall back to the §4.1 defaults inside the rule.
-		if l.PerFileSoftCapBytes > 0 || l.PerPackageSoftCapBytes > 0 {
-			for i := range rules {
-				if _, ok := rules[i].(ruleBundledResourceSize); ok {
-					rules[i] = ruleBundledResourceSize{
-						perFileCap:    l.PerFileSoftCapBytes,
-						perPackageCap: l.PerPackageSoftCapBytes,
-					}
-				}
-			}
-		}
+		rules = rulesWith(l.HTTPClient, l.Thresholds.resolved())
 		// §4.5.5: when the tenant disables per-domain discovery
 		// overrides, warn on any DOMAIN.md that still carries a
 		// `discovery:` block (ingest succeeds; the block is ignored).
 		if l.AllowPerDomainOverrides != nil && !*l.AllowPerDomainOverrides {
 			rules = append(rules, ruleDomainDiscoveryOverrideDisallowed{})
+		}
+		if l.IncludeAdvisories {
+			rules = append(rules, l.AdvisoryRules()...)
 		}
 	}
 	var out []Diagnostic
@@ -214,7 +195,13 @@ func (l *Linter) Lint(ctx context.Context, reg *filesystem.Registry, records []f
 		if out[i].ArtifactID != out[j].ArtifactID {
 			return out[i].ArtifactID < out[j].ArtifactID
 		}
-		return out[i].Code < out[j].Code
+		if out[i].Code != out[j].Code {
+			return out[i].Code < out[j].Code
+		}
+		// Spec: §7.3.1 — one artifact can draw several diagnostics of one
+		// code, such as a near-duplicate warning per unit, and the message
+		// fixes their order.
+		return out[i].Message < out[j].Message
 	})
 	return out
 }

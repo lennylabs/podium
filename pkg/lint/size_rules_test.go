@@ -212,3 +212,72 @@ func TestRuleManifestSize_SmallManifestPasses(t *testing.T) {
 		}
 	}
 }
+
+// manifestSizeHits lints a skill whose SKILL.md body is body under th and
+// returns the lint.manifest_size diagnostics of severity sev whose message
+// contains marker.
+func manifestSizeHits(th lint.Thresholds, body string, sev lint.Severity, marker string) []lint.Diagnostic {
+	rec := filesystem.ArtifactRecord{
+		ID:       "skills/sized",
+		Artifact: &manifest.Artifact{Type: manifest.TypeSkill},
+		Skill:    &manifest.Skill{Body: body},
+	}
+	var out []lint.Diagnostic
+	for _, d := range (&lint.Linter{Thresholds: th}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec}) {
+		if d.Code == "lint.manifest_size" && d.Severity == sev && strings.Contains(d.Message, marker) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// Spec: §4.1, §4.3.4, §13.12 — each configured size threshold applies: a
+// body at the threshold draws nothing and one unit above it draws the
+// diagnostic, which names the configured value.
+func TestManifestSize_ConfiguredThresholds(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name          string
+		th            lint.Thresholds
+		at, above     string
+		sev           lint.Severity
+		marker, limit string
+	}{
+		{
+			name:  "SkillBodyWarnTokens",
+			th:    lint.Thresholds{SkillBodyWarnTokens: 100},
+			at:    strings.Repeat("a", 100*4),
+			above: strings.Repeat("a", 100*4+1),
+			sev:   lint.SeverityWarning, marker: "tokens", limit: "above 100",
+		},
+		{
+			name:  "SkillBodyWarnLines",
+			th:    lint.Thresholds{SkillBodyWarnLines: 10},
+			at:    strings.Repeat("x\n", 10),
+			above: strings.Repeat("x\n", 11),
+			sev:   lint.SeverityWarning, marker: "lines", limit: "above 10",
+		},
+		{
+			name:  "ManifestErrTokens",
+			th:    lint.Thresholds{ManifestErrTokens: 200},
+			at:    strings.Repeat("a", 200*4),
+			above: strings.Repeat("a", 200*4+1),
+			sev:   lint.SeverityError, marker: "tokens", limit: "cap of 200 tokens",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := manifestSizeHits(c.th, c.at, c.sev, c.marker); len(got) != 0 {
+				t.Errorf("body at the threshold drew %+v", got)
+			}
+			got := manifestSizeHits(c.th, c.above, c.sev, c.marker)
+			if len(got) != 1 {
+				t.Fatalf("body one above the threshold drew %d diagnostics, want 1: %+v", len(got), got)
+			}
+			if !strings.Contains(got[0].Message, c.limit) {
+				t.Errorf("message %q does not name the configured threshold %q", got[0].Message, c.limit)
+			}
+		})
+	}
+}

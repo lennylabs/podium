@@ -3,7 +3,6 @@ package lint
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -19,31 +18,37 @@ import (
 // description that clears either bound is left alone, so only genuinely
 // thin summaries draw the advisory.
 const (
-	// MinDescriptionChars is the lower bound, in runes, below which a
-	// non-empty description is treated as thin.
+	// MinDescriptionChars is the default lower bound, in code points,
+	// below which a non-empty description is treated as thin.
 	MinDescriptionChars = 15
-	// MinDescriptionWords is the lower bound, in whitespace-separated
-	// words, below which a description is treated as thin.
+	// MinDescriptionWords is the default lower bound, in
+	// white-space-separated words, below which a description is treated
+	// as thin.
 	MinDescriptionWords = 3
 )
 
-// DescriptionAdvisoryRules returns the §3.3 / §12 registry ingest-time
-// description-quality checks: a thin-description flag and a
-// colliding-summaries flag. Both are advisory (warning severity).
-//
-// They are intentionally NOT part of AllRules(): the spec attributes the
-// behavior to "the registry" (§3.3 "The registry lints for thin
-// descriptions and flags clusters of artifacts whose summaries collide")
-// and to "ingest-time lint" (§12), so the registry ingest pipeline runs
-// them over the ingested record set, while the author-facing `podium lint`
-// keeps the per-artifact schema rules in AllRules(). The colliding-summary
-// check is inherently cross-artifact and only carries meaning over a set
-// of artifacts, which the ingest batch supplies.
-func DescriptionAdvisoryRules() []Rule {
+// descriptionRules builds the description-quality rules from th, which
+// the caller has already resolved.
+func descriptionRules(th Thresholds) []Rule {
 	return []Rule{
-		ruleThinDescription{},
-		ruleCollidingDescriptions{},
+		ruleThinDescription{minChars: th.MinDescriptionChars, minWords: th.MinDescriptionWords},
+		ruleCollidingDescriptions{t: th.DescriptionSimilarity},
 	}
+}
+
+// AdvisoryRules returns the §7.3.1 catalog advisories: lint.thin_description,
+// lint.colliding_descriptions, and lint.near_duplicate_content, each built
+// from l.Thresholds with every unset field at its default. A nil l uses the
+// defaults. The advisories stay out of AllRules(); Lint appends them when
+// IncludeAdvisories is set.
+//
+// Spec: §7.3.1, §13.12
+func (l *Linter) AdvisoryRules() []Rule {
+	th := DefaultThresholds()
+	if l != nil {
+		th = l.Thresholds.resolved()
+	}
+	return append(descriptionRules(th), ruleNearDuplicateContent{t: th.ContentSimilarity})
 }
 
 // effectiveDescription returns the description that drives discovery for a
@@ -69,8 +74,12 @@ func effectiveDescription(rec filesystem.ArtifactRecord) string {
 // §12). An absent description is left to the per-type required-field rules
 // (a skill with an empty description is already a hard error via
 // lint.skill_md_compliance); this rule targets the present-but-inadequate
-// case. Honors the per-artifact lint_suppress flag.
-type ruleThinDescription struct{}
+// case. minChars counts code points and minWords counts white-space-separated
+// words (§7.3.1, §13.12). Honors the per-artifact lint_suppress flag.
+type ruleThinDescription struct {
+	minChars int
+	minWords int
+}
 
 func (ruleThinDescription) Code() string { return "lint.thin_description" }
 
@@ -86,60 +95,60 @@ func (r ruleThinDescription) Check(_ context.Context, _ *filesystem.Registry, re
 		}
 		chars := utf8.RuneCountInString(desc)
 		words := len(strings.Fields(desc))
-		if chars < MinDescriptionChars || words < MinDescriptionWords {
+		if chars < r.minChars || words < r.minWords {
 			out = append(out, warn(rec.ID, r.Code(),
 				fmt.Sprintf("description is thin (%d chars, %d words); answer \"when should I use this?\" in one or two sentences (want at least %d chars and %d words)",
-					chars, words, MinDescriptionChars, MinDescriptionWords)))
+					chars, words, r.minChars, r.minWords)))
 		}
 	}
 	return out
 }
 
-// ruleCollidingDescriptions flags clusters of artifacts whose summaries
-// collide (spec §3.3 "flags clusters of artifacts whose summaries
-// collide", §12). Two descriptions collide when they are identical after
-// normalization (lowercased, runs of punctuation and whitespace collapsed
-// to single spaces, trimmed), so "Close the books.", "close the books",
-// and "CLOSE  THE  BOOKS!" cluster together. Every member of a cluster of
-// two or more draws one warning naming the colliding peers. An empty
-// description never collides. Honors the per-artifact lint_suppress flag.
-type ruleCollidingDescriptions struct{}
+// ruleCollidingDescriptions flags artifacts whose descriptions overlap:
+// two artifacts whose normalized descriptions have word sets with a
+// similarity of t or higher (§7.3.1). Each flagged artifact draws one
+// warning naming its peers by descending similarity and then by ID, with
+// more than 10 peers abbreviated to a count. An empty description never
+// overlaps. Suppression is one-sided: an artifact whose lint_suppress lists
+// the code draws no warning, and its peers still name it.
+//
+// Spec: §7.3.1
+type ruleCollidingDescriptions struct {
+	t float64
+}
 
 func (ruleCollidingDescriptions) Code() string { return "lint.colliding_descriptions" }
 
-func (r ruleCollidingDescriptions) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
-	// Group canonical IDs by normalized description across the whole
-	// ingested set so a cluster is visible from any of its members.
-	byNorm := map[string][]string{}
-	for _, rec := range records {
-		norm := normalizeDescription(effectiveDescription(rec))
-		if norm == "" {
+func (r ruleCollidingDescriptions) Check(ctx context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+	in := newInterner()
+	var sets []tokenSet
+	for i, rec := range records {
+		toks := in.words(wordTokens(effectiveDescription(rec)))
+		if len(toks) == 0 {
 			continue
 		}
-		byNorm[norm] = append(byNorm[norm], rec.ID)
+		sets = append(sets, tokenSet{owner: i, tokens: toks})
 	}
+	groups := groupIdentical(sets)
+	pairs, err := similarPairs(ctx, groups, r.t)
+	if err != nil {
+		return nil
+	}
+	name := func(s int) string { return records[sets[s].owner].ID }
+	peers := newPeerIndex(sets, groups, pairs, name)
 	var out []Diagnostic
-	for _, rec := range records {
-		if rec.Artifact != nil && rec.Artifact.Suppresses(r.Code()) {
+	for s, set := range sets {
+		rec := records[set.owner]
+		if rec.Artifact.Suppresses(r.Code()) {
 			continue
 		}
-		norm := normalizeDescription(effectiveDescription(rec))
-		if norm == "" {
+		first, total := peers.summary(s)
+		if total == 0 {
 			continue
 		}
-		others := make([]string, 0, len(byNorm[norm]))
-		for _, id := range byNorm[norm] {
-			if id != rec.ID {
-				others = append(others, id)
-			}
-		}
-		if len(others) == 0 {
-			continue
-		}
-		sort.Strings(others)
 		out = append(out, warn(rec.ID, r.Code(),
-			fmt.Sprintf("description collides with %s; give each artifact a distinct summary so search and load_domain can tell them apart",
-				strings.Join(others, ", "))))
+			fmt.Sprintf("description overlaps %s; give each artifact a distinct summary so search and load_domain can tell them apart",
+				formatPeers(first, total, name))))
 	}
 	return out
 }

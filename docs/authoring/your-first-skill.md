@@ -48,7 +48,7 @@ metadata:
 ---
 ```
 
-The `description` decides whether the harness reaches for the skill. A vague description such as "Helper skill" gets ignored. A specific one that states what the skill does and when to use it matches the prompts users write. The registry flags thin descriptions at ingest, and local `podium lint` does not run that check.
+The `description` decides whether the harness reaches for the skill. A vague description such as "Helper skill" gets ignored. A specific one that states what the skill does and when to use it matches the prompts users write. `podium lint` flags a thin description and two descriptions that overlap across the whole catalog, and the registry flags them within the layer it ingests, as [Step 6](#step-6-lint-before-you-commit) describes.
 
 The version stays `1.0.0`, because a filesystem catalog keeps no ingest history. Once a registry server ingests the skill, `(artifact_id, version)` is immutable, so bump `metadata.version` whenever the content changes after that. [Frontmatter reference](frontmatter-reference) lists every field.
 
@@ -193,10 +193,11 @@ Lint runs these checks:
 - Prose references in `SKILL.md`, which must resolve to bundled files.
 - The agentskills.io compliance checks on `SKILL.md`: name format, description constraints, and parent-directory match.
 - The type-specific rules.
+- The catalog advisories, which warn on a thin description, on two descriptions that overlap, and on near-duplicate content in two artifacts.
 
-When the catalog lives in a Git-source layer, CI runs the same checks on pull requests, and the registry adds the thin-description check at ingest (see [Connecting layer sources](../deployment/content/layer-sources#git-repositories)).
+When the catalog lives in a Git-source layer, CI runs the same checks on pull requests (see [Connecting layer sources](../deployment/content/layer-sources#git-repositories)). The registry runs the artifact checks again at ingest and runs the catalog advisories over the layer it ingests, so only `podium lint` reports an overlap between artifacts in different layers.
 
-Each diagnostic prints as `[<severity>] <artifact-id>: <message> (<rule-code>)`, for example `[error] personal/hello/greet: type is required (lint.required_field_missing)`. Warnings alone exit 0, and any error exits 1. [Skill lint checks](frontmatter-reference#skill-lint-checks) lists the checks that apply to a skill.
+Each diagnostic prints as `[<severity>] <artifact-id>: <message> (<rule-code>)`, for example `[error] personal/hello/greet: type is required (lint.required_field_missing)`. Warnings alone exit 0, and any error exits 1. With `--fail-on warning`, a warning also exits 1. [Skill lint checks](frontmatter-reference#skill-lint-checks) lists the checks that apply to a skill.
 
 When lint passes, commit the artifact.
 

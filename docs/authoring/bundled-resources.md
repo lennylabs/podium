@@ -66,7 +66,7 @@ A path written as inline code rather than as a markdown link is not checked.
 | Per-file soft cap | 1 MB | Lint warning above this size. |
 | Per-package soft cap | 10 MB | Lint error above this size, which fails ingest. |
 
-An operator can change the caps with `PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES` and `PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES`. Above the per-package cap, use [external resources](#external-resources). The size thresholds never remove a file from the bundled set.
+The limits are defaults. An operator changes them with `PODIUM_LINT_PER_FILE_SOFT_CAP_BYTES` and `PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES`, and changes the [manifest size thresholds](#manifest-size-lint) with `PODIUM_LINT_SKILL_BODY_WARN_TOKENS`, `PODIUM_LINT_SKILL_BODY_WARN_LINES`, and `PODIUM_LINT_MANIFEST_ERROR_TOKENS`. Registry ingest and `podium lint` read the same variables, which [Lint](../reference/configuration#lint) in the configuration reference lists. Above the per-package cap, use [external resources](#external-resources). The size thresholds never remove a file from the bundled set.
 
 A separate 256 KB cutoff decides whether a resource's bytes travel inside the `load_artifact` response or as a URL. It does not limit what an author ships. [The inline cutoff](../consuming/handling-artifact-responses#the-inline-cutoff) describes it.
 
@@ -153,15 +153,25 @@ Prose copied from an external source, such as a wiki page or a vendor document, 
 
 ## Manifest size lint
 
-Manifest content has a cap of about 20K tokens. For a skill, the cap applies to the `SKILL.md` body. The agentskills.io specification recommends keeping that body under 5K tokens and at most 500 lines, with longer reference material moved into `references/`. Larger reference content can also become a separate `type: context` artifact that the prose body references.
+Manifest content has a cap of 20,000 estimated tokens by default. For a skill, the cap applies to the `SKILL.md` body. The agentskills.io specification recommends keeping that body under 5K tokens and at most 500 lines, with longer reference material moved into `references/`. Larger reference content can also become a separate `type: context` artifact that the prose body references.
 
-| Threshold | Lint result |
-|:--|:--|
-| 20K tokens of manifest content | Ingest error (`lint.manifest_size`). |
-| 5K tokens in a `SKILL.md` body | Warning. |
-| 500 lines in a `SKILL.md` body | Warning. |
+Lint estimates a token count as the byte length divided by four, rounded up. Each threshold below is a default, and the variable in its row changes it:
+
+| Threshold | Default | Variable | Lint result |
+|:--|:--|:--|:--|
+| Manifest content | 20,000 estimated tokens | `PODIUM_LINT_MANIFEST_ERROR_TOKENS` | Ingest error (`lint.manifest_size`). |
+| `SKILL.md` body | 5,000 estimated tokens | `PODIUM_LINT_SKILL_BODY_WARN_TOKENS` | Warning. |
+| `SKILL.md` body | 500 lines | `PODIUM_LINT_SKILL_BODY_WARN_LINES` | Warning. |
 
 When an artifact hits a threshold, decide whether the prose is manifest-level material, such as instructions and `when_to_use` details, or reference material that belongs in its own artifact.
+
+---
+
+## Near-duplicate content
+
+`lint.near_duplicate_content` warns when two artifacts carry near-identical text. It compares units: an artifact's prose body, which is the `SKILL.md` body for a skill and the `ARTIFACT.md` body for any other type, and each bundled resource that is valid UTF-8 and contains no NUL byte. A binary resource is not a unit. A unit's shingles are the sequences of five consecutive words of its normalized text, and two units of different artifacts whose shingle sets have a similarity of 0.8 or higher draw the warning. `PODIUM_LINT_CONTENT_SIMILARITY` changes the threshold. A unit of fewer than 50 words is not compared, and two units of one artifact are not compared.
+
+A shared file bundled in several artifacts, such as a `LICENSE` file or a helper script of 50 words or more, draws the warning in every artifact that bundles it. The diagnostic names the units and the other artifacts, and abbreviates a list of more than 10 artifacts to the first 10 and a count of the rest. The warning neither blocks ingest nor changes the `podium lint` exit status under the default `--fail-on error`. To clear it, factor the shared content into its own artifact, or list `lint.near_duplicate_content` under `lint_suppress` in the `ARTIFACT.md` of each artifact that keeps a copy.
 
 ---
 

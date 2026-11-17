@@ -24,6 +24,7 @@ import (
 	"syscall"
 
 	"github.com/lennylabs/podium/internal/buildinfo"
+	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
@@ -315,6 +316,16 @@ func syncCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", verr)
 		return 2
 	}
+	// Spec: §7.5.2 — an invalid listing_budgets entry for the run's harness
+	// exits 2 before the view resolves, --preview included, so the check sits
+	// ahead of the config.no_registry guard and the --preview branch. It takes
+	// the resolved harness rather than the raw flag, so an entry for `none`
+	// fails a sync that sets no harness.
+	budget, berr := merged.ListingBudgetFor(resolved.Harness, adapter.DefaultRegistry())
+	if berr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", berr)
+		return 2
+	}
 
 	registryPath := resolved.Registry
 	if registryPath != "" {
@@ -397,7 +408,7 @@ func syncCmd(args []string) int {
 		Delivery:     newSyncDeliveryCheck(ws),
 	}
 	if *watch {
-		return runWatchLoop(syncOpts, overlayPath, *asJSON)
+		return runWatchLoop(syncOpts, overlayPath, budget, *asJSON)
 	}
 	res, err := sync.Run(syncOpts)
 	if err != nil {
@@ -409,14 +420,18 @@ func syncCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "sync failed: %v\n", err)
 		return 1
 	}
+	listing := sync.Listing(res, budget)
 	if *asJSON {
-		printJSON(res)
+		printJSON(res, listing)
 	} else {
 		printHuman(res, *dryRun)
 	}
-	// Spec: §13.11.3 — a drop is reported on standard error, so the --json
-	// envelope on standard output stays valid, and the sync exits 1.
-	if reportDropped(os.Stderr, res.Dropped) {
+	// Spec: §13.11.3, §7.5.8 — a drop and a listing report are written on
+	// standard error, so the --json envelope on standard output stays valid. A
+	// drop fails the sync, and so does a listing report under `check: error`.
+	dropped := reportDropped(os.Stderr, res.Dropped)
+	overBudget := reportListing(os.Stderr, listing)
+	if dropped || overBudget {
 		return 1
 	}
 	return 0
@@ -440,7 +455,7 @@ func resolveCacheMode(v string) (string, error) {
 // runWatchLoop drives sync.Watch until the user interrupts (SIGINT
 // / SIGTERM). Each WatchEvent is printed in the same shape as a
 // one-shot sync run so existing tooling can consume the stream.
-func runWatchLoop(opts sync.Options, overlay string, asJSON bool) int {
+func runWatchLoop(opts sync.Options, overlay string, budget sync.EffectiveListingBudget, asJSON bool) int {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	events, err := sync.Watch(ctx, sync.WatchOptions{
@@ -466,15 +481,20 @@ func runWatchLoop(opts sync.Options, overlay string, asJSON bool) int {
 			failures++
 			continue
 		}
+		listing := sync.Listing(ev.Result, budget)
 		if asJSON {
-			printJSON(ev.Result)
+			printJSON(ev.Result, listing)
 		} else {
 			printHuman(ev.Result, opts.DryRun)
 		}
-		// Spec: §13.11.4 — each reported cycle that dropped an artifact counts
-		// toward the exit status on interrupt. A cycle whose event the watcher
-		// discarded on cancellation is reported by the next podium sync.
+		// Spec: §13.11.4, §7.5.8 — each reported cycle that dropped an artifact
+		// or failed its listing under `check: error` counts toward the exit
+		// status on interrupt. A cycle whose event the watcher discarded on
+		// cancellation is reported by the next podium sync.
 		if reportDropped(os.Stderr, ev.Result.Dropped) {
+			failures++
+		}
+		if reportListing(os.Stderr, listing) {
 			failures++
 		}
 	}
@@ -534,6 +554,20 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watc
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}
+	// Spec: §7.5.2 — --config reads one file, so listing_budgets come from the
+	// three file scopes at the configuration file's workspace, and an invalid
+	// entry for any kind: workspace target exits 2 before the first target
+	// runs, with or without --check.
+	home, _ := os.UserHomeDir()
+	merged, _, err := sync.LoadMergedConfig(workspace, home)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	budgets, code := resolveTargetBudgets(merged, plans)
+	if code != 0 {
+		return code
+	}
 	cacheMode, cmErr := resolveCacheMode(os.Getenv("PODIUM_CACHE_MODE"))
 	if cmErr != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", cmErr)
@@ -551,14 +585,14 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watc
 	// file's workspace, the same workspace PlanMultiTarget receives.
 	delivery := newSyncDeliveryCheck(workspace)
 	failures := 0
-	for _, p := range plans {
+	for i, p := range plans {
 		fmt.Printf("== target %s ==\n", p.ID)
 		var rerr error
 		switch p.Kind {
 		case sync.KindMarketplace:
 			rerr = runMarketplaceTarget(ctx, p, delivery, dryRun, check, asJSON)
 		default:
-			rerr = runWorkspaceTarget(ctx, p, delivery, cacheMode, dryRun, check, asJSON)
+			rerr = runWorkspaceTarget(ctx, p, delivery, budgets[i], cacheMode, dryRun, check, asJSON)
 		}
 		// Spec: §7.5 — a resolution refusal is the same for every later
 		// target, so the run stops at the refused target and exits 2.
@@ -589,7 +623,11 @@ var errDropped = errors.New("dropped at least one artifact")
 // one (§7.5.2). Under check it runs sync.Run with DryRun set so no tree or
 // lock is written, and skips the workflow phases. Under dryRun it resolves and
 // reports without writing, and skips the workflow phases.
-func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sync.DeliveryCheckFunc, cacheMode string, dryRun, check, asJSON bool) error {
+//
+// budget is the target's resolved §7.5.8 listing budget. A listing report that
+// fails under `check: error` fails the target after its publish phase, as a
+// drop does (§13.11.3).
+func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sync.DeliveryCheckFunc, budget sync.EffectiveListingBudget, cacheMode string, dryRun, check, asJSON bool) error {
 	abs, err := filepath.Abs(p.Target)
 	if err != nil {
 		return err
@@ -619,16 +657,19 @@ func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sy
 	if err != nil {
 		return err
 	}
-	// Spec: §13.11.3 — report the drops before the --check return, because a
-	// --check run of a kind: workspace target composes the layers too.
+	// Spec: §13.11.3, §7.5.8 — report the drops and the listing before the
+	// --check return, because a --check run of a kind: workspace target
+	// composes the layers and estimates its listing too.
+	listing := sync.Listing(res, budget)
 	dropped := reportDropped(os.Stderr, res.Dropped)
+	overBudget := reportListing(os.Stderr, listing)
 	if check {
 		// A --check run resolves the artifact set without materializing; do not
 		// print the per-artifact materialization summary.
-		return droppedErr(dropped)
+		return errors.Join(droppedErr(dropped), listingErr(overBudget))
 	}
 	if asJSON {
-		printJSON(res)
+		printJSON(res, listing)
 	} else {
 		printHuman(res, dryRun)
 	}
@@ -644,8 +685,32 @@ func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sy
 		}
 	}
 	// The publish phase has already pushed the output without the dropped
-	// artifact; the target still counts as failed (§13.11.3).
-	return droppedErr(dropped)
+	// artifact, or with the listing over its budget; the target still counts
+	// as failed (§13.11.3, §7.5.8).
+	return errors.Join(droppedErr(dropped), listingErr(overBudget))
+}
+
+// resolveTargetBudgets resolves the §7.5.8 listing budget of every kind:
+// workspace plan, indexed like plans; a kind: marketplace plan keeps the zero
+// value, because no listing is computed for it. An invalid entry for a
+// workspace target's harness prints `error: target <id>: <err>` and returns
+// exit code 2.
+//
+// Spec: §7.5.2, §7.5.8
+func resolveTargetBudgets(merged *sync.MergedConfig, plans []sync.MultiTargetPlan) ([]sync.EffectiveListingBudget, int) {
+	budgets := make([]sync.EffectiveListingBudget, len(plans))
+	for i, p := range plans {
+		if p.Kind == sync.KindMarketplace {
+			continue
+		}
+		b, err := merged.ListingBudgetFor(p.Harness, adapter.DefaultRegistry())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: target %s: %v\n", p.ID, err)
+			return nil, 2
+		}
+		budgets[i] = b
+	}
+	return budgets, 0
 }
 
 // droppedErr returns errDropped when the target reported a drop.
@@ -788,7 +853,7 @@ func runSyncCheck() int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	warns := sync.Check(merged)
+	warns := sync.Check(merged, adapter.DefaultRegistry())
 	if len(warns) == 0 {
 		fmt.Println("sync.yaml: ok (no warnings)")
 		return 0
@@ -836,13 +901,25 @@ func syncOverrideCmd(args []string) int {
 	// the registry the same way sync does so --add materializes and --remove
 	// deletes. A missing registry leaves materialization off; the toggles are
 	// still recorded.
-	registryPath := resolveOverrideRegistry(*registry)
+	merged, workspace := loadOverrideConfig()
+	registryPath := resolveOverrideRegistry(merged, workspace, *registry)
+	harnessID := resolveOverrideHarness(merged, *harness, abs)
+	// Spec: §7.5.2, §7.5.8 — with a registry and without --dry-run, Override
+	// re-materializes, so an invalid listing_budgets entry exits 2 here, before
+	// Override records a toggle.
+	var budget sync.EffectiveListingBudget
+	if registryPath != "" && !*dryRun {
+		var ok bool
+		if budget, ok = overrideListingBudget(merged, harnessID); !ok {
+			return 2
+		}
+	}
 	res, err := sync.Override(sync.OverrideOptions{
 		Target: abs,
 		Add:    []string(add), Remove: []string(remove),
 		Reset: *reset, DryRun: *dryRun,
 		RegistryPath: registryPath,
-		AdapterID:    resolveOverrideHarness(*harness, abs),
+		AdapterID:    harnessID,
 		Delivery:     newSyncDeliveryCheck(workingDir()),
 	})
 	if err != nil {
@@ -867,24 +944,31 @@ func syncOverrideCmd(args []string) int {
 	if !res.Changed {
 		fmt.Println("(no change)")
 	}
-	// Spec: §13.11.3 — the re-materialization's drops are reported and exit 1;
-	// the toggles stay recorded.
-	if reportDropped(os.Stderr, res.Dropped) {
-		return 1
-	}
-	return 0
+	// Spec: §13.11.3, §7.5.8 — the re-materialization's drops and listing
+	// report are written and exit 1 (the listing under `check: error`); the
+	// toggles stay recorded.
+	return overrideExit(res, budget)
 }
 
-// resolveOverrideRegistry resolves the registry source for `podium sync
-// override` from the --registry flag, PODIUM_REGISTRY, or the merged
-// sync.yaml, returning "" when none is configured (materialization off).
-func resolveOverrideRegistry(flagVal string) string {
+// loadOverrideConfig loads the merged sync.yaml for `podium sync override` and
+// returns it with the workspace that relative registry paths resolve against.
+// A load error is ignored, so merged is nil and the override takes its
+// registry and harness from the flags, the environment, or the lock, and the
+// §7.5.8 listing defaults (§7.5.2).
+func loadOverrideConfig() (*sync.MergedConfig, string) {
 	ws, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
 	merged, workspace, _ := sync.LoadMergedConfig(ws, home)
 	if workspace == "" {
 		workspace = ws
 	}
+	return merged, workspace
+}
+
+// resolveOverrideRegistry resolves the registry source for `podium sync
+// override` from the --registry flag, PODIUM_REGISTRY, or the merged
+// sync.yaml, returning "" when none is configured (materialization off).
+func resolveOverrideRegistry(merged *sync.MergedConfig, workspace, flagVal string) string {
 	reg := flagVal
 	if reg == "" {
 		reg = os.Getenv("PODIUM_REGISTRY")
@@ -902,7 +986,7 @@ func resolveOverrideRegistry(flagVal string) string {
 // per §7.5.2 precedence: the --harness flag, then PODIUM_HARNESS, then the
 // harness recorded in the target's lock (the adapter the last sync used), then
 // the merged sync.yaml default, then the built-in "none" adapter.
-func resolveOverrideHarness(flagVal, target string) string {
+func resolveOverrideHarness(merged *sync.MergedConfig, flagVal, target string) string {
 	if flagVal != "" {
 		return flagVal
 	}
@@ -912,9 +996,7 @@ func resolveOverrideHarness(flagVal, target string) string {
 	if lock, _ := sync.ReadLock(target); lock != nil && lock.Harness != "" {
 		return lock.Harness
 	}
-	ws, _ := os.Getwd()
-	home, _ := os.UserHomeDir()
-	if merged, _, _ := sync.LoadMergedConfig(ws, home); merged != nil && merged.Defaults.Harness != "" {
+	if merged != nil && merged.Defaults.Harness != "" {
 		return merged.Defaults.Harness
 	}
 	return "none"
@@ -1065,6 +1147,8 @@ func lintCmd(args []string) int {
 	// by default; --offline (or PODIUM_INGEST_OFFLINE=true) skips the
 	// network probe and validates only bundled-file references.
 	offline := fs.Bool("offline", false, "skip the §4.4 URL HEAD check (validate bundled files only)")
+	asJSON := fs.Bool("json", false, "write one JSON object with the diagnostics, the refused artifacts, and the counts")
+	failOnFlag := fs.String("fail-on", string(lint.SeverityError), "lowest severity that fails the run: error or warning")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -1073,17 +1157,35 @@ func lintCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
+	// Spec: §7.3.1 — a --fail-on value other than error or warning is a
+	// usage error, reported before the registry is opened.
+	failOn := lint.Severity(*failOnFlag)
+	if failOn != lint.SeverityError && failOn != lint.SeverityWarning {
+		fmt.Fprintln(os.Stderr, "error: --fail-on must be error or warning")
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	offlineMode := *offline || os.Getenv("PODIUM_INGEST_OFFLINE") == "true"
+	return runLint(ctx, os.Stdout, os.Stderr, *registry, offlineMode, *asJSON, failOn)
+}
 
-	reg, err := filesystem.Open(*registry)
+// runLint walks the filesystem registry at registry, lints every walked
+// artifact with the ingest rules and the §7.3.1 catalog advisories, and
+// writes the result to stdout and stderr. It returns the exit status.
+//
+// Spec: §7.3.1, §4.6
+func runLint(ctx context.Context, stdout, stderr io.Writer, registry string, offline, asJSON bool, failOn lint.Severity) int {
+	reg, err := filesystem.Open(registry)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 	// spec: §4.6 — lint validates the registry, so it fails on a
 	// same-canonical-ID cross-layer collision ("silent shadowing is never
 	// permitted"): the default policy fails the walk on one. OnDrop collects
 	// every ARTIFACT.md that declares extends:, each is reported as a
-	// rejected: error line, and the remaining artifacts are linted, as ingest
+	// refused artifact, and the remaining artifacts are linted, as ingest
 	// does (§4.6, §7.3.1), so lint names every refused artifact and every
 	// diagnostic of the rest. sync uses CollisionPolicyDrop, which drops and
 	// reports both (§13.11.3). The walk calls OnDrop synchronously, so drops
@@ -1094,25 +1196,35 @@ func lintCmd(args []string) int {
 		OnDrop:          func(d layer.Drop) { drops = append(drops, d) },
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	exit := 0
-	if reportDropped(os.Stderr, drops) {
-		exit = 1
-	}
 
-	linter := lint.NewIngestLinter(*offline || os.Getenv("PODIUM_INGEST_OFFLINE") == "true")
-	diags := linter.Lint(context.Background(), reg, records)
-	if len(diags) == 0 && exit == 0 {
-		fmt.Println("lint: no issues.")
-		return 0
+	linter := lint.NewIngestLinter(offline)
+	linter.IncludeAdvisories = true
+	diags := linter.Lint(ctx, reg, records)
+	// A rule returns no error, so a cancelled near-duplicate pass returns
+	// fewer diagnostics rather than failing. Reporting them would present an
+	// interrupted run as a clean catalog, so the interrupt is checked here.
+	if ctx.Err() != nil {
+		_, _ = fmt.Fprintln(stderr, "error: lint interrupted")
+		return 1
+	}
+	exit := lintExitCode(diags, len(drops) > 0, failOn)
+	if asJSON {
+		if err := writeLintEnvelope(stdout, registry, diags, drops); err != nil {
+			_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+		return exit
+	}
+	reportDropped(stderr, drops)
+	if len(diags) == 0 && len(drops) == 0 {
+		_, _ = fmt.Fprintln(stdout, "lint: no issues.")
+		return exit
 	}
 	for _, d := range diags {
-		_, _ = fmt.Fprintln(os.Stdout, d.String())
-		if d.Severity == lint.SeverityError {
-			exit = 1
-		}
+		_, _ = fmt.Fprintln(stdout, d.String())
 	}
 	return exit
 }
@@ -1827,8 +1939,9 @@ func printDomainSearchHuman(body []byte) {
 // type, layer}]}. A jq consumer reads .harness, .scope.include, or
 // .artifacts[].version directly. The per-artifact content_hash lets a pre-flight
 // check verify the full §14.11 (artifact_id, version, content_hash) triple
-// before the lock file is committed (spec: §7.5, §14.11).
-func printJSON(res *sync.Result) {
+// before the lock file is committed (spec: §7.5, §14.11). The envelope also
+// carries `listing`, the §7.5.8 listing report, which is null when rep is nil.
+func printJSON(res *sync.Result, rep *sync.ListingReport) {
 	type artOut struct {
 		ID          string `json:"id"`
 		Version     string `json:"version"`
@@ -1842,11 +1955,12 @@ func printJSON(res *sync.Result) {
 		Type    []string `json:"type"`
 	}
 	env := struct {
-		Profile   string   `json:"profile"`
-		Target    string   `json:"target"`
-		Harness   string   `json:"harness"`
-		Scope     scopeOut `json:"scope"`
-		Artifacts []artOut `json:"artifacts"`
+		Profile   string       `json:"profile"`
+		Target    string       `json:"target"`
+		Harness   string       `json:"harness"`
+		Scope     scopeOut     `json:"scope"`
+		Artifacts []artOut     `json:"artifacts"`
+		Listing   *listingJSON `json:"listing"`
 	}{
 		Profile: res.Profile,
 		Target:  res.Target,
@@ -1857,6 +1971,7 @@ func printJSON(res *sync.Result) {
 			Type:    emptyIfNil(res.Scope.Types),
 		},
 		Artifacts: []artOut{},
+		Listing:   listingOut(rep),
 	}
 	for _, a := range res.Artifacts {
 		env.Artifacts = append(env.Artifacts, artOut{ID: a.ID, Version: a.Version, ContentHash: a.ContentHash, Type: a.Type, Layer: a.Layer})

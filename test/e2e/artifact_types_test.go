@@ -693,7 +693,7 @@ func TestArtifactTypes_DelegatesToTypeNotEnforcedAtLint(t *testing.T) {
 func TestArtifactTypes_RuleAutoLints(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"policies/payment-style/ARTIFACT.md": "---\ntype: rule\nname: payment-style\nversion: 1.0.0\ndescription: Style checks.\nrule_mode: auto\nrule_description: \"Apply when reviewing payment-handling code\"\n---\n\nrules\n",
+		"policies/payment-style/ARTIFACT.md": "---\ntype: rule\nname: payment-style\nversion: 1.0.0\ndescription: Style checks for payment-handling code.\nrule_mode: auto\nrule_description: \"Apply when reviewing payment-handling code\"\n---\n\nrules\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 || !strings.Contains(res.Stdout, "lint: no issues.") {

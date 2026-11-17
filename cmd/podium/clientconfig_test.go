@@ -33,6 +33,40 @@ func TestConfigClientShow_Provenance(t *testing.T) {
 	}
 }
 
+// Spec: §7.7, §7.5.2 — `podium config show` reads the scopes without decoding
+// listing_budgets, so a project-local block of the wrong YAML type leaves the
+// other keys displayed with their provenance and the command exits 0. A config
+// show that merged the scopes through sync.LoadMergedConfig would fail on the
+// mistyped max_chars and print no registry.
+func TestConfigClientShow_MistypedListingBudgets(t *testing.T) {
+	home := t.TempDir()
+	ws := t.TempDir()
+	mustWrite(t, filepath.Join(ws, ".podium", "sync.yaml"), "defaults:\n  registry: https://podium.acme.com\n")
+	mustWrite(t, filepath.Join(ws, ".podium", "sync.local.yaml"),
+		"listing_budgets:\n  claude-code:\n    max_chars: abc\n")
+
+	out := captureStdout(t, func() {
+		if rc := configClientShowAt(ws, home, false, ""); rc != 0 {
+			t.Errorf("rc = %d, want 0", rc)
+		}
+	})
+	var registryLine string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "https://podium.acme.com") {
+			registryLine = l
+		}
+	}
+	if registryLine == "" {
+		t.Fatalf("missing registry value:\n%s", out)
+	}
+	if !strings.Contains(registryLine, "<ws>/.podium/sync.yaml") {
+		t.Errorf("registry line omits its provenance: %q", registryLine)
+	}
+	if strings.Contains(out, "listing_budgets") {
+		t.Errorf("config show printed a listing_budgets line:\n%s", out)
+	}
+}
+
 // spec: §7.7 — each rendered profile field carries the scope it resolved
 // from. The §7.7 example annotates `include`/`exclude` with `(from <scope>)`
 // per field; whole-profile overwrite (§7.5.2) makes every field share the
