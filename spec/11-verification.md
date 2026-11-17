@@ -70,7 +70,7 @@
 
 - **Chaos tests**: Postgres failover during load, object-storage stalls, network partitions between MCP server and registry, IdP outage during refresh, full-disk on registry node.
 
-- **Example artifact registry**: multi-domain demo with diverse types (skill, agent, context, command, rule, hook, mcp-server), diverse bundled file types, multiple layers exercising every visibility mode (`public`, `organization`, `groups`, `users`), at least one user-defined layer, signed artifacts at multiple sensitivities.
+- **Example artifact registry**: multi-domain demo with diverse types (skill, agent, rule, hook, and mcp-server), including a skill whose `invocation` is `user` (§4.3.4) and a skill that carries reference material, diverse bundled file types, multiple layers exercising every visibility mode (`public`, `organization`, `groups`, `users`), at least one user-defined layer, signed artifacts at multiple sensitivities.
 
 - **Rule mode adapter conformance**: each first-class harness adapter materializes a `type: rule` fixture across all four `rule_mode` values; supported modes (✓ in §6.7.1) produce the expected harness-native output; fallback modes (⚠) produce the documented degraded output and emit a lint warning when the fixture declares `target_harnesses:` naming the harness; unsupported modes (✗) cause lint to reject ingest when `target_harnesses:` names the unsupported harness, and otherwise fail at materialization (§6.9) when the rule loads onto that harness.
 
