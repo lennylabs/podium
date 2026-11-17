@@ -1,9 +1,6 @@
 package lint
 
-import (
-	"strconv"
-	"strings"
-)
+import "strconv"
 
 // Default similarity thresholds for the §7.3.1 catalog advisories.
 const (
@@ -145,9 +142,12 @@ type thresholdEnv struct {
 	logf   func(format string, args ...any)
 }
 
-// lookup returns the trimmed value of name; an empty result means unset.
+// lookup returns the value of name exactly as set. Only the empty string
+// means unset: a white-space-only or padded value is set, fails to parse,
+// and draws the warning, so a value mangled by quoting is not ignored
+// silently.
 func (e thresholdEnv) lookup(name string) string {
-	return strings.TrimSpace(e.getenv(name))
+	return e.getenv(name)
 }
 
 func (e thresholdEnv) invalid(name, value, want string, def any) {

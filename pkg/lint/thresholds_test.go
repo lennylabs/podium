@@ -86,7 +86,8 @@ var thresholdVars = []thresholdVar{
 // Spec: §13.12 — each variable applies a valid value. Unset and empty
 // keep the default without a log line. A value that does not parse or
 // falls outside its range keeps the default and logs one line naming the
-// variable and no other variable's value.
+// variable and no other variable's value. A white-space-only or padded
+// value is set and does not parse, so it logs as invalid.
 func TestThresholdsFromEnv(t *testing.T) {
 	t.Parallel()
 	def := DefaultThresholds()
@@ -100,9 +101,8 @@ func TestThresholdsFromEnv(t *testing.T) {
 			{value: v.valid, set: true, want: v.want},
 			{set: false, want: v.field(def)},
 			{value: "", set: true, want: v.field(def)},
-			{value: "  ", set: true, want: v.field(def)},
 		}
-		for _, bad := range []string{"abc", "0", "-5", "0.3", "1.5"} {
+		for _, bad := range []string{"abc", "0", "-5", "0.3", "1.5", "  ", "\t", " " + v.valid + " "} {
 			cases = append(cases, struct {
 				value   string
 				set     bool
