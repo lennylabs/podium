@@ -337,7 +337,7 @@ registry:
 
 Discovery skips every directory below the layer root whose name begins with a dot. A repository whose skills sit under `.claude/skills/` or `.agents/skills/` names the dot directory in `root`. With `root: .claude/skills` the canonical IDs are `<name>`, and with `root: .claude` they are `skills/<name>`.
 
-A `SKILL.md` without frontmatter in a directory outside any package fails discovery for the whole layer. Rename the file or add the Agent Skills frontmatter.
+A `SKILL.md` without frontmatter in a directory outside any package starts a skill artifact whose manifest does not parse. Ingest refuses that artifact with `ingest.invalid_artifact` and `details.constraint: "manifest_unparseable"` and ingests the other artifacts of the layer. Rename the file or add the Agent Skills frontmatter.
 
 ### A repository that is a single skill
 

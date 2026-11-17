@@ -92,6 +92,22 @@ Release 0.7.0 removed both types. A store that an earlier release wrote can stil
 
 ---
 
+## Unparseable manifests
+
+Ingest refuses an artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter does not parse. Frontmatter does not parse when the file has none, when it is not valid YAML, when its root is not a mapping, or when a field holds a value of a kind its definition does not allow, such as a `SKILL.md` `metadata` value that is a sequence or a mapping.
+
+- The refusal is `ingest.invalid_artifact` with `details.constraint: "manifest_unparseable"`. Its reason names the file and the parse error.
+- The refusal runs before every other per-artifact rule, including the no-inheritance and removed-type checks, because neither can be evaluated without the parsed frontmatter.
+- The refusal covers that artifact alone. Ingest stores the other artifacts of the layer, `podium lint` lints them, and a filesystem-source `podium sync` writes them.
+- A filesystem-source `podium sync` drops such an artifact before the collision rule, names it on standard error, and exits 1. `podium lint` lists it among its refused artifacts and exits 1.
+- A row already stored is not parsed again under this rule.
+
+A refused artifact is not stored, with the same consequences as an artifact the no-inheritance rule refuses.
+
+A directory that cannot hold an artifact at all still fails the whole layer. A manifest at the layer root has no canonical ID, so a layer whose root directory holds an `ARTIFACT.md` or a `SKILL.md` fails to ingest, and `podium lint` and `podium sync` fail on it.
+
+---
+
 ## Composing from a directory
 
 On the Local deployment mode, each subdirectory of the registry path is a `local`-source layer, and the layer ID defaults to the subdirectory name. `.registry-config` states the order:
@@ -152,7 +168,7 @@ On a server-backed deployment, `podium admin show-effective [--group <g>]... <us
 
 - **Overlay artifact with `extends`.** An overlay `ARTIFACT.md` that carries an `extends` key is served as authored, and the key has no effect.
 - **Overlay artifact of a removed type.** An overlay `ARTIFACT.md` whose `type` is `command` or `context` is served as authored. The `none` adapter writes the canonical layout, the `claude-code` adapter writes it and its bundled resources under `.claude/podium/<artifact-id>/`, and every other adapter writes nothing for it.
-- **Lint and the overlay.** `podium lint` reports an `ARTIFACT.md` that the no-inheritance rule or the removed-type rule refuses. `podium lint` contacts no registry, so it does not report a collision with an artifact that only a registry holds.
+- **Lint and the overlay.** `podium lint` reports an artifact that the unparseable-manifest rule, the no-inheritance rule, or the removed-type rule refuses. `podium lint` contacts no registry, so it does not report a collision with an artifact that only a registry holds.
 - **Reorder by a caller whose credential fails verification.** Such a caller is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime` before either authorization arm is evaluated. On this operation, `auth.forbidden` therefore names a caller the registry verified and did not authorize. The other layer write operations answer such a caller `auth.forbidden`.
 
 ---

@@ -230,11 +230,12 @@ The code applies when `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above 0 and the 
 | Cause | `details.constraint` |
 |:--|:--|
 | The manifest could not be decoded into an artifact record. | none |
-| An `ARTIFACT.md` declares the removed `extends` key. The registry refuses it before lint. | `"extends_removed"` |
+| The artifact's `ARTIFACT.md` or `SKILL.md` frontmatter does not parse: the file has no frontmatter, the frontmatter is not valid YAML, its root is not a mapping, or a field holds a value of a kind its definition does not allow, such as a `SKILL.md` `metadata` value that is a sequence or a mapping. The registry refuses it before every other per-artifact rule, including the `extends` and removed-type checks, and the reason names the file and the parse error. The other artifacts of the layer are ingested. | `"manifest_unparseable"` |
+| An `ARTIFACT.md` declares the removed `extends` key. The registry refuses it before lint and after the frontmatter parse. | `"extends_removed"` |
 | An `ARTIFACT.md` declares the removed type `command` or `context`. The registry refuses it before lint and after the `extends` check, so an `ARTIFACT.md` that declares both reports `extends_removed`. | `"type_removed"` |
 | A skill with no declared version has content that a stored or soft-deleted row of the artifact already holds under another version. Set `metadata.version` in `SKILL.md`, or change the content, to publish such a skill. | `"auto_version_duplicate_content"` |
 
-A filesystem-source `podium sync` reports the same code for an `ARTIFACT.md` that declares `extends:` or a removed type. It drops that artifact before the collision rule, materializes the rest, and exits 1.
+A filesystem-source `podium sync` reports the same code for an artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter does not parse and for an `ARTIFACT.md` that declares `extends:` or a removed type. It drops that artifact before the collision rule, materializes the rest, and exits 1. `podium lint` lists such an artifact in `rejected`, lints the other artifacts, and exits 1.
 
 ### materialize.*
 

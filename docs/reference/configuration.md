@@ -254,7 +254,7 @@ An unset or empty variable keeps the default. A value that does not parse, or th
 | `PODIUM_LINT_MIN_DESCRIPTION_CHARS` | integer | `15` | `lint.thin_description` flags a description with fewer code points. |
 | `PODIUM_LINT_MIN_DESCRIPTION_WORDS` | integer | `3` | `lint.thin_description` flags a description with fewer words. |
 | `PODIUM_LINT_DESCRIPTION_SIMILARITY` | number | `0.7` | `lint.colliding_descriptions` reports two descriptions whose word sets have at least this similarity. |
-| `PODIUM_LINT_CONTENT_SIMILARITY` | number | `0.8` | `lint.near_duplicate_content` reports two units of different artifacts whose five-word shingle sets have at least this similarity. |
+| `PODIUM_LINT_CONTENT_SIMILARITY` | number | `0.8` | `lint.near_duplicate_content` reports two units of different artifacts whose five-word shingle sets have at least this similarity. A unit is a prose body or a prose resource, which is a bundled `.md`, `.markdown`, `.txt`, or `.rst` file other than a license file. [Near-duplicate content](../authoring/bundled-resources#near-duplicate-content) describes the units. |
 
 [Skill lint checks](../authoring/frontmatter-reference#skill-lint-checks) describes the catalog advisories.
 

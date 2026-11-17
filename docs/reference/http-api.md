@@ -1008,7 +1008,7 @@ POST /v1/layers/reingest?id={id}
 | `conflicts` | Same-version content conflicts. |
 | `lint_failures` | The count of lint failures. Lint failures are reported only as this count. |
 
-An `ARTIFACT.md` that declares `extends:` is rejected with `details: {"constraint": "extends_removed"}`. An `ARTIFACT.md` that declares the removed type `command` or `context` is rejected with `details: {"constraint": "type_removed"}`. The no-inheritance refusal runs first, so an `ARTIFACT.md` that declares both reports `extends_removed`. Both refusals run before lint, so such an artifact appears in `rejected` and is never counted in `lint_failures`, whatever lint rule it also fails.
+An artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter does not parse is rejected with `details: {"constraint": "manifest_unparseable"}`, and its `reason` names the file and the parse error. An `ARTIFACT.md` that declares `extends:` is rejected with `details: {"constraint": "extends_removed"}`. An `ARTIFACT.md` that declares the removed type `command` or `context` is rejected with `details: {"constraint": "type_removed"}`. The refusals run in that order, so an unparseable manifest reports `manifest_unparseable`, and an `ARTIFACT.md` that declares both `extends:` and a removed type reports `extends_removed`. All three refusals run before lint, so such an artifact appears in `rejected` and is never counted in `lint_failures`, whatever lint rule it also fails. The other artifacts of the layer are ingested.
 
 **Errors.**
 

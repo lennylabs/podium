@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -145,13 +145,36 @@ The rolling upgrade from 0.6.0 and the rollback to 0.6.0 follow [Rollback floor 
 
 - `podium lint` now reports the catalog advisories `lint.thin_description`, `lint.colliding_descriptions`, and `lint.near_duplicate_content`, which registry ingest also runs over the layer it ingests. Each is a warning, so a catalog that linted clean can print new warnings and still exits 0 under the default `--fail-on error`.
 - `lint.colliding_descriptions` now reports two descriptions whose normalized word sets have a similarity of 0.7 or higher, so descriptions that follow one template draw it.
-- `lint.near_duplicate_content` warns in every artifact that bundles a shared text file of 50 words or more, such as a `LICENSE` file.
+- `lint.near_duplicate_content` compares prose bodies and prose resources, which are bundled `.md`, `.markdown`, `.txt`, and `.rst` files. It does not compare license files, scripts, or data files. A prose resource of 50 words or more that several artifacts bundle, such as a shared reference document, draws the warning in every artifact that bundles it.
 - A CI pipeline that must stay green does not pass `--fail-on warning` until the catalog is clean. Clear the warnings by rewriting the descriptions, by raising a threshold through the `PODIUM_LINT_*` variables, or through `lint_suppress`, as [Skill lint checks](../../authoring/frontmatter-reference#skill-lint-checks) describes.
 
 #### `podium sync`
 
-- `podium sync` estimates the skill listing of each `kind: workspace` target and, by default, writes a warning on standard error when the estimate exceeds 8,000 characters for an adapter that writes skills. The warning leaves the exit status unchanged. Set `check: off` for the adapter under `listing_budgets` in `sync.yaml` to turn the check off, or raise `max_chars`, as [Listing budget](../../consuming/configure-your-harness#listing-budget) describes.
+- `podium sync` estimates the skill listing of each `kind: workspace` target and, by default, writes a warning on standard error when the estimate exceeds 8,000 characters for an adapter that writes skills. The warning leaves the exit status unchanged. Set `check: off` for the adapter under `listing_budgets` in `sync.yaml` to turn the check off, or raise `max_chars`, as [Listing budget](../../consuming/configure-your-harness#listing-budget) describes. A workspace whose Claude Code model has a 1,000,000-token context window sets `max_chars: 40000` for `claude-code`.
+- For `claude-code`, `max_entry_chars` defaults to 1536, the length at which Claude Code shortens a skill's listing text, so the check also reports each skill whose description is longer than 1536 code points. Under `check: error`, such a description fails the sync. Shorten the description, or set `max_entry_chars` higher for `claude-code`.
 - `listing_budgets` is a new top-level `sync.yaml` key. A 0.6.0 `podium sync` ignores it, and a 0.6.0 `podium sync save-as` drops it from the `sync.yaml` it rewrites.
+
+### Per-artifact manifest refusal and skill lint severities
+
+0.7.0 refuses an artifact whose manifest does not parse without stopping the rest of its layer, and it lowers the severity of several skill lint checks. A layer or a skill that 0.6.0 refused as a whole can ingest after the upgrade.
+
+#### Unparseable manifests
+
+In 0.6.0, one artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter did not parse stopped its whole layer. Ingest stored no row from the cycle and answered `422 ingest.lint_failed`, `podium lint` reported the parse error without linting the other artifacts, and `podium sync` wrote nothing.
+
+- Ingest refuses that artifact alone with `ingest.invalid_artifact` and `details.constraint: "manifest_unparseable"`, and it stores the other artifacts of the layer. The `POST /v1/layers/reingest` response lists the artifact in `rejected`, and `podium layer reingest` names it on standard error and exits non-zero. A script that watched for `422 ingest.lint_failed` on such a layer reads `rejected` instead.
+- `podium lint` lists the artifact in `rejected`, lints the other artifacts, and exits 1.
+- A filesystem-source `podium sync` drops the artifact, names it on standard error, writes the other artifacts and the lock file, and exits 1.
+- A manifest at a layer root has no canonical ID and still fails the whole layer.
+
+[Unparseable manifests](../content/layers#unparseable-manifests) describes the rule.
+
+#### Skill lint severities
+
+- A top-level `version` in `SKILL.md` is a warning, where 0.6.0 reported the `lint.skill_podium_only_field` error. Podium ignores the value and takes the version from `metadata.version` or `ARTIFACT.md`. Every other top-level Podium-only field stays an error.
+- `lint.skill_version_assigned` is an info diagnostic, where 0.6.0 reported a warning. It fails `podium lint` under neither `--fail-on` value.
+- A relative prose link that leaves the package, such as `../other-skill/SKILL.md`, is a warning, where 0.6.0 reported an error. The diagnostic recommends naming the other artifact by its canonical ID. A link to a bundled file the package does not contain stays an error.
+- Lint no longer checks link syntax inside code, and it resolves a link with a fragment, such as `references/api.md#errors`, to the bundled file.
 
 ### `command` and `context` removal
 

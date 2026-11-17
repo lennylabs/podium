@@ -49,13 +49,16 @@ Run `scripts/variance.py` against the closed period. Format the
 output using [the report template](assets/variance-report.md.j2).
 ```
 
-The ingest-time linter resolves every markdown link (`[text](path)`) in the prose body:
+The ingest-time linter resolves every markdown link (`[text](path)`) in the prose body outside inline code spans and fenced code blocks:
 
 - A relative link must name a bundled file, one of the artifact's own manifest files, or the canonical ID of another artifact in the catalog.
 - An `http` or `https` link is validated with an HTTP HEAD request that must return 200 or a 3xx redirect. `podium lint --offline` skips this probe.
-- A link that resolves to none of these is an ingest error.
+- A link that resolves to none of these is an ingest error. A link to a bundled file the package does not contain is such an error.
+- A relative link that leaves the package, such as `../other-skill/SKILL.md`, is a warning. It names no bundled file, and it resolves only while the artifacts sit side by side in one source tree, which a consumer that installs one of them does not reproduce. The diagnostic recommends naming the other artifact by its canonical ID.
 
-A path written as inline code rather than as a markdown link is not checked.
+Before the lookup, the linter removes the link's fragment (from `#`) and query (from `?`) and decodes its percent-encoding, so `references/api.md#errors` resolves to the bundled file `references/api.md`. A link that is only a fragment, such as `#usage`, refers to the same document and is not checked.
+
+A path written as inline code rather than as a markdown link is not checked. Link syntax inside an inline code span or a fenced code block is example text and is not checked either.
 
 ---
 
@@ -169,9 +172,15 @@ When an artifact hits a threshold, decide whether the prose is manifest-level ma
 
 ## Near-duplicate content
 
-`lint.near_duplicate_content` warns when two artifacts carry near-identical text. It compares units: an artifact's prose body, which is the `SKILL.md` body for a skill and the `ARTIFACT.md` body for any other type, and each bundled resource that is valid UTF-8 and contains no NUL byte. A binary resource is not a unit. A unit's shingles are the sequences of five consecutive words of its normalized text, and two units of different artifacts whose shingle sets have a similarity of 0.8 or higher draw the warning. `PODIUM_LINT_CONTENT_SIMILARITY` changes the threshold. A unit of fewer than 50 words is not compared, and two units of one artifact are not compared.
+`lint.near_duplicate_content` warns when two artifacts carry near-identical prose. It compares units: an artifact's prose body, which is the `SKILL.md` body for a skill and the `ARTIFACT.md` body for any other type, and each of its prose resources. A prose resource is a bundled resource that meets all of these conditions:
 
-A shared file bundled in several artifacts, such as a `LICENSE` file or a helper script of 50 words or more, draws the warning in every artifact that bundles it. The diagnostic names the units and the other artifacts, and abbreviates a list of more than 10 artifacts to the first 10 and a count of the rest. The warning neither blocks ingest nor changes the `podium lint` exit status under the default `--fail-on error`. To clear it, factor the shared content into its own artifact, or list `lint.near_duplicate_content` under `lint_suppress` in the `ARTIFACT.md` of each artifact that keeps a copy.
+- Its file name ends in `.md`, `.markdown`, `.txt`, or `.rst`, compared without regard to case.
+- It is valid UTF-8 and contains no NUL byte.
+- It is not a license file. The linter lowercases the file name, removes its final extension, and splits the rest on `-`, `_`, and `.`. A name with `license`, `licence`, `copying`, `notice`, or `ofl` among those parts is a license file, so `LICENSE.txt`, `LICENSE-MIT`, and `ArsenalSC-OFL.txt` are not compared.
+
+Scripts, data files, and binary resources are not units. A skill carries its own copy of every file it runs, and every package carries its own license file, so neither is reported. A unit's shingles are the sequences of five consecutive words of its normalized text, and two units of different artifacts whose shingle sets have a similarity of 0.8 or higher draw the warning. `PODIUM_LINT_CONTENT_SIMILARITY` changes the threshold. A unit of fewer than 50 words is not compared, and two units of one artifact are not compared.
+
+A shared prose resource bundled in several artifacts, such as a `references/style-guide.md` of 50 words or more, draws the warning in every artifact that bundles it. The copies can drift apart as each artifact is edited. The diagnostic names the units and the other artifacts, and abbreviates a list of more than 10 artifacts to the first 10 and a count of the rest. The warning neither blocks ingest nor changes the `podium lint` exit status under the default `--fail-on error`. To clear it, keep the copies in step and list `lint.near_duplicate_content` under `lint_suppress` in the `ARTIFACT.md` of each artifact that keeps a copy, or move the shared text into one artifact and reference that artifact by its canonical ID.
 
 ---
 

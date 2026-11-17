@@ -235,7 +235,7 @@ The command walks every artifact of every layer under the root. To lint a single
 - The `DOMAIN.md` body-size warning, which registry ingest does not apply. The command does not run the warning on a `DOMAIN.md` `discovery:` block, which applies when the registry's `discovery.allow_per_domain_overrides` setting is false, because the command does not read that setting.
 - The catalog advisories: `lint.thin_description`, `lint.colliding_descriptions`, and `lint.near_duplicate_content`. Each is a warning. Registry ingest runs them over the layer it ingests and reports them without blocking the ingest, and the command runs them over every artifact it walks. [Skill lint checks](../authoring/frontmatter-reference#skill-lint-checks) describes each one and the `lint_suppress` field that silences it.
 
-The command refuses each artifact whose `ARTIFACT.md` declares `extends:` or a removed type (`command` or `context`). Without `--json`, it prints a `rejected: <id> (ingest.invalid_artifact): <reason>` line on standard error for each one. With `--json`, the artifact appears in `rejected` with `details.constraint: "extends_removed"` for an `extends:` refusal and `details.constraint: "type_removed"` for a removed type. An `ARTIFACT.md` that declares both reports `extends_removed`. In both cases the command lints the remaining artifacts and exits 1. `PODIUM_LINT_*` environment variables set the size and similarity thresholds, as [Lint](configuration#lint) in the configuration reference lists.
+The command refuses each artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter does not parse, and each artifact whose `ARTIFACT.md` declares `extends:` or a removed type (`command` or `context`), before it runs any lint rule. Without `--json`, the command prints a `rejected: <id> (ingest.invalid_artifact): <reason>` line on standard error for each refused artifact. With `--json`, the artifact appears in `rejected` with `details.constraint: "manifest_unparseable"` for frontmatter that does not parse, `details.constraint: "extends_removed"` for an `extends:` refusal, and `details.constraint: "type_removed"` for a removed type. The checks run in that order, so an `ARTIFACT.md` that declares both `extends:` and a removed type reports `extends_removed`. In every case the command lints the remaining artifacts and exits 1. `PODIUM_LINT_*` environment variables set the size and similarity thresholds, as [Lint](configuration#lint) in the configuration reference lists.
 
 Without `--json`, each diagnostic prints on standard output as `[<severity>] <artifact-id>: <message> (<rule-code>)`, and each refused artifact prints on standard error as `rejected: <id> (<code>): <reason>`. A run with no diagnostic and no refused artifact prints `lint: no issues.`.
 
@@ -262,10 +262,10 @@ With `--json`, standard output carries one JSON object and nothing else, and a r
 | Exit code | Meaning |
 |:--|:--|
 | `0` | No diagnostic reaches the `--fail-on` severity, and no artifact was refused. Warnings alone exit 0 under the default `--fail-on error`. |
-| `1` | A diagnostic reaches the `--fail-on` severity, an artifact was refused because its `ARTIFACT.md` declares `extends:` or a removed type, the registry could not be opened or walked, or the run was interrupted. |
+| `1` | A diagnostic reaches the `--fail-on` severity, an artifact was refused because its frontmatter does not parse or its `ARTIFACT.md` declares `extends:` or a removed type, the registry could not be opened or walked, or the run was interrupted. |
 | `2` | A usage error: `--registry` is absent, or `--fail-on` is neither `error` nor `warning`. |
 
-An `info` diagnostic never fails the run. When the registry cannot be opened or walked, including on a collision between two layers, the command writes the error on standard error, writes no JSON object, and exits 1. An interrupted run writes no JSON object and exits 1, so an interrupted run never reports a clean catalog.
+An `info` diagnostic, such as `lint.skill_version_assigned`, never fails the run under either `--fail-on` value. When the registry cannot be opened or walked, including on a collision between two layers and on a manifest at a layer root, which has no canonical ID, the command writes the error on standard error, writes no JSON object, and exits 1. An interrupted run writes no JSON object and exits 1, so an interrupted run never reports a clean catalog.
 
 ### `podium import`
 
@@ -360,6 +360,7 @@ Against a local catalog, `podium sync` drops the artifacts the table below lists
 
 | Cause | Artifact dropped | Report line |
 |:--|:--|:--|
+| An `ARTIFACT.md` or `SKILL.md` frontmatter does not parse | The artifact that holds the file. | `rejected: <id> (ingest.invalid_artifact): <reason>` |
 | An `ARTIFACT.md` declares `extends:` | The declaring artifact. | `rejected: <id> (ingest.invalid_artifact): <reason>` |
 | An `ARTIFACT.md` declares a removed type (`command` or `context`) | The declaring artifact. | `rejected: <id> (ingest.invalid_artifact): <reason>` |
 | Two registry layers contribute the same ID (a collision) | The higher-precedence copy. | `rejected: <id> (ingest.collision): <reason>` |
@@ -368,7 +369,7 @@ The rules below apply to every drop in the table:
 
 - The command materializes every other artifact, writes the lock file without the dropped artifact, and exits 1.
 - `--dry-run` reports the drop and exits 1 without writing.
-- An `extends:` drop and a removed-type drop happen before the collision rule, in that order, so an `ARTIFACT.md` that declares both reports the `extends:` reason. A dropped artifact collides with no other artifact, so the other copy of its ID is materialized and no `ingest.collision` line is printed for it.
+- An unparseable-manifest drop, an `extends:` drop, and a removed-type drop happen before the collision rule, in that order, so an `ARTIFACT.md` that declares both `extends:` and a removed type reports the `extends:` reason. A dropped artifact collides with no other artifact, so the other copy of its ID is materialized and no `ingest.collision` line is printed for it.
 - Under `--config`, a target that dropped an artifact counts as a failed target, and the command exits 1. This includes a `kind: workspace` target under `--check`. A target's workflow still runs before the target is marked failed.
 - `--check` without `--config` validates `sync.yaml` only and reports no drop. A `kind: marketplace` target under `--check` renders nothing.
 - Under `--json`, the report stays on standard error.
@@ -384,7 +385,7 @@ The command writes each excess and each entry above `max_entry_chars` on standar
 
 ```
 warning: listing: claude-code listing estimate is 9120 characters against a configured budget of 8000 (64 entries)
-warning: listing: finance/close/reconcile description is 1210 characters, above max_entry_chars 1024
+warning: listing: finance/close/reconcile description is 1610 characters, above max_entry_chars 1536
 ```
 
 Under `--json`, the envelope carries a `listing` member:
@@ -397,11 +398,11 @@ Under `--json`, the envelope carries a `listing` member:
   "entries": 64,
   "over": true,
   "check": "warning",
-  "oversized": [{"id": "finance/close/reconcile", "chars": 1210}]
+  "oversized": [{"id": "finance/close/reconcile", "chars": 1610}]
 }
 ```
 
-`over` reports whether the cost exceeds `max_chars`. `oversized` lists the entries above `max_entry_chars` in ID order, as `{"id": ..., "chars": ...}`, and is empty when `max_entry_chars` is unset. The member is `null` when the run computes no listing: under `check: off`, for the `none` adapter, for an adapter for which no type in `types` counts, and for an offline-first run that leaves the existing output in place.
+`over` reports whether the cost exceeds `max_chars`. `oversized` lists the entries above `max_entry_chars` in ID order, as `{"id": ..., "chars": ...}`, and is empty when `max_entry_chars` is unset. `max_entry_chars` defaults to `1536` for `claude-code` and is unset by default for every other adapter. The member is `null` when the run computes no listing: under `check: off`, for the `none` adapter, for an adapter for which no type in `types` counts, and for an offline-first run that leaves the existing output in place.
 
 Under `check: warning`, a report leaves the exit status unchanged. Under `check: error`, a report fails the run as a drop does:
 

@@ -39,7 +39,7 @@ A skill's `SKILL.md` carries the agentskills.io fields. Its `metadata` map can a
 | `license` | Yes (SPDX) | Not used | Yes |
 | `compatibility` | Optional (≤ 500 chars; human-readable) | Not used | Not used |
 | `metadata` | Optional (string-to-string map). Podium reads `version` and the keys that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists | Not used | Not used |
-| `allowed-tools` | Optional (experimental) | Not used | Not used |
+| `allowed-tools` | Optional (experimental). A space-separated string, as the standard defines, or a YAML sequence of strings | Not used | Not used |
 | `type` | Not used | Yes (`type: skill`); implied when `ARTIFACT.md` is absent | Yes |
 | `version` | As `metadata.version` (string) | Optional; equal to `metadata.version` when that is a `major.minor.patch` value | Yes |
 | `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, `invocation` | Optional, as `metadata` values in the encodings of [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) | Optional; takes precedence over the `metadata` value when stated | Yes |
@@ -104,7 +104,7 @@ When `ARTIFACT.md` states a key and the `metadata` value for that key follows it
 ### Values Podium ignores or refuses
 
 - A `metadata` value that does not follow its encoding, such as `sensitivity: secret`, `deprecated: yes`, or `tags: "a,,b"`, is ignored, and the field takes no value from `metadata`. `podium lint` reports the `lint.skill_metadata_field_ignored` warning, which names the key, the value, and the encoding, and the warning alone leaves the exit code at 0. A `lint_suppress` entry does not silence it. Ingest accepts the skill and does not report the warning.
-- `metadata` values are strings, so a sequence or a mapping under `metadata`, such as `tags: [a, b]`, makes `SKILL.md` fail to parse. The error names the key, for example `metadata.tags is not a string`, and for `tags` it adds that the value is comma-separated. The layer ingest that reads such a skill fails as a whole and stores no row from that ingest, `POST /v1/layers/reingest` answers `422 ingest.lint_failed` with a message that names the key, and `podium lint` reports the parse error and exits 1.
+- `metadata` values are strings, so a sequence or a mapping under `metadata`, such as `tags: [a, b]`, makes `SKILL.md` fail to parse. The error names the key, for example `metadata.tags is not a string`, and for `tags` it adds that the value is comma-separated. Ingest refuses that skill with `ingest.invalid_artifact` and `details.constraint: "manifest_unparseable"`, with a reason that names the file and the parse error, and ingests the other artifacts of the layer. `POST /v1/layers/reingest` lists the skill in `rejected`. `podium lint` lists it in `rejected`, lints the other artifacts, and exits 1, and a filesystem-source `podium sync` drops it, names it on standard error, writes the other artifacts, and exits 1.
 - A `metadata` key that names one of these fields takes the Podium meaning, whichever tool wrote it. A value that another tool writes in a different encoding is read in the Podium encoding, so `tags: "a;b"` is the single tag `a;b`.
 - Apart from `version`, a `metadata` key that names any other Podium field, such as `sandbox_profile`, `effort_hint`, `model_class_hint`, `source`, or `runtime_requirements`, is a free-form value. Podium ignores it, and lint reports nothing. Set those fields in `ARTIFACT.md`.
 
@@ -189,7 +189,7 @@ A skill's version comes from the first of these that applies:
 
 When both files set a version and `metadata.version` is a `major.minor.patch` value, the two must be equal (`lint.skill_artifact_field_mismatch`).
 
-A registry-assigned version has the form `0.0.0-auto.<N>`, a semver prerelease of `0.0.0`. Lint reports the `lint.skill_version_assigned` warning for a skill that carries one, and the diagnostic names any ignored `metadata.version` value. Set `metadata.version` in `SKILL.md` to clear the warning. The form is reserved to the registry, so an authored version in that form fails lint with `lint.invalid_version`.
+A registry-assigned version has the form `0.0.0-auto.<N>`, a semver prerelease of `0.0.0`. Lint reports the `lint.skill_version_assigned` info diagnostic for a skill that carries one, and the diagnostic names any ignored `metadata.version` value. An info diagnostic never fails `podium lint`, including under `--fail-on warning`. Set `metadata.version` in `SKILL.md` to clear it. The form is reserved to the registry, so an authored version in that form fails lint with `lint.invalid_version`.
 
 `<id>@0.0.0-auto.<N>` pins an assigned version exactly. A range pin such as `<id>@1.x` never selects one. Assigned versions are candidates for `latest`. [Registry-assigned versions](#registry-assigned-versions) describes how the registry numbers them.
 
@@ -210,9 +210,7 @@ compatibility: Requires Python 3.10+ and pandas. Designed for Claude Code or sim
 metadata:
   author: example-org
   version: "1.2.0"
-allowed-tools:
-  - Bash(python:*)
-  - Read
+allowed-tools: Bash(python:*) Read
 ---
 ```
 
@@ -220,7 +218,7 @@ allowed-tools:
 |:--|:--|:--|
 | `compatibility` | string | Free-form environment notes, at most 500 characters. SKILL.md-aware tools read it to show preconditions to a reader. When it is omitted, every harness adapter that writes a skill's `SKILL.md` derives a compatibility string from `runtime_requirements` and `sandbox_profile` and adds it to the materialized `SKILL.md`. The `none` adapter copies `SKILL.md` unchanged and leaves the field absent. Published marketplace output carries the same line. |
 | `metadata` | map (string to string) | Open-ended map for client-specific properties that the agentskills.io specification does not define. Podium reads `version`, which carries the skill's version (see [Skill versions](#skill-versions)), and `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, and `invocation` (see [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata)). Podium ignores every other key. |
-| `allowed-tools` | list of strings | Experimental. Tools the skill is pre-approved to call. Podium's parser rejects a bare string, so write one list entry per tool. Adapter coverage varies by harness. |
+| `allowed-tools` | string or list of strings | Experimental. Tools the skill is pre-approved to call. The agentskills.io standard defines a space-separated string, such as `Bash(git:*) Bash(jq:*) Read`, and Podium also accepts a YAML sequence with one entry per tool. Podium stores the authored bytes and does not interpret the value. Adapter coverage varies by harness. |
 
 The body is the Markdown after the frontmatter. The agentskills.io specification recommends at most 5K tokens and 500 lines, with longer reference content factored into `references/`. [Manifest size lint](bundled-resources#manifest-size-lint) gives the thresholds lint enforces.
 
@@ -234,7 +232,8 @@ The body is the Markdown after the frontmatter. The agentskills.io specification
 | `SKILL.md` `name` matches the parent directory. | Error |
 | `SKILL.md` `name` syntax follows the agentskills.io constraints. | Error |
 | `SKILL.md` `description` is non-empty. The 1024-character cap is checked by the `skills-ref validate` check below and reported as a warning. | Error |
-| `SKILL.md` does not contain Podium-only fields (`type`, `version`, `when_to_use`, `tags`, etc.) at the top level. The diagnostic recommends `metadata.version` for a version, the `metadata` key of the same name for a field that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists, and the `ARTIFACT.md` overlay for every other field. | Error (`lint.skill_podium_only_field`) |
+| `SKILL.md` does not contain Podium-only fields (`type`, `when_to_use`, `tags`, etc.) at the top level. The diagnostic recommends the `metadata` key of the same name for a field that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists, and the `ARTIFACT.md` overlay for every other field. | Error (`lint.skill_podium_only_field`) |
+| `SKILL.md` does not contain a top-level `version`. Many published skills carry one, so the check is a warning. Podium ignores the value and takes the version from `metadata.version` or `ARTIFACT.md`, and the diagnostic recommends `metadata.version`. | Warning |
 | `ARTIFACT.md` does not contain `name`, `description`, or `license`. | Warning |
 | When `ARTIFACT.md` does contain `name`, `description`, or `license`, the values match `SKILL.md` exactly. | Error on mismatch |
 | A `version` in `ARTIFACT.md` equals `SKILL.md` `metadata.version` when both are set and `metadata.version` is a `major.minor.patch` value. | Error on mismatch (`lint.skill_artifact_field_mismatch`) |
@@ -242,12 +241,12 @@ The body is the Markdown after the frontmatter. The agentskills.io specification
 | A `SKILL.md` `metadata` value for a key that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists follows its encoding. A value that does not is ignored, and the diagnostic names the key, the value, and the encoding. | Warning (`lint.skill_metadata_field_ignored`); `lint_suppress` does not silence it |
 | A non-empty `ARTIFACT.md` `invocation` value is `any` or `user`. Another value resolves to `any`, and the diagnostic names the value and the allowed values. | Warning (`lint.skill_invocation`) |
 | The `ARTIFACT.md` body is empty or a single HTML comment. | Warning |
-| A skill that declares no usable version has its version assigned. | Warning (`lint.skill_version_assigned`) |
+| A skill that declares no usable version has its version assigned. A plain Agent Skill commonly declares no version, so the diagnostic is informational. | Info (`lint.skill_version_assigned`); never fails `podium lint` |
 | An authored version in the reserved `0.0.0-auto.<N>` form, in either file, is invalid. | Error (`lint.invalid_version`) |
 | `skills-ref validate` passes against `SKILL.md`. | Warning (`lint.skill_ref_validate`); an `ARTIFACT.md` that lists the code under `lint_suppress` silences it |
 | A non-empty description has at least 15 code points and at least 3 words after surrounding white space is trimmed. An empty description does not draw `lint.thin_description`. `PODIUM_LINT_MIN_DESCRIPTION_CHARS` and `PODIUM_LINT_MIN_DESCRIPTION_WORDS` change the bounds. | Warning (`lint.thin_description`); `lint_suppress` honored |
 | No two artifacts have descriptions whose normalized word sets have a similarity of 0.7 or higher. `PODIUM_LINT_DESCRIPTION_SIMILARITY` changes the threshold. | Warning (`lint.colliding_descriptions`); `lint_suppress` honored, one-sided |
-| No prose body or text resource has a near duplicate in another artifact: two units whose five-word shingle sets have a similarity of 0.8 or higher. `PODIUM_LINT_CONTENT_SIMILARITY` changes the threshold. | Warning (`lint.near_duplicate_content`); `lint_suppress` honored, one-sided |
+| No prose body or prose resource has a near duplicate in another artifact: two units whose five-word shingle sets have a similarity of 0.8 or higher. A prose resource is a bundled `.md`, `.markdown`, `.txt`, or `.rst` file other than a license file, so scripts and data files are not compared. `PODIUM_LINT_CONTENT_SIMILARITY` changes the threshold. | Warning (`lint.near_duplicate_content`); `lint_suppress` honored, one-sided |
 
 The `lint.thin_description`, `lint.colliding_descriptions`, and `lint.near_duplicate_content` checks are the catalog advisories. They apply to every artifact type and compare artifacts with each other, so `podium lint` runs them over every artifact of every layer it walks, and registry ingest runs them over the layer it ingests without blocking the ingest. A skill's description is its `ARTIFACT.md` `description`, or its `SKILL.md` `description` when `ARTIFACT.md` states none. Normalizing a description lowercases it and replaces each run of characters other than letters and digits with a single space. The similarity of two sets is the size of their intersection divided by the size of their union. A diagnostic names the artifacts it overlaps, in order of descending similarity, and abbreviates a list of more than 10 to the first 10 and a count of the rest. [Near-duplicate content](bundled-resources#near-duplicate-content) describes the units that `lint.near_duplicate_content` compares.
 
