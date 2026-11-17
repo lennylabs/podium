@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
@@ -351,48 +352,44 @@ func TestScaffold_Skill_BadSensitivityReportsHint(t *testing.T) {
 	}
 }
 
-func TestScaffold_Context_LintClean(t *testing.T) {
-	root := t.TempDir()
-	target := filepath.Join(root, "personal", "company-glossary")
-	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
-		"--description", "Company glossary of acronyms.",
-		"--tags", "glossary,reference",
-		"--yes",
-		target,
-	}, "")
-	if exit != 0 {
-		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
-	}
-	if _, err := os.Stat(filepath.Join(target, "SKILL.md")); err == nil {
-		t.Errorf("context type should not produce SKILL.md")
-	}
-	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
-	if !bytes.Contains(body, []byte("type: context")) {
-		t.Errorf("ARTIFACT.md missing type: %s", body)
-	}
-	if !bytes.Contains(body, []byte("tags: [glossary, reference]")) {
-		t.Errorf("ARTIFACT.md missing tags: %s", body)
-	}
-	if !bytes.Contains(body, []byte("name: company-glossary")) {
-		t.Errorf("ARTIFACT.md missing name: %s", body)
-	}
-	assertLintClean(t, root)
-}
+// Spec: §4.1, §4.3, §7.3.1 — scaffold refuses a type §4.1 removed with exit
+// 2 and the removed-type reason, writes nothing, and refuses before the
+// existing-directory guard, so --force does not write the package either.
+func TestScaffold_RemovedTypesRefused(t *testing.T) {
+	for _, typ := range []string{"command", "context"} {
+		t.Run(typ, func(t *testing.T) {
+			root := t.TempDir()
+			target := filepath.Join(root, "personal", "x")
+			exit, _, stderr := runScaffold([]string{
+				"--type", typ,
+				"--description", "Removed type.",
+				"--yes",
+				target,
+			}, "")
+			if exit != 2 {
+				t.Fatalf("exit=%d, want 2; stderr=%s", exit, stderr)
+			}
+			if want := "error: " + layer.TypeRemovedReason(typ) + "\n"; stderr != want {
+				t.Errorf("stderr = %q, want %q", stderr, want)
+			}
+			if _, err := os.Stat(target); !os.IsNotExist(err) {
+				t.Errorf("refusal must create no directory (stat err=%v)", err)
+			}
 
-func TestScaffold_Command_LintClean(t *testing.T) {
-	root := t.TempDir()
-	target := filepath.Join(root, "personal", "code-change-pr")
-	exit, _, stderr := runScaffold([]string{
-		"--type", "command",
-		"--description", "Open a PR from the working tree.",
-		"--yes",
-		target,
-	}, "")
-	if exit != 0 {
-		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				t.Fatalf("setup: %v", err)
+			}
+			exit, _, stderr = runScaffold([]string{
+				"--type", typ, "--description", "Removed type.", "--yes", "--force", target,
+			}, "")
+			if exit != 2 || !strings.Contains(stderr, layer.TypeRemovedReason(typ)) {
+				t.Errorf("existing dir with --force: exit=%d stderr=%s, want exit 2 and the reason", exit, stderr)
+			}
+			if _, err := os.Stat(filepath.Join(target, "ARTIFACT.md")); !os.IsNotExist(err) {
+				t.Errorf("refusal must write no ARTIFACT.md (stat err=%v)", err)
+			}
+		})
 	}
-	assertLintClean(t, root)
 }
 
 func TestScaffold_Agent_LintClean(t *testing.T) {
@@ -1124,7 +1121,7 @@ func TestScaffold_Hook_DefaultActionPlaceholder(t *testing.T) {
 // ---------- Render helpers ----------
 
 func TestPlaceholderBody_AllTypes(t *testing.T) {
-	cases := []string{"context", "command", "agent", "rule", "hook", "mcp-server", "unknown-extension"}
+	cases := []string{"agent", "rule", "hook", "mcp-server", "unknown-extension"}
 	for _, typ := range cases {
 		t.Run(typ, func(t *testing.T) {
 			got := placeholderBody(typ)

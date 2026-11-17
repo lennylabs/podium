@@ -21,13 +21,17 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // firstClassTypes mirrors spec §4.3's enum. Extension types are
 // permitted but produce a warning since the scaffolder cannot know
-// the extension's type-specific frontmatter shape.
+// the extension's type-specific frontmatter fields. The types §4.1
+// removed are refused rather than scaffolded as extension types.
 var firstClassTypes = []string{
-	"skill", "agent", "context", "command", "rule", "hook", "mcp-server",
+	"skill", "agent", "rule", "hook", "mcp-server",
 }
 
 // nameRe enforces the §4.2 canonical-ID syntax: lowercase
@@ -192,7 +196,11 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 // validateType checks the type against the first-class enum and
 // warns (but does not reject) extension types. An empty type is an
 // error so a missed interactive prompt (closed stdin under --yes,
-// or a typo) fails fast instead of writing a malformed manifest.
+// or a typo) fails fast instead of writing a malformed manifest. A
+// type §4.1 removed is an error naming its replacement, because
+// ingest refuses the package the scaffolder would write.
+//
+// Spec: §4.1, §4.3, §7.3.1
 func validateType(t string, errOut io.Writer) error {
 	if t == "" {
 		_, _ = fmt.Fprintln(errOut, "error: --type is required")
@@ -202,6 +210,10 @@ func validateType(t string, errOut io.Writer) error {
 		if t == k {
 			return nil
 		}
+	}
+	if manifest.IsRemovedType(manifest.ArtifactType(t)) {
+		_, _ = fmt.Fprintln(errOut, "error: "+layer.TypeRemovedReason(t))
+		return fmt.Errorf("removed type %q", t)
 	}
 	// Extension types are allowed by spec §4.3 (`<extension type>`).
 	// Warn so the author knows the scaffolder cannot supply the
@@ -576,10 +588,6 @@ func writeTypeSpecific(sb *strings.Builder, o *scaffoldOpts) {
 // bodies live in SKILL.md and are produced by renderSkillMD.
 func placeholderBody(typ string) string {
 	switch typ {
-	case "context":
-		return "Reference content the agent loads on demand. Replace this paragraph with the actual reference material.\n"
-	case "command":
-		return "Slash-command body. Describe the command's prompt template here.\n"
 	case "agent":
 		return "Agent definition body. Describe the agent's role, tools, and behavior here.\n"
 	case "rule":

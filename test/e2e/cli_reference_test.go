@@ -1399,12 +1399,10 @@ func TestCLI_ScaffoldAgent(t *testing.T) {
 	}
 }
 
-// spec: doc "podium artifact scaffold", command row.
+// Spec: §4.1, §7.3.1 — scaffold --type command exits 2 with the removed-type
+// reason and writes no package. Doc: "podium artifact scaffold".
 func TestCLI_ScaffoldCommand(t *testing.T) {
-	root := t.TempDir()
-	dst := filepath.Join(root, "personal/code-change-pr")
-	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "command", "--description", "Open a PR.", "--yes", dst), 0, "scaffold command")
-	cliContains(t, readFile(t, filepath.Join(dst, "ARTIFACT.md")), "type: command", "command type")
+	assertScaffoldRemovedType(t, "command")
 }
 
 // spec: doc "podium artifact scaffold", rule row, `--rule-mode`/`--rule-globs`.

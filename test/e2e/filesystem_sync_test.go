@@ -342,21 +342,7 @@ func TestFilesystemSync_SyncAgentViaClaudeCode(t *testing.T) {
 	mustExist(t, filepath.Join(target, ".claude", "agents", "pay-invoice.md"))
 }
 
-func TestFilesystemSync_SyncContextViaClaudeCode(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"shared/company-glossary/ARTIFACT.md": contextArtifact("company glossary"),
-	})
-	target := t.TempDir()
-	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "claude-code")
-	if res.Exit != 0 {
-		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
-	}
-	// context lands in the harness-neutral .podium/context/<artifact-id>/ bucket
-	mustExist(t, filepath.Join(target, ".podium", "context", "shared", "company-glossary", "ARTIFACT.md"))
-}
-
-// A plugin-layout type (skill/agent/command/rule/hook/mcp-server) on
+// A plugin-layout type (skill/agent/rule/hook/mcp-server) on
 // claude-cowork is a §6.7.1 ✗ cell: the cowork adapter ships those types
 // through the published Claude marketplace, not through project-files
 // materialization. podium sync runs the §6.9 untranslatable guard before
@@ -400,22 +386,6 @@ func TestFilesystemSync_CoworkDefaultModeRuleFailsUntranslatable(t *testing.T) {
 	if !strings.Contains(combined, "materialize.untranslatable") {
 		t.Errorf("output missing 'materialize.untranslatable': stderr=%q stdout=%q", res.Stderr, res.Stdout)
 	}
-}
-
-// The cowork context cell stays ✓, so a type: context artifact still
-// materializes onto claude-cowork (into the harness-neutral context bucket)
-// while the plugin-layout types fail per §6.9.
-func TestFilesystemSync_CoworkContextStillSyncs(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"shared/company-glossary/ARTIFACT.md": contextArtifact("company glossary"),
-	})
-	target := t.TempDir()
-	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "claude-cowork")
-	if res.Exit != 0 {
-		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
-	}
-	mustExist(t, filepath.Join(target, ".podium", "context", "shared", "company-glossary", "ARTIFACT.md"))
 }
 
 func TestFilesystemSync_SyncProducesLockFile(t *testing.T) {

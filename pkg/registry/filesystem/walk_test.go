@@ -207,7 +207,7 @@ func TestWalk_CollisionWithExtendsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
-	if want := []layer.Drop{layer.ExtendsRemovedDrop("x")}; !reflect.DeepEqual(drops, want) {
+	if want := []layer.Drop{layer.RemovedFeatureDrop("x", layer.ExtendsRemovedConstraint, layer.ExtendsRemovedReason)}; !reflect.DeepEqual(drops, want) {
 		t.Errorf("OnDrop calls = %+v, want %+v", drops, want)
 	}
 	if len(got) != 1 || got[0].Layer.ID != "team-shared" || got[0].Artifact.Description != "shared" {
@@ -413,7 +413,7 @@ func extendsRefusalCases() []extendsRefusalCase {
 			layers:    []string{"l1"},
 			files:     map[string]string{"l1/x/ARTIFACT.md": declaring, "l1/other/ARTIFACT.md": plain},
 			want:      map[string]string{"other": "l1"},
-			wantDrops: []layer.Drop{layer.ExtendsRemovedDrop("x")},
+			wantDrops: []layer.Drop{layer.RemovedFeatureDrop("x", layer.ExtendsRemovedConstraint, layer.ExtendsRemovedReason)},
 		},
 		{
 			name:    "default policy without OnDrop fails naming the id and layer",
@@ -436,9 +436,9 @@ func extendsRefusalCases() []extendsRefusalCase {
 			},
 			want: map[string]string{"c": "l1"},
 			wantDrops: []layer.Drop{
-				layer.ExtendsRemovedDrop("z"),
-				layer.ExtendsRemovedDrop("a"),
-				layer.ExtendsRemovedDrop("b"),
+				layer.RemovedFeatureDrop("z", layer.ExtendsRemovedConstraint, layer.ExtendsRemovedReason),
+				layer.RemovedFeatureDrop("a", layer.ExtendsRemovedConstraint, layer.ExtendsRemovedReason),
+				layer.RemovedFeatureDrop("b", layer.ExtendsRemovedConstraint, layer.ExtendsRemovedReason),
 				layer.Collision{ArtifactID: "c"}.Drop(),
 			},
 		},
@@ -453,7 +453,7 @@ func extendsRefusalCases() []extendsRefusalCase {
 				layers:    []string{"l1", "l2"},
 				files:     map[string]string{"l1/x/ARTIFACT.md": declaring, "l2/x/ARTIFACT.md": plain},
 				want:      map[string]string{"x": "l2"},
-				wantDrops: []layer.Drop{layer.ExtendsRemovedDrop("x")},
+				wantDrops: []layer.Drop{layer.RemovedFeatureDrop("x", layer.ExtendsRemovedConstraint, layer.ExtendsRemovedReason)},
 			},
 			extendsRefusalCase{
 				name:    name + " policy keeps a SKILL.md extends key with no ARTIFACT.md",
@@ -519,6 +519,65 @@ func TestWalk_ExtendsRefusal(t *testing.T) {
 				t.Errorf("kept records (id -> layer) = %v, want %v", kept, tc.want)
 			}
 		})
+	}
+}
+
+// Spec: §4.1, §4.6, §13.11.3 — the walk drops an ARTIFACT.md whose type §4.1
+// removed with a type_removed drop, and one that also declares extends: with
+// an extends_removed drop, because the classifier checks extends: first. With
+// OnDrop nil the walk fails with the removed-type reason, and under
+// CollisionPolicyHighestWins the workspace overlay keeps the record.
+func TestWalk_RemovedTypeDropped(t *testing.T) {
+	t.Parallel()
+	command := "---\ntype: command\nversion: 1.0.0\ndescription: Command.\n---\n\nBody.\n"
+	contextDoc := "---\ntype: context\nversion: 1.0.0\ndescription: Reference.\n---\n\nBody.\n"
+	both := "---\ntype: context\nversion: 1.0.0\ndescription: Both.\nextends: core/base\n---\n\nBody.\n"
+	files := map[string]string{
+		"l1/c/ARTIFACT.md":    command,
+		"l1/g/ARTIFACT.md":    contextDoc,
+		"l1/e/ARTIFACT.md":    both,
+		"l1/keep/ARTIFACT.md": dropFixtureArtifact("plain", ""),
+	}
+	reg := openLayeredTree(t, []string{"l1"}, files)
+	got, drops, err := walkCollecting(reg, CollisionPolicyDrop, true)
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	want := []layer.Drop{
+		layer.RemovedFeatureDrop("c", layer.TypeRemovedConstraint, layer.TypeRemovedReason("command")),
+		layer.RemovedFeatureDrop("e", layer.ExtendsRemovedConstraint, layer.ExtendsRemovedReason),
+		layer.RemovedFeatureDrop("g", layer.TypeRemovedConstraint, layer.TypeRemovedReason("context")),
+	}
+	if !reflect.DeepEqual(drops, want) {
+		t.Errorf("OnDrop calls = %+v, want %+v", drops, want)
+	}
+	if len(got) != 1 || got[0].ID != "keep" {
+		t.Errorf("kept = %v, want only keep", idsOf(got))
+	}
+
+	single := openLayeredTree(t, []string{"l1"}, map[string]string{"l1/c/ARTIFACT.md": command})
+	if _, _, err := walkCollecting(single, CollisionPolicyDefault, false); err == nil ||
+		!strings.Contains(err.Error(), layer.TypeRemovedReason("command")) ||
+		!strings.Contains(err.Error(), layer.InvalidArtifactCode) {
+		t.Errorf("Walk without OnDrop err = %v, want the removed-type reason", err)
+	}
+
+	overlay, drops, err := walkCollecting(reg, CollisionPolicyHighestWins, true)
+	if err != nil || len(drops) != 0 || len(overlay) != 4 {
+		t.Errorf("HighestWins: kept %v, drops %+v, err %v; want all four records and no drop", idsOf(overlay), drops, err)
+	}
+}
+
+// Spec: §4.1 — a record with no parsed ARTIFACT.md reports the empty type, so
+// the removed-type classifier admits it.
+func TestArtifactRecord_Type(t *testing.T) {
+	t.Parallel()
+	if got := (&ArtifactRecord{}).Type(); got != "" {
+		t.Errorf("Type() of a record with no artifact = %q, want empty", got)
+	}
+	rec := &ArtifactRecord{Artifact: &manifest.Artifact{Type: manifest.TypeAgent}}
+	if got := rec.Type(); got != manifest.TypeAgent {
+		t.Errorf("Type() = %q, want agent", got)
 	}
 }
 

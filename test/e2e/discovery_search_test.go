@@ -1198,14 +1198,14 @@ func TestSearch_LoadDomainEmptyPath(t *testing.T) {
 func TestSearch_BrowseAllTypes(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"tools/sk/ARTIFACT.md":  greetSkillArtifact,
-		"tools/sk/SKILL.md":     skillBody("sk"),
-		"tools/ctx/ARTIFACT.md": contextArtifact("a context"),
-		"tools/cmd/ARTIFACT.md": "---\ntype: command\nversion: 1.0.0\ndescription: A command.\n---\n\n$ARGUMENTS\n",
+		"tools/sk/ARTIFACT.md": greetSkillArtifact,
+		"tools/sk/SKILL.md":    skillBody("sk"),
+		"tools/ag/ARTIFACT.md": agentArtifact("an agent"),
+		"tools/rl/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: A rule.\nrule_mode: always\n---\n\nRule body.\n",
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_artifacts", map[string]any{"scope": "tools"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
-	for _, want := range []string{"tools/sk", "tools/ctx", "tools/cmd"} {
+	for _, want := range []string{"tools/sk", "tools/ag", "tools/rl"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("browse missing %q: %s", want, body)
 		}

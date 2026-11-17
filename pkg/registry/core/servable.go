@@ -7,22 +7,24 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// retiredKey keys the memo of the §4.6 no-inheritance verdict.
+// retiredKey keys the memo of the retired-row verdict.
 type retiredKey struct {
 	tenant      string
 	contentHash string
 }
 
-// servableRows drops every row whose stored ARTIFACT.md declares extends:,
+// servableRows drops every retired row: a row whose type the §4.1
+// removed-type rule names, or whose stored ARTIFACT.md declares extends:,
 // which the §4.6 no-inheritance rule retires. The core listing choke points
 // (visibleManifests, adminVisibleManifests, and artifactExistsAnywhere) call
 // it on the ListManifests result, so every read path that excludes a
 // soft-deleted row also excludes a retired one, and no retired row reaches
 // version resolution, admission, or the revalidation bypass. The verdict is
 // memoized per (tenant, content hash), because the predicate decodes YAML and
-// this runs on every row of every listing.
+// this runs on every row of every listing. The type column is written from the
+// frontmatter type, so the content hash also fixes the type.
 //
-// Spec: §4.6
+// Spec: §4.1, §4.6
 func (r *Registry) servableRows(ctx context.Context, rows []store.ManifestRecord) []store.ManifestRecord {
 	tenant := r.TenantFor(ctx)
 	out := make([]store.ManifestRecord, 0, len(rows))
@@ -34,12 +36,12 @@ func (r *Registry) servableRows(ctx context.Context, rows []store.ManifestRecord
 	return out
 }
 
-// isRetired reports the §4.6 no-inheritance verdict for m, reading and
+// isRetired reports the manifest.RetiredRow verdict for m, reading and
 // filling the memo. A row with no content hash is decided without the memo,
 // because an empty hash does not name one set of bytes.
 func (r *Registry) isRetired(tenant string, m store.ManifestRecord) bool {
 	if m.ContentHash == "" {
-		return manifest.DeclaresExtends(m.Frontmatter)
+		return manifest.RetiredRow(m.Frontmatter, m.Type)
 	}
 	key := retiredKey{tenant: tenant, contentHash: m.ContentHash}
 	r.retiredMu.RLock()
@@ -48,7 +50,7 @@ func (r *Registry) isRetired(tenant string, m store.ManifestRecord) bool {
 	if ok {
 		return verdict
 	}
-	verdict = manifest.DeclaresExtends(m.Frontmatter)
+	verdict = manifest.RetiredRow(m.Frontmatter, m.Type)
 	r.retiredMu.Lock()
 	if r.retired == nil {
 		r.retired = map[retiredKey]bool{}

@@ -25,13 +25,14 @@ type DependentsEdge struct {
 // can see. Edges are recorded by artifact ID and carry no version, so an edge
 // a retired version recorded under delegates_to or mcpServers stays visible
 // while its ID has another servable row, as a superseded version's edges do;
-// an ID whose every row the §4.6 no-inheritance rule retires admits none of
-// its edges, because servableRows has already dropped those rows. The store
+// an ID whose every row the §4.1 removed-type rule or the §4.6
+// no-inheritance rule retires admits none of its edges, because servableRows
+// has already dropped those rows. The store
 // returns no edge of a kind §4.7.3 does not define. The query is filtered
 // rather than refused: an invisible target yields the same empty list as a
 // target that does not exist, and no visibility.denied event is emitted.
 //
-// Spec: §4.7.3, §4.6
+// Spec: §4.7.3, §4.1, §4.6
 func (r *Registry) DependentsOf(ctx context.Context, id layer.Identity, artifactID string) ([]DependentsEdge, error) {
 	r.emit(ctx, AuditEvent{
 		Type:   "artifacts.dependents_of",

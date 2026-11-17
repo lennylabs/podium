@@ -29,14 +29,6 @@ description: glossary
 
 Glossary body.
 `
-	contextArtifactSrc = `---
-type: context
-version: 1.0.0
-description: glossary
----
-
-Glossary body.
-`
 )
 
 // Spec: §7.5 podium sync — Run materializes every visible artifact through
@@ -317,28 +309,6 @@ func TestRun_CoworkPluginLayoutTypeFailsUntranslatable(t *testing.T) {
 				t.Errorf("target had %d files after a failed sync, want 0: %v", len(got), keys(got))
 			}
 		})
-	}
-}
-
-// Spec: §6.7 / §6.7.1 — the cowork context cell stays ✓, so a type: context
-// artifact still materializes onto claude-cowork through the §6.9 guard.
-func TestRun_CoworkContextStillMaterializes(t *testing.T) {
-	t.Parallel()
-	registry := t.TempDir()
-	target := t.TempDir()
-	testharness.WriteTree(t, registry,
-		testharness.WriteTreeOption{Path: "team/glossary/ARTIFACT.md", Content: contextArtifactSrc},
-	)
-	res, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "claude-cowork"})
-	if err != nil {
-		t.Fatalf("Run on claude-cowork over a context artifact: %v", err)
-	}
-	if len(res.Artifacts) != 1 {
-		t.Fatalf("got %d artifacts, want 1", len(res.Artifacts))
-	}
-	got := testharness.ReadTree(t, target)
-	if _, ok := got[".podium/context/team/glossary/ARTIFACT.md"]; !ok {
-		t.Errorf("cowork context did not materialize to .podium/context/, got: %v", keys(got))
 	}
 }
 

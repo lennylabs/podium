@@ -15,10 +15,11 @@ import (
 	"github.com/lennylabs/podium/pkg/lint"
 )
 
-// Spec: §7.3.1 — the --json envelope carries registry, diagnostics,
-// rejected, and counts; empty members render as [], rejected is sorted by
-// artifact ID with details only where the refusing rule defines them, and
-// counts carries every severity.
+// Spec: §7.3.1, §4.1, §4.6 — the --json envelope carries registry,
+// diagnostics, rejected, and counts; empty members render as [], rejected is
+// sorted by artifact ID with details only where the refusing rule defines
+// them, so every removed-feature drop carries its constraint and a collision
+// drop carries none, and counts carries every severity.
 func TestWriteLintEnvelope(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		var buf bytes.Buffer
@@ -46,7 +47,8 @@ func TestWriteLintEnvelope(t *testing.T) {
 			{ArtifactID: "b/two", Code: "x.info", Severity: lint.SeverityInfo, Message: "note"},
 		}
 		drops := []layer.Drop{
-			layer.ExtendsRemovedDrop("z/ext"),
+			layer.RemovedFeatureDrop("z/ext", layer.ExtendsRemovedConstraint, layer.ExtendsRemovedReason),
+			layer.RemovedFeatureDrop("m/cmd", layer.TypeRemovedConstraint, layer.TypeRemovedReason("command")),
 			layer.Collision{ArtifactID: "c/dup", Layer: "l2", ExistingLayer: "l1"}.Drop(),
 		}
 		var buf bytes.Buffer
@@ -65,13 +67,15 @@ func TestWriteLintEnvelope(t *testing.T) {
 			t.Errorf("diagnostics = %v, want %v", got["diagnostics"], wantDiags)
 		}
 		rejected, _ := got["rejected"].([]any)
-		if len(rejected) != 2 {
-			t.Fatalf("rejected = %v, want two entries", got["rejected"])
+		if len(rejected) != 3 {
+			t.Fatalf("rejected = %v, want three entries", got["rejected"])
 		}
 		first, _ := rejected[0].(map[string]any)
-		second, _ := rejected[1].(map[string]any)
-		if first["artifact_id"] != "c/dup" || second["artifact_id"] != "z/ext" {
-			t.Errorf("rejected order = %v, %v; want c/dup then z/ext", first["artifact_id"], second["artifact_id"])
+		removed, _ := rejected[1].(map[string]any)
+		second, _ := rejected[2].(map[string]any)
+		if first["artifact_id"] != "c/dup" || removed["artifact_id"] != "m/cmd" || second["artifact_id"] != "z/ext" {
+			t.Errorf("rejected order = %v, %v, %v; want c/dup, m/cmd, z/ext",
+				first["artifact_id"], removed["artifact_id"], second["artifact_id"])
 		}
 		if _, ok := first["details"]; ok {
 			t.Errorf("collision entry carries details: %v", first)
@@ -82,6 +86,11 @@ func TestWriteLintEnvelope(t *testing.T) {
 		wantDetails := map[string]any{"constraint": "extends_removed"}
 		if !reflect.DeepEqual(second["details"], wantDetails) || second["code"] != "ingest.invalid_artifact" {
 			t.Errorf("extends entry = %v, want ingest.invalid_artifact with details %v", second, wantDetails)
+		}
+		wantRemoved := map[string]any{"constraint": "type_removed"}
+		if !reflect.DeepEqual(removed["details"], wantRemoved) || removed["code"] != "ingest.invalid_artifact" ||
+			removed["reason"] != layer.TypeRemovedReason("command") {
+			t.Errorf("removed-type entry = %v, want ingest.invalid_artifact with details %v", removed, wantRemoved)
 		}
 		wantCounts := map[string]any{"error": float64(0), "warning": float64(1), "info": float64(1)}
 		if !reflect.DeepEqual(got["counts"], wantCounts) {

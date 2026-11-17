@@ -64,14 +64,12 @@ func TestCoreConcept_NonSkillArtifact(t *testing.T) {
 func TestCoreConcept_AllFirstClassTypesLint(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"sk/ARTIFACT.md":  greetSkillArtifact,
-		"sk/SKILL.md":     skillBody("sk"),
-		"ag/ARTIFACT.md":  "---\ntype: agent\nversion: 1.0.0\ndescription: Delegate the close checklist to helpers\n---\n\nbody\n",
-		"ctx/ARTIFACT.md": contextArtifact("Reference notes on the ledger layout"),
-		"cmd/ARTIFACT.md": "---\ntype: command\nversion: 1.0.0\ndescription: Open a pull request for review\n---\n\nbody\n",
-		"rl/ARTIFACT.md":  "---\ntype: rule\nversion: 1.0.0\ndescription: Require gofmt on every Go file\nrule_mode: always\n---\n\nbody\n",
-		"hk/ARTIFACT.md":  "---\ntype: hook\nversion: 1.0.0\ndescription: Echo ok when the session stops\nhook_event: stop\nhook_action: echo ok\n---\n\nbody\n",
-		"ms/ARTIFACT.md":  "---\ntype: mcp-server\nversion: 1.0.0\ndescription: Expose the ms tool server\nserver_identifier: ms\n---\n\nbody\n",
+		"sk/ARTIFACT.md": greetSkillArtifact,
+		"sk/SKILL.md":    skillBody("sk"),
+		"ag/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Delegate the close checklist to helpers\n---\n\nbody\n",
+		"rl/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: Require gofmt on every Go file\nrule_mode: always\n---\n\nbody\n",
+		"hk/ARTIFACT.md": "---\ntype: hook\nversion: 1.0.0\ndescription: Echo ok when the session stops\nhook_event: stop\nhook_action: echo ok\n---\n\nbody\n",
+		"ms/ARTIFACT.md": "---\ntype: mcp-server\nversion: 1.0.0\ndescription: Expose the ms tool server\nserver_identifier: ms\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 || !strings.Contains(res.Stdout, "lint: no issues.") {
@@ -761,25 +759,6 @@ func TestCoreConcept_ClaudeDesktopExtension(t *testing.T) {
 	// project surface nor any claude-desktop subtree is produced.
 	mustNotExist(t, filepath.Join(tgt, ".claude", "agents", "helper.md"))
 	mustNotExist(t, filepath.Join(tgt, ".claude-desktop"))
-}
-
-// claude-cowork materializes a context artifact into the harness-neutral
-// .podium/context/ bucket (§6.7, identical across every adapter). The plugin and
-// marketplace layout for the other types ships through marketplace publishing
-// (§6.7, §7.8) rather than podium sync, so the adapter emits no project-scope
-// plugin or marketplace tree.
-func TestCoreConcept_ClaudeCoworkContextOnly(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"tools/helper/ARTIFACT.md": contextArtifact("helper"),
-	})
-	tgt := t.TempDir()
-	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-cowork")
-	// Context is harness-neutral and still materializes.
-	mustExist(t, filepath.Join(tgt, ".podium/context/tools/helper/ARTIFACT.md"))
-	// No plugin or marketplace layout is produced.
-	mustNotExist(t, filepath.Join(tgt, "plugins"))
-	mustNotExist(t, filepath.Join(tgt, ".claude-plugin"))
 }
 
 // podium-mcp fails at startup when PODIUM_REGISTRY is unset.

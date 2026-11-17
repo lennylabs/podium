@@ -879,28 +879,6 @@ func TestBundled_ProvenanceClaudeCodeNonSkill(t *testing.T) {
 	}
 }
 
-// a `type: context` body materializes to the
-// harness-neutral .podium/context/<id>/ bucket and keeps the canonical
-// provenance markers. The bucket is identical across every adapter, so it does
-// not receive the Claude-specific <untrusted-data> rewrite (§6.7).
-func TestBundled_ProvenanceContextNeutralBucket(t *testing.T) {
-	t.Parallel()
-	id := "finance/policy/payments-context"
-	art := "---\ntype: context\nname: payments-context\nversion: 1.0.0\ndescription: Aggregated payments policy.\n---\n\nAuthored intro.\n\n" + brProvenanceBody
-	reg := writeRegistry(t, map[string]string{id + "/ARTIFACT.md": art})
-	tgt := t.TempDir()
-	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
-		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
-	}
-	got := readFile(t, filepath.Join(tgt, ".podium/context", id, "ARTIFACT.md"))
-	if !strings.Contains(got, "begin imported") {
-		t.Errorf("canonical provenance markers should be preserved in the neutral bucket:\n%s", got)
-	}
-	if strings.Contains(got, "<untrusted-data") {
-		t.Errorf("the neutral context bucket should not receive the Claude rewrite:\n%s", got)
-	}
-}
-
 // two imported provenance blocks with distinct
 // sources are each rewritten to a separate <untrusted-data> region.
 func TestBundled_ProvenanceMultipleBlocks(t *testing.T) {

@@ -163,7 +163,7 @@ func parseOperands(fs *flag.FlagSet, args []string) ([]string, error) {
 // parsePositional parses args into fs while tolerating the command's positional
 // argument anywhere among the flags, and reports how many positionals were
 // given. The count matters: a command may take an empty operand as meaningful,
-// as `podium search --type context ""` does to browse a type, and a sentinel
+// as `podium search --type rule ""` does to browse a type, and a sentinel
 // empty string cannot tell that apart from an operand nobody supplied.
 //
 // It returns the first positional and the total count. A command taking exactly

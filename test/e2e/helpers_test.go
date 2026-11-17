@@ -27,6 +27,7 @@ import (
 
 	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
+	"github.com/lennylabs/podium/pkg/layer"
 )
 
 // cliResult captures one subprocess invocation.
@@ -850,11 +851,36 @@ func syncAndSnapshot(t testing.TB, registry, target string) map[string]string {
 	return readTreeFiltered(t, target)
 }
 
-// contextArtifact builds an ARTIFACT.md for a type:context artifact with
-// the given description (descriptions in ARTIFACT.md are what the registry
-// indexes for search).
-func contextArtifact(desc string) string {
-	return fmt.Sprintf("---\ntype: context\nversion: 1.0.0\ndescription: %s\n---\n\n%s body.\n", desc, desc)
+// userInvokedSkill builds a SKILL.md for a user-invoked skill named name:
+// metadata.invocation is "user", the form that replaces a command (§4.1,
+// §4.3.4, §5.2). Podium writes body unchanged, so a $ARGUMENTS placeholder
+// reaches the harness as authored.
+func userInvokedSkill(name, desc, body string) string {
+	return fmt.Sprintf("---\nname: %s\ndescription: %s\nmetadata:\n  version: \"1.0.0\"\n  invocation: \"user\"\n---\n\n%s", name, desc, body)
+}
+
+// referenceSkill builds a SKILL.md for a model-invocable skill named name
+// whose description says it carries reference material, the form that
+// replaces a context artifact (§4.1).
+func referenceSkill(name, desc string) string {
+	return fmt.Sprintf("---\nname: %s\ndescription: Reference material on %s. Use when the task needs it.\nmetadata:\n  version: \"1.0.0\"\n---\n\n%s body.\n", name, desc, desc)
+}
+
+// assertScaffoldRemovedType runs podium artifact scaffold --type typ for a
+// type §4.1 removed and asserts exit 2, the removed-type reason on standard
+// error, and no package directory.
+func assertScaffoldRemovedType(t *testing.T, typ string) {
+	t.Helper()
+	out := filepath.Join(t.TempDir(), "tools", "removed")
+	sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", typ,
+		"--description", "A package of a removed type.", "--yes", out)
+	if sc.Exit != 2 {
+		t.Errorf("scaffold --type %s exit=%d, want 2; stderr=%s", typ, sc.Exit, sc.Stderr)
+	}
+	if want := "error: " + layer.TypeRemovedReason(typ); !strings.Contains(sc.Stderr, want) {
+		t.Errorf("scaffold --type %s stderr = %q, want it to contain %q", typ, sc.Stderr, want)
+	}
+	mustNotExist(t, out)
 }
 
 // agentArtifact builds an ARTIFACT.md for a type:agent artifact with the

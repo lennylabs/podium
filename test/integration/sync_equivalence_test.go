@@ -471,7 +471,7 @@ func TestSyncEquivalence_LayerCollisionIsByteIdentical(t *testing.T) {
 			}
 
 			want := []layer.Drop{
-				layer.ExtendsRemovedDrop("shared/legacy"),
+				layer.RemovedFeatureDrop("shared/legacy", layer.ExtendsRemovedConstraint, layer.ExtendsRemovedReason),
 				layer.Collision{ArtifactID: "shared/clash", Layer: "team-finance", ExistingLayer: "org-defaults"}.Drop(),
 			}
 			if !reflect.DeepEqual(fsRes.Dropped, want) {

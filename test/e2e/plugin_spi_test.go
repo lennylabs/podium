@@ -222,10 +222,6 @@ func TestPluginSPI_FirstClassTypesPassLint(t *testing.T) {
 		"types/my-skill/SKILL.md":    skillBody("my-skill"),
 		// agent
 		"types/my-agent/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: My agent for tests.\n---\n\nbody\n",
-		// context
-		"types/my-context/ARTIFACT.md": contextArtifact("Reference notes for the plugin tests"),
-		// command
-		"types/my-command/ARTIFACT.md": "---\ntype: command\nversion: 1.0.0\ndescription: My command for tests.\n---\n\n$ARGUMENTS\n",
 		// rule
 		"types/my-rule/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: My rule for tests.\nrule_mode: always\n---\n\nAlways follow this rule.\n",
 		// hook (hook_event + hook_action are the required §4.3 hook fields)

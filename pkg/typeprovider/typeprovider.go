@@ -1,6 +1,6 @@
 // Package typeprovider implements the §9 TypeProvider SPI. Each
-// first-class artifact type (skill, agent, context, command, rule,
-// hook) and the built-in extension type (mcp-server) ships as a
+// first-class artifact type (skill, agent, rule, hook) and the
+// built-in extension type (mcp-server) ships as a
 // TypeProvider; deployers register further extension types through the
 // SPI to add validators, lint rules, or harness-adapter outputs without
 // forking pkg/manifest.

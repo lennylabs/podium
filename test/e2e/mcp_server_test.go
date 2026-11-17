@@ -57,15 +57,15 @@ func TestMCPResources_ReadRejectsBadURI(t *testing.T) {
 	}
 }
 
-// Covers: spec §5.2 (Command Materialization), §5.0 — MCP prompt projection of
-// commands was removed; commands materialize through the harness adapters (§6.7)
+// Covers: spec §5.2 (User-Invoked Skills), §5.0 — the MCP server projects no
+// prompts; user-invoked skills materialize through the harness adapters (§6.7)
 // instead. initialize advertises {tools, resources, sessionCorrelation} and no
-// `prompts` capability, even when a command artifact is present.
+// `prompts` capability, even when a user-invoked skill is present.
 func TestMCPInitialize_AdvertisesNoPromptsCapability(t *testing.T) {
 	t.Parallel()
 
-	// A command artifact in the view does not add a prompts capability.
-	withCommand := startServer(t, writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact}))
+	// A user-invoked skill in the view does not add a prompts capability.
+	withCommand := startServer(t, writeRegistry(t, map[string]string{standupFile: standupSkill}))
 	res := mcpExec(t, mcpServerEnv(t, withCommand.BaseURL),
 		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{"protocolVersion": "2024-11-05"}})
 	caps, _ := rpcResult(t, res.Stdout, 1)["capabilities"].(map[string]any)
@@ -74,7 +74,7 @@ func TestMCPInitialize_AdvertisesNoPromptsCapability(t *testing.T) {
 	}
 
 	// The advertised set is tools + resources + sessionCorrelation, both with
-	// and without a command artifact.
+	// and without a user-invoked skill.
 	plain := startServer(t, writeRegistry(t, map[string]string{
 		"reference/glossary/ARTIFACT.md": agentArtifact("glossary"),
 	}))

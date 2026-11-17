@@ -317,25 +317,22 @@ func TestHarness_ClaudeCodeRule(t *testing.T) {
 	}
 }
 
-// claude-code context lands in the harness-neutral
-// .podium/context/<id>/ bucket (§6.7).
-func TestHarness_ClaudeCodeContextDefaultCase(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"glossary/company/ARTIFACT.md": contextArtifact("company glossary")})
-	target := t.TempDir()
-	chSync(t, reg, target, "claude-code")
-	mustExist(t, filepath.Join(target, ".podium", "context", "glossary", "company", "ARTIFACT.md"))
-}
-
-// claude-code command lands at .claude/commands/<name>.md.
+// Spec: §5.2, §6.7 — claude-code writes a user-invoked skill, the
+// replacement for a command (§4.1), at .claude/skills/<name>/SKILL.md with
+// its $ARGUMENTS body unchanged. The test compares the body, because the
+// adapter adds the harness control to the frontmatter.
 func TestHarness_ClaudeCodeCommandDefaultCase(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"tools/deploy/ARTIFACT.md": "---\ntype: command\nversion: 1.0.0\ndescription: Deploy.\n---\n\n$ARGUMENTS\n",
+		"tools/deploy/SKILL.md": userInvokedSkill("deploy", "Deploy the current branch.", "$ARGUMENTS\n"),
 	})
 	target := t.TempDir()
 	chSync(t, reg, target, "claude-code")
-	mustExist(t, filepath.Join(target, ".claude", "commands", "deploy.md"))
+	got := readFile(t, filepath.Join(target, ".claude", "skills", "deploy", "SKILL.md"))
+	if !strings.HasSuffix(got, "---\n\n$ARGUMENTS\n") {
+		t.Errorf("SKILL.md body is not the authored $ARGUMENTS body:\n%s", got)
+	}
+	mustNotExist(t, filepath.Join(target, ".claude", "commands"))
 }
 
 // claude-code hook merges into .claude/settings.json.
@@ -367,18 +364,21 @@ func TestHarness_ClaudeCodeSkillResources(t *testing.T) {
 	mustExist(t, filepath.Join(target, ".claude", "skills", "analyzer", "scripts", "run.py"))
 }
 
-// claude-code command is a native file; its non-skill
-// bundled resources land in the .podium/resources/<id>/ bucket.
+// Spec: §5.2, §6.7 — a user-invoked skill's bundled resources co-locate
+// with its SKILL.md under .claude/skills/<name>/ on claude-code, as every
+// skill's resources do.
 func TestHarness_ClaudeCodeNonSkillResources(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"tools/deploy/ARTIFACT.md":       "---\ntype: command\nversion: 1.0.0\ndescription: Deploy.\n---\n\n$ARGUMENTS\n",
+		"tools/deploy/SKILL.md":          userInvokedSkill("deploy", "Deploy the current branch.", "$ARGUMENTS\n"),
 		"tools/deploy/scripts/deploy.sh": "#!/bin/sh\necho deploy\n",
 	})
 	target := t.TempDir()
 	chSync(t, reg, target, "claude-code")
-	mustExist(t, filepath.Join(target, ".claude", "commands", "deploy.md"))
-	mustExist(t, filepath.Join(target, ".podium", "resources", "tools", "deploy", "scripts", "deploy.sh"))
+	mustExist(t, filepath.Join(target, ".claude", "skills", "deploy", "SKILL.md"))
+	if got := readFile(t, filepath.Join(target, ".claude", "skills", "deploy", "scripts", "deploy.sh")); got != "#!/bin/sh\necho deploy\n" {
+		t.Errorf("bundled script = %q, want the authored bytes", got)
+	}
 }
 
 // claude-code/glob is native: the rule file carries
@@ -489,27 +489,6 @@ func TestHarness_MCPClaudeDesktop(t *testing.T) {
 }
 
 // ---- Claude Cowork ----------------------------------------------------------
-
-// claude-cowork materializes a type: context artifact into the harness-neutral
-// .podium/context/<id>/ bucket. The plugin and marketplace layout for the other
-// types ships through marketplace publishing (§6.7, §7.8), not through podium
-// sync, so a non-context artifact produces no project-scope output.
-func TestHarness_ClaudeCoworkContextOnly(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"glossary/ARTIFACT.md": contextArtifact("glossary"),
-	})
-	cowork := t.TempDir()
-	chSync(t, reg, cowork, "claude-cowork")
-	mustExist(t, filepath.Join(cowork, ".podium", "context", "glossary", "ARTIFACT.md"))
-	// No plugin or marketplace layout: the dispatch change routes only context.
-	if _, err := os.Stat(filepath.Join(cowork, "plugins")); !os.IsNotExist(err) {
-		t.Errorf("claude-cowork emitted a plugins/ tree; stat err=%v", err)
-	}
-	if _, err := os.Stat(filepath.Join(cowork, ".claude-plugin", "marketplace.json")); !os.IsNotExist(err) {
-		t.Errorf("claude-cowork emitted a marketplace.json; stat err=%v", err)
-	}
-}
 
 // claude-cowork MCP startup is not refused.
 func TestHarness_MCPClaudeCowork(t *testing.T) {

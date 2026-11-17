@@ -1,11 +1,12 @@
 package e2e
 
 // End-to-end tests for docs/authoring/artifact-types.md (D-artifact-types).
-// Covers every built-in type (skill, agent, context, command, rule, hook,
-// mcp-server) plus the extension-type path: scaffolding, lint acceptance
-// and rejection, the per-harness materialization layout, and the
-// registry-side behaviors (search type filtering, deprecation, dependents)
-// including the documented absence of MCP prompt projection for commands.
+// Covers every built-in type (skill, agent, rule, hook, mcp-server) plus the
+// extension-type path and the scaffold refusal of the removed command and
+// context types: scaffolding, lint acceptance and rejection, the per-harness
+// materialization layout, and the registry-side behaviors (search type
+// filtering, deprecation, dependents) including the documented absence of
+// MCP prompt projection for user-invoked skills.
 // Tests drive the podium CLI, the standalone
 // server, and the podium-mcp bridge. Behaviors blocked by a known
 // implementation-gap finding are encoded as skips so the acceptance criterion is
@@ -178,114 +179,35 @@ func TestArtifactTypes_AgentClaudeCodeLayout(t *testing.T) {
 	}
 }
 
-// ---- context ---------------------------------------------------------------
+// ---- removed types -----------------------------------------------------------
 
-// scaffold context produces no SKILL.md and lints clean.
+// Spec: §4.1, §7.3.1 — scaffold --type context exits 2 with the removed-type
+// reason and writes no package.
 func TestArtifactTypes_ScaffoldContext(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
-	out := filepath.Join(root, "reference/company-glossary")
-	sc := runPodium(t, "", nil, "artifact", "scaffold",
-		"--type", "context",
-		"--description", "Internal terminology and acronyms used at the company.",
-		"--tags", "reference,glossary",
-		"--sensitivity", "low",
-		"--yes", out)
-	if sc.Exit != 0 {
-		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
-	}
-	if _, err := os.Stat(filepath.Join(out, "SKILL.md")); err == nil {
-		t.Errorf("context must not have a SKILL.md")
-	}
-	art := readFile(t, filepath.Join(out, "ARTIFACT.md"))
-	if !strings.Contains(art, "type: context") || !strings.Contains(art, "name: company-glossary") {
-		t.Errorf("ARTIFACT.md missing type/name:\n%s", art)
-	}
-	if l := runPodium(t, "", nil, "lint", "--registry", root); l.Exit != 0 {
-		t.Errorf("lint exit=%d stdout=%q", l.Exit, l.Stdout)
-	}
+	assertScaffoldRemovedType(t, "context")
 }
 
-// the doc's context example (version 1.4.0) lints clean.
-func TestArtifactTypes_ContextExampleLints(t *testing.T) {
-	t.Parallel()
-	art := "---\ntype: context\nname: company-glossary\nversion: 1.4.0\n" +
-		"description: Internal terminology and acronyms used at the company.\n" +
-		"tags: [reference, glossary]\nsensitivity: low\n---\n\n# Glossary\n\n**ACV.** Annual Contract Value.\n"
-	reg := writeRegistry(t, map[string]string{"reference/company-glossary/ARTIFACT.md": art})
-	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 0 || !strings.Contains(res.Stdout, "lint: no issues.") {
-		t.Fatalf("lint exit=%d stdout=%q", res.Exit, res.Stdout)
-	}
-}
-
-// claude-code places a context in the harness-neutral
-// .podium/context/<id>/ bucket.
-func TestArtifactTypes_ContextClaudeCodeLayout(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"reference/company-glossary/ARTIFACT.md": "---\ntype: context\nname: company-glossary\nversion: 1.4.0\ndescription: Glossary.\n---\n\nbody\n",
-	})
-	tgt := t.TempDir()
-	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code")
-	mustExist(t, filepath.Join(tgt, ".podium/context/reference/company-glossary/ARTIFACT.md"))
-}
-
-// ---- command ---------------------------------------------------------------
-
-// scaffold command lints clean.
+// Spec: §4.1, §7.3.1 — scaffold --type command exits 2 with the removed-type
+// reason and writes no package.
 func TestArtifactTypes_ScaffoldCommand(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
-	out := filepath.Join(root, "tools/refactor-module")
-	sc := runPodium(t, "", nil, "artifact", "scaffold",
-		"--type", "command",
-		"--description", "Guided module refactoring with configurable focus areas.",
-		"--tags", "command,refactoring",
-		"--sensitivity", "low",
-		"--yes", out)
-	if sc.Exit != 0 {
-		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
-	}
-	art := readFile(t, filepath.Join(out, "ARTIFACT.md"))
-	if !strings.Contains(art, "type: command") {
-		t.Errorf("ARTIFACT.md missing type: command:\n%s", art)
-	}
-	if l := runPodium(t, "", nil, "lint", "--registry", root); l.Exit != 0 {
-		t.Errorf("lint exit=%d stdout=%q", l.Exit, l.Stdout)
-	}
+	assertScaffoldRemovedType(t, "command")
 }
 
-// and earlier coverage was written against an
-// earlier draft in which a command opted into MCP prompt projection via an
-// `expose_as_mcp_prompt` frontmatter field: an opted-in command appeared in the
-// MCP `prompts/list` response (-12) and a non-opted-in command did not (-13).
-// That feature was removed. The doc now states the canonical behavior in its
-// command section: "Both `podium sync` and the MCP server materialize a command
-// into the target harness's native command location ... Podium does not project
-// commands through MCP" (docs/authoring/artifact-types.md § command). The spec
-// agrees (spec/05-meta-tools.md § command), the manifest schema carries no
-// `expose_as_mcp_prompt` field, and the MCP server advertises no `prompts`
-// capability and defines no `prompts/list` JSON-RPC method (§5.2
-// reviewed §5.2 and recorded "No findings"). Both specs therefore collapse to a
-// single observable: `prompts/list` is an unknown method.
-//
 // TestArtifactTypes_CommandNotProjectedThroughMCP drives podium-mcp against a
-// standalone server holding a command artifact and asserts that `prompts/list`
-// returns JSON-RPC -32601 ("method not found"), the absence the doc claims.
-// spec: §5.2 (no MCP projection); cmd/podium-mcp/main.go default case.
+// standalone server holding a user-invoked skill, the replacement for a
+// command, and asserts that `prompts/list` returns JSON-RPC -32601 ("method
+// not found"): the MCP server defines no prompt projection, so a user-invoked
+// skill reaches a harness through materialization alone.
+// Spec: §5.2 (User-Invoked Skills); cmd/podium-mcp/main.go default case.
 func TestArtifactTypes_CommandNotProjectedThroughMCP(t *testing.T) {
 	t.Parallel()
-	const cmdID = "tools/refactor-module"
-	const cmdArtifact = "---\n" +
-		"type: command\n" +
-		"name: refactor-module\n" +
-		"version: 1.0.0\n" +
-		"description: Guided module refactoring with configurable focus areas.\n" +
-		"tags: [command, refactoring]\n" +
-		"sensitivity: low\n" +
-		"---\n\n# Refactor Module\n\n## User Input\n$ARGUMENTS\n"
-	srv := startServer(t, writeRegistry(t, map[string]string{cmdID + "/ARTIFACT.md": cmdArtifact}))
+	const id = "tools/refactor-module"
+	skill := userInvokedSkill("refactor-module",
+		"Guided module refactoring with configurable focus areas.",
+		"# Refactor Module\n\n## User Input\n$ARGUMENTS\n")
+	srv := startServer(t, writeRegistry(t, map[string]string{id + "/SKILL.md": skill}))
 	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL),
 		rpcReq{ID: 1, Method: "prompts/list", Params: map[string]any{}},
 	)

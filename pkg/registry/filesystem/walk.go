@@ -65,6 +65,15 @@ func (r *ArtifactRecord) ResolveSkillFields() {
 // that want the explicit name.
 func (r *ArtifactRecord) CanonicalID() string { return r.ID }
 
+// Type returns the record's parsed artifact type, or the empty type when the
+// record carries no parsed ARTIFACT.md.
+func (r *ArtifactRecord) Type() manifest.ArtifactType {
+	if r.Artifact == nil {
+		return ""
+	}
+	return r.Artifact.Type
+}
+
 // Walk walks every layer in r and returns the discovered artifacts in a
 // stable order: layer order first, alphabetical canonical-ID within each
 // layer.
@@ -91,10 +100,10 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 		all = append(all, records...)
 	}
 
-	// spec: §13.11.3 — the filesystem source applies the same §4.6 rules as
-	// the server, so a source materializes the artifacts a server stores
-	// from it.
-	kept, refused, err := refuseExtends(all, opts)
+	// spec: §13.11.3 — the filesystem source applies the same §4.1 and §4.6
+	// rules as the server, so a source materializes the artifacts a server
+	// stores from it.
+	kept, refused, err := refuseRemovedFeatures(all, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -111,32 +120,34 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 	return records, nil
 }
 
-// refuseExtends applies the §4.6 no-inheritance rule to all, which is in
-// layer order and then canonical-ID order. Under CollisionPolicyHighestWins
-// it returns all unchanged, because the workspace overlay serves an artifact
-// as authored (§6.4). Under every other policy it removes each record whose
-// authored ARTIFACT.md declares extends:. With OnDrop set, it returns the
-// removed records' drops in the order it met them; with OnDrop nil, the first
-// such record fails the walk. AuthoredBytes is nil for a plain skill, so its
-// synthesized document is never tested for the key.
+// refuseRemovedFeatures applies the §4.6 no-inheritance rule and the §4.1
+// removed-type rule to all, which is in layer order and then canonical-ID
+// order. Under CollisionPolicyHighestWins it returns all unchanged, because
+// the workspace overlay serves an artifact as authored (§6.4). Under every
+// other policy it removes each record that layer.RemovedFeature refuses. With
+// OnDrop set, it returns the removed records' drops in the order it met them;
+// with OnDrop nil, the first such record fails the walk. AuthoredBytes is nil
+// for a plain skill, so its synthesized document is never tested for the key.
 //
-// Spec: §4.6, §13.11.3
-func refuseExtends(all []ArtifactRecord, opts WalkOptions) ([]ArtifactRecord, []layer.Drop, error) {
+// Spec: §4.1, §4.6, §13.11.3
+func refuseRemovedFeatures(all []ArtifactRecord, opts WalkOptions) ([]ArtifactRecord, []layer.Drop, error) {
 	if opts.CollisionPolicy == CollisionPolicyHighestWins {
 		return all, nil, nil
 	}
 	var drops []layer.Drop
 	kept := make([]ArtifactRecord, 0, len(all))
-	for _, rec := range all {
-		if !manifest.DeclaresExtends(rec.AuthoredBytes) {
+	for i := range all {
+		rec := all[i]
+		constraint, reason, refused := layer.RemovedFeature(rec.AuthoredBytes, rec.Type())
+		if !refused {
 			kept = append(kept, rec)
 			continue
 		}
 		if opts.OnDrop == nil {
 			return nil, nil, fmt.Errorf("%s: %q in layer %q: %s",
-				layer.InvalidArtifactCode, rec.ID, rec.Layer.ID, layer.ExtendsRemovedReason)
+				layer.InvalidArtifactCode, rec.ID, rec.Layer.ID, reason)
 		}
-		drops = append(drops, layer.ExtendsRemovedDrop(rec.ID))
+		drops = append(drops, layer.RemovedFeatureDrop(rec.ID, constraint, reason))
 	}
 	return kept, drops, nil
 }
@@ -165,7 +176,7 @@ func assignSourceSkillFields(rec *ArtifactRecord) {
 // synthesizeSkillDocuments sets the ArtifactBytes of every skill record with
 // no ARTIFACT.md to the synthesized document of §4.3.4, so adapters dispatch
 // a plain skill as a skill in every mode. Walk calls it on the slice dedupe
-// returns, and refuseExtends reads AuthoredBytes, so a plain skill's
+// returns, and refuseRemovedFeatures reads AuthoredBytes, so a plain skill's
 // synthesized document is never tested for the extends key. The version is a
 // validated metadata.version or the auto form, so an error marks a broken
 // invariant rather than an authoring fault.

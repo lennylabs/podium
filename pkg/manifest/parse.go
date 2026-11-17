@@ -362,12 +362,12 @@ func ValidateVersion(v string) error {
 // / IsBuiltinExtensionType predicates and for the default TypeProvider
 // registry seeded in pkg/typeprovider.
 var (
-	firstClassTypes       = []ArtifactType{TypeSkill, TypeAgent, TypeContext, TypeCommand, TypeRule, TypeHook}
+	firstClassTypes       = []ArtifactType{TypeSkill, TypeAgent, TypeRule, TypeHook}
 	builtinExtensionTypes = []ArtifactType{TypeMCPServer}
 )
 
 // FirstClassTypes returns the first-class artifact types listed in §4.1
-// (skill, agent, context, command, rule, hook). These types carry full
+// (skill, agent, rule, hook). These types carry full
 // lint coverage and conformance-suite participation. The returned slice
 // is a copy the caller may modify.
 func FirstClassTypes() []ArtifactType {
@@ -384,7 +384,7 @@ func BuiltinExtensionTypes() []ArtifactType {
 }
 
 // IsFirstClassType reports whether t is one of the first-class types
-// listed in §4.1 (skill, agent, context, command, rule, hook). Per §4.1
+// listed in §4.1 (skill, agent, rule, hook). Per §4.1
 // mcp-server is a built-in extension type, not first-class; use
 // IsBuiltinExtensionType for it.
 func IsFirstClassType(t ArtifactType) bool {

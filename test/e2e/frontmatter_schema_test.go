@@ -597,15 +597,13 @@ func TestFrontmatter_CommandScaffoldRejectsExposeFlag(t *testing.T) {
 	}
 }
 
-// TestFrontmatter_CommandNotProjectedThroughMCP covers the realigned
-// behavior, which collapses to one
-// observable now that the opt-in field is gone: the MCP server defines no
-// `prompts/list` method, so the request returns JSON-RPC -32601 ("method not
-// found") regardless of any command in the registry.
+// TestFrontmatter_CommandNotProjectedThroughMCP asserts that the MCP server
+// defines no `prompts/list` method, so the request returns JSON-RPC -32601
+// ("method not found") regardless of any user-invoked skill in the registry.
 // spec: §5.2 (no MCP projection); cmd/podium-mcp/main.go default case.
 func TestFrontmatter_CommandNotProjectedThroughMCP(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{standupID + "/ARTIFACT.md": standupArtifact}))
+	srv := startServer(t, writeRegistry(t, map[string]string{standupFile: standupSkill}))
 	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL),
 		rpcReq{ID: 1, Method: "prompts/list", Params: map[string]any{}},
 	)

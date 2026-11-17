@@ -320,16 +320,23 @@ func TestQuickstart_SyncClaudeCodeRule(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, ".claude/rules/code-style.md"))
 }
 
-// sync claude-code places a context artifact in the
-// harness-neutral .podium/context/<id>/ bucket. Doc: quickstart § What's next.
+// sync claude-code places a reference skill, the replacement for a context
+// artifact (§4.1), at .claude/skills/<name>/SKILL.md with its body.
+// Doc: quickstart § What's next.
 func TestQuickstart_SyncClaudeCodeFallbackPath(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"personal/hello/ctx-demo/ARTIFACT.md": contextArtifact("ctx"),
+		"personal/hello/ctx-demo/SKILL.md": referenceSkill("ctx-demo", "the hello domain"),
 	})
 	tgt := t.TempDir()
-	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code")
-	mustExist(t, filepath.Join(tgt, ".podium/context/personal/hello/ctx-demo/ARTIFACT.md"))
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	got := readFile(t, filepath.Join(tgt, ".claude/skills/ctx-demo/SKILL.md"))
+	if !strings.Contains(got, "the hello domain body.") {
+		t.Errorf("reference skill body missing:\n%s", got)
+	}
+	mustNotExist(t, filepath.Join(tgt, ".podium/context"))
 }
 
 // sync --watch performs an initial sync and exits 0 on
