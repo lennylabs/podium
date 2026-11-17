@@ -32,6 +32,7 @@ func adminCmd(args []string) int {
 			{"erase", "GDPR right-to-erasure: purge a user's layers and redact their audit identity."},
 			{"retention", "Apply audit retention policies to the local audit log."},
 			{"reembed", "Re-run vector embeddings against the configured registry."},
+			{"rebuild-overlap", "Recompute the semantic overlap records of every served artifact."},
 			{"runtime", "Manage trusted runtime signing keys."},
 			{"tenant", "Manage tenants (operator role)."},
 			{"migrate-to-standard", "Pump standalone state into a standard deployment."},
@@ -50,6 +51,8 @@ func adminCmd(args []string) int {
 		return adminRetentionCmd(args[1:])
 	case "reembed":
 		return adminReembedCmd(args[1:])
+	case "rebuild-overlap":
+		return adminRebuildOverlapCmd(args[1:])
 	case "grant":
 		return adminGrantCmd(args[1:])
 	case "revoke":

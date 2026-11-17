@@ -520,6 +520,8 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			Embedder:        collocatedVec.Embedder,
 			VectorPut:       collocatedVec.VectorPut,
 			DomainVectorPut: collocatedVec.DomainVectorPut,
+			// §7.3.1 semantic overlap, nil when the check is off or the backend is managed.
+			SemanticOverlap: collocatedVec.SemanticOverlap,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
@@ -672,6 +674,8 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 				Embedder:        collocatedVec.Embedder,
 				VectorPut:       collocatedVec.VectorPut,
 				DomainVectorPut: collocatedVec.DomainVectorPut,
+				// §7.3.1 semantic overlap, nil when the check is off or the backend is managed.
+				SemanticOverlap: collocatedVec.SemanticOverlap,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
@@ -1192,6 +1196,10 @@ func run(ctx context.Context, stop func()) error {
 	// backend) writes no vector inline; the outbox or self-embed path handles
 	// those.
 	collocatedVec := buildCollocatedVectorIngest(vecProvider, embedProvider, useVectorOutbox)
+	// §7.3.1: with PODIUM_LINT_SEMANTIC_OVERLAP on, every ingest path
+	// computes and reports semantic overlap after its writes on a collocated
+	// backend; a managed backend computes when the outbox writes the vector.
+	collocatedVec.SemanticOverlap = buildSemanticOverlap(st, vecProvider, embedProvider, cfg.semanticOverlap, isManagedVectorBackend(cfg.vectorBackend))
 
 	// §4.6 declarative layers: the registry.yaml `layers:` list seeds an
 	// admin-defined layer per entry (lowest precedence first, in config
@@ -1256,6 +1264,10 @@ func run(ctx context.Context, stop func()) error {
 	// before bootstrap ingest, so a collocated backend embedded each artifact at
 	// ingest) into the registry's query path. vecProvider / embedProvider stay
 	// captured for the §4.7.2 outbox drain worker started later.
+	// §7.3.1 catalog overlap report: the description thresholds come from
+	// the PODIUM_LINT_* variables ingest reads, and the semantic overlap check
+	// from PODIUM_LINT_SEMANTIC_*.
+	registry = registry.WithOverlapChecks(lint.ThresholdsFromEnv(os.Getenv, log.Printf), cfg.semanticOverlap)
 	if vecProvider != nil {
 		registry = registry.WithVectorSearch(vecProvider, embedProvider)
 		if embedProvider != nil {
@@ -1818,8 +1830,11 @@ func run(ctx context.Context, stop func()) error {
 	// pending rows to the backend, publishes the outbox-depth gauge, and emits
 	// vector.outbox_lagging when the backend falls behind.
 	if useVectorOutbox {
-		startVectorOutboxWorker(ctx, cfg, st, vecProvider, embedProvider, mreg, auditSink, tenantID)
+		startVectorOutboxWorker(ctx, cfg, st, vecProvider, embedProvider, mreg, auditSink, tenantID, overlapOutboxHook(registry))
 	}
+	// §7.3.1: the periodic sweep computes artifacts with missing or stale
+	// overlap records on every replica.
+	startOverlapSweep(ctx, cfg.semanticOverlap, st, registry)
 
 	// §8.6 local chain-head anchoring: with PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS
 	// above 0 and a file destination, a goroutine signs the chain head with the
@@ -2181,6 +2196,11 @@ type Config struct {
 	// value is parsed and surfaced so a config-file deployment is not silently
 	// dropped.
 	vectorInferenceModel string
+	// semanticOverlap is the §7.3.1 semantic overlap check configuration from
+	// PODIUM_LINT_SEMANTIC_OVERLAP, PODIUM_LINT_SEMANTIC_SIMILARITY, and
+	// PODIUM_LINT_SEMANTIC_NEIGHBORS. They are environment variables only
+	// (§13.12), so registry.yaml carries no key for them.
+	semanticOverlap lint.SemanticConfig
 	// §4.6 default visibility for newly-registered layers when no
 	// explicit visibility is supplied. One of "public" |
 	// "organization" | "private". Defaults to "private" so
@@ -2480,6 +2500,9 @@ func LoadConfig() *Config {
 		qdrantURL:    os.Getenv("PODIUM_QDRANT_URL"),
 		qdrantKey:    os.Getenv("PODIUM_QDRANT_API_KEY"),
 		qdrantColl:   os.Getenv("PODIUM_QDRANT_COLLECTION"),
+		// §7.3.1 / §13.12: an invalid value keeps its default and logs a
+		// warning naming the variable, as the other PODIUM_LINT_* values do.
+		semanticOverlap: lint.SemanticConfigFromEnv(os.Getenv, log.Printf),
 		// §13.12 self-embedding model (parsed/surfaced).
 		vectorInferenceModel: envFirst("PODIUM_PINECONE_INFERENCE_MODEL", "PODIUM_WEAVIATE_VECTORIZER", "PODIUM_QDRANT_INFERENCE_MODEL"),
 		// §4.6 + §13.2.1. The default visibility is resolved after applyYAML
@@ -2712,7 +2735,25 @@ func (c *Config) validate() error {
 		return fmt.Errorf("missing required configuration for the selected backend(s): %s",
 			strings.Join(missing, ", "))
 	}
-	return nil
+	return c.semanticOverlapGuard()
+}
+
+// semanticOverlapGuard refuses a start that turns the §7.3.1 semantic overlap
+// check on with no embedding source: an empty PODIUM_EMBEDDING_PROVIDER with a
+// backend that does not self-embed. The check reads the vectors search
+// writes, and that configuration writes none. "none", which
+// PODIUM_NO_EMBEDDINGS selects, disables the provider the same way the empty
+// string does, so it is refused on the same terms.
+//
+// Spec: §7.3.1, §13.12
+func (c *Config) semanticOverlapGuard() error {
+	if !c.semanticOverlap.Enabled || c.vectorSelfEmbeds() {
+		return nil
+	}
+	if c.embeddingProvider != "" && c.embeddingProvider != "none" {
+		return nil
+	}
+	return fmt.Errorf("config.invalid: PODIUM_LINT_SEMANTIC_OVERLAP=on needs an embedding source, but PODIUM_EMBEDDING_PROVIDER is empty and the vector backend does not self-embed; set PODIUM_EMBEDDING_PROVIDER, select a self-embedding backend, or set PODIUM_LINT_SEMANTIC_OVERLAP=off")
 }
 
 // missingBackendValues returns the env-var names that a selected backend

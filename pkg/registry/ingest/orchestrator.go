@@ -70,6 +70,9 @@ type SourceIngestOptions struct {
 	// UseVectorOutbox routes embedding through the §4.7.2 transactional outbox
 	// (set for an external vector backend). See ingest.Request.UseVectorOutbox.
 	UseVectorOutbox bool
+	// SemanticOverlap computes §7.3.1 overlap after the cycle's writes. See
+	// ingest.Request.SemanticOverlap.
+	SemanticOverlap SemanticOverlapFunc
 }
 
 // SourceIngest snapshots the layer via the supplied provider, runs
@@ -163,6 +166,7 @@ func SourceIngestWithOptions(
 		EnforceableSandboxProfiles: opts.EnforceableSandboxProfiles,
 		Signer:                     opts.Signer,
 		UseVectorOutbox:            opts.UseVectorOutbox,
+		SemanticOverlap:            opts.SemanticOverlap,
 	})
 	if err != nil {
 		return nil, err

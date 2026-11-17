@@ -24,6 +24,13 @@ type collocatedVectorIngest struct {
 	Embedder        ingest.EmbedderFunc
 	VectorPut       ingest.VectorPutFunc
 	DomainVectorPut ingest.DomainVectorPutFunc
+	// SemanticOverlap is the §7.3.1 overlap computation each ingest path runs
+	// after its writes on a collocated backend. Run sets it after
+	// buildCollocatedVectorIngest returns, from the check's configuration; it
+	// rides here so the bootstrap and reingest paths receive every
+	// search-index hook through one value. Nil when the check is off or the
+	// backend is managed.
+	SemanticOverlap ingest.SemanticOverlapFunc
 }
 
 // buildCollocatedVectorIngest returns the ingest-time embedding closures for a

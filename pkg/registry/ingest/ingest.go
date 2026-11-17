@@ -269,7 +269,21 @@ type Request struct {
 	// only when the store implements store.VectorOutbox; collocated backends
 	// leave it false and keep the inline fast path.
 	UseVectorOutbox bool
+	// SemanticOverlap, when non-nil, computes and stores the §7.3.1 overlap
+	// records of the artifacts this cycle stores as a new version, after the
+	// cycle's writes, and its diagnostics join Result.Advisories. The registry
+	// sets it when PODIUM_LINT_SEMANTIC_OVERLAP is on and the vector backend
+	// is collocated; nil computes nothing.
+	SemanticOverlap SemanticOverlapFunc
 }
+
+// SemanticOverlapFunc computes the §7.3.1 overlap records of the (artifact,
+// version) pairs an ingest cycle of layerID in tenantID stored as new
+// versions and returns lint.semantic_overlap advisories for them. It never
+// fails the cycle.
+//
+// Spec: §7.3.1
+type SemanticOverlapFunc func(ctx context.Context, tenantID, layerID string, stored []IngestedArtifact) []lint.Diagnostic
 
 // AuditEmitterFunc is the audit-emission seam ingest uses to
 // surface ingest events into the §8 audit log.
@@ -796,10 +810,29 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		}
 	}
 
+	// Spec: §7.3.1 — overlap is computed after the cycle's writes, so a peer
+	// this cycle stored on a collocated backend is found, and it reports among
+	// the non-blocking advisories.
+	if req.SemanticOverlap != nil {
+		res.Advisories = append(res.Advisories, req.SemanticOverlap(ctx, req.TenantID, req.LayerID, acceptedArtifacts(res.Ingested))...)
+	}
+
 	if len(res.LintFailures) > 0 && res.Accepted == 0 && res.Idempotent == 0 && len(res.Conflicts) == 0 {
 		return res, fmt.Errorf("%w: %d diagnostics", ErrLintFailed, len(res.LintFailures))
 	}
 	return res, nil
+}
+
+// acceptedArtifacts returns the pairs the cycle newly stored, leaving out the
+// idempotent no-ops.
+func acceptedArtifacts(ingested []IngestedArtifact) []IngestedArtifact {
+	var out []IngestedArtifact
+	for _, a := range ingested {
+		if a.Accepted {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // placement is the outcome of placing one record in the store. At most one

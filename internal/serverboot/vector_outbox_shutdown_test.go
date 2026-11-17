@@ -22,6 +22,6 @@ func TestStartVectorOutboxWorker_StopsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	// A long interval parks the goroutine on the ticker after its immediate pass.
 	// The ctx.Done() case in the select must still unblock the worker and return.
-	startVectorOutboxWorker(ctx, &Config{vectorOutboxInterval: 3600}, st, vec, fakeEmbedder{dim: 8}, nil, nil, "t")
+	startVectorOutboxWorker(ctx, &Config{vectorOutboxInterval: 3600}, st, vec, fakeEmbedder{dim: 8}, nil, nil, "t", nil)
 	cancel()
 }

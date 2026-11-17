@@ -55,6 +55,8 @@ func main() {
 		os.Exit(lintCmd(os.Args[2:]))
 	case "search":
 		os.Exit(searchCmd(os.Args[2:]))
+	case "overlap":
+		os.Exit(overlapCmd(os.Args[2:]))
 	case "domain":
 		os.Exit(domainCmd(os.Args[2:]))
 	case "artifact":
@@ -193,6 +195,7 @@ Commands:
   sync save-as        Capture the current target state as a sync.yaml profile.
   lint                Validate manifests in a filesystem-source registry.
   search              Hybrid search over artifacts (registry HTTP API).
+  overlap             Report description overlap across every layer you can see (registry HTTP API).
   domain show         Show a domain map.
   domain search       Hybrid search over domains.
   domain analyze      Print domain-discovery metrics and split/fold candidates for a subtree.
@@ -211,6 +214,7 @@ Commands:
   admin erase         GDPR right-to-be-forgotten on the local audit log.
   admin retention     Apply audit retention policies to the local audit log.
   admin reembed       Re-run vector embeddings against the configured registry.
+  admin rebuild-overlap  Recompute the semantic overlap records of every served artifact.
   admin grant         Grant tenant admin role to a user.
   admin revoke        Revoke tenant admin role from a user.
   admin show-effective  Print the per-layer visibility for a user identity.

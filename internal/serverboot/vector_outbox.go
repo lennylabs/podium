@@ -30,6 +30,10 @@ type vectorDrainWorker struct {
 	lagAge    time.Duration
 	metrics   *metrics.Registry
 	onLagging func(depth int, oldestAge time.Duration)
+	// onWritten runs after a row's vector reaches the backend and the row is
+	// marked done. The §7.3.1 overlap computation hooks here so it runs once
+	// the artifact's vector is in the managed index. Nil runs nothing.
+	onWritten func(ctx context.Context, p store.VectorPending)
 
 	wasLagging bool
 }
@@ -50,6 +54,9 @@ func (w *vectorDrainWorker) runOnce(ctx context.Context, now time.Time) {
 			continue
 		}
 		_ = w.outbox.MarkVectorPendingDone(ctx, p.TenantID, p.ArtifactID, p.Version)
+		if w.onWritten != nil {
+			w.onWritten(ctx, p)
+		}
 	}
 	w.publishStats(ctx, now)
 }
@@ -113,7 +120,7 @@ func (w *vectorDrainWorker) publishStats(ctx context.Context, now time.Time) {
 // retention/anchor scheduler goroutine pattern: an immediate pass, then one per
 // tick, until ctx is cancelled (the server's lifecycle context), so a graceful
 // shutdown stops the worker rather than leaking the goroutine.
-func startVectorOutboxWorker(ctx context.Context, cfg *Config, st store.Store, vec vector.Provider, embedder embedding.Provider, mreg *metrics.Registry, auditSink audit.Sink, tenantID string) {
+func startVectorOutboxWorker(ctx context.Context, cfg *Config, st store.Store, vec vector.Provider, embedder embedding.Provider, mreg *metrics.Registry, auditSink audit.Sink, tenantID string, onWritten func(context.Context, store.VectorPending)) {
 	ob, ok := st.(store.VectorOutbox)
 	if !ok {
 		return
@@ -136,6 +143,7 @@ func startVectorOutboxWorker(ctx context.Context, cfg *Config, st store.Store, v
 		lagAge:    time.Duration(cfg.vectorOutboxLagAge) * time.Second,
 		metrics:   mreg,
 		onLagging: vectorOutboxLaggingCallback(auditSink, tenantID),
+		onWritten: onWritten,
 	}
 	go func() {
 		t := time.NewTicker(interval)
