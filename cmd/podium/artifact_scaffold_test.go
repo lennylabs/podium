@@ -251,6 +251,83 @@ func TestScaffold_Skill_WritesFieldsInFixedOrder(t *testing.T) {
 	}
 }
 
+// Spec: §4.3, §4.3.4, §7.3.1 — --invocation user with --type skill writes
+// invocation: "user" under SKILL.md metadata, between sensitivity and
+// when_to_use. The output lints with no diagnostic and resolves to a
+// user-invoked skill.
+func TestScaffold_Skill_InvocationUserWritesMetadata(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "dev-loop", "standup")
+	skill := scaffoldSkillMD(t, target,
+		"--invocation", "user",
+		"--sensitivity", "low",
+		"--when-to-use", "daily standup")
+	want := "metadata:\n" +
+		"  version: \"0.1.0\"\n" +
+		"  sensitivity: \"low\"\n" +
+		"  invocation: \"user\"\n" +
+		"  when_to_use: |\n" +
+		"    daily standup\n" +
+		"---\n"
+	if !strings.Contains(skill, want) {
+		t.Errorf("SKILL.md missing %q:\n%s", want, skill)
+	}
+	art := resolveScaffoldedSkill(t, root)
+	if art.Invocation != manifest.InvocationUser || !art.UserInvoked() {
+		t.Errorf("invocation = %q, UserInvoked = %v; want user, true", art.Invocation, art.UserInvoked())
+	}
+}
+
+// Spec: §4.3.4 — --invocation any writes no invocation key, because an
+// absent field already resolves to the default any.
+func TestScaffold_Skill_InvocationAnyWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "personal", "greet")
+	skill := scaffoldSkillMD(t, target, "--invocation", "any")
+	if strings.Contains(skill, "invocation") {
+		t.Errorf("--invocation any must write no invocation key:\n%s", skill)
+	}
+	if art := resolveScaffoldedSkill(t, root); art.UserInvoked() {
+		t.Errorf("skill resolved as user-invoked; want the default any")
+	}
+}
+
+// Spec: §4.3, §4.3.4, §7.3.1 — --invocation is valid only with --type
+// skill and only with the values any and user. Any other combination
+// exits 2 with an error naming the flag and writes no directory.
+func TestScaffold_InvocationRefused(t *testing.T) {
+	cases := []struct {
+		name, typ, value, want string
+	}{
+		{"user on agent", "agent", "user", "--invocation applies only to --type skill"},
+		{"any on rule", "rule", "any", "--invocation applies only to --type skill"},
+		{"invalid value", "skill", "maybe", `--invocation "maybe" must be one of any|user`},
+		{"empty value", "skill", "", `--invocation "" must be one of any|user`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			target := filepath.Join(root, "personal", "standup")
+			exit, _, stderr := runScaffold([]string{
+				"--type", tc.typ,
+				"--description", "Format a standup update.",
+				"--invocation", tc.value,
+				"--yes",
+				target,
+			}, "")
+			if exit != 2 {
+				t.Fatalf("exit=%d, want 2; stderr=%s", exit, stderr)
+			}
+			if !strings.HasPrefix(stderr, "error: ") || !strings.Contains(stderr, tc.want) {
+				t.Errorf("stderr = %q, want an error containing %q", stderr, tc.want)
+			}
+			if _, err := os.Stat(target); !os.IsNotExist(err) {
+				t.Errorf("refusal must create no directory (stat err=%v)", err)
+			}
+		})
+	}
+}
+
 // Spec: §4.3.4, §7.3.1 — the YAML reader ends a line in the when_to_use
 // literal block at U+0085, U+2028, and U+2029 as well as at a line feed or
 // a carriage return. A --when-to-use entry that holds any of them is

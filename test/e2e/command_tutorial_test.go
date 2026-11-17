@@ -60,7 +60,8 @@ func TestCommandTutorial_ArtifactLayout(t *testing.T) {
 	}
 }
 
-// a scaffolded skill with metadata.invocation "user" added lints clean.
+// Spec: §4.3.4, §7.3.1 — a skill scaffolded with --invocation user carries
+// metadata.invocation "user" and lints clean.
 func TestCommandTutorial_ScaffoldLintsClean(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -70,20 +71,16 @@ func TestCommandTutorial_ScaffoldLintsClean(t *testing.T) {
 		"--description", "Format a daily standup update from a free-text summary of yesterday's work.",
 		"--tags", "dev-loop,standup,daily",
 		"--sensitivity", "low",
+		"--invocation", "user",
 		"--yes", out)
 	if sc.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
 	}
-	skillPath := filepath.Join(out, "SKILL.md")
-	skill := readFile(t, skillPath)
-	for _, want := range []string{"metadata:\n", "sensitivity: \"low\""} {
+	skill := readFile(t, filepath.Join(out, "SKILL.md"))
+	for _, want := range []string{"metadata:\n", "sensitivity: \"low\"", "invocation: \"user\""} {
 		if !strings.Contains(skill, want) {
 			t.Errorf("scaffolded SKILL.md missing %q:\n%s", want, skill)
 		}
-	}
-	skill = strings.Replace(skill, "metadata:\n", "metadata:\n  invocation: \"user\"\n", 1)
-	if err := os.WriteFile(skillPath, []byte(skill), 0o644); err != nil {
-		t.Fatalf("write SKILL.md: %v", err)
 	}
 	lint := runPodium(t, "", nil, "lint", "--registry", root)
 	if lint.Exit != 0 || !strings.Contains(lint.Stdout, "lint: no issues.") {
