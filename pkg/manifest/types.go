@@ -10,8 +10,8 @@ package manifest
 
 // ArtifactType is the canonical type discriminator. The first-class types
 // are skill, agent, rule, and hook, and mcp-server is the built-in extension
-// type (per §4.1). The TypeContext and TypeCommand constants name the types
-// §4.1 removed, which ingest refuses.
+// type (per §4.1). The types §4.1 removed, command and context, have no
+// constant; ingest refuses them.
 // Extension types register through the TypeProvider SPI; they appear in
 // this enum as plain strings without a constant.
 type ArtifactType string
@@ -20,8 +20,6 @@ type ArtifactType string
 const (
 	TypeSkill     ArtifactType = "skill"
 	TypeAgent     ArtifactType = "agent"
-	TypeContext   ArtifactType = "context"
-	TypeCommand   ArtifactType = "command"
 	TypeRule      ArtifactType = "rule"
 	TypeHook      ArtifactType = "hook"
 	TypeMCPServer ArtifactType = "mcp-server"

@@ -511,7 +511,7 @@ func TestFrontmatter_HintsVerbatim(t *testing.T) {
 	}
 }
 
-// effort_hint on a non-agent/skill/command type warns.
+// effort_hint on a non-agent/skill type warns.
 func TestFrontmatter_HintOnUnsupportedTypeWarns(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -523,6 +523,42 @@ func TestFrontmatter_HintOnUnsupportedTypeWarns(t *testing.T) {
 	}
 	if !strings.Contains(res.Stdout, "lint.hint_on_unsupported_type") || !strings.Contains(res.Stdout, "[warning]") {
 		t.Errorf("missing hint_on_unsupported_type warning:\n%s", res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "hints apply only to agent / skill") {
+		t.Errorf("hint warning does not name agent / skill:\n%s", res.Stdout)
+	}
+}
+
+// Spec: §4.3, §4.3.4 — `podium lint` warns on an invalid ARTIFACT.md
+// invocation value on a skill and on an invocation set on another type, and
+// exits 0 because both are warnings. A valid value on a skill draws no
+// lint.skill_invocation warning.
+func TestFrontmatter_InvocationWarnings(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"finance/bad/ARTIFACT.md":   "---\ntype: skill\nversion: 1.0.0\ninvocation: yes\n---\n\n",
+		"finance/bad/SKILL.md":      "---\nname: bad\ndescription: Reconcile the quarterly ledger before the audit.\n---\n\nBody.\n",
+		"finance/good/ARTIFACT.md":  "---\ntype: skill\nversion: 1.0.0\ninvocation: user\n---\n\n",
+		"finance/good/SKILL.md":     "---\nname: good\ndescription: Draft the vendor payment schedule for next month.\n---\n\nBody.\n",
+		"finance/close/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Run the month-end close across every subsidiary.\ninvocation: user\n---\n\nAgent body.\n",
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0 (warnings)\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	for _, want := range []string{
+		`invocation "yes" is not a valid value; valid values: any, user. The skill resolves to any`,
+		`invocation set on type "agent"; invocation applies only to skill`,
+	} {
+		if !strings.Contains(res.Stdout, want) {
+			t.Errorf("lint output missing %q:\n%s", want, res.Stdout)
+		}
+	}
+	if n := strings.Count(res.Stdout, "lint.skill_invocation"); n != 2 {
+		t.Errorf("want 2 lint.skill_invocation warnings, got %d:\n%s", n, res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "finance/good") {
+		t.Errorf("a valid invocation drew a diagnostic:\n%s", res.Stdout)
 	}
 }
 

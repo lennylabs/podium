@@ -803,7 +803,7 @@ func TestArtifactTypes_InvalidVersion(t *testing.T) {
 }
 
 // effort_hint on a rule warns (hints apply only to
-// agent / skill / command).
+// agent / skill).
 func TestArtifactTypes_EffortHintOnRuleWarns(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{

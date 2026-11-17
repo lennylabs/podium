@@ -2,6 +2,7 @@ package lint
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -191,8 +192,8 @@ body
 }
 
 // Spec: §4.3 — effort_hint and model_class_hint apply only to types
-// agent, skill, and command. Setting them on context, rule, hook, or
-// mcp-server emits a warning.
+// agent and skill. Setting them on rule, hook, or mcp-server emits a
+// warning.
 func TestLint_EffortHintWarnsOnUnsupportedType(t *testing.T) {
 	t.Parallel()
 	reg, records := openFixture(t,
@@ -216,6 +217,10 @@ body
 	}
 	if !hasSeverity(diags, "lint.hint_on_unsupported_type", SeverityWarning) {
 		t.Errorf("expected severity warning")
+	}
+	want := `effort_hint set on type "rule"; hints apply only to agent / skill`
+	if !slices.Contains(messagesFor(diags, "lint.hint_on_unsupported_type", SeverityWarning), want) {
+		t.Errorf("want message %q, got: %v", want, diags)
 	}
 }
 

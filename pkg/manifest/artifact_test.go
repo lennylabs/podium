@@ -266,7 +266,7 @@ func TestIsBuiltinExtensionType(t *testing.T) {
 		t.Errorf("mcp-server should be a built-in extension type")
 	}
 	for _, ty := range []ArtifactType{
-		TypeSkill, TypeAgent, TypeContext, TypeCommand, TypeRule, TypeHook, "dataset", "",
+		TypeSkill, TypeAgent, ArtifactType("context"), ArtifactType("command"), TypeRule, TypeHook, "dataset", "",
 	} {
 		if IsBuiltinExtensionType(ty) {
 			t.Errorf("%q should not be a built-in extension type", ty)

@@ -228,6 +228,8 @@ func skillMetadataFieldValue(a *manifest.Artifact, key string) any {
 		return a.ReplacedBy
 	case "release_notes":
 		return a.ReleaseNotes
+	case "invocation":
+		return string(a.Invocation)
 	}
 	return nil
 }
@@ -242,6 +244,55 @@ func skillMetadataValuesEqual(x, y any) bool {
 		return xList && yList && slices.Equal(xs, ys)
 	}
 	return x == y
+}
+
+// ruleSkillInvocation enforces spec §4.3 and §4.3.4 for the invocation value
+// that ARTIFACT.md authors. On a skill, a non-empty value other than any or
+// user warns and the skill resolves to any. On every other type, a set value
+// warns, because invocation applies only to skills.
+//
+// The rule reads the authored bytes rather than rec.Artifact.Invocation,
+// because the resolved value can hold the SKILL.md metadata.invocation value,
+// which ruleSkillMetadataFields already reports. Each invalid value is
+// therefore reported once, in the file that holds it. A plain skill has no
+// ARTIFACT.md and states no value. The warning honors no lint_suppress entry.
+//
+// Spec: §4.3, §4.3.4
+type ruleSkillInvocation struct{}
+
+func (ruleSkillInvocation) Code() string { return "lint.skill_invocation" }
+
+func (r ruleSkillInvocation) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+	var out []Diagnostic
+	for _, rec := range records {
+		if rec.Artifact == nil || len(rec.AuthoredBytes) == 0 {
+			continue
+		}
+		authored, err := manifest.ParseArtifact(rec.AuthoredBytes)
+		if err != nil || authored.Invocation == "" {
+			// The walk parsed the same bytes before lint runs.
+			continue
+		}
+		if msg := invocationProblem(rec.Artifact.Type, authored.Invocation); msg != "" {
+			out = append(out, warn(rec.ID, r.Code(), msg))
+		}
+	}
+	return out
+}
+
+// invocationProblem returns the warning text for a non-empty authored
+// invocation value on an artifact of type ty, or "" when the value is valid.
+//
+// Spec: §4.3, §4.3.4
+func invocationProblem(ty manifest.ArtifactType, inv manifest.Invocation) string {
+	if ty != manifest.TypeSkill {
+		return fmt.Sprintf("invocation set on type %q; invocation applies only to skill", ty)
+	}
+	if inv == manifest.InvocationAny || inv == manifest.InvocationUser {
+		return ""
+	}
+	return fmt.Sprintf("invocation %q is not a valid value; valid values: %s, %s. The skill resolves to %s",
+		inv, manifest.InvocationAny, manifest.InvocationUser, manifest.InvocationAny)
 }
 
 // ruleSkillMetadataFields enforces spec §4.3.4: "A `SKILL.md` `metadata` value

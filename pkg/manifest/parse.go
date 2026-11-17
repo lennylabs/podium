@@ -408,8 +408,8 @@ func IsBuiltinExtensionType(t ArtifactType) bool {
 }
 
 // removedTypes maps each type that §4.1 removed to the replacement phrase a
-// refusal names. The keys are string literals rather than the TypeCommand and
-// TypeContext constants, so the predicates outlive those constants.
+// refusal names. The removed types have no ArtifactType constant, so the keys
+// are string literals.
 //
 // Spec: §4.1
 var removedTypes = map[ArtifactType]string{

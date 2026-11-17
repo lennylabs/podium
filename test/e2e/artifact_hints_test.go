@@ -3,7 +3,7 @@ package e2e
 // End-to-end tests for docs/authoring/hints.md (D-hints).
 // Covers the effort_hint and model_class_hint enums, the
 // lint.hint_on_unsupported_type warning that fires when a hint is set on a type
-// other than agent/skill/command, the absence of enum-value validation, and the
+// other than agent/skill, the absence of enum-value validation, and the
 // verbatim pass-through of both hint fields through the standalone server, the
 // MCP bridge, and filesystem sync. Tests drive the podium CLI, the standalone
 // server, and the podium-mcp bridge. Doc claims that the implementation does not
@@ -39,7 +39,7 @@ func htLoadFrontmatter(t *testing.T, baseURL, id string) string {
 	return load.Frontmatter
 }
 
-// ---- effort_hint accepted on supported types (agent/skill/command) ---------
+// ---- effort_hint accepted on supported types (agent/skill) ---------------
 
 // effort_hint: low on a skill lints clean with no
 // hint_on_unsupported_type warning.
