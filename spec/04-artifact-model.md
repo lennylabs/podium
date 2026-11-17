@@ -36,7 +36,7 @@ The type system is extensible: deployments register additional types with their 
 
 The type determines indexing, loading semantics, governance requirements, and search ranking.
 
-**Manifest size lint.** Lint estimates a token count as the byte length divided by four, rounded up. Lint errors when manifest content exceeds 20,000 estimated tokens by default, and the cap is configurable (§13.12). Larger reference content should be factored out as a separate `type: context` artifact. For skills, the cap applies to the `SKILL.md` body; the agentskills.io spec recommends keeping `SKILL.md` body content under 5K tokens and ≤ 500 lines, with longer reference material moved into `references/`.
+**Manifest size lint.** Lint estimates a token count as the byte length divided by four, rounded up. Lint errors when manifest content exceeds 20,000 estimated tokens by default, and the cap is configurable (§13.12). Larger reference content belongs in a skill's `references/` directory (§4.3.4), or, when no single skill owns it, in a skill that carries reference material and whose description says so. For skills, the cap applies to the `SKILL.md` body; the agentskills.io spec recommends keeping `SKILL.md` body content under 5K tokens and ≤ 500 lines, with longer reference material moved into `references/`.
 
 **Package layout example (skill).** A skill that ships with a Python script and a Jinja template, following the agentskills.io directory conventions (`scripts/`, `references/`, `assets/`):
 
