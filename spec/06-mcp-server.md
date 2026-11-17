@@ -384,8 +384,6 @@ Type materialization (can the harness materialize an artifact of this type at pr
 | ------------ | ----------- | -------------- | ------------- | ------ | ----- | -------- | ------ | --- | ------ |
 | `skill`      | ✓           | ✗              | ✗             | ✓      | ✓     | ✓        | ✓      | ✓   | ✗      |
 | `agent`      | ✓           | ✗              | ✗             | ✓      | ✓     | ✓        | ✓      | ✗   | ✗      |
-| `context`    | ✓           | ✗              | ✓             | ✓      | ✓     | ✓        | ✓      | ✓   | ✓      |
-| `command`    | ✓           | ✗              | ✗             | ✓      | ✗     | ✓        | ✓      | ✓   | ✗      |
 | `mcp-server` | ✓           | ✗              | ✗             | ✓      | ✓     | ✓        | ✓      | ✗   | ✗      |
 
 Frontmatter-field fidelity, measured on a `type: agent` carrier (does the field survive the harness's agent output):
@@ -400,7 +398,7 @@ Frontmatter-field fidelity, measured on a `type: agent` carrier (does the field 
 
 A field row records whether the value survives the harness's agent materialization. The pass-through `.md` agents (claude-code, cursor, opencode, gemini) preserve every field; the Codex TOML agent keeps `name` and `description` and drops the rest; a harness with no project-level agent surface (claude-desktop, claude-cowork, pi, hermes) drops the row.
 
-Rule modes (`type: rule`) and hook events (`type: hook`):
+Rule modes (`type: rule`), hook events (`type: hook`), and skill invocation (`type: skill`):
 
 | Capability            | claude-code | claude-desktop | claude-cowork | cursor | codex | opencode | gemini | pi  | hermes |
 | --------------------- | ----------- | -------------- | ------------- | ------ | ----- | -------- | ------ | --- | ------ |
@@ -409,8 +407,11 @@ Rule modes (`type: rule`) and hook events (`type: hook`):
 | `rule_mode: auto`     | ⚠           | ✗              | ✗             | ✓      | ⚠     | ⚠        | ⚠      | ⚠   | ✓      |
 | `rule_mode: explicit` | ⚠           | ✗              | ✗             | ✓      | ⚠     | ⚠        | ⚠      | ⚠   | ✓      |
 | `hook_event` (any)    | ✓           | ✗              | ✗             | ⚠      | ✓     | ✗        | ✓      | ✗   | ✗      |
+| `invocation: user`    | ✓           | ✗              | ✗             | ✓      | ✓     | ⚠        | ⚠      | ✓   | ✗      |
 
 A rule mode is ✓ where the adapter produces native per-file or per-mode scoping, and ⚠ where the rule degrades to an always-loaded block. Cursor and Hermes write `.cursor/rules/*.mdc`, which carry every mode natively. Claude Code writes `.claude/rules/` files: `always` loads at launch (native), `glob` uses the native `paths:` list (native), and `auto` and `explicit` fall back to a load-always file because Claude Code has no description-attach or mention-only rule mode. The `AGENTS.md` and `GEMINI.md` inject harnesses (codex, opencode, gemini, pi) honor `always` natively and degrade the scoped modes to the always-loaded block.
+
+The `invocation: user` row is ✓ where the adapter writes the harness's user-only skill control, ⚠ where it writes the harness's native command file instead, and ✗ where the harness has no project-scope skill surface. It grades adapter output, and the harness determines runtime behavior.
 
 The `hook_event` row summarizes hook support at the field level. Per-event coverage (which canonical events from §4.3.5 each adapter translates) is tracked in the adapter implementation rather than in this spec; the row marks ✓ when the adapter config-merges the common events (`session_start`, `session_end`, `pre_tool_use`, `post_tool_use`, `stop`, `pre_compact`) and ⚠ when only a subset translates. Cursor is ⚠ because it exposes per-category subtype events (`beforeShellExecution` and the like) rather than the generic tool events. For the harness's own current event surface, refer to the harness's documentation.
 
