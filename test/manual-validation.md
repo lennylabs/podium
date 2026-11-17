@@ -12995,7 +12995,7 @@ own, parses, keeps its bytes, and lints without false errors, and that a
 frontmatter does not parse is refused alone while lint, a filesystem-source
 sync, and a registry reingest still process every other artifact of its layer.
 
-**Covers.** The §4.1 unparseable-manifest rule, the §4.3.4 `allowed-tools`
+**Covers.** The §4.1 unparseable-manifest rule and the §13.11.3 keep and remove setting, the §4.3.4 `allowed-tools`
 row, nested `metadata` values, and skill-artifact lint severities, the §4.4 prose-reference rule, the
 §7.3.1 `lint.near_duplicate_content` units, §13.11.3, and the §7.3.1 ingest
 outcome, through the compiled `podium` binary.
@@ -13030,7 +13030,7 @@ diagnostic that fails `--fail-on warning` is the defect this scenario catches.
    printf '%s\n' "$LICENSE_TEXT" > "$WORK/reg/team/history/LICENSE.txt"
    printf '%s\n' "$LICENSE_TEXT" > "$WORK/reg/team/history-copy/LICENSE.txt"
    printf '# API\n\n## Errors\n\nEach error carries a code.\n' > "$WORK/reg/team/history/references/api.md"
-   printf -- '---\nname: history\ndescription: Summarizes repository history with git and jq for a weekly engineering report.\nallowed-tools: Bash(git:*) Bash(jq:*) Read\n---\n\nRead [the error codes](references/api.md#errors) first.\nWrite links as `[text](url)` in the report.\n\n\140\140\140markdown\n[example](missing/file.md)\n\140\140\140\n' > "$WORK/reg/team/history/SKILL.md"
+   printf -- '---\nname: history\ndescription: Summarizes repository history with git and jq for a weekly engineering report.\nallowed-tools: Bash(git:*) Bash(jq:*) Read\n---\n\nRead [the error codes](references/api.md#errors) first.\nAsk [the team](mailto:team@acme.com) before a release.\nWrite links as `[text](url)` in the report.\n\n\140\140\140markdown\n[example](missing/file.md)\n\140\140\140\n' > "$WORK/reg/team/history/SKILL.md"
    printf -- '---\nname: history-copy\ndescription: Drafts release notes from merged pull requests for the product changelog page.\nversion: 1.2.0\n---\n\nSee [the history skill](../history/SKILL.md) for the git queries.\n' > "$WORK/reg/team/history-copy/SKILL.md"
    printf -- '---\nname: requires\ndescription: Checks that browser automation prerequisites are installed before a run.\nmetadata:\n  version: "1.0.0"\n  requires:\n    bins: [node]\n---\n\nRun the checks.\n' > "$WORK/reg/team/requires/SKILL.md"
    printf -- '---\nname: broken\ndescription:\n  text: Checks that the build cache is warm before a release run.\n---\n\nRun the checks.\n' > "$WORK/reg/team/broken/SKILL.md"
@@ -13048,7 +13048,7 @@ diagnostic that fails `--fail-on warning` is the defect this scenario catches.
    `(lint.skill_metadata_nonstring)`. Standard error carries one `rejected:`
    line naming `team/broken` with `ingest.invalid_artifact` and a reason that
    names `team/broken/SKILL.md`. No line
-   reports `references/api.md#errors`, `url`, `missing/file.md`, or
+   reports `references/api.md#errors`, `mailto:team@acme.com`, `url`, `missing/file.md`, or
    `LICENSE.txt`, and no line reports `allowed-tools`. The run prints
    `lint exit=1`, because a refused artifact fails the run. A missing
    `team/history` line, or no output beyond an error naming
@@ -13134,6 +13134,28 @@ diagnostic that fails `--fail-on warning` is the defect this scenario catches.
    and a reason that names `team/broken/SKILL.md`. The search count prints
    `3`: `team/history`, `team/history-copy`, and `team/requires` were ingested,
    which a server that failed the whole layer would not serve.
+
+6. Break `team/history-copy`, which step 4 synced, by writing its
+   `description` as a mapping. Sync the same target again under the default
+   setting, then with `--on-unparseable remove`.
+
+   ```bash
+   printf -- '---\nname: history-copy\ndescription:\n  text: Drafts release notes.\n---\n\nBody.\n' > "$WORK/reg/team/history-copy/SKILL.md"
+   podium sync --registry "$WORK/reg" --harness claude-code --target "$WORK/ws" > /dev/null 2> "$WORK/keep.err"; echo "keep exit=$?"
+   grep 'team/history-copy' "$WORK/keep.err"
+   ls "$WORK/ws/.claude/skills/history-copy"
+   podium sync --registry "$WORK/reg" --harness claude-code --target "$WORK/ws" --on-unparseable remove > /dev/null 2> "$WORK/remove.err"; echo "remove exit=$?"
+   ls "$WORK/ws/.claude/skills/history-copy" 2>&1 | head -1
+   podium sync --registry "$WORK/reg" --harness claude-code --target "$WORK/ws" --on-unparseable discard > /dev/null 2>&1; echo "invalid exit=$?"
+   ```
+
+   **Expect.** `keep exit=1`, and the `grep` prints `rejected:
+   team/history-copy (ingest.invalid_artifact): ...; the previous sync output
+   was kept`. The `ls` lists `LICENSE.txt` and `SKILL.md`, the files step 4
+   wrote. A missing directory means the default removed a skill that is only
+   mid-edit. The `remove` run prints `remove exit=1`, and the second `ls`
+   reports that the directory does not exist. The invalid value prints
+   `invalid exit=2`.
 
 **Cleanup.** `rm -rf "$WORK"`. Step 5 stops the server.
 
