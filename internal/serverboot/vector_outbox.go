@@ -36,6 +36,10 @@ type vectorDrainWorker struct {
 	// artifacts' vectors are in the managed index and reads the served set
 	// once per pass rather than once per row. Nil runs nothing.
 	onWritten func(ctx context.Context, written []store.VectorPending)
+	// redact removes credentials from a drain error before the row records
+	// it and the log line carries it (§4.7). The zero value still removes URL
+	// userinfo, query strings, and connection-string passwords.
+	redact outboxRedactor
 
 	wasLagging bool
 }
@@ -51,9 +55,10 @@ func (w *vectorDrainWorker) runOnce(ctx context.Context, now time.Time) {
 	for _, p := range rows {
 		if err := w.drainRow(ctx, p); err != nil {
 			backoff := w.backoff(p.Attempts)
-			_ = w.outbox.MarkVectorPendingRetry(ctx, p.TenantID, p.ArtifactID, p.Version, now.Add(backoff), err.Error())
-			log.Printf("vector outbox: drain %s@%s failed (attempt %d): %v; retry in %s",
-				p.ArtifactID, p.Version, p.Attempts+1, err, backoff)
+			msg := w.redact.text(err)
+			_ = w.outbox.MarkVectorPendingRetry(ctx, p.TenantID, p.ArtifactID, p.Version, now.Add(backoff), msg)
+			log.Printf("vector outbox: drain %s@%s failed (attempt %d): %s; retry in %s",
+				p.ArtifactID, p.Version, p.Attempts+1, msg, backoff)
 			continue
 		}
 		_ = w.outbox.MarkVectorPendingDone(ctx, p.TenantID, p.ArtifactID, p.Version)
@@ -148,6 +153,7 @@ func startVectorOutboxWorker(ctx context.Context, cfg *Config, st store.Store, v
 		metrics:   mreg,
 		onLagging: vectorOutboxLaggingCallback(auditSink, tenantID),
 		onWritten: onWritten,
+		redact:    newOutboxRedactor(cfg.outboxSecrets()...),
 	}
 	go func() {
 		t := time.NewTicker(interval)
