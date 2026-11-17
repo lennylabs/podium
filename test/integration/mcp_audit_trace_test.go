@@ -26,7 +26,7 @@ import (
 // matching trace id.
 func TestPodiumMCP_LocalAuditSharesTraceID(t *testing.T) {
 	t.Parallel()
-	const traceFM = "---\nname: x\ntype: context\nversion: 1.0.0\n---\n"
+	const traceFM = "---\nname: x\ntype: agent\nversion: 1.0.0\n---\n"
 
 	var mu sync.Mutex
 	var gotTraceparent string

@@ -56,9 +56,9 @@ func TestDomainSearch_IngestToSearchDomains(t *testing.T) {
 			Path:    "finance/ap/DOMAIN.md",
 			Content: "---\ndescription: \"Accounts payable operations\"\ndiscovery:\n  keywords:\n    - reconciliation\n    - remittance\n---\n\n# Accounts Payable\n\nLong-form AP context body.\n",
 		},
-		testharness.WriteTreeOption{Path: "finance/ap/pay-invoice/ARTIFACT.md", Content: contextArtifact},
+		testharness.WriteTreeOption{Path: "finance/ap/pay-invoice/ARTIFACT.md", Content: agentArtifact},
 		// ops/runner has artifacts but no DOMAIN.md anywhere in its chain.
-		testharness.WriteTreeOption{Path: "ops/runner/restart/ARTIFACT.md", Content: contextArtifact},
+		testharness.WriteTreeOption{Path: "ops/runner/restart/ARTIFACT.md", Content: agentArtifact},
 	)
 
 	ctx := context.Background()

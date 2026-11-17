@@ -762,8 +762,8 @@ func TestArtifactTypes_SearchTypeAgent(t *testing.T) {
 func TestArtifactTypes_SearchVisibilityDirectOnly(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/indexed-glossary/ARTIFACT.md": "---\ntype: context\nname: indexed-glossary\nversion: 1.0.0\ndescription: Indexed variance glossary.\n---\n\nbody\n",
-		"finance/secret-glossary/ARTIFACT.md":  "---\ntype: context\nname: secret-glossary\nversion: 1.0.0\ndescription: Secret variance glossary.\nsearch_visibility: direct-only\n---\n\nbody\n",
+		"finance/indexed-glossary/ARTIFACT.md": "---\ntype: agent\nname: indexed-glossary\nversion: 1.0.0\ndescription: Indexed variance glossary.\n---\n\nbody\n",
+		"finance/secret-glossary/ARTIFACT.md":  "---\ntype: agent\nname: secret-glossary\nversion: 1.0.0\ndescription: Secret variance glossary.\nsearch_visibility: direct-only\n---\n\nbody\n",
 	}))
 	_, sbody := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=variance")
 	if strings.Contains(string(sbody), "finance/secret-glossary") {
@@ -792,8 +792,8 @@ func TestArtifactTypes_SearchVisibilityDirectOnly(t *testing.T) {
 func TestArtifactTypes_DeprecatedLifecycle(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/new-glossary/ARTIFACT.md": "---\ntype: context\nname: new-glossary\nversion: 1.0.0\ndescription: Current variance glossary.\n---\n\nbody\n",
-		"finance/old-glossary/ARTIFACT.md": "---\ntype: context\nname: old-glossary\nversion: 1.0.0\ndescription: Old variance glossary.\ndeprecated: true\nreplaced_by: finance/new-glossary\n---\n\nbody\n",
+		"finance/new-glossary/ARTIFACT.md": "---\ntype: agent\nname: new-glossary\nversion: 1.0.0\ndescription: Current variance glossary.\n---\n\nbody\n",
+		"finance/old-glossary/ARTIFACT.md": "---\ntype: agent\nname: old-glossary\nversion: 1.0.0\ndescription: Old variance glossary.\ndeprecated: true\nreplaced_by: finance/new-glossary\n---\n\nbody\n",
 	}))
 	_, sbody := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=variance")
 	if strings.Contains(string(sbody), "finance/old-glossary") {
@@ -854,7 +854,7 @@ func TestArtifactTypes_HookBundledScript(t *testing.T) {
 func TestArtifactTypes_MissingVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"tools/my-context/ARTIFACT.md": "---\ntype: context\nname: my-context\ndescription: Test.\n---\n\nbody\n",
+		"tools/my-context/ARTIFACT.md": "---\ntype: agent\nname: my-context\ndescription: Test.\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 1 {
@@ -869,7 +869,7 @@ func TestArtifactTypes_MissingVersion(t *testing.T) {
 func TestArtifactTypes_InvalidVersion(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"tools/my-context/ARTIFACT.md": "---\ntype: context\nname: my-context\nversion: not-a-semver\ndescription: Test.\n---\n\nbody\n",
+		"tools/my-context/ARTIFACT.md": "---\ntype: agent\nname: my-context\nversion: not-a-semver\ndescription: Test.\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 1 {
@@ -920,16 +920,16 @@ func TestArtifactTypes_RuntimeRequirementsPassThrough(t *testing.T) {
 func TestArtifactTypes_TargetHarnessesRestrictsSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"reference/glossary/ARTIFACT.md": "---\ntype: context\nname: glossary\nversion: 1.0.0\ndescription: Glossary.\ntarget_harnesses: [claude-code]\n---\n\nbody\n",
+		"reference/glossary/ARTIFACT.md": "---\ntype: agent\nname: glossary\nversion: 1.0.0\ndescription: Glossary.\ntarget_harnesses: [claude-code]\n---\n\nbody\n",
 	})
-	// Listed harness materializes it (context lands in the neutral bucket).
+	// Listed harness materializes it (an agent lands in .claude/agents/).
 	included := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", included, "--harness", "claude-code")
-	mustExist(t, filepath.Join(included, ".podium/context/reference/glossary/ARTIFACT.md"))
+	mustExist(t, filepath.Join(included, ".claude/agents/glossary.md"))
 	// Unlisted harness skips it.
 	excluded := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", excluded, "--harness", "codex")
-	if _, err := os.Stat(filepath.Join(excluded, ".podium/context/reference/glossary/ARTIFACT.md")); err == nil {
+	if _, err := os.Stat(filepath.Join(excluded, ".codex/agents/glossary.toml")); err == nil {
 		t.Errorf("artifact excluded by target_harnesses must not materialize for codex")
 	}
 }
@@ -938,7 +938,7 @@ func TestArtifactTypes_TargetHarnessesRestrictsSync(t *testing.T) {
 func TestArtifactTypes_InvalidSensitivity(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "tools/x")
-	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "x", "--sensitivity", "ultra", "--yes", out)
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "x", "--sensitivity", "ultra", "--yes", out)
 	if res.Exit != 2 {
 		t.Fatalf("exit=%d, want 2\nstderr=%s", res.Exit, res.Stderr)
 	}
@@ -950,7 +950,7 @@ func TestArtifactTypes_InvalidSensitivity(t *testing.T) {
 // scaffold with no positional path exits 2.
 func TestArtifactTypes_ScaffoldNoPath(t *testing.T) {
 	t.Parallel()
-	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "x", "--yes")
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "x", "--yes")
 	if res.Exit != 2 {
 		t.Fatalf("exit=%d, want 2\nstderr=%s", res.Exit, res.Stderr)
 	}
@@ -967,7 +967,7 @@ func TestArtifactTypes_ScaffoldNoOverwrite(t *testing.T) {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "x", "--yes", out)
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "x", "--yes", out)
 	if res.Exit != 1 {
 		t.Fatalf("exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
 	}
@@ -986,7 +986,7 @@ func TestArtifactTypes_ScaffoldForce(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(out, "ARTIFACT.md"), []byte("stale content\n"), 0o644); err != nil {
 		t.Fatalf("write stale: %v", err)
 	}
-	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "fresh content", "--force", "--yes", out)
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "fresh content", "--force", "--yes", out)
 	if res.Exit != 0 {
 		t.Fatalf("exit=%d, want 0\nstderr=%s", res.Exit, res.Stderr)
 	}
@@ -1039,7 +1039,7 @@ func TestArtifactTypes_DomainHierarchy(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	out := filepath.Join(root, "team-shared/finance/ap/company-glossary")
-	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "Company glossary.", "--yes", out)
+	res := runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "Company glossary.", "--yes", out)
 	if res.Exit != 0 {
 		t.Fatalf("scaffold exit=%d stderr=%s", res.Exit, res.Stderr)
 	}

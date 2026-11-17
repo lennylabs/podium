@@ -67,9 +67,9 @@ func TestDiffStrings(t *testing.T) {
 
 func sampleView() []sync.EffectiveArtifact {
 	return []sync.EffectiveArtifact{
-		{ID: "finance/invoice", Type: "context", Layer: "acme-finance", Materialized: true},
+		{ID: "finance/invoice", Type: "agent", Layer: "acme-finance", Materialized: true},
 		{ID: "finance/experimental/new", Type: "skill", Layer: "acme-finance", Materialized: false},
-		{ID: "personal/note", Type: "context", Layer: "alice-personal", Materialized: false},
+		{ID: "personal/note", Type: "agent", Layer: "alice-personal", Materialized: false},
 	}
 }
 
@@ -264,7 +264,7 @@ func TestRunSyncOverrideInteractive_AddsAndMaterializes(t *testing.T) {
 	registry := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\n"},
-		testharness.WriteTreeOption{Path: "team-shared/company-glossary/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\ndescription: glossary\n---\n\nBody.\n"},
+		testharness.WriteTreeOption{Path: "team-shared/company-glossary/ARTIFACT.md", Content: "---\ntype: agent\nversion: 1.0.0\ndescription: glossary\n---\n\nBody.\n"},
 	)
 	target := t.TempDir()
 	// View is sorted by ID; the lone artifact is leaf 1.
@@ -340,7 +340,7 @@ func TestRunSyncOverrideInteractive_SendsResolvedHarness(t *testing.T) {
 }
 
 // clientRecordingRegistry is a server-source registry stub that serves one
-// context artifact and records the path and X-Podium-Client header of every
+// agent artifact and records the path and X-Podium-Client header of every
 // request.
 type clientRecordingRegistry struct {
 	srv *httptest.Server
@@ -364,13 +364,13 @@ func newClientRecordingRegistry(t *testing.T) *clientRecordingRegistry {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/sync/manifest", func(w http.ResponseWriter, r *http.Request) {
 		writeTestJSON(w, map[string]any{"artifacts": []map[string]string{
-			{"id": "company-glossary", "type": "context", "version": "1.0.0", "layer": "team-shared"},
+			{"id": "company-glossary", "type": "agent", "version": "1.0.0", "layer": "team-shared"},
 		}})
 	})
 	mux.HandleFunc("/v1/load_artifact", func(w http.ResponseWriter, r *http.Request) {
 		writeTestJSON(w, testharness.SealDelivery(map[string]any{
-			"id": "company-glossary", "type": "context", "layer": "team-shared",
-			"frontmatter": "---\ntype: context\nversion: 1.0.0\ndescription: glossary\n---\n\nBody.\n",
+			"id": "company-glossary", "type": "agent", "layer": "team-shared",
+			"frontmatter": "---\ntype: agent\nversion: 1.0.0\ndescription: glossary\n---\n\nBody.\n",
 		}))
 	})
 	reg.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -405,8 +405,8 @@ func TestRunSyncOverrideInteractive_CollisionExits1(t *testing.T) {
 	registry := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\nlayer_order:\n  - base\n  - high\n"},
-		testharness.WriteTreeOption{Path: "base/shared/note/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\ndescription: from-base\n---\n\nfrom-base\n"},
-		testharness.WriteTreeOption{Path: "high/shared/note/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\ndescription: from-high\n---\n\nfrom-high\n"},
+		testharness.WriteTreeOption{Path: "base/shared/note/ARTIFACT.md", Content: "---\ntype: agent\nversion: 1.0.0\ndescription: from-base\n---\n\nfrom-base\n"},
+		testharness.WriteTreeOption{Path: "high/shared/note/ARTIFACT.md", Content: "---\ntype: agent\nversion: 1.0.0\ndescription: from-high\n---\n\nfrom-high\n"},
 	)
 	target := t.TempDir()
 	withInteractiveStdin(t, "1\nsave\n", true)

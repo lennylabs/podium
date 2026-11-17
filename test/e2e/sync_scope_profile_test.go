@@ -130,7 +130,7 @@ func TestSyncOverride_RemoveDeletes(t *testing.T) {
 func TestSync_ProjectLocalOverridesShared(t *testing.T) {
 	shared := cliReg(t) // personal/greet, finance/invoice, personal/note
 	localOnly := writeRegistry(t, map[string]string{
-		"finance/invoice/ARTIFACT.md": contextArtifact("Only finance lives in the project-local registry override."),
+		"finance/invoice/ARTIFACT.md": agentArtifact("Only finance lives in the project-local registry override."),
 	})
 	ws := t.TempDir()
 	tgt := t.TempDir()

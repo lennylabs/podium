@@ -149,9 +149,9 @@ func traceScrubRegistry(t *testing.T, presignedURL string) *httptest.Server {
 			_, _ = io.WriteString(w, `{"results":[],"total_matched":0}`)
 		case "/v1/load_artifact":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": "finance/a", "version": "1.0.0", "type": "context",
+				"id": "finance/a", "version": "1.0.0", "type": "agent",
 				"content_hash": "sha256:" + strings.Repeat("0", 64),
-				"frontmatter":  "---\ntype: context\n---\n",
+				"frontmatter":  "---\ntype: agent\n---\n",
 				"large_resources": map[string]any{
 					"data/big.bin": map[string]any{
 						"presigned_url": presignedURL,

@@ -136,7 +136,7 @@ func TestLint_RuleModeOnNonRuleWarns(t *testing.T) {
 	t.Parallel()
 	reg, records := openFixture(t, testharness.WriteTreeOption{
 		Path:    "ctx/note/ARTIFACT.md",
-		Content: "---\ntype: context\nversion: 1.0.0\nrule_mode: glob\n---\n\nbody\n",
+		Content: "---\ntype: agent\nversion: 1.0.0\nrule_mode: glob\n---\n\nbody\n",
 	})
 	diags := (&Linter{}).Lint(context.Background(), reg, records)
 	if !hasWarnMessage(diags, "lint.rule_mode_on_non_rule", "only applicable to type: rule") {
@@ -216,7 +216,7 @@ func TestLint_RuleModeUnsetClean(t *testing.T) {
 // rule_mode_on_non_rule hygiene warning, not by this enum error.
 func TestLint_RuleModeEnumScopedToRule(t *testing.T) {
 	t.Parallel()
-	diags := rmCanonicalDiags(t, "---\ntype: context\nversion: 1.0.0\nrule_mode: sometimes\n---\n\nbody\n")
+	diags := rmCanonicalDiags(t, "---\ntype: agent\nversion: 1.0.0\nrule_mode: sometimes\n---\n\nbody\n")
 	if hasCode(diags, "lint.unknown_rule_mode") {
 		t.Errorf("the enum rule must only apply to type: rule, got: %v", diags)
 	}

@@ -71,7 +71,7 @@ func TestResolveResourceOwner_VisibilityReCheck(t *testing.T) {
 	}
 	if err := st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: tenantID, ArtifactID: "team/secret", Version: "1.0.0",
-		ContentHash: "sha256:m", Type: "context", Layer: "private",
+		ContentHash: "sha256:m", Type: "agent", Layer: "private",
 		Resources: []store.ResourceRef{{Path: "data/big.bin", ContentHash: "sha256:deadbeef", Size: 9_000_000}},
 	}); err != nil {
 		t.Fatalf("PutManifest: %v", err)

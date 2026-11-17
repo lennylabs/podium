@@ -80,7 +80,7 @@ func rtUTF16LEDoc(text string) []byte {
 // the empty-pin case: retirement reads the stored bytes alone.
 func rtRow(id, ver, lay string, hour int, doc []byte, resources ...store.ResourceRef) store.ManifestRecord {
 	return store.ManifestRecord{
-		TenantID: rtTenant, ArtifactID: id, Version: ver, Layer: lay, Type: "context",
+		TenantID: rtTenant, ArtifactID: id, Version: ver, Layer: lay, Type: "agent",
 		Description: "Fixture " + id + " " + ver + ".",
 		Frontmatter: doc, Body: []byte("Body of " + id + "@" + ver + ".\n"),
 		IngestedAt: rtEpoch.Add(time.Duration(hour) * time.Hour),
@@ -88,9 +88,9 @@ func rtRow(id, ver, lay string, hour int, doc []byte, resources ...store.Resourc
 	}
 }
 
-// rtPlain builds a plain context row whose manifest parses and admits.
+// rtPlain builds a plain agent row whose manifest parses and admits.
 func rtPlain(id, ver, lay string, hour int, resources ...store.ResourceRef) store.ManifestRecord {
-	doc := rtDoc("type: context\nversion: "+ver+"\ndescription: Fixture "+id+" "+ver+".\n", "Body of "+id+"@"+ver+".\n")
+	doc := rtDoc("type: agent\nversion: "+ver+"\ndescription: Fixture "+id+" "+ver+".\n", "Body of "+id+"@"+ver+".\n")
 	return rtRow(id, ver, lay, hour, doc, resources...)
 }
 
@@ -106,32 +106,32 @@ func rtFixtures() map[string][]store.ManifestRecord {
 		"a": {
 			rtPlain(rtP, "1.0.0", "base", 1, rtResource("parent resource\n")),
 			rtPlain(rtC, "1.0.0", "base", 2),
-			rtRow(rtC, "2.0.0", "base", 3, rtDoc("type: context\nversion: 2.0.0\nextends: "+rtP+"\n", "Child body.\n")),
+			rtRow(rtC, "2.0.0", "base", 3, rtDoc("type: agent\nversion: 2.0.0\nextends: "+rtP+"\n", "Child body.\n")),
 		},
 		"b": {
 			rtPlain(rtX, "1.0.0", "base", 4),
-			rtRow(rtX, "2.0.0", "team", 5, rtDoc("type: context\nversion: 2.0.0\nextends: "+rtX+"\n", "Overlay body.\n")),
+			rtRow(rtX, "2.0.0", "team", 5, rtDoc("type: agent\nversion: 2.0.0\nextends: "+rtX+"\n", "Overlay body.\n")),
 		},
 		"c": {
-			rtRow(rtR, "1.0.0", "team", 6, rtDoc("type: context\nversion: 1.0.0\nextends: "+rtP+"\n", "Retired body.\n"), rtResource("retired resource\n")),
+			rtRow(rtR, "1.0.0", "team", 6, rtDoc("type: agent\nversion: 1.0.0\nextends: "+rtP+"\n", "Retired body.\n"), rtResource("retired resource\n")),
 		},
 		"d": {
 			rtPlain(rtT, "1.0.0", "base", 7),
 			rtPlain(rtD, "1.0.0", "base", 8),
-			rtRow(rtD, "2.0.0", "base", 9, rtDoc("type: context\nversion: 2.0.0\nextends: "+rtP+"\ndelegates_to: ["+rtT+"]\n", "Delegator body.\n")),
+			rtRow(rtD, "2.0.0", "base", 9, rtDoc("type: agent\nversion: 2.0.0\nextends: "+rtP+"\ndelegates_to: ["+rtT+"]\n", "Delegator body.\n")),
 		},
 		"e": {
-			rtRow(rtE, "1.0.0", "team", 10, rtDoc("type: context\nversion: 1.0.0\n\"\\x65xtends\": "+rtP+"\n", "Escaped body.\n")),
+			rtRow(rtE, "1.0.0", "team", 10, rtDoc("type: agent\nversion: 1.0.0\n\"\\x65xtends\": "+rtP+"\n", "Escaped body.\n")),
 		},
 		"f": {
-			rtRow(rtF, "1.0.0", "team", 11, rtDoc("type: context\nversion: 1.0.0\n!!binary ZXh0ZW5kcw==: "+rtP+"\n", "Tagged body.\n")),
+			rtRow(rtF, "1.0.0", "team", 11, rtDoc("type: agent\nversion: 1.0.0\n!!binary ZXh0ZW5kcw==: "+rtP+"\n", "Tagged body.\n")),
 		},
 		"g": {
 			rtPlain(rtG, "1.0.0", "base", 12),
 			rtPlain(rtG, "1.1.0", "base", 13),
 		},
 		"u": {
-			rtRow(rtU, "1.0.0", "team", 14, rtUTF16LEDoc("type: context\nversion: 1.0.0\nextends: "+rtP+"\n")),
+			rtRow(rtU, "1.0.0", "team", 14, rtUTF16LEDoc("type: agent\nversion: 1.0.0\nextends: "+rtP+"\n")),
 		},
 	}
 }
@@ -510,12 +510,12 @@ func TestRetiredRows_MemoKeyedByContentHash(t *testing.T) {
 	if _, err := st.PurgeDeprecatedManifests(ctx, time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("PurgeDeprecatedManifests: %v", err)
 	}
-	rtPut(t, st, rtRow(toRetired, "1.0.0", "base", 21, rtDoc("type: context\nversion: 1.0.0\nextends: "+rtP+"\n", "Reused body.\n")))
+	rtPut(t, st, rtRow(toRetired, "1.0.0", "base", 21, rtDoc("type: agent\nversion: 1.0.0\nextends: "+rtP+"\n", "Reused body.\n")))
 	_, err := reg.LoadArtifact(ctx, publicID, toRetired, core.LoadArtifactOptions{})
 	rtWantNotFound(t, "the retired row under a reused key", err)
 
 	// A retired row is not served, then a plain row under the same key is.
-	retired := rtRow(toPlain, "1.0.0", "base", 22, rtDoc("type: context\nversion: 1.0.0\nextends: "+rtP+"\n", "Retired first.\n"))
+	retired := rtRow(toPlain, "1.0.0", "base", 22, rtDoc("type: agent\nversion: 1.0.0\nextends: "+rtP+"\n", "Retired first.\n"))
 	retired.Deprecated = true
 	rtPut(t, st, retired)
 	_, err = reg.LoadArtifact(ctx, publicID, toPlain, core.LoadArtifactOptions{})
@@ -597,13 +597,13 @@ func TestServableRows_ConcurrentListingsAndIngest(t *testing.T) {
 		for i := range writes {
 			rtPutConcurrent(t, st, rtPlain(fmt.Sprintf("ops/new-plain-%d", i), "1.0.0", "base", 40+i))
 			rtPutConcurrent(t, st, rtRow(fmt.Sprintf("ops/new-retired-%d", i), "1.0.0", "team", 40+i,
-				rtDoc(fmt.Sprintf("type: context\nversion: 1.0.0\nextends: %s\nnote: %d\n", rtP, i), "New retired.\n")))
+				rtDoc(fmt.Sprintf("type: agent\nversion: 1.0.0\nextends: %s\nnote: %d\n", rtP, i), "New retired.\n")))
 			if i == writes/2 {
 				if _, err := st.PurgeDeprecatedManifests(ctx, time.Now().Add(time.Hour)); err != nil {
 					t.Errorf("PurgeDeprecatedManifests: %v", err)
 				}
 				rtPutConcurrent(t, st, rtRow(reused, "1.0.0", "base", 31,
-					rtDoc("type: context\nversion: 1.0.0\nextends: "+rtP+"\n", "Reused retired.\n")))
+					rtDoc("type: agent\nversion: 1.0.0\nextends: "+rtP+"\n", "Reused retired.\n")))
 			}
 		}
 	}()

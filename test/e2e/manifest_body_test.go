@@ -47,7 +47,7 @@ func mbStubRegistryServing(t *testing.T, id, artifactMD, served string, status i
 		t.Fatalf("ManifestBodyOf: %v", err)
 	}
 	deliveryHash := version.DeliveryHash(version.DeliveryRecord{
-		ID: id, Version: "1.0.0", Type: "context", ContentHash: contentHash,
+		ID: id, Version: "1.0.0", Type: "agent", ContentHash: contentHash,
 		ArtifactRevision: epochArtifactRevision, Frontmatter: artifactMD, ManifestBody: derived,
 	})
 	var bodyHits int32
@@ -64,7 +64,7 @@ func mbStubRegistryServing(t *testing.T, id, artifactMD, served string, status i
 	})
 	mux.HandleFunc("/v1/load_artifact", func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{
-			"id": id, "type": "context", "version": "1.0.0",
+			"id": id, "type": "agent", "version": "1.0.0",
 			"content_hash":      contentHash,
 			"artifact_revision": epochArtifactRevision,
 			"delivery_hash":     deliveryHash,
@@ -92,7 +92,7 @@ func TestManifestBody_BridgeFetchesReconstitutesMaterializes(t *testing.T) {
 	t.Parallel()
 	id := "finance/glossary"
 	body := strings.Repeat("Glossary entry line.\n", 20000) // ~420 KB, above the 256 KB cutoff
-	artifactMD := "---\ntype: context\nversion: 1.0.0\ndescription: Big glossary.\n---\n\n" + body
+	artifactMD := "---\ntype: agent\nversion: 1.0.0\ndescription: Big glossary.\n---\n\n" + body
 	ts, bodyHits := mbStubRegistry(t, id, artifactMD, http.StatusOK)
 
 	mat := t.TempDir()
@@ -136,7 +136,7 @@ func TestManifestBody_BridgeFetchFailureAborts(t *testing.T) {
 	t.Parallel()
 	id := "finance/glossary"
 	body := strings.Repeat("Glossary entry line.\n", 20000)
-	artifactMD := "---\ntype: context\nversion: 1.0.0\ndescription: Big glossary.\n---\n\n" + body
+	artifactMD := "---\ntype: agent\nversion: 1.0.0\ndescription: Big glossary.\n---\n\n" + body
 	ts, _ := mbStubRegistry(t, id, artifactMD, http.StatusNotFound)
 
 	mat := t.TempDir()
@@ -162,7 +162,7 @@ func TestManifestBody_BridgeFetchFailureAborts(t *testing.T) {
 func TestManifestBody_BridgeRefusesATamperedDocument(t *testing.T) {
 	t.Parallel()
 	id := "finance/glossary"
-	artifactMD := "---\ntype: context\nversion: 1.0.0\ndescription: Glossary.\n---\n\nGlossary entry line.\n"
+	artifactMD := "---\ntype: agent\nversion: 1.0.0\ndescription: Glossary.\n---\n\nGlossary entry line.\n"
 	tampered := strings.Replace(artifactMD, "Glossary entry line.", "Forged entry line.", 1)
 	ts, bodyHits := mbStubRegistryServing(t, id, artifactMD, tampered, http.StatusOK)
 

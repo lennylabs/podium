@@ -42,7 +42,7 @@ func TestFollowManifestBody_RestoresTheDocument(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 
-	for typ, docField := range map[string]string{"context": "frontmatter", "skill": "skill_raw"} {
+	for typ, docField := range map[string]string{"agent": "frontmatter", "skill": "skill_raw"} {
 		out, err := followManifestBody(context.Background(), manifestBodyResponse(t, typ, ts.URL+"/objects/k", digestOf(doc)), "tok")
 		if err != nil {
 			t.Fatalf("%s: %v", typ, err)
@@ -58,7 +58,7 @@ func TestFollowManifestBody_RestoresTheDocument(t *testing.T) {
 	if len(auths) != 2 || auths[0] != "Bearer tok" {
 		t.Errorf("Authorization headers = %v, want the token on the /objects URL", auths)
 	}
-	if _, err := followManifestBody(context.Background(), manifestBodyResponse(t, "context", ts.URL+"/k?X-Amz-Signature=s", digestOf(doc)), "tok"); err != nil || auths[2] != "" {
+	if _, err := followManifestBody(context.Background(), manifestBodyResponse(t, "agent", ts.URL+"/k?X-Amz-Signature=s", digestOf(doc)), "tok"); err != nil || auths[2] != "" {
 		t.Errorf("SigV4 URL: err %v, Authorization %q, want none", err, auths[2])
 	}
 	plain := []byte(`{"id":"team/x","frontmatter":"inline"}`)
@@ -70,7 +70,7 @@ func TestFollowManifestBody_RestoresTheDocument(t *testing.T) {
 // Spec: §7.6.1 — a document that does not hash to the link, a URL that
 // answers an error status, and a document that does not parse fail.
 func TestFollowManifestBody_Failures(t *testing.T) {
-	const doc = "---\ntype: context\n---\nbody\n"
+	const doc = "---\ntype: agent\n---\nbody\n"
 	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(doc)) }))
 	t.Cleanup(ok.Close)
 	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) }))
@@ -82,11 +82,11 @@ func TestFollowManifestBody_Failures(t *testing.T) {
 		body []byte
 		want string
 	}{
-		"digest mismatch": {manifestBodyResponse(t, "context", ok.URL, "sha256:"+strings.Repeat("0", 64)), "content hash mismatch"},
-		"HTTP 500":        {manifestBodyResponse(t, "context", broken.URL, digestOf(doc)), "HTTP 500"},
-		"unparseable":     {manifestBodyResponse(t, "context", bad.URL, digestOf("---\n: [\n---\n")), "parse ARTIFACT.md"},
-		"unreachable":     {manifestBodyResponse(t, "context", "http://127.0.0.1:1/x", digestOf(doc)), "127.0.0.1:1"},
-		"bad url":         {manifestBodyResponse(t, "context", "://no-scheme", digestOf(doc)), "missing protocol scheme"},
+		"digest mismatch": {manifestBodyResponse(t, "agent", ok.URL, "sha256:"+strings.Repeat("0", 64)), "content hash mismatch"},
+		"HTTP 500":        {manifestBodyResponse(t, "agent", broken.URL, digestOf(doc)), "HTTP 500"},
+		"unparseable":     {manifestBodyResponse(t, "agent", bad.URL, digestOf("---\n: [\n---\n")), "parse ARTIFACT.md"},
+		"unreachable":     {manifestBodyResponse(t, "agent", "http://127.0.0.1:1/x", digestOf(doc)), "127.0.0.1:1"},
+		"bad url":         {manifestBodyResponse(t, "agent", "://no-scheme", digestOf(doc)), "missing protocol scheme"},
 	}
 	for name, tc := range cases {
 		if _, err := followManifestBody(context.Background(), tc.body, ""); err == nil || !strings.Contains(err.Error(), tc.want) {

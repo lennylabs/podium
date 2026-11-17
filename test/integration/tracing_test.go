@@ -47,7 +47,7 @@ func TestTracing_RegistryServerSpanJoinsInboundTrace(t *testing.T) {
 		ArtifactID:  "finance/variance",
 		Version:     "1.0.0",
 		ContentHash: "sha256:" + "0000000000000000000000000000000000000000000000000000000000000001",
-		Type:        "context",
+		Type:        "agent",
 		Description: "Variance analysis reference for vendor payments here today.",
 		Layer:       "shared",
 	}, nil, nil)); err != nil {

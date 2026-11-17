@@ -17,8 +17,8 @@ import (
 func TestSearchArtifacts_DependencyRerank(t *testing.T) {
 	t.Parallel()
 	fsys := fstest.MapFS{
-		"tools/aaa/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("shared helper"))},
-		"tools/bbb/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("shared helper"))},
+		"tools/aaa/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("shared helper"))},
+		"tools/bbb/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("shared helper"))},
 	}
 	ctx := context.Background()
 

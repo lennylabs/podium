@@ -105,7 +105,7 @@ func TestConfigReadOnlyFlip_PostgresPrimaryOutage(t *testing.T) {
 	const seededID = "ops/runbooks/restart-gateway"
 	if err := pg.PutManifest(ctx, storetest.Seal(t, store.ManifestRecord{
 		TenantID: roflipTenant, ArtifactID: seededID, Version: "1.0.0",
-		ContentHash: "sha256:roflipseed", Type: "context",
+		ContentHash: "sha256:roflipseed", Type: "agent",
 		Description: "restart the api gateway", Layer: "ops",
 		IngestedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}, nil, nil)); err != nil {

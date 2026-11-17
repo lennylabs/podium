@@ -29,8 +29,8 @@ import (
 
 // ---- helpers ----------------------------------------------------------------
 
-func hrCtx(extraFM string) string {
-	return "---\ntype: context\nversion: 1.0.0\ndescription: A context.\n" + extraFM + "\n---\n\nContext body.\n"
+func hrAgent(extraFM string) string {
+	return "---\ntype: agent\nversion: 1.0.0\ndescription: A context.\n" + extraFM + "\n---\n\nContext body.\n"
 }
 
 // hrSkillReg stages a skill (ARTIFACT.md + SKILL.md) with extra frontmatter.
@@ -138,7 +138,7 @@ func TestArtifactResponse_TargetHarnessMismatch(t *testing.T) {
 func TestArtifactResponse_SensitivityTopLevel(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": hrCtx("sensitivity: high"),
+		"finance/ap/pay-invoice/ARTIFACT.md": hrAgent("sensitivity: high"),
 	}))
 	if r := hrLoad(t, srv.BaseURL, "finance/ap/pay-invoice"); r.Sensitivity != "high" {
 		t.Errorf("sensitivity=%q, want high", r.Sensitivity)
@@ -149,7 +149,7 @@ func TestArtifactResponse_SensitivityTopLevel(t *testing.T) {
 func TestArtifactResponse_SandboxProfile(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"scripts/acme/fetcher/ARTIFACT.md": hrCtx("sandbox_profile: network-isolated"),
+		"scripts/acme/fetcher/ARTIFACT.md": hrAgent("sandbox_profile: network-isolated"),
 	}))
 	hrWantFM(t, srv.BaseURL, "scripts/acme/fetcher", "sandbox_profile: network-isolated")
 }
@@ -158,7 +158,7 @@ func TestArtifactResponse_SandboxProfile(t *testing.T) {
 func TestArtifactResponse_SandboxUnsupportedRefused(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"scripts/acme/strict/ARTIFACT.md": hrCtx("sandbox_profile: seccomp-strict"),
+		"scripts/acme/strict/ARTIFACT.md": hrAgent("sandbox_profile: seccomp-strict"),
 	}))
 	mat := t.TempDir()
 	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=none", "PODIUM_HOST_SANDBOXES=unrestricted", "PODIUM_MATERIALIZE_ROOT="+mat),
@@ -175,7 +175,7 @@ func TestArtifactResponse_SandboxUnsupportedRefused(t *testing.T) {
 func TestArtifactResponse_IgnoreSandbox(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"scripts/acme/strict/ARTIFACT.md": hrCtx("sandbox_profile: seccomp-strict"),
+		"scripts/acme/strict/ARTIFACT.md": hrAgent("sandbox_profile: seccomp-strict"),
 	}))
 	mat := t.TempDir()
 	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=none", "PODIUM_HOST_SANDBOXES=unrestricted", "PODIUM_IGNORE_SANDBOX=true", "PODIUM_MATERIALIZE_ROOT="+mat),
@@ -203,7 +203,7 @@ func TestArtifactResponse_ProvenanceNonePreserved(t *testing.T) {
 	t.Parallel()
 	body := "Authored prose.\n\n<!-- begin imported source=\"https://wiki.example.com/policy/payments\" -->\nimported text\n<!-- end imported -->\n"
 	reg := writeRegistry(t, map[string]string{
-		"content/acme/policy/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Policy.\n---\n\n" + body,
+		"content/acme/policy/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Policy.\n---\n\n" + body,
 	})
 	target := t.TempDir()
 	chSync(t, reg, target, "none")
@@ -430,7 +430,7 @@ func TestArtifactResponse_ResourcesInline(t *testing.T) {
 	id := "finance/ap/pay-invoice"
 	script := "print('inline fixture')\n"
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md":       contextArtifact("pay"),
+		id + "/ARTIFACT.md":       agentArtifact("pay"),
 		id + "/scripts/helper.py": script,
 	}))
 	r := hrLoad(t, srv.BaseURL, id)
@@ -444,7 +444,7 @@ func TestArtifactResponse_ResourcesInline(t *testing.T) {
 func TestArtifactResponse_ExternalResources(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"tools/acme/model/ARTIFACT.md": hrCtx("external_resources:\n  - path: ./model.onnx\n    url: s3://company-models/v1/model.onnx\n    sha256: 9f2caabbccddeeff00112233445566778899aabbccddeeff0011223344556677\n    size: 145000000"),
+		"tools/acme/model/ARTIFACT.md": hrAgent("external_resources:\n  - path: ./model.onnx\n    url: s3://company-models/v1/model.onnx\n    sha256: 9f2caabbccddeeff00112233445566778899aabbccddeeff0011223344556677\n    size: 145000000"),
 	}))
 	hrWantFM(t, srv.BaseURL, "tools/acme/model", "external_resources", "model.onnx", "s3://company-models", "sha256")
 }
@@ -455,7 +455,7 @@ func TestArtifactResponse_ExternalResources(t *testing.T) {
 func TestArtifactResponse_DeprecatedReplaced(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice-v1/ARTIFACT.md": hrCtx("deprecated: true\nreplaced_by: finance/ap/pay-invoice-v2"),
+		"finance/ap/pay-invoice-v1/ARTIFACT.md": hrAgent("deprecated: true\nreplaced_by: finance/ap/pay-invoice-v2"),
 	}))
 	r := hrLoad(t, srv.BaseURL, "finance/ap/pay-invoice-v1")
 	if !r.Deprecated {
@@ -479,7 +479,7 @@ func TestArtifactResponse_DeprecatedReplaced(t *testing.T) {
 func TestArtifactResponse_DeprecatedNoReplacement(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"tools/acme/old-tool/ARTIFACT.md": hrCtx("deprecated: true"),
+		"tools/acme/old-tool/ARTIFACT.md": hrAgent("deprecated: true"),
 	}))
 	r := hrLoad(t, srv.BaseURL, "tools/acme/old-tool")
 	if !r.Deprecated {
@@ -497,7 +497,7 @@ func TestArtifactResponse_DeprecatedNoReplacement(t *testing.T) {
 func TestArtifactResponse_DeprecatedExcludedFromSearch(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"tools/acme/old-tool/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: zzdeprecatedtoken widget\ndeprecated: true\n---\n\nbody\n",
+		"tools/acme/old-tool/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: zzdeprecatedtoken widget\ndeprecated: true\n---\n\nbody\n",
 	}))
 	_, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=zzdeprecatedtoken")
 	if strings.Contains(string(body), "tools/acme/old-tool") {
@@ -509,7 +509,7 @@ func TestArtifactResponse_DeprecatedExcludedFromSearch(t *testing.T) {
 func TestArtifactResponse_DescriptionWhenToUse(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Pay an approved vendor invoice\nwhen_to_use:\n  - \"After AP has approved an invoice for payment\"\n---\n\nbody\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Pay an approved vendor invoice\nwhen_to_use:\n  - \"After AP has approved an invoice for payment\"\n---\n\nbody\n",
 	}))
 	hrWantFM(t, srv.BaseURL, "finance/ap/pay-invoice", "description: Pay an approved vendor invoice", "when_to_use", "After AP has approved")
 }
@@ -518,7 +518,7 @@ func TestArtifactResponse_DescriptionWhenToUse(t *testing.T) {
 func TestArtifactResponse_Tags(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": hrCtx("tags: [finance, ap, payments]"),
+		"finance/ap/pay-invoice/ARTIFACT.md": hrAgent("tags: [finance, ap, payments]"),
 	}))
 	hrWantFM(t, srv.BaseURL, "finance/ap/pay-invoice", "tags", "finance", "ap", "payments")
 }
@@ -527,7 +527,7 @@ func TestArtifactResponse_Tags(t *testing.T) {
 func TestArtifactResponse_ReleaseNotes(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": hrCtx("release_notes: \"Fixed edge case in currency rounding\""),
+		"finance/ap/pay-invoice/ARTIFACT.md": hrAgent("release_notes: \"Fixed edge case in currency rounding\""),
 	}))
 	hrWantFM(t, srv.BaseURL, "finance/ap/pay-invoice", "release_notes", "Fixed edge case in currency rounding")
 }
@@ -541,8 +541,8 @@ func TestArtifactResponse_ReleaseNotes(t *testing.T) {
 func TestArtifactResponse_ComposeSandbox(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"a/ARTIFACT.md": hrCtx("sandbox_profile: read-only-fs"),
-		"b/ARTIFACT.md": hrCtx("sandbox_profile: seccomp-strict"),
+		"a/ARTIFACT.md": hrAgent("sandbox_profile: read-only-fs"),
+		"b/ARTIFACT.md": hrAgent("sandbox_profile: seccomp-strict"),
 	}))
 	for id, own := range map[string]string{"a": "read-only-fs", "b": "seccomp-strict"} {
 		fm := fmLoadFrontmatter(t, srv.BaseURL, id)
@@ -559,8 +559,8 @@ func TestArtifactResponse_ComposeSandbox(t *testing.T) {
 func TestArtifactResponse_ComposeSensitivity(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"a/ARTIFACT.md": hrCtx("sensitivity: low"),
-		"b/ARTIFACT.md": hrCtx("sensitivity: high"),
+		"a/ARTIFACT.md": hrAgent("sensitivity: low"),
+		"b/ARTIFACT.md": hrAgent("sensitivity: high"),
 	}))
 	a := hrLoad(t, srv.BaseURL, "a")
 	b := hrLoad(t, srv.BaseURL, "b")
@@ -595,8 +595,8 @@ func TestArtifactResponse_ComposeRequiresApproval(t *testing.T) {
 func TestArtifactResponse_ComposeMcpServers(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"a/ARTIFACT.md": hrCtx("mcpServers:\n  - name: github\n    transport: stdio\n    command: npx"),
-		"b/ARTIFACT.md": hrCtx("mcpServers:\n  - name: github\n    env:\n      GITHUB_TOKEN: placeholder\n  - name: filesystem\n    transport: stdio\n    command: npx"),
+		"a/ARTIFACT.md": hrAgent("mcpServers:\n  - name: github\n    transport: stdio\n    command: npx"),
+		"b/ARTIFACT.md": hrAgent("mcpServers:\n  - name: github\n    env:\n      GITHUB_TOKEN: placeholder\n  - name: filesystem\n    transport: stdio\n    command: npx"),
 	}))
 	hrWantFM(t, srv.BaseURL, "a", "github", "command: npx")
 	hrWantFM(t, srv.BaseURL, "b", "github", "GITHUB_TOKEN", "filesystem")
@@ -611,8 +611,8 @@ func TestArtifactResponse_ComposeMcpServers(t *testing.T) {
 func TestArtifactResponse_ComposeTargetHarnesses(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"a/ARTIFACT.md": hrCtx("target_harnesses: [claude-code]"),
-		"b/ARTIFACT.md": hrCtx("target_harnesses: [cursor]"),
+		"a/ARTIFACT.md": hrAgent("target_harnesses: [claude-code]"),
+		"b/ARTIFACT.md": hrAgent("target_harnesses: [cursor]"),
 	}))
 	hrWantFM(t, srv.BaseURL, "a", "claude-code")
 	hrWantFM(t, srv.BaseURL, "b", "cursor")
@@ -650,8 +650,8 @@ func TestArtifactResponse_ComposeHints(t *testing.T) {
 func TestArtifactResponse_ComposeRuntime(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"a/ARTIFACT.md": hrCtx("runtime_requirements:\n  python: \">=3.10\""),
-		"b/ARTIFACT.md": hrCtx("runtime_requirements:\n  python: \">=3.12\""),
+		"a/ARTIFACT.md": hrAgent("runtime_requirements:\n  python: \">=3.10\""),
+		"b/ARTIFACT.md": hrAgent("runtime_requirements:\n  python: \">=3.12\""),
 	}))
 	hrWantFM(t, srv.BaseURL, "a", "python", ">=3.10")
 	hrWantFM(t, srv.BaseURL, "b", "python", ">=3.12")
@@ -664,7 +664,7 @@ func TestArtifactResponse_PyFromEnvLoad(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": hrCtx("model_class_hint: large"),
+		"finance/ap/pay-invoice/ARTIFACT.md": hrAgent("model_class_hint: large"),
 	}))
 	res := csRunPy(t, py, srv.BaseURL,
 		"from podium import Client\nc = Client.from_env()\nr = c.load_artifact('finance/ap/pay-invoice')\nprint('FM', bool(r.frontmatter))\n")
@@ -708,7 +708,7 @@ func TestArtifactResponse_PyDelegatesWalk(t *testing.T) {
 func TestArtifactResponse_PyRegistryError(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	res := csRunPy(t, py, srv.BaseURL,
 		"from podium import Client, RegistryError\nc = Client.from_env()\ntry:\n    c.load_artifact('nonexistent/path')\nexcept RegistryError as e:\n    print('CODE', e.code, 'RETRY', e.retryable)\n")
 	csWantStdout(t, res, "CODE registry.not_found RETRY False")
@@ -729,7 +729,7 @@ func TestArtifactResponse_TSDeprecatedFields(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice-v1/ARTIFACT.md": hrCtx("deprecated: true\nreplaced_by: finance/ap/pay-invoice-v2"),
+		"finance/ap/pay-invoice-v1/ARTIFACT.md": hrAgent("deprecated: true\nreplaced_by: finance/ap/pay-invoice-v2"),
 	}))
 	res := csRunTS(t, node, srv.BaseURL,
 		"import { Client } from "+csTSImport(t)+";\nconst c = new Client({ registry: process.env.PODIUM_REGISTRY });\nconst r = await c.loadArtifact('finance/ap/pay-invoice-v1');\nconsole.log('OK', r.deprecated, r.replaced_by, !!r.deprecation_warning);\n")
@@ -740,7 +740,7 @@ func TestArtifactResponse_TSDeprecatedFields(t *testing.T) {
 func TestArtifactResponse_TSRegistryError(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	res := csRunTS(t, node, srv.BaseURL,
 		"import { Client, RegistryError } from "+csTSImport(t)+";\nconst c = new Client({ registry: process.env.PODIUM_REGISTRY });\ntry { await c.loadArtifact('nonexistent/path'); console.log('NO_ERROR'); } catch (e) { const r = e as RegistryError; console.log('CODE', r.code, r.retryable); }\n")
 	csWantStdout(t, res, "CODE registry.not_found false")
@@ -754,7 +754,7 @@ func TestArtifactResponse_TSRegistryError(t *testing.T) {
 func TestArtifactResponse_SignatureMissing(t *testing.T) {
 	t.Parallel()
 	srv := startServerUnsigned(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": hrCtx("sensitivity: low"),
+		"finance/ap/pay-invoice/ARTIFACT.md": hrAgent("sensitivity: low"),
 	}))
 	mat := t.TempDir()
 	// The environment is stated in full rather than built on mcpServerEnv,
@@ -779,7 +779,7 @@ func TestArtifactResponse_SignatureMissing(t *testing.T) {
 func TestArtifactResponse_UnknownHarness(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay"),
 	}))
 	mat := t.TempDir()
 	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=nonexistent-harness", "PODIUM_MATERIALIZE_ROOT="+mat),
@@ -800,7 +800,7 @@ func TestArtifactResponse_ReadOnlyServes(t *testing.T) {
 // quota.materialize_rate_exceeded under a low rate.
 func TestArtifactResponse_QuotaMaterialize(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay")})
+	reg := writeRegistry(t, map[string]string{"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay")})
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_QUOTA_MATERIALIZE_RATE=1"},
 		"serve", "--standalone", "--layer-path", reg)
 	var got429 bool
@@ -833,8 +833,8 @@ func TestArtifactResponse_QuotaMaterialize(t *testing.T) {
 func TestArtifactResponse_BatchLoadQuotaMaterialize(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md":     contextArtifact("pay"),
-		"finance/ap/approve-invoice/ARTIFACT.md": contextArtifact("approve"),
+		"finance/ap/pay-invoice/ARTIFACT.md":     agentArtifact("pay"),
+		"finance/ap/approve-invoice/ARTIFACT.md": agentArtifact("approve"),
 	})
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_QUOTA_MATERIALIZE_RATE=1"},
 		"serve", "--standalone", "--layer-path", reg)
@@ -891,7 +891,7 @@ func TestArtifactResponse_ScopeDenied(t *testing.T) {
 	srv := startAuthServer(t, authServerSpec{
 		Layers: []authLayer{{
 			ID:         "restricted",
-			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("restricted ledger")},
 			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 		}},
 	})
@@ -940,7 +940,7 @@ func TestArtifactResponse_HookFailedWired(t *testing.T) {
 // load_artifact with missing id returns 400.
 func TestArtifactResponse_MissingID(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact")
 	if st != 400 {
 		t.Errorf("status=%d, want 400: %s", st, body)
@@ -953,7 +953,7 @@ func TestArtifactResponse_MissingID(t *testing.T) {
 // load_artifact with unknown id returns 404 not_found.
 func TestArtifactResponse_UnknownID(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=nonexistent/artifact/path")
 	if st != 404 {
 		t.Errorf("status=%d, want 404: %s", st, body)
@@ -966,7 +966,7 @@ func TestArtifactResponse_UnknownID(t *testing.T) {
 // batch load with >50 ids returns 400.
 func TestArtifactResponse_BatchCap(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	ids := make([]string, 51)
 	for i := range ids {
 		ids[i] = "x/a" + strconv.Itoa(i)
@@ -984,7 +984,7 @@ func TestArtifactResponse_BatchCap(t *testing.T) {
 func TestArtifactResponse_BatchPartial(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay"),
 	}))
 	st, body := postJSON(t, srv.BaseURL+"/v1/artifacts:batchLoad",
 		map[string]any{"ids": []string{"finance/ap/pay-invoice", "finance/ap/nonexistent"}})
@@ -1024,7 +1024,7 @@ func TestArtifactResponse_BatchPartial(t *testing.T) {
 func TestArtifactResponse_ContentHash(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay"),
 	}))
 	if r := hrLoad(t, srv.BaseURL, "finance/ap/pay-invoice"); strings.TrimSpace(r.ContentHash) == "" {
 		t.Errorf("content_hash empty: %+v", r)

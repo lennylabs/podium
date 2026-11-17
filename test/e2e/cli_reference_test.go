@@ -35,14 +35,14 @@ import (
 // ---- local helpers (cli-prefixed to avoid package collisions) ----------
 
 // cliReg stages the registry fixture shared by the read-CLI tests: a
-// skill (personal/greet) and two context artifacts whose descriptions
+// skill (personal/greet) and two agent artifacts whose descriptions
 // carry the "variance" query term used throughout.
 func cliReg(t testing.TB) string {
 	return writeRegistry(t, map[string]string{
 		"personal/greet/ARTIFACT.md":  greetSkillArtifact,
 		"personal/greet/SKILL.md":     greetSkillBody,
-		"finance/invoice/ARTIFACT.md": contextArtifact("Vendor payments and invoice variance reference for finance teams."),
-		"personal/note/ARTIFACT.md":   contextArtifact("Personal note about variance tracking and reminders for later."),
+		"finance/invoice/ARTIFACT.md": agentArtifact("Vendor payments and invoice variance reference for finance teams."),
+		"personal/note/ARTIFACT.md":   agentArtifact("Personal note about variance tracking and reminders for later."),
 	})
 }
 
@@ -557,7 +557,7 @@ func TestCLI_NoAutoStandaloneEnv(t *testing.T) {
 // spec: doc "Server — podium serve", `--layer-path` single layer.
 func TestCLI_LayerPathSingleLayer(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
-		"team/x/ARTIFACT.md": contextArtifact("A single local-source layer artifact for coverage."),
+		"team/x/ARTIFACT.md": agentArtifact("A single local-source layer artifact for coverage."),
 	})
 	srv := startServer(t, reg)
 	res := runPodium(t, "", brEnv(srv.BaseURL), "layer", "list")
@@ -573,8 +573,8 @@ func TestCLI_LayerPathSingleLayer(t *testing.T) {
 func TestCLI_LayerPathMultiLayer(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":       "multi_layer: true\n",
-		"team-a/svc/ARTIFACT.md": contextArtifact("Team A service reference documentation for coverage here."),
-		"team-b/svc/ARTIFACT.md": contextArtifact("Team B service reference documentation for coverage here."),
+		"team-a/svc/ARTIFACT.md": agentArtifact("Team A service reference documentation for coverage here."),
+		"team-b/svc/ARTIFACT.md": agentArtifact("Team B service reference documentation for coverage here."),
 	})
 	srv := startServer(t, reg)
 	res := runPodium(t, "", brEnv(srv.BaseURL), "layer", "list")
@@ -713,7 +713,7 @@ func TestCLI_LintTreeRecurses(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"personal/greet/ARTIFACT.md": greetSkillArtifact,
 		"personal/greet/SKILL.md":    greetSkillBody,
-		"finance/note/ARTIFACT.md":   contextArtifact("Finance note reference documentation for coverage here today."),
+		"finance/note/ARTIFACT.md":   agentArtifact("Finance note reference documentation for coverage here today."),
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	cliWantExit(t, res, 0, "lint tree")
@@ -728,7 +728,7 @@ func TestCLI_LintDomainBodyOverCapWarns(t *testing.T) {
 	// ~2750 tokens of body (well over the 2000-token recommendation).
 	bigBody := strings.Repeat("word ", 2200)
 	reg := writeRegistry(t, map[string]string{
-		"finance/note/ARTIFACT.md": contextArtifact("Finance note reference documentation for coverage here today."),
+		"finance/note/ARTIFACT.md": agentArtifact("Finance note reference documentation for coverage here today."),
 		"finance/DOMAIN.md":        "---\ndescription: Finance\n---\n\n" + bigBody,
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
@@ -741,7 +741,7 @@ func TestCLI_LintDomainBodyOverCapWarns(t *testing.T) {
 // no body-size warning.
 func TestCLI_LintDomainBodyWithinCapClean(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
-		"finance/note/ARTIFACT.md": contextArtifact("Finance note reference documentation for coverage here today."),
+		"finance/note/ARTIFACT.md": agentArtifact("Finance note reference documentation for coverage here today."),
 		"finance/DOMAIN.md":        "---\ndescription: Finance\n---\n\n# Finance\n\nA short prose body well under the recommendation.\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
@@ -1054,17 +1054,17 @@ func TestCLI_Search(t *testing.T) {
 // the type filter narrows results by artifact type.
 func TestCLI_SearchType(t *testing.T) {
 	srv := startServer(t, cliReg(t))
-	ctx := runPodium(t, "", brEnv(srv.BaseURL), "search", "--type", "context", "--json", "")
-	cliWantExit(t, ctx, 0, "search --type context")
-	for _, r := range cliResults(t, ctx.Stdout) {
-		if r["type"] != "context" {
-			t.Fatalf("--type context returned non-context: %v", r)
+	agents := runPodium(t, "", brEnv(srv.BaseURL), "search", "--type", "agent", "--json", "")
+	cliWantExit(t, agents, 0, "search --type agent")
+	for _, r := range cliResults(t, agents.Stdout) {
+		if r["type"] != "agent" {
+			t.Fatalf("--type agent returned non-agent: %v", r)
 		}
 	}
-	cliContains(t, ctx.Stdout, "finance/invoice", "context artifact present")
+	cliContains(t, agents.Stdout, "finance/invoice", "agent artifact present")
 	skill := runPodium(t, "", brEnv(srv.BaseURL), "search", "--type", "skill", "--json", "")
 	cliWantExit(t, skill, 0, "search --type skill")
-	cliNotContains(t, skill.Stdout, "finance/invoice", "context excluded by --type skill")
+	cliNotContains(t, skill.Stdout, "finance/invoice", "agent excluded by --type skill")
 }
 
 // spec: doc "podium search", `--tags` flag. The flag is not implemented;
@@ -1114,10 +1114,10 @@ func TestCLI_JSONPipeline(t *testing.T) {
 	srv := startServer(t, cliReg(t))
 	env := brEnv(srv.BaseURL)
 
-	// Discovery step (`podium search ... --json`). --type context matches the
-	// two "variance" contexts and excludes the skill, standing in for the
+	// Discovery step (`podium search ... --json`). --type agent matches the
+	// two "variance" agents and excludes the skill, standing in for the
 	// doc's score-floored jq selection.
-	search := runPodium(t, "", env, "search", "--type", "context", "--json", "variance")
+	search := runPodium(t, "", env, "search", "--type", "agent", "--json", "variance")
 	cliWantExit(t, search, 0, "search --json")
 	var ids []string
 	for _, r := range cliResults(t, search.Stdout) {
@@ -1145,7 +1145,7 @@ func TestCLI_JSONPipeline(t *testing.T) {
 			t.Fatalf("curated id %q not materialized: %v", id, keysOf(files))
 		}
 	}
-	// The skill was never discovered (--type context) and is absent from the
+	// The skill was never discovered (--type agent) and is absent from the
 	// include list, so it must not appear on disk: the set is reproducible
 	// from the include list (§9.4).
 	if _, ok := files["personal/greet/ARTIFACT.md"]; ok {
@@ -1202,7 +1202,7 @@ func TestCLI_DomainSearch(t *testing.T) {
 	// is excluded (§3.2), so stage one for the finance domain.
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/DOMAIN.md":           "---\ndescription: \"Finance operations and vendor payments\"\ndiscovery:\n  keywords:\n    - finance\n---\n",
-		"finance/invoice/ARTIFACT.md": contextArtifact("Invoice variance for finance teams."),
+		"finance/invoice/ARTIFACT.md": agentArtifact("Invoice variance for finance teams."),
 	}))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "domain", "search", "finance")
 	cliWantExit(t, res, 0, "domain search")
@@ -1215,7 +1215,7 @@ func TestCLI_DomainSearch(t *testing.T) {
 func TestCLI_DomainSearchJSON(t *testing.T) {
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/DOMAIN.md":           "---\ndescription: \"Finance operations and vendor payments\"\ndiscovery:\n  keywords:\n    - finance\n---\n",
-		"finance/invoice/ARTIFACT.md": contextArtifact("Invoice variance for finance teams."),
+		"finance/invoice/ARTIFACT.md": agentArtifact("Invoice variance for finance teams."),
 	}))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "domain", "search", "--json", "finance")
 	cliWantExit(t, res, 0, "domain search --json")
@@ -1272,11 +1272,11 @@ func TestCLI_ArtifactShow(t *testing.T) {
 // ARTIFACT.md, so a non-skill's body must not print a second time from it.
 func TestCLI_ArtifactShowPrintsBodyOnce(t *testing.T) {
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"team/faq/ARTIFACT.md": contextArtifact("Frequently asked questions."),
+		"team/faq/ARTIFACT.md": agentArtifact("Frequently asked questions."),
 	}))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "artifact", "show", "team/faq")
 	cliWantExit(t, res, 0, "artifact show team/faq")
-	want := "---\ntype: context\nversion: 1.0.0\ndescription: Frequently asked questions.\n---\n"
+	want := "---\ntype: agent\nversion: 1.0.0\ndescription: Frequently asked questions.\n---\n"
 	if !strings.HasPrefix(res.Stdout, want) {
 		t.Fatalf("artifact show did not open with the frontmatter block:\n%s", res.Stdout)
 	}
@@ -1494,7 +1494,7 @@ func TestCLI_ScaffoldInteractive(t *testing.T) {
 func TestCLI_LayerRegisterLocal(t *testing.T) {
 	srv := startServer(t, "")
 	lp := writeRegistry(t, map[string]string{
-		"x/y/ARTIFACT.md": contextArtifact("A registered local layer artifact body for coverage here today."),
+		"x/y/ARTIFACT.md": agentArtifact("A registered local layer artifact body for coverage here today."),
 	})
 	res := runPodium(t, "", brEnv(srv.BaseURL), "layer", "register", "--id", "my-layer", "--local", lp)
 	cliWantExit(t, res, 0, "layer register local")
@@ -1698,7 +1698,7 @@ func TestCLI_AdminGrant(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "restricted",
-			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("restricted ledger")},
 			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 		}},
 	})
@@ -1732,7 +1732,7 @@ func TestCLI_AdminRevoke(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "restricted",
-			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("restricted ledger")},
 			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 		}},
 	})
@@ -1772,7 +1772,7 @@ func TestCLI_AdminShowEffective(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "restricted",
-			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("restricted ledger")},
 			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 		}},
 	})
@@ -2211,7 +2211,7 @@ func TestCLI_SyncWatch(t *testing.T) {
 		t.Fatalf("watch did not materialize initial artifact\nlog:\n%s", w.log())
 	}
 	// Add a new artifact; the fsnotify/poll watcher re-materializes it.
-	mkArtifact(t, filepath.Join(reg, "finance/new"), contextArtifact("A newly added artifact the watcher should pick up here."))
+	mkArtifact(t, filepath.Join(reg, "finance/new"), agentArtifact("A newly added artifact the watcher should pick up here."))
 	if !pollFile(filepath.Join(tgt, "finance/new/ARTIFACT.md"), 15*time.Second) {
 		t.Fatalf("watch did not re-materialize the new artifact\nlog:\n%s", w.log())
 	}
@@ -2228,13 +2228,13 @@ func TestCLI_SyncWatch(t *testing.T) {
 func TestCLI_SyncProfile(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		// Included by finance/**.
-		"finance/invoicing/run-variance/ARTIFACT.md": contextArtifact("Run variance analysis over vendor invoices for the finance team."),
+		"finance/invoicing/run-variance/ARTIFACT.md": agentArtifact("Run variance analysis over vendor invoices for the finance team."),
 		// Included by finance/** but removed by the exclude finance/**/legacy/**.
-		"finance/invoicing/legacy/old-flow/ARTIFACT.md": contextArtifact("A retired invoicing flow kept only for historical reference."),
+		"finance/invoicing/legacy/old-flow/ARTIFACT.md": agentArtifact("A retired invoicing flow kept only for historical reference."),
 		// Included by shared/policies/*.
-		"shared/policies/data-handling/ARTIFACT.md": contextArtifact("Data handling policy that every team applies to customer records."),
+		"shared/policies/data-handling/ARTIFACT.md": agentArtifact("Data handling policy that every team applies to customer records."),
 		// Outside the profile scope entirely.
-		"personal/notes/reminder/ARTIFACT.md": contextArtifact("A personal note that the finance profile must not materialize here."),
+		"personal/notes/reminder/ARTIFACT.md": agentArtifact("A personal note that the finance profile must not materialize here."),
 	})
 	home := t.TempDir()
 	ws := t.TempDir()
@@ -2315,7 +2315,7 @@ func TestCLI_ScaffoldDescriptionRequired(t *testing.T) {
 // spec: doc "podium artifact scaffold", `--sensitivity` flag.
 func TestCLI_ScaffoldSensitivity(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "personal/pub")
-	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "context", "--description", "Low-sensitivity context.", "--sensitivity", "low", "--yes", dst), 0, "scaffold sensitivity")
+	cliWantExit(t, runPodium(t, "", nil, "artifact", "scaffold", "--type", "agent", "--description", "Low-sensitivity agent.", "--sensitivity", "low", "--yes", dst), 0, "scaffold sensitivity")
 	cliContains(t, readFile(t, filepath.Join(dst, "ARTIFACT.md")), "sensitivity: low", "sensitivity field")
 }
 
@@ -2325,7 +2325,7 @@ func TestCLI_ScaffoldSensitivity(t *testing.T) {
 //
 // Spec: §4.6
 func TestCLI_ScaffoldExtendsIsUndefined(t *testing.T) {
-	for _, typ := range []string{"skill", "context"} {
+	for _, typ := range []string{"skill", "agent"} {
 		t.Run(typ, func(t *testing.T) {
 			dst := filepath.Join(t.TempDir(), "personal/extended")
 			res := runPodium(t, "", nil, "artifact", "scaffold", "--type", typ, "--description", "Extended artifact.", "--extends", "x", "--yes", dst)

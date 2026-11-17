@@ -26,8 +26,8 @@ description: Say hello.
 
 Body.
 `
-	contextArtifact = `---
-type: context
+	agentArtifact = `---
+type: agent
 version: 1.0.0
 description: Glossary.
 ---
@@ -54,7 +54,7 @@ func TestPodiumSync_FilesystemSourceWritesTarget(t *testing.T) {
 			Path: "team-shared/greetings/hello/SKILL.md", Content: skillBody,
 		},
 		testharness.WriteTreeOption{
-			Path: "team-shared/company-glossary/ARTIFACT.md", Content: contextArtifact,
+			Path: "team-shared/company-glossary/ARTIFACT.md", Content: agentArtifact,
 		},
 	)
 	res := cmdharness.Run(t, "podium", "",
@@ -108,7 +108,7 @@ func TestPodiumSync_DryRunWritesNothing(t *testing.T) {
 	target := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{
-			Path: "company-glossary/ARTIFACT.md", Content: contextArtifact,
+			Path: "company-glossary/ARTIFACT.md", Content: agentArtifact,
 		},
 	)
 	res := cmdharness.Run(t, "podium", "",
@@ -140,7 +140,7 @@ func TestPodiumSync_LayerPathAmbiguousIsRejected(t *testing.T) {
 			Path: ".registry-config", Content: "multi_layer: true\n",
 		},
 		testharness.WriteTreeOption{
-			Path: "ARTIFACT.md", Content: contextArtifact,
+			Path: "ARTIFACT.md", Content: agentArtifact,
 		},
 	)
 	res := cmdharness.Run(t, "podium", "",
@@ -165,7 +165,7 @@ func TestPodiumSync_UnknownHarnessFails(t *testing.T) {
 	registry := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{
-			Path: "x/ARTIFACT.md", Content: contextArtifact,
+			Path: "x/ARTIFACT.md", Content: agentArtifact,
 		},
 	)
 	res := cmdharness.Run(t, "podium", "",
@@ -192,10 +192,10 @@ func TestPodiumSync_IsIdempotent(t *testing.T) {
 	target := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{
-			Path: "x/ARTIFACT.md", Content: contextArtifact,
+			Path: "x/ARTIFACT.md", Content: agentArtifact,
 		},
 		testharness.WriteTreeOption{
-			Path: "y/ARTIFACT.md", Content: contextArtifact,
+			Path: "y/ARTIFACT.md", Content: agentArtifact,
 		},
 	)
 	for i := 0; i < 2; i++ {

@@ -21,7 +21,7 @@ func TestPodiumMCP_LoadArtifactMaterializes(t *testing.T) {
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
 			Path: "company-glossary/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\n" +
+			Content: "---\ntype: agent\nversion: 1.0.0\n" +
 				"description: Company glossary\n---\n\n" +
 				"# Glossary\n\nbody\n",
 		},
@@ -93,7 +93,7 @@ func TestPodiumMCP_TargetHarnessesSuppressesMaterialize(t *testing.T) {
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
 			Path: "tools/cc-only/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\n" +
+			Content: "---\ntype: agent\nversion: 1.0.0\n" +
 				"description: claude-code only\n" +
 				"target_harnesses: [claude-code]\n---\n\nbody\n",
 		},
@@ -305,7 +305,7 @@ func TestPodiumMCP_LoadArtifactPopulatesContentCache(t *testing.T) {
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
 			Path: "x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\n" +
+			Content: "---\ntype: agent\nversion: 1.0.0\n" +
 				"description: x\n---\n\nbody\n",
 		},
 	)
@@ -354,7 +354,7 @@ func TestPodiumMCP_NoMaterializeRootReturnsManifestOnly(t *testing.T) {
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
 			Path:    "x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\n---\n\nbody\n",
+			Content: "---\ntype: agent\nversion: 1.0.0\n---\n\nbody\n",
 		},
 	)
 	bin := buildMCP(t)

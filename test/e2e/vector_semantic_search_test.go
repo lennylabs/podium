@@ -116,16 +116,16 @@ type semanticSearchResponse struct {
 	} `json:"results"`
 }
 
-// semanticRegistry stages three context artifacts whose descriptions are
+// semanticRegistry stages three agent artifacts whose descriptions are
 // lexically and semantically distinct, so a query matching one of them ranks
 // that artifact first. The "invoice reconciliation" artifact is the search
 // target; the other two are distractors.
 func semanticRegistry(t *testing.T) string {
 	t.Helper()
 	return writeRegistry(t, map[string]string{
-		"finance/reconcile/ARTIFACT.md": contextArtifact("invoice reconciliation matching vendor payments against purchase orders"),
-		"hr/onboarding/ARTIFACT.md":     contextArtifact("employee onboarding checklist for new hire orientation"),
-		"infra/deploy/ARTIFACT.md":      contextArtifact("kubernetes deployment rollout and pod autoscaling"),
+		"finance/reconcile/ARTIFACT.md": agentArtifact("invoice reconciliation matching vendor payments against purchase orders"),
+		"hr/onboarding/ARTIFACT.md":     agentArtifact("employee onboarding checklist for new hire orientation"),
+		"infra/deploy/ARTIFACT.md":      agentArtifact("kubernetes deployment rollout and pod autoscaling"),
 	})
 }
 
@@ -153,7 +153,7 @@ func queryEscape(q string) string {
 
 // TestVectorSemanticSearch_PgVectorThroughServer is the PR-lane form
 // (pgvector). It boots the standalone server with PODIUM_VECTOR_BACKEND=pgvector
-// against the CI Postgres container, ingests three context artifacts, and
+// against the CI Postgres container, ingests three agent artifacts, and
 // asserts a semantic query returns the matching artifact at rank 1 through the
 // HTTP search surface. The mock embedder keeps ingest off the real OpenAI API.
 //

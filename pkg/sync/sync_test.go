@@ -21,6 +21,14 @@ description: Say hello.
 
 Body.
 `
+	agentArtifactSrc = `---
+type: agent
+version: 1.0.0
+description: glossary
+---
+
+Glossary body.
+`
 	contextArtifactSrc = `---
 type: context
 version: 1.0.0
@@ -48,7 +56,7 @@ func TestRun_SyncsArtifactsToTarget(t *testing.T) {
 			Path: "team-shared/greetings/hello/SKILL.md", Content: skillBodySrc,
 		},
 		testharness.WriteTreeOption{
-			Path: "team-shared/company-glossary/ARTIFACT.md", Content: contextArtifactSrc,
+			Path: "team-shared/company-glossary/ARTIFACT.md", Content: agentArtifactSrc,
 		},
 	)
 	res, err := Run(Options{
@@ -82,7 +90,7 @@ func TestRun_SyncsArtifactsToTarget(t *testing.T) {
 func TestRun_TargetHarnessesFiltersAdapter(t *testing.T) {
 	t.Parallel()
 	ccOnly := `---
-type: context
+type: agent
 version: 1.0.0
 description: claude-code only
 target_harnesses: [claude-code]
@@ -91,7 +99,7 @@ target_harnesses: [claude-code]
 body
 `
 	noneTargeted := `---
-type: context
+type: agent
 version: 1.0.0
 description: targets none adapter
 target_harnesses: [none]
@@ -104,7 +112,7 @@ body
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{Path: "team/cc-only/ARTIFACT.md", Content: ccOnly},
 		testharness.WriteTreeOption{Path: "team/none-targeted/ARTIFACT.md", Content: noneTargeted},
-		testharness.WriteTreeOption{Path: "team/everywhere/ARTIFACT.md", Content: contextArtifactSrc},
+		testharness.WriteTreeOption{Path: "team/everywhere/ARTIFACT.md", Content: agentArtifactSrc},
 	)
 	res, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"})
 	if err != nil {
@@ -132,7 +140,7 @@ func TestRun_DryRunWritesNothing(t *testing.T) {
 	target := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{
-			Path: "company-glossary/ARTIFACT.md", Content: contextArtifactSrc,
+			Path: "company-glossary/ARTIFACT.md", Content: agentArtifactSrc,
 		},
 	)
 	res, err := Run(Options{
@@ -161,7 +169,7 @@ func TestRun_ChangedTracksOnDiskDelta(t *testing.T) {
 	registry := t.TempDir()
 	target := t.TempDir()
 	testharness.WriteTree(t, registry,
-		testharness.WriteTreeOption{Path: "company-glossary/ARTIFACT.md", Content: contextArtifactSrc},
+		testharness.WriteTreeOption{Path: "company-glossary/ARTIFACT.md", Content: agentArtifactSrc},
 	)
 
 	first, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"})
@@ -192,7 +200,7 @@ func TestRun_ChangedTracksOnDiskDelta(t *testing.T) {
 	// Editing the artifact changes the materialized content, so the next sync
 	// reports Changed=true again.
 	edited := `---
-type: context
+type: agent
 version: 1.0.1
 description: glossary edited
 ---
@@ -219,7 +227,7 @@ func TestRun_DefaultAdapterIsNone(t *testing.T) {
 	target := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{
-			Path: "x/ARTIFACT.md", Content: contextArtifactSrc,
+			Path: "x/ARTIFACT.md", Content: agentArtifactSrc,
 		},
 	)
 	res, err := Run(Options{RegistryPath: registry, Target: target})
@@ -238,7 +246,7 @@ func TestRun_UnknownAdapterFails(t *testing.T) {
 	registry := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{
-			Path: "x/ARTIFACT.md", Content: contextArtifactSrc,
+			Path: "x/ARTIFACT.md", Content: agentArtifactSrc,
 		},
 	)
 	_, err := Run(Options{

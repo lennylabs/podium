@@ -28,7 +28,7 @@ func TestIngest_AttachesSignatureWhenSignerConfigured(t *testing.T) {
 		Signer: signer.Sign,
 		Files: fstest.MapFS{
 			"x/ARTIFACT.md": &fstest.MapFile{
-				Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: medium\n---\n\nbody\n"),
+				Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: medium\n---\n\nbody\n"),
 			},
 		},
 	})
@@ -74,10 +74,10 @@ func TestIngest_SignFailureRejectsArtifact(t *testing.T) {
 		Signer: failFirst,
 		Files: fstest.MapFS{
 			"x/ARTIFACT.md": &fstest.MapFile{
-				Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: medium\n---\n\nbody\n"),
+				Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: medium\n---\n\nbody\n"),
 			},
 			"y/ARTIFACT.md": &fstest.MapFile{
-				Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: y\nsensitivity: medium\n---\n\nbody\n"),
+				Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: y\nsensitivity: medium\n---\n\nbody\n"),
 			},
 		},
 	})
@@ -118,7 +118,7 @@ func TestIngest_NoSignerProducesEmptySignature(t *testing.T) {
 		TenantID: "t", LayerID: "L",
 		Files: fstest.MapFS{
 			"x/ARTIFACT.md": &fstest.MapFile{
-				Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
+				Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
 			},
 		},
 	})

@@ -1,9 +1,10 @@
 ---
-type: context
-version: 0.2.0
+name: glossary-notes
 description: Alice's annotations on the company glossary.
-sensitivity: low
-tags: [notes]
+metadata:
+  version: "0.3.0"
+  tags: "notes"
+  sensitivity: "low"
 ---
 
 # Glossary notes

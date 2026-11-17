@@ -173,7 +173,7 @@ func TestIngest_PersistsResourcesInlineWithoutObjectStore(t *testing.T) {
 func TestIngest_NoResourcesYieldsNoRefs(t *testing.T) {
 	t.Parallel()
 	files := fstest.MapFS{
-		"finance/glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("g"))},
+		"finance/glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("g"))},
 	}
 	st := newStore(t)
 	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{

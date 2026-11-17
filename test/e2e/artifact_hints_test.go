@@ -78,19 +78,19 @@ func TestHints_EffortMediumOnAgent(t *testing.T) {
 	}
 }
 
-// effort_hint: high on a command lints clean.
+// effort_hint: high on an agent lints clean.
 // spec: docs/authoring/hints.md §effort_hint table.
-func TestHints_EffortHighOnCommand(t *testing.T) {
+func TestHints_EffortHighOnAgent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"personal/run-analysis/ARTIFACT.md": "---\ntype: command\nversion: 1.0.0\ndescription: Run the variance analysis.\neffort_hint: high\n---\n\n$ARGUMENTS\n",
+		"personal/run-analysis/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Run the variance analysis.\neffort_hint: high\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 {
 		t.Fatalf("lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
 	}
 	if strings.Contains(res.Stdout+res.Stderr, "lint.hint_on_unsupported_type") {
-		t.Errorf("unexpected hint warning on command:\n%s", res.Stdout)
+		t.Errorf("unexpected hint warning on agent:\n%s", res.Stdout)
 	}
 }
 
@@ -166,45 +166,6 @@ func TestHints_BothHintsOnSkill(t *testing.T) {
 }
 
 // ---- effort_hint / model_class_hint on unsupported types -> warning ---------
-
-// effort_hint on a context warns (lint.hint_on_unsupported_type,
-// severity warning) and the lint still exits 0.
-// spec: docs/authoring/hints.md §Lint behavior.
-func TestHints_EffortOnContextWarns(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"personal/glossary/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Company glossary.\neffort_hint: high\n---\n\nbody\n",
-	})
-	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 0 {
-		t.Fatalf("lint exit=%d, want 0 (warning)\nstdout=%s", res.Exit, res.Stdout)
-	}
-	if !strings.Contains(res.Stdout, "lint.hint_on_unsupported_type") || !strings.Contains(res.Stdout, "[warning]") {
-		t.Fatalf("missing hint_on_unsupported_type warning:\n%s", res.Stdout)
-	}
-	if !strings.Contains(res.Stdout, "effort_hint") || !strings.Contains(res.Stdout, "context") {
-		t.Errorf("warning message missing effort_hint/context:\n%s", res.Stdout)
-	}
-}
-
-// model_class_hint on a context warns.
-// spec: docs/authoring/hints.md §Lint behavior.
-func TestHints_ModelOnContextWarns(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
-		"personal/glossary/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Company glossary.\nmodel_class_hint: large\n---\n\nbody\n",
-	})
-	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 0 {
-		t.Fatalf("lint exit=%d, want 0 (warning)\nstdout=%s", res.Exit, res.Stdout)
-	}
-	if !strings.Contains(res.Stdout, "lint.hint_on_unsupported_type") || !strings.Contains(res.Stdout, "[warning]") {
-		t.Fatalf("missing hint_on_unsupported_type warning:\n%s", res.Stdout)
-	}
-	if !strings.Contains(res.Stdout, "model_class_hint") || !strings.Contains(res.Stdout, "context") {
-		t.Errorf("warning message missing model_class_hint/context:\n%s", res.Stdout)
-	}
-}
 
 // effort_hint on a rule warns.
 // spec: docs/authoring/hints.md §Lint behavior.
@@ -481,13 +442,13 @@ func TestHints_MCPLoadArtifactPreservesHints(t *testing.T) {
 	}
 }
 
-// a context with effort_hint syncs successfully (the warning does
+// a rule with effort_hint syncs successfully (the warning does
 // not block sync) and the hint passes through to the materialized file.
 // spec: docs/authoring/hints.md §Lint behavior (warning, not error).
-func TestHints_ContextHintDoesNotBlockSync(t *testing.T) {
+func TestHints_RuleHintDoesNotBlockSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"personal/glossary/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Glossary.\neffort_hint: low\n---\n\nbody\n",
+		"personal/glossary/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\ndescription: Glossary.\nrule_mode: always\neffort_hint: low\n---\n\nbody\n",
 	})
 	tgt := t.TempDir()
 	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none"); res.Exit != 0 {
@@ -495,25 +456,25 @@ func TestHints_ContextHintDoesNotBlockSync(t *testing.T) {
 	}
 	got := readFile(t, filepath.Join(tgt, "personal/glossary/ARTIFACT.md"))
 	if !strings.Contains(got, "effort_hint: low") {
-		t.Errorf("materialized context missing effort_hint:\n%s", got)
+		t.Errorf("materialized rule missing effort_hint:\n%s", got)
 	}
 }
 
-// model_class_hint values small and large are both accepted on a
-// command (two separate registries, each lint-clean).
+// model_class_hint values small and large are both accepted on an
+// agent (two separate registries, each lint-clean).
 // spec: docs/authoring/hints.md §model_class_hint table.
-func TestHints_ModelSmallAndLargeOnCommand(t *testing.T) {
+func TestHints_ModelSmallAndLargeOnAgent(t *testing.T) {
 	t.Parallel()
 	for _, v := range []string{"small", "large"} {
 		reg := writeRegistry(t, map[string]string{
-			"personal/run-report/ARTIFACT.md": "---\ntype: command\nversion: 1.0.0\ndescription: Run the monthly report.\nmodel_class_hint: " + v + "\n---\n\n$ARGUMENTS\n",
+			"personal/run-report/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Run the monthly report.\nmodel_class_hint: " + v + "\n---\n\nbody\n",
 		})
 		res := runPodium(t, "", nil, "lint", "--registry", reg)
 		if res.Exit != 0 {
 			t.Fatalf("model_class_hint=%s lint exit=%d, want 0\nstdout=%s", v, res.Exit, res.Stdout)
 		}
 		if strings.Contains(res.Stdout+res.Stderr, "lint.hint_on_unsupported_type") {
-			t.Errorf("model_class_hint=%s on command unexpectedly warned:\n%s", v, res.Stdout)
+			t.Errorf("model_class_hint=%s on agent unexpectedly warned:\n%s", v, res.Stdout)
 		}
 	}
 }

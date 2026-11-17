@@ -141,7 +141,7 @@ func TestEventStream_LayerVisibilityPerCaller(t *testing.T) {
 		t.Fatalf("mkdir roadmap: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(engRoot, "roadmap", "ARTIFACT.md"),
-		[]byte(contextArtifact("engineering roadmap")), 0o644); err != nil {
+		[]byte(agentArtifact("engineering roadmap")), 0o644); err != nil {
 		t.Fatalf("write roadmap artifact: %v", err)
 	}
 	evReingest(t, srv, carol, "eng-layer")

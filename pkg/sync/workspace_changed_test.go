@@ -49,14 +49,14 @@ func wantChanged(t *testing.T, opts Options, want bool, why string) {
 	}
 }
 
-// contextRegistry writes a registry of context artifacts, one per ID, and
+// agentRegistry writes a registry of agent artifacts, one per ID, and
 // returns its root.
-func contextRegistry(t *testing.T, ids ...string) string {
+func agentRegistry(t *testing.T, ids ...string) string {
 	t.Helper()
 	registry := t.TempDir()
 	opts := make([]testharness.WriteTreeOption, 0, len(ids))
 	for _, id := range ids {
-		opts = append(opts, testharness.WriteTreeOption{Path: id + "/ARTIFACT.md", Content: contextArtifactSrc})
+		opts = append(opts, testharness.WriteTreeOption{Path: id + "/ARTIFACT.md", Content: agentArtifactSrc})
 	}
 	testharness.WriteTree(t, registry, opts...)
 	return registry
@@ -83,7 +83,7 @@ func TestRun_ChangedOnAdapterOutputChange(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 	opts := Options{
-		RegistryPath:    contextRegistry(t, "company-glossary"),
+		RegistryPath:    agentRegistry(t, "company-glossary"),
 		Target:          t.TempDir(),
 		AdapterID:       "switchable",
 		AdapterRegistry: reg,
@@ -151,7 +151,7 @@ func TestRun_ChangedRestoresHandEdits(t *testing.T) {
 
 	t.Run("hand edit", func(t *testing.T) {
 		t.Parallel()
-		opts := Options{RegistryPath: contextRegistry(t, "company-glossary"), Target: t.TempDir(), AdapterID: "none"}
+		opts := Options{RegistryPath: agentRegistry(t, "company-glossary"), Target: t.TempDir(), AdapterID: "none"}
 		syncChanged(t, opts)
 		original := readTargetFile(t, opts.Target, rel)
 		writeFile(t, filepath.Join(opts.Target, rel), "edited by hand\n")
@@ -163,7 +163,7 @@ func TestRun_ChangedRestoresHandEdits(t *testing.T) {
 
 	t.Run("hand deletion", func(t *testing.T) {
 		t.Parallel()
-		opts := Options{RegistryPath: contextRegistry(t, "company-glossary"), Target: t.TempDir(), AdapterID: "none"}
+		opts := Options{RegistryPath: agentRegistry(t, "company-glossary"), Target: t.TempDir(), AdapterID: "none"}
 		syncChanged(t, opts)
 		if err := os.Remove(filepath.Join(opts.Target, rel)); err != nil {
 			t.Fatalf("Remove: %v", err)
@@ -181,14 +181,14 @@ func TestRun_ChangedIgnoresLockFile(t *testing.T) {
 
 	t.Run("lock-only rewrite", func(t *testing.T) {
 		t.Parallel()
-		opts := Options{RegistryPath: contextRegistry(t, "company-glossary"), Target: t.TempDir(), AdapterID: "none"}
+		opts := Options{RegistryPath: agentRegistry(t, "company-glossary"), Target: t.TempDir(), AdapterID: "none"}
 		syncChanged(t, opts)
 		wantChanged(t, opts, false, "unchanged re-sync")
 	})
 
 	t.Run("missing prior lock", func(t *testing.T) {
 		t.Parallel()
-		opts := Options{RegistryPath: contextRegistry(t, "company-glossary"), Target: t.TempDir(), AdapterID: "none"}
+		opts := Options{RegistryPath: agentRegistry(t, "company-glossary"), Target: t.TempDir(), AdapterID: "none"}
 		syncChanged(t, opts)
 		if err := os.Remove(LockFilePath(opts.Target)); err != nil {
 			t.Fatalf("Remove lock: %v", err)
@@ -202,7 +202,7 @@ func TestRun_ChangedIgnoresLockFile(t *testing.T) {
 // path and reports Changed false.
 func TestRun_ChangedOnStaleRemoval(t *testing.T) {
 	t.Parallel()
-	registry := contextRegistry(t, "company-glossary", "style-guide")
+	registry := agentRegistry(t, "company-glossary", "style-guide")
 	opts := Options{RegistryPath: registry, Target: t.TempDir(), AdapterID: "none"}
 	syncChanged(t, opts)
 	if err := os.RemoveAll(filepath.Join(registry, "style-guide")); err != nil {
@@ -281,7 +281,7 @@ func addOperatorServer(t *testing.T, path string, marshal func(v any) ([]byte, e
 // standalone path fails the write with its own error and leaves no lock.
 func TestRun_ChangedUnreadablePathWriteFails(t *testing.T) {
 	t.Parallel()
-	opts := Options{RegistryPath: contextRegistry(t, "company-glossary"), Target: t.TempDir(), AdapterID: "none"}
+	opts := Options{RegistryPath: agentRegistry(t, "company-glossary"), Target: t.TempDir(), AdapterID: "none"}
 	writeFile(t, filepath.Join(opts.Target, "company-glossary", "ARTIFACT.md", "keep"), "operator\n")
 
 	_, err := Run(opts)
@@ -305,7 +305,7 @@ func TestRun_ChangedUnreadableStandaloneFile(t *testing.T) {
 		t.Skip("root reads a mode-000 file, so the read error cannot occur")
 	}
 	const rel = "company-glossary/ARTIFACT.md"
-	opts := Options{RegistryPath: contextRegistry(t, "company-glossary"), Target: t.TempDir(), AdapterID: "none"}
+	opts := Options{RegistryPath: agentRegistry(t, "company-glossary"), Target: t.TempDir(), AdapterID: "none"}
 	syncChanged(t, opts)
 	original := readTargetFile(t, opts.Target, rel)
 	if err := os.Chmod(filepath.Join(opts.Target, rel), 0o000); err != nil {
@@ -327,7 +327,7 @@ func TestRun_ChangedUnreadableStandaloneFile(t *testing.T) {
 // Not parallel: the test swaps the process-wide os.Stderr to capture the
 // cleanup log line.
 func TestRun_ChangedUnreadablePriorOnlyPath(t *testing.T) {
-	registry := contextRegistry(t, "company-glossary", "style-guide")
+	registry := agentRegistry(t, "company-glossary", "style-guide")
 	opts := Options{RegistryPath: registry, Target: t.TempDir(), AdapterID: "none"}
 	syncChanged(t, opts)
 	if err := os.RemoveAll(filepath.Join(registry, "style-guide")); err != nil {
@@ -421,7 +421,7 @@ func lockedContentHash(t *testing.T, target, id string) string {
 // paths and report independent Changed values. Run with -race.
 func TestRun_ChangedIndependentAcrossTargets(t *testing.T) {
 	t.Parallel()
-	registry := contextRegistry(t, "company-glossary")
+	registry := agentRegistry(t, "company-glossary")
 	current := Options{RegistryPath: registry, Target: t.TempDir(), AdapterID: "none"}
 	syncChanged(t, current)
 	fresh := Options{RegistryPath: registry, Target: t.TempDir(), AdapterID: "none"}

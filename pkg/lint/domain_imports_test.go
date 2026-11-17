@@ -25,7 +25,7 @@ func writeTree(t *testing.T, root string, files map[string]string) {
 }
 
 const liveArtifact = `---
-type: context
+type: agent
 version: 1.0.0
 description: x
 sensitivity: low

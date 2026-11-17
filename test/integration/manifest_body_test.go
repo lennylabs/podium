@@ -22,7 +22,7 @@ import (
 )
 
 // Spec: §6.6/§7.2 — the presigned manifest-body channel over the SQLite
-// metadata store and a filesystem object store. A context artifact whose
+// metadata store and a filesystem object store. An agent artifact whose
 // ARTIFACT.md exceeds the inline cutoff is persisted with its full
 // frontmatter, and load_artifact lazily uploads that document to the object
 // store and returns a presigned manifest_body_url instead of the inline body.
@@ -46,10 +46,10 @@ func TestManifestBody_PresignedRoundTripSQLite(t *testing.T) {
 	}
 
 	body := strings.Repeat("glossary line\n", objectstore.InlineCutoff/14+200)
-	doc := []byte("---\ntype: context\nversion: 1.0.0\ndescription: Big glossary.\n---\n\n" + body)
+	doc := []byte("---\ntype: agent\nversion: 1.0.0\ndescription: Big glossary.\n---\n\n" + body)
 	if err := st.PutManifest(ctx, storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "finance/glossary", Version: "1.0.0",
-		ContentHash: "sha256:c", Type: "context", Layer: "L",
+		ContentHash: "sha256:c", Type: "agent", Layer: "L",
 		Frontmatter: doc, Body: []byte(body),
 	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)

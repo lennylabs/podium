@@ -52,7 +52,7 @@ import (
 func TestLifecycle_DeprecationExcludesFromSearchLoadSurfacesTarget(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"seed/ARTIFACT.md": contextArtifact("seed context"),
+		"seed/ARTIFACT.md": agentArtifact("seed context"),
 	}))
 	layer := newRepublishLayer(t, srv, "deprecation-journey")
 
@@ -247,7 +247,7 @@ func TestLifecycle_InPlaceSQLiteUpgradePreservesArtifactsAndAudit(t *testing.T) 
 	}
 	if _, err := legacy.Exec(
 		`INSERT INTO manifests (tenant_id, artifact_id, version, content_hash, type, ingested_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		tenantID, id, version, contentHash, "context", "2024-01-01T00:00:00Z",
+		tenantID, id, version, contentHash, "agent", "2024-01-01T00:00:00Z",
 	); err != nil {
 		t.Fatalf("legacy insert manifest: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestLifecycle_ForcePushToleratedThroughReingest(t *testing.T) {
 
 	const id = "policies/security/rotate-keys"
 	// Commit A: the layer's initial content at 1.0.0.
-	repo.commitContextArtifact(t, id, "1.0.0",
+	repo.commitAgentArtifact(t, id, "1.0.0",
 		"Rotate signing keys following the security policy.", "commit A")
 	hashA := lcHeadHash(t, repo)
 
@@ -423,7 +423,7 @@ func TestLifecycle_ForcePushToleratedThroughReingest(t *testing.T) {
 	// different content at a new version. A is no longer reachable from the head,
 	// so the next ingest sees a rewritten history relative to the stored prior ref.
 	lcResetHard(t, repo, plumbing.ZeroHash)
-	repo.commitContextArtifact(t, id, "2.0.0",
+	repo.commitAgentArtifact(t, id, "2.0.0",
 		"Rotate signing keys following the rewritten security policy.", "commit C (force-push)")
 	hashC := lcHeadHash(t, repo)
 	if hashC == hashA {

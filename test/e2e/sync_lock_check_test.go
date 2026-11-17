@@ -53,8 +53,8 @@ func TestSync_DryRunJSONEnvelope(t *testing.T) {
 		t.Fatalf("no artifacts in envelope:\n%s", res.Stdout)
 	}
 	a := env.Artifacts[0]
-	if a.ID != "finance/invoice" || a.Version != "1.0.0" || a.Type != "context" {
-		t.Errorf("artifact = %+v, want finance/invoice 1.0.0 context", a)
+	if a.ID != "finance/invoice" || a.Version != "1.0.0" || a.Type != "agent" {
+		t.Errorf("artifact = %+v, want finance/invoice 1.0.0 agent", a)
 	}
 	// spec: §7.5 / §14.11 — each artifact carries content_hash so a
 	// pre-flight check can verify the full (id, version, content_hash) triple.

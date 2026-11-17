@@ -95,17 +95,17 @@ func TestArtifactShow_HappyPath(t *testing.T) {
 func TestSearchCmd_AllFlags(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		if q.Get("type") != "context" || q.Get("scope") != "finance" {
+		if q.Get("type") != "agent" || q.Get("scope") != "finance" {
 			t.Errorf("query = %q", r.URL.RawQuery)
 		}
-		_, _ = w.Write([]byte(`{"total_matched":1,"results":[{"id":"a","type":"context","description":"x"}]}`))
+		_, _ = w.Write([]byte(`{"total_matched":1,"results":[{"id":"a","type":"agent","description":"x"}]}`))
 	}))
 	defer srv.Close()
 	t.Setenv("PODIUM_REGISTRY", srv.URL)
 	out := captureStdout(t, func() {
 		withStderr(t, func() {
 			if rc := searchCmd([]string{
-				"--type", "context", "--scope", "finance", "--top-k", "5",
+				"--type", "agent", "--scope", "finance", "--top-k", "5",
 				"alpha-query",
 			}); rc != 0 {
 				t.Errorf("rc = %d", rc)

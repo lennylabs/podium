@@ -80,7 +80,7 @@ func TestOpen_MultiLayer_AlphabeticalOrder(t *testing.T) {
 		},
 		testharness.WriteTreeOption{
 			Path:    "personal/notes/x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\n---\nbody\n",
+			Content: "---\ntype: agent\nversion: 1.0.0\n---\nbody\n",
 		},
 	)
 	reg, err := Open(root)

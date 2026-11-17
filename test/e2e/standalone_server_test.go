@@ -47,14 +47,14 @@ func extendsRejected(id string) string {
 	return "rejected: " + id + " (" + layer.InvalidArtifactCode + "): " + layer.ExtendsRemovedReason
 }
 
-// smallteamLowArtifact returns a valid low-sensitivity context ARTIFACT.md.
+// smallteamLowArtifact returns a valid low-sensitivity agent ARTIFACT.md.
 func smallteamLowArtifact(desc string) string {
-	return fmt.Sprintf("---\ntype: context\nversion: 1.0.0\ndescription: %s\nsensitivity: low\n---\n\n%s body.\n", desc, desc)
+	return fmt.Sprintf("---\ntype: agent\nversion: 1.0.0\ndescription: %s\nsensitivity: low\n---\n\n%s body.\n", desc, desc)
 }
 
-// smallteamMediumArtifact returns a medium-sensitivity context ARTIFACT.md.
+// smallteamMediumArtifact returns a medium-sensitivity agent ARTIFACT.md.
 func smallteamMediumArtifact(desc string) string {
-	return fmt.Sprintf("---\ntype: context\nversion: 1.0.0\ndescription: %s\nsensitivity: medium\n---\n\n%s body.\n", desc, desc)
+	return fmt.Sprintf("---\ntype: agent\nversion: 1.0.0\ndescription: %s\nsensitivity: medium\n---\n\n%s body.\n", desc, desc)
 }
 
 // smallteamStartAudit starts a standalone server with PODIUM_AUDIT_LOG_PATH
@@ -865,7 +865,7 @@ func TestStandaloneServer_MigrateOutputBitIdentical(t *testing.T) {
 	t.Skip("deferred gap (no implementation-gap finding yet): server-source sync omits the SKILL.md secondary file for multi-file artifacts (skills/agents), so the §2.2 bit-identical claim fails for a skill — the filesystem source writes ARTIFACT.md + SKILL.md while the server source writes ARTIFACT.md only and the claude-code adapter then emits nothing for the skill. Single-file (context/rule) parity passes in TestFilesystemSync_BitIdenticalFilesystemVsServer")
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                     "multi_layer: true\n",
-		"team/glossary/ARTIFACT.md":            contextArtifact("glossary"),
+		"team/glossary/ARTIFACT.md":            agentArtifact("glossary"),
 		"team/finance/pay-invoice/ARTIFACT.md": greetSkillArtifact,
 		"team/finance/pay-invoice/SKILL.md":    skillBody("pay-invoice"),
 	})
@@ -1399,7 +1399,7 @@ func TestStandaloneServer_LintValidInvalid(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		"valid/ARTIFACT.md": smallteamLowArtifact("valid artifact"),
 		// Invalid: missing the required version field, which the linter rejects.
-		"invalid/ARTIFACT.md": "---\ntype: context\ndescription: missing version\n---\n\nbody.\n",
+		"invalid/ARTIFACT.md": "---\ntype: agent\ndescription: missing version\n---\n\nbody.\n",
 	})
 
 	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
@@ -1427,7 +1427,7 @@ func TestLint_ExtendsRefusalBesideLintFailure(t *testing.T) {
 			"ops/c/ARTIFACT.md":    extendsContextArtifact("c artifact", "ops/base"),
 			"ops/d/ARTIFACT.md":    extendsContextArtifact("d artifact", "ops/base"),
 			// Invalid: missing the required version field, which the linter rejects.
-			"invalid/ARTIFACT.md": "---\ntype: context\ndescription: missing version\n---\n\nbody.\n",
+			"invalid/ARTIFACT.md": "---\ntype: agent\ndescription: missing version\n---\n\nbody.\n",
 		})
 		res := runPodium(t, "", []string{"HOME=" + t.TempDir()}, "lint", "--registry", reg)
 		cliWantExit(t, res, 1, "lint beside a lint failure")
@@ -1521,7 +1521,7 @@ func TestStandaloneServer_ExtendsArtifactRefused(t *testing.T) {
 func TestStandaloneServer_ImpactAnalysis(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"parent/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: parent artifact\nsensitivity: low\n---\n\nparent body.\n",
+		"parent/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: parent artifact\nsensitivity: low\n---\n\nparent body.\n",
 		"child/ARTIFACT.md":  "---\ntype: agent\nversion: 1.0.0\ndescription: child agent\nsensitivity: low\ndelegates_to: [parent]\n---\n\nchild body.\n",
 	})
 	srv := startServer(t, reg)

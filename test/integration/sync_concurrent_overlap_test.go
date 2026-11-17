@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -33,9 +34,9 @@ import (
 
 // scaleConcurrentRegistry writes a registry with one shared subtree that every
 // consumer includes plus per-consumer private subtrees. It returns the registry
-// root. The shared artifacts span a skill (with a bundled resource), an agent,
-// a command, and a context so the adapter emits a varied file set whose
-// byte-identity across targets is a non-trivial property.
+// root. The shared artifacts span a skill (with a bundled resource), agents,
+// and a rule so the adapter emits a varied file set whose byte-identity across
+// targets is a non-trivial property.
 func scaleConcurrentRegistry(t *testing.T, consumers int) string {
 	t.Helper()
 	root := t.TempDir()
@@ -49,22 +50,24 @@ func scaleConcurrentRegistry(t *testing.T, consumers int) string {
 	for i := 0; i < 12; i++ {
 		name := fmt.Sprintf("svc-%02d", i)
 		base := fmt.Sprintf("shared/svc/%s", name)
-		add(base+"/ARTIFACT.md", "---\ntype: context\nversion: 1.0.0\ndescription: Shared service "+name+" reference.\nsensitivity: low\n---\n\nShared service "+name+" body.\n")
+		add(base+"/ARTIFACT.md", "---\ntype: agent\nversion: 1.0.0\ndescription: Shared service "+name+" reference.\nsensitivity: low\n---\n\nShared service "+name+" body.\n")
 	}
 	// A shared skill with a bundled resource. Per §4.3.4 the skill's name and
 	// description live in SKILL.md; ARTIFACT.md carries Podium frontmatter only.
 	add("shared/tools/greeter/ARTIFACT.md", "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- Skill body lives in SKILL.md. -->\n")
 	add("shared/tools/greeter/SKILL.md", "---\nname: greeter\ndescription: The greeter skill. Use when greeting a user.\n---\n\nGreet warmly.\n")
 	add("shared/tools/greeter/helper.py", "print('shared helper')\n")
-	// A shared agent and command.
+	// A shared agent and rule.
 	add("shared/agents/router/ARTIFACT.md", "---\ntype: agent\nversion: 1.0.0\ndescription: Shared routing agent.\n---\n\nRoute requests.\n")
-	add("shared/cmds/deploy/ARTIFACT.md", "---\ntype: command\nversion: 1.0.0\ndescription: Shared deploy command.\n---\n\n$ARGUMENTS\n")
+	add("shared/rules/deploy/ARTIFACT.md", "---\ntype: rule\nversion: 1.0.0\ndescription: Shared deploy rule.\nrule_mode: always\n---\n\nDeploy through the pipeline.\n")
 
-	// Per-consumer private subtrees: only consumer k includes ck/**.
+	// Per-consumer private subtrees: only consumer k includes ck/**. Each leaf
+	// name carries the consumer prefix, so the claude-code agent file of a
+	// private item is unique to its consumer.
 	for k := 0; k < consumers; k++ {
 		for i := 0; i < 8; i++ {
-			id := fmt.Sprintf("c%d/local/item-%02d", k, i)
-			add(id+"/ARTIFACT.md", fmt.Sprintf("---\ntype: context\nversion: 1.0.0\ndescription: Consumer %d private item %d.\nsensitivity: low\n---\n\nprivate body.\n", k, i))
+			id := privateItemID(k, i)
+			add(id+"/ARTIFACT.md", fmt.Sprintf("---\ntype: agent\nversion: 1.0.0\ndescription: Consumer %d private item %d.\nsensitivity: low\n---\n\nprivate body.\n", k, i))
 		}
 	}
 	testharness.WriteTree(t, root, opts...)
@@ -123,14 +126,14 @@ func TestSyncConcurrent_OverlappingIncludeByteIdenticalShared(t *testing.T) {
 	// ---- byte-identical shared output across every target -----------------
 	// The shared subtree materializes under the claude-code layout. Extract
 	// each target's shared-artifact files and diff them against consumer 0's.
-	// A target's private files (.podium/context/c<k>/...) are excluded from the
-	// comparison because they legitimately differ per consumer.
+	// A target's private files (.claude/agents/c<k>-item-*.md) are excluded from
+	// the comparison because they legitimately differ per consumer.
 	reference := sharedSubtree(t, targets[0])
 	if len(reference) == 0 {
 		t.Fatalf("consumer 0 materialized no shared output")
 	}
-	// The shared set must include the skill, its bundled resource, the agent,
-	// the command, and the context bodies.
+	// The shared set must include the skill, its bundled resource, the agents,
+	// and the rule.
 	mustHaveSharedShape(t, reference)
 
 	for k := 1; k < consumers; k++ {
@@ -145,30 +148,35 @@ func TestSyncConcurrent_OverlappingIncludeByteIdenticalShared(t *testing.T) {
 
 	// ---- each target is complete for its own include set ------------------
 	for k := 0; k < consumers; k++ {
-		// Each consumer's private context items materialized.
+		// Each consumer's private agent items materialized.
 		for i := 0; i < 8; i++ {
-			p := filepath.Join(targets[k], ".podium", "context", fmt.Sprintf("c%d/local/item-%02d", k, i), "ARTIFACT.md")
+			p := filepath.Join(targets[k], ".claude", "agents", path.Base(privateItemID(k, i))+".md")
 			if _, err := os.Stat(p); err != nil {
 				t.Errorf("consumer %d missing its private item %d: %v", k, i, err)
 			}
 		}
-		// No other consumer's private subtree leaked into this target.
+		// No other consumer's private items leaked into this target.
 		for j := 0; j < consumers; j++ {
 			if j == k {
 				continue
 			}
-			leak := filepath.Join(targets[k], ".podium", "context", fmt.Sprintf("c%d", j))
+			leak := filepath.Join(targets[k], ".claude", "agents", path.Base(privateItemID(j, 0))+".md")
 			if _, err := os.Stat(leak); err == nil {
-				t.Errorf("consumer %d target contains consumer %d's private subtree", k, j)
+				t.Errorf("consumer %d target contains consumer %d's private items", k, j)
 			}
 		}
 	}
 }
 
+// privateItemID returns the ID of consumer k's private item i.
+func privateItemID(k, i int) string {
+	return fmt.Sprintf("c%d/local/c%d-item-%02d", k, k, i)
+}
+
 // sharedSubtree returns the materialized files under a target that originate
 // from the shared/** include slice, keyed by relative path. It reads the whole
 // tree and keeps only the files the shared artifacts produce, dropping the lock
-// file and each consumer's private context bucket.
+// file and each consumer's private agent files.
 func sharedSubtree(t testing.TB, target string) map[string]string {
 	t.Helper()
 	full := testharness.ReadTree(t, target)
@@ -177,8 +185,8 @@ func sharedSubtree(t testing.TB, target string) map[string]string {
 		if strings.HasPrefix(path, ".podium/sync.lock") {
 			continue
 		}
-		// Drop any consumer-private context bucket (.podium/context/c<k>/...).
-		if strings.HasPrefix(path, ".podium/context/c") {
+		// Drop any consumer-private agent file (.claude/agents/c<k>-item-*.md).
+		if strings.HasPrefix(path, ".claude/agents/c") {
 			continue
 		}
 		out[path] = content
@@ -188,15 +196,15 @@ func sharedSubtree(t testing.TB, target string) map[string]string {
 
 // mustHaveSharedShape asserts the shared materialized set carries the expected
 // claude-code output for the shared artifacts: the skill SKILL.md, its bundled
-// resource, the agent, the command, and at least one shared context body.
+// resource, the router agent, the rule, and at least one shared service agent.
 func mustHaveSharedShape(t testing.TB, tree map[string]string) {
 	t.Helper()
 	want := []string{
 		".claude/skills/greeter/SKILL.md",
 		".claude/skills/greeter/helper.py",
 		".claude/agents/router.md",
-		".claude/commands/deploy.md",
-		".podium/context/shared/svc/svc-00/ARTIFACT.md",
+		".claude/rules/deploy.md",
+		".claude/agents/svc-00.md",
 	}
 	for _, p := range want {
 		if _, ok := tree[p]; !ok {

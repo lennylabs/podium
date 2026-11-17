@@ -19,7 +19,7 @@ func TestMCP_LocalAuditAppliesManifestRedaction(t *testing.T) {
 
 	const secret = "AC-7777-6666"
 	reg := writeRegistry(t, map[string]string{
-		"finance/payroll/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Payroll record.\nsensitivity: low\nbank_account: \"" + secret + "\"\naudit_redact:\n  - bank_account\n---\n\nbody\n",
+		"finance/payroll/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Payroll record.\nsensitivity: low\nbank_account: \"" + secret + "\"\naudit_redact:\n  - bank_account\n---\n\nbody\n",
 	})
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()}, "serve", "--standalone", "--layer-path", reg)
 

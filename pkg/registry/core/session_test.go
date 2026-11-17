@@ -27,7 +27,7 @@ func putVersion(t *testing.T, st store.Store, id, version string) {
 	t.Helper()
 	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: "t", ArtifactID: id, Version: version,
-		ContentHash: "sha256:" + version, Type: "context", Layer: "L",
+		ContentHash: "sha256:" + version, Type: "agent", Layer: "L",
 	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest %s@%s: %v", id, version, err)
 	}

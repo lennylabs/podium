@@ -52,7 +52,7 @@ func TestCoreConcept_CanonicalID(t *testing.T) {
 func TestCoreConcept_NonSkillArtifact(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Accounts payable payment guide.\n---\n\nPay invoices on time.\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Accounts payable payment guide.\n---\n\nPay invoices on time.\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 || !strings.Contains(res.Stdout, "lint: no issues.") {
@@ -98,7 +98,7 @@ func TestCoreConcept_UnknownTypeRejected(t *testing.T) {
 func TestCoreConcept_DomainWithoutDomainMD(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"finance/glossary/ARTIFACT.md": agentArtifact("glossary"),
 	}))
 	var fin map[string]any
 	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", &fin)
@@ -115,7 +115,7 @@ func TestCoreConcept_DomainMDDescriptionKeywords(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable: money out to vendors\"\ndiscovery:\n  keywords:\n    - invoice\n    - remittance\n---\n\n# Accounts Payable\n\nInvoice processing and vendor remittance.\n",
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay invoice"),
 	}))
 	var m map[string]any
 	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance/ap", &m)
@@ -159,8 +159,8 @@ func TestCoreConcept_LayerCollisionRejected(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                       "multi_layer: true\nlayer_order: [low-layer, high-layer]\n",
-		"low-layer/shared/glossary/ARTIFACT.md":  contextArtifact("low-description"),
-		"high-layer/shared/glossary/ARTIFACT.md": contextArtifact("high-description"),
+		"low-layer/shared/glossary/ARTIFACT.md":  agentArtifact("low-description"),
+		"high-layer/shared/glossary/ARTIFACT.md": agentArtifact("high-description"),
 	})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
@@ -180,10 +180,10 @@ func TestCoreConcept_LayerCollisionRejected(t *testing.T) {
 func TestCoreConcept_OverlayHighestPrecedence(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/glossary/ARTIFACT.md": contextArtifact("registry-version"),
+		"shared/glossary/ARTIFACT.md": agentArtifact("registry-version"),
 	})
 	overlay := writeRegistry(t, map[string]string{
-		"shared/glossary/ARTIFACT.md": contextArtifact("overlay-version"),
+		"shared/glossary/ARTIFACT.md": agentArtifact("overlay-version"),
 	})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--overlay", overlay, "--harness", "none")
@@ -200,8 +200,8 @@ func TestCoreConcept_LayerOrderAlphabeticalDefault(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                "multi_layer: true\n",
-		"a-layer/shared/item/ARTIFACT.md": contextArtifact("from-a"),
-		"b-layer/shared/item/ARTIFACT.md": contextArtifact("from-b"),
+		"a-layer/shared/item/ARTIFACT.md": agentArtifact("from-a"),
+		"b-layer/shared/item/ARTIFACT.md": agentArtifact("from-b"),
 	})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
@@ -220,7 +220,7 @@ func TestCoreConcept_LayerOrderAlphabeticalDefault(t *testing.T) {
 // a public layer is accessible to unauthenticated callers.
 func TestCoreConcept_PublicLayerUnauthenticated(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"test/ARTIFACT.md": contextArtifact("test")})
+	reg := writeRegistry(t, map[string]string{"test/ARTIFACT.md": agentArtifact("test")})
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()}, "serve", "--public-mode", "--layer-path", reg)
 	if st := getStatus(t, srv.BaseURL+"/v1/search_artifacts?query=test"); st != 200 {
 		t.Errorf("unauthenticated search = HTTP %d, want 200", st)
@@ -240,7 +240,7 @@ func TestCoreConcept_VisibilityPerCall(t *testing.T) {
 // harness none writes the canonical layout.
 func TestCoreConcept_HarnessNoneCanonical(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"company/glossary/ARTIFACT.md": contextArtifact("glossary")})
+	reg := writeRegistry(t, map[string]string{"company/glossary/ARTIFACT.md": agentArtifact("glossary")})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
 	mustExist(t, filepath.Join(tgt, "company/glossary/ARTIFACT.md"))
@@ -299,7 +299,7 @@ func TestCoreConcept_CursorRule(t *testing.T) {
 // an unknown harness is rejected with config.unknown_harness.
 func TestCoreConcept_UnknownHarness(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", t.TempDir(), "--harness", "not-a-valid-harness")
 	if res.Exit == 0 || !strings.Contains(res.Stderr, "config.unknown_harness") {
 		t.Errorf("expected config.unknown_harness, exit=%d stderr=%s", res.Exit, res.Stderr)
@@ -309,7 +309,7 @@ func TestCoreConcept_UnknownHarness(t *testing.T) {
 // MCP load_artifact materializes to PODIUM_MATERIALIZE_ROOT.
 func TestCoreConcept_MCPMaterialize(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"company-glossary/ARTIFACT.md": contextArtifact("glossary")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"company-glossary/ARTIFACT.md": agentArtifact("glossary")}))
 	mat := t.TempDir()
 	res := mcpExec(t, []string{
 		"PODIUM_REGISTRY=" + srv.BaseURL,
@@ -329,7 +329,7 @@ func TestCoreConcept_MCPMaterialize(t *testing.T) {
 // the manifest without writing files (materialized_at: []).
 func TestCoreConcept_MCPNoMaterializeRoot(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"company-glossary/ARTIFACT.md": contextArtifact("glossary")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"company-glossary/ARTIFACT.md": agentArtifact("glossary")}))
 	res := mcpExec(t, []string{
 		"PODIUM_REGISTRY=" + srv.BaseURL,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
@@ -348,8 +348,8 @@ func TestCoreConcept_MCPNoMaterializeRoot(t *testing.T) {
 func TestCoreConcept_SyncBatch(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"finance/glossary/ARTIFACT.md": contextArtifact("glossary"),
-		"eng/style/ARTIFACT.md":        contextArtifact("style"),
+		"finance/glossary/ARTIFACT.md": agentArtifact("glossary"),
+		"eng/style/ARTIFACT.md":        agentArtifact("style"),
 	})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
@@ -364,8 +364,8 @@ func TestCoreConcept_SyncBatch(t *testing.T) {
 func TestCoreConcept_LoadDomainRoot(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"alpha/x/ARTIFACT.md": contextArtifact("x"),
-		"beta/y/ARTIFACT.md":  contextArtifact("y"),
+		"alpha/x/ARTIFACT.md": agentArtifact("x"),
+		"beta/y/ARTIFACT.md":  agentArtifact("y"),
 	}))
 	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL}, toolCall(1, "load_domain", map[string]any{}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
@@ -378,8 +378,8 @@ func TestCoreConcept_LoadDomainRoot(t *testing.T) {
 func TestCoreConcept_LoadDomainPath(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md":                        contextArtifact("pay"),
-		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": contextArtifact("variance"),
+		"finance/ap/pay-invoice/ARTIFACT.md":                        agentArtifact("pay"),
+		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": agentArtifact("variance"),
 	}))
 	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL}, toolCall(1, "load_domain", map[string]any{"path": "finance"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
@@ -394,7 +394,7 @@ func TestCoreConcept_SearchDomains(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable operations\"\ndiscovery:\n  keywords:\n    - reconciliation\n---\n",
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay invoice"),
 	}))
 	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL}, toolCall(1, "search_domains", map[string]any{"query": "reconciliation"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
@@ -407,7 +407,7 @@ func TestCoreConcept_SearchDomains(t *testing.T) {
 func TestCoreConcept_SearchArtifactsQuery(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/va/ARTIFACT.md": contextArtifact("variance analysis report"),
+		"finance/va/ARTIFACT.md": agentArtifact("variance analysis report"),
 	}))
 	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL},
 		toolCall(1, "search_artifacts", map[string]any{"query": "variance"}))
@@ -424,9 +424,9 @@ func TestCoreConcept_SearchArtifactsQuery(t *testing.T) {
 func TestCoreConcept_SearchArtifactsScope(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/a/ARTIFACT.md": contextArtifact("a"),
-		"finance/b/ARTIFACT.md": contextArtifact("b"),
-		"eng/c/ARTIFACT.md":     contextArtifact("c"),
+		"finance/a/ARTIFACT.md": agentArtifact("a"),
+		"finance/b/ARTIFACT.md": agentArtifact("b"),
+		"eng/c/ARTIFACT.md":     agentArtifact("c"),
 	}))
 	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL},
 		toolCall(1, "search_artifacts", map[string]any{"scope": "finance"}))
@@ -445,23 +445,23 @@ func TestCoreConcept_SearchArtifactsType(t *testing.T) {
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"sk/ARTIFACT.md":  greetSkillArtifact,
 		"sk/SKILL.md":     skillBody("sk"),
-		"ctx/ARTIFACT.md": contextArtifact("Reference notes on the ledger layout"),
+		"ctx/ARTIFACT.md": agentArtifact("Reference notes on the ledger layout"),
 	}))
 	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL},
-		toolCall(1, "search_artifacts", map[string]any{"type": "context"}))
+		toolCall(1, "search_artifacts", map[string]any{"type": "agent"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
 	if strings.Contains(body, `"type":"skill"`) {
-		t.Errorf("type=context returned a skill: %s", body)
+		t.Errorf("type=agent returned a skill: %s", body)
 	}
 	if !strings.Contains(body, "ctx") {
-		t.Errorf("type=context missing the context artifact: %s", body)
+		t.Errorf("type=agent missing the agent artifact: %s", body)
 	}
 }
 
 // load_artifact returns absolute materialized_at paths.
 func TestCoreConcept_LoadArtifactAbsolutePaths(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"company-glossary/ARTIFACT.md": contextArtifact("glossary")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"company-glossary/ARTIFACT.md": agentArtifact("glossary")}))
 	mat := t.TempDir()
 	res := mcpExec(t, []string{
 		"PODIUM_REGISTRY=" + srv.BaseURL,
@@ -484,7 +484,7 @@ func TestCoreConcept_LoadArtifactAbsolutePaths(t *testing.T) {
 // the MCP server exposes exactly the four meta-tools.
 func TestCoreConcept_FourMetaTools(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "tools/list"})
 	for _, tool := range []string{"load_domain", "search_domains", "search_artifacts", "load_artifact"} {
 		if !strings.Contains(res.Stdout, tool) {
@@ -503,7 +503,7 @@ func TestCoreConcept_MCPServerFilteredFromSearch(t *testing.T) {
 func TestCoreConcept_SearchCLIMatchesHTTP(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"company-glossary/ARTIFACT.md": contextArtifact("the company glossary of terms"),
+		"company-glossary/ARTIFACT.md": agentArtifact("the company glossary of terms"),
 	}))
 	cli := runPodium(t, "", nil, "search", "--registry", srv.BaseURL, "glossary")
 	if cli.Exit != 0 || !strings.Contains(cli.Stdout, "company-glossary") {
@@ -519,7 +519,7 @@ func TestCoreConcept_SearchCLIMatchesHTTP(t *testing.T) {
 func TestCoreConcept_DomainShowThinClient(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"finance/glossary/ARTIFACT.md": agentArtifact("glossary"),
 	}))
 	cli := runPodium(t, "", nil, "domain", "show", "--registry", srv.BaseURL, "finance")
 	if cli.Exit != 0 || !strings.Contains(cli.Stdout, "finance") {
@@ -537,7 +537,7 @@ func TestCoreConcept_DomainShowThinClient(t *testing.T) {
 func TestCoreConcept_LazyNavigation(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"finance/glossary/ARTIFACT.md": agentArtifact("glossary"),
 	}))
 	mat := t.TempDir()
 	res := mcpExec(t, []string{
@@ -571,9 +571,9 @@ func TestCoreConcept_LazyNavigation(t *testing.T) {
 func TestCoreConcept_EagerSync(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"finance/a/ARTIFACT.md": contextArtifact("a"),
-		"finance/b/ARTIFACT.md": contextArtifact("b"),
-		"eng/c/ARTIFACT.md":     contextArtifact("c"),
+		"finance/a/ARTIFACT.md": agentArtifact("a"),
+		"finance/b/ARTIFACT.md": agentArtifact("b"),
+		"eng/c/ARTIFACT.md":     agentArtifact("c"),
 	})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
@@ -591,13 +591,13 @@ func TestCoreConcept_EagerSync(t *testing.T) {
 // sync --watch re-materializes when the registry changes.
 func TestCoreConcept_WatchRematerializes(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"first/ARTIFACT.md": contextArtifact("first")})
+	reg := writeRegistry(t, map[string]string{"first/ARTIFACT.md": agentArtifact("first")})
 	tgt := t.TempDir()
 	w := startWatch(t, reg, tgt, "none")
 	if !pollFile(filepath.Join(tgt, "first/ARTIFACT.md"), 5*time.Second) {
 		t.Fatalf("initial sync missing\nlog:\n%s", w.log())
 	}
-	mkArtifact(t, filepath.Join(reg, "second"), contextArtifact("second"))
+	mkArtifact(t, filepath.Join(reg, "second"), agentArtifact("second"))
 	got := pollFile(filepath.Join(tgt, "second/ARTIFACT.md"), 6*time.Second)
 	code := w.stop(t)
 	if !got {
@@ -642,7 +642,7 @@ func TestCoreConcept_SyncNoRegistry(t *testing.T) {
 func TestCoreConcept_VersionPinInID(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"finance/glossary/ARTIFACT.md": agentArtifact("glossary"),
 	}))
 	if st := getStatus(t, srv.BaseURL+"/v1/load_artifact?id=finance/glossary@1.0.0"); st != 404 {
 		t.Errorf("inline @1.0.0 in id = HTTP %d; the implementation does not resolve inline pins (want 404 documenting the gap)", st)
@@ -681,7 +681,7 @@ func TestCoreConcept_VisibilityUnion(t *testing.T) {
 // a registry with no .registry-config runs as single-layer.
 func TestCoreConcept_SingleLayerNoConfig(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": agentArtifact("glossary")})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
 	if res.Exit != 0 {
@@ -690,17 +690,16 @@ func TestCoreConcept_SingleLayerNoConfig(t *testing.T) {
 	mustExist(t, filepath.Join(tgt, "glossary/ARTIFACT.md"))
 }
 
-// a context artifact materializes to the harness-neutral
-// .podium/context/<id>/ bucket under codex (identical across every adapter).
+// an agent artifact materializes to .codex/agents/<name>.toml under codex.
 func TestCoreConcept_CodexHarness(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": contextArtifact("helper")})
+	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": agentArtifact("helper")})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "codex")
 	if res.Exit != 0 {
 		t.Fatalf("codex sync exit=%d stderr=%s", res.Exit, res.Stderr)
 	}
-	mustExist(t, filepath.Join(tgt, ".podium/context/tools/helper/ARTIFACT.md"))
+	mustExist(t, filepath.Join(tgt, ".codex/agents/helper.toml"))
 }
 
 // hermes reuses the Cursor .mdc format and writes a rule to
@@ -728,14 +727,13 @@ func TestCoreConcept_PiRule(t *testing.T) {
 	}
 }
 
-// a context artifact materializes to .podium/context/<id>/
-// under gemini (the harness-neutral bucket).
+// an agent artifact materializes to .gemini/agents/<name>.md under gemini.
 func TestCoreConcept_GeminiExtension(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": contextArtifact("helper")})
+	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": agentArtifact("helper")})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "gemini")
-	mustExist(t, filepath.Join(tgt, ".podium/context/tools/helper/ARTIFACT.md"))
+	mustExist(t, filepath.Join(tgt, ".gemini/agents/helper.md"))
 }
 
 // opencode injects a rule into AGENTS.md (§6.7 inject).
@@ -755,14 +753,14 @@ func TestCoreConcept_OpencodeRule(t *testing.T) {
 // produces no project output for it (§6.7).
 func TestCoreConcept_ClaudeDesktopExtension(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": contextArtifact("helper")})
+	reg := writeRegistry(t, map[string]string{"tools/helper/ARTIFACT.md": agentArtifact("helper")})
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-desktop")
 	// The sync writes its own .podium/ bookkeeping, but no artifact is
-	// materialized: neither the harness-neutral context bucket nor any
-	// claude-desktop subtree is produced.
-	mustNotExist(t, filepath.Join(tgt, ".podium", "context"))
-	mustNotExist(t, filepath.Join(tgt, ".claude-desktop"))
+	// materialized: the target holds no file outside .podium/.
+	if files := readTreeFiltered(t, tgt); len(files) != 0 {
+		t.Errorf("claude-desktop sync materialized project files: %v", keysOf(files))
+	}
 }
 
 // claude-cowork materializes a context artifact into the harness-neutral
@@ -832,7 +830,7 @@ func TestCoreConcept_ClaudeCodeColocatesResources(t *testing.T) {
 // sync --dry-run reports a plan and writes nothing.
 func TestCoreConcept_DryRun(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	tgt := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--dry-run")
 	if res.Exit != 0 || !strings.Contains(res.Stdout, "dry-run") {
@@ -847,8 +845,8 @@ func TestCoreConcept_DryRun(t *testing.T) {
 func TestCoreConcept_Idempotent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"a/ARTIFACT.md": contextArtifact("a"),
-		"b/ARTIFACT.md": contextArtifact("b"),
+		"a/ARTIFACT.md": agentArtifact("a"),
+		"b/ARTIFACT.md": agentArtifact("b"),
 	})
 	tgt := t.TempDir()
 	first := syncAndSnapshot(t, reg, tgt)

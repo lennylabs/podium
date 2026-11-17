@@ -65,17 +65,17 @@ func newGitJourneyRepo(t testing.TB) *gitJourneyRepo {
 // url returns the file:// clone URL the git source provider fetches.
 func (g *gitJourneyRepo) url() string { return "file://" + g.dir }
 
-// commitContextArtifact writes a type:context ARTIFACT.md at relDir/ARTIFACT.md
+// commitAgentArtifact writes a type:agent ARTIFACT.md at relDir/ARTIFACT.md
 // carrying the given version and description, stages it, and commits it on the
 // current branch (master). Each call fully replaces the prior bytes at that
 // path, so a bumped version commits as a new manifest version on reingest.
-func (g *gitJourneyRepo) commitContextArtifact(t testing.TB, relDir, version, desc, message string) {
+func (g *gitJourneyRepo) commitAgentArtifact(t testing.TB, relDir, version, desc, message string) {
 	t.Helper()
 	artDir := filepath.Join(g.dir, filepath.FromSlash(relDir))
 	if err := os.MkdirAll(artDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", artDir, err)
 	}
-	body := "---\ntype: context\nversion: " + version +
+	body := "---\ntype: agent\nversion: " + version +
 		"\ndescription: " + desc + "\nsensitivity: low\n---\n\n" + desc + " body (v" + version + ").\n"
 	if err := os.WriteFile(filepath.Join(artDir, "ARTIFACT.md"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write ARTIFACT.md: %v", err)
@@ -199,7 +199,7 @@ func TestGitJourney_WebhookReingestNewVersionSearchable(t *testing.T) {
 
 	const id = "vendor-skills/lint-pr"
 	// Initial commit at v1.0.0.
-	repo.commitContextArtifact(t, id, "1.0.0",
+	repo.commitAgentArtifact(t, id, "1.0.0",
 		"Lint a pull request for vendor coding standards before review.", "initial")
 	reg := registerGitLayer(t, srv, "vendor-skills", repo.url())
 
@@ -217,7 +217,7 @@ func TestGitJourney_WebhookReingestNewVersionSearchable(t *testing.T) {
 	}
 
 	// The author merges a second commit bumping the version to 2.0.0.
-	repo.commitContextArtifact(t, id, "2.0.0",
+	repo.commitAgentArtifact(t, id, "2.0.0",
 		"Lint a pull request for vendor coding standards before review.", "bump to 2.0.0")
 
 	// Webhook delivery 2 ingests the new commit as a new version.
@@ -260,7 +260,7 @@ func TestGitJourney_PollReingestDetectsNewCommit(t *testing.T) {
 	repo := newGitJourneyRepo(t)
 
 	const id = "team-runbooks/rotate-creds"
-	repo.commitContextArtifact(t, id, "1.0.0",
+	repo.commitAgentArtifact(t, id, "1.0.0",
 		"Rotate service credentials following the team runbook procedure.", "initial")
 	// Register with no webhook delivery; poll is the only trigger.
 	registerGitLayer(t, srv, "team-runbooks", repo.url())
@@ -272,7 +272,7 @@ func TestGitJourney_PollReingestDetectsNewCommit(t *testing.T) {
 	}
 
 	// The author commits a new version; no webhook fires.
-	repo.commitContextArtifact(t, id, "2.0.0",
+	repo.commitAgentArtifact(t, id, "2.0.0",
 		"Rotate service credentials following the team runbook procedure.", "bump to 2.0.0")
 
 	// Poll cycle 2 detects the changed ref and reingests the new version.

@@ -38,14 +38,14 @@ var (
 	// newline.
 	daBigBody = strings.Repeat("big line\n", objectstore.InlineCutoff/9+100) + "last line"
 	daRecords = []store.ManifestRecord{
-		{ArtifactID: "base/note", Layer: "base", Type: "context",
-			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Base note.\nsensitivity: low\n---\n\nbase prose\n")},
-		{ArtifactID: "team/big", Layer: "team", Type: "context",
-			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Big.\n---\n\n" + daBigBody)},
-		{ArtifactID: "team/plain", Layer: "team", Type: "context", Sensitivity: "low",
-			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: Plain.\nsensitivity: low\n---\n\nplain body\n")},
-		{ArtifactID: "team/withres", Layer: "team", Type: "context",
-			Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: With resources.\n---\n\nresource body\n"),
+		{ArtifactID: "base/note", Layer: "base", Type: "agent",
+			Frontmatter: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: Base note.\nsensitivity: low\n---\n\nbase prose\n")},
+		{ArtifactID: "team/big", Layer: "team", Type: "agent",
+			Frontmatter: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: Big.\n---\n\n" + daBigBody)},
+		{ArtifactID: "team/plain", Layer: "team", Type: "agent", Sensitivity: "low",
+			Frontmatter: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: Plain.\nsensitivity: low\n---\n\nplain body\n")},
+		{ArtifactID: "team/withres", Layer: "team", Type: "agent",
+			Frontmatter: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: With resources.\n---\n\nresource body\n"),
 			Resources:   []store.ResourceRef{{Path: "ref.md", Inline: []byte("reference\n")}, {Path: "a.md", Inline: []byte("a\n")}}},
 		{ArtifactID: "team/skill", Layer: "team", Type: "skill",
 			Frontmatter: []byte("---\ntype: skill\nversion: 1.0.0\ndescription: A skill.\n---\n"),

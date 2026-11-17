@@ -46,9 +46,9 @@ func TestPodiumMCP_ContentHashMismatchRejected(t *testing.T) {
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/load_artifact" {
 			// content_hash is inconsistent with the served frontmatter.
-			_, _ = w.Write([]byte(`{"id":"finance/a","version":"1.0.0","type":"context",` +
+			_, _ = w.Write([]byte(`{"id":"finance/a","version":"1.0.0","type":"agent",` +
 				`"content_hash":"sha256:` + strings.Repeat("0", 64) + `",` +
-				`"frontmatter":"---\ntype: context\n---\n"}`))
+				`"frontmatter":"---\ntype: agent\n---\n"}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{}`))
@@ -269,14 +269,14 @@ func TestPodiumMCP_LargeResourceFetchSendsToken(t *testing.T) {
 	}))
 	t.Cleanup(obj.Close)
 
-	fm := "---\ntype: context\n---\n"
+	fm := "---\ntype: agent\n---\n"
 	// Artifact-level hash over frontmatter + the (sorted) bundled resource,
 	// matching the registry's canonicalization.
 	artHash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{"data/big.bin": blob})
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/load_artifact" {
 			b, _ := json.Marshal(testharness.SealDelivery(map[string]any{
-				"id": "finance/a", "version": "1.0.0", "type": "context",
+				"id": "finance/a", "version": "1.0.0", "type": "agent",
 				"content_hash": artHash, "frontmatter": fm,
 				"large_resources": map[string]any{
 					"data/big.bin": map[string]any{
@@ -342,7 +342,7 @@ func TestPodiumMCP_LargeResourceFetchSendsToken(t *testing.T) {
 // rejected with materialize.content_hash_mismatch before any write.
 func TestPodiumMCP_MultiResourceContentHashRoundTrip(t *testing.T) {
 	t.Parallel()
-	fm := "---\ntype: context\n---\nbody\n"
+	fm := "---\ntype: agent\n---\nbody\n"
 	resources := map[string]string{
 		"data/b.txt":  "second",
 		"data/a.txt":  "first",
@@ -355,7 +355,7 @@ func TestPodiumMCP_MultiResourceContentHashRoundTrip(t *testing.T) {
 	}
 	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, hashed)
 	sealed := testharness.SealDelivery(map[string]any{
-		"id": "team/bundle", "version": "1.0.0", "type": "context",
+		"id": "team/bundle", "version": "1.0.0", "type": "agent",
 		"content_hash": hash, "frontmatter": fm, "resources": resources,
 	})
 
@@ -363,7 +363,7 @@ func TestPodiumMCP_MultiResourceContentHashRoundTrip(t *testing.T) {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/v1/load_artifact" {
 				b, _ := json.Marshal(map[string]any{
-					"id": "team/bundle", "version": "1.0.0", "type": "context",
+					"id": "team/bundle", "version": "1.0.0", "type": "agent",
 					"content_hash": hash, "frontmatter": fm, "resources": served,
 					"artifact_revision": sealed["artifact_revision"],
 					"delivery_hash":     sealed["delivery_hash"],

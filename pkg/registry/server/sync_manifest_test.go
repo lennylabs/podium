@@ -67,11 +67,11 @@ func TestSyncManifest_AppliesVisibility(t *testing.T) {
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "default"})
 	_ = st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: "default", ArtifactID: "public-x", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Layer: "public",
+		ContentHash: "sha256:a", Type: "agent", Layer: "public",
 	})
 	_ = st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: "default", ArtifactID: "private-y", Version: "1.0.0",
-		ContentHash: "sha256:b", Type: "context", Layer: "private",
+		ContentHash: "sha256:b", Type: "agent", Layer: "private",
 	})
 	reg := core.New(st, "default", []layer.Layer{
 		{ID: "public", Precedence: 1, Visibility: layer.Visibility{Public: true}},

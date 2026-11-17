@@ -33,7 +33,7 @@ func TestPodiumMCP_OverlayWatchReindexesOnChange(t *testing.T) {
 	// Seed one draft so the overlay exists at startup.
 	testharness.WriteTree(t, overlayDir, testharness.WriteTreeOption{
 		Path:    "alpha/ARTIFACT.md",
-		Content: "---\ntype: context\nversion: 0.1.0\ndescription: alpha placeholder\n---\n\nalpha body\n",
+		Content: "---\ntype: agent\nversion: 0.1.0\ndescription: alpha placeholder\n---\n\nalpha body\n",
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -75,7 +75,7 @@ func TestPodiumMCP_OverlayWatchReindexesOnChange(t *testing.T) {
 	// Add a new draft after launch. It must be picked up by the watcher.
 	testharness.WriteTree(t, overlayDir, testharness.WriteTreeOption{
 		Path:    "beta/ARTIFACT.md",
-		Content: "---\ntype: context\nversion: 0.1.0\ndescription: variance analysis helper\n---\n\nbeta body\n",
+		Content: "---\ntype: agent\nversion: 0.1.0\ndescription: variance analysis helper\n---\n\nbeta body\n",
 	})
 	// Wait for the fsnotify event plus the re-index debounce.
 	time.Sleep(2 * time.Second)

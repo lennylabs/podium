@@ -18,13 +18,13 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
-// deliveryTree writes a one-layer registry holding the single context
+// deliveryTree writes a one-layer registry holding the single agent
 // artifact team/plain, which every delivery test loads.
 func deliveryTree(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	testharness.WriteTree(t, dir,
-		testharness.WriteTreeOption{Path: "team/plain/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\ndescription: plain\n---\n\nplain\n"},
+		testharness.WriteTreeOption{Path: "team/plain/ARTIFACT.md", Content: "---\ntype: agent\nversion: 1.0.0\ndescription: plain\n---\n\nplain\n"},
 	)
 	return dir
 }

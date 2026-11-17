@@ -44,7 +44,7 @@ func TestEveryAdapter_ProducesDeterministicOutput(t *testing.T) {
 	t.Parallel()
 	src := Source{
 		ArtifactID:    "company/glossary",
-		ArtifactBytes: []byte("---\ntype: context\nversion: 1.0.0\n---\n\nbody\n"),
+		ArtifactBytes: []byte("---\ntype: agent\nversion: 1.0.0\n---\n\nbody\n"),
 		Resources: map[string][]byte{
 			"r/x.md": []byte("x"),
 			"r/y.md": []byte("y"),

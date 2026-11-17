@@ -112,7 +112,7 @@ func TestCommandTutorial_LintPositionalRejected(t *testing.T) {
 // missing version fails lint.
 func TestCommandTutorial_MissingVersion(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"standup/ARTIFACT.md": "---\ntype: command\ndescription: A standup command.\n---\n\n$ARGUMENTS\n"})
+	reg := writeRegistry(t, map[string]string{"standup/ARTIFACT.md": "---\ntype: agent\ndescription: A standup command.\n---\n\n$ARGUMENTS\n"})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 1 {
 		t.Fatalf("lint exit=%d, want 1\nstdout=%s", res.Exit, res.Stdout)
@@ -138,7 +138,7 @@ func TestCommandTutorial_MissingType(t *testing.T) {
 // a non-semver version fails lint.
 func TestCommandTutorial_NonSemver(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"standup/ARTIFACT.md": "---\ntype: command\nversion: v1\ndescription: x\n---\n\n$ARGUMENTS\n"})
+	reg := writeRegistry(t, map[string]string{"standup/ARTIFACT.md": "---\ntype: agent\nversion: v1\ndescription: x\n---\n\n$ARGUMENTS\n"})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 1 {
 		t.Fatalf("lint exit=%d, want 1\nstdout=%s", res.Exit, res.Stdout)

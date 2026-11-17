@@ -33,7 +33,7 @@ func TestAudit_ManifestDeclaredRedaction(t *testing.T) {
 	t.Cleanup(recorder.Close)
 
 	reg := writeRegistry(t, map[string]string{
-		"finance/payroll/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Payroll record.\nsensitivity: low\nbank_account: \"" + secret + "\"\naudit_redact:\n  - bank_account\n---\n\nbody\n",
+		"finance/payroll/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Payroll record.\nsensitivity: low\nbank_account: \"" + secret + "\"\naudit_redact:\n  - bank_account\n---\n\nbody\n",
 	})
 	home := t.TempDir()
 	srv := startServerArgs(t, []string{

@@ -26,7 +26,7 @@ import (
 // it merges both streams into one log.
 func launchWithStdout(t *testing.T, env []string, stdout *os.File) *serverProc {
 	t.Helper()
-	reg := writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")})
 	logf, err := os.CreateTemp(t.TempDir(), "server-*.log")
 	if err != nil {
 		t.Fatalf("server log: %v", err)
@@ -164,7 +164,7 @@ func TestAuditDestinations_ShutdownFlushes(t *testing.T) {
 		rcv := auditharness.NewReceiver(t)
 		rcv.SetResponse(http.StatusServiceUnavailable, "60")
 		s := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_AUDIT_LOG_PATH=" + rcv.URL()},
-			"serve", "--standalone", "--layer-path", writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+			"serve", "--standalone", "--layer-path", writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 		loadDomain(t, s)
 		awaitRefused(t, rcv, "domain.loaded")
 		rcv.SetResponse(http.StatusOK, "")
@@ -180,7 +180,7 @@ func TestAuditDestinations_ShutdownFlushes(t *testing.T) {
 		rcv := auditharness.NewReceiver(t)
 		rcv.SetResponse(http.StatusServiceUnavailable, "")
 		s := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_AUDIT_LOG_PATH=" + rcv.URL()},
-			"serve", "--standalone", "--layer-path", writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+			"serve", "--standalone", "--layer-path", writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 		loadDomain(t, s)
 		awaitRefused(t, rcv, "domain.loaded")
 		if _, took := interruptAndWait(t, s, 8*time.Second); took > 8*time.Second {

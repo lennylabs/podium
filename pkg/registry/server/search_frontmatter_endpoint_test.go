@@ -18,7 +18,7 @@ import (
 func TestSearchArtifacts_ResultCarriesFrontmatter(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("a/ARTIFACT.md", contextFor("Alpha description", "finance")),
+		fixture("a/ARTIFACT.md", agentFor("Alpha description", "finance")),
 	)
 	body := mustGet(t, h.URL, "/v1/search_artifacts?query=")
 	var resp server.SearchResponse
@@ -33,7 +33,7 @@ func TestSearchArtifacts_ResultCarriesFrontmatter(t *testing.T) {
 		t.Fatalf("search result dropped frontmatter (regression): %+v", r)
 	}
 	// The descriptive fields the §7.6.1 schema surfaces inside frontmatter.
-	if !strings.Contains(r.Frontmatter, "type: context") ||
+	if !strings.Contains(r.Frontmatter, "type: agent") ||
 		!strings.Contains(r.Frontmatter, "Alpha description") {
 		t.Errorf("frontmatter missing expected fields: %q", r.Frontmatter)
 	}

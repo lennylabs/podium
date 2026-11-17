@@ -55,7 +55,7 @@ func semanticRecords() []filesystem.ArtifactRecord {
 			Type: manifest.TypeSkill, Name: "variance-analysis",
 			Description: "compute variance against last quarter", Version: "1.0.0"}},
 		{ID: "team/ops/restart-runner", Artifact: &manifest.Artifact{
-			Type: manifest.TypeCommand, Name: "restart-runner",
+			Type: manifest.TypeAgent, Name: "restart-runner",
 			Description: "restart the build runner", Version: "1.0.0"}},
 	}
 }

@@ -273,7 +273,7 @@ func TestRuleModes_LintAutoWithGlobsWarns(t *testing.T) {
 func TestRuleModes_LintRuleModeOnNonRuleWarns(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"ctx/note/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\nname: note\ndescription: A note.\nrule_mode: glob\n---\n\nbody\n",
+		"ctx/note/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\nname: note\ndescription: A note.\nrule_mode: glob\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 {

@@ -32,12 +32,12 @@ func TestAuthServerHarness_VisibilityMatrix(t *testing.T) {
 		Layers: []authLayer{
 			{
 				ID:         "pub",
-				Files:      map[string]string{"pub/note/ARTIFACT.md": authContext("public note")},
+				Files:      map[string]string{"pub/note/ARTIFACT.md": authAgent("public note")},
 				Visibility: authVisibility{Public: true},
 			},
 			{
 				ID:         "org",
-				Files:      map[string]string{"org/handbook/ARTIFACT.md": authContext("org handbook")},
+				Files:      map[string]string{"org/handbook/ARTIFACT.md": authAgent("org handbook")},
 				Visibility: authVisibility{Org: true},
 			},
 			{
@@ -49,12 +49,12 @@ func TestAuthServerHarness_VisibilityMatrix(t *testing.T) {
 			},
 			{
 				ID:         "carolonly",
-				Files:      map[string]string{"carolonly/secret/ARTIFACT.md": authContext("carol secret")},
+				Files:      map[string]string{"carolonly/secret/ARTIFACT.md": authAgent("carol secret")},
 				Visibility: authVisibility{Users: []string{"carol@acme.com"}},
 			},
 			{
 				ID:         "vault",
-				Files:      map[string]string{"vault/locked/ARTIFACT.md": authContext("locked vault")},
+				Files:      map[string]string{"vault/locked/ARTIFACT.md": authAgent("locked vault")},
 				Visibility: authVisibility{}, // private: no one but an admin override
 			},
 		},
@@ -152,8 +152,8 @@ func TestAuthServerHarness_ScopeNarrowsSurface(t *testing.T) {
 		Layers: []authLayer{{
 			ID: "shared",
 			Files: map[string]string{
-				"finance/ap/pay-invoice/ARTIFACT.md": authContext("pay invoice"),
-				"hr/policies/ARTIFACT.md":            authContext("hr policies"),
+				"finance/ap/pay-invoice/ARTIFACT.md": authAgent("pay invoice"),
+				"hr/policies/ARTIFACT.md":            authAgent("hr policies"),
 			},
 			Visibility: authVisibility{Public: true},
 		}},

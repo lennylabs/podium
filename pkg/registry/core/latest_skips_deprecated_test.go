@@ -122,7 +122,7 @@ func putAt(t *testing.T, st store.Store, id, ver string, offset int, deprecated 
 	t.Helper()
 	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: "t", ArtifactID: id, Version: ver,
-		ContentHash: "sha256:" + ver, Type: "context", Layer: "L",
+		ContentHash: "sha256:" + ver, Type: "agent", Layer: "L",
 		Deprecated: deprecated, IngestedAt: revAt(offset),
 	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest %s@%s: %v", id, ver, err)

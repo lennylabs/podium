@@ -74,8 +74,8 @@ func newTestServer(t *testing.T, cfg *config) *mcpServer {
 func TestLoadArtifact_HappyPath(t *testing.T) {
 	t.Parallel()
 	respBody := loadArtifactJSON(t, map[string]any{
-		"id": "x", "type": "context", "version": "1.0.0",
-		"manifest_body": "body", "frontmatter": "---\ntype: context\n---\n",
+		"id": "x", "type": "agent", "version": "1.0.0",
+		"manifest_body": "body", "frontmatter": "---\ntype: agent\n---\n",
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/load_artifact" {
@@ -181,8 +181,8 @@ func TestArgsIDAndVersion(t *testing.T) {
 func TestCallTool_DispatchToLoadArtifact(t *testing.T) {
 	t.Parallel()
 	respBody := loadArtifactJSON(t, map[string]any{
-		"id": "x", "type": "context", "version": "1.0.0",
-		"frontmatter": "---\ntype: context\n---\n",
+		"id": "x", "type": "agent", "version": "1.0.0",
+		"frontmatter": "---\ntype: agent\n---\n",
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(respBody))
@@ -256,9 +256,9 @@ func newFreshLoadFixture(t *testing.T) *freshLoadFixture {
 	t.Helper()
 	big := []byte("large resource bytes")
 	obj := newObjectStub(t, map[string][]byte{"/big.bin": big, "/extra.bin": []byte("extra")})
-	fm := "---\ntype: context\nversion: 1.0.0\n---\nbody\n"
+	fm := "---\ntype: agent\nversion: 1.0.0\n---\nbody\n"
 	resp := sealDelivery(loadArtifactResponse{
-		ID: "team/x", Type: "context", Version: "1.0.0", Sensitivity: "internal",
+		ID: "team/x", Type: "agent", Version: "1.0.0", Sensitivity: "internal",
 		Frontmatter: fm, ManifestBody: "body\n", Layer: "team-layer",
 		Resources: map[string]string{"a.txt": "inline bytes"},
 		LargeResources: map[string]largeResourceLink{

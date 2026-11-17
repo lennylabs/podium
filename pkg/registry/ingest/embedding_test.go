@@ -36,7 +36,7 @@ func TestIngest_PopulatesVectorOnAccept(t *testing.T) {
 		LayerID:  "L",
 		Files: fstest.MapFS{
 			"x/ARTIFACT.md": &fstest.MapFile{
-				Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
+				Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
 			},
 		},
 		Embedder: fakeEmbed,
@@ -78,7 +78,7 @@ func TestIngest_EmbedderFailureDoesNotRejectIngest(t *testing.T) {
 		LayerID:  "L",
 		Files: fstest.MapFS{
 			"x/ARTIFACT.md": &fstest.MapFile{
-				Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
+				Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
 			},
 		},
 		Embedder: failingEmbed,
@@ -116,7 +116,7 @@ func TestIngest_IdempotentSkipsEmbedding(t *testing.T) {
 	v := vector.NewMemory(8)
 	files := fstest.MapFS{
 		"x/ARTIFACT.md": &fstest.MapFile{
-			Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
+			Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
 		},
 	}
 	for i := 0; i < 3; i++ {

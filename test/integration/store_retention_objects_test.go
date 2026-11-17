@@ -176,7 +176,7 @@ func assertDeprecatedPurge(t *testing.T, st store.Store, legacyPin legacyPinFunc
 	const idA = "finance/close/run-variance"
 	putManifest(t, st, objStore, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: idA, Version: "1.0.0", ContentHash: "sha256:a-old",
-		Type: "context", Layer: "team", Deprecated: true, DeprecatedAt: ptrTime(old),
+		Type: "agent", Layer: "team", Deprecated: true, DeprecatedAt: ptrTime(old),
 		IngestedAt: old,
 		Resources: []store.ResourceRef{
 			{Path: "data/orphan.txt", ContentHash: "sha256:" + orphanHash, Size: int64(len(orphanBytes))},
@@ -186,7 +186,7 @@ func assertDeprecatedPurge(t *testing.T, st store.Store, legacyPin legacyPinFunc
 	// 2) A NON-DEPRECATED successor of id A that still references the shared bytes.
 	putManifest(t, st, objStore, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: idA, Version: "2.0.0", ContentHash: "sha256:a-new",
-		Type: "context", Layer: "team", IngestedAt: fresh,
+		Type: "agent", Layer: "team", IngestedAt: fresh,
 		Resources: []store.ResourceRef{
 			{Path: "data/shared.txt", ContentHash: "sha256:" + sharedHash, Size: int64(len(sharedBytes))},
 		},
@@ -196,7 +196,7 @@ func assertDeprecatedPurge(t *testing.T, st store.Store, legacyPin legacyPinFunc
 	const idP = "platform/base/policy"
 	putManifest(t, st, objStore, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: idP, Version: "1.0.0", ContentHash: "sha256:p-old",
-		Type: "context", Layer: "platform", Deprecated: true, DeprecatedAt: ptrTime(old),
+		Type: "agent", Layer: "platform", Deprecated: true, DeprecatedAt: ptrTime(old),
 		IngestedAt: old,
 	})
 	// 4) A live child C whose ARTIFACT.md declares extends: P@1.0.0, as a row an
@@ -205,8 +205,8 @@ func assertDeprecatedPurge(t *testing.T, st store.Store, legacyPin legacyPinFunc
 	const idC = "team/checkout/policy"
 	putManifest(t, st, objStore, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: idC, Version: "1.0.0", ContentHash: "sha256:c",
-		Type: "context", Layer: "team", IngestedAt: fresh,
-		Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: checkout policy\nextends: " + idP + "@1.0.0\n---\n\nbody\n"),
+		Type: "agent", Layer: "team", IngestedAt: fresh,
+		Frontmatter: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: checkout policy\nextends: " + idP + "@1.0.0\n---\n\nbody\n"),
 	})
 	legacyPin(t, tenant, idC, "1.0.0", idP+"@1.0.0")
 

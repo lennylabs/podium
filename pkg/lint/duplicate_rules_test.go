@@ -44,10 +44,10 @@ func skillRec(id, body string) filesystem.ArtifactRecord {
 	}
 }
 
-func contextRec(id, body string) filesystem.ArtifactRecord {
+func agentRec(id, body string) filesystem.ArtifactRecord {
 	return filesystem.ArtifactRecord{
 		ID:       id,
-		Artifact: &manifest.Artifact{Type: manifest.TypeContext, Version: "1.0.0", Body: body},
+		Artifact: &manifest.Artifact{Type: manifest.TypeAgent, Version: "1.0.0", Body: body},
 	}
 }
 
@@ -87,7 +87,7 @@ func TestNearDuplicate_BodiesAcrossArtifacts(t *testing.T) {
 func TestNearDuplicate_ArtifactBodiesOfOtherTypes(t *testing.T) {
 	t.Parallel()
 	a, b := sharedPrefixBodies(60, 55)
-	msgs := nearDupMessages(nearDup([]filesystem.ArtifactRecord{contextRec("ctx/a", a), contextRec("ctx/b", b)}, DefaultContentSimilarity))
+	msgs := nearDupMessages(nearDup([]filesystem.ArtifactRecord{agentRec("ctx/a", a), agentRec("ctx/b", b)}, DefaultContentSimilarity))
 	for id, peer := range map[string]string{"ctx/a": "ctx/b", "ctx/b": "ctx/a"} {
 		want := "ARTIFACT.md body nearly duplicates " + peer + " ARTIFACT.md body (83%)"
 		if got := msgs[id]; len(got) != 1 || !strings.HasPrefix(got[0], want) {
@@ -105,7 +105,7 @@ func TestNearDuplicate_DefaultThreshold(t *testing.T) {
 	run := func(shared int) bool {
 		a, b := sharedPrefixBodies(76, shared)
 		l := &Linter{IncludeAdvisories: true}
-		return hasCode(l.Lint(context.Background(), nil, []filesystem.ArtifactRecord{contextRec("ctx/a", a), contextRec("ctx/b", b)}), nearDupCode)
+		return hasCode(l.Lint(context.Background(), nil, []filesystem.ArtifactRecord{agentRec("ctx/a", a), agentRec("ctx/b", b)}), nearDupCode)
 	}
 	if !run(68) {
 		t.Errorf("64/80 shingles (0.8) did not warn at the default")
@@ -133,13 +133,13 @@ func TestNearDuplicate_ThresholdOne(t *testing.T) {
 	}
 }
 
-// sharedResourceRecords returns n context artifacts that each bundle the
+// sharedResourceRecords returns n agent artifacts that each bundle the
 // same resource of the given word count at references/license.md.
 func sharedResourceRecords(n, words int) []filesystem.ArtifactRecord {
 	res := []byte(prose("license", words))
 	out := make([]filesystem.ArtifactRecord, n)
 	for i := range out {
-		r := contextRec(fmt.Sprintf("pkg/a%03d", i), "")
+		r := agentRec(fmt.Sprintf("pkg/a%03d", i), "")
 		r.Resources = map[string][]byte{"references/license.md": res}
 		out[i] = r
 	}
@@ -188,7 +188,7 @@ func TestNearDuplicate_ResourceUnits(t *testing.T) {
 			"assets/latin1.txt":   []byte(text + " \xff"),
 		}
 	}
-	a, b := contextRec("docs/a", ""), contextRec("docs/b", "")
+	a, b := agentRec("docs/a", ""), agentRec("docs/b", "")
 	a.Resources, b.Resources = resources(), resources()
 	msgs := nearDupMessages(nearDup([]filesystem.ArtifactRecord{a, b}, DefaultContentSimilarity))
 	want := "references/guide.md nearly duplicates docs/b references/guide.md (100%); keep one copy if the artifacts can share it"
@@ -225,7 +225,7 @@ func TestNearDuplicate_SkipsShortAndSameArtifact(t *testing.T) {
 func TestNearDuplicate_OneSidedSuppress(t *testing.T) {
 	t.Parallel()
 	body := prose("dup", 60)
-	a, b := contextRec("ctx/a", body), contextRec("ctx/b", body)
+	a, b := agentRec("ctx/a", body), agentRec("ctx/b", body)
 	a.Artifact.LintSuppress = []string{nearDupCode}
 	msgs := nearDupMessages(nearDup([]filesystem.ArtifactRecord{a, b}, DefaultContentSimilarity))
 	if len(msgs["ctx/a"]) != 0 {
@@ -242,7 +242,7 @@ func TestNearDuplicate_Cancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	body := prose("dup", 60)
-	got := ruleNearDuplicateContent{t: DefaultContentSimilarity}.Check(ctx, nil, []filesystem.ArtifactRecord{contextRec("a", body), contextRec("b", body)})
+	got := ruleNearDuplicateContent{t: DefaultContentSimilarity}.Check(ctx, nil, []filesystem.ArtifactRecord{agentRec("a", body), agentRec("b", body)})
 	if len(got) != 0 {
 		t.Errorf("cancelled pass returned %v", got)
 	}
@@ -354,7 +354,7 @@ func BenchmarkNearDuplicateContent(b *testing.B) {
 		for k := range words {
 			words[k] = fmt.Sprintf("v%d", rng.Intn(20000))
 		}
-		return contextRec(fmt.Sprintf("bench/a%05d", i), strings.Join(words, " "))
+		return agentRec(fmt.Sprintf("bench/a%05d", i), strings.Join(words, " "))
 	})
 	rule := ruleNearDuplicateContent{t: DefaultContentSimilarity}
 	b.ResetTimer()

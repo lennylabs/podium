@@ -149,7 +149,7 @@ func gatewayServer(t *testing.T, verify func(*http.Request) (layer.Identity, err
 		t.Helper()
 		if err := st.PutManifest(t.Context(), storetest.Seal(t, store.ManifestRecord{
 			TenantID: tenant, ArtifactID: artifactID, Version: "1.0.0",
-			ContentHash: "sha256:" + artifactID, Type: "context",
+			ContentHash: "sha256:" + artifactID, Type: "agent",
 			Description: artifactID, Layer: layerID,
 			IngestedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		}, nil, nil)); err != nil {

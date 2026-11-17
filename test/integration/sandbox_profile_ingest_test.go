@@ -21,7 +21,7 @@ func TestSandboxProfileIngestGate(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "eng", "widget"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	body := "---\ntype: context\nversion: 1.0.0\ndescription: A sandboxed widget.\nsensitivity: low\nsandbox_profile: seccomp-strict\n---\n\nbody\n"
+	body := "---\ntype: agent\nversion: 1.0.0\ndescription: A sandboxed widget.\nsensitivity: low\nsandbox_profile: seccomp-strict\n---\n\nbody\n"
 	if err := os.WriteFile(filepath.Join(dir, "eng", "widget", "ARTIFACT.md"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write artifact: %v", err)
 	}

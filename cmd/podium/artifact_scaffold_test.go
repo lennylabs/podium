@@ -598,7 +598,7 @@ func TestScaffold_RejectsMissingDescription(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--yes",
 		target,
 	}, "")
@@ -612,7 +612,7 @@ func TestScaffold_RejectsMissingDescription(t *testing.T) {
 
 func TestScaffold_RejectsMissingPath(t *testing.T) {
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--yes",
 	}, "")
@@ -628,7 +628,7 @@ func TestScaffold_RejectsBadName(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "Bad_Name") // underscore + uppercase
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--yes",
 		target,
@@ -662,7 +662,7 @@ func TestScaffold_RejectsBadSensitivity(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--sensitivity", "ultra",
 		"--yes",
@@ -683,7 +683,7 @@ func TestScaffold_RefusesExistingDir(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--yes",
 		target,
@@ -706,7 +706,7 @@ func TestScaffold_ForceOverwrites(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "fresh",
 		"--force",
 		"--yes",
@@ -724,17 +724,17 @@ func TestScaffold_ForceOverwrites(t *testing.T) {
 func TestScaffold_Interactive_TypePrompt(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
-	// Pick option 3 (context).
+	// Pick option 2 (agent).
 	exit, _, stderr := runScaffold([]string{
 		"--description", "x",
 		target,
-	}, "3\n")
+	}, "2\n")
 	if exit != 0 {
 		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
 	}
 	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
-	if !bytes.Contains(body, []byte("type: context")) {
-		t.Errorf("interactive type pick did not yield context: %s", body)
+	if !bytes.Contains(body, []byte("type: agent")) {
+		t.Errorf("interactive type pick did not yield agent: %s", body)
 	}
 }
 
@@ -747,7 +747,7 @@ func TestScaffold_Interactive_DescriptionPrompt(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		target,
 	}, "Reference content for the catalog.\n")
 	if exit != 0 {
@@ -954,7 +954,7 @@ func TestScaffold_Interactive_DescriptionEmptyErrors(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		target,
 	}, "\n")
 	if exit != 2 {
@@ -1008,7 +1008,7 @@ func TestScaffold_UnknownFlagErrors(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, _ := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--yes",
 		"--no-such-flag",
@@ -1076,7 +1076,7 @@ func TestScaffold_WhenToUsePopulated(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--when-to-use", "first situation,second situation",
 		"--yes",
@@ -1167,11 +1167,11 @@ func TestSplitCSV(t *testing.T) {
 // --license on a non-skill type populates ARTIFACT.md (license
 // lives in SKILL.md for skills, so this branch only fires for
 // other types).
-func TestScaffold_LicenseOnContext(t *testing.T) {
+func TestScaffold_LicenseOnAgent(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--license", "Apache-2.0",
 		"--yes",
@@ -1192,7 +1192,7 @@ func TestScaffold_Interactive_DescriptionEOF(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		target,
 	}, "")
 	if exit != 2 {
@@ -1210,7 +1210,7 @@ func TestArtifactScaffoldWrapper(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "personal", "x")
 	exit := artifactScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--yes",
 		target,
@@ -1258,7 +1258,7 @@ func TestScaffold_WriteFileFailsCleanly(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 	exit, _, stderr := runScaffold([]string{
-		"--type", "context",
+		"--type", "agent",
 		"--description", "x",
 		"--force",
 		"--yes",

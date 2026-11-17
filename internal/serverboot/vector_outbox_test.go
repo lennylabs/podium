@@ -35,7 +35,7 @@ func (e fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, err
 
 func enqueue(t *testing.T, st store.VectorOutbox, id, version string, at time.Time) {
 	t.Helper()
-	rec := store.ManifestRecord{TenantID: "default", ArtifactID: id, Version: version, ContentHash: "sha256:" + id, Type: "context", Description: "d"}
+	rec := store.ManifestRecord{TenantID: "default", ArtifactID: id, Version: version, ContentHash: "sha256:" + id, Type: "agent", Description: "d"}
 	p := store.VectorPending{TenantID: "default", ArtifactID: id, Version: version, Text: "embed " + id, EnqueuedAt: at, NextRetryAt: at}
 	if err := st.PutManifestWithVectorPending(context.Background(), rec, p); err != nil {
 		t.Fatalf("enqueue %s: %v", id, err)

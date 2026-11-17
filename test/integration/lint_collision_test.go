@@ -20,10 +20,10 @@ func TestPodiumLint_CollisionErrors(t *testing.T) {
 			Path: ".registry-config", Content: "multi_layer: true\nlayer_order:\n  - org\n  - team\n",
 		},
 		testharness.WriteTreeOption{
-			Path: "org/shared/note/ARTIFACT.md", Content: contextArtifact,
+			Path: "org/shared/note/ARTIFACT.md", Content: agentArtifact,
 		},
 		testharness.WriteTreeOption{
-			Path: "team/shared/note/ARTIFACT.md", Content: contextArtifact,
+			Path: "team/shared/note/ARTIFACT.md", Content: agentArtifact,
 		},
 	)
 	res := cmdharness.Run(t, "podium", "", "lint", "--registry", registry)

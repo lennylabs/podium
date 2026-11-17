@@ -7,15 +7,15 @@ import (
 )
 
 // scopeRegistry writes a three-artifact filesystem registry: two skills under
-// finance/ and one context under shared/. Returns the registry dir.
+// finance/ and one agent under shared/. Returns the registry dir.
 func scopeRegistry(t *testing.T) string {
 	t.Helper()
 	registry := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\n"},
-		testharness.WriteTreeOption{Path: "team/finance/a/ARTIFACT.md", Content: contextArtifactSrc},
-		testharness.WriteTreeOption{Path: "team/finance/b/ARTIFACT.md", Content: contextArtifactSrc},
-		testharness.WriteTreeOption{Path: "team/shared/c/ARTIFACT.md", Content: contextArtifactSrc},
+		testharness.WriteTreeOption{Path: "team/finance/a/ARTIFACT.md", Content: agentArtifactSrc},
+		testharness.WriteTreeOption{Path: "team/finance/b/ARTIFACT.md", Content: agentArtifactSrc},
+		testharness.WriteTreeOption{Path: "team/shared/c/ARTIFACT.md", Content: agentArtifactSrc},
 	)
 	return registry
 }
@@ -100,7 +100,7 @@ func TestRun_ScopeTypeFilters(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(res.Artifacts) != 0 {
-		t.Errorf("no context artifact should pass a skill-only type filter, got %d", len(res.Artifacts))
+		t.Errorf("no agent artifact should pass a skill-only type filter, got %d", len(res.Artifacts))
 	}
 }
 

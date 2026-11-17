@@ -122,13 +122,13 @@ func TestSearchCmd_HappyPath(t *testing.T) {
 		if r.URL.Path != "/v1/search_artifacts" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"total_matched":1,"results":[{"id":"a","type":"context"}]}`))
+		_, _ = w.Write([]byte(`{"total_matched":1,"results":[{"id":"a","type":"agent"}]}`))
 	}))
 	defer srv.Close()
 	t.Setenv("PODIUM_REGISTRY", srv.URL)
 	out := captureStdout(t, func() {
 		withStderr(t, func() {
-			if rc := searchCmd([]string{"--type", "context", "--scope", "x", "query"}); rc != 0 {
+			if rc := searchCmd([]string{"--type", "agent", "--scope", "x", "query"}); rc != 0 {
 				t.Errorf("rc = %d", rc)
 			}
 		})

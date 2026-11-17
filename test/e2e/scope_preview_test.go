@@ -10,7 +10,7 @@ import (
 func scopePreviewRegistry(t *testing.T) string {
 	t.Helper()
 	return writeRegistry(t, map[string]string{
-		"finance/glossary/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: finance glossary\nsensitivity: low\n---\n\nGlossary body.\n",
+		"finance/glossary/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: finance glossary\nsensitivity: low\n---\n\nGlossary body.\n",
 		"eng/runbook/ARTIFACT.md":      "---\ntype: rule\nversion: 1.0.0\ndescription: deploy runbook\nsensitivity: medium\n---\n\nRunbook body.\n",
 	})
 }

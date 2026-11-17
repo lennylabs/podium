@@ -485,7 +485,7 @@ func TestMCPOverlayEmbedder_CustomRegistryError(t *testing.T) {
 // unparsable, or declares no directive.
 func TestManifestRedactKeys(t *testing.T) {
 	t.Parallel()
-	declared := "---\ntype: context\nversion: 1.0.0\naudit_redact: [ssn, account_number]\n---\nbody\n"
+	declared := "---\ntype: agent\nversion: 1.0.0\naudit_redact: [ssn, account_number]\n---\nbody\n"
 	got := manifestRedactKeys(declared)
 	if strings.Join(got, ",") != "ssn,account_number" {
 		t.Errorf("declared keys = %v, want [ssn account_number]", got)
@@ -495,7 +495,7 @@ func TestManifestRedactKeys(t *testing.T) {
 		t.Errorf("empty frontmatter = %v, want nil", got)
 	}
 	// No directive present: the field is absent, so the result is nil.
-	if got := manifestRedactKeys("---\ntype: context\nversion: 1.0.0\n---\nbody\n"); got != nil {
+	if got := manifestRedactKeys("---\ntype: agent\nversion: 1.0.0\n---\nbody\n"); got != nil {
 		t.Errorf("no-directive frontmatter = %v, want nil", got)
 	}
 	// Unparsable YAML frontmatter yields nil rather than a parse error.
@@ -513,7 +513,7 @@ func TestManifestBodyRefresher_YieldsFreshURL(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id":                "finance/glossary",
-			"type":              "context",
+			"type":              "agent",
 			"version":           "1.0.0",
 			"content_hash":      "sha256:abc",
 			"manifest_body_url": map[string]any{"presigned_url": freshURL, "content_hash": "sha256:abc", "size": 10},
@@ -543,7 +543,7 @@ func TestManifestBodyRefresher_NilWhenNoBodyURL(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "finance/glossary", "type": "context", "version": "1.0.0", "content_hash": "sha256:abc",
+			"id": "finance/glossary", "type": "agent", "version": "1.0.0", "content_hash": "sha256:abc",
 		})
 	}))
 	t.Cleanup(ts.Close)

@@ -62,7 +62,7 @@ func TestAdminVisibilityOverride_HTTPReadPath(t *testing.T) {
 	rlvLayer(t, st, store.LayerConfig{TenantID: "default", ID: "private", Order: 1, Users: []string{"bob"}})
 	rlvManifest(t, st, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "team/secret", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Layer: "private",
+		ContentHash: "sha256:a", Type: "agent", Layer: "private",
 		Description: "secret context", Body: []byte("hidden body"),
 	})
 	// alice holds the admin role but is not in the private layer.

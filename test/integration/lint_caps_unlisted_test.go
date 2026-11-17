@@ -66,7 +66,7 @@ func TestNewlyUnlistedAdvisory_ReingestSurfacesIt(t *testing.T) {
 	layerDir := t.TempDir()
 	domainPath := filepath.Join(layerDir, "finance", "DOMAIN.md")
 	lintWriteArtifact(t, filepath.Join(layerDir, "finance/ap"),
-		"---\ntype: context\nversion: 1.0.0\ndescription: ap\nsensitivity: low\n---\n\nbody\n")
+		"---\ntype: agent\nversion: 1.0.0\ndescription: ap\nsensitivity: low\n---\n\nbody\n")
 	writeDomain := func(content string) {
 		t.Helper()
 		if err := os.WriteFile(domainPath, []byte(content), 0o644); err != nil {
@@ -136,12 +136,12 @@ func TestConfigurablePackageCap_GatesIngest(t *testing.T) {
 	// gated package surfaces in LintFailures without aborting the whole layer.
 	artDir := filepath.Join(t.TempDir(), "layer")
 	lintWriteArtifact(t, filepath.Join(artDir, "finance/big"),
-		"---\ntype: context\nversion: 1.0.0\ndescription: big\nsensitivity: low\n---\n\nbody\n")
+		"---\ntype: agent\nversion: 1.0.0\ndescription: big\nsensitivity: low\n---\n\nbody\n")
 	if err := os.WriteFile(filepath.Join(artDir, "finance/big", "data.bin"), make([]byte, 8*1024), 0o644); err != nil {
 		t.Fatalf("write resource: %v", err)
 	}
 	lintWriteArtifact(t, filepath.Join(artDir, "finance/small"),
-		"---\ntype: context\nversion: 1.0.0\ndescription: small\nsensitivity: low\n---\n\nbody\n")
+		"---\ntype: agent\nversion: 1.0.0\ndescription: small\nsensitivity: low\n---\n\nbody\n")
 
 	cfg := store.LayerConfig{TenantID: "t", ID: "big-layer", SourceType: "local", LocalPath: artDir, Order: 1}
 

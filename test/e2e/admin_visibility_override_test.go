@@ -24,7 +24,7 @@ func TestAdminVisibilityOverride_E2E(t *testing.T) {
 
 	// A restricted layer visible only to bob, holding one artifact.
 	layerRoot := writeRegistry(t, map[string]string{
-		"finance/secret/ledger/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: restricted ledger\nsensitivity: low\n---\n\nbody\n",
+		"finance/secret/ledger/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: restricted ledger\nsensitivity: low\n---\n\nbody\n",
 	})
 	cfgPath := filepath.Join(home, "registry.yaml")
 	cfg := "" +

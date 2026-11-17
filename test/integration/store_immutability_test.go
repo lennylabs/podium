@@ -49,7 +49,7 @@ func TestIngest_ConcurrentConflict_SQLiteReportsConflicts(t *testing.T) {
 		wg.Add(1)
 		// Same (id, version), different body, so the content hash differs
 		// and only the first writer may win the immutability race.
-		body := []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody variant\n")
+		body := []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody variant\n")
 		body[len(body)-2] = byte('A' + i)
 		files := fstest.MapFS{
 			"x/ARTIFACT.md": &fstest.MapFile{Data: body},

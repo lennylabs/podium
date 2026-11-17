@@ -1,10 +1,11 @@
 ---
-type: context
-version: 1.0.0
+name: company-glossary
 description: Glossary of company-wide terminology.
-tags: [reference, glossary]
-sensitivity: low
 license: MIT
+metadata:
+  version: "1.1.0"
+  tags: "reference, glossary"
+  sensitivity: "low"
 ---
 
 # Company glossary

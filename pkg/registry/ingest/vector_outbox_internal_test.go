@@ -11,7 +11,7 @@ import (
 func outboxTestRecord() store.ManifestRecord {
 	return store.ManifestRecord{
 		TenantID: "default", ArtifactID: "a/x", Version: "1.0.0",
-		ContentHash: "sha256:1", Type: "context",
+		ContentHash: "sha256:1", Type: "agent",
 		Description: "variance analysis reference for vendor payments",
 	}
 }

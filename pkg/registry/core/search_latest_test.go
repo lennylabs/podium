@@ -26,7 +26,7 @@ func putSearchFixtures(t *testing.T, st store.Store, fixtures []searchFixture) {
 	for _, f := range fixtures {
 		rec := store.ManifestRecord{
 			TenantID: "t", ArtifactID: "x", Version: f.ver,
-			ContentHash: "sha256:" + f.ver, Type: "context", Layer: "L",
+			ContentHash: "sha256:" + f.ver, Type: "agent", Layer: "L",
 			Description: "release checklist", Tags: f.tags,
 			Deprecated: f.deprecated, IngestedAt: revAt(f.offset),
 		}

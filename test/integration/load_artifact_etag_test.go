@@ -16,7 +16,7 @@ func TestRegistry_LoadArtifactETagRoundTrip(t *testing.T) {
 	h := registryharness.New(t,
 		testharness.WriteTreeOption{
 			Path:    "x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: x\n---\n\nbody\n",
+			Content: "---\ntype: agent\nversion: 1.0.0\ndescription: x\n---\n\nbody\n",
 		},
 	)
 

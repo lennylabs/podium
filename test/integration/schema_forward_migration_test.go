@@ -68,7 +68,7 @@ func TestForwardMigration_IngestAndSoftDeleteOnLegacySQLite(t *testing.T) {
 	// Ingest a new artifact through the real pipeline. The write path sets
 	// every manifests column, so a database still missing them would fail
 	// here rather than silently dropping data.
-	body := []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nfresh body\n")
+	body := []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nfresh body\n")
 	res, err := ingest.Ingest(ctx, st, ingest.Request{
 		TenantID: "t",
 		LayerID:  "team-shared",

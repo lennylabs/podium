@@ -109,8 +109,8 @@ func brReadOrEmpty(path string) string {
 func TestSearch_LoadDomainRoot(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/pay-invoice/ARTIFACT.md":   contextArtifact("pay invoice"),
-		"engineering/pr-review/ARTIFACT.md": contextArtifact("pr review"),
+		"finance/pay-invoice/ARTIFACT.md":   agentArtifact("pay invoice"),
+		"engineering/pr-review/ARTIFACT.md": agentArtifact("pr review"),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "load_domain", map[string]any{}))
 	result := rpcResult(t, res.Stdout, 1)
@@ -130,8 +130,8 @@ func TestSearch_LoadDomainRoot(t *testing.T) {
 func TestSearch_LoadDomainFinance(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md":                        contextArtifact("pay"),
-		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": contextArtifact("variance"),
+		"finance/ap/pay-invoice/ARTIFACT.md":                        agentArtifact("pay"),
+		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": agentArtifact("variance"),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "load_domain", map[string]any{"path": "finance"}))
 	result := rpcResult(t, res.Stdout, 1)
@@ -149,7 +149,7 @@ func TestSearch_LoadDomainFinance(t *testing.T) {
 func TestSearch_LoadDomainThirdLevel(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": contextArtifact("variance"),
+		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": agentArtifact("variance"),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "load_domain", map[string]any{"path": "finance/close-reporting"}))
 	result := rpcResult(t, res.Stdout, 1)
@@ -169,7 +169,7 @@ func TestSearch_LoadDomainThirdLevel(t *testing.T) {
 func TestSearch_LoadDomainNoBodies(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/report/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: A report.\n---\n\nLong multi-line\nprose body here.\n",
+		"finance/report/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: A report.\n---\n\nLong multi-line\nprose body here.\n",
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "load_domain", map[string]any{"path": "finance"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
@@ -185,8 +185,8 @@ func TestSearch_LoadDomainNoBodies(t *testing.T) {
 func TestSearch_LoadDomainDepth(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/direct/ARTIFACT.md":   contextArtifact("direct"),
-		"finance/ap/sub/deep/ARTIFACT.md": contextArtifact("deep"),
+		"finance/ap/direct/ARTIFACT.md":   agentArtifact("direct"),
+		"finance/ap/sub/deep/ARTIFACT.md": agentArtifact("deep"),
 	}))
 	var d1 map[string]any
 	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance&depth=1", &d1)
@@ -214,7 +214,7 @@ func TestSearch_LoadDomainNote(t *testing.T) {
 		"finance/DOMAIN.md": "---\ndescription: Finance\ndiscovery:\n  target_response_tokens: 20\n---\n\n# Finance\n",
 	}
 	for _, n := range []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot"} {
-		files["finance/"+n+"/ARTIFACT.md"] = contextArtifact(n + " operations workflow")
+		files["finance/"+n+"/ARTIFACT.md"] = agentArtifact(n + " operations workflow")
 	}
 	srv := startServer(t, writeRegistry(t, files))
 	var m map[string]any
@@ -230,7 +230,7 @@ func TestSearch_LoadDomainKeywords(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/DOMAIN.md":       "---\ndescription: Finance\ndiscovery:\n  keywords:\n    - reconciliation\n    - 1099\n---\n\n# Finance\n",
-		"finance/pay/ARTIFACT.md": contextArtifact("pay"),
+		"finance/pay/ARTIFACT.md": agentArtifact("pay"),
 	}))
 	var m map[string]any
 	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", &m)
@@ -262,7 +262,7 @@ func TestSearch_SearchDomainsSemantic(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable operations\"\ndiscovery:\n  keywords:\n    - reconciliation\n---\n",
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay invoice"),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{"query": "reconciliation"}))
 	paths := brDomainPaths(rpcResult(t, res.Stdout, 1))
@@ -277,11 +277,11 @@ func TestSearch_SearchDomainsScope(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":     "---\ndescription: AP\n---\n",
-		"finance/ap/x/ARTIFACT.md": contextArtifact("x"),
+		"finance/ap/x/ARTIFACT.md": agentArtifact("x"),
 		"finance/ar/DOMAIN.md":     "---\ndescription: AR\n---\n",
-		"finance/ar/y/ARTIFACT.md": contextArtifact("y"),
+		"finance/ar/y/ARTIFACT.md": agentArtifact("y"),
 		"ops/runner/DOMAIN.md":     "---\ndescription: Ops runner\n---\n",
-		"ops/runner/z/ARTIFACT.md": contextArtifact("z"),
+		"ops/runner/z/ARTIFACT.md": agentArtifact("z"),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{"scope": "finance"}))
 	paths := brDomainPaths(rpcResult(t, res.Stdout, 1))
@@ -298,11 +298,11 @@ func TestSearch_SearchDomainsTopK(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"alpha/DOMAIN.md":       "---\ndescription: \"shared topic\"\n---\n",
-		"alpha/a/ARTIFACT.md":   contextArtifact("a"),
+		"alpha/a/ARTIFACT.md":   agentArtifact("a"),
 		"bravo/DOMAIN.md":       "---\ndescription: \"shared topic\"\n---\n",
-		"bravo/b/ARTIFACT.md":   contextArtifact("b"),
+		"bravo/b/ARTIFACT.md":   agentArtifact("b"),
 		"charlie/DOMAIN.md":     "---\ndescription: \"shared topic\"\n---\n",
-		"charlie/c/ARTIFACT.md": contextArtifact("c"),
+		"charlie/c/ARTIFACT.md": agentArtifact("c"),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{"query": "shared topic", "top_k": 2}))
 	paths := brDomainPaths(rpcResult(t, res.Stdout, 1))
@@ -318,9 +318,9 @@ func TestSearch_SearchDomainsRequiresDomainMD(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable\"\n---\n",
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay invoice"),
 		// ops/runner has artifacts but no DOMAIN.md.
-		"ops/runner/restart/ARTIFACT.md": contextArtifact("restart"),
+		"ops/runner/restart/ARTIFACT.md": agentArtifact("restart"),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{}))
 	paths := brDomainPaths(rpcResult(t, res.Stdout, 1))
@@ -361,9 +361,9 @@ func TestSearch_SearchArtifactsQuery(t *testing.T) {
 func TestSearch_SearchArtifactsBrowse(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md":       contextArtifact("pay invoice"),
-		"finance/ap/reconcile-invoice/ARTIFACT.md": contextArtifact("reconcile invoice"),
-		"engineering/x/ARTIFACT.md":                contextArtifact("x"),
+		"finance/ap/pay-invoice/ARTIFACT.md":       agentArtifact("pay invoice"),
+		"finance/ap/reconcile-invoice/ARTIFACT.md": agentArtifact("reconcile invoice"),
+		"engineering/x/ARTIFACT.md":                agentArtifact("x"),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_artifacts", map[string]any{"scope": "finance/ap"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
@@ -403,14 +403,14 @@ func TestSearch_SearchArtifactsType(t *testing.T) {
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"sk/ARTIFACT.md":  greetSkillArtifact,
 		"sk/SKILL.md":     skillBody("sk"),
-		"ctx/ARTIFACT.md": contextArtifact("a context"),
+		"ctx/ARTIFACT.md": agentArtifact("a context"),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_artifacts", map[string]any{"type": "skill"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
 	if !strings.Contains(body, "sk") {
 		t.Errorf("type=skill missing the skill: %s", body)
 	}
-	if strings.Contains(body, `"type":"context"`) {
+	if strings.Contains(body, `"type":"agent"`) {
 		t.Errorf("type=skill returned a context: %s", body)
 	}
 }
@@ -419,8 +419,8 @@ func TestSearch_SearchArtifactsType(t *testing.T) {
 func TestSearch_SearchArtifactsTags(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"a/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: A.\ntags: [finance, variance]\n---\n\nbody\n",
-		"b/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: B.\ntags: [engineering]\n---\n\nbody\n",
+		"a/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: A.\ntags: [finance, variance]\n---\n\nbody\n",
+		"b/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: B.\ntags: [engineering]\n---\n\nbody\n",
 	}))
 	// The HTTP endpoint parses tags as a comma-separated list; pass the
 	// documented comma form through the bridge (the array form serializes to
@@ -440,7 +440,7 @@ func TestSearch_SearchArtifactsTopK(t *testing.T) {
 	t.Parallel()
 	entries := map[string]string{}
 	for i := 0; i < 15; i++ {
-		entries[fmt.Sprintf("d/a%02d/ARTIFACT.md", i)] = contextArtifact(fmt.Sprintf("artifact %d", i))
+		entries[fmt.Sprintf("d/a%02d/ARTIFACT.md", i)] = agentArtifact(fmt.Sprintf("artifact %d", i))
 	}
 	srv := startServer(t, writeRegistry(t, entries))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_artifacts", map[string]any{"scope": "d"}))
@@ -459,7 +459,7 @@ func TestSearch_SearchArtifactsTotalMatched(t *testing.T) {
 	t.Parallel()
 	entries := map[string]string{}
 	for i := 0; i < 12; i++ {
-		entries[fmt.Sprintf("finance/a%02d/ARTIFACT.md", i)] = contextArtifact(fmt.Sprintf("artifact %d", i))
+		entries[fmt.Sprintf("finance/a%02d/ARTIFACT.md", i)] = agentArtifact(fmt.Sprintf("artifact %d", i))
 	}
 	srv := startServer(t, writeRegistry(t, entries))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_artifacts", map[string]any{"scope": "finance", "top_k": 5}))
@@ -476,7 +476,7 @@ func TestSearch_SearchArtifactsTotalMatched(t *testing.T) {
 func TestSearch_SearchArtifactsNoBodies(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/report/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: A report.\n---\n\nVery long prose body content here.\n",
+		"finance/report/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: A report.\n---\n\nVery long prose body content here.\n",
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_artifacts", map[string]any{"query": "report"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
@@ -506,7 +506,7 @@ func TestSearch_LoadArtifactInline(t *testing.T) {
 	t.Parallel()
 	id := "finance/close-reporting/run-variance-analysis"
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Variance.\n---\n\nVariance analysis instructions.\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Variance.\n---\n\nVariance analysis instructions.\n",
 	}))
 	mat := t.TempDir()
 	res := mcpExec(t, brMatEnv(t, srv.BaseURL, mat), toolCall(1, "load_artifact", map[string]any{"id": id}))
@@ -595,8 +595,8 @@ func TestSearch_LoadArtifactResourcesAtomic(t *testing.T) {
 func TestSearch_OnlyLoadArtifactWrites(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
-		"finance/x/ARTIFACT.md":              contextArtifact("x"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay"),
+		"finance/x/ARTIFACT.md":              agentArtifact("x"),
 	}))
 	mat := t.TempDir()
 	discovery := mcpExec(t, brMatEnv(t, srv.BaseURL, mat),
@@ -656,7 +656,7 @@ func TestSearch_DiscoveryFlowSearchDomains(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable: money out to vendors\"\ndiscovery:\n  keywords:\n    - invoice\n---\n",
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay invoice"),
 	}))
 	// Cold start: a topical query ("accounts payable") absent from the path
 	// surfaces the neighborhood.
@@ -677,7 +677,7 @@ func TestSearch_DiscoveryFlowSearchDomains(t *testing.T) {
 // domain.loaded audit event.
 func TestSearch_AuditDomainLoaded(t *testing.T) {
 	t.Parallel()
-	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", nil)
 	if !brPollContains(audit, "domain.loaded", 5*time.Second) {
 		t.Errorf("audit log missing domain.loaded:\n%s", brReadOrEmpty(audit))
@@ -689,7 +689,7 @@ func TestSearch_AuditDomainLoaded(t *testing.T) {
 // recover the depth and whether folding occurred from the audit trail.
 func TestSearch_AuditDomainLoadedRecordsDepthAndFolds(t *testing.T) {
 	t.Parallel()
-	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	getJSON(t, srv.BaseURL+"/v1/load_domain?path=finance", nil)
 	if !brPollContains(audit, "domain.loaded", 5*time.Second) {
 		t.Fatalf("audit log missing domain.loaded:\n%s", brReadOrEmpty(audit))
@@ -705,7 +705,7 @@ func TestSearch_AuditDomainLoadedRecordsDepthAndFolds(t *testing.T) {
 // domains.searched audit event.
 func TestSearch_AuditDomainsSearched(t *testing.T) {
 	t.Parallel()
-	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	getJSON(t, srv.BaseURL+"/v1/search_domains?query=vendor+payments", nil)
 	if !brPollContains(audit, "domains.searched", 5*time.Second) {
 		t.Errorf("audit log missing domains.searched:\n%s", brReadOrEmpty(audit))
@@ -715,7 +715,7 @@ func TestSearch_AuditDomainsSearched(t *testing.T) {
 // artifacts.searched audit event.
 func TestSearch_AuditArtifactsSearched(t *testing.T) {
 	t.Parallel()
-	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("invoice approval")}))
+	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("invoice approval")}))
 	getJSON(t, srv.BaseURL+"/v1/search_artifacts?query=invoice+approval", nil)
 	if !brPollContains(audit, "artifacts.searched", 5*time.Second) {
 		t.Errorf("audit log missing artifacts.searched:\n%s", brReadOrEmpty(audit))
@@ -725,7 +725,7 @@ func TestSearch_AuditArtifactsSearched(t *testing.T) {
 // artifact.loaded audit event.
 func TestSearch_AuditArtifactLoaded(t *testing.T) {
 	t.Parallel()
-	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv, audit := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=finance/x", nil)
 	if !brPollContains(audit, "artifact.loaded", 5*time.Second) {
 		t.Errorf("audit log missing artifact.loaded:\n%s", brReadOrEmpty(audit))
@@ -737,7 +737,7 @@ func TestSearch_AuditArtifactLoaded(t *testing.T) {
 // email, phone) before being written to audit. Default-on.
 func TestSearch_AuditPIIScrubbed(t *testing.T) {
 	t.Parallel()
-	srv, auditLog := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv, auditLog := brStartAuditServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	// A query carrying an SSN and an email address.
 	getJSON(t, srv.BaseURL+"/v1/search_artifacts?query="+url.QueryEscape("ssn 123-45-6789 contact bob@acme.com"), nil)
 	if !brPollContains(auditLog, "[ssn-redacted]", 5*time.Second) {
@@ -763,7 +763,7 @@ func TestSearch_AuditPIIScrubDisabled(t *testing.T) {
 		"HOME=" + t.TempDir(),
 		"PODIUM_AUDIT_LOG_PATH=" + auditPath,
 		"PODIUM_PII_REDACTION=false",
-	}, "serve", "--standalone", "--layer-path", writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	}, "serve", "--standalone", "--layer-path", writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	getJSON(t, srv.BaseURL+"/v1/search_artifacts?query="+url.QueryEscape("ssn 123-45-6789"), nil)
 	if !brPollContains(auditPath, "123-45-6789", 5*time.Second) {
 		t.Errorf("disabled scrub should record the raw query:\n%s", brReadOrEmpty(auditPath))
@@ -804,7 +804,7 @@ func brSeedDomains(n int) map[string]string {
 	for i := 0; i < n; i++ {
 		d := fmt.Sprintf("dom%02d", i)
 		entries[d+"/DOMAIN.md"] = fmt.Sprintf("---\ndescription: \"Vendor onboarding and management for unit %d\"\ndiscovery:\n  keywords:\n    - vendor\n---\n\n# %s\n", i, d)
-		entries[d+"/onboard/ARTIFACT.md"] = contextArtifact("vendor onboarding workflow")
+		entries[d+"/onboard/ARTIFACT.md"] = agentArtifact("vendor onboarding workflow")
 	}
 	return entries
 }
@@ -814,7 +814,7 @@ func brSeedDomains(n int) map[string]string {
 func brSeedArtifacts(n int) map[string]string {
 	entries := make(map[string]string, n)
 	for i := 0; i < n; i++ {
-		entries[fmt.Sprintf("finance/art%02d/ARTIFACT.md", i)] = contextArtifact(fmt.Sprintf("variance analysis report %d", i))
+		entries[fmt.Sprintf("finance/art%02d/ARTIFACT.md", i)] = agentArtifact(fmt.Sprintf("variance analysis report %d", i))
 	}
 	return entries
 }
@@ -873,7 +873,7 @@ func TestSearch_SLOSearchArtifacts(t *testing.T) {
 func TestSearch_SLOLoadArtifactManifest(t *testing.T) {
 	id := "finance/report"
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": contextArtifact("variance report"),
+		id + "/ARTIFACT.md": agentArtifact("variance report"),
 	}))
 	brMeasureHTTP(t, srv.BaseURL+"/v1/load_artifact?id="+id, "load_artifact_manifest", 100, 500*time.Millisecond, 3*time.Second)
 }
@@ -930,7 +930,7 @@ func TestSearch_SearchDomainsDescriptorFields(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable operations\"\ndiscovery:\n  keywords:\n    - reconciliation\n    - remittance\n---\n",
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay invoice"),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{"query": "reconciliation"}))
 	result := rpcResult(t, res.Stdout, 1)
@@ -956,7 +956,7 @@ func TestSearch_SearchDomainsDescriptorFields(t *testing.T) {
 func TestSearch_SearchDomainsNoSubtree(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay"),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{"query": "finance"}))
 	result := rpcResult(t, res.Stdout, 1)
@@ -1062,7 +1062,7 @@ func TestSearch_SearchArtifactsSessionID(t *testing.T) {
 func TestSearch_LoadArtifactSessionPin(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"seed/ARTIFACT.md": contextArtifact("seed context keeps the boot non-empty here"),
+		"seed/ARTIFACT.md": agentArtifact("seed context keeps the boot non-empty here"),
 	}))
 	layer := newRepublishLayer(t, srv, "session-pin")
 
@@ -1119,7 +1119,7 @@ func brSessionLoad(t *testing.T, srv *serverProc, id, sessionID string) (version
 // load_artifact for a nonexistent artifact returns a structured error.
 func TestSearch_LoadArtifactNotFound(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	mat := t.TempDir()
 	res := mcpExec(t, brMatEnv(t, srv.BaseURL, mat), toolCall(1, "load_artifact", map[string]any{"id": "does/not/exist"}))
 	if e := brToolErr(t, res.Stdout, 1); !strings.Contains(e, "not_found") {
@@ -1134,7 +1134,7 @@ func TestSearch_LoadArtifactNotFound(t *testing.T) {
 func TestSearch_LoadArtifactBadVersion(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay"),
 	}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=finance/ap/pay-invoice&version=9.9.9")
 	if st == 200 {
@@ -1149,7 +1149,7 @@ func TestSearch_LoadArtifactBadVersion(t *testing.T) {
 // health tool, each with a description.
 func TestSearch_ToolsList(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	res := mcpExec(t, brEnv(srv.BaseURL), rpcReq{ID: 1, Method: "tools/list", Params: map[string]any{}})
 	result := rpcResult(t, res.Stdout, 1)
 	tools := brArr(result, "tools")
@@ -1187,7 +1187,7 @@ func TestSearch_SearchArtifactsEmptyRegistry(t *testing.T) {
 // path that resolves to no visible artifacts; this asserts the actual behavior.
 func TestSearch_LoadDomainEmptyPath(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "load_domain", map[string]any{"path": "empty/domain"}))
 	if e := brToolErr(t, res.Stdout, 1); !strings.Contains(e, "not_found") {
 		t.Errorf("expected domain.not_found for a path with no artifacts, got error=%q stdout=%s", e, res.Stdout)
@@ -1226,8 +1226,8 @@ func TestSearch_DomainWithoutKeywords(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/DOMAIN.md":           "---\ndescription: AP\ndiscovery:\n  keywords:\n    - reconciliation\n---\n",
-		"finance/ap/x/ARTIFACT.md":       contextArtifact("x"),
-		"ops/runner/restart/ARTIFACT.md": contextArtifact("restart"),
+		"finance/ap/x/ARTIFACT.md":       agentArtifact("x"),
+		"ops/runner/restart/ARTIFACT.md": agentArtifact("restart"),
 	}))
 	res := mcpExec(t, brEnv(srv.BaseURL), toolCall(1, "search_domains", map[string]any{"query": "reconciliation"}))
 	paths := brDomainPaths(rpcResult(t, res.Stdout, 1))
@@ -1255,7 +1255,7 @@ func TestSearch_WhenToUseSignal(t *testing.T) {
 // GET /v1/load_domain returns the documented structure.
 func TestSearch_HTTPLoadDomain(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"finance/x/ARTIFACT.md": agentArtifact("x")}))
 	var resp struct {
 		Path       string `json:"path"`
 		Subdomains []any  `json:"subdomains"`
@@ -1302,7 +1302,7 @@ func TestSearch_HTTPSearchDomains(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/DOMAIN.md":     "---\ndescription: \"The finance function\"\n---\n",
-		"finance/x/ARTIFACT.md": contextArtifact("x"),
+		"finance/x/ARTIFACT.md": agentArtifact("x"),
 	}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/search_domains?query=finance")
 	if st != 200 {
@@ -1320,7 +1320,7 @@ func TestSearch_HTTPSearchDomains(t *testing.T) {
 func TestSearch_HTTPLoadArtifact(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay"),
 	}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=finance/ap/pay-invoice")
 	if st != 200 {
@@ -1336,7 +1336,7 @@ func TestSearch_HTTPLoadArtifact(t *testing.T) {
 // GET /v1/load_artifact with missing id returns 400.
 func TestSearch_HTTPLoadArtifactMissingID(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
+	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact")
 	if st != 400 {
 		t.Errorf("status=%d, want 400: %s", st, body)

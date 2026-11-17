@@ -61,13 +61,13 @@ func TestDescriptionQuality_ThinAdvisoryEndToEnd(t *testing.T) {
 
 	ri := reingestArtifacts(t, layer, map[string]string{
 		// Vague: 1 word / 4 chars, below both §7.3.1 bounds. Flagged.
-		"finance/vague/ARTIFACT.md": contextArtifact("demo"),
+		"finance/vague/ARTIFACT.md": agentArtifact("demo"),
 		// Precise: a rich summary that answers "when should I use this?".
-		"finance/precise/ARTIFACT.md": contextArtifact("Reconcile vendor invoices at month-end close."),
+		"finance/precise/ARTIFACT.md": agentArtifact("Reconcile vendor invoices at month-end close."),
 		// Borderline-acceptable: exactly 3 words and 15 chars, at the §7.3.1
 		// bound (MinDescriptionChars=15, MinDescriptionWords=3). The
 		// false-positive guard: this must NOT be flagged.
-		"finance/borderline/ARTIFACT.md": contextArtifact("Greet the user."),
+		"finance/borderline/ARTIFACT.md": agentArtifact("Greet the user."),
 	})
 
 	// The advisory fires on the vague artifact only.
@@ -103,10 +103,10 @@ func TestDescriptionQuality_CollidingAdvisoryEndToEnd(t *testing.T) {
 	ri := reingestArtifacts(t, layer, map[string]string{
 		// Two summaries with equal word sets after §7.3.1 normalization
 		// (case, punctuation, and whitespace folded).
-		"finance/close-a/ARTIFACT.md": contextArtifact("Close the monthly books."),
-		"ops/close-b/ARTIFACT.md":     contextArtifact("close   the   monthly   books"),
+		"finance/close-a/ARTIFACT.md": agentArtifact("Close the monthly books."),
+		"ops/close-b/ARTIFACT.md":     agentArtifact("close   the   monthly   books"),
 		// A distinct summary that must not be flagged as colliding.
-		"finance/pay/ARTIFACT.md": contextArtifact("Submit an approved vendor payment for release."),
+		"finance/pay/ARTIFACT.md": agentArtifact("Submit an approved vendor payment for release."),
 	})
 
 	cliContains(t, ri.Stdout, "lint.colliding_descriptions", "colliding-summary advisory surfaced")
@@ -145,7 +145,7 @@ func closeAOverlap(stdout string) bool {
 }
 
 // Spec: §7.3.1 — registry ingest runs lint.near_duplicate_content over the
-// ingested layer. Two context artifacts whose prose bodies share all but one
+// ingested layer. Two agent artifacts whose prose bodies share all but one
 // sentence each draw the advisory naming the other, and the reingest exits 0
 // because the advisory does not gate ingest.
 func TestDescriptionQuality_NearDuplicateAdvisoryEndToEnd(t *testing.T) {
@@ -154,7 +154,7 @@ func TestDescriptionQuality_NearDuplicateAdvisoryEndToEnd(t *testing.T) {
 	layer := newRepublishLayer(t, srv, "doc-quality-near-dup")
 
 	body := func(desc, own string) string {
-		return "---\ntype: context\nversion: 1.0.0\ndescription: " + desc + "\n---\n\n" + advisorySharedRunbook + own + "\n"
+		return "---\ntype: agent\nversion: 1.0.0\ndescription: " + desc + "\n---\n\n" + advisorySharedRunbook + own + "\n"
 	}
 	ri := reingestArtifacts(t, layer, map[string]string{
 		"ops/rotate-staging/ARTIFACT.md": body("Rotate the staging database credentials and confirm each service reconnects.",

@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	contextArtifact = `---
-type: context
+	agentArtifact = `---
+type: agent
 version: 1.0.0
 description: %s
 tags: [%s]
@@ -87,9 +87,9 @@ func TestHealth_ReturnsReady(t *testing.T) {
 func TestLoadDomain_RootMap(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("finance/ap/pay-invoice/ARTIFACT.md", contextFor("Pay invoice", "finance,ap")),
-		fixture("finance/close/run-variance/ARTIFACT.md", contextFor("Variance", "finance,close")),
-		fixture("company-glossary/ARTIFACT.md", contextFor("Glossary", "company")),
+		fixture("finance/ap/pay-invoice/ARTIFACT.md", agentFor("Pay invoice", "finance,ap")),
+		fixture("finance/close/run-variance/ARTIFACT.md", agentFor("Variance", "finance,close")),
+		fixture("company-glossary/ARTIFACT.md", agentFor("Glossary", "company")),
 	)
 	body := mustGet(t, h.URL, "/v1/load_domain")
 	var resp server.LoadDomainResponse
@@ -115,8 +115,8 @@ func TestLoadDomain_RootMap(t *testing.T) {
 func TestLoadDomain_DrillIn(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("finance/ap/pay-invoice/ARTIFACT.md", contextFor("Pay invoice", "finance,ap")),
-		fixture("finance/close/run-variance/ARTIFACT.md", contextFor("Variance", "finance,close")),
+		fixture("finance/ap/pay-invoice/ARTIFACT.md", agentFor("Pay invoice", "finance,ap")),
+		fixture("finance/close/run-variance/ARTIFACT.md", agentFor("Variance", "finance,close")),
 	)
 	body := mustGet(t, h.URL, "/v1/load_domain?path=finance")
 	var resp server.LoadDomainResponse
@@ -140,8 +140,8 @@ func TestLoadDomain_DrillIn(t *testing.T) {
 func TestSearchArtifacts_Substring(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("finance/run-variance/ARTIFACT.md", contextFor("Variance analysis", "finance")),
-		fixture("finance/pay-invoice/ARTIFACT.md", contextFor("Pay an invoice", "finance,ap")),
+		fixture("finance/run-variance/ARTIFACT.md", agentFor("Variance analysis", "finance")),
+		fixture("finance/pay-invoice/ARTIFACT.md", agentFor("Pay an invoice", "finance,ap")),
 	)
 	body := mustGet(t, h.URL, "/v1/search_artifacts?query=variance")
 	var resp server.SearchResponse
@@ -162,9 +162,9 @@ func TestSearchArtifacts_TypeFilter(t *testing.T) {
 	h := registryharness.New(t,
 		fixture("finance/run/ARTIFACT.md", skillFor("Skill")),
 		fixture("finance/run/SKILL.md", skillBodyFor("run", "Run")),
-		fixture("notes/glossary/ARTIFACT.md", contextFor("Glossary", "notes")),
+		fixture("notes/glossary/ARTIFACT.md", agentFor("Glossary", "notes")),
 	)
-	body := mustGet(t, h.URL, "/v1/search_artifacts?type=context")
+	body := mustGet(t, h.URL, "/v1/search_artifacts?type=agent")
 	var resp server.SearchResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -245,8 +245,8 @@ func fixture(p, content string) testharness.WriteTreeOption {
 	return testharness.WriteTreeOption{Path: p, Content: content}
 }
 
-func contextFor(desc, tags string) string {
-	return fmtString(contextArtifact, desc, tags, desc)
+func agentFor(desc, tags string) string {
+	return fmtString(agentArtifact, desc, tags, desc)
 }
 
 func skillFor(desc string) string { return fmtString(skillArtifact, desc) }

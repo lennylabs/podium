@@ -37,7 +37,7 @@ const scimvisToken = "scimvis-bearer"
 func scimvisStartServer(t *testing.T, home, groupName, pemPath string) (*serverProc, string) {
 	t.Helper()
 	layerRoot := writeRegistry(t, map[string]string{
-		"engineering/runbook/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: engineering runbook\n---\n\nbody\n",
+		"engineering/runbook/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: engineering runbook\n---\n\nbody\n",
 	})
 	cfgPath := filepath.Join(home, "registry.yaml")
 	cfg := "" +

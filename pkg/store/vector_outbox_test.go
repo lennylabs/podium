@@ -25,7 +25,7 @@ func outboxBackends(t *testing.T) map[string]VectorOutbox {
 func mr(id, version, hash string) ManifestRecord {
 	return ManifestRecord{
 		TenantID: "default", ArtifactID: id, Version: version,
-		ContentHash: hash, Type: "context", Description: "d",
+		ContentHash: hash, Type: "agent", Description: "d",
 	}
 }
 

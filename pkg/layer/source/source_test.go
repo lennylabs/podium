@@ -17,7 +17,7 @@ func TestLocal_SnapshotExposesFilesystem(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	testharness.WriteTree(t, dir,
-		testharness.WriteTreeOption{Path: "x/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\n---\nbody\n"},
+		testharness.WriteTreeOption{Path: "x/ARTIFACT.md", Content: "---\ntype: agent\nversion: 1.0.0\n---\nbody\n"},
 	)
 	snap, err := Local{}.Snapshot(context.Background(), LayerConfig{Path: dir})
 	if err != nil {

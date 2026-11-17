@@ -13,8 +13,8 @@ func fsRegistryTwo(t *testing.T) string {
 	registry := t.TempDir()
 	testharness.WriteTree(t, registry,
 		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\n"},
-		testharness.WriteTreeOption{Path: "team-shared/greetings/hello/ARTIFACT.md", Content: contextArtifactSrc},
-		testharness.WriteTreeOption{Path: "team-shared/company-glossary/ARTIFACT.md", Content: contextArtifactSrc},
+		testharness.WriteTreeOption{Path: "team-shared/greetings/hello/ARTIFACT.md", Content: agentArtifactSrc},
+		testharness.WriteTreeOption{Path: "team-shared/company-glossary/ARTIFACT.md", Content: agentArtifactSrc},
 	)
 	return registry
 }

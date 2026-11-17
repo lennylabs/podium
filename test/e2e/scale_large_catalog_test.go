@@ -37,7 +37,7 @@ import (
 //
 // Layout per top-level domain d{NN}:
 //   - d{NN}/DOMAIN.md carries a discovery: block whose knobs vary by index.
-//   - several subdomains d{NN}/s{M} each hold a handful of context artifacts.
+//   - several subdomains d{NN}/s{M} each hold a handful of agent artifacts.
 //   - one deliberately sparse subdomain d{NN}/sparse holds a single artifact so
 //     a fold_below_artifacts threshold collapses it into the parent leaf set.
 //   - a third nesting level d{NN}/s0/deep/leaf exists so depth tightening and
@@ -76,7 +76,7 @@ func scaleCatalog() (entries map[string]string, totalArtifacts int, topDomains [
 			for a := 0; a < perSub; a++ {
 				id := fmt.Sprintf("%s/%s/a%02d", dom, sub, a)
 				desc := fmt.Sprintf("Artifact %s in %s subdomain %s. scaletopic shared term.", id, dom, sub)
-				entries[id+"/ARTIFACT.md"] = contextArtifact(desc)
+				entries[id+"/ARTIFACT.md"] = agentArtifact(desc)
 				totalArtifacts++
 			}
 		}
@@ -84,7 +84,7 @@ func scaleCatalog() (entries map[string]string, totalArtifacts int, topDomains [
 		// A third nesting level under s0 so depth compression and max_depth
 		// have a level to drop.
 		deepID := fmt.Sprintf("%s/s0/deep/leaf", dom)
-		entries[deepID+"/ARTIFACT.md"] = contextArtifact(
+		entries[deepID+"/ARTIFACT.md"] = agentArtifact(
 			fmt.Sprintf("Deep leaf artifact %s. scaletopic shared term.", deepID))
 		totalArtifacts++
 
@@ -92,7 +92,7 @@ func scaleCatalog() (entries map[string]string, totalArtifacts int, topDomains [
 		// fold_below_artifacts: 2 threshold collapses it into the parent's
 		// leaf set with a folded_from annotation.
 		sparseID := fmt.Sprintf("%s/sparse/only", dom)
-		entries[sparseID+"/ARTIFACT.md"] = contextArtifact(
+		entries[sparseID+"/ARTIFACT.md"] = agentArtifact(
 			fmt.Sprintf("Sole artifact in the sparse subdomain of %s. scaletopic shared term.", dom))
 		totalArtifacts++
 	}

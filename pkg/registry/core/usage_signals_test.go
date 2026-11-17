@@ -42,7 +42,7 @@ func TestMemoryUsageSignals_RecordRanking(t *testing.T) {
 func TestLoadArtifact_RecordsUsageSignal(t *testing.T) {
 	t.Parallel()
 	reg := setupRegistry(t, fstest.MapFS{
-		"tools/calc/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("calc"))},
+		"tools/calc/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("calc"))},
 	}, "L")
 	sig := core.NewMemoryUsageSignals()
 	reg.WithUsageSignals(sig)
@@ -69,8 +69,8 @@ func TestLoadArtifact_RecordsUsageSignal(t *testing.T) {
 func TestSearchArtifacts_UsageRerank(t *testing.T) {
 	t.Parallel()
 	fs := fstest.MapFS{
-		"tools/aaa/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("shared helper"))},
-		"tools/bbb/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("shared helper"))},
+		"tools/aaa/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("shared helper"))},
+		"tools/bbb/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("shared helper"))},
 	}
 
 	// Control: no usage signal, so the BM25 tie breaks alphabetically.
@@ -103,9 +103,9 @@ func TestSearchArtifacts_UsageRerank(t *testing.T) {
 func TestLoadDomain_NotableUsageRerank(t *testing.T) {
 	t.Parallel()
 	fs := fstest.MapFS{
-		"g1/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("one"))},
-		"g2/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("two"))},
-		"g3/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifest("three"))},
+		"g1/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("one"))},
+		"g2/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("two"))},
+		"g3/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifest("three"))},
 	}
 
 	// Control: alphabetical signal order.

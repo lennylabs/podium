@@ -23,7 +23,7 @@ func freshRegistry(t *testing.T, n int) *core.Registry {
 		id := fmtID(i)
 		if err := st.PutManifest(context.Background(), store.ManifestRecord{
 			TenantID: "t", ArtifactID: id, Version: "1.0.0",
-			ContentHash: "sha256:" + id, Type: "context",
+			ContentHash: "sha256:" + id, Type: "agent",
 			Layer: "L",
 		}); err != nil {
 			t.Fatalf("PutManifest %d: %v", i, err)

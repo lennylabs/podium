@@ -79,9 +79,9 @@ func readMirror(t *testing.T, registry string, policy sign.VerificationPolicy, i
 // missing-signature code and no text.
 func TestResources_ReadRefusesAnUnsignedArtifactUnderAlways(t *testing.T) {
 	t.Parallel()
-	fm := "---\ntype: context\nversion: 1.0.0\n---\n"
+	fm := "---\ntype: agent\nversion: 1.0.0\n---\n"
 	rec := sealDelivery(loadArtifactResponse{
-		ID: "docs/x", Type: "context", Frontmatter: fm, ManifestBody: "secret",
+		ID: "docs/x", Type: "agent", Frontmatter: fm, ManifestBody: "secret",
 		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
 	})
 	reg := newMirrorRegistry(t, func(string) (map[string]any, map[string][]byte) {
@@ -102,7 +102,7 @@ func TestResources_ReadRefusesAFailedVerification(t *testing.T) {
 	t.Parallel()
 	reg := newMirrorRegistry(t, func(string) (map[string]any, map[string][]byte) {
 		return map[string]any{
-			"id": "docs/x", "type": "context", "frontmatter": "---\ntype: context\n---\n",
+			"id": "docs/x", "type": "agent", "frontmatter": "---\ntype: agent\n---\n",
 			"manifest_body": "forged", "content_hash": "sha256:" + strings.Repeat("0", 64),
 		}, nil
 	})
@@ -116,15 +116,15 @@ func TestResources_ReadRefusesAFailedVerification(t *testing.T) {
 // delivered through manifest_body_url and returns the fetched body text.
 func TestResources_ReadReconstitutesAPresignedBody(t *testing.T) {
 	t.Parallel()
-	doc := []byte("---\ntype: context\nversion: 1.0.0\n---\nPresigned body text.\n")
+	doc := []byte("---\ntype: agent\nversion: 1.0.0\n---\nPresigned body text.\n")
 	reg := newMirrorRegistry(t, func(base string) (map[string]any, map[string][]byte) {
 		return map[string]any{
-				"id": "docs/big", "type": "context",
+				"id": "docs/big", "type": "agent",
 				"content_hash": "sha256:" + version.CanonicalContentHash(doc, nil, nil),
 				// The delivery hash frames the document and the body the fetch
 				// reconstitutes, not the cleared inline fields.
 				"delivery_hash": deliveryHashOf(loadArtifactResponse{
-					ID: "docs/big", Type: "context", Frontmatter: string(doc),
+					ID: "docs/big", Type: "agent", Frontmatter: string(doc),
 					ManifestBody: "Presigned body text.\n",
 					ContentHash:  "sha256:" + version.CanonicalContentHash(doc, nil, nil),
 				}),
@@ -139,7 +139,7 @@ func TestResources_ReadReconstitutesAPresignedBody(t *testing.T) {
 	if errMsg != "" {
 		t.Fatalf("resources/read refused: %s", errMsg)
 	}
-	if !strings.Contains(text, "Presigned body text.") || !strings.Contains(text, "type: context") {
+	if !strings.Contains(text, "Presigned body text.") || !strings.Contains(text, "type: agent") {
 		t.Errorf("text = %q, want the reconstituted manifest", text)
 	}
 }
@@ -150,21 +150,21 @@ func TestResources_ReadReconstitutesAPresignedBody(t *testing.T) {
 // §4.7.10 step 6 check and is refused with materialize.content_hash_mismatch.
 func TestResources_ReadVerifiesOverBundledResources(t *testing.T) {
 	t.Parallel()
-	fm := []byte("---\ntype: context\nversion: 1.0.0\n---\nbody\n")
+	fm := []byte("---\ntype: agent\nversion: 1.0.0\n---\nbody\n")
 	inline := []byte("inline resource bytes")
 	large := []byte("large resource bytes")
 	hash := "sha256:" + version.CanonicalContentHash(fm, nil, map[string][]byte{
 		"inline.txt": inline, "data/big.bin": large,
 	})
 	delivery := deliveryHashOf(loadArtifactResponse{
-		ID: "docs/res", Type: "context", Frontmatter: string(fm), ManifestBody: "body\n",
+		ID: "docs/res", Type: "agent", Frontmatter: string(fm), ManifestBody: "body\n",
 		ContentHash: hash, Resources: map[string]string{"inline.txt": string(inline)},
 		LargeResources: map[string]largeResourceLink{"data/big.bin": {ContentHash: sha256Hex(large)}},
 	})
 	build := func(served []byte) func(string) (map[string]any, map[string][]byte) {
 		return func(base string) (map[string]any, map[string][]byte) {
 			return map[string]any{
-					"id": "docs/res", "type": "context", "frontmatter": string(fm), "manifest_body": "body\n",
+					"id": "docs/res", "type": "agent", "frontmatter": string(fm), "manifest_body": "body\n",
 					"content_hash":     hash,
 					"delivery_hash":    delivery,
 					"resources":        map[string]string{"inline.txt": base64.StdEncoding.EncodeToString(inline)},
@@ -183,7 +183,7 @@ func TestResources_ReadVerifiesOverBundledResources(t *testing.T) {
 	if errMsg != "" {
 		t.Fatalf("resources/read refused a record that verifies over its resources: %s", errMsg)
 	}
-	if !strings.Contains(text, "type: context") {
+	if !strings.Contains(text, "type: agent") {
 		t.Errorf("text = %q, want the manifest", text)
 	}
 
@@ -200,9 +200,9 @@ func TestResources_ReadVerifiesOverBundledResources(t *testing.T) {
 // materialize.content_hash_mismatch and returns no text.
 func TestResources_ReadRefusesAForgedManifestBody(t *testing.T) {
 	t.Parallel()
-	fm := "---\ntype: context\nversion: 1.0.0\n---\nreal body\n"
+	fm := "---\ntype: agent\nversion: 1.0.0\n---\nreal body\n"
 	rec := sealDelivery(loadArtifactResponse{
-		ID: "docs/x", Type: "context", Version: "1.0.0", Frontmatter: fm, ManifestBody: "real body\n",
+		ID: "docs/x", Type: "agent", Version: "1.0.0", Frontmatter: fm, ManifestBody: "real body\n",
 		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
 	})
 	serve := func(body string) *mirrorRegistry {
@@ -244,7 +244,7 @@ func TestResources_ReadRefusesBodiesTheProcedureRefuses(t *testing.T) {
 		})
 	}
 	text, errMsg := readMirror(t, rawRegistry(t, base64Body(t, raw, base64.StdEncoding.EncodeToString(raw), nil)), sign.PolicyNever, "team/x")
-	if errMsg != "" || !strings.Contains(text, "type: context") {
+	if errMsg != "" || !strings.Contains(text, "type: agent") {
 		t.Errorf("canonical read = %q / %q, want the served text", text, errMsg)
 	}
 }

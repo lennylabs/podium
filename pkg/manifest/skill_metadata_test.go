@@ -322,7 +322,7 @@ func TestResolveStoredSkill_Forms(t *testing.T) {
 		artifactMD string
 		skillMD    string
 	}{
-		{"non-skill manifest", "---\ntype: context\nversion: 1.0.0\n---\nBody.\n", skillMD},
+		{"non-skill manifest", "---\ntype: agent\nversion: 1.0.0\n---\nBody.\n", skillMD},
 		{"unparsable SKILL.md", "", "no frontmatter"},
 		{"empty SKILL.md", "", ""},
 		{"unparsable ARTIFACT.md", "---\ntype: [skill\n---\n", skillMD},

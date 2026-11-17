@@ -20,11 +20,11 @@ import (
 
 // sandboxedFM declares a sandbox profile a zero-config host does not support,
 // so the §4.4.1 sandbox gate refuses it.
-const sandboxedFM = "---\ntype: context\nversion: 1.0.0\nsandbox_profile: seccomp-strict\n---\nbody\n"
+const sandboxedFM = "---\ntype: agent\nversion: 1.0.0\nsandbox_profile: seccomp-strict\n---\nbody\n"
 
 // runtimeFM declares a python requirement a host advertising 3.9.0 cannot
 // satisfy, the fixture runtime_policy_test.go uses against the gate directly.
-const runtimeFM = "---\ntype: context\nversion: 1.0.0\nruntime_requirements:\n  python: \">=3.11\"\n---\nbody\n"
+const runtimeFM = "---\ntype: agent\nversion: 1.0.0\nruntime_requirements:\n  python: \">=3.11\"\n---\nbody\n"
 
 // orderServer returns a test server whose local audit sink writes to a file,
 // and the path of that file, so a case can observe whether the §8.2 read
@@ -111,7 +111,7 @@ func TestDeliverLoadArtifact_FreshnessCheckRunsAfterVerification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	stale := fixtureResp("team/x", "---\ntype: context\n---\nbody\n")
+	stale := fixtureResp("team/x", "---\ntype: agent\n---\nbody\n")
 	stale.ArtifactRevision = rev(100)
 	stale = sealDelivery(stale)
 
@@ -155,7 +155,7 @@ func TestDeliverLoadArtifact_NoAuditEventOnVerificationRefusal(t *testing.T) {
 	t.Run("verification refusal", func(t *testing.T) {
 		t.Parallel()
 		s, path := orderServer(t, &config{harness: "none", verifyPolicy: sign.PolicyNever})
-		out := s.deliverLoadArtifact(tamperedHash(fixtureResp("team/x", "---\ntype: context\n---\nbody\n")))
+		out := s.deliverLoadArtifact(tamperedHash(fixtureResp("team/x", "---\ntype: agent\n---\nbody\n")))
 		if got := errorMessageText(out); !strings.HasPrefix(got, "materialize.content_hash_mismatch") {
 			t.Fatalf("error = %q, want materialize.content_hash_mismatch", got)
 		}
@@ -215,7 +215,7 @@ func TestDeliverLoadArtifact_NoAuditEventOnResourceFetchFailure(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 	s, path := orderServer(t, &config{harness: "none", verifyPolicy: sign.PolicyNever})
-	resp := fixtureResp("team/x", "---\ntype: context\n---\nbody\n")
+	resp := fixtureResp("team/x", "---\ntype: agent\n---\nbody\n")
 	resp.LargeResources = map[string]largeResourceLink{
 		"data/big.bin": {URL: ts.URL, ContentHash: "sha256:" + strings.Repeat("a", 64)},
 	}
@@ -235,7 +235,7 @@ func TestDeliverLoadArtifact_NoAuditEventOnResourceFetchFailure(t *testing.T) {
 func TestDeliverLoadArtifact_MissingSignatureCarriesItsOwnCode(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &config{harness: "none", verifyPolicy: sign.PolicyAlways, signatureProvider: "registry-managed"})
-	out := s.deliverLoadArtifact(fixtureResp("team/x", "---\ntype: context\n---\nbody\n"))
+	out := s.deliverLoadArtifact(fixtureResp("team/x", "---\ntype: agent\n---\nbody\n"))
 	got := errorMessageText(out)
 	if !strings.HasPrefix(got, "materialize.signature_missing: ") {
 		t.Errorf("error = %q, want a leading materialize.signature_missing code", got)
@@ -251,7 +251,7 @@ func TestVerifyServedArtifact_ManifestBodyFetchFailure(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 	s := newTestServer(t, &config{verifyPolicy: sign.PolicyNever})
-	resp := loadArtifactResponse{ID: "team/x", Type: "context", ManifestBodyURL: &largeResourceLink{URL: ts.URL}}
+	resp := loadArtifactResponse{ID: "team/x", Type: "agent", ManifestBodyURL: &largeResourceLink{URL: ts.URL}}
 	err := s.verifyServedArtifact(&resp, deliverOpts{})
 	if err == nil || !strings.HasPrefix(err.Error(), "materialize.fetch_failed") {
 		t.Errorf("err = %v, want materialize.fetch_failed", err)

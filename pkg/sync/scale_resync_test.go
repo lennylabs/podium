@@ -16,8 +16,8 @@ import (
 // entries are dropped and the catalog re-synced. The test asserts the §7.5
 // stale-cleanup and §6.7 config-merge reconciliation contracts at scale:
 //
-//   - removed standalone files (agents, commands, deeply-nested context trees)
-//     are deleted and their emptied parent directories pruned;
+//   - removed standalone files (agents, rules, deeply-nested bundled-resource
+//     trees) are deleted and their emptied parent directories pruned;
 //   - the shared config-merge files (.claude/settings.json hooks,
 //     .mcp.json mcpServers) keep the operator's own entries and every surviving
 //     Podium entry while the dropped artifacts' entries disappear;
@@ -32,8 +32,8 @@ import (
 // (40-plus drops across every materialization class) the unit tests do not.
 
 // scaleArtifact builds a minimal valid ARTIFACT.md for the given type and a
-// searchable description. Standalone classes (agent, command, context) and the
-// two config-merge classes (hook, mcp-server) are all produced here.
+// searchable description. Standalone classes (agent, rule) and the two
+// config-merge classes (hook, mcp-server) are all produced here.
 func scaleArtifact(typ, name, desc string) string {
 	switch typ {
 	case "hook":
@@ -57,11 +57,11 @@ func scaleArtifact(typ, name, desc string) string {
 // returns the set of materialized-file relative paths the test will later
 // assert on, keyed by artifact ID. The catalog spans:
 //   - standalone agents          -> .claude/agents/<name>.md
-//   - standalone commands        -> .claude/commands/<name>.md
-//   - deeply-nested context dirs -> .podium/context/<id>/ARTIFACT.md
+//   - standalone rules           -> .claude/rules/<name>.md
+//   - bundled-resource agents    -> .claude/podium/<id>/notes/ref.md
 //   - hooks                      -> .claude/settings.json (config-merge)
 //   - mcp-server entries         -> .mcp.json (config-merge)
-func scaleSyncCatalog(t *testing.T, root string) (agentIDs, commandIDs, contextIDs, hookIDs, mcpIDs []string) {
+func scaleSyncCatalog(t *testing.T, root string) (agentIDs, ruleIDs, bundleIDs, hookIDs, mcpIDs []string) {
 	t.Helper()
 	write := func(rel, content string) {
 		full := filepath.Join(root, rel)
@@ -80,20 +80,22 @@ func scaleSyncCatalog(t *testing.T, root string) (agentIDs, commandIDs, contextI
 		write(id+"/ARTIFACT.md", scaleArtifact("agent", name, "Agent "+name+" for scale resync."))
 		agentIDs = append(agentIDs, id)
 	}
-	// 80 standalone commands.
+	// 80 standalone rules.
 	for i := 0; i < 80; i++ {
-		name := fmt.Sprintf("cmd-%03d", i)
-		id := fmt.Sprintf("commands/grp%02d/%s", i%8, name)
-		write(id+"/ARTIFACT.md", scaleArtifact("command", name, "Command "+name+" for scale resync."))
-		commandIDs = append(commandIDs, id)
+		name := fmt.Sprintf("rule-%03d", i)
+		id := fmt.Sprintf("rules/grp%02d/%s", i%8, name)
+		write(id+"/ARTIFACT.md", scaleArtifact("rule", name, "Rule "+name+" for scale resync."))
+		ruleIDs = append(ruleIDs, id)
 	}
-	// 80 context artifacts, each materializing into its own nested
-	// .podium/context/<id>/ tree so emptied-parent pruning is exercised.
+	// 80 agents that each bundle a resource. Claude Code materializes the
+	// resource into its own nested .claude/podium/<id>/ tree, so emptied-parent
+	// pruning is exercised.
 	for i := 0; i < 80; i++ {
-		name := fmt.Sprintf("ctx-%03d", i)
-		id := fmt.Sprintf("context/grp%02d/%s", i%10, name)
-		write(id+"/ARTIFACT.md", scaleArtifact("context", name, "Context "+name+" for scale resync."))
-		contextIDs = append(contextIDs, id)
+		name := fmt.Sprintf("bundle-%03d", i)
+		id := fmt.Sprintf("bundles/grp%02d/%s", i%10, name)
+		write(id+"/ARTIFACT.md", scaleArtifact("agent", name, "Bundle "+name+" for scale resync."))
+		write(id+"/notes/ref.md", "Reference notes for "+name+".\n")
+		bundleIDs = append(bundleIDs, id)
 	}
 	// 30 hooks, all config-merging into the single .claude/settings.json.
 	for i := 0; i < 30; i++ {
@@ -109,7 +111,7 @@ func scaleSyncCatalog(t *testing.T, root string) (agentIDs, commandIDs, contextI
 		write(id+"/ARTIFACT.md", scaleArtifact("mcp-server", name, "Server "+name+"."))
 		mcpIDs = append(mcpIDs, id)
 	}
-	return agentIDs, commandIDs, contextIDs, hookIDs, mcpIDs
+	return agentIDs, ruleIDs, bundleIDs, hookIDs, mcpIDs
 }
 
 func TestScale_LargeCatalogResyncCleansAndReconciles(t *testing.T) {
@@ -118,8 +120,8 @@ func TestScale_LargeCatalogResyncCleansAndReconciles(t *testing.T) {
 	registry := filepath.Join(dir, "registry")
 	target := filepath.Join(dir, "out")
 
-	agentIDs, commandIDs, contextIDs, hookIDs, mcpIDs := scaleSyncCatalog(t, registry)
-	total := len(agentIDs) + len(commandIDs) + len(contextIDs) + len(hookIDs) + len(mcpIDs)
+	agentIDs, ruleIDs, bundleIDs, hookIDs, mcpIDs := scaleSyncCatalog(t, registry)
+	total := len(agentIDs) + len(ruleIDs) + len(bundleIDs) + len(hookIDs) + len(mcpIDs)
 	if total < 300 {
 		t.Fatalf("catalog has %d artifacts, want several hundred", total)
 	}
@@ -141,8 +143,8 @@ func TestScale_LargeCatalogResyncCleansAndReconciles(t *testing.T) {
 
 	// Sanity: a sampling of standalone files materialized.
 	mustExistFile(t, filepath.Join(target, ".claude", "agents", "agent-000.md"))
-	mustExistFile(t, filepath.Join(target, ".claude", "commands", "cmd-000.md"))
-	mustExistFile(t, filepath.Join(target, ".podium", "context", contextIDs[0], "ARTIFACT.md"))
+	mustExistFile(t, filepath.Join(target, ".claude", "rules", "rule-000.md"))
+	mustExistFile(t, filepath.Join(target, ".claude", "podium", bundleIDs[0], "notes", "ref.md"))
 	// Every hook and mcp-server entry is present in the shared files.
 	for i := 0; i < 30; i++ {
 		assertContains(t, settings, fmt.Sprintf("HOOKMARK-hook-%03d", i))
@@ -150,17 +152,17 @@ func TestScale_LargeCatalogResyncCleansAndReconciles(t *testing.T) {
 	}
 
 	// ---- drop 40-plus artifacts across every class ------------------------
-	// 15 agents, 10 commands, 8 context trees, 5 hooks, and ALL 30 mcp-servers
+	// 15 agents, 10 rules, 8 bundled-resource trees, 5 hooks, and ALL 30 mcp-servers
 	// are removed from the registry. Dropping every mcp-server makes .mcp.json
 	// an orphaned config-merge that must be reconciled (not deleted), while the
 	// surviving hooks keep .claude/settings.json a live merge target.
 	droppedAgents := dropIDs(t, registry, agentIDs[:15])
-	droppedCommands := dropIDs(t, registry, commandIDs[:10])
-	droppedContext := dropIDs(t, registry, contextIDs[:8])
+	droppedRules := dropIDs(t, registry, ruleIDs[:10])
+	droppedBundles := dropIDs(t, registry, bundleIDs[:8])
 	droppedHooks := hookIDs[:5]
 	dropIDs(t, registry, droppedHooks)
 	dropIDs(t, registry, mcpIDs) // every mcp-server gone
-	dropped := len(droppedAgents) + len(droppedCommands) + len(droppedContext) + len(droppedHooks) + len(mcpIDs)
+	dropped := len(droppedAgents) + len(droppedRules) + len(droppedBundles) + len(droppedHooks) + len(mcpIDs)
 	if dropped < 40 {
 		t.Fatalf("dropped %d artifacts, want >= 40", dropped)
 	}
@@ -174,19 +176,19 @@ func TestScale_LargeCatalogResyncCleansAndReconciles(t *testing.T) {
 	for _, id := range droppedAgents {
 		mustNotExistFile(t, filepath.Join(target, ".claude", "agents", filepath.Base(id)+".md"))
 	}
-	for _, id := range droppedCommands {
-		mustNotExistFile(t, filepath.Join(target, ".claude", "commands", filepath.Base(id)+".md"))
+	for _, id := range droppedRules {
+		mustNotExistFile(t, filepath.Join(target, ".claude", "rules", filepath.Base(id)+".md"))
 	}
-	// A dropped context artifact's whole nested tree is gone, including the
-	// emptied .podium/context/<id> parent directory.
-	for _, id := range droppedContext {
-		mustNotExistFile(t, filepath.Join(target, ".podium", "context", id, "ARTIFACT.md"))
-		mustNotExistFile(t, filepath.Join(target, ".podium", "context", id))
+	// A dropped bundled agent's whole nested resource tree is gone, including
+	// the emptied .claude/podium/<id> parent directory.
+	for _, id := range droppedBundles {
+		mustNotExistFile(t, filepath.Join(target, ".claude", "podium", id, "notes", "ref.md"))
+		mustNotExistFile(t, filepath.Join(target, ".claude", "podium", id))
 	}
 
 	// Surviving standalone files remain.
 	mustExistFile(t, filepath.Join(target, ".claude", "agents", filepath.Base(agentIDs[20])+".md"))
-	mustExistFile(t, filepath.Join(target, ".podium", "context", contextIDs[20], "ARTIFACT.md"))
+	mustExistFile(t, filepath.Join(target, ".claude", "podium", bundleIDs[20], "notes", "ref.md"))
 
 	// settings.json keeps the operator key and every surviving Podium hook, and
 	// drops exactly the removed hooks' entries.
@@ -235,7 +237,7 @@ func TestScale_LargeCatalogResyncCleansAndReconciles(t *testing.T) {
 	for _, a := range lock.Artifacts {
 		lockIDs[a.ID] = true
 	}
-	for _, id := range append(append([]string{}, droppedAgents...), droppedContext...) {
+	for _, id := range append(append([]string{}, droppedAgents...), droppedBundles...) {
 		if lockIDs[id] {
 			t.Errorf("dropped artifact %q still present in lock", id)
 		}
@@ -245,7 +247,7 @@ func TestScale_LargeCatalogResyncCleansAndReconciles(t *testing.T) {
 			t.Errorf("dropped mcp-server %q still present in lock", id)
 		}
 	}
-	for _, id := range []string{agentIDs[20], commandIDs[20], contextIDs[20], hookIDs[20]} {
+	for _, id := range []string{agentIDs[20], ruleIDs[20], bundleIDs[20], hookIDs[20]} {
 		if !lockIDs[id] {
 			t.Errorf("surviving artifact %q missing from lock", id)
 		}

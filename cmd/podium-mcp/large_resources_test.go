@@ -139,7 +139,7 @@ func TestDeliverLoadArtifact_EmptyLinkHashRefused(t *testing.T) {
 	body := []byte("authentic large bytes")
 	obj := newObjectStub(t, map[string][]byte{"/big.bin": body})
 	s := newTestServer(t, &config{harness: "none", verifyPolicy: sign.PolicyNever})
-	rec := liveRecord("---\ntype: context\nversion: 1.0.0\n---\nbody\n")
+	rec := liveRecord("---\ntype: agent\nversion: 1.0.0\n---\nbody\n")
 	rec.LargeResources = map[string]largeResourceLink{"data/big.bin": {URL: obj.ts.URL + "/big.bin", ContentHash: sha256Hex(body)}}
 	rec = sealDelivery(rec)
 	rec.LargeResources["data/big.bin"] = largeResourceLink{URL: obj.ts.URL + "/big.bin"}

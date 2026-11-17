@@ -184,7 +184,7 @@ func TestLinter_ZeroValueUsesDefaults(t *testing.T) {
 		// Spec: §7.3.1 — the advisories keep the 15-code-point default.
 		thin := []filesystem.ArtifactRecord{{
 			ID:       "x",
-			Artifact: &manifest.Artifact{Type: manifest.TypeContext, Description: "abcd efgh ijkl"},
+			Artifact: &manifest.Artifact{Type: manifest.TypeAgent, Description: "abcd efgh ijkl"},
 		}}
 		if !hasCode((&Linter{Rules: l.AdvisoryRules()}).Lint(context.Background(), nil, thin), "lint.thin_description") {
 			t.Errorf("%s linter: a 14-code-point description did not warn", name)

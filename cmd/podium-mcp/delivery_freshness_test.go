@@ -264,10 +264,10 @@ func lockIndex(t *testing.T, dir string) {
 	t.Cleanup(func() { _ = holder.Close() })
 }
 
-// revRecord returns a sealed context record for id at semver ver served at
+// revRecord returns a sealed agent record for id at semver ver served at
 // revision n.
 func revRecord(id, ver string, n int64) loadArtifactResponse {
-	rec := cachedRecord(id, "---\ntype: context\nversion: "+ver+"\n---\n", "body "+ver+"\n", nil)
+	rec := cachedRecord(id, "---\ntype: agent\nversion: "+ver+"\n---\n", "body "+ver+"\n", nil)
 	rec.ArtifactRevision = rev(n)
 	return sealDelivery(rec)
 }
@@ -520,12 +520,12 @@ func TestFreshness_OverlayNotCompared(t *testing.T) {
 	s := freshBridge(t, t.TempDir(), ts.URL, "")
 	seedMark(t, s, "team/x", 500)
 	stub.set(revRecord("team/x", "0.9.0", 50))
-	fm := []byte("---\ntype: context\nversion: 1.0.0\n---\n")
+	fm := []byte("---\ntype: agent\nversion: 1.0.0\n---\n")
 	s.setOverlay([]filesystem.ArtifactRecord{{
 		ID:            "team/x",
 		ArtifactBytes: fm,
 		AuthoredBytes: fm,
-		Artifact:      &manifest.Artifact{Type: manifest.TypeContext, Version: "1.0.0", Body: "overlay body"},
+		Artifact:      &manifest.Artifact{Type: manifest.TypeAgent, Version: "1.0.0", Body: "overlay body"},
 	}}, nil)
 	out := s.loadArtifact(loadArgs("team/x", "S"))
 	m, ok := out.(map[string]any)

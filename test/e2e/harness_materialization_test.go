@@ -103,7 +103,7 @@ func chSync(t *testing.T, reg, target, harness string) cliResult {
 func TestHarness_InitWritesSyncYAML(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
-	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": agentArtifact("glossary")})
 	res := runPodium(t, ws, nil, "init", "--registry", reg, "--harness", "claude-code")
 	if res.Exit != 0 {
 		t.Fatalf("init exit=%d stderr=%s", res.Exit, res.Stderr)
@@ -123,7 +123,7 @@ func TestHarness_InitWritesSyncYAML(t *testing.T) {
 // podium sync reads registry from sync.yaml when --registry omitted.
 func TestHarness_SyncReadsRegistryFromConfig(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": agentArtifact("glossary")})
 	ws := t.TempDir()
 	chWriteSyncYAML(t, ws, "defaults:\n  registry: "+reg+"\n")
 	res := runPodium(t, ws, []string{"PODIUM_REGISTRY="}, "sync")
@@ -193,7 +193,7 @@ func TestHarness_SyncNoRegistryFails(t *testing.T) {
 // sync one-shot completes without --watch.
 func TestHarness_SyncOneShot(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": agentArtifact("glossary")})
 	target := t.TempDir()
 	res := chSync(t, reg, target, "none")
 	mustExist(t, filepath.Join(target, "glossary", "ARTIFACT.md"))
@@ -205,7 +205,7 @@ func TestHarness_SyncOneShot(t *testing.T) {
 // sync --watch exits cleanly on SIGINT.
 func TestHarness_WatchSIGINT(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": agentArtifact("glossary")})
 	target := t.TempDir()
 	w := startWatch(t, reg, target, "none")
 	if !pollFile(filepath.Join(target, "glossary", "ARTIFACT.md"), 10*time.Second) {
@@ -219,7 +219,7 @@ func TestHarness_WatchSIGINT(t *testing.T) {
 // sync --watch picks up a new artifact.
 func TestHarness_WatchPicksUpNewArtifact(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": agentArtifact("seed")})
 	target := t.TempDir()
 	w := startWatch(t, reg, target, "none")
 	if !pollFile(filepath.Join(target, "seed", "ARTIFACT.md"), 10*time.Second) {
@@ -250,14 +250,14 @@ func TestHarness_MCPRequiresRegistry(t *testing.T) {
 // responds to initialize.
 func TestHarness_MCPClaudeCodeInitialize(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=claude-code"))
 }
 
 // podium-mcp accepts PODIUM_OVERLAY_PATH.
 func TestHarness_MCPOverlayPathAccepted(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	overlay := t.TempDir()
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=claude-code", "PODIUM_OVERLAY_PATH="+overlay))
 }
@@ -265,7 +265,7 @@ func TestHarness_MCPOverlayPathAccepted(t *testing.T) {
 // podium-mcp exposes the four meta-tools.
 func TestHarness_MCPFourTools(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	res := mcpExec(t, chMCPEnv(t, reg), rpcReq{ID: 2, Method: "tools/list", Params: map[string]any{}})
 	for _, tool := range []string{"load_domain", "search_domains", "search_artifacts", "load_artifact"} {
 		if !strings.Contains(res.Stdout, tool) {
@@ -484,7 +484,7 @@ func TestHarness_ClaudeDesktopExtensionLayout(t *testing.T) {
 // claude-desktop MCP startup.
 func TestHarness_MCPClaudeDesktop(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=claude-desktop"))
 }
 
@@ -514,7 +514,7 @@ func TestHarness_ClaudeCoworkContextOnly(t *testing.T) {
 // claude-cowork MCP startup is not refused.
 func TestHarness_MCPClaudeCowork(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=claude-cowork"))
 }
 
@@ -634,7 +634,7 @@ func TestHarness_CursorInitSync(t *testing.T) {
 // cursor MCP startup.
 func TestHarness_MCPCursor(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=cursor"))
 }
 
@@ -713,7 +713,7 @@ func TestHarness_OpenCodeInitSync(t *testing.T) {
 // opencode MCP startup.
 func TestHarness_MCPOpenCode(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=opencode"))
 }
 
@@ -791,7 +791,7 @@ func TestHarness_CodexHookMaterializesToConfigToml(t *testing.T) {
 // codex init+sync two-step.
 func TestHarness_CodexInitSync(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": agentArtifact("glossary")})
 	ws := t.TempDir()
 	if r := runPodium(t, ws, nil, "init", "--registry", reg, "--harness", "codex"); r.Exit != 0 {
 		t.Fatalf("init exit=%d stderr=%s", r.Exit, r.Stderr)
@@ -802,18 +802,18 @@ func TestHarness_CodexInitSync(t *testing.T) {
 	if yaml := readFile(t, filepath.Join(ws, ".podium", "sync.yaml")); !strings.Contains(yaml, "harness: codex") {
 		t.Errorf("sync.yaml missing harness: codex:\n%s", yaml)
 	}
-	mustExist(t, filepath.Join(ws, ".podium", "context", "glossary", "ARTIFACT.md"))
+	mustExist(t, filepath.Join(ws, ".codex", "agents", "glossary.toml"))
 }
 
 // ---- Gemini -----------------------------------------------------------------
 
-// gemini context lands in .podium/context/<id>/.
+// a gemini agent lands in .gemini/agents/<name>.md.
 func TestHarness_GeminiExtensionLayout(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": agentArtifact("glossary")})
 	target := t.TempDir()
 	chSync(t, reg, target, "gemini")
-	mustExist(t, filepath.Join(target, ".podium", "context", "glossary", "ARTIFACT.md"))
+	mustExist(t, filepath.Join(target, ".gemini", "agents", "glossary.md"))
 }
 
 // gemini/always maps natively to GEMINI.md, so an
@@ -836,7 +836,7 @@ func TestHarness_GeminiAlwaysNativeClean(t *testing.T) {
 // gemini init+sync two-step.
 func TestHarness_GeminiInitSync(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": agentArtifact("glossary")})
 	ws := t.TempDir()
 	if r := runPodium(t, ws, nil, "init", "--registry", reg, "--harness", "gemini"); r.Exit != 0 {
 		t.Fatalf("init exit=%d stderr=%s", r.Exit, r.Stderr)
@@ -906,7 +906,7 @@ func TestHarness_PiInitSync(t *testing.T) {
 // pi MCP startup.
 func TestHarness_MCPPi(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=pi"))
 }
 
@@ -982,7 +982,7 @@ func TestHarness_HermesInitSync(t *testing.T) {
 // hermes MCP startup.
 func TestHarness_MCPHermes(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=hermes"))
 }
 
@@ -992,7 +992,7 @@ func TestHarness_MCPHermes(t *testing.T) {
 func TestHarness_NoneCanonicalLayout(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"glossary/ARTIFACT.md": agentArtifact("glossary"),
 		"greet/ARTIFACT.md":    greetSkillArtifact,
 		"greet/SKILL.md":       skillBody("greet"),
 	})
@@ -1011,7 +1011,7 @@ func TestHarness_NoneCanonicalLayout(t *testing.T) {
 // none MCP startup.
 func TestHarness_MCPNone(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_HARNESS=none"))
 }
 
@@ -1035,7 +1035,7 @@ func TestHarness_NoneInitSync(t *testing.T) {
 // unknown harness rejected with config.unknown_harness.
 func TestHarness_UnknownHarness(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", t.TempDir(), "--harness", "totally-unknown-harness")
 	if res.Exit == 0 {
 		t.Errorf("expected non-zero exit for unknown harness")
@@ -1051,10 +1051,10 @@ func TestHarness_UnknownHarness(t *testing.T) {
 func TestHarness_SyncAutoResolvesWorkspaceOverlay(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"finance/intro/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: from registry\nsensitivity: low\n---\n\nfrom registry\n",
+		"finance/intro/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: from registry\nsensitivity: low\n---\n\nfrom registry\n",
 	})
 	ws := t.TempDir()
-	overlayArt := "---\ntype: context\nversion: 1.0.0\ndescription: from overlay\nsensitivity: low\n---\n\nfrom overlay\n"
+	overlayArt := "---\ntype: agent\nversion: 1.0.0\ndescription: from overlay\nsensitivity: low\n---\n\nfrom overlay\n"
 	if err := os.MkdirAll(filepath.Join(ws, ".podium", "overlay", "finance", "intro"), 0o755); err != nil {
 		t.Fatalf("mkdir overlay: %v", err)
 	}
@@ -1081,11 +1081,11 @@ func TestHarness_SyncDryRunServerFromEnv(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v1/sync/manifest":
-			_, _ = w.Write([]byte(`{"artifacts":[{"id":"greet","type":"context","version":"1.2.0","layer":"org"}]}`))
+			_, _ = w.Write([]byte(`{"artifacts":[{"id":"greet","type":"agent","version":"1.2.0","layer":"org"}]}`))
 		case "/v1/load_artifact":
 			_ = json.NewEncoder(w).Encode(testharness.SealDelivery(map[string]any{
-				"id": "greet", "type": "context", "layer": "org",
-				"frontmatter": "---\ntype: context\nversion: 1.2.0\ndescription: served\nsensitivity: low\n---\n\nbody\n",
+				"id": "greet", "type": "agent", "layer": "org",
+				"frontmatter": "---\ntype: agent\nversion: 1.2.0\ndescription: served\nsensitivity: low\n---\n\nbody\n",
 			}))
 		default:
 			http.Error(w, `{"code":"not_found","message":"x"}`, 404)
@@ -1137,11 +1137,11 @@ func TestHarness_StandaloneSyncFromServer(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v1/sync/manifest":
-			_, _ = w.Write([]byte(`{"artifacts":[{"id":"greet","type":"context","version":"1.0.0","layer":"org"}]}`))
+			_, _ = w.Write([]byte(`{"artifacts":[{"id":"greet","type":"agent","version":"1.0.0","layer":"org"}]}`))
 		case "/v1/load_artifact":
 			_ = json.NewEncoder(w).Encode(testharness.SealDelivery(map[string]any{
-				"id": "greet", "type": "context", "layer": "org",
-				"frontmatter": "---\ntype: context\nversion: 1.0.0\ndescription: served\nsensitivity: low\n---\n\nhello from server\n",
+				"id": "greet", "type": "agent", "layer": "org",
+				"frontmatter": "---\ntype: agent\nversion: 1.0.0\ndescription: served\nsensitivity: low\n---\n\nhello from server\n",
 			}))
 		default:
 			http.Error(w, `{"code":"not_found","message":"x"}`, 404)
@@ -1160,7 +1160,7 @@ func TestHarness_StandaloneSyncFromServer(t *testing.T) {
 	if gotAuth != "Bearer tok-abc123" {
 		t.Errorf("registry did not receive forwarded session token; Authorization=%q", gotAuth)
 	}
-	// claude-code materializes a context artifact under .claude/.
+	// claude-code materializes an agent artifact under .claude/.
 	found := false
 	_ = filepath.Walk(target, func(p string, info os.FileInfo, _ error) error {
 		if info != nil && !info.IsDir() && strings.Contains(readFile(t, p), "hello from server") {
@@ -1270,7 +1270,7 @@ func TestHarness_InitGitignore(t *testing.T) {
 // sync --dry-run reports without writing.
 func TestHarness_SyncDryRun(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": agentArtifact("glossary")})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none", "--dry-run")
 	if res.Exit != 0 {
@@ -1287,7 +1287,7 @@ func TestHarness_SyncDryRun(t *testing.T) {
 // sync --json emits a structured envelope.
 func TestHarness_SyncJSON(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": agentArtifact("glossary")})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none", "--json")
 	if res.Exit != 0 {
@@ -1311,7 +1311,7 @@ func TestHarness_SyncJSON(t *testing.T) {
 // PODIUM_IDENTITY_PROVIDER=injected-session-token accepted.
 func TestHarness_MCPInjectedSessionToken(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	// A syntactically valid (unsigned) JWT shape; the bridge accepts the var at startup.
 	tok := "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhbGljZSJ9."
 	chAssertInitOK(t, chMCPEnv(t, reg,
@@ -1323,14 +1323,14 @@ func TestHarness_MCPInjectedSessionToken(t *testing.T) {
 // oauth-device-code is the default (absent var) and the binary still starts.
 func TestHarness_MCPDefaultIdentityProvider(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	chAssertInitOK(t, chMCPEnv(t, reg, "PODIUM_IDENTITY_PROVIDER="))
 }
 
 // every documented harness adapter id is registered.
 func TestHarness_AllHarnessIDsRegistered(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")})
+	reg := writeRegistry(t, map[string]string{"x/ARTIFACT.md": agentArtifact("x")})
 	ids := []string{"none", "claude-code", "claude-desktop", "claude-cowork", "cursor", "codex", "gemini", "opencode", "pi", "hermes"}
 	for _, id := range ids {
 		id := id
@@ -1484,7 +1484,7 @@ func TestHarness_MCPServersTargetingClaudeCodeLintClean(t *testing.T) {
 // this binary (§6.7 "Versioning": older binaries refuse to start).
 func TestHarness_SyncRefusesBelowMinServerVersion(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": agentArtifact("glossary")})
 	ws := t.TempDir()
 	chWriteSyncYAML(t, ws, "defaults:\n  registry: "+reg+"\n  min_server_version: \"99.0.0\"\n")
 	res := runPodium(t, ws, []string{"PODIUM_REGISTRY="}, "sync")
@@ -1500,7 +1500,7 @@ func TestHarness_SyncRefusesBelowMinServerVersion(t *testing.T) {
 // below this binary's version.
 func TestHarness_SyncAllowsAtOrAboveMinServerVersion(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": contextArtifact("glossary")})
+	reg := writeRegistry(t, map[string]string{"glossary/ARTIFACT.md": agentArtifact("glossary")})
 	ws := t.TempDir()
 	chWriteSyncYAML(t, ws, "defaults:\n  registry: "+reg+"\n  min_server_version: \"0.0.1\"\n")
 	res := runPodium(t, ws, []string{"PODIUM_REGISTRY="}, "sync")

@@ -19,11 +19,11 @@ import (
 	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
-// mbLargeContextDoc is an ARTIFACT.md whose bytes exceed the §4.2 inline
+// mbLargeAgentDoc is an ARTIFACT.md whose bytes exceed the §4.2 inline
 // cutoff so the §6.6 manifest-body channel presigns it.
-func mbLargeContextDoc() []byte {
+func mbLargeAgentDoc() []byte {
 	body := strings.Repeat("glossary line\n", objectstore.InlineCutoff/14+200)
-	return []byte("---\ntype: context\nversion: 1.0.0\ndescription: Big glossary.\n---\n\n" + body)
+	return []byte("---\ntype: agent\nversion: 1.0.0\ndescription: Big glossary.\n---\n\n" + body)
 }
 
 func mbHashOf(b []byte) string {
@@ -83,16 +83,16 @@ func mbGetLoadArtifact(t *testing.T, ts *httptest.Server, id string) server.Load
 	return parsed
 }
 
-// Spec: §6.6/§7.2 — a context artifact whose ARTIFACT.md body exceeds the
+// Spec: §6.6/§7.2 — an agent artifact whose ARTIFACT.md body exceeds the
 // inline cutoff is delivered via a presigned manifest_body_url rather than
 // inline. The inline manifest_body and frontmatter are cleared so the body
 // does not also travel inline, and the URL serves the verbatim ARTIFACT.md.
-func TestManifestBody_ContextLargeBodyPresigned(t *testing.T) {
+func TestManifestBody_AgentLargeBodyPresigned(t *testing.T) {
 	t.Parallel()
-	doc := mbLargeContextDoc()
+	doc := mbLargeAgentDoc()
 	ts := manifestBodyServer(t, store.ManifestRecord{
 		ArtifactID: "finance/glossary", Version: "1.0.0", ContentHash: "sha256:c",
-		Type: "context", Frontmatter: doc, Body: []byte("glossary line\n"),
+		Type: "agent", Frontmatter: doc, Body: []byte("glossary line\n"),
 	}, true)
 
 	parsed := mbGetLoadArtifact(t, ts, "finance/glossary")
@@ -170,10 +170,10 @@ func TestManifestBody_SkillLargeSkillRawPresigned(t *testing.T) {
 // no manifest_body_url.
 func TestManifestBody_BelowCutoffInline(t *testing.T) {
 	t.Parallel()
-	doc := []byte("---\ntype: context\nversion: 1.0.0\ndescription: Small.\n---\n\nshort body\n")
+	doc := []byte("---\ntype: agent\nversion: 1.0.0\ndescription: Small.\n---\n\nshort body\n")
 	ts := manifestBodyServer(t, store.ManifestRecord{
 		ArtifactID: "finance/small", Version: "1.0.0", ContentHash: "sha256:c",
-		Type: "context", Frontmatter: doc, Body: []byte("short body\n"),
+		Type: "agent", Frontmatter: doc, Body: []byte("short body\n"),
 	}, true)
 
 	parsed := mbGetLoadArtifact(t, ts, "finance/small")
@@ -192,10 +192,10 @@ func TestManifestBody_BelowCutoffInline(t *testing.T) {
 // even a large body is returned inline because there is nowhere to presign it.
 func TestManifestBody_NoObjectStoreInline(t *testing.T) {
 	t.Parallel()
-	doc := mbLargeContextDoc()
+	doc := mbLargeAgentDoc()
 	ts := manifestBodyServer(t, store.ManifestRecord{
 		ArtifactID: "finance/glossary", Version: "1.0.0", ContentHash: "sha256:c",
-		Type: "context", Frontmatter: doc, Body: []byte("glossary line\n"),
+		Type: "agent", Frontmatter: doc, Body: []byte("glossary line\n"),
 	}, false)
 
 	parsed := mbGetLoadArtifact(t, ts, "finance/glossary")

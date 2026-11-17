@@ -180,8 +180,8 @@ func TestLoadMergedConfig_ListingBudgetsMistyped(t *testing.T) {
 			sync.EffectiveListingBudget{MaxChars: 12000, EntryOverheadChars: 5, Types: []string{"skill"}, Check: "error"}},
 		{"non-string keys", "listing_budgets:\n  claude-code:\n    max_chars: 12000\n    1: x\n    true: y\n  1: {max_chars: 5}\n",
 			sync.EffectiveListingBudget{MaxChars: 12000, EntryOverheadChars: 5, Types: []string{"skill"}, Check: "warning"}},
-		{"aliased item", "x-t: &t command\nlisting_budgets:\n  claude-code:\n    types: [skill, *t]\n",
-			sync.EffectiveListingBudget{MaxChars: 8000, EntryOverheadChars: 5, Types: []string{"skill", "command"}, Check: "warning"}},
+		{"aliased item", "x-t: &t agent\nlisting_budgets:\n  claude-code:\n    types: [skill, *t]\n",
+			sync.EffectiveListingBudget{MaxChars: 8000, EntryOverheadChars: 5, Types: []string{"skill", "agent"}, Check: "warning"}},
 	}
 	for _, tc := range loads {
 		ws, home := listingWorkspace(t)

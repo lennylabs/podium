@@ -19,7 +19,7 @@ func TestIngest_AuditRedactMasksContentField(t *testing.T) {
 	t.Parallel()
 	const secret = "AC-1234-5678"
 	const artifact = "---\n" +
-		"type: context\n" +
+		"type: agent\n" +
 		"version: 1.0.0\n" +
 		"description: payroll record\n" +
 		"sensitivity: low\n" +

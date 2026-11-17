@@ -122,7 +122,7 @@ func TestLayerCLI_ImmutableVisibilityRefusedForEveryCaller(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "seed",
-			Files:      map[string]string{"seed/note/ARTIFACT.md": authContext("seed note")},
+			Files:      map[string]string{"seed/note/ARTIFACT.md": authAgent("seed note")},
 			Visibility: authVisibility{Public: true},
 		}},
 	})
@@ -191,7 +191,7 @@ func TestLayerCLI_ImmutableVisibilityRefusedForEveryCaller(t *testing.T) {
 // through the binary rather than from the handler alone.
 func TestLayerCLI_ImmutableVisibilityBindsPublicMode(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"seed/note/ARTIFACT.md": authContext("seed note")})
+	reg := writeRegistry(t, map[string]string{"seed/note/ARTIFACT.md": authAgent("seed note")})
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_INGEST_OFFLINE=true"},
 		"serve", "--public-mode", "--layer-path", reg)
 	var health map[string]any

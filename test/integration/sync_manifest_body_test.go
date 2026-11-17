@@ -33,15 +33,15 @@ func writeLargeManifestRegistry(t *testing.T) string {
 		testharness.WriteTreeOption{Path: "base/.layer-config", Content: "visibility:\n  public: true\n"},
 		testharness.WriteTreeOption{Path: "top/.layer-config", Content: "visibility:\n  public: true\n"},
 		testharness.WriteTreeOption{Path: "base/shared/parent/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsensitivity: low\n---\n\nparent prose\n"},
+			Content: "---\ntype: agent\nversion: 1.0.0\ndescription: parent\nsensitivity: low\n---\n\nparent prose\n"},
 		testharness.WriteTreeOption{Path: "top/team/big/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: big context\nsensitivity: low\nx_owner: platform\n---\n\n" + daBigBody},
+			Content: "---\ntype: agent\nversion: 1.0.0\ndescription: big context\nsensitivity: low\nx_owner: platform\n---\n\n" + daBigBody},
 		testharness.WriteTreeOption{Path: "top/team/bigskill/ARTIFACT.md",
 			Content: "---\ntype: skill\nversion: 1.0.0\ndescription: big skill\n---\n"},
 		testharness.WriteTreeOption{Path: "top/team/bigskill/SKILL.md",
 			Content: "---\nname: bigskill\ndescription: big skill\n---\n\n" + daBigBody},
 		testharness.WriteTreeOption{Path: "top/team/small/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: small\n---\n\nsmall\n"},
+			Content: "---\ntype: agent\nversion: 1.0.0\ndescription: small\n---\n\nsmall\n"},
 	)
 	return root
 }
@@ -210,11 +210,11 @@ func TestServerSync_DerivedManifestBodyReproducesTheServedHash(t *testing.T) {
 		testharness.WriteTreeOption{Path: "base/.layer-config", Content: "visibility:\n  public: true\n"},
 		testharness.WriteTreeOption{Path: "top/.layer-config", Content: "visibility:\n  public: true\n"},
 		testharness.WriteTreeOption{Path: "base/shared/note/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: note\n---\n\nnote\n"},
+			Content: "---\ntype: agent\nversion: 1.0.0\ndescription: note\n---\n\nnote\n"},
 		testharness.WriteTreeOption{Path: "top/team/lf/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: lf\n---\n\n" + daBigBody},
+			Content: "---\ntype: agent\nversion: 1.0.0\ndescription: lf\n---\n\n" + daBigBody},
 		testharness.WriteTreeOption{Path: "top/team/crlf/ARTIFACT.md",
-			Content: "---\r\ntype: context\r\nversion: 1.0.0\r\ndescription: crlf\r\n---\r\n\r\n" + crlfBody},
+			Content: "---\r\ntype: agent\r\nversion: 1.0.0\r\ndescription: crlf\r\n---\r\n\r\n" + crlfBody},
 	)
 	ts := largeManifestServer(t, root)
 	for _, id := range []string{"team/lf", "team/crlf"} {

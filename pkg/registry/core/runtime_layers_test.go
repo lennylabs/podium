@@ -32,11 +32,11 @@ func seedRuntimeLayers(t *testing.T) *core.Registry {
 	})
 	mustPutManifest(t, st, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "org-x", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Layer: "org",
+		ContentHash: "sha256:a", Type: "agent", Layer: "org",
 	})
 	mustPutManifest(t, st, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "alice-y", Version: "1.0.0",
-		ContentHash: "sha256:b", Type: "context", Layer: "alice-personal",
+		ContentHash: "sha256:b", Type: "agent", Layer: "alice-personal",
 	})
 	// Boot-time slice carries only the admin layer.
 	return core.New(st, tenant, []layer.Layer{

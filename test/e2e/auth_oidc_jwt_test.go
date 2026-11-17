@@ -153,8 +153,8 @@ func gwOIDCServer(t *testing.T, idp *oidcTestIdP, audiences []string, extraEnv .
 // form rather than the environment form.
 func gwOIDCConfigFile(t *testing.T, home, extraBlocks string) string {
 	t.Helper()
-	pubRoot := writeRegistry(t, map[string]string{"welcome/ARTIFACT.md": contextArtifact("public welcome")})
-	engRoot := writeRegistry(t, map[string]string{"secret/ARTIFACT.md": contextArtifact("engineering secret")})
+	pubRoot := writeRegistry(t, map[string]string{"welcome/ARTIFACT.md": agentArtifact("public welcome")})
+	engRoot := writeRegistry(t, map[string]string{"secret/ARTIFACT.md": agentArtifact("engineering secret")})
 	cfg := "" +
 		"registry:\n" +
 		"  layers:\n" +

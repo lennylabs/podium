@@ -159,7 +159,7 @@ func TestImport_Refusals(t *testing.T) {
 			name: "nested ARTIFACT.md",
 			files: map[string]string{
 				"SKILL.md":        "---\nname: bad\n---\nbody\n",
-				"sub/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n---\n",
+				"sub/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\n---\n",
 			},
 			want: "sub/ARTIFACT.md",
 		},

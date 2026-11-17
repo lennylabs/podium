@@ -17,7 +17,7 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-const confinedContextArtifact = "---\ntype: context\nversion: 1.0.0\ndescription: Pay an invoice\nsensitivity: low\n---\n\nbody\n"
+const confinedContextArtifact = "---\ntype: agent\nversion: 1.0.0\ndescription: Pay an invoice\nsensitivity: low\n---\n\nbody\n"
 
 // writeConfinementTree builds a layer directory holding one artifact and, when
 // escaping is true, one bundled resource symlinked to a file above the root.

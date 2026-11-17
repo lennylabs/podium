@@ -66,7 +66,7 @@ func rcReingestStatus(t *testing.T, aliceTree map[string]string) (store.Store, i
 	}
 
 	coreDir := t.TempDir()
-	rcWrite(t, coreDir, "shared/note", rcArtifact("context", "1.0.0", "", ""))
+	rcWrite(t, coreDir, "shared/note", rcArtifact("agent", "1.0.0", "", ""))
 	core := store.LayerConfig{
 		TenantID: "t", ID: rcHiddenLayer, Order: 1, SourceType: "local", LocalPath: coreDir,
 		Users: []string{"ops@acme.com"},
@@ -129,7 +129,7 @@ func rcReingest(t *testing.T, aliceTree map[string]string) ([]byte, map[string]r
 func TestReingest_CollisionReasonNamesNoLayer(t *testing.T) {
 	t.Parallel()
 	body, rejected := rcReingest(t, map[string]string{
-		"shared/note": rcArtifact("context", "2.0.0", "", ""),
+		"shared/note": rcArtifact("agent", "2.0.0", "", ""),
 	})
 	got, ok := rejected["shared/note"]
 	if !ok {
@@ -160,8 +160,8 @@ func TestReingest_CollisionReasonNamesNoLayer(t *testing.T) {
 func TestReingest_ExtendsRemovedDetails(t *testing.T) {
 	t.Parallel()
 	body, rejected := rcReingest(t, map[string]string{
-		"mine/child":  rcArtifact("context", "1.0.0", "shared/note", ""),
-		"shared/note": rcArtifact("context", "2.0.0", "", ""),
+		"mine/child":  rcArtifact("agent", "1.0.0", "shared/note", ""),
+		"shared/note": rcArtifact("agent", "2.0.0", "", ""),
 	})
 	got, ok := rejected["mine/child"]
 	if !ok {
@@ -215,7 +215,7 @@ func TestReingest_ExtendsRemovedUnderLintEnvelope(t *testing.T) {
 	hook := "---\ntype: hook\nversion: 1.0.0\ndescription: fixture hook\nsensitivity: low\n" +
 		"hook_event: stop\n---\n\nbody\n"
 	st, status, body := rcReingestStatus(t, map[string]string{
-		"mine/child": rcArtifact("context", "1.0.0", "shared/note", ""),
+		"mine/child": rcArtifact("agent", "1.0.0", "shared/note", ""),
 		"mine/hook":  hook,
 	})
 	if status != http.StatusUnprocessableEntity {

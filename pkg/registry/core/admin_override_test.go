@@ -24,7 +24,7 @@ func adminOverrideFixture(t *testing.T) (*core.Registry, *recorder) {
 	}
 	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenantID, ArtifactID: "team/secret", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Layer: "private",
+		ContentHash: "sha256:a", Type: "agent", Layer: "private",
 		Description: "secret context", Body: []byte("hidden body"),
 	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)

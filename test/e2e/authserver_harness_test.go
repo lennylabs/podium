@@ -207,7 +207,7 @@ func writeAuthLayerRoot(t *testing.T, home string, l authLayer) string {
 	files := l.Files
 	if len(files) == 0 {
 		files = map[string]string{
-			l.ID + "/placeholder/ARTIFACT.md": authContext(l.ID + " placeholder"),
+			l.ID + "/placeholder/ARTIFACT.md": authAgent(l.ID + " placeholder"),
 		}
 	}
 	for rel, content := range files {
@@ -222,10 +222,10 @@ func writeAuthLayerRoot(t *testing.T, home string, l authLayer) string {
 	return root
 }
 
-// authContext returns a minimal §4.4 context artifact with the given
+// authAgent returns a minimal §4.4 agent artifact with the given
 // description, suitable as a layer's placeholder or as an inline test fixture.
-func authContext(description string) string {
-	return "---\ntype: context\nversion: 1.0.0\ndescription: " + description + "\n---\n\nbody\n"
+func authAgent(description string) string {
+	return "---\ntype: agent\nversion: 1.0.0\ndescription: " + description + "\n---\n\nbody\n"
 }
 
 // authSkillFiles returns the two files a §4.3.4 skill artifact requires: an

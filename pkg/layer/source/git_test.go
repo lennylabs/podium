@@ -66,7 +66,7 @@ func repoFactory(t *testing.T, files map[string]string) (string, func()) {
 func TestGit_SnapshotExposesTree(t *testing.T) {
 	t.Parallel()
 	url, cleanup := repoFactory(t, map[string]string{
-		"company-glossary/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n---\n\nbody\n",
+		"company-glossary/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\n---\n\nbody\n",
 		"finance/run/ARTIFACT.md":      "---\ntype: skill\nversion: 1.0.0\n---\n\n",
 		"finance/run/SKILL.md":         "---\nname: run\ndescription: x\n---\n\nbody\n",
 	})
@@ -87,7 +87,7 @@ func TestGit_SnapshotExposesTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if !strings.Contains(string(bytes), "type: context") {
+	if !strings.Contains(string(bytes), "type: agent") {
 		t.Errorf("body wrong: %s", bytes)
 	}
 }
@@ -96,8 +96,8 @@ func TestGit_SnapshotExposesTree(t *testing.T) {
 func TestGit_FSWalkDir(t *testing.T) {
 	t.Parallel()
 	url, cleanup := repoFactory(t, map[string]string{
-		"a/ARTIFACT.md":   "---\ntype: context\nversion: 1.0.0\n---\n\n",
-		"b/c/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n---\n\n",
+		"a/ARTIFACT.md":   "---\ntype: agent\nversion: 1.0.0\n---\n\n",
+		"b/c/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\n---\n\n",
 	})
 	defer cleanup()
 	snap, err := (source.Git{}).Snapshot(context.Background(), source.LayerConfig{
@@ -231,7 +231,7 @@ func TestGit_RootNarrowsToSubtree(t *testing.T) {
 	t.Parallel()
 	url, cleanup := repoFactory(t, map[string]string{
 		"top.txt":                 "outside",
-		"artifacts/x/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n---\n\n",
+		"artifacts/x/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\n---\n\n",
 	})
 	defer cleanup()
 

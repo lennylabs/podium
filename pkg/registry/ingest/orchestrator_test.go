@@ -41,8 +41,8 @@ func (p *fakeProvider) Snapshot(_ context.Context, cfg source.LayerConfig) (*sou
 	}, nil
 }
 
-func contextManifestBody(desc string) string {
-	return "---\ntype: context\nversion: 1.0.0\ndescription: " + desc +
+func agentManifestBody(desc string) string {
+	return "---\ntype: agent\nversion: 1.0.0\ndescription: " + desc +
 		"\nsensitivity: low\n---\n\nbody\n"
 }
 
@@ -67,7 +67,7 @@ func TestSourceIngest_TracksLastIngestedRef(t *testing.T) {
 	provider := &fakeProvider{
 		files: fstest.MapFS{
 			"company-glossary/ARTIFACT.md": &fstest.MapFile{
-				Data: []byte(contextManifestBody("glossary")),
+				Data: []byte(agentManifestBody("glossary")),
 			},
 		},
 		reference: "fedcba9876543210",
@@ -134,7 +134,7 @@ func TestSourceIngest_ProviderReceivesCloneRepo(t *testing.T) {
 
 			provider := &fakeProvider{
 				files: fstest.MapFS{"g/ARTIFACT.md": &fstest.MapFile{
-					Data: []byte(contextManifestBody("glossary")),
+					Data: []byte(agentManifestBody("glossary")),
 				}},
 				reference: "fedcba9876543210",
 			}
@@ -212,7 +212,7 @@ func TestSourceIngest_StampWritesUserinfoApartOnSQLite(t *testing.T) {
 
 	provider := &fakeProvider{
 		files: fstest.MapFS{"g/ARTIFACT.md": &fstest.MapFile{
-			Data: []byte(contextManifestBody("glossary")),
+			Data: []byte(agentManifestBody("glossary")),
 		}},
 		reference: "fedcba9876543210",
 	}
@@ -251,7 +251,7 @@ func TestSourceIngest_SignerThreadsThrough(t *testing.T) {
 	_ = st.PutLayerConfig(context.Background(), cfg)
 	provider := &fakeProvider{
 		files: fstest.MapFS{"g/ARTIFACT.md": &fstest.MapFile{
-			Data: []byte(contextManifestBody("glossary")),
+			Data: []byte(agentManifestBody("glossary")),
 		}},
 		reference: "ref-1",
 	}
@@ -286,7 +286,7 @@ func TestSourceIngest_FreezeWindowAndBreakGlass(t *testing.T) {
 	_ = st.PutLayerConfig(context.Background(), cfg)
 	provider := &fakeProvider{
 		files: fstest.MapFS{"g/ARTIFACT.md": &fstest.MapFile{
-			Data: []byte(contextManifestBody("glossary")),
+			Data: []byte(agentManifestBody("glossary")),
 		}},
 		reference: "ref-1",
 	}
@@ -338,7 +338,7 @@ func TestSourceIngest_TolerantEmitsRewriteEvent(t *testing.T) {
 	_ = st.PutLayerConfig(context.Background(), cfg)
 	provider := &fakeProvider{
 		files: fstest.MapFS{
-			"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextManifestBody("x"))},
+			"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifestBody("x"))},
 		},
 		reference:        "new-sha",
 		historyRewritten: true,

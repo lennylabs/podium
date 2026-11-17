@@ -154,7 +154,7 @@ func TestWebUISession_ReportsLayerCapabilities(t *testing.T) {
 		ServeArgs:       []string{"--web-ui"},
 		Layers: []authLayer{{
 			ID:         "seed",
-			Files:      map[string]string{"seed/note/ARTIFACT.md": authContext("seed note")},
+			Files:      map[string]string{"seed/note/ARTIFACT.md": authAgent("seed note")},
 			Visibility: authVisibility{Public: true},
 		}},
 	})
@@ -198,7 +198,7 @@ func TestWebUISession_ReportsLayerCapabilities(t *testing.T) {
 	// The read predicts what the layer endpoint does. The admin arm the read
 	// reported open admits a registration naming a host path.
 	root := writeRegistry(t, map[string]string{
-		"ops/runbook/ARTIFACT.md": authContext("an operations runbook"),
+		"ops/runbook/ARTIFACT.md": authAgent("an operations runbook"),
 	})
 	reg, err := json.Marshal(map[string]any{
 		"id": "ops", "source_type": "local", "local_path": root, "organization": true,

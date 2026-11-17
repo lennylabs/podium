@@ -29,8 +29,8 @@ description: %s
 Body for %s.
 `
 
-const contextArtifact = `---
-type: context
+const agentArtifact = `---
+type: agent
 version: 1.0.0
 description: %s
 ---
@@ -63,7 +63,7 @@ func TestWalk_FindsAllArtifactsInLayer(t *testing.T) {
 		},
 		testharness.WriteTreeOption{
 			Path:    "company-glossary/ARTIFACT.md",
-			Content: stringf(contextArtifact, "Glossary", "glossary"),
+			Content: stringf(agentArtifact, "Glossary", "glossary"),
 		},
 	)
 	reg, err := Open(root)
@@ -169,11 +169,11 @@ func TestWalk_CollisionFails(t *testing.T) {
 		},
 		testharness.WriteTreeOption{
 			Path:    "team-shared/x/ARTIFACT.md",
-			Content: stringf(contextArtifact, "shared", "shared"),
+			Content: stringf(agentArtifact, "shared", "shared"),
 		},
 		testharness.WriteTreeOption{
 			Path:    "personal/x/ARTIFACT.md",
-			Content: stringf(contextArtifact, "personal", "personal"),
+			Content: stringf(agentArtifact, "personal", "personal"),
 		},
 	)
 	reg, err := Open(root)
@@ -233,11 +233,11 @@ layer_order:
 		},
 		testharness.WriteTreeOption{
 			Path:    "team-shared/x/ARTIFACT.md",
-			Content: stringf(contextArtifact, "shared", "shared"),
+			Content: stringf(agentArtifact, "shared", "shared"),
 		},
 		testharness.WriteTreeOption{
 			Path:    "personal/x/ARTIFACT.md",
-			Content: stringf(contextArtifact, "personal", "personal"),
+			Content: stringf(agentArtifact, "personal", "personal"),
 		},
 	)
 	reg, err := Open(root)
@@ -273,13 +273,13 @@ func TestWalk_DropPolicyRequiresOnDrop(t *testing.T) {
 	}
 }
 
-// dropFixtureArtifact is a context artifact whose description names the
+// dropFixtureArtifact is an agent artifact whose description names the
 // contributing layer, with an optional extends: line, so a test can tell
 // which layer's copy survived and whether the §4.6 no-inheritance rule
 // refused it.
 func dropFixtureArtifact(desc, extends string) string {
 	var b strings.Builder
-	b.WriteString("---\ntype: context\nversion: 1.0.0\ndescription: " + desc + "\n")
+	b.WriteString("---\ntype: agent\nversion: 1.0.0\ndescription: " + desc + "\n")
 	if extends != "" {
 		b.WriteString("extends: " + extends + "\n")
 	}
@@ -579,7 +579,7 @@ func TestWalk_SingleLayerArtifactIDsAreRelativeToRoot(t *testing.T) {
 	testharness.WriteTree(t, root,
 		testharness.WriteTreeOption{
 			Path:    "company-glossary/ARTIFACT.md",
-			Content: stringf(contextArtifact, "Glossary", "glossary"),
+			Content: stringf(agentArtifact, "Glossary", "glossary"),
 		},
 	)
 	reg, err := Open(root)
@@ -640,7 +640,7 @@ func TestWalk_RootLevelArtifactRejected(t *testing.T) {
 	testharness.WriteTree(t, root,
 		testharness.WriteTreeOption{
 			Path:    "ARTIFACT.md",
-			Content: stringf(contextArtifact, "Root", "root"),
+			Content: stringf(agentArtifact, "Root", "root"),
 		},
 	)
 	reg, err := Open(root)
@@ -662,7 +662,7 @@ func TestWalk_AtSegmentRejected(t *testing.T) {
 	testharness.WriteTree(t, root,
 		testharness.WriteTreeOption{
 			Path:    "finance/pay@v2/ARTIFACT.md",
-			Content: stringf(contextArtifact, "Pay", "pay"),
+			Content: stringf(agentArtifact, "Pay", "pay"),
 		},
 	)
 	reg, err := Open(root)
@@ -685,7 +685,7 @@ func TestWalk_NestedArtifactNotCapturedAsResource(t *testing.T) {
 	testharness.WriteTree(t, root,
 		testharness.WriteTreeOption{
 			Path:    "outer/ARTIFACT.md",
-			Content: stringf(contextArtifact, "Outer", "outer"),
+			Content: stringf(agentArtifact, "Outer", "outer"),
 		},
 		testharness.WriteTreeOption{
 			Path:    "outer/notes.md",
@@ -693,7 +693,7 @@ func TestWalk_NestedArtifactNotCapturedAsResource(t *testing.T) {
 		},
 		testharness.WriteTreeOption{
 			Path:    "outer/inner/ARTIFACT.md",
-			Content: stringf(contextArtifact, "Inner", "inner"),
+			Content: stringf(agentArtifact, "Inner", "inner"),
 		},
 		testharness.WriteTreeOption{
 			Path:    "outer/inner/data.txt",
@@ -805,12 +805,12 @@ func TestWalk_ResourceSetIsEveryFileUnderThePackageRoot(t *testing.T) {
 		testharness.WriteTreeOption{Path: "outer/references/SKILL.md", Content: referencesSkill},
 		testharness.WriteTreeOption{
 			Path:    "outer/inner/ARTIFACT.md",
-			Content: stringf(contextArtifact, "Inner", "inner"),
+			Content: stringf(agentArtifact, "Inner", "inner"),
 		},
 		testharness.WriteTreeOption{Path: "outer/inner/data.txt", Content: "inner data\n"},
 		testharness.WriteTreeOption{
 			Path:    "outer/.nested/ARTIFACT.md",
-			Content: stringf(contextArtifact, "Nested", "nested"),
+			Content: stringf(agentArtifact, "Nested", "nested"),
 		},
 		testharness.WriteTreeOption{Path: "outer/.nested/note.txt", Content: "nested note\n"},
 	)
@@ -1021,7 +1021,7 @@ func TestWalk_PlainSkillChangeAndRevertKeepsAutoVersion(t *testing.T) {
 func TestSynthesizeSkillDocuments_RefusesUnsynthesizableVersion(t *testing.T) {
 	t.Parallel()
 	recs := []ArtifactRecord{
-		{ID: "ops/ctx", Artifact: &manifest.Artifact{Type: manifest.TypeContext, Version: "x"}},
+		{ID: "ops/ctx", Artifact: &manifest.Artifact{Type: manifest.TypeAgent, Version: "x"}},
 		{ID: "ops/bad", Artifact: &manifest.Artifact{Type: manifest.TypeSkill, Version: "1.0"}},
 	}
 	err := synthesizeSkillDocuments(recs)

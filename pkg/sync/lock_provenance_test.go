@@ -83,7 +83,7 @@ func TestRun_PersistsProfileScopeAndVersion(t *testing.T) {
 		RegistryPath: registry,
 		Target:       target,
 		Profile:      "finance-team",
-		Scope:        ScopeFilter{Include: []string{"finance/**"}, Types: []string{"context"}},
+		Scope:        ScopeFilter{Include: []string{"finance/**"}, Types: []string{"agent"}},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -95,7 +95,7 @@ func TestRun_PersistsProfileScopeAndVersion(t *testing.T) {
 	if len(lock.Scope.Include) != 1 || lock.Scope.Include[0] != "finance/**" {
 		t.Errorf("lock.Scope.Include = %v", lock.Scope.Include)
 	}
-	if len(lock.Scope.Type) != 1 || lock.Scope.Type[0] != "context" {
+	if len(lock.Scope.Type) != 1 || lock.Scope.Type[0] != "agent" {
 		t.Errorf("lock.Scope.Type = %v", lock.Scope.Type)
 	}
 	if len(lock.Artifacts) == 0 || lock.Artifacts[0].Version != "1.0.0" {

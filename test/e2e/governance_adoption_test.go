@@ -141,7 +141,7 @@ func TestGovernance_StandaloneHealthz(t *testing.T) {
 func TestGovernance_UnauthedSearch(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"eng/sample/ARTIFACT.md": contextArtifact("sample"),
+		"eng/sample/ARTIFACT.md": agentArtifact("sample"),
 	}))
 	// No Authorization header: the standalone default has no auth gate.
 	st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=sample")
@@ -214,7 +214,7 @@ func TestGovernance_SensitivityDefaultsLow(t *testing.T) {
 	t.Parallel()
 	// Artifact with no sensitivity field.
 	reg := writeRegistry(t, map[string]string{
-		"eng/no-sensitivity/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: No sensitivity field.\n---\n\nbody\n",
+		"eng/no-sensitivity/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: No sensitivity field.\n---\n\nbody\n",
 	})
 	srv := startServer(t, reg)
 	// Load via HTTP to inspect the response.
@@ -240,7 +240,7 @@ func TestGovernance_ExplicitNeverLoadsUnsignedLow(t *testing.T) {
 	t.Parallel()
 	id := "eng/low-artifact"
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\nsensitivity: low\ndescription: Low sensitivity.\n---\n\nbody\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\nsensitivity: low\ndescription: Low sensitivity.\n---\n\nbody\n",
 	})
 	srv := startServerUnsigned(t, reg)
 	mat := t.TempDir()
@@ -310,7 +310,7 @@ func TestGovernance_ConfigShowIdentityProvider(t *testing.T) {
 func TestGovernance_PersonalLayerRegister(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"draft/ARTIFACT.md": contextArtifact("draft artifact"),
+		"draft/ARTIFACT.md": agentArtifact("draft artifact"),
 	})
 	srv := startServer(t, "")
 	res := runPodium(t, "", nil, "layer", "register",
@@ -361,7 +361,7 @@ func TestGovernance_UnauthedAuditSystemPublic(t *testing.T) {
 	t.Parallel()
 	id := "eng/audit-test"
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": contextArtifact("audit test artifact"),
+		id + "/ARTIFACT.md": agentArtifact("audit test artifact"),
 	})
 	srv, auditPath := progAuditServer(t, reg)
 	// Unauthenticated load.
@@ -420,7 +420,7 @@ func TestGovernance_GroupScopedLayer(t *testing.T) {
 func TestGovernance_LintPassesWithSensitivity(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"eng/labeled/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Labeled artifact.\nsensitivity: medium\n---\n\nbody\n",
+		"eng/labeled/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Labeled artifact.\nsensitivity: medium\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 {
@@ -442,7 +442,7 @@ func TestGovernance_LintPassesWithSensitivity(t *testing.T) {
 func TestGovernance_LintNoWarnOnMissingSensitivity(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"eng/unlabeled/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: No sensitivity.\n---\n\nbody\n",
+		"eng/unlabeled/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: No sensitivity.\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	// Doc-accuracy gap: no sensitivity lint rule; exit 0 with no sensitivity diagnostic.
@@ -464,7 +464,7 @@ func TestGovernance_LintNoWarnOnMissingSensitivity(t *testing.T) {
 func TestGovernance_SearchFilterFlagMissing(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"eng/x/ARTIFACT.md": contextArtifact("x"),
+		"eng/x/ARTIFACT.md": agentArtifact("x"),
 	}))
 	res := runPodium(t, "", nil, "search", ".", "--filter", "sensitivity=medium", "--registry", srv.BaseURL)
 	if res.Exit != 2 {
@@ -481,8 +481,8 @@ func TestGovernance_SearchFilterFlagMissing(t *testing.T) {
 func TestGovernance_HTTPSearchIgnoresSensitivity(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"eng/med/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Medium.\nsensitivity: medium\n---\n\nbody\n",
-		"eng/hi/ARTIFACT.md":  "---\ntype: context\nversion: 1.0.0\ndescription: High.\nsensitivity: high\n---\n\nbody\n",
+		"eng/med/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Medium.\nsensitivity: medium\n---\n\nbody\n",
+		"eng/hi/ARTIFACT.md":  "---\ntype: agent\nversion: 1.0.0\ndescription: High.\nsensitivity: high\n---\n\nbody\n",
 	})
 	srv := startServer(t, reg)
 	// Browse the eng/ subtree (scope returns every artifact under it regardless
@@ -515,7 +515,7 @@ func TestGovernance_AuditSensitivityPerLoad(t *testing.T) {
 	t.Parallel()
 	id := "eng/high-audit"
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: High audit test.\nsensitivity: high\n---\n\nbody\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: High audit test.\nsensitivity: high\n---\n\nbody\n",
 	})
 	srv, auditPath := progAuditServer(t, reg)
 	getJSON(t, srv.BaseURL+"/v1/load_artifact?id="+id, nil)
@@ -559,7 +559,7 @@ func TestGovernance_HighOnlyFailsOpen(t *testing.T) {
 	t.Parallel()
 	id := "eng/high-unsigned-failopen"
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: High unsigned failopen.\nsensitivity: high\n---\n\nbody\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: High unsigned failopen.\nsensitivity: high\n---\n\nbody\n",
 	})
 	srv := startServer(t, reg)
 	mat := t.TempDir()
@@ -584,7 +584,7 @@ func TestGovernance_NeverPolicyLoadsHighUnsigned(t *testing.T) {
 	t.Parallel()
 	id := "eng/high-never"
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: High never.\nsensitivity: high\n---\n\nbody\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: High never.\nsensitivity: high\n---\n\nbody\n",
 	})
 	srv := startServer(t, reg)
 	mat := t.TempDir()
@@ -753,7 +753,7 @@ func TestGovernance_SignedArtifactMaterializes(t *testing.T) {
 func TestGovernance_LintNoErrorOnMissingSensitivity(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"eng/no-sens/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: No sensitivity.\n---\n\nbody\n",
+		"eng/no-sens/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: No sensitivity.\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 0 {
@@ -772,7 +772,7 @@ func progressiveFreezeBoot(t *testing.T, active bool) (*serverProc, string) {
 	t.Helper()
 	home := t.TempDir()
 	layerRoot := writeRegistry(t, map[string]string{
-		"ctx/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: freeze window test artifact\nsensitivity: low\n---\n\nbody\n",
+		"ctx/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: freeze window test artifact\nsensitivity: low\n---\n\nbody\n",
 	})
 	start, end := "2020-01-01T00:00:00Z", "2035-01-01T00:00:00Z"
 	if !active {
@@ -897,7 +897,7 @@ func TestGovernance_SandboxEnforcementBlocks(t *testing.T) {
 	// Author an artifact with sandbox_profile: unrestricted in frontmatter.
 	id := "eng/sandboxed"
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Sandboxed artifact.\nsensitivity: low\nsandbox_profile: unrestricted\n---\n\nbody\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Sandboxed artifact.\nsensitivity: low\nsandbox_profile: unrestricted\n---\n\nbody\n",
 	})
 	srv := startServer(t, reg)
 	mat := t.TempDir()
@@ -935,7 +935,7 @@ func TestGovernance_SandboxInformationalWithoutEnforcement(t *testing.T) {
 	// declared profile is informational and the artifact materializes.
 	id := "eng/widget"
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Widget with a sandbox profile.\nsensitivity: low\nsandbox_profile: unrestricted\n---\n\nbody\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Widget with a sandbox profile.\nsensitivity: low\nsandbox_profile: unrestricted\n---\n\nbody\n",
 	})
 	srv := startServer(t, reg)
 	mat := t.TempDir()
@@ -965,7 +965,7 @@ func TestGovernance_SandboxInformationalWithoutEnforcement(t *testing.T) {
 func assertUnsignedHighRefused(t *testing.T, id string) {
 	t.Helper()
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Unsigned high-sensitivity artifact.\nsensitivity: high\n---\n\nsecret body\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Unsigned high-sensitivity artifact.\nsensitivity: high\n---\n\nsecret body\n",
 	})
 	srv := startServerUnsigned(t, reg)
 	mat := t.TempDir()
@@ -1061,7 +1061,7 @@ func TestGovernance_ScaffoldSensitivityHigh(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "my-context")
 	res := runPodium(t, "", nil, "artifact", "scaffold",
-		"--type", "context",
+		"--type", "agent",
 		"--description", "A high-sensitivity context for testing.",
 		"--sensitivity", "high",
 		"--version", "0.1.0",
@@ -1071,7 +1071,7 @@ func TestGovernance_ScaffoldSensitivityHigh(t *testing.T) {
 		t.Fatalf("artifact scaffold exit=%d\nstdout: %s\nstderr: %s", res.Exit, res.Stdout, res.Stderr)
 	}
 	content := readFile(t, filepath.Join(dir, "ARTIFACT.md"))
-	for _, want := range []string{"sensitivity: high", "type: context", "version: 0.1.0"} {
+	for _, want := range []string{"sensitivity: high", "type: agent", "version: 0.1.0"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("ARTIFACT.md missing %q:\n%s", want, content)
 		}
@@ -1123,7 +1123,7 @@ func TestGovernance_AlwaysPolicyRejectsLowUnsigned(t *testing.T) {
 	t.Parallel()
 	id := "eng/low-always"
 	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Low always.\nsensitivity: low\n---\n\nbody\n",
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Low always.\nsensitivity: low\n---\n\nbody\n",
 	})
 	srv := startServerUnsigned(t, reg)
 	mat := t.TempDir()

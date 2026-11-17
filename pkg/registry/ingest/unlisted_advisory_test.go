@@ -18,7 +18,7 @@ func ingestDomain(t *testing.T, st store.Store, domainMD string) *ingest.Result 
 	t.Helper()
 	mfs := fstest.MapFS{
 		"finance/DOMAIN.md":          &fstest.MapFile{Data: []byte(domainMD)},
-		"finance/ap/run/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("AP run"))},
+		"finance/ap/run/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("AP run"))},
 	}
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "tenant-1", LayerID: "L1", Files: mfs,

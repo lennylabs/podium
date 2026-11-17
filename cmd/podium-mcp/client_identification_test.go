@@ -72,8 +72,8 @@ type clientStub struct {
 func newClientStub(t *testing.T) *clientStub {
 	t.Helper()
 	loadBody := loadArtifactJSON(t, map[string]any{
-		"id": "team/x", "type": "context", "version": "1.0.0",
-		"frontmatter": "---\ntype: context\n---\n",
+		"id": "team/x", "type": "agent", "version": "1.0.0",
+		"frontmatter": "---\ntype: agent\n---\n",
 	})
 	st := &clientStub{headers: map[string][]string{}}
 	st.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

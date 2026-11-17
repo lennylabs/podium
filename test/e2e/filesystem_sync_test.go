@@ -153,7 +153,7 @@ func TestFilesystemSync_MultiLayerEachSubdirIsLayer(t *testing.T) {
 		".registry-config": solofsMultiLayerConfig,
 		"team-shared/finance/close-reporting/run-variance-analysis/ARTIFACT.md": solofsSkillArtifact,
 		"team-shared/finance/close-reporting/run-variance-analysis/SKILL.md":    skillBody("run-variance-analysis"),
-		"personal/notes/ARTIFACT.md":                                            contextArtifact("notes"),
+		"personal/notes/ARTIFACT.md":                                            agentArtifact("notes"),
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
@@ -171,8 +171,8 @@ func TestFilesystemSync_LayerOrderDefaultsAlphabetical(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":             solofsMultiLayerConfig,
-		"zebra-layer/note/ARTIFACT.md": contextArtifact("zebra"),
-		"alpha-layer/note/ARTIFACT.md": contextArtifact("alpha"),
+		"zebra-layer/note/ARTIFACT.md": agentArtifact("zebra"),
+		"alpha-layer/note/ARTIFACT.md": agentArtifact("alpha"),
 	})
 	r, err := filesystem.Open(reg)
 	if err != nil {
@@ -195,8 +195,8 @@ func TestFilesystemSync_LayerOrderExplicitOverridesAlphabetical(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":             solofsRegistryConfig("team-shared", "personal"),
-		"personal/note/ARTIFACT.md":    contextArtifact("personal"),
-		"team-shared/note/ARTIFACT.md": contextArtifact("team-shared"),
+		"personal/note/ARTIFACT.md":    agentArtifact("personal"),
+		"team-shared/note/ARTIFACT.md": agentArtifact("team-shared"),
 	})
 	r, err := filesystem.Open(reg)
 	if err != nil {
@@ -216,7 +216,7 @@ func TestFilesystemSync_LayerOrderExplicitOverridesAlphabetical(t *testing.T) {
 func TestFilesystemSync_AbsentRegistryConfigSingleLayer(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"finance/report/ARTIFACT.md": contextArtifact("report"),
+		"finance/report/ARTIFACT.md": agentArtifact("report"),
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
@@ -230,7 +230,7 @@ func TestFilesystemSync_MultiLayerFalseSingleLayer(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":          "multi_layer: false\n",
-		"notes/my-note/ARTIFACT.md": contextArtifact("my-note"),
+		"notes/my-note/ARTIFACT.md": agentArtifact("my-note"),
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
@@ -244,7 +244,7 @@ func TestFilesystemSync_TopLevelArtifactAmbiguous(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config": solofsMultiLayerConfig,
-		"ARTIFACT.md":      contextArtifact("top-level"),
+		"ARTIFACT.md":      agentArtifact("top-level"),
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target)
@@ -261,7 +261,7 @@ func TestFilesystemSync_DotDirectoriesSkippedAsLayers(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":            solofsMultiLayerConfig,
 		".git/HEAD":                   "ref: refs/heads/main\n",
-		"real-layer/note/ARTIFACT.md": contextArtifact("note"),
+		"real-layer/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
@@ -421,7 +421,7 @@ func TestFilesystemSync_CoworkContextStillSyncs(t *testing.T) {
 func TestFilesystemSync_SyncProducesLockFile(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/note/ARTIFACT.md": contextArtifact("note"),
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
@@ -446,7 +446,7 @@ func TestFilesystemSync_SyncProducesLockFile(t *testing.T) {
 func TestFilesystemSync_SyncIdempotent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"shared/glossary/ARTIFACT.md": agentArtifact("glossary"),
 	})
 	target := t.TempDir()
 	res1 := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
@@ -474,8 +474,8 @@ func TestFilesystemSync_SyncIdempotent(t *testing.T) {
 func TestFilesystemSync_StaleFilesRemovedOnDelete(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/artifact-a/ARTIFACT.md": contextArtifact("artifact-a"),
-		"shared/artifact-b/ARTIFACT.md": contextArtifact("artifact-b"),
+		"shared/artifact-a/ARTIFACT.md": agentArtifact("artifact-a"),
+		"shared/artifact-b/ARTIFACT.md": agentArtifact("artifact-b"),
 	})
 	target := t.TempDir()
 	res1 := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
@@ -503,7 +503,7 @@ func TestFilesystemSync_StaleFilesRemovedOnDelete(t *testing.T) {
 func TestFilesystemSync_SyncDryRunWritesNothing(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/note/ARTIFACT.md": contextArtifact("note"),
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--dry-run")
@@ -526,7 +526,7 @@ func TestFilesystemSync_SyncDryRunWritesNothing(t *testing.T) {
 func TestFilesystemSync_SyncReadsRegistryFromSyncYAML(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/note/ARTIFACT.md": contextArtifact("note"),
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	ws := t.TempDir()
 	solofsWriteSyncYAML(t, ws, "defaults:\n  registry: "+reg+"\n")
@@ -554,7 +554,7 @@ func TestFilesystemSync_SyncNoRegistryNoConfigFails(t *testing.T) {
 func TestFilesystemSync_SyncUnknownHarnessFails(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/note/ARTIFACT.md": contextArtifact("note"),
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "not-an-adapter")
@@ -603,7 +603,7 @@ func TestFilesystemSync_LintNoRegistryFlagExits2(t *testing.T) {
 func TestFilesystemSync_WatchRematerializesOnChange(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/note/ARTIFACT.md": contextArtifact("note"),
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	target := t.TempDir()
 	w := startWatch(t, reg, target, "none")
@@ -611,7 +611,7 @@ func TestFilesystemSync_WatchRematerializesOnChange(t *testing.T) {
 		t.Fatalf("initial sync did not materialize\nlog:\n%s", w.log())
 	}
 	// Add a second artifact to the registry.
-	solofsWriteFile(t, filepath.Join(reg, "shared", "note2", "ARTIFACT.md"), contextArtifact("note2"))
+	solofsWriteFile(t, filepath.Join(reg, "shared", "note2", "ARTIFACT.md"), agentArtifact("note2"))
 	if !pollFile(filepath.Join(target, "shared", "note2", "ARTIFACT.md"), 10*time.Second) {
 		t.Errorf("watcher did not materialize new artifact\nlog:\n%s", w.log())
 	}
@@ -621,7 +621,7 @@ func TestFilesystemSync_WatchRematerializesOnChange(t *testing.T) {
 func TestFilesystemSync_WatchExits0OnSIGINT(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/note/ARTIFACT.md": contextArtifact("note"),
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	target := t.TempDir()
 	w := startWatch(t, reg, target, "none")
@@ -636,10 +636,10 @@ func TestFilesystemSync_WatchExits0OnSIGINT(t *testing.T) {
 func TestFilesystemSync_OverlayOverridesRegistry(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/glossary/ARTIFACT.md": contextArtifact("from-registry"),
+		"shared/glossary/ARTIFACT.md": agentArtifact("from-registry"),
 	})
 	overlay := writeRegistry(t, map[string]string{
-		"shared/glossary/ARTIFACT.md": "---\ntype: context\nversion: 1.1.0\ndescription: from-overlay\n---\n\nfrom-overlay body.\n",
+		"shared/glossary/ARTIFACT.md": "---\ntype: agent\nversion: 1.1.0\ndescription: from-overlay\n---\n\nfrom-overlay body.\n",
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--overlay", overlay, "--harness", "none")
@@ -655,8 +655,8 @@ func TestFilesystemSync_OverlayOverridesRegistry(t *testing.T) {
 func TestFilesystemSync_OverrideAddRecordsInLock(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/base/ARTIFACT.md":  contextArtifact("base"),
-		"shared/extra/ARTIFACT.md": contextArtifact("extra"),
+		"shared/base/ARTIFACT.md":  agentArtifact("base"),
+		"shared/extra/ARTIFACT.md": agentArtifact("extra"),
 	})
 	target := t.TempDir()
 	// Scope the baseline to shared/base so shared/extra is out of the
@@ -682,7 +682,7 @@ func TestFilesystemSync_OverrideAddRecordsInLock(t *testing.T) {
 func TestFilesystemSync_OverrideRemoveRecordsInLock(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/artifact-a/ARTIFACT.md": contextArtifact("artifact-a"),
+		"shared/artifact-a/ARTIFACT.md": agentArtifact("artifact-a"),
 	})
 	target := t.TempDir()
 	res1 := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
@@ -705,7 +705,7 @@ func TestFilesystemSync_OverrideRemoveRecordsInLock(t *testing.T) {
 func TestFilesystemSync_OverrideResetClearsToggles(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/artifact-a/ARTIFACT.md": contextArtifact("artifact-a"),
+		"shared/artifact-a/ARTIFACT.md": agentArtifact("artifact-a"),
 	})
 	target := t.TempDir()
 	if r := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none"); r.Exit != 0 {
@@ -728,7 +728,7 @@ func TestFilesystemSync_OverrideResetClearsToggles(t *testing.T) {
 func TestFilesystemSync_SaveAsCreatesProfile(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/note/ARTIFACT.md": contextArtifact("note"),
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	target := t.TempDir()
 	if r := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none"); r.Exit != 0 {
@@ -758,7 +758,7 @@ func TestFilesystemSync_SaveAsNoProfileExits2(t *testing.T) {
 func TestFilesystemSync_MultipleWorkspacesIndependentLocks(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/note/ARTIFACT.md": contextArtifact("note"),
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	targetA := t.TempDir()
 	targetB := t.TempDir()
@@ -792,7 +792,7 @@ func TestFilesystemSync_ServeStandaloneLayerPath(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                         solofsMultiLayerConfig,
-		"alice-personal/notes/welcome/ARTIFACT.md": contextArtifact("welcome"),
+		"alice-personal/notes/welcome/ARTIFACT.md": agentArtifact("welcome"),
 	})
 	srv := startServer(t, reg)
 
@@ -820,7 +820,7 @@ func TestFilesystemSync_LayerPathFlagEnvMapping(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":         solofsMultiLayerConfig,
-		"mylayer/note/ARTIFACT.md": contextArtifact("note"),
+		"mylayer/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	srv := startServerArgs(t,
 		[]string{"HOME=" + t.TempDir()},
@@ -845,7 +845,7 @@ func TestFilesystemSync_LayerPathFlagEnvMapping(t *testing.T) {
 func TestFilesystemSync_SearchFailsAgainstFilesystemRegistry(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/note/ARTIFACT.md": contextArtifact("note"),
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=" + reg}, "search", "some query")
 	if res.Exit == 0 {
@@ -871,7 +871,7 @@ func TestFilesystemSync_LayerOrderGhostLayerIgnored(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":            solofsRegistryConfig("ghost-layer", "real-layer"),
-		"real-layer/note/ARTIFACT.md": contextArtifact("note"),
+		"real-layer/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
@@ -887,9 +887,9 @@ func TestFilesystemSync_LayerOrderExtraLayersAppendedAlphabetically(t *testing.T
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":             solofsRegistryConfig("beta-layer"),
-		"alpha-layer/note/ARTIFACT.md": contextArtifact("alpha"),
-		"beta-layer/note/ARTIFACT.md":  contextArtifact("beta"),
-		"gamma-layer/note/ARTIFACT.md": contextArtifact("gamma"),
+		"alpha-layer/note/ARTIFACT.md": agentArtifact("alpha"),
+		"beta-layer/note/ARTIFACT.md":  agentArtifact("beta"),
+		"gamma-layer/note/ARTIFACT.md": agentArtifact("gamma"),
 	})
 	r, err := filesystem.Open(reg)
 	if err != nil {
@@ -915,8 +915,8 @@ func TestFilesystemSync_CollisionRaisedByLint(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                solofsMultiLayerConfig,
-		"layer-a/shared/note/ARTIFACT.md": contextArtifact("from-a"),
-		"layer-b/shared/note/ARTIFACT.md": contextArtifact("from-b"),
+		"layer-a/shared/note/ARTIFACT.md": agentArtifact("from-a"),
+		"layer-b/shared/note/ARTIFACT.md": agentArtifact("from-b"),
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit == 0 {
@@ -935,9 +935,9 @@ func collidingSyncRegistry(t *testing.T) string {
 	t.Helper()
 	return writeRegistry(t, map[string]string{
 		".registry-config":                       solofsRegistryConfig("base-layer", "override-layer"),
-		"base-layer/shared/note/ARTIFACT.md":     "---\ntype: context\nversion: 1.0.0\ndescription: from-base\n---\n\nfrom-base body.\n",
-		"base-layer/shared/other/ARTIFACT.md":    contextArtifact("other"),
-		"override-layer/shared/note/ARTIFACT.md": "---\ntype: context\nversion: 1.1.0\ndescription: from-override\n---\n\nfrom-override body.\n",
+		"base-layer/shared/note/ARTIFACT.md":     "---\ntype: agent\nversion: 1.0.0\ndescription: from-base\n---\n\nfrom-base body.\n",
+		"base-layer/shared/other/ARTIFACT.md":    agentArtifact("other"),
+		"override-layer/shared/note/ARTIFACT.md": "---\ntype: agent\nversion: 1.1.0\ndescription: from-override\n---\n\nfrom-override body.\n",
 	})
 }
 
@@ -1176,7 +1176,7 @@ func extendsSyncRegistry(t *testing.T) string {
 	return writeRegistry(t, map[string]string{
 		".registry-config":                    solofsRegistryConfig("base-layer", "team-layer"),
 		"base-layer/core/notify/ARTIFACT.md":  hook("base", "hook_action: ./notify.sh\n"),
-		"base-layer/shared/other/ARTIFACT.md": contextArtifact("other"),
+		"base-layer/shared/other/ARTIFACT.md": agentArtifact("other"),
 		"team-layer/team/notify/ARTIFACT.md":  hook("team", "extends: core/notify\n"),
 	})
 }
@@ -1259,7 +1259,7 @@ func TestFilesystemSync_DomainMDInLayerNotTreatedAsArtifact(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":              solofsMultiLayerConfig,
 		"team-shared/DOMAIN.md":         "---\ntitle: Finance\n---\n\nFinance domain.\n",
-		"team-shared/notes/ARTIFACT.md": contextArtifact("notes"),
+		"team-shared/notes/ARTIFACT.md": agentArtifact("notes"),
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
@@ -1298,7 +1298,7 @@ func TestFilesystemSync_TopLevelDomainMDAmbiguous(t *testing.T) {
 func TestFilesystemSync_SyncDryRunJSONStructured(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/note/ARTIFACT.md": contextArtifact("note"),
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--dry-run", "--json")
@@ -1318,7 +1318,7 @@ func TestFilesystemSync_SyncDryRunJSONStructured(t *testing.T) {
 func TestFilesystemSync_VisibilityNotEnforced(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/private-note/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: private note\nsensitivity: high\n---\n\nPrivate body.\n",
+		"shared/private-note/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: private note\nsensitivity: high\n---\n\nPrivate body.\n",
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
@@ -1337,7 +1337,7 @@ func TestFilesystemSync_RelativeRegistryPathResolved(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(regDir, "shared", "note"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(regDir, "shared", "note", "ARTIFACT.md"), []byte(contextArtifact("note")), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(regDir, "shared", "note", "ARTIFACT.md"), []byte(agentArtifact("note")), 0o644); err != nil {
 		t.Fatalf("write ARTIFACT.md: %v", err)
 	}
 	// Write sync.yaml with a relative path.
@@ -1361,12 +1361,12 @@ func TestFilesystemSync_NoAuditLogInFilesystemMode(t *testing.T) {
 		t.Fatalf("git init exit=%d stderr=%s", r.Exit, r.Stderr)
 	}
 	solofsWriteFile(t, filepath.Join(gitReg, ".registry-config"), solofsMultiLayerConfig)
-	solofsWriteFile(t, filepath.Join(gitReg, "shared", "note", "ARTIFACT.md"), contextArtifact("note"))
+	solofsWriteFile(t, filepath.Join(gitReg, "shared", "note", "ARTIFACT.md"), agentArtifact("note"))
 	runExternal(t, gitReg, 10*time.Second, "git", "-c", "user.email=alice@acme.com", "-c", "user.name=alice", "add", ".")
 	runExternal(t, gitReg, 10*time.Second, "git", "-c", "user.email=alice@acme.com", "-c", "user.name=alice", "commit", "-m", "initial")
 
 	// Modify and commit again.
-	solofsWriteFile(t, filepath.Join(gitReg, "shared", "note", "ARTIFACT.md"), contextArtifact("note-v2"))
+	solofsWriteFile(t, filepath.Join(gitReg, "shared", "note", "ARTIFACT.md"), agentArtifact("note-v2"))
 	runExternal(t, gitReg, 10*time.Second, "git", "-c", "user.email=alice@acme.com", "-c", "user.name=alice", "add", ".")
 	runExternal(t, gitReg, 10*time.Second, "git", "-c", "user.email=alice@acme.com", "-c", "user.name=alice", "commit", "-m", "update note")
 
@@ -1402,7 +1402,7 @@ func TestFilesystemSync_NoAuditLogInFilesystemMode(t *testing.T) {
 func TestFilesystemSync_NoFreezeOrSigningEnforcement(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/note/ARTIFACT.md": contextArtifact("note"),
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	target := t.TempDir()
 	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
@@ -1429,7 +1429,7 @@ func TestFilesystemSync_NoFreezeOrSigningEnforcement(t *testing.T) {
 func TestFilesystemSync_MCPFailsAgainstFilesystemRegistry(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		"shared/note/ARTIFACT.md": contextArtifact("note"),
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
 	})
 	mcpEnv := []string{
 		"PODIUM_REGISTRY=" + reg,
@@ -1463,8 +1463,8 @@ func TestFilesystemSync_BitIdenticalFilesystemVsServer(t *testing.T) {
 	t.Parallel()
 	registry := writeRegistry(t, map[string]string{
 		".registry-config":          "multi_layer: true\n",
-		"team/glossary/ARTIFACT.md": contextArtifact("glossary"),
-		"team/policy/ARTIFACT.md":   contextArtifact("policy"),
+		"team/glossary/ARTIFACT.md": agentArtifact("glossary"),
+		"team/policy/ARTIFACT.md":   agentArtifact("policy"),
 	})
 
 	fsTarget := t.TempDir()
@@ -1515,7 +1515,7 @@ func TestSoloFS_ServerSourceURLMaterializes(t *testing.T) {
 	t.Parallel()
 	registry := writeRegistry(t, map[string]string{
 		".registry-config":                 "multi_layer: true\n",
-		"team-shared/glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"team-shared/glossary/ARTIFACT.md": agentArtifact("glossary"),
 	})
 	srv := startServer(t, registry)
 	target := t.TempDir()

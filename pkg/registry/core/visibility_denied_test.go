@@ -22,7 +22,7 @@ func TestLoadArtifact_EmitsVisibilityDeniedWhenLayerInvisible(t *testing.T) {
 	}
 	if err := st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: tenantID, ArtifactID: "team/secret", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Layer: "private",
+		ContentHash: "sha256:a", Type: "agent", Layer: "private",
 	}); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}

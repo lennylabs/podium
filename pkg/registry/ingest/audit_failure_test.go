@@ -29,7 +29,7 @@ func TestIngest_AuditEmitterPanicDoesNotPreventCommit(t *testing.T) {
 	}
 	files := fstest.MapFS{
 		"x/ARTIFACT.md": &fstest.MapFile{
-			Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
+			Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
 		},
 	}
 	// Wrap a panicking emitter in a recover so the goroutine doesn't
@@ -70,7 +70,7 @@ func TestIngest_NilAuditEmitterIsClean(t *testing.T) {
 	}
 	files := fstest.MapFS{
 		"x/ARTIFACT.md": &fstest.MapFile{
-			Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
+			Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
 		},
 	}
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{

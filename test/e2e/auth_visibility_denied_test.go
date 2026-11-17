@@ -66,14 +66,14 @@ func TestAuthVisibilityDenied_SearchLoadObjects(t *testing.T) {
 			{
 				ID: "restricted",
 				Files: map[string]string{
-					restrictedID + "/ARTIFACT.md":  authContext("quarterly ledger detail, restricted to finance owners"),
+					restrictedID + "/ARTIFACT.md":  authAgent("quarterly ledger detail, restricted to finance owners"),
 					restrictedID + "/data/big.bin": above,
 				},
 				Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 			},
 			{
 				ID:         "public",
-				Files:      map[string]string{publicID + "/ARTIFACT.md": authContext("quarterly overview, visible to everyone")},
+				Files:      map[string]string{publicID + "/ARTIFACT.md": authAgent("quarterly overview, visible to everyone")},
 				Visibility: authVisibility{Public: true},
 			},
 		},

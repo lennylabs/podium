@@ -15,8 +15,8 @@ import (
 func TestSearchDomains_FindsMatchingPath(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("finance/run-variance/ARTIFACT.md", contextFor("Variance", "finance")),
-		fixture("ops/restart-runner/ARTIFACT.md", contextFor("Restart runner", "ops")),
+		fixture("finance/run-variance/ARTIFACT.md", agentFor("Variance", "finance")),
+		fixture("ops/restart-runner/ARTIFACT.md", agentFor("Restart runner", "ops")),
 	)
 	body := mustGet(t, h.URL, "/v1/search_domains?query=finance&top_k=5")
 	var resp server.SearchResponse
@@ -51,7 +51,7 @@ func TestDependents_MissingIDReturns400(t *testing.T) {
 func TestDependents_ReturnsEdgesArray(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("a/ARTIFACT.md", contextFor("A", "")),
+		fixture("a/ARTIFACT.md", agentFor("A", "")),
 	)
 	body := mustGet(t, h.URL, "/v1/dependents?id=a")
 	var resp map[string]any
@@ -104,7 +104,7 @@ func TestAdminReembed_ArtifactWithoutVersionReturns400(t *testing.T) {
 func TestAdminReembed_TenantWidePostReachesHandler(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("a/ARTIFACT.md", contextFor("A", "")),
+		fixture("a/ARTIFACT.md", agentFor("A", "")),
 	)
 	req, _ := http.NewRequest(http.MethodPost, h.URL+"/v1/admin/reembed", nil)
 	resp, err := http.DefaultClient.Do(req)
@@ -126,7 +126,7 @@ func TestAdminReembed_TenantWidePostReachesHandler(t *testing.T) {
 func TestAdminReembed_InvalidSinceReturns400(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("a/ARTIFACT.md", contextFor("A", "")),
+		fixture("a/ARTIFACT.md", agentFor("A", "")),
 	)
 	req, _ := http.NewRequest(http.MethodPost,
 		h.URL+"/v1/admin/reembed?since=not-a-timestamp", nil)
@@ -150,7 +150,7 @@ func TestAdminReembed_InvalidSinceReturns400(t *testing.T) {
 func TestAdminReembed_ValidSinceReachesHandler(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("a/ARTIFACT.md", contextFor("A", "")),
+		fixture("a/ARTIFACT.md", agentFor("A", "")),
 	)
 	req, _ := http.NewRequest(http.MethodPost,
 		h.URL+"/v1/admin/reembed?since=2026-01-01T00:00:00Z", nil)
@@ -169,7 +169,7 @@ func TestAdminReembed_ValidSinceReachesHandler(t *testing.T) {
 func TestDomainAnalyze_OKAndWrongMethod(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("finance/run-variance/ARTIFACT.md", contextFor("Variance", "finance")),
+		fixture("finance/run-variance/ARTIFACT.md", agentFor("Variance", "finance")),
 	)
 	if body := mustGet(t, h.URL, "/v1/domain/analyze?path=finance"); len(body) == 0 {
 		t.Errorf("empty body")
@@ -203,8 +203,8 @@ func TestScopePreview_ReturnsPreview(t *testing.T) {
 func TestSearchArtifacts_TagsFilterExercisesSplitCSV(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t,
-		fixture("a/ARTIFACT.md", contextFor("A", "finance,ap")),
-		fixture("b/ARTIFACT.md", contextFor("B", "sales")),
+		fixture("a/ARTIFACT.md", agentFor("A", "finance,ap")),
+		fixture("b/ARTIFACT.md", agentFor("B", "sales")),
 	)
 	body := mustGet(t, h.URL, "/v1/search_artifacts?tags=finance,ap")
 	var resp server.SearchResponse

@@ -59,12 +59,12 @@ func erIngest(t *testing.T, st store.Store, layerID string, files map[string]str
 	return res
 }
 
-// erRow builds a context row whose stored ARTIFACT.md is doc, ingested hour
+// erRow builds an agent row whose stored ARTIFACT.md is doc, ingested hour
 // hours after erEpoch.
 func erRow(id, ver, layerID, doc string, hour int) store.ManifestRecord {
 	return store.ManifestRecord{
-		TenantID: erTenant, ArtifactID: id, Version: ver, Layer: layerID, Type: "context",
-		Description: "Fixture context artifact.", Sensitivity: "low",
+		TenantID: erTenant, ArtifactID: id, Version: ver, Layer: layerID, Type: "agent",
+		Description: "Fixture agent artifact.", Sensitivity: "low",
 		Frontmatter: []byte(doc), Body: []byte("Body of " + id + "@" + ver + ".\n"),
 		IngestedAt: erEpoch.Add(time.Duration(hour) * time.Hour),
 	}
@@ -177,7 +177,7 @@ func TestIngest_ExtendsRemovedRefusal(t *testing.T) {
 	t.Parallel()
 	st := newStore(t)
 	res := erIngest(t, st, "team", map[string]string{
-		"ops/child/ARTIFACT.md": erDoc("context", "1.0.0", "extends: ops/base\ndelegates_to: [ops/target]\n", "Child body."),
+		"ops/child/ARTIFACT.md": erDoc("agent", "1.0.0", "extends: ops/base\ndelegates_to: [ops/target]\n", "Child body."),
 	})
 	if res.Accepted != 0 || res.Idempotent != 0 || len(res.Rejected) != 1 {
 		t.Fatalf("result = %+v, want the one refusal only", res)
@@ -188,7 +188,7 @@ func TestIngest_ExtendsRemovedRefusal(t *testing.T) {
 	erAssertNoDependents(t, st, "ops/target")
 
 	plain := erIngest(t, st, "base", map[string]string{
-		"ops/child/ARTIFACT.md": erDoc("context", "1.0.0", "", "Plain body."),
+		"ops/child/ARTIFACT.md": erDoc("agent", "1.0.0", "", "Plain body."),
 	})
 	if plain.Accepted != 1 || len(plain.Rejected) != 0 {
 		t.Fatalf("plain copy from another layer = %+v, want accepted with no ingest.collision", plain)
@@ -245,9 +245,9 @@ func TestIngest_RetiredRowIsNoCollision(t *testing.T) {
 	t.Parallel()
 	st := newStore(t)
 	erSeed(t, st, erRow("ops/doc", "1.0.0", "team",
-		erDoc("context", "1.0.0", "extends: ops/base\n", "Retired body."), 1))
+		erDoc("agent", "1.0.0", "extends: ops/base\n", "Retired body."), 1))
 	res := erIngest(t, st, "base", map[string]string{
-		"ops/doc/ARTIFACT.md": erDoc("context", "2.0.0", "", "Plain body."),
+		"ops/doc/ARTIFACT.md": erDoc("agent", "2.0.0", "", "Plain body."),
 	})
 	if res.Accepted != 1 || len(res.Rejected) != 0 {
 		t.Fatalf("result = %+v, want ops/doc@2.0.0 accepted with no rejection", res)
@@ -259,7 +259,7 @@ func TestIngest_RetiredRowIsNoCollision(t *testing.T) {
 func TestIngest_RetiredRowBytesAreRefused(t *testing.T) {
 	t.Parallel()
 	st := newStore(t)
-	doc := erDoc("context", "1.0.0", "extends: ops/base\n", "Retired body.")
+	doc := erDoc("agent", "1.0.0", "extends: ops/base\n", "Retired body.")
 	erSeed(t, st, erRow("ops/doc", "1.0.0", "team", doc, 1))
 	res := erIngest(t, st, "team", map[string]string{"ops/doc/ARTIFACT.md": doc})
 	if res.Idempotent != 0 || res.Accepted != 0 || len(res.Conflicts) != 0 {
@@ -276,9 +276,9 @@ func TestIngest_RetiredRowVersionIsImmutable(t *testing.T) {
 	t.Parallel()
 	st := newStore(t)
 	retired := erSeed(t, st, erRow("ops/doc", "1.0.0", "team",
-		erDoc("context", "1.0.0", "extends: ops/base\n", "Retired body."), 1))
+		erDoc("agent", "1.0.0", "extends: ops/base\n", "Retired body."), 1))
 	res := erIngest(t, st, "base", map[string]string{
-		"ops/doc/ARTIFACT.md": erDoc("context", "1.0.0", "", "Plain body."),
+		"ops/doc/ARTIFACT.md": erDoc("agent", "1.0.0", "", "Plain body."),
 	})
 	if len(res.Conflicts) != 1 {
 		t.Fatalf("Conflicts = %+v, want one: %+v", res.Conflicts, res)
@@ -351,9 +351,9 @@ func TestIngest_ExtendsRemovedProseReference(t *testing.T) {
 	t.Parallel()
 	st := newStore(t)
 	res := erIngest(t, st, "team", map[string]string{
-		"ops/refused/ARTIFACT.md": erDoc("context", "1.0.0", "extends: ops/base\n", "Refused body."),
-		"ops/kept/ARTIFACT.md":    erDoc("context", "1.0.0", "", "Kept body."),
-		"ops/sibling/ARTIFACT.md": erDoc("context", "1.0.0", "",
+		"ops/refused/ARTIFACT.md": erDoc("agent", "1.0.0", "extends: ops/base\n", "Refused body."),
+		"ops/kept/ARTIFACT.md":    erDoc("agent", "1.0.0", "", "Kept body."),
+		"ops/sibling/ARTIFACT.md": erDoc("agent", "1.0.0", "",
 			"See [the refused one](ops/refused) and [the kept one](ops/kept)."),
 	})
 	erAssertExtendsRemoved(t, res, "ops/refused")
@@ -409,9 +409,9 @@ func TestIngest_SkillMDExtendsKeyIsServed(t *testing.T) {
 var erTwoLayerFiles = struct {
 	yBase, yOther, z, s string
 }{
-	yBase:  erDoc("context", "1.0.0", "", "Base copy of ops/y."),
-	yOther: erDoc("context", "3.0.0", "", "Other copy of ops/y."),
-	z:      erDoc("context", "1.0.0", "", "Body of ops/z."),
+	yBase:  erDoc("agent", "1.0.0", "", "Base copy of ops/y."),
+	yOther: erDoc("agent", "3.0.0", "", "Other copy of ops/y."),
+	z:      erDoc("agent", "1.0.0", "", "Body of ops/z."),
 	s:      erSkill("s", ""),
 }
 
@@ -444,7 +444,7 @@ func erTwoLayerStore(t *testing.T) *store.Memory {
 	now := time.Now().UTC()
 	rows := []store.ManifestRecord{
 		erRow("ops/y", "1.0.0", "base", erTwoLayerFiles.yBase, 0),
-		erRow("ops/y", "2.0.0", "team", erDoc("context", "2.0.0", "extends: ops/y\n", "Team overlay of ops/y."), 0),
+		erRow("ops/y", "2.0.0", "team", erDoc("agent", "2.0.0", "extends: ops/y\n", "Team overlay of ops/y."), 0),
 		erRow("ops/y", "3.0.0", "other", erTwoLayerFiles.yOther, 0),
 	}
 	for i, rec := range rows {

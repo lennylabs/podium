@@ -25,7 +25,7 @@ func TestNewFromFilesystem_AdmitsObjectHeldBody(t *testing.T) {
 	dir := t.TempDir()
 	large := makeBigPayload(objectstore.InlineCutoff + 1024)
 	testharness.WriteTree(t, dir,
-		testharness.WriteTreeOption{Path: "finance/run/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\ndescription: run\n---\n\nbody\n"},
+		testharness.WriteTreeOption{Path: "finance/run/ARTIFACT.md", Content: "---\ntype: agent\nversion: 1.0.0\ndescription: run\n---\n\nbody\n"},
 		testharness.WriteTreeOption{Path: "finance/run/data/big.bin", Content: string(large)},
 	)
 	objects, err := objectstore.Open(filepath.Join(t.TempDir(), "objects"))

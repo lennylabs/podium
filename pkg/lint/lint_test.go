@@ -175,7 +175,7 @@ func TestLint_InvalidSemverVersion(t *testing.T) {
 		testharness.WriteTreeOption{
 			Path: "x/ARTIFACT.md",
 			Content: `---
-type: context
+type: agent
 version: v1
 description: invalid version
 ---
@@ -199,9 +199,10 @@ func TestLint_EffortHintWarnsOnUnsupportedType(t *testing.T) {
 		testharness.WriteTreeOption{
 			Path: "x/ARTIFACT.md",
 			Content: `---
-type: context
+type: rule
 version: 1.0.0
-description: context with hints
+description: rule with hints
+rule_mode: always
 effort_hint: high
 ---
 
@@ -437,7 +438,7 @@ func TestLint_HookEventIgnoredForNonHook(t *testing.T) {
 		testharness.WriteTreeOption{
 			Path: "ctx/note/ARTIFACT.md",
 			Content: `---
-type: context
+type: agent
 version: 1.0.0
 hook_event: totally-made-up
 ---

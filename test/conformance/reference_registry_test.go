@@ -78,7 +78,7 @@ func TestReferenceRegistry_SyncsThroughNoneAdapter(t *testing.T) {
 }
 
 // Spec: §11 — claude-code adapter handles the reference registry's
-// type-skill / type-context mix without errors.
+// type-skill mix, including reference and user-invoked skills, without errors.
 func TestReferenceRegistry_SyncsThroughClaudeCode(t *testing.T) {
 	t.Parallel()
 	target := t.TempDir()

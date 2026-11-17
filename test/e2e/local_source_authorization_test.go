@@ -32,12 +32,12 @@ func TestLayerCLI_LocalRefusedForNonAdmin(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "seed",
-			Files:      map[string]string{"seed/note/ARTIFACT.md": authContext("seed note")},
+			Files:      map[string]string{"seed/note/ARTIFACT.md": authAgent("seed note")},
 			Visibility: authVisibility{Public: true},
 		}},
 	})
 	root := writeRegistry(t, map[string]string{
-		"ops/runbook/ARTIFACT.md": authContext("an operations runbook"),
+		"ops/runbook/ARTIFACT.md": authAgent("an operations runbook"),
 	})
 
 	// ---- A verified non-admin is refused, with the rule named ---------------
@@ -62,7 +62,7 @@ func TestLayerCLI_LocalRefusedForNonAdmin(t *testing.T) {
 	// admits the operation rather than closing the local operator out of a
 	// deployment that has no way to grant the role.
 	std := startServer(t, writeRegistry(t, map[string]string{
-		"seed/note/ARTIFACT.md": authContext("seed note"),
+		"seed/note/ARTIFACT.md": authAgent("seed note"),
 	}))
 	stdEnv := []string{
 		"PODIUM_REGISTRY=" + std.BaseURL,
@@ -84,7 +84,7 @@ func TestLayerCLI_AdminOnlyFieldsRefusedForNonAdmin(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "seed",
-			Files:      map[string]string{"seed/note/ARTIFACT.md": authContext("seed note")},
+			Files:      map[string]string{"seed/note/ARTIFACT.md": authAgent("seed note")},
 			Visibility: authVisibility{Public: true},
 		}},
 	})
@@ -120,7 +120,7 @@ func bootLayerTree(t *testing.T, id string) (root, link string) {
 	parent := t.TempDir()
 	root = filepath.Join(parent, id)
 	testharness.WriteTree(t, root,
-		testharness.WriteTreeOption{Path: "ops/runbook/ARTIFACT.md", Content: authContext("an operations runbook")},
+		testharness.WriteTreeOption{Path: "ops/runbook/ARTIFACT.md", Content: authAgent("an operations runbook")},
 	)
 	if err := os.WriteFile(filepath.Join(parent, "outside.txt"), []byte(bootEscapedBytes+"\n"), 0o644); err != nil {
 		t.Fatalf("write the file outside the root: %v", err)

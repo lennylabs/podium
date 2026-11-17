@@ -227,14 +227,14 @@ func (l *republishLayer) waitForVersion(t testing.TB, id, version string, within
 }
 
 // republishArtifact renders the ARTIFACT.md for a versionSpec. The type
-// defaults to context (the registry indexes the description for search and
-// context artifacts carry their body inline, so a single ARTIFACT.md is a
+// defaults to agent (the registry indexes the description for search and
+// agent artifacts carry their body inline, so a single ARTIFACT.md is a
 // complete, lint-clean artifact). deprecated and replaced_by are emitted only
 // when set so a non-deprecated version carries no deprecation frontmatter.
 func republishArtifact(spec versionSpec) string {
 	typ := spec.Type
 	if typ == "" {
-		typ = "context"
+		typ = "agent"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "---\ntype: %s\nversion: %s\n", typ, spec.Version)

@@ -90,10 +90,11 @@ func TestCapability_CoreFeatureSet(t *testing.T) {
 	if got := CoreFeatureSet(); len(got) != 0 {
 		t.Errorf("CoreFeatureSet() = %v, want empty (claude-desktop materializes nothing)", got)
 	}
-	// context is native on every harness except claude-desktop, so it is not
-	// in the core set under the literal "every harness" definition.
-	if InCoreFeatureSet(Capability{Field: "type", Value: "context"}) {
-		t.Errorf("InCoreFeatureSet(type: context) = true; claude-desktop is ✗")
+	// rule_mode: always is native on every harness except claude-desktop and
+	// claude-cowork, so it is not in the core set under the literal "every
+	// harness" definition.
+	if InCoreFeatureSet(Capability{Field: "rule_mode", Value: "always"}) {
+		t.Errorf("InCoreFeatureSet(rule_mode: always) = true; claude-desktop is ✗")
 	}
 	if InCoreFeatureSet(Capability{Field: "sandbox_profile"}) {
 		t.Errorf("InCoreFeatureSet(sandbox_profile) = true")

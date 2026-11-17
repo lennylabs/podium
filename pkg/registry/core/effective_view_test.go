@@ -21,12 +21,12 @@ func TestEffectiveView_ListsLatestPerIDSorted(t *testing.T) {
 	for _, v := range []string{"1.0.0", "2.0.0"} {
 		_ = st.PutManifest(context.Background(), store.ManifestRecord{
 			TenantID: tenant, ArtifactID: "b/glossary", Version: v,
-			ContentHash: "sha256:" + v, Type: "context", Layer: "L",
+			ContentHash: "sha256:" + v, Type: "agent", Layer: "L",
 		})
 	}
 	_ = st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "a/policy", Version: "1.0.0",
-		ContentHash: "sha256:p", Type: "context", Layer: "L",
+		ContentHash: "sha256:p", Type: "agent", Layer: "L",
 	})
 	reg := core.New(st, tenant, []layer.Layer{
 		{ID: "L", Visibility: layer.Visibility{Public: true}, Precedence: 1},
@@ -59,11 +59,11 @@ func TestEffectiveView_AppliesVisibility(t *testing.T) {
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenant})
 	_ = st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "public-x", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Layer: "public",
+		ContentHash: "sha256:a", Type: "agent", Layer: "public",
 	})
 	_ = st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "private-y", Version: "1.0.0",
-		ContentHash: "sha256:b", Type: "context", Layer: "private",
+		ContentHash: "sha256:b", Type: "agent", Layer: "private",
 	})
 	reg := core.New(st, tenant, []layer.Layer{
 		{ID: "public", Visibility: layer.Visibility{Public: true}, Precedence: 1},

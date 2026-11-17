@@ -60,7 +60,7 @@ func TestAuthObjectsRevocation_RefusesAfterMembershipLoss(t *testing.T) {
 		Layers: []authLayer{{
 			ID: "finance",
 			Files: map[string]string{
-				id + "/ARTIFACT.md":  authContext("variance bundle restricted to finance"),
+				id + "/ARTIFACT.md":  authAgent("variance bundle restricted to finance"),
 				id + "/data/big.bin": above,
 			},
 			Visibility: authVisibility{Groups: []string{"finance"}},

@@ -110,14 +110,14 @@ func TestRun_ServerSourceLockPinsRegistryContentHash(t *testing.T) {
 	const authoritative = "sha256:deadbeefcafef00d"
 	// Guard the fixture: the recomputed digest over the served frontmatter must
 	// differ from the authoritative stub value, or the test proves nothing.
-	if contentHashFor(materialRecord{AuthoredBytes: []byte(contextArtifactSrc)}) == authoritative {
+	if contentHashFor(materialRecord{AuthoredBytes: []byte(agentArtifactSrc)}) == authoritative {
 		t.Fatal("test setup: served frontmatter hashes to the authoritative value; pick a distinct stub hash")
 	}
 	srv := newStubRegistry(t, map[string]stubArtifact{
 		"team/glossary": {
-			typ:          "context",
+			typ:          "agent",
 			layer:        "team-shared",
-			frontmatter:  contextArtifactSrc,
+			frontmatter:  agentArtifactSrc,
 			manifestBody: "Glossary body.\n",
 			contentHash:  authoritative,
 		},

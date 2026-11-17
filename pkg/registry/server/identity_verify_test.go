@@ -31,7 +31,7 @@ func verifyFixture(t *testing.T, verify func(*http.Request) (layer.Identity, err
 	}
 	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "finance/secret", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Description: "finance secret", Layer: "fin",
+		ContentHash: "sha256:a", Type: "agent", Description: "finance secret", Layer: "fin",
 	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
@@ -164,7 +164,7 @@ func objectsVerifyFixture(t *testing.T, verify func(*http.Request) (layer.Identi
 	}
 	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "finance/secret", Version: "1.0.0",
-		ContentHash: "sha256:a", Type: "context", Description: "finance secret", Layer: "fin",
+		ContentHash: "sha256:a", Type: "agent", Description: "finance secret", Layer: "fin",
 		Resources: []store.ResourceRef{
 			{Path: "data/big.bin", ContentHash: "sha256:" + key, Size: int64(len(large)), ContentType: "application/octet-stream"},
 		},

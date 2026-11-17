@@ -78,8 +78,8 @@ type signedArtifactFixture struct {
 
 // signedArtifactSpec configures a signedArtifactFixture. ID is the canonical
 // artifact id. Frontmatter is the full ARTIFACT.md the stub serves (frontmatter
-// plus body for a context artifact); when empty a default medium-sensitivity
-// context artifact is synthesized. Sensitivity defaults to "medium"; the
+// plus body for an agent artifact); when empty a default medium-sensitivity
+// agent artifact is synthesized. Sensitivity defaults to "medium"; the
 // policy reads no sensitivity, so the value only labels the fixture.
 // ExtraTrustedKeys, when set, are listed ahead of the fixture's signing key in
 // the comma-separated PODIUM_SIGNATURE_VERIFY_KEY that Env emits, so the
@@ -114,7 +114,7 @@ func newSignedArtifactFixture(t *testing.T, spec signedArtifactSpec) *signedArti
 		pub:         pub,
 		trusted:     spec.ExtraTrustedKeys,
 		id:          orDefault(spec.ID, "finance/secret-policy"),
-		typ:         orDefault(spec.Type, "context"),
+		typ:         orDefault(spec.Type, "agent"),
 		sensitivity: orDefault(spec.Sensitivity, "medium"),
 		customFM:    spec.Frontmatter,
 	}

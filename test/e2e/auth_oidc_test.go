@@ -262,7 +262,7 @@ func oidcSCIMGroupBody(displayName string, memberIDs []string) []byte {
 // oidcStartSCIMServer starts a standalone registry with SCIM enabled.
 func oidcStartSCIMServer(t testing.TB, scimToken string, extraEnv ...string) *serverProc {
 	t.Helper()
-	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": agentArtifact("seed")})
 	env := []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_SCIM_TOKENS=" + scimToken,
@@ -278,7 +278,7 @@ func TestAuth_PublicModeWithIdPFails(t *testing.T) {
 	bin := cmdharness.Bin(t, "podium")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": agentArtifact("seed")})
 	cmd := exec.CommandContext(ctx, bin, "serve", "--standalone", "--layer-path", reg)
 	cmd.Env = mergeEnv(
 		"HOME="+t.TempDir(),
@@ -571,11 +571,11 @@ func TestAuth_StatusShowsIdentityProvider(t *testing.T) {
 
 func TestAuth_LayerGroupVisibility(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": agentArtifact("seed")})
 	srv := startServer(t, reg)
 
 	// Register a layer scoped to the "engineering" group.
-	localPath := writeRegistry(t, map[string]string{"eng/ARTIFACT.md": contextArtifact("engineering artifact")})
+	localPath := writeRegistry(t, map[string]string{"eng/ARTIFACT.md": agentArtifact("engineering artifact")})
 	res := runPodium(t, "", nil,
 		"layer", "register",
 		"--registry", srv.BaseURL,
@@ -610,7 +610,7 @@ func TestAuth_LayerGroupVisibility(t *testing.T) {
 
 func TestAuth_SCIMNotMountedWithoutToken(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": agentArtifact("seed")})
 	// Start WITHOUT PODIUM_SCIM_TOKENS.
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()},
 		"serve", "--standalone", "--layer-path", reg)
@@ -795,7 +795,7 @@ func TestAuth_IdpGroupMappingRemapsClaim(t *testing.T) {
 	// A finance-only layer (visibility: groups: [finance]) declared in
 	// registry.yaml so its visibility is explicit rather than the default.
 	layerRoot := writeRegistry(t, map[string]string{
-		"finance/secret/ARTIFACT.md": contextArtifact("finance secret"),
+		"finance/secret/ARTIFACT.md": agentArtifact("finance secret"),
 	})
 	cfgPath := filepath.Join(home, "registry.yaml")
 	cfg := "" +
@@ -1013,7 +1013,7 @@ func TestAuth_SlowDownIncreasesInterval(t *testing.T) {
 
 func TestAuth_HealthzReachableWithOIDCMode(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": agentArtifact("seed")})
 	// PODIUM_IDENTITY_PROVIDER=oidc is a free-form label that is not a
 	// registered provider, so no verifier is installed and startup is not
 	// blocked. The registry verifies callers only under injected-session-token.
@@ -1053,7 +1053,7 @@ func TestAuth_HealthzReachableWithOIDCMode(t *testing.T) {
 // is nil on exactly this bind.
 func TestAuth_ReembedGatedWhenIdentityProviderNamed(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": agentArtifact("seed")})
 	srv := startServerArgs(t, []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_IDENTITY_PROVIDER=oidc",
@@ -1078,9 +1078,9 @@ func TestAuth_ReembedGatedWhenIdentityProviderNamed(t *testing.T) {
 
 func TestAuth_LayerRegisterVisibilityFlagNotExist(t *testing.T) {
 	t.Parallel()
-	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": agentArtifact("seed")})
 	srv := startServer(t, reg)
-	localPath := writeRegistry(t, map[string]string{"eng/ARTIFACT.md": contextArtifact("eng")})
+	localPath := writeRegistry(t, map[string]string{"eng/ARTIFACT.md": agentArtifact("eng")})
 
 	res := runPodium(t, "", nil,
 		"layer", "register",
@@ -1104,7 +1104,7 @@ func TestAuth_LayerRegisterVisibilityFlagNotExist(t *testing.T) {
 func TestAuth_SCIMStorePersistsAcrossRestart(t *testing.T) {
 	t.Parallel()
 	storePath := filepath.Join(t.TempDir(), "nested", "scim.json")
-	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
+	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": agentArtifact("seed")})
 
 	// First server instance.
 	srv1 := startServerArgs(t, []string{

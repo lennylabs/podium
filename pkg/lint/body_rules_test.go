@@ -52,10 +52,10 @@ func TestRuleArtifactBodyForSkill_AcceptsEmptyOrSingleComment(t *testing.T) {
 // resolve. References to missing files are an ingest error.
 func TestRuleProseReference_BundledFileResolves(t *testing.T) {
 	t.Parallel()
-	body := "---\ntype: context\n---\nSee [the script](./scripts/run.py)."
+	body := "---\ntype: agent\n---\nSee [the script](./scripts/run.py)."
 	rec := filesystem.ArtifactRecord{
 		ID:            "team/example",
-		Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
+		Artifact:      &manifest.Artifact{Type: manifest.TypeAgent},
 		ArtifactBytes: []byte(body),
 		Resources: map[string][]byte{
 			"scripts/run.py": []byte("print('run')\n"),
@@ -71,10 +71,10 @@ func TestRuleProseReference_BundledFileResolves(t *testing.T) {
 
 func TestRuleProseReference_MissingBundledFileErrors(t *testing.T) {
 	t.Parallel()
-	body := "---\ntype: context\n---\nSee [the script](./scripts/missing.py)."
+	body := "---\ntype: agent\n---\nSee [the script](./scripts/missing.py)."
 	rec := filesystem.ArtifactRecord{
 		ID:            "team/example",
-		Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
+		Artifact:      &manifest.Artifact{Type: manifest.TypeAgent},
 		ArtifactBytes: []byte(body),
 	}
 	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
@@ -94,10 +94,10 @@ func TestRuleProseReference_MissingBundledFileErrors(t *testing.T) {
 
 func TestRuleProseReference_RejectsPathEscape(t *testing.T) {
 	t.Parallel()
-	body := "---\ntype: context\n---\nSee [escape](../../etc/passwd)."
+	body := "---\ntype: agent\n---\nSee [escape](../../etc/passwd)."
 	rec := filesystem.ArtifactRecord{
 		ID:            "team/example",
-		Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
+		Artifact:      &manifest.Artifact{Type: manifest.TypeAgent},
 		ArtifactBytes: []byte(body),
 	}
 	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
@@ -119,13 +119,13 @@ func TestRuleProseReference_ResolvesAgainstCatalog(t *testing.T) {
 	t.Parallel()
 	referrer := filesystem.ArtifactRecord{
 		ID:            "finance/ap/pay-invoice",
-		Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
-		ArtifactBytes: []byte("---\ntype: context\n---\nSee [the reconciler](finance/ap/reconcile)."),
+		Artifact:      &manifest.Artifact{Type: manifest.TypeAgent},
+		ArtifactBytes: []byte("---\ntype: agent\n---\nSee [the reconciler](finance/ap/reconcile)."),
 	}
 	target := filesystem.ArtifactRecord{
 		ID:            "finance/ap/reconcile",
-		Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
-		ArtifactBytes: []byte("---\ntype: context\n---\nNo references here."),
+		Artifact:      &manifest.Artifact{Type: manifest.TypeAgent},
+		ArtifactBytes: []byte("---\ntype: agent\n---\nNo references here."),
 	}
 	diags := (&lint.Linter{}).Lint(context.Background(), nil,
 		[]filesystem.ArtifactRecord{referrer, target})
@@ -142,13 +142,13 @@ func TestRuleProseReference_ResolvesPinnedArtifact(t *testing.T) {
 	t.Parallel()
 	referrer := filesystem.ArtifactRecord{
 		ID:            "finance/ap/pay-invoice",
-		Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
-		ArtifactBytes: []byte("---\ntype: context\n---\nPinned [reconcile](finance/ap/reconcile@1.2.0)."),
+		Artifact:      &manifest.Artifact{Type: manifest.TypeAgent},
+		ArtifactBytes: []byte("---\ntype: agent\n---\nPinned [reconcile](finance/ap/reconcile@1.2.0)."),
 	}
 	target := filesystem.ArtifactRecord{
 		ID:            "finance/ap/reconcile",
-		Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
-		ArtifactBytes: []byte("---\ntype: context\n---\nNo references here."),
+		Artifact:      &manifest.Artifact{Type: manifest.TypeAgent},
+		ArtifactBytes: []byte("---\ntype: agent\n---\nNo references here."),
 	}
 	diags := (&lint.Linter{}).Lint(context.Background(), nil,
 		[]filesystem.ArtifactRecord{referrer, target})
@@ -165,8 +165,8 @@ func TestRuleProseReference_UnknownArtifactErrors(t *testing.T) {
 	t.Parallel()
 	rec := filesystem.ArtifactRecord{
 		ID:            "finance/ap/pay-invoice",
-		Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
-		ArtifactBytes: []byte("---\ntype: context\n---\nSee [ghost](finance/ap/does-not-exist)."),
+		Artifact:      &manifest.Artifact{Type: manifest.TypeAgent},
+		ArtifactBytes: []byte("---\ntype: agent\n---\nSee [ghost](finance/ap/does-not-exist)."),
 	}
 	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
 	gotErr := false
@@ -220,8 +220,8 @@ func TestRuleProseReference_URLStatusRange(t *testing.T) {
 
 			rec := filesystem.ArtifactRecord{
 				ID:            "team/example",
-				Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
-				ArtifactBytes: []byte("---\ntype: context\n---\nLink [home](" + ts.URL + "/r)."),
+				Artifact:      &manifest.Artifact{Type: manifest.TypeAgent},
+				ArtifactBytes: []byte("---\ntype: agent\n---\nLink [home](" + ts.URL + "/r)."),
 			}
 			rule := lint.NewProseReferenceRule(noRedirectClient())
 			diags := (&lint.Linter{Rules: []lint.Rule{rule}}).Lint(
@@ -272,10 +272,10 @@ func TestRuleProseReference_URLHEAD(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	body := "---\ntype: context\n---\nLive at [home](" + ts.URL + "/ok). Dead at [home](" + ts.URL + "/missing)."
+	body := "---\ntype: agent\n---\nLive at [home](" + ts.URL + "/ok). Dead at [home](" + ts.URL + "/missing)."
 	rec := filesystem.ArtifactRecord{
 		ID:            "team/example",
-		Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
+		Artifact:      &manifest.Artifact{Type: manifest.TypeAgent},
 		ArtifactBytes: []byte(body),
 	}
 	rule := lint.NewProseReferenceRule(ts.Client())

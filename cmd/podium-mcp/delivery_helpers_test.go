@@ -88,7 +88,7 @@ func servedDeliveryHashOf(resp loadArtifactResponse) string {
 	return version.DeliveryHash(rec)
 }
 
-// primeCachedRecord writes the sealed context record cachedRecord builds for
+// primeCachedRecord writes the sealed record cachedRecord builds for
 // id into cache through cacheVerifiedRecord, the writer a verified live load
 // uses, so a later cache-served load finds its per-ID delivery files. It
 // returns the record.
@@ -135,9 +135,9 @@ func servedJSON(t *testing.T, resp loadArtifactResponse, overrides map[string]an
 // large_resources and framed by each link's content hash.
 func base64Body(t *testing.T, decoded []byte, encoded string, links map[string]largeResourceLink) string {
 	t.Helper()
-	fm := "---\ntype: context\n---\nbody"
+	fm := "---\ntype: agent\n---\nbody"
 	resp := sealDelivery(loadArtifactResponse{
-		ID: "team/x", Type: "context", Version: "1.0.0", Frontmatter: fm,
+		ID: "team/x", Type: "agent", Version: "1.0.0", Frontmatter: fm,
 		Resources:      map[string]string{"bin/blob": string(decoded)},
 		LargeResources: links,
 		ContentHash:    "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{"bin/blob": decoded}),

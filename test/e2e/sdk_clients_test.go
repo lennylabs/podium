@@ -113,7 +113,7 @@ func csSkillReg(t *testing.T) string {
 		// (and mismatching SKILL.md) is a lint error that blocks ingest, so omit it.
 		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\ntags: [finance, close]\n---\n\n<!-- body -->\n",
 		"finance/close-reporting/run-variance-analysis/SKILL.md":    skillBody("run-variance-analysis"),
-		"finance/ap/pay-invoice/ARTIFACT.md":                        contextArtifact("pay invoice"),
+		"finance/ap/pay-invoice/ARTIFACT.md":                        agentArtifact("pay invoice"),
 	})
 }
 
@@ -251,16 +251,16 @@ func TestSDK_PyTypeAgent(t *testing.T) {
 	csWantStdout(t, res, "ALL_AGENT True")
 }
 
-// Python search_artifacts type=context.
-func TestSDK_PyTypeContext(t *testing.T) {
+// Python search_artifacts type=skill.
+func TestSDK_PyTypeSkill(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"ctx/style/ARTIFACT.md": contextArtifact("style guide"),
+		"docs/style-guide/SKILL.md": "---\nname: style-guide\ndescription: style guide\nmetadata:\n  version: \"1.0.0\"\n---\n\nFollow the style guide.\n",
 	}))
 	res := csRunPy(t, py, srv.BaseURL,
-		"from podium import Client\nc = Client.from_env()\nr = c.search_artifacts('style guide', type='context')\nprint('ALL_CTX', all(d.type == 'context' for d in r.results))\n")
-	csWantStdout(t, res, "ALL_CTX True")
+		"from podium import Client\nc = Client.from_env()\nr = c.search_artifacts('style guide', type='skill')\nprint('ALL_SKILL', len(r.results) > 0 and all(d.type == 'skill' for d in r.results))\n")
+	csWantStdout(t, res, "ALL_SKILL True")
 }
 
 // Python search_artifacts type=mcp-server.
@@ -404,12 +404,12 @@ func TestSDK_PyBulkVisibilityDenied(t *testing.T) {
 		Layers: []authLayer{
 			{
 				ID:         "shared",
-				Files:      map[string]string{"finance/ap/pay-invoice/ARTIFACT.md": authContext("pay invoice")},
+				Files:      map[string]string{"finance/ap/pay-invoice/ARTIFACT.md": authAgent("pay invoice")},
 				Visibility: authVisibility{Public: true},
 			},
 			{
 				ID:         "restricted",
-				Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+				Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("restricted ledger")},
 				Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 			},
 		},
@@ -452,7 +452,7 @@ func TestSDK_PyDependentsOf(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay"),
 		"agents/orch/ARTIFACT.md":            "---\ntype: agent\nversion: 1.0.0\ndescription: Orchestrator.\ndelegates_to: [finance/ap/pay-invoice]\n---\n\nbody\n",
 	}))
 	res := csRunPy(t, py, srv.BaseURL,
@@ -465,7 +465,7 @@ func TestSDK_PyDependentsOfEmpty(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/standalone/ARTIFACT.md": contextArtifact("standalone"),
+		"finance/ap/standalone/ARTIFACT.md": agentArtifact("standalone"),
 	}))
 	res := csRunPy(t, py, srv.BaseURL,
 		"from podium import Client\nc = Client.from_env()\ndeps = c.dependents_of('finance/ap/standalone')\nprint('LEN', len(deps))\n")
@@ -493,7 +493,7 @@ func TestSDK_PyCustomConsumer(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"evals/regression-suite/run-week-42/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Week 42 eval.\n---\n\nThe eval body.\n",
+		"evals/regression-suite/run-week-42/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Week 42 eval.\n---\n\nThe eval body.\n",
 	}))
 	res := csRunPy(t, py, srv.BaseURL,
 		"from podium import Client\nc = Client.from_env()\na = c.load_artifact('evals/regression-suite/run-week-42')\nprint('FM', bool(a.frontmatter), 'BODY', bool(a.manifest_body))\n")
@@ -515,10 +515,10 @@ func TestSDK_PyEvalPipeline(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: A doc.\ntags: [regression]\n---\n\nbody\n",
+		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: A doc.\ntags: [regression]\n---\n\nbody\n",
 	}))
 	res := csRunPy(t, py, srv.BaseURL,
-		"from podium import Client\nc = Client.from_env()\nsuite = c.search_artifacts(type='context', tags=['regression'], top_k=50)\nok = True\nfor d in suite.results:\n    a = c.load_artifact(d.id)\n    ok = ok and bool(a.frontmatter)\nprint('PIPELINE_OK', ok)\n")
+		"from podium import Client\nc = Client.from_env()\nsuite = c.search_artifacts(type='agent', tags=['regression'], top_k=50)\nok = True\nfor d in suite.results:\n    a = c.load_artifact(d.id)\n    ok = ok and bool(a.frontmatter)\nprint('PIPELINE_OK', ok)\n")
 	csWantStdout(t, res, "PIPELINE_OK True")
 }
 
@@ -557,7 +557,7 @@ func TestSDK_TSDependentsOf(t *testing.T) {
 	t.Parallel()
 	node := csNode(t)
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay"),
+		"finance/ap/pay-invoice/ARTIFACT.md": agentArtifact("pay"),
 		"agents/orch/ARTIFACT.md":            "---\ntype: agent\nversion: 1.0.0\ndescription: Orchestrator.\ndelegates_to: [finance/ap/pay-invoice]\n---\n\nbody\n",
 	}))
 	res := csRunTS(t, node, srv.BaseURL,
@@ -748,12 +748,12 @@ func TestSDK_PyIdentityUnchanged(t *testing.T) {
 		Layers: []authLayer{
 			{
 				ID:         "shared",
-				Files:      map[string]string{"finance/ap/pay-invoice/ARTIFACT.md": authContext("pay invoice")},
+				Files:      map[string]string{"finance/ap/pay-invoice/ARTIFACT.md": authAgent("pay invoice")},
 				Visibility: authVisibility{Public: true},
 			},
 			{
 				ID:         "restricted",
-				Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+				Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("restricted ledger")},
 				Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 			},
 		},

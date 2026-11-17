@@ -63,7 +63,7 @@ func TestAuthAdminCLIRBAC_GrantRevokeShowEffective(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "restricted",
-			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("restricted ledger")},
 			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 		}},
 	})
@@ -128,7 +128,7 @@ func TestAuthAdminCLIRBAC_AdminDefinedLayerRegistration(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "seed",
-			Files:      map[string]string{"seed/note/ARTIFACT.md": authContext("seed note")},
+			Files:      map[string]string{"seed/note/ARTIFACT.md": authAgent("seed note")},
 			Visibility: authVisibility{Public: true},
 		}},
 	})
@@ -137,7 +137,7 @@ func TestAuthAdminCLIRBAC_AdminDefinedLayerRegistration(t *testing.T) {
 	// A local source the registry can read. No --user-defined flag: this is an
 	// admin-defined registration, which the server gates on AdminAuthorize.
 	layerRoot := writeRegistry(t, map[string]string{
-		"ops/runbook/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: an admin-defined operations runbook\n---\n\nbody\n",
+		"ops/runbook/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: an admin-defined operations runbook\n---\n\nbody\n",
 	})
 	reg := runPodium(t, "", acliEnv(t, srv, adminToken),
 		"layer", "register", "--id", "ops", "--local", layerRoot, "--organization")

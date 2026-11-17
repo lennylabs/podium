@@ -52,8 +52,8 @@ func makeOverlayWithBody(t *testing.T, dir, body string) string {
 func TestRun_OverlayOverridesRegistry(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	registryBody := "---\ntype: context\nversion: 1.0.0\ndescription: registry\nsensitivity: low\n---\n\nfrom registry\n"
-	overlayBody := "---\ntype: context\nversion: 1.0.0\ndescription: overlay\nsensitivity: low\n---\n\nfrom overlay\n"
+	registryBody := "---\ntype: agent\nversion: 1.0.0\ndescription: registry\nsensitivity: low\n---\n\nfrom registry\n"
+	overlayBody := "---\ntype: agent\nversion: 1.0.0\ndescription: overlay\nsensitivity: low\n---\n\nfrom overlay\n"
 	registry := makeRegistryWithBody(t, dir, registryBody)
 	ovl := makeOverlayWithBody(t, dir, overlayBody)
 	target := filepath.Join(dir, "out")
@@ -89,7 +89,7 @@ func TestRun_OverlayOverridesRegistry(t *testing.T) {
 // error, and the §4.6 collision rule drops nothing.
 func TestRun_OverlayWithExtendsReplacesWholesale(t *testing.T) {
 	t.Parallel()
-	registryBody := "---\ntype: context\nversion: 1.0.0\ndescription: base\nsensitivity: low\ntags: [a]\n---\n\nfrom registry\n"
+	registryBody := "---\ntype: agent\nversion: 1.0.0\ndescription: base\nsensitivity: low\ntags: [a]\n---\n\nfrom registry\n"
 	cases := map[string]string{
 		"extends the registry artifact": "finance/intro",
 		"extends a missing parent":      "missing/parent",
@@ -98,7 +98,7 @@ func TestRun_OverlayWithExtendsReplacesWholesale(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			overlayBody := "---\ntype: context\nversion: 1.0.0\ndescription: overlay\nsensitivity: low\nextends: " +
+			overlayBody := "---\ntype: agent\nversion: 1.0.0\ndescription: overlay\nsensitivity: low\nextends: " +
 				parent + "\ntags: [b]\n---\n\nfrom overlay\n"
 			registry := makeRegistryWithBody(t, dir, registryBody)
 			ovl := makeOverlayWithBody(t, dir, overlayBody)
@@ -134,7 +134,7 @@ func TestRun_OverlayWithExtendsReplacesWholesale(t *testing.T) {
 func TestRun_OverlayAppendsNewArtifact(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	registryBody := "---\ntype: context\nversion: 1.0.0\ndescription: r\nsensitivity: low\n---\n\nregistry-only\n"
+	registryBody := "---\ntype: agent\nversion: 1.0.0\ndescription: r\nsensitivity: low\n---\n\nregistry-only\n"
 	registry := makeRegistryWithBody(t, dir, registryBody)
 	// Overlay adds a different id at marketing/deck.
 	ovl := filepath.Join(dir, "overlay")
@@ -143,7 +143,7 @@ func TestRun_OverlayAppendsNewArtifact(t *testing.T) {
 	}
 	if err := os.WriteFile(
 		filepath.Join(ovl, "marketing", "deck", "ARTIFACT.md"),
-		[]byte("---\ntype: context\nversion: 1.0.0\ndescription: ovl-only\nsensitivity: low\n---\n\nfrom overlay\n"),
+		[]byte("---\ntype: agent\nversion: 1.0.0\ndescription: ovl-only\nsensitivity: low\n---\n\nfrom overlay\n"),
 		0o644,
 	); err != nil {
 		t.Fatalf("WriteFile artifact: %v", err)
@@ -174,8 +174,8 @@ func TestRun_OverlayAppendsNewArtifact(t *testing.T) {
 func TestRun_OverlayRecordLockHashesItsAuthoredManifest(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	registryBody := "---\ntype: context\nversion: 1.0.0\ndescription: registry\nsensitivity: low\n---\n\nfrom registry\n"
-	overlayBody := "---\ntype: context\nversion: 2.0.0\ndescription: overlay\nsensitivity: low\n---\n\nfrom overlay\n"
+	registryBody := "---\ntype: agent\nversion: 1.0.0\ndescription: registry\nsensitivity: low\n---\n\nfrom registry\n"
+	overlayBody := "---\ntype: agent\nversion: 2.0.0\ndescription: overlay\nsensitivity: low\n---\n\nfrom overlay\n"
 	registry := makeRegistryWithBody(t, dir, registryBody)
 	ovl := makeOverlayWithBody(t, dir, overlayBody)
 	target := filepath.Join(dir, "out")

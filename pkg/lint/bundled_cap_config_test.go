@@ -30,7 +30,7 @@ func TestBundledResourceSize_PerFileCapConfigurable(t *testing.T) {
 	// 2 KB resource: well under the 1 MB default, over a 1 KB configured cap.
 	rec := filesystem.ArtifactRecord{
 		ID:        "team/small-context",
-		Artifact:  &manifest.Artifact{Type: manifest.TypeContext},
+		Artifact:  &manifest.Artifact{Type: manifest.TypeAgent},
 		Resources: map[string][]byte{"data.bin": make([]byte, 2*1024)},
 	}
 	if got := bundledSizeDiags(&lint.Linter{}, rec, lint.SeverityWarning); len(got) != 0 {
@@ -48,7 +48,7 @@ func TestBundledResourceSize_PerPackageCapConfigurable(t *testing.T) {
 	t.Parallel()
 	rec := filesystem.ArtifactRecord{
 		ID:       "team/small-package",
-		Artifact: &manifest.Artifact{Type: manifest.TypeContext},
+		Artifact: &manifest.Artifact{Type: manifest.TypeAgent},
 		Resources: map[string][]byte{
 			"a.bin": make([]byte, 2*1024),
 			"b.bin": make([]byte, 2*1024),
@@ -81,7 +81,7 @@ func TestNewIngestLinter_ReadsCapEnv(t *testing.T) {
 
 	rec := filesystem.ArtifactRecord{
 		ID:        "team/ctx",
-		Artifact:  &manifest.Artifact{Type: manifest.TypeContext},
+		Artifact:  &manifest.Artifact{Type: manifest.TypeAgent},
 		Resources: map[string][]byte{"data.bin": make([]byte, 2*1024)},
 	}
 	if got := bundledSizeDiags(l, rec, lint.SeverityWarning); len(got) != 1 {

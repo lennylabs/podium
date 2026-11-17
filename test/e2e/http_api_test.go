@@ -49,13 +49,13 @@ import (
 func apiReg(t testing.TB) string {
 	return writeRegistry(t, map[string]string{
 		"finance/DOMAIN.md":          "---\ndescription: Vendor payments and invoice reconciliation for the finance org.\nkeywords: [vendor, payments, invoice]\n---\n\nFinance domain.\n",
-		"finance/run/ARTIFACT.md":    "---\ntype: context\nversion: 1.2.0\ntags: [finance, reporting]\ndescription: Run variance analysis for month-end close across vendor payments here.\n---\n\nVariance analysis body.\n",
-		"finance/ap/pay/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ntags: [finance]\ndescription: Accounts payable pay-invoice reference for vendor payments here today.\n---\n\nAP body.\n",
-		"finance/old/ARTIFACT.md":    "---\ntype: context\nversion: 1.0.0\ndeprecated: true\nreplaced_by: finance/run\ndescription: Deprecated variance helper replaced by the run-variance artifact here.\n---\n\nOld body.\n",
+		"finance/run/ARTIFACT.md":    "---\ntype: agent\nversion: 1.2.0\ntags: [finance, reporting]\ndescription: Run variance analysis for month-end close across vendor payments here.\n---\n\nVariance analysis body.\n",
+		"finance/ap/pay/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ntags: [finance]\ndescription: Accounts payable pay-invoice reference for vendor payments here today.\n---\n\nAP body.\n",
+		"finance/old/ARTIFACT.md":    "---\ntype: agent\nversion: 1.0.0\ndeprecated: true\nreplaced_by: finance/run\ndescription: Deprecated variance helper replaced by the run-variance artifact here.\n---\n\nOld body.\n",
 		"personal/greet/ARTIFACT.md": greetSkillArtifact,
 		"personal/greet/SKILL.md":    greetSkillBody,
 		"personal/agent/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: A coordinating agent for release orchestration used in tests here.\n---\n\nAgent body.\n",
-		"personal/note/ARTIFACT.md":  contextArtifact("Personal note about reminders and tracking for later use here today."),
+		"personal/note/ARTIFACT.md":  agentArtifact("Personal note about reminders and tracking for later use here today."),
 	})
 }
 
@@ -369,11 +369,11 @@ func TestHTTPAPI_SearchArtifacts(t *testing.T) {
 // spec: http-api.md § search_artifacts — type filter.
 func TestHTTPAPI_SearchArtifactsType(t *testing.T) {
 	srv := startServer(t, apiReg(t))
-	st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?type=context")
+	st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?type=agent")
 	apiWantStatus(t, st, 200, "search_artifacts type", body)
 	for _, r := range apiJSONObj(t, body)["results"].([]any) {
-		if r.(map[string]any)["type"] != "context" {
-			t.Fatalf("type=context returned %v", r)
+		if r.(map[string]any)["type"] != "agent" {
+			t.Fatalf("type=agent returned %v", r)
 		}
 	}
 }
@@ -474,7 +474,7 @@ func TestHTTPAPI_LoadArtifactDefaultLatest(t *testing.T) {
 // real code path that splits resources at objectstore.InlineCutoff.
 func TestHTTPAPI_LoadArtifactLargeResource(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
-		"finance/big/ARTIFACT.md":       "---\ntype: context\nversion: 1.0.0\ndescription: An artifact with a large bundled script resource for delivery tests.\n---\n\nBody.\n",
+		"finance/big/ARTIFACT.md":       "---\ntype: agent\nversion: 1.0.0\ndescription: An artifact with a large bundled script resource for delivery tests.\n---\n\nBody.\n",
 		"finance/big/scripts/big.txt":   strings.Repeat("x", int(objectstore.InlineCutoff)+4096),
 		"finance/big/scripts/small.txt": "tiny",
 	})
@@ -591,12 +591,12 @@ func TestHTTPAPI_BatchLoadVisibilityDenied(t *testing.T) {
 		Layers: []authLayer{
 			{
 				ID:         "public",
-				Files:      map[string]string{"finance/run/ARTIFACT.md": authContext("public run report")},
+				Files:      map[string]string{"finance/run/ARTIFACT.md": authAgent("public run report")},
 				Visibility: authVisibility{Public: true},
 			},
 			{
 				ID:         "restricted",
-				Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+				Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("restricted ledger")},
 				Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 			},
 		},
@@ -1393,7 +1393,7 @@ func TestHTTPAPI_ErrorEnvelope(t *testing.T) {
 func TestHTTPAPI_ObjectsServesBytes(t *testing.T) {
 	payload := strings.Repeat("z", int(objectstore.InlineCutoff)+2048)
 	reg := writeRegistry(t, map[string]string{
-		"finance/big/ARTIFACT.md":     "---\ntype: context\nversion: 1.0.0\ndescription: An artifact with a large bundled resource for object serving tests.\n---\n\nBody.\n",
+		"finance/big/ARTIFACT.md":     "---\ntype: agent\nversion: 1.0.0\ndescription: An artifact with a large bundled resource for object serving tests.\n---\n\nBody.\n",
 		"finance/big/scripts/big.txt": payload,
 	})
 	ostore, err := objectstore.Open(t.TempDir())
@@ -1598,7 +1598,7 @@ func TestHTTPAPI_AdminGrants(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "restricted",
-			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("restricted ledger")},
 			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 		}},
 	})
@@ -1645,7 +1645,7 @@ func TestHTTPAPI_AdminShowEffective(t *testing.T) {
 		BootstrapAdmins: []string{"alice@acme.com"},
 		Layers: []authLayer{{
 			ID:         "restricted",
-			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authContext("restricted ledger")},
+			Files:      map[string]string{"finance/ledger/ARTIFACT.md": authAgent("restricted ledger")},
 			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
 		}},
 	})
@@ -1728,7 +1728,7 @@ func TestHTTPAPI_SLOLoadArtifact(t *testing.T) {
 // batch item, with no deprecation warning.
 func TestHTTPAPI_LoadNonDeprecatedArtifactReturnsReplacedBy(t *testing.T) {
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"finance/live/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\nreplaced_by: finance/next\ndescription: A live artifact that already names its successor for callers here.\n---\n\nLive body.\n",
+		"finance/live/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\nreplaced_by: finance/next\ndescription: A live artifact that already names its successor for callers here.\n---\n\nLive body.\n",
 	}))
 	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=finance/live")
 	apiWantStatus(t, st, 200, "load_artifact non-deprecated", body)

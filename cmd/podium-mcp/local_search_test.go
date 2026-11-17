@@ -28,7 +28,7 @@ func TestLocalSearch_DescriptionMatch(t *testing.T) {
 		{
 			ID: "team/ops/restart-runner",
 			Artifact: &manifest.Artifact{
-				Type:        manifest.TypeCommand,
+				Type:        manifest.TypeAgent,
 				Name:        "restart-runner",
 				Description: "restart the build runner",
 				Version:     "1.0.0",
@@ -50,12 +50,12 @@ func TestLocalSearch_TypeFilter(t *testing.T) {
 	records := []filesystem.ArtifactRecord{
 		{ID: "x/skill",
 			Artifact: &manifest.Artifact{Type: manifest.TypeSkill, Name: "skill", Description: "x"}},
-		{ID: "x/cmd",
-			Artifact: &manifest.Artifact{Type: manifest.TypeCommand, Name: "cmd", Description: "x"}},
+		{ID: "x/agent",
+			Artifact: &manifest.Artifact{Type: manifest.TypeAgent, Name: "agent", Description: "x"}},
 	}
-	got := localSearch(records, "x", "command", "", nil, 10)
-	if len(got) != 1 || got[0].ID != "x/cmd" {
-		t.Errorf("got %+v, want only x/cmd", got)
+	got := localSearch(records, "x", "agent", "", nil, 10)
+	if len(got) != 1 || got[0].ID != "x/agent" {
+		t.Errorf("got %+v, want only x/agent", got)
 	}
 }
 
@@ -64,8 +64,8 @@ func TestLocalSearch_TypeFilter(t *testing.T) {
 func TestLocalSearch_EmptyQueryAlphabetical(t *testing.T) {
 	t.Parallel()
 	records := []filesystem.ArtifactRecord{
-		{ID: "z/last", Artifact: &manifest.Artifact{Type: manifest.TypeContext}},
-		{ID: "a/first", Artifact: &manifest.Artifact{Type: manifest.TypeContext}},
+		{ID: "z/last", Artifact: &manifest.Artifact{Type: manifest.TypeAgent}},
+		{ID: "a/first", Artifact: &manifest.Artifact{Type: manifest.TypeAgent}},
 	}
 	got := localSearch(records, "", "", "", nil, 10)
 	if len(got) != 2 {
@@ -80,8 +80,8 @@ func TestLocalSearch_EmptyQueryAlphabetical(t *testing.T) {
 func TestLocalSearch_ScopeFilter(t *testing.T) {
 	t.Parallel()
 	records := []filesystem.ArtifactRecord{
-		{ID: "team/a", Artifact: &manifest.Artifact{Type: manifest.TypeContext, Description: "match"}},
-		{ID: "other/b", Artifact: &manifest.Artifact{Type: manifest.TypeContext, Description: "match"}},
+		{ID: "team/a", Artifact: &manifest.Artifact{Type: manifest.TypeAgent, Description: "match"}},
+		{ID: "other/b", Artifact: &manifest.Artifact{Type: manifest.TypeAgent, Description: "match"}},
 	}
 	got := localSearch(records, "match", "", "team/", nil, 10)
 	if len(got) != 1 || got[0].ID != "team/a" {

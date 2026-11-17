@@ -17,9 +17,9 @@ import (
 
 // fixture builders --------------------------------------------------------
 
-func contextArtifact(desc string) string {
+func agentArtifact(desc string) string {
 	return "---\n" +
-		"type: context\n" +
+		"type: agent\n" +
 		"version: 1.0.0\n" +
 		"description: " + desc + "\n" +
 		"sensitivity: low\n" +
@@ -71,7 +71,7 @@ func newStore(t testing.TB) store.Store {
 func TestIngest_NewArtifactAccepted(t *testing.T) {
 	t.Parallel()
 	fsys := fstest.MapFS{
-		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Glossary"))},
+		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("Glossary"))},
 	}
 	st := newStore(t)
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -102,7 +102,7 @@ func TestIngest_NewArtifactAccepted(t *testing.T) {
 func TestIngest_IdempotentOnSameContent(t *testing.T) {
 	t.Parallel()
 	fsys := fstest.MapFS{
-		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Glossary"))},
+		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("Glossary"))},
 	}
 	st := newStore(t)
 	for i := 0; i < 3; i++ {
@@ -135,7 +135,7 @@ func TestIngest_IngestedMarksTheNewlyAcceptedPairs(t *testing.T) {
 	t.Parallel()
 	st := newStore(t)
 	first := fstest.MapFS{
-		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Glossary"))},
+		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("Glossary"))},
 	}
 	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "tenant-1",
@@ -145,8 +145,8 @@ func TestIngest_IngestedMarksTheNewlyAcceptedPairs(t *testing.T) {
 		t.Fatalf("first ingest: %v", err)
 	}
 	second := fstest.MapFS{
-		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Glossary"))},
-		"deploy-runbook/ARTIFACT.md":   &fstest.MapFile{Data: []byte(contextArtifact("Runbook"))},
+		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("Glossary"))},
+		"deploy-runbook/ARTIFACT.md":   &fstest.MapFile{Data: []byte(agentArtifact("Runbook"))},
 	}
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "tenant-1",
@@ -181,7 +181,7 @@ func TestIngest_ImmutabilityViolation(t *testing.T) {
 	t.Parallel()
 	st := newStore(t)
 	first := fstest.MapFS{
-		"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("first"))},
+		"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("first"))},
 	}
 	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "tenant-1", LayerID: "L", Files: first,
@@ -189,7 +189,7 @@ func TestIngest_ImmutabilityViolation(t *testing.T) {
 		t.Fatalf("first ingest: %v", err)
 	}
 	second := fstest.MapFS{
-		"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("changed"))},
+		"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("changed"))},
 	}
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "tenant-1", LayerID: "L", Files: second,
@@ -219,12 +219,12 @@ func TestIngest_ImmutabilityViolation(t *testing.T) {
 func TestIngest_LintFailureBlocksThatArtifact(t *testing.T) {
 	t.Parallel()
 	bad := "---\n" +
-		"type: context\n" +
+		"type: agent\n" +
 		// Missing version, which is required.
 		"description: bad\n" +
 		"---\n\nbody\n"
 	fsys := fstest.MapFS{
-		"good/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("good"))},
+		"good/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("good"))},
 		"bad/ARTIFACT.md":  &fstest.MapFile{Data: []byte(bad)},
 	}
 	st := newStore(t)
@@ -393,8 +393,8 @@ func TestIngest_BatchPartialFailure(t *testing.T) {
 	t.Parallel()
 	st := newStore(t)
 	first := fstest.MapFS{
-		"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("first-x"))},
-		"y/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("first-y"))},
+		"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("first-x"))},
+		"y/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("first-y"))},
 	}
 	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "tenant-1", LayerID: "L", Files: first,
@@ -403,9 +403,9 @@ func TestIngest_BatchPartialFailure(t *testing.T) {
 	}
 	second := fstest.MapFS{
 		// Conflict on x: same version, different bytes.
-		"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("second-x"))},
+		"x/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("second-x"))},
 		// y is unchanged.
-		"y/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("first-y"))},
+		"y/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("first-y"))},
 	}
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
 		TenantID: "tenant-1", LayerID: "L", Files: second,
@@ -467,7 +467,7 @@ func TestIngest_ErrLintFailedExposed(t *testing.T) {
 func TestIngest_RootLevelArtifactRejected(t *testing.T) {
 	t.Parallel()
 	fsys := fstest.MapFS{
-		"ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Root"))},
+		"ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("Root"))},
 	}
 	st := newStore(t)
 	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -489,7 +489,7 @@ func TestIngest_RootLevelArtifactRejected(t *testing.T) {
 func TestIngest_AtSegmentRejected(t *testing.T) {
 	t.Parallel()
 	fsys := fstest.MapFS{
-		"finance/pay@v2/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Pay"))},
+		"finance/pay@v2/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("Pay"))},
 	}
 	st := newStore(t)
 	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -512,8 +512,8 @@ func TestIngest_AtSegmentRejected(t *testing.T) {
 func TestIngest_NestedArtifactsIngestedSeparately(t *testing.T) {
 	t.Parallel()
 	fsys := fstest.MapFS{
-		"outer/ARTIFACT.md":       &fstest.MapFile{Data: []byte(contextArtifact("Outer"))},
-		"outer/inner/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Inner"))},
+		"outer/ARTIFACT.md":       &fstest.MapFile{Data: []byte(agentArtifact("Outer"))},
+		"outer/inner/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("Inner"))},
 	}
 	st := newStore(t)
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -558,7 +558,7 @@ func TestIngest_UnreadableSnapshotDirectoryIsSourceUnreachable(t *testing.T) {
 	t.Parallel()
 	fsys := denyFS{
 		MapFS: fstest.MapFS{
-			"finance/ap/pay-invoice/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Pay an invoice"))},
+			"finance/ap/pay-invoice/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("Pay an invoice"))},
 			"locked/keep":                        &fstest.MapFile{Data: []byte("x")},
 		},
 		deny: "locked",

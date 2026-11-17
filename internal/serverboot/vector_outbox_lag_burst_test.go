@@ -296,15 +296,15 @@ func TestVectorOutbox_LagSignalUnderBurstThenDrains(t *testing.T) {
 }
 
 // burstFixture returns an fs.FS with one discriminating target artifact plus
-// n-1 filler context artifacts, so an outbox ingest queues n vector_pending
+// n-1 filler agent artifacts, so an outbox ingest queues n vector_pending
 // rows. The target's description matches the consistency query.
 func burstFixture(n int) fs.FS {
 	m := fstest.MapFS{
-		"finance/reconcile/ARTIFACT.md": &fstest.MapFile{Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: invoice reconciliation matching vendor payments against purchase orders\n---\n\ninvoice reconciliation body.\n")},
+		"finance/reconcile/ARTIFACT.md": &fstest.MapFile{Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: invoice reconciliation matching vendor payments against purchase orders\n---\n\ninvoice reconciliation body.\n")},
 	}
 	for i := 0; i < n-1; i++ {
 		path := fmt.Sprintf("filler/item-%03d/ARTIFACT.md", i)
-		data := fmt.Sprintf("---\ntype: context\nversion: 1.0.0\ndescription: filler artifact number %d unrelated topic\n---\n\nfiller %d body.\n", i, i)
+		data := fmt.Sprintf("---\ntype: agent\nversion: 1.0.0\ndescription: filler artifact number %d unrelated topic\n---\n\nfiller %d body.\n", i, i)
 		m[path] = &fstest.MapFile{Data: []byte(data)}
 	}
 	return m

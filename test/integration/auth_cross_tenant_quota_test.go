@@ -140,7 +140,7 @@ func TestAuthCrossTenantQuota_NonInterferenceOverSharedPostgres(t *testing.T) {
 		t.Helper()
 		if err := pg.PutManifest(ctx, store.ManifestRecord{
 			TenantID: tenant, ArtifactID: artifactID, Version: "1.0.0",
-			ContentHash: "sha256:" + artifactID, Type: "context", Description: desc,
+			ContentHash: "sha256:" + artifactID, Type: "agent", Description: desc,
 			Layer: "shared", IngestedAt: base,
 		}); err != nil {
 			t.Fatalf("PutManifest(%s/%s): %v", tenant, artifactID, err)

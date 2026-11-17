@@ -33,7 +33,7 @@ func TestRepublish_MultiVersionSelectionAndLatest(t *testing.T) {
 	// Seed registry keeps the standalone boot non-empty; the layer under test is
 	// registered and populated entirely at runtime.
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"seed/ARTIFACT.md": contextArtifact("seed context"),
+		"seed/ARTIFACT.md": agentArtifact("seed context"),
 	}))
 	layer := newRepublishLayer(t, srv, "versions")
 
@@ -65,7 +65,7 @@ func TestRepublish_MultiVersionSelectionAndLatest(t *testing.T) {
 func TestRepublish_DeprecatedSuccessorSkippedByLatest(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"seed/ARTIFACT.md": contextArtifact("seed context"),
+		"seed/ARTIFACT.md": agentArtifact("seed context"),
 	}))
 	layer := newRepublishLayer(t, srv, "deprecation")
 
@@ -101,7 +101,7 @@ func TestRepublish_DeprecatedSuccessorSkippedByLatest(t *testing.T) {
 func TestRepublish_SessionSnapshotStableAcrossRepublish(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"seed/ARTIFACT.md": contextArtifact("seed context"),
+		"seed/ARTIFACT.md": agentArtifact("seed context"),
 	}))
 	layer := newRepublishLayer(t, srv, "session")
 

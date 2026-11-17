@@ -295,9 +295,9 @@ func TestRunLint_OpenFailureAndWriteFailure(t *testing.T) {
 	collide := t.TempDir()
 	files := map[string]string{
 		".registry-config":               "multi_layer: true\nlayer_order:\n  - org\n  - team\n",
-		"org/ops/close/ARTIFACT.md":      "---\ntype: context\nversion: 1.0.0\ndescription: Close the books for the org layer\n---\n\nOrg.\n",
-		"team/ops/close/ARTIFACT.md":     "---\ntype: context\nversion: 1.0.0\ndescription: Close the books for the team layer\n---\n\nTeam.\n",
-		"team/ops/unrelated/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Notes kept beside the colliding copy\n---\n\nNotes.\n",
+		"org/ops/close/ARTIFACT.md":      "---\ntype: agent\nversion: 1.0.0\ndescription: Close the books for the org layer\n---\n\nOrg.\n",
+		"team/ops/close/ARTIFACT.md":     "---\ntype: agent\nversion: 1.0.0\ndescription: Close the books for the team layer\n---\n\nTeam.\n",
+		"team/ops/unrelated/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Notes kept beside the colliding copy\n---\n\nNotes.\n",
 	}
 	for rel, body := range files {
 		p := filepath.Join(collide, rel)

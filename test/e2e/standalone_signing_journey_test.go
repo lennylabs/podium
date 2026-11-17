@@ -30,10 +30,10 @@ import (
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
-// mediumArtifact is a context artifact labeled medium, the sensitivity at
+// mediumArtifact is an agent artifact labeled medium, the sensitivity at
 // which the deleted medium-and-above policy first required a signature.
 func mediumArtifact(desc string) string {
-	return "---\ntype: context\nversion: 1.0.0\ndescription: " + desc + "\nsensitivity: medium\n---\n\n" + desc + " body.\n"
+	return "---\ntype: agent\nversion: 1.0.0\ndescription: " + desc + "\nsensitivity: medium\n---\n\n" + desc + " body.\n"
 }
 
 // startServerSharedHome starts `podium serve --standalone` on the isolated

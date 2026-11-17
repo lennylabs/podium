@@ -111,7 +111,7 @@ func TestClientIdentification_MCPBothStreams(t *testing.T) {
 	t.Parallel()
 
 	reg := writeRegistry(t, map[string]string{
-		"finance/ledger/ARTIFACT.md": contextArtifact("quarterly ledger for finance"),
+		"finance/ledger/ARTIFACT.md": agentArtifact("quarterly ledger for finance"),
 	})
 	registryAudit := filepath.Join(t.TempDir(), "registry-audit.log")
 	srv := startServerArgs(t, []string{

@@ -17,7 +17,7 @@ func TestRuleBundledResourceSize_PerFileWarn(t *testing.T) {
 	big := make([]byte, lint.PerFileSoftCapBytes+1)
 	rec := filesystem.ArtifactRecord{
 		ID:        "team/big-context",
-		Artifact:  &manifest.Artifact{Type: manifest.TypeContext},
+		Artifact:  &manifest.Artifact{Type: manifest.TypeAgent},
 		Resources: map[string][]byte{"data.bin": big},
 	}
 	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
@@ -47,7 +47,7 @@ func TestRuleBundledResourceSize_PerPackageError(t *testing.T) {
 	}
 	rec := filesystem.ArtifactRecord{
 		ID:        "team/big-package",
-		Artifact:  &manifest.Artifact{Type: manifest.TypeContext},
+		Artifact:  &manifest.Artifact{Type: manifest.TypeAgent},
 		Resources: resources,
 	}
 	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
@@ -114,7 +114,7 @@ func TestRuleManifestSize_NonSkillManifestErrorsAtTokenCap(t *testing.T) {
 	body := strings.Repeat("a", lint.ManifestErrTokens*4+8)
 	rec := filesystem.ArtifactRecord{
 		ID:            "context/huge",
-		Artifact:      &manifest.Artifact{Type: manifest.TypeContext},
+		Artifact:      &manifest.Artifact{Type: manifest.TypeAgent},
 		ArtifactBytes: []byte(body),
 	}
 	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})

@@ -164,7 +164,7 @@ func TestAuthOrgIsolation_OrgScopedReadsAreIsolated(t *testing.T) {
 		t.Helper()
 		rec := storetest.Seal(t, store.ManifestRecord{
 			TenantID: tenant, ArtifactID: artifactID, Version: "1.0.0",
-			Frontmatter: []byte(label), Type: "context", Description: desc, Layer: "shared",
+			Frontmatter: []byte(label), Type: "agent", Description: desc, Layer: "shared",
 			IngestedAt: base,
 		}, nil, nil)
 		if err := pg.PutManifest(ctx, rec); err != nil {

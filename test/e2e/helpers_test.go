@@ -857,6 +857,14 @@ func contextArtifact(desc string) string {
 	return fmt.Sprintf("---\ntype: context\nversion: 1.0.0\ndescription: %s\n---\n\n%s body.\n", desc, desc)
 }
 
+// agentArtifact builds an ARTIFACT.md for a type:agent artifact with the
+// given description. Tests whose subject is not the artifact type use it as
+// a stand-in, because an agent is a single-ARTIFACT.md first-class type with
+// no type-specific required field.
+func agentArtifact(desc string) string {
+	return fmt.Sprintf("---\ntype: agent\nversion: 1.0.0\ndescription: %s\n---\n\n%s body.\n", desc, desc)
+}
+
 // skillBody returns a SKILL.md whose name matches the leaf directory. The
 // linter (run at server boot ingest) rejects a skill whose name differs
 // from its parent directory, so the caller must place this under a

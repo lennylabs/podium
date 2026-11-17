@@ -33,7 +33,7 @@ func TestIngest_PublishesArtifactPublished(t *testing.T) {
 		PublishEvent: publish,
 		Files: fstest.MapFS{
 			"x/ARTIFACT.md": &fstest.MapFile{
-				Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
+				Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
 			},
 		},
 	})
@@ -75,7 +75,7 @@ func TestIngest_IdempotentDoesNotRepublish(t *testing.T) {
 	}
 	files := fstest.MapFS{
 		"x/ARTIFACT.md": &fstest.MapFile{
-			Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
+			Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\n---\n\nbody\n"),
 		},
 	}
 	for i := 0; i < 3; i++ {
@@ -110,7 +110,7 @@ func TestIngest_PublishesArtifactDeprecatedOnFlip(t *testing.T) {
 		}
 		return fstest.MapFS{
 			"x/ARTIFACT.md": &fstest.MapFile{
-				Data: []byte("---\ntype: context\nversion: " + version +
+				Data: []byte("---\ntype: agent\nversion: " + version +
 					"\ndescription: x\nsensitivity: low\n" + dep + "---\n\nbody\n"),
 			},
 		}
@@ -161,7 +161,7 @@ func TestIngest_BornDeprecatedDoesNotPublishDeprecated(t *testing.T) {
 		TenantID: "t", LayerID: "L", PublishEvent: publish,
 		Files: fstest.MapFS{
 			"x/ARTIFACT.md": &fstest.MapFile{
-				Data: []byte("---\ntype: context\nversion: 1.0.0\ndescription: x\nsensitivity: low\ndeprecated: true\n---\n\nbody\n"),
+				Data: []byte("---\ntype: agent\nversion: 1.0.0\ndescription: x\nsensitivity: low\ndeprecated: true\n---\n\nbody\n"),
 			},
 		},
 	})
@@ -219,7 +219,7 @@ func TestIngest_EventScopes(t *testing.T) {
 	mk := func(version, dep string) fstest.MapFS {
 		return fstest.MapFS{
 			"finance/DOMAIN.md": &fstest.MapFile{Data: []byte("---\ndescription: finance\n---\n\n# Finance\n")},
-			"finance/run/ARTIFACT.md": &fstest.MapFile{Data: []byte("---\ntype: context\nversion: " + version +
+			"finance/run/ARTIFACT.md": &fstest.MapFile{Data: []byte("---\ntype: agent\nversion: " + version +
 				"\ndescription: x\nsensitivity: low\n" + dep + "---\n\nbody\n")},
 		}
 	}

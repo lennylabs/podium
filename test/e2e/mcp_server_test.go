@@ -18,7 +18,7 @@ import (
 func TestMCPResources_MirrorListAndRead(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"reference/glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"reference/glossary/ARTIFACT.md": agentArtifact("glossary"),
 	}))
 	env := mcpServerEnv(t, srv.BaseURL)
 
@@ -35,7 +35,7 @@ func TestMCPResources_MirrorListAndRead(t *testing.T) {
 		t.Fatalf("resources/read returned no contents: %v", result)
 	}
 	first, _ := contents[0].(map[string]any)
-	if text, _ := first["text"].(string); !strings.Contains(text, "type: context") {
+	if text, _ := first["text"].(string); !strings.Contains(text, "type: agent") {
 		t.Errorf("resources/read content missing manifest frontmatter: %q", text)
 	}
 	if mt, _ := first["mimeType"].(string); mt != "text/markdown" {
@@ -48,7 +48,7 @@ func TestMCPResources_MirrorListAndRead(t *testing.T) {
 func TestMCPResources_ReadRejectsBadURI(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
-		"reference/glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"reference/glossary/ARTIFACT.md": agentArtifact("glossary"),
 	}))
 	res := mcpExec(t, mcpServerEnv(t, srv.BaseURL), rpcReq{ID: 1, Method: "resources/read", Params: map[string]any{"uri": "file:///etc/passwd"}})
 	result := rpcResult(t, res.Stdout, 1)
@@ -76,7 +76,7 @@ func TestMCPInitialize_AdvertisesNoPromptsCapability(t *testing.T) {
 	// The advertised set is tools + resources + sessionCorrelation, both with
 	// and without a command artifact.
 	plain := startServer(t, writeRegistry(t, map[string]string{
-		"reference/glossary/ARTIFACT.md": contextArtifact("glossary"),
+		"reference/glossary/ARTIFACT.md": agentArtifact("glossary"),
 	}))
 	res2 := mcpExec(t, mcpServerEnv(t, plain.BaseURL),
 		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{"protocolVersion": "2024-11-05"}})

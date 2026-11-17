@@ -26,7 +26,7 @@ func catalogFixture(t *testing.T) *httptest.Server {
 		}
 	}
 	put("finance/ap/pay", "skill", "pay vendors")
-	put("finance/close/run", "context", "close the books")
+	put("finance/close/run", "agent", "close the books")
 	put("other/thing", "skill", "unrelated")
 	reg := core.New(st, "default", []layer.Layer{
 		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
