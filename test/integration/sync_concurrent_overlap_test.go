@@ -155,14 +155,18 @@ func TestSyncConcurrent_OverlappingIncludeByteIdenticalShared(t *testing.T) {
 				t.Errorf("consumer %d missing its private item %d: %v", k, i, err)
 			}
 		}
-		// No other consumer's private items leaked into this target.
+		// No other consumer's private subtree leaked into this target.
 		for j := 0; j < consumers; j++ {
 			if j == k {
 				continue
 			}
-			leak := filepath.Join(targets[k], ".claude", "agents", path.Base(privateItemID(j, 0))+".md")
-			if _, err := os.Stat(leak); err == nil {
-				t.Errorf("consumer %d target contains consumer %d's private items", k, j)
+			pattern := filepath.Join(targets[k], ".claude", "agents", fmt.Sprintf("c%d-item-*.md", j))
+			leaks, err := filepath.Glob(pattern)
+			if err != nil {
+				t.Fatalf("glob %s: %v", pattern, err)
+			}
+			if len(leaks) > 0 {
+				t.Errorf("consumer %d target contains consumer %d's private subtree: %v", k, j, leaks)
 			}
 		}
 	}

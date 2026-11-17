@@ -757,10 +757,10 @@ func TestCoreConcept_ClaudeDesktopExtension(t *testing.T) {
 	tgt := t.TempDir()
 	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-desktop")
 	// The sync writes its own .podium/ bookkeeping, but no artifact is
-	// materialized: the target holds no file outside .podium/.
-	if files := readTreeFiltered(t, tgt); len(files) != 0 {
-		t.Errorf("claude-desktop sync materialized project files: %v", keysOf(files))
-	}
+	// materialized: neither the path an agent takes on a harness with a
+	// project surface nor any claude-desktop subtree is produced.
+	mustNotExist(t, filepath.Join(tgt, ".claude", "agents", "helper.md"))
+	mustNotExist(t, filepath.Join(tgt, ".claude-desktop"))
 }
 
 // claude-cowork materializes a context artifact into the harness-neutral

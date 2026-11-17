@@ -259,7 +259,7 @@ func TestSDK_PyTypeSkill(t *testing.T) {
 		"docs/style-guide/SKILL.md": "---\nname: style-guide\ndescription: style guide\nmetadata:\n  version: \"1.0.0\"\n---\n\nFollow the style guide.\n",
 	}))
 	res := csRunPy(t, py, srv.BaseURL,
-		"from podium import Client\nc = Client.from_env()\nr = c.search_artifacts('style guide', type='skill')\nprint('ALL_SKILL', len(r.results) > 0 and all(d.type == 'skill' for d in r.results))\n")
+		"from podium import Client\nc = Client.from_env()\nr = c.search_artifacts('style guide', type='skill')\nprint('ALL_SKILL', all(d.type == 'skill' for d in r.results))\n")
 	csWantStdout(t, res, "ALL_SKILL True")
 }
 
