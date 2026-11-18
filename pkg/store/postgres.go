@@ -155,6 +155,20 @@ var orgTableStmts = []string{
 		computed_at TIMESTAMPTZ NOT NULL,
 		PRIMARY KEY (tenant_id, artifact_id)
 	)`,
+	// §8.7 daily usage totals, one row per day, layer, artifact, client kind, and client
+	// harness.
+	`CREATE TABLE IF NOT EXISTS usage_daily (
+		tenant_id TEXT NOT NULL,
+		day DATE NOT NULL,
+		layer TEXT NOT NULL,
+		artifact_id TEXT NOT NULL,
+		client_kind TEXT NOT NULL,
+		harness TEXT NOT NULL,
+		loads BIGINT NOT NULL DEFAULT 0,
+		syncs BIGINT NOT NULL DEFAULT 0,
+		search_hits BIGINT NOT NULL DEFAULT 0,
+		PRIMARY KEY (tenant_id, day, layer, artifact_id, client_kind, harness)
+	)`,
 }
 
 // orgIndexStmts create the per-org indexes after the org tables and the

@@ -183,6 +183,20 @@ func (s *SQLite) applySchema() error {
 			computed_at TEXT NOT NULL,
 			PRIMARY KEY (tenant_id, artifact_id)
 		)`,
+		// §8.7 daily usage totals, one row per day, layer, artifact, client kind, and
+		// harness. day is the UTC date as YYYY-MM-DD.
+		`CREATE TABLE IF NOT EXISTS usage_daily (
+			tenant_id TEXT NOT NULL,
+			day TEXT NOT NULL,
+			layer TEXT NOT NULL,
+			artifact_id TEXT NOT NULL,
+			client_kind TEXT NOT NULL,
+			harness TEXT NOT NULL,
+			loads INTEGER NOT NULL DEFAULT 0,
+			syncs INTEGER NOT NULL DEFAULT 0,
+			search_hits INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (tenant_id, day, layer, artifact_id, client_kind, harness)
+		)`,
 	}
 	// Indexes are created after the additive column migration because
 	// idx_manifests_tenant_layer references the `layer` column, which the
