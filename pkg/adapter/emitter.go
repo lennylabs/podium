@@ -169,10 +169,11 @@ func claudePluginSkill(root string, src Source) []File {
 	body := src.SkillBytes
 	if len(body) > 0 {
 		// Spec: §4.3.4, §7.8: the plugin's SKILL.md carries the derived
-		// compatibility line and, for a user-invoked skill, the user-only
-		// control. The rule and ARTIFACT.md fallbacks below add neither,
-		// because §4.3.4 allocates both only to a skill's SKILL.md.
-		body = skillMarkdown(src, controlFrontmatter)
+		// compatibility line, the user-only control for a user-invoked skill,
+		// and the resolved when_to_use at the top level where Claude Code
+		// reads it. The rule and ARTIFACT.md fallbacks below add none of
+		// them, because §4.3.4 allocates them only to a skill's SKILL.md.
+		body = withClaudeWhenToUse(skillMarkdown(src, controlFrontmatter), src)
 	}
 	if len(body) == 0 {
 		if frontmatterType(src.ArtifactBytes) == "rule" {

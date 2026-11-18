@@ -261,6 +261,33 @@ func TestSkillTutorial_TopLevelWhenToUse(t *testing.T) {
 	}
 }
 
+// Spec: §4.3.4, §6.7 — podium sync for claude-code writes a skill's
+// metadata.when_to_use as a top-level when_to_use string in the materialized
+// SKILL.md, where Claude Code reads it, and keeps the metadata value; a sync
+// for another harness writes no top-level key.
+func TestSkillTutorial_ClaudeCodeSyncLiftsWhenToUse(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"personal/hello/greet/SKILL.md": "---\nname: greet\ndescription: Greet the user.\n" +
+			"metadata:\n  when_to_use: |\n    At session start.\n    When a teammate joins.\n---\n\nbody\n",
+	})
+	claude := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", claude, "--harness", "claude-code"); res.Exit != 0 {
+		t.Fatalf("claude-code sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	got := readFile(t, filepath.Join(claude, ".claude/skills/greet/SKILL.md"))
+	if !strings.Contains(got, "\nwhen_to_use: \"At session start.\\nWhen a teammate joins.\"\n") || !strings.Contains(got, "  when_to_use: |") {
+		t.Errorf("claude-code SKILL.md lacks the top-level when_to_use or the metadata value:\n%s", got)
+	}
+	cursor := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", cursor, "--harness", "cursor"); res.Exit != 0 {
+		t.Fatalf("cursor sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if got := readFile(t, filepath.Join(cursor, ".cursor/skills/greet/SKILL.md")); strings.Contains(got, "\nwhen_to_use:") {
+		t.Errorf("cursor SKILL.md carries a top-level when_to_use:\n%s", got)
+	}
+}
+
 // name/description/license in a skill's ARTIFACT.md that
 // disagree with SKILL.md are an ingest error (spec §4.3.4).
 func TestSkillTutorial_ArtifactFieldMismatchErrors(t *testing.T) {

@@ -109,6 +109,8 @@ A load from 0.7.0 resolves the fields from the row's stored bytes. Such a row ch
 
 Lexical search reads the row's `name` and `when_to_use` from its stored bytes, so it matches a `metadata.when_to_use` in such a row.
 
+A `podium sync` or a `podium-mcp` load for Claude Code after the upgrade writes a skill's `when_to_use` from `metadata` or `ARTIFACT.md` as a top-level `when_to_use` line in the materialized `SKILL.md` when the authored `SKILL.md` has none, so the first sync after the upgrade rewrites those files and a workflow that publishes on changes sees them as changed. The Claude marketplace output gains the same line.
+
 When a later version of such a skill sets `deprecated`, the registry emits `artifact.deprecated` for it, even when the earlier version's `metadata` already carried `deprecated: "true"`, because the earlier row's stored flag is unset.
 
 #### Publishing an affected skill at a new version

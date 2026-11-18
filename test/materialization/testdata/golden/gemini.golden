@@ -90,6 +90,10 @@ print('hello')
 ---
 name: standup
 description: Summarize yesterday's work for the daily standup.
+metadata:
+  when_to_use: |
+    At the daily standup.
+    When asked what changed yesterday.
 ---
 
 List what changed yesterday and what is planned today.
