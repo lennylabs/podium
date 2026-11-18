@@ -1024,8 +1024,9 @@ func (s *SQLite) ListDeletedLayerConfigs(ctx context.Context, tenantID string) (
 	return out, rows.Err()
 }
 
-// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers and their
-// artifacts whose deleted_at predates `before` (§8.4 30-day window end).
+// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers, their
+// artifacts, and their §8.7 usage counts whose deleted_at predates `before`
+// (§8.4 30-day window end).
 func (s *SQLite) PurgeExpiredLayerDeletions(ctx context.Context, before time.Time) (int, error) {
 	cutoff := before.UTC().Format(time.RFC3339Nano)
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -1036,6 +1037,16 @@ func (s *SQLite) PurgeExpiredLayerDeletions(ctx context.Context, before time.Tim
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM manifests
 		WHERE deleted_at IS NOT NULL AND deleted_at < ?`, cutoff); err != nil {
+		return 0, err
+	}
+	// Spec: §8.7 — the counts are keyed by layer identifier, so they go with
+	// the layer; left behind, they would report to a later layer that
+	// reuses the identifier.
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM usage_daily
+		WHERE (tenant_id, layer) IN (
+			SELECT tenant_id, id FROM layer_configs
+			WHERE deleted_at IS NOT NULL AND deleted_at < ?)`, cutoff); err != nil {
 		return 0, err
 	}
 	res, err := tx.ExecContext(ctx, `

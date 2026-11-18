@@ -587,8 +587,9 @@ func (s *Memory) ListDeletedLayerConfigs(_ context.Context, tenantID string) ([]
 	return out, nil
 }
 
-// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers and their
-// artifacts whose DeletedAt predates `before` (§8.4 30-day window end).
+// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers, their
+// artifacts, and their §8.7 usage counts whose DeletedAt predates `before`
+// (§8.4 30-day window end).
 func (s *Memory) PurgeExpiredLayerDeletions(_ context.Context, before time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -602,9 +603,20 @@ func (s *Memory) PurgeExpiredLayerDeletions(_ context.Context, before time.Time)
 					delete(s.manifests, mk)
 				}
 			}
+			s.deleteLayerUsageLocked(cfg.TenantID, cfg.ID)
 		}
 	}
 	return n, nil
+}
+
+// deleteLayerUsageLocked removes the §8.7 usage rows of one layer. The
+// caller holds s.mu.
+func (s *Memory) deleteLayerUsageLocked(tenantID, layerID string) {
+	for k, c := range s.usage[tenantID] {
+		if c.Layer == layerID {
+			delete(s.usage[tenantID], k)
+		}
+	}
 }
 
 // ReplaceOverlapRecords removes the records the computed artifact owns,

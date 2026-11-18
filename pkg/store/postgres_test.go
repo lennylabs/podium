@@ -94,6 +94,51 @@ func TestPostgres_DeleteUsageBeforeSkipsSchemaWithoutTable(t *testing.T) {
 	}
 }
 
+// Spec: §8.7, §8.4 — the expired-layer purge deletes the purged layer's
+// usage rows, and an org schema an earlier release created, which has no
+// usage_daily until its first request, purges its layers without an error.
+func TestPostgres_PurgeExpiredLayerDeletionsSkipsSchemaWithoutUsage(t *testing.T) {
+	dsn := os.Getenv("PODIUM_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("PODIUM_POSTGRES_DSN unset; skipping Postgres layer purge check")
+	}
+	s, err := store.OpenPostgres(dsn)
+	if err != nil {
+		t.Skipf("OpenPostgres: %v (database unreachable)", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	ctx := context.Background()
+	if err := s.ResetForTest(ctx); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	expired := time.Now().UTC().Add(-40 * 24 * time.Hour)
+	row := store.UsageCount{Day: "2026-10-01", Layer: "gone", ArtifactID: "x", ClientKind: "mcp", Harness: "none", Loads: 1}
+	for _, org := range []string{"a", "b"} {
+		if err := s.CreateTenant(ctx, store.Tenant{ID: org}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.PutLayerConfig(ctx, store.LayerConfig{TenantID: org, ID: "gone", SourceType: "local", LocalPath: "/g", DeletedAt: &expired}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.AddUsageCounts(ctx, org, []store.UsageCount{row}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(ctx, `DROP TABLE org_b.usage_daily`); err != nil {
+		t.Fatalf("drop org_b.usage_daily: %v", err)
+	}
+	n, err := s.PurgeExpiredLayerDeletions(ctx, time.Now().UTC().Add(-30*24*time.Hour))
+	rows, listErr := s.ListUsageCounts(ctx, "a", "2026-09-01", "2026-11-01")
+	if err != nil || n != 2 || listErr != nil || len(rows) != 0 {
+		t.Errorf("purge = %d, %v; org a usage rows %v (%v); want both layers purged, org a's rows gone, and no error for org b", n, err, rows, listErr)
+	}
+}
+
 // Spec: §13.2.1 / §13.9 — the Postgres backend computes
 // observed replication lag from pg_last_xact_replay_timestamp(). On a
 // primary (the usual DSN target) the function is NULL and the query

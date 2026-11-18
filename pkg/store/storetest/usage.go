@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -135,5 +136,41 @@ func usageCountsConcurrentAdd(t *testing.T, s store.Store) {
 	must(t, errors.Join(errs...))
 	if got := usageSummary(t, s, "a", "2026-11-02", "2026-11-02"); got != "a|2026-11-02|team|x|mcp|none=8/8/8" {
 		t.Errorf("concurrent adds: %s, want 8/8/8", got)
+	}
+}
+
+// Spec: §8.7 — purging a soft-deleted layer at the end of its recovery
+// window deletes the layer's usage rows in the same step. A layer still
+// inside its window, a live layer, and a layer of the same identifier in
+// another tenant keep theirs.
+func usageCountsPurgedWithLayer(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	mustCreateTenant(t, s, "b")
+	now := time.Now().UTC()
+	expired, recent := now.Add(-40*24*time.Hour), now.Add(-5*24*time.Hour)
+	for _, l := range []store.LayerConfig{
+		{TenantID: "a", ID: "gone", SourceType: "local", LocalPath: "/g", DeletedAt: &expired},
+		{TenantID: "a", ID: "recent", SourceType: "local", LocalPath: "/r", DeletedAt: &recent},
+		{TenantID: "a", ID: "live", SourceType: "local", LocalPath: "/l"},
+		{TenantID: "b", ID: "gone", SourceType: "local", LocalPath: "/g"},
+	} {
+		must(t, s.PutLayerConfig(ctx, l))
+	}
+	for _, tenant := range []string{"a", "b"} {
+		must(t, s.AddUsageCounts(ctx, tenant, []store.UsageCount{
+			usageRow("2026-11-02", "gone", "x", "mcp", "none", 1, 0, 0),
+			usageRow("2026-11-02", "recent", "x", "mcp", "none", 2, 0, 0),
+			usageRow("2026-11-02", "live", "x", "mcp", "none", 3, 0, 0),
+		}))
+	}
+	_, err := s.PurgeExpiredLayerDeletions(ctx, now.Add(-30*24*time.Hour))
+	must(t, err)
+	got := usageSummary(t, s, "a", "2026-11-01", "2026-11-03") + " ; " + usageSummary(t, s, "b", "2026-11-01", "2026-11-03")
+	want := "a|2026-11-02|live|x|mcp|none=3/0/0 a|2026-11-02|recent|x|mcp|none=2/0/0 ; " +
+		"b|2026-11-02|gone|x|mcp|none=1/0/0 b|2026-11-02|live|x|mcp|none=3/0/0 b|2026-11-02|recent|x|mcp|none=2/0/0"
+	if got != want {
+		t.Errorf("usage rows after purge:\n got %s\nwant %s", got, want)
 	}
 }
