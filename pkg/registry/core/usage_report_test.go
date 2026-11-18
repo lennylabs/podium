@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,6 +211,9 @@ func TestUsageReport_Parameters(t *testing.T) {
 		"too many layers":    func(u *core.UsageQuery) { u.LayerIDs = manyLayers },
 		"limit above 200":    func(u *core.UsageQuery) { u.Limit = 201 },
 		"too many types":     func(u *core.UsageQuery) { u.Types = make([]string, 21) },
+		"unknown sort":       func(u *core.UsageQuery) { u.Sort = "name" },
+		"unknown order":      func(u *core.UsageQuery) { u.Order = "up" },
+		"long query":         func(u *core.UsageQuery) { u.Query = strings.Repeat("é", 201) },
 		"negative limit":     func(u *core.UsageQuery) { u.Limit = -1 },
 		"cursor not base64":  func(u *core.UsageQuery) { u.Cursor = "!!" },
 		"cursor not json":    func(u *core.UsageQuery) { u.Cursor = "bm90IGpzb24" },
@@ -457,5 +461,79 @@ func TestUsageReport_TypeFilter(t *testing.T) {
 			t.Errorf("%s: artifacts %v (count %d) totals %+v layers %v, want %v with the unfiltered totals and layers",
 				c.name, reportIDs(rep), rep.ArtifactCount, rep.Totals.UsageCounts, layerIDs(rep), c.want)
 		}
+	}
+}
+
+// Spec: §8.7 — sort and order choose the artifact list's order, an artifact
+// with no load sorts last under last_loaded in both directions, ties keep the
+// default order, query keeps the IDs that contain it without regard to case
+// and leaves totals alone, paging follows the chosen order, and a cursor from
+// another sort or order is refused.
+func TestUsageReport_SortsAndFilters(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	seedUsage(t, f)
+	idle := store.ManifestRecord{TenantID: "t", ArtifactID: "ops/idle", Version: "1.0.0", ContentHash: "sha256:5",
+		Type: "skill", Name: "idle", Description: "an unused session helper", Layer: "team"}
+	if err := f.st.PutManifest(context.Background(), storetest.Seal(t, idle, nil, nil)); err != nil {
+		t.Fatal(err)
+	}
+	report := func(mod func(*core.UsageQuery)) *core.UsageReport {
+		t.Helper()
+		rep, err := f.reg.UsageReport(context.Background(), publicID, q(mod)())
+		if err != nil {
+			t.Fatalf("UsageReport: %v", err)
+		}
+		return rep
+	}
+	// hidden: 7 loads, last 11-16; greet: 3 loads, 4 syncs, 3 hits, last
+	// 11-01; farewell: 3 loads, 1 hit, last 11-18; idle: nothing.
+	whole := report(nil)
+	for _, c := range []struct {
+		sort, order string
+		want        []string
+	}{
+		{"", "", []string{"ops/hidden", "ops/greet", "ops/farewell", "ops/idle"}},
+		{"loads", "asc", []string{"ops/idle", "ops/greet", "ops/farewell", "ops/hidden"}},
+		{"syncs", "", []string{"ops/greet", "ops/hidden", "ops/farewell", "ops/idle"}},
+		{"syncs", "asc", []string{"ops/hidden", "ops/farewell", "ops/idle", "ops/greet"}},
+		{"search_hits", "desc", []string{"ops/greet", "ops/farewell", "ops/hidden", "ops/idle"}},
+		{"last_loaded", "", []string{"ops/farewell", "ops/hidden", "ops/greet", "ops/idle"}},
+		{"last_loaded", "asc", []string{"ops/greet", "ops/hidden", "ops/farewell", "ops/idle"}},
+	} {
+		got := reportIDs(report(func(u *core.UsageQuery) { u.Sort, u.Order = c.sort, c.order }))
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("sort %q order %q = %v, want %v", c.sort, c.order, got, c.want)
+		}
+		var paged []string
+		cursor := ""
+		for range len(c.want) + 1 {
+			rep := report(func(u *core.UsageQuery) { u.Sort, u.Order, u.Limit, u.Cursor = c.sort, c.order, 1, cursor })
+			paged = append(paged, reportIDs(rep)...)
+			if rep.NextCursor == nil {
+				break
+			}
+			cursor = *rep.NextCursor
+		}
+		if !reflect.DeepEqual(paged, c.want) {
+			t.Errorf("sort %q order %q paged = %v, want %v", c.sort, c.order, paged, c.want)
+		}
+	}
+	matched := report(func(u *core.UsageQuery) { u.Query = "FARE" })
+	if !reflect.DeepEqual(reportIDs(matched), []string{"ops/farewell"}) || matched.ArtifactCount != 1 ||
+		matched.Totals.UsageCounts != whole.Totals.UsageCounts {
+		t.Errorf("query FARE = %v (count %d, totals %+v), want ops/farewell with the unfiltered totals",
+			reportIDs(matched), matched.ArtifactCount, matched.Totals.UsageCounts)
+	}
+	first := report(func(u *core.UsageQuery) { u.Sort, u.Limit = "syncs", 1 })
+	_, err := f.reg.UsageReport(context.Background(), publicID, q(func(u *core.UsageQuery) { u.Cursor = *first.NextCursor })())
+	if !errors.Is(err, core.ErrInvalidArgument) {
+		t.Errorf("a syncs cursor under the default sort: err = %v, want ErrInvalidArgument", err)
+	}
+	_, err = f.reg.UsageReport(context.Background(), publicID, q(func(u *core.UsageQuery) {
+		u.Sort, u.Order, u.Cursor = "syncs", "asc", *first.NextCursor
+	})())
+	if !errors.Is(err, core.ErrInvalidArgument) {
+		t.Errorf("a descending cursor under asc: err = %v, want ErrInvalidArgument", err)
 	}
 }

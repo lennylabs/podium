@@ -160,6 +160,8 @@ func TestUsageReport_HTTPBatchAndErrors(t *testing.T) {
 		{http.MethodGet, "/v1/usage?cursor=!!", "", http.StatusBadRequest},
 		{http.MethodPost, "/v1/usage", `{"limit":0}`, http.StatusBadRequest},
 		{http.MethodPost, "/v1/usage", `{"cursor":"!!"}`, http.StatusBadRequest},
+		{http.MethodGet, "/v1/usage?sort=name", "", http.StatusBadRequest},
+		{http.MethodPost, "/v1/usage", `{"order":"up"}`, http.StatusBadRequest},
 		{http.MethodPut, "/v1/usage", "", http.StatusMethodNotAllowed},
 	} {
 		st, b := usageCall(t, h, c.method, c.path, c.body, "alice", "", "")
@@ -288,5 +290,19 @@ func TestUsageReport_HTTPTypeFilter(t *testing.T) {
 	}
 	if _, none := usageCall(t, h, http.MethodGet, "/v1/usage?type=no-such-type", "", "alice", "", ""); len(decodeUsage(t, none).Artifacts) != 0 {
 		t.Errorf("an unknown type lists artifacts: %s", none)
+	}
+}
+
+// Spec: §8.7 — GET and POST read query, sort, and order the same way.
+func TestUsageReport_HTTPSortAndQuery(t *testing.T) {
+	t.Parallel()
+	h, _ := usageHarness(t)
+	_, get := usageCall(t, h, http.MethodGet, "/v1/usage?query=FIN/&sort=last_loaded&order=asc", "", "alice", "", "")
+	_, post := usageCall(t, h, http.MethodPost, "/v1/usage", `{"query":"FIN/","sort":"last_loaded","order":"asc"}`, "alice", "", "")
+	if get != post || len(decodeUsage(t, get).Artifacts) == 0 {
+		t.Errorf("GET and POST sort and query differ or list nothing:\nGET  %s\nPOST %s", get, post)
+	}
+	if _, none := usageCall(t, h, http.MethodGet, "/v1/usage?query=no-such-id", "", "alice", "", ""); len(decodeUsage(t, none).Artifacts) != 0 {
+		t.Errorf("a query no ID contains lists artifacts: %s", none)
 	}
 }

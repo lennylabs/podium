@@ -54,6 +54,7 @@ Narrow it with a window, layers, artifacts, and artifact types, and add a series
 podium usage --registry https://podium.acme.com --from 2026-09-01 --to 2026-11-30 --granularity month
 podium usage --registry https://podium.acme.com --layer team-finance --days 7 --granularity day
 podium usage --registry https://podium.acme.com --type agent --days 30
+podium usage --registry https://podium.acme.com --query finance/ --sort last_loaded --order asc
 podium usage --registry https://podium.acme.com --artifact finance/ap/pay-invoice --artifact finance/ap/submit-invoice --json
 ```
 
