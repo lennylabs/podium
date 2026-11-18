@@ -162,3 +162,75 @@ func TestUsageReport_HTTPBatchAndErrors(t *testing.T) {
 		}
 	}
 }
+
+// Spec: §8.7, §7.6.2, §13.4 — each resolved artifacts:batchLoad item counts
+// one load, or one sync under client kind sync, and an unresolved item counts
+// nothing; a HEAD and a GET that If-None-Match answers 304 each count one
+// load, like the full GET that returned the validator.
+func TestUsageReport_HTTPBatchItemsAndRevalidatedLoads(t *testing.T) {
+	t.Parallel()
+	h, counter := usageHarness(t)
+	mcp := "kind=mcp&name=podium-mcp&harness=claude-code"
+	batch := `{"ids":["fin/close","fin/reconcile","fin/missing"]}`
+	if st, body := usageCall(t, h, http.MethodPost, "/v1/artifacts:batchLoad", batch, "alice", "", mcp); st != http.StatusOK {
+		t.Fatalf("batchLoad: %d %s", st, body)
+	}
+	if st, body := usageCall(t, h, http.MethodPost, "/v1/artifacts:batchLoad", batch, "alice", "", "kind=sync&name=podium&harness=cursor"); st != http.StatusOK {
+		t.Fatalf("batchLoad as sync: %d %s", st, body)
+	}
+	send := func(method, etag string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(method, h.api.URL+"/v1/load_artifact?id=fin/close", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Test-User", "alice")
+		req.Header.Set("X-Podium-Client", mcp)
+		if etag != "" {
+			req.Header.Set("If-None-Match", etag)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		return resp
+	}
+	full := send(http.MethodGet, "")
+	etag := full.Header.Get("ETag")
+	if full.StatusCode != http.StatusOK || etag == "" {
+		t.Fatalf("full GET: %d, ETag %q", full.StatusCode, etag)
+	}
+	if head := send(http.MethodHead, ""); head.StatusCode != http.StatusOK {
+		t.Fatalf("HEAD: %d", head.StatusCode)
+	}
+	if cond := send(http.MethodGet, etag); cond.StatusCode != http.StatusNotModified {
+		t.Fatalf("conditional GET: %d, want 304", cond.StatusCode)
+	}
+	if err := counter.Flush(context.Background(), h.st); err != nil {
+		t.Fatal(err)
+	}
+	var rep struct {
+		Totals struct {
+			Loads int64 `json:"loads"`
+			Syncs int64 `json:"syncs"`
+		} `json:"totals"`
+		Artifacts []struct {
+			ArtifactID string `json:"artifact_id"`
+			Loads      int64  `json:"loads"`
+			Syncs      int64  `json:"syncs"`
+		} `json:"artifacts"`
+	}
+	_, body := usageCall(t, h, http.MethodGet, "/v1/usage", "", "alice", "", "")
+	if err := json.Unmarshal([]byte(body), &rep); err != nil {
+		t.Fatalf("decode: %v\n%s", err, body)
+	}
+	got := map[string][2]int64{}
+	for _, a := range rep.Artifacts {
+		got[a.ArtifactID] = [2]int64{a.Loads, a.Syncs}
+	}
+	if rep.Totals.Loads != 5 || rep.Totals.Syncs != 2 || got["fin/close"] != [2]int64{4, 1} || got["fin/reconcile"] != [2]int64{1, 1} {
+		t.Errorf("want fin/close 4 loads 1 sync and fin/reconcile 1 load 1 sync: %s", body)
+	}
+}
