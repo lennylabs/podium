@@ -219,6 +219,15 @@ To turn the check on for an existing catalog:
 
 The store needs no backup restore to roll back.
 
+### Operator token in public mode
+
+A 0.7.0 registry in public mode refuses `podium admin reembed` and `podium admin rebuild-overlap` with `403 auth.forbidden` unless the request carries `PODIUM_OPERATOR_TOKEN`. A 0.6.0 registry in public mode admitted both from any caller.
+
+- Before the upgrade, generate a secret of at least 32 characters, for example with `openssl rand -hex 32`, and set it as `PODIUM_OPERATOR_TOKEN` on the registry. A shorter value refuses startup with `config.invalid`.
+- Set the same value in the environment of whoever runs the two commands.
+- A public-mode registry with no token keeps serving every other request and refuses both passes. The re-embed after a model change and the overlap recomputation the registry runs on its own do not go through these endpoints and are unaffected.
+- A registry with no identity provider and not in public mode does not read the variable.
+
 ### `command` and `context` removal
 
 0.7.0 removes the `command` and `context` artifact types. Ingest rejects an `ARTIFACT.md` whose `type` is either of them with `ingest.invalid_artifact` and `details.constraint: "type_removed"`, and `podium artifact scaffold` refuses both types. A command becomes a skill whose `invocation` is `user`, and reference material moves into a skill or a `DOMAIN.md` body. [Artifact types](../../authoring/artifact-types#removed-types) describes the replacements. The notes below cover converting a package and the stored rows and caches that an earlier release wrote.

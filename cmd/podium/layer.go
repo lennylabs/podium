@@ -15,6 +15,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/sync"
 )
 
@@ -722,6 +723,17 @@ func requestBase(rawURL string) string {
 
 // doJSON makes an HTTP request with optional JSON body and returns
 // the response bytes + status code.
+// operatorPass reports whether url addresses one of the passes a public-mode
+// registry admits only with the operator token (§13.10): the re-embed and the
+// overlap rebuild.
+func operatorPass(url string) bool {
+	u, err := neturl.Parse(url)
+	if err != nil {
+		return false
+	}
+	return strings.HasSuffix(u.Path, "/v1/admin/reembed") || strings.HasSuffix(u.Path, "/v1/admin/overlap/rebuild")
+}
+
 func doJSON(url, method string, body any) ([]byte, int) {
 	var buf io.Reader
 	if body != nil {
@@ -744,6 +756,12 @@ func doJSON(url, method string, body any) ([]byte, int) {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	req.Header.Set(audit.ClientHeader, cliClientHeader())
+	// Spec: §13.10 — a public-mode registry admits the re-embed and overlap
+	// rebuild passes only with the operator token, so the commands send it
+	// when the environment holds one. Every other request goes without it.
+	if tok := os.Getenv("PODIUM_OPERATOR_TOKEN"); tok != "" && operatorPass(url) {
+		req.Header.Set(server.OperatorTokenHeader, tok)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return []byte(err.Error()), 500
