@@ -334,7 +334,7 @@ podium sync [--registry <url-or-path>] [--target <path>] [--harness <name>]
 | `--check` | Validate the merged `sync.yaml` and report warnings: unresolved profiles, malformed globs, target/profile collisions, and invalid `listing_budgets` entries. With `--config`, validate every target in the named file and materialize none. |
 | `--json` | Structured envelope output, for piping to `jq`. |
 
-The lock file is written to `<target>/.podium/sync.lock`.
+The lock file is written to `<target>/.podium/sync.lock`. Each entry records one materialized file: the artifact's `id`, `version`, `content_hash`, `layer`, and `type`, the `materialized_path`, and, for a path shared with the operator, `merge` (`json` for a JSON config merge, `inject` for a marker-based inject).
 
 #### Exit status
 
@@ -383,7 +383,8 @@ A sync against a server reports no drop, because the server rejected the artifac
 
 An unparseable manifest is usually a file in the middle of an edit. `--on-unparseable` selects what a filesystem-source sync does with the output an earlier run wrote for an artifact dropped because its frontmatter does not parse. The flag takes precedence over `PODIUM_SYNC_ON_UNPARSEABLE`, which takes precedence over `defaults.on_unparseable` in the merged `sync.yaml`. The default is `keep`. A value other than `keep` or `remove` exits 2 with an error that names its source.
 
-- Under `keep`, when the target's lock file records the artifact from an earlier run, the command leaves the files that run wrote for it, including its entries in shared files such as `.mcp.json`, and its lock entry unchanged. It reconciles every other artifact as usual, and the report line reads `rejected: <id> (ingest.invalid_artifact): <reason>; the previous sync output was kept`. An artifact the lock file does not record gets no files.
+- Under `keep`, when the target's lock file records the artifact from an earlier run, the command leaves the files that run wrote for it, including its entries in shared files such as `.mcp.json`, and its lock entry unchanged. It reconciles every other artifact as usual, and the report line reads `rejected: <id> (ingest.invalid_artifact): <reason>; the previous sync output was kept`. Under `--dry-run`, the line ends `; the previous sync output would be kept`. An artifact the lock file does not record gets no files.
+- `keep` applies only while the previous output still belongs in the target: the earlier run used the same harness, the artifact passes this run's scope and toggles, and no artifact this run writes one of its paths. The type filter reads the type the lock entry records, because the unparseable manifest names none, and an entry written before the lock recorded `type` fails any non-empty type filter. Otherwise the command removes the previous output, as under `remove`.
 - When another copy of the ID parses, from a lower-precedence layer or the workspace overlay, the command materializes that copy.
 - Under `remove`, the command removes the previous output, as it does for the other drops.
 - Under either value, the artifact counts as a drop for the exit status, `--dry-run`, `--config` targets, and `podium sync override`.
@@ -603,7 +604,13 @@ The report covers the current served version of every artifact the caller can se
 
 Without `--json`, each diagnostic prints on standard output in the `podium lint` format, `[<severity>] <artifact-id>: <message> (<rule-code>)`, and a report with no diagnostic prints `overlap: no issues.`. With `--json`, standard output carries the response object alone, indented.
 
-The command exits 0 when no diagnostic reaches the `--fail-on` severity, and 1 when one does. Every overlap diagnostic is a warning, so the default `--fail-on error` exits 0 on any report, and `--fail-on warning` exits 1 when the report contains a diagnostic. A response that carries an error envelope prints on standard error, and the command exits 1. A usage error exits 2, including a missing `--registry`, a `--fail-on` value other than `error` or `warning`, and a `--threshold` outside 0.5 to 1.0.
+When the response's `computed` is below its `total`, the command prints a warning on standard error, with or without `--json`, because the report can miss overlap of the artifacts not yet computed:
+
+```
+warning: semantic overlap is computed for 118 of 120 artifacts; the report can miss overlap of the other 2 until their computation succeeds
+```
+
+The command exits 0 when no diagnostic reaches the `--fail-on` severity, and 1 when one does. Every overlap diagnostic is a warning, and the coverage warning counts as a warning too, so the default `--fail-on error` exits 0 on any report, and `--fail-on warning` exits 1 when the report contains a diagnostic or `computed` is below `total`. A response that carries an error envelope prints on standard error, and the command exits 1. A usage error exits 2, including a missing `--registry`, a `--fail-on` value other than `error` or `warning`, and a `--threshold` outside 0.5 to 1.0.
 
 ### `podium domain show`
 
@@ -1115,7 +1122,7 @@ With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` 
 
 ### `podium admin rebuild-overlap`
 
-Recomputes the semantic overlap records of every served artifact of the caller's tenant. The registry keeps the records current on its own, at ingest, through its periodic sweep, and after a full re-embed, so this command is for a recomputation that cannot wait for the next sweep.
+Recomputes the semantic overlap records of every served artifact of the caller's tenant, including artifacts whose vector the outbox has not written yet. The registry keeps the records current on its own, at ingest, through a startup pass after the startup ingest, through its periodic sweep, and after a full re-embed, so this command is for a recomputation that cannot wait for the next sweep.
 
 ```
 podium admin rebuild-overlap --registry <url>
@@ -1132,7 +1139,7 @@ computed: 42
 failed: 0
 ```
 
-The command exits 0 when `failed` is zero. It exits 1 when `failed` is not zero, and when the response is an error envelope, which it prints on standard error. A registry with the semantic overlap check off, or with no search index, answers `registry.unavailable`. A missing `--registry` exits 2.
+A computation stores nothing and counts in neither number when its artifact gains a newer served version first. The command exits 0 when `failed` is zero. It exits 1 when `failed` is not zero, and when the response is an error envelope, which it prints on standard error. A registry with the semantic overlap check off, or with no search index, answers `registry.unavailable`. A missing `--registry` exits 2.
 
 ### `podium admin runtime`
 

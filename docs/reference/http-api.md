@@ -675,27 +675,44 @@ GET /v1/overlap?threshold={n}&artifact={id}
 {
   "semantic_overlap": {
     "state": "on",
-    "threshold": 0.85,
-    "model": "text-embedding-3-small"
+    "threshold": 0.8,
+    "model": "text-embedding-3-small",
+    "computed": 120,
+    "total": 120
   },
   "diagnostics": [
     {
       "artifact_id": "finance/ap/pay-invoice",
+      "description": "Pay an approved vendor invoice from the AP queue.",
+      "type": "skill",
+      "layer": "team-finance",
       "code": "lint.colliding_descriptions",
       "severity": "warning",
       "message": "description overlaps finance/ap/submit-invoice (80%); give each artifact a distinct summary so search and load_domain can tell them apart",
       "peers": [
-        { "artifact_id": "finance/ap/submit-invoice", "similarity": 0.8 }
+        {
+          "artifact_id": "finance/ap/submit-invoice",
+          "description": "Submit a vendor invoice to the AP queue.",
+          "type": "skill",
+          "layer": "team-finance",
+          "similarity": 0.8
+        }
       ]
     },
     {
       "artifact_id": "finance/ap/pay-invoice",
+      "description": "Pay an approved vendor invoice from the AP queue.",
+      "type": "skill",
+      "layer": "team-finance",
       "code": "lint.semantic_overlap",
       "severity": "warning",
       "message": "description is semantically similar to finance/payments/settle-bill (91%); give each artifact a distinct summary so search and load_domain can tell them apart",
       "peers": [
         {
           "artifact_id": "finance/payments/settle-bill",
+          "description": "Settle a supplier bill through the payments rail.",
+          "type": "skill",
+          "layer": "org-payments",
           "similarity": 0.912,
           "computed_at": "2026-11-16T03:00:12Z"
         }
@@ -713,11 +730,14 @@ The example answers `GET /v1/overlap?artifact=finance/ap/pay-invoice`.
 | `semantic_overlap.state` | `"on"` or `"off"`. |
 | `semantic_overlap.threshold` | The threshold the read applied. `null` when the check is off. |
 | `semantic_overlap.model` | The configured embedding model identifier. `null` when the check is off. |
+| `semantic_overlap.computed` | The number of artifacts the caller can see whose last successful computation is for their current served version and the configured model. `null` when the check is off. |
+| `semantic_overlap.total` | The number of artifacts the caller can see. `null` when the check is off. A `computed` below `total` means some artifacts are not computed yet or their last computation failed, so the report can miss their overlap. |
 | `diagnostics` | One entry per diagnostic, ordered by artifact ID, then by code, then by message, as `podium lint` orders them. |
-| `diagnostics[].peers` | Present on `lint.colliding_descriptions` and `lint.semantic_overlap`. It lists every peer the message names or abbreviates, in the message's order, as `{artifact_id, similarity}` objects with `similarity` a number from 0 to 1. A `lint.semantic_overlap` peer also carries `computed_at`, the time its record was computed. The list is never abbreviated and holds only artifacts the caller can see. |
+| `diagnostics[].description`, `type`, and `layer` | The artifact's description as the description checks read it, its artifact type, and the ID of the layer that serves its current version. Each peer carries the same fields. |
+| `diagnostics[].peers` | Present on `lint.colliding_descriptions` and `lint.semantic_overlap`. It lists every peer the message names or abbreviates, in the message's order, as `{artifact_id, description, type, layer, similarity}` objects with `similarity` a number from 0 to 1. A `lint.semantic_overlap` peer also carries `computed_at`, the time its record was computed. The list is never abbreviated and holds only artifacts the caller can see. |
 | `counts` | The diagnostics counted by severity. |
 
-A `lint.colliding_descriptions` similarity is the word-set similarity of the two normalized descriptions. A `lint.semantic_overlap` similarity is the cosine similarity of the two embedding vectors. When the check is off, the response carries no `lint.semantic_overlap` diagnostic.
+A `lint.colliding_descriptions` similarity is the word-set similarity of the two normalized descriptions. A `lint.semantic_overlap` similarity is the cosine similarity of the two embedding vectors, limited to the range 0 to 1. When the check is off, the response carries no `lint.semantic_overlap` diagnostic.
 
 **Errors.**
 
@@ -1511,7 +1531,7 @@ POST /v1/admin/overlap/rebuild
 
 **Authorization.** The same as [Reembed](#reembed): the admin role, except on a registry that authenticates no caller, which admits the request.
 
-**Response.** The number of artifacts computed and the number whose index query failed.
+**Response.** The number of artifacts computed and the number whose index query failed. A computation stores nothing and counts in neither number when its artifact gains a newer served version first, because the computation of the newer version is due.
 
 ```json
 { "computed": 42, "failed": 0 }
@@ -1529,7 +1549,8 @@ A computation replaces the records the artifact owns and leaves the records its 
 
 **Notes.**
 
-- The registry keeps the records current without this call: at ingest, through the sweep every `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL`, and after a full re-embed.
+- The registry keeps the records current without this call: at ingest, through a background startup pass after the startup ingest, through the sweep every `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL`, and after a full re-embed.
+- Unlike the startup pass and the sweep, the endpoint also attempts artifacts whose vector the outbox has not written yet.
 
 ### Erase a user (GDPR)
 

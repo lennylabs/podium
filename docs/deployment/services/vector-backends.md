@@ -306,7 +306,7 @@ The search response reports none of these conditions (see [Operational notes](#o
 
 ### Write consistency on managed backends
 
-Every managed service is a non-collocated backend. For these backends, ingest writes go through a transactional outbox. The manifest commit and a `vector_pending` row land in the same metadata-store transaction, and a background worker drives the write to the vector backend. The outbox keeps the metadata commit and the vector write consistent under failure.
+Every managed service is a non-collocated backend. For these backends, ingest writes go through a transactional outbox. The manifest commit and a `vector_pending` row land in the same metadata-store transaction, and a background worker drives the write to the vector backend. The outbox keeps the metadata commit and the vector write consistent under failure. A row records the error of its last failed attempt, and the registry removes URL userinfo, query strings, and every configured secret value from that text before it stores or logs it.
 
 ---
 
@@ -314,7 +314,9 @@ Every managed service is a non-collocated backend. For these backends, ingest wr
 
 The `lint.semantic_overlap` check reads the search index this page configures. It is off by default, and `PODIUM_LINT_SEMANTIC_OVERLAP=on` turns it on. The check uses the backend and the embedding model that search uses, so it adds no second index and no second embedding of the catalog. Computing an artifact queries the index for the nearest rows of other served artifacts, widening the query past rows of earlier versions, and stores one overlap record per peer found in the `semantic_overlap_records` table of the metadata store. [Finding overlapping artifacts](../../managing/overlap#turn-on-the-semantic-check) describes the check, and [Lint](../../reference/configuration#lint) in the configuration reference lists its variables.
 
-Each backend computes the similarity as follows:
+The widening asks no more rows than the backend accepts in one query: 1000 on `sqlite-vec` and Pinecone, 1000 as a conservative cap on Qdrant Cloud and Weaviate Cloud, and no limit on `pgvector`. A failed widened query keeps the peers the earlier queries found.
+
+The registry queries with the artifact's stored vector on every backend that can return it. Every built-in backend returns stored vectors, a self-embedding Pinecone, Weaviate Cloud, or Qdrant Cloud index included, so scores are symmetric cosine similarities and identical texts score 1. A custom backend that cannot return a stored vector is queried with the artifact's text, and its query-to-passage scores are asymmetric and stay below 1 for identical texts. Every similarity is limited to the range 0 to 1. Each backend computes the similarity as follows:
 
 - `pgvector` and `sqlite-vec` compute the cosine similarity from the stored vectors, whatever distance their nearest-neighbour index orders by.
 - `sqlite-vec` orders candidates by Euclidean distance. With an embedding model that does not normalize its vectors, the candidate set can miss a close cosine neighbour. Any other index that orders by Euclidean distance has the same limit.
@@ -325,11 +327,13 @@ The check needs an embedding source. A registry with `PODIUM_LINT_SEMANTIC_OVERL
 When the registry computes depends on the backend:
 
 - On `pgvector` and `sqlite-vec`, an ingest computes each artifact it stores as a new version within the cycle and reports `lint.semantic_overlap` among its non-blocking advisories.
-- On a managed backend, including a self-embedding one, the registry computes the artifacts an outbox pass wrote once that pass ends. An ingest on a managed backend therefore reports no `lint.semantic_overlap` diagnostic, and two artifacts of one cycle find each other once both vectors are written.
-- On every backend, a sweep runs every `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL` (24 hours by default) and computes each served artifact whose last computation is missing or was for another version or embedding model, or that owns a record naming a version that is no longer served. It deletes the records of artifacts that are no longer served. Every replica runs the sweep, starting after a random delay of up to a tenth of the interval, and replicas that compute one artifact at once store the same result.
-- A full `podium admin reembed` pass recomputes every artifact it re-embeds, and `podium admin rebuild-overlap` recomputes every served artifact of the tenant.
+- On a managed backend, including a self-embedding one, the registry computes the artifacts an outbox pass wrote once that pass ends. An ingest on a managed backend therefore reports no `lint.semantic_overlap` diagnostic, and two artifacts of one cycle find each other once both vectors are written. The computation uses the vector the outbox row carries when it has one, so it reads nothing back. When it reads a stored vector that the backend does not return yet, as an eventually consistent backend such as Pinecone can right after a write, the outbox retries it on its next five passes and then leaves it to the sweep.
+- The startup ingest computes no overlap. Once it completes, the registry runs one sweep pass in the background, whether or not the periodic sweep is on.
+- On every backend, a sweep runs every `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL` (24 hours by default) and computes each served artifact whose last computation is missing or was for another version or embedding model, or that owns a record naming a version that is no longer served. It deletes the records of artifacts that are no longer served. Every replica runs the sweep, offset by a random delay of up to a tenth of the interval, and replicas that compute one artifact at once store the same result.
+- The startup pass and the sweep skip an artifact whose vector the outbox has not written, because the outbox write computes it. Such an artifact counts as neither computed nor failed, and the pass log reports it as `skipped N whose vectors the outbox has not written`.
+- A full `podium admin reembed` pass recomputes every artifact it re-embeds, and `podium admin rebuild-overlap` attempts every served artifact of the tenant, including one whose vector is not written yet.
 
-A failed index query leaves the artifact's existing records in place and does not fail the ingest. The registry logs the failure with the artifact ID, and the next sweep computes the artifact again. A record whose embedding model is not the configured model is not reported, so an embedding-model change hides the old records until the sweep or a re-embed replaces them. `podium admin migrate-to-standard` copies no overlap records, and the target registry's sweep computes them.
+A failed index query leaves the artifact's existing records in place and does not fail the ingest. The registry logs the failure with the artifact ID and the step that failed, `stored-vector read`, `neighbour query`, or `scoring`, and the next sweep computes the artifact again. A record whose embedding model is not the configured model is not reported, so an embedding-model change hides the old records until the sweep or a re-embed replaces them. `podium admin migrate-to-standard` copies no overlap records, and the target registry's sweep computes them.
 
 ---
 

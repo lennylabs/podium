@@ -164,7 +164,8 @@ In 0.6.0, one artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter did not par
 
 - Ingest refuses that artifact alone with `ingest.invalid_artifact` and `details.constraint: "manifest_unparseable"`, and it stores the other artifacts of the layer. The `POST /v1/layers/reingest` response lists the artifact in `rejected`, and `podium layer reingest` names it on standard error and exits non-zero. A script that watched for `422 ingest.lint_failed` on such a layer reads `rejected` instead.
 - `podium lint` lists the artifact in `rejected`, lints the other artifacts, and exits 1.
-- A filesystem-source `podium sync` drops the artifact, names it on standard error, writes the other artifacts and the lock file, and exits 1. By default it keeps the files and lock entry an earlier run wrote for the artifact; `--on-unparseable remove`, `PODIUM_SYNC_ON_UNPARSEABLE=remove`, or `defaults.on_unparseable: remove` in `sync.yaml` removes them.
+- A filesystem-source `podium sync` drops the artifact, names it on standard error, writes the other artifacts and the lock file, and exits 1. By default it keeps the files and lock entry an earlier run wrote for the artifact, when the earlier run used the same harness, the artifact passes the run's scope and toggles, and no other artifact of the run writes one of its paths; `--on-unparseable remove`, `PODIUM_SYNC_ON_UNPARSEABLE=remove`, or `defaults.on_unparseable: remove` in `sync.yaml` removes them.
+- Lock entries now record the artifact's `type`, which the keep rule reads for the scope type filter. An entry a 0.6.0 sync wrote has no `type` and fails any non-empty type filter, so under a type filter the output of an artifact whose manifest stops parsing is removed until a 0.7.0 sync has rewritten the entry.
 - A manifest at a layer root has no canonical ID and still fails the whole layer.
 
 [Unparseable manifests](../content/layers#unparseable-manifests) describes the rule.
@@ -201,8 +202,8 @@ To turn the check on for an existing catalog:
 1. Confirm that the registry has an embedding source. A registry with `PODIUM_LINT_SEMANTIC_OVERLAP=on`, no embedding provider, and a backend that does not embed text itself refuses to start with `config.invalid`.
 2. On Pinecone, Weaviate Cloud, or Qdrant Cloud, confirm that the index or collection uses the cosine metric, as [Vector backends](../services/vector-backends#semantic-overlap) describes.
 3. Set `PODIUM_LINT_SEMANTIC_OVERLAP=on` on every registry replica and restart them.
-4. Wait for the first sweep, which each replica starts after a random delay of up to a tenth of `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL` and which computes every served artifact that has no computation entry. To compute at once, run `podium admin rebuild-overlap --registry <url>` in each tenant as an identity that holds the `admin` role.
-5. Read the result with `podium overlap --registry <url>`, and tune `PODIUM_LINT_SEMANTIC_SIMILARITY` against the catalog.
+4. Wait for the startup pass, which each replica runs in the background as soon as its startup ingest completes and which computes every served artifact that has no computation entry. The periodic sweep does not need to run first. On a managed backend, artifacts whose vectors the outbox has not written are computed at the outbox write. `podium admin rebuild-overlap --registry <url>`, run in each tenant as an identity that holds the `admin` role, recomputes every artifact at once.
+5. Read the result with `podium overlap --registry <url>`. The command warns while `computed` is below `total`. The default threshold follows the embedding model, 0.80 for `text-embedding-3-small`, so tune `PODIUM_LINT_SEMANTIC_SIMILARITY` against the catalog only when the reported pairs call for it.
 
 ### `command` and `context` removal
 

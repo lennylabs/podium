@@ -32,7 +32,7 @@ Two artifacts overlap when their descriptions claim the same situations or their
 |:--|:--|:--|:--|
 | Copied or templated descriptions | "Use when the user asks to create a pdf" and "Use when the user asks to merge a pdf" | `lint.colliding_descriptions`: the normalized word sets of two descriptions have a similarity of 0.7 or higher. | `podium lint`, registry ingest, and the overlap report |
 | Duplicated prose | Two near-identical skill bodies, or one `references/style-guide.md` bundled in several artifacts | `lint.near_duplicate_content`: two prose units of different artifacts have five-word shingle sets with a similarity of 0.8 or higher. | `podium lint` and registry ingest |
-| The same meaning in different words | "Pay a vendor invoice from accounts payable" and "Settle a supplier bill" | `lint.semantic_overlap`: the embedding vectors of two artifacts have a cosine similarity at or above the threshold, 0.85 by default. | The registry alone, when an operator turns the check on |
+| The same meaning in different words | "Pay a vendor invoice from accounts payable" and "Settle a supplier bill" | `lint.semantic_overlap`: the embedding vectors of two artifacts have a cosine similarity at or above the threshold, whose default depends on the embedding model. | The registry alone, when an operator turns the check on |
 
 The word-based checks compare words, so they find copies and descriptions built from one template. They miss two descriptions that share few words and mean the same thing, which is what `lint.semantic_overlap` finds. The overlap report also carries `lint.thin_description`, which flags a description too short to tell a harness when to use the artifact.
 
@@ -68,17 +68,23 @@ Each message names the overlapping artifacts in order of descending similarity, 
 `podium overlap --json` prints the response of `GET /v1/overlap`. Its members carry what the lines abbreviate:
 
 - `semantic_overlap.state` is `"on"` or `"off"`, and `semantic_overlap.threshold` and `semantic_overlap.model` give the threshold the read applied and the configured embedding model. The report includes only records computed with that model.
-- Each `lint.colliding_descriptions` and `lint.semantic_overlap` diagnostic carries `peers`, the full list of overlapping artifacts as `{artifact_id, similarity}` objects with `similarity` from 0 to 1. The list is never abbreviated.
+- `semantic_overlap.computed` counts the visible artifacts with a current computation, and `semantic_overlap.total` counts the visible artifacts.
+- Each diagnostic carries the artifact's `description`, `type`, and `layer`, so a client can show the artifact without loading it.
+- Each `lint.colliding_descriptions` and `lint.semantic_overlap` diagnostic carries `peers`, the full list of overlapping artifacts as `{artifact_id, description, type, layer, similarity}` objects with `similarity` from 0 to 1. The list is never abbreviated.
 - A `lint.semantic_overlap` peer also carries `computed_at`, the time the registry computed the pair, because the registry stores semantic scores and recomputes them on its own schedule.
 - `counts` counts the diagnostics by severity.
 
-A `lint.colliding_descriptions` similarity is the word-set similarity of two normalized descriptions. A `lint.semantic_overlap` similarity is the cosine similarity of two embedding vectors. The two scales differ, so compare a score only with other scores of the same code.
+A `lint.colliding_descriptions` similarity is the word-set similarity of two normalized descriptions. A `lint.semantic_overlap` similarity is the cosine similarity of two embedding vectors, limited to the range 0 to 1. The two scales differ, so compare a score only with other scores of the same code.
+
+### Incomplete coverage
+
+A `computed` below `total` means some artifacts are not computed yet, or their last computation failed, so the report can miss their overlap. `podium overlap` then prints a warning on standard error that names both numbers, and `--fail-on warning` exits 1 on it. The gap closes when the startup pass, the sweep, or `podium admin rebuild-overlap` computes those artifacts, and the registry log names each failed computation.
 
 ### Narrowing the report
 
 - The `artifact` query parameter of `GET /v1/overlap` keeps only the diagnostics of one artifact, and `counts` counts those. The CLI has no equivalent flag.
 - `--threshold <n>`, or the `threshold` query parameter, replaces the operator's semantic threshold for one read, as a number from 0.5 to 1.0. A higher value reports fewer semantic pairs, and a lower value reports more. It does not change the `lint.colliding_descriptions` threshold.
-- `--fail-on warning` makes `podium overlap` exit 1 when the report contains any diagnostic, so a scheduled job can alert on new overlap.
+- `--fail-on warning` makes `podium overlap` exit 1 when the report contains any diagnostic or `computed` is below `total`, so a scheduled job can alert on new overlap.
 
 ### What the caller sees
 
@@ -117,7 +123,7 @@ A catalog whose descriptions follow one template on purpose can raise `PODIUM_LI
 
 This section is for the operator who turns the check on and for tenant admins who recompute its records.
 
-`lint.semantic_overlap` compares the embedding vectors that search already computes for each artifact. Two artifacts whose vectors have a cosine similarity at or above the threshold are peers, and the warning names each peer with its similarity as a percentage.
+`lint.semantic_overlap` compares the embedding vectors that search already computes for each artifact. A vector embeds the artifact's name, description, `when_to_use`, and tags, so two artifacts with identical descriptions and different names score below 1. Two artifacts whose vectors have a cosine similarity at or above the threshold are peers, and the warning names each peer with its similarity as a percentage.
 
 ### Requirements
 
@@ -126,25 +132,26 @@ This section is for the operator who turns the check on and for tenant admins wh
 - A managed index (Pinecone, Weaviate Cloud, or Qdrant Cloud) must use the cosine metric. The registry takes one minus the reported distance as the similarity, which is the cosine similarity only under that metric. [Vector backends](../deployment/services/vector-backends#semantic-overlap) describes each backend.
 - sqlite-vec, and any index that orders candidates by Euclidean distance, can miss a close cosine neighbour when the embedding model does not normalize its vectors. The registry computes the similarity from the stored vectors, but the index chooses the candidates.
 
-The check uses the backend and the embedding model that search uses, so it adds no second index and no second embedding of the catalog.
+The check uses the backend and the embedding model that search uses, so it adds no second index and no second embedding of the catalog. The registry queries with the artifact's stored vector on every backend that can return it, a self-embedding backend included, so scores are symmetric and identical texts score 1. A backend that cannot return a stored vector is queried with text, and its scores are asymmetric.
 
 ### When the registry computes
 
-The registry stores the similarity of each artifact to its nearest neighbours as overlap records and applies the threshold when it reads them. A computation of artifact A finds the `PODIUM_LINT_SEMANTIC_NEIGHBORS` other artifacts whose current served versions lie nearest to A in the index. The index keeps a row for every ingested version, so the computation widens its query past rows of earlier versions, up to 50 times one more than `PODIUM_LINT_SEMANTIC_NEIGHBORS` rows. A computation replaces only the records A owns, and a pair found from both sides is reported once, with the similarity of the more recently computed record. The registry also records the version and model of each artifact's last successful computation. It computes an artifact at these points:
+The registry stores the similarity of each artifact to its nearest neighbours as overlap records and applies the threshold when it reads them. A computation of artifact A finds the `PODIUM_LINT_SEMANTIC_NEIGHBORS` other artifacts whose current served versions lie nearest to A in the index. The index keeps a row for every ingested version, so the computation widens its query past rows of earlier versions, up to 50 times one more than `PODIUM_LINT_SEMANTIC_NEIGHBORS` rows and no more than the backend returns in one query. A failed widened query keeps the peers already found. A computation replaces only the records A owns, and a pair found from both sides is reported once, with the similarity of the more recently computed record. The registry also records the version and model of each artifact's last successful computation. A computation stores nothing when its artifact gains a newer served version first, and two concurrent computations of one artifact store one result. The registry computes an artifact at these points:
 
-- **At ingest.** On a collocated backend (pgvector or sqlite-vec), an ingest computes each artifact it stores as a new version within the cycle and reports the warning among its non-blocking advisories. On a managed backend, the registry computes when the vector reaches the index, after the ingest answers, once per outbox pass for the vectors that pass wrote, so the ingest reports no `lint.semantic_overlap` diagnostic.
-- **Through a periodic sweep.** Every `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL`, 24 hours by default, the sweep computes each served artifact whose last computation is missing or was for another version or embedding model, and each artifact that owns a record naming a version that is no longer served. An artifact whose computation found no peer is current and is not recomputed. The sweep deletes the records and computation entries of artifacts that are no longer served. Each replica starts its first sweep after a random delay of up to a tenth of the interval.
+- **At ingest.** On a collocated backend (pgvector or sqlite-vec), an ingest computes each artifact it stores as a new version within the cycle and reports the warning among its non-blocking advisories. On a managed backend, the registry computes when the vector reaches the index, after the ingest answers, once per outbox pass for the vectors that pass wrote, so the ingest reports no `lint.semantic_overlap` diagnostic. That computation uses the vector the outbox row carries when it has one, and retries a stored vector the backend does not return yet on the next five outbox passes. The startup ingest computes no overlap, so startup does not wait on it.
+- **Through a startup pass.** Once the startup ingest completes, the registry runs one sweep pass in the background, whether or not the periodic sweep is on. After a restart the pass computes only artifacts whose computation is missing or stale.
+- **Through a periodic sweep.** Every `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL`, 24 hours by default, the sweep computes each served artifact whose last computation is missing or was for another version or embedding model, and each artifact that owns a record naming a version that is no longer served. An artifact whose computation found no peer is current and is not recomputed. The sweep deletes the records and computation entries of artifacts that are no longer served. Each replica offsets its periodic passes by a random delay of up to a tenth of the interval. The startup pass and the sweep skip an artifact whose vector the outbox has not written, because the outbox write computes it.
 - **After a full re-embed.** A tenant-wide `podium admin reembed` pass recomputes every artifact it re-embeds. A pass scoped with `--only-missing` or `--since` recomputes no records.
-- **On demand.** `podium admin rebuild-overlap --registry <url>` recomputes every served artifact of the caller's tenant. It needs the per-tenant `admin` role, is refused in read-only mode, and answers `registry.unavailable` when the check is off. It prints `computed` and `failed` counts and exits 1 when `failed` is not zero.
+- **On demand.** `podium admin rebuild-overlap --registry <url>` recomputes every served artifact of the caller's tenant, including one whose vector is not written yet. It needs the per-tenant `admin` role, is refused in read-only mode, and answers `registry.unavailable` when the check is off. It prints `computed` and `failed` counts and exits 1 when `failed` is not zero.
 
 An ingest diagnostic names a peer only when the peer is in the ingested layer or in a layer whose visibility includes `public` or `organization`, so a reingest response never names an artifact of a layer restricted to groups or users. A reingest that a source webhook triggers names only peers in the ingested layer, because the git host records the response. The overlap report shows the stored result across every layer the caller can see.
 
 ### Tune the threshold
 
-Similarity values depend on the embedding model, so the default threshold of 0.85 is an uncalibrated starting point. To tune it:
+Similarity values depend on the embedding model, so the default threshold follows the configured model: 0.80 for `text-embedding-3-small`, 0.86 for `nomic-embed-text`, 0.90 for `multilingual-e5-large`, and 0.85 for any other model. The model name is matched in lowercase, without a provider prefix up to the last `/` and without an Ollama tag from the first `:`, so `nomic-embed-text:latest` takes 0.86. The values come from an evaluation over 413 published skills, in which the pairs reported at 0.80 on `text-embedding-3-small` had a precision of about 0.97. To tune the threshold for a catalog:
 
 1. Run `podium overlap --registry <url> --threshold <n>` at a few values, such as 0.80, 0.85, and 0.90. The threshold applies when records are read, so a new value needs no recomputation.
 2. Read the pairs each value reports, and choose the value whose pairs are artifacts that do the same job.
 3. Set `PODIUM_LINT_SEMANTIC_SIMILARITY` to that value on every replica. The registry reads it at startup.
 
-`PODIUM_LINT_SEMANTIC_NEIGHBORS` sets how many nearest peer artifacts one computation finds and stores records for, 10 by default. [Lint](../reference/configuration#lint) in the configuration reference lists every variable and its range, and [Semantic overlap check](../deployment/operations/upgrade-notes#semantic-overlap-check) in the upgrade notes gives the steps for an existing catalog.
+`PODIUM_LINT_SEMANTIC_NEIGHBORS` sets how many nearest peer artifacts one computation finds and stores records for, 10 by default. A read with a lower threshold shows only peers among those stored, so raise the count before reading at low thresholds. [Lint](../reference/configuration#lint) in the configuration reference lists every variable and its range, and [Semantic overlap check](../deployment/operations/upgrade-notes#semantic-overlap-check) in the upgrade notes gives the steps for an existing catalog.

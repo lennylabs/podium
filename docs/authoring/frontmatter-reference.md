@@ -255,7 +255,7 @@ The `lint.thin_description`, `lint.colliding_descriptions`, and `lint.near_dupli
 
 Descriptions that follow one template overlap. "Use when the user asks to create a pdf" and "Use when the user asks to merge a pdf" share 8 of their 10 distinct words, a similarity of 0.8, so `lint.colliding_descriptions` reports the pair. Rewrite one description to state what distinguishes the skill, raise `PODIUM_LINT_DESCRIPTION_SIMILARITY`, or list the code under `lint_suppress` in the `ARTIFACT.md` of both artifacts. Suppression is one-sided: listing the code in one artifact silences that artifact's warning, and the other artifact still draws a warning that names it. A skill with no `ARTIFACT.md` cannot suppress a code, so add an `ARTIFACT.md` that lists it.
 
-The registry also runs `lint.semantic_overlap`, which finds two descriptions that say the same thing in different words, as [Finding overlapping artifacts](../managing/overlap) describes.
+The registry also runs `lint.semantic_overlap`, which compares embeddings of each artifact's name, description, `when_to_use`, and tags to find two artifacts that say the same thing in different words, as [Finding overlapping artifacts](../managing/overlap) describes.
 
 ---
 
