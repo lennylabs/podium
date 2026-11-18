@@ -111,8 +111,9 @@ The response contains the following:
   when the domain has one, otherwise the frontmatter summary, otherwise a
   synthesized fallback.
 - Author-supplied keywords for the domain.
-- Notable artifacts, drawn from the author's `featured` list plus the
-  learn-from-usage signal. The list is empty when neither applies.
+- Notable artifacts: the author's `featured` list first, then the domain's
+  other artifacts, ordered by how often agents loaded them in the last 30
+  days and then by ID.
 - Subdomains, each with its short description.
 
 Configurable rules per domain and per tenant govern the output rendering: depth,
@@ -180,7 +181,7 @@ search_artifacts(scope="finance/ap")                         # browse mode
 search_artifacts(query="invoice approval", scope="finance/ap", type="skill")
 ```
 
-![Hybrid retrieval: a query runs through BM25 and embedding similarity in parallel; results merge via reciprocal rank fusion; an optional learn-from-usage rerank produces the final ranking.](../assets/diagrams/hybrid-retrieval.svg)
+![Hybrid retrieval: a query runs through BM25 and embedding similarity in parallel; results merge via reciprocal rank fusion; for search_artifacts, a learn-from-usage rerank by artifact loads produces the final ranking.](../assets/diagrams/hybrid-retrieval.svg)
 
 <!--
 ASCII fallback for the diagram above (hybrid retrieval):
@@ -190,8 +191,8 @@ ASCII fallback for the diagram above (hybrid retrieval):
        +===> BM25 (lexical scoring over manifest text)        ===+
        |                                                         |==> RRF fusion ==> Rerank (optional) ==> ranked results
        +===> Embedding similarity (vector cosine over            +     (reciprocal       (learn-from-        (artifact_id,
-              manifest projection)                                      rank across       usage; off          summary,
-                                                                        the two lists)    by default)         score) tuples
+              manifest projection)                                      rank across       usage loads;        summary,
+                                                                        the two lists)    search_artifacts)   score) tuples
 
   The same retriever runs over manifest text (search_artifacts)
   or domain metadata (search_domains). Visibility filtering
@@ -207,7 +208,13 @@ ASCII fallback for the diagram above (hybrid retrieval):
 | `tags` | Filter by tag. |
 | `scope` | Constrain to a domain path prefix. |
 | `top_k` | Result count cap. Default 10, max 50. |
-| `session_id` | Optional UUID for `latest`-resolution consistency and learn-from-usage reranking. |
+| `session_id` | Optional UUID for `latest`-resolution consistency. |
+
+With a `query`, results that rank close together are reordered by how often
+agents loaded each artifact in the last 30 days, counted under the layer that
+serves it. Loads by `podium sync` and appearances in search results do not
+count. A load is reflected at once on the registry replica that served it and on
+the others within `PODIUM_USAGE_FLUSH_INTERVAL`, one minute by default.
 
 When `query` is omitted, the tool returns artifacts matching the filters in
 default order. This is how an agent lists everything in a domain, when the
