@@ -257,6 +257,7 @@ rm -rf "$WORK"
 | S114 | The usage report counts loads, syncs, and search hits per layer, client, and harness, and reports them over time | standalone | none | none | none |
 | S115 | The usage report survives an upgrade from 0.6.0, a rollback to 0.6.0, and a second upgrade on SQLite and on Postgres | standalone then standard | none | none | Postgres (Docker) |
 | S116 | Search ranks tied artifacts by stored loads, ignores syncs, and keeps the order across a restart | standalone | none | none | none |
+| S117 | The web UI's Usage page, list lines, and rail section render the usage report in both themes | standalone | none | none | none |
 
 ---
 
@@ -13718,6 +13719,75 @@ Every phase stops its own server.
    ```
 
    **Expect.** `sqlite3` prints `tools/aaa|0|5` and `tools/bbb|3|0`. After the restart, the search prints `["tools/bbb","tools/aaa"]`. An order that falls back to `["tools/aaa","tools/bbb"]` means the ranking does not read the stored counts.
+
+**Cleanup.**
+
+```bash
+kill "$SRV"; wait "$SRV" 2>/dev/null
+rm -rf "$WORK"
+```
+
+---
+
+## S117: The web UI's Usage page, list lines, and rail section render the usage report in both themes
+
+**Goal.** Validate that the web UI shows the usage report on the Usage page, on search results and domain browser rows, and in the artifact viewer's rail, that a request recorded without a client or harness reads as `unknown`, that the artifact table filters, sorts, and pages, and that every part reads in the light and the dark theme.
+
+**Covers.** The Usage bullet of the §13.10 web UI, read over the §8.7 usage report, and the usage section of `web/DESIGN.md`.
+
+**Why by hand.** The suite drives the surface against a stubbed registry and checks what each element states, and the end-to-end test checks that the served bundle reads and sends the report's member names. Neither looks at the page. A bar that vanishes against one theme's ground, a breakdown tone that marks the unknown part as a named one, or a table column that runs into its neighbour is visible only in a browser.
+
+**Prerequisites.** A browser. The scenario binds 127.0.0.1:8181.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above. Build a two-layer root, serve it with the web UI and a one-second flush interval, and record loads from several clients and harnesses, a sync, a load that names no client, and three searches.
+
+   ```bash
+   mkdir -p "$WORK/root/platform" "$WORK/root/team-finance"
+   printf 'multi_layer: true\nlayer_order:\n  - team-finance\n  - platform\n' > "$WORK/root/.registry-config"
+   for L in platform team-finance; do printf 'visibility:\n  public: true\n' > "$WORK/root/$L/.layer-config"; done
+   skill() {
+     mkdir -p "$WORK/root/$1/$2"
+     printf -- '---\nname: %s\ndescription: %s\nmetadata:\n  version: "1.0.0"\n---\n\nBody.\n' "${2##*/}" "$3" > "$WORK/root/$1/$2/SKILL.md"
+   }
+   skill platform observability/trace-review "Review distributed traces for latency regressions."
+   skill platform postgres/query-review "Review a slow Postgres query plan."
+   skill team-finance finance/pay-invoice "Pay an approved vendor invoice through the AP system."
+   skill team-finance finance/settle-bill "Settle an outstanding supplier bill."
+   PODIUM_USAGE_FLUSH_INTERVAL=1s podium serve --standalone --no-embeddings --web-ui --layer-path "$WORK/root" --bind 127.0.0.1:8181 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8181/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   U=http://127.0.0.1:8181
+   hit() { i=0; while [ "$i" -lt "$3" ]; do curl -s -o /dev/null -H "X-Podium-Client: $2" "$U/v1/load_artifact?id=$1"; i=$((i+1)); done; }
+   hit observability/trace-review 'kind=mcp&name=podium-mcp&harness=claude-code' 12
+   hit observability/trace-review 'kind=mcp&name=podium-mcp&harness=cursor' 5
+   hit postgres/query-review 'kind=sdk&name=podium-py' 7
+   hit finance/pay-invoice 'kind=sync&name=podium&harness=claude-code' 4
+   hit finance/pay-invoice '' 2
+   for q in trace review invoice; do curl -s -o /dev/null "$U/v1/search_artifacts?query=$q"; done
+   sleep 2
+   curl -s -X POST -d '{"days":30}' "$U/v1/usage" | jq -c '{loads: .totals.loads, syncs: .totals.syncs, artifact_count}'
+   ```
+
+   **Expect.** `server_alive` prints nothing, and the report line is `{"loads":26,"syncs":4,"artifact_count":4}`.
+
+2. Open `http://127.0.0.1:8181/app/#/usage` and read the page in the light theme.
+
+   **Expect.** The sidebar carries a Usage row after Similarity, and it is the current row. The header reads `Usage` with a `LAST 30 DAYS` badge and the `30d` segment pressed. The tiles state 26 artifacts loaded and 4 synced. The client bar lists `mcp 17`, `sdk 7`, `sync 4`, and `unknown 2`, and the harness bar lists `claude-code 16`, `cursor 5`, and `unknown 9`; in both, the unknown swatch is the palest tone, whatever its position. By layer is closed and reads `2 layers · platform has the most loads`. The table shows `Showing 4 of 4`, sorted by `LOADS ↓`, with `observability/trace-review` first at 17 and an accent bar, and `finance/settle-bill` last at 0 with an em dash under LAST LOADED. A breakdown that names `none`, or an unknown part drawn in a dark tone, is the defect.
+
+3. Open By layer, press the SYNCS header twice, type `finance` into the filter, and choose `platform` in the Layer menu.
+
+   **Expect.** By layer lists platform and team-finance with share bars, platform's in the accent. The first SYNCS press puts `finance/pay-invoice` first under `SYNCS ↓`, and the second turns the header to `SYNCS ↑`. The filter leaves the two finance artifacts and states `Showing 2 of 2`, and the Layer menu then empties the table to `No artifacts match.` while the tiles and the breakdowns keep their figures. Tiles that change with the table's filters are the defect.
+
+4. Search for `review`, open `observability/trace-review`, and follow its rail link.
+
+   **Expect.** Each search result closes with a dashed rule and a `30 DAYS` line, `17 loads 0 syncs 2 search hits` for trace-review. The artifact's rail carries a Usage section after Provenance with a row of daily bars whose last bar is in the accent, `loads 17`, `last loaded today`, `last synced —`, and `Open in Usage →`, which opens the Usage page with the filter holding the artifact ID.
+
+5. Switch the theme to dark with the control in the top bar and repeat steps 2 to 4.
+
+   **Expect.** Every bar, swatch, and figure stays legible against the dark ground, the accent bars keep their tone, and no text or bar disappears.
 
 **Cleanup.**
 

@@ -22,6 +22,10 @@ export type Route =
   // selected names the artifact the similarity page opens on, and the empty
   // string opens it on the first entry its list carries.
   | { name: 'similarity'; selected: string }
+  // query is the artifact ID text the usage page's artifact list opens
+  // filtered by, which is how the artifact viewer's "Open in Usage" link
+  // lands on that artifact's row; the empty string opens it unfiltered.
+  | { name: 'usage'; query: string }
   // deleted selects the recovery surface, which is a page of its own under
   // the panel rather than a section inside it: it carries its own table, and
   // stacking that table above the panel's pushes the precedence label and the
@@ -54,6 +58,8 @@ export function parseRoute(hash: string): Route | null {
       return { name: 'layers', deleted: tail === 'deleted' };
     case 'similarity':
       return { name: 'similarity', selected: tail };
+    case 'usage':
+      return { name: 'usage', query: tail };
     case 'domain':
       return { name: 'domain', path: tail };
     default:
@@ -144,6 +150,12 @@ export function similarityHref(selected = ''): string {
   return selected === '' ? '#/similarity' : `#/similarity/${encodeURIComponent(selected)}`;
 }
 
+/** usageHref addresses the usage page, with its artifact list filtered by
+ * the ID text given, or unfiltered where none is. */
+export function usageHref(query = ''): string {
+  return query === '' ? '#/usage' : `#/usage/${encodeURIComponent(query)}`;
+}
+
 /** domainTitle is what a domain page is titled. The breadcrumb above the
  * title already carries the ancestry, so repeating the whole slash-separated
  * path in the h1 states the reader's position twice and runs the title off the
@@ -194,6 +206,8 @@ export function routeKey(route: Route): string {
       return route.deleted ? 'layers/deleted' : 'layers';
     case 'similarity':
       return `similarity/${route.selected}`;
+    case 'usage':
+      return `usage/${route.query}`;
   }
 }
 
@@ -228,6 +242,8 @@ export function routeTitle(route: Route): string {
       return route.deleted ? 'Recently unregistered' : 'Layers';
     case 'similarity':
       return 'Similarity analysis';
+    case 'usage':
+      return 'Usage';
   }
 }
 
@@ -391,6 +407,8 @@ export function routeAnnouncement(route: Route): string {
       return routeTitle(route);
     case 'similarity':
       return route.selected === '' ? routeTitle(route) : `${routeTitle(route)} for ${route.selected}`;
+    case 'usage':
+      return route.query === '' ? routeTitle(route) : `${routeTitle(route)} for ${route.query}`;
   }
 }
 

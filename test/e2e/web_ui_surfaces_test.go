@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // bundleAPIPathPattern matches a registry path the built bundle references.
@@ -326,4 +327,75 @@ func contains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// usageReportFields are the usage-report members the usage surface reads: the
+// window and the served granularity, the totals with their breakdowns and
+// series, the layers, one page of artifacts with their type, layer, and last
+// days, the list's length, and its cursor. The registry answers the §8.7
+// report, so every member is lower snake_case.
+var usageReportFields = []string{
+	"to", "granularity", "totals", "layers", "artifacts", "artifact_count", "next_cursor",
+	"loads", "syncs", "search_hits", "by_client", "by_harness", "series", "start",
+	"layer", "artifact_id", "type", "last_loaded", "last_synced",
+}
+
+// usageQueryFields are the POST /v1/usage body members the usage surface
+// sends: the window, the series granularity, the named artifacts of a list,
+// the table's ID text, type, and layer filters, its sort and order, and the
+// page size and cursor.
+var usageQueryFields = []string{
+	"days", "granularity", "artifacts", "query", "types", "layers", "sort", "order", "limit", "cursor",
+}
+
+// Spec: §13.10, §8.7 — the served bundle reads the usage report under the
+// member names the running binary answers and sends the body members the
+// binary accepts. A member read under any other name yields nothing on every
+// response, which renders as a catalog nobody used rather than as a failure,
+// and a body member sent under another name is refused by the binary's
+// unknown-field check, which the list rows absorb without an error, so the
+// correspondence is pinned against the running binary.
+func TestWebUI_ServedBundleReadsTheUsageReport(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"fin/pay/ARTIFACT.md": smallteamLowArtifact("pay an approved vendor invoice from the payables queue"),
+	})
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_WEB_UI=true", "PODIUM_USAGE_FLUSH_INTERVAL=1s"},
+		"serve", "--standalone", "--web-ui", "--layer-path", reg)
+	if st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=fin/pay"); st != 200 {
+		t.Fatalf("load fin/pay = %d\nbody: %s\nlog:\n%s", st, body, srv.log())
+	}
+	var wire string
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		st, body := postJSON(t, srv.BaseURL+"/v1/usage", json.RawMessage(
+			`{"days":30,"granularity":"day","artifacts":["fin/pay"],"query":"fin/","types":["skill","agent"],"sort":"loads","order":"desc","limit":1}`))
+		if st != 200 {
+			t.Fatalf("POST /v1/usage = %d\nbody: %s", st, body)
+		}
+		wire = string(body)
+		if strings.Contains(wire, `"last_loaded": "`) || strings.Contains(wire, `"last_loaded":"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the flushed load never reached the report\nbody: %s\nlog:\n%s", body, srv.log())
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	for _, field := range usageReportFields {
+		if !strings.Contains(wire, `"`+field+`"`) {
+			t.Errorf("the usage report carries no %q member; the usage surface reads one\nbody: %s", field, wire)
+		}
+	}
+
+	st, index := getRaw(t, srv.BaseURL+"/app/")
+	if st != 200 {
+		t.Fatalf("GET /app/ status = %d, want 200\nlog:\n%s", st, srv.log())
+	}
+	scripts := strings.Join(bundleScripts(t, srv, string(index)), "\n")
+	for _, field := range append(append([]string{}, usageReportFields...), usageQueryFields...) {
+		if !strings.Contains(scripts, `"`+field+`"`) && !strings.Contains(scripts, "."+field) && !strings.Contains(scripts, field+":") {
+			t.Errorf("the served bundle references no %q usage member; the surface reads or sends it under some other name", field)
+		}
+	}
 }

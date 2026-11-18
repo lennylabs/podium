@@ -45,6 +45,9 @@ import { RailSimilarity, SimilarityTab, similarityCount } from './ArtifactSimila
 import { ingestedRef, visibilitySummary } from './layerfacts';
 import type { OverlapRead } from './overlapread';
 import { useOverlapRead } from './overlapread';
+import { UsageSummary } from '../components/Usage';
+import type { RailUsage } from '../usage';
+import { useRailUsage } from '../usage';
 
 type TabName = 'rendered' | 'frontmatter' | 'source' | 'resources' | 'similarity';
 
@@ -123,6 +126,9 @@ export function ArtifactViewer({
   // read standing beside the document, like the layer list above, so a
   // failure is presented in the tab and the rail section alone. Spec: §13.10.
   const overlap = useOverlapRead(id);
+  // The rail's usage section reads on a request of its own beside the
+  // artifact read, so the page never waits on it (§13.10).
+  const railUsage = useRailUsage(id);
   if (artifact.value !== null && artifact.value !== held) {
     setHeld(artifact.value);
   }
@@ -321,6 +327,7 @@ export function ArtifactViewer({
         frontmatter={document.frontmatter}
         showFrontmatter={!frontmatterOpen}
         overlap={overlap}
+        usage={railUsage}
         description={description}
       />
     </section>
@@ -686,6 +693,7 @@ function ArtifactRail({
   frontmatter,
   showFrontmatter,
   overlap,
+  usage,
   description,
 }: {
   artifact: LoadArtifactResponse;
@@ -693,6 +701,8 @@ function ArtifactRail({
   frontmatter: string;
   showFrontmatter: boolean;
   overlap: OverlapRead;
+  /** usage is the rail's usage section, absent where its read failed. */
+  usage: RailUsage | undefined;
   description: string;
 }) {
   const pairs = parseFrontmatter(frontmatter);
@@ -739,9 +749,11 @@ function ArtifactRail({
           </div>
         </dl>
       </section>
-      {/* The similarity section follows provenance on every tab, because what
-          the artifact overlaps is a property of the artifact rather than of
-          the panel being read (§13.10). */}
+      {/* The usage and similarity sections follow provenance on every tab,
+          because how the artifact is used and what it overlaps are properties
+          of the artifact rather than of the panel being read. A usage read
+          that failed draws no section, and the rail closes up (§13.10). */}
+      <UsageSummary id={artifact.id} usage={usage} />
       <RailSimilarity read={overlap} id={artifact.id} description={description} />
       {hasFrontmatter && (
         <section aria-label="Frontmatter">

@@ -526,6 +526,44 @@ place of its list. The viewer renders it inside the Similarity tab and the
 rail's similarity section alone, because the artifact's own response already
 arrived and the rest of the viewer stays usable.
 
+### 6. Usage
+
+The rules for this surface are owned by the Usage bullet of the Web UI part of
+§13.10: what the surface reads and with whose identity, who is offered it, what
+the usage page shows, where the last 30 days of each artifact's counts appear,
+how a client kind or harness recorded as `none` is named, and what a failed read
+does in each place. This brief does not restate them. The surface is numbered
+after Similarity because it was added after it, and the numbers carry no order
+of their own.
+
+The surface reads the usage report. Its routes, its parameters, and its response
+are documented under "Usage report" in `docs/reference/http-api.md`, the handler
+is `handleUsage` in `pkg/registry/server/usage.go`, and the response schema is
+`UsageReport` in `pkg/registry/core/usage_report.go`. What each part of the
+response gives the design:
+
+| Part of the response | What it gives the design |
+|:--|:--|
+| the window and the served granularity | The days the figures cover. A long window coarsens a daily series to weeks or months, and the response names the granularity it served, so a chart labels its periods from the response rather than from the request. |
+| `totals` | The catalog's loads, syncs, and search hits over the window, their breakdowns by client kind and by harness, and, when a granularity is requested, a series whose periods sum to the totals. |
+| `layers` | One entry per layer the caller can see, including a layer with no counts, with the same figures. A layer's counts include artifacts it no longer serves, so they can exceed the sum of its listed artifacts. |
+| `artifacts`, `artifact_count`, and `next_cursor` | One page of artifacts with their counts, type, serving layer, and last loaded and synced days, ordered by the requested sort. `artifact_count` is the length of the whole list and `next_cursor` reads the next page, so a table states its total and pages without loading the catalog. |
+
+Three properties of the report carry design consequences. Every figure covers
+only what the caller can see, and a hidden or unknown artifact answers the same
+empty counts as an artifact nobody used, so the "no activity" treatment is also
+the treatment for an artifact the caller cannot see. The ID filter, the type
+filter, and the sort narrow and order the artifact list without changing
+`totals` or `layers`, so the tiles and the breakdowns above a filtered table do
+not move when the reader filters it. A cursor belongs to the sort and order it
+was issued under, so changing either starts the table at its first page.
+
+The surface carries no write. On the usage page a failed read renders the error
+envelope described under Errors below in place of the figures. Everywhere else
+the counts are extra: they arrive from their own request after the page, show
+placeholders while it is in flight, and are left out without an error when it
+fails, because the rest of the page already arrived and stays usable.
+
 ## The state matrix
 
 Most of the design work is here rather than in the happy path.
@@ -700,6 +738,11 @@ The following deserve specific attention:
   state for all three, and the similarity page's empty state states only that
   nothing overlaps at the threshold applied. Neither may imply that a hidden
   artifact overlaps the one on screen.
+- **No usage versus not visible.** The usage read for an artifact the caller
+  cannot see answers the same empty counts as an artifact nobody loaded, synced,
+  or found (the usage section above). The usage line, the rail's usage section,
+  and the usage page's artifact list therefore render one state for both, and
+  none may imply that a hidden artifact exists.
 - **Semantic check off.** A registry that does not run the semantic check
   answers the report without semantic peers and without a threshold. The page
   and the viewer then show the word-overlap entries alone, with no threshold

@@ -30,6 +30,7 @@ import {
   layersHref,
   searchHref,
   similarityHref,
+  usageHref,
 } from "./route";
 import type { SessionPosture } from "./session";
 import { zone } from "./time";
@@ -20483,6 +20484,318 @@ describe("similarity", () => {
       const panel = await screen.findByRole("tabpanel");
       expect(within(panel).getByRole("alert").textContent).toContain("The overlap report did not load.");
       expect(screen.queryByLabelText("Catalog refused")).toBeNull();
+    });
+  });
+});
+
+describe("usage", () => {
+  const traceReview = "platform/observability/trace-review";
+  const payInvoice = "finance/ap/pay-invoice";
+
+  function usageArtifact(id: string, layer: string, loads: number, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      artifact_id: id,
+      type: "skill",
+      layer,
+      loads,
+      syncs: 318,
+      search_hits: 5120,
+      by_client: {},
+      by_harness: {},
+      last_loaded: "2026-11-18",
+      last_synced: "2026-11-15",
+      ...overrides,
+    };
+  }
+
+  /** usageBody is a report the registry answers with: two layers, client and
+   * harness breakdowns that include a request recorded under `none`, a
+   * two-day series, and one artifact of a list 312 long. */
+  function usageBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      days: 30,
+      from: "2026-10-20",
+      to: "2026-11-18",
+      granularity: "day",
+      totals: {
+        loads: 18402,
+        syncs: 2316,
+        search_hits: 5000,
+        by_client: {
+          mcp: { loads: 11020, syncs: 0, search_hits: 4000 },
+          sync: { loads: 0, syncs: 2316, search_hits: 0 },
+          none: { loads: 192, syncs: 0, search_hits: 0 },
+        },
+        by_harness: {
+          "claude-code": { loads: 11120, syncs: 2000, search_hits: 0 },
+          none: { loads: 192, syncs: 0, search_hits: 0 },
+        },
+        series: [
+          { start: "2026-11-17", end: "2026-11-17", loads: 9000, syncs: 1000, search_hits: 2000 },
+          { start: "2026-11-18", end: "2026-11-18", loads: 9402, syncs: 1316, search_hits: 3000 },
+        ],
+      },
+      layers: [
+        { layer: "platform", loads: 9120, syncs: 1240, search_hits: 18900, by_client: {}, by_harness: {} },
+        { layer: "team-finance", loads: 5830, syncs: 648, search_hits: 14510, by_client: {}, by_harness: {} },
+      ],
+      artifacts: [usageArtifact(traceReview, "platform", 2412)],
+      artifact_count: 312,
+      next_cursor: "c1",
+      ...overrides,
+    };
+  }
+
+  /** usageBodies parses the usage reads the page sent, oldest first. */
+  function usageBodies(): Record<string, unknown>[] {
+    return bodies
+      .map((raw) => JSON.parse(raw) as Record<string, unknown>)
+      .filter((body) => "days" in body || "from" in body || "artifacts" in body || "sort" in body);
+  }
+
+  describe("the usage page", () => {
+    it("draws the totals, the breakdowns with none named unknown, the closed layer disclosure, and the first page of artifacts", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      goTo(usageHref());
+      render(<App />);
+      const tiles = await screen.findAllByTestId("stat-tile");
+      expect(tiles[0].textContent).toContain("ARTIFACTS LOADED");
+      expect(tiles[0].textContent).toContain("18,402");
+      expect(tiles[1].textContent).toContain("ARTIFACTS SYNCED");
+      expect(tiles[1].textContent).toContain("2,316");
+      const breakdowns = screen.getAllByTestId("breakdown");
+      expect(breakdowns[0].textContent).toContain("unknown");
+      // The unknown part keeps the lightest tone wherever it falls: it is the
+      // second part of the harness breakdown here.
+      const unknownKey = within(breakdowns[1]).getByText("unknown", { exact: false });
+      expect(unknownKey.querySelector(".breakdown-swatch")?.className).toContain("breakdown-part-4");
+      expect(breakdowns[0].textContent).not.toMatch(/\bnone\b/);
+      const disclosure = screen.getByRole("button", { name: /By layer/ });
+      expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+      expect(disclosure.textContent).toContain("2 layers · platform has the most loads");
+      expect(screen.queryByRole("table", { name: "Usage by layer" })).toBeNull();
+      fireEvent.click(disclosure);
+      const layers = screen.getByRole("table", { name: "Usage by layer" });
+      expect(within(layers).getAllByRole("row")).toHaveLength(3);
+      const table = await screen.findByRole("table", { name: "Usage by artifact" });
+      expect(within(table).getByRole("link", { name: traceReview }).getAttribute("href")).toBe(artifactHref(traceReview));
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 1 of 312");
+      expect(screen.getByRole("button", { name: "Show 50 more" })).toBeTruthy();
+      // The summary reads by day and names no layer, so the table's layer
+      // menu never narrows the tiles; the list reads one page by loads.
+      const sent = usageBodies();
+      expect(sent.some((b) => b.granularity === "day" && b.layers === undefined)).toBe(true);
+      expect(sent.some((b) => b.sort === "loads" && b.order === "desc" && b.limit === 50)).toBe(true);
+    });
+
+    it("sorts on a column header, and a second press reverses the order", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      goTo(usageHref());
+      render(<App />);
+      await screen.findByRole("table", { name: "Usage by artifact" });
+      fireEvent.click(screen.getByRole("button", { name: "SYNCS" }));
+      await waitFor(() => {
+        expect(usageBodies().some((b) => b.sort === "syncs" && b.order === "desc")).toBe(true);
+      });
+      fireEvent.click(await screen.findByRole("button", { name: "SYNCS ↓" }));
+      await waitFor(() => {
+        expect(usageBodies().some((b) => b.sort === "syncs" && b.order === "asc")).toBe(true);
+      });
+    });
+
+    it("filters the list by ID text, type, and layer without narrowing the summary", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      goTo(usageHref());
+      render(<App />);
+      await screen.findByRole("table", { name: "Usage by artifact" });
+      fireEvent.change(screen.getByLabelText("Filter by artifact id"), { target: { value: "trace" } });
+      fireEvent.change(screen.getByLabelText("Type"), { target: { value: "agent" } });
+      fireEvent.change(screen.getByLabelText("Layer"), { target: { value: "platform" } });
+      await waitFor(() => {
+        const last = usageBodies().at(-1);
+        expect(last?.query).toBe("trace");
+        expect(last?.types).toEqual(["agent"]);
+        expect(last?.layers).toEqual(["platform"]);
+      });
+      expect(usageBodies().filter((b) => b.granularity === "day").every((b) => b.layers === undefined)).toBe(true);
+    });
+
+    it("opens with the list filtered by the ID the address carries", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      goTo(usageHref(traceReview));
+      render(<App />);
+      await screen.findByRole("table", { name: "Usage by artifact" });
+      expect((screen.getByLabelText("Filter by artifact id") as HTMLInputElement).value).toBe(traceReview);
+      expect(usageBodies().some((b) => b.query === traceReview)).toBe(true);
+    });
+
+    it("pages with the report's cursor and appends the next page", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      goTo(usageHref());
+      render(<App />);
+      const more = await screen.findByRole("button", { name: "Show 50 more" });
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": {
+          body: usageBody({ artifacts: [usageArtifact(payInvoice, "team-finance", 1544)], next_cursor: null }),
+        },
+      });
+      fireEvent.click(more);
+      await waitFor(() => {
+        expect(screen.getByTestId("usage-count").textContent).toBe("Showing 2 of 312");
+      });
+      expect(usageBodies().at(-1)?.cursor).toBe("c1");
+      const table = screen.getByRole("table", { name: "Usage by artifact" });
+      expect(within(table).getByRole("link", { name: payInvoice })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^Show \d+ more$/ })).toBeNull();
+    });
+
+    it("states a failed read in place of the figures", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { status: 500, body: { code: "registry.unavailable", message: "down" } },
+      });
+      goTo(usageHref());
+      render(<App />);
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toContain("The usage report did not load.");
+      expect(screen.queryAllByTestId("stat-tile")).toHaveLength(0);
+    });
+
+    it("stands in the sidebar for an anonymous caller", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture() },
+        "/v1/load_domain": { body: emptyDomain },
+      });
+      render(<App />);
+      expect(await screen.findByTestId("anonymous-banner")).toBeTruthy();
+      expect(screen.getByRole("link", { name: /^Usage/ }).getAttribute("href")).toBe(usageHref());
+    });
+  });
+
+  describe("the usage line on search results", () => {
+    const searchBody = {
+      results: [{ id: traceReview, type: "skill", version: "1.0.0", description: "Review traces.", score: 2 }],
+      total_matched: 1,
+    };
+
+    it("fills in each result's last 30 days from one batched read", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/search_artifacts": { body: searchBody },
+        "/v1/usage": { body: usageBody({ next_cursor: null }) },
+      });
+      goTo(searchHref("trace"));
+      render(<App />);
+      const line = await screen.findByTestId("usage-line");
+      await waitFor(() => {
+        expect(line.textContent).toContain("2,412loads");
+      });
+      expect(line.textContent).toContain("318syncs");
+      expect(line.textContent).toContain("5,120search hits");
+      const reads = usageBodies().filter((b) => Array.isArray(b.artifacts));
+      expect(reads).toHaveLength(1);
+      expect(reads[0].artifacts).toEqual([traceReview]);
+      expect(reads[0].days).toBe(30);
+    });
+
+    it("leaves the line out when the usage read fails", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/search_artifacts": { body: searchBody },
+        "/v1/usage": { status: 500, body: { code: "registry.unavailable", message: "down" } },
+      });
+      goTo(searchHref("trace"));
+      render(<App />);
+      await screen.findByRole("link", { name: traceReview });
+      await waitFor(() => {
+        expect(requests.some((r) => r.url === "/v1/usage")).toBe(true);
+        expect(screen.queryByTestId("usage-line")).toBeNull();
+      });
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+  });
+
+  describe("the rail's usage section", () => {
+    const artifactBody = {
+      body: {
+        id: traceReview,
+        type: "skill",
+        version: "1.0.0",
+        content_hash: "sha256:ab74",
+        manifest_body: "# Body\n",
+        frontmatter: `---\nname: trace-review\ndescription: Review traces.\n---\n`,
+        layer: "platform",
+      },
+    };
+    const daily = Array.from({ length: 30 }, (_, i) => ({
+      start: `2026-10-${String(20 + i).padStart(2, "0")}`,
+      end: `2026-10-${String(20 + i).padStart(2, "0")}`,
+      loads: i,
+      syncs: 0,
+      search_hits: 0,
+    }));
+
+    it("states the artifact's last 30 days with its daily bars and a link to the usage page", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": artifactBody,
+        "/v1/usage": { body: usageBody({ artifacts: [usageArtifact(traceReview, "platform", 2412, { series: daily })] }) },
+      });
+      goTo(artifactHref(traceReview));
+      render(<App />);
+      const section = await screen.findByTestId("rail-usage");
+      await waitFor(() => {
+        expect(section.textContent).toContain("2,412");
+      });
+      expect(section.textContent).toContain("today");
+      expect(section.textContent).toContain("3 days ago");
+      expect(within(section).getByRole("img").children).toHaveLength(30);
+      expect(within(section).getByRole("link", { name: "Open in Usage →" }).getAttribute("href")).toBe(usageHref(traceReview));
+    });
+
+    it("states no activity for an artifact the report has no counts for", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": artifactBody,
+        "/v1/usage": { body: usageBody({ artifacts: [] }) },
+      });
+      goTo(artifactHref(traceReview));
+      render(<App />);
+      const section = await screen.findByTestId("rail-usage");
+      await waitFor(() => {
+        expect(section.textContent).toContain("No loads, syncs, or search hits in the last 30 days.");
+      });
+    });
+
+    it("draws no section when its read fails", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": artifactBody,
+        "/v1/usage": { status: 500, body: { code: "registry.unavailable", message: "down" } },
+      });
+      goTo(artifactHref(traceReview));
+      render(<App />);
+      await screen.findByTestId("artifact-body");
+      await waitFor(() => {
+        expect(requests.some((r) => r.url === "/v1/usage")).toBe(true);
+        expect(screen.queryByTestId("rail-usage")).toBeNull();
+      });
     });
   });
 });
