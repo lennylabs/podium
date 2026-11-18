@@ -152,7 +152,7 @@ func (r *Registry) neighborSourceFor(ctx context.Context, rec store.ManifestReco
 		if !ok {
 			return neighborSource{}, fmt.Errorf("vector backend %s cannot return stored vectors and cannot query with text", r.vector.ID())
 		}
-		text := projection.Artifact(rec)
+		text := projection.Artifact(r.withProjectionFields(rec))
 		return neighborSource{
 			query: func(ctx context.Context, k int) ([]vector.Match, error) { return tv.QueryText(ctx, tenant, text, k) },
 			score: scoreByDistance,

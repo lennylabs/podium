@@ -22,10 +22,11 @@ const (
 )
 
 // ruleSkillPodiumOnlyFields enforces spec §4.3.4: "SKILL.md does not contain
-// Podium-only fields (`type`, `when_to_use`, `tags`, etc.) at the top level;
-// if present, error. A top-level `version` is a warning rather than an error,
-// because many published skills carry one: Podium ignores it and takes the
-// version from `metadata.version` or `ARTIFACT.md`. The diagnostic recommends
+// Podium-only fields (`type`, `tags`, etc.) at the top level; if present,
+// error. A top-level `version` is a warning rather than an error, because many
+// published skills carry one: Podium ignores it and takes the version from
+// `metadata.version` or `ARTIFACT.md`. A top-level `when_to_use` is a warning
+// rather than an error, because Claude Code defines it." The diagnostic recommends
 // `metadata.version` for a version, the `metadata` key of the same name for a
 // field that **Podium fields in `metadata`** lists, and the `ARTIFACT.md`
 // overlay for every other field." SKILL.md stays within the agentskills.io
@@ -53,7 +54,7 @@ func (r ruleSkillPodiumOnlyFields) Check(_ context.Context, _ *filesystem.Regist
 			if !manifest.IsPodiumOnlySkillField(k) {
 				continue
 			}
-			if k == "version" {
+			if k == "version" || k == "when_to_use" {
 				out = append(out, warn(rec.ID, r.Code(), podiumOnlyFieldMessage(k)))
 				continue
 			}
@@ -72,6 +73,10 @@ func (r ruleSkillPodiumOnlyFields) Check(_ context.Context, _ *filesystem.Regist
 func podiumOnlyFieldMessage(key string) string {
 	if key == "version" {
 		return fmt.Sprintf("SKILL.md contains Podium-only field %q, which Podium ignores; set metadata.version in SKILL.md instead", key)
+	}
+	if key == "when_to_use" {
+		return "SKILL.md sets when_to_use at the top level, as Claude Code reads it, and Podium reads the value; " +
+			"the Agent Skills standard does not define the key, so a skill upload outside Claude Code refuses it"
 	}
 	if manifest.IsSkillMetadataField(key) {
 		return fmt.Sprintf("SKILL.md contains Podium-only field %q at the top level; set metadata.%s in SKILL.md or move it to ARTIFACT.md", key, key)
@@ -195,6 +200,15 @@ func skillMetadataMismatches(rec filesystem.ArtifactRecord, keys []string) []Dia
 	}
 	dec := manifest.DecodeSkillMetadata(rec.Skill)
 	var out []Diagnostic
+	if top, _ := manifest.DecodeSkillTopLevelWhenToUse(rec.Skill); top != nil && slices.Contains(keys, "when_to_use") &&
+		!skillMetadataValuesEqual(authored.WhenToUse, top) {
+		out = append(out, Diagnostic{
+			ArtifactID: rec.ID,
+			Code:       "lint.skill_artifact_field_mismatch",
+			Severity:   SeverityError,
+			Message:    fmt.Sprintf("ARTIFACT.md when_to_use %v does not match SKILL.md top-level when_to_use %v", authored.WhenToUse, top),
+		})
+	}
 	for _, k := range keys {
 		if !dec.Decoded[k] {
 			continue
@@ -305,7 +319,11 @@ func invocationProblem(ty manifest.ArtifactType, inv manifest.Invocation) string
 // ruleSkillMetadataFields enforces spec §4.3.4: "A `SKILL.md` `metadata` value
 // for a key that **Podium fields in `metadata`** lists and that does not
 // follow its encoding, including a sequence or a mapping, is ignored (warning
-// that names the key, the value, and the encoding)." The warning honors no
+// that names the key, the value, and the encoding). A top-level `SKILL.md`
+// `when_to_use` that does not follow its encoding is ignored the same way." It
+// also enforces "A top-level `SKILL.md` `when_to_use` that follows its encoding
+// ... equals a `metadata.when_to_use` that follows its encoding (error on each
+// mismatch)", because both values come from SKILL.md alone. The warning honors no
 // lint_suppress entry, because §4.3.4 grants the list only to the skills-ref
 // check and the catalog advisories.
 //
@@ -320,8 +338,22 @@ func (r ruleSkillMetadataFields) Check(_ context.Context, _ *filesystem.Registry
 		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill || rec.Skill == nil {
 			continue
 		}
-		for _, is := range manifest.DecodeSkillMetadata(rec.Skill).Issues {
+		dec := manifest.DecodeSkillMetadata(rec.Skill)
+		for _, is := range dec.Issues {
 			out = append(out, warn(rec.ID, r.Code(), metadataIssueMessage(is)))
+		}
+		top, issue := manifest.DecodeSkillTopLevelWhenToUse(rec.Skill)
+		if issue != nil {
+			out = append(out, warn(rec.ID, r.Code(), metadataIssueMessage(*issue)))
+		}
+		if top != nil && dec.Decoded["when_to_use"] && !skillMetadataValuesEqual(top, dec.Values.WhenToUse) {
+			out = append(out, Diagnostic{
+				ArtifactID: rec.ID,
+				Code:       "lint.skill_artifact_field_mismatch",
+				Severity:   SeverityError,
+				Message: fmt.Sprintf("SKILL.md top-level when_to_use %v does not match SKILL.md metadata.when_to_use %v",
+					top, dec.Values.WhenToUse),
+			})
 		}
 	}
 	return out
@@ -334,6 +366,12 @@ func (r ruleSkillMetadataFields) Check(_ context.Context, _ *filesystem.Registry
 //
 // Spec: §4.3.4
 func metadataIssueMessage(is manifest.SkillMetadataIssue) string {
+	if is.TopLevel {
+		if is.Kind != "" {
+			return fmt.Sprintf("SKILL.md top-level %s is a %s (%s) and is ignored: the value must be %s", is.Key, is.Kind, is.Value, is.Encoding)
+		}
+		return fmt.Sprintf("SKILL.md top-level %s %q is ignored: the value must be %s", is.Key, is.Value, is.Encoding)
+	}
 	if is.Kind != "" {
 		return fmt.Sprintf("metadata.%s is a %s (%s) and is ignored: the value must be %s", is.Key, is.Kind, is.Value, is.Encoding)
 	}

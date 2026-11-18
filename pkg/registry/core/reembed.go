@@ -242,7 +242,7 @@ func (r *Registry) ReembedOne(ctx context.Context, artifactID, version string) e
 // receives raw text. Mirrors ingest's embedAndStore but operates on a
 // manifest fetched from the store rather than one mid-ingest.
 func (r *Registry) embedAndUpsert(ctx context.Context, mr store.ManifestRecord) error {
-	return r.upsertVector(ctx, mr.TenantID, mr.ArtifactID, mr.Version, projection.Artifact(mr))
+	return r.upsertVector(ctx, mr.TenantID, mr.ArtifactID, mr.Version, projection.Artifact(r.withProjectionFields(mr)))
 }
 
 // embedAndUpsertDomain composes the §4.7 domain projection from a

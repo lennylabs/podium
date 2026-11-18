@@ -102,15 +102,15 @@ func TestPodiumLint_SkillPodiumFieldErrors(t *testing.T) {
 		},
 		testharness.WriteTreeOption{
 			Path:    "greetings/hello/SKILL.md",
-			Content: "---\nname: hello\ndescription: Greet the user.\nwhen_to_use:\n  - greeting\n---\n\nbody\n",
+			Content: "---\nname: hello\ndescription: Greet the user.\ntags: greeting\n---\n\nbody\n",
 		},
 	)
 	res := cmdharness.Run(t, "podium", "", "lint", "--registry", registry)
 	if res.ExitCode != 1 {
 		t.Fatalf("lint exit=%d, want 1\nstdout:\n%s", res.ExitCode, res.Stdout)
 	}
-	if !strings.Contains(res.Stdout, "when_to_use") {
-		t.Errorf("expected an error naming the Podium-only field when_to_use:\n%s", res.Stdout)
+	if !strings.Contains(res.Stdout, "[error]") || !strings.Contains(res.Stdout, `"tags"`) {
+		t.Errorf("expected an error naming the Podium-only field tags:\n%s", res.Stdout)
 	}
 }
 

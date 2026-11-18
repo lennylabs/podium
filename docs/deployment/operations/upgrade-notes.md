@@ -107,6 +107,8 @@ A load from 0.7.0 resolves the fields from the row's stored bytes. Such a row ch
 - The stored deprecation flag stays unset when only `metadata` deprecates the row, so the 90-day retention window for deprecated versions does not start for that version.
 - Semantic search ranks the row by the vector that the earlier release built from the stored tags.
 
+Lexical search reads the row's `name` and `when_to_use` from its stored bytes, so it matches a `metadata.when_to_use` in such a row.
+
 When a later version of such a skill sets `deprecated`, the registry emits `artifact.deprecated` for it, even when the earlier version's `metadata` already carried `deprecated: "true"`, because the earlier row's stored flag is unset.
 
 #### Publishing an affected skill at a new version
