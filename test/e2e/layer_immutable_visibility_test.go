@@ -192,7 +192,7 @@ func TestLayerCLI_ImmutableVisibilityRefusedForEveryCaller(t *testing.T) {
 func TestLayerCLI_ImmutableVisibilityBindsPublicMode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"seed/note/ARTIFACT.md": authAgent("seed note")})
-	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_INGEST_OFFLINE=true"},
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_INGEST_OFFLINE=true", "PODIUM_OPERATOR_TOKEN=" + e2eOperatorToken},
 		"serve", "--public-mode", "--layer-path", reg)
 	var health map[string]any
 	getJSON(t, srv.BaseURL+"/healthz", &health)
@@ -203,6 +203,9 @@ func TestLayerCLI_ImmutableVisibilityBindsPublicMode(t *testing.T) {
 		"PODIUM_REGISTRY=" + srv.BaseURL,
 		"PODIUM_TOKEN_KEYCHAIN_NAME=podium-immutable-visibility-test",
 		"HOME=" + t.TempDir(),
+		// §7.3.1: public mode admits a layer write only with the operator
+		// token, and a request carrying it is admitted as a tenant admin is.
+		"PODIUM_OPERATOR_TOKEN=" + e2eOperatorToken,
 	}
 
 	// Public mode authenticates no caller, so the owner is named in the

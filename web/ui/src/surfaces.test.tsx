@@ -143,15 +143,17 @@ function catalogOf(count: number): { ids: string[] } {
 
 /** posture is a §7.3.4 posture read body. layer_capabilities is derived from
  * the two identity fields with the predicate the registry itself applies: a
- * deployment running in public mode or configuring no identity provider
+ * deployment that configures no identity provider and is not in public mode
  * authenticates no caller, so its layer endpoints admit every request on the
- * admin arm, and every other deployment reports the arm closed unless the
- * call site says otherwise. A fixture therefore cannot state a body the
- * registry could not emit, and an authenticated caller that renders a write
- * control states the capability that makes it render. */
+ * admin arm. A public-mode deployment admits that arm only with the operator
+ * token, which a browser never sends (§7.3.1), so it reports the arm closed,
+ * as every other deployment does unless the call site says otherwise. A
+ * fixture therefore cannot state a body the registry could not emit, and an
+ * authenticated caller that renders a write control states the capability
+ * that makes it render. */
 function posture(overrides: Partial<SessionPosture> = {}): SessionPosture {
   const open =
-    overrides.public_mode === true ||
+    overrides.public_mode !== true &&
     overrides.identity_provider_configured === false;
   return {
     identity_provider_configured: true,
@@ -7986,7 +7988,7 @@ describe("the layer panel", () => {
   // describes a different source than the one the registry stored.
   it("names the source type and states the git root and the local path", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/ui/session": { body: posture({ identity_provider_configured: false }) },
       "/v1/layers": {
         body: {
           layers: [
@@ -8038,7 +8040,7 @@ describe("the layer panel", () => {
     const longPath =
       "/var/folders/q_/df6ygvl10fj4g162_ld1tkvw0000gn/T/tmp.8UKSGzgrdh/reg";
     stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/ui/session": { body: posture({ identity_provider_configured: false }) },
       "/v1/layers": {
         body: {
           layers: [
@@ -8075,7 +8077,7 @@ describe("the layer panel", () => {
     const parent =
       "/var/folders/q_/df6ygvl10fj4g162_ld1tkvw0000gn/T/registries";
     stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/ui/session": { body: posture({ identity_provider_configured: false }) },
       "/v1/layers": {
         body: {
           layers: [
@@ -8127,7 +8129,7 @@ describe("the layer panel", () => {
   it("elides a source path's last segment at its start where it fills the cell", async () => {
     const longSegment = "a".repeat(60);
     stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/ui/session": { body: posture({ identity_provider_configured: false }) },
       "/v1/layers": {
         body: {
           layers: [
@@ -8178,7 +8180,7 @@ describe("the layer panel", () => {
   // against the tail (§13.10).
   it("draws a single-segment source path with no gap after its separator", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/ui/session": { body: posture({ identity_provider_configured: false }) },
       "/v1/layers": {
         body: {
           layers: [
@@ -8212,7 +8214,7 @@ describe("the layer panel", () => {
   // as `artifacts//`.
   it("draws a git root that already ends in a separator with one separator", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/ui/session": { body: posture({ identity_provider_configured: false }) },
       "/v1/layers": {
         body: {
           layers: [
@@ -8256,7 +8258,7 @@ describe("the layer panel", () => {
   // empty indented such a value by the width of a marker it never paints.
   it("draws no clipped run where a source detail has no leading directories", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/ui/session": { body: posture({ identity_provider_configured: false }) },
       "/v1/layers": {
         body: {
           layers: [
@@ -8301,7 +8303,7 @@ describe("the layer panel", () => {
   // repository line is one run elided at its end instead (§13.10).
   it("elides a git repository line at its end so its owner survives the clip", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/ui/session": { body: posture({ identity_provider_configured: false }) },
       "/v1/layers": {
         body: {
           layers: [
@@ -8365,7 +8367,7 @@ describe("the layer panel", () => {
   // disclosure.
   it("renders an unknown source type as a chip with its fields behind a disclosure", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/ui/session": { body: posture({ identity_provider_configured: false }) },
       "/v1/layers": {
         body: {
           layers: [
@@ -10574,7 +10576,7 @@ describe("the layer write flows", () => {
   // does not implement.
   it("names a git row's missing ref rather than asserting a default branch", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/ui/session": { body: posture({ identity_provider_configured: false }) },
       "/v1/layers": {
         body: {
           layers: [

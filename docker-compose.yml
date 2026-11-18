@@ -107,7 +107,10 @@ services:
   # registry resolves every caller as anonymous-public, every layer is
   # visible regardless of its declared `visibility:`, and the
   # layer-management and erase endpoints admit any request. The port
-  # publishes on the host loopback interface for that reason.
+  # publishes on the host loopback interface for that reason, and
+  # PODIUM_ALLOW_PUBLIC_BIND records that decision: a registry with no
+  # identity provider refuses the container's 0.0.0.0 bind without it
+  # (§13.10).
   # PODIUM_DEFAULT_LAYER_VISIBILITY holds the persisted layer declaration at
   # private, which becomes load-bearing once an identity provider is
   # configured. Dex is retained for device-code evaluation and this service
@@ -126,6 +129,7 @@ services:
         condition: service_started
     environment:
       PODIUM_BIND: "0.0.0.0:8080"
+      PODIUM_ALLOW_PUBLIC_BIND: "true"
       PODIUM_PUBLIC_URL: "http://localhost:8080"
       PODIUM_REGISTRY_STORE: "postgres"
       PODIUM_POSTGRES_DSN: "postgres://podium:podium@postgres:5432/podium?sslmode=disable"

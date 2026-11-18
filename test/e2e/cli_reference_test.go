@@ -1606,11 +1606,14 @@ func TestCLI_LayerReingest(t *testing.T) {
 func TestCLI_LayerReingestExitStatus(t *testing.T) {
 	t.Parallel()
 	srv := startServerArgs(t,
-		[]string{"HOME=" + t.TempDir(), "PODIUM_PUBLIC_MODE=true"},
+		[]string{"HOME=" + t.TempDir(), "PODIUM_PUBLIC_MODE=true", "PODIUM_OPERATOR_TOKEN=" + e2eOperatorToken},
 		"serve", "--standalone", "--layer-path", writeRegistry(t, nil))
+	// §7.3.1: a public-mode registry admits layer writes only with the
+	// operator token, which the CLI sends from its environment.
+	opEnv := append(brEnv(srv.BaseURL), "PODIUM_OPERATOR_TOKEN="+e2eOperatorToken)
 	register := func(id, dir string) {
 		t.Helper()
-		cliWantExit(t, runPodium(t, "", brEnv(srv.BaseURL),
+		cliWantExit(t, runPodium(t, "", opEnv,
 			"layer", "register", "--id", id, "--local", dir), 0, "register "+id)
 	}
 
@@ -1620,7 +1623,7 @@ func TestCLI_LayerReingestExitStatus(t *testing.T) {
 	mkArtifact(t, filepath.Join(mixedDir, "mixed-low"), smallteamLowArtifact("mixed low"))
 	mkArtifact(t, filepath.Join(mixedDir, "mixed-medium"), smallteamMediumArtifact("mixed medium"))
 	register("mixed-layer", mixedDir)
-	mixed := runPodium(t, "", brEnv(srv.BaseURL), "layer", "reingest", "mixed-layer")
+	mixed := runPodium(t, "", opEnv, "layer", "reingest", "mixed-layer")
 	cliWantExit(t, mixed, 1, "reingest a mixed snapshot")
 	cliContains(t, mixed.Stdout, "artifact: mixed-low@1.0.0", "the accepted artifact")
 	cliContains(t, mixed.Stderr, "rejected: mixed-medium (ingest.public_mode_rejects_sensitive)", "the dropped artifact")
@@ -1630,14 +1633,14 @@ func TestCLI_LayerReingestExitStatus(t *testing.T) {
 	rejectedDir := t.TempDir()
 	mkArtifact(t, filepath.Join(rejectedDir, "rejected-medium"), smallteamMediumArtifact("rejected medium"))
 	register("rejected-layer", rejectedDir)
-	rejected := runPodium(t, "", brEnv(srv.BaseURL), "layer", "reingest", "rejected-layer")
+	rejected := runPodium(t, "", opEnv, "layer", "reingest", "rejected-layer")
 	cliWantExit(t, rejected, 1, "reingest a rejected-only snapshot")
 	cliContains(t, rejected.Stderr, "rejected: rejected-medium (ingest.public_mode_rejects_sensitive)", "the dropped artifact")
 	cliNotContains(t, rejected.Stdout, "queued_at", "the raw response body")
 
 	// Empty layer: nothing to ingest is nothing dropped.
 	register("empty-layer", t.TempDir())
-	empty := runPodium(t, "", brEnv(srv.BaseURL), "layer", "reingest", "empty-layer")
+	empty := runPodium(t, "", opEnv, "layer", "reingest", "empty-layer")
 	cliWantExit(t, empty, 0, "reingest an empty layer")
 	cliNotContains(t, empty.Stdout, "queued_at", "the raw response body")
 	cliNotContains(t, empty.Stderr, "rejected:", "an empty layer drops nothing")

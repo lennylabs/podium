@@ -17,11 +17,13 @@ var (
 	// are mutually exclusive. Maps to config.public_mode_with_idp.
 	ErrPublicModeWithIdP = errors.New("config.public_mode_with_idp")
 
-	// ErrPublicBindNonLoopback signals that public mode was engaged with a
-	// non-loopback bind address and --allow-public-bind was not set. §13.10
-	// ("Loopback bind by default") and §13.2.2 require public mode to bind
-	// 127.0.0.1 unless the operator explicitly opts into a non-loopback bind.
-	// Maps to config.public_bind_refused.
+	// ErrPublicBindNonLoopback signals that a registry that authenticates no
+	// caller, one in public mode or one with no identity provider, was given
+	// a non-loopback bind address and --allow-public-bind was not set. §13.10
+	// ("Loopback bind by default", "Loopback bind without an identity
+	// provider") and §13.2.2 require such a registry to bind 127.0.0.1 unless
+	// the operator explicitly opts into a non-loopback bind. Maps to
+	// config.public_bind_refused.
 	ErrPublicBindNonLoopback = errors.New("config.public_bind_refused")
 
 	// ErrWebUIPublicBindRefused signals that the §13.10 web UI was enabled on
@@ -120,6 +122,8 @@ type StartupConfig struct {
 //
 //   - public_mode and an identity provider are mutually exclusive.
 //   - public_mode binds a loopback address unless --allow-public-bind is set.
+//   - a registry with no identity provider binds a loopback address unless
+//     --allow-public-bind is set.
 //   - the §6.3.4 browser flow is enabled only on a configuration that
 //     satisfies every conjunct of the browser-flow guard.
 func (c StartupConfig) Validate() error {
@@ -141,11 +145,20 @@ func (c StartupConfig) Validate() error {
 	// filters what it serves by that identity. Either condition missing on a
 	// non-loopback bind is refused.
 	if c.WebUI && !isLoopbackBind(c.Bind) {
-		hasIdP := c.IdentityProvider != "" && c.IdentityProvider != "none"
-		if !c.WebUIAllowPublicBind || !hasIdP {
+		if !c.WebUIAllowPublicBind || !hasIdentityProvider(c.IdentityProvider) {
 			return fmt.Errorf("%w: the web UI on a non-loopback bind (%q) requires --web-ui-allow-public-bind and a configured identity provider",
 				ErrWebUIPublicBindRefused, c.Bind)
 		}
+	}
+	// §13.10 "Loopback bind without an identity provider": such a registry
+	// authenticates no caller and admits every caller on the admin arm, which
+	// covers every layer write, the host-path reads, and erasure, so a
+	// non-loopback bind needs the same explicit opt-in public mode needs. It
+	// runs after the web UI guard so a UI on a non-loopback bind keeps that
+	// guard's own code.
+	if !c.PublicMode && !hasIdentityProvider(c.IdentityProvider) && !c.AllowPublicBind && !isLoopbackBind(c.Bind) {
+		return fmt.Errorf("%w: a registry with no identity provider admits every caller as an admin, so it binds a loopback address; %q is not one (configure an identity provider, or pass --allow-public-bind when something else limits who can reach it)",
+			ErrPublicBindNonLoopback, c.Bind)
 	}
 	// §6.3.3 / §13.10 "Bind restriction under trusted-headers": the provider
 	// trusts unverified identity headers, so the identity it trusts is exactly
@@ -173,6 +186,12 @@ func (c StartupConfig) Validate() error {
 	// public mode with an identity provider keeps failing with
 	// config.public_mode_with_idp.
 	return c.validateBrowserFlow()
+}
+
+// hasIdentityProvider reports whether provider names a configured identity
+// provider; the empty value and "none" configure none.
+func hasIdentityProvider(provider string) bool {
+	return provider != "" && provider != "none"
 }
 
 // validateBrowserFlow enforces the §13.10 browser-flow configuration guard.

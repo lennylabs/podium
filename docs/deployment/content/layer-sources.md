@@ -15,7 +15,7 @@ On the [Local](../modes/local) deployment mode there is no server to register a 
 ## Before you start
 
 - A running registry. Every `podium layer` subcommand takes `--registry <url>`, which defaults to `PODIUM_REGISTRY`.
-- The tenant `admin` role for an admin-defined layer and for any layer that names a path on the registry host. An authenticated caller without the role registers a user-defined layer for itself. A registry with no identity provider configured, or one in public mode, authenticates no caller and admits every request. [Registration rights](#registration-rights) states the rules.
+- The tenant `admin` role for an admin-defined layer and for any layer that names a path on the registry host. An authenticated caller without the role registers a user-defined layer for itself. A registry with no identity provider configured authenticates no caller and admits every request. A registry in public mode admits a request only when it carries the value of `PODIUM_OPERATOR_TOKEN`, which the `podium layer` commands send when it is set in their environment. [Registration rights](#registration-rights) states the rules.
 - For a private repository, a credential the Git host issues. [Private repositories](#private-repositories) lists what each host expects.
 
 ---
@@ -396,7 +396,7 @@ The registry reads `owner`, `public`, `organization`, `groups`, and `users` on a
 
 - Any other caller that asserts one of these fields is refused with `auth.forbidden` carrying `details.constraint: "admin_only_fields"`, and the refusal names the asserted fields.
 - A field is asserted by its value rather than by its presence. A false `public` or `organization`, an empty `groups` or `users`, an empty `owner`, and an `owner` naming the caller's own verified subject assert nothing.
-- A deployment with no identity provider configured, and one in public mode, admits every caller on the admin arm, so the rule refuses nothing there. On such a deployment, `podium layer register --user-defined --owner` names a layer's owner.
+- A deployment with no identity provider configured admits every caller on the admin arm, so the rule refuses nothing there. On such a deployment, `podium layer register --user-defined --owner` names a layer's owner. A deployment in public mode admits a request that carries the operator token on the same arm, and it refuses a registration without the token with a bare `auth.forbidden` before this rule is evaluated.
 - The registry evaluates this rule after the layer write authorization rule and after the local-source rule. A registration the layer write rule refuses keeps its bare `auth.forbidden` with no `details.constraint`. A registration also on the local-source arm keeps `details.constraint: "local_source"`. The `admin_only_fields` refusal is returned only where neither earlier rule refuses.
 
 A user-defined layer's owner and visibility are fixed at the registration that created it. On `podium layer update` against such a layer, the registry compares the value each flag would store with the value the layer holds:
@@ -422,7 +422,8 @@ An operator on a deployment with no identity provider who needs to correct an `-
 Registering a layer whose source names a filesystem path on the registry host, patching that path, restoring such a layer, and reingesting one are authorized to a caller holding the tenant `admin` role. Any other caller is refused with `auth.forbidden` carrying `details.constraint: "local_source"`.
 
 - A `--repo` value that resolves to the Git file transport names a host path as well and takes the same arm.
-- A deployment with no identity provider configured, and one in public mode, authenticates no caller. No caller can hold the `admin` role there, and each of these operations is admitted for every caller.
+- A deployment with no identity provider configured authenticates no caller. No caller can hold the `admin` role there, and each of these operations is admitted for every caller.
+- A deployment in public mode admits each of these operations only for a request that carries the operator token. An inbound webhook delivery carries no operator token, so a webhook-triggered reingest of a layer that names a host path is refused there.
 - The registry process reads the named path with its own rights rather than with the registrant's. That is why the path is admin-only while a Git ref is not.
 
 The rule is evaluated on each operation rather than against the stored layer list. A `local` layer a non-admin registered before the rule was in force keeps serving its ingested artifacts, and it is refused at its next reingest, restore, or path patch. Re-register it under an admin identity, or grant the owner the `admin` role, to bring it back under a caller the rule admits.

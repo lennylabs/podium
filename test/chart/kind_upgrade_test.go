@@ -417,6 +417,7 @@ func freshInstall(t *testing.T, env *liveEnv, ns string) {
 	k.helmOK(t, "install", liveRelease, k.chart(),
 		"--set", "image.repository="+liveRepo, "--set", "image.tag="+liveCurrent,
 		"--set", "signing.secretName=podium-signing-key", "--set", "config.identityProvider.type=",
+		"--set", "config.allowPublicBind=true",
 		"--set", "replicaCount=1", "--wait", "--timeout", "10m")
 	if got := k.kubectlOut("get", "job", "-o", "name"); got != "" {
 		t.Fatalf("a fresh install rendered a Job: %s", got)
@@ -606,7 +607,7 @@ func (k *cluster) installV040(extra []string) {
 	t.Helper()
 	args := []string{"install", liveRelease, filepath.Join(k.env.worktree, "deploy", "helm", "podium"),
 		"--set", "image.repository=" + liveRepo, "--set", "image.tag=" + liveOld,
-		"--set", "replicaCount=2", "--set", "config.identityProvider.type=",
+		"--set", "replicaCount=2", "--set", "config.identityProvider.type=", "--set", "config.allowPublicBind=true",
 		"--wait", "--timeout", "10m"}
 	k.helmOK(t, append(args, extra...)...)
 	k.assertRegistryPods(t, 2, liveRepo+":"+liveOld)

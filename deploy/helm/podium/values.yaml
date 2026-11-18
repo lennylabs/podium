@@ -85,6 +85,10 @@ config:
   # Setting both records the operator's decision to serve an open registry on a
   # cluster-reachable address. Public mode is mutually exclusive with an
   # identity provider: setting both fails with `config.public_mode_with_idp`.
+  # An install that empties identityProvider.type authenticates no caller
+  # either, so it also needs allowPublicBind or it fails with
+  # `config.public_bind_refused`. In public mode, layer writes and erasure
+  # need PODIUM_OPERATOR_TOKEN, supplied through existingSecret.
   publicMode: false
   allowPublicBind: false
 

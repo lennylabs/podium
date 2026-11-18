@@ -62,7 +62,7 @@ A registry with no embedding provider serves BM25 keyword search over manifest t
 
 ## Identity
 
-The default is no identity provider. A registry that boots without one treats every caller as anonymous, and the visibility evaluator admits every layer. `PODIUM_IDENTITY_PROVIDER` selects a provider the registry verifies at request time, and each one needs configuration the deployment supplies:
+The default is no identity provider. A registry that boots without one treats every caller as anonymous, and the visibility evaluator admits every layer. It refuses a non-loopback bind with `config.public_bind_refused` unless `PODIUM_ALLOW_PUBLIC_BIND` is set, as [Running without a provider](../identity/#running-without-a-provider) describes. `PODIUM_IDENTITY_PROVIDER` selects a provider the registry verifies at request time, and each one needs configuration the deployment supplies:
 
 - `oidc-jwt` needs an issuer and an audience, and a client registered with the IdP.
 - `trusted-headers` needs a fronting gateway.

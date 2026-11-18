@@ -174,7 +174,7 @@ Each flag overrides the matching `PODIUM_*` environment variable for the lifetim
 | `--bind <addr>` | Bind address. Overrides `PODIUM_BIND`. |
 | `--layer-path <path>` | Standalone: register layers rooted at this path, as described in the notes. Equivalent to `PODIUM_LAYER_PATH` and to the `layer_path` key under the top-level `registry:` mapping in `registry.yaml`. Precedence: CLI flag, then environment variable, then config file. |
 | `--public-mode` | Bypass authentication and visibility filtering. Mutually exclusive with an identity provider. Overrides `PODIUM_PUBLIC_MODE`. |
-| `--allow-public-bind` | Allow a non-loopback bind in public mode or with trusted headers, typically behind an authenticated reverse proxy. Overrides `PODIUM_ALLOW_PUBLIC_BIND`. |
+| `--allow-public-bind` | Allow a non-loopback bind in public mode, with no identity provider configured, or with trusted headers, typically behind an authenticated reverse proxy. Without it, a registry in public mode or with no identity provider refuses a non-loopback bind with `config.public_bind_refused`. Overrides `PODIUM_ALLOW_PUBLIC_BIND`. |
 | `--no-embeddings` | Disable embeddings and fall back to BM25-only search. Overrides `PODIUM_NO_EMBEDDINGS`. |
 | `--presign-ttl-seconds <n>` | Presigned-URL TTL in seconds. Overrides `PODIUM_PRESIGN_TTL_SECONDS` and the `object_store.presign_ttl_seconds` key in `registry.yaml`. |
 | `--sign <mode>` | Ingest signing mode: `registry-key` (the default) or `none`. Overrides `PODIUM_SIGN`. The notes describe each mode. |
@@ -812,7 +812,8 @@ Several layer commands refer to these authorization terms:
 |:--|:--|
 | Per-tenant `admin` role | The tenant administrator role that `podium admin grant` assigns. |
 | Local-source rule | A request that names a filesystem path on the registry host requires the per-tenant `admin` role. A caller without it is rejected with `auth.forbidden` carrying `details.constraint: "local_source"`. A Git `--repo` value that resolves to the Git file transport also names a host path and falls under the same rule. |
-| Unauthenticated registry | A registry started with no identity provider configured, or one started in public mode. It authenticates no caller. Each command below states what such a registry admits. |
+| Unauthenticated registry | A registry started with no identity provider configured, or one started in public mode. It authenticates no caller. Each command below states what such a registry admits. A registry in public mode admits those requests only when they carry the operator token. |
+| Operator token | The value of `PODIUM_OPERATOR_TOKEN` on a registry in public mode. Every `podium layer` subcommand sends the variable's value in the `X-Podium-Operator-Token` header when it is set in its environment. A registry in public mode refuses a layer write without the matching value with `auth.forbidden`, and refuses every layer write while the variable is unset on the registry. [Operator token in public mode](http-api#operator-token-in-public-mode) states the rule. |
 
 ### `podium layer register`
 
@@ -1420,6 +1421,7 @@ podium admin erase <user-id> --salt <salt> --local --operator <admin-id> [--audi
 Registry form:
 
 - On a registry started with `PODIUM_MULTI_TENANT=true`, the registry form acts in the tenant the caller's organization selects and redacts only that tenant's audit records.
+- A registry in public mode admits the request only with its operator token. The command sends `PODIUM_OPERATOR_TOKEN` from its environment in the `X-Podium-Operator-Token` header, and the registry answers `403 auth.forbidden` when the variable is unset or holds another value.
 - Records that carry no tenant are left unchanged, and the response reports nothing about them. When the list names a file destination, the local form redacts them in that file. Otherwise the receiving system owns their redaction (see [Retention and erasure](audit-events#retention-and-erasure)).
 - When `PODIUM_AUDIT_LOG_PATH` lists no file destination, such as the Helm chart's `stdout` default, the registry rewrites no record and records only `user.erased`. The receiving system redacts the records already delivered to it.
 

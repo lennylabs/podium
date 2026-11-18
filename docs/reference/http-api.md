@@ -144,7 +144,8 @@ The response carries no other field. In particular, it carries no issuer, client
 Notes on `layer_capabilities`:
 
 - The `admin` arm decides a write on a layer the caller does not own and every operation the [local-source authorization rule](#local-source-authorization) governs.
-- On a registry started with no identity provider configured, or one started in public mode, the layer endpoints admit every caller on that arm. The member is true there, including on a request that resolves no subject.
+- On a registry started with no identity provider configured, the layer endpoints admit every caller on that arm. The member is true there, including on a request that resolves no subject.
+- On a registry started in public mode, the member is true only for a request that carries the [operator token](#operator-token-in-public-mode). A browser sends no such header, so the member is false for the web UI, and the web UI offers no layer control.
 - On a multi-tenant registry, the member is evaluated in the tenant the caller's organization selects. It is false for a request that resolves to no tenant.
 - A caller that the layer endpoints reject with `401 auth.tenant_unknown` is answered `200` with the member false.
 - The object and its member are always present. Where the deployment determines no capability for the request, the member is false.
@@ -901,7 +902,19 @@ These write operations are gated: `POST /v1/layers`, `DELETE /v1/layers`, `/v1/l
 - A registration whose `id` names no stored layer is authorized to a caller the admin arm admits, or to a caller who resolves a verified subject. Where that registration resolves to a user-defined layer and a subject resolves, the stored `owner` is that subject.
 - A registration whose existence lookup fails is refused with `500 registry.unavailable` and writes nothing.
 - On `POST /v1/layers/reorder`, a caller whose credential fails verification under the configured identity provider's rule is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime` before either arm is evaluated. On that operation, `auth.forbidden` therefore names a caller the registry verified and did not authorize. The other layer write operations answer such a caller `auth.forbidden`.
-- A registry started with no identity provider configured, or one started in public mode, authenticates no caller. No caller can hold the admin role or resolve as an owner there, so these endpoints admit the request.
+- A registry started with no identity provider configured authenticates no caller. No caller can hold the admin role or resolve as an owner there, so these endpoints admit the request.
+- A registry started in public mode authenticates no caller either. The [operator token](#operator-token-in-public-mode) rule decides its admin arm.
+
+### Operator token in public mode
+
+A registry started in public mode admits a request on the admin arm only when `PODIUM_OPERATOR_TOKEN` is set on the registry and the request carries the same value in the `X-Podium-Operator-Token` header. The registry compares the values in constant time. The rule decides the admin arm of the layer write authorization, local-source authorization, and admin-only registration fields rules, and the admin check of [Erase a user](#erase-a-user-gdpr).
+
+- A request that carries the token is admitted on the admin arm as a tenant admin is.
+- No request resolves a verified subject on such a registry, so a layer write or an erasure request without the token is refused with `403 auth.forbidden` with no `details.constraint`. Every such request is refused while the variable is unset.
+- The refusal is evaluated after the read-only refusal and the no-data tenant refusal of [Tenant selection](#tenant-selection), and before the request body or any stored layer is read. It takes precedence over every other refusal of those operations, including `local_source`, `admin_only_fields`, `url_credential`, `404`, and a malformed body, and it discloses nothing about the stored layers.
+- `GET /v1/layers` is unchanged and returns the whole layer list to every caller.
+- An inbound webhook delivery carries the per-layer secret and no operator token, so a webhook-triggered reingest of a layer that names a filesystem path is refused.
+- The `podium layer` commands and `podium admin erase` send the variable's value when it is set in their environment.
 
 ### Local-source authorization
 
@@ -912,13 +925,13 @@ The operations below are authorized to a caller holding the per-tenant `admin` r
 - Restoring a stored layer that names a filesystem path.
 - Reingesting a stored layer that names a filesystem path.
 
-Any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`, and the refusal names no filesystem path. A registry started with no identity provider configured, or one started in public mode, authenticates no caller. No caller can hold the admin role there, so these operations are admitted, on the same reading the [layer write authorization](#layer-write-authorization) rule states for its own arms.
+Any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`, and the refusal names no filesystem path. A registry started with no identity provider configured authenticates no caller. No caller can hold the admin role there, so these operations are admitted, on the same reading the [layer write authorization](#layer-write-authorization) rule states for its own arms. On a registry started in public mode, the [operator token](#operator-token-in-public-mode) rule decides the admin arm.
 
 Notes:
 
 - The rule applies to a user-defined and to an admin-defined layer alike.
 - The rule is evaluated on each of those operations rather than against the stored layer list. A layer stored before this rule was in force is refused at its next such operation rather than at startup.
-- An inbound webhook delivery triggers a reingest and is governed by this rule on the same arm. The delivery carries the per-layer secret rather than a caller the registry can place on the admin arm. On a registry that authenticates its callers, a webhook-triggered reingest of a layer that names a filesystem path is therefore refused.
+- An inbound webhook delivery triggers a reingest and is governed by this rule on the same arm. The delivery carries the per-layer secret rather than a caller the registry can place on the admin arm. On a registry that authenticates its callers, and on one started in public mode, a webhook-triggered reingest of a layer that names a filesystem path is therefore refused.
 - `DELETE /v1/layers` and `POST /v1/layers/reorder` name no filesystem path and re-read none, so the rule does not reach them.
 - A `git` source whose `repo` names a network endpoint is fetched through a network transport and yields tree objects rather than host files, so the rule does not reach it.
 - A `git` source is placed on this rule's arm by its `repo` string alone. A `local_path` stored beside a `git` source never places a restore, a reingest, or a webhook-triggered reingest on the arm.
@@ -1063,7 +1076,7 @@ The registration in the example has not ingested yet, so `last_ingested_at` is a
 |:--|:--|
 | `400 registry.invalid_argument` | `id` or `source_type` is missing; `force_push_policy` is not `tolerant` or `strict`; `git_provider` names no registered provider, or any `git_provider` is sent on a `local` source; or a [repository credential](#repository-credential) refusal applies. |
 | `400 registry.invalid_argument` with `details.constraint: "url_credential"` | The `http` or `https` `repo` carries userinfo, or a read would report the `repo` as `[redacted]`. |
-| `403 auth.forbidden` | [Layer write authorization](#layer-write-authorization) refuses the write. No `details.constraint`. |
+| `403 auth.forbidden` | [Layer write authorization](#layer-write-authorization) refuses the write, or, on a registry in public mode, the request does not carry the [operator token](#operator-token-in-public-mode). No `details.constraint`. |
 | `403 auth.forbidden` with `details.constraint: "local_source"` | [Local-source authorization](#local-source-authorization) refuses the registration. |
 | `403 auth.forbidden` with `details.constraint: "admin_only_fields"` | The [admin-only fields rule](#admin-only-fields) refuses the registration. |
 | `429 quota.layer_count_exceeded` | The caller has hit the per-identity user-defined-layer cap. |
@@ -1075,6 +1088,8 @@ The registration in the example has not ingested yet, so `last_ingested_at` is a
 2. Layer write authorization. Its refusal carries a bare `403 auth.forbidden` with no `details.constraint`, including for a caller who resolves no subject.
 3. Local-source authorization, with `details.constraint: "local_source"`.
 4. The admin-only fields rule, with `details.constraint: "admin_only_fields"`.
+
+On a registry in public mode, the [operator token](#operator-token-in-public-mode) refusal precedes all of these checks.
 
 #### Local-source registrations
 
@@ -1092,7 +1107,7 @@ A `git` registration is placed by its `repo` string alone. A `local_path` sent b
 
 - A field is asserted by its value rather than by its presence. `public` or `organization` carrying false, an empty `groups` or `users`, an empty `owner`, and an `owner` naming the caller's own verified subject assert nothing.
 - A registration that asserts none of these fields is resolved to a user-defined layer owned by the caller.
-- A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits every caller on the admin arm, so the rule refuses nothing there.
+- A registry started with no identity provider configured authenticates no caller and admits every caller on the admin arm, so the rule refuses nothing there. A registry started in public mode refuses a registration without the [operator token](#operator-token-in-public-mode) before this rule is evaluated, and it refuses nothing under this rule from a request that carries the token.
 - The `admin_only_fields` refusal is returned only where neither layer write authorization nor local-source authorization refuses.
 
 #### Repository credential
@@ -1149,7 +1164,7 @@ Notes:
 
 - A `repo` of `[redacted]` names a filesystem path to the registry. A re-registration that sends it back falls under local-source authorization, which refuses it with `403 auth.forbidden` and `details.constraint: "local_source"` from the owner of a user-defined layer who does not hold the tenant `admin` role.
 - Layer write authorization refuses any other caller without that role first, with `403 auth.forbidden` and no `details.constraint`.
-- A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits every caller on the admin arm, so neither rule refuses that re-registration there.
+- A registry started with no identity provider configured authenticates no caller and admits every caller on the admin arm, so neither rule refuses that re-registration there. A registry started in public mode does the same for a request that carries the [operator token](#operator-token-in-public-mode), and it refuses a request without the token first.
 - The body has no `force_repo_overwrite` member, and an unknown member is ignored, so a client that still sends it has the credential kept.
 
 ### List layers
@@ -1244,7 +1259,7 @@ An artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter does not parse is reje
 
 | Code | When |
 |:--|:--|
-| `403 auth.forbidden` | Layer write authorization refuses the caller. |
+| `403 auth.forbidden` | Layer write authorization refuses the caller, or, on a registry in public mode, the request does not carry the [operator token](#operator-token-in-public-mode). |
 | `403 auth.forbidden` with `details.constraint: "local_source"` | Local-source authorization refuses the caller. |
 | `409 ingest.immutable_violation` | The cycle accepted no artifact, classified none unchanged, and has a same-version content conflict. |
 | `422 ingest.lint_failed` | The cycle accepted no artifact, classified none unchanged, and has a lint failure and no conflict. |
@@ -1270,7 +1285,7 @@ POST /v1/layers/reorder
 | Code | When |
 |:--|:--|
 | `auth.token_expired`, `auth.untrusted_token`, `auth.untrusted_runtime` | The caller's credential fails verification under the configured identity provider's rule. This is checked before either authorization arm is evaluated. |
-| `auth.forbidden` | The registry verified the caller and neither arm authorizes it. |
+| `auth.forbidden` | The registry verified the caller and neither arm authorizes it, or, on a registry in public mode, the request does not carry the [operator token](#operator-token-in-public-mode). |
 
 ### Update a layer
 
@@ -1300,7 +1315,7 @@ PUT  /v1/layers/update?id={id}
 |:--|:--|
 | `400 registry.invalid_argument` | `git_provider` names no registered provider, or any `git_provider` is sent for a layer whose stored source type is not `git`; or a repository credential refusal applies. |
 | `400 registry.invalid_argument` with `details.constraint: "immutable_visibility"` | The patch asserts `owner` or a visibility field against a stored user-defined layer. |
-| `403 auth.forbidden` | Layer write authorization refuses the caller. |
+| `403 auth.forbidden` | Layer write authorization refuses the caller, or, on a registry in public mode, the request does not carry the [operator token](#operator-token-in-public-mode). |
 | `403 auth.forbidden` with `details.constraint: "local_source"` | The patch carries `local_path` and the caller does not hold the `admin` role. |
 
 **Evaluation order.**
@@ -1685,7 +1700,7 @@ Performs the right-to-erasure operation for a named user.
 POST /v1/admin/erase    body: { "user_id": "...", "salt": "..." }
 ```
 
-**Authorization.** Admin, in the tenant the request acts in.
+**Authorization.** Admin, in the tenant the request acts in. A registry started with no identity provider configured admits every caller on the admin check. A registry started in public mode admits the request only when it carries the [operator token](#operator-token-in-public-mode). It refuses every other request before any layer is read and before any audit record is rewritten, and every request while `PODIUM_OPERATOR_TOKEN` is unset. `podium admin erase` sends the variable's value when it is set in its environment.
 
 **Body.** Both `user_id` and `salt` are required.
 
@@ -1701,7 +1716,7 @@ POST /v1/admin/erase    body: { "user_id": "...", "salt": "..." }
 
 | Code | When |
 |:--|:--|
-| `403 auth.forbidden` | On a multi-tenant registry, the request resolves to no tenant. This is checked before the admin check. |
+| `403 auth.forbidden` | On a multi-tenant registry, the request resolves to no tenant. This is checked before the admin check. On a registry in public mode, the request does not carry the operator token, or the registry has none configured. |
 | `401 auth.tenant_unknown` | Under `oidc-jwt`, the organization names no provisioned tenant. |
 
 **Tenant scope.**
