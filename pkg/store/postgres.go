@@ -155,6 +155,20 @@ var orgTableStmts = []string{
 		computed_at TIMESTAMPTZ NOT NULL,
 		PRIMARY KEY (tenant_id, artifact_id)
 	)`,
+	// §8.7 daily usage totals, one row per day, layer, artifact, client kind, and client
+	// harness.
+	`CREATE TABLE IF NOT EXISTS usage_daily (
+		tenant_id TEXT NOT NULL,
+		day DATE NOT NULL,
+		layer TEXT NOT NULL,
+		artifact_id TEXT NOT NULL,
+		client_kind TEXT NOT NULL,
+		harness TEXT NOT NULL,
+		loads BIGINT NOT NULL DEFAULT 0,
+		syncs BIGINT NOT NULL DEFAULT 0,
+		search_hits BIGINT NOT NULL DEFAULT 0,
+		PRIMARY KEY (tenant_id, day, layer, artifact_id, client_kind, harness)
+	)`,
 }
 
 // orgIndexStmts create the per-org indexes after the org tables and the
@@ -1490,9 +1504,10 @@ func (p *Postgres) ListDeletedLayerConfigs(ctx context.Context, tenantID string)
 	return out, rows.Err()
 }
 
-// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers and their
-// artifacts whose deleted_at predates `before` (§8.4 30-day window end). It is
-// a cross-org maintenance scan, so it iterates every provisioned org schema.
+// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers, their
+// artifacts, and their §8.7 usage counts whose deleted_at predates `before`
+// (§8.4 30-day window end). It is a cross-org maintenance scan, so it
+// iterates every provisioned org schema.
 func (p *Postgres) PurgeExpiredLayerDeletions(ctx context.Context, before time.Time) (int, error) {
 	idents, err := p.listOrgSchemas(ctx)
 	if err != nil {
@@ -1529,6 +1544,9 @@ func (p *Postgres) purgeExpiredLayersInSchema(ctx context.Context, ident string,
 		WHERE deleted_at IS NOT NULL AND deleted_at < $1`, cutoff); err != nil {
 		return 0, err
 	}
+	if err := purgeExpiredLayerUsage(ctx, tx, cutoff); err != nil {
+		return 0, err
+	}
 	res, err := tx.ExecContext(ctx, `
 		DELETE FROM layer_configs
 		WHERE deleted_at IS NOT NULL AND deleted_at < $1`, cutoff)
@@ -1543,6 +1561,30 @@ func (p *Postgres) purgeExpiredLayersInSchema(ctx context.Context, ident string,
 		return 0, err
 	}
 	return int(n), nil
+}
+
+// purgeExpiredLayerUsage deletes the §8.7 usage counts of the layers the
+// purge removes, inside its transaction. An org schema an earlier release
+// created gets usage_daily on its first request (ensureOrg), so the purge
+// can meet a schema without the table; to_regclass resolves through the
+// transaction's search_path and reports that case as NULL rather than an
+// error that would abort the transaction.
+//
+// Spec: §8.7
+func purgeExpiredLayerUsage(ctx context.Context, tx *sql.Tx, cutoff time.Time) error {
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT to_regclass('usage_daily') IS NOT NULL`).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		DELETE FROM usage_daily
+		WHERE (tenant_id, layer) IN (
+			SELECT tenant_id, id FROM layer_configs
+			WHERE deleted_at IS NOT NULL AND deleted_at < $1)`, cutoff)
+	return err
 }
 
 // scanManifestPG scans a manifest row from Postgres. Differs from

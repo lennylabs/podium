@@ -31,6 +31,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"gopkg.in/yaml.v3"
 
+	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/internal/repourl"
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/embedding"
@@ -1257,6 +1258,10 @@ func run(ctx context.Context, stop func()) error {
 	// search_artifacts and load_domain rerank by access frequency. The signal
 	// is in-process advisory ordering; a restart relearns it from live traffic.
 	registry = registry.WithUsageSignals(core.NewMemoryUsageSignals())
+	// §8.7 usage counts: each resolved load and each search hit is buffered
+	// in this replica and added to the store on the flush interval.
+	usageCounter := core.NewUsageCounter(clock.Real{})
+	registry = registry.WithUsageCounts(usageCounter)
 
 	// §13.8: the metric set built before the audit stream opened also
 	// records the registry cache.
@@ -1840,6 +1845,8 @@ func run(ctx context.Context, stop func()) error {
 	// computes artifacts with missing or stale overlap records on every
 	// replica. This is the one call, after every bootstrap layer.
 	startOverlapSweep(ctx, cfg.semanticOverlap, st, registry)
+	finalUsageFlush := startUsageCounts(ctx, cfg.usage, st, usageCounter, clock.Real{})
+	defer finalUsageFlush()
 
 	// §8.6 local chain-head anchoring: with PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS
 	// above 0 and a file destination, a goroutine signs the chain head with the
@@ -2206,6 +2213,9 @@ type Config struct {
 	// PODIUM_LINT_SEMANTIC_NEIGHBORS. They are environment variables only
 	// (§13.12), so registry.yaml carries no key for them.
 	semanticOverlap lint.SemanticConfig
+	// usage is the §8.7 usage-count configuration from
+	// PODIUM_USAGE_FLUSH_INTERVAL and PODIUM_USAGE_RETENTION_DAYS.
+	usage usageConfig
 	// §4.6 default visibility for newly-registered layers when no
 	// explicit visibility is supplied. One of "public" |
 	// "organization" | "private". Defaults to "private" so
@@ -2508,6 +2518,7 @@ func LoadConfig() *Config {
 		// §7.3.1 / §13.12: an invalid value keeps its default and logs a
 		// warning naming the variable, as the other PODIUM_LINT_* values do.
 		semanticOverlap: lint.SemanticConfigFromEnv(os.Getenv, log.Printf),
+		usage:           usageConfigFromEnv(os.Getenv),
 		// §13.12 self-embedding model (parsed/surfaced).
 		vectorInferenceModel: envFirst("PODIUM_PINECONE_INFERENCE_MODEL", "PODIUM_WEAVIATE_VECTORIZER", "PODIUM_QDRANT_INFERENCE_MODEL"),
 		// §4.6 + §13.2.1. The default visibility is resolved after applyYAML
@@ -2740,6 +2751,9 @@ func (c *Config) validate() error {
 		return fmt.Errorf("missing required configuration for the selected backend(s): %s",
 			strings.Join(missing, ", "))
 	}
+	if c.usage.err != nil {
+		return c.usage.err
+	}
 	return c.semanticOverlapGuard()
 }
 
@@ -2872,6 +2886,7 @@ func bootstrapOptions(c *Config, objStore objectstore.Provider) []server.Option 
 	if c.publicMode {
 		out = append(out, server.WithPublicMode())
 	}
+	out = append(out, server.WithUsageRetentionDays(c.usage.retentionDays))
 	// §4.7: a registry that configures no identity provider, or one in
 	// §13.10 public mode, authenticates no caller, so no caller can hold
 	// the per-tenant admin role and the re-embed endpoint would be

@@ -61,6 +61,8 @@ func operationName(path string) string {
 		return "domain_analyze"
 	case "/v1/overlap":
 		return "overlap"
+	case "/v1/usage":
+		return "usage"
 	case "/v1/quota":
 		return "quota"
 	case "/healthz", "/readyz", "/v1/events":

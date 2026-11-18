@@ -48,7 +48,10 @@ type Server struct {
 	// endpoint, so a Server built without WithUnauthenticatedReembed fails
 	// closed.
 	unauthenticatedReembed bool
-	resolveID              func(*http.Request) layer.Identity
+	// usageRetentionDays is PODIUM_USAGE_RETENTION_DAYS, the largest §8.7
+	// usage report window. Zero takes DefaultUsageRetentionDays.
+	usageRetentionDays int
+	resolveID          func(*http.Request) layer.Identity
 	// idVerifier verifies the per-request caller token and maps it to an
 	// Identity (§6.3.2 injected-session-token). When set, the meta-tool
 	// routes verify on every call: a verification failure rejects the
@@ -193,6 +196,16 @@ func WithPublicMode() Option { return func(s *Server) { s.publicMode = true } }
 // verifier for, and it still gates the endpoint.
 func WithUnauthenticatedReembed() Option {
 	return func(s *Server) { s.unauthenticatedReembed = true }
+}
+
+// DefaultUsageRetentionDays is the §13.12 default of
+// PODIUM_USAGE_RETENTION_DAYS.
+const DefaultUsageRetentionDays = 365
+
+// WithUsageRetentionDays sets the §8.7 retention, the largest window the
+// usage report accepts.
+func WithUsageRetentionDays(days int) Option {
+	return func(s *Server) { s.usageRetentionDays = days }
 }
 
 // WithIdentityResolver swaps the default anonymous-public resolver for
@@ -408,6 +421,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/scope/preview", s.handleScopePreview)
 	mux.HandleFunc("/v1/domain/analyze", s.handleDomainAnalyze)
 	mux.HandleFunc("/v1/overlap", s.handleOverlap)
+	mux.HandleFunc("/v1/usage", s.handleUsage)
 	mux.HandleFunc("/v1/admin/reembed", s.handleReembed)
 	mux.HandleFunc("/v1/admin/overlap/rebuild", s.handleOverlapRebuild)
 	mux.HandleFunc("/v1/admin/grants", s.handleAdminGrants)

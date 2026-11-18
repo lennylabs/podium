@@ -541,6 +541,24 @@ type Store interface {
 	// calls it for artifacts that are no longer served; a record naming such
 	// an artifact as its peer is removed when its owner is recomputed.
 	DeleteOverlapArtifacts(ctx context.Context, tenantID string, artifactIDs []string) error
+
+	// Usage counts (§8.7): daily totals per layer, artifact, client kind,
+	// and harness.
+	//
+	// AddUsageCounts adds each count's counters to the stored row of its
+	// key, creating the row when none exists, in one transaction. Adding is
+	// commutative, so replicas that flush to one store produce totals across
+	// every replica. A count that names no day, layer, artifact, client
+	// kind, or harness, carries a day that is not a YYYY-MM-DD date, or carries a
+	// negative counter returns ErrInvalidUsageCount and changes nothing.
+	AddUsageCounts(ctx context.Context, tenantID string, counts []UsageCount) error
+	// ListUsageCounts returns the tenant's rows whose day lies from fromDay
+	// to toDay, both YYYY-MM-DD dates and both included, ordered by day,
+	// layer, artifact, client kind, and harness.
+	ListUsageCounts(ctx context.Context, tenantID, fromDay, toDay string) ([]UsageCount, error)
+	// DeleteUsageBefore removes the rows of every tenant whose day is before
+	// day, a YYYY-MM-DD date, and returns the number removed.
+	DeleteUsageBefore(ctx context.Context, day string) (int, error)
 }
 
 // DataMigrationContentHashFraming names the one-time rewrite of every stored

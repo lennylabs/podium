@@ -1,24 +1,106 @@
 ---
 title: Seeing how the catalog is used
 nav_order: 2
-description: Answer usage questions from the audit records, such as which artifacts are loaded and how often, which go unused, which harnesses and client versions call the registry, and which searches return nothing.
+description: Read the built-in usage report for loads, syncs, and search hits per artifact, per layer, and for the catalog, and answer further usage questions from the audit records.
 ---
 
 # Seeing how the catalog is used
 
-The registry records every discovery and load call as an audit event. This page covers the events that describe use, where the records are read, how to answer common questions from them, how to audit changes to the catalog itself, and the privacy controls that apply to the records.
+The registry keeps usage counts and serves them in a usage report: how often each artifact was loaded, synced, and returned by searches, per artifact, per layer, and for the catalog, broken down by client and harness and over time. The registry also records every discovery and load call as an audit event, which answers the questions the report does not, such as who loaded an artifact or which queries returned nothing.
 
-> [!IMPORTANT]
-> Podium has no built-in usage report. No command, endpoint, or web view reports how often an artifact is loaded or how often a query is searched. The answers on this page come from the audit records, read in the system that receives them.
+This page covers the usage report, the events that describe use, where the records are read, how to answer common questions from them, how to audit changes to the catalog itself, and the privacy controls that apply to the records.
 
 ## Who can do this
 
 | Task | Access |
 |:--|:--|
+| Read the usage report | Any caller that can search the registry. Every total covers only the layers the caller can see. |
+| Query the stored usage counts directly | Whoever the operator grants read access to the metadata store. |
 | Read the audit records | Whoever the operator grants access to an audit destination. The registry serves no endpoint that returns audit records. |
 | Configure audit destinations, sampling, and retention | Operator, through environment variables on the registry and on `podium-mcp`. |
+| Configure the usage counts' flush interval and retention | Operator, through environment variables on the registry. |
 | Erase a user's identity from the records | Per-tenant `admin` role for `podium admin erase --registry`. The `--local` form needs file access to the audit log. |
 | Follow catalog changes as they happen | Any caller, through the change-event stream. A tenant admin registers outbound webhook receivers. |
+
+---
+
+## Built-in usage report
+
+The registry counts three things for each artifact, per UTC day, per layer, per client kind, and per harness:
+
+- **Loads**: resolved `load_artifact` calls, including each item of a batch load, from a client other than `podium sync`. An agent's load through `podium-mcp` is a load. The registry counts each call it resolves, so one agent load can count twice: under the default `always-revalidate` cache mode, `podium-mcp` revalidates a cached artifact with a `HEAD` request and, when the content changed, fetches it with a `GET`, and a load repeated to replace an expired download URL counts again.
+- **Syncs**: the same calls from `podium sync`. A server-source sync fetches every artifact the caller can see on each run, so syncs measure what workspaces fetch rather than what agents use.
+- **Search hits**: searches with a query that returned the artifact among their first 10 results. A search that asks for fewer than 10 results counts each result it returns. A search with an empty query lists the catalog and counts nothing.
+
+The layer is the layer that serves the artifact. The client kind and the harness come from the `X-Podium-Client` header that `podium-mcp`, `podium sync`, the CLI, and the SDKs send: `podium-mcp` reports its harness, or the harness a load names, and `podium sync` reports the harness of its run. A request without the header counts under `none`. The header is self-reported, so the split between loads and syncs and the harness breakdown are as reliable as the clients that call the registry.
+
+The registry counts only the calls it serves. A load `podium-mcp` answers from its workspace overlay, or from its content cache under the `offline-first` and `offline-only` cache modes, and a filesystem-source `podium sync` do not reach the registry and are not counted. The counts carry no caller identity.
+
+Counts are stored under the layer's ID. When an unregistered layer is purged at the end of its recovery window (`PODIUM_LAYER_RECOVERY_DAYS`, 30 days by default), its counts are deleted with it, including a personal layer that `podium admin erase` unregistered. A layer restored with `podium layer restore` within the window keeps its counts. A layer removed from the registry configuration, rather than unregistered, keeps its counts until retention deletes them, and a layer configured later under the same ID shows them.
+
+### Read the report
+
+`podium usage` prints the report for the last 30 days:
+
+```text
+podium usage --registry https://podium.acme.com
+```
+
+Narrow it with a window, layers, and artifacts, and add a series for use over time:
+
+```text
+podium usage --registry https://podium.acme.com --from 2026-09-01 --to 2026-11-30 --granularity month
+podium usage --registry https://podium.acme.com --layer team-finance --days 7 --granularity day
+podium usage --registry https://podium.acme.com --artifact finance/ap/pay-invoice --artifact finance/ap/submit-invoice --json
+```
+
+A catalog longer than one page ends the output with the `--cursor` value that lists the following artifacts:
+
+```text
+podium usage --registry https://podium.acme.com --limit 100
+podium usage --registry https://podium.acme.com --limit 100 --cursor <next_cursor>
+```
+
+The command calls [`GET /v1/usage`](../reference/http-api#usage-report), which takes the same parameters. `POST /v1/usage` takes them as a JSON body, which suits a page that reads the counts of every artifact it lists. The response holds:
+
+- `totals` for the catalog: every layer the caller can see. When the caller's token carries read scopes, such as `podium:read:finance/*`, every total in the response covers only the artifacts the scopes allow.
+- `layers`: one entry per layer, in precedence order, including layers with no counts. A layer's counts include artifacts it no longer serves.
+- `artifacts`: one entry per artifact the caller can see, including artifacts with no counts, ordered by loads, syncs, and search hits, with `last_loaded` and `last_synced` days. The list comes in pages of `limit` entries, 50 by default and at most 200. `artifact_count` gives the length of the whole list, and `next_cursor`, when it is not `null`, reads the next page.
+
+Each total carries `loads`, `syncs`, and `search_hits`, a `by_client` breakdown by client kind, and a `by_harness` breakdown by harness. Under `granularity` `day`, `week`, or `month`, each total also carries a `series` of periods, where weeks run Monday to Sunday and the first and last periods are cut to the window. A long window coarsens the periods: a window of more than 366 days serves `day` as `week`, and a window of more than 1,096 days serves `day` and `week` as `month`, so a calendar year stays daily and three calendar years stay weekly. The response's `granularity` names the periods it holds.
+
+An artifact with no loads in the window lists `loads` 0 and `last_loaded` `null`, so the report answers which artifacts go unused without a separate catalog listing.
+
+### How current the report is
+
+Each registry replica buffers its counts and adds them to the metadata store every `PODIUM_USAGE_FLUSH_INTERVAL`, one minute by default, and once more at a graceful shutdown, which waits for a flush in progress and has 10 seconds to finish. The report therefore trails live traffic by up to one interval, and a replica that stops without a graceful shutdown loses the counts since its last flush. A flush that fails, such as one on a read-only registry, keeps its counts for the next flush. Replicas that share a metadata store add their counts together, so the report covers every replica.
+
+The registry keeps `PODIUM_USAGE_RETENTION_DAYS` days of counts, 365 by default, and the report's window lies within them. [Usage report settings](../reference/configuration#usage-report) lists both settings.
+
+### Query the stored counts
+
+The Postgres and SQLite metadata stores keep the counts in a table named `usage_daily`, with one row per tenant, day, layer, artifact, client kind, and harness:
+
+| Column | Content |
+|:--|:--|
+| `tenant_id` | The tenant. |
+| `day` | The UTC date. SQLite stores it as `YYYY-MM-DD` text, and Postgres as a `DATE`. |
+| `layer` | The layer that served the artifact. |
+| `artifact_id` | The canonical artifact ID. |
+| `client_kind` | `mcp`, `sync`, `sdk`, `cli`, `other`, or `none`. |
+| `harness` | The harness the client reported, or `none`. |
+| `loads`, `syncs`, `search_hits` | The day's counts. |
+
+The counts add across rows, so any grouping is a sum. On Postgres, each tenant's table is in the tenant's schema. Loads per artifact and week, for example:
+
+```text
+SELECT artifact_id, date_trunc('week', day) AS week, sum(loads) AS loads, sum(syncs) AS syncs
+FROM usage_daily
+GROUP BY artifact_id, week
+ORDER BY week, loads DESC;
+```
+
+A direct query reads every layer of the tenant, whatever the reader can see in the registry.
 
 ---
 
@@ -29,7 +111,7 @@ The registry records one event for each meta-tool call it serves, whether an age
 | Event | Recorded when | Members that describe the call |
 |:--|:--|:--|
 | `artifact.loaded` | A caller loaded an artifact through `load_artifact`. A server-source `podium sync` loads every artifact of the caller's effective view this way on each run and applies the workspace's scope after the loads. | `target` holds the artifact ID. On a load that resolves, `context` holds `version`, `content_hash`, and `layer`, and `result_size` is `1`. |
-| `artifacts.searched` | A caller invoked `search_artifacts`. | `context` holds `query`, `scope`, and `type`, and `result_size` holds the number of results returned. |
+| `artifacts.searched` | A caller invoked `search_artifacts`. | `context` holds `query`, `scope`, and `type`, and `result_size` holds the number of results returned. When the call returned results, `context.results` holds them in result order as a JSON array of `{artifact_id, layer}` objects, encoded in the string value. |
 | `domain.loaded` | A caller invoked `load_domain`. | `target` holds the domain path, and `result_size` holds the number of subdomains and notable entries returned. |
 | `domains.searched` | A caller invoked `search_domains`. | `context` holds `query` and `scope`, and `result_size` holds the number of domains returned. |
 
@@ -71,6 +153,8 @@ Run the examples against the registry stream. The `podium-mcp` local stream carr
 
 ## Answer common questions
 
+The usage report answers how often each artifact is loaded, synced, and found, and which artifacts go unused. The audit records answer the questions below, which need the individual calls, and they can reproduce the report's counts, because every counted call records an audit event with the same artifact, layer, client kind, and harness. The two differ where sampling drops audit events, where the receiver lacks a replica's stream, where retention has removed a query, and where an artifact's manifest redacts `layer` in audit records, which hides the layer of its loads from the audit stream while the report keeps it.
+
 ### Which artifacts are loaded, and how often
 
 Count resolved loads per artifact:
@@ -97,6 +181,16 @@ sort -u catalog.txt | comm -23 - loaded.txt
 ```
 
 The result covers the period the records span. Retention drops records older than its window, 365 days by default on the file destination, and a sampled event type undercounts, so an artifact that the result lists was not loaded within the retained and sampled records.
+
+### Which artifacts searches return
+
+Count the appearances of each artifact in the first 10 results of searches with a query, as the usage report counts search hits:
+
+```text
+jq -r 'select(.type == "artifacts.searched" and (.context.query // "") != "" and .context.results != null) | .context.results | fromjson | .[:10][] | .artifact_id' audit.log | sort | uniq -c | sort -rn
+```
+
+Replace `.artifact_id` with `.layer` to count by layer.
 
 ### Which harnesses and client versions are in use
 

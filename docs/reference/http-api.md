@@ -751,6 +751,124 @@ A `lint.colliding_descriptions` similarity is the word-set similarity of the two
 - The endpoint is a read endpoint, so a registry in read-only mode serves it.
 - [Finding overlapping artifacts](../managing/overlap#check-the-live-catalog) describes how to read the report.
 
+### Usage report
+
+Reports how often artifacts were loaded, synced, and returned by searches, per artifact, per layer, and for the catalog. `podium usage` calls it.
+
+```
+GET  /v1/usage?from={date}&to={date}&days={n}&granularity={g}&layer={id}&artifact={id}&limit={n}&cursor={cursor}
+POST /v1/usage
+```
+
+**Authorization.** Any caller that can search the registry. The request passes through the identity verification, tenant routing, and browser-session handling of `search_artifacts`. Every total covers only the layers in the caller's effective view, so a caller learns nothing about the use of a layer it cannot see. When the caller's token carries read scopes, every total also covers only the artifacts the scopes allow.
+
+**Parameters.** Every parameter is optional. `POST` takes the same parameters as a JSON body, `{"from", "to", "days", "granularity", "layers": [...], "artifacts": [...], "limit", "cursor"}`, for a list of artifacts too long for a query string.
+
+| Parameter | Description |
+|:--|:--|
+| `from`, `to` | UTC dates as `YYYY-MM-DD`. The window is the days from `from` to `to`, both included. `to` defaults to today, and `from` defaults to the day that makes the window 30 days long, or to the first retained day when that is later. |
+| `days` | The window is the last `days` UTC days, counting today. It cannot be combined with `from` or `to`. |
+| `granularity` | `none` (the default), `day`, `week`, or `month`. With a value other than `none`, every total in the response carries a `series`. A window of more than 366 days serves `day` as `week`, and a window of more than 1,096 days serves `day` and `week` as `month`. |
+| `layer` | A layer ID. The report covers only the named layers. Repeat it to name several. |
+| `artifact` | A canonical artifact ID. The `artifacts` list holds only the named artifacts. Repeat it to name several. |
+| `limit` | The most entries one response holds in `artifacts`, from 1 to 200. Defaults to 50. |
+| `cursor` | The `next_cursor` of an earlier response. The `artifacts` list continues after the last entry that response held. |
+
+With none of `from`, `to`, and `days`, the window is the last 30 days. The window must lie within the retained days, the last `PODIUM_USAGE_RETENTION_DAYS` UTC days counting today. A request names at most 100 layers and 500 artifacts.
+
+**What is counted.** The registry counts per UTC day, per serving layer, per artifact, per client kind, and per harness:
+
+- `loads`: resolved `load_artifact` calls, including each item of `artifacts:batchLoad`, a `HEAD`, and a `GET` answered `304`, from a client whose kind is not `sync`. A revalidation followed by a refetch counts two loads.
+- `syncs`: the same calls from a client whose kind is `sync`, which is how a server-source `podium sync` fetches every artifact on each run.
+- `search_hits`: `search_artifacts` calls with a non-empty query that returned the artifact among their first 10 results. A call with a `top_k` below 10 counts each result it returns.
+
+The client kind and the harness come from the `X-Podium-Client` header. A request without the header counts under `none`. Each replica adds its counts to the metadata store every `PODIUM_USAGE_FLUSH_INTERVAL`, so the report trails live traffic by up to that interval.
+
+**Response.**
+
+```json
+{
+  "days": 7,
+  "from": "2026-11-12",
+  "to": "2026-11-18",
+  "granularity": "week",
+  "totals": {
+    "loads": 42,
+    "syncs": 120,
+    "search_hits": 65,
+    "by_client": {
+      "mcp": {"loads": 40, "syncs": 0, "search_hits": 50},
+      "sync": {"loads": 0, "syncs": 120, "search_hits": 0},
+      "sdk": {"loads": 2, "syncs": 0, "search_hits": 15}
+    },
+    "by_harness": {
+      "claude-code": {"loads": 30, "syncs": 80, "search_hits": 50},
+      "cursor": {"loads": 10, "syncs": 40, "search_hits": 0},
+      "none": {"loads": 2, "syncs": 0, "search_hits": 15}
+    },
+    "series": [
+      {"start": "2026-11-12", "end": "2026-11-15", "loads": 18, "syncs": 60, "search_hits": 30},
+      {"start": "2026-11-16", "end": "2026-11-18", "loads": 24, "syncs": 60, "search_hits": 35}
+    ]
+  },
+  "layers": [
+    {
+      "layer": "team-finance",
+      "loads": 42,
+      "syncs": 120,
+      "search_hits": 65,
+      "by_client": {"mcp": {"loads": 40, "syncs": 0, "search_hits": 50}},
+      "by_harness": {"claude-code": {"loads": 30, "syncs": 80, "search_hits": 50}},
+      "series": []
+    }
+  ],
+  "artifacts": [
+    {
+      "artifact_id": "finance/ap/pay-invoice",
+      "type": "skill",
+      "layer": "team-finance",
+      "loads": 30,
+      "syncs": 60,
+      "search_hits": 40,
+      "by_client": {"mcp": {"loads": 30, "syncs": 0, "search_hits": 40}},
+      "by_harness": {"claude-code": {"loads": 30, "syncs": 60, "search_hits": 40}},
+      "series": [],
+      "last_loaded": "2026-11-18",
+      "last_synced": "2026-11-18"
+    }
+  ],
+  "artifact_count": 1,
+  "next_cursor": null
+}
+```
+
+The example uses `granularity=week` and abbreviates the breakdowns and the layer and artifact series.
+
+| Field | Description |
+|:--|:--|
+| `days`, `from`, `to` | The number of days in the window and its first and last UTC days. |
+| `granularity` | The granularity the series use: the requested one, or the coarser one a long window serves in its place. |
+| `totals` | `loads`, `syncs`, and `search_hits` summed over every row of the window in the covered layers, with `by_client` and `by_harness` breakdowns that map each client kind or harness with a non-zero count to its three counts. |
+| `layers` | One entry per covered layer, in the precedence order of the caller's effective view, including a layer with no counts. A layer's counts include artifacts it no longer serves. |
+| `artifacts` | One entry per artifact the caller can see in a covered layer, at its current served version, including an artifact with no counts, ordered by `loads`, then `syncs`, then `search_hits`, each descending, then by `artifact_id`. A response holds one page of at most `limit` entries. `last_loaded` and `last_synced` are the latest days in the window with a load or a sync, or `null`. |
+| `artifact_count` | The number of entries the `artifacts` list holds across every page. |
+| `next_cursor` | An opaque string that reads the next page when entries remain, or `null` on the last page. Pass it as `cursor` with otherwise the same parameters. The cursor records the last entry's counts and ID, so an artifact whose counts change between requests can appear on two pages or on none. |
+| `series` | Present on `totals`, each layer, and each artifact when `granularity` is not `none`. One `{start, end, loads, syncs, search_hits}` entry per day, ISO week (Monday to Sunday), or calendar month of the window, oldest first, including periods with no counts. The first and last periods are cut to the window, and a series sums to the totals beside it. |
+
+A named layer or artifact the caller cannot see is left out of the response, exactly as one that does not exist. `totals` follows `layer` and does not follow `artifact`.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `400 registry.invalid_argument` | `days` is combined with `from` or `to`, a date does not parse or lies outside the retained days, `from` is later than `to`, `days` is not an integer from 1 to `PODIUM_USAGE_RETENTION_DAYS`, `granularity` is not one of its four values, `limit` is not an integer from 1 to 200, `cursor` does not parse, the request names more than 100 layers or 500 artifacts, or a `POST` body does not decode or carries an unknown member. Another method also returns it, with `405`. |
+| `500 registry.unavailable` | The registry cannot read its metadata store. |
+
+**Notes.**
+
+- Both methods are reads, so a registry in read-only mode serves them.
+- The `artifact.loaded` and `artifacts.searched` audit records carry everything the counts read, so the audit stream can reproduce them; [Seeing how the catalog is used](../managing/usage) compares the two sources.
+
 ### `domain/analyze`
 
 Returns the per-subtree domain analysis report for a path, the same report `podium domain analyze` prints.

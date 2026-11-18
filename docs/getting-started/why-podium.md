@@ -129,15 +129,17 @@ Covered in [Access control](../deployment/content/access-control) and
 
 ### Usage metrics
 
-Every artifact load is an audit event that records the artifact and the client
-that made the call, and every search is an audit event that records the query,
-its result count, and the client. The registry streams
-audit events to any combination of a local file, stdout, HTTP receivers that
-accept NDJSON, and an OpenTelemetry Collector over OTLP. A log pipeline that
-receives the stream counts loads per artifact and searches per query, which
-shows which artifacts agents load, how often, which go unused, and which
-searches return nothing. Podium has no built-in
-usage report.
+The registry counts how often each artifact is loaded by an agent or program,
+synced into a workspace, and returned by searches, per layer, per client, and
+per harness, and keeps the daily counts in its metadata store. `podium usage`
+and `GET /v1/usage` report them for the whole catalog, for each layer, and for
+each artifact over a date range, with daily, weekly, or monthly series, which
+shows which artifacts agents load, how often, and which go unused. Every load
+and search is also an audit event that records the artifact or the query, its
+results, and the client. The registry streams audit events to any combination
+of a local file, stdout, HTTP receivers that accept NDJSON, and an
+OpenTelemetry Collector over OTLP, where a log pipeline answers questions the
+report does not, such as which searches return nothing.
 
 Covered in [Seeing how the catalog is used](../managing/usage).
 

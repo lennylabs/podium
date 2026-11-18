@@ -33,6 +33,8 @@ type Memory struct {
 	// keyed by artifact.
 	overlaps    map[string]map[[2]string]OverlapRecord
 	overlapRuns map[string]map[string]OverlapComputation
+	// usage holds the §8.7 daily usage rows per tenant.
+	usage map[string]map[usageKey]UsageCount
 }
 
 // NewMemory returns a fresh in-memory Store.
@@ -49,6 +51,7 @@ func NewMemory() *Memory {
 		migrations:    map[string]bool{},
 		overlaps:      map[string]map[[2]string]OverlapRecord{},
 		overlapRuns:   map[string]map[string]OverlapComputation{},
+		usage:         map[string]map[usageKey]UsageCount{},
 	}
 }
 
@@ -584,8 +587,9 @@ func (s *Memory) ListDeletedLayerConfigs(_ context.Context, tenantID string) ([]
 	return out, nil
 }
 
-// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers and their
-// artifacts whose DeletedAt predates `before` (§8.4 30-day window end).
+// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers, their
+// artifacts, and their §8.7 usage counts whose DeletedAt predates `before`
+// (§8.4 30-day window end).
 func (s *Memory) PurgeExpiredLayerDeletions(_ context.Context, before time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -599,9 +603,20 @@ func (s *Memory) PurgeExpiredLayerDeletions(_ context.Context, before time.Time)
 					delete(s.manifests, mk)
 				}
 			}
+			s.deleteLayerUsageLocked(cfg.TenantID, cfg.ID)
 		}
 	}
 	return n, nil
+}
+
+// deleteLayerUsageLocked removes the §8.7 usage rows of one layer. The
+// caller holds s.mu.
+func (s *Memory) deleteLayerUsageLocked(tenantID, layerID string) {
+	for k, c := range s.usage[tenantID] {
+		if c.Layer == layerID {
+			delete(s.usage[tenantID], k)
+		}
+	}
 }
 
 // ReplaceOverlapRecords removes the records the computed artifact owns,
@@ -682,4 +697,62 @@ func (s *Memory) DeleteOverlapArtifacts(_ context.Context, tenantID string, arti
 		delete(s.overlapRuns[tenantID], id)
 	}
 	return nil
+}
+
+// AddUsageCounts adds the counts to the tenant's rows under the store lock,
+// so a call applies whole.
+func (s *Memory) AddUsageCounts(_ context.Context, tenantID string, counts []UsageCount) error {
+	norm, err := normalizeUsageCounts(tenantID, counts)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	bucket := s.usage[tenantID]
+	if bucket == nil {
+		bucket = map[usageKey]UsageCount{}
+		s.usage[tenantID] = bucket
+	}
+	for _, c := range norm {
+		row := bucket[c.key()]
+		if row.TenantID == "" {
+			row = UsageCount{TenantID: tenantID, Day: c.Day, Layer: c.Layer, ArtifactID: c.ArtifactID, ClientKind: c.ClientKind, Harness: c.Harness}
+		}
+		row.Loads += c.Loads
+		row.Syncs += c.Syncs
+		row.SearchHits += c.SearchHits
+		bucket[c.key()] = row
+	}
+	return nil
+}
+
+// ListUsageCounts returns the tenant's rows from fromDay to toDay, ordered by
+// day, layer, artifact, client kind, and harness.
+func (s *Memory) ListUsageCounts(_ context.Context, tenantID, fromDay, toDay string) ([]UsageCount, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []UsageCount{}
+	for _, c := range s.usage[tenantID] {
+		if c.Day >= fromDay && c.Day <= toDay {
+			out = append(out, c)
+		}
+	}
+	sortUsageCounts(out)
+	return out, nil
+}
+
+// DeleteUsageBefore removes every tenant's rows dated before day.
+func (s *Memory) DeleteUsageBefore(_ context.Context, day string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, bucket := range s.usage {
+		for k, c := range bucket {
+			if c.Day < day {
+				delete(bucket, k)
+				n++
+			}
+		}
+	}
+	return n, nil
 }

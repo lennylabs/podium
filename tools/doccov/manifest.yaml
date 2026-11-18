@@ -58,6 +58,8 @@ pages:
     slug: D-cli
   - path: docs/deployment/services/vector-backends.md
     slug: D-vector-backends
+  - path: docs/managing/usage.md
+    slug: D-usage
 
   # The OIDC provider cookbook pages share one e2e file via a directory glob
   # (D-oidc covers docs/deployment/identity/oidc/*.md). Each runnable provider page maps

@@ -187,6 +187,11 @@ func (s *Server) withAuditMetaMiddleware(next http.Handler) http.Handler {
 		m := auditMetaFrom(r, s.identity(r))
 		m.Tenant = auditTenant(r.Context(), s.multiTenant, s.core.TenantFor(r.Context()))
 		ctx := withAuditMeta(r.Context(), m)
+		// §8.7 usage counts record the request's client kind and harness
+		// from the same advisory value.
+		if m.Client != nil {
+			ctx = core.ContextWithUsageClient(ctx, m.Client.Kind, m.Client.Harness)
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -116,6 +117,8 @@ type Registry struct {
 	// reranking surfaces signal-based ordering"). Nil leaves ranking on its
 	// lexical, vector, and author-curated order alone.
 	usage UsageSignals
+	// usageCounts buffers the §8.7 usage counts. Nil records none.
+	usageCounts *UsageCounter
 	// admitSigner, admitObjects, and admitReadTimeout are the §13.4 stored-row
 	// admission inputs WithAdmission sets. They are written once, before the
 	// registry serves a request, and only read afterwards.
@@ -1364,7 +1367,43 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		res.Results = append(res.Results, d)
 	}
 	ev.ResultSize = len(res.Results)
+	r.recordSearchUsage(ctx, &ev, opts.Query, scored)
 	return res, nil
+}
+
+// searchResultRef is one entry of the §8.1 artifacts.searched results member.
+type searchResultRef struct {
+	ArtifactID string `json:"artifact_id"`
+	Layer      string `json:"layer"`
+}
+
+// recordSearchUsage records a search's returned artifacts in the audit
+// event's results member and counts a §8.7 search hit for each of the first
+// usageSearchHitDepth results of a search with a query. An empty query lists
+// the catalog rather than searching it, so it counts nothing.
+//
+// Spec: §8.1, §8.7
+func (r *Registry) recordSearchUsage(ctx context.Context, ev *AuditEvent, query string, returned []scoredRecord) {
+	if len(returned) == 0 {
+		return
+	}
+	refs := make([]searchResultRef, len(returned))
+	for i, sc := range returned {
+		refs[i] = searchResultRef{ArtifactID: sc.rec.ArtifactID, Layer: sc.rec.Layer}
+	}
+	if b, err := json.Marshal(refs); err == nil {
+		ev.Context["results"] = string(b)
+	}
+	if query == "" {
+		return
+	}
+	tenant := r.TenantFor(ctx)
+	for i, ref := range refs {
+		if i == usageSearchHitDepth {
+			break
+		}
+		r.usageCounts.recordSearchHit(ctx, tenant, ref.Layer, ref.ArtifactID)
+	}
 }
 
 // vectorRanks embeds the query and returns the top-K nearest artifact IDs
@@ -1549,6 +1588,9 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 			// signal that feeds search and load_domain reranking. Recorded
 			// only on success so denied/not-found calls do not inflate counts.
 			r.recordUsage(ctx, artifactID, opts.SessionID)
+			// §8.7 usage counts: a resolved load counts under the layer
+			// that serves it.
+			r.usageCounts.recordLoad(ctx, r.TenantFor(ctx), res.Layer, res.ID)
 		}
 		r.emit(ctx, ev)
 	}()

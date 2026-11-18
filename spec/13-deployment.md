@@ -567,6 +567,15 @@ The anchor key and the registry signing key are distinct keypairs (§8.6). Each 
 
 An audit configuration that cannot be used refuses startup with `config.audit_sink_unavailable`, whatever the anchoring setting. The causes are an empty element in the list, an element whose `scheme://` prefix §8.3 does not name, an element with a prefix §8.3 names that does not parse as a URL, two file destinations, an element named twice, userinfo in a destination URL, `stdout` in the list while `PODIUM_TRACING=stdout` (§13.8) also writes to standard output, a transport setting that the rows above refuse, a `PODIUM_AUDIT_QUEUE_MAX_BYTES` value that the row above refuses, a file destination that the registry cannot open, and a file destination that the registry can open but cannot open for appending. The registry cannot open the file destination when the path is unset and the home directory cannot be resolved, when the file's parent directory cannot be created, or when an existing file at the path cannot be read. A file destination refuses startup for either cause even when it is the only destination, because the registry would otherwise start with no audit stream: §8.5 erasure through the registry would record no `user.erased` event, and §8.4 retention would not run. The error names the cause and the variable that holds the unusable setting: `PODIUM_AUDIT_LOG_PATH` for a list or file-destination cause, and the variable of the row above that refuses a transport or queue setting. It names a destination by its scheme, host, and path, and it never includes a header value or URL userinfo.
 
+### Usage
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_USAGE_FLUSH_INTERVAL` | Interval at which a registry replica adds its buffered §8.7 usage counts to the `RegistryStore`, as a duration of at least `1s`. A replica also flushes once when it shuts down gracefully. Read by the registry only | `1m` |
+| `PODIUM_USAGE_RETENTION_DAYS` | Number of UTC days of §8.7 usage counts the registry keeps, counting today, as a positive integer. It is also the largest `days` value the usage report accepts. Read by the registry only | `365` |
+
+A value of either variable that does not parse, or that is outside its range, refuses startup with `config.invalid` and a message that names the variable.
+
 ### Layers
 
 Layer-list bootstrap and visibility default for the §13.10 standalone deployment.

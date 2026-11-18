@@ -75,6 +75,12 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("OverlapRecordsScopedToTenant", func(t *testing.T) { overlapRecordsScopedToTenant(t, factory(t)) })
 	t.Run("OverlapSupersededComputation", func(t *testing.T) { overlapSupersededComputation(t, factory(t)) })
 	t.Run("OverlapConcurrentReplace", func(t *testing.T) { overlapConcurrentReplace(t, factory(t)) })
+	t.Run("UsageCountsAdd", func(t *testing.T) { usageCountsAdd(t, factory(t)) })
+	t.Run("UsageCountsScopedToTenant", func(t *testing.T) { usageCountsScopedToTenant(t, factory(t)) })
+	t.Run("UsageCountsInvalid", func(t *testing.T) { usageCountsInvalid(t, factory(t)) })
+	t.Run("UsageCountsDeleteBefore", func(t *testing.T) { usageCountsDeleteBefore(t, factory(t)) })
+	t.Run("UsageCountsConcurrentAdd", func(t *testing.T) { usageCountsConcurrentAdd(t, factory(t)) })
+	t.Run("UsageCountsPurgedWithLayer", func(t *testing.T) { usageCountsPurgedWithLayer(t, factory(t)) })
 }
 
 // Spec: §4.5.1 / §4.5.4 — DOMAIN.md is persisted per (tenant,
