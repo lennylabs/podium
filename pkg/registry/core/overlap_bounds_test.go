@@ -159,7 +159,7 @@ func TestRefreshOverlap_KeepsNewerComputation(t *testing.T) {
 			owned += r.OwnerVersion + ">" + r.Peer + " "
 		}
 	}
-	if err != nil || nested != nil || res != (OverlapComputeResult{Computed: 1}) || versions["a"] != "2.0.0" || owned != "2.0.0>b " {
+	if err != nil || nested != nil || res.OverlapComputeResult != (OverlapComputeResult{Computed: 1}) || versions["a"] != "2.0.0" || owned != "2.0.0>b " {
 		t.Errorf("RefreshOverlap = %+v, %v (nested %v); entries %v, a owns %q; want a's 2.0.0 computation kept and b computed",
 			res, err, nested, versions, owned)
 	}

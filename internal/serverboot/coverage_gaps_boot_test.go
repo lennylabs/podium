@@ -116,7 +116,7 @@ func TestDrainRow_SelfEmbeddingBackendUsesPutText(t *testing.T) {
 	w := &vectorDrainWorker{outbox: store.NewMemory(), vec: vec, embedder: nil, interval: time.Second}
 
 	p := store.VectorPending{TenantID: "default", ArtifactID: "a/x", Version: "1.0.0", Text: "compose me"}
-	if err := w.drainRow(ctx, p); err != nil {
+	if _, err := w.drainRow(ctx, p); err != nil {
 		t.Fatalf("drainRow self-embed = %v, want nil", err)
 	}
 	if got := vec.puttext["a/x@1.0.0"]; got != "compose me" {
@@ -131,7 +131,7 @@ func TestDrainRow_ExternalBackendWithoutEmbedderErrors(t *testing.T) {
 	// vector.Memory is not a self-embedding TextVectorizer, and embedder is nil.
 	w := &vectorDrainWorker{outbox: store.NewMemory(), vec: vector.NewMemory(8), embedder: nil, interval: time.Second}
 
-	err := w.drainRow(ctx, store.VectorPending{TenantID: "default", ArtifactID: "a/x", Version: "1.0.0", Text: "t"})
+	_, err := w.drainRow(ctx, store.VectorPending{TenantID: "default", ArtifactID: "a/x", Version: "1.0.0", Text: "t"})
 	if err == nil {
 		t.Fatal("drainRow with no embedder and a non-self-embedding backend = nil, want an error")
 	}
@@ -148,7 +148,7 @@ func TestDrainRow_SelfEmbeddingPutTextError(t *testing.T) {
 	vec.putErr = errors.New("backend down")
 	w := &vectorDrainWorker{outbox: store.NewMemory(), vec: vec, embedder: nil, interval: time.Second}
 
-	if err := w.drainRow(ctx, store.VectorPending{ArtifactID: "a/x", Version: "1.0.0", Text: "t"}); err == nil {
+	if _, err := w.drainRow(ctx, store.VectorPending{ArtifactID: "a/x", Version: "1.0.0", Text: "t"}); err == nil {
 		t.Fatal("drainRow = nil, want the PutText error propagated")
 	}
 }
@@ -171,7 +171,7 @@ func TestDrainRow_EmbedVectorCountMismatchErrors(t *testing.T) {
 	ctx := context.Background()
 	w := &vectorDrainWorker{outbox: store.NewMemory(), vec: vector.NewMemory(8), embedder: brokenEmbedder{dim: 1}, interval: time.Second}
 
-	err := w.drainRow(ctx, store.VectorPending{ArtifactID: "a/x", Version: "1.0.0", Text: "t"})
+	_, err := w.drainRow(ctx, store.VectorPending{ArtifactID: "a/x", Version: "1.0.0", Text: "t"})
 	if err == nil {
 		t.Fatal("drainRow with a 2-vector embedder result = nil, want a count-mismatch error")
 	}

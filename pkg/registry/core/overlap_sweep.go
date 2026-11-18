@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sort"
 
@@ -24,8 +25,16 @@ func (r *Registry) RebuildOverlap(ctx context.Context) (OverlapComputeResult, er
 	if err != nil {
 		return OverlapComputeResult{}, err
 	}
-	computed, failed := r.computeOverlapBatch(ctx, sortedServed(served, nil), served)
-	return OverlapComputeResult{Computed: len(computed), Failed: failed}, nil
+	out := r.computeOverlapBatch(ctx, sortedServed(served, nil), served, overlapBatchOptions{})
+	return OverlapComputeResult{Computed: len(out.computed), Failed: out.failed}, nil
+}
+
+// OverlapSweepResult is the outcome of one sweep pass over a tenant: the
+// counts of OverlapComputeResult, and Pending, the stale artifacts the pass
+// skipped because the §4.7 outbox has not written their vectors yet.
+type OverlapSweepResult struct {
+	OverlapComputeResult
+	Pending int
 }
 
 // RefreshOverlap is one pass of the §7.3.1 periodic sweep over the request's
@@ -46,23 +55,35 @@ func (r *Registry) RebuildOverlap(ctx context.Context) (OverlapComputeResult, er
 // whose version was superseded during the pass stores nothing (see
 // storeOverlapChunk).
 //
+// The pass skips a stale artifact whose current version has a row in the
+// §4.7 outbox, because its vector is not written yet and the outbox write
+// computes it; a skipped artifact counts in Pending, as neither computed nor
+// failed. The pass lists the outbox after the served set: the outbox row of
+// a served version commits with its manifest, so a version in the served set
+// whose vector is not written is in the listing, and a row drained in
+// between has its vector written.
+//
 // Spec: §7.3.1
-func (r *Registry) RefreshOverlap(ctx context.Context) (OverlapComputeResult, error) {
+func (r *Registry) RefreshOverlap(ctx context.Context) (OverlapSweepResult, error) {
 	if err := r.overlapReady(); err != nil {
-		return OverlapComputeResult{}, err
+		return OverlapSweepResult{}, err
 	}
 	tenant := r.TenantFor(ctx)
 	records, err := r.store.ListOverlapRecords(ctx, tenant)
 	if err != nil {
-		return OverlapComputeResult{}, err
+		return OverlapSweepResult{}, err
 	}
 	runs, err := r.store.ListOverlapComputations(ctx, tenant)
 	if err != nil {
-		return OverlapComputeResult{}, err
+		return OverlapSweepResult{}, err
 	}
 	served, err := r.servedArtifacts(ctx)
 	if err != nil {
-		return OverlapComputeResult{}, err
+		return OverlapSweepResult{}, err
+	}
+	unwritten, err := r.unwrittenVectors(ctx, tenant)
+	if err != nil {
+		return OverlapSweepResult{}, err
 	}
 	if gone := unservedOverlapArtifacts(served, records, runs); len(gone) > 0 {
 		if err := r.store.DeleteOverlapArtifacts(ctx, tenant, gone); err != nil {
@@ -70,8 +91,39 @@ func (r *Registry) RefreshOverlap(ctx context.Context) (OverlapComputeResult, er
 		}
 	}
 	stale := staleOverlapArtifacts(served, records, runs, r.overlapModel())
-	computed, failed := r.computeOverlapBatch(ctx, sortedServed(served, stale), served)
-	return OverlapComputeResult{Computed: len(computed), Failed: failed}, nil
+	pending := 0
+	for id := range stale {
+		if unwritten[store.VectorPendingKey{ArtifactID: id, Version: served[id].Version}] {
+			delete(stale, id)
+			pending++
+		}
+	}
+	out := r.computeOverlapBatch(ctx, sortedServed(served, stale), served, overlapBatchOptions{})
+	return OverlapSweepResult{
+		OverlapComputeResult: OverlapComputeResult{Computed: len(out.computed), Failed: out.failed},
+		Pending:              pending,
+	}, nil
+}
+
+// unwrittenVectors returns the keys of tenant's §4.7 outbox rows, the
+// versions whose vectors are not written yet. A store without the outbox
+// capability writes vectors with the manifest, so nothing is unwritten.
+//
+// Spec: §7.3.1, §4.7
+func (r *Registry) unwrittenVectors(ctx context.Context, tenant string) (map[store.VectorPendingKey]bool, error) {
+	ob, ok := r.store.(store.VectorOutbox)
+	if !ok {
+		return nil, nil
+	}
+	keys, err := ob.ListVectorPendingKeys(ctx, tenant)
+	if err != nil {
+		return nil, fmt.Errorf("list the vector outbox: %w", err)
+	}
+	out := make(map[store.VectorPendingKey]bool, len(keys))
+	for _, k := range keys {
+		out[k] = true
+	}
+	return out, nil
 }
 
 // staleOverlapArtifacts returns the served artifacts the sweep computes: one

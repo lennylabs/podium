@@ -3,6 +3,7 @@ package serverboot
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -27,27 +28,55 @@ const (
 
 var (
 	registerOverlapBootProviders sync.Once
-	// vectorGate holds the channel the gated backend's stored-vector reads
-	// wait on; a test stores a fresh one before it boots.
-	vectorGate atomic.Pointer[chan struct{}]
+	// queryGate holds the channel the gated backend's neighbour queries wait
+	// on, and putGate the channel its vector writes wait on; a test stores a
+	// fresh one before it boots.
+	queryGate atomic.Pointer[chan struct{}]
+	putGate   atomic.Pointer[chan struct{}]
 )
 
 // gatedVector is a managed vector backend over the memory backend whose
-// stored-vector read waits until the current vectorGate closes, so a test can
-// hold every overlap computation in flight.
+// neighbour queries wait until the current queryGate closes, so a test can
+// hold every overlap computation in flight, and whose writes wait until the
+// current putGate closes, so a test can keep the outbox rows pending.
 type gatedVector struct{ *vector.Memory }
 
 func (g gatedVector) ID() string { return gatedVectorID }
 
-func (g gatedVector) StoredVector(ctx context.Context, tenant, id, version string) ([]float32, string, error) {
-	if gate := vectorGate.Load(); gate != nil {
-		select {
-		case <-*gate:
-		case <-ctx.Done():
-			return nil, "", ctx.Err()
-		}
+// waitGate blocks until the channel in gate closes or ctx ends; an empty
+// gate does not block.
+func waitGate(ctx context.Context, gate *atomic.Pointer[chan struct{}]) error {
+	ch := gate.Load()
+	if ch == nil {
+		return nil
 	}
-	return g.Memory.StoredVector(ctx, tenant, id, version)
+	select {
+	case <-*ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (g gatedVector) Put(ctx context.Context, tenant, id, version string, vec []float32) error {
+	if err := waitGate(ctx, &putGate); err != nil {
+		return err
+	}
+	return g.Memory.Put(ctx, tenant, id, version, vec)
+}
+
+func (g gatedVector) Query(ctx context.Context, tenant string, vec []float32, k int) ([]vector.Match, error) {
+	if err := waitGate(ctx, &queryGate); err != nil {
+		return nil, err
+	}
+	return g.Memory.Query(ctx, tenant, vec, k)
+}
+
+func (g gatedVector) QueryModel(ctx context.Context, tenant string, vec []float32, k int, model string) ([]vector.Match, error) {
+	if err := waitGate(ctx, &queryGate); err != nil {
+		return nil, err
+	}
+	return g.Memory.QueryModel(ctx, tenant, vec, k, model)
 }
 
 // registerOverlapProviders registers the word embedder and the gated vector
@@ -225,13 +254,14 @@ func TestRun_StartupPassComputesBootstrapArtifacts(t *testing.T) {
 }
 
 // Spec: §7.3.1, §13.9 — readiness never waits on a semantic overlap
-// computation: with every computation held in flight, the startup pass's
-// included, /readyz answers 200 and the report says nothing is computed yet.
-// Once the computations are released, the report reaches computed == total.
+// computation: with every computation held in flight at its neighbour query,
+// the startup pass's and the outbox write's included, /readyz answers 200 and
+// the report says nothing is computed yet. Once the computations are
+// released, the report reaches computed == total.
 func TestRun_ReadinessDoesNotWaitOnTheStartupPass(t *testing.T) {
 	gate := make(chan struct{})
-	vectorGate.Store(&gate)
-	t.Cleanup(func() { vectorGate.Store(nil) })
+	queryGate.Store(&gate)
+	t.Cleanup(func() { queryGate.Store(nil) })
 	f := overlapBootFixture(t, gatedVectorID, "0")
 	var held, done overlapState
 	logs, err := f.bootWith(t, func() {
@@ -253,5 +283,49 @@ func TestRun_ReadinessDoesNotWaitOnTheStartupPass(t *testing.T) {
 	}
 	if !strings.Contains(logs, "startup pass running") {
 		t.Errorf("the startup pass did not start\n%s", logs)
+	}
+}
+
+// Spec: §7.3.1 — on a fresh managed deployment the startup pass skips every
+// artifact whose vector the outbox has not written, counting it as neither
+// computed nor failed, so it logs no stored-vector failure. With the outbox
+// writes held, the startup pass logs the three artifacts as skipped. Once the
+// writes are released, the outbox write computes them with the vectors it
+// wrote, the report reaches computed == total, and the log carries no
+// stored-vector read failure and no failed computation.
+func TestRun_ManagedBootSkipsUnwrittenVectors(t *testing.T) {
+	gate := make(chan struct{})
+	putGate.Store(&gate)
+	t.Cleanup(func() { putGate.Store(nil) })
+	f := overlapBootFixture(t, gatedVectorID, "0")
+	var state overlapState
+	var semantic []string
+	logs, err := f.bootWith(t, func() {
+		buf, ok := log.Writer().(*syncBuffer)
+		if !ok {
+			t.Fatal("the boot did not capture the standard logger")
+		}
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) && !strings.Contains(buf.String(), "startup pass of tenant") {
+			time.Sleep(20 * time.Millisecond)
+		}
+		close(gate)
+		state, semantic = waitComplete(t, f.addr)
+	})
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, logs)
+	}
+	skipped := regexp.MustCompile(`lint\.semantic_overlap: startup pass of tenant \S+ computed 0, failed 0, skipped 3 whose vectors the outbox has not written`)
+	if !skipped.MatchString(logs) {
+		t.Errorf("the startup pass did not log the three unwritten artifacts as skipped\n%s", logs)
+	}
+	if strings.Contains(logs, "stored-vector read") || regexp.MustCompile(`failed [1-9]`).MatchString(logs) {
+		t.Errorf("the boot logged a stored-vector read failure or a failed computation\n%s", logs)
+	}
+	if state.Computed == nil || state.Total == nil || *state.Computed != 3 || *state.Total != 3 {
+		t.Fatalf("computed/total = %v/%v, want 3/3\n%s", state.Computed, state.Total, logs)
+	}
+	if strings.Join(semantic, ",") != "fin/invoices,fin/payables" {
+		t.Errorf("semantic diagnostics name %v, want fin/invoices and fin/payables", semantic)
 	}
 }

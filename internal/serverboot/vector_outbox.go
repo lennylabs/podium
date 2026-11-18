@@ -30,18 +30,29 @@ type vectorDrainWorker struct {
 	lagAge    time.Duration
 	metrics   *metrics.Registry
 	onLagging func(depth int, oldestAge time.Duration)
-	// onWritten runs once per pass, after every row of the pass is drained,
-	// with the rows whose vectors reached the backend and were marked done.
-	// The §7.3.1 overlap computation hooks here so it runs once the
-	// artifacts' vectors are in the managed index and reads the served set
-	// once per pass rather than once per row. Nil runs nothing.
-	onWritten func(ctx context.Context, written []store.VectorPending)
+	// onWritten runs once per pass that listed the outbox, after every row of
+	// the pass is drained, with the rows whose vectors reached the backend and
+	// were marked done; written is empty on a pass that wrote nothing. The
+	// §7.3.1 overlap computation hooks here so it runs once the artifacts'
+	// vectors are in the managed index, reads the served set once per pass
+	// rather than once per row, and retries on later passes a computation
+	// whose stored vector the backend did not return yet. Nil runs nothing.
+	onWritten func(ctx context.Context, written []outboxWrite)
 	// redact removes credentials from a drain error before the row records
 	// it and the log line carries it (§4.7). The zero value still removes URL
 	// userinfo, query strings, and connection-string passwords.
 	redact outboxRedactor
 
 	wasLagging bool
+}
+
+// outboxWrite is one outbox row a pass wrote to the backend: the row, and
+// the vector the pass wrote with the model that produced it. vec is nil when
+// a self-embedding backend embedded the row's text itself.
+type outboxWrite struct {
+	row   store.VectorPending
+	vec   []float32
+	model string
 }
 
 // runOnce drains one batch of eligible rows and republishes the depth gauge.
@@ -51,9 +62,10 @@ func (w *vectorDrainWorker) runOnce(ctx context.Context, now time.Time) {
 		log.Printf("vector outbox: list pending: %v", err)
 		return
 	}
-	var written []store.VectorPending
+	var written []outboxWrite
 	for _, p := range rows {
-		if err := w.drainRow(ctx, p); err != nil {
+		out, err := w.drainRow(ctx, p)
+		if err != nil {
 			backoff := w.backoff(p.Attempts)
 			msg := w.redact.text(err)
 			_ = w.outbox.MarkVectorPendingRetry(ctx, p.TenantID, p.ArtifactID, p.Version, now.Add(backoff), msg)
@@ -62,32 +74,37 @@ func (w *vectorDrainWorker) runOnce(ctx context.Context, now time.Time) {
 			continue
 		}
 		_ = w.outbox.MarkVectorPendingDone(ctx, p.TenantID, p.ArtifactID, p.Version)
-		written = append(written, p)
+		written = append(written, out)
 	}
-	if w.onWritten != nil && len(written) > 0 {
+	if w.onWritten != nil {
 		w.onWritten(ctx, written)
 	}
 	w.publishStats(ctx, now)
 }
 
-// drainRow embeds and writes one pending row to the external backend. A
-// self-embedding backend takes the raw text; otherwise the configured embedder
-// produces the vector first.
-func (w *vectorDrainWorker) drainRow(ctx context.Context, p store.VectorPending) error {
+// drainRow embeds and writes one pending row to the external backend, and
+// returns what it wrote. A self-embedding backend takes the raw text;
+// otherwise the configured embedder produces the vector first, and the write
+// carries it so the §7.3.1 overlap computation queries with it rather than
+// reading it back.
+func (w *vectorDrainWorker) drainRow(ctx context.Context, p store.VectorPending) (outboxWrite, error) {
 	if w.embedder == nil && vector.SelfEmbeds(w.vec) {
-		return w.vec.(vector.TextVectorizer).PutText(ctx, p.TenantID, p.ArtifactID, p.Version, p.Text)
+		return outboxWrite{row: p}, w.vec.(vector.TextVectorizer).PutText(ctx, p.TenantID, p.ArtifactID, p.Version, p.Text)
 	}
 	if w.embedder == nil {
-		return fmt.Errorf("no embedder configured for external vector backend")
+		return outboxWrite{}, fmt.Errorf("no embedder configured for external vector backend")
 	}
 	vecs, err := w.embedder.Embed(ctx, []string{p.Text})
 	if err != nil {
-		return fmt.Errorf("embed: %w", err)
+		return outboxWrite{}, fmt.Errorf("embed: %w", err)
 	}
 	if len(vecs) != 1 {
-		return fmt.Errorf("embed: expected 1 vector, got %d", len(vecs))
+		return outboxWrite{}, fmt.Errorf("embed: expected 1 vector, got %d", len(vecs))
 	}
-	return w.vec.Put(ctx, p.TenantID, p.ArtifactID, p.Version, vecs[0])
+	if err := w.vec.Put(ctx, p.TenantID, p.ArtifactID, p.Version, vecs[0]); err != nil {
+		return outboxWrite{}, err
+	}
+	return outboxWrite{row: p, vec: vecs[0], model: w.embedder.Model()}, nil
 }
 
 // backoff returns the retry delay for a row that has already failed `attempts`
@@ -129,7 +146,7 @@ func (w *vectorDrainWorker) publishStats(ctx context.Context, now time.Time) {
 // retention/anchor scheduler goroutine pattern: an immediate pass, then one per
 // tick, until ctx is cancelled (the server's lifecycle context), so a graceful
 // shutdown stops the worker rather than leaking the goroutine.
-func startVectorOutboxWorker(ctx context.Context, cfg *Config, st store.Store, vec vector.Provider, embedder embedding.Provider, mreg *metrics.Registry, auditSink audit.Sink, tenantID string, onWritten func(context.Context, []store.VectorPending)) {
+func startVectorOutboxWorker(ctx context.Context, cfg *Config, st store.Store, vec vector.Provider, embedder embedding.Provider, mreg *metrics.Registry, auditSink audit.Sink, tenantID string, onWritten func(context.Context, []outboxWrite)) {
 	ob, ok := st.(store.VectorOutbox)
 	if !ok {
 		return

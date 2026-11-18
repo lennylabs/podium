@@ -440,6 +440,18 @@ func (s *listingStore) ListManifests(ctx context.Context, tenantID string) ([]st
 // registry over a listing-counting wrapper of the store.
 func outboxCycle(t *testing.T) (*store.SQLite, *hostedIndex, *listingStore, *core.Registry) {
 	t.Helper()
+	st := outboxIngest(t)
+	idx := newHostedIndex()
+	counted := &listingStore{Store: st}
+	reg := core.New(counted, "default", nil).WithVectorSearch(idx, nil).WithOverlapChecks(lint.Thresholds{}, lint.SemanticConfig{Enabled: true})
+	return st, idx, counted, reg
+}
+
+// outboxIngest ingests fin-invoices, fin-payables, and fin-ledger at 1.0.0
+// through the §4.7.2 outbox into a fresh SQLite store, so each has a pending
+// outbox row and no vector, and returns the store.
+func outboxIngest(t *testing.T) *store.SQLite {
+	t.Helper()
 	ctx := context.Background()
 	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "reg.db"))
 	if err != nil {
@@ -466,10 +478,7 @@ func outboxCycle(t *testing.T) (*store.SQLite, *hostedIndex, *listingStore, *cor
 	if _, err := ingest.SourceIngestWithOptions(ctx, st, source.Local{}, lc, ingest.SourceIngestOptions{UseVectorOutbox: true}); err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
-	idx := newHostedIndex()
-	counted := &listingStore{Store: st}
-	reg := core.New(counted, "default", nil).WithVectorSearch(idx, nil).WithOverlapChecks(lint.Thresholds{}, lint.SemanticConfig{Enabled: true})
-	return st, idx, counted, reg
+	return st
 }
 
 // Spec: §7.3.1 — the outbox drain computes every artifact one pass wrote and

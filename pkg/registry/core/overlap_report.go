@@ -336,11 +336,12 @@ func (r *Registry) IngestSemanticOverlap(ctx context.Context, layerID string, st
 	if len(stored) == 0 {
 		return nil
 	}
-	computed, _, served, err := r.computeOverlapKeys(ctx, stored)
+	out, served, err := r.computeOverlapKeys(ctx, stored, overlapBatchOptions{})
 	if err != nil {
 		log.Printf("%s: layer %s: %v", lint.SemanticOverlapCode, layerID, err)
 		return nil
 	}
+	computed := out.computed
 	if len(computed) == 0 {
 		return nil
 	}

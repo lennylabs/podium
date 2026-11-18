@@ -439,7 +439,7 @@ func TestRefreshOverlap_DeletesUnservedArtifacts(t *testing.T) {
 	for _, c := range runs {
 		entries = append(entries, c.ArtifactID)
 	}
-	if err != nil || res != (OverlapComputeResult{Computed: 1}) || ownedSummary(f.records()) != "a>b b>a" || strings.Join(entries, ",") != "a,b" {
+	if err != nil || res.OverlapComputeResult != (OverlapComputeResult{Computed: 1}) || ownedSummary(f.records()) != "a>b b>a" || strings.Join(entries, ",") != "a,b" {
 		t.Errorf("refresh = %+v (%v), records %q, entries %v; want a recomputed, records a>b b>a, entries a,b",
 			res, err, ownedSummary(f.records()), entries)
 	}
@@ -662,7 +662,7 @@ func TestRefreshOverlap_StoreFailures(t *testing.T) {
 	_, errRuns := reg.RefreshOverlap(f.ctx)
 	fs.failRuns, fs.failDelete = false, true
 	res, errDelete := reg.RefreshOverlap(f.ctx)
-	if errRecords == nil || errRuns == nil || errDelete != nil || res != (OverlapComputeResult{Computed: 2}) {
+	if errRecords == nil || errRuns == nil || errDelete != nil || res.OverlapComputeResult != (OverlapComputeResult{Computed: 2}) {
 		t.Errorf("refresh errors = %v, %v, %v and result %+v; want two read failures, then a and b computed despite the failed delete",
 			errRecords, errRuns, errDelete, res)
 	}

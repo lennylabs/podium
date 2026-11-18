@@ -50,6 +50,12 @@ var errOverlapUnavailable = errors.New("semantic overlap cannot be computed")
 // the next computation succeeds.
 var errNoStoredVector = errors.New("no current vector is stored for the artifact")
 
+// errStoredVectorAbsent reports a stored-vector read the backend answered
+// with no row. It is the errNoStoredVector case an eventually consistent
+// backend such as Pinecone produces right after a write, so the §7.3.1
+// outbox-write computation retries it on the outbox's next passes.
+var errStoredVectorAbsent = fmt.Errorf("%w: the backend returned no row", errNoStoredVector)
+
 // overlapModel returns the configured embedding model identifier the records
 // are stamped with and filtered by: the local embedder's model, or the hosted
 // model of a self-embedding backend.
@@ -109,7 +115,10 @@ type neighborSource struct {
 	score func(ctx context.Context, matches []vector.Match) ([]overlapNeighbor, error)
 }
 
-// neighborSourceFor prepares rec's index queries. Every backend that can
+// neighborSourceFor prepares rec's index queries. A non-nil given is rec's
+// vector as the §4.7 outbox wrote it, and the queries use it with no
+// stored-vector read, so a backend that has not made the write readable yet
+// does not fail the computation. Otherwise, every backend that can
 // return rec's stored vector (vector.VectorReader) is queried with it, a
 // self-embedding backend included, restricted to the configured model on a
 // model-versioned backend as search restricts its queries. A self-embedding
@@ -121,8 +130,11 @@ type neighborSource struct {
 // backend's similarity is one minus the distance it reports.
 //
 // Spec: §7.3.1, §4.7
-func (r *Registry) neighborSourceFor(ctx context.Context, rec store.ManifestRecord) (neighborSource, error) {
+func (r *Registry) neighborSourceFor(ctx context.Context, rec store.ManifestRecord, given []float32) (neighborSource, error) {
 	tenant := r.TenantFor(ctx)
+	if given != nil {
+		return r.vectorNeighborSource(tenant, given), nil
+	}
 	if _, canRead := r.vector.(vector.VectorReader); !canRead && r.embedder == nil {
 		tv := r.vector.(vector.TextVectorizer)
 		text := projection.Artifact(rec)
@@ -135,6 +147,13 @@ func (r *Registry) neighborSourceFor(ctx context.Context, rec store.ManifestReco
 	if err != nil {
 		return neighborSource{}, err
 	}
+	return r.vectorNeighborSource(tenant, vec), nil
+}
+
+// vectorNeighborSource returns the index queries of a computation that
+// queries with vec: restricted to the configured model on a model-versioned
+// backend, and scored from the stored vectors on a collocated backend.
+func (r *Registry) vectorNeighborSource(tenant string, vec []float32) neighborSource {
 	src := neighborSource{score: scoreByDistance}
 	if mv, ok := vector.ModelVersionedOf(r.vector); ok && r.embedder != nil {
 		model := r.embedder.Model()
@@ -149,7 +168,7 @@ func (r *Registry) neighborSourceFor(ctx context.Context, rec store.ManifestReco
 			return cosineNeighbors(ctx, scorer, tenant, vec, matches)
 		}
 	}
-	return src, nil
+	return src
 }
 
 // currentStoredVector returns rec's stored vector when the backend holds one
@@ -163,7 +182,7 @@ func (r *Registry) currentStoredVector(ctx context.Context, tenant string, rec s
 	}
 	vec, model, err := reader.StoredVector(ctx, tenant, rec.ArtifactID, rec.Version)
 	if errors.Is(err, vector.ErrNotFound) {
-		return nil, errNoStoredVector
+		return nil, errStoredVectorAbsent
 	}
 	if err != nil {
 		return nil, err
@@ -223,11 +242,12 @@ func cosineNeighbors(ctx context.Context, scorer vector.CosineScorer, tenant str
 // nearestServedPeers finds rec's nearest peers: the configured number of
 // artifacts other than rec's whose current served versions (served maps an
 // identifier to it) have the rows nearest rec's projection, by descending
-// similarity and then by identifier. A peer's nearest row is kept.
+// similarity and then by identifier. A peer's nearest row is kept. A non-nil
+// given is rec's vector as the outbox wrote it (neighborSourceFor).
 //
 // Spec: §7.3.1
-func (r *Registry) nearestServedPeers(ctx context.Context, rec store.ManifestRecord, served map[string]string) ([]overlapNeighbor, error) {
-	src, err := r.neighborSourceFor(ctx, rec)
+func (r *Registry) nearestServedPeers(ctx context.Context, rec store.ManifestRecord, served map[string]string, given []float32) ([]overlapNeighbor, error) {
+	src, err := r.neighborSourceFor(ctx, rec, given)
 	if err != nil {
 		return nil, &overlapStepError{step: stepStoredVector, err: err}
 	}
@@ -421,49 +441,73 @@ type OverlapComputeResult struct {
 // per computation. It sets no observable result, so it is not operator-tunable.
 const overlapConfirmChunk = 32
 
-// computeOverlapBatch computes each record in subjects, in order, and returns
-// the identifiers it computed and the count of failures. The batch runs in
-// chunks of overlapConfirmChunk: it queries the index for each computation of
-// a chunk against served, then stores the chunk's records. A failure is
-// logged with the artifact identifier and does not stop the batch; a
-// cancelled context stops it.
+// overlapBatchOptions adjusts a batch for the §4.7 outbox-write computation.
+// given maps a subject's key to the vector the outbox wrote for it, which the
+// computation queries with in place of the stored vector. deferAbsent counts
+// a stored-vector read the backend answered with no row as unreadable rather
+// than failed, and does not log it, because the outbox retries it. The zero
+// value is the plain batch the sweep, the rebuild, a re-embed, and a
+// collocated ingest run.
+type overlapBatchOptions struct {
+	given       map[vector.RowKey][]float32
+	deferAbsent bool
+}
+
+// overlapBatchOutcome is what a batch did: the identifiers it computed, the
+// count of failures, and, under overlapBatchOptions.deferAbsent, the keys
+// whose stored vector the backend did not return.
+type overlapBatchOutcome struct {
+	computed   []string
+	failed     int
+	unreadable []vector.RowKey
+}
+
+// computeOverlapBatch computes each record in subjects, in order. The batch
+// runs in chunks of overlapConfirmChunk: it queries the index for each
+// computation of a chunk against served, then stores the chunk's records. A
+// failure is logged with the artifact identifier and does not stop the
+// batch; a cancelled context stops it.
 //
 // Spec: §7.3.1
-func (r *Registry) computeOverlapBatch(ctx context.Context, subjects []store.ManifestRecord, served map[string]store.ManifestRecord) ([]string, int) {
+func (r *Registry) computeOverlapBatch(ctx context.Context, subjects []store.ManifestRecord, served map[string]store.ManifestRecord, opts overlapBatchOptions) overlapBatchOutcome {
 	versions := servedVersions(served)
-	var computed []string
-	failed := 0
+	var out overlapBatchOutcome
 	for start := 0; start < len(subjects) && ctx.Err() == nil; start += overlapConfirmChunk {
 		chunk := subjects[start:min(start+overlapConfirmChunk, len(subjects))]
-		pending, queryFailed := r.findOverlapPeers(ctx, chunk, versions)
+		pending := r.findOverlapPeers(ctx, chunk, versions, opts, &out)
 		ids, storeFailed := r.storeOverlapChunk(ctx, pending)
-		computed = append(computed, ids...)
-		failed += queryFailed + storeFailed
+		out.computed = append(out.computed, ids...)
+		out.failed += storeFailed
 	}
-	return computed, failed
+	return out
 }
 
 // findOverlapPeers runs the index queries of each record in chunk and returns
-// the computations that found their peers and the count that failed. A failed
-// stored-vector read, first neighbour query, or scoring call is logged with
-// the step that failed and leaves that artifact's stored records and
-// computation entry in place.
-func (r *Registry) findOverlapPeers(ctx context.Context, chunk []store.ManifestRecord, versions map[string]string) ([]pendingOverlap, int) {
-	out := make([]pendingOverlap, 0, len(chunk))
-	failed := 0
+// the computations that found their peers, adding each failure to out. A
+// failed stored-vector read, first neighbour query, or scoring call is logged
+// with the step that failed and leaves that artifact's stored records and
+// computation entry in place. Under opts.deferAbsent, a stored-vector read
+// the backend answered with no row goes to out.unreadable instead, unlogged.
+func (r *Registry) findOverlapPeers(ctx context.Context, chunk []store.ManifestRecord, versions map[string]string, opts overlapBatchOptions, out *overlapBatchOutcome) []pendingOverlap {
+	found := make([]pendingOverlap, 0, len(chunk))
 	for _, m := range chunk {
 		if ctx.Err() != nil {
 			break
 		}
-		peers, err := r.nearestServedPeers(ctx, m, versions)
-		if err != nil {
-			logOverlapFailure(m, err)
-			failed++
+		key := vector.RowKey{ArtifactID: m.ArtifactID, Version: m.Version}
+		peers, err := r.nearestServedPeers(ctx, m, versions, opts.given[key])
+		if opts.deferAbsent && errors.Is(err, errStoredVectorAbsent) {
+			out.unreadable = append(out.unreadable, key)
 			continue
 		}
-		out = append(out, pendingOverlap{rec: m, peers: peers})
+		if err != nil {
+			logOverlapFailure(m, err)
+			out.failed++
+			continue
+		}
+		found = append(found, pendingOverlap{rec: m, peers: peers})
 	}
-	return out, failed
+	return found
 }
 
 // storeOverlapChunk stores the records of each computation in pending whose
@@ -523,19 +567,63 @@ func (r *Registry) storeOverlapChunk(ctx context.Context, pending []pendingOverl
 //
 // Spec: §7.3.1
 func (r *Registry) ComputeOverlap(ctx context.Context, keys []vector.RowKey) (OverlapComputeResult, error) {
-	computed, failed, _, err := r.computeOverlapKeys(ctx, keys)
-	return OverlapComputeResult{Computed: len(computed), Failed: failed}, err
+	out, _, err := r.computeOverlapKeys(ctx, keys, overlapBatchOptions{})
+	return OverlapComputeResult{Computed: len(out.computed), Failed: out.failed}, err
 }
 
-// computeOverlapKeys is ComputeOverlap returning the computed identifiers and
-// the served set it computed against.
-func (r *Registry) computeOverlapKeys(ctx context.Context, keys []vector.RowKey) ([]string, int, map[string]store.ManifestRecord, error) {
+// OverlapWrite is one vector the §4.7 outbox wrote to a managed backend:
+// the row's key, and the vector the row carried with the model that produced
+// it. Vector is nil when the backend embedded the row's text itself.
+type OverlapWrite struct {
+	Key    vector.RowKey
+	Vector []float32
+	Model  string
+}
+
+// OutboxOverlapResult is the outcome of the outbox-write computation: the
+// counts, and the keys whose stored vector the backend did not return yet,
+// which count as neither computed nor failed.
+type OutboxOverlapResult struct {
+	OverlapComputeResult
+	Unreadable []vector.RowKey
+}
+
+// ComputeOverlapAtWrite is ComputeOverlap for the artifacts one §4.7 outbox
+// pass wrote to a managed backend. A write that carries a vector produced by
+// the configured embedding model (overlapModel) is queried with that vector
+// and reads no stored vector, so it does not depend on the backend returning
+// the write yet. A write with no vector, as on a self-embedding backend, or
+// with a vector of another model reads the stored vector; when the backend
+// answers that read with no row, the key is returned in Unreadable without a
+// failure log, and the outbox retries it on its next passes.
+//
+// Spec: §7.3.1, §4.7
+func (r *Registry) ComputeOverlapAtWrite(ctx context.Context, writes []OverlapWrite) (OutboxOverlapResult, error) {
+	keys := make([]vector.RowKey, len(writes))
+	opts := overlapBatchOptions{given: map[vector.RowKey][]float32{}, deferAbsent: true}
+	model := r.overlapModel()
+	for i, w := range writes {
+		keys[i] = w.Key
+		if len(w.Vector) > 0 && w.Model == model {
+			opts.given[w.Key] = w.Vector
+		}
+	}
+	out, _, err := r.computeOverlapKeys(ctx, keys, opts)
+	return OutboxOverlapResult{
+		OverlapComputeResult: OverlapComputeResult{Computed: len(out.computed), Failed: out.failed},
+		Unreadable:           out.unreadable,
+	}, err
+}
+
+// computeOverlapKeys is ComputeOverlap under opts, returning the batch's
+// outcome and the served set it computed against.
+func (r *Registry) computeOverlapKeys(ctx context.Context, keys []vector.RowKey, opts overlapBatchOptions) (overlapBatchOutcome, map[string]store.ManifestRecord, error) {
 	if err := r.overlapReady(); err != nil {
-		return nil, 0, nil, err
+		return overlapBatchOutcome{}, nil, err
 	}
 	served, err := r.servedArtifacts(ctx)
 	if err != nil {
-		return nil, 0, nil, err
+		return overlapBatchOutcome{}, nil, err
 	}
 	var subjects []store.ManifestRecord
 	seen := map[string]bool{}
@@ -545,6 +633,5 @@ func (r *Registry) computeOverlapKeys(ctx context.Context, keys []vector.RowKey)
 			subjects = append(subjects, m)
 		}
 	}
-	computed, failed := r.computeOverlapBatch(ctx, subjects, served)
-	return computed, failed, served, nil
+	return r.computeOverlapBatch(ctx, subjects, served, opts), served, nil
 }

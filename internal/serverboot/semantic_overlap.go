@@ -49,38 +49,20 @@ func buildSemanticOverlap(st store.Store, vec vector.Provider, emb embedding.Pro
 }
 
 // overlapOutboxHook returns the callback the §4.7 outbox drain worker runs
-// after each pass that wrote vectors to a managed backend, or nil when the
-// check is off. It computes the overlap records of the artifacts the pass
-// wrote, so two artifacts of one cycle find each other once both vectors are
-// written. The rows are grouped by tenant and each tenant's rows go to one
-// ComputeOverlap call, which lists that tenant's served set once for the
-// pass. The drain has already marked every row of the pass done, so a failed
-// computation never holds a row back: the computation logs it and leaves it
-// to the sweep.
+// after each pass on a managed backend, or nil when the check is off. It
+// computes the overlap records of the artifacts the pass wrote, so two
+// artifacts of one cycle find each other once both vectors are written, and
+// retries the computations of earlier passes whose stored vector the backend
+// did not return yet (overlapOutbox). The drain has already marked every row
+// of the pass done, so a failed computation never holds a row back: the
+// computation logs it and leaves it to the sweep.
 //
 // Spec: §7.3.1
-func overlapOutboxHook(reg *core.Registry) func(context.Context, []store.VectorPending) {
+func overlapOutboxHook(reg *core.Registry) func(context.Context, []outboxWrite) {
 	if !reg.SemanticOverlapEnabled() {
 		return nil
 	}
-	return func(ctx context.Context, written []store.VectorPending) {
-		byTenant := map[string][]vector.RowKey{}
-		var tenants []string
-		for _, p := range written {
-			if _, seen := byTenant[p.TenantID]; !seen {
-				tenants = append(tenants, p.TenantID)
-			}
-			byTenant[p.TenantID] = append(byTenant[p.TenantID], vector.RowKey{ArtifactID: p.ArtifactID, Version: p.Version})
-		}
-		for _, tenant := range tenants {
-			if ctx.Err() != nil {
-				return
-			}
-			if _, err := reg.ComputeOverlap(core.ContextWithTenant(ctx, tenant), byTenant[tenant]); err != nil {
-				log.Printf("%s: tenant %s after the outbox write of %d vectors: %v", lint.SemanticOverlapCode, tenant, len(byTenant[tenant]), err)
-			}
-		}
-	}
+	return newOverlapOutbox(reg).afterPass
 }
 
 // startOverlapSweep launches the §7.3.1 startup pass and the periodic sweep
@@ -156,8 +138,10 @@ func sweepLoop(ctx context.Context, interval, offset time.Duration, pass func(ct
 }
 
 // runOverlapSweep runs one sweep pass in every active tenant and logs, under
-// label, the counts of a pass that computed or failed anything. A cancelled
-// ctx stops it before the next tenant.
+// label, the counts of a pass that computed, failed, or skipped anything. An
+// artifact whose vector the outbox has not written is skipped and counted
+// apart from the computed and failed ones. A cancelled ctx stops it before
+// the next tenant.
 //
 // Spec: §7.3.1
 func runOverlapSweep(ctx context.Context, st store.Store, reg *core.Registry, label string) {
@@ -181,7 +165,11 @@ func runOverlapSweep(ctx context.Context, st store.Store, reg *core.Registry, la
 			log.Printf("%s: %s of tenant %s: %v", lint.SemanticOverlapCode, label, t.ID, err)
 			continue
 		}
-		if res.Computed > 0 || res.Failed > 0 {
+		switch {
+		case res.Pending > 0:
+			log.Printf("%s: %s of tenant %s computed %d, failed %d, skipped %d whose vectors the outbox has not written",
+				lint.SemanticOverlapCode, label, t.ID, res.Computed, res.Failed, res.Pending)
+		case res.Computed > 0 || res.Failed > 0:
 			log.Printf("%s: %s of tenant %s computed %d, failed %d", lint.SemanticOverlapCode, label, t.ID, res.Computed, res.Failed)
 		}
 	}
