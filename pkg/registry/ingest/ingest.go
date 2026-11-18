@@ -399,6 +399,11 @@ type Result struct {
 	//
 	// Spec: §7.3.1
 	Advisories []lint.Diagnostic
+	// Removed lists, sorted, the artifacts the cycle soft-deleted because the
+	// snapshot no longer contains their package.
+	//
+	// Spec: §7.3.1 (Removed artifacts)
+	Removed []string
 }
 
 // IngestedArtifact names an (artifact_id, version) pair present in a layer
@@ -551,6 +556,12 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	records, err := walkLayer(req.Files, req.LayerID)
 	if err != nil {
 		return nil, err
+	}
+	// Spec: §7.3.1 (Removed artifacts) — every package the snapshot holds
+	// counts as present, whatever the cycle then does with it.
+	inSnapshot := make(map[string]bool, len(records))
+	for _, rec := range records {
+		inSnapshot[rec.ID] = true
 	}
 
 	// The §4.1 unparseable-manifest rule, the §4.6 no-inheritance rule, and
@@ -817,10 +828,43 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		res.Advisories = append(res.Advisories, req.SemanticOverlap(ctx, req.TenantID, req.LayerID, acceptedArtifacts(res.Ingested))...)
 	}
 
+	// Spec: §7.3.1 (Removed artifacts) — the cycle read the whole snapshot,
+	// so an artifact this layer serves that it did not find is soft-deleted.
+	res.Removed = removedArtifacts(rowsByID, req.LayerID, inSnapshot)
+	if len(res.Removed) > 0 {
+		if err := st.SoftDeleteArtifacts(ctx, req.TenantID, req.LayerID, res.Removed, now); err != nil {
+			return nil, fmt.Errorf("ingest: soft-delete removed artifacts: %w", err)
+		}
+	}
+
 	if len(res.LintFailures) > 0 && res.Accepted == 0 && res.Idempotent == 0 && len(res.Conflicts) == 0 {
 		return res, fmt.Errorf("%w: %d diagnostics", ErrLintFailed, len(res.LintFailures))
 	}
 	return res, nil
+}
+
+// removedArtifacts returns, sorted, the identifiers of the artifacts layerID
+// serves, a live row of which it contributed, whose package the snapshot no
+// longer contains. rowsByID is the listing the cycle read before its writes;
+// an artifact the cycle stored is in the snapshot, so the listing's age
+// changes nothing.
+//
+// Spec: §7.3.1 (Removed artifacts)
+func removedArtifacts(rowsByID map[string][]store.ManifestRecord, layerID string, inSnapshot map[string]bool) []string {
+	var out []string
+	for id, rows := range rowsByID {
+		if inSnapshot[id] {
+			continue
+		}
+		for _, row := range rows {
+			if row.Layer == layerID && row.DeletedAt == nil {
+				out = append(out, id)
+				break
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // acceptedArtifacts returns the pairs the cycle newly stored, leaving out the

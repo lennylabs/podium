@@ -380,6 +380,9 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	if n > 0 {
 		return nil // inserted these bytes
 	}
+	if revived, err := sqliteRevive(ctx, s.db, rec, ingestedAt, resources); err != nil || revived {
+		return err
+	}
 	// The row already existed (a prior ingest, or the winner of a
 	// concurrent race). Read the stored hash back to classify; immutable
 	// rows are never deleted, so the SELECT always finds it.
@@ -395,6 +398,51 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		return ErrImmutableViolation
 	}
 	return nil // idempotent — same hash
+}
+
+// sqliteRevive restores a tombstoned row of rec's (artifact_id, version) that
+// carries rec's content hash and was contributed by rec's layer, rewriting it
+// as rec states it, and reports whether it did. A live row or a different hash is left for the caller to
+// classify.
+//
+// Spec: §7.3.1 (Removed artifacts)
+func sqliteRevive(ctx context.Context, ex execContexter, rec ManifestRecord, ingestedAt time.Time, resources []byte) (bool, error) {
+	res, err := ex.ExecContext(ctx, `
+		UPDATE manifests SET
+			type = ?, description = ?, tags = ?, sensitivity = ?, layer = ?, deprecated = ?,
+			ingested_at = ?, frontmatter = ?, body = ?, skill_raw = ?, signature = ?,
+			search_visibility = ?, resources = ?, deprecated_at = ?, deleted_at = NULL
+		WHERE tenant_id = ? AND artifact_id = ? AND version = ?
+			AND content_hash = ? AND layer = ? AND deleted_at IS NOT NULL`,
+		rec.Type, rec.Description, strings.Join(rec.Tags, "\n"), rec.Sensitivity, rec.Layer,
+		boolToInt(rec.Deprecated), ingestedAt.UTC().Format(time.RFC3339Nano),
+		rec.Frontmatter, rec.Body, rec.SkillRaw, rec.Signature, rec.SearchVisibility, resources,
+		nullTimeText(rec.DeprecatedAt),
+		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.Layer)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+// SoftDeleteArtifacts tombstones the live rows layerID contributed for each
+// of artifactIDs (§7.3.1 removed artifacts).
+func (s *SQLite) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time) error {
+	if len(artifactIDs) == 0 {
+		return nil
+	}
+	args := []any{at.UTC().Format(time.RFC3339Nano), tenantID, layerID}
+	marks := make([]string, len(artifactIDs))
+	for i, id := range artifactIDs {
+		marks[i] = "?"
+		args = append(args, id)
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE manifests SET deleted_at = ?
+		WHERE tenant_id = ? AND layer = ? AND deleted_at IS NULL
+			AND artifact_id IN (`+strings.Join(marks, ", ")+`)`, args...)
+	return err
 }
 
 // PutManifestWithVectorPending commits the manifest and the §4.7.2 vector
@@ -442,7 +490,13 @@ func (s *SQLite) PutManifestWithVectorPending(ctx context.Context, rec ManifestR
 	if err != nil {
 		return err
 	}
+	revived := false
 	if n == 0 {
+		if revived, err = sqliteRevive(ctx, tx, rec, ingestedAt, resources); err != nil {
+			return err
+		}
+	}
+	if n == 0 && !revived {
 		var existing string
 		err = tx.QueryRowContext(ctx, `
 			SELECT content_hash FROM manifests

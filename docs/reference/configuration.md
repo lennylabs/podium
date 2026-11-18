@@ -361,7 +361,7 @@ These settings are environment variables only.
 |:--|:--|:--|:--|
 | `PODIUM_STORE_RETENTION_INTERVAL_SECONDS` | integer | `86400` | Interval between store retention sweeps. `0` disables the sweeps. |
 | `PODIUM_DEPRECATED_RETENTION_DAYS` | integer | `90` | Days after an artifact version is deprecated before a sweep purges it. |
-| `PODIUM_LAYER_RECOVERY_DAYS` | integer | `30` | Days an unregistered layer stays restorable with `podium layer restore` before a sweep purges it. |
+| `PODIUM_LAYER_RECOVERY_DAYS` | integer | `30` | Days an unregistered layer stays restorable with `podium layer restore`, and an artifact removed from its layer's source stays restorable by putting its folder back and reingesting, before a sweep purges it. |
 
 ## Quotas
 

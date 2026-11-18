@@ -556,8 +556,8 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			Precedence: order,
 			Visibility: effVis,
 		})
-		log.Printf("ingested layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d)",
-			l.ID, l.Path, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories))
+		log.Printf("ingested layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d, removed=%d)",
+			l.ID, l.Path, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories), len(res.Removed))
 	}
 	return layers, nil
 }
@@ -682,8 +682,8 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 			if err != nil {
 				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
 			}
-			log.Printf("ingested declared layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d)",
-				lc.ID, lc.LocalPath, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories))
+			log.Printf("ingested declared layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d, removed=%d)",
+				lc.ID, lc.LocalPath, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories), len(res.Removed))
 		case "git":
 			// Spec: §7.3.1 (Declared repository credentials). A declared repo
 			// may carry a URL credential, the seed joins declared keys into

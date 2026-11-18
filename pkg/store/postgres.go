@@ -762,6 +762,9 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	if n > 0 {
 		return nil // inserted these bytes
 	}
+	if revived, err := postgresRevive(ctx, conn, rec, ingestedAt, resources); err != nil || revived {
+		return err
+	}
 	// The row already existed (a prior ingest, or the winner of a
 	// concurrent race). Read the stored hash back to classify; immutable
 	// rows are never deleted, so the SELECT always finds it.
@@ -777,6 +780,56 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		return ErrImmutableViolation
 	}
 	return nil // idempotent — same hash
+}
+
+// postgresRevive restores a tombstoned row of rec's (artifact_id, version)
+// that carries rec's content hash and was contributed by rec's layer,
+// rewriting it as rec states it, and reports whether it did. A live row or a different hash is left for the caller to
+// classify.
+//
+// Spec: §7.3.1 (Removed artifacts)
+func postgresRevive(ctx context.Context, ex execContexter, rec ManifestRecord, ingestedAt time.Time, resources []byte) (bool, error) {
+	res, err := ex.ExecContext(ctx, `
+		UPDATE manifests SET
+			type = $1, description = $2, tags = $3, sensitivity = $4, layer = $5, deprecated = $6,
+			ingested_at = $7, frontmatter = $8, body = $9, skill_raw = $10, signature = $11,
+			search_visibility = $12, resources = $13, deprecated_at = $14, deleted_at = NULL
+		WHERE tenant_id = $15 AND artifact_id = $16 AND version = $17
+			AND content_hash = $18 AND layer = $5 AND deleted_at IS NOT NULL`,
+		rec.Type, rec.Description, strings.Join(rec.Tags, "\n"), rec.Sensitivity, rec.Layer,
+		rec.Deprecated, ingestedAt.UTC(),
+		rec.Frontmatter, rec.Body, rec.SkillRaw, rec.Signature, rec.SearchVisibility, resources,
+		nullTimePG(rec.DeprecatedAt),
+		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+// SoftDeleteArtifacts tombstones the live rows layerID contributed for each
+// of artifactIDs (§7.3.1 removed artifacts).
+func (p *Postgres) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time) error {
+	if len(artifactIDs) == 0 {
+		return nil
+	}
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	args := []any{at.UTC(), tenantID, layerID}
+	marks := make([]string, len(artifactIDs))
+	for i, id := range artifactIDs {
+		args = append(args, id)
+		marks[i] = fmt.Sprintf("$%d", len(args))
+	}
+	_, err = conn.ExecContext(ctx, `
+		UPDATE manifests SET deleted_at = $1
+		WHERE tenant_id = $2 AND layer = $3 AND deleted_at IS NULL
+			AND artifact_id IN (`+strings.Join(marks, ", ")+`)`, args...)
+	return err
 }
 
 // PutManifestWithVectorPending commits the manifest and the §4.7.2 vector
@@ -829,7 +882,13 @@ func (p *Postgres) PutManifestWithVectorPending(ctx context.Context, rec Manifes
 	if err != nil {
 		return err
 	}
+	revived := false
 	if n == 0 {
+		if revived, err = postgresRevive(ctx, tx, rec, ingestedAt, resources); err != nil {
+			return err
+		}
+	}
+	if n == 0 && !revived {
 		var existing string
 		err = tx.QueryRowContext(ctx, `
 			SELECT content_hash FROM manifests

@@ -13918,3 +13918,62 @@ rm -rf "$WORK"
 ```
 
 ---
+
+## S120: Deleting an artifact's folder soft-deletes it, and restoring the folder brings it back
+
+**Goal.** Validate that a reingest after an artifact's folder is deleted removes the artifact from every read path and reports it, that an unreachable source removes nothing, and that restoring the folder within the recovery window serves the artifact again.
+
+**Covers.** The §7.3.1 removed-artifact ingest case and the §8.4 retention row.
+
+**Why by hand.** The suite drives the case through the pipeline and the CLI. This scenario reads the registry's answers to the read paths a consumer uses, a load, a search, and the layer's reingest report, against a local folder an operator edits.
+
+**Prerequisites.** `jq` and `curl`. The scenario binds 127.0.0.1:8185.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above. Serve a layer holding two artifacts.
+
+   ```bash
+   mkdir -p "$WORK/layer/ops/gone" "$WORK/layer/ops/kept"
+   printf -- '---\ntype: agent\nversion: 1.0.0\ndescription: Runbook for restarting the ingest worker.\n---\n\nBody.\n' > "$WORK/layer/ops/gone/ARTIFACT.md"
+   printf -- '---\ntype: agent\nversion: 1.0.0\ndescription: Checklist for the weekly on-call handover.\n---\n\nBody.\n' > "$WORK/layer/ops/kept/ARTIFACT.md"
+   podium serve --standalone --no-embeddings --bind 127.0.0.1:8185 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   server_alive "$SRV" "$WORK/srv.log"
+   U=http://127.0.0.1:8185
+   podium layer register --registry "$U" --id ops --local "$WORK/layer" > /dev/null
+   podium layer reingest --registry "$U" ops
+   ```
+
+   **Expect.** The reingest prints an `artifact:` line for `ops/gone@1.0.0` and one for `ops/kept@1.0.0`.
+
+2. Delete the `ops/gone` folder, reingest, and read the artifact through a load and a search.
+
+   ```bash
+   mv "$WORK/layer/ops/gone" "$WORK/gone.saved"
+   podium layer reingest --registry "$U" ops; echo "exit=$?"
+   curl -s "$U/v1/load_artifact?id=ops/gone" | jq -r .code
+   curl -s "$U/v1/load_artifact?id=ops/gone&version=1.0.0" | jq -r .code
+   curl -s "$U/v1/search_artifacts?query=ingest+worker+runbook" | jq -c '[(.results // [])[].id]'
+   ```
+
+   **Expect.** The reingest prints the `ops/kept` line, then `removed: ops/gone`, then `exit=0`. Both loads print `registry.not_found`. The search prints a list without `ops/gone`. A load that still answers with a manifest is the defect.
+
+3. Restore the folder and reingest.
+
+   ```bash
+   mv "$WORK/gone.saved" "$WORK/layer/ops/gone"
+   podium layer reingest --registry "$U" ops; echo "exit=$?"
+   curl -s "$U/v1/load_artifact?id=ops/gone" | jq -r .version
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** The reingest prints an `artifact:` line for each artifact, no `removed:` line, and `exit=0`. The load prints `1.0.0`.
+
+**Cleanup.**
+
+```bash
+rm -rf "$WORK"
+```
+
+---

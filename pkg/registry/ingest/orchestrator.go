@@ -185,6 +185,7 @@ func SourceIngestWithOptions(
 			"conflicts":      len(res.Conflicts),
 			"lint_failures":  len(res.LintFailures),
 			"embed_failures": len(res.EmbeddingFailures),
+			"removed":        len(res.Removed),
 		})
 	}
 	if opts.AuditEmit != nil {

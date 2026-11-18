@@ -2381,7 +2381,18 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		"embedding_failures": embeddingFailures,
 		"artifacts":          arts,
 		"advisories":         advisories,
+		// Spec: §7.3.1 (Removed artifacts).
+		"removed": nonNilStrings(res.Removed),
 	})
+}
+
+// nonNilStrings returns in, or an empty slice for nil, so a list member
+// marshals as [] rather than null.
+func nonNilStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }
 
 // writeReingestError maps the ingest-pipeline sentinels to their §6.10
