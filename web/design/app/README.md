@@ -16,8 +16,8 @@ Do not copy the inline styles out of these files. They are inline because of how
 
 | File | What it holds |
 |:--|:--|
-| `Podium App.dc.html` | 40 screen mockups, grouped in numbered turns. Open it and read the board ids (14a, 17c, 21c…) — this README refers to them. |
-| `Podium UI Inventory.dc.html` | 64 components, every state, in both themes, plus a complete "what uses what" dependency table. Build from this file. |
+| `Podium App.dc.html` | 43 screen mockups, grouped in numbered turns. Open it and read the board ids (14a, 17c, 22a…) — this README refers to them. |
+| `Podium UI Inventory.dc.html` | 69 components, every state, in both themes, plus a complete "what uses what" dependency table. Build from this file. |
 | `support.js` | Runtime for the two HTML files. Not part of the design. |
 
 Open either file directly in a browser. No build step, no server.
@@ -89,8 +89,8 @@ Every screen except the sign-in dialog is the same shell.
 - **TopBar** — 52px tall, `surf`, 1px `bd` bottom border, 16px horizontal padding, 16px gap. Left to right: wordmark (24px mark + Anton 17–18px uppercase, `.03em`); registry hostname in 11px mono `faint` behind a 12px left padding and a 1px `b2` rule; flexible spacer; search trigger; 1px × 22px divider; Docs link (12.5px, `link`, external arrow, `white-space:nowrap`); divider; identity cluster.
   - The **search trigger** is 32px tall, `flex: 1 1 300px; max-width: 300px; min-width: 150px`, 1px `bd`, 8px radius, `surf2`, holding a magnifier, "Search artifacts", and a ⌘K key hint. It is a button that opens the palette, not an input.
   - **Identity** is a 24px circular `chip` avatar with mono initials, the email at 12.5px, and an `ADMIN` badge when applicable. Anonymous replaces the cluster with a primary "Sign in".
-- **Sidebar** — 268px fixed, `surf`, 1px `bd` right border, full height, flex column. Nav items (Browse / Search / Similarity / Layers) at 13.5px in 7px-radius rows, active row filled `chip` at weight 600. Similarity carries a right-aligned mono count of entries in `faint`. Then a `CATALOG` section label with the depth marker ("3 levels") right-aligned. Then the tree. A footer pinned to the bottom by `margin-top:auto` states "4 layers · 312 artifacts" and "ingested 6m ago" in 10.5px mono.
-  - Anonymous drops the **Layers** nav item (Similarity stays — anyone who can search can read the report) and swaps the footer for "Public catalog" / "Sign in to see more". It keeps the depth marker.
+- **Sidebar** — 268px fixed, `surf`, 1px `bd` right border, full height, flex column. Nav items (Browse / Search / Similarity / Usage / Layers) at 13.5px in 7px-radius rows, active row filled `chip` at weight 600. Similarity carries a right-aligned mono count of entries in `faint`. Then a `CATALOG` section label with the depth marker ("3 levels") right-aligned. Then the tree. A footer pinned to the bottom by `margin-top:auto` states "4 layers · 312 artifacts" and "ingested 6m ago" in 10.5px mono.
+  - Anonymous drops the **Layers** nav item (Similarity and Usage stay — every number covers only what the caller can see) and swaps the footer for "Public catalog" / "Sign in to see more". It keeps the depth marker.
 - **Main** — `display: grid; grid-template-columns: 268px 1fr`. Content padding is `26px 30px 40px`, max width 1120–1180px.
 - A **PageBanner**, when present, sits between the TopBar and the grid, full width.
 
@@ -112,6 +112,7 @@ Behaviour the API forces:
 - **Folded artifacts.** An entry with `FoldedFrom` is not a child of this domain. It goes in a separate dashed group titled "LIFTED FROM SPARSE SUBDOMAINS / Not direct children", each row carrying an `↑ FROM <subdomain>` badge.
 - **Rendering note.** When the server trimmed the listing, show both a `listing trimmed` pill among the header badges and a line at the end of the list: "4 of 21 artifacts shown." with a "Load the rest" button. It must read as neither content nor error.
 - **At scale (15a).** Past roughly twenty subdomains, switch to compact count tiles in a 6-column grid with a filter field, a grid/list toggle, and a "Show all 24 subdomains" control. Artifacts become a sortable DataTable with type filters and a curated section header; descriptions drop to one clipped line.
+- **Usage on each row.** The type label and version sit beside the artifact name. A `30 DAYS` line — loads · syncs · search hits — follows the description, filled in lazily from one batched `POST /v1/usage` for the visible rows (§10). The dense table (15a) carries Loads and Syncs columns instead of the line.
 - **Anonymous (14f).** A neutral `PUBLIC VIEW` PageBanner. The layer panel is hidden from the nav. Nothing states or implies that hidden artifacts exist.
 
 ### 2. Search — 14b, 20b
@@ -123,6 +124,7 @@ A 46px search field with a blinking accent caret, then a filter row: active filt
 - The match count is taken **before** truncation, so N-of-M is normal, not an error. Offer the §5 recovery path: narrow with filters, drill into a subdomain, or run a more specific query.
 - **Relevance** renders as four bars, not a number. A vector-only match returns score 0 — render **no bars at all** and put a "matched by meaning" tag in the metadata row. The bar column keeps its width so rows stay aligned.
 - **Sensitivity** is an outlined badge in the metadata row, the same weight as type and version. It is informational, never an alert, and is absent on unclassified artifacts.
+- **Usage** — a `30 DAYS` line under the tags, above a dashed rule: loads · syncs · search hits, from one batched `POST /v1/usage` for the visible page. Placeholders while it loads; left out if it fails (§10).
 
 ### 3. Artifact viewer — 14c, 15b, 15c, 20c, 20d, 20e, 20f, 21d
 
@@ -136,7 +138,8 @@ Header is breadcrumb, h1, type and version badges, description. Then tabs: **Ren
 - **Resources (20f)** — a table of file, format, size, delivery, and a Download action on every row. Inline and fetched files are **one list** distinguished by a `delivery` column, not two lists. No previews: every file downloads, and a "Download all ↓ 168 MB" control sits above the table. The selected row is tinted `wash` with an inset accent bar and drives a SELECTED detail card below it.
 - **Body fetched from object storage (20d/20e)** — a large manifest arrives as a presigned URL. While fetching, show skeleton lines and "Fetching the artifact."; the rail is already populated because metadata came with the registry response. On failure, an InlineError with Retry sits **in the body area only** — the rest of the page stays usable.
 - **Rail** — PROVENANCE (layer, visibility, ingest ref, content hash), FRONTMATTER as a property table, RELATIONS (extends / extended by, fetched on a second request via `handleDependents`), RESOURCES split into inline and fetched-on-demand. Each section needs an absent state; use the inline EmptyState ("Nothing extends this artifact").
-- **Similarity in the rail** — a SIMILARITY section directly after PROVENANCE on every tab: how many artifacts overlap and the strongest similarity, how many share wording, whether the description is long enough, and a link to Similarity analysis. Absent state: "No overlapping artifacts".
+- **Usage in the rail** — a USAGE section directly after PROVENANCE on every tab: 30 daily load bars (today in accent), loads, syncs, search hits, last loaded, last synced, and an "Open in Usage" link. It loads on its own request after the page. No activity reads "No loads, syncs, or search hits in the last 30 days." — also what a hidden or unknown artifact returns. If the request fails the section is not rendered.
+- **Similarity in the rail** — a SIMILARITY section after USAGE on every tab: how many artifacts overlap and the strongest similarity, how many share wording, whether the description is long enough, and a link to Similarity analysis. Absent state: "No overlapping artifacts".
 - **Versions.** `load_artifact` defaults to latest but takes any version. The picker sits in the header, and viewing an older version puts an accent notice across the page with a "Go to v2.3.0" link.
 
 ### 4. Layer panel — 14d, 14e, 17f, 17g
@@ -207,6 +210,20 @@ Backed by `GET /v1/overlap?threshold={0.5–1.0}&artifact={id}`. Same authentica
 - **Threshold.** Applied at read time, filters `lint.semantic_overlap` only, so word-overlap entries show at any setting. The slider shows the value as an `≥ 0.85` tag; default comes from the server.
 - **States (21e).** No clusters at the threshold; nothing overlaps on the tab (a hidden or unknown id returns an empty 200 and **must render identically**); a thin description only. When `semantic_overlap.state` is `off`, hide the slider and the Similarity column without comment.
 
+### 10. Usage — 22a, 22b, 22c
+
+Backed by `GET /v1/usage` and `POST /v1/usage` (same parameters; the UI uses POST for artifact lists). Window: `days=N`, or `from`/`to` (default the last 30 days); `layers` (max 100), `artifacts` (max 500); `granularity` none|day|week|month, which adds a `series` that always sums to the totals. Three levels come back — `totals`, `layers`, `artifacts` — each with `loads`, `syncs`, `search_hits` and breakdowns `by_client` and `by_harness`; artifacts also carry `type`, `layer`, `last_loaded`, `last_synced`. Every number covers only layers the caller can see, and a hidden or unknown layer or artifact answers like one with no activity. Both methods are reads, so a read-only registry still serves them. Bad parameters return 400 `registry.invalid_argument`.
+
+What counts: a **load** is a successful `load_artifact` (each item of a batch) from an agent, SDK, or CLI; a **sync** is the same call from `podium sync`; a **search hit** is one per artifact in the first 10 results of a search with a query. Counts are per UTC day.
+
+- **Usage page (22a).** Top-level page from the Usage nav item. Header: title, a `LAST 30 DAYS` badge, and a 7d / 30d / 90d / Custom… Segmented. Then:
+  - Two **StatTiles**: *Artifacts loaded* and *Artifacts synced*, each with its total and a daily sparkline (request `granularity=day`). Search hits has no tile.
+  - One card with two **BreakdownBars**: *Loads/Syncs by client* (mcp, sdk, cli, sync, unknown) and *Loads/Syncs by harness*. A request without the `X-Podium-Client` header is recorded as `none` — **show it as "unknown"**.
+  - **By layer** — a Disclosure, **collapsed by default**, summarising the layer count and the leader. Expanded (22b): a table of layer, **ShareBar** ("Share of loads/syncs", the largest in accent), loads, syncs, search hits.
+  - **By artifact** — expanded by default. Filter by artifact id, Type and Layer menus, a ResultCount, and a DataTable sortable on Loads (default, descending), Syncs, Search hits, and Last loaded. The Loads cell carries a small bar relative to the top row. Artifact ids link to the artifact page.
+- **Elsewhere.** Search results (14b, 20b), the catalog explorer (14a, 20a, 15a) and the artifact rail (14c, 15b, 15c, 20c–20f, 21d) show per-artifact usage for the last 30 days — see §1–§3. Lists send **one** `POST /v1/usage` with the visible artifact ids (≤ 500) after the page renders.
+- **States (22c).** Loading shows placeholders in the usage slots only. No activity has its own copy. **A failed usage request is not an error state**: the rail section and the list lines are simply left out — no message, no retry.
+
 ---
 
 ## Interactions
@@ -255,6 +272,7 @@ Rules the set depends on:
 - Nothing fetches. Components take data as props; a screen owns the request.
 - Absent is a designed state, not blank space — description, keywords, version, score, sensitivity, relations, resources.
 - Two scores, two marks. Similarity and word overlap each have their own color and number format (ScoreBar), and no list ranks one against the other.
+- Usage is extra, never in the way. It arrives from its own request after the page; placeholders while it loads, left out without an error if it fails.
 
 ## Assets
 
@@ -264,4 +282,4 @@ Fonts load from Google Fonts: Space Grotesk 400–700, JetBrains Mono 400–700,
 
 ## Not yet designed
 
-Named so they are not mistaken for oversights: the update-layer form; empty states for an empty domain, a search with no results, a registry with no layers, and an empty restore list; not-found and forbidden pages (the ErrorPage component exists, the screens do not); loading states for the browser, search, and layer list; the non-admin layer panel; the standalone deployment with no identity provider; browse-mode search with filters and no query; a surface over `GET /v1/scope/preview`; loading and error states for the overlap read, and any responsive behaviour below 1440px.
+Named so they are not mistaken for oversights: the update-layer form; empty states for an empty domain, a search with no results, a registry with no layers, and an empty restore list; not-found and forbidden pages (the ErrorPage component exists, the screens do not); loading states for the browser, search, and layer list; the non-admin layer panel; the standalone deployment with no identity provider; browse-mode search with filters and no query; a surface over `GET /v1/scope/preview`; loading and error states for the overlap read, the Usage custom date range picker and its dark theme, and any responsive behaviour below 1440px.

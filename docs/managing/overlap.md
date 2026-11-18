@@ -88,7 +88,7 @@ A `computed` below `total` means some artifacts are not computed yet, or their l
 
 ### Reading the report in the web UI
 
-A registry started with `--web-ui` shows the report on the Similarity page, which the sidebar lists for every caller who can search, an anonymous caller included. The sidebar row states how many artifacts have overlap at the registry's threshold.
+A registry started with `--web-ui` shows the report on the Similarity page, which the sidebar lists for every caller who can search, an anonymous caller included. The sidebar row states how many artifacts the page lists: at the registry's threshold until the reader moves the page's threshold control, and at the chosen threshold after, including after the reader leaves the page.
 
 - The Similarity page lists each artifact with overlap once, with its `lint.semantic_overlap` and `lint.colliding_descriptions` diagnostics combined, and the strongest score of each kind beside it. Selecting an artifact shows its description, the registry's messages verbatim, and a table of the artifacts it overlaps. The page does not list `lint.thin_description`.
 - The artifact viewer carries a Similarity tab that reads the report for the artifact on screen. The tab's count is the number of artifacts it overlaps. Selecting a row in its table sets the two descriptions side by side. The tab also states whether the description is long enough, from `lint.thin_description`.

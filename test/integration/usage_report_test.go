@@ -160,6 +160,8 @@ func TestUsageReport_HTTPBatchAndErrors(t *testing.T) {
 		{http.MethodGet, "/v1/usage?cursor=!!", "", http.StatusBadRequest},
 		{http.MethodPost, "/v1/usage", `{"limit":0}`, http.StatusBadRequest},
 		{http.MethodPost, "/v1/usage", `{"cursor":"!!"}`, http.StatusBadRequest},
+		{http.MethodGet, "/v1/usage?sort=name", "", http.StatusBadRequest},
+		{http.MethodPost, "/v1/usage", `{"order":"up"}`, http.StatusBadRequest},
 		{http.MethodPut, "/v1/usage", "", http.StatusMethodNotAllowed},
 	} {
 		st, b := usageCall(t, h, c.method, c.path, c.body, "alice", "", "")
@@ -270,5 +272,67 @@ func TestUsageReport_HTTPPages(t *testing.T) {
 	second := read(http.MethodPost, "/v1/usage", `{"limit":1,"cursor":"`+*first.NextCursor+`"}`)
 	if len(second.Artifacts) != 1 || second.NextCursor != nil || second.Artifacts[0].ArtifactID == first.Artifacts[0].ArtifactID {
 		t.Errorf("second page: %+v after %+v", second, first)
+	}
+}
+
+// Spec: §8.7 — GET with repeated type parameters and POST with a types member
+// restrict the artifact list the same way, and an unknown type lists nothing.
+func TestUsageReport_HTTPTypeFilter(t *testing.T) {
+	t.Parallel()
+	h, _ := usageHarness(t)
+	_, get := usageCall(t, h, http.MethodGet, "/v1/usage?type=skill&type=agent", "", "alice", "", "")
+	_, post := usageCall(t, h, http.MethodPost, "/v1/usage", `{"types":["skill","agent"]}`, "alice", "", "")
+	if get != post {
+		t.Errorf("GET and POST type filters differ:\nGET  %s\nPOST %s", get, post)
+	}
+	if rep := decodeUsage(t, get); len(rep.Artifacts) == 0 {
+		t.Errorf("type=skill&type=agent lists no artifact: %s", get)
+	}
+	if _, none := usageCall(t, h, http.MethodGet, "/v1/usage?type=no-such-type", "", "alice", "", ""); len(decodeUsage(t, none).Artifacts) != 0 {
+		t.Errorf("an unknown type lists artifacts: %s", none)
+	}
+}
+
+// Spec: §8.7 — GET and POST read query, sort, and order the same way.
+func TestUsageReport_HTTPSortAndQuery(t *testing.T) {
+	t.Parallel()
+	h, _ := usageHarness(t)
+	_, get := usageCall(t, h, http.MethodGet, "/v1/usage?query=FIN/&sort=last_loaded&order=asc", "", "alice", "", "")
+	_, post := usageCall(t, h, http.MethodPost, "/v1/usage", `{"query":"FIN/","sort":"last_loaded","order":"asc"}`, "alice", "", "")
+	if get != post || len(decodeUsage(t, get).Artifacts) == 0 {
+		t.Errorf("GET and POST sort and query differ or list nothing:\nGET  %s\nPOST %s", get, post)
+	}
+	if _, none := usageCall(t, h, http.MethodGet, "/v1/usage?query=no-such-id", "", "alice", "", ""); len(decodeUsage(t, none).Artifacts) != 0 {
+		t.Errorf("a query no ID contains lists artifacts: %s", none)
+	}
+}
+
+// Spec: §13.10, §8.7 — the usage surface's server-driven Read cell. The
+// batched read a list issues names the artifacts on screen, and the report
+// answers an artifact the caller cannot see exactly as one that does not
+// exist, so the usage line and the rail section render one state for both and
+// imply nothing about a hidden artifact; a caller who can see it receives its
+// counts.
+func TestWebUIUsage_HiddenArtifactReadsAsUnknown(t *testing.T) {
+	t.Parallel()
+	h, counter := usageHarness(t)
+	if st, body := usageCall(t, h, http.MethodGet, "/v1/load_artifact?id=fin/payroll", "", "alice", "eng", "kind=mcp&name=podium-mcp"); st != http.StatusOK {
+		t.Fatalf("load fin/payroll as eng: %d %s", st, body)
+	}
+	if err := counter.Flush(context.Background(), h.st); err != nil {
+		t.Fatal(err)
+	}
+	_, hidden := usageCall(t, h, http.MethodPost, "/v1/usage", `{"days":30,"artifacts":["fin/payroll"],"granularity":"day","limit":1}`, "alice", "", "")
+	_, unknown := usageCall(t, h, http.MethodPost, "/v1/usage", `{"days":30,"artifacts":["fin/nope"],"granularity":"day","limit":1}`, "alice", "", "")
+	if hidden != unknown {
+		t.Errorf("a hidden artifact answers differently from an unknown one:\nhidden  %s\nunknown %s", hidden, unknown)
+	}
+	_, listed := usageCall(t, h, http.MethodPost, "/v1/usage", `{"days":30,"artifacts":["fin/close","fin/payroll"],"limit":200}`, "alice", "", "")
+	if strings.Contains(listed, "fin/payroll") || !strings.Contains(listed, "fin/close") {
+		t.Errorf("the batched read for a caller outside eng: %s", listed)
+	}
+	_, seen := usageCall(t, h, http.MethodPost, "/v1/usage", `{"days":30,"artifacts":["fin/payroll"],"limit":1}`, "alice", "eng", "")
+	if rep := decodeUsage(t, seen); len(rep.Artifacts) != 1 || rep.Artifacts[0].Loads != 1 {
+		t.Errorf("eng's read of fin/payroll: %s", seen)
 	}
 }

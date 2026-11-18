@@ -18,6 +18,7 @@ import {
 } from '../domain';
 import { domainHref, domainTitle, searchHref } from '../route';
 import { useAsync, useErrorReport } from '../useAsync';
+import { useArtifactUsage } from '../usage';
 
 // The browser lists the immediate children and follows a link for the rest,
 // and it reads the second returned level for the child's own subdomain count
@@ -42,6 +43,10 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
   // page serves both the header count and the at-scale tile counts.
   const catalog = useAsync(() => catalogArtifactIDs(path), [path]);
   useErrorReport(domain.error, onError);
+  // The listed artifacts' last 30 days, read in one request once the domain
+  // read answered, so the rows render first and their usage lines fill in
+  // after (§13.10).
+  const usage = useArtifactUsage(domain.loading || domain.value === null ? [] : domain.value.notable.map((a) => a.id));
 
   if (domain.loading) {
     return <Loading label="Loading the domain." />;
@@ -251,7 +256,7 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
           ) : (
             <ul className="artifact-list">
               {direct.map((artifact) => (
-                <ArtifactRow key={artifact.id} artifact={artifact} />
+                <ArtifactRow key={artifact.id} artifact={artifact} usage={usage(artifact.id)} />
               ))}
               {tail}
             </ul>
@@ -274,7 +279,7 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
           </div>
           <ul className="artifact-list">
             {folded.map((artifact) => (
-              <ArtifactRow key={artifact.id} artifact={artifact} />
+              <ArtifactRow key={artifact.id} artifact={artifact} usage={usage(artifact.id)} />
             ))}
           </ul>
         </section>

@@ -14,6 +14,7 @@ export const paths = {
   loadArtifact: '/v1/load_artifact',
   dependents: '/v1/dependents',
   overlap: '/v1/overlap',
+  usage: '/v1/usage',
   layers: '/v1/layers',
   quota: '/v1/quota',
 } as const;
@@ -549,6 +550,103 @@ export async function overlapReport(params: OverlapQuery = {}): Promise<OverlapR
     semantic_overlap: body.semantic_overlap ?? { state: 'off', threshold: null, model: null, computed: null, total: null },
     diagnostics: body.diagnostics ?? [],
     counts: body.counts ?? { error: 0, warning: 0, info: 0 },
+  };
+}
+
+/** UsageCounts is the three §8.7 counters. */
+export interface UsageCounts {
+  loads: number;
+  syncs: number;
+  search_hits: number;
+}
+
+/** UsagePeriod is one period of a series: the counts of the UTC days from
+ * start to end, both included. */
+export interface UsagePeriod extends UsageCounts {
+  start: string;
+  end: string;
+}
+
+/** UsageTotals is a total with its breakdowns by client kind and by harness,
+ * which map each name with a non-zero count to its counts, and the series a
+ * granularity other than none adds. */
+export interface UsageTotals extends UsageCounts {
+  by_client: Record<string, UsageCounts>;
+  by_harness: Record<string, UsageCounts>;
+  series?: UsagePeriod[];
+}
+
+export interface UsageLayer extends UsageTotals {
+  layer: string;
+}
+
+export interface UsageArtifact extends UsageTotals {
+  artifact_id: string;
+  type: string;
+  layer: string;
+  last_loaded: string | null;
+  last_synced: string | null;
+}
+
+/** UsageReport is the /v1/usage response. granularity is the one the series
+ * use, which a long window makes coarser than the one requested, and
+ * artifacts is one page of a list artifact_count long that next_cursor
+ * continues. */
+export interface UsageReport {
+  days: number;
+  from: string;
+  to: string;
+  granularity: string;
+  totals: UsageTotals;
+  layers: UsageLayer[];
+  artifacts: UsageArtifact[];
+  artifact_count: number;
+  next_cursor: string | null;
+}
+
+/** UsageQuery holds the report's parameters, every one optional. */
+export interface UsageQuery {
+  days?: number;
+  from?: string;
+  to?: string;
+  granularity?: 'none' | 'day' | 'week' | 'month';
+  layers?: string[];
+  artifacts?: string[];
+  types?: string[];
+  query?: string;
+  sort?: 'loads' | 'syncs' | 'search_hits' | 'last_loaded';
+  order?: 'desc' | 'asc';
+  limit?: number;
+  cursor?: string;
+}
+
+/** usageReport reads the §8.7 usage report with the caller's identity, as an
+ * SDK would. It sends the POST form, which takes the same parameters as the
+ * GET form in a body, because a list page names up to 500 artifacts and a
+ * query string carrying them overruns what a gateway accepts. The POST is a
+ * read, and a same-origin request carries the evidence the browser-origin
+ * gate admits. A hidden or unknown artifact is answered as one with no counts,
+ * and the client passes that answer on unchanged.
+ *
+ * Spec: §8.7, §13.10 */
+export async function usageReport(params: UsageQuery = {}): Promise<UsageReport> {
+  const body = await request<Partial<UsageReport>>(paths.usage, {
+    ...write,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const totals = body.totals ?? { loads: 0, syncs: 0, search_hits: 0, by_client: {}, by_harness: {} };
+  return {
+    days: body.days ?? 0,
+    from: body.from ?? '',
+    to: body.to ?? '',
+    granularity: body.granularity ?? 'none',
+    totals: { ...totals, by_client: totals.by_client ?? {}, by_harness: totals.by_harness ?? {} },
+    layers: body.layers ?? [],
+    artifacts: body.artifacts ?? [],
+    artifact_count: body.artifact_count ?? 0,
+    next_cursor: body.next_cursor ?? null,
   };
 }
 

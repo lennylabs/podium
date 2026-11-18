@@ -125,6 +125,14 @@ func TestUsageReport_BinaryCountsReportAndCLI(t *testing.T) {
 	if _, body := getRaw(t, srv.BaseURL+"/v1/usage?days=1100&granularity=day"); json.Unmarshal(body, &served) != nil || served.Granularity != "month" {
 		t.Errorf("a 1,100-day daily request should be served by month: %.200s", body)
 	}
+	sorted := runPodium(t, "", srv.cliEnv(), "usage", "--registry", srv.BaseURL, "--sort", "syncs", "--query", "FARE")
+	if sorted.Exit != 0 || !strings.Contains(sorted.Stdout, "ops/farewell") || strings.Contains(sorted.Stdout, "ops/greet") {
+		t.Errorf("podium usage --sort syncs --query FARE exit=%d\n%s%s", sorted.Exit, sorted.Stdout, sorted.Stderr)
+	}
+	typed := runPodium(t, "", srv.cliEnv(), "usage", "--registry", srv.BaseURL, "--json", "--type", "agent")
+	if typed.Exit != 0 || !strings.Contains(typed.Stdout, `"artifact_count": 0`) {
+		t.Errorf("podium usage --type agent over two skills exit=%d\n%s%s", typed.Exit, typed.Stdout, typed.Stderr)
+	}
 	first := runPodium(t, "", srv.cliEnv(), "usage", "--registry", srv.BaseURL, "--limit", "1")
 	_, cursor, more := strings.Cut(first.Stdout, "1 of 2 artifacts listed; read the next ones with --cursor ")
 	cursor = strings.TrimSpace(cursor)
@@ -138,7 +146,7 @@ func TestUsageReport_BinaryCountsReportAndCLI(t *testing.T) {
 	if res := runPodium(t, "", srv.cliEnv(), "usage", "--registry", srv.BaseURL, "--from", "2000-01-01"); res.Exit != 1 || !strings.Contains(res.Stderr, "registry.invalid_argument") {
 		t.Errorf("podium usage --from outside retention exit=%d stderr=%s, want 1 with the envelope", res.Exit, res.Stderr)
 	}
-	for _, args := range [][]string{{"--days", "0"}, {"--days", "3", "--from", "2026-11-01"}, {"--granularity", "year"}, {"--limit", "0"}} {
+	for _, args := range [][]string{{"--days", "0"}, {"--days", "3", "--from", "2026-11-01"}, {"--granularity", "year"}, {"--limit", "0"}, {"--sort", "name"}} {
 		if res := runPodium(t, "", srv.cliEnv(), append([]string{"usage", "--registry", srv.BaseURL}, args...)...); res.Exit != 2 {
 			t.Errorf("podium usage %v exit=%d, want 2", args, res.Exit)
 		}

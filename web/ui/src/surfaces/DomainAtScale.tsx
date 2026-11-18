@@ -42,7 +42,7 @@ const subdomainViews = [
  * row with. It is a row rather than a bare input, so the magnifier sits inside
  * the border the way it does in the top bar's search trigger and on the search
  * surface, which is what marks the control as a filter (§13.10). */
-function FilterField({
+export function FilterField({
   label,
   value,
   onTyped,
