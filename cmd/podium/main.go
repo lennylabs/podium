@@ -57,6 +57,8 @@ func main() {
 		os.Exit(searchCmd(os.Args[2:]))
 	case "overlap":
 		os.Exit(overlapCmd(os.Args[2:]))
+	case "usage":
+		os.Exit(usageCmd(os.Args[2:]))
 	case "domain":
 		os.Exit(domainCmd(os.Args[2:]))
 	case "artifact":
@@ -196,6 +198,7 @@ Commands:
   lint                Validate manifests in a filesystem-source registry.
   search              Hybrid search over artifacts (registry HTTP API).
   overlap             Report description overlap across every layer you can see (registry HTTP API).
+  usage               Report artifact loads, syncs, and search hits per artifact, per layer, and for the catalog (registry HTTP API).
   domain show         Show a domain map.
   domain search       Hybrid search over domains.
   domain analyze      Print domain-discovery metrics and split/fold candidates for a subtree.
