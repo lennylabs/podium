@@ -169,6 +169,75 @@ func TestWebUI_ServedBundleReadsTheLayerRecordFields(t *testing.T) {
 	}
 }
 
+// similarityReportFields are the overlap-report members the similarity
+// surface reads: the semantic state and the threshold it applied, the
+// diagnostics with their artifact fields, code, and message, and each peer's
+// score and computed time. The registry answers the §7.3.1 report, so every
+// member is lower snake_case.
+var similarityReportFields = []string{
+	"semantic_overlap", "state", "threshold", "diagnostics", "artifact_id",
+	"description", "type", "layer", "code", "message", "peers", "similarity", "computed_at",
+}
+
+// similarityCodes are the diagnostic codes the similarity surface branches
+// on: the two overlap codes it combines into one entry and the
+// description-length code the viewer states apart.
+var similarityCodes = []string{"lint.semantic_overlap", "lint.colliding_descriptions", "lint.thin_description"}
+
+// Spec: §13.10, §7.3.1 — the served bundle reads the catalog overlap report
+// under the member names and the diagnostic codes the running binary
+// answers. A member or a code read under any other name yields nothing on
+// every response, which renders as a catalog with no overlap rather than as
+// a failure, so the correspondence is pinned against a report the binary
+// returns.
+func TestWebUI_ServedBundleReadsTheOverlapReport(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"fin/pay/ARTIFACT.md":    smallteamLowArtifact("pay an approved vendor invoice from the payables queue"),
+		"fin/submit/ARTIFACT.md": smallteamLowArtifact("submit an approved vendor invoice from the payables queue"),
+		"fin/close/ARTIFACT.md":  smallteamLowArtifact("close"),
+	})
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_WEB_UI=true"},
+		"serve", "--standalone", "--web-ui", "--layer-path", reg)
+
+	st, body := getRaw(t, srv.BaseURL+"/v1/overlap")
+	if st != 200 {
+		t.Fatalf("GET /v1/overlap = %d, want 200\nbody: %s\nlog:\n%s", st, body, srv.log())
+	}
+	wire := string(body)
+	for _, code := range []string{"lint.colliding_descriptions", "lint.thin_description"} {
+		if !strings.Contains(wire, `"`+code+`"`) {
+			t.Errorf("the report carries no %s diagnostic to read the members off\nbody: %s", code, body)
+		}
+	}
+	// computed_at is carried by a semantic peer alone, and a registry with
+	// the check off answers none, so the wire half checks the rest.
+	for _, field := range similarityReportFields {
+		if field == "computed_at" {
+			continue
+		}
+		if !strings.Contains(wire, `"`+field+`"`) {
+			t.Errorf("the overlap report carries no %q member; the similarity surface reads one\nbody: %s", field, body)
+		}
+	}
+
+	st, index := getRaw(t, srv.BaseURL+"/app/")
+	if st != 200 {
+		t.Fatalf("GET /app/ status = %d, want 200\nlog:\n%s", st, srv.log())
+	}
+	scripts := strings.Join(bundleScripts(t, srv, string(index)), "\n")
+	for _, field := range similarityReportFields {
+		if !strings.Contains(scripts, `"`+field+`"`) && !strings.Contains(scripts, "."+field) {
+			t.Errorf("the served bundle references no %q overlap member; the surface reads it under some other name", field)
+		}
+	}
+	for _, code := range similarityCodes {
+		if !strings.Contains(scripts, code) {
+			t.Errorf("the served bundle references no %q; the surface branches on the code the registry writes", code)
+		}
+	}
+}
+
 // identityRefusalCodes are the §6.10 codes the identity middleware answers a
 // read with when it could not verify the caller
 // (pkg/registry/server/identity_verify.go). The page renders the refused arm
