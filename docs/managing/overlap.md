@@ -15,7 +15,7 @@ Two artifacts overlap when their descriptions claim the same situations or their
 | Check a layer's source with `podium lint` | Any user with a checkout of the source. |
 | Read the catalog overlap report with `podium overlap`, `GET /v1/overlap`, or the web UI's Similarity page | Any caller that can search the registry. The report names only artifacts the caller can see. |
 | Resolve an overlap by editing, deprecating, or suppressing | An author with write access to the layer's source repository. |
-| Recompute the semantic overlap records with `podium admin rebuild-overlap` | Per-tenant `admin` role. |
+| Recompute the semantic overlap records with `podium admin rebuild-overlap` | Per-tenant `admin` role. On a public-mode registry, the operator who holds `PODIUM_OPERATOR_TOKEN`. |
 | Turn on the semantic check and set its threshold and sweep interval | Operator, through environment variables on every registry replica. |
 
 ---

@@ -280,6 +280,21 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
+// Spec: §13.12 — a PODIUM_OPERATOR_TOKEN shorter than 32 characters fails
+// validation with config.invalid without echoing the value, and one of 32
+// characters passes.
+func TestConfigValidate_OperatorTokenLength(t *testing.T) {
+	t.Parallel()
+	err := (&Config{storeType: "sqlite", operatorToken: "short-secret"}).validate()
+	if err == nil || !strings.Contains(err.Error(), "config.invalid: PODIUM_OPERATOR_TOKEN must be at least 32 characters") ||
+		strings.Contains(err.Error(), "short-secret") {
+		t.Errorf("short token: err = %v", err)
+	}
+	if err := (&Config{storeType: "sqlite", operatorToken: strings.Repeat("k", 32)}).validate(); err != nil {
+		t.Errorf("32-character token: err = %v", err)
+	}
+}
+
 func TestModeBanner(t *testing.T) {
 	t.Parallel()
 	cases := map[string]*Config{

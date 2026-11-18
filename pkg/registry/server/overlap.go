@@ -60,13 +60,12 @@ func (s *Server) handleOverlapRebuild(w http.ResponseWriter, r *http.Request) {
 			"method not allowed: "+r.Method)
 		return
 	}
-	if !s.unauthenticatedReembed {
-		// An authorization the registry cannot evaluate denies rather than
-		// admits, as on the re-embed endpoint.
-		if err := s.requireAdmin(r); err != nil {
-			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
-			return
-		}
+	// Authorized as the re-embed endpoint is, including the operator token a
+	// public-mode registry requires; an authorization the registry cannot
+	// evaluate denies rather than admits.
+	if err := s.authorizeOperatorPass(r); err != nil {
+		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+		return
 	}
 	if rejectIfReadOnly(w, s.mode) {
 		return

@@ -1162,7 +1162,7 @@ podium admin reembed [--artifact <id> --version <semver>]
 | `--since <rfc3339>` | Re-embed only artifacts ingested at or after this RFC3339 timestamp. Scopes a tenant-wide pass. |
 | `--registry <url>` | Registry URL. Required; defaults to `PODIUM_REGISTRY`. |
 
-With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` and `--since` compose to scope it. When `PODIUM_LINT_SEMANTIC_OVERLAP` is `on`, a full pass also recomputes the semantic overlap records of every artifact it re-embeds. The command exits 1 and prints the error envelope on standard error when the request fails. A registry with no vector search configured answers `404 registry.reembed_unavailable` with `retryable: false`, because the request cannot succeed until the operator configures a vector backend and an embedding source.
+With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` and `--since` compose to scope it. When `PODIUM_LINT_SEMANTIC_OVERLAP` is `on`, a full pass also recomputes the semantic overlap records of every artifact it re-embeds. The command exits 1 and prints the error envelope on standard error when the request fails. A registry with no vector search configured answers `404 registry.reembed_unavailable` with `retryable: false`, because the request cannot succeed until the operator configures a vector backend and an embedding source. A registry in public mode admits the request only with its operator token: the command sends `PODIUM_OPERATOR_TOKEN` from its environment in the `X-Podium-Operator-Token` header, and the registry answers `403 auth.forbidden` when the variable is unset or holds another value.
 
 ### `podium admin rebuild-overlap`
 
@@ -1175,6 +1175,8 @@ podium admin rebuild-overlap --registry <url>
 | Flag | Effect |
 |:--|:--|
 | `--registry <url>` | Registry URL. Required; defaults to `PODIUM_REGISTRY`. |
+
+Against a registry in public mode, set `PODIUM_OPERATOR_TOKEN` to the registry's value. The command sends it as `podium admin reembed` does.
 
 The command calls `POST /v1/admin/overlap/rebuild`, which [Rebuild overlap records](http-api#rebuild-overlap-records) describes, and prints the two counts of the response:
 

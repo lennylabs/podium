@@ -48,6 +48,10 @@ type Server struct {
 	// endpoint, so a Server built without WithUnauthenticatedReembed fails
 	// closed.
 	unauthenticatedReembed bool
+	// operatorToken is PODIUM_OPERATOR_TOKEN, which admits a re-embed or
+	// overlap rebuild pass in public mode (§13.10). authorizeOperatorPass is
+	// its only reader.
+	operatorToken string
 	// usageRetentionDays is PODIUM_USAGE_RETENTION_DAYS, the largest §8.7
 	// usage report window. Zero takes DefaultUsageRetentionDays.
 	usageRetentionDays int
@@ -1016,22 +1020,20 @@ func (s *Server) handleDependents(w http.ResponseWriter, r *http.Request) {
 // (§4.7.2) and is a §13.2.1 write endpoint, so a caller without the role
 // is rejected with auth.forbidden and a read-only registry rejects the
 // request with registry.read_only. A deployment that authenticates no
-// caller sets WithUnauthenticatedReembed, which skips the role check.
+// caller sets WithUnauthenticatedReembed, which skips the role check, and a
+// public-mode registry requires the operator token instead (§13.10).
 func (s *Server) handleReembed(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
 			"method not allowed: "+r.Method)
 		return
 	}
-	if !s.unauthenticatedReembed {
-		// A store failure inside requireAdmin is reported as 403
-		// auth.forbidden, mirroring handleAdminGrants and
-		// handleAdminShowEffective: an authorization the registry cannot
-		// evaluate denies rather than admits.
-		if err := s.requireAdmin(r); err != nil {
-			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
-			return
-		}
+	// A store failure inside requireAdmin is reported as 403 auth.forbidden,
+	// mirroring handleAdminGrants and handleAdminShowEffective: an
+	// authorization the registry cannot evaluate denies rather than admits.
+	if err := s.authorizeOperatorPass(r); err != nil {
+		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+		return
 	}
 	if rejectIfReadOnly(w, s.mode) {
 		return

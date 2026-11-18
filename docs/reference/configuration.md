@@ -77,6 +77,7 @@ The layer list in `layers:` is copied into the metadata store at every start, as
 | `bind` | `PODIUM_BIND` | string | `127.0.0.1:8080` | Listen address. Flag `--bind`. |
 | `public_mode` | `PODIUM_PUBLIC_MODE` | boolean | `false` | Bypass authentication and the visibility model. It cannot be combined with an identity provider. Flag `--public-mode`. [Single node](../deployment/modes/single-node#public-mode) describes it. |
 | (none) | `PODIUM_ALLOW_PUBLIC_BIND` | boolean | `false` | Allow a non-loopback bind in public mode or under `trusted-headers`. Flag `--allow-public-bind`. |
+| (none) | `PODIUM_OPERATOR_TOKEN` | string | (unset) | Shared secret that admits a re-embed or overlap rebuild request on a registry in public mode, sent in the `X-Podium-Operator-Token` header. While it is unset, a public-mode registry refuses both endpoints with `403 auth.forbidden`. A value shorter than 32 characters refuses startup with `config.invalid`. It has no effect outside public mode. `podium admin reembed` and `podium admin rebuild-overlap` send it when it is set in their environment, and `podium config show` redacts it. |
 | (none) | `PODIUM_STANDALONE` | boolean | `false` | Set by `--standalone`. It counts as explicit configuration, so `--strict` does not refuse the start and no first-run notice is printed. |
 | (none) | `PODIUM_NO_AUTOSTANDALONE` | boolean | `false` | Refuse to start when no configuration is found, instead of entering the standalone configuration. Flag `--strict`. |
 
