@@ -127,3 +127,22 @@ func TestWhenToUse_ClaudeEmitterWritesItAndOtherAdaptersDoNot(t *testing.T) {
 		}
 	}
 }
+
+// Spec: §4.3.4, §6.7 — a SKILL.md the adapter cannot read as a frontmatter
+// mapping is written as it is: one with no frontmatter, one whose frontmatter
+// does not decode, one whose frontmatter decodes to something other than a
+// mapping, and an empty one.
+func TestWithClaudeWhenToUse_LeavesUnreadableFrontmatterAlone(t *testing.T) {
+	t.Parallel()
+	for name, skill := range map[string]string{
+		"no frontmatter":  "name: standup\nbody\n",
+		"does not decode": "---\nname: [standup\nmetadata:\n  when_to_use: At standup.\n---\nbody\n",
+		"scalar":          "---\njust a sentence\n---\nbody\n",
+		"empty":           "---\n---\nbody\n",
+	} {
+		src := Source{ArtifactID: "team/standup", ArtifactBytes: []byte(wtuSkillArtifact), SkillBytes: []byte(skill)}
+		if got := withClaudeWhenToUse([]byte(skill), src); string(got) != skill {
+			t.Errorf("%s: changed to %q", name, got)
+		}
+	}
+}
