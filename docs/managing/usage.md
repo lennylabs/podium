@@ -48,11 +48,12 @@ Counts are stored under the layer's ID. When an unregistered layer is purged at 
 podium usage --registry https://podium.acme.com
 ```
 
-Narrow it with a window, layers, and artifacts, and add a series for use over time:
+Narrow it with a window, layers, artifacts, and artifact types, and add a series for use over time:
 
 ```text
 podium usage --registry https://podium.acme.com --from 2026-09-01 --to 2026-11-30 --granularity month
 podium usage --registry https://podium.acme.com --layer team-finance --days 7 --granularity day
+podium usage --registry https://podium.acme.com --type agent --days 30
 podium usage --registry https://podium.acme.com --artifact finance/ap/pay-invoice --artifact finance/ap/submit-invoice --json
 ```
 

@@ -26,26 +26,39 @@ export interface OverlapRead {
   setThreshold: (value: number) => void;
 }
 
+/** ThresholdChoice holds the threshold a reader chose outside the hook, so
+ * a screen whose choice something else also reads keeps it where both can
+ * reach it. chosen is null until the reader moves the control. */
+export interface ThresholdChoice {
+  chosen: number | null;
+  setChosen: (value: number | null) => void;
+}
+
 /** useOverlapRead reads the §7.3.1 catalog overlap report, restricted to
  * `artifact` where one is named. The first read carries no threshold, so the
  * registry applies its configured one and the control starts there; a value
  * the reader chooses is sent on the re-read and changes which semantic peers
  * the report carries, and nothing else (§13.10). The re-read waits for the
  * control to rest, so a drag across the track costs one request rather than
- * one per step.
+ * one per step. A screen that passes `choice` keeps the reader's threshold
+ * there, which is how the similarity page shares it with the sidebar's count;
+ * a screen that passes none keeps it in the hook.
  *
  * Spec: §13.10, §7.3.1 */
-export function useOverlapRead(artifact?: string): OverlapRead {
-  const [chosen, setChosen] = useState<number | null>(null);
+export function useOverlapRead(artifact?: string, choice?: ThresholdChoice): OverlapRead {
+  const [ownChosen, setOwnChosen] = useState<number | null>(null);
+  const chosen = choice === undefined ? ownChosen : choice.chosen;
+  const setChosen = choice === undefined ? setOwnChosen : choice.setChosen;
   const [held, setHeld] = useState<{ artifact?: string; report: OverlapReport } | null>(null);
   const [readFor, setReadFor] = useState(artifact);
   if (readFor !== artifact) {
     // The viewer survives the route change from one artifact to the next, so
     // a threshold chosen on one artifact would otherwise be applied to the
     // next one's first read and its control would not start at the
-    // registry's threshold.
+    // registry's threshold. Only the hook's own choice is reset here: a
+    // shared choice belongs to a screen whose artifact does not change.
     setReadFor(artifact);
-    setChosen(null);
+    setOwnChosen(null);
   }
   // A reset is applied at once rather than after the pause, so the next
   // artifact's first read never carries the previous artifact's choice.

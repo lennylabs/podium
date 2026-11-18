@@ -83,8 +83,9 @@ func TestUsageCmd_PassesParameters(t *testing.T) {
 	}))
 	defer srv.Close()
 	code := usageCmd([]string{"--registry", srv.URL, "--from", "2026-11-01", "--to", "2026-11-18", "--granularity", "week",
-		"--layer", "team", "--artifact", "ops/greet", "--artifact", "ops/farewell", "--limit", "20", "--cursor", "abc"})
-	want := "artifact=ops%2Fgreet&artifact=ops%2Ffarewell&cursor=abc&from=2026-11-01&granularity=week&layer=team&limit=20&to=2026-11-18"
+		"--layer", "team", "--artifact", "ops/greet", "--artifact", "ops/farewell", "--limit", "20", "--cursor", "abc",
+		"--type", "skill", "--type", "agent"})
+	want := "artifact=ops%2Fgreet&artifact=ops%2Ffarewell&cursor=abc&from=2026-11-01&granularity=week&layer=team&limit=20&to=2026-11-18&type=skill&type=agent"
 	if code != 0 || got != want {
 		t.Errorf("exit %d query %q, want 0 and %q", code, got, want)
 	}

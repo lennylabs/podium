@@ -36,11 +36,17 @@ import { useOverlapRead } from './overlapread';
 export function SimilaritySurface({
   selected,
   onError,
+  threshold,
+  onThreshold,
 }: {
   selected: string;
   onError: (err: unknown) => void;
+  /** threshold is the threshold the reader chose, held by the shell so the
+   * sidebar's count reads at it; null until the reader moves the control. */
+  threshold: number | null;
+  onThreshold: (value: number | null) => void;
 }) {
-  const read = useOverlapRead();
+  const read = useOverlapRead(undefined, { chosen: threshold, setChosen: onThreshold });
   // The report is a catalog read taken with the caller's identity, so its
   // outcome goes to the shell, where the catalog-scope rule decides what an
   // identity refusal renders.

@@ -19,6 +19,7 @@ const UsageReportDefaultDays = 30
 const (
 	UsageMaxLayers    = 100
 	UsageMaxArtifacts = 500
+	UsageMaxTypes     = 20
 )
 
 // UsageQuery holds the §8.7 report's parameters. From and To are optional
@@ -26,7 +27,8 @@ const (
 // with From or To. Retention is the configured PODIUM_USAGE_RETENTION_DAYS,
 // which bounds the window. LayerIDs and ArtifactIDs, when non-empty, restrict
 // the report to the named layers and artifacts. Granularity is "", "none",
-// "day", "week", or "month"; "" is "none". Limit is the page size of the
+// "day", "week", or "month"; "" is "none". Types, when non-empty, restricts
+// the artifact list to artifacts of the named types. Limit is the page size of the
 // artifact list, 0 for the default, and Cursor an earlier response's
 // next_cursor.
 type UsageQuery struct {
@@ -37,6 +39,7 @@ type UsageQuery struct {
 	Retention   int
 	LayerIDs    []string
 	ArtifactIDs []string
+	Types       []string
 	Limit       int
 	Cursor      string
 }
@@ -136,8 +139,8 @@ func resolveUsageWindow(now time.Time, q UsageQuery) (usageWindow, error) {
 	if !validGranularity(q.Granularity) {
 		return usageWindow{}, fmt.Errorf("%w: granularity must be none, day, week, or month, got %q", ErrInvalidArgument, q.Granularity)
 	}
-	if len(q.LayerIDs) > UsageMaxLayers || len(q.ArtifactIDs) > UsageMaxArtifacts {
-		return usageWindow{}, fmt.Errorf("%w: at most %d layers and %d artifacts", ErrInvalidArgument, UsageMaxLayers, UsageMaxArtifacts)
+	if len(q.LayerIDs) > UsageMaxLayers || len(q.ArtifactIDs) > UsageMaxArtifacts || len(q.Types) > UsageMaxTypes {
+		return usageWindow{}, fmt.Errorf("%w: at most %d layers, %d artifacts, and %d types", ErrInvalidArgument, UsageMaxLayers, UsageMaxArtifacts, UsageMaxTypes)
 	}
 	today := now.UTC().Truncate(24 * time.Hour)
 	firstKept := today.AddDate(0, 0, 1-retention)
@@ -393,7 +396,7 @@ func buildUsageReport(w usageWindow, layers []string, served []store.ManifestRec
 	for _, l := range layers {
 		rep.Layers = append(rep.Layers, UsageLayer{Layer: l, UsageTotals: byLayer[l].result(w, q.Granularity)})
 	}
-	entries := usageEntries(served, byArtifact, q.ArtifactIDs)
+	entries := usageEntries(served, byArtifact, q.ArtifactIDs, q.Types)
 	rep.ArtifactCount = len(entries)
 	selected, next := page.slice(entries)
 	rep.NextCursor = next
@@ -413,16 +416,24 @@ func buildUsageReport(w usageWindow, layers []string, served []store.ManifestRec
 	return rep
 }
 
-// usageEntries returns the artifacts the list covers, the named ones when
-// the request names any, in the report's order.
-func usageEntries(served []store.ManifestRecord, byArtifact map[string]*usageAccumulator, namedIDs []string) []usageEntry {
+// usageEntries returns the artifacts the list covers, in the report's order:
+// the named ones when the request names any, of a named type when it names
+// types, and both conditions when it names both. A type that no artifact has,
+// including a removed one, matches nothing.
+//
+// Spec: §8.7
+func usageEntries(served []store.ManifestRecord, byArtifact map[string]*usageAccumulator, namedIDs, types []string) []usageEntry {
 	named := make(map[string]bool, len(namedIDs))
 	for _, id := range namedIDs {
 		named[id] = true
 	}
+	typed := make(map[string]bool, len(types))
+	for _, t := range types {
+		typed[t] = true
+	}
 	entries := make([]usageEntry, 0, len(served))
 	for _, m := range served {
-		if len(named) > 0 && !named[m.ArtifactID] {
+		if (len(named) > 0 && !named[m.ArtifactID]) || (len(typed) > 0 && !typed[m.Type]) {
 			continue
 		}
 		a := byArtifact[m.ArtifactID]

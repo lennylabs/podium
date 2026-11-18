@@ -50,14 +50,14 @@ type usageResponseJSON struct {
 // usageFlags holds the podium usage flags that become query parameters.
 type usageFlags struct {
 	from, to, days, granularity, limit, cursor string
-	layers, artifacts                          stringSliceFlag
+	layers, artifacts, types                   stringSliceFlag
 }
 
 // usageCmd calls the §8.7 usage report.
 //
 //	podium usage --registry <url> [--from <date>] [--to <date>] [--days <n>]
 //	             [--granularity none|day|week|month]
-//	             [--layer <id>]... [--artifact <id>]...
+//	             [--layer <id>]... [--artifact <id>]... [--type <type>]...
 //	             [--limit <n>] [--cursor <cursor>] [--json]
 //
 // Spec: §8.7
@@ -72,6 +72,7 @@ func usageCmd(args []string) int {
 	fs.StringVar(&f.granularity, "granularity", "", "series granularity: none, day, week, or month")
 	fs.Var(&f.layers, "layer", "restrict the report to a layer (repeatable)")
 	fs.Var(&f.artifacts, "artifact", "restrict the artifact list to an artifact (repeatable)")
+	fs.Var(&f.types, "type", "restrict the artifact list to an artifact type (repeatable)")
 	fs.StringVar(&f.limit, "limit", "", "most artifacts to list, 1 to 200 (default 50)")
 	fs.StringVar(&f.cursor, "cursor", "", "next_cursor value of an earlier report, to list the following artifacts")
 	asJSON := fs.Bool("json", false, "write the response object on standard output")
@@ -124,6 +125,7 @@ func (f usageFlags) query() (url.Values, error) {
 	setIf(q, "cursor", f.cursor)
 	q["layer"] = f.layers
 	q["artifact"] = f.artifacts
+	q["type"] = f.types
 	return q, nil
 }
 

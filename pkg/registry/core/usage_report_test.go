@@ -12,6 +12,7 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // seedUsage stores rows for the fixture: counts for both visible skills, for
@@ -208,6 +209,7 @@ func TestUsageReport_Parameters(t *testing.T) {
 		"too many artifacts": func(u *core.UsageQuery) { u.ArtifactIDs = many },
 		"too many layers":    func(u *core.UsageQuery) { u.LayerIDs = manyLayers },
 		"limit above 200":    func(u *core.UsageQuery) { u.Limit = 201 },
+		"too many types":     func(u *core.UsageQuery) { u.Types = make([]string, 21) },
 		"negative limit":     func(u *core.UsageQuery) { u.Limit = -1 },
 		"cursor not base64":  func(u *core.UsageQuery) { u.Cursor = "!!" },
 		"cursor not json":    func(u *core.UsageQuery) { u.Cursor = "bm90IGpzb24" },
@@ -419,5 +421,41 @@ func TestUsageReport_OrdersAndPagesBySearchHits(t *testing.T) {
 	}
 	if !reflect.DeepEqual(paged, want) {
 		t.Errorf("paged = %v, want %v", paged, want)
+	}
+}
+
+// Spec: §8.7 — type restricts the artifact list to artifacts of the named
+// types at their served version, repeated types widen it, type and artifact
+// together must both hold, a type no artifact has matches nothing without an
+// error, and totals and layers do not follow type.
+func TestUsageReport_TypeFilter(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	seedUsage(t, f)
+	runner := store.ManifestRecord{TenantID: "t", ArtifactID: "ops/runner", Version: "1.0.0", ContentHash: "sha256:4",
+		Type: "agent", Name: "runner", Description: "runs the session checks", Layer: "team"}
+	if err := f.st.PutManifest(context.Background(), storetest.Seal(t, runner, nil, nil)); err != nil {
+		t.Fatal(err)
+	}
+	all := usageReport(t, f, q(nil), "alice")
+	for _, c := range []struct {
+		name string
+		mod  func(*core.UsageQuery)
+		want []string
+	}{
+		{"agent", func(u *core.UsageQuery) { u.Types = []string{"agent"} }, []string{"ops/runner"}},
+		{"skill", func(u *core.UsageQuery) { u.Types = []string{"skill"} }, []string{"ops/greet", "ops/farewell"}},
+		{"both types", func(u *core.UsageQuery) { u.Types = []string{"skill", "agent"} }, []string{"ops/greet", "ops/farewell", "ops/runner"}},
+		{"type and artifact", func(u *core.UsageQuery) {
+			u.Types, u.ArtifactIDs = []string{"skill"}, []string{"ops/farewell", "ops/runner"}
+		}, []string{"ops/farewell"}},
+		{"removed type", func(u *core.UsageQuery) { u.Types = []string{"command"} }, []string{}},
+	} {
+		rep := usageReport(t, f, q(c.mod), "alice")
+		if !reflect.DeepEqual(reportIDs(rep), c.want) || rep.ArtifactCount != len(c.want) ||
+			rep.Totals.UsageCounts != all.Totals.UsageCounts || !reflect.DeepEqual(layerIDs(rep), layerIDs(all)) {
+			t.Errorf("%s: artifacts %v (count %d) totals %+v layers %v, want %v with the unfiltered totals and layers",
+				c.name, reportIDs(rep), rep.ArtifactCount, rep.Totals.UsageCounts, layerIDs(rep), c.want)
+		}
 	}
 }
