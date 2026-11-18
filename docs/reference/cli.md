@@ -619,7 +619,7 @@ Reports how often artifacts were loaded, synced, and returned by searches, per a
 ```
 podium usage --registry <url> [--from <date>] [--to <date>] [--days <n>]
              [--granularity none|day|week|month]
-             [--layer <id>]... [--artifact <id>]...
+             [--layer <id>]... [--artifact <id>]... [--type <type>]...
              [--limit <n>] [--cursor <cursor>] [--json]
 ```
 
@@ -630,6 +630,7 @@ podium usage --registry <url> [--from <date>] [--to <date>] [--days <n>]
 | `--granularity <g>` | `none` (the default), `day`, `week`, or `month`. A value other than `none` adds a series to every total and prints the catalog's periods. A window of more than 366 days serves `day` as `week`, and one of more than 1,096 days serves `day` and `week` as `month`; the command then prints a line such as `periods by week: a 400-day window serves day as week` before the periods. |
 | `--layer <id>` | Restrict the report to a layer. Repeat it to name several. |
 | `--artifact <id>` | Restrict the artifact list to an artifact. Repeat it to name several. |
+| `--type <type>` | Restrict the artifact list to an artifact type, such as `skill`. Repeat it to name several. The totals and layers do not follow it. |
 | `--limit <n>` | The most artifacts to list, from 1 to 200. Defaults to 50. |
 | `--cursor <cursor>` | List the artifacts after an earlier report's page, using the cursor that report printed or its `next_cursor`. |
 | `--json` | Write the response object on standard output. |

@@ -762,7 +762,7 @@ POST /v1/usage
 
 **Authorization.** Any caller that can search the registry. The request passes through the identity verification, tenant routing, and browser-session handling of `search_artifacts`. Every total covers only the layers in the caller's effective view, so a caller learns nothing about the use of a layer it cannot see. When the caller's token carries read scopes, every total also covers only the artifacts the scopes allow.
 
-**Parameters.** Every parameter is optional. `POST` takes the same parameters as a JSON body, `{"from", "to", "days", "granularity", "layers": [...], "artifacts": [...], "limit", "cursor"}`, for a list of artifacts too long for a query string.
+**Parameters.** Every parameter is optional. `POST` takes the same parameters as a JSON body, `{"from", "to", "days", "granularity", "layers": [...], "artifacts": [...], "types": [...], "limit", "cursor"}`, for a list of artifacts too long for a query string.
 
 | Parameter | Description |
 |:--|:--|
@@ -771,10 +771,11 @@ POST /v1/usage
 | `granularity` | `none` (the default), `day`, `week`, or `month`. With a value other than `none`, every total in the response carries a `series`. A window of more than 366 days serves `day` as `week`, and a window of more than 1,096 days serves `day` and `week` as `month`. |
 | `layer` | A layer ID. The report covers only the named layers. Repeat it to name several. |
 | `artifact` | A canonical artifact ID. The `artifacts` list holds only the named artifacts. Repeat it to name several. |
+| `type` | An artifact type, such as `skill` or `agent`. The `artifacts` list holds only artifacts of the named types. Repeat it to name several. A type no artifact has matches nothing. `totals` and `layers` do not follow it. |
 | `limit` | The most entries one response holds in `artifacts`, from 1 to 200. Defaults to 50. |
 | `cursor` | The `next_cursor` of an earlier response. The `artifacts` list continues after the last entry that response held. |
 
-With none of `from`, `to`, and `days`, the window is the last 30 days. The window must lie within the retained days, the last `PODIUM_USAGE_RETENTION_DAYS` UTC days counting today. A request names at most 100 layers and 500 artifacts.
+With none of `from`, `to`, and `days`, the window is the last 30 days. The window must lie within the retained days, the last `PODIUM_USAGE_RETENTION_DAYS` UTC days counting today. A request names at most 100 layers, 500 artifacts, and 20 types.
 
 **What is counted.** The registry counts per UTC day, per serving layer, per artifact, per client kind, and per harness:
 
@@ -861,7 +862,7 @@ A named layer or artifact the caller cannot see is left out of the response, exa
 
 | Code | When |
 |:--|:--|
-| `400 registry.invalid_argument` | `days` is combined with `from` or `to`, a date does not parse or lies outside the retained days, `from` is later than `to`, `days` is not an integer from 1 to `PODIUM_USAGE_RETENTION_DAYS`, `granularity` is not one of its four values, `limit` is not an integer from 1 to 200, `cursor` does not parse, the request names more than 100 layers or 500 artifacts, or a `POST` body does not decode or carries an unknown member. Another method also returns it, with `405`. |
+| `400 registry.invalid_argument` | `days` is combined with `from` or `to`, a date does not parse or lies outside the retained days, `from` is later than `to`, `days` is not an integer from 1 to `PODIUM_USAGE_RETENTION_DAYS`, `granularity` is not one of its four values, `limit` is not an integer from 1 to 200, `cursor` does not parse, the request names more than 100 layers, 500 artifacts, or 20 types, or a `POST` body does not decode or carries an unknown member. Another method also returns it, with `405`. |
 | `500 registry.unavailable` | The registry cannot read its metadata store. |
 
 **Notes.**
