@@ -13,7 +13,11 @@ import type * as React from "react";
  *   .l-dg-meta / .l-dg-meta-fill    connectors and de-emphasized shapes
  *   .l-dg-accent / .l-dg-accent-fill  selected and visible states
  *   .l-dg-tick                      a glyph drawn on top of an accent fill
+ *   .l-dg-on-accent-fill            text set on top of an accent fill
  *   .l-dg-paper                     the panel colour behind a primary shape
+ *
+ * The diagrams carry no masks and no ids, so no id can collide when a diagram
+ * renders more than once in a document.
  *
  * Every diagram is decorative and carries aria-hidden, because the card text
  * beside it states the same thing in prose.
@@ -23,10 +27,10 @@ import type * as React from "react";
 export type FeatureDiagramKey =
   | "domains"
   | "materialization"
-  | "discovery"
   | "layers"
   | "security"
-  | "observability";
+  | "usage"
+  | "overlap";
 
 /** Names the icon a deployment card shows. */
 export type DeploymentIconKey = "folder" | "database" | "asterisk";
@@ -37,6 +41,7 @@ export type IntegrationIconKey =
   | "cube"
   | "nodes"
   | "sparkle"
+  | "circles"
   | "padlock"
   | "branch"
   | "scroll"
@@ -230,221 +235,149 @@ export function MaterializationDiagram(): React.ReactElement {
   );
 }
 
-/** A walk through the catalog: solid where visited, dashed where untouched. */
-export function DiscoveryDiagram(): React.ReactElement {
+/** Three flat layers seen at an angle, stacked, and joined at their corners. */
+export function LayersDiagram(): React.ReactElement {
+  return (
+    <svg className="l-dg" width="200" height="93" viewBox="0 0 240 112" aria-hidden="true">
+      <g className="l-dg-paper l-dg-ink" strokeWidth="1.6" strokeLinejoin="round">
+        <path d="M24 78 L100 64 L176 78 L100 92 Z" />
+        <path d="M24 54 L100 40 L176 54 L100 68 Z" />
+        <path d="M24 30 L100 16 L176 30 L100 44 Z" />
+      </g>
+      <path
+        className="l-dg-meta"
+        d="M24 30v48M176 30v48"
+        strokeWidth="1"
+        strokeDasharray="2 2"
+      />
+      <g className="l-dg-mono l-dg-meta-fill" fontSize="9">
+        <text x="186" y="33">
+          personal
+        </text>
+        <text x="186" y="57">
+          team
+        </text>
+        <text x="186" y="81">
+          org
+        </text>
+      </g>
+    </svg>
+  );
+}
+
+/** A shield outline carrying a check in the accent. */
+export function SecurityDiagram(): React.ReactElement {
   return (
     <svg className="l-dg" width="200" height="80" viewBox="0 0 240 96" aria-hidden="true">
-      <g
-        className="l-dg-meta"
+      <path
+        className="l-dg-paper l-dg-ink"
+        d="M120 6 L154 17 V44 C154 66 139 81 120 90 C101 81 86 66 86 44 V17 Z"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        className="l-dg-accent"
+        d="M105 47l10 10 21-22"
         fill="none"
-        strokeWidth="1.6"
-        strokeDasharray="3 3"
-        opacity=".85"
-      >
-        <path d="M26 48h20c10 0 8-28 18-28" />
-        <path d="M26 48h20c10 0 8 28 18 28" />
-        <path d="M105 46c12-2 10-18 22-18h5" />
-        <path d="M157 76c14 2 12 14 26 14h7" />
-      </g>
-      <g className="l-dg-meta" fill="none" strokeWidth="1.6" strokeDasharray="2 2" opacity=".8">
-        <circle cx="72" cy="20" r="7" />
-        <circle cx="72" cy="76" r="7" />
-        <circle cx="140" cy="28" r="7" />
-        <circle cx="196" cy="90" r="6" />
-      </g>
-      <g className="l-dg-ink" fill="none" strokeWidth="1.8">
-        <path d="M26 48h62m-6-5l6 5-6 5" />
-      </g>
-      <g className="l-dg-ink" fill="none" strokeWidth="1.8">
-        <path d="M105 50c12 4 10 24 22 24h9m-6-5l6 5-6 5" />
-        <path d="M157 72c10 0 12-6 20-6h4m-5-4l5 4-5 4" />
-      </g>
-      <circle className="l-dg-ink-fill" cx="16" cy="48" r="9" />
-      <circle className="l-dg-ink-fill" cx="97" cy="48" r="7" />
-      <circle className="l-dg-ink-fill" cx="149" cy="74" r="7" />
-      <circle className="l-dg-ink-fill" cx="190" cy="66" r="7" />
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
 /*
- * Three overlapping layers. One mask per circle hides the two circles it
- * overlaps, so the masked copy draws a solid arc outside the overlaps while the
- * dashed copy underneath shows through inside them. The mask fills are coverage
- * values on the alpha channel rather than theme colours, which is why they stay
- * white and black.
+ * The usage rows, ranked from the most used down. Each row is a label stub, a
+ * bar, and the count printed after the bar's end.
  */
-const LAYER_MASKS = ["l-dg-layers-0", "l-dg-layers-1", "l-dg-layers-2"] as const;
+const USAGE_ROWS = [
+  { y: 8, label: 44, bar: 132, count: "412" },
+  { y: 30, label: 36, bar: 98, count: "305" },
+  { y: 52, label: 50, bar: 70, count: "214" },
+  { y: 74, label: 30, bar: 44, count: "131" },
+] as const;
 
-/** Three overlapping source layers merging into one catalog. */
-export function LayersDiagram(): React.ReactElement {
+/** Ranked usage: the top bar in the accent, the rest muted. */
+export function UsageDiagram(): React.ReactElement {
   return (
-    <svg className="l-dg" width="200" height="97" viewBox="0 0 240 116" aria-hidden="true">
-      <defs>
-        <mask id={LAYER_MASKS[0]} maskUnits="userSpaceOnUse" x="0" y="0" width="240" height="116">
-          <rect x="0" y="0" width="240" height="116" fill="white" />
-          <circle cx="126" cy="41" r="26" fill="black" />
-          <circle cx="107" cy="69" r="26" fill="black" />
-        </mask>
-        <mask id={LAYER_MASKS[1]} maskUnits="userSpaceOnUse" x="0" y="0" width="240" height="116">
-          <rect x="0" y="0" width="240" height="116" fill="white" />
-          <circle cx="88" cy="41" r="26" fill="black" />
-          <circle cx="107" cy="69" r="26" fill="black" />
-        </mask>
-        <mask id={LAYER_MASKS[2]} maskUnits="userSpaceOnUse" x="0" y="0" width="240" height="116">
-          <rect x="0" y="0" width="240" height="116" fill="white" />
-          <circle cx="88" cy="41" r="26" fill="black" />
-          <circle cx="126" cy="41" r="26" fill="black" />
-        </mask>
-      </defs>
-      <g className="l-dg-ink-fill" opacity=".12">
-        <circle cx="88" cy="41" r="26" />
-        <circle cx="126" cy="41" r="26" />
-        <circle cx="107" cy="69" r="26" />
-      </g>
-      <g className="l-dg-meta" fill="none" strokeWidth="1.5" strokeDasharray="3 3" opacity=".85">
-        <circle cx="88" cy="41" r="26" />
-        <circle cx="126" cy="41" r="26" />
-        <circle cx="107" cy="69" r="26" />
-      </g>
-      <circle
-        className="l-dg-meta"
-        cx="88"
-        cy="41"
-        r="26"
-        fill="none"
-        strokeWidth="1.5"
-        opacity=".7"
-        mask={`url(#${LAYER_MASKS[0]})`}
-      />
-      <circle
-        className="l-dg-meta"
-        cx="126"
-        cy="41"
-        r="26"
-        fill="none"
-        strokeWidth="1.5"
-        opacity=".7"
-        mask={`url(#${LAYER_MASKS[1]})`}
-      />
-      <circle
-        className="l-dg-meta"
-        cx="107"
-        cy="69"
-        r="26"
-        fill="none"
-        strokeWidth="1.5"
-        opacity=".7"
-        mask={`url(#${LAYER_MASKS[2]})`}
-      />
-      <g className="l-dg-mono l-dg-meta-fill" fontSize="10">
-        <text x="48" y="15" textAnchor="middle">
-          team
-        </text>
-        <text x="166" y="15" textAnchor="middle">
-          org
-        </text>
-        <text x="107" y="109" textAnchor="middle">
-          personal
-        </text>
+    <svg className="l-dg" width="200" height="80" viewBox="0 0 240 96" aria-hidden="true">
+      <g className="l-dg-mono" fontSize="9.5">
+        {USAGE_ROWS.map((row, rank) => {
+          const top = rank === 0;
+
+          return (
+            <g key={row.count}>
+              <rect
+                className="l-dg-ink-fill"
+                x="20"
+                y={row.y + 6}
+                width={row.label}
+                height="3"
+                rx="1.5"
+                opacity=".55"
+              />
+              <rect
+                className={top ? "l-dg-accent-fill" : "l-dg-meta-fill"}
+                x="80"
+                y={row.y}
+                width={row.bar}
+                height="12"
+                rx="3"
+                opacity={top ? undefined : ".3"}
+              />
+              <text
+                className={top ? "l-dg-ink-fill" : "l-dg-meta-fill"}
+                x={80 + row.bar + 6}
+                y={row.y + 9.5}
+                fontWeight={top ? "600" : "400"}
+              >
+                {row.count}
+              </text>
+            </g>
+          );
+        })}
       </g>
     </svg>
   );
 }
 
 /**
- * A signed artifact, its seal in the accent, travelling into an audit log whose
- * newest entry carries the accent dot.
+ * Two skill cards overlapping at a corner. The shared area and the line that
+ * runs through both cards are in the accent, and the pill above carries the
+ * similarity score.
  */
-export function SecurityDiagram(): React.ReactElement {
+export function OverlapDiagram(): React.ReactElement {
   return (
     <svg className="l-dg" width="200" height="80" viewBox="0 0 240 96" aria-hidden="true">
-      <rect
-        className="l-dg-paper l-dg-ink"
-        x="4"
-        y="22"
-        width="46"
-        height="52"
-        rx="4"
-        strokeWidth="1.8"
-      />
-      <rect className="l-dg-ink-fill" x="12" y="33" width="28" height="3" rx="1.5" opacity=".5" />
-      <rect className="l-dg-ink-fill" x="12" y="41" width="20" height="3" rx="1.5" opacity=".5" />
-      <rect className="l-dg-ink-fill" x="12" y="49" width="24" height="3" rx="1.5" opacity=".5" />
-      <circle className="l-dg-accent-fill" cx="47" cy="71" r="11" />
-      <path
-        className="l-dg-tick"
-        d="M41.5 71l3.5 3.5 7-7"
-        fill="none"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path className="l-dg-meta" d="M68 48h26m-6-5l6 5-6 5" fill="none" strokeWidth="1.6" />
-      <rect
-        className="l-dg-ink"
-        x="104"
-        y="12"
-        width="132"
-        height="72"
-        rx="5"
-        fill="none"
-        strokeWidth="1.6"
-      />
-      <AuditEntry y={30} width={62} newest />
-      <AuditEntry y={48} width={48} newest={false} />
-      <AuditEntry y={66} width={70} newest={false} />
-    </svg>
-  );
-}
-
-/** One audit-log row: a status dot, a timestamp bar, and a message bar. */
-function AuditEntry(props: { y: number; width: number; newest: boolean }): React.ReactElement {
-  const { y, width, newest } = props;
-
-  return (
-    <>
-      <circle className={newest ? "l-dg-accent-fill" : "l-dg-meta-fill"} cx="117" cy={y} r="3" />
-      <rect className="l-dg-meta-fill" x="127" y={y - 1.5} width="22" height="3" rx="1.5" opacity=".6" />
-      <rect className="l-dg-ink-fill" x="155" y={y - 1.5} width={width} height="3" rx="1.5" opacity=".5" />
-    </>
-  );
-}
-
-/**
- * A usage report: a framed card with a title, a trend line in the accent, a
- * rule, and three ranked bars with the top bar in the accent.
- */
-export function ObservabilityDiagram(): React.ReactElement {
-  return (
-    <svg className="l-dg" width="200" height="80" viewBox="0 0 240 96" aria-hidden="true">
-      <rect
-        className="l-dg-paper l-dg-ink"
-        x="20"
-        y="5"
-        width="200"
-        height="86"
-        rx="5"
-        strokeWidth="1.6"
-      />
-      <rect className="l-dg-ink-fill" x="34" y="18" width="58" height="4" rx="2" opacity=".7" />
-      <rect className="l-dg-meta-fill" x="34" y="27" width="36" height="3" rx="1.5" opacity=".6" />
-      <polyline
-        className="l-dg-accent"
-        points="148,31 160,26 172,28 184,20 196,23 206,15"
-        fill="none"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-      <circle className="l-dg-accent-fill" cx="206" cy="15" r="2.6" />
-      <path className="l-dg-meta" d="M34 40h172" strokeWidth="1" opacity=".45" />
-      <rect className="l-dg-meta-fill" x="34" y="50.5" width="32" height="3" rx="1.5" opacity=".6" />
-      <rect className="l-dg-accent-fill" x="76" y="49" width="118" height="6" rx="1.5" />
-      <rect className="l-dg-meta-fill" x="34" y="63.5" width="32" height="3" rx="1.5" opacity=".6" />
-      <rect className="l-dg-meta-fill" x="76" y="62" width="80" height="6" rx="1.5" opacity=".5" />
-      <rect className="l-dg-meta-fill" x="34" y="76.5" width="32" height="3" rx="1.5" opacity=".6" />
-      <rect className="l-dg-meta-fill" x="76" y="75" width="44" height="6" rx="1.5" opacity=".5" />
+      <rect className="l-dg-paper" x="34" y="6" width="104" height="58" rx="5" />
+      <rect className="l-dg-paper" x="98" y="30" width="104" height="58" rx="5" />
+      <rect className="l-dg-accent-fill" x="98" y="30" width="40" height="34" opacity=".4" />
+      <g className="l-dg-ink" fill="none" strokeWidth="1.6">
+        <rect x="34" y="6" width="104" height="58" rx="5" />
+        <rect x="98" y="30" width="104" height="58" rx="5" />
+      </g>
+      <g className="l-dg-ink-fill" opacity=".5">
+        <rect x="44" y="17" width="48" height="3" rx="1.5" />
+        <rect x="44" y="29" width="36" height="3" rx="1.5" />
+        <rect x="146" y="61" width="46" height="3" rx="1.5" />
+        <rect x="108" y="73" width="60" height="3" rx="1.5" />
+      </g>
+      <g className="l-dg-accent-fill">
+        <rect x="44" y="45" width="86" height="4" rx="2" />
+        <rect x="106" y="45" width="86" height="4" rx="2" />
+        <rect x="160" y="8" width="42" height="15" rx="7.5" />
+      </g>
+      <text
+        className="l-dg-mono l-dg-on-accent-fill"
+        x="181"
+        y="19"
+        fontSize="9.5"
+        fontWeight="600"
+        textAnchor="middle"
+      >
+        0.91
+      </text>
     </svg>
   );
 }
@@ -453,10 +386,10 @@ export function ObservabilityDiagram(): React.ReactElement {
 export const featureDiagrams: Record<FeatureDiagramKey, () => React.ReactElement> = {
   domains: DomainsDiagram,
   materialization: MaterializationDiagram,
-  discovery: DiscoveryDiagram,
   layers: LayersDiagram,
   security: SecurityDiagram,
-  observability: ObservabilityDiagram,
+  usage: UsageDiagram,
+  overlap: OverlapDiagram,
 };
 
 /* -------------------------------------------------------- deployment icons */
@@ -567,6 +500,18 @@ export function SparkleIcon(): React.ReactElement {
   );
 }
 
+/** Two overlapping circles, for the overlap detection row. */
+export function CirclesIcon(): React.ReactElement {
+  return (
+    <svg className="l-dg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+      <g className="l-dg-meta" fill="none" strokeWidth="1.5">
+        <circle cx="5.8" cy="8" r="4.6" />
+        <circle cx="10.2" cy="8" r="4.6" />
+      </g>
+    </svg>
+  );
+}
+
 /** A padlock, for the identity row. */
 export function PadlockIcon(): React.ReactElement {
   return (
@@ -657,6 +602,7 @@ export const integrationIcons: Record<IntegrationIconKey, () => React.ReactEleme
   cube: CubeIcon,
   nodes: NodesIcon,
   sparkle: SparkleIcon,
+  circles: CirclesIcon,
   padlock: PadlockIcon,
   branch: BranchIcon,
   scroll: ScrollIcon,
