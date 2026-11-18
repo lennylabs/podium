@@ -142,6 +142,12 @@ func (p *Postgres) deleteUsageInSchema(ctx context.Context, ident, day string) (
 		return 0, err
 	}
 	res, err := conn.ExecContext(ctx, `DELETE FROM usage_daily WHERE day < $1::date`, day)
+	if isUndefinedTable(err) {
+		// An org schema provisioned by an earlier release gains usage_daily
+		// on its first access in this process, and the startup retention
+		// pass runs before any access; such a schema holds no usage rows.
+		return 0, nil
+	}
 	if err != nil {
 		return 0, err
 	}

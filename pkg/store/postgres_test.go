@@ -53,6 +53,47 @@ func TestPostgres_ConformanceSuite(t *testing.T) {
 	})
 }
 
+// Spec: §8.7 — the retention pass reaches every org schema, including one an
+// earlier release provisioned without usage_daily, which gains the table only
+// at its first access in the process. Such a schema holds no usage rows, so
+// the pass skips it and still deletes the old rows of every other org.
+func TestPostgres_DeleteUsageBeforeSkipsSchemaWithoutTable(t *testing.T) {
+	dsn := os.Getenv("PODIUM_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("PODIUM_POSTGRES_DSN unset; skipping Postgres usage retention check")
+	}
+	s, err := store.OpenPostgres(dsn)
+	if err != nil {
+		t.Skipf("OpenPostgres: %v (database unreachable)", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	ctx := context.Background()
+	if err := s.ResetForTest(ctx); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	row := store.UsageCount{Day: "2026-10-01", Layer: "team", ArtifactID: "x", ClientKind: "mcp", Harness: "none", Loads: 1}
+	for _, org := range []string{"a", "b"} {
+		if err := s.CreateTenant(ctx, store.Tenant{ID: org}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.AddUsageCounts(ctx, org, []store.UsageCount{row}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(ctx, `DROP TABLE org_b.usage_daily`); err != nil {
+		t.Fatalf("drop org_b.usage_daily: %v", err)
+	}
+	n, err := s.DeleteUsageBefore(ctx, "2026-11-01")
+	if err != nil || n != 1 {
+		t.Errorf("DeleteUsageBefore = %d, %v; want 1 row from org a and no error for org b", n, err)
+	}
+}
+
 // Spec: §13.2.1 / §13.9 — the Postgres backend computes
 // observed replication lag from pg_last_xact_replay_timestamp(). On a
 // primary (the usual DSN target) the function is NULL and the query
