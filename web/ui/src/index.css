@@ -78,6 +78,9 @@
   --on-danger: #ffffff;
   --ok: #3f8f66;
   --scrim: rgba(20, 19, 15, 0.42);
+  /* The raised card's shadow. It is a token because the dark theme deepens it
+     against its darker ground. */
+  --shadow-card: 0 1px 2px rgba(20, 19, 15, 0.06);
   --font-ui: "Space Grotesk", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
   --font-display: "Anton", var(--font-ui);
@@ -111,6 +114,7 @@
     --on-danger: #14130f;
     --ok: #5fbf8f;
     --scrim: rgba(6, 8, 13, 0.62);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
   }
 }
 
@@ -139,6 +143,7 @@
   --on-danger: #14130f;
   --ok: #5fbf8f;
   --scrim: rgba(6, 8, 13, 0.62);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 body {
@@ -184,7 +189,13 @@ pre,
 .data-table th.column-label,
 .stat-count,
 button.stat-count.stat-open,
-.stat-label {
+.stat-label,
+.range-slider-label,
+.range-slider-end,
+.range-slider-input,
+.range-slider-value,
+.score,
+.score-absent {
   font-variant-ligatures: none;
 }
 
@@ -5889,4 +5900,781 @@ button.stat-open {
   border: 1px solid var(--b2);
   border-radius: 9px;
   background: var(--surf2);
+}
+
+/* ---- Similarity (§13.10) ------------------------------------------------
+
+   The similarity page, the artifact viewer's Similarity tab, and the rail's
+   similarity section. The two overlap scores keep their own marks
+   throughout: the accent for a semantic similarity and the metadata grey for
+   a word overlap, because the scales are not comparable and a reader who
+   sees one colour for both reads them as one measure. */
+
+/* The sidebar row's figure: how many entries the similarity page lists. It
+   sits on the row's far edge in the quiet mono a count takes. */
+.sidebar a.section-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.section-count {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--faint);
+}
+
+.section-link-current .section-count {
+  color: var(--meta);
+}
+
+/* The Similarity tab's count is a warning rather than an extent, so it takes
+   the accent wash pill instead of the quiet figure the other tabs carry. */
+.tab-count-warning {
+  margin-left: 4px;
+  padding: 0 5px;
+  border: 1px solid var(--cbd);
+  border-radius: 100px;
+  background: var(--wash);
+  color: var(--link);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* The threshold control: a pill carrying the label, the two ends of the
+   range, the track, and the value tag. */
+.range-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 14px;
+  border: 1px solid var(--bd);
+  border-radius: 100px;
+  background: var(--surf);
+  box-shadow: var(--shadow-card);
+}
+
+.range-slider-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  color: var(--faint);
+}
+
+.range-slider-end {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint);
+}
+
+/* The track fills to the value. The share arrives as a custom property from
+   the component, so both colours stay tokens. */
+.range-slider-input {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 150px;
+  height: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--acc) 0 var(--fill, 0%), var(--b2) var(--fill, 0%) 100%);
+  cursor: pointer;
+  outline: none;
+}
+
+/* The thumb is reached only through each engine's own pseudo-element, and a
+   selector naming another engine's pseudo-element invalidates the whole rule
+   it sits in. Each engine's rules therefore stand under a feature query for
+   that engine, which also keeps them out of the top-level rule list the
+   stylesheet cases walk with a selector engine that knows neither. */
+@supports selector(::-webkit-slider-thumb) {
+  .range-slider-input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--acc);
+    border-radius: 50%;
+    background: var(--surf);
+    box-shadow: var(--shadow-card);
+  }
+
+  .range-slider-input:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 4px rgba(255, 164, 36, 0.25);
+  }
+}
+
+@supports selector(::-moz-range-thumb) {
+  .range-slider-input::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--acc);
+    border-radius: 50%;
+    background: var(--surf);
+  }
+}
+
+.range-slider-value {
+  padding: 3px 9px;
+  border: 1px solid var(--cbd);
+  border-radius: 100px;
+  background: var(--wash);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--link);
+  white-space: nowrap;
+}
+
+/* A score: a short bar filled to the value beside the figure. */
+.score {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.score-track {
+  display: block;
+  width: 44px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--chip);
+}
+
+.score-word .score-track {
+  width: 36px;
+}
+
+.score-fill {
+  display: block;
+  height: 100%;
+}
+
+.score-similarity .score-fill {
+  background: var(--acc);
+}
+
+.score-word .score-fill {
+  background: var(--meta);
+}
+
+.score-absent {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--faint);
+}
+
+/* The registry's messages, one line each, in the accent wash box. A line too
+   long for the box is cut with an ellipsis and carries the whole message as
+   its title. */
+.message-box {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0 0 14px;
+  padding: 9px 14px;
+  border: 1px solid var(--cbd);
+  border-radius: 9px;
+  background: var(--wash);
+  list-style: none;
+}
+
+.message-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.message-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.message-dot-similarity {
+  background: var(--acc);
+}
+
+.message-dot-word {
+  background: var(--meta);
+}
+
+.message-text {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The description-length warning: the accent dot on a plain card, a short
+   heading, and the registry's message under it. */
+.thin-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+  background: var(--surf);
+}
+
+.thin-notice-dot {
+  margin-top: 7px;
+}
+
+.thin-notice p {
+  margin: 0;
+}
+
+.thin-notice-title {
+  margin-bottom: 4px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.thin-notice-message {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--sec);
+}
+
+/* The dashed card a listing stands on when the report holds nothing for it. */
+.overlap-empty {
+  margin: 0 0 14px;
+  padding: 20px 18px;
+  border: 1px dashed var(--bd);
+  border-radius: 11px;
+  background: var(--surf2);
+}
+
+.overlap-empty-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* The overlap table. Its rows share one grid with the header, and the
+   similarity column is dropped from the grid where the read carried no
+   semantic check. */
+.overlap-grid {
+  display: grid;
+  gap: 14px;
+  align-items: center;
+}
+
+.overlap-grid-both {
+  grid-template-columns: minmax(0, 1fr) 120px 120px 100px;
+}
+
+.overlap-grid-word {
+  grid-template-columns: minmax(0, 1fr) 120px 100px;
+}
+
+.overlap-table {
+  margin: 0;
+}
+
+.overlap-head {
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--b2);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+}
+
+.overlap-row {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--b2);
+}
+
+.overlap-row:last-child {
+  border-bottom: 0;
+}
+
+/* The viewer's table is framed, its header sits on the inset ground, and its
+   rows are buttons, so the button's own chrome is reset to the row's. */
+.overlap-table-framed {
+  margin-bottom: 14px;
+  overflow: hidden;
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+  background: var(--surf);
+}
+
+.overlap-table-framed .overlap-head {
+  padding: 8px 16px;
+  background: var(--surf2);
+}
+
+button.overlap-row {
+  width: 100%;
+  margin: 0;
+  padding: 11px 16px;
+  border: 0;
+  border-top: 1px solid var(--b2);
+  border-radius: 0;
+  background: var(--surf);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.overlap-table-framed .overlap-head + button.overlap-row {
+  border-top: 0;
+}
+
+button.overlap-row:hover {
+  background: var(--surf2);
+}
+
+button.overlap-row-selected,
+button.overlap-row-selected:hover {
+  background: var(--wash);
+  box-shadow: inset 3px 0 var(--acc);
+}
+
+.overlap-peer {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.overlap-peer-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.overlap-peer-name .badge {
+  flex: none;
+  margin-right: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  color: var(--meta);
+}
+
+.overlap-id {
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--link);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+a.overlap-id:hover {
+  text-decoration: underline;
+}
+
+.overlap-description {
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--sec);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The page's table states a description whole; only the viewer's rows,
+   which a press expands into the comparison below, clip to one line. */
+.overlap-table:not(.overlap-table-framed) .overlap-description {
+  white-space: normal;
+}
+
+.overlap-layer {
+  font-size: 11.5px;
+  color: var(--sec);
+  overflow-wrap: anywhere;
+}
+
+/* The comparison a selected row opens: a heading naming both artifacts, the
+   scores, the link to the peer, and the two descriptions side by side. */
+.compare {
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+  background: var(--surf);
+}
+
+.compare-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.compare-head p {
+  margin: 0;
+}
+
+.compare-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.compare-vs {
+  font-weight: 400;
+  color: var(--faint);
+}
+
+.compare-facts {
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.compare-open {
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--link);
+  text-decoration: underline;
+}
+
+.compare-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.compare-card {
+  padding: 11px 13px;
+  border: 1px solid var(--b2);
+  border-radius: 9px;
+  background: var(--surf2);
+}
+
+.compare-card p {
+  margin: 0;
+}
+
+.compare-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+
+.compare-card-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.compare-card-meta {
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.compare-card-description {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--sec);
+}
+
+/* The statement under the tab that the description is long enough. */
+.length-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--sec);
+}
+
+.length-status-mark {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+/* The tab's intro line and its threshold control share one wrapping row. */
+.similarity-tab {
+  max-width: 860px;
+}
+
+.similarity-intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.similarity-intro:empty {
+  display: none;
+}
+
+.similarity-intro-text {
+  flex: 1;
+  min-width: 300px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--sec);
+}
+
+/* The rail's similarity section: one line per fact, each led by the mark of
+   the score it states. */
+.rail-similarity {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12.5px;
+}
+
+.rail-similarity-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--ink);
+}
+
+.rail-similarity-mark {
+  flex: none;
+  width: 14px;
+  height: 5px;
+  border-radius: 3px;
+}
+
+.rail-similarity-mark-similarity {
+  background: var(--acc);
+}
+
+.rail-similarity-mark-word {
+  background: var(--meta);
+}
+
+.rail-similarity-dot {
+  margin: 0 4px;
+}
+
+.rail-similarity-check {
+  width: 14px;
+  text-align: center;
+}
+
+.rail-similarity-link {
+  align-self: flex-start;
+  margin-top: 2px;
+  color: var(--link);
+  text-decoration: underline;
+}
+
+/* The similarity page. The title, the cluster count, and the threshold
+   control share the title row, with the control pushed to the far edge. */
+.similarity-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 0 0 8px;
+}
+
+.similarity-head h1 {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.similarity-head-badges {
+  margin-top: 9px;
+}
+
+.similarity-head-badges .badge {
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.similarity-head-control {
+  margin-top: 4px;
+  margin-left: auto;
+}
+
+.similarity-lead {
+  margin: 0 0 22px;
+}
+
+/* The two panes share one fixed-height card, and each scrolls on its own,
+   so the detail stays beside the entry selected in a long list. */
+.similarity-panel {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  height: 500px;
+  overflow: hidden;
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+  background: var(--surf);
+  box-shadow: var(--shadow-card);
+}
+
+.cluster-list {
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--bd);
+  background: var(--surf2);
+}
+
+.cluster-list-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  margin: 0;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--bd);
+  background: var(--surf2);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+}
+
+.cluster-list-strongest {
+  margin-left: auto;
+}
+
+.cluster-list-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+button.cluster-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  padding: 11px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--b2);
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.cluster-row:hover {
+  background: var(--chip);
+}
+
+button.cluster-row-selected,
+button.cluster-row-selected:hover {
+  background: var(--wash);
+  box-shadow: inset 3px 0 var(--acc);
+}
+
+.cluster-row-id {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--link);
+  overflow-wrap: anywhere;
+}
+
+.cluster-row-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.cluster-row-selected .cluster-row-meta {
+  color: var(--meta);
+}
+
+.cluster-row-score {
+  margin-left: auto;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.cluster-detail {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 26px;
+}
+
+.cluster-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+}
+
+.cluster-detail-head .badge {
+  margin-right: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  color: var(--meta);
+}
+
+.cluster-detail-id {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--link);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.cluster-detail-id:hover {
+  text-decoration: underline;
+}
+
+.cluster-detail-layer {
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.cluster-detail-description {
+  margin: 8px 0 18px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--sec);
+}
+
+.cluster-detail .message-box {
+  margin-bottom: 22px;
+}
+
+/* Below the width that holds both panes beside each other, the list stacks
+   over the detail and the card gives up its fixed height. */
+@media (max-width: 900px) {
+  .similarity-panel {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .cluster-list {
+    max-height: 300px;
+    border-right: 0;
+    border-bottom: 1px solid var(--bd);
+  }
+
+  .compare-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
