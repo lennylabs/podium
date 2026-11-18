@@ -13,7 +13,7 @@ Two artifacts overlap when their descriptions claim the same situations or their
 | Task | Access |
 |:--|:--|
 | Check a layer's source with `podium lint` | Any user with a checkout of the source. |
-| Read the catalog overlap report with `podium overlap` or `GET /v1/overlap` | Any caller that can search the registry. The report names only artifacts the caller can see. |
+| Read the catalog overlap report with `podium overlap`, `GET /v1/overlap`, or the web UI's Similarity page | Any caller that can search the registry. The report names only artifacts the caller can see. |
 | Resolve an overlap by editing, deprecating, or suppressing | An author with write access to the layer's source repository. |
 | Recompute the semantic overlap records with `podium admin rebuild-overlap` | Per-tenant `admin` role. |
 | Turn on the semantic check and set its threshold and sweep interval | Operator, through environment variables on every registry replica. |
@@ -48,7 +48,7 @@ Every overlap diagnostic is a warning. It never blocks an ingest. [Skill lint ch
 
 ## Check the live catalog
 
-The catalog overlap report runs across every layer the caller can see on a running registry. Read it with `podium overlap --registry <url>` or `GET /v1/overlap`.
+The catalog overlap report runs across every layer the caller can see on a running registry. Read it with `podium overlap --registry <url>`, `GET /v1/overlap`, or the web UI's Similarity page.
 
 The report covers the current served version of every artifact the caller can see. It contains `lint.thin_description` and `lint.colliding_descriptions`, and `lint.semantic_overlap` when the operator turned the semantic check on. It omits `lint.near_duplicate_content`, which needs the prose of each artifact and runs only in `podium lint` and at ingest. The endpoint reads stored records and descriptions and runs no index query, so a request costs no embedding call.
 
@@ -85,6 +85,19 @@ A `computed` below `total` means some artifacts are not computed yet, or their l
 - The `artifact` query parameter of `GET /v1/overlap` keeps only the diagnostics of one artifact, and `counts` counts those. The CLI has no equivalent flag.
 - `--threshold <n>`, or the `threshold` query parameter, replaces the operator's semantic threshold for one read, as a number from 0.5 to 1.0. A higher value reports fewer semantic pairs, and a lower value reports more. It does not change the `lint.colliding_descriptions` threshold.
 - `--fail-on warning` makes `podium overlap` exit 1 when the report contains any diagnostic or `computed` is below `total`, so a scheduled job can alert on new overlap.
+
+### Reading the report in the web UI
+
+A registry started with `--web-ui` shows the report on the Similarity page, which the sidebar lists for every caller who can search, an anonymous caller included. The sidebar row states how many artifacts have overlap at the registry's threshold.
+
+- The Similarity page lists each artifact with overlap once, with its `lint.semantic_overlap` and `lint.colliding_descriptions` diagnostics combined, and the strongest score of each kind beside it. Selecting an artifact shows its description, the registry's messages verbatim, and a table of the artifacts it overlaps. The page does not list `lint.thin_description`.
+- The artifact viewer carries a Similarity tab that reads the report for the artifact on screen. The tab's count is the number of artifacts it overlaps. Selecting a row in its table sets the two descriptions side by side. The tab also states whether the description is long enough, from `lint.thin_description`.
+- The rail beside every tab of the artifact viewer carries a Similarity section that summarizes the same read and links to the Similarity page.
+- The threshold control ranges from 0.5 to 1.0 and starts at the threshold the registry applied. Moving it re-reads the report with the `threshold` parameter, which changes only the semantic peers, so word-overlap entries stay listed at any setting.
+- Similarity is drawn as an orange bar with a decimal, and word overlap as a grey bar with a percentage. The two scores sit in separate columns and are never sorted against each other. A missing score is an em dash.
+- When the semantic check is off, the page and the tab show no threshold control and no Similarity column.
+
+The web UI reads the report with the caller's identity, so it shows only what [What the caller sees](#what-the-caller-sees) describes. An artifact the caller cannot see answers the same empty report as an artifact with no overlap, and the Similarity tab renders the two the same way. The web UI has no control for `podium admin rebuild-overlap`.
 
 ### What the caller sees
 

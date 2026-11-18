@@ -29,6 +29,7 @@ import {
   domainHref,
   layersHref,
   searchHref,
+  similarityHref,
 } from "./route";
 import type { SessionPosture } from "./session";
 import { zone } from "./time";
@@ -19137,8 +19138,11 @@ describe("keyboard semantics", () => {
     await screen.findByLabelText("Artifact viewer");
     const list = screen.getByRole("tablist");
     const tabs = within(list).getAllByRole("tab");
+    // The Similarity tab stands on every artifact, without a count where
+    // nothing overlaps, so it is the last of the four.
     expect(tabs.map((tab) => tab.getAttribute("tabindex"))).toEqual([
       "0",
+      "-1",
       "-1",
       "-1",
     ]);
@@ -19158,7 +19162,7 @@ describe("keyboard semantics", () => {
     fireEvent.keyDown(list, { key: "End" });
     expect(
       screen
-        .getByRole("tab", { name: "Authored source" })
+        .getByRole("tab", { name: "Similarity" })
         .getAttribute("aria-selected"),
     ).toBe("true");
     fireEvent.keyDown(list, { key: "ArrowRight" });
@@ -19788,5 +19792,655 @@ describe("the layer panel under the local-source rule", () => {
     expect(refused.textContent).toContain(
       "the caller is not authorized for a local source",
     );
+  });
+});
+
+// The similarity unit's browser-driven cells. The unit's statement is the
+// similarity section of web/DESIGN.md, which defers its rules to the
+// Similarity bullet of §13.10: the overlap read the bundle's own client
+// issues (Read), the refusal or failure arm of that read (Error, driven with
+// the registry answering and with the registry not answering), and what the
+// page and the viewer render from it (Render), at the condition points that
+// bullet branches on: the semantic check on or off, the caller anonymous or
+// signed in, an artifact with overlap, with none, or with a thin description
+// alone, and a threshold the reader chose. The surface carries no write, so
+// it has no Write cell.
+// Spec: §13.10, §7.3.1
+describe("similarity", () => {
+  const payInvoice = {
+    artifact_id: "finance/ap/pay-invoice",
+    description: "Pay an approved vendor invoice through the AP system.",
+    type: "skill",
+    layer: "team-finance",
+  };
+  const settleBill = {
+    artifact_id: "finance/payments/settle-bill",
+    description: "Settle an outstanding supplier bill and record the payment.",
+    type: "skill",
+    layer: "payments",
+  };
+  const submitInvoice = {
+    artifact_id: "finance/ap/submit-invoice",
+    description: "Submit a vendor invoice to the AP system for approval.",
+    type: "command",
+    layer: "team-finance",
+  };
+  const closeBooks = {
+    artifact_id: "finance/close-books",
+    description: "Close books.",
+    type: "skill",
+    layer: "team-finance",
+  };
+  const computedAt = new Date(Date.now() - 14 * 3600000).toISOString();
+  const semanticMessage = (peer: string, pct: number) =>
+    `name, description, when_to_use, and tags are semantically similar to ${peer} (${String(pct)}%); make them distinct so search and load_domain can tell the artifacts apart`;
+  const wordMessage = (peer: string, pct: number) =>
+    `description overlaps ${peer} (${String(pct)}%); give each artifact a distinct summary so search and load_domain can tell them apart`;
+  const thinMessage =
+    'description is thin (12 chars, 2 words); answer "when should I use this?" in one or two sentences (want at least 15 chars and 3 words)';
+
+  /** diagnostics is the report the registry answers with the check on: two
+   * artifacts share a semantic pair, two share wording, and one carries a
+   * thin description alone, ordered by artifact and then by code as the
+   * registry orders them. */
+  function diagnostics(semantic: boolean): unknown[] {
+    return [
+      {
+        ...closeBooks,
+        code: "lint.thin_description",
+        severity: "warning",
+        message: thinMessage,
+      },
+      {
+        ...payInvoice,
+        code: "lint.colliding_descriptions",
+        severity: "warning",
+        message: wordMessage(submitInvoice.artifact_id, 80),
+        peers: [{ ...submitInvoice, similarity: 0.8 }],
+      },
+      ...(semantic
+        ? [
+            {
+              ...payInvoice,
+              code: "lint.semantic_overlap",
+              severity: "warning",
+              message: semanticMessage(settleBill.artifact_id, 91),
+              peers: [
+                { ...settleBill, similarity: 0.912, computed_at: computedAt },
+              ],
+            },
+          ]
+        : []),
+      {
+        ...submitInvoice,
+        code: "lint.colliding_descriptions",
+        severity: "warning",
+        message: wordMessage(payInvoice.artifact_id, 80),
+        peers: [{ ...payInvoice, similarity: 0.8 }],
+      },
+      ...(semantic
+        ? [
+            {
+              ...settleBill,
+              code: "lint.semantic_overlap",
+              severity: "warning",
+              message: semanticMessage(payInvoice.artifact_id, 91),
+              peers: [
+                { ...payInvoice, similarity: 0.912, computed_at: computedAt },
+              ],
+            },
+          ]
+        : []),
+    ];
+  }
+
+  function report(
+    diags: unknown[],
+    state: "on" | "off" = "on",
+    threshold = 0.85,
+  ): Record<string, unknown> {
+    return {
+      semantic_overlap:
+        state === "on"
+          ? {
+              state: "on",
+              threshold,
+              model: "text-embedding-3-small",
+              computed: 4,
+              total: 4,
+            }
+          : {
+              state: "off",
+              threshold: null,
+              model: null,
+              computed: null,
+              total: null,
+            },
+      diagnostics: diags,
+      counts: { error: 0, warning: diags.length, info: 0 },
+    };
+  }
+
+  /** only keeps the diagnostics of one artifact, which is what the report
+   * answers to a read carrying the artifact parameter. */
+  function only(id: string, diags: unknown[]): unknown[] {
+    return diags.filter(
+      (d) => (d as { artifact_id: string }).artifact_id === id,
+    );
+  }
+
+  function overlapReads(): URLSearchParams[] {
+    return requests
+      .filter((r) => r.url.startsWith("/v1/overlap"))
+      .map((r) => new URLSearchParams(r.url.split("?")[1] ?? ""));
+  }
+
+  function artifactRead(id: string, description: string): Stub {
+    return {
+      body: {
+        id,
+        type: "skill",
+        version: "1.0.0",
+        content_hash: "sha256:ab74",
+        manifest_body: "# Body\n",
+        frontmatter: `---\nname: ${id}\ndescription: ${description}\n---\n`,
+        layer: "team-finance",
+      },
+    };
+  }
+
+  function overlapURL(params: Record<string, string>): string {
+    return `/v1/overlap?${new URLSearchParams(params).toString()}`;
+  }
+
+  describe("the similarity page", () => {
+    it("lists one entry per artifact with overlap, combining its diagnostics, and leaves a thin description out", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/overlap": { body: report(diagnostics(true)) },
+      });
+      goTo(similarityHref());
+      render(<App />);
+      const list = await screen.findByTestId("cluster-list");
+      const rows = within(list).getAllByRole("button");
+      // The thin description draws no entry, and the artifact carrying both
+      // overlap codes draws one.
+      expect(rows.map((row) => row.querySelector(".cluster-row-id")?.textContent)).toEqual([
+        payInvoice.artifact_id,
+        submitInvoice.artifact_id,
+        settleBill.artifact_id,
+      ]);
+      expect(within(list).getByText("3 artifacts")).toBeTruthy();
+      expect(rows[0].textContent).toContain("0.91 · 80%");
+      expect(rows[1].textContent).toContain("80%");
+      expect(rows[1].textContent).not.toContain("·");
+      expect(rows[2].textContent).toContain("0.91");
+      expect(screen.getByText("3 CLUSTERS")).toBeTruthy();
+      // The first read carries no threshold, so the registry applies its
+      // configured one, and the control starts at the value it reports.
+      expect(overlapReads().every((params) => !params.has("threshold"))).toBe(true);
+      const slider = screen.getByLabelText("SIMILARITY");
+      expect((slider as HTMLInputElement).value).toBe("0.85");
+      expect(screen.getByText("≥ 0.85")).toBeTruthy();
+      // No control drives the rebuild endpoint.
+      expect(screen.queryByRole("button", { name: /rebuild/i })).toBeNull();
+      expect(requests.some((r) => r.url.includes("/rebuild"))).toBe(false);
+    });
+
+    it("shows the selected entry's description, messages, and peers with the two scores apart", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/overlap": { body: report(diagnostics(true)) },
+      });
+      goTo(similarityHref());
+      render(<App />);
+      const detail = await screen.findByTestId("cluster-detail");
+      const id = within(detail).getByRole("link", { name: payInvoice.artifact_id });
+      expect(id.getAttribute("href")).toBe(artifactHref(payInvoice.artifact_id));
+      expect(detail.textContent).toContain("SKILL");
+      expect(detail.textContent).toContain("team-finance");
+      expect(detail.textContent).toContain(payInvoice.description);
+      // The messages are the registry's own, verbatim, the semantic one
+      // first, each carrying its whole text as its title.
+      const lines = within(detail).getAllByRole("listitem");
+      expect(lines.map((line) => line.textContent)).toEqual([
+        semanticMessage(settleBill.artifact_id, 91),
+        wordMessage(submitInvoice.artifact_id, 80),
+      ]);
+      expect(lines[0].querySelector(".message-text")?.getAttribute("title")).toBe(
+        semanticMessage(settleBill.artifact_id, 91),
+      );
+      const peers = within(detail).getAllByTestId("overlap-row");
+      expect(peers).toHaveLength(2);
+      // A semantic peer carries a decimal and no word overlap; a word peer
+      // carries a percentage and no similarity.
+      expect(peers[0].textContent).toContain(settleBill.artifact_id);
+      expect(peers[0].textContent).toContain("0.912");
+      expect(peers[0].textContent).toContain("none");
+      expect(peers[1].textContent).toContain(submitInvoice.artifact_id);
+      expect(peers[1].textContent).toContain("80%");
+      expect(peers[1].textContent).toContain("none");
+      expect(
+        within(peers[0]).getByRole("link", { name: settleBill.artifact_id }).getAttribute("href"),
+      ).toBe(artifactHref(settleBill.artifact_id));
+    });
+
+    it("selects another entry in place and writes it to the address", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/overlap": { body: report(diagnostics(true)) },
+      });
+      goTo(similarityHref());
+      render(<App />);
+      const list = await screen.findByTestId("cluster-list");
+      const target = within(list).getByRole("button", { name: new RegExp(settleBill.artifact_id) });
+      fireEvent.click(target);
+      expect(target.getAttribute("aria-pressed")).toBe("true");
+      expect(
+        within(screen.getByTestId("cluster-detail")).getByRole("link", {
+          name: settleBill.artifact_id,
+        }),
+      ).toBeTruthy();
+      expect(window.location.hash).toBe(similarityHref(settleBill.artifact_id));
+    });
+
+    it("opens on the entry the address names", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/overlap": { body: report(diagnostics(true)) },
+      });
+      goTo(similarityHref(submitInvoice.artifact_id));
+      render(<App />);
+      const detail = await screen.findByTestId("cluster-detail");
+      expect(within(detail).getByRole("link", { name: submitInvoice.artifact_id })).toBeTruthy();
+    });
+
+    it("re-reads the report at the threshold the reader chooses and states the empty result at it", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/overlap": { body: report(diagnostics(true)) },
+        [overlapURL({ threshold: "0.97" })]: { body: report([], "on", 0.97) },
+      });
+      goTo(similarityHref());
+      render(<App />);
+      await screen.findByTestId("cluster-list");
+      fireEvent.change(screen.getByLabelText("SIMILARITY"), {
+        target: { value: "0.97" },
+      });
+      expect(screen.getByText("≥ 0.97")).toBeTruthy();
+      expect(await screen.findByTestId("similarity-empty")).toBeTruthy();
+      expect(screen.getByTestId("similarity-empty").textContent).toBe("No clusters at 0.97");
+      expect(overlapReads().at(-1)?.get("threshold")).toBe("0.97");
+      // The control stays drawn over the empty result, so the reader can
+      // lower the threshold again.
+      expect(screen.getByLabelText("SIMILARITY")).toBeTruthy();
+    });
+
+    it("lists the word-overlap entries alone and draws no semantic control when the check is off", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/overlap": { body: report(diagnostics(false), "off") },
+      });
+      goTo(similarityHref());
+      render(<App />);
+      const list = await screen.findByTestId("cluster-list");
+      expect(within(list).getAllByRole("button")).toHaveLength(2);
+      expect(screen.queryByLabelText("SIMILARITY")).toBeNull();
+      const detail = screen.getByTestId("cluster-detail");
+      const head = detail.querySelector(".overlap-head");
+      expect(head?.textContent).not.toMatch(/similarity/i);
+      expect(head?.textContent).toMatch(/word overlap/i);
+      // Nothing on the page names the check or its state.
+      expect(screen.getByLabelText("Similarity").textContent).not.toMatch(/semantic|off|disabled/i);
+    });
+
+    it("states that nothing overlaps without a threshold when the check is off", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/overlap": { body: report([], "off") },
+      });
+      goTo(similarityHref());
+      render(<App />);
+      expect((await screen.findByTestId("similarity-empty")).textContent).toBe("No clusters");
+      expect(screen.getByText("0 CLUSTERS")).toBeTruthy();
+    });
+
+    it("presents a read the registry refused with its code and offers a retry that re-issues it", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/overlap": {
+          status: 500,
+          body: {
+            code: "registry.unavailable",
+            message: "the metadata store did not answer",
+            retryable: true,
+          },
+        },
+      });
+      goTo(similarityHref());
+      render(<App />);
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toContain("The overlap report did not load.");
+      expect(alert.textContent).toContain("registry.unavailable");
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/overlap": { body: report(diagnostics(true)) },
+      });
+      fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+      expect(await screen.findByTestId("cluster-list")).toBeTruthy();
+    });
+
+    it("presents a read the registry did not answer", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/overlap": { rejects: true },
+      });
+      goTo(similarityHref());
+      render(<App />);
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toContain("The overlap report did not load.");
+      expect(within(alert).getByRole("button", { name: "Try again" })).toBeTruthy();
+    });
+
+    // The report is a catalog read taken with the caller's identity, so a
+    // credential the registry could not verify reaches the refused arm of
+    // the catalog-scope rule rather than an empty page.
+    it("hands an identity refusal to the shell's refused arm", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture() },
+        "/v1/overlap": {
+          status: 401,
+          body: { code: "auth.untrusted_token", message: "untrusted" },
+        },
+      });
+      goTo(similarityHref());
+      render(<App />);
+      expect(await screen.findByLabelText("Catalog refused")).toBeTruthy();
+      expect(screen.queryByTestId("cluster-list")).toBeNull();
+    });
+  });
+
+  describe("the sidebar row", () => {
+    it("counts the entries the page lists", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_domain": { body: emptyDomain },
+        "/v1/overlap": { body: report(diagnostics(true)) },
+      });
+      render(<App />);
+      const row = await screen.findByRole("link", { name: /^Similarity/ });
+      await waitFor(() => {
+        expect(within(row).getByTestId("section-count").textContent).toBe(
+          "3 artifacts with overlap",
+        );
+      });
+      expect(row.getAttribute("href")).toBe(similarityHref());
+    });
+
+    // Every caller who can search can read the report, so the anonymous
+    // caller keeps the row, with its count.
+    it("stands for an anonymous caller", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture() },
+        "/v1/load_domain": { body: emptyDomain },
+        "/v1/overlap": { body: report(diagnostics(false), "off") },
+      });
+      render(<App />);
+      expect(await screen.findByTestId("anonymous-banner")).toBeTruthy();
+      const row = screen.getByRole("link", { name: /^Similarity/ });
+      await waitFor(() => {
+        expect(within(row).getByTestId("section-count").textContent).toContain("2");
+      });
+    });
+
+    it("draws no figure where the read failed", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_domain": { body: emptyDomain },
+        "/v1/overlap": { status: 500, body: { code: "registry.unavailable", message: "down" } },
+      });
+      render(<App />);
+      const row = await screen.findByRole("link", { name: /^Similarity/ });
+      await waitFor(() => {
+        expect(requests.some((r) => r.url.startsWith("/v1/overlap"))).toBe(true);
+      });
+      expect(within(row).queryByTestId("section-count")).toBeNull();
+    });
+  });
+
+  describe("the artifact viewer", () => {
+    function stubViewer(extra: Record<string, Stub>): void {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": artifactRead(payInvoice.artifact_id, payInvoice.description),
+        "/v1/dependents": { body: { edges: [] } },
+        "/v1/overlap": { body: report(diagnostics(true)) },
+        ...extra,
+      });
+    }
+
+    it("reads the artifact's overlap and counts its peers on the tab", async () => {
+      stubViewer({
+        [overlapURL({ artifact: payInvoice.artifact_id })]: {
+          body: report(only(payInvoice.artifact_id, diagnostics(true))),
+        },
+      });
+      goTo(artifactHref(payInvoice.artifact_id));
+      render(<App />);
+      const tab = await screen.findByRole("tab", { name: /Similarity/ });
+      await waitFor(() => {
+        expect(tab.querySelector(".tab-count")?.textContent).toBe("2");
+      });
+      expect(tab.querySelector(".tab-count-warning")).toBeTruthy();
+      expect(
+        overlapReads().some(
+          (params) => params.get("artifact") === payInvoice.artifact_id && !params.has("threshold"),
+        ),
+      ).toBe(true);
+    });
+
+    it("shows the intro, the messages, and the peers, and compares a selected peer below the table", async () => {
+      stubViewer({
+        [overlapURL({ artifact: payInvoice.artifact_id })]: {
+          body: report(only(payInvoice.artifact_id, diagnostics(true))),
+        },
+      });
+      goTo(artifactHref(payInvoice.artifact_id));
+      render(<App />);
+      fireEvent.click(await screen.findByRole("tab", { name: /Similarity/ }));
+      const panel = await screen.findByRole("tabpanel");
+      await within(panel).findByTestId("overlap-table");
+      expect(panel.textContent).toContain(
+        "Two artifacts read like this one. Search and load_domain may not tell them apart.",
+      );
+      expect((within(panel).getByLabelText("SIMILARITY") as HTMLInputElement).value).toBe("0.85");
+      expect(within(panel).getAllByRole("listitem").map((line) => line.textContent)).toEqual([
+        semanticMessage(settleBill.artifact_id, 91),
+        wordMessage(submitInvoice.artifact_id, 80),
+      ]);
+      expect(panel.querySelector(".overlap-head")?.textContent).toBe(
+        "Overlaps withLayerSimilarityWord overlap",
+      );
+      // The rows are the selection controls; there is no separate Compare.
+      expect(within(panel).queryByRole("button", { name: /^Compare/ })).toBeNull();
+      expect(within(panel).queryByRole("region", { name: /compared with/ })).toBeNull();
+      const row = within(panel).getByRole("button", { name: new RegExp(settleBill.artifact_id) });
+      fireEvent.click(row);
+      expect(row.getAttribute("aria-pressed")).toBe("true");
+      const compare = within(panel).getByRole("region", {
+        name: `${payInvoice.artifact_id} compared with ${settleBill.artifact_id}`,
+      });
+      expect(compare.querySelector(".compare-title")?.textContent).toBe("pay-invoice vs. settle-bill");
+      expect(compare.textContent).toContain("similarity 0.912 · computed 14h ago");
+      expect(within(compare).getByRole("link", { name: "Open settle-bill →" }).getAttribute("href")).toBe(
+        artifactHref(settleBill.artifact_id),
+      );
+      expect(compare.textContent).toContain(payInvoice.description);
+      expect(compare.textContent).toContain(settleBill.description);
+      expect(compare.textContent).toContain("this artifact · team-finance");
+      expect(compare.textContent).toContain("skill · payments");
+      // A word-overlap peer is compared on its percentage and carries no
+      // computed time.
+      fireEvent.click(within(panel).getByRole("button", { name: new RegExp(submitInvoice.artifact_id) }));
+      const wordCompare = within(panel).getByRole("region", { name: /compared with/ });
+      expect(wordCompare.querySelector(".compare-facts")?.textContent).toBe("word overlap 80%");
+      expect(within(panel).getByTestId("length-status").textContent).toContain(
+        "The description is long enough to tell apart.",
+      );
+    });
+
+    it("states the overlap in the rail after provenance on every tab", async () => {
+      stubViewer({
+        [overlapURL({ artifact: payInvoice.artifact_id })]: {
+          body: report(only(payInvoice.artifact_id, diagnostics(true))),
+        },
+      });
+      goTo(artifactHref(payInvoice.artifact_id));
+      render(<App />);
+      const rail = await screen.findByLabelText("Artifact details");
+      const facts = await within(rail).findByTestId("rail-similarity");
+      const sections = [...rail.querySelectorAll(":scope > section")].map((s) => s.getAttribute("aria-label"));
+      expect(sections.indexOf("Similarity")).toBe(sections.indexOf("Provenance") + 1);
+      expect(facts.textContent).toContain("1 overlapping artifact, at 0.91");
+      expect(facts.textContent).toContain("1 with 80% word overlap");
+      expect(facts.textContent).toContain("Description length is fine");
+      expect(within(facts).getByRole("link", { name: "See it in Similarity analysis →" }).getAttribute("href")).toBe(
+        similarityHref(payInvoice.artifact_id),
+      );
+      fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+      expect(within(rail).getByTestId("rail-similarity")).toBeTruthy();
+    });
+
+    // The registry answers an artifact the caller cannot see with the same
+    // empty report as one that overlaps nothing, and the viewer renders the
+    // two identically: neither the tab nor the rail can tell them apart.
+    it("renders an artifact with no overlap and one the report omits identically", async () => {
+      const empty = { body: report([]) };
+      const renderedTab = async (id: string): Promise<string> => {
+        stubRegistry({
+          "/v1/ui/session": { body: posture({ public_mode: true }) },
+          "/v1/load_artifact": artifactRead(id, "A description long enough to pass the length check."),
+          "/v1/dependents": { body: { edges: [] } },
+          "/v1/overlap": empty,
+        });
+        goTo(artifactHref(id));
+        const view = render(<App />);
+        const tab = await screen.findByRole("tab", { name: /Similarity/ });
+        await screen.findByTestId("rail-similarity");
+        expect(tab.querySelector(".tab-count")).toBeNull();
+        fireEvent.click(tab);
+        const panel = await screen.findByRole("tabpanel");
+        expect(within(panel).getByTestId("similarity-tab-empty").textContent).toBe(
+          "No overlapping artifacts at 0.85",
+        );
+        // The generated element ids differ per mount and carry nothing the
+        // reader sees, so they are blanked before the comparison.
+        const shown = `${panel.innerHTML}|${screen.getByTestId("rail-similarity").innerHTML}`.replace(
+          /_r_[0-9a-z]+_/g,
+          "_id_",
+        );
+        view.unmount();
+        return shown;
+      };
+      const quiet = await renderedTab("finance/quiet");
+      const hidden = await renderedTab("finance/restricted");
+      expect(hidden).toBe(quiet);
+      // The text states nothing about visibility either way.
+      expect(quiet.replace(/<[^>]+>/g, " ")).not.toMatch(/hidden|visible|permission|denied/i);
+    });
+
+    it("warns about a thin description above the table and in the rail", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": artifactRead(closeBooks.artifact_id, closeBooks.description),
+        "/v1/dependents": { body: { edges: [] } },
+        "/v1/overlap": { body: report(diagnostics(true)) },
+        [overlapURL({ artifact: closeBooks.artifact_id })]: {
+          body: report(only(closeBooks.artifact_id, diagnostics(true))),
+        },
+      });
+      goTo(artifactHref(closeBooks.artifact_id));
+      render(<App />);
+      const tab = await screen.findByRole("tab", { name: /Similarity/ });
+      const facts = await screen.findByTestId("rail-similarity");
+      expect(tab.querySelector(".tab-count")).toBeNull();
+      expect(facts.textContent).toContain("Description is too short to tell apart");
+      expect(facts.textContent).toContain("No overlapping artifacts");
+      expect(facts.textContent).not.toContain("Description length is fine");
+      fireEvent.click(tab);
+      const notice = await screen.findByTestId("thin-notice");
+      expect(notice.textContent).toBe(`Too short to tell apart${thinMessage}`);
+      expect(screen.queryByTestId("length-status")).toBeNull();
+    });
+
+    it("draws no threshold control and no similarity score when the check is off", async () => {
+      stubViewer({
+        "/v1/overlap": { body: report(diagnostics(false), "off") },
+        [overlapURL({ artifact: payInvoice.artifact_id })]: {
+          body: report(only(payInvoice.artifact_id, diagnostics(false)), "off"),
+        },
+      });
+      goTo(artifactHref(payInvoice.artifact_id));
+      render(<App />);
+      const facts = await screen.findByTestId("rail-similarity");
+      expect(facts.textContent).not.toContain("overlapping artifact");
+      expect(facts.textContent).toContain("1 with 80% word overlap");
+      fireEvent.click(screen.getByRole("tab", { name: /Similarity/ }));
+      const panel = await screen.findByRole("tabpanel");
+      await within(panel).findByTestId("overlap-table");
+      expect(within(panel).queryByLabelText("SIMILARITY")).toBeNull();
+      expect(panel.querySelector(".overlap-head")?.textContent).toBe("Overlaps withLayerWord overlap");
+      fireEvent.click(within(panel).getByRole("button", { name: new RegExp(submitInvoice.artifact_id) }));
+      expect(panel.querySelector(".compare-facts")?.textContent).toBe("word overlap 80%");
+    });
+
+    it("re-reads the artifact's overlap at the tab's threshold and states it in the rail too", async () => {
+      stubViewer({
+        [overlapURL({ artifact: payInvoice.artifact_id })]: {
+          body: report(only(payInvoice.artifact_id, diagnostics(true))),
+        },
+        [overlapURL({ threshold: "0.95", artifact: payInvoice.artifact_id })]: {
+          body: report(only(payInvoice.artifact_id, diagnostics(false)), "on", 0.95),
+        },
+      });
+      goTo(artifactHref(payInvoice.artifact_id));
+      render(<App />);
+      fireEvent.click(await screen.findByRole("tab", { name: /Similarity/ }));
+      const panel = await screen.findByRole("tabpanel");
+      await within(panel).findByTestId("overlap-table");
+      fireEvent.change(within(panel).getByLabelText("SIMILARITY"), {
+        target: { value: "0.95" },
+      });
+      await waitFor(() => {
+        expect(within(panel).getAllByTestId("overlap-row")).toHaveLength(1);
+      });
+      // The threshold filters the semantic peers alone, so the word-overlap
+      // peer stays.
+      expect(within(panel).getByTestId("overlap-row").textContent).toContain(submitInvoice.artifact_id);
+      expect(screen.getByTestId("rail-similarity").textContent).not.toContain("overlapping artifact");
+      const last = overlapReads().at(-1);
+      expect(last?.get("threshold")).toBe("0.95");
+      expect(last?.get("artifact")).toBe(payInvoice.artifact_id);
+    });
+
+    it("confines a failed overlap read to the tab and the rail section", async () => {
+      stubViewer({
+        "/v1/overlap": {
+          status: 500,
+          body: { code: "registry.unavailable", message: "down", retryable: true },
+        },
+      });
+      goTo(artifactHref(payInvoice.artifact_id));
+      render(<App />);
+      const rail = await screen.findByLabelText("Artifact details");
+      const section = within(rail).getByLabelText("Similarity");
+      expect((await within(section).findByRole("alert")).textContent).toContain("registry.unavailable");
+      // The artifact itself is still drawn and its body still reads.
+      expect(screen.getByTestId("artifact-body")).toBeTruthy();
+      fireEvent.click(screen.getByRole("tab", { name: /Similarity/ }));
+      const panel = await screen.findByRole("tabpanel");
+      expect(within(panel).getByRole("alert").textContent).toContain("The overlap report did not load.");
+      expect(screen.queryByLabelText("Catalog refused")).toBeNull();
+    });
   });
 });

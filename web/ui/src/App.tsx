@@ -1,7 +1,7 @@
 // The application shell. It takes the §7.3.4 posture read on load, renders
 // the authentication control that read's posture calls for, and hosts the
-// §13.10 surfaces: the domain browser, search, the artifact viewer, and the
-// layer panel.
+// §13.10 surfaces: the domain browser, search, the artifact viewer,
+// similarity, and the layer panel.
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
@@ -24,6 +24,7 @@ import {
   isIdentityRefusal,
   listLayers,
   loadDomain,
+  overlapReport,
   readQuota,
   signOut,
   subscribeReadOnly,
@@ -40,11 +41,13 @@ import {
   layersHref,
   routeKey,
   searchHref,
+  similarityHref,
   useDocumentTitle,
   useEnteredSurface,
   useRoute,
   useTopOfNewRoute,
 } from './route';
+import { clusterEntries } from './similarity';
 import { since } from './time';
 import type { ThemePreference } from './theme';
 import { useTheme } from './theme';
@@ -55,6 +58,7 @@ import { SearchSurface } from './surfaces/SearchSurface';
 import { ArtifactViewer } from './surfaces/ArtifactViewer';
 import { LayerPanel } from './surfaces/LayerPanel';
 import { DeletedLayers } from './surfaces/DeletedLayers';
+import { SimilaritySurface } from './surfaces/SimilaritySurface';
 
 /** treeDepth is how many levels of the domain hierarchy the sidebar tree
  * resolves eagerly. A level below that edge is read when the reader expands
@@ -201,6 +205,15 @@ export function App() {
   // reader enters, and counts left behind then state totals that contradict
   // the tree directly above them and the domain header beside it.
   const counts = useAsync(() => readCounts(), [route.name, catalogNonce]);
+
+  // The similarity row states how many entries the similarity page lists: the
+  // artifacts with overlap at the threshold the registry applies by default.
+  // It is re-read on the same two signals as the counts, because an ingest
+  // moves the overlap the figure reports. Its outcome is not reported to the
+  // shell: the figure stands beside a navigation row rather than standing for
+  // the catalog, so a read that fails leaves the row without a figure.
+  // Spec: §13.10.
+  const overlap = useAsync(() => overlapReport(), [route.name, catalogNonce]);
 
   useEffect(() => {
     let live = true;
@@ -456,6 +469,23 @@ export function App() {
           <SectionLink href={searchHref('')} current={route.name === 'search' ? 'page' : false}>
             Search
           </SectionLink>
+          {/* Every caller who can search can read the overlap report, an
+              anonymous caller included, so the row stands on every posture
+              (§13.10). The figure is left off while the read is in flight,
+              where it failed, and on the refused arm, which has no catalog
+              to state a figure about. */}
+          <SectionLink
+            href={similarityHref()}
+            current={route.name === 'similarity' ? 'page' : false}
+            count={
+              refused || overlap.loading || overlap.value === null
+                ? undefined
+                : String(clusterEntries(overlap.value).length)
+            }
+            countLabel="artifacts with overlap"
+          >
+            Similarity
+          </SectionLink>
           {/* The layer panel is reachable for every caller on every
               deployment. The nav reads no posture field and states nothing
               about the caller: the panel decides which of its own write
@@ -595,6 +625,8 @@ function Surface({
       return <SearchSurface key={route.query} query={route.query} onError={onCatalogOutcome} />;
     case 'artifact':
       return <ArtifactViewer id={route.id} viewing={route.version} onError={onCatalogOutcome} />;
+    case 'similarity':
+      return <SimilaritySurface selected={route.selected} onError={onCatalogOutcome} />;
     case 'layers':
       // A restore moves the same figures the sidebar footer states, so the
       // recovery surface reports it the way every other layer write does.
@@ -714,10 +746,18 @@ type SectionState = 'page' | 'containing' | false;
 function SectionLink({
   href,
   current,
+  count,
+  countLabel,
   children,
 }: {
   href: string;
   current: SectionState;
+  /** count is the figure the row states on its far edge, and an absent count
+   * draws no figure. */
+  count?: string;
+  /** countLabel names what the figure counts, for a reader who hears the row
+   * rather than sees it. */
+  countLabel?: string;
   children: ReactNode;
 }) {
   return (
@@ -731,6 +771,12 @@ function SectionLink({
       aria-current={current === 'page' ? 'page' : current === 'containing' ? true : undefined}
     >
       {children}
+      {count !== undefined && (
+        <span className="mono section-count" data-testid="section-count">
+          {count}
+          {countLabel !== undefined && <span className="assistive-only"> {countLabel}</span>}
+        </span>
+      )}
     </a>
   );
 }

@@ -252,6 +252,7 @@ rm -rf "$WORK"
 | S109 | `command` and `context` are refused, stored rows of either type stop serving after an upgrade, hand-converted skills lint clean and serve, and user-invoked skills carry each harness's control | solo then standalone | none | none | none |
 | S110 | Published Agent Skills parse and lint without false errors, and an unparseable manifest is refused on its own by lint, sync, and ingest | solo then standalone | none | none | none |
 | S111 | The catalog overlap report reads across layers with structured peers, validates its threshold, and the semantic check refuses to start without an embedding source | standalone | none | none | none |
+| S112 | The web UI's Similarity page, tab, and rail section render the overlap report in both themes | standalone | none | none | none |
 
 ---
 
@@ -13278,6 +13279,97 @@ scenario covers what an operator sees without one.
    and the `grep` prints `config.invalid: PODIUM_LINT_SEMANTIC_OVERLAP=on needs
    an embedding source`. A server that starts means the check would run with
    no vectors to compare.
+
+**Cleanup.** `rm -rf "$WORK"`. Step 3 stops the server.
+
+---
+
+## S112: The web UI's Similarity page, tab, and rail section render the overlap report in both themes
+
+**Goal.** Validate that the web UI shows the catalog overlap report on the
+Similarity page, in the artifact viewer's Similarity tab, and in the viewer's
+rail, that the two scores keep their own marks, and that every part reads in
+the light and the dark theme.
+
+**Covers.** The Similarity bullet of the §13.10 web UI, read over the §7.3.1
+catalog overlap report, and the similarity section of `web/DESIGN.md`.
+
+**Why by hand.** The suite drives the surface against a stubbed registry and
+checks what each element states, and the end-to-end test checks that the
+served bundle reads the report's member names. Neither looks at the page. A
+score bar that vanishes against one theme's ground, a message box that runs
+past its card, or a list and a detail that stop scrolling apart is visible
+only in a browser.
+
+**Prerequisites.** A browser. The scenario runs with the semantic check off,
+so it needs no embedding provider, and it binds 127.0.0.1:8176.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above. Build a
+   two-layer root in which two skills share most of their wording and a third
+   has a thin description, and serve it with the web UI.
+
+   ```bash
+   mkdir -p "$WORK/root/team" "$WORK/root/shared"
+   printf 'multi_layer: true\nlayer_order:\n  - shared\n  - team\n' > "$WORK/root/.registry-config"
+   for L in team shared; do printf 'visibility:\n  public: true\n' > "$WORK/root/$L/.layer-config"; done
+   skill() {
+     mkdir -p "$WORK/root/$1/$2"
+     printf -- '---\nname: %s\ndescription: %s\nmetadata:\n  version: "1.0.0"\n---\n\nBody.\n' "${2##*/}" "$3" > "$WORK/root/$1/$2/SKILL.md"
+   }
+   skill team finance/reconcile "Reconcile vendor invoices against purchase orders before the monthly close."
+   skill shared finance/match-invoices "Reconcile supplier invoices against purchase orders before the monthly close."
+   skill team finance/close "Close books"
+   skill team ops/welcome "Walk a new engineer through laptop setup, accounts, and the first week."
+   podium serve --standalone --no-embeddings --web-ui --layer-path "$WORK/root" --bind 127.0.0.1:8176 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8176/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   echo "open http://127.0.0.1:8176/app/#/similarity"
+   ```
+
+   **Expect.** The sidebar lists Similarity between Search and Layers with the
+   figure `2` on its right edge. The page is titled Similarity analysis with a
+   `2 CLUSTERS` badge and shows no threshold control. The list holds
+   `finance/match-invoices` and `finance/reconcile`, each with a percentage of
+   at least 70 on the right, and holds no `finance/close`. The detail of the
+   selected entry shows its identifier, a `SKILL` badge, its layer, its
+   description, one message line in the accent box beginning `description
+   overlaps`, and a table whose columns are OVERLAPS WITH, LAYER, and WORD
+   OVERLAP, with a grey bar beside the percentage. A SIMILARITY column on this
+   registry is the defect, because the semantic check is off.
+
+2. Open `finance/reconcile` from the detail, open its Similarity tab, and
+   select the row in its table. Then open `finance/close` and
+   `ops/welcome` and read their Similarity tabs and rails.
+
+   **Expect.** On `finance/reconcile`, the tab carries the count `1` in an
+   accent pill, the intro reads `One artifact reads like this one.`, the
+   selected row is tinted with an accent bar on its left edge, and a
+   comparison below the table is headed `reconcile vs. match-invoices` with
+   `word overlap` and the percentage, an `Open match-invoices →` link, and the
+   two descriptions side by side. The rail's SIMILARITY section, directly
+   under PROVENANCE, reads `1 with` the percentage `word overlap`, then
+   `Description length is fine` with a check mark, then `See it in Similarity
+   analysis →`. On `finance/close`, the tab carries no count, a card headed
+   `Too short to tell apart` states the registry's message, and the rail reads
+   `Description is too short to tell apart`. On `ops/welcome`, the tab carries
+   no count and shows `No overlapping artifacts` in a dashed card.
+
+3. Switch the appearance between Light and Dark with the appearance control
+   in the top bar, and repeat steps 1 and 2 in each theme. Then stop the
+   server.
+
+   ```bash
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** In both themes every bar, dot, pill, and tinted row is visible
+   against its ground, no message line runs past the accent box (a long line
+   ends in an ellipsis and shows in full on hover), and the list scrolls
+   without moving the detail beside it when the window is short enough to
+   make it scroll.
 
 **Cleanup.** `rm -rf "$WORK"`. Step 3 stops the server.
 

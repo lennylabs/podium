@@ -13,6 +13,7 @@ export const paths = {
   catalog: '/v1/catalog',
   loadArtifact: '/v1/load_artifact',
   dependents: '/v1/dependents',
+  overlap: '/v1/overlap',
   layers: '/v1/layers',
   quota: '/v1/quota',
 } as const;
@@ -474,6 +475,81 @@ export function loadArtifact(id: string, version?: string): Promise<LoadArtifact
 export async function dependentsOf(id: string): Promise<DependencyEdge[]> {
   const body = await request<{ edges?: DependencyEdge[] }>(paths.dependents + query({ id }));
   return body.edges ?? [];
+}
+
+/** OverlapArtifact names one artifact of the §7.3.1 catalog overlap report:
+ * its identifier, its description as the description checks read it, its
+ * type, and the layer serving its current version. A diagnostic and each of
+ * its peers carry it, so the similarity surface names an artifact without
+ * loading it. */
+export interface OverlapArtifact {
+  artifact_id: string;
+  description: string;
+  type: string;
+  layer: string;
+}
+
+/** OverlapPeer is one peer of an overlap diagnostic. similarity is the score
+ * of the check that produced the diagnostic, and computed_at is carried by a
+ * `lint.semantic_overlap` peer alone. */
+export interface OverlapPeer extends OverlapArtifact {
+  similarity: number;
+  computed_at?: string;
+}
+
+/** OverlapDiagnostic is one diagnostic of the report. peers is set on the two
+ * overlap codes and absent on `lint.thin_description`. */
+export interface OverlapDiagnostic extends OverlapArtifact {
+  code: string;
+  severity: string;
+  message: string;
+  peers?: OverlapPeer[];
+}
+
+/** OverlapReport is the GET /v1/overlap response. The semantic state's
+ * threshold, model, and counts are null when the check is off. */
+export interface OverlapReport {
+  semantic_overlap: {
+    state: string;
+    threshold: number | null;
+    model: string | null;
+    computed: number | null;
+    total: number | null;
+  };
+  diagnostics: OverlapDiagnostic[];
+  counts: { error: number; warning: number; info: number };
+}
+
+/** OverlapQuery holds the report's two optional parameters. An absent
+ * threshold leaves the registry's configured one in force, and an absent
+ * artifact reads the whole catalog the caller can see. */
+export interface OverlapQuery {
+  threshold?: number;
+  artifact?: string;
+}
+
+/** overlapReport reads the §7.3.1 catalog overlap report with the caller's
+ * identity, as an SDK would. The registry answers an artifact the caller
+ * cannot see with the same empty report as one that overlaps nothing, and
+ * the client passes that answer on unchanged.
+ *
+ * Spec: §7.3.1, §13.10 */
+export async function overlapReport(params: OverlapQuery = {}): Promise<OverlapReport> {
+  const body = await request<Partial<OverlapReport>>(
+    paths.overlap +
+      query({
+        // The parameter is sent at the two decimals the control steps in, so
+        // a value carried through floating-point arithmetic does not reach
+        // the registry as 0.8500000000000001.
+        threshold: params.threshold === undefined ? undefined : params.threshold.toFixed(2),
+        artifact: params.artifact,
+      }),
+  );
+  return {
+    semantic_overlap: body.semantic_overlap ?? { state: 'off', threshold: null, model: null, computed: null, total: null },
+    diagnostics: body.diagnostics ?? [],
+    counts: body.counts ?? { error: 0, warning: 0, info: 0 },
+  };
 }
 
 export async function listLayers(): Promise<LayerRecord[]> {

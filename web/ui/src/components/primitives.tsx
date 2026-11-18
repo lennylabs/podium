@@ -26,8 +26,11 @@ export type BadgeTone = Tone | 'soft' | 'grant' | 'hollow' | 'marker' | 'count' 
 
 /** TabCountTone is the tone a tab's trailing count or marker takes. The count
  * is quiet mono text rather than a chip, so the tone sets its colour and
- * nothing else. */
-export type TabCountTone = 'quiet' | 'danger' | 'accent';
+ * nothing else. `warning` is the one exception: the Similarity tab's count
+ * states how many artifacts may be confused with this one, which the reader
+ * should act on, so it takes the accent wash pill the design gives a warning
+ * count. */
+export type TabCountTone = 'quiet' | 'danger' | 'accent' | 'warning';
 
 /**
  * CopyField renders a value the reader has to take away with them beside an

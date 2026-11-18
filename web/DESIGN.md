@@ -486,6 +486,46 @@ operator as the administrator (§13.10, with the admin-authorization wiring in
 `internal/serverboot/serverboot.go`), and keeps the panel available holding the
 tenant's whole list, where nobody authenticates and the panel is the point.
 
+### 5. Similarity
+
+The rules for this surface are owned by the Similarity bullet of the Web UI part
+of §13.10: what the surface reads and with whose identity, who is offered it,
+what the similarity page lists, how the artifact viewer shows one artifact's
+overlap, the range and the starting value of the threshold control, the
+separation of the two scores, the presentation when the semantic check is off,
+and the absence of a rebuild control. This brief does not restate them. The
+surface is numbered after the layer panel because it was added after the other
+four, and the numbers carry no order of their own.
+
+The surface reads the catalog overlap report. Its route, its two optional
+parameters, and its response are documented under "Catalog overlap report" in
+`docs/reference/http-api.md`, the handler is `handleOverlap` in
+`pkg/registry/server/overlap.go`, and the response schema is `OverlapReport` in
+`pkg/registry/core/overlap_report.go`, which also defines the meaning of each
+score. What each part of the response gives the design:
+
+| Part of the response | What it gives the design |
+|:--|:--|
+| the semantic check's state, with the threshold the read applied | The state decides whether the threshold control and the semantic score appear at all. The applied threshold is where the control starts, and it is absent when the check is off, so nothing on the surface can lean on a threshold there. The model identifier and the computed and total counts beside it describe the report rather than any artifact, and §13.10 gives the surface no use for them. |
+| the diagnostics | One per check per artifact, ordered by artifact, so an artifact with overlap of both kinds arrives as two entries that the page combines into one. The description-length check arrives in the same list and belongs to the viewer alone. Every entry carries the artifact's description, type, and serving layer, so the surface names an artifact without loading it. |
+| the peers of an overlap diagnostic | Structured entries listing every peer the message names, each with the score of the check that produced it. A peer reached by both checks is one row carrying two scores, and only a semantic peer carries the time its score was computed, so a row needs an absent treatment for either score and for that time. |
+| the message | Prose the registry writes for the diagnostic. It is shown verbatim and never parsed, because the peers already carry what a parser would extract. |
+
+Two properties of the report carry design consequences. The report names only
+artifacts the caller can see, and a read restricted to one artifact the caller
+cannot see answers the same empty report as a read for an artifact with no
+overlap, so the viewer's treatment for "nothing overlaps" is also its treatment
+for a hidden or unknown identifier. The threshold filters only the semantic
+peers, so a word-overlap entry stays listed at any setting, and the page's empty
+state at a high threshold names the threshold rather than claiming the catalog
+has no overlap.
+
+The surface carries no write. Its one request can fail like any other read, with
+the envelope described under Errors below. The page renders that failure in
+place of its list. The viewer renders it inside the Similarity tab and the
+rail's similarity section alone, because the artifact's own response already
+arrived and the rest of the viewer stays usable.
+
 ## The state matrix
 
 Most of the design work is here rather than in the happy path.
@@ -633,7 +673,7 @@ authorization is owned by the layer-write authorization rule, which the layer
 panel above states, and it carries no session information.
 
 **Per-surface states.** Each surface needs loading, empty, error, and forbidden.
-Two deserve specific attention:
+The following deserve specific attention:
 
 - **Empty versus filtered.** A domain response is assembled entirely from the
   caller's visible set (`LoadDomain` in `pkg/registry/core/core.go`) and carries
@@ -653,6 +693,18 @@ Two deserve specific attention:
   `docs/reference/error-codes.md` catalogues both codes and records that the
   denial code's response mirrors a not-found result. The UI must not undo the
   concealment by implying the artifact exists.
+- **No overlap versus not visible.** The overlap read restricted to an artifact
+  the caller cannot see answers the same empty report as a read for an
+  artifact that does not exist or overlaps nothing (the similarity section
+  above). The viewer's similarity tab and rail section therefore render one
+  state for all three, and the similarity page's empty state states only that
+  nothing overlaps at the threshold applied. Neither may imply that a hidden
+  artifact overlaps the one on screen.
+- **Semantic check off.** A registry that does not run the semantic check
+  answers the report without semantic peers and without a threshold. The page
+  and the viewer then show the word-overlap entries alone, with no threshold
+  control, no semantic score, and no statement that a check is missing, because
+  the state is the deployment's configuration rather than a failure.
 
 **Errors** arrive as the structured envelope spec §6.10 defines, implemented as
 `ErrorResponse` in `pkg/registry/server/server.go` and catalogued for clients in

@@ -19,6 +19,9 @@ export type Route =
   // reload nor a step back, and leaves the address stating the latest version
   // while the page states an older one.
   | { name: 'artifact'; id: string; version: string }
+  // selected names the artifact the similarity page opens on, and the empty
+  // string opens it on the first entry its list carries.
+  | { name: 'similarity'; selected: string }
   // deleted selects the recovery surface, which is a page of its own under
   // the panel rather than a section inside it: it carries its own table, and
   // stacking that table above the panel's pushes the precedence label and the
@@ -49,6 +52,8 @@ export function parseRoute(hash: string): Route | null {
       return artifactRoute(rest.join('/'));
     case 'layers':
       return { name: 'layers', deleted: tail === 'deleted' };
+    case 'similarity':
+      return { name: 'similarity', selected: tail };
     case 'domain':
       return { name: 'domain', path: tail };
     default:
@@ -133,6 +138,12 @@ export function searchHref(query: string): string {
   return `#/search/${encodeURIComponent(query)}`;
 }
 
+/** similarityHref addresses the similarity page, opened on the entry for the
+ * artifact named, or on its first entry where none is. */
+export function similarityHref(selected = ''): string {
+  return selected === '' ? '#/similarity' : `#/similarity/${encodeURIComponent(selected)}`;
+}
+
 /** domainTitle is what a domain page is titled. The breadcrumb above the
  * title already carries the ancestry, so repeating the whole slash-separated
  * path in the h1 states the reader's position twice and runs the title off the
@@ -181,6 +192,8 @@ export function routeKey(route: Route): string {
       return route.version === '' ? `artifact/${route.id}` : `artifact/${route.id}${versionMark}${route.version}`;
     case 'layers':
       return route.deleted ? 'layers/deleted' : 'layers';
+    case 'similarity':
+      return `similarity/${route.selected}`;
   }
 }
 
@@ -213,6 +226,8 @@ export function routeTitle(route: Route): string {
       return route.id === '' ? 'Artifact' : artifactLeaf(route.id);
     case 'layers':
       return route.deleted ? 'Recently unregistered' : 'Layers';
+    case 'similarity':
+      return 'Similarity analysis';
   }
 }
 
@@ -374,6 +389,8 @@ export function routeAnnouncement(route: Route): string {
     }
     case 'layers':
       return routeTitle(route);
+    case 'similarity':
+      return route.selected === '' ? routeTitle(route) : `${routeTitle(route)} for ${route.selected}`;
   }
 }
 
