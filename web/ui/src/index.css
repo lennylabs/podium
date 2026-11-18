@@ -7105,7 +7105,7 @@ button.cluster-row-selected:hover {
 }
 
 .usage-artifact-table .usage-row {
-  grid-template-columns: minmax(0, 1fr) 120px 110px 80px 100px 96px;
+  grid-template-columns: minmax(0, 1fr) 120px 110px 100px 110px 96px;
   padding-top: 11px;
   padding-bottom: 11px;
 }
@@ -7236,22 +7236,23 @@ button.cluster-row-selected:hover {
   white-space: nowrap;
 }
 
-.usage-loads {
+.usage-count-cell {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
 }
 
-.usage-loads-bar {
-  width: 40px;
+.usage-count-bar {
+  flex: none;
+  width: 32px;
   height: 4px;
   border-radius: 2px;
   background: var(--chip);
   overflow: hidden;
 }
 
-.usage-loads-fill {
+.usage-count-fill {
   display: block;
   height: 100%;
   background: var(--acc);
@@ -7271,6 +7272,12 @@ button.cluster-row-selected:hover {
   display: flex;
   justify-content: center;
   margin-top: 12px;
+}
+
+.usage-more-status {
+  padding: 7px 0;
+  color: var(--meta);
+  font: 11.5px var(--font-mono);
 }
 
 /* The dense domain table's Loads and Syncs columns read right-aligned, the

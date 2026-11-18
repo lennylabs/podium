@@ -79,11 +79,11 @@ An artifact with no loads in the window lists `loads` 0 and `last_loaded` `null`
 
 A registry started with `--web-ui` shows the report on the Usage page, which the sidebar lists for every caller who can search, an anonymous caller included.
 
-- The header chooses the window: the last 7, 30, or 90 days, or a custom range of two dates. The default is 30 days.
+- The header chooses the window: the last 7, 30, or 90 days, or a custom range of two dates. The default is 30 days. Choosing a custom range fills its two dates with the window on display, so the end date starts at today.
 - Two tiles state the window's loads and syncs, each with a daily sparkline. A window longer than 366 days draws weekly points, and one longer than 1,096 days draws monthly points.
 - A card splits loads and syncs by client kind and by harness. A request that named no client or harness is shown as `unknown`.
 - The By layer section is closed by default and names the layer count and the layer with the most loads. Opened, it lists each layer with its share of loads and syncs and its counts.
-- The By artifact table filters by artifact ID text, type, and layer, sorts on loads, syncs, search hits, or last loaded day in either order, and shows 50 artifacts at a time with a control that shows the next 50. The tiles and the breakdowns above it do not follow the table's filters.
+- The By artifact table filters by artifact ID text, type, and layer, sorts on loads, syncs, search hits, or last loaded day in either order, and reads 50 artifacts at a time, reading the next 50 as the reader scrolls to the end of the table. The loads, syncs, and search hits cells each draw a bar relative to the largest value in that column among the rows shown. The tiles and the breakdowns above it do not follow the table's filters.
 
 Search results, the domain browser's artifact rows, and the artifact viewer show each artifact's loads, syncs, and search hits for the last 30 days. A domain large enough for the compact table carries Loads and Syncs columns instead, and its sort control can rank the artifacts by loads. The lists read the counts of every artifact on screen in one request after the page renders. The artifact viewer's rail carries a Usage section with a bar per day, the last loaded and synced days, and a link that opens the Usage page filtered to the artifact. A usage read that fails leaves those figures out without an error.
 
