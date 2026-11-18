@@ -135,9 +135,7 @@ var orgTableStmts = []string{
 		PRIMARY KEY (tenant_id, id)
 	)`,
 	// §7.3.1 semantic overlap records, keyed by owner and peer, and the
-	// per-artifact computation entries. The names differ from the pair-keyed
-	// overlap_records table an earlier build of this release created, so
-	// CREATE TABLE IF NOT EXISTS never meets that layout.
+	// per-artifact computation entries.
 	`CREATE TABLE IF NOT EXISTS semantic_overlap_records (
 		tenant_id TEXT NOT NULL,
 		owner_id TEXT NOT NULL,

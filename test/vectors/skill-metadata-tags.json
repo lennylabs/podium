@@ -67,6 +67,16 @@
       "sdk_tags": []
     },
     {
+      "name": "byte order mark in earlier line",
+      "skill_md": "---\nname: greet\ndescription: foo﻿bar\nmetadata:\n  tags: a, b\n---\nGreet the user by name.\n",
+      "readable": false,
+      "go_tags": [
+        "a",
+        "b"
+      ],
+      "sdk_tags": []
+    },
+    {
       "name": "child-indent comment after tags",
       "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: a, b\n  # note\n---\nGreet the user by name.\n",
       "readable": false,
@@ -84,6 +94,29 @@
         "a:b"
       ],
       "sdk_tags": []
+    },
+    {
+      "name": "column-0 comment after tags",
+      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: a, b\n# team info\n  owner: alice\n---\nGreet the user by name.\n",
+      "readable": false,
+      "go_tags": [
+        "a",
+        "b"
+      ],
+      "sdk_tags": []
+    },
+    {
+      "name": "column-0 comment before tags",
+      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  owner: alice\n# team info\n  tags: a, b\n---\nGreet the user by name.\n",
+      "readable": true,
+      "go_tags": [
+        "a",
+        "b"
+      ],
+      "sdk_tags": [
+        "a",
+        "b"
+      ]
     },
     {
       "name": "comment as value",
@@ -276,6 +309,15 @@
       "sdk_tags": []
     },
     {
+      "name": "explicit tagged key after tags",
+      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: a, b\n  ? !!binary dGFncw==\n  : z\n---\nGreet the user by name.\n",
+      "readable": false,
+      "go_tags": [
+        "z"
+      ],
+      "sdk_tags": []
+    },
+    {
       "name": "flow mapping",
       "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: {x: y}\n---\nGreet the user by name.\n",
       "readable": false,
@@ -325,6 +367,19 @@
       "readable": false,
       "go_tags": [],
       "sdk_tags": []
+    },
+    {
+      "name": "four-space child indent",
+      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n    owner: alice\n    tags: a, b\n---\nGreet the user by name.\n",
+      "readable": true,
+      "go_tags": [
+        "a",
+        "b"
+      ],
+      "sdk_tags": [
+        "a",
+        "b"
+      ]
     },
     {
       "name": "go refuses escaped second tags key",
@@ -475,6 +530,16 @@
       ]
     },
     {
+      "name": "next line in earlier line",
+      "skill_md": "---\nname: greet\ndescription: foo  bar\nmetadata:\n  tags: a, b\n---\nGreet the user by name.\n",
+      "readable": false,
+      "go_tags": [
+        "a",
+        "b"
+      ],
+      "sdk_tags": []
+    },
+    {
       "name": "no value",
       "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags:\n---\nGreet the user by name.\n",
       "readable": false,
@@ -487,6 +552,29 @@
       "readable": false,
       "go_tags": [
         "café"
+      ],
+      "sdk_tags": []
+    },
+    {
+      "name": "one-space child indent",
+      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n tags: a, b\n---\nGreet the user by name.\n",
+      "readable": true,
+      "go_tags": [
+        "a",
+        "b"
+      ],
+      "sdk_tags": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "name": "paragraph separator in earlier line",
+      "skill_md": "---\nname: greet\ndescription: foo\u2029  bar\nmetadata:\n  tags: a, b\n---\nGreet the user by name.\n",
+      "readable": false,
+      "go_tags": [
+        "a",
+        "b"
       ],
       "sdk_tags": []
     },
@@ -751,6 +839,15 @@
       "skill_md": "---\nname: greet\ndescription: Greet the user politely.\n%TAG !e! tag:example.com,2000:app/\n# directive\nmetadata:\n  tags: a, b\n---\nGreet the user by name.\n",
       "readable": false,
       "go_tags": [],
+      "sdk_tags": []
+    },
+    {
+      "name": "tagged key after tags",
+      "skill_md": "---\nname: greet\ndescription: Greet the user politely.\nmetadata:\n  tags: a, b\n  !!binary dGFncw==: z\n---\nGreet the user by name.\n",
+      "readable": false,
+      "go_tags": [
+        "z"
+      ],
       "sdk_tags": []
     },
     {

@@ -67,8 +67,8 @@ func TestComputeOverlapAtWrite(t *testing.T) {
 	}
 	f.idx.fail = false
 	off := New(f.st, "t", nil)
-	if _, err := off.ComputeOverlapAtWrite(f.ctx, []OverlapWrite{{Key: key}}); !errors.Is(err, errOverlapUnavailable) {
-		t.Errorf("with the check off: %v, want errOverlapUnavailable", err)
+	if _, err := off.ComputeOverlapAtWrite(f.ctx, []OverlapWrite{{Key: key}}); !errors.Is(err, ErrOverlapUnavailable) {
+		t.Errorf("with the check off: %v, want ErrOverlapUnavailable", err)
 	}
 }
 

@@ -253,6 +253,29 @@ func TestRun_StartupPassComputesBootstrapArtifacts(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.1 — with the check on and no search index
+// (PODIUM_VECTOR_BACKEND=none beside an embedding provider), the registry
+// starts and logs once that neither the startup pass nor the sweep runs, and
+// no pass runs, so no tenant logs a refused computation.
+func TestRun_NoSearchIndexRunsNoStartupPass(t *testing.T) {
+	f := overlapBootFixture(t, "none", "1m")
+	logs, err := f.bootWith(t, func() {
+		if !readyzOK(f.addr) {
+			t.Error("/readyz did not answer 200")
+		}
+	})
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, logs)
+	}
+	skip := "lint.semantic_overlap: no startup pass or sweep runs: semantic overlap cannot be computed: no search index is configured"
+	if strings.Count(logs, skip) != 1 {
+		t.Errorf("the log carries %d lines saying no pass runs, want 1\n%s", strings.Count(logs, skip), logs)
+	}
+	if strings.Contains(logs, "startup pass running") || strings.Contains(logs, "startup pass of tenant") {
+		t.Errorf("a startup pass ran with no search index\n%s", logs)
+	}
+}
+
 // Spec: §7.3.1, §13.9 — readiness never waits on a semantic overlap
 // computation: with every computation held in flight at its neighbour query,
 // the startup pass's and the outbox write's included, /readyz answers 200 and

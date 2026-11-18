@@ -388,12 +388,12 @@ func TestRefreshAndRebuildOverlap(t *testing.T) {
 		t.Errorf("rebuild = %+v, %v; want 2 computed and 1 failed", rebuilt, err)
 	}
 	off := New(f.st, "t", nil).WithVectorSearch(f.idx, overlapEmbedder{model: "m1"})
-	if _, err := off.RebuildOverlap(f.ctx); !errors.Is(err, errOverlapUnavailable) {
-		t.Errorf("rebuild with the check off = %v, want errOverlapUnavailable", err)
+	if _, err := off.RebuildOverlap(f.ctx); !errors.Is(err, ErrOverlapUnavailable) {
+		t.Errorf("rebuild with the check off = %v, want ErrOverlapUnavailable", err)
 	}
 	noIndex := New(f.st, "t", nil).WithOverlapChecks(lint.Thresholds{}, lint.SemanticConfig{Enabled: true})
-	if _, err := noIndex.RefreshOverlap(f.ctx); !errors.Is(err, errOverlapUnavailable) {
-		t.Errorf("refresh with no index = %v, want errOverlapUnavailable", err)
+	if _, err := noIndex.RefreshOverlap(f.ctx); !errors.Is(err, ErrOverlapUnavailable) {
+		t.Errorf("refresh with no index = %v, want ErrOverlapUnavailable", err)
 	}
 }
 

@@ -8,11 +8,13 @@ import (
 )
 
 // AllowedTools is the SKILL.md `allowed-tools` field. The Agent Skills
-// standard defines it as a space-separated string (`Bash(git:*) Read`), and
-// Claude Code also accepts a YAML sequence, so decoding accepts both. Podium
-// does not interpret the value: adapters copy the authored SKILL.md bytes, and
-// the decoded list exists so a malformed value is reported rather than
-// silently dropped.
+// standard defines it as a space-separated string (`Bash(git:*) Read`),
+// published skills also separate the entries with commas, and a YAML sequence
+// of strings is accepted too, so decoding accepts each form. Podium stores the
+// authored bytes and does not interpret the value: adapters copy the authored
+// SKILL.md, and nothing reads the decoded list. A value of any other kind,
+// such as a mapping, fails the decode, which makes the SKILL.md unparseable
+// (§4.1).
 //
 // Spec: §4.3.4
 type AllowedTools []string
@@ -44,8 +46,12 @@ func (a *AllowedTools) UnmarshalYAML(node *yaml.Node) error {
 	}
 }
 
-// splitToolList splits a space-separated tool list. Separators inside
-// parentheses belong to the tool pattern and do not split it.
+// splitToolList splits a tool list on white space and on commas, so it
+// accepts the space-separated list the standard defines and the
+// comma-separated lists published skills use. Separators inside parentheses
+// belong to the tool pattern and do not split it.
+//
+// Spec: §4.3.4
 func splitToolList(s string) []string {
 	var out []string
 	var cur strings.Builder

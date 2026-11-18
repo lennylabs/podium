@@ -66,9 +66,13 @@ func overlapOutboxHook(reg *core.Registry) func(context.Context, []outboxWrite) 
 }
 
 // startOverlapSweep launches the §7.3.1 startup pass and the periodic sweep
-// in one background goroutine when the check is on, and returns at once, so
-// readiness never waits on a computation. run calls it once, after the
-// startup ingest of every bootstrap layer has completed, so one start runs
+// in one background goroutine when the check is on and the registry can
+// compute overlap, returns at once, so readiness never waits on a
+// computation, and reports whether it launched them. With the check on and no
+// search index, such as PODIUM_VECTOR_BACKEND=none, neither runs: every pass
+// would fail in every tenant, so it logs one line naming why instead. run
+// calls it once, after the startup ingest of every bootstrap layer has
+// completed, so one start runs
 // one startup pass however many layers it ingested. The startup pass is one
 // sweep pass that runs immediately, with no random delay, whether or not the
 // periodic sweep is on; it computes the artifacts the startup ingest stored,
@@ -78,9 +82,13 @@ func overlapOutboxHook(reg *core.Registry) func(context.Context, []outboxWrite) 
 // interval (firstSweepDelay). The goroutine exits when ctx is cancelled.
 //
 // Spec: §7.3.1, §13.12
-func startOverlapSweep(ctx context.Context, sem lint.SemanticConfig, st store.Store, reg *core.Registry) {
+func startOverlapSweep(ctx context.Context, sem lint.SemanticConfig, st store.Store, reg *core.Registry) bool {
 	if !sem.Enabled {
-		return
+		return false
+	}
+	if err := reg.OverlapReady(); err != nil {
+		log.Printf("warning: %s: no startup pass or sweep runs: %v", lint.SemanticOverlapCode, err)
+		return false
 	}
 	var offset time.Duration
 	if sem.RefreshInterval > 0 {
@@ -90,6 +98,7 @@ func startOverlapSweep(ctx context.Context, sem lint.SemanticConfig, st store.St
 		log.Printf("%s: startup pass running; periodic sweep off", lint.SemanticOverlapCode)
 	}
 	go sweepLoop(ctx, sem.RefreshInterval, offset, func(ctx context.Context, label string) { runOverlapSweep(ctx, st, reg, label) })
+	return true
 }
 
 // firstSweepDelay returns the random offset of a replica's periodic passes:

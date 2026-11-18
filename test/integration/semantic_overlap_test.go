@@ -520,6 +520,64 @@ func TestSemanticOverlap_RebuildAuthorization(t *testing.T) {
 	}
 }
 
+// unlistableStore fails every manifest listing, so a rebuild with the check
+// on and a search index fails at the store.
+type unlistableStore struct{ store.Store }
+
+func (unlistableStore) ListManifests(context.Context, string) ([]store.ManifestRecord, error) {
+	return nil, errors.New("metadata store unreachable")
+}
+
+// rebuildEnvelope posts a rebuild to a server over reg that authenticates no
+// caller and returns the status and the decoded §6.10 envelope.
+func rebuildEnvelope(t *testing.T, reg *core.Registry) (int, server.ErrorResponse) {
+	t.Helper()
+	api := httptest.NewServer(server.New(reg, server.WithUnauthenticatedReembed()).Handler())
+	t.Cleanup(api.Close)
+	resp, err := http.Post(api.URL+"/v1/admin/overlap/rebuild", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST rebuild: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var env server.ErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode rebuild envelope: %v", err)
+	}
+	return resp.StatusCode, env
+}
+
+// Spec: §7.3.1, §6.10 — with the check off, and with the check on and no
+// search index, the rebuild answers registry.unavailable with retryable false
+// and a suggested_action naming the configuration to change, because the
+// request cannot succeed until the operator changes it. A store failure keeps
+// the registry.unavailable default, retryable true.
+func TestSemanticOverlap_RebuildUnavailableRetryability(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	idx := vector.NewMemory(4)
+	emb := overlapEmbedder{model: "m1"}
+	off := core.New(st, "t", nil).WithVectorSearch(idx, emb).WithOverlapChecks(lint.Thresholds{}, lint.SemanticConfig{})
+	noIndex := core.New(st, "t", nil).WithOverlapChecks(lint.Thresholds{}, lint.SemanticConfig{Enabled: true})
+	for name, reg := range map[string]*core.Registry{"check off": off, "no search index": noIndex} {
+		status, env := rebuildEnvelope(t, reg)
+		if status != http.StatusInternalServerError || env.Code != "registry.unavailable" || env.Retryable {
+			t.Errorf("%s: status %d code %q retryable %v, want 500 registry.unavailable retryable false", name, status, env.Code, env.Retryable)
+		}
+		if !strings.Contains(env.SuggestedAction, "PODIUM_LINT_SEMANTIC_OVERLAP=on") || !strings.Contains(env.SuggestedAction, "search index") {
+			t.Errorf("%s: suggested_action %q, want the check and the search index named", name, env.SuggestedAction)
+		}
+	}
+	broken := core.New(unlistableStore{st}, "t", nil).WithVectorSearch(idx, emb).
+		WithOverlapChecks(lint.Thresholds{}, lint.SemanticConfig{Enabled: true})
+	status, env := rebuildEnvelope(t, broken)
+	if status != http.StatusInternalServerError || env.Code != "registry.unavailable" || !env.Retryable {
+		t.Errorf("store failure: status %d code %q retryable %v, want 500 registry.unavailable retryable true", status, env.Code, env.Retryable)
+	}
+	if strings.Contains(env.SuggestedAction, "PODIUM_LINT_SEMANTIC_OVERLAP") {
+		t.Errorf("store failure: suggested_action %q names the overlap configuration", env.SuggestedAction)
+	}
+}
+
 // Spec: §7.3.1 — the report and the rebuild accept only their own methods.
 func TestSemanticOverlap_Methods(t *testing.T) {
 	t.Parallel()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -52,7 +53,10 @@ func overlapStatementFailures(t *testing.T, s Store, tenant string, exec func(st
 // fails the read rather than reading as no overlap.
 func TestSQLite_OverlapStatementFailures(t *testing.T) {
 	t.Parallel()
-	s, err := OpenSQLite(":memory:")
+	// A file of its own rather than ":memory:": the in-memory DSN is one
+	// shared-cache database per test binary, and this test drops and
+	// recreates the overlap tables that parallel tests read.
+	s, err := OpenSQLite(filepath.Join(t.TempDir(), "podium.db"))
 	if err != nil {
 		t.Fatalf("OpenSQLite: %v", err)
 	}

@@ -65,8 +65,8 @@ type OverrideResult struct {
 	Changed  bool
 	Warnings []string
 	// Dropped lists the artifacts the re-materialization dropped under the
-	// §4.6 collision rule, the §4.6 no-inheritance rule, or the §4.1
-	// removed-type rule (§13.11.3); empty under DryRun, without a
+	// §4.6 collision rule, the §4.1 unparseable-manifest rule, the §4.6
+	// no-inheritance rule, or the §4.1 removed-type rule (§13.11.3); empty under DryRun, without a
 	// RegistryPath, and for a server source.
 	Dropped []layer.Drop
 	// Materialized is the re-materialization's Result, which the caller reads

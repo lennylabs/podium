@@ -11,7 +11,7 @@ import (
 
 const overlapBody = `{"semantic_overlap":{"state":"on","threshold":0.85,"model":"m1"},` +
 	`"diagnostics":[{"artifact_id":"fin/a","code":"lint.semantic_overlap","severity":"warning",` +
-	`"message":"description is semantically similar to fin/b (90%)","peers":[{"artifact_id":"fin/b","similarity":0.9}]}],` +
+	`"message":"name, description, when_to_use, and tags are semantically similar to fin/b (90%)","peers":[{"artifact_id":"fin/b","similarity":0.9}]}],` +
 	`"counts":{"error":0,"warning":1,"info":0}}`
 
 // Spec: §7.3.1 — podium overlap prints one line per diagnostic in the podium
@@ -23,7 +23,7 @@ func TestRenderOverlap(t *testing.T) {
 	if code := renderOverlap(&out, &errOut, []byte(overlapBody), 200, false, lint.SeverityError); code != 0 {
 		t.Errorf("--fail-on error with a warning: exit %d, want 0", code)
 	}
-	if want := "[warning] fin/a: description is semantically similar to fin/b (90%) (lint.semantic_overlap)\n"; out.String() != want {
+	if want := "[warning] fin/a: name, description, when_to_use, and tags are semantically similar to fin/b (90%) (lint.semantic_overlap)\n"; out.String() != want {
 		t.Errorf("text output = %q, want %q", out.String(), want)
 	}
 	out.Reset()

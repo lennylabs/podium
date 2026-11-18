@@ -169,8 +169,12 @@ func TestSemanticDiagnostics_ThresholdOrderAndPeers(t *testing.T) {
 	if d.Code != SemanticOverlapCode || d.Severity != SeverityWarning {
 		t.Errorf("diagnostic = %+v, want a %s warning", d, SemanticOverlapCode)
 	}
-	if want := "description is semantically similar to d (97%), b (90%), c (90%);"; !strings.Contains(d.Message, want) {
-		t.Errorf("message = %q, want it to contain %q", d.Message, want)
+	// The check compares the §4.7 embedding projection, so the message names
+	// the projection fields and does not attribute the similarity to the
+	// description alone.
+	want := "name, description, when_to_use, and tags are semantically similar to d (97%), b (90%), c (90%); make them distinct"
+	if !strings.HasPrefix(d.Message, want) {
+		t.Errorf("message = %q, want it to begin with %q", d.Message, want)
 	}
 	if len(d.Peers) != 3 || d.Peers[0].ArtifactID != "d" || d.Peers[0].Similarity != 0.97 || !d.Peers[2].ComputedAt.Equal(at) {
 		t.Errorf("peers = %+v", d.Peers)

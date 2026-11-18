@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/store"
@@ -33,7 +34,9 @@ func overlapReadsFail(t *testing.T, s store.Store, tenant string) {
 // Spec: §7.3.1 — the SQLite overlap calls return the store error.
 func TestSQLite_OverlapRecordsReturnErrors(t *testing.T) {
 	t.Parallel()
-	s, err := store.OpenSQLite(":memory:")
+	// A file of its own: the ":memory:" DSN is one shared-cache database per
+	// test binary, which a parallel test would share.
+	s, err := store.OpenSQLite(filepath.Join(t.TempDir(), "podium.db"))
 	if err != nil {
 		t.Fatalf("OpenSQLite: %v", err)
 	}

@@ -134,6 +134,9 @@ func readableTagsForms() []tagsForm {
 			withTags("  credits:\n    - alice\n    - bob\n  tags: a, b\n"), "a", "b"),
 		// Go refuses this one, a repeated key, so go_tags is null.
 		readableForm("go refuses escaped second tags key", withTags("  tags: a, b\n  \"ta\\x67s\": c\n"), "a", "b"),
+		readableForm("one-space child indent", withTags(" tags: a, b\n"), "a", "b"),
+		readableForm("four-space child indent", withTags("    owner: alice\n    tags: a, b\n"), "a", "b"),
+		readableForm("column-0 comment before tags", withTags("  owner: alice\n# team info\n  tags: a, b\n"), "a", "b"),
 	}
 }
 
@@ -182,6 +185,11 @@ func unreadableTagsForms() []tagsForm {
 		unreadableForm("alias key after tags", withTags(owner+"  *k : z\n")),
 		unreadableForm("explicit alias key after tags", withTags(owner+"  ? *k\n  : z\n")),
 		unreadableForm("explicit key with deeper alias after tags", withTags(owner+"  ?\n    *k\n  : z\n")),
+		// yaml.v3 lets a tagged key that decodes to "tags" replace the earlier
+		// value, so Go resolves [z] and the overlay reports no tag.
+		unreadableForm("tagged key after tags", withTags("  tags: a, b\n  !!binary dGFncw==: z\n")),
+		unreadableForm("explicit tagged key after tags", withTags("  tags: a, b\n  ? !!binary dGFncw==\n  : z\n")),
+		unreadableForm("column-0 comment after tags", withTags("  tags: a, b\n# team info\n  owner: alice\n")),
 	}
 }
 
@@ -213,6 +221,9 @@ func frontmatterTagsForms() []tagsForm {
 			skillDoc("name: greet\ndescription: foo\u2028  bar\n"+tags)),
 		unreadableForm("lone cr in description", skillDoc("name: greet\ndescription: foo\r  bar\n"+tags)),
 		unreadableForm("lone cr between keys", skillDoc("name: greet\rx: y\n"+tags)),
+		unreadableForm("next line in earlier line", skillDoc("name: greet\ndescription: foo\u0085  bar\n"+tags)),
+		unreadableForm("paragraph separator in earlier line", skillDoc("name: greet\ndescription: foo\u2029  bar\n"+tags)),
+		unreadableForm("byte order mark in earlier line", skillDoc("name: greet\ndescription: foo\ufeffbar\n"+tags)),
 	}
 }
 

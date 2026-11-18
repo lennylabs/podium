@@ -18,7 +18,7 @@ import (
 //
 // Spec: §7.3.1
 func (r *Registry) RebuildOverlap(ctx context.Context) (OverlapComputeResult, error) {
-	if err := r.overlapReady(); err != nil {
+	if err := r.OverlapReady(); err != nil {
 		return OverlapComputeResult{}, err
 	}
 	served, err := r.servedArtifacts(ctx)
@@ -65,7 +65,7 @@ type OverlapSweepResult struct {
 //
 // Spec: §7.3.1
 func (r *Registry) RefreshOverlap(ctx context.Context) (OverlapSweepResult, error) {
-	if err := r.overlapReady(); err != nil {
+	if err := r.OverlapReady(); err != nil {
 		return OverlapSweepResult{}, err
 	}
 	tenant := r.TenantFor(ctx)

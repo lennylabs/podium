@@ -58,7 +58,7 @@ Without `--json`, `podium overlap` prints one line per diagnostic in the `podium
 
 ```text
 [warning] finance/ap/pay-invoice: description overlaps finance/ap/submit-invoice (80%); give each artifact a distinct summary so search and load_domain can tell them apart (lint.colliding_descriptions)
-[warning] finance/ap/pay-invoice: description is semantically similar to finance/payments/settle-bill (91%); give each artifact a distinct summary so search and load_domain can tell them apart (lint.semantic_overlap)
+[warning] finance/ap/pay-invoice: name, description, when_to_use, and tags are semantically similar to finance/payments/settle-bill (91%); make them distinct so search and load_domain can tell the artifacts apart (lint.semantic_overlap)
 ```
 
 Each message names the overlapping artifacts in order of descending similarity, with each similarity as a percentage, and abbreviates a list of more than 10 to the first 10 and a count of the rest. A pair appears under both of its artifacts unless one of them suppresses the code. A report with no diagnostic prints `overlap: no issues.`.

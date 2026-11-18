@@ -171,8 +171,8 @@ type Result struct {
 	// rather than silently omitting it.
 	Skipped []string
 	// Dropped lists the artifacts a filesystem-source composition dropped
-	// under the §4.6 collision rule, the §4.6 no-inheritance rule, or the
-	// §4.1 removed-type rule (§13.11.3). Callers render each entry with its
+	// under the §4.6 collision rule, the §4.1 unparseable-manifest rule, the
+	// §4.6 no-inheritance rule, or the §4.1 removed-type rule (§13.11.3). Callers render each entry with its
 	// Code and Reason; a server source never reports one. An entry whose
 	// PreviousOutputKept is set is a §4.1 unparseable-manifest drop whose
 	// previous files and lock entries the run kept (a DryRun run reports what

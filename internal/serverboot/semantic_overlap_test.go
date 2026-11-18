@@ -252,15 +252,33 @@ func TestRunOverlapSweep(t *testing.T) {
 }
 
 // Spec: §7.3.1, §13.12 — the startup pass and the sweep start only with the
-// check on, and the goroutine exits when the context ends.
-func TestStartOverlapSweep_StopsWithContext(t *testing.T) {
+// check on and a search index, and the goroutine exits when the context ends.
+// With the check on and no search index neither starts, so no pass lists the
+// tenants to log a refusal in each.
+func TestStartOverlapSweep_StartsOnlyWhenComputable(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	reg := core.New(store.NewMemory(), "", nil)
-	startOverlapSweep(ctx, lint.SemanticConfig{}, store.NewMemory(), reg)
-	startOverlapSweep(ctx, lint.SemanticConfig{Enabled: true}, store.NewMemory(), reg)
-	startOverlapSweep(ctx, lint.SemanticConfig{Enabled: true, RefreshInterval: time.Minute}, store.NewMemory(), reg)
+	_, gated, ready := sweepFixture(t)
+	if startOverlapSweep(ctx, lint.SemanticConfig{}, gated, ready) {
+		t.Error("the sweep started with the check off")
+	}
+	if !startOverlapSweep(ctx, lint.SemanticConfig{Enabled: true}, gated, ready) {
+		t.Error("the startup pass did not start with the check on and a search index")
+	}
+	if !startOverlapSweep(ctx, lint.SemanticConfig{Enabled: true, RefreshInterval: time.Minute}, gated, ready) {
+		t.Error("the sweep did not start with the check on and a search index")
+	}
+
+	_, unindexed, _ := sweepFixture(t)
+	close(unindexed.release)
+	noIndex := core.New(unindexed, "", nil).WithOverlapChecks(lint.Thresholds{}, lint.SemanticConfig{Enabled: true})
+	if startOverlapSweep(context.Background(), lint.SemanticConfig{Enabled: true, RefreshInterval: time.Minute}, unindexed, noIndex) {
+		t.Error("the sweep started with no search index")
+	}
+	if n := unindexed.calls.Load(); n != 0 {
+		t.Errorf("a pass listed the tenants %d times with no search index, want 0", n)
+	}
 }
 
 // Spec: §7.3.1 — the loop runs the startup pass at once, then a periodic pass

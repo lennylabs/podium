@@ -40,9 +40,13 @@ func (r *Registry) WithOverlapChecks(th lint.Thresholds, sem lint.SemanticConfig
 // SemanticOverlapEnabled reports whether PODIUM_LINT_SEMANTIC_OVERLAP is on.
 func (r *Registry) SemanticOverlapEnabled() bool { return r.overlap.semantic.Enabled }
 
-// errOverlapUnavailable reports a computation the registry cannot run: the
-// check is off, or no search index is wired.
-var errOverlapUnavailable = errors.New("semantic overlap cannot be computed")
+// ErrOverlapUnavailable reports a computation the registry cannot run: the
+// check is off, or no search index is wired. The condition lasts until the
+// operator changes the configuration, so the rebuild endpoint answers it as
+// not retryable, and the startup pass and the sweep do not run under it.
+//
+// Spec: §7.3.1
+var ErrOverlapUnavailable = errors.New("semantic overlap cannot be computed")
 
 // errNoStoredVector reports an artifact whose vector the index does not hold
 // yet, or holds under another embedding model. The computation fails and keeps
@@ -82,14 +86,17 @@ func (r *Registry) semanticThreshold() float64 {
 	return r.overlap.semantic.Threshold(r.overlapModel())
 }
 
-// overlapReady reports whether the registry can compute overlap records: the
-// check is on and the §4.7 vector path is wired.
-func (r *Registry) overlapReady() error {
+// OverlapReady returns nil when the registry can compute overlap records,
+// which needs the check on and the §4.7 vector path wired, and otherwise an
+// error wrapping ErrOverlapUnavailable that names the missing piece.
+//
+// Spec: §7.3.1
+func (r *Registry) OverlapReady() error {
 	if !r.overlap.semantic.Enabled {
-		return fmt.Errorf("%w: PODIUM_LINT_SEMANTIC_OVERLAP is off", errOverlapUnavailable)
+		return fmt.Errorf("%w: PODIUM_LINT_SEMANTIC_OVERLAP is off", ErrOverlapUnavailable)
 	}
 	if !r.vectorSearchActive() {
-		return fmt.Errorf("%w: no search index is configured", errOverlapUnavailable)
+		return fmt.Errorf("%w: no search index is configured", ErrOverlapUnavailable)
 	}
 	return nil
 }
@@ -136,7 +143,14 @@ func (r *Registry) neighborSourceFor(ctx context.Context, rec store.ManifestReco
 		return r.vectorNeighborSource(tenant, given), nil
 	}
 	if _, canRead := r.vector.(vector.VectorReader); !canRead && r.embedder == nil {
-		tv := r.vector.(vector.TextVectorizer)
+		// vectorSearchActive admits a backend with no local embedder only
+		// when it self-embeds, so every such backend is expected to query
+		// by text. A backend that does neither fails this computation
+		// rather than the process.
+		tv, ok := r.vector.(vector.TextVectorizer)
+		if !ok {
+			return neighborSource{}, fmt.Errorf("vector backend %s cannot return stored vectors and cannot query with text", r.vector.ID())
+		}
 		text := projection.Artifact(rec)
 		return neighborSource{
 			query: func(ctx context.Context, k int) ([]vector.Match, error) { return tv.QueryText(ctx, tenant, text, k) },
@@ -618,7 +632,7 @@ func (r *Registry) ComputeOverlapAtWrite(ctx context.Context, writes []OverlapWr
 // computeOverlapKeys is ComputeOverlap under opts, returning the batch's
 // outcome and the served set it computed against.
 func (r *Registry) computeOverlapKeys(ctx context.Context, keys []vector.RowKey, opts overlapBatchOptions) (overlapBatchOutcome, map[string]store.ManifestRecord, error) {
-	if err := r.overlapReady(); err != nil {
+	if err := r.OverlapReady(); err != nil {
 		return overlapBatchOutcome{}, nil, err
 	}
 	served, err := r.servedArtifacts(ctx)

@@ -706,7 +706,7 @@ GET /v1/overlap?threshold={n}&artifact={id}
       "layer": "team-finance",
       "code": "lint.semantic_overlap",
       "severity": "warning",
-      "message": "description is semantically similar to finance/payments/settle-bill (91%); give each artifact a distinct summary so search and load_domain can tell them apart",
+      "message": "name, description, when_to_use, and tags are semantically similar to finance/payments/settle-bill (91%); make them distinct so search and load_domain can tell the artifacts apart",
       "peers": [
         {
           "artifact_id": "finance/payments/settle-bill",

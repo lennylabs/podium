@@ -302,7 +302,7 @@ func SemanticDiagnostics(subjects []SemanticSubject, pairs []SemanticPair, thres
 		}
 		sortPeers(found)
 		d := warn(s.ArtifactID, SemanticOverlapCode,
-			fmt.Sprintf("description is semantically similar to %s; give each artifact a distinct summary so search and load_domain can tell them apart",
+			fmt.Sprintf("name, description, when_to_use, and tags are semantically similar to %s; make them distinct so search and load_domain can tell the artifacts apart",
 				formatSemanticPeers(found)))
 		d.Peers = found
 		out = append(out, d)

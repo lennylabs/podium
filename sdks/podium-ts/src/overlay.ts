@@ -89,11 +89,43 @@ function parseFrontmatter(text: string): { fields: FrontmatterFields; body: stri
         pendingTags = true;
       }
     } else if (key === "type" || key === "version" || key === "description") {
-      fields[key] = unquote(val);
+      fields[key] = scalarValue(val);
     }
   }
   fields.tags = tags.filter(Boolean);
   return { fields, body };
+}
+
+// YAML_NULLS are the plain scalars yaml.v3 decodes to null, which a string
+// field reads as empty, and the empty value, which is null too.
+const YAML_NULLS = new Set(["", "~", "null", "Null", "NULL"]);
+
+// scalarValue returns the string a single-line top-level YAML scalar decodes
+// to. A quoted value ends at its closing quote, so a trailing comment after it
+// is dropped. A plain value ends before a "#" that begins the value or follows
+// white space, which starts a comment, and a plain null (~, null, or an empty
+// value) reads as empty, as Go's decode reads it into a string field.
+// "version: ~" therefore declares no version, and "type: skill # c" declares a
+// skill. Escapes inside a quoted value are kept as written. An unclosed quote
+// keeps the earlier reading, with the surrounding quotes removed.
+//
+// Spec: §4.3, §4.3.4
+function scalarValue(val: string): string {
+  const quote = val[0];
+  if (quote === '"' || quote === "'") {
+    for (let i = 1; i < val.length; i++) {
+      if (quote === '"' && val[i] === "\\") {
+        i++;
+      } else if (val[i] === quote) {
+        if (quote === "'" && val[i + 1] === "'") i++;
+        else return val.slice(1, i);
+      }
+    }
+    return val.replace(/^['"]|['"]$/g, "");
+  }
+  const comment = /(?:^|[ \t])#/.exec(val);
+  const plain = (comment ? val.slice(0, comment.index) : val).replace(/[ \t]+$/, "");
+  return YAML_NULLS.has(plain) ? "" : plain;
 }
 
 // The SKILL.md metadata.tags readable form. A line reader cannot reproduce
@@ -118,9 +150,10 @@ function parseFrontmatter(text: string): { fields: FrontmatterFields; body: stri
 //   5. The value is plain (TAGS_PLAIN and not a null word), or double- or
 //      single-quoted printable ASCII with no escape and no inner quote.
 //   6. Every later line is blank up to the next block line at or above the
-//      child indent, and no later block line holds a "*" that starts an alias:
-//      yaml.v3 lets an alias key that resolves to "tags" replace the value
-//      with no error.
+//      child indent, and no later block line holds a "*" that starts an alias
+//      or a "!" that starts a tag: yaml.v3 lets an alias key that resolves to
+//      "tags", or a tagged key that decodes to it, replace the value with no
+//      error.
 //   7. Splitting the content on "," and trimming spaces leaves no empty
 //      element. The elements, in order, are the tags.
 //   8. The frontmatter holds no CR, U+0085, U+2028, U+2029, or U+FEFF, which
@@ -195,15 +228,22 @@ function blankUntilSibling(lines: string[], indentLen: number): boolean {
   return true;
 }
 
-// holdsAlias reports whether a line holds a "*" that begins a token and that a
-// non-white character follows. yaml.v3 compares mapping keys for duplicates
-// only between nodes of one kind, so an alias key resolving to tags would
-// replace the tags value with no error (condition 6).
-function holdsAlias(line: string): boolean {
+// holdsAliasOrTag reports whether a line holds an alias or a tag at a token
+// start (condition 6). yaml.v3 compares mapping keys for duplicates only
+// between nodes of one kind and tag, so an alias key resolving to tags, or a
+// tagged key such as !!binary dGFncw== that decodes to it, replaces the
+// earlier value with no error. A token starts at the line start, after white
+// space, or after the "[", "{", or "," of a flow collection, which needs no
+// space before the next entry. A "*" starts an alias when a non-white
+// character follows it, and a "!" always starts a tag. A "*" or a "!" at a
+// token start inside a scalar counts too, so the check errs toward reporting
+// no value.
+function holdsAliasOrTag(line: string): boolean {
   for (let i = 0; i < line.length; i++) {
-    if (line[i] === "*" && (i === 0 || isWhite(line[i - 1])) && i + 1 < line.length && !isWhite(line[i + 1])) {
-      return true;
-    }
+    const ch = line[i];
+    if (ch !== "*" && ch !== "!") continue;
+    if (i > 0 && !isWhite(line[i - 1]) && !"[{,".includes(line[i - 1])) continue;
+    if (ch === "!" || (i + 1 < line.length && !isWhite(line[i + 1]))) return true;
   }
   return false;
 }
@@ -251,7 +291,7 @@ export function metadataTags(skillMD: string): string[] {
   const content = tagsContent(fm[at], indent);
   if (content === null) return [];
   const after = fm.slice(at + 1, stop);
-  if (!blankUntilSibling(after, indent.length) || after.some(holdsAlias)) return [];
+  if (!blankUntilSibling(after, indent.length) || after.some(holdsAliasOrTag)) return [];
   if (fm.slice(0, at).some(opensScalarOrDocumentEnd)) return [];
   const tags = content.split(",").map(trimSpaces);
   return tags.some((t) => t === "") ? [] : tags;
@@ -281,8 +321,8 @@ export function metadataTags(skillMD: string): string[] {
 //      version line into another value: a multi-line flow mapping such as
 //      "openclaw: {" or a quoted scalar continued on the next line.
 //   6. No later frontmatter line, and no part of a flow-form mapping, holds a
-//      "*" that starts an alias, which yaml.v3 lets replace the metadata
-//      mapping or its version key with no error.
+//      "*" that starts an alias or a "!" that starts a tag, which yaml.v3 lets
+//      replace the metadata mapping or its version key with no error.
 const VERSION_VALUE = /^(?:([0-9]+\.[0-9]+\.[0-9]+)|"([0-9]+\.[0-9]+\.[0-9]+)"|'([0-9]+\.[0-9]+\.[0-9]+)')$/;
 
 // versionValue returns the version a value in the condition 4 form holds, or
@@ -365,7 +405,7 @@ function flowMappingEntries(val: string): string[] | null {
 // (condition 3), or "".
 function flowMetadataVersion(val: string): string {
   const entries = flowMappingEntries(val);
-  if (entries === null || holdsAlias(val)) return "";
+  if (entries === null || holdsAliasOrTag(val)) return "";
   const found: string[] = [];
   for (const entry of entries) {
     const trimmed = entry.replace(/^[ \t]+|[ \t]+$/g, "");
@@ -425,7 +465,7 @@ export function metadataVersion(skillMD: string): string {
     return "";
   }
   if (version === "" || fm.slice(0, at).some(leavesOpen)) return "";
-  if (fm.slice(at + 1).some(holdsAlias)) return "";
+  if (fm.slice(at + 1).some(holdsAliasOrTag)) return "";
   return version;
 }
 

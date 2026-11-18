@@ -149,7 +149,7 @@ func TestSemanticOverlap_EndToEnd(t *testing.T) {
 		"ops/mixed/ARTIFACT.md":      agentArtifact("invoice reconciliation for employee onboarding"),
 		"hr/welcome/ARTIFACT.md":     agentArtifact("welcoming staff with new hire orientation"),
 	})
-	cliContains(t, ri.Stdout, "advisory: finance/remit [warning] description is semantically similar to finance/settle (", "ingest advisory names the paraphrase")
+	cliContains(t, ri.Stdout, "advisory: finance/remit [warning] name, description, when_to_use, and tags are semantically similar to finance/settle (", "ingest advisory names the paraphrase")
 	cliContains(t, ri.Stdout, "(lint.semantic_overlap)", "ingest advisory carries the code")
 	if strings.Contains(ri.Stdout, "advisory: hr/welcome [warning] description is semantically") {
 		t.Errorf("an unrelated artifact drew a semantic advisory:\n%s", ri.Stdout)
@@ -159,7 +159,7 @@ func TestSemanticOverlap_EndToEnd(t *testing.T) {
 	if text.Exit != 0 {
 		t.Fatalf("podium overlap exit=%d, want 0 under --fail-on error\nstdout=%s\nstderr=%s", text.Exit, text.Stdout, text.Stderr)
 	}
-	cliContains(t, text.Stdout, "[warning] finance/settle: description is semantically similar to finance/remit (", "text line in the lint format")
+	cliContains(t, text.Stdout, "[warning] finance/settle: name, description, when_to_use, and tags are semantically similar to finance/remit (", "text line in the lint format")
 	if strings.Contains(text.Stdout, "ops/mixed (7") {
 		t.Errorf("the 0.71 pair is reported at the default threshold:\n%s", text.Stdout)
 	}
