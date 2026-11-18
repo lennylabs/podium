@@ -24,6 +24,7 @@ The only running component is the `podium` CLI. There is no server process, no d
 - **Materialization** through the configured harness adapter.
 - **Profiles and scoping.** `--include`, `--exclude`, and `--type` narrow the materialized set. `podium sync save-as --profile <name>` captures the current set as a named profile in `sync.yaml`, and `podium sync --profile <name>` replays it.
 - **Lock file** at `<target>/.podium/sync.lock`. `podium sync override` and `podium sync save-as` work the same way as they do against a server.
+- **Word-based overlap checks.** `podium lint` flags artifacts with copied or templated descriptions and duplicated prose. The semantic check needs a registry server. See [Finding overlapping artifacts](../../managing/overlap).
 - **Watch mode** through `podium sync --watch`, which uses fsnotify to re-materialize on registry-folder or overlay changes.
 - **Multi-user use through a shared directory.** Commit the registry folder to Git, or share it through a network share or a sync service, and each developer runs `podium sync` against their copy. The shared Git history doubles as the audit trail.
 

@@ -63,17 +63,16 @@ artifact, and agents get a tree to walk.
 
 Covered in [Domains](../authoring/domains).
 
-### Selective materialization
+### Materialization and discovery
+
+Artifacts reach a workspace in one of two ways. Sync is proactive and runs
+ahead of time. Discovery is lazy and driven by the agent.
 
 A workspace rarely needs the whole catalog. `podium sync` writes a chosen
 subset into the workspace ahead of time, selected by include globs, exclude
 globs, and artifact types. A named profile stores that subset in `sync.yaml`,
 so one command switches between scopes. A narrowed scope also removes the files
 a wider previous run wrote.
-
-Covered in [Selective materialization](../consuming/selective-materialization).
-
-### Progressive discovery
 
 The `podium-mcp` stdio MCP server lets an agent find artifacts and load them on
 demand. The agent starts with an empty context window and a small set of
@@ -88,7 +87,8 @@ bundled files at the same time. A catalog larger than any system prompt stays
 usable because the agent pays only for the artifacts it loads. This path
 requires a registry server, reached through the MCP server or an SDK.
 
-Covered in [Browsing the catalog](../consuming/browsing-the-catalog).
+Covered in [Selective materialization](../consuming/selective-materialization)
+and [Browsing the catalog](../consuming/browsing-the-catalog).
 
 ### Layered composition
 
@@ -127,14 +127,34 @@ A registry server protects the catalog with signing, visibility, and audit:
 Covered in [Access control](../deployment/content/access-control) and
 [Audit and observability](../deployment/operations/observability#audit-log).
 
+### Usage metrics
+
+Every artifact load and every search is an audit event that records the
+artifact or the query and the client that made the call. The registry streams
+audit events to any combination of a local file, stdout, HTTP receivers that
+accept NDJSON, and an OpenTelemetry Collector over OTLP. A log pipeline that
+receives the stream counts loads and searches per artifact, which shows which
+artifacts agents load, how often, and which go unused. Podium has no built-in
+usage report.
+
+Covered in [Seeing how the catalog is used](../managing/usage).
+
+### Overlap detection
+
+Two artifacts overlap when their descriptions claim the same situations, and an
+agent that sees both cannot tell which one to load. Word-based checks flag
+copied or templated descriptions and duplicated prose. `podium lint` runs them
+in every deployment mode, so a CI job reports an overlap before a merge, and a
+registry runs them at ingest. A registry server can also run an optional
+semantic check that compares the embedding vectors search already stores, which
+flags two artifacts that say the same thing in different words.
+`podium overlap` reports the overlap across the live catalog.
+
+Covered in [Finding overlapping artifacts](../managing/overlap).
+
 ### Observability
 
-Every artifact load and every search is an audit event. The registry streams
-audit events to any combination of a file, stdout, HTTP receivers that accept
-NDJSON, and an OpenTelemetry Collector over OTLP. The stream shows which
-artifacts agents load and how often.
-
-The registry also exposes these signals:
+The registry exposes these operational signals:
 
 - Prometheus metrics at `/metrics`.
 - OpenTelemetry traces exported over OTLP/HTTP when tracing is enabled.
