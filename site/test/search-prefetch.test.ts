@@ -41,10 +41,44 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
+  // Restores the prototype getter after a test that overrides the ready state.
+  Reflect.deleteProperty(document, "readyState");
   Object.defineProperty(navigator, "connection", { value: undefined, configurable: true });
   document.body.innerHTML = "";
 });
+
+/** Opens the search overlay the way a reader's focus on the field does. */
+function openSearch(): void {
+  document.querySelector<HTMLInputElement>("[data-search-input]")?.dispatchEvent(new Event("focus"));
+}
+
+/** Types a query into the open overlay. */
+function typeQuery(query: string): void {
+  const input = document.querySelector<HTMLInputElement>("[data-search-overlay] input");
+  expect(input).not.toBeNull();
+  input!.value = query;
+  input!.dispatchEvent(new Event("input"));
+}
+
+function resultsText(): string {
+  return document.querySelector("[data-search-results]")?.textContent ?? "";
+}
+
+/** A response holding the one-page index. */
+function indexResponse(): Response {
+  return new Response(serializedIndex(), { status: 200 });
+}
+
+/** A fetch that never answers and rejects only when its signal aborts. */
+function hangingFetch(_url: string, init?: RequestInit): Promise<Response> {
+  return new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () =>
+      reject(new DOMException("The operation was aborted.", "AbortError")),
+    );
+  });
+}
 
 /** Runs every queued idle task and lets the loads they start settle. */
 async function runIdle(): Promise<void> {
@@ -89,6 +123,87 @@ describe("search index prefetch", () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
+  it("shares the in-flight prefetch when the reader opens search before it finishes", async () => {
+    let release: () => void = () => undefined;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = () => resolve(indexResponse());
+        }),
+    );
+    const mountSearch = await freshMountSearch();
+    mountSearch("/base");
+    for (const task of idle.splice(0)) task();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    openSearch();
+    typeQuery("install");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    release();
+    await vi.waitFor(() => expect(resultsText()).toContain("Install"));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for the load event when the page is still loading", async () => {
+    Object.defineProperty(document, "readyState", { value: "loading", configurable: true });
+    const mountSearch = await freshMountSearch();
+    mountSearch("/base");
+    expect(idle).toHaveLength(0);
+
+    Reflect.deleteProperty(document, "readyState");
+    window.dispatchEvent(new Event("load"));
+    expect(idle).toHaveLength(1);
+    // The listener is registered once, so a second load event schedules nothing.
+    window.dispatchEvent(new Event("load"));
+    expect(idle).toHaveLength(1);
+
+    await runIdle();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a message after a failed load and retries when the reader types", async () => {
+    fetchMock
+      .mockImplementationOnce(async () => new Response("missing", { status: 404 }))
+      .mockImplementationOnce(async () => new Response("missing", { status: 503 }));
+    const mountSearch = await freshMountSearch();
+    mountSearch("/base");
+    await runIdle();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    openSearch();
+    await vi.waitFor(() => expect(resultsText()).toContain("Search could not load"));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    typeQuery("install");
+    await vi.waitFor(() => expect(resultsText()).toContain("Install"));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(resultsText()).not.toContain("Search could not load");
+  });
+
+  it("abandons a hung index request after its timeout and retries on the next query", async () => {
+    fetchMock.mockImplementationOnce(hangingFetch);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const mountSearch = await freshMountSearch();
+    mountSearch("/base");
+    openSearch();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const signal = (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.signal;
+    expect(signal).toBeDefined();
+
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(signal?.aborted).toBe(true);
+
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(resultsText()).toContain("Search could not load"));
+
+    typeQuery("install");
+    await vi.waitFor(() => expect(resultsText()).toContain("Install"));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the on-demand fetch when the browser asks to save data", async () => {
     Object.defineProperty(navigator, "connection", { value: { saveData: true }, configurable: true });
     const mountSearch = await freshMountSearch();
@@ -101,12 +216,17 @@ describe("search index prefetch", () => {
 
   it("waits a fixed delay when the browser has no requestIdleCallback", async () => {
     vi.stubGlobal("requestIdleCallback", undefined);
-    vi.useFakeTimers();
+    // Only the timer functions are faked. The default set also installs a fake
+    // requestIdleCallback, which would put the idle path back in place and
+    // leave the fallback untested.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       const mountSearch = await freshMountSearch();
       mountSearch("/base");
       expect(fetchMock).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(2000);
+      vi.advanceTimersByTime(1999);
+      expect(fetchMock).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
       expect(fetchMock).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();

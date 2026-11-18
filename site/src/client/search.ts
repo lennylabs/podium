@@ -14,6 +14,16 @@ let index: MiniSearchType<StoredFields> | null = null;
 let loading: Promise<void> | null = null;
 
 /**
+ * How long the index request may take before it is abandoned. A request that
+ * hangs would otherwise hold the shared load forever, and every later search
+ * would wait on it instead of retrying. A timed-out load counts as failed.
+ */
+const LOAD_TIMEOUT_MS = 15_000;
+
+/** Shown in the results while the index cannot be loaded. */
+const UNAVAILABLE = `<li class="search-empty">Search could not load. Type to try again.</li>`;
+
+/**
  * Fetches the prebuilt index and the search engine. The page schedules this
  * when it is idle (prefetchWhenIdle), and the reader's first interaction with
  * the search field starts it if it has not run, so the first search rarely
@@ -29,10 +39,7 @@ async function load(basePath: string): Promise<void> {
     document.body.dataset["searchIndex"] ?? `${basePath}/assets/search-index.json`;
   const [{ default: MiniSearch }, serialized] = await Promise.all([
     import("minisearch"),
-    fetch(url).then((response) => {
-      if (!response.ok) throw new Error(`search index: HTTP ${response.status}`);
-      return response.text();
-    }),
+    fetchIndex(url),
   ]);
   index = MiniSearch.loadJSON<StoredFields>(serialized, {
     fields: SEARCH_FIELDS,
@@ -40,6 +47,23 @@ async function load(basePath: string): Promise<void> {
     processTerm,
     searchOptions: SEARCH_OPTIONS,
   });
+}
+
+/**
+ * Fetches the serialized index, abandoning the request after LOAD_TIMEOUT_MS.
+ * The abort also covers reading the body, so a response that stalls midway
+ * fails the same way as one that never starts.
+ */
+async function fetchIndex(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), LOAD_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`search index: HTTP ${response.status}`);
+    return await response.text();
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 /**
@@ -199,10 +223,21 @@ export function mountSearch(basePath: string): void {
 
   const begin = (): void => {
     open(overlay, input);
+    search();
+  };
+
+  // Runs the query once the index is present. Before that, it starts or joins
+  // the load, so a query typed after a failed load retries it, and it reports
+  // a failure in the results rather than leaving them blank.
+  const search = (): void => {
+    if (index !== null) {
+      run();
+      return;
+    }
     ensureLoading(basePath).then(
       () => run(),
       () => {
-        // The field stays open with no results; the next interaction retries.
+        results.innerHTML = UNAVAILABLE;
       },
     );
   };
@@ -227,7 +262,7 @@ export function mountSearch(basePath: string): void {
     field.addEventListener("focus", begin);
   }
 
-  input.addEventListener("input", run);
+  input.addEventListener("input", search);
 
   // A result the router takes over never reloads the page, so the overlay is
   // closed here rather than by the navigation.

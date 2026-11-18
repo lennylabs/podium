@@ -49,11 +49,11 @@ export function loadConfig(overrides: Partial<SiteConfig> = {}): SiteConfig {
     // what a reader downloads: GitHub Pages serves the file gzipped, and the
     // page prefetches it in idle time (client/search.ts). The raw size grew
     // with every release and every reference section, so a raw limit had to be
-    // raised repeatedly, from 600kB to 845kB; the compressed size is about a
-    // quarter of the raw size and grows correspondingly more slowly. 256kB leaves room for
-    // routine documentation growth. When the compressed index reaches it,
-    // split the index per section, which is the other fix the check's own
-    // message names.
+    // raised repeatedly, from 600kB to 845kB. The compressed size is about a
+    // quarter of the raw size and grows correspondingly more slowly. 256kB
+    // leaves room for routine documentation growth. When the compressed index
+    // reaches it, split the index per section, which is the other fix the
+    // check's own message names.
     searchIndexLimitGzipBytes: 256 * 1024,
     ...overrides,
   };

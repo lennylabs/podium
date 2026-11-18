@@ -98,9 +98,9 @@ describe("loadConfig", () => {
     expect(loadConfig({ repoRoot: root }).version).toBe("9.9.9");
   });
 
-  // The threshold is pinned so it is raised deliberately rather than nudged
-  // upward whenever a documentation change fails the gate. It has been raised
-  // measured on the gzip-compressed index, which is what a reader downloads.
+  // The threshold is measured on the gzip-compressed index, which is what a
+  // reader downloads. It is pinned here so that it is raised deliberately
+  // rather than nudged upward whenever a documentation change fails the gate.
   // Reaching it is the signal to split the index per section.
   it("declares a failure threshold for the serialized search index", () => {
     expect(
