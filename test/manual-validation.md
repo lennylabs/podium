@@ -250,6 +250,8 @@ rm -rf "$WORK"
 | S107 | A skill's Podium fields under `SKILL.md` `metadata` reach search, load, and lint, and a stored row from an earlier release keeps its search columns until a new version | standalone | none | none | none |
 | S108 | Catalog advisories in `podium lint` and at ingest, the lint JSON envelope, and the `podium sync` listing budget | standalone | none | none | none |
 | S109 | `command` and `context` are refused, stored rows of either type stop serving after an upgrade, hand-converted skills lint clean and serve, and user-invoked skills carry each harness's control | solo then standalone | none | none | none |
+| S110 | Published Agent Skills parse and lint without false errors, and an unparseable manifest is refused on its own by lint, sync, and ingest | solo then standalone | none | none | none |
+| S111 | The catalog overlap report reads across layers with structured peers, validates its threshold, and the semantic check refuses to start without an embedding source | standalone | none | none | none |
 
 ---
 
@@ -10908,7 +10910,7 @@ instead of rejected, or a modified source tree is the defect this scenario catch
    ```
 
    **Expect.** `lint exit=0`, and the output carries one
-   `lint.skill_version_assigned` warning, for `greet` only.
+   `lint.skill_version_assigned` info diagnostic, for `greet` only.
 
 3. Sync through filesystem source, then inspect the output, the lock, and the
    source tree.
@@ -12981,5 +12983,302 @@ address for both, because a revision mark is keyed by the registry URL.
    `agents/openai.yaml` is the defect.
 
 **Cleanup.** `rm -rf "$WORK"`. Step 7 stops the server.
+
+---
+
+## S110: Published Agent Skills parse and lint without false errors, and an unparseable manifest is refused on its own by lint, sync, and ingest
+
+**Goal.** Validate that a `SKILL.md` written the way published Agent Skills
+are written, including one that nests a mapping under a `metadata` key of its
+own, parses, keeps its bytes, and lints without false errors, and that a
+`SKILL.md` whose
+frontmatter does not parse is refused alone while lint, a filesystem-source
+sync, and a registry reingest still process every other artifact of its layer.
+
+**Covers.** The §4.1 unparseable-manifest rule and the §13.11.3 keep and remove setting, the §4.3.4 `allowed-tools`
+row, nested `metadata` values, and skill-artifact lint severities, the §4.4 prose-reference rule, the
+§7.3.1 `lint.near_duplicate_content` units, and the §7.3.1 ingest
+outcome, through the compiled `podium` binary.
+
+**Why by hand.** An operator reads the lint lines, the `--json` envelope, the
+sync's `rejected:` line, the written tree, and the reingest output together.
+A whole layer that fails on one file, a space-separated `allowed-tools` or a
+nested `metadata.requires` that does not parse, a nested block rewritten in the
+materialized file, a `#section` link reported as missing, an example link inside
+code reported at all, a license file reported as a duplicate, or an info
+diagnostic that fails `--fail-on warning` is the defect this scenario catches.
+
+**Prerequisites.** None beyond the isolation block. The scenario binds
+127.0.0.1:8170.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above. Build a layer
+   of skills with no `ARTIFACT.md` anywhere. `team/history` sets
+   `allowed-tools` as the Agent Skills standard writes it, links to a section
+   of a bundled reference, shows link syntax inside inline code and inside a
+   fenced block, and declares no version. `team/history-copy` links to its
+   sibling through `../`, sets a top-level `version`, and bundles the same
+   `LICENSE.txt` as `team/history`. `team/requires` nests a mapping under
+   `metadata.requires`, as published skills do, and sets `metadata.version`.
+   `team/broken` writes its `description` as a mapping, which no frontmatter
+   allows. Lint the layer.
+
+   ```bash
+   mkdir -p "$WORK/reg/team/history/references" "$WORK/reg/team/history-copy" "$WORK/reg/team/requires" "$WORK/reg/team/broken"
+   LICENSE_TEXT="$(for i in 1 2 3 4 5 6 7 8; do printf 'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files, to deal in the software without restriction. '; done)"
+   printf '%s\n' "$LICENSE_TEXT" > "$WORK/reg/team/history/LICENSE.txt"
+   printf '%s\n' "$LICENSE_TEXT" > "$WORK/reg/team/history-copy/LICENSE.txt"
+   printf '# API\n\n## Errors\n\nEach error carries a code.\n' > "$WORK/reg/team/history/references/api.md"
+   printf -- '---\nname: history\ndescription: Summarizes repository history with git and jq for a weekly engineering report.\nallowed-tools: Bash(git:*) Bash(jq:*) Read\n---\n\nRead [the error codes](references/api.md#errors) first.\nAsk [the team](mailto:team@acme.com) before a release.\nWrite links as `[text](url)` in the report.\n\n\140\140\140markdown\n[example](missing/file.md)\n\140\140\140\n' > "$WORK/reg/team/history/SKILL.md"
+   printf -- '---\nname: history-copy\ndescription: Drafts release notes from merged pull requests for the product changelog page.\nversion: 1.2.0\n---\n\nSee [the history skill](../history/SKILL.md) for the git queries.\n' > "$WORK/reg/team/history-copy/SKILL.md"
+   printf -- '---\nname: requires\ndescription: Checks that browser automation prerequisites are installed before a run.\nmetadata:\n  version: "1.0.0"\n  requires:\n    bins: [node]\n---\n\nRun the checks.\n' > "$WORK/reg/team/requires/SKILL.md"
+   printf -- '---\nname: broken\ndescription:\n  text: Checks that the build cache is warm before a release run.\n---\n\nRun the checks.\n' > "$WORK/reg/team/broken/SKILL.md"
+   podium lint --registry "$WORK/reg"; echo "lint exit=$?"
+   ```
+
+   **Expect.** Standard output carries an `[info]` line for `team/history` and
+   one for `team/history-copy`, each ending in `(lint.skill_version_assigned)`
+   (Podium ignores the top-level `version`, so `team/history-copy` declares no
+   usable version either), a `[warning] team/history-copy: prose
+   reference "../history/SKILL.md" leaves the artifact package` line that
+   recommends the canonical ID, and a `[warning] team/history-copy:` line for
+   the top-level `version` ending in `(lint.skill_podium_only_field)`, and a
+   `[warning] team/requires: metadata.requires is a mapping` line ending in
+   `(lint.skill_metadata_nonstring)`. Standard error carries one `rejected:`
+   line naming `team/broken` with `ingest.invalid_artifact` and a reason that
+   names `team/broken/SKILL.md`. No line
+   reports `references/api.md#errors`, `mailto:team@acme.com`, `url`, `missing/file.md`, or
+   `LICENSE.txt`, and no line reports `allowed-tools`. The run prints
+   `lint exit=1`, because a refused artifact fails the run. A missing
+   `team/history` line, or no output beyond an error naming
+   `team/broken/SKILL.md`, means one file still stops the layer.
+
+2. Read the `--json` envelope, then move `team/broken` out of the layer and
+   lint under `--fail-on warning` and under the default.
+
+   ```bash
+   podium lint --registry "$WORK/reg" --json > "$WORK/lint.json"; echo "json exit=$?"
+   jq -c '.rejected' "$WORK/lint.json"
+   jq -c '.counts' "$WORK/lint.json"
+   mv "$WORK/reg/team/broken" "$WORK/broken-aside"
+   podium lint --registry "$WORK/reg" --fail-on warning > /dev/null; echo "fail-on warning exit=$?"
+   podium lint --registry "$WORK/reg" > /dev/null; echo "default exit=$?"
+   mv "$WORK/broken-aside" "$WORK/reg/team/broken"
+   ```
+
+   **Expect.** `json exit=1`. `rejected` is one entry for `team/broken` whose
+   `code` is `ingest.invalid_artifact` and whose `details` is exactly
+   `{"constraint":"manifest_unparseable"}`. `counts` is
+   `{"error":0,"warning":3,"info":2}`. `fail-on warning exit=1`, from the
+   warnings, and `default exit=0`.
+
+3. Remove the warnings, so the layer carries only the info diagnostics, and
+   lint under `--fail-on warning`.
+
+   ```bash
+   mv "$WORK/reg/team/broken" "$WORK/broken-aside"
+   mv "$WORK/reg/team/requires" "$WORK/requires-aside"
+   cp "$WORK/reg/team/history-copy/SKILL.md" "$WORK/history-copy.SKILL.md"
+   printf -- '---\nname: history-copy\ndescription: Drafts release notes from merged pull requests for the product changelog page.\n---\n\nUse the git queries of team/history.\n' > "$WORK/reg/team/history-copy/SKILL.md"
+   podium lint --registry "$WORK/reg" --fail-on warning; echo "info only exit=$?"
+   cp "$WORK/history-copy.SKILL.md" "$WORK/reg/team/history-copy/SKILL.md"
+   mv "$WORK/requires-aside" "$WORK/reg/team/requires"
+   mv "$WORK/broken-aside" "$WORK/reg/team/broken"
+   ```
+
+   **Expect.** The output is the two `[info]` lines alone, and the run prints
+   `info only exit=0`. An exit of 1 means an info diagnostic fails
+   `--fail-on warning`.
+
+4. Sync the layer through claude-code and read the tree and the first lines of
+   the materialized `SKILL.md`.
+
+   ```bash
+   podium sync --registry "$WORK/reg" --harness claude-code --target "$WORK/ws" 2> "$WORK/sync.err"; echo "sync exit=$?"
+   cat "$WORK/sync.err"
+   (cd "$WORK/ws" && find .claude -type f | sort)
+   sed -n 4p "$WORK/ws/.claude/skills/history/SKILL.md"
+   cmp "$WORK/reg/team/requires/SKILL.md" "$WORK/ws/.claude/skills/requires/SKILL.md" && echo "requires bytes identical"
+   ```
+
+   **Expect.** `sync exit=1`, and `$WORK/sync.err` holds one `rejected:
+   team/broken (ingest.invalid_artifact):` line. The tree lists
+   `.claude/skills/history/SKILL.md`,
+   `.claude/skills/history/LICENSE.txt`,
+   `.claude/skills/history/references/api.md`,
+   `.claude/skills/history-copy/SKILL.md`,
+   `.claude/skills/history-copy/LICENSE.txt`, and
+   `.claude/skills/requires/SKILL.md`, and nothing for `broken`. The `sed`
+   prints `allowed-tools: Bash(git:*) Bash(jq:*) Read`, the authored line, and
+   the `cmp` prints `requires bytes identical`. An empty tree means the sync
+   still fails the layer, and a `cmp` difference means the nested `metadata`
+   block was rewritten.
+
+5. Serve the layer on 127.0.0.1:8170 and reingest it. A single `--layer-path`
+   directory registers one layer named after its base name, `reg`.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8170 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8170/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   podium layer reingest --registry http://127.0.0.1:8170 reg > "$WORK/reingest.out" 2> "$WORK/reingest.err"; echo "reingest exit=$?"
+   cat "$WORK/reingest.err"
+   podium search --registry http://127.0.0.1:8170 --type skill "" | grep -c 'team/'
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** `reingest exit=1`, because the cycle dropped an artifact.
+   `$WORK/reingest.err` names `team/broken` with `ingest.invalid_artifact`
+   and a reason that names `team/broken/SKILL.md`. The search count prints
+   `3`: `team/history`, `team/history-copy`, and `team/requires` were ingested,
+   which a server that failed the whole layer would not serve.
+
+6. Break `team/history-copy`, which step 4 synced, by writing its
+   `description` as a mapping. Sync the same target again under the default
+   setting, then with `--on-unparseable remove`.
+
+   ```bash
+   printf -- '---\nname: history-copy\ndescription:\n  text: Drafts release notes.\n---\n\nBody.\n' > "$WORK/reg/team/history-copy/SKILL.md"
+   podium sync --registry "$WORK/reg" --harness claude-code --target "$WORK/ws" --dry-run > /dev/null 2> "$WORK/dry.err"; echo "dry-run exit=$?"
+   grep -o 'the previous sync output would be kept' "$WORK/dry.err"
+   podium sync --registry "$WORK/reg" --harness claude-code --target "$WORK/ws" > /dev/null 2> "$WORK/keep.err"; echo "keep exit=$?"
+   grep 'team/history-copy' "$WORK/keep.err"
+   ls "$WORK/ws/.claude/skills/history-copy"
+   podium sync --registry "$WORK/reg" --harness claude-code --target "$WORK/ws" --on-unparseable remove > /dev/null 2> "$WORK/remove.err"; echo "remove exit=$?"
+   ls "$WORK/ws/.claude/skills/history-copy" 2>&1 | head -1
+   podium sync --registry "$WORK/reg" --harness claude-code --target "$WORK/ws" --on-unparseable discard > /dev/null 2>&1; echo "invalid exit=$?"
+   ```
+
+   **Expect.** `dry-run exit=1`, and the first `grep` prints `the previous
+   sync output would be kept`. `keep exit=1`, and the next `grep` prints `rejected:
+   team/history-copy (ingest.invalid_artifact): ...; the previous sync output
+   was kept`. The `ls` lists `LICENSE.txt` and `SKILL.md`, the files step 4
+   wrote. A missing directory means the default removed a skill that is only
+   mid-edit. The `remove` run prints `remove exit=1`, and the second `ls`
+   reports that the directory does not exist. The invalid value prints
+   `invalid exit=2`.
+
+**Cleanup.** `rm -rf "$WORK"`. Step 5 stops the server.
+
+---
+
+## S111: The catalog overlap report reads across layers with structured peers, validates its threshold, and the semantic check refuses to start without an embedding source
+
+**Goal.** Validate that `podium overlap` and `GET /v1/overlap` report
+description overlap across every layer a caller can see, with a structured
+`peers` list and a per-artifact filter, that an out-of-range threshold is
+rejected by both, that the rebuild endpoint answers `registry.unavailable`
+while the semantic check is off, and that a registry started with the check on
+and no embedding source refuses to start.
+
+**Covers.** The §7.3.1 catalog overlap report, the rebuild endpoint and
+`podium admin rebuild-overlap`, the §7.3.1 startup refusal, and the §13.12
+`PODIUM_LINT_SEMANTIC_*` variables, through the compiled `podium` binary.
+
+**Why by hand.** An operator reads the report lines, the JSON object, the
+error envelopes, and the refusal message together. A report that misses a
+cross-layer pair, a `peers` list that is missing or abbreviated, an
+`artifact` filter that returns other artifacts, a threshold outside 0.5 to
+1.0 that is accepted, a rebuild that claims to compute with the check off, or
+a registry that starts with the check on and nothing to embed with is the
+defect this scenario catches. Computing similarity needs an embedding model,
+so the end-to-end test with a mock embedder covers the semantic records; this
+scenario covers what an operator sees without one.
+
+**Prerequisites.** None beyond the isolation block. The scenario binds
+127.0.0.1:8175.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above. Build a
+   two-layer registry root. `team/finance/reconcile` and
+   `shared/finance/match-invoices` carry descriptions that differ by one word,
+   and `team/finance/close` has a thin description. Serve the root with the
+   semantic check off, and read the report.
+
+   ```bash
+   mkdir -p "$WORK/root/team" "$WORK/root/shared"
+   printf 'multi_layer: true\nlayer_order:\n  - shared\n  - team\n' > "$WORK/root/.registry-config"
+   for L in team shared; do printf 'visibility:\n  public: true\n' > "$WORK/root/$L/.layer-config"; done
+   skill() {
+     mkdir -p "$WORK/root/$1/$2"
+     printf -- '---\nname: %s\ndescription: %s\nmetadata:\n  version: "1.0.0"\n---\n\nBody.\n' "${2##*/}" "$3" > "$WORK/root/$1/$2/SKILL.md"
+   }
+   skill team finance/reconcile "Reconcile vendor invoices against purchase orders before the monthly close."
+   skill shared finance/match-invoices "Reconcile supplier invoices against purchase orders before the monthly close."
+   skill team finance/close "Close books"
+   podium serve --standalone --no-embeddings --layer-path "$WORK/root" --bind 127.0.0.1:8175 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8175/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   URL=http://127.0.0.1:8175
+   podium overlap --registry "$URL"; echo "overlap exit=$?"
+   podium overlap --registry "$URL" --fail-on warning > /dev/null; echo "fail-on warning exit=$?"
+   ```
+
+   **Expect.** The output carries a `[warning] finance/close: description is
+   thin` line ending in `(lint.thin_description)`, and a `[warning]
+   finance/match-invoices: description overlaps finance/reconcile` line and
+   its mirror for `finance/reconcile`, each with a percentage of at least 70
+   and ending in `(lint.colliding_descriptions)`. The two artifacts sit in
+   different layers, so a missing overlap line means the report did not read
+   across layers. The run prints `overlap exit=0`, and the second run prints
+   `fail-on warning exit=1`.
+
+2. Read the JSON object, then filter it to one artifact.
+
+   ```bash
+   podium overlap --registry "$URL" --json > "$WORK/overlap.json"; echo "json exit=$?"
+   jq -c '.semantic_overlap' "$WORK/overlap.json"
+   jq -c '.diagnostics[] | select(.code == "lint.colliding_descriptions") | {artifact_id, peers}' "$WORK/overlap.json"
+   jq -c '.counts' "$WORK/overlap.json"
+   curl -s "$URL/v1/overlap?artifact=finance/reconcile" | jq -c '([.diagnostics[].artifact_id] | unique), .counts'
+   ```
+
+   **Expect.** `json exit=0`. `semantic_overlap` is
+   `{"state":"off","threshold":null,"model":null,"computed":null,"total":null}`.
+   Each overlap diagnostic carries `peers` with one entry, the other
+   artifact, with its `description`, `type`, `layer`, and a `similarity`
+   between 0.7 and 1, for example
+   `{"artifact_id":"finance/reconcile","peers":[{"artifact_id":"finance/match-invoices","description":"Reconcile supplier invoices against purchase orders before the monthly close.","type":"skill","layer":"shared","similarity":0.81...}]}`.
+   `counts` is `{"error":0,"warning":3,"info":0}`. The filtered read prints
+   `["finance/reconcile"]` and `{"error":0,"warning":1,"info":0}`. A filtered
+   read that lists another artifact means the filter does not apply.
+
+3. Pass a threshold outside the allowed range to the endpoint and to the
+   command, and call the rebuild while the check is off.
+
+   ```bash
+   curl -s -o "$WORK/bad.json" -w '%{http_code}\n' "$URL/v1/overlap?threshold=0.3"
+   jq -r '.code' "$WORK/bad.json"
+   podium overlap --registry "$URL" --threshold 0.3; echo "bad threshold exit=$?"
+   podium admin rebuild-overlap --registry "$URL"; echo "rebuild exit=$?"
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** The endpoint answers `400` with `registry.invalid_argument`.
+   The command prints `error: --threshold must be a number from 0.5 to 1.0`
+   and `bad threshold exit=2`. The rebuild prints an error envelope whose code
+   is `registry.unavailable`, with `"retryable": false` and a suggested
+   action naming `PODIUM_LINT_SEMANTIC_OVERLAP=on`, and `rebuild exit=1`,
+   because the semantic check is off. A rebuild that reports computed
+   artifacts here is the defect, and so is `"retryable": true`, which would
+   invite a retry that cannot succeed.
+
+4. Start a registry with the semantic check on and no embedding source.
+
+   ```bash
+   PODIUM_LINT_SEMANTIC_OVERLAP=on podium serve --standalone --no-embeddings --layer-path "$WORK/root" --bind 127.0.0.1:8175 > "$WORK/refused.log" 2>&1; echo "serve exit=$?"
+   grep -o 'config.invalid: PODIUM_LINT_SEMANTIC_OVERLAP=on needs an embedding source' "$WORK/refused.log"
+   ```
+
+   **Expect.** `serve exit=` prints a non-zero status, the server never binds,
+   and the `grep` prints `config.invalid: PODIUM_LINT_SEMANTIC_OVERLAP=on needs
+   an embedding source`. A server that starts means the check would run with
+   no vectors to compare.
+
+**Cleanup.** `rm -rf "$WORK"`. Step 3 stops the server.
 
 ---

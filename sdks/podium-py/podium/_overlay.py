@@ -49,11 +49,12 @@ def _tokenize(text: str) -> list[str]:
 def _parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
     """Return (fields, body) for an ARTIFACT.md or a SKILL.md (§4.3, §4.3.4).
 
-    Only the fields the SDK ranks and reports are parsed: ``type``,
-    ``version``, ``description``, and ``tags``, plus the ``version`` key
-    directly under a block-form or a single-line flow-form ``metadata:``
-    mapping, reported as ``metadata_version``. ``tags`` accepts both the inline ``[a, b]`` form and
-    the block ``- a`` form.
+    Only the top-level fields the SDK ranks and reports are parsed:
+    ``type``, ``version``, ``description``, and ``tags``. ``tags`` accepts
+    both the inline ``[a, b]`` form and the block ``- a`` form. A SKILL.md
+    ``metadata`` value is read by ``_metadata_version`` and ``_metadata_tags``
+    instead, which take a value only in a form whose line reading equals the
+    YAML decoding.
     """
     fields: dict[str, object] = {}
     if not text.startswith("---"):
@@ -68,10 +69,6 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
         return fields, text
     body = "\n".join(lines[end + 1 :])
     pending_tags = False
-    # metadata_indent is -1 outside a metadata: block, 0 inside one before its
-    # first child, and the child indent after it, so a deeper key never reads
-    # as metadata.version.
-    metadata_indent = -1
     tags: list[str] = []
     for raw in lines[1:end]:
         if pending_tags and raw.lstrip().startswith("- "):
@@ -81,17 +78,13 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         if raw.startswith(" "):
-            metadata_indent = _read_metadata_version(raw, metadata_indent, fields)
             continue
-        metadata_indent = -1
         key, sep, val = raw.partition(":")
         if not sep:
             continue
         key = key.strip()
         val = val.strip()
-        if key == "metadata":
-            metadata_indent = _read_metadata_value(val, fields)
-        elif key == "tags":
+        if key == "tags":
             if val.startswith("[") and val.endswith("]"):
                 tags = [t.strip().strip("\"'") for t in val[1:-1].split(",") if t.strip()]
             elif val:
@@ -99,88 +92,46 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
             else:
                 pending_tags = True
         elif key in ("type", "version", "description"):
-            fields[key] = val.strip("\"'")
+            fields[key] = _scalar_value(val)
     fields["tags"] = [t for t in tags if t]
     return fields, body
 
 
-_FLOW_ENTRY_RE = re.compile(r"^(.*?):(?:\s|$)(.*)$", re.DOTALL)
+# The plain scalars yaml.v3 decodes to null, which a string field reads as
+# empty, and the empty value, which is null too.
+_YAML_NULLS = frozenset({"", "~", "null", "Null", "NULL"})
 
 
-def _read_metadata_value(val: str, fields: dict[str, object]) -> int:
-    """Read the value of a top-level ``metadata:`` line and return the metadata_indent state.
+def _scalar_value(val: str) -> str:
+    """Return the string a single-line top-level YAML scalar decodes to.
 
-    An empty value or a lone comment opens a block-form mapping. A single-line
-    flow mapping such as ``{version: "1.0.0"}`` records its own ``version``
-    key as ``fields["metadata_version"]``, so the SDK overlay reports the
-    version the Go overlay's full YAML parse reports (§4.3.4).
+    Spec: §4.3, §4.3.4. A quoted value ends at its closing quote, so a
+    trailing comment after it is dropped. A plain value ends before a ``#``
+    that begins the value or follows white space, which starts a comment, and
+    a plain null (``~``, ``null``, or an empty value) reads as empty, as
+    Go's decode reads it into a string field. ``version: ~`` therefore
+    declares no version, and ``type: skill # c`` declares a skill. Escapes
+    inside a quoted value are kept as written. An unclosed quote keeps the
+    earlier reading, with the surrounding quotes removed.
     """
-    if not val or val.startswith("#"):
-        return 0
-    for entry in _flow_mapping_entries(val) or []:
-        m = _FLOW_ENTRY_RE.match(entry.strip())
-        if m and m.group(1).strip().strip("\"'") == "version":
-            fields["metadata_version"] = m.group(2).strip().strip("\"'")
-    return -1
-
-
-def _flow_mapping_entries(val: str) -> list[str] | None:
-    """Split a single-line YAML flow mapping into its top-level entries.
-
-    Commas inside a nested mapping, a sequence, or a quoted scalar stay part
-    of their entry, so a nested ``version`` key never reads as the mapping's
-    own. Returns ``None`` for a value that is not a flow mapping, whose braces
-    do not close on the line, or that carries anything but a comment after
-    the closing brace.
-    """
-    if not val.startswith("{"):
-        return None
-    entries: list[str] = []
-    depth = 0
-    quote = ""
-    start = 1
-    i = 0
-    while i < len(val):
-        ch = val[i]
-        if quote:
+    quote = val[:1]
+    if quote in ("\"", "'"):
+        i = 1
+        while i < len(val):
+            ch = val[i]
             if quote == '"' and ch == "\\":
-                i += 1
-            elif ch == quote:
-                quote = ""
-        elif ch in "\"'":
-            quote = ch
-        elif ch in "{[":
-            depth += 1
-        elif ch == "," and depth == 1:
-            entries.append(val[start:i])
-            start = i + 1
-        elif ch in "}]":
-            depth -= 1
-            if depth == 0:
-                entries.append(val[start:i])
-                rest = val[i + 1 :].strip()
-                return None if rest and not rest.startswith("#") else entries
-        i += 1
-    return None
-
-
-def _read_metadata_version(raw: str, metadata_indent: int, fields: dict[str, object]) -> int:
-    """Read one indented frontmatter line and return the metadata_indent state.
-
-    Inside a ``metadata:`` block, a ``version`` key at the block's child
-    indent is recorded as ``fields["metadata_version"]``, quoted or unquoted.
-    """
-    if metadata_indent < 0:
-        return metadata_indent
-    stripped = raw.lstrip()
-    indent = len(raw) - len(stripped)
-    child_indent = indent if metadata_indent == 0 else metadata_indent
-    if indent != child_indent:
-        return child_indent
-    key, sep, val = stripped.partition(":")
-    if sep and key.strip() == "version":
-        fields["metadata_version"] = val.strip().strip("\"'")
-    return child_indent
+                i += 2
+                continue
+            if ch == quote:
+                if quote == "'" and val[i + 1 : i + 2] == "'":
+                    i += 2
+                    continue
+                return val[1:i]
+            i += 1
+        return val.strip("\"'")
+    comment = re.search(r"(?:^|[ \t])#", val)
+    plain = (val[: comment.start()] if comment else val).rstrip(_WHITE)
+    return "" if plain in _YAML_NULLS else plain
 
 
 # The SKILL.md metadata.tags readable form. A line reader cannot reproduce
@@ -205,9 +156,10 @@ def _read_metadata_version(raw: str, metadata_indent: int, fields: dict[str, obj
 #   5. The value is plain (_TAGS_PLAIN_RE and not a null word), or double- or
 #      single-quoted printable ASCII with no escape and no inner quote.
 #   6. Every later line is blank up to the next block line at or above the
-#      child indent, and no later block line holds a "*" that starts an alias:
-#      yaml.v3 lets an alias key that resolves to "tags" replace the value
-#      with no error.
+#      child indent, and no later block line holds a "*" that starts an alias
+#      or a "!" that starts a tag: yaml.v3 lets an alias key that resolves to
+#      "tags", or a tagged key that decodes to it, replace the value with no
+#      error.
 #   7. Splitting the content on "," and trimming spaces leaves no empty
 #      element. The elements, in order, are the tags.
 #   8. The frontmatter holds no CR, U+0085, U+2028, U+2029, or U+FEFF, which
@@ -309,17 +261,23 @@ def _blank_until_sibling(lines: list[str], indent_len: int) -> bool:
     return True
 
 
-def _holds_alias(line: str) -> bool:
-    """Report whether a line holds a ``*`` that starts an alias (condition 6).
+def _holds_alias_or_tag(line: str) -> bool:
+    """Report whether a line holds an alias or a tag at a token start (condition 6).
 
     yaml.v3 compares mapping keys for duplicates only between nodes of one
-    kind, so an alias key resolving to ``tags`` would replace the tags value
-    with no error.
+    kind and tag, so an alias key resolving to ``tags``, or a tagged key such
+    as ``!!binary dGFncw==`` that decodes to it, replaces the earlier value
+    with no error. A token starts at the line start, after white space, or
+    after the ``[``, ``{``, or ``,`` of a flow collection, which needs no
+    space before the next entry. A ``*`` starts an alias when a non-white
+    character follows it, and a ``!`` always starts a tag. A ``*`` or a ``!``
+    at a token start inside a scalar counts too, so the check errs toward
+    reporting no value.
     """
     for i, ch in enumerate(line):
-        if ch != "*" or (i > 0 and line[i - 1] not in _WHITE):
+        if ch not in "*!" or (i > 0 and line[i - 1] not in _WHITE + "[{,"):
             continue
-        if i + 1 < len(line) and line[i + 1] not in _WHITE:
+        if ch == "!" or (i + 1 < len(line) and line[i + 1] not in _WHITE):
             return True
     return False
 
@@ -381,12 +339,204 @@ def _metadata_tags(skill_md: str) -> list[str]:
     if content is None:
         return []
     after = fm[at + 1 : stop]
-    if not _blank_until_sibling(after, len(indent)) or any(_holds_alias(line) for line in after):
+    if not _blank_until_sibling(after, len(indent)) or any(_holds_alias_or_tag(line) for line in after):
         return []
     if any(_opens_scalar_or_document_end(line) for line in fm[:at]):
         return []
     tags = [_trim_spaces(t) for t in content.split(",")]
     return [] if "" in tags else tags
+
+
+# The SKILL.md metadata.version readable form. _metadata_version reads the
+# value only where the line reading equals the yaml.v3 decoding Go applies,
+# and returns "" for every other input, so the overlay reports the decoded
+# version or none (§4.3.4). test/vectors/skill-metadata-version.json,
+# generated from manifest.ResolveSkillVersion, pins the form to Go. The
+# frontmatter is delimited as for _metadata_tags, and conditions 8 and 9 of
+# the tags form apply. A value is in the form when, in addition:
+#   1. Exactly one frontmatter line begins with "metadata:". What follows it
+#      is white space, a comment, or a flow mapping that closes on the line.
+#   2. In the block form, the block and its child indent are as in condition 2
+#      of the tags form, exactly one block line at the child indent has the
+#      key "version", and that line is the child indent, "version:", one or
+#      more spaces, the value, and optional trailing spaces. Every later line
+#      is blank up to the next block line at or above the child indent.
+#   3. In the flow form, the mapping holds no comment, exactly one of its
+#      top-level entries has the key "version", once unquoted, and the value
+#      is that entry's value.
+#   4. The value is major.minor.patch, plain or in double or single quotes.
+#   5. No line before the version line, or before the metadata line in the
+#      flow form, begins with "..." or "%" or leaves a quoted scalar or a flow
+#      collection open, because each can end the document or swallow the
+#      version line into another value: a multi-line flow mapping such as
+#      "openclaw: {" or a quoted scalar continued on the next line.
+#   6. No later frontmatter line, and no part of a flow-form mapping, holds a
+#      "*" that starts an alias or a "!" that starts a tag, which yaml.v3 lets
+#      replace the metadata mapping or its version key with no error.
+_VERSION_VALUE_RE = re.compile(r"([0-9]+\.[0-9]+\.[0-9]+)|\"([0-9]+\.[0-9]+\.[0-9]+)\"|'([0-9]+\.[0-9]+\.[0-9]+)'")
+
+
+def _version_value(value: str) -> str:
+    """Return the version a value in the condition 4 form holds, or ``""``."""
+    m = _VERSION_VALUE_RE.fullmatch(_trim_spaces(value))
+    return next((g for g in m.groups() if g), "") if m else ""
+
+
+def _leaves_open(line: str) -> bool:
+    """Report whether a line can end the document or leave a value open (condition 5).
+
+    A quote at a token start opens a quoted scalar, and a bracket or a brace
+    at a token start opens a flow collection; the line leaves it open when it
+    does not close before the line ends. A ``#`` after white space outside a
+    quoted scalar starts a comment, which ends the scan. A quote inside a
+    plain scalar, such as ``say "hi``, counts as an opener too, so the check
+    errs toward reporting no value.
+    """
+    if line.startswith("...") or line.startswith("%"):
+        return True
+    depth = 0
+    quote = ""
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        prev = line[i - 1] if i > 0 else " "
+        if quote:
+            if quote == '"' and ch == "\\":
+                i += 1
+            elif ch == quote and quote == "'" and line[i + 1 : i + 2] == "'":
+                i += 1
+            elif ch == quote:
+                quote = ""
+        elif ch == "#" and prev in _WHITE:
+            break
+        elif ch in "\"'" and (prev in _WHITE or (depth > 0 and prev in "[{,:")):
+            quote = ch
+        elif ch in "[{" and (prev in _WHITE or depth > 0):
+            depth += 1
+        elif ch in "]}" and depth > 0:
+            depth -= 1
+        i += 1
+    return bool(quote) or depth > 0
+
+
+def _flow_mapping_entries(val: str) -> list[str] | None:
+    """Split a single-line YAML flow mapping into its top-level entries.
+
+    Commas inside a nested mapping, a sequence, or a quoted scalar stay part
+    of their entry, so a nested ``version`` key never reads as the mapping's
+    own. Returns ``None`` for a value that is not a flow mapping, whose braces
+    do not close on the line, that holds a comment, which would continue the
+    mapping on a later line, or that carries anything but a comment after the
+    closing brace.
+    """
+    if not val.startswith("{"):
+        return None
+    entries: list[str] = []
+    depth = 0
+    quote = ""
+    start = 1
+    i = 0
+    while i < len(val):
+        ch = val[i]
+        if quote:
+            if quote == '"' and ch == "\\":
+                i += 1
+            elif ch == quote:
+                quote = ""
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#" and val[i - 1] in _WHITE:
+            return None
+        elif ch in "{[":
+            depth += 1
+        elif ch == "," and depth == 1:
+            entries.append(val[start:i])
+            start = i + 1
+        elif ch in "}]":
+            depth -= 1
+            if depth == 0:
+                entries.append(val[start:i])
+                rest = val[i + 1 :].strip(_WHITE)
+                return None if rest and not rest.startswith("#") else entries
+        i += 1
+    return None
+
+
+def _flow_metadata_version(val: str) -> str:
+    """Return the version of a flow-form metadata value (condition 3), or ``""``."""
+    entries = _flow_mapping_entries(val)
+    if entries is None or _holds_alias_or_tag(val):
+        return ""
+    found = []
+    for entry in entries:
+        key, sep, value = entry.strip(_WHITE).partition(":")
+        if not sep or (value and value[0] not in _WHITE):
+            continue
+        key = key.rstrip(_WHITE)
+        if len(key) >= 2 and key[0] in "\"'" and key[-1] == key[0]:
+            key = key[1:-1]
+        if key == "version":
+            found.append(value)
+    return _version_value(found[0]) if len(found) == 1 else ""
+
+
+def _block_metadata_version(fm: list[str], start: int) -> tuple[str, int]:
+    """Return the version of a block-form metadata value and its line (condition 2).
+
+    ``start`` is the index of the line after ``metadata:``. Returns
+    ``("", -1)`` when the block holds no value in the form.
+    """
+    stop = start
+    while stop < len(fm) and not (fm[stop] and fm[stop][0] not in _WHITE and fm[stop][0] != "#"):
+        stop += 1
+    child = next(
+        (line for line in fm[start:stop] if not _is_blank_line(line) and not _is_comment_line(line)),
+        None,
+    )
+    if child is None:
+        return "", -1
+    indent = _indent_of(child)
+    if indent.strip(" "):
+        return "", -1
+    at = [i for i in range(start, stop) if _indent_of(fm[i]) == indent and _line_key(fm[i][len(indent) :]) == "version"]
+    if len(at) != 1 or "\t" in fm[at[0]] or not fm[at[0]].startswith(indent + "version: "):
+        return "", -1
+    if not _blank_until_sibling(fm[at[0] + 1 : stop], len(indent)):
+        return "", -1
+    return _version_value(fm[at[0]][len(indent) + len("version:") :]), at[0]
+
+
+def _metadata_version(skill_md: str) -> str:
+    """Return the metadata.version of a SKILL.md in the readable form, and "" otherwise.
+
+    Spec: §4.3.4, §6.4. The caller passes the file's text. A ``version:``
+    line nested in another key's block, or inside a multi-line flow
+    collection or quoted scalar, is never read, so the overlay reports no
+    version the YAML decoding does not produce.
+    """
+    fm = _frontmatter_lines(skill_md)
+    if fm is None or any(_HIDDEN_BREAK_RE.search(line) for line in fm):
+        return ""
+    first = next((line for line in fm if not _is_blank_line(line) and not _is_comment_line(line)), None)
+    if first is None or first[0] in _WHITE:
+        return ""
+    meta_at = [i for i, line in enumerate(fm) if line.startswith("metadata:")]
+    if len(meta_at) != 1:
+        return ""
+    rest = fm[meta_at[0]][len("metadata:") :]
+    if _is_blank_line(rest) or rest.lstrip(_WHITE).startswith("#"):
+        if rest and rest[0] not in _WHITE:
+            return ""
+        version, at = _block_metadata_version(fm, meta_at[0] + 1)
+    elif rest.startswith(" "):
+        version, at = _flow_metadata_version(rest.lstrip(" ")), meta_at[0]
+    else:
+        return ""
+    if not version or any(_leaves_open(line) for line in fm[:at]):
+        return ""
+    if any(_holds_alias_or_tag(line) for line in fm[at + 1 :]):
+        return ""
+    return version
 
 
 def _parse_domain(text: str) -> "OverlayDomain | None":
@@ -627,9 +777,8 @@ class LocalOverlay:
             resources = _collect_resources(dirpath, {"ARTIFACT.md"})
             return _overlay_artifact(artifact_id, fields, frontmatter, body, "", resources)
         skill_raw = _read_optional(os.path.join(dirpath, "SKILL.md"))
-        skill_fields, _ = _parse_frontmatter(skill_raw)
         fields["version"] = _skill_document.resolve_skill_version(
-            str(fields.get("version", "")), str(skill_fields.get("metadata_version", ""))
+            str(fields.get("version", "")), _metadata_version(skill_raw)
         )
         resources = _collect_resources(dirpath, {"ARTIFACT.md", "SKILL.md"})
         return _overlay_artifact(artifact_id, fields, frontmatter, body, skill_raw, resources)
@@ -653,9 +802,7 @@ class LocalOverlay:
         except OSError:
             return None
         skill_fields, body = _parse_frontmatter(skill_raw)
-        version = _skill_document.resolve_skill_version(
-            "", str(skill_fields.get("metadata_version", ""))
-        )
+        version = _skill_document.resolve_skill_version("", _metadata_version(skill_raw))
         fields: dict[str, object] = {
             "type": "skill",
             "version": version,
@@ -818,9 +965,15 @@ def _overlay_artifact(
 
 
 def _read_optional(path: str) -> str:
-    """Return a file's text, or "" when it cannot be read."""
+    """Return a file's text with its line ends unchanged, or "" when it cannot be read.
+
+    Spec: §4.3.4, §6.4. The file is read with ``newline=""``, as
+    ``_read_plain_skill`` reads SKILL.md, so a lone CR stays a CR for
+    ``_metadata_version`` to refuse and ``skill_raw`` keeps the CR LF line
+    ends the registry serves.
+    """
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open(path, encoding="utf-8", newline="") as fh:
             return fh.read()
     except OSError:
         return ""

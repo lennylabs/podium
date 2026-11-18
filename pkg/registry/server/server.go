@@ -38,9 +38,10 @@ type Server struct {
 	publicMode bool
 	// unauthenticatedReembed records that the deployment authenticates no
 	// caller, which the boot path decides from its own configuration
-	// (§4.7). handleReembed is the only reader: no caller can hold the
-	// per-tenant admin role there, so the endpoint admits the request and
-	// the local operator owns the pass. requireAdmin must not consult this
+	// (§4.7). handleReembed and handleOverlapRebuild are the only readers:
+	// no caller can hold the per-tenant admin role there, so both endpoints
+	// admit the request and the local operator owns the pass (§4.7,
+	// §7.3.1). requireAdmin must not consult this
 	// field, because that would reopen /v1/admin/grants,
 	// /v1/admin/show-effective, the /v1/webhooks receiver CRUD, and the
 	// as_admin override to anonymous callers. The zero value gates the
@@ -180,15 +181,16 @@ type Option func(*Server)
 func WithPublicMode() Option { return func(s *Server) { s.publicMode = true } }
 
 // WithUnauthenticatedReembed records that the deployment authenticates no
-// caller, so POST /v1/admin/reembed admits the request (§4.7). Only
-// handleReembed reads the flag. requireAdmin must not consult it: the
-// carve-out is specific to re-embed, and generalizing it would reopen
-// /v1/admin/grants, /v1/admin/show-effective, the /v1/webhooks receiver
-// CRUD, and the as_admin override to anonymous callers. The boot path is
-// the authority on whether the deployment authenticates anyone, so the
-// server never re-derives it from the installed identity verifier: a
-// registry can name an identity provider this build installs no verifier
-// for, and it still gates the endpoint.
+// caller, so POST /v1/admin/reembed admits the request (§4.7), and POST
+// /v1/admin/overlap/rebuild admits it on the same terms (§7.3.1). Only
+// handleReembed and handleOverlapRebuild read the flag. requireAdmin must not
+// consult it: the carve-out is specific to those endpoints, and generalizing
+// it would reopen /v1/admin/grants, /v1/admin/show-effective, the
+// /v1/webhooks receiver CRUD, and the as_admin override to anonymous callers.
+// The boot path is the authority on whether the deployment authenticates
+// anyone, so the server never re-derives it from the installed identity
+// verifier: a registry can name an identity provider this build installs no
+// verifier for, and it still gates the endpoint.
 func WithUnauthenticatedReembed() Option {
 	return func(s *Server) { s.unauthenticatedReembed = true }
 }
@@ -405,7 +407,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/dependents", s.handleDependents)
 	mux.HandleFunc("/v1/scope/preview", s.handleScopePreview)
 	mux.HandleFunc("/v1/domain/analyze", s.handleDomainAnalyze)
+	mux.HandleFunc("/v1/overlap", s.handleOverlap)
 	mux.HandleFunc("/v1/admin/reembed", s.handleReembed)
+	mux.HandleFunc("/v1/admin/overlap/rebuild", s.handleOverlapRebuild)
 	mux.HandleFunc("/v1/admin/grants", s.handleAdminGrants)
 	mux.HandleFunc("/v1/admin/show-effective", s.handleAdminShowEffective)
 	mux.HandleFunc("GET /v1/admin/tenants", s.handleTenantList)

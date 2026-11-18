@@ -166,21 +166,21 @@ $ ▌
    | # | Title | Body |
    | --- | --- | --- |
    | 01 | Domains and subdomains | Easy skill maintenance and discoverability through the use of domains and sub-domains. |
-   | 02 | Selective materialization | Sync a chosen subset of the catalog into a workspace ahead of time. Define profiles to quickly and seamlessly switch between scopes. |
-   | 03 | Progressive discovery | stdio MCP server with tools for agents to find skills and to lazily load them into the agent's workspace (including bundled files). |
-   | 04 | Layered composition | Compose the catalog from multiple independent sources with deterministic merge and explicit precedence. *Second paragraph, 8px above:* Use your own Git repos as sources. |
-   | 05 | Security and access control | Skills and other artifacts are signed at ingest and verified on every sync. Declare who can see what with RBAC. Audit logs. |
-   | 06 | Observability | See how often each artifact is searched for and downloaded. |
+   | 02 | Materialization and discovery | Sync a chosen subset of the catalog into a workspace ahead of time, with profiles to switch scopes. Or let agents find skills over MCP and load them on demand, bundled files included. |
+   | 03 | Layered composition | Compose the catalog from multiple independent sources with deterministic merge and explicit precedence. *Second paragraph, 8px above:* Use your own Git repos as sources. |
+   | 04 | Security and access control | Skills and other artifacts are signed at ingest and verified on every sync. Declare who can see what with RBAC. Audit logs. |
+   | 05 | Usage metrics | See how often each artifact is searched for and downloaded. |
+   | 06 | Overlap detection | Flags skills an agent could mix up: copies, or the same meaning in different words. |
 
-   02 and 03 are deliberately contrasted: sync is proactive ("ahead of time"), discovery is lazy and agent-driven. Keep that distinction in any copy edit. Cross-harness delivery is no longer a landing feature (the adapter strip and the terminal carry it); it stays in the docs.
+   02 joins two deliberately different modes: sync is proactive ("ahead of time"), discovery is lazy and agent-driven. Keep both halves in any copy edit. Cross-harness delivery is no longer a landing feature (the adapter strip and the terminal carry it); it stays in the docs.
 
    The six diagrams are inline SVG — copy them verbatim from the reference. Summary (see *Feature diagrams* below):
    1. an indented domain tree: `catalog` → `Platform` → `ci` (nested) → `Analytics` → `Finance`;
    2. a dashed catalog of eight rows, two ticked in accent, arrow, two matching accent rows at right;
-   3. a discovery walk — solid ink path with arrowheads through solid nodes, dotted branches to dashed unvisited nodes;
-   4. three overlapping circles filled `ink @ 12%`, solid outlines outside the overlaps and **dotted arcs where they overlap** (via per-circle SVG masks), labelled team / org / personal;
-   5. a signed artifact (document with an accent check seal at its corner), arrow, an audit-log panel of three entries with the newest marked by an accent dot;
-   6. a usage report — a framed card with a title bar, a small accent trend line top right, a rule, and three ranked bars, the top bar in accent.
+   3. three flat layers seen at an angle, stacked, labelled personal / team / org, joined by dotted lines at the corners;
+   4. a shield outline with an accent check;
+   5. ranked usage — four rows of label stub, bar, and count, the top bar in accent and the rest muted;
+   6. two skill cards that overlap at a corner: the shared area filled accent at 40%, one accent line running through both cards, and a `0.91` accent pill above.
 
 5. **Deployment modes** — h2, then a 3-column hairline grid. Each card: icon + title row, hairline, three label/value pairs, then a "plus" list with accent bullet dots. The **Local** title row carries a right-aligned pill `No server needed` (11px mono 600, `.06em`, 100px radius, `#ffeeda` on `#f5cd9b` with `#a8480a` text in light; `rgba(255,164,36,.12)` on `#4a3a22` with `#ffa424` in dark).
 
@@ -191,7 +191,7 @@ $ ▌
    | Catalog source | A folder, read from disk | One or more folders or remote Git repos | One or more folders or remote Git repos |
    | Materialization | User-driven sync | User-driven sync, or agent-driven on demand | User-driven sync, or agent-driven on demand |
    | plus label | — | Everything in local, plus | Everything in single node, plus |
-   | plus list | Author, lint, sync · Domains and profiles | Discovery via MCP or SDK · Hybrid search · Layers and visibility · One audit log | Multi-tenancy · SCIM group sync · Signing and transparency log · High availability |
+   | plus list | Author, lint, sync · Domains and profiles · Layers (from disk) · Basic skill word overlap analysis | Discovery via MCP or SDK · Hybrid search · Remote layers + per-user visibility · Semantic overlap analysis · Audit log (local, HTTP, OTLP) | Multi-tenancy · Postgres tenant isolation · SCIM group sync · Signing and transparency log · High availability |
 
    Below the grid, a tinted callout with an accent `→`: *Skills and other artifacts are independent of Podium's deployment model.*
 
@@ -203,6 +203,7 @@ $ ▌
    | Object storage | cube | Local filesystem | S3 or S3-compatible storage | — |
    | Vector index | node triangle | sqlite-vec | pgvector, Pinecone, Weaviate Cloud, Qdrant Cloud | pgvector is the default when you already run Postgres. |
    | Embeddings | sparkle | BM25 only | OpenAI, Voyage, Cohere, Ollama | Or let Pinecone, Weaviate, or Qdrant embed on ingest. Vectors are fused with BM25 hits via reciprocal rank fusion. |
+   | Overlap detection | two overlapping circles | Word-based checks | Semantic check | Compares embeddings of each artifact’s name, description, when_to_use, and tags in the vector index above — no second index. Word-based checks need no services. |
    | Identity | padlock | None | OIDC device code, Gateway-forwarded JWT, SCIM | — |
    | Layer sources | branch | Git and local paths | Custom via SPI | S3 buckets, OCI registries, HTTP archives. |
    | Audit log | scroll | Hash-chained file | stdout, HTTP receivers, OpenTelemetry Collector | List several destinations to write one hash-chained stream to each. |
@@ -252,12 +253,12 @@ Two mockups, three states: mobile ≤ 720px, tablet 721–1099px (not mocked —
 
 ## Feature diagrams
 
-Six inline SVGs, one per feature card, on a 240-unit-wide viewBox (96 tall, except #4 at 116) rendered at 200px wide on desktop and 232px on mobile. Two palettes only: `ink`/`text` for primary shapes, `meta`/`muted` for connectors and de-emphasized shapes, `accent` for "selected/visible" states. Rules they follow — keep these if you redraw anything:
+Six inline SVGs, one per feature card, on a 240-unit-wide viewBox (96 tall, except #3 at 112) rendered at 200px wide on desktop and 232px on mobile. Two palettes only: `ink`/`text` for primary shapes, `meta`/`muted` for connectors and de-emphasized shapes, `accent` for "selected/visible" states. Rules they follow — keep these if you redraw anything:
 
 - Every connector starts and ends **at a node's edge**, never inside it.
 - Dashed strokes mean *not loaded* / *not permitted*; solid means *walked* / *permitted*.
-- Accent marks the one thing each diagram is about: the selected artifacts (02), the signature seal and newest audit entry (05), the trend and top bar (06). 01, 03 and 04 carry no accent.
-- Diagram 04 uses one `<mask>` per circle (in the reference each frame's ids are prefixed with its frame id, e.g. `f21a-r21lm0`) so the overlapping arcs draw dotted and the outer arcs solid. **Mask ids must be unique per rendered instance** — generate them per component instance rather than hard-coding.
+- Accent marks the one thing each diagram is about: the selected artifacts (02), the check (04), the top bar (05), the overlap and its score (06). 01 and 03 carry no accent — no layer is singled out in 03.
+- Diagrams use no masks or ids. If you add any, keep ids unique per rendered instance.
 
 ## Interactions & behavior
 

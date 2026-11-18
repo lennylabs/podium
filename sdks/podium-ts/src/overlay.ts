@@ -43,16 +43,15 @@ interface FrontmatterFields {
   version: string;
   description: string;
   tags: string[];
-  // metadataVersion is the nested metadata.version of a SKILL.md (§4.3.4).
-  metadataVersion: string;
 }
 
-// parseFrontmatter hand-parses the fields the SDK ranks and reports from an
-// ARTIFACT.md or a SKILL.md: the top-level type, version, description, and
-// tags, and the version key directly under a block-form or a single-line
-// flow-form metadata: mapping.
+// parseFrontmatter hand-parses the top-level fields the SDK ranks and reports
+// from an ARTIFACT.md or a SKILL.md: type, version, description, and tags. A
+// SKILL.md metadata value is read by metadataVersion and metadataTags instead,
+// which take a value only in a form whose line reading equals the YAML
+// decoding.
 function parseFrontmatter(text: string): { fields: FrontmatterFields; body: string } {
-  const fields: FrontmatterFields = { type: "", version: "", description: "", tags: [], metadataVersion: "" };
+  const fields: FrontmatterFields = { type: "", version: "", description: "", tags: [] };
   if (!text.startsWith("---")) return { fields, body: text };
   const lines = text.split(/\r?\n/);
   let end = -1;
@@ -65,10 +64,6 @@ function parseFrontmatter(text: string): { fields: FrontmatterFields; body: stri
   if (end === -1) return { fields, body: text };
   const body = lines.slice(end + 1).join("\n");
   let pendingTags = false;
-  // metadataIndent is -1 outside a metadata: block, 0 inside one before its
-  // first child, and the child indent after it, so a deeper key never reads as
-  // metadata.version.
-  let metadataIndent = -1;
   const tags: string[] = [];
   const unquote = (s: string): string => s.trim().replace(/^['"]|['"]$/g, "");
   for (const raw of lines.slice(1, end)) {
@@ -78,18 +73,12 @@ function parseFrontmatter(text: string): { fields: FrontmatterFields; body: stri
     }
     pendingTags = false;
     if (!raw.trim() || raw.trimStart().startsWith("#")) continue;
-    if (raw.startsWith(" ")) {
-      metadataIndent = readMetadataVersion(raw, metadataIndent, fields, unquote);
-      continue;
-    }
-    metadataIndent = -1;
+    if (raw.startsWith(" ")) continue;
     const sep = raw.indexOf(":");
     if (sep === -1) continue;
     const key = raw.slice(0, sep).trim();
     const val = raw.slice(sep + 1).trim();
-    if (key === "metadata") {
-      metadataIndent = readMetadataValue(val, fields, unquote);
-    } else if (key === "tags") {
+    if (key === "tags") {
       if (val.startsWith("[") && val.endsWith("]")) {
         for (const t of val.slice(1, -1).split(",")) {
           if (t.trim()) tags.push(unquote(t));
@@ -100,82 +89,43 @@ function parseFrontmatter(text: string): { fields: FrontmatterFields; body: stri
         pendingTags = true;
       }
     } else if (key === "type" || key === "version" || key === "description") {
-      fields[key] = unquote(val);
+      fields[key] = scalarValue(val);
     }
   }
   fields.tags = tags.filter(Boolean);
   return { fields, body };
 }
 
-// readMetadataValue reads the value of a top-level metadata: line and returns
-// the metadataIndent state. An empty value or a lone comment opens a
-// block-form mapping. A single-line flow mapping such as {version: "1.0.0"}
-// records its own version key into fields.metadataVersion, so the SDK overlay
-// reports the version the Go overlay's full YAML parse reports (§4.3.4).
-function readMetadataValue(val: string, fields: FrontmatterFields, unquote: (s: string) => string): number {
-  if (!val || val.startsWith("#")) return 0;
-  for (const entry of flowMappingEntries(val) ?? []) {
-    const m = /^(.*?):(?:\s|$)(.*)$/s.exec(entry.trim());
-    if (m && unquote(m[1]) === "version") fields.metadataVersion = unquote(m[2]);
-  }
-  return -1;
-}
+// YAML_NULLS are the plain scalars yaml.v3 decodes to null, which a string
+// field reads as empty, and the empty value, which is null too.
+const YAML_NULLS = new Set(["", "~", "null", "Null", "NULL"]);
 
-// flowMappingEntries splits a single-line YAML flow mapping into its top-level
-// entries. Commas inside a nested mapping, a sequence, or a quoted scalar stay
-// part of their entry, so a nested version key never reads as the mapping's
-// own. It returns null for a value that is not a flow mapping, whose braces do
-// not close on the line, or that carries anything but a comment after the
-// closing brace.
-function flowMappingEntries(val: string): string[] | null {
-  if (!val.startsWith("{")) return null;
-  const entries: string[] = [];
-  let depth = 0;
-  let quote = "";
-  let start = 1;
-  for (let i = 0; i < val.length; i++) {
-    const ch = val[i];
-    if (quote) {
-      if (quote === '"' && ch === "\\") i++;
-      else if (ch === quote) quote = "";
-      continue;
+// scalarValue returns the string a single-line top-level YAML scalar decodes
+// to. A quoted value ends at its closing quote, so a trailing comment after it
+// is dropped. A plain value ends before a "#" that begins the value or follows
+// white space, which starts a comment, and a plain null (~, null, or an empty
+// value) reads as empty, as Go's decode reads it into a string field.
+// "version: ~" therefore declares no version, and "type: skill # c" declares a
+// skill. Escapes inside a quoted value are kept as written. An unclosed quote
+// keeps the earlier reading, with the surrounding quotes removed.
+//
+// Spec: §4.3, §4.3.4
+function scalarValue(val: string): string {
+  const quote = val[0];
+  if (quote === '"' || quote === "'") {
+    for (let i = 1; i < val.length; i++) {
+      if (quote === '"' && val[i] === "\\") {
+        i++;
+      } else if (val[i] === quote) {
+        if (quote === "'" && val[i + 1] === "'") i++;
+        else return val.slice(1, i);
+      }
     }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-    } else if (ch === "{" || ch === "[") {
-      depth++;
-    } else if (ch === "," && depth === 1) {
-      entries.push(val.slice(start, i));
-      start = i + 1;
-    } else if ((ch === "}" || ch === "]") && --depth === 0) {
-      entries.push(val.slice(start, i));
-      const rest = val.slice(i + 1).trim();
-      return rest && !rest.startsWith("#") ? null : entries;
-    }
+    return val.replace(/^['"]|['"]$/g, "");
   }
-  return null;
-}
-
-// readMetadataVersion reads one indented frontmatter line. Inside a metadata:
-// block it records a version key at the block's child indent into
-// fields.metadataVersion, quoted or unquoted. It returns the updated
-// metadataIndent state.
-function readMetadataVersion(
-  raw: string,
-  metadataIndent: number,
-  fields: FrontmatterFields,
-  unquote: (s: string) => string,
-): number {
-  if (metadataIndent < 0) return metadataIndent;
-  const indent = raw.length - raw.trimStart().length;
-  const childIndent = metadataIndent === 0 ? indent : metadataIndent;
-  if (indent !== childIndent) return childIndent;
-  const line = raw.trim();
-  const sep = line.indexOf(":");
-  if (sep !== -1 && line.slice(0, sep).trim() === "version") {
-    fields.metadataVersion = unquote(line.slice(sep + 1));
-  }
-  return childIndent;
+  const comment = /(?:^|[ \t])#/.exec(val);
+  const plain = (comment ? val.slice(0, comment.index) : val).replace(/[ \t]+$/, "");
+  return YAML_NULLS.has(plain) ? "" : plain;
 }
 
 // The SKILL.md metadata.tags readable form. A line reader cannot reproduce
@@ -200,9 +150,10 @@ function readMetadataVersion(
 //   5. The value is plain (TAGS_PLAIN and not a null word), or double- or
 //      single-quoted printable ASCII with no escape and no inner quote.
 //   6. Every later line is blank up to the next block line at or above the
-//      child indent, and no later block line holds a "*" that starts an alias:
-//      yaml.v3 lets an alias key that resolves to "tags" replace the value
-//      with no error.
+//      child indent, and no later block line holds a "*" that starts an alias
+//      or a "!" that starts a tag: yaml.v3 lets an alias key that resolves to
+//      "tags", or a tagged key that decodes to it, replace the value with no
+//      error.
 //   7. Splitting the content on "," and trimming spaces leaves no empty
 //      element. The elements, in order, are the tags.
 //   8. The frontmatter holds no CR, U+0085, U+2028, U+2029, or U+FEFF, which
@@ -277,15 +228,22 @@ function blankUntilSibling(lines: string[], indentLen: number): boolean {
   return true;
 }
 
-// holdsAlias reports whether a line holds a "*" that begins a token and that a
-// non-white character follows. yaml.v3 compares mapping keys for duplicates
-// only between nodes of one kind, so an alias key resolving to tags would
-// replace the tags value with no error (condition 6).
-function holdsAlias(line: string): boolean {
+// holdsAliasOrTag reports whether a line holds an alias or a tag at a token
+// start (condition 6). yaml.v3 compares mapping keys for duplicates only
+// between nodes of one kind and tag, so an alias key resolving to tags, or a
+// tagged key such as !!binary dGFncw== that decodes to it, replaces the
+// earlier value with no error. A token starts at the line start, after white
+// space, or after the "[", "{", or "," of a flow collection, which needs no
+// space before the next entry. A "*" starts an alias when a non-white
+// character follows it, and a "!" always starts a tag. A "*" or a "!" at a
+// token start inside a scalar counts too, so the check errs toward reporting
+// no value.
+function holdsAliasOrTag(line: string): boolean {
   for (let i = 0; i < line.length; i++) {
-    if (line[i] === "*" && (i === 0 || isWhite(line[i - 1])) && i + 1 < line.length && !isWhite(line[i + 1])) {
-      return true;
-    }
+    const ch = line[i];
+    if (ch !== "*" && ch !== "!") continue;
+    if (i > 0 && !isWhite(line[i - 1]) && !"[{,".includes(line[i - 1])) continue;
+    if (ch === "!" || (i + 1 < line.length && !isWhite(line[i + 1]))) return true;
   }
   return false;
 }
@@ -333,10 +291,182 @@ export function metadataTags(skillMD: string): string[] {
   const content = tagsContent(fm[at], indent);
   if (content === null) return [];
   const after = fm.slice(at + 1, stop);
-  if (!blankUntilSibling(after, indent.length) || after.some(holdsAlias)) return [];
+  if (!blankUntilSibling(after, indent.length) || after.some(holdsAliasOrTag)) return [];
   if (fm.slice(0, at).some(opensScalarOrDocumentEnd)) return [];
   const tags = content.split(",").map(trimSpaces);
   return tags.some((t) => t === "") ? [] : tags;
+}
+
+// The SKILL.md metadata.version readable form. metadataVersion reads the value
+// only where the line reading equals the yaml.v3 decoding Go applies, and
+// returns "" for every other input, so the overlay reports the decoded version
+// or none (§4.3.4). test/vectors/skill-metadata-version.json, generated from
+// manifest.ResolveSkillVersion, pins the form to Go. The frontmatter is
+// delimited as for metadataTags, and conditions 8 and 9 of the tags form
+// apply. A value is in the form when, in addition:
+//   1. Exactly one frontmatter line begins with "metadata:". What follows it
+//      is white space, a comment, or a flow mapping that closes on the line.
+//   2. In the block form, the block and its child indent are as in condition 2
+//      of the tags form, exactly one block line at the child indent has the
+//      key "version", and that line is the child indent, "version:", one or
+//      more spaces, the value, and optional trailing spaces. Every later line
+//      is blank up to the next block line at or above the child indent.
+//   3. In the flow form, the mapping holds no comment, exactly one of its
+//      top-level entries has the key "version", once unquoted, and the value
+//      is that entry's value.
+//   4. The value is major.minor.patch, plain or in double or single quotes.
+//   5. No line before the version line, or before the metadata line in the
+//      flow form, begins with "..." or "%" or leaves a quoted scalar or a flow
+//      collection open, because each can end the document or swallow the
+//      version line into another value: a multi-line flow mapping such as
+//      "openclaw: {" or a quoted scalar continued on the next line.
+//   6. No later frontmatter line, and no part of a flow-form mapping, holds a
+//      "*" that starts an alias or a "!" that starts a tag, which yaml.v3 lets
+//      replace the metadata mapping or its version key with no error.
+const VERSION_VALUE = /^(?:([0-9]+\.[0-9]+\.[0-9]+)|"([0-9]+\.[0-9]+\.[0-9]+)"|'([0-9]+\.[0-9]+\.[0-9]+)')$/;
+
+// versionValue returns the version a value in the condition 4 form holds, or
+// "".
+function versionValue(value: string): string {
+  const m = VERSION_VALUE.exec(trimSpaces(value));
+  return m ? (m[1] ?? m[2] ?? m[3]) : "";
+}
+
+// leavesOpen reports whether a line can end the document or leave a quoted
+// scalar or a flow collection open (condition 5). A quote at a token start
+// opens a quoted scalar, and a bracket or a brace at a token start opens a
+// flow collection; the line leaves it open when it does not close before the
+// line ends. A "#" after white space outside a quoted scalar starts a comment,
+// which ends the scan. A quote inside a plain scalar, such as say "hi, counts
+// as an opener too, so the check errs toward reporting no value.
+function leavesOpen(line: string): boolean {
+  if (line.startsWith("...") || line.startsWith("%")) return true;
+  let depth = 0;
+  let quote = "";
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    const prev = i > 0 ? line[i - 1] : " ";
+    if (quote) {
+      if (quote === '"' && ch === "\\") i++;
+      else if (ch === quote && quote === "'" && line[i + 1] === "'") i++;
+      else if (ch === quote) quote = "";
+    } else if (ch === "#" && isWhite(prev)) {
+      break;
+    } else if ((ch === '"' || ch === "'") && (isWhite(prev) || (depth > 0 && "[{,:".includes(prev)))) {
+      quote = ch;
+    } else if ((ch === "[" || ch === "{") && (isWhite(prev) || depth > 0)) {
+      depth++;
+    } else if ((ch === "]" || ch === "}") && depth > 0) {
+      depth--;
+    }
+  }
+  return quote !== "" || depth > 0;
+}
+
+// flowMappingEntries splits a single-line YAML flow mapping into its top-level
+// entries. Commas inside a nested mapping, a sequence, or a quoted scalar stay
+// part of their entry, so a nested version key never reads as the mapping's
+// own. It returns null for a value that is not a flow mapping, whose braces do
+// not close on the line, that holds a comment, which would continue the
+// mapping on a later line, or that carries anything but a comment after the
+// closing brace.
+function flowMappingEntries(val: string): string[] | null {
+  if (!val.startsWith("{")) return null;
+  const entries: string[] = [];
+  let depth = 0;
+  let quote = "";
+  let start = 1;
+  for (let i = 0; i < val.length; i++) {
+    const ch = val[i];
+    if (quote) {
+      if (quote === '"' && ch === "\\") i++;
+      else if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === "#" && isWhite(val[i - 1])) {
+      return null;
+    } else if (ch === "{" || ch === "[") {
+      depth++;
+    } else if (ch === "," && depth === 1) {
+      entries.push(val.slice(start, i));
+      start = i + 1;
+    } else if ((ch === "}" || ch === "]") && --depth === 0) {
+      entries.push(val.slice(start, i));
+      const rest = val.slice(i + 1).replace(/^[ \t]+|[ \t]+$/g, "");
+      return rest && !rest.startsWith("#") ? null : entries;
+    }
+  }
+  return null;
+}
+
+// flowMetadataVersion returns the version of a flow-form metadata value
+// (condition 3), or "".
+function flowMetadataVersion(val: string): string {
+  const entries = flowMappingEntries(val);
+  if (entries === null || holdsAliasOrTag(val)) return "";
+  const found: string[] = [];
+  for (const entry of entries) {
+    const trimmed = entry.replace(/^[ \t]+|[ \t]+$/g, "");
+    const sep = trimmed.indexOf(":");
+    if (sep === -1) continue;
+    const value = trimmed.slice(sep + 1);
+    if (value !== "" && !isWhite(value[0])) continue;
+    let key = trimmed.slice(0, sep).replace(/[ \t]+$/, "");
+    if (key.length >= 2 && (key[0] === '"' || key[0] === "'") && key.endsWith(key[0])) key = key.slice(1, -1);
+    if (key === "version") found.push(value);
+  }
+  return found.length === 1 ? versionValue(found[0]) : "";
+}
+
+// blockMetadataVersion returns the version of a block-form metadata value and
+// the index of its line (condition 2), or ["", -1]. start is the index of the
+// line after metadata:.
+function blockMetadataVersion(fm: string[], start: number): [string, number] {
+  let stop = start;
+  while (stop < fm.length && !(fm[stop] !== "" && !isWhite(fm[stop][0]) && fm[stop][0] !== "#")) stop++;
+  const child = fm.slice(start, stop).find((l) => !isBlankLine(l) && !isCommentLine(l));
+  if (child === undefined) return ["", -1];
+  const indent = indentOf(child);
+  if (!/^ +$/.test(indent)) return ["", -1];
+  const at: number[] = [];
+  for (let i = start; i < stop; i++) {
+    if (indentOf(fm[i]) === indent && lineKey(fm[i].slice(indent.length)) === "version") at.push(i);
+  }
+  if (at.length !== 1 || fm[at[0]].includes("\t") || !fm[at[0]].startsWith(`${indent}version: `)) return ["", -1];
+  if (!blankUntilSibling(fm.slice(at[0] + 1, stop), indent.length)) return ["", -1];
+  return [versionValue(fm[at[0]].slice(indent.length + "version:".length)), at[0]];
+}
+
+// metadataVersion returns the metadata.version of a SKILL.md in the readable
+// form, and "" for every input outside it. A version: line nested in another
+// key's block, or inside a multi-line flow collection or quoted scalar, is
+// never read, so the overlay reports no version the YAML decoding does not
+// produce.
+//
+// Spec: §4.3.4, §6.4
+export function metadataVersion(skillMD: string): string {
+  const fm = frontmatterLines(skillMD);
+  if (fm === null || fm.some((l) => HIDDEN_BREAK.test(l))) return "";
+  const first = fm.find((l) => !isBlankLine(l) && !isCommentLine(l));
+  if (first === undefined || isWhite(first[0])) return "";
+  const metaAt = fm.flatMap((l, i) => (l.startsWith("metadata:") ? [i] : []));
+  if (metaAt.length !== 1) return "";
+  const rest = fm[metaAt[0]].slice("metadata:".length);
+  let version: string;
+  let at: number;
+  if (isBlankLine(rest) || rest.replace(/^[ \t]+/, "").startsWith("#")) {
+    if (rest !== "" && !isWhite(rest[0])) return "";
+    [version, at] = blockMetadataVersion(fm, metaAt[0] + 1);
+  } else if (rest.startsWith(" ")) {
+    [version, at] = [flowMetadataVersion(rest.replace(/^ +/, "")), metaAt[0]];
+  } else {
+    return "";
+  }
+  if (version === "" || fm.slice(0, at).some(leavesOpen)) return "";
+  if (fm.slice(at + 1).some(holdsAliasOrTag)) return "";
+  return version;
 }
 
 export interface OverlayArtifact {
@@ -744,8 +874,7 @@ export class LocalOverlay {
       return overlayArtifact(id, fields, frontmatter, body, "", resources);
     }
     const skillRaw = await readOptional(fs, path.join(dir, "SKILL.md"));
-    const skill = parseFrontmatter(skillRaw).fields;
-    fields.version = resolveSkillVersion(fields.version, skill.metadataVersion);
+    fields.version = resolveSkillVersion(fields.version, metadataVersion(skillRaw));
     const resources = await collectResources(fs, path, dir, new Set(["ARTIFACT.md", "SKILL.md"]));
     return overlayArtifact(id, fields, frontmatter, body, skillRaw, resources);
   }
@@ -770,13 +899,12 @@ export class LocalOverlay {
       return null;
     }
     const { fields: skill, body } = parseFrontmatter(skillRaw);
-    const version = resolveSkillVersion("", skill.metadataVersion);
+    const version = resolveSkillVersion("", metadataVersion(skillRaw));
     const fields: FrontmatterFields = {
       type: "skill",
       version,
       description: skill.description,
       tags: metadataTags(skillRaw),
-      metadataVersion: skill.metadataVersion,
     };
     const resources = await collectResources(fs, path, dir, new Set(["SKILL.md"]));
     return overlayArtifact(id, fields, synthesizedSkillDocument(version), body, skillRaw, resources);

@@ -94,6 +94,10 @@ func (f *FaultVectorStore) ListVectorPending(ctx context.Context, limit int, now
 	return f.outbox.ListVectorPending(ctx, limit, now)
 }
 
+func (f *FaultVectorStore) ListVectorPendingKeys(ctx context.Context, tenantID string) ([]store.VectorPendingKey, error) {
+	return f.outbox.ListVectorPendingKeys(ctx, tenantID)
+}
+
 func (f *FaultVectorStore) MarkVectorPendingDone(ctx context.Context, tenantID, artifactID, version string) error {
 	return f.outbox.MarkVectorPendingDone(ctx, tenantID, artifactID, version)
 }

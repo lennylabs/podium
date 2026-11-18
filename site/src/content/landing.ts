@@ -316,28 +316,20 @@ export const landing: LandingContent = {
         number: "01",
         title: "Domains and subdomains",
         body: [
-          "Easy skill maintenance and discoverability through the use of domains and sub-domains.",
+          "Domains and subdomains keep skills easy to maintain and to discover.",
         ],
         diagram: "domains",
       },
       {
         number: "02",
-        title: "Selective materialization",
+        title: "Materialization and discovery",
         body: [
-          "Sync a chosen subset of the catalog into a workspace ahead of time. Define profiles to quickly and seamlessly switch between scopes.",
+          "Sync a chosen subset of the catalog into a workspace ahead of time, with profiles to switch scopes. Or let agents find skills over MCP and load them on demand, bundled files included.",
         ],
         diagram: "materialization",
       },
       {
         number: "03",
-        title: "Progressive discovery",
-        body: [
-          "stdio MCP server with tools for agents to find skills and to lazily load them into the agent's workspace (including bundled files).",
-        ],
-        diagram: "discovery",
-      },
-      {
-        number: "04",
         title: "Layered composition",
         body: [
           "Compose the catalog from multiple independent sources with deterministic merge and explicit precedence.",
@@ -346,20 +338,26 @@ export const landing: LandingContent = {
         diagram: "layers",
       },
       {
-        number: "05",
+        number: "04",
         title: "Security and access control",
         body: [
-          "Skills and other artifacts are signed at ingest and verified on every sync. Declare who can see what with RBAC. Audit logs.",
+          "Skills and other artifacts are signed at ingest and verified on every sync. Declare who can see what with RBAC. An audit log records registry activity.",
         ],
         diagram: "security",
       },
       {
+        number: "05",
+        title: "Usage metrics",
+        body: ["See how often each artifact is searched for and downloaded."],
+        diagram: "usage",
+      },
+      {
         number: "06",
-        title: "Observability",
+        title: "Overlap detection",
         body: [
-          "Every artifact load and every search is an audit event. Stream the events to your log pipeline to see which artifacts agents load and how often.",
+          "Podium flags skills an agent could mix up: copies, or the same meaning in different words.",
         ],
-        diagram: "observability",
+        diagram: "overlap",
       },
     ],
   },
@@ -376,7 +374,12 @@ export const landing: LandingContent = {
           { label: "Materialization", value: "User-driven sync" },
         ],
         plusLabel: null,
-        plus: ["Author, lint, sync", "Domains and profiles", "Ordered layers from disk"],
+        plus: [
+          "Author, lint, and sync",
+          "Domains and profiles",
+          "Layers (from disk)",
+          "Word-based overlap checks",
+        ],
       },
       {
         icon: "database",
@@ -397,8 +400,10 @@ export const landing: LandingContent = {
         plus: [
           "Discovery via MCP or SDK",
           "Hybrid search",
-          "Registered and remote layers, with visibility",
-          "One audit log",
+          "Remote layers and per-user visibility",
+          "Semantic overlap analysis",
+          "Audit log to a local file, HTTP, or OTLP",
+          "Multi-tenancy and SCIM group sync",
         ],
       },
       {
@@ -417,10 +422,7 @@ export const landing: LandingContent = {
           },
         ],
         plusLabel: "Everything in single node, plus",
-        plus: [
-          "Postgres tenant isolation",
-          "High availability",
-        ],
+        plus: ["Postgres tenant isolation", "High availability"],
       },
     ],
     callout: {
@@ -465,6 +467,13 @@ export const landing: LandingContent = {
         note: "A provider is configured by default (ollama, or openai on Postgres) but ships in no binary, so hybrid search needs it reachable. Or let Pinecone, Weaviate, or Qdrant embed on ingest. Vectors are fused with BM25 hits via reciprocal rank fusion.",
       },
       {
+        icon: "circles",
+        name: "Overlap detection",
+        builtIn: "Word-based checks",
+        alternatives: ["Semantic check"],
+        note: "Compares embeddings of each artifact’s name, description, when_to_use, and tags in the vector index above, so it needs no second index. Word-based checks need no services.",
+      },
+      {
         icon: "padlock",
         name: "Identity",
         builtIn: "None",
@@ -476,7 +485,7 @@ export const landing: LandingContent = {
         name: "Layer sources",
         builtIn: "Git and local paths",
         alternatives: ["Custom via SPI"],
-        note: "S3 buckets, OCI registries, HTTP archives.",
+        note: "A custom source can read from S3 buckets, OCI registries, or HTTP archives.",
       },
       {
         icon: "scroll",
@@ -497,7 +506,7 @@ export const landing: LandingContent = {
         name: "Notifications",
         builtIn: "None",
         alternatives: ["Webhook", "Email (SMTP)", "Log"],
-        note: "Delivers layer ingest-failure alerts. Several providers can run together.",
+        note: "Notifications report layer ingest failures. Several providers can run together.",
       },
     ],
     note: "Nothing in the right column is required to start. At cluster scale, Postgres and object storage become requirements. Easily re-embed during vector backend migrations.",

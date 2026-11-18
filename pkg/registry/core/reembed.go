@@ -3,10 +3,12 @@ package core
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
 	domainpkg "github.com/lennylabs/podium/pkg/domain"
+	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/projection"
 	"github.com/lennylabs/podium/pkg/store"
@@ -122,6 +124,7 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 	}
 
 	res := &ReembedResult{Total: len(manifests)}
+	var reembedded []vector.RowKey
 	// §4.7 "emits embedding.reembed_in_progress events for progress monitoring":
 	// announce the pass, then emit periodic progress so an operator can watch a
 	// long re-embed advance.
@@ -139,6 +142,7 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 			continue
 		}
 		res.Succeeded++
+		reembedded = append(reembedded, vector.RowKey{ArtifactID: m.ArtifactID, Version: m.Version})
 		if (i+1)%50 == 0 {
 			r.emitReembedProgress(ctx, i+1, res.Total, modelID)
 		}
@@ -182,6 +186,15 @@ func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedRe
 		}
 	}
 	r.emitReembedProgress(ctx, res.Succeeded, res.Total, modelID)
+	// Spec: §7.3.1 — a full pass computes the overlap records of every
+	// artifact it re-embedded, so records of a replaced model are recomputed
+	// as soon as the new vectors exist. A failed computation is logged and
+	// left to the sweep; it does not fail the re-embed.
+	if !opts.OnlyIfMissing && opts.Since.IsZero() && r.overlap.semantic.Enabled {
+		if _, err := r.ComputeOverlap(ctx, reembedded); err != nil {
+			log.Printf("%s: after re-embed: %v", lint.SemanticOverlapCode, err)
+		}
+	}
 	return res, nil
 }
 

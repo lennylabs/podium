@@ -125,6 +125,16 @@ func (v *SQLiteVec) applySchema() error {
 // ID returns "sqlite-vec".
 func (*SQLiteVec) ID() string { return "sqlite-vec" }
 
+// sqliteVecMaxK bounds the KNN candidate count a query asks the vec0 table
+// for. A query returns at most this many rows whatever its topK, so a larger
+// topK would come back short and read as an index with no further rows.
+const sqliteVecMaxK = 1000
+
+// MaxQueryRows returns sqliteVecMaxK, the most rows one query can return.
+//
+// Spec: §7.3.1
+func (*SQLiteVec) MaxQueryRows() int { return sqliteVecMaxK }
+
 // Dimensions returns the configured dimension.
 func (v *SQLiteVec) Dimensions() int { return v.dim }
 
@@ -199,11 +209,8 @@ func (v *SQLiteVec) Query(ctx context.Context, tenantID string, vec []float32, t
 	// avoid pulling other tenants into the KNN result, we ask for
 	// (topK + tenantSize) candidates and trim — but a simpler
 	// strategy that works at expected scale is to fetch a generous
-	// over-K and filter; we use 10x topK clamped to 1000.
-	overK := topK * 10
-	if overK > 1000 {
-		overK = 1000
-	}
+	// over-K and filter; we use 10x topK clamped to sqliteVecMaxK.
+	overK := min(topK*10, sqliteVecMaxK)
 	rows, err := v.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT vi.artifact_id, vi.version, va.distance
 		FROM (
@@ -292,10 +299,7 @@ func (v *SQLiteVec) QueryModel(ctx context.Context, tenantID string, vec []float
 		return nil, err
 	}
 	blob := serialize(vec)
-	overK := topK * 10
-	if overK > 1000 {
-		overK = 1000
-	}
+	overK := min(topK*10, sqliteVecMaxK)
 	q := fmt.Sprintf(`
 		SELECT vi.artifact_id, vi.version, va.distance
 		FROM (

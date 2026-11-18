@@ -7,7 +7,7 @@ import { REPO_ROOT, SITE_DIR, loadConfig } from "../src/build/config";
 import { disposeHighlighter } from "../src/build/content/highlight";
 import { buildCorpus, type BuiltCorpus } from "../src/build/content/pipeline";
 import { buildNav, flattenNav } from "../src/build/nav";
-import { runChecks } from "../src/build/check";
+import { gzippedBytes, runChecks } from "../src/build/check";
 import { buildSearchIndex } from "../src/build/search";
 import { validateRegistry } from "../src/components/islands/props";
 import { registry } from "../src/components/islands/registry";
@@ -61,7 +61,7 @@ describe("the repository documentation tree", () => {
         pages: corpus.pages,
         nav,
         index: corpus.index,
-        searchIndexBytes: Buffer.byteLength(search.serialized),
+        searchIndexGzipBytes: gzippedBytes(search.serialized),
       }),
     ).toEqual([]);
   });
@@ -86,12 +86,12 @@ describe("the repository documentation tree", () => {
     expect(unreachable).toEqual([]);
   });
 
-  it("keeps the serialized search index inside the declared limit", () => {
+  it("keeps the gzipped search index inside the declared limit", () => {
     const sectionTitles = new Map(corpus.pages.map((page) => [page.route, page.title]));
     const search = buildSearchIndex(corpus.pages, sectionTitles);
 
-    expect(Buffer.byteLength(search.serialized)).toBeLessThanOrEqual(
-      config.searchIndexLimitBytes,
+    expect(gzippedBytes(search.serialized)).toBeLessThanOrEqual(
+      config.searchIndexLimitGzipBytes,
     );
   });
 });

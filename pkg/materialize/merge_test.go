@@ -366,7 +366,7 @@ func TestStripPodiumBlocks_PreservesOperatorContent(t *testing.T) {
 	base := injectBlock([]byte("# House rules\n\nKeep PRs small.\n"), "team/a", []byte("Rule A."), md)
 	base = injectBlock(base, "team/b", []byte("Rule B."), md)
 
-	out := string(stripPodiumBlocks(base, md))
+	out := string(stripPodiumBlocks(base, md, nil))
 	if !strings.Contains(out, "Keep PRs small.") || !strings.Contains(out, "# House rules") {
 		t.Errorf("operator content lost:\n%s", out)
 	}

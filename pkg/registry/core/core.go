@@ -131,6 +131,10 @@ type Registry struct {
 	// closed.
 	retiredMu sync.RWMutex
 	retired   map[retiredKey]bool
+	// overlap holds the §7.3.1 description-check thresholds and the semantic
+	// overlap configuration WithOverlapChecks sets. It is written once,
+	// before the registry serves a request, and only read afterwards.
+	overlap overlapSettings
 }
 
 // DiscoveryDefaults carries the §13.12 tenant-scope discovery knobs from

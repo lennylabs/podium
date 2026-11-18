@@ -42,11 +42,12 @@ runs on. [Why Podium](why-podium#features) describes the features themselves.
 | Feature | What implements it | Where it runs |
 |:--|:--|:--|
 | Domains and subdomains | The catalog's directory layout, plus the `DOMAIN.md` metadata read from it. | In the catalog, in every deployment mode. |
-| Selective materialization | Scope resolution in `podium sync`, from the merged `sync.yaml` and the CLI flags. | On the consumer, in every deployment mode. |
-| Progressive discovery | The meta-tools, backed by the domain renderer and hybrid retrieval. | On the registry server, reached through the MCP server or an SDK. |
+| Materialization and discovery | Scope resolution in `podium sync`, from the merged `sync.yaml` and the CLI flags, for sync ahead of time. The meta-tools, backed by the domain renderer and hybrid retrieval, for discovery on demand. | Sync runs on the consumer, in every deployment mode. Discovery runs on the registry server, reached through the MCP server or an SDK. |
 | Layered composition | The layer composer, fed by the layer source providers. | On the registry. A filesystem source composes ordered layers from one root, and identity-aware composition across independent sources runs on a server. |
 | Security and access control | Signing at ingest, the visibility evaluator run against the caller's verified identity, and the audit log. | On the registry server, with signature verification on the consumer. |
-| Observability | The audit destinations, the Prometheus metrics endpoint, the OpenTelemetry tracer, and the notification provider. | On the registry server. The MCP server can also write a local audit stream, serve metrics, and export traces. |
+| Usage metrics | The `artifact.loaded` and `artifacts.searched` audit events, which record the artifact or the query and the client, written to the audit destinations: a local file, stdout, HTTP receivers, or an OpenTelemetry Collector. | On the registry server, with counting in the log pipeline that receives the records. The MCP server can also write a local audit stream. |
+| Overlap detection | The word-based lint checks, the semantic check over the vectors the search index stores, and the catalog overlap report. | The word-based checks run in `podium lint` in every deployment mode and at registry ingest. The semantic check and the overlap report run on the registry server. |
+| Observability | The Prometheus metrics endpoint, the OpenTelemetry tracer, and the notification provider. | On the registry server. The MCP server can also serve metrics and export traces. |
 | Cross-harness delivery | The `HarnessAdapter` step of the materialization pipeline, shared by `podium sync`, the MCP server, and the SDKs. | On the consumer, in every deployment mode. |
 
 ---
@@ -153,7 +154,7 @@ The table lists the components of a server-source deployment:
 
 | Component        | Role                                                                                                                           | Where it runs                                                                                                                      |
 | :--------------- | :----------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------- |
-| Registry service | HTTP API; layer composition; visibility filtering; manifest indexing; hybrid retrieval; dependency graph; signing; audit       | A server (one binary in the single-node mode, replicas behind a load balancer in the clustered mode)                               |
+| Registry service | HTTP API; layer composition; visibility filtering; manifest indexing; hybrid retrieval; dependency graph; overlap detection; signing; audit | A server (one binary in the single-node mode, replicas behind a load balancer in the clustered mode)                               |
 | Postgres         | Manifest metadata, layer config, admin grants, dependency edges, embeddings (when `pgvector` is the vector backend)            | Alongside the registry (or managed RDS / Cloud SQL / Aurora)                                                                       |
 | Object storage   | Bundled resource bytes, content-addressed                                                                                      | S3 / GCS / MinIO / R2 (the local filesystem in the single-node mode)                                                               |
 | Vector backend   | Hybrid retrieval                                                                                                               | `pgvector` and `sqlite-vec` collocate with the metadata store; managed alternatives include Pinecone, Weaviate Cloud, Qdrant Cloud |
@@ -184,8 +185,10 @@ Each mode keeps what the mode before it does and adds server-side capability.
 | Single node | One registry process, started with `podium serve --standalone`, with SQLite, `sqlite-vec`, and filesystem object storage embedded. |
 | Clustered | Registry replicas behind a load balancer, with Postgres, S3-compatible object storage, and an OIDC identity provider. A Helm chart ships for Kubernetes. |
 
-Multi-tenancy, SCIM group push, freeze windows, outbound webhooks, and the
-hash-chained audit log run on a single node as well. The clustered mode adds
+The local mode runs the word-based overlap checks through `podium lint`.
+Signing, multi-tenancy, SCIM group push, freeze windows, outbound webhooks, the
+semantic overlap check, and the hash-chained audit log with its file, stdout,
+HTTP, and OTLP destinations run on a single node as well. The clustered mode adds
 high availability across registry replicas and Postgres schema-per-org tenant
 isolation. [Deployment modes](../deployment/modes/) covers choosing a mode, and
 [Moving between modes](../deployment/modes/migrating) covers the migration
@@ -435,6 +438,7 @@ Continue with the guide that fits the task:
 - **Deliver them into a harness**: [Configure your harness](../consuming/configure-your-harness)
 - **Narrow what a workspace receives**: [Selective materialization](../consuming/selective-materialization)
 - **Let an agent find them at runtime**: [Browsing the catalog](../consuming/browsing-the-catalog)
+- **Look after the catalog once it is in use**: [Managing the catalog](../managing/)
 - **Connect Git repositories as layer sources**: [Connecting layer sources](../deployment/content/layer-sources)
 - **Run Podium for a team or organization**: [Deployment guide](../deployment/)
 - **Call the API directly**: [Reference](../reference/)

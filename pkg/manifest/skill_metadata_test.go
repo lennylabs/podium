@@ -89,6 +89,38 @@ func TestDecodeSkillMetadata_Encodings(t *testing.T) {
 	}
 }
 
+// Spec: §4.3.4 — a sequence or a mapping under a key Podium reads does not
+// follow its encoding, so it is ignored with an issue that names its kind and
+// value; one under an unread key or under version raises no issue here and
+// is the only entry UnreadNonStringMetadata returns. It fails against a
+// decoder that reads a nested tags value or reports an unread key as an issue.
+func TestDecodeSkillMetadata_NonStringValues(t *testing.T) {
+	t.Parallel()
+	s, err := ParseSkill([]byte("---\nname: x\nmetadata:\n  version: {major: 1}\n  requires:\n    bins: [uv]\n  tags: [a, b]\n  sensitivity: low\n---\n"))
+	if err != nil {
+		t.Fatalf("ParseSkill: %v", err)
+	}
+	got := DecodeSkillMetadata(s)
+	want := []SkillMetadataIssue{{Key: "tags", Value: "[a, b]", Encoding: skillMetadataCodecs["tags"].encoding, Kind: "sequence"}}
+	if !reflect.DeepEqual(got.Issues, want) {
+		t.Errorf("Issues = %+v, want %+v", got.Issues, want)
+	}
+	if got.Decoded["tags"] || got.Values.Tags != nil || !got.Decoded["sensitivity"] {
+		t.Errorf("got %+v, want tags ignored and sensitivity decoded", got)
+	}
+	unread := s.UnreadNonStringMetadata()
+	if len(unread) != 1 || unread[0].Key != "requires" {
+		t.Errorf("UnreadNonStringMetadata = %+v, want only requires", unread)
+	}
+	if v := ResolveSkillVersion(&Artifact{}, s); v != "" {
+		t.Errorf("ResolveSkillVersion = %q, want no usable version", v)
+	}
+	var none *Skill
+	if _, ok := none.NonStringMetadataValue("tags"); ok || none.UnreadNonStringMetadata() != nil {
+		t.Error("a nil skill holds a non-string value")
+	}
+}
+
 // Spec: §4.3.4 — issues come out in the table order of the keys, so the lint
 // warnings are deterministic whatever the map iteration order.
 func TestDecodeSkillMetadata_IssuesInTableOrder(t *testing.T) {
@@ -329,6 +361,21 @@ func TestResolveStoredSkill_Forms(t *testing.T) {
 		}
 	})
 
+	t.Run("nested metadata resolves and is not read", func(t *testing.T) {
+		t.Parallel()
+		nested := "---\nname: x\ndescription: d\nmetadata:\n  tags: [a, b]\n  requires:\n    bins: [uv]\n  sensitivity: high\n---\n"
+		a, s, filled, ok := ResolveStoredSkill(nil, []byte(nested))
+		if !ok {
+			t.Fatal("ok = false, want true")
+		}
+		if a.Tags != nil || a.Sensitivity != SensitivityHigh || !reflect.DeepEqual(filled, []string{"sensitivity"}) {
+			t.Errorf("a = %+v, filled = %v, want no tags and sensitivity high", a, filled)
+		}
+		if len(s.NonStringMetadata) != 2 {
+			t.Errorf("NonStringMetadata = %+v, want tags and requires", s.NonStringMetadata)
+		}
+	})
+
 	refused := []struct {
 		name       string
 		artifactMD string
@@ -338,7 +385,7 @@ func TestResolveStoredSkill_Forms(t *testing.T) {
 		{"unparsable SKILL.md", "", "no frontmatter"},
 		{"empty SKILL.md", "", ""},
 		{"unparsable ARTIFACT.md", "---\ntype: [skill\n---\n", skillMD},
-		{"list metadata value", "", "---\nname: x\nmetadata:\n  tags: [a, b]\n---\n"},
+		{"description mapping", "", "---\nname: x\ndescription:\n  text: d\n---\n"},
 	}
 	for _, tc := range refused {
 		t.Run(tc.name, func(t *testing.T) {

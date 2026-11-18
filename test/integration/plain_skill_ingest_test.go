@@ -3,7 +3,6 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -527,39 +526,95 @@ func TestPlainSkillIngest_PublicModeRefusesMetadataSensitivity(t *testing.T) {
 	}
 }
 
-// psListTagsLayer is a layer snapshot holding the valid plain skill good and
-// the plain skill bad, whose metadata.tags is a YAML sequence.
-func psListTagsLayer() fstest.MapFS {
+// psLayerWith returns a layer holding the plain skill good at 1.0.0 and the
+// plain skill bad whose SKILL.md is skillMD.
+func psLayerWith(skillMD string) fstest.MapFS {
 	fs := psFS("good", psNamedSkill("good", "valid", "1.0.0"), "")
-	fs["bad/SKILL.md"] = &fstest.MapFile{Data: []byte(psListTagsSkill)}
+	fs["bad/SKILL.md"] = &fstest.MapFile{Data: []byte(skillMD)}
 	return fs
 }
 
-// psListTagsSkill is a plain SKILL.md whose metadata.tags is a YAML sequence,
-// which the map[string]string metadata decoder refuses.
-const psListTagsSkill = "---\nname: bad\ndescription: bad skill\nmetadata:\n  tags: [a, b]\n---\n\nbody\n"
+// psNestedMetadataSkill is a plain SKILL.md whose metadata nests a mapping
+// under requires, a key Podium does not read, and a sequence under tags.
+const psNestedMetadataSkill = "---\nname: bad\ndescription: bad skill\nmetadata:\n" +
+	"  requires:\n    bins: [\"lark-cli\"]\n  tags: [a, b]\n---\n\nbody\n"
 
-// Spec: §4.3.4 — a sequence under SKILL.md metadata is a parse failure that
-// fails the whole layer ingest: the error wraps ingest.ErrInvalidArtifact and
-// names metadata.tags, and the valid sibling skill stores no row either.
-func TestPlainSkillIngest_ListMetadataValueRefused(t *testing.T) {
+// psMappingDescriptionSkill is a plain SKILL.md whose description is a
+// mapping, which does not parse.
+const psMappingDescriptionSkill = "---\nname: bad\ndescription:\n  text: bad skill\n---\n\nbody\n"
+
+// Spec: §4.1, §4.3.4 — a sequence or a mapping under SKILL.md metadata does
+// not make the frontmatter unparseable: ingest accepts the skill beside its
+// valid sibling on every store, stores its SKILL.md bytes unchanged, and
+// takes no tag from the sequence under tags. It fails against an ingest that
+// refuses the nested value as manifest_unparseable.
+func TestPlainSkillIngest_NestedMetadataAccepted(t *testing.T) {
 	t.Parallel()
 	for _, f := range ingestConvergenceStores(t) {
 		t.Run(f.name, func(t *testing.T) {
 			t.Parallel()
 			e := newPSEnv(t, f, "L")
-			_, err := ingest.Ingest(context.Background(), e.st, ingest.Request{
-				TenantID: psTenant, LayerID: "L", Files: psListTagsLayer(),
+			res, err := ingest.Ingest(context.Background(), e.st, ingest.Request{
+				TenantID: psTenant, LayerID: "L", Files: psLayerWith(psNestedMetadataSkill),
 			})
-			if !errors.Is(err, ingest.ErrInvalidArtifact) || !strings.Contains(err.Error(), "metadata.tags") {
-				t.Fatalf("Ingest err = %v, want an ingest.ErrInvalidArtifact error naming metadata.tags", err)
+			if err != nil {
+				t.Fatalf("Ingest: %v", err)
+			}
+			if res.Accepted != 2 || len(res.Rejected) != 0 {
+				t.Fatalf("result = %+v, want good and bad accepted", res)
 			}
 			all, err := e.st.ListManifestsIncludingDeleted(context.Background(), psTenant)
 			if err != nil {
 				t.Fatalf("ListManifestsIncludingDeleted: %v", err)
 			}
-			if len(all) != 0 {
-				t.Errorf("stored rows = %d, want none from the refused ingest", len(all))
+			var bad *store.ManifestRecord
+			for i := range all {
+				if all[i].ArtifactID == "bad" {
+					bad = &all[i]
+				}
+			}
+			if len(all) != 2 || bad == nil {
+				t.Fatalf("stored rows = %+v, want good and bad", all)
+			}
+			if string(bad.SkillRaw) != psNestedMetadataSkill || len(bad.Tags) != 0 {
+				t.Errorf("bad row SkillRaw = %q, tags = %q; want the authored bytes and no tag", bad.SkillRaw, bad.Tags)
+			}
+		})
+	}
+}
+
+// Spec: §4.1, §4.3.4 — a SKILL.md whose description is a mapping is a parse
+// failure that refuses that skill alone: ingest rejects it with
+// ingest.invalid_artifact, a reason naming bad/SKILL.md, and exactly the
+// manifest_unparseable constraint, stores no row for it, and stores the valid
+// sibling skill.
+func TestPlainSkillIngest_MappingDescriptionRefused(t *testing.T) {
+	t.Parallel()
+	for _, f := range ingestConvergenceStores(t) {
+		t.Run(f.name, func(t *testing.T) {
+			t.Parallel()
+			e := newPSEnv(t, f, "L")
+			res, err := ingest.Ingest(context.Background(), e.st, ingest.Request{
+				TenantID: psTenant, LayerID: "L", Files: psLayerWith(psMappingDescriptionSkill),
+			})
+			if err != nil {
+				t.Fatalf("Ingest err = %v, want the malformed skill refused on its own", err)
+			}
+			if res.Accepted != 1 || len(res.Rejected) != 1 {
+				t.Fatalf("result = %+v, want good accepted and bad refused", res)
+			}
+			rj := res.Rejected[0]
+			want := map[string]any{"constraint": layer.ManifestUnparseableConstraint}
+			if rj.ArtifactID != "bad" || rj.Code != layer.InvalidArtifactCode || !reflect.DeepEqual(rj.Details, want) ||
+				!strings.HasPrefix(rj.Reason, "bad/SKILL.md: ") || !strings.Contains(rj.Reason, "cannot unmarshal !!map into string") {
+				t.Errorf("rejection = %+v, want bad refused with manifest_unparseable naming bad/SKILL.md and the parse error", rj)
+			}
+			all, err := e.st.ListManifestsIncludingDeleted(context.Background(), psTenant)
+			if err != nil {
+				t.Fatalf("ListManifestsIncludingDeleted: %v", err)
+			}
+			if len(all) != 1 || all[0].ArtifactID != "good" {
+				t.Errorf("stored rows = %+v, want good alone", all)
 			}
 		})
 	}

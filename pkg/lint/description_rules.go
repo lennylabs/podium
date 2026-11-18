@@ -146,9 +146,15 @@ func (r ruleCollidingDescriptions) Check(ctx context.Context, _ *filesystem.Regi
 		if total == 0 {
 			continue
 		}
-		out = append(out, warn(rec.ID, r.Code(),
+		d := warn(rec.ID, r.Code(),
 			fmt.Sprintf("description overlaps %s; give each artifact a distinct summary so search and load_domain can tell them apart",
-				formatPeers(first, total, name))))
+				formatPeers(first, total, name)))
+		// Spec: §7.3.1 — the structured list carries every peer the
+		// message names or abbreviates, in the message's order.
+		for _, pr := range peers.all(s) {
+			d.Peers = append(d.Peers, Peer{ArtifactID: name(pr.set), Similarity: pr.similarity})
+		}
+		out = append(out, d)
 	}
 	return out
 }

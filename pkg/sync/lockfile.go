@@ -59,10 +59,13 @@ type LockScope struct {
 // config-merge, "inject" for a marker-based inject, empty for a standalone
 // file). Stale-file cleanup uses it: a standalone path is deleted when no
 // longer written, but a config-merge path is shared with the operator, so it
-// is reconciled (Podium's entries stripped) rather than removed.
+// is reconciled (Podium's entries stripped) rather than removed. Type records
+// the artifact type the run's §7.5.1 type filter judged, so a later run can
+// judge the filter for an artifact whose manifest no longer parses (§13.11.3).
 type LockArtifact struct {
 	ID               string `yaml:"id"`
 	Version          string `yaml:"version,omitempty"`
+	Type             string `yaml:"type,omitempty"`
 	ContentHash      string `yaml:"content_hash,omitempty"`
 	Layer            string `yaml:"layer,omitempty"`
 	MaterializedPath string `yaml:"materialized_path,omitempty"`
@@ -115,9 +118,10 @@ func ReadLock(target string) (*LockFile, error) {
 // every writer of the file passes, covering sync.Run, the §7.5.5 override
 // paths, and the §7.8 publish render.
 //
-// The sync path already hands over the set in this order, so the sort is a
-// no-op there. It stays because it is what normalizes a lock an override
-// rewrites in place and a lock an older build wrote in a different order.
+// The sync path hands over its materialized set in this order and appends the
+// entries of any artifact whose previous output it kept (§13.11.3), which the
+// sort places. The sort also normalizes a lock an override rewrites in place
+// and a lock an older build wrote in a different order.
 //
 // The normalization applies to a copy. Every step after it can fail, and a
 // caller that sorted the slice it passed in would find its own entries

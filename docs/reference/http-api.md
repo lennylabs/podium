@@ -644,6 +644,113 @@ GET /v1/dependents?id={id}
 - A query against an artifact the caller cannot see answers `200 {"edges":[]}`. That is the same response as a query against an artifact that does not exist or that nothing depends on. The endpoint filters rather than refuses, so it returns no `visibility.denied` error.
 - The search ranking signal counts dependents across the tenant and is not filtered.
 
+### Catalog overlap report
+
+Reports description overlap across every layer of the caller's tenant in one request. `podium overlap` calls it.
+
+```
+GET /v1/overlap?threshold={n}&artifact={id}
+```
+
+**Authorization.** Any caller that can search the registry. The request passes through the identity verification, tenant routing, and browser-session handling of `search_artifacts`, and the report covers only the artifacts the caller can see.
+
+**Parameters.** Both parameters are optional.
+
+| Parameter | Description |
+|:--|:--|
+| `threshold` | Semantic overlap threshold for this read, a number from 0.5 to 1.0. It replaces `PODIUM_LINT_SEMANTIC_SIMILARITY`. |
+| `artifact` | A canonical artifact ID. The response keeps only the diagnostics whose `artifact_id` is that ID, and `counts` counts those diagnostics. |
+
+**Behavior.**
+
+- The registry runs `lint.thin_description` and `lint.colliding_descriptions` over the current served version of every artifact the caller can see, across layers.
+- When the registry runs with `PODIUM_LINT_SEMANTIC_OVERLAP=on`, it also reports `lint.semantic_overlap` from its stored overlap records. A record is reported when the caller can see both of its artifacts, both of its versions are the current served versions, its embedding model is the configured model, and its similarity is at or above the read's threshold. When both artifacts own a reported record naming the other, the pair is reported once, with the similarity of the more recently computed record.
+- A record with an artifact the caller cannot see is not reported and is not counted in an abbreviated peer list, so the report names only artifacts the caller can load.
+- The endpoint reads stored records and descriptions and issues no index query, so a request costs no embedding call.
+- The report reads descriptions alone, so it omits `lint.near_duplicate_content`, which `podium lint` reports over a checkout of the layer sources.
+
+**Response.**
+
+```json
+{
+  "semantic_overlap": {
+    "state": "on",
+    "threshold": 0.8,
+    "model": "text-embedding-3-small",
+    "computed": 120,
+    "total": 120
+  },
+  "diagnostics": [
+    {
+      "artifact_id": "finance/ap/pay-invoice",
+      "description": "Pay an approved vendor invoice from the AP queue.",
+      "type": "skill",
+      "layer": "team-finance",
+      "code": "lint.colliding_descriptions",
+      "severity": "warning",
+      "message": "description overlaps finance/ap/submit-invoice (80%); give each artifact a distinct summary so search and load_domain can tell them apart",
+      "peers": [
+        {
+          "artifact_id": "finance/ap/submit-invoice",
+          "description": "Submit a vendor invoice to the AP queue.",
+          "type": "skill",
+          "layer": "team-finance",
+          "similarity": 0.8
+        }
+      ]
+    },
+    {
+      "artifact_id": "finance/ap/pay-invoice",
+      "description": "Pay an approved vendor invoice from the AP queue.",
+      "type": "skill",
+      "layer": "team-finance",
+      "code": "lint.semantic_overlap",
+      "severity": "warning",
+      "message": "name, description, when_to_use, and tags are semantically similar to finance/payments/settle-bill (91%); make them distinct so search and load_domain can tell the artifacts apart",
+      "peers": [
+        {
+          "artifact_id": "finance/payments/settle-bill",
+          "description": "Settle a supplier bill through the payments rail.",
+          "type": "skill",
+          "layer": "org-payments",
+          "similarity": 0.912,
+          "computed_at": "2026-11-16T03:00:12Z"
+        }
+      ]
+    }
+  ],
+  "counts": { "error": 0, "warning": 2, "info": 0 }
+}
+```
+
+The example answers `GET /v1/overlap?artifact=finance/ap/pay-invoice`.
+
+| Field | Content |
+|:--|:--|
+| `semantic_overlap.state` | `"on"` or `"off"`. |
+| `semantic_overlap.threshold` | The threshold the read applied. `null` when the check is off. |
+| `semantic_overlap.model` | The configured embedding model identifier. `null` when the check is off. |
+| `semantic_overlap.computed` | The number of artifacts the caller can see whose last successful computation is for their current served version and the configured model. `null` when the check is off. |
+| `semantic_overlap.total` | The number of artifacts the caller can see. `null` when the check is off. A `computed` below `total` means some artifacts are not computed yet or their last computation failed, so the report can miss their overlap. |
+| `diagnostics` | One entry per diagnostic, ordered by artifact ID, then by code, then by message, as `podium lint` orders them. |
+| `diagnostics[].description`, `type`, and `layer` | The artifact's description as the description checks read it, its artifact type, and the ID of the layer that serves its current version. Each peer carries the same fields. |
+| `diagnostics[].peers` | Present on `lint.colliding_descriptions` and `lint.semantic_overlap`. It lists every peer the message names or abbreviates, in the message's order, as `{artifact_id, description, type, layer, similarity}` objects with `similarity` a number from 0 to 1. A `lint.semantic_overlap` peer also carries `computed_at`, the time its record was computed. The list is never abbreviated and holds only artifacts the caller can see. |
+| `counts` | The diagnostics counted by severity. |
+
+A `lint.colliding_descriptions` similarity is the word-set similarity of the two normalized descriptions. A `lint.semantic_overlap` similarity is the cosine similarity of the two embedding vectors, limited to the range 0 to 1. When the check is off, the response carries no `lint.semantic_overlap` diagnostic.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `400 registry.invalid_argument` | `threshold` is not a number from 0.5 to 1.0. |
+| `500 registry.unavailable` | The registry cannot read its metadata store. |
+
+**Notes.**
+
+- The endpoint is a read endpoint, so a registry in read-only mode serves it.
+- [Finding overlapping artifacts](../managing/overlap#check-the-live-catalog) describes how to read the report.
+
 ### `domain/analyze`
 
 Returns the per-subtree domain analysis report for a path, the same report `podium domain analyze` prints.
@@ -1007,8 +1114,9 @@ POST /v1/layers/reingest?id={id}
 | `rejected` | Each artifact the cycle dropped for a reason other than a lint failure or a same-version content conflict. Each entry carries `artifact_id`, `code`, and `reason`, and a `details` object when the rule that rejected it defines one. |
 | `conflicts` | Same-version content conflicts. |
 | `lint_failures` | The count of lint failures. Lint failures are reported only as this count. |
+| `advisories` | The cycle's non-blocking advisories, such as the catalog advisories over the ingested layer and, on a collocated vector backend with the semantic check on, `lint.semantic_overlap`. Each entry carries `artifact_id`, `code`, `severity`, and `message`. An advisory does not stop the artifact from being ingested. |
 
-An `ARTIFACT.md` that declares `extends:` is rejected with `details: {"constraint": "extends_removed"}`. An `ARTIFACT.md` that declares the removed type `command` or `context` is rejected with `details: {"constraint": "type_removed"}`. The no-inheritance refusal runs first, so an `ARTIFACT.md` that declares both reports `extends_removed`. Both refusals run before lint, so such an artifact appears in `rejected` and is never counted in `lint_failures`, whatever lint rule it also fails.
+An artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter does not parse is rejected with `details: {"constraint": "manifest_unparseable"}`, and its `reason` names the file and the parse error. An `ARTIFACT.md` that declares `extends:` is rejected with `details: {"constraint": "extends_removed"}`. An `ARTIFACT.md` that declares the removed type `command` or `context` is rejected with `details: {"constraint": "type_removed"}`. The refusals run in that order, so an unparseable manifest reports `manifest_unparseable`, and an `ARTIFACT.md` that declares both `extends:` and a removed type reports `extends_removed`. All three refusals run before lint, so such an artifact appears in `rejected` and is never counted in `lint_failures`, whatever lint rule it also fails. The other artifacts of the layer are ingested.
 
 **Errors.**
 
@@ -1192,6 +1300,8 @@ POST /v1/ingest/webhook/{tenant-id}/{layer-id}
 6. Stores the manifest and bundled resources.
 7. Indexes metadata.
 8. Emits the corresponding outbound event.
+
+The response summarizes the cycle. Its `lint.semantic_overlap` advisories name only peers in the ingested layer, because the git host records the response.
 
 **Errors.**
 
@@ -1407,6 +1517,41 @@ POST /v1/admin/reembed?artifact={id}&version={v}&only_missing={bool}&since={rfc3
 | Code | When |
 |:--|:--|
 | `400 registry.invalid_argument` | `artifact` is set without `version`. |
+
+**Notes.**
+
+- When `PODIUM_LINT_SEMANTIC_OVERLAP` is `on`, a full pass also recomputes the semantic overlap records of every artifact it re-embeds.
+
+### Rebuild overlap records
+
+Recomputes the semantic overlap records of every served artifact of the caller's tenant. `podium admin rebuild-overlap` calls it.
+
+```
+POST /v1/admin/overlap/rebuild
+```
+
+**Authorization.** The same as [Reembed](#reembed): the admin role, except on a registry that authenticates no caller, which admits the request.
+
+**Response.** The number of artifacts computed and the number whose computation failed. A computation fails when its stored-vector read, its index query, or its scoring fails, or when the registry cannot store its records. A computation stores nothing and counts in neither number when its artifact gains a newer served version first, because the computation of the newer version is due.
+
+```json
+{ "computed": 42, "failed": 0 }
+```
+
+A computation replaces the records the artifact owns and leaves the records its peers own. A failed computation leaves the artifact's existing records in place, and the next sweep computes it again.
+
+**Errors.**
+
+| Code | When |
+|:--|:--|
+| `403 auth.forbidden` | The caller is not an admin. |
+| `500 registry.unavailable` | `PODIUM_LINT_SEMANTIC_OVERLAP` is off or no search index is configured. The registry computes nothing, and the envelope carries `retryable: false`, because the request cannot succeed until the operator changes the configuration. In that configuration neither the startup pass nor the sweep runs. |
+| `503 registry.read_only` | The registry is in read-only mode. The endpoint is a write endpoint. |
+
+**Notes.**
+
+- The registry keeps the records current without this call: at ingest, through a background startup pass after the startup ingest, through the sweep every `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL`, and after a full re-embed.
+- Unlike the startup pass and the sweep, the endpoint also attempts artifacts whose vector the outbox has not written yet.
 
 ### Erase a user (GDPR)
 

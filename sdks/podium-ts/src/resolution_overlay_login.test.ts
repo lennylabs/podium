@@ -263,7 +263,9 @@ describe("overlay merge", () => {
   // Spec: §4.3.4, §6.4 — a SKILL.md-only overlay package loads as a skill
   // whose frontmatter is the synthesized document for its resolved version,
   // and whose manifest_body is the SKILL.md body rather than the document's
-  // pointer comment.
+  // pointer comment. A sequence or a mapping under a metadata key keeps its
+  // bytes in skillRaw and is not read, and one under version declares no
+  // usable version.
   it.each([
     { name: "no metadata.version", metadata: "", version: "0.0.0-auto.0", doc: SYNTHESIZED_AUTO },
     { name: "a quoted metadata.version", metadata: 'metadata:\n  version: "1.0.0"\n', version: "1.0.0", doc: SYNTHESIZED_100 },
@@ -292,6 +294,26 @@ describe("overlay merge", () => {
     },
     { name: "a non-semver flow-form metadata.version", metadata: 'metadata: {version: "1.0"}\n', version: "0.0.0-auto.0", doc: SYNTHESIZED_AUTO },
     { name: "a commented metadata: line", metadata: "metadata: # build info\n  version: 1.0.0\n", version: "1.0.0", doc: SYNTHESIZED_100 },
+    {
+      name: "a nested mapping beside metadata.version",
+      metadata: 'metadata:\n  requires:\n    bins: ["lark-cli"]\n  version: "1.0.0"\n',
+      version: "1.0.0",
+      doc: SYNTHESIZED_100,
+    },
+    {
+      name: "a flow-form nested mapping beside metadata.version",
+      metadata: 'metadata: {"openclaw": {"requires": {"bins": ["uv"]}}, "version": "1.0.0"}\n',
+      version: "1.0.0",
+      doc: SYNTHESIZED_100,
+    },
+    {
+      name: "a mapping under metadata.version",
+      metadata: "metadata:\n  version:\n    major: 1\n  credits:\n    - alice\n",
+      version: "0.0.0-auto.0",
+      doc: SYNTHESIZED_AUTO,
+    },
+    { name: "a sequence under metadata.version", metadata: "metadata:\n  version: [1, 0, 0]\n", version: "0.0.0-auto.0", doc: SYNTHESIZED_AUTO },
+    { name: "a flow-form mapping under metadata.version", metadata: "metadata: {version: {major: 1}}\n", version: "0.0.0-auto.0", doc: SYNTHESIZED_AUTO },
   ])("loads a SKILL.md-only package with $name", async ({ metadata, version, doc }) => {
     const overlay = join(dir, "overlay");
     await writeOverlay(overlay, { "team/greet/SKILL.md": skillMD(metadata) });

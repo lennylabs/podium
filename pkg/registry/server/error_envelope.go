@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"net/http"
 
 	"github.com/lennylabs/podium/pkg/registry/core"
 )
@@ -153,4 +154,13 @@ func enrichEnvelope(e *ErrorResponse) {
 	if e.SuggestedAction == "" {
 		e.SuggestedAction = meta.suggestedAction
 	}
+}
+
+// writeNotRetryable emits the §6.10 envelope with retryable false and the
+// given suggested_action. It serves a code whose registry default is
+// retryable, such as registry.unavailable, for a condition that lasts until
+// the operator changes the configuration, which enrichEnvelope would
+// otherwise mark retryable.
+func writeNotRetryable(w http.ResponseWriter, status int, code, msg, action string) {
+	writeJSON(w, status, ErrorResponse{Code: code, Message: msg, SuggestedAction: action})
 }

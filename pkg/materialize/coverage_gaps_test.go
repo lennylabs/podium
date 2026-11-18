@@ -20,7 +20,7 @@ func TestStripPodiumBlocks_Exported_MarkdownRoundTrip(t *testing.T) {
 	base := injectBlock([]byte("# House rules\n\nKeep PRs small.\n"), "team/a", []byte("Rule A."), md)
 	base = injectBlock(base, "team/b", []byte("Rule B."), md)
 
-	out := string(StripPodiumBlocks(base, "AGENTS.md"))
+	out := string(StripPodiumBlocks(base, "AGENTS.md", nil))
 	if !strings.Contains(out, "# House rules") || !strings.Contains(out, "Keep PRs small.") {
 		t.Errorf("operator content lost:\n%s", out)
 	}
@@ -41,7 +41,7 @@ func TestStripPodiumBlocks_Exported_TOMLMarkers(t *testing.T) {
 	if !strings.Contains(string(base), "# podium:begin:ops/db") {
 		t.Fatalf("setup: expected toml markers:\n%s", base)
 	}
-	out := string(StripPodiumBlocks(base, ".codex/config.toml"))
+	out := string(StripPodiumBlocks(base, ".codex/config.toml", nil))
 	if strings.Contains(out, "podium:begin:ops/db") || strings.Contains(out, "[mcp_servers.db]") {
 		t.Errorf("toml Podium block survived the strip:\n%s", out)
 	}
@@ -55,10 +55,10 @@ func TestStripPodiumBlocks_Exported_TOMLMarkers(t *testing.T) {
 func TestStripPodiumBlocks_Exported_NoMatchAndEmpty(t *testing.T) {
 	t.Parallel()
 	plain := []byte("# House rules\n\nKeep PRs small.\n")
-	if got := string(StripPodiumBlocks(plain, "AGENTS.md")); got != string(plain) {
+	if got := string(StripPodiumBlocks(plain, "AGENTS.md", nil)); got != string(plain) {
 		t.Errorf("no-block input changed:\nwant %q\ngot  %q", plain, got)
 	}
-	if got := string(StripPodiumBlocks(nil, "AGENTS.md")); got != "" {
+	if got := string(StripPodiumBlocks(nil, "AGENTS.md", nil)); got != "" {
 		t.Errorf("empty input = %q, want empty", got)
 	}
 }

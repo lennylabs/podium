@@ -162,6 +162,27 @@ func (s *SQLite) applySchema() error {
 			name TEXT PRIMARY KEY,
 			applied_at TEXT NOT NULL
 		)`,
+		// §7.3.1 semantic overlap records, keyed by owner and peer, and the
+		// per-artifact computation entries.
+		`CREATE TABLE IF NOT EXISTS semantic_overlap_records (
+			tenant_id TEXT NOT NULL,
+			owner_id TEXT NOT NULL,
+			owner_version TEXT NOT NULL,
+			peer_id TEXT NOT NULL,
+			peer_version TEXT NOT NULL,
+			similarity REAL NOT NULL,
+			model_id TEXT NOT NULL DEFAULT '',
+			computed_at TEXT NOT NULL,
+			PRIMARY KEY (tenant_id, owner_id, peer_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS semantic_overlap_computations (
+			tenant_id TEXT NOT NULL,
+			artifact_id TEXT NOT NULL,
+			version TEXT NOT NULL,
+			model_id TEXT NOT NULL DEFAULT '',
+			computed_at TEXT NOT NULL,
+			PRIMARY KEY (tenant_id, artifact_id)
+		)`,
 	}
 	// Indexes are created after the additive column migration because
 	// idx_manifests_tenant_layer references the `layer` column, which the
@@ -464,6 +485,31 @@ func (s *SQLite) ListVectorPending(ctx context.Context, limit int, now time.Time
 		p.EnqueuedAt, _ = time.Parse(time.RFC3339Nano, enqueued)
 		p.NextRetryAt, _ = time.Parse(time.RFC3339Nano, nextRetry)
 		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ListVectorPendingKeys returns the key of every outbox row of tenantID.
+func (s *SQLite) ListVectorPendingKeys(ctx context.Context, tenantID string) ([]VectorPendingKey, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT artifact_id, version FROM vector_pending WHERE tenant_id = ?`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanVectorPendingKeys(rows)
+}
+
+// scanVectorPendingKeys reads (artifact_id, version) rows, which the SQLite
+// and Postgres outbox key listings both select.
+func scanVectorPendingKeys(rows *sql.Rows) ([]VectorPendingKey, error) {
+	var out []VectorPendingKey
+	for rows.Next() {
+		var k VectorPendingKey
+		if err := rows.Scan(&k.ArtifactID, &k.Version); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
 	}
 	return out, rows.Err()
 }
@@ -1090,4 +1136,147 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// ReplaceOverlapRecords removes the records the computed artifact owns,
+// stores recs, and upserts the computation entry in one transaction. It
+// returns ErrOverlapSuperseded, changing nothing, when the stored entry
+// supersedes comp. The transaction's first statement is the delete, a write,
+// so SQLite grants it the database's single write lock before it reads the
+// entry: a concurrent call for the same artifact waits under the busy timeout
+// and then replaces this call's records whole, and the entry read is the
+// latest committed one.
+func (s *SQLite) ReplaceOverlapRecords(ctx context.Context, tenantID string, comp OverlapComputation, recs []OverlapRecord) error {
+	comp, norm, err := normalizeOverlapComputation(tenantID, comp, recs)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM semantic_overlap_records WHERE tenant_id = ? AND owner_id = ?`,
+		tenantID, comp.ArtifactID); err != nil {
+		return err
+	}
+	if superseded, err := s.overlapSupersededTx(ctx, tx, comp); err != nil || superseded {
+		if err == nil {
+			err = ErrOverlapSuperseded
+		}
+		return err
+	}
+	for _, r := range norm {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO semantic_overlap_records
+				(tenant_id, owner_id, owner_version, peer_id, peer_version, similarity, model_id, computed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			r.TenantID, r.Owner, r.OwnerVersion, r.Peer, r.PeerVersion, r.Similarity, r.ModelID,
+			r.ComputedAt.Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT OR REPLACE INTO semantic_overlap_computations
+			(tenant_id, artifact_id, version, model_id, computed_at)
+		VALUES (?, ?, ?, ?, ?)`,
+		comp.TenantID, comp.ArtifactID, comp.Version, comp.ModelID, comp.ComputedAt.Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// overlapSupersededTx reports whether the computation entry stored for
+// comp's artifact supersedes comp, reading it inside tx.
+func (s *SQLite) overlapSupersededTx(ctx context.Context, tx *sql.Tx, comp OverlapComputation) (bool, error) {
+	var prev OverlapComputation
+	var at string
+	err := tx.QueryRowContext(ctx, `
+		SELECT version, computed_at FROM semantic_overlap_computations
+		WHERE tenant_id = ? AND artifact_id = ?`, comp.TenantID, comp.ArtifactID).Scan(&prev.Version, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if prev.ComputedAt, err = time.Parse(time.RFC3339Nano, at); err != nil {
+		return false, fmt.Errorf("store: parse overlap computed_at %q: %w", at, err)
+	}
+	return supersededBy(prev, comp), nil
+}
+
+// ListOverlapRecords returns the tenant's records ordered by owner and peer.
+func (s *SQLite) ListOverlapRecords(ctx context.Context, tenantID string) ([]OverlapRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT tenant_id, owner_id, owner_version, peer_id, peer_version, similarity, model_id, computed_at
+		FROM semantic_overlap_records
+		WHERE tenant_id = ?
+		ORDER BY owner_id, peer_id`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []OverlapRecord{}
+	for rows.Next() {
+		var r OverlapRecord
+		var at string
+		if err := rows.Scan(&r.TenantID, &r.Owner, &r.OwnerVersion, &r.Peer, &r.PeerVersion, &r.Similarity, &r.ModelID, &at); err != nil {
+			return nil, err
+		}
+		if r.ComputedAt, err = time.Parse(time.RFC3339Nano, at); err != nil {
+			return nil, fmt.Errorf("store: parse overlap computed_at %q: %w", at, err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListOverlapComputations returns the tenant's computation entries ordered by
+// artifact.
+func (s *SQLite) ListOverlapComputations(ctx context.Context, tenantID string) ([]OverlapComputation, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT tenant_id, artifact_id, version, model_id, computed_at
+		FROM semantic_overlap_computations
+		WHERE tenant_id = ?
+		ORDER BY artifact_id`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []OverlapComputation{}
+	for rows.Next() {
+		var c OverlapComputation
+		var at string
+		if err := rows.Scan(&c.TenantID, &c.ArtifactID, &c.Version, &c.ModelID, &at); err != nil {
+			return nil, err
+		}
+		if c.ComputedAt, err = time.Parse(time.RFC3339Nano, at); err != nil {
+			return nil, fmt.Errorf("store: parse overlap computation computed_at %q: %w", at, err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// DeleteOverlapArtifacts removes the records owned by and the computation
+// entries of each named artifact in one transaction.
+func (s *SQLite) DeleteOverlapArtifacts(ctx context.Context, tenantID string, artifactIDs []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, id := range artifactIDs {
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM semantic_overlap_records WHERE tenant_id = ? AND owner_id = ?`, tenantID, id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM semantic_overlap_computations WHERE tenant_id = ? AND artifact_id = ?`, tenantID, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

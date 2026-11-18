@@ -59,11 +59,12 @@ catalog and materializes it into Claude Code and Cursor with `podium init` and
 | Feature | What it does | Covered in |
 |:--|:--|:--|
 | Domains and subdomains | The directory layout defines the domain hierarchy, and `DOMAIN.md` adds descriptions, keywords, and featured artifacts. | [Domains](authoring/domains) |
-| Selective materialization | `podium sync` writes the subset named by include globs, exclude globs, and types ahead of time, and a named profile replays that subset. | [Selective materialization](consuming/selective-materialization) |
-| Progressive discovery | An agent walks domains and searches the catalog through the MCP server's meta-tools, and materializes an artifact and its bundled files only when it loads one. | [Browsing the catalog](consuming/browsing-the-catalog) |
+| Materialization and discovery | `podium sync` writes the subset named by include globs, exclude globs, and types ahead of time, and a named profile replays that subset. An agent can instead walk domains and search the catalog through the MCP server's meta-tools, and materialize an artifact and its bundled files only when it loads one. | [Selective materialization](consuming/selective-materialization), [Browsing the catalog](consuming/browsing-the-catalog) |
 | Layered composition | Independent sources, including Git repositories, compose into one catalog with deterministic merge and explicit precedence. | [Connecting layer sources](deployment/content/layer-sources), [Layered composition](deployment/content/layers) |
-| Security and access control | The registry signs artifacts at ingest, and consumers verify the signature before they write an artifact. Each layer declares who can see it, and every call is audited. | [Access control](deployment/content/access-control) |
-| Observability | Audit events stream to a file, stdout, HTTP receivers, or an OpenTelemetry Collector. The registry also serves Prometheus metrics, exports OTLP traces, and sends ingest-failure notifications. | [Audit and observability](deployment/operations/observability) |
+| Security and access control | The registry signs artifacts at ingest by default, and consumers verify the signature before they write an artifact. Each layer declares who can see it, and every call is audited. | [Access control](deployment/content/access-control) |
+| Usage metrics | Every load is an audit event that records the artifact and the client, and every search is an audit event that records the query, its result count, and the client. Audit events go to a local file, stdout, HTTP receivers, or an OpenTelemetry Collector, and a log pipeline that receives them counts loads per artifact and searches per query. | [Seeing how the catalog is used](managing/usage) |
+| Overlap detection | Word-based checks flag copied descriptions and duplicated prose in `podium lint` and at ingest. An optional semantic check on a registry server flags artifacts that say the same thing in different words. | [Finding overlapping artifacts](managing/overlap) |
+| Observability | The registry serves Prometheus metrics, exports OTLP traces, and sends ingest-failure notifications. | [Audit and observability](deployment/operations/observability) |
 | Cross-harness delivery | A harness adapter translates a canonical artifact into the layout one runtime expects, for a workspace tree or a published marketplace repository. | [Configure your harness](consuming/configure-your-harness), [Publishing marketplace repositories](deployment/content/publishing) |
 
 ---
@@ -75,8 +76,8 @@ server-side capability. The artifacts are the same in every mode.
 
 | Mode | Server-side deployment | What the mode adds |
 |:--|:--|:--|
-| [Local](deployment/modes/local) | None | Authoring, lint, sync, domains, profiles, and ordered layers from disk |
-| [Single node](deployment/modes/single-node) | One binary | Discovery through MCP or the SDKs, hybrid search, registered and remote layers with visibility, and one audit log |
+| [Local](deployment/modes/local) | None | Authoring, lint, sync, domains, profiles, ordered layers from disk, and word-based overlap checks |
+| [Single node](deployment/modes/single-node) | One binary | Discovery through MCP or the SDKs, hybrid search, registered and remote layers with per-user visibility, the semantic overlap check, an audit log with file, stdout, HTTP, and OTLP destinations, multi-tenancy, and SCIM group sync |
 | [Clustered](deployment/modes/clustered) | Replicas, Postgres, and object storage | Postgres schema-per-org tenant isolation and high availability across registry replicas |
 
 [Backing services](deployment/services/) names the backing service
@@ -93,6 +94,7 @@ ships by default and what can replace it.
 | [Getting Started](getting-started/) | The reading order for the evaluation, the quickstart, the vocabulary, and the architecture. |
 | [Authoring](authoring/) | Writing artifacts: types, frontmatter, domains, bundled resources, rule modes, hooks, and hints. |
 | [Consuming](consuming/) | Delivering artifacts into a harness, narrowing what a workspace receives, runtime discovery, verifying deliveries, and the SDKs. |
+| [Managing the catalog](managing/) | Finding overlapping artifacts, reading usage from the audit records, changing and retiring artifacts, and keeping the catalog within lint and listing limits. |
 | [Deployment](deployment/) | Choosing and running a deployment mode, identity and tenants, layer sources and access control, marketplace publishing, day-two operations, and the backing services. |
 | [Reference](reference/) | The CLI, the HTTP API, the configuration keys, error codes, audit events, and the glossary. |
 | [About](about/) | Implementation status, contributing, the live vector backend tests, governance, and the changelog. |

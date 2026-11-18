@@ -690,6 +690,11 @@
   stroke: var(--on-accent);
 }
 
+/* Text set on top of an accent fill, such as the score in a pill. */
+.l-dg-on-accent-fill {
+  fill: var(--on-accent);
+}
+
 .l-dg-paper {
   fill: var(--l-diagram-fill);
 }
@@ -1279,6 +1284,13 @@
     width: 232px;
     max-width: 100%;
     margin: 0 auto;
+  }
+
+  /* The diagrams are drawn at 200px for the desktop row and scale up to the
+     232px the mobile design sets, keeping the viewBox's aspect ratio. */
+  .l-card-art .l-dg {
+    width: 100%;
+    height: auto;
   }
 
   .l-card-title {

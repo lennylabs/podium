@@ -61,8 +61,8 @@ type RenderResult struct {
 	ChangedArtifacts []string
 	Files            []string
 	// Dropped lists the artifacts the filesystem-source composition dropped
-	// under the §4.6 collision rule, the §4.6 no-inheritance rule, or the
-	// §4.1 removed-type rule (§13.11.3). The render omits them; callers report
+	// under the §4.6 collision rule, the §4.1 unparseable-manifest rule, the
+	// §4.6 no-inheritance rule, or the §4.1 removed-type rule (§13.11.3). The render omits them; callers report
 	// each entry with its Code and Reason.
 	Dropped []layer.Drop
 }

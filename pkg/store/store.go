@@ -510,6 +510,37 @@ type Store interface {
 	// SQLite store in the signing key file's directory, and otherwise
 	// through sign-stored-rows.
 	SetDataMigrationApplied(ctx context.Context, name string, applied bool) error
+
+	// Semantic overlap records (§7.3.1). The registry derives them from the
+	// search index and keeps them in the tenant's metadata store so a read
+	// applies its threshold without querying the index.
+	//
+	// ReplaceOverlapRecords stores one successful computation of
+	// comp.ArtifactID: it removes every record of tenantID that artifact
+	// owns, stores recs, and upserts comp as the artifact's computation
+	// entry, in one transaction, so the artifact's records always come from
+	// one computation. Records other artifacts own are left in place, so a
+	// pair one side found survives the other side's recomputation. Each
+	// record must be owned by comp.ArtifactID and name another artifact as
+	// its peer, or the call returns ErrInvalidOverlapRecord and changes
+	// nothing. An empty recs leaves the artifact owning no record and still
+	// records the computation. When the stored entry is for another version
+	// and its ComputedAt is after comp.ComputedAt, the call returns
+	// ErrOverlapSuperseded and changes nothing, because a computation of a
+	// newer served version stored first. Concurrent calls for one artifact
+	// are serialized, so the artifact's records come from one of them.
+	ReplaceOverlapRecords(ctx context.Context, tenantID string, comp OverlapComputation, recs []OverlapRecord) error
+	// ListOverlapRecords returns every record of tenantID ordered by owner
+	// and then peer.
+	ListOverlapRecords(ctx context.Context, tenantID string) ([]OverlapRecord, error)
+	// ListOverlapComputations returns every computation entry of tenantID
+	// ordered by artifact.
+	ListOverlapComputations(ctx context.Context, tenantID string) ([]OverlapComputation, error)
+	// DeleteOverlapArtifacts removes the records owned by and the computation
+	// entries of each artifact in artifactIDs, in one transaction. The sweep
+	// calls it for artifacts that are no longer served; a record naming such
+	// an artifact as its peer is removed when its owner is recomputed.
+	DeleteOverlapArtifacts(ctx context.Context, tenantID string, artifactIDs []string) error
 }
 
 // DataMigrationContentHashFraming names the one-time rewrite of every stored
@@ -552,6 +583,13 @@ type VectorPending struct {
 	LastError string
 }
 
+// VectorPendingKey identifies one row of a tenant's §4.7.2 vector outbox by
+// the artifact and version whose vector is not yet written.
+type VectorPendingKey struct {
+	ArtifactID string
+	Version    string
+}
+
 // VectorOutbox is the §4.7.2 transactional-outbox capability a RegistryStore
 // backend may implement so ingest against an external vector backend commits
 // the manifest and a vector_pending row atomically, and a background worker
@@ -569,6 +607,11 @@ type VectorOutbox interface {
 	// ListVectorPending returns up to limit rows eligible for a drain attempt
 	// (NextRetryAt not after now), oldest first.
 	ListVectorPending(ctx context.Context, limit int, now time.Time) ([]VectorPending, error)
+	// ListVectorPendingKeys returns the key of every row of tenantID's
+	// outbox, whatever its NextRetryAt, in no particular order. The §7.3.1
+	// startup pass and sweep read it once per pass to skip the artifacts
+	// whose vectors the outbox has not written yet.
+	ListVectorPendingKeys(ctx context.Context, tenantID string) ([]VectorPendingKey, error)
 	// MarkVectorPendingDone removes the row after a successful backend write.
 	MarkVectorPendingDone(ctx context.Context, tenantID, artifactID, version string) error
 	// MarkVectorPendingRetry records a failed attempt: it increments Attempts,

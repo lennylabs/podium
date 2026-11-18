@@ -179,7 +179,7 @@ func (q *Qdrant) Query(ctx context.Context, tenantID string, vec []float32, topK
 	if tenantID == "" || topK < 1 {
 		return nil, ErrInvalidArgument
 	}
-	if err := validateDim(vec, q.Dim); err != nil {
+	if err := validateQueryDim(vec, q.Dim); err != nil {
 		return nil, err
 	}
 	body := map[string]any{

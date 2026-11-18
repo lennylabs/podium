@@ -57,7 +57,7 @@ func TestStartVectorOutboxWorker_DrainsQueuedRow(t *testing.T) {
 	enqueue(t, st, "a/x", "1.0.0", now)
 
 	cfg := &Config{vectorOutboxInterval: 1, vectorOutboxBatch: 50}
-	startVectorOutboxWorker(t.Context(), cfg, st, vector.NewMemory(8), fakeEmbedder{dim: 8}, metrics.New(), nil, "default")
+	startVectorOutboxWorker(t.Context(), cfg, st, vector.NewMemory(8), fakeEmbedder{dim: 8}, metrics.New(), nil, "default", nil)
 
 	// The immediate runOnce pass drains the row; poll the depth until it reaches
 	// zero rather than sleeping a fixed wall-clock interval.
@@ -71,7 +71,7 @@ func TestStartVectorOutboxWorker_DrainsQueuedRow(t *testing.T) {
 // outbox) disables the worker; the call returns without spawning a goroutine.
 func TestStartVectorOutboxWorker_NonOutboxStoreNoop(t *testing.T) {
 	// A bare Store that does not satisfy VectorOutbox.
-	startVectorOutboxWorker(t.Context(), &Config{}, nonOutboxStore{}, vector.NewMemory(8), fakeEmbedder{dim: 8}, nil, nil, "default")
+	startVectorOutboxWorker(t.Context(), &Config{}, nonOutboxStore{}, vector.NewMemory(8), fakeEmbedder{dim: 8}, nil, nil, "default", nil)
 	// No panic and no goroutine is the assertion; the type assertion guard returns
 	// before any worker construction.
 }
@@ -84,7 +84,7 @@ func TestStartVectorOutboxWorker_NilBackendNoop(t *testing.T) {
 	now := time.Now().UTC()
 	enqueue(t, st, "a/x", "1.0.0", now)
 
-	startVectorOutboxWorker(t.Context(), &Config{vectorOutboxInterval: 1}, st, nil, fakeEmbedder{dim: 8}, nil, nil, "default")
+	startVectorOutboxWorker(t.Context(), &Config{vectorOutboxInterval: 1}, st, nil, fakeEmbedder{dim: 8}, nil, nil, "default", nil)
 
 	// The row must remain queued because no worker ran.
 	if depth, _, _ := st.VectorOutboxStats(ctx); depth != 1 {
@@ -100,7 +100,7 @@ func TestStartVectorOutboxWorker_NonPositiveIntervalDefaults(t *testing.T) {
 	enqueue(t, st, "a/x", "1.0.0", now)
 
 	// interval 0 exercises the `interval <= 0` fallback to 5s.
-	startVectorOutboxWorker(t.Context(), &Config{vectorOutboxInterval: 0, vectorOutboxBatch: 50}, st, vector.NewMemory(8), fakeEmbedder{dim: 8}, nil, nil, "default")
+	startVectorOutboxWorker(t.Context(), &Config{vectorOutboxInterval: 0, vectorOutboxBatch: 50}, st, vector.NewMemory(8), fakeEmbedder{dim: 8}, nil, nil, "default", nil)
 
 	if !waitForDepth(t, st, 0, time.Second) {
 		depth, _, _ := st.VectorOutboxStats(context.Background())
@@ -116,7 +116,7 @@ func TestDrainRow_SelfEmbeddingBackendUsesPutText(t *testing.T) {
 	w := &vectorDrainWorker{outbox: store.NewMemory(), vec: vec, embedder: nil, interval: time.Second}
 
 	p := store.VectorPending{TenantID: "default", ArtifactID: "a/x", Version: "1.0.0", Text: "compose me"}
-	if err := w.drainRow(ctx, p); err != nil {
+	if _, err := w.drainRow(ctx, p); err != nil {
 		t.Fatalf("drainRow self-embed = %v, want nil", err)
 	}
 	if got := vec.puttext["a/x@1.0.0"]; got != "compose me" {
@@ -131,7 +131,7 @@ func TestDrainRow_ExternalBackendWithoutEmbedderErrors(t *testing.T) {
 	// vector.Memory is not a self-embedding TextVectorizer, and embedder is nil.
 	w := &vectorDrainWorker{outbox: store.NewMemory(), vec: vector.NewMemory(8), embedder: nil, interval: time.Second}
 
-	err := w.drainRow(ctx, store.VectorPending{TenantID: "default", ArtifactID: "a/x", Version: "1.0.0", Text: "t"})
+	_, err := w.drainRow(ctx, store.VectorPending{TenantID: "default", ArtifactID: "a/x", Version: "1.0.0", Text: "t"})
 	if err == nil {
 		t.Fatal("drainRow with no embedder and a non-self-embedding backend = nil, want an error")
 	}
@@ -148,7 +148,7 @@ func TestDrainRow_SelfEmbeddingPutTextError(t *testing.T) {
 	vec.putErr = errors.New("backend down")
 	w := &vectorDrainWorker{outbox: store.NewMemory(), vec: vec, embedder: nil, interval: time.Second}
 
-	if err := w.drainRow(ctx, store.VectorPending{ArtifactID: "a/x", Version: "1.0.0", Text: "t"}); err == nil {
+	if _, err := w.drainRow(ctx, store.VectorPending{ArtifactID: "a/x", Version: "1.0.0", Text: "t"}); err == nil {
 		t.Fatal("drainRow = nil, want the PutText error propagated")
 	}
 }
@@ -171,7 +171,7 @@ func TestDrainRow_EmbedVectorCountMismatchErrors(t *testing.T) {
 	ctx := context.Background()
 	w := &vectorDrainWorker{outbox: store.NewMemory(), vec: vector.NewMemory(8), embedder: brokenEmbedder{dim: 1}, interval: time.Second}
 
-	err := w.drainRow(ctx, store.VectorPending{ArtifactID: "a/x", Version: "1.0.0", Text: "t"})
+	_, err := w.drainRow(ctx, store.VectorPending{ArtifactID: "a/x", Version: "1.0.0", Text: "t"})
 	if err == nil {
 		t.Fatal("drainRow with a 2-vector embedder result = nil, want a count-mismatch error")
 	}

@@ -123,7 +123,9 @@ func FetchRecords(opts Options) ([]Record, []layer.Drop, error) {
 // "inject", or "" for a standalone file), as PriorMergeKinds returns from a
 // lock. current is the set of paths the render wrote this time.
 func Reconcile(target string, prior map[string]string, current map[string]bool) {
-	removeStalePaths(target, prior, current)
+	// A marketplace lock records no artifact IDs, so no previous output is
+	// kept (§13.11.3 applies to a target lock that records the artifact).
+	removeStalePaths(target, prior, current, keptOutput{})
 }
 
 // PriorMergeKinds returns the materialized paths a lock recorded, each mapped to

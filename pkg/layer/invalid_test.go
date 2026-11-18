@@ -2,14 +2,16 @@ package layer
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // Spec: §4.1, §4.6, §13.11.3 — a filesystem-source composition reports an
-// ARTIFACT.md the no-inheritance rule or the removed-type rule refuses as an
-// ingest.invalid_artifact drop whose details carry exactly the constraint.
+// artifact the unparseable-manifest rule, the no-inheritance rule, or the
+// removed-type rule refuses as an ingest.invalid_artifact drop whose details
+// carry exactly the constraint.
 func TestRemovedFeatureDrop(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -17,6 +19,7 @@ func TestRemovedFeatureDrop(t *testing.T) {
 	}{
 		{"extends", "extends_removed", ExtendsRemovedReason},
 		{"type removed", "type_removed", TypeRemovedReason("command")},
+		{"manifest unparseable", "manifest_unparseable", UnparseableReason("a/b/SKILL.md", manifest.ErrNoFrontmatter)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,6 +47,56 @@ func TestRemovedFeatureDrop(t *testing.T) {
 	}
 	if InvalidArtifactCode != "ingest.invalid_artifact" {
 		t.Errorf("InvalidArtifactCode = %q, want ingest.invalid_artifact", InvalidArtifactCode)
+	}
+	if ManifestUnparseableConstraint != "manifest_unparseable" {
+		t.Errorf("ManifestUnparseableConstraint = %q, want manifest_unparseable", ManifestUnparseableConstraint)
+	}
+}
+
+// Spec: §4.1, §13.11.3 — Unparseable singles out the drop whose previous sync
+// output a filesystem-source sync keeps: an ingest.invalid_artifact drop with
+// the manifest_unparseable constraint. The other pre-lint drops and a
+// collision drop are not unparseable.
+func TestDrop_Unparseable(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		drop Drop
+		want bool
+	}{
+		{"manifest unparseable", RemovedFeatureDrop("a/b", ManifestUnparseableConstraint, "r"), true},
+		{"extends", RemovedFeatureDrop("a/b", ExtendsRemovedConstraint, ExtendsRemovedReason), false},
+		{"type removed", RemovedFeatureDrop("a/b", TypeRemovedConstraint, TypeRemovedReason("command")), false},
+		{"collision", Collision{ArtifactID: "a/b", Layer: "l2", ExistingLayer: "l1"}.Drop(), false},
+		{"constraint under another code", Drop{ArtifactID: "a/b", Code: CollisionCode,
+			Details: map[string]any{"constraint": ManifestUnparseableConstraint}}, false},
+	}
+	for _, tc := range cases {
+		if got := tc.drop.Unparseable(); got != tc.want {
+			t.Errorf("%s: Unparseable() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// Spec: §4.1, §7.3.1 — the unparseable-manifest reason names the manifest
+// file and the parse error, and it names no layer. A multi-line decoder error
+// becomes one line, so the CLI prints each refusal on one standard-error
+// line.
+func TestUnparseableReason(t *testing.T) {
+	t.Parallel()
+	got := UnparseableReason("ops/greet/SKILL.md", manifest.ErrNoFrontmatter)
+	if want := "ops/greet/SKILL.md: manifest: missing YAML frontmatter"; got != want {
+		t.Errorf("UnparseableReason = %q, want %q", got, want)
+	}
+	_, err := manifest.ParseSkill([]byte("---\nname: g\ndescription:\n  text: alice\n---\n\nbody\n"))
+	if err == nil || !strings.Contains(err.Error(), "\n") {
+		t.Fatalf("fixture error = %v, want a multi-line decoder error", err)
+	}
+	got = UnparseableReason("ops/g/SKILL.md", err)
+	if strings.Contains(got, "\n") || strings.Contains(got, "  ") ||
+		!strings.HasPrefix(got, "ops/g/SKILL.md: manifest: invalid YAML frontmatter: yaml: unmarshal errors:") ||
+		!strings.HasSuffix(got, "cannot unmarshal !!map into string") {
+		t.Errorf("UnparseableReason of a multi-line error = %q, want one line naming the file and the error", got)
 	}
 }
 

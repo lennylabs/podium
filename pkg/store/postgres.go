@@ -134,6 +134,27 @@ var orgTableStmts = []string{
 		repo_userinfo TEXT,
 		PRIMARY KEY (tenant_id, id)
 	)`,
+	// §7.3.1 semantic overlap records, keyed by owner and peer, and the
+	// per-artifact computation entries.
+	`CREATE TABLE IF NOT EXISTS semantic_overlap_records (
+		tenant_id TEXT NOT NULL,
+		owner_id TEXT NOT NULL,
+		owner_version TEXT NOT NULL,
+		peer_id TEXT NOT NULL,
+		peer_version TEXT NOT NULL,
+		similarity DOUBLE PRECISION NOT NULL,
+		model_id TEXT NOT NULL DEFAULT '',
+		computed_at TIMESTAMPTZ NOT NULL,
+		PRIMARY KEY (tenant_id, owner_id, peer_id)
+	)`,
+	`CREATE TABLE IF NOT EXISTS semantic_overlap_computations (
+		tenant_id TEXT NOT NULL,
+		artifact_id TEXT NOT NULL,
+		version TEXT NOT NULL,
+		model_id TEXT NOT NULL DEFAULT '',
+		computed_at TIMESTAMPTZ NOT NULL,
+		PRIMARY KEY (tenant_id, artifact_id)
+	)`,
 }
 
 // orgIndexStmts create the per-org indexes after the org tables and the
@@ -851,6 +872,19 @@ func (p *Postgres) ListVectorPending(ctx context.Context, limit int, now time.Ti
 		out = append(out, pend)
 	}
 	return out, rows.Err()
+}
+
+// ListVectorPendingKeys returns the key of every outbox row of tenantID.
+// The outbox is the cross-org public.vector_pending, as ListVectorPending
+// reads it.
+func (p *Postgres) ListVectorPendingKeys(ctx context.Context, tenantID string) ([]VectorPendingKey, error) {
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT artifact_id, version FROM public.vector_pending WHERE tenant_id = $1`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanVectorPendingKeys(rows)
 }
 
 // MarkVectorPendingDone removes a drained outbox row.
@@ -1591,4 +1625,171 @@ func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 	cfg.DeletedAt = ptrFromNullTime(deletedAt)
 	cfg.LastIngestedAt = ptrFromNullTime(lastIngestedAt)
 	return cfg, nil
+}
+
+// ReplaceOverlapRecords removes the records the computed artifact owns,
+// stores recs, and upserts the computation entry in one transaction in the
+// org schema. It returns ErrOverlapSuperseded, changing nothing, when the
+// stored entry supersedes comp.
+//
+// At READ COMMITTED, two concurrent calls for one artifact would each delete
+// the rows committed before they started and insert their own, leaving the
+// union of both peer sets. The transaction therefore first takes a
+// transaction-scoped advisory lock on the (tenant, artifact) pair, so the
+// calls run one after the other, the later one deletes the earlier one's
+// rows, and the entry it reads is the latest committed one.
+func (p *Postgres) ReplaceOverlapRecords(ctx context.Context, tenantID string, comp OverlapComputation, recs []OverlapRecord) error {
+	comp, norm, err := normalizeOverlapComputation(tenantID, comp, recs)
+	if err != nil {
+		return err
+	}
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockOverlapOwner(ctx, tx, tenantID, comp.ArtifactID); err != nil {
+		return err
+	}
+	var prev OverlapComputation
+	err = tx.QueryRowContext(ctx, `
+		SELECT version, computed_at FROM semantic_overlap_computations
+		WHERE tenant_id = $1 AND artifact_id = $2`, tenantID, comp.ArtifactID).Scan(&prev.Version, &prev.ComputedAt)
+	switch {
+	case err == nil && supersededBy(prev, comp):
+		return ErrOverlapSuperseded
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM semantic_overlap_records WHERE tenant_id = $1 AND owner_id = $2`,
+		tenantID, comp.ArtifactID); err != nil {
+		return err
+	}
+	for _, r := range norm {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO semantic_overlap_records
+				(tenant_id, owner_id, owner_version, peer_id, peer_version, similarity, model_id, computed_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (tenant_id, owner_id, peer_id) DO UPDATE SET
+				owner_version = EXCLUDED.owner_version, peer_version = EXCLUDED.peer_version,
+				similarity = EXCLUDED.similarity, model_id = EXCLUDED.model_id,
+				computed_at = EXCLUDED.computed_at`,
+			r.TenantID, r.Owner, r.OwnerVersion, r.Peer, r.PeerVersion, r.Similarity, r.ModelID, r.ComputedAt); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO semantic_overlap_computations (tenant_id, artifact_id, version, model_id, computed_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (tenant_id, artifact_id) DO UPDATE SET
+			version = EXCLUDED.version, model_id = EXCLUDED.model_id, computed_at = EXCLUDED.computed_at`,
+		comp.TenantID, comp.ArtifactID, comp.Version, comp.ModelID, comp.ComputedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// lockOverlapOwner takes the transaction-scoped advisory lock that serializes
+// the overlap writes of one (tenant, artifact) pair. The key is a 64-bit hash
+// of a namespaced string (Postgres text holds no NUL, so the parts are joined
+// by the unit separator), and a collision with another pair only serializes
+// two unrelated writes.
+func lockOverlapOwner(ctx context.Context, tx *sql.Tx, tenantID, artifactID string) error {
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		"podium.semantic_overlap\x1f"+tenantID+"\x1f"+artifactID); err != nil {
+		return fmt.Errorf("store: lock the overlap records of %s: %w", artifactID, err)
+	}
+	return nil
+}
+
+// ListOverlapRecords returns the tenant's records ordered by owner and peer.
+func (p *Postgres) ListOverlapRecords(ctx context.Context, tenantID string) ([]OverlapRecord, error) {
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	rows, err := conn.QueryContext(ctx, `
+		SELECT tenant_id, owner_id, owner_version, peer_id, peer_version, similarity, model_id, computed_at
+		FROM semantic_overlap_records
+		WHERE tenant_id = $1
+		ORDER BY owner_id, peer_id`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []OverlapRecord{}
+	for rows.Next() {
+		var r OverlapRecord
+		if err := rows.Scan(&r.TenantID, &r.Owner, &r.OwnerVersion, &r.Peer, &r.PeerVersion, &r.Similarity, &r.ModelID, &r.ComputedAt); err != nil {
+			return nil, err
+		}
+		r.ComputedAt = r.ComputedAt.UTC()
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListOverlapComputations returns the tenant's computation entries ordered by
+// artifact.
+func (p *Postgres) ListOverlapComputations(ctx context.Context, tenantID string) ([]OverlapComputation, error) {
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	rows, err := conn.QueryContext(ctx, `
+		SELECT tenant_id, artifact_id, version, model_id, computed_at
+		FROM semantic_overlap_computations
+		WHERE tenant_id = $1
+		ORDER BY artifact_id`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []OverlapComputation{}
+	for rows.Next() {
+		var c OverlapComputation
+		if err := rows.Scan(&c.TenantID, &c.ArtifactID, &c.Version, &c.ModelID, &c.ComputedAt); err != nil {
+			return nil, err
+		}
+		c.ComputedAt = c.ComputedAt.UTC()
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// DeleteOverlapArtifacts removes the records owned by and the computation
+// entries of each named artifact in one transaction in the org schema.
+func (p *Postgres) DeleteOverlapArtifacts(ctx context.Context, tenantID string, artifactIDs []string) error {
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, id := range artifactIDs {
+		if err := lockOverlapOwner(ctx, tx, tenantID, id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM semantic_overlap_records WHERE tenant_id = $1 AND owner_id = $2`, tenantID, id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM semantic_overlap_computations WHERE tenant_id = $1 AND artifact_id = $2`, tenantID, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

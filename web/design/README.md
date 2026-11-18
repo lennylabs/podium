@@ -5,7 +5,7 @@ Two deliverables that share one visual identity: the same tokens, the same type 
 | Folder | What it is | Start with |
 |:--|:--|:--|
 | `site/` | Public website: landing page and documentation shell, light and dark, desktop and 390pt mobile. | `site/README.md`, then `site/podium-design-reference.html` |
-| `app/` | Registry web UI (the SPA served by `podium serve --web-ui`): 37 screen mockups and a 57-component inventory with every state, in both themes. | `app/README.md`, then `app/Podium UI Inventory.dc.html` |
+| `app/` | Registry web UI (the SPA served by `podium serve --web-ui`): 40 screen mockups and a 64-component inventory with every state, in both themes. | `app/README.md`, then `app/Podium UI Inventory.dc.html` |
 | `site/logo/` | Production SVGs for the mark, lockups, and tile. Both deliverables use these. | — |
 
 Each README is self-contained and is the spec for its folder. The HTML files are design references, not production code: recreate them in the target codebase, and don't copy the inline styles.

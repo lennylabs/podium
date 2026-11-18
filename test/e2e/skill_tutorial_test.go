@@ -127,8 +127,8 @@ func TestSkillTutorial_InitRefusesOverwrite(t *testing.T) {
 
 // A SKILL.md alone with the minimum frontmatter (name and description) is a
 // complete skill. It lints with exit 0 and exactly one
-// lint.skill_version_assigned warning, because it declares no version and
-// the registry assigns one. spec: doc "## Starting point" and
+// lint.skill_version_assigned info diagnostic, because it declares no version
+// and the registry assigns one. spec: doc "## Starting point" and
 // "## Add fuller frontmatter".
 // Spec: §4.2
 // Spec: §4.3.4
@@ -143,13 +143,13 @@ func TestSkillTutorial_MinimalSkillLints(t *testing.T) {
 		t.Fatalf("lint exit=%d stderr=%s stdout=%s", res.Exit, res.Stderr, res.Stdout)
 	}
 	if n := strings.Count(res.Stdout, "lint.skill_version_assigned"); n != 1 {
-		t.Errorf("want exactly one lint.skill_version_assigned warning, got %d:\n%s", n, res.Stdout)
+		t.Errorf("want exactly one lint.skill_version_assigned diagnostic, got %d:\n%s", n, res.Stdout)
 	}
-	if n := strings.Count(res.Stdout, "[warning]"); n != 1 {
-		t.Errorf("want exactly one diagnostic, got %d warnings:\n%s", n, res.Stdout)
+	if n := strings.Count(res.Stdout, "[info]"); n != 1 {
+		t.Errorf("want exactly one info diagnostic, got %d:\n%s", n, res.Stdout)
 	}
-	if strings.Contains(res.Stdout, "[error]") {
-		t.Errorf("unexpected error diagnostic:\n%s", res.Stdout)
+	if strings.Contains(res.Stdout, "[warning]") || strings.Contains(res.Stdout, "[error]") {
+		t.Errorf("unexpected warning or error diagnostic:\n%s", res.Stdout)
 	}
 }
 
@@ -173,20 +173,35 @@ func TestSkillTutorial_FullerFrontmatterLints(t *testing.T) {
 	}
 }
 
-// a Podium-only field in SKILL.md is an ingest error;
-// SKILL.md stays within the agentskills.io subset (spec §4.3.4).
+// A Podium-only field in SKILL.md is an ingest error, so SKILL.md stays within
+// the agentskills.io subset. A top-level version is the exception: it is a
+// warning, because many published skills carry one and Podium ignores it.
+// Spec: §4.3.4
 func TestSkillTutorial_SkillMDPodiumFieldErrors(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
-		"personal/hello/greet/SKILL.md":    "---\nname: greet\ndescription: Greet the user.\nversion: 1.0.0\n---\n\nbody\n",
+		"personal/hello/greet/SKILL.md":    "---\nname: greet\ndescription: Greet the user.\nwhen_to_use:\n  - greeting\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 1 {
 		t.Fatalf("lint exit=%d, want 1 (error)\nstdout=%s", res.Exit, res.Stdout)
 	}
-	if !strings.Contains(res.Stdout, "[error]") || !strings.Contains(res.Stdout, "version") {
-		t.Errorf("expected an error flagging the Podium-only field version:\n%s", res.Stdout)
+	if !strings.Contains(res.Stdout, "[error]") || !strings.Contains(res.Stdout, "when_to_use") {
+		t.Errorf("expected an error flagging the Podium-only field when_to_use:\n%s", res.Stdout)
+	}
+
+	versionOnly := writeRegistry(t, map[string]string{
+		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
+		"personal/hello/greet/SKILL.md":    "---\nname: greet\ndescription: Greet the user.\nversion: 1.0.0\n---\n\nbody\n",
+	})
+	res = runPodium(t, "", nil, "lint", "--registry", versionOnly)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0 (a top-level version is a warning)\nstdout=%s", res.Exit, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "[warning]") || !strings.Contains(res.Stdout, "lint.skill_podium_only_field") ||
+		!strings.Contains(res.Stdout, "metadata.version") {
+		t.Errorf("expected a warning recommending metadata.version:\n%s", res.Stdout)
 	}
 }
 
@@ -389,8 +404,9 @@ func TestSkillTutorial_ProseRefBrokenFails(t *testing.T) {
 	}
 }
 
-// a prose reference escaping the artifact package
-// fails lint. spec: ruleProseReferenceResolution.checkBundled.
+// A prose reference that leaves the artifact package is a warning that
+// recommends the canonical ID, so lint exits 0 under the default --fail-on.
+// Spec: §4.4
 func TestSkillTutorial_ProseRefEscapesPackage(t *testing.T) {
 	t.Parallel()
 	body := "See [secret](../../../etc/passwd) for details.\n"
@@ -399,11 +415,12 @@ func TestSkillTutorial_ProseRefEscapesPackage(t *testing.T) {
 		"personal/hello/greet/SKILL.md":    greetSkillWithBody(body),
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 1 {
-		t.Fatalf("lint exit=%d, want 1\nstdout=%s", res.Exit, res.Stdout)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
 	}
-	if !strings.Contains(res.Stdout, "lint.prose_reference") || !strings.Contains(res.Stdout, "escapes the artifact package") {
-		t.Errorf("missing escapes-package diagnostic:\n%s", res.Stdout)
+	if !strings.Contains(res.Stdout, "[warning]") || !strings.Contains(res.Stdout, "lint.prose_reference") ||
+		!strings.Contains(res.Stdout, "leaves the artifact package") || !strings.Contains(res.Stdout, "canonical ID") {
+		t.Errorf("missing leaves-the-package warning:\n%s", res.Stdout)
 	}
 }
 
@@ -669,8 +686,8 @@ func TestSkillTutorial_MissingType(t *testing.T) {
 }
 
 // A skill whose ARTIFACT.md and SKILL.md declare no version lints with
-// exit 0 and one lint.skill_version_assigned warning, because the registry
-// assigns its version. TestFrontmatter_MissingVersion keeps the
+// exit 0 and one lint.skill_version_assigned info diagnostic, because the
+// registry assigns its version. TestFrontmatter_MissingVersion keeps the
 // required-version error for a non-skill type.
 // Spec: §4.3.4
 func TestSkillTutorial_MissingVersion(t *testing.T) {
@@ -683,8 +700,8 @@ func TestSkillTutorial_MissingVersion(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("lint exit=%d, want 0\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
 	}
-	if n := strings.Count(res.Stdout, "lint.skill_version_assigned"); n != 1 {
-		t.Errorf("want exactly one lint.skill_version_assigned warning, got %d:\n%s", n, res.Stdout)
+	if n := strings.Count(res.Stdout, "lint.skill_version_assigned"); n != 1 || !strings.Contains(res.Stdout, "[info] personal/hello/greet:") {
+		t.Errorf("want exactly one lint.skill_version_assigned info diagnostic, got %d:\n%s", n, res.Stdout)
 	}
 	if strings.Contains(res.Stdout, "lint.required_field_missing") {
 		t.Errorf("an assigned version must not draw lint.required_field_missing:\n%s", res.Stdout)

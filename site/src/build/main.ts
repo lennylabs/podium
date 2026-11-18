@@ -16,7 +16,7 @@ import {
   iconVersion,
   writeFile,
 } from "./assets";
-import { runChecks } from "./check";
+import { gzippedBytes, runChecks } from "./check";
 import { SITE_DIR, loadConfig } from "./config";
 import { buildCorpus } from "./content/pipeline";
 import { disposeHighlighter } from "./content/highlight";
@@ -95,7 +95,7 @@ async function runCheck(config: SiteConfig): Promise<void> {
       pages: assembled.pages,
       nav: assembled.nav,
       index: assembled.index,
-      searchIndexBytes: Buffer.byteLength(assembled.search.serialized),
+      searchIndexGzipBytes: gzippedBytes(assembled.search.serialized),
     }),
   ];
   report(diagnostics);
@@ -113,7 +113,7 @@ async function runBuild(config: SiteConfig): Promise<void> {
       pages: assembled.pages,
       nav: assembled.nav,
       index: assembled.index,
-      searchIndexBytes: Buffer.byteLength(assembled.search.serialized),
+      searchIndexGzipBytes: gzippedBytes(assembled.search.serialized),
     }),
   ];
   report(diagnostics);

@@ -193,7 +193,7 @@ func TestRunMultiTargetSync_Listing(t *testing.T) {
 		cfg, marker := writeListingTargetsConfig(t, ws, registry, "    max_chars: 10\n    check: error\n")
 		var rc int
 		stderr := captureStderr(t, func() {
-			captureStdout(t, func() { rc = runMultiTargetSync(cfg, "", false, false, false, false) })
+			captureStdout(t, func() { rc = runMultiTargetSync(cfg, "", "", false, false, false, false) })
 		})
 		if rc != 1 {
 			t.Errorf("rc = %d, want 1\nstderr:\n%s", rc, stderr)
@@ -216,7 +216,7 @@ func TestRunMultiTargetSync_Listing(t *testing.T) {
 		cfg, _ := writeListingTargetsConfig(t, ws, registry, "    max_chars: abc\n")
 		var rc int
 		stderr := captureStderr(t, func() {
-			captureStdout(t, func() { rc = runMultiTargetSync(cfg, "", false, false, false, false) })
+			captureStdout(t, func() { rc = runMultiTargetSync(cfg, "", "", false, false, false, false) })
 		})
 		if rc != 1 || !strings.Contains(stderr, "listing_budgets") {
 			t.Errorf("rc = %d, want 1 naming listing_budgets\nstderr:\n%s", rc, stderr)
@@ -228,7 +228,7 @@ func TestRunMultiTargetSync_Listing(t *testing.T) {
 			var rc int
 			var stdout string
 			stderr := captureStderr(t, func() {
-				stdout = captureStdout(t, func() { rc = runMultiTargetSync(cfg, "", false, check, false, false) })
+				stdout = captureStdout(t, func() { rc = runMultiTargetSync(cfg, "", "", false, check, false, false) })
 			})
 			if rc != 2 {
 				t.Errorf("rc = %d, want 2", rc)

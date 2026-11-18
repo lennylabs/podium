@@ -134,6 +134,53 @@ func ModelVersionedOf(v Provider) (ModelVersioned, bool) {
 	return mv, ok
 }
 
+// QueryRowLimiter is the optional capability a backend implements to report
+// the largest topK it accepts in one Query, QueryModel, or QueryText call. A
+// computation that widens its query, such as the §7.3.1 overlap computation,
+// asks no more rows than this, because a larger request fails on a backend
+// that enforces the limit, or comes back short on one that clamps it and so
+// reads as an index with no further rows.
+type QueryRowLimiter interface {
+	// MaxQueryRows returns the per-query row limit, or 0 when the backend
+	// accepts any topK.
+	MaxQueryRows() int
+}
+
+// MaxQueryRowsOf returns v's per-query row limit, or 0 when v does not
+// implement QueryRowLimiter or accepts any topK. Nil-safe.
+//
+// Spec: §7.3.1
+func MaxQueryRowsOf(v Provider) int {
+	if l, ok := v.(QueryRowLimiter); ok {
+		return max(l.MaxQueryRows(), 0)
+	}
+	return 0
+}
+
+// managedMaxQueryRows is the topK limit the managed backends report. Pinecone
+// accepts a topK of at most 1,000 on a query that includes metadata, which
+// its /query call does, and its /records search returns the same fields. The
+// Qdrant `limit` and the Weaviate `limit` have no fixed maximum in their
+// clients here (Weaviate's server caps results at its QUERY_MAXIMUM_RESULTS
+// setting), so they report the same conservative figure: a request of up to
+// 1,000 rows stays within the limits a hosted instance applies by default.
+const managedMaxQueryRows = 1000
+
+// validateQueryDim checks a query vector against the configured dimension. A
+// self-embedding backend opened with no local dimension (dim 0) accepts a
+// non-empty vector of any length: its hosted model fixes the dimension, and
+// the §7.3.1 overlap computation queries it with a vector the index itself
+// returned (VectorReader).
+func validateQueryDim(v []float32, dim int) error {
+	if len(v) == 0 {
+		return ErrDimensionMismatch
+	}
+	if dim == 0 {
+		return nil
+	}
+	return validateDim(v, dim)
+}
+
 // validateDim returns ErrDimensionMismatch when v's length doesn't
 // match the configured dimension. Backends call this on every Put /
 // Query so the error surface is consistent.

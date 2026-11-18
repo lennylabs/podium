@@ -2,6 +2,7 @@ package lint_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +14,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
-// Spec: §4.3.4 line 286 — a skill's ARTIFACT.md body is empty
+// Spec: §4.3.4 — a skill's ARTIFACT.md body is empty
 // or a single HTML comment; anything else warns.
 func TestRuleArtifactBodyForSkill_AcceptsEmptyOrSingleComment(t *testing.T) {
 	t.Parallel()
@@ -48,7 +49,7 @@ func TestRuleArtifactBodyForSkill_AcceptsEmptyOrSingleComment(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 lines 336-342 — bundled-file references must
+// Spec: §4.4 — bundled-file references must
 // resolve. References to missing files are an ingest error.
 func TestRuleProseReference_BundledFileResolves(t *testing.T) {
 	t.Parallel()
@@ -92,27 +93,263 @@ func TestRuleProseReference_MissingBundledFileErrors(t *testing.T) {
 	}
 }
 
-func TestRuleProseReference_RejectsPathEscape(t *testing.T) {
+// Spec: §4.4 — a relative target that leaves the package is a warning rather
+// than an error, and the diagnostic says it resolves only while the artifacts
+// sit side by side in one source tree and recommends the canonical ID.
+func TestRuleProseReference_PathEscapeWarns(t *testing.T) {
 	t.Parallel()
-	body := "---\ntype: agent\n---\nSee [escape](../../etc/passwd)."
-	rec := filesystem.ArtifactRecord{
-		ID:            "team/example",
-		Artifact:      &manifest.Artifact{Type: manifest.TypeAgent},
-		ArtifactBytes: []byte(body),
-	}
-	diags := (&lint.Linter{}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec})
-	gotErr := false
-	for _, d := range diags {
-		if d.Code == "lint.prose_reference" && strings.Contains(d.Message, "escapes") {
-			gotErr = true
-		}
-	}
-	if !gotErr {
-		t.Errorf("missing escape error: %+v", diags)
+	for _, href := range []string{"../other-skill/SKILL.md", "../../etc/passwd", "..", "./../sibling.md#part"} {
+		t.Run(href, func(t *testing.T) {
+			t.Parallel()
+			diags := proseDiags(proseRec("team/example", "See [escape]("+href+")."))
+			if len(diags) != 1 {
+				t.Fatalf("want one lint.prose_reference diagnostic, got %+v", diags)
+			}
+			d := diags[0]
+			if d.Severity != lint.SeverityWarning {
+				t.Errorf("severity = %s, want warning", d.Severity)
+			}
+			want := "prose reference \"" + href + "\" leaves the artifact package; it resolves only while the artifacts sit side by side in one source tree. Name the other artifact by its canonical ID instead"
+			if d.Message != want {
+				t.Errorf("message = %q\nwant      %q", d.Message, want)
+			}
+		})
 	}
 }
 
-// Spec: §4.4 line 348 — a prose reference that names another
+// proseRec returns an agent record whose ARTIFACT.md body is body and whose
+// bundled resources are the given paths.
+func proseRec(id, body string, resources ...string) filesystem.ArtifactRecord {
+	rec := filesystem.ArtifactRecord{
+		ID:            id,
+		Artifact:      &manifest.Artifact{Type: manifest.TypeAgent},
+		ArtifactBytes: []byte("---\ntype: agent\n---\n" + body),
+		Resources:     map[string][]byte{},
+	}
+	for _, p := range resources {
+		rec.Resources[p] = []byte("content\n")
+	}
+	return rec
+}
+
+// proseDiags runs the offline prose-reference rule alone and returns its
+// diagnostics.
+func proseDiags(records ...filesystem.ArtifactRecord) []lint.Diagnostic {
+	rule := lint.NewProseReferenceRule(nil)
+	var out []lint.Diagnostic
+	for _, d := range (&lint.Linter{Rules: []lint.Rule{rule}}).Lint(context.Background(), nil, records) {
+		if d.Code == "lint.prose_reference" {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// Spec: §4.4 — the fragment and query are removed and the percent-encoding
+// decoded before the bundled-file lookup, so each of these targets resolves
+// to a bundled file, and a target that is only a fragment is not checked.
+func TestRuleProseReference_FragmentQueryAndEncodingResolve(t *testing.T) {
+	t.Parallel()
+	body := "See [errors](references/api.md#errors), [raw](references/api.md?plain=1), " +
+		"[both](./references/api.md?plain=1#L3), [spaced](references/my%20notes.md), " +
+		"[angle](<references/my notes.md#intro>), [self](./ARTIFACT.md#usage), [same page](?tab=1), and [top](#top)."
+	diags := proseDiags(proseRec("team/example", body, "references/api.md", "references/my notes.md"))
+	if len(diags) != 0 {
+		t.Errorf("references with a fragment, query, or percent-encoding should resolve: %+v", diags)
+	}
+}
+
+// Spec: §4.4 — a target that begins with / is root-relative: it names a path
+// on a website and is not checked, whether or not a bundled file or an
+// artifact shares the path. The missing relative reference beside them is
+// still an error, so the rule ran. It fails against a rule that resolves a
+// root-relative target against the package or the catalog.
+func TestRuleProseReference_RootRelativeTargetNotChecked(t *testing.T) {
+	t.Parallel()
+	body := "See [analytics](/features/analytics), [docs](/docs/guide.md#setup), [api](/references/api.md), " +
+		"[home](/), [peer](/finance/ap/reconcile), and [missing](references/missing.md)."
+	diags := proseDiags(proseRec("team/example", body, "references/api.md"))
+	if len(diags) != 1 || diags[0].Severity != lint.SeverityError || !strings.Contains(diags[0].Message, `"references/missing.md"`) {
+		t.Errorf("want only the missing relative reference reported, got %+v", diags)
+	}
+}
+
+// Spec: §4.4 — a reference to a directory of the package resolves when a
+// bundled file lies below it, with or without a trailing slash. A directory
+// with no bundled file below it, and a name that only shares a prefix with a
+// directory, are still errors.
+func TestRuleProseReference_BundledDirectoryResolves(t *testing.T) {
+	t.Parallel()
+	body := "See [templates](assets/templates/), [also](./assets/templates), " +
+		"[empty](assets/none/), and [prefix](assets/temp)."
+	diags := proseDiags(proseRec("team/mail", body, "assets/templates/weekly.html", "assets/templates/brief.html"))
+	if len(diags) != 2 {
+		t.Fatalf("want the empty directory and the prefix-only name reported, got %+v", diags)
+	}
+	for _, d := range diags {
+		named := strings.Contains(d.Message, `"assets/none/"`) || strings.Contains(d.Message, `"assets/temp"`)
+		if d.Severity != lint.SeverityError || !named {
+			t.Errorf("unexpected diagnostic %+v", d)
+		}
+	}
+}
+
+// Spec: §4.4 — the fragment is removed before the artifact lookup as well,
+// so a reference to another artifact with a fragment resolves.
+func TestRuleProseReference_FragmentOnArtifactReferenceResolves(t *testing.T) {
+	t.Parallel()
+	diags := proseDiags(
+		proseRec("finance/ap/pay-invoice", "See [steps](finance/ap/reconcile#steps)."),
+		proseRec("finance/ap/reconcile", "No references here."),
+	)
+	if len(diags) != 0 {
+		t.Errorf("an artifact reference with a fragment should resolve: %+v", diags)
+	}
+}
+
+// Spec: §4.4 — removing the fragment does not excuse a missing file: the
+// path it leaves must still name a bundled file, and the error quotes the
+// target as written. A target whose percent-encoding does not decode is
+// looked up as written and is an error when no bundled file has that name.
+func TestRuleProseReference_MissingFileWithFragmentErrors(t *testing.T) {
+	t.Parallel()
+	for _, href := range []string{"references/missing.md#errors", "references/notes%zz.md"} {
+		t.Run(href, func(t *testing.T) {
+			t.Parallel()
+			diags := proseDiags(proseRec("team/example", "See [x]("+href+").", "references/api.md"))
+			if len(diags) != 1 || diags[0].Severity != lint.SeverityError {
+				t.Fatalf("want one error, got %+v", diags)
+			}
+			want := "prose reference \"" + href + "\" does not resolve to a bundled file or a known artifact"
+			if diags[0].Message != want {
+				t.Errorf("message = %q, want %q", diags[0].Message, want)
+			}
+		})
+	}
+}
+
+// Spec: §4.4 — a target whose percent-encoding does not decode is looked up
+// as written, so it resolves when a bundled file carries that literal name.
+func TestRuleProseReference_UndecodableTargetLooksUpAsWritten(t *testing.T) {
+	t.Parallel()
+	diags := proseDiags(proseRec("team/example", "See [x](references/100%.md#top).", "references/100%.md"))
+	if len(diags) != 0 {
+		t.Errorf("an undecodable target should resolve to the file of that literal name: %+v", diags)
+	}
+}
+
+// Spec: §4.4 — link syntax inside a code span or a fenced code block is not a
+// link and is not checked, while a link outside code in the same body still
+// is.
+func TestRuleProseReference_SkipsLinksInCode(t *testing.T) {
+	t.Parallel()
+	body := "Write a link as `[text](url)`.\n\n" +
+		"```markdown\n- [Guide](references/guide.md)\n```\n\n" +
+		"~~~~\n[Template](templates/{{name}}.md)\n~~~~\n\n" +
+		"See [the missing file](references/missing.md).\n"
+	diags := proseDiags(proseRec("team/example", body))
+	if len(diags) != 1 || !strings.Contains(diags[0].Message, `"references/missing.md"`) {
+		t.Errorf("want only the link outside code reported, got %+v", diags)
+	}
+}
+
+// Spec: §4.4 — the check applies to the SKILL.md body of a skill, and an
+// unterminated fence makes the rest of the body code.
+func TestRuleProseReference_UnterminatedFenceInSkillBody(t *testing.T) {
+	t.Parallel()
+	rec := filesystem.ArtifactRecord{
+		ID:         "team/greet",
+		Artifact:   &manifest.Artifact{Type: manifest.TypeSkill},
+		SkillBytes: []byte("---\nname: greet\n---\nSee [a](a.md).\n\n```\n[b](b.md)\n"),
+	}
+	diags := proseDiags(rec)
+	if len(diags) != 1 || !strings.Contains(diags[0].Message, `"a.md"`) {
+		t.Errorf("want only the link before the unterminated fence reported, got %+v", diags)
+	}
+}
+
+// Spec: §4.4 — prose references follow CommonMark parsing. A fenced code
+// block nested in a list item, an indented code block, a fence in a block
+// quote, and an escaped bracket are not links, so the missing files they name
+// are not reported. A backtick in one list item does not pair with one in the
+// next, and link text may hold nested brackets, so the missing files those
+// links name are reported.
+func TestRuleProseReference_FollowsCommonMark(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"fence indented in a list item", "1. Run it\n\n    ```markdown\n    - [Guide](references/guide.md)\n    ```\n", nil},
+		{"indented code block", "Example:\n\n    [Template](templates/{{name}}.md)\n", nil},
+		{"fence in a block quote", "> ```\n> [x](references/x.md)\n> ```\n", nil},
+		{"tilde fence indented in a list item", "1. Run it\n\n    ~~~markdown\n    - [Guide](references/guide.md)\n    ~~~\n", nil},
+		{"tilde fence in a block quote", "> ~~~\n> [x](references/x.md)\n> ~~~\n", nil},
+		{"escaped bracket", "Write \\[text](references/x.md) for a link.\n", nil},
+		{"backticks in separate list items", "- run `make\n- see [setup](references/setup.md) and `go`\n", []string{"references/setup.md"}},
+		{"nested brackets in link text", "See [the [draft] notes](references/notes.md).\n", []string{"references/notes.md"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			diags := proseDiags(proseRec("team/example", tc.body))
+			if len(diags) != len(tc.want) {
+				t.Fatalf("want %d diagnostics naming %q, got %+v", len(tc.want), tc.want, diags)
+			}
+			for i, target := range tc.want {
+				if diags[i].Severity != lint.SeverityError || !strings.Contains(diags[i].Message, `"`+target+`"`) {
+					t.Errorf("diagnostic %d = %+v, want an error naming %q", i, diags[i], target)
+				}
+			}
+		})
+	}
+}
+
+// Spec: §4.4 — a target with a URL scheme other than http or https is not
+// checked, and it is not looked up as a bundled file either. The HTTP client
+// fails every request, so a scheme sent to the URL check would be reported. A
+// relative path whose "/" precedes a ":" carries no scheme and resolves to the
+// bundled file it names.
+func TestRuleProseReference_NonHTTPSchemeNotChecked(t *testing.T) {
+	t.Parallel()
+	body := "Write to [us](mailto:team@acme.com), call [support](tel:+15550100), open " +
+		"[the file](file:///etc/hosts), [the editor](vscode://file/a.md), [the mirror](ftp://acme.com/a.md), " +
+		"[the timed note](references/09:30.md), and see [the missing file](references/missing.md).\n"
+	rule := lint.NewProseReferenceRule(&http.Client{Transport: failingTransport{}})
+	rec := proseRec("team/example", body, "references/09:30.md")
+	var diags []lint.Diagnostic
+	for _, d := range (&lint.Linter{Rules: []lint.Rule{rule}}).Lint(context.Background(), nil, []filesystem.ArtifactRecord{rec}) {
+		if d.Code == "lint.prose_reference" {
+			diags = append(diags, d)
+		}
+	}
+	if len(diags) != 1 || !strings.Contains(diags[0].Message, `"references/missing.md"`) {
+		t.Errorf("want only the missing relative reference reported, got %+v", diags)
+	}
+}
+
+// failingTransport fails every request it is handed.
+type failingTransport struct{}
+
+func (failingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf("unexpected request to %s", r.URL)
+}
+
+// Spec: §4.4 — a prose reference is the destination of an inline link or
+// image, so a reference-style link whose definition names a missing file is
+// not checked, while an inline link to a missing file in the same body is.
+func TestRuleProseReference_ReferenceStyleLinkNotChecked(t *testing.T) {
+	t.Parallel()
+	body := "See [the guide][guide] and [the notes].\n\n[guide]: references/guide.md\n[the notes]: references/notes.md\n\n" +
+		"Then [the missing file](references/missing.md).\n"
+	diags := proseDiags(proseRec("team/example", body))
+	if len(diags) != 1 || !strings.Contains(diags[0].Message, `"references/missing.md"`) {
+		t.Errorf("want only the inline link reported, got %+v", diags)
+	}
+}
+
+// Spec: §4.4 — a prose reference that names another
 // artifact resolves against the current visible catalog rather than being
 // reported as a missing bundled file. The catalog is the linted record set.
 func TestRuleProseReference_ResolvesAgainstCatalog(t *testing.T) {
@@ -136,7 +373,7 @@ func TestRuleProseReference_ResolvesAgainstCatalog(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 line 348 — an artifact reference carrying a §4.7.6
+// Spec: §4.4 — an artifact reference carrying a §4.7.6
 // version pin resolves against the catalog after the pin is stripped.
 func TestRuleProseReference_ResolvesPinnedArtifact(t *testing.T) {
 	t.Parallel()
@@ -159,7 +396,7 @@ func TestRuleProseReference_ResolvesPinnedArtifact(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 lines 348-350 — a reference that matches neither a
+// Spec: §4.4 — a reference that matches neither a
 // bundled file nor any artifact in the catalog is an ingest error.
 func TestRuleProseReference_UnknownArtifactErrors(t *testing.T) {
 	t.Parallel()
@@ -183,7 +420,7 @@ func TestRuleProseReference_UnknownArtifactErrors(t *testing.T) {
 	}
 }
 
-// Spec: §4.4 line 347 — a URL reference is valid only when HEAD
+// Spec: §4.4 — a URL reference is valid only when HEAD
 // returns 200 or a 3xx redirect. Other 2xx codes (201/204/206) do not
 // confirm the named resource and are rejected.
 func TestRuleProseReference_URLStatusRange(t *testing.T) {

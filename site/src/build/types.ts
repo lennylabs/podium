@@ -80,8 +80,11 @@ export type SiteConfig = {
   repoUrl: string;
   /** Version string shown in the version pill. */
   version: string;
-  /** Failure threshold for the serialized search index, in bytes. */
-  searchIndexLimitBytes: number;
+  /**
+   * Failure threshold for the serialized search index after gzip compression,
+   * in bytes. The compressed size is what a reader downloads.
+   */
+  searchIndexLimitGzipBytes: number;
 };
 
 export type BuildDiagnostic = {

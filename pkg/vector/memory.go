@@ -2,7 +2,6 @@ package vector
 
 import (
 	"context"
-	"math"
 	"sort"
 	"sync"
 )
@@ -35,6 +34,10 @@ func NewMemory(dim int) *Memory {
 
 // ID returns "memory".
 func (m *Memory) ID() string { return "memory" }
+
+// MaxQueryRows returns 0: the in-process index ranks every row of the tenant
+// and returns any topK.
+func (*Memory) MaxQueryRows() int { return 0 }
 
 // Dimensions returns the configured dimension.
 func (m *Memory) Dimensions() int { return m.dim }
@@ -182,19 +185,5 @@ func memKey(id, ver string) string { return id + "@" + ver }
 // cosineDistance returns 1 - cosine_similarity. Vectors of zero
 // magnitude produce distance 1 (ortho/unknown).
 func cosineDistance(a, b []float32) float32 {
-	if len(a) != len(b) || len(a) == 0 {
-		return 1
-	}
-	var dot, na, nb float64
-	for i := range a {
-		af, bf := float64(a[i]), float64(b[i])
-		dot += af * bf
-		na += af * af
-		nb += bf * bf
-	}
-	if na == 0 || nb == 0 {
-		return 1
-	}
-	sim := dot / (math.Sqrt(na) * math.Sqrt(nb))
-	return float32(1 - sim)
+	return float32(1 - cosineSimilarity(a, b))
 }

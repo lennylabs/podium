@@ -270,6 +270,8 @@ With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` 
 
 The previous backend can stay in place during cut-over, or it can be torn down after re-embedding completes.
 
+When the [semantic overlap](#semantic-overlap) check is on, a re-embed pass also recomputes the overlap records of every artifact it re-embeds. A pass scoped with `--only-missing` or `--since` recomputes no records and leaves them to the periodic sweep.
+
 ### Model changes on pgvector and sqlite-vec
 
 Model versioning applies to the collocated backends only. `pgvector` and `sqlite-vec` tag each row with the embedding model. While a re-embed is in flight, they restrict a query to the current model. They drop the previous model's rows once a full pass completes. A pass scoped with `--only-missing` or `--since` purges nothing.
@@ -304,7 +306,35 @@ The search response reports none of these conditions (see [Operational notes](#o
 
 ### Write consistency on managed backends
 
-Every managed service is a non-collocated backend. For these backends, ingest writes go through a transactional outbox. The manifest commit and a `vector_pending` row land in the same metadata-store transaction, and a background worker drives the write to the vector backend. The outbox keeps the metadata commit and the vector write consistent under failure.
+Every managed service is a non-collocated backend. For these backends, ingest writes go through a transactional outbox. The manifest commit and a `vector_pending` row land in the same metadata-store transaction, and a background worker drives the write to the vector backend. The outbox keeps the metadata commit and the vector write consistent under failure. A row records the error of its last failed attempt, and the registry removes URL userinfo, URL query strings, the password of a key/value connection string (`password=...`), and every configured secret value from that text before it stores or logs it. A configured connection string also contributes its password as a secret value, so a DSN quoted only in part loses its password too.
+
+---
+
+## Semantic overlap
+
+The `lint.semantic_overlap` check reads the search index this page configures. It is off by default, and `PODIUM_LINT_SEMANTIC_OVERLAP=on` turns it on. The check uses the backend and the embedding model that search uses, so it adds no second index and no second embedding of the catalog. Computing an artifact queries the index for the nearest rows of other served artifacts, widening the query past rows of earlier versions, and stores one overlap record per peer found in the `semantic_overlap_records` table of the metadata store. [Finding overlapping artifacts](../../managing/overlap#turn-on-the-semantic-check) describes the check, and [Lint](../../reference/configuration#lint) in the configuration reference lists its variables.
+
+The widening asks no more rows than the backend accepts in one query: 1000 on `sqlite-vec` and Pinecone, 1000 as a conservative cap on Qdrant Cloud and Weaviate Cloud, and no limit on `pgvector`. A failed widened query keeps the peers the earlier queries found.
+
+The registry queries with the artifact's stored vector on every backend that can return it. Every built-in backend returns stored vectors, a self-embedding Pinecone, Weaviate Cloud, or Qdrant Cloud index included, so scores are symmetric cosine similarities and identical texts score 1. A custom self-embedding backend that cannot return a stored vector is queried with the artifact's projection text, and its query-to-passage scores are asymmetric and stay below 1 for identical texts. A custom backend that can neither return a stored vector nor query with text fails the computation with an error, which the registry logs and counts as failed, and the artifact keeps its existing records. Every similarity is limited to the range 0 to 1. Each backend computes the similarity as follows:
+
+- `pgvector` and `sqlite-vec` compute the cosine similarity from the stored vectors, whatever distance their nearest-neighbour index orders by.
+- `sqlite-vec` orders candidates by Euclidean distance. With an embedding model that does not normalize its vectors, the candidate set can miss a close cosine neighbour. Any other index that orders by Euclidean distance has the same limit.
+- A managed backend reports a score in the metric its index or collection was created with, and the registry takes one minus the reported distance as the similarity. That value is the cosine similarity only when the metric is cosine. Create the Pinecone index, the Weaviate Cloud collection, or the Qdrant Cloud collection with the cosine metric before turning the check on, and leave the check off on an index that uses another metric.
+
+The check needs an embedding source. A registry with `PODIUM_LINT_SEMANTIC_OVERLAP=on`, a storage-only or collocated backend, and `PODIUM_EMBEDDING_PROVIDER` set to the empty string or `none` refuses to start with `config.invalid`, and the message names the configured value. A self-embedding backend is its own embedding source.
+
+When the registry computes depends on the backend:
+
+- On `pgvector` and `sqlite-vec`, an ingest computes each artifact it stores as a new version within the cycle and reports `lint.semantic_overlap` among its non-blocking advisories.
+- On a managed backend, including a self-embedding one, the registry computes the artifacts an outbox pass wrote once that pass ends. An ingest on a managed backend therefore reports no `lint.semantic_overlap` diagnostic, and two artifacts of one cycle find each other once both vectors are written. The computation uses the vector the outbox row carries when it has one, so it reads nothing back. When it reads a stored vector that the backend does not return yet, as an eventually consistent backend such as Pinecone can right after a write, the outbox retries it on its next five passes and then leaves it to the sweep.
+- The startup ingest computes no overlap. Once it completes, the registry runs one sweep pass in the background, whether or not the periodic sweep is on.
+- On every backend, a sweep runs every `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL` (24 hours by default) and computes each served artifact whose last computation is missing or was for another version or embedding model, or that owns a record naming a version that is no longer served. It deletes the records of artifacts that are no longer served. Every replica runs the sweep and delays its periodic passes by a random offset from zero up to a tenth of the interval, drawn once at startup. Replicas that compute one artifact at once store the same result.
+- Neither the startup pass nor the sweep runs when the check is off or no search index is configured.
+- The startup pass and the sweep skip an artifact whose vector the outbox has not written, because the outbox write computes it. Such an artifact counts as neither computed nor failed, and the pass log reports it as `skipped N whose vectors the outbox has not written`.
+- A full `podium admin reembed` pass recomputes every artifact it re-embeds, and `podium admin rebuild-overlap` attempts every served artifact of the tenant, including one whose vector is not written yet.
+
+A failed index query leaves the artifact's existing records in place and does not fail the ingest. The registry logs the failure with the artifact ID and the step that failed, `stored-vector read`, `neighbour query`, or `scoring`, and the next sweep computes the artifact again. A record whose embedding model is not the configured model is not reported, so an embedding-model change hides the old records until the sweep or a re-embed replaces them. `podium admin migrate-to-standard` copies no overlap records, and the target registry's sweep computes them.
 
 ---
 

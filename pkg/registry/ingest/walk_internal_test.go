@@ -4,11 +4,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/version"
@@ -98,13 +100,14 @@ func mapKeys(m map[string][]byte) []string {
 	return out
 }
 
-// TestLoadOne_MalformedFrontmatterIsInvalidArtifact covers
-// spec: §7.3.1 — a manifest the parser cannot decode is a fault in the layer's
-// content, so the walk error carries ErrInvalidArtifact. The server maps that
-// sentinel to a non-retryable ingest refusal; without it the failure falls
-// through to the unclassified default, which reports the registry as
-// unavailable and advises a retry that repeats the same parse failure.
-func TestLoadOne_MalformedFrontmatterIsInvalidArtifact(t *testing.T) {
+// TestLoadOne_MalformedFrontmatterIsRefusedPerArtifact covers
+// spec: §4.1 — a manifest the parser cannot decode is refused on its own, so
+// loadOne returns no error, which would stop the walk of the whole layer.
+// It returns a record that carries the unparseable reason, naming the file
+// and the parse error and no layer, and that Ingest refuses before any rule
+// reads the parsed fields. This covers the ARTIFACT.md that does not parse
+// and the type: skill package whose SKILL.md does not parse.
+func TestLoadOne_MalformedFrontmatterIsRefusedPerArtifact(t *testing.T) {
 	t.Parallel()
 	const malformed = "---\n" +
 		"type: agent\n" +
@@ -112,21 +115,37 @@ func TestLoadOne_MalformedFrontmatterIsInvalidArtifact(t *testing.T) {
 		"description: d\n" +
 		"weird: [unclosed\n" +
 		"---\n\nbody\n"
-	fsys := fstest.MapFS{
-		"x/y/ARTIFACT.md": &fstest.MapFile{Data: []byte(malformed)},
+	const mappingDescription = "---\nname: s\ndescription:\n  text: d\n---\n\nbody\n"
+	cases := []struct {
+		name, manifestPath, wantFile string
+		fsys                         fstest.MapFS
+	}{
+		{"ARTIFACT.md", "x/y/ARTIFACT.md", "x/y/ARTIFACT.md: ", fstest.MapFS{
+			"x/y/ARTIFACT.md": &fstest.MapFile{Data: []byte(malformed)},
+		}},
+		{"SKILL.md of a skill package", "x/s/ARTIFACT.md", "x/s/SKILL.md: ", fstest.MapFS{
+			"x/s/ARTIFACT.md": &fstest.MapFile{Data: []byte(skillArtifactInternal)},
+			"x/s/SKILL.md":    &fstest.MapFile{Data: []byte(mappingDescription)},
+		}},
 	}
-	_, err := loadOne(fsys, "x/y/ARTIFACT.md", "layer")
-	if err == nil {
-		t.Fatalf("loadOne accepted malformed YAML frontmatter")
-	}
-	if !errors.Is(err, ErrInvalidArtifact) {
-		t.Errorf("error %v does not wrap ErrInvalidArtifact", err)
-	}
-	if !errors.Is(err, manifest.ErrInvalidYAML) {
-		t.Errorf("error %v lost the underlying parse cause", err)
-	}
-	if !strings.Contains(err.Error(), "x/y") {
-		t.Errorf("error %q does not name the offending artifact", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rec, err := loadOne(tc.fsys, tc.manifestPath, "layer")
+			if err != nil {
+				t.Fatalf("loadOne = %v, want a per-artifact refusal and no error", err)
+			}
+			constraint, reason, ok := rec.Refusal()
+			if !ok || constraint != layer.ManifestUnparseableConstraint {
+				t.Fatalf("Refusal() = %q, %q, %v, want manifest_unparseable", constraint, reason, ok)
+			}
+			if !strings.HasPrefix(reason, tc.wantFile+"manifest: invalid YAML frontmatter") {
+				t.Errorf("reason %q does not name the file %q and the parse error", reason, tc.wantFile)
+			}
+			if strings.Contains(reason, "layer") {
+				t.Errorf("reason %q names the layer", reason)
+			}
+		})
 	}
 }
 
@@ -175,6 +194,46 @@ const agentArtifactInternal = "---\n" +
 	"description: d\n" +
 	"---\n\nagent body\n"
 
+// mappingDescriptionSkillInternal is a SKILL.md whose description is a
+// mapping, a kind §4.3.4 does not allow, so it does not parse.
+const mappingDescriptionSkillInternal = "---\n" +
+	"name: nested\n" +
+	"description:\n" +
+	"  text: A mapping\n" +
+	"---\n\nBody for nested.\n"
+
+// nestedMetadataSkillInternal is a SKILL.md whose metadata nests a mapping
+// under a key Podium does not read, which parses (§4.3.4).
+const nestedMetadataSkillInternal = "---\n" +
+	"name: nested\n" +
+	"description: Nested metadata\n" +
+	"metadata:\n" +
+	"  author:\n" +
+	"    name: alice\n" +
+	"---\n\nBody for nested.\n"
+
+// invalidYAMLArtifactInternal is an ARTIFACT.md whose frontmatter is not
+// valid YAML.
+const invalidYAMLArtifactInternal = "---\ntype: agent\nweird: [unclosed\n---\n\nbody\n"
+
+// skillReason returns the unparseable-manifest reason for the SKILL.md src at
+// file, or the empty string when src parses, which no refusal matches.
+func skillReason(file, src string) string {
+	if _, err := manifest.ParseSkill([]byte(src)); err != nil {
+		return layer.UnparseableReason(file, err)
+	}
+	return ""
+}
+
+// artifactReason returns the unparseable-manifest reason for the ARTIFACT.md
+// src at file, or the empty string when src parses.
+func artifactReason(file, src string) string {
+	if _, err := manifest.ParseArtifact([]byte(src)); err != nil {
+		return layer.UnparseableReason(file, err)
+	}
+	return ""
+}
+
 // walkParityPackage is one package a walk parity case expects: its canonical
 // ID, its resource set, and its resolved version.
 type walkParityPackage struct {
@@ -198,6 +257,9 @@ type walkParityCase struct {
 	// wantErr lists substrings both walks' errors carry. A case that sets it
 	// also requires the ingest error to wrap ErrInvalidArtifact.
 	wantErr []string
+	// wantRefused maps the ID of each package both modes refuse under the
+	// §4.1 unparseable-manifest rule to the reason both give it.
+	wantRefused map[string]string
 }
 
 func walkParityCases() []walkParityCase {
@@ -313,9 +375,56 @@ func walkParityCases() []walkParityCase {
 			want: []walkParityPackage{{id: "x", resources: map[string]string{}, versionAssigned: true}},
 		},
 		{
-			name:    "frontmatter-less SKILL.md outside any package",
-			tree:    []testharness.WriteTreeOption{{Path: "loose/SKILL.md", Content: "no frontmatter here\n"}},
-			wantErr: []string{"loose/SKILL.md"},
+			name:        "frontmatter-less SKILL.md outside any package",
+			tree:        []testharness.WriteTreeOption{{Path: "loose/SKILL.md", Content: "no frontmatter here\n"}},
+			wantRefused: map[string]string{"loose": "loose/SKILL.md: manifest: missing YAML frontmatter"},
+		},
+		{
+			name: "SKILL.md with a mapping description beside a valid skill",
+			tree: []testharness.WriteTreeOption{
+				{Path: "bad/SKILL.md", Content: mappingDescriptionSkillInternal},
+				{Path: "good/SKILL.md", Content: plainSkillInternal},
+			},
+			want:        []walkParityPackage{{id: "good", resources: map[string]string{}, versionAssigned: true}},
+			wantRefused: map[string]string{"bad": skillReason("bad/SKILL.md", mappingDescriptionSkillInternal)},
+		},
+		{
+			name: "SKILL.md with nested metadata beside a valid skill",
+			tree: []testharness.WriteTreeOption{
+				{Path: "nested/SKILL.md", Content: nestedMetadataSkillInternal},
+				{Path: "good/SKILL.md", Content: plainSkillInternal},
+			},
+			want: []walkParityPackage{
+				{id: "good", resources: map[string]string{}, versionAssigned: true},
+				{id: "nested", resources: map[string]string{}, versionAssigned: true},
+			},
+		},
+		{
+			name: "ARTIFACT.md with invalid YAML beside a valid artifact",
+			tree: []testharness.WriteTreeOption{
+				{Path: "bad/ARTIFACT.md", Content: invalidYAMLArtifactInternal},
+				{Path: "ctx/ARTIFACT.md", Content: ctxArtifactInternal},
+			},
+			want:        []walkParityPackage{{id: "ctx", resources: map[string]string{}, version: "1.0.0"}},
+			wantRefused: map[string]string{"bad": artifactReason("bad/ARTIFACT.md", invalidYAMLArtifactInternal)},
+		},
+		{
+			// The refused package still claims its directory under §4.2, so the
+			// SKILL.md below it is a bundled file rather than a plain skill.
+			name: "unparseable ARTIFACT.md above a SKILL.md",
+			tree: []testharness.WriteTreeOption{
+				{Path: "bad/ARTIFACT.md", Content: "no frontmatter\n"},
+				{Path: "bad/refs/SKILL.md", Content: plainSkillInternal},
+			},
+			wantRefused: map[string]string{"bad": "bad/ARTIFACT.md: manifest: missing YAML frontmatter"},
+		},
+		{
+			name: "skill ARTIFACT.md whose SKILL.md does not parse",
+			tree: []testharness.WriteTreeOption{
+				{Path: "both/ARTIFACT.md", Content: skillArtifactInternal},
+				{Path: "both/SKILL.md", Content: mappingDescriptionSkillInternal},
+			},
+			wantRefused: map[string]string{"both": skillReason("both/SKILL.md", mappingDescriptionSkillInternal)},
 		},
 		{
 			name: "agent ARTIFACT.md beside its root SKILL.md",
@@ -349,7 +458,7 @@ func TestWalkLayer_MatchesTheFilesystemWalk(t *testing.T) {
 			}
 			root := filepath.Join(dir, tc.layerRoot)
 			ingestRecs, ingestErr := walkLayer(os.DirFS(root), "L")
-			fsRecs, fsErr := filesystemWalk(t, root)
+			fsRecs, fsDrops, fsErr := filesystemWalk(t, root)
 			if len(tc.wantErr) > 0 {
 				assertWalkErrors(t, ingestErr, fsErr, tc.wantErr)
 				return
@@ -357,18 +466,52 @@ func TestWalkLayer_MatchesTheFilesystemWalk(t *testing.T) {
 			if ingestErr != nil || fsErr != nil {
 				t.Fatalf("walk errors: ingest %v, filesystem %v", ingestErr, fsErr)
 			}
-			assertWalkParity(t, tc.want, ingestRecs, fsRecs)
+			kept, refused := refuseInvalidArtifacts(ingestRecs)
+			assertRefusalParity(t, tc.wantRefused, refused, fsDrops)
+			assertWalkParity(t, tc.want, kept, fsRecs)
 		})
 	}
 }
 
-func filesystemWalk(t *testing.T, root string) ([]filesystem.ArtifactRecord, error) {
+// filesystemWalk walks root as a single-layer filesystem registry under the
+// default collision policy and returns the kept records and the drops the
+// walk reported.
+func filesystemWalk(t *testing.T, root string) ([]filesystem.ArtifactRecord, []layer.Drop, error) {
 	t.Helper()
 	reg, err := filesystem.Open(root)
 	if err != nil {
 		t.Fatalf("filesystem.Open: %v", err)
 	}
-	return reg.Walk(filesystem.WalkOptions{})
+	var drops []layer.Drop
+	recs, err := reg.Walk(filesystem.WalkOptions{OnDrop: func(d layer.Drop) { drops = append(drops, d) }})
+	return recs, drops, err
+}
+
+// assertRefusalParity checks that ingest's rejections and the filesystem
+// walk's drops each name exactly the packages in want, with
+// ingest.invalid_artifact, the wanted reason, and details that are exactly
+// {"constraint": "manifest_unparseable"}.
+//
+// Spec: §4.1, §13.11.3
+func assertRefusalParity(t *testing.T, want map[string]string, refused []RejectedArtifact, drops []layer.Drop) {
+	t.Helper()
+	if len(refused) != len(want) || len(drops) != len(want) {
+		t.Fatalf("refusals: ingest %+v, filesystem %+v, want %v", refused, drops, want)
+	}
+	wantDetails := map[string]any{"constraint": layer.ManifestUnparseableConstraint}
+	for i, r := range refused {
+		d := drops[i]
+		if want[r.ArtifactID] != r.Reason || r.ArtifactID != d.ArtifactID || r.Reason != d.Reason {
+			t.Errorf("refusal %d: ingest %s %q, filesystem %s %q, want reason %q",
+				i, r.ArtifactID, r.Reason, d.ArtifactID, d.Reason, want[r.ArtifactID])
+		}
+		if r.Code != layer.InvalidArtifactCode || d.Code != layer.InvalidArtifactCode {
+			t.Errorf("refusal %s codes: ingest %s, filesystem %s", r.ArtifactID, r.Code, d.Code)
+		}
+		if !reflect.DeepEqual(r.Details, wantDetails) || !reflect.DeepEqual(d.Details, wantDetails) {
+			t.Errorf("refusal %s details: ingest %v, filesystem %v, want %v", r.ArtifactID, r.Details, d.Details, wantDetails)
+		}
+	}
 }
 
 func assertWalkErrors(t *testing.T, ingestErr, fsErr error, substrings []string) {

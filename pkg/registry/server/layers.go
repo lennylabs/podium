@@ -2278,13 +2278,15 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 	}
 	// spec: §7.3.1 / §4.1 / §4.6 — surface the artifacts the snapshot dropped
 	// for reasons other than lint or immutability (sensitivity floor,
-	// cross-layer collision, the §4.6 no-inheritance rule's extends_removed,
+	// cross-layer collision, the §4.1 unparseable-manifest rule's
+	// manifest_unparseable, the §4.6 no-inheritance rule's extends_removed,
 	// the §4.1 removed-type rule's type_removed, the registry-assigned-version
 	// rule, quota). Without this a reingest that accepts nothing returns
 	// accepted:0 with no indication of why, which is indistinguishable from
 	// "the snapshot was empty." An entry carries details only when the
-	// rejecting rule defines them, as the extends_removed, type_removed, and
-	// auto_version_duplicate_content constraints are.
+	// rejecting rule defines them, as the manifest_unparseable,
+	// extends_removed, type_removed, and auto_version_duplicate_content
+	// constraints are.
 	rejected := make([]map[string]any, 0, len(res.Rejected))
 	for _, rj := range res.Rejected {
 		entry := map[string]any{

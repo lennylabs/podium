@@ -194,7 +194,7 @@ func (w *Weaviate) Query(ctx context.Context, tenantID string, vec []float32, to
 	if tenantID == "" || topK < 1 {
 		return nil, ErrInvalidArgument
 	}
-	if err := validateDim(vec, w.Dim); err != nil {
+	if err := validateQueryDim(vec, w.Dim); err != nil {
 		return nil, err
 	}
 	vecJSON, _ := json.Marshal(vec)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,14 +20,19 @@ import (
 // distinctive so a substring search of the reingest response finds any leak.
 const rcHiddenLayer = "core-private-xq7"
 
-// rcWrite writes one ARTIFACT.md under dir/id.
+// rcWrite writes one manifest under dir/id: ARTIFACT.md, or SKILL.md when id
+// ends in /SKILL.md, in which case the package is the directory above it.
 func rcWrite(t *testing.T, dir, id, src string) {
 	t.Helper()
+	file := "ARTIFACT.md"
+	if path.Base(id) == "SKILL.md" {
+		id, file = path.Dir(id), "SKILL.md"
+	}
 	p := filepath.Join(dir, filepath.FromSlash(id))
 	if err := os.MkdirAll(p, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", p, err)
 	}
-	if err := os.WriteFile(filepath.Join(p, "ARTIFACT.md"), []byte(src), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(p, file), []byte(src), 0o644); err != nil {
 		t.Fatalf("write %s: %v", id, err)
 	}
 }
@@ -253,6 +259,63 @@ func TestReingest_TypeRemovedDetails(t *testing.T) {
 	}
 	if err := json.Unmarshal(body, &counts); err != nil || counts.Accepted != 1 {
 		t.Errorf("accepted = %d (%v), want the sibling alone: %s", counts.Accepted, err, body)
+	}
+}
+
+// Spec: §4.1, §7.3.1 — POST /v1/layers/reingest refuses an artifact whose
+// SKILL.md or ARTIFACT.md frontmatter does not parse with
+// ingest.invalid_artifact, a reason that names the file and the parse error
+// and no layer, and details that are exactly
+// {"constraint":"manifest_unparseable"}. The rule runs before the §4.6
+// no-inheritance rule, so an ARTIFACT.md that declares extends: beside a
+// SKILL.md that does not parse reports manifest_unparseable. The cycle
+// answers 200 and accepts the valid sibling, and the refusal is reported among
+// the rejections rather than as a lint failure.
+func TestReingest_ManifestUnparseableDetails(t *testing.T) {
+	t.Parallel()
+	nested := "---\nname: nested\ndescription:\n  text: A mapping.\n---\n\nBody.\n"
+	extendsSkill := "---\ntype: skill\nversion: 1.0.0\ndescription: fixture skill\nsensitivity: low\nextends: shared/note\n---\n\n"
+	body, rejected := rcReingest(t, map[string]string{
+		"mine/nested/SKILL.md":  nested,
+		"mine/badyaml":          "---\ntype: agent\nweird: [unclosed\n---\n\nbody\n",
+		"mine/ordered":          extendsSkill,
+		"mine/ordered/SKILL.md": nested,
+		"mine/sibling":          rcArtifact("agent", "1.0.0", "", ""),
+	})
+	want := map[string]string{
+		"mine/nested":  "mine/nested/SKILL.md: manifest: invalid YAML frontmatter: yaml: unmarshal errors:",
+		"mine/badyaml": "mine/badyaml/ARTIFACT.md: manifest: invalid YAML frontmatter: ",
+		"mine/ordered": "mine/ordered/SKILL.md: manifest: invalid YAML frontmatter: yaml: unmarshal errors:",
+	}
+	details := rcDetails(t, body)
+	for id, prefix := range want {
+		got, ok := rejected[id]
+		if !ok {
+			t.Errorf("%s not rejected: %s", id, body)
+			continue
+		}
+		if got.Code != layer.InvalidArtifactCode || !strings.HasPrefix(got.Reason, prefix) {
+			t.Errorf("%s rejection = %+v, want %s with a reason starting %q", id, got, layer.InvalidArtifactCode, prefix)
+		}
+		if strings.Contains(got.Reason, "alice-personal") {
+			t.Errorf("%s reason %q names the layer", id, got.Reason)
+		}
+		if details[id] != `{"constraint":"manifest_unparseable"}` {
+			t.Errorf("%s details = %q, want exactly {\"constraint\":\"manifest_unparseable\"}", id, details[id])
+		}
+	}
+	if len(rejected) != len(want) {
+		t.Errorf("rejected = %+v, want exactly %d refusals", rejected, len(want))
+	}
+	var counts struct {
+		Accepted     int `json:"accepted"`
+		LintFailures int `json:"lint_failures"`
+	}
+	if err := json.Unmarshal(body, &counts); err != nil || counts.Accepted != 1 {
+		t.Errorf("accepted = %d (%v), want the sibling alone: %s", counts.Accepted, err, body)
+	}
+	if counts.LintFailures != 0 {
+		t.Errorf("lint_failures = %d, want 0: the refusals are not lint failures: %s", counts.LintFailures, body)
 	}
 }
 

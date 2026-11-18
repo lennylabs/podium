@@ -35,9 +35,9 @@ func (c Collision) Reason() string {
 }
 
 // Drop is one artifact a filesystem-source composition dropped, with the
-// §6.10 code and reason it reports. A collision, a §4.6 no-inheritance
-// refusal, and a §4.1 removed-type refusal all report through it, so a caller
-// prints every drop the same way.
+// §6.10 code and reason it reports. A collision, a §4.1 unparseable-manifest
+// refusal, a §4.6 no-inheritance refusal, and a §4.1 removed-type refusal all
+// report through it, so a caller prints every drop the same way.
 //
 // Spec: §4.1, §4.6, §13.11.3
 type Drop struct {
@@ -51,6 +51,21 @@ type Drop struct {
 	// the value a reingest response and `podium lint --json` report as
 	// `details`. It is nil when the rule defines none, as for a collision.
 	Details map[string]any
+	// PreviousOutputKept reports that a filesystem-source sync left the files
+	// and lock entry an earlier run wrote for the artifact in place, which it
+	// does for a drop under the §4.1 unparseable-manifest rule when the
+	// target's lock records the artifact. The composition never sets it; the
+	// sync sets it after reading the target's lock, and the CLI adds it to the
+	// artifact's rejected line.
+	PreviousOutputKept bool
+}
+
+// Unparseable reports whether d is a drop under the §4.1 unparseable-manifest
+// rule, the one drop whose previous sync output a filesystem-source sync keeps.
+//
+// Spec: §4.1, §13.11.3
+func (d Drop) Unparseable() bool {
+	return d.Code == InvalidArtifactCode && d.Details["constraint"] == ManifestUnparseableConstraint
 }
 
 // Drop returns the drop record for c: its artifact ID, CollisionCode, and

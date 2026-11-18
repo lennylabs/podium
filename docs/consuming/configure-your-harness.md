@@ -175,6 +175,21 @@ reference describes. Against a filesystem registry, it watches the registry path
 and the workspace overlay with `fsnotify`, and it polls both trees every 500 ms
 when `fsnotify` cannot start.
 
+A save that leaves an `ARTIFACT.md` or `SKILL.md` half-edited makes its
+frontmatter unparseable. A filesystem-source sync drops that artifact, and by
+default it keeps the files and lock entry the prior run wrote for it, so step 4
+does not delete them. It keeps them only while they still belong in the target:
+the prior run used the same harness, the artifact passes the run's scope and
+toggles, and no other artifact of the run takes them over. An artifact takes
+them over when it writes a file the kept output holds whole, or a
+configuration-merge entry under the same key, such as an `mcpServers` server of
+the same name. Another artifact's entry in a shared file such as `.mcp.json`
+does not end the keep.
+`--on-unparseable remove`, `PODIUM_SYNC_ON_UNPARSEABLE`,
+or `defaults.on_unparseable` in `sync.yaml` deletes them instead.
+[Previous output of an unparseable artifact](../reference/cli#previous-output-of-an-unparseable-artifact)
+in the CLI reference gives the precedence and the exit status.
+
 ---
 
 ## Listing budget
@@ -230,18 +245,21 @@ resolves by the usual precedence. A key that no scope sets takes its default:
 |:--|:--|:--|
 | `max_chars` | Listing budget, in code points. | `8000` |
 | `entry_overhead_chars` | Code points counted per entry for the harness's separators and formatting. | `5` |
-| `max_entry_chars` | Description length, in code points, above which an entry is reported. | unset (no per-entry report) |
+| `max_entry_chars` | Description length, in code points, above which an entry is reported. | `1536` for `claude-code`; unset (no per-entry report) for every other adapter |
 | `types` | Artifact types that count as entries. | `[skill]` |
 | `check` | `off`, `warning`, or `error`. | `warning` |
 
-The defaults are the same for every adapter. The `none` adapter feeds no harness
-listing and gets no estimate.
+The defaults are the same for every adapter except `max_entry_chars`. The
+`claude-code` default for `max_entry_chars` is the length at which Claude Code
+shortens an entry's text in its listing, so a description above 1536 code points
+draws a report by default. The `none` adapter feeds no harness listing and gets
+no estimate.
 
 ```yaml
 # Harness listing budgets, keyed by adapter value.
 listing_budgets:
   claude-code:
-    max_chars: 12000
+    max_chars: 40000
     max_entry_chars: 1024
     check: error # off | warning | error
 ```
@@ -273,6 +291,10 @@ adapter. The following harnesses illustrate the arithmetic:
   model sets `max_chars: 40000` for `claude-code`.
 - Codex allots about 2% of the context window, and 8,000 characters when the
   window is unknown, which is also the default.
+
+The `max_chars` default corresponds to the Claude Code listing for a model with a
+200,000-token window. The budgets of the other harnesses are estimates, so set
+`max_chars` for each of them from that harness's documentation.
 
 A harness's budget can change between versions and with the user's settings, so
 re-check the harness documentation when the harness or the model changes.

@@ -22,7 +22,7 @@ func TestWriteTarget_ComparesBytesOnDisk(t *testing.T) {
 		t.Parallel()
 		target := t.TempDir()
 		writeFile(t, filepath.Join(target, "a.md"), "alpha\n")
-		changed, err := writeTarget(target, files, current, map[string]string{"a.md": ""})
+		changed, err := writeTarget(target, files, current, map[string]string{"a.md": ""}, keptOutput{})
 		if err != nil || changed {
 			t.Fatalf("writeTarget = (%v, %v), want (false, nil)", changed, err)
 		}
@@ -32,7 +32,7 @@ func TestWriteTarget_ComparesBytesOnDisk(t *testing.T) {
 		t.Parallel()
 		target := t.TempDir()
 		writeFile(t, filepath.Join(target, "a.md"), "edited by hand\n")
-		changed, err := writeTarget(target, files, current, map[string]string{"a.md": ""})
+		changed, err := writeTarget(target, files, current, map[string]string{"a.md": ""}, keptOutput{})
 		if err != nil || !changed {
 			t.Fatalf("writeTarget = (%v, %v), want (true, nil)", changed, err)
 		}
@@ -43,7 +43,7 @@ func TestWriteTarget_ComparesBytesOnDisk(t *testing.T) {
 		target := t.TempDir()
 		writeFile(t, filepath.Join(target, "a.md"), "alpha\n")
 		writeFile(t, filepath.Join(target, "old.md"), "stale\n")
-		changed, err := writeTarget(target, files, current, map[string]string{"a.md": "", "old.md": ""})
+		changed, err := writeTarget(target, files, current, map[string]string{"a.md": "", "old.md": ""}, keptOutput{})
 		if err != nil || !changed {
 			t.Fatalf("writeTarget = (%v, %v), want (true, nil)", changed, err)
 		}
@@ -56,7 +56,7 @@ func TestWriteTarget_ComparesBytesOnDisk(t *testing.T) {
 		t.Parallel()
 		target := t.TempDir()
 		writeFile(t, filepath.Join(target, "a.md"), "alpha\n")
-		changed, err := writeTarget(target, files, current, map[string]string{"a.md": "", "gone.md": ""})
+		changed, err := writeTarget(target, files, current, map[string]string{"a.md": "", "gone.md": ""}, keptOutput{})
 		if err != nil || changed {
 			t.Fatalf("writeTarget = (%v, %v), want (false, nil)", changed, err)
 		}
@@ -69,7 +69,7 @@ func TestWriteTarget_ComparesBytesOnDisk(t *testing.T) {
 		// A non-empty directory at a stale path survives the best-effort
 		// cleanup and cannot be read as a file.
 		writeFile(t, filepath.Join(target, "old.md", "keep"), "operator\n")
-		changed, err := writeTarget(target, files, current, map[string]string{"a.md": "", "old.md": ""})
+		changed, err := writeTarget(target, files, current, map[string]string{"a.md": "", "old.md": ""}, keptOutput{})
 		if err != nil || !changed {
 			t.Fatalf("writeTarget = (%v, %v), want (true, nil)", changed, err)
 		}
@@ -81,7 +81,7 @@ func TestWriteTarget_ComparesBytesOnDisk(t *testing.T) {
 		// A non-empty directory at a standalone path makes materialize.Write
 		// fail; the before-read only marks the path unobservable.
 		writeFile(t, filepath.Join(target, "a.md", "keep"), "operator\n")
-		_, err := writeTarget(target, files, current, nil)
+		_, err := writeTarget(target, files, current, nil, keptOutput{})
 		if err == nil {
 			t.Fatal("writeTarget returned no error over a directory at a materialized path")
 		}
@@ -101,7 +101,7 @@ func TestWriteTarget_ComparesBytesOnDisk(t *testing.T) {
 		if err := os.Chmod(path, 0); err != nil {
 			t.Fatalf("Chmod: %v", err)
 		}
-		changed, err := writeTarget(target, files, current, map[string]string{"a.md": ""})
+		changed, err := writeTarget(target, files, current, map[string]string{"a.md": ""}, keptOutput{})
 		if err != nil || !changed {
 			t.Fatalf("writeTarget = (%v, %v), want (true, nil)", changed, err)
 		}

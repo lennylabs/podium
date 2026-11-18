@@ -85,6 +85,10 @@ func buildReingestRunner(
 			Embedder:        collocatedVec.Embedder,
 			VectorPut:       collocatedVec.VectorPut,
 			DomainVectorPut: collocatedVec.DomainVectorPut,
+			// §7.3.1 semantic overlap, computed after the cycle's writes on a
+			// collocated backend. Nil when the check is off or the backend is
+			// managed, where the outbox write computes it.
+			SemanticOverlap: collocatedVec.SemanticOverlap,
 		}
 		if auditSink != nil {
 			opts.AuditEmit = ingestAuditEmitter(ctx, auditSink, scrubber, caller, lc.TenantID)

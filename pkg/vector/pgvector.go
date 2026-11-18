@@ -85,6 +85,10 @@ func (p *PgVector) applySchema() error {
 // ID returns "pgvector".
 func (*PgVector) ID() string { return "pgvector" }
 
+// MaxQueryRows returns 0: a query is an exact ORDER BY over the tenant's rows
+// with no approximate index, so its LIMIT returns any topK.
+func (*PgVector) MaxQueryRows() int { return 0 }
+
 // Dimensions returns the configured dimension.
 func (p *PgVector) Dimensions() int { return p.dim }
 

@@ -49,8 +49,9 @@ func hasAnySeverity(diags []Diagnostic, sev Severity) bool {
 }
 
 // spec: §4.3.4 — "SKILL.md does not contain Podium-only fields (`type`,
-// `version`, `when_to_use`, `tags`, etc.); if present, error." ParseSkill
-// drops the unknown keys, so without the rule the violation is invisible.
+// `when_to_use`, `tags`, etc.) at the top level; if present, error."
+// ParseSkill drops the unknown keys, so without the rule the violation is
+// invisible.
 func TestLint_SkillPodiumOnlyFieldInSkillMD(t *testing.T) {
 	t.Parallel()
 	reg, records := openFixture(t, skillTree(
@@ -246,7 +247,7 @@ func TestLint_SkillVersionIgnoredMetadataBesideArtifactVersion(t *testing.T) {
 }
 
 // Spec: §4.3.4 — "A skill that declares no usable version has its version
-// assigned (warning that names any ignored `metadata.version` value and the
+// assigned (info that names any ignored `metadata.version` value and the
 // fix)."
 func TestLint_SkillVersionAssignedNamesIgnoredValue(t *testing.T) {
 	t.Parallel()
@@ -261,8 +262,8 @@ func TestLint_SkillVersionAssignedNamesIgnoredValue(t *testing.T) {
 		if d.Code != "lint.skill_version_assigned" {
 			continue
 		}
-		if d.Severity != SeverityWarning {
-			t.Errorf("severity = %s, want warning", d.Severity)
+		if d.Severity != SeverityInfo {
+			t.Errorf("severity = %s, want info", d.Severity)
 		}
 		for _, want := range []string{`metadata.version "1.0" is not major.minor.patch and is ignored`, "0.0.0-auto.<N>", "Set metadata.version in SKILL.md"} {
 			if !strings.Contains(d.Message, want) {
@@ -275,8 +276,9 @@ func TestLint_SkillVersionAssignedNamesIgnoredValue(t *testing.T) {
 	}
 }
 
-// Spec: §4.3.4 — a plain skill with no metadata.version warns without the
-// ignored-value prefix.
+// Spec: §4.3.4 — a plain skill with no metadata.version draws the info
+// diagnostic without the ignored-value prefix, and nothing at warning or
+// error severity, so it passes `podium lint --fail-on warning` (§7.3.1).
 func TestLint_SkillVersionAssignedWithoutMetadata(t *testing.T) {
 	t.Parallel()
 	reg, records := openFixture(t, plainSkillTree("name: hello\ndescription: Greet the user.\n")...)
@@ -288,6 +290,13 @@ func TestLint_SkillVersionAssignedWithoutMetadata(t *testing.T) {
 		if d.Code == "lint.skill_version_assigned" && strings.Contains(d.Message, "is ignored") {
 			t.Errorf("no metadata.version was set, so the message must not name an ignored value: %q", d.Message)
 		}
+	}
+	want := []string{"no usable version declared; the registry assigns 0.0.0-auto.<N>. Set metadata.version in SKILL.md to choose one"}
+	if got := messagesFor(diags, "lint.skill_version_assigned", SeverityInfo); !slices.Equal(got, want) {
+		t.Errorf("info messages = %q, want %q", got, want)
+	}
+	if hasAnySeverity(diags, SeverityWarning) || hasAnySeverity(diags, SeverityError) {
+		t.Errorf("a plain skill with no version must draw no warning or error: %v", diags)
 	}
 }
 
@@ -365,7 +374,8 @@ func TestLint_SkillSynthesizedDocumentLintsClean(t *testing.T) {
 // Spec: §4.3.4 — "The diagnostic recommends `metadata.version` for a
 // version, the `metadata` key of the same name for a field that **Podium
 // fields in `metadata`** lists, and the `ARTIFACT.md` overlay for every other
-// field."
+// field." A top-level version is a warning, and every other top-level
+// Podium-only field, tags included, stays an error.
 func TestLint_SkillPodiumOnlyVersionRecommendsMetadataVersion(t *testing.T) {
 	t.Parallel()
 	reg, records := openFixture(t, skillTree(
@@ -373,23 +383,45 @@ func TestLint_SkillPodiumOnlyVersionRecommendsMetadataVersion(t *testing.T) {
 		"name: hello\ndescription: Greet the user.\nversion: 1.0.0\ntags: [demo]\n",
 	)...)
 	diags := (&Linter{}).Lint(context.Background(), reg, records)
-	var sawVersion, sawTags bool
-	for _, d := range diags {
-		if d.Code != "lint.skill_podium_only_field" || d.Severity != SeverityError {
-			continue
-		}
-		switch {
-		case strings.Contains(d.Message, `"version"`):
-			sawVersion = strings.Contains(d.Message, "metadata.version")
-		case strings.Contains(d.Message, `"tags"`):
-			sawTags = strings.Contains(d.Message, "metadata.tags")
-		}
+	wantWarn := []string{`SKILL.md contains Podium-only field "version", which Podium ignores; set metadata.version in SKILL.md instead`}
+	if got := messagesFor(diags, "lint.skill_podium_only_field", SeverityWarning); !slices.Equal(got, wantWarn) {
+		t.Errorf("warnings = %q, want %q", got, wantWarn)
 	}
-	if !sawVersion {
-		t.Errorf("expected the version diagnostic to recommend metadata.version: %v", diags)
+	wantErr := []string{`SKILL.md contains Podium-only field "tags" at the top level; set metadata.tags in SKILL.md or move it to ARTIFACT.md`}
+	if got := messagesFor(diags, "lint.skill_podium_only_field", SeverityError); !slices.Equal(got, wantErr) {
+		t.Errorf("errors = %q, want %q", got, wantErr)
 	}
-	if !sawTags {
-		t.Errorf("expected the tags diagnostic to recommend metadata.tags: %v", diags)
+}
+
+// Spec: §4.3.4 — a top-level version in SKILL.md is a warning, so a skill
+// whose only Podium-only field is a top-level version draws no error, for a
+// plain skill and for one with an ARTIFACT.md overlay. Podium ignores the
+// value, so a plain skill without metadata.version still has its version
+// assigned.
+func TestLint_SkillTopLevelVersionIsWarningOnly(t *testing.T) {
+	t.Parallel()
+	trees := map[string][]testharness.WriteTreeOption{
+		"plain":            plainSkillTree("name: hello\ndescription: Greet the user.\nversion: 2.0.0\n"),
+		"with ARTIFACT.md": skillTree("type: skill\nversion: 1.0.0\n", "name: hello\ndescription: Greet the user.\nversion: 2.0.0\n"),
+	}
+	for name, tree := range trees {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			reg, records := openFixture(t, tree...)
+			diags := (&Linter{}).Lint(context.Background(), reg, records)
+			if n := len(messagesFor(diags, "lint.skill_podium_only_field", SeverityWarning)); n != 1 {
+				t.Errorf("want one lint.skill_podium_only_field warning, got %d: %v", n, diags)
+			}
+			if hasAnySeverity(diags, SeverityError) {
+				t.Errorf("a top-level version must draw no error: %v", diags)
+			}
+			if name == "plain" && !hasSeverity(diags, "lint.skill_version_assigned", SeverityInfo) {
+				t.Errorf("the ignored top-level version leaves the version assigned: %v", diags)
+			}
+			if name != "plain" && records[0].Artifact.Version != "1.0.0" {
+				t.Errorf("version = %q, want the ARTIFACT.md value 1.0.0", records[0].Artifact.Version)
+			}
+		})
 	}
 }
 
@@ -483,6 +515,79 @@ func TestLint_SkillMetadataFieldIgnoredWarns(t *testing.T) {
 				t.Errorf("ignored value reached the artifact: sensitivity %q", records[0].Artifact.Sensitivity)
 			}
 		})
+	}
+}
+
+// nestedMetadataSkillFM is a SKILL.md frontmatter that nests a mapping, a
+// flow sequence, and a block sequence under metadata keys: two keys Podium
+// does not read, a key it reads, and version.
+const nestedMetadataSkillFM = "name: hello\ndescription: Greet the user.\nmetadata:\n" +
+	"  requires:\n    bins: [\"lark-cli\"]\n" +
+	"  cliHelp: \"lark-cli docs --help\"\n" +
+	"  tags: [a, b]\n" +
+	"  credits:\n    - alice\n" +
+	"  version:\n    major: 1\n"
+
+// Spec: §4.3.4 — "A `SKILL.md` `metadata` value that is a sequence or a
+// mapping under a key that is neither `version` nor a key **Podium fields in
+// `metadata`** lists is kept and not read (warning `lint.skill_metadata_nonstring`
+// that names the key and says the Agent Skills standard defines `metadata`
+// values as strings). A sequence or a mapping under `version` is ignored, and
+// the skill declares no usable version." A sequence under tags draws the
+// encoding warning instead, and no case errors. The rule honors no
+// lint_suppress entry, because §4.3.4 grants the list only to the skills-ref
+// check and the catalog advisories. It fails against a rule that reports the
+// read keys or version, that errors, or that a lint_suppress entry silences.
+func TestLint_SkillMetadataNonStringWarns(t *testing.T) {
+	t.Parallel()
+	trees := map[string][]testharness.WriteTreeOption{
+		"plain": plainSkillTree(nestedMetadataSkillFM),
+		"suppressed": skillTree(
+			"type: skill\nlint_suppress:\n  - lint.skill_metadata_nonstring\n  - lint.skill_metadata_field_ignored\n",
+			nestedMetadataSkillFM,
+		),
+	}
+	for name, tree := range trees {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			reg, records := openFixture(t, tree...)
+			diags := (&Linter{}).Lint(context.Background(), reg, records)
+			const standard = "Podium keeps it unchanged and does not read it, but the Agent Skills standard defines metadata values as strings"
+			// Linter.Lint sorts diagnostics by message within a code.
+			wantNonString := []string{
+				"metadata.credits is a sequence; " + standard,
+				"metadata.requires is a mapping; " + standard,
+			}
+			if got := messagesFor(diags, "lint.skill_metadata_nonstring", SeverityWarning); !slices.Equal(got, wantNonString) {
+				t.Errorf("lint.skill_metadata_nonstring = %q, want %q", got, wantNonString)
+			}
+			wantIgnored := []string{"metadata.tags is a sequence ([a, b]) and is ignored: the value must be comma-separated, with no empty element and no line break"}
+			if got := messagesFor(diags, "lint.skill_metadata_field_ignored", SeverityWarning); !slices.Equal(got, wantIgnored) {
+				t.Errorf("lint.skill_metadata_field_ignored = %q, want %q", got, wantIgnored)
+			}
+			if hasAnySeverity(diags, SeverityError) {
+				t.Errorf("nested metadata must not error: %v", diags)
+			}
+			if records[0].Artifact.Tags != nil {
+				t.Errorf("a nested tags value reached the artifact: %q", records[0].Artifact.Tags)
+			}
+		})
+	}
+}
+
+// Spec: §4.3.4 — a mapping under metadata.version declares no usable version,
+// so the skill's version is assigned and the info diagnostic names the
+// ignored mapping. It fails against a walker that reads a nested version.
+func TestLint_SkillVersionAssignedNamesNestedVersion(t *testing.T) {
+	t.Parallel()
+	reg, records := openFixture(t, plainSkillTree(nestedMetadataSkillFM)...)
+	got := messagesFor((&Linter{}).Lint(context.Background(), reg, records), "lint.skill_version_assigned", SeverityInfo)
+	want := "metadata.version is a mapping ({major: 1}), not a string, and is ignored; no usable version declared"
+	if len(got) != 1 || !strings.HasPrefix(got[0], want) {
+		t.Errorf("lint.skill_version_assigned = %q, want one starting %q", got, want)
+	}
+	if !records[0].VersionAssigned {
+		t.Error("VersionAssigned = false, want the version assigned")
 	}
 }
 

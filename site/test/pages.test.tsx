@@ -466,4 +466,41 @@ describe("Landing", () => {
   it("carries the copy hook the client script binds to the install command", () => {
     expect(markup(<Landing config={CONFIG} />)).toContain("data-copy");
   });
+
+  it("draws one diagram per feature card, in the design's order", () => {
+    const html = markup(<Landing config={CONFIG} />);
+    const grid = html.slice(html.indexOf('class="l-grid"'), html.indexOf('class="l-deploy"'));
+    const titles = [...grid.matchAll(/<h3 class="l-card-title">([^<]*)<\/h3>/g)].map(
+      (match) => match[1],
+    );
+
+    expect(titles).toEqual([
+      "Domains and subdomains",
+      "Materialization and discovery",
+      "Layered composition",
+      "Security and access control",
+      "Usage metrics",
+      "Overlap detection",
+    ]);
+    expect(grid.match(/<svg class="l-dg"/g)).toHaveLength(titles.length);
+  });
+
+  it("gives the landing artwork no ids or masks, so no id collides on the page", () => {
+    const html = markup(<Landing config={CONFIG} />);
+    const svgs = html.match(/<svg[\s\S]*?<\/svg>/g) ?? [];
+
+    expect(svgs.length).toBeGreaterThan(0);
+    for (const svg of svgs) {
+      expect(svg).not.toMatch(/\sid="|<mask/);
+    }
+  });
+
+  it("lists overlap detection among the server-side integrations", () => {
+    const html = markup(<Landing config={CONFIG} />);
+    const table = html.slice(html.indexOf('class="l-int-table"'));
+
+    expect(table).toContain("Overlap detection");
+    expect(table).toContain("Word-based checks");
+    expect(table).toContain("Semantic check");
+  });
 });

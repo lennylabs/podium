@@ -86,11 +86,14 @@ func IsSkillMetadataField(key string) bool {
 
 // SkillMetadataIssue describes a metadata value that does not follow its
 // field's encoding. Encoding is the human-readable encoding a lint warning
-// prints beside the key and the value.
+// prints beside the key and the value. Kind is empty for a string value and
+// names the kind of a sequence or a mapping, whose Value is its single-line
+// YAML flow encoding.
 type SkillMetadataIssue struct {
 	Key      string
 	Value    string
 	Encoding string
+	Kind     string
 }
 
 // SkillMetadataFields is the decoding of a SKILL.md's metadata-eligible keys.
@@ -105,7 +108,9 @@ type SkillMetadataFields struct {
 
 // DecodeSkillMetadata decodes the metadata-eligible keys of s by the §4.3.4
 // encodings. An empty value, which a YAML null decodes to, is absent and
-// raises no issue. A nil s returns empty Values and an empty, non-nil Decoded.
+// raises no issue. A sequence or a mapping under one of these keys does not
+// follow its encoding, so it is ignored with an issue. A nil s returns empty
+// Values and an empty, non-nil Decoded.
 //
 // Spec: §4.3.4
 func DecodeSkillMetadata(s *Skill) SkillMetadataFields {
@@ -114,6 +119,11 @@ func DecodeSkillMetadata(s *Skill) SkillMetadataFields {
 		return out
 	}
 	for _, key := range skillMetadataFields {
+		if nv, ok := s.NonStringMetadataValue(key); ok {
+			c := skillMetadataCodecs[key]
+			out.Issues = append(out.Issues, SkillMetadataIssue{Key: key, Value: nv.Value, Encoding: c.encoding, Kind: nv.Kind})
+			continue
+		}
 		v := s.Metadata[key]
 		if v == "" {
 			continue
@@ -124,6 +134,39 @@ func DecodeSkillMetadata(s *Skill) SkillMetadataFields {
 			continue
 		}
 		out.Decoded[key] = true
+	}
+	return out
+}
+
+// NonStringMetadataValue returns the sequence or mapping s holds under the
+// metadata key, if any. A nil s holds none.
+func (s *Skill) NonStringMetadataValue(key string) (NonStringMetadata, bool) {
+	if s == nil {
+		return NonStringMetadata{}, false
+	}
+	for _, nv := range s.NonStringMetadata {
+		if nv.Key == key {
+			return nv, true
+		}
+	}
+	return NonStringMetadata{}, false
+}
+
+// UnreadNonStringMetadata returns the entries of s.NonStringMetadata under a
+// key Podium does not read: neither version nor a key IsSkillMetadataField
+// names. Their bytes stay in every copy of SKILL.md, and lint reports them.
+// A nil s holds none.
+//
+// Spec: §4.3.4
+func (s *Skill) UnreadNonStringMetadata() []NonStringMetadata {
+	if s == nil {
+		return nil
+	}
+	var out []NonStringMetadata
+	for _, nv := range s.NonStringMetadata {
+		if nv.Key != "version" && !IsSkillMetadataField(nv.Key) {
+			out = append(out, nv)
+		}
 	}
 	return out
 }

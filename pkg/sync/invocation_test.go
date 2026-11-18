@@ -43,7 +43,7 @@ func assertTwoListingEntries(t *testing.T, harness string, res *Result) {
 	}
 	cost := 0
 	for _, name := range []string{"model", "upper"} {
-		cost += len(name) + len("The "+name+" skill describes itself at length.") + DefaultListingBudget().EntryOverheadChars
+		cost += len(name) + len("The "+name+" skill describes itself at length.") + DefaultListingBudget("claude-code").EntryOverheadChars
 	}
 	var oversized []string
 	for _, o := range rep.Oversized {

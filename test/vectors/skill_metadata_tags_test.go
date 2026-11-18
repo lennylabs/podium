@@ -122,11 +122,21 @@ func readableTagsForms() []tagsForm {
 			strings.ReplaceAll(withTags("  tags: a, b\n"), "\n", "\r\n"), "a", "b"),
 		readableForm("merge key after tags", withTags("  tags: a, b\n  <<: {tags: z}\n"), "a", "b"),
 		readableForm("document end after tags block", withTags("  tags: a, b\n...\n"), "a", "b"),
-		// Go refuses each of these, so go_tags is null.
-		readableForm("go refuses sibling sequence after tags", withTags("  tags: a, b\n  owner: [a]\n"), "a", "b"),
-		readableForm("go refuses sibling mapping after tags",
+		// A sequence or a mapping under another metadata key parses and is
+		// not read (§4.3.4), so Go resolves the tags beside it. A nested
+		// version key does not read as metadata.version.
+		readableForm("nested sibling sequence after tags", withTags("  tags: a, b\n  owner: [a]\n"), "a", "b"),
+		readableForm("nested sibling mapping after tags",
 			withTags("  tags: a, b\n  build:\n    version: 9.9.9\n"), "a", "b"),
+		readableForm("nested block mapping before tags",
+			withTags("  requires:\n    bins: lark-cli\n  tags: a, b\n"), "a", "b"),
+		readableForm("nested block sequence before tags",
+			withTags("  credits:\n    - alice\n    - bob\n  tags: a, b\n"), "a", "b"),
+		// Go refuses this one, a repeated key, so go_tags is null.
 		readableForm("go refuses escaped second tags key", withTags("  tags: a, b\n  \"ta\\x67s\": c\n"), "a", "b"),
+		readableForm("one-space child indent", withTags(" tags: a, b\n"), "a", "b"),
+		readableForm("four-space child indent", withTags("    owner: alice\n    tags: a, b\n"), "a", "b"),
+		readableForm("column-0 comment before tags", withTags("  owner: alice\n# team info\n  tags: a, b\n"), "a", "b"),
 	}
 }
 
@@ -166,11 +176,20 @@ func unreadableTagsForms() []tagsForm {
 		unreadableForm("tab after colon", withTags("  tags:\ta, b\n")),
 		unreadableForm("tags nested below another child", withTags("  build:\n    tags: a, b\n")),
 		unreadableForm("flow-form metadata", skillDoc(skillHead+"metadata: {tags: \"a, b\"}\n")),
+		unreadableForm("flow-form metadata with a nested mapping",
+			skillDoc(skillHead+"metadata: {\"openclaw\": {\"requires\": {\"bins\": [\"uv\"]}}, \"tags\": \"a, b\"}\n")),
+		unreadableForm("block sequence under tags", withTags("  tags:\n    - a\n    - b\n")),
+		unreadableForm("block mapping under tags", withTags("  tags:\n    a: b\n")),
 		unreadableForm("metadata line with comment", skillDoc(skillHead+"metadata: # info\n  tags: a, b\n")),
 		unreadableForm("top-level tags key", skillDoc(skillHead+"tags: a, b\n")),
 		unreadableForm("alias key after tags", withTags(owner+"  *k : z\n")),
 		unreadableForm("explicit alias key after tags", withTags(owner+"  ? *k\n  : z\n")),
 		unreadableForm("explicit key with deeper alias after tags", withTags(owner+"  ?\n    *k\n  : z\n")),
+		// yaml.v3 lets a tagged key that decodes to "tags" replace the earlier
+		// value, so Go resolves [z] and the overlay reports no tag.
+		unreadableForm("tagged key after tags", withTags("  tags: a, b\n  !!binary dGFncw==: z\n")),
+		unreadableForm("explicit tagged key after tags", withTags("  tags: a, b\n  ? !!binary dGFncw==\n  : z\n")),
+		unreadableForm("column-0 comment after tags", withTags("  tags: a, b\n# team info\n  owner: alice\n")),
 	}
 }
 
@@ -202,6 +221,9 @@ func frontmatterTagsForms() []tagsForm {
 			skillDoc("name: greet\ndescription: foo\u2028  bar\n"+tags)),
 		unreadableForm("lone cr in description", skillDoc("name: greet\ndescription: foo\r  bar\n"+tags)),
 		unreadableForm("lone cr between keys", skillDoc("name: greet\rx: y\n"+tags)),
+		unreadableForm("next line in earlier line", skillDoc("name: greet\ndescription: foo\u0085  bar\n"+tags)),
+		unreadableForm("paragraph separator in earlier line", skillDoc("name: greet\ndescription: foo\u2029  bar\n"+tags)),
+		unreadableForm("byte order mark in earlier line", skillDoc("name: greet\ndescription: foo\ufeffbar\n"+tags)),
 	}
 }
 

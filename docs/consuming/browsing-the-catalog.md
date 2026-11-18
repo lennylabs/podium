@@ -323,3 +323,7 @@ For authoring guidance, see [Your first skill](../authoring/your-first-skill),
 [Your first command](../authoring/your-first-command) for a user-invoked skill,
 [Your first agent](../authoring/your-first-agent), and
 [Domains](../authoring/domains).
+
+Two artifacts with overlapping descriptions compete for the same prompts.
+[Finding overlapping artifacts](../managing/overlap) covers the catalog overlap
+report that lists them.

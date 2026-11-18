@@ -6,7 +6,7 @@ description: "Every podium subcommand with its usage, flags, defaults, and exit 
 
 # CLI
 
-This page lists every `podium` subcommand, grouped by purpose, with its usage, flags, defaults, and exit behavior. It is a lookup reference. For task-oriented guides, see [Quickstart](../getting-started/quickstart), [Authoring](../authoring/), [Consuming](../consuming/), and [Deployment](../deployment/).
+This page lists every `podium` subcommand, grouped by purpose, with its usage, flags, defaults, and exit behavior. It is a lookup reference. For task-oriented guides, see [Quickstart](../getting-started/quickstart), [Authoring](../authoring/), [Consuming](../consuming/), [Managing the catalog](../managing/), and [Deployment](../deployment/).
 
 The `podium` CLI is a single binary.
 
@@ -49,6 +49,7 @@ Subcommands:
   erase                GDPR right-to-erasure: purge a user's layers and redact their audit identity.
   retention            Apply audit retention policies to the local audit log.
   reembed              Re-run vector embeddings against the configured registry.
+  rebuild-overlap      Recompute the semantic overlap records of every served artifact.
   runtime              Manage trusted runtime signing keys.
   tenant               Manage tenants (operator role).
   migrate-to-standard  Pump standalone state into a standard deployment.
@@ -110,7 +111,7 @@ podium config show [--explain <key>] [--server] [--json]
 | `--server` | Print the resolved server configuration instead of the client `sync.yaml`. Each value shows its source: an environment variable, `registry.yaml`, or the default. API keys and DSNs are redacted. |
 | `--json` | Emit the output as JSON. |
 
-The command does not display `listing_budgets`. A `listing_budgets` value of the wrong YAML type fails the `sync.yaml` load in `podium sync` (see [Listing budget](#listing-budget)), and `podium config show` still displays the file's other keys and exits 0.
+The command displays each `defaults` key that a scope sets, in the order `registry`, `harness`, `target`, `profile`, `verify_signatures`, and `on_unparseable`. It does not display `listing_budgets`. A `listing_budgets` value of the wrong YAML type fails the `sync.yaml` load in `podium sync` (see [Listing budget](#listing-budget)), and `podium config show` still displays the file's other keys and exits 0.
 
 ### `podium login` / `podium logout`
 
@@ -235,7 +236,7 @@ The command walks every artifact of every layer under the root. To lint a single
 - The `DOMAIN.md` body-size warning, which registry ingest does not apply. The command does not run the warning on a `DOMAIN.md` `discovery:` block, which applies when the registry's `discovery.allow_per_domain_overrides` setting is false, because the command does not read that setting.
 - The catalog advisories: `lint.thin_description`, `lint.colliding_descriptions`, and `lint.near_duplicate_content`. Each is a warning. Registry ingest runs them over the layer it ingests and reports them without blocking the ingest, and the command runs them over every artifact it walks. [Skill lint checks](../authoring/frontmatter-reference#skill-lint-checks) describes each one and the `lint_suppress` field that silences it.
 
-The command refuses each artifact whose `ARTIFACT.md` declares `extends:` or a removed type (`command` or `context`). Without `--json`, it prints a `rejected: <id> (ingest.invalid_artifact): <reason>` line on standard error for each one. With `--json`, the artifact appears in `rejected` with `details.constraint: "extends_removed"` for an `extends:` refusal and `details.constraint: "type_removed"` for a removed type. An `ARTIFACT.md` that declares both reports `extends_removed`. In both cases the command lints the remaining artifacts and exits 1. `PODIUM_LINT_*` environment variables set the size and similarity thresholds, as [Lint](configuration#lint) in the configuration reference lists.
+The command refuses each artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter does not parse, and each artifact whose `ARTIFACT.md` declares `extends:` or a removed type (`command` or `context`), before it runs any lint rule. Without `--json`, the command prints a `rejected: <id> (ingest.invalid_artifact): <reason>` line on standard error for each refused artifact. With `--json`, the artifact appears in `rejected` with `details.constraint: "manifest_unparseable"` for frontmatter that does not parse, `details.constraint: "extends_removed"` for an `extends:` refusal, and `details.constraint: "type_removed"` for a removed type. The checks run in that order, so an `ARTIFACT.md` that declares both `extends:` and a removed type reports `extends_removed`. In every case the command lints the remaining artifacts and exits 1. `PODIUM_LINT_*` environment variables set the size and similarity thresholds, as [Lint](configuration#lint) in the configuration reference lists.
 
 Without `--json`, each diagnostic prints on standard output as `[<severity>] <artifact-id>: <message> (<rule-code>)`, and each refused artifact prints on standard error as `rejected: <id> (<code>): <reason>`. A run with no diagnostic and no refused artifact prints `lint: no issues.`.
 
@@ -262,10 +263,10 @@ With `--json`, standard output carries one JSON object and nothing else, and a r
 | Exit code | Meaning |
 |:--|:--|
 | `0` | No diagnostic reaches the `--fail-on` severity, and no artifact was refused. Warnings alone exit 0 under the default `--fail-on error`. |
-| `1` | A diagnostic reaches the `--fail-on` severity, an artifact was refused because its `ARTIFACT.md` declares `extends:` or a removed type, the registry could not be opened or walked, or the run was interrupted. |
+| `1` | A diagnostic reaches the `--fail-on` severity, an artifact was refused because its frontmatter does not parse or its `ARTIFACT.md` declares `extends:` or a removed type, the registry could not be opened or walked, or the run was interrupted. |
 | `2` | A usage error: `--registry` is absent, or `--fail-on` is neither `error` nor `warning`. |
 
-An `info` diagnostic never fails the run. When the registry cannot be opened or walked, including on a collision between two layers, the command writes the error on standard error, writes no JSON object, and exits 1. An interrupted run writes no JSON object and exits 1, so an interrupted run never reports a clean catalog.
+An `info` diagnostic, such as `lint.skill_version_assigned`, never fails the run under either `--fail-on` value. When the registry cannot be opened or walked, including on a collision between two layers and on a manifest at a layer root, which has no canonical ID, the command writes the error on standard error, writes no JSON object, and exits 1. An interrupted run writes no JSON object and exits 1, so an interrupted run never reports a clean catalog.
 
 ### `podium import`
 
@@ -311,7 +312,7 @@ Materializes the caller's effective view to disk through the configured harness 
 podium sync [--registry <url-or-path>] [--target <path>] [--harness <name>]
             [--profile <name>] [--config <path>]
             [--include <pattern>] [--exclude <pattern>] [--type <t1,t2>]
-            [--overlay <path>]
+            [--overlay <path>] [--on-unparseable keep|remove]
             [--watch] [--dry-run] [--preview] [--check] [--json]
 ```
 
@@ -326,20 +327,21 @@ podium sync [--registry <url-or-path>] [--target <path>] [--harness <name>]
 | `--exclude <pattern>` | Glob to exclude. Applied after include. Repeatable. |
 | `--type <t1,t2,...>` | Restrict to a comma-separated list of artifact types. |
 | `--overlay <path>` | Workspace overlay path watched alongside the registry. |
+| `--on-unparseable keep\|remove` | What a filesystem-source sync does with the previous output of an artifact whose manifest does not parse. See [Previous output of an unparseable artifact](#previous-output-of-an-unparseable-artifact). |
 | `--watch` | Run continuously. Re-materialize on registry change events, or on fsnotify events against a filesystem source. |
 | `--dry-run` | Print the resolved set; write nothing. |
 | `--preview` | Print the scope-preview aggregate counts and exit; write nothing. Requires a server-source registry, because the counts come from `GET /v1/scope/preview`. |
 | `--check` | Validate the merged `sync.yaml` and report warnings: unresolved profiles, malformed globs, target/profile collisions, and invalid `listing_budgets` entries. With `--config`, validate every target in the named file and materialize none. |
 | `--json` | Structured envelope output, for piping to `jq`. |
 
-The lock file is written to `<target>/.podium/sync.lock`.
+The lock file is written to `<target>/.podium/sync.lock`. Each entry records one materialized file: the artifact's `id`, `version`, `content_hash`, `layer`, and `type`, the `materialized_path`, and, for a path shared with the operator, `merge` (`json` for a JSON config merge, `inject` for a marker-based inject).
 
 #### Exit status
 
 | Status | Cause |
 |:--|:--|
 | `1` | The run dropped an artifact (see [Dropped artifacts](#dropped-artifacts)), the listing estimate exceeded its budget or an entry exceeded `max_entry_chars` under `check: error` (see [Listing budget](#listing-budget)), a delivery check failed on a one-shot sync, a `--config` target failed, or a `sync.yaml` scope failed to load, including on a `listing_budgets` value of the wrong YAML type. Under `--watch`, the command exits 1 on interrupt when any cycle it reported failed, dropped an artifact, or reported a listing excess or an entry that exceeded `max_entry_chars` under `check: error`. |
-| `2` | The signature policy or the verification key set did not resolve (see [Delivery verification](#delivery-verification)), or the `listing_budgets` entry for the run's harness is invalid. The entry check covers `--preview`, and a run that sets no harness runs the `none` adapter, so a `listing_budgets.none` entry exits 2 on it. |
+| `2` | `--on-unparseable`, `PODIUM_SYNC_ON_UNPARSEABLE`, or `defaults.on_unparseable` holds a value other than `keep` or `remove`, the signature policy or the verification key set did not resolve (see [Delivery verification](#delivery-verification)), or the `listing_budgets` entry for the run's harness is invalid. The entry check covers `--preview`, and a run that sets no harness runs the `none` adapter, so a `listing_budgets.none` entry exits 2 on it. |
 
 A drop and a listing report under `check: error` each add a cause for exit status 1 and leave the command's other exit statuses unchanged.
 
@@ -360,21 +362,34 @@ Against a local catalog, `podium sync` drops the artifacts the table below lists
 
 | Cause | Artifact dropped | Report line |
 |:--|:--|:--|
+| An `ARTIFACT.md` or `SKILL.md` frontmatter does not parse | The artifact that holds the file. | `rejected: <id> (ingest.invalid_artifact): <reason>` |
 | An `ARTIFACT.md` declares `extends:` | The declaring artifact. | `rejected: <id> (ingest.invalid_artifact): <reason>` |
 | An `ARTIFACT.md` declares a removed type (`command` or `context`) | The declaring artifact. | `rejected: <id> (ingest.invalid_artifact): <reason>` |
 | Two registry layers contribute the same ID (a collision) | The higher-precedence copy. | `rejected: <id> (ingest.collision): <reason>` |
 
 The rules below apply to every drop in the table:
 
-- The command materializes every other artifact, writes the lock file without the dropped artifact, and exits 1.
+- The command materializes every other artifact, writes the lock file without the dropped artifact except as [Previous output of an unparseable artifact](#previous-output-of-an-unparseable-artifact) describes, and exits 1.
 - `--dry-run` reports the drop and exits 1 without writing.
-- An `extends:` drop and a removed-type drop happen before the collision rule, in that order, so an `ARTIFACT.md` that declares both reports the `extends:` reason. A dropped artifact collides with no other artifact, so the other copy of its ID is materialized and no `ingest.collision` line is printed for it.
+- An unparseable-manifest drop, an `extends:` drop, and a removed-type drop happen before the collision rule, in that order, so an `ARTIFACT.md` that declares both `extends:` and a removed type reports the `extends:` reason. A dropped artifact collides with no other artifact, so the other copy of its ID is materialized and no `ingest.collision` line is printed for it.
 - Under `--config`, a target that dropped an artifact counts as a failed target, and the command exits 1. This includes a `kind: workspace` target under `--check`. A target's workflow still runs before the target is marked failed.
 - `--check` without `--config` validates `sync.yaml` only and reports no drop. A `kind: marketplace` target under `--check` renders nothing.
 - Under `--json`, the report stays on standard error.
 - Under `--watch`, each cycle prints its report. A cycle still running when the interrupt arrives can finish without a report, and the next `podium sync` reports its drops.
 
 A sync against a server reports no drop, because the server rejected the artifact at ingest.
+
+##### Previous output of an unparseable artifact
+
+An unparseable manifest is usually a file in the middle of an edit. `--on-unparseable` selects what a filesystem-source sync does with the output an earlier run wrote for an artifact dropped because its frontmatter does not parse. The flag takes precedence over `PODIUM_SYNC_ON_UNPARSEABLE`, which takes precedence over `defaults.on_unparseable` in the merged `sync.yaml`. The default is `keep`. A value other than `keep` or `remove` exits 2 with an error that names its source.
+
+- Under `keep`, when the target's lock file records the artifact from an earlier run, the command leaves the files that run wrote for it, including its entries in shared files such as `.mcp.json`, and its lock entry unchanged. It reconciles every other artifact as usual, and the report line reads `rejected: <id> (ingest.invalid_artifact): <reason>; the previous sync output was kept`. Under `--dry-run`, the line ends `; the previous sync output would be kept`. An artifact the lock file does not record gets no files.
+- `keep` applies only while the previous output still belongs in the target: the earlier run used the same harness, the artifact passes this run's scope and toggles, and no artifact this run materializes takes the previous output over. An artifact takes it over when it writes a file the previous output holds whole, or a configuration-merge entry under the key the previous output holds in that file, such as an `mcpServers` server of the same name. Another artifact's entry in a shared configuration-merge or inject file, such as `.mcp.json`, does not take the previous output over. The type filter reads the type the lock entry records, because the unparseable manifest names none, and an entry written before the lock recorded `type` fails any non-empty type filter. Otherwise the command removes the previous output, as under `remove`.
+- When another copy of the ID parses, from a lower-precedence layer or the workspace overlay, the command materializes that copy.
+- Under `remove`, the command removes the previous output, as it does for the other drops.
+- Under either value, the artifact counts as a drop for the exit status, `--dry-run`, `--config` targets, and `podium sync override`.
+- An `extends:` drop, a removed-type drop, and a collision drop always remove the previous output.
+- The setting has no effect on a sync against a server. The registry never stores the unparseable version and keeps serving the earlier one, so the sync receives that version and drops nothing.
 
 #### Listing budget
 
@@ -384,7 +399,7 @@ The command writes each excess and each entry above `max_entry_chars` on standar
 
 ```
 warning: listing: claude-code listing estimate is 9120 characters against a configured budget of 8000 (64 entries)
-warning: listing: finance/close/reconcile description is 1210 characters, above max_entry_chars 1024
+warning: listing: finance/close/reconcile description is 1610 characters, above max_entry_chars 1536
 ```
 
 Under `--json`, the envelope carries a `listing` member:
@@ -397,11 +412,11 @@ Under `--json`, the envelope carries a `listing` member:
   "entries": 64,
   "over": true,
   "check": "warning",
-  "oversized": [{"id": "finance/close/reconcile", "chars": 1210}]
+  "oversized": [{"id": "finance/close/reconcile", "chars": 1610}]
 }
 ```
 
-`over` reports whether the cost exceeds `max_chars`. `oversized` lists the entries above `max_entry_chars` in ID order, as `{"id": ..., "chars": ...}`, and is empty when `max_entry_chars` is unset. The member is `null` when the run computes no listing: under `check: off`, for the `none` adapter, for an adapter for which no type in `types` counts, and for an offline-first run that leaves the existing output in place.
+`over` reports whether the cost exceeds `max_chars`. `oversized` lists the entries above `max_entry_chars` in ID order, as `{"id": ..., "chars": ...}`, and is empty when `max_entry_chars` is unset. `max_entry_chars` defaults to `1536` for `claude-code` and is unset by default for every other adapter. The member is `null` when the run computes no listing: under `check: off`, for the `none` adapter, for an adapter for which no type in `types` counts, and for an offline-first run that leaves the existing output in place.
 
 Under `check: warning`, a report leaves the exit status unchanged. Under `check: error`, a report fails the run as a drop does:
 
@@ -491,10 +506,11 @@ podium sync override --add <id> --dry-run
 | `--target <path>` | Materialized directory. Default: the current directory. |
 | `--registry <url-or-path>` | Registry for the toggle's materialization. When unset: `PODIUM_REGISTRY`, then the merged `sync.yaml`. |
 | `--harness <name>` | Adapter for the toggle's materialization. When unset: `PODIUM_HARNESS`, then the harness recorded in the target's lock file, then the merged `sync.yaml`, then the built-in `none` adapter. |
+| `--on-unparseable keep\|remove` | What the re-materialization does with the previous output of an artifact whose manifest does not parse, as for [`podium sync`](#previous-output-of-an-unparseable-artifact). An invalid value exits 2 before any toggle is recorded. |
 
 With no flags, the command opens an interactive checklist.
 
-When a registry is configured, override re-materializes the target through the same composition as `podium sync`. Against a local catalog, a collision between two registry layers or an `ARTIFACT.md` that declares `extends:` or a removed type drops the artifact. The command then prints the same `rejected: <id> (ingest.collision): <reason>` or `rejected: <id> (ingest.invalid_artifact): <reason>` line for each dropped artifact, keeps the recorded toggles, and exits 1.
+When a registry is configured, override re-materializes the target through the same composition as `podium sync`. Against a local catalog, a collision between two registry layers, an `ARTIFACT.md` or `SKILL.md` whose frontmatter does not parse, or an `ARTIFACT.md` that declares `extends:` or a removed type drops the artifact. The command then prints the same `rejected: <id> (ingest.collision): <reason>` or `rejected: <id> (ingest.invalid_artifact): <reason>` line for each dropped artifact, keeps the recorded toggles, and exits 1.
 
 The re-materialization also reports the [listing budget](#listing-budget) of the harness. Under `check: error`, an excess or an oversized entry exits 1 and keeps the recorded toggles. Before it records a toggle, an override that re-materializes validates the `listing_budgets` entry for its harness, and an invalid entry exits 2 with no toggle recorded. An override that does not re-materialize validates no entry and computes no listing. `--dry-run`, an override with no registry, and an interactive checklist that is cancelled, saves no change, or runs with neither a terminal nor piped commands are such overrides. A `sync.yaml` that does not load, including on a `listing_budgets` value of the wrong YAML type, is ignored as before: the registry and the harness come from the flags, the environment, or the lock, and the listing uses the default budget.
 
@@ -549,7 +565,7 @@ Passing none of the add and remove flags opens the interactive editor. The comma
 
 The read CLI maps one-to-one to the SDK's read operations. It uses the same identity, cache, layer composition, and server-side visibility filtering.
 
-Each command that queries the registry takes `--registry <url>`, which defaults to `PODIUM_REGISTRY` and is required. These commands are `search`, `domain show`, `domain search`, `domain analyze`, `artifact show`, and `impact`. `artifact scaffold` works on the filesystem only and takes no `--registry`.
+Each command that queries the registry takes `--registry <url>`, which defaults to `PODIUM_REGISTRY` and is required. These commands are `search`, `overlap`, `domain show`, `domain search`, `domain analyze`, `artifact show`, and `impact`. `artifact scaffold` works on the filesystem only and takes no `--registry`.
 
 ### `podium search`
 
@@ -568,6 +584,33 @@ podium search <query> [--type <t>] [--tags <tag1,tag2>]
 | `--scope <path>` | Constrain results to a path prefix. |
 | `--top-k <n>` | Maximum number of results. Default: `10`. |
 | `--json` | JSON output. See [JSON output](#json-output). |
+
+### `podium overlap`
+
+Reports description overlap across every layer the caller can see. The command calls `GET /v1/overlap`, which [Catalog overlap report](http-api#catalog-overlap-report) describes, so any caller that can search the registry can run it.
+
+```
+podium overlap --registry <url> [--threshold <n>] [--json] [--fail-on error|warning]
+```
+
+| Flag | Effect |
+|:--|:--|
+| `--registry <url>` | Registry URL. Required; defaults to `PODIUM_REGISTRY`. |
+| `--threshold <n>` | Semantic overlap threshold for this read, a number from 0.5 to 1.0. It replaces `PODIUM_LINT_SEMANTIC_SIMILARITY` for the request. |
+| `--json` | Write the response object on standard output instead of one line per diagnostic. |
+| `--fail-on <severity>` | Lowest severity that fails the run: `error` (the default) or `warning`. |
+
+The report covers the current served version of every artifact the caller can see. It contains `lint.thin_description` and `lint.colliding_descriptions`, and `lint.semantic_overlap` when the registry runs with `PODIUM_LINT_SEMANTIC_OVERLAP=on`. It omits `lint.near_duplicate_content`, which `podium lint` reports over a checkout of the layer sources.
+
+Without `--json`, each diagnostic prints on standard output in the `podium lint` format, `[<severity>] <artifact-id>: <message> (<rule-code>)`, and a report with no diagnostic prints `overlap: no issues.`. With `--json`, standard output carries the response object alone, indented.
+
+When the response's `computed` is below its `total`, the command prints a warning on standard error, with or without `--json`, because the report can miss overlap of the artifacts not yet computed:
+
+```
+warning: semantic overlap is computed for 118 of 120 artifacts; the report can miss overlap of the other 2 until their computation succeeds
+```
+
+The command exits 0 when no diagnostic reaches the `--fail-on` severity, and 1 when one does. Every overlap diagnostic is a warning, and the coverage warning counts as a warning too, so the default `--fail-on error` exits 0 on any report, and `--fail-on warning` exits 1 when the report contains a diagnostic or `computed` is below `total`. A response that carries an error envelope prints on standard error, and the command exits 1. A usage error exits 2, including a missing `--registry`, a `--fail-on` value other than `error` or `warning`, and a `--threshold` outside 0.5 to 1.0.
 
 ### `podium domain show`
 
@@ -1075,7 +1118,28 @@ podium admin reembed [--artifact <id> --version <semver>]
 | `--since <rfc3339>` | Re-embed only artifacts ingested at or after this RFC3339 timestamp. Scopes a tenant-wide pass. |
 | `--registry <url>` | Registry URL. Required; defaults to `PODIUM_REGISTRY`. |
 
-With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` and `--since` compose to scope it.
+With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` and `--since` compose to scope it. When `PODIUM_LINT_SEMANTIC_OVERLAP` is `on`, a full pass also recomputes the semantic overlap records of every artifact it re-embeds.
+
+### `podium admin rebuild-overlap`
+
+Recomputes the semantic overlap records of every served artifact of the caller's tenant, including artifacts whose vector the outbox has not written yet. The registry keeps the records current on its own, at ingest, through a startup pass after the startup ingest, through its periodic sweep, and after a full re-embed, so this command is for a recomputation that cannot wait for the next sweep.
+
+```
+podium admin rebuild-overlap --registry <url>
+```
+
+| Flag | Effect |
+|:--|:--|
+| `--registry <url>` | Registry URL. Required; defaults to `PODIUM_REGISTRY`. |
+
+The command calls `POST /v1/admin/overlap/rebuild`, which [Rebuild overlap records](http-api#rebuild-overlap-records) describes, and prints the two counts of the response:
+
+```
+computed: 42
+failed: 0
+```
+
+A computation stores nothing and counts in neither number when its artifact gains a newer served version first. The command exits 0 when `failed` is zero. It exits 1 when `failed` is not zero, and when the response is an error envelope, which it prints on standard error. A registry with the semantic overlap check off, or with no search index, answers `registry.unavailable` with `retryable: false`, because the request cannot succeed until the operator changes the configuration. A missing `--registry` exits 2.
 
 ### `podium admin runtime`
 
@@ -1536,10 +1600,11 @@ The tables below list the variables that client processes read: the CLI, `podium
 | `PODIUM_CACHE_DIR` | Content-addressed cache directory. Default `~/.podium/cache/`. |
 | `PODIUM_CACHE_MODE` | `always-revalidate` (default), `offline-first`, or `offline-only`. |
 | `PODIUM_MATERIALIZE_ROOT` | Default destination for `load_artifact` materialization. |
+| `PODIUM_SYNC_ON_UNPARSEABLE` | `keep` (default) or `remove`: what a filesystem-source `podium sync` does with the previous output of an artifact whose manifest does not parse. `--on-unparseable` overrides it. |
 
 ### Lint
 
-`podium lint` reads the `PODIUM_LINT_*` threshold variables that registry ingest reads, so a CI run and the registry apply the same thresholds when both environments set them. [Lint](configuration#lint) in the configuration reference lists each variable and its default.
+`podium lint` reads the `PODIUM_LINT_*` threshold variables that registry ingest reads, so a CI run and the registry apply the same thresholds when both environments set them. The `PODIUM_LINT_SEMANTIC_*` variables are the exception: `podium lint` reads no search index, so only the registry reads them. [Lint](configuration#lint) in the configuration reference lists each variable and its default.
 
 ### Signing and verification
 

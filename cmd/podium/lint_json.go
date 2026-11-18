@@ -13,9 +13,9 @@ import (
 // lintExitCode is the `podium lint` exit status for a completed run. It is 1
 // when an artifact was refused, when a diagnostic is an error, or when a
 // diagnostic is a warning and failOn is lint.SeverityWarning, and 0
-// otherwise. An info diagnostic never fails the run. The rule lives apart
-// from runLint because no built-in rule emits info, so only a direct test
-// can pin that an info diagnostic stays below every --fail-on value.
+// otherwise. An info diagnostic, such as lint.skill_version_assigned
+// (§4.3.4), never fails the run. The rule lives apart from runLint so a
+// direct test can pin every severity against every --fail-on value.
 //
 // Spec: §7.3.1
 func lintExitCode(diags []lint.Diagnostic, dropped bool, failOn lint.Severity) int {

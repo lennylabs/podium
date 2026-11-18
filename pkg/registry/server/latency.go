@@ -59,6 +59,8 @@ func operationName(path string) string {
 		return "scope_preview"
 	case "/v1/domain/analyze":
 		return "domain_analyze"
+	case "/v1/overlap":
+		return "overlap"
 	case "/v1/quota":
 		return "quota"
 	case "/healthz", "/readyz", "/v1/events":

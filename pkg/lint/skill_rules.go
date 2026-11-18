@@ -22,14 +22,16 @@ const (
 )
 
 // ruleSkillPodiumOnlyFields enforces spec §4.3.4: "SKILL.md does not contain
-// Podium-only fields (`type`, `version`, `when_to_use`, `tags`, etc.) at the
-// top level; if present, error. The diagnostic recommends `metadata.version`
-// for a version, the `metadata` key of the same name for a field that
-// **Podium fields in `metadata`** lists, and the `ARTIFACT.md` overlay for
-// every other field." SKILL.md stays within the agentskills.io subset so the
-// standard's skills-ref validator passes. ParseSkill drops unknown keys
-// silently, so the rule scans the raw SKILL.md frontmatter keys rather than
-// the typed Skill value.
+// Podium-only fields (`type`, `when_to_use`, `tags`, etc.) at the top level;
+// if present, error. A top-level `version` is a warning rather than an error,
+// because many published skills carry one: Podium ignores it and takes the
+// version from `metadata.version` or `ARTIFACT.md`. The diagnostic recommends
+// `metadata.version` for a version, the `metadata` key of the same name for a
+// field that **Podium fields in `metadata`** lists, and the `ARTIFACT.md`
+// overlay for every other field." SKILL.md stays within the agentskills.io
+// subset so the standard's skills-ref validator passes. ParseSkill drops
+// unknown keys silently, so the rule scans the raw SKILL.md frontmatter keys
+// rather than the typed Skill value.
 //
 // Spec: §4.3.4
 type ruleSkillPodiumOnlyFields struct{}
@@ -44,13 +46,18 @@ func (r ruleSkillPodiumOnlyFields) Check(_ context.Context, _ *filesystem.Regist
 		}
 		keys, err := manifest.TopLevelFrontmatterKeys(rec.SkillBytes)
 		if err != nil {
-			// A malformed SKILL.md already fails Walk/ParseSkill upstream.
+			// An unparseable SKILL.md is refused before lint (§4.1), so it never reaches this rule.
 			continue
 		}
 		for _, k := range keys {
-			if manifest.IsPodiumOnlySkillField(k) {
-				out = append(out, errMsg(rec.ID, r, podiumOnlyFieldMessage(k)))
+			if !manifest.IsPodiumOnlySkillField(k) {
+				continue
 			}
+			if k == "version" {
+				out = append(out, warn(rec.ID, r.Code(), podiumOnlyFieldMessage(k)))
+				continue
+			}
+			out = append(out, errMsg(rec.ID, r, podiumOnlyFieldMessage(k)))
 		}
 	}
 	return out
@@ -64,7 +71,7 @@ func (r ruleSkillPodiumOnlyFields) Check(_ context.Context, _ *filesystem.Regist
 // Spec: §4.3.4
 func podiumOnlyFieldMessage(key string) string {
 	if key == "version" {
-		return fmt.Sprintf("SKILL.md contains Podium-only field %q; set metadata.version in SKILL.md instead", key)
+		return fmt.Sprintf("SKILL.md contains Podium-only field %q, which Podium ignores; set metadata.version in SKILL.md instead", key)
 	}
 	if manifest.IsSkillMetadataField(key) {
 		return fmt.Sprintf("SKILL.md contains Podium-only field %q at the top level; set metadata.%s in SKILL.md or move it to ARTIFACT.md", key, key)
@@ -297,9 +304,10 @@ func invocationProblem(ty manifest.ArtifactType, inv manifest.Invocation) string
 
 // ruleSkillMetadataFields enforces spec §4.3.4: "A `SKILL.md` `metadata` value
 // for a key that **Podium fields in `metadata`** lists and that does not
-// follow its encoding is ignored (warning that names the key, the value, and
-// the encoding)." The warning honors no lint_suppress entry, because §4.3.4
-// grants a suppression flag only for the skills-ref check.
+// follow its encoding, including a sequence or a mapping, is ignored (warning
+// that names the key, the value, and the encoding)." The warning honors no
+// lint_suppress entry, because §4.3.4 grants the list only to the skills-ref
+// check and the catalog advisories.
 //
 // Spec: §4.3.4
 type ruleSkillMetadataFields struct{}
@@ -313,19 +321,66 @@ func (r ruleSkillMetadataFields) Check(_ context.Context, _ *filesystem.Registry
 			continue
 		}
 		for _, is := range manifest.DecodeSkillMetadata(rec.Skill).Issues {
-			out = append(out, warn(rec.ID, r.Code(),
-				fmt.Sprintf("metadata.%s %q is ignored: the value must be %s", is.Key, is.Value, is.Encoding)))
+			out = append(out, warn(rec.ID, r.Code(), metadataIssueMessage(is)))
+		}
+	}
+	return out
+}
+
+// metadataIssueMessage names the key, the value, and the encoding of an
+// ignored metadata value. A string value is quoted, and a sequence or a
+// mapping is named by its kind and its single-line YAML flow encoding, so the
+// two never read alike.
+//
+// Spec: §4.3.4
+func metadataIssueMessage(is manifest.SkillMetadataIssue) string {
+	if is.Kind != "" {
+		return fmt.Sprintf("metadata.%s is a %s (%s) and is ignored: the value must be %s", is.Key, is.Kind, is.Value, is.Encoding)
+	}
+	return fmt.Sprintf("metadata.%s %q is ignored: the value must be %s", is.Key, is.Value, is.Encoding)
+}
+
+// ruleSkillMetadataNonString enforces spec §4.3.4: "A `SKILL.md` `metadata`
+// value that is a sequence or a mapping under a key that is neither `version`
+// nor a key **Podium fields in `metadata`** lists is kept and not read
+// (warning `lint.skill_metadata_nonstring` that names the key and says the
+// Agent Skills standard defines `metadata` values as strings)." Published
+// skills nest values under keys of their own, such as requires and openclaw,
+// so the SKILL.md parses and its bytes reach every materialized copy. A
+// sequence or a mapping under a key Podium reads is reported by
+// ruleSkillMetadataFields, and one under version by ruleSkillVersionAssigned.
+// The warning honors no lint_suppress entry (§4.3.4).
+//
+// Spec: §4.3.4
+type ruleSkillMetadataNonString struct{}
+
+func (ruleSkillMetadataNonString) Code() string { return "lint.skill_metadata_nonstring" }
+
+func (r ruleSkillMetadataNonString) Check(_ context.Context, _ *filesystem.Registry, records []filesystem.ArtifactRecord) []Diagnostic {
+	var out []Diagnostic
+	for _, rec := range records {
+		if rec.Artifact == nil || rec.Artifact.Type != manifest.TypeSkill {
+			continue
+		}
+		for _, nv := range rec.Skill.UnreadNonStringMetadata() {
+			out = append(out, warn(rec.ID, r.Code(), fmt.Sprintf(
+				"metadata.%s is a %s; Podium keeps it unchanged and does not read it, but the Agent Skills standard defines metadata values as strings",
+				nv.Key, nv.Kind)))
 		}
 	}
 	return out
 }
 
 // ruleSkillVersionAssigned enforces spec §4.3.4: "A skill that declares no
-// usable version has its version assigned (warning that names any ignored
-// `metadata.version` value and the fix)." The record's VersionAssigned flag
-// is set by the walker, so the rule fires the same way before ingest assigns
-// the version and under `podium lint`, where the filesystem source reports
-// the reserved form.
+// usable version has its version assigned (info that names any ignored
+// `metadata.version` value and the fix)." A sequence or a mapping under
+// version is such an ignored value. The diagnostic is informational
+// because a plain Agent Skill commonly declares no version, and an info
+// diagnostic never fails `podium lint` under either --fail-on value (§7.3.1)
+// and never blocks ingest. The record's VersionAssigned flag is set by the
+// walker, so the rule fires the same way before ingest assigns the version
+// and under `podium lint`, where the filesystem source reports the reserved
+// form.
 //
 // Spec: §4.3.4
 type ruleSkillVersionAssigned struct{}
@@ -342,9 +397,11 @@ func (r ruleSkillVersionAssigned) Check(_ context.Context, _ *filesystem.Registr
 		if rec.Skill != nil {
 			if mv := rec.Skill.Metadata["version"]; mv != "" {
 				msg = fmt.Sprintf("metadata.version %q is not major.minor.patch and is ignored; ", mv) + msg
+			} else if nv, ok := rec.Skill.NonStringMetadataValue("version"); ok {
+				msg = fmt.Sprintf("metadata.version is a %s (%s), not a string, and is ignored; ", nv.Kind, nv.Value) + msg
 			}
 		}
-		out = append(out, warn(rec.ID, r.Code(), msg))
+		out = append(out, Diagnostic{ArtifactID: rec.ID, Code: r.Code(), Severity: SeverityInfo, Message: msg})
 	}
 	return out
 }

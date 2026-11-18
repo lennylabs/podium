@@ -242,72 +242,35 @@ func TestReingestPipeline_FreezeAndBreakGlass(t *testing.T) {
 	}
 }
 
-// Spec: §7.3.1 / §6.10 — a manual reingest whose source holds an artifact with
-// undecodable YAML frontmatter is refused as a content fault. The refusal
-// carries ingest.lint_failed with retryable false and a remediation naming the
-// source, because the registry is healthy and every retry of the same source
-// reproduces the same parse failure. Before this was classified, the failure
-// fell through to registry.unavailable, which reports the registry as the
-// problem and advises a retry and a look at its health endpoint.
-func TestReingestPipeline_MalformedFrontmatterIsContentFault(t *testing.T) {
+// Spec: §4.1, §7.3.1 — a manual reingest whose source holds an artifact with
+// undecodable YAML frontmatter refuses that artifact alone. The cycle
+// completes without a §6.10 error envelope, because the refusal is neither a
+// lint failure nor a same-version change, and the response's rejected list
+// names the artifact with ingest.invalid_artifact, a reason naming its
+// ARTIFACT.md, and details that are exactly the manifest_unparseable
+// constraint. The failure never falls through to registry.unavailable, which
+// would report the healthy registry as the problem.
+func TestReingestPipeline_MalformedFrontmatterIsRefusedPerArtifact(t *testing.T) {
 	t.Parallel()
-	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "reg.db"))
-	if err != nil {
-		t.Fatalf("OpenSQLite: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	ctx := context.Background()
-	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
-		t.Fatalf("CreateTenant: %v", err)
-	}
-
 	layerDir := t.TempDir()
-	artDir := filepath.Join(layerDir, "x", "y")
-	if err := os.MkdirAll(artDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
 	malformed := "---\ntype: agent\nversion: 1.0.0\ndescription: d\nweird: [unclosed\n---\n\nbody\n"
-	if err := os.WriteFile(filepath.Join(artDir, "ARTIFACT.md"), []byte(malformed), 0o644); err != nil {
-		t.Fatalf("write artifact: %v", err)
+	writeFile(t, filepath.Join(layerDir, "x", "y", "ARTIFACT.md"), malformed)
+	_, reingest := localReingest(t, layerDir)
+	status, m := reingest()
+	if status != http.StatusOK || m["accepted"] != float64(0) {
+		t.Fatalf("reingest = %d %v, want 200 with nothing accepted", status, m)
 	}
-	if err := st.PutLayerConfig(ctx, store.LayerConfig{
-		TenantID: "t", ID: "badlayer", SourceType: "local", LocalPath: layerDir,
-	}); err != nil {
-		t.Fatalf("PutLayerConfig: %v", err)
+	rejected, _ := m["rejected"].([]any)
+	if len(rejected) != 1 {
+		t.Fatalf("rejected = %v, want the one malformed artifact", m["rejected"])
 	}
-
-	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
-		WithReingestRunner(localReingestRunner(st, nil))
-	ts := httptest.NewServer(endpoint.Handler())
-	t.Cleanup(ts.Close)
-
-	resp, err := http.Post(ts.URL+"/v1/layers/reingest?id=badlayer", "application/json", nil)
-	if err != nil {
-		t.Fatalf("reingest: %v", err)
-	}
-	var m map[string]any
-	_ = json.NewDecoder(resp.Body).Decode(&m)
-	_ = resp.Body.Close()
-
-	if resp.StatusCode != http.StatusUnprocessableEntity {
-		t.Errorf("status = %d, want 422 (body %v)", resp.StatusCode, m)
-	}
-	if m["code"] != "ingest.lint_failed" {
-		t.Errorf("code = %v, want ingest.lint_failed", m["code"])
-	}
-	if m["retryable"] != false {
-		t.Errorf("retryable = %v, want false: the same source fails identically", m["retryable"])
-	}
-	action, _ := m["suggested_action"].(string)
-	if action == "" {
-		t.Errorf("suggested_action empty; the refusal must name the remediation")
-	}
-	if strings.Contains(action, "health endpoint") {
-		t.Errorf("suggested_action = %q sends the operator to the registry's health endpoint for a content fault", action)
-	}
-	msg, _ := m["message"].(string)
-	if !strings.Contains(msg, "x/y") {
-		t.Errorf("message = %q does not name the offending artifact", msg)
+	r, _ := rejected[0].(map[string]any)
+	details, _ := r["details"].(map[string]any)
+	reason, _ := r["reason"].(string)
+	if r["artifact_id"] != "x/y" || r["code"] != "ingest.invalid_artifact" ||
+		len(details) != 1 || details["constraint"] != "manifest_unparseable" ||
+		!strings.HasPrefix(reason, "x/y/ARTIFACT.md: manifest: invalid YAML frontmatter") {
+		t.Errorf("rejected[0] = %v, want x/y refused with manifest_unparseable naming x/y/ARTIFACT.md", r)
 	}
 }
 
@@ -358,43 +321,63 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// Spec: §4.2, §7.3.1 — a SKILL.md directly under the layer root makes no
-// package, because a package is a directory below the root. The reingest is
-// refused as a content fault, 422 ingest.lint_failed, rather than the
-// retryable registry.unavailable.
+// Spec: §4.2, §7.3.1, §6.10 — a SKILL.md directly under the layer root makes
+// no package, because a package is a directory below the root, and it still
+// fails the walk of the whole layer beside an unparseable manifest the walk
+// would otherwise refuse on its own. The reingest is refused as a content
+// fault: 422 ingest.lint_failed with retryable false and a remediation that
+// does not send the operator to the registry's health endpoint, because the
+// registry is healthy and every retry of the same source fails identically.
 func TestReingestPipeline_RootLevelSkillIsLintFailure(t *testing.T) {
 	t.Parallel()
 	layerDir := t.TempDir()
 	writeFile(t, filepath.Join(layerDir, "SKILL.md"), "---\nname: root\ndescription: A skill at the layer root.\n---\n\nbody\n")
+	writeFile(t, filepath.Join(layerDir, "bad", "SKILL.md"), psMappingDescriptionSkill)
 	_, reingest := localReingest(t, layerDir)
-	status, m := reingest()
-	if status != http.StatusUnprocessableEntity || m["code"] != "ingest.lint_failed" {
-		t.Errorf("reingest = %d %v, want 422 ingest.lint_failed", status, m)
-	}
-}
-
-// Spec: §4.3.4, §7.3.1 — a layer holding a plain skill whose metadata.tags is
-// a YAML sequence beside a valid skill fails the reingest as a whole with 422
-// ingest.lint_failed, the message names metadata.tags, and no row is stored.
-func TestReingest_ListMetadataValueAnswersLintFailed(t *testing.T) {
-	t.Parallel()
-	layerDir := t.TempDir()
-	writeFile(t, filepath.Join(layerDir, "good", "SKILL.md"), psNamedSkill("good", "valid", "1.0.0"))
-	writeFile(t, filepath.Join(layerDir, "bad", "SKILL.md"), psListTagsSkill)
-	st, reingest := localReingest(t, layerDir)
 	status, m := reingest()
 	if status != http.StatusUnprocessableEntity || m["code"] != "ingest.lint_failed" {
 		t.Fatalf("reingest = %d %v, want 422 ingest.lint_failed", status, m)
 	}
-	if msg, _ := m["message"].(string); !strings.Contains(msg, "metadata.tags") {
-		t.Errorf("message = %q, want it to name metadata.tags", msg)
+	if m["retryable"] != false {
+		t.Errorf("retryable = %v, want false: the same source fails identically", m["retryable"])
+	}
+	action, _ := m["suggested_action"].(string)
+	if action == "" || strings.Contains(action, "health endpoint") {
+		t.Errorf("suggested_action = %q, want a remediation that is not the registry's health endpoint", action)
+	}
+	if msg, _ := m["message"].(string); !strings.Contains(msg, "SKILL.md") || !strings.Contains(msg, "subdirectory") {
+		t.Errorf("message = %q, want it to name the root-level SKILL.md", msg)
+	}
+}
+
+// Spec: §4.1, §4.3.4, §7.3.1 — a layer holding a plain skill whose metadata
+// nests a mapping and a sequence beside a valid skill answers the reingest
+// with 200, rejects nothing, and stores both skills, the nested one with its
+// SKILL.md bytes unchanged.
+func TestReingest_NestedMetadataAccepted(t *testing.T) {
+	t.Parallel()
+	layerDir := t.TempDir()
+	writeFile(t, filepath.Join(layerDir, "good", "SKILL.md"), psNamedSkill("good", "valid", "1.0.0"))
+	writeFile(t, filepath.Join(layerDir, "bad", "SKILL.md"), psNestedMetadataSkill)
+	st, reingest := localReingest(t, layerDir)
+	status, m := reingest()
+	if status != http.StatusOK || m["accepted"] != float64(2) {
+		t.Fatalf("reingest = %d %v, want 200 with both skills accepted", status, m)
+	}
+	if rejected, _ := m["rejected"].([]any); len(rejected) != 0 {
+		t.Errorf("rejected = %v, want none", m["rejected"])
 	}
 	all, err := st.ListManifestsIncludingDeleted(context.Background(), "t")
 	if err != nil {
 		t.Fatalf("ListManifestsIncludingDeleted: %v", err)
 	}
-	if len(all) != 0 {
-		t.Errorf("stored rows = %d, want none from the refused reingest", len(all))
+	if len(all) != 2 {
+		t.Fatalf("stored rows = %+v, want good and bad", all)
+	}
+	for _, rec := range all {
+		if rec.ArtifactID == "bad" && string(rec.SkillRaw) != psNestedMetadataSkill {
+			t.Errorf("bad SkillRaw = %q, want the authored bytes", rec.SkillRaw)
+		}
 	}
 }
 

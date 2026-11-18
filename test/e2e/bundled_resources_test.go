@@ -238,8 +238,11 @@ func TestBundled_ProseURLOfflineSkips(t *testing.T) {
 	}
 }
 
-// a Markdown-link prose reference that escapes the
-// artifact package (../) errors with lint.prose_reference.
+// A Markdown-link prose reference that leaves the artifact package (../) is
+// a lint.prose_reference warning, so lint exits 0 under the default
+// --fail-on error and 1 under --fail-on warning.
+//
+// Spec: §4.4, §7.3.1
 func TestBundled_ProseReferenceEscapes(t *testing.T) {
 	t.Parallel()
 	id := "finance/close-reporting/run-variance-analysis"
@@ -248,11 +251,15 @@ func TestBundled_ProseReferenceEscapes(t *testing.T) {
 		id + "/SKILL.md":    brSkillMD("run-variance-analysis", brVarianceDesc, "See [creds](../../etc/passwd).\n"),
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
-	if res.Exit != 1 {
-		t.Fatalf("lint exit=%d, want 1\nstdout=%s", res.Exit, res.Stdout)
+	if res.Exit != 0 {
+		t.Fatalf("lint exit=%d, want 0\nstdout=%s", res.Exit, res.Stdout)
 	}
-	if !strings.Contains(res.Stdout, "lint.prose_reference") || !strings.Contains(res.Stdout, "escapes the artifact package") {
-		t.Errorf("missing escape diagnostic:\n%s", res.Stdout)
+	if !strings.Contains(res.Stdout, "[warning]") || !strings.Contains(res.Stdout, "lint.prose_reference") ||
+		!strings.Contains(res.Stdout, "leaves the artifact package") {
+		t.Errorf("missing leaves-the-package warning:\n%s", res.Stdout)
+	}
+	if strict := runPodium(t, "", nil, "lint", "--registry", reg, "--fail-on", "warning"); strict.Exit != 1 {
+		t.Errorf("lint --fail-on warning exit=%d, want 1\nstdout=%s", strict.Exit, strict.Stdout)
 	}
 }
 

@@ -239,9 +239,9 @@ Each entry of `freeze_windows` takes these keys:
 
 ## Lint
 
-These variables set the lint thresholds. Registry ingest reads them, and `podium lint` reads the same variables, so a CI run and the registry apply the same threshold when both environments set it. They have no `registry.yaml` key, because `podium lint` does not read `registry.yaml`.
+These variables set the lint thresholds. Registry ingest and `podium lint` both read the size and word-similarity variables, so a CI run and the registry apply the same threshold when both environments set it. The `PODIUM_LINT_SEMANTIC_*` variables are read by the registry alone, as the note after the table describes. None of the variables has a `registry.yaml` key, because `podium lint` does not read `registry.yaml`.
 
-An unset or empty variable keeps the default. A value that does not parse, or that falls outside its range, keeps the default, and the process logs a warning that names the variable on standard error. The registry reads the variables for every ingest, so it logs the warning on each ingest. Integer values are positive, and the similarity thresholds range from 0.5 to 1.0. A token count is the estimate of the byte length divided by four, rounded up.
+An unset or empty variable keeps the default. A value that does not parse, or that falls outside its range, keeps the default, and the process logs a warning that names the variable on standard error. The registry reads the size and word-similarity variables for every ingest, so it logs the warning on each ingest. Integer values are positive, and the similarity thresholds range from 0.5 to 1.0. A token count is the estimate of the byte length divided by four, rounded up.
 
 | Variable | Type | Default | Description |
 |:--|:--|:--|:--|
@@ -254,9 +254,15 @@ An unset or empty variable keeps the default. A value that does not parse, or th
 | `PODIUM_LINT_MIN_DESCRIPTION_CHARS` | integer | `15` | `lint.thin_description` flags a description with fewer code points. |
 | `PODIUM_LINT_MIN_DESCRIPTION_WORDS` | integer | `3` | `lint.thin_description` flags a description with fewer words. |
 | `PODIUM_LINT_DESCRIPTION_SIMILARITY` | number | `0.7` | `lint.colliding_descriptions` reports two descriptions whose word sets have at least this similarity. |
-| `PODIUM_LINT_CONTENT_SIMILARITY` | number | `0.8` | `lint.near_duplicate_content` reports two units of different artifacts whose five-word shingle sets have at least this similarity. |
+| `PODIUM_LINT_CONTENT_SIMILARITY` | number | `0.8` | `lint.near_duplicate_content` reports two units of different artifacts whose five-word shingle sets have at least this similarity. A unit is a prose body or a prose resource, which is a bundled `.md`, `.markdown`, `.txt`, or `.rst` file other than a license file. [Near-duplicate content](../authoring/bundled-resources#near-duplicate-content) describes the units. |
+| `PODIUM_LINT_SEMANTIC_OVERLAP` | `on` or `off` | `off` | Turns on the `lint.semantic_overlap` check, which stores overlap records computed from the search index and reports them at ingest and in the catalog overlap report. Read by the registry only. |
+| `PODIUM_LINT_SEMANTIC_SIMILARITY` | number | by model | Threshold applied to stored overlap records when they are read, as a cosine similarity from 0.5 to 1.0. Changing it needs no recomputation. When unset, the default follows the embedding model: `0.80` for `text-embedding-3-small`, `0.86` for `nomic-embed-text`, `0.90` for `multilingual-e5-large`, and `0.85` for any other model. Read by the registry only. |
+| `PODIUM_LINT_SEMANTIC_NEIGHBORS` | integer | `10` | Number of nearest peer artifacts one computation finds and stores records for, from 1 to 100. A read with a lower threshold shows only peers among them. Read by the registry only. |
+| `PODIUM_LINT_SEMANTIC_REFRESH_INTERVAL` | duration | `24h` | Interval of the periodic sweep that computes artifacts with missing or stale overlap records, at least `1m`. Each replica offsets its periodic passes by a random delay of up to a tenth of the interval. `0` turns the periodic sweep off. The startup pass runs either way. Neither runs when the check is off or no search index is configured. Read by the registry only. |
 
-[Skill lint checks](../authoring/frontmatter-reference#skill-lint-checks) describes the catalog advisories.
+`podium lint` reads no search index, so the `PODIUM_LINT_SEMANTIC_*` variables take effect in the registry only, which reads them at startup. With `PODIUM_LINT_SEMANTIC_OVERLAP=on`, a registry whose embedding provider is empty or `none` and whose vector backend does not embed text itself refuses to start with `config.invalid`, and the message names the configured value, such as `"none"`.
+
+[Skill lint checks](../authoring/frontmatter-reference#skill-lint-checks) describes the catalog advisories, and [Finding overlapping artifacts](../managing/overlap#turn-on-the-semantic-check) describes the semantic check.
 
 ## Vector index and embeddings
 

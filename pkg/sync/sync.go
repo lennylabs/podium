@@ -115,6 +115,11 @@ type Options struct {
 	// server-source branch of the effective-view resolution, and never for a
 	// filesystem source. A server-source load with a nil Delivery fails closed.
 	Delivery DeliveryCheckFunc
+	// OnUnparseable selects what a filesystem-source run does with the
+	// previous output of an artifact the §4.1 unparseable-manifest rule
+	// drops (§13.11.3): keep it (the zero value) or remove it. A server
+	// source reports no drop, so the setting has no effect there.
+	OnUnparseable OnUnparseable
 }
 
 // materialRecord is a source-neutral artifact ready for the HarnessAdapter.
@@ -166,9 +171,12 @@ type Result struct {
 	// rather than silently omitting it.
 	Skipped []string
 	// Dropped lists the artifacts a filesystem-source composition dropped
-	// under the §4.6 collision rule, the §4.6 no-inheritance rule, or the
-	// §4.1 removed-type rule (§13.11.3). Callers render each entry with its
-	// Code and Reason; a server source never reports one.
+	// under the §4.6 collision rule, the §4.1 unparseable-manifest rule, the
+	// §4.6 no-inheritance rule, or the §4.1 removed-type rule (§13.11.3). Callers render each entry with its
+	// Code and Reason; a server source never reports one. An entry whose
+	// PreviousOutputKept is set is a §4.1 unparseable-manifest drop whose
+	// previous files and lock entries the run kept (a DryRun run reports what
+	// a real run would keep).
 	Dropped []layer.Drop
 	// Offline is set when a §7.4 offline-first sync could not reach the
 	// server-source registry and left the existing materialized output in
@@ -248,6 +256,9 @@ func Run(opts Options) (*Result, error) {
 	if opts.Target == "" && !opts.DryRun {
 		return nil, ErrNoTarget
 	}
+	if err := opts.OnUnparseable.check(); err != nil {
+		return nil, err
+	}
 	if opts.AdapterID == "" {
 		opts.AdapterID = "none"
 	}
@@ -306,9 +317,6 @@ func Run(opts Options) (*Result, error) {
 	// §7.5.1 scope + §7.5.5 toggles select the records to materialize.
 	records := selectRecords(opts.Scope, all, toggles)
 
-	// §13.11.3: a drop does not stop the sync. The caller reports each
-	// dropped artifact, and the rest is materialized, stale-file cleanup
-	// runs, and the lock omits the dropped copy.
 	res := &Result{Adapter: a.ID(), Target: opts.Target, Profile: opts.Profile, Scope: opts.Scope, Dropped: dropped}
 
 	allFiles := []adapter.File{}
@@ -366,6 +374,25 @@ func Run(opts Options) (*Result, error) {
 		allFiles = append(allFiles, out...)
 	}
 
+	// §13.11.3: a drop does not stop the sync. The caller reports each
+	// dropped artifact, and the rest is materialized, stale-file cleanup
+	// runs, and the lock omits the dropped copy. The exception, under the keep
+	// setting, is a drop under the unparseable-manifest rule of an artifact the
+	// prior lock records whose output still belongs in the target: its previous
+	// files and lock entries are kept. It is computed after the run's output is
+	// known, because an artifact that now writes a kept path ends the keep, and
+	// before the dry-run return, so a dry run reports the drops a real run
+	// would keep.
+	kept := keepPreviousOutput(dropped, priorLock, keepRun{
+		adapterID: a.ID(),
+		policy:    opts.OnUnparseable,
+		scope:     opts.Scope,
+		toggles:   toggles,
+		resolved:  all,
+		files:     allFiles,
+		target:    opts.Target,
+	})
+
 	if opts.DryRun {
 		return res, nil
 	}
@@ -388,7 +415,7 @@ func Run(opts Options) (*Result, error) {
 		currentPaths[f.Path] = true
 		fileMerge[f.Path] = mergeKind(f.Op)
 	}
-	changed, err := writeTarget(opts.Target, allFiles, currentPaths, priorMerge)
+	changed, err := writeTarget(opts.Target, allFiles, currentPaths, priorMerge, kept)
 	if err != nil {
 		return nil, err
 	}
@@ -422,6 +449,7 @@ func Run(opts Options) (*Result, error) {
 			lock.Artifacts = append(lock.Artifacts, LockArtifact{
 				ID:               art.ID,
 				Version:          art.Version,
+				Type:             art.Type,
 				ContentHash:      art.ContentHash,
 				Layer:            art.Layer,
 				MaterializedPath: p,
@@ -429,6 +457,9 @@ func Run(opts Options) (*Result, error) {
 			})
 		}
 	}
+	// §13.11.3: a kept artifact's entries carry over unchanged, so the next
+	// run still records its previous output.
+	lock.Artifacts = append(lock.Artifacts, kept.entries...)
 	res.Changed = changed
 	if err := WriteLock(opts.Target, lock); err != nil {
 		// Lock write failure is non-fatal; the sync already
@@ -739,8 +770,10 @@ func selectRecords(scope ScopeFilter, all []materialRecord, toggles LockToggles)
 // result true. A prior-only path is shared with the operator and cleaned up
 // best-effort by removeStalePaths, so it is read tolerantly after the write
 // as well. A current path unreadable after the write fails the sync closed,
-// because the run just wrote it.
-func writeTarget(target string, files []adapter.File, current map[string]bool, priorMerge map[string]string) (bool, error) {
+// because the run just wrote it. kept is the previous output of the artifacts
+// the run keeps (§13.11.3): its standalone paths are not removed and its
+// config-merge entries survive the reconciliation.
+func writeTarget(target string, files []adapter.File, current map[string]bool, priorMerge map[string]string, kept keptOutput) (bool, error) {
 	priorOnly := map[string]bool{}
 	for p := range priorMerge {
 		if !current[p] {
@@ -750,10 +783,10 @@ func writeTarget(target string, files []adapter.File, current map[string]bool, p
 	beforeCurrent, unobservedCurrent := tolerantDigests(target, current)
 	beforePrior, unobservedPrior := tolerantDigests(target, priorOnly)
 
-	if err := materialize.Write(target, files); err != nil {
+	if err := materialize.WriteKeeping(target, files, kept.keepFunc()); err != nil {
 		return false, err
 	}
-	removeStalePaths(target, priorMerge, current)
+	removeStalePaths(target, priorMerge, current, kept)
 
 	afterCurrent, err := onDiskDigests(target, current)
 	if err != nil {
@@ -802,15 +835,17 @@ func mergeDigests(a, b map[string]string) map[string]string {
 // blocks are stripped) rather than deleted, which preserves the operator's
 // other entries when the last contributing artifact is removed. Best-effort:
 // log to stderr on error and continue, since a partial cleanup is better than
-// a hard failure that rolls back a successful materialize.
-func removeStalePaths(target string, prior map[string]string, current map[string]bool) {
+// a hard failure that rolls back a successful materialize. The previous output
+// in kept (§13.11.3) is not stale: its standalone paths stay on disk, and the
+// reconciliation of a config-merge path leaves its entries in place.
+func removeStalePaths(target string, prior map[string]string, current map[string]bool, kept keptOutput) {
 	for p, merge := range prior {
-		if current[p] {
+		if current[p] || kept.standalone[p] {
 			continue
 		}
 		full := filepath.Join(target, p)
 		if merge != "" {
-			reconcileOrphanConfig(full, merge)
+			reconcileOrphanConfig(full, merge, kept.keepFunc())
 			continue
 		}
 		if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
@@ -849,7 +884,8 @@ func pruneEmptyParents(target, dir string) {
 // whose last contributing artifact is gone, leaving the operator's content in
 // place (§6.7 "removing the artifact removes its entry"). The file is left on
 // disk because the operator may own the rest of it. A missing file is a no-op.
-func reconcileOrphanConfig(full, merge string) {
+// The entries of an artifact keep reports stay; a nil keep strips them all.
+func reconcileOrphanConfig(full, merge string, keep func(id string) bool) {
 	data, err := os.ReadFile(full)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -860,9 +896,9 @@ func reconcileOrphanConfig(full, merge string) {
 	var out []byte
 	switch merge {
 	case "json":
-		out = materialize.StripPodiumOwnedBytes(data)
+		out = materialize.StripPodiumOwnedBytes(data, keep)
 	case "inject":
-		out = materialize.StripPodiumBlocks(data, full)
+		out = materialize.StripPodiumBlocks(data, full, keep)
 	default:
 		return
 	}

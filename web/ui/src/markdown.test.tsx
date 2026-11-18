@@ -374,6 +374,26 @@ describe('a prose reference to a bundled file', () => {
     expect(named).toEqual(['files/notes.txt', 'files/notes.txt']);
   });
 
+  // Spec: §4.4 — a link to a directory of bundled files passes lint, so the
+  // viewer must not route it to an artifact page; it stays as authored.
+  it('leaves a link to a directory of bundled files as authored', () => {
+    const container = renderBody('See [templates](assets/templates/).\n', ['assets/templates/weekly.html']);
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('assets/templates/');
+  });
+
+  // Spec: §4.4 — the linter decodes percent-encoding before the bundled-file
+  // lookup, so the viewer resolves the same file; a malformed escape is
+  // looked up as written.
+  it('decodes percent-encoding and keeps a malformed escape as written', () => {
+    const container = renderBody('A [note](files/my%20notes.md?v=1#top) and a [raw](files/100%.md).\n', [
+      'files/my notes.md',
+      'files/100%.md',
+    ]);
+    const named = [...container.querySelectorAll('button')].map((control) => control.getAttribute('data-resource'));
+    expect(named).toEqual(['files/my notes.md', 'files/100%.md']);
+  });
+
   it('reports the file the reader follows', () => {
     const followed: string[] = [];
     const container = render(

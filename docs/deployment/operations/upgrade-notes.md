@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -145,13 +145,65 @@ The rolling upgrade from 0.6.0 and the rollback to 0.6.0 follow [Rollback floor 
 
 - `podium lint` now reports the catalog advisories `lint.thin_description`, `lint.colliding_descriptions`, and `lint.near_duplicate_content`, which registry ingest also runs over the layer it ingests. Each is a warning, so a catalog that linted clean can print new warnings and still exits 0 under the default `--fail-on error`.
 - `lint.colliding_descriptions` now reports two descriptions whose normalized word sets have a similarity of 0.7 or higher, so descriptions that follow one template draw it.
-- `lint.near_duplicate_content` warns in every artifact that bundles a shared text file of 50 words or more, such as a `LICENSE` file.
+- `lint.near_duplicate_content` compares prose bodies and prose resources, which are bundled `.md`, `.markdown`, `.txt`, and `.rst` files. It does not compare license files, scripts, or data files. A prose resource of 50 words or more that several artifacts bundle, such as a shared reference document, draws the warning in every artifact that bundles it.
 - A CI pipeline that must stay green does not pass `--fail-on warning` until the catalog is clean. Clear the warnings by rewriting the descriptions, by raising a threshold through the `PODIUM_LINT_*` variables, or through `lint_suppress`, as [Skill lint checks](../../authoring/frontmatter-reference#skill-lint-checks) describes.
 
 #### `podium sync`
 
-- `podium sync` estimates the skill listing of each `kind: workspace` target and, by default, writes a warning on standard error when the estimate exceeds 8,000 characters for an adapter that writes skills. The warning leaves the exit status unchanged. Set `check: off` for the adapter under `listing_budgets` in `sync.yaml` to turn the check off, or raise `max_chars`, as [Listing budget](../../consuming/configure-your-harness#listing-budget) describes.
+- `podium sync` estimates the skill listing of each `kind: workspace` target and, by default, writes a warning on standard error when the estimate exceeds 8,000 characters for an adapter that writes skills. The warning leaves the exit status unchanged. Set `check: off` for the adapter under `listing_budgets` in `sync.yaml` to turn the check off, or raise `max_chars`, as [Listing budget](../../consuming/configure-your-harness#listing-budget) describes. A workspace whose Claude Code model has a 1,000,000-token context window sets `max_chars: 40000` for `claude-code`.
+- For `claude-code`, `max_entry_chars` defaults to 1536, the length at which Claude Code shortens a skill's listing text, so the check also reports each skill whose description is longer than 1536 code points. Under `check: error`, such a description fails the sync. Shorten the description, or set `max_entry_chars` higher for `claude-code`.
 - `listing_budgets` is a new top-level `sync.yaml` key. A 0.6.0 `podium sync` ignores it, and a 0.6.0 `podium sync save-as` drops it from the `sync.yaml` it rewrites.
+
+### Per-artifact manifest refusal and skill lint severities
+
+0.7.0 refuses an artifact whose manifest does not parse without stopping the rest of its layer, and it lowers the severity of several skill lint checks. A layer or a skill that 0.6.0 refused as a whole can ingest after the upgrade.
+
+#### Unparseable manifests
+
+In 0.6.0, one artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter did not parse stopped its whole layer. Ingest stored no row from the cycle and answered `422 ingest.lint_failed`, `podium lint` reported the parse error without linting the other artifacts, and `podium sync` wrote nothing.
+
+- Ingest refuses that artifact alone with `ingest.invalid_artifact` and `details.constraint: "manifest_unparseable"`, and it stores the other artifacts of the layer. The `POST /v1/layers/reingest` response lists the artifact in `rejected`, and `podium layer reingest` names it on standard error and exits non-zero. A script that watched for `422 ingest.lint_failed` on such a layer reads `rejected` instead.
+- `podium lint` lists the artifact in `rejected`, lints the other artifacts, and exits 1.
+- A filesystem-source `podium sync` drops the artifact, names it on standard error, writes the other artifacts and the lock file, and exits 1. By default it keeps the files and lock entry an earlier run wrote for the artifact, when the earlier run used the same harness, the artifact passes the run's scope and toggles, and no other artifact of the run takes them over by writing a file the kept output holds whole or a configuration-merge entry under the same key, such as an `mcpServers` server of the same name. Another artifact's entry in a shared file such as `.mcp.json` does not end the keep. `--on-unparseable remove`, `PODIUM_SYNC_ON_UNPARSEABLE=remove`, or `defaults.on_unparseable: remove` in `sync.yaml` removes them.
+- Lock entries now record the artifact's `type`, which the keep rule reads for the scope type filter. An entry a 0.6.0 sync wrote has no `type` and fails any non-empty type filter, so under a type filter the output of an artifact whose manifest stops parsing is removed until a 0.7.0 sync has rewritten the entry.
+- A manifest at a layer root has no canonical ID and still fails the whole layer.
+
+[Unparseable manifests](../content/layers#unparseable-manifests) describes the rule.
+
+#### Nested `SKILL.md` metadata
+
+In 0.6.0, a sequence or a mapping under a `SKILL.md` `metadata` key made the frontmatter unparseable, and the skill was refused. Published skills nest values under keys of their own, such as `requires` and `openclaw`, so 0.6.0 refused them.
+
+- A sequence or a mapping under a key Podium does not read parses. Podium keeps the bytes unchanged in every materialized and published copy, except where an adapter adds the user-only control to a frontmatter written as a flow mapping or opening with an explicit key, and re-encodes it with every value kept. Podium does not read the value, and lint reports the `lint.skill_metadata_nonstring` warning.
+- A sequence or a mapping under a key Podium reads, such as `tags: [a, b]`, is ignored with the `lint.skill_metadata_field_ignored` warning. Under `version`, it is ignored, and the skill receives a registry-assigned version.
+- A `name` or a `description` that is a mapping still makes the frontmatter unparseable.
+
+A skill that 0.6.0 refused for nested metadata ingests at the next reingest of its layer. Neither warning fails `podium lint` under the default `--fail-on error`.
+
+#### Skill lint severities
+
+- A top-level `version` in `SKILL.md` is a `lint.skill_podium_only_field` warning, where 0.6.0 reported an error. Podium ignores the value and takes the version from `metadata.version` or `ARTIFACT.md`. Every other top-level Podium-only field stays an error.
+- `lint.skill_version_assigned` is an info diagnostic, where 0.6.0 reported a warning. It fails `podium lint` under neither `--fail-on` value.
+- A relative prose link that leaves the package, such as `../other-skill/SKILL.md`, is a warning, where 0.6.0 reported an error. The diagnostic recommends naming the other artifact by its canonical ID. A link to a bundled file the package does not contain stays an error.
+- Lint reads inline links and images as CommonMark parses the body. It does not check link syntax inside a code span or a fenced or indented code block, including one nested in a list item or a block quote, an escaped bracket, a reference-style link, or a target with a scheme other than http or https, such as `mailto:`. It resolves a link with a fragment, such as `references/api.md#errors`, to the bundled file.
+- Lint does not check a root-relative link, such as `[analytics](/features/analytics)`, which 0.6.0 reported as a missing bundled file.
+- A link to a directory of the package, such as `[templates](assets/templates/)`, resolves when at least one bundled file lies below it, where 0.6.0 reported a missing bundled file.
+
+### Semantic overlap check
+
+0.7.0 adds the `lint.semantic_overlap` check, the catalog overlap report, and `podium admin rebuild-overlap`. [Finding overlapping artifacts](../../managing/overlap) describes the check and the report.
+
+- Each 0.7.0 start creates the `semantic_overlap_records` and `semantic_overlap_computations` tables in the SQLite database and in each Postgres org schema if it is absent. The change is additive, and no existing table changes. A 0.6.0 process does not read the tables, so a rollback leaves them in place unused.
+- The check is off by default, and a registry that leaves `PODIUM_LINT_SEMANTIC_OVERLAP` unset writes no records and runs no sweep.
+- `GET /v1/overlap` and `podium overlap` are available whether or not the check is on. With the check off, they report `lint.thin_description` and `lint.colliding_descriptions` alone.
+
+To turn the check on for an existing catalog:
+
+1. Confirm that the registry has an embedding source. A registry with `PODIUM_LINT_SEMANTIC_OVERLAP=on`, no embedding provider, and a backend that does not embed text itself refuses to start with `config.invalid`.
+2. On Pinecone, Weaviate Cloud, or Qdrant Cloud, confirm that the index or collection uses the cosine metric, as [Vector backends](../services/vector-backends#semantic-overlap) describes.
+3. Set `PODIUM_LINT_SEMANTIC_OVERLAP=on` on every registry replica and restart them.
+4. Wait for the startup pass, which each replica runs in the background as soon as its startup ingest completes and which computes every served artifact that has no computation entry. The periodic sweep does not need to run first. On a managed backend, artifacts whose vectors the outbox has not written are computed at the outbox write. `podium admin rebuild-overlap --registry <url>`, run in each tenant as an identity that holds the `admin` role, recomputes every artifact at once.
+5. Read the result with `podium overlap --registry <url>`. The command warns while `computed` is below `total`. The default threshold follows the embedding model, 0.80 for `text-embedding-3-small`, so tune `PODIUM_LINT_SEMANTIC_SIMILARITY` against the catalog only when the reported pairs call for it.
 
 ### `command` and `context` removal
 

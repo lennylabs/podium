@@ -203,6 +203,21 @@ func containsString(haystack []string, needle string) bool {
 // filepath.EvalSymlinks and confirming it stays within the resolved
 // destination root.
 func Write(destination string, files []adapter.File) error {
+	return WriteKeeping(destination, files, nil)
+}
+
+// WriteKeeping is Write with a set of artifacts whose prior contribution to a
+// shared config-merge or inject file survives the §6.7 reconciliation. The
+// fold strips every prior Podium-owned entry and block before this batch's
+// fragments merge in, which removes the contribution of every artifact the
+// batch does not carry. keep reports the artifact IDs exempt from that strip:
+// their tagged JSON entries and their keyed inject blocks stay in the file as
+// they are. A nil keep exempts nothing, which is Write.
+//
+// Spec: §6.7, §13.11.3 — a filesystem-source sync keeps the previous output of
+// an artifact refused under the unparseable-manifest rule, and that output can
+// include an entry in a file other artifacts still write.
+func WriteKeeping(destination string, files []adapter.File, keep func(id string) bool) error {
 	if destination == "" {
 		return ErrEmptyDestination
 	}
@@ -235,7 +250,7 @@ func Write(destination string, files []adapter.File) error {
 	// Fold inject/merge ops into one final content per destination path. This
 	// reads any existing on-disk file for OpInject / OpMergeJSON targets so
 	// the operator's other content is preserved (§6.7 config-merge / inject).
-	items, err := foldOps(files, resolved)
+	items, err := foldOps(files, resolved, keep)
 	if err != nil {
 		return err
 	}
