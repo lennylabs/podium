@@ -40,6 +40,8 @@ func TestOperationName(t *testing.T) {
 		"/v1/dependents":          "dependents",
 		"/v1/scope/preview":       "scope_preview",
 		"/v1/domain/analyze":      "domain_analyze",
+		"/v1/overlap":             "overlap",
+		"/v1/usage":               "usage",
 		"/v1/quota":               "quota",
 		"/v1/admin/grants":        "admin",
 		"/v1/webhooks":            "webhooks",
