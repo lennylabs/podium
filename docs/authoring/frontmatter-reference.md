@@ -135,7 +135,7 @@ when_to_use: |
 ---
 ```
 
-Podium keeps the key in every materialized and published `SKILL.md`, so Claude Code reads the authored text. The Agent Skills standard does not define the key, and a skill upload outside Claude Code refuses it, so `podium lint` reports it with the `lint.skill_podium_only_field` warning. A top-level value that differs from the `ARTIFACT.md` value or from a `metadata.when_to_use` is the `lint.skill_artifact_field_mismatch` error. A top-level value that is a sequence or a mapping, or that holds only white space, is ignored with the `lint.skill_metadata_field_ignored` warning, and the field takes the `metadata` value.
+Podium keeps an authored top-level key in every materialized and published `SKILL.md`, so Claude Code reads the authored text. A skill that states `when_to_use` only in `metadata` or in `ARTIFACT.md` does not need the top-level key for Claude Code: when the `SKILL.md` has no top-level `when_to_use`, the Claude Code adapter and the Claude marketplace output write the resolved value there as one string, with the situations on separate lines, and keep the `metadata` value. No other harness reads the key, and no other adapter writes it. The Agent Skills standard does not define the key, and a skill upload outside Claude Code refuses it, so `podium lint` reports it with the `lint.skill_podium_only_field` warning. A top-level value that differs from the `ARTIFACT.md` value or from a `metadata.when_to_use` is the `lint.skill_artifact_field_mismatch` error. A top-level value that is a sequence or a mapping, or that holds only white space, is ignored with the `lint.skill_metadata_field_ignored` warning, and the field takes the `metadata` value.
 
 ### Multi-line `when_to_use`
 
