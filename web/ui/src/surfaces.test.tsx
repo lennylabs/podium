@@ -20568,6 +20568,10 @@ describe("usage", () => {
       expect(tiles[1].textContent).toContain("2,316");
       const breakdowns = screen.getAllByTestId("breakdown");
       expect(breakdowns[0].textContent).toContain("unknown");
+      // The unknown part keeps the lightest tone wherever it falls: it is the
+      // second part of the harness breakdown here.
+      const unknownKey = within(breakdowns[1]).getByText("unknown", { exact: false });
+      expect(unknownKey.querySelector(".breakdown-swatch")?.className).toContain("breakdown-part-4");
       expect(breakdowns[0].textContent).not.toMatch(/\bnone\b/);
       const disclosure = screen.getByRole("button", { name: /By layer/ });
       expect(disclosure.getAttribute("aria-expanded")).toBe("false");

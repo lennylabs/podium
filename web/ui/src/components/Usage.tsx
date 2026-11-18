@@ -179,9 +179,15 @@ export function Sparkline({ values }: { values: number[] }) {
   );
 }
 
+/** partTone is the tone slot a part takes: the unknown part always takes the
+ * lightest, last slot, so it reads as the remainder however large it is, and
+ * the named parts take the others in order, sharing the fourth past it. */
+function partTone(part: BreakdownPart, index: number): number {
+  return part.name === 'unknown' ? 4 : Math.min(index, 3);
+}
+
 /** BreakdownBar is one stacked bar and a legend with each part's count, the
- * parts in the order they are handed. The slots past the fifth share the last
- * colour. */
+ * parts in the order they are handed. */
 export function BreakdownBar({ title, parts }: { title: string; parts: BreakdownPart[] }) {
   const total = parts.reduce((sum, part) => sum + part.count, 0);
   return (
@@ -195,7 +201,7 @@ export function BreakdownBar({ title, parts }: { title: string; parts: Breakdown
             {parts.map((part, i) => (
               <span
                 key={part.name}
-                className={`breakdown-part breakdown-part-${String(Math.min(i, 4))}`}
+                className={`breakdown-part breakdown-part-${String(partTone(part, i))}`}
                 style={{ width: `${((part.count / total) * 100).toFixed(1)}%` }}
               />
             ))}
@@ -203,7 +209,7 @@ export function BreakdownBar({ title, parts }: { title: string; parts: Breakdown
           <ul className="breakdown-legend">
             {parts.map((part, i) => (
               <li key={part.name} className="breakdown-key">
-                <span className={`breakdown-swatch breakdown-part-${String(Math.min(i, 4))}`} aria-hidden="true" />
+                <span className={`breakdown-swatch breakdown-part-${String(partTone(part, i))}`} aria-hidden="true" />
                 {part.name} <span className="breakdown-count">{formatCount(part.count)}</span>
               </li>
             ))}

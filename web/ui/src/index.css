@@ -7008,8 +7008,9 @@ button.cluster-row-selected:hover {
   border-radius: 2px;
 }
 
-/* The breakdown's five tones, largest first. The fourth has no other use, so
-   it is the one token the usage page adds; the unknown part takes the last. */
+/* The breakdown's tones: the named parts take the first four, largest first,
+   and the unknown part always takes the last. The fourth has no other use, so
+   it is the one token the usage page adds. */
 .breakdown-part-0 {
   background: var(--acc);
 }
