@@ -485,7 +485,7 @@ export const landing: LandingContent = {
         name: "Layer sources",
         builtIn: "Git and local paths",
         alternatives: ["Custom via SPI"],
-        note: "A custom source can read from S3 buckets, OCI registries, or HTTP archives.",
+        note: "S3 buckets, OCI registries, HTTP archives.",
       },
       {
         icon: "scroll",
