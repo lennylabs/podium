@@ -65,6 +65,8 @@ func TestUsageCmd_UsageErrors(t *testing.T) {
 		{"--registry", "http://127.0.0.1:1", "--granularity", "year"},
 		{"--registry", "http://127.0.0.1:1", "--limit", "0"},
 		{"--registry", "http://127.0.0.1:1", "--limit", "x"},
+		{"--registry", "http://127.0.0.1:1", "--sort", "name"},
+		{"--registry", "http://127.0.0.1:1", "--order", "up"},
 		{"--registry", "http://127.0.0.1:1", "--bogus"},
 	} {
 		if code := usageCmd(args); code != 2 {
@@ -84,8 +86,8 @@ func TestUsageCmd_PassesParameters(t *testing.T) {
 	defer srv.Close()
 	code := usageCmd([]string{"--registry", srv.URL, "--from", "2026-11-01", "--to", "2026-11-18", "--granularity", "week",
 		"--layer", "team", "--artifact", "ops/greet", "--artifact", "ops/farewell", "--limit", "20", "--cursor", "abc",
-		"--type", "skill", "--type", "agent"})
-	want := "artifact=ops%2Fgreet&artifact=ops%2Ffarewell&cursor=abc&from=2026-11-01&granularity=week&layer=team&limit=20&to=2026-11-18&type=skill&type=agent"
+		"--type", "skill", "--type", "agent", "--query", "ops/", "--sort", "syncs", "--order", "asc"})
+	want := "artifact=ops%2Fgreet&artifact=ops%2Ffarewell&cursor=abc&from=2026-11-01&granularity=week&layer=team&limit=20&order=asc&query=ops%2F&sort=syncs&to=2026-11-18&type=skill&type=agent"
 	if code != 0 || got != want {
 		t.Errorf("exit %d query %q, want 0 and %q", code, got, want)
 	}

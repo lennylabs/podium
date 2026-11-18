@@ -28,7 +28,9 @@ const (
 // which bounds the window. LayerIDs and ArtifactIDs, when non-empty, restrict
 // the report to the named layers and artifacts. Granularity is "", "none",
 // "day", "week", or "month"; "" is "none". Types, when non-empty, restricts
-// the artifact list to artifacts of the named types. Limit is the page size of the
+// the artifact list to artifacts of the named types, and Query to artifacts
+// whose ID contains it. Sort and Order choose the list's order, "" for the
+// default. Limit is the page size of the
 // artifact list, 0 for the default, and Cursor an earlier response's
 // next_cursor.
 type UsageQuery struct {
@@ -40,6 +42,9 @@ type UsageQuery struct {
 	LayerIDs    []string
 	ArtifactIDs []string
 	Types       []string
+	Query       string
+	Sort        string
+	Order       string
 	Limit       int
 	Cursor      string
 }
@@ -396,7 +401,7 @@ func buildUsageReport(w usageWindow, layers []string, served []store.ManifestRec
 	for _, l := range layers {
 		rep.Layers = append(rep.Layers, UsageLayer{Layer: l, UsageTotals: byLayer[l].result(w, q.Granularity)})
 	}
-	entries := usageEntries(served, byArtifact, q.ArtifactIDs, q.Types)
+	entries := usageEntries(served, byArtifact, q.ArtifactIDs, q.Types, page)
 	rep.ArtifactCount = len(entries)
 	selected, next := page.slice(entries)
 	rep.NextCursor = next
@@ -416,13 +421,14 @@ func buildUsageReport(w usageWindow, layers []string, served []store.ManifestRec
 	return rep
 }
 
-// usageEntries returns the artifacts the list covers, in the report's order:
+// usageEntries returns the artifacts the list covers, in the page's order:
 // the named ones when the request names any, of a named type when it names
-// types, and both conditions when it names both. A type that no artifact has,
-// including a removed one, matches nothing.
+// types, whose ID contains the query when it has one, and every condition the
+// request sets. A type that no artifact has, including a removed one, matches
+// nothing.
 //
 // Spec: §8.7
-func usageEntries(served []store.ManifestRecord, byArtifact map[string]*usageAccumulator, namedIDs, types []string) []usageEntry {
+func usageEntries(served []store.ManifestRecord, byArtifact map[string]*usageAccumulator, namedIDs, types []string, page usagePage) []usageEntry {
 	named := make(map[string]bool, len(namedIDs))
 	for _, id := range namedIDs {
 		named[id] = true
@@ -433,15 +439,15 @@ func usageEntries(served []store.ManifestRecord, byArtifact map[string]*usageAcc
 	}
 	entries := make([]usageEntry, 0, len(served))
 	for _, m := range served {
-		if (len(named) > 0 && !named[m.ArtifactID]) || (len(typed) > 0 && !typed[m.Type]) {
+		if (len(named) > 0 && !named[m.ArtifactID]) || (len(typed) > 0 && !typed[m.Type]) || !page.matches(m.ArtifactID) {
 			continue
 		}
 		a := byArtifact[m.ArtifactID]
-		entries = append(entries, usageEntry{m: m, acc: a, key: usageCursor{
-			Loads: a.totals.Loads, Syncs: a.totals.Syncs, SearchHits: a.totals.SearchHits, ID: m.ArtifactID,
+		entries = append(entries, usageEntry{m: m, acc: a, key: usageKey{
+			loads: a.totals.Loads, syncs: a.totals.Syncs, hits: a.totals.SearchHits, lastLoaded: a.lastL, id: m.ArtifactID,
 		}})
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].key.before(entries[j].key) })
+	page.sortEntries(entries)
 	return entries
 }
 

@@ -50,6 +50,7 @@ type usageResponseJSON struct {
 // usageFlags holds the podium usage flags that become query parameters.
 type usageFlags struct {
 	from, to, days, granularity, limit, cursor string
+	match, sort, order                         string
 	layers, artifacts, types                   stringSliceFlag
 }
 
@@ -58,6 +59,8 @@ type usageFlags struct {
 //	podium usage --registry <url> [--from <date>] [--to <date>] [--days <n>]
 //	             [--granularity none|day|week|month]
 //	             [--layer <id>]... [--artifact <id>]... [--type <type>]...
+//	             [--query <text>] [--sort loads|syncs|search_hits|last_loaded]
+//	             [--order desc|asc]
 //	             [--limit <n>] [--cursor <cursor>] [--json]
 //
 // Spec: §8.7
@@ -73,6 +76,9 @@ func usageCmd(args []string) int {
 	fs.Var(&f.layers, "layer", "restrict the report to a layer (repeatable)")
 	fs.Var(&f.artifacts, "artifact", "restrict the artifact list to an artifact (repeatable)")
 	fs.Var(&f.types, "type", "restrict the artifact list to an artifact type (repeatable)")
+	fs.StringVar(&f.match, "query", "", "restrict the artifact list to IDs containing this text, ignoring case")
+	fs.StringVar(&f.sort, "sort", "", "order the artifact list by loads, syncs, search_hits, or last_loaded (default loads)")
+	fs.StringVar(&f.order, "order", "", "desc or asc (default desc)")
 	fs.StringVar(&f.limit, "limit", "", "most artifacts to list, 1 to 200 (default 50)")
 	fs.StringVar(&f.cursor, "cursor", "", "next_cursor value of an earlier report, to list the following artifacts")
 	asJSON := fs.Bool("json", false, "write the response object on standard output")
@@ -118,11 +124,24 @@ func (f usageFlags) query() (url.Values, error) {
 	default:
 		return nil, errors.New("--granularity must be none, day, week, or month")
 	}
+	switch f.sort {
+	case "", "loads", "syncs", "search_hits", "last_loaded":
+	default:
+		return nil, errors.New("--sort must be loads, syncs, search_hits, or last_loaded")
+	}
+	switch f.order {
+	case "", "desc", "asc":
+	default:
+		return nil, errors.New("--order must be desc or asc")
+	}
 	setIf(q, "granularity", f.granularity)
 	setIf(q, "from", f.from)
 	setIf(q, "to", f.to)
 	setIf(q, "limit", f.limit)
 	setIf(q, "cursor", f.cursor)
+	setIf(q, "query", f.match)
+	setIf(q, "sort", f.sort)
+	setIf(q, "order", f.order)
 	q["layer"] = f.layers
 	q["artifact"] = f.artifacts
 	q["type"] = f.types
