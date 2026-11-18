@@ -13141,6 +13141,8 @@ diagnostic that fails `--fail-on warning` is the defect this scenario catches.
 
    ```bash
    printf -- '---\nname: history-copy\ndescription:\n  text: Drafts release notes.\n---\n\nBody.\n' > "$WORK/reg/team/history-copy/SKILL.md"
+   podium sync --registry "$WORK/reg" --harness claude-code --target "$WORK/ws" --dry-run > /dev/null 2> "$WORK/dry.err"; echo "dry-run exit=$?"
+   grep -o 'the previous sync output would be kept' "$WORK/dry.err"
    podium sync --registry "$WORK/reg" --harness claude-code --target "$WORK/ws" > /dev/null 2> "$WORK/keep.err"; echo "keep exit=$?"
    grep 'team/history-copy' "$WORK/keep.err"
    ls "$WORK/ws/.claude/skills/history-copy"
@@ -13149,7 +13151,8 @@ diagnostic that fails `--fail-on warning` is the defect this scenario catches.
    podium sync --registry "$WORK/reg" --harness claude-code --target "$WORK/ws" --on-unparseable discard > /dev/null 2>&1; echo "invalid exit=$?"
    ```
 
-   **Expect.** `keep exit=1`, and the `grep` prints `rejected:
+   **Expect.** `dry-run exit=1`, and the first `grep` prints `the previous
+   sync output would be kept`. `keep exit=1`, and the next `grep` prints `rejected:
    team/history-copy (ingest.invalid_artifact): ...; the previous sync output
    was kept`. The `ls` lists `LICENSE.txt` and `SKILL.md`, the files step 4
    wrote. A missing directory means the default removed a skill that is only
@@ -13235,10 +13238,11 @@ scenario covers what an operator sees without one.
    ```
 
    **Expect.** `json exit=0`. `semantic_overlap` is
-   `{"state":"off","threshold":null,"model":null}`. Each overlap diagnostic
-   carries `peers` with one entry, the other artifact, and a `similarity`
+   `{"state":"off","threshold":null,"model":null,"computed":null,"total":null}`.
+   Each overlap diagnostic carries `peers` with one entry, the other
+   artifact, with its `description`, `type`, `layer`, and a `similarity`
    between 0.7 and 1, for example
-   `{"artifact_id":"finance/reconcile","peers":[{"artifact_id":"finance/match-invoices","similarity":0.81...}]}`.
+   `{"artifact_id":"finance/reconcile","peers":[{"artifact_id":"finance/match-invoices","description":"Reconcile supplier invoices against purchase orders before the monthly close.","type":"skill","layer":"shared","similarity":0.81...}]}`.
    `counts` is `{"error":0,"warning":3,"info":0}`. The filtered read prints
    `["finance/reconcile"]` and `{"error":0,"warning":1,"info":0}`. A filtered
    read that lists another artifact means the filter does not apply.
