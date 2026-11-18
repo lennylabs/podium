@@ -174,3 +174,31 @@ func usageCountsPurgedWithLayer(t *testing.T, s store.Store) {
 		t.Errorf("usage rows after purge:\n got %s\nwant %s", got, want)
 	}
 }
+
+// Spec: §3.3, §8.7 — summing loads adds a layer and artifact's loads across
+// the days of the range, client kinds, and harnesses; a pair with only syncs
+// or search hits, a day outside the range, and another tenant's rows are left
+// out; and pairs come back ordered by layer and artifact.
+func usageLoadsSummed(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	mustCreateTenant(t, s, "b")
+	must(t, s.AddUsageCounts(ctx, "a", []store.UsageCount{
+		usageRow("2026-11-01", "team", "x", "mcp", "claude-code", 2, 0, 1),
+		usageRow("2026-11-02", "team", "x", "sdk", "none", 3, 0, 0),
+		usageRow("2026-11-02", "org", "x", "mcp", "cursor", 1, 0, 0),
+		usageRow("2026-11-02", "team", "y", "sync", "claude-code", 0, 4, 2),
+		usageRow("2026-10-31", "team", "z", "mcp", "none", 9, 0, 0),
+	}))
+	must(t, s.AddUsageCounts(ctx, "b", []store.UsageCount{usageRow("2026-11-02", "team", "x", "mcp", "none", 7, 0, 0)}))
+	got, err := s.SumUsageLoads(ctx, "a", "2026-11-01", "2026-11-02")
+	must(t, err)
+	parts := make([]string, 0, len(got))
+	for _, l := range got {
+		parts = append(parts, fmt.Sprintf("%s|%s=%d", l.Layer, l.ArtifactID, l.Loads))
+	}
+	if want := "org|x=1 team|x=5"; strings.Join(parts, " ") != want {
+		t.Errorf("summed loads = %q, want %q", strings.Join(parts, " "), want)
+	}
+}

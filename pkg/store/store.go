@@ -556,6 +556,11 @@ type Store interface {
 	// to toDay, both YYYY-MM-DD dates and both included, ordered by day,
 	// layer, artifact, client kind, and harness.
 	ListUsageCounts(ctx context.Context, tenantID, fromDay, toDay string) ([]UsageCount, error)
+	// SumUsageLoads returns the tenant's loads from fromDay to toDay, both
+	// included, summed per layer and artifact across days, client kinds, and
+	// harnesses. A pair with no loads in the range is absent, and the result
+	// is ordered by layer and artifact.
+	SumUsageLoads(ctx context.Context, tenantID, fromDay, toDay string) ([]UsageLoads, error)
 	// DeleteUsageBefore removes the rows of every tenant whose day is before
 	// day, a YYYY-MM-DD date, and returns the number removed.
 	DeleteUsageBefore(ctx context.Context, day string) (int, error)

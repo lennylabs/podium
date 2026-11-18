@@ -111,12 +111,11 @@ type Registry struct {
 	// server-side per artifact-version snapshot; cache invalidation is
 	// keyed on ingest events"). Nil falls back to uncached resolution.
 	importCache *importCache
-	// usage carries the §3.3 learn-from-usage signal. When set, load_artifact
-	// records each access and search_artifacts / load_domain blend the
-	// access-frequency ranking into their ordering (§12 "learn-from-usage
-	// reranking surfaces signal-based ordering"). Nil leaves ranking on its
-	// lexical, vector, and author-curated order alone.
-	usage UsageSignals
+	// usageRank reads the §8.7 stored loads that search_artifacts and
+	// load_domain blend into their ordering (§3.3 learn-from-usage
+	// reranking). Nil leaves ranking on its lexical, vector, and
+	// author-curated order alone.
+	usageRank *UsageRanking
 	// usageCounts buffers the §8.7 usage counts. Nil records none.
 	usageCounts *UsageCounter
 	// admitSigner, admitObjects, and admitReadTimeout are the §13.4 stored-row
@@ -273,15 +272,6 @@ func (r *Registry) WithCacheObserver(observe func(hit bool)) *Registry {
 	if r.importCache != nil {
 		r.importCache.observe = observe
 	}
-	return r
-}
-
-// WithUsageSignals attaches the §3.3 learn-from-usage signal store so
-// load_artifact records accesses and search_artifacts / load_domain rerank by
-// access frequency (§12). Nil disables the feature; ranking stays on its
-// lexical, vector, and author-curated order. Returns the registry for chaining.
-func (r *Registry) WithUsageSignals(u UsageSignals) *Registry {
-	r.usage = u
 	return r
 }
 
@@ -788,11 +778,11 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	// §12 learn-from-usage reranking restricted to the notable pool so the
 	// signal orders the candidates within their tier without pulling in
 	// artifacts outside this domain's view.
-	notableIDs := make(map[string]bool, len(notable))
+	notableRefs := make([]usageRef, 0, len(notable))
 	for _, n := range notable {
-		notableIDs[n.ID] = true
+		notableRefs = append(notableRefs, usageRef{id: n.ID, layer: byID[n.ID].Layer})
 	}
-	notable = orderNotable(notable, knobs.featured, knobs.deprioritize, r.usageRanking(ctx, notableIDs))
+	notable = orderNotable(notable, knobs.featured, knobs.deprioritize, r.usageRanking(ctx, notableRefs))
 	if len(notable) > knobs.notableCount {
 		notable = notable[:knobs.notableCount]
 	}
@@ -1331,7 +1321,11 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 	// injecting non-matching artifacts.
 	if opts.Query != "" && len(scored) > 1 {
 		curIDs := scoredIDs(scored)
-		if usageRank := r.usageRanking(ctx, idSet(curIDs)); len(usageRank) > 0 {
+		refs := make([]usageRef, len(scored))
+		for i, sc := range scored {
+			refs[i] = usageRef{id: sc.rec.ArtifactID, layer: sc.rec.Layer}
+		}
+		if usageRank := r.usageRanking(ctx, refs); len(usageRank) > 0 {
 			fused := RRFFuse(curIDs, usageRank)
 			scored = reorderScored(scored, latestByID(filtered), fused)
 		}
@@ -1584,12 +1578,10 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 	defer func() {
 		if res != nil {
 			ev.ResultSize = 1
-			// §3.3 / §12 learn-from-usage: a resolved load is the access
-			// signal that feeds search and load_domain reranking. Recorded
-			// only on success so denied/not-found calls do not inflate counts.
-			r.recordUsage(ctx, artifactID, opts.SessionID)
 			// §8.7 usage counts: a resolved load counts under the layer
-			// that serves it.
+			// that serves it, and the count is also the §3.3
+			// learn-from-usage signal. Recorded only on success so denied
+			// and not-found calls do not inflate it.
 			r.usageCounts.recordLoad(ctx, r.TenantFor(ctx), res.Layer, res.ID)
 		}
 		r.emit(ctx, ev)

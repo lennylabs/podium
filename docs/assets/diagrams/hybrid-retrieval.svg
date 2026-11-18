@@ -2,8 +2,8 @@
   <!--
     Hybrid retrieval inside search_artifacts and search_domains. The query runs
     in parallel through BM25 and embedding similarity; results merge via
-    reciprocal rank fusion; an optional learn-from-usage rerank produces the
-    final ranking.
+    reciprocal rank fusion; for search_artifacts, a learn-from-usage rerank
+    by artifact loads produces the final ranking.
   -->
   <defs>
     <marker id="dg-arrow-hybrid-retrieval" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
@@ -135,11 +135,11 @@
   <!-- Arrow fuse -> rerank -->
   <path class="dg-line" d="M 780 220 L 826 220" marker-end="url(#dg-arrow-hybrid-retrieval)"/>
 
-  <!-- Rerank (optional, dashed border) -->
+  <!-- Rerank (search_artifacts only, dashed border) -->
   <rect class="dg-card" x="830" y="180" width="180" height="80" rx="8" stroke-dasharray="6 5"/>
   <text class="dg-name dg-t-l" x="850" y="206">Rerank</text>
   <text class="dg-sub" x="850" y="228">learn-from-usage</text>
-  <text class="dg-sub" x="850" y="248">(when enabled)</text>
+  <text class="dg-sub" x="850" y="248">(search_artifacts)</text>
 
   <!-- Output -->
   <path class="dg-line" d="M 905 260 L 905 300" marker-end="url(#dg-arrow-hybrid-retrieval)"/>
@@ -149,5 +149,5 @@
 
   <text class="dg-foot" x="40" y="410">The same retriever runs over manifest text (search_artifacts) or domain metadata (search_domains).</text>
   <text class="dg-foot" x="40" y="428">Visibility filtering applies to the candidate set before retrieval; hidden layers contribute nothing to the ranking.</text>
-  <text class="dg-foot" x="40" y="446">Rerank uses (query, loaded artifact) correlations from prior sessions; it is off by default until enough signal accrues.</text>
+  <text class="dg-foot" x="40" y="446">The rerank orders matching artifacts by how often agents loaded each one in the last 30 days.</text>
 </svg>

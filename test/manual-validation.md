@@ -256,6 +256,7 @@ rm -rf "$WORK"
 | S113 | Claude Code's top-level `when_to_use` in `SKILL.md` lints as a warning, reaches search on a SQLite registry, and stays in the materialized `SKILL.md` | solo then standalone | none | none | none |
 | S114 | The usage report counts loads, syncs, and search hits per layer, client, and harness, and reports them over time | standalone | none | none | none |
 | S115 | The usage report survives an upgrade from 0.6.0, a rollback to 0.6.0, and a second upgrade on SQLite and on Postgres | standalone then standard | none | none | Postgres (Docker) |
+| S116 | Search ranks tied artifacts by stored loads, ignores syncs, and keeps the order across a restart | standalone | none | none | none |
 
 ---
 
@@ -13662,5 +13663,67 @@ rm -rf "$WORK"
 ```
 
 Every phase stops its own server.
+
+---
+
+## S116: Search ranks tied artifacts by stored loads, ignores syncs, and keeps the order across a restart
+
+**Goal.** Validate that `search_artifacts` reorders two artifacts that tie on retrieval by how often agents loaded them, that loads by `podium sync` do not count, and that the order survives a graceful restart on the same database because the ranking reads the stored usage counts.
+
+**Covers.** The §3.3 learn-from-usage reranking over the §8.7 stored loads, through the compiled `podium` binary.
+
+**Why by hand.** The order is what a person reads in search results. A ranking that counts syncs, that forgets its order on restart, or that reads loads under the wrong layer shows only in the order of results a person compares before and after.
+
+**Prerequisites.** `sqlite3` and `jq`. The scenario binds 127.0.0.1:8180.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above. Author two skills with the same description and serve them with a one-second flush interval.
+
+   ```bash
+   for n in aaa bbb; do
+     mkdir -p "$WORK/root/tools/$n"
+     printf -- '---\nname: %s\ndescription: Shared helper for session tasks.\nmetadata:\n  version: "1.0.0"\n---\n\nBody.\n' "$n" > "$WORK/root/tools/$n/SKILL.md"
+   done
+   serve() {
+     PODIUM_USAGE_FLUSH_INTERVAL=1s podium serve --standalone --no-embeddings --layer-path "$WORK/root" --bind 127.0.0.1:8180 > "$WORK/srv.log" 2>&1 &
+     SRV=$!
+     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8180/healthz
+     server_alive "$SRV" "$WORK/srv.log"
+   }
+   order() { curl -s "http://127.0.0.1:8180/v1/search_artifacts?query=helper" | jq -c '[.results[].id]'; }
+   serve
+   order
+   ```
+
+   **Expect.** `server_alive` prints nothing, and the search prints `["tools/aaa","tools/bbb"]`, the alphabetical order of a tie.
+
+2. Sync `tools/aaa` five times, load `tools/bbb` three times as an agent, and search again.
+
+   ```bash
+   for i in 1 2 3 4 5; do curl -s -o /dev/null -H 'X-Podium-Client: kind=sync&name=podium&harness=claude-code' "http://127.0.0.1:8180/v1/load_artifact?id=tools/aaa"; done
+   for i in 1 2 3; do curl -s -o /dev/null -H 'X-Podium-Client: kind=mcp&name=podium-mcp&harness=claude-code' "http://127.0.0.1:8180/v1/load_artifact?id=tools/bbb"; done
+   order
+   ```
+
+   **Expect.** `["tools/bbb","tools/aaa"]`. The three agent loads rank `tools/bbb` first, and the five syncs of `tools/aaa` count nothing. The order before any flush also shows that the replica's unflushed loads count at once.
+
+3. Stop the server, read the stored loads, restart it on the same database, and search without loading anything.
+
+   ```bash
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   sqlite3 "$PODIUM_SQLITE_PATH" "SELECT artifact_id, SUM(loads), SUM(syncs) FROM usage_daily GROUP BY artifact_id ORDER BY artifact_id"
+   serve
+   order
+   ```
+
+   **Expect.** `sqlite3` prints `tools/aaa|0|5` and `tools/bbb|3|0`. After the restart, the search prints `["tools/bbb","tools/aaa"]`. An order that falls back to `["tools/aaa","tools/bbb"]` means the ranking does not read the stored counts.
+
+**Cleanup.**
+
+```bash
+kill "$SRV"; wait "$SRV" 2>/dev/null
+rm -rf "$WORK"
+```
 
 ---

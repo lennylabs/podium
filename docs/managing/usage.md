@@ -34,6 +34,8 @@ The registry counts three things for each artifact, per UTC day, per layer, per 
 
 The layer is the layer that serves the artifact. The client kind and the harness come from the `X-Podium-Client` header that `podium-mcp`, `podium sync`, the CLI, and the SDKs send: `podium-mcp` reports its harness, or the harness a load names, and `podium sync` reports the harness of its run. A request without the header counts under `none`. The header is self-reported, so the split between loads and syncs and the harness breakdown are as reliable as the clients that call the registry.
 
+The same load counts order search results and the notable artifacts of `load_domain`: an artifact agents loaded more often in the last 30 days ranks above an equally relevant one they loaded less. [Browsing the catalog](../consuming/browsing-the-catalog) describes the ordering.
+
 The registry counts only the calls it serves. A load `podium-mcp` answers from its workspace overlay, or from its content cache under the `offline-first` and `offline-only` cache modes, and a filesystem-source `podium sync` do not reach the registry and are not counted. The counts carry no caller identity.
 
 Counts are stored under the layer's ID. When an unregistered layer is purged at the end of its recovery window (`PODIUM_LAYER_RECOVERY_DAYS`, 30 days by default), its counts are deleted with it, including a personal layer that `podium admin erase` unregistered. A layer restored with `podium layer restore` within the window keeps its counts. A layer removed from the registry configuration, rather than unregistered, keeps its counts until retention deletes them, and a layer configured later under the same ID shows them.

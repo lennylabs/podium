@@ -8,6 +8,14 @@ import (
 	"github.com/lennylabs/podium/pkg/spi"
 )
 
+// UsageLoads is one artifact's §8.7 loads under one layer, summed over a range
+// of days. The §3.3 learn-from-usage reranking reads it.
+type UsageLoads struct {
+	Layer      string
+	ArtifactID string
+	Loads      int64
+}
+
 // ErrInvalidUsageCount is returned by AddUsageCounts when a count names no
 // day, layer, artifact, client kind, or harness, carries a day that is not a
 // YYYY-MM-DD date, or carries a negative counter.

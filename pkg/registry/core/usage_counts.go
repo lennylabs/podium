@@ -162,6 +162,25 @@ func (u *UsageCounter) Flush(ctx context.Context, st store.Store) error {
 	return first
 }
 
+// pendingLoads returns the tenant's buffered loads per layer and artifact:
+// the loads this replica served since its last successful flush, which the
+// §3.3 reranking adds to the stored loads so a load counts at once. A nil
+// counter has none.
+func (u *UsageCounter) pendingLoads(tenant string) map[usageRef]int64 {
+	if u == nil {
+		return nil
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	out := map[usageRef]int64{}
+	for k, c := range u.pending {
+		if k.tenant == tenant && c.Loads > 0 {
+			out[usageRef{id: k.artifact, layer: k.layer}] += c.Loads
+		}
+	}
+	return out
+}
+
 // restore merges counts back into the buffer after a failed flush.
 func (u *UsageCounter) restore(counts []store.UsageCount) {
 	u.mu.Lock()

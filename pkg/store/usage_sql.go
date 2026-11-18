@@ -48,6 +48,22 @@ func (s *SQLite) ListUsageCounts(ctx context.Context, tenantID, fromDay, toDay s
 	return scanUsageRows(rows)
 }
 
+// SumUsageLoads returns the tenant's loads from fromDay to toDay per layer and
+// artifact.
+func (s *SQLite) SumUsageLoads(ctx context.Context, tenantID, fromDay, toDay string) ([]UsageLoads, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT layer, artifact_id, SUM(loads)
+		FROM usage_daily
+		WHERE tenant_id = ? AND day >= ? AND day <= ? AND loads > 0
+		GROUP BY layer, artifact_id
+		ORDER BY layer, artifact_id`, tenantID, fromDay, toDay)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanUsageLoads(rows)
+}
+
 // DeleteUsageBefore removes every tenant's usage_daily rows dated before day.
 func (s *SQLite) DeleteUsageBefore(ctx context.Context, day string) (int, error) {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM usage_daily WHERE day < ?`, day)
@@ -112,6 +128,27 @@ func (p *Postgres) ListUsageCounts(ctx context.Context, tenantID, fromDay, toDay
 	return scanUsageRows(rows)
 }
 
+// SumUsageLoads returns the org's loads from fromDay to toDay per layer and
+// artifact.
+func (p *Postgres) SumUsageLoads(ctx context.Context, tenantID, fromDay, toDay string) ([]UsageLoads, error) {
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	rows, err := conn.QueryContext(ctx, `
+		SELECT layer, artifact_id, SUM(loads)
+		FROM usage_daily
+		WHERE tenant_id = $1 AND day >= $2::date AND day <= $3::date AND loads > 0
+		GROUP BY layer, artifact_id
+		ORDER BY layer, artifact_id`, tenantID, fromDay, toDay)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanUsageLoads(rows)
+}
+
 // DeleteUsageBefore removes the usage_daily rows dated before day in every
 // org schema.
 func (p *Postgres) DeleteUsageBefore(ctx context.Context, day string) (int, error) {
@@ -160,6 +197,19 @@ type usageRows interface {
 	Next() bool
 	Scan(dest ...any) error
 	Err() error
+}
+
+// scanUsageLoads reads (layer, artifact_id, loads) rows.
+func scanUsageLoads(rows usageRows) ([]UsageLoads, error) {
+	out := []UsageLoads{}
+	for rows.Next() {
+		var l UsageLoads
+		if err := rows.Scan(&l.Layer, &l.ArtifactID, &l.Loads); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 // scanUsageRows reads usage_daily rows selected in UsageCount field order.

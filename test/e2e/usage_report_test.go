@@ -182,3 +182,54 @@ func TestUsageReport_StartupRefusesBadSettings(t *testing.T) {
 		}
 	}
 }
+
+// searchOrder returns the IDs of a search_artifacts call in ranked order.
+func searchOrder(t *testing.T, base, query string) []string {
+	t.Helper()
+	st, body := getRaw(t, base+"/v1/search_artifacts?query="+query)
+	var res struct {
+		Results []struct {
+			ID string `json:"id"`
+		} `json:"results"`
+	}
+	if st != http.StatusOK || json.Unmarshal(body, &res) != nil {
+		t.Fatalf("search %q: HTTP %d %s", query, st, body)
+	}
+	out := make([]string, 0, len(res.Results))
+	for _, r := range res.Results {
+		out = append(out, r.ID)
+	}
+	return out
+}
+
+// Spec: §3.3, §8.7 — the compiled registry ranks search results that tie on
+// retrieval by loads: a load raises its artifact at once, and after a graceful
+// restart on the same database the stored loads keep the order with no new
+// load, because the ranking reads the stored counts rather than process
+// memory.
+func TestLearnFromUsage_RankingReadsStoredLoadsAcrossRestart(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	reg := writeRegistry(t, map[string]string{
+		"tools/aaa/SKILL.md": skillBodyDesc("aaa", "Shared helper for session tasks."),
+		"tools/bbb/SKILL.md": skillBodyDesc("bbb", "Shared helper for session tasks."),
+	})
+	env := []string{"HOME=" + home, "PODIUM_USAGE_FLUSH_INTERVAL=1s"}
+	srv := startServerArgs(t, env, "serve", "--standalone", "--layer-path", reg)
+	if got := searchOrder(t, srv.BaseURL, "helper"); len(got) != 2 || got[0] != "tools/aaa" {
+		t.Fatalf("control order = %v, want tools/aaa first on the alphabetical tie\n%s", got, srv.log())
+	}
+	for range 3 {
+		if st := usageGet(t, srv.BaseURL+"/v1/load_artifact?id=tools/bbb", "kind=mcp&name=podium-mcp&harness=claude-code"); st != http.StatusOK {
+			t.Fatalf("load tools/bbb: HTTP %d", st)
+		}
+	}
+	if got := searchOrder(t, srv.BaseURL, "helper"); len(got) != 2 || got[0] != "tools/bbb" {
+		t.Errorf("order after loads = %v, want tools/bbb first", got)
+	}
+	stopProc(srv.cmd)
+	again := startServerArgs(t, env, "serve", "--standalone", "--layer-path", reg)
+	if got := searchOrder(t, again.BaseURL, "helper"); len(got) != 2 || got[0] != "tools/bbb" {
+		t.Errorf("order after a restart = %v, want tools/bbb first on its stored loads\n%s", got, again.log())
+	}
+}
