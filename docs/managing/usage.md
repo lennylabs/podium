@@ -17,7 +17,8 @@ This page covers the usage report, the events that describe use, where the recor
 | Read the usage report | Any caller that can search the registry. Every total covers only the layers the caller can see. |
 | Query the stored usage counts directly | Whoever the operator grants read access to the metadata store. |
 | Read the audit records | Whoever the operator grants access to an audit destination. The registry serves no endpoint that returns audit records. |
-| Configure audit destinations, sampling, and retention, and the usage counts' flush interval and retention | Operator, through environment variables on the registry and on `podium-mcp`. |
+| Configure audit destinations, sampling, and retention | Operator, through environment variables on the registry and on `podium-mcp`. |
+| Configure the usage counts' flush interval and retention | Operator, through environment variables on the registry. |
 | Erase a user's identity from the records | Per-tenant `admin` role for `podium admin erase --registry`. The `--local` form needs file access to the audit log. |
 | Follow catalog changes as they happen | Any caller, through the change-event stream. A tenant admin registers outbound webhook receivers. |
 
@@ -53,11 +54,18 @@ podium usage --registry https://podium.acme.com --layer team-finance --days 7 --
 podium usage --registry https://podium.acme.com --artifact finance/ap/pay-invoice --artifact finance/ap/submit-invoice --json
 ```
 
+A catalog longer than one page ends the output with the `--cursor` value that lists the following artifacts:
+
+```text
+podium usage --registry https://podium.acme.com --limit 100
+podium usage --registry https://podium.acme.com --limit 100 --cursor <next_cursor>
+```
+
 The command calls [`GET /v1/usage`](../reference/http-api#usage-report), which takes the same parameters. `POST /v1/usage` takes them as a JSON body, which suits a page that reads the counts of every artifact it lists. The response holds:
 
 - `totals` for the catalog: every layer the caller can see. When the caller's token carries read scopes, such as `podium:read:finance/*`, every total in the response covers only the artifacts the scopes allow.
 - `layers`: one entry per layer, in precedence order, including layers with no counts. A layer's counts include artifacts it no longer serves.
-- `artifacts`: one entry per artifact the caller can see, including artifacts with no counts, ordered by loads, syncs, and search hits, with `last_loaded` and `last_synced` days.
+- `artifacts`: one entry per artifact the caller can see, including artifacts with no counts, ordered by loads, syncs, and search hits, with `last_loaded` and `last_synced` days. The list comes in pages of `limit` entries, 50 by default and at most 200. `artifact_count` gives the length of the whole list, and `next_cursor`, when it is not `null`, reads the next page.
 
 Each total carries `loads`, `syncs`, and `search_hits`, a `by_client` breakdown by client kind, and a `by_harness` breakdown by harness. Under `granularity` `day`, `week`, or `month`, each total also carries a `series` of periods, where weeks run Monday to Sunday and the first and last periods are cut to the window.
 
@@ -145,7 +153,7 @@ Run the examples against the registry stream. The `podium-mcp` local stream carr
 
 ## Answer common questions
 
-The usage report answers how often each artifact is loaded, synced, and found, and which artifacts go unused. The audit records answer the questions below, which need the individual calls, and they can reproduce the report's counts, because every counted call records an audit event with the same artifact, layer, client kind, and harness. The two differ where sampling drops audit events, where the receiver lacks a replica's stream, and where retention has removed a query.
+The usage report answers how often each artifact is loaded, synced, and found, and which artifacts go unused. The audit records answer the questions below, which need the individual calls, and they can reproduce the report's counts, because every counted call records an audit event with the same artifact, layer, client kind, and harness. The two differ where sampling drops audit events, where the receiver lacks a replica's stream, where retention has removed a query, and where an artifact's manifest redacts `layer` in audit records, which hides the layer of its loads from the audit stream while the report keeps it.
 
 ### Which artifacts are loaded, and how often
 

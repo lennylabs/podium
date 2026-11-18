@@ -619,7 +619,8 @@ Reports how often artifacts were loaded, synced, and returned by searches, per a
 ```
 podium usage --registry <url> [--from <date>] [--to <date>] [--days <n>]
              [--granularity none|day|week|month]
-             [--layer <id>]... [--artifact <id>]... [--json]
+             [--layer <id>]... [--artifact <id>]...
+             [--limit <n>] [--cursor <cursor>] [--json]
 ```
 
 | Flag | Effect |
@@ -629,10 +630,12 @@ podium usage --registry <url> [--from <date>] [--to <date>] [--days <n>]
 | `--granularity <g>` | `none` (the default), `day`, `week`, or `month`. A value other than `none` adds a series to every total and prints the catalog's periods. |
 | `--layer <id>` | Restrict the report to a layer. Repeat it to name several. |
 | `--artifact <id>` | Restrict the artifact list to an artifact. Repeat it to name several. |
+| `--limit <n>` | The most artifacts to list, from 1 to 200. Defaults to 50. |
+| `--cursor <cursor>` | List the artifacts after an earlier report's page, using the cursor that report printed or its `next_cursor`. |
 | `--json` | Write the response object on standard output. |
 | `--registry <url>` | Registry URL. Required; defaults to `PODIUM_REGISTRY`. |
 
-Without `--json`, the command prints a table of artifacts with their loads, syncs, search hits, and last loaded day, then a table of layers, then the catalog's periods under a granularity, then the window and the totals:
+Without `--json`, the command prints a table of artifacts with their loads, syncs, search hits, and last loaded day, then a table of layers, then the catalog's periods under a granularity, then the window and the totals. When more artifacts remain, a last line gives the number listed and the `--cursor` value for the next page:
 
 ```
    LOADS    SYNCS SEARCHES  LAST LOAD   ARTIFACT
@@ -643,9 +646,10 @@ Without `--json`, the command prints a table of artifacts with their loads, sync
       30       72       43  team-finance
 
 2026-10-20 to 2026-11-18: 30 loads, 72 syncs, 43 search hits
+2 of 8 artifacts listed; read the next ones with --cursor eyJsIjowLCJzIjoxMiwiaCI6MywiaWQiOiJmaW5hbmNlL2FwL3N1Ym1pdC1pbnZvaWNlIn0
 ```
 
-The command exits 0 on a report, 1 when the response is an error envelope, which it prints on standard error, and 2 on a usage error: a missing `--registry`, a `--days` that is not a positive integer, `--days` combined with `--from` or `--to`, or an unknown `--granularity`.
+The command exits 0 on a report, 1 when the response is an error envelope, which it prints on standard error, and 2 on a usage error: a missing `--registry`, a `--days` or `--limit` that is not a positive integer, `--days` combined with `--from` or `--to`, or an unknown `--granularity`.
 
 ### `podium domain show`
 
