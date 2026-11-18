@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { gzipSync } from "node:zlib";
 
 import { SITE_DIR } from "./config";
 import type { RouteIndex } from "./content/links";
@@ -35,7 +36,8 @@ export type CheckInput = {
   pages: PageModel[];
   nav: NavNode[];
   index: RouteIndex;
-  searchIndexBytes: number;
+  /** Size of the serialized search index after gzip compression, in bytes. */
+  searchIndexGzipBytes: number;
 };
 
 /**
@@ -135,14 +137,22 @@ function resolvesToRoute(path: string, index: RouteIndex): boolean {
   return candidates.some((candidate) => index.routes.has(candidate));
 }
 
+/**
+ * Returns the size of text after gzip compression at the default level, which
+ * is what a static host that compresses responses sends for the search index.
+ */
+export function gzippedBytes(text: string): number {
+  return gzipSync(Buffer.from(text, "utf8")).length;
+}
+
 function checkSearchIndexSize(input: CheckInput, diagnostics: BuildDiagnostic[]): void {
-  if (input.searchIndexBytes <= input.config.searchIndexLimitBytes) return;
+  if (input.searchIndexGzipBytes <= input.config.searchIndexLimitGzipBytes) return;
   diagnostics.push({
     file: "site/src/build/search.ts",
     line: null,
     column: null,
-    message: `the search index is ${Math.round(input.searchIndexBytes / 1024)}kB, over the ${Math.round(
-      input.config.searchIndexLimitBytes / 1024,
+    message: `the search index is ${Math.round(input.searchIndexGzipBytes / 1024)}kB gzipped, over the ${Math.round(
+      input.config.searchIndexLimitGzipBytes / 1024,
     )}kB limit. Split it per section, or raise the limit deliberately`,
   });
 }

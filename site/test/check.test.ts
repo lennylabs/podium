@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   checkContrast,
   contrastRatio,
+  gzippedBytes,
   readThemes,
   runChecks,
   type CheckInput,
@@ -78,7 +79,7 @@ function inputFor(overrides: Partial<CheckInput> & { config: SiteConfig }): Chec
     pages: [],
     nav: [] as NavNode[],
     index: indexFor([]),
-    searchIndexBytes: 0,
+    searchIndexGzipBytes: 0,
     ...overrides,
   };
 }
@@ -171,19 +172,19 @@ describe("checkContrast", () => {
 });
 
 describe("checkSearchIndexSize", () => {
-  it("passes when the serialized index is inside the limit", () => {
-    const config = configFor(scratchRepo(), "docs", { searchIndexLimitBytes: 1024 });
+  it("passes when the gzipped index is inside the limit", () => {
+    const config = configFor(scratchRepo(), "docs", { searchIndexLimitGzipBytes: 1024 });
 
-    expect(runChecks(inputFor({ config, searchIndexBytes: 1024 }))).toEqual([]);
+    expect(runChecks(inputFor({ config, searchIndexGzipBytes: 1024 }))).toEqual([]);
   });
 
-  it("fails when the serialized index is over the limit", () => {
+  it("fails when the gzipped index is over the limit", () => {
     const config = configFor(scratchRepo(), "docs", {
-      searchIndexLimitBytes: 600 * 1024,
+      searchIndexLimitGzipBytes: 600 * 1024,
     });
 
     const diagnostics = runChecks(
-      inputFor({ config, searchIndexBytes: 700 * 1024 }),
+      inputFor({ config, searchIndexGzipBytes: 700 * 1024 }),
     );
 
     expect(diagnostics).toEqual([
@@ -192,9 +193,15 @@ describe("checkSearchIndexSize", () => {
         line: null,
         column: null,
         message:
-          "the search index is 700kB, over the 600kB limit. Split it per section, or raise the limit deliberately",
+          "the search index is 700kB gzipped, over the 600kB limit. Split it per section, or raise the limit deliberately",
       },
     ]);
+  });
+
+  it("measures the index gzipped, which is what a reader downloads", () => {
+    const repetitive = "skill ".repeat(10_000);
+    expect(gzippedBytes(repetitive)).toBeLessThan(Buffer.byteLength(repetitive) / 10);
+    expect(gzippedBytes("")).toBeGreaterThan(0);
   });
 });
 

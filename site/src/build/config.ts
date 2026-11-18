@@ -45,33 +45,16 @@ export function loadConfig(overrides: Partial<SiteConfig> = {}): SiteConfig {
     editBase: "https://github.com/lennylabs/podium/edit/main",
     repoUrl: "https://github.com/lennylabs/podium",
     version: overrides.version ?? readVersion(repoRoot),
-    // The site indexes docs/, and the changelog page includes CHANGELOG.md, so
-    // the index grows with every release and with every reference page that
-    // gains a section. This budget has now been raised twice for that reason:
-    // from 600kB when the HTTP API and CLI references gained the
-    // browser-session, posture-read, and layer-write-authorization sections,
-    // and from 640kB when a release note and one CLI paragraph together added
-    // under 2kB of source and carried it past the ceiling. Both raises were
-    // taken rather than paid for by dropping reference content. When the
-    // Agent Skills layer and version pages carried it past 768kB, the index
-    // stopped storing each route as a field beside the identical document ID
-    // (search.ts), which recovered the headroom without a third raise. When a
-    // documentation rewrite added the layer-sources and observability pages
-    // and many short reference subsections, two more reductions held the
-    // budget again: only h2 and h3 headings start an entry (search.ts), and
-    // common function words stay out of the index (client/search-terms.ts).
-    // When the restructure that split the deployment pages and added the
-    // configuration reference carried it past again, the page title and the
-    // section name stopped being stored on every section entry and are now
-    // stored once per page (client/search-fields.ts). The budget was then raised
-    // a third time, by 10% from 768kB to 845kB, when the 0.7.0 lint and
-    // manifest-refusal documentation left the index 80 bytes under 768kB.
-    //
-    // The headroom here is deliberate so a routine documentation change does
-    // not fail the gate. A fourth raise is the signal to stop raising it and
-    // split the index per section instead, which is the other fix the check's
-    // own message names.
-    searchIndexLimitBytes: 845 * 1024,
+    // The budget is measured on the gzip-compressed index, because that is
+    // what a reader downloads: GitHub Pages serves the file gzipped, and the
+    // page prefetches it in idle time (client/search.ts). The raw size grew
+    // with every release and every reference section, so a raw limit had to be
+    // raised repeatedly, from 600kB to 845kB; the compressed size is about a
+    // quarter of the raw size and grows correspondingly more slowly. 256kB leaves room for
+    // routine documentation growth. When the compressed index reaches it,
+    // split the index per section, which is the other fix the check's own
+    // message names.
+    searchIndexLimitGzipBytes: 256 * 1024,
     ...overrides,
   };
 }

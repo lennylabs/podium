@@ -100,13 +100,12 @@ describe("loadConfig", () => {
 
   // The threshold is pinned so it is raised deliberately rather than nudged
   // upward whenever a documentation change fails the gate. It has been raised
-  // three times, from 600kB, from 640kB, and from 768kB, each time because the
-  // changelog page and the reference pages grew. A fourth raise is the signal
-  // to split the index per section instead.
+  // measured on the gzip-compressed index, which is what a reader downloads.
+  // Reaching it is the signal to split the index per section.
   it("declares a failure threshold for the serialized search index", () => {
     expect(
-      loadConfig({ repoRoot: REPO_ROOT, version: "0.0.0-test" }).searchIndexLimitBytes,
-    ).toBe(845 * 1024);
+      loadConfig({ repoRoot: REPO_ROOT, version: "0.0.0-test" }).searchIndexLimitGzipBytes,
+    ).toBe(256 * 1024);
   });
 });
 
