@@ -253,6 +253,13 @@ class LoadedArtifact:
     # empty, because no registry served the record.
     delivery_hash: str = ""
     delivery_signature: str = ""
+    # spec: §7.2 (Deprecation members), §4.7.4 — the registry's lifecycle
+    # signal: whether the served version is deprecated, the upgrade target,
+    # and the warning a load returns, including the one a latest load returns
+    # when it serves an older version because the newest is deprecated.
+    deprecated: bool = False
+    replaced_by: str = ""
+    deprecation_warning: str = ""
 
     def materialize(
         self,
@@ -319,6 +326,13 @@ class BatchResult:
     # fields empty, because no registry served the record.
     delivery_hash: str = ""
     delivery_signature: str = ""
+    # spec: §7.2 (Deprecation members), §4.7.4 — the registry's lifecycle
+    # signal: whether the served version is deprecated, the upgrade target,
+    # and the warning a load returns, including the one a latest load returns
+    # when it serves an older version because the newest is deprecated.
+    deprecated: bool = False
+    replaced_by: str = ""
+    deprecation_warning: str = ""
     error: "RegistryError | None" = None
 
     def materialize(
@@ -515,6 +529,9 @@ def _batch_result_from(
         resources=entry.served.references,
         delivery_hash=entry.served.hash,
         delivery_signature=entry.served.signature,
+        deprecated=entry.served.deprecated,
+        replaced_by=entry.served.replaced_by,
+        deprecation_warning=entry.served.deprecation_warning,
     )
 
 
@@ -1503,6 +1520,9 @@ class Client:
             large_resources=served.links,
             delivery_hash=served.hash,
             delivery_signature=served.signature,
+            deprecated=served.deprecated,
+            replaced_by=served.replaced_by,
+            deprecation_warning=served.deprecation_warning,
         )
 
     def load_artifacts(

@@ -71,12 +71,14 @@ replaced_by: finance/ap/pay-invoice
 A consumer sees the deprecation as follows:
 
 - A `load_artifact` response for a deprecated version carries `deprecated: true`, `replaced_by`, and `deprecation_warning`, such as `artifact is deprecated; replaced_by finance/ap/pay-invoice`. Every load of an artifact whose manifest sets `replaced_by` returns it, whether or not the version is deprecated.
+- A `latest` load whose newest version is deprecated serves the newest earlier version that is not, and carries a `deprecation_warning` that names the deprecated version and its `replaced_by`, such as `version 2.0.0 of finance/ap/pay-vendor is deprecated; replaced_by finance/ap/pay-invoice; this load serves version 1.4.0`. It returns that `replaced_by` when the served version names none.
+- `podium-mcp` passes the three members to the agent in the `load_artifact` tool result, `podium artifact show` prints the warning on standard error, and both SDKs expose the members on the loaded artifact.
 - Default `search_artifacts` results leave out an artifact whose resolved version is deprecated.
 - The registry records `artifact.deprecated` in the audit log, emits it on the change-event stream, and delivers it to webhook receivers that subscribe to it. `podium sync --watch` re-syncs on it.
 - A consumer decides what to do with the warning. [Handling artifact responses](../consuming/handling-artifact-responses) describes the recommended handling.
 
 > [!WARNING]
-> `latest` skips deprecated versions. When an artifact has earlier versions that are not deprecated, a load of `latest` and a search resolve to the newest of those earlier versions, which carries no deprecation warning. Only when every version of the artifact is deprecated does `latest` resolve to the newest version and return the warning. After the ingest, check which version `latest` serves with `podium artifact show <id> --json`, whose `version` member names it.
+> `latest` skips deprecated versions. When an artifact has earlier versions that are not deprecated, a load of `latest` and a search resolve to the newest of those earlier versions. The load carries the warning about the deprecated newest version, and the search result carries none. Only when every version of the artifact is deprecated does `latest` resolve to the newest version. After the ingest, check which version `latest` serves with `podium artifact show <id> --json`, whose `version` member names it and whose `deprecation_warning` member names the deprecated version.
 
 A store retention sweep purges a deprecated version `PODIUM_DEPRECATED_RETENTION_DAYS` days after it was deprecated, 90 by default. [Store retention](../reference/configuration#store-retention) lists the setting.
 
