@@ -211,3 +211,21 @@ func TestUsageReport_Parameters(t *testing.T) {
 		}
 	}
 }
+
+// Spec: §8.7 — a public-mode caller's report covers every layer, and a
+// registry with no layer list, such as one serving a filesystem source,
+// lists the layers of the artifacts it serves.
+func TestUsageReport_PublicAndUnlayeredRegistries(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	seedUsage(t, f)
+	pub, err := f.reg.UsageReport(context.Background(), publicID, q(nil)())
+	if err != nil || !reflect.DeepEqual(layerIDs(pub), []string{"team", "secret"}) || pub.Totals.Loads != 18 {
+		t.Errorf("public report: layers %v loads %d err %v", layerIDs(pub), pub.Totals.Loads, err)
+	}
+	bare := core.New(f.st, "t", nil)
+	rep, err := bare.UsageReport(context.Background(), usageAlice, q(nil)())
+	if err != nil || !reflect.DeepEqual(layerIDs(rep), []string{"secret", "team"}) || rep.Totals.Loads != 18 {
+		t.Errorf("unlayered report: layers %v loads %d err %v", layerIDs(rep), rep.Totals.Loads, err)
+	}
+}

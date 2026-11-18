@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -66,5 +68,25 @@ func TestUsageCmd_UsageErrors(t *testing.T) {
 		if code := usageCmd(args); code != 2 {
 			t.Errorf("usage %v: exit %d, want 2", args, code)
 		}
+	}
+}
+
+// Spec: §8.7 — podium usage passes its window, granularity, and repeated
+// layer and artifact flags as query parameters and prints the report.
+func TestUsageCmd_PassesParameters(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.RawQuery
+		_, _ = w.Write([]byte(usageFixture))
+	}))
+	defer srv.Close()
+	code := usageCmd([]string{"--registry", srv.URL, "--from", "2026-11-01", "--to", "2026-11-18", "--granularity", "week",
+		"--layer", "team", "--artifact", "ops/greet", "--artifact", "ops/farewell"})
+	want := "artifact=ops%2Fgreet&artifact=ops%2Ffarewell&from=2026-11-01&granularity=week&layer=team&to=2026-11-18"
+	if code != 0 || got != want {
+		t.Errorf("exit %d query %q, want 0 and %q", code, got, want)
+	}
+	if code := usageCmd([]string{"--registry", srv.URL, "--days", "7"}); code != 0 || got != "days=7" {
+		t.Errorf("--days: exit %d query %q", code, got)
 	}
 }
