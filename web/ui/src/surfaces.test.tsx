@@ -12815,16 +12815,24 @@ describe("the layer write flows", () => {
   // Leaving the region alone leaves the previous move's confirmation standing
   // as the answer to a press that moved nothing.
   it("announces that an arrow key stepped off the end of the block", async () => {
-    stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
-      "/v1/layers": {
-        body: { layers: [adminLayer(), userLayer(), scratchLayer()] },
-      },
-      "/v1/layers/reorder": { body: { layers: [] } },
-    });
+    // Each committed move re-reads the layer list, so the list answers in the
+    // order the move produced, as the registry does. A list that kept
+    // answering in the first order would put the row back between key
+    // presses whenever its re-read landed first, and the next press would
+    // then start from the wrong place.
+    const listed = (layers: Record<string, unknown>[]) =>
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+        "/v1/layers": { body: { layers } },
+        "/v1/layers/reorder": { body: { layers: [] } },
+      });
+    const layerReads = () => requests.filter((r) => r.url === "/v1/layers" && r.method === "GET").length;
+    listed([adminLayer(), userLayer(), scratchLayer()]);
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
+    listed([adminLayer(), { ...scratchLayer(), order: 2 }, { ...userLayer(), order: 3 }]);
+    let reads = layerReads();
     fireEvent.keyDown(
       screen.getByLabelText(moveHandleLabel("alice-personal")),
       { key: "ArrowDown" },
@@ -12833,9 +12841,12 @@ describe("the layer write flows", () => {
       expect(screen.getByTestId("panel-announcement").textContent).toBe(
         "alice-personal moved to order 3 of 3.",
       );
+      expect(layerReads()).toBeGreaterThan(reads);
     });
     // The step down left the row last in its class block, so the step back
     // up is a move the block can make and the one after it is the refusal.
+    listed([adminLayer(), userLayer(), scratchLayer()]);
+    reads = layerReads();
     fireEvent.keyDown(
       screen.getByLabelText(moveHandleLabel("alice-personal")),
       { key: "ArrowUp" },
@@ -12844,6 +12855,7 @@ describe("the layer write flows", () => {
       expect(screen.getByTestId("panel-announcement").textContent).toBe(
         "alice-personal moved to order 2 of 3.",
       );
+      expect(layerReads()).toBeGreaterThan(reads);
     });
     fireEvent.keyDown(
       screen.getByLabelText(moveHandleLabel("alice-personal")),
