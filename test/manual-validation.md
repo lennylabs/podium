@@ -13396,7 +13396,9 @@ so it needs no embedding provider, and it binds 127.0.0.1:8176.
 Claude Code defines, lints with a warning rather than an error, resolves the
 skill's `when_to_use` so that lexical search on a SQLite registry matches a
 word only that key holds, stays byte-for-byte in the `SKILL.md` a Claude Code
-sync writes, and is an error when it disagrees with `metadata.when_to_use`.
+sync writes, and is an error when it disagrees with `metadata.when_to_use`;
+and that a skill stating `when_to_use` in `metadata` alone gets the top-level
+key in the `SKILL.md` a Claude Code sync writes and in no other harness's.
 
 **Covers.** The §4.3.4 top-level `when_to_use`, its lint diagnostics, and the
 §4.7 projection that search reads, through the compiled `podium` binary.
@@ -13469,6 +13471,23 @@ lines, the search response, and the written file together.
    metadata.when_to_use [At session start.]
    (lint.skill_artifact_field_mismatch)`, and the last line is
    `lint exit=1`.
+
+5. Drop the top-level key, so the skill states `when_to_use` in `metadata`
+   alone, and sync for Claude Code and for Cursor.
+
+   ```bash
+   printf -- '---\nname: greet\ndescription: Greet the user.\nmetadata:\n  version: "1.0.0"\n  when_to_use: |\n    At session start.\n    When a teammate joins.\n---\n\nBody.\n' > "$WORK/root/ops/greet/SKILL.md"
+   podium sync --registry "$WORK/root" --target "$WORK/claude" --harness claude-code > /dev/null; echo "claude exit=$?"
+   podium sync --registry "$WORK/root" --target "$WORK/cursor" --harness cursor > /dev/null; echo "cursor exit=$?"
+   sed -n 2p "$WORK/claude/.claude/skills/greet/SKILL.md"
+   grep -c '^when_to_use:' "$WORK/cursor/.cursor/skills/greet/SKILL.md"
+   ```
+
+   **Expect.** `claude exit=0`, `cursor exit=0`, then the line
+   `when_to_use: "At session start.\nWhen a teammate joins."`, the top-level
+   key Claude Code reads, and `0`, because no other harness defines the key.
+   A Claude Code `SKILL.md` whose second line is `name: greet` means the
+   adapter did not write the key.
 
 **Cleanup.** `rm -rf "$WORK"`. Step 3 stops the server.
 
