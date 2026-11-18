@@ -23,13 +23,14 @@ type usageRequest struct {
 	Granularity string   `json:"granularity"`
 	Layers      []string `json:"layers"`
 	Artifacts   []string `json:"artifacts"`
+	Types       []string `json:"types"`
 	Limit       *int     `json:"limit"`
 	Cursor      string   `json:"cursor"`
 }
 
 // handleUsage serves the §8.7 usage report. GET /v1/usage takes from, to,
-// days, granularity, limit, cursor, and repeated layer and artifact query
-// parameters, and POST /v1/usage
+// days, granularity, limit, cursor, and repeated layer, artifact, and type
+// query parameters, and POST /v1/usage
 // takes the same parameters as a JSON body for a list too long for a query
 // string. Any caller that can search can call it: the request passes through
 // the same identity verification, tenant routing, and browser-session
@@ -74,7 +75,7 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 // the range checks run in the core for both methods.
 func usageQueryFromURL(q url.Values) (core.UsageQuery, error) {
 	query := core.UsageQuery{From: q.Get("from"), To: q.Get("to"), Granularity: q.Get("granularity"),
-		LayerIDs: q["layer"], ArtifactIDs: q["artifact"], Cursor: q.Get("cursor")}
+		LayerIDs: q["layer"], ArtifactIDs: q["artifact"], Types: q["type"], Cursor: q.Get("cursor")}
 	var err error
 	if query.Days, err = positiveParam(q, "days"); err != nil {
 		return core.UsageQuery{}, err
@@ -107,7 +108,7 @@ func usageQueryFromBody(body io.Reader) (core.UsageQuery, error) {
 		return core.UsageQuery{}, errors.New("usage request body: " + err.Error())
 	}
 	query := core.UsageQuery{From: req.From, To: req.To, Granularity: req.Granularity,
-		LayerIDs: req.Layers, ArtifactIDs: req.Artifacts, Cursor: req.Cursor}
+		LayerIDs: req.Layers, ArtifactIDs: req.Artifacts, Types: req.Types, Cursor: req.Cursor}
 	var err error
 	if query.Days, err = positiveField(req.Days, "days"); err != nil {
 		return core.UsageQuery{}, err

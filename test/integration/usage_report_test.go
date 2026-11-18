@@ -272,3 +272,21 @@ func TestUsageReport_HTTPPages(t *testing.T) {
 		t.Errorf("second page: %+v after %+v", second, first)
 	}
 }
+
+// Spec: §8.7 — GET with repeated type parameters and POST with a types member
+// restrict the artifact list the same way, and an unknown type lists nothing.
+func TestUsageReport_HTTPTypeFilter(t *testing.T) {
+	t.Parallel()
+	h, _ := usageHarness(t)
+	_, get := usageCall(t, h, http.MethodGet, "/v1/usage?type=skill&type=agent", "", "alice", "", "")
+	_, post := usageCall(t, h, http.MethodPost, "/v1/usage", `{"types":["skill","agent"]}`, "alice", "", "")
+	if get != post {
+		t.Errorf("GET and POST type filters differ:\nGET  %s\nPOST %s", get, post)
+	}
+	if rep := decodeUsage(t, get); len(rep.Artifacts) == 0 {
+		t.Errorf("type=skill&type=agent lists no artifact: %s", get)
+	}
+	if _, none := usageCall(t, h, http.MethodGet, "/v1/usage?type=no-such-type", "", "alice", "", ""); len(decodeUsage(t, none).Artifacts) != 0 {
+		t.Errorf("an unknown type lists artifacts: %s", none)
+	}
+}
