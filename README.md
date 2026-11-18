@@ -13,7 +13,7 @@ An enterprise-grade registry for reusable agent skills and other artifacts.
 
 Podium stores skills, agents, rules, hooks, and MCP server registrations as
 canonical artifacts. A Podium server signs each artifact at
-ingest, decides which callers can see it, and records every load and search in
+ingest by default, decides which callers can see it, and records every load and search in
 an audit log. Podium delivers each artifact into the native format of every
 harness that uses it.
 
@@ -95,8 +95,8 @@ cd podium && go build -o ~/.local/bin/podium ./cmd/podium
   domain folder can carry a `DOMAIN.md` that adds a description, keywords, and
   featured artifacts. See
   [Domains](https://lennylabs.github.io/podium/authoring/domains).
-- **Materialization and discovery.** Artifacts reach a workspace in one of
-  two ways. `podium sync` writes a chosen subset of the catalog into a
+- **Materialization and discovery.** Artifacts reach a workspace through
+  sync or through discovery on demand. `podium sync` writes a chosen subset of the catalog into a
   workspace ahead of time. Include globs, exclude globs, and artifact types
   select the subset, and a named profile stores that selection in `sync.yaml`,
   so one command switches between scopes. Alternatively, the `podium-mcp` stdio
@@ -119,19 +119,20 @@ cd podium && go build -o ~/.local/bin/podium ./cmd/podium
   [Connecting layer sources](https://lennylabs.github.io/podium/deployment/content/layer-sources)
   and [Layered composition](https://lennylabs.github.io/podium/deployment/content/layers).
 - **Security and access control.** A Podium server signs each artifact
-  version at ingest. The MCP server and `podium sync` against a server verify
+  version at ingest by default. The MCP server and `podium sync` against a server verify
   the signature before they write the artifact. Each layer declares who can see it:
   everyone, every authenticated user in the organization, the members of named
   OIDC groups, or named users. The registry evaluates visibility on every call,
   which requires an identity provider. Loads, searches, ingests, and admin
   changes are recorded in a hash-chained audit log. See
   [Access control](https://lennylabs.github.io/podium/deployment/content/access-control).
-- **Usage metrics.** Every search and every load is an audit event that
-  records the artifact or the query and the client that made the call. The
-  registry exports audit events to a local file, stdout, HTTP receivers that
-  accept NDJSON, or an OpenTelemetry Collector over OTLP, and a log pipeline
-  that receives them counts searches and loads per artifact. Podium has no
-  built-in usage report. See
+- **Usage metrics.** Every load is an audit event that records the artifact
+  and the client that made the call, and every search is an audit event that
+  records the query, its result count, and the client. The registry exports
+  audit events to a local file, stdout, HTTP receivers that accept NDJSON, or
+  an OpenTelemetry Collector over OTLP, and a log pipeline that receives them
+  counts loads per artifact and searches per query. Podium has no built-in
+  usage report. See
   [Seeing how the catalog is used](https://lennylabs.github.io/podium/managing/usage).
 - **Overlap detection.** Word-based checks flag artifacts with copied or
   templated descriptions and duplicated prose. `podium lint` runs them in every
@@ -160,11 +161,11 @@ before it does and adds server-side capability.
 | Mode | Server-side deployment | Catalog source | Materialization | What the mode adds |
 |:--|:--|:--|:--|:--|
 | [Local](https://lennylabs.github.io/podium/deployment/modes/local) | None | A folder, read from disk | User-driven sync | Authoring, lint, sync, domains, profiles, ordered layers from disk, and word-based overlap checks |
-| [Single node](https://lennylabs.github.io/podium/deployment/modes/single-node) | One binary | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in local, plus discovery through MCP or the SDKs, hybrid search, registered and remote layers with per-user visibility, the semantic overlap check, an audit log with file, HTTP, and OTLP destinations, multi-tenancy, and SCIM group sync |
+| [Single node](https://lennylabs.github.io/podium/deployment/modes/single-node) | One binary | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in local, plus discovery through MCP or the SDKs, hybrid search, registered and remote layers with per-user visibility, the semantic overlap check, an audit log with file, stdout, HTTP, and OTLP destinations, multi-tenancy, and SCIM group sync |
 | [Clustered](https://lennylabs.github.io/podium/deployment/modes/clustered) | Replicas, Postgres, and object storage | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in single node, plus Postgres schema-per-org tenant isolation and high availability across registry replicas |
 
-Artifact signing runs on every registry server, so a single node signs at
-ingest as a clustered deployment does. The artifacts are the same in every
+Artifact signing is on by default on every registry server, so a single node
+signs at ingest as a clustered deployment does. The artifacts are the same in every
 mode. The catalog on disk does not change when the deployment changes. The
 same shared Go library parses, composes, and materializes it everywhere, so a given target and profile produce
 bit-identical output.

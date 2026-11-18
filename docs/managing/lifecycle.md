@@ -47,7 +47,7 @@ Before changing or retiring an artifact, list the artifacts that reference it:
 
 - `podium impact <artifact-id> --registry <url>` prints the artifacts that depend on it.
 - `GET /v1/dependents?id=<artifact-id>` returns the same edges under `edges`, each with `from`, `to`, and `kind`. An edge's `kind` is `delegates_to` or `mcpServers`.
-- The SDKs expose the query as `dependents_of()`.
+- The SDKs expose the query as `dependents_of()` in Python and `dependentsOf()` in TypeScript.
 
 Query by the canonical ID without an `@version` suffix, because a query that carries one matches no edge. An edge appears only when the caller can see both of its artifacts, and a query against an artifact the caller cannot see answers with an empty list. An empty result therefore does not prove that nothing depends on the artifact. Run the check as an identity whose view covers every layer that could reference it. [`dependents`](../reference/http-api#dependents) gives the response and its rules.
 

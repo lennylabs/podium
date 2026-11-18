@@ -1114,6 +1114,7 @@ POST /v1/layers/reingest?id={id}
 | `rejected` | Each artifact the cycle dropped for a reason other than a lint failure or a same-version content conflict. Each entry carries `artifact_id`, `code`, and `reason`, and a `details` object when the rule that rejected it defines one. |
 | `conflicts` | Same-version content conflicts. |
 | `lint_failures` | The count of lint failures. Lint failures are reported only as this count. |
+| `advisories` | The cycle's non-blocking advisories, such as the catalog advisories over the ingested layer and, on a collocated vector backend with the semantic check on, `lint.semantic_overlap`. Each entry carries `artifact_id`, `code`, `severity`, and `message`. An advisory does not stop the artifact from being ingested. |
 
 An artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter does not parse is rejected with `details: {"constraint": "manifest_unparseable"}`, and its `reason` names the file and the parse error. An `ARTIFACT.md` that declares `extends:` is rejected with `details: {"constraint": "extends_removed"}`. An `ARTIFACT.md` that declares the removed type `command` or `context` is rejected with `details: {"constraint": "type_removed"}`. The refusals run in that order, so an unparseable manifest reports `manifest_unparseable`, and an `ARTIFACT.md` that declares both `extends:` and a removed type reports `extends_removed`. All three refusals run before lint, so such an artifact appears in `rejected` and is never counted in `lint_failures`, whatever lint rule it also fails. The other artifacts of the layer are ingested.
 
@@ -1531,7 +1532,7 @@ POST /v1/admin/overlap/rebuild
 
 **Authorization.** The same as [Reembed](#reembed): the admin role, except on a registry that authenticates no caller, which admits the request.
 
-**Response.** The number of artifacts computed and the number whose index query failed. A computation stores nothing and counts in neither number when its artifact gains a newer served version first, because the computation of the newer version is due.
+**Response.** The number of artifacts computed and the number whose computation failed. A computation fails when its stored-vector read, its index query, or its scoring fails, or when the registry cannot store its records. A computation stores nothing and counts in neither number when its artifact gains a newer served version first, because the computation of the newer version is due.
 
 ```json
 { "computed": 42, "failed": 0 }
@@ -1544,7 +1545,7 @@ A computation replaces the records the artifact owns and leaves the records its 
 | Code | When |
 |:--|:--|
 | `403 auth.forbidden` | The caller is not an admin. |
-| `500 registry.unavailable` | `PODIUM_LINT_SEMANTIC_OVERLAP` is off or no search index is configured. The registry computes nothing. |
+| `500 registry.unavailable` | `PODIUM_LINT_SEMANTIC_OVERLAP` is off or no search index is configured. The registry computes nothing, and the envelope carries `retryable: false`, because the request cannot succeed until the operator changes the configuration. In that configuration neither the startup pass nor the sweep runs. |
 | `503 registry.read_only` | The registry is in read-only mode. The endpoint is a write endpoint. |
 
 **Notes.**

@@ -12997,7 +12997,7 @@ sync, and a registry reingest still process every other artifact of its layer.
 
 **Covers.** The §4.1 unparseable-manifest rule and the §13.11.3 keep and remove setting, the §4.3.4 `allowed-tools`
 row, nested `metadata` values, and skill-artifact lint severities, the §4.4 prose-reference rule, the
-§7.3.1 `lint.near_duplicate_content` units, §13.11.3, and the §7.3.1 ingest
+§7.3.1 `lint.near_duplicate_content` units, and the §7.3.1 ingest
 outcome, through the compiled `podium` binary.
 
 **Why by hand.** An operator reads the lint lines, the `--json` envelope, the

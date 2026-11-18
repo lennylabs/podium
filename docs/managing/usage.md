@@ -9,7 +9,7 @@ description: Answer usage questions from the audit records, such as which artifa
 The registry records every discovery and load call as an audit event. This page covers the events that describe use, where the records are read, how to answer common questions from them, how to audit changes to the catalog itself, and the privacy controls that apply to the records.
 
 > [!IMPORTANT]
-> Podium has no built-in usage report. No command, endpoint, or web view reports how often an artifact is loaded or searched for. The answers on this page come from the audit records, read in the system that receives them.
+> Podium has no built-in usage report. No command, endpoint, or web view reports how often an artifact is loaded or how often a query is searched. The answers on this page come from the audit records, read in the system that receives them.
 
 ## Who can do this
 
@@ -28,7 +28,7 @@ The registry records one event for each meta-tool call it serves, whether an age
 
 | Event | Recorded when | Members that describe the call |
 |:--|:--|:--|
-| `artifact.loaded` | A caller loaded an artifact through `load_artifact`. A server-source `podium sync` loads each artifact it writes this way. | `target` holds the artifact ID. On a load that resolves, `context` holds `version`, `content_hash`, and `layer`, and `result_size` is `1`. |
+| `artifact.loaded` | A caller loaded an artifact through `load_artifact`. A server-source `podium sync` loads every artifact of the caller's effective view this way on each run and applies the workspace's scope after the loads. | `target` holds the artifact ID. On a load that resolves, `context` holds `version`, `content_hash`, and `layer`, and `result_size` is `1`. |
 | `artifacts.searched` | A caller invoked `search_artifacts`. | `context` holds `query`, `scope`, and `type`, and `result_size` holds the number of results returned. |
 | `domain.loaded` | A caller invoked `load_domain`. | `target` holds the domain path, and `result_size` holds the number of subdomains and notable entries returned. |
 | `domains.searched` | A caller invoked `search_domains`. | `context` holds `query` and `scope`, and `result_size` holds the number of domains returned. |
@@ -63,7 +63,7 @@ The operator lists the registry stream's destinations in `PODIUM_AUDIT_LOG_PATH`
 | OpenTelemetry Collector | One log record per audit record, with the record's JSON as the log body. |
 | Standard output | One JSON line per record. The Helm chart writes here by default, so the records land in the container log. |
 
-Each registry replica writes its own stream. A question about the whole catalog reads the records of every replica, such as a log pipeline or receiver that collects them holds. [Audit destinations](../deployment/operations/observability#audit-destinations) covers configuring each destination, and [Destinations](../reference/audit-events#destinations) gives the list rules.
+Each registry replica writes its own stream. A question about the whole catalog needs the records of every replica, so answer it in a log pipeline or receiver that collects the streams of all replicas. [Audit destinations](../deployment/operations/observability#audit-destinations) covers configuring each destination, and [Destinations](../reference/audit-events#destinations) gives the list rules.
 
 The examples below use `jq` over a file destination named `audit.log`. A receiver that stores the records with their member names, such as a log search over the OTLP body or the NDJSON lines, takes the same member paths in its own query language.
 
@@ -79,7 +79,7 @@ Count resolved loads per artifact:
 jq -r 'select(.type == "artifact.loaded" and .result_size == 1) | .target' audit.log | sort | uniq -c | sort -rn
 ```
 
-To count only agent loads, add `and .caller.client.kind == "mcp"` to the `select`. A server-source `podium sync` loads every artifact in the workspace's scope on each run, so its loads measure what workspaces receive rather than what agents use.
+To count only agent loads, add `and .caller.client.kind == "mcp"` to the `select`. A server-source `podium sync` loads every artifact the caller can see on each run, whatever the workspace's scope, so its loads measure what syncs fetch rather than what agents use.
 
 To see who loads one artifact, select it by ID:
 
@@ -113,10 +113,10 @@ A `-` marks a member the client did not report, and a row of `-` values counts t
 List the queries of artifact searches that returned no result:
 
 ```text
-jq -r 'select(.type == "artifacts.searched" and .result_size == null and .context.query != "") | .context.query' audit.log | sort | uniq -c | sort -rn
+jq -r 'select(.type == "artifacts.searched" and .result_size == null and (.context.query // "") != "" and .context.query != "[redacted]") | .context.query' audit.log | sort | uniq -c | sort -rn
 ```
 
-Replace `artifacts.searched` with `domains.searched` for domain searches. A search with an empty query lists the catalog, and the filter leaves it out. A search that failed, such as one with an invalid `top_k`, also carries no `result_size` and appears in the list. Query text is scrubbed of common PII patterns before it is recorded, and on the file destination retention replaces it with a placeholder after 7 days and removes it after 30 days, so the list holds recent queries only. A query that returns nothing points at a missing artifact, a description that does not use the words callers search with, or a domain whose `keywords` miss them.
+Replace `artifacts.searched` with `domains.searched` for domain searches. A search with an empty query lists the catalog, and the filter leaves it out. The filter also leaves out a query that retention replaced with `[redacted]` or removed, because its text no longer names what the caller searched for. A search that failed, such as one with an invalid `top_k`, also carries no `result_size` and appears in the list. Query text is scrubbed of common PII patterns before it is recorded, and on the file destination retention replaces it with a placeholder after 7 days and removes it after 30 days, so the list holds recent queries only. A query that returns nothing points at a missing artifact, a description that does not use the words callers search with, or a domain whose `keywords` miss them.
 
 ---
 
@@ -133,7 +133,7 @@ The same stream records changes to the catalog and to who can reach it:
 | `layer.config_changed`, `layer.user_registered` | An admin-defined layer or a personal layer was added, removed, restored, or patched, or the layer order changed. |
 | `admin.granted`, `admin.visibility_override` | An admin grant was added or revoked, or an admin read a layer with a visibility override. |
 | `visibility.denied` | A call was rejected because the requested resource was not visible. |
-| `freeze.break_glass` | An admin used break-glass during a freeze window. |
+| `freeze.break_glass` | A caller with reingest rights on the layer used break-glass during a freeze window. |
 | `user.erased` | An admin ran the erasure command. |
 
 [Event types](../reference/audit-events#event-types) lists every event. The events the ingest pipeline raises carry no `caller.client`, even when a reingest request triggered the ingest. To list the versions published in the retained period:

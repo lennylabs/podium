@@ -180,7 +180,11 @@ frontmatter unparseable. A filesystem-source sync drops that artifact, and by
 default it keeps the files and lock entry the prior run wrote for it, so step 4
 does not delete them. It keeps them only while they still belong in the target:
 the prior run used the same harness, the artifact passes the run's scope and
-toggles, and no other artifact of the run writes one of its paths.
+toggles, and no other artifact of the run takes them over. An artifact takes
+them over when it writes a file the kept output holds whole, or a
+configuration-merge entry under the same key, such as an `mcpServers` server of
+the same name. Another artifact's entry in a shared file such as `.mcp.json`
+does not end the keep.
 `--on-unparseable remove`, `PODIUM_SYNC_ON_UNPARSEABLE`,
 or `defaults.on_unparseable` in `sync.yaml` deletes them instead.
 [Previous output of an unparseable artifact](../reference/cli#previous-output-of-an-unparseable-artifact)

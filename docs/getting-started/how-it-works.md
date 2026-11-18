@@ -187,8 +187,8 @@ Each mode keeps what the mode before it does and adds server-side capability.
 
 The local mode runs the word-based overlap checks through `podium lint`.
 Signing, multi-tenancy, SCIM group push, freeze windows, outbound webhooks, the
-semantic overlap check, and the hash-chained audit log with its file, HTTP,
-and OTLP destinations run on a single node as well. The clustered mode adds
+semantic overlap check, and the hash-chained audit log with its file, stdout,
+HTTP, and OTLP destinations run on a single node as well. The clustered mode adds
 high availability across registry replicas and Postgres schema-per-org tenant
 isolation. [Deployment modes](../deployment/modes/) covers choosing a mode, and
 [Moving between modes](../deployment/modes/migrating) covers the migration

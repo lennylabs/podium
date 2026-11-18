@@ -65,8 +65,8 @@ Covered in [Domains](../authoring/domains).
 
 ### Materialization and discovery
 
-Artifacts reach a workspace in one of two ways. Sync is proactive and runs
-ahead of time. Discovery is lazy and driven by the agent.
+Artifacts reach a workspace through sync or through discovery. Sync is
+proactive and runs ahead of time. Discovery is lazy and driven by the agent.
 
 A workspace rarely needs the whole catalog. `podium sync` writes a chosen
 subset into the workspace ahead of time, selected by include globs, exclude
@@ -129,12 +129,14 @@ Covered in [Access control](../deployment/content/access-control) and
 
 ### Usage metrics
 
-Every artifact load and every search is an audit event that records the
-artifact or the query and the client that made the call. The registry streams
+Every artifact load is an audit event that records the artifact and the client
+that made the call, and every search is an audit event that records the query,
+its result count, and the client. The registry streams
 audit events to any combination of a local file, stdout, HTTP receivers that
 accept NDJSON, and an OpenTelemetry Collector over OTLP. A log pipeline that
-receives the stream counts loads and searches per artifact, which shows which
-artifacts agents load, how often, and which go unused. Podium has no built-in
+receives the stream counts loads per artifact and searches per query, which
+shows which artifacts agents load, how often, which go unused, and which
+searches return nothing. Podium has no built-in
 usage report.
 
 Covered in [Seeing how the catalog is used](../managing/usage).

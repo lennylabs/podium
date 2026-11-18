@@ -31,7 +31,7 @@ Run `podium lint` as a required check on pull requests to each layer's source re
 - `--fail-on` sets the lowest severity that fails the run, `error` by default or `warning`. An `info` diagnostic, such as `lint.skill_version_assigned`, fails the run under neither value.
 - Start with the default, which fails only on errors, and move to `--fail-on warning` once the catalog lints clean. An existing catalog that adopts the catalog advisories usually prints warnings at first.
 - `--json` writes one object, `{registry, diagnostics, rejected, counts}`, on standard output. Each diagnostic carries `artifact_id`, `code`, `severity`, and `message`, so a CI step can count or filter by code. An artifact whose manifest does not parse, or whose `ARTIFACT.md` declares `extends:` or a removed type, appears in `rejected` and makes the run exit 1.
-- The registry and `podium lint` read the same `PODIUM_LINT_*` variables, so set any threshold change in both places to keep CI and ingest in agreement.
+- The registry and `podium lint` read the same size and word-similarity `PODIUM_LINT_*` variables, so set any change to those thresholds in both places to keep CI and ingest in agreement. The `PODIUM_LINT_SEMANTIC_*` variables apply to the registry alone, because `podium lint` does not run the semantic check.
 
 To see which checks a catalog draws most often, count the codes in the JSON output:
 

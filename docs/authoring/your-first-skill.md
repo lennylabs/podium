@@ -195,7 +195,7 @@ Lint runs these checks:
 - The type-specific rules.
 - The catalog advisories, which warn on a thin description, on two descriptions that overlap, and on near-duplicate content in two artifacts.
 
-When the catalog lives in a Git-source layer, CI runs the same checks on pull requests (see [Connecting layer sources](../deployment/content/layer-sources#git-repositories)). The registry runs the artifact checks again at ingest and runs the catalog advisories over the layer it ingests, so only `podium lint` reports an overlap between artifacts in different layers.
+When the catalog lives in a Git-source layer, CI runs the same checks on pull requests (see [Connecting layer sources](../deployment/content/layer-sources#git-repositories)). The registry runs the artifact checks again at ingest and runs the word-based catalog advisories over the layer it ingests, so an ingest does not report a word-based overlap with an artifact in another layer. `podium lint` reports overlaps across every layer it walks, and on a running registry the catalog overlap report (`podium overlap` or `GET /v1/overlap`) covers every layer the caller can see. When the semantic overlap check is on, an ingest also names peers in layers visible to `public` or `organization`. [Finding overlapping artifacts](../managing/overlap) describes each check.
 
 Each diagnostic prints as `[<severity>] <artifact-id>: <message> (<rule-code>)`, for example `[error] personal/hello/greet: type is required (lint.required_field_missing)`. Info and warning diagnostics alone exit 0, and any error exits 1. With `--fail-on warning`, a warning also exits 1, and an info diagnostic still exits 0. [Skill lint checks](frontmatter-reference#skill-lint-checks) lists the checks that apply to a skill.
 

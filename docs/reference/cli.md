@@ -384,12 +384,12 @@ A sync against a server reports no drop, because the server rejected the artifac
 An unparseable manifest is usually a file in the middle of an edit. `--on-unparseable` selects what a filesystem-source sync does with the output an earlier run wrote for an artifact dropped because its frontmatter does not parse. The flag takes precedence over `PODIUM_SYNC_ON_UNPARSEABLE`, which takes precedence over `defaults.on_unparseable` in the merged `sync.yaml`. The default is `keep`. A value other than `keep` or `remove` exits 2 with an error that names its source.
 
 - Under `keep`, when the target's lock file records the artifact from an earlier run, the command leaves the files that run wrote for it, including its entries in shared files such as `.mcp.json`, and its lock entry unchanged. It reconciles every other artifact as usual, and the report line reads `rejected: <id> (ingest.invalid_artifact): <reason>; the previous sync output was kept`. Under `--dry-run`, the line ends `; the previous sync output would be kept`. An artifact the lock file does not record gets no files.
-- `keep` applies only while the previous output still belongs in the target: the earlier run used the same harness, the artifact passes this run's scope and toggles, and no artifact this run writes one of its paths. The type filter reads the type the lock entry records, because the unparseable manifest names none, and an entry written before the lock recorded `type` fails any non-empty type filter. Otherwise the command removes the previous output, as under `remove`.
+- `keep` applies only while the previous output still belongs in the target: the earlier run used the same harness, the artifact passes this run's scope and toggles, and no artifact this run materializes takes the previous output over. An artifact takes it over when it writes a file the previous output holds whole, or a configuration-merge entry under the key the previous output holds in that file, such as an `mcpServers` server of the same name. Another artifact's entry in a shared configuration-merge or inject file, such as `.mcp.json`, does not take the previous output over. The type filter reads the type the lock entry records, because the unparseable manifest names none, and an entry written before the lock recorded `type` fails any non-empty type filter. Otherwise the command removes the previous output, as under `remove`.
 - When another copy of the ID parses, from a lower-precedence layer or the workspace overlay, the command materializes that copy.
 - Under `remove`, the command removes the previous output, as it does for the other drops.
 - Under either value, the artifact counts as a drop for the exit status, `--dry-run`, `--config` targets, and `podium sync override`.
 - An `extends:` drop, a removed-type drop, and a collision drop always remove the previous output.
-- The setting has no effect on a sync against a server, where the registry keeps serving the earlier version.
+- The setting has no effect on a sync against a server. The registry never stores the unparseable version and keeps serving the earlier one, so the sync receives that version and drops nothing.
 
 #### Listing budget
 
@@ -1139,7 +1139,7 @@ computed: 42
 failed: 0
 ```
 
-A computation stores nothing and counts in neither number when its artifact gains a newer served version first. The command exits 0 when `failed` is zero. It exits 1 when `failed` is not zero, and when the response is an error envelope, which it prints on standard error. A registry with the semantic overlap check off, or with no search index, answers `registry.unavailable`. A missing `--registry` exits 2.
+A computation stores nothing and counts in neither number when its artifact gains a newer served version first. The command exits 0 when `failed` is zero. It exits 1 when `failed` is not zero, and when the response is an error envelope, which it prints on standard error. A registry with the semantic overlap check off, or with no search index, answers `registry.unavailable` with `retryable: false`, because the request cannot succeed until the operator changes the configuration. A missing `--registry` exits 2.
 
 ### `podium admin runtime`
 

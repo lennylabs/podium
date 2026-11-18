@@ -15,10 +15,10 @@ Each mode keeps everything the mode before it does and adds server-side capabili
 | Deployment mode | Server-side deployment | Catalog source | Materialization | What the mode adds |
 |:--|:--|:--|:--|:--|
 | [Local](local) | None | A folder, read from disk | User-driven sync | Authoring, lint, sync, domains, profiles, ordered layers from disk, and word-based overlap checks |
-| [Single node](single-node) | One binary | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in local, plus discovery through MCP or the SDKs, hybrid search, registered and remote layers with per-user visibility, the semantic overlap check, an audit log with file, HTTP, and OTLP destinations, multi-tenancy, and SCIM group sync |
+| [Single node](single-node) | One binary | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in local, plus discovery through MCP or the SDKs, hybrid search, registered and remote layers with per-user visibility, the semantic overlap check, an audit log with file, stdout, HTTP, and OTLP destinations, multi-tenancy, and SCIM group sync |
 | [Clustered](clustered) | Replicas, Postgres, and object storage | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in single node, plus Postgres schema-per-org tenant isolation and high availability across registry replicas |
 
-Artifact signing runs on every registry server, so a single node signs at ingest as a clustered deployment does.
+Artifact signing is on by default on every registry server, so a single node signs at ingest as a clustered deployment does. `PODIUM_SIGN=none` turns it off.
 
 Pick the mode that matches the requirement:
 
