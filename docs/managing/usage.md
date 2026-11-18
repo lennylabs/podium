@@ -27,13 +27,15 @@ This page covers the usage report, the events that describe use, where the recor
 
 The registry counts three things for each artifact, per UTC day, per layer, per client kind, and per harness:
 
-- **Loads**: resolved `load_artifact` calls, including each item of a batch load, from a client other than `podium sync`. An agent's load through `podium-mcp` is a load.
+- **Loads**: resolved `load_artifact` calls, including each item of a batch load, from a client other than `podium sync`. An agent's load through `podium-mcp` is a load. The registry counts each call it resolves, so one agent load can count twice: under the default `always-revalidate` cache mode, `podium-mcp` revalidates a cached artifact with a `HEAD` request and, when the content changed, fetches it with a `GET`, and a load repeated to replace an expired download URL counts again.
 - **Syncs**: the same calls from `podium sync`. A server-source sync fetches every artifact the caller can see on each run, so syncs measure what workspaces fetch rather than what agents use.
-- **Search hits**: searches with a query that returned the artifact among their first 10 results. A search with an empty query lists the catalog and counts nothing.
+- **Search hits**: searches with a query that returned the artifact among their first 10 results. A search that asks for fewer than 10 results counts each result it returns. A search with an empty query lists the catalog and counts nothing.
 
 The layer is the layer that serves the artifact. The client kind and the harness come from the `X-Podium-Client` header that `podium-mcp`, `podium sync`, the CLI, and the SDKs send: `podium-mcp` reports its harness, or the harness a load names, and `podium sync` reports the harness of its run. A request without the header counts under `none`. The header is self-reported, so the split between loads and syncs and the harness breakdown are as reliable as the clients that call the registry.
 
 The registry counts only the calls it serves. A load `podium-mcp` answers from its workspace overlay, or from its content cache under the `offline-first` and `offline-only` cache modes, and a filesystem-source `podium sync` do not reach the registry and are not counted. The counts carry no caller identity.
+
+Counts are stored under the layer's ID. When an unregistered layer is purged at the end of its recovery window (`PODIUM_LAYER_RECOVERY_DAYS`, 30 days by default), its counts are deleted with it, including a personal layer that `podium admin erase` unregistered. A layer restored with `podium layer restore` within the window keeps its counts. A layer removed from the registry configuration, rather than unregistered, keeps its counts until retention deletes them, and a layer configured later under the same ID shows them.
 
 ### Read the report
 
@@ -53,7 +55,7 @@ podium usage --registry https://podium.acme.com --artifact finance/ap/pay-invoic
 
 The command calls [`GET /v1/usage`](../reference/http-api#usage-report), which takes the same parameters. `POST /v1/usage` takes them as a JSON body, which suits a page that reads the counts of every artifact it lists. The response holds:
 
-- `totals` for the catalog: every layer the caller can see.
+- `totals` for the catalog: every layer the caller can see. When the caller's token carries read scopes, such as `podium:read:finance/*`, every total in the response covers only the artifacts the scopes allow.
 - `layers`: one entry per layer, in precedence order, including layers with no counts. A layer's counts include artifacts it no longer serves.
 - `artifacts`: one entry per artifact the caller can see, including artifacts with no counts, ordered by loads, syncs, and search hits, with `last_loaded` and `last_synced` days.
 
@@ -63,7 +65,7 @@ An artifact with no loads in the window lists `loads` 0 and `last_loaded` `null`
 
 ### How current the report is
 
-Each registry replica buffers its counts and adds them to the metadata store every `PODIUM_USAGE_FLUSH_INTERVAL`, one minute by default, and once more at a graceful shutdown. The report therefore trails live traffic by up to one interval, and a replica that stops without a graceful shutdown loses the counts since its last flush. A flush that fails, such as one on a read-only registry, keeps its counts for the next flush. Replicas that share a metadata store add their counts together, so the report covers every replica.
+Each registry replica buffers its counts and adds them to the metadata store every `PODIUM_USAGE_FLUSH_INTERVAL`, one minute by default, and once more at a graceful shutdown, which waits for a flush in progress and has 10 seconds to finish. The report therefore trails live traffic by up to one interval, and a replica that stops without a graceful shutdown loses the counts since its last flush. A flush that fails, such as one on a read-only registry, keeps its counts for the next flush. Replicas that share a metadata store add their counts together, so the report covers every replica.
 
 The registry keeps `PODIUM_USAGE_RETENTION_DAYS` days of counts, 365 by default, and the report's window lies within them. [Usage report settings](../reference/configuration#usage-report) lists both settings.
 

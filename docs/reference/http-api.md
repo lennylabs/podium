@@ -760,7 +760,7 @@ GET  /v1/usage?from={date}&to={date}&days={n}&granularity={g}&layer={id}&artifac
 POST /v1/usage
 ```
 
-**Authorization.** Any caller that can search the registry. The request passes through the identity verification, tenant routing, and browser-session handling of `search_artifacts`. Every total covers only the layers in the caller's effective view, so a caller learns nothing about the use of a layer it cannot see.
+**Authorization.** Any caller that can search the registry. The request passes through the identity verification, tenant routing, and browser-session handling of `search_artifacts`. Every total covers only the layers in the caller's effective view, so a caller learns nothing about the use of a layer it cannot see. When the caller's token carries read scopes, every total also covers only the artifacts the scopes allow.
 
 **Parameters.** Every parameter is optional. `POST` takes the same parameters as a JSON body, `{"from", "to", "days", "granularity", "layers": [...], "artifacts": [...]}`, for a list of artifacts too long for a query string.
 
@@ -776,9 +776,9 @@ With none of `from`, `to`, and `days`, the window is the last 30 days. The windo
 
 **What is counted.** The registry counts per UTC day, per serving layer, per artifact, per client kind, and per harness:
 
-- `loads`: resolved `load_artifact` calls, including each item of `artifacts:batchLoad`, from a client whose kind is not `sync`.
+- `loads`: resolved `load_artifact` calls, including each item of `artifacts:batchLoad`, a `HEAD`, and a `GET` answered `304`, from a client whose kind is not `sync`. A revalidation followed by a refetch counts two loads.
 - `syncs`: the same calls from a client whose kind is `sync`, which is how a server-source `podium sync` fetches every artifact on each run.
-- `search_hits`: `search_artifacts` calls with a non-empty query that returned the artifact among their first 10 results.
+- `search_hits`: `search_artifacts` calls with a non-empty query that returned the artifact among their first 10 results. A call with a `top_k` below 10 counts each result it returns.
 
 The client kind and the harness come from the `X-Podium-Client` header. A request without the header counts under `none`. Each replica adds its counts to the metadata store every `PODIUM_USAGE_FLUSH_INTERVAL`, so the report trails live traffic by up to that interval.
 
