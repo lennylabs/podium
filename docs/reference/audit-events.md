@@ -67,7 +67,7 @@ The registry stream records the following events. Each carries the trace ID of t
 |:--|:--|
 | `domain.loaded` | A caller invoked `load_domain`. |
 | `domains.searched` | A caller invoked `search_domains`. |
-| `artifacts.searched` | A caller invoked `search_artifacts`. |
+| `artifacts.searched` | A caller invoked `search_artifacts`. When the call returned results, `context.results` holds them in result order as a JSON array of `{artifact_id, layer}` objects encoded in the string value. |
 | `artifact.loaded` | A caller invoked `load_artifact`. |
 | `artifact.published` | A new `(artifact_id, version)` was ingested. |
 | `artifact.deprecated` | An ingested manifest set `deprecated: true`, or, for a skill, the `deprecated` value that its `SKILL.md` `metadata` and `ARTIFACT.md` resolve to is `true`. |

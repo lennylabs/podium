@@ -565,7 +565,7 @@ Passing none of the add and remove flags opens the interactive editor. The comma
 
 The read CLI maps one-to-one to the SDK's read operations. It uses the same identity, cache, layer composition, and server-side visibility filtering.
 
-Each command that queries the registry takes `--registry <url>`, which defaults to `PODIUM_REGISTRY` and is required. These commands are `search`, `overlap`, `domain show`, `domain search`, `domain analyze`, `artifact show`, and `impact`. `artifact scaffold` works on the filesystem only and takes no `--registry`.
+Each command that queries the registry takes `--registry <url>`, which defaults to `PODIUM_REGISTRY` and is required. These commands are `search`, `overlap`, `usage`, `domain show`, `domain search`, `domain analyze`, `artifact show`, and `impact`. `artifact scaffold` works on the filesystem only and takes no `--registry`.
 
 ### `podium search`
 
@@ -611,6 +611,41 @@ warning: semantic overlap is computed for 118 of 120 artifacts; the report can m
 ```
 
 The command exits 0 when no diagnostic reaches the `--fail-on` severity, and 1 when one does. Every overlap diagnostic is a warning, and the coverage warning counts as a warning too, so the default `--fail-on error` exits 0 on any report, and `--fail-on warning` exits 1 when the report contains a diagnostic or `computed` is below `total`. A response that carries an error envelope prints on standard error, and the command exits 1. A usage error exits 2, including a missing `--registry`, a `--fail-on` value other than `error` or `warning`, and a `--threshold` outside 0.5 to 1.0.
+
+### `podium usage`
+
+Reports how often artifacts were loaded, synced, and returned by searches, per artifact, per layer, and for the catalog. The command calls `GET /v1/usage`, which [Usage report](http-api#usage-report) describes, so any caller that can search the registry can run it, and every total covers only the layers the caller can see.
+
+```
+podium usage --registry <url> [--from <date>] [--to <date>] [--days <n>]
+             [--granularity none|day|week|month]
+             [--layer <id>]... [--artifact <id>]... [--json]
+```
+
+| Flag | Effect |
+|:--|:--|
+| `--from <date>`, `--to <date>` | First and last UTC days of the window, as `YYYY-MM-DD`. `--to` defaults to today, and the window defaults to 30 days. |
+| `--days <n>` | Window of the last `n` UTC days, counting today. It cannot be combined with `--from` or `--to`. |
+| `--granularity <g>` | `none` (the default), `day`, `week`, or `month`. A value other than `none` adds a series to every total and prints the catalog's periods. |
+| `--layer <id>` | Restrict the report to a layer. Repeat it to name several. |
+| `--artifact <id>` | Restrict the artifact list to an artifact. Repeat it to name several. |
+| `--json` | Write the response object on standard output. |
+| `--registry <url>` | Registry URL. Required; defaults to `PODIUM_REGISTRY`. |
+
+Without `--json`, the command prints a table of artifacts with their loads, syncs, search hits, and last loaded day, then a table of layers, then the catalog's periods under a granularity, then the window and the totals:
+
+```
+   LOADS    SYNCS SEARCHES  LAST LOAD   ARTIFACT
+      30       60       40  2026-11-18  finance/ap/pay-invoice
+       0       12        3  -           finance/ap/submit-invoice
+
+   LOADS    SYNCS SEARCHES  LAYER
+      30       72       43  team-finance
+
+2026-10-20 to 2026-11-18: 30 loads, 72 syncs, 43 search hits
+```
+
+The command exits 0 on a report, 1 when the response is an error envelope, which it prints on standard error, and 2 on a usage error: a missing `--registry`, a `--days` that is not a positive integer, `--days` combined with `--from` or `--to`, or an unknown `--granularity`.
 
 ### `podium domain show`
 

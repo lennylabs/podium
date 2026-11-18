@@ -253,6 +253,7 @@ rm -rf "$WORK"
 | S110 | Published Agent Skills parse and lint without false errors, and an unparseable manifest is refused on its own by lint, sync, and ingest | solo then standalone | none | none | none |
 | S111 | The catalog overlap report reads across layers with structured peers, validates its threshold, and the semantic check refuses to start without an embedding source | standalone | none | none | none |
 | S112 | The web UI's Similarity page, tab, and rail section render the overlap report in both themes | standalone | none | none | none |
+| S114 | The usage report counts loads, syncs, and search hits per layer, client, and harness, and reports them over time | standalone | none | none | none |
 
 ---
 
@@ -13383,5 +13384,78 @@ so it needs no embedding provider, and it binds 127.0.0.1:8176.
    make it scroll.
 
 **Cleanup.** `rm -rf "$WORK"`. Step 3 stops the server.
+
+---
+
+## S114: The usage report counts loads, syncs, and search hits per layer, client, and harness, and reports them over time
+
+**Goal.** Validate that the registry counts a load, a sync, and a search hit under the serving layer, the client kind, and the harness of the request; that `GET /v1/usage` and `podium usage` report totals for the catalog, each layer, and each artifact, including an artifact with no counts, with a week series and a batch of named artifacts; that the counts are plain rows in the `usage_daily` table; and that the `artifacts.searched` audit record carries the returned artifacts and their layers.
+
+**Covers.** The §8.7 usage counts, report, CLI, storage, and flush, the §8.1 `context.results` member, and the §13.12 `PODIUM_USAGE_*` settings, through the compiled `podium` binary.
+
+**Why by hand.** An operator reads the report beside the calls that produced it. A sync counted as a load, a harness that lands under `none`, a series whose periods do not add up to the totals, an unused artifact missing from the list, or a counts table that SQL cannot read is visible only when the three are compared. Per-caller layer visibility needs an identity provider, and the integration suite covers it.
+
+**Prerequisites.** `sqlite3` and `jq`. The scenario binds 127.0.0.1:8178.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above. Build a two-layer root, `team` and `finance`, and serve it with a one-second flush interval. A standalone registry with no identity provider authenticates no caller and serves every layer to every caller, so the report covers both layers.
+
+   ```bash
+   mkdir -p "$WORK/root/team" "$WORK/root/finance"
+   printf 'multi_layer: true\nlayer_order:\n  - team\n  - finance\n' > "$WORK/root/.registry-config"
+   for L in team finance; do printf 'visibility:\n  public: true\n' > "$WORK/root/$L/.layer-config"; done
+   skill() {
+     mkdir -p "$WORK/root/$1/$2"
+     printf -- '---\nname: %s\ndescription: %s\nmetadata:\n  version: "1.0.0"\n---\n\nBody.\n' "${2##*/}" "$3" > "$WORK/root/$1/$2/SKILL.md"
+   }
+   skill team ops/greet "Greet the user at the start of a session."
+   skill team ops/farewell "Say goodbye to the user at the end of a session."
+   skill finance fin/payroll "Run payroll for the finance team each month."
+   PODIUM_USAGE_FLUSH_INTERVAL=1s podium serve --standalone --no-embeddings --layer-path "$WORK/root" --bind 127.0.0.1:8178 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8178/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   URL=http://127.0.0.1:8178
+   ```
+
+   **Expect.** `server_alive` prints nothing, and `srv.log` holds a line that begins `podium-server listening on 127.0.0.1:8178`.
+
+2. Load `ops/greet` as an agent from two harnesses, sync `ops/farewell`, search with a query and without one, and read the report after the flush.
+
+   ```bash
+   curl -s -o /dev/null -H 'X-Podium-Client: kind=mcp&name=podium-mcp&harness=claude-code' "$URL/v1/load_artifact?id=ops/greet"
+   curl -s -o /dev/null -H 'X-Podium-Client: kind=mcp&name=podium-mcp&harness=cursor' "$URL/v1/load_artifact?id=ops/greet"
+   curl -s -o /dev/null -H 'X-Podium-Client: kind=sync&name=podium&harness=claude-code' "$URL/v1/load_artifact?id=ops/farewell"
+   curl -s -o /dev/null -H 'X-Podium-Client: kind=sdk&name=podium-py' "$URL/v1/search_artifacts?query=session"
+   curl -s -o /dev/null "$URL/v1/search_artifacts"
+   sleep 2
+   curl -s "$URL/v1/usage" | jq -c '{totals: (.totals | {loads, syncs, search_hits, by_harness}), layers: [.layers[].layer], artifacts: [.artifacts[] | {artifact_id, loads, syncs, search_hits, last_loaded}]}'
+   ```
+
+   **Expect.** One line in which `totals` is `{"loads":2,"syncs":1,"search_hits":2,...}`, `by_harness` holds `claude-code` with 1 load and 1 sync, `cursor` with 1 load, and `none` with 2 search hits, `layers` is `["team","finance"]`, and `artifacts` lists `ops/greet` first with 2 loads, 0 syncs, 1 search hit, and today's date as `last_loaded`, then `ops/farewell` with 0 loads, 1 sync, 1 search hit, and a null `last_loaded`, then `fin/payroll` with zero counts. A sync counted as a load, the empty-query listing counted as search hits, or a missing `fin/payroll` is the defect.
+
+3. Read the report as a week series, for two named artifacts through `POST`, and through the CLI.
+
+   ```bash
+   curl -s "$URL/v1/usage?days=14&granularity=week" | jq -c '[.totals.series[] | {start, end, loads}], ([.totals.series[].loads] | add)'
+   curl -s -X POST -d '{"artifacts":["ops/farewell","ops/missing"],"layers":["team"],"days":1}' "$URL/v1/usage" | jq -c '[.artifacts[].artifact_id], [.layers[].layer]'
+   podium usage --registry "$URL" --days 7; echo "usage exit=$?"
+   podium usage --registry "$URL" --days 7 --from 2026-01-01; echo "bad exit=$?"
+   ```
+
+   **Expect.** The first line lists two or three periods whose `start` and `end` dates run Monday to Sunday except the first, which starts 13 days ago, and the last, which ends today. The second line is `2`, the totals' loads. The `POST` prints `["ops/farewell"]` and `["team"]`, because `ops/missing` names no artifact and the request names one layer. The CLI prints a table whose first artifact row ends in `ops/greet`, layer rows for `team` and `finance`, a line ending `2 loads, 1 syncs, 2 search hits`, and `usage exit=0`, then `error: --days cannot be combined with --from or --to` and `bad exit=2`.
+
+4. Stop the server and read the stored rows and the audit record of the search.
+
+   ```bash
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   sqlite3 "$PODIUM_SQLITE_PATH" 'SELECT layer, artifact_id, client_kind, harness, loads, syncs, search_hits FROM usage_daily ORDER BY artifact_id, client_kind, harness'
+   grep '"artifacts.searched"' "$PODIUM_AUDIT_LOG_PATH" | jq -r 'select(.context.query == "session") | .context.results'
+   ```
+
+   **Expect.** Five rows, with the columns separated by `|`: `team|ops/farewell|sdk|none|0|0|1`, `team|ops/farewell|sync|claude-code|0|1|0`, `team|ops/greet|mcp|claude-code|1|0|0`, `team|ops/greet|mcp|cursor|1|0|0`, and `team|ops/greet|sdk|none|0|0|1`. The audit line is a JSON array of two `{"artifact_id":...,"layer":"team"}` objects naming `ops/greet` and `ops/farewell`. A missing row means the graceful shutdown dropped buffered counts.
+
+**Cleanup.** `rm -rf "$WORK"`. Step 4 stops the server.
 
 ---

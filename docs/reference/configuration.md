@@ -343,6 +343,15 @@ The `pii_redaction:` block is the one audit setting with file keys:
 | `pii_redaction.enabled` | boolean | `true` | Turn the query-text scrub on or off. `PODIUM_PII_REDACTION` takes precedence. |
 | `pii_redaction.patterns` | list | (none) | Extra scrub rules appended to the built-in patterns. Each entry carries `regex` (required), `name` (default `custom`), and `replacement` (default `[redacted]`). A regular expression that does not compile refuses startup. |
 
+## Usage report
+
+The registry counts loads, syncs, and search hits for the [usage report](../managing/usage#built-in-usage-report). These settings are environment variables only, and a value outside its range refuses startup with `config.invalid` and a message that names the variable.
+
+| Variable | Type | Default | Description |
+|:--|:--|:--|:--|
+| `PODIUM_USAGE_FLUSH_INTERVAL` | duration | `1m` | Interval at which each registry replica adds its buffered usage counts to the metadata store, at least `1s`. A replica also flushes once at a graceful shutdown. A replica that stops without one loses the counts since its last flush. Read by the registry only. |
+| `PODIUM_USAGE_RETENTION_DAYS` | integer | `365` | Number of UTC days of usage counts the registry keeps, counting today, as a positive integer. A pass at startup and every 24 hours deletes older days. It is also the longest window the usage report accepts. Read by the registry only. |
+
 ## Store retention
 
 These settings are environment variables only.

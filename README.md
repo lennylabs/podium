@@ -126,13 +126,13 @@ cd podium && go build -o ~/.local/bin/podium ./cmd/podium
   which requires an identity provider. Loads, searches, ingests, and admin
   changes are recorded in a hash-chained audit log. See
   [Access control](https://lennylabs.github.io/podium/deployment/content/access-control).
-- **Usage metrics.** Every load is an audit event that records the artifact
-  and the client that made the call, and every search is an audit event that
-  records the query, its result count, and the client. The registry exports
-  audit events to a local file, stdout, HTTP receivers that accept NDJSON, or
-  an OpenTelemetry Collector over OTLP, and a log pipeline that receives them
-  counts loads per artifact and searches per query. Podium has no built-in
-  usage report. See
+- **Usage metrics.** The registry counts loads, syncs, and search hits per
+  artifact, layer, client, and harness, and `podium usage` and
+  `GET /v1/usage` report them for the catalog, each layer, and each artifact
+  over a date range, with daily, weekly, or monthly series. Every load and
+  search is also an audit event that the registry exports to a local file,
+  stdout, HTTP receivers that accept NDJSON, or an OpenTelemetry Collector
+  over OTLP. See
   [Seeing how the catalog is used](https://lennylabs.github.io/podium/managing/usage).
 - **Overlap detection.** Word-based checks flag artifacts with copied or
   templated descriptions and duplicated prose. `podium lint` runs them in every
