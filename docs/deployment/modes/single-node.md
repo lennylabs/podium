@@ -198,6 +198,7 @@ podium serve --standalone --public-mode --layer-path /path/to/artifacts/
 - Public mode is also mutually exclusive with `PODIUM_MULTI_TENANT`, and setting both fails at startup. The registry reports `config.multitenant_no_verifier` when `PODIUM_IDENTITY_PROVIDER` is unset or `none`, unless another startup check refuses the configuration first.
 - Public mode binds to `127.0.0.1` by default. Pass `--allow-public-bind` to bind a non-loopback address, typically behind an authenticated reverse proxy.
 - Public mode applies a sensitivity ceiling: ingest of `sensitivity: medium` and `sensitivity: high` artifacts is rejected.
+- Public mode refuses the re-embed and overlap rebuild passes, which query the embedding provider and the search index for every artifact, unless the request carries the operator token. Set `PODIUM_OPERATOR_TOKEN` to a secret of at least 32 characters on the registry, and set the same value in the environment of the operator who runs `podium admin reembed` or `podium admin rebuild-overlap`. With the variable unset, both commands fail with `403 auth.forbidden`.
 - The audit log records `caller.identity = "system:public"` for every call, so downstream consumers can filter on it.
 
 Public mode is appropriate when both of the following hold:

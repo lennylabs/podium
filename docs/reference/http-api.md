@@ -1623,7 +1623,7 @@ Recomputes embeddings over the tenant.
 POST /v1/admin/reembed?artifact={id}&version={v}&only_missing={bool}&since={rfc3339}
 ```
 
-**Authorization.** Admin. A registry started with no identity provider configured, or one started in public mode, authenticates no caller. No caller can hold the admin role there, so this endpoint admits the request. The layer write endpoints admit the request on such a registry for the same reason, which the [layer write authorization](#layer-write-authorization) rule states.
+**Authorization.** Admin. A registry started with no identity provider configured authenticates no caller. No caller can hold the admin role there, so this endpoint admits the request. The layer write endpoints admit the request on such a registry for the same reason, which the [layer write authorization](#layer-write-authorization) rule states. A registry started in public mode authenticates no caller either, and it can be reachable beyond the local machine, so it admits the request only when `PODIUM_OPERATOR_TOKEN` is set and the request carries the same value in the `X-Podium-Operator-Token` header. It refuses every other request, and every request while the variable is unset.
 
 **Parameters.** With no query parameters, the endpoint reembeds every artifact.
 
@@ -1639,6 +1639,7 @@ POST /v1/admin/reembed?artifact={id}&version={v}&only_missing={bool}&since={rfc3
 | Code | When |
 |:--|:--|
 | `400 registry.invalid_argument` | `artifact` is set without `version`. |
+| `403 auth.forbidden` | The caller lacks the admin role, or, on a public-mode registry, the request does not carry the operator token or the registry has none configured. |
 | `404 registry.reembed_unavailable` | No vector search is configured: no vector backend, or a vector backend with neither an embedding provider nor self-embedding. The registry re-embeds nothing, and the envelope carries `retryable: false`, because the request cannot succeed until the operator changes the configuration. |
 
 **Notes.**
@@ -1653,7 +1654,7 @@ Recomputes the semantic overlap records of every served artifact of the caller's
 POST /v1/admin/overlap/rebuild
 ```
 
-**Authorization.** The same as [Reembed](#reembed): the admin role, except on a registry that authenticates no caller, which admits the request.
+**Authorization.** The same as [Reembed](#reembed): the admin role, except on a registry with no identity provider, which admits the request, and on a public-mode registry, which requires the operator token in the `X-Podium-Operator-Token` header and answers `403 auth.forbidden` without it.
 
 **Response.** The number of artifacts computed and the number whose computation failed. A computation fails when its stored-vector read, its index query, or its scoring fails, or when the registry cannot store its records. A computation stores nothing and counts in neither number when its artifact gains a newer served version first, because the computation of the newer version is due.
 

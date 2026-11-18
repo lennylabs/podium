@@ -2136,6 +2136,10 @@ type Config struct {
 	// (PODIUM_TRUSTED_PROXY_SECRET, environment only). Empty honors the identity
 	// headers on every request.
 	trustedProxySecret string
+	// operatorToken is PODIUM_OPERATOR_TOKEN (§13.12, environment only): the
+	// shared secret that admits a re-embed or overlap rebuild pass in public
+	// mode (§13.10). Empty refuses both passes there.
+	operatorToken string
 	// multiTenant enables §6.3.1 per-request tenant routing (PODIUM_MULTI_TENANT):
 	// the registry binds to a no-data tenant and resolves each request's tenant
 	// from the caller's organization. validate refuses it without a
@@ -2387,6 +2391,7 @@ func (c *Config) Settings() []Setting {
 		{"identity_provider.groups_claim", c.oauthGroupsClaim, envOrSrc("PODIUM_OAUTH_GROUPS_CLAIM", yamlSrc)},
 		{"identity_provider.jwks_cache_ttl_seconds", intStr(c.oauthJWKSCacheTTLSeconds), envOrSrc("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", yamlSrc)},
 		{"trusted_proxy_secret", redact(c.trustedProxySecret), envOrSrc("PODIUM_TRUSTED_PROXY_SECRET", "")},
+		{"operator_token", redact(c.operatorToken), envOrSrc("PODIUM_OPERATOR_TOKEN", "")},
 		{"multi_tenant", boolStr(c.multiTenant), envOrSrc("PODIUM_MULTI_TENANT", defaultSrc)},
 		{"operator_admins", strings.Join(c.operatorAdmins, ","), envOrSrc("PODIUM_OPERATOR_ADMINS", defaultSrc)},
 		{"idp_group_mapping", idpGroupMappingStr(c.idpGroupMapping), envOrSrc("PODIUM_IDP_GROUP_MAPPING", defaultSrc)},
@@ -2471,6 +2476,7 @@ func LoadConfig() *Config {
 		oauthGroupsClaim:                os.Getenv("PODIUM_OAUTH_GROUPS_CLAIM"),
 		oauthJWKSCacheTTLSeconds:        envInt("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", 0),
 		trustedProxySecret:              os.Getenv("PODIUM_TRUSTED_PROXY_SECRET"),
+		operatorToken:                   os.Getenv("PODIUM_OPERATOR_TOKEN"),
 		multiTenant:                     isTrue(os.Getenv("PODIUM_MULTI_TENANT")),
 		operatorAdmins:                  parseBootstrapAdmins(os.Getenv("PODIUM_OPERATOR_ADMINS")),
 		storeType:                       envDefault("PODIUM_REGISTRY_STORE", "sqlite"),
@@ -2751,6 +2757,11 @@ func (c *Config) validate() error {
 		return fmt.Errorf("missing required configuration for the selected backend(s): %s",
 			strings.Join(missing, ", "))
 	}
+	// §13.12: a short operator token is refused rather than accepted as a
+	// guessable secret.
+	if c.operatorToken != "" && len(c.operatorToken) < server.MinOperatorTokenLength {
+		return fmt.Errorf("config.invalid: PODIUM_OPERATOR_TOKEN must be at least %d characters", server.MinOperatorTokenLength)
+	}
 	if c.usage.err != nil {
 		return c.usage.err
 	}
@@ -2884,7 +2895,7 @@ func openObjectStoreOrNil(c *Config) objectstore.Provider {
 func bootstrapOptions(c *Config, objStore objectstore.Provider) []server.Option {
 	out := []server.Option{}
 	if c.publicMode {
-		out = append(out, server.WithPublicMode())
+		out = append(out, server.WithPublicMode(), server.WithOperatorToken(c.operatorToken))
 	}
 	out = append(out, server.WithUsageRetentionDays(c.usage.retentionDays))
 	// §4.7: a registry that configures no identity provider, or one in

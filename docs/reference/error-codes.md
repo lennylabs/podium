@@ -84,6 +84,7 @@ The envelope reaches each consumer as follows:
 | Arm | Trigger | `details.constraint` |
 |:--|:--|:--|
 | Admin-only operation | A caller without the admin role attempts an admin-only operation. This includes a receiver CRUD call (`/v1/webhooks`) by a caller without the per-tenant admin role. | none |
+| Operator token | A re-embed or overlap rebuild request to a public-mode registry that does not carry `PODIUM_OPERATOR_TOKEN` in the `X-Podium-Operator-Token` header, or any such request while the registry has no token configured. | none |
 | Layer write | A layer write that the [layer write authorization rule](http-api#layer-write-authorization) authorizes on neither arm. That is an admin-defined layer written by a caller without the per-tenant admin role, or a user-defined layer written by a caller who is neither its stored owner nor a tenant admin. A caller who resolves no subject is included. | none |
 | Local source | A registration, a filesystem-path patch, a restore, or a reingest of a layer that names a filesystem path on the registry host, by a caller without the per-tenant admin role. The [local-source authorization rule](http-api#local-source-authorization) governs it. | `"local_source"` |
 | Admin-only fields | A registration that asserts `owner`, `public`, `organization`, `groups`, or `users`, by a caller without the per-tenant admin role. These fields are read on a tenant admin's registration alone. | `"admin_only_fields"` |
