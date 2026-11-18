@@ -306,3 +306,33 @@ func TestUsageReport_HTTPSortAndQuery(t *testing.T) {
 		t.Errorf("a query no ID contains lists artifacts: %s", none)
 	}
 }
+
+// Spec: §13.10, §8.7 — the usage surface's server-driven Read cell. The
+// batched read a list issues names the artifacts on screen, and the report
+// answers an artifact the caller cannot see exactly as one that does not
+// exist, so the usage line and the rail section render one state for both and
+// imply nothing about a hidden artifact; a caller who can see it receives its
+// counts.
+func TestWebUIUsage_HiddenArtifactReadsAsUnknown(t *testing.T) {
+	t.Parallel()
+	h, counter := usageHarness(t)
+	if st, body := usageCall(t, h, http.MethodGet, "/v1/load_artifact?id=fin/payroll", "", "alice", "eng", "kind=mcp&name=podium-mcp"); st != http.StatusOK {
+		t.Fatalf("load fin/payroll as eng: %d %s", st, body)
+	}
+	if err := counter.Flush(context.Background(), h.st); err != nil {
+		t.Fatal(err)
+	}
+	_, hidden := usageCall(t, h, http.MethodPost, "/v1/usage", `{"days":30,"artifacts":["fin/payroll"],"granularity":"day","limit":1}`, "alice", "", "")
+	_, unknown := usageCall(t, h, http.MethodPost, "/v1/usage", `{"days":30,"artifacts":["fin/nope"],"granularity":"day","limit":1}`, "alice", "", "")
+	if hidden != unknown {
+		t.Errorf("a hidden artifact answers differently from an unknown one:\nhidden  %s\nunknown %s", hidden, unknown)
+	}
+	_, listed := usageCall(t, h, http.MethodPost, "/v1/usage", `{"days":30,"artifacts":["fin/close","fin/payroll"],"limit":200}`, "alice", "", "")
+	if strings.Contains(listed, "fin/payroll") || !strings.Contains(listed, "fin/close") {
+		t.Errorf("the batched read for a caller outside eng: %s", listed)
+	}
+	_, seen := usageCall(t, h, http.MethodPost, "/v1/usage", `{"days":30,"artifacts":["fin/payroll"],"limit":1}`, "alice", "eng", "")
+	if rep := decodeUsage(t, seen); len(rep.Artifacts) != 1 || rep.Artifacts[0].Loads != 1 {
+		t.Errorf("eng's read of fin/payroll: %s", seen)
+	}
+}
