@@ -205,6 +205,18 @@ To turn the check on for an existing catalog:
 4. Wait for the startup pass, which each replica runs in the background as soon as its startup ingest completes and which computes every served artifact that has no computation entry. The periodic sweep does not need to run first. On a managed backend, artifacts whose vectors the outbox has not written are computed at the outbox write. `podium admin rebuild-overlap --registry <url>`, run in each tenant as an identity that holds the `admin` role, recomputes every artifact at once.
 5. Read the result with `podium overlap --registry <url>`. The command warns while `computed` is below `total`. The default threshold follows the embedding model, 0.80 for `text-embedding-3-small`, so tune `PODIUM_LINT_SEMANTIC_SIMILARITY` against the catalog only when the reported pairs call for it.
 
+### Usage report
+
+0.7.0 counts loads, syncs, and search hits per artifact and serves them through `GET /v1/usage` and `podium usage`. [Seeing how the catalog is used](../../managing/usage#built-in-usage-report) describes the report.
+
+- Each 0.7.0 start creates the `usage_daily` table in the SQLite database if it is absent. A Postgres org schema that an earlier release created gets the table when 0.7.0 first serves a request for that org, and the startup retention pass skips an org schema that does not have it yet. The change is additive, and no existing table changes.
+- A 0.6.0 process neither reads nor writes `usage_daily`. A rollback to 0.6.0 leaves the stored counts in place, and a later 0.7.0 start adds to them.
+- A 0.6.0 replica counts nothing. During a rolling upgrade from 0.6.0 and after a rollback, the report omits the requests that 0.6.0 replicas served, so the counts for those days are lower than the traffic.
+- A 0.6.0 replica answers `GET /v1/usage` with 404, so `podium usage` against a registry with a 0.6.0 replica behind its load balancer can fail until every replica runs 0.7.0.
+- `artifacts.searched` audit records that a 0.6.0 replica writes carry no `context.results` member.
+
+The store needs no backup restore to roll back.
+
 ### `command` and `context` removal
 
 0.7.0 removes the `command` and `context` artifact types. Ingest rejects an `ARTIFACT.md` whose `type` is either of them with `ingest.invalid_artifact` and `details.constraint: "type_removed"`, and `podium artifact scaffold` refuses both types. A command becomes a skill whose `invocation` is `user`, and reference material moves into a skill or a `DOMAIN.md` body. [Artifact types](../../authoring/artifact-types#removed-types) describes the replacements. The notes below cover converting a package and the stored rows and caches that an earlier release wrote.
