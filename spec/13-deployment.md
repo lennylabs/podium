@@ -639,6 +639,7 @@ These variables set the lint thresholds (§4.1, §4.3.4, §4.5.5, §7.3.1). The 
 | `PODIUM_LINT_MIN_DESCRIPTION_WORDS` | §7.3.1 thin-description bound, in words | `3` |
 | `PODIUM_LINT_DESCRIPTION_SIMILARITY` | §7.3.1 description overlap threshold, from 0.5 to 1.0 | `0.7` |
 | `PODIUM_LINT_CONTENT_SIMILARITY` | §7.3.1 near-duplicate content threshold, from 0.5 to 1.0 | `0.8` |
+| `PODIUM_LINT_URL_CONCURRENCY` | §4.4 most URL probes one lint run holds in flight at once, from 1 to 64 | `8` |
 | `PODIUM_LINT_SEMANTIC_OVERLAP` | §7.3.1 semantic overlap check, `on` or `off`: computes and stores overlap records and reports them at ingest and in the catalog overlap report; read by the registry only | `off` |
 | `PODIUM_LINT_SEMANTIC_SIMILARITY` | §7.3.1 default threshold applied to stored overlap records when they are read, a cosine similarity from 0.5 to 1.0; changing it needs no recomputation; read by the registry only | depends on the configured embedding model: `0.80` for `text-embedding-3-small`, `0.86` for `nomic-embed-text`, `0.90` for `multilingual-e5-large`, and `0.85` for any other model |
 | `PODIUM_LINT_SEMANTIC_NEIGHBORS` | §7.3.1 number of nearest peer artifacts one computation finds and stores records for, from 1 to 100; the computation widens its index query past rows of earlier versions to find them; read by the registry only | `10` |
