@@ -768,7 +768,7 @@ POST /v1/usage
 |:--|:--|
 | `from`, `to` | UTC dates as `YYYY-MM-DD`. The window is the days from `from` to `to`, both included. `to` defaults to today, and `from` defaults to the day that makes the window 30 days long, or to the first retained day when that is later. |
 | `days` | The window is the last `days` UTC days, counting today. It cannot be combined with `from` or `to`. |
-| `granularity` | `none` (the default), `day`, `week`, or `month`. With a value other than `none`, every total in the response carries a `series`. A window of more than 365 days serves `day` as `week`, and a window of more than 1,095 days serves `day` and `week` as `month`. |
+| `granularity` | `none` (the default), `day`, `week`, or `month`. With a value other than `none`, every total in the response carries a `series`. A window of more than 366 days serves `day` as `week`, and a window of more than 1,096 days serves `day` and `week` as `month`. |
 | `layer` | A layer ID. The report covers only the named layers. Repeat it to name several. |
 | `artifact` | A canonical artifact ID. The `artifacts` list holds only the named artifacts. Repeat it to name several. |
 | `limit` | The most entries one response holds in `artifacts`, from 1 to 200. Defaults to 50. |
