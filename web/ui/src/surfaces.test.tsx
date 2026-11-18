@@ -20799,3 +20799,88 @@ describe("usage", () => {
     });
   });
 });
+
+describe("usage in the at-scale domain table", () => {
+  const atScale = {
+    path: "platform",
+    subdomains: Array.from({ length: 24 }, (_, i) => ({
+      path: `platform/d${String(i)}`,
+      name: `d${String(i)}`,
+    })),
+    notable: [
+      { id: "platform/deploy", type: "skill", version: "2.0.0", source: "featured" },
+      { id: "platform/lint", type: "rule", version: "1.0.0" },
+      { id: "platform/triage", type: "skill", version: "1.0.0" },
+    ],
+  };
+
+  function usageEntry(id: string, loads: number, syncs: number): Record<string, unknown> {
+    return {
+      artifact_id: id,
+      type: "skill",
+      layer: "platform",
+      loads,
+      syncs,
+      search_hits: 3,
+      by_client: {},
+      by_harness: {},
+      last_loaded: "2026-11-18",
+      last_synced: null,
+    };
+  }
+
+  const usageAnswer = {
+    days: 30,
+    from: "2026-10-20",
+    to: "2026-11-18",
+    granularity: "none",
+    totals: { loads: 0, syncs: 0, search_hits: 0, by_client: {}, by_harness: {} },
+    layers: [],
+    artifacts: [usageEntry("platform/deploy", 1163, 193), usageEntry("platform/lint", 12, 4), usageEntry("platform/triage", 480, 7)],
+    artifact_count: 3,
+    next_cursor: null,
+  };
+
+  // Spec: §13.10 — the dense table carries each row's last 30 days as Loads
+  // and Syncs columns, the curated rows above it carry the usage line, and
+  // the sort control ranks the rows by loads.
+  it("adds Loads and Syncs columns, the curated usage line, and a loads sort", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: atScale },
+      "/v1/usage": { body: usageAnswer },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const table = within(browser).getByRole("table", { name: "Artifacts" });
+    await waitFor(() => {
+      expect(within(table).getByRole("columnheader", { name: "Loads" })).toBeTruthy();
+      expect(within(table).getByRole("cell", { name: "480" })).toBeTruthy();
+    });
+    expect(within(table).getByRole("columnheader", { name: "Syncs" })).toBeTruthy();
+    const picks = within(browser).getByRole("list", { name: "Curated artifacts" });
+    expect(within(picks).getByTestId("usage-line").textContent).toContain("1,163loads");
+    fireEvent.change(within(browser).getByLabelText("Sort artifacts"), { target: { value: "loads" } });
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows.map((row) => within(row).getAllByRole("link")[0].textContent)).toEqual(["triage", "lint"]);
+  });
+
+  it("leaves the usage columns and the loads sort out when the usage read fails", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: atScale },
+      "/v1/usage": { status: 500, body: { code: "registry.unavailable", message: "down" } },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    await waitFor(() => {
+      expect(requests.some((r) => r.url === "/v1/usage")).toBe(true);
+      expect(within(browser).queryByRole("columnheader", { name: "Loads" })).toBeNull();
+    });
+    const sort = within(browser).getByLabelText("Sort artifacts");
+    expect(within(sort).queryByRole("option", { name: "loads" })).toBeNull();
+    expect(within(browser).queryByTestId("usage-line")).toBeNull();
+  });
+});

@@ -233,6 +233,7 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
           trimmed={trimmed}
           withheld={total === null ? null : total - direct.length}
           tail={tailList}
+          usage={usage}
         />
       ) : (
         <>

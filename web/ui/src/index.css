@@ -7272,3 +7272,10 @@ button.cluster-row-selected:hover {
   justify-content: center;
   margin-top: 12px;
 }
+
+/* The dense domain table's Loads and Syncs columns read right-aligned, the
+   way every count column in the build does. */
+.artifact-rows .num {
+  text-align: right;
+  white-space: nowrap;
+}
