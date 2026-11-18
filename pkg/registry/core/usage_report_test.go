@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -228,4 +229,42 @@ func TestUsageReport_PublicAndUnlayeredRegistries(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(layerIDs(rep), []string{"secret", "team"}) || rep.Totals.Loads != 18 {
 		t.Errorf("unlayered report: layers %v loads %d err %v", layerIDs(rep), rep.Totals.Loads, err)
 	}
+}
+
+// Spec: §8.7, §6.3.1 — under read scopes every total sums only rows whose
+// artifact ID the scopes allow: a token scoped to one artifact reads that
+// artifact's counts in the totals, the layer entry, and the breakdowns, and
+// learns nothing about the other artifacts of the layer, while a subtree
+// scope keeps the rows of an artifact the layer no longer serves.
+func TestUsageReport_ReadScopesNarrowEveryTotal(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	seedUsage(t, f)
+	scoped := usageAlice
+	scoped.Scopes = []string{"podium:read:ops/farewell"}
+	rep, err := f.reg.UsageReport(context.Background(), scoped, q(func(u *core.UsageQuery) { u.Granularity = "day" })())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seriesLoads int64
+	for _, p := range rep.Totals.Series {
+		seriesLoads += p.Loads
+	}
+	if !reflect.DeepEqual(reportIDs(rep), []string{"ops/farewell"}) || rep.Totals.Loads != 3 || rep.Totals.Syncs != 0 || rep.Totals.SearchHits != 1 ||
+		len(rep.Layers) != 1 || rep.Layers[0].Loads != 3 || rep.Totals.ByHarness["cursor"].Loads != 0 || rep.Totals.ByClient["sync"].Syncs != 0 || seriesLoads != 3 {
+		t.Errorf("scoped report = artifacts %v totals %+v layers %+v", reportIDs(rep), rep.Totals.UsageCounts, rep.Layers)
+	}
+	scoped.Scopes = []string{"podium:read:ops/*"}
+	if rep = usageReportAs(t, f, scoped); rep.Totals.Loads != 11 {
+		t.Errorf("subtree scope: totals %+v, want the 11 team loads including the retired artifact", rep.Totals.UsageCounts)
+	}
+}
+
+func usageReportAs(t *testing.T, f *usageFixture, id layer.Identity) *core.UsageReport {
+	t.Helper()
+	rep, err := f.reg.UsageReport(context.Background(), id, q(nil)())
+	if err != nil {
+		t.Fatalf("UsageReport: %v", err)
+	}
+	return rep
 }

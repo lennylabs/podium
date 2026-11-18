@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -196,17 +197,29 @@ func (r *Registry) UsageReport(ctx context.Context, id layer.Identity, q UsageQu
 		layers = keepLayers(layers, q.LayerIDs)
 	}
 	served = keepArtifactsIn(served, layers)
+	return buildUsageReport(w, layers, served, keepUsageRows(rows, layers, layer.ParseScopes(id.Scopes)), q), nil
+}
+
+// keepUsageRows returns the rows the report may sum: those whose layer the
+// report covers and, when the caller's token carries read scopes, whose
+// artifact ID the scopes allow. visibleManifests narrows the artifact list by
+// the same scopes, so without the second test the totals, the layer entries,
+// and their breakdowns would add up artifacts the caller cannot read, and a
+// layer holding one such artifact would give its counts away by subtraction.
+//
+// Spec: §8.7, §6.3.1
+func keepUsageRows(rows []store.UsageCount, layers []string, scopes layer.ScopeSet) []store.UsageCount {
 	allowed := make(map[string]bool, len(layers))
 	for _, l := range layers {
 		allowed[l] = true
 	}
 	kept := rows[:0:0]
 	for _, row := range rows {
-		if allowed[row.Layer] {
+		if allowed[row.Layer] && scopes.AllowsRead(row.ArtifactID) {
 			kept = append(kept, row)
 		}
 	}
-	return buildUsageReport(w, layers, served, kept, q), nil
+	return kept
 }
 
 // usageNow is the report's clock: the counter's when one is wired, so a test
@@ -215,7 +228,7 @@ func (r *Registry) usageNow() time.Time {
 	if r.usageCounts != nil {
 		return r.usageCounts.clock.Now()
 	}
-	return time.Now().UTC()
+	return clock.Real{}.Now().UTC()
 }
 
 // usageLayers returns the caller's effective layers in §4.6 precedence order.
