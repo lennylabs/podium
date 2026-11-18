@@ -70,9 +70,12 @@ var (
 // Registry is the core registry type. Construct one per tenant; the
 // caller passes Identity in per request to drive visibility filtering.
 type Registry struct {
-	store      store.Store
-	tenantID   string
-	layers     []layer.Layer
+	store    store.Store
+	tenantID string
+	layers   []layer.Layer
+	// projection caches the name and when_to_use a stored row's bytes
+	// resolve to, for the rows a SQL store returns without them.
+	projection *projectionFieldCache
 	audit      AuditEmitter
 	sessionsMu sync.Mutex
 	sessions   map[sessionKey]string
@@ -203,7 +206,8 @@ type AuditEvent struct {
 func New(s store.Store, tenantID string, layers []layer.Layer) *Registry {
 	// §4.5.5: per-domain discovery overrides are allowed unless a tenant
 	// opts out via discovery.allow_per_domain_overrides: false.
-	return &Registry{store: s, tenantID: tenantID, layers: layers, allowPerDomainOverrides: true, importCache: newImportCache()}
+	return &Registry{store: s, tenantID: tenantID, layers: layers, allowPerDomainOverrides: true, importCache: newImportCache(),
+		projection: &projectionFieldCache{}}
 }
 
 // tenantCtxKey carries the per-request tenant a multi-tenant registry resolves
@@ -1280,7 +1284,14 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 	}
 
 	// Lexical: BM25 over manifest text. Empty query returns matched
-	// records with score 0 (alphabetical by id).
+	// records with score 0 (alphabetical by id). The name and when_to_use
+	// BM25 reads are resolved from the row bytes when the store does not
+	// return them.
+	if opts.Query != "" {
+		for i := range filtered {
+			filtered[i] = r.withProjectionFields(filtered[i])
+		}
+	}
 	scored := scoreBM25(filtered, opts.Query)
 	totalMatched := len(scored)
 

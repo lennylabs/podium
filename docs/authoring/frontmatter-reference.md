@@ -30,7 +30,7 @@ The fields fall into these groups:
 
 ## File allocation for skills
 
-A skill's `SKILL.md` carries the agentskills.io fields. Its `metadata` map can also carry the version and the Podium fields that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists, each as a string value. An optional hand-written `ARTIFACT.md` can carry every Podium-only field, and it is the only place for the Podium-only fields that `metadata` does not carry. The split keeps `SKILL.md` strictly within the agentskills.io specification, which defines every `metadata` value as a string. The allocation is mechanical:
+A skill's `SKILL.md` carries the agentskills.io fields. Its `metadata` map can also carry the version and the Podium fields that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists, each as a string value. An optional hand-written `ARTIFACT.md` can carry every Podium-only field, and it is the only place for the Podium-only fields that `metadata` does not carry. The split keeps `SKILL.md` strictly within the agentskills.io specification, which defines every `metadata` value as a string. The one exception is a top-level `when_to_use`, which Claude Code defines and Podium also reads (see [Claude Code's top-level `when_to_use`](#claude-codes-top-level-when_to_use)). The allocation is mechanical:
 
 | Field | SKILL.md | ARTIFACT.md (skill overlay) | ARTIFACT.md (non-skill) |
 |:--|:--|:--|:--|
@@ -42,7 +42,8 @@ A skill's `SKILL.md` carries the agentskills.io fields. Its `metadata` map can a
 | `allowed-tools` | Optional (experimental). A space-separated string, as the standard defines, a comma-separated string, as published skills also write, or a YAML sequence of strings | Not used | Not used |
 | `type` | Not used | Yes (`type: skill`); implied when `ARTIFACT.md` is absent | Yes |
 | `version` | As `metadata.version` (string) | Optional; equal to `metadata.version` when that is a `major.minor.patch` value | Yes |
-| `when_to_use`, `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, `invocation` | Optional, as `metadata` values in the encodings of [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) | Optional; takes precedence over the `metadata` value when stated | Yes |
+| `when_to_use` | Optional, as a `metadata` value in the encoding of [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata), or top-level in the same encoding (see [Claude Code's top-level `when_to_use`](#claude-codes-top-level-when_to_use)) | Optional; takes precedence over both `SKILL.md` values when stated | Yes |
+| `tags`, `sensitivity`, `search_visibility`, `deprecated`, `replaced_by`, `release_notes`, `invocation` | Optional, as `metadata` values in the encodings of [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) | Optional; takes precedence over the `metadata` value when stated | Yes |
 | `audit_redact`, `lint_suppress`, `source` | Not used | Yes | Yes |
 | `mcpServers`, `requiresApproval`, `runtime_requirements`, `sandbox_profile`, `effort_hint`, `model_class_hint`, `sbom`, `external_resources`, `target_harnesses` | Not used | Yes | Yes |
 | Type-specific fields (`input`, `output`, `delegates_to`, `rule_*`, `hook_*`, `server_identifier`) | Not used | Yes (when applicable) | Yes (when applicable) |
@@ -97,7 +98,7 @@ The example resolves to the tags `finance` and `close`, the sensitivity `medium`
 
 ### Precedence
 
-When `ARTIFACT.md` states a key, the field takes the `ARTIFACT.md` value, and otherwise it takes the `metadata` value. Precedence follows the presence of the key, so an `ARTIFACT.md` key stated with an empty or false value, such as `tags: []`, `sensitivity: ""`, or `deprecated: false`, still takes precedence.
+When `ARTIFACT.md` states a key, the field takes the `ARTIFACT.md` value, and otherwise it takes the `metadata` value. `when_to_use` reads a top-level `SKILL.md` value between the two (see [Claude Code's top-level `when_to_use`](#claude-codes-top-level-when_to_use)). Precedence follows the presence of the key, so an `ARTIFACT.md` key stated with an empty or false value, such as `tags: []`, `sensitivity: ""`, or `deprecated: false`, still takes precedence.
 
 When `ARTIFACT.md` states a key and the `metadata` value for that key follows its encoding, the two values must be equal. `tags` and `when_to_use` compare as ordered lists. A difference is the `lint.skill_artifact_field_mismatch` error: `podium lint` exits 1, and ingest refuses the skill with `ingest.lint_failed`.
 
@@ -119,6 +120,22 @@ When `ARTIFACT.md` states a key and the `metadata` value for that key follows it
 An invalid value draws a warning and leaves the resolved value at `any`. An `ARTIFACT.md` value draws `lint.skill_invocation`, which names the value and the allowed values, and a `metadata` value draws `lint.skill_metadata_field_ignored`. `invocation` set on a type other than `skill` draws `lint.skill_invocation`, and Podium ignores the value. An `ARTIFACT.md` that states `any`, an empty value, or an invalid value beside `metadata.invocation: "user"` draws `lint.skill_artifact_field_mismatch`, because the stated key decides.
 
 A harness control that the author writes in `SKILL.md`, such as `disable-model-invocation: true`, passes through unchanged on a skill whose `invocation` is `any`, so the harness that reads the key treats the skill as user-only and every other harness does not. On a skill whose `invocation` is `user`, the claude-code, cursor, and pi adapters write `disable-model-invocation: true` as the YAML boolean. They keep an authored value that is already the boolean `true` and replace any other authored value, including `false` and the quoted string `"true"`. An authored `agents/openai.yaml` in the skill folder is copied unchanged on a skill whose `invocation` is `any`. On a skill whose `invocation` is `user`, the codex adapter keeps the file's other keys and sets `policy.allow_implicit_invocation` to the YAML boolean `false`. Lint reports nothing for an authored control, because it does not read harness-native keys.
+
+### Claude Code's top-level `when_to_use`
+
+Claude Code reads a top-level `when_to_use` string in `SKILL.md` and appends it to the skill's description in its skill listing. Podium reads the same key in the encoding of `metadata.when_to_use`: one situation per line. The field takes the `ARTIFACT.md` value when `ARTIFACT.md` states the key, otherwise the top-level value, and otherwise the `metadata` value.
+
+```markdown
+---
+name: month-end-close
+description: Run the month-end close checklist.
+when_to_use: |
+  After the last invoice of the month posts.
+  When the controller asks for the close status.
+---
+```
+
+Podium keeps the key in every materialized and published `SKILL.md`, so Claude Code reads the authored text. The Agent Skills standard does not define the key, and a skill upload outside Claude Code refuses it, so `podium lint` reports it with the `lint.skill_podium_only_field` warning. A top-level value that differs from the `ARTIFACT.md` value or from a `metadata.when_to_use` is the `lint.skill_artifact_field_mismatch` error. A top-level value that is a sequence or a mapping, or that holds only white space, is ignored with the `lint.skill_metadata_field_ignored` warning, and the field takes the `metadata` value.
 
 ### Multi-line `when_to_use`
 
@@ -179,7 +196,7 @@ lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence
 
 When the registry has an embedding provider, it computes an embedding for each artifact at ingest from the artifact's `name`, `description`, `when_to_use`, and `tags`. `when_to_use` therefore contributes to the vector half of hybrid search through the embedding computed at ingest.
 
-The SQLite and Postgres metadata stores do not persist `when_to_use`. Lexical (BM25) matching against those stores never sees the field, and `podium admin reembed` recomputes each vector without it. Put the terms a search must match in `description` and `tags`, and use `when_to_use` for concrete situations, such as "After month-end close" rather than "When working on finance stuff."
+Lexical (BM25) matching also reads `name`, `description`, `when_to_use`, and `tags`, and `podium admin reembed` recomputes each vector from the same fields. Write `when_to_use` as concrete situations, such as "After month-end close" rather than "When working on finance stuff."
 
 ### Skill versions
 
@@ -234,13 +251,14 @@ The body is the Markdown after the frontmatter. The agentskills.io specification
 | `SKILL.md` `name` matches the parent directory. | Error |
 | `SKILL.md` `name` syntax follows the agentskills.io constraints. | Error |
 | `SKILL.md` `description` is non-empty. The 1024-character cap is checked by the `skills-ref validate` check below and reported as a warning. | Error |
-| `SKILL.md` does not contain Podium-only fields (`type`, `when_to_use`, `tags`, etc.) at the top level. The diagnostic recommends the `metadata` key of the same name for a field that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists, and the `ARTIFACT.md` overlay for every other field. | Error (`lint.skill_podium_only_field`) |
+| `SKILL.md` does not contain Podium-only fields (`type`, `tags`, etc.) at the top level. The diagnostic recommends the `metadata` key of the same name for a field that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists, and the `ARTIFACT.md` overlay for every other field. | Error (`lint.skill_podium_only_field`) |
 | `SKILL.md` does not contain a top-level `version`. Many published skills carry one, so the check is a warning. Podium ignores the value and takes the version from `metadata.version` or `ARTIFACT.md`, and the diagnostic recommends `metadata.version`. | Warning (`lint.skill_podium_only_field`) |
+| A top-level `when_to_use` is reported because the Agent Skills standard does not define it, so a skill upload outside Claude Code refuses it. Claude Code defines the key, and Podium reads it (see [Claude Code's top-level `when_to_use`](#claude-codes-top-level-when_to_use)). | Warning (`lint.skill_podium_only_field`) |
 | `ARTIFACT.md` does not contain `name`, `description`, or `license`. | Warning |
 | When `ARTIFACT.md` does contain `name`, `description`, or `license`, the values match `SKILL.md` exactly. | Error on mismatch |
 | A `version` in `ARTIFACT.md` equals `SKILL.md` `metadata.version` when both are set and `metadata.version` is a `major.minor.patch` value. | Error on mismatch (`lint.skill_artifact_field_mismatch`) |
-| When `ARTIFACT.md` states a key that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists and the `SKILL.md` `metadata` value for that key follows its encoding, the two values are equal. `tags` and `when_to_use` compare as ordered lists. | Error on mismatch (`lint.skill_artifact_field_mismatch`) |
-| A `SKILL.md` `metadata` value for a key that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists follows its encoding. A value that does not, including a sequence or a mapping, is ignored, and the diagnostic names the key, the value, and the encoding. | Warning (`lint.skill_metadata_field_ignored`); `lint_suppress` does not silence it |
+| When `ARTIFACT.md` states a key that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists and the `SKILL.md` `metadata` value for that key follows its encoding, the two values are equal. `tags` and `when_to_use` compare as ordered lists. A top-level `when_to_use` that follows its encoding also equals the `ARTIFACT.md` value and a `metadata.when_to_use` that follows its encoding. | Error on mismatch (`lint.skill_artifact_field_mismatch`) |
+| A `SKILL.md` `metadata` value for a key that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists follows its encoding. A value that does not, including a sequence or a mapping, is ignored, and the diagnostic names the key, the value, and the encoding. A top-level `when_to_use` that does not follow the encoding is ignored the same way. | Warning (`lint.skill_metadata_field_ignored`); `lint_suppress` does not silence it |
 | A `SKILL.md` `metadata` value under a key that is neither `version` nor a key that [Podium fields in SKILL.md metadata](#podium-fields-in-skillmd-metadata) lists is a string. A sequence or a mapping is kept unchanged and not read, and the diagnostic names the key and states that the Agent Skills standard defines `metadata` values as strings. | Warning (`lint.skill_metadata_nonstring`); `lint_suppress` does not silence it |
 | A non-empty `ARTIFACT.md` `invocation` value is `any` or `user`. Another value resolves to `any`, and the diagnostic names the value and the allowed values. | Warning (`lint.skill_invocation`) |
 | The `ARTIFACT.md` body is empty or a single HTML comment. | Warning |

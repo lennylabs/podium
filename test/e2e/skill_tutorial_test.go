@@ -10,6 +10,7 @@ package e2e
 // .claude/agents arrow) are asserted against actual behavior.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,21 +175,21 @@ func TestSkillTutorial_FullerFrontmatterLints(t *testing.T) {
 }
 
 // A Podium-only field in SKILL.md is an ingest error, so SKILL.md stays within
-// the agentskills.io subset. A top-level version is the exception: it is a
+// the agentskills.io subset. A top-level version is an exception: it is a
 // warning, because many published skills carry one and Podium ignores it.
 // Spec: §4.3.4
 func TestSkillTutorial_SkillMDPodiumFieldErrors(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetSkillArtifact,
-		"personal/hello/greet/SKILL.md":    "---\nname: greet\ndescription: Greet the user.\nwhen_to_use:\n  - greeting\n---\n\nbody\n",
+		"personal/hello/greet/SKILL.md":    "---\nname: greet\ndescription: Greet the user.\nsensitivity: low\n---\n\nbody\n",
 	})
 	res := runPodium(t, "", nil, "lint", "--registry", reg)
 	if res.Exit != 1 {
 		t.Fatalf("lint exit=%d, want 1 (error)\nstdout=%s", res.Exit, res.Stdout)
 	}
-	if !strings.Contains(res.Stdout, "[error]") || !strings.Contains(res.Stdout, "when_to_use") {
-		t.Errorf("expected an error flagging the Podium-only field when_to_use:\n%s", res.Stdout)
+	if !strings.Contains(res.Stdout, "[error]") || !strings.Contains(res.Stdout, `"sensitivity"`) {
+		t.Errorf("expected an error flagging the Podium-only field sensitivity:\n%s", res.Stdout)
 	}
 
 	versionOnly := writeRegistry(t, map[string]string{
@@ -202,6 +203,61 @@ func TestSkillTutorial_SkillMDPodiumFieldErrors(t *testing.T) {
 	if !strings.Contains(res.Stdout, "[warning]") || !strings.Contains(res.Stdout, "lint.skill_podium_only_field") ||
 		!strings.Contains(res.Stdout, "metadata.version") {
 		t.Errorf("expected a warning recommending metadata.version:\n%s", res.Stdout)
+	}
+}
+
+// Claude Code's top-level when_to_use in SKILL.md lints with a warning rather
+// than an error, ingests, feeds search, and stays in the materialized
+// SKILL.md, where Claude Code reads it. A top-level value that disagrees with
+// metadata.when_to_use is an error.
+// Spec: §4.3.4
+func TestSkillTutorial_TopLevelWhenToUse(t *testing.T) {
+	t.Parallel()
+	const skill = "---\nname: greet\ndescription: Greet the user.\n" +
+		"when_to_use: Use when a zorblax report is due.\n---\n\nbody\n"
+	reg := writeRegistry(t, map[string]string{
+		"personal/hello/greet/SKILL.md": skill,
+		"personal/hello/other/SKILL.md": "---\nname: other\ndescription: Say goodbye.\n---\n\nbody\n",
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 0 || strings.Contains(res.Stdout, "[error]") ||
+		!strings.Contains(res.Stdout, "[warning] personal/hello/greet: SKILL.md sets when_to_use at the top level") {
+		t.Fatalf("lint exit=%d, want 0 with a top-level when_to_use warning\nstdout=%s", res.Exit, res.Stdout)
+	}
+
+	srv := startServer(t, reg)
+	st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=zorblax")
+	if st != 200 {
+		t.Fatalf("search: HTTP %d: %s", st, body)
+	}
+	var found struct {
+		Results []struct {
+			ID string `json:"id"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &found); err != nil {
+		t.Fatalf("decode search: %v\n%s", err, body)
+	}
+	if len(found.Results) != 1 || found.Results[0].ID != "personal/hello/greet" {
+		t.Errorf("search for a word only the top-level when_to_use holds = %s, want personal/hello/greet alone", body)
+	}
+
+	tgt := t.TempDir()
+	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if got := readFile(t, filepath.Join(tgt, ".claude/skills/greet/SKILL.md")); !strings.Contains(got, "when_to_use: Use when a zorblax report is due.") {
+		t.Errorf("materialized SKILL.md lost the top-level when_to_use:\n%s", got)
+	}
+
+	mismatch := writeRegistry(t, map[string]string{
+		"personal/hello/greet/SKILL.md": "---\nname: greet\ndescription: Greet the user.\n" +
+			"when_to_use: Use when a zorblax report is due.\nmetadata:\n  when_to_use: Use at session start.\n---\n\nbody\n",
+	})
+	res = runPodium(t, "", nil, "lint", "--registry", mismatch)
+	if res.Exit != 1 || !strings.Contains(res.Stdout, "lint.skill_artifact_field_mismatch") ||
+		!strings.Contains(res.Stdout, "metadata.when_to_use") {
+		t.Errorf("lint exit=%d, want 1 with a top-level and metadata when_to_use mismatch\nstdout=%s", res.Exit, res.Stdout)
 	}
 }
 

@@ -253,6 +253,7 @@ rm -rf "$WORK"
 | S110 | Published Agent Skills parse and lint without false errors, and an unparseable manifest is refused on its own by lint, sync, and ingest | solo then standalone | none | none | none |
 | S111 | The catalog overlap report reads across layers with structured peers, validates its threshold, and the semantic check refuses to start without an embedding source | standalone | none | none | none |
 | S112 | The web UI's Similarity page, tab, and rail section render the overlap report in both themes | standalone | none | none | none |
+| S113 | Claude Code's top-level `when_to_use` in `SKILL.md` lints as a warning, reaches search on a SQLite registry, and stays in the materialized `SKILL.md` | solo then standalone | none | none | none |
 
 ---
 
@@ -13381,6 +13382,90 @@ so it needs no embedding provider, and it binds 127.0.0.1:8176.
    ends in an ellipsis and shows in full on hover), and the list scrolls
    without moving the detail beside it when the window is short enough to
    make it scroll.
+
+**Cleanup.** `rm -rf "$WORK"`. Step 3 stops the server.
+
+---
+
+## S113: Claude Code's top-level `when_to_use` in `SKILL.md` lints as a warning, reaches search on a SQLite registry, and stays in the materialized `SKILL.md`
+
+**Goal.** Validate that a top-level `when_to_use` in `SKILL.md`, the key
+Claude Code defines, lints with a warning rather than an error, resolves the
+skill's `when_to_use` so that lexical search on a SQLite registry matches a
+word only that key holds, stays byte-for-byte in the `SKILL.md` a Claude Code
+sync writes, and is an error when it disagrees with `metadata.when_to_use`.
+
+**Covers.** The §4.3.4 top-level `when_to_use`, its lint diagnostics, and the
+§4.7 projection that search reads, through the compiled `podium` binary.
+
+**Why by hand.** The registry stores rows in SQLite, which keeps no
+`when_to_use` column, so a search that ignores the key returns nothing
+rather than an error, and a materialized `SKILL.md` that drops the key still
+loads in Claude Code without the extra context. An operator reads the lint
+lines, the search response, and the written file together.
+
+**Prerequisites.** None beyond the isolation block. The scenario binds
+127.0.0.1:8177.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above. Write a
+   layer with a skill whose `when_to_use` is top-level and a second skill
+   without it, and lint the layer.
+
+   ```bash
+   mkdir -p "$WORK/root/ops/greet" "$WORK/root/ops/farewell"
+   printf -- '---\nname: greet\ndescription: Greet the user.\nwhen_to_use: |\n  When a zorblax report is due.\n  At session start.\nmetadata:\n  version: "1.0.0"\n---\n\nBody.\n' > "$WORK/root/ops/greet/SKILL.md"
+   printf -- '---\nname: farewell\ndescription: Say goodbye at the end of a session.\nmetadata:\n  version: "1.0.0"\n---\n\nBody.\n' > "$WORK/root/ops/farewell/SKILL.md"
+   podium lint --registry "$WORK/root"; echo "lint exit=$?"
+   ```
+
+   **Expect.** One line reads `[warning] ops/greet: SKILL.md sets when_to_use
+   at the top level, as Claude Code reads it, and Podium reads the value; the
+   Agent Skills standard does not define the key, so a skill upload outside
+   Claude Code refuses it (lint.skill_podium_only_field)`, no line is
+   `[error]`, and the last line is `lint exit=0`. An `[error]` naming
+   `when_to_use` is the defect.
+
+2. Sync the layer for Claude Code and read the written `SKILL.md`.
+
+   ```bash
+   podium sync --registry "$WORK/root" --target "$WORK/out" --harness claude-code > /dev/null; echo "sync exit=$?"
+   cmp "$WORK/root/ops/greet/SKILL.md" "$WORK/out/.claude/skills/greet/SKILL.md" && echo "SKILL.md unchanged"
+   ```
+
+   **Expect.** `sync exit=0` and `SKILL.md unchanged`. A `cmp` difference
+   line means the sync rewrote the file Claude Code reads.
+
+3. Serve the layer on a SQLite registry and search for a word only the
+   top-level `when_to_use` holds.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/root" --bind 127.0.0.1:8177 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8177/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   curl -s "http://127.0.0.1:8177/v1/search_artifacts?query=zorblax" | jq -c '{total_matched, ids: [.results[]?.id]}'
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** `{"total_matched":1,"ids":["ops/greet"]}`. A
+   `total_matched` of 0 means search does not read the top-level
+   `when_to_use` on a SQLite registry.
+
+4. Give the skill a `metadata.when_to_use` that disagrees with the top-level
+   value, and lint again.
+
+   ```bash
+   printf -- '---\nname: greet\ndescription: Greet the user.\nwhen_to_use: When a zorblax report is due.\nmetadata:\n  version: "1.0.0"\n  when_to_use: At session start.\n---\n\nBody.\n' > "$WORK/root/ops/greet/SKILL.md"
+   podium lint --registry "$WORK/root"; echo "lint exit=$?"
+   ```
+
+   **Expect.** One line reads `[error] ops/greet: SKILL.md top-level
+   when_to_use [When a zorblax report is due.] does not match SKILL.md
+   metadata.when_to_use [At session start.]
+   (lint.skill_artifact_field_mismatch)`, and the last line is
+   `lint exit=1`.
 
 **Cleanup.** `rm -rf "$WORK"`. Step 3 stops the server.
 

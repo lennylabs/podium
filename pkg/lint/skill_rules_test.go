@@ -49,33 +49,30 @@ func hasAnySeverity(diags []Diagnostic, sev Severity) bool {
 }
 
 // spec: §4.3.4 — "SKILL.md does not contain Podium-only fields (`type`,
-// `when_to_use`, `tags`, etc.) at the top level; if present, error."
-// ParseSkill drops the unknown keys, so without the rule the violation is
-// invisible.
+// `tags`, etc.) at the top level; if present, error." A top-level when_to_use
+// is a warning instead, because Claude Code defines it. ParseSkill drops the
+// unknown keys, so without the rule the violation is invisible.
 func TestLint_SkillPodiumOnlyFieldInSkillMD(t *testing.T) {
 	t.Parallel()
 	reg, records := openFixture(t, skillTree(
 		"type: skill\nversion: 1.0.0\n",
-		"name: hello\ndescription: Greet the user.\ntype: skill\nwhen_to_use:\n  - greeting\n",
+		"name: hello\ndescription: Greet the user.\ntype: skill\nwhen_to_use: greeting\n",
 	)...)
 	diags := (&Linter{}).Lint(context.Background(), reg, records)
-	if !hasSeverity(diags, "lint.skill_podium_only_field", SeverityError) {
-		t.Fatalf("expected lint.skill_podium_only_field error, got: %v", diags)
-	}
-	var sawType, sawWhenToUse bool
+	var typeSev, whenSev Severity
 	for _, d := range diags {
 		if d.Code != "lint.skill_podium_only_field" {
 			continue
 		}
 		if strings.Contains(d.Message, `"type"`) {
-			sawType = true
+			typeSev = d.Severity
 		}
 		if strings.Contains(d.Message, "when_to_use") {
-			sawWhenToUse = true
+			whenSev = d.Severity
 		}
 	}
-	if !sawType || !sawWhenToUse {
-		t.Errorf("expected diagnostics naming both type and when_to_use, got: %v", diags)
+	if typeSev != SeverityError || whenSev != SeverityWarning {
+		t.Errorf("type severity %q and when_to_use severity %q, want error and warning: %v", typeSev, whenSev, diags)
 	}
 }
 
@@ -868,5 +865,87 @@ func TestLint_TopLevelInvocationNamesMetadataKey(t *testing.T) {
 	want := `SKILL.md contains Podium-only field "invocation" at the top level; set metadata.invocation in SKILL.md or move it to ARTIFACT.md`
 	if len(got) != 1 || got[0] != want {
 		t.Errorf("want one error %q, got %q", want, got)
+	}
+}
+
+// spec: §4.3.4 — a top-level when_to_use is a warning that names Claude Code
+// and the Agent Skills standard, and draws no error on a skill with no
+// ARTIFACT.md and no metadata.when_to_use.
+func TestLint_SkillTopLevelWhenToUseWarns(t *testing.T) {
+	t.Parallel()
+	reg, records := openFixture(t, plainSkillTree("name: hello\ndescription: Greet the user.\nwhen_to_use: When the user says hi.\n")...)
+	diags := (&Linter{}).Lint(context.Background(), reg, records)
+	if hasAnySeverity(diags, SeverityError) {
+		t.Fatalf("a top-level when_to_use raised an error: %v", diags)
+	}
+	if !hasSeverity(diags, "lint.skill_podium_only_field", SeverityWarning) {
+		t.Fatalf("expected a lint.skill_podium_only_field warning: %v", diags)
+	}
+	for _, d := range diags {
+		if d.Code == "lint.skill_podium_only_field" &&
+			(!strings.Contains(d.Message, "Claude Code") || !strings.Contains(d.Message, "Agent Skills standard")) {
+			t.Errorf("warning %q does not name Claude Code and the Agent Skills standard", d.Message)
+		}
+	}
+}
+
+// spec: §4.3.4 — a top-level when_to_use that follows its encoding equals the
+// ARTIFACT.md value when ARTIFACT.md states the key, and equals a
+// metadata.when_to_use that follows its encoding; each mismatch is an error.
+// Equal values raise no mismatch.
+func TestLint_SkillTopLevelWhenToUseMismatches(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, artifactFM, skillFM, wantIn string
+	}{
+		{"artifact", "type: skill\nversion: 1.0.0\nwhen_to_use: [greeting]\n",
+			"name: hello\ndescription: Greet the user.\nwhen_to_use: farewell\n", "ARTIFACT.md when_to_use"},
+		{"metadata", "type: skill\nversion: 1.0.0\n",
+			"name: hello\ndescription: Greet the user.\nwhen_to_use: farewell\nmetadata:\n  when_to_use: greeting\n", "metadata.when_to_use"},
+	}
+	for _, tc := range cases {
+		reg, records := openFixture(t, skillTree(tc.artifactFM, tc.skillFM)...)
+		diags := (&Linter{}).Lint(context.Background(), reg, records)
+		found := false
+		for _, d := range diags {
+			if d.Code == "lint.skill_artifact_field_mismatch" && d.Severity == SeverityError && strings.Contains(d.Message, tc.wantIn) &&
+				strings.Contains(d.Message, "top-level when_to_use") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s: expected a top-level when_to_use mismatch error naming %s: %v", tc.name, tc.wantIn, diags)
+		}
+	}
+	reg, records := openFixture(t, skillTree(
+		"type: skill\nversion: 1.0.0\nwhen_to_use: [greeting]\n",
+		"name: hello\ndescription: Greet the user.\nwhen_to_use: greeting\nmetadata:\n  when_to_use: \" greeting \"\n",
+	)...)
+	if diags := (&Linter{}).Lint(context.Background(), reg, records); hasCode(diags, "lint.skill_artifact_field_mismatch") {
+		t.Errorf("equal when_to_use values raised a mismatch: %v", diags)
+	}
+}
+
+// spec: §4.3.4 — a top-level when_to_use that does not follow its encoding,
+// a sequence or a value of white space alone, is ignored with a warning that
+// names the key as top-level, the value, and the encoding.
+func TestLint_SkillTopLevelWhenToUseIgnoredValue(t *testing.T) {
+	t.Parallel()
+	for value, want := range map[string]string{
+		"\n  - greeting\n": "SKILL.md top-level when_to_use is a sequence ([greeting]) and is ignored",
+		" \"   \"\n":       `SKILL.md top-level when_to_use "   " is ignored`,
+	} {
+		reg, records := openFixture(t, plainSkillTree("name: hello\ndescription: Greet the user.\nwhen_to_use:"+value)...)
+		diags := (&Linter{}).Lint(context.Background(), reg, records)
+		found := false
+		for _, d := range diags {
+			if d.Code == "lint.skill_metadata_field_ignored" && d.Severity == SeverityWarning &&
+				strings.HasPrefix(d.Message, want) && strings.Contains(d.Message, "one situation per line") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("when_to_use:%q: expected a warning starting %q: %v", value, want, diags)
+		}
 	}
 }

@@ -30,7 +30,8 @@ var skillMDAllowedFields = map[string]bool{
 // names (when_to_use, tags, sensitivity, search_visibility, deprecated,
 // replaced_by, release_notes, and invocation) live under metadata.<key> or in
 // ARTIFACT.md. They stay in this list because a top-level SKILL.md key is
-// still an error.
+// still an error, except when_to_use: Claude Code defines it at the top level,
+// so Podium reads it there and lint warns rather than errors.
 var podiumOnlySkillFields = []string{
 	"type",
 	"version",

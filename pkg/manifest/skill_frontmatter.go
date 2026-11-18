@@ -33,6 +33,7 @@ func (s *Skill) UnmarshalYAML(value *yaml.Node) error {
 	var aux struct {
 		skillFields `yaml:",inline"`
 		Metadata    yaml.Node `yaml:"metadata"`
+		WhenToUse   yaml.Node `yaml:"when_to_use"`
 	}
 	if err := value.Decode(&aux); err != nil {
 		return err
@@ -43,7 +44,25 @@ func (s *Skill) UnmarshalYAML(value *yaml.Node) error {
 	}
 	*s = Skill(aux.skillFields)
 	s.Metadata, s.NonStringMetadata = md, nested
-	return nil
+	return s.decodeTopLevelWhenToUse(&aux.WhenToUse)
+}
+
+// decodeTopLevelWhenToUse records Claude Code's top-level when_to_use. A
+// scalar lands in WhenToUse as a string, a null or an absent key leaves it
+// empty, and a sequence or a mapping lands in WhenToUseNonString, so the
+// SKILL.md still parses and lint reports the ignored value.
+//
+// Spec: §4.3.4
+func (s *Skill) decodeTopLevelWhenToUse(n *yaml.Node) error {
+	v := resolveAlias(n)
+	if n.Kind == 0 || (v.Kind == yaml.ScalarNode && v.ShortTag() == "!!null") {
+		return nil
+	}
+	if v.Kind != yaml.ScalarNode {
+		s.WhenToUseNonString = &NonStringMetadata{Key: "when_to_use", Kind: nodeKindName(v), Value: flowValue(v)}
+		return nil
+	}
+	return n.Decode(&s.WhenToUse)
 }
 
 // decodeSkillMetadataNode splits the metadata node n into the string-valued
