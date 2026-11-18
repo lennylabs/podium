@@ -6,7 +6,7 @@
 // filter narrows the totals, and the table's layer menu must not move the
 // tiles above it (§8.7).
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { FilterField } from './DomainAtScale';
 import { firstClassTypes } from './SearchSurface';
@@ -69,7 +69,11 @@ export function UsageSurface({ query, onError }: { query: string; onError: (err:
         <span className="usage-head-badges">
           <Badge tone="soft">{windowBadge(range)}</Badge>
         </span>
-        <WindowControl value={range} onChange={setRange} />
+        <WindowControl
+          value={range}
+          shown={report === null ? null : { from: report.from, to: report.to }}
+          onChange={setRange}
+        />
       </div>
       <p className="lead usage-lead">Loads, syncs, and search hits for the layers you can see. Counted per UTC day.</p>
       {summary.error !== null && (
@@ -87,9 +91,28 @@ export function UsageSurface({ query, onError }: { query: string; onError: (err:
   );
 }
 
+/** presetRange returns the first and last UTC day of a preset window that
+ * ends today, the range the registry reads for `days` (§8.7). */
+function presetRange(days: number, now: Date = new Date()): { from: string; to: string } {
+  const day = 24 * 60 * 60 * 1000;
+  const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
+  return { from: iso(now.getTime() - (days - 1) * day), to: iso(now.getTime()) };
+}
+
 /** WindowControl is the 7d / 30d / 90d / Custom… choice. Custom opens two
- * date fields, and the page reads the range once both hold a date. */
-function WindowControl({ value, onChange }: { value: UsageWindow; onChange: (w: UsageWindow) => void }) {
+ * date fields filled with the range on display, `shown` (the report's from
+ * and to) or, before the report arrives, the preset's own days, so To starts
+ * at today and From at the start of the preset window. The page reads the
+ * range whenever both fields hold a date. */
+function WindowControl({
+  value,
+  shown,
+  onChange,
+}: {
+  value: UsageWindow;
+  shown: { from: string; to: string } | null;
+  onChange: (w: UsageWindow) => void;
+}) {
   const [custom, setCustom] = useState(!('days' in value));
   const [from, setFrom] = useState('days' in value ? '' : value.from);
   const [to, setTo] = useState('days' in value ? '' : value.to);
@@ -118,7 +141,14 @@ function WindowControl({ value, onChange }: { value: UsageWindow; onChange: (w: 
           className={custom ? 'segment segment-on' : 'segment'}
           aria-pressed={custom}
           onClick={() => {
+            if (custom) {
+              return;
+            }
+            const start = shown ?? ('days' in value ? presetRange(value.days) : value);
             setCustom(true);
+            setFrom(start.from);
+            setTo(start.to);
+            onChange({ from: start.from, to: start.to });
           }}
         >
           Custom…
@@ -274,6 +304,7 @@ function ArtifactUsage({
   const [more, setMore] = useState<UsageArtifact[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const sentinel = useRef<HTMLDivElement | null>(null);
   const typed = useDebounced(filter.trim());
   // The address carries the filter text, so a copied link opens the list the
   // reader filtered.
@@ -301,7 +332,11 @@ function ArtifactUsage({
   const first = list.value;
   const rows = first === null ? [] : [...first.artifacts, ...more];
   const next = more.length > 0 ? cursor : (first?.next_cursor ?? null);
-  const peak = Math.max(0, ...rows.map((r) => r.loads));
+  const peak: Peaks = {
+    loads: Math.max(0, ...rows.map((r) => r.loads)),
+    syncs: Math.max(0, ...rows.map((r) => r.syncs)),
+    search_hits: Math.max(0, ...rows.map((r) => r.search_hits)),
+  };
 
   const sortBy = (column: SortKey) => {
     if (column === sort) {
@@ -312,7 +347,7 @@ function ArtifactUsage({
     }
   };
   const showMore = () => {
-    if (next === null || loadingMore) {
+    if (next === null || loadingMore || list.loading) {
       return;
     }
     setLoadingMore(true);
@@ -327,6 +362,31 @@ function ArtifactUsage({
       },
     );
   };
+  // The sentinel below the table reads the next page as it comes within
+  // 400px of the viewport. The observer is rebuilt with each page, so a page
+  // too short to push the sentinel out of view reads the one after it too. A
+  // failed read leaves the button in place to try again.
+  const observe = typeof IntersectionObserver !== 'undefined';
+  const showMoreRef = useRef(showMore);
+  showMoreRef.current = showMore;
+  useEffect(() => {
+    const target = sentinel.current;
+    if (!observe || target === null || next === null || loadingMore) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          showMoreRef.current();
+        }
+      },
+      { rootMargin: '400px 0px' },
+    );
+    observer.observe(target);
+    return () => {
+      observer.disconnect();
+    };
+  }, [observe, next, loadingMore, rows.length]);
 
   return (
     <section className="usage-artifacts" aria-label="By artifact">
@@ -410,18 +470,41 @@ function ArtifactUsage({
         </div>
       )}
       {next !== null && first !== null && (
-        <div className="usage-more">
-          <button type="button" className="button" aria-disabled={loadingMore} onClick={showMore}>
-            {loadingMore ? 'Loading…' : `Show ${String(Math.min(listPage, first.artifact_count - rows.length))} more`}
-          </button>
+        <div className="usage-more" ref={sentinel}>
+          {loadingMore ? (
+            <span className="usage-more-status" role="status">
+              Loading more artifacts…
+            </span>
+          ) : (
+            <button type="button" className="button" onClick={showMore}>
+              {`Show ${String(Math.min(listPage, first.artifact_count - rows.length))} more`}
+            </button>
+          )}
         </div>
       )}
     </section>
   );
 }
 
-function ArtifactUsageRow({ row, peak, today }: { row: UsageArtifact; peak: number; today: string }) {
-  const width = peak === 0 ? 0 : Math.round((row.loads / peak) * 100);
+/** Peaks holds the largest value of each barred column among the rows
+ * shown, which each row's bars are drawn against. */
+type Peaks = Record<'loads' | 'syncs' | 'search_hits', number>;
+
+/** CountCell is a count with a small bar relative to its column's peak. */
+function CountCell({ value, peak, strong }: { value: number; peak: number; strong?: boolean }) {
+  const width = peak === 0 ? 0 : Math.round((value / peak) * 100);
+  const tone = [strong === true ? 'strong' : '', value === 0 ? 'quiet' : ''].filter(Boolean).join(' ');
+  return (
+    <span role="cell" className="num usage-count-cell">
+      <span className="usage-count-bar" aria-hidden="true">
+        <span className="usage-count-fill" style={{ width: `${String(width)}%` }} />
+      </span>
+      <span className={tone === '' ? undefined : tone}>{formatCount(value)}</span>
+    </span>
+  );
+}
+
+function ArtifactUsageRow({ row, peak, today }: { row: UsageArtifact; peak: Peaks; today: string }) {
   return (
     <div className="usage-row" role="row">
       <span role="cell" className="usage-artifact">
@@ -433,18 +516,9 @@ function ArtifactUsageRow({ row, peak, today }: { row: UsageArtifact; peak: numb
       <span role="cell" className="mono usage-layer-cell">
         {row.layer}
       </span>
-      <span role="cell" className="num usage-loads">
-        <span className="usage-loads-bar" aria-hidden="true">
-          <span className="usage-loads-fill" style={{ width: `${String(width)}%` }} />
-        </span>
-        <span className={row.loads === 0 ? 'strong quiet' : 'strong'}>{formatCount(row.loads)}</span>
-      </span>
-      <span role="cell" className={row.syncs === 0 ? 'num quiet' : 'num'}>
-        {formatCount(row.syncs)}
-      </span>
-      <span role="cell" className={row.search_hits === 0 ? 'num quiet' : 'num'}>
-        {formatCount(row.search_hits)}
-      </span>
+      <CountCell value={row.loads} peak={peak.loads} strong />
+      <CountCell value={row.syncs} peak={peak.syncs} />
+      <CountCell value={row.search_hits} peak={peak.search_hits} />
       <span role="cell" className="num usage-last">
         {relativeDay(row.last_loaded, today)}
       </span>
