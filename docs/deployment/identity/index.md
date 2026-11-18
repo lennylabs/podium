@@ -62,7 +62,7 @@ Enabling an identity provider changes the default visibility of a new admin-defi
 
 ## Web UI
 
-The registry process serves the web UI when it starts with `--web-ui` or `PODIUM_WEB_UI=true`. The UI calls the registry's HTTP API, so each UI request resolves its caller exactly as any other API request does.
+The registry process serves the web UI when it starts with `--web-ui` or `PODIUM_WEB_UI=true`. The UI calls the registry's HTTP API, so each UI request resolves its caller exactly as any other API request does. Its surfaces are the domain browser, search, the artifact viewer, the Similarity page, and the layer panel. Each surface shows what the caller's identity can see: the Similarity page and the artifact viewer's Similarity tab read the [catalog overlap report](../../managing/overlap#reading-the-report-in-the-web-ui) as that caller, an anonymous caller included.
 
 - **Behind a gateway.** The gateway authenticates the browser and forwards a token or injects identity headers. The UI carries no sign-in flow of its own.
 - **Directly reachable under `oidc-jwt`.** The registry verifies the token each request presents. It can also sign the browser in itself when the browser flow is enabled with `--web-ui-auth` or `PODIUM_WEB_UI_AUTH`. The registry then redirects the browser to the IdP, exchanges the authorization code server-side, and returns the access token in the `__Host-podium_session` cookie. The [browser session](../../reference/http-api#browser-session) reference documents the cookies and routes, and [config.web_ui_auth_unconfigured requirements](../../reference/error-codes#configweb_ui_auth_unconfigured-requirements) lists the settings the flow requires.
