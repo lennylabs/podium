@@ -191,6 +191,26 @@ func (v *SQLiteVec) Put(ctx context.Context, tenantID, artifactID, version strin
 	return tx.Commit()
 }
 
+// knnJoin returns the KNN query over vec_artifacts, which takes the query
+// vector as its first argument, joined to vec_index and filtered to the
+// tenant named by its second argument; the caller appends any further filter,
+// the ORDER BY, and the LIMIT. The KNN runs in a MATERIALIZED common table
+// expression because SQLite otherwise flattens a FROM-clause subquery into the
+// join, puts vec_index in the outer loop, and runs a full KNN scan once per
+// tenant row: with a few thousand vectors one query then takes seconds where
+// the materialized KNN takes milliseconds.
+func knnJoin(overK int) string {
+	return fmt.Sprintf(`
+		WITH va AS MATERIALIZED (
+			SELECT rowid, distance FROM vec_artifacts
+			WHERE embedding MATCH ? AND k = %d
+		)
+		SELECT vi.artifact_id, vi.version, va.distance
+		FROM va
+		JOIN vec_index vi ON vi.rowid = va.rowid
+		WHERE vi.tenant_id = ?`, overK)
+}
+
 // Query joins vec_index with vec_artifacts and ORDER BY distance.
 // sqlite-vec's MATCH operator + `k=` parameter does the top-K
 // selection; we filter by tenant in the join.
@@ -203,24 +223,13 @@ func (v *SQLiteVec) Query(ctx context.Context, tenantID string, vec []float32, t
 	}
 	blob := serialize(vec)
 
-	// sqlite-vec's KNN syntax: `WHERE embedding MATCH ? AND k = ?`.
-	// The result has columns (rowid, distance). We then join vec_index
-	// to recover artifact identifiers and filter to the tenant. To
-	// avoid pulling other tenants into the KNN result, we ask for
-	// (topK + tenantSize) candidates and trim — but a simpler
-	// strategy that works at expected scale is to fetch a generous
-	// over-K and filter; we use 10x topK clamped to sqliteVecMaxK.
+	// The KNN result carries no tenant, so the query asks for a generous
+	// over-K, 10x topK clamped to sqliteVecMaxK, and filters it to the
+	// tenant through vec_index.
 	overK := min(topK*10, sqliteVecMaxK)
-	rows, err := v.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT vi.artifact_id, vi.version, va.distance
-		FROM (
-			SELECT rowid, distance FROM vec_artifacts
-			WHERE embedding MATCH ? AND k = %d
-		) AS va
-		JOIN vec_index vi ON vi.rowid = va.rowid
-		WHERE vi.tenant_id = ?
+	rows, err := v.db.QueryContext(ctx, knnJoin(overK)+`
 		ORDER BY va.distance ASC
-		LIMIT ?`, overK), blob, tenantID, topK)
+		LIMIT ?`, blob, tenantID, topK)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
@@ -300,14 +309,7 @@ func (v *SQLiteVec) QueryModel(ctx context.Context, tenantID string, vec []float
 	}
 	blob := serialize(vec)
 	overK := min(topK*10, sqliteVecMaxK)
-	q := fmt.Sprintf(`
-		SELECT vi.artifact_id, vi.version, va.distance
-		FROM (
-			SELECT rowid, distance FROM vec_artifacts
-			WHERE embedding MATCH ? AND k = %d
-		) AS va
-		JOIN vec_index vi ON vi.rowid = va.rowid
-		WHERE vi.tenant_id = ?`, overK)
+	q := knnJoin(overK)
 	args := []any{blob, tenantID}
 	if modelID != "" {
 		q += ` AND (vi.model_id = ? OR vi.model_id = '')`

@@ -45,9 +45,10 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 		if len(src.SkillBytes) > 0 {
 			// Spec: §4.3.4, §6.7: skillMarkdown derives compatibility like
 			// every SKILL.md writer and adds disable-model-invocation for a
-			// user-invoked skill. Both run before the §4.4.2 provenance
+			// user-invoked skill, and withClaudeWhenToUse writes the resolved
+			// when_to_use at the top level, where Claude Code reads it. Both run before the §4.4.2 provenance
 			// rewrite, so the rewrite sees the final frontmatter.
-			skill := skillMarkdown(src, controlFrontmatter)
+			skill := withClaudeWhenToUse(skillMarkdown(src, controlFrontmatter), src)
 			// §4.4.2 — rewrite imported provenance blocks into
 			// Claude Code <untrusted-data> regions so the host
 			// can apply differential trust at read time.

@@ -24,6 +24,8 @@ import {
 } from "../domain";
 import { formatQueryLine } from "../query";
 import { artifactHref, domainHref, pathUnder, searchHref } from "../route";
+import type { UsageCell } from "../usage";
+import { formatCount } from "../usage";
 
 /** tileCap is how many tiles the grid shows before the reader asks for the
  * rest, which keeps a domain with dozens of children to one screen. */
@@ -253,13 +255,18 @@ export function SubdomainTiles({
 /** ArtifactColumn is what the table sorts on. Every value is present on every
  * descriptor or rendered as absent, so a sort never reorders on a field half
  * the rows lack. */
-type ArtifactColumn = "id" | "type" | "version";
+type ArtifactColumn = "id" | "type" | "version" | "loads";
 
 const sortOptions: { key: ArtifactColumn; label: string }[] = [
   { key: "id", label: "artifact" },
   { key: "type", label: "type" },
   { key: "version", label: "version" },
+  { key: "loads", label: "loads" },
 ];
+
+/** UsageOf answers a row's last 30 days, or nothing where the listing reads
+ * no usage or its read failed. */
+type UsageOf = (id: string) => UsageCell | undefined;
 
 /** ArtifactTable is the at-scale artifact treatment: a filter over the domain's
  * own listing, a type chip per returned type beside an All chip, a sort
@@ -291,6 +298,7 @@ export function ArtifactTable({
   trimmed,
   withheld,
   tail,
+  usage,
 }: {
   artifacts: ArtifactDescriptor[];
   /** scope is the domain the listing belongs to, which bounds the search the
@@ -305,6 +313,10 @@ export function ArtifactTable({
    * listing carries. The table owns where it is drawn, because the table is
    * what knows whether the rows under it are still the ones the tail counts. */
   tail?: ReactNode;
+  /** usage is the listing's last 30 days, read in one request after the page
+   * rendered. The curated rows carry it as their usage line and the table as
+   * its Loads and Syncs columns (§13.10). */
+  usage?: UsageOf;
 }) {
   const [type, setType] = useState("");
   const [filter, setFilter] = useState("");
@@ -333,13 +345,20 @@ export function ArtifactTable({
   // A filter, a type chip, or a ranking over a trimmed listing answers for the
   // returned rows alone, which is what the reach line exists to say.
   const narrowed = trimmed && (filtering || ranking);
+  // The usage columns, and the loads sort, are offered once the listing
+  // reads usage and the read has not failed. A failed read leaves them out
+  // without an error, as it leaves out every other usage figure (§13.10).
+  const counted = usage !== undefined && artifacts.some((artifact) => usage(artifact.id) !== undefined);
+  const sortBy = column === "loads" && !counted ? "id" : column;
   const curated = sorted(
     matched.filter((artifact) => artifact.source === "featured"),
-    column,
+    sortBy,
+    usage,
   );
   const rest = sorted(
     matched.filter((artifact) => artifact.source !== "featured"),
-    column,
+    sortBy,
+    usage,
   );
 
   // A domain past the subdomain threshold that holds nothing directly is
@@ -419,7 +438,7 @@ export function ArtifactTable({
               setColumn(event.target.value as ArtifactColumn);
             }}
           >
-            {sortOptions.map((option) => (
+            {sortOptions.filter((option) => option.key !== "loads" || counted).map((option) => (
               <option key={option.key} value={option.key}>
                 {option.label}
               </option>
@@ -469,7 +488,7 @@ export function ArtifactTable({
               pushed the table down the page. */}
           <ul className="artifact-list" aria-label="Curated artifacts">
             {curated.map((artifact) => (
-              <ArtifactRow key={artifact.id} artifact={artifact} titled dense />
+              <ArtifactRow key={artifact.id} artifact={artifact} titled dense usage={usage?.(artifact.id)} />
             ))}
           </ul>
         </div>
@@ -482,6 +501,7 @@ export function ArtifactTable({
           rows={rest}
           scope={scope}
           region="Artifacts in this domain"
+          usage={counted ? usage : undefined}
         />
       )}
       {/* The tail counts the rows the response returned, and a filter narrows
@@ -614,6 +634,7 @@ function ArtifactRows({
   scope,
   region,
   empty,
+  usage,
 }: {
   rows: ArtifactDescriptor[];
   /** scope is the domain the page stands on, which the identifier column
@@ -623,6 +644,9 @@ function ArtifactRows({
   /** empty is what the body carries in place of rows, drawn under the column
    * labels so the header still explains the list it stands over. */
   empty?: ReactNode;
+  /** usage adds the Loads and Syncs columns, the last 30 days of each row;
+   * an absent function draws neither. */
+  usage?: UsageOf;
 }) {
   return (
     <div
@@ -638,13 +662,19 @@ function ArtifactRows({
             <th className="column-label">Type</th>
             <th className="column-label">Version</th>
             <th className="column-label">Tags</th>
+            {usage !== undefined && (
+              <>
+                <th className="column-label num">Loads</th>
+                <th className="column-label num">Syncs</th>
+              </>
+            )}
             <th className="column-label">Description</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 && empty !== undefined && (
             <tr>
-              <td className="table-empty" colSpan={5}>
+              <td className="table-empty" colSpan={usage === undefined ? 5 : 7}>
                 {empty}
               </td>
             </tr>
@@ -685,6 +715,7 @@ function ArtifactRows({
                   ))}
                 </span>
               </td>
+              {usage !== undefined && <UsageCells cell={usage(artifact.id)} />}
               {/* The clip sits on an inner element rather than on the cell.
                 A `display: block` cell leaves the row's cell layout, which
                 broke the rule under the description column away from the rule
@@ -705,19 +736,60 @@ function ArtifactRows({
   );
 }
 
+/** UsageCells are a row's Loads and Syncs cells: placeholders while the
+ * listing's read is in flight, then the counts. */
+function UsageCells({ cell }: { cell: UsageCell | undefined }) {
+  if (cell === undefined) {
+    return (
+      <>
+        <td className="mono num" />
+        <td className="mono num" />
+      </>
+    );
+  }
+  if (cell.state === "loading") {
+    return (
+      <>
+        <td className="num" aria-busy="true">
+          <span className="usage-placeholder" aria-hidden="true" style={{ width: 36 }} />
+        </td>
+        <td className="num" aria-busy="true">
+          <span className="usage-placeholder" aria-hidden="true" style={{ width: 28 }} />
+        </td>
+      </>
+    );
+  }
+  return (
+    <>
+      <td className="mono num">{formatCount(cell.counts.loads)}</td>
+      <td className="mono num quiet">{formatCount(cell.counts.syncs)}</td>
+    </>
+  );
+}
+
 /** sorted orders a row set by the chosen column. A descriptor omits a version
  * where it carries none, and an absent value sorts as the empty string rather
- * than dropping the row. */
+ * than dropping the row. The loads column ranks the most loaded first, with a
+ * row whose counts have not arrived counting none, and identifier order among
+ * equal counts. */
 function sorted(
   rows: ArtifactDescriptor[],
   column: ArtifactColumn,
+  usage?: UsageOf,
 ): ArtifactDescriptor[] {
+  if (column === "loads") {
+    const loads = (artifact: ArtifactDescriptor) => {
+      const cell = usage?.(artifact.id);
+      return cell?.state === "ready" ? cell.counts.loads : 0;
+    };
+    return [...rows].sort((a, b) => loads(b) - loads(a) || a.id.localeCompare(b.id));
+  }
   return [...rows].sort((a, b) =>
     valueOf(a, column).localeCompare(valueOf(b, column)),
   );
 }
 
-function valueOf(artifact: ArtifactDescriptor, column: ArtifactColumn): string {
+function valueOf(artifact: ArtifactDescriptor, column: Exclude<ArtifactColumn, "loads">): string {
   switch (column) {
     case "type":
       return artifact.type;
