@@ -56,7 +56,7 @@ The version stays `1.0.0`, because a filesystem catalog keeps no ingest history.
 
 ## Step 2: Add Podium-only fields in an ARTIFACT.md overlay
 
-`SKILL.md` stays within the agentskills.io specification, so a Podium-only field never sits at its top level. Fields such as `when_to_use`, `tags`, and `sensitivity` can go under `SKILL.md` `metadata` as strings, or in an optional `ARTIFACT.md` beside `SKILL.md`, which the author writes by hand. The overlay carries every Podium-only field with its YAML type, and it is the only place for fields such as `runtime_requirements` that `metadata` does not carry. This step writes the overlay, and the end of the step shows the `metadata` form.
+`SKILL.md` stays within the agentskills.io specification, so a Podium-only field does not sit at its top level, apart from the `when_to_use` that Claude Code defines (see [Claude Code's top-level `when_to_use`](frontmatter-reference#claude-codes-top-level-when_to_use)). Fields such as `when_to_use`, `tags`, and `sensitivity` can go under `SKILL.md` `metadata` as strings, or in an optional `ARTIFACT.md` beside `SKILL.md`, which the author writes by hand. The overlay carries every Podium-only field with its YAML type, and it is the only place for fields such as `runtime_requirements` that `metadata` does not carry. This step writes the overlay, and the end of the step shows the `metadata` form.
 
 Create the overlay:
 
