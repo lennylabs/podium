@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
@@ -320,7 +321,8 @@ func TestUsageReport_PagesTheArtifactList(t *testing.T) {
 // Spec: §8.7 — a long window coarsens the series: day stays day up to 366
 // days and is served as week beyond, week stays week up to 1,096 days and is
 // served as month beyond, day past the weekly limit is served as month, and
-// the response's granularity names the served value.
+// the response's granularity names the served value, which the series'
+// periods follow.
 func TestUsageReport_CoarsensLongWindows(t *testing.T) {
 	t.Parallel()
 	f := newUsageFixture(t)
@@ -347,10 +349,75 @@ func TestUsageReport_CoarsensLongWindows(t *testing.T) {
 		for _, p := range rep.Totals.Series {
 			loads += p.Loads
 		}
-		periods := map[string]int{"none": 0, "day": c.days}[c.want]
-		if rep.Granularity != c.want || (periods > 0 && len(rep.Totals.Series) != periods) || (c.want != "none" && loads != rep.Totals.Loads) {
-			t.Errorf("%s over %d days: granularity %q with %d periods summing to %d of %d loads, want %q",
-				c.requested, c.days, rep.Granularity, len(rep.Totals.Series), loads, rep.Totals.Loads, c.want)
+		periods := expectedPeriods(t, rep.From, rep.To, c.want)
+		if rep.Granularity != c.want || len(rep.Totals.Series) != periods || (c.want != "none" && loads != rep.Totals.Loads) {
+			t.Errorf("%s over %d days: granularity %q with %d periods summing to %d of %d loads, want %q with %d periods",
+				c.requested, c.days, rep.Granularity, len(rep.Totals.Series), loads, rep.Totals.Loads, c.want, periods)
 		}
+	}
+}
+
+// expectedPeriods counts the periods a series at granularity holds over the
+// days from first to last: one per day, per ISO week, or per calendar month
+// the window touches, and none for none.
+func expectedPeriods(t *testing.T, first, last, granularity string) int {
+	t.Helper()
+	from, err1 := time.Parse(store.UsageDayLayout, first)
+	to, err2 := time.Parse(store.UsageDayLayout, last)
+	if err1 != nil || err2 != nil {
+		t.Fatalf("window %s to %s does not parse", first, last)
+	}
+	if granularity == "none" {
+		return 0
+	}
+	seen := map[string]bool{}
+	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
+		switch granularity {
+		case "day":
+			seen[d.Format(store.UsageDayLayout)] = true
+		case "week":
+			y, w := d.ISOWeek()
+			seen[fmt.Sprintf("%d-%d", y, w)] = true
+		case "month":
+			seen[d.Format("2006-01")] = true
+		}
+	}
+	return len(seen)
+}
+
+// Spec: §8.7 — artifacts that tie on loads and syncs are ordered by search
+// hits descending before their IDs, and paging one entry at a time follows
+// that order without skipping or repeating an entry.
+func TestUsageReport_OrdersAndPagesBySearchHits(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	row := func(lay, id string, hits int64) store.UsageCount {
+		return store.UsageCount{Day: "2026-11-18", Layer: lay, ArtifactID: id, ClientKind: "mcp", Harness: "none", Loads: 1, SearchHits: hits}
+	}
+	if err := f.st.AddUsageCounts(context.Background(), "t", []store.UsageCount{
+		row("team", "ops/greet", 1), row("team", "ops/farewell", 5), row("secret", "ops/hidden", 3),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ops/farewell", "ops/hidden", "ops/greet"}
+	whole, err := f.reg.UsageReport(context.Background(), publicID, q(nil)())
+	if err != nil || !reflect.DeepEqual(reportIDs(whole), want) {
+		t.Fatalf("order = %v (%v), want %v", reportIDs(whole), err, want)
+	}
+	var paged []string
+	cursor := ""
+	for range len(want) + 1 {
+		rep, err := f.reg.UsageReport(context.Background(), publicID, q(func(u *core.UsageQuery) { u.Limit, u.Cursor = 1, cursor })())
+		if err != nil {
+			t.Fatal(err)
+		}
+		paged = append(paged, reportIDs(rep)...)
+		if rep.NextCursor == nil {
+			break
+		}
+		cursor = *rep.NextCursor
+	}
+	if !reflect.DeepEqual(paged, want) {
+		t.Errorf("paged = %v, want %v", paged, want)
 	}
 }
