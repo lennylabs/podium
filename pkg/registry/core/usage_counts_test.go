@@ -218,6 +218,56 @@ func TestUsageCounter_FailedFlushKeepsCounts(t *testing.T) {
 	}
 }
 
+// blockingUsageStore holds its first AddUsageCounts until release is closed
+// and then fails it, as an add does when the shutdown cancels its context;
+// later adds reach the store.
+type blockingUsageStore struct {
+	*store.Memory
+	entered, release chan struct{}
+	once             sync.Once
+}
+
+func (s *blockingUsageStore) AddUsageCounts(ctx context.Context, tenant string, counts []store.UsageCount) error {
+	first := false
+	s.once.Do(func() { first = true })
+	if first {
+		close(s.entered)
+		<-s.release
+		return context.Canceled
+	}
+	return s.Memory.AddUsageCounts(ctx, tenant, counts)
+}
+
+// Spec: §8.7 — a flush that starts while another is in progress waits for
+// it, so the shutdown flush adds the counts that an interrupted periodic
+// flush puts back when its add fails, rather than finding the buffer empty.
+func TestUsageCounter_FlushWaitsForFlushInProgress(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	bs := &blockingUsageStore{Memory: f.st, entered: make(chan struct{}), release: make(chan struct{})}
+	_, _ = f.reg.LoadArtifact(clientCtx("mcp", "claude-code"), usageAlice, "ops/greet", core.LoadArtifactOptions{})
+	periodic := make(chan error, 1)
+	go func() { periodic <- f.counter.Flush(context.Background(), bs) }()
+	<-bs.entered
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- f.counter.Flush(context.Background(), bs) }()
+	select {
+	case err := <-shutdown:
+		t.Fatalf("the second flush returned (%v) while the first was still adding", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(bs.release)
+	if err := <-periodic; err == nil {
+		t.Error("the interrupted flush returned nil")
+	}
+	if err := <-shutdown; err != nil {
+		t.Fatal(err)
+	}
+	if rows := f.rows(t); len(rows) != 1 || rows[0].Loads != 1 {
+		t.Errorf("rows = %+v, want the interrupted flush's load added by the second flush", rows)
+	}
+}
+
 // Spec: §8.7 — counts flushed by two replicas that share a store add up.
 func TestUsageCounter_TwoReplicasAdd(t *testing.T) {
 	t.Parallel()

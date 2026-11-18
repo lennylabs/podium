@@ -60,11 +60,17 @@ type usageBufferKey struct {
 // replicas that flush to one store produce totals across every replica.
 //
 // mu guards pending; every method takes it, so the counter is safe for
-// concurrent use by request goroutines and the flush loop.
+// concurrent use by request goroutines and the flush loop. flushMu
+// serializes Flush: the shutdown flush runs while a periodic flush the
+// shutdown cancelled may still be waiting on the store, and that flush puts
+// its counts back only when its add fails. Without the wait, the shutdown
+// flush would find the buffer empty and the restored counts would be lost
+// at exit.
 //
 // Spec: §8.7
 type UsageCounter struct {
 	clock   clock.Clock
+	flushMu sync.Mutex
 	mu      sync.Mutex
 	pending map[usageBufferKey]store.UsageCount
 }
@@ -118,13 +124,16 @@ func (u *UsageCounter) recordSearchHit(ctx context.Context, tenant, layer, artif
 // Flush adds the buffered counts to st, one AddUsageCounts call per tenant,
 // and clears what it added. A tenant whose add fails keeps its counts in the
 // buffer, merged with the counts buffered since, so the next flush that
-// succeeds adds them. It returns the first error.
+// succeeds adds them. A flush that starts while another is in progress waits
+// for it. It returns the first error.
 //
 // Spec: §8.7
 func (u *UsageCounter) Flush(ctx context.Context, st store.Store) error {
 	if u == nil {
 		return nil
 	}
+	u.flushMu.Lock()
+	defer u.flushMu.Unlock()
 	u.mu.Lock()
 	taken := u.pending
 	u.pending = map[usageBufferKey]store.UsageCount{}
