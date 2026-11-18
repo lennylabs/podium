@@ -419,6 +419,12 @@ func sqliteRevive(ctx context.Context, ex execContexter, rec ManifestRecord, ing
 		rec.Frontmatter, rec.Body, rec.SkillRaw, rec.Signature, rec.SearchVisibility, resources,
 		nullTimeText(rec.DeprecatedAt),
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.Layer)
+	return rowsChanged(res, err)
+}
+
+// rowsChanged reports whether a statement changed any row, passing its error
+// through. Both SQL stores' restore updates read it.
+func rowsChanged(res sql.Result, err error) (bool, error) {
 	if err != nil {
 		return false, err
 	}
@@ -438,10 +444,10 @@ func (s *SQLite) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID stri
 		marks[i] = "?"
 		args = append(args, id)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := rowsChanged(s.db.ExecContext(ctx, `
 		UPDATE manifests SET deleted_at = ?
 		WHERE tenant_id = ? AND layer = ? AND deleted_at IS NULL
-			AND artifact_id IN (`+strings.Join(marks, ", ")+`)`, args...)
+			AND artifact_id IN (`+strings.Join(marks, ", ")+`)`, args...))
 	return err
 }
 

@@ -1002,14 +1002,12 @@ func removedArtifactLifecycle(t *testing.T, s store.Store) {
 	put("ops/gone", "2.0.0", "hg2", "L")
 	put("ops/kept", "1.0.0", "hk", "L")
 	put("ops/other", "1.0.0", "ho", "M")
-	if err := s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/gone", "ops/other"}, time.Now().UTC()); err != nil {
-		t.Fatalf("SoftDeleteArtifacts: %v", err)
-	}
+	// An empty list tombstones nothing.
+	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", nil, time.Now().UTC()))
+	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/gone", "ops/other"}, time.Now().UTC()))
 	served := func() string {
 		rows, err := s.ListManifests(ctx, "t")
-		if err != nil {
-			t.Fatalf("ListManifests: %v", err)
-		}
+		must(t, err)
 		var out []string
 		for _, r := range rows {
 			out = append(out, r.ArtifactID+"@"+r.Version+"/"+r.Layer)
@@ -1027,18 +1025,13 @@ func removedArtifactLifecycle(t *testing.T, s store.Store) {
 	got = append(got, fmt.Sprint(s.PutManifest(ctx, gone)), served())
 
 	old := time.Now().UTC().Add(-40 * 24 * time.Hour)
-	if err := s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/kept"}, old); err != nil {
-		t.Fatalf("SoftDeleteArtifacts(old): %v", err)
-	}
-	if _, err := s.PurgeExpiredLayerDeletions(ctx, time.Now().UTC().Add(-30*24*time.Hour)); err != nil {
-		t.Fatalf("PurgeExpiredLayerDeletions: %v", err)
-	}
+	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/kept"}, old))
+	_, err := s.PurgeExpiredLayerDeletions(ctx, time.Now().UTC().Add(-30*24*time.Hour))
+	must(t, err)
 	_, keptErr := s.GetManifest(ctx, "t", "ops/kept", "1.0.0")
 	got = append(got, fmt.Sprint(errors.Is(keptErr, store.ErrNotFound)), fmt.Sprint(s.PutManifest(ctx, manifestRec("t", "ops/kept", "1.0.0", "fresh"))))
 	all, err := s.ListManifestsIncludingDeleted(ctx, "t")
-	if err != nil {
-		t.Fatalf("ListManifestsIncludingDeleted: %v", err)
-	}
+	must(t, err)
 	got = append(got, fmt.Sprint(len(all)))
 
 	want := []string{

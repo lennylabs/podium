@@ -400,7 +400,8 @@ type Result struct {
 	// Spec: §7.3.1
 	Advisories []lint.Diagnostic
 	// Removed lists, sorted, the artifacts the cycle soft-deleted because the
-	// snapshot no longer contains their package.
+	// snapshot no longer contains their package. A completed cycle sets it,
+	// to an empty slice when it removed nothing.
 	//
 	// Spec: §7.3.1 (Removed artifacts)
 	Removed []string
@@ -851,7 +852,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 //
 // Spec: §7.3.1 (Removed artifacts)
 func removedArtifacts(rowsByID map[string][]store.ManifestRecord, layerID string, inSnapshot map[string]bool) []string {
-	var out []string
+	out := []string{}
 	for id, rows := range rowsByID {
 		if inSnapshot[id] {
 			continue

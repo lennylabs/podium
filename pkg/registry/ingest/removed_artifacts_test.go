@@ -3,11 +3,14 @@ package ingest_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
+	"github.com/lennylabs/podium/pkg/store"
 )
 
 func removedAgent(desc, version string) string {
@@ -113,4 +116,28 @@ func TestIngest_RemovedArtifactRestoresAndConflicts(t *testing.T) {
 	}
 	erAssertServes(t, reg, "ops/gone", "", "1.0.0")
 	erAssertServes(t, reg, "ops/kept", "", "1.0.0")
+}
+
+// failingSoftDelete is a store whose tombstone write fails.
+type failingSoftDelete struct{ store.Store }
+
+func (failingSoftDelete) SoftDeleteArtifacts(context.Context, string, string, []string, time.Time) error {
+	return errors.New("store down")
+}
+
+// Spec: §7.3.1 (Removed artifacts) — a cycle whose tombstone write fails
+// returns the failure instead of reporting the artifact as removed, and the
+// artifact keeps serving.
+func TestIngest_RemovedArtifactStoreFailure(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	reg := erRegistry(st, "team")
+	erIngest(t, st, "team", map[string]string{"ops/gone/ARTIFACT.md": removedAgent("Runbook for restarting the ingest worker", "1.0.0")})
+	_, err := ingest.Ingest(context.Background(), failingSoftDelete{st}, ingest.Request{
+		TenantID: erTenant, LayerID: "team", Files: erFS(map[string]string{}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "store down") {
+		t.Fatalf("ingest err = %v, want the store failure", err)
+	}
+	erAssertServes(t, reg, "ops/gone", "", "1.0.0")
 }

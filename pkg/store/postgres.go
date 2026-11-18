@@ -801,11 +801,7 @@ func postgresRevive(ctx context.Context, ex execContexter, rec ManifestRecord, i
 		rec.Frontmatter, rec.Body, rec.SkillRaw, rec.Signature, rec.SearchVisibility, resources,
 		nullTimePG(rec.DeprecatedAt),
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	return n > 0, err
+	return rowsChanged(res, err)
 }
 
 // SoftDeleteArtifacts tombstones the live rows layerID contributed for each
