@@ -268,6 +268,33 @@ func TestUsageCounter_FlushWaitsForFlushInProgress(t *testing.T) {
 	}
 }
 
+// Spec: §8.7 — a flush whose deadline passes while it waits for a flush in
+// progress gives up with the deadline error, so a store call that never
+// returns cannot hold the shutdown flush open past its deadline.
+func TestUsageCounter_FlushWaitEndsAtDeadline(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	bs := &blockingUsageStore{Memory: f.st, entered: make(chan struct{}), release: make(chan struct{})}
+	_, _ = f.reg.LoadArtifact(clientCtx("mcp", "claude-code"), usageAlice, "ops/greet", core.LoadArtifactOptions{})
+	stuck := make(chan error, 1)
+	go func() { stuck <- f.counter.Flush(context.Background(), bs) }()
+	<-bs.entered
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	bounded := make(chan error, 1)
+	go func() { bounded <- f.counter.Flush(ctx, bs) }()
+	select {
+	case err := <-bounded:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("Flush = %v, want the deadline error", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("the flush is still waiting 5s after its 100ms deadline")
+	}
+	close(bs.release)
+	<-stuck
+}
+
 // Spec: §8.7 — counts flushed by two replicas that share a store add up.
 func TestUsageCounter_TwoReplicasAdd(t *testing.T) {
 	t.Parallel()

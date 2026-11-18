@@ -60,19 +60,21 @@ type usageBufferKey struct {
 // replicas that flush to one store produce totals across every replica.
 //
 // mu guards pending; every method takes it, so the counter is safe for
-// concurrent use by request goroutines and the flush loop. flushMu
-// serializes Flush: the shutdown flush runs while a periodic flush the
-// shutdown cancelled may still be waiting on the store, and that flush puts
-// its counts back only when its add fails. Without the wait, the shutdown
-// flush would find the buffer empty and the restored counts would be lost
-// at exit.
+// concurrent use by request goroutines and the flush loop. flushing, a
+// one-slot semaphore, serializes Flush: the shutdown flush runs while a
+// periodic flush the shutdown cancelled may still be waiting on the store,
+// and that flush puts its counts back only when its add fails. Without the
+// wait, the shutdown flush would find the buffer empty and the restored
+// counts would be lost at exit. A channel rather than a mutex lets the wait
+// end at the flush's deadline, because a store call that ignores
+// cancellation would otherwise hold the shutdown open.
 //
 // Spec: §8.7
 type UsageCounter struct {
-	clock   clock.Clock
-	flushMu sync.Mutex
-	mu      sync.Mutex
-	pending map[usageBufferKey]store.UsageCount
+	clock    clock.Clock
+	flushing chan struct{}
+	mu       sync.Mutex
+	pending  map[usageBufferKey]store.UsageCount
 }
 
 // NewUsageCounter returns an empty counter that dates each count by c in UTC.
@@ -81,7 +83,7 @@ func NewUsageCounter(c clock.Clock) *UsageCounter {
 	if c == nil {
 		c = clock.Real{}
 	}
-	return &UsageCounter{clock: c, pending: map[usageBufferKey]store.UsageCount{}}
+	return &UsageCounter{clock: c, flushing: make(chan struct{}, 1), pending: map[usageBufferKey]store.UsageCount{}}
 }
 
 // add buffers one count for the call's artifact under today's UTC date.
@@ -125,15 +127,20 @@ func (u *UsageCounter) recordSearchHit(ctx context.Context, tenant, layer, artif
 // and clears what it added. A tenant whose add fails keeps its counts in the
 // buffer, merged with the counts buffered since, so the next flush that
 // succeeds adds them. A flush that starts while another is in progress waits
-// for it. It returns the first error.
+// for it, and returns ctx's error, adding nothing, when ctx ends first. It
+// returns the first error.
 //
 // Spec: §8.7
 func (u *UsageCounter) Flush(ctx context.Context, st store.Store) error {
 	if u == nil {
 		return nil
 	}
-	u.flushMu.Lock()
-	defer u.flushMu.Unlock()
+	select {
+	case u.flushing <- struct{}{}:
+		defer func() { <-u.flushing }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	u.mu.Lock()
 	taken := u.pending
 	u.pending = map[usageBufferKey]store.UsageCount{}

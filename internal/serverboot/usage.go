@@ -23,10 +23,8 @@ const (
 	usageRetentionEvery = 24 * time.Hour
 	// usageFinalFlushTimeout bounds the flush at a graceful shutdown, so a
 	// store that hangs does not hold the process open. §8.7 fixes it at 10
-	// seconds. The final flush first waits for a periodic flush in progress,
-	// which this deadline does not cover; that flush runs under the
-	// cancelled boot context, so it returns as soon as the store honors the
-	// cancellation.
+	// seconds, and it covers the final flush's wait for a periodic flush in
+	// progress as well as its own add.
 	usageFinalFlushTimeout = 10 * time.Second
 )
 
