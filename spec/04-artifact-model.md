@@ -580,7 +580,7 @@ Body length is recommended ≤ 2000 tokens. By default lint warns above 2,000 es
 **Notable selection.** Notable artifacts surfaced by `load_domain` are the union of:
 
 - Author-curated entries in `featured:`, in author-supplied order.
-- Artifacts surfaced by learn-from-usage reranking (§3.3) for callers in the relevant signal cohort.
+- The domain's other artifacts, ordered by the learn-from-usage signal (§3.3).
 
 Resolution rules:
 
