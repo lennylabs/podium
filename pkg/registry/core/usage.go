@@ -2,107 +2,161 @@ package core
 
 import (
 	"context"
+	"log"
 	"sort"
 	"sync"
+	"time"
+
+	"github.com/lennylabs/podium/internal/clock"
+	"github.com/lennylabs/podium/pkg/store"
 )
 
-// UsageSignals records and reports the §3.3 learn-from-usage signal: how
-// frequently each artifact is accessed through the meta-tools. spec: §12 —
-// the "Catalog grows too large" mitigation credits "learn-from-usage
-// reranking surfaces signal-based ordering." The recorded signal feeds
-// search_artifacts ranking and the load_domain notable ordering so artifacts
-// agents actually load rise above equally-relevant but unused ones. A nil
-// UsageSignals on the Registry leaves ranking on its lexical, vector, and
-// author-curated order alone.
-type UsageSignals interface {
-	// Record notes one access to (tenantID, artifactID). The sessionID is the
-	// §3.3 correlation key the caller threads through; a repeated access in
-	// the same session still counts so a heavily reused artifact ranks above a
-	// one-off load. An empty artifactID is ignored.
-	Record(ctx context.Context, tenantID, artifactID, sessionID string)
-	// Ranking returns the tenant's accessed artifact IDs ordered most-accessed
-	// first, ties broken by ID for determinism. IDs never accessed are absent,
-	// so callers fuse this partial order with the lexical or vector ranks.
-	Ranking(ctx context.Context, tenantID string) []string
+// UsageRankingWindowDays is the §3.3 learn-from-usage window: the loads of the
+// last 30 UTC days, counting today, rank search results and notable entries.
+const UsageRankingWindowDays = 30
+
+// usageRef names one candidate of a rerank by its artifact ID and the layer
+// that serves it, which is the layer its §8.7 counts are recorded under.
+type usageRef struct {
+	id, layer string
 }
 
-// MemoryUsageSignals is an in-process UsageSignals backed by per-tenant access
-// counters. It carries the §3.3 signal for the life of the registry process,
-// which is sufficient for the §12 reranking: the signal is advisory ordering,
-// not durable state, and a restart simply relearns it from live traffic.
-type MemoryUsageSignals struct {
-	mu     sync.Mutex
-	counts map[string]map[string]int // tenantID -> artifactID -> access count
+// UsageRanking reads the §8.7 stored load counts that drive the §3.3
+// learn-from-usage reranking, and keeps one snapshot per tenant so a search
+// reads the store at most once per refresh interval. The stored counts change
+// only when a replica flushes, so the flush interval is the natural refresh.
+//
+// mu guards tenants. A snapshot's loads map is replaced, never mutated, so a
+// caller reads the map it was handed without the lock.
+//
+// Spec: §3.3
+type UsageRanking struct {
+	clock     clock.Clock
+	refresh   time.Duration
+	retention int
+	mu        sync.Mutex
+	tenants   map[string]*usageSnapshot
 }
 
-// NewMemoryUsageSignals returns an empty in-process usage-signal store.
-func NewMemoryUsageSignals() *MemoryUsageSignals {
-	return &MemoryUsageSignals{counts: map[string]map[string]int{}}
+// usageSnapshot is one tenant's stored loads at readAt. refreshing marks a
+// read in progress, so concurrent searches keep using the previous loads
+// rather than each reading the store.
+type usageSnapshot struct {
+	readAt     time.Time
+	loads      map[usageRef]int64
+	refreshing bool
 }
 
-// Record increments the access counter for (tenantID, artifactID).
-func (m *MemoryUsageSignals) Record(_ context.Context, tenantID, artifactID, _ string) {
-	if artifactID == "" {
-		return
+// NewUsageRanking returns a ranking that reads the stored counts again once a
+// tenant's snapshot is older than refresh, over the §3.3 window capped by
+// retentionDays. A nil c uses the real clock.
+func NewUsageRanking(c clock.Clock, refresh time.Duration, retentionDays int) *UsageRanking {
+	if c == nil {
+		c = clock.Real{}
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	tenant := m.counts[tenantID]
-	if tenant == nil {
-		tenant = map[string]int{}
-		m.counts[tenantID] = tenant
-	}
-	tenant[artifactID]++
+	return &UsageRanking{clock: c, refresh: refresh, retention: retentionDays, tenants: map[string]*usageSnapshot{}}
 }
 
-// Ranking returns the tenant's artifact IDs ordered by descending access
-// count, ties broken alphabetically.
-func (m *MemoryUsageSignals) Ranking(_ context.Context, tenantID string) []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	tenant := m.counts[tenantID]
-	if len(tenant) == 0 {
+// WithUsageRanking wires the §3.3 learn-from-usage reranking. Nil leaves
+// search and load_domain on their lexical, vector, and author-curated order.
+func (r *Registry) WithUsageRanking(u *UsageRanking) *Registry {
+	r.usageRank = u
+	return r
+}
+
+// stored returns the tenant's stored loads, reading them again when the
+// snapshot is older than the refresh interval. A failed read keeps the last
+// loads and still counts as a read, so a store outage costs one attempt per
+// interval rather than one per search: the ranking is advisory ordering.
+//
+// Spec: §3.3
+func (u *UsageRanking) stored(ctx context.Context, st store.Store, tenant string) map[usageRef]int64 {
+	now := u.clock.Now()
+	u.mu.Lock()
+	snap := u.tenants[tenant]
+	if snap != nil && (snap.refreshing || now.Sub(snap.readAt) < u.refresh) {
+		loads := snap.loads
+		u.mu.Unlock()
+		return loads
+	}
+	if snap == nil {
+		snap = &usageSnapshot{}
+		u.tenants[tenant] = snap
+	}
+	snap.refreshing = true
+	u.mu.Unlock()
+
+	loads, err := u.read(ctx, st, tenant, now)
+
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	snap.refreshing = false
+	snap.readAt = now
+	if err != nil {
+		log.Printf("usage ranking: read stored loads for tenant %s: %v; ranking by the last loads read", tenant, err)
+		return snap.loads
+	}
+	snap.loads = loads
+	return loads
+}
+
+// read sums the tenant's stored loads over the window ending today.
+func (u *UsageRanking) read(ctx context.Context, st store.Store, tenant string, now time.Time) (map[usageRef]int64, error) {
+	days := min(UsageRankingWindowDays, max(u.retention, 1))
+	today := now.UTC().Truncate(24 * time.Hour)
+	rows, err := st.SumUsageLoads(ctx, tenant, today.AddDate(0, 0, 1-days).Format(store.UsageDayLayout), today.Format(store.UsageDayLayout))
+	if err != nil {
+		return nil, err
+	}
+	loads := make(map[usageRef]int64, len(rows))
+	for _, row := range rows {
+		loads[usageRef{id: row.ArtifactID, layer: row.Layer}] = row.Loads
+	}
+	return loads, nil
+}
+
+// usageRanking returns the candidates' IDs that have loads, most loaded
+// first and ties by ID, counting each candidate's stored and unflushed loads
+// under the layer that serves it. Counts recorded under another layer, which
+// may be one the caller cannot see, never move a candidate. It returns nil
+// when no ranking is wired or no candidate has loads, so callers skip the
+// rerank.
+//
+// Spec: §3.3
+func (r *Registry) usageRanking(ctx context.Context, refs []usageRef) []string {
+	if r.usageRank == nil {
 		return nil
 	}
-	ids := make([]string, 0, len(tenant))
-	for id := range tenant {
-		ids = append(ids, id)
+	tenant := r.TenantFor(ctx)
+	stored := r.usageRank.stored(ctx, r.store, tenant)
+	pending := r.usageCounts.pendingLoads(tenant)
+	type ranked struct {
+		id    string
+		loads int64
 	}
-	sort.Slice(ids, func(i, j int) bool {
-		if tenant[ids[i]] != tenant[ids[j]] {
-			return tenant[ids[i]] > tenant[ids[j]]
+	list := make([]ranked, 0, len(refs))
+	seen := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		if seen[ref.id] {
+			continue
 		}
-		return ids[i] < ids[j]
+		seen[ref.id] = true
+		if n := stored[ref] + pending[ref]; n > 0 {
+			list = append(list, ranked{id: ref.id, loads: n})
+		}
+	}
+	if len(list) == 0 {
+		return nil
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].loads != list[j].loads {
+			return list[i].loads > list[j].loads
+		}
+		return list[i].id < list[j].id
 	})
-	return ids
-}
-
-// recordUsage notes an artifact access against the §3.3 usage signal when one
-// is wired. A nil signal store is a no-op.
-func (r *Registry) recordUsage(ctx context.Context, artifactID, sessionID string) {
-	if r.usage == nil {
-		return
-	}
-	r.usage.Record(ctx, r.TenantFor(ctx), artifactID, sessionID)
-}
-
-// usageRanking returns the tenant's learn-from-usage ranking restricted to the
-// allowed set, preserving usage order. It returns nil when no signal store is
-// wired or nothing in the allowed set has been accessed, so callers cheaply
-// skip the rerank. spec: §12.
-func (r *Registry) usageRanking(ctx context.Context, allowed map[string]bool) []string {
-	if r.usage == nil {
-		return nil
-	}
-	ranked := r.usage.Ranking(ctx, r.TenantFor(ctx))
-	if len(ranked) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(ranked))
-	for _, id := range ranked {
-		if allowed == nil || allowed[id] {
-			out = append(out, id)
-		}
+	out := make([]string, len(list))
+	for i, e := range list {
+		out[i] = e.id
 	}
 	return out
 }

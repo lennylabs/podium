@@ -377,9 +377,11 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 	// cutoff. A filesystem-source registry signs nothing, so it admits on the
 	// content hash alone.
 	registry := core.New(st, tenant, layers).WithAdmission(nil, probe.objectStore, objectstore.DefaultReadTimeout)
-	// §3.3 / §12 learn-from-usage: the standalone server reranks search and
-	// load_domain by access frequency, like the standard-topology registry.
-	registry = registry.WithUsageSignals(core.NewMemoryUsageSignals())
+	// §3.3 learn-from-usage: the filesystem server reranks search and
+	// load_domain by loads like the booted registry. It runs no flush loop,
+	// so its loads stay in the counter's buffer, which the ranking reads.
+	registry = registry.WithUsageCounts(core.NewUsageCounter(nil)).
+		WithUsageRanking(core.NewUsageRanking(nil, time.Minute, DefaultUsageRetentionDays))
 	return New(registry, opts...), nil
 }
 

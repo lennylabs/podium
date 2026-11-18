@@ -1254,14 +1254,14 @@ func run(ctx context.Context, stop func()) error {
 	// §13.12 / §4.5.5: apply the tenant registry.yaml discovery defaults
 	// and the allow_per_domain_overrides gate to load_domain rendering.
 	registry = registry.WithDiscoveryDefaults(cfg.discoveryDefaults(), cfg.allowPerDomain())
-	// §3.3 / §12 learn-from-usage: record meta-tool accesses so
-	// search_artifacts and load_domain rerank by access frequency. The signal
-	// is in-process advisory ordering; a restart relearns it from live traffic.
-	registry = registry.WithUsageSignals(core.NewMemoryUsageSignals())
 	// §8.7 usage counts: each resolved load and each search hit is buffered
 	// in this replica and added to the store on the flush interval.
 	usageCounter := core.NewUsageCounter(clock.Real{})
 	registry = registry.WithUsageCounts(usageCounter)
+	// §3.3 learn-from-usage: search_artifacts and load_domain rerank by the
+	// stored loads, read again once per flush interval, plus this replica's
+	// unflushed loads.
+	registry = registry.WithUsageRanking(core.NewUsageRanking(clock.Real{}, cfg.usage.flushInterval, cfg.usage.retentionDays))
 
 	// §13.8: the metric set built before the audit stream opened also
 	// records the registry cache.
