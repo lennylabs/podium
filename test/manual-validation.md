@@ -4286,7 +4286,8 @@ rather than trying to avoid them.
    helm install podium deploy/helm/podium \
      --set replicaCount=1 \
      --set signing.secretName=podium-signing-key \
-     --set config.identityProvider.type=""
+     --set config.identityProvider.type="" \
+     --set config.allowPublicBind=true
    kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=podium --timeout=180s
    kubectl get pods -l app.kubernetes.io/name=podium
    kubectl logs deployment/podium-podium | grep 'podium-server listening on '
@@ -4295,7 +4296,10 @@ rather than trying to avoid them.
    `config.identityProvider.type` is emptied because the chart's `oidc-jwt`
    default needs a reachable `https` issuer, which this cluster does not have.
    An empty provider selects none, and the registry serves every caller as
-   anonymous.
+   anonymous. Such a registry admits every caller as an admin, so it refuses
+   the chart's `0.0.0.0` bind with `config.public_bind_refused` unless
+   `config.allowPublicBind` is also set. Installing without it leaves the pod
+   in `CrashLoopBackOff`, and its log names the code and the address.
 
    Public mode is the other way to reach an open registry, and it requires both
    of its values. It binds loopback unless the bind is explicitly allowed, and
@@ -6571,6 +6575,7 @@ container, or certificate is required.
      "Closing the monthly ledger." medium
    write_artifact "$WORK/clean/ops/oncall/ARTIFACT.md" \
      "Handing over the on-call pager." low
+   export PODIUM_OPERATOR_TOKEN="$(openssl rand -hex 32)"
    PODIUM_PUBLIC_MODE=true podium serve --standalone --no-embeddings \
      > "$WORK/server.log" 2>&1 &
    echo "$!" > "$WORK/server.pid"
@@ -6581,7 +6586,9 @@ container, or certificate is required.
 
    **Expect.** `grep` prints a timestamped `podium-server listening on
    127.0.0.1:8080 (mode=public)` line, `kill -0` prints nothing, and `$WORK/server.log` reports
-   the registry started in public mode. No `--layer-path` is passed,
+   the registry started in public mode. The exported `PODIUM_OPERATOR_TOKEN`
+   reaches both the registry and the CLI, because a public-mode registry
+   admits a layer write only with it. No `--layer-path` is passed,
    so the registry ingests nothing at boot and the only ingests are the ones
    the steps below trigger. A `FAIL:` line or a missing `listening` line is a
    refusal to start. A refusal naming the address means the address is in use;
@@ -8124,7 +8131,7 @@ The isolation block's `HOME` also keeps the kind cluster's kubeconfig under
    ```bash
    helm install podium "$WORK/v040/deploy/helm/podium" --set image.repository=podium-live \
      --set image.tag=v0.4.0 --set replicaCount=2 --set config.identityProvider.type="" \
-     --wait --timeout 10m
+     --set config.allowPublicBind=true --wait --timeout 10m
    kubectl get pods -l app.kubernetes.io/name=podium
    helm get values podium -o yaml > "$WORK/podium-values.yaml"
    helm history podium --max 1
@@ -8467,7 +8474,7 @@ The isolation block's `HOME` also keeps the kind cluster's kubeconfig under
     rows
     helm install podium "$WORK/v040/deploy/helm/podium" --set image.repository=podium-live \
       --set image.tag=v0.4.0 --set replicaCount=2 --set config.identityProvider.type="" \
-      --wait --timeout 10m
+      --set config.allowPublicBind=true --wait --timeout 10m
     helm get values podium -o yaml > "$WORK/podium-values.yaml"
     ```
 
@@ -8524,7 +8531,8 @@ The isolation block's `HOME` also keeps the kind cluster's kubeconfig under
       --from-file=registry-signing.key="$WORK/registry-signing.key"
     helm install podium "$CHART" --set image.repository=podium-live \
       --set image.tag=current --set signing.secretName=podium-signing-key \
-      --set config.identityProvider.type="" --set replicaCount=1 --wait --timeout 10m
+      --set config.identityProvider.type="" --set config.allowPublicBind=true \
+      --set replicaCount=1 --wait --timeout 10m
     kubectl get pods -l app.kubernetes.io/name=podium
     kubectl get jobs
     record
@@ -13812,6 +13820,100 @@ rm -rf "$WORK"
 
 ```bash
 kill "$SRV"; wait "$SRV" 2>/dev/null
+rm -rf "$WORK"
+```
+
+---
+
+## S118: Public mode gates layer writes and erasure behind the operator token, and a registry with no identity provider refuses a non-loopback bind
+
+**Goal.** Validate that a public-mode registry refuses every layer write and an erasure request without `PODIUM_OPERATOR_TOKEN`, before it reads the body, and admits them with it. Also validate that the layer list stays open, that the web UI offers no layer control there, and that a registry with no identity provider refuses a non-loopback bind unless `--allow-public-bind` is set.
+
+**Covers.** The §7.3.1 operator token rule, the §7.3.4 `manage_any_layer` member, §8.5 erasure, and the §13.10 operator-token bullet and the "Loopback bind without an identity provider" paragraph.
+
+**Why by hand.** The suite drives the gate through the handler and the compiled CLI, and it stubs the web UI's posture read. This scenario reads the served posture body and the layer panel against the running registry. It also reads the startup refusal on a wildcard bind, which parts of the end-to-end suite skip on macOS.
+
+**Prerequisites.** `jq`, `openssl`, and a browser. The scenario binds 127.0.0.1:8182 and 0.0.0.0:8183.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above. Start a public-mode registry with the web UI and an operator token, over one layer.
+
+   ```bash
+   mkdir -p "$WORK/seed/ops/runbook" "$WORK/notes/ops/oncall"
+   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Restart the ingest worker.\nsensitivity: low\n---\n\nBody.\n' > "$WORK/seed/ops/runbook/ARTIFACT.md"
+   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Hand over the on-call pager.\nsensitivity: low\n---\n\nBody.\n' > "$WORK/notes/ops/oncall/ARTIFACT.md"
+   TOKEN="$(openssl rand -hex 32)"
+   PODIUM_OPERATOR_TOKEN="$TOKEN" podium serve --standalone --no-embeddings --public-mode --web-ui \
+     --layer-path "$WORK/seed" --bind 127.0.0.1:8182 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   server_alive "$SRV" "$WORK/srv.log"
+   U=http://127.0.0.1:8182
+   ```
+
+   **Expect.** `server_alive` prints nothing, and `$WORK/srv.log` carries a `listening on 127.0.0.1:8182 (mode=public)` line.
+
+2. Send a registration that names a path on the registry host, a malformed registration, and an erasure request, each without the token, then send the registration with it.
+
+   ```bash
+   curl -s -X POST "$U/v1/layers" -d '{"id":"etc","source_type":"local","local_path":"/etc"}' | jq -c '{code, constraint: .details.constraint}'
+   curl -s -X POST "$U/v1/layers" -d '{not json' | jq -c '{code}'
+   curl -s -X POST "$U/v1/admin/erase" -d '{"user_id":"alice@acme.com"}' | jq -c '{code}'
+   curl -s -o /dev/null -w '%{http_code}\n' -X POST "$U/v1/layers" -H "X-Podium-Operator-Token: $TOKEN" \
+     -d "{\"id\":\"notes\",\"source_type\":\"local\",\"local_path\":\"$WORK/notes\"}"
+   curl -s "$U/v1/layers" | jq -c '[.layers[].id]'
+   ```
+
+   **Expect.** The three refusals print `{"code":"auth.forbidden","constraint":null}`, `{"code":"auth.forbidden"}`, and `{"code":"auth.forbidden"}`. The registration with the token prints `201`. The list, read without a token, prints both layers, `["seed","notes"]` in either order. A `local_source` constraint or a `registry.invalid_argument` code on the first two lines means a check ran ahead of the token refusal. A `201` on the first line means the registry admitted an anonymous host-path registration.
+
+3. Repeat a write through the CLI without and with the token.
+
+   ```bash
+   podium layer reorder --registry "$U" notes seed; echo "exit=$?"
+   PODIUM_OPERATOR_TOKEN="$TOKEN" podium layer reorder --registry "$U" notes seed; echo "exit=$?"
+   ```
+
+   **Expect.** The first command prints an `HTTP 403` envelope with `"code": "auth.forbidden"` on standard error and `exit=1`. The second prints the new order and `exit=0`.
+
+4. Read the posture with and without the token, then open `http://127.0.0.1:8182/app/#/layers`.
+
+   ```bash
+   curl -s "$U/v1/ui/session" | jq -c '.layer_capabilities'
+   curl -s -H "X-Podium-Operator-Token: $TOKEN" "$U/v1/ui/session" | jq -c '.layer_capabilities'
+   ```
+
+   **Expect.** The first line is `{"manage_any_layer":false}` and the second `{"manage_any_layer":true}`. The layer panel lists both layers and offers no register, reorder, reingest, update, or unregister control. A control on the page is the defect, because the browser sends no token and every such request would be refused.
+
+5. Restart the registry without a token and send a registration that carries one.
+
+   ```bash
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   podium serve --standalone --no-embeddings --public-mode --layer-path "$WORK/seed" --bind 127.0.0.1:8182 > "$WORK/srv2.log" 2>&1 &
+   SRV=$!
+   server_alive "$SRV" "$WORK/srv2.log"
+   curl -s -X POST "$U/v1/layers" -H "X-Podium-Operator-Token: $TOKEN" \
+     -d "{\"id\":\"notes\",\"source_type\":\"local\",\"local_path\":\"$WORK/notes\"}" | jq -r '.code, .message'
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** The registration prints `auth.forbidden` and a message naming `PODIUM_OPERATOR_TOKEN`. The message does not contain the token value.
+
+6. Start a registry with no identity provider on a wildcard address, without and with `--allow-public-bind`.
+
+   ```bash
+   PODIUM_IDENTITY_PROVIDER= podium serve --standalone --no-embeddings --bind 0.0.0.0:8183 > "$WORK/bind.log" 2>&1; echo "exit=$?"
+   grep -o 'config.public_bind_refused[^;]*; "0.0.0.0:8183"' "$WORK/bind.log"
+   PODIUM_IDENTITY_PROVIDER= podium serve --standalone --no-embeddings --allow-public-bind --bind 0.0.0.0:8183 > "$WORK/bind2.log" 2>&1 &
+   SRV=$!
+   server_alive "$SRV" "$WORK/bind2.log"
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** The first start exits non-zero without a `listening` line, and `grep` prints the `config.public_bind_refused` refusal naming `"0.0.0.0:8183"`. The second start prints nothing from `server_alive`, and `$WORK/bind2.log` carries a `listening on 0.0.0.0:8183` line. A `listening` line in `$WORK/bind.log` is the defect.
+
+**Cleanup.**
+
+```bash
 rm -rf "$WORK"
 ```
 

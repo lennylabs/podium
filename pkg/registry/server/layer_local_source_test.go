@@ -716,6 +716,45 @@ func webhookDelivery(t *testing.T, e *LayerEndpoint, id, secret string) *httptes
 	return rec
 }
 
+// Spec: §7.3.1 (Operator token in public mode) — a webhook delivery carries
+// the per-layer secret and no operator token, so on a public-mode registry a
+// delivery for a layer whose repository names a host path is refused with the
+// local_source refusal and runs no ingest, while a delivery for a network
+// repository reaches the ingest.
+func TestLocalSource_WebhookIngestInPublicMode(t *testing.T) {
+	t.Parallel()
+	const secret = "hook-secret"
+	publicMode := func(e *LayerEndpoint) *LayerEndpoint {
+		return e.WithPublicMode().WithAdminAuth(func(r *http.Request) error {
+			return CheckOperatorToken(r, "0123456789abcdef0123456789abcdef")
+		})
+	}
+	for _, c := range []struct {
+		repo string
+		want int
+	}{
+		{"/srv/other-tenant", http.StatusForbidden},
+		{"https://github.com/acme/x.git", http.StatusOK},
+	} {
+		var ran atomic.Int64
+		e, _ := newWebhookEndpoint(t, store.LayerConfig{
+			ID: "vendor", SourceType: "git", Repo: c.repo, GitProvider: "github", WebhookSecret: secret,
+		}, func(e *LayerEndpoint) *LayerEndpoint { return e.WithReingestRunner(countingRunner(&ran)) }, publicMode)
+		rec := webhookDelivery(t, e, "vendor", secret)
+		if rec.Code != c.want {
+			t.Fatalf("%s: delivery status = %d, want %d: %s", c.repo, rec.Code, c.want, rec.Body.String())
+		}
+		if c.want == http.StatusForbidden {
+			assertLocalSourceRefusal(t, rec, c.repo)
+			if n := ran.Load(); n != 0 {
+				t.Errorf("%s: refused delivery ran the ingest %d times", c.repo, n)
+			}
+		} else if n := ran.Load(); n != 1 {
+			t.Errorf("%s: admitted delivery ran the ingest %d times, want 1", c.repo, n)
+		}
+	}
+}
+
 // Spec: §7.3.1 — the inbound webhook ingest takes the local-source arm. A
 // delivery carries the per-layer secret rather than a session, so on a
 // deployment whose admin arm inspects the caller it resolves no admin: a

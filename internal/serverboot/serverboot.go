@@ -1638,6 +1638,11 @@ func run(ctx context.Context, stop func()) error {
 		// branch runs.
 		layers = layers.WithTenantRouting()
 	}
+	if cfg.publicMode {
+		// §7.3.1 Operator token in public mode: the endpoint refuses a write
+		// without the token before reading its body and keeps the list whole.
+		layers = layers.WithPublicMode()
+	}
 	layers = layers.
 		// §7.5.4: an admin layer change wakes a `podium sync --watch`
 		// subscriber, so the endpoint publishes onto the same bus
@@ -1649,11 +1654,17 @@ func run(ctx context.Context, stop func()) error {
 		WithIdentityResolver(layerCallerResolver(layerVerify)).
 		WithGroupResolver(resolveGroup).
 		WithAdminAuth(func(r *http.Request) error {
-			// §13.10/§13.11: a standalone deployment configures no identity
-			// provider, so the local operator is the de facto admin; public
-			// mode authenticates no one. Otherwise gate on the resolved
-			// attested identity via the §4.7.2 admin grant table.
-			if cfg.publicMode || cfg.identityProvider == "" {
+			// §7.3.1 Operator token in public mode: public mode authenticates
+			// no one and can be reachable beyond the local machine, so its
+			// admin arm is the operator token. §13.10/§13.11: a deployment
+			// with no identity provider binds loopback unless the operator
+			// allows otherwise, so the local operator is the de facto admin.
+			// Otherwise gate on the resolved attested identity via the §4.7.2
+			// admin grant table.
+			if cfg.publicMode {
+				return server.CheckOperatorToken(r, cfg.operatorToken)
+			}
+			if cfg.identityProvider == "" {
 				return nil
 			}
 			return registry.AdminAuthorize(r.Context(), layerIdentity(r))
@@ -2901,7 +2912,8 @@ func bootstrapOptions(c *Config, objStore objectstore.Provider) []server.Option 
 	// §4.7: a registry that configures no identity provider, or one in
 	// §13.10 public mode, authenticates no caller, so no caller can hold
 	// the per-tenant admin role and the re-embed endpoint would be
-	// unreachable. The predicate matches the LayerEndpoint admin callback.
+	// unreachable. In public mode authorizeOperatorPass then requires the
+	// operator token, as the LayerEndpoint admin callback does.
 	if c.publicMode || c.identityProvider == "" {
 		out = append(out, server.WithUnauthenticatedReembed())
 	}

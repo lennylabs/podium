@@ -8,10 +8,10 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/server"
 )
 
-// Spec: §13.10 — the CLI sends PODIUM_OPERATOR_TOKEN in the operator token
-// header on a re-embed or overlap rebuild request and on no other request,
-// and sends nothing when the variable is unset.
-func TestDoJSON_SendsOperatorTokenOnlyToThePasses(t *testing.T) {
+// Spec: §7.3.1, §13.10 — the CLI sends PODIUM_OPERATOR_TOKEN in the operator
+// token header on a re-embed, overlap rebuild, erasure, or layer request and
+// on no other request, and sends nothing when the variable is unset.
+func TestDoJSON_SendsOperatorTokenOnlyToGatedEndpoints(t *testing.T) {
 	seen := map[string]string{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen[r.URL.Path] = r.Header.Get(server.OperatorTokenHeader)
@@ -20,25 +20,31 @@ func TestDoJSON_SendsOperatorTokenOnlyToThePasses(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("PODIUM_OPERATOR_TOKEN", "operator-secret")
-	for _, path := range []string{"/v1/admin/reembed", "/v1/admin/overlap/rebuild", "/v1/layers"} {
-		doJSON(srv.URL+path+"?only_missing=true", http.MethodPost, nil)
-	}
-	for path, want := range map[string]string{
+	want := map[string]string{
 		"/v1/admin/reembed":         "operator-secret",
 		"/v1/admin/overlap/rebuild": "operator-secret",
-		"/v1/layers":                "",
-	} {
-		if seen[path] != want {
-			t.Errorf("%s carried %q, want %q", path, seen[path], want)
+		"/v1/admin/erase":           "operator-secret",
+		"/v1/layers":                "operator-secret",
+		"/v1/layers/reingest":       "operator-secret",
+		"/v1/layers/update":         "operator-secret",
+		"/v1/usage":                 "",
+		"/v1/layerset":              "",
+	}
+	for path := range want {
+		doJSON(srv.URL+path+"?id=x", http.MethodPost, nil)
+	}
+	for path, token := range want {
+		if seen[path] != token {
+			t.Errorf("%s carried %q, want %q", path, seen[path], token)
 		}
 	}
 
 	t.Setenv("PODIUM_OPERATOR_TOKEN", "")
-	doJSON(srv.URL+"/v1/admin/reembed", http.MethodPost, nil)
-	if got := seen["/v1/admin/reembed"]; got != "" {
-		t.Errorf("unset variable: /v1/admin/reembed carried %q, want none", got)
+	doJSON(srv.URL+"/v1/layers", http.MethodPost, nil)
+	if got := seen["/v1/layers"]; got != "" {
+		t.Errorf("unset variable: /v1/layers carried %q, want none", got)
 	}
-	if operatorPass("://not a url") {
-		t.Error("an unparseable URL counted as an operator pass")
+	if sendsOperatorToken("://not a url") {
+		t.Error("an unparseable URL counted as a gated endpoint")
 	}
 }

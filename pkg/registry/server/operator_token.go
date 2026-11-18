@@ -21,6 +21,24 @@ func WithOperatorToken(token string) Option {
 	return func(s *Server) { s.operatorToken = token }
 }
 
+// CheckOperatorToken reports whether r carries token in the operator token
+// header, compared in constant time, and returns an error naming the remedy
+// otherwise. An empty token admits no request, so a public-mode registry
+// without PODIUM_OPERATOR_TOKEN refuses every request this gates. The error
+// names the variable and the header and never the expected value.
+//
+// Spec: §7.3.1 (Operator token in public mode), §13.10
+func CheckOperatorToken(r *http.Request, token string) error {
+	if token == "" {
+		return errors.New("this registry runs in public mode and has no PODIUM_OPERATOR_TOKEN, so it refuses this request")
+	}
+	got := r.Header.Get(OperatorTokenHeader)
+	if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+		return errors.New("this registry runs in public mode and requires PODIUM_OPERATOR_TOKEN in the " + OperatorTokenHeader + " header")
+	}
+	return nil
+}
+
 // authorizeOperatorPass decides whether a request may start a re-embed or
 // overlap rebuild pass, both of which query the embedding provider and the
 // search index for every artifact. In public mode the registry authenticates
@@ -34,14 +52,7 @@ func WithOperatorToken(token string) Option {
 // Spec: §4.7, §7.3.1, §13.10
 func (s *Server) authorizeOperatorPass(r *http.Request) error {
 	if s.publicMode {
-		if s.operatorToken == "" {
-			return errors.New("this registry runs in public mode and has no PODIUM_OPERATOR_TOKEN, so it refuses this pass")
-		}
-		got := r.Header.Get(OperatorTokenHeader)
-		if subtle.ConstantTimeCompare([]byte(got), []byte(s.operatorToken)) != 1 {
-			return errors.New("this registry runs in public mode and requires PODIUM_OPERATOR_TOKEN in the " + OperatorTokenHeader + " header")
-		}
-		return nil
+		return CheckOperatorToken(r, s.operatorToken)
 	}
 	if s.unauthenticatedReembed {
 		return nil

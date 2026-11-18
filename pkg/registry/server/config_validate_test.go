@@ -156,13 +156,28 @@ func TestStartupConfig_PublicModeLoopbackDefault(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 — the loopback guard only applies in public mode; a standard
-// deployment binds any address.
-func TestStartupConfig_NonPublicNonLoopbackAllowed(t *testing.T) {
+// Spec: §13.10 (Loopback bind without an identity provider) — a registry
+// with no identity provider, and not in public mode, refuses a non-loopback
+// bind with config.public_bind_refused naming the address, unless
+// --allow-public-bind is set. A registry with an identity provider binds any
+// address, and a loopback bind is always allowed.
+func TestStartupConfig_NoIdentityProviderNonLoopback(t *testing.T) {
 	t.Parallel()
-	cfg := server.StartupConfig{Bind: "0.0.0.0:8080"}
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("non-public non-loopback bind rejected: %v", err)
+	for _, provider := range []string{"", "none"} {
+		err := server.StartupConfig{IdentityProvider: provider, Bind: "0.0.0.0:8080"}.Validate()
+		if !errors.Is(err, server.ErrPublicBindNonLoopback) || !strings.Contains(err.Error(), `"0.0.0.0:8080"`) {
+			t.Errorf("provider %q on a non-loopback bind: %v, want config.public_bind_refused naming the address", provider, err)
+		}
+	}
+	for name, cfg := range map[string]server.StartupConfig{
+		"opt-in":            {Bind: "0.0.0.0:8080", AllowPublicBind: true},
+		"identity provider": {IdentityProvider: "oidc-jwt", Bind: "0.0.0.0:8080"},
+		"loopback":          {Bind: "127.0.0.1:8080"},
+		"default bind":      {Bind: ""},
+	} {
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("%s: Validate() = %v, want nil", name, err)
+		}
 	}
 }
 
@@ -203,7 +218,7 @@ func TestStartupConfig_WebUIAllowed(t *testing.T) {
 		{"non-loopback with opt-in and idp", server.StartupConfig{WebUI: true, WebUIAllowPublicBind: true, IdentityProvider: "oidc", Bind: "0.0.0.0:8080"}},
 		{"loopback standalone, no opt-in", server.StartupConfig{WebUI: true, Bind: "127.0.0.1:8080"}},
 		{"loopback default bind", server.StartupConfig{WebUI: true, Bind: ""}},
-		{"ui off, non-loopback bind", server.StartupConfig{WebUI: false, Bind: "0.0.0.0:8080"}},
+		{"ui off, non-loopback bind", server.StartupConfig{WebUI: false, IdentityProvider: "oidc", Bind: "0.0.0.0:8080"}},
 	}
 	for _, c := range cases {
 		c := c

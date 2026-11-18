@@ -15,7 +15,7 @@ An artifact changes by publishing a new version through its layer's source. This
 | Publish a new version or deprecate an artifact | An author with write access to the layer's source repository. The next ingest of the layer publishes the change. |
 | List an artifact's dependents with `podium impact` | Any caller. The result holds only edges whose artifacts the caller can see. |
 | Run `podium domain analyze` | Any caller. The report covers the artifacts the caller can see. |
-| Reingest, reorder, unregister, or restore a layer | A tenant admin for an admin-defined layer, and the owner or a tenant admin for a user-defined layer. A layer whose source is a filesystem path on the registry host needs the tenant `admin` role to reingest or restore. |
+| Reingest, reorder, unregister, or restore a layer | A tenant admin for an admin-defined layer, and the owner or a tenant admin for a user-defined layer. A layer whose source is a filesystem path on the registry host needs the tenant `admin` role to reingest or restore. On a public-mode registry, the operator who holds `PODIUM_OPERATOR_TOKEN`. |
 | Declare freeze windows | Operator, in `registry.yaml`. |
 | Reingest during a freeze window with break-glass | A caller with reingest rights on the layer, naming two distinct approvers. |
 

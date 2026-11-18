@@ -223,12 +223,23 @@ The store needs no backup restore to roll back.
 
 ### Operator token in public mode
 
-A 0.7.0 registry in public mode refuses `podium admin reembed` and `podium admin rebuild-overlap` with `403 auth.forbidden` unless the request carries `PODIUM_OPERATOR_TOKEN`. A 0.6.0 registry in public mode admitted both from any caller.
+A 0.7.0 registry in public mode refuses the following with `403 auth.forbidden` unless the request carries `PODIUM_OPERATOR_TOKEN`: `podium admin reembed`, `podium admin rebuild-overlap`, `podium admin erase`, and every layer write (`podium layer register`, `unregister`, `update`, `restore`, `reorder`, `reingest`, and `watch`). A 0.6.0 registry in public mode admitted all of them from any caller.
 
 - Before the upgrade, generate a secret of at least 32 characters, for example with `openssl rand -hex 32`, and set it as `PODIUM_OPERATOR_TOKEN` on the registry. A shorter value refuses startup with `config.invalid`.
-- Set the same value in the environment of whoever runs the two commands.
-- A public-mode registry with no token keeps serving every other request and refuses both passes. The re-embed after a model change and the overlap recomputation the registry runs on its own do not go through these endpoints and are unaffected.
+- Set the same value in the environment of whoever runs those commands. The CLI sends it when it is set.
+- A public-mode registry with no token keeps serving every read, including the layer list, and serves the layers its startup configuration declares. It refuses every layer change over the API. The re-embed after a model change and the overlap recomputation the registry runs on its own do not go through these endpoints and are unaffected.
+- The web UI sends no token, so in public mode it no longer offers layer controls.
+- An inbound webhook delivery cannot carry the token, so in public mode a webhook-triggered reingest of a layer that names a filesystem path on the registry host is refused. A webhook for a `git` layer is unaffected.
 - A registry with no identity provider and not in public mode does not read the variable.
+
+### Non-loopback bind without an identity provider
+
+A 0.7.0 registry with no identity provider, and not in public mode, refuses a non-loopback bind at startup with `config.public_bind_refused`, naming the address. Such a registry admits every caller as an admin, including layer writes, registrations that read a path on the registry host, and erasure. A 0.6.0 registry started on any address.
+
+- When something other than the registry limits who can reach the address, such as a container whose port is published on the host's loopback interface or an authenticated reverse proxy, set `PODIUM_ALLOW_PUBLIC_BIND=true` or pass `--allow-public-bind`.
+- Otherwise configure an identity provider, or bind `127.0.0.1`.
+- The Docker Compose evaluation stack in the repository sets `PODIUM_ALLOW_PUBLIC_BIND: "true"`. A Helm install that empties `config.identityProvider.type` needs `config.allowPublicBind=true`.
+- A rollback to 0.6.0 removes the refusal. The setting is harmless on 0.6.0, which reads it only in public mode and under `trusted-headers`.
 
 ### `command` and `context` removal
 

@@ -20,7 +20,7 @@ Catalog tasks need one of the following levels of access. Each page opens with a
 | Per-tenant `admin` role | An identity that holds the role, which `podium admin grant` assigns. | Reingest, reorder, unregister, and restore admin-defined layers, recompute semantic overlap records, register webhook receivers, and erase a user. |
 | Operator | The person who runs the registry process and its deployment. | Set the environment variables and `registry.yaml` keys for the semantic overlap check, freeze windows, retention, and audit destinations, and grant access to the systems that hold the audit records. |
 
-A registry started with no identity provider, or in public mode, authenticates no caller, so it admits the `admin` operations to every caller. [Access control](../deployment/content/access-control#layer-writes-without-an-identity-provider) describes that case.
+A registry started with no identity provider, or in public mode, authenticates no caller. A registry with no identity provider admits the `admin` operations to every caller. A registry in public mode admits the layer operations, the semantic overlap recomputation, and erasure only from the operator who holds `PODIUM_OPERATOR_TOKEN`. [Access control](../deployment/content/access-control#layer-writes-without-an-identity-provider) describes that case.
 
 A [local](../deployment/modes/local) deployment runs no registry server. On a local catalog, `podium lint` and the listing budget check of `podium sync` apply, and the tasks that read a registry, such as the overlap report, dependents, audit records, and layer management, need a [single-node](../deployment/modes/single-node) or [clustered](../deployment/modes/clustered) deployment.
 

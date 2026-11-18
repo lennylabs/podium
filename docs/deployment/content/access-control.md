@@ -200,7 +200,10 @@ The registry skips visibility enforcement in these cases:
 
 ### Layer writes without an identity provider
 
-A registry with no identity provider, and a registry in public mode, authenticate no caller. No caller can hold the `admin` role on such a registry, and the registry admits every caller on the admin rule. The layer write rule, the local-source rule, and the admin-only-fields rule therefore admit every request.
+A registry with no identity provider, and a registry in public mode, authenticate no caller. No caller can hold the `admin` role on such a registry.
+
+- A registry with no identity provider admits every caller on the admin rule. The layer write rule, the local-source rule, and the admin-only-fields rule therefore admit every request. The registry refuses to start on a non-loopback address unless `--allow-public-bind` is set, as [Identity](../identity/#running-without-a-provider) describes.
+- A registry in public mode admits a layer write, and an erasure request, only when it carries the value of `PODIUM_OPERATOR_TOKEN` in the `X-Podium-Operator-Token` header. It refuses every other such request with `auth.forbidden`, and every such request while the variable is unset. A request that carries the token is admitted as a tenant admin is. [Public mode](../modes/single-node#public-mode) describes the setting.
 
 ### Refusal precedence for registrations
 
@@ -208,6 +211,7 @@ The registry evaluates the admin-only-fields rule after the other layer authoriz
 
 - A registration whose `id` names another caller's user-defined layer is refused with `auth.forbidden` carrying no `details.constraint`.
 - A registration that also falls under the local-source rule is refused with `details.constraint: "local_source"`.
+- On a registry in public mode, a registration without the operator token is refused with `auth.forbidden` carrying no `details.constraint` before the registry reads the request body or any stored layer.
 
 ### Web UI layer controls
 
@@ -218,5 +222,6 @@ The web UI reads the caller's own capabilities from the session posture read, `G
 - On a multi-tenant registry, the value reports the admin role in the tenant that the caller's organization selects. It is false for a caller whose organization selects no tenant.
 - Such a caller's layer requests are refused with `401 auth.tenant_unknown` when the registry rejects that caller with that code on its other endpoints. Any other such caller lists no layers.
 - The web UI still offers an authenticated caller of either kind the registration control, because the session posture reports its subject. The registry refuses that registration.
+- On a registry in public mode, the value is true only for a request that carries `PODIUM_OPERATOR_TOKEN`. A browser sends no such header, so the web UI renders no layer control there.
 
 The value predicts a server decision and grants nothing. The layer endpoint's own refusal remains the authority.

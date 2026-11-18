@@ -19,7 +19,7 @@ This page covers the usage report, the events that describe use, where the recor
 | Read the audit records | Whoever the operator grants access to an audit destination. The registry serves no endpoint that returns audit records. |
 | Configure audit destinations, sampling, and retention | Operator, through environment variables on the registry and on `podium-mcp`. |
 | Configure the usage counts' flush interval and retention | Operator, through environment variables on the registry. |
-| Erase a user's identity from the records | Per-tenant `admin` role for `podium admin erase --registry`. The `--local` form needs file access to the audit log. |
+| Erase a user's identity from the records | Per-tenant `admin` role for `podium admin erase --registry`. On a public-mode registry, the operator who holds `PODIUM_OPERATOR_TOKEN`. The `--local` form needs file access to the audit log. |
 | Follow catalog changes as they happen | Any caller, through the change-event stream. A tenant admin registers outbound webhook receivers. |
 
 ---

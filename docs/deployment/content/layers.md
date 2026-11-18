@@ -152,6 +152,7 @@ podium layer reorder alice-scratch alice-personal
 - A caller reorders their own user-defined layers without special rights.
 - An argument list that names an admin-defined layer requires the tenant `admin` role, and the registry answers `auth.forbidden` otherwise.
 - A deployment with no identity provider has no authenticated callers, so the local operator reorders any layer.
+- A deployment in public mode reorders a layer only for a request that carries `PODIUM_OPERATOR_TOKEN`, as [Public mode](../modes/single-node#public-mode) describes.
 
 A layer declared in the `registry.layers` list of `registry.yaml` is re-seeded from that file in list order at every restart, so a reorder of it reverts. Change its position in `registry.yaml` to make a new order durable.
 

@@ -721,18 +721,23 @@ func requestBase(rawURL string) string {
 	return u.Scheme + "://" + u.Host
 }
 
-// doJSON makes an HTTP request with optional JSON body and returns
-// the response bytes + status code.
-// operatorPass reports whether url addresses one of the passes a public-mode
-// registry admits only with the operator token (§13.10): the re-embed and the
-// overlap rebuild.
-func operatorPass(url string) bool {
+// sendsOperatorToken reports whether url addresses an endpoint a public-mode
+// registry admits only with the operator token (§7.3.1, §13.10): the
+// re-embed, the overlap rebuild, erasure, and the layer endpoints. The layer
+// list is among them because the commands share the path, and the registry
+// ignores the header on a read.
+func sendsOperatorToken(url string) bool {
 	u, err := neturl.Parse(url)
 	if err != nil {
 		return false
 	}
-	return strings.HasSuffix(u.Path, "/v1/admin/reembed") || strings.HasSuffix(u.Path, "/v1/admin/overlap/rebuild")
+	p := u.Path
+	return strings.HasSuffix(p, "/v1/admin/reembed") || strings.HasSuffix(p, "/v1/admin/overlap/rebuild") ||
+		strings.HasSuffix(p, "/v1/admin/erase") || strings.HasSuffix(p, "/v1/layers") || strings.Contains(p, "/v1/layers/")
 }
+
+// doJSON makes an HTTP request with optional JSON body and returns
+// the response bytes + status code.
 
 func doJSON(url, method string, body any) ([]byte, int) {
 	var buf io.Reader
@@ -756,10 +761,11 @@ func doJSON(url, method string, body any) ([]byte, int) {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	req.Header.Set(audit.ClientHeader, cliClientHeader())
-	// Spec: §13.10 — a public-mode registry admits the re-embed and overlap
-	// rebuild passes only with the operator token, so the commands send it
-	// when the environment holds one. Every other request goes without it.
-	if tok := os.Getenv("PODIUM_OPERATOR_TOKEN"); tok != "" && operatorPass(url) {
+	// Spec: §7.3.1, §13.10 — a public-mode registry admits the re-embed and
+	// overlap rebuild passes, erasure, and the layer writes only with the
+	// operator token, so the commands send it when the environment holds one.
+	// Every other request goes without it.
+	if tok := os.Getenv("PODIUM_OPERATOR_TOKEN"); tok != "" && sendsOperatorToken(url) {
 		req.Header.Set(server.OperatorTokenHeader, tok)
 	}
 	resp, err := http.DefaultClient.Do(req)

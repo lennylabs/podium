@@ -54,7 +54,13 @@ type LayerEndpoint struct {
 	// multiTenant makes the endpoint resolve its tenant from the request
 	// context. WithTenantRouting sets it and nothing clears it.
 	multiTenant bool
-	mode        *ModeTracker
+	// publicMode marks a registry started in public mode. There the admin
+	// callback is the operator token check (§7.3.1), so the endpoint refuses
+	// a write that fails it before reading the body, and the layer list stays
+	// whole for every caller rather than following the callback.
+	// WithPublicMode sets it and nothing clears it.
+	publicMode bool
+	mode       *ModeTracker
 	// authAdmin returns nil when the caller is permitted to mutate
 	// admin-defined layers. Tests inject a no-op; production wires
 	// the registry's AdminAuthorize.
@@ -222,6 +228,34 @@ func (e *LayerEndpoint) WithAdminAuth(fn func(*http.Request) error) *LayerEndpoi
 	return e
 }
 
+// WithPublicMode marks the endpoint as serving a registry in public mode,
+// whose admin callback is the operator token check.
+//
+// Spec: §7.3.1 (Operator token in public mode)
+func (e *LayerEndpoint) WithPublicMode() *LayerEndpoint {
+	e.publicMode = true
+	return e
+}
+
+// refuseWithoutOperatorToken refuses a layer write or an erasure request on a
+// public-mode registry when the admin callback, the operator token check
+// there, does not admit it, and reports whether it refused. Each write
+// handler calls it after the read-only and no-data tenant refusals and before
+// it reads the body or any stored layer, so a caller without the token learns
+// nothing about the stored layers and no other refusal precedes this one.
+//
+// Spec: §7.3.1 (Operator token in public mode), §8.5
+func (e *LayerEndpoint) refuseWithoutOperatorToken(w http.ResponseWriter, r *http.Request) bool {
+	if !e.publicMode {
+		return false
+	}
+	if err := e.authAdmin(r); err != nil {
+		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+		return true
+	}
+	return false
+}
+
 // WithTenantRouting marks the endpoint as serving a multi-tenant registry. The
 // registry routes each request to a tenant by §6.3.1 and attaches it with
 // core.ContextWithTenant, and the endpoint acts in that tenant alone. A request
@@ -292,10 +326,11 @@ func (e *LayerEndpoint) WithGroupResolver(fn layer.GroupResolver) *LayerEndpoint
 //
 // A caller the callback admits reads the tenant's whole list. That is the
 // §4.7.2 tenant admin, and it is also every caller on a registry started
-// with no identity provider configured or in public mode, because the
-// callback serverboot installs admits unconditionally there. That second
-// case is what keeps the standalone layer panel populated for a caller with
-// no subject.
+// with no identity provider configured, because the callback serverboot
+// installs admits unconditionally there. That second case is what keeps the
+// standalone layer panel populated for a caller with no subject. On a
+// registry in public mode the callback is the operator token check, so the
+// endpoint's publicMode flag returns the whole list instead.
 //
 // Any other caller must resolve a verified subject. The guard runs before
 // layer.VisibleWith and is load-bearing rather than defensive: a deployment
@@ -323,7 +358,10 @@ func (e *LayerEndpoint) WithGroupResolver(fn layer.GroupResolver) *LayerEndpoint
 // Spec: §4.6, §7.3.1
 func (e *LayerEndpoint) readableBy(r *http.Request, caller layer.Identity, configs []store.LayerConfig) []LayerObject {
 	out := make([]LayerObject, 0, len(configs))
-	if e.authAdmin(r) == nil {
+	// Spec: §7.3.1 — a public-mode registry returns the whole list to every
+	// caller; its admin callback is the operator token check, which decides
+	// writes and must not narrow the read.
+	if e.publicMode || e.authAdmin(r) == nil {
 		for _, c := range configs {
 			out = append(out, wireLayer(c))
 		}
@@ -1268,11 +1306,15 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Spec: §8.5, §6.3.1 — an unrouted multi-tenant request is refused
-	// before the admin callback, which admits every caller on a public-mode
-	// or no-provider registry, and before any store access or audit rewrite.
-	// The admin check then runs in the routed tenant (§4.7.2).
+	// before the admin callback, which admits every caller on a no-provider
+	// registry, and before any store access or audit rewrite. A public-mode
+	// request without the operator token is refused next (§7.3.1). The admin
+	// check then runs in the routed tenant (§4.7.2).
 	tenantID, ok := e.requireTenant(w, r)
 	if !ok {
+		return
+	}
+	if e.refuseWithoutOperatorToken(w, r) {
 		return
 	}
 	if err := e.authAdmin(r); err != nil {
@@ -1430,6 +1472,9 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	}
 	tenantID, ok := e.requireTenant(w, r)
 	if !ok {
+		return
+	}
+	if e.refuseWithoutOperatorToken(w, r) {
 		return
 	}
 	id := r.URL.Query().Get("id")
@@ -1611,6 +1656,9 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	}
 	tenantID, ok := e.requireTenant(w, r)
 	if !ok {
+		return
+	}
+	if e.refuseWithoutOperatorToken(w, r) {
 		return
 	}
 	var req LayerRegisterRequest
@@ -1944,6 +1992,9 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if e.refuseWithoutOperatorToken(w, r) {
+		return
+	}
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id query param required")
@@ -2002,6 +2053,9 @@ func (e *LayerEndpoint) unregister(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if e.refuseWithoutOperatorToken(w, r) {
+		return
+	}
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "id query param required")
@@ -2054,6 +2108,9 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	}
 	tenantID, ok := e.requireTenant(w, r)
 	if !ok {
+		return
+	}
+	if e.refuseWithoutOperatorToken(w, r) {
 		return
 	}
 	var req struct {
@@ -2141,6 +2198,9 @@ func (e *LayerEndpoint) reingest(w http.ResponseWriter, r *http.Request) {
 	}
 	tenantID, ok := e.requireTenant(w, r)
 	if !ok {
+		return
+	}
+	if e.refuseWithoutOperatorToken(w, r) {
 		return
 	}
 	id := r.URL.Query().Get("id")
