@@ -367,7 +367,7 @@ GET /v1/load_artifact?id={id}&version={v}&session_id={uuid}&as_admin={bool}
 | `session_id` | No | The session identifier. The first `latest` lookup within a session is recorded and reused for subsequent same-id lookups in the session, so the host sees a consistent snapshot. |
 | `as_admin` | No | `1` or `true` requests the admin diagnostic visibility override. |
 
-**Revalidation.** A `HEAD` request revalidates the consumer's resolution cache. The registry returns the resolved content hash in the `X-Podium-Content-Hash` header and the version in `X-Podium-Version`, with no body. A `GET` that carries a matching `If-None-Match` is answered `304 Not Modified`. The entity tag is the content-hash entity tag on a full response, a `HEAD`, and a `304` alike.
+**Revalidation.** A `HEAD` request revalidates the consumer's resolution cache. The registry returns the resolved content hash in the `X-Podium-Content-Hash` header and the version in `X-Podium-Version`, with no body. A `GET` that carries a matching `If-None-Match` is answered `304 Not Modified`. The entity tag is the content-hash entity tag on a full response, a `HEAD`, and a `304` alike. A load that returns a deprecation warning is the exception: its `HEAD` also carries the warning in the `X-Podium-Deprecation-Warning` header, and its `GET` is answered with the full response even when `If-None-Match` matches. The warning can change while the content hash stays the same, when a newer version is deprecated, so a cached copy cannot carry it.
 
 **Response.**
 
@@ -408,6 +408,16 @@ The response carries these integrity and reference fields:
 - `delivery_hash` is a SHA-256 digest over the record this response delivers. The record covers the identity, version, type, content hash, sensitivity, ingest time, served `ARTIFACT.md` document, manifest body, `SKILL.md`, and each bundled resource's path and content hash. It is present on every response, for every artifact. The record is framed under the tag `podium/delivery-record/2`, so every verifying consumer and the registry must run matching releases, or every load fails with `materialize.content_hash_mismatch`.
 - `delivery_signature` is the registry's signature over `delivery_hash`, minted per response with the registry-managed key. It is absent when the registry runs without a signing key. It is a registry-managed envelope whatever key model signed the artifact at ingest, so a consumer verifies it with the registry-managed verifier under its verification key set.
 - `artifact_revision` is the time the registry stored the served version, an RFC 3339 UTC timestamp with six fractional digits, such as `2025-01-01T00:00:00.000000Z`. `delivery_hash` covers it. It is present on every response and on every `ok` batch item, and it does not enter the entity tag.
+
+**Deprecation members.** The response carries the artifact's lifecycle signal in three members that `delivery_hash` does not cover:
+
+| Member | Meaning |
+|:--|:--|
+| `deprecated` | `true` when the served version is deprecated. Absent otherwise. |
+| `replaced_by` | The upgrade target: the served version's `replaced_by`, or, when a `latest` load serves an older version because the newest is deprecated and the served version names none, the newest version's. Absent when none applies. |
+| `deprecation_warning` | A human-readable warning. Absent when none applies. |
+
+A load of a deprecated version warns, for example `artifact is deprecated; replaced_by finance/ap/pay-invoice`. A `latest` load also warns when the newest version visible to the caller is deprecated and the load serves an older one, for example `version 2.0.0 of finance/ap/pay-vendor is deprecated; replaced_by finance/ap/pay-invoice; this load serves version 1.4.0`. A load pinned to a version, a range, or a content hash warns only when the version it serves is deprecated. Each `ok` item of [`load_artifacts`](#load_artifacts-bulk) carries the same members.
 
 The response carries no `raw_frontmatter` or `signature` field. A registry configured with a signer verifies the signature it stored at ingest before it serves a row, and no registry serves that stored signature.
 

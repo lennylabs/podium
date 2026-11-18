@@ -111,7 +111,7 @@ The arrangement keeps the registry response small and keeps large content out of
 | `external_resources` | Fetch from `url` and verify against `sha256` and `signature`. |
 | `description` / `when_to_use` | Surface to the user or agent for selection. |
 | `tags` | Filter and group views. |
-| `deprecated` / `replaced_by` | Warn or offer the replacement. |
+| `deprecated` / `replaced_by` / `deprecation_warning` | Show the warning, and offer the replacement. |
 | Provenance markers in prose | Wrap imported regions in the host's trust-region marker. |
 
 ---
@@ -278,7 +278,7 @@ The presentation fields help the user or the agent select an artifact. They carr
 |:--|:--|
 | `description` and `when_to_use` | Show in artifact pickers, slash-command lists, and search-result summaries. `when_to_use` is the canonical signal for deciding at runtime whether to pick the artifact. |
 | `tags` | Filter and group views. |
-| `deprecated` and `replaced_by` | Warn the user when loading a deprecated artifact. Offer `replaced_by` as a suggested upgrade target. Redirect automatically only when the consumer is explicitly configured to do so. |
+| `deprecated`, `replaced_by`, and `deprecation_warning` | Show `deprecation_warning` whenever the response carries it, which includes a `latest` load that serves an older version because the newest is deprecated. Offer `replaced_by` as a suggested upgrade target. Redirect automatically only when the consumer is explicitly configured to do so. `podium-mcp` places the three members in the `load_artifact` tool result. |
 | `release_notes` | Show on update prompts and record in audit logs. |
 
 ---

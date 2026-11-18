@@ -13841,8 +13841,8 @@ rm -rf "$WORK"
 
    ```bash
    mkdir -p "$WORK/seed/ops/runbook" "$WORK/notes/ops/oncall"
-   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Restart the ingest worker.\nsensitivity: low\n---\n\nBody.\n' > "$WORK/seed/ops/runbook/ARTIFACT.md"
-   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: Hand over the on-call pager.\nsensitivity: low\n---\n\nBody.\n' > "$WORK/notes/ops/oncall/ARTIFACT.md"
+   printf -- '---\ntype: agent\nversion: 1.0.0\ndescription: Restart the ingest worker.\nsensitivity: low\n---\n\nBody.\n' > "$WORK/seed/ops/runbook/ARTIFACT.md"
+   printf -- '---\ntype: agent\nversion: 1.0.0\ndescription: Hand over the on-call pager.\nsensitivity: low\n---\n\nBody.\n' > "$WORK/notes/ops/oncall/ARTIFACT.md"
    TOKEN="$(openssl rand -hex 32)"
    PODIUM_OPERATOR_TOKEN="$TOKEN" podium serve --standalone --no-embeddings --public-mode --web-ui \
      --layer-path "$WORK/seed" --bind 127.0.0.1:8182 > "$WORK/srv.log" 2>&1 &
@@ -13910,6 +13910,68 @@ rm -rf "$WORK"
    ```
 
    **Expect.** The first start exits non-zero without a `listening` line, and `grep` prints the `config.public_bind_refused` refusal naming `"0.0.0.0:8183"`. The second start prints nothing from `server_alive`, and `$WORK/bind2.log` carries a `listening on 0.0.0.0:8183` line. A `listening` line in `$WORK/bind.log` is the defect.
+
+**Cleanup.**
+
+```bash
+rm -rf "$WORK"
+```
+
+---
+
+## S119: A latest load warns when the newest version is deprecated
+
+**Goal.** Validate that a `latest` load of an artifact whose newest version is deprecated serves the newest live version and returns a warning naming the deprecated version and its upgrade target. Also validate that a pinned load of the live version carries no warning, and that a revalidation reports the warning instead of a `304`.
+
+**Covers.** The §4.7.4 lifecycle bullet, the §4.7.6 `latest` rule, the §7.2 deprecation members, and the §7.6.1 `podium artifact show` row.
+
+**Why by hand.** The suite pins the members in each component. This scenario reads them as the CLI prints them and as the registry answers a revalidation, against two versions a real reingest stored.
+
+**Prerequisites.** `jq` and `curl`. The scenario binds 127.0.0.1:8184.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above. Start a registry, register a layer, and publish version 1.0.0 of `team/notes`.
+
+   ```bash
+   mkdir -p "$WORK/layer/team/notes"
+   note() {
+     printf -- '---\ntype: agent\nversion: %s\ndescription: Meeting notes template for weekly team syncs.\n%b---\n\nBody of %s.\n' "$1" "$2" "$1" > "$WORK/layer/team/notes/ARTIFACT.md"
+   }
+   note 1.0.0 ""
+   podium serve --standalone --no-embeddings --bind 127.0.0.1:8184 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   server_alive "$SRV" "$WORK/srv.log"
+   U=http://127.0.0.1:8184
+   podium layer register --registry "$U" --id notes --local "$WORK/layer" > /dev/null
+   podium layer reingest --registry "$U" notes > /dev/null; echo "exit=$?"
+   ```
+
+   **Expect.** `server_alive` prints nothing and the reingest prints `exit=0`.
+
+2. Publish a deprecated 2.0.0 that names an upgrade target, then show the artifact.
+
+   ```bash
+   note 2.0.0 'deprecated: true\nreplaced_by: team/notes-v2\n'
+   podium layer reingest --registry "$U" notes > /dev/null; echo "exit=$?"
+   podium artifact show team/notes --registry "$U" > "$WORK/show.txt"
+   podium artifact show team/notes --registry "$U" --json 2>/dev/null | jq -c '{version, deprecated, replaced_by, deprecation_warning}'
+   ```
+
+   **Expect.** The reingest prints `exit=0`. Standard error of the first `show` prints `warning: version 2.0.0 of team/notes is deprecated; replaced_by team/notes-v2; this load serves version 1.0.0`, and `$WORK/show.txt` holds the 1.0.0 body without the warning. The JSON line is `{"version":"1.0.0","deprecated":null,"replaced_by":"team/notes-v2","deprecation_warning":"version 2.0.0 of team/notes is deprecated; replaced_by team/notes-v2; this load serves version 1.0.0"}`. A `version` of `1.0.0` with no warning is the defect this scenario exists to catch.
+
+3. Revalidate the latest load, and compare a load pinned to 1.0.0.
+
+   ```bash
+   HASH=$(curl -s "$U/v1/load_artifact?id=team/notes" | jq -r .content_hash)
+   curl -s -I "$U/v1/load_artifact?id=team/notes" | grep -i '^x-podium-deprecation-warning'
+   curl -s -o /dev/null -w '%{http_code}\n' -H "If-None-Match: \"$HASH\"" "$U/v1/load_artifact?id=team/notes"
+   curl -s -o /dev/null -w '%{http_code}\n' -H "If-None-Match: \"$HASH\"" "$U/v1/load_artifact?id=team/notes&version=1.0.0"
+   podium artifact show team/notes --version 1.0.0 --registry "$U" 2>&1 >/dev/null | grep -c warning
+   kill "$SRV"; wait "$SRV" 2>/dev/null
+   ```
+
+   **Expect.** The `HEAD` prints an `X-Podium-Deprecation-Warning` line carrying the same warning. The latest `GET` with the matching validator prints `200`, and the pinned one prints `304`. The pinned `show` prints `0` warning lines.
 
 **Cleanup.**
 

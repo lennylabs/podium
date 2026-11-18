@@ -1624,6 +1624,16 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 	// path through this check and mirrors the visibility-denial response
 	// so it does not leak that a version the caller may not load exists.
 	scopes := layer.ParseScopes(id.Scopes)
+	// newestDeprecated is the most recently ingested visible version when it
+	// is deprecated and the load is a `latest` lookup; assemble then warns on
+	// every other version it serves (§4.7.4). Nil otherwise.
+	var newestDeprecated *store.ManifestRecord
+	lifecycle := func(res *LoadArtifactResult) *LoadArtifactResult {
+		if newestDeprecated != nil && res.Version != newestDeprecated.Version {
+			return withNewerDeprecation(res, *newestDeprecated)
+		}
+		return res
+	}
 	assemble := func(rec store.ManifestRecord) (*LoadArtifactResult, error) {
 		if scopes.Active() && !scopes.AllowsLoad(artifactID, rec.Version) {
 			if r.artifactExistsAnywhere(ctx, artifactID) {
@@ -1647,7 +1657,9 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 			"layer":        rec.Layer,
 		}
 		if opts.Revalidate != nil {
-			unadmitted := revalidationResult(rec)
+			// The revalidation result carries the deprecation warning so the
+			// callback can decline a 304 for a load that warns (§7.2).
+			unadmitted := lifecycle(revalidationResult(rec))
 			if opts.Revalidate(unadmitted) {
 				// Spec: §13.4 — a revalidation returns no content and is
 				// answered from the resolved row without admission, so the
@@ -1659,6 +1671,7 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 		}
 		res, served, err := r.assembleResult(ctx, rec)
 		if err == nil {
+			res = lifecycle(res)
 			ev.Context = readContext
 			// The served record carries the admitted audit_redact key set:
 			// admission derives it from the row's bytes.
@@ -1694,6 +1707,20 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 	}
 	if pin.Kind == version.PinContentHash {
 		return nil, fmt.Errorf("%w: no version with content hash sha256:%s", ErrNotFound, pin.Hash)
+	}
+	if pin.Kind == version.PinLatest {
+		newestDeprecated = newestIfDeprecated(versions, byVersion)
+	}
+	if newestDeprecated != nil {
+		// Spec: §4.7.4, §13.4 — no store keeps replaced_by; admission derives
+		// it from the row's bytes, §4.3.4 SKILL.md metadata included. The
+		// upgrade target reaches agents, so it is read from the admitted row
+		// alone, and a row admission refuses warns with no target.
+		if admitted, err := r.admit(ctx, *newestDeprecated); err == nil {
+			newestDeprecated.ReplacedBy = admitted.ReplacedBy
+		} else {
+			newestDeprecated.ReplacedBy = ""
+		}
 	}
 
 	// §4.7.6 session-consistent latest: the first latest lookup within
@@ -1789,16 +1816,19 @@ func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord)
 }
 
 // revalidationResult is the result a revalidation is answered with: the
-// resolved row's coordinates and validator, and no content.
+// resolved row's coordinates, validator, and §4.7.4 lifecycle signal, and no
+// content.
 func revalidationResult(rec store.ManifestRecord) *LoadArtifactResult {
-	return &LoadArtifactResult{
+	return withDeprecationWarning(&LoadArtifactResult{
 		ID:          rec.ArtifactID,
 		Version:     rec.Version,
 		ContentHash: rec.ContentHash,
 		Layer:       rec.Layer,
+		Deprecated:  rec.Deprecated,
+		ReplacedBy:  rec.ReplacedBy,
 		// Spec: §4.7.10 — a revalidation answers the same delivery record.
 		ArtifactRevision: version.FormatArtifactRevision(rec.IngestedAt),
-	}
+	})
 }
 
 // parsedArtifact decodes a record's stored frontmatter into a
@@ -1915,6 +1945,49 @@ func (r *Registry) ResolveResourceOwner(ctx context.Context, id layer.Identity, 
 		return m.ArtifactID, true
 	}
 	return "", false
+}
+
+// newestIfDeprecated returns the most recently ingested of versions, ties
+// broken by the higher semver as `latest` breaks them, when that version is
+// deprecated, and nil otherwise.
+//
+// Spec: §4.7.4, §4.7.6
+func newestIfDeprecated(versions []string, byVersion map[string]store.ManifestRecord) *store.ManifestRecord {
+	cands := make([]version.Candidate, 0, len(versions))
+	for _, v := range versions {
+		cands = append(cands, version.Candidate{Version: v, IngestedAt: byVersion[v].IngestedAt})
+	}
+	newest, err := version.ResolveLatest(cands)
+	if err != nil {
+		return nil
+	}
+	rec, ok := byVersion[newest]
+	if !ok || !rec.Deprecated {
+		return nil
+	}
+	return &rec
+}
+
+// withNewerDeprecation adds the §4.7.4 warning a `latest` load returns when
+// it serves a version other than the newest visible one because that one is
+// deprecated. The warning names the deprecated version and its replaced_by,
+// and the result takes that upgrade target when the served version names
+// none. A served version that is itself deprecated keeps its own warning.
+//
+// Spec: §4.7.4
+func withNewerDeprecation(r *LoadArtifactResult, newest store.ManifestRecord) *LoadArtifactResult {
+	if r == nil || r.Deprecated {
+		return r
+	}
+	msg := "version " + newest.Version + " of " + newest.ArtifactID + " is deprecated"
+	if newest.ReplacedBy != "" {
+		msg += "; replaced_by " + newest.ReplacedBy
+	}
+	r.DeprecationWarning = msg + "; this load serves version " + r.Version
+	if r.ReplacedBy == "" {
+		r.ReplacedBy = newest.ReplacedBy
+	}
+	return r
 }
 
 // withDeprecationWarning fills in DeprecationWarning when the
