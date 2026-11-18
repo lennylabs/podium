@@ -10,8 +10,10 @@ import {
   TypeBadge,
   formatVersion,
 } from './primitives';
+import { UsageLine } from './Usage';
 import type { ArtifactDescriptor } from '../api';
 import { artifactHref, artifactLeaf } from '../route';
+import type { UsageCell } from '../usage';
 
 /** relevanceBars is how many bars the indicator draws. */
 const relevanceBars = 4;
@@ -69,6 +71,7 @@ export function ArtifactRow({
   matchedByMeaning = false,
   titled = false,
   dense = false,
+  usage,
 }: {
   artifact: ArtifactDescriptor;
   ranked?: boolean;
@@ -96,6 +99,10 @@ export function ArtifactRow({
    * table pushes it down the page and the surface reads as two listings
    * rather than one (§13.10). */
   dense?: boolean;
+  /** usage is the row's last 30 days, read for the whole list in one request
+   * after it rendered. An absent cell is a list that reads no usage, or whose
+   * read failed, and the row draws no usage line (§13.10). */
+  usage?: UsageCell;
 }) {
   const version = artifact.version !== undefined && artifact.version !== '' ? artifact.version : '';
   const filled = ranked ? filledBars(rank, resultCount) : 0;
@@ -187,6 +194,10 @@ export function ArtifactRow({
             ))}
           </ul>
         )}
+        {/* The 30-day line closes the body. A search result is a card with
+            its tags above, so the line takes a dashed rule there; a listing
+            row reads it straight after the description. */}
+        <UsageLine cell={usage} ruled={ranked} />
       </div>
       {/* The right-hand column. Type and version sit at a fixed edge down
           the listing, so the reader scans one column instead of reading

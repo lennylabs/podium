@@ -22,6 +22,7 @@ import { formatQueryLine, hasFilters, parseQueryLine, parseTypedLine } from "../
 import { layersHref, parseRoute, replaceRoute, searchHref } from "../route";
 import type { Async } from "../useAsync";
 import { useAsync, useDebounced, useErrorReport } from "../useAsync";
+import { useArtifactUsage } from "../usage";
 
 const resultCap = 10;
 
@@ -44,7 +45,7 @@ const scopeDepth = 2;
  * TypeProvider SPI and no response enumerates the registered set, so a filter
  * on one arrives through the palette's `type:` syntax or through the route,
  * and the row renders it as the pill any applied type takes. */
-const firstClassTypes = [
+export const firstClassTypes = [
   "skill",
   "agent",
   "rule",
@@ -623,6 +624,9 @@ function SearchResults({
   onMore: (step: number) => void;
   onCorrect: (query: string) => void;
 }) {
+  // The results' last 30 days, read in one request once the results are on
+  // the page (§13.10).
+  const usage = useArtifactUsage(search.value?.results?.map((artifact) => artifact.id) ?? []);
   if (search.loading && !continuing) {
     return <Loading label="Searching." />;
   }
@@ -729,6 +733,7 @@ function SearchResults({
             rank={index}
             resultCount={rankedCount}
             matchedByMeaning={lexicalSet && (artifact.score ?? 0) <= 0}
+            usage={usage(artifact.id)}
           />
         ))}
       </ul>

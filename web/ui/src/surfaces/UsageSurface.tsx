@@ -1,0 +1,453 @@
+// The usage page: how the catalog the caller can see is loaded, synced, and
+// found over a window the reader chooses. Two reads back it. The summary read
+// carries the totals, their daily series, the client and harness breakdowns,
+// and the layers; the list read carries one page of artifacts at a time under
+// the reader's filters and sort. They are separate because the report's layer
+// filter narrows the totals, and the table's layer menu must not move the
+// tiles above it (§8.7).
+
+import { useEffect, useState } from 'react';
+
+import { FilterField } from './DomainAtScale';
+import { firstClassTypes } from './SearchSurface';
+import type { UsageArtifact, UsageQuery, UsageReport } from '../api';
+import { usageReport } from '../api';
+import { BreakdownBar, ShareBar, StatTile } from '../components/Usage';
+import { Badge, EmptyState, ErrorState, Loading, TypeBadge } from '../components/primitives';
+import { artifactHref, replaceRoute, usageHref } from '../route';
+import { plural } from '../similarity';
+import { breakdownParts, formatCount, relativeDay } from '../usage';
+import { useAsync, useDebounced, useErrorReport } from '../useAsync';
+
+/** UsageWindow is the window the page reads: a preset number of days, or a
+ * custom range of UTC days. */
+type UsageWindow = { days: number } | { from: string; to: string };
+
+const presets = [7, 30, 90] as const;
+
+/** listPage is how many artifacts one page of the table carries. */
+const listPage = 50;
+
+type SortKey = NonNullable<UsageQuery['sort']>;
+
+/** columns are the table's sortable columns in the order they are drawn,
+ * after the artifact and layer columns. */
+const columns: { key: SortKey; label: string }[] = [
+  { key: 'loads', label: 'LOADS' },
+  { key: 'syncs', label: 'SYNCS' },
+  { key: 'search_hits', label: 'SEARCH HITS' },
+  { key: 'last_loaded', label: 'LAST LOADED' },
+];
+
+function windowParams(w: UsageWindow): Pick<UsageQuery, 'days' | 'from' | 'to'> {
+  return 'days' in w ? { days: w.days } : { from: w.from, to: w.to };
+}
+
+function windowBadge(w: UsageWindow): string {
+  return 'days' in w ? `LAST ${String(w.days)} DAYS` : `${w.from} TO ${w.to}`;
+}
+
+/** UsageSurface is the usage page. `query` is the artifact ID text the list
+ * opens filtered by, which the artifact viewer's link sets.
+ *
+ * Spec: §13.10, §8.7 */
+export function UsageSurface({ query, onError }: { query: string; onError: (err: unknown) => void }) {
+  const [range, setRange] = useState<UsageWindow>({ days: 30 });
+  const summary = useAsync(
+    () => usageReport({ ...windowParams(range), granularity: 'day', limit: 1 }),
+    [JSON.stringify(range)],
+  );
+  // The summary is a catalog read taken with the caller's identity, so its
+  // outcome goes to the shell, where the catalog-scope rule decides what an
+  // identity refusal renders.
+  useErrorReport(summary.error, onError);
+  const report = summary.value;
+  return (
+    <section className="surface usage" aria-label="Usage">
+      <div className="usage-head">
+        <h1>Usage</h1>
+        <span className="usage-head-badges">
+          <Badge tone="soft">{windowBadge(range)}</Badge>
+        </span>
+        <WindowControl value={range} onChange={setRange} />
+      </div>
+      <p className="lead usage-lead">Loads, syncs, and search hits for the layers you can see. Counted per UTC day.</p>
+      {summary.error !== null && (
+        <ErrorState error={summary.error} title="The usage report did not load." onRetry={summary.reload} />
+      )}
+      {report === null && summary.error === null && <Loading label="Loading the usage report." />}
+      {report !== null && (
+        <>
+          <Summary report={report} />
+          <LayerUsage report={report} />
+          <ArtifactUsage range={range} layers={report.layers.map((l) => l.layer)} initialQuery={query} today={report.to} />
+        </>
+      )}
+    </section>
+  );
+}
+
+/** WindowControl is the 7d / 30d / 90d / Custom… choice. Custom opens two
+ * date fields, and the page reads the range once both hold a date. */
+function WindowControl({ value, onChange }: { value: UsageWindow; onChange: (w: UsageWindow) => void }) {
+  const [custom, setCustom] = useState(!('days' in value));
+  const [from, setFrom] = useState('days' in value ? '' : value.from);
+  const [to, setTo] = useState('days' in value ? '' : value.to);
+  return (
+    <div className="usage-head-control">
+      <div className="segmented usage-range" role="group" aria-label="Time range">
+        {presets.map((days) => {
+          const on = !custom && 'days' in value && value.days === days;
+          return (
+            <button
+              key={days}
+              type="button"
+              className={on ? 'segment segment-on' : 'segment'}
+              aria-pressed={on}
+              onClick={() => {
+                setCustom(false);
+                onChange({ days });
+              }}
+            >
+              {`${String(days)}d`}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className={custom ? 'segment segment-on' : 'segment'}
+          aria-pressed={custom}
+          onClick={() => {
+            setCustom(true);
+          }}
+        >
+          Custom…
+        </button>
+      </div>
+      {custom && (
+        <div className="usage-custom-range">
+          <label>
+            From
+            <input
+              type="date"
+              value={from}
+              onChange={(event) => {
+                setFrom(event.target.value);
+                if (event.target.value !== '' && to !== '') {
+                  onChange({ from: event.target.value, to });
+                }
+              }}
+            />
+          </label>
+          <label>
+            To
+            <input
+              type="date"
+              value={to}
+              onChange={(event) => {
+                setTo(event.target.value);
+                if (from !== '' && event.target.value !== '') {
+                  onChange({ from, to: event.target.value });
+                }
+              }}
+            />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Summary is the two stat tiles and the breakdown card. */
+function Summary({ report }: { report: UsageReport }) {
+  const series = report.totals.series ?? [];
+  return (
+    <>
+      <div className="usage-tiles">
+        <StatTile
+          label="ARTIFACTS LOADED"
+          note="agents, SDK, CLI"
+          total={report.totals.loads}
+          values={series.map((p) => p.loads)}
+        />
+        <StatTile label="ARTIFACTS SYNCED" note="podium sync" total={report.totals.syncs} values={series.map((p) => p.syncs)} />
+      </div>
+      <div className="usage-card usage-breakdowns">
+        <BreakdownBar title="LOADS/SYNCS BY CLIENT" parts={breakdownParts(report.totals.by_client)} />
+        <BreakdownBar title="LOADS/SYNCS BY HARNESS" parts={breakdownParts(report.totals.by_harness)} />
+      </div>
+    </>
+  );
+}
+
+/** LayerUsage is the By layer disclosure, collapsed by default and naming the
+ * layer count and the layer with the most loads while closed. */
+function LayerUsage({ report }: { report: UsageReport }) {
+  const [open, setOpen] = useState(false);
+  const layers = report.layers;
+  const shares = layers.map((l) => l.loads + l.syncs);
+  const max = Math.max(0, ...shares);
+  const leader = layers.reduce<(typeof layers)[number] | null>(
+    (best, l) => (best === null || l.loads > best.loads ? l : best),
+    null,
+  );
+  const count = `${String(layers.length)} ${plural(layers.length, 'layer', 'layers')}`;
+  const summary =
+    !open && leader !== null && leader.loads > 0 ? `${count} · ${leader.layer} has the most loads` : count;
+  return (
+    <div className={open ? 'usage-card usage-layers usage-layers-open' : 'usage-card usage-layers'}>
+      <button
+        type="button"
+        className="usage-disclosure"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen(!open);
+        }}
+      >
+        <svg className="usage-disclosure-chevron" width="9" height="9" viewBox="0 0 10 10" aria-hidden="true">
+          <path d="M3 1.5L7 5l-4 3.5" fill="none" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+        <span className="usage-disclosure-title">By layer</span>
+        <span className="usage-disclosure-summary">{summary}</span>
+      </button>
+      {open && (
+        <div className="usage-table usage-layer-table" role="table" aria-label="Usage by layer">
+          <div className="usage-row usage-row-head" role="row">
+            <span role="columnheader">LAYER</span>
+            <span role="columnheader">SHARE OF LOADS/SYNCS</span>
+            <span role="columnheader" className="num">
+              LOADS
+            </span>
+            <span role="columnheader" className="num">
+              SYNCS
+            </span>
+            <span role="columnheader" className="num">
+              SEARCH HITS
+            </span>
+          </div>
+          {layers.map((l, i) => (
+            <div key={l.layer} className="usage-row" role="row">
+              <span role="cell" className="mono usage-layer-name">
+                {l.layer}
+              </span>
+              <span role="cell">
+                <ShareBar value={shares[i]} max={max} top={max > 0 && shares[i] === max} />
+              </span>
+              <span role="cell" className="num strong">
+                {formatCount(l.loads)}
+              </span>
+              <span role="cell" className="num">
+                {formatCount(l.syncs)}
+              </span>
+              <span role="cell" className="num">
+                {formatCount(l.search_hits)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** ArtifactUsage is the By artifact section: the ID filter, the type and
+ * layer menus, the count, and the sortable table that pages with the
+ * report's cursor. Every change to a filter or the sort reads the list from
+ * its first page, because a cursor belongs to the order it was issued in
+ * (§8.7). */
+function ArtifactUsage({
+  range,
+  layers,
+  initialQuery,
+  today,
+}: {
+  range: UsageWindow;
+  layers: string[];
+  initialQuery: string;
+  today: string;
+}) {
+  const [filter, setFilter] = useState(initialQuery);
+  const [type, setType] = useState('');
+  const [layer, setLayer] = useState('');
+  const [sort, setSort] = useState<SortKey>('loads');
+  const [order, setOrder] = useState<'desc' | 'asc'>('desc');
+  const [more, setMore] = useState<UsageArtifact[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const typed = useDebounced(filter.trim());
+  // The address carries the filter text, so a copied link opens the list the
+  // reader filtered.
+  useEffect(() => {
+    replaceRoute(usageHref(typed));
+  }, [typed]);
+  const params: UsageQuery = {
+    ...windowParams(range),
+    query: typed === '' ? undefined : typed,
+    types: type === '' ? undefined : [type],
+    layers: layer === '' ? undefined : [layer],
+    sort,
+    order,
+    limit: listPage,
+  };
+  const key = JSON.stringify(params);
+  const list = useAsync(() => usageReport(params), [key]);
+  // A new first page discards the pages appended under the previous key.
+  const [listedFor, setListedFor] = useState(key);
+  if (listedFor !== key) {
+    setListedFor(key);
+    setMore([]);
+    setCursor(null);
+  }
+  const first = list.value;
+  const rows = first === null ? [] : [...first.artifacts, ...more];
+  const next = more.length > 0 ? cursor : (first?.next_cursor ?? null);
+  const peak = Math.max(0, ...rows.map((r) => r.loads));
+
+  const sortBy = (column: SortKey) => {
+    if (column === sort) {
+      setOrder(order === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSort(column);
+      setOrder('desc');
+    }
+  };
+  const showMore = () => {
+    if (next === null || loadingMore) {
+      return;
+    }
+    setLoadingMore(true);
+    usageReport({ ...params, cursor: next }).then(
+      (page) => {
+        setMore((prior) => [...prior, ...page.artifacts]);
+        setCursor(page.next_cursor);
+        setLoadingMore(false);
+      },
+      () => {
+        setLoadingMore(false);
+      },
+    );
+  };
+
+  return (
+    <section className="usage-artifacts" aria-label="By artifact">
+      <h2 className="usage-section-title">By artifact</h2>
+      <div className="usage-filters">
+        <FilterField label="Filter by artifact id" value={filter} onTyped={setFilter} />
+        <label className="usage-menu">
+          Type:
+          <select
+            aria-label="Type"
+            value={type}
+            onChange={(event) => {
+              setType(event.target.value);
+            }}
+          >
+            <option value="">all</option>
+            {firstClassTypes.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="usage-menu">
+          Layer:
+          <select
+            aria-label="Layer"
+            value={layer}
+            onChange={(event) => {
+              setLayer(event.target.value);
+            }}
+          >
+            <option value="">all</option>
+            {layers.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {first !== null && (
+          <span className="usage-count" data-testid="usage-count">
+            Showing <strong>{formatCount(rows.length)}</strong> of <strong>{formatCount(first.artifact_count)}</strong>
+          </span>
+        )}
+      </div>
+      {list.error !== null && (
+        <ErrorState error={list.error} title="The artifact list did not load." onRetry={list.reload} />
+      )}
+      {list.loading && first === null && list.error === null && <Loading label="Loading the artifact list." />}
+      {first !== null && (
+        <div className="usage-card usage-table usage-artifact-table" role="table" aria-label="Usage by artifact">
+          <div className="usage-row usage-row-head" role="row">
+            <span role="columnheader">ARTIFACT</span>
+            <span role="columnheader">LAYER</span>
+            {columns.map((column) => (
+              <span
+                key={column.key}
+                role="columnheader"
+                className="num"
+                aria-sort={column.key === sort ? (order === 'desc' ? 'descending' : 'ascending') : 'none'}
+              >
+                <button
+                  type="button"
+                  className={column.key === sort ? 'usage-sort usage-sort-on' : 'usage-sort'}
+                  onClick={() => {
+                    sortBy(column.key);
+                  }}
+                >
+                  {column.label}
+                  {column.key === sort ? (order === 'desc' ? ' ↓' : ' ↑') : ''}
+                </button>
+              </span>
+            ))}
+          </div>
+          {rows.length === 0 ? (
+            <EmptyState scope="inline">No artifacts match.</EmptyState>
+          ) : (
+            rows.map((row) => <ArtifactUsageRow key={row.artifact_id} row={row} peak={peak} today={today} />)
+          )}
+        </div>
+      )}
+      {next !== null && first !== null && (
+        <div className="usage-more">
+          <button type="button" className="button" aria-disabled={loadingMore} onClick={showMore}>
+            {loadingMore ? 'Loading…' : `Show ${String(Math.min(listPage, first.artifact_count - rows.length))} more`}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ArtifactUsageRow({ row, peak, today }: { row: UsageArtifact; peak: number; today: string }) {
+  const width = peak === 0 ? 0 : Math.round((row.loads / peak) * 100);
+  return (
+    <div className="usage-row" role="row">
+      <span role="cell" className="usage-artifact">
+        <a className="mono usage-artifact-id" href={artifactHref(row.artifact_id)}>
+          {row.artifact_id}
+        </a>
+        <TypeBadge type={row.type} />
+      </span>
+      <span role="cell" className="mono usage-layer-cell">
+        {row.layer}
+      </span>
+      <span role="cell" className="num usage-loads">
+        <span className="usage-loads-bar" aria-hidden="true">
+          <span className="usage-loads-fill" style={{ width: `${String(width)}%` }} />
+        </span>
+        <span className={row.loads === 0 ? 'strong quiet' : 'strong'}>{formatCount(row.loads)}</span>
+      </span>
+      <span role="cell" className={row.syncs === 0 ? 'num quiet' : 'num'}>
+        {formatCount(row.syncs)}
+      </span>
+      <span role="cell" className={row.search_hits === 0 ? 'num quiet' : 'num'}>
+        {formatCount(row.search_hits)}
+      </span>
+      <span role="cell" className="num usage-last">
+        {relativeDay(row.last_loaded, today)}
+      </span>
+    </div>
+  );
+}

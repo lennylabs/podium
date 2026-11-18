@@ -60,6 +60,8 @@
   --bd: #d9d5c6;
   --b2: #e4e0d2;
   --chip: #eae7d9;
+  /* The usage breakdown bar's fourth tone, between meta and the hairline. */
+  --part4: #b9b4a3;
   --acc: #ffa424;
   --acc-deep: #f2861a;
   /* The pointer states of the two filled controls. They are tokens rather
@@ -101,6 +103,7 @@
     --bd: #2b3145;
     --b2: #232838;
     --chip: #212739;
+    --part4: #5b6378;
     --acc: #ffa424;
     --acc-deep: #ffa424;
     --acc-hover: #f2861a;
@@ -131,6 +134,7 @@
   --bd: #2b3145;
   --b2: #232838;
   --chip: #212739;
+  --part4: #5b6378;
   --acc-deep: #ffa424;
   --acc-hover: #f2861a;
   --danger-hover: #e2543a;
@@ -6677,4 +6681,593 @@ button.cluster-row-selected:hover {
   .compare-cards {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* ---- Usage (§13.10) --------------------------------------------------- */
+
+/* The 30-day line under a list row: a quiet label and three figures. The
+   ruled form closes a search result card under a dashed rule. */
+.usage-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 6px;
+}
+
+.usage-line-ruled {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--b2);
+}
+
+.usage-label {
+  color: var(--faint);
+  font: 600 9.5px var(--font-mono);
+  letter-spacing: 0.11em;
+}
+
+.usage-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.usage-figure {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.usage-value {
+  color: var(--ink);
+  font: 600 12px var(--font-mono);
+}
+
+.usage-unit {
+  color: var(--faint);
+  font: 11px var(--font-mono);
+}
+
+/* A placeholder stands where a figure will arrive. It is a block of the chip
+   tone rather than a spinner, so a list of rows does not animate. */
+.usage-placeholder {
+  display: inline-block;
+  height: 10px;
+  border-radius: 4px;
+  background: var(--chip);
+}
+
+/* The artifact rail's usage section. */
+.usage-summary-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.usage-summary-loading .usage-placeholder {
+  display: block;
+}
+
+.usage-summary-empty {
+  margin: 0;
+  color: var(--sec);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.load-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 32px;
+  margin-bottom: 12px;
+}
+
+.load-bar {
+  flex: none;
+  width: 4px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--meta) 40%, transparent);
+}
+
+.load-bar-today {
+  background: var(--acc);
+}
+
+.usage-summary-figures {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+}
+
+.usage-summary-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.usage-summary-row dt {
+  flex: none;
+  width: 96px;
+  color: var(--faint);
+  font: 11px var(--font-mono);
+}
+
+.usage-summary-row dd {
+  margin: 0;
+  color: var(--ink);
+  font: 600 12.5px var(--font-mono);
+}
+
+.usage-summary-link {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--link);
+  font-size: 12.5px;
+}
+
+/* The usage page. */
+.usage-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 0 0 8px;
+}
+
+.usage-head h1 {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.usage-head-badges {
+  margin-top: 9px;
+}
+
+.usage-head-badges .badge {
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.usage-head-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.usage-range .segment {
+  padding: 5px 10px;
+  font: 500 11.5px var(--font-mono);
+}
+
+.usage-range .segment-on {
+  font-weight: 700;
+}
+
+.usage-custom-range {
+  display: flex;
+  gap: 10px;
+}
+
+.usage-custom-range label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--meta);
+  font: 11.5px var(--font-mono);
+}
+
+.usage-custom-range input {
+  border: 1px solid var(--bd);
+  border-radius: 7px;
+  background: var(--surf);
+  color: var(--ink);
+  font: 12px var(--font-mono);
+  padding: 4px 6px;
+}
+
+.usage-lead {
+  margin-bottom: 22px;
+}
+
+.usage-card {
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+  background: var(--surf);
+  box-shadow: var(--shadow-card);
+}
+
+.usage-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 15px 18px 14px;
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+  background: var(--surf);
+  box-shadow: var(--shadow-card);
+}
+
+.stat-tile-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.stat-tile-label {
+  margin: 0;
+  color: var(--faint);
+  font: 600 10.5px var(--font-mono);
+  letter-spacing: 0.11em;
+}
+
+.stat-tile-note {
+  margin-left: auto;
+  color: var(--faint);
+  font: 10.5px var(--font-mono);
+}
+
+.stat-tile-body {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.stat-tile-total {
+  font: 700 28px/1 var(--font-ui);
+  letter-spacing: -0.02em;
+}
+
+.sparkline {
+  margin-left: auto;
+}
+
+.sparkline-area {
+  fill: var(--acc);
+  opacity: 0.16;
+}
+
+.sparkline-line {
+  fill: none;
+  stroke: var(--acc);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.usage-breakdowns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px;
+  margin-bottom: 22px;
+  padding: 16px 18px;
+}
+
+.breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.breakdown-title {
+  margin: 0;
+  color: var(--faint);
+  font: 600 10.5px var(--font-mono);
+  letter-spacing: 0.11em;
+}
+
+.breakdown-empty {
+  margin: 0;
+  color: var(--sec);
+  font-size: 12.5px;
+}
+
+.breakdown-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.breakdown-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.breakdown-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--sec);
+  font: 11px var(--font-mono);
+}
+
+.breakdown-count {
+  color: var(--ink);
+}
+
+.breakdown-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+/* The breakdown's five tones, largest first. The fourth has no other use, so
+   it is the one token the usage page adds; the unknown part takes the last. */
+.breakdown-part-0 {
+  background: var(--acc);
+}
+
+.breakdown-part-1 {
+  background: var(--ink);
+}
+
+.breakdown-part-2 {
+  background: var(--meta);
+}
+
+.breakdown-part-3 {
+  background: var(--part4);
+}
+
+.breakdown-part-4 {
+  background: var(--b2);
+}
+
+.usage-layers {
+  margin-bottom: 26px;
+  overflow: hidden;
+}
+
+.usage-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 18px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.usage-disclosure-chevron path {
+  stroke: var(--faint);
+}
+
+.usage-layers-open .usage-disclosure-chevron {
+  transform: rotate(90deg);
+}
+
+.usage-disclosure-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.usage-disclosure-summary {
+  margin-left: auto;
+  color: var(--faint);
+  font: 11.5px var(--font-mono);
+}
+
+.usage-row {
+  display: grid;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 18px;
+}
+
+.usage-row + .usage-row {
+  border-top: 1px solid var(--b2);
+}
+
+.usage-row-head {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  background: var(--surf2);
+  color: var(--faint);
+  font: 600 10px var(--font-mono);
+  letter-spacing: 0.11em;
+}
+
+.usage-row-head + .usage-row {
+  border-top: 1px solid var(--b2);
+}
+
+.usage-layer-table .usage-row {
+  grid-template-columns: minmax(0, 1fr) 200px 100px 80px 100px;
+}
+
+.usage-layer-table .usage-row-head {
+  border-top: 1px solid var(--b2);
+}
+
+.usage-artifact-table {
+  overflow: hidden;
+}
+
+.usage-artifact-table .usage-row {
+  grid-template-columns: minmax(0, 1fr) 120px 110px 80px 100px 96px;
+  padding-top: 11px;
+  padding-bottom: 11px;
+}
+
+.usage-artifact-table .usage-row-head {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+.usage-row .num {
+  color: var(--ink);
+  font: 400 12.5px var(--font-mono);
+  text-align: right;
+}
+
+.usage-row-head .num {
+  color: var(--faint);
+  font: inherit;
+}
+
+.usage-row .strong {
+  font-weight: 600;
+}
+
+.usage-row .quiet {
+  color: var(--faint);
+}
+
+.usage-layer-name {
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.usage-layer-cell {
+  color: var(--sec);
+  font-size: 11.5px;
+}
+
+.share-bar {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--chip);
+  overflow: hidden;
+}
+
+.share-fill {
+  display: block;
+  height: 100%;
+  background: var(--meta);
+}
+
+.share-fill-top {
+  background: var(--acc);
+}
+
+.usage-section-title {
+  margin: 0 0 12px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.usage-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.usage-menu {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 4px 12px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+
+.usage-menu select {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+.usage-count {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 12.5px;
+}
+
+.usage-count strong {
+  color: var(--ink);
+}
+
+.usage-sort {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font: 600 10px var(--font-mono);
+  letter-spacing: 0.11em;
+}
+
+.usage-sort-on {
+  color: var(--ink);
+}
+
+.usage-artifact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.usage-artifact-id {
+  overflow: hidden;
+  color: var(--link);
+  font-weight: 600;
+  font-size: 12.5px;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-loads {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.usage-loads-bar {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--chip);
+  overflow: hidden;
+}
+
+.usage-loads-fill {
+  display: block;
+  height: 100%;
+  background: var(--acc);
+}
+
+.usage-row .usage-last {
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.usage-artifact-table .empty {
+  padding: 14px 18px;
+  border-top: 1px solid var(--b2);
+}
+
+.usage-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
 }

@@ -42,6 +42,7 @@ import {
   routeKey,
   searchHref,
   similarityHref,
+  usageHref,
   useDocumentTitle,
   useEnteredSurface,
   useRoute,
@@ -59,6 +60,7 @@ import { ArtifactViewer } from './surfaces/ArtifactViewer';
 import { LayerPanel } from './surfaces/LayerPanel';
 import { DeletedLayers } from './surfaces/DeletedLayers';
 import { SimilaritySurface } from './surfaces/SimilaritySurface';
+import { UsageSurface } from './surfaces/UsageSurface';
 
 /** treeDepth is how many levels of the domain hierarchy the sidebar tree
  * resolves eagerly. A level below that edge is read when the reader expands
@@ -497,6 +499,12 @@ export function App() {
           >
             Similarity
           </SectionLink>
+          {/* Every caller who can search can read the usage report, and every
+              figure on it covers only what the caller can see, so the row
+              stands on every posture, an anonymous caller included (§13.10). */}
+          <SectionLink href={usageHref()} current={route.name === 'usage' ? 'page' : false}>
+            Usage
+          </SectionLink>
           {/* The layer panel is reachable for every caller on every
               deployment. The nav reads no posture field and states nothing
               about the caller: the panel decides which of its own write
@@ -653,6 +661,11 @@ function Surface({
           onThreshold={onSimilarityThreshold}
         />
       );
+    case 'usage':
+      // The page holds its filter in the address as the reader types, so it
+      // is not keyed on the route: a remount per keystroke would drop the
+      // focus from the field.
+      return <UsageSurface query={route.query} onError={onCatalogOutcome} />;
     case 'layers':
       // A restore moves the same figures the sidebar footer states, so the
       // recovery surface reports it the way every other layer write does.
