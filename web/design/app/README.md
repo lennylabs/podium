@@ -216,11 +216,11 @@ Backed by `GET /v1/usage` and `POST /v1/usage` (same parameters; the UI uses POS
 
 What counts: a **load** is a successful `load_artifact` (each item of a batch) from an agent, SDK, or CLI; a **sync** is the same call from `podium sync`; a **search hit** is one per artifact in the first 10 results of a search with a query. Counts are per UTC day.
 
-- **Usage page (22a).** Top-level page from the Usage nav item. Header: title, a `LAST 30 DAYS` badge, and a 7d / 30d / 90d / Custom… Segmented. Then:
+- **Usage page (22a).** Top-level page from the Usage nav item. Header: title, a `LAST 30 DAYS` badge, and a 7d / 30d / 90d / Custom… Segmented. Custom… opens From and To date fields filled with the range on display, so To starts at today and From at the start of the preset window. Then:
   - Two **StatTiles**: *Artifacts loaded* and *Artifacts synced*, each with its total and a daily sparkline (request `granularity=day`). Search hits has no tile.
   - One card with two **BreakdownBars**: *Loads/Syncs by client* (mcp, sdk, cli, sync, unknown) and *Loads/Syncs by harness*. A request without the `X-Podium-Client` header is recorded as `none` — **show it as "unknown"**.
   - **By layer** — a Disclosure, **collapsed by default**, summarising the layer count and the leader. Expanded (22b): a table of layer, **ShareBar** ("Share of loads/syncs", the largest in accent), loads, syncs, search hits.
-  - **By artifact** — expanded by default. Filter by artifact id, Type and Layer menus, a ResultCount, and a DataTable sortable on Loads (default, descending), Syncs, Search hits, and Last loaded. The Loads cell carries a small bar relative to the top row. Artifact ids link to the artifact page.
+  - **By artifact** — expanded by default. Filter by artifact id, Type and Layer menus, a ResultCount, and a DataTable sortable on Loads (default, descending), Syncs, Search hits, and Last loaded. The Loads, Syncs, and Search hits cells each carry a small bar relative to the largest value of that column among the rows shown. The table loads its next page when the reader scrolls to its end. Artifact ids link to the artifact page.
 - **Elsewhere.** Search results (14b, 20b), the catalog explorer (14a, 20a, 15a) and the artifact rail (14c, 15b, 15c, 20c–20f, 21d) show per-artifact usage for the last 30 days — see §1–§3. Lists send **one** `POST /v1/usage` with the visible artifact ids (≤ 500) after the page renders.
 - **States (22c).** Loading shows placeholders in the usage slots only. No activity has its own copy. **A failed usage request is not an error state**: the rail section and the list lines are simply left out — no message, no retry.
 

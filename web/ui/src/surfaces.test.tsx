@@ -10,6 +10,7 @@
 // under public mode is the whole catalog rather than a filtered one.
 
 import {
+  act,
   cleanup,
   createEvent,
   fireEvent,
@@ -20663,6 +20664,94 @@ describe("usage", () => {
       const table = screen.getByRole("table", { name: "Usage by artifact" });
       expect(within(table).getByRole("link", { name: payInvoice })).toBeTruthy();
       expect(screen.queryByRole("button", { name: /^Show \d+ more$/ })).toBeNull();
+    });
+
+    it("reads the next page when the end of the list scrolls into view", async () => {
+      const observers: { fire: () => void; disconnected: boolean }[] = [];
+      vi.stubGlobal(
+        "IntersectionObserver",
+        class {
+          entry = { fire: () => {}, disconnected: false };
+          constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+            this.entry.fire = () => {
+              callback([{ isIntersecting: true }]);
+            };
+            observers.push(this.entry);
+          }
+          observe() {}
+          disconnect() {
+            this.entry.disconnected = true;
+          }
+        },
+      );
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      goTo(usageHref());
+      render(<App />);
+      await screen.findByRole("table", { name: "Usage by artifact" });
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": {
+          body: usageBody({ artifacts: [usageArtifact(payInvoice, "team-finance", 1544)], next_cursor: null }),
+        },
+      });
+      await waitFor(() => {
+        expect(observers.some((o) => !o.disconnected)).toBe(true);
+      });
+      act(() => {
+        observers.filter((o) => !o.disconnected).forEach((o) => {
+          o.fire();
+        });
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("usage-count").textContent).toBe("Showing 2 of 312");
+      });
+      expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
+      // The last page carries no cursor, so the list stops reading.
+      expect(observers.every((o) => o.disconnected)).toBe(true);
+      expect(screen.queryByRole("button", { name: /^Show \d+ more$/ })).toBeNull();
+    });
+
+    it("draws a bar in the loads, syncs, and search hits cells against each column's largest value", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": {
+          body: usageBody({
+            artifacts: [
+              usageArtifact(traceReview, "platform", 2412, { syncs: 100, search_hits: 0 }),
+              usageArtifact(payInvoice, "team-finance", 1206, { syncs: 400, search_hits: 0 }),
+            ],
+          }),
+        },
+      });
+      goTo(usageHref());
+      render(<App />);
+      const table = await screen.findByRole("table", { name: "Usage by artifact" });
+      const fills = (id: string) =>
+        Array.from(
+          within(table).getByRole("link", { name: id }).closest('[role="row"]')?.querySelectorAll<HTMLElement>(".usage-count-fill") ?? [],
+        ).map((fill) => fill.style.width);
+      expect(fills(traceReview)).toEqual(["100%", "25%", "0%"]);
+      expect(fills(payInvoice)).toEqual(["50%", "100%", "0%"]);
+    });
+
+    it("fills the custom range with the range on display", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      goTo(usageHref());
+      render(<App />);
+      await screen.findAllByTestId("stat-tile");
+      fireEvent.click(screen.getByRole("button", { name: "Custom…" }));
+      expect((screen.getByLabelText("From") as HTMLInputElement).value).toBe("2026-10-20");
+      expect((screen.getByLabelText("To") as HTMLInputElement).value).toBe("2026-11-18");
+      await waitFor(() => {
+        expect(usageBodies().some((b) => b.from === "2026-10-20" && b.to === "2026-11-18")).toBe(true);
+      });
+      expect(await screen.findByText("2026-10-20 TO 2026-11-18")).toBeTruthy();
     });
 
     it("states a failed read in place of the figures", async () => {
