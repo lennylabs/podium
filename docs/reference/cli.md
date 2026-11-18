@@ -627,7 +627,7 @@ podium usage --registry <url> [--from <date>] [--to <date>] [--days <n>]
 |:--|:--|
 | `--from <date>`, `--to <date>` | First and last UTC days of the window, as `YYYY-MM-DD`. `--to` defaults to today, and the window defaults to 30 days. |
 | `--days <n>` | Window of the last `n` UTC days, counting today. It cannot be combined with `--from` or `--to`. |
-| `--granularity <g>` | `none` (the default), `day`, `week`, or `month`. A value other than `none` adds a series to every total and prints the catalog's periods. |
+| `--granularity <g>` | `none` (the default), `day`, `week`, or `month`. A value other than `none` adds a series to every total and prints the catalog's periods. A window of more than 365 days serves `day` as `week`, and one of more than 1,095 days serves `day` and `week` as `month`; the command then prints a line such as `periods by week: a 400-day window serves day as week` before the periods. |
 | `--layer <id>` | Restrict the report to a layer. Repeat it to name several. |
 | `--artifact <id>` | Restrict the artifact list to an artifact. Repeat it to name several. |
 | `--limit <n>` | The most artifacts to list, from 1 to 200. Defaults to 50. |

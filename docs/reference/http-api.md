@@ -768,7 +768,7 @@ POST /v1/usage
 |:--|:--|
 | `from`, `to` | UTC dates as `YYYY-MM-DD`. The window is the days from `from` to `to`, both included. `to` defaults to today, and `from` defaults to the day that makes the window 30 days long, or to the first retained day when that is later. |
 | `days` | The window is the last `days` UTC days, counting today. It cannot be combined with `from` or `to`. |
-| `granularity` | `none` (the default), `day`, `week`, or `month`. With a value other than `none`, every total in the response carries a `series`. |
+| `granularity` | `none` (the default), `day`, `week`, or `month`. With a value other than `none`, every total in the response carries a `series`. A window of more than 365 days serves `day` as `week`, and a window of more than 1,095 days serves `day` and `week` as `month`. |
 | `layer` | A layer ID. The report covers only the named layers. Repeat it to name several. |
 | `artifact` | A canonical artifact ID. The `artifacts` list holds only the named artifacts. Repeat it to name several. |
 | `limit` | The most entries one response holds in `artifacts`, from 1 to 200. Defaults to 50. |
@@ -791,6 +791,7 @@ The client kind and the harness come from the `X-Podium-Client` header. A reques
   "days": 7,
   "from": "2026-11-12",
   "to": "2026-11-18",
+  "granularity": "week",
   "totals": {
     "loads": 42,
     "syncs": 120,
@@ -846,6 +847,7 @@ The example uses `granularity=week` and abbreviates the breakdowns and the layer
 | Field | Description |
 |:--|:--|
 | `days`, `from`, `to` | The number of days in the window and its first and last UTC days. |
+| `granularity` | The granularity the series use: the requested one, or the coarser one a long window serves in its place. |
 | `totals` | `loads`, `syncs`, and `search_hits` summed over every row of the window in the covered layers, with `by_client` and `by_harness` breakdowns that map each client kind or harness with a non-zero count to its three counts. |
 | `layers` | One entry per covered layer, in the precedence order of the caller's effective view, including a layer with no counts. A layer's counts include artifacts it no longer serves. |
 | `artifacts` | One entry per artifact the caller can see in a covered layer, at its current served version, including an artifact with no counts, ordered by `loads`, then `syncs`, then `search_hits`, each descending, then by `artifact_id`. A response holds one page of at most `limit` entries. `last_loaded` and `last_synced` are the latest days in the window with a load or a sync, or `null`. |
