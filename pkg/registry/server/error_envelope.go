@@ -2,7 +2,6 @@ package server
 
 import (
 	"errors"
-	"net/http"
 
 	"github.com/lennylabs/podium/pkg/registry/core"
 )
@@ -123,6 +122,15 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 	"registry.tenant_management_unavailable": {
 		suggestedAction: "Start the registry in multi-tenant mode (PODIUM_MULTI_TENANT) to manage tenants.",
 	},
+	// §6.10: the overlap rebuild and the re-embed need configuration the
+	// operator may leave off, and the same request fails until the
+	// configuration changes and the registry restarts.
+	"registry.overlap_rebuild_unavailable": {
+		suggestedAction: "Set PODIUM_LINT_SEMANTIC_OVERLAP=on and configure a search index (PODIUM_VECTOR_BACKEND with PODIUM_EMBEDDING_PROVIDER, or a self-embedding vector backend), then restart the registry.",
+	},
+	"registry.reembed_unavailable": {
+		suggestedAction: "Configure vector search (PODIUM_VECTOR_BACKEND with PODIUM_EMBEDDING_PROVIDER, or a self-embedding vector backend), then restart the registry.",
+	},
 }
 
 // admissionCode returns the §6.10 code of a §13.4 stored-row admission
@@ -154,13 +162,4 @@ func enrichEnvelope(e *ErrorResponse) {
 	if e.SuggestedAction == "" {
 		e.SuggestedAction = meta.suggestedAction
 	}
-}
-
-// writeNotRetryable emits the §6.10 envelope with retryable false and the
-// given suggested_action. It serves a code whose registry default is
-// retryable, such as registry.unavailable, for a condition that lasts until
-// the operator changes the configuration, which enrichEnvelope would
-// otherwise mark retryable.
-func writeNotRetryable(w http.ResponseWriter, status int, code, msg, action string) {
-	writeJSON(w, status, ErrorResponse{Code: code, Message: msg, SuggestedAction: action})
 }

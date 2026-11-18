@@ -42,10 +42,11 @@ func (r *Registry) SemanticOverlapEnabled() bool { return r.overlap.semantic.Ena
 
 // ErrOverlapUnavailable reports a computation the registry cannot run: the
 // check is off, or no search index is wired. The condition lasts until the
-// operator changes the configuration, so the rebuild endpoint answers it as
-// not retryable, and the startup pass and the sweep do not run under it.
+// operator changes the configuration, so the rebuild endpoint answers it with
+// registry.overlap_rebuild_unavailable rather than a retryable code, and the
+// startup pass and the sweep do not run under it.
 //
-// Spec: §7.3.1
+// Spec: §7.3.1, §6.10
 var ErrOverlapUnavailable = errors.New("semantic overlap cannot be computed")
 
 // errNoStoredVector reports an artifact whose vector the index does not hold

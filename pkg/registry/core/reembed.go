@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -14,6 +15,15 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/vector"
 )
+
+// ErrReembedUnavailable reports a re-embed the registry cannot run because no
+// vector search is configured: no vector backend, or one with neither an
+// embedding provider nor self-embedding. The condition lasts until the
+// operator changes the configuration, so the endpoint answers it with
+// registry.reembed_unavailable rather than a retryable code.
+//
+// Spec: §4.7, §6.10
+var ErrReembedUnavailable = errors.New("reembed: vector search not configured")
 
 // ReembedResult reports what `Reembed` did across the tenant. Used
 // by the admin CLI for human-readable output and by callers that
@@ -65,7 +75,7 @@ type ReembedOptions struct {
 // artifacts ingested at or after the given instant.
 func (r *Registry) Reembed(ctx context.Context, opts ReembedOptions) (*ReembedResult, error) {
 	if !r.vectorSearchActive() {
-		return nil, fmt.Errorf("reembed: vector search not configured")
+		return nil, ErrReembedUnavailable
 	}
 	manifests, err := r.store.ListManifests(ctx, r.TenantFor(ctx))
 	if err != nil {
@@ -218,7 +228,7 @@ func (r *Registry) emitReembedProgress(ctx context.Context, done, total int, mod
 // `podium admin reembed --artifact <id>` path.
 func (r *Registry) ReembedOne(ctx context.Context, artifactID, version string) error {
 	if !r.vectorSearchActive() {
-		return fmt.Errorf("reembed: vector search not configured")
+		return ErrReembedUnavailable
 	}
 	m, err := r.store.GetManifest(ctx, r.TenantFor(ctx), artifactID, version)
 	if err != nil {

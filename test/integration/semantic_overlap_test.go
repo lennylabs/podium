@@ -547,11 +547,13 @@ func rebuildEnvelope(t *testing.T, reg *core.Registry) (int, server.ErrorRespons
 }
 
 // Spec: §7.3.1, §6.10 — with the check off, and with the check on and no
-// search index, the rebuild answers registry.unavailable with retryable false
-// and a suggested_action naming the configuration to change, because the
-// request cannot succeed until the operator changes it. A store failure keeps
-// the registry.unavailable default, retryable true.
-func TestSemanticOverlap_RebuildUnavailableRetryability(t *testing.T) {
+// search index, the rebuild answers 404 registry.overlap_rebuild_unavailable
+// with retryable false and a suggested_action naming the configuration to
+// change, because the request cannot succeed until the operator changes it. A
+// store failure keeps registry.unavailable, retryable true.
+//
+// Matrix: §6.10 (registry.overlap_rebuild_unavailable)
+func TestSemanticOverlap_RebuildUnavailableCode(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
 	idx := vector.NewMemory(4)
@@ -560,8 +562,8 @@ func TestSemanticOverlap_RebuildUnavailableRetryability(t *testing.T) {
 	noIndex := core.New(st, "t", nil).WithOverlapChecks(lint.Thresholds{}, lint.SemanticConfig{Enabled: true})
 	for name, reg := range map[string]*core.Registry{"check off": off, "no search index": noIndex} {
 		status, env := rebuildEnvelope(t, reg)
-		if status != http.StatusInternalServerError || env.Code != "registry.unavailable" || env.Retryable {
-			t.Errorf("%s: status %d code %q retryable %v, want 500 registry.unavailable retryable false", name, status, env.Code, env.Retryable)
+		if status != http.StatusNotFound || env.Code != "registry.overlap_rebuild_unavailable" || env.Retryable {
+			t.Errorf("%s: status %d code %q retryable %v, want 404 registry.overlap_rebuild_unavailable retryable false", name, status, env.Code, env.Retryable)
 		}
 		if !strings.Contains(env.SuggestedAction, "PODIUM_LINT_SEMANTIC_OVERLAP=on") || !strings.Contains(env.SuggestedAction, "search index") {
 			t.Errorf("%s: suggested_action %q, want the check and the search index named", name, env.SuggestedAction)

@@ -1029,7 +1029,7 @@ func (s *Server) handleReembed(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.core.ReembedOne(r.Context(), id, ver); err != nil {
-			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+			writeReembedError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -1050,10 +1050,24 @@ func (s *Server) handleReembed(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := s.core.Reembed(r.Context(), opts)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		writeReembedError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// writeReembedError answers a failed re-embed. A registry with no vector
+// search configured fails every re-embed until the operator changes the
+// configuration, so it gets its own non-retryable code; any other failure
+// is a dependency failure the caller may retry.
+//
+// Spec: §4.7, §6.10
+func writeReembedError(w http.ResponseWriter, err error) {
+	if errors.Is(err, core.ErrReembedUnavailable) {
+		writeError(w, http.StatusNotFound, "registry.reembed_unavailable", err.Error())
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 }
 
 // handleDomainAnalyze serves §4.5.5 GET /v1/domain/analyze?path=<>

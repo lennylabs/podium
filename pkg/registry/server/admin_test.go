@@ -179,8 +179,8 @@ func TestAdminReembed_AnonymousCallerForbidden(t *testing.T) {
 
 // Spec: §4.7.2 — a caller holding the per-tenant admin role passes the
 // gate and reaches the handler. The test registry wires no vector search
-// backend, so the pass itself fails with registry.unavailable; what this
-// pins is that the request is not rejected as forbidden.
+// backend, so the pass itself fails with registry.reembed_unavailable; what
+// this pins is that the request is not rejected as forbidden.
 func TestAdminReembed_AdminCallerReachesHandler(t *testing.T) {
 	t.Parallel()
 	ts := bootRegistryWithAdmin(t, "alice", nil)
@@ -188,8 +188,8 @@ func TestAdminReembed_AdminCallerReachesHandler(t *testing.T) {
 	if status == http.StatusForbidden {
 		t.Fatalf("status = 403 (code %q), want the handler to run for an admin caller", code)
 	}
-	if status != http.StatusOK && status != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 200 or 500", status)
+	if status != http.StatusOK && code != "registry.reembed_unavailable" {
+		t.Errorf("status = %d (code %q), want 200 or registry.reembed_unavailable", status, code)
 	}
 }
 
@@ -204,8 +204,8 @@ func TestAdminReembed_UnauthenticatedDeploymentAdmitted(t *testing.T) {
 	if status == http.StatusForbidden {
 		t.Fatalf("status = 403 (code %q), want the handler to run on a registry that authenticates no caller", code)
 	}
-	if status != http.StatusOK && status != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 200 or 500", status)
+	if status != http.StatusOK && code != "registry.reembed_unavailable" {
+		t.Errorf("status = %d (code %q), want 200 or registry.reembed_unavailable", status, code)
 	}
 }
 
