@@ -81,6 +81,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("UsageCountsDeleteBefore", func(t *testing.T) { usageCountsDeleteBefore(t, factory(t)) })
 	t.Run("UsageCountsConcurrentAdd", func(t *testing.T) { usageCountsConcurrentAdd(t, factory(t)) })
 	t.Run("UsageCountsPurgedWithLayer", func(t *testing.T) { usageCountsPurgedWithLayer(t, factory(t)) })
+	t.Run("UsageLoadsSummed", func(t *testing.T) { usageLoadsSummed(t, factory(t)) })
 }
 
 // Spec: §4.5.1 / §4.5.4 — DOMAIN.md is persisted per (tenant,
