@@ -1,8 +1,10 @@
 package e2e
 
-// End-to-end tests for the §8.7 usage report: counts recorded by the compiled
-// registry, flushed on its interval, served by GET /v1/usage, printed by
-// podium usage, mirrored in the audit stream, and the startup refusal of a
+// End-to-end tests for docs/managing/usage.md
+// (D-usage). The page documents the §8.7 usage report: counts recorded by the
+// compiled registry, flushed on its interval, served by GET /v1/usage, printed
+// by podium usage with its window, layer, artifact, and granularity flags, and
+// mirrored in the audit stream; the tests also cover the startup refusal of a
 // usage setting out of range.
 
 import (
@@ -98,6 +100,18 @@ func TestUsageReport_BinaryCountsReportAndCLI(t *testing.T) {
 	asJSON := runPodium(t, "", srv.cliEnv(), "usage", "--registry", srv.BaseURL, "--json", "--artifact", "ops/farewell")
 	if asJSON.Exit != 0 || !strings.Contains(asJSON.Stdout, `"artifact_id": "ops/farewell"`) || strings.Contains(asJSON.Stdout, `"artifact_id": "ops/greet"`) {
 		t.Errorf("podium usage --json --artifact exit=%d\n%s", asJSON.Exit, asJSON.Stdout)
+	}
+	var layers struct {
+		Layers []struct {
+			Layer string `json:"layer"`
+		} `json:"layers"`
+	}
+	if _, body := getRaw(t, srv.BaseURL+"/v1/usage"); json.Unmarshal(body, &layers) != nil || len(layers.Layers) != 1 {
+		t.Fatalf("layers: %s", body)
+	}
+	month := runPodium(t, "", srv.cliEnv(), "usage", "--registry", srv.BaseURL, "--layer", layers.Layers[0].Layer, "--granularity", "month")
+	if month.Exit != 0 || !strings.Contains(month.Stdout, "PERIOD") || !strings.Contains(month.Stdout, layers.Layers[0].Layer) {
+		t.Errorf("podium usage --layer --granularity month exit=%d\n%s%s", month.Exit, month.Stdout, month.Stderr)
 	}
 	if res := runPodium(t, "", srv.cliEnv(), "usage", "--registry", srv.BaseURL, "--from", "2000-01-01"); res.Exit != 1 || !strings.Contains(res.Stderr, "registry.invalid_argument") {
 		t.Errorf("podium usage --from outside retention exit=%d stderr=%s, want 1 with the envelope", res.Exit, res.Stderr)
