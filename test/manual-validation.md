@@ -13443,9 +13443,12 @@ so it needs no embedding provider, and it binds 127.0.0.1:8176.
    curl -s -X POST -d '{"artifacts":["ops/farewell","ops/missing"],"layers":["team"],"days":1}' "$URL/v1/usage" | jq -c '[.artifacts[].artifact_id], [.layers[].layer]'
    podium usage --registry "$URL" --days 7; echo "usage exit=$?"
    podium usage --registry "$URL" --days 7 --from 2026-01-01; echo "bad exit=$?"
+   podium usage --registry "$URL" --limit 2 | tail -n 1
+   C=$(curl -s "$URL/v1/usage?limit=2" | jq -r .next_cursor)
+   curl -s "$URL/v1/usage?limit=2&cursor=$C" | jq -c '[.artifacts[].artifact_id], .artifact_count, .next_cursor'
    ```
 
-   **Expect.** The first line lists two or three periods whose `start` and `end` dates run Monday to Sunday except the first, which starts 13 days ago, and the last, which ends today. The second line is `2`, the totals' loads. The `POST` prints `["ops/farewell"]` and `["team"]`, because `ops/missing` names no artifact and the request names one layer. The CLI prints a table whose first artifact row ends in `ops/greet`, layer rows for `team` and `finance`, a line ending `2 loads, 1 syncs, 2 search hits`, and `usage exit=0`, then `error: --days cannot be combined with --from or --to` and `bad exit=2`.
+   **Expect.** The first line lists two or three periods whose `start` and `end` dates run Monday to Sunday except the first, which starts 13 days ago, and the last, which ends today. The second line is `2`, the totals' loads. The `POST` prints `["ops/farewell"]` and `["team"]`, because `ops/missing` names no artifact and the request names one layer. The CLI prints a table whose first artifact row ends in `ops/greet`, layer rows for `team` and `finance`, a line ending `2 loads, 1 syncs, 2 search hits`, and `usage exit=0`, then `error: --days cannot be combined with --from or --to` and `bad exit=2`. The paged CLI run prints `2 of 3 artifacts listed; read the next ones with --cursor ` followed by a cursor, and the page that cursor reads prints `["fin/payroll"]`, `3`, and `null`, because the first page held `ops/greet` and `ops/farewell` and nothing follows the third artifact. A third artifact repeated from the first page, or a second page that is empty, is the defect.
 
 4. Stop the server and read the stored rows and the audit record of the search.
 
