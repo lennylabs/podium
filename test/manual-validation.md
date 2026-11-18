@@ -13261,8 +13261,11 @@ scenario covers what an operator sees without one.
    **Expect.** The endpoint answers `400` with `registry.invalid_argument`.
    The command prints `error: --threshold must be a number from 0.5 to 1.0`
    and `bad threshold exit=2`. The rebuild prints an error envelope whose code
-   is `registry.unavailable` and `rebuild exit=1`, because the semantic check
-   is off. A rebuild that reports computed artifacts here is the defect.
+   is `registry.unavailable`, with `"retryable": false` and a suggested
+   action naming `PODIUM_LINT_SEMANTIC_OVERLAP=on`, and `rebuild exit=1`,
+   because the semantic check is off. A rebuild that reports computed
+   artifacts here is the defect, and so is `"retryable": true`, which would
+   invite a retry that cannot succeed.
 
 4. Start a registry with the semantic check on and no embedding source.
 
