@@ -1482,7 +1482,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 	// cached content instead of downloading the full manifest + resources. A
 	// changed hash or a HEAD failure falls through to a full fetch.
 	if s.cfg.cacheMode == "always-revalidate" && id != "" {
-		if hash, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok && s.cache.has(hash) {
+		if hash, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok && s.cache.has(hash) && !s.cache.hasDeprecationWarning(hash, id) {
 			if freshHash, herr := s.headContentHash("/v1/load_artifact", args); herr == nil && freshHash == hash {
 				// Revalidated: restart the `latest` TTL window once the
 				// cached record passes verification.
@@ -1505,7 +1505,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 	// or any other (id, version) sends no validator and fetches normally.
 	condHash := ""
 	if id != "" {
-		if h, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok && s.cache.has(h) {
+		if h, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok && s.cache.has(h) && !s.cache.hasDeprecationWarning(h, id) {
 			condHash = h
 		}
 	}
@@ -1614,6 +1614,16 @@ func applyServed(served version.Served) (loadArtifactResponse, error) {
 	}
 	if err := memberValue(served.Members, "layer", &resp.Layer); err != nil {
 		return loadArtifactResponse{}, err
+	}
+	// Spec: §7.2 (Deprecation members), §5 — read by exact name like layer.
+	for name, dst := range map[string]any{
+		"deprecated":          &resp.Deprecated,
+		"replaced_by":         &resp.ReplacedBy,
+		"deprecation_warning": &resp.DeprecationWarning,
+	} {
+		if err := memberValue(served.Members, name, dst); err != nil {
+			return loadArtifactResponse{}, err
+		}
 	}
 	if len(served.Links) > 0 {
 		resp.LargeResources = make(map[string]largeResourceLink, len(served.Links))
@@ -1928,14 +1938,17 @@ func (s *mcpServer) cacheVerifiedRecord(resp loadArtifactResponse) error {
 		return err
 	}
 	return s.cache.putDelivery(resp.ContentHash, resp.ID, deliveryFiles{
-		Frontmatter:       resp.Frontmatter,
-		Body:              resp.ManifestBody,
-		DeliveryHash:      resp.DeliveryHash,
-		DeliverySignature: resp.DeliverySignature,
-		Sensitivity:       resp.Sensitivity,
-		ArtifactRevision:  resp.ArtifactRevision,
-		Version:           resp.Version,
-		Type:              resp.Type,
+		Frontmatter:        resp.Frontmatter,
+		Body:               resp.ManifestBody,
+		DeliveryHash:       resp.DeliveryHash,
+		DeliverySignature:  resp.DeliverySignature,
+		Sensitivity:        resp.Sensitivity,
+		ArtifactRevision:   resp.ArtifactRevision,
+		Version:            resp.Version,
+		Type:               resp.Type,
+		Deprecated:         resp.Deprecated,
+		ReplacedBy:         resp.ReplacedBy,
+		DeprecationWarning: resp.DeprecationWarning,
 	})
 }
 
@@ -2130,6 +2143,7 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		"manifest_body":   resp.ManifestBody,
 		"materialized_at": materialized,
 	}
+	addDeprecationMembers(result, resp)
 	// §6.6 step 4 — surface any warnings the hook chain emitted alongside the
 	// materialized paths so the host sees them without failing the call.
 	if len(warnings) > 0 {
@@ -2363,6 +2377,23 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 	return result
 }
 
+// addDeprecationMembers copies the §7.2 deprecation members the registry
+// returned into a load_artifact result, each only when set, so the model reads
+// the §4.7.4 warning and the upgrade target in the tool output.
+//
+// Spec: §5 (Deprecation in the load_artifact result), §4.7.4
+func addDeprecationMembers(result map[string]any, resp loadArtifactResponse) {
+	if resp.Deprecated {
+		result["deprecated"] = true
+	}
+	if resp.ReplacedBy != "" {
+		result["replaced_by"] = resp.ReplacedBy
+	}
+	if resp.DeprecationWarning != "" {
+		result["deprecation_warning"] = resp.DeprecationWarning
+	}
+}
+
 func resourcesAsStrings(in map[string][]byte) map[string]string {
 	if len(in) == 0 {
 		return nil
@@ -2413,6 +2444,12 @@ type loadArtifactResponse struct {
 	// ArtifactRevision is the §4.7.10 ingest time of the served version,
 	// which the delivery record frames after the sensitivity.
 	ArtifactRevision string `json:"artifact_revision"`
+	// Deprecated, ReplacedBy, and DeprecationWarning are the §7.2 deprecation
+	// members, outside the delivery record, which the load_artifact result
+	// passes to the model (§5).
+	Deprecated         bool   `json:"deprecated,omitempty"`
+	ReplacedBy         string `json:"replaced_by,omitempty"`
+	DeprecationWarning string `json:"deprecation_warning,omitempty"`
 }
 
 // largeResourceLink mirrors the registry's per-resource link. The
@@ -2774,6 +2811,10 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 // revalidate a cached resolution without downloading the manifest body or
 // presigning resources (§6.5 always-revalidate). It returns the registry's
 // current content hash for the requested (id, version).
+// deprecationWarningHeader is the §7.2 header a registry HEAD revalidation
+// carries when the load returns a §4.7.4 deprecation warning.
+const deprecationWarningHeader = "X-Podium-Deprecation-Warning"
+
 func (s *mcpServer) headContentHash(path string, args map[string]any) (string, error) {
 	req, err := s.newRegistryRequest(http.MethodHead, path, args)
 	if err != nil {
@@ -2793,6 +2834,12 @@ func (s *mcpServer) headContentHash(path string, args map[string]any) (string, e
 		return "", fmt.Errorf("HEAD %s: status %d", path, resp.StatusCode)
 	}
 	s.recordSuccess(time.Now())
+	// Spec: §6.5, §7.2 — a HEAD that reports a deprecation warning does not
+	// confirm the cached record, which may not carry it, so no hash is
+	// returned and the caller fetches the artifact.
+	if resp.Header.Get(deprecationWarningHeader) != "" {
+		return "", nil
+	}
 	return resp.Header.Get("X-Podium-Content-Hash"), nil
 }
 
@@ -3001,6 +3048,13 @@ type deliveryFiles struct {
 	// Spec: §6.5, §6.6, §4.7.10
 	Version string
 	Type    string
+	// Deprecated, ReplacedBy, and DeprecationWarning are the §7.2 deprecation
+	// members of the cached response. They depend on the ID and on the
+	// versions the caller could see, so they live with the per-ID files, and
+	// an offline load serves them as cached (§6.5).
+	Deprecated         bool
+	ReplacedBy         string
+	DeprecationWarning string
 }
 
 // putDelivery writes d under delivery/<deliverySegment(id)>/ in the bucket
@@ -3017,21 +3071,46 @@ func (c *contentCache) putDelivery(hash, id string, d deliveryFiles) error {
 		return err
 	}
 	for name, content := range map[string]string{
-		"id":                 id,
-		"frontmatter":        d.Frontmatter,
-		"body":               d.Body,
-		"delivery_hash":      d.DeliveryHash,
-		"delivery_signature": d.DeliverySignature,
-		"sensitivity":        d.Sensitivity,
-		"artifact_revision":  d.ArtifactRevision,
-		"version":            d.Version,
-		"type":               d.Type,
+		"id":                  id,
+		"frontmatter":         d.Frontmatter,
+		"body":                d.Body,
+		"delivery_hash":       d.DeliveryHash,
+		"delivery_signature":  d.DeliverySignature,
+		"sensitivity":         d.Sensitivity,
+		"artifact_revision":   d.ArtifactRevision,
+		"version":             d.Version,
+		"type":                d.Type,
+		"deprecated":          boolFile(d.Deprecated),
+		"replaced_by":         d.ReplacedBy,
+		"deprecation_warning": d.DeprecationWarning,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// boolFile is the content of a delivery file that records a boolean: "true",
+// or empty for false.
+func boolFile(b bool) string {
+	if b {
+		return "true"
+	}
+	return ""
+}
+
+// hasDeprecationWarning reports whether the cached record of id under hash
+// carries a §4.7.4 deprecation warning. A revalidation that reports no
+// warning cannot confirm such a record, because the warning it carries no
+// longer applies (§6.5), so the caller refetches instead of sending a
+// validator.
+func (c *contentCache) hasDeprecationWarning(hash, id string) bool {
+	if c.dir == "" || hash == "" {
+		return false
+	}
+	b, err := os.ReadFile(filepath.Join(c.dir, sanitizeHash(hash), "delivery", deliverySegment(id), "deprecation_warning"))
+	return err == nil && len(b) > 0
 }
 
 // deliverySegment maps a canonical artifact ID to the directory name its

@@ -35,6 +35,8 @@ At or below the inline cutoff, resources are returned inline. This avoids round-
 
 **Other response members.** The response also carries members the §4.7.10 verification procedure does not read, among them `layer`, a string naming the layer the served version comes from and absent when the registry records none, and a link object's `size`, an integer byte count, and `content_type`, a string absent when the registry records none. §7.6.2 states which members a batch entry carries.
 
+**Deprecation members.** A `load_artifact` response and each `status: ok` batch entry (§7.6.2) carry the §4.7.4 lifecycle signal in three members outside the delivery record, which the §4.7.10 procedure does not read: `deprecated`, a boolean that is true when the served version is deprecated and absent otherwise; `replaced_by`, a string naming the upgrade target §4.7.4 returns for the load, absent when none applies; and `deprecation_warning`, a human-readable string present when §4.7.4 returns a warning for the load and absent otherwise. A HEAD revalidation of a load for which §4.7.4 returns a warning carries the same text in the `X-Podium-Deprecation-Warning` response header, and the registry answers such a load with the full response rather than `304` even when its `If-None-Match` matches, so a consumer revalidating a cached record receives the warning. The warning depends on the versions the caller can see as well as on the served version, so the content hash, which a revalidation confirms, does not change when a newer version is deprecated.
+
 **Integrity fields.** The registry's HTTP `load_artifact` response carries these fields beside the manifest and the resources:
 
 - `delivery_hash`: the §4.7.10 digest over the record this response delivers. Present on every response.
@@ -728,7 +730,7 @@ For shell pipelines and language-agnostic scripts that don't want to take a Pyth
 | `podium search <query>`       | `Client.search_artifacts(...)`             | Hybrid search over artifacts. Flags `--type`, `--tags`, `--scope`, `--top-k` mirror the SDK args. Returns ranked descriptors.                                                    |
 | `podium domain search <query>`| `Client.search_domains(...)`               | Hybrid search over domains. Flags `--scope`, `--top-k` mirror the SDK args. Returns ranked domain descriptors.                                                                   |
 | `podium domain show [<path>]` | `Client.load_domain(path)`                 | Domain map for `<path>` (or root when no path is given).                                                                                                                         |
-| `podium artifact show <id>`   | `Client.load_artifact(id)` (manifest only) | Prints the manifest body and frontmatter to stdout. Runs no §4.7.10 delivery check. **Does not materialize bundled resources**; for that, use `podium sync --include <id>`. Flags: `--version`, `--session-id`.  |
+| `podium artifact show <id>`   | `Client.load_artifact(id)` (manifest only) | Prints the manifest body and frontmatter to stdout, and the §4.7.4 deprecation warning to stderr when the registry returns one. Runs no §4.7.10 delivery check. **Does not materialize bundled resources**; for that, use `podium sync --include <id>`. Flags: `--version`, `--session-id`.  |
 
 Output formats:
 
@@ -761,7 +763,10 @@ Output formats:
 
   // podium artifact show <id> --json
   { "id": "...", "version": "...", "content_hash": "...",
-    "frontmatter": { ... }, "body": "..." }
+    "frontmatter": { ... }, "body": "...",
+    "deprecated": true, "replaced_by": "...", "deprecation_warning": "..." }
+  // deprecated, replaced_by, and deprecation_warning are the §7.2
+  // deprecation members, each omitted when the registry omits it.
   ```
 
 The CLI and SDK are intentionally interchangeable for these read operations. Pick whichever fits the surrounding code. Both defer to the same `RegistrySearchProvider`, `LayerComposer`, and cache paths server-side; output drift between them is treated as a bug. The exception is the §4.7.10 delivery check, which the SDK runs and the read CLI does not, so an SDK call can refuse with a §6.10 code a record that the read CLI prints.

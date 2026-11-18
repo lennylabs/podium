@@ -707,6 +707,8 @@ podium artifact show <id> [--version <semver>]
 | `--session-id <uuid>` | Session ID, for consistent resolution of `latest`. |
 | `--json` | JSON output. See [JSON output](#json-output). |
 
+When the registry returns a deprecation warning, the command prints it on standard error as `warning: <text>`, in both output modes. Under `--json`, the object also carries the `deprecated`, `replaced_by`, and `deprecation_warning` members, each omitted when the registry omits it. [Deprecation members](http-api#load_artifact) describes them.
+
 To write an artifact's files to disk, use `podium sync --include <id>`.
 
 ### `podium artifact scaffold`

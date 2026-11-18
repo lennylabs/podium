@@ -1123,3 +1123,33 @@ def test_load_artifact_large_resource_size_is_an_int(stub_server):
     link = client.load_artifact("big/res").large_resources["big.bin"]
     assert isinstance(link["size"], int) and link["size"] == 5242880
     assert json.loads(json.dumps(link))["size"] == 5242880
+
+
+# Spec: §7.2 (Deprecation members), §4.7.4 — load_artifact and each ok batch
+# entry return the registry's deprecated, replaced_by, and deprecation_warning
+# members, which sit outside the delivery record, and a mistyped member is
+# refused as a member read beyond the record.
+def test_load_artifact_returns_deprecation_members(stub_server):
+    warning = "version 2.0.0 of finance/run is deprecated; replaced_by finance/run-v2; this load serves version 1.0.0"
+    stub_server.next_response = served({
+        "id": "finance/run", "type": "prompt", "version": "1.0.0", "content_hash": "sha256:c",
+        "replaced_by": "finance/run-v2", "deprecation_warning": warning,
+    })
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    art = client.load_artifact("finance/run")
+    assert (art.deprecated, art.replaced_by, art.deprecation_warning) == (False, "finance/run-v2", warning)
+
+    stub_server.next_response = [
+        served({"id": "a", "status": "ok", "version": "2.0.0", "content_hash": "sha256:a",
+                "deprecated": True, "deprecation_warning": "artifact is deprecated"}),
+    ]
+    out = client.load_artifacts(["a"])
+    assert out[0].status == "ok"
+    assert (out[0].deprecated, out[0].deprecation_warning) == (True, "artifact is deprecated")
+
+    stub_server.next_response = served({
+        "id": "finance/run", "type": "prompt", "version": "1.0.0", "content_hash": "sha256:c",
+        "deprecated": "yes",
+    })
+    with pytest.raises(RegistryError):
+        client.load_artifact("finance/run")

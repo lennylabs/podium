@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -139,6 +140,32 @@ type readArtifactShow struct {
 	ContentHash string         `json:"content_hash"`
 	Frontmatter map[string]any `json:"frontmatter"`
 	Body        string         `json:"body"`
+	// Deprecated, ReplacedBy, and DeprecationWarning are the §7.2 deprecation
+	// members, each omitted when the registry omits it (§7.6.1).
+	Deprecated         bool   `json:"deprecated,omitempty"`
+	ReplacedBy         string `json:"replaced_by,omitempty"`
+	DeprecationWarning string `json:"deprecation_warning,omitempty"`
+}
+
+// deprecationMembers are the §7.2 deprecation members of a load_artifact
+// response.
+type deprecationMembers struct {
+	Deprecated         bool   `json:"deprecated"`
+	ReplacedBy         string `json:"replaced_by"`
+	DeprecationWarning string `json:"deprecation_warning"`
+}
+
+// warnDeprecation prints the §4.7.4 deprecation warning a load_artifact
+// response carries to w, so it reaches the user on standard error whatever
+// standard output carries. A response without one prints nothing.
+//
+// Spec: §7.6.1, §4.7.4
+func warnDeprecation(w io.Writer, body []byte) {
+	var m deprecationMembers
+	if err := json.Unmarshal(body, &m); err != nil || m.DeprecationWarning == "" {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "warning: %s\n", m.DeprecationWarning)
 }
 
 // emitArtifactShowJSON maps the /v1/load_artifact wire response to the §7.6.1
@@ -151,17 +178,21 @@ func emitArtifactShowJSON(body []byte) {
 		ContentHash  string `json:"content_hash"`
 		ManifestBody string `json:"manifest_body"`
 		Frontmatter  string `json:"frontmatter"`
+		deprecationMembers
 	}
 	if err := json.Unmarshal(body, &wire); err != nil {
 		fmt.Println(string(body))
 		return
 	}
 	out := readArtifactShow{
-		ID:          wire.ID,
-		Version:     wire.Version,
-		ContentHash: wire.ContentHash,
-		Frontmatter: parseFrontmatterObject(wire.Frontmatter),
-		Body:        wire.ManifestBody,
+		ID:                 wire.ID,
+		Version:            wire.Version,
+		ContentHash:        wire.ContentHash,
+		Frontmatter:        parseFrontmatterObject(wire.Frontmatter),
+		Body:               wire.ManifestBody,
+		Deprecated:         wire.Deprecated,
+		ReplacedBy:         wire.ReplacedBy,
+		DeprecationWarning: wire.DeprecationWarning,
 	}
 	printReadJSON(out, body)
 }

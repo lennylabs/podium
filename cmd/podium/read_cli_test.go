@@ -138,3 +138,35 @@ func TestReadCLI_SearchSurfacesRegistryError(t *testing.T) {
 		t.Fatal("stub registry not bound")
 	}
 }
+
+// Spec: §7.6.1, §4.7.4 — podium artifact show prints the registry's
+// deprecation warning on standard error in both output modes, keeps it off
+// standard output in the human mode, and carries the §7.2 deprecation members
+// under --json.
+func TestReadCLI_ArtifactShowDeprecationWarning(t *testing.T) {
+	const warning = "version 2.0.0 of team/x is deprecated; replaced_by team/y; this load serves version 1.0.0"
+	ts := newRegistryStub(t, map[string]any{
+		"/v1/load_artifact": map[string]any{
+			"id": "team/x", "type": "skill", "version": "1.0.0",
+			"manifest_body": "Skill body content.", "frontmatter": "---\ntype: skill\nname: x\n---\n",
+			"replaced_by": "team/y", "deprecation_warning": warning,
+		},
+	})
+	var stdout string
+	stderr := captureStderr(t, func() {
+		stdout = captureStdout(t, func() { _ = artifactShow([]string{"--registry", ts.URL, "team/x"}) })
+	})
+	if !strings.Contains(stderr, "warning: "+warning) || strings.Contains(stdout, warning) {
+		t.Errorf("human mode: stderr=%q stdout=%q, want the warning on stderr alone", stderr, stdout)
+	}
+	stderr = captureStderr(t, func() {
+		stdout = captureStdout(t, func() { _ = artifactShow([]string{"--registry", ts.URL, "--json", "team/x"}) })
+	})
+	var got map[string]any
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("--json output %q: %v", stdout, err)
+	}
+	if got["deprecation_warning"] != warning || got["replaced_by"] != "team/y" || got["deprecated"] != nil || !strings.Contains(stderr, warning) {
+		t.Errorf("--json: %v (stderr %q), want the warning and replaced_by in the object and on stderr", got, stderr)
+	}
+}

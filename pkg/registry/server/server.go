@@ -1128,6 +1128,10 @@ func (s *Server) handleScopePreview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, preview)
 }
 
+// DeprecationWarningHeader carries the §4.7.4 deprecation warning on a HEAD
+// revalidation of a load that returns one (§7.2).
+const DeprecationWarningHeader = "X-Podium-Deprecation-Warning"
+
 func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 	// §6.5: GET materializes; HEAD revalidates the MCP resolution cache by
 	// returning the resolved content hash in a header without a body.
@@ -1169,7 +1173,8 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 				return true
 			}
 			etag := validatorFor(res)
-			return etag != "" && strings.TrimSpace(ifNoneMatch) != "*" && ifNoneMatchHit(ifNoneMatch, etag)
+			return etag != "" && strings.TrimSpace(ifNoneMatch) != "*" && ifNoneMatchHit(ifNoneMatch, etag) &&
+				res.DeprecationWarning == ""
 		},
 		// §5 load_artifact "Optional session_id"; §4.7.6 — within a
 		// session the first `latest` lookup pins, so a later same-id
@@ -1190,9 +1195,14 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 	// content-addressed cache instead of re-downloading the manifest body and
 	// re-presigning resources. The check runs for GET and HEAD alike and
 	// before any resource presigning so a revalidated hit avoids that work.
+	// Spec: §7.2 (Deprecation members) — a load that carries a §4.7.4 warning
+	// is answered in full even when the validator matches. The warning can
+	// change while the content hash does not, when a newer version is
+	// deprecated, and a 304 would let the consumer serve its cached record
+	// without it.
 	if etag := validatorFor(res); etag != "" {
 		w.Header().Set("ETag", etag)
-		if ifNoneMatchHit(ifNoneMatch, etag) {
+		if ifNoneMatchHit(ifNoneMatch, etag) && res.DeprecationWarning == "" {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
@@ -1204,6 +1214,11 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Podium-Content-Hash", res.ContentHash)
 		if res.Version != "" {
 			w.Header().Set("X-Podium-Version", res.Version)
+		}
+		// Spec: §7.2, §6.5 — the warning tells a revalidating consumer that
+		// its cached record does not carry the lifecycle signal of this load.
+		if res.DeprecationWarning != "" {
+			w.Header().Set(DeprecationWarningHeader, res.DeprecationWarning)
 		}
 		w.WriteHeader(http.StatusOK)
 		return
