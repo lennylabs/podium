@@ -263,6 +263,15 @@ type Skill struct {
 	// Podium reads none of these values, and the authored bytes keep them.
 	NonStringMetadata []NonStringMetadata `yaml:"-"`
 
+	// WhenToUse is a top-level when_to_use scalar, the key Claude Code
+	// defines and Podium reads in the metadata.when_to_use encoding. A YAML
+	// null and an absent key both leave it empty (§4.3.4).
+	WhenToUse string `yaml:"-"`
+	// WhenToUseNonString holds a top-level when_to_use that is a sequence or
+	// a mapping, which does not follow the encoding and is ignored. Its Key
+	// is "when_to_use".
+	WhenToUseNonString *NonStringMetadata `yaml:"-"`
+
 	// Body is the agent-facing skill prose body.
 	Body string `yaml:"-"`
 }

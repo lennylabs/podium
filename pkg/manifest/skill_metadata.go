@@ -94,6 +94,34 @@ type SkillMetadataIssue struct {
 	Value    string
 	Encoding string
 	Kind     string
+	// TopLevel marks an issue with Claude Code's top-level when_to_use
+	// rather than with a metadata value.
+	TopLevel bool
+}
+
+// DecodeSkillTopLevelWhenToUse decodes Claude Code's top-level when_to_use by
+// the metadata.when_to_use encoding. It returns the lines when the value
+// follows the encoding. An absent, null, or empty value returns nothing and
+// no issue. A value that does not follow the encoding, including a sequence
+// or a mapping, returns an issue marked TopLevel. A nil s returns nothing.
+//
+// Spec: §4.3.4
+func DecodeSkillTopLevelWhenToUse(s *Skill) (lines []string, issue *SkillMetadataIssue) {
+	if s == nil {
+		return nil, nil
+	}
+	enc := skillMetadataCodecs["when_to_use"].encoding
+	if nv := s.WhenToUseNonString; nv != nil {
+		return nil, &SkillMetadataIssue{Key: "when_to_use", Value: nv.Value, Encoding: enc, Kind: nv.Kind, TopLevel: true}
+	}
+	if s.WhenToUse == "" {
+		return nil, nil
+	}
+	var a Artifact
+	if !decodeWhenToUse(s.WhenToUse, &a) {
+		return nil, &SkillMetadataIssue{Key: "when_to_use", Value: s.WhenToUse, Encoding: enc, TopLevel: true}
+	}
+	return a.WhenToUse, nil
 }
 
 // SkillMetadataFields is the decoding of a SKILL.md's metadata-eligible keys.
@@ -198,7 +226,9 @@ func StatedKeys(artifactMD []byte) (map[string]bool, error) {
 // ResolveSkillFields resolves a skill's fields into a. It sets a.Version by
 // ResolveSkillVersion, then fills each metadata-eligible field from SKILL.md
 // metadata when stated does not hold the field's key and the metadata value
-// decodes. It returns the filled keys in the §4.3.4 table order.
+// decodes. when_to_use first takes Claude Code's top-level value when that
+// value decodes, and takes the metadata value only otherwise. It returns the
+// filled keys in the §4.3.4 table order.
 //
 // Precedence is by key presence: a key ARTIFACT.md states keeps its
 // ARTIFACT.md value whatever that value is, so an explicit deprecated: false,
@@ -218,7 +248,17 @@ func ResolveSkillFields(a *Artifact, stated map[string]bool, s *Skill) []string 
 	dec := DecodeSkillMetadata(s)
 	var filled []string
 	for _, key := range skillMetadataFields {
-		if stated[key] || !dec.Decoded[key] {
+		if stated[key] {
+			continue
+		}
+		if key == "when_to_use" {
+			if lines, _ := DecodeSkillTopLevelWhenToUse(s); lines != nil {
+				a.WhenToUse = lines
+				filled = append(filled, key)
+				continue
+			}
+		}
+		if !dec.Decoded[key] {
 			continue
 		}
 		skillMetadataCodecs[key].assign(a, &dec.Values)
