@@ -6,8 +6,11 @@
 // The layout is two columns: the content column carries the header, the tabs,
 // and whichever tab is open, and the rail beside it carries the metadata that
 // arrived with the registry's response. The tabs are Rendered, Frontmatter,
-// Authored source, and Resources, and each one disappears where the artifact
-// carries nothing for it rather than standing an empty panel in the layout.
+// Authored source, Resources, and Similarity. Authored source and Resources
+// disappear where the artifact carries nothing for them rather than standing
+// an empty panel in the layout; Similarity stays, without a count, where
+// nothing overlaps, because a hidden artifact and one with no overlap must
+// read the same (§13.10).
 
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
 
@@ -38,9 +41,12 @@ import { dependentsOf, listLayers, loadArtifact } from '../api';
 import { artifactHref } from '../route';
 import { since } from '../time';
 import { useAsync, useErrorReport } from '../useAsync';
+import { RailSimilarity, SimilarityTab, similarityCount } from './ArtifactSimilarity';
 import { ingestedRef, visibilitySummary } from './layerfacts';
+import type { OverlapRead } from './overlapread';
+import { useOverlapRead } from './overlapread';
 
-type TabName = 'rendered' | 'frontmatter' | 'source' | 'resources';
+type TabName = 'rendered' | 'frontmatter' | 'source' | 'resources' | 'similarity';
 
 /** fetchedDelivery is the delivery a file retrieved from object storage
  * carries. The rail groups on it and the resource table states it in its own
@@ -110,6 +116,13 @@ export function ArtifactViewer({
   }
   const artifact = useAsync(() => loadArtifact(id, viewing === '' ? undefined : viewing), [id, viewing]);
   useErrorReport(artifact.error, onError);
+  // The overlap of the artifact on screen, read beside it with the report's
+  // artifact parameter. The tab, its count, and the rail section all render
+  // this one read, so the threshold the tab's control sets is the threshold
+  // the rail states. Its outcome is not reported to the shell: it is a second
+  // read standing beside the document, like the layer list above, so a
+  // failure is presented in the tab and the rail section alone. Spec: §13.10.
+  const overlap = useOverlapRead(id);
   if (artifact.value !== null && artifact.value !== held) {
     setHeld(artifact.value);
   }
@@ -292,7 +305,14 @@ export function ArtifactViewer({
           <ErrorState error={fetched.error} onRetry={fetched.reload} />
         )}
         {(body.manifest_body_url === undefined || (!fetched.loading && fetched.error === null)) && (
-          <Manifest artifact={body} document={document} tab={tab} onTab={setTab} />
+          <Manifest
+            artifact={body}
+            document={document}
+            tab={tab}
+            onTab={setTab}
+            overlap={overlap}
+            description={description}
+          />
         )}
       </div>
       <ArtifactRail
@@ -300,6 +320,8 @@ export function ArtifactViewer({
         layer={layerOf(layers.value, body)}
         frontmatter={document.frontmatter}
         showFrontmatter={!frontmatterOpen}
+        overlap={overlap}
+        description={description}
       />
     </section>
   );
@@ -541,11 +563,15 @@ function Manifest({
   document,
   tab,
   onTab,
+  overlap,
+  description,
 }: {
   artifact: LoadArtifactResponse;
   document: ManifestHalves;
   tab: TabName;
   onTab: (tab: TabName) => void;
+  overlap: OverlapRead;
+  description: string;
 }) {
   const { body, frontmatter } = document;
   const skillRaw = artifact.skill_raw ?? '';
@@ -568,6 +594,9 @@ function Manifest({
     ...(resources.length === 0
       ? []
       : [{ name: 'resources' as TabName, label: 'Resources', count: String(resources.length) }]),
+    // The figure is a warning: each artifact it counts may keep search and
+    // load_domain from telling this one apart.
+    { name: 'similarity', label: 'Similarity', count: similarityCount(overlap, artifact.id), countTone: 'warning' },
   ];
   // A tab can disappear between renders, which is what happens when the
   // manifest arrives by link and the authored source it carried is cleared.
@@ -589,6 +618,9 @@ function Manifest({
         {open === 'frontmatter' && <PropertyTable raw={frontmatter} offerRaw />}
         {open === 'source' && <AuthoredSource name="SKILL.md" value={skillRaw} />}
         {open === 'resources' && <ResourceTable rows={resources} selected={selected} onSelect={setSelected} />}
+        {open === 'similarity' && (
+          <SimilarityTab read={overlap} id={artifact.id} description={description} now={Date.now()} />
+        )}
       </>
     </TabStrip>
   );
@@ -653,11 +685,15 @@ function ArtifactRail({
   layer,
   frontmatter,
   showFrontmatter,
+  overlap,
+  description,
 }: {
   artifact: LoadArtifactResponse;
   layer: LayerRecord | null;
   frontmatter: string;
   showFrontmatter: boolean;
+  overlap: OverlapRead;
+  description: string;
 }) {
   const pairs = parseFrontmatter(frontmatter);
   const hasFrontmatter = showFrontmatter && (pairs.error !== '' || pairs.properties.length > 0);
@@ -703,6 +739,10 @@ function ArtifactRail({
           </div>
         </dl>
       </section>
+      {/* The similarity section follows provenance on every tab, because what
+          the artifact overlaps is a property of the artifact rather than of
+          the panel being read (§13.10). */}
+      <RailSimilarity read={overlap} id={artifact.id} description={description} />
       {hasFrontmatter && (
         <section aria-label="Frontmatter">
           <p className="label">Frontmatter</p>
