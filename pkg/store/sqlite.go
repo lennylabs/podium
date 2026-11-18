@@ -491,6 +491,31 @@ func (s *SQLite) ListVectorPending(ctx context.Context, limit int, now time.Time
 	return out, rows.Err()
 }
 
+// ListVectorPendingKeys returns the key of every outbox row of tenantID.
+func (s *SQLite) ListVectorPendingKeys(ctx context.Context, tenantID string) ([]VectorPendingKey, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT artifact_id, version FROM vector_pending WHERE tenant_id = ?`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanVectorPendingKeys(rows)
+}
+
+// scanVectorPendingKeys reads (artifact_id, version) rows, which the SQLite
+// and Postgres outbox key listings both select.
+func scanVectorPendingKeys(rows *sql.Rows) ([]VectorPendingKey, error) {
+	var out []VectorPendingKey
+	for rows.Next() {
+		var k VectorPendingKey
+		if err := rows.Scan(&k.ArtifactID, &k.Version); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
 // MarkVectorPendingDone removes a drained outbox row.
 func (s *SQLite) MarkVectorPendingDone(ctx context.Context, tenantID, artifactID, version string) error {
 	_, err := s.db.ExecContext(ctx, `

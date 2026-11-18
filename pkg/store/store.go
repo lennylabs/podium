@@ -583,6 +583,13 @@ type VectorPending struct {
 	LastError string
 }
 
+// VectorPendingKey identifies one row of a tenant's §4.7.2 vector outbox by
+// the artifact and version whose vector is not yet written.
+type VectorPendingKey struct {
+	ArtifactID string
+	Version    string
+}
+
 // VectorOutbox is the §4.7.2 transactional-outbox capability a RegistryStore
 // backend may implement so ingest against an external vector backend commits
 // the manifest and a vector_pending row atomically, and a background worker
@@ -600,6 +607,11 @@ type VectorOutbox interface {
 	// ListVectorPending returns up to limit rows eligible for a drain attempt
 	// (NextRetryAt not after now), oldest first.
 	ListVectorPending(ctx context.Context, limit int, now time.Time) ([]VectorPending, error)
+	// ListVectorPendingKeys returns the key of every row of tenantID's
+	// outbox, whatever its NextRetryAt, in no particular order. The §7.3.1
+	// startup pass and sweep read it once per pass to skip the artifacts
+	// whose vectors the outbox has not written yet.
+	ListVectorPendingKeys(ctx context.Context, tenantID string) ([]VectorPendingKey, error)
 	// MarkVectorPendingDone removes the row after a successful backend write.
 	MarkVectorPendingDone(ctx context.Context, tenantID, artifactID, version string) error
 	// MarkVectorPendingRetry records a failed attempt: it increments Attempts,

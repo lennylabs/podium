@@ -183,6 +183,19 @@ func (s *Memory) ListVectorPending(_ context.Context, limit int, now time.Time) 
 	return out, nil
 }
 
+// ListVectorPendingKeys returns the key of every outbox row of tenantID.
+func (s *Memory) ListVectorPendingKeys(_ context.Context, tenantID string) ([]VectorPendingKey, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []VectorPendingKey
+	for _, p := range s.vectorPending {
+		if p.TenantID == tenantID {
+			out = append(out, VectorPendingKey{ArtifactID: p.ArtifactID, Version: p.Version})
+		}
+	}
+	return out, nil
+}
+
 // MarkVectorPendingDone removes a drained outbox row.
 func (s *Memory) MarkVectorPendingDone(_ context.Context, tenantID, artifactID, version string) error {
 	s.mu.Lock()

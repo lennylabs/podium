@@ -876,6 +876,19 @@ func (p *Postgres) ListVectorPending(ctx context.Context, limit int, now time.Ti
 	return out, rows.Err()
 }
 
+// ListVectorPendingKeys returns the key of every outbox row of tenantID.
+// The outbox is the cross-org public.vector_pending, as ListVectorPending
+// reads it.
+func (p *Postgres) ListVectorPendingKeys(ctx context.Context, tenantID string) ([]VectorPendingKey, error) {
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT artifact_id, version FROM public.vector_pending WHERE tenant_id = $1`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanVectorPendingKeys(rows)
+}
+
 // MarkVectorPendingDone removes a drained outbox row.
 func (p *Postgres) MarkVectorPendingDone(ctx context.Context, tenantID, artifactID, version string) error {
 	_, err := p.db.ExecContext(ctx, `

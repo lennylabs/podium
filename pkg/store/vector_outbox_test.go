@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -115,6 +117,65 @@ func TestVectorOutbox_ImmutableViolationRollsBack(t *testing.T) {
 			}
 		})
 	}
+}
+
+// checkPendingKeys enqueues two rows of tenant a, one of them backed off,
+// and one row of tenant b, and checks that the key listing of each tenant
+// returns its rows and only its rows, whatever their retry time.
+func checkPendingKeys(t *testing.T, ob VectorOutbox, a, b string) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	for _, k := range []struct{ tenant, id string }{{a, "a/x"}, {a, "a/y"}, {b, "b/z"}} {
+		rec := ManifestRecord{TenantID: k.tenant, ArtifactID: k.id, Version: "1.0.0", ContentHash: "sha256:" + k.id, Type: "agent", Description: "d"}
+		p := VectorPending{TenantID: k.tenant, ArtifactID: k.id, Version: "1.0.0", Text: "t", EnqueuedAt: now, NextRetryAt: now}
+		if err := ob.PutManifestWithVectorPending(ctx, rec, p); err != nil {
+			t.Fatalf("put %s/%s: %v", k.tenant, k.id, err)
+		}
+		t.Cleanup(func() { _ = ob.MarkVectorPendingDone(context.Background(), k.tenant, k.id, "1.0.0") })
+	}
+	if err := ob.MarkVectorPendingRetry(ctx, a, "a/y", "1.0.0", now.Add(time.Hour), "backend down"); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	keys, err := ob.ListVectorPendingKeys(ctx, a)
+	got := map[VectorPendingKey]bool{}
+	for _, k := range keys {
+		got[k] = true
+	}
+	if err != nil || len(keys) != 2 || !got[VectorPendingKey{"a/x", "1.0.0"}] || !got[VectorPendingKey{"a/y", "1.0.0"}] {
+		t.Errorf("keys of %s = %+v, %v; want a/x and a/y, the backed-off row included", a, keys, err)
+	}
+	if keys, err := ob.ListVectorPendingKeys(ctx, b); err != nil || len(keys) != 1 || keys[0] != (VectorPendingKey{"b/z", "1.0.0"}) {
+		t.Errorf("keys of %s = %+v, %v; want b/z alone", b, keys, err)
+	}
+	if err := ob.MarkVectorPendingDone(ctx, a, "a/x", "1.0.0"); err != nil {
+		t.Fatalf("done: %v", err)
+	}
+	if keys, err := ob.ListVectorPendingKeys(ctx, a); err != nil || len(keys) != 1 || keys[0] != (VectorPendingKey{"a/y", "1.0.0"}) {
+		t.Errorf("keys of %s after a/x drained = %+v, %v; want a/y alone", a, keys, err)
+	}
+}
+
+// Spec: §7.3.1, §4.7 — the outbox key listing the sweep reads returns every
+// pending row of one tenant, whatever its retry time.
+func TestVectorOutbox_ListPendingKeys(t *testing.T) {
+	for name, ob := range outboxBackends(t) {
+		t.Run(name, func(t *testing.T) { checkPendingKeys(t, ob, "default", "other") })
+	}
+}
+
+// Spec: §7.3.1, §4.7 — the Postgres outbox key listing reads the cross-org
+// outbox table by tenant. It skips without PODIUM_POSTGRES_DSN.
+func TestVectorOutbox_ListPendingKeysPostgres(t *testing.T) {
+	a := "pendkeys-a-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	b := strings.Replace(a, "-a-", "-b-", 1)
+	p, _ := openPostgresOrg(t, a)
+	ctx := context.Background()
+	if err := p.CreateTenant(ctx, Tenant{ID: b, Name: b}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	t.Cleanup(func() { _ = p.DropOrg(context.Background(), b) })
+	checkPendingKeys(t, p, a, b)
 }
 
 func TestVectorOutbox_RetryBackoffHidesRow(t *testing.T) {
