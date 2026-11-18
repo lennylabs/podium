@@ -1517,6 +1517,7 @@ POST /v1/admin/reembed?artifact={id}&version={v}&only_missing={bool}&since={rfc3
 | Code | When |
 |:--|:--|
 | `400 registry.invalid_argument` | `artifact` is set without `version`. |
+| `404 registry.reembed_unavailable` | No vector search is configured: no vector backend, or a vector backend with neither an embedding provider nor self-embedding. The registry re-embeds nothing, and the envelope carries `retryable: false`, because the request cannot succeed until the operator changes the configuration. |
 
 **Notes.**
 
@@ -1545,7 +1546,7 @@ A computation replaces the records the artifact owns and leaves the records its 
 | Code | When |
 |:--|:--|
 | `403 auth.forbidden` | The caller is not an admin. |
-| `500 registry.unavailable` | `PODIUM_LINT_SEMANTIC_OVERLAP` is off or no search index is configured. The registry computes nothing, and the envelope carries `retryable: false`, because the request cannot succeed until the operator changes the configuration. In that configuration neither the startup pass nor the sweep runs. |
+| `404 registry.overlap_rebuild_unavailable` | `PODIUM_LINT_SEMANTIC_OVERLAP` is off or no search index is configured. The registry computes nothing, and the envelope carries `retryable: false`, because the request cannot succeed until the operator changes the configuration. In that configuration neither the startup pass nor the sweep runs. |
 | `503 registry.read_only` | The registry is in read-only mode. The endpoint is a write endpoint. |
 
 **Notes.**
