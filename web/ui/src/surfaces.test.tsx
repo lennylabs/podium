@@ -20177,6 +20177,36 @@ describe("similarity", () => {
       expect(row.getAttribute("href")).toBe(similarityHref());
     });
 
+    // The row counts what the page lists, so it reads at the threshold the
+    // reader chose on the page, and the choice holds when the reader leaves.
+    it("counts at the threshold the reader chose on the page, on the page and off it", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_domain": { body: emptyDomain },
+        "/v1/search_artifacts": { body: { results: [], total_matched: 0 } },
+        "/v1/overlap": { body: report(diagnostics(true)) },
+        [overlapURL({ threshold: "0.97" })]: { body: report([], "on", 0.97) },
+      });
+      goTo(similarityHref());
+      render(<App />);
+      await screen.findByTestId("cluster-list");
+      const row = screen.getByRole("link", { name: /^Similarity/ });
+      await waitFor(() => {
+        expect(within(row).getByTestId("section-count").textContent).toBe("3 artifacts with overlap");
+      });
+      fireEvent.change(screen.getByLabelText("SIMILARITY"), { target: { value: "0.97" } });
+      await waitFor(() => {
+        expect(within(row).getByTestId("section-count").textContent).toBe("0 artifacts with overlap");
+      });
+      fireEvent.click(screen.getByRole("link", { name: /^Search/ }));
+      await waitFor(() => {
+        expect(overlapReads().at(-1)?.get("threshold")).toBe("0.97");
+        expect(
+          within(screen.getByRole("link", { name: /^Similarity/ })).getByTestId("section-count").textContent,
+        ).toBe("0 artifacts with overlap");
+      });
+    });
+
     // Every caller who can search can read the report, so the anonymous
     // caller keeps the row, with its count.
     it("stands for an anonymous caller", async () => {

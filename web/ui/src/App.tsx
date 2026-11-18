@@ -51,7 +51,7 @@ import { clusterEntries } from './similarity';
 import { since } from './time';
 import type { ThemePreference } from './theme';
 import { useTheme } from './theme';
-import { useAsync } from './useAsync';
+import { useAsync, useDebounced } from './useAsync';
 import { CommandPalette } from './surfaces/CommandPalette';
 import { DomainBrowser } from './surfaces/DomainBrowser';
 import { SearchSurface } from './surfaces/SearchSurface';
@@ -207,13 +207,24 @@ export function App() {
   const counts = useAsync(() => readCounts(), [route.name, catalogNonce]);
 
   // The similarity row states how many entries the similarity page lists: the
-  // artifacts with overlap at the threshold the registry applies by default.
-  // It is re-read on the same two signals as the counts, because an ingest
-  // moves the overlap the figure reports. Its outcome is not reported to the
-  // shell: the figure stands beside a navigation row rather than standing for
-  // the catalog, so a read that fails leaves the row without a figure.
+  // artifacts with overlap at the page's threshold. The shell holds the
+  // threshold the reader chose on the page, so the row follows the control
+  // and keeps the choice when the reader leaves the page and comes back; it
+  // reads at the registry's threshold until the reader moves the control. The
+  // row reads once the control rests, as the page does, so a drag costs one
+  // read rather than one per step. It is re-read on the same two signals as
+  // the counts, because an ingest moves the overlap the figure reports. Its
+  // outcome is not reported to the shell: the figure stands beside a
+  // navigation row rather than standing for the catalog, so a read that fails
+  // leaves the row without a figure.
   // Spec: §13.10.
-  const overlap = useAsync(() => overlapReport(), [route.name, catalogNonce]);
+  const [similarityThreshold, setSimilarityThreshold] = useState<number | null>(null);
+  const settledThreshold = useDebounced(similarityThreshold);
+  const sidebarThreshold = similarityThreshold === null ? null : settledThreshold;
+  const overlap = useAsync(
+    () => overlapReport({ threshold: sidebarThreshold ?? undefined }),
+    [route.name, catalogNonce, sidebarThreshold],
+  );
 
   useEffect(() => {
     let live = true;
@@ -584,6 +595,8 @@ export function App() {
                 onCatalogOutcome={onCatalogOutcome}
                 onCatalogChange={reloadCatalog}
                 onReach={onReach}
+                similarityThreshold={similarityThreshold}
+                onSimilarityThreshold={setSimilarityThreshold}
               />
             </ReportFailureTitle.Provider>
           )}
@@ -602,6 +615,8 @@ function Surface({
   onCatalogOutcome,
   onCatalogChange,
   onReach,
+  similarityThreshold,
+  onSimilarityThreshold,
 }: {
   route: ReturnType<typeof useRoute>;
   subject: string;
@@ -616,6 +631,10 @@ function Surface({
   onCatalogOutcome: (err: unknown) => void;
   onCatalogChange: () => void;
   onReach: () => void;
+  /** similarityThreshold is the threshold the reader chose on the similarity
+   * page, which the shell holds so the sidebar's count reads at it. */
+  similarityThreshold: number | null;
+  onSimilarityThreshold: (value: number | null) => void;
 }) {
   switch (route.name) {
     case 'search':
@@ -626,7 +645,14 @@ function Surface({
     case 'artifact':
       return <ArtifactViewer id={route.id} viewing={route.version} onError={onCatalogOutcome} />;
     case 'similarity':
-      return <SimilaritySurface selected={route.selected} onError={onCatalogOutcome} />;
+      return (
+        <SimilaritySurface
+          selected={route.selected}
+          onError={onCatalogOutcome}
+          threshold={similarityThreshold}
+          onThreshold={onSimilarityThreshold}
+        />
+      );
     case 'layers':
       // A restore moves the same figures the sidebar footer states, so the
       // recovery surface reports it the way every other layer write does.
