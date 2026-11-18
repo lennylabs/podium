@@ -316,3 +316,41 @@ func TestUsageReport_PagesTheArtifactList(t *testing.T) {
 		t.Errorf("named page: %+v, %v", named, err)
 	}
 }
+
+// Spec: §8.7 — a long window coarsens the series: day stays day up to 365
+// days and is served as week beyond, week stays week up to 1,095 days and is
+// served as month beyond, day past the weekly limit is served as month, and
+// the response's granularity names the served value.
+func TestUsageReport_CoarsensLongWindows(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	seedUsage(t, f)
+	for _, c := range []struct {
+		requested string
+		days      int
+		want      string
+	}{
+		{"", 30, "none"},
+		{"none", 2000, "none"},
+		{"day", 365, "day"},
+		{"day", 366, "week"},
+		{"week", 1095, "week"},
+		{"week", 1096, "month"},
+		{"day", 1096, "month"},
+		{"month", 2000, "month"},
+	} {
+		rep, err := f.reg.UsageReport(context.Background(), usageAlice, core.UsageQuery{Retention: 2000, Days: c.days, Granularity: c.requested})
+		if err != nil {
+			t.Fatalf("%s over %d days: %v", c.requested, c.days, err)
+		}
+		var loads int64
+		for _, p := range rep.Totals.Series {
+			loads += p.Loads
+		}
+		periods := map[string]int{"none": 0, "day": c.days}[c.want]
+		if rep.Granularity != c.want || (periods > 0 && len(rep.Totals.Series) != periods) || (c.want != "none" && loads != rep.Totals.Loads) {
+			t.Errorf("%s over %d days: granularity %q with %d periods summing to %d of %d loads, want %q",
+				c.requested, c.days, rep.Granularity, len(rep.Totals.Series), loads, rep.Totals.Loads, c.want)
+		}
+	}
+}

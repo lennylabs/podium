@@ -22,9 +22,11 @@ type usageCountsJSON struct {
 // usageResponseJSON is the part of the GET /v1/usage response the text output
 // reads. --json writes the response itself.
 type usageResponseJSON struct {
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Totals struct {
+	Days        int    `json:"days"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Granularity string `json:"granularity"`
+	Totals      struct {
 		usageCountsJSON
 		Series []struct {
 			Start string `json:"start"`
@@ -91,7 +93,7 @@ func usageCmd(args []string) int {
 		endpoint += "?" + encoded
 	}
 	body, status := doJSON(endpoint, "GET", nil)
-	return renderUsage(os.Stdout, os.Stderr, body, status, *asJSON)
+	return renderUsage(os.Stdout, os.Stderr, body, status, f.granularity, *asJSON)
 }
 
 // query validates the flags §8.7 lists as usage errors and returns them as
@@ -139,10 +141,11 @@ func setIf(q url.Values, key, value string) {
 }
 
 // renderUsage writes the usage response and returns the exit status: 1 for an
-// error envelope or an unreadable body, and 0 otherwise.
+// error envelope or an unreadable body, and 0 otherwise. requested is the
+// --granularity value, so the output can say when the report coarsened it.
 //
 // Spec: §8.7
-func renderUsage(stdout, stderr io.Writer, body []byte, status int, asJSON bool) int {
+func renderUsage(stdout, stderr io.Writer, body []byte, status int, requested string, asJSON bool) int {
 	if status >= 400 {
 		_, _ = fmt.Fprintf(stderr, "usage failed: HTTP %d\n%s\n", status, body)
 		return 1
@@ -174,6 +177,9 @@ func renderUsage(stdout, stderr io.Writer, body []byte, status int, asJSON bool)
 		_, _ = fmt.Fprintf(stdout, "%8d %8d %8d  %s\n", l.Loads, l.Syncs, l.SearchHits, l.Layer)
 	}
 	if len(resp.Totals.Series) > 0 {
+		if requested != "" && resp.Granularity != requested {
+			_, _ = fmt.Fprintf(stdout, "\nperiods by %s: a %d-day window serves %s as %s\n", resp.Granularity, resp.Days, requested, resp.Granularity)
+		}
 		_, _ = fmt.Fprintf(stdout, "\n%8s %8s %8s  %s\n", "LOADS", "SYNCS", "SEARCHES", "PERIOD")
 		for _, p := range resp.Totals.Series {
 			_, _ = fmt.Fprintf(stdout, "%8d %8d %8d  %s to %s\n", p.Loads, p.Syncs, p.SearchHits, p.Start, p.End)

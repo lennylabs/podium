@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const usageFixture = `{"days":2,"from":"2026-11-17","to":"2026-11-18",
+const usageFixture = `{"days":2,"from":"2026-11-17","to":"2026-11-18","granularity":"day",
 "totals":{"loads":3,"syncs":1,"search_hits":2,"by_client":{},"by_harness":{},
  "series":[{"start":"2026-11-17","end":"2026-11-17","loads":1,"syncs":0,"search_hits":0},{"start":"2026-11-18","end":"2026-11-18","loads":2,"syncs":1,"search_hits":2}]},
 "layers":[{"layer":"team","loads":3,"syncs":1,"search_hits":2}],
@@ -20,7 +20,7 @@ const usageFixture = `{"days":2,"from":"2026-11-17","to":"2026-11-18",
 // response; an error envelope or an unreadable body exits 1.
 func TestRenderUsage(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := renderUsage(&out, &errOut, []byte(usageFixture), 200, false); code != 0 {
+	if code := renderUsage(&out, &errOut, []byte(usageFixture), 200, "", false); code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut.String())
 	}
 	for _, want := range []string{
@@ -35,7 +35,7 @@ func TestRenderUsage(t *testing.T) {
 		}
 	}
 	out.Reset()
-	if code := renderUsage(&out, &errOut, []byte(usageFixture), 200, true); code != 0 || !strings.Contains(out.String(), `"artifact_id": "ops/greet"`) {
+	if code := renderUsage(&out, &errOut, []byte(usageFixture), 200, "", true); code != 0 || !strings.Contains(out.String(), `"artifact_id": "ops/greet"`) {
 		t.Errorf("--json exit %d:\n%s", code, out.String())
 	}
 	for _, c := range []struct {
@@ -46,7 +46,7 @@ func TestRenderUsage(t *testing.T) {
 		{`not json`, 200},
 	} {
 		errOut.Reset()
-		if code := renderUsage(&out, &errOut, []byte(c.body), c.status, false); code != 1 || errOut.Len() == 0 {
+		if code := renderUsage(&out, &errOut, []byte(c.body), c.status, "", false); code != 1 || errOut.Len() == 0 {
 			t.Errorf("%s: exit %d stderr %q, want 1 with a message", c.body, code, errOut.String())
 		}
 	}
@@ -99,12 +99,29 @@ func TestUsageCmd_PassesParameters(t *testing.T) {
 func TestRenderUsage_NextCursorLine(t *testing.T) {
 	var out, errOut bytes.Buffer
 	paged := strings.Replace(usageFixture, `"artifacts":[`, `"artifact_count":7,"next_cursor":"eyJpZCI6Im9wcy9mYXJld2VsbCJ9","artifacts":[`, 1)
-	if code := renderUsage(&out, &errOut, []byte(paged), 200, false); code != 0 ||
+	if code := renderUsage(&out, &errOut, []byte(paged), 200, "", false); code != 0 ||
 		!strings.Contains(out.String(), "2 of 7 artifacts listed; read the next ones with --cursor eyJpZCI6Im9wcy9mYXJld2VsbCJ9") {
 		t.Errorf("exit %d:\n%s", code, out.String())
 	}
 	out.Reset()
-	if renderUsage(&out, &errOut, []byte(usageFixture), 200, false); strings.Contains(out.String(), "--cursor") {
+	if renderUsage(&out, &errOut, []byte(usageFixture), 200, "", false); strings.Contains(out.String(), "--cursor") {
 		t.Errorf("last page prints a cursor line:\n%s", out.String())
+	}
+}
+
+// Spec: §8.7 — when the report coarsened the requested granularity, podium
+// usage names the served granularity before the periods, and prints no such
+// line when the report served the request as asked.
+func TestRenderUsage_CoarsenedGranularityLine(t *testing.T) {
+	var out, errOut bytes.Buffer
+	weekly := strings.Replace(usageFixture, `"days":2,`, `"days":400,`, 1)
+	weekly = strings.Replace(weekly, `"granularity":"day"`, `"granularity":"week"`, 1)
+	if code := renderUsage(&out, &errOut, []byte(weekly), 200, "day", false); code != 0 ||
+		!strings.Contains(out.String(), "periods by week: a 400-day window serves day as week") {
+		t.Errorf("exit %d:\n%s", code, out.String())
+	}
+	out.Reset()
+	if renderUsage(&out, &errOut, []byte(usageFixture), 200, "day", false); strings.Contains(out.String(), "periods by") {
+		t.Errorf("an uncoarsened report prints the line:\n%s", out.String())
 	}
 }

@@ -4,8 +4,9 @@ package e2e
 // (D-usage). The page documents the §8.7 usage report: counts recorded by the
 // compiled registry, flushed on its interval, served by GET /v1/usage, printed
 // by podium usage with its window, layer, artifact, and granularity flags, and
-// mirrored in the audit stream; the tests also cover the startup refusal of a
-// usage setting out of range.
+// mirrored in the audit stream, with pages and a granularity that long windows
+// coarsen; the tests also cover the startup refusal of a usage setting out of
+// range.
 
 import (
 	"encoding/json"
@@ -52,6 +53,7 @@ func TestUsageReport_BinaryCountsReportAndCLI(t *testing.T) {
 	srv := startServerArgs(t, []string{
 		"HOME=" + home,
 		"PODIUM_USAGE_FLUSH_INTERVAL=1s",
+		"PODIUM_USAGE_RETENTION_DAYS=1200",
 		"PODIUM_AUDIT_LOG_PATH=" + audit,
 	}, "serve", "--standalone", "--layer-path", reg)
 	for _, c := range []struct{ path, client string }{
@@ -112,6 +114,16 @@ func TestUsageReport_BinaryCountsReportAndCLI(t *testing.T) {
 	month := runPodium(t, "", srv.cliEnv(), "usage", "--registry", srv.BaseURL, "--layer", layers.Layers[0].Layer, "--granularity", "month")
 	if month.Exit != 0 || !strings.Contains(month.Stdout, "PERIOD") || !strings.Contains(month.Stdout, layers.Layers[0].Layer) {
 		t.Errorf("podium usage --layer --granularity month exit=%d\n%s%s", month.Exit, month.Stdout, month.Stderr)
+	}
+	long := runPodium(t, "", srv.cliEnv(), "usage", "--registry", srv.BaseURL, "--days", "400", "--granularity", "day")
+	if long.Exit != 0 || !strings.Contains(long.Stdout, "periods by week: a 400-day window serves day as week") {
+		t.Errorf("podium usage --days 400 --granularity day exit=%d\n%s%s", long.Exit, long.Stdout, long.Stderr)
+	}
+	var served struct {
+		Granularity string `json:"granularity"`
+	}
+	if _, body := getRaw(t, srv.BaseURL+"/v1/usage?days=1100&granularity=day"); json.Unmarshal(body, &served) != nil || served.Granularity != "month" {
+		t.Errorf("a 1,100-day daily request should be served by month: %.200s", body)
 	}
 	first := runPodium(t, "", srv.cliEnv(), "usage", "--registry", srv.BaseURL, "--limit", "1")
 	_, cursor, more := strings.Cut(first.Stdout, "1 of 2 artifacts listed; read the next ones with --cursor ")

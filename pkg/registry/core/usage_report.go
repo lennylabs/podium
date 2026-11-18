@@ -92,12 +92,15 @@ type UsageArtifact struct {
 
 // UsageReport is the §8.7 GET /v1/usage response.
 type UsageReport struct {
-	Days      int             `json:"days"`
-	From      string          `json:"from"`
-	To        string          `json:"to"`
-	Totals    UsageTotals     `json:"totals"`
-	Layers    []UsageLayer    `json:"layers"`
-	Artifacts []UsageArtifact `json:"artifacts"`
+	Days int    `json:"days"`
+	From string `json:"from"`
+	To   string `json:"to"`
+	// Granularity is the granularity the series use, which a long window
+	// makes coarser than the requested one.
+	Granularity string          `json:"granularity"`
+	Totals      UsageTotals     `json:"totals"`
+	Layers      []UsageLayer    `json:"layers"`
+	Artifacts   []UsageArtifact `json:"artifacts"`
 	// ArtifactCount is the number of entries the artifact list holds across
 	// every page, and NextCursor reads the page after this one, or is nil
 	// on the last page.
@@ -362,6 +365,7 @@ func (a *usageAccumulator) result(w usageWindow, granularity string) UsageTotals
 // buildUsageReport aggregates rows, already restricted to the caller's view,
 // into the report's totals, layers, and one page of artifacts.
 func buildUsageReport(w usageWindow, layers []string, served []store.ManifestRecord, rows []store.UsageCount, q UsageQuery, page usagePage) *UsageReport {
+	q.Granularity = servedGranularity(q.Granularity, len(w.days))
 	total := newUsageAccumulator()
 	byLayer := map[string]*usageAccumulator{}
 	byArtifact := map[string]*usageAccumulator{}
@@ -379,11 +383,12 @@ func buildUsageReport(w usageWindow, layers []string, served []store.ManifestRec
 		}
 	}
 	rep := &UsageReport{
-		Days:   len(w.days),
-		From:   w.from(),
-		To:     w.to(),
-		Totals: total.result(w, q.Granularity),
-		Layers: make([]UsageLayer, 0, len(layers)),
+		Days:        len(w.days),
+		From:        w.from(),
+		To:          w.to(),
+		Granularity: q.Granularity,
+		Totals:      total.result(w, q.Granularity),
+		Layers:      make([]UsageLayer, 0, len(layers)),
 	}
 	for _, l := range layers {
 		rep.Layers = append(rep.Layers, UsageLayer{Layer: l, UsageTotals: byLayer[l].result(w, q.Granularity)})

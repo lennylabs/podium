@@ -16,6 +16,34 @@ const (
 	GranularityMonth = "month"
 )
 
+// The longest windows §8.7 serves at day and week granularity; a longer
+// window coarsens the series to the next granularity, so a series stays a
+// few hundred periods long whatever the window.
+const (
+	UsageMaxDailyDays  = 365
+	UsageMaxWeeklyDays = 3 * 365
+)
+
+// servedGranularity returns the granularity a window of days serves for the
+// requested one: none for the default, and day coarsened to week and week to
+// month past their longest windows, in sequence, so day over a window longer
+// than the weekly limit is served as month.
+//
+// Spec: §8.7
+func servedGranularity(requested string, days int) string {
+	g := requested
+	if g == "" {
+		g = GranularityNone
+	}
+	if g == GranularityDay && days > UsageMaxDailyDays {
+		g = GranularityWeek
+	}
+	if g == GranularityWeek && days > UsageMaxWeeklyDays {
+		g = GranularityMonth
+	}
+	return g
+}
+
 // validGranularity reports whether g is a §8.7 granularity; the empty string
 // is the default, none.
 func validGranularity(g string) bool {
