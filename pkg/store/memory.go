@@ -741,6 +741,31 @@ func (s *Memory) ListUsageCounts(_ context.Context, tenantID, fromDay, toDay str
 	return out, nil
 }
 
+// SumUsageLoads returns the tenant's loads from fromDay to toDay per layer and
+// artifact.
+func (s *Memory) SumUsageLoads(_ context.Context, tenantID, fromDay, toDay string) ([]UsageLoads, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	type pair struct{ layer, artifact string }
+	sums := map[pair]int64{}
+	for _, c := range s.usage[tenantID] {
+		if c.Day >= fromDay && c.Day <= toDay && c.Loads > 0 {
+			sums[pair{c.Layer, c.ArtifactID}] += c.Loads
+		}
+	}
+	out := make([]UsageLoads, 0, len(sums))
+	for k, n := range sums {
+		out = append(out, UsageLoads{Layer: k.layer, ArtifactID: k.artifact, Loads: n})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Layer != out[j].Layer {
+			return out[i].Layer < out[j].Layer
+		}
+		return out[i].ArtifactID < out[j].ArtifactID
+	})
+	return out, nil
+}
+
 // DeleteUsageBefore removes every tenant's rows dated before day.
 func (s *Memory) DeleteUsageBefore(_ context.Context, day string) (int, error) {
 	s.mu.Lock()

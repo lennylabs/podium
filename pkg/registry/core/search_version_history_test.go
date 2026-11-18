@@ -3,7 +3,9 @@ package core_test
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
@@ -13,6 +15,14 @@ import (
 // registry over it, so a search sees a stored version history behind a single
 // canonical ID.
 func versionHistoryRegistry(t *testing.T) *core.Registry {
+	t.Helper()
+	return core.New(versionHistoryStore(t), "t", []layer.Layer{
+		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
+	})
+}
+
+// versionHistoryStore holds four versions of one skill in layer L of tenant t.
+func versionHistoryStore(t *testing.T) *store.Memory {
 	t.Helper()
 	const tenant = "t"
 	st := store.NewMemory()
@@ -28,9 +38,7 @@ func versionHistoryRegistry(t *testing.T) *core.Registry {
 			t.Fatalf("PutManifest %s: %v", v, err)
 		}
 	}
-	return core.New(st, tenant, []layer.Layer{
-		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
-	})
+	return st
 }
 
 // Spec: §4.7.6 / §5 — search ranks artifacts at their latest version, so a
@@ -72,10 +80,15 @@ func TestSearchArtifacts_VersionHistoryCountsOnce(t *testing.T) {
 // with the rows the caller can reach.
 func TestSearchArtifacts_VersionHistoryCountsOnceUnderUsageRerank(t *testing.T) {
 	t.Parallel()
-	reg := versionHistoryRegistry(t)
-	sig := core.NewMemoryUsageSignals()
-	sig.Record(context.Background(), "t", "finance/ap/pay-invoice", "s1")
-	reg = reg.WithUsageSignals(sig)
+	st := versionHistoryStore(t)
+	now := clock.NewFrozen(time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC))
+	if err := st.AddUsageCounts(context.Background(), "t", []store.UsageCount{{
+		Day: "2026-11-18", Layer: "L", ArtifactID: "finance/ap/pay-invoice", ClientKind: "mcp", Harness: "none", Loads: 1,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	reg := core.New(st, "t", []layer.Layer{{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}}}).
+		WithUsageRanking(core.NewUsageRanking(now, time.Minute, 365))
 
 	res, err := reg.SearchArtifacts(context.Background(), layer.Identity{IsPublic: true},
 		core.SearchArtifactsOptions{Query: "untrusted", TopK: 10})
