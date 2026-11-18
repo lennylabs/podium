@@ -239,3 +239,32 @@ func TestSemanticOverlap_StartupRefusedWithoutEmbeddingSource(t *testing.T) {
 		t.Fatalf("serve with the check on and no embedding source: exit=%d\n%s", out.Exit, combined)
 	}
 }
+
+// Spec: §4.7, §7.3.1, §6.10 — on a registry with no vector search and the
+// overlap check off, podium admin rebuild-overlap and podium admin reembed
+// exit 1 and print the 404 envelope each endpoint answers: its own
+// registry.* code with retryable false, so a caller does not retry a request
+// that fails until the operator changes the configuration.
+func TestSemanticOverlap_UnconfiguredAdminCommandsReportTheirCodes(t *testing.T) {
+	t.Parallel()
+	srv := startServerArgs(t, []string{
+		"HOME=" + t.TempDir(),
+		"PODIUM_LINT_SEMANTIC_OVERLAP=",
+		"PODIUM_EMBEDDING_PROVIDER=",
+		"PODIUM_VECTOR_BACKEND=",
+	}, "serve", "--standalone")
+	for _, tc := range []struct {
+		args []string
+		code string
+	}{
+		{[]string{"admin", "rebuild-overlap", "--registry", srv.BaseURL}, "registry.overlap_rebuild_unavailable"},
+		{[]string{"admin", "reembed", "--registry", srv.BaseURL}, "registry.reembed_unavailable"},
+	} {
+		res := runPodium(t, "", srv.cliEnv(), tc.args...)
+		if res.Exit != 1 || !strings.Contains(res.Stderr, "HTTP 404") ||
+			!strings.Contains(res.Stderr, `"code": "`+tc.code+`"`) || !strings.Contains(res.Stderr, `"retryable": false`) {
+			t.Errorf("podium %s: exit=%d stderr=%q, want exit 1 and the 404 %s envelope with retryable false",
+				strings.Join(tc.args[:2], " "), res.Exit, res.Stderr, tc.code)
+		}
+	}
+}

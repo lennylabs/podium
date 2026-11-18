@@ -13170,12 +13170,16 @@ diagnostic that fails `--fail-on warning` is the defect this scenario catches.
 **Goal.** Validate that `podium overlap` and `GET /v1/overlap` report
 description overlap across every layer a caller can see, with a structured
 `peers` list and a per-artifact filter, that an out-of-range threshold is
-rejected by both, that the rebuild endpoint answers `registry.unavailable`
-while the semantic check is off, and that a registry started with the check on
-and no embedding source refuses to start.
+rejected by both, that the rebuild endpoint answers
+`registry.overlap_rebuild_unavailable` while the semantic check is off and the
+re-embed endpoint answers `registry.reembed_unavailable` without vector search,
+and that a registry started with the check on and no embedding source refuses
+to start.
 
 **Covers.** The §7.3.1 catalog overlap report, the rebuild endpoint and
-`podium admin rebuild-overlap`, the §7.3.1 startup refusal, and the §13.12
+`podium admin rebuild-overlap`, the §4.7 re-embed refusal and
+`podium admin reembed`, the §6.10 codes for both refusals, the §7.3.1 startup
+refusal, and the §13.12
 `PODIUM_LINT_SEMANTIC_*` variables, through the compiled `podium` binary.
 
 **Why by hand.** An operator reads the report lines, the JSON object, the
@@ -13249,24 +13253,31 @@ scenario covers what an operator sees without one.
    read that lists another artifact means the filter does not apply.
 
 3. Pass a threshold outside the allowed range to the endpoint and to the
-   command, and call the rebuild while the check is off.
+   command, call the rebuild while the check is off, and call the re-embed on
+   a registry started with `--no-embeddings`.
 
    ```bash
    curl -s -o "$WORK/bad.json" -w '%{http_code}\n' "$URL/v1/overlap?threshold=0.3"
    jq -r '.code' "$WORK/bad.json"
    podium overlap --registry "$URL" --threshold 0.3; echo "bad threshold exit=$?"
    podium admin rebuild-overlap --registry "$URL"; echo "rebuild exit=$?"
+   podium admin reembed --registry "$URL"; echo "reembed exit=$?"
    kill "$SRV"; wait "$SRV" 2>/dev/null
    ```
 
    **Expect.** The endpoint answers `400` with `registry.invalid_argument`.
    The command prints `error: --threshold must be a number from 0.5 to 1.0`
-   and `bad threshold exit=2`. The rebuild prints an error envelope whose code
-   is `registry.unavailable`, with `"retryable": false` and a suggested
-   action naming `PODIUM_LINT_SEMANTIC_OVERLAP=on`, and `rebuild exit=1`,
-   because the semantic check is off. A rebuild that reports computed
-   artifacts here is the defect, and so is `"retryable": true`, which would
-   invite a retry that cannot succeed.
+   and `bad threshold exit=2`. The rebuild prints `rebuild-overlap failed:
+   HTTP 404` and an error envelope whose code is
+   `registry.overlap_rebuild_unavailable`, with `"retryable": false` and a
+   suggested action naming `PODIUM_LINT_SEMANTIC_OVERLAP=on`, and
+   `rebuild exit=1`, because the semantic check is off. The re-embed prints
+   `reembed failed: HTTP 404` and an envelope whose code is
+   `registry.reembed_unavailable`, with `"retryable": false` and a suggested
+   action naming `PODIUM_VECTOR_BACKEND`, and `reembed exit=1`. A rebuild that
+   reports computed artifacts here is the defect. So is `HTTP 500`, a
+   `registry.unavailable` code, or `"retryable": true` on either command,
+   because each invites a retry that cannot succeed.
 
 4. Start a registry with the semantic check on and no embedding source.
 

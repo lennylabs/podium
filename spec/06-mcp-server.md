@@ -533,6 +533,17 @@ The tenant-management endpoints (§7.3.3) reuse existing codes for authorization
 }
 ```
 
+Two admin endpoints depend on configuration the operator may leave off, and each reports that configuration with its own code in the `registry.*` namespace. `registry.overlap_rebuild_unavailable` reports a `POST /v1/admin/overlap/rebuild` request on a registry where the semantic overlap check is off or no search index is configured (§7.3.1). `registry.reembed_unavailable` reports a `POST /v1/admin/reembed` request on a registry with no vector search configured (§4.7). Both are answered with `404` after the endpoint's authorization and read-only checks. Both carry `retryable: false`, because the same request fails until the operator changes the configuration and restarts the registry, and each `suggested_action` names the settings to change:
+
+```json
+{
+  "code": "registry.overlap_rebuild_unavailable",
+  "message": "semantic overlap cannot be computed: PODIUM_LINT_SEMANTIC_OVERLAP is off",
+  "retryable": false,
+  "suggested_action": "Set PODIUM_LINT_SEMANTIC_OVERLAP=on and configure a search index (PODIUM_VECTOR_BACKEND with PODIUM_EMBEDDING_PROVIDER, or a self-embedding vector backend), then restart the registry."
+}
+```
+
 Codes are namespaced (`auth.*`, `config.*`, `ingest.*`, `materialize.*`, `quota.*`, `mcp.*`, `network.*`, `registry.*`, `domain.*`). Mapped to MCP error payloads per the MCP spec. A meta-tool error envelope is returned from `tools/call` as the `CallToolResult` carrying `isError: true`, with the envelope under `structuredContent` (§6.1.1).
 
 ## 6.11 Host Configuration Recipes

@@ -1118,7 +1118,7 @@ podium admin reembed [--artifact <id> --version <semver>]
 | `--since <rfc3339>` | Re-embed only artifacts ingested at or after this RFC3339 timestamp. Scopes a tenant-wide pass. |
 | `--registry <url>` | Registry URL. Required; defaults to `PODIUM_REGISTRY`. |
 
-With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` and `--since` compose to scope it. When `PODIUM_LINT_SEMANTIC_OVERLAP` is `on`, a full pass also recomputes the semantic overlap records of every artifact it re-embeds.
+With no `--artifact`, the command runs a tenant-wide pass, and `--only-missing` and `--since` compose to scope it. When `PODIUM_LINT_SEMANTIC_OVERLAP` is `on`, a full pass also recomputes the semantic overlap records of every artifact it re-embeds. The command exits 1 and prints the error envelope on standard error when the request fails. A registry with no vector search configured answers `404 registry.reembed_unavailable` with `retryable: false`, because the request cannot succeed until the operator configures a vector backend and an embedding source.
 
 ### `podium admin rebuild-overlap`
 
@@ -1139,7 +1139,7 @@ computed: 42
 failed: 0
 ```
 
-A computation stores nothing and counts in neither number when its artifact gains a newer served version first. The command exits 0 when `failed` is zero. It exits 1 when `failed` is not zero, and when the response is an error envelope, which it prints on standard error. A registry with the semantic overlap check off, or with no search index, answers `registry.unavailable` with `retryable: false`, because the request cannot succeed until the operator changes the configuration. A missing `--registry` exits 2.
+A computation stores nothing and counts in neither number when its artifact gains a newer served version first. The command exits 0 when `failed` is zero. It exits 1 when `failed` is not zero, and when the response is an error envelope, which it prints on standard error. A registry with the semantic overlap check off, or with no search index, answers `404 registry.overlap_rebuild_unavailable` with `retryable: false`, because the request cannot succeed until the operator changes the configuration. A missing `--registry` exits 2.
 
 ### `podium admin runtime`
 

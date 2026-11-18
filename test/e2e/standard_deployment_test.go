@@ -1643,16 +1643,19 @@ func TestStandardDeploy_AdminReembedEndpoint(t *testing.T) {
 	st, body := orgPostJSON(t, srv.BaseURL+"/v1/admin/reembed", map[string]any{})
 	// Spec: §4.7 — a standalone boot configures no identity provider, so it
 	// authenticates no caller, the admin gate is skipped, and the endpoint is
-	// reachable. It still requires a configured vector backend. A plain standalone server has none, so the
-	// POST returns 500 registry.unavailable "vector search not configured".
-	// When a backend is wired the endpoint returns 200; accept either.
+	// reachable. It still requires a configured vector backend. A plain
+	// standalone server has none, so the POST returns 404
+	// registry.reembed_unavailable with retryable false (§6.10). When a
+	// backend is wired the endpoint returns 200; accept either.
 	if st == 200 {
 		var obj map[string]any
 		orgDecodeBody(t, body, &obj)
 		return
 	}
-	if st != 500 || !strings.Contains(string(body), "vector search not configured") {
-		t.Errorf("POST /v1/admin/reembed = %d (body=%s); want 200, or 500 with 'vector search not configured'", st, body)
+	var env map[string]any
+	orgDecodeBody(t, body, &env)
+	if st != 404 || env["code"] != "registry.reembed_unavailable" || env["retryable"] != false {
+		t.Errorf("POST /v1/admin/reembed = %d (body=%s); want 200, or 404 registry.reembed_unavailable with retryable false", st, body)
 	}
 }
 

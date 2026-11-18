@@ -125,6 +125,8 @@ func KnownMatrices() []Matrix {
 					"registry.invalid_argument",
 					"registry.not_found",
 					"registry.read_only",
+					"registry.overlap_rebuild_unavailable",
+					"registry.reembed_unavailable",
 					"domain.not_found",
 				},
 			},

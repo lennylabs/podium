@@ -73,10 +73,10 @@ func (s *Server) handleOverlapRebuild(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := s.core.RebuildOverlap(r.Context())
 	if errors.Is(err, core.ErrOverlapUnavailable) {
-		// Spec: §7.3.1 — the check is off or no search index is configured,
-		// so the same request fails until the operator changes the
-		// configuration and is not retryable.
-		writeNotRetryable(w, http.StatusInternalServerError, "registry.unavailable", err.Error(), overlapUnavailableAction)
+		// Spec: §7.3.1, §6.10 — the check is off or no search index is
+		// configured, so the same request fails until the operator changes
+		// the configuration.
+		writeError(w, http.StatusNotFound, "registry.overlap_rebuild_unavailable", err.Error())
 		return
 	}
 	if err != nil {
@@ -85,10 +85,3 @@ func (s *Server) handleOverlapRebuild(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, res)
 }
-
-// overlapUnavailableAction is the suggested_action of a rebuild the registry
-// refuses because the semantic overlap check is off or no search index is
-// configured.
-const overlapUnavailableAction = "Set PODIUM_LINT_SEMANTIC_OVERLAP=on and configure a search index " +
-	"(PODIUM_VECTOR_BACKEND with PODIUM_EMBEDDING_PROVIDER, or a self-embedding vector backend), then restart the registry; " +
-	"the request fails the same way until the configuration changes."
