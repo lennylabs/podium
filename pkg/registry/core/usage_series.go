@@ -18,10 +18,12 @@ const (
 
 // The longest windows §8.7 serves at day and week granularity; a longer
 // window coarsens the series to the next granularity, so a series stays a
-// few hundred periods long whatever the window.
+// few hundred periods long whatever the window. They are a calendar year and
+// three calendar years with a leap day, so those windows keep the requested
+// granularity.
 const (
-	UsageMaxDailyDays  = 365
-	UsageMaxWeeklyDays = 3 * 365
+	UsageMaxDailyDays  = 366
+	UsageMaxWeeklyDays = 1096
 )
 
 // servedGranularity returns the granularity a window of days serves for the

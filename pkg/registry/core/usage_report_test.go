@@ -317,8 +317,8 @@ func TestUsageReport_PagesTheArtifactList(t *testing.T) {
 	}
 }
 
-// Spec: §8.7 — a long window coarsens the series: day stays day up to 365
-// days and is served as week beyond, week stays week up to 1,095 days and is
+// Spec: §8.7 — a long window coarsens the series: day stays day up to 366
+// days and is served as week beyond, week stays week up to 1,096 days and is
 // served as month beyond, day past the weekly limit is served as month, and
 // the response's granularity names the served value.
 func TestUsageReport_CoarsensLongWindows(t *testing.T) {
@@ -332,11 +332,11 @@ func TestUsageReport_CoarsensLongWindows(t *testing.T) {
 	}{
 		{"", 30, "none"},
 		{"none", 2000, "none"},
-		{"day", 365, "day"},
-		{"day", 366, "week"},
-		{"week", 1095, "week"},
-		{"week", 1096, "month"},
-		{"day", 1096, "month"},
+		{"day", 366, "day"},
+		{"day", 367, "week"},
+		{"week", 1096, "week"},
+		{"week", 1097, "month"},
+		{"day", 1097, "month"},
 		{"month", 2000, "month"},
 	} {
 		rep, err := f.reg.UsageReport(context.Background(), usageAlice, core.UsageQuery{Retention: 2000, Days: c.days, Granularity: c.requested})
