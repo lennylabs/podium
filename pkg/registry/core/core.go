@@ -70,9 +70,9 @@ var (
 // Registry is the core registry type. Construct one per tenant; the
 // caller passes Identity in per request to drive visibility filtering.
 type Registry struct {
-	store      store.Store
-	tenantID   string
-	layers     []layer.Layer
+	store    store.Store
+	tenantID string
+	layers   []layer.Layer
 	// projection caches the name and when_to_use a stored row's bytes
 	// resolve to, for the rows a SQL store returns without them.
 	projection *projectionFieldCache
