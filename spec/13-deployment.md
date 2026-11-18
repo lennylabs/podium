@@ -253,6 +253,7 @@ Safety constraints:
 - **Loopback bind by default.** Public mode binds to `127.0.0.1` unless `--allow-public-bind` is _also_ passed. The escape hatch exists for deployments behind an authenticated reverse proxy that enforces who can reach the registry; without the proxy, the operator is taking explicit responsibility for the security model.
 - **Sensitivity ceiling.** Ingest of `sensitivity: medium` or `sensitivity: high` artifacts is rejected with `ingest.public_mode_rejects_sensitive`. Public mode is for low-stakes content only. Artifacts already at those levels (ingested before public mode was enabled) continue to be served; public mode does not retroactively delete content. A skill row that a release which did not resolve the §4.3.4 `metadata` fields stored also continues to be served at the sensitivity §4.3.4 resolves from its `SKILL.md` `metadata`, even when that release stored it while public mode was enabled (§13.4).
 - **One-way for the deployment's lifetime.** Toggling public mode requires a config change _and_ a registry restart. The registry refuses to flip the mode mid-run, preventing an admin accidentally toggling away protections through a config-reload signal.
+- **Operator token for the costly passes.** The re-embed endpoint (§4.7) and the overlap rebuild endpoint (§7.3.1) start passes that query the embedding provider and the search index for every artifact, so in public mode they admit only a request that carries `PODIUM_OPERATOR_TOKEN` (§13.12) in the `X-Podium-Operator-Token` header, and they refuse every request while the variable is unset. `podium admin reembed` and `podium admin rebuild-overlap` send the variable's value when it is set in their environment.
 - **Loud at every checkpoint.** The mode is surfaced in `/healthz` (`mode: public`), in the MCP `health` tool, in `podium status`, and as a flag (`caller.public_mode: true`) on every audit event so downstream tooling can detect it without inspecting startup config.
 
 When to use public mode vs sensible-defaults standalone:
@@ -694,3 +695,9 @@ Server-side controls for the outbound webhook receivers (§7.3.2).
 | Var | Description | Default |
 | --- | --- | --- |
 | `PODIUM_WEBHOOK_ALLOWED_TARGETS` | Comma-separated allowlist of hosts or CIDRs that the receiver-URL SSRF policy permits in addition to public addresses. | (empty) |
+
+### Public mode
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_OPERATOR_TOKEN` | Shared secret that admits a re-embed (§4.7) or overlap rebuild (§7.3.1) request on a registry in public mode (§13.10), sent in the `X-Podium-Operator-Token` header and compared in constant time. While it is unset, a public-mode registry refuses both endpoints with `auth.forbidden`. A value shorter than 32 characters refuses startup with `config.invalid`. It has no effect outside public mode. The registry reads it, and `podium admin reembed` and `podium admin rebuild-overlap` send it. | (unset) |
