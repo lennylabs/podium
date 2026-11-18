@@ -23,10 +23,13 @@ type usageRequest struct {
 	Granularity string   `json:"granularity"`
 	Layers      []string `json:"layers"`
 	Artifacts   []string `json:"artifacts"`
+	Limit       *int     `json:"limit"`
+	Cursor      string   `json:"cursor"`
 }
 
 // handleUsage serves the §8.7 usage report. GET /v1/usage takes from, to,
-// days, granularity, and repeated layer and artifact query parameters, and POST /v1/usage
+// days, granularity, limit, cursor, and repeated layer and artifact query
+// parameters, and POST /v1/usage
 // takes the same parameters as a JSON body for a list too long for a query
 // string. Any caller that can search can call it: the request passes through
 // the same identity verification, tenant routing, and browser-session
@@ -66,18 +69,33 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, report)
 }
 
-// usageQueryFromURL reads the GET parameters. A days that is not an integer
-// is reported here; the range checks run in the core for both methods.
+// usageQueryFromURL reads the GET parameters. A days or limit that is not a
+// positive integer is reported here, because the core reads zero as unset;
+// the range checks run in the core for both methods.
 func usageQueryFromURL(q url.Values) (core.UsageQuery, error) {
-	query := core.UsageQuery{From: q.Get("from"), To: q.Get("to"), Granularity: q.Get("granularity"), LayerIDs: q["layer"], ArtifactIDs: q["artifact"]}
-	if q.Has("days") {
-		days, err := strconv.Atoi(q.Get("days"))
-		if err != nil || days < 1 {
-			return core.UsageQuery{}, errors.New("days must be a positive integer: " + q.Get("days"))
-		}
-		query.Days = days
+	query := core.UsageQuery{From: q.Get("from"), To: q.Get("to"), Granularity: q.Get("granularity"),
+		LayerIDs: q["layer"], ArtifactIDs: q["artifact"], Cursor: q.Get("cursor")}
+	var err error
+	if query.Days, err = positiveParam(q, "days"); err != nil {
+		return core.UsageQuery{}, err
+	}
+	if query.Limit, err = positiveParam(q, "limit"); err != nil {
+		return core.UsageQuery{}, err
 	}
 	return query, nil
+}
+
+// positiveParam returns the named parameter as a positive integer, or 0 when
+// it is absent.
+func positiveParam(q url.Values, name string) (int, error) {
+	if !q.Has(name) {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(q.Get(name))
+	if err != nil || n < 1 {
+		return 0, errors.New(name + " must be a positive integer: " + q.Get(name))
+	}
+	return n, nil
 }
 
 // usageQueryFromBody reads the POST body.
@@ -88,12 +106,26 @@ func usageQueryFromBody(body io.Reader) (core.UsageQuery, error) {
 	if err := dec.Decode(&req); err != nil {
 		return core.UsageQuery{}, errors.New("usage request body: " + err.Error())
 	}
-	query := core.UsageQuery{From: req.From, To: req.To, Granularity: req.Granularity, LayerIDs: req.Layers, ArtifactIDs: req.Artifacts}
-	if req.Days != nil {
-		if *req.Days < 1 {
-			return core.UsageQuery{}, errors.New("days must be a positive integer: " + strconv.Itoa(*req.Days))
-		}
-		query.Days = *req.Days
+	query := core.UsageQuery{From: req.From, To: req.To, Granularity: req.Granularity,
+		LayerIDs: req.Layers, ArtifactIDs: req.Artifacts, Cursor: req.Cursor}
+	var err error
+	if query.Days, err = positiveField(req.Days, "days"); err != nil {
+		return core.UsageQuery{}, err
+	}
+	if query.Limit, err = positiveField(req.Limit, "limit"); err != nil {
+		return core.UsageQuery{}, err
 	}
 	return query, nil
+}
+
+// positiveField returns a body member as a positive integer, or 0 when it is
+// absent.
+func positiveField(v *int, name string) (int, error) {
+	if v == nil {
+		return 0, nil
+	}
+	if *v < 1 {
+		return 0, errors.New(name + " must be a positive integer: " + strconv.Itoa(*v))
+	}
+	return *v, nil
 }

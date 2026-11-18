@@ -154,6 +154,12 @@ func TestUsageReport_HTTPBatchAndErrors(t *testing.T) {
 		{http.MethodPost, "/v1/usage", `{"days":0}`, http.StatusBadRequest},
 		{http.MethodGet, "/v1/usage?days=abc", "", http.StatusBadRequest},
 		{http.MethodGet, "/v1/usage?granularity=year", "", http.StatusBadRequest},
+		{http.MethodGet, "/v1/usage?limit=0", "", http.StatusBadRequest},
+		{http.MethodGet, "/v1/usage?limit=x", "", http.StatusBadRequest},
+		{http.MethodGet, "/v1/usage?limit=201", "", http.StatusBadRequest},
+		{http.MethodGet, "/v1/usage?cursor=!!", "", http.StatusBadRequest},
+		{http.MethodPost, "/v1/usage", `{"limit":0}`, http.StatusBadRequest},
+		{http.MethodPost, "/v1/usage", `{"cursor":"!!"}`, http.StatusBadRequest},
 		{http.MethodPut, "/v1/usage", "", http.StatusMethodNotAllowed},
 	} {
 		st, b := usageCall(t, h, c.method, c.path, c.body, "alice", "", "")
@@ -232,5 +238,37 @@ func TestUsageReport_HTTPBatchItemsAndRevalidatedLoads(t *testing.T) {
 	}
 	if rep.Totals.Loads != 5 || rep.Totals.Syncs != 2 || got["fin/close"] != [2]int64{4, 1} || got["fin/reconcile"] != [2]int64{1, 1} {
 		t.Errorf("want fin/close 4 loads 1 sync and fin/reconcile 1 load 1 sync: %s", body)
+	}
+}
+
+// Spec: §8.7 — GET and POST page the artifact list the same way: limit bounds
+// a page, next_cursor from one method continues the list through the other,
+// and the last page carries a null next_cursor.
+func TestUsageReport_HTTPPages(t *testing.T) {
+	t.Parallel()
+	h, _ := usageHarness(t)
+	type page struct {
+		Artifacts []struct {
+			ArtifactID string `json:"artifact_id"`
+		} `json:"artifacts"`
+		ArtifactCount int     `json:"artifact_count"`
+		NextCursor    *string `json:"next_cursor"`
+	}
+	read := func(method, path, body string) page {
+		t.Helper()
+		st, raw := usageCall(t, h, method, path, body, "alice", "", "")
+		var p page
+		if st != http.StatusOK || json.Unmarshal([]byte(raw), &p) != nil {
+			t.Fatalf("%s %s %s: %d %s", method, path, body, st, raw)
+		}
+		return p
+	}
+	first := read(http.MethodGet, "/v1/usage?limit=1", "")
+	if len(first.Artifacts) != 1 || first.ArtifactCount != 2 || first.NextCursor == nil {
+		t.Fatalf("first page: %+v", first)
+	}
+	second := read(http.MethodPost, "/v1/usage", `{"limit":1,"cursor":"`+*first.NextCursor+`"}`)
+	if len(second.Artifacts) != 1 || second.NextCursor != nil || second.Artifacts[0].ArtifactID == first.Artifacts[0].ArtifactID {
+		t.Errorf("second page: %+v after %+v", second, first)
 	}
 }

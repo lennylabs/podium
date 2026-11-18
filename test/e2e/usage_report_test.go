@@ -113,10 +113,20 @@ func TestUsageReport_BinaryCountsReportAndCLI(t *testing.T) {
 	if month.Exit != 0 || !strings.Contains(month.Stdout, "PERIOD") || !strings.Contains(month.Stdout, layers.Layers[0].Layer) {
 		t.Errorf("podium usage --layer --granularity month exit=%d\n%s%s", month.Exit, month.Stdout, month.Stderr)
 	}
+	first := runPodium(t, "", srv.cliEnv(), "usage", "--registry", srv.BaseURL, "--limit", "1")
+	_, cursor, more := strings.Cut(first.Stdout, "1 of 2 artifacts listed; read the next ones with --cursor ")
+	cursor = strings.TrimSpace(cursor)
+	if first.Exit != 0 || !more || cursor == "" || !strings.Contains(first.Stdout, "ops/greet") || strings.Contains(first.Stdout, "ops/farewell") {
+		t.Fatalf("podium usage --limit 1 exit=%d\n%s%s", first.Exit, first.Stdout, first.Stderr)
+	}
+	next := runPodium(t, "", srv.cliEnv(), "usage", "--registry", srv.BaseURL, "--limit", "1", "--cursor", cursor)
+	if next.Exit != 0 || !strings.Contains(next.Stdout, "ops/farewell") || strings.Contains(next.Stdout, "ops/greet") || strings.Contains(next.Stdout, "--cursor") {
+		t.Errorf("podium usage --cursor exit=%d\n%s%s", next.Exit, next.Stdout, next.Stderr)
+	}
 	if res := runPodium(t, "", srv.cliEnv(), "usage", "--registry", srv.BaseURL, "--from", "2000-01-01"); res.Exit != 1 || !strings.Contains(res.Stderr, "registry.invalid_argument") {
 		t.Errorf("podium usage --from outside retention exit=%d stderr=%s, want 1 with the envelope", res.Exit, res.Stderr)
 	}
-	for _, args := range [][]string{{"--days", "0"}, {"--days", "3", "--from", "2026-11-01"}, {"--granularity", "year"}} {
+	for _, args := range [][]string{{"--days", "0"}, {"--days", "3", "--from", "2026-11-01"}, {"--granularity", "year"}, {"--limit", "0"}} {
 		if res := runPodium(t, "", srv.cliEnv(), append([]string{"usage", "--registry", srv.BaseURL}, args...)...); res.Exit != 2 {
 			t.Errorf("podium usage %v exit=%d, want 2", args, res.Exit)
 		}

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -40,26 +41,37 @@ type usageResponseJSON struct {
 		LastLoaded *string `json:"last_loaded"`
 		usageCountsJSON
 	} `json:"artifacts"`
+	ArtifactCount int     `json:"artifact_count"`
+	NextCursor    *string `json:"next_cursor"`
+}
+
+// usageFlags holds the podium usage flags that become query parameters.
+type usageFlags struct {
+	from, to, days, granularity, limit, cursor string
+	layers, artifacts                          stringSliceFlag
 }
 
 // usageCmd calls the §8.7 usage report.
 //
 //	podium usage --registry <url> [--from <date>] [--to <date>] [--days <n>]
 //	             [--granularity none|day|week|month]
-//	             [--layer <id>]... [--artifact <id>]... [--json]
+//	             [--layer <id>]... [--artifact <id>]...
+//	             [--limit <n>] [--cursor <cursor>] [--json]
 //
 // Spec: §8.7
 func usageCmd(args []string) int {
 	fs := flag.NewFlagSet("usage", flag.ContinueOnError)
 	setUsage(fs, "Report artifact loads, syncs, and search hits per artifact, per layer, and for the catalog (registry HTTP API).")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
-	from := fs.String("from", "", "first UTC day of the window, as YYYY-MM-DD")
-	to := fs.String("to", "", "last UTC day of the window, as YYYY-MM-DD")
-	days := fs.String("days", "", "window of the last n UTC days, counting today")
-	granularity := fs.String("granularity", "", "series granularity: none, day, week, or month")
-	var layers, artifacts stringSliceFlag
-	fs.Var(&layers, "layer", "restrict the report to a layer (repeatable)")
-	fs.Var(&artifacts, "artifact", "restrict the artifact list to an artifact (repeatable)")
+	var f usageFlags
+	fs.StringVar(&f.from, "from", "", "first UTC day of the window, as YYYY-MM-DD")
+	fs.StringVar(&f.to, "to", "", "last UTC day of the window, as YYYY-MM-DD")
+	fs.StringVar(&f.days, "days", "", "window of the last n UTC days, counting today")
+	fs.StringVar(&f.granularity, "granularity", "", "series granularity: none, day, week, or month")
+	fs.Var(&f.layers, "layer", "restrict the report to a layer (repeatable)")
+	fs.Var(&f.artifacts, "artifact", "restrict the artifact list to an artifact (repeatable)")
+	fs.StringVar(&f.limit, "limit", "", "most artifacts to list, 1 to 200 (default 50)")
+	fs.StringVar(&f.cursor, "cursor", "", "next_cursor value of an earlier report, to list the following artifacts")
 	asJSON := fs.Bool("json", false, "write the response object on standard output")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -69,35 +81,54 @@ func usageCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	q := url.Values{}
-	if *days != "" {
-		if n, err := strconv.Atoi(*days); err != nil || n < 1 {
-			fmt.Fprintln(os.Stderr, "error: --days must be a positive integer")
-			return 2
-		}
-		if *from != "" || *to != "" {
-			fmt.Fprintln(os.Stderr, "error: --days cannot be combined with --from or --to")
-			return 2
-		}
-		q.Set("days", *days)
-	}
-	switch *granularity {
-	case "", "none", "day", "week", "month":
-	default:
-		fmt.Fprintln(os.Stderr, "error: --granularity must be none, day, week, or month")
+	q, err := f.query()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: "+err.Error())
 		return 2
 	}
-	setIf(q, "granularity", *granularity)
-	setIf(q, "from", *from)
-	setIf(q, "to", *to)
-	q["layer"] = layers
-	q["artifact"] = artifacts
 	endpoint := *registry + "/v1/usage"
 	if encoded := q.Encode(); encoded != "" {
 		endpoint += "?" + encoded
 	}
 	body, status := doJSON(endpoint, "GET", nil)
 	return renderUsage(os.Stdout, os.Stderr, body, status, *asJSON)
+}
+
+// query validates the flags §8.7 lists as usage errors and returns them as
+// query parameters.
+func (f usageFlags) query() (url.Values, error) {
+	q := url.Values{}
+	if f.days != "" {
+		if !positiveInt(f.days) {
+			return nil, errors.New("--days must be a positive integer")
+		}
+		if f.from != "" || f.to != "" {
+			return nil, errors.New("--days cannot be combined with --from or --to")
+		}
+		q.Set("days", f.days)
+	}
+	if f.limit != "" && !positiveInt(f.limit) {
+		return nil, errors.New("--limit must be a positive integer")
+	}
+	switch f.granularity {
+	case "", "none", "day", "week", "month":
+	default:
+		return nil, errors.New("--granularity must be none, day, week, or month")
+	}
+	setIf(q, "granularity", f.granularity)
+	setIf(q, "from", f.from)
+	setIf(q, "to", f.to)
+	setIf(q, "limit", f.limit)
+	setIf(q, "cursor", f.cursor)
+	q["layer"] = f.layers
+	q["artifact"] = f.artifacts
+	return q, nil
+}
+
+// positiveInt reports whether s is a positive decimal integer.
+func positiveInt(s string) bool {
+	n, err := strconv.Atoi(s)
+	return err == nil && n > 0
 }
 
 // setIf sets key to value when value is not empty.
@@ -150,5 +181,9 @@ func renderUsage(stdout, stderr io.Writer, body []byte, status int, asJSON bool)
 	}
 	_, _ = fmt.Fprintf(stdout, "\n%s to %s: %d loads, %d syncs, %d search hits\n",
 		resp.From, resp.To, resp.Totals.Loads, resp.Totals.Syncs, resp.Totals.SearchHits)
+	if resp.NextCursor != nil {
+		_, _ = fmt.Fprintf(stdout, "%d of %d artifacts listed; read the next ones with --cursor %s\n",
+			len(resp.Artifacts), resp.ArtifactCount, *resp.NextCursor)
+	}
 	return 0
 }

@@ -26,7 +26,9 @@ const (
 // with From or To. Retention is the configured PODIUM_USAGE_RETENTION_DAYS,
 // which bounds the window. LayerIDs and ArtifactIDs, when non-empty, restrict
 // the report to the named layers and artifacts. Granularity is "", "none",
-// "day", "week", or "month"; "" is "none".
+// "day", "week", or "month"; "" is "none". Limit is the page size of the
+// artifact list, 0 for the default, and Cursor an earlier response's
+// next_cursor.
 type UsageQuery struct {
 	From        string
 	To          string
@@ -35,6 +37,8 @@ type UsageQuery struct {
 	Retention   int
 	LayerIDs    []string
 	ArtifactIDs []string
+	Limit       int
+	Cursor      string
 }
 
 // UsageCounts is the three §8.7 counters.
@@ -94,6 +98,11 @@ type UsageReport struct {
 	Totals    UsageTotals     `json:"totals"`
 	Layers    []UsageLayer    `json:"layers"`
 	Artifacts []UsageArtifact `json:"artifacts"`
+	// ArtifactCount is the number of entries the artifact list holds across
+	// every page, and NextCursor reads the page after this one, or is nil
+	// on the last page.
+	ArtifactCount int     `json:"artifact_count"`
+	NextCursor    *string `json:"next_cursor"`
 }
 
 // usageWindow is the report's window of UTC days, oldest first.
@@ -183,6 +192,10 @@ func (r *Registry) UsageReport(ctx context.Context, id layer.Identity, q UsageQu
 	if err != nil {
 		return nil, err
 	}
+	page, err := parseUsagePage(q)
+	if err != nil {
+		return nil, err
+	}
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {
 		return nil, err
@@ -197,7 +210,7 @@ func (r *Registry) UsageReport(ctx context.Context, id layer.Identity, q UsageQu
 		layers = keepLayers(layers, q.LayerIDs)
 	}
 	served = keepArtifactsIn(served, layers)
-	return buildUsageReport(w, layers, served, keepUsageRows(rows, layers, layer.ParseScopes(id.Scopes)), q), nil
+	return buildUsageReport(w, layers, served, keepUsageRows(rows, layers, layer.ParseScopes(id.Scopes)), q, page), nil
 }
 
 // keepUsageRows returns the rows the report may sum: those whose layer the
@@ -347,8 +360,8 @@ func (a *usageAccumulator) result(w usageWindow, granularity string) UsageTotals
 }
 
 // buildUsageReport aggregates rows, already restricted to the caller's view,
-// into the report's totals, layers, and artifacts.
-func buildUsageReport(w usageWindow, layers []string, served []store.ManifestRecord, rows []store.UsageCount, q UsageQuery) *UsageReport {
+// into the report's totals, layers, and one page of artifacts.
+func buildUsageReport(w usageWindow, layers []string, served []store.ManifestRecord, rows []store.UsageCount, q UsageQuery, page usagePage) *UsageReport {
 	total := newUsageAccumulator()
 	byLayer := map[string]*usageAccumulator{}
 	byArtifact := map[string]*usageAccumulator{}
@@ -366,36 +379,54 @@ func buildUsageReport(w usageWindow, layers []string, served []store.ManifestRec
 		}
 	}
 	rep := &UsageReport{
-		Days:      len(w.days),
-		From:      w.from(),
-		To:        w.to(),
-		Totals:    total.result(w, q.Granularity),
-		Layers:    make([]UsageLayer, 0, len(layers)),
-		Artifacts: make([]UsageArtifact, 0, len(served)),
+		Days:   len(w.days),
+		From:   w.from(),
+		To:     w.to(),
+		Totals: total.result(w, q.Granularity),
+		Layers: make([]UsageLayer, 0, len(layers)),
 	}
 	for _, l := range layers {
 		rep.Layers = append(rep.Layers, UsageLayer{Layer: l, UsageTotals: byLayer[l].result(w, q.Granularity)})
 	}
-	named := make(map[string]bool, len(q.ArtifactIDs))
-	for _, id := range q.ArtifactIDs {
+	entries := usageEntries(served, byArtifact, q.ArtifactIDs)
+	rep.ArtifactCount = len(entries)
+	selected, next := page.slice(entries)
+	rep.NextCursor = next
+	// The breakdowns and the series are built for the page alone, so a
+	// response's size follows the limit rather than the catalog.
+	rep.Artifacts = make([]UsageArtifact, 0, len(selected))
+	for _, e := range selected {
+		rep.Artifacts = append(rep.Artifacts, UsageArtifact{
+			ArtifactID:  e.m.ArtifactID,
+			Type:        e.m.Type,
+			Layer:       e.m.Layer,
+			UsageTotals: e.acc.result(w, q.Granularity),
+			LastLoaded:  dayOrNil(e.acc.lastL),
+			LastSynced:  dayOrNil(e.acc.lastS),
+		})
+	}
+	return rep
+}
+
+// usageEntries returns the artifacts the list covers, the named ones when
+// the request names any, in the report's order.
+func usageEntries(served []store.ManifestRecord, byArtifact map[string]*usageAccumulator, namedIDs []string) []usageEntry {
+	named := make(map[string]bool, len(namedIDs))
+	for _, id := range namedIDs {
 		named[id] = true
 	}
+	entries := make([]usageEntry, 0, len(served))
 	for _, m := range served {
 		if len(named) > 0 && !named[m.ArtifactID] {
 			continue
 		}
 		a := byArtifact[m.ArtifactID]
-		rep.Artifacts = append(rep.Artifacts, UsageArtifact{
-			ArtifactID:  m.ArtifactID,
-			Type:        m.Type,
-			Layer:       m.Layer,
-			UsageTotals: a.result(w, q.Granularity),
-			LastLoaded:  dayOrNil(a.lastL),
-			LastSynced:  dayOrNil(a.lastS),
-		})
+		entries = append(entries, usageEntry{m: m, acc: a, key: usageCursor{
+			Loads: a.totals.Loads, Syncs: a.totals.Syncs, SearchHits: a.totals.SearchHits, ID: m.ArtifactID,
+		}})
 	}
-	sortUsageArtifacts(rep.Artifacts)
-	return rep
+	sort.Slice(entries, func(i, j int) bool { return entries[i].key.before(entries[j].key) })
+	return entries
 }
 
 func dayOrNil(day string) *string {
@@ -403,21 +434,4 @@ func dayOrNil(day string) *string {
 		return nil
 	}
 	return &day
-}
-
-// sortUsageArtifacts orders the list by loads, syncs, and search hits, each
-// descending, then by artifact ID.
-func sortUsageArtifacts(list []UsageArtifact) {
-	sort.SliceStable(list, func(i, j int) bool {
-		a, b := list[i], list[j]
-		switch {
-		case a.Loads != b.Loads:
-			return a.Loads > b.Loads
-		case a.Syncs != b.Syncs:
-			return a.Syncs > b.Syncs
-		case a.SearchHits != b.SearchHits:
-			return a.SearchHits > b.SearchHits
-		}
-		return a.ArtifactID < b.ArtifactID
-	})
 }

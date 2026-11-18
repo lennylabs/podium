@@ -52,7 +52,7 @@ func TestRenderUsage(t *testing.T) {
 	}
 }
 
-// Spec: §8.7 — a missing --registry, a --days that is not a positive integer,
+// Spec: §8.7 — a missing --registry, a --days or --limit that is not a positive integer,
 // --days with --from or --to, and an unknown --granularity are usage errors
 // with exit status 2, reported before any request.
 func TestUsageCmd_UsageErrors(t *testing.T) {
@@ -63,6 +63,8 @@ func TestUsageCmd_UsageErrors(t *testing.T) {
 		{"--registry", "http://127.0.0.1:1", "--days", "x"},
 		{"--registry", "http://127.0.0.1:1", "--days", "3", "--to", "2026-11-01"},
 		{"--registry", "http://127.0.0.1:1", "--granularity", "year"},
+		{"--registry", "http://127.0.0.1:1", "--limit", "0"},
+		{"--registry", "http://127.0.0.1:1", "--limit", "x"},
 		{"--registry", "http://127.0.0.1:1", "--bogus"},
 	} {
 		if code := usageCmd(args); code != 2 {
@@ -71,8 +73,8 @@ func TestUsageCmd_UsageErrors(t *testing.T) {
 	}
 }
 
-// Spec: §8.7 — podium usage passes its window, granularity, and repeated
-// layer and artifact flags as query parameters and prints the report.
+// Spec: §8.7 — podium usage passes its window, granularity, page, and
+// repeated layer and artifact flags as query parameters and prints the report.
 func TestUsageCmd_PassesParameters(t *testing.T) {
 	var got string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,12 +83,28 @@ func TestUsageCmd_PassesParameters(t *testing.T) {
 	}))
 	defer srv.Close()
 	code := usageCmd([]string{"--registry", srv.URL, "--from", "2026-11-01", "--to", "2026-11-18", "--granularity", "week",
-		"--layer", "team", "--artifact", "ops/greet", "--artifact", "ops/farewell"})
-	want := "artifact=ops%2Fgreet&artifact=ops%2Ffarewell&from=2026-11-01&granularity=week&layer=team&to=2026-11-18"
+		"--layer", "team", "--artifact", "ops/greet", "--artifact", "ops/farewell", "--limit", "20", "--cursor", "abc"})
+	want := "artifact=ops%2Fgreet&artifact=ops%2Ffarewell&cursor=abc&from=2026-11-01&granularity=week&layer=team&limit=20&to=2026-11-18"
 	if code != 0 || got != want {
 		t.Errorf("exit %d query %q, want 0 and %q", code, got, want)
 	}
 	if code := usageCmd([]string{"--registry", srv.URL, "--days", "7"}); code != 0 || got != "days=7" {
 		t.Errorf("--days: exit %d query %q", code, got)
+	}
+}
+
+// Spec: §8.7 — when the response carries a next_cursor, podium usage ends the
+// text output with the number of artifacts listed and the --cursor value that
+// reads the next page, and prints no such line on the last page.
+func TestRenderUsage_NextCursorLine(t *testing.T) {
+	var out, errOut bytes.Buffer
+	paged := strings.Replace(usageFixture, `"artifacts":[`, `"artifact_count":7,"next_cursor":"eyJpZCI6Im9wcy9mYXJld2VsbCJ9","artifacts":[`, 1)
+	if code := renderUsage(&out, &errOut, []byte(paged), 200, false); code != 0 ||
+		!strings.Contains(out.String(), "2 of 7 artifacts listed; read the next ones with --cursor eyJpZCI6Im9wcy9mYXJld2VsbCJ9") {
+		t.Errorf("exit %d:\n%s", code, out.String())
+	}
+	out.Reset()
+	if renderUsage(&out, &errOut, []byte(usageFixture), 200, false); strings.Contains(out.String(), "--cursor") {
+		t.Errorf("last page prints a cursor line:\n%s", out.String())
 	}
 }

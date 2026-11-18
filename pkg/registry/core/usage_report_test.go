@@ -206,6 +206,11 @@ func TestUsageReport_Parameters(t *testing.T) {
 		"bad granularity":    func(u *core.UsageQuery) { u.Granularity = "year" },
 		"too many artifacts": func(u *core.UsageQuery) { u.ArtifactIDs = many },
 		"too many layers":    func(u *core.UsageQuery) { u.LayerIDs = manyLayers },
+		"limit above 200":    func(u *core.UsageQuery) { u.Limit = 201 },
+		"negative limit":     func(u *core.UsageQuery) { u.Limit = -1 },
+		"cursor not base64":  func(u *core.UsageQuery) { u.Cursor = "!!" },
+		"cursor not json":    func(u *core.UsageQuery) { u.Cursor = "bm90IGpzb24" },
+		"cursor without id":  func(u *core.UsageQuery) { u.Cursor = "eyJsIjoxfQ" },
 	} {
 		if _, err := f.reg.UsageReport(context.Background(), usageAlice, q(mod)()); !errors.Is(err, core.ErrInvalidArgument) {
 			t.Errorf("%s: err = %v, want ErrInvalidArgument", name, err)
@@ -267,4 +272,47 @@ func usageReportAs(t *testing.T, f *usageFixture, id layer.Identity) *core.Usage
 		t.Fatalf("UsageReport: %v", err)
 	}
 	return rep
+}
+
+// Spec: §8.7 — the artifact list is paged: following next_cursor with limit 1
+// lists every entry once, in the order of the whole list, with the same
+// artifact_count, totals, and layers on every page and a null next_cursor on
+// the last; the default page holds the whole of a short list; and a request
+// that names artifacts pages over the named ones.
+func TestUsageReport_PagesTheArtifactList(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	seedUsage(t, f)
+	whole, err := f.reg.UsageReport(context.Background(), publicID, q(nil)())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if whole.ArtifactCount != 3 || len(whole.Artifacts) != 3 || whole.NextCursor != nil {
+		t.Fatalf("default page: count %d, %d entries, next %v", whole.ArtifactCount, len(whole.Artifacts), whole.NextCursor)
+	}
+	var paged []string
+	cursor := ""
+	for range 4 {
+		rep, err := f.reg.UsageReport(context.Background(), publicID, q(func(u *core.UsageQuery) { u.Limit, u.Cursor = 1, cursor })())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rep.Artifacts) != 1 || rep.ArtifactCount != 3 || rep.Totals.UsageCounts != whole.Totals.UsageCounts || len(rep.Layers) != len(whole.Layers) {
+			t.Fatalf("page after %q: %d entries, count %d, totals %+v", cursor, len(rep.Artifacts), rep.ArtifactCount, rep.Totals.UsageCounts)
+		}
+		paged = append(paged, rep.Artifacts[0].ArtifactID)
+		if rep.NextCursor == nil {
+			break
+		}
+		cursor = *rep.NextCursor
+	}
+	if !reflect.DeepEqual(paged, reportIDs(whole)) {
+		t.Errorf("paged order %v, want %v", paged, reportIDs(whole))
+	}
+	named, err := f.reg.UsageReport(context.Background(), publicID, q(func(u *core.UsageQuery) {
+		u.Limit, u.ArtifactIDs = 1, []string{"ops/farewell", "ops/hidden"}
+	})())
+	if err != nil || named.ArtifactCount != 2 || len(named.Artifacts) != 1 || named.NextCursor == nil {
+		t.Errorf("named page: %+v, %v", named, err)
+	}
 }
