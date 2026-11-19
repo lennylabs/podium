@@ -192,14 +192,12 @@ function Summary({ report }: { report: UsageReport }) {
         <StatTile
           label="ON-DEMAND LOADS"
           hint={usageHints.loads}
-          note="agents, SDK, CLI"
           total={report.totals.loads}
           values={series.map((p) => p.loads)}
         />
         <StatTile
           label="PRELOADS"
           hint={usageHints.syncs}
-          note="podium sync, ahead of time"
           total={report.totals.syncs}
           values={series.map((p) => p.syncs)}
         />

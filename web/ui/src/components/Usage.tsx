@@ -127,13 +127,11 @@ function LoadBars({ series }: { series: UsagePeriod[] }) {
 export function StatTile({
   label,
   hint,
-  note,
   total,
   values,
 }: {
   label: string;
   hint: string;
-  note: string;
   total: number;
   values: number[];
 }) {
@@ -143,7 +141,6 @@ export function StatTile({
         <h2 className="stat-tile-label" title={hint}>
           {label}
         </h2>
-        <span className="stat-tile-note">{note}</span>
       </div>
       <div className="stat-tile-body">
         <span className="stat-tile-total">{formatCount(total)}</span>

@@ -20574,7 +20574,10 @@ describe("usage", () => {
       expect(tiles[0].textContent).toContain("18,402");
       expect(tiles[0].querySelector(".stat-tile-label")?.getAttribute("title")).toContain("when an agent");
       expect(tiles[1].textContent).toContain("PRELOADS");
-      expect(tiles[1].textContent).toContain("podium sync, ahead of time");
+      // The tooltip carries the definition, so the tiles state no note
+      // beside the label.
+      expect(tiles[0].textContent).not.toContain("agents, SDK, CLI");
+      expect(tiles[1].textContent).not.toContain("podium sync");
       expect(tiles[1].textContent).toContain("2,316");
       expect(tiles[1].querySelector(".stat-tile-label")?.getAttribute("title")).toContain("ahead of time by podium sync");
       expect(screen.getByRole("heading", { name: "ALL LOADS BY CLIENT" })).toBeTruthy();

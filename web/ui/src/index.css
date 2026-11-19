@@ -6904,12 +6904,6 @@ button.cluster-row-selected:hover {
   letter-spacing: 0.11em;
 }
 
-.stat-tile-note {
-  margin-left: auto;
-  color: var(--faint);
-  font: 10.5px var(--font-mono);
-}
-
 .stat-tile-body {
   display: flex;
   align-items: flex-end;
