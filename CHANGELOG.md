@@ -62,6 +62,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Documentation
 
+- **The upgrade notes describe audit chain verification after a rollback** (§8.6): after a rollback to 0.6.0, the scheduled integrity pass reports a chain break at the first record 0.7.0 wrote, because 0.6.0 cannot recompute the hash of a record that carries `schema_version` or `caller.client`. The chain is intact and verifies again on the next 0.7.0 start. The 0.7.0 upgrade notes describe how to confirm that a reported break is this boundary.
 - **A Managing the catalog section covers catalog upkeep**: the new `docs/managing/` section, placed between Consuming and Deployment, covers finding overlapping artifacts with `podium lint` and the catalog overlap report, answering usage questions from the audit records, changing and retiring artifacts and layers, and keeping lint results and harness listing budgets in check. Each page names the access a task needs: any user, the per-tenant `admin` role, or the operator. Finding overlapping artifacts describes the word-based checks, the semantic overlap check and its configuration, and the catalog overlap report.
 - **Governance names the proposal process for spec changes** (§1.6): `GOVERNANCE.md` and the Governance page describe the numbered proposals under `proposals/`, their review and approval states, and the rule that spec edits land before the code that depends on them. The unused `docs/rfc/` index and its published page are removed.
 
