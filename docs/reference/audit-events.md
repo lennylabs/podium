@@ -114,7 +114,7 @@ The following list rules apply to both variables:
 
 - A list names at most one file destination and names no element twice.
 - An empty element refuses startup, and so does a trailing comma, which leaves an empty last element.
-- An element that carries a `scheme://` prefix other than `http://`, `https://`, `otlp+http://`, or `otlp+https://` refuses startup. So does an element with one of those prefixes that does not parse as a URL. An element that contains `://` is therefore never read as a file path.
+- An element that carries a `scheme://` prefix other than `http://`, `https://`, `otlp+http://`, or `otlp+https://` refuses startup. So does an element with one of those prefixes that does not parse as a URL or whose URL names no host, as in `http://` or `https://:443/x`. An element that contains `://` is therefore never read as a file path.
 - A file path that contains a comma cannot be listed, because the comma separates elements and the list has no escape syntax.
 
 A list that these rules do not admit refuses startup with `config.audit_sink_unavailable`. The causes are listed in the [error code catalog](error-codes#config).

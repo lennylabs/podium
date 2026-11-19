@@ -65,23 +65,40 @@ func TestOperatorToken_PublicModeWithoutTokenRefuses(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 — a PODIUM_OPERATOR_TOKEN shorter than 32 characters refuses
-// startup with config.invalid naming the variable, and the refusal does not
-// print the value.
+// Spec: §13.12 — on a public-mode registry a PODIUM_OPERATOR_TOKEN shorter
+// than 32 characters refuses startup with config.invalid naming the variable,
+// and the refusal does not print the value. The length is counted in
+// characters, so 17 characters that take 33 bytes are refused.
 // Matrix: §6.10 (config.invalid)
 func TestOperatorToken_ShortTokenRefusesStartup(t *testing.T) {
 	t.Parallel()
-	out := runPodium(t, "", []string{
-		"HOME=" + t.TempDir(),
-		"PODIUM_PUBLIC_MODE=true",
-		"PODIUM_OPERATOR_TOKEN=too-short-value",
-	}, "serve", "--standalone", "--bind", "127.0.0.1:0")
-	combined := out.Stderr + out.Stdout
-	if out.Exit == 0 || !strings.Contains(combined, "config.invalid") || !strings.Contains(combined, "PODIUM_OPERATOR_TOKEN must be at least 32 characters") {
-		t.Fatalf("serve with a short operator token: exit=%d\n%s", out.Exit, combined)
+	for _, token := range []string{"too-short-value", strings.Repeat("é", 16) + "x"} {
+		out := runPodium(t, "", []string{
+			"HOME=" + t.TempDir(),
+			"PODIUM_PUBLIC_MODE=true",
+			"PODIUM_OPERATOR_TOKEN=" + token,
+		}, "serve", "--standalone", "--bind", "127.0.0.1:0")
+		combined := out.Stderr + out.Stdout
+		if out.Exit == 0 || !strings.Contains(combined, "config.invalid") || !strings.Contains(combined, "PODIUM_OPERATOR_TOKEN must be at least 32 characters") {
+			t.Fatalf("serve with the operator token %q: exit=%d\n%s", token, out.Exit, combined)
+		}
+		if strings.Contains(combined, token) {
+			t.Errorf("the refusal printed the token value:\n%s", combined)
+		}
 	}
-	if strings.Contains(combined, "too-short-value") {
-		t.Errorf("the refusal printed the token value:\n%s", combined)
+}
+
+// Spec: §13.12 — PODIUM_OPERATOR_TOKEN has no effect outside public mode, so
+// a registry outside public mode starts with a value public mode would refuse.
+func TestOperatorToken_NotValidatedOutsidePublicMode(t *testing.T) {
+	t.Parallel()
+	srv := startServerArgs(t, []string{
+		"HOME=" + t.TempDir(),
+		"PODIUM_OPERATOR_TOKEN=too-short-value",
+	}, "serve", "--standalone")
+	res := runPodium(t, "", nil, "layer", "list", "--registry", srv.BaseURL)
+	if res.Exit != 0 {
+		t.Errorf("podium layer list against the started registry: exit=%d stderr=%q", res.Exit, res.Stderr)
 	}
 }
 

@@ -181,7 +181,7 @@ Destination list and file causes:
 
 - An empty element in the destination list.
 - An element whose `scheme://` prefix is not `http`, `https`, `otlp+http`, or `otlp+https`.
-- An element with one of those prefixes that does not parse as a URL.
+- An element with one of those prefixes that does not parse as a URL, or whose URL names no host, as in `http://`.
 - Two file destinations, or an element named twice.
 - Userinfo in a destination URL.
 - `stdout` in the list while `PODIUM_TRACING=stdout` also writes to standard output.

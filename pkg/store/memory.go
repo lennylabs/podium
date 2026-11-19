@@ -562,8 +562,12 @@ func (s *Memory) DeleteLayerConfig(_ context.Context, tenantID, id string) error
 	return nil
 }
 
-// RestoreLayerConfig clears the soft-delete tombstone on a layer and its
-// artifacts (§8.4 admin recovery).
+// RestoreLayerConfig clears the soft-delete tombstone on a layer and on the
+// artifacts its unregister tombstoned (§8.4 admin recovery). DeleteLayerConfig
+// stamps the layer and those artifacts with one time, so a row whose
+// tombstone differs was removed by an earlier ingest and stays removed.
+//
+// Spec: §7.3.1 (Removed artifacts), §8.4
 func (s *Memory) RestoreLayerConfig(_ context.Context, tenantID, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -571,10 +575,11 @@ func (s *Memory) RestoreLayerConfig(_ context.Context, tenantID, id string) erro
 	if !ok || cfg.DeletedAt == nil {
 		return ErrNotFound
 	}
+	unregisteredAt := *cfg.DeletedAt
 	cfg.DeletedAt = nil
 	s.layers[layerKey(tenantID, id)] = cfg
 	for key, rec := range s.manifests {
-		if rec.TenantID == tenantID && rec.Layer == id && rec.DeletedAt != nil {
+		if rec.TenantID == tenantID && rec.Layer == id && rec.DeletedAt != nil && rec.DeletedAt.Equal(unregisteredAt) {
 			rec.DeletedAt = nil
 			s.manifests[key] = rec
 		}

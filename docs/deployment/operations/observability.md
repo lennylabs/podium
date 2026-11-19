@@ -460,7 +460,7 @@ The registry, `sign-stored-rows`, or `podium-mcp` cannot use its audit configura
 
 | Cause | Fix |
 |:--|:--|
-| `PODIUM_AUDIT_LOG_PATH` holds an empty element, an element whose `scheme://` prefix is not `http`, `https`, `otlp+http`, or `otlp+https`, an element with one of those prefixes that does not parse as a URL, two file destinations, or an element named twice. | Correct the list. |
+| `PODIUM_AUDIT_LOG_PATH` holds an empty element, an element whose `scheme://` prefix is not `http`, `https`, `otlp+http`, or `otlp+https`, an element with one of those prefixes that does not parse as a URL or whose URL names no host, two file destinations, or an element named twice. | Correct the list. |
 | A destination URL carries userinfo. | Move the credential from the URL into the `PODIUM_AUDIT_HEADERS_FILE` file. |
 | `PODIUM_AUDIT_LOG_PATH` lists `stdout` while `PODIUM_TRACING=stdout` also writes spans to standard output. | Remove one of the two. |
 | The registry cannot open the file destination: the path is a directory, a parent component is a regular file, the parent directory cannot be created, an existing log file cannot be read, or the home directory cannot be resolved for the default `~/.podium/audit.log`. A file the registry can read but cannot open for appending also refuses startup, even when it is the only destination. | Fix the path or its permissions. |

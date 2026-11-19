@@ -443,6 +443,21 @@ func TestAuditDestinations_UnappendableFileRefusesStartup(t *testing.T) {
 	}
 }
 
+// Spec: §8.3, §13.12 — a lone URL destination that names no host refuses the
+// start with config.audit_sink_unavailable, because the registry would
+// otherwise serve with no audit stream that can deliver.
+func TestAuditDestinations_URLWithoutHostRefusesStartup(t *testing.T) {
+	f := newBootFixture(t)
+	t.Setenv("PODIUM_AUDIT_LOG_PATH", "http://")
+	_, runErr := f.bootWith(t, func() {
+		t.Error("the registry served with an audit destination that names no host")
+	})
+	if runErr == nil || !strings.HasPrefix(runErr.Error(), "config.audit_sink_unavailable:") ||
+		!strings.Contains(runErr.Error(), "PODIUM_AUDIT_LOG_PATH") || !strings.Contains(runErr.Error(), "names no host") {
+		t.Fatalf("run = %v, want a config.audit_sink_unavailable refusal naming PODIUM_AUDIT_LOG_PATH and the missing host", runErr)
+	}
+}
+
 // eraseUser posts an erase for user to the registry at addr and returns the
 // status.
 func eraseUser(t *testing.T, addr, user string) int {

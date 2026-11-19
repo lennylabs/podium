@@ -280,18 +280,36 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 — a PODIUM_OPERATOR_TOKEN shorter than 32 characters fails
-// validation with config.invalid without echoing the value, and one of 32
-// characters passes.
+// publicConfig is a valid public-mode configuration carrying token.
+func publicConfig(token string) *Config {
+	return &Config{storeType: "sqlite", publicMode: true, bind: "127.0.0.1:0", operatorToken: token}
+}
+
+// Spec: §13.12 — on a public-mode registry a PODIUM_OPERATOR_TOKEN shorter
+// than 32 characters, counted as Unicode code points, fails validation with
+// config.invalid without echoing the value, one of 32 characters passes, and
+// an unset one passes.
 func TestConfigValidate_OperatorTokenLength(t *testing.T) {
 	t.Parallel()
-	err := (&Config{storeType: "sqlite", operatorToken: "short-secret"}).validate()
-	if err == nil || !strings.Contains(err.Error(), "config.invalid: PODIUM_OPERATOR_TOKEN must be at least 32 characters") ||
-		strings.Contains(err.Error(), "short-secret") {
-		t.Errorf("short token: err = %v", err)
+	for name, token := range map[string]string{
+		"short":                       "short-secret",
+		"31 characters in 62 bytes":   strings.Repeat("é", 31),
+		"17 characters over 32 bytes": strings.Repeat("é", 16) + "x",
+	} {
+		err := publicConfig(token).validate()
+		if err == nil || !strings.Contains(err.Error(), "config.invalid: PODIUM_OPERATOR_TOKEN must be at least 32 characters") ||
+			strings.Contains(err.Error(), token) {
+			t.Errorf("%s: err = %v", name, err)
+		}
 	}
-	if err := (&Config{storeType: "sqlite", operatorToken: strings.Repeat("k", 32)}).validate(); err != nil {
-		t.Errorf("32-character token: err = %v", err)
+	for name, token := range map[string]string{
+		"unset":                    "",
+		"32 characters":            strings.Repeat("k", 32),
+		"32 multi-byte characters": strings.Repeat("é", 32),
+	} {
+		if err := publicConfig(token).validate(); err != nil {
+			t.Errorf("%s: err = %v", name, err)
+		}
 	}
 	// Spec: §13.12 — no request header carries whitespace or a control
 	// character, so a token holding one is refused at startup rather than
@@ -301,10 +319,22 @@ func TestConfigValidate_OperatorTokenLength(t *testing.T) {
 		"inner space":      strings.Repeat("k", 16) + " " + strings.Repeat("k", 16),
 		"control":          strings.Repeat("k", 32) + "\x01",
 	} {
-		err := (&Config{storeType: "sqlite", operatorToken: token}).validate()
+		err := publicConfig(token).validate()
 		if err == nil || !strings.Contains(err.Error(), "config.invalid: PODIUM_OPERATOR_TOKEN must not contain whitespace or control characters") ||
 			strings.Contains(err.Error(), strings.Repeat("k", 16)) {
 			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
+// Spec: §13.12 — PODIUM_OPERATOR_TOKEN has no effect outside public mode, so
+// a registry outside public mode does not validate it: a short value and one
+// holding a newline both pass.
+func TestConfigValidate_OperatorTokenIgnoredOutsidePublicMode(t *testing.T) {
+	t.Parallel()
+	for _, token := range []string{"short-secret", strings.Repeat("k", 32) + "\n"} {
+		if err := (&Config{storeType: "sqlite", operatorToken: token}).validate(); err != nil {
+			t.Errorf("token %q outside public mode: err = %v", token, err)
 		}
 	}
 }

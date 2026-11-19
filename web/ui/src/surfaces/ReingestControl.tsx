@@ -364,7 +364,7 @@ function IngestReport({
             </div>
             <NeedsAttention
               rejected={rejected.length}
-              conflicts={conflicts.length}
+              conflictList={conflicts}
               lintFailures={lintFailures}
               onOpen={setDetail}
             />
@@ -459,6 +459,30 @@ function Stat({
   );
 }
 
+/** REMOVED_VERSION_CAUSE explains a conflict on a removed version. Such a
+ * version holds its (id, version) whatever the incoming content is, so equal
+ * hashes are not a content difference. Only the layer that contributed it
+ * serves it again: by a reingest of the same content, or, when that layer's
+ * unregister removed it, by a restore of the layer. A version an ingest
+ * removed before the unregister needs the restore and then a reingest. The
+ * wording matches the server's ingest.immutable_violation message. */
+const REMOVED_VERSION_CAUSE =
+  "only the layer that contributed it serves again, by a reingest of the same content or, when the layer's unregister removed it, a restore of the layer, until the registry purges it.";
+
+/** conflictCause names why the conflicts arose, distinguishing a version
+ * published with different content from a removed version, as each entry's
+ * `removed` member says. */
+function conflictCause(conflicts: IngestConflict[]): string {
+  const removed = conflicts.filter((conflict) => conflict.removed === true).length;
+  if (removed === 0) {
+    return 'a published version was republished with different content.';
+  }
+  if (removed === conflicts.length) {
+    return `${removed === 1 ? 'the version is a removed version' : 'each version is a removed version'}, which ${REMOVED_VERSION_CAUSE}`;
+  }
+  return `a version was republished with different content, or is a removed version, which ${REMOVED_VERSION_CAUSE}`;
+}
+
 /** NeedsAttention states what the counts mean for the reader's next action.
  * A rejection and a conflict have different remedies, and lint failures have
  * no list to open, so each is named rather than left as a number in a row of
@@ -468,15 +492,16 @@ function Stat({
  * sentence. */
 function NeedsAttention({
   rejected,
-  conflicts,
+  conflictList,
   lintFailures,
   onOpen,
 }: {
   rejected: number;
-  conflicts: number;
+  conflictList: IngestConflict[];
   lintFailures: number;
   onOpen: (detail: IngestDetail) => void;
 }) {
+  const conflicts = conflictList.length;
   if (rejected === 0 && conflicts === 0 && lintFailures === 0) {
     return null;
   }
@@ -517,8 +542,8 @@ function NeedsAttention({
             >
               {conflicts} immutability {conflicts === 1 ? 'conflict' : 'conflicts'}
             </button>
-            {' — '}a published version was republished with different content. Bump the version
-            and reingest.
+            {' — '}
+            {conflictCause(conflictList)} Bump the version and reingest.
           </p>
         </div>
       )}
@@ -555,7 +580,7 @@ export function summaryText(layerID: string, summary: IngestSummary, finishedAt:
     lines.push(`rejected ${rejection.artifact_id} ${rejection.code}: ${rejection.reason}`);
   }
   for (const conflict of conflicts) {
-    lines.push(`conflict ${conflict.artifact_id}@${conflict.version} ${conflict.code}`);
+    lines.push(`conflict ${conflict.artifact_id}@${conflict.version} ${conflict.code}${conflict.removed === true ? " removed version" : ""}`);
   }
   for (const advisory of advisories) {
     lines.push(`${advisory.severity} ${advisory.artifact_id} ${advisory.code}: ${advisory.message}`);
@@ -688,13 +713,22 @@ function RejectionList({ rejections }: { rejections: IngestRejection[] }) {
  * reader comparing them has to find where. Each is elided the way every other
  * hash in this UI is, with a wider lead than the artifact rail takes because
  * two hashes read against each other need more digest before they part. The
- * whole hash stays on the title, so a reader who needs to copy it has it. */
+ * whole hash stays on the title, so a reader who needs to copy it has it.
+ * An entry the server marks `removed` is held by a removed version, whose
+ * hash can equal the incoming one, so the lede and the entry name the removal
+ * and its hash is labelled removed rather than stored. */
 function ConflictList({ conflicts }: { conflicts: IngestConflict[] }) {
+  const removed = conflicts.filter((conflict) => conflict.removed === true).length;
+  let lede = 'Each version already exists with different content.';
+  if (removed === conflicts.length) {
+    lede = `Each version is a removed version, which ${REMOVED_VERSION_CAUSE}`;
+  } else if (removed > 0) {
+    lede = `Each version already exists with different content or is a removed version, which ${REMOVED_VERSION_CAUSE}`;
+  }
   return (
     <section className="ingest-detail" aria-label="Immutability conflicts">
       <p className="ingest-detail-lede">
-        Each version already exists with different content. A published version is immutable, so bump the version and
-        reingest.
+        {lede} A published version is immutable, so bump the version and reingest.
       </p>
       <ul className="ingest-entries">
         {conflicts.map((conflict) => (
@@ -704,9 +738,10 @@ function ConflictList({ conflicts }: { conflicts: IngestConflict[] }) {
                 {conflict.artifact_id}@{conflict.version}
               </span>
               <Badge tone="accent">{conflict.code}</Badge>
+              {conflict.removed === true && <Badge tone="quiet">removed version</Badge>}
             </p>
             <dl className="ingest-hashes mono">
-              <dt className="quiet">stored</dt>
+              <dt className="quiet">{conflict.removed === true ? 'removed' : 'stored'}</dt>
               <dd title={conflict.old_hash}>{abbreviateHash(conflict.old_hash ?? '', 8)}</dd>
               <dt className="quiet">incoming</dt>
               <dd title={conflict.new_hash}>{abbreviateHash(conflict.new_hash ?? '', 8)}</dd>
@@ -1156,7 +1191,7 @@ export function ReingestRunReport({
             </div>
             <NeedsAttention
               rejected={totals.rejected.length}
-              conflicts={totals.conflicts.length}
+              conflictList={totals.conflicts}
               lintFailures={totals.lintFailures}
               onOpen={setDetail}
             />
