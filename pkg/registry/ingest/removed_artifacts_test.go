@@ -185,5 +185,39 @@ func TestIngest_RemovedVersionInAnotherLayerIsRefused(t *testing.T) {
 	if res.Accepted != 0 || len(res.Conflicts) != 1 || res.Conflicts[0].ArtifactID != "ops/gone" {
 		t.Fatalf("other layer's cycle: accepted=%d conflicts=%+v, want one conflict on ops/gone", res.Accepted, res.Conflicts)
 	}
+	// The conflict names the removed row as the holder, with its hash, which
+	// equals the new one because the bytes are the same.
+	if c := res.Conflicts[0]; !c.Removed || c.OldHash == "" || c.OldHash != c.NewHash {
+		t.Errorf("conflict = %+v, want Removed with OldHash equal to NewHash", c)
+	}
 	erAssertUnserved(t, reg, "ops/gone")
+}
+
+// Spec: §7.3.1 (Removed artifacts), §4.1, §4.6 — a retired row, of a removed
+// type or declaring extends:, is served by no read path, so a cycle whose
+// snapshot no longer holds its package does not report it as removed and
+// leaves the row stored and untombstoned.
+func TestIngest_RetiredRowIsNotRemoved(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	command := erRow("ops/old", "1.0.0", "team", erDoc("command", "1.0.0", "", "Old body."), 1)
+	command.Type = "command"
+	erSeed(t, st, command)
+	erSeed(t, st, erRow("ops/child", "1.0.0", "team", erDoc("agent", "1.0.0", "extends: ops/base\n", "Child body."), 2))
+	res := erIngest(t, st, "team", map[string]string{
+		"ops/kept/ARTIFACT.md": removedAgent("Checklist for the weekly on-call handover", "1.0.0"),
+	})
+	all, err := st.ListManifestsIncludingDeleted(context.Background(), erTenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tombstoned []string
+	for _, m := range all {
+		if m.DeletedAt != nil {
+			tombstoned = append(tombstoned, m.ArtifactID)
+		}
+	}
+	if len(res.Removed) != 0 || len(tombstoned) != 0 || len(all) != 3 {
+		t.Errorf("removed=%v tombstoned=%v stored=%d, want no removal and 3 stored rows", res.Removed, tombstoned, len(all))
+	}
 }

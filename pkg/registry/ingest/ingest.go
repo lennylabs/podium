@@ -428,12 +428,20 @@ type EmbeddingFailure struct {
 	Reason     string
 }
 
-// ConflictReport names a (id, version) that already has different bytes.
+// ConflictReport names a (id, version) that already has different bytes, or
+// that a soft-deleted row holds.
 type ConflictReport struct {
 	ArtifactID string
 	Version    string
-	OldHash    string
-	NewHash    string
+	// OldHash is the content hash of the row holding the version. It is empty
+	// only when the commit refused the version and no holding row could be
+	// read afterwards.
+	OldHash string
+	NewHash string
+	// Removed reports that the holding row is a version §7.3.1 removed: a
+	// soft-deleted row this cycle cannot restore, which holds the version
+	// whatever the new content hash is.
+	Removed bool
 }
 
 // RejectedArtifact names an artifact rejected at ingest with a reason.
@@ -848,9 +856,10 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 // serves, a live row of which it contributed, whose package the snapshot no
 // longer contains. rowsByID is the listing the cycle read before its writes;
 // an artifact the cycle stored is in the snapshot, so the listing's age
-// changes nothing.
+// changes nothing. A retired row is served by no read path, so the layer does
+// not serve its artifact, and the retired-row rule keeps the row stored.
 //
-// Spec: §7.3.1 (Removed artifacts)
+// Spec: §7.3.1 (Removed artifacts), §4.1, §4.6
 func removedArtifacts(rowsByID map[string][]store.ManifestRecord, layerID string, inSnapshot map[string]bool) []string {
 	out := []string{}
 	for id, rows := range rowsByID {
@@ -858,7 +867,7 @@ func removedArtifacts(rowsByID map[string][]store.ManifestRecord, layerID string
 			continue
 		}
 		for _, row := range rows {
-			if row.Layer == layerID && row.DeletedAt == nil {
+			if row.Layer == layerID && row.DeletedAt == nil && !retired(row) {
 				out = append(out, id)
 				break
 			}
@@ -924,7 +933,7 @@ func (p *manifestPlacer) place(ctx context.Context, rowsByID map[string][]store.
 			}
 			p.mr.Version = v
 		}
-		out, taken, err := p.attempt(ctx)
+		out, taken, err := p.attempt(ctx, rowsByID[p.mr.ArtifactID])
 		if err != nil || !taken || attempt == attempts {
 			return out, err
 		}
@@ -938,8 +947,10 @@ func (p *manifestPlacer) place(ctx context.Context, rowsByID map[string][]store.
 
 // attempt places the record at its current version. taken reports that a
 // row with a different content hash holds that version, found by the
-// pre-check or by the commit, in which case out carries the conflict.
-func (p *manifestPlacer) attempt(ctx context.Context) (out placement, taken bool, err error) {
+// pre-check or by the commit, in which case out carries the conflict. rows
+// are the stored rows of the artifact, soft-deleted ones included, which
+// name the holder of a version the commit refuses.
+func (p *manifestPlacer) attempt(ctx context.Context, rows []store.ManifestRecord) (out placement, taken bool, err error) {
 	mr := p.mr
 	existing, err := p.st.GetManifest(ctx, p.req.TenantID, mr.ArtifactID, mr.Version)
 	switch {
@@ -967,15 +978,34 @@ func (p *manifestPlacer) attempt(ctx context.Context) (out placement, taken bool
 	}
 	if err := commitManifest(ctx, p.st, p.req, *mr); err != nil {
 		if errors.Is(err, store.ErrImmutableViolation) {
-			return placement{conflict: &ConflictReport{
-				ArtifactID: mr.ArtifactID,
-				Version:    mr.Version,
-				NewHash:    mr.ContentHash,
-			}}, true, nil
+			return placement{conflict: p.commitConflict(ctx, rows)}, true, nil
 		}
 		return placement{}, false, err
 	}
 	return placement{}, false, nil
+}
+
+// commitConflict describes a version the commit refused although the
+// pre-check found no served row at it. Either a concurrent cycle stored a
+// row there in between, which a second read finds, or a soft-deleted row
+// holds it: a removed version, which another layer's cycle and a different
+// content hash cannot restore.
+//
+// Spec: §7.3.1 (Removed artifacts)
+func (p *manifestPlacer) commitConflict(ctx context.Context, rows []store.ManifestRecord) *ConflictReport {
+	mr := p.mr
+	out := &ConflictReport{ArtifactID: mr.ArtifactID, Version: mr.Version, NewHash: mr.ContentHash}
+	if existing, err := p.st.GetManifest(ctx, p.req.TenantID, mr.ArtifactID, mr.Version); err == nil {
+		out.OldHash = existing.ContentHash
+		return out
+	}
+	for _, row := range rows {
+		if row.Version == mr.Version && row.DeletedAt != nil {
+			out.OldHash, out.Removed = row.ContentHash, true
+			break
+		}
+	}
+	return out
 }
 
 // prepare runs the insert-path steps that precede the commit: §4.7.9 signing

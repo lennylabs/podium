@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -78,6 +79,42 @@ func TestLoadArtifact_DeprecationMembersAndRevalidation(t *testing.T) {
 	head, _ := doLoad(t, http.MethodHead, url, "")
 	if got := head.Header.Get(server.DeprecationWarningHeader); got != want {
 		t.Errorf("HEAD %s = %q, want %q", server.DeprecationWarningHeader, got, want)
+	}
+}
+
+// Spec: §7.2 (Deprecation members), §4.7.4, §13.4 — on a SQLite store, which
+// keeps no replaced_by column, a HEAD revalidation of a load of a deprecated
+// version carries the same warning text, upgrade target included, as the GET
+// of the same load.
+func TestLoadArtifact_HeadWarningMatchesGetOnSQLite(t *testing.T) {
+	t.Parallel()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "podium.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
+		t.Fatal(err)
+	}
+	fm := []byte("---\ntype: rule\nversion: 1.0.0\ndescription: d\ndeprecated: true\nreplaced_by: team/y\n---\n")
+	rec := storetest.Seal(t, store.ManifestRecord{
+		TenantID: "default", ArtifactID: "team/x", Version: "1.0.0", Type: "rule", Layer: "L",
+		Frontmatter: fm, Body: []byte("body\n"), Deprecated: true, ReplacedBy: "team/y",
+	}, nil, nil)
+	if err := st.PutManifest(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+	reg := core.New(st, "default", []layer.Layer{{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}}})
+	ts := httptest.NewServer(server.New(reg).Handler())
+	t.Cleanup(ts.Close)
+
+	url := ts.URL + "/v1/load_artifact?id=team/x"
+	_, body := doLoad(t, http.MethodGet, url, "")
+	head, _ := doLoad(t, http.MethodHead, url, "")
+	got := head.Header.Get(server.DeprecationWarningHeader)
+	if body["replaced_by"] != "team/y" || got == "" || got != body["deprecation_warning"] {
+		t.Errorf("GET replaced_by=%v warning=%v; HEAD %s=%q; want team/y and the same warning text",
+			body["replaced_by"], body["deprecation_warning"], server.DeprecationWarningHeader, got)
 	}
 }
 

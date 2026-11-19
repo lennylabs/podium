@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // UsageDim names a usage_daily key column a UsageSumQuery groups by.
@@ -282,7 +283,12 @@ func argList(arg func(any) string, values []string) string {
 
 // pathsSQL renders the path matches as one disjunction. A subtree match
 // compares a prefix with substr rather than LIKE, so an ID holding % or _
-// needs no escaping.
+// needs no escaping. SQLite and Postgres count substr positions in
+// characters, so the prefix length is its character count: a byte count
+// would cut an ID holding a multi-byte character at the wrong place and
+// match nothing.
+//
+// Spec: §8.7, §6.3.1
 func pathsSQL(arg func(any) string, paths []UsagePath) string {
 	terms := make([]string, 0, len(paths))
 	for _, p := range paths {
@@ -292,7 +298,7 @@ func pathsSQL(arg func(any) string, paths []UsagePath) string {
 		case p.Subtree:
 			prefix := p.Path + "/"
 			terms = append(terms, "artifact_id = "+arg(p.Path)+
-				" OR substr(artifact_id, 1, "+arg(len(prefix))+") = "+arg(prefix))
+				" OR substr(artifact_id, 1, "+arg(utf8.RuneCountInString(prefix))+") = "+arg(prefix))
 		default:
 			terms = append(terms, "artifact_id = "+arg(p.Path))
 		}

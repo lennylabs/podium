@@ -236,6 +236,25 @@ func TestIngest_AutoVersionCommitConflictRederives(t *testing.T) {
 	}
 }
 
+// A competing row that lands between the pre-check and the commit on every
+// attempt ends the bounded attempts with a conflict that names the competing
+// row's hash, read after the commit refused the version.
+// Spec: §7.3.1
+func TestIngest_CommitConflictNamesTheCompetingHash(t *testing.T) {
+	t.Parallel()
+	skill := avSkill("mine")
+	st := &interveningStore{Store: avStore(t)}
+	st.beforePut = func(_ context.Context, mr store.ManifestRecord) error {
+		st.seed(t, avRow("L", mr.Version, "sha256:competing", time.Now()))
+		return nil
+	}
+	res := avIngest(t, st, "L", avPlainFS(skill))
+	want := ConflictReport{ArtifactID: "x", Version: "0.0.0-auto.2", OldHash: "sha256:competing", NewHash: avHash(skill)}
+	if len(res.Conflicts) != 1 || res.Conflicts[0] != want {
+		t.Fatalf("conflicts = %+v, want %+v", res.Conflicts, want)
+	}
+}
+
 // (c) A commit that keeps failing with ErrImmutableViolation ends after the
 // bounded attempts with the existing conflict report and no row.
 // Spec: §7.3.1

@@ -434,22 +434,33 @@ func rowsChanged(res sql.Result, err error) (bool, error) {
 }
 
 // SoftDeleteArtifacts tombstones the live rows layerID contributed for each
-// of artifactIDs (§7.3.1 removed artifacts).
+// of artifactIDs (§7.3.1 removed artifacts). It binds the IDs in batches of
+// softDeleteBatchSize inside one transaction.
 func (s *SQLite) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time) error {
 	if len(artifactIDs) == 0 {
 		return nil
 	}
-	args := []any{at.UTC().Format(time.RFC3339Nano), tenantID, layerID}
-	marks := make([]string, len(artifactIDs))
-	for i, id := range artifactIDs {
-		marks[i] = "?"
-		args = append(args, id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	_, err := rowsChanged(s.db.ExecContext(ctx, `
-		UPDATE manifests SET deleted_at = ?
-		WHERE tenant_id = ? AND layer = ? AND deleted_at IS NULL
-			AND artifact_id IN (`+strings.Join(marks, ", ")+`)`, args...))
-	return err
+	defer func() { _ = tx.Rollback() }()
+	stamp := at.UTC().Format(time.RFC3339Nano)
+	for _, batch := range idBatches(artifactIDs, softDeleteBatchSize) {
+		args := []any{stamp, tenantID, layerID}
+		marks := make([]string, len(batch))
+		for i, id := range batch {
+			marks[i] = "?"
+			args = append(args, id)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE manifests SET deleted_at = ?
+			WHERE tenant_id = ? AND layer = ? AND deleted_at IS NULL
+				AND artifact_id IN (`+strings.Join(marks, ", ")+`)`, args...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // PutManifestWithVectorPending commits the manifest and the §4.7.2 vector
@@ -1033,31 +1044,35 @@ func (s *SQLite) DeleteLayerConfig(ctx context.Context, tenantID, id string) err
 	return tx.Commit()
 }
 
-// RestoreLayerConfig clears the soft-delete tombstone on a layer and its
-// artifacts (§8.4 admin recovery).
+// RestoreLayerConfig clears the soft-delete tombstone on a layer and on the
+// artifacts its unregister tombstoned (§8.4 admin recovery). DeleteLayerConfig
+// stamps the layer and those artifacts with one timestamp, so a row whose
+// tombstone differs was removed by an earlier ingest and stays removed. The
+// artifacts are cleared first, while the layer's tombstone is still readable.
+//
+// Spec: §7.3.1 (Removed artifacts), §8.4
 func (s *SQLite) RestoreLayerConfig(ctx context.Context, tenantID, id string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE manifests SET deleted_at = NULL
+		WHERE tenant_id = ? AND layer = ? AND deleted_at = (
+			SELECT deleted_at FROM layer_configs WHERE tenant_id = ? AND id = ?)`,
+		tenantID, id, tenantID, id); err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE layer_configs SET deleted_at = NULL
 		WHERE tenant_id = ? AND id = ? AND deleted_at IS NOT NULL`, tenantID, id)
+	changed, err := rowsChanged(res, err)
 	if err != nil {
 		return err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
+	if !changed {
 		return ErrNotFound
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE manifests SET deleted_at = NULL
-		WHERE tenant_id = ? AND layer = ? AND deleted_at IS NOT NULL`, tenantID, id); err != nil {
-		return err
 	}
 	return tx.Commit()
 }

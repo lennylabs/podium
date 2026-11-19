@@ -1,6 +1,7 @@
 package serverboot
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -97,11 +98,10 @@ type yamlIdentityCfg struct {
 // audience and a sequence naming several.
 //
 // The custom decoder is required rather than stylistic. A plain []string field
-// rejects the scalar form with a type error, readYAMLConfig wraps it, and
-// LoadConfig responds to that error by logging one warning line and skipping
-// the whole overlay, so every registry whose registry.yaml writes
-// `audience: https://podium.acme.com` would boot with its entire config file
-// discarded.
+// rejects the scalar form with a type error, readYAMLConfig turns it into a
+// config.invalid error, and validate refuses the start, so every registry
+// whose registry.yaml writes `audience: https://podium.acme.com` would fail
+// to start.
 type audienceList []string
 
 // UnmarshalYAML decodes identity_provider.audience from a scalar or a
@@ -295,7 +295,9 @@ func expandEnvVars(data []byte) []byte {
 
 // readYAMLConfig loads ~/.podium/registry.yaml (or PODIUM_CONFIG_FILE
 // override), resolves §13.12 ${ENV_VAR} interpolation, and unwraps the
-// top-level `registry:` block. Missing file returns (nil, nil).
+// top-level `registry:` block. Missing file returns (nil, nil). A file that
+// exists but cannot be read or does not decode returns a config.invalid
+// error, which validate refuses the start with.
 func readYAMLConfig() (*yamlConfig, error) {
 	path := os.Getenv("PODIUM_CONFIG_FILE")
 	if path == "" {
@@ -310,7 +312,7 @@ func readYAMLConfig() (*yamlConfig, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, configFileReadError(path, err)
 	}
 	// §13.12: resolve ${ENV_VAR} interpolation before parsing so a config
 	// written with the documented secret-handling form connects with the
@@ -318,9 +320,42 @@ func readYAMLConfig() (*yamlConfig, error) {
 	data = expandEnvVars(data)
 	var out fileConfig
 	if err := yaml.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, configFileParseError(path, err)
 	}
 	return &out.Registry, nil
+}
+
+// configFileReadError is the refusal for a registry.yaml that exists but
+// cannot be read. It carries the operating system's reason, such as
+// "permission denied", which holds no file content.
+//
+// Spec: §13.12
+func configFileReadError(path string, err error) error {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		err = pathErr.Err
+	}
+	return fmt.Errorf("config.invalid: registry configuration %s cannot be read: %w", path, err)
+}
+
+// yamlErrorLine finds the line number the YAML parser reports at the start of
+// its message: "yaml: line N: ..." for a syntax error and "yaml: unmarshal
+// errors:\n  line N: ..." for a type error. Only that prefix is matched, so
+// no digit from the quoted remainder is read.
+var yamlErrorLine = regexp.MustCompile(`\Ayaml: (?:unmarshal errors:\n\s*)?line (\d+):`)
+
+// configFileParseError is the refusal for a registry.yaml that does not
+// decode. It names the file and the line the parser reports, and quotes no
+// other part of the parser's message: ${ENV_VAR} interpolation runs before
+// parsing, so the message can quote a substituted secret, as "unknown anchor
+// 'tail' referenced" does for a token that starts with '*'.
+//
+// Spec: §13.12
+func configFileParseError(path string, err error) error {
+	if m := yamlErrorLine.FindStringSubmatch(err.Error()); m != nil {
+		return fmt.Errorf("config.invalid: registry configuration %s does not parse at line %s", path, m[1])
+	}
+	return fmt.Errorf("config.invalid: registry configuration %s does not parse", path)
 }
 
 // applyYAML overlays values from the YAML config onto c. Env-set

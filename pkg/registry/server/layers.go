@@ -2317,13 +2317,25 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 	// opaque count this previously returned.
 	conflicts := make([]map[string]any, 0, len(res.Conflicts))
 	for _, c := range res.Conflicts {
-		conflicts = append(conflicts, map[string]any{
+		entry := map[string]any{
 			"artifact_id": c.ArtifactID,
 			"version":     c.Version,
-			"old_hash":    c.OldHash,
 			"new_hash":    c.NewHash,
 			"code":        "ingest.immutable_violation",
-		})
+		}
+		// The holder's hash is unknown only when the commit refused the
+		// version and no holding row could be read afterwards; an empty
+		// value would misreport it.
+		if c.OldHash != "" {
+			entry["old_hash"] = c.OldHash
+		}
+		// Spec: §7.3.1 (Removed artifacts) — a removed version holds its
+		// (id, version) whatever the new content hash is, so the entry says so
+		// and a reader does not take equal hashes for a content difference.
+		if c.Removed {
+			entry["removed"] = true
+		}
+		conflicts = append(conflicts, entry)
 	}
 	// A snapshot whose only outcome is conflicts (nothing accepted, nothing
 	// idempotent) is a pure rejection: surface it as the §6.10
@@ -2334,9 +2346,7 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 	// when nothing else succeeded), so a mixed snapshot still returns 200 with
 	// the accepted artifacts and the conflicts reported per-artifact.
 	if len(res.Conflicts) > 0 && res.Accepted == 0 && res.Idempotent == 0 {
-		first := res.Conflicts[0]
-		msg := fmt.Sprintf("same-version content conflict: %s@%s already exists with different content; bump the version",
-			first.ArtifactID, first.Version)
+		msg := conflictMessage(res.Conflicts[0])
 		if len(res.Conflicts) > 1 {
 			msg = fmt.Sprintf("%s (and %d more)", msg, len(res.Conflicts)-1)
 		}
@@ -2396,6 +2406,24 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		// so it marshals as [] when the cycle removed nothing.
 		"removed": res.Removed,
 	})
+}
+
+// conflictMessage is the ingest.immutable_violation message for one conflict.
+// A removed version holds its (id, version) whatever the new content hash is,
+// so its message states the removal rather than a content difference. The
+// layer that contributed the version can be live or unregistered, so the
+// message names both ways that layer serves the version again: a reingest of
+// the same content into it, or, for a version its unregister removed, a
+// restore of the layer.
+//
+// Spec: §7.3.1 (Removed artifacts)
+func conflictMessage(c ingest.ConflictReport) string {
+	if c.Removed {
+		return fmt.Sprintf("same-version conflict: %s@%s is a removed version, which only the layer that contributed it serves again, by a reingest of the same content or, when the layer's unregister removed it, a restore of the layer, until the registry purges it; bump the version",
+			c.ArtifactID, c.Version)
+	}
+	return fmt.Sprintf("same-version content conflict: %s@%s already exists with different content; bump the version",
+		c.ArtifactID, c.Version)
 }
 
 // writeReingestError maps the ingest-pipeline sentinels to their §6.10

@@ -59,7 +59,13 @@ func configShow(args []string) int {
 // source of each value (env var name, registry.yaml, or "default").
 // API keys / DSNs are redacted. spec: §13.10, §13.12.
 func configServerShow(asJSON bool) int {
-	settings := serverboot.LoadConfig().Settings()
+	cfg := serverboot.LoadConfig()
+	if err := cfg.ConfigFileError(); err != nil {
+		// The settings below then come from the environment and defaults
+		// alone, and the registry refuses to start on this file.
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
+	settings := cfg.Settings()
 	if asJSON {
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"settings": settings})
 		return 0

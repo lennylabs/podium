@@ -28,6 +28,7 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"gopkg.in/yaml.v3"
@@ -2116,6 +2117,10 @@ type Config struct {
 	// channel and also serves `podium config show --server`
 	// (cmd/podium/config.go:62), which stays usable on a malformed value.
 	idpGroupMappingErr error
+	// configFileErr records why registry.yaml could not be read or decoded,
+	// for (*Config).validate to refuse the start with. It is deferred for the
+	// same reason as idpGroupMappingErr, and it names the file and line only.
+	configFileErr error
 	// oauthIssuer is the §6.3.3 / §13.12 OIDC issuer URL for the oidc-jwt
 	// provider (PODIUM_OAUTH_ISSUER or identity_provider.issuer). The registry
 	// derives the JWKS from ${issuer}/.well-known/openid-configuration and
@@ -2597,9 +2602,12 @@ func LoadConfig() *Config {
 		exposeScopePreview: envBoolPtr("PODIUM_EXPOSE_SCOPE_PREVIEW"),
 	}
 	// §13.10 ~/.podium/registry.yaml: load and overlay onto env-
-	// derived defaults. Env values keep precedence per applyYAML.
+	// derived defaults. Env values keep precedence per applyYAML. A file that
+	// cannot be read or does not decode is carried to validate, which refuses
+	// the start: starting on the defaults would drop the configured identity
+	// provider, layers, and store settings (§13.12).
 	if y, err := readYAMLConfig(); err != nil {
-		log.Printf("warning: ignored registry.yaml: %v", err)
+		c.configFileErr = err
 	} else {
 		applyYAML(c, y)
 	}
@@ -2716,7 +2724,21 @@ func LoadConfig() *Config {
 	return c
 }
 
+// ConfigFileError reports why registry.yaml could not be read or decoded, or
+// nil when it was read or is absent. `podium config show --server` prints it,
+// because the settings it shows then come from the environment and defaults
+// alone. The error names the file and line only.
+//
+// Spec: §13.12
+func (c *Config) ConfigFileError() error { return c.configFileErr }
+
 func (c *Config) validate() error {
+	// §13.12: a registry.yaml that exists but cannot be read or decoded
+	// refuses the start before any other check, because every value below
+	// may have been meant to come from it.
+	if c.configFileErr != nil {
+		return c.configFileErr
+	}
 	startup := server.StartupConfig{
 		PublicMode:           c.publicMode,
 		IdentityProvider:     c.identityProvider,
@@ -2770,21 +2792,36 @@ func (c *Config) validate() error {
 		return fmt.Errorf("missing required configuration for the selected backend(s): %s",
 			strings.Join(missing, ", "))
 	}
-	// §13.12: a short operator token is refused rather than accepted as a
-	// guessable secret.
-	if c.operatorToken != "" && len(c.operatorToken) < server.MinOperatorTokenLength {
-		return fmt.Errorf("config.invalid: PODIUM_OPERATOR_TOKEN must be at least %d characters", server.MinOperatorTokenLength)
-	}
-	// §13.12: no request header can carry whitespace or a control character,
-	// so a token holding one, such as the trailing newline a secret file
-	// often ends with, would match no request and refuse every write.
-	if strings.IndexFunc(c.operatorToken, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
-		return fmt.Errorf("config.invalid: PODIUM_OPERATOR_TOKEN must not contain whitespace or control characters")
+	if c.publicMode {
+		if err := operatorTokenError(c.operatorToken); err != nil {
+			return err
+		}
 	}
 	if c.usage.err != nil {
 		return c.usage.err
 	}
 	return c.semanticOverlapGuard()
+}
+
+// operatorTokenError validates a public-mode registry's PODIUM_OPERATOR_TOKEN.
+// The token has no effect outside public mode, so validate calls it only
+// there. A short token is refused rather than accepted as a guessable secret,
+// and its length is counted in characters, as the refusal states, so a value
+// of a few multi-byte characters cannot pass on its byte count. No request
+// header can carry whitespace or a control character, so a token holding one,
+// such as the trailing newline a secret file often ends with, would match no
+// request and refuse every write. An unset token is valid: public mode then
+// refuses every operation the token admits.
+//
+// Spec: §13.12, §7.3.1
+func operatorTokenError(token string) error {
+	if token != "" && utf8.RuneCountInString(token) < server.MinOperatorTokenLength {
+		return fmt.Errorf("config.invalid: PODIUM_OPERATOR_TOKEN must be at least %d characters", server.MinOperatorTokenLength)
+	}
+	if strings.IndexFunc(token, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+		return fmt.Errorf("config.invalid: PODIUM_OPERATOR_TOKEN must not contain whitespace or control characters")
+	}
+	return nil
 }
 
 // semanticOverlapGuard refuses a start that turns the §7.3.1 semantic overlap

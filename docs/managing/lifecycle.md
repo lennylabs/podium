@@ -116,7 +116,7 @@ A layer is the unit the registry ingests, orders, and removes. These commands ta
 | `podium layer reorder <id> [<id> ...]` | Sets precedence, lowest to highest. A layer declared in `registry.yaml` returns to its configured position at the next restart, so change its position in the file to make the order durable. |
 | `podium layer unregister <id>` | Soft-deletes the layer and the artifacts ingested from it. |
 | `podium layer list --deleted` | Lists the unregistered layers that are still restorable. |
-| `podium layer restore <id>` | Restores an unregistered layer and its artifacts within the recovery window, `PODIUM_LAYER_RECOVERY_DAYS` days, 30 by default. A sweep purges the layer after the window. |
+| `podium layer restore <id>` | Restores an unregistered layer, and the artifacts the unregister removed, within the recovery window, `PODIUM_LAYER_RECOVERY_DAYS` days, 30 by default. An artifact an ingest removed before the unregister stays removed. A sweep purges the layer after the window. |
 
 The reingest response reports lint diagnostics only as a count. Run `podium lint` against the source to read them. Each change to an admin-defined layer or to the layer order records `layer.config_changed`, and each change to a personal layer records `layer.user_registered`.
 

@@ -1277,7 +1277,7 @@ POST /v1/layers/reingest?id={id}
 | Field | Content |
 |:--|:--|
 | `rejected` | Each artifact the cycle dropped for a reason other than a lint failure or a same-version content conflict. Each entry carries `artifact_id`, `code`, and `reason`, and a `details` object when the rule that rejected it defines one. |
-| `conflicts` | Same-version content conflicts. |
+| `conflicts` | Same-version conflicts. Each entry carries `artifact_id`, `version`, `new_hash`, and `code`, which is `ingest.immutable_violation`. It carries `old_hash`, the hash of the row that holds the version, when the registry can read that row. It carries `removed: true` when the version is a removed version, which only the layer that contributed it serves again until the purge, whatever the new content hash is. |
 | `lint_failures` | The count of lint failures. Lint failures are reported only as this count. |
 | `removed` | The identifiers of the artifacts the cycle soft-deleted because the snapshot no longer contains their package. An empty array when none. A removed artifact stays restorable within the recovery window: put its package back and reingest. |
 | `advisories` | The cycle's non-blocking advisories, such as the catalog advisories over the ingested layer and, on a collocated vector backend with the semantic check on, `lint.semantic_overlap`. Each entry carries `artifact_id`, `code`, `severity`, and `message`. An advisory does not stop the artifact from being ingested. |
@@ -1290,7 +1290,7 @@ An artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter does not parse is reje
 |:--|:--|
 | `403 auth.forbidden` | Layer write authorization refuses the caller, or, on a registry in public mode, the request does not carry the [operator token](#operator-token-in-public-mode). |
 | `403 auth.forbidden` with `details.constraint: "local_source"` | Local-source authorization refuses the caller. |
-| `409 ingest.immutable_violation` | The cycle accepted no artifact, classified none unchanged, and has a same-version content conflict. |
+| `409 ingest.immutable_violation` | The cycle accepted no artifact, classified none unchanged, and has a same-version conflict. `details.conflicts` carries the entries the `conflicts` field describes. |
 | `422 ingest.lint_failed` | The cycle accepted no artifact, classified none unchanged, and has a lint failure and no conflict. |
 
 Neither the `409` nor the `422` envelope carries a `rejected` array, so it reports none of the cycle's other drops and no `details`.
@@ -1437,7 +1437,7 @@ POST /v1/layers/restore?id={id}
 
 `GET /v1/layers?deleted=true` lists the soft-deleted layers still inside the recovery window. It filters them on the terms of the [layer read visibility](#layer-read-visibility) rule.
 
-`POST /v1/layers/restore?id={id}` clears the tombstone and recovers the layer and its artifacts.
+`POST /v1/layers/restore?id={id}` clears the tombstone and recovers the layer and the artifacts the unregister soft-deleted. An artifact an ingest removed before the unregister stays soft-deleted.
 
 **Authorization for restore.** [Layer write authorization](#layer-write-authorization): a tenant admin for an admin-defined layer, and the owner or a tenant admin for a user-defined layer. A caller authorized by neither arm is rejected with `auth.forbidden`. On a layer that names a filesystem path on the registry host, [local-source authorization](#local-source-authorization) additionally requires the `admin` role. Any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
 
