@@ -21003,27 +21003,75 @@ describe("usage", () => {
       expect(errors.mock.calls.some((call) => String(call[0]).includes("same key"))).toBe(false);
     });
 
-    // Spec: §13.10, §8.7 — a page that adds no artifact not already listed
-    // ends the list, because reading on from its cursor can repeat the same
-    // rows again.
-    it("ends the list at a page that adds no new artifact", async () => {
+    /** repeatThenNew answers a list whose second page repeats only the
+     * artifact already listed and carries a cursor, and whose third page holds
+     * an artifact not yet listed. A count change that moves listed artifacts
+     * past the cursor position produces that second page (§8.7). */
+    function repeatThenNew(params: Record<string, unknown>): { body: unknown } {
+      if (params.cursor === "c1") {
+        return { body: usageBody({ artifacts: [usageArtifact(traceReview, "platform", 2500)], next_cursor: "c2" }) };
+      }
+      if (params.cursor === "c2") {
+        return { body: usageBody({ artifacts: [usageArtifact(payInvoice, "team-finance", 1544)], next_cursor: null }) };
+      }
+      return { body: usageBody() };
+    }
+
+    // Spec: §13.10, §8.7 — a page that repeats only listed artifacts but
+    // carries a cursor is not the end of the list. The button reads on from
+    // its cursor and lists the artifacts after it.
+    it("reads on past a page of repeated artifacts from the button", async () => {
+      stubUsageReads(repeatThenNew);
+      goTo(usageHref());
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show 50 more" }));
+      await waitFor(() => {
+        expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
+      });
+      const again = await screen.findByRole("button", { name: "Show 50 more" });
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 1 of 312");
+      fireEvent.click(again);
+      const table = screen.getByRole("table", { name: "Usage by artifact" });
+      await within(table).findByRole("link", { name: payInvoice });
+      expect(within(table).getAllByRole("link", { name: traceReview })).toHaveLength(1);
+      expect(usageBodies().filter((b) => b.cursor === "c2")).toHaveLength(1);
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 2 of 312");
+      expect(screen.queryByRole("button", { name: /^Show/ })).toBeNull();
+    });
+
+    // Spec: §13.10, §8.7 — the sentinel reads on past a page of repeated
+    // artifacts the same way.
+    it("reads on past a page of repeated artifacts as the end of the list scrolls into view", async () => {
+      observeInView();
+      stubUsageReads(repeatThenNew);
+      goTo(usageHref());
+      render(<App />);
+      const table = await screen.findByRole("table", { name: "Usage by artifact" });
+      await within(table).findByRole("link", { name: payInvoice });
+      await pause(100);
+      expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
+      expect(usageBodies().filter((b) => b.cursor === "c2")).toHaveLength(1);
+      expect(within(table).getAllByRole("link", { name: traceReview })).toHaveLength(1);
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 2 of 312");
+    });
+
+    // Spec: §13.10 — a page that hands back the cursor it was read with
+    // would read the same page again, so the list ends there.
+    it("ends the list at a page that returns the cursor it was read with", async () => {
       observeInView();
       stubUsageReads((params) => ({
         body:
           params.cursor === "c1"
-            ? usageBody({ artifacts: [usageArtifact(traceReview, "platform", 2500)], next_cursor: "c2" })
+            ? usageBody({ artifacts: [usageArtifact(payInvoice, "team-finance", 1544)], next_cursor: "c1" })
             : usageBody(),
       }));
       goTo(usageHref());
       render(<App />);
-      await screen.findByRole("table", { name: "Usage by artifact" });
-      await waitFor(() => {
-        expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
-      });
+      const table = await screen.findByRole("table", { name: "Usage by artifact" });
+      await within(table).findByRole("link", { name: payInvoice });
       await pause(200);
-      expect(usageBodies().filter((b) => b.cursor === "c2")).toHaveLength(0);
+      expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
       expect(screen.queryByRole("button", { name: /^Show/ })).toBeNull();
-      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 1 of 312");
     });
 
     // Spec: §13.10, §8.7 — the artifact count can fall below the artifacts

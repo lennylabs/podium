@@ -386,22 +386,24 @@ function ArtifactUsage({
     // dropped rather than appended under the new order.
     const askedIn = generation;
     const listed = rows;
+    const readWith = next;
     setLoadingMore(true);
     setMoreFailed(false);
-    usageReport({ ...params, cursor: next }).then(
+    usageReport({ ...params, cursor: readWith }).then(
       (page) => {
         if (generationRef.current !== askedIn) {
           return;
         }
-        const fresh = unlisted(listed, page.artifacts);
-        setMore((prior) => [...prior, ...fresh]);
+        setMore((prior) => [...prior, ...unlisted(listed, page.artifacts)]);
         // The page's cursor replaces the one it was read with, whether or not
-        // the page held rows. A page that adds no row ends the list: a count
-        // that changed between reads moves an artifact across the cursor, so
-        // the last page can come back empty or repeat rows already listed
-        // (§8.7), and following the earlier cursor again reads the same page
-        // in a loop.
-        setNext(fresh.length === 0 ? null : page.next_cursor);
+        // the page added rows. A count that changed between reads moves
+        // artifacts across the cursor (§8.7), so the last page can come back
+        // empty with no cursor, and a page before it can repeat only rows
+        // already listed while unseen artifacts remain after it. Each cursor
+        // the report issues lies past the one it was read with, so following
+        // it always advances. A cursor equal to the one just read would read
+        // the same page again in a loop, so it ends the list.
+        setNext(page.next_cursor === readWith ? null : page.next_cursor);
         setTotal(page.artifact_count);
         setLoadingMore(false);
       },
