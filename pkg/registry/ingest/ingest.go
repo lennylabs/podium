@@ -281,6 +281,12 @@ type Request struct {
 	// removes artifacts only while the layer holds it. Empty skips both
 	// checks, for a caller with no stored layer row.
 	IngestClaim string
+	// OnFirstWrite, when non-nil, is called once, after the checks that
+	// precede the cycle's writes and before its first store write. A caller
+	// that holds a claim uses it to tell a cycle that failed before writing,
+	// whose claim it may hand back, from one that failed after, whose claim
+	// it keeps (§7.3.1).
+	OnFirstWrite func()
 }
 
 // SemanticOverlapFunc computes the §7.3.1 overlap records of the (artifact,
@@ -531,6 +537,10 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		case err != nil:
 			return nil, fmt.Errorf("ingest: check the ingest claim: %w", err)
 		}
+	}
+	// Every return from here on follows a store write or an attempted one.
+	if req.OnFirstWrite != nil {
+		req.OnFirstWrite()
 	}
 
 	// §4.5.1 — persist every DOMAIN.md so load_domain can read domain

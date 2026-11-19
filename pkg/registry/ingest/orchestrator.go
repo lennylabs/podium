@@ -10,6 +10,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
@@ -38,7 +39,10 @@ type HistoryEmitter func(ctx context.Context, tenantID, layerID, priorRef, newRe
 // whenever the orchestrator runs against a server that exposes
 // /v1/events.
 type SourceIngestOptions struct {
-	Linter          *lint.Linter
+	Linter *lint.Linter
+	// Clock dates the freeze-window check before the claim and the ingest
+	// Request. Nil uses the real clock.
+	Clock           clock.Clock
 	Emit            HistoryEmitter
 	Embedder        EmbedderFunc
 	VectorPut       VectorPutFunc
@@ -127,15 +131,23 @@ func SourceIngestWithOptions(
 	// Spec: §7.3.1 (Removed artifacts) — a refusal that needs no snapshot runs
 	// before the claim, so a cycle a freeze window refuses supersedes no
 	// cycle that the window does not block, such as a break-glass reingest.
-	if err := freezeRefusal(opts.FreezeWindows, time.Now()); err != nil {
+	if opts.Clock == nil {
+		opts.Clock = clock.Real{}
+	}
+	if err := freezeRefusal(opts.FreezeWindows, opts.Clock.Now()); err != nil {
 		return nil, err
 	}
 	claim, previous, stored, err := ClaimLayer(ctx, st, cfg.TenantID, cfg.ID)
 	if err != nil {
 		return nil, err
 	}
-	res, err := runClaimedCycle(ctx, st, provider, stored, opts, claim)
-	if err != nil {
+	// Spec: §7.3.1 (Removed artifacts) — only a cycle that failed before its
+	// first store write hands the claim back. One that wrote, such as one
+	// that removed artifacts and then failed lint, keeps it, because the
+	// cycle it displaced would otherwise resume and undo those writes.
+	wrote := false
+	res, err := runClaimedCycle(ctx, st, provider, stored, opts, claim, func() { wrote = true })
+	if err != nil && !wrote {
 		ReleaseClaim(ctx, st, stored.TenantID, stored.ID, claim, previous)
 	}
 	return res, err
@@ -174,7 +186,8 @@ const claimReleaseTimeout = 10 * time.Second
 
 // runClaimedCycle runs the cycle that holds claim on cfg, the layer as the
 // claim read it: snapshot, history check, ingest, events, and the record.
-func runClaimedCycle(ctx context.Context, st store.Store, provider source.Provider, cfg store.LayerConfig, opts SourceIngestOptions, claim string) (*Result, error) {
+// onFirstWrite runs once, before the cycle's first store write.
+func runClaimedCycle(ctx context.Context, st store.Store, provider source.Provider, cfg store.LayerConfig, opts SourceIngestOptions, claim string, onFirstWrite func()) (*Result, error) {
 	srcCfg := source.LayerConfig{
 		ID: cfg.ID,
 		// Spec: §7.3.1 (Repository credentials). The ingest clones with the stored
@@ -236,6 +249,8 @@ func runClaimedCycle(ctx context.Context, st store.Store, provider source.Provid
 		UseVectorOutbox:            opts.UseVectorOutbox,
 		SemanticOverlap:            opts.SemanticOverlap,
 		IngestClaim:                claim,
+		OnFirstWrite:               onFirstWrite,
+		Clock:                      opts.Clock,
 	})
 	if err != nil {
 		// Spec: §7.3.1 (Removed artifacts) — a cycle that read the whole
@@ -289,6 +304,7 @@ func runClaimedCycle(ctx context.Context, st store.Store, provider source.Provid
 	switch err := st.RecordLayerIngest(ctx, cfg.TenantID, cfg.ID, claim, snap.Reference, ingestedAt); {
 	case errors.Is(err, store.ErrIngestSuperseded):
 		log.Printf("ingest: layer %s: a later cycle claimed the layer before this cycle recorded its reference", cfg.ID)
+		res.Superseded = true
 	case err != nil:
 		return res, fmt.Errorf("update last_ingested_ref: %w", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -168,8 +169,9 @@ func TestSourceIngest_ClaimFailureStopsTheCycle(t *testing.T) {
 
 // Spec: §7.3.1 (Removed artifacts) — a cycle superseded after its check
 // before the writes stops at the removal check: it removes nothing and
-// records nothing. A cycle superseded after its removal records nothing, and
-// the reference stays as the later claim leaves it.
+// records nothing. A cycle superseded after its removal records nothing and
+// reports itself superseded, and the reference stays as the later claim
+// leaves it.
 func TestSourceIngest_ClaimTakenDuringTheCycle(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -200,8 +202,8 @@ func TestSourceIngest_ClaimTakenDuringTheCycle(t *testing.T) {
 				t.Errorf("removal: result %+v, GetManifest(a) %v; want superseded with a still served", res, getErr)
 			}
 		case "record":
-			if res.Superseded || len(res.Removed) != 1 || !errors.Is(getErr, store.ErrNotFound) {
-				t.Errorf("record: result %+v, GetManifest(a) %v; want a removed", res, getErr)
+			if !res.Superseded || len(res.Removed) != 1 || !errors.Is(getErr, store.ErrNotFound) {
+				t.Errorf("record: result %+v, GetManifest(a) %v; want a removed and the cycle reported superseded", res, getErr)
 			}
 		}
 		if lc.LastIngestedRef != "r0" {
@@ -235,6 +237,37 @@ func (s *claimTaker) RecordLayerIngest(ctx context.Context, tenantID, layerID, c
 		}
 	}
 	return s.Memory.RecordLayerIngest(ctx, tenantID, layerID, claim, ref, at)
+}
+
+// Spec: §7.3.1 (Removed artifacts), §4.7.2 — the freeze check before the
+// claim reads the injected clock: a window active at that clock refuses the
+// cycle before it claims the layer, whatever the wall clock says.
+func TestSourceIngest_FreezeCheckBeforeTheClaimReadsTheClock(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := store.NewMemory()
+	if err := mem.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := store.LayerConfig{TenantID: "t", ID: "team", SourceType: "fake"}
+	if err := mem.PutLayerConfig(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := mem.ClaimLayerIngest(ctx, "t", "team", "running"); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2030, 1, 1, 12, 0, 0, 0, time.UTC)
+	window := FreezeWindow{Name: "release", Start: at.Add(-time.Hour), End: at.Add(time.Hour), Blocks: []string{"ingest"}}
+	prov := &orderProvider{files: fstest.MapFS{}, ref: "r1", taken: make(chan struct{})}
+	_, err := SourceIngestWithOptions(ctx, mem, prov, cfg, SourceIngestOptions{
+		Clock: clock.NewFrozen(at), FreezeWindows: []FreezeWindow{window},
+	})
+	if !errors.Is(err, ErrFrozen) {
+		t.Fatalf("SourceIngestWithOptions = %v, want ErrFrozen at the injected time", err)
+	}
+	if err := mem.SoftDeleteArtifacts(ctx, "t", "team", nil, at, "running"); err != nil {
+		t.Errorf("the running cycle's claim checks %v, want it still held", err)
+	}
 }
 
 var errClaim = errors.New("claim failed")

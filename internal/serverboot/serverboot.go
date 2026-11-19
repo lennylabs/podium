@@ -518,6 +518,7 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		// layer as every cycle does, so it and a cycle of the same layer on
 		// another replica supersede each other by claim order.
 		claim, previous, _, err := ingest.ClaimLayer(ctx, st, tenantID, l.ID)
+		wrote := false
 		if err != nil {
 			return nil, err
 		}
@@ -525,7 +526,10 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			TenantID:    tenantID,
 			LayerID:     l.ID,
 			IngestClaim: claim,
-			Files:       source.ConfinedFS(l.Path),
+			// Spec: §7.3.1 (Removed artifacts) — a failure after the first
+			// write keeps the claim, so a displaced cycle cannot undo it.
+			OnFirstWrite: func() { wrote = true },
+			Files:        source.ConfinedFS(l.Path),
 			// §13.10/§13.2.2 public-mode sensitivity ceiling: reject medium and
 			// high artifacts at ingest with ingest.public_mode_rejects_sensitive.
 			// Empty (non-public deployments) imposes no floor.
@@ -558,7 +562,9 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			// computes these artifacts once every bootstrap layer is in.
 		})
 		if err != nil {
-			ingest.ReleaseClaim(ctx, st, tenantID, l.ID, claim, previous)
+			if !wrote {
+				ingest.ReleaseClaim(ctx, st, tenantID, l.ID, claim, previous)
+			}
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
 		}
 		// §7.3.1: the bootstrap ingest just completed, so stamp
@@ -676,6 +682,7 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 			// another replica and this ingest supersede each other by claim
 			// order rather than both removing.
 			claim, previous, _, err := ingest.ClaimLayer(ctx, st, tenantID, lc.ID)
+			wrote := false
 			if err != nil {
 				return nil, err
 			}
@@ -683,7 +690,10 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 				TenantID:    tenantID,
 				LayerID:     lc.ID,
 				IngestClaim: claim,
-				Files:       source.ConfinedFS(lc.LocalPath),
+				// Spec: §7.3.1 (Removed artifacts) — a failure after the first
+				// write keeps the claim, so a displaced cycle cannot undo it.
+				OnFirstWrite: func() { wrote = true },
+				Files:        source.ConfinedFS(lc.LocalPath),
 				// §13.10/§13.2.2 public-mode sensitivity ceiling.
 				RejectAtOrAbove: publicSensitivityFloor(cfg),
 				// §13.10 sandbox-profile ingest gate (off unless enforced).
@@ -706,7 +716,9 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 				// overlap; the startup pass computes these artifacts.
 			})
 			if err != nil {
-				ingest.ReleaseClaim(ctx, st, tenantID, lc.ID, claim, previous)
+				if !wrote {
+					ingest.ReleaseClaim(ctx, st, tenantID, lc.ID, claim, previous)
+				}
 				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
 			}
 			log.Printf("ingested declared layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d, removed=%d)",
