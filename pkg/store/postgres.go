@@ -184,6 +184,9 @@ var orgIndexStmts = []string{
 		ON domains(tenant_id, path)`,
 	`CREATE INDEX IF NOT EXISTS idx_deps_to
 		ON dependencies(tenant_id, to_artifact)`,
+	// The §8.7 report sums one page of artifacts over the window.
+	`CREATE INDEX IF NOT EXISTS idx_usage_daily_artifact
+		ON usage_daily(tenant_id, artifact_id, day)`,
 }
 
 // sharedTableStmts create the cross-org tables in public: the tenants registry

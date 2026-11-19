@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -27,7 +28,7 @@ func publicLayerHarness(t *testing.T, token string) (*server.LayerEndpoint, stri
 		t.Fatal(err)
 	}
 	mode := server.NewModeTracker()
-	e := server.NewLayerEndpoint(st, "t", mode).WithPublicMode().
+	e := server.NewLayerEndpoint(st, "t", mode).WithPublicMode(token).
 		WithAdminAuth(func(r *http.Request) error { return server.CheckOperatorToken(r, token) })
 	mux := http.NewServeMux()
 	mux.Handle("/v1/layers", e.Handler())
@@ -211,5 +212,34 @@ func TestNoIdentityProviderLayerWrites_NeedNoToken(t *testing.T) {
 	}
 	if ids := storedLayerIDs(t, st); len(ids) != 1 {
 		t.Errorf("stored layers = %v, want [new]", ids)
+	}
+}
+
+// Spec: §7.3.1 (Operator token in public mode) — the endpoint checks the
+// token itself, so one built without an admin callback, whose default admits
+// every caller, still refuses a write without the token and admits one that
+// carries it.
+func TestLayerEndpoint_PublicModeChecksTheTokenWithoutAdminAuth(t *testing.T) {
+	t.Parallel()
+	const token = "0123456789abcdef0123456789abcdef"
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	e := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).WithPublicMode(token)
+	post := func(header string) int {
+		req := httptest.NewRequest(http.MethodPost, "/v1/layers/reorder", strings.NewReader(`{"order":[]}`))
+		if header != "" {
+			req.Header.Set("X-Podium-Operator-Token", header)
+		}
+		rec := httptest.NewRecorder()
+		e.Handler().ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := post(""); code != http.StatusForbidden {
+		t.Errorf("write without the token: HTTP %d, want 403", code)
+	}
+	if code := post(token); code == http.StatusForbidden {
+		t.Errorf("write with the token: HTTP %d, want it admitted past the token check", code)
 	}
 }

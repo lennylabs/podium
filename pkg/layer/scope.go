@@ -94,6 +94,21 @@ func (set ScopeSet) AllowsRead(artifactID string) bool {
 	return false
 }
 
+// ReadGrants returns the read and load grants of the set, the grants
+// AllowsRead consults, so a caller can apply the same narrowing where it
+// cannot call AllowsRead per artifact, such as in a store query. Active
+// reports whether the narrowing applies: an active set with no read or load
+// grant allows no artifact.
+func (set ScopeSet) ReadGrants() []Scope {
+	var out []Scope
+	for _, sc := range set.scopes {
+		if sc.Action == "read" || sc.Action == "load" {
+			out = append(out, sc)
+		}
+	}
+	return out
+}
+
 // AllowsLoad reports whether the caller's scopes permit loading artifactID
 // at version. Only a load grant authorizes a load, and a grant carrying an
 // "@version" pin must also match the resolved version. When the set is

@@ -196,6 +196,8 @@ func usageDate(raw string, def, lo, hi time.Time) (time.Time, error) {
 // rows whose layer is in the caller's effective view, the artifact list holds
 // every artifact the caller can see at its current served version, and a
 // layer or artifact the caller cannot see answers as one that names nothing.
+// The store sums the rows, so the report holds sums per layer, client,
+// harness, day, and artifact rather than the window's rows.
 //
 // Spec: §8.7
 func (r *Registry) UsageReport(ctx context.Context, id layer.Identity, q UsageQuery) (*UsageReport, error) {
@@ -213,37 +215,64 @@ func (r *Registry) UsageReport(ctx context.Context, id layer.Identity, q UsageQu
 	}
 	served := dedupeLatest(visible)
 	layers := r.usageLayers(ctx, id, served)
-	rows, err := r.store.ListUsageCounts(ctx, r.TenantFor(ctx), w.from(), w.to())
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
-	}
 	if len(q.LayerIDs) > 0 {
 		layers = keepLayers(layers, q.LayerIDs)
 	}
 	served = keepArtifactsIn(served, layers)
-	return buildUsageReport(w, layers, served, keepUsageRows(rows, layers, layer.ParseScopes(id.Scopes)), q, page), nil
+	src := newUsageSums(r.store, r.TenantFor(ctx), w, layers, layer.ParseScopes(id.Scopes))
+	return buildUsageReport(ctx, src, w, layers, served, q, page)
 }
 
-// keepUsageRows returns the rows the report may sum: those whose layer the
-// report covers and, when the caller's token carries read scopes, whose
-// artifact ID the scopes allow. visibleManifests narrows the artifact list by
-// the same scopes, so without the second test the totals, the layer entries,
-// and their breakdowns would add up artifacts the caller cannot read, and a
-// layer holding one such artifact would give its counts away by subtraction.
+// usageSums reads the report's sums from the store, restricted to the rows
+// the report may sum: those whose layer the report covers and, when the
+// caller's token carries read scopes, whose artifact ID the scopes allow.
+// visibleManifests narrows the artifact list by the same scopes, so without
+// the second restriction the totals, the layer entries, and their breakdowns
+// would add up artifacts the caller cannot read, and a layer holding one such
+// artifact would give its counts away by subtraction.
 //
 // Spec: §8.7, §6.3.1
-func keepUsageRows(rows []store.UsageCount, layers []string, scopes layer.ScopeSet) []store.UsageCount {
-	allowed := make(map[string]bool, len(layers))
-	for _, l := range layers {
-		allowed[l] = true
+type usageSums struct {
+	st     store.Store
+	tenant string
+	base   store.UsageSumQuery
+	// none is set when the caller's view reaches no row: it covers no layer,
+	// or its scopes grant no read. The store treats an empty filter as no
+	// restriction, so such a report must not query.
+	none bool
+}
+
+func newUsageSums(st store.Store, tenant string, w usageWindow, layers []string, scopes layer.ScopeSet) usageSums {
+	src := usageSums{st: st, tenant: tenant, base: store.UsageSumQuery{From: w.from(), To: w.to(), Layers: layers}}
+	if len(layers) == 0 {
+		src.none = true
 	}
-	kept := rows[:0:0]
-	for _, row := range rows {
-		if allowed[row.Layer] && scopes.AllowsRead(row.ArtifactID) {
-			kept = append(kept, row)
+	if scopes.Active() {
+		grants := scopes.ReadGrants()
+		if len(grants) == 0 {
+			src.none = true
+		}
+		for _, g := range grants {
+			src.base.Paths = append(src.base.Paths, store.UsagePath{Path: g.Path, Subtree: g.Subtree})
 		}
 	}
-	return kept
+	return src
+}
+
+// sum returns the sums grouped by by, restricted to artifacts when it is
+// non-empty.
+func (s usageSums) sum(ctx context.Context, by []store.UsageDim, artifacts []string) ([]store.UsageSum, error) {
+	if s.none {
+		return nil, nil
+	}
+	q := s.base
+	q.GroupBy = by
+	q.ArtifactIDs = artifacts
+	sums, err := s.st.SumUsage(ctx, s.tenant, q)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	return sums, nil
 }
 
 // usageNow is the report's clock: the counter's when one is wired, so a test
@@ -315,7 +344,7 @@ func keepArtifactsIn(served []store.ManifestRecord, layers []string) []store.Man
 	return out
 }
 
-// usageAccumulator gathers one total from rows.
+// usageAccumulator gathers one total from the store's sums.
 type usageAccumulator struct {
 	totals UsageTotals
 	daily  map[string]*UsageCounts
@@ -330,26 +359,35 @@ func newUsageAccumulator() *usageAccumulator {
 	}
 }
 
-func (a *usageAccumulator) add(row store.UsageCount) {
-	a.totals.add(row)
-	c := a.totals.ByClient[row.Client]
-	c.add(row)
-	a.totals.ByClient[row.Client] = c
-	h := a.totals.ByHarness[row.Harness]
-	h.add(row)
-	a.totals.ByHarness[row.Harness] = h
-	d := a.daily[row.Day]
+// addTotal adds a sum to the total and moves the latest load and sync days.
+func (a *usageAccumulator) addTotal(s store.UsageSum) {
+	a.totals.add(s.UsageCount)
+	if s.LastLoaded > a.lastL {
+		a.lastL = s.LastLoaded
+	}
+	if s.LastSynced > a.lastS {
+		a.lastS = s.LastSynced
+	}
+}
+
+// addSplit adds a sum grouped by client and harness to the breakdowns.
+func (a *usageAccumulator) addSplit(s store.UsageSum) {
+	c := a.totals.ByClient[s.Client]
+	c.add(s.UsageCount)
+	a.totals.ByClient[s.Client] = c
+	h := a.totals.ByHarness[s.Harness]
+	h.add(s.UsageCount)
+	a.totals.ByHarness[s.Harness] = h
+}
+
+// addDay adds a sum grouped by day to the series' days.
+func (a *usageAccumulator) addDay(s store.UsageSum) {
+	d := a.daily[s.Day]
 	if d == nil {
 		d = &UsageCounts{}
-		a.daily[row.Day] = d
+		a.daily[s.Day] = d
 	}
-	d.add(row)
-	if row.Loads > 0 && row.Day > a.lastL {
-		a.lastL = row.Day
-	}
-	if row.Syncs > 0 && row.Day > a.lastS {
-		a.lastS = row.Day
-	}
+	d.add(s.UsageCount)
 }
 
 // result returns the total, with a series over w at granularity unless it is
@@ -370,25 +408,33 @@ func (a *usageAccumulator) result(w usageWindow, granularity string) UsageTotals
 	return t
 }
 
-// buildUsageReport aggregates rows, already restricted to the caller's view,
-// into the report's totals, layers, and one page of artifacts.
-func buildUsageReport(w usageWindow, layers []string, served []store.ManifestRecord, rows []store.UsageCount, q UsageQuery, page usagePage) *UsageReport {
+// The groupings the report reads. Each result is bounded by the number of
+// layers, clients, harnesses, days, and artifacts rather than by the number
+// of stored rows.
+var (
+	usageByLayerSplit    = []store.UsageDim{store.UsageByLayer, store.UsageByClient, store.UsageByHarness}
+	usageByLayerDay      = []store.UsageDim{store.UsageByLayer, store.UsageByDay}
+	usageByArtifact      = []store.UsageDim{store.UsageByArtifact}
+	usageByArtifactSplit = []store.UsageDim{store.UsageByArtifact, store.UsageByClient, store.UsageByHarness}
+	usageByArtifactDay   = []store.UsageDim{store.UsageByArtifact, store.UsageByDay}
+)
+
+// buildUsageReport reads the sums of src, already restricted to the caller's
+// view, into the report's totals, layers, and one page of artifacts.
+func buildUsageReport(ctx context.Context, src usageSums, w usageWindow, layers []string, served []store.ManifestRecord, q UsageQuery, page usagePage) (*UsageReport, error) {
 	q.Granularity = servedGranularity(q.Granularity, len(w.days))
+	series := q.Granularity != "" && q.Granularity != GranularityNone
 	total := newUsageAccumulator()
 	byLayer := map[string]*usageAccumulator{}
-	byArtifact := map[string]*usageAccumulator{}
 	for _, l := range layers {
 		byLayer[l] = newUsageAccumulator()
 	}
-	for _, m := range served {
-		byArtifact[m.ArtifactID] = newUsageAccumulator()
+	if err := addLayerSums(ctx, src, series, total, byLayer); err != nil {
+		return nil, err
 	}
-	for _, row := range rows {
-		total.add(row)
-		byLayer[row.Layer].add(row)
-		if a := byArtifact[row.ArtifactID]; a != nil {
-			a.add(row)
-		}
+	byArtifact, err := artifactTotals(ctx, src, served)
+	if err != nil {
+		return nil, err
 	}
 	rep := &UsageReport{
 		Days:        len(w.days),
@@ -405,8 +451,12 @@ func buildUsageReport(w usageWindow, layers []string, served []store.ManifestRec
 	rep.ArtifactCount = len(entries)
 	selected, next := page.slice(entries)
 	rep.NextCursor = next
-	// The breakdowns and the series are built for the page alone, so a
-	// response's size follows the limit rather than the catalog.
+	// The breakdowns and the series are read for the page alone, so a
+	// response's size and the sums it reads follow the limit rather than
+	// the catalog.
+	if err := addPageSums(ctx, src, series, selected); err != nil {
+		return nil, err
+	}
 	rep.Artifacts = make([]UsageArtifact, 0, len(selected))
 	for _, e := range selected {
 		rep.Artifacts = append(rep.Artifacts, UsageArtifact{
@@ -418,7 +468,86 @@ func buildUsageReport(w usageWindow, layers []string, served []store.ManifestRec
 			LastSynced:  dayOrNil(e.acc.lastS),
 		})
 	}
-	return rep
+	return rep, nil
+}
+
+// addLayerSums adds the per-layer sums to the catalog total and to each
+// layer's total, with the per-day sums when the report has series.
+func addLayerSums(ctx context.Context, src usageSums, series bool, total *usageAccumulator, byLayer map[string]*usageAccumulator) error {
+	splits, err := src.sum(ctx, usageByLayerSplit, nil)
+	if err != nil {
+		return err
+	}
+	for _, s := range splits {
+		for _, a := range []*usageAccumulator{total, byLayer[s.Layer]} {
+			a.addTotal(s)
+			a.addSplit(s)
+		}
+	}
+	if !series {
+		return nil
+	}
+	days, err := src.sum(ctx, usageByLayerDay, nil)
+	if err != nil {
+		return err
+	}
+	for _, s := range days {
+		total.addDay(s)
+		byLayer[s.Layer].addDay(s)
+	}
+	return nil
+}
+
+// artifactTotals returns an accumulator per served artifact holding its sums
+// and latest days, which order the list. An artifact's rows under any layer
+// the report covers count toward it.
+func artifactTotals(ctx context.Context, src usageSums, served []store.ManifestRecord) (map[string]*usageAccumulator, error) {
+	byArtifact := make(map[string]*usageAccumulator, len(served))
+	for _, m := range served {
+		byArtifact[m.ArtifactID] = newUsageAccumulator()
+	}
+	sums, err := src.sum(ctx, usageByArtifact, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range sums {
+		if a := byArtifact[s.ArtifactID]; a != nil {
+			a.addTotal(s)
+		}
+	}
+	return byArtifact, nil
+}
+
+// addPageSums adds the breakdowns, and the per-day sums when the report has
+// series, of the page's artifacts.
+func addPageSums(ctx context.Context, src usageSums, series bool, page []usageEntry) error {
+	if len(page) == 0 {
+		return nil
+	}
+	ids := make([]string, len(page))
+	byID := make(map[string]*usageAccumulator, len(page))
+	for i, e := range page {
+		ids[i] = e.m.ArtifactID
+		byID[e.m.ArtifactID] = e.acc
+	}
+	splits, err := src.sum(ctx, usageByArtifactSplit, ids)
+	if err != nil {
+		return err
+	}
+	for _, s := range splits {
+		byID[s.ArtifactID].addSplit(s)
+	}
+	if !series {
+		return nil
+	}
+	days, err := src.sum(ctx, usageByArtifactDay, ids)
+	if err != nil {
+		return err
+	}
+	for _, s := range days {
+		byID[s.ArtifactID].addDay(s)
+	}
+	return nil
 }
 
 // usageEntries returns the artifacts the list covers, in the page's order:

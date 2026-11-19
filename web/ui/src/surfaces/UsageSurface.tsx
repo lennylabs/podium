@@ -79,7 +79,12 @@ export function UsageSurface({ query, onError }: { query: string; onError: (err:
         <>
           <Summary report={report} />
           <LayerUsage report={report} />
-          <ArtifactUsage range={range} layers={report.layers.map((l) => l.layer)} initialQuery={query} today={report.to} />
+          <ArtifactUsage
+            range={range}
+            layers={report.layers.map((l) => l.layer)}
+            initialQuery={query}
+            today={'days' in range ? report.to : new Date().toISOString().slice(0, 10)}
+          />
         </>
       )}
     </section>
@@ -98,7 +103,9 @@ function presetRange(days: number, now: Date = new Date()): { from: string; to: 
  * date fields filled with the range on display, `shown` (the report's from
  * and to) or, before the report arrives, the preset's own days, so To starts
  * at today and From at the start of the preset window. The page reads the
- * range whenever both fields hold a date. */
+ * range whenever both fields hold a date and From is not after To; the fields
+ * bound each other and stop at today, so a reversed or future range, which
+ * the registry refuses, is not sent. */
 function WindowControl({
   value,
   shown,
@@ -111,6 +118,12 @@ function WindowControl({
   const [custom, setCustom] = useState(!('days' in value));
   const [from, setFrom] = useState('days' in value ? '' : value.from);
   const [to, setTo] = useState('days' in value ? '' : value.to);
+  const today = new Date().toISOString().slice(0, 10);
+  const read = (f: string, t: string) => {
+    if (f !== '' && t !== '' && f <= t) {
+      onChange({ from: f, to: t });
+    }
+  };
   return (
     <div className="usage-head-control">
       <div className="segmented usage-range" role="group" aria-label="Time range">
@@ -156,11 +169,10 @@ function WindowControl({
             <input
               type="date"
               value={from}
+              max={to === '' ? today : to}
               onChange={(event) => {
                 setFrom(event.target.value);
-                if (event.target.value !== '' && to !== '') {
-                  onChange({ from: event.target.value, to });
-                }
+                read(event.target.value, to);
               }}
             />
           </label>
@@ -169,11 +181,11 @@ function WindowControl({
             <input
               type="date"
               value={to}
+              min={from === '' ? undefined : from}
+              max={today}
               onChange={(event) => {
                 setTo(event.target.value);
-                if (from !== '' && event.target.value !== '') {
-                  onChange({ from, to: event.target.value });
-                }
+                read(from, event.target.value);
               }}
             />
           </label>
@@ -217,6 +229,7 @@ function LayerUsage({ report }: { report: UsageReport }) {
   const layers = report.layers;
   const shares = layers.map((l) => l.loads + l.syncs);
   const max = Math.max(0, ...shares);
+  const total = shares.reduce((sum, share) => sum + share, 0);
   const leader = layers.reduce<(typeof layers)[number] | null>(
     (best, l) => (best === null || l.loads > best.loads ? l : best),
     null,
@@ -263,7 +276,7 @@ function LayerUsage({ report }: { report: UsageReport }) {
                 {l.layer}
               </span>
               <span role="cell">
-                <ShareBar value={shares[i]} max={max} top={max > 0 && shares[i] === max} />
+                <ShareBar value={shares[i]} total={total} top={max > 0 && shares[i] === max} />
               </span>
               <span role="cell" className="num strong">
                 {formatCount(l.loads)}
@@ -306,6 +319,7 @@ function ArtifactUsage({
   const [more, setMore] = useState<UsageArtifact[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [moreFailed, setMoreFailed] = useState(false);
   const sentinel = useRef<HTMLDivElement | null>(null);
   const typed = useDebounced(filter.trim());
   // The address carries the filter text, so a copied link opens the list the
@@ -323,6 +337,8 @@ function ArtifactUsage({
     limit: listPage,
   };
   const key = JSON.stringify(params);
+  const keyRef = useRef(key);
+  keyRef.current = key;
   const list = useAsync(() => usageReport(params), [key]);
   // A new first page discards the pages appended under the previous key.
   const [listedFor, setListedFor] = useState(key);
@@ -330,6 +346,8 @@ function ArtifactUsage({
     setListedFor(key);
     setMore([]);
     setCursor(null);
+    setLoadingMore(false);
+    setMoreFailed(false);
   }
   const first = list.value;
   const rows = first === null ? [] : [...first.artifacts, ...more];
@@ -352,28 +370,42 @@ function ArtifactUsage({
     if (next === null || loadingMore || list.loading) {
       return;
     }
+    // A page answers the filter, sort, and range it was asked under. One that
+    // arrives after the reader changed them belongs to a list no longer on
+    // screen, so it is dropped rather than appended under the new order.
+    const askedFor = key;
     setLoadingMore(true);
+    setMoreFailed(false);
     usageReport({ ...params, cursor: next }).then(
       (page) => {
+        if (keyRef.current !== askedFor) {
+          return;
+        }
         setMore((prior) => [...prior, ...page.artifacts]);
         setCursor(page.next_cursor);
         setLoadingMore(false);
       },
       () => {
+        if (keyRef.current !== askedFor) {
+          return;
+        }
         setLoadingMore(false);
+        setMoreFailed(true);
       },
     );
   };
   // The sentinel below the table reads the next page as it comes within
   // 400px of the viewport. The observer is rebuilt with each page, so a page
   // too short to push the sentinel out of view reads the one after it too. A
-  // failed read leaves the button in place to try again.
+  // failed read stops the observer, because a rebuilt observer reports the
+  // sentinel still in view at once and would ask for the failed page again
+  // in a loop; the page states the failure and the button retries it.
   const observe = typeof IntersectionObserver !== 'undefined';
   const showMoreRef = useRef(showMore);
   showMoreRef.current = showMore;
   useEffect(() => {
     const target = sentinel.current;
-    if (!observe || target === null || next === null || loadingMore) {
+    if (!observe || target === null || next === null || loadingMore || moreFailed) {
       return;
     }
     const observer = new IntersectionObserver(
@@ -388,7 +420,7 @@ function ArtifactUsage({
     return () => {
       observer.disconnect();
     };
-  }, [observe, next, loadingMore, rows.length]);
+  }, [observe, next, loadingMore, moreFailed, rows.length]);
 
   return (
     <section className="usage-artifacts" aria-label="By artifact">
@@ -478,6 +510,15 @@ function ArtifactUsage({
             <span className="usage-more-status" role="status">
               Loading more artifacts…
             </span>
+          ) : moreFailed ? (
+            <>
+              <span className="usage-more-status" role="alert">
+                The next artifacts did not load.
+              </span>
+              <button type="button" className="button" onClick={showMore}>
+                Try again
+              </button>
+            </>
           ) : (
             <button type="button" className="button" onClick={showMore}>
               {`Show ${String(Math.min(listPage, first.artifact_count - rows.length))} more`}

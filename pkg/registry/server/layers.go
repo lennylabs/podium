@@ -60,7 +60,10 @@ type LayerEndpoint struct {
 	// whole for every caller rather than following the callback.
 	// WithPublicMode sets it and nothing clears it.
 	publicMode bool
-	mode       *ModeTracker
+	// operatorToken is the §13.12 PODIUM_OPERATOR_TOKEN a public-mode write
+	// must carry; WithPublicMode sets it, and empty refuses every write.
+	operatorToken string
+	mode          *ModeTracker
 	// authAdmin returns nil when the caller is permitted to mutate
 	// admin-defined layers. Tests inject a no-op; production wires
 	// the registry's AdminAuthorize.
@@ -229,11 +232,16 @@ func (e *LayerEndpoint) WithAdminAuth(fn func(*http.Request) error) *LayerEndpoi
 }
 
 // WithPublicMode marks the endpoint as serving a registry in public mode,
-// whose admin callback is the operator token check.
+// whose layer writes and erasure require token in X-Podium-Operator-Token.
+// The endpoint checks the token itself rather than through the admin
+// callback, so an endpoint built without WithAdminAuth, whose default
+// callback admits everyone, still refuses a write without it. An empty token
+// refuses every write.
 //
 // Spec: §7.3.1 (Operator token in public mode)
-func (e *LayerEndpoint) WithPublicMode() *LayerEndpoint {
+func (e *LayerEndpoint) WithPublicMode(token string) *LayerEndpoint {
 	e.publicMode = true
+	e.operatorToken = token
 	return e
 }
 
@@ -249,7 +257,7 @@ func (e *LayerEndpoint) refuseWithoutOperatorToken(w http.ResponseWriter, r *htt
 	if !e.publicMode {
 		return false
 	}
-	if err := e.authAdmin(r); err != nil {
+	if err := CheckOperatorToken(r, e.operatorToken); err != nil {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 		return true
 	}

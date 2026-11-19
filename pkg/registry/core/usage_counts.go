@@ -303,9 +303,12 @@ func (u *UsageCounter) capKeys(ctx context.Context, st store.Store, tenant strin
 // readDayKeys merges the clients and harnesses of the store's rows for tenant
 // on day into the day's known keys, creating them on the first read, and
 // returns them. The merge is unbounded: a key the store holds is recorded
-// already, so it keeps its name.
+// already, so it keeps its name. It reads the day's distinct client and
+// harness pairs rather than its rows, which grow with the catalog.
 func (u *UsageCounter) readDayKeys(ctx context.Context, st store.Store, tenant, day string) (*usageDayKeys, error) {
-	rows, err := st.ListUsageCounts(ctx, tenant, day, day)
+	rows, err := st.SumUsage(ctx, tenant, store.UsageSumQuery{
+		From: day, To: day, GroupBy: []store.UsageDim{store.UsageByClient, store.UsageByHarness},
+	})
 	if err != nil {
 		return nil, err
 	}
