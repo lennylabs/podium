@@ -848,9 +848,10 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 // serves, a live row of which it contributed, whose package the snapshot no
 // longer contains. rowsByID is the listing the cycle read before its writes;
 // an artifact the cycle stored is in the snapshot, so the listing's age
-// changes nothing.
+// changes nothing. A retired row is served by no read path, so the layer does
+// not serve its artifact, and the retired-row rule keeps the row stored.
 //
-// Spec: §7.3.1 (Removed artifacts)
+// Spec: §7.3.1 (Removed artifacts), §4.1, §4.6
 func removedArtifacts(rowsByID map[string][]store.ManifestRecord, layerID string, inSnapshot map[string]bool) []string {
 	out := []string{}
 	for id, rows := range rowsByID {
@@ -858,7 +859,7 @@ func removedArtifacts(rowsByID map[string][]store.ManifestRecord, layerID string
 			continue
 		}
 		for _, row := range rows {
-			if row.Layer == layerID && row.DeletedAt == nil {
+			if row.Layer == layerID && row.DeletedAt == nil && !retired(row) {
 				out = append(out, id)
 				break
 			}
