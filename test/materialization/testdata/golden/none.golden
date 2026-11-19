@@ -82,6 +82,13 @@ hook_action: |
 
 Notify when the agent stops.
 
+=== team/retro/SKILL.md ===
+---
+{name: retro, description: Run the team retrospective and record the actions., metadata: {when_to_use: "At the end of a sprint.\nWhen asked to run a retro."}}
+---
+
+Ask what went well, what did not, and what to change.
+
 === team/reviewer/ARTIFACT.md ===
 ---
 type: agent
