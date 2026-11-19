@@ -12,6 +12,16 @@ A pull request lands with a merge commit, so the branch's commits stay in the hi
 - Do not pass `--squash` by default. A squash collapses the branch into one commit and discards the per-commit messages, the per-step history, and the ability to bisect or revert one step of a multi-commit change.
 - Rebase-merging (`--rebase`) rewrites the branch's commits onto `main` with new hashes. Use it only when the user asks for it.
 
+## Adversarial review before the merge
+
+Every pull request gets an adversarial review before `gh pr merge` runs.
+
+- The reviewer is independent of the change: a person or an agent that did not write it.
+- The reviewer reads the PR's diff against the spec and the `.claude/rules/` files, tries to break the change, and reproduces each finding it reports.
+- Before the merge, each confirmed finding is either fixed, with the fix reviewed again, or explicitly accepted by the user.
+- The review runs after CI is green or alongside CI.
+- The review's outcome, with its findings and how each was resolved, is recorded in the PR as a comment or in the PR description.
+
 ## When a squash is justified
 
 Squash only when the branch's individual commits carry no information worth keeping, and state the reason in the conversation or the PR before merging. The following cases qualify:
@@ -24,4 +34,4 @@ A branch with many commits is not on its own a reason to squash when each commit
 ## Where this rule applies
 
 - Every pull request merged into `main` or a `release/*` branch.
-- Agents, workflows, and skills that merge pull requests.
+- Agents, workflows, and skills that merge pull requests, and the reviewers they start before a merge.

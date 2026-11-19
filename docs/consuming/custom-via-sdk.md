@@ -95,7 +95,7 @@ client.login()
 
 ### Name the client in the usage report
 
-The SDK names itself to the registry in the `X-Podium-Client` header on every request. By default it sends the client name `sdk` and no harness, so the [usage report](../managing/usage#built-in-usage-report) counts every SDK program under `sdk` and its harness under `unknown`. Set `client_name` and `harness` to count a program's calls under its own name and the harness it serves:
+The SDK names itself to the registry in the `X-Podium-Client` header on every control-plane request. A resource fetch that follows a presigned link carries no header. By default it sends the client name `sdk` and no harness, so the [usage report](../managing/usage#built-in-usage-report) counts every SDK program under `sdk` and its harness under `unknown`. Set `client_name` and `harness` to count a program's calls under its own name and the harness it serves:
 
 ```python
 client = Client(

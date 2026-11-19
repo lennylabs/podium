@@ -53,7 +53,9 @@ The two SDKs are fully tag-driven; only `buildinfo.go` and `Chart.yaml` require 
 
 3. **Update `CHANGELOG.md`.** Summarize the unreleased section into a dated header `## [0.2.0] - YYYY-MM-DD`, and add the compare link at the bottom. The summary keeps everything a user or an operator acts on or observes (breaking changes, removals, configuration and defaults, startup refusals, error codes, security fixes, and upgrade and rollback steps), merges the entries for one feature, folds fixes to unreleased work into the feature they fix, and drops unobservable detail in favor of a link to the documentation. `.claude/rules/release-process.md` states the full rules and the check against the unreleased entries.
 
-4. **Commit, tag, push.**
+4. **Clear the "unreleased" markers for the version.** Retitle `## 0.2.0 (unreleased)` in `docs/deployment/operations/upgrade-notes.md` to `## 0.2.0` and delete the sentence that names the previous release as current, point each `docs/_redirects.yaml` entry that targets `upgrade-notes#020-unreleased` at `upgrade-notes#020`, and rewrite any other note that calls the version's behavior unreleased. `grep -rnIi -e 'unreleased' -e 'current release is' docs README.md spec site/src test` lists them; the matches in `docs/about/changelog.md` stay. `.claude/rules/release-process.md` states the full step.
+
+5. **Commit, tag, push.**
    ```bash
    git commit -am "Release v0.2.0"
    git tag -a v0.2.0 -m "v0.2.0"
@@ -61,9 +63,9 @@ The two SDKs are fully tag-driven; only `buildinfo.go` and `Chart.yaml` require 
    git push origin v0.2.0
    ```
 
-5. **CI builds and publishes.** The release workflow runs `make build VERSION=v0.2.0` for the Go binaries, `python -m build` (under setuptools-scm) for the Python wheel, and `npm version --no-git-tag-version 0.2.0 && npm publish` for the TS SDK. All three report `0.2.0`. The workflow publishes binaries to GitHub Releases, the wheel + sdist to PyPI, the npm package, and the container image to ghcr.io.
+6. **CI builds and publishes.** The release workflow runs `make build VERSION=v0.2.0` for the Go binaries, `python -m build` (under setuptools-scm) for the Python wheel, and `npm version --no-git-tag-version 0.2.0 && npm publish` for the TS SDK. All three report `0.2.0`. The workflow publishes binaries to GitHub Releases, the wheel + sdist to PyPI, the npm package, and the container image to ghcr.io.
 
-6. **Open the next development cycle.** On `main`, bump the Go default and the chart:
+7. **Open the next development cycle.** On `main`, bump the Go default and the chart:
    - `buildinfo.go`: `Version = "0.3.0-dev"`.
    - `Chart.yaml`: `version: 0.3.0-dev` and `appVersion: 0.3.0-dev`.
 
