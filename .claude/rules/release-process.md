@@ -31,6 +31,11 @@ Re-verify the product comparison in spec §1.5 and in `docs/getting-started/why-
    - Update the `[Unreleased]` compare link to `compare/vX.Y.Z...HEAD`.
    - Add the `[X.Y.Z]: https://github.com/lennylabs/podium/releases/tag/vX.Y.Z` reference link.
    - Group entries under `Added`, `Changed`, `Fixed`, `Removed`, and `Documentation`. Cover user-facing changes, and omit test-only and CI-only changes.
+   - Summarize the `[Unreleased]` entries into the release section rather than moving them verbatim. The entries accumulate one per pull request, so a release collects several entries for one feature, follow-up fixes to work that never shipped, and implementation detail. The summary follows these rules:
+     - Keep everything a user or an operator acts on or observes: backward-incompatible changes, removals, new and changed configuration with its defaults, startup refusals, new error codes, security fixes, upgrade and rollback steps, and each new capability at the level of what it does.
+     - Merge the entries that describe one feature into one entry, and fold a fix to a feature the previous release did not ship into that feature's entry. A fix to unreleased work is not a `Fixed` entry.
+     - Drop implementation detail a reader cannot observe, intermediate behavior that never shipped, and detail the documentation already states. Link the documentation page or the upgrade notes section that carries the detail, and keep the spec section citations.
+     - Check the summary against the unreleased entries before committing: every dropped sentence is redundant with another entry, unobservable, or stated on a linked page. The upgrade notes keep the operational detail the summary leaves out.
    - Match the `## [X.Y.Z] - YYYY-MM-DD` header format exactly. The release workflow extracts this section verbatim as the GitHub Release body, so a malformed header drops the release notes.
 4. Confirm `go build ./...`, `go test ./internal/buildinfo/`, and `go test ./test/chart/` pass.
 5. Commit as `chore(release): prep vX.Y.Z` with a DCO sign-off (`git commit -s`). The prep commit touches only `CHANGELOG.md`, `internal/buildinfo/buildinfo.go`, and `deploy/helm/podium/Chart.yaml`, plus `README.md` and `docs/about/status.md` on a MINOR or MAJOR bump.
