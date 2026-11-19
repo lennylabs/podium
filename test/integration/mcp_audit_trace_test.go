@@ -17,23 +17,25 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
-// Spec: §8.1 — "Both streams share trace IDs." The MCP bridge
-// injects its in-flight span as a W3C traceparent on the outbound registry
-// call (the registry derives its stream's trace id from that header), and now
-// stamps the same trace id on the local audit event. This drives the real
-// podium-mcp binary with tracing on against a stub that captures the inbound
-// traceparent, then asserts the local artifact.loaded event carries the
-// matching trace id.
+// Spec: §8.1, §13.8 — "Both streams share trace IDs." With trace export on,
+// the MCP bridge injects its in-flight sampled span as a W3C traceparent on
+// the outbound registry call (the registry derives its stream's trace id from
+// that header), sends no X-Podium-Trace-Id, which is reserved for a call with
+// no span context, and stamps the same trace id on the local audit event.
+// This drives the real podium-mcp binary with tracing on against a stub that
+// captures the inbound headers, then asserts the local artifact.loaded event
+// carries the matching trace id.
 func TestPodiumMCP_LocalAuditSharesTraceID(t *testing.T) {
 	t.Parallel()
 	const traceFM = "---\nname: x\ntype: agent\nversion: 1.0.0\n---\n"
 
 	var mu sync.Mutex
-	var gotTraceparent string
+	var gotTraceparent, gotPodiumTraceID string
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/v1/load_artifact") {
 			mu.Lock()
 			gotTraceparent = r.Header.Get("traceparent")
+			gotPodiumTraceID = r.Header.Get("X-Podium-Trace-Id")
 			mu.Unlock()
 			// A non-empty id drives the bridge into its delivery path. The
 			// bridge emits the artifact.loaded event only after the §6.6
@@ -85,8 +87,14 @@ func TestPodiumMCP_LocalAuditSharesTraceID(t *testing.T) {
 	}
 
 	mu.Lock()
-	tp := gotTraceparent
+	tp, podiumTraceID := gotTraceparent, gotPodiumTraceID
 	mu.Unlock()
+	if podiumTraceID != "" {
+		t.Errorf("a tracing bridge sent X-Podium-Trace-Id %q; the header is for calls with no span context", podiumTraceID)
+	}
+	if !strings.HasSuffix(tp, "-01") {
+		t.Errorf("traceparent %q does not carry the sampled flag of the bridge's recording span", tp)
+	}
 	if tp == "" {
 		t.Fatalf("registry stub never received a traceparent header (tracing not propagated)")
 	}

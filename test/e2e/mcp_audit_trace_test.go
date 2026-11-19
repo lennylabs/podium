@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/audit"
 )
@@ -30,24 +31,27 @@ func auditTraceIDs(t *testing.T, path, typ string) []string {
 	return ids
 }
 
-// Spec: §8.1 — with tracing off, every local audit event of podium-mcp still
-// carries a trace ID, each meta-tool call gets its own, and the registry
-// record of the same call carries the same ID, so the two streams share trace
-// IDs whether or not spans are exported.
-func TestMCPAudit_StreamsShareTraceIDWithTracingOff(t *testing.T) {
-	t.Parallel()
+// traceAuditTypes are the read events a search_artifacts call and a
+// load_artifact call raise in both audit streams.
+var traceAuditTypes = []string{string(audit.EventArtifactsSearched), string(audit.EventArtifactLoaded)}
 
+// runTracingOffBridge starts a registry with registryEnv, drives a podium-mcp
+// with trace export off through one search_artifacts call and one
+// load_artifact call, and returns the registry and the paths of the
+// registry and local audit logs once both hold every traceAuditTypes record.
+func runTracingOffBridge(t *testing.T, registryEnv ...string) (srv *serverProc, registryAudit, localAudit string) {
+	t.Helper()
 	reg := writeRegistry(t, map[string]string{
 		"finance/ledger/ARTIFACT.md": agentArtifact("quarterly ledger for finance"),
 	})
-	registryAudit := filepath.Join(t.TempDir(), "registry-audit.log")
-	srv := startServerArgs(t, []string{
+	registryAudit = filepath.Join(t.TempDir(), "registry-audit.log")
+	srv = startServerArgs(t, append([]string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_AUDIT_LOG_PATH=" + registryAudit,
-	}, "serve", "--standalone", "--layer-path", reg)
+	}, registryEnv...), "serve", "--standalone", "--layer-path", reg)
 
-	localAudit := filepath.Join(t.TempDir(), "local-audit.log")
-	env := []string{
+	localAudit = filepath.Join(t.TempDir(), "local-audit.log")
+	res := mcpExec(t, []string{
 		"PODIUM_REGISTRY=" + srv.BaseURL,
 		"PODIUM_AUDIT_SINK=" + localAudit,
 		"PODIUM_MATERIALIZE_ROOT=" + t.TempDir(),
@@ -56,20 +60,25 @@ func TestMCPAudit_StreamsShareTraceIDWithTracingOff(t *testing.T) {
 		"PODIUM_TRACING=",
 		"OTEL_EXPORTER_OTLP_ENDPOINT=",
 		"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=",
-	}
-	res := mcpExec(t, env,
+	},
 		toolCall(1, "search_artifacts", map[string]any{"query": "ledger"}),
 		toolCall(2, "load_artifact", map[string]any{"id": "finance/ledger"}),
 	)
 	cliWantExit(t, res, 0, "podium-mcp search_artifacts, load_artifact")
 	rpcResult(t, res.Stdout, 1)
 	rpcResult(t, res.Stdout, 2)
+	awaitClientAuditTypes(t, registryAudit, traceAuditTypes...)
+	awaitClientAuditTypes(t, localAudit, traceAuditTypes...)
+	return srv, registryAudit, localAudit
+}
 
-	types := []string{string(audit.EventArtifactsSearched), string(audit.EventArtifactLoaded)}
-	awaitClientAuditTypes(t, registryAudit, types...)
-	awaitClientAuditTypes(t, localAudit, types...)
+// assertStreamsShareTraceIDs fails the test unless each traceAuditTypes
+// record appears once in each stream with one valid trace ID shared by both
+// streams and distinct from the other call's.
+func assertStreamsShareTraceIDs(t *testing.T, registryAudit, localAudit string) {
+	t.Helper()
 	seen := map[string]string{}
-	for _, typ := range types {
+	for _, typ := range traceAuditTypes {
 		local, remote := auditTraceIDs(t, localAudit, typ), auditTraceIDs(t, registryAudit, typ)
 		if len(local) != 1 || len(remote) != 1 {
 			t.Fatalf("%s: local trace IDs %q, registry trace IDs %q, want one each", typ, local, remote)
@@ -84,5 +93,39 @@ func TestMCPAudit_StreamsShareTraceIDWithTracingOff(t *testing.T) {
 			t.Errorf("%s reuses the trace ID of %s; each call gets its own", typ, prev)
 		}
 		seen[local[0]] = typ
+	}
+}
+
+// Spec: §8.1 — with tracing off, every local audit event of podium-mcp still
+// carries a trace ID, each meta-tool call gets its own, and the registry
+// record of the same call carries the same ID, so the two streams share trace
+// IDs whether or not spans are exported.
+func TestMCPAudit_StreamsShareTraceIDWithTracingOff(t *testing.T) {
+	t.Parallel()
+	_, registryAudit, localAudit := runTracingOffBridge(t)
+	assertStreamsShareTraceIDs(t, registryAudit, localAudit)
+}
+
+// Spec: §8.1, §13.8 — a registry with trace export on still records and
+// exports its server spans for the calls of a podium-mcp whose export is
+// off. The bridge carries its generated trace ID in X-Podium-Trace-Id and
+// sends no traceparent, so the registry's parent-based sampler sees no
+// not-sampled parent, and the audit streams still share the ID.
+func TestMCPAudit_TracingRegistrySamplesTracingOffBridgeCalls(t *testing.T) {
+	t.Parallel()
+	srv, registryAudit, localAudit := runTracingOffBridge(t,
+		"PODIUM_TRACING=stdout",
+		"OTEL_BSP_SCHEDULE_DELAY=50",
+	)
+	assertStreamsShareTraceIDs(t, registryAudit, localAudit)
+	for _, op := range []string{"search_artifacts", "load_artifact"} {
+		span := regexp.MustCompile(`"Name":\s*"` + op + `"`)
+		deadline := time.Now().Add(10 * time.Second)
+		for !span.MatchString(readOrEmpty(srv.logPath)) {
+			if time.Now().After(deadline) {
+				t.Fatalf("the registry exported no %s span for the bridge call\nlog:\n%s", op, readOrEmpty(srv.logPath))
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 }

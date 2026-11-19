@@ -184,6 +184,17 @@ An absent or ignored value never causes a request to fail. The value is never an
 
 The first-party clients send the header on every control-plane request. They omit it on presigned links, on `/objects` links, and on `/healthz` and `/readyz`.
 
+## Trace ID header
+
+The registry takes the `trace_id` of a request's audit records from a valid W3C `traceparent` header, otherwise from a valid `X-Podium-Trace-Id` header, and otherwise generates one. A valid `X-Podium-Trace-Id` value is 32 hexadecimal characters that are not all zeros, and the registry records it in lowercase.
+
+```http
+GET /v1/search_artifacts?query=x HTTP/1.1
+X-Podium-Trace-Id: 4bf92f3577b34da6a3ce929d0e0e4736
+```
+
+The header names an audit trace ID and carries no trace context. It neither starts nor parents a span, and it has no effect on the registry's sampling decision. `podium-mcp` sends it on the registry requests of a meta-tool call when its trace export is off, so its local audit records and the registry's share the ID.
+
 The value appears in audit records as `caller.client`, as described in [Client software](audit-events#client-software) on the audit events page. The MCP server sends `name=mcp`, every `podium` CLI command sends `name=cli`, and `podium sync` sends `name=cli` with `purpose=sync`. The SDKs send `name=sdk`, or the client name and harness the program configures. The values each first-party client sends are listed in [§7.2.2 of the specification](https://github.com/lennylabs/podium/blob/main/spec/07-external-integration.md#722-client-identification).
 
 ---

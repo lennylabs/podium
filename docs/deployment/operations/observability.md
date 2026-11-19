@@ -352,7 +352,7 @@ Each meta-tool call opens one root span, with child spans for the registry round
 
 ### Trace context propagation
 
-Both processes always install the W3C Trace Context propagator, even when export is off. `podium-mcp` sends the `traceparent` header on its registry calls, and the registry continues that trace. The audit records of both streams carry the same trace ID in `trace_id`.
+Both processes always install the W3C Trace Context propagator, even when export is off. With export on, `podium-mcp` sends the `traceparent` header on its registry calls, and the registry continues that trace. With export off, `podium-mcp` has no trace context to send, so it generates a trace ID for each meta-tool call and sends it in the `X-Podium-Trace-Id` header instead. That header names the ID for the audit records alone and has no effect on which registry spans are sampled. The registry takes a request's trace ID from a valid `traceparent`, otherwise from a valid `X-Podium-Trace-Id`, and otherwise generates one. The audit records of both streams carry the same trace ID in `trace_id`.
 
 ### What exported spans omit
 

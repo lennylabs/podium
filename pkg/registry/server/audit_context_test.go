@@ -36,6 +36,36 @@ func TestParseTraceparent(t *testing.T) {
 	}
 }
 
+// Spec: §8.1 — a valid traceparent decides the trace ID, a valid
+// X-Podium-Trace-Id decides it when no valid traceparent is present, and a
+// request with neither gets a generated ID.
+func TestTraceIDFromRequest_Precedence(t *testing.T) {
+	const tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	const podium = "A1B2C3D4E5F60718293A4B5C6D7E8F90"
+	req := func(h map[string]string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/v1/search_artifacts", nil)
+		for k, v := range h {
+			r.Header.Set(k, v)
+		}
+		return r
+	}
+	if got := traceIDFromRequest(req(map[string]string{"traceparent": tp, audit.TraceIDHeader: podium})); got != "4bf92f3577b34da6a3ce929d0e0e4736" {
+		t.Errorf("traceparent and header: %q, want the traceparent ID", got)
+	}
+	if got := traceIDFromRequest(req(map[string]string{audit.TraceIDHeader: podium})); got != strings.ToLower(podium) {
+		t.Errorf("header alone: %q, want it in lowercase", got)
+	}
+	if got := traceIDFromRequest(req(map[string]string{"traceparent": "garbage", audit.TraceIDHeader: podium})); got != strings.ToLower(podium) {
+		t.Errorf("malformed traceparent: %q, want the header ID", got)
+	}
+	for _, bad := range []string{"", "xyz", strings.Repeat("0", 32)} {
+		got := traceIDFromRequest(req(map[string]string{audit.TraceIDHeader: bad}))
+		if audit.ValidTraceID(got) != got || got == "" || got == strings.Repeat("0", 32) {
+			t.Errorf("header %q: %q, want a generated ID", bad, got)
+		}
+	}
+}
+
 // spec §8.1: authenticated callers carry email and groups (no network);
 // public-mode callers carry source IP, forwarded user, and the public flag
 // (no email or groups). The trace id is generated when no header is present.
