@@ -5665,7 +5665,7 @@ grep 'ingested layer' "$WORK/srv.log"
 ```
 
 **Expect.** `ingested layer reg from $WORK/reg (accepted=1, idempotent=0,
-rejected=0, advisories=1)`. The advisory is `lint.thin_description`: the
+rejected=0, advisories=1, removed=0)`. The advisory is `lint.thin_description`: the
 description above is 14 characters, one short of the 15-character threshold.
 Keep it as written, because a longer description reports `advisories=0`.
 
@@ -6541,7 +6541,7 @@ redirecting standard output still leaves the rejection visible, and that the
 shell's `$?` is what a cron job or a CI step would gate on.
 
 **Prerequisites.** A built `podium` binary on `PATH`. No identity provider,
-container, or certificate is required.
+container, or certificate is required. The scenario binds 127.0.0.1:8209.
 
 **Steps.**
 
@@ -6552,7 +6552,7 @@ container, or certificate is required.
    layers contributing the same identifier is a cross-layer collision.
 
    ```bash
-   export REG="http://127.0.0.1:8080"
+   export REG="http://127.0.0.1:8209"
    mkdir -p "$WORK/mixed/ops/runbook" "$WORK/mixed/ops/payroll" \
      "$WORK/rejected/finance/ledger" "$WORK/clean/ops/oncall"
    write_artifact() {
@@ -6576,24 +6576,23 @@ container, or certificate is required.
    write_artifact "$WORK/clean/ops/oncall/ARTIFACT.md" \
      "Handing over the on-call pager." low
    export PODIUM_OPERATOR_TOKEN="$(openssl rand -hex 32)"
-   PODIUM_PUBLIC_MODE=true podium serve --standalone --no-embeddings \
+   PODIUM_PUBLIC_MODE=true PODIUM_BIND=127.0.0.1:8209 podium serve --standalone --no-embeddings \
      > "$WORK/server.log" 2>&1 &
-   echo "$!" > "$WORK/server.pid"
-   sleep 2
+   SRV=$!
+   echo "$SRV" > "$WORK/server.pid"
+   server_alive "$SRV" "$WORK/server.log"
    grep 'podium-server listening on ' "$WORK/server.log"
-   kill -0 "$(cat "$WORK/server.pid")" || echo "FAIL: the server exited; read $WORK/server.log" >&2
    ```
 
-   **Expect.** `grep` prints a timestamped `podium-server listening on
-   127.0.0.1:8080 (mode=public)` line, `kill -0` prints nothing, and `$WORK/server.log` reports
+   **Expect.** `server_alive` prints nothing, `grep` prints a timestamped `podium-server listening on
+   127.0.0.1:8209 (mode=public)` line, and `$WORK/server.log` reports
    the registry started in public mode. The exported `PODIUM_OPERATOR_TOKEN`
    reaches both the registry and the CLI, because a public-mode registry
    admits a layer write only with it. No `--layer-path` is passed,
    so the registry ingests nothing at boot and the only ingests are the ones
-   the steps below trigger. A `FAIL:` line or a missing `listening` line is a
-   refusal to start. A refusal naming the address means the address is in use;
-   restart with `PODIUM_BIND=127.0.0.1:8099`, set
-   `export REG="http://127.0.0.1:8099"`, and repeat.
+   the steps below trigger. A `FAIL:` line from `server_alive` is a refusal to
+   start: stop there and read the log, because every later step would
+   otherwise reach whatever else answers on the port.
 
 2. Register the mixed layer as a local source and reingest it, keeping the two
    streams apart.
@@ -11493,8 +11492,8 @@ this scenario catches.
    wait_new artifact.loaded "$BEFORE"
    ```
 
-   **Expect.** `exit=0`, and a `caller.client` with `kind` `sync`, `name`
-   `podium`, and `harness` `cursor`. The HTTP audit destination delivers
+   **Expect.** `exit=0`, and a `caller.client` with `name` `cli`, `purpose`
+   `sync`, and `harness` `cursor`. The HTTP audit destination delivers
    asynchronously, about one second after the call, so the step waits for a
    new record instead of reading the file at once. A timeout line means no new
    record reached the receiver within 5 s, which is a delivery defect, and the
@@ -13478,7 +13477,8 @@ lines, the search response, and the written file together.
    **Expect.** One line reads `[error] ops/greet: SKILL.md top-level
    when_to_use [When a zorblax report is due.] does not match SKILL.md
    metadata.when_to_use [At session start.]
-   (lint.skill_artifact_field_mismatch)`, and the last line is
+   (lint.skill_artifact_field_mismatch)`, another carries the top-level
+   `when_to_use` warning that step 3 reads, and the last line is
    `lint exit=1`.
 
 5. Drop the top-level key, so the skill states `when_to_use` in `metadata`
@@ -13909,7 +13909,7 @@ rm -rf "$WORK"
    kill "$SRV"; wait "$SRV" 2>/dev/null
    ```
 
-   **Expect.** The first start exits non-zero without a `listening` line, and `grep` prints the `config.public_bind_refused` refusal naming `"0.0.0.0:8183"`. The second start prints nothing from `server_alive`, and `$WORK/bind2.log` carries a `listening on 0.0.0.0:8183` line. A `listening` line in `$WORK/bind.log` is the defect.
+   **Expect.** The first start exits non-zero without a `listening` line, and `grep` prints the `config.public_bind_refused` refusal naming `"0.0.0.0:8183"`. The second start prints nothing from `server_alive`, and `$WORK/bind2.log` carries a `listening on` line for port 8183, which names the address the listener holds: `[::]:8183` on a host where a wildcard bind takes both address families. A `listening` line in `$WORK/bind.log` is the defect.
 
 **Cleanup.**
 
@@ -13954,8 +13954,8 @@ rm -rf "$WORK"
    ```bash
    note 2.0.0 'deprecated: true\nreplaced_by: team/notes-v2\n'
    podium layer reingest --registry "$U" notes > /dev/null; echo "exit=$?"
-   podium artifact show team/notes --registry "$U" > "$WORK/show.txt"
-   podium artifact show team/notes --registry "$U" --json 2>/dev/null | jq -c '{version, deprecated, replaced_by, deprecation_warning}'
+   podium artifact show --registry "$U" team/notes > "$WORK/show.txt"
+   podium artifact show --registry "$U" --json team/notes 2>/dev/null | jq -c '{version, deprecated, replaced_by, deprecation_warning}'
    ```
 
    **Expect.** The reingest prints `exit=0`. Standard error of the first `show` prints `warning: version 2.0.0 of team/notes is deprecated; replaced_by team/notes-v2; this load serves version 1.0.0`, and `$WORK/show.txt` holds the 1.0.0 body without the warning. The JSON line is `{"version":"1.0.0","deprecated":null,"replaced_by":"team/notes-v2","deprecation_warning":"version 2.0.0 of team/notes is deprecated; replaced_by team/notes-v2; this load serves version 1.0.0"}`. A `version` of `1.0.0` with no warning is the defect this scenario exists to catch.
@@ -13967,7 +13967,7 @@ rm -rf "$WORK"
    curl -s -I "$U/v1/load_artifact?id=team/notes" | grep -i '^x-podium-deprecation-warning'
    curl -s -o /dev/null -w '%{http_code}\n' -H "If-None-Match: \"$HASH\"" "$U/v1/load_artifact?id=team/notes"
    curl -s -o /dev/null -w '%{http_code}\n' -H "If-None-Match: \"$HASH\"" "$U/v1/load_artifact?id=team/notes&version=1.0.0"
-   podium artifact show team/notes --version 1.0.0 --registry "$U" 2>&1 >/dev/null | grep -c warning
+   podium artifact show --version 1.0.0 --registry "$U" team/notes 2>&1 >/dev/null | grep -c warning
    kill "$SRV"; wait "$SRV" 2>/dev/null
    ```
 
@@ -13983,7 +13983,7 @@ rm -rf "$WORK"
 
 ## S120: Deleting an artifact's folder soft-deletes it, and restoring the folder brings it back
 
-**Goal.** Validate that a reingest after an artifact's folder is deleted removes the artifact from every read path and reports it, that an unreachable source removes nothing, and that restoring the folder within the recovery window serves the artifact again.
+**Goal.** Validate that a reingest after an artifact's folder is deleted removes the artifact from every read path and reports it, and that restoring the folder within the recovery window serves the artifact again.
 
 **Covers.** The §7.3.1 removed-artifact ingest case and the §8.4 retention row.
 
@@ -14005,9 +14005,10 @@ rm -rf "$WORK"
    U=http://127.0.0.1:8185
    podium layer register --registry "$U" --id ops --local "$WORK/layer" > /dev/null
    podium layer reingest --registry "$U" ops
+   curl -s "$U/v1/search_artifacts?query=ingest+worker+runbook" | jq -c '[(.results // [])[].id]'
    ```
 
-   **Expect.** The reingest prints an `artifact:` line for `ops/gone@1.0.0` and one for `ops/kept@1.0.0`.
+   **Expect.** The reingest prints an `artifact:` line for `ops/gone@1.0.0` and one for `ops/kept@1.0.0`, and the search prints a list holding `ops/gone`, which is the control for the search in step 2.
 
 2. Delete the `ops/gone` folder, reingest, and read the artifact through a load and a search.
 

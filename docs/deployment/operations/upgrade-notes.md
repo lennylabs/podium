@@ -223,6 +223,17 @@ To turn the check on for an existing catalog:
 
 The store needs no backup restore to roll back.
 
+### Audit destinations and delivery
+
+0.7.0 writes each audit record to a list of destinations and changes how an HTTP destination receives records. [Audit events](../../reference/audit-events) documents the destinations, delivery, and loss accounting.
+
+- **Helm audit default.** The chart's `config.auditLogPath` defaults to `stdout`, where 0.6.0 left it empty, and the chart renders it as an `env:` entry. An `env:` entry overrides the same variable from `envFrom`, so a `PODIUM_AUDIT_LOG_PATH` set in the `existingSecret` stops applying on upgrade and the registry writes its audit records to the container log. Before upgrading, move that value to `config.auditLogPath`.
+- **HTTP destination format.** An `http(s)` destination receives NDJSON batches (`application/x-ndjson`) with retry and backoff, where 0.6.0 sent one unretried `POST` per event. Update a receiver that parses each request body as one JSON object to split the body on newlines and parse each line as one record, and to deduplicate on `hash`. A receiver that accepts both forms keeps working through a rollback to 0.6.0.
+- **Destination lists.** A comma in `PODIUM_AUDIT_LOG_PATH` or `PODIUM_AUDIT_SINK` separates destinations, so a file path that contains a comma cannot be named. 0.6.0 reads the value as one destination, so reduce it to one before rolling back.
+- **New startup refusals.** An audit destination URL that carries userinfo refuses startup with `config.audit_sink_unavailable`; move the credential into an `Authorization` line of the `PODIUM_AUDIT_HEADERS_FILE` file. A file destination that cannot be opened for appending refuses startup whatever the anchoring setting, and so does an audit URL that does not parse, where 0.6.0 disabled audit. 0.6.0 ignores `PODIUM_AUDIT_HEADERS_FILE`, so restore the userinfo before rolling back if the receiver requires it.
+- **MCP server local events.** `podium-mcp` local audit events no longer carry `context.source`, and `caller.client.name` is `mcp` on them instead. Change a consumer that filters on `context.source` to filter on `caller.client.name`. After a rollback, 0.6.0 writes `context.source` again.
+- **Record schema.** Every record carries `schema_version: 1`. A consumer that rejects unknown members accepts it once it reads the published v1 JSON Schema.
+
 ### Audit chain verification after a rollback
 
 0.7.0 writes a `schema_version` member on every audit record and a `caller.client` member when the request names its client, and it includes both in the record's hash. A 0.6.0 process reads neither member, so it cannot recompute the hash of a record that 0.7.0 wrote.
