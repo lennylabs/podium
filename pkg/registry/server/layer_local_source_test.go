@@ -725,7 +725,7 @@ func TestLocalSource_WebhookIngestInPublicMode(t *testing.T) {
 	t.Parallel()
 	const secret = "hook-secret"
 	publicMode := func(e *LayerEndpoint) *LayerEndpoint {
-		return e.WithPublicMode().WithAdminAuth(func(r *http.Request) error {
+		return e.WithPublicMode("0123456789abcdef0123456789abcdef").WithAdminAuth(func(r *http.Request) error {
 			return CheckOperatorToken(r, "0123456789abcdef0123456789abcdef")
 		})
 	}

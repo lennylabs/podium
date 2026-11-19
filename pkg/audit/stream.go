@@ -505,6 +505,9 @@ func (s *Stream) Shutdown() {
 		log.Printf("audit: shutdown flush: %v", err)
 	}
 	s.Seal()
+	if s.drops != nil {
+		s.drops.flushAll()
+	}
 }
 
 // Seal makes every later Append return ErrSealed. It takes s.mu, so an

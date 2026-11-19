@@ -165,8 +165,9 @@ func TestStartupConfig_NoIdentityProviderNonLoopback(t *testing.T) {
 	t.Parallel()
 	for _, provider := range []string{"", "none"} {
 		err := server.StartupConfig{IdentityProvider: provider, Bind: "0.0.0.0:8080"}.Validate()
-		if !errors.Is(err, server.ErrPublicBindNonLoopback) || !strings.Contains(err.Error(), `"0.0.0.0:8080"`) {
-			t.Errorf("provider %q on a non-loopback bind: %v, want config.public_bind_refused naming the address", provider, err)
+		if !errors.Is(err, server.ErrPublicBindNonLoopback) || !strings.Contains(err.Error(), `"0.0.0.0:8080"`) ||
+			!strings.Contains(err.Error(), "PODIUM_ALLOW_PUBLIC_BIND=true") {
+			t.Errorf("provider %q on a non-loopback bind: %v, want config.public_bind_refused naming the address and the variable", provider, err)
 		}
 	}
 	for name, cfg := range map[string]server.StartupConfig{
