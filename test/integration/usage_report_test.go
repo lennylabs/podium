@@ -120,6 +120,29 @@ func TestUsageReport_HTTPCountsByClientAndVisibility(t *testing.T) {
 	}
 }
 
+// Spec: §7.2.2, §8.7 — an X-Podium-Client value whose name holds a raw ; is
+// parsed as application/x-www-form-urlencoded, where ; is member content, so
+// the load counts under the sanitized name and the harness rather than
+// under unknown.
+func TestUsageReport_ClientHeaderWithRawSemicolon(t *testing.T) {
+	t.Parallel()
+	h, counter := usageHarness(t)
+	if st, body := usageCall(t, h, http.MethodGet, "/v1/load_artifact?id=fin/close", "", "alice", "", "name=acme;evals&harness=claude-code"); st != http.StatusOK {
+		t.Fatalf("load: %d %s", st, body)
+	}
+	if err := counter.Flush(context.Background(), h.st); err != nil {
+		t.Fatal(err)
+	}
+	_, body := usageCall(t, h, http.MethodGet, "/v1/usage", "", "alice", "", "")
+	r := decodeUsage(t, body)
+	if r.Totals.ByClient["acme_evals"].Loads != 1 || r.Totals.ByHarness["claude-code"].Loads != 1 {
+		t.Errorf("the load did not count under acme_evals and claude-code: %s", body)
+	}
+	if _, ok := r.Totals.ByClient["unknown"]; ok {
+		t.Errorf("the load counted under unknown: %s", body)
+	}
+}
+
 // Spec: §8.7 — POST /v1/usage takes the parameters as a JSON body, repeated
 // artifact parameters read several artifacts at once, a granularity adds a
 // series, and both methods serve on a read-only registry; an unknown body
