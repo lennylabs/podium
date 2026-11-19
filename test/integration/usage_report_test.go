@@ -80,7 +80,7 @@ func decodeUsage(t *testing.T, body string) usageResp {
 }
 
 // Spec: §8.7, §7.2.2 — loads and searches served over HTTP count under the
-// client kind and harness of their X-Podium-Client header, and GET /v1/usage
+// client name and harness of their X-Podium-Client header, and GET /v1/usage
 // reports them over the caller's effective view only: a caller outside the
 // secret layer's group sees neither its counts nor its layer.
 func TestUsageReport_HTTPCountsByClientAndVisibility(t *testing.T) {
@@ -172,7 +172,7 @@ func TestUsageReport_HTTPBatchAndErrors(t *testing.T) {
 }
 
 // Spec: §8.7, §7.6.2, §13.4 — each resolved artifacts:batchLoad item counts
-// one load, or one sync under client kind sync, and an unresolved item counts
+// one load, or one sync when the request carries purpose=sync, and an unresolved item counts
 // nothing; a HEAD and a GET that If-None-Match answers 304 each count one
 // load, like the full GET that returned the validator.
 func TestUsageReport_HTTPBatchItemsAndRevalidatedLoads(t *testing.T) {

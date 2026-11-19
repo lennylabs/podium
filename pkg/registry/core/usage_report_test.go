@@ -102,7 +102,7 @@ func TestUsageReport_TotalsAndVisibility(t *testing.T) {
 		t.Errorf("greet entry = %+v", g)
 	}
 	if fw := rep.Artifacts[1]; fw.LastSynced != nil || len(fw.ByClient) != 1 {
-		t.Errorf("farewell entry = %+v, want no last_synced and one client kind", fw)
+		t.Errorf("farewell entry = %+v, want no last_synced and one client", fw)
 	}
 	bob := usageReport(t, f, q(nil), "bob")
 	if !reflect.DeepEqual(layerIDs(bob), []string{"team", "secret"}) || bob.Totals.Loads != 18 || len(bob.Artifacts) != 3 {

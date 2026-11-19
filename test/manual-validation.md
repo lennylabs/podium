@@ -11464,7 +11464,7 @@ this scenario catches.
    - The `alice` count is `0`. Any other count means the search text reached
      the trace backend.
    - The forwarded `caller.client`, printed with its keys sorted, is
-     `{"harness":"claude-code","host":"s104-host","host_version":"9.9","kind":"mcp","name":"podium-mcp","version":"<release>"}`
+     `{"harness":"claude-code","host":"s104-host","host_version":"9.9","name":"mcp","version":"<release>"}`
      with the release that the `initialize` result reports as `serverInfo.version` in `$WORK/mcp.out`. A missing `host` means
      the bridge discarded `clientInfo`.
    - The local log line shows the same object, and its context holds no
@@ -12123,7 +12123,7 @@ run as the invoking user, so the files they write under `$WORK` are removable.
    s106_probe() {
      curl -s -o /dev/null -w "probe $1: %{http_code}\n" \
        -H "traceparent: 00-$1-00f067aa0ba902b7-01" \
-       -H 'X-Podium-Client: kind=cli&name=s106-probe&version=1.0' \
+       -H 'X-Podium-Client: name=s106-probe&version=1.0' \
        "http://127.0.0.1:8147/v1/load_artifact?id=team/ledger"
    }
    TRACE1=4bf92f3577b34da6a3ce929d0e0e4736
@@ -12269,7 +12269,7 @@ run as the invoking user, so the files they write under `$WORK` are removable.
    - `collector: ... missing 0, extra 0, body mismatches 0`, and the same
      three results on the `s3` line.
    - Each probe line reports at least 1 `artifact.loaded` record and
-     `caller.client {"kind":"cli","name":"s106-probe","version":"1.0"}`.
+     `caller.client {"name":"s106-probe","version":"1.0"}`.
    - `attribute mismatches: hash 0, prev_hash 0, schema_version 0, trace_id
      0`. The checks are that `podium.audit.hash` is a string value equal to
      the body's `hash`; that `podium.audit.prev_hash` is a string value equal
@@ -13504,11 +13504,11 @@ lines, the search response, and the written file together.
 
 ## S114: The usage report counts loads, syncs, and search hits per layer, client, and harness, and reports them over time
 
-**Goal.** Validate that the registry counts a load, a sync, and a search hit under the serving layer, the client kind, and the harness of the request; that `GET /v1/usage` and `podium usage` report totals for the catalog, each layer, and each artifact, including an artifact with no counts, with a week series and a batch of named artifacts; that the counts are plain rows in the `usage_daily` table; and that the `artifacts.searched` audit record carries the returned artifacts and their layers.
+**Goal.** Validate that the registry counts a load, a sync, and a search hit under the serving layer, the client name, and the harness of the request; that `GET /v1/usage` and `podium usage` report totals for the catalog, each layer, and each artifact, including an artifact with no counts, with a week series and a batch of named artifacts; that the counts are plain rows in the `usage_daily` table; and that the `artifacts.searched` audit record carries the returned artifacts and their layers.
 
 **Covers.** The §8.7 usage counts, report, CLI, storage, and flush, the §8.1 `context.results` member, and the §13.12 `PODIUM_USAGE_*` settings, through the compiled `podium` binary.
 
-**Why by hand.** An operator reads the report beside the calls that produced it. A sync counted as a load, a harness that lands under `none`, a series whose periods do not add up to the totals, an unused artifact missing from the list, or a counts table that SQL cannot read is visible only when the three are compared. Per-caller layer visibility needs an identity provider, and the integration suite covers it.
+**Why by hand.** An operator reads the report beside the calls that produced it. A sync counted as a load, a harness that lands under a name the request did not send, a series whose periods do not add up to the totals, an unused artifact missing from the list, or a counts table that SQL cannot read is visible only when the three are compared. Per-caller layer visibility needs an identity provider, and the integration suite covers it.
 
 **Prerequisites.** `sqlite3` and `jq`. The scenario binds 127.0.0.1:8178.
 
@@ -13539,16 +13539,16 @@ lines, the search response, and the written file together.
 2. Load `ops/greet` as an agent from two harnesses, sync `ops/farewell`, search with a query and without one, and read the report after the flush.
 
    ```bash
-   curl -s -o /dev/null -H 'X-Podium-Client: kind=mcp&name=podium-mcp&harness=claude-code' "$URL/v1/load_artifact?id=ops/greet"
-   curl -s -o /dev/null -H 'X-Podium-Client: kind=mcp&name=podium-mcp&harness=cursor' "$URL/v1/load_artifact?id=ops/greet"
-   curl -s -o /dev/null -H 'X-Podium-Client: kind=sync&name=podium&harness=claude-code' "$URL/v1/load_artifact?id=ops/farewell"
-   curl -s -o /dev/null -H 'X-Podium-Client: kind=sdk&name=podium-py' "$URL/v1/search_artifacts?query=session"
+   curl -s -o /dev/null -H 'X-Podium-Client: name=mcp&harness=claude-code' "$URL/v1/load_artifact?id=ops/greet"
+   curl -s -o /dev/null -H 'X-Podium-Client: name=mcp&harness=cursor' "$URL/v1/load_artifact?id=ops/greet"
+   curl -s -o /dev/null -H 'X-Podium-Client: name=cli&purpose=sync&harness=claude-code' "$URL/v1/load_artifact?id=ops/farewell"
+   curl -s -o /dev/null -H 'X-Podium-Client: name=sdk' "$URL/v1/search_artifacts?query=session"
    curl -s -o /dev/null "$URL/v1/search_artifacts"
    sleep 2
    curl -s "$URL/v1/usage" | jq -c '{totals: (.totals | {loads, syncs, search_hits, by_harness}), layers: [.layers[].layer], artifacts: [.artifacts[] | {artifact_id, loads, syncs, search_hits, last_loaded}]}'
    ```
 
-   **Expect.** One line in which `totals` is `{"loads":2,"syncs":1,"search_hits":2,...}`, `by_harness` holds `claude-code` with 1 load and 1 sync, `cursor` with 1 load, and `none` with 2 search hits, `layers` is `["team","finance"]`, and `artifacts` lists `ops/greet` first with 2 loads, 0 syncs, 1 search hit, and today's date as `last_loaded`, then `ops/farewell` with 0 loads, 1 sync, 1 search hit, and a null `last_loaded`, then `fin/payroll` with zero counts. A sync counted as a load, the empty-query listing counted as search hits, or a missing `fin/payroll` is the defect.
+   **Expect.** One line in which `totals` is `{"loads":2,"syncs":1,"search_hits":2,...}`, `by_harness` holds `claude-code` with 1 load and 1 sync, `cursor` with 1 load, and `unknown` with 2 search hits, `layers` is `["team","finance"]`, and `artifacts` lists `ops/greet` first with 2 loads, 0 syncs, 1 search hit, and today's date as `last_loaded`, then `ops/farewell` with 0 loads, 1 sync, 1 search hit, and a null `last_loaded`, then `fin/payroll` with zero counts. A sync counted as a load, the empty-query listing counted as search hits, or a missing `fin/payroll` is the defect.
 
 3. Read the report as a week series, for two named artifacts through `POST`, and through the CLI.
 
@@ -13572,7 +13572,7 @@ lines, the search response, and the written file together.
    grep '"artifacts.searched"' "$PODIUM_AUDIT_LOG_PATH" | jq -r 'select(.context.query == "session") | .context.results'
    ```
 
-   **Expect.** Five rows, with the columns separated by `|`: `team|ops/farewell|sdk|none|0|0|1`, `team|ops/farewell|sync|claude-code|0|1|0`, `team|ops/greet|mcp|claude-code|1|0|0`, `team|ops/greet|mcp|cursor|1|0|0`, and `team|ops/greet|sdk|none|0|0|1`. The audit line is a JSON array of two `{"artifact_id":...,"layer":"team"}` objects naming `ops/greet` and `ops/farewell`. A missing row means the graceful shutdown dropped buffered counts.
+   **Expect.** Five rows, with the columns separated by `|`: `team|ops/farewell|cli|claude-code|0|1|0`, `team|ops/farewell|sdk|unknown|0|0|1`, `team|ops/greet|mcp|claude-code|1|0|0`, `team|ops/greet|mcp|cursor|1|0|0`, and `team|ops/greet|sdk|unknown|0|0|1`. The `client_kind` column holds the client name. The audit line is a JSON array of two `{"artifact_id":...,"layer":"team"}` objects naming `ops/greet` and `ops/farewell`. A missing row means the graceful shutdown dropped buffered counts.
 
 **Cleanup.** `rm -rf "$WORK"`. Step 4 stops the server.
 
@@ -13611,8 +13611,8 @@ lines, the search response, and the written file together.
      SRV=$!
      curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null "$URL/healthz"
      server_alive "$SRV" "$WORK/$2.log" || return 1
-     curl -s -o /dev/null -w 'load %{http_code}\n' -H 'X-Podium-Client: kind=mcp&name=podium-mcp&harness=claude-code' "$URL/v1/load_artifact?id=ops/greet"
-     curl -s -o /dev/null -w 'sync %{http_code}\n' -H 'X-Podium-Client: kind=sync&name=podium&harness=claude-code' "$URL/v1/load_artifact?id=ops/farewell"
+     curl -s -o /dev/null -w 'load %{http_code}\n' -H 'X-Podium-Client: name=mcp&harness=claude-code' "$URL/v1/load_artifact?id=ops/greet"
+     curl -s -o /dev/null -w 'sync %{http_code}\n' -H 'X-Podium-Client: name=cli&purpose=sync&harness=claude-code' "$URL/v1/load_artifact?id=ops/farewell"
      curl -s "$URL/v1/search_artifacts?query=session" | jq -c '[.results[].id]'
      sleep 2
      st=$(curl -s -o "$WORK/$2.usage" -w '%{http_code}' "$URL/v1/usage")
@@ -13641,7 +13641,7 @@ lines, the search response, and the written file together.
    rows
    ```
 
-   **Expect.** `load 200`, `sync 200`, the same search line, `usage 200`, and `[{"artifact_id":"ops/greet","loads":1,"syncs":0,"search_hits":1},{"artifact_id":"ops/farewell","loads":0,"syncs":1,"search_hits":1}]`. `rows` prints four rows: `ops/farewell|none|none|0|0|1`, `ops/farewell|sync|claude-code|0|1|0`, `ops/greet|mcp|claude-code|1|0|0`, and `ops/greet|none|none|0|0|1`. A server that exits in `server_alive`, or a report without the counts, is the defect.
+   **Expect.** `load 200`, `sync 200`, the same search line, `usage 200`, and `[{"artifact_id":"ops/greet","loads":1,"syncs":0,"search_hits":1},{"artifact_id":"ops/farewell","loads":0,"syncs":1,"search_hits":1}]`. `rows` prints four rows: `ops/farewell|cli|claude-code|0|1|0`, `ops/farewell|unknown|unknown|0|0|1`, `ops/greet|mcp|claude-code|1|0|0`, and `ops/greet|unknown|unknown|0|0|1`. The search sends no `X-Podium-Client` header, so its hits count under `unknown`. A server that exits in `server_alive`, or a report without the counts, is the defect.
 
 4. Roll back: serve the same database with 0.6.0 and read the rows again.
 
@@ -13729,8 +13729,8 @@ Every phase stops its own server.
 2. Sync `tools/aaa` five times, load `tools/bbb` three times as an agent, and search again.
 
    ```bash
-   for i in 1 2 3 4 5; do curl -s -o /dev/null -H 'X-Podium-Client: kind=sync&name=podium&harness=claude-code' "http://127.0.0.1:8180/v1/load_artifact?id=tools/aaa"; done
-   for i in 1 2 3; do curl -s -o /dev/null -H 'X-Podium-Client: kind=mcp&name=podium-mcp&harness=claude-code' "http://127.0.0.1:8180/v1/load_artifact?id=tools/bbb"; done
+   for i in 1 2 3 4 5; do curl -s -o /dev/null -H 'X-Podium-Client: name=cli&purpose=sync&harness=claude-code' "http://127.0.0.1:8180/v1/load_artifact?id=tools/aaa"; done
+   for i in 1 2 3; do curl -s -o /dev/null -H 'X-Podium-Client: name=mcp&harness=claude-code' "http://127.0.0.1:8180/v1/load_artifact?id=tools/bbb"; done
    order
    ```
 
@@ -13788,10 +13788,10 @@ rm -rf "$WORK"
    server_alive "$SRV" "$WORK/srv.log"
    U=http://127.0.0.1:8181
    hit() { i=0; while [ "$i" -lt "$3" ]; do curl -s -o /dev/null -H "X-Podium-Client: $2" "$U/v1/load_artifact?id=$1"; i=$((i+1)); done; }
-   hit observability/trace-review 'kind=mcp&name=podium-mcp&harness=claude-code' 12
-   hit observability/trace-review 'kind=mcp&name=podium-mcp&harness=cursor' 5
-   hit postgres/query-review 'kind=sdk&name=podium-py' 7
-   hit finance/pay-invoice 'kind=sync&name=podium&harness=claude-code' 4
+   hit observability/trace-review 'name=mcp&harness=claude-code' 12
+   hit observability/trace-review 'name=mcp&harness=cursor' 5
+   hit postgres/query-review 'name=sdk' 7
+   hit finance/pay-invoice 'name=cli&purpose=sync&harness=claude-code' 4
    hit finance/pay-invoice '' 2
    for q in trace review invoice; do curl -s -o /dev/null "$U/v1/search_artifacts?query=$q"; done
    sleep 2
@@ -13802,7 +13802,7 @@ rm -rf "$WORK"
 
 2. Open `http://127.0.0.1:8181/app/#/usage` and read the page in the light theme.
 
-   **Expect.** The sidebar carries a Usage row after Similarity, and it is the current row. The header reads `Usage` with a `LAST 30 DAYS` badge and the `30d` segment pressed. The tiles state 26 artifacts loaded and 4 synced. The client bar lists `mcp 17`, `sdk 7`, `sync 4`, and `unknown 2`, and the harness bar lists `claude-code 16`, `cursor 5`, and `unknown 9`; in both, the unknown swatch is the palest tone, whatever its position. By layer is closed and reads `2 layers · platform has the most loads`. The table shows `Showing 4 of 4`, sorted by `LOADS ↓`, with `observability/trace-review` first at 17 and an accent bar, and `finance/settle-bill` last at 0 with an em dash under LAST LOADED. A breakdown that names `none`, or an unknown part drawn in a dark tone, is the defect.
+   **Expect.** The sidebar carries a Usage row after Similarity, and it is the current row. The header reads `Usage` with a `LAST 30 DAYS` badge and the `30d` segment pressed. The tiles state 26 artifacts loaded and 4 synced. The client bar lists `mcp 17`, `sdk 7`, `cli 4`, and `unknown 2`, and the harness bar lists `claude-code 16`, `cursor 5`, and `unknown 9`; in both, `unknown` comes last with the palest swatch, whatever its count. By layer is closed and reads `2 layers · platform has the most loads`. The table shows `Showing 4 of 4`, sorted by `LOADS ↓`, with `observability/trace-review` first at 17 and an accent bar, and `finance/settle-bill` last at 0 with an em dash under LAST LOADED. A breakdown that names `none` or `sync`, an unknown part drawn in a dark tone, or an unknown part ahead of a named one is the defect.
 
 3. Open By layer, press the SYNCS header twice, type `finance` into the filter, and choose `platform` in the Layer menu.
 

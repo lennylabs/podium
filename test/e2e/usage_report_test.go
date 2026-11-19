@@ -38,7 +38,7 @@ func usageGet(t *testing.T, url, client string) int {
 }
 
 // Spec: §8.7, §8.1 — the registry counts loads, syncs, and search hits by
-// client kind and harness, flushes them on PODIUM_USAGE_FLUSH_INTERVAL,
+// client and harness, flushes them on PODIUM_USAGE_FLUSH_INTERVAL,
 // serves them in GET /v1/usage, and records the search results with their
 // layers in the artifacts.searched audit record; podium usage prints the
 // report and exits 0, 1, and 2 as documented.

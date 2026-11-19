@@ -567,7 +567,7 @@ export interface UsagePeriod extends UsageCounts {
   end: string;
 }
 
-/** UsageTotals is a total with its breakdowns by client kind and by harness,
+/** UsageTotals is a total with its breakdowns by client and by harness,
  * which map each name with a non-zero count to its counts, and the series a
  * granularity other than none adds. */
 export interface UsageTotals extends UsageCounts {

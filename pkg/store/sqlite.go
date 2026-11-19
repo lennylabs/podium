@@ -183,7 +183,7 @@ func (s *SQLite) applySchema() error {
 			computed_at TEXT NOT NULL,
 			PRIMARY KEY (tenant_id, artifact_id)
 		)`,
-		// §8.7 daily usage totals, one row per day, layer, artifact, client kind, and
+		// §8.7 daily usage totals, one row per day, layer, artifact, client, and
 		// harness. day is the UTC date as YYYY-MM-DD.
 		`CREATE TABLE IF NOT EXISTS usage_daily (
 			tenant_id TEXT NOT NULL,

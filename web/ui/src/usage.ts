@@ -1,5 +1,5 @@
 // The usage report's figures as the UI states them: the counts of a list's
-// artifacts read in one request, the names of the client kinds and harnesses,
+// artifacts read in one request, the names of the clients and harnesses,
 // and the days and numbers the surfaces print.
 
 import { useMemo } from 'react';

@@ -8,8 +8,8 @@ import (
 	"github.com/lennylabs/podium/pkg/audit"
 )
 
-// TestClientHeaderValue pins the X-Podium-Client value podium sync sends: kind
-// sync, name podium, the build version, and the harness it is given. An empty
+// TestClientHeaderValue pins the X-Podium-Client value podium sync sends: name
+// cli, purpose sync, the build version, and the harness it is given. An empty
 // harness (a marketplace render) omits the member rather than sending it empty.
 //
 // Spec: §7.2.2

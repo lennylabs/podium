@@ -2,9 +2,11 @@ package core
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/lennylabs/podium/internal/clock"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -45,7 +47,7 @@ type usageClient struct {
 //
 // Spec: §8.7, §7.2.2
 func ContextWithUsageClient(ctx context.Context, name, harness, purpose string) context.Context {
-	return context.WithValue(ctx, usageClientCtxKey{}, usageClient{name: name, harness: harness, sync: purpose == "sync"})
+	return context.WithValue(ctx, usageClientCtxKey{}, usageClient{name: name, harness: harness, sync: purpose == audit.PurposeSync})
 }
 
 // usageClientFrom returns the client name, harness, and sync purpose ctx
@@ -65,6 +67,14 @@ func usageClientFrom(ctx context.Context) (name, harness string, sync bool) {
 // usageBufferKey identifies one buffered §8.7 row.
 type usageBufferKey struct {
 	tenant, day, layer, artifact, client, harness string
+}
+
+// pendingCount is one buffered §8.7 row and the order of the call that first
+// buffered it. Flush caps keys in that order, so a client or harness beyond the
+// per-day cap is the one whose first call came later, as §8.7 states.
+type pendingCount struct {
+	store.UsageCount
+	seq uint64
 }
 
 // usageDayKeys is the set of clients and the set of harnesses one tenant has
@@ -92,7 +102,9 @@ type UsageCounter struct {
 	clock    clock.Clock
 	flushing chan struct{}
 	mu       sync.Mutex
-	pending  map[usageBufferKey]store.UsageCount
+	pending  map[usageBufferKey]pendingCount
+	// next is the sequence number add gives the next new row; mu guards it.
+	next uint64
 	// maxKeys is the §8.7 per-tenant, per-day cap on distinct clients and on
 	// distinct harnesses.
 	maxKeys int
@@ -109,7 +121,7 @@ func NewUsageCounter(c clock.Clock) *UsageCounter {
 		c = clock.Real{}
 	}
 	return &UsageCounter{
-		clock: c, flushing: make(chan struct{}, 1), pending: map[usageBufferKey]store.UsageCount{},
+		clock: c, flushing: make(chan struct{}, 1), pending: map[usageBufferKey]pendingCount{},
 		maxKeys: DefaultUsageMaxClientKeys, known: map[[2]string]*usageDayKeys{},
 	}
 }
@@ -135,7 +147,11 @@ func (u *UsageCounter) add(ctx context.Context, tenant, layer, artifact string, 
 	defer u.mu.Unlock()
 	c, ok := u.pending[k]
 	if !ok {
-		c = store.UsageCount{TenantID: tenant, Day: day, Layer: layer, ArtifactID: artifact, Client: client, Harness: harness}
+		c = pendingCount{
+			UsageCount: store.UsageCount{TenantID: tenant, Day: day, Layer: layer, ArtifactID: artifact, Client: client, Harness: harness},
+			seq:        u.next,
+		}
+		u.next++
 	}
 	c.Loads += loads
 	c.Syncs += syncs
@@ -180,15 +196,16 @@ func (u *UsageCounter) Flush(ctx context.Context, st store.Store) error {
 	}
 	u.mu.Lock()
 	taken := u.pending
-	u.pending = map[usageBufferKey]store.UsageCount{}
+	u.pending = map[usageBufferKey]pendingCount{}
 	u.mu.Unlock()
 
-	byTenant := map[string][]store.UsageCount{}
+	byTenant := map[string][]pendingCount{}
 	for _, c := range taken {
 		byTenant[c.TenantID] = append(byTenant[c.TenantID], c)
 	}
 	var first error
 	for tenant, counts := range byTenant {
+		sort.Slice(counts, func(i, j int) bool { return counts[i].seq < counts[j].seq })
 		capped, err := u.capKeys(ctx, st, tenant, counts)
 		if err == nil {
 			err = st.AddUsageCounts(ctx, tenant, capped)
@@ -204,20 +221,30 @@ func (u *UsageCounter) Flush(ctx context.Context, st store.Store) error {
 	return first
 }
 
-// capKeys returns counts with each client, and each harness, beyond the
-// tenant's per-day cap replaced by UsageOther. It seeds a day's known keys
-// from the rows the store holds for that day the first time a flush meets
-// the day, and adds each key it admits, so later flushes of this replica see
-// them. UsageUnknown and UsageOther never count toward the cap. A store read
-// that fails returns its error, and the caller keeps the counts buffered.
+// capKeys returns counts, in the order given, with each client, and each
+// harness, beyond the tenant's per-day cap replaced by UsageOther.
+// UsageUnknown and UsageOther never count toward the cap. The known keys of a
+// day are read from the rows the store holds for it the first time a flush
+// meets the day, and read again, at most once per flush, before admitting a
+// key this replica has not seen while the set has room: another replica may
+// have recorded keys since, and §8.7 lets replicas exceed the cap only until
+// each reads the others'. A full set admits nothing, so it needs no read. A
+// store read that fails returns its error, and the caller keeps the counts
+// buffered.
 //
 // Spec: §8.7, §13.12
-func (u *UsageCounter) capKeys(ctx context.Context, st store.Store, tenant string, counts []store.UsageCount) ([]store.UsageCount, error) {
+func (u *UsageCounter) capKeys(ctx context.Context, st store.Store, tenant string, counts []pendingCount) ([]store.UsageCount, error) {
 	out := make([]store.UsageCount, 0, len(counts))
-	for _, c := range counts {
-		keys, err := u.dayKeys(ctx, st, tenant, c.Day)
-		if err != nil {
-			return nil, err
+	read := map[string]bool{}
+	for _, pc := range counts {
+		c := pc.UsageCount
+		keys := u.known[[2]string{tenant, c.Day}]
+		if keys == nil || !read[c.Day] && keys.wouldAdd(c, u.maxKeys) {
+			var err error
+			if keys, err = u.readDayKeys(ctx, st, tenant, c.Day); err != nil {
+				return nil, err
+			}
+			read[c.Day] = true
 		}
 		c.Client = admitKey(keys.clients, c.Client, u.maxKeys)
 		c.Harness = admitKey(keys.harnesses, c.Harness, u.maxKeys)
@@ -226,30 +253,52 @@ func (u *UsageCounter) capKeys(ctx context.Context, st store.Store, tenant strin
 	return out, nil
 }
 
-// dayKeys returns the known keys of tenant on day, reading them from the
-// store's rows for the day the first time.
-func (u *UsageCounter) dayKeys(ctx context.Context, st store.Store, tenant, day string) (*usageDayKeys, error) {
-	if k, ok := u.known[[2]string{tenant, day}]; ok {
-		return k, nil
-	}
+// readDayKeys merges the clients and harnesses of the store's rows for tenant
+// on day into the day's known keys, creating them on the first read, and
+// returns them. The merge is unbounded: a key the store holds is recorded
+// already, so it keeps its name.
+func (u *UsageCounter) readDayKeys(ctx context.Context, st store.Store, tenant, day string) (*usageDayKeys, error) {
 	rows, err := st.ListUsageCounts(ctx, tenant, day, day)
 	if err != nil {
 		return nil, err
 	}
-	k := &usageDayKeys{clients: map[string]bool{}, harnesses: map[string]bool{}}
-	for _, r := range rows {
-		admitKey(k.clients, r.Client, int(^uint(0)>>1))
-		admitKey(k.harnesses, r.Harness, int(^uint(0)>>1))
+	k := u.known[[2]string{tenant, day}]
+	if k == nil {
+		k = &usageDayKeys{clients: map[string]bool{}, harnesses: map[string]bool{}}
+		u.known[[2]string{tenant, day}] = k
 	}
-	u.known[[2]string{tenant, day}] = k
+	for _, r := range rows {
+		if counted(r.Client) {
+			k.clients[r.Client] = true
+		}
+		if counted(r.Harness) {
+			k.harnesses[r.Harness] = true
+		}
+	}
 	return k, nil
+}
+
+// wouldAdd reports whether capping c would add a client or a harness to k.
+func (k *usageDayKeys) wouldAdd(c store.UsageCount, max int) bool {
+	return admits(k.clients, c.Client, max) || admits(k.harnesses, c.Harness, max)
+}
+
+// counted reports whether key counts toward the cap: every value except
+// UsageUnknown and UsageOther.
+func counted(key string) bool {
+	return key != UsageUnknown && key != UsageOther
+}
+
+// admits reports whether admitKey would add key to set.
+func admits(set map[string]bool, key string, max int) bool {
+	return counted(key) && !set[key] && len(set) < max
 }
 
 // admitKey returns key when the set already holds it, when it is UsageUnknown
 // or UsageOther, or when the set holds fewer than max keys, adding it in the
 // last case; otherwise it returns UsageOther.
 func admitKey(set map[string]bool, key string, max int) string {
-	if key == UsageUnknown || key == UsageOther || set[key] {
+	if !counted(key) || set[key] {
 		return key
 	}
 	if len(set) >= max {
@@ -290,8 +339,10 @@ func (u *UsageCounter) pendingLoads(tenant string) map[usageRef]int64 {
 	return out
 }
 
-// restore merges counts back into the buffer after a failed flush.
-func (u *UsageCounter) restore(counts []store.UsageCount) {
+// restore merges counts back into the buffer after a failed flush. A merged
+// row keeps the restored row's sequence number, which is the earlier one,
+// so the cap still meets it in call order.
+func (u *UsageCounter) restore(counts []pendingCount) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	for _, c := range counts {
@@ -301,10 +352,10 @@ func (u *UsageCounter) restore(counts []store.UsageCount) {
 			u.pending[k] = c
 			continue
 		}
-		p.Loads += c.Loads
-		p.Syncs += c.Syncs
-		p.SearchHits += c.SearchHits
-		u.pending[k] = p
+		c.Loads += p.Loads
+		c.Syncs += p.Syncs
+		c.SearchHits += p.SearchHits
+		u.pending[k] = c
 	}
 }
 

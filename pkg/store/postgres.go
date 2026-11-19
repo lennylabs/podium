@@ -155,7 +155,7 @@ var orgTableStmts = []string{
 		computed_at TIMESTAMPTZ NOT NULL,
 		PRIMARY KEY (tenant_id, artifact_id)
 	)`,
-	// §8.7 daily usage totals, one row per day, layer, artifact, client kind, and client
+	// §8.7 daily usage totals, one row per day, layer, artifact, client, and client
 	// harness.
 	`CREATE TABLE IF NOT EXISTS usage_daily (
 		tenant_id TEXT NOT NULL,

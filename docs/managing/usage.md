@@ -95,7 +95,7 @@ The web UI reads the report with the caller's identity. An artifact the caller c
 
 Each registry replica buffers its counts and adds them to the metadata store every `PODIUM_USAGE_FLUSH_INTERVAL`, one minute by default, and once more at a graceful shutdown, which waits for a flush in progress and has 10 seconds to finish. The report therefore trails live traffic by up to one interval, and a replica that stops without a graceful shutdown loses the counts since its last flush. A flush that fails, such as one on a read-only registry, keeps its counts for the next flush. Replicas that share a metadata store add their counts together, so the report covers every replica.
 
-The registry keeps `PODIUM_USAGE_RETENTION_DAYS` days of counts, 365 by default, and the report's window lies within them. [Usage report settings](../reference/configuration#usage-report) lists both settings.
+The registry keeps `PODIUM_USAGE_RETENTION_DAYS` days of counts, 365 by default, and the report's window lies within them. [Usage report settings](../reference/configuration#usage-report) lists these settings.
 
 ### Query the stored counts
 

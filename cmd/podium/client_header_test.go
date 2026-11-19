@@ -89,8 +89,8 @@ func cliWant() audit.CallerClient {
 	return audit.CallerClient{Name: "cli", Version: buildinfo.Version}
 }
 
-// Spec: §7.2.2 — the podium CLI request helpers send kind=cli, name podium,
-// and the build version, with no harness member.
+// Spec: §7.2.2 — the podium CLI request helpers send name cli and the build
+// version, with no harness member.
 func TestClientHeader_CLIRequestHelpers(t *testing.T) {
 	s := newCLIClientServer(t)
 	isolateClientResolution(t, func() {
