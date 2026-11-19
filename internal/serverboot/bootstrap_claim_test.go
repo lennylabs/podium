@@ -29,7 +29,7 @@ func TestBootstrapIngests_ClaimTheLayer(t *testing.T) {
 		if err := st.PutLayerConfig(ctx, store.LayerConfig{TenantID: "default", ID: id, SourceType: "local"}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := st.ClaimLayerIngest(ctx, "default", id, "earlier-"+id); err != nil {
+		if _, _, err := st.ClaimLayerIngest(ctx, "default", id, "earlier-"+id); err != nil {
 			t.Fatal(err)
 		}
 	}

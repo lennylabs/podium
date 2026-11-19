@@ -518,11 +518,17 @@ type Store interface {
 	SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time, claim string) error
 	// ClaimLayerIngest makes claim the live layer's ingest claim, superseding
 	// the claim of every earlier §7.3.1 ingest cycle of the layer, and returns
-	// the layer as stored. It returns ErrNotFound, claiming nothing, when no
-	// live layer layerID exists. PutLayerConfig keeps the claim, and
-	// DeleteLayerConfig clears it, so a cycle in flight when the layer is
-	// unregistered never matches again after a restore.
-	ClaimLayerIngest(ctx context.Context, tenantID, layerID, claim string) (LayerConfig, error)
+	// the layer as stored and the claim it replaced, empty when the layer held
+	// none. It returns ErrNotFound, claiming nothing, when no live layer
+	// layerID exists. PutLayerConfig keeps the claim, and DeleteLayerConfig
+	// clears it, so a cycle in flight when the layer is unregistered never
+	// matches again after a restore.
+	ClaimLayerIngest(ctx context.Context, tenantID, layerID, claim string) (LayerConfig, string, error)
+	// ReleaseLayerIngest hands a failed cycle's claim back: when the live
+	// layer still holds claim, it holds previous again, so the cycle claim
+	// displaced continues. A later claim, or an unregistered layer, is left
+	// as it is.
+	ReleaseLayerIngest(ctx context.Context, tenantID, layerID, claim, previous string) error
 	// RecordLayerIngest sets the live layer's LastIngestedRef to ref and its
 	// LastIngestedAt to at when the layer holds claim, and changes no other
 	// field. It returns ErrIngestSuperseded, changing nothing, otherwise.

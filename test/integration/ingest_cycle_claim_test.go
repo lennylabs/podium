@@ -168,10 +168,14 @@ func TestIngestCycles_WaitingCycleAfterUnregisterRunsNothing(t *testing.T) {
 				t.Fatal(err)
 			}
 			close(first.release)
-			for _, o := range []cycleOutcome{<-d1, <-d2} {
-				if o.err != nil || !o.res.Superseded {
-					t.Errorf("cycle = %+v, %v; want superseded by the unregister", o.res, o.err)
-				}
+			// The running cycle stops at its check before the writes. The waiting
+			// cycle finds no layer to claim and returns the not-found error the
+			// reingest endpoint answers as registry.not_found.
+			if o := <-d1; o.err != nil || !o.res.Superseded {
+				t.Errorf("running cycle = %+v, %v; want superseded by the unregister", o.res, o.err)
+			}
+			if o := <-d2; !errors.Is(o.err, store.ErrNotFound) {
+				t.Errorf("waiting cycle = %+v, %v; want store.ErrNotFound", o.res, o.err)
 			}
 			if _, err := st.GetLayerConfig(ctx, "t", "team"); !errors.Is(err, store.ErrNotFound) {
 				t.Errorf("GetLayerConfig after the unregister = %v, want the layer still unregistered", err)

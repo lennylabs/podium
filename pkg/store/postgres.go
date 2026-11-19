@@ -865,24 +865,47 @@ func postgresHoldsClaim(ctx context.Context, tx *sql.Tx, tenantID, layerID, clai
 	return err
 }
 
-// ClaimLayerIngest makes claim the live layer's ingest claim (§7.3.1). A
-// layer that is absent or unregistered claims nothing.
-func (p *Postgres) ClaimLayerIngest(ctx context.Context, tenantID, layerID, claim string) (LayerConfig, error) {
+// ClaimLayerIngest makes claim the live layer's ingest claim (§7.3.1) and
+// returns the layer as stored and the claim it replaced. The old claim is
+// read in the updating statement, from the row version the update locked, so
+// no other claim lands between the two. A layer that is absent or
+// unregistered claims nothing.
+func (p *Postgres) ClaimLayerIngest(ctx context.Context, tenantID, layerID, claim string) (LayerConfig, string, error) {
 	conn, release, err := p.org(ctx, tenantID)
 	if err != nil {
-		return LayerConfig{}, err
+		return LayerConfig{}, "", err
 	}
-	claimed, err := rowsChanged(conn.ExecContext(ctx, `
-		UPDATE layer_configs SET ingest_claim = $1
-		WHERE tenant_id = $2 AND id = $3 AND deleted_at IS NULL`, claim, tenantID, layerID))
+	var previous sql.NullString
+	err = conn.QueryRowContext(ctx, `
+		UPDATE layer_configs AS l SET ingest_claim = $1
+		FROM (SELECT tenant_id, id, ingest_claim FROM layer_configs
+		      WHERE tenant_id = $2 AND id = $3 AND deleted_at IS NULL FOR UPDATE) AS old
+		WHERE l.tenant_id = old.tenant_id AND l.id = old.id
+		RETURNING old.ingest_claim`, claim, tenantID, layerID).Scan(&previous)
 	release()
+	if errors.Is(err, sql.ErrNoRows) {
+		return LayerConfig{}, "", ErrNotFound
+	}
 	if err != nil {
-		return LayerConfig{}, err
+		return LayerConfig{}, "", err
 	}
-	if !claimed {
-		return LayerConfig{}, ErrNotFound
+	cfg, err := p.GetLayerConfig(ctx, tenantID, layerID)
+	return cfg, previous.String, err
+}
+
+// ReleaseLayerIngest puts previous back as the layer's ingest claim when the
+// live layer still holds claim (§7.3.1). An empty previous stores NULL.
+func (p *Postgres) ReleaseLayerIngest(ctx context.Context, tenantID, layerID, claim, previous string) error {
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return err
 	}
-	return p.GetLayerConfig(ctx, tenantID, layerID)
+	defer release()
+	_, err = conn.ExecContext(ctx, `
+		UPDATE layer_configs SET ingest_claim = $1
+		WHERE tenant_id = $2 AND id = $3 AND deleted_at IS NULL AND ingest_claim = $4`,
+		sql.NullString{String: previous, Valid: previous != ""}, tenantID, layerID, claim)
+	return err
 }
 
 // RecordLayerIngest sets the ingest reference and time of the live layer that

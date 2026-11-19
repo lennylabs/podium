@@ -1091,8 +1091,10 @@ func softDeleteManyArtifacts(t *testing.T, s store.Store) {
 // earlier claim: SoftDeleteArtifacts and RecordLayerIngest under the earlier
 // claim return ErrIngestSuperseded and change nothing, also for an empty
 // list, and the latest claim tombstones and records only the ingest columns.
-// PutLayerConfig keeps the claim, DeleteLayerConfig clears it so a restore
-// does not revive it, and an absent or unregistered layer cannot be claimed.
+// A claim returns the claim it replaced, and ReleaseLayerIngest hands a claim
+// back only while it is the latest. PutLayerConfig keeps the claim,
+// DeleteLayerConfig clears it so a restore does not revive it, and an absent
+// or unregistered layer cannot be claimed.
 func layerIngestClaim(t *testing.T, s store.Store) {
 	t.Helper()
 	ctx := context.Background()
@@ -1105,17 +1107,23 @@ func layerIngestClaim(t *testing.T, s store.Store) {
 	superseded := func(err error) bool { return errors.Is(err, store.ErrIngestSuperseded) }
 	at := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 
-	_, absentErr := s.ClaimLayerIngest(ctx, "t", "absent", "c0")
-	claimed, err := s.ClaimLayerIngest(ctx, "t", "L", "c1")
+	_, _, absentErr := s.ClaimLayerIngest(ctx, "t", "absent", "c0")
+	claimed, first, err := s.ClaimLayerIngest(ctx, "t", "L", "c1")
 	must(t, err)
-	_, err = s.ClaimLayerIngest(ctx, "t", "L", "c2")
+	_, second, err := s.ClaimLayerIngest(ctx, "t", "L", "c2")
 	must(t, err)
+	// A failing cycle hands its claim back only while it is the latest: the
+	// release of c1, which c2 replaced, changes nothing, and c9 hands c2 back.
+	_, ninth, err := s.ClaimLayerIngest(ctx, "t", "L", "c9")
+	must(t, err)
+	must(t, s.ReleaseLayerIngest(ctx, "t", "L", "c1", "c0"))
+	must(t, s.ReleaseLayerIngest(ctx, "t", "L", "c9", ninth))
 	// A config update made between the claim and the record keeps the claim.
 	cfg.Public, cfg.WebhookSecret = true, "s2"
 	must(t, s.PutLayerConfig(ctx, cfg))
 	got := []bool{
 		errors.Is(absentErr, store.ErrNotFound),
-		claimed.Order == 3,
+		claimed.Order == 3 && first == "" && second == "c1" && ninth == "c2",
 		superseded(s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/gone"}, at, "c1")),
 		superseded(s.SoftDeleteArtifacts(ctx, "t", "L", nil, at, "c1")),
 		superseded(s.RecordLayerIngest(ctx, "t", "L", "c1", "r1", &at)),
@@ -1130,13 +1138,19 @@ func layerIngestClaim(t *testing.T, s store.Store) {
 	got = append(got, stored.LastIngestedRef == "r2" && stored.LastIngestedAt != nil && stored.LastIngestedAt.Equal(at) &&
 		stored.Public && stored.WebhookSecret == "s2" && stored.Order == 3)
 
+	// Handing back to no previous claim leaves the layer claimed by no cycle.
+	_, _, err = s.ClaimLayerIngest(ctx, "t", "L", "c4")
+	must(t, err)
+	must(t, s.ReleaseLayerIngest(ctx, "t", "L", "c4", ""))
+	got = append(got, superseded(s.SoftDeleteArtifacts(ctx, "t", "L", nil, at, "c4")))
+
 	must(t, s.DeleteLayerConfig(ctx, "t", "L"))
-	_, deletedErr := s.ClaimLayerIngest(ctx, "t", "L", "c3")
+	_, _, deletedErr := s.ClaimLayerIngest(ctx, "t", "L", "c3")
 	got = append(got, errors.Is(deletedErr, store.ErrNotFound), superseded(s.RecordLayerIngest(ctx, "t", "L", "c2", "r3", &at)))
 	must(t, s.RestoreLayerConfig(ctx, "t", "L"))
 	got = append(got, superseded(s.SoftDeleteArtifacts(ctx, "t", "L", nil, at, "c2")))
 
-	want := []bool{true, true, true, true, true, true, true, true, true, true, true, true, true, true}
+	want := []bool{true, true, true, true, true, true, true, true, true, true, true, true, true, true, true}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("claim sequence = %v, want %v", got, want)
 	}

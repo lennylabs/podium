@@ -668,17 +668,36 @@ func (s *Memory) holdsClaimLocked(tenantID, layerID, claim string) bool {
 	return ok && cfg.DeletedAt == nil && s.ingestClaims[key] == claim
 }
 
-// ClaimLayerIngest makes claim the live layer's ingest claim (§7.3.1).
-func (s *Memory) ClaimLayerIngest(_ context.Context, tenantID, layerID, claim string) (LayerConfig, error) {
+// ClaimLayerIngest makes claim the live layer's ingest claim (§7.3.1) and
+// returns the claim it replaced.
+func (s *Memory) ClaimLayerIngest(_ context.Context, tenantID, layerID, claim string) (LayerConfig, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := layerKey(tenantID, layerID)
 	cfg, ok := s.layers[key]
 	if !ok || cfg.DeletedAt != nil {
-		return LayerConfig{}, ErrNotFound
+		return LayerConfig{}, "", ErrNotFound
 	}
+	previous := s.ingestClaims[key]
 	s.ingestClaims[key] = claim
-	return splitStoredLayer(cfg), nil
+	return splitStoredLayer(cfg), previous, nil
+}
+
+// ReleaseLayerIngest puts previous back as the layer's ingest claim when the
+// live layer still holds claim (§7.3.1).
+func (s *Memory) ReleaseLayerIngest(_ context.Context, tenantID, layerID, claim, previous string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.holdsClaimLocked(tenantID, layerID, claim) {
+		return nil
+	}
+	key := layerKey(tenantID, layerID)
+	if previous == "" {
+		delete(s.ingestClaims, key)
+		return nil
+	}
+	s.ingestClaims[key] = previous
+	return nil
 }
 
 // RecordLayerIngest sets the ingest reference and time of the live layer that

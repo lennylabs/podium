@@ -481,20 +481,52 @@ func sqliteHoldsClaim(ctx context.Context, q queryRower, tenantID, layerID, clai
 	return err
 }
 
-// ClaimLayerIngest makes claim the live layer's ingest claim (§7.3.1). The
-// update runs first, so a layer that is absent or unregistered claims
-// nothing, and the read that follows returns the layer as stored.
-func (s *SQLite) ClaimLayerIngest(ctx context.Context, tenantID, layerID, claim string) (LayerConfig, error) {
-	claimed, err := rowsChanged(s.db.ExecContext(ctx, `
-		UPDATE layer_configs SET ingest_claim = ?
-		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, claim, tenantID, layerID))
+// ClaimLayerIngest makes claim the live layer's ingest claim (§7.3.1) and
+// returns the layer as stored and the claim it replaced. A layer that is
+// absent or unregistered claims nothing.
+func (s *SQLite) ClaimLayerIngest(ctx context.Context, tenantID, layerID, claim string) (LayerConfig, string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return LayerConfig{}, err
+		return LayerConfig{}, "", err
 	}
-	if !claimed {
-		return LayerConfig{}, ErrNotFound
+	defer func() { _ = tx.Rollback() }()
+	// A no-op update takes the write lock before the read, so no other
+	// claim can land between reading the old claim and writing the new one.
+	locked, err := rowsChanged(tx.ExecContext(ctx, `
+		UPDATE layer_configs SET ingest_claim = ingest_claim
+		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, tenantID, layerID))
+	if err != nil {
+		return LayerConfig{}, "", err
 	}
-	return s.GetLayerConfig(ctx, tenantID, layerID)
+	if !locked {
+		return LayerConfig{}, "", ErrNotFound
+	}
+	var previous sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+		SELECT ingest_claim FROM layer_configs WHERE tenant_id = ? AND id = ?`,
+		tenantID, layerID).Scan(&previous); err != nil {
+		return LayerConfig{}, "", err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE layer_configs SET ingest_claim = ? WHERE tenant_id = ? AND id = ?`,
+		claim, tenantID, layerID); err != nil {
+		return LayerConfig{}, "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return LayerConfig{}, "", err
+	}
+	cfg, err := s.GetLayerConfig(ctx, tenantID, layerID)
+	return cfg, previous.String, err
+}
+
+// ReleaseLayerIngest puts previous back as the layer's ingest claim when the
+// live layer still holds claim (§7.3.1). An empty previous stores NULL.
+func (s *SQLite) ReleaseLayerIngest(ctx context.Context, tenantID, layerID, claim, previous string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE layer_configs SET ingest_claim = ?
+		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL AND ingest_claim = ?`,
+		sql.NullString{String: previous, Valid: previous != ""}, tenantID, layerID, claim)
+	return err
 }
 
 // RecordLayerIngest sets the ingest reference and time of the live layer that

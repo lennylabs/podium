@@ -517,7 +517,7 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		// Spec: §7.3.1 (Removed artifacts) — the startup ingest claims the
 		// layer as every cycle does, so it and a cycle of the same layer on
 		// another replica supersede each other by claim order.
-		claim, _, err := ingest.ClaimLayer(ctx, st, tenantID, l.ID)
+		claim, previous, _, err := ingest.ClaimLayer(ctx, st, tenantID, l.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -558,6 +558,7 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			// computes these artifacts once every bootstrap layer is in.
 		})
 		if err != nil {
+			ingest.ReleaseClaim(ctx, st, tenantID, l.ID, claim, previous)
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
 		}
 		// §7.3.1: the bootstrap ingest just completed, so stamp
@@ -674,7 +675,7 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 			// layer as every cycle does, so a cycle of the same layer on
 			// another replica and this ingest supersede each other by claim
 			// order rather than both removing.
-			claim, _, err := ingest.ClaimLayer(ctx, st, tenantID, lc.ID)
+			claim, previous, _, err := ingest.ClaimLayer(ctx, st, tenantID, lc.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -705,6 +706,7 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 				// overlap; the startup pass computes these artifacts.
 			})
 			if err != nil {
+				ingest.ReleaseClaim(ctx, st, tenantID, lc.ID, claim, previous)
 				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
 			}
 			log.Printf("ingested declared layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d, removed=%d)",

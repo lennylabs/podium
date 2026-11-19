@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -197,6 +198,42 @@ func TestReingest_ErrorMapping(t *testing.T) {
 				t.Errorf("code = %v, want %v", m["code"], tc.body)
 			}
 		})
+	}
+}
+
+// Spec: §7.3.1 (Removed artifacts) — the reingest response carries
+// superseded, true for a cycle a later cycle of the layer superseded and
+// false otherwise, and a cycle whose layer was unregistered while it waited
+// is answered 404 registry.not_found, as a reingest of an unregistered layer
+// is, rather than as an empty success.
+func TestReingest_SupersededAndUnregisteredWhileWaiting(t *testing.T) {
+	t.Parallel()
+	post := func(t *testing.T, runner server.ReingestRunner) (int, map[string]any) {
+		t.Helper()
+		base, cleanup := newRunnerHarness(t, runner)
+		defer cleanup()
+		resp, err := http.Post(base+"/v1/layers/reingest?id=team-shared", "application/json", nil)
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var m map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&m)
+		return resp.StatusCode, m
+	}
+	for _, superseded := range []bool{true, false} {
+		status, m := post(t, func(context.Context, store.LayerConfig, *server.BreakGlass) (*ingest.Result, error) {
+			return &ingest.Result{Removed: []string{}, Superseded: superseded}, nil
+		})
+		if status != http.StatusOK || m["superseded"] != superseded {
+			t.Errorf("superseded=%v: status %d, body %v; want 200 with superseded %v", superseded, status, m, superseded)
+		}
+	}
+	status, m := post(t, func(context.Context, store.LayerConfig, *server.BreakGlass) (*ingest.Result, error) {
+		return nil, fmt.Errorf("ingest: claim layer team-shared: %w", store.ErrNotFound)
+	})
+	if status != http.StatusNotFound || m["code"] != "registry.not_found" || m["message"] != "no such layer: team-shared" {
+		t.Errorf("unregistered while waiting: status %d, body %v; want 404 registry.not_found naming the layer", status, m)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/lint"
@@ -123,16 +124,57 @@ func SourceIngestWithOptions(
 		return nil, err
 	}
 	defer unlock()
-	claim, stored, err := ClaimLayer(ctx, st, cfg.TenantID, cfg.ID)
-	if errors.Is(err, store.ErrNotFound) {
-		log.Printf("ingest: layer %s is not registered; the cycle runs no ingest", cfg.ID)
-		return &Result{Removed: []string{}, Superseded: true}, nil
+	// Spec: §7.3.1 (Removed artifacts) — a refusal that needs no snapshot runs
+	// before the claim, so a cycle a freeze window refuses supersedes no
+	// cycle that the window does not block, such as a break-glass reingest.
+	if err := freezeRefusal(opts.FreezeWindows, time.Now()); err != nil {
+		return nil, err
 	}
+	claim, previous, stored, err := ClaimLayer(ctx, st, cfg.TenantID, cfg.ID)
 	if err != nil {
 		return nil, err
 	}
-	cfg = stored
+	res, err := runClaimedCycle(ctx, st, provider, stored, opts, claim)
+	if err != nil {
+		ReleaseClaim(ctx, st, stored.TenantID, stored.ID, claim, previous)
+	}
+	return res, err
+}
 
+// freezeRefusal returns the ErrFrozen refusal Ingest would return when a
+// window blocking ingest is active at now. Ingest checks again, and records
+// any break-glass override, once the cycle runs.
+func freezeRefusal(windows []FreezeWindow, now time.Time) error {
+	for _, w := range windows {
+		if w.Active(now, "ingest") {
+			return fmt.Errorf("%w: window %q active", ErrFrozen, w.Name)
+		}
+	}
+	return nil
+}
+
+// ReleaseClaim hands a failed cycle's claim back, so the cycle it displaced
+// continues when no later cycle claimed the layer meanwhile. It runs on the
+// failure path, possibly after the request's context ended, so it uses a
+// context that keeps the caller's values without its cancellation, bounded
+// by its own deadline.
+//
+// Spec: §7.3.1 (Removed artifacts)
+func ReleaseClaim(ctx context.Context, st store.Store, tenantID, layerID, claim, previous string) {
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claimReleaseTimeout)
+	defer cancel()
+	if err := st.ReleaseLayerIngest(rctx, tenantID, layerID, claim, previous); err != nil {
+		log.Printf("ingest: layer %s: hand back the claim of a failed cycle: %v", layerID, err)
+	}
+}
+
+// claimReleaseTimeout bounds the store update that hands a failed cycle's
+// claim back. It is one statement on the layer row.
+const claimReleaseTimeout = 10 * time.Second
+
+// runClaimedCycle runs the cycle that holds claim on cfg, the layer as the
+// claim read it: snapshot, history check, ingest, events, and the record.
+func runClaimedCycle(ctx context.Context, st store.Store, provider source.Provider, cfg store.LayerConfig, opts SourceIngestOptions, claim string) (*Result, error) {
 	srcCfg := source.LayerConfig{
 		ID: cfg.ID,
 		// Spec: §7.3.1 (Repository credentials). The ingest clones with the stored
@@ -254,24 +296,25 @@ func SourceIngestWithOptions(
 }
 
 // ClaimLayer claims layerID for a new ingest cycle with a fresh random claim,
-// superseding every earlier cycle of the layer, and returns the claim and the
-// layer as stored. It returns an error wrapping store.ErrNotFound when no
-// live layer exists. The claim is random rather than a counter, so a claim
-// that an unregister cleared or a store write reset can never equal a later
-// one.
+// superseding every earlier cycle of the layer, and returns the claim, the
+// claim it replaced, and the layer as stored. It returns an error wrapping
+// store.ErrNotFound, which the reingest endpoint answers as
+// registry.not_found, when no live layer exists. The claim is random rather
+// than a counter, so a claim that an unregister cleared or a store write
+// reset can never equal a later one.
 //
 // Spec: §7.3.1 (Removed artifacts)
-func ClaimLayer(ctx context.Context, st store.Store, tenantID, layerID string) (string, store.LayerConfig, error) {
+func ClaimLayer(ctx context.Context, st store.Store, tenantID, layerID string) (claim, previous string, cfg store.LayerConfig, err error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "", store.LayerConfig{}, fmt.Errorf("ingest: generate an ingest claim: %w", err)
+		return "", "", store.LayerConfig{}, fmt.Errorf("ingest: generate an ingest claim: %w", err)
 	}
-	claim := hex.EncodeToString(b[:])
-	cfg, err := st.ClaimLayerIngest(ctx, tenantID, layerID, claim)
+	claim = hex.EncodeToString(b[:])
+	cfg, previous, err = st.ClaimLayerIngest(ctx, tenantID, layerID, claim)
 	if err != nil {
-		return "", store.LayerConfig{}, fmt.Errorf("ingest: claim layer %s: %w", layerID, err)
+		return "", "", store.LayerConfig{}, fmt.Errorf("ingest: claim layer %s: %w", layerID, err)
 	}
-	return claim, cfg, nil
+	return claim, previous, cfg, nil
 }
 
 // silence unused-import linters when build paths don't reach fs.

@@ -2275,6 +2275,13 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	res, err := e.reingestRunner(r.Context(), cfg, bg)
+	// Spec: §7.3.1 (Removed artifacts) — the layer was unregistered while the
+	// cycle waited for it, so the reingest is answered as one of a layer that
+	// is not registered rather than as an empty success or a failure.
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "registry.not_found", "no such layer: "+cfg.ID)
+		return
+	}
 	if err != nil {
 		// spec §9: fire a §9.1 operational notification on an ingest-failure so a
 		// configured NotificationProvider alerts the operator. Delivery is
@@ -2405,6 +2412,10 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		// Spec: §7.3.1 (Removed artifacts). A completed cycle sets the slice,
 		// so it marshals as [] when the cycle removed nothing.
 		"removed": res.Removed,
+		// Spec: §7.3.1 (Removed artifacts) — true when a later cycle of the
+		// layer claimed it and this cycle stopped at a check, so a caller can
+		// tell that outcome from an ingest that found nothing to change.
+		"superseded": res.Superseded,
 	})
 }
 
