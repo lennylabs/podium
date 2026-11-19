@@ -139,13 +139,13 @@ func (s *Memory) PutManifest(_ context.Context, rec ManifestRecord) error {
 	stampDeprecation(&rec)
 	key := mkey(rec.TenantID, rec.ArtifactID, rec.Version)
 	if existing, ok := s.manifests[key]; ok {
-		if existing.ContentHash != rec.ContentHash {
-			return ErrImmutableViolation
+		if err := classifyExistingManifest(rec, existing.ContentHash, existing.Layer, existing.DeletedAt != nil); err != nil {
+			return err
 		}
 		// Spec: §7.3.1 (Removed artifacts) — the same bytes put again by the
 		// layer that contributed a tombstoned row restore it as this put
-		// states it. Another layer's put leaves it tombstoned.
-		if existing.DeletedAt != nil && existing.Layer == rec.Layer {
+		// states it.
+		if existing.DeletedAt != nil {
 			s.manifests[key] = rec
 		}
 		// Same content hash on a live row is a no-op (idempotent ingest).
@@ -165,10 +165,10 @@ func (s *Memory) PutManifestWithVectorPending(_ context.Context, rec ManifestRec
 	stampDeprecation(&rec)
 	key := mkey(rec.TenantID, rec.ArtifactID, rec.Version)
 	if existing, ok := s.manifests[key]; ok {
-		if existing.ContentHash != rec.ContentHash {
-			return ErrImmutableViolation
+		if err := classifyExistingManifest(rec, existing.ContentHash, existing.Layer, existing.DeletedAt != nil); err != nil {
+			return err
 		}
-		if existing.DeletedAt == nil || existing.Layer != rec.Layer {
+		if existing.DeletedAt == nil {
 			return nil // idempotent; an existing pending row stands
 		}
 		// A restored row is queued again, as a new one is.

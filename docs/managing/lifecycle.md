@@ -87,11 +87,11 @@ A store retention sweep purges a deprecated version `PODIUM_DEPRECATED_RETENTION
 To remove an artifact, delete its folder from the layer's source. The next completed ingest of the layer soft-deletes every version of the artifact that the layer stored:
 
 - No read path serves the artifact afterward. `load_artifact`, search, `load_domain`, `podium sync`, and the web UI all leave it out, and a load pinned to one of its versions answers `registry.not_found`.
-- `podium layer reingest` prints `removed: <id>` on standard output for each removed artifact and exits 0. The `layer.ingested` webhook event carries the number of removed artifacts.
+- `podium layer reingest` prints `removed: <id>` on standard output for each removed artifact and exits 0. It prints the same lines when the registry refuses the rest of the ingest, for example with `ingest.lint_failed`, because the removal has already happened. The `layer.ingested` webhook event carries the number of removed artifacts.
 - An ingest that cannot read the whole snapshot, such as one whose source is unreachable, removes nothing.
 - An artifact whose folder is still in the source is not removed, even when the ingest rejects it.
 
-Restore a removed artifact by putting its folder back and reingesting the layer within the recovery window, `PODIUM_LAYER_RECOVERY_DAYS` days, 30 by default. A version restored with the same content is served again. A version restored with different content at the same version number is rejected with `ingest.immutable_violation` until the window ends, so bump the version instead. A store retention sweep purges the removed versions after the window.
+Restore a removed artifact by putting its folder back and reingesting the layer within the recovery window, `PODIUM_LAYER_RECOVERY_DAYS` days, 30 by default. A version restored with the same content is served again, including a skill with no declared version, which is restored at the version the registry assigned it. A version restored with different content at the same version number is rejected with `ingest.immutable_violation` until the window ends, so bump the version instead. A removed version can be restored only into the layer it was removed from: moving the folder into another layer is rejected with `ingest.immutable_violation` until the window ends, so publish the artifact there at a new version. A store retention sweep purges the removed versions after the window.
 
 > [!WARNING]
 > An ingest whose snapshot contains no artifact removes every artifact the layer serves. A `git` layer whose `ref` or `root` points at the wrong place produces such a snapshot. Correct the layer with `podium layer update` and reingest within the recovery window to restore the artifacts.

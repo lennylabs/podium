@@ -984,9 +984,9 @@ func layerDeletionPurgedAfterWindow(t *testing.T, s store.Store) {
 
 // Spec: §7.3.1 (Removed artifacts), §8.4 — SoftDeleteArtifacts tombstones
 // the named artifacts' live rows in one layer and leaves other layers' rows
-// served; the same bytes put again by that layer restore a row, a put from
-// another layer leaves it tombstoned, and a different hash is an immutability
-// violation; PurgeExpiredLayerDeletions removes a row tombstoned before the
+// served; the same bytes put again by that layer restore a row, a put of the
+// same bytes from another layer is an immutability violation that leaves it
+// tombstoned, and a different hash is an immutability violation; PurgeExpiredLayerDeletions removes a row tombstoned before the
 // cutoff in a live layer and keeps a recent one.
 func removedArtifactLifecycle(t *testing.T, s store.Store) {
 	t.Helper()
@@ -1020,7 +1020,7 @@ func removedArtifactLifecycle(t *testing.T, s store.Store) {
 
 	foreign := gone
 	foreign.Layer = "M"
-	got = append(got, fmt.Sprint(s.PutManifest(ctx, foreign)), served())
+	got = append(got, fmt.Sprint(errors.Is(s.PutManifest(ctx, foreign), store.ErrImmutableViolation)), served())
 	got = append(got, fmt.Sprint(errors.Is(s.PutManifest(ctx, manifestRec("t", "ops/gone", "1.0.0", "changed")), store.ErrImmutableViolation)))
 	got = append(got, fmt.Sprint(s.PutManifest(ctx, gone)), served())
 
@@ -1036,7 +1036,7 @@ func removedArtifactLifecycle(t *testing.T, s store.Store) {
 
 	want := []string{
 		"ops/kept@1.0.0/L,ops/other@1.0.0/M",
-		"<nil>", "ops/kept@1.0.0/L,ops/other@1.0.0/M",
+		"true", "ops/kept@1.0.0/L,ops/other@1.0.0/M",
 		"true",
 		"<nil>", "ops/gone@1.0.0/L,ops/kept@1.0.0/L,ops/other@1.0.0/M",
 		"true", "<nil>",
