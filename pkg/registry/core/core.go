@@ -1659,7 +1659,7 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 		if opts.Revalidate != nil {
 			// The revalidation result carries the deprecation warning so the
 			// callback can decline a 304 for a load that warns (§7.2).
-			unadmitted := lifecycle(revalidationResult(rec))
+			unadmitted := lifecycle(r.revalidationResult(ctx, rec))
 			if opts.Revalidate(unadmitted) {
 				// Spec: §13.4 — a revalidation returns no content and is
 				// answered from the resolved row without admission, so the
@@ -1712,15 +1712,7 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 		newestDeprecated = newestIfDeprecated(versions, byVersion)
 	}
 	if newestDeprecated != nil {
-		// Spec: §4.7.4, §13.4 — no store keeps replaced_by; admission derives
-		// it from the row's bytes, §4.3.4 SKILL.md metadata included. The
-		// upgrade target reaches agents, so it is read from the admitted row
-		// alone, and a row admission refuses warns with no target.
-		if admitted, err := r.admit(ctx, *newestDeprecated); err == nil {
-			newestDeprecated.ReplacedBy = admitted.ReplacedBy
-		} else {
-			newestDeprecated.ReplacedBy = ""
-		}
+		newestDeprecated.ReplacedBy = r.admittedReplacedBy(ctx, *newestDeprecated)
 	}
 
 	// §4.7.6 session-consistent latest: the first latest lookup within
@@ -1815,10 +1807,31 @@ func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord)
 	return res, served, nil
 }
 
+// admittedReplacedBy returns the upgrade target of a deprecated row.
+//
+// Spec: §4.7.4, §13.4 — no store keeps replaced_by; admission derives it from
+// the row's bytes, §4.3.4 SKILL.md metadata included. The upgrade target
+// reaches agents, so it is read from the admitted row alone, and a row
+// admission refuses warns with no target.
+func (r *Registry) admittedReplacedBy(ctx context.Context, rec store.ManifestRecord) string {
+	admitted, err := r.admit(ctx, rec)
+	if err != nil {
+		return ""
+	}
+	return admitted.ReplacedBy
+}
+
 // revalidationResult is the result a revalidation is answered with: the
 // resolved row's coordinates, validator, and §4.7.4 lifecycle signal, and no
-// content.
-func revalidationResult(rec store.ManifestRecord) *LoadArtifactResult {
+// content. The row is not admitted for the result, except that a deprecated
+// row is admitted for its upgrade target, so the warning carries the same
+// text a full load returns.
+//
+// Spec: §7.2 (Deprecation members), §4.7.4, §13.4
+func (r *Registry) revalidationResult(ctx context.Context, rec store.ManifestRecord) *LoadArtifactResult {
+	if rec.Deprecated {
+		rec.ReplacedBy = r.admittedReplacedBy(ctx, rec)
+	}
 	return withDeprecationWarning(&LoadArtifactResult{
 		ID:          rec.ArtifactID,
 		Version:     rec.Version,
