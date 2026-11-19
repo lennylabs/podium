@@ -597,8 +597,8 @@ func (s *mcpServer) reqCtx() context.Context {
 }
 
 // traceID returns the 32-hex W3C trace id of the in-flight meta-tool
-// call's span, or "" when no recording span is active (tracing off). The
-// registry derives its audit stream's trace id from the same span via the
+// call, or "" outside a call. With tracing off the id is the one callTool
+// minted through tracing.EnsureTraceID. The registry derives its audit stream's trace id from the same span via the
 // W3C `traceparent` header the otelhttp transport injects on the outbound
 // call (pkg/registry/server/audit_context.go traceIDFromRequest), so
 // stamping this id on the local audit event makes the registry and MCP
@@ -1335,6 +1335,11 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 	// tracing is off. activeCtx is restored after dispatch so off-call paths
 	// fall back to context.Background().
 	ctx, span := tracing.Tracer().Start(context.Background(), "mcp."+p.Name)
+	// Spec: §8.1 — a non-recording span has no trace ID, so the call gets a
+	// minted one. The local audit events stamp it, and the outbound registry
+	// request carries it as traceparent, so both streams share it with
+	// tracing off.
+	ctx = tracing.EnsureTraceID(ctx)
 	prev := s.activeCtx
 	s.activeCtx = ctx
 	defer func() {
