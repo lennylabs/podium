@@ -319,3 +319,23 @@ func TestLayerReingestCmd_ExitsOneOnDroppedArtifacts(t *testing.T) {
 		})
 	}
 }
+
+// Spec: §7.3.1 (Removed artifacts) — a refusal body prints one "removed:"
+// line per artifact in details.removed, and a body that is not a JSON
+// envelope, or that names no removal, prints nothing.
+func TestWriteRefusedRemovals(t *testing.T) {
+	t.Parallel()
+	var got []string
+	for _, body := range []string{
+		`{"code":"ingest.lint_failed","details":{"removed":["ops/a","ops/b"]}}`,
+		`{"code":"ingest.lint_failed","details":{}}`,
+		`<html>bad gateway</html>`,
+	} {
+		var out bytes.Buffer
+		writeRefusedRemovals(&out, []byte(body))
+		got = append(got, out.String())
+	}
+	if want := []string{"removed: ops/a\nremoved: ops/b\n", "", ""}; strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("output = %q, want %q", got, want)
+	}
+}

@@ -143,3 +143,36 @@ func TestReingest_NoConflictsReportsEmptyList(t *testing.T) {
 		t.Errorf("conflicts = %v, want empty", conflicts)
 	}
 }
+
+// Spec: §7.3.1 (Removed artifacts) — a cycle refused because its only
+// outcome is a same-version content conflict still names, in
+// details.removed, the artifacts it soft-deleted, so the author learns of
+// the removal from the refusal.
+func TestReingest_PureConflictNamesRemovals(t *testing.T) {
+	t.Parallel()
+	runner := func(_ context.Context, _ store.LayerConfig, _ *server.BreakGlass) (*ingest.Result, error) {
+		return &ingest.Result{
+			Conflicts: []ingest.ConflictReport{{ArtifactID: "a", Version: "1.0.0", OldHash: "sha256:aaa", NewHash: "sha256:bbb"}},
+			Removed:   []string{"ops/gone"},
+		}, nil
+	}
+	base, cleanup := newRunnerHarness(t, runner)
+	defer cleanup()
+	resp, err := http.Post(base+"/v1/layers/reingest?id=team-shared", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var env struct {
+		Code    string `json:"code"`
+		Details struct {
+			Removed []string `json:"removed"`
+		} `json:"details"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.StatusCode != http.StatusConflict || env.Code != "ingest.immutable_violation" || len(env.Details.Removed) != 1 || env.Details.Removed[0] != "ops/gone" {
+		t.Errorf("status %d, code %q, details.removed %v; want 409, ingest.immutable_violation, [ops/gone]", resp.StatusCode, env.Code, env.Details.Removed)
+	}
+}
