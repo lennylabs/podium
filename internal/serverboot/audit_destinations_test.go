@@ -458,6 +458,21 @@ func TestAuditDestinations_URLWithoutHostRefusesStartup(t *testing.T) {
 	}
 }
 
+// Spec: §8.3, §13.12 — two elements that name one destination after the
+// scheme and host are lowercased refuse the start, because every record
+// would otherwise be delivered to that receiver twice.
+func TestAuditDestinations_CaseVariantDuplicateRefusesStartup(t *testing.T) {
+	f := newBootFixture(t)
+	t.Setenv("PODIUM_AUDIT_LOG_PATH", "http://audit.acme.com/a,HTTP://Audit.Acme.com:80/a")
+	_, runErr := f.bootWith(t, func() {
+		t.Error("the registry served with one audit destination listed twice")
+	})
+	if runErr == nil || !strings.HasPrefix(runErr.Error(), "config.audit_sink_unavailable:") ||
+		!strings.Contains(runErr.Error(), "is listed twice") {
+		t.Fatalf("run = %v, want a config.audit_sink_unavailable refusal for the repeated destination", runErr)
+	}
+}
+
 // eraseUser posts an erase for user to the registry at addr and returns the
 // status.
 func eraseUser(t *testing.T, addr, user string) int {

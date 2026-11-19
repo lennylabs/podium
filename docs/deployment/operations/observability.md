@@ -91,7 +91,7 @@ PODIUM_AUDIT_LOG_PATH=stdout
 PODIUM_AUDIT_SINK=default,https://audit.acme.com/ingest
 ```
 
-A list names at most one file destination and names no element twice. An empty element, a trailing comma, an unknown `scheme://` prefix, and a URL that carries userinfo each refuse startup with `config.audit_sink_unavailable`. [Destinations](../../reference/audit-events#destinations) gives the complete list rules.
+A list names at most one file destination and names no destination twice, comparing URLs with the scheme and host in lowercase, a default port removed, and an empty path read as `/`. An empty element, a trailing comma, an unknown `scheme://` prefix, and a URL that carries userinfo each refuse startup with `config.audit_sink_unavailable`. [Destinations](../../reference/audit-events#destinations) gives the complete list rules.
 
 To ship the stream to another system, list a stdout, HTTP, or OTLP destination beside the file.
 

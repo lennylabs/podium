@@ -52,6 +52,26 @@ func TestParseDestinations_SchemePrefixIgnoresCase(t *testing.T) {
 	}
 }
 
+// URL elements that differ after normalization name different destinations
+// and are all accepted: another scheme, a port other than the default,
+// another path, another query, and an IPv6 host beside its port.
+//
+// Spec: §8.3
+func TestParseDestinations_DistinctAfterNormalization(t *testing.T) {
+	t.Parallel()
+	value := "http://h/a,https://h/a,otlp+http://h/a,http://h:8080/a,http://h/b,http://h/a?r=2,http://[::1]/a,http://[::1]:8080/a"
+	specs, err := parseDestinations(value, OpenOptions{})
+	if err != nil {
+		t.Fatalf("parseDestinations: %v", err)
+	}
+	if len(specs) != 8 {
+		t.Errorf("got %d destinations, want 8", len(specs))
+	}
+	if got := specs[6].identity(); got != "http://[::1]/a" {
+		t.Errorf("identity of the IPv6 element = %q, want http://[::1]/a", got)
+	}
+}
+
 // Every destination-list refusal wraps ErrConfig, names the list variable, and never
 // echoes a URL's userinfo, query, or unparseable text.
 //
@@ -77,6 +97,10 @@ func TestOpen_RefusesUnusableConfiguration(t *testing.T) {
 		{"unparseable empty scheme", "://x", OpenOptions{}, []string{envRegistryPath, "scheme-less"}},
 		{"two files", a + "," + b, OpenOptions{}, []string{envRegistryPath, b, "more than one file"}},
 		{"repeated URL", "http://h/x?tok=zq7k,http://h/x?tok=zq7k", OpenOptions{}, []string{envRegistryPath, "http://h/x", "twice"}},
+		{"repeated URL in another case", "http://h/a,HTTP://H/a", OpenOptions{}, []string{envRegistryPath, "twice"}},
+		{"repeated URL with the default port", "https://h.acme.com/a,https://h.acme.com:443/a", OpenOptions{}, []string{envRegistryPath, "twice"}},
+		{"repeated OTLP URL with the default port", "otlp+http://h,OTLP+HTTP://h:80/", OpenOptions{}, []string{envRegistryPath, "twice"}},
+		{"repeated URL with an empty path", "http://h,http://h/", OpenOptions{}, []string{envRegistryPath, "twice"}},
 		{"userinfo", "https://alice:pw9x@h/x", OpenOptions{}, []string{envRegistryPath, "https://h/x", "userinfo"}},
 		{"no host", "http://", OpenOptions{}, []string{envRegistryPath, "http://", "names no host"}},
 		{"port without host", "https://:443/x?tok=zq7k", OpenOptions{}, []string{envRegistryPath, "https://:443/x", "names no host"}},

@@ -112,7 +112,7 @@ An unset or empty `PODIUM_AUDIT_LOG_PATH` resolves to the file `~/.podium/audit.
 
 The following list rules apply to both variables:
 
-- A list names at most one file destination and names no element twice.
+- A list names at most one file destination and names no destination twice. Two URL elements name the same destination when they are equal after the scheme and the host are lowercased, a port equal to the scheme's default (80 for `http` and `otlp+http`, 443 for `https` and `otlp+https`) is removed, and an empty path is read as `/`.
 - An empty element refuses startup, and so does a trailing comma, which leaves an empty last element.
 - An element that carries a `scheme://` prefix other than `http://`, `https://`, `otlp+http://`, or `otlp+https://` refuses startup. So does an element with one of those prefixes that does not parse as a URL or whose URL names no host, as in `http://` or `https://:443/x`. An element that contains `://` is therefore never read as a file path.
 - A file path that contains a comma cannot be listed, because the comma separates elements and the list has no escape syntax.
