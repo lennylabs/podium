@@ -139,13 +139,13 @@ func (s *Memory) PutManifest(_ context.Context, rec ManifestRecord) error {
 	stampDeprecation(&rec)
 	key := mkey(rec.TenantID, rec.ArtifactID, rec.Version)
 	if existing, ok := s.manifests[key]; ok {
-		if existing.ContentHash != rec.ContentHash {
-			return ErrImmutableViolation
+		if err := classifyExistingManifest(rec, existing.ContentHash, existing.Layer, existing.DeletedAt != nil); err != nil {
+			return err
 		}
 		// Spec: §7.3.1 (Removed artifacts) — the same bytes put again by the
 		// layer that contributed a tombstoned row restore it as this put
-		// states it. Another layer's put leaves it tombstoned.
-		if existing.DeletedAt != nil && existing.Layer == rec.Layer {
+		// states it.
+		if existing.DeletedAt != nil {
 			s.manifests[key] = rec
 		}
 		// Same content hash on a live row is a no-op (idempotent ingest).
@@ -165,10 +165,10 @@ func (s *Memory) PutManifestWithVectorPending(_ context.Context, rec ManifestRec
 	stampDeprecation(&rec)
 	key := mkey(rec.TenantID, rec.ArtifactID, rec.Version)
 	if existing, ok := s.manifests[key]; ok {
-		if existing.ContentHash != rec.ContentHash {
-			return ErrImmutableViolation
+		if err := classifyExistingManifest(rec, existing.ContentHash, existing.Layer, existing.DeletedAt != nil); err != nil {
+			return err
 		}
-		if existing.DeletedAt == nil || existing.Layer != rec.Layer {
+		if existing.DeletedAt == nil {
 			return nil // idempotent; an existing pending row stands
 		}
 		// A restored row is queued again, as a new one is.
@@ -775,6 +775,22 @@ func (s *Memory) ListUsageCounts(_ context.Context, tenantID, fromDay, toDay str
 	}
 	sortUsageCounts(out)
 	return out, nil
+}
+
+// SumUsage returns the tenant's rows that q selects, summed per group.
+//
+// Spec: §8.7
+func (s *Memory) SumUsage(_ context.Context, tenantID string, q UsageSumQuery) ([]UsageSum, error) {
+	if err := q.validate(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows := make([]UsageCount, 0, len(s.usage[tenantID]))
+	for _, c := range s.usage[tenantID] {
+		rows = append(rows, c)
+	}
+	return sumUsageRows(rows, q), nil
 }
 
 // SumUsageLoads returns the tenant's loads from fromDay to toDay per layer and

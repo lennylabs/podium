@@ -60,7 +60,10 @@ type LayerEndpoint struct {
 	// whole for every caller rather than following the callback.
 	// WithPublicMode sets it and nothing clears it.
 	publicMode bool
-	mode       *ModeTracker
+	// operatorToken is the §13.12 PODIUM_OPERATOR_TOKEN a public-mode write
+	// must carry; WithPublicMode sets it, and empty refuses every write.
+	operatorToken string
+	mode          *ModeTracker
 	// authAdmin returns nil when the caller is permitted to mutate
 	// admin-defined layers. Tests inject a no-op; production wires
 	// the registry's AdminAuthorize.
@@ -229,11 +232,16 @@ func (e *LayerEndpoint) WithAdminAuth(fn func(*http.Request) error) *LayerEndpoi
 }
 
 // WithPublicMode marks the endpoint as serving a registry in public mode,
-// whose admin callback is the operator token check.
+// whose layer writes and erasure require token in X-Podium-Operator-Token.
+// The endpoint checks the token itself rather than through the admin
+// callback, so an endpoint built without WithAdminAuth, whose default
+// callback admits everyone, still refuses a write without it. An empty token
+// refuses every write.
 //
 // Spec: §7.3.1 (Operator token in public mode)
-func (e *LayerEndpoint) WithPublicMode() *LayerEndpoint {
+func (e *LayerEndpoint) WithPublicMode(token string) *LayerEndpoint {
 	e.publicMode = true
+	e.operatorToken = token
 	return e
 }
 
@@ -249,7 +257,7 @@ func (e *LayerEndpoint) refuseWithoutOperatorToken(w http.ResponseWriter, r *htt
 	if !e.publicMode {
 		return false
 	}
-	if err := e.authAdmin(r); err != nil {
+	if err := CheckOperatorToken(r, e.operatorToken); err != nil {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 		return true
 	}
@@ -2272,7 +2280,7 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		// configured NotificationProvider alerts the operator. Delivery is
 		// best-effort; the structured error envelope is written regardless.
 		e.notifyIngestFailure(r.Context(), cfg, err)
-		writeReingestError(w, err)
+		writeReingestError(w, err, res)
 		return
 	}
 	// §0 quickstart: report the (artifact_id, version) pairs the snapshot
@@ -2332,8 +2340,11 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		if len(res.Conflicts) > 1 {
 			msg = fmt.Sprintf("%s (and %d more)", msg, len(res.Conflicts)-1)
 		}
-		writeErrorDetails(w, http.StatusConflict, "ingest.immutable_violation", msg,
-			map[string]any{"conflicts": conflicts})
+		details := map[string]any{"conflicts": conflicts}
+		if len(res.Removed) > 0 {
+			details["removed"] = res.Removed
+		}
+		writeErrorDetails(w, http.StatusConflict, "ingest.immutable_violation", msg, details)
 		return
 	}
 	// spec: §7.3.1 / §4.1 / §4.6 — surface the artifacts the snapshot dropped
@@ -2388,14 +2399,23 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 }
 
 // writeReingestError maps the ingest-pipeline sentinels to their §6.10
-// structured error codes and HTTP status.
-func writeReingestError(w http.ResponseWriter, err error) {
+// structured error codes and HTTP status. res is the cycle's result when the
+// pipeline returned one with the error; a lint failure after the cycle read
+// the whole snapshot carries the artifacts it removed in details.removed.
+//
+// Spec: §7.3.1 (Removed artifacts), §6.10
+func writeReingestError(w http.ResponseWriter, err error, res *ingest.Result) {
 	switch {
 	case errors.Is(err, ingest.ErrFrozen):
 		writeError(w, http.StatusConflict, "ingest.frozen", err.Error())
 	case errors.Is(err, ingest.ErrHistoryRewritten):
 		writeError(w, http.StatusConflict, "ingest.history_rewritten", err.Error())
 	case errors.Is(err, ingest.ErrLintFailed), errors.Is(err, ingest.ErrInvalidArtifact):
+		if res != nil && len(res.Removed) > 0 {
+			writeErrorDetails(w, http.StatusUnprocessableEntity, "ingest.lint_failed", err.Error(),
+				map[string]any{"removed": res.Removed})
+			return
+		}
 		writeError(w, http.StatusUnprocessableEntity, "ingest.lint_failed", err.Error())
 	case errors.Is(err, ingest.ErrQuotaExceeded):
 		writeError(w, http.StatusTooManyRequests, "quota.storage_exceeded", err.Error())

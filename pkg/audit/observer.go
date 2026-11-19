@@ -69,10 +69,12 @@ func (s *Stream) queued(kind destKind, delta int) {
 // dropLog rate-limits the drop log line per destination name and reason.
 // Drops counted while a key's line is suppressed are carried into the next
 // line for that key, so each line states every drop since the previous one.
+// A suppressed count is written when the key's minute ends, by a timer, and
+// at the latest when the stream shuts down, so no counted drop goes unlogged.
 type dropLog struct {
 	clock clock.Clock
 
-	// mu guards entries.
+	// mu guards entries and each entry's timer.
 	mu      sync.Mutex
 	entries map[dropKey]*dropEntry
 }
@@ -82,6 +84,9 @@ type dropKey struct{ name, reason string }
 type dropEntry struct {
 	logged  time.Time
 	pending int
+	// timer writes the pending count when the key's minute ends; nil while
+	// nothing is pending.
+	timer *time.Timer
 }
 
 func newDropLog(c clock.Clock) *dropLog {
@@ -90,8 +95,8 @@ func newDropLog(c clock.Clock) *dropLog {
 
 // record counts n drops for name and reason and writes a line when no line
 // for that key was written in the last dropLogInterval. A suppressed count
-// stays pending until the next line for the key, so the per-minute bound
-// holds at every point in the process, its exit included.
+// stays pending, and a timer writes it when the interval ends, so the line
+// rate stays within the per-minute bound while the process runs.
 func (d *dropLog) record(name, reason string, n int) {
 	now := d.clock.Now()
 	d.mu.Lock()
@@ -104,15 +109,55 @@ func (d *dropLog) record(name, reason string, n int) {
 	}
 	ent.pending += n
 	if seen && now.Sub(ent.logged) < dropLogInterval {
+		if ent.timer == nil {
+			ent.timer = time.AfterFunc(dropLogInterval-now.Sub(ent.logged), func() { d.flushKey(key) })
+		}
 		return
 	}
 	writeDropLine(key, ent, now)
 }
 
-// writeDropLine logs ent's pending count for key and resets it. The caller
-// holds the dropLog mutex.
+// flushKey writes key's pending count, if any, when its suppression ends.
+func (d *dropLog) flushKey(key dropKey) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ent := d.entries[key]
+	if ent == nil {
+		return
+	}
+	if ent.pending > 0 {
+		writeDropLine(key, ent, d.clock.Now())
+	}
+	ent.timer = nil
+}
+
+// flushAll writes every pending count, which stops each armed timer: a timer
+// is armed only while its key has a count pending, and writeDropLine cancels
+// it. The stream calls flushAll once, at shutdown, so the drops of a
+// process's last minute, such as the records a shutdown could not deliver,
+// are logged before it exits.
+//
+// Spec: §8.3
+func (d *dropLog) flushAll() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	now := d.clock.Now()
+	for key, ent := range d.entries {
+		if ent.pending > 0 {
+			writeDropLine(key, ent, now)
+		}
+	}
+}
+
+// writeDropLine logs ent's pending count for key, resets it, and cancels the
+// key's trailing timer, so the next line waits a full interval from this one.
+// The caller holds the dropLog mutex.
 func writeDropLine(key dropKey, ent *dropEntry, now time.Time) {
 	log.Printf("audit: dropped %d record(s) for destination %s: %s", ent.pending, key.name, key.reason)
 	ent.logged = now
 	ent.pending = 0
+	if ent.timer != nil {
+		ent.timer.Stop()
+		ent.timer = nil
+	}
 }

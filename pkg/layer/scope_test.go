@@ -1,10 +1,28 @@
 package layer_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/layer"
 )
+
+// Spec: §6.3.1 — ReadGrants returns the read and load grants AllowsRead
+// consults, in order, and no write grant.
+func TestScopeSet_ReadGrants(t *testing.T) {
+	t.Parallel()
+	set := layer.ParseScopes([]string{"podium:write:ops/*", "podium:read:ops/*", "podium:load:fin/pay@1.x", "openid"})
+	want := []layer.Scope{
+		{Action: "read", Path: "ops", Subtree: true},
+		{Action: "load", Path: "fin/pay", Version: "1.x"},
+	}
+	if got := set.ReadGrants(); !reflect.DeepEqual(got, want) {
+		t.Errorf("ReadGrants = %+v, want %+v", got, want)
+	}
+	if got := layer.ParseScopes([]string{"podium:write:ops/*"}).ReadGrants(); got != nil {
+		t.Errorf("write-only ReadGrants = %+v, want none", got)
+	}
+}
 
 // Spec: §6.3.1 — an inactive scope set (no "podium:*" scopes) narrows
 // nothing; the caller keeps full layer visibility.

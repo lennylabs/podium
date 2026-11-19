@@ -141,3 +141,49 @@ func TestIngest_RemovedArtifactStoreFailure(t *testing.T) {
 	}
 	erAssertServes(t, reg, "ops/gone", "", "1.0.0")
 }
+
+// removedSkill is a plain Agent Skill with no declared version, so ingest
+// assigns its version.
+func removedSkill(desc string) string {
+	return "---\nname: greet\ndescription: " + desc + "\n---\n\nGreet the user.\n"
+}
+
+// Spec: §7.3.1 (Removed artifacts), §4.7.6 — a skill with no declared version
+// whose package returns unchanged after its removal is restored at the version
+// the registry assigned it, rather than rejected as duplicate content.
+func TestIngest_RemovedAutoVersionedSkillRestores(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	reg := erRegistry(st, "team")
+	skill := map[string]string{"ops/greet/SKILL.md": removedSkill("Greet the user at the start of every session")}
+	erIngest(t, st, "team", skill)
+	erAssertServes(t, reg, "ops/greet", "", "0.0.0-auto.0")
+	if res := erIngest(t, st, "team", map[string]string{}); len(res.Removed) != 1 {
+		t.Fatalf("Removed = %v, want [ops/greet]", res.Removed)
+	}
+	erAssertUnserved(t, reg, "ops/greet")
+	res := erIngest(t, st, "team", skill)
+	if len(res.Rejected) != 0 || len(res.Conflicts) != 0 {
+		t.Fatalf("restoring cycle: rejected=%+v conflicts=%+v, want none", res.Rejected, res.Conflicts)
+	}
+	erAssertServes(t, reg, "ops/greet", "", "0.0.0-auto.0")
+}
+
+// Spec: §7.3.1 (Removed artifacts) — a cycle of another layer that ingests a
+// removed version, the same bytes included, is rejected as an immutability
+// violation, and the version stays unserved; it was reported accepted.
+func TestIngest_RemovedVersionInAnotherLayerIsRefused(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	reg := erRegistry(st, "team", "other")
+	moved := map[string]string{"ops/gone/ARTIFACT.md": removedAgent("Runbook for restarting the ingest worker", "1.0.0")}
+	erIngest(t, st, "team", moved)
+	if res := erIngest(t, st, "team", map[string]string{}); len(res.Removed) != 1 {
+		t.Fatalf("Removed = %v, want [ops/gone]", res.Removed)
+	}
+	res := erIngest(t, st, "other", moved)
+	if res.Accepted != 0 || len(res.Conflicts) != 1 || res.Conflicts[0].ArtifactID != "ops/gone" {
+		t.Fatalf("other layer's cycle: accepted=%d conflicts=%+v, want one conflict on ops/gone", res.Accepted, res.Conflicts)
+	}
+	erAssertUnserved(t, reg, "ops/gone")
+}

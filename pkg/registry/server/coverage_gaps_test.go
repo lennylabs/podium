@@ -288,7 +288,7 @@ func TestWriteReingestError_SentinelMapping(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			rec := httptest.NewRecorder()
-			writeReingestError(rec, fmt.Errorf("ctx: %w", tc.err))
+			writeReingestError(rec, fmt.Errorf("ctx: %w", tc.err), nil)
 			if rec.Code != tc.status {
 				t.Errorf("status = %d, want %d", rec.Code, tc.status)
 			}
@@ -298,6 +298,25 @@ func TestWriteReingestError_SentinelMapping(t *testing.T) {
 			}
 		})
 	}
+	// Spec: §7.3.1 (Removed artifacts) — a lint failure after the cycle read
+	// the whole snapshot names the artifacts it removed in details.removed.
+	t.Run("lint_failed_with_removals", func(t *testing.T) {
+		t.Parallel()
+		rec := httptest.NewRecorder()
+		writeReingestError(rec, fmt.Errorf("ctx: %w", ingest.ErrLintFailed), &ingest.Result{Removed: []string{"ops/gone"}})
+		var body struct {
+			Code    string `json:"code"`
+			Details struct {
+				Removed []string `json:"removed"`
+			} `json:"details"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusUnprocessableEntity || body.Code != "ingest.lint_failed" || len(body.Details.Removed) != 1 || body.Details.Removed[0] != "ops/gone" {
+			t.Errorf("status=%d body=%s, want 422 ingest.lint_failed with details.removed [ops/gone]", rec.Code, rec.Body.String())
+		}
+	})
 }
 
 // webhookSignatureHeader selects the signature credential header for the named

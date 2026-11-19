@@ -85,7 +85,7 @@ export function SimilaritySurface({
         {report !== null && (
           <span className="similarity-head-badges">
             <Badge tone="soft">
-              {entries.length} {plural(entries.length, 'CLUSTER', 'CLUSTERS')}
+              {entries.length} {plural(entries.length, 'ARTIFACT', 'ARTIFACTS')}
             </Badge>
           </span>
         )}

@@ -372,8 +372,20 @@ func TestAssignVersion(t *testing.T) {
 			layerID: "L", hash: h1, want: "0.0.0-auto.1",
 		},
 		{
-			name:    "soft-deleted row of the layer carries the hash",
+			// Spec: §7.3.1 (Removed artifacts) — the layer serves no version, so
+			// its own removed row with the same bytes is restored.
+			name:    "soft-deleted row of the layer carries the hash and the layer serves none",
 			rows:    []store.ManifestRecord{tomb(avRow("L", "0.0.0-auto.0", h1, t0))},
+			layerID: "L", hash: h1, want: "0.0.0-auto.0",
+		},
+		{
+			name:    "soft-deleted row of the layer carries the hash and the layer serves another",
+			rows:    []store.ManifestRecord{tomb(avRow("L", "0.0.0-auto.0", h1, t0)), avRow("L", "0.0.0-auto.1", h2, t0.Add(time.Hour))},
+			layerID: "L", hash: h1, duplicate: true,
+		},
+		{
+			name:    "soft-deleted row of another layer carries the hash",
+			rows:    []store.ManifestRecord{tomb(avRow("M", "0.0.0-auto.0", h1, t0))},
 			layerID: "L", hash: h1, duplicate: true,
 		},
 		{

@@ -768,7 +768,7 @@ A `lint.colliding_descriptions` similarity is the word-set similarity of the two
 Reports how often artifacts were loaded, synced, and returned by searches, per artifact, per layer, and for the catalog. `podium usage` calls it.
 
 ```
-GET  /v1/usage?from={date}&to={date}&days={n}&granularity={g}&layer={id}&artifact={id}&limit={n}&cursor={cursor}
+GET  /v1/usage?from={date}&to={date}&days={n}&granularity={g}&layer={id}&artifact={id}&type={type}&query={text}&sort={key}&order={dir}&limit={n}&cursor={cursor}
 POST /v1/usage
 ```
 
@@ -833,9 +833,20 @@ The client is the `name` member of the `X-Podium-Client` header, and the harness
       "loads": 42,
       "syncs": 120,
       "search_hits": 65,
-      "by_client": {"mcp": {"loads": 40, "syncs": 0, "search_hits": 50}},
-      "by_harness": {"claude-code": {"loads": 30, "syncs": 80, "search_hits": 50}},
-      "series": []
+      "by_client": {
+        "mcp": {"loads": 40, "syncs": 0, "search_hits": 50},
+        "cli": {"loads": 0, "syncs": 120, "search_hits": 0},
+        "sdk": {"loads": 2, "syncs": 0, "search_hits": 15}
+      },
+      "by_harness": {
+        "claude-code": {"loads": 30, "syncs": 80, "search_hits": 50},
+        "cursor": {"loads": 10, "syncs": 40, "search_hits": 0},
+        "unknown": {"loads": 2, "syncs": 0, "search_hits": 15}
+      },
+      "series": [
+        {"start": "2026-11-12", "end": "2026-11-15", "loads": 18, "syncs": 60, "search_hits": 30},
+        {"start": "2026-11-16", "end": "2026-11-18", "loads": 24, "syncs": 60, "search_hits": 35}
+      ]
     }
   ],
   "artifacts": [
@@ -846,9 +857,15 @@ The client is the `name` member of the `X-Podium-Client` header, and the harness
       "loads": 30,
       "syncs": 60,
       "search_hits": 40,
-      "by_client": {"mcp": {"loads": 30, "syncs": 0, "search_hits": 40}},
+      "by_client": {
+        "mcp": {"loads": 30, "syncs": 0, "search_hits": 40},
+        "cli": {"loads": 0, "syncs": 60, "search_hits": 0}
+      },
       "by_harness": {"claude-code": {"loads": 30, "syncs": 60, "search_hits": 40}},
-      "series": [],
+      "series": [
+        {"start": "2026-11-12", "end": "2026-11-15", "loads": 12, "syncs": 30, "search_hits": 15},
+        {"start": "2026-11-16", "end": "2026-11-18", "loads": 18, "syncs": 30, "search_hits": 25}
+      ],
       "last_loaded": "2026-11-18",
       "last_synced": "2026-11-18"
     }

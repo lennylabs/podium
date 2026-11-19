@@ -64,6 +64,23 @@ func (s *SQLite) SumUsageLoads(ctx context.Context, tenantID, fromDay, toDay str
 	return scanUsageLoads(rows)
 }
 
+// SumUsage returns the tenant's usage_daily rows that q selects, summed in
+// SQL per group.
+//
+// Spec: §8.7
+func (s *SQLite) SumUsage(ctx context.Context, tenantID string, q UsageSumQuery) ([]UsageSum, error) {
+	if err := q.validate(); err != nil {
+		return nil, err
+	}
+	stmt, args := usageSumSQL(sqliteUsageDialect, tenantID, q)
+	rows, err := s.db.QueryContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: sum usage: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanUsageSums(rows, q)
+}
+
 // DeleteUsageBefore removes every tenant's usage_daily rows dated before day.
 func (s *SQLite) DeleteUsageBefore(ctx context.Context, day string) (int, error) {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM usage_daily WHERE day < ?`, day)
@@ -147,6 +164,28 @@ func (p *Postgres) SumUsageLoads(ctx context.Context, tenantID, fromDay, toDay s
 	}
 	defer func() { _ = rows.Close() }()
 	return scanUsageLoads(rows)
+}
+
+// SumUsage returns the org's usage_daily rows that q selects, summed in SQL
+// per group.
+//
+// Spec: §8.7
+func (p *Postgres) SumUsage(ctx context.Context, tenantID string, q UsageSumQuery) ([]UsageSum, error) {
+	if err := q.validate(); err != nil {
+		return nil, err
+	}
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	stmt, args := usageSumSQL(postgresUsageDialect, tenantID, q)
+	rows, err := conn.QueryContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: sum usage: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanUsageSums(rows, q)
 }
 
 // DeleteUsageBefore removes the usage_daily rows dated before day in every

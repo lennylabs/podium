@@ -27,6 +27,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"gopkg.in/yaml.v3"
@@ -1641,7 +1642,7 @@ func run(ctx context.Context, stop func()) error {
 	if cfg.publicMode {
 		// §7.3.1 Operator token in public mode: the endpoint refuses a write
 		// without the token before reading its body and keeps the list whole.
-		layers = layers.WithPublicMode()
+		layers = layers.WithPublicMode(cfg.operatorToken)
 	}
 	layers = layers.
 		// §7.5.4: an admin layer change wakes a `podium sync --watch`
@@ -2773,6 +2774,12 @@ func (c *Config) validate() error {
 	// guessable secret.
 	if c.operatorToken != "" && len(c.operatorToken) < server.MinOperatorTokenLength {
 		return fmt.Errorf("config.invalid: PODIUM_OPERATOR_TOKEN must be at least %d characters", server.MinOperatorTokenLength)
+	}
+	// §13.12: no request header can carry whitespace or a control character,
+	// so a token holding one, such as the trailing newline a secret file
+	// often ends with, would match no request and refuse every write.
+	if strings.IndexFunc(c.operatorToken, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+		return fmt.Errorf("config.invalid: PODIUM_OPERATOR_TOKEN must not contain whitespace or control characters")
 	}
 	if c.usage.err != nil {
 		return c.usage.err

@@ -135,7 +135,7 @@ func (c StartupConfig) Validate() error {
 	// every caller, so a non-loopback bind without the explicit opt-in is a
 	// misconfiguration the registry refuses at startup, naming the address.
 	if c.PublicMode && !c.AllowPublicBind && !isLoopbackBind(c.Bind) {
-		return fmt.Errorf("%w: public mode binds 127.0.0.1 by default; %q is not a loopback address (pass --allow-public-bind to override)",
+		return fmt.Errorf("%w: public mode binds 127.0.0.1 by default; %q is not a loopback address (set PODIUM_ALLOW_PUBLIC_BIND=true or pass --allow-public-bind to override)",
 			ErrPublicBindNonLoopback, c.Bind)
 	}
 	// §13.10 "Behind a flag": a registry with no identity provider resolves
@@ -157,7 +157,7 @@ func (c StartupConfig) Validate() error {
 	// runs after the web UI guard so a UI on a non-loopback bind keeps that
 	// guard's own code.
 	if !c.PublicMode && !hasIdentityProvider(c.IdentityProvider) && !c.AllowPublicBind && !isLoopbackBind(c.Bind) {
-		return fmt.Errorf("%w: a registry with no identity provider admits every caller as an admin, so it binds a loopback address; %q is not one (configure an identity provider, or pass --allow-public-bind when something else limits who can reach it)",
+		return fmt.Errorf("%w: a registry with no identity provider admits every caller as an admin, so it binds a loopback address; %q is not one (configure an identity provider, or set PODIUM_ALLOW_PUBLIC_BIND=true or pass --allow-public-bind when something else limits who can reach it)",
 			ErrPublicBindNonLoopback, c.Bind)
 	}
 	// §6.3.3 / §13.10 "Bind restriction under trusted-headers": the provider

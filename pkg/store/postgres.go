@@ -184,6 +184,9 @@ var orgIndexStmts = []string{
 		ON domains(tenant_id, path)`,
 	`CREATE INDEX IF NOT EXISTS idx_deps_to
 		ON dependencies(tenant_id, to_artifact)`,
+	// The §8.7 report sums one page of artifacts over the window.
+	`CREATE INDEX IF NOT EXISTS idx_usage_daily_artifact
+		ON usage_daily(tenant_id, artifact_id, day)`,
 }
 
 // sharedTableStmts create the cross-org tables in public: the tenants registry
@@ -768,18 +771,16 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	// The row already existed (a prior ingest, or the winner of a
 	// concurrent race). Read the stored hash back to classify; immutable
 	// rows are never deleted, so the SELECT always finds it.
-	var existing string
+	var existing, layer string
+	var deleted bool
 	err = conn.QueryRowContext(ctx, `
-		SELECT content_hash FROM manifests
+		SELECT content_hash, layer, deleted_at IS NOT NULL FROM manifests
 		WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3`,
-		rec.TenantID, rec.ArtifactID, rec.Version).Scan(&existing)
+		rec.TenantID, rec.ArtifactID, rec.Version).Scan(&existing, &layer, &deleted)
 	if err != nil {
 		return err
 	}
-	if existing != rec.ContentHash {
-		return ErrImmutableViolation
-	}
-	return nil // idempotent — same hash
+	return classifyExistingManifest(rec, existing, layer, deleted)
 }
 
 // postgresRevive restores a tombstoned row of rec's (artifact_id, version)
@@ -885,16 +886,17 @@ func (p *Postgres) PutManifestWithVectorPending(ctx context.Context, rec Manifes
 		}
 	}
 	if n == 0 && !revived {
-		var existing string
+		var existing, layer string
+		var deleted bool
 		err = tx.QueryRowContext(ctx, `
-			SELECT content_hash FROM manifests
+			SELECT content_hash, layer, deleted_at IS NOT NULL FROM manifests
 			WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3`,
-			rec.TenantID, rec.ArtifactID, rec.Version).Scan(&existing)
+			rec.TenantID, rec.ArtifactID, rec.Version).Scan(&existing, &layer, &deleted)
 		if err != nil {
 			return err
 		}
-		if existing != rec.ContentHash {
-			return ErrImmutableViolation
+		if err := classifyExistingManifest(rec, existing, layer, deleted); err != nil {
+			return err
 		}
 		return tx.Commit() // idempotent — same hash, no re-queue
 	}

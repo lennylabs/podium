@@ -153,11 +153,25 @@ function unreachable(): ApiError {
   );
 }
 
+/** webClient is the §7.2.2 client value the web UI sends on every registry
+ * request. The registry counts a load the UI makes, such as opening an
+ * artifact in the viewer, under this client rather than under `unknown`
+ * (§8.7). The value is self-reported and decides nothing. */
+const webClient = 'name=web';
+
+/** withClient returns init with the web UI's X-Podium-Client header added to
+ * the headers it already carries. */
+function withClient(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers);
+  headers.set('X-Podium-Client', webClient);
+  return { ...init, headers };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   let text: string;
   try {
-    response = await fetch(path, init);
+    response = await fetch(path, withClient(init));
     publishReadOnly(path, response);
     text = await response.text();
   } catch {
