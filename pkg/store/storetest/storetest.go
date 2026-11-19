@@ -66,6 +66,8 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("LayerSoftDeleteRecovery", func(t *testing.T) { layerSoftDeleteRecovery(t, factory(t)) })
 	t.Run("LayerDeletionPurgedAfterWindow", func(t *testing.T) { layerDeletionPurgedAfterWindow(t, factory(t)) })
 	t.Run("RemovedArtifactLifecycle", func(t *testing.T) { removedArtifactLifecycle(t, factory(t)) })
+	t.Run("SoftDeleteManyArtifacts", func(t *testing.T) { softDeleteManyArtifacts(t, factory(t)) })
+	t.Run("LayerRestoreKeepsRemovedArtifacts", func(t *testing.T) { layerRestoreKeepsRemovedArtifacts(t, factory(t)) })
 	t.Run("SearchVisibilityRoundTrip", func(t *testing.T) { searchVisibilityRoundTrip(t, factory(t)) })
 	t.Run("SkillRawRoundTrip", func(t *testing.T) { skillRawRoundTrip(t, factory(t)) })
 	t.Run("ResourcesRoundTrip", func(t *testing.T) { resourcesRoundTrip(t, factory(t)) })
@@ -1045,6 +1047,69 @@ func removedArtifactLifecycle(t *testing.T, s store.Store) {
 	}
 	if strings.Join(got, " | ") != strings.Join(want, " | ") {
 		t.Errorf("removed-artifact lifecycle:\n got  %q\n want %q", got, want)
+	}
+}
+
+// servedRows renders the tenant's served rows as sorted id@version/layer.
+func servedRows(t *testing.T, s store.Store, tenant string) string {
+	t.Helper()
+	rows, err := s.ListManifests(context.Background(), tenant)
+	must(t, err)
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.ArtifactID+"@"+r.Version+"/"+r.Layer)
+	}
+	sort.Strings(out)
+	return strings.Join(out, ",")
+}
+
+// Spec: §7.3.1 (Removed artifacts) — a cycle that removes more artifacts
+// than one SQL statement can bind (here 70,000, above the SQLite and
+// Postgres parameter limits) tombstones every named row of the layer, and
+// leaves an unnamed row and another layer's row served.
+func softDeleteManyArtifacts(t *testing.T, s store.Store) {
+	t.Helper()
+	mustCreateTenant(t, s, "t")
+	for _, r := range [][2]string{{"ops/first", "L"}, {"ops/last", "L"}, {"ops/kept", "L"}, {"ops/other", "M"}} {
+		rec := manifestRec("t", r[0], "1.0.0", "h"+r[0]+r[1])
+		rec.Layer = r[1]
+		mustPut(t, s, rec)
+	}
+	ids := make([]string, 70000)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("ops/absent-%d", i)
+	}
+	ids[0], ids[1], ids[len(ids)-1] = "ops/first", "ops/other", "ops/last"
+	must(t, s.SoftDeleteArtifacts(context.Background(), "t", "L", ids, time.Now().UTC()))
+	if got, want := servedRows(t, s, "t"), "ops/kept@1.0.0/L,ops/other@1.0.0/M"; got != want {
+		t.Errorf("served after removing 70,000 IDs = %q, want %q", got, want)
+	}
+}
+
+// Spec: §7.3.1 (Removed artifacts), §8.4 — restoring an unregistered layer
+// serves again the artifacts the unregister soft-deleted and leaves an
+// artifact an earlier ingest removed soft-deleted, with its own tombstone, so
+// the purge still reaches it.
+func layerRestoreKeepsRemovedArtifacts(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+	must(t, s.PutLayerConfig(ctx, store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: "/x"}))
+	for _, id := range []string{"ops/kept", "ops/gone"} {
+		rec := manifestRec("t", id, "1.0.0", "h"+id)
+		rec.Layer = "L"
+		mustPut(t, s, rec)
+	}
+	removedAt := time.Now().UTC().Add(-40 * 24 * time.Hour)
+	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/gone"}, removedAt))
+	must(t, s.DeleteLayerConfig(ctx, "t", "L"))
+	must(t, s.RestoreLayerConfig(ctx, "t", "L"))
+	_, err := s.PurgeExpiredLayerDeletions(ctx, time.Now().UTC().Add(-30*24*time.Hour))
+	must(t, err)
+	all, err := s.ListManifestsIncludingDeleted(ctx, "t")
+	must(t, err)
+	if got, want := fmt.Sprintf("%s | %d", servedRows(t, s, "t"), len(all)), "ops/kept@1.0.0/L | 1"; got != want {
+		t.Errorf("after an ingest removal, unregister, restore, and purge: served | stored = %q, want %q", got, want)
 	}
 }
 
