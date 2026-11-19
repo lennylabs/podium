@@ -14191,23 +14191,36 @@ describe("the layer write flows", () => {
   // A layer unregistered earlier the same day is looked for by someone who
   // did it minutes ago, so the row states the time of day. The date of a day
   // the reader is already on tells them nothing.
+  //
+  // The clock is held at local noon. Taken from the wall clock, an unregister
+  // one minute ago lands on the previous day during the first minute after
+  // midnight, and the row then rightly states a date. Only Date is faked, so
+  // the waits the render needs still run on real timers.
   it("states a same-day unregister as the time of day", async () => {
-    const unregisteredAt = new Date(Date.now() - 60 * 1000);
-    stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
-      "/v1/layers": {
-        body: {
-          layers: [{ ...userLayer(), deleted_at: unregisteredAt.toISOString() }],
+    const noon = new Date();
+    noon.setHours(12, 0, 0, 0);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(noon);
+    try {
+      const unregisteredAt = new Date(Date.now() - 60 * 1000);
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+        "/v1/layers": {
+          body: {
+            layers: [{ ...userLayer(), deleted_at: unregisteredAt.toISOString() }],
+          },
         },
-      },
-    });
-    goTo("#/layers/deleted");
-    render(<App />);
-    const surface = await screen.findByLabelText("Recently unregistered");
-    const pad = (value: number) => String(value).padStart(2, "0");
-    expect(surface.textContent).toContain(
-      `today, ${pad(unregisteredAt.getHours())}:${pad(unregisteredAt.getMinutes())}`,
-    );
+      });
+      goTo("#/layers/deleted");
+      render(<App />);
+      const surface = await screen.findByLabelText("Recently unregistered");
+      const pad = (value: number) => String(value).padStart(2, "0");
+      expect(surface.textContent).toContain(
+        `today, ${pad(unregisteredAt.getHours())}:${pad(unregisteredAt.getMinutes())}`,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // The unregister confirmation promises the full §8.4 window and names the
