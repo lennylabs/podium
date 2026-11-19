@@ -65,6 +65,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Credentials no longer reach vector outbox errors or trace spans** (§4.7, §13.8): outbox error text drops URL userinfo, query strings, connection-string passwords, and configured secrets, and exported spans drop URL query strings and fragments, so search text and presigned-URL signatures no longer reach the trace backend.
 - **The SDK workspace overlays read `metadata.version` only as YAML decodes it** (§4.3.4, §6.4).
 - **A `registry.yaml` that cannot be read or does not parse refuses startup** (§13.12) with `config.invalid`, naming the file and the line, where the registry logged a warning and started on the defaults without the file's identity provider, layers, and store settings. The message quotes no file content, so a substituted `${ENV_VAR}` secret does not reach the log.
+- **`${ENV_VAR}` interpolation in `registry.yaml` runs after the file is parsed** (§13.12): the variable's value replaces the reference inside its scalar value, so a secret that contains `#`, `'`, `"`, `&`, `*`, `: `, or a line break is taken exactly as the variable holds it, quoted or not, where it could truncate the value, change the file's structure, or stop the file from parsing. A reference in a mapping key is no longer replaced, and a reference inside a flow collection such as `[${GROUP}]` needs quotes.
 
 ### Documentation
 

@@ -249,12 +249,12 @@ type yamlGitSource struct {
 	Username string `yaml:"username,omitempty"`
 	// Token is the §7.3.1 repository credential's token, under the rules of
 	// the repo_token member. It is meant to be written as ${ENV_VAR}, which
-	// expandEnvVars substitutes before parsing, and it is never
-	// percent-encoded. It is a yaml.Node because an unset variable expands
-	// to the empty string and leaves `token:` with a null value: yaml.v3
-	// skips a custom unmarshaler on a null node but sets a yaml.Node field,
-	// so a present null stays apart from an absent key, which a string
-	// field cannot tell apart.
+	// interpolateScalars substitutes inside the parsed value, and it is never
+	// percent-encoded. It is a yaml.Node because an unset variable in an
+	// unquoted value leaves `token:` with a null value: yaml.v3 skips a
+	// custom unmarshaler on a null node but sets a yaml.Node field, so a
+	// present null stays apart from an absent key, which a string field
+	// cannot tell apart.
 	Token yaml.Node `yaml:"token,omitempty"`
 }
 
@@ -279,25 +279,75 @@ type yamlReadOnly struct {
 // the brace form is recognized so a bare `$` in a DSN or password survives.
 var envInterpolationRE = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
-// expandEnvVars resolves `${ENV_VAR}` references in the raw config bytes
-// before parsing, per §13.12 ("`${ENV_VAR}` interpolation supported" and
-// "Secret values should use `${ENV_VAR}` interpolation"). An unset variable
-// expands to the empty string, matching standard environment-substitution
-// tools; the resulting empty required value is then named by validate
-// (§13.12: "refuses to start when a backend is selected but its required
-// values are missing"). spec: §13.12.
-func expandEnvVars(data []byte) []byte {
-	return envInterpolationRE.ReplaceAllFunc(data, func(match []byte) []byte {
-		name := envInterpolationRE.FindSubmatch(match)[1]
-		return []byte(os.Getenv(string(name)))
+// expandEnvVars resolves `${ENV_VAR}` references in one scalar value. An
+// unset variable expands to the empty string, matching standard
+// environment-substitution tools; the resulting empty required value is then
+// named by validate (§13.12: "refuses to start when a backend is selected but
+// its required values are missing"). The replacement is a single pass, so a
+// variable's value that itself holds `${...}` is not expanded again.
+//
+// Spec: §13.12
+func expandEnvVars(value string) string {
+	return envInterpolationRE.ReplaceAllStringFunc(value, func(match string) string {
+		return os.Getenv(envInterpolationRE.FindStringSubmatch(match)[1])
 	})
 }
 
+// interpolateScalars applies expandEnvVars to every scalar value under n,
+// after the file has been parsed, so a substituted value cannot change the
+// file's structure. Substituting into the raw text before parsing let a
+// secret holding YAML syntax rewrite the document: `abc #s3cret` stored
+// `abc`, a leading `*` read as an alias, and a `'` ended a single-quoted
+// scalar early. Mapping keys keep their text, and an alias node is skipped
+// because the node it names is visited where it is defined, so no value is
+// expanded twice.
+//
+// Spec: §13.12
+func interpolateScalars(n *yaml.Node) {
+	switch n.Kind {
+	case yaml.DocumentNode, yaml.SequenceNode:
+		for _, c := range n.Content {
+			interpolateScalars(c)
+		}
+	case yaml.MappingNode:
+		for i := 1; i < len(n.Content); i += 2 {
+			interpolateScalars(n.Content[i])
+		}
+	case yaml.ScalarNode:
+		interpolateScalar(n)
+	}
+}
+
+// interpolateScalar expands the references in one scalar node. A quoted,
+// block, or explicitly tagged scalar keeps its tag, so it stays a string. A
+// plain scalar is resolved again from its new text, as if that text had been
+// written unquoted, so `${PORT}` can still set an integer key; a non-empty
+// result that would resolve to null is kept a string, so a value such as `~`
+// is never read as an absent one. An empty plain result resolves to null, as
+// an empty unquoted value does.
+//
+// Spec: §13.12
+func interpolateScalar(n *yaml.Node) {
+	expanded := expandEnvVars(n.Value)
+	if expanded == n.Value {
+		return
+	}
+	n.Value = expanded
+	if n.Style&(yaml.TaggedStyle|yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle|yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
+		return
+	}
+	n.Tag = ""
+	if expanded != "" && n.ShortTag() == "!!null" {
+		n.Tag = "!!str"
+	}
+}
+
 // readYAMLConfig loads ~/.podium/registry.yaml (or PODIUM_CONFIG_FILE
-// override), resolves §13.12 ${ENV_VAR} interpolation, and unwraps the
-// top-level `registry:` block. Missing file returns (nil, nil). A file that
-// exists but cannot be read or does not decode returns a config.invalid
-// error, which validate refuses the start with.
+// override), parses it, resolves §13.12 ${ENV_VAR} interpolation inside the
+// parsed scalar values, and unwraps the top-level `registry:` block. Missing
+// file returns (nil, nil). A file that exists but cannot be read or does not
+// decode returns a config.invalid error, which validate refuses the start
+// with.
 func readYAMLConfig() (*yamlConfig, error) {
 	path := os.Getenv("PODIUM_CONFIG_FILE")
 	if path == "" {
@@ -314,12 +364,17 @@ func readYAMLConfig() (*yamlConfig, error) {
 		}
 		return nil, configFileReadError(path, err)
 	}
-	// §13.12: resolve ${ENV_VAR} interpolation before parsing so a config
-	// written with the documented secret-handling form connects with the
-	// resolved value rather than the literal placeholder.
-	data = expandEnvVars(data)
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, configFileParseError(path, err)
+	}
 	var out fileConfig
-	if err := yaml.Unmarshal(data, &out); err != nil {
+	if doc.Kind == 0 {
+		// An empty file holds no document and configures nothing.
+		return &out.Registry, nil
+	}
+	interpolateScalars(&doc)
+	if err := doc.Decode(&out); err != nil {
 		return nil, configFileParseError(path, err)
 	}
 	return &out.Registry, nil
@@ -346,9 +401,9 @@ var yamlErrorLine = regexp.MustCompile(`\Ayaml: (?:unmarshal errors:\n\s*)?line 
 
 // configFileParseError is the refusal for a registry.yaml that does not
 // decode. It names the file and the line the parser reports, and quotes no
-// other part of the parser's message: ${ENV_VAR} interpolation runs before
-// parsing, so the message can quote a substituted secret, as "unknown anchor
-// 'tail' referenced" does for a token that starts with '*'.
+// other part of the parser's message: a type error quotes the value it could
+// not decode, and that value can be a secret written in the file or one
+// ${ENV_VAR} interpolation substituted.
 //
 // Spec: §13.12
 func configFileParseError(path string, err error) error {

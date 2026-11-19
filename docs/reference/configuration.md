@@ -19,7 +19,7 @@ The registry reads the file that `PODIUM_CONFIG_FILE` names. When the variable i
 - `podium serve --config <path>` sets `PODIUM_CONFIG_FILE` for the process, so the flag overrides a value inherited from the environment. `podium-server` has no `--config` option.
 - When `PODIUM_CONFIG_FILE` names a file that does not exist, the registry refuses to start with `config file "<path>" does not exist`.
 - When the default file does not exist, the registry starts from the environment variables and the defaults. A registry on the SQLite store then writes `~/.podium/registry.yaml` with its bind address and storage paths, unless `PODIUM_CONFIG_FILE` or `PODIUM_NO_AUTOSTANDALONE` is set. [`podium serve`](cli#podium-serve) describes the standalone fallback.
-- When the file exists but cannot be read, or does not decode as the `registry:` document, the registry refuses to start with `config.invalid`. The message names the file and, when the parser reports one, the line, as in `config.invalid: registry configuration <path> does not parse at line 9`. It quotes no other part of the file or of the parser error, because a value that `${ENV_VAR}` interpolation substituted can appear there. `podium config show --server` prints the same message as a warning.
+- When the file exists but cannot be read, or does not decode as the `registry:` document, the registry refuses to start with `config.invalid`. The message names the file and, when the parser reports one, the line, as in `config.invalid: registry configuration <path> does not parse at line 9`. It quotes no other part of the file or of the parser error, because the parser can quote a value, and a value can be a secret written in the file or substituted by `${ENV_VAR}` interpolation. `podium config show --server` prints the same message as a warning.
 
 ### The registry: mapping
 
@@ -50,7 +50,9 @@ The registry ignores every top-level key other than `registry:`, and it ignores 
 
 ### Environment interpolation
 
-The registry replaces each `${NAME}` in the file with the value of the environment variable `NAME` before it parses the file. Only the brace form is replaced, so a bare `$` in a password survives. An unset variable becomes the empty string. A required backend value left empty that way refuses startup with an error that names the missing variable. Write secrets as `${NAME}` references rather than as literal values in the file.
+The registry parses the file first and then replaces each `${NAME}` inside a value with the value of the environment variable `NAME`. A reference in a key is left as written. Only the brace form is replaced, so a bare `$` in a password survives, and a substituted value is not searched for further references. An unset variable becomes the empty string. A required backend value left empty that way refuses startup with an error that names the missing variable. Write secrets as `${NAME}` references rather than as literal values in the file.
+
+A substituted value cannot change the structure of the file, so a secret needs no quoting or escaping for YAML: `#`, `'`, `"`, `&`, `*`, `: `, and a line break in the variable stay part of the value. A value written in quotes stays a string. An unquoted value takes the type its substituted text reads as, so `notable_count: ${NOTABLE}` sets an integer, except that a non-empty value such as `~` or `null` stays a string. An unquoted value that is empty after the substitution, as an unset variable makes it, is null. A reference inside a flow collection such as `[${GROUP}]` needs quotes, as in `["${GROUP}"]`, because YAML ends an unquoted scalar at `{` there.
 
 ### Precedence
 

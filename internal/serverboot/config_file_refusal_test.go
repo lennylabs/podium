@@ -22,18 +22,16 @@ func writeConfigFile(t *testing.T, body string) string {
 // Spec: §13.12 — a registry.yaml that does not decode refuses the start with
 // config.invalid naming the file and, when the parser reports one, the line.
 // The refusal quotes no other part of the parser's message, so a secret that
-// ${ENV_VAR} interpolation placed in the file never reaches it, whether the
-// parser would quote it as an anchor name or as a mistyped value.
+// ${ENV_VAR} interpolation substituted never reaches it, though the decoder
+// quotes a value it cannot convert.
 func TestValidate_UnparseableConfigFileRefusesStart(t *testing.T) {
 	const secret = "s3cretTail"
-	t.Setenv("PODIUM_TEST_GIT_TOKEN", "*"+secret)
 	t.Setenv("PODIUM_TEST_PORT", secret)
 	cases := []struct {
 		name, body, want string
 	}{
 		{"syntax error", "registry:\n  bind: 127.0.0.1:0\n  layers: [\n", "does not parse at line "},
 		{"type error", "registry:\n  bind: 127.0.0.1:0\n  discovery:\n    notable_count: ${PODIUM_TEST_PORT}\n", "does not parse at line 4"},
-		{"anchor from a substituted token", "registry:\n  layers:\n    - id: team\n      source:\n        git:\n          token: ${PODIUM_TEST_GIT_TOKEN}\n", "does not parse"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

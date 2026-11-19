@@ -153,9 +153,9 @@ func TestRegistryConfig_S3MissingBucketRefusesStart(t *testing.T) {
 // Spec: §13.12 — a registry.yaml that does not parse refuses startup with
 // config.invalid, naming the file and the line the parser reports, rather
 // than starting on the defaults without the configured identity provider. A
-// token that ${ENV_VAR} interpolation substitutes, and that the parser would
-// quote, never reaches the output: here a token starting with '*' reads as a
-// YAML alias. `podium config show --server` warns with the same message.
+// value that ${ENV_VAR} interpolation substitutes, and that the decoder
+// quotes when it cannot convert it, never reaches the output. `podium config
+// show --server` warns with the same message.
 // Matrix: §6.10 (config.invalid)
 func TestRegistryConfig_UnparseableFileRefusesStart(t *testing.T) {
 	t.Parallel()
@@ -164,17 +164,16 @@ func TestRegistryConfig_UnparseableFileRefusesStart(t *testing.T) {
 	cases := []struct {
 		name, body, want string
 	}{
-		{"quote in a quoted token", "registry:\n" + idp + "  layers:\n    - id: team\n      source:\n        git:\n          repo: https://git.acme.com/x.git\n          token: '${PODIUM_TEST_GIT_TOKEN}'\n", "does not parse at line 9"},
-		{"alias from an unquoted token", "registry:\n" + idp + "  layers:\n    - id: team\n      source:\n        git:\n          repo: https://git.acme.com/x.git\n          token: ${PODIUM_TEST_GIT_TOKEN}\n", "does not parse"},
+		{"unclosed flow sequence", "registry:\n" + idp + "  layers: [\n", "does not parse"},
+		{"substituted value of the wrong type", "registry:\n" + idp + "  discovery:\n    notable_count: ${PODIUM_TEST_SECRET}\n", "does not parse at line 7"},
 	}
-	for i, tc := range cases {
-		token := []string{"ab'" + secret, "*" + secret}[i]
+	for _, tc := range cases {
 		home := t.TempDir()
 		cfgFile := filepath.Join(home, "registry.yaml")
 		if err := os.WriteFile(cfgFile, []byte(tc.body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		env := []string{"HOME=" + home, "PODIUM_CONFIG_FILE=" + cfgFile, "PODIUM_TEST_GIT_TOKEN=" + token}
+		env := []string{"HOME=" + home, "PODIUM_CONFIG_FILE=" + cfgFile, "PODIUM_TEST_SECRET=" + secret}
 		res := runPodium(t, "", env, "serve", "--bind", "127.0.0.1:0")
 		combined := res.Stdout + res.Stderr
 		wantMsg := "config.invalid: registry configuration " + cfgFile + " " + tc.want
@@ -187,7 +186,7 @@ func TestRegistryConfig_UnparseableFileRefusesStart(t *testing.T) {
 		}
 		for _, out := range []string{combined, show.Stdout + show.Stderr} {
 			if strings.Contains(out, secret) {
-				t.Errorf("%s: output carries the substituted token:\n%s", tc.name, out)
+				t.Errorf("%s: output carries the substituted value:\n%s", tc.name, out)
 			}
 		}
 	}

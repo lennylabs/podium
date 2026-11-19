@@ -7,22 +7,155 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Spec: §13.12 — `${ENV_VAR}` interpolation resolves the brace
-// form only; an unset variable expands to empty; a bare `$` survives.
+// form only; an unset variable expands to empty; a bare `$` survives; a
+// substituted value is not searched for further references.
 func TestExpandEnvVars(t *testing.T) {
 	t.Setenv("PODIUM_TEST_DSN", "postgres://u:p@h/db")
+	t.Setenv("PODIUM_TEST_NESTED", "${PODIUM_TEST_DSN}")
 	cases := []struct{ in, want string }{
-		{"dsn: ${PODIUM_TEST_DSN}", "dsn: postgres://u:p@h/db"},
-		{"a: ${PODIUM_TEST_UNSET_XYZ}", "a: "}, // unset → empty
-		{"pw: p$ssw0rd", "pw: p$ssw0rd"},       // bare $ is not the brace form
-		{"two: ${PODIUM_TEST_DSN}/${PODIUM_TEST_DSN}", "two: postgres://u:p@h/db/postgres://u:p@h/db"},
+		{"${PODIUM_TEST_DSN}", "postgres://u:p@h/db"},
+		{"${PODIUM_TEST_UNSET_XYZ}", ""}, // unset → empty
+		{"p$ssw0rd", "p$ssw0rd"},         // bare $ is not the brace form
+		{"${PODIUM_TEST_DSN}/${PODIUM_TEST_DSN}", "postgres://u:p@h/db/postgres://u:p@h/db"},
+		{"${PODIUM_TEST_NESTED}", "${PODIUM_TEST_DSN}"}, // single pass
 	}
 	for _, c := range cases {
-		if got := string(expandEnvVars([]byte(c.in))); got != c.want {
+		if got := expandEnvVars(c.in); got != c.want {
 			t.Errorf("expandEnvVars(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// interpolationLayer reads the declared layer of a registry.yaml that holds
+// one git layer whose token key is tokenLine.
+func interpolationLayer(t *testing.T, tokenLine string) yamlGitSource {
+	t.Helper()
+	writeConfigFile(t, "registry:\n  layers:\n    - id: team\n      source:\n        git:\n"+
+		"          repo: https://git.acme.com/x.git\n          "+tokenLine+"\n          ref: main\n")
+	y, err := readYAMLConfig()
+	if err != nil {
+		t.Fatalf("readYAMLConfig: %v", err)
+	}
+	if len(y.Layers) != 1 || y.Layers[0].Source.Git == nil {
+		t.Fatalf("layers = %+v, want one git layer", y.Layers)
+	}
+	g := *y.Layers[0].Source.Git
+	if g.Ref != "main" {
+		t.Fatalf("ref = %q, want main: the substituted token changed the keys that follow it", g.Ref)
+	}
+	return g
+}
+
+// Spec: §13.12 — interpolation runs after parsing and replaces references
+// inside scalar values only, so a token holding YAML syntax is stored exactly,
+// in the quoted and the unquoted form, and changes no other key.
+func TestReadYAMLConfig_InterpolationKeepsTheFileStructure(t *testing.T) {
+	tokens := []string{
+		"abc #s3cret",
+		"ab'cd",
+		`ab"cd`,
+		"&anch s3cret",
+		"*s3cretTail",
+		"key: value",
+		"line1\nline2",
+		"- item",
+		"[x, y]",
+		"{a: b}",
+		"~",
+		"null",
+	}
+	for _, tok := range tokens {
+		t.Setenv("PODIUM_TEST_GIT_TOKEN", tok)
+		for _, form := range []string{"token: ${PODIUM_TEST_GIT_TOKEN}", "token: '${PODIUM_TEST_GIT_TOKEN}'", `token: "${PODIUM_TEST_GIT_TOKEN}"`} {
+			g := interpolationLayer(t, form)
+			got, err := declaredToken("team", &g)
+			if err != nil || got != tok {
+				t.Errorf("%s with %q: token = %q, %v; want the variable's exact value", form, tok, got, err)
+			}
+		}
+	}
+}
+
+// Spec: §13.12 — a reference inside a larger value is replaced in place, a
+// reference in a mapping key is left as written, an unquoted value takes the
+// type its substituted text resolves to, and an unset variable makes an
+// unquoted value null and a quoted one empty.
+func TestReadYAMLConfig_InterpolationTypesAndKeys(t *testing.T) {
+	t.Setenv("PODIUM_TEST_HOST", "db.acme.com")
+	t.Setenv("PODIUM_TEST_COUNT", "7")
+	t.Setenv("PODIUM_TEST_FLAG", "true")
+	t.Setenv("PODIUM_TEST_KEY", "endpoint")
+	writeConfigFile(t, `registry:
+  store:
+    dsn: postgres://alice@${PODIUM_TEST_HOST}:5432/podium
+  public_mode: ${PODIUM_TEST_FLAG}
+  discovery:
+    notable_count: ${PODIUM_TEST_COUNT}
+  ${PODIUM_TEST_KEY}: https://wrong.acme.com
+`)
+	y, err := readYAMLConfig()
+	if err != nil {
+		t.Fatalf("readYAMLConfig: %v", err)
+	}
+	if y.Store.DSN != "postgres://alice@db.acme.com:5432/podium" {
+		t.Errorf("dsn = %q, want the host substituted in place", y.Store.DSN)
+	}
+	if y.PublicMode == nil || !*y.PublicMode {
+		t.Errorf("public_mode = %v, want true from the substituted boolean", y.PublicMode)
+	}
+	if y.Discovery.NotableCount != 7 {
+		t.Errorf("notable_count = %d, want 7 from the substituted integer", y.Discovery.NotableCount)
+	}
+	if y.Endpoint != "" {
+		t.Errorf("endpoint = %q, want empty: a reference in a key is not replaced", y.Endpoint)
+	}
+
+	g := interpolationLayer(t, "token: ${PODIUM_TEST_UNSET_TOKEN}")
+	if g.Token.Kind != yaml.ScalarNode || g.Token.ShortTag() != "!!null" {
+		t.Errorf("unquoted unset token = kind %v tag %s, want a null scalar", g.Token.Kind, g.Token.ShortTag())
+	}
+	g = interpolationLayer(t, "token: '${PODIUM_TEST_UNSET_TOKEN}'")
+	if g.Token.ShortTag() != "!!str" || g.Token.Value != "" {
+		t.Errorf("quoted unset token = tag %s value %q, want an empty string", g.Token.ShortTag(), g.Token.Value)
+	}
+	if _, err := declaredToken("team", &g); err == nil {
+		t.Error("declaredToken accepted the empty token an unset variable yields")
+	}
+}
+
+// Spec: §13.12 — a value an alias repeats is substituted once, where its
+// anchor defines it, so a variable whose value holds a reference is not
+// expanded on the second visit.
+func TestReadYAMLConfig_InterpolationExpandsAnAnchorOnce(t *testing.T) {
+	t.Setenv("PODIUM_TEST_HOST", "db.acme.com")
+	t.Setenv("PODIUM_TEST_INDIRECT", "${PODIUM_TEST_HOST}")
+	writeConfigFile(t, `registry:
+  store:
+    dsn: &dsn ${PODIUM_TEST_INDIRECT}
+  object_store:
+    endpoint: *dsn
+`)
+	y, err := readYAMLConfig()
+	if err != nil {
+		t.Fatalf("readYAMLConfig: %v", err)
+	}
+	if y.Store.DSN != "${PODIUM_TEST_HOST}" || y.ObjectStore.Endpoint != "${PODIUM_TEST_HOST}" {
+		t.Errorf("dsn = %q, endpoint = %q, want the variable's literal value in both", y.Store.DSN, y.ObjectStore.Endpoint)
+	}
+}
+
+// Spec: §13.12 — an empty registry.yaml configures nothing and is not a
+// refusal.
+func TestReadYAMLConfig_EmptyFile(t *testing.T) {
+	writeConfigFile(t, "")
+	y, err := readYAMLConfig()
+	if err != nil || y == nil {
+		t.Fatalf("readYAMLConfig = %v, %v; want an empty configuration", y, err)
 	}
 }
 

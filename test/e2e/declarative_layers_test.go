@@ -363,6 +363,45 @@ func TestDeclarativeLayers_RepoCredentialKeys(t *testing.T) {
 	}
 }
 
+// Spec: §13.12, §7.3.1 (Declared repository credentials) — interpolation runs
+// inside the parsed value, so a declared token whose variable holds YAML
+// syntax is stored exactly, in the quoted and the unquoted form: the registry
+// starts, a reingest sends the remote the variable's value as the password,
+// and no output carries it.
+func TestDeclarativeLayers_InterpolatedTokenKeepsYAMLSyntax(t *testing.T) {
+	t.Parallel()
+	const (
+		user  = "alice-user"
+		token = `ab'c #d &e *f: g"h`
+	)
+	for _, form := range []string{"token: '${PODIUM_E2E_GIT_TOKEN}'", "token: ${PODIUM_E2E_GIT_TOKEN}"} {
+		t.Run(form, func(t *testing.T) {
+			t.Parallel()
+			remote := newFailingGitRemote(t)
+			home := t.TempDir()
+			cfgPath := declaredGitConfig(t, home, "private", remote.URL+"/acme/private.git", "username: "+user, form)
+			srv := startServerArgs(t, declaredCredentialEnv(home, cfgPath, "PODIUM_E2E_GIT_TOKEN="+token),
+				"serve", "--standalone")
+			reingest := runPodium(t, "", nil, "layer", "reingest", "--registry", srv.BaseURL, "private")
+			sent := remote.recorded()
+			if len(sent) == 0 {
+				t.Fatalf("the remote recorded no basic-auth request\nreingest stderr: %s\nserver log:\n%s", reingest.Stderr, srv.log())
+			}
+			for i, pair := range sent {
+				if pair.user != user || pair.password != token {
+					t.Errorf("remote request %d carried a credential other than the declared one (user %q, password of %d bytes)",
+						i, pair.user, len(pair.password))
+				}
+			}
+			for what, text := range map[string]string{"server log": srv.log(), "reingest output": reingest.Stdout + reingest.Stderr} {
+				if strings.Contains(text, token) {
+					t.Errorf("%s carries the token", what)
+				}
+			}
+		})
+	}
+}
+
 // Spec: §7.3.1 (Declared repository credentials) — a declaration that sets a
 // credential key aborts startup when source.git.repo carries userinfo of its
 // own and when source.git.token is empty, which an unset ${ENV_VAR} yields.
