@@ -540,7 +540,9 @@ The surface names the report's loads **on-demand loads** and its syncs
 **preloads**, and keeps **search hits**. A preload is written into a workspace
 ahead of time by `podium sync`, and the harness then reads the local copy, which
 the registry never sees; the names state that difference, and each label's
-tooltip states the definition. A figure that sums both is named **all loads**.
+tooltip states the definition. The two stat tiles carry the definition behind an
+ⓘ beside the label, which opens on hover, on keyboard focus, and on a press, so
+a touch reader can read it. A figure that sums both is named **all loads**.
 The API, the CLI, and the documentation keep the names loads and syncs, and
 `usageHints` in `web/ui/src/usage.ts` holds the UI's wording.
 

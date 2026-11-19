@@ -20572,14 +20572,32 @@ describe("usage", () => {
       // preloads, and each label's tooltip states the definition.
       expect(tiles[0].textContent).toContain("ON-DEMAND LOADS");
       expect(tiles[0].textContent).toContain("18,402");
-      expect(tiles[0].querySelector(".stat-tile-label")?.getAttribute("title")).toContain("when an agent");
+      const loadsTip = within(tiles[0]).getByRole("button", { name: "About on-demand loads" });
+      expect(loadsTip.textContent).toBe("ⓘ");
+      expect(loadsTip.getAttribute("aria-expanded")).toBe("false");
+      expect(document.getElementById(loadsTip.getAttribute("aria-describedby") ?? "")?.textContent).toContain(
+        "when an agent",
+      );
+      // A press pins the definition open for a reader with no hover, and a
+      // second press or Escape closes it.
+      fireEvent.click(loadsTip);
+      expect(loadsTip.getAttribute("aria-expanded")).toBe("true");
+      expect(tiles[0].querySelector(".info-tip-open")).not.toBeNull();
+      fireEvent.keyDown(loadsTip, { key: "Escape" });
+      expect(loadsTip.getAttribute("aria-expanded")).toBe("false");
+      fireEvent.click(loadsTip);
+      fireEvent.click(loadsTip);
+      expect(loadsTip.getAttribute("aria-expanded")).toBe("false");
       expect(tiles[1].textContent).toContain("PRELOADS");
       // The tooltip carries the definition, so the tiles state no note
       // beside the label.
       expect(tiles[0].textContent).not.toContain("agents, SDK, CLI");
-      expect(tiles[1].textContent).not.toContain("podium sync");
+      expect(tiles[1].querySelector(".stat-tile-note")).toBeNull();
       expect(tiles[1].textContent).toContain("2,316");
-      expect(tiles[1].querySelector(".stat-tile-label")?.getAttribute("title")).toContain("ahead of time by podium sync");
+      const preloadsTip = within(tiles[1]).getByRole("button", { name: "About preloads" });
+      expect(document.getElementById(preloadsTip.getAttribute("aria-describedby") ?? "")?.textContent).toContain(
+        "ahead of time by podium sync",
+      );
       expect(screen.getByRole("heading", { name: "ALL LOADS BY CLIENT" })).toBeTruthy();
       const breakdowns = screen.getAllByTestId("breakdown");
       // Clients read as the report names them, largest first, then other,

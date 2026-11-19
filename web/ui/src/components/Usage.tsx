@@ -3,6 +3,8 @@
 // a breakdown or a layer's share. Each draws figures it is handed; the
 // surfaces own the reads.
 
+import { useId, useState } from 'react';
+
 import type { UsagePeriod } from '../api';
 import { usageHref } from '../route';
 import type { BreakdownPart, RailUsage, UsageCell } from '../usage';
@@ -122,8 +124,49 @@ function LoadBars({ series }: { series: UsagePeriod[] }) {
   );
 }
 
+/** InfoTip is the ⓘ beside a label and the definition it opens. The
+ * definition shows while the pointer rests on the ⓘ or the ⓘ holds focus, and
+ * a press pins it open, so a touch reader, who has no hover, can read it; a
+ * second press, Escape, or leaving the ⓘ closes it. The text stays in the
+ * document as the button's description, so a screen reader states it with
+ * the button whether or not it is shown. A native title would show only
+ * after a hover delay, never on focus or touch, and nothing on the label
+ * would say it is there. */
+export function InfoTip({ subject, text }: { subject: string; text: string }) {
+  const id = useId();
+  const [pinned, setPinned] = useState(false);
+  return (
+    <span className={pinned ? 'info-tip info-tip-open' : 'info-tip'}>
+      <button
+        type="button"
+        className="info-tip-button"
+        aria-label={`About ${subject}`}
+        aria-describedby={id}
+        aria-expanded={pinned}
+        onClick={() => {
+          setPinned(!pinned);
+        }}
+        onBlur={() => {
+          setPinned(false);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            setPinned(false);
+            e.currentTarget.blur();
+          }
+        }}
+      >
+        ⓘ
+      </button>
+      <span role="tooltip" id={id} className="info-tip-text">
+        {text}
+      </span>
+    </span>
+  );
+}
+
 /** StatTile is one of the usage page's two totals with its daily sparkline.
- * hint is the definition the label's tooltip states. */
+ * hint is the definition the ⓘ beside the label opens. */
 export function StatTile({
   label,
   hint,
@@ -138,9 +181,8 @@ export function StatTile({
   return (
     <div className="stat-tile" data-testid="stat-tile">
       <div className="stat-tile-head">
-        <h2 className="stat-tile-label" title={hint}>
-          {label}
-        </h2>
+        <h2 className="stat-tile-label">{label}</h2>
+        <InfoTip subject={label.toLowerCase()} text={hint} />
       </div>
       <div className="stat-tile-body">
         <span className="stat-tile-total">{formatCount(total)}</span>
