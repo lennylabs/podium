@@ -56,6 +56,9 @@ type fixture struct {
 // team/standup states two situations in metadata.when_to_use, so the
 // claude-code SKILL.md carries them as a top-level when_to_use string and
 // every other harness keeps the metadata value alone.
+// team/retro does the same from a flow-mapping frontmatter, which no single
+// injected line can extend, so the claude-code SKILL.md carries the
+// re-encoded mapping with the top-level when_to_use appended.
 // team/deploy sets metadata.invocation: user and bundles a script, so each
 // harness writes its user-only control or its command-file fallback with the
 // script in .podium/resources/<id>/.
@@ -73,6 +76,11 @@ var canonicalArtifacts = []fixture{
 		artifact:  "---\ntype: skill\nversion: 0.0.0-auto.0\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n",
 		skill:     "---\nname: standup\ndescription: Summarize yesterday's work for the daily standup.\nmetadata:\n  when_to_use: |\n    At the daily standup.\n    When asked what changed yesterday.\n---\n\nList what changed yesterday and what is planned today.\n",
 		resources: map[string]string{"references/template.md": "# Standup\n\n- Yesterday:\n- Today:\n"},
+	},
+	{
+		id:       "team/retro",
+		artifact: "---\ntype: skill\nversion: 0.0.0-auto.0\n---\n<!-- Synthesized by Podium: this skill has no ARTIFACT.md. -->\n",
+		skill:    "---\n{name: retro, description: Run the team retrospective and record the actions., metadata: {when_to_use: \"At the end of a sprint.\\nWhen asked to run a retro.\"}}\n---\n\nAsk what went well, what did not, and what to change.\n",
 	},
 	{
 		id:       "team/reviewer",

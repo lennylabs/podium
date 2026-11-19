@@ -742,6 +742,8 @@ podium artifact scaffold --type <type> --description <text>
 
 For `--type skill`, the command writes `SKILL.md` alone. `--tags`, `--sensitivity`, and `--when-to-use` become `metadata` keys in the encodings that [Podium fields in SKILL.md metadata](../authoring/frontmatter-reference#podium-fields-in-skillmd-metadata) defines, and the command writes no `ARTIFACT.md`. The command exits 2, before it writes any file, when a `--tags` element is not valid UTF-8 or a `--when-to-use` entry holds a character that a YAML block cannot carry.
 
+For every type, the command writes `description` and `license` as double-quoted YAML scalars, so a value that contains `: ` or `#` parses back unchanged. The command exits 2, before it writes any file, when either value is not valid UTF-8.
+
 `--type` accepts the first-class artifact types and `mcp-server`, the extension type Podium ships built-in:
 
 | Type | Files written | Type-specific flags |

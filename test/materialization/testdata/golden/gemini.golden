@@ -86,6 +86,13 @@ Say hello to the person and offer help.
 === .gemini/skills/hello/scripts/run.py ===
 print('hello')
 
+=== .gemini/skills/retro/SKILL.md ===
+---
+{name: retro, description: Run the team retrospective and record the actions., metadata: {when_to_use: "At the end of a sprint.\nWhen asked to run a retro."}}
+---
+
+Ask what went well, what did not, and what to change.
+
 === .gemini/skills/standup/SKILL.md ===
 ---
 name: standup

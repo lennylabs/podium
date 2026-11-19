@@ -1,8 +1,11 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -46,5 +49,105 @@ func TestDoJSON_SendsOperatorTokenOnlyToGatedEndpoints(t *testing.T) {
 	}
 	if sendsOperatorToken("://not a url") {
 		t.Error("an unparseable URL counted as a gated endpoint")
+	}
+}
+
+// Spec: §7.3.1, §13.12 — the CLI does not follow a redirect that leaves the
+// host it was given. A 307 to another host would otherwise resend the
+// operator token header, which Go forwards to any host, and the JSON body,
+// which can carry a repository token. A redirect to another path on the same
+// host is followed with the token.
+func TestDoJSON_RefusesRedirectToAnotherHost(t *testing.T) {
+	type hit struct{ path, token, body string }
+	var other []hit
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		other = append(other, hit{r.URL.Path, r.Header.Get(server.OperatorTokenHeader), string(b)})
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer elsewhere.Close()
+	var sameHost []hit
+	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/layers/away":
+			http.Redirect(w, r, elsewhere.URL+"/v1/layers", http.StatusTemporaryRedirect)
+		case "/v1/layers/moved":
+			http.Redirect(w, r, "/v1/layers", http.StatusPermanentRedirect)
+		case "/v1/layers/loop":
+			http.Redirect(w, r, "/v1/layers/loop", http.StatusTemporaryRedirect)
+		default:
+			b, _ := io.ReadAll(r.Body)
+			sameHost = append(sameHost, hit{r.URL.Path, r.Header.Get(server.OperatorTokenHeader), string(b)})
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer registry.Close()
+
+	t.Setenv("PODIUM_OPERATOR_TOKEN", "operator-secret")
+	body := map[string]string{"repo_token": "repo-secret"}
+	out, status := doJSON(registry.URL+"/v1/layers/away", http.MethodPost, body)
+	if len(other) != 0 {
+		t.Errorf("the other host received %+v", other)
+	}
+	if status == http.StatusOK || !strings.Contains(string(out), "redirect") {
+		t.Errorf("cross-host redirect: status=%d body=%s, want a refusal naming the redirect", status, out)
+	}
+
+	out, status = doJSON(registry.URL+"/v1/layers/moved", http.MethodPost, body)
+	if status != http.StatusOK {
+		t.Fatalf("same-host redirect: status=%d body=%s", status, out)
+	}
+	if len(sameHost) != 1 || sameHost[0].token != "operator-secret" || !strings.Contains(sameHost[0].body, "repo-secret") {
+		t.Errorf("same-host redirect target saw %+v, want the token and the body", sameHost)
+	}
+
+	if out, _ := doJSON(registry.URL+"/v1/layers/loop", http.MethodGet, nil); !strings.Contains(string(out), "stopped after 10 redirects") {
+		t.Errorf("redirect loop: %s, want the hop limit", out)
+	}
+}
+
+// Spec: §13.12 — a redirect within one scheme and host is followed when the
+// effective ports match, with a URL that names no port taking its scheme's
+// default; the upgrade from http on port 80 to https on port 443 of the same
+// host is followed; a move from https to http, to another host, or to
+// another port is refused.
+func TestSameHostRedirect(t *testing.T) {
+	u := func(s string) *url.URL {
+		v, err := url.Parse(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	for _, tc := range []struct {
+		from, to string
+		ok       bool
+	}{
+		{"https://reg.acme.com/v1/layers", "https://reg.acme.com/v1/x", true},
+		{"https://reg.acme.com/v1/layers", "https://REG.acme.com/v1/x", true},
+		{"http://reg.acme.com/v1/layers", "https://reg.acme.com/v1/x", true},
+		{"https://reg.acme.com/v1/layers", "http://reg.acme.com/v1/x", false},
+		{"https://reg.acme.com/v1/layers", "https://evil.example/v1/x", false},
+		{"https://reg.acme.com/v1/layers", "https://reg.acme.com:8443/v1/x", false},
+		{"https://reg.acme.com/v1/layers", "https://api.reg.acme.com/v1/x", false},
+		{"https://reg.acme.com/v1/layers", "https://reg.acme.com:443/v1/x", true},
+		{"https://reg.acme.com:443/v1/layers", "https://reg.acme.com/v1/x", true},
+		{"http://reg.acme.com:80/v1/layers", "http://reg.acme.com/v1/x", true},
+		{"http://reg.acme.com:80/v1/layers", "https://reg.acme.com/v1/x", true},
+		{"http://reg.acme.com/v1/layers", "https://reg.acme.com:443/v1/x", true},
+		{"http://reg.acme.com:8080/v1/layers", "https://reg.acme.com/v1/x", false},
+		{"http://reg.acme.com/v1/layers", "https://reg.acme.com:8443/v1/x", false},
+		{"http://reg.acme.com:8080/v1/layers", "http://reg.acme.com:8080/v1/x", true},
+		{"https://reg.acme.com:443/v1/layers", "http://reg.acme.com:443/v1/x", false},
+		{"https://reg.acme.com/v1/layers", "ftp://reg.acme.com/v1/x", false},
+	} {
+		if got := sameHostRedirect(u(tc.from), u(tc.to)); got != tc.ok {
+			t.Errorf("%s -> %s: %v, want %v", tc.from, tc.to, got, tc.ok)
+		}
+	}
+	for raw, want := range map[string]string{"http://h": "80", "HTTPS://h": "443", "https://h:8443": "8443", "ftp://h": ""} {
+		if got := effectivePort(u(raw)); got != want {
+			t.Errorf("effectivePort(%s) = %q, want %q", raw, got, want)
+		}
 	}
 }

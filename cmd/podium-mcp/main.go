@@ -583,6 +583,10 @@ type mcpServer struct {
 	// dispatchTool and is nil otherwise. reqCtx reads it with a Background
 	// fallback for the off-call paths (resource reads).
 	activeCtx context.Context
+	// callTraceID is the §8.1 trace ID callTool generated for the in-flight
+	// call when its span has no span context, and "" otherwise. It is set and
+	// restored with activeCtx under the same single-call invariant.
+	callTraceID string
 }
 
 // reqCtx returns the in-flight call's trace context, or context.Background()
@@ -597,8 +601,8 @@ func (s *mcpServer) reqCtx() context.Context {
 }
 
 // traceID returns the 32-hex W3C trace id of the in-flight meta-tool
-// call's span, or "" when no recording span is active (tracing off). The
-// registry derives its audit stream's trace id from the same span via the
+// call, or "" outside a call. With tracing off the id is callTraceID, which
+// newRegistryRequest sends in X-Podium-Trace-Id. The registry derives its audit stream's trace id from the same span via the
 // W3C `traceparent` header the otelhttp transport injects on the outbound
 // call (pkg/registry/server/audit_context.go traceIDFromRequest), so
 // stamping this id on the local audit event makes the registry and MCP
@@ -606,7 +610,7 @@ func (s *mcpServer) reqCtx() context.Context {
 func (s *mcpServer) traceID() string {
 	sc := oteltrace.SpanContextFromContext(s.reqCtx())
 	if !sc.HasTraceID() {
-		return ""
+		return s.callTraceID
 	}
 	return sc.TraceID().String()
 }
@@ -1335,10 +1339,16 @@ func (s *mcpServer) callTool(raw json.RawMessage) any {
 	// tracing is off. activeCtx is restored after dispatch so off-call paths
 	// fall back to context.Background().
 	ctx, span := tracing.Tracer().Start(context.Background(), "mcp."+p.Name)
-	prev := s.activeCtx
-	s.activeCtx = ctx
+	prev, prevTraceID := s.activeCtx, s.callTraceID
+	s.activeCtx, s.callTraceID = ctx, ""
+	// Spec: §8.1 — with trace export off the span carries no trace ID, so the
+	// call gets a generated one, carried in X-Podium-Trace-Id rather than in a
+	// traceparent, which would bear a not-sampled flag no sampler decided.
+	if !span.SpanContext().IsValid() {
+		s.callTraceID = audit.NewTraceID()
+	}
 	defer func() {
-		s.activeCtx = prev
+		s.activeCtx, s.callTraceID = prev, prevTraceID
 		span.End()
 	}()
 
@@ -2717,6 +2727,12 @@ func (s *mcpServer) newRegistryRequest(method, path string, args map[string]any)
 	}
 	// §7.2.2: name the client software on every control-plane request.
 	req.Header.Set(audit.ClientHeader, s.client(s.callHarness(path, args)).Header())
+	// Spec: §8.1 — a call with no span context sends its generated trace ID
+	// here, so the registry's audit record shares it; a call with one sends
+	// it in the traceparent the otelhttp transport injects.
+	if s.callTraceID != "" {
+		req.Header.Set(audit.TraceIDHeader, s.callTraceID)
+	}
 	return req, nil
 }
 

@@ -1372,8 +1372,8 @@ func TestCLI_ScaffoldSkillExample(t *testing.T) {
 	cliWantExit(t, res, 0, "scaffold skill example")
 	skill := assertScaffoldedSkillAlone(t, dst, "0.1.0")
 	cliContains(t, skill, "name: release-notes", "skill name")
-	cliContains(t, skill, "description: Draft release notes from a list of ticket keys.", "skill description")
-	cliContains(t, skill, "license: MIT", "skill license")
+	cliContains(t, skill, `description: "Draft release notes from a list of ticket keys."`, "skill description")
+	cliContains(t, skill, `license: "MIT"`, "skill license")
 	// The scaffolded tree lints clean.
 	cliWantExit(t, runPodium(t, "", nil, "lint", "--registry", root), 0, "lint scaffolded")
 
