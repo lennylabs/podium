@@ -324,7 +324,6 @@ func TestLayerReingestCmd_ExitsOneOnDroppedArtifacts(t *testing.T) {
 // line per artifact in details.removed, and a body that is not a JSON
 // envelope, or that names no removal, prints nothing.
 func TestWriteRefusedRemovals(t *testing.T) {
-	t.Parallel()
 	var got []string
 	for _, body := range []string{
 		`{"code":"ingest.lint_failed","details":{"removed":["ops/a","ops/b"]}}`,
