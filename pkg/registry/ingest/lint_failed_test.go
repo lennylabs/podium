@@ -54,4 +54,10 @@ func TestLintFailedError_BoundsTheList(t *testing.T) {
 	if got := lintFailedError(diags).Error(); got != want {
 		t.Errorf("lintFailedError =\n%q\nwant\n%q", got, want)
 	}
+	want = "ingest.lint_failed: 11 lint diagnostics in team/a00 (lint.c), team/a01 (lint.c), team/a02 (lint.c), " +
+		"team/a03 (lint.c), team/a04 (lint.c), team/a05 (lint.c), team/a06 (lint.c), team/a07 (lint.c), " +
+		"team/a08 (lint.c), team/a09 (lint.c), and 1 more artifact"
+	if got := lintFailedError(diags[:11]).Error(); got != want {
+		t.Errorf("lintFailedError of 11 artifacts =\n%q\nwant\n%q", got, want)
+	}
 }

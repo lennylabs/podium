@@ -48,7 +48,10 @@ func lintFailedError(diags []lint.Diagnostic) error {
 		named = append(named, fmt.Sprintf("%s (%s)", id, strings.Join(codes, ", ")))
 	}
 	msg += " in " + strings.Join(named, ", ")
-	if rest := len(ids) - len(named); rest > 0 {
+	switch rest := len(ids) - len(named); {
+	case rest == 1:
+		msg += ", and 1 more artifact"
+	case rest > 1:
 		msg += fmt.Sprintf(", and %d more artifacts", rest)
 	}
 	return fmt.Errorf("%w: %s", ErrLintFailed, msg)
