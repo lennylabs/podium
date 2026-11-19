@@ -41,10 +41,20 @@ type UsageRanking struct {
 // usageSnapshot is one tenant's stored loads at readAt. refreshing marks a
 // read in progress, so concurrent searches keep using the previous loads
 // rather than each reading the store.
+//
+// carried holds the loads this replica's flushes added to the store after
+// the last read began, which that read does not include; carriedDuring holds
+// those added while a read is in progress, which that read may not include.
+// A read that succeeds replaces carried with carriedDuring, and one that
+// fails merges the two. Without them, a flush emptied the replica's buffer
+// and the loads it added stayed out of the ranking until the next read, up
+// to a whole refresh interval later.
 type usageSnapshot struct {
-	readAt     time.Time
-	loads      map[usageRef]int64
-	refreshing bool
+	readAt        time.Time
+	loads         map[usageRef]int64
+	refreshing    bool
+	carried       map[usageRef]int64
+	carriedDuring map[usageRef]int64
 }
 
 // NewUsageRanking returns a ranking that reads the stored counts again once a
@@ -61,6 +71,7 @@ func NewUsageRanking(c clock.Clock, refresh time.Duration, retentionDays int) *U
 // search and load_domain on their lexical, vector, and author-curated order.
 func (r *Registry) WithUsageRanking(u *UsageRanking) *Registry {
 	r.usageRank = u
+	r.usageCounts.withRanking(u)
 	return r
 }
 
@@ -75,7 +86,7 @@ func (u *UsageRanking) stored(ctx context.Context, st store.Store, tenant string
 	u.mu.Lock()
 	snap := u.tenants[tenant]
 	if snap != nil && (snap.refreshing || now.Sub(snap.readAt) < u.refresh) {
-		loads := snap.loads
+		loads := snap.withCarried()
 		u.mu.Unlock()
 		return loads
 	}
@@ -94,10 +105,56 @@ func (u *UsageRanking) stored(ctx context.Context, st store.Store, tenant string
 	snap.readAt = now
 	if err != nil {
 		log.Printf("usage ranking: read stored loads for tenant %s: %v; ranking by the last loads read", tenant, err)
-		return snap.loads
+		snap.carried = mergeLoads(snap.carried, snap.carriedDuring)
+		snap.carriedDuring = nil
+		return snap.withCarried()
 	}
 	snap.loads = loads
-	return loads
+	snap.carried, snap.carriedDuring = snap.carriedDuring, nil
+	return snap.withCarried()
+}
+
+// carry records loads a flush of this replica has just added to the store
+// for tenant, which the ranking adds to the stored loads until a read that
+// began after the add replaces them. A tenant with no snapshot needs
+// nothing: its first read begins after the add.
+//
+// Spec: §3.3
+func (u *UsageRanking) carry(tenant string, loads map[usageRef]int64) {
+	if len(loads) == 0 {
+		return
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	snap := u.tenants[tenant]
+	switch {
+	case snap == nil:
+	case snap.refreshing:
+		snap.carriedDuring = mergeLoads(snap.carriedDuring, loads)
+	default:
+		snap.carried = mergeLoads(snap.carried, loads)
+	}
+}
+
+// withCarried returns the snapshot's stored loads plus its carried loads. It
+// returns the stored map itself when nothing is carried; the caller holds
+// UsageRanking.mu.
+func (s *usageSnapshot) withCarried() map[usageRef]int64 {
+	if len(s.carried) == 0 && len(s.carriedDuring) == 0 {
+		return s.loads
+	}
+	return mergeLoads(mergeLoads(mergeLoads(nil, s.loads), s.carried), s.carriedDuring)
+}
+
+// mergeLoads adds src into dst, allocating dst when it is nil, and returns it.
+func mergeLoads(dst, src map[usageRef]int64) map[usageRef]int64 {
+	if dst == nil && len(src) > 0 {
+		dst = make(map[usageRef]int64, len(src))
+	}
+	for k, n := range src {
+		dst[k] += n
+	}
+	return dst
 }
 
 // read sums the tenant's stored loads over the window ending today.
@@ -128,8 +185,11 @@ func (r *Registry) usageRanking(ctx context.Context, refs []usageRef) []string {
 		return nil
 	}
 	tenant := r.TenantFor(ctx)
-	stored := r.usageRank.stored(ctx, r.store, tenant)
+	// The buffer is read before the snapshot: a flush hands its loads to the
+	// snapshot before it drops them from the buffer, so in this order a load
+	// is counted in one of the two, or briefly in both, and never in neither.
 	pending := r.usageCounts.pendingLoads(tenant)
+	stored := r.usageRank.stored(ctx, r.store, tenant)
 	type ranked struct {
 		id    string
 		loads int64
