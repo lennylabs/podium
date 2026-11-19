@@ -145,4 +145,9 @@ func TestSameHostRedirect(t *testing.T) {
 			t.Errorf("%s -> %s: %v, want %v", tc.from, tc.to, got, tc.ok)
 		}
 	}
+	for raw, want := range map[string]string{"http://h": "80", "HTTPS://h": "443", "https://h:8443": "8443", "ftp://h": ""} {
+		if got := effectivePort(u(raw)); got != want {
+			t.Errorf("effectivePort(%s) = %q, want %q", raw, got, want)
+		}
+	}
 }
