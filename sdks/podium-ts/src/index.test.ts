@@ -46,9 +46,8 @@ const expectSdkClient = async (value: string | null | undefined): Promise<void> 
   };
   expect(value).toBeTruthy();
   const members = new URLSearchParams(value ?? "");
-  expect([...members.keys()].sort()).toEqual(["kind", "name", "version"]);
-  expect(members.get("kind")).toBe("sdk");
-  expect(members.get("name")).toBe("podium-ts");
+  expect([...members.keys()].sort()).toEqual(["name", "version"]);
+  expect(members.get("name")).toBe("sdk");
   expect(members.get("version")).toBe(pkg.version);
 };
 
@@ -606,20 +605,37 @@ describe("Client", () => {
     await expectSdkClient(observedClient);
   });
 
-  // Spec: §7.2.2, §7.6 — the SDK names itself as kind=sdk and
-  // name=podium-ts, and omits the version member when the release is unknown.
+  // Spec: §7.2.2, §7.6 — the SDK names itself sdk, omits the version member
+  // when the release is unknown, and reports a program's own client name and
+  // harness when the program configures them.
   it("clientHeader encodes the sdk members", () => {
     const withVersion = new URLSearchParams(clientHeader("1.2.3"));
-    expect(withVersion.get("kind")).toBe("sdk");
-    expect(withVersion.get("name")).toBe("podium-ts");
+    expect(withVersion.get("name")).toBe("sdk");
     expect(withVersion.get("version")).toBe("1.2.3");
     const without = new URLSearchParams(clientHeader(""));
-    expect([...without.keys()].sort()).toEqual(["kind", "name"]);
+    expect([...without.keys()].sort()).toEqual(["name"]);
+    const named = new URLSearchParams(clientHeader("1.2.3", "acme-evals", "cursor"));
+    expect(Object.fromEntries(named)).toEqual({ name: "acme-evals", version: "1.2.3", harness: "cursor" });
+  });
+
+  // Spec: §7.2.2, §8.7 — a Client configured with a client name and a
+  // harness sends them on its control-plane requests.
+  it("sends the configured client name and harness", async () => {
+    let observed: string | null = null;
+    const fetcher: typeof fetch = async (_input, init) => {
+      observed = new Headers(init?.headers).get("X-Podium-Client");
+      return new Response(JSON.stringify({ query: "q", total_matched: 0, results: [] }), { status: 200 });
+    };
+    const client = new Client({ registry: "http://example.test", fetcher, clientName: "acme-evals", harness: "cursor" });
+    await client.searchArtifacts("q");
+    const members = new URLSearchParams(observed ?? "");
+    expect(members.get("name")).toBe("acme-evals");
+    expect(members.get("harness")).toBe("cursor");
   });
 
   // Spec: §7.2.2, §7.6 — searchArtifacts, loadArtifact, and the batch-load
-  // POST each send X-Podium-Client with kind=sdk, name=podium-ts, and the
-  // package.json release.
+  // POST each send X-Podium-Client with name=sdk and the package.json
+  // release.
   it("sends X-Podium-Client on control-plane requests", async () => {
     const load = await served({ id: "finance/run", type: "prompt", version: "1.0.0" });
     const entry = await served({ id: "a", status: "ok", type: "rule" });
@@ -671,8 +687,8 @@ describe("Client", () => {
       const out = await new fresh.Client({ registry: "http://reg", fetcher }).searchArtifacts("q");
       expect(out.total_matched).toBe(0);
       const members = new URLSearchParams(got ?? "");
-      expect(members.get("kind")).toBe("sdk");
-      expect(members.get("name")).toBe("podium-ts");
+      expect(members.has("kind")).toBe(false);
+      expect(members.get("name")).toBe("sdk");
       expect(members.has("version")).toBe(false);
     } finally {
       vi.doUnmock("node:fs/promises");

@@ -59,7 +59,7 @@ type errorEnvelope struct {
 //
 // Spec: §7.2.2
 func ClientHeaderValue(adapterID string) string {
-	return audit.CallerClient{Kind: "sync", Name: "podium", Version: buildinfo.Version, Harness: adapterID}.Header()
+	return audit.CallerClient{Name: audit.ClientNameCLI, Version: buildinfo.Version, Harness: adapterID, Purpose: audit.PurposeSync}.Header()
 }
 
 // fetchServerRecords reads the caller's effective view from a server-source

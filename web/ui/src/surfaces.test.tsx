@@ -20512,8 +20512,9 @@ describe("usage", () => {
   }
 
   /** usageBody is a report the registry answers with: two layers, client and
-   * harness breakdowns that include a request recorded under `none`, a
-   * two-day series, and one artifact of a list 312 long. */
+   * harness breakdowns that include requests recorded under `unknown` and a
+   * client recorded under `other`, a two-day series, and one artifact of a
+   * list 312 long. */
   function usageBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
       days: 30,
@@ -20525,13 +20526,15 @@ describe("usage", () => {
         syncs: 2316,
         search_hits: 5000,
         by_client: {
+          unknown: { loads: 192, syncs: 0, search_hits: 0 },
           mcp: { loads: 11020, syncs: 0, search_hits: 4000 },
-          sync: { loads: 0, syncs: 2316, search_hits: 0 },
-          none: { loads: 192, syncs: 0, search_hits: 0 },
+          other: { loads: 40, syncs: 0, search_hits: 0 },
+          cli: { loads: 0, syncs: 2316, search_hits: 0 },
+          "acme-evals": { loads: 300, syncs: 0, search_hits: 0 },
         },
         by_harness: {
           "claude-code": { loads: 11120, syncs: 2000, search_hits: 0 },
-          none: { loads: 192, syncs: 0, search_hits: 0 },
+          unknown: { loads: 192, syncs: 0, search_hits: 0 },
         },
         series: [
           { start: "2026-11-17", end: "2026-11-17", loads: 9000, syncs: 1000, search_hits: 2000 },
@@ -20557,7 +20560,7 @@ describe("usage", () => {
   }
 
   describe("the usage page", () => {
-    it("draws the totals, the breakdowns with none named unknown, the closed layer disclosure, and the first page of artifacts", async () => {
+    it("draws the totals, the breakdowns named as reported with other and unknown last, the closed layer disclosure, and the first page of artifacts", async () => {
       stubRegistry({
         "/v1/ui/session": { body: posture({ public_mode: true }) },
         "/v1/usage": { body: usageBody() },
@@ -20570,12 +20573,16 @@ describe("usage", () => {
       expect(tiles[1].textContent).toContain("ARTIFACTS SYNCED");
       expect(tiles[1].textContent).toContain("2,316");
       const breakdowns = screen.getAllByTestId("breakdown");
-      expect(breakdowns[0].textContent).toContain("unknown");
+      // Clients read as the report names them, largest first, then other,
+      // then unknown, whatever their sizes.
+      const clientOrder = ["mcp", "cli", "acme-evals", "other", "unknown"].map((name) =>
+        (breakdowns[0].textContent ?? "").indexOf(name),
+      );
+      expect(clientOrder.every((at, i) => at >= 0 && (i === 0 || at > clientOrder[i - 1]))).toBe(true);
       // The unknown part keeps the lightest tone wherever it falls: it is the
       // second part of the harness breakdown here.
       const unknownKey = within(breakdowns[1]).getByText("unknown", { exact: false });
       expect(unknownKey.querySelector(".breakdown-swatch")?.className).toContain("breakdown-part-4");
-      expect(breakdowns[0].textContent).not.toMatch(/\bnone\b/);
       const disclosure = screen.getByRole("button", { name: /By layer/ });
       expect(disclosure.getAttribute("aria-expanded")).toBe("false");
       expect(disclosure.textContent).toContain("2 layers · platform has the most loads");

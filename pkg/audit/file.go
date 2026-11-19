@@ -231,12 +231,12 @@ type jsonCaller struct {
 // jsonClient is the wire form of CallerClient (§8.1 caller.client). Each
 // member appears only when non-empty.
 type jsonClient struct {
-	Kind        string `json:"kind,omitempty"`
 	Name        string `json:"name,omitempty"`
 	Version     string `json:"version,omitempty"`
 	Host        string `json:"host,omitempty"`
 	HostVersion string `json:"host_version,omitempty"`
 	Harness     string `json:"harness,omitempty"`
+	Purpose     string `json:"purpose,omitempty"`
 }
 
 // jsonNetwork is the wire form of CallerNetwork (§8.1 caller.network).

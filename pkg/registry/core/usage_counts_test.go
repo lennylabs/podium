@@ -80,13 +80,18 @@ func (f *usageFixture) rows(t *testing.T) []store.UsageCount {
 	return rows
 }
 
-func clientCtx(kind, harness string) context.Context {
-	return core.ContextWithUsageClient(context.Background(), kind, harness)
+func clientCtx(name, harness string) context.Context {
+	return core.ContextWithUsageClient(context.Background(), name, harness, "")
+}
+
+func syncCtx(harness string) context.Context {
+	return core.ContextWithUsageClient(context.Background(), "cli", harness, "sync")
 }
 
 // Spec: §8.7 — a resolved load counts one load under the request's client
-// kind, harness, and serving layer, or one sync for a sync client; a request
-// with no client value counts under none; an unresolved load counts nothing.
+// name, harness, and serving layer, or one sync when the request carries
+// purpose=sync; a request with no client value counts under unknown; an
+// unresolved load counts nothing.
 func TestUsageCounts_Loads(t *testing.T) {
 	t.Parallel()
 	f := newUsageFixture(t)
@@ -96,7 +101,7 @@ func TestUsageCounts_Loads(t *testing.T) {
 	}{
 		{clientCtx("mcp", "claude-code"), "ops/greet"},
 		{clientCtx("mcp", "claude-code"), "ops/greet"},
-		{clientCtx("sync", "cursor"), "ops/greet"},
+		{syncCtx("cursor"), "ops/greet"},
 		{context.Background(), "ops/farewell"},
 		{clientCtx("mcp", "claude-code"), "ops/missing"},
 		{clientCtx("mcp", "claude-code"), "ops/hidden"},
@@ -104,12 +109,54 @@ func TestUsageCounts_Loads(t *testing.T) {
 		_, _ = f.reg.LoadArtifact(c.ctx, usageAlice, c.id, core.LoadArtifactOptions{})
 	}
 	want := []store.UsageCount{
-		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/farewell", ClientKind: "none", Harness: "none", Loads: 1},
-		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/greet", ClientKind: "mcp", Harness: "claude-code", Loads: 2},
-		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/greet", ClientKind: "sync", Harness: "cursor", Syncs: 1},
+		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/farewell", Client: "unknown", Harness: "unknown", Loads: 1},
+		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/greet", Client: "cli", Harness: "cursor", Syncs: 1},
+		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/greet", Client: "mcp", Harness: "claude-code", Loads: 2},
 	}
 	if got := f.rows(t); !reflect.DeepEqual(got, want) {
 		t.Errorf("rows:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// Spec: §8.7, §13.12 — a tenant records at most the configured number of
+// distinct clients, and of distinct harnesses, per day: a further value counts
+// under other, unknown and other never count toward the cap, the values the
+// store already holds for the day count toward it, and a client already
+// recorded keeps counting under its own name.
+func TestUsageCounter_CapsDistinctClientsAndHarnesses(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	ctx := context.Background()
+	// A value another replica stored today counts toward the cap.
+	if err := f.st.AddUsageCounts(ctx, "t", []store.UsageCount{
+		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/greet", Client: "stored", Harness: "h-stored", Loads: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.counter.WithMaxClientKeys(2)
+	load := func(name, harness string) {
+		_, _ = f.reg.LoadArtifact(clientCtx(name, harness), usageAlice, "ops/greet", core.LoadArtifactOptions{})
+	}
+	load("fresh", "h-fresh")
+	load("overflow", "h-overflow")
+	load("stored", "h-stored")
+	load("", "")
+	_ = f.rows(t)
+	load("fresh", "h-fresh")
+	load("late", "h-late")
+	rows := f.rows(t)
+	got := map[string]int64{}
+	for _, r := range rows {
+		got[r.Client+"/"+r.Harness] += r.Loads
+	}
+	want := map[string]int64{
+		"stored/h-stored": 2,
+		"fresh/h-fresh":   2,
+		"other/other":     2,
+		"unknown/unknown": 1,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("loads by client/harness = %v, want %v", got, want)
 	}
 }
 
@@ -144,7 +191,7 @@ func TestUsageCounts_SearchHits(t *testing.T) {
 	}
 	counted := map[string]bool{}
 	for _, r := range rows {
-		if r.SearchHits != 1 || r.ClientKind != "sdk" || r.Harness != "none" || r.Layer != "team" {
+		if r.SearchHits != 1 || r.Client != "sdk" || r.Harness != "unknown" || r.Layer != "team" {
 			t.Errorf("row %+v, want one sdk search hit in team", r)
 		}
 		counted[r.ArtifactID] = true

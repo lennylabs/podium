@@ -36,7 +36,7 @@ type UsageCount struct {
 	Day        string
 	Layer      string
 	ArtifactID string
-	ClientKind string
+	Client     string
 	// Harness is the §7.2.2 harness the request reported, or "none".
 	Harness    string
 	Loads      int64
@@ -50,7 +50,7 @@ type usageKey struct {
 }
 
 func (c UsageCount) key() usageKey {
-	return usageKey{day: c.Day, layer: c.Layer, artifact: c.ArtifactID, kind: c.ClientKind, harness: c.Harness}
+	return usageKey{day: c.Day, layer: c.Layer, artifact: c.ArtifactID, kind: c.Client, harness: c.Harness}
 }
 
 // normalizeUsageCounts validates counts and merges the ones that share a key,
@@ -69,7 +69,7 @@ func normalizeUsageCounts(tenantID string, counts []UsageCount) ([]UsageCount, e
 		k := c.key()
 		m, ok := merged[k]
 		if !ok {
-			m = UsageCount{TenantID: tenantID, Day: c.Day, Layer: c.Layer, ArtifactID: c.ArtifactID, ClientKind: c.ClientKind, Harness: c.Harness}
+			m = UsageCount{TenantID: tenantID, Day: c.Day, Layer: c.Layer, ArtifactID: c.ArtifactID, Client: c.Client, Harness: c.Harness}
 		}
 		m.Loads += c.Loads
 		m.Syncs += c.Syncs
@@ -86,7 +86,7 @@ func normalizeUsageCounts(tenantID string, counts []UsageCount) ([]UsageCount, e
 
 // validateUsageCount reports a count no correct recorder produces.
 func validateUsageCount(c UsageCount) error {
-	if c.Layer == "" || c.ArtifactID == "" || c.ClientKind == "" || c.Harness == "" {
+	if c.Layer == "" || c.ArtifactID == "" || c.Client == "" || c.Harness == "" {
 		return fmt.Errorf("%w: a count names no layer, artifact, client kind, or harness", ErrInvalidUsageCount)
 	}
 	if _, err := time.Parse(UsageDayLayout, c.Day); err != nil {
@@ -112,8 +112,8 @@ func sortUsageCounts(rows []UsageCount) {
 		if a.ArtifactID != b.ArtifactID {
 			return a.ArtifactID < b.ArtifactID
 		}
-		if a.ClientKind != b.ClientKind {
-			return a.ClientKind < b.ClientKind
+		if a.Client != b.Client {
+			return a.Client < b.Client
 		}
 		return a.Harness < b.Harness
 	})

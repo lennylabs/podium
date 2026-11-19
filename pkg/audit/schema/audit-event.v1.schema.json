@@ -57,12 +57,12 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "kind": { "type": "string" },
             "name": { "type": "string" },
             "version": { "type": "string" },
             "host": { "type": "string" },
             "host_version": { "type": "string" },
-            "harness": { "type": "string" }
+            "harness": { "type": "string" },
+            "purpose": { "const": "sync" }
           }
         }
       }

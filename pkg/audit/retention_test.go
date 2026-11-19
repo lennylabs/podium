@@ -221,7 +221,7 @@ func TestEraseUser_RedactsEmailAndGroups(t *testing.T) {
 			Caller:       sub,
 			CallerEmail:  email,
 			CallerGroups: []string{group},
-			CallerClient: &audit.CallerClient{Kind: "mcp", Host: "Claude Code"},
+			CallerClient: &audit.CallerClient{Name: "mcp", Host: "Claude Code"},
 			Target:       "skill/x",
 			Timestamp:    time.Now().UTC(),
 		})
@@ -260,7 +260,7 @@ func TestEraseUser_RedactsEmailAndGroups(t *testing.T) {
 		}
 		// Spec: §8.1, §8.5 — caller.client is event metadata rather than an
 		// identifier, so erasure leaves it unchanged.
-		if c := e.Caller.Client; c == nil || *c != (wireClient{Kind: "mcp", Host: "Claude Code"}) {
+		if c := e.Caller.Client; c == nil || *c != (wireClient{Name: "mcp", Host: "Claude Code"}) {
 			t.Errorf("caller.client = %+v, want kind mcp, host Claude Code after erasure", c)
 		}
 	}
@@ -371,12 +371,12 @@ type fullEvent struct {
 
 // wireClient mirrors the §8.1 caller.client wire form.
 type wireClient struct {
-	Kind        string `json:"kind"`
 	Name        string `json:"name"`
 	Version     string `json:"version"`
 	Host        string `json:"host"`
 	HostVersion string `json:"host_version"`
 	Harness     string `json:"harness"`
+	Purpose     string `json:"purpose"`
 }
 
 func parseFullEvents(t *testing.T, path string) []fullEvent {
@@ -519,7 +519,7 @@ func TestEraseUser_RecordsInvokingAdmin(t *testing.T) {
 	_ = sink.Append(context.Background(), audit.Event{
 		Type: audit.EventArtifactLoaded, Caller: "alice@acme.com", Timestamp: time.Now().UTC(),
 	})
-	client := &audit.CallerClient{Kind: "cli", Name: "podium", Host: "x\x00y"}
+	client := &audit.CallerClient{Name: "cli", Host: "x\x00y"}
 	if _, err := audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com", client, audit.EraseScope{Unlabeled: true}); err != nil {
 		t.Fatalf("EraseUser: %v", err)
 	}
@@ -529,7 +529,7 @@ func TestEraseUser_RecordsInvokingAdmin(t *testing.T) {
 	full := parseFullEvents(t, path)
 	erased := full[len(full)-1]
 	if c := erased.Caller.Client; erased.Type != string(audit.EventUserErased) || c == nil ||
-		*c != (wireClient{Kind: "cli", Name: "podium", Host: "x_y"}) {
+		*c != (wireClient{Name: "cli", Host: "x_y"}) {
 		t.Errorf("user.erased %s caller.client = %+v, want kind cli, name podium, host x_y", erased.Type, c)
 	}
 	events := parseEvents(t, path)
@@ -568,7 +568,7 @@ func TestEraseUser_ZeroScopeRefused(t *testing.T) {
 	}
 	// Spec: §8.1, §8.5 — the request's client is a parameter of its own, so a
 	// header-derived value cannot make the zero scope pass the guard.
-	client := &audit.CallerClient{Kind: "cli", Host: "evil"}
+	client := &audit.CallerClient{Name: "cli", Host: "evil"}
 	_, err = audit.EraseUser(context.Background(), sink, "alice@acme.com", "salt", "carol@acme.com", client, audit.EraseScope{})
 	if !errors.Is(err, audit.ErrEraseScope) {
 		t.Fatalf("EraseUser(zero scope, client) err = %v, want ErrEraseScope", err)

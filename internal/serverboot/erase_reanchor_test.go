@@ -109,9 +109,9 @@ type auditLineCaller struct {
 
 // testClientHeader is the X-Podium-Client value the serverboot request tests
 // send, and testClient is the caller.client it records.
-const testClientHeader = "kind=mcp&host=claude-code&harness=cursor"
+const testClientHeader = "name=mcp&host=claude-code&harness=cursor"
 
-var testClient = map[string]string{"kind": "mcp", "host": "claude-code", "harness": "cursor"}
+var testClient = map[string]string{"name": "mcp", "host": "claude-code", "harness": "cursor"}
 
 func readAuditLines(t *testing.T, path string) []auditLine {
 	t.Helper()

@@ -25,16 +25,18 @@ except ImportError:
     _SDK_VERSION = ""
 
 
-def _client_header(version: str) -> str:
+def _client_header(version: str, client_name: str = "", harness: str = "") -> str:
     """Return the X-Podium-Client value the SDK sends (spec §7.2.2, §7.6).
 
-    The value is form-encoded with ``kind=sdk`` and ``name=podium-py``, plus
-    ``version`` when it is non-empty, since §7.2.2 omits a member with no
-    value.
+    The value is form-encoded with ``name`` set to the program's client name,
+    or ``sdk`` when the program sets none, plus ``version`` and ``harness``
+    when they are non-empty, since §7.2.2 omits a member with no value.
     """
-    members = {"kind": "sdk", "name": "podium-py"}
+    members = {"name": client_name or "sdk"}
     if version:
         members["version"] = version
+    if harness:
+        members["harness"] = harness
     return urllib.parse.urlencode(members)
 
 
@@ -760,8 +762,15 @@ class Client:
         cache_mode: str = "always-revalidate",
         verify_signatures: str | None = None,
         verify_keys: str | None = None,
+        client_name: str = "",
+        harness: str = "",
     ) -> None:
         self.registry = registry.rstrip("/")
+        # spec: §7.2.2, §8.7 — the client name and harness the program reports
+        # in X-Podium-Client, so the usage report counts its calls under its
+        # own name. An empty client_name reports "sdk".
+        self.client_name = client_name
+        self.harness = harness
         self.identity_provider = identity_provider
         # spec §6.4 — the SDK honors the overlay lookup order: an explicit
         # Client(overlay_path=...) wins over PODIUM_OVERLAY_PATH, which wins
@@ -879,7 +888,7 @@ class Client:
         request that follows a presigned or ``/objects`` link.
         """
         headers = self._headers(extra)
-        headers["X-Podium-Client"] = _client_header(_SDK_VERSION)
+        headers["X-Podium-Client"] = _client_header(_SDK_VERSION, self.client_name, self.harness)
         return headers
 
     def _overlay_index(self, session_id: str = "") -> "_overlay.LocalOverlay | None":

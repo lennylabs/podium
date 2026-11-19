@@ -13,7 +13,7 @@ import (
 )
 
 func usageRow(day, layer, id, kind, harness string, loads, syncs, hits int64) store.UsageCount {
-	return store.UsageCount{Day: day, Layer: layer, ArtifactID: id, ClientKind: kind, Harness: harness, Loads: loads, Syncs: syncs, SearchHits: hits}
+	return store.UsageCount{Day: day, Layer: layer, ArtifactID: id, Client: kind, Harness: harness, Loads: loads, Syncs: syncs, SearchHits: hits}
 }
 
 // usageSummary renders a tenant's listed rows in one comparable string, so a
@@ -25,7 +25,7 @@ func usageSummary(t *testing.T, s store.Store, tenant, from, to string) string {
 	parts := make([]string, 0, len(rows))
 	for _, r := range rows {
 		parts = append(parts, fmt.Sprintf("%s|%s|%s|%s|%s|%s=%d/%d/%d",
-			r.TenantID, r.Day, r.Layer, r.ArtifactID, r.ClientKind, r.Harness, r.Loads, r.Syncs, r.SearchHits))
+			r.TenantID, r.Day, r.Layer, r.ArtifactID, r.Client, r.Harness, r.Loads, r.Syncs, r.SearchHits))
 	}
 	return strings.Join(parts, " ")
 }

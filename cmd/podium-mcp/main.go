@@ -752,8 +752,7 @@ func newAuditSink(cfg *config, obs audit.Observer) (*audit.Stream, error) {
 // Spec: §7.2.2
 func (s *mcpServer) client(harness string) *audit.CallerClient {
 	return audit.NormalizeClient(audit.CallerClient{
-		Kind:        "mcp",
-		Name:        "podium-mcp",
+		Name:        audit.ClientNameMCP,
 		Version:     buildinfo.Version,
 		Host:        s.hostName,
 		HostVersion: s.hostVersion,

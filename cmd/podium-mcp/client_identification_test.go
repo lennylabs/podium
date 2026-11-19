@@ -24,7 +24,7 @@ import (
 // encoder omits empty members.
 func mcpClientMembers(host, hostVersion, harness string) map[string]string {
 	m := map[string]string{
-		"kind": "mcp", "name": "podium-mcp", "version": buildinfo.Version, "harness": harness,
+		"name": "mcp", "version": buildinfo.Version, "harness": harness,
 	}
 	if host != "" {
 		m["host"] = host

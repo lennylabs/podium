@@ -304,7 +304,7 @@ func searchedEvent(t *testing.T, events []audit.Event) audit.Event {
 func TestAuditEmitterFor_ReadEventRecordsCallerClient(t *testing.T) {
 	t.Parallel()
 	alice := layer.Identity{Sub: "alice", Email: "alice@acme.com", IsAuthenticated: true}
-	sent := audit.CallerClient{Kind: "mcp", Host: "claude-code", Harness: "cursor"}
+	sent := audit.CallerClient{Name: "mcp", Host: "claude-code", Harness: "cursor"}
 	for _, tc := range []struct {
 		name   string
 		id     layer.Identity
@@ -314,7 +314,7 @@ func TestAuditEmitterFor_ReadEventRecordsCallerClient(t *testing.T) {
 	}{
 		{"authenticated with header", alice, nil, sent.Header(), &sent},
 		{"public with header", layer.Identity{}, []server.Option{server.WithPublicMode()}, sent.Header(), &sent},
-		{"unknown kind becomes other", alice, nil, "kind=robot&name=x", &audit.CallerClient{Kind: "other", Name: "x"}},
+		{"custom name kept, kind ignored", alice, nil, "kind=robot&name=x", &audit.CallerClient{Name: "x"}},
 		{"absent header", alice, nil, "", nil},
 		{"oversized header", alice, nil, "name=" + strings.Repeat("a", 2048), nil},
 		{"unparsable header", alice, nil, "%zz", nil},
@@ -337,7 +337,7 @@ func TestAuditEmitterFor_ReadEventRecordsCallerClient(t *testing.T) {
 func TestAuditEmitterFor_SamplingIgnoresCallerClient(t *testing.T) {
 	t.Parallel()
 	alice := layer.Identity{Sub: "alice", IsAuthenticated: true}
-	header := audit.CallerClient{Kind: "sdk", Name: "podium-py"}.Header()
+	header := audit.CallerClient{Name: "sdk"}.Header()
 
 	dropAll := audit.NewSampler(map[audit.EventType]float64{"artifacts.searched": 0})
 	for _, ev := range searchEventsWithClient(t, alice, header, dropAll) {
@@ -348,7 +348,7 @@ func TestAuditEmitterFor_SamplingIgnoresCallerClient(t *testing.T) {
 
 	other := audit.NewSampler(map[audit.EventType]float64{"domain.loaded": 0})
 	ev := searchedEvent(t, searchEventsWithClient(t, alice, header, other))
-	if ev.CallerClient == nil || ev.CallerClient.Kind != "sdk" || ev.CallerClient.Name != "podium-py" {
-		t.Errorf("caller.client = %+v, want kind=sdk name=podium-py", ev.CallerClient)
+	if ev.CallerClient == nil || ev.CallerClient.Name != "sdk" {
+		t.Errorf("caller.client = %+v, want name=sdk", ev.CallerClient)
 	}
 }

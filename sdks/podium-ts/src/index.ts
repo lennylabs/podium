@@ -818,15 +818,16 @@ function checkTopK(topK: number): void {
 }
 
 // clientHeader returns the X-Podium-Client value the SDK sends on a
-// control-plane request: kind=sdk and name=podium-ts, plus version when it is
-// non-empty, because §7.2.2 omits a member with no value.
+// control-plane request: name set to the program's client name, or "sdk" when
+// it sets none, plus version and harness when they are non-empty, because
+// §7.2.2 omits a member with no value.
 //
 // Spec: §7.2.2, §7.6
-export function clientHeader(version: string): string {
+export function clientHeader(version: string, clientName = "", harness = ""): string {
   return new URLSearchParams({
-    kind: "sdk",
-    name: "podium-ts",
+    name: clientName || "sdk",
     ...(version ? { version } : {}),
+    ...(harness ? { harness } : {}),
   }).toString();
 }
 
@@ -880,6 +881,11 @@ export interface ClientOptions {
   // spec: §4.7.9 — a PODIUM_SIGNATURE_VERIFY_KEY key list that takes
   // precedence over the variable and the key file.
   verifyKeys?: string;
+  // spec: §7.2.2, §8.7 — the client name and harness the program reports in
+  // X-Podium-Client, so the usage report counts its calls under its own name.
+  // Unset, the SDK reports the name "sdk" and no harness.
+  clientName?: string;
+  harness?: string;
 }
 
 export class Client {
@@ -887,6 +893,8 @@ export class Client {
   readonly identityProvider: string;
   readonly overlayPath?: string;
   readonly cacheMode: CacheMode;
+  readonly clientName: string;
+  readonly harness: string;
   private readonly fetcher: typeof fetch;
   private token: string;
   private readonly explicitVerification: { verifySignatures?: string; verifyKeys?: string };
@@ -906,6 +914,8 @@ export class Client {
     this.overlayPath = opts.overlayPath ?? process.env.PODIUM_OVERLAY_PATH;
     this.fetcher = opts.fetcher ?? fetch;
     this.token = opts.token ?? "";
+    this.clientName = opts.clientName ?? "";
+    this.harness = opts.harness ?? "";
     // spec: §7.4 — "podium sync and the SDKs apply the same cache modes." The
     // SDK keeps no persistent content cache, so always-revalidate and
     // offline-first both fetch on every call (nothing is cached to serve),
@@ -1042,7 +1052,10 @@ export class Client {
   //
   // Spec: §7.2.2, §7.6
   private async apiHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
-    return { ...this.headers(extra), "X-Podium-Client": clientHeader(await sdkVersion()) };
+    return {
+      ...this.headers(extra),
+      "X-Podium-Client": clientHeader(await sdkVersion(), this.clientName, this.harness),
+    };
   }
 
   // overlayIndex reads the overlay on demand, applying the §6.4 CWD fallback

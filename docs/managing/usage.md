@@ -26,13 +26,15 @@ This page covers the usage report, the events that describe use, where the recor
 
 ## Built-in usage report
 
-The registry counts three things for each artifact, per UTC day, per layer, per client kind, and per harness:
+The registry counts three things for each artifact, per UTC day, per layer, per client, and per harness:
 
-- **Loads**: resolved `load_artifact` calls, including each item of a batch load, from a client other than `podium sync`. An agent's load through `podium-mcp` is a load. The registry counts each call it resolves, so one agent load can count twice: under the default `always-revalidate` cache mode, `podium-mcp` revalidates a cached artifact with a `HEAD` request and, when the content changed, fetches it with a `GET`, and a load repeated to replace an expired download URL counts again.
-- **Syncs**: the same calls from `podium sync`. A server-source sync fetches every artifact the caller can see on each run, so syncs measure what workspaces fetch rather than what agents use.
+- **Loads**: resolved `load_artifact` calls, including each item of a batch load, from a request that does not carry the `sync` purpose. An agent's load through `podium-mcp` is a load. The registry counts each call it resolves, so one agent load can count twice: under the default `always-revalidate` cache mode, `podium-mcp` revalidates a cached artifact with a `HEAD` request and, when the content changed, fetches it with a `GET`, and a load repeated to replace an expired download URL counts again.
+- **Syncs**: the same calls from a request that carries the `sync` purpose, which `podium sync` sends. A server-source sync fetches every artifact the caller can see on each run, so syncs measure what workspaces fetch rather than what agents use.
 - **Search hits**: searches with a query that returned the artifact among their first 10 results. A search that asks for fewer than 10 results counts each result it returns. A search with an empty query lists the catalog and counts nothing.
 
-The layer is the layer that serves the artifact. The client kind and the harness come from the `X-Podium-Client` header that `podium-mcp`, `podium sync`, the CLI, and the SDKs send: `podium-mcp` reports its harness, or the harness a load names, and `podium sync` reports the harness of its run. A request without the header counts under `none`. The header is self-reported, so the split between loads and syncs and the harness breakdown are as reliable as the clients that call the registry.
+The layer is the layer that serves the artifact. The client, the harness, and the purpose come from the `X-Podium-Client` header. `podium-mcp` sends the client name `mcp` and reports its harness, or the harness a load names. Every `podium` CLI command sends `cli`, and `podium sync` adds the purpose `sync` and reports the harness of its run. The SDKs send `sdk`, or the client name and harness the program configures, and any other caller sends a name of its own choosing. A client or harness that the request does not provide counts under `unknown`, and a provided value counts as it is. The header is self-reported, so the split between loads and syncs and the harness breakdown are as reliable as the clients that call the registry.
+
+A tenant records at most `PODIUM_USAGE_MAX_CLIENT_KEYS` distinct clients, 32 by default, and at most as many distinct harnesses per UTC day, not counting `unknown` and `other`. A call whose client or harness would exceed that number counts under `other` for that value. Each replica checks the values the metadata store holds for the day, so replicas that flush at the same time can together record more distinct values than the limit.
 
 The same load counts order search results and the notable artifacts of `load_domain`: an artifact agents loaded more often in the last 30 days ranks above an equally relevant one they loaded less. [Browsing the catalog](../consuming/browsing-the-catalog) describes the ordering.
 
@@ -71,7 +73,7 @@ The command calls [`GET /v1/usage`](../reference/http-api#usage-report), which t
 - `layers`: one entry per layer, in precedence order, including layers with no counts. A layer's counts include artifacts it no longer serves.
 - `artifacts`: one entry per artifact the caller can see, including artifacts with no counts, ordered by loads, syncs, and search hits, with `last_loaded` and `last_synced` days. The list comes in pages of `limit` entries, 50 by default and at most 200. `artifact_count` gives the length of the whole list, and `next_cursor`, when it is not `null`, reads the next page.
 
-Each total carries `loads`, `syncs`, and `search_hits`, a `by_client` breakdown by client kind, and a `by_harness` breakdown by harness. Under `granularity` `day`, `week`, or `month`, each total also carries a `series` of periods, where weeks run Monday to Sunday and the first and last periods are cut to the window. A long window coarsens the periods: a window of more than 366 days serves `day` as `week`, and a window of more than 1,096 days serves `day` and `week` as `month`, so a calendar year stays daily and three calendar years stay weekly. The response's `granularity` names the periods it holds.
+Each total carries `loads`, `syncs`, and `search_hits`, a `by_client` breakdown by client name, and a `by_harness` breakdown by harness. Under `granularity` `day`, `week`, or `month`, each total also carries a `series` of periods, where weeks run Monday to Sunday and the first and last periods are cut to the window. A long window coarsens the periods: a window of more than 366 days serves `day` as `week`, and a window of more than 1,096 days serves `day` and `week` as `month`, so a calendar year stays daily and three calendar years stay weekly. The response's `granularity` names the periods it holds.
 
 An artifact with no loads in the window lists `loads` 0 and `last_loaded` `null`, so the report answers which artifacts go unused without a separate catalog listing.
 
@@ -81,7 +83,7 @@ A registry started with `--web-ui` shows the report on the Usage page, which the
 
 - The header chooses the window: the last 7, 30, or 90 days, or a custom range of two dates. The default is 30 days. Choosing a custom range fills its two dates with the window on display, so the end date starts at today.
 - Two tiles state the window's loads and syncs, each with a daily sparkline. A window longer than 366 days draws weekly points, and one longer than 1,096 days draws monthly points.
-- A card splits loads and syncs by client kind and by harness. A request that named no client or harness is shown as `unknown`.
+- A card splits loads and syncs by client and by harness, and names each as the report does. The `other` part and then the `unknown` part come last in each bar.
 - The By layer section is closed by default and names the layer count and the layer with the most loads. Opened, it lists each layer with its share of loads and syncs and its counts.
 - The By artifact table filters by artifact ID text, type, and layer, sorts on loads, syncs, search hits, or last loaded day in either order, and reads 50 artifacts at a time, reading the next 50 as the reader scrolls to the end of the table. The loads, syncs, and search hits cells each draw a bar relative to the largest value in that column among the rows shown. The tiles and the breakdowns above it do not follow the table's filters.
 
@@ -97,7 +99,7 @@ The registry keeps `PODIUM_USAGE_RETENTION_DAYS` days of counts, 365 by default,
 
 ### Query the stored counts
 
-The Postgres and SQLite metadata stores keep the counts in a table named `usage_daily`, with one row per tenant, day, layer, artifact, client kind, and harness:
+The Postgres and SQLite metadata stores keep the counts in a table named `usage_daily`, with one row per tenant, day, layer, artifact, client, and harness:
 
 | Column | Content |
 |:--|:--|
@@ -105,8 +107,8 @@ The Postgres and SQLite metadata stores keep the counts in a table named `usage_
 | `day` | The UTC date. SQLite stores it as `YYYY-MM-DD` text, and Postgres as a `DATE`. |
 | `layer` | The layer that served the artifact. |
 | `artifact_id` | The canonical artifact ID. |
-| `client_kind` | `mcp`, `sync`, `sdk`, `cli`, `other`, or `none`. |
-| `harness` | The harness the client reported, or `none`. |
+| `client_kind` | The client name: `mcp`, `cli`, `sdk`, a name another caller reported, `other`, or `unknown`. |
+| `harness` | The harness the client reported, `other`, or `unknown`. |
 | `loads`, `syncs`, `search_hits` | The day's counts. |
 
 The counts add across rows, so any grouping is a sum. On Postgres, each tenant's table is in the tenant's schema. Loads per artifact and week, for example:
@@ -136,7 +138,7 @@ The registry records one event for each meta-tool call it serves, whether an age
 Every record also carries `timestamp`, `tenant`, `resolved_layers` (the caller's effective layer composition), and a `caller` object:
 
 - `caller.identity`, `caller.email`, and `caller.groups` identify the caller.
-- `caller.client` names the client software, with the members `kind`, `name`, `version`, `host`, `host_version`, and `harness`. `kind` is `mcp`, `sync`, `cli`, `sdk`, or `other`, so a load by an agent and a load by `podium sync` are told apart by `caller.client.kind`.
+- `caller.client` names the client software, with the members `name`, `version`, `host`, `host_version`, `harness`, and `purpose`. `name` is `mcp` for `podium-mcp`, `cli` for the `podium` CLI, `sdk` for the SDKs, or a name the caller chose. `podium sync` sends `purpose=sync`, so a load by an agent and a load by `podium sync` are told apart by `caller.client.name` and `caller.client.purpose`.
 
 A member whose value is empty or zero is omitted. A load that does not resolve, because the artifact does not exist or the caller cannot see it, therefore carries no `result_size`, and neither does a search that returned nothing or failed.
 
@@ -171,7 +173,7 @@ Run the examples against the registry stream. The `podium-mcp` local stream carr
 
 ## Answer common questions
 
-The usage report answers how often each artifact is loaded, synced, and found, and which artifacts go unused. The audit records answer the questions below, which need the individual calls, and they can reproduce the report's counts, because every counted call records an audit event with the same artifact, layer, client kind, and harness. The two differ where sampling drops audit events, where the receiver lacks a replica's stream, where retention has removed a query, and where an artifact's manifest redacts `layer` in audit records, which hides the layer of its loads from the audit stream while the report keeps it.
+The usage report answers how often each artifact is loaded, synced, and found, and which artifacts go unused. The audit records answer the questions below, which need the individual calls, and they can reproduce the report's counts, because every counted call records an audit event with the same artifact, layer, client name, harness, and purpose. The two differ where sampling drops audit events, where the receiver lacks a replica's stream, where retention has removed a query, and where an artifact's manifest redacts `layer` in audit records, which hides the layer of its loads from the audit stream while the report keeps it.
 
 ### Which artifacts are loaded, and how often
 
@@ -181,7 +183,7 @@ Count resolved loads per artifact:
 jq -r 'select(.type == "artifact.loaded" and .result_size == 1) | .target' audit.log | sort | uniq -c | sort -rn
 ```
 
-To count only agent loads, add `and .caller.client.kind == "mcp"` to the `select`. A server-source `podium sync` loads every artifact the caller can see on each run, whatever the workspace's scope, so its loads measure what syncs fetch rather than what agents use.
+To count only agent loads, add `and .caller.client.name == "mcp"` to the `select`. A server-source `podium sync` loads every artifact the caller can see on each run, whatever the workspace's scope, so its loads measure what syncs fetch rather than what agents use.
 
 To see who loads one artifact, select it by ID:
 
@@ -215,7 +217,7 @@ Replace `.artifact_id` with `.layer` to count by layer.
 Group resolved loads by client:
 
 ```text
-jq -r 'select(.type == "artifact.loaded" and .result_size == 1) | .caller.client // {} | [.kind, .name, .version, .harness] | map(. // "-") | @tsv' audit.log | sort | uniq -c | sort -rn
+jq -r 'select(.type == "artifact.loaded" and .result_size == 1) | .caller.client // {} | [.name, .version, .harness, .purpose] | map(. // "-") | @tsv' audit.log | sort | uniq -c | sort -rn
 ```
 
 A `-` marks a member the client did not report, and a row of `-` values counts the requests that named no client.

@@ -153,7 +153,7 @@ func assertSyncClientHeaders(t *testing.T, reqs []stubRequest, wantHarness strin
 			t.Errorf("no %s request recorded", path)
 		}
 	}
-	want := audit.CallerClient{Kind: "sync", Name: "podium", Version: buildinfo.Version, Harness: wantHarness}
+	want := audit.CallerClient{Name: "cli", Purpose: "sync", Version: buildinfo.Version, Harness: wantHarness}
 	for _, req := range reqs {
 		if !strings.HasPrefix(req.path, "/v1/") {
 			continue

@@ -71,7 +71,7 @@ func TestPostgres_DeleteUsageBeforeSkipsSchemaWithoutTable(t *testing.T) {
 	if err := s.ResetForTest(ctx); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	row := store.UsageCount{Day: "2026-10-01", Layer: "team", ArtifactID: "x", ClientKind: "mcp", Harness: "none", Loads: 1}
+	row := store.UsageCount{Day: "2026-10-01", Layer: "team", ArtifactID: "x", Client: "mcp", Harness: "none", Loads: 1}
 	for _, org := range []string{"a", "b"} {
 		if err := s.CreateTenant(ctx, store.Tenant{ID: org}); err != nil {
 			t.Fatal(err)
@@ -112,7 +112,7 @@ func TestPostgres_PurgeExpiredLayerDeletionsSkipsSchemaWithoutUsage(t *testing.T
 		t.Fatalf("reset: %v", err)
 	}
 	expired := time.Now().UTC().Add(-40 * 24 * time.Hour)
-	row := store.UsageCount{Day: "2026-10-01", Layer: "gone", ArtifactID: "x", ClientKind: "mcp", Harness: "none", Loads: 1}
+	row := store.UsageCount{Day: "2026-10-01", Layer: "gone", ArtifactID: "x", Client: "mcp", Harness: "none", Loads: 1}
 	for _, org := range []string{"a", "b"} {
 		if err := s.CreateTenant(ctx, store.Tenant{ID: org}); err != nil {
 			t.Fatal(err)

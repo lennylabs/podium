@@ -83,7 +83,7 @@ func TestSearchArtifacts_VersionHistoryCountsOnceUnderUsageRerank(t *testing.T) 
 	st := versionHistoryStore(t)
 	now := clock.NewFrozen(time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC))
 	if err := st.AddUsageCounts(context.Background(), "t", []store.UsageCount{{
-		Day: "2026-11-18", Layer: "L", ArtifactID: "finance/ap/pay-invoice", ClientKind: "mcp", Harness: "none", Loads: 1,
+		Day: "2026-11-18", Layer: "L", ArtifactID: "finance/ap/pay-invoice", Client: "mcp", Harness: "none", Loads: 1,
 	}}); err != nil {
 		t.Fatal(err)
 	}

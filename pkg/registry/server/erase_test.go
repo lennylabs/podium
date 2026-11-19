@@ -304,7 +304,7 @@ func TestErase_NoFileDestinationAppendFailure(t *testing.T) {
 }
 
 // eraseClientHeader is the X-Podium-Client value the erase client tests send.
-const eraseClientHeader = "kind=mcp&host=claude-code&harness=cursor"
+const eraseClientHeader = "name=mcp&host=claude-code&harness=cursor"
 
 // Spec: §7.2.2, §8.1, §8.5 — with a file sink, the user.erased that EraseUser
 // appends and the layer event of each purged personal layer record the
@@ -324,7 +324,7 @@ func TestErase_FileSinkRecordsCallerClient(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	want := map[string]any{"kind": "mcp", "host": "claude-code", "harness": "cursor"}
+	want := map[string]any{"name": "mcp", "host": "claude-code", "harness": "cursor"}
 	seen := map[string]bool{}
 	for _, rec := range eraseRecords(t, sinkPath) {
 		typ, _ := rec["type"].(string)
@@ -361,7 +361,7 @@ func TestErase_NoFileDestinationRecordsCallerClient(t *testing.T) {
 	if len(events) != 1 || events[0].Type != audit.EventUserErased {
 		t.Fatalf("events = %+v, want one user.erased", events)
 	}
-	want := &audit.CallerClient{Kind: "mcp", Host: "claude-code", Harness: "cursor"}
+	want := &audit.CallerClient{Name: "mcp", Host: "claude-code", Harness: "cursor"}
 	if got := events[0].CallerClient; !reflect.DeepEqual(got, want) {
 		t.Errorf("user.erased CallerClient = %+v, want %+v", got, want)
 	}

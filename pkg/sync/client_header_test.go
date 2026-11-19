@@ -28,7 +28,7 @@ func TestClientHeaderValue(t *testing.T) {
 			t.Parallel()
 			v := ClientHeaderValue(tc.harness)
 			got := audit.ParseClientHeader(v)
-			want := audit.CallerClient{Kind: "sync", Name: "podium", Version: buildinfo.Version, Harness: tc.harness}
+			want := audit.CallerClient{Name: "cli", Purpose: "sync", Version: buildinfo.Version, Harness: tc.harness}
 			if got == nil || *got != want {
 				t.Fatalf("ClientHeaderValue(%q) parsed to %+v, want %+v", tc.harness, got, want)
 			}

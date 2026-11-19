@@ -57,10 +57,10 @@ func TestUsageReport_BinaryCountsReportAndCLI(t *testing.T) {
 		"PODIUM_AUDIT_LOG_PATH=" + audit,
 	}, "serve", "--standalone", "--layer-path", reg)
 	for _, c := range []struct{ path, client string }{
-		{"/v1/load_artifact?id=ops/greet", "kind=mcp&name=podium-mcp&harness=claude-code"},
-		{"/v1/load_artifact?id=ops/greet", "kind=mcp&name=podium-mcp&harness=cursor"},
-		{"/v1/load_artifact?id=ops/farewell", "kind=sync&name=podium&harness=claude-code"},
-		{"/v1/search_artifacts?query=session", "kind=sdk&name=podium-py"},
+		{"/v1/load_artifact?id=ops/greet", "name=mcp&harness=claude-code"},
+		{"/v1/load_artifact?id=ops/greet", "name=mcp&harness=cursor"},
+		{"/v1/load_artifact?id=ops/farewell", "name=cli&purpose=sync&harness=claude-code"},
+		{"/v1/search_artifacts?query=session", "name=sdk"},
 	} {
 		if st := usageGet(t, srv.BaseURL+c.path, c.client); st != http.StatusOK {
 			t.Fatalf("%s: HTTP %d\n%s", c.path, st, srv.log())
@@ -228,7 +228,7 @@ func TestLearnFromUsage_RankingReadsStoredLoadsAcrossRestart(t *testing.T) {
 		t.Fatalf("control order = %v, want tools/aaa first on the alphabetical tie\n%s", got, srv.log())
 	}
 	for range 3 {
-		if st := usageGet(t, srv.BaseURL+"/v1/load_artifact?id=tools/bbb", "kind=mcp&name=podium-mcp&harness=claude-code"); st != http.StatusOK {
+		if st := usageGet(t, srv.BaseURL+"/v1/load_artifact?id=tools/bbb", "name=mcp&harness=claude-code"); st != http.StatusOK {
 			t.Fatalf("load tools/bbb: HTTP %d", st)
 		}
 	}

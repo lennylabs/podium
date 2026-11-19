@@ -752,7 +752,7 @@ func (s *Memory) AddUsageCounts(_ context.Context, tenantID string, counts []Usa
 	for _, c := range norm {
 		row := bucket[c.key()]
 		if row.TenantID == "" {
-			row = UsageCount{TenantID: tenantID, Day: c.Day, Layer: c.Layer, ArtifactID: c.ArtifactID, ClientKind: c.ClientKind, Harness: c.Harness}
+			row = UsageCount{TenantID: tenantID, Day: c.Day, Layer: c.Layer, ArtifactID: c.ArtifactID, Client: c.Client, Harness: c.Harness}
 		}
 		row.Loads += c.Loads
 		row.Syncs += c.Syncs

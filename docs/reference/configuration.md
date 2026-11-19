@@ -353,6 +353,7 @@ The registry counts loads, syncs, and search hits for the [usage report](../mana
 |:--|:--|:--|:--|
 | `PODIUM_USAGE_FLUSH_INTERVAL` | duration | `1m` | Interval at which each registry replica adds its buffered usage counts to the metadata store, at least `1s`. A replica also flushes once at a graceful shutdown. A replica that stops without one loses the counts since its last flush. Read by the registry only. |
 | `PODIUM_USAGE_RETENTION_DAYS` | integer | `365` | Number of UTC days of usage counts the registry keeps, counting today, as a positive integer. A pass at startup and every 24 hours deletes older days. It is also the longest window the usage report accepts. Read by the registry only. |
+| `PODIUM_USAGE_MAX_CLIENT_KEYS` | integer | `32` | Most distinct clients, and most distinct harnesses, that one tenant records per UTC day, not counting `unknown` and `other`, as an integer from 1 to 1000. A call whose client or harness would add a value beyond it is counted under `other` for that value. Replicas that flush at the same time can together record more distinct values. Read by the registry only. |
 
 ## Store retention
 

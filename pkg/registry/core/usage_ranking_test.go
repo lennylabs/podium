@@ -68,8 +68,8 @@ func (f *rankingFixture) store(t *testing.T, daysAgo int, counts ...store.UsageC
 	day := rankNow.AddDate(0, 0, -daysAgo).Format(store.UsageDayLayout)
 	for i := range counts {
 		counts[i].Day = day
-		if counts[i].ClientKind == "" {
-			counts[i].ClientKind = "mcp"
+		if counts[i].Client == "" {
+			counts[i].Client = "mcp"
 		}
 		if counts[i].Harness == "" {
 			counts[i].Harness = "none"
@@ -106,7 +106,7 @@ func TestSearchArtifacts_RerankByStoredLoads(t *testing.T) {
 	}
 	f.store(t, 29, store.UsageCount{Layer: "L", ArtifactID: "tools/bbb", Loads: 2})
 	f.store(t, 1,
-		store.UsageCount{Layer: "L", ArtifactID: "tools/aaa", ClientKind: "sync", Syncs: 50, SearchHits: 50},
+		store.UsageCount{Layer: "L", ArtifactID: "tools/aaa", Client: "sync", Syncs: 50, SearchHits: 50},
 		store.UsageCount{Layer: "hidden", ArtifactID: "tools/aaa", Loads: 40})
 	f.store(t, 30, store.UsageCount{Layer: "L", ArtifactID: "tools/aaa", Loads: 90})
 	f.clock.Advance(time.Minute)

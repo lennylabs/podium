@@ -26,14 +26,18 @@ const (
 	// seconds, and it covers the final flush's wait for a periodic flush in
 	// progress as well as its own add.
 	usageFinalFlushTimeout = 10 * time.Second
+	// maxUsageClientKeys is the upper bound of PODIUM_USAGE_MAX_CLIENT_KEYS.
+	maxUsageClientKeys = 1000
 )
 
-// usageConfig is the §8.7 configuration from PODIUM_USAGE_FLUSH_INTERVAL and
-// PODIUM_USAGE_RETENTION_DAYS. err holds the first value that does not parse
-// or is out of range; validate refuses the start with it.
+// usageConfig is the §8.7 configuration from PODIUM_USAGE_FLUSH_INTERVAL,
+// PODIUM_USAGE_RETENTION_DAYS, and PODIUM_USAGE_MAX_CLIENT_KEYS. err holds the
+// first value that does not parse or is out of range; validate refuses the
+// start with it.
 type usageConfig struct {
 	flushInterval time.Duration
 	retentionDays int
+	maxClientKeys int
 	err           error
 }
 
@@ -42,7 +46,7 @@ type usageConfig struct {
 //
 // Spec: §8.7, §13.12
 func usageConfigFromEnv(getenv func(string) string) usageConfig {
-	c := usageConfig{flushInterval: defaultUsageFlushInterval, retentionDays: defaultUsageRetentionDays}
+	c := usageConfig{flushInterval: defaultUsageFlushInterval, retentionDays: defaultUsageRetentionDays, maxClientKeys: core.DefaultUsageMaxClientKeys}
 	if raw := strings.TrimSpace(getenv("PODIUM_USAGE_FLUSH_INTERVAL")); raw != "" {
 		d, err := time.ParseDuration(raw)
 		if err != nil || d < minUsageFlushInterval {
@@ -58,6 +62,14 @@ func usageConfigFromEnv(getenv func(string) string) usageConfig {
 			return c
 		}
 		c.retentionDays = n
+	}
+	if raw := strings.TrimSpace(getenv("PODIUM_USAGE_MAX_CLIENT_KEYS")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxUsageClientKeys {
+			c.err = fmt.Errorf("config.invalid: PODIUM_USAGE_MAX_CLIENT_KEYS must be an integer from 1 to %d, got %q", maxUsageClientKeys, raw)
+			return c
+		}
+		c.maxClientKeys = n
 	}
 	return c
 }

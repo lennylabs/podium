@@ -86,12 +86,12 @@ func decodeUsage(t *testing.T, body string) usageResp {
 func TestUsageReport_HTTPCountsByClientAndVisibility(t *testing.T) {
 	t.Parallel()
 	h, counter := usageHarness(t)
-	mcp := "kind=mcp&name=podium-mcp&harness=claude-code"
+	mcp := "name=mcp&harness=claude-code"
 	for _, c := range []struct{ path, group, client string }{
 		{"/v1/load_artifact?id=fin/close", "", mcp},
-		{"/v1/load_artifact?id=fin/close", "", "kind=sync&name=podium&harness=cursor"},
+		{"/v1/load_artifact?id=fin/close", "", "name=cli&purpose=sync&harness=cursor"},
 		{"/v1/load_artifact?id=fin/payroll", "eng", mcp},
-		{"/v1/search_artifacts?query=finance", "eng", "kind=sdk&name=podium-py"},
+		{"/v1/search_artifacts?query=finance", "eng", "name=sdk"},
 	} {
 		if st, body := usageCall(t, h, http.MethodGet, c.path, "", "alice", c.group, c.client); st != http.StatusOK {
 			t.Fatalf("%s: %d %s", c.path, st, body)
@@ -178,12 +178,12 @@ func TestUsageReport_HTTPBatchAndErrors(t *testing.T) {
 func TestUsageReport_HTTPBatchItemsAndRevalidatedLoads(t *testing.T) {
 	t.Parallel()
 	h, counter := usageHarness(t)
-	mcp := "kind=mcp&name=podium-mcp&harness=claude-code"
+	mcp := "name=mcp&harness=claude-code"
 	batch := `{"ids":["fin/close","fin/reconcile","fin/missing"]}`
 	if st, body := usageCall(t, h, http.MethodPost, "/v1/artifacts:batchLoad", batch, "alice", "", mcp); st != http.StatusOK {
 		t.Fatalf("batchLoad: %d %s", st, body)
 	}
-	if st, body := usageCall(t, h, http.MethodPost, "/v1/artifacts:batchLoad", batch, "alice", "", "kind=sync&name=podium&harness=cursor"); st != http.StatusOK {
+	if st, body := usageCall(t, h, http.MethodPost, "/v1/artifacts:batchLoad", batch, "alice", "", "name=cli&purpose=sync&harness=cursor"); st != http.StatusOK {
 		t.Fatalf("batchLoad as sync: %d %s", st, body)
 	}
 	send := func(method, etag string) *http.Response {
@@ -316,7 +316,7 @@ func TestUsageReport_HTTPSortAndQuery(t *testing.T) {
 func TestWebUIUsage_HiddenArtifactReadsAsUnknown(t *testing.T) {
 	t.Parallel()
 	h, counter := usageHarness(t)
-	if st, body := usageCall(t, h, http.MethodGet, "/v1/load_artifact?id=fin/payroll", "", "alice", "eng", "kind=mcp&name=podium-mcp"); st != http.StatusOK {
+	if st, body := usageCall(t, h, http.MethodGet, "/v1/load_artifact?id=fin/payroll", "", "alice", "eng", "name=mcp"); st != http.StatusOK {
 		t.Fatalf("load fin/payroll as eng: %d %s", st, body)
 	}
 	if err := counter.Flush(context.Background(), h.st); err != nil {

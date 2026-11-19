@@ -1782,7 +1782,7 @@ func readPublishToken(registry string) string {
 //
 // Spec: §7.2.2
 func cliClientHeader() string {
-	return audit.CallerClient{Kind: "cli", Name: "podium", Version: buildinfo.Version}.Header()
+	return audit.CallerClient{Name: audit.ClientNameCLI, Version: buildinfo.Version}.Header()
 }
 
 func mustGetJSON(base, path string, params map[string]string) []byte {

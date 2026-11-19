@@ -218,6 +218,8 @@ To turn the check on for an existing catalog:
 - A 0.6.0 replica counts nothing. During a rolling upgrade from 0.6.0 and after a rollback, the report omits the requests that 0.6.0 replicas served, so the counts for those days are lower than the traffic.
 - A 0.6.0 replica answers `GET /v1/usage` with 404, so `podium usage` against a registry with a 0.6.0 replica behind its load balancer can fail until every replica runs 0.7.0.
 - `artifacts.searched` audit records that a 0.6.0 replica writes carry no `context.results` member.
+- 0.6.0 clients send no `X-Podium-Client` header. A 0.7.0 registry counts the requests of a 0.6.0 `podium-mcp`, `podium` CLI, or SDK under client `unknown` and harness `unknown`, and records no `caller.client` for them. A 0.6.0 `podium sync` sends no `purpose=sync`, so a 0.7.0 registry counts its loads as loads rather than syncs. Upgrade the clients to 0.7.0 to have their requests counted under `mcp`, `cli`, and `sdk`, and syncs counted as syncs.
+- A 0.7.0 client against a 0.6.0 registry sends the header, and the 0.6.0 registry ignores it.
 
 The store needs no backup restore to roll back.
 

@@ -141,9 +141,9 @@ func TestEmitAuditEvent_AuthenticatedCaller(t *testing.T) {
 
 // clientHeaderValue is the X-Podium-Client value the client tests send, and
 // wantHeaderClient the caller.client it normalizes to.
-const clientHeaderValue = "kind=mcp&host=claude-code&harness=cursor"
+const clientHeaderValue = "name=mcp&host=claude-code&harness=cursor"
 
-var wantHeaderClient = &audit.CallerClient{Kind: "mcp", Host: "claude-code", Harness: "cursor"}
+var wantHeaderClient = &audit.CallerClient{Name: "mcp", Host: "claude-code", Harness: "cursor"}
 
 // auditMetaFrom records the X-Podium-Client value for authenticated and public
 // callers alike, and an absent, oversized, or malformed header yields no
@@ -153,7 +153,7 @@ var wantHeaderClient = &audit.CallerClient{Kind: "mcp", Host: "claude-code", Har
 func TestAuditMetaFrom_ClientHeader(t *testing.T) {
 	authed := layer.Identity{Sub: "alice", IsAuthenticated: true}
 	public := layer.Identity{IsPublic: true}
-	oversized := "kind=mcp&name=" + strings.Repeat("a", 1025-len("kind=mcp&name="))
+	oversized := "name=mcp&name=" + strings.Repeat("a", 1025-len("name=mcp&name="))
 	cases := []struct {
 		name   string
 		header string
@@ -186,7 +186,7 @@ func TestAuditMetaFrom_ClientHeader(t *testing.T) {
 // Spec: §7.2.2, §8.1
 func TestEmitAuditEvent_RecordsCallerClient(t *testing.T) {
 	id := layer.Identity{Sub: "alice", IsAuthenticated: true}
-	attached := &audit.CallerClient{Kind: "cli", Name: "podium"}
+	attached := &audit.CallerClient{Name: "cli"}
 
 	fromHeader := httptest.NewRequest(http.MethodPost, "/v1/admin/grants", nil)
 	fromHeader.Header.Set(audit.ClientHeader, clientHeaderValue)
@@ -223,7 +223,7 @@ func TestEmitAuditEvent_RecordsCallerClient(t *testing.T) {
 // Spec: §7.2.2, §8.1
 func TestLayerEndpoint_RequestClient(t *testing.T) {
 	e := NewLayerEndpoint(store.NewMemory(), "t", NewModeTracker())
-	attached := &audit.CallerClient{Kind: "sync", Harness: "claude-code"}
+	attached := &audit.CallerClient{Name: "cli", Purpose: "sync", Harness: "claude-code"}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/erase", nil)
 	req.Header.Set(audit.ClientHeader, clientHeaderValue)
