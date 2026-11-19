@@ -248,7 +248,7 @@ The store needs no backup restore to roll back.
 
 A 0.7.0 registry in public mode refuses the following with `403 auth.forbidden` unless the request carries `PODIUM_OPERATOR_TOKEN`: `podium admin reembed`, `podium admin rebuild-overlap`, `podium admin erase`, and every layer write (`podium layer register`, `unregister`, `update`, `restore`, `reorder`, `reingest`, and `watch`). A 0.6.0 registry in public mode admitted all of them from any caller.
 
-- Before the upgrade, generate a secret of at least 32 characters, for example with `openssl rand -hex 32`, and set it as `PODIUM_OPERATOR_TOKEN` on the registry. A shorter value refuses startup with `config.invalid`.
+- Before the upgrade, generate a secret of at least 32 characters, for example with `openssl rand -hex 32`, and set it as `PODIUM_OPERATOR_TOKEN` on the registry. A shorter value, or one that contains whitespace or a control character such as the trailing newline of a secret file, refuses startup with `config.invalid`.
 - Set the same value in the environment of whoever runs those commands. The CLI sends it when it is set.
 - A public-mode registry with no token keeps serving every read, including the layer list, and serves the layers its startup configuration declares. It refuses every layer change over the API. The re-embed after a model change and the overlap recomputation the registry runs on its own do not go through these endpoints and are unaffected.
 - The web UI sends no token, so in public mode it no longer offers layer controls.

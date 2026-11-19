@@ -293,6 +293,20 @@ func TestConfigValidate_OperatorTokenLength(t *testing.T) {
 	if err := (&Config{storeType: "sqlite", operatorToken: strings.Repeat("k", 32)}).validate(); err != nil {
 		t.Errorf("32-character token: err = %v", err)
 	}
+	// Spec: §13.12 — no request header carries whitespace or a control
+	// character, so a token holding one is refused at startup rather than
+	// matching no request.
+	for name, token := range map[string]string{
+		"trailing newline": strings.Repeat("k", 32) + "\n",
+		"inner space":      strings.Repeat("k", 16) + " " + strings.Repeat("k", 16),
+		"control":          strings.Repeat("k", 32) + "\x01",
+	} {
+		err := (&Config{storeType: "sqlite", operatorToken: token}).validate()
+		if err == nil || !strings.Contains(err.Error(), "config.invalid: PODIUM_OPERATOR_TOKEN must not contain whitespace or control characters") ||
+			strings.Contains(err.Error(), strings.Repeat("k", 16)) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
 }
 
 func TestModeBanner(t *testing.T) {

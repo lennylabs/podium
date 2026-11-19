@@ -506,13 +506,14 @@ func TestStream_DropFunnelCountsAndLogs(t *testing.T) {
 		t.Errorf("log carries the query: %s", logs.String())
 	}
 
-	// A drop suppressed within the interval stays held back at Shutdown,
-	// so the exit writes no second line for a key inside its minute.
+	// A drop suppressed within the interval is held back while the process
+	// runs and logged at Shutdown, so a process that exits inside the minute
+	// still reports every drop it counted.
 	s.dropped(kindHTTP, name, ReasonQueueFull, 1)
 	before := logs.String()
 	s.Shutdown()
-	if after := logs.String(); after != before {
-		t.Errorf("Shutdown wrote a drop line inside the interval:\n%s", strings.TrimPrefix(after, before))
+	if added := strings.TrimPrefix(logs.String(), before); strings.Count(added, "audit: dropped 1 record(s) for destination http://collector.example/x: queue_full") != 1 {
+		t.Errorf("Shutdown logged %q, want the one held-back queue_full drop", added)
 	}
 
 	obs := &fakeObserver{}
