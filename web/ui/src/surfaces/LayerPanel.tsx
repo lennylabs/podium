@@ -169,6 +169,7 @@ export function LayerPanel({
   subject,
   caps,
   postureAnswered,
+  publicMode,
   readOnly,
   onCatalogChange,
   onReach,
@@ -184,6 +185,12 @@ export function LayerPanel({
    * resolved none of and a caller whose read did not answer both hold no
    * subject and no capability, and the two are instructed differently. */
   postureAnswered: boolean;
+  /** publicMode is the posture read's public_mode. A public-mode registry
+   * admits a layer write only with the operator token, which a browser does
+   * not send, so the panel offers no layer control there (§13.10): the
+   * reorder handles and the lines that explain them are absent rather than
+   * drawn disabled under a role the deployment does not use. */
+  publicMode: boolean;
   readOnly: boolean;
   /** onCatalogChange tells the shell that a write moved what the catalog
    * holds, so the counts the sidebar footer states are re-read. The panel
@@ -350,6 +357,13 @@ export function LayerPanel({
       mayTake("reorder", row, caps, subject),
     );
   const anyMovable = rows.some((layer) => movableBlock(layer));
+  // A public-mode panel offers no layer control, so where no row is movable
+  // it draws no handle and states no reason a reorder is refused. A role is
+  // not what gates the reorder there, and the browser has no way to supply
+  // the operator token that does.
+  //
+  // Spec: §13.10
+  const handles = !publicMode || anyMovable;
 
   // One in-flight guard covers the whole surface. The registry runs the §7.3.1
   // ingest pipeline inside the request, so two open requests for one layer run
@@ -629,17 +643,20 @@ export function LayerPanel({
         <>
           <p className="precedence-label">
             <span className="label">
-              {readOnly
-                ? "Precedence — reordering is unavailable while the registry is read-only"
-                : anyMovable
-                  ? "Precedence — drag or press the arrow keys on a handle to reorder"
-                  : "Precedence — reordering these layers requires the administrator role"}
+              {!handles
+                ? "Precedence"
+                : readOnly
+                  ? "Precedence — reordering is unavailable while the registry is read-only"
+                  : anyMovable
+                    ? "Precedence — drag or press the arrow keys on a handle to reorder"
+                    : "Precedence — reordering these layers requires the administrator role"}
             </span>
             <span className="quiet">lower row wins</span>
           </p>
           <p className="quiet">
-            Every user-defined layer composes above every admin-defined layer,
-            so a row moves within its own block.
+            {handles
+              ? "Every user-defined layer composes above every admin-defined layer, so a row moves within its own block."
+              : "Every user-defined layer composes above every admin-defined layer."}
           </p>
         </>
       )}
@@ -688,6 +705,7 @@ export function LayerPanel({
                   subject={subject}
                   caps={caps}
                   movable={movableBlock(layer)}
+                  handle={handles}
                   readOnly={readOnly}
                   refusal={refusals[layer.id] ?? null}
                   reingest={reingest[layer.id] ?? idleReingest}
@@ -1032,6 +1050,7 @@ function LayerRow({
   subject,
   caps,
   movable,
+  handle,
   readOnly,
   refusal,
   reingest,
@@ -1060,6 +1079,10 @@ function LayerRow({
    * layer and no list, so the panel settles the block and threads the
    * result in. */
   movable: boolean;
+  /** handle is whether the row draws its reorder handle. A public-mode panel
+   * with no movable row draws none, and the handle cell stays empty so the
+   * columns keep their widths. */
+  handle: boolean;
   readOnly: boolean;
   refusal: Refusal | null;
   reingest: ReingestState;
@@ -1237,30 +1260,32 @@ function LayerRow({
             that still names the arrow keys reads to a screen reader as an
             instruction the control refuses, and the sentence explaining why
             sits elsewhere on the page (§13.2.1). */}
-        <button
-          type="button"
-          className="drag-handle"
-          aria-label={
-            readOnly
-              ? `Move ${layer.id}: reordering is unavailable while the registry is read-only`
-              : movable
-                ? `Move ${layer.id}: press the up or down arrow key`
-                : `Move ${layer.id}: reordering this block requires the administrator role`
-          }
-          disabled={readOnly || !movable}
-          draggable={!readOnly && movable}
-          onKeyDown={(event) => {
-            if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
-              return;
+        {handle && (
+          <button
+            type="button"
+            className="drag-handle"
+            aria-label={
+              readOnly
+                ? `Move ${layer.id}: reordering is unavailable while the registry is read-only`
+                : movable
+                  ? `Move ${layer.id}: press the up or down arrow key`
+                  : `Move ${layer.id}: reordering this block requires the administrator role`
             }
-            // The arrows scroll the page otherwise, which moves the row out
-            // from under the operator driving it.
-            event.preventDefault();
-            onMove(event.key === "ArrowUp" ? -1 : 1);
-          }}
-        >
-          ⋮⋮
-        </button>
+            disabled={readOnly || !movable}
+            draggable={!readOnly && movable}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+                return;
+              }
+              // The arrows scroll the page otherwise, which moves the row out
+              // from under the operator driving it.
+              event.preventDefault();
+              onMove(event.key === "ArrowUp" ? -1 : 1);
+            }}
+          >
+            ⋮⋮
+          </button>
+        )}
       </td>
       <td className="mono">
         {/* The name and the marker qualifying it are one wrapping row, so the

@@ -18,14 +18,16 @@ export const usageListDays = 30;
  * it. Its syncs
  * are preloads: podium sync wrote the artifact into a workspace ahead of
  * time, and the harness then reads the local copy, which the registry never
- * sees. The API, the CLI, and the docs keep the names loads and syncs. */
+ * sees. The API, the CLI, and the docs keep the names loads and syncs. The
+ * last loaded day is the latest one within the window read (§8.7). */
 export const usageHints = {
   loads: 'Fetched from the registry when an agent, an SDK program, a CLI command, or the web UI needed it.',
   syncs:
     'Copied into a workspace ahead of time by podium sync. Each sync run counts once per artifact, and later use of the local copy is not counted.',
   searchHits: 'Appeared in the first 10 results of a search with a query.',
   allLoads: 'On-demand loads and preloads together.',
-  lastLoaded: 'The last day an agent, an SDK program, a CLI command, or the web UI loaded the artifact on demand.',
+  lastLoaded:
+    'The last day in this window on which an agent, an SDK program, a CLI command, or the web UI loaded the artifact on demand.',
 } as const;
 
 /** usageMaxArtifacts is the most artifacts one usage read names (§8.7); a

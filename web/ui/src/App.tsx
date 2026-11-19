@@ -599,6 +599,7 @@ export function App() {
                 subject={subject}
                 caps={caps}
                 postureAnswered={postureAnswered}
+                publicMode={posture?.public_mode === true}
                 readOnly={readOnly}
                 onCatalogOutcome={onCatalogOutcome}
                 onCatalogChange={reloadCatalog}
@@ -619,6 +620,7 @@ function Surface({
   subject,
   caps,
   postureAnswered,
+  publicMode,
   readOnly,
   onCatalogOutcome,
   onCatalogChange,
@@ -635,6 +637,9 @@ function Surface({
   /** postureAnswered reports whether the posture read settled anything. The
    * layer panel's empty state is its only reader below this point. */
   postureAnswered: boolean;
+  /** publicMode is the posture read's public_mode, which the layer panel
+   * reads to offer no layer control (§13.10). */
+  publicMode: boolean;
   readOnly: boolean;
   onCatalogOutcome: (err: unknown) => void;
   onCatalogChange: () => void;
@@ -682,6 +687,7 @@ function Surface({
           subject={subject}
           caps={caps}
           postureAnswered={postureAnswered}
+          publicMode={publicMode}
           readOnly={readOnly}
           onCatalogChange={onCatalogChange}
           onReach={onReach}
