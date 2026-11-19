@@ -19559,6 +19559,90 @@ describe("the layer panel under the local-source rule", () => {
     ).toContain("drag or press the arrow keys on a handle to reorder");
   });
 
+  // Spec: §13.10 — a public-mode registry admits a layer write only with the
+  // operator token, which the web UI never sends, so the panel offers no
+  // layer control: no reorder handle, and no sentence naming a role as the
+  // reason a reorder is refused.
+  it("draws no reorder handle and names no role in public mode", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer("")] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    expect(within(panel).getAllByTestId("layer-order")).toHaveLength(2);
+    expect(within(panel).queryAllByRole("button", { name: /^Move / })).toHaveLength(0);
+    expect(panel.querySelectorAll(".drag-handle")).toHaveLength(0);
+    expect(panel.textContent).not.toContain("administrator role");
+    expect(panel.querySelector(".precedence-label .label")?.textContent).toBe("Precedence");
+    expect(panel.textContent).toContain("lower row wins");
+    expect(panel.textContent).not.toContain("a row moves within its own block");
+  });
+
+  // Spec: §13.10 — public mode withholds the reorder affordance only where
+  // the posture read reports that the caller may not manage layers. A
+  // posture that admits the caller keeps the handles live.
+  it("draws live reorder handles in public mode where the posture admits managing every layer", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ public_mode: true, layer_capabilities: { manage_any_layer: true } }),
+      },
+      "/v1/layers": { body: { layers: [adminLayer(), { ...adminLayer(), id: "platform", order: 2 }] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    for (const id of ["company", "platform"]) {
+      const handle = await within(panel).findByRole("button", { name: moveHandleLabel(id) });
+      expect(handle.hasAttribute("disabled")).toBe(false);
+    }
+    expect(panel.textContent).toContain("drag or press the arrow keys on a handle to reorder");
+  });
+
+  // Spec: §13.10 — a panel whose posture read has not answered cannot tell
+  // a public-mode registry from one that gates the reorder on the role, so
+  // it draws no handle and names no reason rather than naming the role to a
+  // public-mode reader. The shell mounts no surface while the read is in
+  // flight, so a failed read is the arm that reaches the panel unanswered.
+  it("holds the reorder handles and the role sentence where the posture read did not answer", async () => {
+    stubRegistry({
+      "/v1/ui/session": { status: 500, body: { code: "registry.unavailable", message: "down" } },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    await within(panel).findAllByTestId("layer-order");
+    expect(panel.querySelectorAll(".drag-handle")).toHaveLength(0);
+    expect(panel.textContent).not.toContain("administrator role");
+    expect(panel.querySelector(".precedence-label .label")?.textContent).toBe("Precedence");
+  });
+
+  // Spec: §13.10 — outside public mode a viewer without the administrator
+  // role still sees the handles, disabled, with the role as the reason.
+  it("keeps the disabled handles and the role sentence for a viewer without the role outside public mode", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: nonAdmin() },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    const handle = within(panel).getByRole("button", {
+      name: "Move company: reordering this block requires the administrator role",
+    });
+    expect(handle.hasAttribute("disabled")).toBe(true);
+    expect(panel.querySelector(".precedence-label .label")?.textContent).toBe(
+      "Precedence — reordering these layers requires the administrator role",
+    );
+    expect(panel.textContent).toContain("a row moves within its own block");
+  });
+
   // The fan-out narrows to the rows the rule admits, so the run report names
   // no row it did not attempt and the caller collects no refusal for a row
   // the panel already knew about.
@@ -20052,6 +20136,22 @@ describe("similarity", () => {
       expect(
         within(peers[0]).getByRole("link", { name: settleBill.artifact_id }).getAttribute("href"),
       ).toBe(artifactHref(settleBill.artifact_id));
+      // Spec: §13.10 — the peers are a table, so a screen reader announces
+      // each score under the column that names it.
+      const table = within(detail).getByRole("table", { name: "Overlapping artifacts" });
+      expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
+        "Overlaps with",
+        "Layer",
+        "Similarity",
+        "Word overlap",
+      ]);
+      const tableRows = within(table).getAllByRole("row");
+      expect(tableRows).toHaveLength(3);
+      const cells = within(tableRows[1]).getAllByRole("cell");
+      expect(cells).toHaveLength(4);
+      expect(cells[2].textContent).toBe("0.912");
+      expect(cells[3].textContent).toContain("none");
+      expect(table.querySelector(".assistive-only:not(.score-absent *)")).toBeNull();
     });
 
     it("selects another entry in place and writes it to the address", async () => {
@@ -20323,7 +20423,15 @@ describe("similarity", () => {
       // The rows are the selection controls; there is no separate Compare.
       expect(within(panel).queryByRole("button", { name: /^Compare/ })).toBeNull();
       expect(within(panel).queryByRole("region", { name: /compared with/ })).toBeNull();
+      // Spec: §13.10 — a button row cannot be a table row, so each figure in
+      // it carries its column's name for a screen reader, and the visual
+      // header is hidden from one.
+      expect(within(panel).queryByRole("table")).toBeNull();
+      expect(panel.querySelector(".overlap-head")?.getAttribute("aria-hidden")).toBe("true");
       const row = within(panel).getByRole("button", { name: new RegExp(settleBill.artifact_id) });
+      expect(
+        within(panel).getByRole("button", { name: /Layer payments Similarity 0\.912 Word overlap none$/ }),
+      ).toBe(row);
       fireEvent.click(row);
       expect(row.getAttribute("aria-pressed")).toBe("true");
       const compare = within(panel).getByRole("region", {
@@ -21182,6 +21290,9 @@ describe("usage", () => {
       await waitFor(() => {
         expect(row?.textContent).not.toContain("today");
       });
+      // The report's last loaded day is the latest one in the window read
+      // (§8.7), and the column's definition says so.
+      expect(screen.getByRole("button", { name: "LAST LOADED" }).title).toContain("The last day in this window");
       // The fields bound each other and stop at today.
       expect((screen.getByLabelText("From") as HTMLInputElement).max).toBe("2026-10-15");
       expect((screen.getByLabelText("To") as HTMLInputElement).min).toBe("2026-10-01");
@@ -21214,6 +21325,45 @@ describe("usage", () => {
       const alert = await screen.findByRole("alert");
       expect(alert.textContent).toContain("The usage report did not load.");
       expect(screen.queryAllByTestId("stat-tile")).toHaveLength(0);
+    });
+
+    // Spec: §8.7, §13.10 — a window longer than the registry's usage
+    // retention is refused with registry.invalid_argument. The response
+    // names no retention, so the page states the refusal's message and
+    // offers no retry, which would send the same window again; another
+    // preset reads the report again.
+    it("states a refused window's message without a retry, and reads again on another preset", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      goTo(usageHref());
+      render(<App />);
+      await screen.findAllByTestId("stat-tile");
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": {
+          status: 400,
+          body: {
+            code: "registry.invalid_argument",
+            message: "registry.invalid_argument: days must be an integer from 1 to 60",
+            retryable: false,
+          },
+        },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "90d" }));
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toContain("The usage report did not load.");
+      expect(alert.textContent).toContain("days must be an integer from 1 to 60");
+      expect(within(alert).queryByRole("button", { name: "Try again" })).toBeNull();
+      expect(within(alert).getByTestId("not-retryable")).toBeTruthy();
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "30d" }));
+      expect(await screen.findAllByTestId("stat-tile")).toHaveLength(2);
+      expect(screen.queryByText("The usage report did not load.")).toBeNull();
     });
 
     it("stands in the sidebar for an anonymous caller", async () => {
