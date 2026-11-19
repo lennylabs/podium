@@ -599,7 +599,7 @@ func defaultBootstrapVisibility(cfg *Config) layer.Visibility {
 		// LoadConfig's resolution; mirror it so a no-identity standalone
 		// still defaults to public and an identity-gated deployment to
 		// private.
-		if cfg.identityProvider == "" {
+		if !cfg.hasIdentityProvider() {
 			return layer.Visibility{Public: true}
 		}
 		return layer.Visibility{}
@@ -1666,7 +1666,7 @@ func run(ctx context.Context, stop func()) error {
 			if cfg.publicMode {
 				return server.CheckOperatorToken(r, cfg.operatorToken)
 			}
-			if cfg.identityProvider == "" {
+			if !cfg.hasIdentityProvider() {
 				return nil
 			}
 			return registry.AdminAuthorize(r.Context(), layerIdentity(r))
@@ -1754,7 +1754,7 @@ func run(ctx context.Context, stop func()) error {
 		// browser flow is the deployment whose page has to learn not to offer
 		// sign-in.
 		mux.Handle(server.PathWebUISession, srv.TenantRoutedNoReject(server.SessionPosture{
-			IdentityProviderConfigured: cfg.identityProvider != "",
+			IdentityProviderConfigured: cfg.hasIdentityProvider(),
 			PublicMode:                 cfg.publicMode,
 			BrowserAuthEnabled:         cfg.webUIAuth,
 			Identity:                   layerIdentity,
@@ -2672,7 +2672,7 @@ func LoadConfig() *Config {
 	// §13.10 standalone default; once an identity provider gates access, the
 	// default is `private` so admin-defined layers do not leak by accident.
 	if c.defaultLayerVisibility == "" {
-		if c.identityProvider == "" {
+		if !c.hasIdentityProvider() {
 			c.defaultLayerVisibility = "public"
 		} else {
 			c.defaultLayerVisibility = "private"
@@ -2902,11 +2902,22 @@ func (c *Config) missingBackendValues() []string {
 	return missing
 }
 
+// hasIdentityProvider reports whether the configuration names an identity
+// provider. The empty value and "none" name none, and every decision that
+// depends on it (the admin arm, the default layer visibility, the session
+// posture, the start banner, and the unauthenticated re-embed) reads this
+// predicate, as the loopback-bind refusal does.
+//
+// Spec: §13.10 (Loopback bind without an identity provider)
+func (c *Config) hasIdentityProvider() bool {
+	return server.ConfiguresIdentityProvider(c.identityProvider)
+}
+
 func (c *Config) modeBanner() string {
 	if c.publicMode {
 		return "public"
 	}
-	if c.identityProvider != "" {
+	if c.hasIdentityProvider() {
 		return c.identityProvider
 	}
 	return "standalone"
@@ -2959,7 +2970,7 @@ func bootstrapOptions(c *Config, objStore objectstore.Provider) []server.Option 
 	// the per-tenant admin role and the re-embed endpoint would be
 	// unreachable. In public mode authorizeOperatorPass then requires the
 	// operator token, as the LayerEndpoint admin callback does.
-	if c.publicMode || c.identityProvider == "" {
+	if c.publicMode || !c.hasIdentityProvider() {
 		out = append(out, server.WithUnauthenticatedReembed())
 	}
 	if objStore != nil {

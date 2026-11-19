@@ -118,7 +118,7 @@ A boolean environment variable reads `true`, `1`, `yes`, and `on` as true, ignor
 
 | Key | Variable | Type | Default | Description |
 |:--|:--|:--|:--|:--|
-| `identity_provider.type` | `PODIUM_IDENTITY_PROVIDER` | string | (none) | `oidc-jwt`, `trusted-headers`, or `injected-session-token`. Unset, every caller is anonymous. `oauth-device-code` is a client value, and the registry refuses it with `config.identity_provider_unverified`. |
+| `identity_provider.type` | `PODIUM_IDENTITY_PROVIDER` | string | (none) | `oidc-jwt`, `trusted-headers`, or `injected-session-token`. Unset, every caller is anonymous. `none` is the same as unset. `oauth-device-code` is a client value, and the registry refuses it with `config.identity_provider_unverified`. |
 | `identity_provider.audience` | `PODIUM_OAUTH_AUDIENCE` | string or list | (none) | Audiences the registry accepts in a token's `aud` claim. Required under `oidc-jwt` and `injected-session-token`. The variable is a comma-separated list. The key takes a list, or a string that names one audience and is never split. The first value is the one the browser sign-in redirect sends. |
 | `identity_provider.issuer` | `PODIUM_OAUTH_ISSUER` | string | (none) | OIDC issuer URL under `oidc-jwt`. It must use `https`. |
 | `identity_provider.token_header` | `PODIUM_OAUTH_TOKEN_HEADER` | string | `Authorization` | Header that carries the forwarded JWT under `oidc-jwt`. |
