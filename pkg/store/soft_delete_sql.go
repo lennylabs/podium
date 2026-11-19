@@ -1,5 +1,10 @@
 package store
 
+import (
+	"context"
+	"database/sql"
+)
+
 // softDeleteBatchSize is the most artifact IDs one SoftDeleteArtifacts
 // statement binds. SQLite refuses a statement with more than 32,766 bound
 // parameters and Postgres one with more than 65,535, so a removal larger
@@ -19,4 +24,10 @@ func idBatches(ids []string, size int) [][]string {
 		out = append(out, ids)
 	}
 	return out
+}
+
+// queryRower is the single-row read *sql.DB, *sql.Conn, and *sql.Tx offer, so
+// an ingest-mark check runs in or outside the tombstoning transaction.
+type queryRower interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }

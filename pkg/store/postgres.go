@@ -807,9 +807,12 @@ func postgresRevive(ctx context.Context, ex execContexter, rec ManifestRecord, i
 
 // SoftDeleteArtifacts tombstones the live rows layerID contributed for each
 // of artifactIDs (§7.3.1 removed artifacts). It binds the IDs in batches of
-// softDeleteBatchSize inside one transaction.
-func (p *Postgres) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time) error {
-	if len(artifactIDs) == 0 {
+// softDeleteBatchSize inside one transaction. With a mark, the transaction
+// first reads the layer row FOR UPDATE, which waits for a concurrent write of
+// that row to commit and then holds it, so another replica's cycle cannot
+// record a new mark between the check and the commit.
+func (p *Postgres) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time, mark *LayerIngestMark) error {
+	if len(artifactIDs) == 0 && mark == nil {
 		return nil
 	}
 	conn, release, err := p.org(ctx, tenantID)
@@ -822,6 +825,11 @@ func (p *Postgres) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID st
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if mark != nil {
+		if err := postgresCheckIngestMark(ctx, tx, tenantID, layerID, *mark); err != nil {
+			return err
+		}
+	}
 	for _, batch := range idBatches(artifactIDs, softDeleteBatchSize) {
 		args := []any{at.UTC(), tenantID, layerID}
 		marks := make([]string, len(batch))
@@ -837,6 +845,29 @@ func (p *Postgres) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID st
 		}
 	}
 	return tx.Commit()
+}
+
+// postgresCheckIngestMark returns ErrIngestSuperseded unless the live layer
+// still records mark, locking the layer row for the rest of tx.
+//
+// Spec: §7.3.1 (Removed artifacts)
+func postgresCheckIngestMark(ctx context.Context, tx *sql.Tx, tenantID, layerID string, mark LayerIngestMark) error {
+	var ref string
+	var at sql.NullTime
+	err := tx.QueryRowContext(ctx, `
+		SELECT last_ingested_ref, last_ingested_at FROM layer_configs
+		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+		FOR UPDATE`, tenantID, layerID).Scan(&ref, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrIngestSuperseded
+	}
+	if err != nil {
+		return err
+	}
+	if !mark.recordedBy(LayerConfig{LastIngestedRef: ref, LastIngestedAt: ptrFromNullTime(at)}) {
+		return ErrIngestSuperseded
+	}
+	return nil
 }
 
 // PutManifestWithVectorPending commits the manifest and the §4.7.2 vector

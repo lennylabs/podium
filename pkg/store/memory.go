@@ -631,10 +631,17 @@ func (s *Memory) PurgeExpiredLayerDeletions(_ context.Context, before time.Time)
 }
 
 // SoftDeleteArtifacts tombstones the live rows layerID contributed for each
-// of artifactIDs (§7.3.1 removed artifacts).
-func (s *Memory) SoftDeleteArtifacts(_ context.Context, tenantID, layerID string, artifactIDs []string, at time.Time) error {
+// of artifactIDs (§7.3.1 removed artifacts). With a mark, it checks under the
+// store lock that the live layer still records it.
+func (s *Memory) SoftDeleteArtifacts(_ context.Context, tenantID, layerID string, artifactIDs []string, at time.Time, mark *LayerIngestMark) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if mark != nil {
+		cfg, ok := s.layers[layerKey(tenantID, layerID)]
+		if !ok || cfg.DeletedAt != nil || !mark.recordedBy(cfg) {
+			return ErrIngestSuperseded
+		}
+	}
 	ids := make(map[string]bool, len(artifactIDs))
 	for _, id := range artifactIDs {
 		ids[id] = true

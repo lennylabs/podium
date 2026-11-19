@@ -435,17 +435,59 @@ func rowsChanged(res sql.Result, err error) (bool, error) {
 
 // SoftDeleteArtifacts tombstones the live rows layerID contributed for each
 // of artifactIDs (§7.3.1 removed artifacts). It binds the IDs in batches of
-// softDeleteBatchSize inside one transaction.
-func (s *SQLite) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time) error {
+// softDeleteBatchSize inside one transaction. With a mark, the tombstoning
+// statements run first and the layer row is read after them: the first write
+// takes the database's write lock, so no other connection can commit a
+// changed mark between the read and the commit, and a read made first could
+// instead fail the upgrade to a writer with SQLITE_BUSY once another
+// connection committed. A mark the layer no longer records rolls back.
+func (s *SQLite) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time, mark *LayerIngestMark) error {
 	if len(artifactIDs) == 0 {
-		return nil
+		if mark == nil {
+			return nil
+		}
+		return s.checkIngestMark(ctx, s.db, tenantID, layerID, *mark)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	stamp := at.UTC().Format(time.RFC3339Nano)
+	if err := softDeleteBatches(ctx, tx, at.UTC().Format(time.RFC3339Nano), tenantID, layerID, artifactIDs); err != nil {
+		return err
+	}
+	if mark != nil {
+		if err := s.checkIngestMark(ctx, tx, tenantID, layerID, *mark); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// checkIngestMark returns ErrIngestSuperseded unless the live layer still
+// records mark.
+//
+// Spec: §7.3.1 (Removed artifacts)
+func (s *SQLite) checkIngestMark(ctx context.Context, q queryRower, tenantID, layerID string, mark LayerIngestMark) error {
+	var ref string
+	var at sql.NullString
+	err := q.QueryRowContext(ctx, `
+		SELECT last_ingested_ref, last_ingested_at FROM layer_configs
+		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, tenantID, layerID).Scan(&ref, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrIngestSuperseded
+	}
+	if err != nil {
+		return err
+	}
+	if !mark.recordedBy(LayerConfig{LastIngestedRef: ref, LastIngestedAt: parseNullTimeText(at)}) {
+		return ErrIngestSuperseded
+	}
+	return nil
+}
+
+// softDeleteBatches runs the SQLite tombstoning statements in tx.
+func softDeleteBatches(ctx context.Context, tx *sql.Tx, stamp, tenantID, layerID string, artifactIDs []string) error {
 	for _, batch := range idBatches(artifactIDs, softDeleteBatchSize) {
 		args := []any{stamp, tenantID, layerID}
 		marks := make([]string, len(batch))
@@ -460,7 +502,7 @@ func (s *SQLite) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID stri
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // PutManifestWithVectorPending commits the manifest and the §4.7.2 vector

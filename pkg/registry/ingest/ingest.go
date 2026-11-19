@@ -275,6 +275,12 @@ type Request struct {
 	// sets it when PODIUM_LINT_SEMANTIC_OVERLAP is on and the vector backend
 	// is collocated; nil computes nothing.
 	SemanticOverlap SemanticOverlapFunc
+	// IngestMark is the layer's recorded ingest state, read before the
+	// snapshot. When set, the cycle removes artifacts only while the layer
+	// still records it (store.SoftDeleteArtifacts). SourceIngest sets it; a
+	// bootstrap ingest of a path that no other cycle can run against leaves
+	// it nil.
+	IngestMark *store.LayerIngestMark
 }
 
 // SemanticOverlapFunc computes the §7.3.1 overlap records of the (artifact,
@@ -405,6 +411,12 @@ type Result struct {
 	//
 	// Spec: §7.3.1 (Removed artifacts)
 	Removed []string
+	// Superseded reports that another cycle of the layer completed after this
+	// cycle read Request.IngestMark, so the cycle removed nothing and its
+	// caller records neither its reference nor its time on the layer.
+	//
+	// Spec: §7.3.1 (Removed artifacts)
+	Superseded bool
 }
 
 // IngestedArtifact names an (artifact_id, version) pair present in a layer
@@ -839,9 +851,18 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 
 	// Spec: §7.3.1 (Removed artifacts) — the cycle read the whole snapshot,
 	// so an artifact this layer serves that it did not find is soft-deleted.
+	// With an ingest mark, the store checks in the tombstoning transaction
+	// that no other cycle of the layer completed since this one read the mark,
+	// because this cycle's snapshot can then predate that cycle's, and the
+	// cycle removes nothing.
 	res.Removed = removedArtifacts(rowsByID, req.LayerID, inSnapshot)
-	if len(res.Removed) > 0 {
-		if err := st.SoftDeleteArtifacts(ctx, req.TenantID, req.LayerID, res.Removed, now); err != nil {
+	if len(res.Removed) > 0 || req.IngestMark != nil {
+		err := st.SoftDeleteArtifacts(ctx, req.TenantID, req.LayerID, res.Removed, now, req.IngestMark)
+		switch {
+		case errors.Is(err, store.ErrIngestSuperseded):
+			res.Removed = []string{}
+			res.Superseded = true
+		case err != nil:
 			return nil, fmt.Errorf("ingest: soft-delete removed artifacts: %w", err)
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/spi"
@@ -49,6 +50,40 @@ var (
 	// operation does not exist.
 	ErrTenantNotFound = &spi.Error{Code: "registry.tenant_not_found", Message: "store: tenant_not_found"}
 )
+
+// ErrIngestSuperseded is returned by SoftDeleteArtifacts, which then changes
+// nothing, when the layer no longer records the ingest mark the caller read:
+// another ingest cycle of the layer completed in between, or the layer was
+// unregistered. The ingest pipeline handles it and never returns it to a
+// client.
+var ErrIngestSuperseded = errors.New("store: another ingest cycle of the layer completed")
+
+// LayerIngestMark is the ingest state a completed §7.3.1 ingest cycle records
+// on its layer: LastIngestedRef and LastIngestedAt. A cycle reads it before
+// its snapshot and removes artifacts only while the layer still records it,
+// so a cycle whose snapshot predates another completed cycle's removes
+// nothing. LastIngestedAt changes on every completed cycle, which covers a
+// local source, whose reference is its path and never changes.
+//
+// Spec: §7.3.1 (Removed artifacts)
+type LayerIngestMark struct {
+	Ref string
+	At  *time.Time
+}
+
+// IngestMarkOf returns the ingest mark cfg records.
+func IngestMarkOf(cfg LayerConfig) LayerIngestMark {
+	return LayerIngestMark{Ref: cfg.LastIngestedRef, At: cfg.LastIngestedAt}
+}
+
+// recordedBy reports whether cfg still records m. Both stamps come from the
+// same store, so they compare at the precision it keeps.
+func (m LayerIngestMark) recordedBy(cfg LayerConfig) bool {
+	if cfg.LastIngestedRef != m.Ref || (cfg.LastIngestedAt == nil) != (m.At == nil) {
+		return false
+	}
+	return m.At == nil || cfg.LastIngestedAt.Equal(*m.At)
+}
 
 // Tenant identifies a Podium tenant (org). Tenant boundaries are the
 // unit of multi-tenancy per §4.7.1.
@@ -499,8 +534,12 @@ type Store interface {
 	// tombstoned are unchanged. A later PutManifest of a tombstoned row's
 	// (artifact_id, version) with the same content hash and the same layer
 	// restores the row as that put states it; a put from another layer leaves
-	// it tombstoned, and a different hash is ErrImmutableViolation.
-	SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time) error
+	// it tombstoned, and a different hash is ErrImmutableViolation. When mark
+	// is non-nil, the call first checks, in the transaction that tombstones,
+	// that the live layer layerID still records *mark, and otherwise returns
+	// ErrIngestSuperseded and changes nothing; it makes that check even when
+	// artifactIDs is empty. A nil mark tombstones unconditionally.
+	SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time, mark *LayerIngestMark) error
 
 	// Data-migration markers (§13.4). The §13.4 additive schema guarantee
 	// does not cover the values stored under the schema, so a one-time

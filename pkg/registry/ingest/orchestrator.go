@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/lint"
@@ -73,6 +74,9 @@ type SourceIngestOptions struct {
 	// SemanticOverlap computes §7.3.1 overlap after the cycle's writes. See
 	// ingest.Request.SemanticOverlap.
 	SemanticOverlap SemanticOverlapFunc
+	// CycleLocks serializes the cycles of one layer in this process. The
+	// registry passes one set for every trigger; nil serializes nothing.
+	CycleLocks *CycleLocks
 }
 
 // SourceIngest snapshots the layer via the supplied provider, runs
@@ -107,6 +111,25 @@ func SourceIngestWithOptions(
 	cfg store.LayerConfig,
 	opts SourceIngestOptions,
 ) (*Result, error) {
+	// Spec: §7.3.1 (Removed artifacts) — the cycle starts once the previous
+	// cycle of the layer in this process has ended, and it reads the layer's
+	// recorded ingest state after that, so a cycle that waited does not
+	// compare against the mark the caller read before the wait.
+	unlock, err := opts.CycleLocks.lock(ctx, cfg.TenantID, cfg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	var mark *store.LayerIngestMark
+	switch stored, err := st.GetLayerConfig(ctx, cfg.TenantID, cfg.ID); {
+	case err == nil:
+		cfg.LastIngestedRef, cfg.LastIngestedAt = stored.LastIngestedRef, stored.LastIngestedAt
+		m := store.IngestMarkOf(cfg)
+		mark = &m
+	case !errors.Is(err, store.ErrNotFound):
+		return nil, fmt.Errorf("ingest: read layer %s: %w", cfg.ID, err)
+	}
+
 	srcCfg := source.LayerConfig{
 		ID: cfg.ID,
 		// Spec: §7.3.1 (Repository credentials). The ingest clones with the stored
@@ -167,6 +190,7 @@ func SourceIngestWithOptions(
 		Signer:                     opts.Signer,
 		UseVectorOutbox:            opts.UseVectorOutbox,
 		SemanticOverlap:            opts.SemanticOverlap,
+		IngestMark:                 mark,
 	})
 	if err != nil {
 		// Spec: §7.3.1 (Removed artifacts) — a cycle that read the whole
@@ -199,6 +223,13 @@ func SourceIngestWithOptions(
 		})
 	}
 
+	// Spec: §7.3.1 (Removed artifacts) — another cycle completed after this
+	// one read the mark, and its snapshot can be the newer one, so recording
+	// this cycle's reference would move the layer's state backward.
+	if res.Superseded {
+		log.Printf("ingest: layer %s: another cycle completed during this one; this cycle removed nothing and leaves last_ingested_ref as that cycle recorded it", cfg.ID)
+		return res, nil
+	}
 	cfg.LastIngestedRef = snap.Reference
 	// §7.3.1 "last_ingested_at is exposed per layer for staleness
 	// monitoring": stamp the completion time of this ingest cycle from

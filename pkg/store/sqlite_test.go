@@ -323,7 +323,7 @@ func TestSQLite_SoftDeleteArtifactsReportsAStoreFailure(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if err := s.SoftDeleteArtifacts(context.Background(), "t", "L", []string{"ops/x"}, time.Now()); err == nil {
+	if err := s.SoftDeleteArtifacts(context.Background(), "t", "L", []string{"ops/x"}, time.Now(), nil); err == nil {
 		t.Error("SoftDeleteArtifacts on a closed database returned no error")
 	}
 }
