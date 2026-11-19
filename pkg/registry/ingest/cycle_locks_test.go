@@ -166,6 +166,77 @@ func TestSourceIngest_ClaimFailureStopsTheCycle(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.1 (Removed artifacts) — a cycle superseded after its check
+// before the writes stops at the removal check: it removes nothing and
+// records nothing. A cycle superseded after its removal records nothing, and
+// the reference stays as the later claim leaves it.
+func TestSourceIngest_ClaimTakenDuringTheCycle(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for _, at := range []string{"removal", "record"} {
+		mem := store.NewMemory()
+		if err := mem.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+			t.Fatal(err)
+		}
+		cfg := store.LayerConfig{TenantID: "t", ID: "team", SourceType: "fake"}
+		if err := mem.PutLayerConfig(ctx, cfg); err != nil {
+			t.Fatal(err)
+		}
+		base := &orderProvider{files: fstest.MapFS{"a/ARTIFACT.md": orderManifest("runbook for the ingest worker")}, ref: "r0", taken: make(chan struct{})}
+		if _, err := SourceIngestWithOptions(ctx, mem, base, cfg, SourceIngestOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		st := &claimTaker{Memory: mem, at: at}
+		gone := &orderProvider{files: fstest.MapFS{}, ref: "r1", taken: make(chan struct{})}
+		res, err := SourceIngestWithOptions(ctx, st, gone, cfg, SourceIngestOptions{})
+		if err != nil {
+			t.Fatalf("%s: %v", at, err)
+		}
+		_, getErr := mem.GetManifest(ctx, "t", "a", "1.0.0")
+		lc, _ := mem.GetLayerConfig(ctx, "t", "team")
+		switch at {
+		case "removal":
+			if !res.Superseded || len(res.Removed) != 0 || getErr != nil {
+				t.Errorf("removal: result %+v, GetManifest(a) %v; want superseded with a still served", res, getErr)
+			}
+		case "record":
+			if res.Superseded || len(res.Removed) != 1 || !errors.Is(getErr, store.ErrNotFound) {
+				t.Errorf("record: result %+v, GetManifest(a) %v; want a removed", res, getErr)
+			}
+		}
+		if lc.LastIngestedRef != "r0" {
+			t.Errorf("%s: last_ingested_ref = %q, want r0 left by the superseded cycle", at, lc.LastIngestedRef)
+		}
+	}
+}
+
+// claimTaker is a store on which another cycle claims the layer just before
+// the cycle's removal check ("removal") or its record ("record").
+type claimTaker struct {
+	*store.Memory
+	at     string
+	checks int
+}
+
+func (s *claimTaker) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, ids []string, at time.Time, claim string) error {
+	s.checks++
+	if s.at == "removal" && s.checks == 2 {
+		if _, err := s.Memory.ClaimLayerIngest(ctx, tenantID, layerID, "later"); err != nil {
+			return err
+		}
+	}
+	return s.Memory.SoftDeleteArtifacts(ctx, tenantID, layerID, ids, at, claim)
+}
+
+func (s *claimTaker) RecordLayerIngest(ctx context.Context, tenantID, layerID, claim, ref string, at *time.Time) error {
+	if s.at == "record" {
+		if _, err := s.Memory.ClaimLayerIngest(ctx, tenantID, layerID, "later"); err != nil {
+			return err
+		}
+	}
+	return s.Memory.RecordLayerIngest(ctx, tenantID, layerID, claim, ref, at)
+}
+
 var errClaim = errors.New("claim failed")
 
 // failingClaim is a store whose ingest claim fails.
