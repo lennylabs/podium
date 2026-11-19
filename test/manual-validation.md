@@ -766,9 +766,6 @@ reingest`, source updates.
   returns the `rollback` skill.
 - The reingest prints one `artifact: <id>@<version>   layer: team` line per
   accepted or unchanged artifact on standard output, rather than a bare zero.
-  It also prints an `advisory: <id> [warning] description is thin ...
-  (lint.thin_description)` line on standard output for each short
-  description, and an advisory leaves the exit status unchanged.
   An artifact dropped for a cross-layer collision is reported on standard
   error as `rejected: <id> (ingest.collision): <reason>`, and the command then
   exits 1.
