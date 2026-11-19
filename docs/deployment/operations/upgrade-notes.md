@@ -278,6 +278,7 @@ A 0.6.0 registry kept serving an artifact after its folder was deleted from the 
 - The first ingest of each layer after the upgrade removes every artifact whose folder was deleted while 0.6.0 served it. Review the `removed:` lines of that ingest, or the startup log's `removed=` count for a layer ingested at startup.
 - Restore an artifact removed by mistake by putting its folder back and reingesting within `PODIUM_LAYER_RECOVERY_DAYS`, 30 days by default.
 - A rollback to 0.6.0 keeps the soft-deleted versions hidden, because 0.6.0 also hides a soft-deleted row, and a 0.6.0 ingest does not restore them. Restore them with 0.7.0 before the window ends.
+- A 0.7.0 process adds the `ingest_claim` column to `layer_configs` in the SQLite database and in each Postgres org schema if it is absent, and each ingest writes its claim on the layer there. The change is additive. A 0.6.0 process ignores the column and removes nothing, so a rollback, or a 0.6.0 replica during a rolling upgrade, leaves it unused.
 
 ### `command` and `context` removal
 
