@@ -987,7 +987,7 @@ The command reports each artifact of the cycle:
 - Standard output carries one line per accepted and unchanged artifact, and a `removed: <id>` line per artifact the cycle soft-deleted because its folder is no longer in the source. A removed artifact does not change the exit status. [Remove an artifact](../managing/lifecycle#remove-an-artifact) describes recovery.
 - Standard error carries one line per conflicted or rejected artifact, with that artifact's identifier, its error code, and its reason.
 - Standard error also carries a `lint failures: <n>` line with the number of lint diagnostics the cycle raised.
-- When a later ingest of the layer took over while this one ran, standard error carries a `superseded:` line saying so. This ingest then removed nothing and recorded no reference, and the line does not change the exit status.
+- When a later ingest of the layer took over before this one finished, standard error carries a `superseded:` line saying so. This ingest stopped at that point and recorded no reference, and the line does not change the exit status.
 - When the registry answers the request with an error, the command prints that error response on standard error instead of the per-artifact lines.
 
 | Exit code | Meaning |

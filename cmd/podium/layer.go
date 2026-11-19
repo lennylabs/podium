@@ -663,7 +663,7 @@ func writeIngestReport(stdout, stderr io.Writer, layerID string, body []byte) (d
 	// the exit status. The later cycle ingests the source, so this one is not
 	// a failure, but an empty report would read as a source with nothing new.
 	if report.Superseded {
-		_, _ = fmt.Fprintf(stderr, "superseded: a later ingest cycle of layer %s took over; this cycle stopped, removed nothing, and recorded no reference\n", layer)
+		_, _ = fmt.Fprintf(stderr, "superseded: a later ingest cycle of layer %s took over before this cycle finished; this cycle stopped there and recorded no reference\n", layer)
 	}
 	// §4.7: the artifact is stored and served, so a failed embedding call is
 	// reported without changing the exit status.

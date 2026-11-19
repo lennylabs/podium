@@ -197,7 +197,7 @@ func TestWriteIngestReport_Classification(t *testing.T) {
 			body:        `{"layer":"team","accepted":0,"idempotent":0,"artifacts":[],"removed":[],"superseded":true}`,
 			wantDropped: 0,
 			wantOK:      true,
-			wantStderr:  []string{"superseded: a later ingest cycle of layer team took over; this cycle stopped, removed nothing, and recorded no reference\n"},
+			wantStderr:  []string{"superseded: a later ingest cycle of layer team took over before this cycle finished; this cycle stopped there and recorded no reference\n"},
 			emptyOut:    true,
 		},
 		{

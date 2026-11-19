@@ -524,9 +524,9 @@ describe('the finished reingest report', () => {
   // new, and the copied summary carries it too.
   it('states that a later ingest superseded the run', () => {
     report({ accepted: 0, idempotent: 0, lint_failures: 0, superseded: true });
-    expect(screen.getByTestId('reingest-superseded').textContent).toContain('A later ingest of this layer took over');
+    expect(screen.getByTestId('reingest-superseded').textContent).toContain('A later ingest of this layer took over before this one finished');
     expect(summaryText('acme/platform-artifacts', { accepted: 0, superseded: true }, finishedAt)).toContain(
-      'superseded by a later ingest of the layer',
+      'superseded by a later ingest of the layer before it finished',
     );
     cleanup();
     report({ accepted: 1, idempotent: 0, lint_failures: 0 });
