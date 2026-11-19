@@ -131,9 +131,11 @@ func (d *dropLog) flushKey(key dropKey) {
 	ent.timer = nil
 }
 
-// flushAll writes every pending count and stops the timers. The stream calls
-// it once, at shutdown, so the drops of a process's last minute, such as the
-// records a shutdown could not deliver, are logged before it exits.
+// flushAll writes every pending count, which stops each armed timer: a timer
+// is armed only while its key has a count pending, and writeDropLine cancels
+// it. The stream calls flushAll once, at shutdown, so the drops of a
+// process's last minute, such as the records a shutdown could not deliver,
+// are logged before it exits.
 //
 // Spec: §8.3
 func (d *dropLog) flushAll() {
@@ -143,10 +145,6 @@ func (d *dropLog) flushAll() {
 	for key, ent := range d.entries {
 		if ent.pending > 0 {
 			writeDropLine(key, ent, now)
-		}
-		if ent.timer != nil {
-			ent.timer.Stop()
-			ent.timer = nil
 		}
 	}
 }

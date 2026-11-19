@@ -70,3 +70,41 @@ func TestDropLog_LineAfterTheIntervalCancelsTheTimer(t *testing.T) {
 		t.Errorf("armed %t, one timer %t, cleared %t; log:\n%s", first != nil, same, timer() == nil, out)
 	}
 }
+
+// Spec: §8.3 — the trailing timer fires when the key's minute ends and logs
+// the held-back count without another drop arriving.
+func TestDropLog_TimerLogsTheHeldBackCount(t *testing.T) {
+	logs := captureLog(t)
+	frozen := clock.NewFrozen(time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC))
+	d := newDropLog(frozen)
+	d.record("dest", ReasonQueueFull, 1)
+	// The minute ends a few milliseconds of real time after the held-back
+	// drop, so the timer fires within the test.
+	frozen.Advance(dropLogInterval - 5*time.Millisecond)
+	d.record("dest", ReasonQueueFull, 2)
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(logs.String(), "audit: dropped 2 record(s)") {
+		if time.Now().After(deadline) {
+			t.Fatalf("the trailing timer logged nothing:\n%s", logs.String())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// Spec: §8.3 — at shutdown, flushAll logs a held-back count and stops the
+// armed timer, so the count is logged once.
+func TestDropLog_FlushAllStopsTheArmedTimer(t *testing.T) {
+	logs := captureLog(t)
+	frozen := clock.NewFrozen(time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC))
+	d := newDropLog(frozen)
+	d.record("dest", ReasonQueueFull, 1)
+	d.record("dest", ReasonQueueFull, 2)
+	d.flushAll()
+	key := dropKey{name: "dest", reason: ReasonQueueFull}
+	d.mu.Lock()
+	stopped := d.entries[key].timer == nil
+	d.mu.Unlock()
+	if out := logs.String(); !stopped || strings.Count(out, "audit: dropped 2 record(s)") != 1 {
+		t.Errorf("timer stopped %t; log:\n%s", stopped, out)
+	}
+}
