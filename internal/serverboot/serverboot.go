@@ -492,10 +492,40 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		if visibilityIsEmpty(effVis) {
 			effVis = vis
 		}
+		// Persist a LayerConfig so /v1/layers, /v1/layers/reingest, and
+		// the standalone web UI (§13.10) see the bootstrap layers. The
+		// SourceType is "local" with LocalPath set to the resolved
+		// directory so a future reingest can re-snapshot the same path. It
+		// is written before the ingest because the ingest claims the stored
+		// layer (§7.3.1).
+		now := time.Now().UTC()
+		cfg := store.LayerConfig{
+			TenantID:     tenantID,
+			ID:           l.ID,
+			SourceType:   "local",
+			LocalPath:    l.Path,
+			Order:        order,
+			Public:       effVis.Public,
+			Organization: effVis.Organization,
+			Groups:       effVis.Groups,
+			Users:        effVis.Users,
+			CreatedAt:    now,
+		}
+		if err := st.PutLayerConfig(ctx, cfg); err != nil {
+			return nil, fmt.Errorf("persist layer config %s: %w", l.ID, err)
+		}
+		// Spec: §7.3.1 (Removed artifacts) — the startup ingest claims the
+		// layer as every cycle does, so it and a cycle of the same layer on
+		// another replica supersede each other by claim order.
+		claim, _, err := ingest.ClaimLayer(ctx, st, tenantID, l.ID)
+		if err != nil {
+			return nil, err
+		}
 		res, err := ingest.Ingest(ctx, st, ingest.Request{
-			TenantID: tenantID,
-			LayerID:  l.ID,
-			Files:    source.ConfinedFS(l.Path),
+			TenantID:    tenantID,
+			LayerID:     l.ID,
+			IngestClaim: claim,
+			Files:       source.ConfinedFS(l.Path),
 			// §13.10/§13.2.2 public-mode sensitivity ceiling: reject medium and
 			// high artifacts at ingest with ingest.public_mode_rejects_sensitive.
 			// Empty (non-public deployments) imposes no floor.
@@ -530,28 +560,12 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		if err != nil {
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
 		}
-		// Persist a LayerConfig so /v1/layers, /v1/layers/reingest, and
-		// the standalone web UI (§13.10) see the bootstrap layers. The
-		// SourceType is "local" with LocalPath set to the resolved
-		// directory so a future reingest can re-snapshot the same path.
-		now := time.Now().UTC()
-		cfg := store.LayerConfig{
-			TenantID:     tenantID,
-			ID:           l.ID,
-			SourceType:   "local",
-			LocalPath:    l.Path,
-			Order:        order,
-			Public:       effVis.Public,
-			Organization: effVis.Organization,
-			Groups:       effVis.Groups,
-			Users:        effVis.Users,
-			CreatedAt:    now,
-			// §7.3.1: the bootstrap ingest just completed, so stamp
-			// last_ingested_at for staleness monitoring.
-			LastIngestedAt: &now,
-		}
-		if err := st.PutLayerConfig(ctx, cfg); err != nil {
-			return nil, fmt.Errorf("persist layer config %s: %w", l.ID, err)
+		// §7.3.1: the bootstrap ingest just completed, so stamp
+		// last_ingested_at for staleness monitoring, unless a later cycle
+		// claimed the layer and records its own.
+		done := time.Now().UTC()
+		if err := st.RecordLayerIngest(ctx, tenantID, l.ID, claim, "", &done); err != nil && !errors.Is(err, store.ErrIngestSuperseded) {
+			return nil, fmt.Errorf("record the ingest of layer %s: %w", l.ID, err)
 		}
 		layers = append(layers, layer.Layer{
 			ID:         l.ID,
@@ -656,10 +670,19 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 		}
 		switch lc.SourceType {
 		case "local":
+			// Spec: §7.3.1 (Removed artifacts) — the startup ingest claims the
+			// layer as every cycle does, so a cycle of the same layer on
+			// another replica and this ingest supersede each other by claim
+			// order rather than both removing.
+			claim, _, err := ingest.ClaimLayer(ctx, st, tenantID, lc.ID)
+			if err != nil {
+				return nil, err
+			}
 			res, err := ingest.Ingest(ctx, st, ingest.Request{
-				TenantID: tenantID,
-				LayerID:  lc.ID,
-				Files:    source.ConfinedFS(lc.LocalPath),
+				TenantID:    tenantID,
+				LayerID:     lc.ID,
+				IngestClaim: claim,
+				Files:       source.ConfinedFS(lc.LocalPath),
 				// §13.10/§13.2.2 public-mode sensitivity ceiling.
 				RejectAtOrAbove: publicSensitivityFloor(cfg),
 				// §13.10 sandbox-profile ingest gate (off unless enforced).
