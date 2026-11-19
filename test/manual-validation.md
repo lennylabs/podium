@@ -829,6 +829,9 @@ ordering. S05 covers the same-ID collision between layers.
 - `layer reingest base` ingests `greet@0.1.0` into `base`. `layer reingest team`
   ingests `team-greet@0.1.0` and `team-only@0.1.0` into `team` with no
   rejection.
+- Each reingest also prints an `advisory: <id> [warning] description is thin
+  ... (lint.thin_description)` line on standard output for each short
+  description. An advisory does not block the ingest and is not a rejection.
 - Searching `greet` returns both `greet` (description `base greet`) and
   `team-greet` (description `team greet`), so both layers' skills are served.
 - Searching `team only` returns the `team-only` skill.
@@ -13478,7 +13481,7 @@ lines, the search response, and the written file together.
    when_to_use [When a zorblax report is due.] does not match SKILL.md
    metadata.when_to_use [At session start.]
    (lint.skill_artifact_field_mismatch)`, another carries the top-level
-   `when_to_use` warning that step 3 reads, and the last line is
+   `when_to_use` warning that step 1 prints, and the last line is
    `lint exit=1`.
 
 5. Drop the top-level key, so the skill states `when_to_use` in `metadata`
@@ -13534,7 +13537,7 @@ lines, the search response, and the written file together.
    URL=http://127.0.0.1:8178
    ```
 
-   **Expect.** `server_alive` prints nothing, and `srv.log` holds a line that begins `podium-server listening on 127.0.0.1:8178`.
+   **Expect.** `server_alive` prints nothing, and `srv.log` holds a line that contains `podium-server listening on 127.0.0.1:8178`.
 
 2. Load `ops/greet` as an agent from two harnesses, sync `ops/farewell`, search with a query and without one, and read the report after the flush.
 
@@ -13650,7 +13653,7 @@ lines, the search response, and the written file together.
    rows
    ```
 
-   **Expect.** `load 200`, `sync 200`, the same search line, and `usage 404`. `rows` prints the same four rows as step 3, because 0.6.0 neither counts nor removes usage. A 0.6.0 that refuses to start on the newer database is the defect.
+   **Expect.** `load 200`, `sync 200`, the same search line, and `usage 404`. `rows` prints the same four rows as step 3, because 0.6.0 neither counts nor removes usage. A 0.6.0 that refuses to start on the newer database is the defect. `$WORK/s3.log` can carry `audit integrity ALERT: hash-chain gap detected: audit: chain broken at index <n>: Hash mismatch`, where index `<n>` is the first record that carries `schema_version`. 0.6.0 cannot recompute the hash of a record 0.7.0 wrote, as the upgrade notes' audit chain verification after a rollback describes, and step 5's 0.7.0 start reports no break. The alert is not a defect of this scenario.
 
 5. Upgrade again, read the rows, and read the `context.results` member of each `artifacts.searched` record for the query.
 
@@ -13814,7 +13817,7 @@ rm -rf "$WORK"
 
 5. Switch the theme to dark with the control in the top bar and repeat steps 2 to 4.
 
-   **Expect.** Every bar, swatch, and figure stays legible against the dark ground, the accent bars keep their tone, and no text or bar disappears, the `unknown` breakdown part and its swatch included. Opening an artifact in the viewer is itself a load, counted under client `web`, so the repeated steps report one more load for each artifact step 4 opened, and the client bar gains a `web` part.
+   **Expect.** Every bar, swatch, and figure stays legible against the dark ground, the accent bars keep their tone, and no text or bar disappears, the `unknown` breakdown part and its swatch included. Opening an artifact in the viewer is itself a load, counted under client `web`, so the repeated steps report one more load for each artifact step 4 opened, and the client bar gains a `web` part. The web UI sends no harness, so the harness bar's `unknown` part grows by the same loads. Each search the web UI runs counts a `web` search hit for every artifact it returns, so the search hits that the repeated steps state for `observability/trace-review` exceed the light-theme figures by one for each web UI search that returned it.
 
 **Cleanup.**
 

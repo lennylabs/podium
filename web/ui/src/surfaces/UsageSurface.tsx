@@ -317,7 +317,9 @@ function ArtifactUsage({
   const [sort, setSort] = useState<SortKey>('loads');
   const [order, setOrder] = useState<'desc' | 'asc'>('desc');
   const [more, setMore] = useState<UsageArtifact[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
+  const [next, setNext] = useState<string | null>(null);
+  const [total, setTotal] = useState(0);
+  const [generation, setGeneration] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [moreFailed, setMoreFailed] = useState(false);
   const sentinel = useRef<HTMLDivElement | null>(null);
@@ -337,21 +339,30 @@ function ArtifactUsage({
     limit: listPage,
   };
   const key = JSON.stringify(params);
-  const keyRef = useRef(key);
-  keyRef.current = key;
   const list = useAsync(() => usageReport(params), [key]);
-  // A new first page discards the pages appended under the previous key.
-  const [listedFor, setListedFor] = useState(key);
-  if (listedFor !== key) {
-    setListedFor(key);
+  const first = list.value;
+  // A change of filters or sort, and each first page that answers, starts the
+  // list over: the appended pages are discarded and the next cursor is the
+  // one the first page carries. Until the new first page answers there is no
+  // cursor, because the one on screen belongs to the previous order (§8.7).
+  // Each restart bumps the generation, which is what a next page compares on
+  // its return. The filters alone cannot tell lists apart: a reader who
+  // changes a filter and changes it back is under the same filters again,
+  // and a page asked for before the change would be appended beside the
+  // pages the new list reads.
+  const [listedFor, setListedFor] = useState({ key, first });
+  if (listedFor.key !== key || listedFor.first !== first) {
+    setListedFor({ key, first });
     setMore([]);
-    setCursor(null);
+    setNext(listedFor.key === key ? (first?.next_cursor ?? null) : null);
+    setTotal(first?.artifact_count ?? 0);
+    setGeneration((g) => g + 1);
     setLoadingMore(false);
     setMoreFailed(false);
   }
-  const first = list.value;
+  const generationRef = useRef(generation);
+  generationRef.current = generation;
   const rows = first === null ? [] : [...first.artifacts, ...more];
-  const next = more.length > 0 ? cursor : (first?.next_cursor ?? null);
   const peak: Peaks = {
     loads: Math.max(0, ...rows.map((r) => r.loads)),
     syncs: Math.max(0, ...rows.map((r) => r.syncs)),
@@ -370,23 +381,34 @@ function ArtifactUsage({
     if (next === null || loadingMore || list.loading) {
       return;
     }
-    // A page answers the filter, sort, and range it was asked under. One that
-    // arrives after the reader changed them belongs to a list no longer on
-    // screen, so it is dropped rather than appended under the new order.
-    const askedFor = key;
+    // A page answers the list it was asked for. One that arrives after the
+    // list started over belongs to a list no longer on screen, so it is
+    // dropped rather than appended under the new order.
+    const askedIn = generation;
+    const listed = rows;
+    const readWith = next;
     setLoadingMore(true);
     setMoreFailed(false);
-    usageReport({ ...params, cursor: next }).then(
+    usageReport({ ...params, cursor: readWith }).then(
       (page) => {
-        if (keyRef.current !== askedFor) {
+        if (generationRef.current !== askedIn) {
           return;
         }
-        setMore((prior) => [...prior, ...page.artifacts]);
-        setCursor(page.next_cursor);
+        setMore((prior) => [...prior, ...unlisted(listed, page.artifacts)]);
+        // The page's cursor replaces the one it was read with, whether or not
+        // the page added rows. A count that changed between reads moves
+        // artifacts across the cursor (§8.7), so the last page can come back
+        // empty with no cursor, and a page before it can repeat only rows
+        // already listed while unseen artifacts remain after it. Each cursor
+        // the report issues lies past the one it was read with, so following
+        // it always advances. A cursor equal to the one just read would read
+        // the same page again in a loop, so it ends the list.
+        setNext(page.next_cursor === readWith ? null : page.next_cursor);
+        setTotal(page.artifact_count);
         setLoadingMore(false);
       },
       () => {
-        if (keyRef.current !== askedFor) {
+        if (generationRef.current !== askedIn) {
           return;
         }
         setLoadingMore(false);
@@ -463,7 +485,7 @@ function ArtifactUsage({
         </label>
         {first !== null && (
           <span className="usage-count" data-testid="usage-count">
-            Showing <strong>{formatCount(rows.length)}</strong> of <strong>{formatCount(first.artifact_count)}</strong>
+            Showing <strong>{formatCount(rows.length)}</strong> of <strong>{formatCount(Math.max(total, rows.length))}</strong>
           </span>
         )}
       </div>
@@ -521,13 +543,38 @@ function ArtifactUsage({
             </>
           ) : (
             <button type="button" className="button" onClick={showMore}>
-              {`Show ${String(Math.min(listPage, first.artifact_count - rows.length))} more`}
+              {showMoreLabel(total - rows.length)}
             </button>
           )}
         </div>
       )}
     </section>
   );
+}
+
+/** unlisted returns the rows of a page whose artifact is not already listed.
+ * A count that changes between reads can move an artifact across the cursor
+ * and onto a second page (§8.7); the table lists each artifact once, where it
+ * first appeared, and a repeated row would also repeat a React key.
+ *
+ * Spec: §8.7 */
+function unlisted(listed: UsageArtifact[], page: UsageArtifact[]): UsageArtifact[] {
+  const seen = new Set(listed.map((row) => row.artifact_id));
+  return page.filter((row) => {
+    if (seen.has(row.artifact_id)) {
+      return false;
+    }
+    seen.add(row.artifact_id);
+    return true;
+  });
+}
+
+/** showMoreLabel names the next page on the button. `remaining` comes from
+ * the latest page's artifact count, which a count change or a retired
+ * artifact can bring to zero or below while the report still issues a
+ * cursor; the label then names no number. */
+function showMoreLabel(remaining: number): string {
+  return remaining > 0 ? `Show ${String(Math.min(listPage, remaining))} more` : 'Show more';
 }
 
 /** Peaks holds the largest value of each barred column among the rows
