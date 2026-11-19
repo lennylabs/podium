@@ -223,6 +223,16 @@ To turn the check on for an existing catalog:
 
 The store needs no backup restore to roll back.
 
+### Audit chain verification after a rollback
+
+0.7.0 writes a `schema_version` member on every audit record and a `caller.client` member when the request names its client, and it includes both in the record's hash. A 0.6.0 process reads neither member, so it cannot recompute the hash of a record that 0.7.0 wrote.
+
+- After a rollback to 0.6.0, the scheduled integrity pass reports a chain break at the first record 0.7.0 wrote. The pass runs on `PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS` when `PODIUM_AUDIT_LOG_PATH` includes a file. It logs `audit integrity ALERT: hash-chain gap detected: audit: chain broken at index <n>: Hash mismatch`, appends an `audit.gap_detected` record, and repeats both on every pass while 0.6.0 runs.
+- The chain itself is intact. Each record 0.6.0 appends links to the record before it, and the next 0.7.0 start verifies the whole file, including the records 0.6.0 wrote and its `audit.gap_detected` records.
+- While 0.6.0 runs, its pass stops at the break, so no record written after the first 0.7.0 record is verified until 0.7.0 starts again.
+- To confirm that a reported break is this boundary, compare its index with the first record that carries `schema_version`. `grep -n -m1 '"schema_version"' <audit log file>` prints that record's line number, which is the index plus one in a file with no blank lines. The rollback does not explain a break at any other index. Treat such a break as an audit chain gap, as [Troubleshooting](troubleshooting) describes.
+- A receiver that checks the `prev_hash` links of a shipped stream is unaffected, because the links do not depend on the members a record carries.
+
 ### Operator token in public mode
 
 A 0.7.0 registry in public mode refuses the following with `403 auth.forbidden` unless the request carries `PODIUM_OPERATOR_TOKEN`: `podium admin reembed`, `podium admin rebuild-overlap`, `podium admin erase`, and every layer write (`podium layer register`, `unregister`, `update`, `restore`, `reorder`, `reingest`, and `watch`). A 0.6.0 registry in public mode admitted all of them from any caller.
