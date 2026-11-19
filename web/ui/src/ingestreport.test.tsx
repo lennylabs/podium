@@ -420,7 +420,7 @@ describe('the finished reingest report', () => {
       removed: true,
     };
     const cause =
-      'only the layer that contributed it serves it again, by a reingest of the same content or, when that layer was unregistered, a restore, until the registry purges it.';
+      "only the layer that contributed it serves again, by a reingest of the same content or, when the layer's unregister removed it, a restore of the layer, until the registry purges it.";
     report({ accepted: 1, idempotent: 0, conflicts: [removed] });
     const row = screen.getByLabelText('Needs attention').querySelector('.attention-row');
     expect(row?.textContent).toBe(

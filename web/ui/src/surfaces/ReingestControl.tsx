@@ -461,11 +461,13 @@ function Stat({
 
 /** REMOVED_VERSION_CAUSE explains a conflict on a removed version. Such a
  * version holds its (id, version) whatever the incoming content is, so equal
- * hashes are not a content difference, and only the layer that contributed it
+ * hashes are not a content difference. Only the layer that contributed it
  * serves it again: by a reingest of the same content, or, when that layer's
- * unregister removed it, by a restore of the layer. */
+ * unregister removed it, by a restore of the layer. A version an ingest
+ * removed before the unregister needs the restore and then a reingest. The
+ * wording matches the server's ingest.immutable_violation message. */
 const REMOVED_VERSION_CAUSE =
-  'only the layer that contributed it serves it again, by a reingest of the same content or, when that layer was unregistered, a restore, until the registry purges it.';
+  "only the layer that contributed it serves again, by a reingest of the same content or, when the layer's unregister removed it, a restore of the layer, until the registry purges it.";
 
 /** conflictCause names why the conflicts arose, distinguishing a version
  * published with different content from a removed version, as each entry's
