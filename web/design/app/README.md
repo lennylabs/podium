@@ -2,7 +2,7 @@
 
 ## Overview
 
-The web UI for a Podium registry — the read surface for people who do not use the CLI or SDK, plus the layer-management surface for administrators and layer owners. Four core surfaces (domain browser, search, artifact viewer, layer panel), a ⌘K palette, and the write flows around layer registration and reingest.
+The web UI for a Podium registry — the read surface for people who do not use the CLI or SDK, plus the layer-management surface for administrators and layer owners. Core surfaces (domain browser, search, artifact viewer, similarity analysis, usage, and layer panel), a ⌘K palette, and the write flows around layer registration and reingest.
 
 The authority for what the UI does is `spec/13-deployment.md` §13.10 and the design brief derived from it. Where this handoff and the spec disagree, the spec wins.
 
