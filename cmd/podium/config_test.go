@@ -58,6 +58,29 @@ func TestConfigShow_PrintsResolvedSettings(t *testing.T) {
 	}
 }
 
+// Spec: §13.12 — with a registry.yaml that does not parse, `podium config
+// show --server` warns on standard error with the refusal the registry would
+// start with, naming the file and line, and still prints the settings.
+func TestConfigShow_WarnsOnUnparseableConfigFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.yaml")
+	if err := os.WriteFile(path, []byte("registry:\n  layers: [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PODIUM_CONFIG_FILE", path)
+	var out string
+	stderr := captureStderr(t, func() {
+		out = captureStdout(t, func() {
+			if rc := configShow([]string{"--server"}); rc != 0 {
+				t.Errorf("rc = %d, want 0", rc)
+			}
+		})
+	})
+	want := "warning: config.invalid: registry configuration " + path + " does not parse at line "
+	if !strings.HasPrefix(stderr, want) || !strings.Contains(out, "127.0.0.1:8080") {
+		t.Errorf("stderr = %q, want prefix %q; stdout = %q, want the default bind", stderr, want, out)
+	}
+}
+
 // Spec: §6.10 — JSON output stays stable for tooling.
 func TestConfigShow_JSONIsStructured(t *testing.T) {
 	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
