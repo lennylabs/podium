@@ -8,7 +8,7 @@ description: What Podium implements today, where each release is published, and 
 
 This page records what Podium implements today, where each release is published, and how to follow the work toward 1.0.
 
-Podium is at **0.6.x**, an early release. The v1 surface is implemented and published. The surface and its behavior may still change before 1.0, so pin a specific version in production and watch the [changelog](changelog) for breaking changes.
+Podium is at **0.7.x**, an early release. The v1 surface is implemented and published. The surface and its behavior may still change before 1.0, so pin a specific version in production and watch the [changelog](changelog) for breaking changes.
 
 Install the CLI through Homebrew, Scoop, a direct binary download, or a build from source. [Quickstart](../getting-started/quickstart#1-install-the-cli) has the commands. The published container image carries only the `podium-server` registry binary.
 
@@ -40,7 +40,7 @@ The implementation covers the following surfaces:
 
 ## On the roadmap toward 1.0
 
-Behavior between 0.6.x and 1.0 may break, and the [changelog](changelog) records each change. These topics are under active discussion:
+Behavior between 0.7.x and 1.0 may break, and the [changelog](changelog) records each change. These topics are under active discussion:
 
 - Tightening the spec where field semantics are still under-specified.
 - Adapters for harnesses outside the current built-in roster, with conformance coverage for each.
