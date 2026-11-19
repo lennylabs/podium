@@ -35,6 +35,10 @@ type Memory struct {
 	overlapRuns map[string]map[string]OverlapComputation
 	// usage holds the §8.7 daily usage rows per tenant.
 	usage map[string]map[usageKey]UsageCount
+	// ingestClaims holds each layer's §7.3.1 ingest claim, keyed like layers.
+	// It sits apart from layers so PutLayerConfig, which stores the caller's
+	// config whole, keeps it.
+	ingestClaims map[string]string
 }
 
 // NewMemory returns a fresh in-memory Store.
@@ -52,6 +56,7 @@ func NewMemory() *Memory {
 		overlaps:      map[string]map[[2]string]OverlapRecord{},
 		overlapRuns:   map[string]map[string]OverlapComputation{},
 		usage:         map[string]map[usageKey]UsageCount{},
+		ingestClaims:  map[string]string{},
 	}
 }
 
@@ -553,6 +558,7 @@ func (s *Memory) DeleteLayerConfig(_ context.Context, tenantID, id string) error
 	now := time.Now().UTC()
 	cfg.DeletedAt = &now
 	s.layers[layerKey(tenantID, id)] = cfg
+	delete(s.ingestClaims, layerKey(tenantID, id))
 	for key, rec := range s.manifests {
 		if rec.TenantID == tenantID && rec.Layer == id && rec.DeletedAt == nil {
 			rec.DeletedAt = &now
@@ -631,10 +637,14 @@ func (s *Memory) PurgeExpiredLayerDeletions(_ context.Context, before time.Time)
 }
 
 // SoftDeleteArtifacts tombstones the live rows layerID contributed for each
-// of artifactIDs (§7.3.1 removed artifacts).
-func (s *Memory) SoftDeleteArtifacts(_ context.Context, tenantID, layerID string, artifactIDs []string, at time.Time) error {
+// of artifactIDs (§7.3.1 removed artifacts). With a claim, it checks under
+// the store lock that the live layer holds it.
+func (s *Memory) SoftDeleteArtifacts(_ context.Context, tenantID, layerID string, artifactIDs []string, at time.Time, claim string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if claim != "" && !s.holdsClaimLocked(tenantID, layerID, claim) {
+		return ErrIngestSuperseded
+	}
 	ids := make(map[string]bool, len(artifactIDs))
 	for _, id := range artifactIDs {
 		ids[id] = true
@@ -647,6 +657,66 @@ func (s *Memory) SoftDeleteArtifacts(_ context.Context, tenantID, layerID string
 			s.manifests[key] = rec
 		}
 	}
+	return nil
+}
+
+// holdsClaimLocked reports whether the live layer holds claim. The caller
+// holds s.mu.
+func (s *Memory) holdsClaimLocked(tenantID, layerID, claim string) bool {
+	key := layerKey(tenantID, layerID)
+	cfg, ok := s.layers[key]
+	return ok && cfg.DeletedAt == nil && s.ingestClaims[key] == claim
+}
+
+// ClaimLayerIngest makes claim the live layer's ingest claim (§7.3.1) and
+// returns the claim it replaced.
+func (s *Memory) ClaimLayerIngest(_ context.Context, tenantID, layerID, claim string) (LayerConfig, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := layerKey(tenantID, layerID)
+	cfg, ok := s.layers[key]
+	if !ok || cfg.DeletedAt != nil {
+		return LayerConfig{}, "", ErrNotFound
+	}
+	previous := s.ingestClaims[key]
+	s.ingestClaims[key] = claim
+	return splitStoredLayer(cfg), previous, nil
+}
+
+// ReleaseLayerIngest puts previous back as the layer's ingest claim when the
+// live layer still holds claim (§7.3.1).
+func (s *Memory) ReleaseLayerIngest(_ context.Context, tenantID, layerID, claim, previous string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.holdsClaimLocked(tenantID, layerID, claim) {
+		return nil
+	}
+	key := layerKey(tenantID, layerID)
+	if previous == "" {
+		delete(s.ingestClaims, key)
+		return nil
+	}
+	s.ingestClaims[key] = previous
+	return nil
+}
+
+// RecordLayerIngest sets the ingest reference and time of the live layer that
+// holds claim (§7.3.1), leaving every other field as stored.
+func (s *Memory) RecordLayerIngest(_ context.Context, tenantID, layerID, claim, ref string, at *time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.holdsClaimLocked(tenantID, layerID, claim) {
+		return ErrIngestSuperseded
+	}
+	key := layerKey(tenantID, layerID)
+	cfg := s.layers[key]
+	cfg.LastIngestedRef = ref
+	if at != nil {
+		stamp := at.UTC()
+		at = &stamp
+	}
+	cfg.LastIngestedAt = at
+	s.layers[key] = cfg
 	return nil
 }
 

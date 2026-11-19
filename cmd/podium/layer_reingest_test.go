@@ -190,6 +190,17 @@ func TestWriteIngestReport_Classification(t *testing.T) {
 			emptyErr: true,
 		},
 		{
+			// Spec: §7.3.1 (Removed artifacts) — a cycle a later cycle of the
+			// layer superseded says so on stderr and adds no drop, so the exit
+			// status stays 0.
+			name:        "superseded cycle",
+			body:        `{"layer":"team","accepted":0,"idempotent":0,"artifacts":[],"removed":[],"superseded":true}`,
+			wantDropped: 0,
+			wantOK:      true,
+			wantStderr:  []string{"superseded: a later ingest cycle of layer team took over before this cycle finished; this cycle stopped there and recorded no reference\n"},
+			emptyOut:    true,
+		},
+		{
 			name: "mixed lint",
 			body: `{"layer":"team","accepted":1,"idempotent":0,"lint_failures":2,
 				"artifacts":[{"id":"ops/oncall","version":"1.0.0","status":"accepted"}]}`,

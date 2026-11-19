@@ -228,7 +228,7 @@ func TestVectorOutbox_ExistingVersionPostgres(t *testing.T) {
 	}
 	same := p.PutManifestWithVectorPending(ctx, rec("team", "sha256:1"), pending)
 	other := p.PutManifestWithVectorPending(ctx, rec("team", "sha256:2"), pending)
-	if err := p.SoftDeleteArtifacts(ctx, tenant, "team", []string{"a/x"}, now); err != nil {
+	if err := p.SoftDeleteArtifacts(ctx, tenant, "team", []string{"a/x"}, now, ""); err != nil {
 		t.Fatalf("soft delete: %v", err)
 	}
 	foreign := p.PutManifestWithVectorPending(ctx, rec("org", "sha256:1"), pending)

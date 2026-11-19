@@ -121,6 +121,13 @@ type UsageCounter struct {
 	// exact cap; held only bounds what waits for it. mu guards it, because
 	// add reads it on the request path.
 	held map[[2]string]*usageDayKeys
+	// inflight holds the rows a flush took from pending until the flush
+	// either hands their loads to the ranking or puts them back, so the §3.3
+	// ranking counts them while the store add is in progress. mu guards it.
+	inflight map[usageBufferKey]pendingCount
+	// ranking receives the loads of each tenant's successful add, which it
+	// keeps until it reads the stored counts again. mu guards it.
+	ranking *UsageRanking
 }
 
 // NewUsageCounter returns an empty counter that dates each count by c in UTC.
@@ -213,6 +220,7 @@ func (u *UsageCounter) Flush(ctx context.Context, st store.Store) error {
 	u.mu.Lock()
 	taken := u.pending
 	u.pending = map[usageBufferKey]pendingCount{}
+	u.inflight = taken
 	u.mu.Unlock()
 
 	byTenant := map[string][]pendingCount{}
@@ -231,7 +239,10 @@ func (u *UsageCounter) Flush(ctx context.Context, st store.Store) error {
 				first = err
 			}
 			u.restore(counts)
+		} else {
+			u.carryAdded(tenant, counts)
 		}
+		u.settle(tenant)
 	}
 	u.holdKnown()
 	u.forgetOldDays()
@@ -384,12 +395,59 @@ func (u *UsageCounter) pendingLoads(tenant string) map[usageRef]int64 {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	out := map[usageRef]int64{}
-	for k, c := range u.pending {
-		if k.tenant == tenant && c.Loads > 0 {
-			out[usageRef{id: k.artifact, layer: k.layer}] += c.Loads
+	for _, buf := range []map[usageBufferKey]pendingCount{u.pending, u.inflight} {
+		for k, c := range buf {
+			if k.tenant == tenant && c.Loads > 0 {
+				out[usageRef{id: k.artifact, layer: k.layer}] += c.Loads
+			}
 		}
 	}
 	return out
+}
+
+// carryAdded hands the loads of counts, which the store has just added for
+// tenant, to the ranking, which keeps them until its next read of the stored
+// counts. It runs before settle drops the rows from inflight, so a search
+// that reads the buffer before the ranking (usageRanking's order) finds the
+// loads in one place or both and never in neither.
+//
+// Spec: §3.3
+func (u *UsageCounter) carryAdded(tenant string, counts []pendingCount) {
+	u.mu.Lock()
+	ranking := u.ranking
+	u.mu.Unlock()
+	if ranking == nil {
+		return
+	}
+	loads := map[usageRef]int64{}
+	for _, c := range counts {
+		if c.Loads > 0 {
+			loads[usageRef{id: c.ArtifactID, layer: c.Layer}] += c.Loads
+		}
+	}
+	ranking.carry(tenant, loads)
+}
+
+// settle drops tenant's rows from inflight once the flush has carried or
+// restored them.
+func (u *UsageCounter) settle(tenant string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for k := range u.inflight {
+		if k.tenant == tenant {
+			delete(u.inflight, k)
+		}
+	}
+}
+
+// withRanking links the ranking that receives each flush's added loads.
+func (u *UsageCounter) withRanking(r *UsageRanking) {
+	if u == nil {
+		return
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.ranking = r
 }
 
 // restore merges counts back into the buffer after a failed flush. A merged
@@ -416,5 +474,6 @@ func (u *UsageCounter) restore(counts []pendingCount) {
 // and the usage report then reads only rows another replica stored.
 func (r *Registry) WithUsageCounts(u *UsageCounter) *Registry {
 	r.usageCounts = u
+	u.withRanking(r.usageRank)
 	return r
 }

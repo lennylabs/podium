@@ -330,6 +330,13 @@ function IngestReport({
         )}
         {!recorded && detail === null && (
           <>
+            {summary.superseded === true && (
+              <p data-testid="reingest-superseded">
+                A later ingest of this layer took over before this one finished, so this one stopped there and
+                recorded no reference. The counts show what it did before it stopped; the later ingest brings the
+                layer up to date.
+              </p>
+            )}
             <div className="stats" aria-label="Ingest counts">
               <Stat
                 label="accepted"
@@ -576,6 +583,9 @@ export function summaryText(layerID: string, summary: IngestSummary, finishedAt:
     `Reingest ${layerID} finished ${clock(finishedAt)}`,
     `${summary.accepted ?? 0} accepted, ${summary.idempotent ?? 0} unchanged, ${rejected.length} rejected, ${conflicts.length} conflicts, ${summary.lint_failures ?? 0} lint failures, ${advisories.length} advisories`,
   ];
+  if (summary.superseded === true) {
+    lines.push('superseded by a later ingest of the layer before it finished; this ingest stopped there and recorded no reference');
+  }
   for (const rejection of rejected) {
     lines.push(`rejected ${rejection.artifact_id} ${rejection.code}: ${rejection.reason}`);
   }

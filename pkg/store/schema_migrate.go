@@ -91,6 +91,7 @@ var additiveColumns = []additiveColumn{
 	{"layer_configs", "deleted_at TEXT", "deleted_at TIMESTAMPTZ"},
 	{"layer_configs", "last_ingested_at TEXT", "last_ingested_at TIMESTAMPTZ"},
 	{"layer_configs", "repo_userinfo TEXT", "repo_userinfo TEXT"},
+	{"layer_configs", "ingest_claim TEXT", "ingest_claim TEXT"},
 
 	// vector_pending
 	{"vector_pending", "attempts INTEGER NOT NULL DEFAULT 0", "attempts BIGINT NOT NULL DEFAULT 0"},

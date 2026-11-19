@@ -275,6 +275,18 @@ type Request struct {
 	// sets it when PODIUM_LINT_SEMANTIC_OVERLAP is on and the vector backend
 	// is collocated; nil computes nothing.
 	SemanticOverlap SemanticOverlapFunc
+	// IngestClaim is the claim the cycle took on its layer before its
+	// snapshot (store.ClaimLayerIngest). When set, the cycle stores nothing
+	// unless the layer still holds the claim when the writes start, and it
+	// removes artifacts only while the layer holds it. Empty skips both
+	// checks, for a caller with no stored layer row.
+	IngestClaim string
+	// OnFirstWrite, when non-nil, is called once, after the checks that
+	// precede the cycle's writes and before its first store write. A caller
+	// that holds a claim uses it to tell a cycle that failed before writing,
+	// whose claim it may hand back, from one that failed after, whose claim
+	// it keeps (§7.3.1).
+	OnFirstWrite func()
 }
 
 // SemanticOverlapFunc computes the §7.3.1 overlap records of the (artifact,
@@ -405,6 +417,13 @@ type Result struct {
 	//
 	// Spec: §7.3.1 (Removed artifacts)
 	Removed []string
+	// Superseded reports that a later cycle of the layer claimed it before
+	// this cycle's check before its writes or its removal check, so the cycle
+	// stopped there, removed nothing, and its caller records neither its
+	// reference nor its time on the layer.
+	//
+	// Spec: §7.3.1 (Removed artifacts)
+	Superseded bool
 }
 
 // IngestedArtifact names an (artifact_id, version) pair present in a layer
@@ -506,6 +525,23 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	}
 
 	now := req.Clock.Now().UTC()
+
+	// Spec: §7.3.1 (Removed artifacts) — a cycle that a later cycle of the
+	// layer has already superseded stores nothing: its puts would restore
+	// versions the later cycle removed. The check runs before the first write.
+	if req.IngestClaim != "" {
+		err := st.SoftDeleteArtifacts(ctx, req.TenantID, req.LayerID, nil, now, req.IngestClaim)
+		switch {
+		case errors.Is(err, store.ErrIngestSuperseded):
+			return &Result{Removed: []string{}, Superseded: true}, nil
+		case err != nil:
+			return nil, fmt.Errorf("ingest: check the ingest claim: %w", err)
+		}
+	}
+	// Every return from here on follows a store write or an attempted one.
+	if req.OnFirstWrite != nil {
+		req.OnFirstWrite()
+	}
 
 	// §4.5.1 — persist every DOMAIN.md so load_domain can read domain
 	// composition (description, keywords, unlisted, include/exclude,
@@ -839,15 +875,23 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 
 	// Spec: §7.3.1 (Removed artifacts) — the cycle read the whole snapshot,
 	// so an artifact this layer serves that it did not find is soft-deleted.
+	// With an ingest claim, the store checks in the tombstoning transaction
+	// that no later cycle of the layer claimed it, because that cycle's
+	// snapshot can be the newer one, and a superseded cycle removes nothing.
 	res.Removed = removedArtifacts(rowsByID, req.LayerID, inSnapshot)
-	if len(res.Removed) > 0 {
-		if err := st.SoftDeleteArtifacts(ctx, req.TenantID, req.LayerID, res.Removed, now); err != nil {
+	if len(res.Removed) > 0 || req.IngestClaim != "" {
+		err := st.SoftDeleteArtifacts(ctx, req.TenantID, req.LayerID, res.Removed, now, req.IngestClaim)
+		switch {
+		case errors.Is(err, store.ErrIngestSuperseded):
+			res.Removed = []string{}
+			res.Superseded = true
+		case err != nil:
 			return nil, fmt.Errorf("ingest: soft-delete removed artifacts: %w", err)
 		}
 	}
 
 	if len(res.LintFailures) > 0 && res.Accepted == 0 && res.Idempotent == 0 && len(res.Conflicts) == 0 {
-		return res, fmt.Errorf("%w: %d diagnostics", ErrLintFailed, len(res.LintFailures))
+		return res, lintFailedError(res.LintFailures)
 	}
 	return res, nil
 }

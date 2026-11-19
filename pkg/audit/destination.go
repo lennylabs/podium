@@ -60,6 +60,48 @@ func (d destSpec) name() string {
 	}
 }
 
+// defaultPorts maps each URL scheme to the port a request uses when the URL
+// names none (§8.3).
+var defaultPorts = map[string]string{
+	"http":       "80",
+	"https":      "443",
+	"otlp+http":  "80",
+	"otlp+https": "443",
+}
+
+// identity is the value the duplicate check compares. A URL element is
+// compared after its scheme and host are lowercased, a default port is
+// removed, and an empty path is read as "/", because each of those spellings
+// reaches the same receiver; comparing element text let "http://h/a" and
+// "HTTP://h/a" both open, and every record was delivered twice. The query is
+// kept, since it can select a different receiver.
+//
+// Spec: §8.3
+func (d destSpec) identity() string {
+	switch d.kind {
+	case kindFile:
+		return "file:" + d.path
+	case kindStdout:
+		return tokenStdout
+	}
+	host := strings.ToLower(d.url.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if port := d.url.Port(); port != "" && port != defaultPorts[d.url.Scheme] {
+		host += ":" + port
+	}
+	path := d.url.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	id := d.url.Scheme + "://" + host + path
+	if d.url.RawQuery != "" || d.url.ForceQuery {
+		id += "?" + d.url.RawQuery
+	}
+	return id
+}
+
 // listVariable names the variable a list came from, which every refusal
 // names (§13.12).
 func listVariable(opts OpenOptions) string {
@@ -89,10 +131,11 @@ func parseDestinations(value string, opts OpenOptions) ([]destSpec, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s: %w", ErrConfig, variable, err)
 		}
-		if seen[elem] {
+		key := spec.identity()
+		if seen[key] {
 			return nil, fmt.Errorf("%w: %s: destination %s is listed twice", ErrConfig, variable, spec.name())
 		}
-		seen[elem] = true
+		seen[key] = true
 		if spec.kind == kindFile {
 			files++
 			if files > 1 {

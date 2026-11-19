@@ -213,8 +213,12 @@ ASCII fallback for the diagram above (hybrid retrieval):
 With a `query`, results that rank close together are reordered by how often
 agents loaded each artifact in the last 30 days, counted under the layer that
 serves it. Loads by `podium sync` and appearances in search results do not
-count. A load is reflected at once on the registry replica that served it and on
-the others within `PODIUM_USAGE_FLUSH_INTERVAL`, one minute by default.
+count. A load is reflected at once on the registry replica that served it, and on
+another replica at that replica's first read of the stored counts after the
+serving replica flushes the load. A replica flushes once per
+`PODIUM_USAGE_FLUSH_INTERVAL`, one minute by default, and reads the stored counts
+at most once per interval, on a search, so the delay on another replica is at
+most two intervals while searches arrive.
 
 When `query` is omitted, the tool returns artifacts matching the filters in
 default order. This is how an agent lists everything in a domain, when the

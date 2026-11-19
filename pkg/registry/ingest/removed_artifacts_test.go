@@ -121,7 +121,7 @@ func TestIngest_RemovedArtifactRestoresAndConflicts(t *testing.T) {
 // failingSoftDelete is a store whose tombstone write fails.
 type failingSoftDelete struct{ store.Store }
 
-func (failingSoftDelete) SoftDeleteArtifacts(context.Context, string, string, []string, time.Time) error {
+func (failingSoftDelete) SoftDeleteArtifacts(context.Context, string, string, []string, time.Time, string) error {
 	return errors.New("store down")
 }
 

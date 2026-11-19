@@ -169,13 +169,14 @@ type rawStampedRow struct {
 
 // Spec: §7.3.1 (Repository credentials) — over the SQLite store, a row that
 // holds the registered URL whole in repo, the form an earlier release wrote,
-// still clones with that URL, and the post-ingest stamp writes it back with
-// the userinfo apart from the rest of the value.
-func TestSourceIngest_StampWritesUserinfoApartOnSQLite(t *testing.T) {
+// still clones with that URL.
+// Spec: §7.3.1 (Removed artifacts) — the post-ingest record writes only the
+// ingest reference and time, so the repo columns stay as stored; the §13.4
+// start-time rewrite is what moves such a row to the two-column form.
+func TestSourceIngest_RecordLeavesTheRepoColumnsOnSQLite(t *testing.T) {
 	t.Parallel()
 	const (
 		registered = "https://alice-user:s3cr3tpw@git.acme.com/acme/x.git"
-		bare       = "https://git.acme.com/acme/x.git"
 	)
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "podium.db")
@@ -230,8 +231,7 @@ func TestSourceIngest_StampWritesUserinfoApartOnSQLite(t *testing.T) {
 		Row        rawStampedRow
 	}
 	want := stamp{ClonedWith: registered, Row: rawStampedRow{
-		Repo:            bare,
-		Userinfo:        sql.NullString{String: "alice-user:s3cr3tpw", Valid: true},
+		Repo:            registered,
 		LastIngestedRef: "fedcba9876543210",
 	}}
 	if got := (stamp{provider.calledWithRepo, row}); got != want {

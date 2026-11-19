@@ -26,6 +26,10 @@ type countingStore struct {
 	*store.Memory
 	reads   atomic.Int32
 	failing atomic.Bool
+	// gate, when non-nil, holds each read until it is closed, after the read
+	// closes entered. A test sets both before the read and clears gate after
+	// the read returns.
+	gate, entered chan struct{}
 }
 
 func (s *countingStore) SumUsageLoads(ctx context.Context, tenantID, fromDay, toDay string) ([]store.UsageLoads, error) {
@@ -33,7 +37,14 @@ func (s *countingStore) SumUsageLoads(ctx context.Context, tenantID, fromDay, to
 	if s.failing.Load() {
 		return nil, errors.New("store unreachable")
 	}
-	return s.Memory.SumUsageLoads(ctx, tenantID, fromDay, toDay)
+	// The rows are read before the gate, so a flush during the wait lands
+	// after the read's view of the store, as it can on a slow query.
+	rows, err := s.Memory.SumUsageLoads(ctx, tenantID, fromDay, toDay)
+	if s.gate != nil {
+		close(s.entered)
+		<-s.gate
+	}
+	return rows, err
 }
 
 // rankingFixture is a registry over one public layer "L" with the §3.3
@@ -188,3 +199,77 @@ func ids(ds []core.ArtifactDescriptor) []string {
 }
 
 func notableIDs(ds []core.ArtifactDescriptor) []string { return ids(ds) }
+
+// loadN resolves n loads of id through the registry.
+func (f *rankingFixture) loadN(t *testing.T, id string, n int) {
+	t.Helper()
+	for range n {
+		if _, err := f.reg.LoadArtifact(context.Background(), publicID, id, core.LoadArtifactOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Spec: §3.3 — the serving replica keeps ranking by the loads a flush took
+// from its buffer until it reads the stored counts again, so the flush never
+// hides a load for the rest of the interval, and once a read includes the
+// flushed loads they count once.
+func TestUsageRanking_FlushKeepsLoadsUntilTheStoreIsRead(t *testing.T) {
+	t.Parallel()
+	f := newRankingFixture(t, tiedHelpers)
+	if got := f.search(t, "helper"); got[0] != "tools/aaa" || f.st.reads.Load() != 1 {
+		t.Fatalf("control search = %v after %d reads, want tools/aaa first after one read", got, f.st.reads.Load())
+	}
+	f.loadN(t, "tools/bbb", 2)
+	if err := f.counter.Flush(context.Background(), f.st); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.search(t, "helper"); got[0] != "tools/bbb" || f.st.reads.Load() != 1 {
+		t.Errorf("search after the flush = %v after %d reads, want tools/bbb first from the flushed loads without a read", got, f.st.reads.Load())
+	}
+	// Another replica's 3 loads of tools/aaa reach the store. After the next
+	// read, tools/bbb counts its 2 stored loads once and ranks second.
+	f.store(t, 0, store.UsageCount{Layer: "L", ArtifactID: "tools/aaa", Loads: 3})
+	f.clock.Advance(time.Minute)
+	if got := f.search(t, "helper"); got[0] != "tools/aaa" || f.st.reads.Load() != 2 {
+		t.Errorf("search after the read = %v after %d reads, want tools/aaa first with the flushed loads counted once", got, f.st.reads.Load())
+	}
+}
+
+// Spec: §3.3 — a failed read keeps the flushed loads, and a flush that lands
+// while a read is in progress keeps its loads past that read, which may have
+// started before the flush added them.
+func TestUsageRanking_FlushedLoadsSurviveAFailedOrConcurrentRead(t *testing.T) {
+	t.Parallel()
+	f := newRankingFixture(t, tiedHelpers)
+	f.search(t, "helper")
+	f.loadN(t, "tools/bbb", 1)
+	if err := f.counter.Flush(context.Background(), f.st); err != nil {
+		t.Fatal(err)
+	}
+	f.st.failing.Store(true)
+	f.clock.Advance(time.Minute)
+	if got := f.search(t, "helper"); got[0] != "tools/bbb" {
+		t.Errorf("search on a failed read = %v, want tools/bbb first from the flushed load", got)
+	}
+	f.st.failing.Store(false)
+
+	// A read starts and waits; meanwhile tools/aaa gets 2 loads and a flush.
+	f.st.gate = make(chan struct{})
+	f.st.entered = make(chan struct{})
+	f.clock.Advance(time.Minute)
+	done := make(chan []string, 1)
+	go func() { done <- f.search(t, "helper") }()
+	<-f.st.entered
+	f.loadN(t, "tools/aaa", 2)
+	if err := f.counter.Flush(context.Background(), f.st); err != nil {
+		t.Fatal(err)
+	}
+	close(f.st.gate)
+	<-done
+	f.st.gate = nil
+	// The read may predate the flush, so its 2 loads stay counted.
+	if got := f.search(t, "helper"); got[0] != "tools/aaa" {
+		t.Errorf("search after a read concurrent with the flush = %v, want tools/aaa first", got)
+	}
+}

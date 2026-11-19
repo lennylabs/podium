@@ -601,6 +601,9 @@ type ingestReport struct {
 	EmbeddingFailures []ingestEmbeddingFailure `json:"embedding_failures"`
 	// Removed names the artifacts the cycle soft-deleted (§7.3.1).
 	Removed []string `json:"removed"`
+	// Superseded reports that a later cycle of the layer claimed it and this
+	// cycle stopped at a check (§7.3.1).
+	Superseded bool `json:"superseded"`
 }
 
 // writeIngestReport decodes a reingest response and prints the ingest outcome.
@@ -655,6 +658,12 @@ func writeIngestReport(stdout, stderr io.Writer, layerID string, body []byte) (d
 	}
 	if report.LintFailures > 0 {
 		_, _ = fmt.Fprintf(stderr, "lint failures: %d\n", report.LintFailures)
+	}
+	// §7.3.1 (Removed artifacts): supersession is reported without changing
+	// the exit status. The later cycle ingests the source, so this one is not
+	// a failure, but an empty report would read as a source with nothing new.
+	if report.Superseded {
+		_, _ = fmt.Fprintf(stderr, "superseded: a later ingest cycle of layer %s took over before this cycle finished; this cycle stopped there and recorded no reference\n", layer)
 	}
 	// §4.7: the artifact is stored and served, so a failed embedding call is
 	// reported without changing the exit status.

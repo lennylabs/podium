@@ -144,6 +144,9 @@ func TestConfigurablePackageCap_GatesIngest(t *testing.T) {
 		"---\ntype: agent\nversion: 1.0.0\ndescription: small\nsensitivity: low\n---\n\nbody\n")
 
 	cfg := store.LayerConfig{TenantID: "t", ID: "big-layer", SourceType: "local", LocalPath: artDir, Order: 1}
+	if err := st.PutLayerConfig(ctx, cfg); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
 
 	res, err := ingest.SourceIngestWithOptions(ctx, st, source.Local{}, cfg, ingest.SourceIngestOptions{
 		Linter: lint.NewIngestLinter(true), // reads the lowered cap from the env
@@ -170,6 +173,9 @@ func TestConfigurablePackageCap_GatesIngest(t *testing.T) {
 	t.Cleanup(func() { _ = st2.Close() })
 	if err := st2.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
+	}
+	if err := st2.PutLayerConfig(ctx, cfg); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
 	}
 	_ = os.Unsetenv("PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES")
 	clean, err := ingest.SourceIngestWithOptions(ctx, st2, source.Local{}, cfg, ingest.SourceIngestOptions{

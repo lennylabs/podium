@@ -492,10 +492,44 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		if visibilityIsEmpty(effVis) {
 			effVis = vis
 		}
+		// Persist a LayerConfig so /v1/layers, /v1/layers/reingest, and
+		// the standalone web UI (§13.10) see the bootstrap layers. The
+		// SourceType is "local" with LocalPath set to the resolved
+		// directory so a future reingest can re-snapshot the same path. It
+		// is written before the ingest because the ingest claims the stored
+		// layer (§7.3.1).
+		now := time.Now().UTC()
+		cfg := store.LayerConfig{
+			TenantID:     tenantID,
+			ID:           l.ID,
+			SourceType:   "local",
+			LocalPath:    l.Path,
+			Order:        order,
+			Public:       effVis.Public,
+			Organization: effVis.Organization,
+			Groups:       effVis.Groups,
+			Users:        effVis.Users,
+			CreatedAt:    now,
+		}
+		if err := st.PutLayerConfig(ctx, cfg); err != nil {
+			return nil, fmt.Errorf("persist layer config %s: %w", l.ID, err)
+		}
+		// Spec: §7.3.1 (Removed artifacts) — the startup ingest claims the
+		// layer as every cycle does, so it and a cycle of the same layer on
+		// another replica supersede each other by claim order.
+		claim, previous, _, err := ingest.ClaimLayer(ctx, st, tenantID, l.ID)
+		wrote := false
+		if err != nil {
+			return nil, err
+		}
 		res, err := ingest.Ingest(ctx, st, ingest.Request{
-			TenantID: tenantID,
-			LayerID:  l.ID,
-			Files:    source.ConfinedFS(l.Path),
+			TenantID:    tenantID,
+			LayerID:     l.ID,
+			IngestClaim: claim,
+			// Spec: §7.3.1 (Removed artifacts) — a failure after the first
+			// write keeps the claim, so a displaced cycle cannot undo it.
+			OnFirstWrite: func() { wrote = true },
+			Files:        source.ConfinedFS(l.Path),
 			// §13.10/§13.2.2 public-mode sensitivity ceiling: reject medium and
 			// high artifacts at ingest with ingest.public_mode_rejects_sensitive.
 			// Empty (non-public deployments) imposes no floor.
@@ -528,30 +562,17 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			// computes these artifacts once every bootstrap layer is in.
 		})
 		if err != nil {
+			if !wrote {
+				ingest.ReleaseClaim(ctx, st, tenantID, l.ID, claim, previous)
+			}
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
 		}
-		// Persist a LayerConfig so /v1/layers, /v1/layers/reingest, and
-		// the standalone web UI (§13.10) see the bootstrap layers. The
-		// SourceType is "local" with LocalPath set to the resolved
-		// directory so a future reingest can re-snapshot the same path.
-		now := time.Now().UTC()
-		cfg := store.LayerConfig{
-			TenantID:     tenantID,
-			ID:           l.ID,
-			SourceType:   "local",
-			LocalPath:    l.Path,
-			Order:        order,
-			Public:       effVis.Public,
-			Organization: effVis.Organization,
-			Groups:       effVis.Groups,
-			Users:        effVis.Users,
-			CreatedAt:    now,
-			// §7.3.1: the bootstrap ingest just completed, so stamp
-			// last_ingested_at for staleness monitoring.
-			LastIngestedAt: &now,
-		}
-		if err := st.PutLayerConfig(ctx, cfg); err != nil {
-			return nil, fmt.Errorf("persist layer config %s: %w", l.ID, err)
+		// §7.3.1: the bootstrap ingest just completed, so stamp
+		// last_ingested_at for staleness monitoring, unless a later cycle
+		// claimed the layer and records its own.
+		done := time.Now().UTC()
+		if err := st.RecordLayerIngest(ctx, tenantID, l.ID, claim, "", &done); err != nil && !errors.Is(err, store.ErrIngestSuperseded) {
+			return nil, fmt.Errorf("record the ingest of layer %s: %w", l.ID, err)
 		}
 		layers = append(layers, layer.Layer{
 			ID:         l.ID,
@@ -599,7 +620,7 @@ func defaultBootstrapVisibility(cfg *Config) layer.Visibility {
 		// LoadConfig's resolution; mirror it so a no-identity standalone
 		// still defaults to public and an identity-gated deployment to
 		// private.
-		if cfg.identityProvider == "" {
+		if !cfg.hasIdentityProvider() {
 			return layer.Visibility{Public: true}
 		}
 		return layer.Visibility{}
@@ -656,10 +677,23 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 		}
 		switch lc.SourceType {
 		case "local":
+			// Spec: §7.3.1 (Removed artifacts) — the startup ingest claims the
+			// layer as every cycle does, so a cycle of the same layer on
+			// another replica and this ingest supersede each other by claim
+			// order rather than both removing.
+			claim, previous, _, err := ingest.ClaimLayer(ctx, st, tenantID, lc.ID)
+			wrote := false
+			if err != nil {
+				return nil, err
+			}
 			res, err := ingest.Ingest(ctx, st, ingest.Request{
-				TenantID: tenantID,
-				LayerID:  lc.ID,
-				Files:    source.ConfinedFS(lc.LocalPath),
+				TenantID:    tenantID,
+				LayerID:     lc.ID,
+				IngestClaim: claim,
+				// Spec: §7.3.1 (Removed artifacts) — a failure after the first
+				// write keeps the claim, so a displaced cycle cannot undo it.
+				OnFirstWrite: func() { wrote = true },
+				Files:        source.ConfinedFS(lc.LocalPath),
 				// §13.10/§13.2.2 public-mode sensitivity ceiling.
 				RejectAtOrAbove: publicSensitivityFloor(cfg),
 				// §13.10 sandbox-profile ingest gate (off unless enforced).
@@ -682,6 +716,9 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 				// overlap; the startup pass computes these artifacts.
 			})
 			if err != nil {
+				if !wrote {
+					ingest.ReleaseClaim(ctx, st, tenantID, lc.ID, claim, previous)
+				}
 				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
 			}
 			log.Printf("ingested declared layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d, removed=%d)",
@@ -1666,7 +1703,7 @@ func run(ctx context.Context, stop func()) error {
 			if cfg.publicMode {
 				return server.CheckOperatorToken(r, cfg.operatorToken)
 			}
-			if cfg.identityProvider == "" {
+			if !cfg.hasIdentityProvider() {
 				return nil
 			}
 			return registry.AdminAuthorize(r.Context(), layerIdentity(r))
@@ -1754,7 +1791,7 @@ func run(ctx context.Context, stop func()) error {
 		// browser flow is the deployment whose page has to learn not to offer
 		// sign-in.
 		mux.Handle(server.PathWebUISession, srv.TenantRoutedNoReject(server.SessionPosture{
-			IdentityProviderConfigured: cfg.identityProvider != "",
+			IdentityProviderConfigured: cfg.hasIdentityProvider(),
 			PublicMode:                 cfg.publicMode,
 			BrowserAuthEnabled:         cfg.webUIAuth,
 			Identity:                   layerIdentity,
@@ -2672,7 +2709,7 @@ func LoadConfig() *Config {
 	// §13.10 standalone default; once an identity provider gates access, the
 	// default is `private` so admin-defined layers do not leak by accident.
 	if c.defaultLayerVisibility == "" {
-		if c.identityProvider == "" {
+		if !c.hasIdentityProvider() {
 			c.defaultLayerVisibility = "public"
 		} else {
 			c.defaultLayerVisibility = "private"
@@ -2902,11 +2939,22 @@ func (c *Config) missingBackendValues() []string {
 	return missing
 }
 
+// hasIdentityProvider reports whether the configuration names an identity
+// provider. The empty value and "none" name none, and every decision that
+// depends on it (the admin arm, the default layer visibility, the session
+// posture, the start banner, and the unauthenticated re-embed) reads this
+// predicate, as the loopback-bind refusal does.
+//
+// Spec: §13.10 (Loopback bind without an identity provider)
+func (c *Config) hasIdentityProvider() bool {
+	return server.ConfiguresIdentityProvider(c.identityProvider)
+}
+
 func (c *Config) modeBanner() string {
 	if c.publicMode {
 		return "public"
 	}
-	if c.identityProvider != "" {
+	if c.hasIdentityProvider() {
 		return c.identityProvider
 	}
 	return "standalone"
@@ -2959,7 +3007,7 @@ func bootstrapOptions(c *Config, objStore objectstore.Provider) []server.Option 
 	// the per-tenant admin role and the re-embed endpoint would be
 	// unreachable. In public mode authorizeOperatorPass then requires the
 	// operator token, as the LayerEndpoint admin callback does.
-	if c.publicMode || c.identityProvider == "" {
+	if c.publicMode || !c.hasIdentityProvider() {
 		out = append(out, server.WithUnauthenticatedReembed())
 	}
 	if objStore != nil {

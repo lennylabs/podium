@@ -69,7 +69,7 @@ func loadAnchorSigner(cfg *Config, stream *audit.Stream, registryKey sign.Regist
 		return sign.RegistryManagedKey{}, false, nil
 	}
 	if stream.File() == nil {
-		log.Printf("warning: audit anchor disabled (no sink)")
+		log.Printf("warning: audit anchor disabled: no file destination")
 		return sign.RegistryManagedKey{}, false, nil
 	}
 	key, path, err := loadOrGenerateAuditSigner(cfg.auditSigningKeyPath)
@@ -181,7 +181,7 @@ func newReAnchor(stream *audit.Stream, signer sign.Provider) func(context.Contex
 // enabled.
 func startVerifyScheduler(ctx context.Context, cfg *Config, stream *audit.Stream) {
 	if stream.File() == nil {
-		log.Printf("warning: audit verify disabled (no sink)")
+		log.Printf("warning: audit verify disabled: no file destination")
 		return
 	}
 	sched := &audit.VerifyScheduler{

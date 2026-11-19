@@ -377,6 +377,9 @@ export interface IngestSummary {
   /** queued marks the arm a registry with no ingest runner wired answers
    * with: the request is recorded and there is no summary to read. */
   queued?: string;
+  /** superseded is true when a later ingest of the layer took over and this
+   * one stopped, removing nothing and recording no reference (§7.3.1). */
+  superseded?: boolean;
 }
 
 /** IngestedArtifact is one (artifact_id, version) pair the snapshot left in

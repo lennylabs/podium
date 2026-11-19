@@ -48,6 +48,52 @@ func TestPublicModeLayerWrites_CLI(t *testing.T) {
 	}
 }
 
+// Spec: §13.10 (Loopback bind without an identity provider) — an identity
+// provider of `none` configures no identity provider wherever the registry
+// decides whether one is configured: the start refuses a non-loopback bind,
+// and on loopback the session posture reports no identity provider, the admin
+// arm admits the local operator, and a layer registered without a visibility
+// block defaults to public.
+func TestIdentityProviderNone_ConfiguresNoIdentityProvider(t *testing.T) {
+	t.Parallel()
+	env := []string{"HOME=" + t.TempDir(), "PODIUM_IDENTITY_PROVIDER=none", "PODIUM_PUBLIC_MODE=", "PODIUM_ALLOW_PUBLIC_BIND=", "PODIUM_DEFAULT_LAYER_VISIBILITY="}
+	out := smallteamRawExecFail(t, env, "serve", "--standalone", "--bind", "0.0.0.0:0")
+	if !strings.Contains(out, "config.public_bind_refused") {
+		t.Fatalf("serve with PODIUM_IDENTITY_PROVIDER=none on 0.0.0.0: want config.public_bind_refused; got:\n%s", out)
+	}
+
+	srv := startServerArgs(t, env, "serve", "--standalone", "--web-ui")
+	var posture struct {
+		IdentityProviderConfigured bool `json:"identity_provider_configured"`
+		LayerCapabilities          struct {
+			ManageAnyLayer bool `json:"manage_any_layer"`
+		} `json:"layer_capabilities"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/ui/session", &posture)
+	if posture.IdentityProviderConfigured || !posture.LayerCapabilities.ManageAnyLayer {
+		t.Errorf("posture = %+v, want no identity provider and manage_any_layer", posture)
+	}
+
+	reg := writeRegistry(t, map[string]string{"notes/ARTIFACT.md": smallteamLowArtifact("ops notes")})
+	register := runPodium(t, "", nil, "layer", "register", "--registry", srv.BaseURL,
+		"--id", "ops-notes", "--local", reg)
+	cliWantExit(t, register, 0, "layer register on a registry whose identity provider is none")
+	var layers struct {
+		Layers []struct {
+			ID     string `json:"id"`
+			Public bool   `json:"public"`
+		} `json:"layers"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/layers", &layers)
+	public := false
+	for _, l := range layers.Layers {
+		public = public || (l.ID == "ops-notes" && l.Public)
+	}
+	if !public {
+		t.Errorf("layers = %+v, want ops-notes registered with the public default", layers.Layers)
+	}
+}
+
 // Spec: §13.10 (Loopback bind without an identity provider) — a registry with
 // no identity provider and not in public mode refuses a non-loopback bind at
 // startup with config.public_bind_refused naming the address, and

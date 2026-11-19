@@ -32,6 +32,10 @@ func buildReingestRunner(
 	useVectorOutbox bool,
 	collocatedVec collocatedVectorIngest,
 ) server.ReingestRunner {
+	// Spec: §7.3.1 (Removed artifacts) — one set of cycle locks for the
+	// process, shared by the manual reingest and the inbound-webhook trigger,
+	// so the cycles of one layer never overlap here.
+	cycleLocks := ingest.NewCycleLocks()
 	return func(ctx context.Context, lc store.LayerConfig, bg *server.BreakGlass) (*ingest.Result, error) {
 		// §4.7.8: refuse a new auditable write once the layer's tenant has
 		// spent its daily audit-volume budget. The budget rolls over at the
@@ -89,6 +93,7 @@ func buildReingestRunner(
 			// collocated backend. Nil when the check is off or the backend is
 			// managed, where the outbox write computes it.
 			SemanticOverlap: collocatedVec.SemanticOverlap,
+			CycleLocks:      cycleLocks,
 		}
 		if auditSink != nil {
 			opts.AuditEmit = ingestAuditEmitter(ctx, auditSink, scrubber, caller, lc.TenantID)

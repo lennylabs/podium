@@ -127,7 +127,7 @@ type StartupConfig struct {
 //   - the §6.3.4 browser flow is enabled only on a configuration that
 //     satisfies every conjunct of the browser-flow guard.
 func (c StartupConfig) Validate() error {
-	if c.PublicMode && c.IdentityProvider != "" && c.IdentityProvider != "none" {
+	if c.PublicMode && ConfiguresIdentityProvider(c.IdentityProvider) {
 		return fmt.Errorf("%w: PUBLIC_MODE and IDENTITY_PROVIDER (%q) cannot both be set",
 			ErrPublicModeWithIdP, c.IdentityProvider)
 	}
@@ -145,7 +145,7 @@ func (c StartupConfig) Validate() error {
 	// filters what it serves by that identity. Either condition missing on a
 	// non-loopback bind is refused.
 	if c.WebUI && !isLoopbackBind(c.Bind) {
-		if !c.WebUIAllowPublicBind || !hasIdentityProvider(c.IdentityProvider) {
+		if !c.WebUIAllowPublicBind || !ConfiguresIdentityProvider(c.IdentityProvider) {
 			return fmt.Errorf("%w: the web UI on a non-loopback bind (%q) requires --web-ui-allow-public-bind and a configured identity provider",
 				ErrWebUIPublicBindRefused, c.Bind)
 		}
@@ -156,7 +156,7 @@ func (c StartupConfig) Validate() error {
 	// non-loopback bind needs the same explicit opt-in public mode needs. It
 	// runs after the web UI guard so a UI on a non-loopback bind keeps that
 	// guard's own code.
-	if !c.PublicMode && !hasIdentityProvider(c.IdentityProvider) && !c.AllowPublicBind && !isLoopbackBind(c.Bind) {
+	if !c.PublicMode && !ConfiguresIdentityProvider(c.IdentityProvider) && !c.AllowPublicBind && !isLoopbackBind(c.Bind) {
 		return fmt.Errorf("%w: a registry with no identity provider admits every caller as an admin, so it binds a loopback address; %q is not one (configure an identity provider, or set PODIUM_ALLOW_PUBLIC_BIND=true or pass --allow-public-bind when something else limits who can reach it)",
 			ErrPublicBindNonLoopback, c.Bind)
 	}
@@ -188,9 +188,15 @@ func (c StartupConfig) Validate() error {
 	return c.validateBrowserFlow()
 }
 
-// hasIdentityProvider reports whether provider names a configured identity
-// provider; the empty value and "none" configure none.
-func hasIdentityProvider(provider string) bool {
+// ConfiguresIdentityProvider reports whether a PODIUM_IDENTITY_PROVIDER value
+// configures an identity provider; the empty value and "none" configure none.
+// Every startup and request-time decision that depends on whether a registry
+// has an identity provider reads this one predicate, so a "none" registry
+// cannot pass the loopback-bind refusal as unconfigured and then close the
+// admin arm as configured.
+//
+// Spec: §13.10 (Loopback bind without an identity provider)
+func ConfiguresIdentityProvider(provider string) bool {
 	return provider != "" && provider != "none"
 }
 

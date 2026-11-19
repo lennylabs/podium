@@ -182,7 +182,7 @@ registry:
           token: '${GITLAB_TOKEN}'
 ```
 
-The registry substitutes the variable's value as written before it parses the file. The single-quoted scalar therefore takes the token literally, and a token that contains `'` must hold that quote doubled in the variable. The token is not percent-encoded.
+The registry substitutes the variable's value after it parses the file, so the token is taken exactly as the variable holds it, whatever characters it contains, with or without the quotes around the reference. The token is not percent-encoded.
 
 Startup aborts with an error that names the layer and the key in these cases:
 
