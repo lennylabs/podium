@@ -117,6 +117,7 @@ Defaults, configurable per deployment:
 | Query text                          | 30 days (redacted to placeholders after 7 days)         |
 | Deprecated artifact versions        | 90 days after the deprecation flag is set               |
 | Layers unregistered by their owners | 30 days (artifacts soft-deleted, recoverable via admin) |
+| Artifacts removed from a layer's source | 30 days (soft-deleted, recoverable by restoring the package and reingesting, §7.3.1) |
 
 Retention rewrites only the file destination (§8.3). The receiving system of a stdout, HTTP, or OTLP destination owns the retention of the records it received.
 

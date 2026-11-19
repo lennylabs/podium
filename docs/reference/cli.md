@@ -982,7 +982,7 @@ During a freeze window, ingest is blocked unless `--break-glass` is passed with 
 
 The command reports each artifact of the cycle:
 
-- Standard output carries one line per accepted and unchanged artifact.
+- Standard output carries one line per accepted and unchanged artifact, and a `removed: <id>` line per artifact the cycle soft-deleted because its folder is no longer in the source. A removed artifact does not change the exit status. [Remove an artifact](../managing/lifecycle#remove-an-artifact) describes recovery.
 - Standard error carries one line per conflicted or rejected artifact, with that artifact's identifier, its error code, and its reason.
 - Standard error also carries a `lint failures: <n>` line with the number of lint diagnostics the cycle raised.
 - When the registry answers the request with an error, the command prints that error response on standard error instead of the per-artifact lines.

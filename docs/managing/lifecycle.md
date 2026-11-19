@@ -82,6 +82,20 @@ A consumer sees the deprecation as follows:
 
 A store retention sweep purges a deprecated version `PODIUM_DEPRECATED_RETENTION_DAYS` days after it was deprecated, 90 by default. [Store retention](../reference/configuration#store-retention) lists the setting.
 
+## Remove an artifact
+
+To remove an artifact, delete its folder from the layer's source. The next completed ingest of the layer soft-deletes every version of the artifact that the layer stored:
+
+- No read path serves the artifact afterward. `load_artifact`, search, `load_domain`, `podium sync`, and the web UI all leave it out, and a load pinned to one of its versions answers `registry.not_found`.
+- `podium layer reingest` prints `removed: <id>` on standard output for each removed artifact and exits 0. The `layer.ingested` webhook event carries the number of removed artifacts.
+- An ingest that cannot read the whole snapshot, such as one whose source is unreachable, removes nothing.
+- An artifact whose folder is still in the source is not removed, even when the ingest rejects it.
+
+Restore a removed artifact by putting its folder back and reingesting the layer within the recovery window, `PODIUM_LAYER_RECOVERY_DAYS` days, 30 by default. A version restored with the same content is served again. A version restored with different content at the same version number is rejected with `ingest.immutable_violation` until the window ends, so bump the version instead. A store retention sweep purges the removed versions after the window.
+
+> [!WARNING]
+> An ingest whose snapshot contains no artifact removes every artifact the layer serves. A `git` layer whose `ref` or `root` points at the wrong place produces such a snapshot. Correct the layer with `podium layer update` and reingest within the recovery window to restore the artifacts.
+
 ## Freeze windows and break-glass
 
 A freeze window blocks ingest during a period such as a release cut or a year-end close. The operator declares each window under `registry.freeze_windows` in `registry.yaml`, with a `name`, a `start`, and an `end` as RFC 3339 timestamps. The registry reads the list at startup, so a new window takes effect after a restart, and every window applies to every layer of every tenant.
@@ -98,7 +112,7 @@ A layer is the unit the registry ingests, orders, and removes. These commands ta
 
 | Command | Effect |
 |:--|:--|
-| `podium layer reingest <id>` | Pulls a fresh snapshot of the layer's source and ingests it. Standard error lists each conflicted or rejected artifact with its error code, and the command exits 1 when the cycle dropped an artifact. |
+| `podium layer reingest <id>` | Pulls a fresh snapshot of the layer's source and ingests it. Standard error lists each conflicted or rejected artifact with its error code, and the command exits 1 when the cycle dropped an artifact. Standard output lists each artifact the cycle [removed](#remove-an-artifact). |
 | `podium layer reorder <id> [<id> ...]` | Sets precedence, lowest to highest. A layer declared in `registry.yaml` returns to its configured position at the next restart, so change its position in the file to make the order durable. |
 | `podium layer unregister <id>` | Soft-deletes the layer and the artifacts ingested from it. |
 | `podium layer list --deleted` | Lists the unregistered layers that are still restorable. |

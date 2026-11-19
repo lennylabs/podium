@@ -142,7 +142,13 @@ func (s *Memory) PutManifest(_ context.Context, rec ManifestRecord) error {
 		if existing.ContentHash != rec.ContentHash {
 			return ErrImmutableViolation
 		}
-		// Same content hash is a no-op (idempotent ingest).
+		// Spec: §7.3.1 (Removed artifacts) — the same bytes put again by the
+		// layer that contributed a tombstoned row restore it as this put
+		// states it. Another layer's put leaves it tombstoned.
+		if existing.DeletedAt != nil && existing.Layer == rec.Layer {
+			s.manifests[key] = rec
+		}
+		// Same content hash on a live row is a no-op (idempotent ingest).
 		return nil
 	}
 	s.manifests[key] = rec
@@ -162,7 +168,10 @@ func (s *Memory) PutManifestWithVectorPending(_ context.Context, rec ManifestRec
 		if existing.ContentHash != rec.ContentHash {
 			return ErrImmutableViolation
 		}
-		return nil // idempotent; an existing pending row stands
+		if existing.DeletedAt == nil || existing.Layer != rec.Layer {
+			return nil // idempotent; an existing pending row stands
+		}
+		// A restored row is queued again, as a new one is.
 	}
 	s.manifests[key] = rec
 	s.vectorPending[key] = pending
@@ -606,7 +615,34 @@ func (s *Memory) PurgeExpiredLayerDeletions(_ context.Context, before time.Time)
 			s.deleteLayerUsageLocked(cfg.TenantID, cfg.ID)
 		}
 	}
+	// Spec: §7.3.1 (Removed artifacts), §8.4 — a row tombstoned in a live
+	// layer ends its window on its own clock.
+	for mk, rec := range s.manifests {
+		if rec.DeletedAt != nil && rec.DeletedAt.Before(before) {
+			delete(s.manifests, mk)
+		}
+	}
 	return n, nil
+}
+
+// SoftDeleteArtifacts tombstones the live rows layerID contributed for each
+// of artifactIDs (§7.3.1 removed artifacts).
+func (s *Memory) SoftDeleteArtifacts(_ context.Context, tenantID, layerID string, artifactIDs []string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make(map[string]bool, len(artifactIDs))
+	for _, id := range artifactIDs {
+		ids[id] = true
+	}
+	at = at.UTC()
+	for key, rec := range s.manifests {
+		if rec.TenantID == tenantID && rec.Layer == layerID && rec.DeletedAt == nil && ids[rec.ArtifactID] {
+			stamp := at
+			rec.DeletedAt = &stamp
+			s.manifests[key] = rec
+		}
+	}
+	return nil
 }
 
 // deleteLayerUsageLocked removes the §8.7 usage rows of one layer. The

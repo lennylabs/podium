@@ -2381,6 +2381,9 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		"embedding_failures": embeddingFailures,
 		"artifacts":          arts,
 		"advisories":         advisories,
+		// Spec: §7.3.1 (Removed artifacts). A completed cycle sets the slice,
+		// so it marshals as [] when the cycle removed nothing.
+		"removed": res.Removed,
 	})
 }
 

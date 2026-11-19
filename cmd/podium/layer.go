@@ -577,6 +577,8 @@ type ingestReport struct {
 	Conflicts         []ingestConflict         `json:"conflicts"`
 	Rejected          []ingestRejection        `json:"rejected"`
 	EmbeddingFailures []ingestEmbeddingFailure `json:"embedding_failures"`
+	// Removed names the artifacts the cycle soft-deleted (§7.3.1).
+	Removed []string `json:"removed"`
 }
 
 // writeIngestReport decodes a reingest response and prints the ingest outcome.
@@ -610,6 +612,11 @@ func writeIngestReport(stdout, stderr io.Writer, layerID string, body []byte) (d
 	// change) is reported without changing the exit status.
 	for _, a := range report.Advisories {
 		_, _ = fmt.Fprintf(stdout, "advisory: %s [%s] %s (%s)\n", a.ArtifactID, a.Severity, a.Message, a.Code)
+	}
+	// §7.3.1 (Removed artifacts): a soft-deleted artifact is reported without
+	// changing the exit status; restoring its package recovers it.
+	for _, id := range report.Removed {
+		_, _ = fmt.Fprintf(stdout, "removed: %s\n", id)
 	}
 	// §7.3.1: a same-version content conflict is rejected as
 	// ingest.immutable_violation even when sibling artifacts ingested. Name each

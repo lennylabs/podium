@@ -487,10 +487,20 @@ type Store interface {
 	// ListDeletedLayerConfigs returns the tenant's soft-deleted layers so
 	// an admin can see what is recoverable within the window.
 	ListDeletedLayerConfigs(ctx context.Context, tenantID string) ([]LayerConfig, error)
-	// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers and
-	// their artifacts whose DeletedAt predates `before`, ending the §8.4
-	// 30-day recovery window. Returns the number of layers removed.
+	// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers whose
+	// DeletedAt predates `before`, and every soft-deleted manifest row whose
+	// DeletedAt predates it, whether a layer unregistration or a §7.3.1
+	// removed-artifact ingest tombstoned the row, ending the §8.4 recovery
+	// window. Returns the number of layers removed.
 	PurgeExpiredLayerDeletions(ctx context.Context, before time.Time) (int, error)
+	// SoftDeleteArtifacts tombstones, at the given time, every live manifest
+	// row of tenantID that layerID contributed for one of artifactIDs: the
+	// §7.3.1 removed-artifact case. Rows of other layers and rows already
+	// tombstoned are unchanged. A later PutManifest of a tombstoned row's
+	// (artifact_id, version) with the same content hash and the same layer
+	// restores the row as that put states it; a put from another layer leaves
+	// it tombstoned, and a different hash is ErrImmutableViolation.
+	SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time) error
 
 	// Data-migration markers (§13.4). The §13.4 additive schema guarantee
 	// does not cover the values stored under the schema, so a one-time

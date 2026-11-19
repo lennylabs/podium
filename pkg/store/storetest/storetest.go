@@ -65,6 +65,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("DeprecatedAtStampedAndPurged", func(t *testing.T) { deprecatedAtStampedAndPurged(t, factory(t)) })
 	t.Run("LayerSoftDeleteRecovery", func(t *testing.T) { layerSoftDeleteRecovery(t, factory(t)) })
 	t.Run("LayerDeletionPurgedAfterWindow", func(t *testing.T) { layerDeletionPurgedAfterWindow(t, factory(t)) })
+	t.Run("RemovedArtifactLifecycle", func(t *testing.T) { removedArtifactLifecycle(t, factory(t)) })
 	t.Run("SearchVisibilityRoundTrip", func(t *testing.T) { searchVisibilityRoundTrip(t, factory(t)) })
 	t.Run("SkillRawRoundTrip", func(t *testing.T) { skillRawRoundTrip(t, factory(t)) })
 	t.Run("ResourcesRoundTrip", func(t *testing.T) { resourcesRoundTrip(t, factory(t)) })
@@ -978,6 +979,71 @@ func layerDeletionPurgedAfterWindow(t *testing.T, s store.Store) {
 	}
 	if err := s.RestoreLayerConfig(ctx, "t", "recent"); err != nil {
 		t.Errorf("recent layer should still be recoverable: %v", err)
+	}
+}
+
+// Spec: §7.3.1 (Removed artifacts), §8.4 — SoftDeleteArtifacts tombstones
+// the named artifacts' live rows in one layer and leaves other layers' rows
+// served; the same bytes put again by that layer restore a row, a put from
+// another layer leaves it tombstoned, and a different hash is an immutability
+// violation; PurgeExpiredLayerDeletions removes a row tombstoned before the
+// cutoff in a live layer and keeps a recent one.
+func removedArtifactLifecycle(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+	put := func(id, version, hash, layer string) store.ManifestRecord {
+		rec := manifestRec("t", id, version, hash)
+		rec.Layer = layer
+		mustPut(t, s, rec)
+		return rec
+	}
+	gone := put("ops/gone", "1.0.0", "hg1", "L")
+	put("ops/gone", "2.0.0", "hg2", "L")
+	put("ops/kept", "1.0.0", "hk", "L")
+	put("ops/other", "1.0.0", "ho", "M")
+	// An empty list tombstones nothing.
+	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", nil, time.Now().UTC()))
+	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/gone", "ops/other"}, time.Now().UTC()))
+	served := func() string {
+		rows, err := s.ListManifests(ctx, "t")
+		must(t, err)
+		var out []string
+		for _, r := range rows {
+			out = append(out, r.ArtifactID+"@"+r.Version+"/"+r.Layer)
+		}
+		sort.Strings(out)
+		return strings.Join(out, ",")
+	}
+	var got []string
+	got = append(got, served())
+
+	foreign := gone
+	foreign.Layer = "M"
+	got = append(got, fmt.Sprint(s.PutManifest(ctx, foreign)), served())
+	got = append(got, fmt.Sprint(errors.Is(s.PutManifest(ctx, manifestRec("t", "ops/gone", "1.0.0", "changed")), store.ErrImmutableViolation)))
+	got = append(got, fmt.Sprint(s.PutManifest(ctx, gone)), served())
+
+	old := time.Now().UTC().Add(-40 * 24 * time.Hour)
+	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/kept"}, old))
+	_, err := s.PurgeExpiredLayerDeletions(ctx, time.Now().UTC().Add(-30*24*time.Hour))
+	must(t, err)
+	_, keptErr := s.GetManifest(ctx, "t", "ops/kept", "1.0.0")
+	got = append(got, fmt.Sprint(errors.Is(keptErr, store.ErrNotFound)), fmt.Sprint(s.PutManifest(ctx, manifestRec("t", "ops/kept", "1.0.0", "fresh"))))
+	all, err := s.ListManifestsIncludingDeleted(ctx, "t")
+	must(t, err)
+	got = append(got, fmt.Sprint(len(all)))
+
+	want := []string{
+		"ops/kept@1.0.0/L,ops/other@1.0.0/M",
+		"<nil>", "ops/kept@1.0.0/L,ops/other@1.0.0/M",
+		"true",
+		"<nil>", "ops/gone@1.0.0/L,ops/kept@1.0.0/L,ops/other@1.0.0/M",
+		"true", "<nil>",
+		"4",
+	}
+	if strings.Join(got, " | ") != strings.Join(want, " | ") {
+		t.Errorf("removed-artifact lifecycle:\n got  %q\n want %q", got, want)
 	}
 }
 

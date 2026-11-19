@@ -175,6 +175,21 @@ func TestWriteIngestReport_Classification(t *testing.T) {
 			// field in pkg/registry/server/layers.go emits that slice's length. One
 			// artifact with two diagnostics reports 2, so the number is a diagnostic
 			// count and no reader may turn it into an artifact count.
+			// Spec: §7.3.1 (Removed artifacts) — a removed artifact is soft-deleted
+			// rather than dropped, so it prints on stdout and adds no drop.
+			name: "removed artifacts are not drops",
+			body: `{"layer":"team","accepted":0,"idempotent":1,
+				"artifacts":[{"id":"ops/oncall","version":"1.0.0","status":"unchanged"}],
+				"removed":["ops/retired-runbook"]}`,
+			wantDropped: 0,
+			wantOK:      true,
+			wantStdout: []string{
+				"artifact: ops/oncall@1.0.0   layer: team\n",
+				"removed: ops/retired-runbook\n",
+			},
+			emptyErr: true,
+		},
+		{
 			name: "mixed lint",
 			body: `{"layer":"team","accepted":1,"idempotent":0,"lint_failures":2,
 				"artifacts":[{"id":"ops/oncall","version":"1.0.0","status":"accepted"}]}`,

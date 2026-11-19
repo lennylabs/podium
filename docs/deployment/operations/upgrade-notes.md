@@ -241,6 +241,14 @@ A 0.7.0 registry with no identity provider, and not in public mode, refuses a no
 - The Docker Compose evaluation stack in the repository sets `PODIUM_ALLOW_PUBLIC_BIND: "true"`. A Helm install that empties `config.identityProvider.type` needs `config.allowPublicBind=true`.
 - A rollback to 0.6.0 removes the refusal. The setting is harmless on 0.6.0, which reads it only in public mode and under `trusted-headers`.
 
+### Artifacts removed from a layer's source
+
+A 0.6.0 registry kept serving an artifact after its folder was deleted from the layer's source. A 0.7.0 registry soft-deletes such an artifact at the next completed ingest of its layer, and `podium layer reingest` prints `removed: <id>` for it. [Remove an artifact](../../managing/lifecycle#remove-an-artifact) describes the behavior.
+
+- The first ingest of each layer after the upgrade removes every artifact whose folder was deleted while 0.6.0 served it. Review the `removed:` lines of that ingest, or the startup log's `removed=` count for a layer ingested at startup.
+- Restore an artifact removed by mistake by putting its folder back and reingesting within `PODIUM_LAYER_RECOVERY_DAYS`, 30 days by default.
+- A rollback to 0.6.0 keeps the soft-deleted versions hidden, because 0.6.0 also hides a soft-deleted row, and a 0.6.0 ingest does not restore them. Restore them with 0.7.0 before the window ends.
+
 ### `command` and `context` removal
 
 0.7.0 removes the `command` and `context` artifact types. Ingest rejects an `ARTIFACT.md` whose `type` is either of them with `ingest.invalid_artifact` and `details.constraint: "type_removed"`, and `podium artifact scaffold` refuses both types. A command becomes a skill whose `invocation` is `user`, and reference material moves into a skill or a `DOMAIN.md` body. [Artifact types](../../authoring/artifact-types#removed-types) describes the replacements. The notes below cover converting a package and the stored rows and caches that an earlier release wrote.

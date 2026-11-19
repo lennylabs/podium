@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // Spec: §13.10 Standalone Deployment — the SQLite backend persists
@@ -308,5 +309,21 @@ func TestSQLite_DependencyReadsReturnQueryErrors(t *testing.T) {
 	}
 	if got, err := s.DependencyInDegree(ctx, "a"); err == nil {
 		t.Errorf("DependencyInDegree on a canceled context = %v, nil; want an error", got)
+	}
+}
+
+// Spec: §7.3.1 (Removed artifacts) — a tombstone write the database refuses
+// is returned to the caller rather than reported as done.
+func TestSQLite_SoftDeleteArtifactsReportsAStoreFailure(t *testing.T) {
+	t.Parallel()
+	s, err := OpenSQLite(filepath.Join(t.TempDir(), "podium.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := s.SoftDeleteArtifacts(context.Background(), "t", "L", []string{"ops/x"}, time.Now()); err == nil {
+		t.Error("SoftDeleteArtifacts on a closed database returned no error")
 	}
 }
