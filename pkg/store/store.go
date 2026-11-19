@@ -51,39 +51,14 @@ var (
 	ErrTenantNotFound = &spi.Error{Code: "registry.tenant_not_found", Message: "store: tenant_not_found"}
 )
 
-// ErrIngestSuperseded is returned by SoftDeleteArtifacts, which then changes
-// nothing, when the layer no longer records the ingest mark the caller read:
-// another ingest cycle of the layer completed in between, or the layer was
-// unregistered. The ingest pipeline handles it and never returns it to a
-// client.
-var ErrIngestSuperseded = errors.New("store: another ingest cycle of the layer completed")
-
-// LayerIngestMark is the ingest state a completed §7.3.1 ingest cycle records
-// on its layer: LastIngestedRef and LastIngestedAt. A cycle reads it before
-// its snapshot and removes artifacts only while the layer still records it,
-// so a cycle whose snapshot predates another completed cycle's removes
-// nothing. LastIngestedAt changes on every completed cycle, which covers a
-// local source, whose reference is its path and never changes.
+// ErrIngestSuperseded is returned by SoftDeleteArtifacts and
+// RecordLayerIngest, which then change nothing, when the live layer does not
+// hold the caller's ingest claim: a later cycle of the layer claimed it, or
+// the layer was unregistered. The ingest pipeline handles it and never
+// returns it to a client.
 //
 // Spec: §7.3.1 (Removed artifacts)
-type LayerIngestMark struct {
-	Ref string
-	At  *time.Time
-}
-
-// IngestMarkOf returns the ingest mark cfg records.
-func IngestMarkOf(cfg LayerConfig) LayerIngestMark {
-	return LayerIngestMark{Ref: cfg.LastIngestedRef, At: cfg.LastIngestedAt}
-}
-
-// recordedBy reports whether cfg still records m. Both stamps come from the
-// same store, so they compare at the precision it keeps.
-func (m LayerIngestMark) recordedBy(cfg LayerConfig) bool {
-	if cfg.LastIngestedRef != m.Ref || (cfg.LastIngestedAt == nil) != (m.At == nil) {
-		return false
-	}
-	return m.At == nil || cfg.LastIngestedAt.Equal(*m.At)
-}
+var ErrIngestSuperseded = errors.New("store: a later ingest cycle of the layer claimed it")
 
 // Tenant identifies a Podium tenant (org). Tenant boundaries are the
 // unit of multi-tenancy per §4.7.1.
@@ -534,12 +509,24 @@ type Store interface {
 	// tombstoned are unchanged. A later PutManifest of a tombstoned row's
 	// (artifact_id, version) with the same content hash and the same layer
 	// restores the row as that put states it; a put from another layer leaves
-	// it tombstoned, and a different hash is ErrImmutableViolation. When mark
-	// is non-nil, the call first checks, in the transaction that tombstones,
-	// that the live layer layerID still records *mark, and otherwise returns
-	// ErrIngestSuperseded and changes nothing; it makes that check even when
-	// artifactIDs is empty. A nil mark tombstones unconditionally.
-	SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time, mark *LayerIngestMark) error
+	// it tombstoned, and a different hash is ErrImmutableViolation. When claim
+	// is non-empty, the call first checks, in the transaction that tombstones,
+	// that the live layer layerID holds claim (ClaimLayerIngest), and
+	// otherwise returns ErrIngestSuperseded and changes nothing; it makes that
+	// check even when artifactIDs is empty, which is how a cycle checks its
+	// claim before it stores. An empty claim tombstones unconditionally.
+	SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time, claim string) error
+	// ClaimLayerIngest makes claim the live layer's ingest claim, superseding
+	// the claim of every earlier §7.3.1 ingest cycle of the layer, and returns
+	// the layer as stored. It returns ErrNotFound, claiming nothing, when no
+	// live layer layerID exists. PutLayerConfig keeps the claim, and
+	// DeleteLayerConfig clears it, so a cycle in flight when the layer is
+	// unregistered never matches again after a restore.
+	ClaimLayerIngest(ctx context.Context, tenantID, layerID, claim string) (LayerConfig, error)
+	// RecordLayerIngest sets the live layer's LastIngestedRef to ref and its
+	// LastIngestedAt to at when the layer holds claim, and changes no other
+	// field. It returns ErrIngestSuperseded, changing nothing, otherwise.
+	RecordLayerIngest(ctx context.Context, tenantID, layerID, claim, ref string, at *time.Time) error
 
 	// Data-migration markers (§13.4). The §13.4 additive schema guarantee
 	// does not cover the values stored under the schema, so a one-time

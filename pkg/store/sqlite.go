@@ -145,6 +145,7 @@ func (s *SQLite) applySchema() error {
 			deleted_at TEXT,
 			last_ingested_at TEXT,
 			repo_userinfo TEXT,
+			ingest_claim TEXT,
 			PRIMARY KEY (tenant_id, id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS vector_pending (
@@ -435,18 +436,18 @@ func rowsChanged(res sql.Result, err error) (bool, error) {
 
 // SoftDeleteArtifacts tombstones the live rows layerID contributed for each
 // of artifactIDs (§7.3.1 removed artifacts). It binds the IDs in batches of
-// softDeleteBatchSize inside one transaction. With a mark, the tombstoning
-// statements run first and the layer row is read after them: the first write
-// takes the database's write lock, so no other connection can commit a
-// changed mark between the read and the commit, and a read made first could
-// instead fail the upgrade to a writer with SQLITE_BUSY once another
-// connection committed. A mark the layer no longer records rolls back.
-func (s *SQLite) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time, mark *LayerIngestMark) error {
+// softDeleteBatchSize inside one transaction. With a claim, the tombstoning
+// statements run first and the claim is read after them: the first write
+// takes the database's write lock, so no other connection can commit a later
+// claim between the read and the commit, and a read made first could instead
+// fail the upgrade to a writer with SQLITE_BUSY once another connection
+// committed. A claim the layer no longer holds rolls back.
+func (s *SQLite) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time, claim string) error {
 	if len(artifactIDs) == 0 {
-		if mark == nil {
+		if claim == "" {
 			return nil
 		}
-		return s.checkIngestMark(ctx, s.db, tenantID, layerID, *mark)
+		return sqliteHoldsClaim(ctx, s.db, tenantID, layerID, claim)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -456,31 +457,57 @@ func (s *SQLite) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID stri
 	if err := softDeleteBatches(ctx, tx, at.UTC().Format(time.RFC3339Nano), tenantID, layerID, artifactIDs); err != nil {
 		return err
 	}
-	if mark != nil {
-		if err := s.checkIngestMark(ctx, tx, tenantID, layerID, *mark); err != nil {
+	if claim != "" {
+		if err := sqliteHoldsClaim(ctx, tx, tenantID, layerID, claim); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-// checkIngestMark returns ErrIngestSuperseded unless the live layer still
-// records mark.
+// sqliteHoldsClaim returns ErrIngestSuperseded unless the live layer holds
+// claim.
 //
 // Spec: §7.3.1 (Removed artifacts)
-func (s *SQLite) checkIngestMark(ctx context.Context, q queryRower, tenantID, layerID string, mark LayerIngestMark) error {
-	var ref string
-	var at sql.NullString
+func sqliteHoldsClaim(ctx context.Context, q queryRower, tenantID, layerID, claim string) error {
+	var one int
 	err := q.QueryRowContext(ctx, `
-		SELECT last_ingested_ref, last_ingested_at FROM layer_configs
-		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, tenantID, layerID).Scan(&ref, &at)
+		SELECT 1 FROM layer_configs
+		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL AND ingest_claim = ?`,
+		tenantID, layerID, claim).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrIngestSuperseded
 	}
+	return err
+}
+
+// ClaimLayerIngest makes claim the live layer's ingest claim (§7.3.1). The
+// update runs first, so a layer that is absent or unregistered claims
+// nothing, and the read that follows returns the layer as stored.
+func (s *SQLite) ClaimLayerIngest(ctx context.Context, tenantID, layerID, claim string) (LayerConfig, error) {
+	claimed, err := rowsChanged(s.db.ExecContext(ctx, `
+		UPDATE layer_configs SET ingest_claim = ?
+		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, claim, tenantID, layerID))
+	if err != nil {
+		return LayerConfig{}, err
+	}
+	if !claimed {
+		return LayerConfig{}, ErrNotFound
+	}
+	return s.GetLayerConfig(ctx, tenantID, layerID)
+}
+
+// RecordLayerIngest sets the ingest reference and time of the live layer that
+// holds claim (§7.3.1) with one update of those two columns.
+func (s *SQLite) RecordLayerIngest(ctx context.Context, tenantID, layerID, claim, ref string, at *time.Time) error {
+	recorded, err := rowsChanged(s.db.ExecContext(ctx, `
+		UPDATE layer_configs SET last_ingested_ref = ?, last_ingested_at = ?
+		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL AND ingest_claim = ?`,
+		ref, nullTimeText(at), tenantID, layerID, claim))
 	if err != nil {
 		return err
 	}
-	if !mark.recordedBy(LayerConfig{LastIngestedRef: ref, LastIngestedAt: parseNullTimeText(at)}) {
+	if !recorded {
 		return ErrIngestSuperseded
 	}
 	return nil
@@ -1006,20 +1033,24 @@ func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
+	// The REPLACE deletes the old row, so the §7.3.1 ingest claim is carried
+	// over from it; dropping it would supersede a cycle in flight on every
+	// layer update.
 	_, err = s.db.ExecContext(ctx, `
 		INSERT OR REPLACE INTO layer_configs
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
 			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-			 repo_userinfo)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 repo_userinfo, ingest_claim)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			(SELECT ingest_claim FROM layer_configs WHERE tenant_id = ? AND id = ?))`,
 		cfg.TenantID, cfg.ID, cfg.SourceType, repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, boolToInt(cfg.UserDefined), cfg.Owner,
 		boolToInt(cfg.Public), boolToInt(cfg.Organization),
 		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
 		createdAt.UTC().Format(time.RFC3339Nano), nullTimeText(cfg.DeletedAt), nullTimeText(cfg.LastIngestedAt),
-		userinfo)
+		userinfo, cfg.TenantID, cfg.ID)
 	return err
 }
 
@@ -1074,7 +1105,7 @@ func (s *SQLite) DeleteLayerConfig(ctx context.Context, tenantID, id string) err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE layer_configs SET deleted_at = ?
+		UPDATE layer_configs SET deleted_at = ?, ingest_claim = NULL
 		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, now, tenantID, id); err != nil {
 		return err
 	}

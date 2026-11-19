@@ -67,7 +67,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("LayerDeletionPurgedAfterWindow", func(t *testing.T) { layerDeletionPurgedAfterWindow(t, factory(t)) })
 	t.Run("RemovedArtifactLifecycle", func(t *testing.T) { removedArtifactLifecycle(t, factory(t)) })
 	t.Run("SoftDeleteManyArtifacts", func(t *testing.T) { softDeleteManyArtifacts(t, factory(t)) })
-	t.Run("SoftDeleteIngestMark", func(t *testing.T) { softDeleteIngestMark(t, factory(t)) })
+	t.Run("LayerIngestClaim", func(t *testing.T) { layerIngestClaim(t, factory(t)) })
 	t.Run("LayerRestoreKeepsRemovedArtifacts", func(t *testing.T) { layerRestoreKeepsRemovedArtifacts(t, factory(t)) })
 	t.Run("SearchVisibilityRoundTrip", func(t *testing.T) { searchVisibilityRoundTrip(t, factory(t)) })
 	t.Run("SkillRawRoundTrip", func(t *testing.T) { skillRawRoundTrip(t, factory(t)) })
@@ -1007,8 +1007,8 @@ func removedArtifactLifecycle(t *testing.T, s store.Store) {
 	put("ops/kept", "1.0.0", "hk", "L")
 	put("ops/other", "1.0.0", "ho", "M")
 	// An empty list tombstones nothing.
-	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", nil, time.Now().UTC(), nil))
-	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/gone", "ops/other"}, time.Now().UTC(), nil))
+	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", nil, time.Now().UTC(), ""))
+	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/gone", "ops/other"}, time.Now().UTC(), ""))
 	served := func() string {
 		rows, err := s.ListManifests(ctx, "t")
 		must(t, err)
@@ -1029,7 +1029,7 @@ func removedArtifactLifecycle(t *testing.T, s store.Store) {
 	got = append(got, fmt.Sprint(s.PutManifest(ctx, gone)), served())
 
 	old := time.Now().UTC().Add(-40 * 24 * time.Hour)
-	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/kept"}, old, nil))
+	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/kept"}, old, ""))
 	_, err := s.PurgeExpiredLayerDeletions(ctx, time.Now().UTC().Add(-30*24*time.Hour))
 	must(t, err)
 	_, keptErr := s.GetManifest(ctx, "t", "ops/kept", "1.0.0")
@@ -1081,46 +1081,64 @@ func softDeleteManyArtifacts(t *testing.T, s store.Store) {
 		ids[i] = fmt.Sprintf("ops/absent-%d", i)
 	}
 	ids[0], ids[1], ids[len(ids)-1] = "ops/first", "ops/other", "ops/last"
-	must(t, s.SoftDeleteArtifacts(context.Background(), "t", "L", ids, time.Now().UTC(), nil))
+	must(t, s.SoftDeleteArtifacts(context.Background(), "t", "L", ids, time.Now().UTC(), ""))
 	if got, want := servedRows(t, s, "t"), "ops/kept@1.0.0/L,ops/other@1.0.0/M"; got != want {
 		t.Errorf("served after removing 70,000 IDs = %q, want %q", got, want)
 	}
 }
 
-// Spec: §7.3.1 (Removed artifacts) — with an ingest mark, SoftDeleteArtifacts
-// tombstones only while the layer still records that mark: a mark another
-// completed cycle replaced, one naming an earlier time, and a layer that is
-// gone return ErrIngestSuperseded and change nothing, also for an empty list,
-// and the current mark tombstones.
-func softDeleteIngestMark(t *testing.T, s store.Store) {
+// Spec: §7.3.1 (Removed artifacts) — a later ClaimLayerIngest supersedes an
+// earlier claim: SoftDeleteArtifacts and RecordLayerIngest under the earlier
+// claim return ErrIngestSuperseded and change nothing, also for an empty
+// list, and the latest claim tombstones and records only the ingest columns.
+// PutLayerConfig keeps the claim, DeleteLayerConfig clears it so a restore
+// does not revive it, and an absent or unregistered layer cannot be claimed.
+func layerIngestClaim(t *testing.T, s store.Store) {
 	t.Helper()
 	ctx := context.Background()
 	mustCreateTenant(t, s, "t")
-	at := time.Date(2026, 11, 1, 12, 0, 0, 123456000, time.UTC)
-	cfg := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "git", Repo: "https://git.acme.com/x.git", LastIngestedRef: "r1", LastIngestedAt: &at}
+	cfg := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "git", Repo: "https://git.acme.com/x.git", Order: 3, WebhookSecret: "s1"}
 	must(t, s.PutLayerConfig(ctx, cfg))
 	rec := manifestRec("t", "ops/gone", "1.0.0", "hg")
 	rec.Layer = "L"
 	mustPut(t, s, rec)
+	superseded := func(err error) bool { return errors.Is(err, store.ErrIngestSuperseded) }
+	at := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+
+	_, absentErr := s.ClaimLayerIngest(ctx, "t", "absent", "c0")
+	claimed, err := s.ClaimLayerIngest(ctx, "t", "L", "c1")
+	must(t, err)
+	_, err = s.ClaimLayerIngest(ctx, "t", "L", "c2")
+	must(t, err)
+	// A config update made between the claim and the record keeps the claim.
+	cfg.Public, cfg.WebhookSecret = true, "s2"
+	must(t, s.PutLayerConfig(ctx, cfg))
+	got := []bool{
+		errors.Is(absentErr, store.ErrNotFound),
+		claimed.Order == 3,
+		superseded(s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/gone"}, at, "c1")),
+		superseded(s.SoftDeleteArtifacts(ctx, "t", "L", nil, at, "c1")),
+		superseded(s.RecordLayerIngest(ctx, "t", "L", "c1", "r1", &at)),
+		servedRows(t, s, "t") == "ops/gone@1.0.0/L",
+		s.SoftDeleteArtifacts(ctx, "t", "L", nil, at, "c2") == nil,
+		s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/gone"}, at, "c2") == nil,
+		servedRows(t, s, "t") == "",
+		s.RecordLayerIngest(ctx, "t", "L", "c2", "r2", &at) == nil,
+	}
 	stored, err := s.GetLayerConfig(ctx, "t", "L")
 	must(t, err)
-	current := store.IngestMarkOf(stored)
-	earlier := at.Add(-time.Second)
-	superseded := func(mark store.LayerIngestMark, layer string, ids []string) bool {
-		return errors.Is(s.SoftDeleteArtifacts(ctx, "t", layer, ids, time.Now().UTC(), &mark), store.ErrIngestSuperseded)
-	}
-	got := []bool{
-		superseded(store.LayerIngestMark{Ref: "r0", At: current.At}, "L", []string{"ops/gone"}),
-		superseded(store.LayerIngestMark{Ref: "r1", At: &earlier}, "L", []string{"ops/gone"}),
-		superseded(store.LayerIngestMark{Ref: "r1"}, "L", nil),
-		superseded(current, "absent", nil),
-		servedRows(t, s, "t") == "ops/gone@1.0.0/L",
-		superseded(current, "L", nil),
-		superseded(current, "L", []string{"ops/gone"}),
-		servedRows(t, s, "t") == "",
-	}
-	if want := []bool{true, true, true, true, true, false, false, true}; fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Errorf("superseded/served sequence = %v, want %v", got, want)
+	got = append(got, stored.LastIngestedRef == "r2" && stored.LastIngestedAt != nil && stored.LastIngestedAt.Equal(at) &&
+		stored.Public && stored.WebhookSecret == "s2" && stored.Order == 3)
+
+	must(t, s.DeleteLayerConfig(ctx, "t", "L"))
+	_, deletedErr := s.ClaimLayerIngest(ctx, "t", "L", "c3")
+	got = append(got, errors.Is(deletedErr, store.ErrNotFound), superseded(s.RecordLayerIngest(ctx, "t", "L", "c2", "r3", &at)))
+	must(t, s.RestoreLayerConfig(ctx, "t", "L"))
+	got = append(got, superseded(s.SoftDeleteArtifacts(ctx, "t", "L", nil, at, "c2")))
+
+	want := []bool{true, true, true, true, true, true, true, true, true, true, true, true, true, true}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("claim sequence = %v, want %v", got, want)
 	}
 }
 
@@ -1139,7 +1157,7 @@ func layerRestoreKeepsRemovedArtifacts(t *testing.T, s store.Store) {
 		mustPut(t, s, rec)
 	}
 	removedAt := time.Now().UTC().Add(-40 * 24 * time.Hour)
-	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/gone"}, removedAt, nil))
+	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", []string{"ops/gone"}, removedAt, ""))
 	must(t, s.DeleteLayerConfig(ctx, "t", "L"))
 	must(t, s.RestoreLayerConfig(ctx, "t", "L"))
 	_, err := s.PurgeExpiredLayerDeletions(ctx, time.Now().UTC().Add(-30*24*time.Hour))

@@ -132,23 +132,53 @@ func TestCycleLocks_WaitEndsWithTheContext(t *testing.T) {
 	release()
 }
 
-// Spec: §7.3.1 (Removed artifacts) — a cycle whose layer cannot be read
-// before the snapshot fails rather than running without the ingest mark.
-func TestSourceIngest_LayerReadFailureStopsTheCycle(t *testing.T) {
+// Spec: §7.3.1 (Removed artifacts) — a cycle whose claim fails, or whose
+// claim check before its writes fails, stops with that error before its
+// snapshot or its first write, rather than running unordered.
+func TestSourceIngest_ClaimFailureStopsTheCycle(t *testing.T) {
 	t.Parallel()
-	st := failingLayerRead{Memory: store.NewMemory()}
-	prov := &orderProvider{files: fstest.MapFS{}, ref: "r1", taken: make(chan struct{})}
-	_, err := SourceIngestWithOptions(context.Background(), st, prov, store.LayerConfig{TenantID: "t", ID: "team"}, SourceIngestOptions{})
-	if err == nil || !errors.Is(err, errLayerRead) {
-		t.Errorf("SourceIngestWithOptions = %v, want the layer read error", err)
+	ctx := context.Background()
+	mem := store.NewMemory()
+	if err := mem.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := store.LayerConfig{TenantID: "t", ID: "team", SourceType: "fake"}
+	if err := mem.PutLayerConfig(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	claimProv := &orderProvider{files: fstest.MapFS{}, ref: "r1", taken: make(chan struct{})}
+	_, err := SourceIngestWithOptions(ctx, failingClaim{Memory: mem}, claimProv, cfg, SourceIngestOptions{})
+	select {
+	case <-claimProv.taken:
+		t.Error("the cycle took its snapshot after its claim failed")
+	default:
+	}
+	if !errors.Is(err, errClaim) {
+		t.Errorf("SourceIngestWithOptions with a failing claim = %v, want the claim error", err)
+	}
+	checkProv := &orderProvider{files: fstest.MapFS{"a/ARTIFACT.md": orderManifest("runbook for the ingest worker")}, ref: "r1", taken: make(chan struct{})}
+	_, err = SourceIngestWithOptions(ctx, failingClaimCheck{Memory: mem}, checkProv, cfg, SourceIngestOptions{})
+	if !errors.Is(err, errClaim) {
+		t.Errorf("SourceIngestWithOptions with a failing claim check = %v, want the check error", err)
+	}
+	if _, err := mem.GetManifest(ctx, "t", "a", "1.0.0"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("GetManifest(a) = %v, want nothing stored after the failed check", err)
 	}
 }
 
-var errLayerRead = errors.New("layer read failed")
+var errClaim = errors.New("claim failed")
 
-// failingLayerRead is a store whose layer read fails.
-type failingLayerRead struct{ *store.Memory }
+// failingClaim is a store whose ingest claim fails.
+type failingClaim struct{ *store.Memory }
 
-func (failingLayerRead) GetLayerConfig(context.Context, string, string) (store.LayerConfig, error) {
-	return store.LayerConfig{}, errLayerRead
+func (failingClaim) ClaimLayerIngest(context.Context, string, string, string) (store.LayerConfig, error) {
+	return store.LayerConfig{}, errClaim
+}
+
+// failingClaimCheck is a store whose claim check fails with an error other
+// than a later claim.
+type failingClaimCheck struct{ *store.Memory }
+
+func (failingClaimCheck) SoftDeleteArtifacts(context.Context, string, string, []string, time.Time, string) error {
+	return errClaim
 }

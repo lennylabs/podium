@@ -132,6 +132,7 @@ var orgTableStmts = []string{
 		deleted_at TIMESTAMPTZ,
 		last_ingested_at TIMESTAMPTZ,
 		repo_userinfo TEXT,
+		ingest_claim TEXT,
 		PRIMARY KEY (tenant_id, id)
 	)`,
 	// §7.3.1 semantic overlap records, keyed by owner and peer, and the
@@ -807,12 +808,13 @@ func postgresRevive(ctx context.Context, ex execContexter, rec ManifestRecord, i
 
 // SoftDeleteArtifacts tombstones the live rows layerID contributed for each
 // of artifactIDs (§7.3.1 removed artifacts). It binds the IDs in batches of
-// softDeleteBatchSize inside one transaction. With a mark, the transaction
-// first reads the layer row FOR UPDATE, which waits for a concurrent write of
-// that row to commit and then holds it, so another replica's cycle cannot
-// record a new mark between the check and the commit.
-func (p *Postgres) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time, mark *LayerIngestMark) error {
-	if len(artifactIDs) == 0 && mark == nil {
+// softDeleteBatchSize inside one transaction. With a claim, the transaction
+// first reads the layer row FOR UPDATE where it holds the claim: the read
+// waits for a concurrent claim of that row to finish, reads the row again
+// after it, and then holds the row, so no later claim can land between the
+// check and the tombstoning.
+func (p *Postgres) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, artifactIDs []string, at time.Time, claim string) error {
+	if len(artifactIDs) == 0 && claim == "" {
 		return nil
 	}
 	conn, release, err := p.org(ctx, tenantID)
@@ -825,8 +827,8 @@ func (p *Postgres) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID st
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if mark != nil {
-		if err := postgresCheckIngestMark(ctx, tx, tenantID, layerID, *mark); err != nil {
+	if claim != "" {
+		if err := postgresHoldsClaim(ctx, tx, tenantID, layerID, claim); err != nil {
 			return err
 		}
 	}
@@ -847,24 +849,58 @@ func (p *Postgres) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID st
 	return tx.Commit()
 }
 
-// postgresCheckIngestMark returns ErrIngestSuperseded unless the live layer
-// still records mark, locking the layer row for the rest of tx.
+// postgresHoldsClaim returns ErrIngestSuperseded unless the live layer holds
+// claim, locking the layer row for the rest of tx.
 //
 // Spec: §7.3.1 (Removed artifacts)
-func postgresCheckIngestMark(ctx context.Context, tx *sql.Tx, tenantID, layerID string, mark LayerIngestMark) error {
-	var ref string
-	var at sql.NullTime
+func postgresHoldsClaim(ctx context.Context, tx *sql.Tx, tenantID, layerID, claim string) error {
+	var one int
 	err := tx.QueryRowContext(ctx, `
-		SELECT last_ingested_ref, last_ingested_at FROM layer_configs
-		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-		FOR UPDATE`, tenantID, layerID).Scan(&ref, &at)
+		SELECT 1 FROM layer_configs
+		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL AND ingest_claim = $3
+		FOR UPDATE`, tenantID, layerID, claim).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrIngestSuperseded
 	}
+	return err
+}
+
+// ClaimLayerIngest makes claim the live layer's ingest claim (§7.3.1). A
+// layer that is absent or unregistered claims nothing.
+func (p *Postgres) ClaimLayerIngest(ctx context.Context, tenantID, layerID, claim string) (LayerConfig, error) {
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return LayerConfig{}, err
+	}
+	claimed, err := rowsChanged(conn.ExecContext(ctx, `
+		UPDATE layer_configs SET ingest_claim = $1
+		WHERE tenant_id = $2 AND id = $3 AND deleted_at IS NULL`, claim, tenantID, layerID))
+	release()
+	if err != nil {
+		return LayerConfig{}, err
+	}
+	if !claimed {
+		return LayerConfig{}, ErrNotFound
+	}
+	return p.GetLayerConfig(ctx, tenantID, layerID)
+}
+
+// RecordLayerIngest sets the ingest reference and time of the live layer that
+// holds claim (§7.3.1) with one update of those two columns.
+func (p *Postgres) RecordLayerIngest(ctx context.Context, tenantID, layerID, claim, ref string, at *time.Time) error {
+	conn, release, err := p.org(ctx, tenantID)
 	if err != nil {
 		return err
 	}
-	if !mark.recordedBy(LayerConfig{LastIngestedRef: ref, LastIngestedAt: ptrFromNullTime(at)}) {
+	defer release()
+	recorded, err := rowsChanged(conn.ExecContext(ctx, `
+		UPDATE layer_configs SET last_ingested_ref = $1, last_ingested_at = $2
+		WHERE tenant_id = $3 AND id = $4 AND deleted_at IS NULL AND ingest_claim = $5`,
+		ref, nullTimePG(at), tenantID, layerID, claim))
+	if err != nil {
+		return err
+	}
+	if !recorded {
 		return ErrIngestSuperseded
 	}
 	return nil
@@ -1527,7 +1563,7 @@ func (p *Postgres) DeleteLayerConfig(ctx context.Context, tenantID, id string) e
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE layer_configs SET deleted_at = $1
+		UPDATE layer_configs SET deleted_at = $1, ingest_claim = NULL
 		WHERE tenant_id = $2 AND id = $3 AND deleted_at IS NULL`, now, tenantID, id); err != nil {
 		return err
 	}

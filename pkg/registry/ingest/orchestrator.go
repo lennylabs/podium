@@ -2,6 +2,8 @@ package ingest
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -112,23 +114,24 @@ func SourceIngestWithOptions(
 	opts SourceIngestOptions,
 ) (*Result, error) {
 	// Spec: §7.3.1 (Removed artifacts) — the cycle starts once the previous
-	// cycle of the layer in this process has ended, and it reads the layer's
-	// recorded ingest state after that, so a cycle that waited does not
-	// compare against the mark the caller read before the wait.
+	// cycle of the layer in this process has ended, and it claims the layer
+	// after that, before its snapshot. The claim returns the layer as stored,
+	// so a cycle that waited reads the configuration and the prior reference
+	// an update or another cycle wrote meanwhile rather than the caller's copy.
 	unlock, err := opts.CycleLocks.lock(ctx, cfg.TenantID, cfg.ID)
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
-	var mark *store.LayerIngestMark
-	switch stored, err := st.GetLayerConfig(ctx, cfg.TenantID, cfg.ID); {
-	case err == nil:
-		cfg.LastIngestedRef, cfg.LastIngestedAt = stored.LastIngestedRef, stored.LastIngestedAt
-		m := store.IngestMarkOf(cfg)
-		mark = &m
-	case !errors.Is(err, store.ErrNotFound):
-		return nil, fmt.Errorf("ingest: read layer %s: %w", cfg.ID, err)
+	claim, stored, err := ClaimLayer(ctx, st, cfg.TenantID, cfg.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		log.Printf("ingest: layer %s is not registered; the cycle runs no ingest", cfg.ID)
+		return &Result{Removed: []string{}, Superseded: true}, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	cfg = stored
 
 	srcCfg := source.LayerConfig{
 		ID: cfg.ID,
@@ -190,7 +193,7 @@ func SourceIngestWithOptions(
 		Signer:                     opts.Signer,
 		UseVectorOutbox:            opts.UseVectorOutbox,
 		SemanticOverlap:            opts.SemanticOverlap,
-		IngestMark:                 mark,
+		IngestClaim:                claim,
 	})
 	if err != nil {
 		// Spec: §7.3.1 (Removed artifacts) — a cycle that read the whole
@@ -198,6 +201,13 @@ func SourceIngestWithOptions(
 		// snapshot no longer holds, so the result travels with the error and
 		// the response can report them.
 		return res, err
+	}
+	// Spec: §7.3.1 (Removed artifacts) — a later cycle claimed the layer, and
+	// its snapshot can be the newer one, so this cycle stopped at a check and
+	// records nothing: recording its reference would move the layer back.
+	if res.Superseded {
+		log.Printf("ingest: layer %s: a later cycle claimed the layer; this cycle stopped and records nothing", cfg.ID)
+		return res, nil
 	}
 
 	// §7.6 layer.ingested: one event per completed layer cycle with
@@ -223,26 +233,45 @@ func SourceIngestWithOptions(
 		})
 	}
 
-	// Spec: §7.3.1 (Removed artifacts) — another cycle completed after this
-	// one read the mark, and its snapshot can be the newer one, so recording
-	// this cycle's reference would move the layer's state backward.
-	if res.Superseded {
-		log.Printf("ingest: layer %s: another cycle completed during this one; this cycle removed nothing and leaves last_ingested_ref as that cycle recorded it", cfg.ID)
-		return res, nil
-	}
-	cfg.LastIngestedRef = snap.Reference
 	// §7.3.1 "last_ingested_at is exposed per layer for staleness
-	// monitoring": stamp the completion time of this ingest cycle from
-	// the snapshot timestamp the provider reported.
-	ingestedAt := snap.CreatedAt
-	if !ingestedAt.IsZero() {
-		ts := ingestedAt.UTC()
-		cfg.LastIngestedAt = &ts
+	// monitoring": stamp the completion time of this ingest cycle from the
+	// snapshot timestamp the provider reported. Only the two ingest columns
+	// are written, and only while the layer holds this cycle's claim, so an
+	// update made during the cycle stands and an unregistered layer stays
+	// unregistered.
+	ingestedAt := cfg.LastIngestedAt
+	if !snap.CreatedAt.IsZero() {
+		ts := snap.CreatedAt.UTC()
+		ingestedAt = &ts
 	}
-	if perr := st.PutLayerConfig(ctx, cfg); perr != nil {
-		return res, fmt.Errorf("update last_ingested_ref: %w", perr)
+	switch err := st.RecordLayerIngest(ctx, cfg.TenantID, cfg.ID, claim, snap.Reference, ingestedAt); {
+	case errors.Is(err, store.ErrIngestSuperseded):
+		log.Printf("ingest: layer %s: a later cycle claimed the layer before this cycle recorded its reference", cfg.ID)
+	case err != nil:
+		return res, fmt.Errorf("update last_ingested_ref: %w", err)
 	}
 	return res, nil
+}
+
+// ClaimLayer claims layerID for a new ingest cycle with a fresh random claim,
+// superseding every earlier cycle of the layer, and returns the claim and the
+// layer as stored. It returns an error wrapping store.ErrNotFound when no
+// live layer exists. The claim is random rather than a counter, so a claim
+// that an unregister cleared or a store write reset can never equal a later
+// one.
+//
+// Spec: §7.3.1 (Removed artifacts)
+func ClaimLayer(ctx context.Context, st store.Store, tenantID, layerID string) (string, store.LayerConfig, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", store.LayerConfig{}, fmt.Errorf("ingest: generate an ingest claim: %w", err)
+	}
+	claim := hex.EncodeToString(b[:])
+	cfg, err := st.ClaimLayerIngest(ctx, tenantID, layerID, claim)
+	if err != nil {
+		return "", store.LayerConfig{}, fmt.Errorf("ingest: claim layer %s: %w", layerID, err)
+	}
+	return claim, cfg, nil
 }
 
 // silence unused-import linters when build paths don't reach fs.
