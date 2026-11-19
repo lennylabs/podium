@@ -166,6 +166,10 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 		return 2
 	}
 	opts.sensitivitySet = flagPassed(fs, "sensitivity")
+	if err := validateQuotedScalars(opts); err != nil {
+		_, _ = fmt.Fprintf(errOut, "error: %v\n", err)
+		return 2
+	}
 	if opts.typ == "skill" {
 		if err := validateSkillMetadata(opts); err != nil {
 			_, _ = fmt.Fprintf(errOut, "error: %v\n", err)
@@ -370,19 +374,22 @@ func renderAndWrite(dir, name string, o *scaffoldOpts) ([]string, error) {
 }
 
 // renderArtifactMD assembles a non-skill ARTIFACT.md. Universal
-// fields plus the type-specific block, then a placeholder body.
+// fields plus the type-specific block, then a placeholder body. The
+// description and license are free text, so they are written as
+// %q-quoted scalars: a plain scalar holding ": " or " #" does not parse
+// as the value passed, and the scaffold would fail lint.
 func renderArtifactMD(name string, o *scaffoldOpts) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
 	fmt.Fprintf(&sb, "type: %s\n", o.typ)
 	fmt.Fprintf(&sb, "name: %s\n", name)
 	fmt.Fprintf(&sb, "version: %s\n", o.version)
-	fmt.Fprintf(&sb, "description: %s\n", o.description)
+	fmt.Fprintf(&sb, "description: %q\n", o.description)
 	writeWhenToUse(&sb, o.whenToUse)
 	writeTags(&sb, o.tags)
 	fmt.Fprintf(&sb, "sensitivity: %s\n", o.sensitivity)
 	if o.license != "" {
-		fmt.Fprintf(&sb, "license: %s\n", o.license)
+		fmt.Fprintf(&sb, "license: %q\n", o.license)
 	}
 	writeTypeSpecific(&sb, o)
 	sb.WriteString("---\n\n")
@@ -399,16 +406,17 @@ func renderArtifactMD(name string, o *scaffoldOpts) string {
 // and when_to_use as a literal block with one situation per line. A skill
 // gets a sensitivity only when --sensitivity was passed, and an invocation
 // only for --invocation user, because an absent field already resolves to
-// the default any.
+// the default any. The description and license are %q-quoted for the
+// reason renderArtifactMD gives.
 //
 // Spec: §4.3.4, §7.3.1
 func renderSkillMD(name string, o *scaffoldOpts) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
 	fmt.Fprintf(&sb, "name: %s\n", name)
-	fmt.Fprintf(&sb, "description: %s\n", o.description)
+	fmt.Fprintf(&sb, "description: %q\n", o.description)
 	if o.license != "" {
-		fmt.Fprintf(&sb, "license: %s\n", o.license)
+		fmt.Fprintf(&sb, "license: %q\n", o.license)
 	}
 	sb.WriteString("metadata:\n")
 	fmt.Fprintf(&sb, "  version: %q\n", o.version)
@@ -457,6 +465,23 @@ func validateSkillMetadata(o *scaffoldOpts) error {
 		return err
 	}
 	return validateSkillWhenToUse(o.whenToUse)
+}
+
+// validateQuotedScalars refuses a --description or --license value that
+// is not valid UTF-8. Both are written as %q-quoted scalars, and
+// strconv.Quote writes an invalid byte as a \xNN escape that a YAML
+// double-quoted scalar reads as a different character, so the written
+// value would differ from the one passed.
+//
+// Spec: §7.3.1
+func validateQuotedScalars(o *scaffoldOpts) error {
+	if !utf8.ValidString(o.description) {
+		return fmt.Errorf("--description %q is not valid UTF-8", o.description)
+	}
+	if !utf8.ValidString(o.license) {
+		return fmt.Errorf("--license %q is not valid UTF-8", o.license)
+	}
+	return nil
 }
 
 // validateSkillTags refuses a --tags element that is not valid UTF-8. The

@@ -22,7 +22,9 @@ func TestCallerClient_HeaderRoundTrip(t *testing.T) {
 	}
 }
 
-// Spec: §7.2.2, §8.1 — the registry ignores an empty, oversized, or
+// Spec: §7.2.2, §8.1 — the value is parsed as
+// application/x-www-form-urlencoded, where only & separates members, so a
+// raw ; is member content. The registry ignores an empty, oversized, or
 // unparsable value, keeps the first occurrence of a repeated member, ignores
 // unknown members (the removed kind among them), sanitizes and truncates each
 // member, keeps a provided name as provided, and drops a purpose other than
@@ -51,6 +53,12 @@ func TestParseClientHeader(t *testing.T) {
 		{"absent name", "harness=cursor", &CallerClient{Harness: "cursor"}},
 		{"only empty members", "name=&harness=", nil},
 		{"only unknown members", "color=blue", nil},
+		{"raw semicolon in a value", "name=acme;evals&harness=cursor", &CallerClient{Name: "acme_evals", Harness: "cursor"}},
+		{"raw semicolon in a key", "na;me=x&name=cli", &CallerClient{Name: "cli"}},
+		{"plus decodes to a space", "name=Acme+Evals", &CallerClient{Name: "Acme Evals"}},
+		{"member without =", "name&harness=codex", &CallerClient{Harness: "codex"}},
+		{"empty sequences skipped", "&&name=sdk&", &CallerClient{Name: "sdk"}},
+		{"bad escape in a later member", "name=cli&host=%zz", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

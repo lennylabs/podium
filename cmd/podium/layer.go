@@ -765,9 +765,68 @@ func sendsOperatorToken(url string) bool {
 		strings.HasSuffix(p, "/v1/admin/erase") || strings.HasSuffix(p, "/v1/layers") || strings.Contains(p, "/v1/layers/")
 }
 
+// doJSONClient sends the doJSON requests. It refuses a redirect that leaves
+// the request's host, because Go strips only Authorization and cookie headers
+// on such a redirect: the operator token header would follow it, and a 307 or
+// 308 would resend a body carrying a repo_token.
+//
+// Spec: §7.3.1, §13.12
+var doJSONClient = &http.Client{CheckRedirect: refuseCrossHostRedirect}
+
+// refuseCrossHostRedirect is the CheckRedirect of doJSONClient. via[0] is the
+// request the command made, so every hop is judged against the host the
+// operator named rather than against the previous hop. The limit of 10 hops
+// matches the default policy of net/http.
+func refuseCrossHostRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if !sameHostRedirect(via[0].URL, req.URL) {
+		return fmt.Errorf("refusing redirect from %s to %s: the target is another host or port, or drops https", via[0].URL.Host, req.URL.Redacted())
+	}
+	return nil
+}
+
+// sameHostRedirect reports whether a redirect from orig to next stays on the
+// host, compared without regard to case. Within one scheme the effective
+// port must match. The one scheme change kept is the upgrade from http on
+// port 80 to https on port 443, the default port of each; an upgrade between
+// other ports could name a different service on the host, and a move from
+// https to http would send the token in clear text.
+//
+// Spec: §13.12
+func sameHostRedirect(orig, next *neturl.URL) bool {
+	if !strings.EqualFold(orig.Hostname(), next.Hostname()) {
+		return false
+	}
+	from, to := strings.ToLower(orig.Scheme), strings.ToLower(next.Scheme)
+	switch {
+	case from == to:
+		return effectivePort(orig) == effectivePort(next)
+	case from == "http" && to == "https":
+		return effectivePort(orig) == "80" && effectivePort(next) == "443"
+	}
+	return false
+}
+
+// effectivePort returns u's port, or the default port of its scheme (80 for
+// http, 443 for https) when u names none, so https://h and https://h:443
+// compare equal.
+func effectivePort(u *neturl.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	}
+	return ""
+}
+
 // doJSON makes an HTTP request with optional JSON body and returns
 // the response bytes + status code.
-
 func doJSON(url, method string, body any) ([]byte, int) {
 	var buf io.Reader
 	if body != nil {
@@ -797,7 +856,7 @@ func doJSON(url, method string, body any) ([]byte, int) {
 	if tok := os.Getenv("PODIUM_OPERATOR_TOKEN"); tok != "" && sendsOperatorToken(url) {
 		req.Header.Set(server.OperatorTokenHeader, tok)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doJSONClient.Do(req)
 	if err != nil {
 		return []byte(err.Error()), 500
 	}

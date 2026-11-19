@@ -21,11 +21,13 @@ const whenToUseKey = "when_to_use"
 //
 // An authored top-level key is kept byte for byte, whatever its value: it is
 // the text Claude Code is meant to read, and a second key would make the
-// frontmatter a mapping with a duplicate key. The line is injected only into
-// a block mapping, at the indentation of its keys, which keeps every other
-// line unchanged; a frontmatter in any other layout, or one that does not
-// decode, is left as it is rather than risk writing a frontmatter that no
-// longer parses.
+// frontmatter a mapping with a duplicate key. In a block mapping the line is
+// injected at the indentation of its keys, which keeps every other line
+// unchanged. No injected line joins a flow mapping, a mapping whose first key
+// is explicit, or one that opens with a tag or anchor line without breaking
+// the decode, so there the key joins the mapping node and the frontmatter is
+// re-encoded, as the user-only control does. A frontmatter that does not
+// decode to a mapping is left as it is.
 //
 // Spec: §4.3.4, §6.7, §7.8
 func withClaudeWhenToUse(b []byte, src Source) []byte {
@@ -46,13 +48,17 @@ func withClaudeWhenToUse(b []byte, src Source) []byte {
 			return b
 		}
 	}
-	indent, ok := blockKeyIndent(strings.SplitAfter(string(b), "\n"), root)
-	if !ok {
-		return b
-	}
 	a, err := manifest.ResolveArtifact(src.ArtifactBytes, b)
 	if err != nil || len(a.WhenToUse) == 0 {
 		return b
 	}
-	return injectFrontmatterLine(b, indent, whenToUseKey, strconv.Quote(strings.Join(a.WhenToUse, "\n")))
+	value := strings.Join(a.WhenToUse, "\n")
+	lines := strings.SplitAfter(string(b), "\n")
+	if indent, ok := blockKeyIndent(lines, root); ok {
+		return injectFrontmatterLine(b, indent, whenToUseKey, strconv.Quote(value))
+	}
+	root.Content = append(root.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: whenToUseKey},
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value, Style: yaml.DoubleQuotedStyle})
+	return reencodeFrontmatter(lines, closingDelimiterLine(fm), &doc)
 }

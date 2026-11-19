@@ -1,6 +1,9 @@
 package audit
 
-import "net/url"
+import (
+	"net/url"
+	"strings"
+)
 
 // ClientHeader is the §7.2.2 request header that names the client software.
 //
@@ -104,8 +107,8 @@ func ParseClientHeader(v string) *CallerClient {
 	if v == "" || len(v) > maxClientHeaderBytes {
 		return nil
 	}
-	q, err := url.ParseQuery(v)
-	if err != nil {
+	q, ok := parseFormURLEncoded(v)
+	if !ok {
 		return nil
 	}
 	var c CallerClient
@@ -113,6 +116,32 @@ func ParseClientHeader(v string) *CallerClient {
 		*m.val = q.Get(m.key)
 	}
 	return NormalizeClient(c)
+}
+
+// parseFormURLEncoded decodes v as application/x-www-form-urlencoded: the
+// members are separated by & alone, each splits at its first =, and + and
+// percent escapes are decoded in both halves. url.ParseQuery is not used
+// because it refuses a member holding a raw ;, which the encoding treats as
+// content, so a value with one would be ignored as a whole. A malformed
+// percent escape reports false, and the caller ignores the value.
+func parseFormURLEncoded(v string) (url.Values, bool) {
+	q := url.Values{}
+	for _, member := range strings.Split(v, "&") {
+		if member == "" {
+			continue
+		}
+		rawKey, rawVal, _ := strings.Cut(member, "=")
+		key, err := url.QueryUnescape(rawKey)
+		if err != nil {
+			return nil, false
+		}
+		val, err := url.QueryUnescape(rawVal)
+		if err != nil {
+			return nil, false
+		}
+		q.Add(key, val)
+	}
+	return q, true
 }
 
 // NormalizeClient applies the §7.2.2 sanitization to c and returns nil when

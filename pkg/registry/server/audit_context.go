@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"net"
 	"net/http"
 	"strings"
@@ -108,16 +106,24 @@ func auditMetaFrom(r *http.Request, id layer.Identity) AuditMeta {
 
 // traceIDFromRequest extracts the 16-byte trace-id from a W3C
 // `traceparent` header (`version-traceid-spanid-flags`) when it is
-// well-formed, and otherwise mints a fresh random trace id. A request
-// without a usable header still yields a stable id shared by every event
-// emitted while serving it.
+// well-formed, otherwise takes a valid X-Podium-Trace-Id value, and
+// otherwise mints a fresh random trace id. A request without a usable
+// header still yields a stable id shared by every event emitted while
+// serving it. The traceparent wins because it is the trace the request's
+// spans belong to; X-Podium-Trace-Id is what the MCP server sends when it
+// has no trace context, and it touches no span or sampling decision.
+//
+// Spec: §8.1
 func traceIDFromRequest(r *http.Request) string {
 	if tp := r.Header.Get("traceparent"); tp != "" {
 		if id := parseTraceparent(tp); id != "" {
 			return id
 		}
 	}
-	return newTraceID()
+	if id := audit.ValidTraceID(r.Header.Get(audit.TraceIDHeader)); id != "" {
+		return id
+	}
+	return audit.NewTraceID()
 }
 
 // parseTraceparent returns the trace-id field of a W3C traceparent header,
@@ -129,29 +135,7 @@ func parseTraceparent(tp string) string {
 	if len(parts) < 4 {
 		return ""
 	}
-	traceID := strings.ToLower(parts[1])
-	if len(traceID) != 32 || !isHex(traceID) || traceID == "00000000000000000000000000000000" {
-		return ""
-	}
-	return traceID
-}
-
-// newTraceID mints a random 16-byte (32-hex) trace id.
-func newTraceID() string {
-	var buf [16]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return ""
-	}
-	return hex.EncodeToString(buf[:])
-}
-
-func isHex(s string) bool {
-	for _, c := range s {
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
+	return audit.ValidTraceID(parts[1])
 }
 
 // sourceIP returns the client IP from RemoteAddr, stripping the port.

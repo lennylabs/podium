@@ -115,7 +115,7 @@ func TestHooks_ScaffoldStopFields(t *testing.T) {
 		"hook_event: stop",
 		"hook_action: |",
 		"version: 0.1.0",
-		"description: Log session-end events to a local audit file.",
+		`description: "Log session-end events to a local audit file."`,
 	} {
 		if !strings.Contains(art, want) {
 			t.Errorf("ARTIFACT.md missing %q:\n%s", want, art)

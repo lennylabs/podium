@@ -83,18 +83,53 @@ func TestClaudeCode_WritesResolvedWhenToUseAtTopLevel(t *testing.T) {
 }
 
 // Spec: §4.3.4, §6.7 — an authored top-level when_to_use is kept byte for
-// byte whatever its value, a skill with no resolved when_to_use gets no key,
-// and a frontmatter the adapter cannot extend by one line is left as it is.
+// byte whatever its value, in a block or a flow mapping, and a skill with no
+// resolved when_to_use gets no key.
 func TestClaudeCode_KeepsAuthoredOrAbsentWhenToUse(t *testing.T) {
 	t.Parallel()
 	for name, skill := range map[string]string{
-		"authored value": "---\nname: standup\ndescription: x\nwhen_to_use: When I say so.\nmetadata:\n  when_to_use: At standup.\n---\nbody\n",
-		"authored empty": "---\nname: standup\ndescription: x\nwhen_to_use: \"\"\nmetadata:\n  when_to_use: At standup.\n---\nbody\n",
-		"no value":       "---\nname: standup\ndescription: x\n---\nbody\n",
-		"flow mapping":   "---\n{name: standup, description: x, metadata: {when_to_use: At standup.}}\n---\nbody\n",
+		"authored value":      "---\nname: standup\ndescription: x\nwhen_to_use: When I say so.\nmetadata:\n  when_to_use: At standup.\n---\nbody\n",
+		"authored empty":      "---\nname: standup\ndescription: x\nwhen_to_use: \"\"\nmetadata:\n  when_to_use: At standup.\n---\nbody\n",
+		"no value":            "---\nname: standup\ndescription: x\n---\nbody\n",
+		"authored flow value": "---\n{name: standup, description: x, when_to_use: Mine., metadata: {when_to_use: At standup.}}\n---\nbody\n",
+		"flow, no value":      "---\n{name: standup, description: x}\n---\nbody\n",
 	} {
 		if got := claudeSkillMarkdown(t, wtuSkillArtifact, skill); got != skill {
 			t.Errorf("%s: SKILL.md changed:\n got %q\nwant %q", name, got, skill)
+		}
+	}
+}
+
+// Spec: §4.3.4, §6.7 — a frontmatter that no single injected line can extend,
+// a flow mapping, a mapping whose first key is explicit, and one that opens
+// with a tag line, still gets the resolved top-level when_to_use: the key
+// joins the mapping and the frontmatter is re-encoded, keeping the opening
+// delimiter, the closing delimiter, and the body. A user-invoked flow-mapping
+// skill carries both the user-only control and the key.
+func TestClaudeCode_WritesWhenToUseIntoNonBlockFrontmatter(t *testing.T) {
+	t.Parallel()
+	for name, skill := range map[string]string{
+		"flow mapping": "---\n{name: standup, description: x, metadata: {version: \"1.0.0\", when_to_use: \"At standup.\\nWhen asked about yesterday.\"}}\n---\n\nbody\n",
+		"explicit key": "---\n? name\n: standup\ndescription: x\nmetadata:\n  when_to_use: |\n    At standup.\n    When asked about yesterday.\n---\n\nbody\n",
+		"tag line":     "---\n!!map\nname: standup\ndescription: x\nmetadata:\n  when_to_use: |\n    At standup.\n    When asked about yesterday.\n---\n\nbody\n",
+		"flow, user":   "---\n{name: standup, description: x, metadata: {invocation: user, when_to_use: \"At standup.\\nWhen asked about yesterday.\"}}\n---\n\nbody\n",
+	} {
+		got := claudeSkillMarkdown(t, wtuSkillArtifact, skill)
+		if v, ok := topLevelWhenToUse(t, got); !ok || v != "At standup.\nWhen asked about yesterday." {
+			t.Errorf("%s: top-level when_to_use = %q (%v):\n%s", name, v, ok, got)
+		}
+		if !strings.HasPrefix(got, "---\n") || !strings.HasSuffix(got, "\n---\n\nbody\n") {
+			t.Errorf("%s: delimiters or body changed:\n%s", name, got)
+		}
+		a, err := manifest.ResolveArtifact([]byte(wtuSkillArtifact), []byte(got))
+		if err != nil {
+			t.Fatalf("%s: the written SKILL.md does not resolve: %v\n%s", name, err, got)
+		}
+		if strings.Join(a.WhenToUse, "|") != "At standup.|When asked about yesterday." {
+			t.Errorf("%s: resolved when_to_use = %q", name, a.WhenToUse)
+		}
+		if name == "flow, user" && !strings.Contains(got, "disable-model-invocation: true") {
+			t.Errorf("%s: the user-only control is missing:\n%s", name, got)
 		}
 	}
 }

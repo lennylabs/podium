@@ -20,7 +20,7 @@ Every destination carries a record as one JSON object with the following members
 |:--|:--|
 | `type` | The event type, such as `artifact.loaded` or `layer.ingested`. [Event types](#event-types) lists them. |
 | `timestamp` | The event time in RFC 3339, in UTC, with up to nine fractional-second digits and trailing zeros omitted. |
-| `trace_id` | The W3C trace ID of the request that raised the event. |
+| `trace_id` | The trace ID of the request that raised the event, taken from its W3C `traceparent` or its `X-Podium-Trace-Id` header, as [Trace ID header](http-api#trace-id-header) describes. |
 | `caller` | An object with `identity`, `email`, `groups`, `network`, `public_mode`, and `client`. `network` holds `source_ip` and `forwarded_user` and appears on public-mode events. `client` holds `name`, `version`, `host`, `host_version`, `harness`, and `purpose`, as described in [Client software](#client-software). |
 | `target` | The artifact, domain, layer, or user the event concerns. |
 | `context` | A map of event-specific string values, such as `version` on `artifact.loaded` or `superseded_head` on a closing event. |

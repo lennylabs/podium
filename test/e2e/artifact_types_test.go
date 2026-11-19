@@ -38,7 +38,7 @@ func TestArtifactTypes_ScaffoldSkillSplit(t *testing.T) {
 	}
 	skill := assertScaffoldedSkillAlone(t, out, "0.1.0")
 	if !strings.Contains(skill, "name: run-variance-analysis") ||
-		!strings.Contains(skill, "description: Flag unusual variance vs. forecast after month-end close.") {
+		!strings.Contains(skill, `description: "Flag unusual variance vs. forecast after month-end close."`) {
 		t.Errorf("SKILL.md missing name/description:\n%s", skill)
 	}
 	if l := runPodium(t, "", nil, "lint", "--registry", root); l.Exit != 0 {

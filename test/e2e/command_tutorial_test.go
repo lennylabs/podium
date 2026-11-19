@@ -23,7 +23,7 @@ const standupFile = standupID + "/SKILL.md"
 // §5.2).
 const standupSkill = "---\n" +
 	"name: standup\n" +
-	"description: Format a daily standup update from a free-text summary of yesterday's work.\n" +
+	"description: \"Format a daily standup update from a free-text summary of yesterday's work.\"\n" +
 	"metadata:\n" +
 	"  version: \"1.0.0\"\n" +
 	"  invocation: \"user\"\n" +
@@ -77,7 +77,9 @@ func TestCommandTutorial_ScaffoldLintsClean(t *testing.T) {
 		t.Fatalf("scaffold exit=%d stderr=%s", sc.Exit, sc.Stderr)
 	}
 	skill := readFile(t, filepath.Join(out, "SKILL.md"))
-	for _, want := range []string{"metadata:\n", "sensitivity: \"low\"", "invocation: \"user\""} {
+	// The tutorial page shows the scaffolded description line as written.
+	desc := "description: \"Format a daily standup update from a free-text summary of yesterday's work.\"\n"
+	for _, want := range []string{desc, "metadata:\n", "sensitivity: \"low\"", "invocation: \"user\""} {
 		if !strings.Contains(skill, want) {
 			t.Errorf("scaffolded SKILL.md missing %q:\n%s", want, skill)
 		}

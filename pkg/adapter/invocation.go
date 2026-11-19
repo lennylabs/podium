@@ -236,10 +236,7 @@ func lineEnding(line string) string {
 // such as a flow mapping whose keys share a line, and one the line injection
 // would break, such as a mapping whose first key is explicit. It sets the first
 // occurrence to the boolean true, drops later ones, and re-encodes the
-// frontmatter between the delimiters. The re-encoding normalizes the layout
-// of the frontmatter alone: the opening delimiter line, the frontmatter's
-// line ending, and every byte from the closing delimiter on, including the
-// authored separator before the body, are kept.
+// frontmatter with reencodeFrontmatter.
 func reencodeUserOnly(lines []string, closing int, doc *yaml.Node, keys []int) []byte {
 	root := doc.Content[0]
 	for k := len(keys) - 1; k > 0; k-- {
@@ -247,6 +244,15 @@ func reencodeUserOnly(lines []string, closing int, doc *yaml.Node, keys []int) [
 		root.Content = append(root.Content[:i], root.Content[i+2:]...)
 	}
 	root.Content[keys[0]+1] = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"}
+	return reencodeFrontmatter(lines, closing, doc)
+}
+
+// reencodeFrontmatter replaces the frontmatter between the delimiters of the
+// document split into lines with the encoding of doc. The re-encoding
+// normalizes the layout of the frontmatter alone: the opening delimiter line,
+// the frontmatter's line ending, and every byte from the closing delimiter
+// on, including the authored separator before the body, are kept.
+func reencodeFrontmatter(lines []string, closing int, doc *yaml.Node) []byte {
 	out, err := yaml.Marshal(doc)
 	if err != nil {
 		// Unreachable for a node tree yaml.v3 just decoded; kept so a future
