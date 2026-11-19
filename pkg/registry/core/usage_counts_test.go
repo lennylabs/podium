@@ -119,30 +119,29 @@ func TestUsageCounts_Loads(t *testing.T) {
 }
 
 // Spec: §8.7, §13.12 — a tenant records at most the configured number of
-// distinct clients, and of distinct harnesses, per day: a further value counts
-// under other, unknown and other never count toward the cap, the values the
-// store already holds for the day count toward it, and a client already
+// distinct clients, and of distinct harnesses, per day: the values the store
+// already holds for the day count toward the cap, a further value counts
+// under other, unknown and other never count toward it, and a client already
 // recorded keeps counting under its own name.
 func TestUsageCounter_CapsDistinctClientsAndHarnesses(t *testing.T) {
 	t.Parallel()
 	f := newUsageFixture(t)
 	ctx := context.Background()
-	// A value another replica stored today counts toward the cap.
+	// A value another replica stored today fills the single slot.
 	if err := f.st.AddUsageCounts(ctx, "t", []store.UsageCount{
 		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/greet", Client: "stored", Harness: "h-stored", Loads: 1},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	f.counter.WithMaxClientKeys(2)
+	f.counter.WithMaxClientKeys(1)
 	load := func(name, harness string) {
 		_, _ = f.reg.LoadArtifact(clientCtx(name, harness), usageAlice, "ops/greet", core.LoadArtifactOptions{})
 	}
 	load("fresh", "h-fresh")
-	load("overflow", "h-overflow")
-	load("stored", "h-stored")
-	load("", "")
 	_ = f.rows(t)
+	load("stored", "h-stored")
 	load("fresh", "h-fresh")
+	load("", "")
 	load("late", "h-late")
 	rows := f.rows(t)
 	got := map[string]int64{}
@@ -151,12 +150,62 @@ func TestUsageCounter_CapsDistinctClientsAndHarnesses(t *testing.T) {
 	}
 	want := map[string]int64{
 		"stored/h-stored": 2,
-		"fresh/h-fresh":   2,
-		"other/other":     2,
+		"other/other":     3,
 		"unknown/unknown": 1,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("loads by client/harness = %v, want %v", got, want)
+	}
+}
+
+// Spec: §8.7 — a replica applies the cap as it records a call, so its
+// unflushed counts name at most the cap's number of clients and harnesses
+// however many distinct names callers send between flushes, and every call
+// is still counted: the further names count under other.
+func TestUsageCounter_BuffersAtMostTheCap(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	f.counter.WithMaxClientKeys(3)
+	for i := range 500 {
+		name := fmt.Sprintf("caller-%d", i)
+		_, _ = f.reg.LoadArtifact(clientCtx(name, "h-"+name), usageAlice, "ops/greet", core.LoadArtifactOptions{})
+	}
+	if c, h := core.UsagePendingNames(f.counter); c > 4 || h > 4 {
+		t.Errorf("buffered %d clients and %d harnesses, want at most 3 each plus other", c, h)
+	}
+	got := loadsByClient(f.rows(t))
+	want := map[string]int64{"caller-0": 1, "caller-1": 1, "caller-2": 1, "other": 497}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("loads by client = %v, want %v", got, want)
+	}
+}
+
+// Spec: §8.7 — a value another replica recorded after this replica last read
+// the store counts under other while this replica has counted the cap's
+// number of other values, and under its own name once a flush has read it.
+func TestUsageCounter_UnreadValueCountsAsOtherWhileTheBufferIsFull(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	if err := f.st.AddUsageCounts(context.Background(), "t", []store.UsageCount{
+		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/greet", Client: "peer", Harness: "h", Loads: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.counter.WithMaxClientKeys(2)
+	load := func(name string) {
+		_, _ = f.reg.LoadArtifact(clientCtx(name, "h"), usageAlice, "ops/greet", core.LoadArtifactOptions{})
+	}
+	load("first")
+	load("second")
+	load("peer")
+	want := map[string]int64{"peer": 1, "first": 1, "other": 2}
+	if got := loadsByClient(f.rows(t)); !reflect.DeepEqual(got, want) {
+		t.Errorf("loads by client after the first flush = %v, want %v", got, want)
+	}
+	load("peer")
+	want["peer"] = 2
+	if got := loadsByClient(f.rows(t)); !reflect.DeepEqual(got, want) {
+		t.Errorf("loads by client after the second flush = %v, want %v", got, want)
 	}
 }
 
