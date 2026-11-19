@@ -1437,7 +1437,7 @@ POST /v1/layers/restore?id={id}
 
 `GET /v1/layers?deleted=true` lists the soft-deleted layers still inside the recovery window. It filters them on the terms of the [layer read visibility](#layer-read-visibility) rule.
 
-`POST /v1/layers/restore?id={id}` clears the tombstone and recovers the layer and its artifacts.
+`POST /v1/layers/restore?id={id}` clears the tombstone and recovers the layer and the artifacts the unregister soft-deleted. An artifact an ingest removed before the unregister stays soft-deleted.
 
 **Authorization for restore.** [Layer write authorization](#layer-write-authorization): a tenant admin for an admin-defined layer, and the owner or a tenant admin for a user-defined layer. A caller authorized by neither arm is rejected with `auth.forbidden`. On a layer that names a filesystem path on the registry host, [local-source authorization](#local-source-authorization) additionally requires the `admin` role. Any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
 
