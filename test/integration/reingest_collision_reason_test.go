@@ -345,6 +345,13 @@ func TestReingest_ExtendsRemovedUnderLintEnvelope(t *testing.T) {
 	if string(env["code"]) != `"ingest.lint_failed"` {
 		t.Errorf("code = %s, want ingest.lint_failed: %s", env["code"], body)
 	}
+	// Spec: §7.3.1 (Ingest outcome) — the message names the artifact the lint
+	// diagnostic came from, so the suggested action has one to point at.
+	var message string
+	_ = json.Unmarshal(env["message"], &message)
+	if !strings.HasPrefix(message, "ingest.lint_failed: 1 lint diagnostic in mine/hook (lint.") {
+		t.Errorf("message = %q, want it to name mine/hook and its lint code", message)
+	}
 	if _, has := env["rejected"]; has {
 		t.Errorf("422 envelope carries a rejected member: %s", body)
 	}

@@ -847,7 +847,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	}
 
 	if len(res.LintFailures) > 0 && res.Accepted == 0 && res.Idempotent == 0 && len(res.Conflicts) == 0 {
-		return res, fmt.Errorf("%w: %d diagnostics", ErrLintFailed, len(res.LintFailures))
+		return res, lintFailedError(res.LintFailures)
 	}
 	return res, nil
 }
