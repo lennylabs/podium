@@ -266,13 +266,19 @@ export function BreakdownBar({ title, parts }: { title: string; parts: Breakdown
   );
 }
 
-/** ShareBar is a layer's share of loads and syncs against the largest layer,
- * which is drawn in the accent and the rest muted. */
-export function ShareBar({ value, max, top }: { value: number; max: number; top: boolean }) {
-  const width = max === 0 ? 0 : Math.round((value / max) * 100);
+/** ShareBar is a layer's share of all loads, its loads and syncs against the
+ * sum over every layer, drawn as a bar and stated as a percentage so a reader
+ * who cannot see the bar hears the share. The largest layer is drawn in the
+ * accent and the rest muted. */
+export function ShareBar({ value, total, top }: { value: number; total: number; top: boolean }) {
+  const share = total === 0 ? 0 : (value / total) * 100;
+  const label = share > 0 && share < 1 ? '<1%' : `${String(Math.round(share))}%`;
   return (
-    <span className="share-bar" aria-hidden="true">
-      <span className={top ? 'share-fill share-fill-top' : 'share-fill'} style={{ width: `${String(width)}%` }} />
+    <span className="share">
+      <span className="share-bar" aria-hidden="true">
+        <span className={top ? 'share-fill share-fill-top' : 'share-fill'} style={{ width: `${share.toFixed(1)}%` }} />
+      </span>
+      <span className="share-pct">{label}</span>
     </span>
   );
 }

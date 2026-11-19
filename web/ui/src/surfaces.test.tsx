@@ -20004,7 +20004,7 @@ describe("similarity", () => {
       expect(rows[1].textContent).toContain("80%");
       expect(rows[1].textContent).not.toContain("·");
       expect(rows[2].textContent).toContain("0.91");
-      expect(screen.getByText("3 CLUSTERS")).toBeTruthy();
+      expect(screen.getByText("3 ARTIFACTS")).toBeTruthy();
       // The first read carries no threshold, so the registry applies its
       // configured one, and the control starts at the value it reports.
       expect(overlapReads().every((params) => !params.has("threshold"))).toBe(true);
@@ -20131,7 +20131,7 @@ describe("similarity", () => {
       goTo(similarityHref());
       render(<App />);
       expect((await screen.findByTestId("similarity-empty")).textContent).toBe("No clusters");
-      expect(screen.getByText("0 CLUSTERS")).toBeTruthy();
+      expect(screen.getByText("0 ARTIFACTS")).toBeTruthy();
     });
 
     it("presents a read the registry refused with its code and offers a retry that re-issues it", async () => {
@@ -20804,6 +20804,168 @@ describe("usage", () => {
       // window, so the heading carries no range badge beside it.
       expect(screen.queryByText("2026-10-20 TO 2026-11-18")).toBeNull();
       expect(document.querySelector(".usage-head")?.textContent).not.toMatch(/LAST \d+ DAYS/);
+    });
+
+    // Spec: §13.10 — a next page that fails is stated beside the table and
+    // retried only from the button. A rebuilt observer reports the sentinel
+    // in view at once, so an observer kept running after the failure asked
+    // for the failed page again in a loop and showed nothing.
+    it("states a failed next page once and retries it from the button", async () => {
+      const observers: { fire: () => void; disconnected: boolean }[] = [];
+      vi.stubGlobal(
+        "IntersectionObserver",
+        class {
+          entry = { fire: () => {}, disconnected: false };
+          constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+            this.entry.fire = () => {
+              callback([{ isIntersecting: true }]);
+            };
+            observers.push(this.entry);
+          }
+          observe() {}
+          disconnect() {
+            this.entry.disconnected = true;
+          }
+        },
+      );
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      goTo(usageHref());
+      render(<App />);
+      await screen.findByRole("table", { name: "Usage by artifact" });
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { status: 503, body: { code: "registry.unavailable", message: "down" } },
+      });
+      await waitFor(() => {
+        expect(observers.some((o) => !o.disconnected)).toBe(true);
+      });
+      act(() => {
+        observers.filter((o) => !o.disconnected).forEach((o) => {
+          o.fire();
+        });
+      });
+      expect((await screen.findByRole("alert")).textContent).toBe("The next artifacts did not load.");
+      // Every observer built after the failure is stopped, so no further read
+      // of the failed page goes out on its own.
+      act(() => {
+        observers.filter((o) => !o.disconnected).forEach((o) => {
+          o.fire();
+        });
+      });
+      expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": {
+          body: usageBody({ artifacts: [usageArtifact(payInvoice, "team-finance", 1544)], next_cursor: null }),
+        },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      await waitFor(() => {
+        expect(screen.getByTestId("usage-count").textContent).toBe("Showing 2 of 312");
+      });
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    // Spec: §13.10 — a next page asked for under one filter and answered
+    // after the reader changed it is dropped, so the table never mixes rows
+    // of two lists or follows a cursor of the earlier order.
+    it("drops a next page that arrives after the filters change", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      goTo(usageHref());
+      render(<App />);
+      const more = await screen.findByRole("button", { name: "Show 50 more" });
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": {
+          deferred: true,
+          body: usageBody({ artifacts: [usageArtifact(payInvoice, "team-finance", 1544)], next_cursor: null }),
+        },
+      });
+      fireEvent.click(more);
+      fireEvent.change(screen.getByLabelText("Type"), { target: { value: "agent" } });
+      await waitFor(() => {
+        expect(usageBodies().some((b) => Array.isArray(b.types) && b.types[0] === "agent")).toBe(true);
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("usage-count").textContent).toBe("Showing 1 of 312");
+      });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 1 of 312");
+    });
+
+    // Spec: §13.10 — a layer's share is its part of all loads across the
+    // layers, stated as a percentage beside the bar.
+    it("states each layer's share of all loads as a percentage", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      goTo(usageHref());
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: /By layer/ }));
+      const table = screen.getByRole("table", { name: "Usage by layer" });
+      const shares = Array.from(table.querySelectorAll(".share-pct")).map((cell) => cell.textContent);
+      expect(shares).toEqual(["62%", "38%"]);
+      const fills = Array.from(table.querySelectorAll<HTMLElement>(".share-fill")).map((fill) => fill.style.width);
+      expect(fills).toEqual(["61.5%", "38.5%"]);
+    });
+
+    // Spec: §13.10 — on a custom range that ended in the past, the last
+    // loaded day reads against the real day, so the range's last day is not
+    // stated as today.
+    it("states the last loaded day against today on a custom range", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": {
+          body: usageBody({
+            from: "2026-10-01",
+            to: "2026-10-15",
+            artifacts: [usageArtifact(traceReview, "platform", 12, { last_loaded: "2026-10-15" })],
+            next_cursor: null,
+          }),
+        },
+      });
+      goTo(usageHref());
+      render(<App />);
+      await screen.findByRole("table", { name: "Usage by artifact" });
+      fireEvent.click(screen.getByRole("button", { name: "Custom…" }));
+      await waitFor(() => {
+        expect(usageBodies().some((b) => b.from === "2026-10-01" && b.to === "2026-10-15")).toBe(true);
+      });
+      const row = within(screen.getByRole("table", { name: "Usage by artifact" }))
+        .getByRole("link", { name: traceReview })
+        .closest('[role="row"]');
+      await waitFor(() => {
+        expect(row?.textContent).not.toContain("today");
+      });
+      // The fields bound each other and stop at today.
+      expect((screen.getByLabelText("From") as HTMLInputElement).max).toBe("2026-10-15");
+      expect((screen.getByLabelText("To") as HTMLInputElement).min).toBe("2026-10-01");
+    });
+
+    // Spec: §7.2.2, §8.7 — the web UI names itself in X-Podium-Client, so the
+    // loads it makes are counted under its own client rather than unknown.
+    it("names itself as the web client on registry requests", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      goTo(usageHref());
+      render(<App />);
+      await screen.findAllByTestId("stat-tile");
+      const calls = vi.mocked(globalThis.fetch).mock.calls.filter(([input]) => String(input).startsWith("/v1/usage"));
+      expect(calls.length).toBeGreaterThan(0);
+      for (const [, init] of calls) {
+        expect(new Headers(init?.headers).get("X-Podium-Client")).toBe("name=web");
+      }
     });
 
     it("states a failed read in place of the figures", async () => {

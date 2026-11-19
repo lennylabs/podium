@@ -13353,9 +13353,9 @@ so it needs no embedding provider, and it binds 127.0.0.1:8176.
    echo "open http://127.0.0.1:8176/app/#/similarity"
    ```
 
-   **Expect.** The sidebar lists Similarity between Search and Layers with the
-   figure `2` on its right edge. The page is titled Similarity analysis with a
-   `2 CLUSTERS` badge and shows no threshold control. The list holds
+   **Expect.** The sidebar lists Similarity after Search with the figure `2`
+   on its right edge. The page is titled Similarity analysis with a
+   `2 ARTIFACTS` badge and shows no threshold control. The list holds
    `finance/match-invoices` and `finance/reconcile`, each with a percentage of
    at least 70 on the right, and holds no `finance/close`. The detail of the
    selected entry shows its identifier, a `SKILL` badge, its layer, its
@@ -13373,8 +13373,8 @@ so it needs no embedding provider, and it binds 127.0.0.1:8176.
    selected row is tinted with an accent bar on its left edge, and a
    comparison below the table is headed `reconcile vs. match-invoices` with
    `word overlap` and the percentage, an `Open match-invoices →` link, and the
-   two descriptions side by side. The rail's SIMILARITY section, directly
-   under PROVENANCE, reads `1 with` the percentage `word overlap`, then
+   two descriptions side by side. The rail's SIMILARITY section, after the
+   PROVENANCE and USAGE sections, reads `1 with` the percentage `word overlap`, then
    `Description length is fine` with a check mark, then `See it in Similarity
    analysis →`. On `finance/close`, the tab carries no count, a card headed
    `Too short to tell apart` states the registry's message, and the rail reads
@@ -13814,7 +13814,7 @@ rm -rf "$WORK"
 
 5. Switch the theme to dark with the control in the top bar and repeat steps 2 to 4.
 
-   **Expect.** Every bar, swatch, and figure stays legible against the dark ground, the accent bars keep their tone, and no text or bar disappears.
+   **Expect.** Every bar, swatch, and figure stays legible against the dark ground, the accent bars keep their tone, and no text or bar disappears, the `unknown` breakdown part and its swatch included. Opening an artifact in the viewer is itself a load, counted under client `web`, so the repeated steps report one more load for each artifact step 4 opened, and the client bar gains a `web` part.
 
 **Cleanup.**
 
