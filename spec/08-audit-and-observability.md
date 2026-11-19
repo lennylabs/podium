@@ -105,7 +105,7 @@ A receiver keeps one copy per `hash` (§8.1), and a record dropped for a destina
 
 Caller identity stays in the body and is not copied into attributes. The resource carries `service.name`, which is the name the process uses for §13.8 tracing, and `service.instance.id`, a random identifier the process generates when it opens the stream. The instrumentation scope name is `github.com/lennylabs/podium/audit`. The OTLP destination reads no `OTEL_EXPORTER_OTLP_*` variable and is independent of `PODIUM_TRACING` (§13.8).
 
-**Observability.** Every dropped record is counted per destination kind and reason, and the queued records of the HTTP and OTLP destinations are reported as a queue depth per destination kind (§13.8). Dropped records are also logged, whether or not metrics are enabled, in at most one line per destination and reason per minute. A log line names a destination by its file path, as `stdout`, or by its scheme, host, and path.
+**Observability.** Every dropped record is counted per destination kind and reason, and the queued records of the HTTP and OTLP destinations are reported as a queue depth per destination kind (§13.8). Dropped records are also logged, whether or not metrics are enabled, in at most one line per destination and reason per minute while the process runs. A count held back by that bound is logged when its minute ends, and a process that shuts down logs every count it has not logged yet. A log line names a destination by its file path, as `stdout`, or by its scheme, host, and path.
 
 ## 8.4 Retention
 
