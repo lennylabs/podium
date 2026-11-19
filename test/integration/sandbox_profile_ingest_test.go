@@ -32,6 +32,9 @@ func TestSandboxProfileIngestGate(t *testing.T) {
 			t.Fatalf("CreateTenant: %v", err)
 		}
 		lc := store.LayerConfig{ID: "L", TenantID: "t", SourceType: "local", LocalPath: dir}
+		if err := st.PutLayerConfig(context.Background(), lc); err != nil {
+			t.Fatalf("PutLayerConfig: %v", err)
+		}
 		res, err := ingest.SourceIngestWithOptions(context.Background(), st, source.Local{}, lc, ingest.SourceIngestOptions{
 			EnforceSandboxProfile:      enforce,
 			EnforceableSandboxProfiles: []string{"unrestricted"},
