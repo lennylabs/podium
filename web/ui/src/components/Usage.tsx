@@ -3,13 +3,15 @@
 // a breakdown or a layer's share. Each draws figures it is handed; the
 // surfaces own the reads.
 
+import { useId, useState } from 'react';
+
 import type { UsagePeriod } from '../api';
 import { usageHref } from '../route';
 import type { BreakdownPart, RailUsage, UsageCell } from '../usage';
-import { formatCount, relativeDay } from '../usage';
+import { formatCount, relativeDay, usageHints } from '../usage';
 
 /** UsageLine is the 30-day line under an artifact in the search results and
- * the domain browser: loads, syncs, and search hits, with placeholders while
+ * the domain browser: on-demand loads, preloads, and search hits, with placeholders while
  * the list's read is in flight. A row whose read failed passes no cell and the
  * line is left out, with no dash and no retry (§13.10). ruled draws the dashed
  * rule above the line that separates it on a search result card.
@@ -35,17 +37,17 @@ export function UsageLine({ cell, ruled = false }: { cell: UsageCell | undefined
     <div className={className} data-testid="usage-line">
       <span className="usage-label">30 DAYS</span>
       <span className="usage-figures">
-        <UsageFigure value={loads} unit="loads" />
-        <UsageFigure value={syncs} unit="syncs" />
-        <UsageFigure value={search_hits} unit="search hits" />
+        <UsageFigure value={loads} unit="on-demand loads" hint={usageHints.loads} />
+        <UsageFigure value={syncs} unit="preloads" hint={usageHints.syncs} />
+        <UsageFigure value={search_hits} unit="search hits" hint={usageHints.searchHits} />
       </span>
     </div>
   );
 }
 
-function UsageFigure({ value, unit }: { value: number; unit: string }) {
+function UsageFigure({ value, unit, hint }: { value: number; unit: string; hint: string }) {
   return (
-    <span className="usage-figure">
+    <span className="usage-figure" title={hint}>
       <span className="usage-value">{formatCount(value)}</span>
       <span className="usage-unit">{unit}</span>
     </span>
@@ -75,16 +77,16 @@ export function UsageSummary({ id, usage }: { id: string; usage: RailUsage | und
           <span className="usage-placeholder" aria-hidden="true" style={{ width: 120 }} />
         </div>
       ) : usage.counts.loads + usage.counts.syncs + usage.counts.search_hits === 0 ? (
-        <p className="usage-summary-empty">No loads, syncs, or search hits in the last 30 days.</p>
+        <p className="usage-summary-empty">No on-demand loads, preloads, or search hits in the last 30 days.</p>
       ) : (
         <>
           <LoadBars series={usage.series} />
           <dl className="usage-summary-figures">
-            <UsageRow label="loads" value={formatCount(usage.counts.loads)} />
-            <UsageRow label="syncs" value={formatCount(usage.counts.syncs)} />
-            <UsageRow label="search hits" value={formatCount(usage.counts.search_hits)} />
-            <UsageRow label="last loaded" value={relativeDay(usage.lastLoaded, usage.today)} />
-            <UsageRow label="last synced" value={relativeDay(usage.lastSynced, usage.today)} />
+            <UsageRow label="on-demand loads" hint={usageHints.loads} value={formatCount(usage.counts.loads)} />
+            <UsageRow label="preloads" hint={usageHints.syncs} value={formatCount(usage.counts.syncs)} />
+            <UsageRow label="search hits" hint={usageHints.searchHits} value={formatCount(usage.counts.search_hits)} />
+            <UsageRow label="last loaded on demand" value={relativeDay(usage.lastLoaded, usage.today)} />
+            <UsageRow label="last preloaded" value={relativeDay(usage.lastSynced, usage.today)} />
           </dl>
           <a className="usage-summary-link" href={usageHref(id)}>
             Open in Usage →
@@ -95,22 +97,22 @@ export function UsageSummary({ id, usage }: { id: string; usage: RailUsage | und
   );
 }
 
-function UsageRow({ label, value }: { label: string; value: string }) {
+function UsageRow({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="usage-summary-row">
-      <dt>{label}</dt>
+      <dt title={hint}>{label}</dt>
       <dd>{value}</dd>
     </div>
   );
 }
 
-/** LoadBars draws one bar per day of the series, scaled to the busiest day,
- * with today's bar, the last, in the accent. A day with no loads keeps a
+/** LoadBars draws one bar per day of the series' on-demand loads, scaled to
+ * the busiest day, with today's bar, the last, in the accent. A day with no loads keeps a
  * one-pixel stub so the run of days stays legible. */
 function LoadBars({ series }: { series: UsagePeriod[] }) {
   const peak = Math.max(1, ...series.map((period) => period.loads));
   return (
-    <div className="load-bars" role="img" aria-label={`Daily loads over the last ${String(series.length)} days`}>
+    <div className="load-bars" role="img" aria-label={`Daily on-demand loads over the last ${String(series.length)} days`}>
       {series.map((period, i) => (
         <span
           key={period.start}
@@ -122,15 +124,57 @@ function LoadBars({ series }: { series: UsagePeriod[] }) {
   );
 }
 
-/** StatTile is one of the usage page's two totals with its daily sparkline. */
+/** InfoTip is the ⓘ beside a label and the definition it opens. The
+ * definition shows while the pointer rests on the ⓘ or the ⓘ holds focus, and
+ * a press pins it open, so a touch reader, who has no hover, can read it; a
+ * second press, Escape, or leaving the ⓘ closes it. The text stays in the
+ * document as the button's description, so a screen reader states it with
+ * the button whether or not it is shown. A native title would show only
+ * after a hover delay, never on focus or touch, and nothing on the label
+ * would say it is there. */
+export function InfoTip({ subject, text }: { subject: string; text: string }) {
+  const id = useId();
+  const [pinned, setPinned] = useState(false);
+  return (
+    <span className={pinned ? 'info-tip info-tip-open' : 'info-tip'}>
+      <button
+        type="button"
+        className="info-tip-button"
+        aria-label={`About ${subject}`}
+        aria-describedby={id}
+        aria-expanded={pinned}
+        onClick={() => {
+          setPinned(!pinned);
+        }}
+        onBlur={() => {
+          setPinned(false);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            setPinned(false);
+            e.currentTarget.blur();
+          }
+        }}
+      >
+        ⓘ
+      </button>
+      <span role="tooltip" id={id} className="info-tip-text">
+        {text}
+      </span>
+    </span>
+  );
+}
+
+/** StatTile is one of the usage page's two totals with its daily sparkline.
+ * hint is the definition the ⓘ beside the label opens. */
 export function StatTile({
   label,
-  note,
+  hint,
   total,
   values,
 }: {
   label: string;
-  note: string;
+  hint: string;
   total: number;
   values: number[];
 }) {
@@ -138,7 +182,7 @@ export function StatTile({
     <div className="stat-tile" data-testid="stat-tile">
       <div className="stat-tile-head">
         <h2 className="stat-tile-label">{label}</h2>
-        <span className="stat-tile-note">{note}</span>
+        <InfoTip subject={label.toLowerCase()} text={hint} />
       </div>
       <div className="stat-tile-body">
         <span className="stat-tile-total">{formatCount(total)}</span>
@@ -192,9 +236,11 @@ export function BreakdownBar({ title, parts }: { title: string; parts: Breakdown
   const total = parts.reduce((sum, part) => sum + part.count, 0);
   return (
     <div className="breakdown" data-testid="breakdown">
-      <h3 className="breakdown-title">{title}</h3>
+      <h3 className="breakdown-title" title={usageHints.allLoads}>
+        {title}
+      </h3>
       {total === 0 ? (
-        <p className="breakdown-empty">No loads or syncs in this window.</p>
+        <p className="breakdown-empty">No on-demand loads or preloads in this window.</p>
       ) : (
         <>
           <div className="breakdown-bar" aria-hidden="true">

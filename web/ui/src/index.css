@@ -6823,15 +6823,6 @@ button.cluster-row-selected:hover {
   font-weight: 700;
 }
 
-.usage-head-badges {
-  margin-top: 9px;
-}
-
-.usage-head-badges .badge {
-  font-size: 10.5px;
-  font-weight: 500;
-}
-
 .usage-head-control {
   display: flex;
   flex-direction: column;
@@ -6913,10 +6904,55 @@ button.cluster-row-selected:hover {
   letter-spacing: 0.11em;
 }
 
-.stat-tile-note {
-  margin-left: auto;
+/* The ⓘ beside a stat tile's label and the definition it opens. The text is
+   positioned under the glyph and shown on hover, on keyboard focus, and while
+   a press holds it open. Keyboard focus is :focus-visible rather than
+   :focus-within, because a press also focuses the button, and the text would
+   then stay open after the second press that is meant to close it. */
+.info-tip {
+  position: relative;
+  display: inline-flex;
+}
+
+.info-tip-button {
+  padding: 0 2px;
+  border: 0;
+  background: none;
   color: var(--faint);
-  font: 10.5px var(--font-mono);
+  font: 12px var(--font-ui);
+  line-height: 1;
+  cursor: help;
+}
+
+.info-tip-button:hover,
+.info-tip-button:focus-visible,
+.info-tip-open .info-tip-button {
+  color: var(--ink);
+}
+
+.info-tip-text {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: -8px;
+  z-index: 20;
+  width: 300px;
+  max-width: calc(100vw - 48px);
+  padding: 10px 12px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  box-shadow: 0 12px 28px -12px var(--scrim);
+  color: var(--sec);
+  font: 13px/1.5 var(--font-ui);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.info-tip:hover .info-tip-text,
+.info-tip-button:focus-visible + .info-tip-text,
+.info-tip-open .info-tip-text {
+  display: block;
 }
 
 .stat-tile-body {
@@ -7093,7 +7129,7 @@ button.cluster-row-selected:hover {
 }
 
 .usage-layer-table .usage-row {
-  grid-template-columns: minmax(0, 1fr) 200px 100px 80px 100px;
+  grid-template-columns: minmax(0, 1fr) 200px 140px 90px 100px;
 }
 
 .usage-layer-table .usage-row-head {
@@ -7105,7 +7141,7 @@ button.cluster-row-selected:hover {
 }
 
 .usage-artifact-table .usage-row {
-  grid-template-columns: minmax(0, 1fr) 120px 110px 100px 110px 96px;
+  grid-template-columns: minmax(0, 1fr) 120px 140px 100px 110px 96px;
   padding-top: 11px;
   padding-bottom: 11px;
 }

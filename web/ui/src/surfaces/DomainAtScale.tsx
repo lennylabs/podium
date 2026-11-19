@@ -25,7 +25,7 @@ import {
 import { formatQueryLine } from "../query";
 import { artifactHref, domainHref, pathUnder, searchHref } from "../route";
 import type { UsageCell } from "../usage";
-import { formatCount } from "../usage";
+import { formatCount, usageHints } from "../usage";
 
 /** tileCap is how many tiles the grid shows before the reader asks for the
  * rest, which keeps a domain with dozens of children to one screen. */
@@ -261,7 +261,7 @@ const sortOptions: { key: ArtifactColumn; label: string }[] = [
   { key: "id", label: "artifact" },
   { key: "type", label: "type" },
   { key: "version", label: "version" },
-  { key: "loads", label: "loads" },
+  { key: "loads", label: "on-demand loads" },
 ];
 
 /** UsageOf answers a row's last 30 days, or nothing where the listing reads
@@ -664,8 +664,12 @@ function ArtifactRows({
             <th className="column-label">Tags</th>
             {usage !== undefined && (
               <>
-                <th className="column-label num">Loads</th>
-                <th className="column-label num">Syncs</th>
+                <th className="column-label num" title={usageHints.loads}>
+                  On-demand loads
+                </th>
+                <th className="column-label num" title={usageHints.syncs}>
+                  Preloads
+                </th>
               </>
             )}
             <th className="column-label">Description</th>
