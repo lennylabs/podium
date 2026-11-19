@@ -24,7 +24,7 @@ import (
 // the next tick retries.
 func startRetentionScheduler(ctx context.Context, cfg *Config, stream *audit.Stream, reAnchor func(context.Context)) {
 	if stream.File() == nil {
-		log.Printf("warning: audit retention disabled (no sink)")
+		log.Printf("warning: audit retention disabled: no file destination")
 		return
 	}
 	maxAge := time.Duration(cfg.auditRetentionMaxAgeDays) * 24 * time.Hour

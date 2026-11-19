@@ -292,9 +292,11 @@ func TestAuditAnchor_UnopenableSinkRefusesWithAnchoringOff(t *testing.T) {
 	}
 }
 
-// Spec: §8.6, §13.12 — a destination list with no file destination leaves
-// no local chain to anchor. With anchoring on, the registry logs that
-// anchoring is disabled and starts.
+// Spec: §8.6, §8.4, §13.12 — a destination list with no file destination
+// leaves no local chain to anchor, verify, or rewrite. With anchoring on, the
+// registry starts and logs that anchoring, verification, and retention are
+// disabled because no file destination is listed, which an HTTP destination
+// that delivers does not change.
 func TestAuditAnchor_NoFileDestinationDisablesAnchoring(t *testing.T) {
 	t.Parallel()
 	recorder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -307,8 +309,17 @@ func TestAuditAnchor_NoFileDestinationDisablesAnchoring(t *testing.T) {
 		"PODIUM_AUDIT_SIGNING_KEY_PATH=" + filepath.Join(t.TempDir(), "audit.key"),
 		anchorIntervalOn,
 	}, anchorStartArgs(t)...)
-	if !strings.Contains(srv.log(), "audit anchor disabled (no sink)") {
-		t.Errorf("start log does not report anchoring disabled:\n%s", srv.log())
+	for _, line := range []string{
+		"warning: audit anchor disabled: no file destination",
+		"warning: audit verify disabled: no file destination",
+		"warning: audit retention disabled: no file destination",
+	} {
+		if !strings.Contains(srv.log(), line) {
+			t.Errorf("start log does not carry %q:\n%s", line, srv.log())
+		}
+	}
+	if strings.Contains(srv.log(), "no sink") {
+		t.Errorf("start log says no sink while an HTTP destination is configured:\n%s", srv.log())
 	}
 }
 
