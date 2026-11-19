@@ -519,6 +519,20 @@ describe('the finished reingest report', () => {
     expect(screen.getByRole('button', { name: 'Copy summary' }).className.split(/\s+/)).not.toContain('primary');
   });
 
+  // §7.3.1: a later ingest of the layer took over this one. The report says
+  // so above the counts, so the zeroes do not read as a source with nothing
+  // new, and the copied summary carries it too.
+  it('states that a later ingest superseded the run', () => {
+    report({ accepted: 0, idempotent: 0, lint_failures: 0, superseded: true });
+    expect(screen.getByTestId('reingest-superseded').textContent).toContain('A later ingest of this layer took over');
+    expect(summaryText('acme/platform-artifacts', { accepted: 0, superseded: true }, finishedAt)).toContain(
+      'superseded by a later ingest of the layer',
+    );
+    cleanup();
+    report({ accepted: 1, idempotent: 0, lint_failures: 0 });
+    expect(screen.queryByTestId('reingest-superseded')).toBeNull();
+  });
+
   // A registry with no ingest runner wired answers with the intent alone.
   // There is no outcome to card up and none to copy.
   it('presents no counts where the registry ran no pipeline inside the request', () => {
