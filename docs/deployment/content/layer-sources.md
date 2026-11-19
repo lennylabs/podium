@@ -134,7 +134,7 @@ The registry verifies a `git` layer's inbound webhook deliveries against one Git
 ## Private repositories
 
 > [!NOTE]
-> The credential handling in this section is unreleased behaviour on `main`. It covers the credential flags, the `username` and `token` keys, and the refusal of a credential in the URL. Release 0.6.0 takes a private repository's credential in the userinfo of `--repo` or `source.git.repo`. [Upgrade notes](../operations/upgrade-notes#rollback-floor-for-the-layer-credential-columns) covers moving between the two forms.
+> From 0.7.0, a private repository's credential goes in `--repo-username` and `--repo-token-file`, or in the `source.git.username` and `source.git.token` keys of `registry.yaml`, and a registration whose `--repo` carries a credential in its URL is refused, as [URLs the registry refuses](#urls-the-registry-refuses) states. 0.6.0 and earlier took the credential in the userinfo of `--repo` or `source.git.repo`. [Credentials stored by an earlier release](../operations/upgrade-notes#credentials-stored-by-an-earlier-release) states how such a credential behaves after the upgrade and how to move it.
 
 A `git` layer for a private HTTPS repository takes its credential in flags of its own, apart from `--repo`:
 

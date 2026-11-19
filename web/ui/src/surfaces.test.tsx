@@ -19559,6 +19559,90 @@ describe("the layer panel under the local-source rule", () => {
     ).toContain("drag or press the arrow keys on a handle to reorder");
   });
 
+  // Spec: §13.10 — a public-mode registry admits a layer write only with the
+  // operator token, which the web UI never sends, so the panel offers no
+  // layer control: no reorder handle, and no sentence naming a role as the
+  // reason a reorder is refused.
+  it("draws no reorder handle and names no role in public mode", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer("")] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    expect(within(panel).getAllByTestId("layer-order")).toHaveLength(2);
+    expect(within(panel).queryAllByRole("button", { name: /^Move / })).toHaveLength(0);
+    expect(panel.querySelectorAll(".drag-handle")).toHaveLength(0);
+    expect(panel.textContent).not.toContain("administrator role");
+    expect(panel.querySelector(".precedence-label .label")?.textContent).toBe("Precedence");
+    expect(panel.textContent).toContain("lower row wins");
+    expect(panel.textContent).not.toContain("a row moves within its own block");
+  });
+
+  // Spec: §13.10 — public mode withholds the reorder affordance only where
+  // the posture read reports that the caller may not manage layers. A
+  // posture that admits the caller keeps the handles live.
+  it("draws live reorder handles in public mode where the posture admits managing every layer", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ public_mode: true, layer_capabilities: { manage_any_layer: true } }),
+      },
+      "/v1/layers": { body: { layers: [adminLayer(), { ...adminLayer(), id: "platform", order: 2 }] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    for (const id of ["company", "platform"]) {
+      const handle = await within(panel).findByRole("button", { name: moveHandleLabel(id) });
+      expect(handle.hasAttribute("disabled")).toBe(false);
+    }
+    expect(panel.textContent).toContain("drag or press the arrow keys on a handle to reorder");
+  });
+
+  // Spec: §13.10 — a panel whose posture read has not answered cannot tell
+  // a public-mode registry from one that gates the reorder on the role, so
+  // it draws no handle and names no reason rather than naming the role to a
+  // public-mode reader. The shell mounts no surface while the read is in
+  // flight, so a failed read is the arm that reaches the panel unanswered.
+  it("holds the reorder handles and the role sentence where the posture read did not answer", async () => {
+    stubRegistry({
+      "/v1/ui/session": { status: 500, body: { code: "registry.unavailable", message: "down" } },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    await within(panel).findAllByTestId("layer-order");
+    expect(panel.querySelectorAll(".drag-handle")).toHaveLength(0);
+    expect(panel.textContent).not.toContain("administrator role");
+    expect(panel.querySelector(".precedence-label .label")?.textContent).toBe("Precedence");
+  });
+
+  // Spec: §13.10 — outside public mode a viewer without the administrator
+  // role still sees the handles, disabled, with the role as the reason.
+  it("keeps the disabled handles and the role sentence for a viewer without the role outside public mode", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: nonAdmin() },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    const handle = within(panel).getByRole("button", {
+      name: "Move company: reordering this block requires the administrator role",
+    });
+    expect(handle.hasAttribute("disabled")).toBe(true);
+    expect(panel.querySelector(".precedence-label .label")?.textContent).toBe(
+      "Precedence — reordering these layers requires the administrator role",
+    );
+    expect(panel.textContent).toContain("a row moves within its own block");
+  });
+
   // The fan-out narrows to the rows the rule admits, so the run report names
   // no row it did not attempt and the caller collects no refusal for a row
   // the panel already knew about.
@@ -20052,6 +20136,22 @@ describe("similarity", () => {
       expect(
         within(peers[0]).getByRole("link", { name: settleBill.artifact_id }).getAttribute("href"),
       ).toBe(artifactHref(settleBill.artifact_id));
+      // Spec: §13.10 — the peers are a table, so a screen reader announces
+      // each score under the column that names it.
+      const table = within(detail).getByRole("table", { name: "Overlapping artifacts" });
+      expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
+        "Overlaps with",
+        "Layer",
+        "Similarity",
+        "Word overlap",
+      ]);
+      const tableRows = within(table).getAllByRole("row");
+      expect(tableRows).toHaveLength(3);
+      const cells = within(tableRows[1]).getAllByRole("cell");
+      expect(cells).toHaveLength(4);
+      expect(cells[2].textContent).toBe("0.912");
+      expect(cells[3].textContent).toContain("none");
+      expect(table.querySelector(".assistive-only:not(.score-absent *)")).toBeNull();
     });
 
     it("selects another entry in place and writes it to the address", async () => {
@@ -20323,7 +20423,15 @@ describe("similarity", () => {
       // The rows are the selection controls; there is no separate Compare.
       expect(within(panel).queryByRole("button", { name: /^Compare/ })).toBeNull();
       expect(within(panel).queryByRole("region", { name: /compared with/ })).toBeNull();
+      // Spec: §13.10 — a button row cannot be a table row, so each figure in
+      // it carries its column's name for a screen reader, and the visual
+      // header is hidden from one.
+      expect(within(panel).queryByRole("table")).toBeNull();
+      expect(panel.querySelector(".overlap-head")?.getAttribute("aria-hidden")).toBe("true");
       const row = within(panel).getByRole("button", { name: new RegExp(settleBill.artifact_id) });
+      expect(
+        within(panel).getByRole("button", { name: /Layer payments Similarity 0\.912 Word overlap none$/ }),
+      ).toBe(row);
       fireEvent.click(row);
       expect(row.getAttribute("aria-pressed")).toBe("true");
       const compare = within(panel).getByRole("region", {
@@ -20563,6 +20671,61 @@ describe("usage", () => {
       next_cursor: "c1",
       ...overrides,
     };
+  }
+
+  /** stubUsageReads answers each usage read from `answer`, which sees the
+   * read's parameters, after `delay` milliseconds (20 by default). The
+   * session answers as stubRegistry would. A read that answers within the
+   * same batch of React updates as the call that issued it hides the renders
+   * between the two, and the paging cases need those renders to happen. */
+  function stubUsageReads(answer: (params: Record<string, unknown>) => { body: unknown; delay?: number }): void {
+    stubRegistry({ "/v1/ui/session": { body: posture({ public_mode: true }) } });
+    const others = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (!String(input).startsWith("/v1/usage")) {
+          return others(input, init);
+        }
+        const raw = typeof init?.body === "string" ? init.body : "{}";
+        bodies.push(raw);
+        const { body, delay = 20 } = answer(JSON.parse(raw) as Record<string, unknown>);
+        return new Promise<Response>((resolve) => {
+          setTimeout(() => {
+            resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
+          }, delay);
+        });
+      }),
+    );
+  }
+
+  /** observeInView installs an IntersectionObserver that reports the target
+   * in view as soon as it is observed, which is what a sentinel left inside
+   * the viewport reports each time the page rebuilds the observer. */
+  function observeInView(): void {
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        callback: (entries: { isIntersecting: boolean }[]) => void;
+        constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+          this.callback = callback;
+        }
+        observe() {
+          setTimeout(() => {
+            this.callback([{ isIntersecting: true }]);
+          }, 0);
+        }
+        disconnect() {
+          this.callback = () => {};
+        }
+      },
+    );
+  }
+
+  function pause(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
   }
 
   /** usageBodies parses the usage reads the page sent, oldest first. */
@@ -20901,6 +21064,187 @@ describe("usage", () => {
       expect(screen.getByTestId("usage-count").textContent).toBe("Showing 1 of 312");
     });
 
+    // Spec: §13.10, §8.7 — a count that changes between reads can move the
+    // last artifact across the cursor, and the next page then comes back
+    // empty with no cursor. The list ends there. The page used to fall back
+    // to the first page's cursor whenever no row arrived, so a sentinel left
+    // in view read the same empty page again in a loop.
+    it("reads an empty last page once and ends the list", async () => {
+      observeInView();
+      stubUsageReads((params) => ({
+        body: params.cursor === "c1" ? usageBody({ artifacts: [], next_cursor: null }) : usageBody(),
+      }));
+      goTo(usageHref());
+      render(<App />);
+      await screen.findByRole("table", { name: "Usage by artifact" });
+      await waitFor(() => {
+        expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
+      });
+      await pause(300);
+      expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
+      expect(screen.queryByRole("button", { name: /^Show/ })).toBeNull();
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 1 of 312");
+    });
+
+    // Spec: §13.10, §8.7 — an artifact whose count changed between reads can
+    // appear on two pages. The table lists it once, where it first appeared,
+    // and the count states the artifacts listed.
+    it("lists an artifact that a later page repeats once", async () => {
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      stubUsageReads((params) => ({
+        body:
+          params.cursor === "c1"
+            ? usageBody({
+                artifacts: [usageArtifact(traceReview, "platform", 2500), usageArtifact(payInvoice, "team-finance", 1544)],
+                artifact_count: 2,
+                next_cursor: null,
+              })
+            : usageBody({ artifact_count: 2 }),
+      }));
+      goTo(usageHref());
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show 1 more" }));
+      const table = screen.getByRole("table", { name: "Usage by artifact" });
+      await within(table).findByRole("link", { name: payInvoice });
+      expect(within(table).getAllByRole("link", { name: traceReview })).toHaveLength(1);
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 2 of 2");
+      expect(errors.mock.calls.some((call) => String(call[0]).includes("same key"))).toBe(false);
+    });
+
+    /** repeatThenNew answers a list whose second page repeats only the
+     * artifact already listed and carries a cursor, and whose third page holds
+     * an artifact not yet listed. A count change that moves listed artifacts
+     * past the cursor position produces that second page (§8.7). */
+    function repeatThenNew(params: Record<string, unknown>): { body: unknown } {
+      if (params.cursor === "c1") {
+        return { body: usageBody({ artifacts: [usageArtifact(traceReview, "platform", 2500)], next_cursor: "c2" }) };
+      }
+      if (params.cursor === "c2") {
+        return { body: usageBody({ artifacts: [usageArtifact(payInvoice, "team-finance", 1544)], next_cursor: null }) };
+      }
+      return { body: usageBody() };
+    }
+
+    // Spec: §13.10, §8.7 — a page that repeats only listed artifacts but
+    // carries a cursor is not the end of the list. The button reads on from
+    // its cursor and lists the artifacts after it.
+    it("reads on past a page of repeated artifacts from the button", async () => {
+      stubUsageReads(repeatThenNew);
+      goTo(usageHref());
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show 50 more" }));
+      await waitFor(() => {
+        expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
+      });
+      const again = await screen.findByRole("button", { name: "Show 50 more" });
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 1 of 312");
+      fireEvent.click(again);
+      const table = screen.getByRole("table", { name: "Usage by artifact" });
+      await within(table).findByRole("link", { name: payInvoice });
+      expect(within(table).getAllByRole("link", { name: traceReview })).toHaveLength(1);
+      expect(usageBodies().filter((b) => b.cursor === "c2")).toHaveLength(1);
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 2 of 312");
+      expect(screen.queryByRole("button", { name: /^Show/ })).toBeNull();
+    });
+
+    // Spec: §13.10, §8.7 — the sentinel reads on past a page of repeated
+    // artifacts the same way.
+    it("reads on past a page of repeated artifacts as the end of the list scrolls into view", async () => {
+      observeInView();
+      stubUsageReads(repeatThenNew);
+      goTo(usageHref());
+      render(<App />);
+      const table = await screen.findByRole("table", { name: "Usage by artifact" });
+      await within(table).findByRole("link", { name: payInvoice });
+      await pause(100);
+      expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
+      expect(usageBodies().filter((b) => b.cursor === "c2")).toHaveLength(1);
+      expect(within(table).getAllByRole("link", { name: traceReview })).toHaveLength(1);
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 2 of 312");
+    });
+
+    // Spec: §13.10 — a page that hands back the cursor it was read with
+    // would read the same page again, so the list ends there.
+    it("ends the list at a page that returns the cursor it was read with", async () => {
+      observeInView();
+      stubUsageReads((params) => ({
+        body:
+          params.cursor === "c1"
+            ? usageBody({ artifacts: [usageArtifact(payInvoice, "team-finance", 1544)], next_cursor: "c1" })
+            : usageBody(),
+      }));
+      goTo(usageHref());
+      render(<App />);
+      const table = await screen.findByRole("table", { name: "Usage by artifact" });
+      await within(table).findByRole("link", { name: payInvoice });
+      await pause(200);
+      expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
+      expect(screen.queryByRole("button", { name: /^Show/ })).toBeNull();
+    });
+
+    // Spec: §13.10, §8.7 — the artifact count can fall below the artifacts
+    // listed while the report still issues a cursor, when an artifact left
+    // the list between reads. The button then names no number, and the count
+    // never states fewer artifacts than the table lists.
+    it("names no number on the button when the count is already reached", async () => {
+      stubUsageReads((params) => ({
+        body:
+          params.cursor === "c1"
+            ? usageBody({ artifacts: [usageArtifact(payInvoice, "team-finance", 1544)], artifact_count: 1, next_cursor: null })
+            : usageBody({ artifact_count: 1 }),
+      }));
+      goTo(usageHref());
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+      await waitFor(() => {
+        expect(screen.getByTestId("usage-count").textContent).toBe("Showing 2 of 2");
+      });
+      expect(screen.queryByRole("button", { name: /^Show/ })).toBeNull();
+    });
+
+    // Spec: §13.10 — a next page asked for before the reader changed a filter
+    // and changed it back answers a list that is no longer on screen, even
+    // though the filters match again. It is dropped, so it is not appended
+    // beside the page the new list reads.
+    it("drops a next page asked for before a filter changed and changed back", async () => {
+      const stale = "platform/observability/stale-page";
+      const fresh = "platform/observability/fresh-page";
+      let nextReads = 0;
+      stubUsageReads((params) => {
+        if (params.cursor !== "c1") {
+          return { body: usageBody() };
+        }
+        nextReads += 1;
+        const id = nextReads === 1 ? stale : fresh;
+        return {
+          body: usageBody({ artifacts: [usageArtifact(id, "platform", 100)], next_cursor: null }),
+          delay: nextReads === 1 ? 200 : 20,
+        };
+      });
+      goTo(usageHref());
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show 50 more" }));
+      fireEvent.change(screen.getByLabelText("Type"), { target: { value: "agent" } });
+      await waitFor(() => {
+        expect(usageBodies().some((b) => Array.isArray(b.types))).toBe(true);
+      });
+      fireEvent.change(screen.getByLabelText("Type"), { target: { value: "" } });
+      // The list reads its first page again under the original filters.
+      await waitFor(() => {
+        const sent = usageBodies();
+        const changed = sent.findIndex((b) => Array.isArray(b.types));
+        expect(sent.slice(changed + 1).some((b) => b.sort === "loads" && b.cursor === undefined)).toBe(true);
+      });
+      await pause(60);
+      fireEvent.click(screen.getByRole("button", { name: "Show 50 more" }));
+      const table = screen.getByRole("table", { name: "Usage by artifact" });
+      await within(table).findByRole("link", { name: fresh });
+      await pause(250);
+      expect(nextReads).toBe(2);
+      expect(within(table).queryByRole("link", { name: stale })).toBeNull();
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 2 of 312");
+    });
+
     // Spec: §13.10 — a layer's share is its part of all loads across the
     // layers, stated as a percentage beside the bar.
     it("states each layer's share of all loads as a percentage", async () => {
@@ -20946,6 +21290,9 @@ describe("usage", () => {
       await waitFor(() => {
         expect(row?.textContent).not.toContain("today");
       });
+      // The report's last loaded day is the latest one in the window read
+      // (§8.7), and the column's definition says so.
+      expect(screen.getByRole("button", { name: "LAST LOADED" }).title).toContain("The last day in this window");
       // The fields bound each other and stop at today.
       expect((screen.getByLabelText("From") as HTMLInputElement).max).toBe("2026-10-15");
       expect((screen.getByLabelText("To") as HTMLInputElement).min).toBe("2026-10-01");
@@ -20978,6 +21325,45 @@ describe("usage", () => {
       const alert = await screen.findByRole("alert");
       expect(alert.textContent).toContain("The usage report did not load.");
       expect(screen.queryAllByTestId("stat-tile")).toHaveLength(0);
+    });
+
+    // Spec: §8.7, §13.10 — a window longer than the registry's usage
+    // retention is refused with registry.invalid_argument. The response
+    // names no retention, so the page states the refusal's message and
+    // offers no retry, which would send the same window again; another
+    // preset reads the report again.
+    it("states a refused window's message without a retry, and reads again on another preset", async () => {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      goTo(usageHref());
+      render(<App />);
+      await screen.findAllByTestId("stat-tile");
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": {
+          status: 400,
+          body: {
+            code: "registry.invalid_argument",
+            message: "registry.invalid_argument: days must be an integer from 1 to 60",
+            retryable: false,
+          },
+        },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "90d" }));
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toContain("The usage report did not load.");
+      expect(alert.textContent).toContain("days must be an integer from 1 to 60");
+      expect(within(alert).queryByRole("button", { name: "Try again" })).toBeNull();
+      expect(within(alert).getByTestId("not-retryable")).toBeTruthy();
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/usage": { body: usageBody() },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "30d" }));
+      expect(await screen.findAllByTestId("stat-tile")).toHaveLength(2);
+      expect(screen.queryByText("The usage report did not load.")).toBeNull();
     });
 
     it("stands in the sidebar for an anonymous caller", async () => {

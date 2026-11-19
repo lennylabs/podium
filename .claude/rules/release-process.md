@@ -37,9 +37,21 @@ Re-verify the product comparison in spec §1.5 and in `docs/getting-started/why-
      - Drop implementation detail a reader cannot observe, intermediate behavior that never shipped, and detail the documentation already states. Link the documentation page or the upgrade notes section that carries the detail, and keep the spec section citations.
      - Check the summary against the unreleased entries before committing: every dropped sentence is redundant with another entry, unobservable, or stated on a linked page. The upgrade notes keep the operational detail the summary leaves out.
    - Match the `## [X.Y.Z] - YYYY-MM-DD` header format exactly. The release workflow extracts this section verbatim as the GitHub Release body, so a malformed header drops the release notes.
-4. Confirm `go build ./...`, `go test ./internal/buildinfo/`, and `go test ./test/chart/` pass.
-5. Commit as `chore(release): prep vX.Y.Z` with a DCO sign-off (`git commit -s`). The prep commit touches only `CHANGELOG.md`, `internal/buildinfo/buildinfo.go`, and `deploy/helm/podium/Chart.yaml`, plus `README.md` and `docs/about/status.md` on a MINOR or MAJOR bump.
-6. Open a PR with base `main`. Let CI pass before merging, including `codecov/patch`, which reports separately from the test lanes and lands after them. See the Codecov section of [`test-coverage.md`](test-coverage.md) for how to read it.
+4. Clear the markers that name `X.Y.Z` as unreleased:
+   - Retitle the `## X.Y.Z (unreleased)` heading of `docs/deployment/operations/upgrade-notes.md` to `## X.Y.Z`, and delete the sentence under it that names the previous release as the current one.
+   - Point every `docs/_redirects.yaml` entry that targets the old heading's anchor, such as `upgrade-notes#XYZ-unreleased`, at the new anchor, such as `upgrade-notes#XYZ`. The anchor drops the dots of the version.
+   - Rewrite or delete any other note that describes `X.Y.Z` behavior as unreleased or as behavior on `main`.
+
+   This command lists the markers:
+
+   ```bash
+   grep -rnIi -e 'unreleased' -e 'current release is' docs README.md spec site/src test
+   ```
+
+   The matches in `docs/about/changelog.md` describe the `Unreleased` section of `CHANGELOG.md` and stay. Every other match is a marker to clear.
+5. Confirm `go build ./...`, `go test ./internal/buildinfo/`, and `go test ./test/chart/` pass.
+6. Commit as `chore(release): prep vX.Y.Z` with a DCO sign-off (`git commit -s`). The prep commit touches only `CHANGELOG.md`, `internal/buildinfo/buildinfo.go`, `deploy/helm/podium/Chart.yaml`, and the pages and redirects that step 4 changes, plus `README.md` and `docs/about/status.md` on a MINOR or MAJOR bump.
+7. Open a PR with base `main`. Let CI pass before merging, including `codecov/patch`, which reports separately from the test lanes and lands after them. See the Codecov section of [`test-coverage.md`](test-coverage.md) for how to read it.
 
 ## Tagging the release
 
@@ -78,6 +90,7 @@ When the release diff touches `pkg/sign` or the `SignatureProvider` contract, ru
 - The prep PR of a MINOR or MAJOR release, for the comparison re-check.
 - A change to the `Version` constant in `internal/buildinfo/buildinfo.go`, to the version fields of `deploy/helm/podium/Chart.yaml`, or to the release series in the status lines of `README.md` and `docs/about/status.md`.
 - A new `CHANGELOG.md` release section.
+- A documentation page or redirect that names the release being prepared as unreleased.
 - A `vX.Y.Z` tag push.
 
 ## Escape hatches
