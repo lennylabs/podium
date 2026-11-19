@@ -571,6 +571,13 @@ type Store interface {
 	// harnesses. A pair with no loads in the range is absent, and the result
 	// is ordered by layer and artifact.
 	SumUsageLoads(ctx context.Context, tenantID, fromDay, toDay string) ([]UsageLoads, error)
+	// SumUsage returns the tenant's rows that q selects, summed per group of
+	// the key columns q names, with each group's latest day of loads and of
+	// syncs, ordered by the grouped columns in byte order. A dimension
+	// outside the UsageDim constants is an error. It returns sums rather than
+	// rows, so its result is bounded by the number of groups rather than by
+	// the number of stored rows in the range.
+	SumUsage(ctx context.Context, tenantID string, q UsageSumQuery) ([]UsageSum, error)
 	// DeleteUsageBefore removes the rows of every tenant whose day is before
 	// day, a YYYY-MM-DD date, and returns the number removed.
 	DeleteUsageBefore(ctx context.Context, day string) (int, error)

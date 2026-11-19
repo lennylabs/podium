@@ -243,17 +243,18 @@ func TestUsageCounter_CapReadsOtherReplicasKeys(t *testing.T) {
 	}
 }
 
-// failingListStore fails ListUsageCounts while failing is set.
+// failingListStore fails the read of the day's recorded clients while
+// failing is set.
 type failingListStore struct {
 	*store.Memory
 	failing bool
 }
 
-func (s *failingListStore) ListUsageCounts(ctx context.Context, tenant, from, to string) ([]store.UsageCount, error) {
+func (s *failingListStore) SumUsage(ctx context.Context, tenant string, q store.UsageSumQuery) ([]store.UsageSum, error) {
 	if s.failing {
 		return nil, errors.New("store unreachable")
 	}
-	return s.Memory.ListUsageCounts(ctx, tenant, from, to)
+	return s.Memory.SumUsage(ctx, tenant, q)
 }
 
 // Spec: §8.7 — a flush that cannot read the day's recorded clients adds

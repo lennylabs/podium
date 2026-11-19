@@ -777,6 +777,22 @@ func (s *Memory) ListUsageCounts(_ context.Context, tenantID, fromDay, toDay str
 	return out, nil
 }
 
+// SumUsage returns the tenant's rows that q selects, summed per group.
+//
+// Spec: §8.7
+func (s *Memory) SumUsage(_ context.Context, tenantID string, q UsageSumQuery) ([]UsageSum, error) {
+	if err := q.validate(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows := make([]UsageCount, 0, len(s.usage[tenantID]))
+	for _, c := range s.usage[tenantID] {
+		rows = append(rows, c)
+	}
+	return sumUsageRows(rows, q), nil
+}
+
 // SumUsageLoads returns the tenant's loads from fromDay to toDay per layer and
 // artifact.
 func (s *Memory) SumUsageLoads(_ context.Context, tenantID, fromDay, toDay string) ([]UsageLoads, error) {
