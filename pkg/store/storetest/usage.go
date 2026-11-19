@@ -226,7 +226,8 @@ func usageSumsRendered(sums []store.UsageSum, by []store.UsageDim) string {
 // syncs. It selects by tenant, by the days from From to To with both ends
 // included, and by the layers, artifacts, and read-scope paths it names. An
 // exact path matches one ID; a subtree path matches the ID and the IDs
-// beneath it, and a path holding % or _ matches those characters literally.
+// beneath it, a path holding % or _ matches those characters literally, and
+// a subtree path holding a multi-byte character matches the IDs beneath it.
 // Sums come back in byte order of the grouped columns, an ungrouped sum over
 // no rows returns nothing, and an unknown dimension is an error.
 func usageSummed(t *testing.T, s store.Store) {
@@ -244,6 +245,7 @@ func usageSummed(t *testing.T, s store.Store) {
 		usageRow("2026-11-04", "team", "opsx/a", "cli", "none", 0, 0, 3),
 		usageRow("2026-10-31", "team", "ops/greet", "mcp", "claude-code", 9, 0, 0),
 		usageRow("2026-11-02", "team", "ops", "mcp", "claude-code", 1, 0, 0),
+		usageRow("2026-11-02", "intl", "équipe/a", "mcp", "claude-code", 5, 0, 0),
 	}))
 	must(t, s.AddUsageCounts(ctx, "b", []store.UsageCount{usageRow("2026-11-02", "team", "ops/greet", "mcp", "claude-code", 7, 0, 0)}))
 	split := []store.UsageDim{store.UsageByLayer, store.UsageByClient, store.UsageByHarness}
@@ -260,6 +262,7 @@ func usageSummed(t *testing.T, s store.Store) {
 		{"exact path", "a", store.UsageSumQuery{Paths: []store.UsagePath{{Path: "ops/greet"}}, GroupBy: byArtifact}},
 		{"subtree path", "a", store.UsageSumQuery{Paths: []store.UsagePath{{Path: "ops", Subtree: true}}, GroupBy: byArtifact}},
 		{"literal wildcard", "a", store.UsageSumQuery{Paths: []store.UsagePath{{Path: "pct%", Subtree: true}, {Path: "_ps/greet"}}, GroupBy: byArtifact}},
+		{"non-ASCII subtree", "a", store.UsageSumQuery{Paths: []store.UsagePath{{Path: "équipe", Subtree: true}}, GroupBy: byArtifact}},
 		{"whole catalog", "a", store.UsageSumQuery{Paths: []store.UsagePath{{Subtree: true}}, Layers: []string{"team"}}},
 		{"no rows", "a", store.UsageSumQuery{Layers: []string{"absent"}}},
 		{"other tenant", "b", store.UsageSumQuery{GroupBy: []store.UsageDim{store.UsageByClient}}},
@@ -285,6 +288,7 @@ func usageSummed(t *testing.T, s store.Store) {
 		"exact path: ops/greet=6/3/3@2026-11-03/2026-11-02",
 		"subtree path: ops=1/0/0@2026-11-02/ ops/greet=6/3/3@2026-11-03/2026-11-02 ops/greeter=1/0/0@2026-11-02/",
 		"literal wildcard: pct%/a=1/0/0@2026-11-03/",
+		"non-ASCII subtree: équipe/a=5/0/0@2026-11-02/",
 		"whole catalog: =4/3/4@2026-11-02/2026-11-02",
 		"no rows: ",
 		"other tenant: mcp=7/0/0@2026-11-02/",
