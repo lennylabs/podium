@@ -202,3 +202,96 @@ func usageLoadsSummed(t *testing.T, s store.Store) {
 		t.Errorf("summed loads = %q, want %q", strings.Join(parts, " "), want)
 	}
 }
+
+// usageSumsRendered renders sums in one comparable string: the grouped
+// columns, the counters, and the latest load and sync days.
+func usageSumsRendered(sums []store.UsageSum, by []store.UsageDim) string {
+	parts := make([]string, 0, len(sums))
+	for _, s := range sums {
+		keys := make([]string, 0, len(by))
+		for _, d := range by {
+			keys = append(keys, map[store.UsageDim]string{
+				store.UsageByDay: s.Day, store.UsageByLayer: s.Layer, store.UsageByArtifact: s.ArtifactID,
+				store.UsageByClient: s.Client, store.UsageByHarness: s.Harness,
+			}[d])
+		}
+		parts = append(parts, fmt.Sprintf("%s=%d/%d/%d@%s/%s",
+			strings.Join(keys, "|"), s.Loads, s.Syncs, s.SearchHits, s.LastLoaded, s.LastSynced))
+	}
+	return strings.Join(parts, " ")
+}
+
+// Spec: §8.7 — a usage sum adds the counters of the selected rows per group
+// of the named key columns, with each group's latest day of loads and of
+// syncs. It selects by tenant, by the days from From to To with both ends
+// included, and by the layers, artifacts, and read-scope paths it names. An
+// exact path matches one ID; a subtree path matches the ID and the IDs
+// beneath it, and a path holding % or _ matches those characters literally.
+// Sums come back in byte order of the grouped columns, an ungrouped sum over
+// no rows returns nothing, and an unknown dimension is an error.
+func usageSummed(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	mustCreateTenant(t, s, "b")
+	must(t, s.AddUsageCounts(ctx, "a", []store.UsageCount{
+		usageRow("2026-11-01", "team", "ops/greet", "mcp", "claude-code", 2, 0, 1),
+		usageRow("2026-11-02", "team", "ops/greet", "sync", "cursor", 0, 3, 0),
+		usageRow("2026-11-02", "team", "ops/greeter", "mcp", "cursor", 1, 0, 0),
+		usageRow("2026-11-03", "org", "ops/greet", "sdk", "none", 4, 0, 2),
+		usageRow("2026-11-03", "org", "pct%/a", "mcp", "claude-code", 1, 0, 0),
+		usageRow("2026-11-03", "org", "pctX/a", "mcp", "claude-code", 5, 0, 0),
+		usageRow("2026-11-04", "team", "opsx/a", "cli", "none", 0, 0, 3),
+		usageRow("2026-10-31", "team", "ops/greet", "mcp", "claude-code", 9, 0, 0),
+		usageRow("2026-11-02", "team", "ops", "mcp", "claude-code", 1, 0, 0),
+	}))
+	must(t, s.AddUsageCounts(ctx, "b", []store.UsageCount{usageRow("2026-11-02", "team", "ops/greet", "mcp", "claude-code", 7, 0, 0)}))
+	split := []store.UsageDim{store.UsageByLayer, store.UsageByClient, store.UsageByHarness}
+	byArtifact := []store.UsageDim{store.UsageByArtifact}
+	cases := []struct {
+		name   string
+		tenant string
+		q      store.UsageSumQuery
+	}{
+		{"layer split", "a", store.UsageSumQuery{Layers: []string{"team", "org"}, GroupBy: split}},
+		{"artifact", "a", store.UsageSumQuery{Layers: []string{"team"}, GroupBy: byArtifact}},
+		{"layer day", "a", store.UsageSumQuery{From: "2026-11-02", To: "2026-11-03", Layers: []string{"org", "team"}, GroupBy: []store.UsageDim{store.UsageByLayer, store.UsageByDay}}},
+		{"named artifacts", "a", store.UsageSumQuery{ArtifactIDs: []string{"ops/greet", "pct%/a"}, GroupBy: []store.UsageDim{store.UsageByArtifact, store.UsageByClient, store.UsageByHarness}}},
+		{"exact path", "a", store.UsageSumQuery{Paths: []store.UsagePath{{Path: "ops/greet"}}, GroupBy: byArtifact}},
+		{"subtree path", "a", store.UsageSumQuery{Paths: []store.UsagePath{{Path: "ops", Subtree: true}}, GroupBy: byArtifact}},
+		{"literal wildcard", "a", store.UsageSumQuery{Paths: []store.UsagePath{{Path: "pct%", Subtree: true}, {Path: "_ps/greet"}}, GroupBy: byArtifact}},
+		{"whole catalog", "a", store.UsageSumQuery{Paths: []store.UsagePath{{Subtree: true}}, Layers: []string{"team"}}},
+		{"no rows", "a", store.UsageSumQuery{Layers: []string{"absent"}}},
+		{"other tenant", "b", store.UsageSumQuery{GroupBy: []store.UsageDim{store.UsageByClient}}},
+		{"one day", "a", store.UsageSumQuery{From: "2026-10-31", To: "2026-10-31", GroupBy: byArtifact}},
+	}
+	var got []string
+	for _, c := range cases {
+		q := c.q
+		if q.From == "" {
+			q.From, q.To = "2026-11-01", "2026-11-04"
+		}
+		sums, err := s.SumUsage(ctx, c.tenant, q)
+		must(t, err)
+		got = append(got, c.name+": "+usageSumsRendered(sums, q.GroupBy))
+	}
+	_, err := s.SumUsage(ctx, "a", store.UsageSumQuery{From: "2026-11-01", To: "2026-11-04", GroupBy: []store.UsageDim{99}})
+	got = append(got, fmt.Sprintf("unknown dimension refused: %t", err != nil))
+	want := []string{
+		"layer split: org|mcp|claude-code=6/0/0@2026-11-03/ org|sdk|none=4/0/2@2026-11-03/ team|cli|none=0/0/3@/ team|mcp|claude-code=3/0/1@2026-11-02/ team|mcp|cursor=1/0/0@2026-11-02/ team|sync|cursor=0/3/0@/2026-11-02",
+		"artifact: ops=1/0/0@2026-11-02/ ops/greet=2/3/1@2026-11-01/2026-11-02 ops/greeter=1/0/0@2026-11-02/ opsx/a=0/0/3@/",
+		"layer day: org|2026-11-03=10/0/2@2026-11-03/ team|2026-11-02=2/3/0@2026-11-02/2026-11-02",
+		"named artifacts: ops/greet|mcp|claude-code=2/0/1@2026-11-01/ ops/greet|sdk|none=4/0/2@2026-11-03/ ops/greet|sync|cursor=0/3/0@/2026-11-02 pct%/a|mcp|claude-code=1/0/0@2026-11-03/",
+		"exact path: ops/greet=6/3/3@2026-11-03/2026-11-02",
+		"subtree path: ops=1/0/0@2026-11-02/ ops/greet=6/3/3@2026-11-03/2026-11-02 ops/greeter=1/0/0@2026-11-02/",
+		"literal wildcard: pct%/a=1/0/0@2026-11-03/",
+		"whole catalog: =4/3/4@2026-11-02/2026-11-02",
+		"no rows: ",
+		"other tenant: mcp=7/0/0@2026-11-02/",
+		"one day: ops/greet=9/0/0@2026-10-31/",
+		"unknown dimension refused: true",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("usage sums:\n got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
