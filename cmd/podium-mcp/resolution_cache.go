@@ -445,17 +445,20 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 		return nil, fmt.Errorf("cache miss for %s: %w", contentHash, err)
 	}
 	resp := &loadArtifactResponse{
-		ID:                idHint,
-		ContentHash:       contentHash,
-		Frontmatter:       d.Frontmatter,
-		ManifestBody:      d.Body,
-		Sensitivity:       d.Sensitivity,
-		DeliveryHash:      d.DeliveryHash,
-		DeliverySignature: d.DeliverySignature,
-		ArtifactRevision:  d.ArtifactRevision,
-		Version:           d.Version,
-		Type:              d.Type,
-		Resources:         map[string]string{},
+		ID:                 idHint,
+		ContentHash:        contentHash,
+		Frontmatter:        d.Frontmatter,
+		ManifestBody:       d.Body,
+		Sensitivity:        d.Sensitivity,
+		DeliveryHash:       d.DeliveryHash,
+		DeliverySignature:  d.DeliverySignature,
+		ArtifactRevision:   d.ArtifactRevision,
+		Version:            d.Version,
+		Type:               d.Type,
+		Resources:          map[string]string{},
+		Deprecated:         d.Deprecated,
+		ReplacedBy:         d.ReplacedBy,
+		DeprecationWarning: d.DeprecationWarning,
 	}
 	// A skill's verbatim SKILL.md is bucket-level, because the authored
 	// package the content hash names carries it.
@@ -511,14 +514,17 @@ func readDeliveryFiles(dir, id string) (deliveryFiles, error) {
 		return string(b)
 	}
 	return deliveryFiles{
-		Frontmatter:       required["frontmatter"],
-		Body:              required["body"],
-		DeliveryHash:      required["delivery_hash"],
-		DeliverySignature: optional("delivery_signature"),
-		Sensitivity:       optional("sensitivity"),
-		ArtifactRevision:  required["artifact_revision"],
-		Version:           required["version"],
-		Type:              required["type"],
+		Frontmatter:        required["frontmatter"],
+		Body:               required["body"],
+		DeliveryHash:       required["delivery_hash"],
+		DeliverySignature:  optional("delivery_signature"),
+		Sensitivity:        optional("sensitivity"),
+		ArtifactRevision:   required["artifact_revision"],
+		Version:            required["version"],
+		Type:               required["type"],
+		Deprecated:         optional("deprecated") == "true",
+		ReplacedBy:         optional("replaced_by"),
+		DeprecationWarning: optional("deprecation_warning"),
 	}, nil
 }
 

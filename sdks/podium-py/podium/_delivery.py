@@ -350,6 +350,11 @@ class Served:
     manifest_link: dict[str, Any] | None = None
     # Batch entry: each reference holding only the members step 2 reads.
     references: list[dict[str, Any]] = field(default_factory=list)
+    # spec: §7.2 (Deprecation members), §4.7.4 — the lifecycle signal outside
+    # the delivery record, which §4.7.10 does not read.
+    deprecated: bool = False
+    replaced_by: str = ""
+    deprecation_warning: str = ""
 
 
 @dataclass
@@ -373,6 +378,9 @@ def _read_record_members(m: Mapping[str, Any]) -> Served:
         record=record,
         hash=_opt_str(m, "delivery_hash"),
         signature=_opt_str(m, "delivery_signature"),
+        deprecated=_opt_bool(m, "deprecated"),
+        replaced_by=_opt_str(m, "replaced_by"),
+        deprecation_warning=_opt_str(m, "deprecation_warning"),
     )
 
 

@@ -1519,6 +1519,9 @@ func artifactShow(args []string) int {
 		fmt.Fprintf(os.Stderr, "artifact show %s: manifest body: %v\n", id, err)
 		return 1
 	}
+	// spec: §7.6.1, §4.7.4 — the deprecation warning goes to standard error
+	// in both output modes.
+	warnDeprecation(os.Stderr, body)
 	if *asJSON {
 		// spec: §7.6.1 — emit the documented {id, version, content_hash,
 		// frontmatter, body} schema. The wire response keys the manifest text
