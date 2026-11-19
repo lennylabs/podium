@@ -167,6 +167,12 @@ func parseURLElement(elem string) (destSpec, error) {
 	if u.User != nil {
 		return destSpec{}, fmt.Errorf("destination %s carries userinfo; supply credentials through PODIUM_AUDIT_HEADERS_FILE", redactedURL(u))
 	}
+	// url.Parse accepts an empty host, as in "http://" or "https://:443/x",
+	// but no request can reach such a destination, so every record would be
+	// retried until the queue dropped it.
+	if u.Hostname() == "" {
+		return destSpec{}, fmt.Errorf("destination %s names no host", redactedURL(u))
+	}
 	return destSpec{kind: kind, url: u}, nil
 }
 

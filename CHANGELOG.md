@@ -41,7 +41,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Audit delivery changes with the destination lists** (§6.2, §8.3, §8.4, §8.5, §8.6, §13.12). This is a backward-incompatible change.
   - An `http(s)` destination receives NDJSON batches with retry and backoff instead of one unretried `POST` per event. A receiver splits the body on newlines and deduplicates on `hash`.
   - A comma in an audit value separates destinations.
-  - A file destination that cannot be opened for appending, and an audit URL that does not parse, refuse startup.
+  - A file destination that cannot be opened for appending, and an audit URL that does not parse or names no host, refuse startup.
   - Every retention rewrite closes with `audit.retention_enforced`.
   - `podium-mcp` flushes its local audit stream for up to 5 seconds on SIGINT and SIGTERM.
   - The Helm chart's `config.auditLogPath` defaults to `stdout` and overrides a `PODIUM_AUDIT_LOG_PATH` set in the `existingSecret`. Move such a value to `config.auditLogPath` on upgrade.
