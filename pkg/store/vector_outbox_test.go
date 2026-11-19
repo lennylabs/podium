@@ -203,3 +203,41 @@ func TestVectorOutbox_RetryBackoffHidesRow(t *testing.T) {
 		})
 	}
 }
+
+// Spec: §7.3.1 (Removed artifacts), §4.7.2 — on Postgres, a write with a
+// vector outbox row over an existing version is idempotent for the same
+// content, an immutability violation for other content, and an immutability
+// violation when another layer writes the same content over a version a
+// layer's removal tombstoned; a refused write leaves no outbox row.
+func TestVectorOutbox_ExistingVersionPostgres(t *testing.T) {
+	tenant := "outbox-exist-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	p, _ := openPostgresOrg(t, tenant)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	rec := func(layer, hash string) ManifestRecord {
+		m := mr("a/x", "1.0.0", hash)
+		m.TenantID, m.Layer = tenant, layer
+		return m
+	}
+	pending := VectorPending{TenantID: tenant, ArtifactID: "a/x", Version: "1.0.0", Text: "t", EnqueuedAt: now, NextRetryAt: now}
+	if err := p.PutManifestWithVectorPending(ctx, rec("team", "sha256:1"), pending); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if err := p.MarkVectorPendingDone(ctx, tenant, "a/x", "1.0.0"); err != nil {
+		t.Fatalf("done: %v", err)
+	}
+	same := p.PutManifestWithVectorPending(ctx, rec("team", "sha256:1"), pending)
+	other := p.PutManifestWithVectorPending(ctx, rec("team", "sha256:2"), pending)
+	if err := p.SoftDeleteArtifacts(ctx, tenant, "team", []string{"a/x"}, now); err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+	foreign := p.PutManifestWithVectorPending(ctx, rec("org", "sha256:1"), pending)
+	keys, err := p.ListVectorPendingKeys(ctx, tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same != nil || !errors.Is(other, ErrImmutableViolation) || !errors.Is(foreign, ErrImmutableViolation) || len(keys) != 0 {
+		t.Errorf("same content: %v; other content: %v; other layer over a tombstone: %v; outbox rows %v; want nil, two immutability violations, and none",
+			same, other, foreign, keys)
+	}
+}

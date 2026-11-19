@@ -662,3 +662,23 @@ type VectorOutbox interface {
 	// the §13.8 depth gauge and the vector.outbox_lagging threshold.
 	VectorOutboxStats(ctx context.Context) (depth int, oldest time.Time, err error)
 }
+
+// classifyExistingManifest decides a put that found rec's (tenant, artifact,
+// version) already stored and did not revive it. A different content hash is
+// an immutability violation. So is a tombstoned row another layer contributed:
+// §7.3.1 lets only the contributing layer restore a version the removed-artifact
+// rule tombstoned, and the key stays held until the purge, so a put from
+// another layer cannot take it. Reporting that put as idempotent would count
+// an artifact as stored that no read path serves. Anything else is the same
+// bytes put again, which is a no-op.
+//
+// Spec: §7.3.1 (Removed artifacts)
+func classifyExistingManifest(rec ManifestRecord, hash, layer string, deleted bool) error {
+	if hash != rec.ContentHash {
+		return ErrImmutableViolation
+	}
+	if deleted && layer != rec.Layer {
+		return ErrImmutableViolation
+	}
+	return nil
+}

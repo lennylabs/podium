@@ -169,7 +169,11 @@ func SourceIngestWithOptions(
 		SemanticOverlap:            opts.SemanticOverlap,
 	})
 	if err != nil {
-		return nil, err
+		// Spec: §7.3.1 (Removed artifacts) — a cycle that read the whole
+		// snapshot and then failed lint has already removed the artifacts the
+		// snapshot no longer holds, so the result travels with the error and
+		// the response can report them.
+		return res, err
 	}
 
 	// §7.6 layer.ingested: one event per completed layer cycle with

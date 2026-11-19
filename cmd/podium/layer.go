@@ -500,6 +500,7 @@ func layerReingest(args []string) int {
 	}
 	out, status := doJSON(*registry+"/v1/layers/reingest?id="+id, "POST", body)
 	if status >= 400 {
+		writeRefusedRemovals(os.Stdout, out)
 		fmt.Fprintf(os.Stderr, "reingest failed: HTTP %d\n%s\n", status, out)
 		return 1
 	}
@@ -516,6 +517,27 @@ func layerReingest(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// writeRefusedRemovals prints a `removed: <id>` line for each artifact a
+// refused cycle removed. A cycle that read the whole snapshot removes the
+// artifacts it no longer holds even when it then fails, and the refusal names
+// them in details.removed, so the author learns of the removal from the same
+// command. A body that carries no such member prints nothing.
+//
+// Spec: §7.3.1 (Removed artifacts)
+func writeRefusedRemovals(stdout io.Writer, body []byte) {
+	var envelope struct {
+		Details struct {
+			Removed []string `json:"removed"`
+		} `json:"details"`
+	}
+	if json.Unmarshal(body, &envelope) != nil {
+		return
+	}
+	for _, id := range envelope.Details.Removed {
+		_, _ = fmt.Fprintf(stdout, "removed: %s\n", id)
+	}
 }
 
 // ingestArtifact is one accepted or unchanged artifact in a reingest response.

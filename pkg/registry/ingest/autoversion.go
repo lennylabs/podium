@@ -83,16 +83,22 @@ func crossLayerRows(rowsByID map[string][]store.ManifestRecord, layerID string) 
 //     non-retired row the layer contributed at any version (ordered as `latest` orders
 //     candidates), carries hash, its version is reused. That version is always
 //     registry-assigned, because a declared version lies in the hashed bytes.
-//  2. Otherwise, when any row carries hash, duplicate is true, so no two rows
+//  2. Otherwise, when the layer serves no version of the artifact and a
+//     soft-deleted, non-retired row the layer contributed carries hash, that
+//     row's version is reused, and the put restores it. This is the §7.3.1
+//     Removed artifacts restore for a skill whose version the registry
+//     assigned: its package returned to the source unchanged.
+//  3. Otherwise, when any row carries hash, duplicate is true, so no two rows
 //     of one artifact ID hold one content hash under different versions.
-//  3. Otherwise the version is 0.0.0-auto.<N> with N one more than the highest
+//  4. Otherwise the version is 0.0.0-auto.<N> with N one more than the highest
 //     N any row carries, or 0 when no row carries the form.
 //
 // Soft-deleted rows join the duplicate set and the N derivation, because
 // restoring their layer (§8.4) serves them again and their keys still block
-// an insert. They never supply the reused version: GetManifest hides a
-// tombstoned row and PutManifest leaves its key tombstoned, so reusing one
-// would report an accepted skill that is not served. Comparing against any
+// an insert. A soft-deleted row supplies the reused version only under step
+// 2: PutManifest restores a tombstoned row for the layer that contributed it,
+// and with no served version left there is no newer row a revert could be
+// mistaken for. While the layer still serves a version, comparing against any
 // earlier row of the layer, rather than its latest one, would map a revert
 // back to an older row while `latest` serves the newer one.
 //
@@ -106,13 +112,16 @@ func crossLayerRows(rowsByID map[string][]store.ManifestRecord, layerID string) 
 //
 // Spec: §7.3.1, §4.7.6
 func assignVersion(rows []store.ManifestRecord, layerID, hash string) (v string, duplicate bool) {
-	var own []version.Candidate
+	var own, removed []version.Candidate
 	ownHash := map[string]string{}
 	maxN := -1
 	for _, r := range rows {
 		if r.Layer == layerID && r.DeletedAt == nil && !retired(r) {
 			own = append(own, version.Candidate{Version: r.Version, IngestedAt: r.IngestedAt})
 			ownHash[r.Version] = r.ContentHash
+		}
+		if r.Layer == layerID && r.DeletedAt != nil && !retired(r) && r.ContentHash == hash {
+			removed = append(removed, version.Candidate{Version: r.Version, IngestedAt: r.IngestedAt})
 		}
 		if r.ContentHash == hash {
 			duplicate = true
@@ -123,6 +132,11 @@ func assignVersion(rows []store.ManifestRecord, layerID, hash string) (v string,
 	}
 	if latest, err := version.ResolveLatest(own); err == nil && ownHash[latest] == hash {
 		return latest, false
+	}
+	if len(own) == 0 {
+		if restored, err := version.ResolveLatest(removed); err == nil {
+			return restored, false
+		}
 	}
 	if duplicate {
 		return "", true

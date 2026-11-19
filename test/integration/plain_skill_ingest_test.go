@@ -279,11 +279,11 @@ func (e *psEnv) putRow(t *testing.T, m store.ManifestRecord) {
 }
 
 // Spec: §7.3.1, §8.4 — unregistering a layer tombstones its rows, and the
-// same bytes reingested into the re-registered layer are refused: reusing the
-// tombstoned version would leave the accepted skill unserved, and a fresh N
-// would give the bytes a second version that a restore would serve beside the
-// first. Changed bytes take the next N.
-func TestPlainSkillIngest_ReregisteredLayerRefusesTombstonedContent(t *testing.T) {
+// same bytes reingested into the re-registered layer restore the tombstoned
+// row at its assigned version, because the layer serves no version of the
+// skill: a fresh N would give the bytes a second version that a layer restore
+// would serve beside the first. Changed bytes take the next N.
+func TestPlainSkillIngest_ReregisteredLayerRestoresTombstonedContent(t *testing.T) {
 	t.Parallel()
 	for _, f := range ingestConvergenceStores(t) {
 		t.Run(f.name, func(t *testing.T) {
@@ -297,9 +297,9 @@ func TestPlainSkillIngest_ReregisteredLayerRefusesTombstonedContent(t *testing.T
 			}
 			e.register(t, "L", 1)
 
-			wantRejected(t, e.ingest(t, "L", psFS("x", skill, "")), "x", layer.InvalidArtifactCode, psDuplicateDetails)
-			if rows := e.rows(t, "x"); len(rows) != 1 || rows[0].DeletedAt == nil {
-				t.Errorf("rows = %+v, want only the tombstoned row", rows)
+			wantAccepted(t, e.ingest(t, "L", psFS("x", skill, "")), "x", "0.0.0-auto.0")
+			if rows := e.rows(t, "x"); len(rows) != 1 || rows[0].DeletedAt != nil {
+				t.Errorf("rows = %+v, want the one row, restored", rows)
 			}
 			wantAccepted(t, e.ingest(t, "L", psFS("x", psSkill("changed", ""), "")), "x", "0.0.0-auto.1")
 		})

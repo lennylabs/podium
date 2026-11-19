@@ -389,18 +389,16 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	// The row already existed (a prior ingest, or the winner of a
 	// concurrent race). Read the stored hash back to classify; immutable
 	// rows are never deleted, so the SELECT always finds it.
-	var existing string
+	var existing, layer string
+	var deleted bool
 	err = s.db.QueryRowContext(ctx, `
-		SELECT content_hash FROM manifests
+		SELECT content_hash, layer, deleted_at IS NOT NULL FROM manifests
 		WHERE tenant_id = ? AND artifact_id = ? AND version = ?`,
-		rec.TenantID, rec.ArtifactID, rec.Version).Scan(&existing)
+		rec.TenantID, rec.ArtifactID, rec.Version).Scan(&existing, &layer, &deleted)
 	if err != nil {
 		return err
 	}
-	if existing != rec.ContentHash {
-		return ErrImmutableViolation
-	}
-	return nil // idempotent — same hash
+	return classifyExistingManifest(rec, existing, layer, deleted)
 }
 
 // sqliteRevive restores a tombstoned row of rec's (artifact_id, version) that
@@ -506,16 +504,17 @@ func (s *SQLite) PutManifestWithVectorPending(ctx context.Context, rec ManifestR
 		}
 	}
 	if n == 0 && !revived {
-		var existing string
+		var existing, layer string
+		var deleted bool
 		err = tx.QueryRowContext(ctx, `
-			SELECT content_hash FROM manifests
+			SELECT content_hash, layer, deleted_at IS NOT NULL FROM manifests
 			WHERE tenant_id = ? AND artifact_id = ? AND version = ?`,
-			rec.TenantID, rec.ArtifactID, rec.Version).Scan(&existing)
+			rec.TenantID, rec.ArtifactID, rec.Version).Scan(&existing, &layer, &deleted)
 		if err != nil {
 			return err
 		}
-		if existing != rec.ContentHash {
-			return ErrImmutableViolation
+		if err := classifyExistingManifest(rec, existing, layer, deleted); err != nil {
+			return err
 		}
 		return tx.Commit() // idempotent — same hash, no re-queue
 	}

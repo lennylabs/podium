@@ -395,3 +395,39 @@ func TestSourceIngest_StrictRejectsRewrite(t *testing.T) {
 		t.Errorf("error %q should reference the prior ref", err.Error())
 	}
 }
+
+// Spec: §7.3.1 (Removed artifacts) — a cycle that read the whole snapshot and
+// then failed lint returns its result with the error, so the response can
+// report the artifacts it removed.
+func TestSourceIngest_LintFailureCarriesRemovals(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	ctx := context.Background()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := store.LayerConfig{TenantID: "t", ID: "team", SourceType: "fake"}
+	if err := st.PutLayerConfig(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeProvider{files: fstest.MapFS{
+		"ops/gone/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifestBody("runbook for the ingest worker"))},
+		"ops/kept/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentManifestBody("checklist for the on-call handover"))},
+	}, reference: "r1"}
+	if _, err := ingest.SourceIngest(ctx, st, provider, cfg, nil, nil); err != nil {
+		t.Fatalf("first cycle: %v", err)
+	}
+	// ops/gone leaves the source, and ops/kept loses its declared version,
+	// which lint refuses, so nothing in the cycle succeeds.
+	provider.files = fstest.MapFS{
+		"ops/kept/ARTIFACT.md": &fstest.MapFile{Data: []byte("---\ntype: agent\ndescription: checklist for the on-call handover\nsensitivity: low\n---\n\nbody\n")},
+	}
+	provider.reference = "r2"
+	res, err := ingest.SourceIngest(ctx, st, provider, cfg, nil, nil)
+	if !errors.Is(err, ingest.ErrLintFailed) {
+		t.Fatalf("second cycle err = %v, want ErrLintFailed", err)
+	}
+	if res == nil || len(res.Removed) != 1 || res.Removed[0] != "ops/gone" {
+		t.Fatalf("second cycle result = %+v, want Removed [ops/gone]", res)
+	}
+}
