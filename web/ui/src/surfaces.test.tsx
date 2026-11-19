@@ -20565,6 +20565,61 @@ describe("usage", () => {
     };
   }
 
+  /** stubUsageReads answers each usage read from `answer`, which sees the
+   * read's parameters, after `delay` milliseconds (20 by default). The
+   * session answers as stubRegistry would. A read that answers within the
+   * same batch of React updates as the call that issued it hides the renders
+   * between the two, and the paging cases need those renders to happen. */
+  function stubUsageReads(answer: (params: Record<string, unknown>) => { body: unknown; delay?: number }): void {
+    stubRegistry({ "/v1/ui/session": { body: posture({ public_mode: true }) } });
+    const others = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (!String(input).startsWith("/v1/usage")) {
+          return others(input, init);
+        }
+        const raw = typeof init?.body === "string" ? init.body : "{}";
+        bodies.push(raw);
+        const { body, delay = 20 } = answer(JSON.parse(raw) as Record<string, unknown>);
+        return new Promise<Response>((resolve) => {
+          setTimeout(() => {
+            resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
+          }, delay);
+        });
+      }),
+    );
+  }
+
+  /** observeInView installs an IntersectionObserver that reports the target
+   * in view as soon as it is observed, which is what a sentinel left inside
+   * the viewport reports each time the page rebuilds the observer. */
+  function observeInView(): void {
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        callback: (entries: { isIntersecting: boolean }[]) => void;
+        constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+          this.callback = callback;
+        }
+        observe() {
+          setTimeout(() => {
+            this.callback([{ isIntersecting: true }]);
+          }, 0);
+        }
+        disconnect() {
+          this.callback = () => {};
+        }
+      },
+    );
+  }
+
+  function pause(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+  }
+
   /** usageBodies parses the usage reads the page sent, oldest first. */
   function usageBodies(): Record<string, unknown>[] {
     return bodies
@@ -20899,6 +20954,139 @@ describe("usage", () => {
         setTimeout(resolve, 20);
       });
       expect(screen.getByTestId("usage-count").textContent).toBe("Showing 1 of 312");
+    });
+
+    // Spec: §13.10, §8.7 — a count that changes between reads can move the
+    // last artifact across the cursor, and the next page then comes back
+    // empty with no cursor. The list ends there. The page used to fall back
+    // to the first page's cursor whenever no row arrived, so a sentinel left
+    // in view read the same empty page again in a loop.
+    it("reads an empty last page once and ends the list", async () => {
+      observeInView();
+      stubUsageReads((params) => ({
+        body: params.cursor === "c1" ? usageBody({ artifacts: [], next_cursor: null }) : usageBody(),
+      }));
+      goTo(usageHref());
+      render(<App />);
+      await screen.findByRole("table", { name: "Usage by artifact" });
+      await waitFor(() => {
+        expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
+      });
+      await pause(300);
+      expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
+      expect(screen.queryByRole("button", { name: /^Show/ })).toBeNull();
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 1 of 312");
+    });
+
+    // Spec: §13.10, §8.7 — an artifact whose count changed between reads can
+    // appear on two pages. The table lists it once, where it first appeared,
+    // and the count states the artifacts listed.
+    it("lists an artifact that a later page repeats once", async () => {
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      stubUsageReads((params) => ({
+        body:
+          params.cursor === "c1"
+            ? usageBody({
+                artifacts: [usageArtifact(traceReview, "platform", 2500), usageArtifact(payInvoice, "team-finance", 1544)],
+                artifact_count: 2,
+                next_cursor: null,
+              })
+            : usageBody({ artifact_count: 2 }),
+      }));
+      goTo(usageHref());
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show 1 more" }));
+      const table = screen.getByRole("table", { name: "Usage by artifact" });
+      await within(table).findByRole("link", { name: payInvoice });
+      expect(within(table).getAllByRole("link", { name: traceReview })).toHaveLength(1);
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 2 of 2");
+      expect(errors.mock.calls.some((call) => String(call[0]).includes("same key"))).toBe(false);
+    });
+
+    // Spec: §13.10, §8.7 — a page that adds no artifact not already listed
+    // ends the list, because reading on from its cursor can repeat the same
+    // rows again.
+    it("ends the list at a page that adds no new artifact", async () => {
+      observeInView();
+      stubUsageReads((params) => ({
+        body:
+          params.cursor === "c1"
+            ? usageBody({ artifacts: [usageArtifact(traceReview, "platform", 2500)], next_cursor: "c2" })
+            : usageBody(),
+      }));
+      goTo(usageHref());
+      render(<App />);
+      await screen.findByRole("table", { name: "Usage by artifact" });
+      await waitFor(() => {
+        expect(usageBodies().filter((b) => b.cursor === "c1")).toHaveLength(1);
+      });
+      await pause(200);
+      expect(usageBodies().filter((b) => b.cursor === "c2")).toHaveLength(0);
+      expect(screen.queryByRole("button", { name: /^Show/ })).toBeNull();
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 1 of 312");
+    });
+
+    // Spec: §13.10, §8.7 — the artifact count can fall below the artifacts
+    // listed while the report still issues a cursor, when an artifact left
+    // the list between reads. The button then names no number, and the count
+    // never states fewer artifacts than the table lists.
+    it("names no number on the button when the count is already reached", async () => {
+      stubUsageReads((params) => ({
+        body:
+          params.cursor === "c1"
+            ? usageBody({ artifacts: [usageArtifact(payInvoice, "team-finance", 1544)], artifact_count: 1, next_cursor: null })
+            : usageBody({ artifact_count: 1 }),
+      }));
+      goTo(usageHref());
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+      await waitFor(() => {
+        expect(screen.getByTestId("usage-count").textContent).toBe("Showing 2 of 2");
+      });
+      expect(screen.queryByRole("button", { name: /^Show/ })).toBeNull();
+    });
+
+    // Spec: §13.10 — a next page asked for before the reader changed a filter
+    // and changed it back answers a list that is no longer on screen, even
+    // though the filters match again. It is dropped, so it is not appended
+    // beside the page the new list reads.
+    it("drops a next page asked for before a filter changed and changed back", async () => {
+      const stale = "platform/observability/stale-page";
+      const fresh = "platform/observability/fresh-page";
+      let nextReads = 0;
+      stubUsageReads((params) => {
+        if (params.cursor !== "c1") {
+          return { body: usageBody() };
+        }
+        nextReads += 1;
+        const id = nextReads === 1 ? stale : fresh;
+        return {
+          body: usageBody({ artifacts: [usageArtifact(id, "platform", 100)], next_cursor: null }),
+          delay: nextReads === 1 ? 200 : 20,
+        };
+      });
+      goTo(usageHref());
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show 50 more" }));
+      fireEvent.change(screen.getByLabelText("Type"), { target: { value: "agent" } });
+      await waitFor(() => {
+        expect(usageBodies().some((b) => Array.isArray(b.types))).toBe(true);
+      });
+      fireEvent.change(screen.getByLabelText("Type"), { target: { value: "" } });
+      // The list reads its first page again under the original filters.
+      await waitFor(() => {
+        const sent = usageBodies();
+        const changed = sent.findIndex((b) => Array.isArray(b.types));
+        expect(sent.slice(changed + 1).some((b) => b.sort === "loads" && b.cursor === undefined)).toBe(true);
+      });
+      await pause(60);
+      fireEvent.click(screen.getByRole("button", { name: "Show 50 more" }));
+      const table = screen.getByRole("table", { name: "Usage by artifact" });
+      await within(table).findByRole("link", { name: fresh });
+      await pause(250);
+      expect(nextReads).toBe(2);
+      expect(within(table).queryByRole("link", { name: stale })).toBeNull();
+      expect(screen.getByTestId("usage-count").textContent).toBe("Showing 2 of 312");
     });
 
     // Spec: §13.10 — a layer's share is its part of all loads across the
