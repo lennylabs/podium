@@ -30,6 +30,7 @@ func TestThresholds_ResolvedFieldByField(t *testing.T) {
 		MinDescriptionWords:    3,
 		DescriptionSimilarity:  0.7,
 		ContentSimilarity:      0.8,
+		URLConcurrency:         8,
 	}
 	if got != want {
 		t.Errorf("resolved() = %+v, want %+v", got, want)
@@ -81,6 +82,28 @@ var thresholdVars = []thresholdVar{
 	{"PODIUM_LINT_MIN_DESCRIPTION_WORDS", "5", 5, func(t Thresholds) any { return t.MinDescriptionWords }},
 	{"PODIUM_LINT_DESCRIPTION_SIMILARITY", "0.85", 0.85, func(t Thresholds) any { return t.DescriptionSimilarity }},
 	{"PODIUM_LINT_CONTENT_SIMILARITY", "1.0", 1.0, func(t Thresholds) any { return t.ContentSimilarity }},
+	{"PODIUM_LINT_URL_CONCURRENCY", "16", 16, func(t Thresholds) any { return t.URLConcurrency }},
+}
+
+// Spec: §13.12 — PODIUM_LINT_URL_CONCURRENCY accepts 1 to 64; a value above
+// the range keeps the default and logs, and the bounds themselves apply.
+func TestThresholdsFromEnv_URLConcurrencyRange(t *testing.T) {
+	t.Parallel()
+	for value, want := range map[string]int{"1": 1, "64": 64, "65": DefaultURLConcurrency} {
+		var logged int
+		got := ThresholdsFromEnv(func(k string) string {
+			if k == "PODIUM_LINT_URL_CONCURRENCY" {
+				return value
+			}
+			return ""
+		}, func(string, ...any) { logged++ })
+		if got.URLConcurrency != want || (logged == 1) != (value == "65") {
+			t.Errorf("%s: URLConcurrency=%d logged=%d, want %d", value, got.URLConcurrency, logged, want)
+		}
+	}
+	if (Thresholds{URLConcurrency: 99}).resolved().URLConcurrency != DefaultURLConcurrency {
+		t.Error("an out-of-range URLConcurrency did not resolve to the default")
+	}
 }
 
 // Spec: §13.12 — each variable applies a valid value. Unset and empty
