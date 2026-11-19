@@ -19,6 +19,14 @@ import { ScoreBar } from './ScoreBar';
  * Without it the table is the similarity page's, unframed, and each peer
  * identifier links to the artifact.
  *
+ * A screen reader has to be told which figure is the similarity and which is
+ * the word overlap. The unframed table carries table roles, so each cell is
+ * announced under its column header. The framed table's rows are buttons,
+ * whose content a screen reader reads as one flat name and which cannot be
+ * table rows, so there the header is hidden from assistive technology and
+ * each figure carries its column's name as text for assistive technology
+ * alone.
+ *
  * Spec: §13.10 */
 export function OverlapTable({
   rows,
@@ -35,19 +43,30 @@ export function OverlapTable({
 }) {
   const columns = showSimilarity ? 'overlap-grid overlap-grid-both' : 'overlap-grid overlap-grid-word';
   const framed = onSelect !== undefined;
+  const header = framed ? undefined : 'columnheader';
+  const cell = framed ? undefined : 'cell';
+  const row = framed ? undefined : 'row';
+  // The column's name as text for assistive technology alone, in the framed
+  // table, where no column header is announced.
+  const named = (name: string) => (framed ? <span className="assistive-only">{`${name} `}</span> : null);
   return (
-    <div className={framed ? 'overlap-table overlap-table-framed' : 'overlap-table'} data-testid="overlap-table">
-      <div className={`${columns} overlap-head label`} aria-hidden="true">
-        <span>Overlaps with</span>
-        <span>Layer</span>
-        {showSimilarity && <span>Similarity</span>}
-        <span>Word overlap</span>
+    <div
+      className={framed ? 'overlap-table overlap-table-framed' : 'overlap-table'}
+      data-testid="overlap-table"
+      role={framed ? undefined : 'table'}
+      aria-label={framed ? undefined : 'Overlapping artifacts'}
+    >
+      <div className={`${columns} overlap-head label`} role={row} aria-hidden={framed ? true : undefined}>
+        <span role={header}>Overlaps with</span>
+        <span role={header}>Layer</span>
+        {showSimilarity && <span role={header}>Similarity</span>}
+        <span role={header}>Word overlap</span>
       </div>
-      {rows.map((row) => {
-        const id = row.peer.artifact_id;
+      {rows.map((peerRow) => {
+        const id = peerRow.peer.artifact_id;
         const cells = (
           <>
-            <span className="overlap-peer">
+            <span className="overlap-peer" role={cell}>
               <span className="overlap-peer-name">
                 {framed ? (
                   <span className="mono overlap-id">{id}</span>
@@ -56,24 +75,29 @@ export function OverlapTable({
                     {id}
                   </a>
                 )}
-                <TypeBadge type={row.peer.type} />
+                <TypeBadge type={peerRow.peer.type} />
               </span>
-              <span className="overlap-description">{row.peer.description}</span>
+              <span className="overlap-description">{peerRow.peer.description}</span>
             </span>
-            <span className="mono overlap-layer">{row.peer.layer}</span>
+            <span className="mono overlap-layer" role={cell}>
+              {named('Layer')}
+              {peerRow.peer.layer}
+            </span>
             {showSimilarity && (
-              <span className="overlap-score">
-                <ScoreBar kind="similarity" value={row.similarity} />
+              <span className="overlap-score" role={cell}>
+                {named('Similarity')}
+                <ScoreBar kind="similarity" value={peerRow.similarity} />
               </span>
             )}
-            <span className="overlap-score">
-              <ScoreBar kind="word" value={row.wordOverlap} />
+            <span className="overlap-score" role={cell}>
+              {named('Word overlap')}
+              <ScoreBar kind="word" value={peerRow.wordOverlap} />
             </span>
           </>
         );
         if (!framed) {
           return (
-            <div key={id} className={`${columns} overlap-row`} data-testid="overlap-row">
+            <div key={id} className={`${columns} overlap-row`} role={row} data-testid="overlap-row">
               {cells}
             </div>
           );

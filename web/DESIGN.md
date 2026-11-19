@@ -433,10 +433,15 @@ reingest. The panel therefore treats creating a layer under an unused ID and
 re-registering an existing ID as different authorization cases, which that rule
 decides. The rule is live only where the deployment both configures an identity
 provider and does not run in public mode, which is the liveness condition that
-rule carries. A registry missing either conjunct admits
-every one of the panel's writes and the role split is presentation there as
-well, which covers both the standalone registry that authenticates no caller and
-a registry that engages public mode. Where the rule is live, a registration under
+rule carries. A registry that configures no identity provider and does not run
+in public mode admits every one of the panel's writes, and the role split is
+presentation there as well, which covers the standalone registry that
+authenticates no caller. A registry in public mode admits a layer write or an
+erasure only from a request that carries the operator token (§13.10). The
+browser sends no such header, so the posture read reports that the caller may
+not manage layers, and the panel offers no layer control there: it draws no
+register, reingest, update, unregister, or restore control and no reorder
+handle. Where the rule is live, a registration under
 one of the recoverable IDs the panel's restore surface lists is authorized on the
 same terms as any other write against that stored layer, so the recovery window
 is not a window in which an unauthorized caller can take the ID over, while a
@@ -461,8 +466,10 @@ writes are admitted is decided on a different axis: the liveness condition above
 is a property of the deployment's configuration rather than of whether this
 caller resolved a subject. Where the registry configures no identity provider or
 runs in public mode, the write rule is not live, the panel holds the tenant's
-whole list, no row carries an ownership marker because no subject resolves, and
-no write is refused. Where the registry configures an identity provider and does
+whole list, and no row carries an ownership marker because no subject resolves.
+A registry that configures no identity provider refuses none of the panel's
+writes. A registry in public mode refuses every layer write that carries no
+operator token, and the panel offers none of them. Where the registry configures an identity provider and does
 not run in public mode, the rule is live and the read has three arms under
 §7.3.1: a caller holding the tenant `admin` role reads the tenant's whole list,
 any other caller who resolves a verified subject reads the layers §4.6 admits,
