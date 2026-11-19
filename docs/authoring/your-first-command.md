@@ -44,7 +44,7 @@ Replace the placeholder body with the template:
 ```markdown
 ---
 name: standup
-description: Format a daily standup update from a free-text summary of yesterday's work.
+description: "Format a daily standup update from a free-text summary of yesterday's work."
 metadata:
   version: "1.0.0"
   tags: "dev-loop, standup, daily"
@@ -104,7 +104,7 @@ The materialized `SKILL.md` carries the Claude Code user-only control `disable-m
 ---
 disable-model-invocation: true
 name: standup
-description: Format a daily standup update from a free-text summary of yesterday's work.
+description: "Format a daily standup update from a free-text summary of yesterday's work."
 metadata:
   version: "1.0.0"
   tags: "dev-loop, standup, daily"
