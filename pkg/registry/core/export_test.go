@@ -15,6 +15,20 @@ func EventAudienceWaiters(a *EventAudience) int {
 	return a.waiters
 }
 
+// UsagePendingNames reports the distinct clients and the distinct harnesses
+// u's unflushed counts name, so a test can check that the buffer stays
+// bounded however many names callers send between flushes.
+func UsagePendingNames(u *UsageCounter) (clients, harnesses int) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	c, h := map[string]bool{}, map[string]bool{}
+	for k := range u.pending {
+		c[k.client] = true
+		h[k.harness] = true
+	}
+	return len(c), len(h)
+}
+
 // AdmittedTags admits rec and returns the tags parsedArtifact reads from the
 // admitted row. A load result carries no tags member, so the admission tests
 // read through this export the tags a reader of the admitted row sees.

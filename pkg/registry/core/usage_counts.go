@@ -87,8 +87,8 @@ type usageDayKeys struct {
 // and adds them to the RegistryStore on Flush. Adding is commutative, so
 // replicas that flush to one store produce totals across every replica.
 //
-// mu guards pending; every method takes it, so the counter is safe for
-// concurrent use by request goroutines and the flush loop. flushing, a
+// mu guards pending, next, and held; every method takes it, so the counter
+// is safe for concurrent use by request goroutines and the flush loop. flushing, a
 // one-slot semaphore, serializes Flush: the shutdown flush runs while a
 // periodic flush the shutdown cancelled may still be waiting on the store,
 // and that flush puts its counts back only when its add fails. Without the
@@ -112,6 +112,15 @@ type UsageCounter struct {
 	// and day. Only Flush reads and writes it, and the flushing semaphore
 	// serializes Flush, so it needs no lock of its own.
 	known map[[2]string]*usageDayKeys
+	// held holds, per tenant and day, the clients and harnesses add may buffer
+	// under their own names: the values add has counted and the values a
+	// flush has read or admitted as recorded. add records any other value
+	// under UsageOther once a set holds maxKeys values, so pending names at
+	// most maxKeys values beyond those read as recorded, however many
+	// distinct names callers send between flushes. Flush still applies the
+	// exact cap; held only bounds what waits for it. mu guards it, because
+	// add reads it on the request path.
+	held map[[2]string]*usageDayKeys
 }
 
 // NewUsageCounter returns an empty counter that dates each count by c in UTC.
@@ -122,7 +131,7 @@ func NewUsageCounter(c clock.Clock) *UsageCounter {
 	}
 	return &UsageCounter{
 		clock: c, flushing: make(chan struct{}, 1), pending: map[usageBufferKey]pendingCount{},
-		maxKeys: DefaultUsageMaxClientKeys, known: map[[2]string]*usageDayKeys{},
+		maxKeys: DefaultUsageMaxClientKeys, known: map[[2]string]*usageDayKeys{}, held: map[[2]string]*usageDayKeys{},
 	}
 }
 
@@ -135,16 +144,23 @@ func (u *UsageCounter) WithMaxClientKeys(n int) *UsageCounter {
 	return u
 }
 
-// add buffers one count for the call's artifact under today's UTC date.
+// add buffers one count for the call's artifact under today's UTC date. A
+// client or a harness the day's held set has no room for is buffered under
+// UsageOther.
+//
+// Spec: §8.7
 func (u *UsageCounter) add(ctx context.Context, tenant, layer, artifact string, loads, syncs, hits int64) {
 	if u == nil || layer == "" || artifact == "" {
 		return
 	}
 	client, harness, _ := usageClientFrom(ctx)
 	day := u.clock.Now().UTC().Format(store.UsageDayLayout)
-	k := usageBufferKey{tenant: tenant, day: day, layer: layer, artifact: artifact, client: client, harness: harness}
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	held := dayKeysIn(u.held, tenant, day)
+	client = admitKey(held.clients, client, u.maxKeys)
+	harness = admitKey(held.harnesses, harness, u.maxKeys)
+	k := usageBufferKey{tenant: tenant, day: day, layer: layer, artifact: artifact, client: client, harness: harness}
 	c, ok := u.pending[k]
 	if !ok {
 		c = pendingCount{
@@ -217,8 +233,39 @@ func (u *UsageCounter) Flush(ctx context.Context, st store.Store) error {
 			u.restore(counts)
 		}
 	}
+	u.holdKnown()
 	u.forgetOldDays()
 	return first
+}
+
+// holdKnown merges every day's known keys into the held sets, so add keeps
+// buffering a value a flush read or admitted as recorded under its own name
+// once the held set is full. A value a flush recorded under UsageOther stays
+// held; its later counts are buffered under its name and capped again by
+// the next flush, which records them under UsageOther as before.
+func (u *UsageCounter) holdKnown() {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for k, keys := range u.known {
+		held := dayKeysIn(u.held, k[0], k[1])
+		for v := range keys.clients {
+			held.clients[v] = true
+		}
+		for v := range keys.harnesses {
+			held.harnesses[v] = true
+		}
+	}
+}
+
+// dayKeysIn returns the keys sets holds for tenant on day, adding empty
+// ones when it holds none.
+func dayKeysIn(sets map[[2]string]*usageDayKeys, tenant, day string) *usageDayKeys {
+	k := sets[[2]string{tenant, day}]
+	if k == nil {
+		k = &usageDayKeys{clients: map[string]bool{}, harnesses: map[string]bool{}}
+		sets[[2]string{tenant, day}] = k
+	}
+	return k
 }
 
 // capKeys returns counts, in the order given, with each client, and each
@@ -262,11 +309,7 @@ func (u *UsageCounter) readDayKeys(ctx context.Context, st store.Store, tenant, 
 	if err != nil {
 		return nil, err
 	}
-	k := u.known[[2]string{tenant, day}]
-	if k == nil {
-		k = &usageDayKeys{clients: map[string]bool{}, harnesses: map[string]bool{}}
-		u.known[[2]string{tenant, day}] = k
-	}
+	k := dayKeysIn(u.known, tenant, day)
 	for _, r := range rows {
 		if counted(r.Client) {
 			k.clients[r.Client] = true
@@ -308,14 +351,21 @@ func admitKey(set map[string]bool, key string, max int) string {
 	return key
 }
 
-// forgetOldDays drops the known keys of days before yesterday, which no
-// count flushed from now on carries except a count a failed flush restored,
-// and that count's day is reseeded from the store.
+// forgetOldDays drops the known and held keys of days before yesterday,
+// which no count flushed from now on carries except a count a failed flush
+// restored, and that count's day is reseeded from the store.
 func (u *UsageCounter) forgetOldDays() {
 	cutoff := u.clock.Now().UTC().AddDate(0, 0, -1).Format(store.UsageDayLayout)
 	for k := range u.known {
 		if k[1] < cutoff {
 			delete(u.known, k)
+		}
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for k := range u.held {
+		if k[1] < cutoff {
+			delete(u.held, k)
 		}
 	}
 }
