@@ -1,7 +1,10 @@
 package e2e
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -79,5 +82,39 @@ func TestOperatorToken_ShortTokenRefusesStartup(t *testing.T) {
 	}
 	if strings.Contains(combined, "too-short-value") {
 		t.Errorf("the refusal printed the token value:\n%s", combined)
+	}
+}
+
+// Spec: §7.3.1, §13.12 — a podium layer command that carries the operator
+// token fails when the registry redirects it to another host, and the other
+// host receives no request, so the token never leaves the host the operator
+// named.
+func TestOperatorToken_CLIRefusesCrossHostRedirect(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var leaked []string
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		leaked = append(leaked, r.Method+" "+r.URL.Path+" token="+r.Header.Get("X-Podium-Operator-Token"))
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{"layers":[]}`))
+	}))
+	defer elsewhere.Close()
+	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+	}))
+	defer registry.Close()
+
+	res := runPodium(t, "", []string{"PODIUM_OPERATOR_TOKEN=" + e2eOperatorToken}, "layer", "list", "--registry", registry.URL)
+	if res.Exit != 1 || !strings.Contains(res.Stderr, "refusing redirect") {
+		t.Errorf("layer list: exit=%d stderr=%q, want exit 1 naming the refused redirect", res.Exit, res.Stderr)
+	}
+	if strings.Contains(res.Stderr, e2eOperatorToken) {
+		t.Errorf("the error output carries the operator token: %q", res.Stderr)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(leaked) != 0 {
+		t.Errorf("the other host received %q", leaked)
 	}
 }
