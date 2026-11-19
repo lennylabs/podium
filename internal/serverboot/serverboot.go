@@ -28,6 +28,7 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"gopkg.in/yaml.v3"
@@ -2770,21 +2771,36 @@ func (c *Config) validate() error {
 		return fmt.Errorf("missing required configuration for the selected backend(s): %s",
 			strings.Join(missing, ", "))
 	}
-	// §13.12: a short operator token is refused rather than accepted as a
-	// guessable secret.
-	if c.operatorToken != "" && len(c.operatorToken) < server.MinOperatorTokenLength {
-		return fmt.Errorf("config.invalid: PODIUM_OPERATOR_TOKEN must be at least %d characters", server.MinOperatorTokenLength)
-	}
-	// §13.12: no request header can carry whitespace or a control character,
-	// so a token holding one, such as the trailing newline a secret file
-	// often ends with, would match no request and refuse every write.
-	if strings.IndexFunc(c.operatorToken, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
-		return fmt.Errorf("config.invalid: PODIUM_OPERATOR_TOKEN must not contain whitespace or control characters")
+	if c.publicMode {
+		if err := operatorTokenError(c.operatorToken); err != nil {
+			return err
+		}
 	}
 	if c.usage.err != nil {
 		return c.usage.err
 	}
 	return c.semanticOverlapGuard()
+}
+
+// operatorTokenError validates a public-mode registry's PODIUM_OPERATOR_TOKEN.
+// The token has no effect outside public mode, so validate calls it only
+// there. A short token is refused rather than accepted as a guessable secret,
+// and its length is counted in characters, as the refusal states, so a value
+// of a few multi-byte characters cannot pass on its byte count. No request
+// header can carry whitespace or a control character, so a token holding one,
+// such as the trailing newline a secret file often ends with, would match no
+// request and refuse every write. An unset token is valid: public mode then
+// refuses every operation the token admits.
+//
+// Spec: §13.12, §7.3.1
+func operatorTokenError(token string) error {
+	if token != "" && utf8.RuneCountInString(token) < server.MinOperatorTokenLength {
+		return fmt.Errorf("config.invalid: PODIUM_OPERATOR_TOKEN must be at least %d characters", server.MinOperatorTokenLength)
+	}
+	if strings.IndexFunc(token, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+		return fmt.Errorf("config.invalid: PODIUM_OPERATOR_TOKEN must not contain whitespace or control characters")
+	}
+	return nil
 }
 
 // semanticOverlapGuard refuses a start that turns the §7.3.1 semantic overlap
