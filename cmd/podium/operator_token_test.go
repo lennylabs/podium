@@ -106,9 +106,11 @@ func TestDoJSON_RefusesRedirectToAnotherHost(t *testing.T) {
 	}
 }
 
-// Spec: §13.12 — a redirect from https to http on the same host is refused,
-// because it would send the token in clear text; a redirect within one
-// scheme and host, and one from http to https, is followed.
+// Spec: §13.12 — a redirect within one scheme and host is followed when the
+// effective ports match, with a URL that names no port taking its scheme's
+// default; the upgrade from http on port 80 to https on port 443 of the same
+// host is followed; a move from https to http, to another host, or to
+// another port is refused.
 func TestSameHostRedirect(t *testing.T) {
 	u := func(s string) *url.URL {
 		v, err := url.Parse(s)
@@ -128,6 +130,16 @@ func TestSameHostRedirect(t *testing.T) {
 		{"https://reg.acme.com/v1/layers", "https://evil.example/v1/x", false},
 		{"https://reg.acme.com/v1/layers", "https://reg.acme.com:8443/v1/x", false},
 		{"https://reg.acme.com/v1/layers", "https://api.reg.acme.com/v1/x", false},
+		{"https://reg.acme.com/v1/layers", "https://reg.acme.com:443/v1/x", true},
+		{"https://reg.acme.com:443/v1/layers", "https://reg.acme.com/v1/x", true},
+		{"http://reg.acme.com:80/v1/layers", "http://reg.acme.com/v1/x", true},
+		{"http://reg.acme.com:80/v1/layers", "https://reg.acme.com/v1/x", true},
+		{"http://reg.acme.com/v1/layers", "https://reg.acme.com:443/v1/x", true},
+		{"http://reg.acme.com:8080/v1/layers", "https://reg.acme.com/v1/x", false},
+		{"http://reg.acme.com/v1/layers", "https://reg.acme.com:8443/v1/x", false},
+		{"http://reg.acme.com:8080/v1/layers", "http://reg.acme.com:8080/v1/x", true},
+		{"https://reg.acme.com:443/v1/layers", "http://reg.acme.com:443/v1/x", false},
+		{"https://reg.acme.com/v1/layers", "ftp://reg.acme.com/v1/x", false},
 	} {
 		if got := sameHostRedirect(u(tc.from), u(tc.to)); got != tc.ok {
 			t.Errorf("%s -> %s: %v, want %v", tc.from, tc.to, got, tc.ok)

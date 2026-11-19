@@ -782,19 +782,47 @@ func refuseCrossHostRedirect(req *http.Request, via []*http.Request) error {
 		return errors.New("stopped after 10 redirects")
 	}
 	if !sameHostRedirect(via[0].URL, req.URL) {
-		return fmt.Errorf("refusing redirect from %s to %s: the target is another host or drops https", via[0].URL.Host, req.URL.Redacted())
+		return fmt.Errorf("refusing redirect from %s to %s: the target is another host or port, or drops https", via[0].URL.Host, req.URL.Redacted())
 	}
 	return nil
 }
 
-// sameHostRedirect reports whether a redirect from orig to next keeps the
-// host and port, compared without regard to case, and does not move from
-// https to http. An http-to-https upgrade on the same host is kept.
+// sameHostRedirect reports whether a redirect from orig to next stays on the
+// host, compared without regard to case. Within one scheme the effective
+// port must match. The one scheme change kept is the upgrade from http on
+// port 80 to https on port 443, the default port of each; an upgrade between
+// other ports could name a different service on the host, and a move from
+// https to http would send the token in clear text.
+//
+// Spec: §13.12
 func sameHostRedirect(orig, next *neturl.URL) bool {
-	if strings.EqualFold(orig.Scheme, "https") && !strings.EqualFold(next.Scheme, "https") {
+	if !strings.EqualFold(orig.Hostname(), next.Hostname()) {
 		return false
 	}
-	return strings.EqualFold(orig.Hostname(), next.Hostname()) && orig.Port() == next.Port()
+	from, to := strings.ToLower(orig.Scheme), strings.ToLower(next.Scheme)
+	switch {
+	case from == to:
+		return effectivePort(orig) == effectivePort(next)
+	case from == "http" && to == "https":
+		return effectivePort(orig) == "80" && effectivePort(next) == "443"
+	}
+	return false
+}
+
+// effectivePort returns u's port, or the default port of its scheme (80 for
+// http, 443 for https) when u names none, so https://h and https://h:443
+// compare equal.
+func effectivePort(u *neturl.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	}
+	return ""
 }
 
 // doJSON makes an HTTP request with optional JSON body and returns
