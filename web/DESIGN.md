@@ -531,10 +531,18 @@ arrived and the rest of the viewer stays usable.
 The rules for this surface are owned by the Usage bullet of the Web UI part of
 §13.10: what the surface reads and with whose identity, who is offered it, what
 the usage page shows, where the last 30 days of each artifact's counts appear,
-how a client kind or harness recorded as `none` is named, and what a failed read
+how a client or harness the request did not provide is named, and what a failed read
 does in each place. This brief does not restate them. The surface is numbered
 after Similarity because it was added after it, and the numbers carry no order
 of their own.
+
+The surface names the report's loads **on-demand loads** and its syncs
+**preloads**, and keeps **search hits**. A preload is written into a workspace
+ahead of time by `podium sync`, and the harness then reads the local copy, which
+the registry never sees; the names state that difference, and each label's
+tooltip states the definition. A figure that sums both is named **all loads**.
+The API, the CLI, and the documentation keep the names loads and syncs, and
+`usageHints` in `web/ui/src/usage.ts` holds the UI's wording.
 
 The surface reads the usage report. Its routes, its parameters, and its response
 are documented under "Usage report" in `docs/reference/http-api.md`, the handler
@@ -545,7 +553,7 @@ response gives the design:
 | Part of the response | What it gives the design |
 |:--|:--|
 | the window and the served granularity | The days the figures cover. A long window coarsens a daily series to weeks or months, and the response names the granularity it served, so a chart labels its periods from the response rather than from the request. |
-| `totals` | The catalog's loads, syncs, and search hits over the window, their breakdowns by client kind and by harness, and, when a granularity is requested, a series whose periods sum to the totals. |
+| `totals` | The catalog's loads, syncs, and search hits over the window, their breakdowns by client and by harness, and, when a granularity is requested, a series whose periods sum to the totals. |
 | `layers` | One entry per layer the caller can see, including a layer with no counts, with the same figures. A layer's counts include artifacts it no longer serves, so they can exceed the sum of its listed artifacts. |
 | `artifacts`, `artifact_count`, and `next_cursor` | One page of artifacts with their counts, type, serving layer, and last loaded and synced days, ordered by the requested sort. `artifact_count` is the length of the whole list and `next_cursor` reads the next page, so a table states its total and pages without loading the catalog. |
 

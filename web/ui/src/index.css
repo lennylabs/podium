@@ -7084,7 +7084,7 @@ button.cluster-row-selected:hover {
 }
 
 .usage-layer-table .usage-row {
-  grid-template-columns: minmax(0, 1fr) 200px 100px 80px 100px;
+  grid-template-columns: minmax(0, 1fr) 200px 140px 90px 100px;
 }
 
 .usage-layer-table .usage-row-head {
@@ -7096,7 +7096,7 @@ button.cluster-row-selected:hover {
 }
 
 .usage-artifact-table .usage-row {
-  grid-template-columns: minmax(0, 1fr) 120px 110px 100px 110px 96px;
+  grid-template-columns: minmax(0, 1fr) 120px 140px 100px 110px 96px;
   padding-top: 11px;
   padding-bottom: 11px;
 }

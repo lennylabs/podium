@@ -16,7 +16,7 @@ import { BreakdownBar, ShareBar, StatTile } from '../components/Usage';
 import { EmptyState, ErrorState, Loading, TypeBadge } from '../components/primitives';
 import { artifactHref, replaceRoute, usageHref } from '../route';
 import { plural } from '../similarity';
-import { breakdownParts, formatCount, relativeDay } from '../usage';
+import { breakdownParts, formatCount, relativeDay, usageHints } from '../usage';
 import { useAsync, useDebounced, useErrorReport } from '../useAsync';
 
 /** UsageWindow is the window the page reads: a preset number of days, or a
@@ -32,11 +32,11 @@ type SortKey = NonNullable<UsageQuery['sort']>;
 
 /** columns are the table's sortable columns in the order they are drawn,
  * after the artifact and layer columns. */
-const columns: { key: SortKey; label: string }[] = [
-  { key: 'loads', label: 'LOADS' },
-  { key: 'syncs', label: 'SYNCS' },
-  { key: 'search_hits', label: 'SEARCH HITS' },
-  { key: 'last_loaded', label: 'LAST LOADED' },
+const columns: { key: SortKey; label: string; hint: string }[] = [
+  { key: 'loads', label: 'ON-DEMAND LOADS', hint: usageHints.loads },
+  { key: 'syncs', label: 'PRELOADS', hint: usageHints.syncs },
+  { key: 'search_hits', label: 'SEARCH HITS', hint: usageHints.searchHits },
+  { key: 'last_loaded', label: 'LAST LOADED', hint: usageHints.lastLoaded },
 ];
 
 function windowParams(w: UsageWindow): Pick<UsageQuery, 'days' | 'from' | 'to'> {
@@ -68,7 +68,9 @@ export function UsageSurface({ query, onError }: { query: string; onError: (err:
           onChange={setRange}
         />
       </div>
-      <p className="lead usage-lead">Loads, syncs, and search hits for the layers you can see. Counted per UTC day.</p>
+      <p className="lead usage-lead">
+        On-demand loads, preloads, and search hits for the layers you can see. Counted per UTC day.
+      </p>
       {summary.error !== null && (
         <ErrorState error={summary.error} title="The usage report did not load." onRetry={summary.reload} />
       )}
@@ -188,23 +190,30 @@ function Summary({ report }: { report: UsageReport }) {
     <>
       <div className="usage-tiles">
         <StatTile
-          label="ARTIFACTS LOADED"
+          label="ON-DEMAND LOADS"
+          hint={usageHints.loads}
           note="agents, SDK, CLI"
           total={report.totals.loads}
           values={series.map((p) => p.loads)}
         />
-        <StatTile label="ARTIFACTS SYNCED" note="podium sync" total={report.totals.syncs} values={series.map((p) => p.syncs)} />
+        <StatTile
+          label="PRELOADS"
+          hint={usageHints.syncs}
+          note="podium sync, ahead of time"
+          total={report.totals.syncs}
+          values={series.map((p) => p.syncs)}
+        />
       </div>
       <div className="usage-card usage-breakdowns">
-        <BreakdownBar title="LOADS/SYNCS BY CLIENT" parts={breakdownParts(report.totals.by_client)} />
-        <BreakdownBar title="LOADS/SYNCS BY HARNESS" parts={breakdownParts(report.totals.by_harness)} />
+        <BreakdownBar title="ALL LOADS BY CLIENT" parts={breakdownParts(report.totals.by_client)} />
+        <BreakdownBar title="ALL LOADS BY HARNESS" parts={breakdownParts(report.totals.by_harness)} />
       </div>
     </>
   );
 }
 
 /** LayerUsage is the By layer disclosure, collapsed by default and naming the
- * layer count and the layer with the most loads while closed. */
+ * layer count and the layer with the most on-demand loads while closed. */
 function LayerUsage({ report }: { report: UsageReport }) {
   const [open, setOpen] = useState(false);
   const layers = report.layers;
@@ -216,7 +225,7 @@ function LayerUsage({ report }: { report: UsageReport }) {
   );
   const count = `${String(layers.length)} ${plural(layers.length, 'layer', 'layers')}`;
   const summary =
-    !open && leader !== null && leader.loads > 0 ? `${count} · ${leader.layer} has the most loads` : count;
+    !open && leader !== null && leader.loads > 0 ? `${count} · ${leader.layer} has the most on-demand loads` : count;
   return (
     <div className={open ? 'usage-card usage-layers usage-layers-open' : 'usage-card usage-layers'}>
       <button
@@ -237,14 +246,16 @@ function LayerUsage({ report }: { report: UsageReport }) {
         <div className="usage-table usage-layer-table" role="table" aria-label="Usage by layer">
           <div className="usage-row usage-row-head" role="row">
             <span role="columnheader">LAYER</span>
-            <span role="columnheader">SHARE OF LOADS/SYNCS</span>
-            <span role="columnheader" className="num">
-              LOADS
+            <span role="columnheader" title={usageHints.allLoads}>
+              SHARE OF ALL LOADS
             </span>
-            <span role="columnheader" className="num">
-              SYNCS
+            <span role="columnheader" className="num" title={usageHints.loads}>
+              ON-DEMAND LOADS
             </span>
-            <span role="columnheader" className="num">
+            <span role="columnheader" className="num" title={usageHints.syncs}>
+              PRELOADS
+            </span>
+            <span role="columnheader" className="num" title={usageHints.searchHits}>
               SEARCH HITS
             </span>
           </div>
@@ -445,6 +456,7 @@ function ArtifactUsage({
                 <button
                   type="button"
                   className={column.key === sort ? 'usage-sort usage-sort-on' : 'usage-sort'}
+                  title={column.hint}
                   onClick={() => {
                     sortBy(column.key);
                   }}

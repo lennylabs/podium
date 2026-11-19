@@ -20568,10 +20568,16 @@ describe("usage", () => {
       goTo(usageHref());
       render(<App />);
       const tiles = await screen.findAllByTestId("stat-tile");
-      expect(tiles[0].textContent).toContain("ARTIFACTS LOADED");
+      // The report's loads read as on-demand loads and its syncs as
+      // preloads, and each label's tooltip states the definition.
+      expect(tiles[0].textContent).toContain("ON-DEMAND LOADS");
       expect(tiles[0].textContent).toContain("18,402");
-      expect(tiles[1].textContent).toContain("ARTIFACTS SYNCED");
+      expect(tiles[0].querySelector(".stat-tile-label")?.getAttribute("title")).toContain("when an agent");
+      expect(tiles[1].textContent).toContain("PRELOADS");
+      expect(tiles[1].textContent).toContain("podium sync, ahead of time");
       expect(tiles[1].textContent).toContain("2,316");
+      expect(tiles[1].querySelector(".stat-tile-label")?.getAttribute("title")).toContain("ahead of time by podium sync");
+      expect(screen.getByRole("heading", { name: "ALL LOADS BY CLIENT" })).toBeTruthy();
       const breakdowns = screen.getAllByTestId("breakdown");
       // Clients read as the report names them, largest first, then other,
       // then unknown, whatever their sizes.
@@ -20585,7 +20591,7 @@ describe("usage", () => {
       expect(unknownKey.querySelector(".breakdown-swatch")?.className).toContain("breakdown-part-4");
       const disclosure = screen.getByRole("button", { name: /By layer/ });
       expect(disclosure.getAttribute("aria-expanded")).toBe("false");
-      expect(disclosure.textContent).toContain("2 layers · platform has the most loads");
+      expect(disclosure.textContent).toContain("2 layers · platform has the most on-demand loads");
       expect(screen.queryByRole("table", { name: "Usage by layer" })).toBeNull();
       fireEvent.click(disclosure);
       const layers = screen.getByRole("table", { name: "Usage by layer" });
@@ -20609,11 +20615,11 @@ describe("usage", () => {
       goTo(usageHref());
       render(<App />);
       await screen.findByRole("table", { name: "Usage by artifact" });
-      fireEvent.click(screen.getByRole("button", { name: "SYNCS" }));
+      fireEvent.click(screen.getByRole("button", { name: "PRELOADS" }));
       await waitFor(() => {
         expect(usageBodies().some((b) => b.sort === "syncs" && b.order === "desc")).toBe(true);
       });
-      fireEvent.click(await screen.findByRole("button", { name: "SYNCS ↓" }));
+      fireEvent.click(await screen.findByRole("button", { name: "PRELOADS ↓" }));
       await waitFor(() => {
         expect(usageBodies().some((b) => b.sort === "syncs" && b.order === "asc")).toBe(true);
       });
@@ -20805,9 +20811,9 @@ describe("usage", () => {
       render(<App />);
       const line = await screen.findByTestId("usage-line");
       await waitFor(() => {
-        expect(line.textContent).toContain("2,412loads");
+        expect(line.textContent).toContain("2,412on-demand loads");
       });
-      expect(line.textContent).toContain("318syncs");
+      expect(line.textContent).toContain("318preloads");
       expect(line.textContent).toContain("5,120search hits");
       const reads = usageBodies().filter((b) => Array.isArray(b.artifacts));
       expect(reads).toHaveLength(1);
@@ -20880,7 +20886,7 @@ describe("usage", () => {
       render(<App />);
       const section = await screen.findByTestId("rail-usage");
       await waitFor(() => {
-        expect(section.textContent).toContain("No loads, syncs, or search hits in the last 30 days.");
+        expect(section.textContent).toContain("No on-demand loads, preloads, or search hits in the last 30 days.");
       });
     });
 
@@ -20942,10 +20948,10 @@ describe("usage in the at-scale domain table", () => {
     next_cursor: null,
   };
 
-  // Spec: §13.10 — the dense table carries each row's last 30 days as Loads
-  // and Syncs columns, the curated rows above it carry the usage line, and
+  // Spec: §13.10 — the dense table carries each row's last 30 days as
+  // On-demand loads and Preloads columns, the curated rows above it carry the usage line, and
   // the sort control ranks the rows by loads.
-  it("adds Loads and Syncs columns, the curated usage line, and a loads sort", async () => {
+  it("adds On-demand loads and Preloads columns, the curated usage line, and a loads sort", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": { body: atScale },
@@ -20956,12 +20962,12 @@ describe("usage in the at-scale domain table", () => {
     const browser = await screen.findByLabelText("Domain browser");
     const table = within(browser).getByRole("table", { name: "Artifacts" });
     await waitFor(() => {
-      expect(within(table).getByRole("columnheader", { name: "Loads" })).toBeTruthy();
+      expect(within(table).getByRole("columnheader", { name: "On-demand loads" })).toBeTruthy();
       expect(within(table).getByRole("cell", { name: "480" })).toBeTruthy();
     });
-    expect(within(table).getByRole("columnheader", { name: "Syncs" })).toBeTruthy();
+    expect(within(table).getByRole("columnheader", { name: "Preloads" })).toBeTruthy();
     const picks = within(browser).getByRole("list", { name: "Curated artifacts" });
-    expect(within(picks).getByTestId("usage-line").textContent).toContain("1,163loads");
+    expect(within(picks).getByTestId("usage-line").textContent).toContain("1,163on-demand loads");
     fireEvent.change(within(browser).getByLabelText("Sort artifacts"), { target: { value: "loads" } });
     const rows = within(table).getAllByRole("row").slice(1);
     expect(rows.map((row) => within(row).getAllByRole("link")[0].textContent)).toEqual(["triage", "lint"]);
@@ -20978,10 +20984,10 @@ describe("usage in the at-scale domain table", () => {
     const browser = await screen.findByLabelText("Domain browser");
     await waitFor(() => {
       expect(requests.some((r) => r.url === "/v1/usage")).toBe(true);
-      expect(within(browser).queryByRole("columnheader", { name: "Loads" })).toBeNull();
+      expect(within(browser).queryByRole("columnheader", { name: "On-demand loads" })).toBeNull();
     });
     const sort = within(browser).getByLabelText("Sort artifacts");
-    expect(within(sort).queryByRole("option", { name: "loads" })).toBeNull();
+    expect(within(sort).queryByRole("option", { name: "on-demand loads" })).toBeNull();
     expect(within(browser).queryByTestId("usage-line")).toBeNull();
   });
 });
