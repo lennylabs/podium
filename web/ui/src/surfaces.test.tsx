@@ -20760,7 +20760,10 @@ describe("usage", () => {
       await waitFor(() => {
         expect(usageBodies().some((b) => b.from === "2026-10-20" && b.to === "2026-11-18")).toBe(true);
       });
-      expect(await screen.findByText("2026-10-20 TO 2026-11-18")).toBeTruthy();
+      // The time range control is the one place the header states the
+      // window, so the heading carries no range badge beside it.
+      expect(screen.queryByText("2026-10-20 TO 2026-11-18")).toBeNull();
+      expect(document.querySelector(".usage-head")?.textContent).not.toMatch(/LAST \d+ DAYS/);
     });
 
     it("states a failed read in place of the figures", async () => {

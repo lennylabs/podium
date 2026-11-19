@@ -216,7 +216,7 @@ Backed by `GET /v1/usage` and `POST /v1/usage` (same parameters; the UI uses POS
 
 What counts: a **load** is a successful `load_artifact` (each item of a batch) from an agent, SDK, or CLI; a **sync** is the same call from `podium sync`; a **search hit** is one per artifact in the first 10 results of a search with a query. Counts are per UTC day.
 
-- **Usage page (22a).** Top-level page from the Usage nav item. Header: title, a `LAST 30 DAYS` badge, and a 7d / 30d / 90d / Custom… Segmented. Custom… opens From and To date fields filled with the range on display, so To starts at today and From at the start of the preset window. Then:
+- **Usage page (22a).** Top-level page from the Usage nav item. Header: title and a 7d / 30d / 90d / Custom… Segmented, which is the only statement of the window in the header. Custom… opens From and To date fields filled with the range on display, so To starts at today and From at the start of the preset window. Then:
   - Two **StatTiles**: *Artifacts loaded* and *Artifacts synced*, each with its total and a daily sparkline (request `granularity=day`). Search hits has no tile.
   - One card with two **BreakdownBars**: *Loads/Syncs by client* (mcp, sdk, cli, sync, unknown) and *Loads/Syncs by harness*. A request without the `X-Podium-Client` header is recorded as `none` — **show it as "unknown"**.
   - **By layer** — a Disclosure, **collapsed by default**, summarising the layer count and the leader. Expanded (22b): a table of layer, **ShareBar** ("Share of loads/syncs", the largest in accent), loads, syncs, search hits.

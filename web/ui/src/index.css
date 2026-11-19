@@ -6823,15 +6823,6 @@ button.cluster-row-selected:hover {
   font-weight: 700;
 }
 
-.usage-head-badges {
-  margin-top: 9px;
-}
-
-.usage-head-badges .badge {
-  font-size: 10.5px;
-  font-weight: 500;
-}
-
 .usage-head-control {
   display: flex;
   flex-direction: column;

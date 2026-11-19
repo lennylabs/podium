@@ -13,7 +13,7 @@ import { firstClassTypes } from './SearchSurface';
 import type { UsageArtifact, UsageQuery, UsageReport } from '../api';
 import { usageReport } from '../api';
 import { BreakdownBar, ShareBar, StatTile } from '../components/Usage';
-import { Badge, EmptyState, ErrorState, Loading, TypeBadge } from '../components/primitives';
+import { EmptyState, ErrorState, Loading, TypeBadge } from '../components/primitives';
 import { artifactHref, replaceRoute, usageHref } from '../route';
 import { plural } from '../similarity';
 import { breakdownParts, formatCount, relativeDay } from '../usage';
@@ -43,10 +43,6 @@ function windowParams(w: UsageWindow): Pick<UsageQuery, 'days' | 'from' | 'to'> 
   return 'days' in w ? { days: w.days } : { from: w.from, to: w.to };
 }
 
-function windowBadge(w: UsageWindow): string {
-  return 'days' in w ? `LAST ${String(w.days)} DAYS` : `${w.from} TO ${w.to}`;
-}
-
 /** UsageSurface is the usage page. `query` is the artifact ID text the list
  * opens filtered by, which the artifact viewer's link sets.
  *
@@ -66,9 +62,6 @@ export function UsageSurface({ query, onError }: { query: string; onError: (err:
     <section className="surface usage" aria-label="Usage">
       <div className="usage-head">
         <h1>Usage</h1>
-        <span className="usage-head-badges">
-          <Badge tone="soft">{windowBadge(range)}</Badge>
-        </span>
         <WindowControl
           value={range}
           shown={report === null ? null : { from: report.from, to: report.to }}
