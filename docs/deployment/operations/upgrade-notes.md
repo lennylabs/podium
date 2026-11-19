@@ -8,9 +8,7 @@ description: "Release-specific upgrade steps, newest release first: the 0.7.0 la
 
 This page lists the upgrade steps that belong to one release, newest release first. [Upgrading](upgrading) gives the general procedure that every upgrade follows. Each release's entry in `CHANGELOG.md` is the authoritative statement of its changes.
 
-## 0.7.0 (unreleased)
-
-The current release is 0.6.0. The notes in this section describe behavior on `main` that ships in 0.7.0.
+## 0.7.0
 
 ### Rollback floor for the layer credential columns
 
@@ -215,6 +213,9 @@ To turn the check on for an existing catalog:
 
 - Each 0.7.0 start creates the `usage_daily` table in the SQLite database if it is absent. A Postgres org schema that an earlier release created gets the table when 0.7.0 first serves a request for that org, and the startup retention pass skips an org schema that does not have it yet. The change is additive, and no existing table changes.
 - A 0.6.0 process neither reads nor writes `usage_daily`. A rollback to 0.6.0 leaves the stored counts in place, and a later 0.7.0 start adds to them.
+- When a 0.6.0 process purges a soft-deleted layer at the end of its recovery window, after a rollback or during a rolling upgrade, the layer's rows stay in `usage_daily`. No 0.7.0 purge reaches them afterwards, and the daily retention pass removes them only as their days pass `PODIUM_USAGE_RETENTION_DAYS`. Until then, a layer registered later under the same identifier reports them as its own counts. Before registering a layer under such an identifier, delete its rows with SQL:
+  - In the SQLite database, which holds the rows of every tenant, run `DELETE FROM usage_daily WHERE tenant_id = '<tenant-id>' AND layer = '<layer-id>'`. `podium admin tenant list` prints each tenant's ID, and `SELECT DISTINCT tenant_id FROM usage_daily WHERE layer = '<layer-id>'` lists the tenants that hold rows under the identifier.
+  - On Postgres, run `DELETE FROM usage_daily WHERE layer = '<layer-id>'` in the tenant's org schema, which holds that tenant's rows alone.
 - A 0.6.0 replica counts nothing. During a rolling upgrade from 0.6.0 and after a rollback, the report omits the requests that 0.6.0 replicas served, so the counts for those days are lower than the traffic.
 - A 0.6.0 replica answers `GET /v1/usage` with 404, so `podium usage` against a registry with a 0.6.0 replica behind its load balancer can fail until every replica runs 0.7.0.
 - `artifacts.searched` audit records that a 0.6.0 replica writes carry no `context.results` member.
@@ -238,9 +239,11 @@ The store needs no backup restore to roll back.
 
 0.7.0 writes a `schema_version` member on every audit record and a `caller.client` member when the request names its client, and it includes both in the record's hash. A 0.6.0 process reads neither member, so it cannot recompute the hash of a record that 0.7.0 wrote.
 
-- After a rollback to 0.6.0, the scheduled integrity pass reports a chain break at the first record 0.7.0 wrote. The pass runs on `PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS` when `PODIUM_AUDIT_LOG_PATH` includes a file. It logs `audit integrity ALERT: hash-chain gap detected: audit: chain broken at index <n>: Hash mismatch`, appends an `audit.gap_detected` record, and repeats both on every pass while 0.6.0 runs.
+- After a rollback to 0.6.0, the scheduled integrity pass reports a chain break at the first record 0.7.0 wrote. The pass runs on `PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS` when `PODIUM_AUDIT_LOG_PATH` includes a file. It logs `audit integrity ALERT: hash-chain gap detected: audit: chain broken at index <n>: Hash mismatch`, appends an `audit.gap_detected` record, and repeats both on every pass until 0.7.0 starts again or a 0.6.0 rewrite of the file removes the break.
 - The chain itself is intact. Each record 0.6.0 appends links to the record before it, and the next 0.7.0 start verifies the whole file, including the records 0.6.0 wrote and its `audit.gap_detected` records.
 - While 0.6.0 runs, its pass stops at the break, so no record written after the first 0.7.0 record is verified until 0.7.0 starts again.
+- 0.6.0 rewrites the whole audit file when its retention pass drops a record or ages the query text of a search record, and when it erases a user's records. The retention pass runs at startup and on every `PODIUM_AUDIT_RETENTION_INTERVAL_SECONDS` tick, and the query text of a search record ages at 7 and at 30 days, so steady search traffic makes a rewrite likely within days of the rollback. 0.6.0 reads each record without `schema_version` and `caller.client`, so the rewrite removes both members from every record 0.7.0 wrote and chains the file again over what remains. From then on the integrity pass reports no break and the alert stops, and the `grep` below finds no record that 0.7.0 wrote before the rollback. The removal is permanent, and a later 0.7.0 start verifies the rewritten file without restoring the members.
+- The copies that an HTTP, OTLP, or `stdout` destination received before such a rewrite keep both members, and their `hash` values no longer match the records in the file. To keep `caller.client` for the period 0.7.0 ran, copy the audit file before the rollback, or keep the records a shipped destination received.
 - To confirm that a reported break is this boundary, compare its index with the first record that carries `schema_version`. `grep -n -m1 '"schema_version"' <audit log file>` prints that record's line number, which is the index plus one in a file with no blank lines. The rollback does not explain a break at any other index. Treat such a break as an audit chain gap, as [Troubleshooting](troubleshooting) describes.
 - A receiver that checks the `prev_hash` links of a shipped stream is unaffected, because the links do not depend on the members a record carries.
 

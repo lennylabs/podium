@@ -425,10 +425,11 @@ The registry derives `<N>` in `0.0.0-auto.<N>` at ingest from the rows it stores
 | Ingested bytes | Result |
 |:--|:--|
 | Match the layer's most recently ingested non-deleted row of the artifact, other than a row the [no-inheritance rule](../deployment/content/layers#inheritance) or the [removed-type rule](../deployment/content/layers#removed-types) retires | The ingest reuses that row's version and is a no-op. |
+| Match a soft-deleted row the layer contributed, other than a retired row, while the layer serves no version of the artifact | The ingest reuses that row's version and restores the row as served, as [Remove an artifact](../managing/lifecycle#remove-an-artifact) describes. |
 | Match no stored or soft-deleted row of the artifact | `<N>` is one more than the highest `<N>` any such row carries, or `0` when none carries one. |
 | Match another stored or soft-deleted row of the artifact under a different version | Rejected with `ingest.invalid_artifact` and `details.constraint: "auto_version_duplicate_content"`. |
 
-The third case rejects a revert to earlier bytes, including a revert across an interval in which the skill declared a version. `latest` keeps serving the newer row. To publish such a skill, set `metadata.version` in `SKILL.md` or change the content.
+The last case rejects a revert to earlier bytes, including a revert across an interval in which the skill declared a version. `latest` keeps serving the newer row. To publish such a skill, set `metadata.version` in `SKILL.md` or change the content.
 
 A filesystem source keeps no ingest history and reports `0.0.0-auto.0` for every skill whose version is assigned.
 
@@ -436,7 +437,7 @@ A filesystem source keeps no ingest history and reports `0.0.0-auto.0` for every
 
 A soft-deleted row counts toward these rules, because `podium layer restore` serves it again. The rule has these consequences:
 
-- A layer unregistered and registered again under its ID rejects its unchanged version-less skills until the retention purge removes the earlier rows or the author sets `metadata.version`. Within the recovery window, `podium layer restore` serves the earlier rows instead.
+- A layer unregistered and registered again under its ID restores its unchanged version-less skills at their earlier assigned versions when it ingests them, until the retention purge removes the earlier rows. Within the recovery window, `podium layer restore` also serves the earlier rows.
 - A purge that removes the row holding the highest `<N>` lets a later ingest assign that `<N>` again.
 - A purge of every row carrying rejected bytes lets a later ingest accept them.
 - An MCP server whose content cache held the purged row for those bytes keeps reporting the purged version for them until the cache drops the record.

@@ -133,7 +133,7 @@
     troubleshooting: deployment/operations/observability#troubleshooting
     upgrade-procedure: deployment/operations/upgrading#upgrade-procedure
     upgrading-directly-from-052-or-earlier: deployment/operations/upgrade-notes#upgrading-directly-from-052-or-earlier
-    upgrading-from-an-earlier-release: deployment/operations/upgrade-notes#070-unreleased
+    upgrading-from-an-earlier-release: deployment/operations/upgrade-notes#070
     what-to-back-up: deployment/operations/backup-restore#what-to-back-up
 - from: deployment/single-node
   to: deployment/modes/single-node
