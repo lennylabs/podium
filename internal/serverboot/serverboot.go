@@ -2117,6 +2117,10 @@ type Config struct {
 	// channel and also serves `podium config show --server`
 	// (cmd/podium/config.go:62), which stays usable on a malformed value.
 	idpGroupMappingErr error
+	// configFileErr records why registry.yaml could not be read or decoded,
+	// for (*Config).validate to refuse the start with. It is deferred for the
+	// same reason as idpGroupMappingErr, and it names the file and line only.
+	configFileErr error
 	// oauthIssuer is the §6.3.3 / §13.12 OIDC issuer URL for the oidc-jwt
 	// provider (PODIUM_OAUTH_ISSUER or identity_provider.issuer). The registry
 	// derives the JWKS from ${issuer}/.well-known/openid-configuration and
@@ -2598,9 +2602,12 @@ func LoadConfig() *Config {
 		exposeScopePreview: envBoolPtr("PODIUM_EXPOSE_SCOPE_PREVIEW"),
 	}
 	// §13.10 ~/.podium/registry.yaml: load and overlay onto env-
-	// derived defaults. Env values keep precedence per applyYAML.
+	// derived defaults. Env values keep precedence per applyYAML. A file that
+	// cannot be read or does not decode is carried to validate, which refuses
+	// the start: starting on the defaults would drop the configured identity
+	// provider, layers, and store settings (§13.12).
 	if y, err := readYAMLConfig(); err != nil {
-		log.Printf("warning: ignored registry.yaml: %v", err)
+		c.configFileErr = err
 	} else {
 		applyYAML(c, y)
 	}
@@ -2717,7 +2724,21 @@ func LoadConfig() *Config {
 	return c
 }
 
+// ConfigFileError reports why registry.yaml could not be read or decoded, or
+// nil when it was read or is absent. `podium config show --server` prints it,
+// because the settings it shows then come from the environment and defaults
+// alone. The error names the file and line only.
+//
+// Spec: §13.12
+func (c *Config) ConfigFileError() error { return c.configFileErr }
+
 func (c *Config) validate() error {
+	// §13.12: a registry.yaml that exists but cannot be read or decoded
+	// refuses the start before any other check, because every value below
+	// may have been meant to come from it.
+	if c.configFileErr != nil {
+		return c.configFileErr
+	}
 	startup := server.StartupConfig{
 		PublicMode:           c.publicMode,
 		IdentityProvider:     c.identityProvider,

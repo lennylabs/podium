@@ -150,6 +150,49 @@ func TestRegistryConfig_S3MissingBucketRefusesStart(t *testing.T) {
 	}
 }
 
+// Spec: §13.12 — a registry.yaml that does not parse refuses startup with
+// config.invalid, naming the file and the line the parser reports, rather
+// than starting on the defaults without the configured identity provider. A
+// token that ${ENV_VAR} interpolation substitutes, and that the parser would
+// quote, never reaches the output: here a token starting with '*' reads as a
+// YAML alias. `podium config show --server` warns with the same message.
+// Matrix: §6.10 (config.invalid)
+func TestRegistryConfig_UnparseableFileRefusesStart(t *testing.T) {
+	t.Parallel()
+	const secret = "s3cretTail"
+	idp := "  identity_provider:\n    type: oidc-jwt\n    issuer: https://acme.okta.com/oauth2/default\n    audience: https://podium.acme.com\n"
+	cases := []struct {
+		name, body, want string
+	}{
+		{"quote in a quoted token", "registry:\n" + idp + "  layers:\n    - id: team\n      source:\n        git:\n          repo: https://git.acme.com/x.git\n          token: '${PODIUM_TEST_GIT_TOKEN}'\n", "does not parse at line 9"},
+		{"alias from an unquoted token", "registry:\n" + idp + "  layers:\n    - id: team\n      source:\n        git:\n          repo: https://git.acme.com/x.git\n          token: ${PODIUM_TEST_GIT_TOKEN}\n", "does not parse"},
+	}
+	for i, tc := range cases {
+		token := []string{"ab'" + secret, "*" + secret}[i]
+		home := t.TempDir()
+		cfgFile := filepath.Join(home, "registry.yaml")
+		if err := os.WriteFile(cfgFile, []byte(tc.body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		env := []string{"HOME=" + home, "PODIUM_CONFIG_FILE=" + cfgFile, "PODIUM_TEST_GIT_TOKEN=" + token}
+		res := runPodium(t, "", env, "serve", "--bind", "127.0.0.1:0")
+		combined := res.Stdout + res.Stderr
+		wantMsg := "config.invalid: registry configuration " + cfgFile + " " + tc.want
+		if res.Exit != 1 || !strings.Contains(combined, wantMsg) || strings.Contains(combined, "listening") {
+			t.Errorf("%s: serve exit=%d, want exit 1 and %q before any listener\n%s", tc.name, res.Exit, wantMsg, combined)
+		}
+		show := runPodium(t, "", env, "config", "show", "--server")
+		if !strings.Contains(show.Stderr, "warning: "+wantMsg) {
+			t.Errorf("%s: config show stderr = %q, want the warning %q", tc.name, show.Stderr, wantMsg)
+		}
+		for _, out := range []string{combined, show.Stdout + show.Stderr} {
+			if strings.Contains(out, secret) {
+				t.Errorf("%s: output carries the substituted token:\n%s", tc.name, out)
+			}
+		}
+	}
+}
+
 // §13.10 / §13.12: a standalone deployment (no identity provider)
 // defaults an endpoint-registered admin layer to public when no explicit
 // visibility is supplied.

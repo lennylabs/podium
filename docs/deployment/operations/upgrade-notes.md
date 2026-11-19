@@ -264,6 +264,10 @@ A 0.7.0 registry with no identity provider, and not in public mode, refuses a no
 - The Docker Compose evaluation stack in the repository sets `PODIUM_ALLOW_PUBLIC_BIND: "true"`. A Helm install that empties `config.identityProvider.type` needs `config.allowPublicBind=true`.
 - A rollback to 0.6.0 removes the refusal. The setting is harmless on 0.6.0, which reads it only in public mode and under `trusted-headers`.
 
+### Unparseable registry.yaml
+
+A 0.7.0 registry refuses to start with `config.invalid` when its `registry.yaml` exists but cannot be read or does not parse, and the message names the file and the line. A 0.6.0 registry logged `warning: ignored registry.yaml` and started on the defaults, without the identity provider, layers, and store settings the file declares. Before the upgrade, run `podium config show --server` with 0.7.0 against the file: a file that would be refused prints the same message as a warning.
+
 ### Artifacts removed from a layer's source
 
 A 0.6.0 registry kept serving an artifact after its folder was deleted from the layer's source. A 0.7.0 registry soft-deletes such an artifact at the next completed ingest of its layer, and `podium layer reingest` prints `removed: <id>` for it. [Remove an artifact](../../managing/lifecycle#remove-an-artifact) describes the behavior.

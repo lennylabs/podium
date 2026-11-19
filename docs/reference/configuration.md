@@ -19,7 +19,7 @@ The registry reads the file that `PODIUM_CONFIG_FILE` names. When the variable i
 - `podium serve --config <path>` sets `PODIUM_CONFIG_FILE` for the process, so the flag overrides a value inherited from the environment. `podium-server` has no `--config` option.
 - When `PODIUM_CONFIG_FILE` names a file that does not exist, the registry refuses to start with `config file "<path>" does not exist`.
 - When the default file does not exist, the registry starts from the environment variables and the defaults. A registry on the SQLite store then writes `~/.podium/registry.yaml` with its bind address and storage paths, unless `PODIUM_CONFIG_FILE` or `PODIUM_NO_AUTOSTANDALONE` is set. [`podium serve`](cli#podium-serve) describes the standalone fallback.
-- When the file cannot be read or does not parse as YAML, the registry logs `warning: ignored registry.yaml:` with the cause and starts without any value from the file.
+- When the file exists but cannot be read, or does not decode as the `registry:` document, the registry refuses to start with `config.invalid`. The message names the file and, when the parser reports one, the line, as in `config.invalid: registry configuration <path> does not parse at line 9`. It quotes no other part of the file or of the parser error, because a value that `${ENV_VAR}` interpolation substituted can appear there. `podium config show --server` prints the same message as a warning.
 
 ### The registry: mapping
 

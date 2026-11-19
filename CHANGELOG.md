@@ -64,6 +64,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **A re-embed on a registry with no vector search answers `404 registry.reembed_unavailable`** (§4.7, §6.10) with `retryable: false`, where it answered a retryable `500 registry.unavailable`.
 - **Credentials no longer reach vector outbox errors or trace spans** (§4.7, §13.8): outbox error text drops URL userinfo, query strings, connection-string passwords, and configured secrets, and exported spans drop URL query strings and fragments, so search text and presigned-URL signatures no longer reach the trace backend.
 - **The SDK workspace overlays read `metadata.version` only as YAML decodes it** (§4.3.4, §6.4).
+- **A `registry.yaml` that cannot be read or does not parse refuses startup** (§13.12) with `config.invalid`, naming the file and the line, where the registry logged a warning and started on the defaults without the file's identity provider, layers, and store settings. The message quotes no file content, so a substituted `${ENV_VAR}` secret does not reach the log.
 
 ### Documentation
 
