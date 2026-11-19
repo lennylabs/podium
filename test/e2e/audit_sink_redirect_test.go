@@ -66,7 +66,7 @@ func TestAuditSink_RegistryEndpointRedirect(t *testing.T) {
 	}, "serve", "--standalone", "--layer-path", reg)
 
 	// A read emits domain.loaded, which the registry forwards to the receiver.
-	getWithClient(t, srv.BaseURL+"/v1/load_domain?path=finance", "kind=cli&name=podium")
+	getWithClient(t, srv.BaseURL+"/v1/load_domain?path=finance", "name=cli")
 
 	deadline := time.Now().Add(10 * time.Second)
 	forwarded := ""
@@ -98,10 +98,10 @@ func TestAuditSink_RegistryEndpointRedirect(t *testing.T) {
 	}
 
 	// A batch can carry the standalone boot's records beside domain.loaded,
-	// so the record is found by line, and its caller.client records the kind
+	// so the record is found by line, and its caller.client records the name
 	// the request named.
-	if kind := lineClientKind(t, forwarded); kind != "cli" {
-		t.Errorf("forwarded domain.loaded caller.client.kind = %q, want cli\nline: %s", kind, forwarded)
+	if name := lineClientName(t, forwarded); name != "cli" {
+		t.Errorf("forwarded domain.loaded caller.client.name = %q, want cli\nline: %s", name, forwarded)
 	}
 
 	// The redirect replaces the file sink: no local audit.log is written at
@@ -147,21 +147,21 @@ func getWithClient(t *testing.T, url, client string) {
 	}
 }
 
-// lineClientKind decodes one NDJSON record line and returns its
-// caller.client.kind.
-func lineClientKind(t *testing.T, line string) string {
+// lineClientName decodes one NDJSON record line and returns its
+// caller.client.name.
+func lineClientName(t *testing.T, line string) string {
 	t.Helper()
 	var ev struct {
 		Caller struct {
 			Client struct {
-				Kind string `json:"kind"`
+				Name string `json:"name"`
 			} `json:"client"`
 		} `json:"caller"`
 	}
 	if err := json.Unmarshal([]byte(line), &ev); err != nil {
 		t.Fatalf("decode forwarded record: %v\nline: %s", err, line)
 	}
-	return ev.Caller.Client.Kind
+	return ev.Caller.Client.Name
 }
 
 // lockedBuffer collects a subprocess stream that the test reads while the

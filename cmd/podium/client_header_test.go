@@ -86,11 +86,11 @@ func assertClient(t *testing.T, where, header string, want audit.CallerClient) {
 
 // cliWant is the value the podium CLI sends: kind cli and no harness.
 func cliWant() audit.CallerClient {
-	return audit.CallerClient{Kind: "cli", Name: "podium", Version: buildinfo.Version}
+	return audit.CallerClient{Name: "cli", Version: buildinfo.Version}
 }
 
-// Spec: §7.2.2 — the podium CLI request helpers send kind=cli, name podium,
-// and the build version, with no harness member.
+// Spec: §7.2.2 — the podium CLI request helpers send name cli and the build
+// version, with no harness member.
 func TestClientHeader_CLIRequestHelpers(t *testing.T) {
 	s := newCLIClientServer(t)
 	isolateClientResolution(t, func() {
@@ -143,7 +143,7 @@ func TestClientHeader_SyncPreview(t *testing.T) {
 					}
 				})
 			})
-			want := audit.CallerClient{Kind: "sync", Name: "podium", Version: buildinfo.Version, Harness: tc.wantHarness}
+			want := audit.CallerClient{Name: "cli", Purpose: "sync", Version: buildinfo.Version, Harness: tc.wantHarness}
 			assertClient(t, "sync --preview", s.clientOn(t, "/v1/scope/preview"), want)
 		})
 	}

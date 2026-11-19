@@ -80,13 +80,18 @@ func (f *usageFixture) rows(t *testing.T) []store.UsageCount {
 	return rows
 }
 
-func clientCtx(kind, harness string) context.Context {
-	return core.ContextWithUsageClient(context.Background(), kind, harness)
+func clientCtx(name, harness string) context.Context {
+	return core.ContextWithUsageClient(context.Background(), name, harness, "")
+}
+
+func syncCtx(harness string) context.Context {
+	return core.ContextWithUsageClient(context.Background(), "cli", harness, "sync")
 }
 
 // Spec: §8.7 — a resolved load counts one load under the request's client
-// kind, harness, and serving layer, or one sync for a sync client; a request
-// with no client value counts under none; an unresolved load counts nothing.
+// name, harness, and serving layer, or one sync when the request carries
+// purpose=sync; a request with no client value counts under unknown; an
+// unresolved load counts nothing.
 func TestUsageCounts_Loads(t *testing.T) {
 	t.Parallel()
 	f := newUsageFixture(t)
@@ -96,7 +101,7 @@ func TestUsageCounts_Loads(t *testing.T) {
 	}{
 		{clientCtx("mcp", "claude-code"), "ops/greet"},
 		{clientCtx("mcp", "claude-code"), "ops/greet"},
-		{clientCtx("sync", "cursor"), "ops/greet"},
+		{syncCtx("cursor"), "ops/greet"},
 		{context.Background(), "ops/farewell"},
 		{clientCtx("mcp", "claude-code"), "ops/missing"},
 		{clientCtx("mcp", "claude-code"), "ops/hidden"},
@@ -104,12 +109,152 @@ func TestUsageCounts_Loads(t *testing.T) {
 		_, _ = f.reg.LoadArtifact(c.ctx, usageAlice, c.id, core.LoadArtifactOptions{})
 	}
 	want := []store.UsageCount{
-		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/farewell", ClientKind: "none", Harness: "none", Loads: 1},
-		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/greet", ClientKind: "mcp", Harness: "claude-code", Loads: 2},
-		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/greet", ClientKind: "sync", Harness: "cursor", Syncs: 1},
+		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/farewell", Client: "unknown", Harness: "unknown", Loads: 1},
+		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/greet", Client: "cli", Harness: "cursor", Syncs: 1},
+		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/greet", Client: "mcp", Harness: "claude-code", Loads: 2},
 	}
 	if got := f.rows(t); !reflect.DeepEqual(got, want) {
 		t.Errorf("rows:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// Spec: §8.7, §13.12 — a tenant records at most the configured number of
+// distinct clients, and of distinct harnesses, per day: a further value counts
+// under other, unknown and other never count toward the cap, the values the
+// store already holds for the day count toward it, and a client already
+// recorded keeps counting under its own name.
+func TestUsageCounter_CapsDistinctClientsAndHarnesses(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	ctx := context.Background()
+	// A value another replica stored today counts toward the cap.
+	if err := f.st.AddUsageCounts(ctx, "t", []store.UsageCount{
+		{Day: "2026-11-18", Layer: "team", ArtifactID: "ops/greet", Client: "stored", Harness: "h-stored", Loads: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.counter.WithMaxClientKeys(2)
+	load := func(name, harness string) {
+		_, _ = f.reg.LoadArtifact(clientCtx(name, harness), usageAlice, "ops/greet", core.LoadArtifactOptions{})
+	}
+	load("fresh", "h-fresh")
+	load("overflow", "h-overflow")
+	load("stored", "h-stored")
+	load("", "")
+	_ = f.rows(t)
+	load("fresh", "h-fresh")
+	load("late", "h-late")
+	rows := f.rows(t)
+	got := map[string]int64{}
+	for _, r := range rows {
+		got[r.Client+"/"+r.Harness] += r.Loads
+	}
+	want := map[string]int64{
+		"stored/h-stored": 2,
+		"fresh/h-fresh":   2,
+		"other/other":     2,
+		"unknown/unknown": 1,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("loads by client/harness = %v, want %v", got, want)
+	}
+}
+
+// loadsByClient returns the loads of rows summed by client.
+func loadsByClient(rows []store.UsageCount) map[string]int64 {
+	got := map[string]int64{}
+	for _, r := range rows {
+		got[r.Client] += r.Loads
+	}
+	return got
+}
+
+// Spec: §8.7 — before admitting a client it has not seen, a replica reads the
+// clients other replicas recorded that day, so replicas that flush in turn
+// keep the tenant at the cap: the first replica's second client counts under
+// other once the second replica has filled the last slot.
+func TestUsageCounter_CapReadsOtherReplicasKeys(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	f.counter.WithMaxClientKeys(2)
+	peer := core.NewUsageCounter(clock.NewFrozen(usageNow)).WithMaxClientKeys(2)
+	second := core.New(f.st, "t", []layer.Layer{{ID: "team", Visibility: layer.Visibility{Public: true}, Precedence: 1}}).WithUsageCounts(peer)
+	loadAndFlush := func(r *core.Registry, u *core.UsageCounter, name string) {
+		_, _ = r.LoadArtifact(clientCtx(name, "h"), usageAlice, "ops/greet", core.LoadArtifactOptions{})
+		if err := u.Flush(context.Background(), f.st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loadAndFlush(f.reg, f.counter, "a1")
+	loadAndFlush(second, peer, "b1")
+	loadAndFlush(f.reg, f.counter, "a2")
+	want := map[string]int64{"a1": 1, "b1": 1, "other": 1}
+	if got := loadsByClient(f.rows(t)); !reflect.DeepEqual(got, want) {
+		t.Errorf("loads by client = %v, want %v", got, want)
+	}
+}
+
+// failingListStore fails ListUsageCounts while failing is set.
+type failingListStore struct {
+	*store.Memory
+	failing bool
+}
+
+func (s *failingListStore) ListUsageCounts(ctx context.Context, tenant, from, to string) ([]store.UsageCount, error) {
+	if s.failing {
+		return nil, errors.New("store unreachable")
+	}
+	return s.Memory.ListUsageCounts(ctx, tenant, from, to)
+}
+
+// Spec: §8.7 — a flush that cannot read the day's recorded clients adds
+// nothing and keeps its counts, and the next flush that can read them adds
+// the counts once.
+func TestUsageCounter_FailedKeyReadKeepsCounts(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	fs := &failingListStore{Memory: f.st, failing: true}
+	_, _ = f.reg.LoadArtifact(clientCtx("mcp", "cursor"), usageAlice, "ops/greet", core.LoadArtifactOptions{})
+	if err := f.counter.Flush(context.Background(), fs); err == nil {
+		t.Fatal("Flush with a failing read returned nil")
+	}
+	fs.failing = false
+	if got, want := loadsByClient(f.rows(t)), map[string]int64{"mcp": 1}; !reflect.DeepEqual(got, want) {
+		t.Errorf("loads by client = %v, want %v", got, want)
+	}
+}
+
+// Spec: §8.7 — the cap counts per UTC day, so a client beyond a full day's
+// cap is recorded under its own name on a later day.
+func TestUsageCounter_CapStartsAfreshEachDay(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	clk := clock.NewFrozen(usageNow)
+	u := core.NewUsageCounter(clk).WithMaxClientKeys(1)
+	reg := core.New(f.st, "t", []layer.Layer{{ID: "team", Visibility: layer.Visibility{Public: true}, Precedence: 1}}).WithUsageCounts(u)
+	loadAndFlush := func(name string) {
+		_, _ = reg.LoadArtifact(clientCtx(name, "h"), usageAlice, "ops/greet", core.LoadArtifactOptions{})
+		if err := u.Flush(context.Background(), f.st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loadAndFlush("first")
+	loadAndFlush("second")
+	clk.Advance(48 * time.Hour)
+	loadAndFlush("second")
+	clk.Advance(48 * time.Hour)
+	loadAndFlush("third")
+	rows, err := f.st.ListUsageCounts(context.Background(), "t", "2026-01-01", "2026-12-31")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int64{}
+	for _, r := range rows {
+		got[r.Day+"/"+r.Client] += r.Loads
+	}
+	want := map[string]int64{"2026-11-18/first": 1, "2026-11-18/other": 1, "2026-11-20/second": 1, "2026-11-22/third": 1}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("loads by day and client = %v, want %v", got, want)
 	}
 }
 
@@ -144,7 +289,7 @@ func TestUsageCounts_SearchHits(t *testing.T) {
 	}
 	counted := map[string]bool{}
 	for _, r := range rows {
-		if r.SearchHits != 1 || r.ClientKind != "sdk" || r.Harness != "none" || r.Layer != "team" {
+		if r.SearchHits != 1 || r.Client != "sdk" || r.Harness != "unknown" || r.Layer != "team" {
 			t.Errorf("row %+v, want one sdk search hit in team", r)
 		}
 		counted[r.ArtifactID] = true
@@ -265,6 +410,33 @@ func TestUsageCounter_FlushWaitsForFlushInProgress(t *testing.T) {
 	}
 	if rows := f.rows(t); len(rows) != 1 || rows[0].Loads != 1 {
 		t.Errorf("rows = %+v, want the interrupted flush's load added by the second flush", rows)
+	}
+}
+
+// Spec: §8.7 — a count recorded while a flush is adding merges with the
+// counts that flush puts back when its add fails, and the next flush adds
+// them once, with the client first seen keeping its name under the cap.
+func TestUsageCounter_FailedFlushMergesCountsRecordedMeanwhile(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	f.counter.WithMaxClientKeys(1)
+	bs := &blockingUsageStore{Memory: f.st, entered: make(chan struct{}), release: make(chan struct{})}
+	load := func(name string) {
+		_, _ = f.reg.LoadArtifact(clientCtx(name, "h"), usageAlice, "ops/greet", core.LoadArtifactOptions{})
+	}
+	load("first")
+	interrupted := make(chan error, 1)
+	go func() { interrupted <- f.counter.Flush(context.Background(), bs) }()
+	<-bs.entered
+	load("first")
+	load("second")
+	close(bs.release)
+	if err := <-interrupted; err == nil {
+		t.Fatal("the interrupted flush returned nil")
+	}
+	want := map[string]int64{"first": 2, "other": 1}
+	if got := loadsByClient(f.rows(t)); !reflect.DeepEqual(got, want) {
+		t.Errorf("loads by client = %v, want %v", got, want)
 	}
 }
 

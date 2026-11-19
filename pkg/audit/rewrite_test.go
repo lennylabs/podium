@@ -607,13 +607,13 @@ func TestStream_NormalizesClientBeforeHash(t *testing.T) {
 	ts := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 	longName := strings.Repeat("n", 200)
 	raw := Event{Type: EventArtifactLoaded, Caller: "alice", Target: "c", Timestamp: ts,
-		CallerClient: &CallerClient{Kind: "MCP", Host: "evil\x00\x1bhost", Name: longName}}
+		CallerClient: &CallerClient{Purpose: "install", Host: "evil\x00\x1bhost", Name: longName}}
 	if err := s.Append(context.Background(), raw); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
 	sanitized := raw
 	sanitized.SchemaVersion = SchemaVersion
-	sanitized.CallerClient = &CallerClient{Kind: "other", Host: "evil__host", Name: longName[:64]}
+	sanitized.CallerClient = &CallerClient{Host: "evil__host", Name: longName[:64]}
 	want := chainEvent(sanitized, "")
 
 	got := q.got()
@@ -628,7 +628,7 @@ func TestStream_NormalizesClientBeforeHash(t *testing.T) {
 		t.Errorf("hash = %s, want %s over the sanitized client", je.Hash, want.Hash)
 	}
 	c := je.Caller.Client
-	if c == nil || c.Kind != "other" || c.Host != "evil__host" || c.Name != longName[:64] {
-		t.Errorf("client = %+v, want kind other, host evil__host, and a 64-byte name", c)
+	if c == nil || c.Purpose != "" || c.Host != "evil__host" || c.Name != longName[:64] {
+		t.Errorf("client = %+v, want no purpose, host evil__host, and a 64-byte name", c)
 	}
 }

@@ -13,23 +13,25 @@ import (
 	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
-// Spec: §8.7, §13.12 — the usage settings default to 1m and 365 days, accept
-// a duration of at least 1s and a positive integer, and refuse anything else
-// with config.invalid naming the variable.
+// Spec: §8.7, §13.12 — the usage settings default to 1m, 365 days, and 32
+// client keys, accept a duration of at least 1s, a positive integer, and an
+// integer from 1 to 1000, and refuse anything else with config.invalid naming
+// the variable.
 func TestUsageConfigFromEnv(t *testing.T) {
 	t.Parallel()
 	env := func(kv map[string]string) func(string) string { return func(k string) string { return kv[k] } }
 	def := usageConfigFromEnv(env(nil))
-	if def.flushInterval != time.Minute || def.retentionDays != 365 || def.err != nil {
+	if def.flushInterval != time.Minute || def.retentionDays != 365 || def.maxClientKeys != 32 || def.err != nil {
 		t.Errorf("defaults = %+v", def)
 	}
-	set := usageConfigFromEnv(env(map[string]string{"PODIUM_USAGE_FLUSH_INTERVAL": " 5s ", "PODIUM_USAGE_RETENTION_DAYS": "90"}))
-	if set.flushInterval != 5*time.Second || set.retentionDays != 90 || set.err != nil {
+	set := usageConfigFromEnv(env(map[string]string{"PODIUM_USAGE_FLUSH_INTERVAL": " 5s ", "PODIUM_USAGE_RETENTION_DAYS": "90", "PODIUM_USAGE_MAX_CLIENT_KEYS": "1000"}))
+	if set.flushInterval != 5*time.Second || set.retentionDays != 90 || set.maxClientKeys != 1000 || set.err != nil {
 		t.Errorf("set = %+v", set)
 	}
 	for name, kv := range map[string]map[string]string{
-		"PODIUM_USAGE_FLUSH_INTERVAL": {"PODIUM_USAGE_FLUSH_INTERVAL": "500ms"},
-		"PODIUM_USAGE_RETENTION_DAYS": {"PODIUM_USAGE_RETENTION_DAYS": "0"},
+		"PODIUM_USAGE_FLUSH_INTERVAL":  {"PODIUM_USAGE_FLUSH_INTERVAL": "500ms"},
+		"PODIUM_USAGE_RETENTION_DAYS":  {"PODIUM_USAGE_RETENTION_DAYS": "0"},
+		"PODIUM_USAGE_MAX_CLIENT_KEYS": {"PODIUM_USAGE_MAX_CLIENT_KEYS": "1001"},
 	} {
 		c := usageConfigFromEnv(env(kv))
 		if c.err == nil || !strings.HasPrefix(c.err.Error(), "config.invalid: "+name) {
@@ -43,6 +45,11 @@ func TestUsageConfigFromEnv(t *testing.T) {
 	}
 	if c := usageConfigFromEnv(env(map[string]string{"PODIUM_USAGE_RETENTION_DAYS": "ten"})); c.err == nil {
 		t.Errorf("retention %q accepted", "ten")
+	}
+	for _, bad := range []string{"0", "many"} {
+		if c := usageConfigFromEnv(env(map[string]string{"PODIUM_USAGE_MAX_CLIENT_KEYS": bad})); c.err == nil {
+			t.Errorf("max client keys %q accepted", bad)
+		}
 	}
 }
 
@@ -58,7 +65,7 @@ func TestStartUsageCounts_RetentionAndFlush(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := func(day string) store.UsageCount {
-		return store.UsageCount{Day: day, Layer: "team", ArtifactID: "x", ClientKind: "mcp", Harness: "none", Loads: 1}
+		return store.UsageCount{Day: day, Layer: "team", ArtifactID: "x", Client: "mcp", Harness: "none", Loads: 1}
 	}
 	if err := st.AddUsageCounts(ctx, "t", []store.UsageCount{row("2026-11-08"), row("2026-11-09"), row("2026-11-18")}); err != nil {
 		t.Fatal(err)

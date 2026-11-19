@@ -17,7 +17,7 @@ type UsageLoads struct {
 }
 
 // ErrInvalidUsageCount is returned by AddUsageCounts when a count names no
-// day, layer, artifact, client kind, or harness, carries a day that is not a
+// day, layer, artifact, client, or harness, carries a day that is not a
 // YYYY-MM-DD date, or carries a negative counter.
 var ErrInvalidUsageCount = &spi.Error{Code: "registry.invalid_argument", Message: "store: invalid usage count"}
 
@@ -25,7 +25,7 @@ var ErrInvalidUsageCount = &spi.Error{Code: "registry.invalid_argument", Message
 const UsageDayLayout = "2006-01-02"
 
 // UsageCount is one §8.7 row of daily usage totals, keyed by tenant, UTC day,
-// layer, artifact canonical ID, client kind, and harness. Loads counts resolved
+// layer, artifact canonical ID, client, and harness. Loads counts resolved
 // load_artifact calls from a client whose kind is not sync, Syncs counts the
 // same calls from a sync client, and SearchHits counts searches with a query
 // that returned the artifact among their first 10 results.
@@ -36,8 +36,8 @@ type UsageCount struct {
 	Day        string
 	Layer      string
 	ArtifactID string
-	ClientKind string
-	// Harness is the §7.2.2 harness the request reported, or "none".
+	Client     string
+	// Harness is the §7.2.2 harness the request reported, or "unknown".
 	Harness    string
 	Loads      int64
 	Syncs      int64
@@ -46,11 +46,11 @@ type UsageCount struct {
 
 // usageKey is the identity of a UsageCount row within one tenant.
 type usageKey struct {
-	day, layer, artifact, kind, harness string
+	day, layer, artifact, client, harness string
 }
 
 func (c UsageCount) key() usageKey {
-	return usageKey{day: c.Day, layer: c.Layer, artifact: c.ArtifactID, kind: c.ClientKind, harness: c.Harness}
+	return usageKey{day: c.Day, layer: c.Layer, artifact: c.ArtifactID, client: c.Client, harness: c.Harness}
 }
 
 // normalizeUsageCounts validates counts and merges the ones that share a key,
@@ -69,7 +69,7 @@ func normalizeUsageCounts(tenantID string, counts []UsageCount) ([]UsageCount, e
 		k := c.key()
 		m, ok := merged[k]
 		if !ok {
-			m = UsageCount{TenantID: tenantID, Day: c.Day, Layer: c.Layer, ArtifactID: c.ArtifactID, ClientKind: c.ClientKind, Harness: c.Harness}
+			m = UsageCount{TenantID: tenantID, Day: c.Day, Layer: c.Layer, ArtifactID: c.ArtifactID, Client: c.Client, Harness: c.Harness}
 		}
 		m.Loads += c.Loads
 		m.Syncs += c.Syncs
@@ -86,8 +86,8 @@ func normalizeUsageCounts(tenantID string, counts []UsageCount) ([]UsageCount, e
 
 // validateUsageCount reports a count no correct recorder produces.
 func validateUsageCount(c UsageCount) error {
-	if c.Layer == "" || c.ArtifactID == "" || c.ClientKind == "" || c.Harness == "" {
-		return fmt.Errorf("%w: a count names no layer, artifact, client kind, or harness", ErrInvalidUsageCount)
+	if c.Layer == "" || c.ArtifactID == "" || c.Client == "" || c.Harness == "" {
+		return fmt.Errorf("%w: a count names no layer, artifact, client, or harness", ErrInvalidUsageCount)
 	}
 	if _, err := time.Parse(UsageDayLayout, c.Day); err != nil {
 		return fmt.Errorf("%w: day %q is not a YYYY-MM-DD date", ErrInvalidUsageCount, c.Day)
@@ -98,7 +98,7 @@ func validateUsageCount(c UsageCount) error {
 	return nil
 }
 
-// sortUsageCounts orders rows by day, layer, artifact, client kind, and harness, the
+// sortUsageCounts orders rows by day, layer, artifact, client, and harness, the
 // order ListUsageCounts returns on every backend.
 func sortUsageCounts(rows []UsageCount) {
 	sort.Slice(rows, func(i, j int) bool {
@@ -112,8 +112,8 @@ func sortUsageCounts(rows []UsageCount) {
 		if a.ArtifactID != b.ArtifactID {
 			return a.ArtifactID < b.ArtifactID
 		}
-		if a.ClientKind != b.ClientKind {
-			return a.ClientKind < b.ClientKind
+		if a.Client != b.Client {
+			return a.Client < b.Client
 		}
 		return a.Harness < b.Harness
 	})

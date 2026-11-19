@@ -2,9 +2,11 @@ package core
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/lennylabs/podium/internal/clock"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -13,46 +15,72 @@ import (
 // requests.
 const usageSearchHitDepth = 10
 
-// UsageNone is the client kind and the harness §8.7 records for a request
-// that reports none.
-const UsageNone = "none"
+// UsageUnknown is the client and the harness §8.7 records for a request that
+// does not provide one, and UsageOther the value a client or harness beyond
+// the per-day cap is recorded under.
+const (
+	UsageUnknown = "unknown"
+	UsageOther   = "other"
+)
 
-// usageClientCtxKey carries the §7.2.2 client kind and harness of the request
-// a call serves.
+// DefaultUsageMaxClientKeys is the §13.12 PODIUM_USAGE_MAX_CLIENT_KEYS
+// default: the most distinct clients, and the most distinct harnesses, one
+// tenant records per UTC day.
+const DefaultUsageMaxClientKeys = 32
+
+// usageClientCtxKey carries the §7.2.2 client name, harness, and purpose of
+// the request a call serves.
 type usageClientCtxKey struct{}
 
-// usageClient is the request's normalized client kind and harness.
+// usageClient is the request's normalized client name and harness, and
+// whether it carries purpose=sync.
 type usageClient struct {
-	kind, harness string
+	name, harness string
+	sync          bool
 }
 
-// ContextWithUsageClient returns ctx carrying the request's §7.2.2 client kind
-// and harness, after normalization, for the §8.7 usage counts. An empty value
-// is recorded as UsageNone. The server sets it from the X-Podium-Client
+// ContextWithUsageClient returns ctx carrying the request's §7.2.2 client
+// name, harness, and purpose, after normalization, for the §8.7 usage counts.
+// An empty name or harness is recorded as UsageUnknown, and purpose sync makes
+// a resolved load count as a sync. The server sets it from the X-Podium-Client
 // header; the value is advisory and feeds no access decision.
 //
 // Spec: §8.7, §7.2.2
-func ContextWithUsageClient(ctx context.Context, kind, harness string) context.Context {
-	return context.WithValue(ctx, usageClientCtxKey{}, usageClient{kind: kind, harness: harness})
+func ContextWithUsageClient(ctx context.Context, name, harness, purpose string) context.Context {
+	return context.WithValue(ctx, usageClientCtxKey{}, usageClient{name: name, harness: harness, sync: purpose == audit.PurposeSync})
 }
 
-// usageClientFrom returns the client kind and harness ctx carries, with
-// UsageNone for an absent or empty value.
-func usageClientFrom(ctx context.Context) (kind, harness string) {
+// usageClientFrom returns the client name, harness, and sync purpose ctx
+// carries, with UsageUnknown for a name or harness not provided.
+func usageClientFrom(ctx context.Context) (name, harness string, sync bool) {
 	c, _ := ctx.Value(usageClientCtxKey{}).(usageClient)
-	kind, harness = c.kind, c.harness
-	if kind == "" {
-		kind = UsageNone
+	name, harness = c.name, c.harness
+	if name == "" {
+		name = UsageUnknown
 	}
 	if harness == "" {
-		harness = UsageNone
+		harness = UsageUnknown
 	}
-	return kind, harness
+	return name, harness, c.sync
 }
 
 // usageBufferKey identifies one buffered §8.7 row.
 type usageBufferKey struct {
-	tenant, day, layer, artifact, kind, harness string
+	tenant, day, layer, artifact, client, harness string
+}
+
+// pendingCount is one buffered §8.7 row and the order of the call that first
+// buffered it. Flush caps keys in that order, so a client or harness beyond the
+// per-day cap is the one whose first call came later, as §8.7 states.
+type pendingCount struct {
+	store.UsageCount
+	seq uint64
+}
+
+// usageDayKeys is the set of clients and the set of harnesses one tenant has
+// recorded on one UTC day, not counting UsageUnknown and UsageOther.
+type usageDayKeys struct {
+	clients, harnesses map[string]bool
 }
 
 // UsageCounter buffers the §8.7 usage counts of the calls one replica serves
@@ -74,7 +102,16 @@ type UsageCounter struct {
 	clock    clock.Clock
 	flushing chan struct{}
 	mu       sync.Mutex
-	pending  map[usageBufferKey]store.UsageCount
+	pending  map[usageBufferKey]pendingCount
+	// next is the sequence number add gives the next new row; mu guards it.
+	next uint64
+	// maxKeys is the §8.7 per-tenant, per-day cap on distinct clients and on
+	// distinct harnesses.
+	maxKeys int
+	// known holds the keys each tenant has recorded per day, keyed by tenant
+	// and day. Only Flush reads and writes it, and the flushing semaphore
+	// serializes Flush, so it needs no lock of its own.
+	known map[[2]string]*usageDayKeys
 }
 
 // NewUsageCounter returns an empty counter that dates each count by c in UTC.
@@ -83,7 +120,19 @@ func NewUsageCounter(c clock.Clock) *UsageCounter {
 	if c == nil {
 		c = clock.Real{}
 	}
-	return &UsageCounter{clock: c, flushing: make(chan struct{}, 1), pending: map[usageBufferKey]store.UsageCount{}}
+	return &UsageCounter{
+		clock: c, flushing: make(chan struct{}, 1), pending: map[usageBufferKey]pendingCount{},
+		maxKeys: DefaultUsageMaxClientKeys, known: map[[2]string]*usageDayKeys{},
+	}
+}
+
+// WithMaxClientKeys sets the §8.7 per-tenant, per-day cap on distinct clients
+// and harnesses. A value below 1 keeps the default.
+func (u *UsageCounter) WithMaxClientKeys(n int) *UsageCounter {
+	if n >= 1 {
+		u.maxKeys = n
+	}
+	return u
 }
 
 // add buffers one count for the call's artifact under today's UTC date.
@@ -91,14 +140,18 @@ func (u *UsageCounter) add(ctx context.Context, tenant, layer, artifact string, 
 	if u == nil || layer == "" || artifact == "" {
 		return
 	}
-	kind, harness := usageClientFrom(ctx)
+	client, harness, _ := usageClientFrom(ctx)
 	day := u.clock.Now().UTC().Format(store.UsageDayLayout)
-	k := usageBufferKey{tenant: tenant, day: day, layer: layer, artifact: artifact, kind: kind, harness: harness}
+	k := usageBufferKey{tenant: tenant, day: day, layer: layer, artifact: artifact, client: client, harness: harness}
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	c, ok := u.pending[k]
 	if !ok {
-		c = store.UsageCount{TenantID: tenant, Day: day, Layer: layer, ArtifactID: artifact, ClientKind: kind, Harness: harness}
+		c = pendingCount{
+			UsageCount: store.UsageCount{TenantID: tenant, Day: day, Layer: layer, ArtifactID: artifact, Client: client, Harness: harness},
+			seq:        u.next,
+		}
+		u.next++
 	}
 	c.Loads += loads
 	c.Syncs += syncs
@@ -106,12 +159,12 @@ func (u *UsageCounter) add(ctx context.Context, tenant, layer, artifact string, 
 	u.pending[k] = c
 }
 
-// recordLoad buffers one resolved load, as a sync when the request's client
-// kind is sync and as a load otherwise.
+// recordLoad buffers one resolved load, as a sync when the request carries
+// purpose=sync and as a load otherwise.
 //
 // Spec: §8.7
 func (u *UsageCounter) recordLoad(ctx context.Context, tenant, layer, artifact string) {
-	if kind, _ := usageClientFrom(ctx); kind == "sync" {
+	if _, _, sync := usageClientFrom(ctx); sync {
 		u.add(ctx, tenant, layer, artifact, 0, 1, 0)
 		return
 	}
@@ -143,23 +196,128 @@ func (u *UsageCounter) Flush(ctx context.Context, st store.Store) error {
 	}
 	u.mu.Lock()
 	taken := u.pending
-	u.pending = map[usageBufferKey]store.UsageCount{}
+	u.pending = map[usageBufferKey]pendingCount{}
 	u.mu.Unlock()
 
-	byTenant := map[string][]store.UsageCount{}
+	byTenant := map[string][]pendingCount{}
 	for _, c := range taken {
 		byTenant[c.TenantID] = append(byTenant[c.TenantID], c)
 	}
 	var first error
 	for tenant, counts := range byTenant {
-		if err := st.AddUsageCounts(ctx, tenant, counts); err != nil {
+		sort.Slice(counts, func(i, j int) bool { return counts[i].seq < counts[j].seq })
+		capped, err := u.capKeys(ctx, st, tenant, counts)
+		if err == nil {
+			err = st.AddUsageCounts(ctx, tenant, capped)
+		}
+		if err != nil {
 			if first == nil {
 				first = err
 			}
 			u.restore(counts)
 		}
 	}
+	u.forgetOldDays()
 	return first
+}
+
+// capKeys returns counts, in the order given, with each client, and each
+// harness, beyond the tenant's per-day cap replaced by UsageOther.
+// UsageUnknown and UsageOther never count toward the cap. The known keys of a
+// day are read from the rows the store holds for it the first time a flush
+// meets the day, and read again, at most once per flush, before admitting a
+// key this replica has not seen while the set has room: another replica may
+// have recorded keys since, and §8.7 lets replicas exceed the cap only until
+// each reads the others'. A full set admits nothing, so it needs no read. A
+// store read that fails returns its error, and the caller keeps the counts
+// buffered.
+//
+// Spec: §8.7, §13.12
+func (u *UsageCounter) capKeys(ctx context.Context, st store.Store, tenant string, counts []pendingCount) ([]store.UsageCount, error) {
+	out := make([]store.UsageCount, 0, len(counts))
+	read := map[string]bool{}
+	for _, pc := range counts {
+		c := pc.UsageCount
+		keys := u.known[[2]string{tenant, c.Day}]
+		if keys == nil || !read[c.Day] && keys.wouldAdd(c, u.maxKeys) {
+			var err error
+			if keys, err = u.readDayKeys(ctx, st, tenant, c.Day); err != nil {
+				return nil, err
+			}
+			read[c.Day] = true
+		}
+		c.Client = admitKey(keys.clients, c.Client, u.maxKeys)
+		c.Harness = admitKey(keys.harnesses, c.Harness, u.maxKeys)
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// readDayKeys merges the clients and harnesses of the store's rows for tenant
+// on day into the day's known keys, creating them on the first read, and
+// returns them. The merge is unbounded: a key the store holds is recorded
+// already, so it keeps its name.
+func (u *UsageCounter) readDayKeys(ctx context.Context, st store.Store, tenant, day string) (*usageDayKeys, error) {
+	rows, err := st.ListUsageCounts(ctx, tenant, day, day)
+	if err != nil {
+		return nil, err
+	}
+	k := u.known[[2]string{tenant, day}]
+	if k == nil {
+		k = &usageDayKeys{clients: map[string]bool{}, harnesses: map[string]bool{}}
+		u.known[[2]string{tenant, day}] = k
+	}
+	for _, r := range rows {
+		if counted(r.Client) {
+			k.clients[r.Client] = true
+		}
+		if counted(r.Harness) {
+			k.harnesses[r.Harness] = true
+		}
+	}
+	return k, nil
+}
+
+// wouldAdd reports whether capping c would add a client or a harness to k.
+func (k *usageDayKeys) wouldAdd(c store.UsageCount, max int) bool {
+	return admits(k.clients, c.Client, max) || admits(k.harnesses, c.Harness, max)
+}
+
+// counted reports whether key counts toward the cap: every value except
+// UsageUnknown and UsageOther.
+func counted(key string) bool {
+	return key != UsageUnknown && key != UsageOther
+}
+
+// admits reports whether admitKey would add key to set.
+func admits(set map[string]bool, key string, max int) bool {
+	return counted(key) && !set[key] && len(set) < max
+}
+
+// admitKey returns key when the set already holds it, when it is UsageUnknown
+// or UsageOther, or when the set holds fewer than max keys, adding it in the
+// last case; otherwise it returns UsageOther.
+func admitKey(set map[string]bool, key string, max int) string {
+	if !counted(key) || set[key] {
+		return key
+	}
+	if len(set) >= max {
+		return UsageOther
+	}
+	set[key] = true
+	return key
+}
+
+// forgetOldDays drops the known keys of days before yesterday, which no
+// count flushed from now on carries except a count a failed flush restored,
+// and that count's day is reseeded from the store.
+func (u *UsageCounter) forgetOldDays() {
+	cutoff := u.clock.Now().UTC().AddDate(0, 0, -1).Format(store.UsageDayLayout)
+	for k := range u.known {
+		if k[1] < cutoff {
+			delete(u.known, k)
+		}
+	}
 }
 
 // pendingLoads returns the tenant's buffered loads per layer and artifact:
@@ -181,21 +339,23 @@ func (u *UsageCounter) pendingLoads(tenant string) map[usageRef]int64 {
 	return out
 }
 
-// restore merges counts back into the buffer after a failed flush.
-func (u *UsageCounter) restore(counts []store.UsageCount) {
+// restore merges counts back into the buffer after a failed flush. A merged
+// row keeps the restored row's sequence number, which is the earlier one,
+// so the cap still meets it in call order.
+func (u *UsageCounter) restore(counts []pendingCount) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	for _, c := range counts {
-		k := usageBufferKey{tenant: c.TenantID, day: c.Day, layer: c.Layer, artifact: c.ArtifactID, kind: c.ClientKind, harness: c.Harness}
+		k := usageBufferKey{tenant: c.TenantID, day: c.Day, layer: c.Layer, artifact: c.ArtifactID, client: c.Client, harness: c.Harness}
 		p, ok := u.pending[k]
 		if !ok {
 			u.pending[k] = c
 			continue
 		}
-		p.Loads += c.Loads
-		p.Syncs += c.Syncs
-		p.SearchHits += c.SearchHits
-		u.pending[k] = p
+		c.Loads += p.Loads
+		c.Syncs += p.Syncs
+		c.SearchHits += p.SearchHits
+		u.pending[k] = c
 	}
 }
 

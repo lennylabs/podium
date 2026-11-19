@@ -795,17 +795,19 @@ def test_no_token_sends_no_auth_header(stub_server):
     assert getattr(stub_server, "last_auth", "") == ""
 
 
-# Spec: §7.2.2, §7.6 — the SDK names itself as kind=sdk, name=podium-py, and
-# its release, and omits the version member when the release is unknown.
+# Spec: §7.2.2, §7.6 — the SDK names itself sdk with its release, omits the
+# version member when the release is unknown, and reports a program's own
+# client name and harness when the program configures them.
 def test_client_header_members():
     from podium.client import _client_header
 
-    assert urllib.parse.parse_qs(_client_header("1.2.3")) == {
-        "kind": ["sdk"],
-        "name": ["podium-py"],
+    assert urllib.parse.parse_qs(_client_header("1.2.3")) == {"name": ["sdk"], "version": ["1.2.3"]}
+    assert urllib.parse.parse_qs(_client_header("")) == {"name": ["sdk"]}
+    assert urllib.parse.parse_qs(_client_header("1.2.3", "acme-evals", "claude-code")) == {
+        "name": ["acme-evals"],
         "version": ["1.2.3"],
+        "harness": ["claude-code"],
     }
-    assert urllib.parse.parse_qs(_client_header("")) == {"kind": ["sdk"], "name": ["podium-py"]}
 
 
 def _assert_sdk_client(value):
@@ -813,16 +815,11 @@ def _assert_sdk_client(value):
     from podium._version import __version__
 
     assert value is not None
-    assert urllib.parse.parse_qs(value) == {
-        "kind": ["sdk"],
-        "name": ["podium-py"],
-        "version": [__version__],
-    }
+    assert urllib.parse.parse_qs(value) == {"name": ["sdk"], "version": [__version__]}
 
 
 # Spec: §7.2.2, §7.6 — search_artifacts, load_artifact, and the batch-load
-# POST each send X-Podium-Client with kind=sdk, name=podium-py, and the
-# installed release.
+# POST each send X-Podium-Client with name=sdk and the installed release.
 def test_control_plane_requests_send_client_header(stub_server):
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
 
@@ -1153,3 +1150,22 @@ def test_load_artifact_returns_deprecation_members(stub_server):
     })
     with pytest.raises(RegistryError):
         client.load_artifact("finance/run")
+
+
+# Spec: §7.2.2, §8.7 — a Client configured with a client name and a harness
+# sends them on every control-plane request.
+def test_client_name_and_harness_reach_the_header(stub_server):
+    from podium._version import __version__
+
+    client = Client(
+        registry=f"http://127.0.0.1:{stub_server.server_port}",
+        client_name="acme-evals",
+        harness="cursor",
+    )
+    stub_server.next_response = {"query": "q", "total_matched": 0, "results": []}
+    client.search_artifacts("q")
+    assert urllib.parse.parse_qs(stub_server.clients[-1]) == {
+        "name": ["acme-evals"],
+        "version": [__version__],
+        "harness": ["cursor"],
+    }

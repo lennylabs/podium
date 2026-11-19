@@ -27,12 +27,12 @@ func TestCanonicalBody_IncludesCallerFields(t *testing.T) {
 		"caller_public_mode":         func(e *Event) { e.PublicMode = true },
 		"caller_network":             func(e *Event) { e.CallerNetwork = &CallerNetwork{SourceIP: "203.0.113.7"} },
 		"tenant":                     func(e *Event) { e.Tenant = "acme" },
-		"caller_client_kind":         func(e *Event) { e.CallerClient = &CallerClient{Kind: "v"} },
 		"caller_client_name":         func(e *Event) { e.CallerClient = &CallerClient{Name: "v"} },
 		"caller_client_version":      func(e *Event) { e.CallerClient = &CallerClient{Version: "v"} },
 		"caller_client_host":         func(e *Event) { e.CallerClient = &CallerClient{Host: "v"} },
 		"caller_client_host_version": func(e *Event) { e.CallerClient = &CallerClient{HostVersion: "v"} },
 		"caller_client_harness":      func(e *Event) { e.CallerClient = &CallerClient{Harness: "v"} },
+		"caller_client_purpose":      func(e *Event) { e.CallerClient = &CallerClient{Purpose: "v"} },
 		"schema_version":             func(e *Event) { e.SchemaVersion = 1 },
 	}
 	want := string(base.canonicalBody())
@@ -54,9 +54,9 @@ func TestCanonicalBody_IncludesCallerFields(t *testing.T) {
 	}
 	full := base
 	full.Tenant = "acme"
-	full.CallerClient = &CallerClient{Kind: "mcp", Name: "podium-mcp"}
+	full.CallerClient = &CallerClient{Name: "cli", Harness: "codex", Purpose: "sync"}
 	full.SchemaVersion = 1
-	wantTail := "tenant=acme\x00caller_client_kind=mcp\x00caller_client_name=podium-mcp\x00schema_version=1\x00"
+	wantTail := "tenant=acme\x00caller_client_name=cli\x00caller_client_harness=codex\x00caller_client_purpose=sync\x00schema_version=1\x00"
 	if body := string(full.canonicalBody()); !strings.HasSuffix(body, wantTail) {
 		t.Errorf("canonical body must end with the tenant, caller_client_*, and schema_version parts in that order; got %q", body)
 	}
@@ -225,7 +225,7 @@ func TestEvent_UnlabeledHashUnchanged(t *testing.T) {
 	}
 	if err := sink.Append(context.Background(), Event{
 		Type: EventArtifactLoaded, Caller: "alice",
-		CallerClient: &CallerClient{Kind: "mcp", Name: "podium-mcp", Host: "Claude Code"},
+		CallerClient: &CallerClient{Name: "mcp", Host: "Claude Code"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestFileSink_CallerDottedKeysDecode(t *testing.T) {
 	if err := sink.Append(ctx, Event{
 		Type: EventDomainLoaded, Caller: "system:public", PublicMode: true,
 		CallerNetwork: &CallerNetwork{SourceIP: "203.0.113.7", ForwardedUser: "bob"},
-		CallerClient:  &CallerClient{Kind: "mcp", Host: "Claude Code", HostVersion: "2.1.0"},
+		CallerClient:  &CallerClient{Name: "mcp", Host: "Claude Code", HostVersion: "2.1.0"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestFileSink_CallerDottedKeysDecode(t *testing.T) {
 				ForwardedUser string `json:"forwarded_user"`
 			} `json:"network"`
 			Client struct {
-				Kind        string `json:"kind"`
+				Name        string `json:"name"`
 				Host        string `json:"host"`
 				HostVersion string `json:"host_version"`
 			} `json:"client"`
@@ -290,8 +290,8 @@ func TestFileSink_CallerDottedKeysDecode(t *testing.T) {
 	if rec.Caller.Network.ForwardedUser != "bob" {
 		t.Errorf("caller.network.forwarded_user = %q, want bob", rec.Caller.Network.ForwardedUser)
 	}
-	if c := rec.Caller.Client; c.Kind != "mcp" || c.Host != "Claude Code" || c.HostVersion != "2.1.0" {
-		t.Errorf("caller.client = %+v, want kind mcp, host Claude Code, host_version 2.1.0", c)
+	if c := rec.Caller.Client; c.Name != "mcp" || c.Host != "Claude Code" || c.HostVersion != "2.1.0" {
+		t.Errorf("caller.client = %+v, want name mcp, host Claude Code, host_version 2.1.0", c)
 	}
 }
 
@@ -308,7 +308,7 @@ func TestFileSink_ClientOnlyCallerSerializes(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err := sink.Append(ctx, Event{Type: EventArtifactLoaded, CallerClient: &CallerClient{Kind: "sync", Harness: "codex"}}); err != nil {
+	if err := sink.Append(ctx, Event{Type: EventArtifactLoaded, CallerClient: &CallerClient{Name: "cli", Purpose: "sync", Harness: "codex"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := sink.Verify(ctx); err != nil {
@@ -318,7 +318,7 @@ func TestFileSink_ClientOnlyCallerSerializes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"caller":{"client":{"kind":"sync","harness":"codex"}}`) {
+	if !strings.Contains(string(data), `"caller":{"client":{"name":"cli","harness":"codex","purpose":"sync"}}`) {
 		t.Errorf("file line lacks caller.client: %s", data)
 	}
 }
@@ -330,8 +330,8 @@ func TestFileSink_ClientOnlyCallerSerializes(t *testing.T) {
 // Spec: §7.2.2, §8.1, §8.6
 func TestSinks_NormalizeCallerClient(t *testing.T) {
 	ctx := context.Background()
-	raw := Event{Type: EventArtifactLoaded, Caller: "alice", CallerClient: &CallerClient{Kind: "MCP", Host: "evil\x00host"}}
-	want := CallerClient{Kind: "other", Host: "evil_host"}
+	raw := Event{Type: EventArtifactLoaded, Caller: "alice", CallerClient: &CallerClient{Name: "MCP", Host: "evil\x00host", Purpose: "install"}}
+	want := CallerClient{Name: "MCP", Host: "evil_host"}
 
 	path := filepath.Join(t.TempDir(), "audit.log")
 	fs, err := NewFileSink(path)
@@ -389,7 +389,7 @@ func TestFileSink_TamperedCallerEmailBreaksChain(t *testing.T) {
 			ctx := context.Background()
 			if err := sink.Append(ctx, Event{
 				Type: EventArtifactLoaded, Caller: "alice", CallerEmail: "alice@acme.com",
-				CallerClient: &CallerClient{Kind: "mcp", Host: "Claude Code"},
+				CallerClient: &CallerClient{Name: "mcp", Host: "Claude Code"},
 			}); err != nil {
 				t.Fatal(err)
 			}

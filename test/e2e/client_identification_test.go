@@ -144,8 +144,7 @@ func TestClientIdentification_MCPBothStreams(t *testing.T) {
 	rpcResult(t, res.Stdout, 3)
 
 	want := map[string]string{
-		"kind":         "mcp",
-		"name":         "podium-mcp",
+		"name":         "mcp",
 		"version":      buildinfo.Version,
 		"host":         "cursor",
 		"host_version": "2.0",
@@ -177,8 +176,9 @@ func TestClientIdentification_MCPBothStreams(t *testing.T) {
 	verifyAuditChain(t, localAudit)
 }
 
-// Spec: §8.1, §8.3, §8.6 — podium sync names itself with kind=sync and the
-// run's harness, and podium search names itself with kind=cli and no harness.
+// Spec: §7.2.2, §8.1, §8.3, §8.6 — podium sync names itself cli with
+// purpose=sync and the run's harness, and podium search names itself cli with
+// no purpose and no harness.
 // The registry records each value as caller.client on the read event the
 // request raises.
 func TestClientIdentification_SyncAndCLI(t *testing.T) {
@@ -206,8 +206,8 @@ func TestClientIdentification_SyncAndCLI(t *testing.T) {
 	if len(loaded) != 1 {
 		t.Fatalf("registry recorded %d artifact.loaded events, want 1\nlog:\n%s", len(loaded), readOrEmpty(registryAudit))
 	}
-	if c := loaded[0].Caller.Client; c["kind"] != "sync" || c["harness"] != "claude-code" {
-		t.Errorf("artifact.loaded caller.client = %v, want kind=sync and harness=claude-code", c)
+	if c := loaded[0].Caller.Client; c["name"] != "cli" || c["purpose"] != "sync" || c["harness"] != "claude-code" {
+		t.Errorf("artifact.loaded caller.client = %v, want name=cli, purpose=sync, and harness=claude-code", c)
 	}
 
 	searched := recordsOfType(recs, string(audit.EventArtifactsSearched))
@@ -215,8 +215,8 @@ func TestClientIdentification_SyncAndCLI(t *testing.T) {
 		t.Fatalf("registry recorded %d artifacts.searched events, want 1\nlog:\n%s", len(searched), readOrEmpty(registryAudit))
 	}
 	c := searched[0].Caller.Client
-	if c["kind"] != "cli" {
-		t.Errorf("artifacts.searched caller.client = %v, want kind=cli", c)
+	if c["name"] != "cli" || c["purpose"] != "" {
+		t.Errorf("artifacts.searched caller.client = %v, want name=cli and no purpose", c)
 	}
 	if h, ok := c["harness"]; ok {
 		t.Errorf("artifacts.searched caller.client carries harness %q; podium search sends none", h)

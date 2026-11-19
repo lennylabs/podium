@@ -26,7 +26,7 @@ func (s *SQLite) AddUsageCounts(ctx context.Context, tenantID string, counts []U
 			ON CONFLICT (tenant_id, day, layer, artifact_id, client_kind, harness) DO UPDATE SET
 				loads = loads + excluded.loads, syncs = syncs + excluded.syncs,
 				search_hits = search_hits + excluded.search_hits`,
-			c.TenantID, c.Day, c.Layer, c.ArtifactID, c.ClientKind, c.Harness, c.Loads, c.Syncs, c.SearchHits); err != nil {
+			c.TenantID, c.Day, c.Layer, c.ArtifactID, c.Client, c.Harness, c.Loads, c.Syncs, c.SearchHits); err != nil {
 			return fmt.Errorf("store: add usage counts: %w", err)
 		}
 	}
@@ -102,7 +102,7 @@ func (p *Postgres) AddUsageCounts(ctx context.Context, tenantID string, counts [
 			ON CONFLICT (tenant_id, day, layer, artifact_id, client_kind, harness) DO UPDATE SET
 				loads = usage_daily.loads + EXCLUDED.loads, syncs = usage_daily.syncs + EXCLUDED.syncs,
 				search_hits = usage_daily.search_hits + EXCLUDED.search_hits`,
-			c.TenantID, c.Day, c.Layer, c.ArtifactID, c.ClientKind, c.Harness, c.Loads, c.Syncs, c.SearchHits); err != nil {
+			c.TenantID, c.Day, c.Layer, c.ArtifactID, c.Client, c.Harness, c.Loads, c.Syncs, c.SearchHits); err != nil {
 			return fmt.Errorf("store: add usage counts: %w", err)
 		}
 	}
@@ -217,7 +217,7 @@ func scanUsageRows(rows usageRows) ([]UsageCount, error) {
 	out := []UsageCount{}
 	for rows.Next() {
 		var c UsageCount
-		if err := rows.Scan(&c.TenantID, &c.Day, &c.Layer, &c.ArtifactID, &c.ClientKind, &c.Harness, &c.Loads, &c.Syncs, &c.SearchHits); err != nil {
+		if err := rows.Scan(&c.TenantID, &c.Day, &c.Layer, &c.ArtifactID, &c.Client, &c.Harness, &c.Loads, &c.Syncs, &c.SearchHits); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

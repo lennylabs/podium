@@ -270,8 +270,8 @@ func fullEvent() Event {
 		CallerGroups:  []string{"eng", "platform"},
 		CallerNetwork: &CallerNetwork{SourceIP: "203.0.113.7", ForwardedUser: "alice"},
 		CallerClient: &CallerClient{
-			Kind: "mcp", Name: "podium-mcp", Version: "0.6.0",
-			Host: "claude-code", HostVersion: "2.1.0", Harness: "claude-code",
+			Name: "cli", Version: "0.7.0",
+			Host: "claude-code", HostVersion: "2.1.0", Harness: "claude-code", Purpose: PurposeSync,
 		},
 		PublicMode:     true,
 		Target:         "finance/close-reconciliation",

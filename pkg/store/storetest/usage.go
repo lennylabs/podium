@@ -13,7 +13,7 @@ import (
 )
 
 func usageRow(day, layer, id, kind, harness string, loads, syncs, hits int64) store.UsageCount {
-	return store.UsageCount{Day: day, Layer: layer, ArtifactID: id, ClientKind: kind, Harness: harness, Loads: loads, Syncs: syncs, SearchHits: hits}
+	return store.UsageCount{Day: day, Layer: layer, ArtifactID: id, Client: kind, Harness: harness, Loads: loads, Syncs: syncs, SearchHits: hits}
 }
 
 // usageSummary renders a tenant's listed rows in one comparable string, so a
@@ -25,7 +25,7 @@ func usageSummary(t *testing.T, s store.Store, tenant, from, to string) string {
 	parts := make([]string, 0, len(rows))
 	for _, r := range rows {
 		parts = append(parts, fmt.Sprintf("%s|%s|%s|%s|%s|%s=%d/%d/%d",
-			r.TenantID, r.Day, r.Layer, r.ArtifactID, r.ClientKind, r.Harness, r.Loads, r.Syncs, r.SearchHits))
+			r.TenantID, r.Day, r.Layer, r.ArtifactID, r.Client, r.Harness, r.Loads, r.Syncs, r.SearchHits))
 	}
 	return strings.Join(parts, " ")
 }
@@ -33,7 +33,7 @@ func usageSummary(t *testing.T, s store.Store, tenant, from, to string) string {
 // Spec: §8.7 — adding counts adds to the stored row of each key, so two adds
 // of one key, in one call or in two, sum. A key that differs in any member is
 // its own row, a row whose counters are all zero is not stored, and rows come
-// back ordered by day, layer, artifact, client kind, and harness within the
+// back ordered by day, layer, artifact, client, and harness within the
 // requested days, both ends included.
 func usageCountsAdd(t *testing.T, s store.Store) {
 	t.Helper()
@@ -69,7 +69,7 @@ func usageCountsScopedToTenant(t *testing.T, s store.Store) {
 	}
 }
 
-// Spec: §8.7 — a count with no layer, artifact, client kind, or harness, a day
+// Spec: §8.7 — a count with no layer, artifact, client, or harness, a day
 // that is not a YYYY-MM-DD date, or a negative counter is refused with
 // ErrInvalidUsageCount, and the call stores none of its counts.
 func usageCountsInvalid(t *testing.T, s store.Store) {
@@ -176,7 +176,7 @@ func usageCountsPurgedWithLayer(t *testing.T, s store.Store) {
 }
 
 // Spec: §3.3, §8.7 — summing loads adds a layer and artifact's loads across
-// the days of the range, client kinds, and harnesses; a pair with only syncs
+// the days of the range, clients, and harnesses; a pair with only syncs
 // or search hits, a day outside the range, and another tenant's rows are left
 // out; and pairs come back ordered by layer and artifact.
 func usageLoadsSummed(t *testing.T, s store.Store) {

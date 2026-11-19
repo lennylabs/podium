@@ -21,7 +21,7 @@ import (
 func seedUsage(t *testing.T, f *usageFixture) {
 	t.Helper()
 	row := func(day, lay, id, kind, harness string, loads, syncs, hits int64) store.UsageCount {
-		return store.UsageCount{Day: day, Layer: lay, ArtifactID: id, ClientKind: kind, Harness: harness, Loads: loads, Syncs: syncs, SearchHits: hits}
+		return store.UsageCount{Day: day, Layer: lay, ArtifactID: id, Client: kind, Harness: harness, Loads: loads, Syncs: syncs, SearchHits: hits}
 	}
 	if err := f.st.AddUsageCounts(context.Background(), "t", []store.UsageCount{
 		row("2026-10-25", "team", "ops/greet", "mcp", "claude-code", 1, 0, 0),
@@ -102,7 +102,7 @@ func TestUsageReport_TotalsAndVisibility(t *testing.T) {
 		t.Errorf("greet entry = %+v", g)
 	}
 	if fw := rep.Artifacts[1]; fw.LastSynced != nil || len(fw.ByClient) != 1 {
-		t.Errorf("farewell entry = %+v, want no last_synced and one client kind", fw)
+		t.Errorf("farewell entry = %+v, want no last_synced and one client", fw)
 	}
 	bob := usageReport(t, f, q(nil), "bob")
 	if !reflect.DeepEqual(layerIDs(bob), []string{"team", "secret"}) || bob.Totals.Loads != 18 || len(bob.Artifacts) != 3 {
@@ -398,7 +398,7 @@ func TestUsageReport_OrdersAndPagesBySearchHits(t *testing.T) {
 	t.Parallel()
 	f := newUsageFixture(t)
 	row := func(lay, id string, hits int64) store.UsageCount {
-		return store.UsageCount{Day: "2026-11-18", Layer: lay, ArtifactID: id, ClientKind: "mcp", Harness: "none", Loads: 1, SearchHits: hits}
+		return store.UsageCount{Day: "2026-11-18", Layer: lay, ArtifactID: id, Client: "mcp", Harness: "none", Loads: 1, SearchHits: hits}
 	}
 	if err := f.st.AddUsageCounts(context.Background(), "t", []store.UsageCount{
 		row("team", "ops/greet", 1), row("team", "ops/farewell", 5), row("secret", "ops/hidden", 3),

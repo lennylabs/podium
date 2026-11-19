@@ -159,17 +159,17 @@ A request to a `/v1/` control-plane route can name its client software in the `X
 
 ```http
 GET /v1/search_artifacts?query=x HTTP/1.1
-X-Podium-Client: kind=sdk&name=acme-tool&version=1.2.0
+X-Podium-Client: name=acme-evals&version=1.2.0&harness=cursor
 ```
 
 | Member | Description |
 |:--|:--|
-| `kind` | `mcp`, `sync`, `sdk`, or `cli`. |
-| `name` | The client software. |
+| `name` | The client software. Podium's own clients send `mcp`, `cli`, and `sdk`, and any other caller sends a name of its own choosing. |
 | `version` | The client software's release. |
 | `host` | The `clientInfo.name` of the MCP `initialize` request. Only the MCP server sends it. |
 | `host_version` | The `clientInfo.version` of the MCP `initialize` request. Only the MCP server sends it. |
 | `harness` | The harness adapter value of the sending process. |
+| `purpose` | `sync` on a request that installs artifacts into a harness's configuration rather than using them. |
 
 The registry parses and sanitizes the value as follows:
 
@@ -177,13 +177,14 @@ The registry parses and sanitizes the value as follows:
 - When a member repeats, it uses the first occurrence. It ignores unknown members.
 - In each member, it replaces every byte other than an ASCII letter, a digit, a space, `.`, `_`, `-`, `+`, `/`, `(`, or `)` with `_`, and then truncates the member to 64 bytes.
 - A value that leaves no non-empty member after sanitization is treated as absent and records no `caller.client`.
-- Otherwise, it records `kind` as `other` when `kind` is absent or is not exactly one of the values above.
+- It drops a `purpose` other than `sync`.
+- A member the value does not carry, and every member of an absent or ignored value, is not provided. The [usage report](#usage-report) counts a client or harness that is not provided under `unknown`.
 
 An absent or ignored value never causes a request to fail. The value is never an input to authentication, authorization, visibility, quotas, audit sampling, or tenant selection.
 
 The first-party clients send the header on every control-plane request. They omit it on presigned links, on `/objects` links, and on `/healthz` and `/readyz`.
 
-The value appears in audit records as `caller.client`, as described in [Client software](audit-events#client-software) on the audit events page. The values each first-party client sends are listed in [§7.2.2 of the specification](https://github.com/lennylabs/podium/blob/main/spec/07-external-integration.md#722-client-identification).
+The value appears in audit records as `caller.client`, as described in [Client software](audit-events#client-software) on the audit events page. The MCP server sends `name=mcp`, every `podium` CLI command sends `name=cli`, and `podium sync` sends `name=cli` with `purpose=sync`. The SDKs send `name=sdk`, or the client name and harness the program configures. The values each first-party client sends are listed in [§7.2.2 of the specification](https://github.com/lennylabs/podium/blob/main/spec/07-external-integration.md#722-client-identification).
 
 ---
 
@@ -791,13 +792,13 @@ POST /v1/usage
 
 With none of `from`, `to`, and `days`, the window is the last 30 days. The window must lie within the retained days, the last `PODIUM_USAGE_RETENTION_DAYS` UTC days counting today. A request names at most 100 layers, 500 artifacts, and 20 types.
 
-**What is counted.** The registry counts per UTC day, per serving layer, per artifact, per client kind, and per harness:
+**What is counted.** The registry counts per UTC day, per serving layer, per artifact, per client, and per harness:
 
-- `loads`: resolved `load_artifact` calls, including each item of `artifacts:batchLoad`, a `HEAD`, and a `GET` answered `304`, from a client whose kind is not `sync`. A revalidation followed by a refetch counts two loads.
-- `syncs`: the same calls from a client whose kind is `sync`, which is how a server-source `podium sync` fetches every artifact on each run.
+- `loads`: resolved `load_artifact` calls, including each item of `artifacts:batchLoad`, a `HEAD`, and a `GET` answered `304`, from a request that does not carry `purpose=sync`. A revalidation followed by a refetch counts two loads.
+- `syncs`: the same calls from a request that carries `purpose=sync`, which is how a server-source `podium sync` fetches every artifact on each run.
 - `search_hits`: `search_artifacts` calls with a non-empty query that returned the artifact among their first 10 results. A call with a `top_k` below 10 counts each result it returns.
 
-The client kind and the harness come from the `X-Podium-Client` header. A request without the header counts under `none`. Each replica adds its counts to the metadata store every `PODIUM_USAGE_FLUSH_INTERVAL`, so the report trails live traffic by up to that interval.
+The client is the `name` member of the `X-Podium-Client` header, and the harness is its `harness` member. A client or harness that the request does not provide counts under `unknown`, and a provided value counts as it is. A tenant records at most `PODIUM_USAGE_MAX_CLIENT_KEYS` distinct clients, and at most as many distinct harnesses, per UTC day, not counting `unknown` and `other`. A further client or harness counts under `other`, and replicas that flush at the same time can together exceed the limit. Each replica adds its counts to the metadata store every `PODIUM_USAGE_FLUSH_INTERVAL`, so the report trails live traffic by up to that interval.
 
 **Response.**
 
@@ -813,13 +814,13 @@ The client kind and the harness come from the `X-Podium-Client` header. A reques
     "search_hits": 65,
     "by_client": {
       "mcp": {"loads": 40, "syncs": 0, "search_hits": 50},
-      "sync": {"loads": 0, "syncs": 120, "search_hits": 0},
+      "cli": {"loads": 0, "syncs": 120, "search_hits": 0},
       "sdk": {"loads": 2, "syncs": 0, "search_hits": 15}
     },
     "by_harness": {
       "claude-code": {"loads": 30, "syncs": 80, "search_hits": 50},
       "cursor": {"loads": 10, "syncs": 40, "search_hits": 0},
-      "none": {"loads": 2, "syncs": 0, "search_hits": 15}
+      "unknown": {"loads": 2, "syncs": 0, "search_hits": 15}
     },
     "series": [
       {"start": "2026-11-12", "end": "2026-11-15", "loads": 18, "syncs": 60, "search_hits": 30},
@@ -863,7 +864,7 @@ The example uses `granularity=week` and abbreviates the breakdowns and the layer
 |:--|:--|
 | `days`, `from`, `to` | The number of days in the window and its first and last UTC days. |
 | `granularity` | The granularity the series use: the requested one, or the coarser one a long window serves in its place. |
-| `totals` | `loads`, `syncs`, and `search_hits` summed over every row of the window in the covered layers, with `by_client` and `by_harness` breakdowns that map each client kind or harness with a non-zero count to its three counts. |
+| `totals` | `loads`, `syncs`, and `search_hits` summed over every row of the window in the covered layers, with `by_client` and `by_harness` breakdowns that map each client name or harness with a non-zero count to its three counts. |
 | `layers` | One entry per covered layer, in the precedence order of the caller's effective view, including a layer with no counts. A layer's counts include artifacts it no longer serves. |
 | `artifacts` | One entry per artifact the caller can see in a covered layer, at its current served version, including an artifact with no counts, ordered by `sort` in `order`, by default `loads`, then `syncs`, then `search_hits`, each descending, then by `artifact_id`. A response holds one page of at most `limit` entries. `last_loaded` and `last_synced` are the latest days in the window with a load or a sync, or `null`. |
 | `artifact_count` | The number of entries the `artifacts` list holds across every page. |

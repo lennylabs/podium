@@ -205,7 +205,7 @@ func TestMCPLocalEvents_RecordCallerClient(t *testing.T) {
 			t.Fatalf("decode event %d: %v", i, err)
 		}
 		want := map[string]string{
-			"kind": "mcp", "name": "podium-mcp", "version": buildinfo.Version,
+			"name": "mcp", "version": buildinfo.Version,
 			"host": "cursor", "host_version": "2.0", "harness": wantHarness,
 		}
 		if !reflect.DeepEqual(ev.Caller.Client, want) {

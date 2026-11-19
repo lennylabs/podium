@@ -326,8 +326,8 @@ func TestRunSyncOverrideInteractive_SendsResolvedHarness(t *testing.T) {
 					manifests++
 				}
 				got := audit.ParseClientHeader(req.client)
-				if got == nil || got.Kind != "sync" || got.Harness != tc.wantHarness {
-					t.Errorf("%s X-Podium-Client %q parsed to %+v, want kind sync and harness %q", req.path, req.client, got, tc.wantHarness)
+				if got == nil || got.Name != "cli" || got.Purpose != "sync" || got.Harness != tc.wantHarness {
+					t.Errorf("%s X-Podium-Client %q parsed to %+v, want name cli, purpose sync, and harness %q", req.path, req.client, got, tc.wantHarness)
 				}
 			}
 			// One manifest read serves the checklist view and one serves the

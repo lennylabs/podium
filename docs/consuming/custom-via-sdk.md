@@ -93,6 +93,30 @@ client = Client(
 client.login()
 ```
 
+### Name the client in the usage report
+
+The SDK names itself to the registry in the `X-Podium-Client` header on every request. By default it sends the client name `sdk` and no harness, so the [usage report](../managing/usage#built-in-usage-report) counts every SDK program under `sdk` and its harness under `unknown`. Set `client_name` and `harness` to count a program's calls under its own name and the harness it serves:
+
+```python
+client = Client(
+    registry="https://podium.acme.com",
+    client_name="acme-evals",
+    harness="cursor",
+)
+```
+
+The TypeScript SDK takes the same values as `clientName` and `harness`:
+
+```ts
+const client = new Client({
+  registry: "https://podium.acme.com",
+  clientName: "acme-evals",
+  harness: "cursor",
+});
+```
+
+The client name is free-form. The registry replaces characters outside its allowed set and keeps at most 64 bytes, as [Client identification](../reference/http-api#client-identification) describes. The registry does not verify either value, and it records both in the `caller.client` member of the audit records. The constructor's `harness` only names the harness to the registry. It does not change the layout `materialize()` writes, whose own `harness` argument accepts only `none`.
+
 ---
 
 ## Authenticate

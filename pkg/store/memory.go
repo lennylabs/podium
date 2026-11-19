@@ -752,7 +752,7 @@ func (s *Memory) AddUsageCounts(_ context.Context, tenantID string, counts []Usa
 	for _, c := range norm {
 		row := bucket[c.key()]
 		if row.TenantID == "" {
-			row = UsageCount{TenantID: tenantID, Day: c.Day, Layer: c.Layer, ArtifactID: c.ArtifactID, ClientKind: c.ClientKind, Harness: c.Harness}
+			row = UsageCount{TenantID: tenantID, Day: c.Day, Layer: c.Layer, ArtifactID: c.ArtifactID, Client: c.Client, Harness: c.Harness}
 		}
 		row.Loads += c.Loads
 		row.Syncs += c.Syncs
@@ -763,7 +763,7 @@ func (s *Memory) AddUsageCounts(_ context.Context, tenantID string, counts []Usa
 }
 
 // ListUsageCounts returns the tenant's rows from fromDay to toDay, ordered by
-// day, layer, artifact, client kind, and harness.
+// day, layer, artifact, client, and harness.
 func (s *Memory) ListUsageCounts(_ context.Context, tenantID, fromDay, toDay string) ([]UsageCount, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

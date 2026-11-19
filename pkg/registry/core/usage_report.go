@@ -332,9 +332,9 @@ func newUsageAccumulator() *usageAccumulator {
 
 func (a *usageAccumulator) add(row store.UsageCount) {
 	a.totals.add(row)
-	c := a.totals.ByClient[row.ClientKind]
+	c := a.totals.ByClient[row.Client]
 	c.add(row)
-	a.totals.ByClient[row.ClientKind] = c
+	a.totals.ByClient[row.Client] = c
 	h := a.totals.ByHarness[row.Harness]
 	h.add(row)
 	a.totals.ByHarness[row.Harness] = h

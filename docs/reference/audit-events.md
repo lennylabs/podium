@@ -21,7 +21,7 @@ Every destination carries a record as one JSON object with the following members
 | `type` | The event type, such as `artifact.loaded` or `layer.ingested`. [Event types](#event-types) lists them. |
 | `timestamp` | The event time in RFC 3339, in UTC, with up to nine fractional-second digits and trailing zeros omitted. |
 | `trace_id` | The W3C trace ID of the request that raised the event. |
-| `caller` | An object with `identity`, `email`, `groups`, `network`, `public_mode`, and `client`. `network` holds `source_ip` and `forwarded_user` and appears on public-mode events. `client` holds `kind`, `name`, `version`, `host`, `host_version`, and `harness`, as described in [Client software](#client-software). |
+| `caller` | An object with `identity`, `email`, `groups`, `network`, `public_mode`, and `client`. `network` holds `source_ip` and `forwarded_user` and appears on public-mode events. `client` holds `name`, `version`, `host`, `host_version`, `harness`, and `purpose`, as described in [Client software](#client-software). |
 | `target` | The artifact, domain, layer, or user the event concerns. |
 | `context` | A map of event-specific string values, such as `version` on `artifact.loaded` or `superseded_head` on a closing event. |
 | `tenant` | The org ID of the tenant the event concerns. |
@@ -34,7 +34,7 @@ Every destination carries a record as one JSON object with the following members
 `type`, `timestamp`, and `hash` are always present. Every other member is omitted when its value is empty, false, or zero, so the first record of a chain carries no `prev_hash`.
 
 ```json
-{"type":"artifact.loaded","timestamp":"2026-11-11T14:03:22.418273Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","caller":{"identity":"alice","email":"alice@acme.com","groups":["platform"],"client":{"kind":"mcp","name":"podium-mcp","version":"0.6.0","host":"claude-code","host_version":"2.1.0","harness":"claude-code"}},"target":"platform/deploy-runbook","context":{"version":"1.2.0"},"tenant":"acme","resolved_layers":["org-defaults","team-platform"],"result_size":1,"schema_version":1,"hash":"9f2c4e7a1b8d3f60c5e2a9d4b7f1038e6c2d5a9b4e7f1c3a8d6b2e0f5a9c7d41","prev_hash":"3e8b1d6f0a4c7e2b9d5f8a1c4e7b0d3f6a9c2e5b8d1f4a7c0e3b6d9f2a5c8e10"}
+{"type":"artifact.loaded","timestamp":"2026-11-11T14:03:22.418273Z","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","caller":{"identity":"alice","email":"alice@acme.com","groups":["platform"],"client":{"name":"mcp","version":"0.7.0","host":"claude-code","host_version":"2.1.0","harness":"claude-code"}},"target":"platform/deploy-runbook","context":{"version":"1.2.0"},"tenant":"acme","resolved_layers":["org-defaults","team-platform"],"result_size":1,"schema_version":1,"hash":"9f2c4e7a1b8d3f60c5e2a9d4b7f1038e6c2d5a9b4e7f1c3a8d6b2e0f5a9c7d41","prev_hash":"3e8b1d6f0a4c7e2b9d5f8a1c4e7b0d3f6a9c2e5b8d1f4a7c0e3b6d9f2a5c8e10"}
 ```
 
 `schema_version` increments when the record's members or their meaning change. A new event type leaves it unchanged. The JSON Schema for version 1 is published at [`https://raw.githubusercontent.com/lennylabs/podium/main/pkg/audit/schema/audit-event.v1.schema.json`](https://raw.githubusercontent.com/lennylabs/podium/main/pkg/audit/schema/audit-event.v1.schema.json).
@@ -43,7 +43,7 @@ Every destination carries a record as one JSON object with the following members
 
 ### Client software
 
-`caller.client` names the client software that sent the request, as the client stated it in the `X-Podium-Client` request header. Each of its members `kind`, `name`, `version`, `host`, `host_version`, and `harness` appears only when it is non-empty. `kind` is `mcp`, `sync`, `cli`, `sdk`, or `other`.
+`caller.client` names the client software that sent the request, as the client stated it in the `X-Podium-Client` request header. Each of its members `name`, `version`, `host`, `host_version`, `harness`, and `purpose` appears only when it is non-empty. `name` is `mcp` for `podium-mcp`, `cli` for the `podium` CLI, `sdk` for the SDKs, or a name the caller chose. `purpose` is `sync` on a request from `podium sync`.
 
 The client reports `caller.client` itself, and the registry does not verify it. The registry never uses it for authentication, visibility, quotas, or tenant selection. The registry bounds and sanitizes the value and records the result as the client reported it. Neither the query-text PII scrub nor `podium admin erase` rewrites `caller.client`, so a value a client placed in a member stays in the record after an erasure.
 

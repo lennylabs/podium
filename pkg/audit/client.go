@@ -20,22 +20,28 @@ const (
 	maxClientMemberBytes = 64
 	// clientSanitizeByte replaces every byte outside the allowed set.
 	clientSanitizeByte = '_'
-	// clientKindOther is the kind recorded for an absent or unknown kind.
-	clientKindOther = "other"
+)
+
+// The names Podium's own clients send (§7.2.2), and the purpose that marks a
+// request installing artifacts rather than using them.
+//
+// Spec: §7.2.2
+const (
+	ClientNameMCP = "mcp"
+	ClientNameCLI = "cli"
+	ClientNameSDK = "sdk"
+	PurposeSync   = "sync"
 )
 
 // The X-Podium-Client member keys (§7.2.2).
 const (
-	clientKeyKind        = "kind"
 	clientKeyName        = "name"
 	clientKeyVersion     = "version"
 	clientKeyHost        = "host"
 	clientKeyHostVersion = "host_version"
 	clientKeyHarness     = "harness"
+	clientKeyPurpose     = "purpose"
 )
-
-// knownClientKinds are the kind values §7.2.2 names, compared exactly.
-var knownClientKinds = map[string]bool{"mcp": true, "sync": true, "sdk": true, "cli": true}
 
 // CallerClient is the §8.1 caller.client attribute: the self-reported client
 // software that sent a request. It is advisory and feeds no access decision
@@ -43,12 +49,14 @@ var knownClientKinds = map[string]bool{"mcp": true, "sync": true, "sdk": true, "
 //
 // Spec: §7.2.2, §8.1
 type CallerClient struct {
-	Kind        string
 	Name        string
 	Version     string
 	Host        string
 	HostVersion string
 	Harness     string
+	// Purpose is PurposeSync on a request that installs artifacts into a
+	// harness's configuration, and empty otherwise.
+	Purpose string
 }
 
 // clientMember pairs an X-Podium-Client key with the CallerClient field it
@@ -63,12 +71,12 @@ type clientMember struct {
 // list, so the member set is defined once.
 func (c *CallerClient) members() []clientMember {
 	return []clientMember{
-		{clientKeyKind, &c.Kind},
 		{clientKeyName, &c.Name},
 		{clientKeyVersion, &c.Version},
 		{clientKeyHost, &c.Host},
 		{clientKeyHostVersion, &c.HostVersion},
 		{clientKeyHarness, &c.Harness},
+		{clientKeyPurpose, &c.Purpose},
 	}
 }
 
@@ -108,13 +116,16 @@ func ParseClientHeader(v string) *CallerClient {
 }
 
 // NormalizeClient applies the §7.2.2 sanitization to c and returns nil when
-// no member is left non-empty. Each member is sanitized and truncated first;
-// the kind is mapped to "other" only after the all-empty check, so a value
-// such as "kind=&name=" is treated as absent rather than recorded as
-// {kind: other}. Normalization is idempotent.
+// no member is left non-empty. Each member is sanitized and truncated, and a
+// purpose other than PurposeSync is dropped before the all-empty check, so a
+// value that carries only an unknown purpose is treated as absent. A provided
+// name or harness is kept as provided. Normalization is idempotent.
 //
 // Spec: §7.2.2, §8.1
 func NormalizeClient(c CallerClient) *CallerClient {
+	if c.Purpose != PurposeSync {
+		c.Purpose = ""
+	}
 	empty := true
 	for _, m := range c.members() {
 		*m.val = sanitizeClientMember(*m.val)
@@ -124,9 +135,6 @@ func NormalizeClient(c CallerClient) *CallerClient {
 	}
 	if empty {
 		return nil
-	}
-	if !knownClientKinds[c.Kind] {
-		c.Kind = clientKindOther
 	}
 	return &c
 }

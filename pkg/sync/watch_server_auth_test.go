@@ -100,7 +100,7 @@ func TestWatch_ServerSource_SubscriptionSendsClientHeader(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := watchSubscriptionClientHeader(t, tc.adapterID)
-			want := audit.CallerClient{Kind: "sync", Name: "podium", Version: buildinfo.Version, Harness: tc.wantHarness}
+			want := audit.CallerClient{Name: "cli", Purpose: "sync", Version: buildinfo.Version, Harness: tc.wantHarness}
 			if parsed := audit.ParseClientHeader(got); parsed == nil || *parsed != want {
 				t.Errorf("subscription X-Podium-Client %q parsed to %+v, want %+v", got, parsed, want)
 			}

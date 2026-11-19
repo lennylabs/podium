@@ -1,5 +1,5 @@
 // The usage report's figures as the UI states them: the counts of a list's
-// artifacts read in one request, the names of the client kinds and harnesses,
+// artifacts read in one request, the names of the clients and harnesses,
 // and the days and numbers the surfaces print.
 
 import { useMemo } from 'react';
@@ -132,13 +132,6 @@ export function useRailUsage(id: string): RailUsage | undefined {
   }, [read.loading, read.value, id]);
 }
 
-/** usageName is how a client kind or harness is named. The report records a
- * request that names none as `none`, which the UI states as "unknown"
- * (§13.10). */
-export function usageName(name: string): string {
-  return name === 'none' ? 'unknown' : name;
-}
-
 /** formatCount prints a count with thousands separators. */
 export function formatCount(n: number): string {
   return n.toLocaleString('en-US');
@@ -171,15 +164,15 @@ export interface BreakdownPart {
   count: number;
 }
 
-/** breakdownParts turns a breakdown into the parts a bar draws: each name's
- * loads plus syncs, largest first, named for the reader, with the unknown part
- * last whatever its size and parts with nothing dropped. */
+/** breakdownParts turns a breakdown into the parts a bar draws: each client's
+ * or harness's loads plus syncs, largest first and named as the report names
+ * it (§13.10), with the `other` part and then the `unknown` part last
+ * whatever their size, and parts with nothing dropped. */
 export function breakdownParts(breakdown: Record<string, UsageCounts>): BreakdownPart[] {
   const parts = Object.entries(breakdown)
     .map(([name, counts]) => ({ name, count: counts.loads + counts.syncs }))
     .filter((part) => part.count > 0)
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  const known = parts.filter((part) => part.name !== 'none');
-  const unknown = parts.filter((part) => part.name === 'none');
-  return [...known, ...unknown].map((part) => ({ name: usageName(part.name), count: part.count }));
+  const rank = (name: string) => (name === 'unknown' ? 2 : name === 'other' ? 1 : 0);
+  return [...parts].sort((a, b) => rank(a.name) - rank(b.name));
 }
