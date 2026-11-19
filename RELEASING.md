@@ -51,7 +51,7 @@ The two SDKs are fully tag-driven; only `buildinfo.go` and `Chart.yaml` require 
 
    The two SDKs need no edit at this step — setuptools-scm and the release workflow's `npm version` step will derive `0.2.0` from the tag.
 
-3. **Update `CHANGELOG.md`.** Move the unreleased section into a dated header `## [0.2.0] - YYYY-MM-DD`. Add the compare link at the bottom.
+3. **Update `CHANGELOG.md`.** Summarize the unreleased section into a dated header `## [0.2.0] - YYYY-MM-DD`, and add the compare link at the bottom. The summary keeps everything a user or an operator acts on or observes (breaking changes, removals, configuration and defaults, startup refusals, error codes, security fixes, and upgrade and rollback steps), merges the entries for one feature, folds fixes to unreleased work into the feature they fix, and drops unobservable detail in favor of a link to the documentation. `.claude/rules/release-process.md` states the full rules and the check against the unreleased entries.
 
 4. **Commit, tag, push.**
    ```bash
