@@ -221,7 +221,7 @@ type claimTaker struct {
 func (s *claimTaker) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID string, ids []string, at time.Time, claim string) error {
 	s.checks++
 	if s.at == "removal" && s.checks == 2 {
-		if _, err := s.Memory.ClaimLayerIngest(ctx, tenantID, layerID, "later"); err != nil {
+		if _, err := s.ClaimLayerIngest(ctx, tenantID, layerID, "later"); err != nil {
 			return err
 		}
 	}
@@ -230,7 +230,7 @@ func (s *claimTaker) SoftDeleteArtifacts(ctx context.Context, tenantID, layerID 
 
 func (s *claimTaker) RecordLayerIngest(ctx context.Context, tenantID, layerID, claim, ref string, at *time.Time) error {
 	if s.at == "record" {
-		if _, err := s.Memory.ClaimLayerIngest(ctx, tenantID, layerID, "later"); err != nil {
+		if _, err := s.ClaimLayerIngest(ctx, tenantID, layerID, "later"); err != nil {
 			return err
 		}
 	}
