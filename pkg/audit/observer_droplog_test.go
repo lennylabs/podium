@@ -43,3 +43,30 @@ func TestDropLog_TrailingLineAfterTheInterval(t *testing.T) {
 		t.Errorf("a timer with nothing pending logged %q", strings.TrimPrefix(logs.String(), before))
 	}
 }
+
+// Spec: §8.3 — further drops within the minute join the pending count under
+// the one armed timer, and a drop recorded after the minute writes the line
+// itself and cancels that timer, so the held-back drops are logged once.
+func TestDropLog_LineAfterTheIntervalCancelsTheTimer(t *testing.T) {
+	logs := captureLog(t)
+	frozen := clock.NewFrozen(time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC))
+	d := newDropLog(frozen)
+	key := dropKey{name: "dest", reason: ReasonQueueFull}
+	timer := func() *time.Timer {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return d.entries[key].timer
+	}
+	d.record("dest", ReasonQueueFull, 1)
+	d.record("dest", ReasonQueueFull, 2)
+	first := timer()
+	d.record("dest", ReasonQueueFull, 3)
+	same := timer() == first
+	frozen.Advance(time.Minute)
+	d.record("dest", ReasonQueueFull, 4)
+	out := logs.String()
+	if first == nil || !same || timer() != nil ||
+		strings.Count(out, "audit: dropped 1 record(s)") != 1 || strings.Count(out, "audit: dropped 9 record(s)") != 1 || strings.Count(out, "audit: dropped") != 2 {
+		t.Errorf("armed %t, one timer %t, cleared %t; log:\n%s", first != nil, same, timer() == nil, out)
+	}
+}
