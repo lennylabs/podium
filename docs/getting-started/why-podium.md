@@ -210,6 +210,7 @@ These products store and govern agent artifacts centrally. They differ in artifa
 | **AWS Agent Registry** ([announcement](https://aws.amazon.com/about-aws/whats-new/2026/08/aws-agent-registry-generally-available/)) | Managed (AWS) | MCP servers, A2A agent cards, skills, and custom records | Discovery from MCP-compatible IDEs | None | IAM; approval workflow; approved-only discovery |
 | **Google Cloud Agent Registry** ([docs](https://docs.cloud.google.com/agent-registry/concepts)) | Managed (Google Cloud) | Agents, MCP servers, and skills (skill governance in preview) | Discovery through the registry's search API | None | Skill governance (preview); vulnerability scanning of skills |
 | **JFrog AI Catalog** ([skills registry](https://jfrog.com/ai-catalog/skills-registry/)) | Commercial; SaaS or self-hosted | Skills, plugins, MCP servers, and models | CLI and MCP | None | Policy-driven approval; scanning; signing of approved skills |
+| **Cloudsmith AI Skills Registry** ([product](https://cloudsmith.com/product/ai-skills-registry)) | Commercial; SaaS | Skills and Claude Code plugins | A repository served as a Claude Code plugin marketplace | GitHub repositories cached as upstreams | Approved skills and versions per team; activity logging |
 | **Tessl** ([tessl.io](https://tessl.io/registry)) | Commercial; SaaS | Skills, docs, rules, and commands in tiles | Package manager; MCP tools to install | None | Workspace-scoped; evaluation of skill effect |
 | **Podium** | MIT; self-hosted in the local, single-node, or clustered deployment mode | Skills, agents, rules, hooks, MCP server registrations, and extension types | Native project files through the built-in adapters, for each artifact type a harness reads from a project directory; marketplace repositories; MCP discovery tools; SDKs | Ordered layers | Per-OIDC-group and per-user visibility evaluated per request; SCIM; multi-tenant mode |
 
@@ -219,11 +220,12 @@ These products store and govern agent artifacts centrally. They differ in artifa
 - agentregistry fits a Kubernetes platform team that deploys MCP servers and agents and wants a catalog beside them.
 - AWS Agent Registry and Google Cloud Agent Registry fit an organization standardized on that cloud provider.
 - JFrog AI Catalog fits an organization that already governs packages in Artifactory and wants scanning and approval for skills.
+- Cloudsmith AI Skills Registry fits an organization that already hosts packages in Cloudsmith and distributes skills and plugins to Claude Code.
 - Tessl fits an organization that accepts SaaS and wants evaluation of each skill's effect on agent tasks.
 
 **Where Podium applies.** Podium applies in any of these cases:
 
-- The catalog holds agents, rules, and hooks beside skills and MCP server registrations.
+- The catalog holds agents, rules, and hooks as individual typed artifacts beside skills and MCP server registrations, rather than inside one harness's plugin bundles.
 - Ordered layers compose several sources.
 - Visibility is evaluated per OIDC group at request time.
 - The built-in adapters translate each artifact into a harness's native project files, for every artifact type that the harness reads from a project directory.
@@ -258,7 +260,7 @@ These products overlap with Podium's `mcp-server` type and with the governance a
 | **LiteLLM** Skills Gateway ([docs](https://docs.litellm.ai/docs/skills_gateway)) | Open source with a commercial enterprise edition | Imports skills from Git, grants private skills per key or team, and generates a Claude Code marketplace |
 | **agentic-community/mcp-gateway-registry** ([repo](https://github.com/agentic-community/mcp-gateway-registry)) | OSS | Registers MCP servers, agents, and skills, with Keycloak or Entra OAuth, dynamic discovery, and scanning at registration |
 | **Kong AI Registry** ([konghq.com](https://konghq.com/products/mcp-registry)) | Commercial | Governed discovery of MCP servers, tools, models, agents, and skills |
-| **TrueFoundry MCP Gateway** ([truefoundry.com](https://www.truefoundry.com/mcp-gateway)) | Commercial | MCP catalog, OAuth, federated identity, and request tracing |
+| **TrueFoundry AI Gateway** ([truefoundry.com](https://www.truefoundry.com/mcp-gateway)) | Commercial | MCP catalog, OAuth, federated identity, and request tracing, with a skills registry whose skills reach TrueFoundry agents, Claude Code, and Cursor |
 | **MACH Alliance MCP Registry** ([machalliance.org](https://machalliance.org/mach-alliance-mcp-registry)) | Industry alliance | A vendor-neutral directory of MCP servers that agents and tools query |
 | **Docker MCP Catalog** ([hub.docker.com](https://hub.docker.com/mcp)) | Run by Docker, with community submissions | A catalog of containerized MCP servers |
 | **GitHub Copilot internal MCP registry** ([docs](https://docs.github.com/en/copilot/how-tos/administer-copilot/manage-mcp-usage/configure-mcp-server-access)) | Hosted by the organization, configured in Copilot policies | An organization's registry of MCP servers for discovery and allowlisting in Copilot clients |
