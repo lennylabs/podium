@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // fmSkillArtifact is a minimal skill ARTIFACT.md (Podium frontmatter only).
@@ -146,6 +147,46 @@ func TestFrontmatter_NonSkillScaffoldSingleFile(t *testing.T) {
 	for _, want := range []string{"type: agent", "description:", "version:"} {
 		if !strings.Contains(art, want) {
 			t.Errorf("ARTIFACT.md missing %q:\n%s", want, art)
+		}
+	}
+}
+
+// Spec: §4.3.4, §7.3.1 — the scaffold writes --description and --license
+// as quoted scalars. A description holding ": " and "#" produces a skill
+// and an agent that lint with no issues, and the parsed manifests carry
+// both values unchanged.
+func TestFrontmatter_ScaffoldQuotesDescriptionAndLicense(t *testing.T) {
+	t.Parallel()
+	const desc = "Deploys: the service to staging # then verifies the rollout."
+	const license = "LicenseRef-acme: internal # see LICENSE"
+	for _, tc := range []struct{ typ, file string }{{"skill", "SKILL.md"}, {"agent", "ARTIFACT.md"}} {
+		root := t.TempDir()
+		dir := filepath.Join(root, "ops/deploy")
+		sc := runPodium(t, "", nil, "artifact", "scaffold", "--type", tc.typ,
+			"--description", desc, "--license", license, "--yes", dir)
+		if sc.Exit != 0 {
+			t.Fatalf("%s: scaffold exit=%d stderr=%s", tc.typ, sc.Exit, sc.Stderr)
+		}
+		if l := runPodium(t, "", nil, "lint", "--registry", root); l.Exit != 0 || !strings.Contains(l.Stdout, "lint: no issues.") {
+			t.Errorf("%s: lint exit=%d stdout=%s stderr=%s", tc.typ, l.Exit, l.Stdout, l.Stderr)
+		}
+		src := []byte(readFile(t, filepath.Join(dir, tc.file)))
+		var gotDesc, gotLicense string
+		if tc.typ == "skill" {
+			s, err := manifest.ParseSkill(src)
+			if err != nil {
+				t.Fatalf("ParseSkill: %v", err)
+			}
+			gotDesc, gotLicense = s.Description, s.License
+		} else {
+			a, err := manifest.ParseArtifact(src)
+			if err != nil {
+				t.Fatalf("ParseArtifact: %v", err)
+			}
+			gotDesc, gotLicense = a.Description, a.License
+		}
+		if gotDesc != desc || gotLicense != license {
+			t.Errorf("%s: description=%q license=%q, want %q and %q", tc.typ, gotDesc, gotLicense, desc, license)
 		}
 	}
 }

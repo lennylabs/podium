@@ -73,8 +73,8 @@ func TestScaffold_Skill_LintClean(t *testing.T) {
 	skill, _ := os.ReadFile(filepath.Join(target, "SKILL.md"))
 	for _, want := range []string{
 		"name: greet\n",
-		"description: Greet the user by name.\n",
-		"license: MIT\n",
+		"description: \"Greet the user by name.\"\n",
+		"license: \"MIT\"\n",
 		"metadata:\n  version: \"0.1.0\"\n",
 	} {
 		if !bytes.Contains(skill, []byte(want)) {
@@ -790,7 +790,7 @@ func TestScaffold_ForceOverwrites(t *testing.T) {
 		t.Fatalf("exit=%d, want 0, stderr=%s", exit, stderr)
 	}
 	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
-	if !bytes.Contains(body, []byte("description: fresh")) {
+	if !bytes.Contains(body, []byte(`description: "fresh"`)) {
 		t.Errorf("ARTIFACT.md not overwritten: %s", body)
 	}
 }
@@ -828,7 +828,7 @@ func TestScaffold_Interactive_DescriptionPrompt(t *testing.T) {
 		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
 	}
 	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
-	if !bytes.Contains(body, []byte("description: Reference content for the catalog.")) {
+	if !bytes.Contains(body, []byte(`description: "Reference content for the catalog."`)) {
 		t.Errorf("description from prompt not written: %s", body)
 	}
 }
@@ -1255,7 +1255,7 @@ func TestScaffold_LicenseOnAgent(t *testing.T) {
 		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
 	}
 	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
-	if !bytes.Contains(body, []byte("license: Apache-2.0")) {
+	if !bytes.Contains(body, []byte(`license: "Apache-2.0"`)) {
 		t.Errorf("license not written to ARTIFACT.md: %s", body)
 	}
 }
@@ -1402,5 +1402,79 @@ func TestScaffold_ExtensionTypeWarns(t *testing.T) {
 	body, _ := os.ReadFile(filepath.Join(target, "ARTIFACT.md"))
 	if !bytes.Contains(body, []byte("type: company-extension")) {
 		t.Errorf("expected type: company-extension, got: %s", body)
+	}
+}
+
+// scaffoldYAMLDescription holds ": " and " #", which a plain YAML scalar
+// reads as a nested mapping and a comment.
+const scaffoldYAMLDescription = "Deploys: the service to staging # then verifies the rollout."
+
+// walkScaffolded walks the registry at root, which must hold one artifact,
+// fails the test on any lint error, and returns the record.
+func walkScaffolded(t *testing.T, root string) filesystem.ArtifactRecord {
+	t.Helper()
+	assertLintClean(t, root)
+	reg, err := filesystem.Open(root)
+	if err != nil {
+		t.Fatalf("filesystem.Open(%s): %v", root, err)
+	}
+	records, err := reg.Walk(filesystem.WalkOptions{CollisionPolicy: filesystem.CollisionPolicyHighestWins})
+	if err != nil || len(records) != 1 {
+		t.Fatalf("Walk: records=%d err=%v", len(records), err)
+	}
+	return records[0]
+}
+
+// Spec: §4.3.4, §7.3.1 — the scaffold writes --description and --license
+// as quoted scalars, so a value holding ": " or "#" parses back unchanged
+// and the scaffold lints clean, for a skill's SKILL.md and for an
+// ARTIFACT.md.
+func TestScaffold_DescriptionAndLicenseRoundTripYAMLSyntax(t *testing.T) {
+	const license = "LicenseRef-acme: internal # see LICENSE"
+	for _, typ := range []string{"skill", "agent"} {
+		t.Run(typ, func(t *testing.T) {
+			root := t.TempDir()
+			target := filepath.Join(root, "personal", "deploy")
+			exit, _, stderr := runScaffold([]string{
+				"--type", typ,
+				"--description", scaffoldYAMLDescription,
+				"--license", license,
+				"--yes", target,
+			}, "")
+			if exit != 0 {
+				t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+			}
+			rec := walkScaffolded(t, root)
+			desc, lic := rec.Artifact.Description, rec.Artifact.License
+			if rec.Skill != nil {
+				desc, lic = rec.Skill.Description, rec.Skill.License
+			}
+			if desc != scaffoldYAMLDescription {
+				t.Errorf("description = %q, want %q", desc, scaffoldYAMLDescription)
+			}
+			if lic != license {
+				t.Errorf("license = %q, want %q", lic, license)
+			}
+		})
+	}
+}
+
+// Spec: §7.3.1 — a --description or --license value that is not valid
+// UTF-8 exits 2 before any file is written, because the quoted scalar
+// cannot carry it unchanged.
+func TestScaffold_RefusesInvalidUTF8DescriptionAndLicense(t *testing.T) {
+	for _, args := range [][]string{
+		{"--description", "Deploy \xff the service."},
+		{"--description", "Deploy the service.", "--license", "MIT\xfe"},
+	} {
+		root := t.TempDir()
+		target := filepath.Join(root, "personal", "deploy")
+		exit, _, stderr := runScaffold(append(append([]string{"--type", "agent", "--yes"}, args...), target), "")
+		if exit != 2 || !strings.Contains(stderr, "not valid UTF-8") {
+			t.Errorf("args %q: exit=%d stderr=%s, want exit 2 naming invalid UTF-8", args, exit, stderr)
+		}
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Errorf("args %q: target written (stat err=%v)", args, err)
+		}
 	}
 }

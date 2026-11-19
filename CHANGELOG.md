@@ -64,6 +64,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **A re-embed on a registry with no vector search answers `404 registry.reembed_unavailable`** (§4.7, §6.10) with `retryable: false`, where it answered a retryable `500 registry.unavailable`.
 - **Credentials no longer reach vector outbox errors or trace spans** (§4.7, §13.8): outbox error text drops URL userinfo, query strings, connection-string passwords, and configured secrets, and exported spans drop URL query strings and fragments, so search text and presigned-URL signatures no longer reach the trace backend.
 - **The SDK workspace overlays read `metadata.version` only as YAML decodes it** (§4.3.4, §6.4).
+- **`podium artifact scaffold` quotes `description` and `license`** (§7.3.1): a `--description` or `--license` value that contains `: ` or `#` produces a manifest that parses and lints, where it produced one that lint refused. A value that is not valid UTF-8 exits 2 before any file is written.
 
 ### Documentation
 
