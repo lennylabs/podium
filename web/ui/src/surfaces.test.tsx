@@ -19581,6 +19581,47 @@ describe("the layer panel under the local-source rule", () => {
     expect(panel.textContent).not.toContain("a row moves within its own block");
   });
 
+  // Spec: §13.10 — public mode withholds the reorder affordance only where
+  // the posture read reports that the caller may not manage layers. A
+  // posture that admits the caller keeps the handles live.
+  it("draws live reorder handles in public mode where the posture admits managing every layer", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ public_mode: true, layer_capabilities: { manage_any_layer: true } }),
+      },
+      "/v1/layers": { body: { layers: [adminLayer(), { ...adminLayer(), id: "platform", order: 2 }] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    for (const id of ["company", "platform"]) {
+      const handle = await within(panel).findByRole("button", { name: moveHandleLabel(id) });
+      expect(handle.hasAttribute("disabled")).toBe(false);
+    }
+    expect(panel.textContent).toContain("drag or press the arrow keys on a handle to reorder");
+  });
+
+  // Spec: §13.10 — a panel whose posture read has not answered cannot tell
+  // a public-mode registry from one that gates the reorder on the role, so
+  // it draws no handle and names no reason rather than naming the role to a
+  // public-mode reader. The shell mounts no surface while the read is in
+  // flight, so a failed read is the arm that reaches the panel unanswered.
+  it("holds the reorder handles and the role sentence where the posture read did not answer", async () => {
+    stubRegistry({
+      "/v1/ui/session": { status: 500, body: { code: "registry.unavailable", message: "down" } },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    await within(panel).findAllByTestId("layer-order");
+    expect(panel.querySelectorAll(".drag-handle")).toHaveLength(0);
+    expect(panel.textContent).not.toContain("administrator role");
+    expect(panel.querySelector(".precedence-label .label")?.textContent).toBe("Precedence");
+  });
+
   // Spec: §13.10 — outside public mode a viewer without the administrator
   // role still sees the handles, disabled, with the role as the reason.
   it("keeps the disabled handles and the role sentence for a viewer without the role outside public mode", async () => {

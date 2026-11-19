@@ -635,7 +635,8 @@ function Surface({
    * predict a write. */
   caps: LayerCapabilities;
   /** postureAnswered reports whether the posture read settled anything. The
-   * layer panel's empty state is its only reader below this point. */
+   * layer panel's empty state and its reorder handles read it below this
+   * point. */
   postureAnswered: boolean;
   /** publicMode is the posture read's public_mode, which the layer panel
    * reads to offer no layer control (§13.10). */

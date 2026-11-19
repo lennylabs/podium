@@ -181,9 +181,10 @@ export function LayerPanel({
    * controls are then disabled by readOnly. */
   caps: LayerCapabilities;
   /** postureAnswered reports whether the posture read settled anything. The
-   * empty state below the header is its only reader: a caller the registry
+   * empty state below the header reads it, because a caller the registry
    * resolved none of and a caller whose read did not answer both hold no
-   * subject and no capability, and the two are instructed differently. */
+   * subject and no capability, and the two are instructed differently. The
+   * reorder handles read it too, and are held until the read answers. */
   postureAnswered: boolean;
   /** publicMode is the posture read's public_mode. A public-mode registry
    * admits a layer write only with the operator token, which a browser does
@@ -360,10 +361,14 @@ export function LayerPanel({
   // A public-mode panel offers no layer control, so where no row is movable
   // it draws no handle and states no reason a reorder is refused. A role is
   // not what gates the reorder there, and the browser has no way to supply
-  // the operator token that does.
+  // the operator token that does. Until the posture read has answered, the
+  // panel cannot tell a public-mode registry from one that gates the reorder
+  // on the administrator role, so the handles and the reason are held: drawn
+  // early, a public-mode reader would see the role named as the reason, and
+  // would keep seeing it if the read failed.
   //
   // Spec: §13.10
-  const handles = !publicMode || anyMovable;
+  const handles = postureAnswered && (!publicMode || anyMovable);
 
   // One in-flight guard covers the whole surface. The registry runs the §7.3.1
   // ingest pipeline inside the request, so two open requests for one layer run
@@ -1079,8 +1084,9 @@ function LayerRow({
    * layer and no list, so the panel settles the block and threads the
    * result in. */
   movable: boolean;
-  /** handle is whether the row draws its reorder handle. A public-mode panel
-   * with no movable row draws none, and the handle cell stays empty so the
+  /** handle is whether the row draws its reorder handle. A panel whose
+   * posture read has not answered draws none, and neither does a public-mode
+   * panel with no movable row; the handle cell then stays empty so the
    * columns keep their widths. */
   handle: boolean;
   readOnly: boolean;
