@@ -2329,6 +2329,12 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		if c.OldHash != "" {
 			entry["old_hash"] = c.OldHash
 		}
+		// Spec: §7.3.1 (Removed artifacts) — a removed version holds its
+		// (id, version) whatever the new content hash is, so the entry says so
+		// and a reader does not take equal hashes for a content difference.
+		if c.Removed {
+			entry["removed"] = true
+		}
 		conflicts = append(conflicts, entry)
 	}
 	// A snapshot whose only outcome is conflicts (nothing accepted, nothing
@@ -2404,12 +2410,16 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 
 // conflictMessage is the ingest.immutable_violation message for one conflict.
 // A removed version holds its (id, version) whatever the new content hash is,
-// so its message states the removal rather than a content difference.
+// so its message states the removal rather than a content difference. The
+// layer that contributed the version can be live or unregistered, so the
+// message names both ways that layer serves the version again: a reingest of
+// the same content into it, or, for a version its unregister removed, a
+// restore of the layer.
 //
 // Spec: §7.3.1 (Removed artifacts)
 func conflictMessage(c ingest.ConflictReport) string {
 	if c.Removed {
-		return fmt.Sprintf("same-version conflict: %s@%s is a removed version, which only its own layer restores, with the same content, until the registry purges it; bump the version",
+		return fmt.Sprintf("same-version conflict: %s@%s is a removed version, which only the layer that contributed it serves again, by a reingest of the same content or, when the layer's unregister removed it, a restore of the layer, until the registry purges it; bump the version",
 			c.ArtifactID, c.Version)
 	}
 	return fmt.Sprintf("same-version content conflict: %s@%s already exists with different content; bump the version",

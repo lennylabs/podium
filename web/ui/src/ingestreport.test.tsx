@@ -406,6 +406,60 @@ describe('the finished reingest report', () => {
     );
   });
 
+  // A removed version holds its (id, version) whatever the incoming bytes
+  // are, so its hashes can be equal. The attention row and the conflict list
+  // name the removal and who serves the version again rather than calling it
+  // different content, and the removed hash is labelled as such.
+  it('names a removed version rather than different content', () => {
+    const removed = {
+      artifact_id: 'ops/moved',
+      version: '1.0.0',
+      old_hash: 'sha256:same',
+      new_hash: 'sha256:same',
+      code: 'ingest.immutable_violation',
+      removed: true,
+    };
+    const cause =
+      'only the layer that contributed it serves it again, by a reingest of the same content or, when that layer was unregistered, a restore, until the registry purges it.';
+    report({ accepted: 1, idempotent: 0, conflicts: [removed] });
+    const row = screen.getByLabelText('Needs attention').querySelector('.attention-row');
+    expect(row?.textContent).toBe(
+      `⇄1 immutability conflict — the version is a removed version, which ${cause} Bump the version and reingest.`,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '1 immutability conflict' }));
+    const list = screen.getByLabelText('Immutability conflicts');
+    expect(list.querySelector('.ingest-detail-lede')?.textContent).toBe(
+      `Each version is a removed version, which ${cause} A published version is immutable, so bump the version and reingest.`,
+    );
+    const entry = within(list).getByRole('listitem');
+    expect(within(entry).getByText('removed version')).toBeTruthy();
+    expect(within(entry).getByText('removed').nextElementSibling?.textContent).toBe('sha256:same');
+    expect(within(entry).queryByText('stored')).toBeNull();
+    expect(list.textContent).not.toContain('different content');
+  });
+
+  // A snapshot with a removed version and a version republished with new
+  // bytes names both causes, and labels each entry's stored hash by its own.
+  it('names both causes when a removed version and a content conflict arrive together', () => {
+    report({
+      accepted: 1,
+      idempotent: 0,
+      conflicts: [
+        { artifact_id: 'ops/moved', version: '1.0.0', old_hash: 'sha256:same', new_hash: 'sha256:same', code: 'ingest.immutable_violation', removed: true },
+        { artifact_id: 'platform/lint', version: '1.0.0', old_hash: 'sha256:aaa', new_hash: 'sha256:bbb', code: 'ingest.immutable_violation' },
+      ],
+    });
+    const row = screen.getByLabelText('Needs attention').querySelector('.attention-row');
+    expect(row?.textContent).toContain('— a version was republished with different content, or is a removed version, which only the layer');
+    fireEvent.click(screen.getByRole('button', { name: '2 immutability conflicts' }));
+    const list = screen.getByLabelText('Immutability conflicts');
+    expect(list.querySelector('.ingest-detail-lede')?.textContent).toContain(
+      'Each version already exists with different content or is a removed version, which only the layer',
+    );
+    expect(within(list).getByText('removed')).toBeTruthy();
+    expect(within(list).getByText('stored')).toBeTruthy();
+  });
+
   // A clean snapshot needs nothing, so nothing is drawn asking for it.
   it('draws no attention block where the snapshot rejected and conflicted on nothing', () => {
     report({ accepted: 2, idempotent: 0, lint_failures: 0 });

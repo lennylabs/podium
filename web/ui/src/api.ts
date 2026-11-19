@@ -395,6 +395,10 @@ export interface IngestConflict {
   old_hash?: string;
   new_hash?: string;
   code: string;
+  /** True when a removed version holds the (id, version), which only the
+   * layer that contributed it serves again until the purge, whatever the
+   * new content hash is. Absent otherwise. */
+  removed?: boolean;
 }
 
 export interface IngestRejection {

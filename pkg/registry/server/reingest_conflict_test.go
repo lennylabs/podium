@@ -68,8 +68,9 @@ func TestReingest_PureConflictReturnsImmutableViolation(t *testing.T) {
 }
 
 // Spec: §7.3.1 (Removed artifacts) — a conflict on a removed version states
-// the removal rather than a content difference, and a conflict whose holder's
-// hash is unknown carries no old_hash member.
+// the removal rather than a content difference, in the message and with a
+// removed member on its entry; another conflict carries no removed member, and
+// a conflict whose holder's hash is unknown carries no old_hash member.
 func TestReingest_RemovedVersionConflictMessage(t *testing.T) {
 	t.Parallel()
 	runner := func(_ context.Context, _ store.LayerConfig, _ *server.BreakGlass) (*ingest.Result, error) {
@@ -94,13 +95,14 @@ func TestReingest_RemovedVersionConflictMessage(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	const want = "same-version conflict: ops/moved@1.0.0 is a removed version, which only its own layer restores, with the same content, until the registry purges it; bump the version (and 1 more)"
+	const want = "same-version conflict: ops/moved@1.0.0 is a removed version, which only the layer that contributed it serves again, by a reingest of the same content or, when the layer's unregister removed it, a restore of the layer, until the registry purges it; bump the version (and 1 more)"
 	if resp.StatusCode != http.StatusConflict || env.Message != want || len(env.Details.Conflicts) != 2 {
 		t.Fatalf("status=%d message=%q conflicts=%v, want 409, %q, and two entries", resp.StatusCode, env.Message, env.Details.Conflicts, want)
 	}
 	_, unknown := env.Details.Conflicts[1]["old_hash"]
-	if env.Details.Conflicts[0]["old_hash"] != "sha256:same" || unknown {
-		t.Errorf("conflicts = %v, want old_hash on the removed version and none on the unknown holder", env.Details.Conflicts)
+	_, otherRemoved := env.Details.Conflicts[1]["removed"]
+	if env.Details.Conflicts[0]["old_hash"] != "sha256:same" || unknown || env.Details.Conflicts[0]["removed"] != true || otherRemoved {
+		t.Errorf("conflicts = %v, want old_hash and removed: true on the removed version, and neither on the unknown holder", env.Details.Conflicts)
 	}
 }
 
