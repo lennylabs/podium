@@ -144,7 +144,7 @@ func rulesWith(client *http.Client, th Thresholds) []Rule {
 		},
 		ruleManifestSize{th: th},
 		ruleArtifactBodyForSkill{},
-		ruleProseReferenceResolution{HTTPClient: client},
+		ruleProseReferenceResolution{HTTPClient: client, Concurrency: th.URLConcurrency, Logf: log.Printf},
 		ruleDomainImportsResolve{},
 		ruleDomainImportCycle{},
 		ruleDomainImportBroadGlob{},

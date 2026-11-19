@@ -52,7 +52,7 @@ output using [the report template](assets/variance-report.md.j2).
 The ingest-time linter resolves the target of every inline link and image (`[text](path)` and `![alt](path)`) in the prose body, as CommonMark parses it:
 
 - A relative link must name a bundled file, a directory of the package, one of the artifact's own manifest files, or the canonical ID of another artifact in the catalog. A link to a directory, with or without a trailing `/`, resolves when at least one bundled file lies below it, so `[templates](assets/templates/)` names the bundled templates. A directory that holds no bundled file does not resolve.
-- An `http` or `https` link is validated with an HTTP HEAD request that must return 200 or a 3xx redirect. `podium lint --offline` skips this probe.
+- An `http` or `https` link is validated with an HTTP HEAD request that must return 200 or a 3xx redirect within 5 seconds. Each distinct URL is probed once per run, however many links name it, and at most `PODIUM_LINT_URL_CONCURRENCY` probes run at once, 8 by default. A run that probes more than 20 distinct URLs logs its progress, on standard error for `podium lint` and in the registry log for ingest. `podium lint --offline` skips this probe.
 - A link that resolves to none of these is an ingest error. A link to a bundled file the package does not contain is such an error.
 - A relative link that leaves the package, such as `../other-skill/SKILL.md`, is a warning. It names no bundled file, and it resolves only while the artifacts sit side by side in one source tree, which a consumer that installs one of them does not reproduce. The diagnostic recommends naming the other artifact by its canonical ID.
 

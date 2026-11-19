@@ -1,6 +1,9 @@
 package lint
 
-import "strconv"
+import (
+	"fmt"
+	"strconv"
+)
 
 // Default similarity thresholds for the §7.3.1 catalog advisories.
 const (
@@ -55,7 +58,17 @@ type Thresholds struct {
 	DescriptionSimilarity float64
 	// ContentSimilarity is the §7.3.1 near-duplicate content threshold.
 	ContentSimilarity float64
+	// URLConcurrency is the §4.4 most URL probes one run holds in flight,
+	// from 1 to MaxURLConcurrency.
+	URLConcurrency int
 }
+
+// DefaultURLConcurrency and MaxURLConcurrency bound the §4.4 URL probes one
+// lint run holds in flight (§13.12 PODIUM_LINT_URL_CONCURRENCY).
+const (
+	DefaultURLConcurrency = 8
+	MaxURLConcurrency     = 64
+)
 
 // DefaultThresholds returns the spec default for every threshold.
 //
@@ -72,6 +85,7 @@ func DefaultThresholds() Thresholds {
 		MinDescriptionWords:    MinDescriptionWords,
 		DescriptionSimilarity:  DefaultDescriptionSimilarity,
 		ContentSimilarity:      DefaultContentSimilarity,
+		URLConcurrency:         DefaultURLConcurrency,
 	}
 }
 
@@ -94,6 +108,9 @@ func (t Thresholds) resolved() Thresholds {
 	}
 	if !validSimilarity(t.ContentSimilarity) {
 		t.ContentSimilarity = d.ContentSimilarity
+	}
+	if t.URLConcurrency < 1 || t.URLConcurrency > MaxURLConcurrency {
+		t.URLConcurrency = d.URLConcurrency
 	}
 	return t
 }
@@ -132,6 +149,7 @@ func ThresholdsFromEnv(getenv func(string) string, logf func(format string, args
 		MinDescriptionWords:    e.positiveInt("PODIUM_LINT_MIN_DESCRIPTION_WORDS", d.MinDescriptionWords),
 		DescriptionSimilarity:  e.similarity("PODIUM_LINT_DESCRIPTION_SIMILARITY", d.DescriptionSimilarity),
 		ContentSimilarity:      e.similarity("PODIUM_LINT_CONTENT_SIMILARITY", d.ContentSimilarity),
+		URLConcurrency:         e.intInRange("PODIUM_LINT_URL_CONCURRENCY", 1, MaxURLConcurrency, d.URLConcurrency),
 	}
 }
 
@@ -170,6 +188,20 @@ func (e thresholdEnv) positive(name string, bits int, def int64) int64 {
 
 func (e thresholdEnv) positiveInt(name string, def int) int {
 	return int(e.positive(name, strconv.IntSize, int64(def)))
+}
+
+// intInRange parses name as a base-10 integer from lo to hi.
+func (e thresholdEnv) intInRange(name string, lo, hi, def int) int {
+	v := e.lookup(name)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < lo || n > hi {
+		e.invalid(name, v, fmt.Sprintf("want an integer from %d to %d", lo, hi), def)
+		return def
+	}
+	return n
 }
 
 // similarity parses name as a number in [0.5, 1.0].

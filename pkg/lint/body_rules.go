@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/manifest"
@@ -87,14 +88,35 @@ type ruleProseReferenceResolution struct {
 	// HTTPClient drives URL HEAD checks. When nil, URL references
 	// are not validated; offline ingest sees a single notice.
 	HTTPClient *http.Client
+	// Concurrency is the most probes the run holds in flight (§13.12
+	// PODIUM_LINT_URL_CONCURRENCY). A value outside 1 to MaxURLConcurrency
+	// takes the default.
+	Concurrency int
+	// Logf receives the progress lines of a long run. Nil logs nothing.
+	Logf func(format string, args ...any)
+	// now reads the clock that paces the progress lines; nil is time.Now.
+	// Tests substitute it.
+	now func() time.Time
+	// timeout overrides the §4.4 probe deadline for tests; zero is
+	// urlProbeTimeout.
+	timeout time.Duration
 }
+
+// urlProgressThreshold is the distinct-URL count above which a run logs its
+// progress, and urlProgressInterval the least time between two progress
+// lines (§4.4).
+const (
+	urlProgressThreshold = 20
+	urlProgressInterval  = 10 * time.Second
+	urlProbeTimeout      = 5 * time.Second
+)
 
 // NewProseReferenceRule returns a Rule that validates prose
 // references against bundled files (always) and against URL HEAD
 // checks (when client is non-nil). Callers that ingest offline
 // pass nil to skip the network probe.
 func NewProseReferenceRule(client *http.Client) Rule {
-	return ruleProseReferenceResolution{HTTPClient: client}
+	return ruleProseReferenceResolution{HTTPClient: client, Concurrency: DefaultURLConcurrency}
 }
 
 func (ruleProseReferenceResolution) Code() string { return "lint.prose_reference" }
@@ -108,6 +130,14 @@ func (r ruleProseReferenceResolution) Check(ctx context.Context, _ *filesystem.R
 	// record set: the full registry walk for `podium lint`, the layer's own
 	// records at single-layer ingest.
 	catalog := artifactCatalog(records)
+	// Spec: §4.4 — URL references are gathered first and probed once per
+	// distinct URL after the scan, concurrently, so each reference takes its
+	// URL's outcome in its own position.
+	type urlRef struct {
+		artifactID, href string
+		at               int
+	}
+	var refs []urlRef
 	// spec: §9.3 — this rule scans every record's body and may issue a URL
 	// HEAD per reference, so it is the long-running work the constraint
 	// names; it checks for cancellation before each record.
@@ -123,10 +153,8 @@ func (r ruleProseReferenceResolution) Check(ctx context.Context, _ *filesystem.R
 			if scheme, ok := urlScheme(href); ok {
 				// Spec: §4.4 — an http or https target is a URL reference. A
 				// target with any other scheme, such as mailto:, is not checked.
-				if scheme == "http" || scheme == "https" {
-					if d := r.checkURL(ctx, rec.ID, href); d != nil {
-						out = append(out, *d)
-					}
+				if (scheme == "http" || scheme == "https") && r.HTTPClient != nil {
+					refs = append(refs, urlRef{artifactID: rec.ID, href: href, at: len(out)})
 				}
 				continue
 			}
@@ -147,7 +175,103 @@ func (r ruleProseReferenceResolution) Check(ctx context.Context, _ *filesystem.R
 			}
 		}
 	}
-	return out
+	if len(refs) == 0 {
+		return out
+	}
+	hrefs := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		hrefs = append(hrefs, ref.href)
+	}
+	failures := r.probeURLs(ctx, hrefs)
+	// Each failed reference is inserted at the position its scan reached, so
+	// the diagnostics keep the order of a serial check.
+	merged := make([]Diagnostic, 0, len(out)+len(refs))
+	next := 0
+	for _, ref := range refs {
+		merged = append(merged, out[next:ref.at]...)
+		next = ref.at
+		if msg, failed := failures[ref.href]; failed {
+			merged = append(merged, Diagnostic{
+				ArtifactID: ref.artifactID,
+				Code:       "lint.prose_reference",
+				Severity:   SeverityError,
+				Message:    msg,
+			})
+		}
+	}
+	return append(merged, out[next:]...)
+}
+
+// probeURLs probes each distinct URL of hrefs once, at most r.Concurrency at
+// a time, and returns the failure message of each URL that failed. A run
+// above urlProgressThreshold distinct URLs logs its start, its progress at
+// most every urlProgressInterval, and its closing counts through r.Logf.
+// Cancellation stops the workers before their next probe, and a URL left
+// unprobed reports no failure.
+//
+// Spec: §4.4
+func (r ruleProseReferenceResolution) probeURLs(ctx context.Context, hrefs []string) map[string]string {
+	var distinct []string
+	seen := map[string]bool{}
+	for _, h := range hrefs {
+		if !seen[h] {
+			seen[h] = true
+			distinct = append(distinct, h)
+		}
+	}
+	workers := r.Concurrency
+	if workers < 1 || workers > MaxURLConcurrency {
+		workers = DefaultURLConcurrency
+	}
+	workers = min(workers, len(distinct))
+	now := r.now
+	if now == nil {
+		now = time.Now
+	}
+	logf := func(format string, args ...any) {}
+	if r.Logf != nil && len(distinct) > urlProgressThreshold {
+		logf = r.Logf
+	}
+	start := now()
+	logf("lint.prose_reference: checking %d URLs, %d at a time", len(distinct), workers)
+
+	var (
+		mu       sync.Mutex
+		failures = map[string]string{}
+		done     int
+		lastLog  = start
+	)
+	jobs := make(chan string)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for href := range jobs {
+				msg, failed := r.probeURL(ctx, href)
+				mu.Lock()
+				done++
+				if failed {
+					failures[href] = msg
+				}
+				if t := now(); t.Sub(lastLog) >= urlProgressInterval && done < len(distinct) {
+					lastLog = t
+					logf("lint.prose_reference: checked %d of %d URLs", done, len(distinct))
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, href := range distinct {
+		if ctx.Err() != nil {
+			break
+		}
+		jobs <- href
+	}
+	close(jobs)
+	wg.Wait()
+	logf("lint.prose_reference: checked %d URLs in %s, %d failed", done, now().Sub(start).Round(time.Millisecond), len(failures))
+	return failures
 }
 
 // artifactCatalog returns the set of canonical artifact IDs in the linted
@@ -238,43 +362,31 @@ func bundledDirectory(resources map[string][]byte, dir string) bool {
 	return false
 }
 
-func (r ruleProseReferenceResolution) checkURL(ctx context.Context, artifactID, href string) *Diagnostic {
-	if r.HTTPClient == nil {
-		return nil
+// probeURL sends one HEAD for href under the §4.4 probe deadline and returns
+// the failure message and true when the reference does not resolve.
+func (r ruleProseReferenceResolution) probeURL(ctx context.Context, href string) (string, bool) {
+	deadline := urlProbeTimeout
+	if r.timeout > 0 {
+		deadline = r.timeout
 	}
-	ctx, cancel := contextWithTimeout(ctx, 5*time.Second)
+	ctx, cancel := contextWithTimeout(ctx, deadline)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, href, nil)
 	if err != nil {
-		return &Diagnostic{
-			ArtifactID: artifactID,
-			Code:       "lint.prose_reference",
-			Severity:   SeverityError,
-			Message:    fmt.Sprintf("prose URL %q cannot be requested: %v", href, err),
-		}
+		return fmt.Sprintf("prose URL %q cannot be requested: %v", href, err), true
 	}
 	resp, err := r.HTTPClient.Do(req)
 	if err != nil {
-		return &Diagnostic{
-			ArtifactID: artifactID,
-			Code:       "lint.prose_reference",
-			Severity:   SeverityError,
-			Message:    fmt.Sprintf("prose URL %q HEAD failed: %v", href, err),
-		}
+		return fmt.Sprintf("prose URL %q HEAD failed: %v", href, err), true
 	}
 	defer func() { _ = resp.Body.Close() }()
 	// Spec: §4.4 — a URL reference is valid when HEAD returns 200
 	// or any 3xx redirect. Other 2xx codes (201, 204, 206) do not confirm
 	// the named resource is served, so they are rejected.
 	if resp.StatusCode == http.StatusOK || (resp.StatusCode >= 300 && resp.StatusCode < 400) {
-		return nil
+		return "", false
 	}
-	return &Diagnostic{
-		ArtifactID: artifactID,
-		Code:       "lint.prose_reference",
-		Severity:   SeverityError,
-		Message:    fmt.Sprintf("prose URL %q HEAD returned HTTP %d", href, resp.StatusCode),
-	}
+	return fmt.Sprintf("prose URL %q HEAD returned HTTP %d", href, resp.StatusCode), true
 }
 
 // urlScheme returns the lowercased URL scheme of href and true when href
