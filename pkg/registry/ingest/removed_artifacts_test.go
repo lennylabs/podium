@@ -185,6 +185,11 @@ func TestIngest_RemovedVersionInAnotherLayerIsRefused(t *testing.T) {
 	if res.Accepted != 0 || len(res.Conflicts) != 1 || res.Conflicts[0].ArtifactID != "ops/gone" {
 		t.Fatalf("other layer's cycle: accepted=%d conflicts=%+v, want one conflict on ops/gone", res.Accepted, res.Conflicts)
 	}
+	// The conflict names the removed row as the holder, with its hash, which
+	// equals the new one because the bytes are the same.
+	if c := res.Conflicts[0]; !c.Removed || c.OldHash == "" || c.OldHash != c.NewHash {
+		t.Errorf("conflict = %+v, want Removed with OldHash equal to NewHash", c)
+	}
 	erAssertUnserved(t, reg, "ops/gone")
 }
 

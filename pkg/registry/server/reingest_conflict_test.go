@@ -67,6 +67,43 @@ func TestReingest_PureConflictReturnsImmutableViolation(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.1 (Removed artifacts) — a conflict on a removed version states
+// the removal rather than a content difference, and a conflict whose holder's
+// hash is unknown carries no old_hash member.
+func TestReingest_RemovedVersionConflictMessage(t *testing.T) {
+	t.Parallel()
+	runner := func(_ context.Context, _ store.LayerConfig, _ *server.BreakGlass) (*ingest.Result, error) {
+		return &ingest.Result{Conflicts: []ingest.ConflictReport{
+			{ArtifactID: "ops/moved", Version: "1.0.0", OldHash: "sha256:same", NewHash: "sha256:same", Removed: true},
+			{ArtifactID: "ops/raced", Version: "2.0.0", NewHash: "sha256:new"},
+		}}, nil
+	}
+	base, cleanup := newRunnerHarness(t, runner)
+	defer cleanup()
+	resp, err := http.Post(base+"/v1/layers/reingest?id=team-shared", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var env struct {
+		Message string `json:"message"`
+		Details struct {
+			Conflicts []map[string]any `json:"conflicts"`
+		} `json:"details"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	const want = "same-version conflict: ops/moved@1.0.0 is a removed version, which only its own layer restores, with the same content, until the registry purges it; bump the version (and 1 more)"
+	if resp.StatusCode != http.StatusConflict || env.Message != want || len(env.Details.Conflicts) != 2 {
+		t.Fatalf("status=%d message=%q conflicts=%v, want 409, %q, and two entries", resp.StatusCode, env.Message, env.Details.Conflicts, want)
+	}
+	_, unknown := env.Details.Conflicts[1]["old_hash"]
+	if env.Details.Conflicts[0]["old_hash"] != "sha256:same" || unknown {
+		t.Errorf("conflicts = %v, want old_hash on the removed version and none on the unknown holder", env.Details.Conflicts)
+	}
+}
+
 // Spec: §7.3.1 — a mixed snapshot (some artifacts accepted alongside
 // a conflict) stays a 200 partial success, mirroring the pipeline's lint
 // hard-error rule, but still reports each conflict per-artifact with the named
