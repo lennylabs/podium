@@ -253,7 +253,7 @@ A 0.7.0 registry in public mode refuses the following with `403 auth.forbidden` 
 
 - Before the upgrade, generate a secret of at least 32 characters, for example with `openssl rand -hex 32`, and set it as `PODIUM_OPERATOR_TOKEN` on the registry. A shorter value, or one that contains whitespace or a control character such as the trailing newline of a secret file, refuses startup with `config.invalid`.
 - Set the same value in the environment of whoever runs those commands. The CLI sends it when it is set.
-- A public-mode registry with no token keeps serving every read, including the layer list, and serves the layers its startup configuration declares. It refuses every layer change over the API. The re-embed after a model change and the overlap recomputation the registry runs on its own do not go through these endpoints and are unaffected.
+- A public-mode registry with no token keeps serving every read, including the layer list, and serves the layers its startup configuration declares. It refuses every layer change over the API. The overlap recomputation the registry runs on its own does not go through these endpoints and is unaffected. A re-embed after a model change runs only through `POST /v1/admin/reembed`, which `podium admin reembed` calls, so it needs the token.
 - The web UI sends no token, so in public mode it no longer offers layer controls.
 - An inbound webhook delivery cannot carry the token, so in public mode a webhook-triggered reingest of a layer that names a filesystem path on the registry host is refused. A webhook for a `git` layer is unaffected.
 - A registry with no identity provider and not in public mode does not read the variable.
