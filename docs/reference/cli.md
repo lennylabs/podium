@@ -1152,7 +1152,7 @@ podium admin show-effective <user-id> [--group <g>]... --registry <url>
 
 ### `podium admin reembed`
 
-Regenerates embeddings. The registry starts no re-embed on its own when the configured embedding model changes, so run this command with no flags in each tenant after a model change. A model change on Pinecone, Weaviate Cloud, or Qdrant Cloud also needs a fresh index or collection before the pass, as [Model changes on Pinecone, Weaviate Cloud, and Qdrant Cloud](../deployment/services/vector-backends#model-changes-on-pinecone-weaviate-cloud-and-qdrant-cloud) describes. The command also runs ad-hoc and scoped re-embeds.
+Regenerates embeddings. The registry starts no re-embed on its own when the configured embedding model changes, so run this command with no scoping flag in each tenant after a model change. A model change on Pinecone, Weaviate Cloud, or Qdrant Cloud also needs a fresh index or collection before the pass, as [Model changes on Pinecone, Weaviate Cloud, and Qdrant Cloud](../deployment/services/vector-backends#model-changes-on-pinecone-weaviate-cloud-and-qdrant-cloud) describes. The command also runs ad-hoc and scoped re-embeds.
 
 ```
 podium admin reembed [--artifact <id> --version <semver>]
