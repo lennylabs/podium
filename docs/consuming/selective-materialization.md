@@ -73,7 +73,8 @@ standard error, and leaves it out of the next lock in these cases:
 A directory that is a symbolic link to another directory inside the target is
 followed, as it is when sync writes. A shared config file that is a symbolic
 link to another file inside the target, such as `GEMINI.md` linked to
-`AGENTS.md`, is updated through the link, and the link stays. Sync never deletes
+`AGENTS.md`, is updated through the link, and the link stays. Sync creates the
+linked file when it does not exist yet. Sync never deletes
 a directory with its contents, and it removes a parent directory only while the
 directory is empty.
 
