@@ -129,7 +129,14 @@ func resolveDanglingLink(realDest, full, rel string) (string, error) {
 		return refuse("that can be read")
 	}
 	if !filepath.IsAbs(dest) {
-		dest = filepath.Join(filepath.Dir(full), dest)
+		// The kernel resolves a relative link against the directory the link
+		// sits in, which a directory link on the way can move away from the
+		// lexical parent of full.
+		linkDir, err := filepath.EvalSymlinks(filepath.Dir(full))
+		if err != nil {
+			return refuse("in an existing directory")
+		}
+		dest = filepath.Join(linkDir, dest)
 	}
 	parent, err := filepath.EvalSymlinks(filepath.Dir(dest))
 	if err != nil {

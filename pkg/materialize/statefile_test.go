@@ -201,6 +201,39 @@ func TestWrite_MergeTargetDanglingLinkInsideCreated(t *testing.T) {
 	}
 }
 
+// Spec: §6.6 — a dangling link with a relative target names a file relative
+// to the directory the link sits in, as the kernel resolves it, also when a
+// directory link leads to that directory. The write creates sub/AGENTS.md
+// for docs/GEMINI.md -> ../AGENTS.md under docs -> sub/deep, and a second
+// write updates the same file through the link.
+func TestWrite_DanglingRelativeLinkThroughDirectoryLink(t *testing.T) {
+	t.Parallel()
+	dest := filepath.Join(t.TempDir(), "target")
+	if err := os.MkdirAll(filepath.Join(dest, "sub", "deep"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	mustSymlink(t, "sub/deep", filepath.Join(dest, "docs"))
+	mustSymlink(t, "../AGENTS.md", filepath.Join(dest, "sub", "deep", "GEMINI.md"))
+	for i, content := range []string{"first rules", "second rules"} {
+		err := Write(dest, []adapter.File{
+			{Path: "docs/GEMINI.md", Op: adapter.OpInject, Key: "style/house", Content: []byte(content)},
+		})
+		if err != nil {
+			t.Fatalf("Write %d through a relative dangling link: %v", i+1, err)
+		}
+		got, err := os.ReadFile(filepath.Join(dest, "docs", "GEMINI.md"))
+		if err != nil || !strings.Contains(string(got), content) {
+			t.Fatalf("Write %d: docs/GEMINI.md = (%q, %v), want the injected block", i+1, got, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(dest, "AGENTS.md")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("AGENTS.md at the destination root: lstat err = %v, want not exist", err)
+	}
+	if info, err := os.Lstat(filepath.Join(dest, "sub", "deep", "GEMINI.md")); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Errorf("sub/deep/GEMINI.md must stay a link; lstat = (%v, %v)", info, err)
+	}
+}
+
 // Spec: §6.6, §7.8 — a directory link inside the destination that resolves
 // into .git or into the sync state fails the write before anything is
 // written, so a committed skills -> .git/hooks link cannot plant a file in
