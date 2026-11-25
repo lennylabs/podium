@@ -13,6 +13,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/storage/memory"
 )
 
@@ -55,9 +56,10 @@ func (Git) Trigger() TriggerModel { return TriggerWebhook }
 // ref include PriorRef in its ancestry? When PriorRef is empty, the
 // clone is shallow.
 //
-// The snapshot runs under the FetchTimeout deadline, so a remote that hangs or
-// trickles data fails the snapshot as ErrSourceUnreachable instead of holding
-// the layer's ingest cycle, and its claim, without bound.
+// The snapshot runs under the FetchTimeout deadline on every transport, so a
+// remote that hangs or trickles data fails the snapshot as
+// ErrSourceUnreachable instead of holding the layer's ingest cycle, and its
+// claim, without bound.
 //
 // Spec: §7.3.1 (Source unreachable), §13.12
 func (g Git) Snapshot(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
@@ -73,7 +75,9 @@ func (g Git) Snapshot(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
 	}
 	fetchCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	snap, err := snapshotGit(fetchCtx, cfg)
+	proxyOpts, release := snapshotProxyOptions(fetchCtx, cfg.Repo)
+	defer release()
+	snap, err := boundedSnapshot(fetchCtx, cfg, proxyOpts)
 	// The caller's own cancellation or deadline is reported as the clone
 	// error; only the expiry of this deadline names the setting. The clone
 	// error is dropped in that case, because its cause is the deadline.
@@ -84,14 +88,51 @@ func (g Git) Snapshot(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
 	return snap, err
 }
 
+// boundedSnapshot runs snapshotGit and returns no later than ctx's end.
+//
+// The http transport honours ctx on every request, and the ssh transport
+// dials through deadlineDialer, which ends the connection with ctx. go-git's
+// git:// transport dials with net.Dial, with no deadline and no hook, before
+// it reads ctx, so a git:// remote whose address drops the connection attempt
+// keeps the clone in that dial until the operating system abandons it, which
+// takes a minute or two. The clone therefore runs in its own goroutine, and
+// this function returns at ctx's end without waiting for it. That goroutine
+// outlives the snapshot only in that git:// dial: it holds one connection
+// attempt and an empty in-memory storer, and once the dial ends it reads an
+// expired ctx, fails, and closes the connection.
+func boundedSnapshot(ctx context.Context, cfg LayerConfig, proxyOpts transport.ProxyOptions) (*Snapshot, error) {
+	type result struct {
+		snap *Snapshot
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		snap, err := snapshotGit(ctx, cfg, proxyOpts)
+		done <- result{snap, err}
+	}()
+	select {
+	case r := <-done:
+		return r.snap, r.err
+	case <-ctx.Done():
+		// A clone that finished as the deadline passed keeps its result.
+		select {
+		case r := <-done:
+			return r.snap, r.err
+		default:
+			return nil, fmt.Errorf("%w: %v", ErrSourceUnreachable, ctx.Err())
+		}
+	}
+}
+
 // snapshotGit clones cfg.Repo under ctx and reads the tree at cfg.Ref. The
 // reads after the clone use the in-memory storer and make no network request.
-func snapshotGit(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
+func snapshotGit(ctx context.Context, cfg LayerConfig, proxyOpts transport.ProxyOptions) (*Snapshot, error) {
 	storer := memory.NewStorage()
 	cloneOpts := &git.CloneOptions{
 		URL:           cfg.Repo,
 		ReferenceName: refNameFor(cfg.Ref),
 		SingleBranch:  true,
+		ProxyOptions:  proxyOpts,
 	}
 	if cfg.PriorRef == "" {
 		cloneOpts.Depth = 1
