@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
@@ -236,7 +237,11 @@ func TestUsageReport_PublicAndUnlayeredRegistries(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(layerIDs(pub), []string{"team", "secret"}) || pub.Totals.Loads != 18 {
 		t.Errorf("public report: layers %v loads %d err %v", layerIDs(pub), pub.Totals.Loads, err)
 	}
-	bare := core.New(f.st, "t", nil)
+	// A registry with no layer list reads the report window from the clock of
+	// its usage counter, so it takes a counter on the fixture's frozen clock.
+	// With no counter it reads the real clock, and the seeded rows age out of
+	// the default 30-day window.
+	bare := core.New(f.st, "t", nil).WithUsageCounts(core.NewUsageCounter(clock.NewFrozen(usageNow)))
 	rep, err := bare.UsageReport(context.Background(), usageAlice, q(nil)())
 	if err != nil || !reflect.DeepEqual(layerIDs(rep), []string{"secret", "team"}) || rep.Totals.Loads != 18 {
 		t.Errorf("unlayered report: layers %v loads %d err %v", layerIDs(rep), rep.Totals.Loads, err)
