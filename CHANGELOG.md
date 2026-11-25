@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **A deadline on each `git` layer snapshot** (§7.3.1, §13.12): every ingest of a `git` layer, from a webhook, `podium layer reingest`, or `podium layer watch`, clones under `PODIUM_GIT_FETCH_TIMEOUT` (`registry.yaml` key `git_fetch_timeout`, default `10m`). A remote that hangs or trickles data no longer holds the ingest and the layer's ingest claim indefinitely: a snapshot that does not finish within the deadline fails the ingest with `ingest.source_unreachable` and a message that names the setting, hands the claim back, and leaves the served artifacts in place. A value that is not a duration above zero refuses startup with `config.invalid`. `podium config show --server` reports the resolved value as `git_fetch_timeout`.
+
 ## [0.7.0] - 2026-11-19
 
 ### Added

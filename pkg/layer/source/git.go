@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -15,10 +16,27 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 )
 
+// DefaultFetchTimeout is the §13.12 default of PODIUM_GIT_FETCH_TIMEOUT, the
+// deadline of one Git snapshot.
+//
+// Spec: §7.3.1, §13.12
+const DefaultFetchTimeout = 10 * time.Minute
+
+// FetchTimeoutSetting names the operator setting that sets Git.FetchTimeout.
+// A snapshot that exceeds the deadline names it in its error, so an operator
+// who reads ingest.source_unreachable knows which value to raise.
+const FetchTimeoutSetting = "PODIUM_GIT_FETCH_TIMEOUT"
+
 // Git is the built-in git LayerSourceProvider per spec §4.6 source
 // types and §7.3.1 ingestion triggers. It clones the configured repo
 // in-memory and exposes the tree at the configured ref as an fs.FS.
-type Git struct{}
+type Git struct {
+	// FetchTimeout bounds one Snapshot: the clone and the resolution of the
+	// ref's tree. The returned Files read the in-memory clone and make no
+	// network request. Zero selects DefaultFetchTimeout, so a Git value built
+	// without the setting still never waits on a remote without bound.
+	FetchTimeout time.Duration
+}
 
 // ID returns "git".
 func (Git) ID() string { return "git" }
@@ -36,14 +54,39 @@ func (Git) Trigger() TriggerModel { return TriggerWebhook }
 // provider can answer the §7.3.1 force-push question: does the new
 // ref include PriorRef in its ancestry? When PriorRef is empty, the
 // clone is shallow.
-func (Git) Snapshot(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
+//
+// The snapshot runs under the FetchTimeout deadline, so a remote that hangs or
+// trickles data fails the snapshot as ErrSourceUnreachable instead of holding
+// the layer's ingest cycle, and its claim, without bound.
+//
+// Spec: §7.3.1 (Source unreachable), §13.12
+func (g Git) Snapshot(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
 	if cfg.Repo == "" {
 		return nil, fmt.Errorf("%w: git source requires repo", ErrInvalidConfig)
 	}
 	if cfg.Ref == "" {
 		return nil, fmt.Errorf("%w: git source requires ref", ErrInvalidConfig)
 	}
+	timeout := g.FetchTimeout
+	if timeout <= 0 {
+		timeout = DefaultFetchTimeout
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	snap, err := snapshotGit(fetchCtx, cfg)
+	// The caller's own cancellation or deadline is reported as the clone
+	// error; only the expiry of this deadline names the setting. The clone
+	// error is dropped in that case, because its cause is the deadline.
+	if err != nil && ctx.Err() == nil && errors.Is(fetchCtx.Err(), context.DeadlineExceeded) {
+		return nil, fmt.Errorf("%w: git snapshot did not finish within %s (%s)",
+			ErrSourceUnreachable, FetchTimeoutSetting, timeout)
+	}
+	return snap, err
+}
 
+// snapshotGit clones cfg.Repo under ctx and reads the tree at cfg.Ref. The
+// reads after the clone use the in-memory storer and make no network request.
+func snapshotGit(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
 	storer := memory.NewStorage()
 	cloneOpts := &git.CloneOptions{
 		URL:           cfg.Repo,

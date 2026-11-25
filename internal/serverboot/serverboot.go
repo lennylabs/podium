@@ -2275,6 +2275,10 @@ type Config struct {
 	// PODIUM_USAGE_FLUSH_INTERVAL, PODIUM_USAGE_RETENTION_DAYS, and
 	// PODIUM_USAGE_MAX_CLIENT_KEYS.
 	usage usageConfig
+	// gitFetch is the §13.12 PODIUM_GIT_FETCH_TIMEOUT deadline of one Git
+	// snapshot (§7.3.1), from the environment or the registry.yaml
+	// git_fetch_timeout key.
+	gitFetch gitFetchConfig
 	// §4.6 default visibility for newly-registered layers when no
 	// explicit visibility is supplied. One of "public" |
 	// "organization" | "private". Defaults to "private" so
@@ -2470,6 +2474,7 @@ func (c *Config) Settings() []Setting {
 		{"sandbox_profile.enforced", boolStr(c.enforceSandboxProfile), envOrSrc("PODIUM_ENFORCE_SANDBOX_PROFILE", defaultSrc)},
 		{"sandbox_profile.host_sandboxes", strings.Join(c.hostSandboxes, ","), envOrSrc("PODIUM_HOST_SANDBOXES", defaultSrc)},
 		{"layers.path", c.layerPath, envOrSrc("PODIUM_LAYER_PATH", yamlSrc)},
+		{gitFetchTimeoutKey, c.gitFetch.timeout.String(), c.gitFetch.source},
 		{"tenant.expose_scope_preview", boolStr(c.exposeScopePreview == nil || *c.exposeScopePreview), envOrSrc("PODIUM_EXPOSE_SCOPE_PREVIEW", yamlSrc)},
 		{"read_only.probe_failures", intStr(c.readOnlyProbeFailures), envOrSrc("PODIUM_READONLY_PROBE_FAILURES", defaultSrc)},
 		{"read_only.probe_interval_seconds", intStr(c.readOnlyProbeInterval), envOrSrc("PODIUM_READONLY_PROBE_INTERVAL", defaultSrc)},
@@ -2643,11 +2648,16 @@ func LoadConfig() *Config {
 	// cannot be read or does not decode is carried to validate, which refuses
 	// the start: starting on the defaults would drop the configured identity
 	// provider, layers, and store settings (§13.12).
+	fileGitFetchTimeout := ""
 	if y, err := readYAMLConfig(); err != nil {
 		c.configFileErr = err
 	} else {
 		applyYAML(c, y)
+		if y != nil {
+			fileGitFetchTimeout = y.GitFetchTimeout
+		}
 	}
+	c.gitFetch = resolveGitFetchTimeout(os.Getenv(source.FetchTimeoutSetting), fileGitFetchTimeout)
 	// §13.12: the Pinecone namespace prefix defaults to "default"
 	// when neither the env var nor registry.yaml set it.
 	if c.pineconeNS == "" {
@@ -2836,6 +2846,9 @@ func (c *Config) validate() error {
 	}
 	if c.usage.err != nil {
 		return c.usage.err
+	}
+	if c.gitFetch.err != nil {
+		return c.gitFetch.err
 	}
 	return c.semanticOverlapGuard()
 }

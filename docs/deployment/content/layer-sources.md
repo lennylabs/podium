@@ -226,6 +226,8 @@ Each layer refreshes from its source independently. A webhook needs a Git host t
 
 Each registered layer reports `last_ingested_at` in `podium layer list` once it has completed an ingest, so a monitor can detect a stale layer.
 
+Every ingest of a `git` layer clones the repository under a deadline that `PODIUM_GIT_FETCH_TIMEOUT` or the `registry.yaml` key `git_fetch_timeout` sets, 10 minutes by default. A remote that does not complete the clone within it fails that ingest with `ingest.source_unreachable`, and the message names the setting. The artifacts served before the failure stay in place. Raise the value for a repository whose clone takes longer. The [configuration reference](../../reference/configuration#ingest) lists the setting.
+
 ### Webhooks
 
 A webhook works only for a `git` layer registered at runtime with `podium layer register`, because the registration response is what issues the secret.
