@@ -69,8 +69,9 @@ func newDeadlineDialer(u *url.URL, _ proxy.Dialer) (proxy.Dialer, error) {
 }
 
 // deadlineDialer dials an ssh remote and ties the connection to the snapshot
-// context, so the handshake and every later read or write on it end at the
-// snapshot's deadline, and the connection is closed when the snapshot ends.
+// context: the connection is closed when the context ends, at the snapshot's
+// deadline or when the snapshot returns, so the handshake and every later
+// read or write on it end then.
 // It dials through golang.org/x/net/proxy.Dial, which go-git's ssh transport
 // itself uses when no proxy is set, so ALL_PROXY and NO_PROXY apply as
 // before.
@@ -90,16 +91,14 @@ func (d deadlineDialer) DialContext(_ context.Context, network, addr string) (ne
 	if err != nil {
 		return nil, err
 	}
-	if deadline, ok := d.ctx.Deadline(); ok {
-		// SetDeadline fails only on a closed connection, which a dial that
-		// just succeeded does not return, so no test reaches this branch.
-		if err := conn.SetDeadline(deadline); err != nil {
-			_ = conn.Close()
-			return nil, err
-		}
-	}
-	// The snapshot cancels its context when it returns, so the connection
-	// never outlives the snapshot, whatever go-git does with it.
+	// Closing the connection when the snapshot context ends interrupts a
+	// handshake or transfer blocked on it, and the snapshot cancels its
+	// context when it returns, so the connection never outlives the snapshot.
+	// The close is the only bound: an I/O deadline on the connection set to
+	// the context's deadline could fire before the context records its
+	// expiry, and the snapshot would then fail without the deadline error
+	// that names the setting. AfterFunc runs only after the context's Err is
+	// set.
 	context.AfterFunc(d.ctx, func() { _ = conn.Close() })
 	return conn, nil
 }

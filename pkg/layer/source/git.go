@@ -73,19 +73,36 @@ func (g Git) Snapshot(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
 	if timeout <= 0 {
 		timeout = DefaultFetchTimeout
 	}
-	fetchCtx, cancel := context.WithTimeout(ctx, timeout)
+	deadline := time.Now().Add(timeout)
+	fetchCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	proxyOpts, release := snapshotProxyOptions(fetchCtx, cfg.Repo)
 	defer release()
 	snap, err := boundedSnapshot(fetchCtx, cfg, proxyOpts)
-	// The caller's own cancellation or deadline is reported as the clone
-	// error; only the expiry of this deadline names the setting. The clone
-	// error is dropped in that case, because its cause is the deadline.
-	if err != nil && ctx.Err() == nil && errors.Is(fetchCtx.Err(), context.DeadlineExceeded) {
+	// Only the expiry of this deadline names the setting. The clone error is
+	// dropped in that case, because its cause is the deadline.
+	if err != nil && fetchDeadlinePassed(ctx, fetchCtx, deadline) {
 		return nil, fmt.Errorf("%w: git snapshot did not finish within %s (%s)",
 			ErrSourceUnreachable, FetchTimeoutSetting, timeout)
 	}
 	return snap, err
+}
+
+// fetchDeadlinePassed reports whether a failed snapshot ended because the
+// FetchTimeout deadline passed. A caller context that ended, or whose own
+// deadline comes first, owns the failure, which keeps its own error.
+//
+// The clock is read as well as fetchCtx.Err: a context records its expiry
+// only when its timer runs, and a transport's own timer or a peer's close at
+// the same instant can fail the clone first, while Err is still nil.
+func fetchDeadlinePassed(ctx, fetchCtx context.Context, deadline time.Time) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		return false
+	}
+	return errors.Is(fetchCtx.Err(), context.DeadlineExceeded) || !time.Now().Before(deadline)
 }
 
 // boundedSnapshot runs snapshotGit and returns no later than ctx's end.

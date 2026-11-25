@@ -5,10 +5,12 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -204,4 +206,44 @@ func TestGit_SnapshotDeadlineLeavesNoGoroutines(t *testing.T) {
 	goleak.VerifyNone(t, baseline,
 		goleak.IgnoreAnyFunction("golang.org/x/crypto/ssh/agent.ServeAgent"),
 		goleak.IgnoreAnyFunction("golang.org/x/crypto/ssh/agent.(*pipeline).readLoop"))
+}
+
+// Spec: §7.3.1 (Source unreachable), §13.12 — every snapshot that a stalled
+// remote holds to its deadline names the setting, whichever transport stalls
+// and however the deadline lines up with the transport's own failure. Rounds
+// of 20 concurrent snapshots with timeouts from 200ms to 580ms run against an
+// ssh remote with no banner, one that stops after its banner, one that stalls
+// in authentication, a silent git:// remote, and a silent http remote.
+func TestGit_SnapshotDeadlineStress(t *testing.T) {
+	knownHosts := sshClientEnv(t)
+	repos := []string{
+		"ssh://git@" + stallingListener(t, silent) + "/acme/layer.git",
+		"ssh://git@" + stallingListener(t, bannerOnly) + "/acme/layer.git",
+		"ssh://git@" + authStallingSSHServer(t, knownHosts) + "/acme/layer.git",
+		"git://" + stallingListener(t, silent) + "/acme/layer.git",
+		stalledRemote(t, hangingHandshake),
+	}
+	const rounds, concurrent = 3, 20
+	for round := 0; round < rounds; round++ {
+		errs := make(chan string, concurrent)
+		var wg sync.WaitGroup
+		for i := 0; i < concurrent; i++ {
+			repo := repos[i%len(repos)]
+			timeout := 200*time.Millisecond + time.Duration(i)*20*time.Millisecond
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := source.Git{FetchTimeout: timeout}.Snapshot(context.Background(), source.LayerConfig{Repo: repo, Ref: "main"})
+				want := fmt.Sprintf("PODIUM_GIT_FETCH_TIMEOUT (%s)", timeout)
+				if !errors.Is(err, source.ErrSourceUnreachable) || !strings.Contains(err.Error(), want) {
+					errs <- fmt.Sprintf("%s with %s: %v", repo, timeout, err)
+				}
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for e := range errs {
+			t.Errorf("round %d: snapshot did not name the setting: %s", round, e)
+		}
+	}
 }
