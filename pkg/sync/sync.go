@@ -884,12 +884,19 @@ func mergeDigests(a, b map[string]string) map[string]string {
 //
 // Spec: §7.5.3
 func removeStalePaths(target string, prior map[string]string, current map[string]bool, kept keptOutput) {
+	var live []os.FileInfo
 	for p, merge := range prior {
 		if current[p] || kept.standalone[p] {
 			continue
 		}
 		if err := materialize.CheckRecordedPath(p); err != nil {
 			fmt.Fprintf(os.Stderr, "sync: stale-file cleanup: skipping lock entry %q: %v\n", p, err)
+			continue
+		}
+		if live == nil {
+			live = liveFiles(target, current, kept)
+		}
+		if aliasesLive(target, p, live) {
 			continue
 		}
 		if merge != "" {
@@ -900,6 +907,42 @@ func removeStalePaths(target string, prior map[string]string, current map[string
 			fmt.Fprintf(os.Stderr, "sync: stale-file cleanup: skipping %q: %v\n", p, err)
 		}
 	}
+}
+
+// liveFiles returns the file information of every path the run wrote and
+// every standalone path it keeps (§13.11.3), following links as the writer
+// does. The result is never nil, so the caller computes it once.
+func liveFiles(target string, current map[string]bool, kept keptOutput) []os.FileInfo {
+	out := make([]os.FileInfo, 0, len(current)+len(kept.standalone))
+	for _, set := range []map[string]bool{current, kept.standalone} {
+		for p := range set {
+			if info, err := os.Stat(filepath.Join(target, filepath.FromSlash(p))); err == nil {
+				out = append(out, info)
+			}
+		}
+	}
+	return out
+}
+
+// aliasesLive reports whether the prior-lock path p names, through a link
+// inside the target, the same file as a path the run wrote or keeps. The
+// cleanup follows such links (§7.5.3), so a stale entry such as alias/a with
+// alias linked to real would otherwise remove or strip the output the run
+// just wrote at real/a; such an entry is not stale and is skipped. The
+// os.Stat follows links but reads only metadata.
+//
+// Spec: §7.5.3
+func aliasesLive(target, p string, live []os.FileInfo) bool {
+	info, err := os.Stat(filepath.Join(target, filepath.FromSlash(p)))
+	if err != nil {
+		return false
+	}
+	for _, l := range live {
+		if os.SameFile(info, l) {
+			return true
+		}
+	}
+	return false
 }
 
 // reconcileOrphanConfig strips Podium's contribution from the config-merge

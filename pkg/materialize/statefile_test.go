@@ -121,9 +121,11 @@ func TestWrite_StagingTemporaryLinkRefused(t *testing.T) {
 }
 
 // Spec: §6.6, §6.7, §7.8 — a merge or inject target that is a link resolving
-// outside the destination, into .git, or into the sync state, or a dangling
-// link, is not read through: a committed link to an outside JSON file cannot
-// fold that file's content into the rendered file the publish step commits.
+// outside the destination, into .git, or into the sync state is not read
+// through: a committed link to an outside JSON file cannot fold that file's
+// content into the rendered file the publish step commits. A dangling link
+// whose named directory is absent, lies outside the destination, or lies in
+// .git, and a dangling link that names another link, are refused as well.
 func TestWrite_MergeTargetLinkRefused(t *testing.T) {
 	t.Parallel()
 	base := t.TempDir()
@@ -134,7 +136,11 @@ func TestWrite_MergeTargetLinkRefused(t *testing.T) {
 	mustSymlink(t, filepath.Join(base, "creds.json"), filepath.Join(dest, "AGENTS.md"))
 	mustSymlink(t, ".git/config", filepath.Join(dest, "GEMINI.md"))
 	mustSymlink(t, ".podium/sync.lock", filepath.Join(dest, "CLAUDE.md"))
-	mustSymlink(t, "absent.json", filepath.Join(dest, "settings.json"))
+	mustSymlink(t, "missing-dir/absent.json", filepath.Join(dest, "settings.json"))
+	mustSymlink(t, filepath.Join(base, "absent.json"), filepath.Join(dest, "outside.json"))
+	mustSymlink(t, ".git/hooks-new.toml", filepath.Join(dest, "git.toml"))
+	mustSymlink(t, "next.json", filepath.Join(dest, "chain.json"))
+	mustSymlink(t, "absent.json", filepath.Join(dest, "next.json"))
 
 	for _, f := range []adapter.File{
 		{Path: ".claude-plugin/marketplace.json", Op: adapter.OpMergeJSON, Content: []byte(`{"name":"acme"}`)},
@@ -142,6 +148,9 @@ func TestWrite_MergeTargetLinkRefused(t *testing.T) {
 		{Path: "GEMINI.md", Op: adapter.OpInject, Key: "a", Content: []byte("block")},
 		{Path: "CLAUDE.md", Op: adapter.OpInject, Key: "a", Content: []byte("block")},
 		{Path: "settings.json", Op: adapter.OpMergeJSON, Content: []byte(`{"a":1}`)},
+		{Path: "outside.json", Op: adapter.OpMergeJSON, Content: []byte(`{"a":1}`)},
+		{Path: "git.toml", Op: adapter.OpInject, Key: "a", Content: []byte("block")},
+		{Path: "chain.json", Op: adapter.OpMergeJSON, Content: []byte(`{"a":1}`)},
 	} {
 		err := Write(dest, []adapter.File{f})
 		if !errors.Is(err, ErrUnconfinedPath) {
@@ -155,7 +164,81 @@ func TestWrite_MergeTargetLinkRefused(t *testing.T) {
 	wantContent(t, filepath.Join(base, "creds.json"), `{"token":"SECRET-123"}`)
 	wantContent(t, filepath.Join(dest, ".git", "config"), "git")
 	wantContent(t, filepath.Join(dest, ".podium", "sync.lock"), "lock")
-	wantGone(t, filepath.Join(dest, "absent.json"))
+	for _, gone := range []string{filepath.Join(dest, "missing-dir"), filepath.Join(base, "absent.json"), filepath.Join(dest, ".git", "hooks-new.toml"), filepath.Join(dest, "absent.json")} {
+		wantGone(t, gone)
+	}
+}
+
+// Spec: §6.6 — a merge or inject target that is a link naming an absent file
+// inside the destination, such as GEMINI.md linked to AGENTS.md before any
+// run created AGENTS.md, is followed: the write creates the file the link
+// names and the link stays.
+func TestWrite_MergeTargetDanglingLinkInsideCreated(t *testing.T) {
+	t.Parallel()
+	dest := filepath.Join(t.TempDir(), "target")
+	if err := os.MkdirAll(filepath.Join(dest, "shared"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	mustSymlink(t, "AGENTS.md", filepath.Join(dest, "GEMINI.md"))
+	mustSymlink(t, "../shared/settings.json", filepath.Join(dest, ".gemini", "settings.json"))
+	err := Write(dest, []adapter.File{
+		{Path: "GEMINI.md", Op: adapter.OpInject, Key: "style/house", Content: []byte("house rules")},
+		{Path: ".gemini/settings.json", Op: adapter.OpMergeJSON, Content: []byte(`{"a":1}`)},
+	})
+	if err != nil {
+		t.Fatalf("Write through dangling in-destination links: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dest, "AGENTS.md")); !strings.Contains(string(got), "house rules") {
+		t.Errorf("AGENTS.md = %q, want the injected block", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dest, "shared", "settings.json")); !strings.Contains(string(got), `"a"`) {
+		t.Errorf("shared/settings.json = %q, want the merged entry", got)
+	}
+	for _, rel := range []string{"GEMINI.md", ".gemini/settings.json"} {
+		if info, err := os.Lstat(filepath.Join(dest, filepath.FromSlash(rel))); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+			t.Errorf("%s must stay a link; lstat = (%v, %v)", rel, info, err)
+		}
+	}
+}
+
+// Spec: §6.6, §7.8 — a directory link inside the destination that resolves
+// into .git or into the sync state fails the write before anything is
+// written, so a committed skills -> .git/hooks link cannot plant a file in
+// .git. A directory link to an ordinary directory inside the destination is
+// written through.
+func TestWrite_DirectoryLinkIntoProtectedStateRefused(t *testing.T) {
+	t.Parallel()
+	dest := filepath.Join(t.TempDir(), "checkout")
+	confinedFixture(t, dest, map[string]string{".git/HEAD": "ref", ".podium/sync.yaml": "cfg", "shared/keep": "k"})
+	if err := os.MkdirAll(filepath.Join(dest, ".git", "hooks"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	mustSymlink(t, "../../.git/hooks", filepath.Join(dest, "claude", "pack", "skills"))
+	mustSymlink(t, ".podium", filepath.Join(dest, "state"))
+	mustSymlink(t, "shared", filepath.Join(dest, "plain"))
+
+	for _, f := range []adapter.File{
+		{Path: "claude/pack/skills/pre-commit/SKILL.md", Content: []byte("x"), Mode: 0o755},
+		{Path: "state/sync.lock", Content: []byte("x")},
+	} {
+		err := Write(dest, []adapter.File{{Path: "ok.md", Content: []byte("ok")}, f})
+		if !errors.Is(err, ErrUnconfinedPath) {
+			t.Errorf("Write(%s) = %v, want ErrUnconfinedPath", f.Path, err)
+		}
+	}
+	wantGone(t, filepath.Join(dest, ".git", "hooks", "pre-commit"))
+	wantGone(t, filepath.Join(dest, ".podium", "sync.lock"))
+	wantGone(t, filepath.Join(dest, "ok.md"))
+
+	if err := Write(dest, []adapter.File{{Path: "plain/a.md", Content: []byte("A")}}); err != nil {
+		t.Fatalf("Write through an ordinary directory link: %v", err)
+	}
+	wantContent(t, filepath.Join(dest, "shared", "a.md"), "A")
+
+	mustSymlink(t, "loop", filepath.Join(dest, "loop"))
+	if err := Write(dest, []adapter.File{{Path: "loop/a.md", Content: []byte("A")}}); err == nil {
+		t.Errorf("Write below a link loop must fail")
+	}
 }
 
 // Spec: §6.6, §6.7 — a merge or inject target that is a link to a regular

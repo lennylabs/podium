@@ -257,9 +257,15 @@ func WriteKeeping(destination string, files []adapter.File, keep func(id string)
 	// ancestor resolves inside the destination before anything is read or
 	// written, so a pre-existing symlinked directory can neither redirect a
 	// write outside the root nor feed the merge fold a file outside it. A
-	// .podium directory that is a link is refused outright (§7.8).
+	// .podium directory that is a link is refused outright (§7.8), and a
+	// directory link that resolves into .git or the sync state, which a
+	// repository checkout can commit, is refused before anything lands there.
 	for i, f := range files {
-		if err := checkSymlinkContainment(realDest, resolved[i]); err != nil {
+		landing, err := checkSymlinkContainment(realDest, resolved[i])
+		if err != nil {
+			return err
+		}
+		if err := checkResolvedTarget(absDest, realDest, resolved[i], landing, f.Path); err != nil {
 			return err
 		}
 		if err := checkPodiumDir(absDest, f.Path); err != nil {
@@ -342,31 +348,67 @@ func resolveSandboxedPath(dest, rel string) (string, error) {
 }
 
 // checkSymlinkContainment confirms that the deepest already-existing ancestor
-// of target resolves (through any symlinks) to a path still inside realDest.
-// realDest must already be symlink-resolved. This catches a destination whose
-// intermediate directory is a symlink pointing outside the root (for example
-// a pre-existing "sub -> /etc"), which the lexical check in
+// of target resolves (through any symlinks) to a path still inside realDest,
+// and returns target with that ancestor resolved: the path the write lands
+// at. realDest must already be symlink-resolved. This catches a destination
+// whose intermediate directory is a symlink pointing outside the root (for
+// example a pre-existing "sub -> /etc"), which the lexical check in
 // resolveSandboxedPath cannot see. spec: §6.6 step 5, §6.7 sandbox contract.
-func checkSymlinkContainment(realDest, target string) error {
+func checkSymlinkContainment(realDest, target string) (string, error) {
 	dir := filepath.Dir(target)
 	for {
 		real, err := filepath.EvalSymlinks(dir)
 		if err == nil {
 			if !withinRoot(realDest, real) {
-				return fmt.Errorf("%w: %q resolves outside %q via a symlinked component", ErrOutOfDestination, target, realDest)
+				return "", fmt.Errorf("%w: %q resolves outside %q via a symlinked component", ErrOutOfDestination, target, realDest)
 			}
-			return nil
+			rest, err := filepath.Rel(dir, target)
+			if err != nil {
+				// Unreachable: dir is an ancestor of target by construction.
+				return "", err
+			}
+			return filepath.Join(real, rest), nil
 		}
 		if !os.IsNotExist(err) {
-			return err
+			return "", err
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			// Reached the filesystem root without an existing ancestor.
-			return nil
+			// Reached the filesystem root without an existing ancestor; the
+			// destination root exists by now, so this needs a concurrent
+			// removal of it.
+			return target, nil
 		}
 		dir = parent
 	}
+}
+
+// checkResolvedTarget refuses a write whose directories resolve, through a
+// link inside the destination, to a path the §7.5.3 recorded-path rule
+// refuses, such as one under .git or the sync state. full is the lexical
+// target and landing the path checkSymlinkContainment resolved. A path that
+// resolves to itself is left to the caller's own rules, so a destination
+// without links keeps the writer's existing behavior.
+//
+// Spec: §6.6, §7.5.3, §7.8
+func checkResolvedTarget(absDest, realDest, full, landing, rel string) error {
+	lexical, err := filepath.Rel(absDest, full)
+	if err != nil {
+		// Unreachable: resolveSandboxedPath placed full under absDest.
+		return err
+	}
+	resolved, err := filepath.Rel(realDest, landing)
+	if err != nil {
+		// Unreachable: checkSymlinkContainment placed landing under realDest.
+		return err
+	}
+	if filepath.ToSlash(resolved) == filepath.ToSlash(lexical) {
+		return nil
+	}
+	if err := CheckRecordedPath(filepath.ToSlash(resolved)); err != nil {
+		return fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, filepath.ToSlash(resolved), err)
+	}
+	return nil
 }
 
 // checkPodiumDir refuses a path under .podium/ when the destination's .podium

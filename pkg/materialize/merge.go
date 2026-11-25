@@ -81,9 +81,10 @@ func foldOps(files []adapter.File, resolved []string, keep func(id string) bool)
 // link. A link at full is followed when it resolves to a path inside realDest
 // that passes CheckRecordedPath: workspaces link GEMINI.md or CLAUDE.md to
 // AGENTS.md, and the merge then reads and rewrites the file the link names
-// and leaves the link in place. A link that resolves outside the destination,
-// into .git, or into the sync state under .podium/, and a dangling link, are
-// refused with ErrUnconfinedPath: a repository checkout can commit such a link
+// and leaves the link in place. A link that names an absent file is handled by
+// resolveDanglingLink. A link that resolves outside the destination, into
+// .git, or into the sync state under .podium/ is refused with
+// ErrUnconfinedPath: a repository checkout can commit such a link
 // (§7.8), and following it would write outside the checkout or fold an
 // outside file's content into the rendered file the publish step commits.
 //
@@ -95,16 +96,60 @@ func resolveMergeTarget(realDest, full, rel string) (string, error) {
 		return full, nil
 	}
 	r, err := resolveWithin(realDest, full, rel)
+	if errors.Is(err, fs.ErrNotExist) {
+		r, err = resolveDanglingLink(realDest, full, rel)
+	}
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("%w: %q is a symbolic link that names no file", ErrUnconfinedPath, rel)
-		}
 		return "", err
 	}
 	if err := CheckRecordedPath(r); err != nil {
 		return "", fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, r, err)
 	}
 	return filepath.Join(realDest, filepath.FromSlash(r)), nil
+}
+
+// resolveDanglingLink resolves a link at full that names an absent file. A
+// workspace can commit GEMINI.md linked to AGENTS.md before any run has
+// created AGENTS.md, so the link is followed when the directory of the file
+// it names exists inside realDest; the caller then checks the resolved path
+// against CheckRecordedPath, and the writer's rename creates the file there
+// and leaves the link in place. The rename never follows a link at its
+// destination, so a link planted at that name after this check is replaced
+// rather than written through. A link whose named directory is absent or
+// resolves outside realDest, and a chain whose next link is itself dangling,
+// are refused with ErrUnconfinedPath.
+//
+// Spec: §6.6
+func resolveDanglingLink(realDest, full, rel string) (string, error) {
+	refuse := func(why string) (string, error) {
+		return "", fmt.Errorf("%w: %q is a symbolic link that names no file %s", ErrUnconfinedPath, rel, why)
+	}
+	dest, err := os.Readlink(full)
+	if err != nil {
+		return refuse("that can be read")
+	}
+	if !filepath.IsAbs(dest) {
+		dest = filepath.Join(filepath.Dir(full), dest)
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(dest))
+	if err != nil {
+		return refuse("in an existing directory")
+	}
+	if !withinRoot(realDest, parent) {
+		return refuse("inside the destination")
+	}
+	target := filepath.Join(parent, filepath.Base(dest))
+	if _, err := os.Lstat(target); !errors.Is(err, fs.ErrNotExist) {
+		// The name exists, so the link names another link or the target
+		// changed under the resolution; a chain is not followed further.
+		return refuse("that it can follow")
+	}
+	r, err := filepath.Rel(realDest, target)
+	if err != nil {
+		// Unreachable: withinRoot placed parent under realDest.
+		return refuse("inside the destination")
+	}
+	return filepath.ToSlash(r), nil
 }
 
 // readMergeBase returns the existing bytes at rp that an inject or merge folds

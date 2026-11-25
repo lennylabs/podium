@@ -1671,6 +1671,36 @@ func TestPublishing_CommittedLinksCannotWriteOrLeakOutsideCheckout(t *testing.T)
 	}
 }
 
+// Spec: §6.6, §7.8 — a seeded remote commits a plugin's skills directory as a
+// symbolic link into the checkout's .git/hooks. `podium sync --config` refuses
+// the write before anything lands in .git, counts the target as failed, and
+// publishes nothing.
+func TestPublishing_CommittedDirectoryLinkIntoGitRefused(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	reg := writePublishRegistry(t)
+	remote := bareRemote(t)
+	ws := t.TempDir()
+	cfg := writeSyncConfigMarketplace(t, ws, reg, remote, "claude-code")
+	seedCommit(t, remote, map[string]string{"claude/finance-pack/skills": "../../.git/hooks"}, nil)
+	seeded := remoteCommitCount(t, remote)
+
+	res := runPodium(t, "", gitEnv(), "sync", "--config", cfg)
+	if res.Exit == 0 {
+		t.Errorf("sync --config over a committed skills link into .git exited 0\nstderr=%s", res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, ".git segment") {
+		t.Errorf("stderr must name the refused .git path; stderr:\n%s", res.Stderr)
+	}
+	hooks := filepath.Join(ws, "build", "acme-agents", ".git", "hooks")
+	if _, err := os.Lstat(filepath.Join(hooks, "run-variance")); !os.IsNotExist(err) {
+		t.Errorf("the render wrote into .git/hooks: lstat err = %v", err)
+	}
+	if n := remoteCommitCount(t, remote); n != seeded {
+		t.Errorf("remote commit count = %d, want %d: the failed target must publish nothing", n, seeded)
+	}
+}
+
 // remoteRegularFilesContaining clones remote and returns the paths of the
 // committed regular files whose content holds needle. A committed symbolic
 // link is skipped rather than followed, because the test seeds links to files

@@ -129,6 +129,90 @@ func TestRun_WorkspaceLinksInsideTargetFollowed(t *testing.T) {
 	wantLinks("after the removal sync")
 }
 
+// Spec: §7.5.3 — a prior-lock entry that names, through a link inside the
+// target, a file the run just wrote is not stale. A standalone entry
+// alias/a/ARTIFACT.md with alias linked to real does not remove the
+// real/a/ARTIFACT.md the run wrote, and an inject entry GEMINI.md with
+// GEMINI.md linked to AGENTS.md does not strip the blocks the run injected
+// into AGENTS.md.
+//
+// Not parallel: the test swaps the process-wide os.Stderr.
+func TestRun_StaleEntryAliasingCurrentOutputKept(t *testing.T) {
+	t.Run("standalone", func(t *testing.T) {
+		target := filepath.Join(t.TempDir(), "target")
+		opts := Options{RegistryPath: agentRegistry(t, "real/a"), Target: target, AdapterID: "none"}
+		syncChanged(t, opts)
+		if err := os.Symlink("real", filepath.Join(target, "alias")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		appendLockEntry(t, target, LockArtifact{ID: "old/a", MaterializedPath: "alias/a/ARTIFACT.md"})
+		captureStderr(t, func() { syncChanged(t, opts) })
+		if _, err := os.Stat(filepath.Join(target, "real", "a", "ARTIFACT.md")); err != nil {
+			t.Errorf("the stale cleanup removed the run's own output through an alias: %v", err)
+		}
+	})
+	t.Run("inject", func(t *testing.T) {
+		reg := t.TempDir()
+		testharness.WriteTree(t, reg, testharness.WriteTreeOption{
+			Path: "style/house/ARTIFACT.md", Content: "---\ntype: rule\nversion: 1.0.0\nrule_mode: always\n---\n\nHouse rule.\n",
+		})
+		target := filepath.Join(t.TempDir(), "target")
+		opts := Options{RegistryPath: reg, Target: target, AdapterID: "codex"}
+		syncChanged(t, opts)
+		if err := os.Symlink("AGENTS.md", filepath.Join(target, "GEMINI.md")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		appendLockEntry(t, target, LockArtifact{ID: "old/rule", MaterializedPath: "GEMINI.md", Merge: "inject"})
+		captureStderr(t, func() { syncChanged(t, opts) })
+		if got := string(readTargetFile(t, target, "AGENTS.md")); !strings.Contains(got, "House rule.") {
+			t.Errorf("AGENTS.md = %q: the stale reconciliation stripped the run's own block through an alias", got)
+		}
+	})
+}
+
+// appendLockEntry adds entry to the lock at target.
+func appendLockEntry(t *testing.T, target string, entry LockArtifact) {
+	t.Helper()
+	lock, err := ReadLock(target)
+	if err != nil || lock == nil {
+		t.Fatalf("ReadLock = (%v, %v)", lock, err)
+	}
+	lock.Artifacts = append(lock.Artifacts, entry)
+	if err := WriteLock(target, lock); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+}
+
+// Spec: §6.6, §7.8 — a checkout that commits a plugin's skills directory as a
+// link into .git/hooks does not receive a file in .git: the render fails
+// before anything is written, naming the refused path.
+func TestRender_CommittedDirectoryLinkIntoGitRefused(t *testing.T) {
+	t.Parallel()
+	workdir := filepath.Join(t.TempDir(), "checkout")
+	opts := renderOpts(t, renderFixtureRegistry(t), workdir, []string{"claude-code"})
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatalf("first Render: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workdir, ".git", "hooks"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	skills := filepath.Join(workdir, "claude", "finance-pack", "skills")
+	if err := os.RemoveAll(skills); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+	if err := os.Symlink("../../.git/hooks", skills); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	_, err := Render(context.Background(), opts)
+	if err == nil || !strings.Contains(err.Error(), "write render") || !strings.Contains(err.Error(), ".git segment") {
+		t.Errorf("Render through a skills link into .git = %v, want the write refused", err)
+	}
+	entries, rerr := os.ReadDir(filepath.Join(workdir, ".git", "hooks"))
+	if rerr != nil || len(entries) != 0 {
+		t.Errorf(".git/hooks after the render = (%v, %v), want it empty", entries, rerr)
+	}
+}
+
 // Spec: §7.5.3 — the rule that admits a prior-lock entry governs what sync
 // writes. A bundled resource whose name holds a backslash, which is a legal
 // file name on Unix, is neither written nor recorded, so no later run warns
