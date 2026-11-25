@@ -60,6 +60,20 @@ files the previous run wrote. Every sync reconciles the target against
 `<target>/.podium/sync.lock`, deletes the paths that are no longer in scope, and
 prunes the directories those paths leave empty.
 
+The removal treats the lock as untrusted, because a committed lock can come from
+anyone who pushes to the repository. Sync skips a lock entry, names it on
+standard error, and leaves it out of the next lock in these cases:
+
+- The path leaves the target, names `.git`, or names Podium's own state under
+  `.podium/`.
+- The path reaches a symbolic link that resolves outside the target.
+- The path names a symbolic link, a directory, or another file that is not a
+  regular file.
+
+A directory that is a symbolic link to another directory inside the target is
+followed, as it is when sync writes. Sync never deletes a directory with its
+contents, and it removes a parent directory only while the directory is empty.
+
 ---
 
 ## Sync a subset from the command line
