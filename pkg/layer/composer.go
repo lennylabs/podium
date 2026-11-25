@@ -3,6 +3,7 @@
 package layer
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -61,6 +62,16 @@ func Visible(layer Layer, id Identity) bool {
 // against an external group-membership store before falling back
 // to the caller's JWT groups. Used by the registry's HTTP
 // handlers to honor SCIM-pushed memberships.
+//
+// Only `public: true` and the bypasses carried by Identity.IsPublic admit an
+// unauthenticated caller. The `organization`, `groups`, and `users` fields
+// admit an authenticated caller alone, and a `groups` or `users` member admits
+// it only through a non-empty value. An anonymous caller carries an empty
+// subject, so without both guards an empty `users` entry, or an empty member
+// name a group resolver returns, would equal that subject and admit every
+// request that carries no credential.
+//
+// Spec: §4.6, §6.3.3
 func VisibleWith(layer Layer, id Identity, resolveGroup GroupResolver) bool {
 	if id.IsPublic {
 		return true
@@ -69,29 +80,51 @@ func VisibleWith(layer Layer, id Identity, resolveGroup GroupResolver) bool {
 	if v.Public {
 		return true
 	}
-	if v.Organization && id.IsAuthenticated {
+	// Spec: §6.3.3 — a request carrying no credential, or a trusted-headers
+	// request without identity headers, is anonymous and sees public
+	// visibility only.
+	if !id.IsAuthenticated {
+		return false
+	}
+	if v.Organization {
 		return true
 	}
-	for _, g := range v.Groups {
-		for _, ug := range id.Groups {
-			if g == ug {
-				return true
-			}
+	return inGroups(v.Groups, id, resolveGroup) || namesCaller(v.Users, id)
+}
+
+// inGroups reports whether the authenticated caller id belongs to one of the
+// non-empty groups, either through the groups its credential carries or
+// through the members resolveGroup returns for the group. An empty group name
+// names no group, so it is skipped before either check.
+func inGroups(groups []string, id Identity, resolveGroup GroupResolver) bool {
+	for _, g := range groups {
+		if g == "" {
+			continue
 		}
-		if resolveGroup != nil {
-			for _, member := range resolveGroup(g) {
-				if member == id.Sub || member == id.Email {
-					return true
-				}
-			}
+		if slices.Contains(id.Groups, g) {
+			return true
+		}
+		if resolveGroup != nil && namesCaller(resolveGroup(g), id) {
+			return true
 		}
 	}
-	// spec: §4.6 — `users:` lists OIDC subjects, but the visibility table's
-	// own config example uses email-style identifiers (users: [alice@acme.com]).
-	// IdPs often carry the human identifier in Email while Sub is opaque
-	// (auth0|abc123), so match either, consistent with the group-resolver path.
-	for _, u := range v.Users {
-		if u == id.Sub || (id.Email != "" && u == id.Email) {
+	return false
+}
+
+// namesCaller reports whether one of the non-empty values equals the caller's
+// non-empty subject or non-empty email.
+//
+// spec: §4.6 — a `users:` entry is matched against the caller's OIDC subject
+// or email, and the section's config example uses email-style identifiers
+// (users: [alice@acme.com]). IdPs often carry the human identifier in Email
+// while Sub is opaque (auth0|abc123), so the group-resolver path matches a
+// directory member name on the same terms.
+func namesCaller(values []string, id Identity) bool {
+	for _, v := range values {
+		if v == "" {
+			continue
+		}
+		if v == id.Sub || v == id.Email {
 			return true
 		}
 	}
