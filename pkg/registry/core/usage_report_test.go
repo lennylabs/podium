@@ -246,6 +246,14 @@ func TestUsageReport_PublicAndUnlayeredRegistries(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(layerIDs(rep), []string{"secret", "team"}) || rep.Totals.Loads != 18 {
 		t.Errorf("unlayered report: layers %v loads %d err %v", layerIDs(rep), rep.Totals.Loads, err)
 	}
+	// A registry with no usage counter reads its window from the real clock.
+	// Its layer list comes from the served artifacts, so it does not depend
+	// on the date, while its counts do and are not asserted.
+	uncounted := core.New(f.st, "t", nil)
+	rep, err = uncounted.UsageReport(context.Background(), usageAlice, q(nil)())
+	if err != nil || !reflect.DeepEqual(layerIDs(rep), []string{"secret", "team"}) {
+		t.Errorf("report without a counter: layers %v err %v", layerIDs(rep), err)
+	}
 }
 
 // Spec: §8.7, §6.3.1 — under read scopes every total sums only rows whose
