@@ -9,11 +9,11 @@ import (
 	"strings"
 )
 
-// ErrUnconfinedPath signals a path the stale-file cleanup or a sync state
-// write refuses: it does not name a regular file reached below the destination
-// root under the rule the operation applies. A directory, a symbolic link, or
-// another non-regular file at the path is refused, and so is a link that
-// resolves outside the root.
+// ErrUnconfinedPath signals a path the stale-file cleanup, a recorded-path
+// read, or a sync state access refuses: it does not name a regular file
+// reached below the destination root under the rule the operation applies. A
+// directory or another non-regular file at the path is refused, and so is a
+// symbolic link that resolves outside the root.
 var ErrUnconfinedPath = errors.New("materialize: path is not a regular file confined to the destination")
 
 // RemoveStale deletes the regular file at rel below destination and then
@@ -26,16 +26,18 @@ var ErrUnconfinedPath = errors.New("materialize: path is not a regular file conf
 // output the writer put behind such a link is removed when its artifact
 // leaves the view. A link that resolves outside the root, a link at the path
 // itself, a .podium directory that is a link, and a path whose resolved form
-// fails CheckRecordedPath are refused. A directory is never removed
-// recursively. The pruning removes only the empty directories the path
-// reaches below its last link, deepest first, so it stops at the first
-// directory that is not empty, at the directory a link names, or at the root.
-// A path that is already absent prunes the same way and returns nil, so a file
-// the operator deleted by hand still lets its empty parents go.
+// fails CheckRecordedPath are refused. The writer replaces a standalone path
+// by rename, so a link at a stale path is not one sync wrote, and following it
+// would delete the file it names. A directory is never removed recursively.
+// The pruning removes only the empty directories the path reaches below its
+// last link, deepest first, so it stops at the first directory that is not
+// empty, at the directory a link names, or at the root. A path that is already
+// absent prunes the same way and returns nil, so a file the operator deleted
+// by hand still lets its empty parents go.
 //
 // Spec: §6.7, §7.5.3
 func RemoveStale(destination, rel string) error {
-	sp, err := openStale(destination, rel)
+	sp, err := openResolved(destination, rel, resolveOpts{recorded: true})
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
@@ -56,34 +58,36 @@ func RemoveStale(destination, rel string) error {
 	return nil
 }
 
-// ReadStale returns the bytes of the regular file at rel below destination,
-// under the rule RemoveStale applies. An absent path returns an error that
-// wraps fs.ErrNotExist, and a refused path returns an error that wraps
-// ErrUnconfinedPath or ErrUnsafeRecordedPath, so a recorded path cannot direct
-// a read at a device, a FIFO, or a file outside the destination.
-func ReadStale(destination, rel string) ([]byte, error) {
-	sp, err := openStale(destination, rel)
+// ReadRecorded returns the bytes of the regular file a recorded path names
+// below destination. Directory links and a link at the path itself are
+// followed when they resolve inside the root, as the writer follows them, and
+// the resolved path must pass CheckRecordedPath. An absent path, including a
+// link that names an absent file, returns an error that wraps fs.ErrNotExist;
+// a refused path returns an error that wraps ErrUnconfinedPath or
+// ErrUnsafeRecordedPath. A recorded path therefore cannot direct a read at a
+// device, a FIFO, or a file outside the destination.
+//
+// Spec: §7.5.2, §7.5.3
+func ReadRecorded(destination, rel string) ([]byte, error) {
+	sp, err := openResolved(destination, rel, resolveOpts{followLeaf: true, recorded: true})
 	if err != nil {
 		return nil, err
 	}
 	defer sp.close()
-	if err := checkConfinedFile(sp.root, rel, sp.segs); err != nil {
-		return nil, err
-	}
-	data, err := sp.root.ReadFile(filepath.Join(sp.segs...))
-	if err != nil {
-		return nil, fmt.Errorf("materialize: read %s: %w", rel, err)
-	}
-	return data, nil
+	return sp.read(rel)
 }
 
 // RewriteStale replaces the content of the regular file at rel below
-// destination with rewrite applied to its current content, under the rule
-// RemoveStale applies. It is the in-place reconciliation of a §6.7
-// config-merge or inject file whose last contributing artifact is gone. An
-// absent path is a no-op that returns nil.
+// destination with rewrite applied to its current content. It is the in-place
+// reconciliation of a §6.7 config-merge or inject file whose last contributing
+// artifact is gone, and it resolves rel as ReadRecorded does: a link at the
+// path that resolves inside the root, such as GEMINI.md linked to AGENTS.md,
+// is followed, so the file it names is rewritten and the link stays. An absent
+// path is a no-op that returns nil.
+//
+// Spec: §6.7, §7.5.3
 func RewriteStale(destination, rel string, rewrite func([]byte) []byte) error {
-	sp, err := openStale(destination, rel)
+	sp, err := openResolved(destination, rel, resolveOpts{followLeaf: true, recorded: true})
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
@@ -91,31 +95,38 @@ func RewriteStale(destination, rel string, rewrite func([]byte) []byte) error {
 		return err
 	}
 	defer sp.close()
-	if err := checkConfinedFile(sp.root, rel, sp.segs); err != nil {
+	data, err := sp.read(rel)
+	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
 		return err
 	}
-	name := filepath.Join(sp.segs...)
-	data, err := sp.root.ReadFile(name)
-	if err != nil {
-		return fmt.Errorf("materialize: read %s: %w", rel, err)
-	}
-	if err := sp.root.WriteFile(name, rewrite(data), 0o644); err != nil {
+	if err := sp.root.WriteFile(filepath.Join(sp.segs...), rewrite(data), 0o644); err != nil {
 		return fmt.Errorf("materialize: write %s: %w", rel, err)
 	}
 	return nil
 }
 
-// stalePath is a recorded path resolved for the stale-file cleanup.
-type stalePath struct {
+// resolveOpts selects how openResolved treats a path.
+type resolveOpts struct {
+	// followLeaf follows a symbolic link at the path itself when it resolves
+	// inside the root.
+	followLeaf bool
+	// recorded applies CheckRecordedPath to the path and to its resolved
+	// form. The sync state reader leaves it unset, because its own paths
+	// under .podium/ are what the rule refuses.
+	recorded bool
+}
+
+// resolvedPath is a path resolved below an open root.
+type resolvedPath struct {
 	// root is the destination opened as an os.Root. Every operation goes
 	// through it, so a component swapped for a link after the resolution
 	// cannot carry the operation outside the destination.
 	root *os.Root
-	// segs is the path below the root with every directory link resolved.
-	// The operations check it again with checkConfinedFile, which refuses any
+	// segs is the path below the root with every followed link resolved. The
+	// operations check it again with checkConfinedFile, which refuses any
 	// link, so a link planted after the resolution fails the operation.
 	segs []string
 	// keep is the number of leading directories of segs the pruning leaves in
@@ -123,32 +134,47 @@ type stalePath struct {
 	keep int
 }
 
-func (sp *stalePath) close() { _ = sp.root.Close() }
+func (rp *resolvedPath) close() { _ = rp.root.Close() }
 
-// openStale checks rel with CheckRecordedPath, resolves its directory
-// components through the links that stay inside the destination, and checks
-// the resolved path again. The resolution uses filepath.EvalSymlinks against
-// the symlink-resolved root, as the writer's checkSymlinkContainment does, so
-// the writer and the cleanup accept the same links. A missing directory
-// returns an error wrapping fs.ErrNotExist.
-func openStale(destination, rel string) (*stalePath, error) {
-	if err := CheckRecordedPath(rel); err != nil {
+// read returns the bytes of the resolved path after checking it again.
+func (rp *resolvedPath) read(rel string) ([]byte, error) {
+	if err := checkConfinedFile(rp.root, rel, rp.segs); err != nil {
 		return nil, err
+	}
+	data, err := rp.root.ReadFile(filepath.Join(rp.segs...))
+	if err != nil {
+		return nil, fmt.Errorf("materialize: read %s: %w", rel, err)
+	}
+	return data, nil
+}
+
+// openResolved opens destination as a root and resolves rel through the links
+// that stay inside it: every directory link, and a link at rel itself when
+// o.followLeaf is set. A .podium directory that is a link is refused. The
+// resolution uses filepath.EvalSymlinks against the symlink-resolved root, as
+// the writer's checkSymlinkContainment does, so the writer and the readers
+// accept the same links. A missing directory returns an error wrapping
+// fs.ErrNotExist.
+func openResolved(destination, rel string, o resolveOpts) (*resolvedPath, error) {
+	if o.recorded {
+		if err := CheckRecordedPath(rel); err != nil {
+			return nil, err
+		}
 	}
 	root, segs, err := openConfinedRoot(destination, rel)
 	if err != nil {
 		return nil, err
 	}
-	sp, err := resolveStale(root, destination, rel, segs)
+	rp, err := resolveIn(root, destination, rel, segs, o)
 	if err != nil {
 		_ = root.Close()
 		return nil, err
 	}
-	return sp, nil
+	return rp, nil
 }
 
-// resolveStale resolves the directory components of rel. See openStale.
-func resolveStale(root *os.Root, destination, rel string, segs []string) (*stalePath, error) {
+// resolveIn resolves rel below root. See openResolved.
+func resolveIn(root *os.Root, destination, rel string, segs []string, o resolveOpts) (*resolvedPath, error) {
 	// filepath.Abs fails only when the working directory cannot be read, and
 	// openConfinedRoot already resolved the same destination.
 	absDest, err := filepath.Abs(destination)
@@ -177,50 +203,57 @@ func resolveStale(root *os.Root, destination, rel string, segs []string) (*stale
 		}
 		lastLink = i
 	}
-	resolvedDir, err := filepath.EvalSymlinks(filepath.Join(realDest, filepath.Join(dirs...)))
+	relDir, err := resolveWithin(realDest, filepath.Join(realDest, filepath.Join(dirs...)), rel)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("materialize: resolve %s: %w", rel, err)
-		}
-		return nil, fmt.Errorf("%w: %q: %v", ErrUnconfinedPath, rel, err)
-	}
-	if !withinRoot(realDest, resolvedDir) {
-		return nil, fmt.Errorf("%w: %q resolves outside the destination", ErrUnconfinedPath, rel)
-	}
-	relDir, err := filepath.Rel(realDest, resolvedDir)
-	if err != nil {
-		// Unreachable: both paths are absolute and withinRoot placed
-		// resolvedDir under realDest. Kept so a future change fails closed.
-		return nil, fmt.Errorf("%w: %q: %v", ErrUnconfinedPath, rel, err)
+		return nil, err
 	}
 	resolved := segs[len(segs)-1]
 	if relDir != "." {
-		resolved = filepath.ToSlash(relDir) + "/" + resolved
+		resolved = relDir + "/" + resolved
 	}
-	if err := CheckRecordedPath(resolved); err != nil {
-		return nil, fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, resolved, err)
+	if o.followLeaf {
+		info, err := root.Lstat(filepath.FromSlash(resolved))
+		if err == nil && info.Mode()&fs.ModeSymlink != 0 {
+			if resolved, err = resolveWithin(realDest, filepath.Join(realDest, filepath.FromSlash(resolved)), rel); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if o.recorded {
+		if err := CheckRecordedPath(resolved); err != nil {
+			return nil, fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, resolved, err)
+		}
 	}
 	rsegs := strings.Split(resolved, "/")
 	// The directories after the last link are real directories the path
 	// itself created; the pruning stops above them.
 	realDirs := len(dirs) - (lastLink + 1)
-	return &stalePath{root: root, segs: rsegs, keep: len(rsegs) - 1 - realDirs}, nil
+	return &resolvedPath{root: root, segs: rsegs, keep: max(len(rsegs)-1-realDirs, 0)}, nil
 }
 
-// openConfinedFile opens destination as a root and checks that rel names a
-// regular file reached with no symbolic link at any component below the root.
-// It returns the open root and the platform form of rel for the caller's
-// operation; the caller closes the root.
-func openConfinedFile(destination, rel string) (*os.Root, string, error) {
-	root, segs, err := openConfinedRoot(destination, rel)
+// resolveWithin resolves every symbolic link in the existing path full and
+// returns the result as a slash-separated path relative to realDest, or "."
+// for realDest itself. A path that resolves outside realDest is refused with
+// ErrUnconfinedPath; a path that names an absent file, a dangling link
+// included, returns an error wrapping fs.ErrNotExist.
+func resolveWithin(realDest, full, rel string) (string, error) {
+	target, err := filepath.EvalSymlinks(full)
 	if err != nil {
-		return nil, "", err
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("materialize: resolve %s: %w", rel, err)
+		}
+		return "", fmt.Errorf("%w: %q: %v", ErrUnconfinedPath, rel, err)
 	}
-	if err := checkConfinedFile(root, rel, segs); err != nil {
-		_ = root.Close()
-		return nil, "", err
+	if !withinRoot(realDest, target) {
+		return "", fmt.Errorf("%w: %q resolves outside the destination", ErrUnconfinedPath, rel)
 	}
-	return root, filepath.Join(segs...), nil
+	r, err := filepath.Rel(realDest, target)
+	if err != nil {
+		// Unreachable: both paths are absolute and withinRoot placed target
+		// under realDest. Kept so a future change fails closed.
+		return "", fmt.Errorf("%w: %q: %v", ErrUnconfinedPath, rel, err)
+	}
+	return filepath.ToSlash(r), nil
 }
 
 // openConfinedRoot splits rel into its segments, checks it lexically with the

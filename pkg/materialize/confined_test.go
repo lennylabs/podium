@@ -124,6 +124,7 @@ func TestRemoveStale_RefusesUnconfinedPaths(t *testing.T) {
 	mustSymlink(t, filepath.Join(dest, ".git"), filepath.Join(dest, "gitlink"))
 	mustSymlink(t, filepath.Join(dest, "podium-real"), filepath.Join(dest, ".podium"))
 	mustSymlink(t, "loop", filepath.Join(dest, "loop"))
+	mustSymlink(t, "real/inner.txt", filepath.Join(dest, "inleaf"))
 
 	cases := []struct {
 		rel     string
@@ -134,6 +135,7 @@ func TestRemoveStale_RefusesUnconfinedPaths(t *testing.T) {
 		{"claude/link/sub/secret.txt", ErrUnconfinedPath, filepath.Join(outside, "secret.txt")},
 		{"loop/x.txt", ErrUnconfinedPath, ""},
 		{"leaflink", ErrUnconfinedPath, filepath.Join(outside, "leaf.txt")},
+		{"inleaf", ErrUnconfinedPath, filepath.Join(dest, "real", "inner.txt")},
 		{"dir/keep", ErrUnconfinedPath, filepath.Join(dest, "dir", "keep", "a.txt")},
 		{"real/inner.txt/x", ErrUnconfinedPath, filepath.Join(dest, "real", "inner.txt")},
 		{"gitlink/HEAD", ErrUnconfinedPath, filepath.Join(dest, ".git", "HEAD")},
@@ -206,33 +208,38 @@ func TestRemoveStale_SymlinkedRoot(t *testing.T) {
 	wantExists(t, realDir)
 }
 
-// Spec: §7.5.3 — ReadStale reads a regular file the cleanup accepts, and
+// Spec: §7.5.3 — ReadRecorded reads a regular file the cleanup accepts, and
 // refuses a link at the path, a directory, and an escaping path.
-func TestReadStale(t *testing.T) {
+func TestReadRecorded(t *testing.T) {
 	t.Parallel()
 	base := t.TempDir()
 	dest := filepath.Join(base, "target")
-	confinedFixture(t, dest, map[string]string{"a/b.txt": "content"})
+	confinedFixture(t, dest, map[string]string{"a/b.txt": "content", ".git/HEAD": "ref"})
 	confinedFixture(t, base, map[string]string{"outside.txt": "o"})
 	mustSymlink(t, filepath.Join(base, "outside.txt"), filepath.Join(dest, "leaflink"))
 	mustSymlink(t, "a", filepath.Join(dest, "alink"))
+	mustSymlink(t, "a/b.txt", filepath.Join(dest, "inleaf"))
+	mustSymlink(t, ".git/HEAD", filepath.Join(dest, "gitleaf"))
+	mustSymlink(t, "a/gone.txt", filepath.Join(dest, "dangling"))
 
-	for _, rel := range []string{"a/b.txt", "alink/b.txt"} {
-		got, err := ReadStale(dest, rel)
+	for _, rel := range []string{"a/b.txt", "alink/b.txt", "inleaf"} {
+		got, err := ReadRecorded(dest, rel)
 		if err != nil || string(got) != "content" {
-			t.Errorf("ReadStale(%q) = (%q, %v), want (content, nil)", rel, got, err)
+			t.Errorf("ReadRecorded(%q) = (%q, %v), want (content, nil)", rel, got, err)
 		}
 	}
-	if _, err := ReadStale(dest, "a/missing.txt"); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("ReadStale of a missing file = %v, want fs.ErrNotExist", err)
-	}
-	for _, rel := range []string{"leaflink", "a"} {
-		if _, err := ReadStale(dest, rel); !errors.Is(err, ErrUnconfinedPath) {
-			t.Errorf("ReadStale(%q) = %v, want ErrUnconfinedPath", rel, err)
+	for _, rel := range []string{"a/missing.txt", "dangling"} {
+		if _, err := ReadRecorded(dest, rel); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("ReadRecorded(%q) = %v, want fs.ErrNotExist", rel, err)
 		}
 	}
-	if _, err := ReadStale(dest, "../outside.txt"); !errors.Is(err, ErrUnsafeRecordedPath) {
-		t.Errorf("ReadStale(../outside.txt) = %v, want ErrUnsafeRecordedPath", err)
+	for _, rel := range []string{"leaflink", "a", "gitleaf"} {
+		if _, err := ReadRecorded(dest, rel); !errors.Is(err, ErrUnconfinedPath) {
+			t.Errorf("ReadRecorded(%q) = %v, want ErrUnconfinedPath", rel, err)
+		}
+	}
+	if _, err := ReadRecorded(dest, "../outside.txt"); !errors.Is(err, ErrUnsafeRecordedPath) {
+		t.Errorf("ReadRecorded(../outside.txt) = %v, want ErrUnsafeRecordedPath", err)
 	}
 }
 
@@ -266,4 +273,41 @@ func TestRewriteStale(t *testing.T) {
 	if err := RewriteStale(dest, "../outside/settings.json", upper); !errors.Is(err, ErrUnsafeRecordedPath) {
 		t.Errorf("RewriteStale(../outside/settings.json) = %v, want ErrUnsafeRecordedPath", err)
 	}
+}
+
+// Spec: §6.7, §7.5.3 — a config-merge path that is a link to a regular file
+// inside the target, such as GEMINI.md linked to AGENTS.md, is rewritten
+// through the link and the link stays. A link that resolves outside the
+// target, into .git, or into the sync state is refused, and nothing changes.
+func TestRewriteStale_LeafLink(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	dest := filepath.Join(base, "target")
+	confinedFixture(t, dest, map[string]string{
+		"AGENTS.md":         "agents",
+		".git/config":       "git",
+		".podium/sync.lock": "lock",
+	})
+	confinedFixture(t, base, map[string]string{"outside.md": "outside"})
+	mustSymlink(t, "AGENTS.md", filepath.Join(dest, "GEMINI.md"))
+	mustSymlink(t, ".git/config", filepath.Join(dest, "GIT.md"))
+	mustSymlink(t, ".podium/sync.lock", filepath.Join(dest, "STATE.md"))
+	mustSymlink(t, filepath.Join(base, "outside.md"), filepath.Join(dest, "OUT.md"))
+	upper := func(b []byte) []byte { return []byte("new:" + string(b)) }
+
+	if err := RewriteStale(dest, "GEMINI.md", upper); err != nil {
+		t.Fatalf("RewriteStale through an in-target link: %v", err)
+	}
+	wantContent(t, filepath.Join(dest, "AGENTS.md"), "new:agents")
+	if info, err := os.Lstat(filepath.Join(dest, "GEMINI.md")); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Errorf("GEMINI.md must stay a link; lstat = (%v, %v)", info, err)
+	}
+	for _, rel := range []string{"GIT.md", "STATE.md", "OUT.md"} {
+		if err := RewriteStale(dest, rel, upper); !errors.Is(err, ErrUnconfinedPath) {
+			t.Errorf("RewriteStale(%q) = %v, want ErrUnconfinedPath", rel, err)
+		}
+	}
+	wantContent(t, filepath.Join(dest, ".git", "config"), "git")
+	wantContent(t, filepath.Join(dest, ".podium", "sync.lock"), "lock")
+	wantContent(t, filepath.Join(base, "outside.md"), "outside")
 }

@@ -9,25 +9,21 @@ import (
 )
 
 // ReadStateFile returns the bytes of a file sync keeps for itself below
-// destination, such as .podium/sync.lock. The file must be a regular file
-// reached with no symbolic link at any component below the root; the root
-// itself may be a link. A target can be a repository checkout whose content
-// another party commits (§7.8), so a committed .podium link or a lock that is
-// a link must not direct the read at a file outside the target. An absent
-// file returns an error wrapping fs.ErrNotExist.
+// destination, such as .podium/sync.lock. A target can be a repository
+// checkout whose content another party commits (§7.8), so a .podium directory
+// that is a symbolic link is refused, and a link at the file itself is
+// followed only when it resolves to a regular file inside the destination; a
+// link that resolves outside is refused. The root itself may be a link. An
+// absent file returns an error wrapping fs.ErrNotExist.
 //
 // Spec: §7.5.3, §7.8
 func ReadStateFile(destination, rel string) ([]byte, error) {
-	root, name, err := openConfinedFile(destination, rel)
+	rp, err := openResolved(destination, rel, resolveOpts{followLeaf: true})
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = root.Close() }()
-	data, err := root.ReadFile(name)
-	if err != nil {
-		return nil, fmt.Errorf("materialize: read %s: %w", rel, err)
-	}
-	return data, nil
+	defer rp.close()
+	return rp.read(rel)
 }
 
 // WriteStateFile writes data to a file sync keeps for itself below

@@ -780,12 +780,12 @@ func selectRecords(scope ScopeFilter, all []materialRecord, toggles LockToggles)
 // config-merge entries survive the reconciliation. A prior-only path comes
 // from the lock, so it is read under the rule the cleanup applies (§7.5.3): a
 // path the cleanup refuses cannot be read and counts as altered. A current
-// path is read only when it is a regular file, so a link at a materialized
-// path is not followed to a file outside the target, a device, or a FIFO.
+// path is read under the same rule, so a link at a materialized path is
+// followed only to a file inside the target.
 func writeTarget(target string, files []adapter.File, current map[string]bool, priorMerge map[string]string, kept keptOutput) (bool, error) {
 	priorOnly := priorOnlyPaths(current, priorMerge)
-	beforeCurrent, unobservedCurrent := tolerantDigests(current, readRegular(target))
-	beforePrior, unobservedPrior := tolerantDigests(priorOnly, readStale(target))
+	beforeCurrent, unobservedCurrent := tolerantDigests(current, readRecorded(target))
+	beforePrior, unobservedPrior := tolerantDigests(priorOnly, readRecorded(target))
 
 	if err := materialize.WriteKeeping(target, files, kept.keepFunc()); err != nil {
 		return false, err
@@ -796,7 +796,7 @@ func writeTarget(target string, files []adapter.File, current map[string]bool, p
 	if err != nil {
 		return false, fmt.Errorf("sync: read target after materialize: %w", err)
 	}
-	afterPrior, unobservedAfter := tolerantDigests(priorOnly, readStale(target))
+	afterPrior, unobservedAfter := tolerantDigests(priorOnly, readRecorded(target))
 	if unobservedCurrent || unobservedPrior || unobservedAfter {
 		return true, nil
 	}
@@ -816,34 +816,17 @@ func priorOnlyPaths(current map[string]bool, priorMerge map[string]string) map[s
 	return out
 }
 
-// readRegular returns a reader of a slash-separated path below workdir that
-// reads only a regular file. Directory links resolve as the writer resolves
-// them, but a link at the path itself is refused rather than followed: a
-// repository checkout can commit one (§7.8), and the writer replaces it by
-// rename rather than writing through it.
-func readRegular(workdir string) func(rel string) ([]byte, error) {
-	return func(rel string) ([]byte, error) {
-		full := filepath.Join(workdir, filepath.FromSlash(rel))
-		info, err := os.Lstat(full)
-		if err != nil {
-			return nil, err
-		}
-		if !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("%w: %q is not a regular file", materialize.ErrUnconfinedPath, rel)
-		}
-		return os.ReadFile(full)
-	}
-}
-
-// readStale returns a reader of a slash-separated prior-lock path below
-// workdir under the rule the stale-file cleanup applies
-// (materialize.ReadStale), so a lock entry cannot direct the comparison at a
-// file outside the target, a device, or a FIFO.
+// readRecorded returns a reader of a compared path below workdir through
+// materialize.ReadRecorded: a symbolic link, at a directory or at the path
+// itself, is followed only when it resolves inside the target to a path the
+// §7.5.3 rule accepts, so a compared path cannot direct the read at a file
+// outside the target, a device, or a FIFO, while a link such as GEMINI.md to
+// AGENTS.md reads the file it names.
 //
-// Spec: §7.5.3
-func readStale(workdir string) func(rel string) ([]byte, error) {
+// Spec: §7.5.2, §7.5.3
+func readRecorded(workdir string) func(rel string) ([]byte, error) {
 	return func(rel string) ([]byte, error) {
-		return materialize.ReadStale(workdir, rel)
+		return materialize.ReadRecorded(workdir, rel)
 	}
 }
 

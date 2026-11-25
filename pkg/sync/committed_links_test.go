@@ -52,6 +52,83 @@ func TestRun_StaleCleanupFollowsInRootLink(t *testing.T) {
 	}
 }
 
+// Spec: §6.6, §6.7, §7.5.2, §7.5.3 — a workspace that links GEMINI.md and
+// CLAUDE.md to AGENTS.md and links .gemini/skills to a directory inside the
+// target syncs through the links. The rule block lands in AGENTS.md next to the
+// operator's content, the skill lands behind the directory link, every link
+// stays a link, a re-sync reports no change, and when both artifacts leave the
+// view the block is stripped through the link and the skill is removed, with
+// no entry skipped.
+//
+// Not parallel: the test swaps the process-wide os.Stderr.
+func TestRun_WorkspaceLinksInsideTargetFollowed(t *testing.T) {
+	reg := t.TempDir()
+	testharness.WriteTree(t, reg,
+		testharness.WriteTreeOption{Path: "style/house/ARTIFACT.md", Content: "---\ntype: rule\nversion: 1.0.0\nrule_mode: always\n---\n\nHouse rule.\n"},
+		testharness.WriteTreeOption{Path: "greet/hello-world/ARTIFACT.md", Content: "---\ntype: skill\nversion: 1.0.0\n---\n"},
+		testharness.WriteTreeOption{Path: "greet/hello-world/SKILL.md", Content: skillBodySrc},
+		testharness.WriteTreeOption{Path: "team/glossary/ARTIFACT.md", Content: agentArtifactSrc},
+	)
+	target := filepath.Join(t.TempDir(), "target")
+	writeFile(t, filepath.Join(target, "AGENTS.md"), "operator notes\n")
+	if err := os.MkdirAll(filepath.Join(target, "shared", "skills"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(target, ".gemini"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	links := map[string]string{"GEMINI.md": "AGENTS.md", "CLAUDE.md": "AGENTS.md", ".gemini/skills": "../shared/skills"}
+	for link, dest := range links {
+		if err := os.Symlink(dest, filepath.Join(target, filepath.FromSlash(link))); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+	}
+	wantLinks := func(when string) {
+		t.Helper()
+		for link := range links {
+			if info, err := os.Lstat(filepath.Join(target, filepath.FromSlash(link))); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+				t.Errorf("%s: %s must stay a link; lstat = (%v, %v)", when, link, info, err)
+			}
+		}
+	}
+	opts := Options{RegistryPath: reg, Target: target, AdapterID: "gemini"}
+
+	stderr := captureStderr(t, func() { syncChanged(t, opts) })
+	if strings.Contains(stderr, "skipping") || strings.Contains(stderr, "refusing") {
+		t.Errorf("first sync stderr = %q, want no refused path", stderr)
+	}
+	agents := string(readTargetFile(t, target, "AGENTS.md"))
+	if !strings.Contains(agents, "operator notes") || !strings.Contains(agents, "House rule.") {
+		t.Errorf("AGENTS.md = %q, want the operator notes and the rule block", agents)
+	}
+	if _, err := os.Stat(filepath.Join(target, "shared", "skills", "hello-world", "SKILL.md")); err != nil {
+		t.Errorf("the skill must land behind the directory link: %v", err)
+	}
+	wantLinks("after the first sync")
+	wantChanged(t, opts, false, "re-sync through the links")
+
+	for _, dir := range []string{"style", "greet"} {
+		if err := os.RemoveAll(filepath.Join(reg, dir)); err != nil {
+			t.Fatalf("RemoveAll: %v", err)
+		}
+	}
+	stderr = captureStderr(t, func() { syncChanged(t, opts) })
+	if strings.Contains(stderr, "skipping") {
+		t.Errorf("removal sync stderr = %q, want no skipped entry", stderr)
+	}
+	agents = string(readTargetFile(t, target, "AGENTS.md"))
+	if !strings.Contains(agents, "operator notes") || strings.Contains(agents, "House rule.") {
+		t.Errorf("AGENTS.md after removal = %q, want the operator notes without the rule block", agents)
+	}
+	if _, err := os.Lstat(filepath.Join(target, "shared", "skills", "hello-world")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the removed skill must be cleaned up behind the link; lstat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "shared", "skills")); err != nil {
+		t.Errorf("the directory the link names must stay: %v", err)
+	}
+	wantLinks("after the removal sync")
+}
+
 // Spec: §7.5.3 — the rule that admits a prior-lock entry governs what sync
 // writes. A bundled resource whose name holds a backslash, which is a legal
 // file name on Unix, is neither written nor recorded, so no later run warns
@@ -119,7 +196,7 @@ func TestRender_CommittedMergeLinkNotFollowed(t *testing.T) {
 	}
 
 	_, err := Render(context.Background(), opts)
-	if err == nil || !strings.Contains(err.Error(), "refusing to merge") {
+	if err == nil || !strings.Contains(err.Error(), "resolves outside the destination") {
 		t.Errorf("Render into a committed merge link = %v, want the link refused", err)
 	}
 	if info, lerr := os.Lstat(manifest); lerr != nil || info.Mode()&fs.ModeSymlink == 0 {

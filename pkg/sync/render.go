@@ -331,8 +331,8 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 	// starting digest, so the comparison reports it under its owner, and an
 	// unreadable prior-only path is reported under removedOwner below.
 	priorOnly := priorOnlyPaths(currentPaths, priorMerge)
-	beforeDigests, _ := tolerantDigests(currentPaths, readRegular(workdir))
-	beforePrior, unobservedBefore := tolerantDigests(priorOnly, readStale(workdir))
+	beforeDigests, _ := tolerantDigests(currentPaths, readRecorded(workdir))
+	beforePrior, unobservedBefore := tolerantDigests(priorOnly, readRecorded(workdir))
 
 	if err := materialize.Write(workdir, files); err != nil {
 		return nil, fmt.Errorf("publish %q: write render: %w", outputID, err)
@@ -352,7 +352,7 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 	if err != nil {
 		return nil, fmt.Errorf("publish %q: read checkout after render: %w", outputID, err)
 	}
-	afterPrior, unobservedAfter := tolerantDigests(priorOnly, readStale(workdir))
+	afterPrior, unobservedAfter := tolerantDigests(priorOnly, readRecorded(workdir))
 
 	res := &RenderResult{OutputID: outputID, Files: sortedKeys(currentPaths)}
 	res.Changed, res.ChangedArtifacts = changeSet(mergeDigests(beforeDigests, beforePrior), mergeDigests(afterDigests, afterPrior), owner)
@@ -379,10 +379,10 @@ func mergeOwner(ids []string, owner string) []string {
 // no entry, and the change-set comparison treats it as added or removed. A read
 // error other than "not present" is returned, because it means the state of the
 // checkout or target directory could not be observed. The read goes through
-// readRegular, so a link at the path is not followed.
+// readRecorded, so a link at the path is followed only inside the target.
 func onDiskDigests(workdir string, paths map[string]bool) (map[string]string, error) {
 	out := make(map[string]string, len(paths))
-	read := readRegular(workdir)
+	read := readRecorded(workdir)
 	for p := range paths {
 		data, err := read(p)
 		if err != nil {

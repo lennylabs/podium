@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/adapter"
@@ -75,13 +76,42 @@ func foldOps(files []adapter.File, resolved []string, keep func(id string) bool)
 	return items, nil
 }
 
+// resolveMergeTarget returns the path a config-merge or inject into full
+// writes. full is returned as it is when it is absent or is not a symbolic
+// link. A link at full is followed when it resolves to a path inside realDest
+// that passes CheckRecordedPath: workspaces link GEMINI.md or CLAUDE.md to
+// AGENTS.md, and the merge then reads and rewrites the file the link names
+// and leaves the link in place. A link that resolves outside the destination,
+// into .git, or into the sync state under .podium/, and a dangling link, are
+// refused with ErrUnconfinedPath: a repository checkout can commit such a link
+// (§7.8), and following it would write outside the checkout or fold an
+// outside file's content into the rendered file the publish step commits.
+//
+// Spec: §6.6, §6.7, §7.8
+func resolveMergeTarget(realDest, full, rel string) (string, error) {
+	info, err := os.Lstat(full)
+	if err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		// Absent, or not a link: readMergeBase reads or refuses it.
+		return full, nil
+	}
+	r, err := resolveWithin(realDest, full, rel)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("%w: %q is a symbolic link that names no file", ErrUnconfinedPath, rel)
+		}
+		return "", err
+	}
+	if err := CheckRecordedPath(r); err != nil {
+		return "", fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, r, err)
+	}
+	return filepath.Join(realDest, filepath.FromSlash(r)), nil
+}
+
 // readMergeBase returns the existing bytes at rp that an inject or merge folds
 // into, or nil when nothing is there. The caller has confirmed that rp's
-// directories resolve inside the destination. A link at rp itself is refused
-// rather than followed: a repository checkout can commit a config-merge path
-// as a link to a file outside it (§7.8), and following it would fold that
-// file's content into the rendered file the publish step commits. Any other
-// non-regular file at rp is refused as well.
+// directories resolve inside the destination and has resolved a link at rp
+// itself through resolveMergeTarget, so a link or any other non-regular file
+// still at rp is refused rather than followed.
 //
 // Spec: §6.7, §7.8
 func readMergeBase(rp string) ([]byte, error) {

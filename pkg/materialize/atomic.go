@@ -265,6 +265,16 @@ func WriteKeeping(destination string, files []adapter.File, keep func(id string)
 		if err := checkPodiumDir(absDest, f.Path); err != nil {
 			return err
 		}
+		// A config-merge or inject target that is a link resolving inside
+		// the destination, such as GEMINI.md linked to AGENTS.md, is merged
+		// into the file the link names, and the link stays (§6.6).
+		if f.Op != adapter.OpWrite {
+			target, err := resolveMergeTarget(realDest, resolved[i], f.Path)
+			if err != nil {
+				return err
+			}
+			resolved[i] = target
+		}
 	}
 
 	// Fold inject/merge ops into one final content per destination path. This

@@ -71,6 +71,15 @@ func TestStateFile_CommittedLinksStayInsideTarget(t *testing.T) {
 		wantContent(t, victim, "victim\n")
 		wantContent(t, filepath.Join(dest, ".podium", "sync.lock"), "lock")
 	})
+	t.Run("lock link inside the target", func(t *testing.T) {
+		dest := filepath.Join(base, "inside-lock-link")
+		confinedFixture(t, dest, map[string]string{"locks/sync.lock": "kept lock"})
+		mustSymlink(t, "../locks/sync.lock", filepath.Join(dest, ".podium", "sync.lock"))
+		got, err := ReadStateFile(dest, ".podium/sync.lock")
+		if err != nil || string(got) != "kept lock" {
+			t.Errorf("ReadStateFile of an in-target lock link = (%q, %v), want (kept lock, nil)", got, err)
+		}
+	})
 	t.Run("podium link", func(t *testing.T) {
 		dest := filepath.Join(base, "podium-link")
 		mustSymlink(t, filepath.Join(base, "podium-out"), filepath.Join(dest, ".podium"))
@@ -111,20 +120,28 @@ func TestWrite_StagingTemporaryLinkRefused(t *testing.T) {
 	wantGone(t, filepath.Join(dest, "a.md.tmp"))
 }
 
-// Spec: §6.6, §6.7, §7.8 — a merge or inject target that is a link is not read
-// through: a committed link to an outside JSON file cannot fold that file's
-// content into the rendered file the publish step commits.
+// Spec: §6.6, §6.7, §7.8 — a merge or inject target that is a link resolving
+// outside the destination, into .git, or into the sync state, or a dangling
+// link, is not read through: a committed link to an outside JSON file cannot
+// fold that file's content into the rendered file the publish step commits.
 func TestWrite_MergeTargetLinkRefused(t *testing.T) {
 	t.Parallel()
 	base := t.TempDir()
 	dest := filepath.Join(base, "checkout")
 	confinedFixture(t, base, map[string]string{"creds.json": `{"token":"SECRET-123"}`})
+	confinedFixture(t, dest, map[string]string{".git/config": "git", ".podium/sync.lock": "lock"})
 	mustSymlink(t, filepath.Join(base, "creds.json"), filepath.Join(dest, ".claude-plugin", "marketplace.json"))
 	mustSymlink(t, filepath.Join(base, "creds.json"), filepath.Join(dest, "AGENTS.md"))
+	mustSymlink(t, ".git/config", filepath.Join(dest, "GEMINI.md"))
+	mustSymlink(t, ".podium/sync.lock", filepath.Join(dest, "CLAUDE.md"))
+	mustSymlink(t, "absent.json", filepath.Join(dest, "settings.json"))
 
 	for _, f := range []adapter.File{
 		{Path: ".claude-plugin/marketplace.json", Op: adapter.OpMergeJSON, Content: []byte(`{"name":"acme"}`)},
 		{Path: "AGENTS.md", Op: adapter.OpInject, Key: "a", Content: []byte("block")},
+		{Path: "GEMINI.md", Op: adapter.OpInject, Key: "a", Content: []byte("block")},
+		{Path: "CLAUDE.md", Op: adapter.OpInject, Key: "a", Content: []byte("block")},
+		{Path: "settings.json", Op: adapter.OpMergeJSON, Content: []byte(`{"a":1}`)},
 	} {
 		err := Write(dest, []adapter.File{f})
 		if !errors.Is(err, ErrUnconfinedPath) {
@@ -136,6 +153,46 @@ func TestWrite_MergeTargetLinkRefused(t *testing.T) {
 		}
 	}
 	wantContent(t, filepath.Join(base, "creds.json"), `{"token":"SECRET-123"}`)
+	wantContent(t, filepath.Join(dest, ".git", "config"), "git")
+	wantContent(t, filepath.Join(dest, ".podium", "sync.lock"), "lock")
+	wantGone(t, filepath.Join(dest, "absent.json"))
+}
+
+// Spec: §6.6, §6.7 — a merge or inject target that is a link to a regular
+// file inside the destination, such as GEMINI.md linked to AGENTS.md, is
+// merged into the file the link names: the operator's content stays, the
+// block lands in AGENTS.md, and GEMINI.md stays a link. A directory link
+// inside the destination is written through as well.
+func TestWrite_MergeTargetLinkInsideFollowed(t *testing.T) {
+	t.Parallel()
+	dest := filepath.Join(t.TempDir(), "target")
+	confinedFixture(t, dest, map[string]string{
+		"AGENTS.md":                   "operator\n",
+		"shared/gemini/settings.json": `{"theme":"dark"}`,
+	})
+	mustSymlink(t, "AGENTS.md", filepath.Join(dest, "GEMINI.md"))
+	mustSymlink(t, "shared/gemini", filepath.Join(dest, ".gemini"))
+
+	err := Write(dest, []adapter.File{
+		{Path: "GEMINI.md", Op: adapter.OpInject, Key: "style/house", Content: []byte("house rules")},
+		{Path: ".gemini/settings.json", Op: adapter.OpMergeJSON, Content: []byte(`{"mcpServers":{"x":{"command":"y"}}}`)},
+	})
+	if err != nil {
+		t.Fatalf("Write through in-destination links: %v", err)
+	}
+	agents, _ := os.ReadFile(filepath.Join(dest, "AGENTS.md"))
+	if !strings.Contains(string(agents), "operator") || !strings.Contains(string(agents), "house rules") {
+		t.Errorf("AGENTS.md = %q, want the operator content and the injected block", agents)
+	}
+	settings, _ := os.ReadFile(filepath.Join(dest, "shared", "gemini", "settings.json"))
+	if !strings.Contains(string(settings), "theme") || !strings.Contains(string(settings), "mcpServers") {
+		t.Errorf("settings.json = %q, want both the operator key and the merged entry", settings)
+	}
+	for _, rel := range []string{"GEMINI.md", ".gemini"} {
+		if info, err := os.Lstat(filepath.Join(dest, rel)); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+			t.Errorf("%s must stay a link; lstat = (%v, %v)", rel, info, err)
+		}
+	}
 }
 
 // Spec: §6.6, §7.8 — the writer refuses a path under a .podium directory that is a
