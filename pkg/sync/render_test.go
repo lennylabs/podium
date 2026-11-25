@@ -624,10 +624,10 @@ func TestRender_WriteError(t *testing.T) {
 	}
 }
 
-// Spec: §7.8 — change detection reads the checkout content. When a path the
-// render will write is occupied by a directory on disk, the pre-write checkout
-// read fails (a non-ErrNotExist error), and Render surfaces a structured error
-// naming the output rather than reporting a render against unobservable state.
+// Spec: §7.5.2, §7.8 — change detection reads the checkout content, and a path
+// it cannot read in the starting state counts as altered. When a path the
+// render will write is occupied by a directory on disk, the write cannot
+// replace it, and Render surfaces a structured error naming the output.
 func TestRender_CheckoutReadError(t *testing.T) {
 	t.Parallel()
 	reg := renderFixtureRegistry(t)
@@ -646,8 +646,8 @@ func TestRender_CheckoutReadError(t *testing.T) {
 	if !strings.Contains(err.Error(), "acme-agents") {
 		t.Errorf("checkout-read error must name the output id: %v", err)
 	}
-	if !strings.Contains(err.Error(), "read checkout") {
-		t.Errorf("error must name the checkout read failure: %v", err)
+	if !strings.Contains(err.Error(), "write render") {
+		t.Errorf("error must name the failed write: %v", err)
 	}
 }
 

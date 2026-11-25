@@ -1,14 +1,17 @@
 package sync
 
 import (
+	"errors"
 	"fmt"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/lennylabs/podium/pkg/materialize"
 )
 
 // nullProfile serializes the empty profile name as the YAML null literal
@@ -93,11 +96,14 @@ func LockFilePath(target string) string {
 }
 
 // ReadLock reads and parses an existing lock file at target. A missing
-// file returns (nil, nil); other errors are returned.
+// file returns (nil, nil); other errors are returned. The lock is read through
+// materialize.ReadStateFile, so a committed lock that is a symbolic link, or a
+// .podium directory that is one, is refused rather than followed to a file
+// outside the target (§7.5.3, §7.8).
 func ReadLock(target string) (*LockFile, error) {
-	data, err := os.ReadFile(LockFilePath(target))
+	data, err := materialize.ReadStateFile(target, lockRelPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, err
@@ -143,14 +149,12 @@ func WriteLock(target string, lf *LockFile) error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(target, ".podium")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	final := LockFilePath(target)
-	tmp := final + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, final)
+	// The write goes through materialize.WriteStateFile: a committed .podium
+	// link refuses the write, and the temporary is created exclusively, so a
+	// committed sync.lock.tmp link cannot redirect it outside the target
+	// (§7.8).
+	return materialize.WriteStateFile(target, lockRelPath, data, 0o644)
 }
+
+// lockRelPath is the lock file's slash-separated path below a target.
+const lockRelPath = ".podium/sync.lock"

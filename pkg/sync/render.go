@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/lennylabs/podium/pkg/adapter"
@@ -305,13 +304,18 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 	prior, _ := ReadLock(workdir)
 	priorMerge := PriorMergeKinds(dropUnsafeLockPaths(prior))
 
-	files := make([]adapter.File, len(rendered))
+	files := make([]adapter.File, 0, len(rendered))
 	currentPaths := map[string]bool{}
 	merge := map[string]string{}
 	owner := map[string]string{}
-	for i, rf := range rendered {
+	for _, rf := range rendered {
 		f := rf.file
-		files[i] = f
+		// §7.5.3: a path the next render would refuse to read back from the
+		// lock is neither written nor recorded.
+		if !recordable(rf.ownerID, f.Path) {
+			continue
+		}
+		files = append(files, f)
 		currentPaths[f.Path] = true
 		merge[f.Path] = MergeKindForOp(f.Op)
 		owner[f.Path] = rf.ownerID
@@ -321,14 +325,14 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 	// of every path the render touches (the rendered paths plus the prior-render
 	// paths that the cleanup may remove) before any write mutates the tree. A
 	// prior-only path comes from the committed lock, so it is read under the
-	// cleanup's confinement, and one that cannot be read counts as altered
-	// (§7.5.2) rather than failing the render.
+	// cleanup's rule, and a rendered path is read only when it is a regular
+	// file. A path that cannot be read counts as altered (§7.5.2) rather than
+	// failing the render: a rendered path unreadable before the write has no
+	// starting digest, so the comparison reports it under its owner, and an
+	// unreadable prior-only path is reported under removedOwner below.
 	priorOnly := priorOnlyPaths(currentPaths, priorMerge)
-	beforeDigests, err := onDiskDigests(workdir, currentPaths)
-	if err != nil {
-		return nil, fmt.Errorf("publish %q: read checkout before render: %w", outputID, err)
-	}
-	beforePrior, unobservedBefore := tolerantDigests(priorOnly, readConfined(workdir))
+	beforeDigests, _ := tolerantDigests(currentPaths, readRegular(workdir))
+	beforePrior, unobservedBefore := tolerantDigests(priorOnly, readStale(workdir))
 
 	if err := materialize.Write(workdir, files); err != nil {
 		return nil, fmt.Errorf("publish %q: write render: %w", outputID, err)
@@ -340,15 +344,15 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 		return nil, err
 	}
 
-	// The pre-write read of the same paths succeeded and materialize.Write left
-	// every rendered path a readable regular file, so this read fails only on a
-	// concurrent filesystem mutation; the guard surfaces that rather than
-	// reporting a change set against unobservable state.
+	// materialize.Write left every rendered path a readable regular file, so
+	// this read fails only on a concurrent filesystem mutation; the guard
+	// surfaces that rather than reporting a change set against unobservable
+	// state.
 	afterDigests, err := onDiskDigests(workdir, currentPaths)
 	if err != nil {
 		return nil, fmt.Errorf("publish %q: read checkout after render: %w", outputID, err)
 	}
-	afterPrior, unobservedAfter := tolerantDigests(priorOnly, readConfined(workdir))
+	afterPrior, unobservedAfter := tolerantDigests(priorOnly, readStale(workdir))
 
 	res := &RenderResult{OutputID: outputID, Files: sortedKeys(currentPaths)}
 	res.Changed, res.ChangedArtifacts = changeSet(mergeDigests(beforeDigests, beforePrior), mergeDigests(afterDigests, afterPrior), owner)
@@ -374,15 +378,20 @@ func mergeOwner(ids []string, owner string) []string {
 // did not exist before materialization or was removed by the cleanup contributes
 // no entry, and the change-set comparison treats it as added or removed. A read
 // error other than "not present" is returned, because it means the state of the
-// checkout or target directory could not be observed.
+// checkout or target directory could not be observed. The read goes through
+// readRegular, so a link at the path is not followed.
 func onDiskDigests(workdir string, paths map[string]bool) (map[string]string, error) {
 	out := make(map[string]string, len(paths))
+	read := readRegular(workdir)
 	for p := range paths {
-		data, err := os.ReadFile(filepath.Join(workdir, filepath.FromSlash(p)))
+		data, err := read(p)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
+			// Both callers read the paths the run just wrote as regular
+			// files, so this branch runs only on a concurrent change to the
+			// target, which the tests cannot stage deterministically.
 			return nil, fmt.Errorf("read %s: %w", p, err)
 		}
 		out[p] = digest(data)

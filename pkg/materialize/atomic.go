@@ -6,6 +6,7 @@ package materialize
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,7 +202,12 @@ func containsString(haystack []string, needle string) bool {
 // destination root or a symlinked intermediate directory are rejected by
 // resolving the deepest existing ancestor of each target with
 // filepath.EvalSymlinks and confirming it stays within the resolved
-// destination root.
+// destination root. The destination can be a repository checkout whose links
+// another party commits (§7.8), so a link at a leaf is never written through:
+// each temporary is created exclusively (stage), a config-merge or inject
+// target that is a link is refused (readMergeBase), and a path under a .podium
+// directory that is a link is refused (checkPodiumDir). The rename replaces a
+// link at a standalone path rather than writing through it.
 func Write(destination string, files []adapter.File) error {
 	return WriteKeeping(destination, files, nil)
 }
@@ -247,6 +253,20 @@ func WriteKeeping(destination string, files []adapter.File, keep func(id string)
 		return err
 	}
 
+	// §6.7 symlink containment: confirm each target's deepest existing
+	// ancestor resolves inside the destination before anything is read or
+	// written, so a pre-existing symlinked directory can neither redirect a
+	// write outside the root nor feed the merge fold a file outside it. A
+	// .podium directory that is a link is refused outright (§7.8).
+	for i, f := range files {
+		if err := checkSymlinkContainment(realDest, resolved[i]); err != nil {
+			return err
+		}
+		if err := checkPodiumDir(absDest, f.Path); err != nil {
+			return err
+		}
+	}
+
 	// Fold inject/merge ops into one final content per destination path. This
 	// reads any existing on-disk file for OpInject / OpMergeJSON targets so
 	// the operator's other content is preserved (§6.7 config-merge / inject).
@@ -267,20 +287,12 @@ func WriteKeeping(destination string, files []adapter.File, keep func(id string)
 		}
 	}
 	for i, it := range items {
-		// §6.7 symlink containment: confirm the target's deepest existing
-		// ancestor resolves inside the destination before creating or
-		// writing anything, so a pre-existing symlinked directory cannot
-		// redirect the write outside the root.
-		if err := checkSymlinkContainment(realDest, it.resolved); err != nil {
-			cleanup()
-			return err
-		}
 		if err := os.MkdirAll(filepath.Dir(it.resolved), 0o755); err != nil {
 			cleanup()
 			return err
 		}
 		tmp := it.resolved + ".tmp"
-		if err := os.WriteFile(tmp, it.content, it.mode); err != nil {
+		if err := stage(hostFS{}, tmp, it.content, it.mode); err != nil {
 			cleanup()
 			return err
 		}
@@ -347,6 +359,22 @@ func checkSymlinkContainment(realDest, target string) error {
 	}
 }
 
+// checkPodiumDir refuses a path under .podium/ when the destination's .podium
+// directory is a symbolic link. Sync keeps its own state there, and a
+// repository checkout can commit .podium as a link (§7.8), so nothing is read
+// or written through such a link even when it resolves inside the root.
+func checkPodiumDir(absDest, rel string) error {
+	first, _, _ := strings.Cut(filepath.ToSlash(rel), "/")
+	if !strings.EqualFold(first, ".podium") {
+		return nil
+	}
+	info, err := os.Lstat(filepath.Join(absDest, first))
+	if err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("%w: %q: .podium is a symbolic link", ErrUnconfinedPath, rel)
+	}
+	return nil
+}
+
 // withinRoot reports whether path is root itself or nested under it, after
 // both have been symlink-resolved by the caller.
 func withinRoot(root, path string) bool {
@@ -365,7 +393,7 @@ func writeAtomic(path string, content []byte, mode os.FileMode) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, content, mode); err != nil {
+	if err := stage(hostFS{}, tmp, content, mode); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {

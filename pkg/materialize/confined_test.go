@@ -50,6 +50,15 @@ func wantGone(t *testing.T, path string) {
 	}
 }
 
+// wantContent fails the test unless the file at path holds want.
+func wantContent(t *testing.T, path, want string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != want {
+		t.Errorf("%s = (%q, %v), want %q", path, got, err, want)
+	}
+}
+
 // Spec: §7.5.3 — the stale-file cleanup removes a regular file below the
 // target and prunes the directories that held it while they are empty,
 // stopping at the first non-empty directory and never removing the root.
@@ -94,9 +103,10 @@ func TestRemoveStale_AbsentFile(t *testing.T) {
 	}
 }
 
-// Spec: §6.7, §7.5.3 — a recorded path reached through a symbolic link, a
-// symbolic link at the path, and a directory at the path are refused, and
-// nothing outside the root or behind the link is removed.
+// Spec: §6.7, §7.5.3 — the cleanup refuses a link that resolves outside the
+// root, a link at the path, a directory at the path, a link into .git, a
+// .podium directory that is a link, and a path the recorded-path rule
+// refuses, and nothing outside the root or behind the link is removed.
 func TestRemoveStale_RefusesUnconfinedPaths(t *testing.T) {
 	t.Parallel()
 	base := t.TempDir()
@@ -104,12 +114,16 @@ func TestRemoveStale_RefusesUnconfinedPaths(t *testing.T) {
 	outside := filepath.Join(base, "outside")
 	confinedFixture(t, outside, map[string]string{"secret.txt": "s", "leaf.txt": "l"})
 	confinedFixture(t, dest, map[string]string{
-		"real/inner.txt": "i",
-		"dir/keep/a.txt": "a",
+		"real/inner.txt":                 "i",
+		"dir/keep/a.txt":                 "a",
+		".git/HEAD":                      "ref",
+		"podium-real/resources/a/run.sh": "r",
 	})
 	mustSymlink(t, outside, filepath.Join(dest, "claude", "link"))
-	mustSymlink(t, filepath.Join(dest, "real"), filepath.Join(dest, "inlink"))
 	mustSymlink(t, filepath.Join(outside, "leaf.txt"), filepath.Join(dest, "leaflink"))
+	mustSymlink(t, filepath.Join(dest, ".git"), filepath.Join(dest, "gitlink"))
+	mustSymlink(t, filepath.Join(dest, "podium-real"), filepath.Join(dest, ".podium"))
+	mustSymlink(t, "loop", filepath.Join(dest, "loop"))
 
 	cases := []struct {
 		rel     string
@@ -117,16 +131,19 @@ func TestRemoveStale_RefusesUnconfinedPaths(t *testing.T) {
 		keep    string
 	}{
 		{"claude/link/secret.txt", ErrUnconfinedPath, filepath.Join(outside, "secret.txt")},
-		{"inlink/inner.txt", ErrUnconfinedPath, filepath.Join(dest, "real", "inner.txt")},
-		{"inlink/gone.md", ErrUnconfinedPath, filepath.Join(dest, "real")},
+		{"claude/link/sub/secret.txt", ErrUnconfinedPath, filepath.Join(outside, "secret.txt")},
+		{"loop/x.txt", ErrUnconfinedPath, ""},
 		{"leaflink", ErrUnconfinedPath, filepath.Join(outside, "leaf.txt")},
 		{"dir/keep", ErrUnconfinedPath, filepath.Join(dest, "dir", "keep", "a.txt")},
 		{"real/inner.txt/x", ErrUnconfinedPath, filepath.Join(dest, "real", "inner.txt")},
-		{"../outside/secret.txt", ErrOutOfDestination, filepath.Join(outside, "secret.txt")},
-		{"/etc/hosts", ErrOutOfDestination, ""},
-		{"", ErrOutOfDestination, ""},
-		{"a//b", ErrOutOfDestination, ""},
-		{"a/./b", ErrOutOfDestination, ""},
+		{"gitlink/HEAD", ErrUnconfinedPath, filepath.Join(dest, ".git", "HEAD")},
+		{".podium/resources/a/run.sh", ErrUnconfinedPath, filepath.Join(dest, "podium-real", "resources", "a", "run.sh")},
+		{"../outside/secret.txt", ErrUnsafeRecordedPath, filepath.Join(outside, "secret.txt")},
+		{".git/HEAD", ErrUnsafeRecordedPath, filepath.Join(dest, ".git", "HEAD")},
+		{"/etc/hosts", ErrUnsafeRecordedPath, ""},
+		{"", ErrUnsafeRecordedPath, ""},
+		{"a//b", ErrUnsafeRecordedPath, ""},
+		{"a/./b", ErrUnsafeRecordedPath, ""},
 	}
 	for _, tc := range cases {
 		err := RemoveStale(dest, tc.rel)
@@ -137,11 +154,39 @@ func TestRemoveStale_RefusesUnconfinedPaths(t *testing.T) {
 			wantExists(t, tc.keep)
 		}
 	}
-	wantExists(t, filepath.Join(dest, "claude", "link"))
-	wantExists(t, filepath.Join(dest, "leaflink"))
-	wantExists(t, filepath.Join(dest, "inlink"))
+	for _, link := range []string{"claude/link", "leaflink", "gitlink", ".podium"} {
+		wantExists(t, filepath.Join(dest, filepath.FromSlash(link)))
+	}
 	if err := RemoveStale("", "a.txt"); !errors.Is(err, ErrEmptyDestination) {
 		t.Errorf("RemoveStale with an empty destination = %v, want ErrEmptyDestination", err)
+	}
+}
+
+// Spec: §6.7, §7.5.3 — the cleanup accepts the directory links the writer
+// accepts. A stale file behind a link that resolves inside the root is
+// removed, the pruning removes the empty directories the path itself reaches
+// below the link, and the directory the link names stays with the link.
+func TestRemoveStale_FollowsInRootDirectoryLink(t *testing.T) {
+	t.Parallel()
+	dest := filepath.Join(t.TempDir(), "target")
+	confinedFixture(t, dest, map[string]string{
+		"vendor-pack/a/ARTIFACT.md":   "a",
+		"vendor-pack/b/c/ARTIFACT.md": "b",
+	})
+	mustSymlink(t, "vendor-pack", filepath.Join(dest, "pack"))
+	if err := RemoveStale(dest, "pack/b/c/ARTIFACT.md"); err != nil {
+		t.Fatalf("RemoveStale through an in-root link: %v", err)
+	}
+	wantGone(t, filepath.Join(dest, "vendor-pack", "b"))
+	wantExists(t, filepath.Join(dest, "vendor-pack", "a", "ARTIFACT.md"))
+	if err := RemoveStale(dest, "pack/a/ARTIFACT.md"); err != nil {
+		t.Fatalf("RemoveStale of the last file behind the link: %v", err)
+	}
+	wantGone(t, filepath.Join(dest, "vendor-pack", "a"))
+	wantExists(t, filepath.Join(dest, "vendor-pack"))
+	wantExists(t, filepath.Join(dest, "pack"))
+	if err := RemoveStale(dest, "pack/gone/x.md"); err != nil {
+		t.Errorf("RemoveStale below a missing directory behind the link = %v, want nil", err)
 	}
 }
 
@@ -161,37 +206,40 @@ func TestRemoveStale_SymlinkedRoot(t *testing.T) {
 	wantExists(t, realDir)
 }
 
-// Spec: §7.5.3 — ReadConfined reads a regular file reached without a symbolic
-// link, and refuses a link, a directory, and an escaping path.
-func TestReadConfined(t *testing.T) {
+// Spec: §7.5.3 — ReadStale reads a regular file the cleanup accepts, and
+// refuses a link at the path, a directory, and an escaping path.
+func TestReadStale(t *testing.T) {
 	t.Parallel()
 	base := t.TempDir()
 	dest := filepath.Join(base, "target")
 	confinedFixture(t, dest, map[string]string{"a/b.txt": "content"})
 	confinedFixture(t, base, map[string]string{"outside.txt": "o"})
 	mustSymlink(t, filepath.Join(base, "outside.txt"), filepath.Join(dest, "leaflink"))
+	mustSymlink(t, "a", filepath.Join(dest, "alink"))
 
-	got, err := ReadConfined(dest, "a/b.txt")
-	if err != nil || string(got) != "content" {
-		t.Errorf("ReadConfined = (%q, %v), want (content, nil)", got, err)
-	}
-	if _, err := ReadConfined(dest, "a/missing.txt"); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("ReadConfined of a missing file = %v, want fs.ErrNotExist", err)
-	}
-	for _, rel := range []string{"leaflink", "a"} {
-		if _, err := ReadConfined(dest, rel); !errors.Is(err, ErrUnconfinedPath) {
-			t.Errorf("ReadConfined(%q) = %v, want ErrUnconfinedPath", rel, err)
+	for _, rel := range []string{"a/b.txt", "alink/b.txt"} {
+		got, err := ReadStale(dest, rel)
+		if err != nil || string(got) != "content" {
+			t.Errorf("ReadStale(%q) = (%q, %v), want (content, nil)", rel, got, err)
 		}
 	}
-	if _, err := ReadConfined(dest, "../outside.txt"); !errors.Is(err, ErrOutOfDestination) {
-		t.Errorf("ReadConfined(../outside.txt) = %v, want ErrOutOfDestination", err)
+	if _, err := ReadStale(dest, "a/missing.txt"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("ReadStale of a missing file = %v, want fs.ErrNotExist", err)
+	}
+	for _, rel := range []string{"leaflink", "a"} {
+		if _, err := ReadStale(dest, rel); !errors.Is(err, ErrUnconfinedPath) {
+			t.Errorf("ReadStale(%q) = %v, want ErrUnconfinedPath", rel, err)
+		}
+	}
+	if _, err := ReadStale(dest, "../outside.txt"); !errors.Is(err, ErrUnsafeRecordedPath) {
+		t.Errorf("ReadStale(../outside.txt) = %v, want ErrUnsafeRecordedPath", err)
 	}
 }
 
 // Spec: §6.7, §7.5.3 — the config-merge reconciliation rewrites a regular
 // file in place, is a no-op on a missing file, and leaves a file behind a
-// symbolic link untouched.
-func TestRewriteConfined(t *testing.T) {
+// link that leaves the root untouched.
+func TestRewriteStale(t *testing.T) {
 	t.Parallel()
 	base := t.TempDir()
 	dest := filepath.Join(base, "target")
@@ -201,23 +249,21 @@ func TestRewriteConfined(t *testing.T) {
 	mustSymlink(t, outside, filepath.Join(dest, "link"))
 	upper := func(b []byte) []byte { return []byte("new:" + string(b)) }
 
-	if err := RewriteConfined(dest, ".claude/settings.json", upper); err != nil {
-		t.Fatalf("RewriteConfined: %v", err)
+	if err := RewriteStale(dest, ".claude/settings.json", upper); err != nil {
+		t.Fatalf("RewriteStale: %v", err)
 	}
-	if got, _ := os.ReadFile(filepath.Join(dest, ".claude", "settings.json")); string(got) != "new:old" {
-		t.Errorf("rewritten content = %q, want new:old", got)
-	}
-	if err := RewriteConfined(dest, "missing.json", upper); err != nil {
-		t.Errorf("RewriteConfined of a missing file = %v, want nil", err)
+	wantContent(t, filepath.Join(dest, ".claude", "settings.json"), "new:old")
+	for _, rel := range []string{"missing.json", "missing-dir/x.json"} {
+		if err := RewriteStale(dest, rel, upper); err != nil {
+			t.Errorf("RewriteStale(%q) of a missing file = %v, want nil", rel, err)
+		}
 	}
 	wantGone(t, filepath.Join(dest, "missing.json"))
-	if err := RewriteConfined(dest, "link/settings.json", upper); !errors.Is(err, ErrUnconfinedPath) {
-		t.Errorf("RewriteConfined through a link = %v, want ErrUnconfinedPath", err)
+	if err := RewriteStale(dest, "link/settings.json", upper); !errors.Is(err, ErrUnconfinedPath) {
+		t.Errorf("RewriteStale through a link = %v, want ErrUnconfinedPath", err)
 	}
-	if got, _ := os.ReadFile(filepath.Join(outside, "settings.json")); string(got) != "old" {
-		t.Errorf("file behind the link was rewritten: %q", got)
-	}
-	if err := RewriteConfined(dest, "../outside/settings.json", upper); !errors.Is(err, ErrOutOfDestination) {
-		t.Errorf("RewriteConfined(../outside/settings.json) = %v, want ErrOutOfDestination", err)
+	wantContent(t, filepath.Join(outside, "settings.json"), "old")
+	if err := RewriteStale(dest, "../outside/settings.json", upper); !errors.Is(err, ErrUnsafeRecordedPath) {
+		t.Errorf("RewriteStale(../outside/settings.json) = %v, want ErrUnsafeRecordedPath", err)
 	}
 }

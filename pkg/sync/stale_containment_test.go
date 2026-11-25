@@ -27,9 +27,11 @@ type staleAttack struct {
 // newStaleAttack lays out the files the hostile entries name: a victim beside
 // the target, a directory reached through a committed symbolic link, a
 // symbolic link at a recorded path, a directory at a recorded path, a link to
-// a directory inside the target, a config-merge file behind a link, and the
-// .git and .podium state the rule protects. It also lays out a valid stale
-// file whose removal prunes up to a non-empty directory.
+// .git, a config-merge file behind a link, and the .git and .podium state the
+// rule protects. It also lays out two valid stale files: one whose removal
+// prunes up to a non-empty directory, and one behind a link to a directory
+// inside the target, which the writer accepts and the cleanup therefore
+// removes.
 func newStaleAttack(t *testing.T, target string) *staleAttack {
 	t.Helper()
 	base := filepath.Dir(target)
@@ -49,6 +51,7 @@ func newStaleAttack(t *testing.T, target string) *staleAttack {
 		writeFile(t, path, content)
 	}
 	writeFile(t, filepath.Join(target, "stale", "a", "b", "file.md"), "stale\n")
+	writeFile(t, filepath.Join(target, "real", "stale.md"), "stale\n")
 	if err := os.MkdirAll(filepath.Join(target, "dirpath", "empty"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -56,6 +59,7 @@ func newStaleAttack(t *testing.T, target string) *staleAttack {
 		filepath.Join(target, "claude", "link"): outside,
 		filepath.Join(target, "leaflink"):       filepath.Join(outside, "leaf.txt"),
 		filepath.Join(target, "inlink"):         filepath.Join(target, "real"),
+		filepath.Join(target, "gitlink"):        filepath.Join(target, ".git"),
 	} {
 		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
 			t.Fatalf("MkdirAll: %v", err)
@@ -72,7 +76,7 @@ func newStaleAttack(t *testing.T, target string) *staleAttack {
 		{ID: "evil/link-leaf", MaterializedPath: "leaflink"},
 		{ID: "evil/dir", MaterializedPath: "dirpath/full"},
 		{ID: "evil/empty-dir", MaterializedPath: "dirpath/empty"},
-		{ID: "evil/inlink", MaterializedPath: "inlink/inner.txt"},
+		{ID: "evil/gitlink", MaterializedPath: "gitlink/HEAD"},
 		{ID: "evil/config", MaterializedPath: "claude/link/settings.json", Merge: "json"},
 		{ID: "evil/git", MaterializedPath: ".git/HEAD"},
 		{ID: "evil/state", MaterializedPath: ".podium/sync.yaml"},
@@ -89,7 +93,10 @@ func (a *staleAttack) seedLock(t *testing.T) {
 		t.Fatalf("ReadLock = (%v, %v)", lock, err)
 	}
 	lock.Artifacts = append(lock.Artifacts, a.entries...)
-	lock.Artifacts = append(lock.Artifacts, LockArtifact{ID: "old/stale", MaterializedPath: "stale/a/b/file.md"})
+	lock.Artifacts = append(lock.Artifacts,
+		LockArtifact{ID: "old/stale", MaterializedPath: "stale/a/b/file.md"},
+		LockArtifact{ID: "old/stale", MaterializedPath: "inlink/stale.md"},
+	)
 	if err := WriteLock(a.target, lock); err != nil {
 		t.Fatalf("WriteLock: %v", err)
 	}
@@ -107,13 +114,15 @@ func (a *staleAttack) verify(t *testing.T, stderr string) {
 			t.Errorf("%s = (%q, %v), want %q unchanged", path, got, err, want)
 		}
 	}
-	for _, rel := range []string{"claude/link", "leaflink", "inlink", "dirpath/empty"} {
+	for _, rel := range []string{"claude/link", "leaflink", "inlink", "gitlink", "dirpath/empty"} {
 		if _, err := os.Lstat(filepath.Join(a.target, rel)); err != nil {
 			t.Errorf("%s must survive: %v", rel, err)
 		}
 	}
-	if _, err := os.Lstat(filepath.Join(a.target, "stale", "a")); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("stale/a must be pruned; lstat err = %v", err)
+	for _, rel := range []string{"stale/a", "real/stale.md"} {
+		if _, err := os.Lstat(filepath.Join(a.target, rel)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s must be removed; lstat err = %v", rel, err)
+		}
 	}
 	for _, e := range a.entries {
 		if !strings.Contains(stderr, `"`+e.MaterializedPath+`"`) {

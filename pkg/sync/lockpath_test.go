@@ -1,71 +1,11 @@
 package sync
 
 import (
-	"errors"
-	"runtime"
 	"strings"
 	"testing"
-)
 
-// Spec: §7.5.3 — a materialized_path read from a prior lock is used only when
-// it is a non-empty slash-separated relative path with no empty, ".", "..",
-// or ".git" segment, no backslash, no control character, and no volume name,
-// and it does not name the sync's own state under .podium/.
-func TestCheckLockPath(t *testing.T) {
-	t.Parallel()
-	refused := []string{
-		"",
-		"../x",
-		"../victim/file.txt",
-		"a/../../x",
-		"a/..",
-		"/abs",
-		"/etc/passwd",
-		`a\b`,
-		`..\x`,
-		".git/HEAD",
-		"sub/.git/config",
-		".GIT/HEAD",
-		".podium/sync.lock",
-		".podium/sync.lock.tmp",
-		".podium/sync.yaml",
-		".podium/sync.local.yaml",
-		".podium/overlay/x/ARTIFACT.md",
-		".PODIUM/sync.lock",
-		".podium/resources",
-		"a//b",
-		"a/",
-		"./a",
-		"a/./b",
-		"a\x00b",
-		"a\nb",
-		"a\x7fb",
-	}
-	if runtime.GOOS == "windows" {
-		refused = append(refused, "C:/x", "C:x")
-	}
-	for _, p := range refused {
-		if err := checkLockPath(p); !errors.Is(err, errUnsafeLockPath) {
-			t.Errorf("checkLockPath(%q) = %v, want errUnsafeLockPath", p, err)
-		}
-	}
-	accepted := []string{
-		"agents/pay-invoice.md",
-		".claude/skills/hello/SKILL.md",
-		".claude/settings.json",
-		".podium/resources/finance/ap/pay-invoice/run.sh",
-		"claude/finance-pack/skills/pay-invoice/SKILL.md",
-		".gitignore",
-		"a/.github/workflows/x.yml",
-		"..foo/bar",
-		"AGENTS.md",
-	}
-	for _, p := range accepted {
-		if err := checkLockPath(p); err != nil {
-			t.Errorf("checkLockPath(%q) = %v, want nil", p, err)
-		}
-	}
-}
+	"github.com/lennylabs/podium/pkg/adapter"
+)
 
 // Spec: §7.5.3 — the lock reader drops every entry whose path the rule
 // refuses, names it on standard error, and keeps the other entries, including
@@ -101,5 +41,25 @@ func TestDropUnsafeLockPaths(t *testing.T) {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr = %q, want it to name %s", stderr, want)
 		}
+	}
+}
+
+// Spec: §7.5.3 — the rule that admits a prior-lock entry also governs what
+// sync writes: a file whose path fails it is dropped from the output with an
+// error naming the path and its owner, and the input is left unchanged.
+//
+// Not parallel: the test swaps the process-wide os.Stderr.
+func TestDropUnrecordablePaths(t *testing.T) {
+	in := []adapter.File{{Path: "pack/a/ARTIFACT.md"}, {Path: `pack/a/notes\x.md`}, {Path: ".podium/resources/pack/a/run.sh"}}
+	var got []adapter.File
+	stderr := captureStderr(t, func() { got = dropUnrecordablePaths("pack/a", in) })
+	if len(got) != 2 || got[0].Path != "pack/a/ARTIFACT.md" || got[1].Path != ".podium/resources/pack/a/run.sh" {
+		t.Errorf("kept files = %v, want the two recordable paths", got)
+	}
+	if len(in) != 3 || in[1].Path != `pack/a/notes\x.md` {
+		t.Errorf("the input slice must be left unchanged: %v", in)
+	}
+	if !strings.Contains(stderr, `refusing to write "pack/a/notes\\x.md" for pack/a`) {
+		t.Errorf("stderr = %q, want the refused path and its owner", stderr)
 	}
 }

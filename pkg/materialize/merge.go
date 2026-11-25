@@ -3,7 +3,9 @@ package materialize
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 
@@ -35,11 +37,11 @@ func foldOps(files []adapter.File, resolved []string, keep func(id string) bool)
 			var base []byte
 			// Inject/merge fold into the existing file; a plain write replaces.
 			if f.Op != adapter.OpWrite {
-				if b, err := os.ReadFile(rp); err == nil {
-					base = b
-				} else if !os.IsNotExist(err) {
-					return nil, fmt.Errorf("materialize: read %q for merge: %w", rp, err)
+				b, err := readMergeBase(rp)
+				if err != nil {
+					return nil, err
 				}
+				base = b
 			}
 			// §6.7 config-merge reconciliation: strip the prior Podium-owned
 			// entries from the base before this sync's fragments fold in, so a
@@ -71,6 +73,35 @@ func foldOps(files []adapter.File, resolved []string, keep func(id string) bool)
 		}
 	}
 	return items, nil
+}
+
+// readMergeBase returns the existing bytes at rp that an inject or merge folds
+// into, or nil when nothing is there. The caller has confirmed that rp's
+// directories resolve inside the destination. A link at rp itself is refused
+// rather than followed: a repository checkout can commit a config-merge path
+// as a link to a file outside it (§7.8), and following it would fold that
+// file's content into the rendered file the publish step commits. Any other
+// non-regular file at rp is refused as well.
+//
+// Spec: §6.7, §7.8
+func readMergeBase(rp string) ([]byte, error) {
+	info, err := os.Lstat(rp)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		// The caller's containment check already resolved rp's directory, so
+		// an Lstat error other than absence needs a concurrent change to it.
+		return nil, fmt.Errorf("materialize: inspect %q for merge: %w", rp, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q is a symbolic link or not a regular file; refusing to merge into it", ErrUnconfinedPath, rp)
+	}
+	b, err := os.ReadFile(rp)
+	if err != nil {
+		return nil, fmt.Errorf("materialize: read %q for merge: %w", rp, err)
+	}
+	return b, nil
 }
 
 func modeOf(f adapter.File) os.FileMode {
