@@ -1529,3 +1529,85 @@ func assertPluginCount(t *testing.T, label, data, wantMarket, wantPlugin string,
 		t.Errorf("%s lists plugin %q %d times, want %d:\n%s", label, wantPlugin, count, want, data)
 	}
 }
+
+// Spec: §7.5.3, §7.8 — the marketplace repository carries the sync lock the
+// previous render committed, so whoever can push to it chooses the paths the
+// next render's stale-file cleanup reads. A seeded remote commits a lock that
+// names a file beside the checkout and a file behind a committed symbolic link
+// to a directory outside it. `podium sync --config` skips both entries with a
+// warning that names each, completes the run, and leaves both files in place.
+func TestPublishing_CommittedLockCannotDeleteOutsideCheckout(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	reg := writePublishRegistry(t)
+	remote := bareRemote(t)
+	ws := t.TempDir()
+	cfg := writeSyncConfigMarketplace(t, ws, reg, remote, "claude-code")
+
+	// The checkout lands at <ws>/build/acme-agents, so ../victim/file.txt names
+	// <ws>/build/victim/file.txt.
+	victim := filepath.Join(ws, "build", "victim", "file.txt")
+	secret := filepath.Join(ws, "outside", "secret.txt")
+	for _, p := range []string{victim, secret} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("keep\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", p, err)
+		}
+	}
+	seedHostileLock(t, remote, filepath.Join(ws, "outside"))
+
+	res := runPodium(t, "", gitEnv(), "sync", "--config", cfg)
+	if res.Exit != 0 {
+		t.Fatalf("sync --config exit=%d\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	for _, p := range []string{victim, secret} {
+		if got, err := os.ReadFile(p); err != nil || string(got) != "keep\n" {
+			t.Errorf("%s after sync = (%q, %v), want it unchanged", p, got, err)
+		}
+	}
+	for _, entry := range []string{`"../victim/file.txt"`, `"claude/link/secret.txt"`} {
+		if !strings.Contains(res.Stderr, entry) {
+			t.Errorf("stderr must name the skipped lock entry %s; stderr:\n%s", entry, res.Stderr)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(ws, "build", "acme-agents", "claude", "link")); err != nil {
+		t.Errorf("the committed symbolic link must survive the cleanup: %v", err)
+	}
+}
+
+// seedHostileLock pushes a commit to remote that holds a symbolic link
+// claude/link pointing at outside and a .podium/sync.lock whose entries name a
+// path beside the checkout and a path through that link.
+func seedHostileLock(t *testing.T, remote, outside string) {
+	t.Helper()
+	seed := t.TempDir()
+	if r := gitCmd(t, seed, "clone", remote, seed); r.Exit != 0 {
+		t.Fatalf("clone for hostile seed: exit=%d stderr=%s", r.Exit, r.Stderr)
+	}
+	if err := os.MkdirAll(filepath.Join(seed, "claude"), 0o755); err != nil {
+		t.Fatalf("mkdir claude: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(seed, "claude", "link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	lock := "version: 1\nprofile: null\nartifacts:\n" +
+		"  - id: \"\"\n    materialized_path: ../victim/file.txt\n" +
+		"  - id: \"\"\n    materialized_path: claude/link/secret.txt\n"
+	if err := os.MkdirAll(filepath.Join(seed, ".podium"), 0o755); err != nil {
+		t.Fatalf("mkdir .podium: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(seed, ".podium", "sync.lock"), []byte(lock), 0o644); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"commit", "-m", "hostile lock"},
+		{"push", "origin", "main"},
+	} {
+		if r := gitCmd(t, seed, args...); r.Exit != 0 {
+			t.Fatalf("git %s: exit=%d stderr=%s", strings.Join(args, " "), r.Exit, r.Stderr)
+		}
+	}
+}

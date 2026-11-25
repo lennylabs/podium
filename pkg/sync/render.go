@@ -299,8 +299,11 @@ func pluginsInOrder(assignments []assigned) []PluginFilter {
 // prior-render lock: an unchanged tree reports Changed=false even though no lock
 // is present, which the lock-based comparison could not do.
 func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult, error) {
+	// The prior lock is committed to the marketplace repository, so the
+	// §7.5.3 recorded-path rule drops every entry the cleanup must not touch
+	// before the comparison or the cleanup reads it.
 	prior, _ := ReadLock(workdir)
-	priorMerge := PriorMergeKinds(prior)
+	priorMerge := PriorMergeKinds(dropUnsafeLockPaths(prior))
 
 	files := make([]adapter.File, len(rendered))
 	currentPaths := map[string]bool{}
@@ -316,12 +319,16 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 
 	// The change set diffs against the checkout, so capture the on-disk digest
 	// of every path the render touches (the rendered paths plus the prior-render
-	// paths that the cleanup may remove) before any write mutates the tree.
-	diffPaths := unionPaths(currentPaths, priorMerge)
-	beforeDigests, err := onDiskDigests(workdir, diffPaths)
+	// paths that the cleanup may remove) before any write mutates the tree. A
+	// prior-only path comes from the committed lock, so it is read under the
+	// cleanup's confinement, and one that cannot be read counts as altered
+	// (§7.5.2) rather than failing the render.
+	priorOnly := priorOnlyPaths(currentPaths, priorMerge)
+	beforeDigests, err := onDiskDigests(workdir, currentPaths)
 	if err != nil {
 		return nil, fmt.Errorf("publish %q: read checkout before render: %w", outputID, err)
 	}
+	beforePrior, unobservedBefore := tolerantDigests(priorOnly, readConfined(workdir))
 
 	if err := materialize.Write(workdir, files); err != nil {
 		return nil, fmt.Errorf("publish %q: write render: %w", outputID, err)
@@ -337,14 +344,29 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 	// every rendered path a readable regular file, so this read fails only on a
 	// concurrent filesystem mutation; the guard surfaces that rather than
 	// reporting a change set against unobservable state.
-	afterDigests, err := onDiskDigests(workdir, diffPaths)
+	afterDigests, err := onDiskDigests(workdir, currentPaths)
 	if err != nil {
 		return nil, fmt.Errorf("publish %q: read checkout after render: %w", outputID, err)
 	}
+	afterPrior, unobservedAfter := tolerantDigests(priorOnly, readConfined(workdir))
 
 	res := &RenderResult{OutputID: outputID, Files: sortedKeys(currentPaths)}
-	res.Changed, res.ChangedArtifacts = changeSet(beforeDigests, afterDigests, owner)
+	res.Changed, res.ChangedArtifacts = changeSet(mergeDigests(beforeDigests, beforePrior), mergeDigests(afterDigests, afterPrior), owner)
+	if unobservedBefore || unobservedAfter {
+		res.Changed, res.ChangedArtifacts = true, mergeOwner(res.ChangedArtifacts, removedOwner)
+	}
 	return res, nil
+}
+
+// mergeOwner returns the sorted change-set owners with owner added once. An
+// unreadable prior-only path is attributed to removedOwner, the owner of a
+// path no rendered file owns.
+func mergeOwner(ids []string, owner string) []string {
+	set := map[string]bool{owner: true}
+	for _, id := range ids {
+		set[id] = true
+	}
+	return sortedSet(set)
 }
 
 // onDiskDigests reads each path's bytes from workdir and returns its hex SHA-256,
@@ -375,20 +397,6 @@ func onDiskDigests(workdir string, paths map[string]bool) (map[string]string, er
 func digest(content []byte) string {
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:])
-}
-
-// unionPaths returns the set of relative paths to diff for change detection: the
-// paths the run materializes, plus the prior-lock paths the cleanup may remove,
-// so a pure removal is observed as a change.
-func unionPaths(current map[string]bool, priorMerge map[string]string) map[string]bool {
-	out := make(map[string]bool, len(current)+len(priorMerge))
-	for p := range current {
-		out[p] = true
-	}
-	for p := range priorMerge {
-		out[p] = true
-	}
-	return out
 }
 
 // writeLock persists the render's lock for the next run's reconciliation: one

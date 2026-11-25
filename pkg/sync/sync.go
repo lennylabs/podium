@@ -308,7 +308,11 @@ func Run(opts Options) (*Result, error) {
 
 	// The prior lock carries the §7.5.5 toggles (applied only in watch /
 	// override mode) and the materialized paths used for §7.5 stale cleanup.
+	// The §7.5.3 recorded-path rule drops every entry whose path the cleanup
+	// must not touch before any consumer reads the lock, so the entry is
+	// neither cleaned up nor kept nor written into the next lock.
 	priorLock, _ := ReadLock(opts.Target)
+	priorLock = dropUnsafeLockPaths(priorLock)
 	var toggles LockToggles
 	if opts.PreserveToggles && priorLock != nil {
 		toggles = priorLock.Toggles
@@ -772,16 +776,14 @@ func selectRecords(scope ScopeFilter, all []materialRecord, toggles LockToggles)
 // as well. A current path unreadable after the write fails the sync closed,
 // because the run just wrote it. kept is the previous output of the artifacts
 // the run keeps (§13.11.3): its standalone paths are not removed and its
-// config-merge entries survive the reconciliation.
+// config-merge entries survive the reconciliation. A prior-only path comes
+// from the lock, so it is read under the confinement the cleanup applies
+// (§7.5.3): a path that is not a regular file reached without a symbolic link
+// cannot be read and counts as altered.
 func writeTarget(target string, files []adapter.File, current map[string]bool, priorMerge map[string]string, kept keptOutput) (bool, error) {
-	priorOnly := map[string]bool{}
-	for p := range priorMerge {
-		if !current[p] {
-			priorOnly[p] = true
-		}
-	}
-	beforeCurrent, unobservedCurrent := tolerantDigests(target, current)
-	beforePrior, unobservedPrior := tolerantDigests(target, priorOnly)
+	priorOnly := priorOnlyPaths(current, priorMerge)
+	beforeCurrent, unobservedCurrent := tolerantDigests(current, readUnder(target))
+	beforePrior, unobservedPrior := tolerantDigests(priorOnly, readConfined(target))
 
 	if err := materialize.WriteKeeping(target, files, kept.keepFunc()); err != nil {
 		return false, err
@@ -792,7 +794,7 @@ func writeTarget(target string, files []adapter.File, current map[string]bool, p
 	if err != nil {
 		return false, fmt.Errorf("sync: read target after materialize: %w", err)
 	}
-	afterPrior, unobservedAfter := tolerantDigests(target, priorOnly)
+	afterPrior, unobservedAfter := tolerantDigests(priorOnly, readConfined(target))
 	if unobservedCurrent || unobservedPrior || unobservedAfter {
 		return true, nil
 	}
@@ -800,15 +802,47 @@ func writeTarget(target string, files []adapter.File, current map[string]bool, p
 	return changed, nil
 }
 
-// tolerantDigests is the non-failing form of onDiskDigests for the workspace
+// priorOnlyPaths returns the prior-lock paths the current run does not
+// materialize: the paths the stale-file cleanup reconciles.
+func priorOnlyPaths(current map[string]bool, priorMerge map[string]string) map[string]bool {
+	out := map[string]bool{}
+	for p := range priorMerge {
+		if !current[p] {
+			out[p] = true
+		}
+	}
+	return out
+}
+
+// readUnder returns a reader of a slash-separated path below workdir that
+// follows symbolic links, as the writer does for the paths a run materializes.
+func readUnder(workdir string) func(rel string) ([]byte, error) {
+	return func(rel string) ([]byte, error) {
+		return os.ReadFile(filepath.Join(workdir, filepath.FromSlash(rel)))
+	}
+}
+
+// readConfined returns a reader of a slash-separated path below workdir that
+// reads only a regular file reached without a symbolic link. A prior-lock path
+// is read through it, so a lock entry cannot direct the comparison at a file
+// outside the target, a device, or a FIFO.
+//
+// Spec: §7.5.3
+func readConfined(workdir string) func(rel string) ([]byte, error) {
+	return func(rel string) ([]byte, error) {
+		return materialize.ReadConfined(workdir, rel)
+	}
+}
+
+// tolerantDigests is the non-failing form of onDiskDigests for the
 // comparison. A path absent from disk contributes no entry, as in
 // onDiskDigests; any other read error is reported through the unobservable
 // flag rather than returned, so the caller counts the run as changed instead
 // of failing it.
-func tolerantDigests(workdir string, paths map[string]bool) (digests map[string]string, unobservable bool) {
+func tolerantDigests(paths map[string]bool, read func(rel string) ([]byte, error)) (digests map[string]string, unobservable bool) {
 	digests = make(map[string]string, len(paths))
 	for p := range paths {
-		data, err := os.ReadFile(filepath.Join(workdir, filepath.FromSlash(p)))
+		data, err := read(p)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
 				unobservable = true
@@ -838,71 +872,57 @@ func mergeDigests(a, b map[string]string) map[string]string {
 // a hard failure that rolls back a successful materialize. The previous output
 // in kept (§13.11.3) is not stale: its standalone paths stay on disk, and the
 // reconciliation of a config-merge path leaves its entries in place.
+//
+// Every prior path comes from a lock another party can write (§7.5.3, §7.8),
+// so the cleanup applies the recorded-path rule here as well as when the lock
+// is read, which covers a caller of the exported Reconcile that passes paths
+// it did not take through dropUnsafeLockPaths. The removal and the rewrite go
+// through the confined materialize primitives: a path reached through a
+// symbolic link, or one that is not a regular file, is skipped with a warning.
+// The removal prunes the now-empty parent directories up to the target root,
+// because a nested layout (a skill's .claude/skills/<name>/, a bundled
+// resource under .podium/resources/<id>/) leaves several empty ancestors when
+// its only file is removed.
+//
+// Spec: §7.5.3
 func removeStalePaths(target string, prior map[string]string, current map[string]bool, kept keptOutput) {
 	for p, merge := range prior {
 		if current[p] || kept.standalone[p] {
 			continue
 		}
-		full := filepath.Join(target, p)
+		if err := checkLockPath(p); err != nil {
+			fmt.Fprintf(os.Stderr, "sync: stale-file cleanup: skipping lock entry %q: %v\n", p, err)
+			continue
+		}
 		if merge != "" {
-			reconcileOrphanConfig(full, merge, kept.keepFunc())
+			reconcileOrphanConfig(target, p, merge, kept.keepFunc())
 			continue
 		}
-		if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "sync: stale-file cleanup: %v\n", err)
-			continue
+		if err := materialize.RemoveStale(target, p); err != nil {
+			fmt.Fprintf(os.Stderr, "sync: stale-file cleanup: skipping %q: %v\n", p, err)
 		}
-		// Prune the now-empty parent directories up the chain, stopping at the
-		// target root. A nested layout (a skill's .claude/skills/<name>/, a
-		// bundled resource under .podium/resources/<id>/) leaves several empty
-		// ancestors when its only file is removed; pruning a single level would
-		// strip the leaf directory but orphan its parent. os.Remove fails on a
-		// non-empty directory naturally, so the walk halts at the first ancestor
-		// that still holds an operator file or a sibling artifact's output.
-		pruneEmptyParents(target, filepath.Dir(full))
 	}
 }
 
-// pruneEmptyParents removes dir and each empty ancestor above it, stopping
-// before target (the sync root is never removed). os.Remove deletes only an
-// empty directory; the first non-empty ancestor stops the walk, so a directory
-// the operator still populates or a sibling artifact still writes into survives.
-func pruneEmptyParents(target, dir string) {
-	root := filepath.Clean(target)
-	cur := filepath.Clean(dir)
-	for cur != root && strings.HasPrefix(cur, root+string(filepath.Separator)) {
-		if err := os.Remove(cur); err != nil {
-			// Non-empty directory or any other error stops the ascent: a parent
-			// of a non-empty child is itself non-empty.
-			return
-		}
-		cur = filepath.Dir(cur)
-	}
-}
-
-// reconcileOrphanConfig strips Podium's contribution from a config-merge file
-// whose last contributing artifact is gone, leaving the operator's content in
-// place (§6.7 "removing the artifact removes its entry"). The file is left on
-// disk because the operator may own the rest of it. A missing file is a no-op.
-// The entries of an artifact keep reports stay; a nil keep strips them all.
-func reconcileOrphanConfig(full, merge string, keep func(id string) bool) {
-	data, err := os.ReadFile(full)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "sync: config reconcile read: %v\n", err)
-		}
-		return
-	}
-	var out []byte
+// reconcileOrphanConfig strips Podium's contribution from the config-merge
+// file at rel below target whose last contributing artifact is gone, leaving
+// the operator's content in place (§6.7 "removing the artifact removes its
+// entry"). The file is left on disk because the operator may own the rest of
+// it. A missing file is a no-op. The entries of an artifact keep reports stay;
+// a nil keep strips them all. The rewrite goes through
+// materialize.RewriteConfined, so a path reached through a symbolic link or
+// one that is not a regular file is left untouched (§7.5.3).
+func reconcileOrphanConfig(target, rel, merge string, keep func(id string) bool) {
+	var strip func([]byte) []byte
 	switch merge {
 	case "json":
-		out = materialize.StripPodiumOwnedBytes(data, keep)
+		strip = func(data []byte) []byte { return materialize.StripPodiumOwnedBytes(data, keep) }
 	case "inject":
-		out = materialize.StripPodiumBlocks(data, full, keep)
+		strip = func(data []byte) []byte { return materialize.StripPodiumBlocks(data, rel, keep) }
 	default:
 		return
 	}
-	if err := os.WriteFile(full, out, 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "sync: config reconcile write: %v\n", err)
+	if err := materialize.RewriteConfined(target, rel, strip); err != nil {
+		fmt.Fprintf(os.Stderr, "sync: config reconcile: skipping %q: %v\n", rel, err)
 	}
 }

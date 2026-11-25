@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Security
+
+- **The `podium sync` stale-file cleanup stays inside the target** (§7.5.3, §7.8): the cleanup removed and rewrote the paths the prior `.podium/sync.lock` recorded without checking them, so a lock committed to a marketplace repository or a shared workspace repository could delete or rewrite files outside the target, including through a committed symbolic link. A recorded path is now used only when it is a relative `/`-separated path with no empty, `.`, `..`, or `.git` segment, no backslash, control character, or volume name, and no sync state under `.podium/`. Sync names each entry that fails the rule on standard error, leaves it out of the lock it writes, and continues. The cleanup removes or rewrites only a regular file reached with no symbolic link below the target directory, never removes a directory recursively, and prunes only empty parent directories. A marketplace render no longer fails when a prior-lock path is unreadable; the path counts as changed.
+
 ## [0.7.0] - 2026-11-19
 
 ### Added
