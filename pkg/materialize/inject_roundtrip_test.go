@@ -3,8 +3,10 @@ package materialize
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/adapter"
 )
@@ -255,6 +257,80 @@ func TestWriteKeeping_TOMLPrefixKeyKeepsLongerKey(t *testing.T) {
 		want := "# podium:begin:ops/db-admin\n[mcp_servers.db-admin]\n# podium:end:ops/db-admin\n\n# podium:begin:ops/db\n[mcp_servers.db]\nargs = [\"v2\"]\n# podium:end:ops/db\n"
 		if got != want {
 			t.Errorf("sync %d: config.toml = %q, want %q", i, got, want)
+		}
+	}
+}
+
+// Spec: §6.7 — a marker line counts after a UTF-8 byte order mark that starts
+// the file and with spaces or tabs around it, so three syncs in a row replace
+// the block in place: the old content is gone, one block remains, and the
+// operator's bytes, the byte order mark included, stay.
+func TestWriteKeeping_DecoratedMarkersReplaceInPlace(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, path, file, operator string
+	}{
+		{"byte order mark before the first block", "GEMINI.md",
+			utf8BOM + "<!-- podium:begin:a -->\nold\n<!-- podium:end:a -->\nop\n", utf8BOM + "op\n"},
+		{"trailing space after the begin marker", "GEMINI.md",
+			"op\n\n<!-- podium:begin:a --> \nold\n<!-- podium:end:a -->\n", "op\n"},
+		{"indented markers", "GEMINI.md",
+			"op\n\n  <!-- podium:begin:a -->\nold\n\t<!-- podium:end:a -->\t\n", "op\n"},
+		{"toml trailing whitespace and crlf", ".codex/config.toml",
+			"x = 1\r\n\r\n# podium:begin:a \r\nold\r\n  # podium:end:a\r\n", "x = 1\r\n"},
+	}
+	for _, c := range cases {
+		dest := t.TempDir()
+		full := filepath.Join(dest, filepath.FromSlash(c.path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(c.file), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		want := string(injectBlock([]byte(c.operator), "a", []byte("new"), commentStyleFor(c.path)))
+		files := []adapter.File{{Path: c.path, Op: adapter.OpInject, Key: "a", Content: []byte("new")}}
+		for i := 0; i < 3; i++ {
+			if err := WriteKeeping(dest, files, nil); err != nil {
+				t.Fatalf("%s: sync %d: %v", c.name, i, err)
+			}
+			if got := readString(t, full); got != want {
+				t.Errorf("%s: sync %d = %q, want %q", c.name, i, got, want)
+			}
+		}
+		if got := string(StripPodiumBlocks([]byte(c.file), c.path, nil)); got != c.operator {
+			t.Errorf("%s: strip = %q, want %q", c.name, got, c.operator)
+		}
+	}
+}
+
+// Spec: §6.7 — reading the markers is linear in the file: a file with tens of
+// thousands of unterminated begin markers, as a committed AGENTS.md or
+// config.toml can carry, is stripped and injected into in one pass. The scan
+// that paired each begin marker by reading on to the end of the file took
+// close to a minute on this input. The bound sits far above the linear scan's
+// milliseconds, the race detector included, and far below that.
+func TestInjectStrip_UnterminatedBeginsScanLinearly(t *testing.T) {
+	t.Parallel()
+	const n = 32000
+	for _, path := range []string{"GEMINI.md", ".codex/config.toml"} {
+		cs := commentStyleFor(path)
+		var b strings.Builder
+		for i := 0; i < n; i++ {
+			// Distinct keys, so no later begin marker for the same key
+			// stops a begin marker's search for its end marker.
+			b.WriteString(cs.open + "podium:begin:k" + strconv.Itoa(i) + cs.close + "\nnotes\n")
+		}
+		file := b.String()
+		start := time.Now()
+		if got := string(StripPodiumBlocks([]byte(file), path, nil)); got != file {
+			t.Fatalf("%s: the strip changed a file with only unterminated begins", path)
+		}
+		if got := string(injectBlock([]byte(file), "k", []byte("Rule."), cs)); !strings.HasPrefix(got, file) {
+			t.Fatalf("%s: the inject rewrote the unterminated begins", path)
+		}
+		if elapsed := time.Since(start); elapsed > 10*time.Second {
+			t.Errorf("%s: %d unterminated begins took %v", path, n, elapsed)
 		}
 	}
 }

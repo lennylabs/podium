@@ -1,6 +1,10 @@
 package materialize
 
-import "strings"
+import (
+	"bytes"
+	"sort"
+	"strings"
+)
 
 // commentStyle wraps a marker comment for a given file format.
 type commentStyle struct{ open, close string }
@@ -13,15 +17,21 @@ func commentStyleFor(path string) commentStyle {
 	return commentStyle{open: "<!-- ", close: " -->"}
 }
 
+// utf8BOM is the byte order mark an editor can write at the start of a text
+// file. It belongs to the operator's file, so a marker on the first line is
+// read after it and a removal leaves it in place.
+const utf8BOM = "\xef\xbb\xbf"
+
 // podiumBlock is one Podium-managed block in a text inject file: a begin
 // marker line, the block's lines, and the end marker line naming the same key.
 type podiumBlock struct {
 	// key is the artifact ID both markers name.
 	key string
-	// begin is the offset of the begin marker's line.
+	// begin is the offset of the begin marker's line, after a byte order
+	// mark that starts the file.
 	begin int
-	// markerEnd is the offset just past the end marker's text, before the
-	// line's terminator.
+	// markerEnd is the offset just past the end marker line's text, before
+	// the line's terminator.
 	markerEnd int
 	// end is the offset just past the end marker line's terminator, or the
 	// length of the file when that line has none.
@@ -47,15 +57,10 @@ func injectBlock(base []byte, key string, block []byte, cs commentStyle) []byte 
 	end := cs.open + "podium:end:" + key + cs.close
 	body := begin + "\n" + strings.TrimRight(string(block), "\n") + "\n" + end
 	s := string(base)
-	for from := 0; ; {
-		blk, ok := nextPodiumBlock(s, from, cs)
-		if !ok {
-			break
-		}
+	for _, blk := range podiumBlocks(s, cs) {
 		if blk.key == key {
 			return []byte(s[:blk.begin] + body + s[blk.markerEnd:])
 		}
-		from = blk.end
 	}
 	var b strings.Builder
 	b.WriteString(s)
@@ -72,110 +77,169 @@ func injectBlock(base []byte, key string, block []byte, cs commentStyle) []byte 
 // counterpart to stripPodiumOwnedBytes: the prior sync's blocks are removed
 // before the current fragments re-add the live ones, so a removed artifact's
 // block does not survive. A block whose key keep reports stays in place; a nil
-// keep strips every block. What counts as a block is nextPodiumBlock's rule,
-// and removalSpan decides which line breaks around a block go with it.
+// keep strips every block. What counts as a block is podiumBlocks's rule, and
+// removalSpan decides which line breaks around a block go with it. The blocks
+// are removed in file order, each against the text the earlier removals left.
 //
 // Spec: §6.7
 func stripPodiumBlocks(base []byte, cs commentStyle, keep func(id string) bool) []byte {
 	s := string(base)
-	for from := 0; ; {
-		blk, ok := nextPodiumBlock(s, from, cs)
-		if !ok {
-			return []byte(s)
-		}
+	blocks := podiumBlocks(s, cs)
+	out := make([]byte, 0, len(s))
+	pos := 0
+	for i, blk := range blocks {
 		if keep != nil && keep(blk.key) {
-			from = blk.end
 			continue
 		}
-		start, end := removalSpan(s, blk, cs)
-		s = s[:start] + s[end:]
-		from = start
+		out = append(out, s[pos:blk.begin]...)
+		nextBegin := -1
+		if i+1 < len(blocks) {
+			nextBegin = blocks[i+1].begin
+		}
+		drop, end := removalSpan(out, s, blk, nextBegin)
+		out = out[:len(out)-drop]
+		pos = end
 	}
+	return append(out, s[pos:]...)
 }
 
-// removalSpan returns the region a removal of blk takes from s: the block's
-// lines with the end marker's line terminator, plus at most one line break
-// injectBlock inserted next to the block. The line break before the begin
-// marker goes with the block when it forms a blank separator line, or when
-// nothing follows the block, where it is the terminator injectBlock added to
-// an operator line that had none. Otherwise it ends the operator's line above
-// the block and stays, so the operator's lines above and below the block are
-// not joined; when the next Podium block follows directly, that block's
-// separator goes instead, so the next block takes the removed one's place as
-// injectBlock would have written it. A line break is a line feed, or a
-// carriage return and line feed when the begin marker's line ends that way,
+// removalSpan decides what a removal of blk takes beyond the block's lines
+// and the end marker's line terminator. before is the text that precedes blk
+// once the earlier removals are applied, and nextBegin is the offset of the
+// next block in s, or -1. drop is the number of trailing bytes of before the
+// removal takes, and end is the offset in s where the kept text resumes.
+//
+// At most one line break injectBlock inserted goes with the block. The line
+// break before the begin marker goes when it forms a blank separator line, or
+// when nothing follows the block, where it is the terminator injectBlock added
+// to an operator line that had none. Otherwise it ends the operator's line
+// above the block and stays, so the operator's lines above and below the
+// block are not joined; when the next Podium block follows directly, that
+// block's separator goes instead, so the next block takes the removed one's
+// place as injectBlock would have written it. A line break is a line feed, or
+// a carriage return and line feed when the begin marker's line ends that way,
 // which is how a checkout that converts line endings leaves Podium's lines.
 //
 // Spec: §6.7
-func removalSpan(s string, blk podiumBlock, cs commentStyle) (start, end int) {
+func removalSpan(before []byte, s string, blk podiumBlock, nextBegin int) (drop, end int) {
 	eol := lineEnding(s[blk.begin:])
-	brk := ""
-	if strings.HasSuffix(s[:blk.begin], eol) {
-		brk = eol
-	} else if blk.begin > 0 {
-		// A begin marker starts a line, so a line feed precedes it.
-		brk = "\n"
+	brk := 0
+	if bytes.HasSuffix(before, []byte(eol)) {
+		brk = len(eol)
+	} else if bytes.HasSuffix(before, []byte("\n")) {
+		brk = 1
 	}
-	above := blk.begin - len(brk)
-	blankSeparator := brk != "" && (above == 0 || s[above-1] == '\n')
-	if blankSeparator || (brk != "" && blk.end == len(s)) {
-		return above, blk.end
+	above := len(before) - brk
+	blankSeparator := brk > 0 && (above == 0 || before[above-1] == '\n')
+	if blankSeparator || (brk > 0 && blk.end == len(s)) {
+		return brk, blk.end
 	}
-	if strings.HasPrefix(s[blk.end:], eol) {
-		next, ok := nextPodiumBlock(s, blk.end+len(eol), cs)
-		if ok && next.begin == blk.end+len(eol) {
-			return blk.begin, next.begin
-		}
+	if nextBegin == blk.end+len(eol) && strings.HasPrefix(s[blk.end:], eol) {
+		return 0, nextBegin
 	}
-	return blk.begin, blk.end
+	return 0, blk.end
 }
 
-// nextPodiumBlock returns the first Podium block that begins at or after
-// from, which is the start of a line. A marker counts only when it is a whole
-// line: its comment text, then a line terminator or the end of the file, so
-// operator prose that mentions a marker is not one and the TOML marker for a
-// key is not read as the marker for a longer key that starts with it. A begin
-// marker pairs with the first later end marker that names the same key; one
-// that reaches another begin marker for its key, or the end of the file,
-// first is unterminated and is left in place, because the operator's content
-// would otherwise be taken up to an unrelated marker.
-func nextPodiumBlock(s string, from int, cs commentStyle) (podiumBlock, bool) {
-	for off := from; off < len(s); {
+// markerLine is a line of an inject file that is a Podium marker.
+type markerLine struct {
+	// begin is true for a begin marker and false for an end marker.
+	begin bool
+	// key is the artifact ID the marker names.
+	key string
+	// start is the offset of the line, after a byte order mark that starts
+	// the file.
+	start int
+	// textEnd is the offset just past the line's text, before its
+	// terminator.
+	textEnd int
+	// next is the offset of the following line.
+	next int
+}
+
+// podiumBlocks returns the Podium blocks in s in file order. A marker is a
+// line whose text, apart from spaces and tabs around it and its line
+// terminator, is the marker comment, so operator prose that mentions a marker
+// is not one and the TOML marker for a key is not read as the marker for a
+// longer key that starts with it. A begin marker pairs with the first later
+// end marker that names the same key. One that reaches another begin marker
+// for its key, or the end of the file, first is unterminated and is left in
+// place, because the operator's content would otherwise be taken up to an
+// unrelated marker. Markers inside a block belong to its content.
+//
+// The file is read once, and each begin marker finds its end marker by a
+// search in the per-key marker positions, so a file with many unterminated
+// begin markers costs no more than reading it.
+func podiumBlocks(s string, cs commentStyle) []podiumBlock {
+	markers := scanMarkers(s, cs)
+	begins, ends := map[string][]int{}, map[string][]int{}
+	for i, m := range markers {
+		if m.begin {
+			begins[m.key] = append(begins[m.key], i)
+		} else {
+			ends[m.key] = append(ends[m.key], i)
+		}
+	}
+	var blocks []podiumBlock
+	from := 0
+	for i, m := range markers {
+		if !m.begin || m.start < from {
+			continue
+		}
+		e := firstAfter(ends[m.key], i)
+		if e < 0 {
+			continue
+		}
+		if b := firstAfter(begins[m.key], i); b >= 0 && b < e {
+			continue
+		}
+		end := markers[e]
+		blocks = append(blocks, podiumBlock{key: m.key, begin: m.start, markerEnd: end.textEnd, end: end.next})
+		from = end.next
+	}
+	return blocks
+}
+
+// firstAfter returns the first element of the ascending list idx that is
+// greater than i, or -1 when none is.
+func firstAfter(idx []int, i int) int {
+	if j := sort.SearchInts(idx, i+1); j < len(idx) {
+		return idx[j]
+	}
+	return -1
+}
+
+// scanMarkers returns every marker line of s in file order.
+func scanMarkers(s string, cs commentStyle) []markerLine {
+	var out []markerLine
+	for off := 0; off < len(s); {
 		line, next := lineAt(s, off)
-		if key, ok := markerKey(line, "begin", cs); ok {
-			if blk, ok := matchEnd(s, off, next, key, cs); ok {
-				return blk, true
+		start := off
+		if off == 0 && strings.HasPrefix(line, utf8BOM) {
+			line, start = line[len(utf8BOM):], len(utf8BOM)
+		}
+		for _, begin := range []bool{true, false} {
+			if key, ok := markerKey(line, begin, cs); ok {
+				text := strings.TrimSuffix(line, "\r")
+				out = append(out, markerLine{begin: begin, key: key, start: start, textEnd: start + len(text), next: next})
 			}
 		}
 		off = next
 	}
-	return podiumBlock{}, false
+	return out
 }
 
-// matchEnd finds the end marker line for the block keyed by key whose begin
-// marker line starts at begin and whose content starts at from. ok is false
-// when another begin marker for key, or the end of the file, comes first.
-func matchEnd(s string, begin, from int, key string, cs commentStyle) (podiumBlock, bool) {
-	for off := from; off < len(s); {
-		line, next := lineAt(s, off)
-		if k, ok := markerKey(line, "begin", cs); ok && k == key {
-			return podiumBlock{}, false
-		}
-		if k, ok := markerKey(line, "end", cs); ok && k == key {
-			text := strings.TrimSuffix(line, "\r")
-			return podiumBlock{key: key, begin: begin, markerEnd: off + len(text), end: next}, true
-		}
-		off = next
+// markerKey reports whether line, without its line feed, is a begin marker
+// (begin true) or an end marker in the comment style cs, and returns the key
+// it names. A carriage return ending the line is the line's terminator, and
+// spaces and tabs around the marker are indentation and trailing whitespace an
+// editor can add; none of them is part of the key.
+func markerKey(line string, begin bool, cs commentStyle) (string, bool) {
+	kind := "end"
+	if begin {
+		kind = "begin"
 	}
-	return podiumBlock{}, false
-}
-
-// markerKey reports whether line, without its line feed, is a begin or end
-// marker (kind) in the comment style cs, and returns the key it names. A
-// carriage return ending the line is the line's terminator and is not part of
-// the key.
-func markerKey(line, kind string, cs commentStyle) (string, bool) {
-	rest, ok := strings.CutPrefix(strings.TrimSuffix(line, "\r"), cs.open+"podium:"+kind+":")
+	text := strings.Trim(strings.TrimSuffix(line, "\r"), " \t")
+	rest, ok := strings.CutPrefix(text, cs.open+"podium:"+kind+":")
 	if !ok {
 		return "", false
 	}

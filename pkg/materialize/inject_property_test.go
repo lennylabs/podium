@@ -18,25 +18,55 @@ var propertyPieces = []string{
 // propertyBodies are the artifact bodies the property test injects.
 var propertyBodies = []string{"", "Rule.", "Rule.\n", "Rule.\n\n", "x\r\ny", "\n", "multi\nline\n"}
 
-// propertyOperatorFile returns a random operator file. ok is false when one of
-// its lines is itself a Podium marker, which the operator does not write.
+// propertyOperatorFile returns a random operator file, starting with a UTF-8
+// byte order mark one time in four. ok is false when one of its lines is
+// itself a Podium marker, which the operator does not write.
 func propertyOperatorFile(r *rand.Rand, cs commentStyle) (string, bool) {
 	var b strings.Builder
+	if r.Intn(4) == 0 {
+		b.WriteString(utf8BOM)
+	}
 	for n := r.Intn(12); n > 0; n-- {
 		b.WriteString(propertyPieces[r.Intn(len(propertyPieces))])
 	}
 	s := b.String()
+	if len(scanMarkers(s, cs)) > 0 {
+		return "", false
+	}
+	return s, true
+}
+
+// decorateMarkers indents every Podium marker line of s and adds trailing
+// whitespace to it, in the mix an editor or a formatter can leave.
+func decorateMarkers(r *rand.Rand, s string, cs commentStyle) string {
+	var b strings.Builder
 	for off := 0; off < len(s); {
 		line, next := lineAt(s, off)
-		if _, ok := markerKey(line, "begin", cs); ok {
-			return "", false
+		out := line
+		_, isBegin := markerKey(line, true, cs)
+		_, isEnd := markerKey(line, false, cs)
+		if isBegin || isEnd {
+			out = decorateLine(r, line)
 		}
-		if _, ok := markerKey(line, "end", cs); ok {
-			return "", false
+		b.WriteString(out)
+		if off+len(line) < next {
+			b.WriteByte('\n')
 		}
 		off = next
 	}
-	return s, true
+	return b.String()
+}
+
+// decorateLine adds leading and trailing spaces or tabs to a marker line,
+// before its carriage return when it has one.
+func decorateLine(r *rand.Rand, line string) string {
+	ws := []string{"", " ", "\t", "  "}
+	text, cr := strings.CutSuffix(line, "\r")
+	out := ws[r.Intn(len(ws))] + text + ws[r.Intn(len(ws))]
+	if cr {
+		out += "\r"
+	}
+	return out
 }
 
 // legacyInjectBlock is injectBlock as releases before this change appended a
@@ -137,6 +167,48 @@ func injectProperties(t *testing.T, cs commentStyle, u string, keys, bodies []st
 	}
 }
 
+// decoratedProperties checks that Podium's marker lines still count after an
+// editor indents them or adds trailing whitespace: removing every block
+// restores the operator's file, and a resync replaces each block in place
+// rather than appending a second copy.
+func decoratedProperties(t *testing.T, r *rand.Rand, cs commentStyle, u string, keys, bodies []string) {
+	t.Helper()
+	full := injectEach(u, keys, bodies, cs, injectBlock)
+	decorated := decorateMarkers(r, full, cs)
+	if got := string(stripPodiumBlocks([]byte(decorated), cs, nil)); got != u {
+		t.Fatalf("decorated round trip: u=%q decorated=%q got=%q", u, decorated, got)
+	}
+	resynced := injectEach(decorated, keys, bodies, cs, injectBlock)
+	if got := len(podiumBlocks(resynced, cs)); got != len(keys) {
+		t.Fatalf("decorated resync: %d blocks, want %d: %q", got, len(keys), resynced)
+	}
+	if got := string(stripPodiumBlocks([]byte(resynced), cs, nil)); got != u {
+		t.Fatalf("decorated resync round trip: u=%q got=%q", u, got)
+	}
+}
+
+// bomBeforeBlockProperties checks a file whose byte order mark an editor
+// added directly before Podium's first block: the mark stays, removing every
+// block leaves only the mark, and removing some leaves the mark before what
+// injecting only the rest writes.
+func bomBeforeBlockProperties(t *testing.T, cs commentStyle, keys, bodies []string, mask int) {
+	t.Helper()
+	file := utf8BOM + injectEach("", keys, bodies, cs, injectBlock)
+	if got := string(stripPodiumBlocks([]byte(file), cs, nil)); got != utf8BOM {
+		t.Fatalf("bom round trip: file=%q got=%q", file, got)
+	}
+	var kept, keptBodies []string
+	for i, k := range keys {
+		if mask&(1<<i) != 0 {
+			kept, keptBodies = append(kept, k), append(keptBodies, bodies[i])
+		}
+	}
+	want := utf8BOM + injectEach("", kept, keptBodies, cs, injectBlock)
+	if got := string(stripPodiumBlocks([]byte(file), cs, keepSet(kept...))); got != want {
+		t.Fatalf("bom partial: kept=%v got=%q want=%q", kept, got, want)
+	}
+}
+
 // Spec: §6.7, §13.11.3 — over random operator files in both marker styles,
 // adding blocks and removing them restores the operator's bytes, removing
 // some leaves what adding only the rest writes, a resync is stable, a CRLF
@@ -157,7 +229,10 @@ func TestInjectStrip_Properties(t *testing.T) {
 		for i := range bodies {
 			bodies[i] = propertyBodies[r.Intn(len(propertyBodies))]
 		}
-		injectProperties(t, cs, u, keys, bodies, r.Intn(1<<len(keys)))
+		mask := r.Intn(1 << len(keys))
+		injectProperties(t, cs, u, keys, bodies, mask)
+		decoratedProperties(t, r, cs, u, keys, bodies)
+		bomBeforeBlockProperties(t, cs, keys, bodies, mask)
 		tail, ok := propertyOperatorFile(r, cs)
 		if !ok {
 			continue
