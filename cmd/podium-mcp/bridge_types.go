@@ -20,56 +20,13 @@ func hiddenFromBridge(typ string) bool {
 // out of its results. Its message has the format of the registry's answer for
 // an ID that is not in the caller's view ("registry.not_found: artifact <id>",
 // pkg/registry/core), so a hidden artifact and an absent one read the same to
-// the host.
+// the host. The registry refuses a registry-served load itself (§5, §7.2.2),
+// so the bridge reaches this for a workspace-overlay artifact, a record the
+// content cache holds, and a registry that does not apply the filter.
 //
 // Spec: §5, §6.10
 func bridgeNotFound(id string) map[string]any {
 	return errorResult("registry.not_found: artifact " + id)
-}
-
-// registryMaxTopK is the largest top_k the registry accepts for
-// search_artifacts. The bridge requests this many results so that dropping
-// the mcp-server results still fills the caller's page.
-//
-// Spec: §5
-const registryMaxTopK = 50
-
-// searchWindow returns the arguments the bridge sends to the registry's
-// search_artifacts and the page size it returns to the caller. A caller top_k
-// of zero or less is the registry default of 10. A top_k within the registry
-// maximum is raised to the maximum, so the registry returns the most results
-// it can and the bridge trims them to the page after dropping the mcp-server
-// results. A top_k above the maximum passes through unchanged, and the
-// registry refuses it.
-//
-// Spec: §5
-func searchWindow(args map[string]any) (map[string]any, int) {
-	page := topKArg(args)
-	if page <= 0 {
-		page = 10
-	}
-	if page > registryMaxTopK {
-		return args, page
-	}
-	wide := make(map[string]any, len(args)+1)
-	for k, v := range args {
-		wide[k] = v
-	}
-	wide["top_k"] = registryMaxTopK
-	return wide, page
-}
-
-// trimDescriptors cuts the list under key of the decoded JSON object v to at
-// most n elements. A value that is not an object, or a key that holds no list,
-// is left unchanged.
-func trimDescriptors(v any, key string, n int) {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return
-	}
-	if list, ok := m[key].([]any); ok && len(list) > n {
-		m[key] = list[:n]
-	}
 }
 
 // bridgeRecords returns the workspace-overlay records the bridge lists,

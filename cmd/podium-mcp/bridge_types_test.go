@@ -92,43 +92,6 @@ func TestLoadArtifact_RefusesMCPServer(t *testing.T) {
 	}
 }
 
-// Spec: §5 — searchWindow raises a top_k within the registry maximum to the
-// maximum and keeps the caller's page, reads a missing or non-positive top_k
-// as the default page of 10, and passes a top_k above the maximum through
-// unchanged; trimDescriptors cuts a list to the page and leaves other values
-// alone.
-func TestSearchWindow(t *testing.T) {
-	t.Parallel()
-	for _, c := range []struct {
-		args     map[string]any
-		wantTopK any
-		wantPage int
-	}{
-		{map[string]any{"query": "acme", "top_k": float64(2)}, registryMaxTopK, 2},
-		{map[string]any{"query": "acme"}, registryMaxTopK, 10},
-		{map[string]any{"top_k": float64(0)}, registryMaxTopK, 10},
-		{map[string]any{"top_k": float64(80)}, float64(80), 80},
-	} {
-		wide, page := searchWindow(c.args)
-		if wide["top_k"] != c.wantTopK || page != c.wantPage {
-			t.Errorf("searchWindow(%v) = top_k %v, page %d; want %v, %d", c.args, wide["top_k"], page, c.wantTopK, c.wantPage)
-		}
-	}
-	args := map[string]any{"top_k": float64(2)}
-	searchWindow(args)
-	if args["top_k"] != float64(2) {
-		t.Errorf("searchWindow changed the caller's top_k to %v", args["top_k"])
-	}
-	v := map[string]any{"results": []any{1, 2, 3}}
-	trimDescriptors(v, "results", 2)
-	if len(v["results"].([]any)) != 2 {
-		t.Errorf("trimDescriptors left %v, want 2 results", v["results"])
-	}
-	for _, in := range []any{nil, map[string]any{"results": "x"}} {
-		trimDescriptors(in, "results", 1)
-	}
-}
-
 // Spec: §5, §6.10 — the refusal carries the registry's not-found message for
 // an artifact ID.
 func TestBridgeNotFound_MatchesRegistryMessage(t *testing.T) {

@@ -132,18 +132,18 @@ func TestMCPBridge_HidesOverlayAndResourceMCPServers(t *testing.T) {
 			t.Errorf("resources/list names an mcp-server: %v", m)
 		}
 	}
-	if read := rpcResult(t, res.Stdout, 4); read["code"] != "resources.not_found" {
-		t.Errorf("resources/read of an mcp-server = %v, want resources.not_found", read)
+	if read := rpcResult(t, res.Stdout, 4); read["code"] != "registry.not_found" {
+		t.Errorf("resources/read of an mcp-server = %v, want registry.not_found", read)
 	}
 	if notable := resultIDs(rpcResult(t, res.Stdout, 5), "notable"); notable["acme/local/cache"] {
 		t.Errorf("load_domain(acme/local) notable = %v, want no overlay mcp-server", notable)
 	}
 }
 
-// Spec: §5 — dropping the mcp-server results does not empty or shorten a
-// search page while visible matches exist, because the bridge asks the
-// registry for its largest page and trims after the drop. A search for the
-// mcp-server type alone matches nothing.
+// Spec: §5, §7.2.2 — leaving out the mcp-server results does not empty or
+// shorten a search page while visible matches exist, because the registry
+// leaves them out of the bridge's search before it ranks and cuts the page.
+// A search for the mcp-server type alone matches nothing.
 func TestMCPBridge_HiddenResultsLeavePageFilled(t *testing.T) {
 	t.Parallel()
 	reg := hiddenRegistry(t)

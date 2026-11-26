@@ -15,19 +15,10 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	// cache miss." The workspace overlay is the only local source a search can
 	// serve, so an offline-only search returns overlay matches without dialing
 	// the registry, and an empty overlay is a structured cache miss.
-	// §5: the bridge lists no mcp-server artifact, so a search for that type
-	// alone matches nothing and the registry is not asked.
-	if typ, _ := args["type"].(string); hiddenFromBridge(typ) {
-		query, _ := args["query"].(string)
-		return map[string]any{"query": query, "total_matched": 0, "results": []any{}}
-	}
 	if s.cfg.cacheMode == "offline-only" {
 		return s.offlineOnlySearchArtifacts(args)
 	}
-	// §5: the registry is asked for its maximum page, so the results left
-	// after the mcp-server results are dropped still fill the caller's page.
-	wide, page := searchWindow(args)
-	body, err := s.fetchJSON("/v1/search_artifacts", wide)
+	body, err := s.fetchJSON("/v1/search_artifacts", args)
 	if err != nil {
 		// spec: §7.4 / §12 — when the registry is unreachable, return the
 		// offline envelope rather than an error. always-revalidate surfaces an
@@ -57,11 +48,12 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	if len(overlayRecords) == 0 {
 		// No overlay: pass the registry response through (frontmatter stripped
 		// and §5 mcp-server descriptors dropped) so single-deployment behavior
-		// is otherwise unchanged.
+		// is otherwise unchanged. The registry leaves the mcp-server artifacts
+		// out of the bridge's search itself (§5, §7.2.2); the drop covers a
+		// registry that does not.
 		decoded := jsonAny(body)
 		stripSearchResultFrontmatter(decoded)
 		lowerTotalMatched(decoded, dropHiddenDescriptors(decoded, "results"))
-		trimDescriptors(decoded, "results", page)
 		return decoded
 	}
 	visible := registry.Results[:0]
@@ -79,7 +71,7 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	typeFilter, _ := args["type"].(string)
 	scope, _ := args["scope"].(string)
 	tags := tagsArg(args)
-	topK := page
+	topK := topKArg(args)
 	local := localSearch(overlayRecords, query, typeFilter, scope, tags, topK)
 
 	// §9.1 LocalSearchProvider: when an overlay semantic backend is
@@ -103,9 +95,9 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 
 // lowerTotalMatched subtracts the n descriptors the bridge dropped from the
 // total_matched of the decoded search response v, never below zero. The
-// registry counts every match, mcp-server artifacts included, and the bridge
-// sees the type only of the results the registry returned within its maximum
-// page, so the total it reports still counts a hidden match beyond that page.
+// registry this guards against counts every match, mcp-server artifacts
+// included, and the bridge sees the type only of the results it returned, so
+// the total still counts a hidden match beyond the page.
 //
 // Spec: §5
 func lowerTotalMatched(v any, n int) {

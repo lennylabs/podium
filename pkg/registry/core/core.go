@@ -627,6 +627,8 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	if err != nil {
 		return nil, err
 	}
+	// §5: the MCP bridge's domain map names no mcp-server artifact.
+	visible, _ = bridgeView(ctx, visible)
 	// §4.5.1 / §4.5.4 — load every visible DOMAIN.md and merge the
 	// candidates for each path across layers. The merged set drives
 	// description, keywords, unlisted, imports, and per-domain
@@ -1234,6 +1236,11 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 	if err != nil {
 		return nil, err
 	}
+	// §5: the MCP bridge's search matches no mcp-server artifact. The filter
+	// runs before ranking, so total_matched, the page, the §8.1 results
+	// context, and the §8.7 search hits describe only what the bridge
+	// receives.
+	visible, _ = bridgeView(ctx, visible)
 
 	// spec: §4.7.6 — search ranks artifacts, so each canonical ID contributes
 	// one document at its latest version. Without this collapse a stored
@@ -1598,6 +1605,10 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 	if err != nil {
 		return nil, err
 	}
+	// §5: the MCP bridge loads no mcp-server artifact. A load of one resolves
+	// as an ID outside the caller's view: registry.not_found with the same
+	// message, a read event of result size 0, and no §8.7 load count.
+	visible, hidden := bridgeView(ctx, visible)
 	candidates := make([]store.ManifestRecord, 0, 4)
 	for _, m := range visible {
 		if m.ArtifactID == artifactID {
@@ -1608,8 +1619,9 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 		// §8.1 visibility.denied: the artifact ID exists in the
 		// store but its layer is not in the caller's effective
 		// view. Emitting before the not-found return lets SIEM
-		// pipelines tell "missing" from "filtered."
-		if r.artifactExistsAnywhere(ctx, artifactID) {
+		// pipelines tell "missing" from "filtered." An artifact the §5 bridge
+		// filter left out is in the caller's view, so it records no denial.
+		if !hidden[artifactID] && r.artifactExistsAnywhere(ctx, artifactID) {
 			r.emit(ctx, AuditEvent{
 				Type:   "visibility.denied",
 				Caller: callerOf(id),
