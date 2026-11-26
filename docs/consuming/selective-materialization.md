@@ -79,6 +79,12 @@ the target. Sync never deletes
 a directory with its contents, and it removes a parent directory only while the
 directory is empty.
 
+The lock lives in `<target>/.podium/`, which must be a directory. When `.podium`
+is a symbolic link, for example one that shares `sync.yaml` across Git
+worktrees, `podium sync` fails before it writes anything, and the error names
+`.podium`. Replace the link with a directory that holds its own `sync.yaml` and
+`sync.lock`.
+
 ---
 
 ## Sync a subset from the command line
