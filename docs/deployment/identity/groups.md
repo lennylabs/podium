@@ -56,6 +56,7 @@ Neither variable has a `registry.yaml` key. A set `PODIUM_SCIM_STORE_PATH` that 
 - A layer's `groups:` entry names a SCIM group by its `displayName`. The `IdpGroupMapping` table does not apply to SCIM group names.
 - The registry grants visibility when that group holds a member whose SCIM `userName` equals the caller's subject or `email`.
 - Provision each user under a `userName` that the caller's token also carries. A `userName` that matches neither the subject nor the email resolves to no group visibility and reports no error. The SCIM user's `emails` value is stored but never compared.
+- The receiver refuses a user with an empty `userName`, and a group with an empty `displayName`, with HTTP 400 and the SCIM error type `invalidValue`. The refusal applies on creation (`POST`) and on replacement (`PUT`), and a refused request changes no stored resource.
 
 ### Endpoints
 

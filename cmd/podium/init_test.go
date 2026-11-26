@@ -103,6 +103,37 @@ func TestInit_RefusesToOverwriteWithoutForce(t *testing.T) {
 	})
 }
 
+// Spec: §7.5.3, §7.7 — in a workspace whose .podium is a symbolic link,
+// init fails with exit 1 before the existing-file check, with and without
+// --force, and the sync.yaml behind the link stays as it was.
+func TestInit_PodiumLinkFailsBeforeExistingFileCheck(t *testing.T) {
+	base := t.TempDir()
+	ws := filepath.Join(base, "ws")
+	shared := filepath.Join(base, "shared")
+	for _, d := range []string{ws, shared} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+	}
+	const existing = "defaults:\n  registry: shared\n"
+	if err := os.WriteFile(filepath.Join(shared, "sync.yaml"), []byte(existing), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.Symlink(shared, filepath.Join(ws, ".podium")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	withCwd(t, ws, func() {
+		for _, args := range [][]string{{"--registry", "x"}, {"--registry", "x", "--force"}} {
+			if rc := initCmd(args); rc != 1 {
+				t.Errorf("init %v rc = %d, want 1", args, rc)
+			}
+		}
+	})
+	if body, _ := os.ReadFile(filepath.Join(shared, "sync.yaml")); string(body) != existing {
+		t.Errorf("the sync.yaml behind the link changed: %q", body)
+	}
+}
+
 // Spec: §7.7 — workspace init updates .gitignore so the
 // gitignored override file and overlay dir don't accidentally
 // land in commits.

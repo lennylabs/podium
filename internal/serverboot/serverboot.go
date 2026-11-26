@@ -489,6 +489,9 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		// This mirrors how layerConfigFromEntry resolves an empty
 		// declarative `visibility:` block, so both bootstrap paths agree.
 		effVis := layer.Visibility(l.Visibility)
+		if err := checkVisibilityEntries(effVis); err != nil {
+			return nil, fmt.Errorf("config.invalid: layer %s: .layer-config visibility.%w", l.ID, err)
+		}
 		if visibilityIsEmpty(effVis) {
 			effVis = vis
 		}
@@ -643,6 +646,20 @@ func visibilityFromDefault(v string) layer.Visibility {
 	}
 }
 
+// checkVisibilityEntries applies the §4.6 entry rule to a declared
+// visibility block, from registry.yaml or from a .layer-config, so a
+// declaration holding an empty entry or one with a control character refuses
+// startup rather than being stored. An unset ${ENV_VAR} interpolated into an
+// entry yields an empty one and is refused on the same terms.
+//
+// Spec: §4.6
+func checkVisibilityEntries(v layer.Visibility) error {
+	if err := layer.CheckEntries("groups", v.Groups); err != nil {
+		return err
+	}
+	return layer.CheckEntries("users", v.Users)
+}
+
 // visibilityIsEmpty reports whether a visibility block declares no filters.
 func visibilityIsEmpty(v layer.Visibility) bool {
 	return !v.Public && !v.Organization && len(v.Groups) == 0 && len(v.Users) == 0
@@ -772,6 +789,9 @@ func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg 
 		Organization: entry.Visibility.Organization,
 		Groups:       entry.Visibility.Groups,
 		Users:        entry.Visibility.Users,
+	}
+	if err := checkVisibilityEntries(vis); err != nil {
+		return store.LayerConfig{}, layer.Visibility{}, fmt.Errorf("config.invalid: declared layer %s: visibility.%w", entry.ID, err)
 	}
 	if visibilityIsEmpty(vis) {
 		vis = defaultBootstrapVisibility(cfg)

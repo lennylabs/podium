@@ -62,6 +62,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
 	t.Run("LayerRepoCredential", func(t *testing.T) { layerRepoCredential(t, factory(t)) })
 	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
+	t.Run("LayerVisibilityEntries", func(t *testing.T) { layerVisibilityEntries(t, factory(t)) })
 	t.Run("DeprecatedAtStampedAndPurged", func(t *testing.T) { deprecatedAtStampedAndPurged(t, factory(t)) })
 	t.Run("LayerSoftDeleteRecovery", func(t *testing.T) { layerSoftDeleteRecovery(t, factory(t)) })
 	t.Run("LayerDeletionPurgedAfterWindow", func(t *testing.T) { layerDeletionPurgedAfterWindow(t, factory(t)) })
@@ -807,6 +808,34 @@ func layerRepoCredential(t *testing.T, s store.Store) {
 	must(t, err)
 	if g, w := layerRepoView(deleted...), layerRepoView(wantCred); g != w {
 		t.Fatalf("deleted list:\ngot:  %s\nwant: %s", g, w)
+	}
+}
+
+// Spec: §4.6 — a layer's groups and users entries read back exactly as
+// written, white space and a carriage return included, and PutLayerConfig
+// refuses an entry holding a line feed and writes nothing, so no backend can
+// store an entry that reads back as several entries.
+func layerVisibilityEntries(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+	stored := store.LayerConfig{
+		TenantID: "t", ID: "team", SourceType: "local", LocalPath: "/tmp/x",
+		Groups: []string{"Finance Team", " acme-eng "},
+		Users:  []string{"alice@acme.com", "bob@acme.com\r"},
+	}
+	must(t, s.PutLayerConfig(ctx, stored))
+	widened := stored
+	widened.Users = []string{"alice@acme.com\nmallory@acme.com"}
+	usersErr := s.PutLayerConfig(ctx, widened)
+	widened.Users, widened.Groups = stored.Users, []string{"acme-eng\n"}
+	groupsErr := s.PutLayerConfig(ctx, widened)
+	got, err := s.GetLayerConfig(ctx, "t", "team")
+	must(t, err)
+	view := func(c store.LayerConfig) string { return fmt.Sprintf("groups=%q users=%q", c.Groups, c.Users) }
+	if !errors.Is(usersErr, store.ErrLayerListEntry) || !errors.Is(groupsErr, store.ErrLayerListEntry) || view(got) != view(stored) {
+		t.Fatalf("users err = %v, groups err = %v, want ErrLayerListEntry for both\nrow:  %s\nwant: %s",
+			usersErr, groupsErr, view(got), view(stored))
 	}
 }
 

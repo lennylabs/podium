@@ -2100,6 +2100,14 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		if err != nil {
 			return errorResult("config.unknown_harness: " + err.Error())
 		}
+		// §6.6 step 5: the destination holds a complete copy or nothing, so
+		// a sandbox profile the write would refuse, such as one under a
+		// .podium that is a symbolic link, fails the load before any of the
+		// artifact's files is written.
+		profile := sandboxProfileOf(resp.Frontmatter)
+		if err := materialize.CheckSandboxProfile(root, profile); err != nil {
+			return materializeFailure(err)
+		}
 		// §4.3 target_harnesses: suppress the on-disk write when the
 		// artifact opts out of this harness. The manifest content is
 		// still returned to the caller; only materialization is skipped.
@@ -2147,7 +2155,7 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 			werr := writeLoadedArtifact(root, resp.ID, out)
 			matSpan.End()
 			if werr != nil {
-				return errorResult("materialize: " + werr.Error())
+				return materializeFailure(werr)
 			}
 			for _, f := range out {
 				materialized = append(materialized, filepath.Join(root, filepath.FromSlash(f.Path)))
@@ -2158,8 +2166,8 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		// alongside the materialized files so a host with sandbox
 		// capability can honor it. The sandbox gate above has already
 		// confirmed the host honors (or was told to ignore) the profile.
-		if p, ok, err := materialize.WriteSandboxProfile(root, sandboxProfileOf(resp.Frontmatter)); err != nil {
-			return errorResult("materialize: " + err.Error())
+		if p, ok, err := materialize.WriteSandboxProfile(root, profile); err != nil {
+			return materializeFailure(err)
 		} else if ok {
 			materialized = append(materialized, p)
 		}
@@ -2390,7 +2398,7 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 			warnings = append(warnings, hookWarnings...)
 			out = hookedOut
 			if err := writeLoadedArtifact(root, rec.ID, out); err != nil {
-				return errorResult("materialize: " + err.Error())
+				return materializeFailure(err)
 			}
 			for _, f := range out {
 				materialized = append(materialized, filepath.Join(root, filepath.FromSlash(f.Path)))

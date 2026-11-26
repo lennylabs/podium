@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -41,6 +42,25 @@ func TestErrorResult_NonNamespacedStaysBare(t *testing.T) {
 		}
 		if _, has := m["code"]; has {
 			t.Errorf("msg %q unexpectedly produced a code field: %v", msg, m)
+		}
+	}
+}
+
+// Spec: §6.6 step 5 — a materialization write error reads with one
+// "materialize:" prefix: an error from pkg/materialize keeps its own, and an
+// operating-system error the writer returns unwrapped gains one.
+func TestMaterializeFailure_PrefixOnce(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"materialize: .podium is a symbolic link or not a directory: \".podium/x.json\"": "materialize: .podium is a symbolic link or not a directory: \".podium/x.json\"",
+		"mkdir /dest/a: permission denied":                                               "materialize: mkdir /dest/a: permission denied",
+	} {
+		m := materializeFailure(errors.New(in))
+		if m["error"] != want {
+			t.Errorf("materializeFailure(%q) error = %v, want %q", in, m["error"], want)
+		}
+		if _, has := m["code"]; has {
+			t.Errorf("materializeFailure(%q) produced a code field: %v", in, m)
 		}
 	}
 }
