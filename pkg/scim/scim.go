@@ -38,6 +38,13 @@ var (
 	// ErrInvalidFilter signals an unsupported SCIM filter; maps
 	// to SCIM error code "invalidFilter".
 	ErrInvalidFilter = errors.New("scim: invalid filter")
+
+	// errUserNameRequired and errDisplayNameRequired refuse a resource
+	// without the attribute RFC 7643 requires. Creation and replacement
+	// return the same error, so the handler answers both with the same
+	// invalidValue response.
+	errUserNameRequired    = errors.New("scim: userName is required")
+	errDisplayNameRequired = errors.New("scim: displayName is required")
 )
 
 // User is the §6.3.1 user resource. The fields mirror the SCIM 2.0
@@ -140,7 +147,7 @@ func (m *Memory) CreateUser(_ context.Context, u User) (User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if u.UserName == "" {
-		return User{}, errors.New("scim: userName is required")
+		return User{}, errUserNameRequired
 	}
 	for _, existing := range m.users {
 		if existing.UserName == u.UserName {
@@ -186,8 +193,15 @@ func (m *Memory) ListUsers(_ context.Context, filter Filter) ([]User, error) {
 }
 
 // ReplaceUser overwrites the stored user with u (id from the path
-// wins).
+// wins). An empty userName is refused as CreateUser refuses it: the group
+// expansion returns each member's userName, so a stored empty one would reach
+// the §4.6 evaluator as an empty member name.
+//
+// Spec: §6.3.1
 func (m *Memory) ReplaceUser(_ context.Context, id string, u User) (User, error) {
+	if u.UserName == "" {
+		return User{}, errUserNameRequired
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	existing, ok := m.users[id]
@@ -224,7 +238,7 @@ func (m *Memory) CreateGroup(_ context.Context, g Group) (Group, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if g.DisplayName == "" {
-		return Group{}, errors.New("scim: displayName is required")
+		return Group{}, errDisplayNameRequired
 	}
 	for _, existing := range m.groups {
 		if existing.DisplayName == g.DisplayName {
@@ -266,8 +280,14 @@ func (m *Memory) ListGroups(_ context.Context, filter Filter) ([]Group, error) {
 	return out, nil
 }
 
-// ReplaceGroup overwrites the stored group.
+// ReplaceGroup overwrites the stored group. An empty displayName is refused
+// as CreateGroup refuses it.
+//
+// Spec: §6.3.1
 func (m *Memory) ReplaceGroup(_ context.Context, id string, g Group) (Group, error) {
+	if g.DisplayName == "" {
+		return Group{}, errDisplayNameRequired
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	existing, ok := m.groups[id]

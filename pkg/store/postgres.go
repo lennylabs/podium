@@ -1473,6 +1473,10 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 	if err != nil {
 		return err
 	}
+	groups, users, err := layerListColumns(cfg)
+	if err != nil {
+		return err
+	}
 	createdAt := cfg.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -1513,7 +1517,7 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 		cfg.TenantID, cfg.ID, cfg.SourceType, repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, cfg.UserDefined, cfg.Owner,
 		cfg.Public, cfg.Organization,
-		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
+		groups, users,
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
 		createdAt.UTC(), nullTimePG(cfg.DeletedAt), nullTimePG(cfg.LastIngestedAt),
 		userinfo)
@@ -1813,10 +1817,10 @@ func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 	}
 	cfg.Repo, cfg.RegisteredRepo = SplitLayerRepo(repo, repoUserinfo)
 	if groups != "" {
-		cfg.Groups = strings.Split(groups, "\n")
+		cfg.Groups = strings.Split(groups, layerListSeparator)
 	}
 	if users != "" {
-		cfg.Users = strings.Split(users, "\n")
+		cfg.Users = strings.Split(users, layerListSeparator)
 	}
 	// lib/pq hands a timestamptz back in the connection's session time
 	// zone, and nothing here pins that zone, so a non-UTC session would

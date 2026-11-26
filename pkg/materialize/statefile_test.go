@@ -525,3 +525,193 @@ func TestWriteSandboxProfile_CommittedLinksRefused(t *testing.T) {
 	}
 	wantContent(t, victim, "victim\n")
 }
+
+// Spec: §6.6 step 5, §7.5.3 — CheckStateFile reports the refusals
+// WriteStateFile would return without writing anything, and passes a path
+// WriteStateFile would create or replace.
+func TestCheckStateFile(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	outside := filepath.Join(base, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	linkDest := filepath.Join(base, "link-ws")
+	mustSymlink(t, outside, filepath.Join(linkDest, ".podium"))
+	fileDest := filepath.Join(base, "file-ws")
+	confinedFixture(t, fileDest, map[string]string{".podium": "x", "sub/file": "x"})
+	tmpDest := filepath.Join(base, "tmp-ws")
+	mustSymlink(t, filepath.Join(outside, "victim"), filepath.Join(tmpDest, ".podium", "sync.yaml.tmp"))
+	leftover := filepath.Join(base, "leftover-ws")
+	confinedFixture(t, leftover, map[string]string{".podium/sync.yaml.tmp": "partial", ".podium/sync.yaml": "old"})
+	leafDir := filepath.Join(base, "leafdir-ws")
+	if err := os.MkdirAll(filepath.Join(leafDir, ".podium", "sync.yaml"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	leafLink := filepath.Join(base, "leaflink-ws")
+	mustSymlink(t, filepath.Join(outside, "elsewhere.yaml"), filepath.Join(leafLink, ".podium", "sync.yaml"))
+
+	for _, tc := range []struct {
+		name, dest, rel string
+		want            []error
+	}{
+		{"absent destination", filepath.Join(base, "absent"), ".podium/sync.yaml", nil},
+		{"absent .podium", t.TempDir(), ".podium/sync.yaml", nil},
+		{"leftover regular temporary and existing file", leftover, ".podium/sync.yaml", nil},
+		{"link at the file name", leafLink, ".podium/sync.yaml", nil},
+		{"directory at the file name", leafDir, ".podium/sync.yaml", []error{ErrUnconfinedPath}},
+		{".podium link", linkDest, ".podium/sync.yaml", []error{ErrUnconfinedPath, ErrPodiumNotDirectory}},
+		{".podium regular file", fileDest, ".podium/sync.yaml", []error{ErrUnconfinedPath, ErrPodiumNotDirectory}},
+		{"other directory a regular file", fileDest, "sub/file/x", []error{ErrUnconfinedPath}},
+		{"temporary link", tmpDest, ".podium/sync.yaml", []error{ErrUnconfinedPath}},
+		{"escaping path", leftover, "../x", []error{ErrOutOfDestination}},
+		{"empty destination", "", ".podium/sync.yaml", []error{ErrEmptyDestination}},
+	} {
+		err := CheckStateFile(tc.dest, tc.rel)
+		if tc.want == nil && err != nil {
+			t.Errorf("%s: CheckStateFile = %v, want nil", tc.name, err)
+		}
+		if tc.want != nil && err == nil {
+			t.Errorf("%s: CheckStateFile = nil, want %v", tc.name, tc.want)
+		}
+		for _, w := range tc.want {
+			if !errors.Is(err, w) {
+				t.Errorf("%s: CheckStateFile = %v, want it to match %v", tc.name, err, w)
+			}
+		}
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("CheckStateFile wrote behind the .podium link: %v", entries)
+	}
+	wantGone(t, filepath.Join(base, "absent"))
+	wantContent(t, filepath.Join(leftover, ".podium", "sync.yaml.tmp"), "partial")
+}
+
+// Spec: §7.5.3 — CheckStateFile reports a destination it cannot open, a
+// directory it cannot inspect, and a temporary name it cannot inspect.
+func TestCheckStateFile_InspectFailures(t *testing.T) {
+	t.Parallel()
+	dest := t.TempDir()
+	confinedFixture(t, dest, map[string]string{"file": "x"})
+	if err := CheckStateFile(filepath.Join(dest, "file"), ".podium/sync.yaml"); err == nil || !strings.Contains(err.Error(), "materialize: open") {
+		t.Errorf("CheckStateFile on a regular-file destination = %v, want the open error", err)
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a mode-000 directory, so the inspect error cannot occur")
+	}
+	locked := filepath.Join(dest, "locked")
+	if err := os.Mkdir(locked, 0o000); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	if err := CheckStateFile(dest, "locked/sub/sync.lock"); !errors.Is(err, ErrUnconfinedPath) {
+		t.Errorf("CheckStateFile below an unreadable directory = %v, want ErrUnconfinedPath", err)
+	}
+	if err := CheckStateFile(dest, "locked/sync.lock"); err == nil || !strings.Contains(err.Error(), "materialize: inspect") {
+		t.Errorf("CheckStateFile with an unreadable temporary name = %v, want the inspect error", err)
+	}
+}
+
+// Spec: §6.6 step 5, §4.4.1 — CheckSandboxProfile refuses the profile a
+// .podium link would carry outside the destination, passes a profile with no
+// shipped baseline, and writes nothing.
+func TestCheckSandboxProfile(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	outside := filepath.Join(base, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	linkDest := filepath.Join(base, "link-ws")
+	mustSymlink(t, outside, filepath.Join(linkDest, ".podium"))
+	err := CheckSandboxProfile(linkDest, SandboxProfileSeccompStrict)
+	if !errors.Is(err, ErrPodiumNotDirectory) || !errors.Is(err, ErrUnconfinedPath) {
+		t.Errorf("CheckSandboxProfile under a .podium link = %v, want ErrPodiumNotDirectory and ErrUnconfinedPath", err)
+	}
+	for _, p := range []string{"", "read-only-fs", "unrestricted"} {
+		if err := CheckSandboxProfile(linkDest, p); err != nil {
+			t.Errorf("CheckSandboxProfile(%q) with no shipped baseline = %v, want nil", p, err)
+		}
+	}
+	dirDest := filepath.Join(base, "dir-ws")
+	if err := os.MkdirAll(filepath.Join(dirDest, ".podium", SandboxProfileSeccompStrict+".json"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := CheckSandboxProfile(dirDest, SandboxProfileSeccompStrict); !errors.Is(err, ErrUnconfinedPath) || !errors.Is(err, ErrStateFileIsDirectory) || !strings.Contains(err.Error(), `".podium/seccomp-strict.json" is a directory`) {
+		t.Errorf("CheckSandboxProfile over a directory at the profile name = %v, want ErrUnconfinedPath and ErrStateFileIsDirectory naming the directory", err)
+	}
+	fresh := filepath.Join(base, "fresh")
+	if err := CheckSandboxProfile(fresh, SandboxProfileSeccompStrict); err != nil {
+		t.Errorf("CheckSandboxProfile into an absent destination = %v, want nil", err)
+	}
+	wantGone(t, fresh)
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("CheckSandboxProfile wrote behind the .podium link: %v", entries)
+	}
+}
+
+// Spec: §7.5.3 — a refusal that matches two sentinels names the package
+// once: the .podium refusal matches ErrUnconfinedPath and
+// ErrPodiumNotDirectory, a recorded-path refusal matches ErrUnconfinedPath
+// and ErrUnsafeRecordedPath, and neither message repeats "materialize:".
+func TestRefusalMessages_PrefixOnce(t *testing.T) {
+	t.Parallel()
+	linkDest := filepath.Join(t.TempDir(), "link-ws")
+	mustSymlink(t, t.TempDir(), filepath.Join(linkDest, ".podium"))
+	podiumErr := WriteStateFile(linkDest, ".podium/sync.lock", nil, 0o644)
+	ruleErr := Write(t.TempDir(), []adapter.File{{Path: ".git/hooks/x", Content: []byte("x")}})
+	for _, tc := range []struct {
+		name string
+		err  error
+		want []error
+		text string
+	}{
+		{".podium link", podiumErr, []error{ErrUnconfinedPath, ErrPodiumNotDirectory}, `materialize: .podium is a symbolic link or not a directory: ".podium/sync.lock"`},
+		{"recorded-path rule", ruleErr, []error{ErrUnconfinedPath, ErrUnsafeRecordedPath}, `materialize: path is not a regular file confined to the destination: ".git/hooks/x": unsafe recorded path: .git segment ".git"`},
+	} {
+		for _, w := range tc.want {
+			if !errors.Is(tc.err, w) {
+				t.Errorf("%s: %v does not match %v", tc.name, tc.err, w)
+			}
+		}
+		if tc.err == nil || tc.err.Error() != tc.text {
+			t.Errorf("%s: message = %v, want %q", tc.name, tc.err, tc.text)
+		}
+	}
+}
+
+// Spec: §6.6, §7.5.3 — a path refused because it resolves, through a link
+// inside the destination, to a path the recorded-path rule refuses matches
+// ErrUnconfinedPath and ErrUnsafeRecordedPath and names the package once.
+// It covers the recorded-path read (resolveIn), the writer's directory-link
+// check (checkResolvedTarget), and the merge-target link (resolveMergeTarget).
+func TestResolvedRuleRefusals_MatchUnsafeRecordedPath(t *testing.T) {
+	t.Parallel()
+	dest := t.TempDir()
+	confinedFixture(t, dest, map[string]string{".git/HEAD": "ref", ".git/config": "git"})
+	if err := os.MkdirAll(filepath.Join(dest, ".git", "hooks"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	mustSymlink(t, filepath.Join(dest, ".git"), filepath.Join(dest, "gitlink"))
+	mustSymlink(t, filepath.Join(dest, ".git", "hooks"), filepath.Join(dest, "skills"))
+	mustSymlink(t, ".git/config", filepath.Join(dest, "GIT.json"))
+
+	_, readErr := ReadRecorded(dest, "gitlink/HEAD")
+	dirLinkErr := Write(dest, []adapter.File{{Path: "skills/post-checkout", Content: []byte("x")}})
+	mergeErr := Write(dest, []adapter.File{{Path: "GIT.json", Op: adapter.OpMergeJSON, Content: []byte(`{"a":1}`)}})
+	for name, err := range map[string]error{
+		"resolveIn":           readErr,
+		"checkResolvedTarget": dirLinkErr,
+		"resolveMergeTarget":  mergeErr,
+	} {
+		if !errors.Is(err, ErrUnconfinedPath) || !errors.Is(err, ErrUnsafeRecordedPath) {
+			t.Errorf("%s: %v, want ErrUnconfinedPath and ErrUnsafeRecordedPath", name, err)
+			continue
+		}
+		if n := strings.Count(err.Error(), "materialize:"); n != 1 || !strings.Contains(err.Error(), "resolves to") {
+			t.Errorf("%s: message %q must name the resolved path with one materialize: prefix", name, err)
+		}
+	}
+	wantGone(t, filepath.Join(dest, ".git", "hooks", "post-checkout"))
+	wantContent(t, filepath.Join(dest, ".git", "config"), "git")
+}

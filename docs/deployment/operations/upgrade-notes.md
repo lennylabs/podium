@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, and the refusal of names that resolve to .git or .podium, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the refusal of an empty or control-character visibility entry, and the refusal of names that resolve to .git or .podium, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -37,6 +37,16 @@ From 0.8.0, Podium refuses a `.git` path segment, and a segment that a filesyste
 - A package that bundles a file under a `.git` directory, or under a directory whose name resolves to `.git`, such as a skill directory that is itself a Git clone, fails ingest with `lint.resource_path_reserved`. Before the upgrade, run `podium lint` against each layer and remove such directories from the packages.
 - `podium sync` and a `kind: marketplace` render do not write an output path with such a segment, and they skip a lock entry that names one, with a warning on standard error that names the path.
 - The Python and TypeScript SDKs skip a workspace overlay that holds such a package, with a warning, and `materialize()` raises `MaterializeError` for a canonical ID or a resource path with a segment that names `.git`.
+- A rollback to 0.7.0 needs no step.
+
+### Visibility entries that are empty or hold a control character
+
+From 0.8.0, a layer's `users` and `groups` entries are non-empty strings that contain no control character, such as a line feed, a carriage return, or a tab. 0.7.0 accepted any string, and the SQLite and Postgres stores read an entry containing a line feed back as several entries.
+
+- Before the upgrade, check the `visibility:` block of each layer in `registry.yaml` and each `.layer-config` that a registry reads through `--layer-path` for an empty entry and for an entry with a control character. An entry written as `${ENV_VAR}` is empty when the variable is unset. A start that finds such an entry exits with `config.invalid`, and the message names the layer and the entry's position.
+- A layer registration or update that carries such an entry, or an `owner` with a control character, is refused with `400 registry.invalid_argument`. A registration is refused the same way when the caller's subject, which the registry stores as the owner and `users` entry of a user-defined layer or as the `users` entry that `PODIUM_DEFAULT_LAYER_VISIBILITY=users` grants, contains a control character.
+- A layer that 0.7.0 stored keeps its entries. Where its stored `users` or `groups` holds an empty entry, an update that sends that list back unchanged, as a client that returns the layer object it read does, is refused; send the list without the empty entry, or omit the member. The web UI's Edit dialog sends both lists on every update of an admin-defined layer, so such a layer cannot have its ref changed or its webhook secret rotated there until the empty entry is removed. The dialog shows the entry as a token labelled `(empty entry)`; remove that token, then save.
+- White space around an entry is kept and matched as written, as in 0.7.0.
 - A rollback to 0.7.0 needs no step.
 
 ## 0.7.0

@@ -77,45 +77,13 @@ func TestLoadArtifact_AlwaysRevalidate_HeadMatchServesCache(t *testing.T) {
 // Spec: §6.5, §4.4.1
 func TestLoadArtifact_HeadMatchServesCachedSandboxProfile(t *testing.T) {
 	t.Parallel()
-	const fm = "---\ntype: agent\nversion: 1.0.0\ndescription: tool\nsandbox_profile: seccomp-strict\n---\n"
-	var gets int32
-	dir := t.TempDir()
-	cache, _ := newContentCache(dir)
-	rec := primeCachedRecord(t, cache, "ops/tool", fm, "cached-body")
-
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodHead:
-			w.Header().Set("X-Podium-Content-Hash", rec.ContentHash)
-			w.WriteHeader(http.StatusOK)
-		case http.MethodGet:
-			atomic.AddInt32(&gets, 1)
-			w.WriteHeader(http.StatusInternalServerError) // a full GET here is a bug
-		}
-	}))
-	defer ts.Close()
-
-	resolutions := newResolutionCache(dir)
-	defer func() { _ = resolutions.Close() }()
-	resolutions.PutVersion("ops/tool", "1.0.0", rec.ContentHash, time.Now())
-
 	root := t.TempDir()
-	srv := &mcpServer{
-		cfg: &config{
-			cacheDir: dir, cacheMode: "always-revalidate", registry: ts.URL, harness: "none",
-			verifyPolicy: sign.PolicyNever, materializeRoot: root,
-			hostSandboxes: []string{"unrestricted", "seccomp-strict"},
-		},
-		cache:       cache,
-		resolutions: resolutions,
-		adapters:    adapter.DefaultRegistry(),
-		http:        &http.Client{},
-	}
+	srv, gets := cachedSeccompServer(t, root)
 	m, ok := srv.loadArtifact(map[string]any{"id": "ops/tool", "version": "1.0.0"}).(map[string]any)
 	if !ok || m["manifest_body"] != "cached-body" {
 		t.Fatalf("loadArtifact = %v, want the cached record", m)
 	}
-	if got := atomic.LoadInt32(&gets); got != 0 {
+	if got := atomic.LoadInt32(gets); got != 0 {
 		t.Errorf("GET count = %d, want 0 (HEAD match must not full-fetch)", got)
 	}
 	baseline := filepath.Join(root, ".podium", "seccomp-strict.json")
@@ -130,6 +98,81 @@ func TestLoadArtifact_HeadMatchServesCachedSandboxProfile(t *testing.T) {
 	if !strings.Contains(string(written), "sandbox_profile: seccomp-strict") {
 		t.Errorf("materialized ARTIFACT.md lacks the cached seccomp-strict:\n%s", written)
 	}
+}
+
+// A load whose baseline sandbox profile cannot be written, because the
+// destination's .podium is a symbolic link, fails before any of the
+// artifact's files is written, so the destination holds nothing rather than
+// the artifact without its profile. The error names the refused .podium with
+// one "materialize:" prefix.
+//
+// Spec: §6.6 step 5, §4.4.1
+func TestLoadArtifact_SandboxProfileRefusedWritesNothing(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	root := filepath.Join(base, "dest")
+	outside := filepath.Join(base, "outside")
+	for _, d := range []string{root, outside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+	}
+	if err := os.Symlink(outside, filepath.Join(root, ".podium")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	srv, _ := cachedSeccompServer(t, root)
+	m, _ := srv.loadArtifact(map[string]any{"id": "ops/tool", "version": "1.0.0"}).(map[string]any)
+	want := `materialize: .podium is a symbolic link or not a directory: ".podium/seccomp-strict.json"`
+	if m["error"] != want {
+		t.Errorf("loadArtifact error = %v, want %q", m["error"], want)
+	}
+	if entries, _ := os.ReadDir(root); len(entries) != 1 || entries[0].Name() != ".podium" {
+		t.Errorf("the refused load wrote into the destination: %v", entries)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("files landed behind the .podium link: %v", entries)
+	}
+}
+
+// cachedSeccompServer returns a bridge that materializes into root and serves
+// ops/tool, an agent with sandbox_profile: seccomp-strict, from its content
+// cache after a matching HEAD revalidation, together with the count of full
+// GETs the registry received.
+func cachedSeccompServer(t *testing.T, root string) (*mcpServer, *int32) {
+	t.Helper()
+	const fm = "---\ntype: agent\nversion: 1.0.0\ndescription: tool\nsandbox_profile: seccomp-strict\n---\n"
+	gets := new(int32)
+	dir := t.TempDir()
+	cache, _ := newContentCache(dir)
+	rec := primeCachedRecord(t, cache, "ops/tool", fm, "cached-body")
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+			w.Header().Set("X-Podium-Content-Hash", rec.ContentHash)
+			w.WriteHeader(http.StatusOK)
+		case http.MethodGet:
+			atomic.AddInt32(gets, 1)
+			w.WriteHeader(http.StatusInternalServerError) // a full GET here is a bug
+		}
+	}))
+	t.Cleanup(ts.Close)
+
+	resolutions := newResolutionCache(dir)
+	t.Cleanup(func() { _ = resolutions.Close() })
+	resolutions.PutVersion("ops/tool", "1.0.0", rec.ContentHash, time.Now())
+
+	return &mcpServer{
+		cfg: &config{
+			cacheDir: dir, cacheMode: "always-revalidate", registry: ts.URL, harness: "none",
+			verifyPolicy: sign.PolicyNever, materializeRoot: root,
+			hostSandboxes: []string{"unrestricted", "seccomp-strict"},
+		},
+		cache:       cache,
+		resolutions: resolutions,
+		adapters:    adapter.DefaultRegistry(),
+		http:        &http.Client{},
+	}, gets
 }
 
 // spec: §6.5 — when HEAD reports a different content hash, the cached

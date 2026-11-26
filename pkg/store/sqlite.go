@@ -1061,6 +1061,10 @@ func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 	if err != nil {
 		return err
 	}
+	groups, users, err := layerListColumns(cfg)
+	if err != nil {
+		return err
+	}
 	createdAt := cfg.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -1079,7 +1083,7 @@ func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 		cfg.TenantID, cfg.ID, cfg.SourceType, repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, boolToInt(cfg.UserDefined), cfg.Owner,
 		boolToInt(cfg.Public), boolToInt(cfg.Organization),
-		strings.Join(cfg.Groups, "\n"), strings.Join(cfg.Users, "\n"),
+		groups, users,
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
 		createdAt.UTC().Format(time.RFC3339Nano), nullTimeText(cfg.DeletedAt), nullTimeText(cfg.LastIngestedAt),
 		userinfo, cfg.TenantID, cfg.ID)
@@ -1267,10 +1271,10 @@ func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
 	cfg.Public = public != 0
 	cfg.Organization = org != 0
 	if groups != "" {
-		cfg.Groups = strings.Split(groups, "\n")
+		cfg.Groups = strings.Split(groups, layerListSeparator)
 	}
 	if users != "" {
-		cfg.Users = strings.Split(users, "\n")
+		cfg.Users = strings.Split(users, layerListSeparator)
 	}
 	if createdAt != "" {
 		cfg.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)

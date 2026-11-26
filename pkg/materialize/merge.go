@@ -102,7 +102,7 @@ func resolveMergeTarget(realDest, full, rel string) (string, error) {
 		return "", err
 	}
 	if err := CheckRecordedPath(r); err != nil {
-		return "", fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, r, err)
+		return "", ruleRefusal(fmt.Sprintf("%q resolves to %q", rel, r), err)
 	}
 	return filepath.Join(realDest, filepath.FromSlash(r)), nil
 }
