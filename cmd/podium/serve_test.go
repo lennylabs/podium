@@ -44,12 +44,16 @@ func freePort(t *testing.T) int {
 }
 
 // serverBootTimeout bounds how long a serve test waits for the in-process
-// server to answer /healthz. Boot finishes in well under a second on an idle
-// machine but has taken more than 4 s while the full parallel suite runs, and a
+// server to answer /healthz. Boot takes about a second on an idle machine,
+// including under -race, but has taken more than 4 s while the full parallel suite runs, and a
 // fixed 5 s wait failed a quarter of the runs under that load. A healthy boot
 // returns as soon as /healthz answers, so the generous bound costs time only
 // when the boot hangs.
 const serverBootTimeout = 60 * time.Second
+
+// healthzProbeTimeout bounds one /healthz request, so a listener that accepts
+// and never answers costs one probe rather than the whole boot wait.
+const healthzProbeTimeout = 2 * time.Second
 
 // bootServer starts serverboot.Run in a goroutine and blocks until the server
 // answers /healthz on port with 200. Run returning before that point fails the
@@ -87,7 +91,7 @@ func waitForServer(t *testing.T, port int, exited <-chan error) {
 // probeHealthz issues one bounded GET against url and returns nil when it
 // answers 200.
 func probeHealthz(url string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), healthzProbeTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
