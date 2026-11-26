@@ -48,8 +48,13 @@ type yamlConfig struct {
 	// DefaultLayerVisibility is the §4.6 fallback visibility for a layer
 	// registered or declared without an explicit visibility block. Mirrors
 	// PODIUM_DEFAULT_LAYER_VISIBILITY.
-	DefaultLayerVisibility string       `yaml:"default_layer_visibility,omitempty"`
-	ReadOnly               yamlReadOnly `yaml:"read_only,omitempty"`
+	DefaultLayerVisibility string `yaml:"default_layer_visibility,omitempty"`
+	// GitFetchTimeout is the §13.12 deadline of one Git snapshot, as a Go
+	// duration. Mirrors PODIUM_GIT_FETCH_TIMEOUT; env wins. LoadConfig
+	// resolves and validates it rather than applyYAML, because the default
+	// and the refusal apply when no file is read as well.
+	GitFetchTimeout string       `yaml:"git_fetch_timeout,omitempty"`
+	ReadOnly        yamlReadOnly `yaml:"read_only,omitempty"`
 	// Tenant is the §3.5 per-tenant config block (currently the
 	// scope-preview gate). Config-file-only with an env override.
 	Tenant yamlTenant `yaml:"tenant,omitempty"`

@@ -225,6 +225,7 @@ A value of `0` in an integer key leaves the default in force.
 | Key | Variable | Type | Default | Description |
 |:--|:--|:--|:--|:--|
 | `freeze_windows` | (none) | list | (none) | Windows during which ingest is refused with `ingest.frozen`. See the table below. |
+| `git_fetch_timeout` | `PODIUM_GIT_FETCH_TIMEOUT` | duration | `10m` | Deadline of one `git` layer snapshot: the clone and the read of the tree at the layer's ref. A snapshot that does not finish within it fails that ingest with `ingest.source_unreachable` and a message that names the variable, and the artifacts served before it stay in place. A value that is not a duration above zero, such as `0s` or `600`, refuses startup with `config.invalid`. [Keeping layers current](../deployment/content/layer-sources#keeping-layers-current) describes it. |
 | (none) | `PODIUM_INGEST_OFFLINE` | boolean | `false` | `true` skips the HEAD request that checks each URL in artifact prose at ingest. |
 | (none) | `PODIUM_ENFORCE_SANDBOX_PROFILE` | boolean | `false` | `true` rejects at ingest an artifact whose `sandbox_profile` the host cannot honor, with `ingest.sandbox_profile_unenforceable`. |
 | (none) | `PODIUM_HOST_SANDBOXES` | string | `unrestricted` | Comma-separated sandbox profiles the host can enforce. |

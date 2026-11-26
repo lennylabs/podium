@@ -584,12 +584,13 @@ A value of either variable that does not parse, or that is outside its range, re
 
 ### Layers
 
-Layer-list bootstrap and visibility default for the §13.10 standalone deployment.
+Layer-list bootstrap and visibility default for the §13.10 standalone deployment, and the deadline of a `git` source snapshot (§7.3.1).
 
 | Var                              | Description                                                                                                                                                              | Default                                                                |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
 | `PODIUM_LAYER_PATH`              | Filesystem registry root opened at startup. Maps to the `--layer-path` flag. Dispatches between single-layer and filesystem-registry modes per `.registry-config` (§13.10). | (unset disables the bootstrap and starts with an empty registry)        |
 | `PODIUM_DEFAULT_LAYER_VISIBILITY`| Fallback `visibility:` applied when a layer is registered without an explicit setting. One of `public`, `organization`, or `private`.                                    | `private` (§13.10 specifies `public` for a standalone deployment without an identity provider; an enabled identity provider leaves the unset default `private`)        |
+| `PODIUM_GIT_FETCH_TIMEOUT`       | Deadline of one `git` source snapshot (§7.3.1): the clone and the read of the tree at the layer's ref, as a Go duration above zero, such as `10m`. A snapshot that does not finish within it fails the ingest cycle with `ingest.source_unreachable` and a message that names the variable. A value that is not a duration above zero refuses startup with `config.invalid` and a message that names the variable or the key. Config-file key `git_fetch_timeout`; the variable takes precedence. | `10m` |
 
 When `PODIUM_LAYER_PATH` is set, the standalone server ingests every resolved layer at startup and persists a `local`-source `LayerConfig` per layer so the §7.3.1 layer-management endpoints (`GET /v1/layers`, `POST /v1/layers/reingest`, `DELETE /v1/layers`) see them. Without an identity provider, bootstrap layers carry `visibility: public` per the §13.10 standalone default; once an identity provider is enabled and `PODIUM_DEFAULT_LAYER_VISIBILITY` is unset, the resolved default is `private` and a bootstrap layer that carried no explicit `visibility:` is re-stamped private on the next boot. Additional `local` and `git` layers can be registered via `podium layer register` after startup.
 

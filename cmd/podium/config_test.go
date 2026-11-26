@@ -81,6 +81,36 @@ func TestConfigShow_WarnsOnUnparseableConfigFile(t *testing.T) {
 	}
 }
 
+// Spec: §13.12 — with a PODIUM_GIT_FETCH_TIMEOUT the registry refuses to
+// start with, `podium config show --server` prints the value as set, marked
+// invalid, and warns on standard error with the config.invalid refusal,
+// rather than report the default as the setting in effect.
+func TestConfigShow_WarnsOnInvalidGitFetchTimeout(t *testing.T) {
+	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Setenv("PODIUM_GIT_FETCH_TIMEOUT", "600")
+	var out string
+	stderr := captureStderr(t, func() {
+		out = captureStdout(t, func() {
+			if rc := configShow([]string{"--server"}); rc != 0 {
+				t.Errorf("rc = %d, want 0", rc)
+			}
+		})
+	})
+	want := `warning: config.invalid: PODIUM_GIT_FETCH_TIMEOUT must be a duration above zero, such as 10m, got "600"`
+	if !strings.Contains(stderr, want) {
+		t.Errorf("stderr = %q, want %q", stderr, want)
+	}
+	var line string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "git_fetch_timeout ") {
+			line = l
+		}
+	}
+	if !strings.Contains(line, "600 (invalid)") || !strings.Contains(line, "PODIUM_GIT_FETCH_TIMEOUT") || strings.Contains(line, "10m0s") {
+		t.Errorf("git_fetch_timeout row = %q, want the value 600 marked invalid from PODIUM_GIT_FETCH_TIMEOUT\n%s", line, out)
+	}
+}
+
 // Spec: §6.10 — JSON output stays stable for tooling.
 func TestConfigShow_JSONIsStructured(t *testing.T) {
 	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
