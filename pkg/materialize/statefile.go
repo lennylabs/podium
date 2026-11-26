@@ -138,10 +138,12 @@ func inspectStateLeaf(root *os.Root, rel, name string) error {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil
 	case err != nil:
-		// Reached only when the directory changes between inspectTemp and
-		// this Lstat: while it stays unchanged, an Lstat in the same
-		// directory that fails for any reason but absence fails the
-		// temporary's inspection first. The branch fails closed either way.
+		// Reached when the directory changes between inspectTemp and this
+		// Lstat, or when the filesystem fails the Lstat for this name alone
+		// (an I/O error on one entry, or a network mount refusing one name).
+		// Otherwise an Lstat in the same directory that fails for any reason
+		// but absence fails the temporary's inspection first. The branch
+		// fails closed either way.
 		return fmt.Errorf("materialize: inspect %s: %w", rel, err)
 	case info.IsDir():
 		return &refusal{
