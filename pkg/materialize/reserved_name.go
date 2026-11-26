@@ -54,20 +54,42 @@ func hfsIgnored(r rune) bool {
 // isHFSDotName reports whether seg reads as "." followed by name once the
 // code points HFS+ ignores are removed, with ASCII letters compared in either
 // case. name is lower-case ASCII. A non-ASCII code point in place of a name
-// character never matches, which is how Git clamps the comparison. HFS+
-// stores a malformed UTF-8 sequence as a percent escape, so a segment that
-// carries one names neither .git nor .podium there.
+// character never matches, which is how Git clamps the comparison. The name
+// ends at the end of seg or at the first sequence nextHFSRune reads as an end,
+// as in Git's is_hfs_dot_generic, so ".git" followed by a malformed byte
+// matches. That errs toward refusing a name HFS+ may store differently.
 func isHFSDotName(seg, name string) bool {
-	if !utf8.ValidString(seg) {
+	r, rest := nextHFSRune(seg)
+	if r != '.' {
 		return false
 	}
-	kept := make([]byte, 0, len(seg))
-	for _, r := range seg {
-		if !hfsIgnored(r) {
-			kept = utf8.AppendRune(kept, r)
+	for i := 0; i < len(name); i++ {
+		r, rest = nextHFSRune(rest)
+		if lowerASCII(r) != rune(name[i]) {
+			return false
 		}
 	}
-	return len(kept) == len(name)+1 && kept[0] == '.' && equalFoldASCII(string(kept[1:]), name)
+	r, _ = nextHFSRune(rest)
+	return r == 0 || r == '/'
+}
+
+// nextHFSRune returns the first code point of s that HFS+ does not ignore and
+// the part of s after it. It returns 0 at the end of s, at U+0000, and at a
+// sequence Git's pick_one_utf8_char refuses: a malformed, overlong, or
+// surrogate encoding, a code point above U+10FFFF, U+FFFE, or U+FFFF. Git's
+// next_hfs_char reads each of these as the end of the name.
+func nextHFSRune(s string) (rune, string) {
+	for s != "" {
+		r, n := utf8.DecodeRuneInString(s)
+		if (r == utf8.RuneError && n == 1) || r == 0xfffe || r == 0xffff {
+			return 0, ""
+		}
+		s = s[n:]
+		if !hfsIgnored(r) {
+			return r, s
+		}
+	}
+	return 0, ""
 }
 
 // isNTFSDotGit reports whether NTFS resolves seg to .git: ".git" or "git~1"

@@ -50,6 +50,13 @@ func TestAliasesDotGit(t *testing.T) {
 		`.git\config`,
 		".git/",
 		".git/x",
+		".git\xff",            // Git reads a malformed sequence after the name as its end
+		".git\xef\xbf\xbf",    // U+FFFF, which Git refuses as UTF-8, ends the name
+		".git\xef\xbf\xbe",    // U+FFFE likewise
+		zwnj + ".git\xe2\x80", // a truncated sequence ends the name
+		".git\xed\xa0\x80",    // an encoded surrogate ends the name
+		".git\xc0\xae",        // an overlong encoding ends the name
+		".git\x00",
 	}
 	for _, seg := range aliases {
 		if !AliasesDotGit(seg) {
@@ -84,7 +91,6 @@ func TestAliasesDotGit(t *testing.T) {
 		zwnj + "git",       // the ignored code point is not a period
 		".gi\xfft",         // malformed UTF-8 in place of a needle character
 		"\xff.git",         // malformed UTF-8 before the period
-		".git\xff",         // malformed UTF-8 after the name: HFS+ percent-escapes it
 		".g\u200cit\u00e9", // a kept code point after the name
 	}
 	for _, seg := range distinct {

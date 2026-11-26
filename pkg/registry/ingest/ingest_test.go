@@ -527,6 +527,38 @@ func TestIngest_ReservedNameAliasSegmentRejected(t *testing.T) {
 	}
 }
 
+// Spec: §4.4, §7.5.3 — a package that bundles a resource under .git, or under
+// a name a filesystem resolves to .git, is refused with ingest.lint_failed
+// (lint.resource_path_reserved), and the layer's other packages are stored.
+func TestIngest_ResourceUnderDotGitRefused(t *testing.T) {
+	t.Parallel()
+	for _, res := range []string{".git/config", "GIT~1/config", "\u200c.git/config", "scripts/.Git/hooks/pre-commit"} {
+		fsys := fstest.MapFS{
+			"team/hooks/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("Hooks"))},
+			"team/hooks/" + res:      &fstest.MapFile{Data: []byte("[core]\n\tfsmonitor = touch pwned\n")},
+			"team/ok/ARTIFACT.md":    &fstest.MapFile{Data: []byte(agentArtifact("Ok"))},
+		}
+		got, err := ingest.Ingest(context.Background(), newStore(t), ingest.Request{
+			TenantID: "tenant-1",
+			LayerID:  "team-shared",
+			Files:    fsys,
+		})
+		if err != nil || got.Accepted != 1 || len(got.LintFailures) != 1 ||
+			got.LintFailures[0].ArtifactID != "team/hooks" || got.LintFailures[0].Code != "lint.resource_path_reserved" {
+			t.Errorf("Ingest with resource %q = (%+v, %v), want team/ok stored and team/hooks refused", res, got, err)
+		}
+		delete(fsys, "team/ok/ARTIFACT.md")
+		_, err = ingest.Ingest(context.Background(), newStore(t), ingest.Request{
+			TenantID: "tenant-1",
+			LayerID:  "team-shared",
+			Files:    fsys,
+		})
+		if !errors.Is(err, ingest.ErrLintFailed) || !strings.Contains(err.Error(), "lint.resource_path_reserved") {
+			t.Errorf("Ingest of team/hooks alone with resource %q = %v, want ingest.lint_failed naming the code", res, err)
+		}
+	}
+}
+
 // TestIngest_NestedArtifactsIngestedSeparately covers
 // Spec: §4.2 — a nested artifact is a separate leaf package. Both the parent
 // and the nested artifact are ingested as distinct records keyed by their own
