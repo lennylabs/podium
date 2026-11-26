@@ -57,6 +57,18 @@ func TestGitFetchDeadline_ReingestFailsAsSourceUnreachable(t *testing.T) {
 		"layer list after the timed-out reingest")
 }
 
+// Spec: §13.12 — through the binary, `podium config show --server` reports a
+// PODIUM_GIT_FETCH_TIMEOUT that the registry refuses to start with as the
+// value set, marked invalid, and warns with the config.invalid refusal.
+func TestGitFetchDeadline_ConfigShowMarksInvalidValue(t *testing.T) {
+	t.Parallel()
+	out := runPodium(t, "", []string{"HOME=" + t.TempDir(), "PODIUM_GIT_FETCH_TIMEOUT=600"},
+		"config", "show", "--server")
+	cliWantExit(t, out, 0, "config show --server with an invalid PODIUM_GIT_FETCH_TIMEOUT")
+	cliContains(t, out.Stderr, "warning: config.invalid: PODIUM_GIT_FETCH_TIMEOUT must be a duration above zero", "config show warning")
+	cliContains(t, out.Stdout, "600 (invalid)", "config show settings")
+}
+
 // Spec: §13.12 — a PODIUM_GIT_FETCH_TIMEOUT that is not a duration above zero
 // refuses startup with config.invalid naming the variable.
 // Matrix: §6.10 (config.invalid)

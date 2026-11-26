@@ -19,7 +19,20 @@ type gitFetchConfig struct {
 	// source is the environment variable, "registry.yaml", or "default",
 	// for `podium config show`.
 	source string
-	err    error
+	// raw is the value as set, kept so `podium config show` reports an
+	// invalid value as written rather than as the default.
+	raw string
+	err error
+}
+
+// display is the value `podium config show` prints: the resolved duration,
+// or the value as set marked invalid when validate would refuse the start
+// with it.
+func (g gitFetchConfig) display() string {
+	if g.err != nil {
+		return g.raw + " (invalid)"
+	}
+	return g.timeout.String()
 }
 
 // resolveGitFetchTimeout resolves PODIUM_GIT_FETCH_TIMEOUT from the
@@ -47,8 +60,9 @@ func parseGitFetchTimeout(raw, name, from string) gitFetchConfig {
 		return gitFetchConfig{
 			timeout: source.DefaultFetchTimeout,
 			source:  from,
+			raw:     raw,
 			err:     fmt.Errorf("config.invalid: %s must be a duration above zero, such as 10m, got %q", name, raw),
 		}
 	}
-	return gitFetchConfig{timeout: d, source: from}
+	return gitFetchConfig{timeout: d, source: from, raw: raw}
 }

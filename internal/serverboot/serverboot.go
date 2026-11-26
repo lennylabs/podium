@@ -2474,7 +2474,7 @@ func (c *Config) Settings() []Setting {
 		{"sandbox_profile.enforced", boolStr(c.enforceSandboxProfile), envOrSrc("PODIUM_ENFORCE_SANDBOX_PROFILE", defaultSrc)},
 		{"sandbox_profile.host_sandboxes", strings.Join(c.hostSandboxes, ","), envOrSrc("PODIUM_HOST_SANDBOXES", defaultSrc)},
 		{"layers.path", c.layerPath, envOrSrc("PODIUM_LAYER_PATH", yamlSrc)},
-		{gitFetchTimeoutKey, c.gitFetch.timeout.String(), c.gitFetch.source},
+		{gitFetchTimeoutKey, c.gitFetch.display(), c.gitFetch.source},
 		{"tenant.expose_scope_preview", boolStr(c.exposeScopePreview == nil || *c.exposeScopePreview), envOrSrc("PODIUM_EXPOSE_SCOPE_PREVIEW", yamlSrc)},
 		{"read_only.probe_failures", intStr(c.readOnlyProbeFailures), envOrSrc("PODIUM_READONLY_PROBE_FAILURES", defaultSrc)},
 		{"read_only.probe_interval_seconds", intStr(c.readOnlyProbeInterval), envOrSrc("PODIUM_READONLY_PROBE_INTERVAL", defaultSrc)},
@@ -2778,6 +2778,19 @@ func LoadConfig() *Config {
 //
 // Spec: §13.12
 func (c *Config) ConfigFileError() error { return c.configFileErr }
+
+// SettingErrors reports the refusals validate returns for settings that
+// Settings shows, such as a PODIUM_GIT_FETCH_TIMEOUT that is not a duration
+// above zero. `podium config show --server` prints them, because Settings
+// marks such a value invalid and the registry refuses to start with it.
+//
+// Spec: §13.12
+func (c *Config) SettingErrors() []error {
+	if c.gitFetch.err != nil {
+		return []error{c.gitFetch.err}
+	}
+	return nil
+}
 
 func (c *Config) validate() error {
 	// §13.12: a registry.yaml that exists but cannot be read or decoded

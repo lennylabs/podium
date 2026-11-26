@@ -65,6 +65,11 @@ func configServerShow(asJSON bool) int {
 		// alone, and the registry refuses to start on this file.
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}
+	// A setting the registry would refuse to start with is shown marked
+	// invalid, and the refusal is printed as the config-file error is.
+	for _, err := range cfg.SettingErrors() {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
 	settings := cfg.Settings()
 	if asJSON {
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"settings": settings})
