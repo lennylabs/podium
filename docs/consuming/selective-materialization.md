@@ -85,6 +85,11 @@ worktrees, `podium sync` fails before it writes anything, and the error names
 `.podium`. Replace the link with a directory that holds its own `sync.yaml` and
 `sync.lock`.
 
+A `sync.lock` that is a symbolic link is read when it names another file inside
+`.podium/`. A lock that sync cannot read, such as a link to a file outside the
+target, is named on standard error, and the run proceeds as if no prior lock
+existed, so the files the earlier run wrote are not cleaned up.
+
 ---
 
 ## Sync a subset from the command line
