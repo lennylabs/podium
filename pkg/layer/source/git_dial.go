@@ -47,14 +47,23 @@ var (
 // the http transport honours the clone context on every request, and an
 // empty value leaves go-git's own proxy handling in place.
 func snapshotProxyOptions(ctx context.Context, repo string) (transport.ProxyOptions, func()) {
-	ep, err := transport.NewEndpoint(repo)
-	if err != nil || ep.Protocol != "ssh" {
+	if _, ok := sshEndpoint(repo); !ok {
 		return transport.ProxyOptions{}, func() {}
 	}
 	token := strconv.FormatUint(deadlineDialToken.Add(1), 10)
 	deadlineDials.Store(token, ctx)
 	return transport.ProxyOptions{URL: deadlineDialScheme + "://" + token},
 		func() { deadlineDials.Delete(token) }
+}
+
+// sshEndpoint parses repo as go-git does and reports whether go-git clones it
+// over its ssh transport, which covers ssh:// URLs and scp-like remotes.
+func sshEndpoint(repo string) (*transport.Endpoint, bool) {
+	ep, err := transport.NewEndpoint(repo)
+	if err != nil || ep.Protocol != "ssh" {
+		return nil, false
+	}
+	return ep, true
 }
 
 // newDeadlineDialer is the golang.org/x/net/proxy constructor for the
