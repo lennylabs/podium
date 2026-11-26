@@ -54,7 +54,7 @@ func buildReingestRunner(
 			countIngest(mreg, err)
 			return nil, err
 		}
-		prov, err := sourceProviderFor(lc.SourceType)
+		prov, err := sourceProviderFor(lc.SourceType, cfg.gitFetch.timeout)
 		if err != nil {
 			countIngest(mreg, err)
 			return nil, err
@@ -140,11 +140,12 @@ func countIngest(mreg *metrics.Registry, err error) {
 
 // sourceProviderFor returns the built-in §4.6 source provider for a layer's
 // source type. An unknown type is an invalid config (the runner maps it to
-// registry.invalid_argument).
-func sourceProviderFor(sourceType string) (source.Provider, error) {
+// registry.invalid_argument). gitFetchTimeout is the §13.12
+// PODIUM_GIT_FETCH_TIMEOUT deadline a Git snapshot runs under (§7.3.1).
+func sourceProviderFor(sourceType string, gitFetchTimeout time.Duration) (source.Provider, error) {
 	switch sourceType {
 	case "git":
-		return source.Git{}, nil
+		return source.Git{FetchTimeout: gitFetchTimeout}, nil
 	case "local":
 		return source.Local{}, nil
 	default:

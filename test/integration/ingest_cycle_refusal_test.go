@@ -44,6 +44,12 @@ func TestIngestCycles_RefusedOrFailedCycleSupersedesNothing(t *testing.T) {
 			_, err := ingest.SourceIngestWithOptions(ctx, st, failingSnapshot{}, cfg, ingest.SourceIngestOptions{CycleLocks: ingest.NewCycleLocks()})
 			return err
 		}, source.ErrSourceUnreachable},
+		// Spec: §13.12 — a Git snapshot that exceeds PODIUM_GIT_FETCH_TIMEOUT
+		// is a source-unreachable failure, so it hands the claim back too.
+		{"git fetch deadline", func(ctx context.Context, st store.Store, cfg store.LayerConfig) error {
+			_, err := ingest.SourceIngestWithOptions(ctx, st, newHangingGitSource(t), cfg, ingest.SourceIngestOptions{CycleLocks: ingest.NewCycleLocks()})
+			return err
+		}, source.ErrSourceUnreachable},
 	}
 	for _, tc := range cases {
 		for _, pair := range replicaPairs(t) {

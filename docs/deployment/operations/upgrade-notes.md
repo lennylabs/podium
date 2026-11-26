@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 refusal of a workspace .podium symbolic link, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and the refusal of a workspace .podium symbolic link, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -11,6 +11,15 @@ This page lists the upgrade steps that belong to one release, newest release fir
 ## 0.8.0 (unreleased)
 
 The current release is 0.7.0. The notes in this section describe behavior on `main` that ships in 0.8.0.
+
+### Git snapshot deadline
+
+From 0.8.0, every ingest of a `git` layer clones under the deadline that `PODIUM_GIT_FETCH_TIMEOUT` or the `registry.yaml` key `git_fetch_timeout` sets, 10 minutes by default. 0.7.0 set no deadline.
+
+- A clone that takes longer than the deadline fails that ingest with `ingest.source_unreachable`, and the message names the setting. The layer keeps serving the artifacts of its last completed ingest.
+- The longest clone of a layer is the full-history clone that each ingest makes once the layer has a recorded reference, which the force-push check needs. Before the upgrade, compare that clone time for the largest `git` layer with the default, and set `PODIUM_GIT_FETCH_TIMEOUT` above it where it is longer.
+- A value that is not a duration above zero, such as `0s` or `600`, refuses startup with `config.invalid`.
+- A rollback to 0.7.0 needs no step. 0.7.0 does not read the variable and ignores the key.
 
 ### Workspace `.podium` that is a symbolic link
 
