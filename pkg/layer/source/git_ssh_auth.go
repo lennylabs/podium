@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
-	sshagent "github.com/xanzy/ssh-agent"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -40,12 +39,13 @@ func snapshotSSHAuth(repo string) (transport.AuthMethod, func()) {
 // and the snapshot owns the agent connection.
 //
 // go-git's default (ssh.NewSSHAgentAuth) opens an agent connection for each
-// clone and never closes it, so every ssh ingest left a Unix socket and the
-// agent client's reader goroutine behind, whether the clone succeeded,
-// failed, or timed out. agentAuth opens the connection in ClientConfig, which
+// clone and never closes it, so every ssh ingest left a Unix socket, or on
+// Windows a handle to the native OpenSSH agent pipe, and the agent client's
+// reader goroutine behind, whether the clone succeeded, failed, or timed out. agentAuth opens the connection in ClientConfig, which
 // the transport calls at the point where it would have built the default
 // auth, so the clone fails at the same step and with the same message when
-// SSH_AUTH_SOCK is unset or the agent is unreachable. The rest of the client
+// SSH_AUTH_SOCK is unset or the agent is unreachable. dialAgent, in a file per
+// platform, makes the connection. The rest of the client
 // config, the login name and the known_hosts host key check included, comes
 // from go-git's own PublicKeysCallback, so it matches the default.
 type agentAuth struct {
@@ -66,9 +66,15 @@ type agentAuth struct {
 // Name implements transport.AuthMethod with the name of go-git's default.
 func (a *agentAuth) Name() string { return gitssh.PublicKeysCallbackName }
 
-// String implements transport.AuthMethod in the format of go-git's default.
+// String implements transport.AuthMethod in the format of go-git's default,
+// which names the resolved login name. A login name that cannot be resolved
+// is printed as the URL names it.
 func (a *agentAuth) String() string {
-	return fmt.Sprintf("user: %s, name: %s", a.user, a.Name())
+	login, err := sshLoginName(a.user, a.currentUser)
+	if err != nil {
+		login = a.user
+	}
+	return fmt.Sprintf("user: %s, name: %s", login, a.Name())
 }
 
 // ClientConfig implements go-git's ssh.AuthMethod. It resolves the login name
@@ -96,11 +102,12 @@ func (a *agentAuth) openAgent() (func() ([]ssh.Signer, error), error) {
 	if a.released {
 		return nil, errAgentAuthReleased
 	}
-	ag, conn, err := sshagent.New()
+	ag, conn, err := dialAgent()
 	if err != nil {
 		return nil, err
 	}
-	// The Windows Pageant agent has no connection to close.
+	// A Pageant agent on Windows holds no connection, so dialAgent returns
+	// none to close.
 	if conn != nil {
 		a.conns = append(a.conns, conn)
 	}

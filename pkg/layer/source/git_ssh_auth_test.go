@@ -36,7 +36,11 @@ func TestSnapshotSSHAuth_CoversSSHRemotes(t *testing.T) {
 		if a.Name() != gitssh.PublicKeysCallbackName {
 			t.Errorf("%s: Name = %q, want go-git's %q", repo, a.Name(), gitssh.PublicKeysCallbackName)
 		}
-		if want := "user: " + wantUser + ", name: " + gitssh.PublicKeysCallbackName; a.String() != want {
+		login, err := sshLoginName(wantUser, user.Current)
+		if err != nil {
+			login = wantUser
+		}
+		if want := "user: " + login + ", name: " + gitssh.PublicKeysCallbackName; a.String() != want {
 			t.Errorf("%s: String = %q, want %q", repo, a.String(), want)
 		}
 		release()
@@ -180,6 +184,9 @@ func TestSSHLoginName(t *testing.T) {
 	defer release()
 	a := auth.(*agentAuth)
 	a.currentUser = noAccount
+	if got, want := a.String(), "user: , name: "+gitssh.PublicKeysCallbackName; got != want {
+		t.Errorf("String with no name = %q, want %q", got, want)
+	}
 	if _, err := a.ClientConfig(); err == nil || err.Error() != "failed to get username" {
 		t.Errorf("ClientConfig with no name = %v, want go-git's failed to get username", err)
 	}
