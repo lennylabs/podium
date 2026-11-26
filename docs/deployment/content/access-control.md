@@ -27,7 +27,7 @@ A layer's `visibility:` block takes one or more of these fields.
 
 Multiple fields combine as a union. A layer with `groups: [acme-finance]` and `users: [security-lead@acme.com]` is visible to every member of `acme-finance` and to that one additional identity.
 
-Each `groups` and `users` entry is a non-empty string with no control character, such as a line feed or a tab. The registry matches an entry exactly as written, including any surrounding white space. A layer registration or update that carries another entry is refused with `registry.invalid_argument`, and a `registry.yaml` declaration or a `.layer-config` file that carries one stops the registry at startup with `config.invalid`.
+Each `groups` and `users` entry is a non-empty string with no control character, such as a line feed or a tab. The registry matches an entry exactly as written, including any surrounding white space. A layer registration or update that carries any other entry is refused with `registry.invalid_argument`, and so is a registration whose owner or implicit `users` entry, taken from the caller's identity, contains a control character. A `registry.yaml` declaration or a `.layer-config` file that carries any other entry stops the registry at startup with `config.invalid`.
 
 ### Enforcement
 

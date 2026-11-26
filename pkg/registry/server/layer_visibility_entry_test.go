@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,6 +44,27 @@ func assertEntryRefusal(t *testing.T, resp *http.Response, body []byte, name str
 	if env.Code != "registry.invalid_argument" || !strings.HasPrefix(env.Message, name+" ") {
 		t.Fatalf("envelope = %+v, want registry.invalid_argument naming %s", env, name)
 	}
+}
+
+// putRaw sends body verbatim, so a case can carry duplicate keys that a
+// marshalled map cannot.
+func putRaw(t *testing.T, base, path, body string) (*http.Response, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPut, base+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT %s: %v", path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return resp, out
 }
 
 // visibilityView renders the visibility fields of a stored layer for
@@ -208,6 +230,34 @@ func TestLayerEndpoint_UpdateRefusesVisibilityEntries(t *testing.T) {
 		}
 	})
 
+	// The JSON decode into the flat request matches keys case-insensitively
+	// and keeps the last duplicate, while the update applies the list read by
+	// exact key. The refusal reads the applied list, so a case-variant
+	// duplicate key carrying a clean list cannot carry a refused one past it.
+	caseVariants := []struct {
+		name, body, want string
+	}{
+		{"users tab behind a case-variant key", `{"users":["alice\tbob",""],"Users":["ok"]}`, "users[0]"},
+		{"users line feed behind a case-variant key", `{"users":["alice@acme.com\nbob@acme.com"],"USERS":["ok"]}`, "users[0]"},
+		{"groups carriage return behind a case-variant key", `{"groups":["acme\r",""],"Groups":["ok"]}`, "groups[0]"},
+		{"groups line feed behind a case-variant key", `{"groups":["acme\neng"],"Groups":["ok"]}`, "groups[0]"},
+	}
+	for _, tc := range caseVariants {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			base, st, before := adminLayer(t)
+			resp, out := putRaw(t, base, "/v1/layers/update?id=team", tc.body)
+			assertEntryRefusal(t, resp, out, tc.want)
+			after, err := st.GetLayerConfig(context.Background(), "t", "team")
+			if err != nil {
+				t.Fatalf("GetLayerConfig: %v", err)
+			}
+			if visibilityView(after) != visibilityView(before) {
+				t.Fatalf("a refused update changed the layer:\nafter:  %s\nbefore: %s", visibilityView(after), visibilityView(before))
+			}
+		})
+	}
+
 	t.Run("immutable visibility keeps its envelope on a user-defined layer", func(t *testing.T) {
 		t.Parallel()
 		base, st := entryLayerServer(t, nil)
@@ -217,4 +267,67 @@ func TestLayerEndpoint_UpdateRefusesVisibilityEntries(t *testing.T) {
 		})
 		assertImmutableVisibilityRefusal(t, resp, out, "users")
 	})
+}
+
+// Spec: §7.3.1 (Visibility entries) — an owner or users entry the registry
+// resolves from the caller's identity is checked on the same terms as the
+// request's own: a user-defined registration stores the caller's subject as
+// owner and as its users entry, and an admin-defined one under
+// PODIUM_DEFAULT_LAYER_VISIBILITY=users stores it as its users entry. A
+// trusted-headers subject can carry a tab or a byte at or above 0x80 and an
+// OIDC sub is any JSON string, so each such subject is refused with 400
+// registry.invalid_argument and nothing is stored; a line feed is refused
+// with 400 rather than reaching the store's backstop as a 500.
+// Matrix: §6.10 (registry.invalid_argument)
+func TestLayerEndpoint_RegisterRefusesIdentityDerivedEntries(t *testing.T) {
+	t.Parallel()
+	subjects := []struct{ name, sub string }{
+		{"tab", "alice\tbob"},
+		{"C1 next line", "alice\u0085bob"},
+		{"line feed", "alice\nbob"},
+	}
+	asCaller := func(sub string) func(*http.Request) (layer.Identity, error) {
+		return func(*http.Request) (layer.Identity, error) {
+			return layer.Identity{Sub: sub, IsAuthenticated: true}, nil
+		}
+	}
+	arms := []struct {
+		name      string
+		customize func(sub string) func(*server.LayerEndpoint) *server.LayerEndpoint
+		want      string
+	}{
+		{"user-defined layer", func(sub string) func(*server.LayerEndpoint) *server.LayerEndpoint {
+			return func(e *server.LayerEndpoint) *server.LayerEndpoint {
+				return e.WithAdminAuth(func(*http.Request) error { return errors.New("not an admin") }).
+					WithIdentityResolver(asCaller(sub))
+			}
+		}, "owner "},
+		{"default visibility users", func(sub string) func(*server.LayerEndpoint) *server.LayerEndpoint {
+			return func(e *server.LayerEndpoint) *server.LayerEndpoint {
+				return e.WithDefaultVisibility("users").WithIdentityResolver(asCaller(sub))
+			}
+		}, "users[0] "},
+	}
+	for _, arm := range arms {
+		for _, s := range subjects {
+			t.Run(arm.name+"/"+s.name, func(t *testing.T) {
+				t.Parallel()
+				base, st := entryLayerServer(t, arm.customize(s.sub))
+				resp, out := mustPost(t, base, "/v1/layers", map[string]any{
+					"id": "team", "source_type": "git", "repo": "git@github.com:acme/team.git",
+				})
+				if resp.StatusCode != http.StatusBadRequest {
+					t.Fatalf("status = %d, want 400: %s", resp.StatusCode, out)
+				}
+				env := refusalEnvelope(t, out)
+				wantMsg := "the registrant's identity cannot be stored as a visibility entry: " + arm.want
+				if env.Code != "registry.invalid_argument" || !strings.HasPrefix(env.Message, wantMsg) {
+					t.Fatalf("envelope = %+v, want registry.invalid_argument starting %q", env, wantMsg)
+				}
+				if _, err := st.GetLayerConfig(context.Background(), "t", "team"); !errors.Is(err, store.ErrNotFound) {
+					t.Fatalf("GetLayerConfig after the refusal: err = %v, want ErrNotFound", err)
+				}
+			})
+		}
+	}
 }

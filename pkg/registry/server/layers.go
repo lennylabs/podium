@@ -1244,27 +1244,43 @@ func gitProviderError(p, sourceType string) string {
 	return ""
 }
 
-// visibilityEntryError reports why the owner, groups, or users member of req
-// is refused under the §4.6 entry rule, or the empty string when none is. An
-// empty owner is the absent value on both operations, so only a non-empty one
-// is checked; it is checked at all because a user-defined layer stores its
-// owner as its one users entry. A groups or users member carrying JSON null
-// decodes to no list and passes.
+// visibilityEntryError reports why owner, groups, or users is refused under
+// the §4.6 entry rule, or the empty string when none is. Callers pass the
+// values the operation stores, not a second decode of the body: the update
+// applies the lists decodeVisibilityPatch read by exact key, while the flat
+// LayerRegisterRequest decode matches keys case-insensitively, so checking
+// the flat lists would let {"users":["a\tb"],"Users":["ok"]} store "a\tb".
+//
+// An empty owner is the absent value on both operations, so only a non-empty
+// one is checked; it is checked at all because a user-defined layer stores
+// its owner as its one users entry. A nil list carries no entry and passes.
 //
 // Spec: §4.6, §7.3.1 (Visibility entries)
-func visibilityEntryError(req LayerRegisterRequest) string {
-	if req.Owner != "" {
-		if err := layer.CheckEntry("owner", req.Owner); err != nil {
+func visibilityEntryError(owner string, groups, users []string) string {
+	if owner != "" {
+		if err := layer.CheckEntry("owner", owner); err != nil {
 			return err.Error()
 		}
 	}
-	if err := layer.CheckEntries("groups", req.Groups); err != nil {
+	if err := layer.CheckEntries("groups", groups); err != nil {
 		return err.Error()
 	}
-	if err := layer.CheckEntries("users", req.Users); err != nil {
+	if err := layer.CheckEntries("users", users); err != nil {
 		return err.Error()
 	}
 	return ""
+}
+
+// patchedLists returns the groups and users lists an update applies, nil for
+// a member the body omitted.
+func (p visibilityPatch) patchedLists() (groups, users []string) {
+	if p.groups != nil {
+		groups = *p.groups
+	}
+	if p.users != nil {
+		users = *p.users
+	}
+	return groups, users
 }
 
 // LayerRegisterResponse is the POST /v1/layers JSON response.
@@ -1592,7 +1608,10 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// spec: §7.3.1 (Visibility entries) — evaluated after the immutable
 	// visibility rule, so an entry asserted against a user-defined layer keeps
 	// that envelope, and above every field assignment and the rotation below.
-	if msg := visibilityEntryError(patch); msg != "" {
+	// It reads the lists vis.applyTo stores and the owner the block below
+	// stores.
+	groups, users := vis.patchedLists()
+	if msg := visibilityEntryError(patch.Owner, groups, users); msg != "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
 		return
 	}
@@ -1737,7 +1756,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// spec: §7.3.1 (Visibility entries) — refused with the checks on the
 	// request's own fields, so a registration this refuses reads no stored
 	// layer.
-	if msg := visibilityEntryError(req); msg != "" {
+	if msg := visibilityEntryError(req.Owner, req.Groups, req.Users); msg != "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
 		return
 	}
@@ -1947,6 +1966,19 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		}
 		// "private" / unset / unknown: leave the layer with no
 		// visibility filters — only explicit grants will see it.
+	}
+
+	// spec: §7.3.1 (Visibility entries) — the owner and the users entry the
+	// registry resolved from the caller's identity are checked on the same
+	// terms as the request's own. The request-side check above cannot see
+	// them: a trusted-headers subject can carry a tab or a byte at or above
+	// 0x80, and an OIDC sub is any JSON string, so without this check such a
+	// subject is stored as an entry or, holding a line feed, reaches the
+	// store's backstop as a 500.
+	if msg := visibilityEntryError(cfg.Owner, cfg.Groups, cfg.Users); msg != "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument",
+			"the registrant's identity cannot be stored as a visibility entry: "+msg)
+		return
 	}
 
 	// Pick a default order: the highest existing ord + 10.

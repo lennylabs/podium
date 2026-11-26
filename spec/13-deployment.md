@@ -319,7 +319,7 @@ visibility:
   groups: [acme-finance]   # one or more of public, organization, groups, or users (§4.6)
 ```
 
-In single-layer mode the file sits at `<registry-path>/.layer-config`. `podium sync` (filesystem source) does not read it, because the filesystem-registry bypass (§4.6) short-circuits visibility to `true` for every layer. A server pointed at the same directory through `--layer-path` (§13.10) reads it and applies the declared visibility to the bootstrap layer when the `visibility:` block is non-empty. A layer with no `.layer-config`, or one whose `visibility:` block is empty, takes the deployment default (`PODIUM_DEFAULT_LAYER_VISIBILITY`, §13.12), which resolves to `public` for a no-identity standalone and to `private` once an identity provider gates access (§13.10).
+In single-layer mode the file sits at `<registry-path>/.layer-config`. `podium sync` (filesystem source) does not read it, because the filesystem-registry bypass (§4.6) short-circuits visibility to `true` for every layer. A server pointed at the same directory through `--layer-path` (§13.10) reads it and applies the declared visibility to the bootstrap layer when the `visibility:` block is non-empty. A `groups` or `users` entry that §4.6 does not admit refuses that server's startup with `config.invalid`. A layer with no `.layer-config`, or one whose `visibility:` block is empty, takes the deployment default (`PODIUM_DEFAULT_LAYER_VISIBILITY`, §13.12), which resolves to `public` for a no-identity standalone and to `private` once an identity provider gates access (§13.10).
 
 The workspace local overlay (`<workspace>/.podium/overlay/`, §6.4) sits on top of the filesystem-registry layers, exactly as in server source.
 
