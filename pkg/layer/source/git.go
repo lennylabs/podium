@@ -107,16 +107,25 @@ func fetchDeadlinePassed(ctx, fetchCtx context.Context, deadline time.Time) bool
 
 // boundedSnapshot runs snapshotGit and returns no later than ctx's end.
 //
-// The http transport honours ctx on every request, and the ssh transport
-// dials through deadlineDialer, which ends the connection with ctx. go-git's
-// git:// transport dials with net.Dial, with no deadline and no hook, before
-// it reads ctx, so a git:// remote whose address drops the connection attempt
-// keeps the clone in that dial until the operating system abandons it, which
-// takes a minute or two. The clone therefore runs in its own goroutine, and
-// this function returns at ctx's end without waiting for it. That goroutine
-// outlives the snapshot only in that git:// dial: it holds one connection
-// attempt and an empty in-memory storer, and once the dial ends it reads an
-// expired ctx, fails, and closes the connection.
+// The clone runs in its own goroutine, and this function returns at ctx's end
+// without waiting for it, because not every step of a clone can be
+// interrupted:
+//
+//   - go-git's git:// transport dials with net.Dial, with no deadline and no
+//     hook, before it reads ctx, so a git:// remote whose address drops the
+//     connection attempt keeps the goroutine in that dial until the operating
+//     system abandons it, which takes a minute or two. It holds one connection
+//     attempt and an empty in-memory storer, and once the dial ends it reads
+//     the expired ctx, fails, and closes the connection.
+//   - go-git resolves the deltas of a received pack, which it has already read
+//     in full, without reading ctx, so a deadline that passes then leaves the
+//     goroutine resolving them, for a time and with memory that grow with the
+//     pack.
+//
+// Every other step ends at ctx's end: the http transport honours ctx on every
+// request, the ssh transport dials through deadlineDialer, which closes the
+// connection when ctx ends, and readSnapshot checks ctx between its steps and
+// during the history walk.
 func boundedSnapshot(ctx context.Context, cfg LayerConfig, proxyOpts transport.ProxyOptions) (*Snapshot, error) {
 	type result struct {
 		snap *Snapshot
@@ -141,8 +150,7 @@ func boundedSnapshot(ctx context.Context, cfg LayerConfig, proxyOpts transport.P
 	}
 }
 
-// snapshotGit clones cfg.Repo under ctx and reads the tree at cfg.Ref. The
-// reads after the clone use the in-memory storer and make no network request.
+// snapshotGit clones cfg.Repo under ctx and reads the tree at cfg.Ref.
 func snapshotGit(ctx context.Context, cfg LayerConfig, proxyOpts transport.ProxyOptions) (*Snapshot, error) {
 	storer := memory.NewStorage()
 	cloneOpts := &git.CloneOptions{
@@ -160,7 +168,18 @@ func snapshotGit(ctx context.Context, cfg LayerConfig, proxyOpts transport.Proxy
 		// request URL, userinfo included, in a failed clone's error.
 		return nil, fmt.Errorf("%w: %s", ErrSourceUnreachable, RedactCloneError(cfg.Repo, err))
 	}
+	return readSnapshot(ctx, repo, cfg)
+}
 
+// readSnapshot resolves cfg.Ref in a cloned repo, reads its tree, and runs the
+// §7.3.1 force-push check. It reads the in-memory clone and makes no network
+// request. It checks ctx before each step and during the history walk, so a
+// snapshot whose deadline passed stops working rather than finish a result no
+// caller reads.
+func readSnapshot(ctx context.Context, repo *git.Repository, cfg LayerConfig) (*Snapshot, error) {
+	if err := snapshotCtxErr(ctx); err != nil {
+		return nil, err
+	}
 	hash, err := repo.ResolveRevision(plumbing.Revision(cfg.Ref))
 	if err != nil {
 		return nil, fmt.Errorf("%w: resolve %q: %v", ErrSourceUnreachable, cfg.Ref, err)
@@ -179,6 +198,9 @@ func snapshotGit(ctx context.Context, cfg LayerConfig, proxyOpts transport.Proxy
 			return nil, fmt.Errorf("%w: subtree %q: %v", ErrSourceUnreachable, cfg.Root, err)
 		}
 	}
+	if err := snapshotCtxErr(ctx); err != nil {
+		return nil, err
+	}
 
 	rewritten := false
 	if cfg.PriorRef != "" {
@@ -187,7 +209,11 @@ func snapshotGit(ctx context.Context, cfg LayerConfig, proxyOpts transport.Proxy
 		// rewrite. Otherwise, walk the new ref's ancestry; if we hit
 		// the prior commit, it's still reachable (no rewrite).
 		if priorHash != plumbing.ZeroHash {
-			rewritten = !isAncestor(repo, priorHash, *hash)
+			reachable, err := isAncestor(ctx, repo, priorHash, *hash)
+			if err != nil {
+				return nil, err
+			}
+			rewritten = !reachable
 		}
 	}
 
@@ -199,22 +225,44 @@ func snapshotGit(ctx context.Context, cfg LayerConfig, proxyOpts transport.Proxy
 	}, nil
 }
 
+// snapshotCtxErr returns the source-unreachable failure of a snapshot whose
+// context ended, or nil.
+func snapshotCtxErr(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", ErrSourceUnreachable, err)
+	}
+	return nil
+}
+
+// ancestorWalkCheckEvery is how many commits isAncestor visits between two
+// reads of its context. Visiting a commit decodes it from the in-memory
+// clone, which takes microseconds, so the walk stops within about a
+// millisecond of its context's end and the check costs nothing measurable.
+const ancestorWalkCheckEvery = 256
+
 // isAncestor reports whether ancestor is reachable from descendant
 // via parent edges. Used by Git.Snapshot for §7.3.1 force-push
 // detection. Walks BFS over the local clone; a missing object yields
-// false (treated as "not reachable, therefore rewrite").
-func isAncestor(repo *git.Repository, ancestor, descendant plumbing.Hash) bool {
+// false (treated as "not reachable, therefore rewrite"). An unreachable
+// ancestor makes the walk cover the whole history, so it stops with the
+// snapshot's source-unreachable failure when ctx ends.
+func isAncestor(ctx context.Context, repo *git.Repository, ancestor, descendant plumbing.Hash) (bool, error) {
 	descCommit, err := repo.CommitObject(descendant)
 	if err != nil {
-		return false
+		return false, nil
 	}
 	seen := map[plumbing.Hash]bool{}
 	queue := []*object.Commit{descCommit}
-	for len(queue) > 0 {
+	for visited := 0; len(queue) > 0; visited++ {
+		if visited%ancestorWalkCheckEvery == 0 {
+			if err := snapshotCtxErr(ctx); err != nil {
+				return false, err
+			}
+		}
 		c := queue[0]
 		queue = queue[1:]
 		if c.Hash == ancestor {
-			return true
+			return true, nil
 		}
 		if seen[c.Hash] {
 			continue
@@ -231,7 +279,7 @@ func isAncestor(repo *git.Repository, ancestor, descendant plumbing.Hash) bool {
 			queue = append(queue, pc)
 		}
 	}
-	return false
+	return false, nil
 }
 
 // refNameFor maps a user-supplied ref into the qualified ref name
