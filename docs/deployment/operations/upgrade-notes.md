@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and the refusal of a workspace .podium symbolic link, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, and the file hashes in the sync lock, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -28,6 +28,15 @@ From 0.8.0, `podium sync` reads and writes its lock and `sync.yaml` only when th
 - Before the upgrade, find each target whose `.podium` is a symbolic link, replace the link with a directory, and copy `sync.yaml`, `sync.local.yaml`, and `sync.lock` into it.
 - A `kind: marketplace` target whose repository commits `.podium` as a symbolic link fails its render the same way. Remove the link from the repository.
 - A rollback to 0.7.0 needs no step. 0.7.0 reads the files from the directory.
+
+### File hashes in the sync lock
+
+From 0.8.0, `podium sync` records a `file_hash` for each file it writes whole in `<target>/.podium/sync.lock`, and the stale-file cleanup deletes an out-of-scope file only when its current bytes match that hash. A lock written by 0.7.0 records no `file_hash`, so the first sync after the upgrade deletes none of the out-of-scope files that lock records. The sync leaves each one in place, names it on standard error in a line that starts with `sync: stale-file cleanup: skipping` and states that the lock entry records no `file_hash`, and writes a lock without it. Later syncs do not name it again.
+
+- Before the upgrade, run `podium sync` with 0.7.0 after each scope change you have not synced yet, so the 0.7.0 cleanup removes those files.
+- After the first sync with 0.8.0, delete by hand each file that the standard error output names and that you no longer need. A `kind: marketplace` render reports the files of its committed lock the same way on its first render after the upgrade; delete them from the repository.
+- A shared config file that sync merges entries into, such as `.mcp.json` or `AGENTS.md`, records no `file_hash`. The cleanup strips Podium's entries from it as before and never deletes it.
+- A rollback to 0.7.0 needs no step. 0.7.0 ignores the `file_hash` key and removes out-of-scope files without checking them.
 
 ## 0.7.0
 

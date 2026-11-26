@@ -67,6 +67,8 @@ Config validation rejects a marketplace target whose harness set names OpenCode 
 
 Re-rendering a marketplace target is idempotent. The materialization writer and the sync lock file remove the files of artifacts that left the view. The JSON manifests merge with the Podium-owned merge tag, so stale entries drop out.
 
+The lock committed with the rendered tree records a `file_hash` for each file the render writes whole, and the render removes a stale file only when its bytes in the checkout still match that hash. A stale file that changed after the render wrote it, including through a line-ending conversion that Git applies on checkout, stays in the checkout and is named on standard error. Delete such a file from the repository by hand. [Removal of out-of-scope files](../../consuming/selective-materialization#removal-of-out-of-scope-files) states the full rule.
+
 The git diff after a render is the catalog delta. When the delta is empty, `skip_if_no_changes` suppresses an empty commit. A second `podium sync --config` against an unchanged catalog therefore produces no second commit.
 
 ---

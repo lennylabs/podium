@@ -2,8 +2,6 @@ package sync
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -306,7 +304,7 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 	if errors.Is(err, ErrStateDirUnusable) {
 		return nil, fmt.Errorf("publish %q: %w", outputID, err)
 	}
-	priorMerge := PriorMergeKinds(dropUnsafeLockPaths(prior))
+	priorPaths := PriorPaths(dropUnsafeLockPaths(prior))
 
 	files := make([]adapter.File, 0, len(rendered))
 	currentPaths := map[string]bool{}
@@ -334,7 +332,7 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 	// failing the render: a rendered path unreadable before the write has no
 	// starting digest, so the comparison reports it under its owner, and an
 	// unreadable prior-only path is reported under removedOwner below.
-	priorOnly := priorOnlyPaths(currentPaths, priorMerge)
+	priorOnly := priorOnlyPaths(currentPaths, priorPaths)
 	beforeDigests, _ := tolerantDigests(currentPaths, readRecorded(workdir))
 	beforePrior, unobservedBefore := tolerantDigests(priorOnly, readRecorded(workdir))
 
@@ -342,20 +340,22 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 		return nil, fmt.Errorf("publish %q: write render: %w", outputID, err)
 	}
 
-	Reconcile(workdir, priorMerge, currentPaths)
-
-	if err := writeLock(workdir, currentPaths, merge); err != nil {
-		return nil, err
-	}
+	Reconcile(workdir, priorPaths, currentPaths)
 
 	// materialize.Write left every rendered path a readable regular file, so
 	// this read fails only on a concurrent filesystem mutation; the guard
 	// surfaces that rather than reporting a change set against unobservable
-	// state.
+	// state. The digests are the §7.5.3 file hashes the lock records, so they
+	// are read before the lock is written.
 	afterDigests, err := onDiskDigests(workdir, currentPaths)
 	if err != nil {
 		return nil, fmt.Errorf("publish %q: read checkout after render: %w", outputID, err)
 	}
+
+	if err := writeLock(workdir, currentPaths, merge, afterDigests); err != nil {
+		return nil, err
+	}
+
 	afterPrior, unobservedAfter := tolerantDigests(priorOnly, readRecorded(workdir))
 
 	res := &RenderResult{OutputID: outputID, Files: sortedKeys(currentPaths)}
@@ -403,29 +403,35 @@ func onDiskDigests(workdir string, paths map[string]bool) (map[string]string, er
 	return out, nil
 }
 
-// digest returns the hex SHA-256 of content, the per-path content fingerprint the
-// change set compares. It is computed over the bytes on disk in the checkout,
-// including the merged result for a config-merge path, so a config-merge write
-// that leaves the file byte-identical reports no change.
+// digest returns the per-path content fingerprint the change set compares, the
+// §7.5.3 file hash of content (materialize.FileHash). It is computed over the
+// bytes on disk in the checkout, including the merged result for a
+// config-merge path, so a config-merge write that leaves the file
+// byte-identical reports no change. Because the value is the file hash, the
+// digest of a standalone path read after the write is what the lock records
+// as its file_hash.
 func digest(content []byte) string {
-	sum := sha256.Sum256(content)
-	return hex.EncodeToString(sum[:])
+	return materialize.FileHash(content)
 }
 
 // writeLock persists the render's lock for the next run's reconciliation: one
-// LockArtifact per written path recording its config-merge kind in Merge. The
-// next render reads it back through PriorMergeKinds so the cleanup treats a
-// config-merge path (reconcile Podium's entries) differently from a standalone
-// path (remove). Change detection reads the checkout content directly rather than
-// the lock, so the lock carries no per-file content fingerprint and leaves the
-// ContentHash field, which holds the sha256:<hex> artifact content hash
-// everywhere else in pkg/sync, unset.
-func writeLock(workdir string, paths map[string]bool, merge map[string]string) error {
+// LockArtifact per written path recording its config-merge kind in Merge and,
+// for a standalone path, the file hash of the bytes the render left on disk in
+// FileHash, taken from hashes. The next render reads it back through
+// PriorPaths, so the cleanup treats a config-merge path (reconcile Podium's
+// entries) differently from a standalone path (remove when the bytes still
+// match). Change detection reads the checkout content directly rather than the
+// lock, and the ContentHash field, which holds the sha256:<hex> artifact
+// content hash everywhere else in pkg/sync, stays unset.
+//
+// Spec: §7.5.3, §7.8
+func writeLock(workdir string, paths map[string]bool, merge, hashes map[string]string) error {
 	lock := &LockFile{Target: workdir}
 	for _, p := range sortedKeys(paths) {
 		lock.Artifacts = append(lock.Artifacts, LockArtifact{
 			MaterializedPath: p,
 			Merge:            merge[p],
+			FileHash:         wholeFileHash(merge[p], hashes[p]),
 		})
 	}
 	if err := WriteLock(workdir, lock); err != nil {

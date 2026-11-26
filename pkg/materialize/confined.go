@@ -1,8 +1,11 @@
 package materialize
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -24,10 +27,41 @@ var ErrUnconfinedPath = errors.New("materialize: path is not a regular file conf
 // fail with an error that names the remedy.
 var ErrPodiumNotDirectory = errors.New("materialize: .podium is a symbolic link or not a directory")
 
-// RemoveStale deletes the regular file at rel below destination and then
-// prunes the directories that held it while they are empty. rel is the
-// slash-separated path a sync lock recorded, and the lock can come from a
-// repository another party pushes to.
+// ErrStaleHashMissing signals a stale file the cleanup leaves in place because
+// its lock entry records no file hash, so the cleanup cannot tell the file
+// sync wrote from a file another party put at the path.
+var ErrStaleHashMissing = errors.New("materialize: the lock entry records no file_hash")
+
+// ErrStaleHashMismatch signals a stale file the cleanup leaves in place
+// because its bytes do not hash to the file hash its lock entry records: the
+// file changed after sync wrote it, or sync did not write the entry for it.
+var ErrStaleHashMismatch = errors.New("materialize: the file does not match the file_hash its lock entry records")
+
+// FileHash returns the hash the sync lock records for a file that sync writes
+// whole: "sha256:" followed by the lowercase hexadecimal SHA-256 digest of
+// data, the form the other content digests take (§4.7.10). RemoveStale
+// deletes a stale file only when its current bytes produce the same value.
+//
+// Spec: §7.5.3
+func FileHash(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// RemoveStale deletes the regular file at rel below destination when its
+// bytes hash to fileHash, and then prunes the directories that held it while
+// they are empty. rel and fileHash come from a sync lock entry, and the lock
+// can come from a repository another party pushes to.
+//
+// The hash check limits the cleanup to files that still hold the bytes sync
+// wrote. A forged lock entry that names a file the operator wrote, such as
+// src/main.go, has to carry the hash of that file's current bytes, so it
+// cannot remove a file whose content its author does not know, and a
+// materialized file the operator edited no longer matches. An empty fileHash,
+// a mismatch, and a file that cannot be read leave the file in place and
+// return an error; the first two wrap ErrStaleHashMissing and
+// ErrStaleHashMismatch. The bytes are hashed through the open root the removal
+// uses, after the path checks.
 //
 // The removal accepts the links the writer accepts (§6.7): a directory
 // component may be a symbolic link that resolves inside the root, so the
@@ -40,11 +74,11 @@ var ErrPodiumNotDirectory = errors.New("materialize: .podium is a symbolic link 
 // The pruning removes only the empty directories the path reaches below its
 // last link, deepest first, so it stops at the first directory that is not
 // empty, at the directory a link names, or at the root. A path that is already
-// absent prunes the same way and returns nil, so a file the operator deleted
-// by hand still lets its empty parents go.
+// absent prunes the same way and returns nil whatever fileHash holds, so a
+// file the operator deleted by hand still lets its empty parents go.
 //
 // Spec: §6.7, §7.5.3
-func RemoveStale(destination, rel string) error {
+func RemoveStale(destination, rel, fileHash string) error {
 	sp, err := openResolved(destination, rel, resolveOpts{recorded: true})
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -56,6 +90,9 @@ func RemoveStale(destination, rel string) error {
 	err = checkConfinedFile(sp.root, rel, sp.segs)
 	switch {
 	case err == nil:
+		if herr := sp.matchHash(rel, fileHash); herr != nil {
+			return herr
+		}
 		if rerr := sp.root.Remove(filepath.Join(sp.segs...)); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
 			return fmt.Errorf("materialize: remove %s: %w", rel, rerr)
 		}
@@ -63,6 +100,30 @@ func RemoveStale(destination, rel string) error {
 		return err
 	}
 	pruneEmptyDirs(sp.root, sp.segs[:len(sp.segs)-1], sp.keep)
+	return nil
+}
+
+// matchHash confirms that the regular file at the resolved path hashes to
+// want. It streams the file rather than reading it whole, because a bundled
+// resource can be large.
+//
+// Spec: §7.5.3
+func (rp *resolvedPath) matchHash(rel, want string) error {
+	if want == "" {
+		return fmt.Errorf("%w: %q", ErrStaleHashMissing, rel)
+	}
+	f, err := rp.root.Open(filepath.Join(rp.segs...))
+	if err != nil {
+		return fmt.Errorf("materialize: open %s: %w", rel, err)
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("materialize: read %s: %w", rel, err)
+	}
+	if got := "sha256:" + hex.EncodeToString(h.Sum(nil)); got != want {
+		return fmt.Errorf("%w: %q", ErrStaleHashMismatch, rel)
+	}
 	return nil
 }
 

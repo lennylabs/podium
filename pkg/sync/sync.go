@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -413,9 +414,11 @@ func Run(opts Options) (*Result, error) {
 	// §7.5 stale-file cleanup: compute the paths this run wrote and delete
 	// anything the prior run wrote that this run didn't. Without this,
 	// syncing a registry that drops an artifact leaves the artifact's files
-	// behind in the target. The prior merge kinds (§6.7 config-merge) are
-	// carried so a shared config file is reconciled rather than deleted.
-	priorMerge := lockMergeKinds(priorLock)
+	// behind in the target. The prior entries carry the merge kinds (§6.7
+	// config-merge), so a shared config file is reconciled rather than
+	// deleted, and the file hashes, so a standalone file is deleted only while
+	// it holds the bytes sync wrote (§7.5.3).
+	priorPaths := lockPriorPaths(priorLock)
 
 	// fileMerge records the §6.7 config-merge kind per path written this run:
 	// "json" for OpMergeJSON, "inject" for OpInject, empty for a standalone
@@ -428,7 +431,7 @@ func Run(opts Options) (*Result, error) {
 		currentPaths[f.Path] = true
 		fileMerge[f.Path] = mergeKind(f.Op)
 	}
-	changed, err := writeTarget(opts.Target, allFiles, currentPaths, priorMerge, kept)
+	changed, fileHashes, err := writeTarget(opts.Target, allFiles, currentPaths, priorPaths, kept)
 	if err != nil {
 		return nil, err
 	}
@@ -466,6 +469,7 @@ func Run(opts Options) (*Result, error) {
 				ContentHash:      art.ContentHash,
 				Layer:            art.Layer,
 				MaterializedPath: p,
+				FileHash:         wholeFileHash(fileMerge[p], fileHashes[p]),
 				Merge:            fileMerge[p],
 			})
 		}
@@ -689,20 +693,36 @@ func filesystemRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
 	return out, dropped, nil
 }
 
-// lockMergeKinds returns the materialized paths recorded in a lock, each
-// mapped to its §6.7 config-merge kind ("json", "inject", or "" for a
-// standalone file). A nil lock returns an empty map.
-func lockMergeKinds(lock *LockFile) map[string]string {
-	out := map[string]string{}
+// lockPriorPaths returns the materialized paths recorded in a lock, each
+// mapped to the entry that records it. The stale-file cleanup reads the
+// entry's §6.7 config-merge kind ("json", "inject", or "" for a standalone
+// file) and its §7.5.3 file_hash. A path several entries record, such as a
+// config-merge file several artifacts contribute to, maps to the last of them.
+// A nil lock returns an empty map.
+func lockPriorPaths(lock *LockFile) map[string]LockArtifact {
+	out := map[string]LockArtifact{}
 	if lock == nil {
 		return out
 	}
 	for _, a := range lock.Artifacts {
 		if a.MaterializedPath != "" {
-			out[a.MaterializedPath] = a.Merge
+			out[a.MaterializedPath] = a
 		}
 	}
 	return out
+}
+
+// wholeFileHash returns the file_hash a lock entry records for a path written
+// with the config-merge kind merge, whose bytes on disk after the write hash
+// to hash. Only a standalone path, which sync writes whole, records one: the
+// cleanup never deletes a config-merge path, so it needs none.
+//
+// Spec: §7.5.3
+func wholeFileHash(merge, hash string) string {
+	if merge != "" {
+		return ""
+	}
+	return hash
 }
 
 // mergeKind maps an adapter.FileOp to the lock's config-merge kind string.
@@ -797,33 +817,37 @@ func selectRecords(scope ScopeFilter, all []materialRecord, toggles LockToggles)
 // path the cleanup refuses cannot be read and counts as altered. A current
 // path is read under the same rule, so a link at a materialized path is
 // followed only to a file inside the target.
-func writeTarget(target string, files []adapter.File, current map[string]bool, priorMerge map[string]string, kept keptOutput) (bool, error) {
-	priorOnly := priorOnlyPaths(current, priorMerge)
+//
+// The second result maps each current path to the digest of its bytes on disk
+// after the write, which is the §7.5.3 file hash (materialize.FileHash) the
+// lock records for a standalone path.
+func writeTarget(target string, files []adapter.File, current map[string]bool, prior map[string]LockArtifact, kept keptOutput) (bool, map[string]string, error) {
+	priorOnly := priorOnlyPaths(current, prior)
 	beforeCurrent, unobservedCurrent := tolerantDigests(current, readRecorded(target))
 	beforePrior, unobservedPrior := tolerantDigests(priorOnly, readRecorded(target))
 
 	if err := materialize.WriteKeeping(target, files, kept.keepFunc()); err != nil {
-		return false, err
+		return false, nil, err
 	}
-	removeStalePaths(target, priorMerge, current, kept)
+	removeStalePaths(target, prior, current, kept)
 
 	afterCurrent, err := onDiskDigests(target, current)
 	if err != nil {
-		return false, fmt.Errorf("sync: read target after materialize: %w", err)
+		return false, nil, fmt.Errorf("sync: read target after materialize: %w", err)
 	}
 	afterPrior, unobservedAfter := tolerantDigests(priorOnly, readRecorded(target))
 	if unobservedCurrent || unobservedPrior || unobservedAfter {
-		return true, nil
+		return true, afterCurrent, nil
 	}
 	changed, _ := changeSet(mergeDigests(beforeCurrent, beforePrior), mergeDigests(afterCurrent, afterPrior), nil)
-	return changed, nil
+	return changed, afterCurrent, nil
 }
 
 // priorOnlyPaths returns the prior-lock paths the current run does not
 // materialize: the paths the stale-file cleanup reconciles.
-func priorOnlyPaths(current map[string]bool, priorMerge map[string]string) map[string]bool {
+func priorOnlyPaths(current map[string]bool, prior map[string]LockArtifact) map[string]bool {
 	out := map[string]bool{}
-	for p := range priorMerge {
+	for p := range prior {
 		if !current[p] {
 			out[p] = true
 		}
@@ -875,7 +899,15 @@ func mergeDigests(a, b map[string]string) map[string]string {
 }
 
 // removeStalePaths reconciles every prior path that this run did not write.
-// A standalone path is deleted. A §6.7 config-merge path is shared with the
+// A standalone path is deleted only while its bytes hash to the file_hash its
+// entry records: the lock can come from another party, and a forged entry
+// could otherwise name any file the operator wrote inside the target, while a
+// materialized file the operator edited would lose the edits. An entry with no
+// file_hash, a file whose bytes differ, and a file that cannot be read are
+// left in place and named on standard error, and since the lock this run
+// writes records only what it wrote or keeps, the entry leaves the lock. The
+// paths are visited in sorted order so that list reads the same on every run.
+// A §6.7 config-merge path is shared with the
 // operator, so it is reconciled in place (Podium's tagged entries or inject
 // blocks are stripped) rather than deleted, which preserves the operator's
 // other entries when the last contributing artifact is removed. Best-effort:
@@ -898,9 +930,10 @@ func mergeDigests(a, b map[string]string) map[string]string {
 // its only file is removed.
 //
 // Spec: §7.5.3
-func removeStalePaths(target string, prior map[string]string, current map[string]bool, kept keptOutput) {
+func removeStalePaths(target string, prior map[string]LockArtifact, current map[string]bool, kept keptOutput) {
 	var live []os.FileInfo
-	for p, merge := range prior {
+	for _, p := range slices.Sorted(maps.Keys(prior)) {
+		entry := prior[p]
 		if current[p] || kept.standalone[p] {
 			continue
 		}
@@ -914,11 +947,11 @@ func removeStalePaths(target string, prior map[string]string, current map[string
 		if aliasesLive(target, p, live) {
 			continue
 		}
-		if merge != "" {
-			reconcileOrphanConfig(target, p, merge, kept.keepFunc())
+		if entry.Merge != "" {
+			reconcileOrphanConfig(target, p, entry.Merge, kept.keepFunc())
 			continue
 		}
-		if err := materialize.RemoveStale(target, p); err != nil {
+		if err := materialize.RemoveStale(target, p, entry.FileHash); err != nil {
 			fmt.Fprintf(os.Stderr, "sync: stale-file cleanup: skipping %q: %v\n", p, err)
 		}
 	}
