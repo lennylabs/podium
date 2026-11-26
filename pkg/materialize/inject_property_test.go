@@ -239,8 +239,10 @@ func TestInjectStrip_Properties(t *testing.T) {
 		}
 		// The line feed that ended the operator's last line stays when text
 		// follows the blocks, so the lines above and below are not joined.
+		// A file that holds only a byte order mark counts as empty, so the
+		// first block follows the mark with no line feed between them.
 		want := u + tail
-		if u != "" && !strings.HasSuffix(u, "\n") && tail != "" {
+		if u != "" && u != utf8BOM && !strings.HasSuffix(u, "\n") && tail != "" {
 			want = u + "\n" + tail
 		}
 		full := injectEach(u, keys, bodies, cs, injectBlock)

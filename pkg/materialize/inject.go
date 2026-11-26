@@ -49,7 +49,10 @@ type podiumBlock struct {
 // same line feeds, so removing the block restores the operator's bytes, final
 // newline or its absence included. Adding a second line feed when the file
 // ends without one would make that file indistinguishable from one that ends
-// with a newline, and the removal could not restore both.
+// with a newline, and the removal could not restore both. A file that holds
+// only a byte order mark counts as empty: stripping the block from a file
+// Podium created and an editor gave a byte order mark leaves the mark alone,
+// and a separator after it would change the file on an unchanged sync.
 //
 // Spec: §6.7
 func injectBlock(base []byte, key string, block []byte, cs commentStyle) []byte {
@@ -64,7 +67,7 @@ func injectBlock(base []byte, key string, block []byte, cs commentStyle) []byte 
 	}
 	var b strings.Builder
 	b.WriteString(s)
-	if len(s) > 0 {
+	if len(s) > 0 && s != utf8BOM {
 		b.WriteByte('\n')
 	}
 	b.WriteString(body)

@@ -262,10 +262,11 @@ func TestWriteKeeping_TOMLPrefixKeyKeepsLongerKey(t *testing.T) {
 }
 
 // Spec: §6.7 — a marker line counts after a UTF-8 byte order mark that starts
-// the file and with spaces or tabs around it, so three syncs in a row replace
-// the block in place: the old content is gone, one block remains, and the
+// the file and with spaces or tabs around it, so a sync removes the decorated
+// block and appends the new block at the end of the file. Three syncs in a row
+// leave the same bytes: the old content is gone, one block remains, and the
 // operator's bytes, the byte order mark included, stay.
-func TestWriteKeeping_DecoratedMarkersReplaceInPlace(t *testing.T) {
+func TestWriteKeeping_DecoratedMarkerBlockIsReappended(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name, path, file, operator string
@@ -300,6 +301,32 @@ func TestWriteKeeping_DecoratedMarkersReplaceInPlace(t *testing.T) {
 		}
 		if got := string(StripPodiumBlocks([]byte(c.file), c.path, nil)); got != c.operator {
 			t.Errorf("%s: strip = %q, want %q", c.name, got, c.operator)
+		}
+	}
+}
+
+// Spec: §6.7 — a file Podium created that an editor later gave a UTF-8 byte
+// order mark holds only the byte order mark once its block is stripped. The
+// next unchanged sync writes the block directly after the byte order mark, so
+// the file's bytes do not change and podium changed reports nothing.
+func TestWriteKeeping_ByteOrderMarkOnlyBaseIsStable(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"AGENTS.md", ".codex/config.toml"} {
+		dest := t.TempDir()
+		files := []adapter.File{{Path: path, Op: adapter.OpInject, Key: "a", Content: []byte("Rule.")}}
+		if err := Write(dest, files); err != nil {
+			t.Fatalf("%s: Write: %v", path, err)
+		}
+		full := filepath.Join(dest, filepath.FromSlash(path))
+		want := utf8BOM + readString(t, full)
+		if err := os.WriteFile(full, []byte(want), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteKeeping(dest, files, nil); err != nil {
+			t.Fatalf("%s: WriteKeeping: %v", path, err)
+		}
+		if got := readString(t, full); got != want {
+			t.Errorf("%s: unchanged sync = %q, want %q", path, got, want)
 		}
 	}
 }
