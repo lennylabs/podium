@@ -1971,10 +1971,10 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// spec: §7.3.1 (Visibility entries) — the owner and the users entry the
 	// registry resolved from the caller's identity are checked on the same
 	// terms as the request's own. The request-side check above cannot see
-	// them: a trusted-headers subject can carry a tab or a byte at or above
-	// 0x80, and an OIDC sub is any JSON string, so without this check such a
-	// subject is stored as an entry or, holding a line feed, reaches the
-	// store's backstop as a 500.
+	// them: a trusted-headers subject can carry a tab or a C1 control
+	// character, and an OIDC sub is any JSON string, so without this check
+	// such a subject is stored as an entry or, holding a line feed, reaches
+	// the store's backstop as a 500.
 	if msg := visibilityEntryError(cfg.Owner, cfg.Groups, cfg.Users); msg != "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument",
 			"the registrant's identity cannot be stored as a visibility entry: "+msg)

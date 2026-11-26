@@ -274,7 +274,7 @@ func TestLayerEndpoint_UpdateRefusesVisibilityEntries(t *testing.T) {
 // request's own: a user-defined registration stores the caller's subject as
 // owner and as its users entry, and an admin-defined one under
 // PODIUM_DEFAULT_LAYER_VISIBILITY=users stores it as its users entry. A
-// trusted-headers subject can carry a tab or a byte at or above 0x80 and an
+// trusted-headers subject can carry a tab or a C1 control character and an
 // OIDC sub is any JSON string, so each such subject is refused with 400
 // registry.invalid_argument and nothing is stored; a line feed is refused
 // with 400 rather than reaching the store's backstop as a 500.
