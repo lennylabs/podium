@@ -79,6 +79,18 @@ func errorResult(msg string) map[string]any {
 	return errorEnvelope(code, rest, nil, retryable, suggested)
 }
 
+// materializeFailure converts a pkg/materialize write error into the error
+// result. The package's own errors already begin with "materialize: ", so the
+// prefix is added only to an error that lacks it, such as an operating-system
+// error the writer returns unwrapped.
+func materializeFailure(err error) map[string]any {
+	msg := err.Error()
+	if !strings.HasPrefix(msg, "materialize: ") {
+		msg = "materialize: " + msg
+	}
+	return errorResult(msg)
+}
+
 // errorResultFrom converts an error into the §6.10 structured result. A
 // *registryError carries the registry-set envelope fields through
 // unchanged; any other error falls back to errorResult on its message.

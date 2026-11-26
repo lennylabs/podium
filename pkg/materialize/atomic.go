@@ -247,7 +247,7 @@ func WriteKeeping(destination string, files []adapter.File, keep func(id string)
 			return err
 		}
 		if err := CheckRecordedPath(f.Path); err != nil {
-			return fmt.Errorf("%w: %q: %w", ErrUnconfinedPath, f.Path, err)
+			return ruleRefusal(fmt.Sprintf("%q", f.Path), err)
 		}
 		resolved[i] = full
 	}
@@ -420,7 +420,7 @@ func checkResolvedTarget(absDest, realDest, full, landing, rel string) error {
 		return nil
 	}
 	if err := CheckRecordedPath(filepath.ToSlash(resolved)); err != nil {
-		return fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, filepath.ToSlash(resolved), err)
+		return ruleRefusal(fmt.Sprintf("%q resolves to %q", rel, filepath.ToSlash(resolved)), err)
 	}
 	return nil
 }

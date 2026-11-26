@@ -810,11 +810,62 @@ func TestCLI_SyncRefusesPodiumLink(t *testing.T) {
 	}
 	cliContains(t, res.Stderr, ".podium is a symbolic link or not a directory", "stderr names the refused .podium")
 	cliContains(t, res.Stderr, "replace it with a directory", "stderr states the remedy")
+	if n := strings.Count(res.Stderr, "symbolic link or not a directory"); n != 1 {
+		t.Errorf("stderr states the refusal %d times, want once:\n%s", n, res.Stderr)
+	}
+	cliNotContains(t, res.Stderr, "materialize:", "stderr carries no nested materialize error")
 	if entries, _ := os.ReadDir(tgt); len(entries) != 1 || entries[0].Name() != ".podium" {
 		t.Errorf("the failed sync wrote into the target: %v", entries)
 	}
 	if entries, _ := os.ReadDir(shared); len(entries) != 0 {
 		t.Errorf("files landed behind the .podium link: %v", entries)
+	}
+}
+
+// Spec: §7.5.3, §7.7 — `podium init` in a workspace whose .podium is a
+// symbolic link fails with an error that names .podium and the remedy, with
+// and without --force, instead of reporting the sync.yaml behind the link as
+// a file --force would overwrite. The file behind the link stays as it was.
+func TestCLI_InitRefusesPodiumLink(t *testing.T) {
+	reg := cliReg(t)
+	base := t.TempDir()
+	ws := filepath.Join(base, "ws")
+	shared := filepath.Join(base, "shared-podium")
+	for _, d := range []string{ws, shared} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	const existing = "defaults:\n  registry: shared\n"
+	if err := os.WriteFile(filepath.Join(shared, "sync.yaml"), []byte(existing), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.Symlink(shared, filepath.Join(ws, ".podium")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	env := withIsolatedHome(nil, t.TempDir())
+	for _, args := range [][]string{
+		{"init", "--registry", reg},
+		{"init", "--registry", reg, "--force"},
+		{"init", "--registry", reg, "--local"},
+	} {
+		what := strings.Join(append([]string{"init"}, args[3:]...), " ")
+		res := runPodium(t, ws, env, args...)
+		cliWantExit(t, res, 1, what)
+		cliContains(t, res.Stderr, ".podium is a symbolic link or not a directory", what+": stderr names the refused .podium")
+		cliContains(t, res.Stderr, filepath.Join(ws, ".podium"), what+": stderr names the .podium path")
+		cliContains(t, res.Stderr, "replace it with a directory", what+": stderr states the remedy")
+		cliNotContains(t, res.Stderr, "--force", what+": stderr does not suggest --force")
+		cliNotContains(t, res.Stderr, "already exists", what+": stderr does not report an existing file")
+	}
+	if got := readFile(t, filepath.Join(shared, "sync.yaml")); got != existing {
+		t.Errorf("the sync.yaml behind the link changed: %q", got)
+	}
+	if entries, _ := os.ReadDir(shared); len(entries) != 1 {
+		t.Errorf("init wrote behind the .podium link: %v", entries)
+	}
+	if entries, _ := os.ReadDir(ws); len(entries) != 1 || entries[0].Name() != ".podium" {
+		t.Errorf("the failed init wrote into the workspace: %v", entries)
 	}
 }
 

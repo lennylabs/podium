@@ -63,9 +63,30 @@ func WriteSandboxProfile(destination, profile string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	rel := ".podium/" + profile + ".json"
+	rel := sandboxProfilePath(profile)
 	if err := WriteStateFile(absDest, rel, data, 0o644); err != nil {
 		return "", false, err
 	}
 	return filepath.Join(absDest, filepath.FromSlash(rel)), true, nil
+}
+
+// CheckSandboxProfile returns the refusal WriteSandboxProfile would return for
+// profile under destination, such as a .podium directory that is a symbolic
+// link, without writing anything. A profile with no shipped baseline passes.
+// podium-mcp calls it before it writes an artifact's files, so a load whose
+// sandbox profile the write would refuse leaves the destination unchanged
+// rather than holding the artifact without its profile.
+//
+// Spec: §6.6 step 5, §4.4.1
+func CheckSandboxProfile(destination, profile string) error {
+	if _, ok := SandboxBaselineProfile(profile); !ok {
+		return nil
+	}
+	return CheckStateFile(destination, sandboxProfilePath(profile))
+}
+
+// sandboxProfilePath is the slash-separated path, relative to the
+// destination, where the baseline for profile lands.
+func sandboxProfilePath(profile string) string {
+	return ".podium/" + profile + ".json"
 }
