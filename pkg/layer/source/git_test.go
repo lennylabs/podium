@@ -226,6 +226,142 @@ func TestGit_SnapshotForcePushDetected(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.1 (Force-push detected) — a clone whose head is a merge commit
+// holds the history of both parents, so a prior reference on the merged
+// branch, reachable only through the merge's second parent, is not a rewrite.
+func TestGit_SnapshotMergeOfThePriorNotRewritten(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree: %v", err)
+	}
+	commit := func(body string, parents ...plumbing.Hash) plumbing.Hash {
+		t.Helper()
+		f, err := wt.Filesystem.Create(body + ".txt")
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if _, err := f.Write([]byte(body)); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if _, err := wt.Add(body + ".txt"); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+		h, err := wt.Commit(body, &git.CommitOptions{
+			Author:  &object.Signature{Name: "alice", Email: "alice@acme.com", When: time.Now()},
+			Parents: parents,
+		})
+		if err != nil {
+			t.Fatalf("Commit %s: %v", body, err)
+		}
+		return h
+	}
+	base := commit("base")
+	prior := commit("feature", base)
+	if err := wt.Reset(&git.ResetOptions{Mode: git.HardReset, Commit: base}); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	mainline := commit("main", base)
+	merge := commit("merge", mainline, prior)
+
+	snap, err := source.Git{}.Snapshot(context.Background(), source.LayerConfig{
+		Repo: "file://" + dir, Ref: "master", PriorRef: prior.String(),
+	})
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if snap.HistoryRewritten {
+		t.Errorf("HistoryRewritten = true for a prior merged through the second parent; want false")
+	}
+	if snap.Reference != merge.String() {
+		t.Errorf("Reference = %q, want the merge %q", snap.Reference, merge.String())
+	}
+}
+
+// Spec: §7.3.1 (Force-push detected) — when the remote is itself a shallow
+// clone, its boundary commit names a parent the remote does not hold. A prior
+// reference that is that missing parent is in the history and is not a
+// rewrite. A prior beyond the boundary cannot be shown reachable, so the
+// snapshot reports a rewrite.
+func TestGit_SnapshotShallowRemoteBoundaryParentNotRewritten(t *testing.T) {
+	t.Parallel()
+	srcDir := t.TempDir()
+	repo, err := git.PlainInit(srcDir, false)
+	if err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree: %v", err)
+	}
+	var commits []plumbing.Hash
+	for _, body := range []string{"c1", "c2", "c3", "c4"} {
+		f, err := wt.Filesystem.Create("a.txt")
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if _, err := f.Write([]byte(body)); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if _, err := wt.Add("a.txt"); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+		h, err := wt.Commit(body, &git.CommitOptions{
+			Author: &object.Signature{Name: "alice", Email: "alice@acme.com", When: time.Now()},
+		})
+		if err != nil {
+			t.Fatalf("Commit %s: %v", body, err)
+		}
+		commits = append(commits, h)
+	}
+	c1, c2, c3, c4 := commits[0], commits[1], commits[2], commits[3]
+
+	// The remote holds c4 and c3. c3 names c2 as its parent, and the
+	// remote holds neither c2 nor c1.
+	remoteDir := t.TempDir()
+	if _, err := git.PlainClone(remoteDir, true, &git.CloneOptions{
+		URL: "file://" + srcDir, ReferenceName: "refs/heads/master", SingleBranch: true, Depth: 2,
+	}); err != nil {
+		t.Fatalf("shallow PlainClone: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		prior     plumbing.Hash
+		rewritten bool
+	}{
+		{name: "prior held by the remote", prior: c3, rewritten: false},
+		{name: "prior is the absent parent of the shallow boundary", prior: c2, rewritten: false},
+		{name: "prior beyond the shallow boundary", prior: c1, rewritten: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snap, err := source.Git{}.Snapshot(context.Background(), source.LayerConfig{
+				Repo: "file://" + remoteDir, Ref: "master", PriorRef: tc.prior.String(),
+			})
+			if err != nil {
+				t.Fatalf("Snapshot: %v", err)
+			}
+			if snap.Reference != c4.String() {
+				t.Errorf("Reference = %q, want %q", snap.Reference, c4.String())
+			}
+			if snap.HistoryRewritten != tc.rewritten {
+				t.Errorf("HistoryRewritten = %v, want %v", snap.HistoryRewritten, tc.rewritten)
+			}
+		})
+	}
+}
+
 // Spec: §4.6 — cfg.Root narrows the snapshot to a subtree.
 func TestGit_RootNarrowsToSubtree(t *testing.T) {
 	t.Parallel()
