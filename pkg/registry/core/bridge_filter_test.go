@@ -120,7 +120,7 @@ func TestBridgeFilter_LoadDomain(t *testing.T) {
 }
 
 // Spec: §5, §7.2.2, §8.1, §8.7 — the MCP bridge's load of an mcp-server
-// artifact fails as a load of an ID outside the caller's view: the same
+// artifact fails as a load of an ID that does not exist: the same
 // registry.not_found error and message, a read event of result size 0, no
 // visibility.denied event, and no load count. An SDK caller loads it.
 func TestBridgeFilter_LoadArtifact(t *testing.T) {
@@ -149,5 +149,70 @@ func TestBridgeFilter_LoadArtifact(t *testing.T) {
 		if row.Client == "mcp" && row.Loads != 0 {
 			t.Errorf("bridge load counted: %+v", row)
 		}
+	}
+}
+
+// Spec: §5 — the bridge filter judges an artifact by the version it
+// resolves to. ops/tool is a skill at 1.0.0 and an mcp-server at 2.0.0: the
+// bridge's search and notable list leave it out instead of surfacing 1.0.0,
+// its latest load is refused instead of serving 1.0.0, and a pin to 1.0.0
+// still loads the skill. An SDK caller searches, lists, and loads 2.0.0.
+func TestBridgeFilter_TypeChangeAcrossVersions(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	for _, m := range []store.ManifestRecord{
+		{TenantID: "t", ArtifactID: "ops/tool", Version: "1.0.0", ContentHash: "sha256:t1", Type: "skill", Name: "tool", Description: "session tool", Layer: "team"},
+		{TenantID: "t", ArtifactID: "ops/tool", Version: "2.0.0", ContentHash: "sha256:t2", Type: "mcp-server", Name: "tool", Description: "session tool server", Layer: "team"},
+	} {
+		if err := f.st.PutManifest(context.Background(), storetest.Seal(t, m, nil, nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bridge, sdk := clientCtx("mcp", ""), clientCtx("sdk", "")
+
+	search := func(ctx context.Context) map[string]string {
+		res, err := f.reg.SearchArtifacts(ctx, usageAlice, core.SearchArtifactsOptions{Query: "tool", TopK: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, d := range res.Results {
+			out[d.ID] = d.Version
+		}
+		return out
+	}
+	if got := search(bridge); got["ops/tool"] != "" {
+		t.Errorf("bridge search = %v, want no ops/tool", got)
+	}
+	if got := search(sdk); got["ops/tool"] != "2.0.0" {
+		t.Errorf("sdk search = %v, want ops/tool at 2.0.0", got)
+	}
+
+	notable := func(ctx context.Context) map[string]string {
+		res, err := f.reg.LoadDomain(ctx, usageAlice, "ops", core.LoadDomainOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, d := range res.Notable {
+			out[d.ID] = d.Type
+		}
+		return out
+	}
+	if got := notable(bridge); got["ops/tool"] != "" {
+		t.Errorf("bridge notable = %v, want no ops/tool", got)
+	}
+	if got := notable(sdk); got["ops/tool"] != "mcp-server" {
+		t.Errorf("sdk notable = %v, want ops/tool as mcp-server", got)
+	}
+
+	if res, err := f.reg.LoadArtifact(bridge, usageAlice, "ops/tool", core.LoadArtifactOptions{}); !errors.Is(err, core.ErrNotFound) {
+		t.Errorf("bridge latest load = %+v, %v; want registry.not_found", res, err)
+	}
+	if res, err := f.reg.LoadArtifact(bridge, usageAlice, "ops/tool", core.LoadArtifactOptions{Version: "1.0.0"}); err != nil || res.Version != "1.0.0" {
+		t.Errorf("bridge load pinned to 1.0.0 = %+v, %v; want the skill", res, err)
+	}
+	if res, err := f.reg.LoadArtifact(sdk, usageAlice, "ops/tool", core.LoadArtifactOptions{}); err != nil || res.Version != "2.0.0" {
+		t.Errorf("sdk latest load = %+v, %v; want 2.0.0", res, err)
 	}
 }

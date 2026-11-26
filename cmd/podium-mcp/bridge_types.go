@@ -18,7 +18,7 @@ func hiddenFromBridge(typ string) bool {
 
 // bridgeNotFound is the load_artifact refusal for an artifact the bridge keeps
 // out of its results. Its message has the format of the registry's answer for
-// an ID that is not in the caller's view ("registry.not_found: artifact <id>",
+// an ID that does not exist ("registry.not_found: artifact <id>",
 // pkg/registry/core), so a hidden artifact and an absent one read the same to
 // the host. The registry refuses a registry-served load itself (§5, §7.2.2),
 // so the bridge reaches this for a workspace-overlay artifact, a record the

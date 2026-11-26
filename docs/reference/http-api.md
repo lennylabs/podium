@@ -180,7 +180,7 @@ The registry parses and sanitizes the value as follows:
 - It drops a `purpose` other than `sync`.
 - A member the value does not carry, and every member of an absent or ignored value, is not provided. The [usage report](#usage-report) counts a client or harness that is not provided under `unknown`.
 
-An absent or ignored value never causes a request to fail. The value is never an input to authentication, authorization, visibility, quotas, audit sampling, or tenant selection. The client name `mcp` makes `search_artifacts`, `load_domain`, and `load_artifact` leave out `mcp-server` artifacts, because the MCP server's hosts cannot connect to a server discovered mid-session. That filter is not access control: a caller that sends `mcp` only narrows its own results.
+An absent or ignored value never causes a request to fail. The value is never an input to authentication, authorization, visibility, quotas, audit sampling, or tenant selection. The client name `mcp` makes `search_artifacts`, `load_domain`, and `load_artifact` leave out `mcp-server` artifacts, because the MCP server's hosts cannot connect to a server discovered mid-session. That filter is not access control: a caller that sends `mcp` only narrows its own results. Those three endpoints send `Vary: X-Podium-Client`.
 
 The first-party clients send the header on every control-plane request. They omit it on presigned links, on `/objects` links, and on `/healthz` and `/readyz`.
 

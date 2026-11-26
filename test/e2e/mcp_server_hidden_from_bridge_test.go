@@ -170,7 +170,7 @@ func TestMCPBridge_HiddenResultsLeavePageFilled(t *testing.T) {
 }
 
 // Spec: §5, §6.10 — a refused mcp-server load reads exactly as a load of an
-// ID that is not in the caller's view, apart from the ID itself.
+// ID that does not exist, apart from the ID itself.
 func TestMCPBridge_HiddenLoadMatchesMissingID(t *testing.T) {
 	t.Parallel()
 	reg := hiddenRegistry(t)
