@@ -118,6 +118,26 @@ func TestCheckWorkspaceConfig(t *testing.T) {
 	}
 }
 
+// Spec: §7.5.3, §7.7 — a directory at the config file's name fails
+// CheckWorkspaceConfig with an error that names the directory by its path
+// below the workspace, as the unusable-.podium error names .podium, states
+// the remedy once, and matches the materialize refusal it reports.
+func TestCheckWorkspaceConfig_ConfigDirectory(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+	dir := filepath.Join(ws, ".podium", "sync.local.yaml")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	err := CheckWorkspaceConfig(ws, "sync.local.yaml")
+	if !errors.Is(err, materialize.ErrStateFileIsDirectory) || !errors.Is(err, materialize.ErrUnconfinedPath) || errors.Is(err, ErrStateDirUnusable) {
+		t.Fatalf("CheckWorkspaceConfig over a config directory = %v, want ErrStateFileIsDirectory and ErrUnconfinedPath", err)
+	}
+	if want := "sync: " + dir + " is a directory, which the write cannot replace; remove it"; err.Error() != want {
+		t.Errorf("CheckWorkspaceConfig error = %q, want %q", err, want)
+	}
+}
+
 // Spec: §7.5.3 — save-as and profile edit write sync.yaml through an
 // exclusively created temporary: a committed .podium/sync.yaml.tmp link to a
 // file outside the workspace refuses the write and leaves that file as it

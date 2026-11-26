@@ -637,8 +637,8 @@ func TestCheckSandboxProfile(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dirDest, ".podium", SandboxProfileSeccompStrict+".json"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := CheckSandboxProfile(dirDest, SandboxProfileSeccompStrict); !errors.Is(err, ErrUnconfinedPath) || !strings.Contains(err.Error(), "is a directory") {
-		t.Errorf("CheckSandboxProfile over a directory at the profile name = %v, want ErrUnconfinedPath naming the directory", err)
+	if err := CheckSandboxProfile(dirDest, SandboxProfileSeccompStrict); !errors.Is(err, ErrUnconfinedPath) || !errors.Is(err, ErrStateFileIsDirectory) || !strings.Contains(err.Error(), `".podium/seccomp-strict.json" is a directory`) {
+		t.Errorf("CheckSandboxProfile over a directory at the profile name = %v, want ErrUnconfinedPath and ErrStateFileIsDirectory naming the directory", err)
 	}
 	fresh := filepath.Join(base, "fresh")
 	if err := CheckSandboxProfile(fresh, SandboxProfileSeccompStrict); err != nil {

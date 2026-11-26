@@ -9,6 +9,13 @@ import (
 	"strings"
 )
 
+// ErrStateFileIsDirectory signals a directory at a state file's own name,
+// which the rename that commits WriteStateFile cannot replace. The refusal
+// CheckStateFile returns for it also matches ErrUnconfinedPath and names the
+// file relative to the destination; a caller that names it by its full path,
+// as `podium init` does, branches on this sentinel.
+var ErrStateFileIsDirectory = errors.New("materialize: a directory is at the state file's name")
+
 // ReadStateFile returns the bytes of a file sync keeps for itself below
 // destination, such as .podium/sync.lock. A target can be a repository
 // checkout whose content another party commits (§7.8), so a .podium directory
@@ -131,12 +138,16 @@ func inspectStateLeaf(root *os.Root, rel, name string) error {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil
 	case err != nil:
-		// Unreachable after inspectTemp: an Lstat in the same directory
-		// that fails for any reason but absence fails the temporary's
-		// inspection first. Kept so a future caller fails closed.
+		// Reached only when the directory changes between inspectTemp and
+		// this Lstat: while it stays unchanged, an Lstat in the same
+		// directory that fails for any reason but absence fails the
+		// temporary's inspection first. The branch fails closed either way.
 		return fmt.Errorf("materialize: inspect %s: %w", rel, err)
 	case info.IsDir():
-		return fmt.Errorf("%w: %q is a directory, which the write cannot replace; remove it", ErrUnconfinedPath, rel)
+		return &refusal{
+			msg: fmt.Sprintf("%v: %q is a directory, which the write cannot replace; remove it", ErrUnconfinedPath, rel),
+			is:  []error{ErrUnconfinedPath, ErrStateFileIsDirectory},
+		}
 	}
 	return nil
 }

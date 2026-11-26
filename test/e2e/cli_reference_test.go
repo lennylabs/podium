@@ -871,7 +871,8 @@ func TestCLI_InitRefusesPodiumLink(t *testing.T) {
 
 // Spec: §7.5.3, §7.7 — `podium init` in a workspace whose .podium/sync.yaml
 // is a directory, which the write cannot replace, fails with an error that
-// names the directory and says to remove it, with and without --force,
+// names the directory by its full path, as the .podium link refusal names
+// .podium, and says to remove it, with and without --force,
 // instead of suggesting --force, and the directory stays.
 func TestCLI_InitRefusesConfigDirectory(t *testing.T) {
 	reg := cliReg(t)
@@ -885,7 +886,7 @@ func TestCLI_InitRefusesConfigDirectory(t *testing.T) {
 		what := strings.Join(append([]string{"init"}, args[3:]...), " ")
 		res := runPodium(t, ws, env, args...)
 		cliWantExit(t, res, 1, what)
-		cliContains(t, res.Stderr, `".podium/sync.yaml" is a directory`, what+": stderr names the directory")
+		cliContains(t, res.Stderr, cfgDir+" is a directory", what+": stderr names the directory by its full path")
 		cliContains(t, res.Stderr, "remove it", what+": stderr states the remedy")
 		cliNotContains(t, res.Stderr, "--force", what+": stderr does not suggest --force")
 		cliNotContains(t, res.Stderr, "rename", what+": init fails before staging the write")

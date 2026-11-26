@@ -25,12 +25,32 @@ func WriteWorkspaceConfig(workspace, filename string, data []byte) error {
 // for filename, without writing anything. `podium init` calls it before it
 // looks for an existing file, so a .podium that is a symbolic link, or a
 // directory at the config file's name, is reported with its remedy rather
-// than as a file that --force would overwrite.
+// than as a file that --force would overwrite. Both refusals name their path
+// below workspace: the .podium directory, or the config file's directory.
 //
 // Spec: §7.5.3, §7.7
 func CheckWorkspaceConfig(workspace, filename string) error {
-	return stateDirError(workspace, materialize.CheckStateFile(workspace, ".podium/"+filename))
+	err := materialize.CheckStateFile(workspace, ".podium/"+filename)
+	if errors.Is(err, materialize.ErrStateFileIsDirectory) {
+		return &configDirErr{path: filepath.Join(workspace, ".podium", filename), cause: err}
+	}
+	return stateDirError(workspace, err)
 }
+
+// configDirErr reports a directory at a workspace config file's name. It
+// names the file by its path below the workspace, as stateDirErr names
+// .podium, and matches every error cause matches. Its message leaves cause
+// out, because cause names the same file relative to the workspace.
+type configDirErr struct {
+	path  string
+	cause error
+}
+
+func (e *configDirErr) Error() string {
+	return fmt.Sprintf("sync: %s is a directory, which the write cannot replace; remove it", e.path)
+}
+
+func (e *configDirErr) Unwrap() error { return e.cause }
 
 // ErrGitignoreLinkSkipped signals that `podium init` left the workspace's
 // .gitignore alone because it is a symbolic link that does not resolve to a
