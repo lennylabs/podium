@@ -45,10 +45,10 @@ func freePort(t *testing.T) int {
 
 // serverBootTimeout bounds how long a serve test waits for the in-process
 // server to answer /healthz. Boot takes about a second on an idle machine,
-// including under -race, but has taken more than 4 s while the full parallel suite runs, and a
-// fixed 5 s wait failed a quarter of the runs under that load. A healthy boot
-// returns as soon as /healthz answers, so the generous bound costs time only
-// when the boot hangs.
+// including under -race, but has taken more than 4 s while the full parallel
+// suite runs, and a fixed 5 s wait failed a quarter of the runs under that
+// load. A healthy boot returns as soon as /healthz answers, so the generous
+// bound costs time only when the boot hangs.
 const serverBootTimeout = 60 * time.Second
 
 // healthzProbeTimeout bounds one /healthz request, so a listener that accepts
