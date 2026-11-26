@@ -7,6 +7,7 @@
 // of the registry. Node's fs/path load lazily so the SDK stays importable
 // in edge bundles that never touch the overlay.
 
+import { namesDotGit, namesDotPodium } from "./reserved_names.js";
 import { resolveSkillVersion, synthesizedSkillDocument } from "./skill_document.js";
 
 const OVERLAY_SUBDIR = ".podium/overlay";
@@ -779,6 +780,31 @@ function overlayArtifact(
   };
 }
 
+// OverlayRefused is thrown when the overlay holds a package Podium refuses to
+// load (§6.4).
+export class OverlayRefused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OverlayRefused";
+  }
+}
+
+// checkCanonicalID refuses a package whose canonical ID names .git or .podium.
+//
+// Spec: §4.2, §6.4, §7.5.3 — the canonical-ID rules apply to an overlay
+// package, and no segment of a canonical ID names .git or .podium under the
+// aliasing rule. Discovery skips a dot-prefixed directory, but a filesystem
+// resolves GIT~1, or .git preceded by U+200C, to .git, and materialize()
+// writes the ID as a path. The overlay fails to load, as
+// filesystem.ValidateCanonicalID makes it fail in the Go consumers.
+function checkCanonicalID(id: string): void {
+  for (const seg of id.split("/")) {
+    if (namesDotGit(seg) || namesDotPodium(seg)) {
+      throw new OverlayRefused(`canonical ID segment ${JSON.stringify(seg)} names .git or .podium on some filesystem`);
+    }
+  }
+}
+
 // LocalOverlay indexes an overlay directory and ranks it with BM25 (§6.4.1).
 export class LocalOverlay {
   // spec §6.4.1 — BM25 is the default overlay ranker (standard Okapi params).
@@ -825,6 +851,7 @@ export class LocalOverlay {
       const hasSkill = await holdsManifest(fs, path, dir, entries, "SKILL.md");
       const isPackage = key !== "" && (hasArtifact || (hasSkill && !inPackage));
       if (isPackage) {
+        checkCanonicalID(key);
         const art = hasArtifact
           ? await overlay.readPackage(fs, path, dir, key)
           : await overlay.readPlainSkill(fs, path, dir, key);
