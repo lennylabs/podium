@@ -237,22 +237,28 @@ func TestUsageReport_PublicAndUnlayeredRegistries(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(layerIDs(pub), []string{"team", "secret"}) || pub.Totals.Loads != 18 {
 		t.Errorf("public report: layers %v loads %d err %v", layerIDs(pub), pub.Totals.Loads, err)
 	}
-	// A registry with no layer list reads the report window from the clock of
-	// its usage counter, so it takes a counter on the fixture's frozen clock.
-	// With no counter it reads the real clock, and the seeded rows age out of
-	// the default 30-day window.
+	// Every registry reads the report window from its usage counter's clock,
+	// so this one takes a counter on the fixture's frozen clock. With no
+	// counter it reads the real clock, and the seeded rows age out of the
+	// default 30-day window.
 	bare := core.New(f.st, "t", nil).WithUsageCounts(core.NewUsageCounter(clock.NewFrozen(usageNow)))
 	rep, err := bare.UsageReport(context.Background(), usageAlice, q(nil)())
 	if err != nil || !reflect.DeepEqual(layerIDs(rep), []string{"secret", "team"}) || rep.Totals.Loads != 18 {
 		t.Errorf("unlayered report: layers %v loads %d err %v", layerIDs(rep), rep.Totals.Loads, err)
 	}
-	// A registry with no usage counter reads its window from the real clock.
-	// Its layer list comes from the served artifacts, so it does not depend
-	// on the date, while its counts do and are not asserted.
+	// A registry with no usage counter reads its window from the real clock:
+	// the default window is the 30 days that end on the current UTC date.
+	// Its layer list comes from the served artifacts and does not depend on
+	// the date. Its counts do and are not asserted.
 	uncounted := core.New(f.st, "t", nil)
+	before := time.Now().UTC().Format(store.UsageDayLayout)
 	rep, err = uncounted.UsageReport(context.Background(), usageAlice, q(nil)())
+	after := time.Now().UTC().Format(store.UsageDayLayout)
 	if err != nil || !reflect.DeepEqual(layerIDs(rep), []string{"secret", "team"}) {
 		t.Errorf("report without a counter: layers %v err %v", layerIDs(rep), err)
+	}
+	if rep != nil && (rep.Days != 30 || (rep.To != before && rep.To != after)) {
+		t.Errorf("report without a counter: window %d days to %s, want 30 days to the current UTC date %s", rep.Days, rep.To, after)
 	}
 }
 
