@@ -497,6 +497,9 @@ func (s *Memory) PutLayerConfig(_ context.Context, cfg LayerConfig) error {
 	if err != nil {
 		return err
 	}
+	if err := checkLayerLists(cfg); err != nil {
+		return err
+	}
 	cfg.Repo, cfg.RegisteredRepo = repo, ""
 	s.mu.Lock()
 	defer s.mu.Unlock()

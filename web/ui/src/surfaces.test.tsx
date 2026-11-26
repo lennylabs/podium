@@ -11485,6 +11485,34 @@ describe("the layer write flows", () => {
     expect(sent.groups).toEqual([dn]);
   });
 
+  // A layer stored before the §4.6 entry rule can hold an empty users entry,
+  // and §7.3.1 refuses an update that sends it back. The Edit dialog draws it
+  // as a labelled token so the reader can find it and remove it, and the patch
+  // then carries the list without it.
+  //
+  // Spec: §4.6, §7.3.1 (Visibility entries)
+  it("labels a stored empty member so it can be removed", async () => {
+    const granted = { ...adminLayer(), users: ["alice@acme.com", ""] };
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
+      "/v1/layers": { body: { layers: [granted] } },
+      "PUT /v1/layers/update": { body: { layer: { ...granted, users: ["alice@acme.com"] } } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions("company");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update company");
+    const empty = within(form).getByRole("button", { name: "Remove (empty entry)" });
+    expect(empty.textContent).toContain("(empty entry)");
+    fireEvent.click(empty);
+    fireEvent.submit(form);
+    await screen.findByText("Layer company is updated.");
+    const sent = JSON.parse(bodies[bodies.length - 1]) as { users: string[] };
+    expect(sent.users).toEqual(["alice@acme.com"]);
+  });
+
   // §7.3.1 applies each visibility axis the patch carries, so the Edit dialog
   // draws an axis the layer already grants as an operable checkbox: turning it
   // off withdraws the axis. The sentence stating that a granted axis could not

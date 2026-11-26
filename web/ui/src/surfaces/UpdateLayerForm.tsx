@@ -397,11 +397,15 @@ function credentialPatch(
  * The stored members are held apart from the line rather than joined into it,
  * because the patch replaces the list rather than adding to it and the join is
  * not reversible: a member carrying a comma splits into two on the way back,
- * and one carrying padding returns trimmed. Nothing constrains a member's
- * characters, so a DN-style group name is storable, and an unedited dialog
- * that re-parsed the line would withdraw that grant and grant to names nobody
- * authorized. Held as an array, an untouched dialog sends the stored list
- * verbatim, which §7.3.1 applies as no change at all. */
+ * and one carrying padding returns trimmed. §4.6 refuses only an empty member
+ * and one carrying a control character, so a DN-style group name is storable,
+ * and an unedited dialog that re-parsed the line would withdraw that grant and
+ * grant to names nobody authorized. Held as an array, an untouched dialog
+ * sends the stored list verbatim, which §7.3.1 applies as no change at all.
+ *
+ * A layer stored before the §4.6 entry rule can still hold an empty member.
+ * The registry refuses a patch that sends it back, so TokenInput draws it as
+ * a labelled token the reader can find and remove before saving. */
 function useMemberList(stored: readonly string[]) {
   const [kept, setKept] = useState<string[]>([...stored]);
   const [line, setLine] = useState("");
