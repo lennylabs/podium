@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and the refusal of a workspace .podium symbolic link, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, and the refusal of an empty or control-character visibility entry, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -28,6 +28,15 @@ From 0.8.0, `podium sync` reads and writes its lock and `sync.yaml` only when th
 - Before the upgrade, find each target whose `.podium` is a symbolic link, replace the link with a directory, and copy `sync.yaml`, `sync.local.yaml`, and `sync.lock` into it.
 - A `kind: marketplace` target whose repository commits `.podium` as a symbolic link fails its render the same way. Remove the link from the repository.
 - A rollback to 0.7.0 needs no step. 0.7.0 reads the files from the directory.
+
+### Visibility entries that are empty or hold a control character
+
+From 0.8.0, a layer's `users` and `groups` entries are non-empty strings that contain no control character, such as a line feed, a carriage return, or a tab. 0.7.0 accepted any string, and the SQLite and Postgres stores read an entry containing a line feed back as several entries.
+
+- Before the upgrade, check the `visibility:` block of each layer in `registry.yaml` and each `.layer-config` that a registry reads through `--layer-path` for an empty entry and for an entry with a control character. An entry written as `${ENV_VAR}` is empty when the variable is unset. A start that finds such an entry exits with `config.invalid`, and the message names the layer and the entry's position.
+- A layer registration or update that carries such an entry, or an `owner` with a control character, is refused with `400 registry.invalid_argument`. A layer that 0.7.0 stored keeps its entries. Where its stored `users` or `groups` holds an empty entry, an update that sends that list back unchanged, as a client that returns the layer object it read does, is refused; send the list without the empty entry, or omit the member.
+- White space around an entry is kept and matched as written, as in 0.7.0.
+- A rollback to 0.7.0 needs no step.
 
 ## 0.7.0
 

@@ -1244,6 +1244,29 @@ func gitProviderError(p, sourceType string) string {
 	return ""
 }
 
+// visibilityEntryError reports why the owner, groups, or users member of req
+// is refused under the §4.6 entry rule, or the empty string when none is. An
+// empty owner is the absent value on both operations, so only a non-empty one
+// is checked; it is checked at all because a user-defined layer stores its
+// owner as its one users entry. A groups or users member carrying JSON null
+// decodes to no list and passes.
+//
+// Spec: §4.6, §7.3.1 (Visibility entries)
+func visibilityEntryError(req LayerRegisterRequest) string {
+	if req.Owner != "" {
+		if err := layer.CheckEntry("owner", req.Owner); err != nil {
+			return err.Error()
+		}
+	}
+	if err := layer.CheckEntries("groups", req.Groups); err != nil {
+		return err.Error()
+	}
+	if err := layer.CheckEntries("users", req.Users); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // LayerRegisterResponse is the POST /v1/layers JSON response.
 type LayerRegisterResponse struct {
 	Layer         LayerObject `json:"layer"`
@@ -1566,6 +1589,13 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"constraint": "immutable_visibility"})
 		return
 	}
+	// spec: §7.3.1 (Visibility entries) — evaluated after the immutable
+	// visibility rule, so an entry asserted against a user-defined layer keeps
+	// that envelope, and above every field assignment and the rotation below.
+	if msg := visibilityEntryError(patch); msg != "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
+		return
+	}
 	// spec: §7.3.1 — the repository credential rule, read against the stored
 	// source type and registered repo because an update never changes the
 	// remote. It runs above every field assignment and the secret rotation,
@@ -1701,6 +1731,13 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if msg := repoCredentialError(req, req.SourceType, req.Repo); msg != "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
+		return
+	}
+	// spec: §7.3.1 (Visibility entries) — refused with the checks on the
+	// request's own fields, so a registration this refuses reads no stored
+	// layer.
+	if msg := visibilityEntryError(req); msg != "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
 		return
 	}

@@ -27,6 +27,8 @@ A layer's `visibility:` block takes one or more of these fields.
 
 Multiple fields combine as a union. A layer with `groups: [acme-finance]` and `users: [security-lead@acme.com]` is visible to every member of `acme-finance` and to that one additional identity.
 
+Each `groups` and `users` entry is a non-empty string with no control character, such as a line feed or a tab. The registry matches an entry exactly as written, including any surrounding white space. A layer registration or update that carries another entry is refused with `registry.invalid_argument`, and a `registry.yaml` declaration or a `.layer-config` file that carries one stops the registry at startup with `config.invalid`.
+
 ### Enforcement
 
 The registry enforces visibility on every call. A call that visibility rejects returns the `visibility.denied` outcome, which mirrors a not-found result, so the rejection does not reveal that a hidden artifact exists. The [audit log](../operations/observability#audit-log) records each denial, and the `podium_visibility_denied_total` metric counts them.
