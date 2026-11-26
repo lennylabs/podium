@@ -94,9 +94,12 @@ func newAdmEnv(t *testing.T, signing bool) *admEnv {
 	if signing {
 		signer = e.key
 	}
+	// No read here is meant to time out, so admission takes the §13.12
+	// default deadline: a short real-clock deadline turns a read delayed on a
+	// loaded machine into registry.unavailable.
 	reg := core.New(st, "default", []layer.Layer{
 		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
-	}).WithAdmission(signer, e.objects, 200*time.Millisecond).WithAudit(e.emit)
+	}).WithAdmission(signer, e.objects, objectstore.DefaultReadTimeout).WithAudit(e.emit)
 	srv := server.New(reg,
 		server.WithObjectStore(e.objects, "placeholder", time.Hour),
 		server.WithIdentityResolver(func(r *http.Request) layer.Identity {

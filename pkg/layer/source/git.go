@@ -247,12 +247,22 @@ func snapshotCtxErr(ctx context.Context) error {
 const ancestorWalkCheckEvery = 256
 
 // isAncestor reports whether ancestor is reachable from descendant
-// via parent edges. Used by Git.Snapshot for §7.3.1 force-push
-// detection. Walks BFS over the local clone; a missing object yields
+// via parent edges, or is descendant itself. Used by Git.Snapshot for
+// §7.3.1 force-push detection. Walks BFS over the local clone, following
+// every parent of a merge commit. A commit that names ancestor as a
+// parent reaches it even when the clone lacks ancestor's object, such as
+// the boundary commit of a shallow history, because a commit's hash
+// covers its parent hashes. Any other missing object ends that path of
+// the walk, and an ancestor only the missing history could reach yields
 // false (treated as "not reachable, therefore rewrite"). An unreachable
 // ancestor makes the walk cover the whole history, so it stops with the
 // snapshot's source-unreachable failure when ctx ends.
+//
+// Spec: §7.3.1 (Force-push detected).
 func isAncestor(ctx context.Context, repo *git.Repository, ancestor, descendant plumbing.Hash) (bool, error) {
+	if descendant == ancestor {
+		return true, nil
+	}
 	descCommit, err := repo.CommitObject(descendant)
 	if err != nil {
 		return false, nil
@@ -267,14 +277,14 @@ func isAncestor(ctx context.Context, repo *git.Repository, ancestor, descendant 
 		}
 		c := queue[0]
 		queue = queue[1:]
-		if c.Hash == ancestor {
-			return true, nil
-		}
 		if seen[c.Hash] {
 			continue
 		}
 		seen[c.Hash] = true
 		for _, ph := range c.ParentHashes {
+			if ph == ancestor {
+				return true, nil
+			}
 			if seen[ph] {
 				continue
 			}
