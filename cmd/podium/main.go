@@ -1618,9 +1618,10 @@ func initCmd(args []string) int {
 		}
 	}
 	dest := filepath.Join(dir, filename)
-	// §7.5.3: a workspace whose .podium is a symbolic link or not a directory
-	// fails with the remedy before the existing-file check, because --force
-	// cannot write through the link either.
+	// §7.5.3: a workspace whose .podium is a symbolic link or not a
+	// directory, or whose config name is a directory, fails with the remedy
+	// before the existing-file check, because --force cannot write there
+	// either.
 	if workspace != "" {
 		if err := sync.CheckWorkspaceConfig(workspace, filename); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)

@@ -543,7 +543,13 @@ func TestCheckStateFile(t *testing.T) {
 	tmpDest := filepath.Join(base, "tmp-ws")
 	mustSymlink(t, filepath.Join(outside, "victim"), filepath.Join(tmpDest, ".podium", "sync.yaml.tmp"))
 	leftover := filepath.Join(base, "leftover-ws")
-	confinedFixture(t, leftover, map[string]string{".podium/sync.yaml.tmp": "partial"})
+	confinedFixture(t, leftover, map[string]string{".podium/sync.yaml.tmp": "partial", ".podium/sync.yaml": "old"})
+	leafDir := filepath.Join(base, "leafdir-ws")
+	if err := os.MkdirAll(filepath.Join(leafDir, ".podium", "sync.yaml"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	leafLink := filepath.Join(base, "leaflink-ws")
+	mustSymlink(t, filepath.Join(outside, "elsewhere.yaml"), filepath.Join(leafLink, ".podium", "sync.yaml"))
 
 	for _, tc := range []struct {
 		name, dest, rel string
@@ -551,7 +557,9 @@ func TestCheckStateFile(t *testing.T) {
 	}{
 		{"absent destination", filepath.Join(base, "absent"), ".podium/sync.yaml", nil},
 		{"absent .podium", t.TempDir(), ".podium/sync.yaml", nil},
-		{"leftover regular temporary", leftover, ".podium/sync.yaml", nil},
+		{"leftover regular temporary and existing file", leftover, ".podium/sync.yaml", nil},
+		{"link at the file name", leafLink, ".podium/sync.yaml", nil},
+		{"directory at the file name", leafDir, ".podium/sync.yaml", []error{ErrUnconfinedPath}},
 		{".podium link", linkDest, ".podium/sync.yaml", []error{ErrUnconfinedPath, ErrPodiumNotDirectory}},
 		{".podium regular file", fileDest, ".podium/sync.yaml", []error{ErrUnconfinedPath, ErrPodiumNotDirectory}},
 		{"other directory a regular file", fileDest, "sub/file/x", []error{ErrUnconfinedPath}},
@@ -625,6 +633,13 @@ func TestCheckSandboxProfile(t *testing.T) {
 			t.Errorf("CheckSandboxProfile(%q) with no shipped baseline = %v, want nil", p, err)
 		}
 	}
+	dirDest := filepath.Join(base, "dir-ws")
+	if err := os.MkdirAll(filepath.Join(dirDest, ".podium", SandboxProfileSeccompStrict+".json"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := CheckSandboxProfile(dirDest, SandboxProfileSeccompStrict); !errors.Is(err, ErrUnconfinedPath) || !strings.Contains(err.Error(), "is a directory") {
+		t.Errorf("CheckSandboxProfile over a directory at the profile name = %v, want ErrUnconfinedPath naming the directory", err)
+	}
 	fresh := filepath.Join(base, "fresh")
 	if err := CheckSandboxProfile(fresh, SandboxProfileSeccompStrict); err != nil {
 		t.Errorf("CheckSandboxProfile into an absent destination = %v, want nil", err)
@@ -663,4 +678,40 @@ func TestRefusalMessages_PrefixOnce(t *testing.T) {
 			t.Errorf("%s: message = %v, want %q", tc.name, tc.err, tc.text)
 		}
 	}
+}
+
+// Spec: §6.6, §7.5.3 — a path refused because it resolves, through a link
+// inside the destination, to a path the recorded-path rule refuses matches
+// ErrUnconfinedPath and ErrUnsafeRecordedPath and names the package once.
+// It covers the recorded-path read (resolveIn), the writer's directory-link
+// check (checkResolvedTarget), and the merge-target link (resolveMergeTarget).
+func TestResolvedRuleRefusals_MatchUnsafeRecordedPath(t *testing.T) {
+	t.Parallel()
+	dest := t.TempDir()
+	confinedFixture(t, dest, map[string]string{".git/HEAD": "ref", ".git/config": "git"})
+	if err := os.MkdirAll(filepath.Join(dest, ".git", "hooks"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	mustSymlink(t, filepath.Join(dest, ".git"), filepath.Join(dest, "gitlink"))
+	mustSymlink(t, filepath.Join(dest, ".git", "hooks"), filepath.Join(dest, "skills"))
+	mustSymlink(t, ".git/config", filepath.Join(dest, "GIT.json"))
+
+	_, readErr := ReadRecorded(dest, "gitlink/HEAD")
+	dirLinkErr := Write(dest, []adapter.File{{Path: "skills/post-checkout", Content: []byte("x")}})
+	mergeErr := Write(dest, []adapter.File{{Path: "GIT.json", Op: adapter.OpMergeJSON, Content: []byte(`{"a":1}`)}})
+	for name, err := range map[string]error{
+		"resolveIn":           readErr,
+		"checkResolvedTarget": dirLinkErr,
+		"resolveMergeTarget":  mergeErr,
+	} {
+		if !errors.Is(err, ErrUnconfinedPath) || !errors.Is(err, ErrUnsafeRecordedPath) {
+			t.Errorf("%s: %v, want ErrUnconfinedPath and ErrUnsafeRecordedPath", name, err)
+			continue
+		}
+		if n := strings.Count(err.Error(), "materialize:"); n != 1 || !strings.Contains(err.Error(), "resolves to") {
+			t.Errorf("%s: message %q must name the resolved path with one materialize: prefix", name, err)
+		}
+	}
+	wantGone(t, filepath.Join(dest, ".git", "hooks", "post-checkout"))
+	wantContent(t, filepath.Join(dest, ".git", "config"), "git")
 }

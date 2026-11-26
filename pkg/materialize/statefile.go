@@ -76,12 +76,16 @@ func WriteStateFile(destination, rel string, data []byte, perm os.FileMode) erro
 
 // CheckStateFile returns the refusal WriteStateFile would return for rel below
 // destination, without writing anything: a directory component, .podium
-// included, that is a symbolic link or not a directory, and a temporary name
-// that exists and is not a regular file. A caller that writes other output
-// before a state file, such as podium-mcp writing an artifact before its
-// sandbox profile, calls it first, so a refused state file leaves the
-// destination unchanged. An absent destination or directory passes, because
-// WriteStateFile creates it.
+// included, that is a symbolic link or not a directory, a temporary name that
+// exists and is not a regular file, and a directory at rel itself, which the
+// rename cannot replace. A regular file or a symbolic link at rel passes,
+// because the rename replaces it. A caller that writes other output before a
+// state file, such as podium-mcp writing an artifact before its sandbox
+// profile, calls it first, so a refused state file leaves the destination
+// unchanged. An absent destination or directory passes, because
+// WriteStateFile creates it. The check inspects file types only: a write that
+// fails for another reason, such as a .podium directory without write
+// permission, still fails after the check passes.
 //
 // Spec: §6.6 step 5, §7.5.3
 func CheckStateFile(destination, rel string) error {
@@ -111,8 +115,30 @@ func CheckStateFile(destination, rel string) error {
 			return err
 		}
 	}
-	_, err = inspectTemp(root, filepath.Join(segs...)+".tmp")
-	return err
+	name := filepath.Join(segs...)
+	if _, err := inspectTemp(root, name+".tmp"); err != nil {
+		return err
+	}
+	return inspectStateLeaf(root, rel, name)
+}
+
+// inspectStateLeaf refuses a directory at the state file name itself: the
+// rename that commits the write replaces a regular file or a symbolic link
+// there, and fails on a directory after the temporary is staged.
+func inspectStateLeaf(root *os.Root, rel, name string) error {
+	info, err := root.Lstat(name)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		// Unreachable after inspectTemp: an Lstat in the same directory
+		// that fails for any reason but absence fails the temporary's
+		// inspection first. Kept so a future caller fails closed.
+		return fmt.Errorf("materialize: inspect %s: %w", rel, err)
+	case info.IsDir():
+		return fmt.Errorf("%w: %q is a directory, which the write cannot replace; remove it", ErrUnconfinedPath, rel)
+	}
+	return nil
 }
 
 // mkdirConfined creates each missing directory of dirs below root and refuses

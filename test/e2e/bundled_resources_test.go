@@ -842,6 +842,44 @@ func TestBundled_SeccompBaselineRefusedUnderPodiumLink(t *testing.T) {
 	}
 }
 
+// Spec: §6.6 step 5, §4.4.1 — a directory at the baseline sandbox profile's
+// name, which the profile write cannot replace, fails the load before any of
+// the artifact's files is written, and the directory stays.
+func TestBundled_SeccompBaselineRefusedOverDirectory(t *testing.T) {
+	t.Parallel()
+	id := "finance/strict-ctx"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: Strict context.\nsandbox_profile: seccomp-strict\n---\n\nbody\n",
+	}))
+	for _, name := range []string{"none", "claude-code"} {
+		mat := t.TempDir()
+		profileDir := filepath.Join(mat, ".podium", "seccomp-strict.json")
+		if err := os.MkdirAll(profileDir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL),
+			"PODIUM_HARNESS="+name, "PODIUM_MATERIALIZE_ROOT="+mat, "PODIUM_HOST_SANDBOXES=unrestricted,seccomp-strict"),
+			toolCall(1, "load_artifact", map[string]any{"id": id}))
+		result := rpcResult(t, res.Stdout, 1)
+		msg, _ := result["error"].(string)
+		if !strings.Contains(msg, `".podium/seccomp-strict.json" is a directory`) {
+			t.Fatalf("%s: load over a profile directory must fail naming it; result = %v", name, result)
+		}
+		if n := strings.Count(msg, "materialize:"); n != 1 {
+			t.Errorf("%s: error carries the materialize: prefix %d times, want once: %q", name, n, msg)
+		}
+		if entries, _ := os.ReadDir(mat); len(entries) != 1 || entries[0].Name() != ".podium" {
+			t.Errorf("%s: the refused load wrote into the destination: %v", name, entries)
+		}
+		if entries, _ := os.ReadDir(filepath.Join(mat, ".podium")); len(entries) != 1 {
+			t.Errorf("%s: the refused load wrote into .podium: %v", name, entries)
+		}
+		if info, err := os.Stat(profileDir); err != nil || !info.IsDir() {
+			t.Errorf("%s: the directory at the profile name changed; stat = (%v, %v)", name, info, err)
+		}
+	}
+}
+
 // ---- Content provenance -----------------------------------------------------
 
 // brProvenanceBody is a SKILL.md body carrying one imported provenance block.

@@ -23,9 +23,9 @@ func WriteWorkspaceConfig(workspace, filename string, data []byte) error {
 
 // CheckWorkspaceConfig returns the refusal WriteWorkspaceConfig would return
 // for filename, without writing anything. `podium init` calls it before it
-// looks for an existing file, so a .podium that is a symbolic link is
-// reported with its remedy rather than as a file that --force would
-// overwrite.
+// looks for an existing file, so a .podium that is a symbolic link, or a
+// directory at the config file's name, is reported with its remedy rather
+// than as a file that --force would overwrite.
 //
 // Spec: §7.5.3, §7.7
 func CheckWorkspaceConfig(workspace, filename string) error {

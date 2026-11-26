@@ -869,6 +869,36 @@ func TestCLI_InitRefusesPodiumLink(t *testing.T) {
 	}
 }
 
+// Spec: §7.5.3, §7.7 — `podium init` in a workspace whose .podium/sync.yaml
+// is a directory, which the write cannot replace, fails with an error that
+// names the directory and says to remove it, with and without --force,
+// instead of suggesting --force, and the directory stays.
+func TestCLI_InitRefusesConfigDirectory(t *testing.T) {
+	reg := cliReg(t)
+	ws := t.TempDir()
+	cfgDir := filepath.Join(ws, ".podium", "sync.yaml")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	env := withIsolatedHome(nil, t.TempDir())
+	for _, args := range [][]string{{"init", "--registry", reg}, {"init", "--registry", reg, "--force"}} {
+		what := strings.Join(append([]string{"init"}, args[3:]...), " ")
+		res := runPodium(t, ws, env, args...)
+		cliWantExit(t, res, 1, what)
+		cliContains(t, res.Stderr, `".podium/sync.yaml" is a directory`, what+": stderr names the directory")
+		cliContains(t, res.Stderr, "remove it", what+": stderr states the remedy")
+		cliNotContains(t, res.Stderr, "--force", what+": stderr does not suggest --force")
+		cliNotContains(t, res.Stderr, "rename", what+": init fails before staging the write")
+	}
+	if info, err := os.Stat(cfgDir); err != nil || !info.IsDir() {
+		t.Errorf("the directory at .podium/sync.yaml changed; stat = (%v, %v)", info, err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(ws, ".podium")); len(entries) != 1 {
+		t.Errorf("the failed init wrote into .podium: %v", entries)
+	}
+	mustNotExist(t, filepath.Join(ws, ".gitignore"))
+}
+
 // Spec: §7.7 — `podium init` leaves a .gitignore that is a symbolic link to no
 // file, or to a file outside the workspace, as it is, prints a warning, and
 // exits 0.
