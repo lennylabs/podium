@@ -29,6 +29,14 @@ From 0.8.0, `podium sync` reads and writes its lock and `sync.yaml` only when th
 - A `kind: marketplace` target whose repository commits `.podium` as a symbolic link fails its render the same way. Remove the link from the repository.
 - A rollback to 0.7.0 needs no step. 0.7.0 reads the files from the directory.
 
+### `mcp-server` artifacts through the MCP server
+
+From 0.8.0, the MCP server keeps `mcp-server` artifacts out of its results, as the specification states. `search_artifacts` and the `load_domain` notable list leave them out, and `load_artifact` refuses one with `registry.not_found` and writes nothing. 0.7.0 listed them and wrote each loaded server's entry into the harness configuration, such as `.mcp.json` or `.codex/config.toml`.
+
+- A host or script that loads `mcp-server` artifacts through the MCP server receives `registry.not_found` after the upgrade. Deliver them with `podium sync`, which writes them into the harness configuration for the next session, or load them through an SDK.
+- An entry that an earlier `load_artifact` wrote stays in the harness configuration file. A `podium sync` that writes into the same file rewrites Podium's entries there and keeps the entry only when the synced selection includes that artifact. Otherwise, delete the entry by hand.
+- A rollback to 0.7.0 needs no step.
+
 ## 0.7.0
 
 ### Rollback floor for the layer credential columns

@@ -432,6 +432,14 @@ version replaces its block and leaves one copy of it. `podium sync` writes its
 whole selection at once and removes the blocks and entries of artifacts that
 left the selection.
 
+`load_artifact` never removes another artifact's block or entry. A block or
+entry stays in the file after its artifact is deleted, leaves the caller's
+view, or stops writing to that file. To remove it, run a `podium sync` into the
+same directory whose selection writes into that file: the sync rebuilds every
+Podium block and entry in the file from its selection. Otherwise, delete the
+entry, or the block between its `podium:begin` and `podium:end` markers, by
+hand.
+
 When neither the argument nor the variable is set, `load_artifact` returns the
 manifest body and writes no file. The recipes in the
 [harness reference](#harness-reference) omit the variable, so add it to the

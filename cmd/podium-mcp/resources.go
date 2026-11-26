@@ -50,7 +50,7 @@ func (s *mcpServer) handleResourcesList() any {
 	}
 	out := []resourceDescriptor{}
 	for _, a := range view.Artifacts {
-		if a.ID == "" || a.Type == "mcp-server" {
+		if a.ID == "" || hiddenFromBridge(a.Type) {
 			continue
 		}
 		out = append(out, resourceDescriptor{
@@ -106,6 +106,12 @@ func (s *mcpServer) handleResourcesRead(raw json.RawMessage) any {
 		manifestRefresh: s.manifestBodyRefresher(loadArgs),
 	}); err != nil {
 		return errorResult(err.Error())
+	}
+	// §5: load_artifact refuses an mcp-server artifact, so the mirror returns
+	// no text for one either. The type is read after the verification, which
+	// binds it to the served record.
+	if hiddenFromBridge(resp.Type) {
+		return errorResult("resources.not_found: " + id)
 	}
 	// §6.5: the mirror always requests `latest`, so its answer is compared
 	// like a fresh load_artifact answer. A pass records the session reference

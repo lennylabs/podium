@@ -2033,6 +2033,13 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	if err := s.verifyServedArtifact(&resp, o); err != nil {
 		return errorResult(err.Error())
 	}
+	// §5: the bridge serves no mcp-server artifact. The served type is read
+	// after the verification, which binds it to the record, and the refusal
+	// comes before the freshness check, the audit event, the cache, and any
+	// write, so a refused load leaves nothing behind.
+	if hiddenFromBridge(resp.Type) {
+		return bridgeNotFound(resp.ID)
+	}
 	// §6.5: a fresh `latest` answer is compared with the session reference or
 	// the revision mark before the audit event, the gates, or any write.
 	if w := o.resolution; w != nil && !w.RefreshOnly && w.Version == "" {
@@ -2298,6 +2305,11 @@ func argString(args map[string]any, key string) string {
 // populates no §6.5 content cache, so the registry-served path stays the
 // single writer of a bucket under that key.
 func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args map[string]any) any {
+	// §5: an overlay mcp-server artifact is refused as a registry-served one
+	// is, before the audit event or any write.
+	if rec.Artifact != nil && hiddenFromBridge(string(rec.Artifact.Type)) {
+		return bridgeNotFound(rec.ID)
+	}
 	// §4.7.6: the overlay's served content_hash is the canonical serialization
 	// of the whole package, the same value the registry would store for it, so
 	// it moves when SKILL.md or a bundled resource changes and a promoted

@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 
 	"github.com/lennylabs/podium/pkg/adapter"
 )
@@ -52,7 +51,7 @@ func foldOps(files []adapter.File, resolved []string, keep func(id string) bool)
 			// fragment, so accumulating fragments are not re-stripped.
 			switch f.Op {
 			case adapter.OpMergeJSON:
-				base = stripPodiumOwnedBytes(base, keepUntaken(keep, base, mergeFragments(files, resolved, rp)))
+				base = stripPodiumOwnedBytes(base, keep)
 			case adapter.OpInject:
 				// Symmetric reconciliation for the marker-based inject files
 				// (AGENTS.md / GEMINI.md / config.toml): drop every prior
@@ -74,60 +73,6 @@ func foldOps(files []adapter.File, resolved []string, keep func(id string) bool)
 		}
 	}
 	return items, nil
-}
-
-// mergeFragments returns the config-merge fragments of files that land at the
-// resolved destination rp, in input order.
-func mergeFragments(files []adapter.File, resolved []string, rp string) [][]byte {
-	var frags [][]byte
-	for i, f := range files {
-		if f.Op == adapter.OpMergeJSON && resolved[i] == rp {
-			frags = append(frags, f.Content)
-		}
-	}
-	return frags
-}
-
-// keepUntaken narrows keep, for one config-merge file whose current bytes are
-// base, to the artifacts whose keyed entry no fragment in frags takes over. A
-// keyed config-map entry (an mcpServers server) is keyed by the artifact's
-// name rather than its ID, so another artifact's fragment can record the entry
-// a kept artifact holds. Keeping that entry would deep-merge the new fragment
-// into it, mixing the two artifacts' fields and leaving both IDs in the index,
-// so the kept artifact's contribution to this file is stripped instead and the
-// fragment replaces the entry. A nil keep stays nil.
-//
-// Spec: §6.6, §6.7
-func keepUntaken(keep func(id string) bool, base []byte, frags [][]byte) func(id string) bool {
-	if keep == nil {
-		return nil
-	}
-	taken := EntriesTakenOver(base, frags)
-	if len(taken) == 0 {
-		return keep
-	}
-	return func(id string) bool { return keep(id) && !taken[id] }
-}
-
-// EntriesTakenOver returns the artifact IDs whose keyed config-map entry, at
-// the path the index of the JSON config document doc records for it, a
-// fragment in frags records for a different artifact. A document or fragment
-// that carries no index contributes nothing.
-//
-// Spec: §6.7, §13.11.3
-func EntriesTakenOver(doc []byte, frags [][]byte) map[string]bool {
-	held := IndexedEntries(doc)
-	taken := map[string]bool{}
-	for _, frag := range frags {
-		for owner, loc := range IndexedEntries(frag) {
-			for id, path := range held {
-				if id != owner && slices.Equal(path, loc) {
-					taken[id] = true
-				}
-			}
-		}
-	}
-	return taken
 }
 
 // resolveMergeTarget returns the path a config-merge or inject into full
