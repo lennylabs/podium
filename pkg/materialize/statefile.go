@@ -13,9 +13,11 @@ import (
 // destination, such as .podium/sync.lock. A target can be a repository
 // checkout whose content another party commits (§7.8), so a .podium directory
 // that is a symbolic link is refused, and a link at the file itself is
-// followed only when it resolves to a regular file inside the destination; a
-// link that resolves outside is refused. The root itself may be a link. An
-// absent file returns an error wrapping fs.ErrNotExist.
+// followed only when it resolves to a regular file inside the destination
+// whose path passes the recorded-path rule, or to another regular file inside
+// .podium/ (checkStateLink); a link that resolves outside or into .git is
+// refused. The root itself may be a link. An absent file returns an error
+// wrapping fs.ErrNotExist.
 //
 // Spec: §7.5.3, §7.8
 func ReadStateFile(destination, rel string) ([]byte, error) {

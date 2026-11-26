@@ -235,17 +235,37 @@ func resolveIn(root *os.Root, destination, rel string, segs []string, o resolveO
 	}
 	// A recorded path passes the rule in its resolved form. A state path such
 	// as .podium/sync.lock fails the rule by design, so it is checked only
-	// when a link moved it: a lock link into .git is refused like any other.
-	if o.recorded || resolved != rel {
-		if err := CheckRecordedPath(resolved); err != nil {
-			return nil, fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, resolved, err)
-		}
+	// when a link moved it (checkStateLink): a lock link into .git is refused
+	// like any other.
+	var ruleErr error
+	switch {
+	case o.recorded:
+		ruleErr = CheckRecordedPath(resolved)
+	case resolved != rel:
+		ruleErr = checkStateLink(resolved)
+	}
+	if ruleErr != nil {
+		return nil, fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, resolved, ruleErr)
 	}
 	rsegs := strings.Split(resolved, "/")
 	// The directories after the last link are real directories the path
 	// itself created; the pruning stops above them.
 	realDirs := len(dirs) - (lastLink + 1)
 	return &resolvedPath{root: root, segs: rsegs, keep: max(len(rsegs)-1-realDirs, 0)}, nil
+}
+
+// checkStateLink applies the recorded-path rule to the resolved path of a
+// state file reached through a link. A link to another regular file inside
+// .podium/, such as .podium/sync.lock linked to .podium/real.lock, reaches
+// none of the target's other files, so the part below .podium/ is checked as
+// a path of its own; any other resolved path must pass the rule.
+//
+// Spec: §7.5.3
+func checkStateLink(resolved string) error {
+	if first, rest, ok := strings.Cut(resolved, "/"); ok && strings.EqualFold(first, ".podium") {
+		return CheckRecordedPath(rest)
+	}
+	return CheckRecordedPath(resolved)
 }
 
 // podiumDirError reports that the .podium directory on rel's path is a

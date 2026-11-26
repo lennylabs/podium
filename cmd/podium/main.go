@@ -1637,12 +1637,16 @@ func initCmd(args []string) int {
 	}
 	// §7.7 workspace mode adds the gitignored override file +
 	// overlay dir to .gitignore so they don't accidentally land
-	// in commits. Best-effort: a read-only workspace does not fail init.
+	// in commits. Best-effort: a read-only workspace does not fail init,
+	// and a .gitignore link the step skips is reported as a warning (§7.7).
 	if !*scopeGlobal && !*scopeLocal {
-		_ = sync.EnsureGitignoreEntries(workspace, []string{
+		err := sync.EnsureGitignoreEntries(workspace, []string{
 			".podium/sync.local.yaml",
 			".podium/overlay/",
 		})
+		if errors.Is(err, sync.ErrGitignoreLinkSkipped) {
+			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+		}
 	}
 	fmt.Printf("Wrote %s\n", dest)
 	// (spec: §7.7 workspace-mode step 4) — print next-step hints.

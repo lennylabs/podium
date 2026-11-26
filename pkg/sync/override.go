@@ -269,7 +269,7 @@ func SaveAs(opts SaveAsOptions) (*SaveAsResult, error) {
 	}
 	// Detect a fresh sync.yaml so the write can emit the empty defaults: block
 	// §7.5.6 documents for a newly created file.
-	cfg, err := ReadConfig(opts.Target)
+	cfg, err := readStateConfig(opts.Target)
 	if err != nil {
 		return nil, err
 	}

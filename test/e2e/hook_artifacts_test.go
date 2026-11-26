@@ -559,8 +559,9 @@ func TestHooks_SyncClaudeCodeBundledFull(t *testing.T) {
 }
 
 // the doc says the bundled script is "testable in isolation",
-// implying an executable bit. The materialize path writes via writeAtomic,
-// which defaults to mode 0o644, so the materialized script is not executable.
+// implying an executable bit. materialize.Write stages each file with the mode
+// the adapter sets, 0o644 by default, so the materialized script is not
+// executable.
 // No implementation-gap finding is filed for this; the test asserts the actual
 // (non-executable) mode as a change-detector.
 func TestHooks_BundledScriptNotExecutable(t *testing.T) {

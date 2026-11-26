@@ -3,6 +3,7 @@ package sync
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/lennylabs/podium/pkg/materialize"
 	"github.com/lennylabs/podium/pkg/version"
 )
 
@@ -403,6 +405,27 @@ func ReadConfig(workspace string) (*SyncConfig, error) {
 			return nil, nil
 		}
 		return nil, err
+	}
+	cfg := &SyncConfig{}
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("sync.yaml: %w", err)
+	}
+	return cfg, nil
+}
+
+// readStateConfig reads the workspace's sync.yaml for a command that writes
+// it back, such as `podium sync save-as`. It reads through
+// materialize.ReadStateFile under the rules of the lock (§7.5.3): a sync.yaml
+// link that resolves outside the workspace is not read, so the outside file's
+// content is never copied into the workspace's sync.yaml, and an unusable
+// .podium reports ErrStateDirUnusable. A missing file returns (nil, nil).
+func readStateConfig(workspace string) (*SyncConfig, error) {
+	data, err := materialize.ReadStateFile(workspace, configRelPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, stateDirError(workspace, err)
 	}
 	cfg := &SyncConfig{}
 	if err := yaml.Unmarshal(data, cfg); err != nil {

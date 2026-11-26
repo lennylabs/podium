@@ -302,7 +302,7 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 	// §7.5.3 recorded-path rule drops every entry the cleanup must not touch
 	// before the comparison or the cleanup reads it. A committed .podium link
 	// fails the render here, before anything is written.
-	prior, err := ReadLock(workdir)
+	prior, err := readPriorLock(workdir)
 	if errors.Is(err, ErrStateDirUnusable) {
 		return nil, fmt.Errorf("publish %q: %w", outputID, err)
 	}

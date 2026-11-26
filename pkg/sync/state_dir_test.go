@@ -1,12 +1,15 @@
 package sync
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lennylabs/podium/pkg/adapter"
 )
 
 // podiumLinkTarget returns a target whose .podium is a symbolic link to a
@@ -180,10 +183,161 @@ func TestEnsureGitignoreEntries(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(ws, ".gitignore")); err != nil {
 		t.Fatalf("Symlink: %v", err)
 	}
-	if err := EnsureGitignoreEntries(ws, entries); err == nil {
-		t.Errorf("EnsureGitignoreEntries through an outside link must fail")
+	if err := EnsureGitignoreEntries(ws, entries); !errors.Is(err, ErrGitignoreLinkSkipped) {
+		t.Errorf("EnsureGitignoreEntries through an outside link = %v, want ErrGitignoreLinkSkipped", err)
 	}
 	if got, _ := os.ReadFile(outside); string(got) != "outside\n" {
 		t.Errorf("the outside file changed: %q", got)
+	}
+}
+
+// Spec: §7.7 — a .gitignore that is a dangling symbolic link, relative or
+// absolute, is skipped with ErrGitignoreLinkSkipped and stays a link: init
+// neither replaces the link with a regular file nor creates the file it
+// names.
+func TestEnsureGitignoreEntries_DanglingLinkSkipped(t *testing.T) {
+	t.Parallel()
+	for name, dest := range map[string]string{
+		"relative": "shared/missing",
+		"absolute": filepath.Join(t.TempDir(), "nonexistent-dir", "x"),
+	} {
+		ws := t.TempDir()
+		link := filepath.Join(ws, ".gitignore")
+		if err := os.Symlink(dest, link); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		if err := EnsureGitignoreEntries(ws, []string{".podium/overlay/"}); !errors.Is(err, ErrGitignoreLinkSkipped) {
+			t.Errorf("%s: EnsureGitignoreEntries = %v, want ErrGitignoreLinkSkipped", name, err)
+		}
+		if info, err := os.Lstat(link); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+			t.Errorf("%s: .gitignore must stay a link; lstat = (%v, %v)", name, info, err)
+		}
+		if _, err := os.Stat(link); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s: the file the link names must not be created; stat err = %v", name, err)
+		}
+	}
+}
+
+// Spec: §7.5.3 — save-as does not read a sync.yaml link that resolves outside
+// the workspace, so the outside file's content is never copied into the
+// workspace's sync.yaml: the command fails, the link stays, and the outside
+// file is unchanged.
+func TestSaveAs_OutsideConfigLinkNotRead(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	target := filepath.Join(base, "ws")
+	outside := filepath.Join(base, "outside-sync.yaml")
+	const secret = "defaults:\n  registry: https://secret.example/registry\n  identity: SECRET-ID\n"
+	writeFile(t, outside, secret)
+	if err := WriteLock(target, &LockFile{Harness: "claude-code"}); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+	link := filepath.Join(target, ".podium", "sync.yaml")
+	if err := os.Symlink("../../outside-sync.yaml", link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := SaveAs(SaveAsOptions{Target: target, Profile: "p1"}); err == nil {
+		t.Errorf("save-as through an outside sync.yaml link must fail")
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Errorf("sync.yaml must stay the link; lstat = (%v, %v)", info, err)
+	}
+	if got, _ := os.ReadFile(outside); string(got) != secret {
+		t.Errorf("the outside file changed: %q", got)
+	}
+}
+
+// Spec: §7.5.3 — a lock that is a link to another regular file inside
+// .podium/ is read, so a scope change still removes the output the prior run
+// wrote; a lock the run cannot read is named on standard error.
+//
+// Not parallel: the test swaps the process-wide os.Stderr.
+func TestRun_LockLinkInsidePodiumRead(t *testing.T) {
+	registry := agentRegistry(t, "personal/greet", "finance/invoice")
+	target := t.TempDir()
+	opts := Options{RegistryPath: registry, Target: target, AdapterID: "none"}
+	syncChanged(t, opts)
+	lock := filepath.Join(target, ".podium", "sync.lock")
+	if err := os.Rename(lock, filepath.Join(target, ".podium", "real.lock")); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if err := os.Symlink("real.lock", lock); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	opts.Scope = ScopeFilter{Exclude: []string{"finance/**"}}
+	stderr := captureStderr(t, func() { syncChanged(t, opts) })
+	if strings.Contains(stderr, "cannot read") {
+		t.Errorf("stderr = %q, want the in-.podium lock link read", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(target, "finance", "invoice", "ARTIFACT.md")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the excluded artifact's output must be removed; stat err = %v", err)
+	}
+}
+
+// Spec: §7.5.3 — a lock the run cannot read, such as a lock link that
+// resolves outside the target, is named on standard error, and the run
+// proceeds as if no prior lock existed.
+//
+// Not parallel: the test swaps the process-wide os.Stderr.
+func TestRun_UnreadableLockWarns(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "ws")
+	writeFile(t, filepath.Join(base, "outside.lock"), "version: 1\n")
+	if err := os.MkdirAll(filepath.Join(target, ".podium"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(base, "outside.lock"), filepath.Join(target, ".podium", "sync.lock")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	opts := Options{RegistryPath: agentRegistry(t, "personal/greet"), Target: target, AdapterID: "none"}
+	stderr := captureStderr(t, func() { syncChanged(t, opts) })
+	if !strings.Contains(stderr, "cannot read "+LockFilePath(target)) || !strings.Contains(stderr, "as if no prior lock existed") {
+		t.Errorf("stderr = %q, want the unreadable lock named", stderr)
+	}
+	if got, _ := os.ReadFile(filepath.Join(base, "outside.lock")); string(got) != "version: 1\n" {
+		t.Errorf("the outside lock changed: %q", got)
+	}
+}
+
+// podiumLinkingAdapter is a stub HarnessAdapter that replaces the target's
+// .podium with a symbolic link while it adapts, which happens after the run
+// read the prior lock and before it writes the next one.
+type podiumLinkingAdapter struct {
+	target, elsewhere string
+}
+
+func (podiumLinkingAdapter) ID() string { return "podium-linking" }
+
+func (a podiumLinkingAdapter) Adapt(_ context.Context, src adapter.Source) ([]adapter.File, error) {
+	link := filepath.Join(a.target, ".podium")
+	if _, err := os.Lstat(link); errors.Is(err, fs.ErrNotExist) {
+		if err := os.Symlink(a.elsewhere, link); err != nil {
+			return nil, err
+		}
+	}
+	return []adapter.File{{Path: "out/" + src.ArtifactID + ".txt", Content: []byte("x\n")}}, nil
+}
+
+// Spec: §7.5.3 — a .podium replaced by a symbolic link while the run
+// materializes fails the run at the lock write with ErrStateDirUnusable,
+// rather than completing without a lock.
+func TestRun_PodiumLinkedDuringRunFailsLockWrite(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	target := filepath.Join(base, "ws")
+	elsewhere := filepath.Join(base, "elsewhere")
+	for _, d := range []string{target, elsewhere} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+	}
+	reg := adapter.NewRegistry()
+	if err := reg.Register(podiumLinkingAdapter{target: target, elsewhere: elsewhere}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	_, err := Run(Options{RegistryPath: agentRegistry(t, "team/glossary"), Target: target, AdapterID: "podium-linking", AdapterRegistry: reg})
+	wantStateDirError(t, "Run", err, target)
+	if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
+		t.Errorf("the lock landed behind the .podium link: %v", entries)
 	}
 }

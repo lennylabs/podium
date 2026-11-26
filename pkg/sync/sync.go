@@ -314,8 +314,9 @@ func Run(opts Options) (*Result, error) {
 	// A .podium that is a symbolic link or not a directory fails the run here,
 	// before anything is written: the lock could neither be read nor written,
 	// and a run that went on would orphan every later stale file. Any other
-	// lock read error leaves the run without a prior lock, as before.
-	priorLock, err := ReadLock(opts.Target)
+	// lock read error is named on standard error and leaves the run without
+	// a prior lock.
+	priorLock, err := readPriorLock(opts.Target)
 	if errors.Is(err, ErrStateDirUnusable) {
 		return nil, err
 	}

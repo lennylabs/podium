@@ -3,6 +3,7 @@ package sync
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/lennylabs/podium/pkg/materialize"
@@ -26,6 +27,25 @@ func stateDirError(target string, err error) error {
 	}
 	return fmt.Errorf("%w: %s: sync keeps its lock and sync.yaml in a .podium directory inside the target and does not follow a link there; replace it with a directory that holds those files: %w",
 		ErrStateDirUnusable, filepath.Join(target, ".podium"), err)
+}
+
+// readPriorLock reads the prior lock for a run. An unusable .podium returns
+// ErrStateDirUnusable, which fails the run. Any other read error, such as a
+// lock link that resolves outside the target or a lock that does not parse,
+// is named on standard error and the run proceeds as if no prior lock
+// existed, so a lock the run cannot use is never ignored silently.
+//
+// Spec: §7.5.3
+func readPriorLock(target string) (*LockFile, error) {
+	lock, err := ReadLock(target)
+	if err == nil {
+		return lock, nil
+	}
+	if errors.Is(err, ErrStateDirUnusable) {
+		return nil, err
+	}
+	fmt.Fprintf(os.Stderr, "sync: cannot read %s: %v; the run proceeds as if no prior lock existed\n", LockFilePath(target), err)
+	return nil, nil
 }
 
 // writeStateFile writes one of sync's own files below target through
