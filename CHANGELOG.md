@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **A deadline on each `git` layer snapshot** (§7.3.1, §13.12): every ingest of a `git` layer, from a webhook, `podium layer reingest`, or `podium layer watch`, clones under `PODIUM_GIT_FETCH_TIMEOUT` (`registry.yaml` key `git_fetch_timeout`, default `10m`) over `http`, `https`, `ssh`, scp-like, and `git://` remotes, including an `ssh` remote's connection and handshake. A remote that hangs or trickles data no longer holds the ingest and the layer's ingest claim indefinitely: a snapshot that does not finish within the deadline fails the ingest with `ingest.source_unreachable` and a message that names the setting, hands the claim back, and leaves the served artifacts in place. A clone that takes longer than the default, such as the full-history clone of a large repository, previously succeeded and now fails with `ingest.source_unreachable`; raising `PODIUM_GIT_FETCH_TIMEOUT` above its clone time restores it, as the upgrade notes describe. A value that is not a duration above zero refuses startup with `config.invalid`. `podium config show --server` reports the resolved value as `git_fetch_timeout`.
 
+### Fixed
+
+- **An anonymous caller sees public layers only, whatever a layer's `users` and `groups` hold** (§4.6, §6.3.3): a layer whose visibility held an empty `users` entry, or a `groups` filter the SCIM directory resolved to an empty member name, was visible to every request that carried no credential, because an anonymous caller has an empty subject. A `groups` filter the directory resolved to an empty member name was also visible to every authenticated caller whose token carried no email claim. The `groups` and `users` fields now admit authenticated callers only, as `organization` already did, and a `groups` or `users` member admits a caller only through a non-empty value equal to the caller's non-empty subject, email, or group. A configuration that holds an empty entry still loads, and the entry matches no caller.
+
 ## [0.7.0] - 2026-11-19
 
 ### Added
