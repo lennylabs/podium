@@ -723,7 +723,7 @@ reingest`, source updates.
 2. Create a real Git repository holding artifacts.
 
    ```bash
-   mkdir -p "$WORK/repo" && cd "$WORK/repo" && git init -q
+   mkdir -p "$WORK/repo" && cd "$WORK/repo" && git init -q -b main
    podium artifact scaffold --type skill --description "Deploy the service" "$WORK/repo/deploy"
    git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "add deploy skill"
    ```
@@ -791,11 +791,11 @@ ordering. S05 covers the same-ID collision between layers.
    collision between layers.
 
    ```bash
-   mkdir -p "$WORK/base" && cd "$WORK/base" && git init -q
+   mkdir -p "$WORK/base" && cd "$WORK/base" && git init -q -b main
    podium artifact scaffold --type skill --description "base greet" "$WORK/base/greet" --force
    git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "base"
 
-   mkdir -p "$WORK/team" && cd "$WORK/team" && git init -q
+   mkdir -p "$WORK/team" && cd "$WORK/team" && git init -q -b main
    podium artifact scaffold --type skill --description "team greet" "$WORK/team/team-greet" --force
    podium artifact scaffold --type skill --description "Team only" "$WORK/team/team-only" --force
    git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "team"
@@ -1345,7 +1345,7 @@ that loading a deprecated artifact surfaces the replacement.
    resource.
 
    ```bash
-   mkdir -p "$WORK/repo" && cd "$WORK/repo" && git init -q
+   mkdir -p "$WORK/repo" && cd "$WORK/repo" && git init -q -b main
    podium artifact scaffold --type skill --description "Deploy the service" "$WORK/repo/deploy"
    sed -i.bak 's/^  version: ".*"$/  version: "1.0.0"/' "$WORK/repo/deploy/SKILL.md" && rm "$WORK/repo/deploy/SKILL.md.bak"
    git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "add deploy skill 1.0.0"
@@ -2033,7 +2033,7 @@ endpoint, HMAC verification.
    stderr.
 
    ```bash
-   mkdir -p "$WORK/repo" && cd "$WORK/repo" && git init -q
+   mkdir -p "$WORK/repo" && cd "$WORK/repo" && git init -q -b main
    podium artifact scaffold --type skill --description "Deploy the service" "$WORK/repo/deploy"
    git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "deploy"
    podium serve --standalone --no-embeddings --bind 127.0.0.1:8121 > "$WORK/srv.log" 2>&1 &
@@ -2061,7 +2061,7 @@ endpoint, HMAC verification.
    sleep 2
    podium search --registry "$PODIUM_REGISTRY" "rollback"
    echo "--- wrong signature ---"
-   curl -s -o /dev/null -w "bad delivery: %{http_code}\n" -X POST \
+   curl -s -w "\nbad delivery: %{http_code}\n" -X POST \
      -H "X-Hub-Signature-256: sha256=deadbeef" -H "Content-Type: application/json" \
      --data "$BODY" "$PODIUM_REGISTRY/v1/ingest/webhook/team"
    ```
@@ -4570,7 +4570,7 @@ to 3 completed and the browser still signed in.
 1. Create a Git repository the layer can source from.
 
    ```bash
-   mkdir -p "$WORK/own-repo" && cd "$WORK/own-repo" && git init -q
+   mkdir -p "$WORK/own-repo" && cd "$WORK/own-repo" && git init -q -b main
    podium artifact scaffold --type skill --description "Roll a release" "$WORK/own-repo/release"
    git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "add release skill"
    ```

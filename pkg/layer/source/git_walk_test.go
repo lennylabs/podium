@@ -40,38 +40,73 @@ func longHistory(t *testing.T) (*git.Repository, plumbing.Hash) {
 }
 
 func buildLinearHistory(n int) (*git.Repository, plumbing.Hash, error) {
-	st := memory.NewStorage()
-	treeObj := st.NewEncodedObject()
-	if err := (&object.Tree{}).Encode(treeObj); err != nil {
-		return nil, plumbing.ZeroHash, err
-	}
-	treeHash, err := st.SetEncodedObject(treeObj)
+	b, err := newHistoryBuilder()
 	if err != nil {
 		return nil, plumbing.ZeroHash, err
 	}
-	sig := object.Signature{Name: "alice", Email: "alice@acme.com", When: time.Unix(0, 0).UTC()}
 	var head plumbing.Hash
 	for i := 0; i < n; i++ {
-		c := &object.Commit{Author: sig, Committer: sig, Message: strconv.Itoa(i), TreeHash: treeHash}
+		var parents []plumbing.Hash
 		if i > 0 {
-			c.ParentHashes = []plumbing.Hash{head}
+			parents = []plumbing.Hash{head}
 		}
-		obj := st.NewEncodedObject()
-		if err := c.Encode(obj); err != nil {
-			return nil, plumbing.ZeroHash, err
-		}
-		if head, err = st.SetEncodedObject(obj); err != nil {
+		if head, err = b.commit(true, parents...); err != nil {
 			return nil, plumbing.ZeroHash, err
 		}
 	}
-	if err := st.SetReference(plumbing.NewHashReference("refs/heads/main", head)); err != nil {
-		return nil, plumbing.ZeroHash, err
-	}
-	if err := st.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, "refs/heads/main")); err != nil {
-		return nil, plumbing.ZeroHash, err
-	}
-	repo, err := git.Open(st, nil)
+	repo, err := b.open(head)
 	return repo, head, err
+}
+
+// historyBuilder writes commits over one empty tree into an in-memory
+// repository, so a test can build any commit graph, including one whose
+// clone lacks some of the commits its history names.
+type historyBuilder struct {
+	st   *memory.Storage
+	tree plumbing.Hash
+	seq  int
+}
+
+func newHistoryBuilder() (*historyBuilder, error) {
+	st := memory.NewStorage()
+	treeObj := st.NewEncodedObject()
+	if err := (&object.Tree{}).Encode(treeObj); err != nil {
+		return nil, err
+	}
+	tree, err := st.SetEncodedObject(treeObj)
+	if err != nil {
+		return nil, err
+	}
+	return &historyBuilder{st: st, tree: tree}, nil
+}
+
+// commit encodes a commit with the given parents and returns its hash. Each
+// commit carries a distinct message, so no two commits share a hash. With
+// stored false, the commit is hashed and left out of the repository, as a
+// shallow or pruned clone leaves out the history beyond its boundary.
+func (b *historyBuilder) commit(stored bool, parents ...plumbing.Hash) (plumbing.Hash, error) {
+	sig := object.Signature{Name: "alice", Email: "alice@acme.com", When: time.Unix(0, 0).UTC()}
+	c := &object.Commit{Author: sig, Committer: sig, Message: strconv.Itoa(b.seq), TreeHash: b.tree, ParentHashes: parents}
+	b.seq++
+	obj := b.st.NewEncodedObject()
+	if err := c.Encode(obj); err != nil {
+		return plumbing.ZeroHash, err
+	}
+	if !stored {
+		return obj.Hash(), nil
+	}
+	return b.st.SetEncodedObject(obj)
+}
+
+// open points the main branch and HEAD at head and opens the repository.
+func (b *historyBuilder) open(head plumbing.Hash) (*git.Repository, error) {
+	if err := b.st.SetReference(plumbing.NewHashReference("refs/heads/main", head)); err != nil {
+		return nil, err
+	}
+	if err := b.st.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, "refs/heads/main")); err != nil {
+		return nil, err
+	}
+	return git.Open(b.st, nil)
 }
 
 // unreachablePrior names a commit the long history does not hold, so the
@@ -165,4 +200,117 @@ func TestReadSnapshot_MissingRefRootAndCommit(t *testing.T) {
 	if reachable, err := isAncestor(context.Background(), repo, plumbing.ZeroHash, unreachablePrior); reachable || err != nil {
 		t.Errorf("isAncestor from a missing commit = %v, %v; want false, nil", reachable, err)
 	}
+}
+
+// mustCommit is commit for a test, failing it on an encoding error.
+func (b *historyBuilder) mustCommit(t *testing.T, stored bool, parents ...plumbing.Hash) plumbing.Hash {
+	t.Helper()
+	h, err := b.commit(stored, parents...)
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	return h
+}
+
+// ancestryCase is one force-push check: the head a snapshot reads, the prior
+// reference the layer recorded, and whether the prior is in the head's history.
+type ancestryCase struct {
+	name      string
+	head      plumbing.Hash
+	prior     plumbing.Hash
+	reachable bool
+}
+
+// checkAncestry asserts isAncestor's answer for each case and that
+// readSnapshot reports a rewritten history exactly when the prior is not
+// reachable.
+func checkAncestry(t *testing.T, repo *git.Repository, cases []ancestryCase) {
+	t.Helper()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := isAncestor(context.Background(), repo, tc.prior, tc.head)
+			if err != nil || got != tc.reachable {
+				t.Errorf("isAncestor = %v, %v; want %v, nil", got, err, tc.reachable)
+			}
+			snap, err := readSnapshot(context.Background(), repo, LayerConfig{Ref: tc.head.String(), PriorRef: tc.prior.String()})
+			if err != nil {
+				t.Fatalf("readSnapshot: %v", err)
+			}
+			if snap.HistoryRewritten != !tc.reachable {
+				t.Errorf("HistoryRewritten = %v, want %v", snap.HistoryRewritten, !tc.reachable)
+			}
+		})
+	}
+}
+
+// Spec: §7.3.1 (Force-push detected) — a merge brings the history of every
+// parent into the new head, so a prior reference reachable only through a
+// merge commit's second parent is in the history and the snapshot reports no
+// rewrite. A prior reference on a branch no merge brought in is reported as a
+// rewrite after the walk covers both sides of the merge.
+func TestIsAncestor_MergeCommits(t *testing.T) {
+	t.Parallel()
+	b, err := newHistoryBuilder()
+	if err != nil {
+		t.Fatalf("newHistoryBuilder: %v", err)
+	}
+	base := b.mustCommit(t, true)
+	m1 := b.mustCommit(t, true, base)
+	m2 := b.mustCommit(t, true, m1)
+	f1 := b.mustCommit(t, true, base)
+	f2 := b.mustCommit(t, true, f1)
+	// merge joins two arms of equal length, so the walk reaches base along
+	// both of them.
+	merge := b.mustCommit(t, true, m2, f2)
+	// noFF is a no-fast-forward merge of f1 into a main branch that has not
+	// moved since base, so its first parent is the merge base.
+	noFF := b.mustCommit(t, true, base, f1)
+	abandoned := b.mustCommit(t, true, base)
+	repo, err := b.open(merge)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	checkAncestry(t, repo, []ancestryCase{
+		{name: "prior behind the second parent", head: merge, prior: f1, reachable: true},
+		{name: "prior is the second parent", head: merge, prior: f2, reachable: true},
+		{name: "prior is the merge base", head: merge, prior: base, reachable: true},
+		{name: "prior is the head", head: merge, prior: merge, reachable: true},
+		{name: "prior on an unmerged branch", head: merge, prior: abandoned, reachable: false},
+		{name: "no-fast-forward merge of the prior", head: noFF, prior: f1, reachable: true},
+		{name: "no-fast-forward merge without the prior", head: noFF, prior: abandoned, reachable: false},
+	})
+}
+
+// Spec: §7.3.1 (Force-push detected) — in a shallow or pruned clone, a commit
+// can name a parent the clone does not hold. A commit that names the prior
+// reference as its parent proves the prior is in the history, whether or not
+// the clone holds the prior's object, and a missing parent on one side of a
+// merge does not hide a prior reachable through the other side. A prior that
+// only the missing history could reach cannot be shown reachable, so the
+// snapshot reports a rewrite, which the strict policy refuses.
+func TestIsAncestor_MissingParentCommits(t *testing.T) {
+	t.Parallel()
+	b, err := newHistoryBuilder()
+	if err != nil {
+		t.Fatalf("newHistoryBuilder: %v", err)
+	}
+	pruned := b.mustCommit(t, false)
+	beyond := b.mustCommit(t, false, pruned)
+	boundary := b.mustCommit(t, true, beyond)
+	head := b.mustCommit(t, true, boundary)
+	prior := b.mustCommit(t, true, boundary)
+	sideHead := b.mustCommit(t, true, prior)
+	missingSide := b.mustCommit(t, false, boundary)
+	merge := b.mustCommit(t, true, missingSide, sideHead)
+	repo, err := b.open(head)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	checkAncestry(t, repo, []ancestryCase{
+		{name: "prior is the absent parent of the shallow boundary", head: head, prior: beyond, reachable: true},
+		{name: "prior beyond the absent parent", head: head, prior: pruned, reachable: false},
+		{name: "prior held in the clone below the boundary", head: head, prior: boundary, reachable: true},
+		{name: "merge whose first parent is absent and whose second parent leads to the prior", head: merge, prior: prior, reachable: true},
+		{name: "merge whose first parent is absent without the prior", head: merge, prior: pruned, reachable: false},
+	})
 }

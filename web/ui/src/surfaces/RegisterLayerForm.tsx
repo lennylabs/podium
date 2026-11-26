@@ -897,6 +897,12 @@ function VisibilityAxis({
   );
 }
 
+/** emptyMemberLabel is the text an empty member's token shows. Only a layer
+ * stored before the §4.6 entry rule holds one, and the registry refuses an
+ * update that sends it back, so the token needs a visible name for the reader
+ * to find and remove it. */
+const emptyMemberLabel = "(empty entry)";
+
 /** TokenInput names the members of an axis. The Edit dialog draws it over the
  * same members, holding the stored ones apart from the line and passing them
  * in `tokens`, and its `onRemove` takes one back from that held array so a
@@ -971,7 +977,7 @@ export function TokenInput({
               type="button"
               className="token mono token-drop"
               key={token}
-              aria-label={`Remove ${token}`}
+              aria-label={`Remove ${token === "" ? emptyMemberLabel : token}`}
               onClick={() => {
                 if (onRemove !== undefined) {
                   onRemove(token);
@@ -980,7 +986,7 @@ export function TokenInput({
                 onChange(without(tokens, token).join(', '));
               }}
             >
-              {token}
+              {token === "" ? emptyMemberLabel : token}
               <span aria-hidden="true">✕</span>
             </button>
           ))}

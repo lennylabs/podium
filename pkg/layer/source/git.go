@@ -76,9 +76,13 @@ func (g Git) Snapshot(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
 	deadline := time.Now().Add(timeout)
 	fetchCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
-	proxyOpts, release := snapshotProxyOptions(fetchCtx, cfg.Repo)
-	defer release()
-	snap, err := boundedSnapshot(fetchCtx, cfg, proxyOpts)
+	proxyOpts, releaseDial := snapshotProxyOptions(fetchCtx, cfg.Repo)
+	defer releaseDial()
+	// The snapshot owns the SSH agent connection of an ssh clone and closes it
+	// when it returns, on success, on failure, and at the deadline.
+	auth, releaseAuth := snapshotSSHAuth(cfg.Repo)
+	defer releaseAuth()
+	snap, err := boundedSnapshot(fetchCtx, cfg, proxyOpts, auth)
 	// Only the expiry of this deadline names the setting. The clone error is
 	// dropped in that case, because its cause is the deadline.
 	if err != nil && fetchDeadlinePassed(ctx, fetchCtx, deadline) {
@@ -126,14 +130,14 @@ func fetchDeadlinePassed(ctx, fetchCtx context.Context, deadline time.Time) bool
 // request, the ssh transport dials through deadlineDialer, which closes the
 // connection when ctx ends, and readSnapshot checks ctx between its steps and
 // during the history walk.
-func boundedSnapshot(ctx context.Context, cfg LayerConfig, proxyOpts transport.ProxyOptions) (*Snapshot, error) {
+func boundedSnapshot(ctx context.Context, cfg LayerConfig, proxyOpts transport.ProxyOptions, auth transport.AuthMethod) (*Snapshot, error) {
 	type result struct {
 		snap *Snapshot
 		err  error
 	}
 	done := make(chan result, 1)
 	go func() {
-		snap, err := snapshotGit(ctx, cfg, proxyOpts)
+		snap, err := snapshotGit(ctx, cfg, proxyOpts, auth)
 		done <- result{snap, err}
 	}()
 	select {
@@ -150,11 +154,13 @@ func boundedSnapshot(ctx context.Context, cfg LayerConfig, proxyOpts transport.P
 	}
 }
 
-// snapshotGit clones cfg.Repo under ctx and reads the tree at cfg.Ref.
-func snapshotGit(ctx context.Context, cfg LayerConfig, proxyOpts transport.ProxyOptions) (*Snapshot, error) {
+// snapshotGit clones cfg.Repo under ctx and reads the tree at cfg.Ref. A nil
+// auth selects go-git's own handling of the remote's transport.
+func snapshotGit(ctx context.Context, cfg LayerConfig, proxyOpts transport.ProxyOptions, auth transport.AuthMethod) (*Snapshot, error) {
 	storer := memory.NewStorage()
 	cloneOpts := &git.CloneOptions{
 		URL:           cfg.Repo,
+		Auth:          auth,
 		ReferenceName: refNameFor(cfg.Ref),
 		SingleBranch:  true,
 		ProxyOptions:  proxyOpts,
@@ -241,12 +247,22 @@ func snapshotCtxErr(ctx context.Context) error {
 const ancestorWalkCheckEvery = 256
 
 // isAncestor reports whether ancestor is reachable from descendant
-// via parent edges. Used by Git.Snapshot for §7.3.1 force-push
-// detection. Walks BFS over the local clone; a missing object yields
+// via parent edges, or is descendant itself. Used by Git.Snapshot for
+// §7.3.1 force-push detection. Walks BFS over the local clone, following
+// every parent of a merge commit. A commit that names ancestor as a
+// parent reaches it even when the clone lacks ancestor's object, such as
+// the boundary commit of a shallow history, because a commit's hash
+// covers its parent hashes. Any other missing object ends that path of
+// the walk, and an ancestor only the missing history could reach yields
 // false (treated as "not reachable, therefore rewrite"). An unreachable
 // ancestor makes the walk cover the whole history, so it stops with the
 // snapshot's source-unreachable failure when ctx ends.
+//
+// Spec: §7.3.1 (Force-push detected).
 func isAncestor(ctx context.Context, repo *git.Repository, ancestor, descendant plumbing.Hash) (bool, error) {
+	if descendant == ancestor {
+		return true, nil
+	}
 	descCommit, err := repo.CommitObject(descendant)
 	if err != nil {
 		return false, nil
@@ -261,14 +277,14 @@ func isAncestor(ctx context.Context, repo *git.Repository, ancestor, descendant 
 		}
 		c := queue[0]
 		queue = queue[1:]
-		if c.Hash == ancestor {
-			return true, nil
-		}
 		if seen[c.Hash] {
 			continue
 		}
 		seen[c.Hash] = true
 		for _, ph := range c.ParentHashes {
+			if ph == ancestor {
+				return true, nil
+			}
 			if seen[ph] {
 				continue
 			}

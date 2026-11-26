@@ -25,9 +25,24 @@ func stateDirError(target string, err error) error {
 	if !errors.Is(err, materialize.ErrPodiumNotDirectory) {
 		return err
 	}
-	return fmt.Errorf("%w: %s: sync keeps its lock and sync.yaml in a .podium directory inside the target and does not follow a link there; replace it with a directory that holds those files: %w",
-		ErrStateDirUnusable, filepath.Join(target, ".podium"), err)
+	return &stateDirErr{dir: filepath.Join(target, ".podium"), cause: err}
 }
+
+// stateDirErr reports an unusable .podium. It matches ErrStateDirUnusable and
+// every error cause matches, and its message leaves cause out: cause restates
+// that .podium is a symbolic link or not a directory and names the state file
+// relative to the .podium path the message already names.
+type stateDirErr struct {
+	dir   string
+	cause error
+}
+
+func (e *stateDirErr) Error() string {
+	return fmt.Sprintf("%v: %s: sync keeps its lock and sync.yaml in a .podium directory inside the target and does not follow a link there; replace it with a directory that holds those files",
+		ErrStateDirUnusable, e.dir)
+}
+
+func (e *stateDirErr) Unwrap() []error { return []error{ErrStateDirUnusable, e.cause} }
 
 // readPriorLock reads the prior lock for a run. An unusable .podium returns
 // ErrStateDirUnusable, which fails the run. Any other read error, such as a

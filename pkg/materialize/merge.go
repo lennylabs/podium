@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/lennylabs/podium/pkg/adapter"
 )
@@ -103,7 +102,7 @@ func resolveMergeTarget(realDest, full, rel string) (string, error) {
 		return "", err
 	}
 	if err := CheckRecordedPath(r); err != nil {
-		return "", fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, r, err)
+		return "", ruleRefusal(fmt.Sprintf("%q resolves to %q", rel, r), err)
 	}
 	return filepath.Join(realDest, filepath.FromSlash(r)), nil
 }
@@ -210,116 +209,6 @@ func applyOp(base []byte, f adapter.File) ([]byte, error) {
 	}
 }
 
-// commentStyle wraps a marker comment for a given file format.
-type commentStyle struct{ open, close string }
-
-func commentStyleFor(path string) commentStyle {
-	if strings.HasSuffix(path, ".toml") {
-		return commentStyle{open: "# ", close: ""}
-	}
-	// Markdown (AGENTS.md, GEMINI.md, CLAUDE.md) and other text files.
-	return commentStyle{open: "<!-- ", close: " -->"}
-}
-
-// injectBlock replaces the Podium-managed block keyed by key with block,
-// wrapped in begin/end markers. When no such block exists it is appended.
-// Re-applying the same block is idempotent.
-func injectBlock(base []byte, key string, block []byte, cs commentStyle) []byte {
-	begin := cs.open + "podium:begin:" + key + cs.close
-	end := cs.open + "podium:end:" + key + cs.close
-	body := begin + "\n" + strings.TrimRight(string(block), "\n") + "\n" + end
-	s := string(base)
-	if bi := strings.Index(s, begin); bi >= 0 {
-		if rel := strings.Index(s[bi:], end); rel >= 0 {
-			ei := bi + rel + len(end)
-			return []byte(s[:bi] + body + s[ei:])
-		}
-	}
-	var b strings.Builder
-	b.WriteString(s)
-	if len(s) > 0 {
-		if !strings.HasSuffix(s, "\n") {
-			b.WriteByte('\n')
-		}
-		b.WriteByte('\n')
-	}
-	b.WriteString(body)
-	b.WriteByte('\n')
-	return []byte(b.String())
-}
-
-// stripPodiumBlocks removes every Podium-managed inject block (the region
-// between a `podium:begin:<key>` and `podium:end:<key>` marker pair in the
-// given comment style) from a text file, leaving the operator's surrounding
-// content intact. It is the inject counterpart to stripPodiumOwnedBytes: the
-// prior sync's blocks are removed before the current fragments re-add the live
-// ones, so a removed artifact's block does not survive. A block whose key keep
-// reports stays in place; a nil keep strips every block.
-func stripPodiumBlocks(base []byte, cs commentStyle, keep func(id string) bool) []byte {
-	s := string(base)
-	beginTag := cs.open + "podium:begin:"
-	endTag := cs.open + "podium:end:"
-	from := 0
-	for {
-		rel := strings.Index(s[from:], beginTag)
-		if rel < 0 {
-			break
-		}
-		bi := from + rel
-		ej := strings.Index(s[bi:], endTag)
-		if ej < 0 {
-			break
-		}
-		ej += bi
-		var ee int
-		if cs.close != "" {
-			ce := strings.Index(s[ej:], cs.close)
-			if ce < 0 {
-				break
-			}
-			ee = ej + ce + len(cs.close)
-		} else {
-			if nl := strings.IndexByte(s[ej:], '\n'); nl < 0 {
-				ee = len(s)
-			} else {
-				ee = ej + nl
-			}
-		}
-		if ee < len(s) && s[ee] == '\n' {
-			ee++
-		}
-		if keep != nil && keep(blockKey(s[bi+len(beginTag):], cs)) {
-			from = ee
-			continue
-		}
-		start := bi
-		for start > 0 && s[start-1] == '\n' {
-			start--
-		}
-		sep := ""
-		if start > 0 && ee < len(s) {
-			sep = "\n"
-		}
-		s = s[:start] + sep + s[ee:]
-		from = start + len(sep)
-	}
-	return []byte(s)
-}
-
-// blockKey returns the key of the begin marker whose text after the
-// `podium:begin:` prefix is rest. The key runs to the comment close, or to the
-// end of the line in a style with no close (TOML).
-func blockKey(rest string, cs commentStyle) string {
-	stop := "\n"
-	if cs.close != "" {
-		stop = cs.close
-	}
-	if i := strings.Index(rest, stop); i >= 0 {
-		return rest[:i]
-	}
-	return rest
-}
-
 // StripPodiumOwnedBytes is the exported form of the §6.7 config-merge JSON
 // reconciliation: it removes every Podium-owned entry from a JSON config
 // document, leaving the operator's entries intact. The sync layer calls it to
@@ -327,14 +216,6 @@ func blockKey(rest string, cs commentStyle) string {
 // entry owned by an artifact keep reports stays; a nil keep strips them all.
 func StripPodiumOwnedBytes(base []byte, keep func(id string) bool) []byte {
 	return stripPodiumOwnedBytes(base, keep)
-}
-
-// StripPodiumBlocks is the exported form of the inject reconciliation: it
-// removes every Podium-managed block from a text inject file (AGENTS.md /
-// GEMINI.md / config.toml), selecting the marker style from the path. A block
-// keyed by an artifact keep reports stays; a nil keep strips them all.
-func StripPodiumBlocks(base []byte, path string, keep func(id string) bool) []byte {
-	return stripPodiumBlocks(base, commentStyleFor(path), keep)
 }
 
 // mergeJSON deep-merges the fragment object into the existing JSON document,

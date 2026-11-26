@@ -63,10 +63,11 @@ func newAdmFixture(t *testing.T) *admFixture {
 }
 
 // registry builds a registry that admits under signer against the fixture's
-// object store, recording every audit event.
+// object store, recording every audit event. Its reads take the §13.12
+// default deadline, because no arm that uses it expects a read to time out.
 func (f *admFixture) registry(signer sign.Provider) *core.Registry {
 	return core.New(f.st, admTenant, nil).
-		WithAdmission(signer, f.objects, time.Second).
+		WithAdmission(signer, f.objects, objectstore.DefaultReadTimeout).
 		WithAudit(f.events.emit)
 }
 
@@ -443,12 +444,26 @@ func TestAdmit_RefusesAndAdmitsStoredRows(t *testing.T) {
 	})
 }
 
+// admBlockedReadTimeout is the read deadline of an arm whose Get blocks. The
+// deadline is the only way such a read ends, so a short one keeps the arm
+// fast, and a deadline that fires late under load only slows the arm down.
+const admBlockedReadTimeout = 50 * time.Millisecond
+
 // registryWithFaults builds the fixture's registry over an object store that
-// applies the failures an arm configured.
+// applies the failures an arm configured. Only an arm whose Get blocks takes
+// the short deadline. Every other arm takes the §13.12 default, because
+// GetWithDeadline runs each read in a goroutine against a real-clock
+// deadline: on a loaded machine under -race, an in-memory read not scheduled
+// within a short deadline is answered as registry.unavailable, which replaces
+// the hash or signature refusal the arm asserts.
 func (f *admFixture) registryWithFaults(signer sign.Provider) *core.Registry {
 	objects := &failingObjects{Memory: f.objects, block: f.blockGet, getFail: f.failGet}
+	timeout := objectstore.DefaultReadTimeout
+	if f.blockGet != nil {
+		timeout = admBlockedReadTimeout
+	}
 	return core.New(f.st, admTenant, nil).
-		WithAdmission(signer, objects, 50*time.Millisecond).
+		WithAdmission(signer, objects, timeout).
 		WithAudit(f.events.emit)
 }
 

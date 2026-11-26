@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, and the file hashes in the sync lock, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, and the refusal of an empty or control-character visibility entry, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -38,6 +38,16 @@ From 0.8.0, `podium sync` records a `file_hash` for each file it writes whole in
 - A `kind: marketplace` render fails instead of keeping such a file. The first render after the upgrade that would remove a file the committed 0.7.0 lock records exits non-zero before it writes or removes anything, pushes nothing, and names each file with the reason that the lock entry records no `file_hash`. Remove the named files from the marketplace repository by hand, or remove their entries from `.podium/sync.lock` for a file the render did not write, and commit the change. The failed render left the checkout as it was, so the next run renders the whole catalog change and publishes it. Each successful render writes a `file_hash` for every file it renders into the lock in the checkout. That lock reaches the repository with the next commit the publish phase makes, because the lock alone does not count as a change. Until then, a render that starts from a fresh checkout of the repository, such as one a CI job clones, still reads the committed 0.7.0 lock, and a render in it that would remove a file fails in the same way. A render that reuses a checkout reads the lock the previous render wrote there.
 - A shared config file that sync merges entries into, such as `.mcp.json` or `AGENTS.md`, records no `file_hash`. The cleanup strips Podium's entries from it as before and never deletes it.
 - A rollback to 0.7.0 needs no step. 0.7.0 ignores the `file_hash` key and removes out-of-scope files without checking them.
+
+### Visibility entries that are empty or hold a control character
+
+From 0.8.0, a layer's `users` and `groups` entries are non-empty strings that contain no control character, such as a line feed, a carriage return, or a tab. 0.7.0 accepted any string, and the SQLite and Postgres stores read an entry containing a line feed back as several entries.
+
+- Before the upgrade, check the `visibility:` block of each layer in `registry.yaml` and each `.layer-config` that a registry reads through `--layer-path` for an empty entry and for an entry with a control character. An entry written as `${ENV_VAR}` is empty when the variable is unset. A start that finds such an entry exits with `config.invalid`, and the message names the layer and the entry's position.
+- A layer registration or update that carries such an entry, or an `owner` with a control character, is refused with `400 registry.invalid_argument`. A registration is refused the same way when the caller's subject, which the registry stores as the owner and `users` entry of a user-defined layer or as the `users` entry that `PODIUM_DEFAULT_LAYER_VISIBILITY=users` grants, contains a control character.
+- A layer that 0.7.0 stored keeps its entries. Where its stored `users` or `groups` holds an empty entry, an update that sends that list back unchanged, as a client that returns the layer object it read does, is refused; send the list without the empty entry, or omit the member. The web UI's Edit dialog sends both lists on every update of an admin-defined layer, so such a layer cannot have its ref changed or its webhook secret rotated there until the empty entry is removed. The dialog shows the entry as a token labelled `(empty entry)`; remove that token, then save.
+- White space around an entry is kept and matched as written, as in 0.7.0.
+- A rollback to 0.7.0 needs no step.
 
 ## 0.7.0
 

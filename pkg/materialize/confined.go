@@ -350,7 +350,7 @@ func resolveIn(root *os.Root, destination, rel string, segs []string, o resolveO
 		ruleErr = checkStateLink(resolved)
 	}
 	if ruleErr != nil {
-		return nil, fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, resolved, ruleErr)
+		return nil, ruleRefusal(fmt.Sprintf("%q resolves to %q", rel, resolved), ruleErr)
 	}
 	rsegs := strings.Split(resolved, "/")
 	// The directories after the last link are real directories the path
@@ -373,10 +373,38 @@ func checkStateLink(resolved string) error {
 	return CheckRecordedPath(resolved)
 }
 
+// refusal is an error that matches each of its sentinels and reads as msg.
+// One refusal can match two sentinels, such as ErrUnconfinedPath and
+// ErrPodiumNotDirectory, and the text of each sentinel starts with
+// "materialize:", so wrapping both with %w would print the package prefix
+// twice.
+type refusal struct {
+	msg string
+	is  []error
+}
+
+func (r *refusal) Error() string   { return r.msg }
+func (r *refusal) Unwrap() []error { return r.is }
+
 // podiumDirError reports that the .podium directory on rel's path is a
-// symbolic link or not a directory.
+// symbolic link or not a directory. The error matches ErrUnconfinedPath and
+// ErrPodiumNotDirectory.
 func podiumDirError(rel string) error {
-	return fmt.Errorf("%w: %w: %q", ErrUnconfinedPath, ErrPodiumNotDirectory, rel)
+	return &refusal{
+		msg: fmt.Sprintf("%v: %q", ErrPodiumNotDirectory, rel),
+		is:  []error{ErrUnconfinedPath, ErrPodiumNotDirectory},
+	}
+}
+
+// ruleRefusal reports a path the §7.5.3 recorded-path rule refuses: ruleErr
+// is the CheckRecordedPath result and detail names the path. The error
+// matches ErrUnconfinedPath and ErrUnsafeRecordedPath, and its message
+// carries the "materialize:" prefix once.
+func ruleRefusal(detail string, ruleErr error) error {
+	return &refusal{
+		msg: fmt.Sprintf("%v: %s: %s", ErrUnconfinedPath, detail, strings.TrimPrefix(ruleErr.Error(), "materialize: ")),
+		is:  []error{ErrUnconfinedPath, ruleErr},
+	}
 }
 
 // resolveWithin resolves every symbolic link in the existing path full and
