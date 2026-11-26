@@ -331,8 +331,10 @@ func TestRender_CommittedStateLinksStayInsideCheckout(t *testing.T) {
 			writeFile(t, filepath.Join(victimDir, "sync.lock"), "victim\n")
 			plant(t, workdir, victimDir)
 
-			if _, err := Render(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "write lock") {
-				t.Errorf("Render = %v, want the lock write refused", err)
+			_, err := Render(context.Background(), opts)
+			refused := err != nil && (strings.Contains(err.Error(), "write lock") || errors.Is(err, ErrStateDirUnusable))
+			if !refused {
+				t.Errorf("Render = %v, want the lock write or the .podium link refused", err)
 			}
 			for _, f := range []string{"sync.lock.tmp", "sync.lock"} {
 				if got, _ := os.ReadFile(filepath.Join(victimDir, f)); string(got) != "victim\n" {

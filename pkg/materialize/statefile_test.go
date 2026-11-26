@@ -80,6 +80,14 @@ func TestStateFile_CommittedLinksStayInsideTarget(t *testing.T) {
 			t.Errorf("ReadStateFile of an in-target lock link = (%q, %v), want (kept lock, nil)", got, err)
 		}
 	})
+	t.Run("lock link into git", func(t *testing.T) {
+		dest := filepath.Join(base, "git-lock-link")
+		confinedFixture(t, dest, map[string]string{".git/config": "[core]\n"})
+		mustSymlink(t, "../.git/config", filepath.Join(dest, ".podium", "sync.lock"))
+		if _, err := ReadStateFile(dest, ".podium/sync.lock"); !errors.Is(err, ErrUnconfinedPath) {
+			t.Errorf("ReadStateFile of a lock link into .git = %v, want ErrUnconfinedPath", err)
+		}
+	})
 	t.Run("podium link", func(t *testing.T) {
 		dest := filepath.Join(base, "podium-link")
 		mustSymlink(t, filepath.Join(base, "podium-out"), filepath.Join(dest, ".podium"))
@@ -433,4 +441,87 @@ func TestWrite_MergeTargetUnreadable(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "for merge") {
 		t.Errorf("Write into an unreadable merge target = %v, want the read error", err)
 	}
+}
+
+// Spec: §6.6, §7.5.3 — every written path passes the recorded-path rule, with
+// or without a link: a batch that names .git/hooks/post-checkout or
+// .podium/sync.lock fails before anything is written, and the bundled
+// resource bucket .podium/resources/ stays writable.
+func TestWrite_ProtectedLexicalPathsRefused(t *testing.T) {
+	t.Parallel()
+	dest := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dest, ".git", "hooks"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	for _, p := range []string{".git/hooks/post-checkout", ".podium/sync.lock", `notes\x.md`} {
+		err := Write(dest, []adapter.File{{Path: "ok.md", Content: []byte("ok")}, {Path: p, Content: []byte("x")}})
+		if !errors.Is(err, ErrUnconfinedPath) || !errors.Is(err, ErrUnsafeRecordedPath) {
+			t.Errorf("Write(%q) = %v, want ErrUnconfinedPath and ErrUnsafeRecordedPath", p, err)
+		}
+	}
+	wantGone(t, filepath.Join(dest, ".git", "hooks", "post-checkout"))
+	wantGone(t, filepath.Join(dest, ".podium", "sync.lock"))
+	wantGone(t, filepath.Join(dest, "ok.md"))
+	if err := Write(dest, []adapter.File{{Path: ".podium/resources/a/run.sh", Content: []byte("x")}}); err != nil {
+		t.Errorf("Write into .podium/resources: %v", err)
+	}
+}
+
+// Spec: §6.6, §6.7 — one merge file reached under two spellings in one batch,
+// AGENTS.md and GEMINI.md linked to it, folds into one item, whether the
+// destination is named directly or through a link: both blocks land and the
+// write succeeds.
+func TestWrite_OneMergeFileUnderTwoSpellingsFolds(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	realDir := filepath.Join(base, "real")
+	confinedFixture(t, realDir, map[string]string{"AGENTS.md": "operator\n"})
+	mustSymlink(t, "AGENTS.md", filepath.Join(realDir, "GEMINI.md"))
+	via := filepath.Join(base, "via")
+	mustSymlink(t, realDir, via)
+	for i, dest := range []string{realDir, via} {
+		files := []adapter.File{
+			{Path: "AGENTS.md", Op: adapter.OpInject, Key: "a", Content: []byte("rule A")},
+			{Path: "GEMINI.md", Op: adapter.OpInject, Key: "b", Content: []byte("rule B")},
+		}
+		if err := Write(dest, files); err != nil {
+			t.Errorf("Write #%d into %s: %v", i, dest, err)
+			continue
+		}
+		got, _ := os.ReadFile(filepath.Join(realDir, "AGENTS.md"))
+		for _, want := range []string{"operator", "rule A", "rule B"} {
+			if !strings.Contains(string(got), want) {
+				t.Errorf("Write #%d: AGENTS.md = %q, want %q", i, got, want)
+			}
+		}
+	}
+	wantGone(t, filepath.Join(realDir, "AGENTS.md.tmp"))
+}
+
+// Spec: §4.4.1, §6.6 — the sandbox profile is written under the destination's
+// .podium directory with the rules of sync's state: a .podium that is a link
+// refuses the write and nothing lands where it points, and a committed link
+// at the profile's temporary name refuses it as well.
+func TestWriteSandboxProfile_CommittedLinksRefused(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	outside := filepath.Join(base, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	linkDest := filepath.Join(base, "link-ws")
+	mustSymlink(t, outside, filepath.Join(linkDest, ".podium"))
+	if _, _, err := WriteSandboxProfile(linkDest, SandboxProfileSeccompStrict); !errors.Is(err, ErrPodiumNotDirectory) {
+		t.Errorf("WriteSandboxProfile under a .podium link = %v, want ErrPodiumNotDirectory", err)
+	}
+	wantGone(t, filepath.Join(outside, SandboxProfileSeccompStrict+".json"))
+
+	victim := filepath.Join(base, "victim.txt")
+	confinedFixture(t, base, map[string]string{"victim.txt": "victim\n"})
+	tmpDest := filepath.Join(base, "tmp-ws")
+	mustSymlink(t, victim, filepath.Join(tmpDest, ".podium", SandboxProfileSeccompStrict+".json.tmp"))
+	if _, _, err := WriteSandboxProfile(tmpDest, SandboxProfileSeccompStrict); !errors.Is(err, ErrUnconfinedPath) {
+		t.Errorf("WriteSandboxProfile over a temporary link = %v, want ErrUnconfinedPath", err)
+	}
+	wantContent(t, victim, "victim\n")
 }

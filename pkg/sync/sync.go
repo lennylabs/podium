@@ -311,7 +311,14 @@ func Run(opts Options) (*Result, error) {
 	// The §7.5.3 recorded-path rule drops every entry whose path the cleanup
 	// must not touch before any consumer reads the lock, so the entry is
 	// neither cleaned up nor kept nor written into the next lock.
-	priorLock, _ := ReadLock(opts.Target)
+	// A .podium that is a symbolic link or not a directory fails the run here,
+	// before anything is written: the lock could neither be read nor written,
+	// and a run that went on would orphan every later stale file. Any other
+	// lock read error leaves the run without a prior lock, as before.
+	priorLock, err := ReadLock(opts.Target)
+	if errors.Is(err, ErrStateDirUnusable) {
+		return nil, err
+	}
 	priorLock = dropUnsafeLockPaths(priorLock)
 	var toggles LockToggles
 	if opts.PreserveToggles && priorLock != nil {
@@ -467,7 +474,14 @@ func Run(opts Options) (*Result, error) {
 	lock.Artifacts = append(lock.Artifacts, kept.entries...)
 	res.Changed = changed
 	if err := WriteLock(opts.Target, lock); err != nil {
-		// Lock write failure is non-fatal; the sync already
+		// An unusable .podium is never silent (§7.5.3): without the lock the
+		// next run cannot clean up what this one wrote. The prior-lock read
+		// already refuses it, so this covers a .podium replaced during the
+		// run.
+		if errors.Is(err, ErrStateDirUnusable) {
+			return nil, err
+		}
+		// Any other lock write failure is non-fatal; the sync already
 		// completed. Operators see the warning via the returned
 		// Result + a printed message in the CLI.
 		fmt.Fprintf(os.Stderr, "sync: lock write failed: %v\n", err)

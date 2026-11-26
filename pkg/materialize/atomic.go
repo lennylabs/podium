@@ -203,11 +203,13 @@ func containsString(haystack []string, needle string) bool {
 // resolving the deepest existing ancestor of each target with
 // filepath.EvalSymlinks and confirming it stays within the resolved
 // destination root. The destination can be a repository checkout whose links
-// another party commits (§7.8), so a link at a leaf is never written through:
-// each temporary is created exclusively (stage), a config-merge or inject
-// target that is a link is refused (readMergeBase), and a path under a .podium
-// directory that is a link is refused (checkPodiumDir). The rename replaces a
-// link at a standalone path rather than writing through it.
+// another party commits (§7.8): every written path, before and after its
+// directory links resolve, passes the §7.5.3 recorded-path rule; each
+// temporary is created exclusively (stage); a config-merge or inject target
+// that is a link is followed only to a file inside the destination that passes
+// the rule (resolveMergeTarget); and a path under a .podium directory that is
+// a link is refused (checkPodiumDir). The rename replaces a link at a
+// standalone path rather than writing through it.
 func Write(destination string, files []adapter.File) error {
 	return WriteKeeping(destination, files, nil)
 }
@@ -233,12 +235,19 @@ func WriteKeeping(destination string, files []adapter.File, keep func(id string)
 	}
 
 	// Validate every path lexically before any write so a single bad path
-	// fails the whole batch with no half-written tree.
+	// fails the whole batch with no half-written tree. Beyond containment,
+	// every written path passes the §7.5.3 recorded-path rule, so no caller,
+	// a podium-mcp MaterializationHook that rewrites paths included, writes
+	// into .git or the sync state under .podium/; sync's own state goes
+	// through WriteStateFile instead.
 	resolved := make([]string, len(files))
 	for i, f := range files {
 		full, err := resolveSandboxedPath(absDest, f.Path)
 		if err != nil {
 			return err
+		}
+		if err := CheckRecordedPath(f.Path); err != nil {
+			return fmt.Errorf("%w: %q: %w", ErrUnconfinedPath, f.Path, err)
 		}
 		resolved[i] = full
 	}
@@ -271,11 +280,16 @@ func WriteKeeping(destination string, files []adapter.File, keep func(id string)
 		if err := checkPodiumDir(absDest, f.Path); err != nil {
 			return err
 		}
+		// Every item is keyed by its landing path below the resolved root,
+		// so one file reached under two spellings (AGENTS.md and GEMINI.md
+		// linked to it, or a destination reached through a link) folds into
+		// one item and stages one temporary.
+		resolved[i] = landing
 		// A config-merge or inject target that is a link resolving inside
 		// the destination, such as GEMINI.md linked to AGENTS.md, is merged
 		// into the file the link names, and the link stays (§6.6).
 		if f.Op != adapter.OpWrite {
-			target, err := resolveMergeTarget(realDest, resolved[i], f.Path)
+			target, err := resolveMergeTarget(realDest, landing, f.Path)
 			if err != nil {
 				return err
 			}
@@ -387,8 +401,8 @@ func checkSymlinkContainment(realDest, target string) (string, error) {
 // link inside the destination, to a path the §7.5.3 recorded-path rule
 // refuses, such as one under .git or the sync state. full is the lexical
 // target and landing the path checkSymlinkContainment resolved. A path that
-// resolves to itself is left to the caller's own rules, so a destination
-// without links keeps the writer's existing behavior.
+// resolves to itself needs no second check: WriteKeeping already applied the
+// rule to the lexical path.
 //
 // Spec: §6.6, §7.5.3, §7.8
 func checkResolvedTarget(absDest, realDest, full, landing, rel string) error {
@@ -422,7 +436,7 @@ func checkPodiumDir(absDest, rel string) error {
 	}
 	info, err := os.Lstat(filepath.Join(absDest, first))
 	if err == nil && info.Mode()&fs.ModeSymlink != 0 {
-		return fmt.Errorf("%w: %q: .podium is a symbolic link", ErrUnconfinedPath, rel)
+		return podiumDirError(rel)
 	}
 	return nil
 }
@@ -434,23 +448,4 @@ func withinRoot(root, path string) bool {
 		return true
 	}
 	return strings.HasPrefix(path+string(filepath.Separator), root+string(filepath.Separator))
-}
-
-// writeAtomic writes content to path via "<path>.tmp" + rename so the
-// destination either has the previous content or the new content. It is the
-// single-file primitive WriteSandboxProfile uses; the multi-file Write path
-// stages and commits explicitly for its tree-level guarantee.
-func writeAtomic(path string, content []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := stage(hostFS{}, tmp, content, mode); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
 }

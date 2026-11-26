@@ -421,22 +421,21 @@ func WriteConfig(workspace string, cfg *SyncConfig) error {
 // ensureDefaults is true and cfg carries no defaults, an empty `defaults:`
 // mapping is emitted ahead of `profiles:` so a freshly created sync.yaml has
 // the structure §7.5.6 / §7.5.7 describe.
+//
+// The write goes through writeStateFile, under the rules of the lock (§7.5.3):
+// a .podium that is a symbolic link fails the write, and the temporary is
+// created exclusively, so a committed .podium/sync.yaml.tmp link cannot carry
+// the write outside the workspace.
 func writeConfig(workspace string, cfg *SyncConfig, ensureDefaults bool) error {
-	dir := filepath.Join(workspace, ".podium")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
 	data, err := marshalConfig(cfg, ensureDefaults)
 	if err != nil {
 		return err
 	}
-	final := ConfigPath(workspace)
-	tmp := final + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, final)
+	return writeStateFile(workspace, configRelPath, data)
 }
+
+// configRelPath is sync.yaml's slash-separated path below a workspace.
+const configRelPath = ".podium/sync.yaml"
 
 // marshalConfig renders cfg to YAML. When ensureDefaults is true and the
 // rendered config has no `defaults:` key (a zero-value Defaults is dropped by

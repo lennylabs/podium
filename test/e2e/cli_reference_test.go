@@ -788,6 +788,36 @@ func TestCLI_SyncMaterializes(t *testing.T) {
 	}
 }
 
+// Spec: §7.5.3 — a target whose .podium is a symbolic link fails `podium sync`
+// with an error naming .podium and the remedy, writes no artifact, and leaves
+// the directory the link names empty, instead of exiting 0 without a lock.
+func TestCLI_SyncRefusesPodiumLink(t *testing.T) {
+	reg := cliReg(t)
+	base := t.TempDir()
+	tgt := filepath.Join(base, "ws")
+	shared := filepath.Join(base, "shared-podium")
+	for _, d := range []string{tgt, shared} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	if err := os.Symlink(shared, filepath.Join(tgt, ".podium")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
+	if res.Exit == 0 {
+		t.Fatalf("sync with a .podium link exited 0\nstderr=%s", res.Stderr)
+	}
+	cliContains(t, res.Stderr, ".podium is a symbolic link or not a directory", "stderr names the refused .podium")
+	cliContains(t, res.Stderr, "replace it with a directory", "stderr states the remedy")
+	if entries, _ := os.ReadDir(tgt); len(entries) != 1 || entries[0].Name() != ".podium" {
+		t.Errorf("the failed sync wrote into the target: %v", entries)
+	}
+	if entries, _ := os.ReadDir(shared); len(entries) != 0 {
+		t.Errorf("files landed behind the .podium link: %v", entries)
+	}
+}
+
 // spec: doc "podium sync", `--dry-run` flag.
 func TestCLI_SyncDryRun(t *testing.T) {
 	reg := cliReg(t)

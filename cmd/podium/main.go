@@ -1617,10 +1617,6 @@ func initCmd(args []string) int {
 			filename = "sync.local.yaml"
 		}
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 1
-	}
 	dest := filepath.Join(dir, filename)
 	if !*force {
 		if _, err := os.Stat(dest); err == nil {
@@ -1635,15 +1631,15 @@ func initCmd(args []string) int {
 	if *target != "" {
 		yaml += "  target: " + *target + "\n"
 	}
-	if err := os.WriteFile(dest, []byte(yaml), 0o644); err != nil {
+	if err := writeInitConfig(workspace, dir, filename, []byte(yaml)); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
 	// §7.7 workspace mode adds the gitignored override file +
 	// overlay dir to .gitignore so they don't accidentally land
-	// in commits.
+	// in commits. Best-effort: a read-only workspace does not fail init.
 	if !*scopeGlobal && !*scopeLocal {
-		_ = ensureGitignoreEntries(filepath.Join(workspace, ".gitignore"), []string{
+		_ = sync.EnsureGitignoreEntries(workspace, []string{
 			".podium/sync.local.yaml",
 			".podium/overlay/",
 		})
@@ -1711,23 +1707,20 @@ func runInitWizard(in io.Reader, out io.Writer) (initWizardResult, error) {
 	return res, nil
 }
 
-// ensureGitignoreEntries appends every missing entry to path,
-// creating the file when absent. Existing entries are preserved
-// verbatim. Best-effort: callers ignore the error to avoid
-// failing init when the workspace is read-only.
-func ensureGitignoreEntries(path string, entries []string) error {
-	existing, _ := os.ReadFile(path)
-	out := string(existing)
-	for _, e := range entries {
-		if strings.Contains(out, e) {
-			continue
-		}
-		if len(out) > 0 && !strings.HasSuffix(out, "\n") {
-			out += "\n"
-		}
-		out += e + "\n"
+// writeInitConfig writes the config file init generates. A workspace scope
+// goes through sync.WriteWorkspaceConfig, which follows the rules of sync's
+// own state (§7.5.3), because a cloned workspace can commit .podium or the
+// file's temporary name as a symbolic link. The user-global file lives in the
+// operator's home directory, whose links are the operator's own, so it keeps
+// a plain write.
+func writeInitConfig(workspace, dir, filename string, data []byte) error {
+	if workspace != "" {
+		return sync.WriteWorkspaceConfig(workspace, filename, data)
 	}
-	return os.WriteFile(path, []byte(out), 0o644)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, filename), data, 0o644)
 }
 
 // readCLIToken resolves the read CLI's caller credential so its requests

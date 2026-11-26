@@ -16,6 +16,14 @@ import (
 // symbolic link that resolves outside the root.
 var ErrUnconfinedPath = errors.New("materialize: path is not a regular file confined to the destination")
 
+// ErrPodiumNotDirectory signals that the destination's .podium is a symbolic
+// link or is not a directory. Sync keeps its own state there and never reads
+// or writes it through a link, because a repository checkout can commit
+// .podium as one (§7.8). It is reported together with ErrUnconfinedPath, so
+// a caller can tell this unusable state directory from a refused file and
+// fail with an error that names the remedy.
+var ErrPodiumNotDirectory = errors.New("materialize: .podium is a symbolic link or not a directory")
+
 // RemoveStale deletes the regular file at rel below destination and then
 // prunes the directories that held it while they are empty. rel is the
 // slash-separated path a sync lock recorded, and the lock can come from a
@@ -122,12 +130,18 @@ type resolveOpts struct {
 // resolvedPath is a path resolved below an open root.
 type resolvedPath struct {
 	// root is the destination opened as an os.Root. Every operation goes
-	// through it, so a component swapped for a link after the resolution
-	// cannot carry the operation outside the destination.
+	// through it, so a component swapped for a link that leaves the root
+	// after the resolution cannot carry the operation outside the
+	// destination. os.Root follows links that stay inside the root, so a
+	// concurrent local writer of the target that swaps a component between
+	// the check and the operation can still redirect it inside the root; the
+	// lock's concurrent-writer rule (§7.5.3) puts that writer out of scope.
+	// Content committed to a repository is static during the run, so it
+	// cannot.
 	root *os.Root
 	// segs is the path below the root with every followed link resolved. The
 	// operations check it again with checkConfinedFile, which refuses any
-	// link, so a link planted after the resolution fails the operation.
+	// link on that path as the check sees it.
 	segs []string
 	// keep is the number of leading directories of segs the pruning leaves in
 	// place: the directories up to and including the one the last link names.
@@ -195,13 +209,13 @@ func resolveIn(root *os.Root, destination, rel string, segs []string, o resolveO
 			}
 			return nil, fmt.Errorf("%w: %q: %v", ErrUnconfinedPath, rel, err)
 		}
-		if info.Mode()&fs.ModeSymlink == 0 {
-			continue
+		isLink := info.Mode()&fs.ModeSymlink != 0
+		if strings.EqualFold(dirs[i], ".podium") && (isLink || !info.IsDir()) {
+			return nil, podiumDirError(rel)
 		}
-		if strings.EqualFold(dirs[i], ".podium") {
-			return nil, fmt.Errorf("%w: %q: .podium is a symbolic link", ErrUnconfinedPath, rel)
+		if isLink {
+			lastLink = i
 		}
-		lastLink = i
 	}
 	relDir, err := resolveWithin(realDest, filepath.Join(realDest, filepath.Join(dirs...)), rel)
 	if err != nil {
@@ -219,7 +233,10 @@ func resolveIn(root *os.Root, destination, rel string, segs []string, o resolveO
 			}
 		}
 	}
-	if o.recorded {
+	// A recorded path passes the rule in its resolved form. A state path such
+	// as .podium/sync.lock fails the rule by design, so it is checked only
+	// when a link moved it: a lock link into .git is refused like any other.
+	if o.recorded || resolved != rel {
 		if err := CheckRecordedPath(resolved); err != nil {
 			return nil, fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, resolved, err)
 		}
@@ -229,6 +246,12 @@ func resolveIn(root *os.Root, destination, rel string, segs []string, o resolveO
 	// itself created; the pruning stops above them.
 	realDirs := len(dirs) - (lastLink + 1)
 	return &resolvedPath{root: root, segs: rsegs, keep: max(len(rsegs)-1-realDirs, 0)}, nil
+}
+
+// podiumDirError reports that the .podium directory on rel's path is a
+// symbolic link or not a directory.
+func podiumDirError(rel string) error {
+	return fmt.Errorf("%w: %w: %q", ErrUnconfinedPath, ErrPodiumNotDirectory, rel)
 }
 
 // resolveWithin resolves every symbolic link in the existing path full and

@@ -44,10 +44,13 @@ func SandboxBaselineProfile(profile string) ([]byte, bool) {
 // WriteSandboxProfile writes the baseline profile Podium ships for the
 // named sandbox_profile under destination so a host with sandbox
 // capability can honor it (§4.4.1). The file lands at
-// .podium/<profile>.json relative to destination, written atomically
-// (temp + rename) under the same containment check as Write. It returns
-// the absolute path written and true; when no baseline ships for the
-// profile it returns ("", false, nil) and writes nothing.
+// .podium/<profile>.json relative to destination, written through
+// WriteStateFile: a .podium directory that is a symbolic link refuses the
+// write, and the temporary is created exclusively, so neither a committed
+// .podium link nor a committed link at the temporary name carries the write
+// outside the destination (§6.6 step 5). It returns the absolute path written
+// and true; when no baseline ships for the profile it returns ("", false,
+// nil) and writes nothing.
 func WriteSandboxProfile(destination, profile string) (string, bool, error) {
 	data, ok := SandboxBaselineProfile(profile)
 	if !ok {
@@ -60,13 +63,9 @@ func WriteSandboxProfile(destination, profile string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	rel := filepath.Join(".podium", profile+".json")
-	full, err := resolveSandboxedPath(absDest, rel)
-	if err != nil {
+	rel := ".podium/" + profile + ".json"
+	if err := WriteStateFile(absDest, rel, data, 0o644); err != nil {
 		return "", false, err
 	}
-	if err := writeAtomic(full, data, 0o644); err != nil {
-		return "", false, err
-	}
-	return full, true, nil
+	return filepath.Join(absDest, filepath.FromSlash(rel)), true, nil
 }

@@ -97,16 +97,17 @@ func LockFilePath(target string) string {
 
 // ReadLock reads and parses an existing lock file at target. A missing
 // file returns (nil, nil); other errors are returned. The lock is read through
-// materialize.ReadStateFile, so a committed lock that is a symbolic link, or a
-// .podium directory that is one, is refused rather than followed to a file
-// outside the target (§7.5.3, §7.8).
+// materialize.ReadStateFile, so a committed lock link that resolves outside
+// the target or into .git is refused rather than followed (§7.5.3, §7.8). A
+// .podium that is a symbolic link or not a directory returns an error that
+// wraps ErrStateDirUnusable.
 func ReadLock(target string) (*LockFile, error) {
 	data, err := materialize.ReadStateFile(target, lockRelPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, stateDirError(target, err)
 	}
 	var lf LockFile
 	if err := yaml.Unmarshal(data, &lf); err != nil {
@@ -153,7 +154,7 @@ func WriteLock(target string, lf *LockFile) error {
 	// link refuses the write, and the temporary is created exclusively, so a
 	// committed sync.lock.tmp link cannot redirect it outside the target
 	// (§7.8).
-	return materialize.WriteStateFile(target, lockRelPath, data, 0o644)
+	return writeStateFile(target, lockRelPath, data)
 }
 
 // lockRelPath is the lock file's slash-separated path below a target.

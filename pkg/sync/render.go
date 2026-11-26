@@ -300,8 +300,12 @@ func pluginsInOrder(assignments []assigned) []PluginFilter {
 func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult, error) {
 	// The prior lock is committed to the marketplace repository, so the
 	// §7.5.3 recorded-path rule drops every entry the cleanup must not touch
-	// before the comparison or the cleanup reads it.
-	prior, _ := ReadLock(workdir)
+	// before the comparison or the cleanup reads it. A committed .podium link
+	// fails the render here, before anything is written.
+	prior, err := ReadLock(workdir)
+	if errors.Is(err, ErrStateDirUnusable) {
+		return nil, fmt.Errorf("publish %q: %w", outputID, err)
+	}
 	priorMerge := PriorMergeKinds(dropUnsafeLockPaths(prior))
 
 	files := make([]adapter.File, 0, len(rendered))
