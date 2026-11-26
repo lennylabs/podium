@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A `git` layer whose clone lacks the prior commit's object no longer reports a false force push** (§7.3.1): when a commit in the cloned history named the layer's last ingested commit as its parent but the clone did not hold that commit's object, as at the boundary of a shallow history, the ingest reported the history as rewritten, emitted `layer.history_rewritten`, and refused the ingest under `force_push_policy: strict`. The force-push check now treats a commit that names the prior commit as its parent as proof that the prior commit is in the history.
 - **An anonymous caller sees public layers only, whatever a layer's `users` and `groups` hold** (§4.6, §6.3.3): a layer whose visibility held an empty `users` entry, or a `groups` filter the SCIM directory resolved to an empty member name, was visible to every request that carried no credential, because an anonymous caller has an empty subject. A `groups` filter the directory resolved to an empty member name was also visible to every authenticated caller whose token carried no email claim. The `groups` and `users` fields now admit authenticated callers only, as `organization` already did, and a `groups` or `users` member admits a caller only through a non-empty value equal to the caller's non-empty subject, email, or group. A configuration that holds an empty entry still loads, and the entry matches no caller.
 
 ### Security

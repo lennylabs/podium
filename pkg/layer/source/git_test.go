@@ -226,6 +226,66 @@ func TestGit_SnapshotForcePushDetected(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.1 (Force-push detected) — a clone whose head is a merge commit
+// holds the history of both parents, so a prior reference on the merged
+// branch, reachable only through the merge's second parent, is not a rewrite.
+func TestGit_SnapshotMergeOfThePriorNotRewritten(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree: %v", err)
+	}
+	commit := func(body string, parents ...plumbing.Hash) plumbing.Hash {
+		t.Helper()
+		f, err := wt.Filesystem.Create(body + ".txt")
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if _, err := f.Write([]byte(body)); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if _, err := wt.Add(body + ".txt"); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+		h, err := wt.Commit(body, &git.CommitOptions{
+			Author:  &object.Signature{Name: "alice", Email: "alice@acme.com", When: time.Now()},
+			Parents: parents,
+		})
+		if err != nil {
+			t.Fatalf("Commit %s: %v", body, err)
+		}
+		return h
+	}
+	base := commit("base")
+	prior := commit("feature", base)
+	if err := wt.Reset(&git.ResetOptions{Mode: git.HardReset, Commit: base}); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	mainline := commit("main", base)
+	merge := commit("merge", mainline, prior)
+
+	snap, err := source.Git{}.Snapshot(context.Background(), source.LayerConfig{
+		Repo: "file://" + dir, Ref: "master", PriorRef: prior.String(),
+	})
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if snap.HistoryRewritten {
+		t.Errorf("HistoryRewritten = true for a prior merged through the second parent; want false")
+	}
+	if snap.Reference != merge.String() {
+		t.Errorf("Reference = %q, want the merge %q", snap.Reference, merge.String())
+	}
+}
+
 // Spec: §4.6 — cfg.Root narrows the snapshot to a subtree.
 func TestGit_RootNarrowsToSubtree(t *testing.T) {
 	t.Parallel()
