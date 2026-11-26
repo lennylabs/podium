@@ -37,6 +37,10 @@ var ErrStaleHashMissing = errors.New("materialize: the lock entry records no fil
 // file changed after sync wrote it, or sync did not write the entry for it.
 var ErrStaleHashMismatch = errors.New("materialize: the file does not match the file_hash its lock entry records")
 
+// ErrStaleUnreadable signals a stale file the cleanup leaves in place because
+// it cannot read the file to compare its bytes with the recorded file hash.
+var ErrStaleUnreadable = errors.New("materialize: the file cannot be read to check its file_hash")
+
 // FileHash returns the hash the sync lock records for a file that sync writes
 // whole: "sha256:" followed by the lowercase hexadecimal SHA-256 digest of
 // data, the form the other content digests take (§4.7.10). RemoveStale
@@ -56,11 +60,11 @@ func FileHash(data []byte) string {
 // The hash check limits the cleanup to files that still hold the bytes sync
 // wrote. A forged lock entry that names a file the operator wrote, such as
 // src/main.go, has to carry the hash of that file's current bytes, so it
-// cannot remove a file whose content its author does not know, and a
+// cannot remove a file whose content its author cannot predict, and a
 // materialized file the operator edited no longer matches. An empty fileHash,
 // a mismatch, and a file that cannot be read leave the file in place and
-// return an error; the first two wrap ErrStaleHashMissing and
-// ErrStaleHashMismatch. The bytes are hashed through the open root the removal
+// return an error that wraps ErrStaleHashMissing, ErrStaleHashMismatch, or
+// ErrStaleUnreadable. The bytes are hashed through the open root the removal
 // uses, after the path checks.
 //
 // The removal accepts the links the writer accepts (§6.7): a directory
@@ -104,8 +108,7 @@ func RemoveStale(destination, rel, fileHash string) error {
 }
 
 // matchHash confirms that the regular file at the resolved path hashes to
-// want. It streams the file rather than reading it whole, because a bundled
-// resource can be large.
+// want.
 //
 // Spec: §7.5.3
 func (rp *resolvedPath) matchHash(rel, want string) error {
@@ -114,12 +117,12 @@ func (rp *resolvedPath) matchHash(rel, want string) error {
 	}
 	f, err := rp.root.Open(filepath.Join(rp.segs...))
 	if err != nil {
-		return fmt.Errorf("materialize: open %s: %w", rel, err)
+		return fmt.Errorf("%w: %q: %w", ErrStaleUnreadable, rel, err)
 	}
 	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
-		return fmt.Errorf("materialize: read %s: %w", rel, err)
+		return fmt.Errorf("%w: %q: %w", ErrStaleUnreadable, rel, err)
 	}
 	if got := "sha256:" + hex.EncodeToString(h.Sum(nil)); got != want {
 		return fmt.Errorf("%w: %q", ErrStaleHashMismatch, rel)

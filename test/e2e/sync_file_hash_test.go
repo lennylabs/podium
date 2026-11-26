@@ -134,3 +134,77 @@ func TestSync_FileHashForgedLockEntryKeepsUserFile(t *testing.T) {
 		}
 	}
 }
+
+// pushRemoteChange clones remote, applies change to the clone, and commits and
+// pushes the result to main, as a contributor to the marketplace repository
+// would.
+func pushRemoteChange(t *testing.T, remote, msg string, change func(dir string)) {
+	t.Helper()
+	dir := t.TempDir()
+	if r := gitCmd(t, dir, "clone", "--branch", "main", remote, dir); r.Exit != 0 {
+		t.Fatalf("clone: exit=%d stderr=%s", r.Exit, r.Stderr)
+	}
+	change(dir)
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-m", msg}, {"push", "origin", "main"}} {
+		if r := gitCmd(t, dir, args...); r.Exit != 0 {
+			t.Fatalf("git %v: exit=%d stderr=%s", args, r.Exit, r.Stderr)
+		}
+	}
+}
+
+// Spec: §7.5.3, §7.8 — a `kind: marketplace` render whose cleanup would leave
+// a stale recorded file in place fails the target before the publish phase,
+// names the file and the reason, and pushes nothing. The case is a lock an
+// older release committed, which records no file_hash, followed by a narrowed
+// plugin. After the publisher removes the file from the repository by hand,
+// the next run publishes.
+func TestPublishing_StaleFileWithoutHashFailsRender(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	const stale = "claude/finance-pack/skills/run-variance/SKILL.md"
+	reg := writePublishRegistry(t)
+	remote := bareRemote(t)
+	ws := t.TempDir()
+	cfg := writeSyncConfigMarketplace(t, ws, reg, remote, "claude-code")
+	if r := runPodium(t, "", gitEnv(), "sync", "--config", cfg); r.Exit != 0 {
+		t.Fatalf("first sync exit=%d stderr=%s", r.Exit, r.Stderr)
+	}
+
+	pushRemoteChange(t, remote, "lock from an older release", func(dir string) {
+		lockPath := filepath.Join(dir, ".podium", "sync.lock")
+		lines := strings.Split(readFile(t, lockPath), "\n")
+		kept := lines[:0]
+		for _, l := range lines {
+			if !strings.Contains(l, "file_hash:") {
+				kept = append(kept, l)
+			}
+		}
+		if err := os.WriteFile(lockPath, []byte(strings.Join(kept, "\n")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+	narrowed := strings.Replace(readFile(t, cfg), `include: ["finance/**"]`, `include: ["finance/ap/**"]`, 1)
+	if err := os.WriteFile(cfg, []byte(narrowed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := remoteCommitCount(t, remote)
+
+	res := runPodium(t, "", gitEnv(), "sync", "--config", cfg)
+	cliWantNonZero(t, res, "sync over a lock without file hashes")
+	cliContains(t, res.Stderr, stale, "the error names the kept file")
+	cliContains(t, res.Stderr, "records no file_hash", "the error states the reason")
+	if n := remoteCommitCount(t, remote); n != before {
+		t.Fatalf("a failed render must push nothing: commit count = %d, want %d", n, before)
+	}
+
+	pushRemoteChange(t, remote, "remove the stale skill by hand", func(dir string) {
+		if err := os.Remove(filepath.Join(dir, filepath.FromSlash(stale))); err != nil {
+			t.Fatal(err)
+		}
+	})
+	res = runPodium(t, "", gitEnv(), "sync", "--config", cfg)
+	cliWantExit(t, res, 0, "sync after the manual removal")
+	if _, ok := remoteTree(t, remote)[stale]; ok {
+		t.Fatalf("the removed skill must stay out of the published tree")
+	}
+}

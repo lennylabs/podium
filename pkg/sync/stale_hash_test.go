@@ -2,6 +2,8 @@ package sync
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -216,42 +218,141 @@ func TestOverride_RemoveUsesGuardedCleanup(t *testing.T) {
 	}
 }
 
+// staleRenderPath is a skill the render fixture writes for finance-pack and
+// that narrowFinancePack takes out of the view.
+const staleRenderPath = "claude/finance-pack/skills/run-variance/SKILL.md"
+
+// narrowFinancePack returns the render plugins narrowed to finance/ap/**, so
+// the finance/close skill and the whole security-baseline plugin leave the
+// view.
+func narrowFinancePack() []PluginFilter {
+	return []PluginFilter{{Name: "finance-pack", Include: []string{"finance/ap/**"}}}
+}
+
 // Spec: §7.5.3, §7.8 — a marketplace render records the file hash of each
-// file it writes whole, deletes a stale file that still matches, and keeps a
-// stale file that changed after the render wrote it.
-//
-// Not parallel: the test swaps the process-wide os.Stderr.
-func TestRender_StaleCleanupChecksFileHash(t *testing.T) {
+// file it writes whole and deletes a stale file that still holds those bytes.
+func TestRender_StaleCleanupRemovesMatchingFile(t *testing.T) {
+	t.Parallel()
 	workdir := t.TempDir()
 	opts := renderOpts(t, renderFixtureRegistry(t), workdir, []string{"claude-code"})
 	if _, err := Render(context.Background(), opts); err != nil {
 		t.Fatalf("first Render: %v", err)
 	}
 	wantFileHashes(t, workdir)
-	edited := filepath.Join(workdir, "claude", "security-baseline", "skills", "lockdown", "SKILL.md")
-	writeFile(t, edited, "edited in the checkout\n")
-	removed := filepath.Join(workdir, "claude", "finance-pack", "skills", "run-variance", "SKILL.md")
-	if _, err := os.Stat(removed); err != nil {
-		t.Fatalf("fixture must render %s: %v", removed, err)
+	stale := filepath.Join(workdir, filepath.FromSlash(staleRenderPath))
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("fixture must render %s: %v", staleRenderPath, err)
 	}
 
-	opts.Plugins = []PluginFilter{{Name: "finance-pack", Include: []string{"finance/ap/**"}}}
-	var err error
-	stderr := captureStderr(t, func() { _, err = Render(context.Background(), opts) })
+	opts.Plugins = narrowFinancePack()
+	res, err := Render(context.Background(), opts)
 	if err != nil {
-		t.Fatalf("second Render: %v", err)
+		t.Fatalf("narrowed Render: %v", err)
 	}
-	wantContentEq(t, edited, "edited in the checkout\n")
-	if !strings.Contains(stderr, "claude/security-baseline/skills/lockdown/SKILL.md") {
-		t.Errorf("stderr must name the kept file; stderr = %q", stderr)
+	if !res.Changed {
+		t.Error("a render that removed stale files must report Changed true")
 	}
-	if _, serr := os.Stat(removed); !os.IsNotExist(serr) {
+	if _, serr := os.Stat(stale); !os.IsNotExist(serr) {
 		t.Errorf("the unchanged stale file must be removed; stat err = %v", serr)
 	}
-	if lockRecords(t, workdir, "claude/security-baseline/skills/lockdown/SKILL.md") {
-		t.Error("the lock must not record the kept file")
+	if lockRecords(t, workdir, staleRenderPath) {
+		t.Error("the lock must not record the removed file")
 	}
 	wantFileHashes(t, workdir)
+}
+
+// Spec: §7.5.3, §7.8 — a marketplace render whose cleanup leaves a stale
+// recorded file in place fails with ErrStaleFilesKept, naming each kept file
+// and its reason, and does not rewrite the lock. Otherwise the render would
+// report no change for a removal it could not make, the publish phase would
+// skip the commit, and every later render would keep the file again. After the
+// publisher removes the file by hand, the next render succeeds.
+func TestRender_KeptStaleFileFailsRender(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		mutate func(t *testing.T, workdir string)
+		reason string
+	}{
+		{
+			name: "file edited after the render",
+			mutate: func(t *testing.T, workdir string) {
+				writeFile(t, filepath.Join(workdir, filepath.FromSlash(staleRenderPath)), "line one\r\nline two\r\n")
+			},
+			reason: "does not match the file_hash",
+		},
+		{
+			name: "lock written before file_hash",
+			mutate: func(t *testing.T, workdir string) {
+				lock, err := ReadLock(workdir)
+				if err != nil || lock == nil {
+					t.Fatalf("ReadLock = (%v, %v)", lock, err)
+				}
+				for i := range lock.Artifacts {
+					lock.Artifacts[i].FileHash = ""
+				}
+				if err := WriteLock(workdir, lock); err != nil {
+					t.Fatalf("WriteLock: %v", err)
+				}
+			},
+			reason: "records no file_hash",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			workdir := t.TempDir()
+			opts := renderOpts(t, renderFixtureRegistry(t), workdir, []string{"claude-code"})
+			if _, err := Render(context.Background(), opts); err != nil {
+				t.Fatalf("first Render: %v", err)
+			}
+			tc.mutate(t, workdir)
+			stale := filepath.Join(workdir, filepath.FromSlash(staleRenderPath))
+			before := readTargetFile(t, workdir, staleRenderPath)
+
+			opts.Plugins = narrowFinancePack()
+			_, err := Render(context.Background(), opts)
+			if !errors.Is(err, ErrStaleFilesKept) {
+				t.Fatalf("narrowed Render = %v, want ErrStaleFilesKept", err)
+			}
+			for _, want := range []string{staleRenderPath, tc.reason, "by hand"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error must contain %q: %v", want, err)
+				}
+			}
+			wantContentEq(t, stale, string(before))
+			if !lockRecords(t, workdir, staleRenderPath) {
+				t.Error("a failed render must leave the prior lock in place")
+			}
+
+			// The publisher removes the file by hand; the next render reconciles.
+			if err := os.Remove(stale); err != nil {
+				t.Fatalf("Remove: %v", err)
+			}
+			if _, err := Render(context.Background(), opts); err != nil && strings.Contains(err.Error(), staleRenderPath) {
+				t.Fatalf("Render after the manual removal still names the file: %v", err)
+			}
+		})
+	}
+}
+
+// Spec: §7.5.3 — keptReason maps each hash-check refusal to its reason and
+// leaves every other cleanup error, such as a recorded-path refusal, out of
+// the kept list.
+func TestKeptReason(t *testing.T) {
+	t.Parallel()
+	cases := map[error]string{
+		materialize.ErrStaleHashMissing:  "records no file_hash",
+		materialize.ErrStaleHashMismatch: "does not match",
+		materialize.ErrStaleUnreadable:   "cannot be read",
+		materialize.ErrUnconfinedPath:    "",
+	}
+	for err, want := range cases {
+		got := keptReason(fmt.Errorf("wrapped: %w", err))
+		if (want == "" && got != "") || !strings.Contains(got, want) {
+			t.Errorf("keptReason(%v) = %q, want it to contain %q", err, got, want)
+		}
+	}
 }
 
 // wantContentEq fails the test unless the file at path holds want.

@@ -121,13 +121,15 @@ func FetchRecords(opts Options) ([]Record, []layer.Drop, error) {
 //
 // prior maps each prior materialized path to the lock entry that records it, as
 // PriorPaths returns from a lock; the cleanup reads the entry's Merge and
-// FileHash. current is the set of paths the render wrote this time.
+// FileHash. current is the set of paths the render wrote this time. The result
+// lists each stale standalone file the file-hash check left in place, which the
+// render turns into a failure (ErrStaleFilesKept).
 //
 // Spec: §7.5.3, §7.8
-func Reconcile(target string, prior map[string]LockArtifact, current map[string]bool) {
+func Reconcile(target string, prior map[string]LockArtifact, current map[string]bool) []StaleFileKept {
 	// A marketplace lock records no artifact IDs, so no previous output is
 	// kept (§13.11.3 applies to a target lock that records the artifact).
-	removeStalePaths(target, prior, current, keptOutput{})
+	return removeStalePaths(target, prior, current, keptOutput{})
 }
 
 // PriorPaths returns the materialized paths a lock recorded, each mapped to the

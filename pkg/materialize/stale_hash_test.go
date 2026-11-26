@@ -81,7 +81,7 @@ func TestRemoveStale_ForgedHashKeepsFile(t *testing.T) {
 }
 
 // Spec: §7.5.3 — a stale file the cleanup cannot read is left in place, and
-// the error is neither of the hash sentinels.
+// the error wraps ErrStaleUnreadable rather than a hash sentinel.
 func TestRemoveStale_UnreadableFileKept(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -98,8 +98,8 @@ func TestRemoveStale_UnreadableFileKept(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
 	err := RemoveStale(dest, "a/locked.md", FileHash([]byte("content")))
-	if err == nil || errors.Is(err, ErrStaleHashMismatch) || errors.Is(err, ErrStaleHashMissing) {
-		t.Fatalf("RemoveStale of an unreadable file = %v, want a read error", err)
+	if !errors.Is(err, ErrStaleUnreadable) || errors.Is(err, ErrStaleHashMismatch) || errors.Is(err, ErrStaleHashMissing) {
+		t.Fatalf("RemoveStale of an unreadable file = %v, want ErrStaleUnreadable", err)
 	}
 	wantExists(t, path)
 }

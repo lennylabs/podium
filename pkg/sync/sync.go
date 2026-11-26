@@ -829,7 +829,9 @@ func writeTarget(target string, files []adapter.File, current map[string]bool, p
 	if err := materialize.WriteKeeping(target, files, kept.keepFunc()); err != nil {
 		return false, nil, err
 	}
-	removeStalePaths(target, prior, current, kept)
+	// A workspace sync keeps a stale file the hash check refuses and only
+	// reports it (§7.5.3); removeStalePaths has already named each one.
+	_ = removeStalePaths(target, prior, current, kept)
 
 	afterCurrent, err := onDiskDigests(target, current)
 	if err != nil {
@@ -904,13 +906,14 @@ func mergeDigests(a, b map[string]string) map[string]string {
 // could otherwise name any file the operator wrote inside the target, while a
 // materialized file the operator edited would lose the edits. An entry with no
 // file_hash, a file whose bytes differ, and a file that cannot be read are
-// left in place and named on standard error, and since the lock this run
-// writes records only what it wrote or keeps, the entry leaves the lock. The
-// paths are visited in sorted order so that list reads the same on every run.
-// A §6.7 config-merge path is shared with the
-// operator, so it is reconciled in place (Podium's tagged entries or inject
-// blocks are stripped) rather than deleted, which preserves the operator's
-// other entries when the last contributing artifact is removed. Best-effort:
+// left in place, named on standard error, and returned, so the §7.8 render can
+// fail rather than publish a tree that still carries them. A workspace sync
+// writes a lock that records only what it wrote or keeps, so the entry leaves
+// that lock. The paths are visited in sorted order so the report reads the
+// same on every run. A §6.7 config-merge path is shared with the operator, so
+// it is reconciled in place (Podium's tagged entries or inject blocks are
+// stripped) rather than deleted, which preserves the operator's other entries
+// when the last contributing artifact is removed. Best-effort:
 // log to stderr on error and continue, since a partial cleanup is better than
 // a hard failure that rolls back a successful materialize. The previous output
 // in kept (§13.11.3) is not stale: its standalone paths stay on disk, and the
@@ -930,8 +933,9 @@ func mergeDigests(a, b map[string]string) map[string]string {
 // its only file is removed.
 //
 // Spec: §7.5.3
-func removeStalePaths(target string, prior map[string]LockArtifact, current map[string]bool, kept keptOutput) {
+func removeStalePaths(target string, prior map[string]LockArtifact, current map[string]bool, kept keptOutput) []StaleFileKept {
 	var live []os.FileInfo
+	var left []StaleFileKept
 	for _, p := range slices.Sorted(maps.Keys(prior)) {
 		entry := prior[p]
 		if current[p] || kept.standalone[p] {
@@ -953,8 +957,12 @@ func removeStalePaths(target string, prior map[string]LockArtifact, current map[
 		}
 		if err := materialize.RemoveStale(target, p, entry.FileHash); err != nil {
 			fmt.Fprintf(os.Stderr, "sync: stale-file cleanup: skipping %q: %v\n", p, err)
+			if reason := keptReason(err); reason != "" {
+				left = append(left, StaleFileKept{Path: p, Reason: reason})
+			}
 		}
 	}
+	return left
 }
 
 // liveFiles returns the file information of every path the run wrote and

@@ -340,7 +340,14 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 		return nil, fmt.Errorf("publish %q: write render: %w", outputID, err)
 	}
 
-	Reconcile(workdir, priorPaths, currentPaths)
+	// §7.5.3, §7.8: a stale file the hash check keeps fails the render before
+	// the lock is rewritten and before the publish phase. Publishing would push
+	// a tree that still carries an artifact that left the view, and since the
+	// lock is not compared (§7.5.2) the publish phase could skip the commit,
+	// so every later render would keep the file again.
+	if left := Reconcile(workdir, priorPaths, currentPaths); len(left) > 0 {
+		return nil, staleFilesKeptError(outputID, left)
+	}
 
 	// materialize.Write left every rendered path a readable regular file, so
 	// this read fails only on a concurrent filesystem mutation; the guard
