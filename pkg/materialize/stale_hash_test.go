@@ -103,3 +103,54 @@ func TestRemoveStale_UnreadableFileKept(t *testing.T) {
 	}
 	wantExists(t, path)
 }
+
+// Spec: §7.5.3, §7.8 — CheckStale returns what RemoveStale would return
+// before its removal and changes nothing: nil for a matching file and for an
+// absent path, and the hash sentinels otherwise.
+func TestCheckStale_ChangesNothing(t *testing.T) {
+	t.Parallel()
+	dest := t.TempDir()
+	confinedFixture(t, dest, map[string]string{"a/match.md": "m", "a/edited.md": "e"})
+	if err := CheckStale(dest, "a/match.md", FileHash([]byte("m"))); err != nil {
+		t.Errorf("CheckStale of a matching file = %v, want nil", err)
+	}
+	wantExists(t, filepath.Join(dest, "a", "match.md"))
+	if err := CheckStale(dest, "a/edited.md", FileHash([]byte("x"))); !errors.Is(err, ErrStaleHashMismatch) {
+		t.Errorf("CheckStale of an edited file = %v, want ErrStaleHashMismatch", err)
+	}
+	if err := CheckStale(dest, "a/edited.md", ""); !errors.Is(err, ErrStaleHashMissing) {
+		t.Errorf("CheckStale with no hash = %v, want ErrStaleHashMissing", err)
+	}
+	if err := CheckStale(dest, "a/gone.md", ""); err != nil {
+		t.Errorf("CheckStale of an absent file = %v, want nil", err)
+	}
+	if err := CheckStale(dest, "missing/x.md", ""); err != nil {
+		t.Errorf("CheckStale below an absent directory = %v, want nil", err)
+	}
+	if err := CheckStale(dest, "a", ""); !errors.Is(err, ErrUnconfinedPath) {
+		t.Errorf("CheckStale of a directory = %v, want ErrUnconfinedPath", err)
+	}
+}
+
+// Spec: §7.5.3 — a matching stale file whose removal fails, here because its
+// directory is read-only, stays and returns ErrStaleNotRemoved.
+func TestRemoveStale_RemoveFailure(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permission bits do not deny removal on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root removes a file whatever its directory's permission bits")
+	}
+	dest := t.TempDir()
+	confinedFixture(t, dest, map[string]string{"ro/a.md": "a"})
+	dir := filepath.Join(dest, "ro")
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if err := RemoveStale(dest, "ro/a.md", FileHash([]byte("a"))); !errors.Is(err, ErrStaleNotRemoved) {
+		t.Fatalf("RemoveStale in a read-only directory = %v, want ErrStaleNotRemoved", err)
+	}
+	wantExists(t, filepath.Join(dir, "a.md"))
+}

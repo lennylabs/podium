@@ -336,15 +336,24 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 	beforeDigests, _ := tolerantDigests(currentPaths, readRecorded(workdir))
 	beforePrior, unobservedBefore := tolerantDigests(priorOnly, readRecorded(workdir))
 
+	// §7.5.3, §7.8: a stale file the cleanup would keep fails the render
+	// before anything is written. Publishing would push a tree that still
+	// carries an artifact that left the view, and since the lock is not
+	// compared (§7.5.2) the publish phase could skip the commit, so every
+	// later render would keep the file again. Failing before the write leaves
+	// a reused checkout with its tree and lock, so the run after the remedy
+	// sees the whole catalog change.
+	if left := staleRefusals(workdir, priorPaths, currentPaths); len(left) > 0 {
+		return nil, staleFilesKeptError(outputID, left)
+	}
+
 	if err := materialize.Write(workdir, files); err != nil {
 		return nil, fmt.Errorf("publish %q: write render: %w", outputID, err)
 	}
 
-	// §7.5.3, §7.8: a stale file the hash check keeps fails the render before
-	// the lock is rewritten and before the publish phase. Publishing would push
-	// a tree that still carries an artifact that left the view, and since the
-	// lock is not compared (§7.5.2) the publish phase could skip the commit,
-	// so every later render would keep the file again.
+	// A removal can still fail after the write, for example on a read-only
+	// directory. The render then fails without rewriting the lock, so the
+	// entry stays recorded.
 	if left := Reconcile(workdir, priorPaths, currentPaths); len(left) > 0 {
 		return nil, staleFilesKeptError(outputID, left)
 	}

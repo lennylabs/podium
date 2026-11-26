@@ -41,6 +41,10 @@ var ErrStaleHashMismatch = errors.New("materialize: the file does not match the 
 // it cannot read the file to compare its bytes with the recorded file hash.
 var ErrStaleUnreadable = errors.New("materialize: the file cannot be read to check its file_hash")
 
+// ErrStaleNotRemoved signals a stale file that passed every check but whose
+// removal failed, for example because its directory is read-only.
+var ErrStaleNotRemoved = errors.New("materialize: the file cannot be removed")
+
 // FileHash returns the hash the sync lock records for a file that sync writes
 // whole: "sha256:" followed by the lowercase hexadecimal SHA-256 digest of
 // data, the form the other content digests take (§4.7.10). RemoveStale
@@ -64,8 +68,10 @@ func FileHash(data []byte) string {
 // materialized file the operator edited no longer matches. An empty fileHash,
 // a mismatch, and a file that cannot be read leave the file in place and
 // return an error that wraps ErrStaleHashMissing, ErrStaleHashMismatch, or
-// ErrStaleUnreadable. The bytes are hashed through the open root the removal
-// uses, after the path checks.
+// ErrStaleUnreadable, and a removal that fails after the checks returns an
+// error that wraps ErrStaleNotRemoved. The bytes are hashed through the open
+// root the removal uses, after the path checks. CheckStale applies the same
+// checks without removing anything.
 //
 // The removal accepts the links the writer accepts (§6.7): a directory
 // component may be a symbolic link that resolves inside the root, so the
@@ -83,28 +89,63 @@ func FileHash(data []byte) string {
 //
 // Spec: §6.7, §7.5.3
 func RemoveStale(destination, rel, fileHash string) error {
-	sp, err := openResolved(destination, rel, resolveOpts{recorded: true})
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
+	sp, present, err := resolveStale(destination, rel, fileHash)
+	if err != nil || sp == nil {
 		return err
 	}
 	defer sp.close()
+	if present {
+		if rerr := sp.root.Remove(filepath.Join(sp.segs...)); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+			return fmt.Errorf("%w: %q: %w", ErrStaleNotRemoved, rel, rerr)
+		}
+	}
+	pruneEmptyDirs(sp.root, sp.segs[:len(sp.segs)-1], sp.keep)
+	return nil
+}
+
+// CheckStale applies the checks RemoveStale applies to rel and fileHash and
+// returns the error RemoveStale would return before its removal, without
+// changing anything. An absent path returns nil. The §7.8 render calls it for
+// every stale path before it writes, so a render that would keep a stale file
+// fails with the checkout untouched.
+//
+// Spec: §7.5.3, §7.8
+func CheckStale(destination, rel, fileHash string) error {
+	sp, _, err := resolveStale(destination, rel, fileHash)
+	if sp != nil {
+		sp.close()
+	}
+	return err
+}
+
+// resolveStale resolves rel for the stale-file cleanup and checks it. It
+// returns a nil resolved path and a nil error when the destination or a
+// directory on the path is absent, the resolved path with present false when
+// only the file is absent, and the resolved path with present true when the
+// file is a confined regular file whose bytes hash to fileHash. The caller
+// closes a non-nil resolved path.
+func resolveStale(destination, rel, fileHash string) (*resolvedPath, bool, error) {
+	sp, err := openResolved(destination, rel, resolveOpts{recorded: true})
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
 	err = checkConfinedFile(sp.root, rel, sp.segs)
 	switch {
 	case err == nil:
 		if herr := sp.matchHash(rel, fileHash); herr != nil {
-			return herr
+			sp.close()
+			return nil, false, herr
 		}
-		if rerr := sp.root.Remove(filepath.Join(sp.segs...)); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
-			return fmt.Errorf("materialize: remove %s: %w", rel, rerr)
-		}
-	case !errors.Is(err, fs.ErrNotExist):
-		return err
+		return sp, true, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return sp, false, nil
+	default:
+		sp.close()
+		return nil, false, err
 	}
-	pruneEmptyDirs(sp.root, sp.segs[:len(sp.segs)-1], sp.keep)
-	return nil
 }
 
 // matchHash confirms that the regular file at the resolved path hashes to

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -336,6 +337,116 @@ func TestRender_KeptStaleFileFailsRender(t *testing.T) {
 	}
 }
 
+// Spec: §7.5.3, §7.8 — a render that fails on a kept stale file fails before
+// it writes, so a reused checkout keeps its tree and its lock. After the
+// publisher removes the named file, the next render makes the whole catalog
+// change and reports it, so the publish phase commits it.
+func TestRender_KeptStaleFileLeavesReusedCheckoutUntouched(t *testing.T) {
+	t.Parallel()
+	workdir := t.TempDir()
+	opts := renderOpts(t, renderFixtureRegistry(t), workdir, []string{"claude-code"})
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatalf("first Render: %v", err)
+	}
+	edited := filepath.Join(workdir, filepath.FromSlash(staleRenderPath))
+	writeFile(t, edited, "edited in the checkout\n")
+	const goneLater = "claude/finance-pack/skills/pay-invoice/SKILL.md"
+	manifest := readTargetFile(t, workdir, ".claude-plugin/marketplace.json")
+	lockBefore := readTargetFile(t, workdir, ".podium/sync.lock")
+
+	opts.Plugins = []PluginFilter{{Name: "security-baseline", Include: []string{"security/baseline/**"}}}
+	if _, err := Render(context.Background(), opts); !errors.Is(err, ErrStaleFilesKept) {
+		t.Fatalf("Render = %v, want ErrStaleFilesKept", err)
+	}
+	if _, err := os.Stat(filepath.Join(workdir, filepath.FromSlash(goneLater))); err != nil {
+		t.Errorf("a failed render must not remove %s: %v", goneLater, err)
+	}
+	if got := readTargetFile(t, workdir, ".claude-plugin/marketplace.json"); string(got) != string(manifest) {
+		t.Error("a failed render must not rewrite the marketplace manifest")
+	}
+	if got := readTargetFile(t, workdir, ".podium/sync.lock"); string(got) != string(lockBefore) {
+		t.Error("a failed render must not rewrite the lock")
+	}
+
+	if err := os.Remove(edited); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	res, err := Render(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Render after the manual removal: %v", err)
+	}
+	if !res.Changed || len(res.ChangedArtifacts) == 0 {
+		t.Errorf("Render = (Changed %v, %v), want the catalog change reported", res.Changed, res.ChangedArtifacts)
+	}
+	if _, serr := os.Stat(filepath.Join(workdir, filepath.FromSlash(goneLater))); !os.IsNotExist(serr) {
+		t.Errorf("%s must be removed by the render after the remedy; stat err = %v", goneLater, serr)
+	}
+}
+
+// Spec: §7.5.3, §7.8 — a forged lock entry naming a file the render did not
+// write fails the render rather than deleting the file, and the error names
+// the lock-entry remedy.
+func TestRender_ForgedEntryFailsWithLockRemedy(t *testing.T) {
+	t.Parallel()
+	workdir := t.TempDir()
+	opts := renderOpts(t, renderFixtureRegistry(t), workdir, []string{"claude-code"})
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatalf("first Render: %v", err)
+	}
+	writeFile(t, filepath.Join(workdir, "README.md"), "# acme marketplace\n")
+	lock, err := ReadLock(workdir)
+	if err != nil || lock == nil {
+		t.Fatalf("ReadLock = (%v, %v)", lock, err)
+	}
+	lock.Artifacts = append(lock.Artifacts, LockArtifact{MaterializedPath: "README.md", FileHash: materialize.FileHash([]byte("other"))})
+	if err := WriteLock(workdir, lock); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+
+	_, err = Render(context.Background(), opts)
+	if !errors.Is(err, ErrStaleFilesKept) {
+		t.Fatalf("Render = %v, want ErrStaleFilesKept", err)
+	}
+	for _, want := range []string{"README.md", "remove its entry from .podium/sync.lock"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must contain %q: %v", want, err)
+		}
+	}
+	wantContentEq(t, filepath.Join(workdir, "README.md"), "# acme marketplace\n")
+}
+
+// Spec: §7.5.3, §7.8 — a stale file that passes the hash check but cannot be
+// removed, here because its directory is read-only, fails the render and
+// leaves its entry in the lock.
+func TestRender_RemoveFailureFailsRender(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permission bits do not deny removal on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root removes a file whatever its directory's permission bits")
+	}
+	workdir := t.TempDir()
+	opts := renderOpts(t, renderFixtureRegistry(t), workdir, []string{"claude-code"})
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatalf("first Render: %v", err)
+	}
+	dir := filepath.Dir(filepath.Join(workdir, filepath.FromSlash(staleRenderPath)))
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	opts.Plugins = narrowFinancePack()
+	_, err := Render(context.Background(), opts)
+	if !errors.Is(err, ErrStaleFilesKept) || !strings.Contains(err.Error(), "cannot be removed") {
+		t.Fatalf("Render = %v, want ErrStaleFilesKept naming the failed removal", err)
+	}
+	if !lockRecords(t, workdir, staleRenderPath) {
+		t.Error("the lock must keep the entry of the file the render could not remove")
+	}
+}
+
 // Spec: §7.5.3 — keptReason maps each hash-check refusal to its reason and
 // leaves every other cleanup error, such as a recorded-path refusal, out of
 // the kept list.
@@ -345,6 +456,7 @@ func TestKeptReason(t *testing.T) {
 		materialize.ErrStaleHashMissing:  "records no file_hash",
 		materialize.ErrStaleHashMismatch: "does not match",
 		materialize.ErrStaleUnreadable:   "cannot be read",
+		materialize.ErrStaleNotRemoved:   "cannot be removed",
 		materialize.ErrUnconfinedPath:    "",
 	}
 	for err, want := range cases {
