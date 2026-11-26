@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/materialize"
 )
 
 // podiumLinkTarget returns a target whose .podium is a symbolic link to a
@@ -40,6 +41,12 @@ func wantStateDirError(t *testing.T, what string, err error, target string) {
 	if !strings.Contains(err.Error(), filepath.Join(target, ".podium")) || !strings.Contains(err.Error(), "replace it with a directory") {
 		t.Errorf("%s error %q must name %s and the remedy", what, err, filepath.Join(target, ".podium"))
 	}
+	if !errors.Is(err, materialize.ErrPodiumNotDirectory) || !errors.Is(err, materialize.ErrUnconfinedPath) {
+		t.Errorf("%s = %v, want it to match the materialize refusal it reports", what, err)
+	}
+	if n := strings.Count(err.Error(), "symbolic link or not a directory"); n != 1 || strings.Contains(err.Error(), "materialize:") {
+		t.Errorf("%s error %q must state the refusal once and carry no nested materialize error", what, err)
+	}
 }
 
 // Spec: §7.5.3 — a workspace whose .podium is a symbolic link or not a
@@ -66,6 +73,7 @@ func TestRun_PodiumNotDirectoryFailsRun(t *testing.T) {
 		wantStateDirError(t, "ProfileEdit", err, target)
 		err = WriteWorkspaceConfig(target, "sync.yaml", []byte("defaults: {}\n"))
 		wantStateDirError(t, "WriteWorkspaceConfig", err, target)
+		wantStateDirError(t, "CheckWorkspaceConfig", CheckWorkspaceConfig(target, "sync.yaml"), target)
 		if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
 			t.Errorf("files landed behind the .podium link: %v", entries)
 		}
@@ -76,7 +84,58 @@ func TestRun_PodiumNotDirectoryFailsRun(t *testing.T) {
 		writeFile(t, filepath.Join(target, ".podium"), "not a directory\n")
 		_, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"})
 		wantStateDirError(t, "Run", err, target)
+		wantStateDirError(t, "CheckWorkspaceConfig", CheckWorkspaceConfig(target, "sync.local.yaml"), target)
 	})
+}
+
+// Spec: §7.5.3, §7.7 — CheckWorkspaceConfig passes a workspace whose config
+// WriteWorkspaceConfig can write, an existing sync.yaml included, writes
+// nothing, and reports a refused temporary unchanged because it is not an
+// unusable .podium.
+func TestCheckWorkspaceConfig(t *testing.T) {
+	t.Parallel()
+	fresh := t.TempDir()
+	if err := CheckWorkspaceConfig(fresh, "sync.yaml"); err != nil {
+		t.Errorf("CheckWorkspaceConfig on a fresh workspace = %v, want nil", err)
+	}
+	if _, err := os.Stat(filepath.Join(fresh, ".podium")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("CheckWorkspaceConfig created .podium; stat err = %v", err)
+	}
+	writeFile(t, filepath.Join(fresh, ".podium", "sync.yaml"), "defaults: {}\n")
+	if err := CheckWorkspaceConfig(fresh, "sync.yaml"); err != nil {
+		t.Errorf("CheckWorkspaceConfig over an existing sync.yaml = %v, want nil", err)
+	}
+	base := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(base, "ws", ".podium"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(base, "victim"), filepath.Join(base, "ws", ".podium", "sync.yaml.tmp")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	err := CheckWorkspaceConfig(filepath.Join(base, "ws"), "sync.yaml")
+	if !errors.Is(err, materialize.ErrUnconfinedPath) || errors.Is(err, ErrStateDirUnusable) {
+		t.Errorf("CheckWorkspaceConfig over a temporary link = %v, want ErrUnconfinedPath without ErrStateDirUnusable", err)
+	}
+}
+
+// Spec: §7.5.3, §7.7 — a directory at the config file's name fails
+// CheckWorkspaceConfig with an error that names the directory by its path
+// below the workspace, as the unusable-.podium error names .podium, states
+// the remedy once, and matches the materialize refusal it reports.
+func TestCheckWorkspaceConfig_ConfigDirectory(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+	dir := filepath.Join(ws, ".podium", "sync.local.yaml")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	err := CheckWorkspaceConfig(ws, "sync.local.yaml")
+	if !errors.Is(err, materialize.ErrStateFileIsDirectory) || !errors.Is(err, materialize.ErrUnconfinedPath) || errors.Is(err, ErrStateDirUnusable) {
+		t.Fatalf("CheckWorkspaceConfig over a config directory = %v, want ErrStateFileIsDirectory and ErrUnconfinedPath", err)
+	}
+	if want := "sync: " + dir + " is a directory, which the write cannot replace; remove it"; err.Error() != want {
+		t.Errorf("CheckWorkspaceConfig error = %q, want %q", err, want)
+	}
 }
 
 // Spec: §7.5.3 — save-as and profile edit write sync.yaml through an
