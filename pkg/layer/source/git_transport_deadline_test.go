@@ -16,7 +16,6 @@ import (
 
 	"go.uber.org/goleak"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/lennylabs/podium/pkg/layer/source"
@@ -28,42 +27,23 @@ import (
 // SSH_KNOWN_HOSTS for host keys, so both are needed to reach the remote.
 func sshClientEnv(t *testing.T) string {
 	t.Helper()
-	// A unix socket path is limited to about 100 bytes, so the socket goes in
-	// a short directory of its own rather than under t.TempDir().
-	dir, err := os.MkdirTemp("", "pga")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	ln, err := net.Listen("unix", filepath.Join(dir, "agent.sock"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	_, key, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	keyring := agent.NewKeyring()
-	if err := keyring.Add(agent.AddedKey{PrivateKey: key}); err != nil {
-		t.Fatal(err)
-	}
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func() { _ = agent.ServeAgent(keyring, c) }()
-		}
-	}()
+	_, knownHosts := sshAgentEnv(t)
+	return knownHosts
+}
+
+// sshAgentEnv sets up the environment sshClientEnv describes and returns the
+// in-process agent as well as the known_hosts path, so a test can count the
+// agent connections a snapshot opens and closes.
+func sshAgentEnv(t *testing.T) (*testAgent, string) {
+	t.Helper()
+	ag := startTestAgent(t)
 	knownHosts := filepath.Join(t.TempDir(), "known_hosts")
 	if err := os.WriteFile(knownHosts, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SSH_AUTH_SOCK", ln.Addr().String())
+	t.Setenv("SSH_AUTH_SOCK", ag.addr)
 	t.Setenv("SSH_KNOWN_HOSTS", knownHosts)
-	return knownHosts
+	return ag, knownHosts
 }
 
 // stallingListener accepts TCP connections, runs onConn on each in the accept
@@ -187,13 +167,10 @@ func TestGit_SnapshotDeadlineGitProtocol(t *testing.T) {
 
 // Spec: §7.3.1, §13.12 — a snapshot that times out leaves no goroutine of its
 // own running, on an ssh remote that never sends its banner and on a git://
-// remote that never answers, however many times it times out.
-//
-// Two goroutines per ssh clone are ignored because they belong to the SSH
-// agent connection rather than to the remote: go-git's default ssh auth
-// (NewSSHAgentAuth) opens an agent client whose connection it never closes,
-// on every ssh clone whether it succeeds, fails, or times out, and the
-// in-process agent serves that connection.
+// remote that never answers, however many times it times out. The check
+// covers the SSH agent connection of each ssh clone: the agent client's reader
+// goroutine and the in-process agent's goroutine that serves the connection
+// end only when the snapshot closes it.
 func TestGit_SnapshotDeadlineLeavesNoGoroutines(t *testing.T) {
 	sshClientEnv(t)
 	sshRepo := "ssh://git@" + stallingListener(t, silent) + "/acme/layer.git"
@@ -203,9 +180,7 @@ func TestGit_SnapshotDeadlineLeavesNoGoroutines(t *testing.T) {
 		wantDeadlineFailure(t, sshRepo)
 		wantDeadlineFailure(t, gitRepo)
 	}
-	goleak.VerifyNone(t, baseline,
-		goleak.IgnoreAnyFunction("golang.org/x/crypto/ssh/agent.ServeAgent"),
-		goleak.IgnoreAnyFunction("golang.org/x/crypto/ssh/agent.(*pipeline).readLoop"))
+	goleak.VerifyNone(t, baseline)
 }
 
 // Spec: §7.3.1 (Source unreachable), §13.12 — every snapshot that a stalled

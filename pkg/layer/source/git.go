@@ -76,9 +76,13 @@ func (g Git) Snapshot(ctx context.Context, cfg LayerConfig) (*Snapshot, error) {
 	deadline := time.Now().Add(timeout)
 	fetchCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
-	proxyOpts, release := snapshotProxyOptions(fetchCtx, cfg.Repo)
-	defer release()
-	snap, err := boundedSnapshot(fetchCtx, cfg, proxyOpts)
+	proxyOpts, releaseDial := snapshotProxyOptions(fetchCtx, cfg.Repo)
+	defer releaseDial()
+	// The snapshot owns the SSH agent connection of an ssh clone and closes it
+	// when it returns, on success, on failure, and at the deadline.
+	auth, releaseAuth := snapshotSSHAuth(cfg.Repo)
+	defer releaseAuth()
+	snap, err := boundedSnapshot(fetchCtx, cfg, proxyOpts, auth)
 	// Only the expiry of this deadline names the setting. The clone error is
 	// dropped in that case, because its cause is the deadline.
 	if err != nil && fetchDeadlinePassed(ctx, fetchCtx, deadline) {
@@ -126,14 +130,14 @@ func fetchDeadlinePassed(ctx, fetchCtx context.Context, deadline time.Time) bool
 // request, the ssh transport dials through deadlineDialer, which closes the
 // connection when ctx ends, and readSnapshot checks ctx between its steps and
 // during the history walk.
-func boundedSnapshot(ctx context.Context, cfg LayerConfig, proxyOpts transport.ProxyOptions) (*Snapshot, error) {
+func boundedSnapshot(ctx context.Context, cfg LayerConfig, proxyOpts transport.ProxyOptions, auth transport.AuthMethod) (*Snapshot, error) {
 	type result struct {
 		snap *Snapshot
 		err  error
 	}
 	done := make(chan result, 1)
 	go func() {
-		snap, err := snapshotGit(ctx, cfg, proxyOpts)
+		snap, err := snapshotGit(ctx, cfg, proxyOpts, auth)
 		done <- result{snap, err}
 	}()
 	select {
@@ -150,11 +154,13 @@ func boundedSnapshot(ctx context.Context, cfg LayerConfig, proxyOpts transport.P
 	}
 }
 
-// snapshotGit clones cfg.Repo under ctx and reads the tree at cfg.Ref.
-func snapshotGit(ctx context.Context, cfg LayerConfig, proxyOpts transport.ProxyOptions) (*Snapshot, error) {
+// snapshotGit clones cfg.Repo under ctx and reads the tree at cfg.Ref. A nil
+// auth selects go-git's own handling of the remote's transport.
+func snapshotGit(ctx context.Context, cfg LayerConfig, proxyOpts transport.ProxyOptions, auth transport.AuthMethod) (*Snapshot, error) {
 	storer := memory.NewStorage()
 	cloneOpts := &git.CloneOptions{
 		URL:           cfg.Repo,
+		Auth:          auth,
 		ReferenceName: refNameFor(cfg.Ref),
 		SingleBranch:  true,
 		ProxyOptions:  proxyOpts,
