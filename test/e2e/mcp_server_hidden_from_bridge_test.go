@@ -1,8 +1,10 @@
 package e2e
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -135,5 +137,60 @@ func TestMCPBridge_HidesOverlayAndResourceMCPServers(t *testing.T) {
 	}
 	if notable := resultIDs(rpcResult(t, res.Stdout, 5), "notable"); notable["acme/local/cache"] {
 		t.Errorf("load_domain(acme/local) notable = %v, want no overlay mcp-server", notable)
+	}
+}
+
+// Spec: §5 — dropping the mcp-server results does not empty or shorten a
+// search page while visible matches exist, because the bridge asks the
+// registry for its largest page and trims after the drop. A search for the
+// mcp-server type alone matches nothing.
+func TestMCPBridge_HiddenResultsLeavePageFilled(t *testing.T) {
+	t.Parallel()
+	reg := hiddenRegistry(t)
+	env := chMCPEnv(t, reg, "PODIUM_HARNESS=codex")
+	res := mcpExec(t, env,
+		toolCall(1, "search_artifacts", map[string]any{"query": "acme", "top_k": 1}),
+		toolCall(2, "search_artifacts", map[string]any{"type": "mcp-server", "top_k": 1}),
+		toolCall(3, "search_artifacts", map[string]any{"scope": "acme/tools", "top_k": 2}),
+	)
+	one := rpcResult(t, res.Stdout, 1)
+	if ids := resultIDs(one, "results"); len(ids) != 1 || !ids["acme/tools/style"] {
+		t.Errorf("search_artifacts(acme, top_k 1) = %v, want the rule", one)
+	}
+	if total, _ := one["total_matched"].(float64); total != 1 {
+		t.Errorf("search_artifacts(acme, top_k 1) total_matched = %v, want 1", one["total_matched"])
+	}
+	byType := rpcResult(t, res.Stdout, 2)
+	if ids := resultIDs(byType, "results"); len(ids) != 0 || byType["total_matched"] != float64(0) {
+		t.Errorf("search_artifacts(type=mcp-server, top_k 1) = %v, want no results and total_matched 0", byType)
+	}
+	if ids := resultIDs(rpcResult(t, res.Stdout, 3), "results"); len(ids) != 1 || !ids["acme/tools/style"] {
+		t.Errorf("search_artifacts(scope acme/tools, top_k 2) ids = %v, want the rule", ids)
+	}
+}
+
+// Spec: §5, §6.10 — a refused mcp-server load reads exactly as a load of an
+// ID that is not in the caller's view, apart from the ID itself.
+func TestMCPBridge_HiddenLoadMatchesMissingID(t *testing.T) {
+	t.Parallel()
+	reg := hiddenRegistry(t)
+	env := chMCPEnv(t, reg, "PODIUM_HARNESS=codex")
+	res := mcpExec(t, env,
+		toolCall(1, "load_artifact", map[string]any{"id": "acme/tools/a/db"}),
+		toolCall(2, "load_artifact", map[string]any{"id": "acme/tools/nope"}),
+	)
+	norm := func(id int, artifact string) string {
+		b, err := json.Marshal(rpcEnvelope(t, res.Stdout, id)["result"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.ReplaceAll(string(b), artifact, "<id>")
+	}
+	hidden, missing := norm(1, "acme/tools/a/db"), norm(2, "acme/tools/nope")
+	if hidden != missing {
+		t.Errorf("refused load and missing ID differ:\nhidden:  %s\nmissing: %s", hidden, missing)
+	}
+	if !strings.Contains(missing, "registry.not_found") {
+		t.Errorf("missing ID result carries no registry.not_found: %s", missing)
 	}
 }

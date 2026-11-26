@@ -33,7 +33,7 @@ From 0.8.0, `podium sync` reads and writes its lock and `sync.yaml` only when th
 
 From 0.8.0, the MCP server keeps `mcp-server` artifacts out of its results, as the specification states. `search_artifacts` and the `load_domain` notable list leave them out, and `load_artifact` refuses one with `registry.not_found` and writes nothing. 0.7.0 listed them and wrote each loaded server's entry into the harness configuration, such as `.mcp.json` or `.codex/config.toml`.
 
-- A host or script that loads `mcp-server` artifacts through the MCP server receives `registry.not_found` after the upgrade. Deliver them with `podium sync`, which writes them into the harness configuration for the next session, or load them through an SDK.
+- A host or script that loads `mcp-server` artifacts through the MCP server receives `registry.not_found` after the upgrade. The MCP server refuses the load after it fetches the artifact, so the registry still records its own `artifact.loaded` audit event for the load, and the MCP server records none. Deliver them with `podium sync`, which writes them into the harness configuration for the next session, or load them through an SDK.
 - An entry that an earlier `load_artifact` wrote stays in the harness configuration file. A `podium sync` that writes into the same file rewrites Podium's entries there and keeps the entry only when the synced selection includes that artifact. Otherwise, delete the entry by hand.
 - A rollback to 0.7.0 needs no step.
 

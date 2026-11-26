@@ -15,10 +15,19 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	// cache miss." The workspace overlay is the only local source a search can
 	// serve, so an offline-only search returns overlay matches without dialing
 	// the registry, and an empty overlay is a structured cache miss.
+	// §5: the bridge lists no mcp-server artifact, so a search for that type
+	// alone matches nothing and the registry is not asked.
+	if typ, _ := args["type"].(string); hiddenFromBridge(typ) {
+		query, _ := args["query"].(string)
+		return map[string]any{"query": query, "total_matched": 0, "results": []any{}}
+	}
 	if s.cfg.cacheMode == "offline-only" {
 		return s.offlineOnlySearchArtifacts(args)
 	}
-	body, err := s.fetchJSON("/v1/search_artifacts", args)
+	// §5: the registry is asked for its maximum page, so the results left
+	// after the mcp-server results are dropped still fill the caller's page.
+	wide, page := searchWindow(args)
+	body, err := s.fetchJSON("/v1/search_artifacts", wide)
 	if err != nil {
 		// spec: §7.4 / §12 — when the registry is unreachable, return the
 		// offline envelope rather than an error. always-revalidate surfaces an
@@ -52,6 +61,7 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 		decoded := jsonAny(body)
 		stripSearchResultFrontmatter(decoded)
 		lowerTotalMatched(decoded, dropHiddenDescriptors(decoded, "results"))
+		trimDescriptors(decoded, "results", page)
 		return decoded
 	}
 	visible := registry.Results[:0]
@@ -69,7 +79,7 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	typeFilter, _ := args["type"].(string)
 	scope, _ := args["scope"].(string)
 	tags := tagsArg(args)
-	topK := topKArg(args)
+	topK := page
 	local := localSearch(overlayRecords, query, typeFilter, scope, tags, topK)
 
 	// §9.1 LocalSearchProvider: when an overlay semantic backend is
@@ -94,9 +104,8 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 // lowerTotalMatched subtracts the n descriptors the bridge dropped from the
 // total_matched of the decoded search response v, never below zero. The
 // registry counts every match, mcp-server artifacts included, and the bridge
-// sees the type only of the results it returned, so the total it reports
-// leaves out the dropped results and still counts a hidden match the registry
-// did not return.
+// sees the type only of the results the registry returned within its maximum
+// page, so the total it reports still counts a hidden match beyond that page.
 //
 // Spec: §5
 func lowerTotalMatched(v any, n int) {

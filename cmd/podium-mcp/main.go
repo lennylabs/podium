@@ -2035,8 +2035,10 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	}
 	// §5: the bridge serves no mcp-server artifact. The served type is read
 	// after the verification, which binds it to the record, and the refusal
-	// comes before the freshness check, the audit event, the cache, and any
-	// write, so a refused load leaves nothing behind.
+	// comes before the freshness check, the local audit event, the cache, and
+	// any write, so a refused load leaves nothing behind on the host. The
+	// refusal follows the fetch, so the registry has already recorded its own
+	// server-side artifact.loaded event for the load.
 	if hiddenFromBridge(resp.Type) {
 		return bridgeNotFound(resp.ID)
 	}
