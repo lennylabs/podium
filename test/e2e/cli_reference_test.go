@@ -788,6 +788,120 @@ func TestCLI_SyncMaterializes(t *testing.T) {
 	}
 }
 
+// Spec: §7.5.3 — a target whose .podium is a symbolic link fails `podium sync`
+// with an error naming .podium and the remedy, writes no artifact, and leaves
+// the directory the link names empty, instead of exiting 0 without a lock.
+func TestCLI_SyncRefusesPodiumLink(t *testing.T) {
+	reg := cliReg(t)
+	base := t.TempDir()
+	tgt := filepath.Join(base, "ws")
+	shared := filepath.Join(base, "shared-podium")
+	for _, d := range []string{tgt, shared} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	if err := os.Symlink(shared, filepath.Join(tgt, ".podium")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
+	if res.Exit == 0 {
+		t.Fatalf("sync with a .podium link exited 0\nstderr=%s", res.Stderr)
+	}
+	cliContains(t, res.Stderr, ".podium is a symbolic link or not a directory", "stderr names the refused .podium")
+	cliContains(t, res.Stderr, "replace it with a directory", "stderr states the remedy")
+	if entries, _ := os.ReadDir(tgt); len(entries) != 1 || entries[0].Name() != ".podium" {
+		t.Errorf("the failed sync wrote into the target: %v", entries)
+	}
+	if entries, _ := os.ReadDir(shared); len(entries) != 0 {
+		t.Errorf("files landed behind the .podium link: %v", entries)
+	}
+}
+
+// Spec: §7.7 — `podium init` leaves a .gitignore that is a symbolic link to no
+// file, or to a file outside the workspace, as it is, prints a warning, and
+// exits 0.
+func TestCLI_InitSkipsGitignoreLink(t *testing.T) {
+	reg := cliReg(t)
+	base := t.TempDir()
+	outside := filepath.Join(base, "outside-ignore")
+	if err := os.WriteFile(outside, []byte("outside\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for name, dest := range map[string]string{"dangling": "shared/missing", "outside": outside} {
+		ws := filepath.Join(base, name)
+		if err := os.MkdirAll(ws, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		link := filepath.Join(ws, ".gitignore")
+		if err := os.Symlink(dest, link); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		res := runPodium(t, ws, nil, "init", "--registry", reg)
+		cliWantExit(t, res, 0, "init with a "+name+" .gitignore link")
+		cliContains(t, res.Stderr, "warning:", name+": init warns")
+		cliContains(t, res.Stderr, ".gitignore is a symbolic link", name+": the warning names the link")
+		if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("%s: .gitignore must stay a link; lstat = (%v, %v)", name, info, err)
+		}
+	}
+	if got, _ := os.ReadFile(outside); string(got) != "outside\n" {
+		t.Errorf("the outside file changed: %q", got)
+	}
+}
+
+// Spec: §7.5.3 — `podium sync save-as` does not copy a sync.yaml link that
+// resolves outside the workspace into the workspace: it exits non-zero and
+// the link stays.
+func TestCLI_SaveAsRefusesOutsideConfigLink(t *testing.T) {
+	reg := cliReg(t)
+	base := t.TempDir()
+	ws := filepath.Join(base, "ws")
+	outside := filepath.Join(base, "outside-sync.yaml")
+	if err := os.WriteFile(outside, []byte("defaults:\n  identity: SECRET-ID\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cliWantExit(t, runPodium(t, "", nil, "sync", "--registry", reg, "--target", ws, "--harness", "none"), 0, "sync")
+	link := filepath.Join(ws, ".podium", "sync.yaml")
+	if err := os.Symlink("../../outside-sync.yaml", link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	res := runPodium(t, ws, nil, "sync", "save-as", "--target", ws, "--profile", "p1")
+	if res.Exit == 0 {
+		t.Errorf("save-as through an outside sync.yaml link exited 0\nstderr=%s", res.Stderr)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("sync.yaml must stay the link; lstat = (%v, %v)", info, err)
+	}
+}
+
+// Spec: §7.5.3 — a lock that is a link to another file inside .podium/ is
+// read, so a later scope exclusion removes the excluded artifact's output.
+func TestCLI_SyncReadsLockLinkInsidePodium(t *testing.T) {
+	reg := cliReg(t)
+	tgt := t.TempDir()
+	cliWantExit(t, runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none"), 0, "first sync")
+	files := readTreeFiltered(t, tgt)
+	if len(files) == 0 {
+		t.Fatalf("no artifacts materialized")
+	}
+	lock := filepath.Join(tgt, ".podium", "sync.lock")
+	if err := os.Rename(lock, filepath.Join(tgt, ".podium", "real.lock")); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if err := os.Symlink("real.lock", lock); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none", "--exclude", "**")
+	cliWantExit(t, res, 0, "sync excluding everything")
+	if strings.Contains(res.Stderr, "cannot read") {
+		t.Errorf("stderr = %q, want the in-.podium lock link read", res.Stderr)
+	}
+	if left := readTreeFiltered(t, tgt); len(left) != 0 {
+		t.Errorf("the excluded output stayed behind: %v", left)
+	}
+}
+
 // spec: doc "podium sync", `--dry-run` flag.
 func TestCLI_SyncDryRun(t *testing.T) {
 	reg := cliReg(t)

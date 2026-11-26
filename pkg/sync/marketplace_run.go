@@ -13,6 +13,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/materialize"
 )
 
 // This file implements the §7.8 prepare->render->publish pipeline that
@@ -281,17 +283,16 @@ func renderCommitMessage(tmpl string, render *RenderResult, now time.Time) (stri
 // writeChangeSummary writes the render's change set to a JSON file under workdir
 // and returns its path, the $PODIUM_CHANGE_SUMMARY value (§7.8). The file lives in
 // the .podium directory beside the sync lock so it is sync-local state the
-// marketplace repository does not commit.
+// marketplace repository does not commit. The checkout's content comes from
+// the repository, so the write goes through materialize.WriteStateFile: a
+// committed .podium link or a committed link at the summary's temporary name
+// cannot redirect it outside the checkout (§7.8).
 func writeChangeSummary(workdir string, render *RenderResult) (string, error) {
-	dir := filepath.Join(workdir, ".podium")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("publish %q: create change-summary dir: %w", render.OutputID, err)
-	}
-	path := filepath.Join(dir, "publish-change-summary.json")
-	if err := os.WriteFile(path, render.ChangeSummaryJSON(), 0o644); err != nil {
+	const rel = ".podium/publish-change-summary.json"
+	if err := materialize.WriteStateFile(workdir, rel, render.ChangeSummaryJSON(), 0o644); err != nil {
 		return "", fmt.Errorf("publish %q: write change summary: %w", render.OutputID, err)
 	}
-	return path, nil
+	return filepath.Join(workdir, filepath.FromSlash(rel)), nil
 }
 
 // printPhase prints each command of a phase with its variables substituted, the

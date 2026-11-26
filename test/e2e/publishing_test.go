@@ -1529,3 +1529,211 @@ func assertPluginCount(t *testing.T, label, data, wantMarket, wantPlugin string,
 		t.Errorf("%s lists plugin %q %d times, want %d:\n%s", label, wantPlugin, count, want, data)
 	}
 }
+
+// Spec: §7.5.3, §7.8 — the marketplace repository carries the sync lock the
+// previous render committed, so whoever can push to it chooses the paths the
+// next render's stale-file cleanup reads. A seeded remote commits a lock that
+// names a file beside the checkout and a file behind a committed symbolic link
+// to a directory outside it. `podium sync --config` skips both entries with a
+// warning that names each, completes the run, and leaves both files in place.
+func TestPublishing_CommittedLockCannotDeleteOutsideCheckout(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	reg := writePublishRegistry(t)
+	remote := bareRemote(t)
+	ws := t.TempDir()
+	cfg := writeSyncConfigMarketplace(t, ws, reg, remote, "claude-code")
+
+	// The checkout lands at <ws>/build/acme-agents, so ../victim/file.txt names
+	// <ws>/build/victim/file.txt.
+	victim := filepath.Join(ws, "build", "victim", "file.txt")
+	secret := filepath.Join(ws, "outside", "secret.txt")
+	for _, p := range []string{victim, secret} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("keep\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", p, err)
+		}
+	}
+	seedHostileLock(t, remote, filepath.Join(ws, "outside"))
+
+	res := runPodium(t, "", gitEnv(), "sync", "--config", cfg)
+	if res.Exit != 0 {
+		t.Fatalf("sync --config exit=%d\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	for _, p := range []string{victim, secret} {
+		if got, err := os.ReadFile(p); err != nil || string(got) != "keep\n" {
+			t.Errorf("%s after sync = (%q, %v), want it unchanged", p, got, err)
+		}
+	}
+	for _, entry := range []string{`"../victim/file.txt"`, `"claude/link/secret.txt"`} {
+		if !strings.Contains(res.Stderr, entry) {
+			t.Errorf("stderr must name the skipped lock entry %s; stderr:\n%s", entry, res.Stderr)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(ws, "build", "acme-agents", "claude", "link")); err != nil {
+		t.Errorf("the committed symbolic link must survive the cleanup: %v", err)
+	}
+}
+
+// seedHostileLock pushes a commit to remote that holds a symbolic link
+// claude/link pointing at outside and a .podium/sync.lock whose entries name a
+// path beside the checkout and a path through that link.
+func seedHostileLock(t *testing.T, remote, outside string) {
+	t.Helper()
+	lock := "version: 1\nprofile: null\nartifacts:\n" +
+		"  - id: \"\"\n    materialized_path: ../victim/file.txt\n" +
+		"  - id: \"\"\n    materialized_path: claude/link/secret.txt\n"
+	seedCommit(t, remote, map[string]string{"claude/link": outside}, map[string]string{".podium/sync.lock": lock})
+}
+
+// seedCommit pushes one commit to remote holding the given symbolic links
+// (path to link target) and files (path to content), each path
+// slash-separated and relative to the repository root.
+func seedCommit(t *testing.T, remote string, links, files map[string]string) {
+	t.Helper()
+	seed := t.TempDir()
+	if r := gitCmd(t, seed, "clone", remote, seed); r.Exit != 0 {
+		t.Fatalf("clone for hostile seed: exit=%d stderr=%s", r.Exit, r.Stderr)
+	}
+	for rel, target := range links {
+		link := filepath.Join(seed, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.Symlink(target, link); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+	}
+	for rel, content := range files {
+		p := filepath.Join(seed, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"commit", "-m", "hostile content"},
+		{"push", "origin", "main"},
+	} {
+		if r := gitCmd(t, seed, args...); r.Exit != 0 {
+			t.Fatalf("git %s: exit=%d stderr=%s", strings.Join(args, " "), r.Exit, r.Stderr)
+		}
+	}
+}
+
+// Spec: §6.7, §7.8 — a seeded remote commits a symbolic link at a name the
+// render writes through a temporary (the lock's temporary, a manifest's
+// staging temporary) or at a config-merge path the render folds into. Each
+// link points outside the checkout. `podium sync --config` refuses the write
+// or the merge, counts the target as failed, and leaves the outside file
+// unchanged, and the remote never receives the outside file's content.
+func TestPublishing_CommittedLinksCannotWriteOrLeakOutsideCheckout(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	for name, linkPath := range map[string]string{
+		"lock temporary":    ".podium/sync.lock.tmp",
+		"staging temporary": ".claude-plugin/marketplace.json.tmp",
+		"merge target":      ".claude-plugin/marketplace.json",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			reg := writePublishRegistry(t)
+			remote := bareRemote(t)
+			ws := t.TempDir()
+			cfg := writeSyncConfigMarketplace(t, ws, reg, remote, "claude-code")
+			victim := filepath.Join(ws, "creds.json")
+			const secret = `{"token":"SECRET-123"}`
+			if err := os.WriteFile(victim, []byte(secret), 0o600); err != nil {
+				t.Fatalf("write victim: %v", err)
+			}
+			seedCommit(t, remote, map[string]string{linkPath: victim}, nil)
+			seeded := remoteCommitCount(t, remote)
+
+			res := runPodium(t, "", gitEnv(), "sync", "--config", cfg)
+			if res.Exit == 0 {
+				t.Errorf("sync --config over a committed %s link exited 0\nstderr=%s", name, res.Stderr)
+			}
+			if got, err := os.ReadFile(victim); err != nil || string(got) != secret {
+				t.Errorf("the outside file after sync = (%q, %v), want it unchanged", got, err)
+			}
+			if n := remoteCommitCount(t, remote); n != seeded {
+				t.Errorf("remote commit count = %d, want %d: the failed target must publish nothing", n, seeded)
+			}
+			for _, path := range remoteRegularFilesContaining(t, remote, "SECRET-123") {
+				t.Errorf("the remote holds the outside file's content in the regular file %s", path)
+			}
+		})
+	}
+}
+
+// Spec: §6.6, §7.8 — a seeded remote commits a plugin's skills directory as a
+// symbolic link into the checkout's .git/hooks. `podium sync --config` refuses
+// the write before anything lands in .git, counts the target as failed, and
+// publishes nothing.
+func TestPublishing_CommittedDirectoryLinkIntoGitRefused(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	reg := writePublishRegistry(t)
+	remote := bareRemote(t)
+	ws := t.TempDir()
+	cfg := writeSyncConfigMarketplace(t, ws, reg, remote, "claude-code")
+	seedCommit(t, remote, map[string]string{"claude/finance-pack/skills": "../../.git/hooks"}, nil)
+	seeded := remoteCommitCount(t, remote)
+
+	res := runPodium(t, "", gitEnv(), "sync", "--config", cfg)
+	if res.Exit == 0 {
+		t.Errorf("sync --config over a committed skills link into .git exited 0\nstderr=%s", res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, ".git segment") {
+		t.Errorf("stderr must name the refused .git path; stderr:\n%s", res.Stderr)
+	}
+	hooks := filepath.Join(ws, "build", "acme-agents", ".git", "hooks")
+	if _, err := os.Lstat(filepath.Join(hooks, "run-variance")); !os.IsNotExist(err) {
+		t.Errorf("the render wrote into .git/hooks: lstat err = %v", err)
+	}
+	if n := remoteCommitCount(t, remote); n != seeded {
+		t.Errorf("remote commit count = %d, want %d: the failed target must publish nothing", n, seeded)
+	}
+}
+
+// remoteRegularFilesContaining clones remote and returns the paths of the
+// committed regular files whose content holds needle. A committed symbolic
+// link is skipped rather than followed, because the test seeds links to files
+// outside the checkout.
+func remoteRegularFilesContaining(t *testing.T, remote, needle string) []string {
+	t.Helper()
+	clone := t.TempDir()
+	if r := gitCmd(t, clone, "clone", remote, clone); r.Exit != 0 {
+		t.Fatalf("clone remote: exit=%d stderr=%s", r.Exit, r.Stderr)
+	}
+	var out []string
+	err := filepath.WalkDir(clone, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && d.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		b, rerr := os.ReadFile(p)
+		if rerr != nil {
+			return rerr
+		}
+		if strings.Contains(string(b), needle) {
+			rel, _ := filepath.Rel(clone, p)
+			out = append(out, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk clone: %v", err)
+	}
+	return out
+}

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/lennylabs/podium/pkg/adapter"
@@ -299,16 +298,28 @@ func pluginsInOrder(assignments []assigned) []PluginFilter {
 // prior-render lock: an unchanged tree reports Changed=false even though no lock
 // is present, which the lock-based comparison could not do.
 func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult, error) {
-	prior, _ := ReadLock(workdir)
-	priorMerge := PriorMergeKinds(prior)
+	// The prior lock is committed to the marketplace repository, so the
+	// §7.5.3 recorded-path rule drops every entry the cleanup must not touch
+	// before the comparison or the cleanup reads it. A committed .podium link
+	// fails the render here, before anything is written.
+	prior, err := readPriorLock(workdir)
+	if errors.Is(err, ErrStateDirUnusable) {
+		return nil, fmt.Errorf("publish %q: %w", outputID, err)
+	}
+	priorMerge := PriorMergeKinds(dropUnsafeLockPaths(prior))
 
-	files := make([]adapter.File, len(rendered))
+	files := make([]adapter.File, 0, len(rendered))
 	currentPaths := map[string]bool{}
 	merge := map[string]string{}
 	owner := map[string]string{}
-	for i, rf := range rendered {
+	for _, rf := range rendered {
 		f := rf.file
-		files[i] = f
+		// §7.5.3: a path the next render would refuse to read back from the
+		// lock is neither written nor recorded.
+		if !recordable(rf.ownerID, f.Path) {
+			continue
+		}
+		files = append(files, f)
 		currentPaths[f.Path] = true
 		merge[f.Path] = MergeKindForOp(f.Op)
 		owner[f.Path] = rf.ownerID
@@ -316,12 +327,16 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 
 	// The change set diffs against the checkout, so capture the on-disk digest
 	// of every path the render touches (the rendered paths plus the prior-render
-	// paths that the cleanup may remove) before any write mutates the tree.
-	diffPaths := unionPaths(currentPaths, priorMerge)
-	beforeDigests, err := onDiskDigests(workdir, diffPaths)
-	if err != nil {
-		return nil, fmt.Errorf("publish %q: read checkout before render: %w", outputID, err)
-	}
+	// paths that the cleanup may remove) before any write mutates the tree. A
+	// prior-only path comes from the committed lock, so it is read under the
+	// cleanup's rule, and a rendered path is read only when it is a regular
+	// file. A path that cannot be read counts as altered (§7.5.2) rather than
+	// failing the render: a rendered path unreadable before the write has no
+	// starting digest, so the comparison reports it under its owner, and an
+	// unreadable prior-only path is reported under removedOwner below.
+	priorOnly := priorOnlyPaths(currentPaths, priorMerge)
+	beforeDigests, _ := tolerantDigests(currentPaths, readRecorded(workdir))
+	beforePrior, unobservedBefore := tolerantDigests(priorOnly, readRecorded(workdir))
 
 	if err := materialize.Write(workdir, files); err != nil {
 		return nil, fmt.Errorf("publish %q: write render: %w", outputID, err)
@@ -333,18 +348,33 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 		return nil, err
 	}
 
-	// The pre-write read of the same paths succeeded and materialize.Write left
-	// every rendered path a readable regular file, so this read fails only on a
-	// concurrent filesystem mutation; the guard surfaces that rather than
-	// reporting a change set against unobservable state.
-	afterDigests, err := onDiskDigests(workdir, diffPaths)
+	// materialize.Write left every rendered path a readable regular file, so
+	// this read fails only on a concurrent filesystem mutation; the guard
+	// surfaces that rather than reporting a change set against unobservable
+	// state.
+	afterDigests, err := onDiskDigests(workdir, currentPaths)
 	if err != nil {
 		return nil, fmt.Errorf("publish %q: read checkout after render: %w", outputID, err)
 	}
+	afterPrior, unobservedAfter := tolerantDigests(priorOnly, readRecorded(workdir))
 
 	res := &RenderResult{OutputID: outputID, Files: sortedKeys(currentPaths)}
-	res.Changed, res.ChangedArtifacts = changeSet(beforeDigests, afterDigests, owner)
+	res.Changed, res.ChangedArtifacts = changeSet(mergeDigests(beforeDigests, beforePrior), mergeDigests(afterDigests, afterPrior), owner)
+	if unobservedBefore || unobservedAfter {
+		res.Changed, res.ChangedArtifacts = true, mergeOwner(res.ChangedArtifacts, removedOwner)
+	}
 	return res, nil
+}
+
+// mergeOwner returns the sorted change-set owners with owner added once. An
+// unreadable prior-only path is attributed to removedOwner, the owner of a
+// path no rendered file owns.
+func mergeOwner(ids []string, owner string) []string {
+	set := map[string]bool{owner: true}
+	for _, id := range ids {
+		set[id] = true
+	}
+	return sortedSet(set)
 }
 
 // onDiskDigests reads each path's bytes from workdir and returns its hex SHA-256,
@@ -352,15 +382,20 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 // did not exist before materialization or was removed by the cleanup contributes
 // no entry, and the change-set comparison treats it as added or removed. A read
 // error other than "not present" is returned, because it means the state of the
-// checkout or target directory could not be observed.
+// checkout or target directory could not be observed. The read goes through
+// readRecorded, so a link at the path is followed only inside the target.
 func onDiskDigests(workdir string, paths map[string]bool) (map[string]string, error) {
 	out := make(map[string]string, len(paths))
+	read := readRecorded(workdir)
 	for p := range paths {
-		data, err := os.ReadFile(filepath.Join(workdir, filepath.FromSlash(p)))
+		data, err := read(p)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
+			// Both callers read the paths the run just wrote as regular
+			// files, so this branch runs only on a concurrent change to the
+			// target, which the tests cannot stage deterministically.
 			return nil, fmt.Errorf("read %s: %w", p, err)
 		}
 		out[p] = digest(data)
@@ -375,20 +410,6 @@ func onDiskDigests(workdir string, paths map[string]bool) (map[string]string, er
 func digest(content []byte) string {
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:])
-}
-
-// unionPaths returns the set of relative paths to diff for change detection: the
-// paths the run materializes, plus the prior-lock paths the cleanup may remove,
-// so a pure removal is observed as a change.
-func unionPaths(current map[string]bool, priorMerge map[string]string) map[string]bool {
-	out := make(map[string]bool, len(current)+len(priorMerge))
-	for p := range current {
-		out[p] = true
-	}
-	for p := range priorMerge {
-		out[p] = true
-	}
-	return out
 }
 
 // writeLock persists the render's lock for the next run's reconciliation: one

@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and the refusal of a workspace .podium symbolic link, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -20,6 +20,14 @@ From 0.8.0, every ingest of a `git` layer clones under the deadline that `PODIUM
 - The longest clone of a layer is the full-history clone that each ingest makes once the layer has a recorded reference, which the force-push check needs. Before the upgrade, compare that clone time for the largest `git` layer with the default, and set `PODIUM_GIT_FETCH_TIMEOUT` above it where it is longer.
 - A value that is not a duration above zero, such as `0s` or `600`, refuses startup with `config.invalid`.
 - A rollback to 0.7.0 needs no step. 0.7.0 does not read the variable and ignores the key.
+
+### Workspace `.podium` that is a symbolic link
+
+From 0.8.0, `podium sync` reads and writes its lock and `sync.yaml` only when the target's `.podium` is a directory rather than a symbolic link. A target whose `.podium` is a symbolic link, such as one that shares `sync.yaml` across Git worktrees, or whose `.podium` is not a directory, fails these commands before they write anything: `podium sync`, `podium sync override`, `podium sync save-as`, `podium profile edit`, and `podium init` in that workspace. The error names `.podium` and states that it must be a directory. 0.7.0 read and wrote through the link.
+
+- Before the upgrade, find each target whose `.podium` is a symbolic link, replace the link with a directory, and copy `sync.yaml`, `sync.local.yaml`, and `sync.lock` into it.
+- A `kind: marketplace` target whose repository commits `.podium` as a symbolic link fails its render the same way. Remove the link from the repository.
+- A rollback to 0.7.0 needs no step. 0.7.0 reads the files from the directory.
 
 ## 0.7.0
 

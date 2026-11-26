@@ -1,11 +1,13 @@
 package sync
 
 import (
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
+	"io/fs"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/lennylabs/podium/pkg/materialize"
 )
 
 // editProfileYAML applies the §7.5.7 profile edits to <target>/.podium/sync.yaml
@@ -13,11 +15,16 @@ import (
 // edit does not touch survive the round-trip; only the edited include/exclude
 // sequences are rewritten. When the file does not exist, it is created with the
 // named profile and an empty `defaults:` block (§7.5.7).
+//
+// The edit reads and writes sync.yaml under the rules of the lock (§7.5.3):
+// a .podium that is a symbolic link fails the edit, a sync.yaml link that
+// resolves outside the workspace is not read, so its target's content cannot
+// be copied into the workspace, and the write's temporary is created
+// exclusively.
 func editProfileYAML(opts ProfileEditOptions) (*ProfileEditResult, error) {
-	path := ConfigPath(opts.Target)
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
+	data, err := materialize.ReadStateFile(opts.Target, configRelPath)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, stateDirError(opts.Target, err)
 	}
 
 	var doc yaml.Node
@@ -67,15 +74,7 @@ func editProfileYAML(opts ProfileEditOptions) (*ProfileEditResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(opts.Target, ".podium")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o644); err != nil {
-		return nil, err
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := writeStateFile(opts.Target, configRelPath, out); err != nil {
 		return nil, err
 	}
 	res.Wrote = true

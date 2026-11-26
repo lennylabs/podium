@@ -6,6 +6,7 @@ package materialize
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,7 +202,14 @@ func containsString(haystack []string, needle string) bool {
 // destination root or a symlinked intermediate directory are rejected by
 // resolving the deepest existing ancestor of each target with
 // filepath.EvalSymlinks and confirming it stays within the resolved
-// destination root.
+// destination root. The destination can be a repository checkout whose links
+// another party commits (§7.8): every written path, before and after its
+// directory links resolve, passes the §7.5.3 recorded-path rule; each
+// temporary is created exclusively (stage); a config-merge or inject target
+// that is a link is followed only to a file inside the destination that passes
+// the rule (resolveMergeTarget); and a path under a .podium directory that is
+// a link is refused (checkPodiumDir). The rename replaces a link at a
+// standalone path rather than writing through it.
 func Write(destination string, files []adapter.File) error {
 	return WriteKeeping(destination, files, nil)
 }
@@ -227,12 +235,19 @@ func WriteKeeping(destination string, files []adapter.File, keep func(id string)
 	}
 
 	// Validate every path lexically before any write so a single bad path
-	// fails the whole batch with no half-written tree.
+	// fails the whole batch with no half-written tree. Beyond containment,
+	// every written path passes the §7.5.3 recorded-path rule, so no caller,
+	// a podium-mcp MaterializationHook that rewrites paths included, writes
+	// into .git or the sync state under .podium/; sync's own state goes
+	// through WriteStateFile instead.
 	resolved := make([]string, len(files))
 	for i, f := range files {
 		full, err := resolveSandboxedPath(absDest, f.Path)
 		if err != nil {
 			return err
+		}
+		if err := CheckRecordedPath(f.Path); err != nil {
+			return fmt.Errorf("%w: %q: %w", ErrUnconfinedPath, f.Path, err)
 		}
 		resolved[i] = full
 	}
@@ -245,6 +260,41 @@ func WriteKeeping(destination string, files []adapter.File, keep func(id string)
 	realDest, err := filepath.EvalSymlinks(absDest)
 	if err != nil {
 		return err
+	}
+
+	// §6.7 symlink containment: confirm each target's deepest existing
+	// ancestor resolves inside the destination before anything is read or
+	// written, so a pre-existing symlinked directory can neither redirect a
+	// write outside the root nor feed the merge fold a file outside it. A
+	// .podium directory that is a link is refused outright (§7.8), and a
+	// directory link that resolves into .git or the sync state, which a
+	// repository checkout can commit, is refused before anything lands there.
+	for i, f := range files {
+		landing, err := checkSymlinkContainment(realDest, resolved[i])
+		if err != nil {
+			return err
+		}
+		if err := checkResolvedTarget(absDest, realDest, resolved[i], landing, f.Path); err != nil {
+			return err
+		}
+		if err := checkPodiumDir(absDest, f.Path); err != nil {
+			return err
+		}
+		// Every item is keyed by its landing path below the resolved root,
+		// so one file reached under two spellings (AGENTS.md and GEMINI.md
+		// linked to it, or a destination reached through a link) folds into
+		// one item and stages one temporary.
+		resolved[i] = landing
+		// A config-merge or inject target that is a link resolving inside
+		// the destination, such as GEMINI.md linked to AGENTS.md, is merged
+		// into the file the link names, and the link stays (§6.6).
+		if f.Op != adapter.OpWrite {
+			target, err := resolveMergeTarget(realDest, landing, f.Path)
+			if err != nil {
+				return err
+			}
+			resolved[i] = target
+		}
 	}
 
 	// Fold inject/merge ops into one final content per destination path. This
@@ -267,20 +317,12 @@ func WriteKeeping(destination string, files []adapter.File, keep func(id string)
 		}
 	}
 	for i, it := range items {
-		// §6.7 symlink containment: confirm the target's deepest existing
-		// ancestor resolves inside the destination before creating or
-		// writing anything, so a pre-existing symlinked directory cannot
-		// redirect the write outside the root.
-		if err := checkSymlinkContainment(realDest, it.resolved); err != nil {
-			cleanup()
-			return err
-		}
 		if err := os.MkdirAll(filepath.Dir(it.resolved), 0o755); err != nil {
 			cleanup()
 			return err
 		}
 		tmp := it.resolved + ".tmp"
-		if err := os.WriteFile(tmp, it.content, it.mode); err != nil {
+		if err := stage(hostFS{}, tmp, it.content, it.mode); err != nil {
 			cleanup()
 			return err
 		}
@@ -320,31 +362,83 @@ func resolveSandboxedPath(dest, rel string) (string, error) {
 }
 
 // checkSymlinkContainment confirms that the deepest already-existing ancestor
-// of target resolves (through any symlinks) to a path still inside realDest.
-// realDest must already be symlink-resolved. This catches a destination whose
-// intermediate directory is a symlink pointing outside the root (for example
-// a pre-existing "sub -> /etc"), which the lexical check in
+// of target resolves (through any symlinks) to a path still inside realDest,
+// and returns target with that ancestor resolved: the path the write lands
+// at. realDest must already be symlink-resolved. This catches a destination
+// whose intermediate directory is a symlink pointing outside the root (for
+// example a pre-existing "sub -> /etc"), which the lexical check in
 // resolveSandboxedPath cannot see. spec: §6.6 step 5, §6.7 sandbox contract.
-func checkSymlinkContainment(realDest, target string) error {
+func checkSymlinkContainment(realDest, target string) (string, error) {
 	dir := filepath.Dir(target)
 	for {
 		real, err := filepath.EvalSymlinks(dir)
 		if err == nil {
 			if !withinRoot(realDest, real) {
-				return fmt.Errorf("%w: %q resolves outside %q via a symlinked component", ErrOutOfDestination, target, realDest)
+				return "", fmt.Errorf("%w: %q resolves outside %q via a symlinked component", ErrOutOfDestination, target, realDest)
 			}
-			return nil
+			rest, err := filepath.Rel(dir, target)
+			if err != nil {
+				// Unreachable: dir is an ancestor of target by construction.
+				return "", err
+			}
+			return filepath.Join(real, rest), nil
 		}
 		if !os.IsNotExist(err) {
-			return err
+			return "", err
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			// Reached the filesystem root without an existing ancestor.
-			return nil
+			// Reached the filesystem root without an existing ancestor; the
+			// destination root exists by now, so this needs a concurrent
+			// removal of it.
+			return target, nil
 		}
 		dir = parent
 	}
+}
+
+// checkResolvedTarget refuses a write whose directories resolve, through a
+// link inside the destination, to a path the §7.5.3 recorded-path rule
+// refuses, such as one under .git or the sync state. full is the lexical
+// target and landing the path checkSymlinkContainment resolved. A path that
+// resolves to itself needs no second check: WriteKeeping already applied the
+// rule to the lexical path.
+//
+// Spec: §6.6, §7.5.3, §7.8
+func checkResolvedTarget(absDest, realDest, full, landing, rel string) error {
+	lexical, err := filepath.Rel(absDest, full)
+	if err != nil {
+		// Unreachable: resolveSandboxedPath placed full under absDest.
+		return err
+	}
+	resolved, err := filepath.Rel(realDest, landing)
+	if err != nil {
+		// Unreachable: checkSymlinkContainment placed landing under realDest.
+		return err
+	}
+	if filepath.ToSlash(resolved) == filepath.ToSlash(lexical) {
+		return nil
+	}
+	if err := CheckRecordedPath(filepath.ToSlash(resolved)); err != nil {
+		return fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, filepath.ToSlash(resolved), err)
+	}
+	return nil
+}
+
+// checkPodiumDir refuses a path under .podium/ when the destination's .podium
+// directory is a symbolic link. Sync keeps its own state there, and a
+// repository checkout can commit .podium as a link (§7.8), so nothing is read
+// or written through such a link even when it resolves inside the root.
+func checkPodiumDir(absDest, rel string) error {
+	first, _, _ := strings.Cut(filepath.ToSlash(rel), "/")
+	if !strings.EqualFold(first, ".podium") {
+		return nil
+	}
+	info, err := os.Lstat(filepath.Join(absDest, first))
+	if err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		return podiumDirError(rel)
+	}
+	return nil
 }
 
 // withinRoot reports whether path is root itself or nested under it, after
@@ -354,23 +448,4 @@ func withinRoot(root, path string) bool {
 		return true
 	}
 	return strings.HasPrefix(path+string(filepath.Separator), root+string(filepath.Separator))
-}
-
-// writeAtomic writes content to path via "<path>.tmp" + rename so the
-// destination either has the previous content or the new content. It is the
-// single-file primitive WriteSandboxProfile uses; the multi-file Write path
-// stages and commits explicitly for its tree-level guarantee.
-func writeAtomic(path string, content []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, content, mode); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
 }

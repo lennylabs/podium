@@ -60,6 +60,36 @@ files the previous run wrote. Every sync reconciles the target against
 `<target>/.podium/sync.lock`, deletes the paths that are no longer in scope, and
 prunes the directories those paths leave empty.
 
+The removal treats the lock as untrusted, because a committed lock can come from
+anyone who pushes to the repository. Sync skips a lock entry, names it on
+standard error, and leaves it out of the next lock in these cases:
+
+- The path leaves the target, names `.git`, or names Podium's own state under
+  `.podium/`.
+- The path reaches a symbolic link that resolves outside the target.
+- The path names a symbolic link, a directory, or another file that is not a
+  regular file.
+
+A directory that is a symbolic link to another directory inside the target is
+followed, as it is when sync writes. A shared config file that is a symbolic
+link to another file inside the target, such as `GEMINI.md` linked to
+`AGENTS.md`, is updated through the link, and the link stays. Sync creates the
+linked file when it does not exist yet and its directory already exists inside
+the target. Sync never deletes
+a directory with its contents, and it removes a parent directory only while the
+directory is empty.
+
+The lock lives in `<target>/.podium/`, which must be a directory. When `.podium`
+is a symbolic link, for example one that shares `sync.yaml` across Git
+worktrees, `podium sync` fails before it writes anything, and the error names
+`.podium`. Replace the link with a directory that holds its own `sync.yaml` and
+`sync.lock`.
+
+A `sync.lock` that is a symbolic link is read when it names another file inside
+`.podium/`. A lock that sync cannot read, such as a link to a file outside the
+target, is named on standard error, and the run proceeds as if no prior lock
+existed, so the files the earlier run wrote are not cleaned up.
+
 ---
 
 ## Sync a subset from the command line

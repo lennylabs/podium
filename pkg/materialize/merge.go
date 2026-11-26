@@ -3,8 +3,11 @@ package materialize
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/adapter"
@@ -35,11 +38,11 @@ func foldOps(files []adapter.File, resolved []string, keep func(id string) bool)
 			var base []byte
 			// Inject/merge fold into the existing file; a plain write replaces.
 			if f.Op != adapter.OpWrite {
-				if b, err := os.ReadFile(rp); err == nil {
-					base = b
-				} else if !os.IsNotExist(err) {
-					return nil, fmt.Errorf("materialize: read %q for merge: %w", rp, err)
+				b, err := readMergeBase(rp)
+				if err != nil {
+					return nil, err
 				}
+				base = b
 			}
 			// §6.7 config-merge reconciliation: strip the prior Podium-owned
 			// entries from the base before this sync's fragments fold in, so a
@@ -71,6 +74,116 @@ func foldOps(files []adapter.File, resolved []string, keep func(id string) bool)
 		}
 	}
 	return items, nil
+}
+
+// resolveMergeTarget returns the path a config-merge or inject into full
+// writes. full is returned as it is when it is absent or is not a symbolic
+// link. A link at full is followed when it resolves to a path inside realDest
+// that passes CheckRecordedPath: workspaces link GEMINI.md or CLAUDE.md to
+// AGENTS.md, and the merge then reads and rewrites the file the link names
+// and leaves the link in place. A link that names an absent file is handled by
+// resolveDanglingLink. A link that resolves outside the destination, into
+// .git, or into the sync state under .podium/ is refused with
+// ErrUnconfinedPath: a repository checkout can commit such a link
+// (§7.8), and following it would write outside the checkout or fold an
+// outside file's content into the rendered file the publish step commits.
+//
+// Spec: §6.6, §6.7, §7.8
+func resolveMergeTarget(realDest, full, rel string) (string, error) {
+	info, err := os.Lstat(full)
+	if err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		// Absent, or not a link: readMergeBase reads or refuses it.
+		return full, nil
+	}
+	r, err := resolveWithin(realDest, full, rel)
+	if errors.Is(err, fs.ErrNotExist) {
+		r, err = resolveDanglingLink(realDest, full, rel)
+	}
+	if err != nil {
+		return "", err
+	}
+	if err := CheckRecordedPath(r); err != nil {
+		return "", fmt.Errorf("%w: %q resolves to %q: %v", ErrUnconfinedPath, rel, r, err)
+	}
+	return filepath.Join(realDest, filepath.FromSlash(r)), nil
+}
+
+// resolveDanglingLink resolves a link at full that names an absent file. A
+// workspace can commit GEMINI.md linked to AGENTS.md before any run has
+// created AGENTS.md, so the link is followed when the directory of the file
+// it names exists inside realDest; the caller then checks the resolved path
+// against CheckRecordedPath, and the writer's rename creates the file there
+// and leaves the link in place. The rename never follows a link at its
+// destination, so a link planted at that name after this check is replaced
+// rather than written through. A link whose named directory is absent or
+// resolves outside realDest, and a chain whose next link is itself dangling,
+// are refused with ErrUnconfinedPath.
+//
+// Spec: §6.6
+func resolveDanglingLink(realDest, full, rel string) (string, error) {
+	refuse := func(why string) (string, error) {
+		return "", fmt.Errorf("%w: %q is a symbolic link that names no file %s", ErrUnconfinedPath, rel, why)
+	}
+	dest, err := os.Readlink(full)
+	if err != nil {
+		return refuse("that can be read")
+	}
+	if !filepath.IsAbs(dest) {
+		// The kernel resolves a relative link against the directory the link
+		// sits in, which a directory link on the way can move away from the
+		// lexical parent of full.
+		linkDir, err := filepath.EvalSymlinks(filepath.Dir(full))
+		if err != nil {
+			return refuse("in an existing directory")
+		}
+		dest = filepath.Join(linkDir, dest)
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(dest))
+	if err != nil {
+		return refuse("in an existing directory")
+	}
+	if !withinRoot(realDest, parent) {
+		return refuse("inside the destination")
+	}
+	target := filepath.Join(parent, filepath.Base(dest))
+	if _, err := os.Lstat(target); !errors.Is(err, fs.ErrNotExist) {
+		// The name exists, so the link names another link or the target
+		// changed under the resolution; a chain is not followed further.
+		return refuse("that it can follow")
+	}
+	r, err := filepath.Rel(realDest, target)
+	if err != nil {
+		// Unreachable: withinRoot placed parent under realDest.
+		return refuse("inside the destination")
+	}
+	return filepath.ToSlash(r), nil
+}
+
+// readMergeBase returns the existing bytes at rp that an inject or merge folds
+// into, or nil when nothing is there. The caller has confirmed that rp's
+// directories resolve inside the destination and has resolved a link at rp
+// itself through resolveMergeTarget, so a link or any other non-regular file
+// still at rp is refused rather than followed.
+//
+// Spec: §6.7, §7.8
+func readMergeBase(rp string) ([]byte, error) {
+	info, err := os.Lstat(rp)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		// The caller's containment check already resolved rp's directory, so
+		// an Lstat error other than absence needs a concurrent change to it.
+		return nil, fmt.Errorf("materialize: inspect %q for merge: %w", rp, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q is a symbolic link or not a regular file; refusing to merge into it", ErrUnconfinedPath, rp)
+	}
+	b, err := os.ReadFile(rp)
+	if err != nil {
+		return nil, fmt.Errorf("materialize: read %q for merge: %w", rp, err)
+	}
+	return b, nil
 }
 
 func modeOf(f adapter.File) os.FileMode {
