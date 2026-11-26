@@ -505,6 +505,28 @@ func TestIngest_AtSegmentRejected(t *testing.T) {
 	}
 }
 
+// Spec: §4.2, §7.5.3 — a directory name that a filesystem resolves to .git or
+// .podium cannot form a canonical ID, so Ingest refuses the package as a
+// content fault (ErrInvalidArtifact) and stores nothing from the layer.
+func TestIngest_ReservedNameAliasSegmentRejected(t *testing.T) {
+	t.Parallel()
+	for _, dir := range []string{"GIT~1/hooks", "finance/PODIUM~1"} {
+		fsys := fstest.MapFS{
+			dir + "/ARTIFACT.md":     &fstest.MapFile{Data: []byte(agentArtifact("Hooks"))},
+			"finance/ok/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("Ok"))},
+		}
+		st := newStore(t)
+		_, err := ingest.Ingest(context.Background(), st, ingest.Request{
+			TenantID: "tenant-1",
+			LayerID:  "team-shared",
+			Files:    fsys,
+		})
+		if !errors.Is(err, ingest.ErrInvalidArtifact) || !strings.Contains(err.Error(), "names .git or .podium") {
+			t.Errorf("Ingest(%s) = %v, want ErrInvalidArtifact naming the .git or .podium alias", dir, err)
+		}
+	}
+}
+
 // TestIngest_NestedArtifactsIngestedSeparately covers
 // Spec: §4.2 — a nested artifact is a separate leaf package. Both the parent
 // and the nested artifact are ingested as distinct records keyed by their own

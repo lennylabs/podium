@@ -735,6 +735,55 @@ func TestWalk_AtSegmentRejected(t *testing.T) {
 	}
 }
 
+// Spec: §4.2, §7.5.3 — a canonical-ID segment that names .git or .podium
+// under the aliasing rule is refused, because a consumer writes the ID as a
+// path and a filesystem resolves GIT~1 or a .git that carries a code point
+// HFS+ ignores to the real .git. Package discovery already skips a
+// dot-prefixed directory; these names do not begin with a dot.
+func TestValidateCanonicalID_RefusesReservedNameAliases(t *testing.T) {
+	t.Parallel()
+	for _, id := range []string{
+		"GIT~1/hooks",
+		"finance/git~1",
+		"\u200c.git/config",
+		"finance/\u200c.GIT",
+		"PODIUM~1/sync",
+		"\ufeff.podium/overlay",
+		"PO1A2B~1/x",
+	} {
+		err := ValidateCanonicalID(id)
+		if err == nil || !strings.Contains(err.Error(), "names .git or .podium") {
+			t.Errorf("ValidateCanonicalID(%q) = %v, want the .git or .podium refusal", id, err)
+		}
+	}
+	for _, id := range []string{"GIT~2/hooks", "git/hooks", "finance/github-actions", "podium/x"} {
+		if err := ValidateCanonicalID(id); err != nil {
+			t.Errorf("ValidateCanonicalID(%q) = %v, want nil", id, err)
+		}
+	}
+}
+
+// Spec: §4.2, §7.5.3 — the walk refuses a package whose directory name
+// aliases .git, so a filesystem-source sync or an overlay never materializes
+// it into a workspace.
+func TestWalk_AliasedDotGitSegmentRejected(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{
+			Path:    "GIT~1/hooks/ARTIFACT.md",
+			Content: stringf(agentArtifact, "Hooks", "hooks"),
+		},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err = reg.Walk(WalkOptions{}); err == nil || !strings.Contains(err.Error(), `"GIT~1"`) {
+		t.Fatalf("Walk = %v, want the refusal naming the GIT~1 segment", err)
+	}
+}
+
 // Spec: §4.2/§4.4 — a nested artifact package is its own leaf. Its files,
 // including its own ARTIFACT.md, are not captured as the parent's bundled
 // resources; the nested artifact is discovered as a separate record.

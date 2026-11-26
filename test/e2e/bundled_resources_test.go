@@ -1489,6 +1489,32 @@ func TestBundled_ImportSkipsDotPrefixedDirectories(t *testing.T) {
 	mustNotExist(t, filepath.Join(tgt, ".github"))
 }
 
+// podium import refuses a --source subdirectory whose name a filesystem
+// resolves to .git, such as the NTFS short name GIT~1, because the name
+// becomes the artifact ID and a directory of the target. The refusal names
+// the directory, and the target's .git is untouched.
+//
+// Spec: §4.2, §7.5.3
+func TestBundled_ImportRefusesDotGitAlias(t *testing.T) {
+	t.Parallel()
+	src := writeRegistry(t, map[string]string{
+		"GIT~1/SKILL.md": "---\nname: hooks\ndescription: Hooks.\n---\n\nBody.\n",
+		"GIT~1/config":   "[core]\n\tfsmonitor = touch pwned\n",
+	})
+	tgt := t.TempDir()
+	head := filepath.Join(tgt, ".git", "HEAD")
+	solofsWriteFile(t, head, "ref: refs/heads/main\n")
+	res := runPodium(t, "", nil, "import", "--source", src, "--target", tgt)
+	if res.Exit != 1 {
+		t.Fatalf("import exit=%d, want 1; stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, filepath.Join(src, "GIT~1")) || !strings.Contains(res.Stderr, "names .git or .podium") {
+		t.Errorf("stderr = %q, want the directory and the .git refusal", res.Stderr)
+	}
+	mustNotExist(t, filepath.Join(tgt, "GIT~1"))
+	mustNotExist(t, filepath.Join(tgt, ".git", "config"))
+}
+
 // The --type flag is removed from podium import, so passing it exits 2.
 //
 // Spec: §4.3.4

@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and the refusal of a workspace .podium symbolic link, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, and the refusal of names that resolve to .git or .podium, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -28,6 +28,14 @@ From 0.8.0, `podium sync` reads and writes its lock and `sync.yaml` only when th
 - Before the upgrade, find each target whose `.podium` is a symbolic link, replace the link with a directory, and copy `sync.yaml`, `sync.local.yaml`, and `sync.lock` into it.
 - A `kind: marketplace` target whose repository commits `.podium` as a symbolic link fails its render the same way. Remove the link from the repository.
 - A rollback to 0.7.0 needs no step. 0.7.0 reads the files from the directory.
+
+### Names that a filesystem resolves to `.git` or `.podium`
+
+From 0.8.0, Podium refuses a path segment that a filesystem resolves to `.git` or `.podium` although its bytes differ, on every platform. The refused forms follow Git's `core.protectHFS` and `core.protectNTFS` checks: a code point that HFS+ ignores, such as `.git` preceded by U+200C ZERO WIDTH NON-JOINER, a different letter case, the trailing spaces and periods that NTFS strips, an NTFS alternate data stream such as `.git::$INDEX_ALLOCATION`, and the NTFS short names `GIT~1` and `PODIUM~1`. 0.7.0 refused a `.git` segment in any letter case and accepted the other forms.
+
+- A layer that holds a package below a directory with such a name fails its ingest, and the reingest answers `ingest.lint_failed`. A filesystem-source `podium sync` and a workspace overlay with such a package fail the same way, and `podium import` refuses such a `--source` subdirectory. Before the upgrade, search each layer for directory names that begin with `GIT~1`, `PODIUM~`, or `PO` followed by hexadecimal digits and `~`, in any letter case, or that carry one of the ignored code points, and rename them. Package discovery already skipped a directory whose name begins with a dot.
+- `podium sync` and a `kind: marketplace` render no longer write an output path with such a segment, and they skip a lock entry that names one, with a warning on standard error that names the path.
+- A rollback to 0.7.0 needs no step.
 
 ## 0.7.0
 

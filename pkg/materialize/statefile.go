@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // ReadStateFile returns the bytes of a file sync keeps for itself below
@@ -87,7 +86,7 @@ func mkdirConfined(root *os.Root, rel string, dirs []string) error {
 			}
 		case err != nil:
 			return fmt.Errorf("%w: %q: %v", ErrUnconfinedPath, rel, err)
-		case !info.IsDir() && i == 0 && strings.EqualFold(dirs[0], ".podium"):
+		case !info.IsDir() && i == 0 && AliasesDotPodium(dirs[0]):
 			return podiumDirError(rel)
 		case !info.IsDir():
 			return fmt.Errorf("%w: %q: %s is a symbolic link or not a directory", ErrUnconfinedPath, rel, filepath.ToSlash(name))

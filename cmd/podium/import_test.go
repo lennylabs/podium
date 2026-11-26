@@ -222,6 +222,29 @@ func TestImport_Refusals(t *testing.T) {
 	}
 }
 
+// Spec: §4.2, §7.5.3 — a --source subdirectory whose name a filesystem
+// resolves to .git or .podium becomes no artifact ID: import exits 1 naming
+// the directory and writes nothing, under --dry-run too.
+func TestImport_RefusesReservedNameAlias(t *testing.T) {
+	for _, dir := range []string{"GIT~1", "PODIUM~1"} {
+		for _, dryRun := range []bool{false, true} {
+			source := t.TempDir()
+			mustWrite(t, filepath.Join(source, "good", "SKILL.md"), "---\nname: good\n---\nbody\n")
+			mustWrite(t, filepath.Join(source, dir, "SKILL.md"), "---\nname: hooks\n---\nbody\n")
+			target := t.TempDir()
+			args := []string{"--source", source, "--target", target}
+			if dryRun {
+				args = append(args, "--dry-run")
+			}
+			rc, stderr := runImport(t, args...)
+			if rc != 1 || !strings.Contains(stderr, filepath.Join(source, dir)) || !strings.Contains(stderr, "names .git or .podium") {
+				t.Errorf("import %s (dry-run %v) = (%d, %q), want 1 and the refusal naming the directory", dir, dryRun, rc, stderr)
+			}
+			assertEmptyDir(t, target)
+		}
+	}
+}
+
 // Spec: §4.3.4, §4.7.6 — a metadata that is not a mapping, or a
 // metadata.version that is not a string, fails with exit 1 naming the file.
 func TestImport_MalformedMetadataFails(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
 // importCmd normalizes a directory of skills into a Podium filesystem layer
@@ -110,6 +111,13 @@ func buildImportPlan(source, version string) ([]importedSkill, error) {
 			continue
 		}
 		dir := filepath.Join(source, e.Name())
+		// The directory name becomes the artifact ID and a directory of the
+		// target, so a name the target's filesystem resolves to .git, such as
+		// GIT~1, would write the skill's files into the target repository's
+		// .git. The §4.2 canonical-ID rules refuse it before any write.
+		if err := filesystem.ValidateCanonicalID(e.Name()); err != nil {
+			return nil, fmt.Errorf("%s: %w", dir, err)
+		}
 		bodyName, body, resources, err := collectSkillFiles(dir)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", dir, err)

@@ -210,7 +210,7 @@ func resolveIn(root *os.Root, destination, rel string, segs []string, o resolveO
 			return nil, fmt.Errorf("%w: %q: %v", ErrUnconfinedPath, rel, err)
 		}
 		isLink := info.Mode()&fs.ModeSymlink != 0
-		if strings.EqualFold(dirs[i], ".podium") && (isLink || !info.IsDir()) {
+		if AliasesDotPodium(dirs[i]) && (isLink || !info.IsDir()) {
 			return nil, podiumDirError(rel)
 		}
 		if isLink {
@@ -262,7 +262,7 @@ func resolveIn(root *os.Root, destination, rel string, segs []string, o resolveO
 //
 // Spec: §7.5.3
 func checkStateLink(resolved string) error {
-	if first, rest, ok := strings.Cut(resolved, "/"); ok && strings.EqualFold(first, ".podium") {
+	if first, rest, ok := strings.Cut(resolved, "/"); ok && AliasesDotPodium(first) {
 		return CheckRecordedPath(rest)
 	}
 	return CheckRecordedPath(resolved)
