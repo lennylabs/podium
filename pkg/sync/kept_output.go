@@ -3,7 +3,6 @@ package sync
 import (
 	"os"
 	"path/filepath"
-	"slices"
 
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/layer"
@@ -173,18 +172,7 @@ func (r keepRun) entryTakenOver(id, rel string, frags [][]byte) bool {
 	if err != nil {
 		return false
 	}
-	held, ok := materialize.IndexedEntries(doc)[id]
-	if !ok {
-		return false
-	}
-	for _, frag := range frags {
-		for owner, loc := range materialize.IndexedEntries(frag) {
-			if owner != id && slices.Equal(loc, held) {
-				return true
-			}
-		}
-	}
-	return false
+	return materialize.EntriesTakenOver(doc, frags)[id]
 }
 
 // keepFunc returns the predicate materialize uses to exempt the kept

@@ -220,11 +220,15 @@ func Write(destination string, files []adapter.File) error {
 // fragments merge in, which removes the contribution of every artifact the
 // batch does not carry. keep reports the artifact IDs exempt from that strip:
 // their tagged JSON entries and their keyed inject blocks stay in the file as
-// they are. A nil keep exempts nothing, which is Write.
+// they are, except a keyed config-map entry that a fragment of this batch
+// records for another artifact, which the fragment replaces. A nil keep
+// exempts nothing, which is Write.
 //
-// Spec: §6.7, §13.11.3 — a filesystem-source sync keeps the previous output of
-// an artifact refused under the unparseable-manifest rule, and that output can
-// include an entry in a file other artifacts still write.
+// Spec: §6.6, §6.7, §13.11.3 — a filesystem-source sync keeps the previous
+// output of an artifact refused under the unparseable-manifest rule, and that
+// output can include an entry in a file other artifacts still write. A
+// load_artifact writes one artifact and keeps every other artifact's entries
+// and blocks.
 func WriteKeeping(destination string, files []adapter.File, keep func(id string) bool) error {
 	if destination == "" {
 		return ErrEmptyDestination

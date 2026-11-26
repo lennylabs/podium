@@ -154,3 +154,98 @@ func TestWriteKeeping_KeepsInjectBlock(t *testing.T) {
 		t.Errorf("the old team/b block survived:\n%s", got)
 	}
 }
+
+// keepAllBut returns a keep predicate that reports every ID except id, the
+// predicate podium-mcp passes for a load of id.
+func keepAllBut(id string) func(string) bool {
+	return func(got string) bool { return got != id }
+}
+
+// Spec: §6.6, §6.7 — a write that keeps every artifact except the one it
+// writes replaces that artifact's earlier index-tracked entry and leaves the
+// other artifacts' entries in place.
+func TestWriteKeeping_ReplacesOnlyTheWrittenArtifact(t *testing.T) {
+	t.Parallel()
+	dest := t.TempDir()
+	mcp := filepath.Join(dest, ".mcp.json")
+	for _, w := range []struct{ name, id string }{{"alpha", "s/a"}, {"bravo", "s/b"}, {"alpha2", "s/a"}} {
+		if err := WriteKeeping(dest, []adapter.File{
+			{Path: ".mcp.json", Op: adapter.OpMergeJSON, Content: taggedServer(w.name, w.id)},
+		}, keepAllBut(w.id)); err != nil {
+			t.Fatalf("WriteKeeping %s: %v", w.name, err)
+		}
+	}
+	// The last write re-wrote s/a under a new entry name: the old alpha entry
+	// goes, and bravo stays.
+	raw := readString(t, mcp)
+	got := IndexedEntries([]byte(raw))
+	if len(got) != 2 || strings.Join(got["s/a"], "/") != "mcpServers/alpha2" || strings.Join(got["s/b"], "/") != "mcpServers/bravo" {
+		t.Errorf("index = %v, want s/a at alpha2 and s/b at bravo", got)
+	}
+	if strings.Contains(raw, `"cmd-alpha"`) || !strings.Contains(raw, `"cmd-bravo"`) {
+		t.Errorf("want the alpha entry replaced and the bravo entry kept:\n%s", raw)
+	}
+}
+
+// Spec: §6.6, §6.7 — a kept artifact's keyed entry that a fragment of the batch
+// records for a different artifact is replaced by that fragment: the kept
+// entry's fields do not mix into the new entry, and the index names only the
+// new owner. A kept entry at another path stays.
+func TestWriteKeeping_TakenOverEntryIsReplaced(t *testing.T) {
+	t.Parallel()
+	dest := t.TempDir()
+	mcp := filepath.Join(dest, ".mcp.json")
+	base := `{"mcpServers":{"shared":{"command":"old","env":{"TOKEN_FILE":"a"}},"other":{"command":"keep"}},` +
+		`"` + adapter.PodiumIndexKey + `":{"s/a":["mcpServers","shared"],"s/k":["mcpServers","other"]}}`
+	if err := os.WriteFile(mcp, []byte(base), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	frag := `{"mcpServers":{"shared":{"url":"https://mcp.acme.com"}},"` + adapter.PodiumIndexKey + `":{"s/b":["mcpServers","shared"]}}`
+	if err := WriteKeeping(dest, []adapter.File{
+		{Path: ".mcp.json", Op: adapter.OpMergeJSON, Content: []byte(frag)},
+	}, keepAllBut("s/b")); err != nil {
+		t.Fatalf("WriteKeeping: %v", err)
+	}
+	raw := readString(t, mcp)
+	for _, gone := range []string{`"old"`, `TOKEN_FILE`, `"s/a"`} {
+		if strings.Contains(raw, gone) {
+			t.Errorf("%s of the taken-over entry survived:\n%s", gone, raw)
+		}
+	}
+	got := IndexedEntries([]byte(raw))
+	if strings.Join(got["s/b"], "/") != "mcpServers/shared" || strings.Join(got["s/k"], "/") != "mcpServers/other" {
+		t.Errorf("index = %v, want s/b at shared and s/k at other", got)
+	}
+	if !strings.Contains(raw, "https://mcp.acme.com") || !strings.Contains(raw, `"keep"`) {
+		t.Errorf("the new entry or the kept entry is missing:\n%s", raw)
+	}
+}
+
+// Spec: §6.7, §13.11.3 — EntriesTakenOver names each document entry a fragment
+// records for a different artifact, and nothing for the same artifact, a
+// different path, or a fragment or document without an index.
+func TestEntriesTakenOver(t *testing.T) {
+	t.Parallel()
+	doc := []byte(`{"x-podium":{"s/a":["mcpServers","alpha"],"s/b":["mcpServers","bravo"]}}`)
+	cases := []struct {
+		name  string
+		doc   []byte
+		frags [][]byte
+		want  string
+	}{
+		{"other artifact", doc, [][]byte{taggedServer("alpha", "s/c")}, "s/a"},
+		{"same artifact", doc, [][]byte{taggedServer("alpha", "s/a")}, ""},
+		{"other path", doc, [][]byte{taggedServer("charlie", "s/c")}, ""},
+		{"no fragment index", doc, [][]byte{[]byte(`{"mcpServers":{"alpha":{}}}`)}, ""},
+		{"no document index", []byte(`{}`), [][]byte{taggedServer("alpha", "s/c")}, ""},
+	}
+	for _, c := range cases {
+		ids := make([]string, 0, 1)
+		for id := range EntriesTakenOver(c.doc, c.frags) {
+			ids = append(ids, id)
+		}
+		if strings.Join(ids, ",") != c.want {
+			t.Errorf("%s: EntriesTakenOver = %v, want %q", c.name, ids, c.want)
+		}
+	}
+}
