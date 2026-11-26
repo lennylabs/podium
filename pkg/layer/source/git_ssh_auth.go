@@ -41,13 +41,14 @@ func snapshotSSHAuth(repo string) (transport.AuthMethod, func()) {
 // go-git's default (ssh.NewSSHAgentAuth) opens an agent connection for each
 // clone and never closes it, so every ssh ingest left a Unix socket, or on
 // Windows a handle to the native OpenSSH agent pipe, and the agent client's
-// reader goroutine behind, whether the clone succeeded, failed, or timed out. agentAuth opens the connection in ClientConfig, which
-// the transport calls at the point where it would have built the default
-// auth, so the clone fails at the same step and with the same message when
-// SSH_AUTH_SOCK is unset or the agent is unreachable. dialAgent, in a file per
-// platform, makes the connection. The rest of the client
-// config, the login name and the known_hosts host key check included, comes
-// from go-git's own PublicKeysCallback, so it matches the default.
+// reader goroutine behind, whether the clone succeeded, failed, or timed out.
+// agentAuth opens the connection in ClientConfig, which the transport calls at
+// the point where it would have built the default auth, so the clone fails at
+// the same step and with the same message when SSH_AUTH_SOCK is unset or the
+// agent is unreachable. dialAgent, in a file per platform, makes the
+// connection. The rest of the client config, the login name and the
+// known_hosts host key check included, comes from go-git's own
+// PublicKeysCallback, so it matches the default.
 type agentAuth struct {
 	// user is the login name of the remote URL, empty when it names none.
 	user string
