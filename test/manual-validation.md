@@ -2535,7 +2535,7 @@ export GIT_COMMITTER_NAME="podium-bot" GIT_COMMITTER_EMAIL="bot@acme.com"
    export REMOTE="$WORK/remote.git"
    git init --bare -b main "$REMOTE"
    seed="$(mktemp -d)"; git -C "$seed" init -b main
-   git -C "$seed" -c user.email=alice@acme.com -c user.name=alice commit --allow-empty -m init
+   git -C "$seed" commit --allow-empty -m init
    git -C "$seed" remote add origin "$REMOTE"; git -C "$seed" push origin main
    ```
 
@@ -2569,7 +2569,7 @@ export GIT_COMMITTER_NAME="podium-bot" GIT_COMMITTER_EMAIL="bot@acme.com"
            - sh: 'if [ -d "\$PODIUM_WORKDIR/.git" ]; then git -C "\$PODIUM_WORKDIR" fetch origin "\$PODIUM_GIT_BRANCH" && git -C "\$PODIUM_WORKDIR" reset --hard "origin/\$PODIUM_GIT_BRANCH"; else git clone --branch "\$PODIUM_GIT_BRANCH" "\$PODIUM_GIT_REMOTE" "\$PODIUM_WORKDIR"; fi'
          publish:
            - run: ["git", "-C", "\$PODIUM_WORKDIR", "add", "-A"]
-           - run: ["git", "-C", "\$PODIUM_WORKDIR", "-c", "user.email=alice@acme.com", "-c", "user.name=alice", "commit", "-m", "\$PODIUM_COMMIT_MESSAGE"]
+           - run: ["git", "-C", "\$PODIUM_WORKDIR", "commit", "-m", "\$PODIUM_COMMIT_MESSAGE"]
              skip_if_no_changes: true
            - run: ["git", "-C", "\$PODIUM_WORKDIR", "push", "origin", "\$PODIUM_GIT_BRANCH"]
    YAML
