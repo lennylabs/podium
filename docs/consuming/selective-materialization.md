@@ -64,7 +64,7 @@ The lock records a `file_hash` for each file sync writes whole: the SHA-256
 digest of the file's bytes, written as `sha256:<hex>`. Sync deletes an
 out-of-scope file only when its current bytes still match that hash. A file
 edited after sync wrote it therefore stays in place when its artifact leaves the
-scope, and sync names it so that you can keep or delete it. A shared config file
+scope, and sync names it on standard error. A shared config file
 that sync merges entries into, such as `.mcp.json`, `.claude/settings.json`, or
 `AGENTS.md`, records no `file_hash`. Sync never deletes such a file; it removes
 Podium's entries from it and leaves the rest in place.
