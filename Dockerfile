@@ -39,6 +39,9 @@ COPY . .
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG DATE=unknown
+# Set by the release workflow only. The age of the embedded public-good
+# Sigstore root counts from it (§4.7.11); empty marks a source build.
+ARG RELEASE_DATE=
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -52,7 +55,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
       -ldflags "-s -w \
         -X github.com/lennylabs/podium/internal/buildinfo.Version=${VERSION} \
         -X github.com/lennylabs/podium/internal/buildinfo.Commit=${COMMIT} \
-        -X github.com/lennylabs/podium/internal/buildinfo.Date=${DATE}" \
+        -X github.com/lennylabs/podium/internal/buildinfo.Date=${DATE} \
+        -X github.com/lennylabs/podium/internal/buildinfo.ReleaseDate=${RELEASE_DATE}" \
       -o /out/podium-server \
       ./cmd/podium-server
 

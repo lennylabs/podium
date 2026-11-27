@@ -15,11 +15,16 @@ GO    ?= go
 VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+# RELEASE_DATE is empty unless a release pipeline sets it. The age of the
+# embedded public-good Sigstore root counts from it (§4.7.11), so a build
+# from a checkout leaves it empty and its embedded root has an unknown age.
+RELEASE_DATE ?=
 
 # -ldflags injects the values into internal/buildinfo at link time.
 LDFLAGS := -X 'github.com/lennylabs/podium/internal/buildinfo.Version=$(VERSION)' \
            -X 'github.com/lennylabs/podium/internal/buildinfo.Commit=$(COMMIT)' \
-           -X 'github.com/lennylabs/podium/internal/buildinfo.Date=$(DATE)'
+           -X 'github.com/lennylabs/podium/internal/buildinfo.Date=$(DATE)' \
+           -X 'github.com/lennylabs/podium/internal/buildinfo.ReleaseDate=$(RELEASE_DATE)'
 
 .PHONY: help test test-live test-live-external test-live-kind test-auth-dex bench build \
         lint golangci-lint update-golden \

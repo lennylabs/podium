@@ -44,6 +44,8 @@ The two SDKs are fully tag-driven; only `buildinfo.go` and `Chart.yaml` require 
 
    On a MINOR or MAJOR bump, re-verify the product comparison in spec §1.5 and in `docs/getting-started/why-podium.md` first: each listed product's name, availability, and stated capabilities, plus new products in the covered categories. A correction to §1.5 goes through the proposal pipeline and merges before the prep PR. `.claude/rules/release-process.md` states the full check.
 
+   Run `go run ./tools/sigstoreroot -check` as well. When it reports that the embedded public-good Sigstore trusted root is not current, run `go run ./tools/sigstoreroot` and land the changed `pkg/sign/embedded/public-good.trusted_root.json` in its own pull request before the prep PR. A release binary counts the age of that root from its build date (§4.7.11), so the release workflow refuses a tag whose embedded root differs from the current TUF target.
+
 2. **Bump the Go default version and the chart** (drop the `-dev` suffix):
    - `internal/buildinfo/buildinfo.go`: `Version = "0.2.0"`.
    - `deploy/helm/podium/Chart.yaml`: `version: 0.2.0` and `appVersion: 0.2.0`.
@@ -95,7 +97,7 @@ Once that gate passes, five test jobs run in parallel and every publish job list
 
 | Job | Covers |
 |:--|:--|
-| `go` | Full Go suite: `make lint`, `make speccov-drift`, `make matrix-audit`, `make test`, `make coverage-budget`. |
+| `go` | Full Go suite: `make lint`, `make speccov-drift`, `make matrix-audit`, `make test`, `make coverage-budget`. It first runs `go run ./tools/sigstoreroot -check`, which fails when the embedded public-good Sigstore trusted root differs from the current target of the Sigstore TUF repository. |
 | `python` | `pytest` against `sdks/podium-py`. |
 | `typescript` | `vitest` against `sdks/podium-ts`. |
 | `postgres` | Live `pkg/store` and `pkg/vector` against a `pgvector/pgvector:pg16` service container. |
