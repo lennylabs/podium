@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, and the refusal of names that resolve to .git or .podium, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, and the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -58,6 +58,19 @@ From 0.8.0, a layer's `users` and `groups` entries are non-empty strings that co
 - A layer registration or update that carries such an entry, or an `owner` with a control character, is refused with `400 registry.invalid_argument`. A registration is refused the same way when the caller's subject, which the registry stores as the owner and `users` entry of a user-defined layer or as the `users` entry that `PODIUM_DEFAULT_LAYER_VISIBILITY=users` grants, contains a control character.
 - A layer that 0.7.0 stored keeps its entries. Where its stored `users` or `groups` holds an empty entry, an update that sends that list back unchanged, as a client that returns the layer object it read does, is refused; send the list without the empty entry, or omit the member. The web UI's Edit dialog sends both lists on every update of an admin-defined layer, so such a layer cannot have its ref changed or its webhook secret rotated there until the empty entry is removed. The dialog shows the entry as a token labelled `(empty entry)`; remove that token, then save.
 - White space around an entry is kept and matched as written, as in 0.7.0.
+- A rollback to 0.7.0 needs no step.
+
+### Skills whose `SKILL.md` is missing or does not parse
+
+From 0.8.0, an artifact whose `ARTIFACT.md` declares `type: skill` and whose directory holds no `SKILL.md` is refused on its own under the unparseable-manifest rule, as an artifact whose `SKILL.md` does not parse already was. 0.7.0 failed the whole layer instead.
+
+- Ingest stores the other artifacts of the layer and lists the skill in `rejected` with `ingest.invalid_artifact` and `details.constraint: "manifest_unparseable"`. The reason names `<id>/SKILL.md` and states that the file is missing. A script that watched for the layer's failed reingest reads `rejected` instead.
+- `podium lint` lists the skill among its refused artifacts and exits 1. A filesystem-source `podium sync` drops it, names it on standard error, writes the other artifacts, and exits 1, and by default keeps the output an earlier run wrote for it, as for any artifact whose manifest does not parse.
+
+Stored-row admission no longer serves a skill row from its `ARTIFACT.md` alone when the row's `SKILL.md` does not parse. 0.7.0 served such a row's sensitivity, deprecation flag, and replacement from the manifest. 0.8.0 serves the values the row stores, as it does for a row whose manifest does not parse. A skill's fields resolve from both documents, so a row whose `SKILL.md` does not parse has no resolved value to serve from its bytes. Ingest refuses such a skill, so only a row that an earlier release stored is affected.
+
+- To find an affected skill, reingest each layer. A skill whose `SKILL.md` does not parse is listed in `rejected` with a reason that names its `SKILL.md`, and the registry keeps serving the version it stored.
+- To serve resolved values again, correct the `SKILL.md` and publish the skill at a new version.
 - A rollback to 0.7.0 needs no step.
 
 ## 0.7.0

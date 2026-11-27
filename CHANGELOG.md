@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **A skill with no `SKILL.md` is refused on its own** (§4.1): an artifact whose `ARTIFACT.md` declares `type: skill` and whose directory holds no `SKILL.md` failed the ingest of its whole layer, `podium lint`, and a filesystem-source `podium sync`. It is now refused per artifact under the unparseable-manifest rule with `ingest.invalid_artifact` and `details.constraint: "manifest_unparseable"`, with a reason that names the missing `SKILL.md`, and the other artifacts of the layer are ingested, linted, and synced. See the [upgrade notes](docs/deployment/operations/upgrade-notes.md#skills-whose-skillmd-is-missing-or-does-not-parse).
+- **Stored-row admission no longer resolves a skill from its `ARTIFACT.md` alone** (§13.4, §4.7.6): a stored skill row whose `SKILL.md` does not parse was served with the sensitivity, deprecation flag, and replacement of its manifest. It is now served with its stored values, as a row whose manifest does not parse is. Ingest refuses such a skill, so only a row an earlier release stored is affected.
 - **A workspace `.podium` that is a symbolic link fails `podium sync`** (§7.5.3): `podium sync`, `podium sync override`, `podium sync save-as`, `podium profile edit`, and `podium init` in a workspace now fail before writing anything when the target's `.podium` is a symbolic link or not a directory, with an error that names `.podium`. Earlier releases read and wrote the lock and `sync.yaml` through the link. Replace the link with a directory; see the [upgrade notes](docs/deployment/operations/upgrade-notes.md).
 
 ### Fixed
