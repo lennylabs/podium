@@ -31,9 +31,13 @@ var (
 	// a non-loopback bind without the explicit opt-in. §13.10 ("Behind a
 	// flag") refuses to bind the UI to a non-loopback address unless
 	// --web-ui-allow-public-bind is also passed and an identity provider is
-	// configured, so a UI reachable beyond the loopback interface is served
-	// only by a registry that resolves a caller's identity and filters what it
-	// serves by that identity. Maps to config.web_ui_public_bind_refused.
+	// configured. A UI beyond the loopback interface resolves each caller's
+	// identity only under a provider that wires a request-time verifier.
+	// ExternalIdentityProvider counts as configured although it resolves no
+	// caller, because Validate's external bind check already requires
+	// --allow-public-bind on a non-loopback bind, so the UI runs there only
+	// when the operator has accepted that every caller sees every layer. Maps
+	// to config.web_ui_public_bind_refused.
 	ErrWebUIPublicBindRefused = errors.New("config.web_ui_public_bind_refused")
 
 	// ErrWebUIAuthUnconfigured signals that the §6.3.4 browser acquisition
@@ -139,12 +143,14 @@ func (c StartupConfig) Validate() error {
 		return fmt.Errorf("%w: public mode binds 127.0.0.1 by default; %q is not a loopback address (set PODIUM_ALLOW_PUBLIC_BIND=true or pass --allow-public-bind to override)",
 			ErrPublicBindNonLoopback, c.Bind)
 	}
-	// §13.10 "Behind a flag": a registry with no identity provider resolves
-	// every UI caller as anonymous, so a UI reachable beyond the loopback
-	// interface requires both the explicit --web-ui-allow-public-bind opt-in
-	// and a configured identity provider that resolves a caller's identity and
-	// filters what it serves by that identity. Either condition missing on a
-	// non-loopback bind is refused.
+	// §13.10 "Behind a flag": a UI reachable beyond the loopback interface
+	// requires both the explicit --web-ui-allow-public-bind opt-in and a
+	// configured identity provider. Under a provider with a request-time
+	// verifier, the UI then resolves each caller's identity and filters what
+	// it serves by it. ExternalIdentityProvider resolves no caller and still
+	// counts as configured here, because the external bind check below
+	// already requires --allow-public-bind on a non-loopback bind. Either
+	// condition missing on a non-loopback bind is refused.
 	if c.WebUI && !isLoopbackBind(c.Bind) {
 		if !c.WebUIAllowPublicBind || !ConfiguresIdentityProvider(c.IdentityProvider) {
 			return fmt.Errorf("%w: the web UI on a non-loopback bind (%q) requires --web-ui-allow-public-bind and a configured identity provider",
