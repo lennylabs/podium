@@ -227,43 +227,70 @@ func (p parsedToken) attrsVerifyUnder(cert *x509.Certificate) error {
 	return cert.CheckSignature(x509.ECDSAWithSHA256, p.signedSET, p.signers[0].Signature)
 }
 
-// inspection is a decoded envelope.
+// inspection is a decoded keyless bundle.
 type inspection struct {
-	env           envelopeJSON
-	leaf          *x509.Certificate
-	intermediates []*x509.Certificate
-	sig           []byte
-	body          hashedRekordEntry
-	bodyRaw       []byte
-	hashes        [][]byte
-	token         *parsedToken
+	bundle bundleJSON
+	leaf   *x509.Certificate
+	sig    []byte
+	// entry is the bundle's log entry, nil when it carries none.
+	entry      *tlogEntryJSON
+	body       hashedRekordEntry
+	bodyRaw    []byte
+	hashes     [][]byte
+	checkpoint string
+	// token is the first timestamp's token, nil when the bundle carries
+	// none; tokens counts the timestamps.
+	token  *parsedToken
+	tokens int
 }
 
-// inspect decodes an envelope and fails the test when any part does not
-// decode.
+// inspect decodes a keyless bundle and fails the test when any part does
+// not decode.
 func inspect(t *testing.T, raw string) inspection {
 	t.Helper()
 	var in inspection
-	if err := json.Unmarshal([]byte(raw), &in.env); err != nil {
-		t.Fatalf("envelope: %v", err)
+	if err := json.Unmarshal([]byte(raw), &in.bundle); err != nil {
+		t.Fatalf("bundle: %v", err)
 	}
-	certs := decodePEMChain(t, in.env.Cert)
-	in.leaf, in.intermediates = certs[0], certs[1:]
-	in.sig = mustB64(t, in.env.Signature)
-	if in.env.TLog != nil {
-		in.bodyRaw = mustB64(t, in.env.TLog.Body)
+	vm := in.bundle.VerificationMaterial
+	leaf, err := x509.ParseCertificate(vm.Certificate.RawBytes)
+	if err != nil {
+		t.Fatalf("leaf: %v", err)
+	}
+	in.leaf = leaf
+	if in.bundle.MessageSignature == nil {
+		t.Fatal("bundle carries no message signature")
+	}
+	in.sig = in.bundle.MessageSignature.Signature
+	if len(vm.TLogEntries) > 0 {
+		in.entry = &vm.TLogEntries[0]
+		in.bodyRaw = in.entry.CanonicalizedBody
 		if err := json.Unmarshal(in.bodyRaw, &in.body); err != nil {
 			t.Fatalf("entry body: %v", err)
 		}
-		for _, h := range in.env.TLog.Hashes {
-			in.hashes = append(in.hashes, mustB64(t, h))
+		if p := in.entry.InclusionProof; p != nil {
+			in.hashes, in.checkpoint = p.Hashes, p.Checkpoint.Envelope
 		}
 	}
-	if in.env.Timestamp != "" {
-		tok := parseToken(t, mustB64(t, in.env.Timestamp))
+	if ts := vm.TimestampVerificationData; ts != nil && len(ts.RFC3161Timestamps) > 0 {
+		in.tokens = len(ts.RFC3161Timestamps)
+		tok := parseToken(t, responseToken(t, ts.RFC3161Timestamps[0].SignedTimestamp))
 		in.token = &tok
 	}
 	return in
+}
+
+// responseToken returns the token a DER TimeStampResp carries.
+func responseToken(t *testing.T, resp []byte) []byte {
+	t.Helper()
+	var r struct {
+		Status asn1.RawValue
+		Token  asn1.RawValue
+	}
+	if _, err := asn1.Unmarshal(resp, &r); err != nil {
+		t.Fatalf("timestamp response: %v", err)
+	}
+	return r.Token.FullBytes
 }
 
 // proofRoot recomputes the root the envelope's proof leads to.

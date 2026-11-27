@@ -4,15 +4,20 @@ import (
 	"bytes"
 	"context"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
+
+	protorekor "github.com/sigstore/protobuf-specs/gen/pb-go/rekor/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 )
+
+// keyDetailsP256 is the Sigstore keyDetails value of the ECDSA P-256 leaf
+// key a keyless signature uses.
+const keyDetailsP256 = "PKIX_ECDSA_P256_SHA_256"
 
 // rekorRawBytes is the protobuf-specs bytes wrapper Rekor v2 uses for a
 // certificate.
@@ -21,8 +26,7 @@ type rekorRawBytes struct {
 }
 
 // rekorSignature is the hashedrekord v0.0.2 signature: the signature
-// bytes and the verifier that made them. The create-entry request and the
-// stored entry body share it.
+// bytes and the verifier that made them.
 type rekorSignature struct {
 	Content  []byte `json:"content"`
 	Verifier struct {
@@ -40,43 +44,13 @@ type rekorCreateRequest struct {
 	} `json:"hashedRekordRequestV002"`
 }
 
-// rekorEntryResponse is the protojson TransparencyLogEntry Rekor v2
-// returns. protojson writes int64 fields as decimal strings and omits
-// zero values, so logIndex is a string and an absent value means 0.
-type rekorEntryResponse struct {
-	LogIndex          string `json:"logIndex"`
-	CanonicalizedBody []byte `json:"canonicalizedBody"`
-	InclusionProof    *struct {
-		Hashes     [][]byte `json:"hashes"`
-		Checkpoint *struct {
-			Envelope string `json:"envelope"`
-		} `json:"checkpoint"`
-	} `json:"inclusionProof"`
-}
-
-// hashedRekordEntry is the canonicalized hashedrekord v0.0.2 entry body
-// the log proves.
-type hashedRekordEntry struct {
-	Kind       string `json:"kind"`
-	APIVersion string `json:"apiVersion"`
-	Spec       struct {
-		HashedRekordV002 struct {
-			Data struct {
-				Algorithm string `json:"algorithm"`
-				Digest    []byte `json:"digest"`
-			} `json:"data"`
-			Signature rekorSignature `json:"signature"`
-		} `json:"hashedRekordV002"`
-	} `json:"spec"`
-}
-
 // uploadRekor records the (digest, signature, leaf) entry in the Rekor v2
-// log at RekorURL and returns the entry with its inclusion proof and
-// checkpoint. A log that serves no /api/v2 path answers 404, which fails
-// the signing.
+// log at RekorURL and returns the TransparencyLogEntry it answers with,
+// which the bundle carries as it is. A log that serves no /api/v2 path
+// answers 404, which fails the signing.
 //
 // Spec: §4.7.9, §6.2.
-func (s SigstoreKeyless) uploadRekor(ctx context.Context, digest, sig []byte, leaf *x509.Certificate) (*tlogEntry, error) {
+func (s SigstoreKeyless) uploadRekor(ctx context.Context, digest, sig []byte, leaf *x509.Certificate) (*protorekor.TransparencyLogEntry, error) {
 	var create rekorCreateRequest
 	create.HashedRekordRequestV002.Digest = digest
 	create.HashedRekordRequestV002.Signature.Content = sig
@@ -97,70 +71,30 @@ func (s SigstoreKeyless) uploadRekor(ctx context.Context, digest, sig []byte, le
 	if err != nil {
 		return nil, err
 	}
-	var resp rekorEntryResponse
-	if err := json.Unmarshal(raw, &resp); err != nil {
+	return parseRekorEntry(raw)
+}
+
+// parseRekorEntry decodes the protojson TransparencyLogEntry Rekor v2
+// returns and refuses one that lacks a member the bundle needs. protojson
+// omits a zero logIndex, so an absent value decodes as 0.
+func parseRekorEntry(raw []byte) (*protorekor.TransparencyLogEntry, error) {
+	entry := new(protorekor.TransparencyLogEntry)
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, entry); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
-	return resp.tlogEntry()
-}
-
-// tlogEntry converts the response into the envelope's tlog object.
-func (r rekorEntryResponse) tlogEntry() (*tlogEntry, error) {
-	var index int64
-	if r.LogIndex != "" {
-		var err error
-		if index, err = strconv.ParseInt(r.LogIndex, 10, 64); err != nil {
-			return nil, fmt.Errorf("decode response: log index: %w", err)
-		}
-	}
 	switch {
-	case len(r.CanonicalizedBody) == 0:
+	case len(entry.GetCanonicalizedBody()) == 0:
 		return nil, errors.New("response carries no canonicalized body")
-	case r.InclusionProof == nil:
+	case len(entry.GetLogId().GetKeyId()) == 0:
+		return nil, errors.New("response carries no log ID")
+	case entry.GetKindVersion().GetKind() == "" || entry.GetKindVersion().GetVersion() == "":
+		return nil, errors.New("response carries no entry kind and version")
+	case entry.GetInclusionProof() == nil:
 		return nil, errors.New("response carries no inclusion proof")
-	case r.InclusionProof.Checkpoint == nil || r.InclusionProof.Checkpoint.Envelope == "":
+	case entry.GetInclusionProof().GetCheckpoint().GetEnvelope() == "":
 		return nil, errors.New("response carries no checkpoint")
 	}
-	hashes := make([]string, len(r.InclusionProof.Hashes))
-	for i, h := range r.InclusionProof.Hashes {
-		hashes[i] = base64.StdEncoding.EncodeToString(h)
-	}
-	return &tlogEntry{
-		LogIndex:   index,
-		Body:       base64.StdEncoding.EncodeToString(r.CanonicalizedBody),
-		Hashes:     hashes,
-		Checkpoint: r.InclusionProof.Checkpoint.Envelope,
-	}, nil
-}
-
-// bindEntry requires the proven entry body to record the digest being
-// verified, the envelope's signature, and the envelope's leaf. Without
-// it, a valid inclusion proof for an unrelated entry would pass.
-//
-// Spec: §4.7.9.
-func bindEntry(body string, digest, sig []byte, leaf *x509.Certificate) error {
-	raw, err := base64.StdEncoding.DecodeString(body)
-	if err != nil {
-		return fmt.Errorf("log entry is not a hashedrekord v0.0.2 entry: %w", err)
-	}
-	var entry hashedRekordEntry
-	if err := json.Unmarshal(raw, &entry); err != nil {
-		return fmt.Errorf("log entry is not a hashedrekord v0.0.2 entry: %w", err)
-	}
-	if entry.Kind != "hashedrekord" || entry.APIVersion != "0.0.2" {
-		return errors.New("log entry is not a hashedrekord v0.0.2 entry")
-	}
-	v2 := entry.Spec.HashedRekordV002
-	if v2.Data.Algorithm != "SHA2_256" || !bytes.Equal(v2.Data.Digest, digest) {
-		return errors.New("log entry does not bind the digest")
-	}
-	if !bytes.Equal(v2.Signature.Content, sig) {
-		return errors.New("log entry does not bind the signature")
-	}
-	if !bytes.Equal(v2.Signature.Verifier.X509Certificate.RawBytes, leaf.Raw) {
-		return errors.New("log entry does not bind the certificate")
-	}
-	return nil
+	return entry, nil
 }
 
 // sha256Digest returns the digest bytes of a "sha256:hex" content hash.
@@ -177,6 +111,16 @@ func sha256Digest(contentHash string) ([]byte, error) {
 		return nil, fmt.Errorf("content hash: algorithm %s is not sha256", alg)
 	}
 	// splitContentHash has already hex-decoded hexStr, so this cannot fail.
+	return hex.DecodeString(hexStr)
+}
+
+// decodeContentHash parses an "alg:hex" string and returns the raw
+// hash bytes.
+func decodeContentHash(s string) ([]byte, error) {
+	_, hexStr, err := splitContentHash(s)
+	if err != nil {
+		return nil, err
+	}
 	return hex.DecodeString(hexStr)
 }
 

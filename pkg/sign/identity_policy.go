@@ -1,7 +1,6 @@
 package sign
 
 import (
-	"crypto/x509"
 	"encoding/asn1"
 	"errors"
 	"fmt"
@@ -9,20 +8,18 @@ import (
 	"strings"
 )
 
-// Fulcio OIDC-issuer certificate extensions. The .1.8 form is a DER
-// UTF8String; the deprecated .1.1 form carries the issuer as raw bytes.
-var (
-	oidFulcioIssuerV2 = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 8}
-	oidFulcioIssuerV1 = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 1}
-)
+// oidFulcioIssuerV2 is the Fulcio Issuer (V2) extension, a DER UTF8String.
+// The older Issuer extension, 1.3.6.1.4.1.57264.1.1, is not read.
+var oidFulcioIssuerV2 = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 8}
 
 // IdentityPolicy is the signer identity a Sigstore-keyless verification
-// accepts. A leaf matches when one of its email or URI subject alternative
-// names equals an entry of Identities and the OIDC issuer its Fulcio
-// issuer extension carries equals Issuer. Both comparisons are byte for
-// byte. Other SAN types are never matched: an otherName SAN, such as
-// Fulcio's username SAN (OID 1.3.6.1.4.1.57264.1.7), identifies no signer
-// to this policy, so a leaf whose only identity is one is refused.
+// accepts. A leaf matches when the identity the §4.7.11 identity comparison
+// reads from it, the content of its one email or URI subject alternative
+// name, equals an entry of Identities, and the issuer that comparison reads
+// from its Issuer (V2) extension equals Issuer. Both comparisons are byte
+// for byte. A leaf whose subject alternative name holds several names, or
+// a name of another kind such as Fulcio's username OtherName, identifies no
+// signer to this policy and is refused.
 //
 // Spec: §4.7.9, §6.2.
 type IdentityPolicy struct {
@@ -49,7 +46,7 @@ func NewIdentityPolicy(identities, issuer string) IdentityPolicy {
 	return IdentityPolicy{Identities: list, Issuer: strings.TrimSpace(issuer)}
 }
 
-// Validate refuses a policy that would accept no envelope: verification
+// Validate refuses a policy that would accept no bundle: verification
 // fails closed when either half of the policy is unset. Each error names
 // the variable that configures the missing half.
 //
@@ -64,49 +61,19 @@ func (p IdentityPolicy) Validate() error {
 	return nil
 }
 
-// match checks the leaf's SANs and OIDC issuer against the policy.
+// match checks the identity and issuer that readCertificateFields read
+// from the verified leaf against the policy. readCertificateFields has
+// already refused a leaf with no Issuer (V2) extension or without exactly
+// one email or URI name. An empty value matches nothing, so a policy built
+// without NewIdentityPolicy that lists an empty entry still fails closed.
 //
 // Spec: §4.7.9.
-func (p IdentityPolicy) match(leaf *x509.Certificate) error {
-	sans := append([]string(nil), leaf.EmailAddresses...)
-	for _, u := range leaf.URIs {
-		sans = append(sans, u.String())
+func (p IdentityPolicy) match(f CertificateFields) error {
+	if f.Identity.Value == "" || !slices.Contains(p.Identities, f.Identity.Value) {
+		return fmt.Errorf("certificate identity mismatch: certificate carries %q", f.Identity.Value)
 	}
-	if !slices.ContainsFunc(sans, func(san string) bool { return slices.Contains(p.Identities, san) }) {
-		return fmt.Errorf("certificate identity mismatch: certificate carries %s", strings.Join(sans, ", "))
-	}
-	issuer, err := leafIssuer(leaf)
-	if err != nil {
-		return err
-	}
-	if issuer != p.Issuer {
-		return fmt.Errorf("OIDC issuer mismatch: certificate carries %s", issuer)
+	if f.Issuer.Value == "" || f.Issuer.Value != p.Issuer {
+		return fmt.Errorf("OIDC issuer mismatch: certificate carries %q", f.Issuer.Value)
 	}
 	return nil
-}
-
-// leafIssuer returns the OIDC issuer from the Fulcio issuer extension.
-// The .1.8 extension takes precedence. A .1.8 value that does not decode
-// as one UTF8String is refused rather than falling back to .1.1, because
-// a fallback would let a certificate present two issuers and have the
-// verifier pick the one that matches.
-func leafIssuer(leaf *x509.Certificate) (string, error) {
-	var v1 []byte
-	for _, ext := range leaf.Extensions {
-		switch {
-		case ext.Id.Equal(oidFulcioIssuerV2):
-			var issuer string
-			rest, err := asn1.UnmarshalWithParams(ext.Value, &issuer, "utf8")
-			if err != nil || len(rest) > 0 {
-				return "", errors.New("malformed OIDC issuer extension")
-			}
-			return issuer, nil
-		case ext.Id.Equal(oidFulcioIssuerV1):
-			v1 = ext.Value
-		}
-	}
-	if v1 == nil {
-		return "", errors.New("certificate carries no OIDC issuer extension")
-	}
-	return string(v1), nil
 }

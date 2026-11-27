@@ -66,20 +66,22 @@ func TestCountIngest_NilRegistryIsNoOp(t *testing.T) {
 
 // Spec: §4.6, §13.12 — sourceProviderFor maps the built-in source types to
 // their providers, hands the Git provider the PODIUM_GIT_FETCH_TIMEOUT
-// deadline, and reports an unknown type as an invalid config so the runner can
-// surface registry.invalid_argument.
+// deadline and the PODIUM_GIT_FETCH_DEPTH starting depth, and reports an
+// unknown type as an invalid config so the runner can surface
+// registry.invalid_argument.
 func TestSourceProviderFor_KnownAndUnknown(t *testing.T) {
 	t.Parallel()
 
-	git, err := sourceProviderFor("git", 90*time.Second)
+	gitSource := source.Git{FetchTimeout: 90 * time.Second, FetchDepth: 4}
+	git, err := sourceProviderFor("git", gitSource)
 	if err != nil {
 		t.Fatalf("git: unexpected error %v", err)
 	}
-	if g, ok := git.(source.Git); !ok || g.FetchTimeout != 90*time.Second {
-		t.Errorf("git provider = %#v, want source.Git with FetchTimeout 1m30s", git)
+	if g, ok := git.(source.Git); !ok || g != gitSource {
+		t.Errorf("git provider = %#v, want %#v", git, gitSource)
 	}
 
-	local, err := sourceProviderFor("local", time.Minute)
+	local, err := sourceProviderFor("local", gitSource)
 	if err != nil {
 		t.Fatalf("local: unexpected error %v", err)
 	}
@@ -87,7 +89,7 @@ func TestSourceProviderFor_KnownAndUnknown(t *testing.T) {
 		t.Errorf("local provider type = %T, want source.Local", local)
 	}
 
-	prov, err := sourceProviderFor("svn", time.Minute)
+	prov, err := sourceProviderFor("svn", gitSource)
 	if prov != nil {
 		t.Errorf("unknown source provider = %T, want nil", prov)
 	}

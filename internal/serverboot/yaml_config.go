@@ -54,6 +54,11 @@ type yamlConfig struct {
 	// resolves and validates it rather than applyYAML, because the default
 	// and the refusal apply when no file is read as well.
 	GitFetchTimeout string `yaml:"git_fetch_timeout,omitempty"`
+	// GitFetchDepth is the §13.12 starting depth of each call of the Git
+	// source, an integer from 1 to 2147483646. Mirrors PODIUM_GIT_FETCH_DEPTH;
+	// env wins. LoadConfig resolves and validates it, as it does
+	// GitFetchTimeout.
+	GitFetchDepth string `yaml:"git_fetch_depth,omitempty"`
 	// Sigstore is the §13.12 `sigstore:` block: the §4.7.11 instances
 	// besides public-good. LoadConfig resolves and validates it.
 	Sigstore yamlSigstore `yaml:"sigstore,omitempty"`

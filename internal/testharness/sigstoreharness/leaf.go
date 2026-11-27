@@ -99,13 +99,12 @@ func (c leafConfig) spec(clock time.Time) (certSpec, error) {
 	return spec, nil
 }
 
-// signedLeaf is a leaf certificate, the chain the envelope carries after
-// it, and the signature the leaf key made over the digest.
+// signedLeaf is a leaf certificate, the signature the leaf key made over
+// the digest, and the keyDetails value of the leaf key.
 type signedLeaf struct {
-	cert          *x509.Certificate
-	intermediates []*x509.Certificate
-	sig           []byte
-	keyDetails    string
+	cert       *x509.Certificate
+	sig        []byte
+	keyDetails string
 }
 
 // issueSignedLeaf issues a leaf under issuer over a fresh key and signs

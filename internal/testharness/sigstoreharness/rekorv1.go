@@ -59,7 +59,8 @@ type setPayload struct {
 // RekorOpt adjusts the Rekor v1 entry of one bundle.
 type RekorOpt func(*rekorConfig)
 
-// rekorConfig describes one Rekor v1 entry.
+// rekorConfig describes one transparency-log entry. The default is a
+// Rekor v1 dsse entry under a Rekor v1 checkpoint.
 type rekorConfig struct {
 	integrated time.Time
 	index      int64
@@ -67,7 +68,79 @@ type rekorConfig struct {
 	badSET     bool
 	noProof    bool
 	foreignKey bool
+	// label, when set, replaces the entry's kindVersion, which sits
+	// outside the signed body.
+	label *kindVersionJSON
+	// body selects the signed body, and checkpoint the form of the
+	// checkpoint the inclusion proof leads to.
+	body       entryBody
+	checkpoint checkpointForm
+	// origin, when set, is the origin line of a Rekor v2 checkpoint.
+	origin string
+	// v2Kind, when set, is the kind a Rekor v2 body names.
+	v2Kind string
 }
+
+// entryBody is the signed body of a log entry.
+type entryBody int
+
+const (
+	// bodyV1DSSE is a Rekor v1 dsse 0.0.1 body over the bundle.
+	bodyV1DSSE entryBody = iota
+	// bodyV2Bound is a Rekor v2 hashedrekord 0.0.2 body over the
+	// bundle's PAE digest, signature, and leaf.
+	bodyV2Bound
+	// bodyV2Other is a Rekor v2 hashedrekord 0.0.2 body that records
+	// another digest and another signature beside the bundle's leaf.
+	bodyV2Other
+)
+
+// checkpointForm is the origin form of the checkpoint of a proof.
+type checkpointForm int
+
+const (
+	// checkpointForBody uses the form that matches the body.
+	checkpointForBody checkpointForm = iota
+	// checkpointV1 is a Rekor v1 origin, "<host> - <tree ID>".
+	checkpointV1
+	// checkpointV2 is a Rekor v2 origin, the host of the log's baseUrl.
+	checkpointV2
+)
+
+// WithKindVersionLabel sets the entry's kindVersion label, which is
+// unsigned bundle metadata, without changing the body.
+func WithKindVersionLabel(kind, version string) RekorOpt {
+	return func(c *rekorConfig) { c.label = &kindVersionJSON{Kind: kind, Version: version} }
+}
+
+// WithRekorV2Body writes a Rekor v2 hashedrekord 0.0.2 body over the
+// bundle's PAE digest, signature, and leaf, under a Rekor v2 checkpoint
+// and with no signed entry timestamp, which Rekor v2 does not issue.
+func WithRekorV2Body() RekorOpt {
+	return func(c *rekorConfig) { c.body, c.noSET = bodyV2Bound, true }
+}
+
+// WithRekorV2BodyForOther writes a Rekor v2 hashedrekord 0.0.2 body that
+// records another digest and another signature, with no signed entry
+// timestamp. The trusted log key still proves it.
+func WithRekorV2BodyForOther() RekorOpt {
+	return func(c *rekorConfig) { c.body, c.noSET = bodyV2Other, true }
+}
+
+// WithV2BodyKind sets the kind member of a Rekor v2 body, which
+// sigstore-go does not read when it parses the body.
+func WithV2BodyKind(kind string) RekorOpt { return func(c *rekorConfig) { c.v2Kind = kind } }
+
+// WithV1Checkpoint proves the entry under a Rekor v1 checkpoint whatever
+// its body.
+func WithV1Checkpoint() RekorOpt { return func(c *rekorConfig) { c.checkpoint = checkpointV1 } }
+
+// WithV2Checkpoint proves the entry under a Rekor v2 checkpoint whatever
+// its body.
+func WithV2Checkpoint() RekorOpt { return func(c *rekorConfig) { c.checkpoint = checkpointV2 } }
+
+// WithCheckpointOrigin sets the origin line of a Rekor v2 checkpoint.
+func WithCheckpointOrigin(origin string) RekorOpt { return func(c *rekorConfig) { c.origin = origin } }
 
 // WithoutSET omits the entry's inclusion promise, so its integrated time
 // is not signed.
@@ -90,15 +163,19 @@ func WithRekorIndex(i int64) RekorOpt { return func(c *rekorConfig) { c.index = 
 // trusted root lists.
 func WithForeignLogKey() RekorOpt { return func(c *rekorConfig) { c.foreignKey = true } }
 
-// rekorV1Entry builds the dsse v0.0.1 entry for env, proves it at the
-// entry's index of a tree twice that size, and signs the checkpoint and
-// the signed entry timestamp with the P-256 log key.
+// rekorV1Entry builds the log entry cfg describes for env, by default a
+// dsse v0.0.1 entry, proves it at the entry's index of a tree twice that
+// size, and signs the checkpoint and the signed entry timestamp with the
+// P-256 log key.
 //
 // Spec: §4.7.11.
 func (h *Harness) rekorV1Entry(cfg rekorConfig, env dsseJSON, leafDER []byte) (tlogEntryJSON, error) {
-	body, err := dsseEntryBody(env, leafDER)
+	body, label, err := entryBodyFor(cfg, env, leafDER)
 	if err != nil {
 		return tlogEntryJSON{}, err
+	}
+	if cfg.label != nil {
+		label = *cfg.label
 	}
 	key := h.logKey
 	if cfg.foreignKey {
@@ -115,7 +192,7 @@ func (h *Harness) rekorV1Entry(cfg rekorConfig, env dsseJSON, leafDER []byte) (t
 	entry := tlogEntryJSON{
 		LogIndex:          cfg.index,
 		LogID:             logIDDoc{KeyID: keyID},
-		KindVersion:       kindVersionJSON{Kind: "dsse", Version: "0.0.1"},
+		KindVersion:       label,
 		IntegratedTime:    cfg.integrated.Unix(),
 		CanonicalizedBody: body,
 	}
@@ -133,11 +210,68 @@ func (h *Harness) rekorV1Entry(cfg rekorConfig, env dsseJSON, leafDER []byte) (t
 		entry.InclusionPromise = &promiseJSON{SignedEntryTimestamp: set}
 	}
 	if !cfg.noProof {
-		if entry.InclusionProof, err = rekorV1Proof(body, cfg.index, key); err != nil {
+		if entry.InclusionProof, err = proofFor(cfg, body, key); err != nil {
 			return tlogEntryJSON{}, err
 		}
 	}
 	return entry, nil
+}
+
+// entryBodyFor encodes the body kind for env and returns its label.
+func entryBodyFor(cfg rekorConfig, env dsseJSON, leafDER []byte) ([]byte, kindVersionJSON, error) {
+	kind := cfg.body
+	if kind == bodyV1DSSE {
+		body, err := dsseEntryBody(env, leafDER)
+		return body, kindVersionJSON{Kind: "dsse", Version: "0.0.1"}, err
+	}
+	digest := sha256.Sum256(PAE(env.PayloadType, env.Payload))
+	fields := entryFields{
+		kind: defaultEntryKind, apiVersion: defaultEntryAPIVersion,
+		digest: digest[:], sig: env.Signatures[0].Sig, certDER: leafDER, keyDetails: keyDetailsP256,
+	}
+	if kind == bodyV2Other {
+		other := sha256.Sum256([]byte("acme other statement"))
+		fields.digest, fields.sig = other[:], []byte("acme other signature")
+	}
+	if cfg.v2Kind != "" {
+		fields.kind = cfg.v2Kind
+	}
+	body, err := hashedRekordBody(fields)
+	return body, kindVersionJSON{Kind: fields.kind, Version: defaultEntryAPIVersion}, err
+}
+
+// proofFor proves body under the checkpoint form cfg selects: a Rekor v1
+// checkpoint for a v1 body and a Rekor v2 checkpoint, whose origin is the
+// host of the log's baseUrl, for a v2 body, unless cfg forces a form.
+func proofFor(cfg rekorConfig, body []byte, key *ecdsa.PrivateKey) (*proofJSON, error) {
+	form := cfg.checkpoint
+	if form == checkpointForBody {
+		form = checkpointV1
+		if cfg.body != bodyV1DSSE {
+			form = checkpointV2
+		}
+	}
+	if form == checkpointV1 {
+		return rekorV1Proof(body, cfg.index, key)
+	}
+	origin := checkpointOrigin
+	if cfg.origin != "" {
+		origin = cfg.origin
+	}
+	size := 2*cfg.index + 2
+	inc, err := prove(body, int(size), int(cfg.index))
+	if err != nil {
+		return nil, err
+	}
+	note := fmt.Sprintf("%s\n%d\n%s\n", origin, size, base64.StdEncoding.EncodeToString(inc.root))
+	checkpoint, err := signNoteAs(note, origin, key)
+	if err != nil {
+		return nil, err
+	}
+	return &proofJSON{
+		LogIndex: cfg.index, RootHash: inc.root, TreeSize: size, Hashes: inc.hashes,
+		Checkpoint: checkpointJSON{Envelope: checkpoint},
+	}, nil
 }
 
 // dsseEntryBody encodes the canonicalized dsse v0.0.1 body of env.

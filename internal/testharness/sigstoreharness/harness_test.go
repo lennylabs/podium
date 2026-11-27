@@ -21,13 +21,11 @@ func TestEnvelope_DefaultIsWellFormed(t *testing.T) {
 	t.Parallel()
 	h := New(t)
 	hash, digest := testContentHash("default")
-	in := inspect(t, h.Envelope(t, hash))
+	in := inspect(t, h.KeylessBundle(t, hash))
 
 	roots, inters := x509.NewCertPool(), x509.NewCertPool()
 	roots.AddCert(h.FulcioRoot())
-	for _, c := range in.intermediates {
-		inters.AddCert(c)
-	}
+	inters.AddCert(h.FulcioIntermediate())
 	if _, err := in.leaf.Verify(x509.VerifyOptions{
 		Roots: roots, Intermediates: inters, CurrentTime: h.Clock(),
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
@@ -47,8 +45,8 @@ func TestEnvelope_DefaultIsWellFormed(t *testing.T) {
 		t.Fatal("signature does not verify over the digest")
 	}
 	assertBodyBinds(t, in, digest)
-	if in.env.TLog.LogIndex != 5 {
-		t.Fatalf("log_index = %d, want 5", in.env.TLog.LogIndex)
+	if in.entry.LogIndex != 5 {
+		t.Fatalf("log_index = %d, want 5", in.entry.LogIndex)
 	}
 	imprint := sha256.Sum256(in.sig)
 	equalBytes(t, "imprint", in.token.tst.MessageImprint.HashedMessage, imprint[:])
@@ -92,10 +90,10 @@ func TestEnvelope_CheckpointVerifiesUnderLogKey(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			in := inspect(t, h.Envelope(t, hash, tc.opts...))
-			n, ok := parseNote(in.env.TLog.Checkpoint)
+			in := inspect(t, h.KeylessBundle(t, hash, tc.opts...))
+			n, ok := parseNote(in.checkpoint)
 			if !ok {
-				t.Fatalf("checkpoint does not parse: %q", in.env.TLog.Checkpoint)
+				t.Fatalf("checkpoint does not parse: %q", in.checkpoint)
 			}
 			if got := n.verifiesUnder(h.LogPublicKey()); got != tc.p256 {
 				t.Fatalf("verifies under P-256 log key = %v, want %v", got, tc.p256)
@@ -120,13 +118,13 @@ func TestEnvelope_AuditPathRecomputesCheckpointRoot(t *testing.T) {
 	for size := 1; size <= 9; size++ {
 		for index := 0; index < size; index++ {
 			t.Run(fmt.Sprintf("%d_of_%d", index, size), func(t *testing.T) {
-				in := inspect(t, h.Envelope(t, hash, WithTreeSize(size, index)))
-				n, ok := parseNote(in.env.TLog.Checkpoint)
+				in := inspect(t, h.KeylessBundle(t, hash, WithTreeSize(size, index)))
+				n, ok := parseNote(in.checkpoint)
 				if !ok || !n.verifiesUnder(h.LogPublicKey()) {
 					t.Fatal("checkpoint does not verify under the log key")
 				}
-				if n.size != int64(size) || in.env.TLog.LogIndex != int64(index) {
-					t.Fatalf("size %d index %d, want %d %d", n.size, in.env.TLog.LogIndex, size, index)
+				if n.size != int64(size) || in.entry.LogIndex != int64(index) {
+					t.Fatalf("size %d index %d, want %d %d", n.size, in.entry.LogIndex, size, index)
 				}
 				root, ok := in.proofRoot(int64(index), n.size)
 				if !ok || !bytes.Equal(root, n.root) {

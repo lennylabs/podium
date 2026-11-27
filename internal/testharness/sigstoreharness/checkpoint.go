@@ -18,9 +18,11 @@ func checkpointBody(size int, root []byte) string {
 }
 
 // signNote appends a signed-note signature line by key to body. The line
-// carries a 4-byte key hint taken from SHA-256 of the PKIX public key;
-// the §4.7.9 verifier tries every trusted key and does not read the hint.
-// ECDSA signs SHA-256(body) and Ed25519 signs body, as Rekor v2 does.
+// carries the 4-byte key hint a Rekor v2 note verifier looks the key up
+// by: the first bytes of SHA-256 of the PKIX public key for ECDSA, and of
+// SHA-256 of the name, a newline, the Ed25519 algorithm byte 0x01, and the
+// raw key for Ed25519. ECDSA signs SHA-256(body) and Ed25519 signs body,
+// as Rekor v2 does.
 func signNote(body string, key crypto.Signer) (string, error) {
 	return signNoteAs(body, checkpointOrigin, key)
 }
@@ -38,6 +40,7 @@ func signNoteAs(body, name string, key crypto.Signer) (string, error) {
 		digest := sha256.Sum256([]byte(body))
 		sig, err = ecdsa.SignASN1(rand.Reader, k, digest[:])
 	case ed25519.PrivateKey:
+		hint = sha256.Sum256(append([]byte(name+"\n\x01"), k.Public().(ed25519.PublicKey)...))
 		sig = ed25519.Sign(k, []byte(body))
 	default:
 		err = fmt.Errorf("unsupported checkpoint key %T", key)

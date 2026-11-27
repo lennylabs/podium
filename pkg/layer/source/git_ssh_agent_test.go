@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strings"
@@ -17,11 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
-	"github.com/go-git/go-git/v5/plumbing/storer"
-	"github.com/go-git/go-git/v5/plumbing/transport"
-	"github.com/go-git/go-git/v5/plumbing/transport/server"
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -127,8 +123,9 @@ func (a *testAgent) wantAllClosed(t *testing.T, acceptedBefore int) {
 }
 
 // sshGitServer is an in-process SSH server that serves git-upload-pack for one
-// repository with go-git's server implementation. It records the login name of
-// each connection it authenticated.
+// repository by running `git upload-pack`, which serves the shallow clone and
+// the deepening fetches of the Git source. It records the login name of each
+// connection it authenticated.
 type sshGitServer struct {
 	addr string
 
@@ -147,8 +144,9 @@ type sshServerOptions struct {
 	knownHosts string
 }
 
-// startSSHGitServer starts an sshGitServer that serves repo.
-func startSSHGitServer(t *testing.T, repo storer.Storer, opts sshServerOptions) *sshGitServer {
+// startSSHGitServer starts an sshGitServer that serves the repository at
+// repoDir.
+func startSSHGitServer(t *testing.T, repoDir string, opts sshServerOptions) *sshGitServer {
 	t.Helper()
 	_, hostKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -171,8 +169,7 @@ func startSSHGitServer(t *testing.T, repo storer.Storer, opts sshServerOptions) 
 		},
 	}
 	cfg.AddHostKey(signer)
-	upload := server.NewServer(fixedLoader{repo})
-	srv.addr = stallingListener(t, func(c net.Conn) { go serveSSHConn(c, cfg, upload) })
+	srv.addr = stallingListener(t, func(c net.Conn) { go serveSSHConn(c, cfg, repoDir) })
 	if opts.knownHosts != "" {
 		line := knownhosts.Line([]string{knownhosts.Normalize(srv.addr)}, signer.PublicKey())
 		if err := os.WriteFile(opts.knownHosts, []byte(line+"\n"), 0o600); err != nil {
@@ -189,14 +186,8 @@ func (s *sshGitServer) loginNames() []string {
 	return append([]string(nil), s.logins...)
 }
 
-// fixedLoader is a go-git server Loader that serves one storer for every path.
-type fixedLoader struct{ s storer.Storer }
-
-// Load implements server.Loader.
-func (l fixedLoader) Load(*transport.Endpoint) (storer.Storer, error) { return l.s, nil }
-
 // serveSSHConn runs the SSH handshake on c and serves each session channel.
-func serveSSHConn(c net.Conn, cfg *ssh.ServerConfig, upload transport.Transport) {
+func serveSSHConn(c net.Conn, cfg *ssh.ServerConfig, repoDir string) {
 	_, chans, reqs, err := ssh.NewServerConn(c, cfg)
 	if err != nil {
 		return
@@ -211,13 +202,13 @@ func serveSSHConn(c net.Conn, cfg *ssh.ServerConfig, upload transport.Transport)
 		if err != nil {
 			continue
 		}
-		go serveSSHSession(ch, chReqs, upload)
+		go serveSSHSession(ch, chReqs, repoDir)
 	}
 }
 
 // serveSSHSession answers the session's exec request with git-upload-pack and
 // refuses every other request.
-func serveSSHSession(ch ssh.Channel, reqs <-chan *ssh.Request, upload transport.Transport) {
+func serveSSHSession(ch ssh.Channel, reqs <-chan *ssh.Request, repoDir string) {
 	defer func() { _ = ch.Close() }()
 	for req := range reqs {
 		if req.Type != "exec" {
@@ -226,7 +217,7 @@ func serveSSHSession(ch ssh.Channel, reqs <-chan *ssh.Request, upload transport.
 		}
 		_ = req.Reply(true, nil)
 		status := uint32(0)
-		if err := uploadPack(ch, upload); err != nil {
+		if err := uploadPack(ch, repoDir); err != nil {
 			status = 1
 		}
 		_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
@@ -234,52 +225,41 @@ func serveSSHSession(ch ssh.Channel, reqs <-chan *ssh.Request, upload transport.
 	}
 }
 
-// uploadPack runs one git-upload-pack exchange over rw: it advertises the
-// references, reads the client's request, and sends the pack.
-func uploadPack(rw io.ReadWriter, upload transport.Transport) error {
-	sess, err := upload.NewUploadPackSession(&transport.Endpoint{Protocol: "ssh", Path: "/acme/layer.git"}, nil)
+// uploadPack runs one git-upload-pack exchange over rw with `git
+// upload-pack`. The process's standard input is copied from rw in a goroutine
+// that Wait does not wait for, because rw delivers no end of file until the
+// client closes the channel, which it does after the exchange.
+func uploadPack(rw io.ReadWriter, repoDir string) error {
+	cmd := exec.Command("git", "upload-pack", repoDir)
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
 	}
-	defer func() { _ = sess.Close() }()
-	refs, err := sess.AdvertisedReferences()
-	if err != nil {
+	cmd.Stdout = rw
+	if err := cmd.Start(); err != nil {
 		return err
 	}
-	if err := refs.Encode(rw); err != nil {
-		return err
-	}
-	req := packp.NewUploadPackRequest()
-	if err := req.Decode(rw); err != nil {
-		return err
-	}
-	resp, err := sess.UploadPack(context.Background(), req)
-	if err != nil {
-		return err
-	}
-	return resp.Encode(rw)
+	go func() {
+		_, _ = io.Copy(stdin, rw)
+		_ = stdin.Close()
+	}()
+	return cmd.Wait()
 }
 
-// layerStorer returns the storer of a repository with one artifact file.
-func layerStorer(t *testing.T) storer.Storer {
+// layerRepoDir returns the directory of a repository with one artifact file.
+func layerRepoDir(t *testing.T) string {
 	t.Helper()
 	url, _ := repoFactory(t, map[string]string{
 		"company-glossary/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\n---\n\nbody\n",
 	})
-	repo, err := git.PlainOpen(strings.TrimPrefix(url, "file://"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return repo.Storer
+	return strings.TrimPrefix(url, "file://")
 }
 
 // sshSnapshot runs a snapshot of the master branch of repo under a one-second
-// FetchTimeout. The zero PriorRef selects a full clone, which the force-push
-// check treats as a first ingest, because go-git's upload-pack server ignores
-// the depth of a shallow clone and the client then finds no ref to resolve.
+// FetchTimeout.
 func sshSnapshot(repo string) (*source.Snapshot, error) {
 	return source.Git{FetchTimeout: time.Second}.Snapshot(context.Background(), source.LayerConfig{
-		Repo: repo, Ref: "master", PriorRef: "0000000000000000000000000000000000000000",
+		Repo: repo, Ref: "master",
 	})
 }
 
@@ -291,7 +271,7 @@ func sshSnapshot(repo string) (*source.Snapshot, error) {
 // set process environment variables, so they do not run in parallel.
 func TestGit_SnapshotClosesSSHAgentConnection(t *testing.T) {
 	ag, knownHosts := sshAgentEnv(t)
-	repo := layerStorer(t)
+	repo := layerRepoDir(t)
 
 	t.Run("success", func(t *testing.T) {
 		srv := startSSHGitServer(t, repo, sshServerOptions{authorized: ag.key, knownHosts: knownHosts})

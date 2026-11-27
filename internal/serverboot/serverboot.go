@@ -2343,6 +2343,10 @@ type Config struct {
 	// snapshot (§7.3.1), from the environment or the registry.yaml
 	// git_fetch_timeout key.
 	gitFetch gitFetchConfig
+	// gitFetchDepth is the §13.12 PODIUM_GIT_FETCH_DEPTH starting depth of
+	// each call of the Git source (§7.3.1 Git fetch), from the environment or
+	// the registry.yaml git_fetch_depth key.
+	gitFetchDepth gitFetchDepthConfig
 	// attestation is the §4.7.11 Sigstore instance configuration: the
 	// sigstore.instances key, PODIUM_ATTESTATION_TRUSTED_ROOT_FILE, and the
 	// refresh settings of the public-good root, with the root files read.
@@ -2551,6 +2555,7 @@ func (c *Config) Settings() []Setting {
 		{"sandbox_profile.host_sandboxes", strings.Join(c.hostSandboxes, ","), envOrSrc("PODIUM_HOST_SANDBOXES", defaultSrc)},
 		{"layers.path", c.layerPath, envOrSrc("PODIUM_LAYER_PATH", yamlSrc)},
 		{gitFetchTimeoutKey, c.gitFetch.display(), c.gitFetch.source},
+		{gitFetchDepthKey, c.gitFetchDepth.display(), c.gitFetchDepth.source},
 		{"tenant.expose_scope_preview", boolStr(c.exposeScopePreview == nil || *c.exposeScopePreview), envOrSrc("PODIUM_EXPOSE_SCOPE_PREVIEW", yamlSrc)},
 		{"read_only.probe_failures", intStr(c.readOnlyProbeFailures), envOrSrc("PODIUM_READONLY_PROBE_FAILURES", defaultSrc)},
 		{"read_only.probe_interval_seconds", intStr(c.readOnlyProbeInterval), envOrSrc("PODIUM_READONLY_PROBE_INTERVAL", defaultSrc)},
@@ -2725,7 +2730,7 @@ func LoadConfig() *Config {
 	// cannot be read or does not decode is carried to validate, which refuses
 	// the start: starting on the defaults would drop the configured identity
 	// provider, layers, and store settings (§13.12).
-	fileGitFetchTimeout := ""
+	fileGitFetchTimeout, fileGitFetchDepth := "", ""
 	var fileSigstore yamlSigstore
 	if y, err := readYAMLConfig(); err != nil {
 		c.configFileErr = err
@@ -2733,10 +2738,12 @@ func LoadConfig() *Config {
 		applyYAML(c, y)
 		if y != nil {
 			fileGitFetchTimeout = y.GitFetchTimeout
+			fileGitFetchDepth = y.GitFetchDepth
 			fileSigstore = y.Sigstore
 		}
 	}
 	c.gitFetch = resolveGitFetchTimeout(os.Getenv(source.FetchTimeoutSetting), fileGitFetchTimeout)
+	c.gitFetchDepth = resolveGitFetchDepth(os.Getenv(source.FetchDepthSetting), fileGitFetchDepth)
 	// §4.7.11: the Sigstore instances and their root files, read now so a
 	// root file that cannot be read refuses the start before any ingest. A
 	// relative trusted_root resolves beside registry.yaml.
@@ -2864,14 +2871,17 @@ func (c *Config) ConfigFileError() error { return c.configFileErr }
 
 // SettingErrors reports the refusals validate returns for settings that
 // Settings shows, such as a PODIUM_GIT_FETCH_TIMEOUT that is not a duration
-// above zero. `podium config show --server` prints them, because Settings
-// marks such a value invalid and the registry refuses to start with it.
+// above zero or a PODIUM_GIT_FETCH_DEPTH outside its range. `podium config
+// show --server` prints them, because Settings marks such a value invalid and
+// the registry refuses to start with it.
 //
 // Spec: §13.12
 func (c *Config) SettingErrors() []error {
 	var errs []error
-	if c.gitFetch.err != nil {
-		errs = append(errs, c.gitFetch.err)
+	for _, err := range []error{c.gitFetch.err, c.gitFetchDepth.err} {
+		if err != nil {
+			errs = append(errs, err)
+		}
 	}
 	return append(errs, c.attestation.errs...)
 }
@@ -2952,6 +2962,9 @@ func (c *Config) validate() error {
 	}
 	if c.gitFetch.err != nil {
 		return c.gitFetch.err
+	}
+	if c.gitFetchDepth.err != nil {
+		return c.gitFetchDepth.err
 	}
 	// §4.7.11: an unreadable root file, an invalid sigstore.instances entry,
 	// and a refresh setting §13.12 does not admit refuse the start.

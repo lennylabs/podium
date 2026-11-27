@@ -229,7 +229,7 @@ The code applies when `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above 0 and the 
 | `ingest.webhook_invalid` | Git provider webhook signature didn't validate against the layer's HMAC secret. |
 | `ingest.immutable_violation` | Same `version:` ingested with different content. The author bumps the version. |
 | `ingest.frozen` | A freeze window blocks ingest. Use `--break-glass` (with dual-signoff and justification) to override. |
-| `ingest.source_unreachable` | The layer's source (Git repo, S3 prefix, etc.) couldn't be reached at ingest time, or a Git snapshot did not finish within [`PODIUM_GIT_FETCH_TIMEOUT`](configuration#ingest). Existing served artifacts are unaffected. |
+| `ingest.source_unreachable` | The layer's source (Git repo, S3 prefix, etc.) couldn't be reached at ingest time, a Git remote could not serve enough history to decide the force-push check, or a Git snapshot did not finish within [`PODIUM_GIT_FETCH_TIMEOUT`](configuration#ingest), in which case `details.constraint` is `fetch_deadline` and `details.depth` names the depth of the fetch that was running. Existing served artifacts are unaffected. |
 | `ingest.public_mode_rejects_sensitive` | Public-mode deployments reject ingest of `sensitivity: medium` and `sensitivity: high` artifacts. |
 | `ingest.sandbox_profile_unenforceable` | With `PODIUM_ENFORCE_SANDBOX_PROFILE=true`, the registry rejects an artifact whose `sandbox_profile` the local host cannot honor. The host advertises its enforceable set via `PODIUM_HOST_SANDBOXES`. |
 | `ingest.invalid_artifact` | The artifact is rejected and the rest of the ingest continues. See [ingest.invalid_artifact causes](#ingestinvalid_artifact-causes). |
@@ -265,7 +265,7 @@ A filesystem-source `podium sync` reports the same code for an artifact whose `A
 #### materialize.signature_invalid causes
 
 - The content was tampered with, or the signer is unknown.
-- A Sigstore-keyless envelope does not verify or match: its certificate identity, OIDC issuer, timestamp, inclusion proof, checkpoint signature, or log entry fails, or its certificate was not valid at the timestamp's time.
+- A Sigstore-keyless bundle does not verify or match: its certificate identity, OIDC issuer, timestamp, inclusion proof, checkpoint signature, or log entry fails, or its certificate was not valid at the timestamp's time. A keyless envelope in the format of 0.7.0 and earlier is refused as well.
 - `podium-mcp`, server-source `podium sync`, or a language SDK, under any policy above `never`, received a signature that does not verify under the key set it resolved.
 - The same consumers, under any policy above `never`, received a malformed `delivery_signature` envelope. An envelope is malformed when it is not a JSON object, has no string `signature`, has a non-string `key_id`, or has a `signature` that is not the canonical base64 encoding of 64 bytes.
 - The registry's [stored-row admission check](#stored-row-admission-refusals) refused the row.
