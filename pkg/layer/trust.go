@@ -74,21 +74,27 @@ func (k TrustInstances) known(name string) bool {
 }
 
 // CheckTrustPolicy applies the §4.7.11 policy rules to the policy cfg holds,
-// read against its source type. It returns nil or an error wrapping
-// ErrTrustPolicy that names the member and the rule. Callers derive the
-// source binding (DeriveSourceBinding) before they check, because the rules
-// read the derived members.
+// read against its source type. defaultMode is the mode an empty trust_mode
+// resolves to for the no-requirement rule: the layer endpoints pass
+// PODIUM_LAYER_TRUST_DEFAULT, and a declared layer passes "", because the
+// default only makes a declared policy invalid per cycle. It returns nil or
+// an error wrapping ErrTrustPolicy that names the member and the rule.
+// Callers derive the source binding (DeriveSourceBinding) before they check,
+// because the rules read the derived members.
 //
 // Spec: §4.7.11 (Policy rules)
-func CheckTrustPolicy(cfg store.LayerConfig, instances TrustInstances) error {
+func CheckTrustPolicy(cfg store.LayerConfig, instances TrustInstances, defaultMode string) error {
 	if !ValidTrustMode(cfg.TrustMode) {
 		return trustRefusal("trust_mode %q is not none, warn, or require", cfg.TrustMode)
 	}
 	if n := len(cfg.TrustRequirements); n > MaxTrustRequirements {
 		return trustRefusal("trust_requirements holds %d requirements; several requirements are not available yet, so a policy holds at most %d", n, MaxTrustRequirements)
 	}
-	if (cfg.TrustMode == TrustModeWarn || cfg.TrustMode == TrustModeRequire) && len(cfg.TrustRequirements) == 0 {
-		return trustRefusal("trust_mode %s needs a requirement in trust_requirements", cfg.TrustMode)
+	if mode := ResolveTrustMode(cfg.TrustMode, defaultMode); (mode == TrustModeWarn || mode == TrustModeRequire) && len(cfg.TrustRequirements) == 0 {
+		if cfg.TrustMode == "" {
+			return trustRefusal("trust_mode is empty and resolves to %s through PODIUM_LAYER_TRUST_DEFAULT, which needs a requirement in trust_requirements; add one or set trust_mode", mode)
+		}
+		return trustRefusal("trust_mode %s needs a requirement in trust_requirements", mode)
 	}
 	for i, req := range cfg.TrustRequirements {
 		if err := checkRequirement(fmt.Sprintf("trust_requirements[%d]", i), req, instances); err != nil {
@@ -255,9 +261,16 @@ func derivableRepository(sourceType, repo string) (string, bool) {
 	if sourceType != "git" || !strings.HasPrefix(repo, "https://") {
 		return "", false
 	}
+	// A percent-escape, an empty port ("host:"), and a host with a trailing
+	// dot each name the repository in a form the host's certificates do not
+	// carry, so the derived value would differ from the certificate's by
+	// more than the operator can see; they derive nothing.
+	if strings.ContainsAny(repo, "%#") {
+		return "", false
+	}
 	u, err := url.Parse(repo)
-	if err != nil || u.User != nil || u.Port() != "" || u.RawQuery != "" || u.ForceQuery ||
-		u.Fragment != "" || strings.Contains(repo, "#") || u.Opaque != "" || u.Host == "" || u.RawPath != "" {
+	if err != nil || u.User != nil || strings.Contains(u.Host, ":") || u.RawQuery != "" || u.ForceQuery ||
+		u.Opaque != "" || u.Host == "" || strings.HasSuffix(u.Host, ".") {
 		return "", false
 	}
 	path := u.Path
@@ -265,6 +278,10 @@ func derivableRepository(sourceType, repo string) (string, bool) {
 		path = trimmed
 	} else {
 		path = strings.TrimSuffix(path, "/")
+	}
+	if strings.HasSuffix(path, ".git") {
+		// .git followed by / is neither form.
+		return "", false
 	}
 	segs := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	if !strings.HasPrefix(path, "/") || len(segs) != 2 || segs[0] == "" || segs[1] == "" {
@@ -285,11 +302,40 @@ func TrustPolicyEqual(a, b store.LayerConfig) bool {
 	}
 	for i := range a.TrustRequirements {
 		ra, rb := a.TrustRequirements[i], b.TrustRequirements[i]
-		if ra.PredicateType != rb.PredicateType || !slices.Equal(ra.Signers, rb.Signers) {
+		if ra.PredicateType != rb.PredicateType || !slices.EqualFunc(ra.Signers, rb.Signers, signerEqual) {
 			return false
 		}
 	}
 	return true
+}
+
+// signerEqual compares two signers with an empty instance read as
+// public-good, which it names; the stored value is kept as given.
+func signerEqual(a, b store.TrustSigner) bool {
+	a.Instance, b.Instance = instanceName(a.Instance), instanceName(b.Instance)
+	return a == b
+}
+
+// instanceName returns the instance a signer names, public-good for empty.
+func instanceName(n string) string {
+	if n == "" {
+		return sign.PublicGoodInstance
+	}
+	return n
+}
+
+// TrustMemberNames are the layer-level trust policy members of a layer
+// object, a layer request body, and a registry.yaml layer entry.
+var TrustMemberNames = []string{"trust_mode", "trust_requirements", "trust_layer_root"}
+
+// IsTrustLikeName reports whether name, with its letters folded to lower
+// case and each - read as _, begins with "trust". A member of that form that
+// is not a trust member is refused rather than ignored, so a misspelled
+// policy member such as trust_mod or trust-mode is never dropped silently.
+//
+// Spec: §7.3.1 (Layer trust policy)
+func IsTrustLikeName(name string) bool {
+	return strings.HasPrefix(strings.ReplaceAll(strings.ToLower(name), "-", "_"), "trust")
 }
 
 // trustRefusal builds an error wrapping ErrTrustPolicy.

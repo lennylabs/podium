@@ -54,6 +54,10 @@ func TestDeriveSourceBinding_URLForms(t *testing.T) {
 		{"https://github.com//finance", ""},
 		{"https://github.com/acme/fin%61nce", ""},
 		{"https:///acme/finance", ""},
+		{"https://github.com/acme/finance.git/", ""},
+		{"https://github.com:/acme/finance", ""},
+		{"https://github.com/acme/fin%2Dance", ""},
+		{"https://github.com./acme/finance", ""},
 	} {
 		reqs := []store.TrustRequirement{{Signers: []store.TrustSigner{signer()}}}
 		got := layer.DeriveSourceBinding("git", tc.repo, reqs)[0].Signers[0]
@@ -148,7 +152,7 @@ func TestCheckTrustPolicy_Rules(t *testing.T) {
 		{"unknown instance", ok(func(c *store.LayerConfig) { c.TrustRequirements[0].Signers[0].Instance = "acme" }), `instance "acme"`},
 		{"root on git", ok(func(c *store.LayerConfig) { c.TrustLayerRoot = "skills" }), "trust_layer_root applies to a local layer"},
 	} {
-		err := layer.CheckTrustPolicy(tc.cfg, known)
+		err := layer.CheckTrustPolicy(tc.cfg, known, "")
 		if !errors.Is(err, layer.ErrTrustPolicy) || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want ErrTrustPolicy with %q", tc.name, err, tc.want)
 		}
@@ -160,11 +164,11 @@ func TestCheckTrustPolicy_Rules(t *testing.T) {
 		policy("none", store.TrustSigner{Issuer: ghIssuer, Identity: "https://x.example/w", AnySource: true, Instance: "public-good"}),
 		policy("require", store.TrustSigner{Issuer: ghIssuer, Identity: "https://x.example/w", SourceRepositoryOwnerID: "7", AnyRef: true}),
 	} {
-		if err := layer.CheckTrustPolicy(cfg, known); err != nil {
+		if err := layer.CheckTrustPolicy(cfg, known, ""); err != nil {
 			t.Errorf("CheckTrustPolicy(%+v) = %v, want nil", cfg.TrustRequirements, err)
 		}
 	}
-	if err := layer.CheckTrustPolicy(ok(func(c *store.LayerConfig) { c.TrustRequirements[0].Signers[0].Instance = "github" }), nil); err == nil {
+	if err := layer.CheckTrustPolicy(ok(func(c *store.LayerConfig) { c.TrustRequirements[0].Signers[0].Instance = "github" }), nil, ""); err == nil {
 		t.Errorf("a nil instance set admitted github")
 	}
 }
@@ -189,7 +193,7 @@ func TestCheckTrustPolicy_LayerRoot(t *testing.T) {
 		`a\b`:            false,
 	} {
 		cfg := store.LayerConfig{ID: "L", SourceType: "local", TrustLayerRoot: root}
-		if err := layer.CheckTrustPolicy(cfg, nil); (err == nil) != ok {
+		if err := layer.CheckTrustPolicy(cfg, nil, ""); (err == nil) != ok {
 			t.Errorf("trust_layer_root %q: err = %v, want ok=%t", root, err, ok)
 		}
 	}
@@ -230,6 +234,56 @@ func TestTrustPolicyEqual(t *testing.T) {
 		mut(&c)
 		if layer.TrustPolicyEqual(a, c) {
 			t.Errorf("a changed policy compared equal: %+v", c)
+		}
+	}
+}
+
+// Spec: §4.7.11 (Policy rules) — at the endpoints the no-requirement rule
+// reads the resolved mode: an empty mode that the default raises to warn or
+// require needs a requirement, and the refusal names the default.
+func TestCheckTrustPolicy_ResolvedDefault(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		mode, def string
+		reqs      bool
+		want      string
+	}{
+		{"", "require", false, "resolves to require through PODIUM_LAYER_TRUST_DEFAULT"},
+		{"", "warn", false, "resolves to warn through PODIUM_LAYER_TRUST_DEFAULT"},
+		{"", "none", false, ""},
+		{"none", "require", false, ""},
+		{"", "require", true, ""},
+	} {
+		cfg := policy(tc.mode)
+		if tc.reqs {
+			cfg = policy(tc.mode, store.TrustSigner{Issuer: ghIssuer, Identity: "alice@acme.com"})
+		}
+		err := layer.CheckTrustPolicy(cfg, nil, tc.def)
+		if (tc.want == "" && err != nil) || (tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want))) {
+			t.Errorf("mode %q default %q reqs %t: err = %v, want %q", tc.mode, tc.def, tc.reqs, err, tc.want)
+		}
+	}
+}
+
+// Spec: §4.7.11 (Layer trust policy) — a signer that names public-good and
+// one that names no instance compare equal.
+func TestTrustPolicyEqual_InstanceNormalized(t *testing.T) {
+	t.Parallel()
+	a := policy("require", store.TrustSigner{Issuer: ghIssuer, Identity: "alice@acme.com"})
+	b := policy("require", store.TrustSigner{Issuer: ghIssuer, Identity: "alice@acme.com", Instance: "public-good"})
+	c := policy("require", store.TrustSigner{Issuer: ghIssuer, Identity: "alice@acme.com", Instance: "github"})
+	if !layer.TrustPolicyEqual(a, b) || layer.TrustPolicyEqual(a, c) {
+		t.Errorf("equal(empty, public-good) = %t, equal(empty, github) = %t", layer.TrustPolicyEqual(a, b), layer.TrustPolicyEqual(a, c))
+	}
+}
+
+// Spec: §7.3.1 (Layer trust policy) — a name reads as a trust member when,
+// folded to lower case with - read as _, it begins with "trust".
+func TestIsTrustLikeName(t *testing.T) {
+	t.Parallel()
+	for name, want := range map[string]bool{"trust_mod": true, "trust-mode": true, "Trust_Mode": true, "TRUSTED": true, "ref": false, "entrust": false} {
+		if got := layer.IsTrustLikeName(name); got != want {
+			t.Errorf("IsTrustLikeName(%q) = %t, want %t", name, got, want)
 		}
 	}
 }
