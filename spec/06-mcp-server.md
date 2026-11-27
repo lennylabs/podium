@@ -557,7 +557,7 @@ Author attestation verification (§4.7.11) adds `ingest.*` codes, which the laye
 - `ingest.attestation_missing`: no accepted bundle lists the layer subject (`no_bundle`, `no_accepted_bundle`, `no_layer_subject`), the accepted bundles of the covering requirement list no subject for an artifact of the layer (`incomplete`), or no accepted bundle of a requirement lists an artifact (`details.scope: "artifact"`).
 - `ingest.attestation_mismatch`: no accepted bundle carries the snapshot's layer digest (`layer_digest`), or an artifact's version or package digest differs from its subject (`version`, `digest`).
 - `ingest.attestation_stale`: the layer subject's attested time is earlier than the attestation mark (`mark`), its attested commit is outside the history of the tracked ref (`not_in_history`), or that commit does not descend from the recorded one (`not_descendant`).
-- `ingest.attestation_invalid`: the attestation directory exceeds the limits (`limits`), or a package ID of the snapshot breaks the subject name rule (`subject_name`).
+- `ingest.attestation_invalid`: the attestation directory exceeds the limits (`limits`), its path or a bundle entry cannot be read (`unreadable`), or a package ID of the snapshot breaks the subject name rule (`subject_name`).
 - `ingest.attestation_policy_invalid`: the layer's resolved trust policy has no requirement (`no_requirements`), names an instance that is not configured (`unknown_instance`), or breaks another policy rule (`policy_rule`).
 - `ingest.attestation_root_stale`: the policy names the `public-good` instance, and that instance's trusted root is past its maximum age. Its envelope carries `retryable: true`, because the condition clears once a refresh of the root succeeds.
 
