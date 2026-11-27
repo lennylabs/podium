@@ -150,7 +150,7 @@ These settings are environment variables only. [Identity providers](../deploymen
 | Variable | Type | Default | Description |
 |:--|:--|:--|:--|
 | `PODIUM_WEB_UI` | boolean | `false` | Mount the web UI at `/app/` and redirect `GET /` to it. Flag `--web-ui`. |
-| `PODIUM_WEB_UI_ALLOW_PUBLIC_BIND` | boolean | `false` | Allow the web UI on a non-loopback bind when an identity provider is configured. Flag `--web-ui-allow-public-bind`. |
+| `PODIUM_WEB_UI_ALLOW_PUBLIC_BIND` | boolean | `false` | Allow the web UI on a non-loopback bind when an identity provider is configured. Under `PODIUM_IDENTITY_PROVIDER=external`, the UI on a non-loopback bind also needs `PODIUM_ALLOW_PUBLIC_BIND`. Flag `--web-ui-allow-public-bind`. |
 | `PODIUM_WEB_UI_AUTH` | boolean | `false` | Sign the browser in through the registry with the OAuth authorization-code flow. Flag `--web-ui-auth`. |
 | `PODIUM_WEB_UI_AUTH_TRANSACTION_TTL` | duration | `10m` | Sign-in window, which is the `Max-Age` of the pre-authorization cookie. Flag `--web-ui-auth-transaction-ttl`. |
 | `PODIUM_WEB_UI_OAUTH_CLIENT_ID`, `PODIUM_WEB_UI_OAUTH_CLIENT_SECRET` | string | (none) | OAuth client identifier and credential the registry presents to the IdP. Required under `PODIUM_WEB_UI_AUTH`. |

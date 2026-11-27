@@ -43,7 +43,7 @@ The registry treats `external` as a configured identity provider in every other 
 
 The registry cannot confirm that the fronting authentication is the only path to it, so it refuses a non-loopback bind at startup with `config.public_bind_refused` unless `--allow-public-bind` (`PODIUM_ALLOW_PUBLIC_BIND`) is set. Set it when the proxy is the only route to the registry's address.
 
-The web UI on a non-loopback bind under `external` needs both `--web-ui-allow-public-bind` and `--allow-public-bind`. The web UI bind rule counts `external` as a configured identity provider, so `--web-ui-allow-public-bind` satisfies it, and the bind refusal above still requires `--allow-public-bind`.
+The web UI on a non-loopback bind under `external` needs both `--web-ui-allow-public-bind` and `--allow-public-bind`. The web UI bind rule counts `external` as a configured identity provider, so `--web-ui-allow-public-bind` satisfies it, and the bind refusal above still requires `--allow-public-bind`. With both flags set, every caller that reaches the UI sees every layer, as through the HTTP API.
 
 ### Public mode
 
@@ -87,7 +87,7 @@ The registry process serves the web UI when it starts with `--web-ui` or `PODIUM
 
 With the browser flow disabled, a browser request whose configured token header carries no `Bearer` credential resolves as anonymous and sees public visibility only. With the flow enabled, such a request resolves as anonymous only when it also presents no valid session cookie. The registry reads the configured token header first in both cases.
 
-The registry refuses to serve the UI on a non-loopback address unless `--web-ui-allow-public-bind` is set and an identity provider is configured. A non-loopback bind under `trusted-headers` is also subject to that provider's [bind restriction](trusted-headers#bind-restriction).
+The registry refuses to serve the UI on a non-loopback address unless `--web-ui-allow-public-bind` is set and an identity provider is configured. Under `external`, the UI also needs `--allow-public-bind`, as [External authentication](#external-authentication) describes. A non-loopback bind under `trusted-headers` is also subject to that provider's [bind restriction](trusted-headers#bind-restriction).
 
 The registry refuses a state-changing request that carries cross-site browser-origin evidence with `403 auth.csrf_invalid`. A gateway that rewrites the `Host` header makes every write from the UI fail that check, as [A gateway that rewrites Host](trusted-headers#a-gateway-that-rewrites-host) describes.
 
