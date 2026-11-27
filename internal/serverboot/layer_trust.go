@@ -109,6 +109,9 @@ var (
 //
 // Spec: §4.7.11 (Policy rules), §7.3.1 (Layer trust policy)
 func declaredTrustPolicy(entry yamlLayerEntry, sourceType, repo string, known layer.TrustInstances) (store.LayerConfig, error) {
+	if entry.trustKeyErr != nil {
+		return store.LayerConfig{}, fmt.Errorf("config.invalid_layer_trust: declared layer %s: %w", entry.ID, entry.trustKeyErr)
+	}
 	reqs, err := declaredTrustRequirements(entry.TrustRequirements)
 	if err != nil {
 		return store.LayerConfig{}, fmt.Errorf("config.invalid_layer_trust: declared layer %s: %w", entry.ID, err)
@@ -120,7 +123,9 @@ func declaredTrustPolicy(entry yamlLayerEntry, sourceType, repo string, known la
 		TrustRequirements: layer.DeriveSourceBinding(sourceType, repo, reqs),
 		TrustLayerRoot:    entry.TrustLayerRoot,
 	}
-	if err := layer.CheckTrustPolicy(cfg, known); err != nil {
+	// The empty default: a declared layer whose empty mode only the default
+	// raises aborts no start; the start log names it (§4.7.11).
+	if err := layer.CheckTrustPolicy(cfg, known, ""); err != nil {
 		return store.LayerConfig{}, fmt.Errorf("config.invalid_layer_trust: declared layer %s: %w", entry.ID, err)
 	}
 	return cfg, nil
@@ -129,7 +134,8 @@ func declaredTrustPolicy(entry yamlLayerEntry, sourceType, repo string, known la
 // declaredTrustRequirements decodes a declared trust_requirements node. A key
 // a requirement or a signer does not define is refused with its line, so a
 // misspelled binding member cannot leave a signer unbound.
-func declaredTrustRequirements(n yaml.Node) ([]store.TrustRequirement, error) {
+func declaredTrustRequirements(node yaml.Node) ([]store.TrustRequirement, error) {
+	n := resolveAlias(&node)
 	if n.Kind == 0 || n.Tag == "!!null" {
 		return nil, nil
 	}
@@ -138,15 +144,17 @@ func declaredTrustRequirements(n yaml.Node) ([]store.TrustRequirement, error) {
 	}
 	for i, req := range n.Content {
 		name := fmt.Sprintf("trust_requirements[%d]", i)
+		req = resolveAlias(req)
 		if err := checkKeys(name, req, requirementKeys); err != nil {
 			return nil, err
 		}
 		for j := 0; j+1 < len(req.Content); j += 2 {
-			if req.Content[j].Value != "signers" || req.Content[j+1].Kind != yaml.SequenceNode {
+			signers := resolveAlias(req.Content[j+1])
+			if req.Content[j].Value != "signers" || signers.Kind != yaml.SequenceNode {
 				continue
 			}
-			for k, s := range req.Content[j+1].Content {
-				if err := checkKeys(fmt.Sprintf("%s.signers[%d]", name, k), s, signerKeys); err != nil {
+			for k, s := range signers.Content {
+				if err := checkKeys(fmt.Sprintf("%s.signers[%d]", name, k), resolveAlias(s), signerKeys); err != nil {
 					return nil, err
 				}
 			}
@@ -165,6 +173,16 @@ func declaredTrustRequirements(n yaml.Node) ([]store.TrustRequirement, error) {
 		out = append(out, req)
 	}
 	return out, nil
+}
+
+// resolveAlias follows a YAML alias to the node it names, so the key check
+// reads a requirement or signer written as *anchor as the decode does. A
+// merge key (<<) stays a key, which checkKeys refuses.
+func resolveAlias(n *yaml.Node) *yaml.Node {
+	for n != nil && n.Kind == yaml.AliasNode && n.Alias != nil {
+		n = n.Alias
+	}
+	return n
 }
 
 // checkKeys refuses a mapping node that holds a key outside allowed. A node
@@ -266,4 +284,19 @@ func trustLogTenants(ctx context.Context, st store.Store, multiTenant bool, tena
 		ids = append(ids, t.ID)
 	}
 	return ids
+}
+
+// isDeclaredLayer returns the predicate the layer endpoint reads: whether a
+// layer of a tenant is declared in registry.yaml. Declared layers are seeded
+// into the bound tenant alone.
+//
+// Spec: §7.3.1 (Layer trust policy)
+func (c *Config) isDeclaredLayer(tenantID string) func(tenant, id string) bool {
+	ids := map[string]bool{}
+	for _, e := range c.declaredLayers {
+		ids[e.ID] = true
+	}
+	return func(tenant, id string) bool {
+		return tenant == tenantID && ids[id]
+	}
 }

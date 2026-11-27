@@ -1765,6 +1765,11 @@ func run(ctx context.Context, stop func()) error {
 		WithDefaultVisibility(cfg.defaultLayerVisibility).
 		// §4.7.11: a signer names an instance sigstore.instances configures.
 		WithTrustInstances(cfg.trustInstanceKnown).
+		// §4.7.11: the no-requirement rule reads the resolved mode at the
+		// endpoints, and §7.3.1: a declared layer's policy is set in
+		// registry.yaml alone.
+		WithTrustDefault(cfg.layerTrust.mode).
+		WithDeclaredLayers(cfg.isDeclaredLayer(tenantID)).
 		WithMaxUserLayers(cfg.maxUserLayers).
 		WithPublicBaseURL(cfg.publicURL).
 		WithIdentityResolver(layerCallerResolver(layerVerify)).

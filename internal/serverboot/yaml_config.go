@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/identity"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 )
 
@@ -239,6 +242,33 @@ type yamlLayerEntry struct {
 	TrustMode         string    `yaml:"trust_mode,omitempty"`
 	TrustRequirements yaml.Node `yaml:"trust_requirements,omitempty"`
 	TrustLayerRoot    string    `yaml:"trust_layer_root,omitempty"`
+	// trustKeyErr records a misspelled trust key UnmarshalYAML found.
+	trustKeyErr error
+}
+
+// UnmarshalYAML decodes a layer entry and records a key that reads as a
+// trust policy member and is none, such as trust-mode or trust_mod, which
+// declaredTrustPolicy refuses with config.invalid_layer_trust, so a
+// misspelled policy key aborts the start instead of leaving the layer at the
+// default mode. Every other key keeps the decode's reading.
+//
+// Spec: §7.3.1 (Layer trust policy)
+func (e *yamlLayerEntry) UnmarshalYAML(value *yaml.Node) error {
+	type plain yamlLayerEntry
+	if err := value.Decode((*plain)(e)); err != nil {
+		return err
+	}
+	if m := resolveAlias(value); m.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			key := m.Content[i]
+			if layer.IsTrustLikeName(key.Value) && !slices.Contains(layer.TrustMemberNames, key.Value) {
+				e.trustKeyErr = fmt.Errorf("the key %q (line %d) is not a trust policy member; the members are %s",
+					key.Value, key.Line, strings.Join(layer.TrustMemberNames, ", "))
+				break
+			}
+		}
+	}
+	return nil
 }
 
 // yamlLayerSource is the §4.6 `source:` block. Exactly one of git or

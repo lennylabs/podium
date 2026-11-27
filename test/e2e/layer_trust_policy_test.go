@@ -115,6 +115,7 @@ func TestLayerTrust_StartRefusals(t *testing.T) {
 		{"declared require without requirement", "      trust_mode: require\n", "", "declared layer finance: layer trust policy: trust_mode require needs a requirement"},
 		{"declared root with ..", "      trust_layer_root: a/../b\n", "", `declared layer finance: layer trust policy: trust_layer_root "a/../b" holds the segment ".."`},
 		{"declared misspelled signer key", "      trust_requirements:\n        - signers: [{issuer: i, identity: alice@acme.com, instance_name: github}]\n", "", `holds the key "instance_name"`},
+		{"declared misspelled layer key", "      trust-mode: require\n", "", `the key "trust-mode" (line 7) is not a trust policy member`},
 		{"invalid default", "", "enforce", `PODIUM_LAYER_TRUST_DEFAULT must be none, warn, or require, got "enforce"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -140,7 +141,8 @@ func TestLayerTrust_StartRefusals(t *testing.T) {
 // PODIUM_LAYER_TRUST_DEFAULT=require logs a warning for each stored layer
 // with no trust_mode and no requirement, and none for a layer whose
 // declaration carries a policy; the declared policy is seeded and `podium
-// layer show` prints it.
+// layer show` prints it. The declared bare layer starts although the default
+// makes its policy invalid.
 func TestLayerTrust_StartWarningAndDeclaredPolicy(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -161,4 +163,18 @@ func TestLayerTrust_StartWarningAndDeclaredPolicy(t *testing.T) {
 	if obj := shownLayer(t, srv.BaseURL, "finance"); obj["trust_mode"] != "warn" {
 		t.Errorf("declared policy = %v", obj["trust_mode"])
 	}
+
+	// Spec: §7.3.1 (Layer trust policy) — a declared layer's policy is set in
+	// registry.yaml, so a trust flag on update is refused.
+	env := brEnv(srv.BaseURL)
+	res := runPodium(t, "", env, "layer", "update", "--id", "finance", "--trust", "none")
+	cliWantExit(t, res, 1, "trust update of a declared layer")
+	cliContains(t, res.Stderr, "is declared in registry.yaml", "declared refusal")
+	// Spec: §4.7.11 (Policy rules) — with the default at require, a
+	// registration with no policy is refused, and one with a policy is not.
+	res = runPodium(t, "", env, "layer", "register", "--id", "scratch", "--local", root)
+	cliWantExit(t, res, 1, "registration without a policy under the require default")
+	cliContains(t, res.Stderr, "resolves to require through PODIUM_LAYER_TRUST_DEFAULT", "default refusal")
+	res = runPodium(t, "", env, "layer", "register", "--id", "scratch", "--local", root, "--trust", "none")
+	cliWantExit(t, res, 0, "registration with an explicit none")
 }

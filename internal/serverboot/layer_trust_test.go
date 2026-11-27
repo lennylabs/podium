@@ -238,3 +238,57 @@ func TestLayerTrust_SeedPathsFailClosed(t *testing.T) {
 		t.Errorf("tenants after a failed list = %v", got)
 	}
 }
+
+// Spec: §7.3.1 (Layer trust policy) — a declared requirement or signer
+// reached through a YAML alias is checked as one written in place, so a
+// misspelled member behind an alias aborts the start instead of being
+// dropped; a merge key is refused as a key; a misspelled layer-level trust
+// key (trust-mode, Trust_Mode) aborts the start with
+// config.invalid_layer_trust.
+// Matrix: §6.10 (config.invalid_layer_trust)
+func TestValidate_DeclaredTrustAliasesAndLayerKeys(t *testing.T) {
+	layerHead := "  layers:\n    - id: finance\n      source:\n        git:\n          repo: https://github.com/acme/finance.git\n          ref: podium/signed\n"
+	for _, tc := range []struct{ name, body, want string }{
+		{"aliased signer",
+			"registry:\n  x-anchors:\n    signer: &s {issuer: i, identity: alice@acme.com, instance_name: github}\n" + layerHead +
+				"      trust_mode: require\n      trust_requirements:\n        - signers: [*s]\n",
+			`trust_requirements[0].signers[0] holds the key "instance_name"`},
+		{"aliased requirement",
+			"registry:\n  x-anchors:\n    req: &r {signers: [{issuer: i, identity: alice@acme.com}], predicate_typo: https://slsa.dev/provenance/v1}\n" + layerHead +
+				"      trust_mode: require\n      trust_requirements:\n        - *r\n",
+			`trust_requirements[0] holds the key "predicate_typo"`},
+		{"aliased signer list",
+			"registry:\n  x-anchors:\n    signers: &l [{issuer: i, identity: alice@acme.com, source_repositry: x}]\n" + layerHead +
+				"      trust_requirements:\n        - signers: *l\n",
+			`holds the key "source_repositry"`},
+		{"merge key",
+			"registry:\n  x-anchors:\n    base: &b {issuer: i}\n" + layerHead +
+				"      trust_requirements:\n        - signers: [{<<: *b, identity: alice@acme.com}]\n",
+			`holds the key "<<"`},
+		{"dashed layer key", "registry:\n" + layerHead + "      trust-mode: require\n", `the key "trust-mode" (line 8) is not a trust policy member`},
+		{"case layer key", "registry:\n" + layerHead + "      Trust_Mode: require\n", `the key "Trust_Mode"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := loadTrustConfig(t, tc.body, "").validate()
+			if err == nil || !strings.HasPrefix(err.Error(), "config.invalid_layer_trust: declared layer finance: ") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("validate = %v, want config.invalid_layer_trust with %q", err, tc.want)
+			}
+		})
+	}
+	// An alias to a well-formed signer is admitted and seeded.
+	body := "registry:\n  x-anchors:\n    signer: &s {issuer: i, identity: alice@acme.com}\n" + layerHead +
+		"      trust_mode: warn\n      trust_requirements:\n        - signers: [*s]\n"
+	if err := loadTrustConfig(t, body, "").validate(); err != nil {
+		t.Errorf("a well-formed aliased signer: %v", err)
+	}
+}
+
+// Spec: §7.3.1 (Layer trust policy) — the endpoint's declared-layer
+// predicate names the declared IDs of the bound tenant alone.
+func TestIsDeclaredLayer(t *testing.T) {
+	c := &Config{declaredLayers: []yamlLayerEntry{{ID: "finance"}}}
+	is := c.isDeclaredLayer("default")
+	if !is("default", "finance") || is("default", "other") || is("globex", "finance") {
+		t.Error("isDeclaredLayer")
+	}
+}
