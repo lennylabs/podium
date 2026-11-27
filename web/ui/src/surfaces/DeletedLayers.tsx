@@ -18,6 +18,7 @@ import { accentDays, daysLeft, erasesOn, recoveryDays, unregisteredOn } from './
 import { EmptyState, ErrorState, Loading } from '../components/primitives';
 import { layersHref } from '../route';
 import { takeFocus } from '../components/focus';
+import { LayerWarnings } from '../components/LayerWarnings';
 import { SourceCell } from '../components/SourceCell';
 import type { LayerCapabilities } from '../session';
 import { mayTake } from './layerrights';
@@ -75,6 +76,9 @@ export function DeletedLayers({
   // the outcome is held here and stated the way the panel states a committed
   // reorder.
   const [restored, setRestored] = useState('');
+  // The §7.3.1 unapplied-visibility warning the last restore returned. It is
+  // held beside the outcome it qualifies and cleared with it.
+  const [restoreWarnings, setRestoreWarnings] = useState<string[]>([]);
   // The restored row leaves the table with the button that restored it, so
   // the heading is where focus goes. Left where it was, focus falls to the
   // document body and the reader resumes at the top of the page.
@@ -105,8 +109,9 @@ export function DeletedLayers({
   const rows = deleted.value ?? [];
   const restore = (id: string) => {
     restoreLayer(id).then(
-      () => {
+      (result) => {
         setRefusal(null);
+        setRestoreWarnings(result.warnings ?? []);
         deleted.reload();
         onRestored();
         takeFocus(heading.current);
@@ -126,6 +131,7 @@ export function DeletedLayers({
       },
       (err: unknown) => {
         setRestored('');
+        setRestoreWarnings([]);
         setRefusal(err);
       },
     );
@@ -213,6 +219,7 @@ export function DeletedLayers({
       >
         {restored}
       </p>
+      <LayerWarnings warnings={restoreWarnings} />
       {refusal !== null && <RestoreRefusal error={refusal} />}
       {/* What a restore does, stated where the reader decides to press it.
           The precedence it returns to and the ID collision that refuses it

@@ -32,7 +32,7 @@ func unappliedVisibilityRegistry(t *testing.T) *httptest.Server {
 // response body on standard output.
 func TestLayerCommands_WriteVisibilityWarningsToStderr(t *testing.T) {
 	ts := unappliedVisibilityRegistry(t)
-	want := `warning: layer "alice-personal" declares visibility users: [alice@acme.com], but this registry applies no layer visibility because it verifies no caller`
+	want := `warning: layer "alice-personal" declares visibility users: ["alice@acme.com"], but this registry verifies no caller and applies no layer visibility, so every caller sees the layer and can update or unregister it`
 
 	var stdout string
 	stderr := captureStderr(t, func() {

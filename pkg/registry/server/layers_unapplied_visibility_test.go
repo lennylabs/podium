@@ -1,8 +1,10 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,7 +17,7 @@ import (
 
 // unappliedVisibilityMessage is the fragment every §7.3.1
 // unapplied-visibility warning carries.
-const unappliedVisibilityMessage = "this registry applies no layer visibility because it verifies no caller, so every caller sees the layer"
+const unappliedVisibilityMessage = "this registry verifies no caller and applies no layer visibility, so every caller sees the layer and can update or unregister it"
 
 // newUnappliedVisibilityHarness serves a layer endpoint over HTTP the way
 // serverboot wires a registry with no request-time identity verifier: every
@@ -80,22 +82,29 @@ func TestLayerRegister_WarnsWhenVisibilityIsNotApplied(t *testing.T) {
 		{
 			name: "groups",
 			body: map[string]any{"groups": []string{"acme-finance", "acme-finance-leads"}},
-			want: []string{"groups: [acme-finance, acme-finance-leads]", "takes effect once an identity provider is configured"},
+			want: []string{`groups: ["acme-finance", "acme-finance-leads"]`, "takes effect once an identity provider is configured"},
 		},
 		{
 			name: "users",
 			body: map[string]any{"users": []string{"bob@acme.com"}},
-			want: []string{"users: [bob@acme.com]"},
+			want: []string{`users: ["bob@acme.com"]`},
 		},
 		{
 			name: "organization and groups together",
 			body: map[string]any{"organization": true, "groups": []string{"acme-eng"}},
-			want: []string{"organization: true; groups: [acme-eng]"},
+			want: []string{`organization: true; groups: ["acme-eng"]`},
 		},
 		{
 			name: "user-defined with an owner",
 			body: map[string]any{"user_defined": true, "owner": "alice@acme.com"},
-			want: []string{"users: [alice@acme.com]", "takes effect once an identity provider is configured"},
+			want: []string{`users: ["alice@acme.com"]`, "takes effect once an identity provider is configured"},
+		},
+		{
+			// An entry holding a comma and a space is quoted, so it does not
+			// read as the two entries "alice@acme.com" and "bob@acme.com".
+			name: "an entry holding a comma",
+			body: map[string]any{"users": []string{"alice@acme.com, bob@acme.com"}},
+			want: []string{`users: ["alice@acme.com, bob@acme.com"]`},
 		},
 		{
 			name:       "the private default",
@@ -187,7 +196,7 @@ func TestLayerUpdate_WarnsWhenVisibilityIsNotApplied(t *testing.T) {
 		t.Fatalf("update status = %d; body=%s", resp.StatusCode, out)
 	}
 	warnings, ok := layerWarnings(t, out)
-	if !ok || len(warnings) != 1 || !strings.Contains(warnings[0], "groups: [acme-eng]") {
+	if !ok || len(warnings) != 1 || !strings.Contains(warnings[0], `groups: ["acme-eng"]`) {
 		t.Errorf("narrowing update warnings = %v (present %v), want the groups warning", warnings, ok)
 	}
 
@@ -233,7 +242,7 @@ func TestLayerRestore_WarnsWhenVisibilityIsNotApplied(t *testing.T) {
 		t.Fatalf("restore status = %d; body=%s", resp.StatusCode, out)
 	}
 	warnings, ok := layerWarnings(t, out)
-	if !ok || len(warnings) != 1 || !strings.Contains(warnings[0], `layer "alice-personal" declares visibility users: [alice@acme.com]`) {
+	if !ok || len(warnings) != 1 || !strings.Contains(warnings[0], `layer "alice-personal" declares visibility users: ["alice@acme.com"]`) {
 		t.Errorf("restore warnings = %v (present %v), want the users warning; body=%s", warnings, ok, out)
 	}
 	var restored struct {
@@ -297,5 +306,61 @@ func TestLayerWrites_NoWarningWithAVerifier(t *testing.T) {
 	}
 	if warnings, ok := layerWarnings(t, out); ok {
 		t.Errorf("restore warnings = %v, want the member omitted", warnings)
+	}
+}
+
+// Spec: §7.3.1 (Unapplied-visibility warning) — a public-mode registry refuses
+// an identity provider and admits a write only with the operator token, so its
+// warning names public mode, says the declaration takes effect once public
+// mode is turned off and a provider is configured, and does not say every
+// caller can change the layer.
+func TestLayerRegister_PublicModeWarning(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	const token = "operator-token-0123456789-abcdefghij"
+	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
+		WithPublicMode(token).
+		WithUnappliedVisibility()
+	ts := httptest.NewServer(endpoint.Handler())
+	t.Cleanup(ts.Close)
+
+	register := func(id string, extra map[string]any) []string {
+		t.Helper()
+		body := map[string]any{"id": id, "source_type": "local", "local_path": "/tmp/" + id}
+		for k, v := range extra {
+			body[k] = v
+		}
+		b, _ := json.Marshal(body)
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/layers", bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Podium-Operator-Token", token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("POST /v1/layers: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		out, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("register %s status = %d; body=%s", id, resp.StatusCode, out)
+		}
+		warnings, ok := layerWarnings(t, out)
+		if !ok || len(warnings) != 1 {
+			t.Fatalf("register %s warnings = %v (present %v), want one", id, warnings, ok)
+		}
+		return warnings
+	}
+
+	got := register("team", map[string]any{"groups": []string{"acme-eng"}})[0]
+	want := `layer "team" declares visibility groups: ["acme-eng"], but this registry runs in public mode and applies no layer visibility, so every caller sees the layer; the declaration takes effect once public mode is turned off and an identity provider is configured`
+	if got != want {
+		t.Errorf("warning = %q, want %q", got, want)
+	}
+	got = register("sealed", nil)[0]
+	want = `layer "sealed" is private, but this registry runs in public mode and applies no layer visibility, so every caller sees the layer; the private declaration applies once public mode is turned off and an identity provider is added`
+	if got != want {
+		t.Errorf("private warning = %q, want %q", got, want)
 	}
 }

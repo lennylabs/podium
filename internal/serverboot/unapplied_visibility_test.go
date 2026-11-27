@@ -55,9 +55,10 @@ func TestAppliesNoVisibility(t *testing.T) {
 }
 
 // Spec: §13.10 (Startup warning for unapplied visibility) — one line names
-// how many stored layers set no public grant and lists their IDs; a public
-// layer is not listed, and a store whose layers are all public logs nothing.
-func TestLogUnappliedVisibility_SingleTenant(t *testing.T) {
+// how many of the bound tenant's layers set no public grant and lists their
+// IDs; a public layer is not listed, and a tenant whose layers are all public
+// logs nothing.
+func TestLogUnappliedVisibility_ListsRestrictedLayers(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
 	seedTenantLayers(t, st, store.Tenant{ID: "t1", Name: "default"},
@@ -67,51 +68,65 @@ func TestLogUnappliedVisibility_SingleTenant(t *testing.T) {
 		store.LayerConfig{ID: "sealed"},
 	)
 	var lines []string
-	logUnappliedVisibility(context.Background(), st, recordLines(&lines))
+	logUnappliedVisibility(context.Background(), st, "t1", false, recordLines(&lines))
 	if len(lines) != 1 {
 		t.Fatalf("logged %d lines, want 1: %q", len(lines), lines)
 	}
 	line := lines[0]
 	for _, want := range []string{
 		"warning: 3 stored layer(s) declare visibility other than public",
-		"applies no layer visibility because it verifies no caller, so every caller sees them",
-		"take effect once an identity provider is configured",
+		"this registry verifies no caller and applies no layer visibility, so every caller sees them",
+		"their declarations take effect once an identity provider is configured: ",
 		"team-finance", "alice-personal", "sealed",
 	} {
 		if !strings.Contains(line, want) {
 			t.Errorf("line %q lacks %q", line, want)
 		}
 	}
-	if strings.Contains(line, "open") || strings.Contains(line, "(tenant") {
-		t.Errorf("line %q lists the public layer or a tenant on a single-tenant store", line)
+	if strings.Contains(line, "open") {
+		t.Errorf("line %q lists the public layer", line)
 	}
 
 	public := store.NewMemory()
 	seedTenantLayers(t, public, store.Tenant{ID: "t1"}, store.LayerConfig{ID: "open", Public: true})
 	lines = nil
-	logUnappliedVisibility(context.Background(), public, recordLines(&lines))
+	logUnappliedVisibility(context.Background(), public, "t1", false, recordLines(&lines))
 	if len(lines) != 0 {
-		t.Errorf("an all-public store logged %q, want nothing", lines)
+		t.Errorf("an all-public tenant logged %q, want nothing", lines)
 	}
 }
 
-// Spec: §13.10 (Startup warning for unapplied visibility) — on a store that
-// holds more than one tenant, each listed ID names its tenant, by name or by
-// ID for a tenant with no name.
-func TestLogUnappliedVisibility_QualifiesTenants(t *testing.T) {
+// Spec: §13.10 (Startup warning for unapplied visibility) — a public-mode
+// registry refuses an identity provider, so its line says the declarations
+// take effect once public mode is turned off and a provider is configured.
+func TestLogUnappliedVisibility_PublicModeWording(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
-	seedTenantLayers(t, st, store.Tenant{ID: "id-acme", Name: "acme"}, store.LayerConfig{ID: "team"})
-	seedTenantLayers(t, st, store.Tenant{ID: "id-globex"}, store.LayerConfig{ID: "team", Organization: true})
+	seedTenantLayers(t, st, store.Tenant{ID: "t1"}, store.LayerConfig{ID: "team", Organization: true})
 	var lines []string
-	logUnappliedVisibility(context.Background(), st, recordLines(&lines))
+	logUnappliedVisibility(context.Background(), st, "t1", true, recordLines(&lines))
+	want := "this registry runs in public mode and applies no layer visibility, so every caller sees them; their declarations take effect once public mode is turned off and an identity provider is configured: team"
+	if len(lines) != 1 || !strings.Contains(lines[0], want) {
+		t.Errorf("logged %q, want one line containing %q", lines, want)
+	}
+}
+
+// Spec: §13.10 (Startup warning for unapplied visibility) — the line reads the
+// tenant the registry binds to alone. A registry that applies no visibility is
+// single-tenant, so a layer of another tenant the store holds is served to no
+// caller and is not listed.
+func TestLogUnappliedVisibility_ListsTheBoundTenantAlone(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	seedTenantLayers(t, st, store.Tenant{ID: "id-acme", Name: "acme"}, store.LayerConfig{ID: "acme-team"})
+	seedTenantLayers(t, st, store.Tenant{ID: "id-globex", Name: "globex"}, store.LayerConfig{ID: "globex-team", Groups: []string{"globex-eng"}})
+	var lines []string
+	logUnappliedVisibility(context.Background(), st, "id-acme", false, recordLines(&lines))
 	if len(lines) != 1 {
 		t.Fatalf("logged %d lines, want 1: %q", len(lines), lines)
 	}
-	for _, want := range []string{"2 stored layer(s)", "team (tenant acme)", "team (tenant id-globex)"} {
-		if !strings.Contains(lines[0], want) {
-			t.Errorf("line %q lacks %q", lines[0], want)
-		}
+	if !strings.Contains(lines[0], "1 stored layer(s)") || !strings.HasSuffix(lines[0], ": acme-team") || strings.Contains(lines[0], "globex") {
+		t.Errorf("line %q, want acme-team alone", lines[0])
 	}
 }
 
@@ -126,7 +141,7 @@ func TestLogUnappliedVisibility_CapsTheList(t *testing.T) {
 	}
 	seedTenantLayers(t, st, store.Tenant{ID: "t1"}, layers...)
 	var lines []string
-	logUnappliedVisibility(context.Background(), st, recordLines(&lines))
+	logUnappliedVisibility(context.Background(), st, "t1", false, recordLines(&lines))
 	if len(lines) != 1 {
 		t.Fatalf("logged %d lines, want 1: %q", len(lines), lines)
 	}
@@ -139,24 +154,14 @@ func TestLogUnappliedVisibility_CapsTheList(t *testing.T) {
 	}
 }
 
-// failingLayerStore fails the store reads the startup warning makes.
+// failingLayerStore fails the layer list the startup warning reads.
 type failingLayerStore struct {
 	store.Store
-	tenantsErr, layersErr error
+	err error
 }
 
-func (f failingLayerStore) ListTenants(ctx context.Context) ([]store.Tenant, error) {
-	if f.tenantsErr != nil {
-		return nil, f.tenantsErr
-	}
-	return f.Store.ListTenants(ctx)
-}
-
-func (f failingLayerStore) ListLayerConfigs(ctx context.Context, tenantID string) ([]store.LayerConfig, error) {
-	if f.layersErr != nil {
-		return nil, f.layersErr
-	}
-	return f.Store.ListLayerConfigs(ctx, tenantID)
+func (f failingLayerStore) ListLayerConfigs(context.Context, string) ([]store.LayerConfig, error) {
+	return nil, f.err
 }
 
 // Spec: §13.10 (Startup warning for unapplied visibility) — the warning
@@ -164,17 +169,10 @@ func (f failingLayerStore) ListLayerConfigs(ctx context.Context, tenantID string
 // the function returns.
 func TestLogUnappliedVisibility_StoreFailureIsLogged(t *testing.T) {
 	t.Parallel()
-	base := store.NewMemory()
-	seedTenantLayers(t, base, store.Tenant{ID: "t1"}, store.LayerConfig{ID: "team"})
-	boom := errors.New("store offline")
-	for _, st := range []failingLayerStore{
-		{Store: base, tenantsErr: boom},
-		{Store: base, layersErr: boom},
-	} {
-		var lines []string
-		logUnappliedVisibility(context.Background(), st, recordLines(&lines))
-		if len(lines) != 1 || !strings.Contains(lines[0], "could not list the stored layers") || !strings.Contains(lines[0], "store offline") {
-			t.Errorf("logged %q, want one line reporting the store failure", lines)
-		}
+	st := failingLayerStore{Store: store.NewMemory(), err: errors.New("store offline")}
+	var lines []string
+	logUnappliedVisibility(context.Background(), st, "t1", false, recordLines(&lines))
+	if len(lines) != 1 || !strings.Contains(lines[0], "could not list the stored layers") || !strings.Contains(lines[0], "store offline") {
+		t.Errorf("logged %q, want one line reporting the store failure", lines)
 	}
 }

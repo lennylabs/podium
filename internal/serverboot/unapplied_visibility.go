@@ -26,13 +26,20 @@ func appliesNoVisibility(publicMode, verifierInstalled bool) bool {
 }
 
 // logUnappliedVisibility logs the §13.10 startup warning that names the
-// stored layers whose declared visibility the registry does not apply. It
-// logs nothing when every stored layer grants public. A store read that fails
-// is logged and the start proceeds, because the warning refuses nothing.
+// layers of tenantID whose declared visibility the registry does not apply.
+// It logs nothing when every such layer grants public. A store read that
+// fails is logged and the start proceeds, because the warning refuses
+// nothing.
+//
+// The read covers the bound tenant alone. A registry that applies no
+// visibility is single-tenant, because a multi-tenant registry without a
+// verifier refuses startup with config.multitenant_no_verifier, so it serves
+// that tenant and no other. Listing another tenant the store holds would name
+// layers no caller of this registry can see.
 //
 // Spec: §13.10 (Startup warning for unapplied visibility)
-func logUnappliedVisibility(ctx context.Context, st store.Store, logf func(string, ...any)) {
-	ids, err := unappliedVisibilityLayers(ctx, st)
+func logUnappliedVisibility(ctx context.Context, st store.Store, tenantID string, publicMode bool, logf func(string, ...any)) {
+	ids, err := unappliedVisibilityLayers(ctx, st, tenantID)
 	if err != nil {
 		logf("warning: could not list the stored layers whose visibility this registry does not apply: %v", err)
 		return
@@ -40,34 +47,27 @@ func logUnappliedVisibility(ctx context.Context, st store.Store, logf func(strin
 	if len(ids) == 0 {
 		return
 	}
-	logf("warning: %d stored layer(s) declare visibility other than public, but this registry applies no layer visibility because it verifies no caller, so every caller sees them; their declarations take effect once an identity provider is configured: %s",
-		len(ids), summarizeIDs(ids, unappliedVisibilityListCap))
+	// A public-mode registry refuses an identity provider
+	// (config.public_mode_with_idp), so its declarations apply only once
+	// public mode is turned off as well.
+	reason, remedy := "verifies no caller", "once an identity provider is configured"
+	if publicMode {
+		reason, remedy = "runs in public mode", "once public mode is turned off and an identity provider is configured"
+	}
+	logf("warning: %d stored layer(s) declare visibility other than public, but this registry %s and applies no layer visibility, so every caller sees them; their declarations take effect %s: %s",
+		len(ids), reason, remedy, summarizeIDs(ids, unappliedVisibilityListCap))
 }
 
-// unappliedVisibilityLayers returns the live layers, across every tenant the
-// store holds, that set no public grant. Each ID is qualified with its
-// tenant's name, or the tenant ID for a tenant with no name, when the store
-// holds more than one tenant, so the operator can tell two tenants' layers of
-// the same ID apart.
-func unappliedVisibilityLayers(ctx context.Context, st store.Store) ([]string, error) {
-	tenants, err := st.ListTenants(ctx)
+// unappliedVisibilityLayers returns the IDs of tenantID's live layers that
+// set no public grant.
+func unappliedVisibilityLayers(ctx context.Context, st store.Store, tenantID string) ([]string, error) {
+	layers, err := st.ListLayerConfigs(ctx, tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("list tenants: %w", err)
+		return nil, fmt.Errorf("list layers of tenant %s: %w", tenantID, err)
 	}
 	var ids []string
-	for _, t := range tenants {
-		layers, err := st.ListLayerConfigs(ctx, t.ID)
-		if err != nil {
-			return nil, fmt.Errorf("list layers of tenant %s: %w", t.ID, err)
-		}
-		for _, l := range layers {
-			if l.Public {
-				continue
-			}
-			if len(tenants) > 1 {
-				ids = append(ids, fmt.Sprintf("%s (tenant %s)", l.ID, tenantLabel(t)))
-				continue
-			}
+	for _, l := range layers {
+		if !l.Public {
 			ids = append(ids, l.ID)
 		}
 	}
@@ -81,13 +81,4 @@ func summarizeIDs(ids []string, limit int) string {
 		return strings.Join(ids, ", ")
 	}
 	return fmt.Sprintf("%s, and %d more", strings.Join(ids[:limit], ", "), len(ids)-limit)
-}
-
-// tenantLabel names a tenant in an operator log line: its human-readable
-// name, or its ID when it has none.
-func tenantLabel(t store.Tenant) string {
-	if t.Name != "" {
-		return t.Name
-	}
-	return t.ID
 }

@@ -13,7 +13,7 @@ import (
 )
 
 // unappliedVisibilityLine is the fragment the §13.10 startup warning carries.
-const unappliedVisibilityLine = "applies no layer visibility because it verifies no caller"
+const unappliedVisibilityLine = "and applies no layer visibility, so every caller sees them"
 
 // writeDeclaredLayers writes a registry.yaml under home that declares a
 // public layer and a layer whose visibility is engVisibility, and returns
@@ -72,7 +72,7 @@ func TestUnappliedVisibility_StartupLogFollowsTheDeclaredLayers(t *testing.T) {
 	if line == "" {
 		t.Fatalf("server log carries no unapplied-visibility warning\nlog:\n%s", srv.log())
 	}
-	for _, want := range []string{"warning: 1 stored layer(s)", "every caller sees them", "once an identity provider is configured", ": eng-layer"} {
+	for _, want := range []string{"warning: 1 stored layer(s)", "this registry verifies no caller", "every caller sees them", "once an identity provider is configured", ": eng-layer"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("warning line %q lacks %q", line, want)
 		}
@@ -90,7 +90,8 @@ func TestUnappliedVisibility_StartupLogFollowsTheDeclaredLayers(t *testing.T) {
 }
 
 // Spec: §13.10 (Startup warning for unapplied visibility) — public mode
-// logs the line in addition to its banner.
+// logs the line in addition to its banner, with the public-mode wording: a
+// provider is refused there, so public mode has to be turned off as well.
 func TestUnappliedVisibility_PublicModeLogsTheList(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -105,8 +106,11 @@ func TestUnappliedVisibility_PublicModeLogsTheList(t *testing.T) {
 	if !strings.Contains(log, "PUBLIC MODE") {
 		t.Errorf("server log lacks the public-mode banner\nlog:\n%s", log)
 	}
-	if line := unappliedVisibilityWarningLine(log); !strings.Contains(line, "eng-layer") {
-		t.Errorf("public-mode warning line = %q, want it to list eng-layer\nlog:\n%s", line, log)
+	line := unappliedVisibilityWarningLine(log)
+	for _, want := range []string{"this registry runs in public mode", "once public mode is turned off and an identity provider is configured", ": eng-layer"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("public-mode warning line = %q, want it to contain %q\nlog:\n%s", line, want, log)
+		}
 	}
 }
 
@@ -147,7 +151,7 @@ func TestUnappliedVisibility_RegisterWarnsOnStderr(t *testing.T) {
 	}
 
 	res := register("--id", "alice-personal", "--local", t.TempDir(), "--user-defined", "--owner", "alice@acme.com")
-	want := `warning: layer "alice-personal" declares visibility users: [alice@acme.com], but this registry applies no layer visibility because it verifies no caller, so every caller sees the layer; the declaration takes effect once an identity provider is configured`
+	want := `warning: layer "alice-personal" declares visibility users: ["alice@acme.com"], but this registry verifies no caller and applies no layer visibility, so every caller sees the layer and can update or unregister it; the declaration takes effect once an identity provider is configured`
 	if !strings.Contains(res.Stderr, want) {
 		t.Errorf("user-defined register stderr = %q, want %q", res.Stderr, want)
 	}

@@ -1670,7 +1670,7 @@ func run(ctx context.Context, stop func()) error {
 	// the declared-layer and --layer-path seed above and once the verifier is
 	// known, so it reports the stored layers under the current configuration.
 	if appliesNoVisibility(cfg.publicMode, verifierInstalled) {
-		logUnappliedVisibility(ctx, st, log.Printf)
+		logUnappliedVisibility(ctx, st, tenantID, cfg.publicMode, log.Printf)
 	}
 
 	srv := server.New(registry, bootOpts...)
