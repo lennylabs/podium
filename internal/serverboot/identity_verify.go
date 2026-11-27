@@ -49,9 +49,10 @@ func injectedTokenVerifier(keys identity.RuntimeKeyVerifierStore, audiences []st
 // verbatim, so the endpoint refuses a credential that failed verification
 // with the §6.10 envelope the server already maps that error to, and it
 // returns the anonymous-public caller with no error when no verifier is
-// wired, which is the no-provider, public-mode, and external deployment. Whether an absent credential is a failure is the provider's
-// own rule and is not decided here: injectedTokenVerifier reports one,
-// oidcJWTVerifier and trustedHeadersVerifier do not.
+// wired, which is the no-provider, public-mode, and external deployment.
+// Whether an absent credential is a failure is the provider's own rule and is
+// not decided here: injectedTokenVerifier reports one, oidcJWTVerifier and
+// trustedHeadersVerifier do not.
 func layerCallerResolver(verify func(*http.Request) (layer.Identity, error)) func(*http.Request) (layer.Identity, error) {
 	return func(r *http.Request) (layer.Identity, error) {
 		if verify == nil {
@@ -133,12 +134,12 @@ func identityVisibilityGuard(identityProvider string, providerSelected, publicMo
 // provider resolves to no registered provider: an empty value, "none",
 // "external", or public mode, which config.public_mode_with_idp already
 // confines to the first two. Any other unregistered value is refused earlier by
-// identityProviderLabelGuard, so it does not reach this guard from validate. A multi-tenant registry selects each
-// request's tenant from the verified identity, so without a verifier it would
-// bind every request to the no-data tenant and route none. A registered
-// provider without a verifier is left to identityVisibilityGuard, which
-// refuses it in either mode, so the predicate matches selectIdentityProvider's
-// nil case and cannot drift from it.
+// identityProviderLabelGuard, so it does not reach this guard from validate.
+// A multi-tenant registry selects each request's tenant from the verified
+// identity, so without a verifier it would bind every request to the no-data
+// tenant and route none. A registered provider without a verifier is left to
+// identityVisibilityGuard, which refuses it in either mode, so the predicate
+// matches selectIdentityProvider's nil case and cannot drift from it.
 //
 // Spec: §6.3.1 / §13.10 / §13.12
 func multiTenantVerifierGuard(multiTenant, publicMode bool, identityProvider string) error {

@@ -30,7 +30,7 @@ The following values select what the registry runs. The defaults are those in `v
 | `config.identityProvider.type` | `oidc-jwt` | The registry's identity provider. `config.identityProvider.issuer`, `audience`, `groupsClaim`, and `idpGroupMapping` configure `oidc-jwt`. An empty type selects no provider, so the registry resolves every caller as anonymous, applies no layer visibility, and admits every caller to every layer write. Such an install fails to start with `config.public_bind_refused`, because the chart renders a `0.0.0.0` bind, unless `config.allowPublicBind` is true. A type of `external` also resolves every caller as anonymous and needs `config.allowPublicBind` for the same reason, as [External authentication](../identity/#external-authentication) describes. Any type the registry does not recognize fails to start with `config.identity_provider_unverified`. |
 | `config.bootstrapAdmins` | Empty | Comma-separated identities granted the admin role in the `default` tenant at each start. |
 | `config.defaultLayerVisibility` | Empty | The visibility of a layer registered without one. Empty keeps the registry's default. |
-| `config.publicMode` and `config.allowPublicBind` | `false` | Public mode, and the non-loopback bind that public mode and an install with no identity provider each require. In public mode, layer writes and erasure need `PODIUM_OPERATOR_TOKEN`, supplied in the secret. [Multi-tenant startup refusals](#multi-tenant-startup-refusals) lists the combinations that fail. |
+| `config.publicMode` and `config.allowPublicBind` | `false` | Public mode, and the non-loopback bind that public mode, an install with no identity provider, and an install with the `external` type each require. In public mode, layer writes and erasure need `PODIUM_OPERATOR_TOKEN`, supplied in the secret. [Multi-tenant startup refusals](#multi-tenant-startup-refusals) lists the combinations that fail. |
 | `config.auditLogPath` | `stdout` | The audit destination list. [Audit destination values](#audit-destination-values) describes it. |
 | `config.migrationObjectReadTimeout` | Empty | The deadline on each object-store read during the stored-row rewrite, as a Go duration. Empty keeps the registry's 30-second default. |
 | `runtimeKeys.enabled` and `runtimeKeys.secretName` | Disabled | Mounts the runtime key set that the `injected-session-token` provider reads, and sets `PODIUM_RUNTIME_KEYS_PATH` to it. |
@@ -145,6 +145,7 @@ On this chart, `config.publicMode` reaches the `config.multitenant_no_verifier` 
 |:--|:--|:--|
 | Empty or `none` | Set | `config.multitenant_no_verifier` |
 | Empty or `none` | Not set | `config.public_bind_refused`, because the chart renders a `0.0.0.0` bind |
-| Any other type, including the default `oidc-jwt` | Either | `config.public_mode_with_idp` |
+| A type the registry recognizes, including the default `oidc-jwt`, or `external` | Either | `config.public_mode_with_idp` |
+| A type the registry does not recognize, such as `oidc-jwy` | Either | `config.identity_provider_unverified` |
 
 Without `config.publicMode`, an install that empties `config.identityProvider.type` and does not set `config.allowPublicBind` fails with `config.public_bind_refused` before the multi-tenant check runs, for the same `0.0.0.0` bind.

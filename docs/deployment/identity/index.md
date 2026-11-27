@@ -43,6 +43,8 @@ The registry treats `external` as a configured identity provider in every other 
 
 The registry cannot confirm that the fronting authentication is the only path to it, so it refuses a non-loopback bind at startup with `config.public_bind_refused` unless `--allow-public-bind` (`PODIUM_ALLOW_PUBLIC_BIND`) is set. Set it when the proxy is the only route to the registry's address.
 
+The web UI on a non-loopback bind under `external` needs both `--web-ui-allow-public-bind` and `--allow-public-bind`. The web UI bind rule counts `external` as a configured identity provider, so `--web-ui-allow-public-bind` satisfies it, and the bind refusal above still requires `--allow-public-bind`.
+
 ### Public mode
 
 Public mode (`--public-mode` or `PODIUM_PUBLIC_MODE`) also admits every caller to every layer. It records `system:public` as the audit caller, rejects the ingest of `medium` and `high` sensitivity artifacts, and binds to the loopback address unless `--allow-public-bind` is set. It admits a layer write or an erasure request only when the request carries the value of `PODIUM_OPERATOR_TOKEN`. Setting it together with an identity provider fails startup with `config.public_mode_with_idp`. [Public mode](../modes/single-node#public-mode) describes it.

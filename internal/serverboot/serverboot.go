@@ -109,10 +109,9 @@ func buildSCIMHandler(store scim.Store) *scim.Handler {
 // gateway kept from it.
 //
 // The default arm denies, so an unset provider, the external value, and any
-// provider added later resolve group
-// membership from the caller's own identity until they are named here. A
-// provider that gains directory-resolved group membership is added in the same
-// change that gives it one.
+// provider added later resolve group membership from the caller's own identity
+// until they are named here. A provider that gains directory-resolved group
+// membership is added in the same change that gives it one.
 //
 // Spec: §6.3.1, §6.3.2, §6.3.3
 func scimResolvesGroups(identityProvider string) bool {
