@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -278,6 +279,8 @@ func layerRegister(args []string) int {
 	forcePush := fs.String("force-push-policy", "", "git force-push handling: tolerant (default) or strict")
 	cred := addRepoCredentialFlags(fs)
 	trust := addTrustFlags(fs, false)
+	preset := fs.String("trust-preset", "", "resolve the trust policy of a GitHub repository: github-actions")
+	testAPI := addGitHubAPITestFlag(fs)
 	var groups, users stringSliceFlag
 	fs.Var(&groups, "group", "OIDC group with visibility (repeatable; requires the administrator role)")
 	fs.Var(&users, "user", "OIDC subject or email with visibility (repeatable; requires the administrator role)")
@@ -309,9 +312,20 @@ func layerRegister(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}
-	// Spec: §7.3.1 (Layer CLI) — the trust flags set the layer's policy.
-	body, err := trust.body(set)
-	if err != nil {
+	// Spec: §7.3.1 (Layer CLI) — the trust flags set the layer's policy, or
+	// the preset resolves it from the repository's record.
+	var body map[string]any
+	if set["trust-preset"] {
+		var code int
+		body, code = resolveTrustPreset(context.Background(),
+			presetRequest{name: *preset, repo: *repo, ref: *ref, trust: trust, set: set},
+			presetEnv{getenv: os.Getenv, apiBase: githubAPIBase("", testAPI), stderr: os.Stderr})
+		if code >= 0 {
+			return code
+		}
+		*ref = body["ref"].(string)
+		delete(body, "ref")
+	} else if body, err = trust.body(set); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}

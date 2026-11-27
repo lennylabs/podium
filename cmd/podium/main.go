@@ -199,6 +199,7 @@ Commands:
   sync save-as        Capture the current target state as a sync.yaml profile.
   lint                Validate manifests in a filesystem-source registry.
   attest              Write the subjects an author attestation of a layer signs.
+  attest init         Write the GitHub Actions workflow that signs this repository's layers.
   attest import       Copy signed bundles into a layer's attestation directory and prune it.
   attest check        Compare a layer's attestation directory with its packages.
   search              Hybrid search over artifacts (registry HTTP API).

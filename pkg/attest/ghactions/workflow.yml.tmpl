@@ -1,0 +1,287 @@
+[[- define "install" ]]
+          set -euo pipefail
+          case "$(uname -m)" in
+            x86_64) arch=amd64 ;;
+            aarch64 | arm64) arch=arm64 ;;
+            *) echo "::error::no podium release for $(uname -m)"; exit 1 ;;
+          esac
+          dir="$RUNNER_TEMP/podium-bin"
+          mkdir -p "$dir"
+          gh release download "$PODIUM_VERSION" --repo lennylabs/podium --pattern "podium-linux-$arch" --dir "$dir"
+          gh attestation verify "$dir/podium-linux-$arch" --repo lennylabs/podium \
+            --cert-identity "https://github.com/lennylabs/podium/.github/workflows/release.yml@refs/tags/$PODIUM_VERSION" \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com \
+            --deny-self-hosted-runners
+          mv "$dir/podium-linux-$arch" "$dir/podium"
+          chmod +x "$dir/podium"
+          echo "$dir" >> "$GITHUB_PATH"
+[[- end -]]
+[[- if eq .Kind "caller" -]]
+# Signs the Podium layers of this repository on each push to [[ .Branch ]] by
+# calling the shared signing workflow of [[ .Shared ]], which publishes the
+# signed state to the [[ .SignedRef ]] branch. A registry tracks that branch.
+# Written by `podium attest init` (podium [[ .Version ]]).
+name: podium-attest
+
+on:
+  push:
+    branches: [[ .BranchList ]]
+    paths-ignore:
+[[- range .PathsIgnore ]]
+      - '[[ . ]]'
+[[- end ]]
+  workflow_dispatch:
+    inputs:
+      recover:
+        description: Rebuild the attestation directories from this run's bundles alone
+        type: boolean
+        default: false
+
+concurrency:
+  group: podium-attest-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  attest:
+    uses: [[ .Shared ]]/[[ .WorkflowPath ]]@[[ .SharedRef ]]
+    with:
+      roots: [[ .Roots ]]
+      recover: ${{ github.event_name == 'workflow_dispatch' && inputs.recover }}
+[[- else -]]
+[[- if eq .Kind "reusable" -]]
+# Shared signing workflow for Podium layers. A layer repository calls it with
+# the workflow that `podium attest init --shared-workflow` writes. It signs
+# the calling commit when that commit is the tip of the calling repository's
+# default branch, and publishes the signed state to the [[ .SignedRef ]] branch
+# of the calling repository. A registry tracks that branch.
+# Written by `podium attest init --reusable` (podium [[ .Version ]]).
+name: podium-attest
+
+on:
+  workflow_call:
+    inputs:
+      roots:
+        description: Layer roots of the calling repository, separated by spaces; / is the top
+        type: string
+        default: /
+      recover:
+        description: Rebuild the attestation directories from this run's bundles alone
+        type: boolean
+        default: false
+[[- else -]]
+# Signs the Podium layers of this repository on each push to [[ .Branch ]] and
+# publishes the signed state to the [[ .SignedRef ]] branch. A registry
+# tracks that branch.
+# Written by `podium attest init` (podium [[ .Version ]]).
+name: podium-attest
+
+on:
+  push:
+    branches: [[ .BranchList ]]
+    paths-ignore:
+[[- range .PathsIgnore ]]
+      - '[[ . ]]'
+[[- end ]]
+  workflow_dispatch:
+    inputs:
+      recover:
+        description: Rebuild the attestation directories from this run's bundles alone
+        type: boolean
+        default: false
+
+concurrency:
+  group: podium-attest-${{ github.ref }}
+  cancel-in-progress: false
+[[- end ]]
+
+permissions: {}
+
+env:
+  PODIUM_VERSION: [[ .Version ]]
+[[- if eq .Kind "reusable" ]]
+  PODIUM_ROOTS: ${{ inputs.roots }}
+  PODIUM_MAIN_BRANCH: ${{ github.event.repository.default_branch }}
+  PODIUM_RECOVER: ${{ inputs.recover }}
+[[- else ]]
+  PODIUM_ROOTS: [[ .Roots ]]
+  PODIUM_MAIN_BRANCH: [[ .Branch ]]
+  PODIUM_RECOVER: ${{ github.event_name == 'workflow_dispatch' && inputs.recover }}
+[[- end ]]
+  PODIUM_SIGNED_REF: [[ .SignedRef ]]
+
+jobs:
+  subjects:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sign: ${{ steps.guard.outputs.sign }}
+      files: ${{ steps.subjects.outputs.files }}
+    steps:
+      - uses: [[ .Checkout ]]
+      - name: Guard
+        id: guard
+        run: |
+          set -euo pipefail
+          stop() {
+            echo "::notice::podium-attest did not sign: $1"
+            echo "podium-attest did not sign: $1" >> "$GITHUB_STEP_SUMMARY"
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          if [ -z "$PODIUM_MAIN_BRANCH" ] || [ "$GITHUB_REF" != "refs/heads/$PODIUM_MAIN_BRANCH" ]; then
+            stop "the run is on $GITHUB_REF, and only the branch ${PODIUM_MAIN_BRANCH:-(unknown)} is signed"
+          fi
+          tip=$(git ls-remote origin "refs/heads/$PODIUM_MAIN_BRANCH" | awk -v ref="refs/heads/$PODIUM_MAIN_BRANCH" '$2 == ref { print $1 }')
+          if [ "$tip" != "$GITHUB_SHA" ]; then
+            stop "commit $GITHUB_SHA is not the tip of $PODIUM_MAIN_BRANCH, which is ${tip:-unknown}; a later run, or a manual run of this workflow on $PODIUM_MAIN_BRANCH, signs the tip"
+          fi
+          echo "sign=true" >> "$GITHUB_OUTPUT"
+      - name: Install podium
+        if: steps.guard.outputs.sign == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |[[ template "install" ]]
+      - name: Write subjects
+        id: subjects
+        if: steps.guard.outputs.sign == 'true'
+        run: |
+          set -euo pipefail
+          read -r -a roots <<< "$PODIUM_ROOTS"
+          if [ "${#roots[@]}" -eq 0 ]; then
+            echo "::error::no layer root is named"
+            exit 1
+          fi
+          files=()
+          i=0
+          for root in "${roots[@]}"; do
+            i=$((i + 1))
+            listed=$(podium attest --commit HEAD --root "$root" --out "$RUNNER_TEMP/podium-subjects/$i")
+            while IFS= read -r path; do
+              files+=("$i/$(basename "$path")")
+            done <<< "$listed"
+          done
+          echo "files=$(printf '%s\n' "${files[@]}" | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
+      - uses: [[ .Upload ]]
+        if: steps.guard.outputs.sign == 'true'
+        with:
+          name: podium-subjects
+          path: ${{ runner.temp }}/podium-subjects/
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  sign:
+    needs: subjects
+    if: needs.subjects.outputs.sign == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: true
+      matrix:
+        file: ${{ fromJSON(needs.subjects.outputs.files) }}
+    steps:
+      - uses: [[ .Download ]]
+        with:
+          name: podium-subjects
+          path: ${{ runner.temp }}/podium-subjects
+      - id: attest
+        uses: [[ .Attest ]]
+        with:
+          subject-checksums: ${{ runner.temp }}/podium-subjects/${{ matrix.file }}
+      - name: Keep the bundle
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          FILE: ${{ matrix.file }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/podium-bundles/$(dirname "$FILE")"
+          cp "$BUNDLE" "$RUNNER_TEMP/podium-bundles/$FILE.jsonl"
+      - uses: [[ .Upload ]]
+        with:
+          name: podium-bundle-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/podium-bundles/
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  publish:
+    needs: [subjects, sign]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: [[ .Checkout ]]
+      - name: Install podium
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |[[ template "install" ]]
+      - uses: [[ .Download ]]
+        with:
+          pattern: podium-bundle-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/podium-bundles
+      - name: Publish
+        run: |
+          set -euo pipefail
+          read -r -a roots <<< "$PODIUM_ROOTS"
+          dirs=()
+          for root in "${roots[@]}"; do
+            r="${root#/}"
+            r="${r%/}"
+            dirs+=("${r:+$r/}.podium/attestations")
+          done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          main=$(git rev-parse HEAD)
+          for attempt in 1 2 3 4 5; do
+            git read-tree "$main"
+            rm -rf -- "${dirs[@]}"
+            prev=""
+            listed=$(git ls-remote origin "refs/heads/$PODIUM_SIGNED_REF")
+            if [ -n "$(printf '%s\n' "$listed" | awk -v ref="refs/heads/$PODIUM_SIGNED_REF" '$2 == ref { print $1 }')" ]; then
+              git fetch --no-tags --depth=1 origin "+refs/heads/$PODIUM_SIGNED_REF:refs/podium/signed-tip"
+              prev=$(git rev-parse refs/podium/signed-tip)
+            fi
+            if [ -n "$prev" ] && [ "$PODIUM_RECOVER" != "true" ]; then
+              for d in "${dirs[@]}"; do
+                if git cat-file -e "$prev:$d" 2> /dev/null; then
+                  git checkout "$prev" -- "$d"
+                fi
+              done
+            fi
+            i=0
+            for root in "${roots[@]}"; do
+              i=$((i + 1))
+              podium attest import --root "$root" --commit "$main" "$RUNNER_TEMP/podium-bundles/$i/"*.jsonl
+            done
+            git add -A -f -- "${dirs[@]}"
+            tree=$(git write-tree)
+            if [ -n "$prev" ]; then
+              commit=$(git commit-tree "$tree" -p "$prev" -p "$main" -m "podium-attest: sign $main")
+            else
+              commit=$(git commit-tree "$tree" -p "$main" -m "podium-attest: sign $main")
+            fi
+            tip=$(git ls-remote origin "refs/heads/$PODIUM_MAIN_BRANCH" | awk -v ref="refs/heads/$PODIUM_MAIN_BRANCH" '$2 == ref { print $1 }')
+            if [ "$tip" != "$main" ]; then
+              echo "::notice::podium-attest did not publish: commit $main is no longer the tip of $PODIUM_MAIN_BRANCH, which is now ${tip:-unknown}; a later run, or a manual run of this workflow on $PODIUM_MAIN_BRANCH, signs the tip"
+              echo "podium-attest did not publish: $main is no longer the tip of $PODIUM_MAIN_BRANCH, which is now ${tip:-unknown}; a later run, or a manual run of this workflow on $PODIUM_MAIN_BRANCH, signs the tip" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if git push origin "$commit:refs/heads/$PODIUM_SIGNED_REF"; then
+              echo "podium-attest signed $main and pushed $commit to $PODIUM_SIGNED_REF" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep $((attempt + RANDOM % (2 * attempt)))
+          done
+          echo "::error::the push to $PODIUM_SIGNED_REF was refused 5 times"
+          exit 1
+[[- end ]]

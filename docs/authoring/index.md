@@ -29,5 +29,6 @@ Each tutorial builds one artifact step by step and runs it in Claude Code.
 | [Rule modes](rule-modes) | The `rule_mode` values (`always`, `glob`, `auto`, and `explicit`) and how each harness honors them. |
 | [Hooks](hooks) | Lifecycle observers that run a shell `hook_action` on a canonical `hook_event`. |
 | [Hints](hints) | The advisory `effort_hint` and `model_class_hint` fields. |
+| [Signing with GitHub Actions](signing-with-github-actions) | The workflow that `podium attest init` writes, which signs a layer on each push, and the registration with `--trust-preset github-actions`. |
 
 To publish artifacts from a Git repository to a registry server, see [Connecting layer sources](../deployment/content/layer-sources#git-repositories).

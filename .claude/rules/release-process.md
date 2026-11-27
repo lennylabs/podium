@@ -14,6 +14,7 @@ Podium follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`MAJO
 
 - `deploy/helm/podium/Chart.yaml`: `version` and `appVersion`, both equal to `buildinfo.Version`. The chart's default image tag is `appVersion`, which the release pushes as a bare `X.Y.Z` tag of `ghcr.io/lennylabs/podium-server`. `TestChart_VersionTracksTheRelease` fails when they disagree. Edit them in the same commit as `buildinfo.go`.
 - `internal/buildinfo/buildinfo.go`: the `Version` constant. Edit it by hand each release. It is the `go build` fallback; the release pipeline overrides it from the tag via `-ldflags`.
+- `pkg/attest/ghactions/workflow.go`: `MinInstallVersion`, the earliest release with attested binaries, which the workflow of `podium attest init` installs at least. It changes only if a release ships without attestations.
 - `README.md` and `docs/about/status.md`: the release series (`X.Y.x`) in the status line. Edit them on a MINOR or MAJOR bump. `TestStatusPages_NameTheCurrentReleaseSeries` fails when a series on either page differs from the series of a release `buildinfo.Version`.
 - `sdks/podium-py/pyproject.toml` and `sdks/podium-ts/package.json`: tag-derived. setuptools-scm derives the Python version from the tag, and the workflow rewrites the npm version from the tag. Neither needs a manual edit per release.
 - The git tag `vX.Y.Z`: authoritative for a release.
@@ -67,9 +68,11 @@ git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-The tag push triggers `.github/workflows/release.yml`. A `validate-tag` job rejects any tag whose commit is not reachable from `main` or a `release/*` branch, so tag from one of those branches. Once the test battery passes, the workflow publishes the cross-compiled binaries to the GitHub Release, the wheel and sdist to PyPI, the npm package, and the container image to ghcr.io.
+The tag push triggers `.github/workflows/release.yml`. A `validate-tag` job rejects any tag whose commit is not reachable from `main` or a `release/*` branch, so tag from one of those branches. Once the test battery passes, the workflow refuses a binary built with the `podiumtest` tag, attests each binary with `actions/attest-build-provenance` (the workflow that `podium attest init` writes verifies the binary it installs against that attestation, with the exact identity of `release.yml` at the tag), and publishes the cross-compiled binaries to the GitHub Release, the wheel and sdist to PyPI, the npm package, and the container image to ghcr.io.
 
 Push the tag after the prep PR merges, against the merged commit on `main`. The prep PR itself carries no tag.
+
+The `v*` tags of lennylabs/podium are protected by a tag ruleset that limits their creation, update, and deletion to the maintainers. The binary attestations name `release.yml@refs/tags/vX.Y.Z` as their identity, so anyone who could push such a tag could obtain an attestation that the workflow of `podium attest init` accepts. Keep the ruleset in place.
 
 ## Patch releases
 
