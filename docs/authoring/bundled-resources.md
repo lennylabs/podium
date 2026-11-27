@@ -306,13 +306,13 @@ These cases sit at the edges of that rule:
 | Case | Result |
 |:--|:--|
 | A dot-prefixed file, such as `.DS_Store` or an editor swap file | Bundled. |
-| A dot-prefixed directory inside the package with no `ARTIFACT.md` of its own | Bundled, together with every file below it outside a nested package. |
+| A dot-prefixed directory inside the package, such as `.claude/` | Bundled, together with every file below it, including an `ARTIFACT.md` at any depth below it. |
 | A directory or a file named exactly `.git` at any depth, such as the repository of a skill directory that is a Git clone, or the `.git` file of a submodule | Left out, together with every file below it. Podium does not read it, and it enters no content hash. |
 | A directory or a file whose name a filesystem resolves to `.git` without being `.git`, such as `.GIT`, `GIT~1`, or `.git.` | Refused. `lint.resource_path_reserved` reports one error for the artifact, and ingest refuses it. Rename or remove the directory before ingest. |
 | A package whose directory, or a directory between it and the layer or overlay root, has a name that a filesystem resolves to `.git` or `.podium`, such as `GIT~1` or `PODIUM~1` | Refused. The walk of the layer or overlay fails, as it does for a manifest at the layer root. |
 | A file named `SKILL.md` in a subfolder, such as `references/SKILL.md` | Bundled as an ordinary resource. It starts no package. |
 | A subdirectory with its own `ARTIFACT.md` | Excluded from the enclosing package and discovered as a separate artifact that owns its files. |
-| A nested package whose own name, or the name of a directory between it and the layer or overlay root, begins with a dot | Excluded from the enclosing package and never discovered. Its files ship nowhere and enter no content hash. |
+| A directory with its own `ARTIFACT.md` below a dot-prefixed directory of the package | Bundled as part of the enclosing package. Discovery does not descend into the dot-prefixed directory, so the `ARTIFACT.md` starts no package and is an ordinary file. |
 | A manifest file anywhere below a dot-prefixed directory under the layer or overlay root | Produces no artifact, because discovery does not descend into that directory. |
 | A layer or overlay root whose own name, or the name of a directory above it, begins with a dot, such as `.podium/registry/` or `.podium/overlay/` | Walked. Discovery always walks the root. |
 | A file above the per-file or per-package cap | Bundled. Lint reports the size, and the thresholds never remove a file. |

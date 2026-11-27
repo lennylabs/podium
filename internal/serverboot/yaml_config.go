@@ -53,8 +53,13 @@ type yamlConfig struct {
 	// duration. Mirrors PODIUM_GIT_FETCH_TIMEOUT; env wins. LoadConfig
 	// resolves and validates it rather than applyYAML, because the default
 	// and the refusal apply when no file is read as well.
-	GitFetchTimeout string       `yaml:"git_fetch_timeout,omitempty"`
-	ReadOnly        yamlReadOnly `yaml:"read_only,omitempty"`
+	GitFetchTimeout string `yaml:"git_fetch_timeout,omitempty"`
+	// GitFetchDepth is the §13.12 starting depth of each call of the Git
+	// source, an integer from 1 to 2147483646. Mirrors PODIUM_GIT_FETCH_DEPTH;
+	// env wins. LoadConfig resolves and validates it, as it does
+	// GitFetchTimeout.
+	GitFetchDepth string       `yaml:"git_fetch_depth,omitempty"`
+	ReadOnly      yamlReadOnly `yaml:"read_only,omitempty"`
 	// Tenant is the §3.5 per-tenant config block (currently the
 	// scope-preview gate). Config-file-only with an env override.
 	Tenant yamlTenant `yaml:"tenant,omitempty"`
