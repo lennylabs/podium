@@ -1020,13 +1020,13 @@ An author attestation is a Sigstore bundle that a layer repository's CI signs wi
 
 **Acceptance conditions.** A verifier accepts a bundle for a signer when all of the following hold:
 
-- The bundle parses as a Sigstore bundle with one of the media types above. Each implementation compares the media type in Podium code before it calls its Sigstore library, because a library also accepts a bundle of version 0.1, which carries an inclusion promise and no inclusion proof.
+- The bundle is a JSON text that satisfies the §4.7.10 JSON rule, its top-level `mediaType` member, read by exact name, is a string that holds one of the media types above, and the bundle parses as a Sigstore bundle. A member spelled another way, such as the protobuf field name `media_type`, is not the media type. Each implementation compares the media type in Podium code before it calls its Sigstore library, because a library also accepts a bundle of version 0.1, which carries an inclusion promise and no inclusion proof.
 - The bundle carries the DSSE envelope and the statement that **Bundle format** describes, and the statement lists no subject under `.podium/signed-at/`.
 - The bundle carries at least one time that the signer's Sigstore instance vouches for: an RFC 3161 timestamp over the signature from a timestamp authority of the instance, or, on an instance with a transparency log, the integrated time of a log entry that the log signed. The integrated time counts only when the entry carries a signed entry timestamp, the bundle's `inclusionPromise`, that verifies under a log key of the instance, because the inclusion proof of a Rekor v1 entry does not cover the integrated time. Each time that verifies is a verified time.
 - The bundle meets the timestamp condition below.
-- The leaf certificate is valid at each verified time, chains to a certificate authority of the instance at each verified time, and lists code signing in its extended key usage.
+- The leaf certificate is valid at each verified time, chains to a certificate authority of the instance at each verified time, and lists code signing in its extended key usage. A leaf that carries no extended key usage, or whose extended key usage lists only the any-purpose usage, lists no code signing, as §4.7.9 states.
 - Where the instance requires a transparency log, the bundle carries a log entry for this signature with an inclusion proof and a checkpoint signed by a log key of the instance.
-- Where the instance has certificate transparency logs, the leaf certificate carries a signed certificate timestamp that verifies under one of them.
+- Where the instance has certificate transparency logs, the leaf certificate carries a signed certificate timestamp that verifies under one of them. An instance has certificate transparency logs when its trusted root lists one, and an instance configuration can require them of a root that lists none, which then accepts no bundle. A configuration cannot remove the requirement from a root that lists them.
 - The signature verifies over the DSSE pre-authentication encoding under the leaf's public key.
 - The certificate's issuer and identity equal the signer's `issuer` and `identity`, and each source binding member and the ref binding member that the signer names equals the matching certificate field, by the identity comparison below. A certificate that lacks a field the signer names is refused.
 
@@ -1067,18 +1067,18 @@ The `identity` is the URI or email entry of the subject alternative name. The so
 
 | Reason | Condition |
 |:--|:--|
-| `parse` | The bundle does not parse as a Sigstore bundle, or its leaf certificate does not parse |
-| `media_type` | The media type names no accepted bundle version |
+| `parse` | The bundle fails the §4.7.10 JSON rule or does not parse as a Sigstore bundle, or its leaf certificate does not parse |
+| `media_type` | The top-level `mediaType` member, read by exact name, is absent, is not a string, or names no accepted bundle version |
 | `payload` | The bundle carries no DSSE envelope of the accepted payload type with exactly one signature, or the payload is no statement of the accepted format |
 | `reserved_subject` | The statement lists a subject under `.podium/signed-at/` |
 | `timestamp_condition` | The bundle breaks the timestamp condition |
 | `time` | The bundle carries no verified time, or the leaf certificate is not valid at a verified time |
-| `chain` | The bundle carries no leaf certificate, or the leaf does not chain to a certificate authority of the instance with code signing in its extended key usage |
+| `chain` | The bundle carries no leaf certificate, the leaf does not chain to a certificate authority of the instance, or its extended key usage does not list code signing |
 | `certificate_timestamp` | The instance has certificate transparency logs and no signed certificate timestamp of the leaf verifies |
 | `log_entry` | The instance requires a transparency log and the bundle carries no log entry with an inclusion proof that verifies |
 | `signature` | The signature does not verify, or the library refuses the bundle after every earlier condition held |
-| `issuer` | The issuer is absent or malformed, or differs from the signer's |
-| `identity` | The subject alternative name is absent, holds another number or kind of names, or differs from the signer's identity |
+| `issuer` | The issuer is absent or malformed, differs from the signer's, or the signer names no issuer |
+| `identity` | The subject alternative name is absent, holds another number or kind of names, differs from the signer's identity, or the signer names no identity |
 | `source_binding` | A source binding member or the source commit is malformed, a member the signer names is absent or differs, or a signer with a URI identity names no source binding |
 | `ref_binding` | The source repository ref is malformed, a ref the signer names is absent or differs, or a bound signer names no ref binding |
 | `predicate_type` | The statement's predicate type differs from the type the requirement names |
