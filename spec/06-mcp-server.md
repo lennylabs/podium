@@ -546,6 +546,8 @@ Two admin endpoints depend on configuration the operator may leave off, and each
 }
 ```
 
+A `config.*` code that refuses a registry start is reported on the process's standard error before the registry serves any request, rather than in a response envelope. `config.identity_provider_removed` is one: a start that installs no request-time identity verifier over a metadata store that records an earlier start with one is refused, and the message names the remedies, restoring the identity provider or acknowledging the removal with `--allow-identity-provider-removal` (`PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL`). §13.10 states the condition.
+
 Codes are namespaced (`auth.*`, `config.*`, `ingest.*`, `materialize.*`, `quota.*`, `mcp.*`, `network.*`, `registry.*`, `domain.*`). Mapped to MCP error payloads per the MCP spec. A meta-tool error envelope is returned from `tools/call` as the `CallToolResult` carrying `isError: true`, with the envelope under `structuredContent` (§6.1.1).
 
 ## 6.11 Host Configuration Recipes
