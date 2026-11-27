@@ -103,6 +103,7 @@ func KnownMatrices() []Matrix {
 					"config.audit_sink_unavailable",
 					"config.audit_anchor_key_unavailable",
 					"config.audit_anchor_key_shared",
+					"config.invalid_layer_trust",
 					"ingest.lint_failed",
 					"ingest.immutable_violation",
 					"ingest.frozen",

@@ -227,6 +227,13 @@ type yamlLayerEntry struct {
 	ID         string              `yaml:"id"`
 	Source     yamlLayerSource     `yaml:"source"`
 	Visibility yamlLayerVisibility `yaml:"visibility,omitempty"`
+	// TrustMode, TrustRequirements, and TrustLayerRoot are the §4.7.11 layer
+	// trust policy, in the form of the §7.3.1 layer object members of those
+	// names. TrustRequirements is a node so declaredTrustRequirements can
+	// refuse an unknown key with its line.
+	TrustMode         string    `yaml:"trust_mode,omitempty"`
+	TrustRequirements yaml.Node `yaml:"trust_requirements,omitempty"`
+	TrustLayerRoot    string    `yaml:"trust_layer_root,omitempty"`
 }
 
 // yamlLayerSource is the §4.6 `source:` block. Exactly one of git or

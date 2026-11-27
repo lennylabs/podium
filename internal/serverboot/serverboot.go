@@ -513,6 +513,12 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			Users:        effVis.Users,
 			CreatedAt:    now,
 		}
+		// Spec: §7.3.1 (Layer trust policy) — a re-seeded --layer-path layer
+		// keeps the trust policy it stores.
+		cfg, err := keepStoredTrust(ctx, st, cfg)
+		if err != nil {
+			return nil, err
+		}
 		if err := st.PutLayerConfig(ctx, cfg); err != nil {
 			return nil, fmt.Errorf("persist layer config %s: %w", l.ID, err)
 		}
@@ -841,6 +847,15 @@ func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg 
 		lc.SourceType = "local"
 		lc.LocalPath = entry.Source.Local.Path
 	}
+	// Spec: §7.3.1 (Layer trust policy) — the declaration is authoritative
+	// for the trust policy, which the start re-seeds with the rest of the
+	// entry. validate already refused a policy that breaks a rule.
+	sourceType, repo := declaredRepo(entry)
+	trust, err := declaredTrustPolicy(entry, sourceType, repo, cfg.trustInstanceKnown)
+	if err != nil {
+		return store.LayerConfig{}, layer.Visibility{}, err
+	}
+	lc.TrustMode, lc.TrustRequirements, lc.TrustLayerRoot = trust.TrustMode, trust.TrustRequirements, trust.TrustLayerRoot
 	return lc, vis, nil
 }
 
@@ -1690,6 +1705,9 @@ func run(ctx context.Context, stop func()) error {
 	if appliesNoVisibility(cfg.publicMode, verifierInstalled) {
 		logUnappliedVisibility(ctx, st, tenantID, cfg.publicMode, log.Printf)
 	}
+	// §4.7.11 (Policy changes): name each stored layer that the trust default
+	// leaves with no requirement, after the declared and --layer-path seed.
+	logUnrequiredTrustLayers(ctx, st, trustLogTenants(ctx, st, cfg.multiTenant, tenantID), cfg.layerTrust.mode, log.Printf)
 
 	// §13.10 Identity provider removed between starts: a start whose
 	// verifier is installed records verified identity, and an acknowledged
@@ -1745,6 +1763,8 @@ func run(ctx context.Context, stop func()) error {
 		// /v1/events streams from.
 		WithEventPublisher(srv.PublishEvent).
 		WithDefaultVisibility(cfg.defaultLayerVisibility).
+		// §4.7.11: a signer names an instance sigstore.instances configures.
+		WithTrustInstances(cfg.trustInstanceKnown).
 		WithMaxUserLayers(cfg.maxUserLayers).
 		WithPublicBaseURL(cfg.publicURL).
 		WithIdentityResolver(layerCallerResolver(layerVerify)).
@@ -2343,6 +2363,9 @@ type Config struct {
 	// snapshot (§7.3.1), from the environment or the registry.yaml
 	// git_fetch_timeout key.
 	gitFetch gitFetchConfig
+	// layerTrust is the §13.12 PODIUM_LAYER_TRUST_DEFAULT, the mode an empty
+	// layer trust_mode resolves to (§4.7.11).
+	layerTrust layerTrustDefault
 	// attestation is the §4.7.11 Sigstore instance configuration: the
 	// sigstore.instances key, PODIUM_ATTESTATION_TRUSTED_ROOT_FILE, and the
 	// refresh settings of the public-good root, with the root files read.
@@ -2551,6 +2574,7 @@ func (c *Config) Settings() []Setting {
 		{"sandbox_profile.host_sandboxes", strings.Join(c.hostSandboxes, ","), envOrSrc("PODIUM_HOST_SANDBOXES", defaultSrc)},
 		{"layers.path", c.layerPath, envOrSrc("PODIUM_LAYER_PATH", yamlSrc)},
 		{gitFetchTimeoutKey, c.gitFetch.display(), c.gitFetch.source},
+		{"layers.trust_default", c.layerTrust.display(), c.layerTrust.source},
 		{"tenant.expose_scope_preview", boolStr(c.exposeScopePreview == nil || *c.exposeScopePreview), envOrSrc("PODIUM_EXPOSE_SCOPE_PREVIEW", yamlSrc)},
 		{"read_only.probe_failures", intStr(c.readOnlyProbeFailures), envOrSrc("PODIUM_READONLY_PROBE_FAILURES", defaultSrc)},
 		{"read_only.probe_interval_seconds", intStr(c.readOnlyProbeInterval), envOrSrc("PODIUM_READONLY_PROBE_INTERVAL", defaultSrc)},
@@ -2737,6 +2761,7 @@ func LoadConfig() *Config {
 		}
 	}
 	c.gitFetch = resolveGitFetchTimeout(os.Getenv(source.FetchTimeoutSetting), fileGitFetchTimeout)
+	c.layerTrust = resolveLayerTrustDefault(os.Getenv(layerTrustDefaultEnv))
 	// §4.7.11: the Sigstore instances and their root files, read now so a
 	// root file that cannot be read refuses the start before any ingest. A
 	// relative trusted_root resolves beside registry.yaml.
@@ -2873,6 +2898,9 @@ func (c *Config) SettingErrors() []error {
 	if c.gitFetch.err != nil {
 		errs = append(errs, c.gitFetch.err)
 	}
+	if c.layerTrust.err != nil {
+		errs = append(errs, c.layerTrust.err)
+	}
 	return append(errs, c.attestation.errs...)
 }
 
@@ -2956,6 +2984,16 @@ func (c *Config) validate() error {
 	// §4.7.11: an unreadable root file, an invalid sigstore.instances entry,
 	// and a refresh setting §13.12 does not admit refuse the start.
 	if err := c.attestation.err(); err != nil {
+		return err
+	}
+	// §4.7.11, §7.3.1: an invalid trust default and a declared layer whose
+	// trust policy breaks a rule refuse the start with
+	// config.invalid_layer_trust. The declared check runs after the instance
+	// check above, because it reads the configured instances.
+	if c.layerTrust.err != nil {
+		return c.layerTrust.err
+	}
+	if err := c.declaredLayerTrustErr(); err != nil {
 		return err
 	}
 	return c.semanticOverlapGuard()
