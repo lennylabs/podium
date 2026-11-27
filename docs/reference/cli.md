@@ -810,7 +810,7 @@ podium impact <artifact-id> [--registry <url>]
 
 The `podium layer` commands register, list, order, update, and remove the layers a registry composes. [Connecting layer sources](../deployment/content/layer-sources) covers Git and local sources as a task, and [Layered composition](../deployment/content/layers) covers precedence and visibility.
 
-Every `podium layer` subcommand takes `--registry <url>`, which defaults to `PODIUM_REGISTRY` and is required. `register`, `reingest`, and `watch` also fall back to `defaults.registry` in the merged `sync.yaml`.
+Every `podium layer` subcommand takes `--registry <url>`, which defaults to `PODIUM_REGISTRY` and is required. `register`, `show`, `reingest`, and `watch` also fall back to `defaults.registry` in the merged `sync.yaml`.
 
 Several layer commands refer to these authorization terms:
 
