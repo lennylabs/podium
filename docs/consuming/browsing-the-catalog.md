@@ -282,12 +282,13 @@ resources arrive inline and which arrive through a URL into object storage.
 
 ### `mcp-server` artifacts
 
-`mcp-server` artifacts are excluded from the MCP server's read-only
-`resources/list` mirror. A harness that consumes Podium through the MCP bridge
-fixes its MCP server list at startup, so a registration discovered mid-session
-would only add planning noise. These artifacts still appear in
-`search_artifacts` results and still load through `load_artifact`. They reach a
-harness's own configuration through `podium sync`.
+The MCP server keeps `mcp-server` artifacts out of its results. A harness that
+consumes Podium through the MCP bridge fixes its MCP server list at startup, so
+a registration discovered mid-session would only add planning noise.
+`search_artifacts`, the `load_domain` notable list, and the read-only
+`resources/list` mirror leave them out, and `load_artifact` refuses one with
+`registry.not_found`. They reach a harness's own configuration through
+`podium sync`, and the SDKs return them.
 
 ---
 

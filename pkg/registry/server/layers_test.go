@@ -515,8 +515,8 @@ func TestLayerEndpoint_ListArmsByCallerRole(t *testing.T) {
 			wantBody: `{"layers":[]}`,
 		},
 		{
-			// A deployment naming a free-form PODIUM_IDENTITY_PROVIDER label
-			// installs no request-time verifier, so its caller resolves the
+			// A deployment setting PODIUM_IDENTITY_PROVIDER=external installs
+			// no request-time verifier, so its caller resolves the
 			// anonymous-public identity that layer.VisibleWith admits
 			// everywhere, and its admin callback refuses. The authentication
 			// guard is what keeps that caller off the tenant's list.

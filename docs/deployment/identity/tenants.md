@@ -30,7 +30,7 @@ On the clustered Postgres backend each org has its own schema. [Multi-tenancy an
 
 A multi-tenant registry selects each request's tenant from the verified identity, so it requires `oidc-jwt`, `trusted-headers`, or `injected-session-token`.
 
-- A registry started with `PODIUM_MULTI_TENANT=true` and no identity provider, an unrecognized provider value, or public mode fails to start with `config.multitenant_no_verifier`.
+- A registry started with `PODIUM_MULTI_TENANT=true` and no identity provider, `external`, or public mode fails to start with `config.multitenant_no_verifier`.
 - A multi-tenant `trusted-headers` registry with no `PODIUM_TRUSTED_PROXY_SECRET` fails to start with `config.trusted_headers_multitenant_no_secret`, as [Bind restriction](trusted-headers#bind-restriction) describes.
 
 On the Helm chart, the combination of `config.publicMode`, `config.identityProvider.type`, and `config.allowPublicBind` decides which code a refused start reports, as [Multi-tenant startup refusals](../modes/helm-chart#multi-tenant-startup-refusals) lists.

@@ -262,6 +262,11 @@ func (v *bundleVerification) checkLog() error {
 	if err != nil || len(entries) != 1 || !entries[0].HasInclusionProof() {
 		return refuse(ReasonLogEntry, "the bundle carries no log entry with an inclusion proof", err)
 	}
+	// The library's choice of path does not by itself tie the entry to the
+	// bundle, so the body and checkpoint forms are fixed first.
+	if err := checkLogEntryForm(entries[0], v.root.RekorLogs()); err != nil {
+		return refuse(ReasonLogEntry, "the log entry is in no accepted form", err)
+	}
 	if _, err := verify.VerifyTlogEntry(v.bundle, v.root, 1, true); err != nil {
 		return refuse(ReasonLogEntry, "the log entry does not verify", err)
 	}

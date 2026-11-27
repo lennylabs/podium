@@ -138,6 +138,11 @@ func generateAttestationFile(t *testing.T) attestationFile {
 		return string(h.DSSEBundle(payload, append([]sh.BundleOpt{sh.WithTimestamp(sh.TSAPrimary)}, opts...)...))
 	}
 	leaf := func(opts ...sh.LeafOpt) sh.BundleOpt { return sh.WithLeaf(opts...) }
+	// logged is a transparency-log bundle with an SCT, an RFC 3161
+	// timestamp, and the one log entry opts describe.
+	logged := func(payload []byte, opts ...sh.RekorOpt) string {
+		return string(h.DSSEBundle(payload, sh.WithSCT(), sh.WithTimestamp(sh.TSAPrimary), sh.WithRekorV1Entry(opts...)))
+	}
 	actions := leaf(sh.GitHubActionsLeaf(vecWorkflow, vecSource()))
 	clock := h.Clock().UTC().Format(time.RFC3339)
 	listed := []subjectCheck{{Name: vecArtifact, SHA256: vecDigest, Listed: true}}
@@ -159,6 +164,14 @@ func generateAttestationFile(t *testing.T) attestationFile {
 			Bundle: pg(std, leaf(sh.LeafWithoutEKU())), Signer: emailVecSigner(), Reason: "chain"},
 		{Name: "leaf with only the any-purpose usage on a transparency-log instance", Category: "bundle", Instance: "public-good",
 			Bundle: pg(std, leaf(sh.LeafAnyUsageOnly())), Signer: emailVecSigner(), Reason: "chain"},
+		{Name: "log entry whose kindVersion label differs from its body", Category: "bundle", Instance: "public-good",
+			Bundle: logged(std, sh.WithKindVersionLabel("intoto", "0.0.2")), Signer: emailVecSigner(), Reason: "log_entry"},
+		{Name: "Rekor v2 body for another digest under a Rekor v1 checkpoint", Category: "bundle", Instance: "public-good",
+			Bundle: logged(std, sh.WithRekorV2BodyForOther(), sh.WithV1Checkpoint()), Signer: emailVecSigner(), Reason: "log_entry"},
+		{Name: "Rekor v2 body for the bundle under a Rekor v1 checkpoint", Category: "bundle", Instance: "public-good",
+			Bundle: logged(std, sh.WithRekorV2Body(), sh.WithV1Checkpoint()), Signer: emailVecSigner(), Reason: "log_entry"},
+		{Name: "Rekor v2 entry bound to the bundle", Category: "bundle", Instance: "public-good",
+			Bundle: logged(std, sh.WithRekorV2Body()), Signer: emailVecSigner(), Accepted: true, AttestedTime: clock},
 		{Name: "subject digest in uppercase", Category: "bundle", Instance: "github",
 			Bundle: gh(stmt(sh.Subject{Name: vecArtifact, SHA256: upper})), Signer: emailVecSigner(), Accepted: true,
 			AttestedTime: clock, Subjects: []subjectCheck{{Name: vecArtifact, SHA256: vecDigest}, {Name: vecArtifact, SHA256: upper}}},

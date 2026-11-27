@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { LayerWarnings } from '../components/LayerWarnings';
 import { Banner, CopyField } from '../components/primitives';
 import type { LayerSecretResult } from '../api';
 
@@ -84,6 +85,7 @@ export function SecretReveal({
       <>
         <div className="modal-body">
           <Banner tone="accent">{outcome}</Banner>
+          <LayerWarnings warnings={result.warnings} />
           {children}
         </div>
         <div className="modal-foot">
@@ -98,6 +100,10 @@ export function SecretReveal({
     <>
       <div className="modal-body">
         <Banner tone="accent">{outcome}</Banner>
+        {/* §7.3.1: the warning follows the outcome it qualifies, on both the
+            register and the update path, and sits above the credential so a
+            reader storing the secret has already read it. */}
+        <LayerWarnings warnings={result.warnings} />
         {/* The URL is stored on the layer and the panel serves it again on
             demand, so it sits outside the block below. Inside it, the block's
             dashed edge would state that the URL is unrecoverable too, which is
