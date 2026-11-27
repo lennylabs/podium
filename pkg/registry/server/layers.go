@@ -60,6 +60,12 @@ type LayerEndpoint struct {
 	// whole for every caller rather than following the callback.
 	// WithPublicMode sets it and nothing clears it.
 	publicMode bool
+	// unappliedVisibility marks a registry that applies no layer visibility
+	// because it verifies no caller: public mode, or no request-time
+	// identity verifier (§4.6, No-identity bypass). The write responses then
+	// warn about a layer whose declaration the registry does not apply.
+	// WithUnappliedVisibility sets it and nothing clears it.
+	unappliedVisibility bool
 	// operatorToken is the §13.12 PODIUM_OPERATOR_TOKEN a public-mode write
 	// must carry; WithPublicMode sets it, and empty refuses every write.
 	operatorToken string
@@ -1288,6 +1294,9 @@ type LayerRegisterResponse struct {
 	Layer         LayerObject `json:"layer"`
 	WebhookURL    string      `json:"webhook_url,omitempty"`
 	WebhookSecret string      `json:"webhook_secret,omitempty"`
+	// Warnings carries the §7.3.1 unapplied-visibility warning and is
+	// omitted when there is none.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Handler returns the http.Handler that dispatches to the layer
@@ -1686,7 +1695,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// with the unchanged layer object and leaves the audit stream reporting
 	// only changes that happened.
 	if layerConfigEqual(before, cfg) {
-		writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: wireLayer(cfg)})
+		writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)})
 		return
 	}
 	if err := e.store.PutLayerConfig(r.Context(), cfg); err != nil {
@@ -1696,7 +1705,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// spec §8.1: a config mutation (including a secret rotation) is an
 	// auditable layer.config_changed / layer.user_registered event.
 	e.emitLayerEvent(r, before, cfg, "update")
-	resp := LayerRegisterResponse{Layer: wireLayer(cfg)}
+	resp := LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)}
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
 	if rotated {
@@ -2007,7 +2016,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// layer.config_changed.
 	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "register")
 
-	resp := LayerRegisterResponse{Layer: wireLayer(cfg)}
+	resp := LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)}
 	if cfg.SourceType == "git" {
 		resp.WebhookURL = e.webhookURL(cfg.TenantID, cfg.ID)
 		resp.WebhookSecret = cfg.WebhookSecret
@@ -2118,7 +2127,11 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "restore")
-	writeJSON(w, http.StatusOK, map[string]any{"restored": id})
+	resp := map[string]any{"restored": id}
+	if warnings := e.visibilityWarnings(cfg); len(warnings) > 0 {
+		resp["warnings"] = warnings
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // unregister handles DELETE /v1/layers?id=ID.

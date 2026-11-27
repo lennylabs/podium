@@ -21601,3 +21601,129 @@ describe("usage in the at-scale domain table", () => {
     expect(within(browser).queryByTestId("usage-line")).toBeNull();
   });
 });
+
+// §7.3.1: a registry that verifies no caller applies no layer visibility, and
+// its register, update, and restore responses carry a warning for a layer that
+// is not public. The write succeeded, so the warning is shown beside the
+// outcome rather than as a refusal, and a response without it shows nothing.
+describe("the unapplied-visibility warning", () => {
+  const warning =
+    'layer "alice-personal" declares visibility users: ["alice@acme.com"], but this registry verifies no caller and applies no layer visibility, so every caller sees the layer and can update or unregister it; the declaration takes effect once an identity provider is configured';
+
+  it("shows the warning a registration returns beside its outcome", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ layer_capabilities: { manage_any_layer: true } }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": { body: { layer: userLayer(), warnings: [warning] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await screen.findByText("Layer alice-personal is registered.");
+    const block = screen.getByTestId("layer-warnings");
+    expect(block.textContent).toContain("Visibility is not applied on this registry.");
+    expect(block.textContent).toContain(warning);
+  });
+
+  it("shows nothing for a registration that returns no warning", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ layer_capabilities: { manage_any_layer: true } }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": { body: { layer: userLayer() } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await screen.findByText("Layer alice-personal is registered.");
+    expect(screen.queryByTestId("layer-warnings")).toBeNull();
+  });
+
+  it("shows the warning an update returns beside its outcome and its rotated secret", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+      "PUT /v1/layers/update": {
+        body: {
+          layer: adminLayer(),
+          webhook_url: "https://registry.acme.com/v1/ingest/webhook/company",
+          webhook_secret: "whsec-rotated",
+          warnings: [warning],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions("company");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update company");
+    fireEvent.click(screen.getByLabelText("Rotate the webhook secret"));
+    fireEvent.submit(form);
+    await screen.findByLabelText("Webhook secret");
+    expect(screen.getByText("Layer company is updated.")).toBeTruthy();
+    expect(screen.getByTestId("layer-warnings").textContent).toContain(warning);
+  });
+
+  it("shows the warning a restore returns beside the restore outcome", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
+      "/v1/layers": { body: { layers: [userLayer(), adminLayer()] } },
+      "/v1/layers?deleted=true": {
+        body: {
+          layers: [{ ...userLayer(), deleted_at: new Date().toISOString() }],
+        },
+      },
+      "/v1/layers/restore": { body: { restored: "alice-personal", warnings: [warning] } },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    await screen.findByLabelText("Recently unregistered");
+    expect(screen.queryByTestId("layer-warnings")).toBeNull();
+    // The live region is mounted before the write lands, so the warning is in
+    // the accessibility tree at the moment its text arrives.
+    const region = screen.getByTestId("restore-warning-announcement");
+    expect(region.getAttribute("role")).toBe("status");
+    expect(region.textContent).toBe("");
+    fireEvent.click(await screen.findByRole("button", { name: "Restore alice-personal" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("layer-warnings").textContent).toContain(warning);
+    });
+    expect(screen.getByTestId("restore-warning-announcement").textContent).toBe(warning);
+    // The visible banner carries no role of its own, so the warning is
+    // announced once, through the region that was already mounted.
+    const banner = screen.getByTestId("layer-warnings").firstElementChild;
+    expect(banner?.getAttribute("role")).toBeNull();
+  });
+
+  it("shows the warning an update without a secret rotation returns", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+      "PUT /v1/layers/update": { body: { layer: adminLayer(), warnings: [warning] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions("company");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update company");
+    fireEvent.submit(form);
+    await screen.findByText("Layer company is updated.");
+    // No secret came back, so the outcome renders without the reveal, and the
+    // warning sits beside it in that branch too.
+    expect(screen.queryByLabelText("Webhook secret")).toBeNull();
+    const block = screen.getByTestId("layer-warnings");
+    expect(block.textContent).toContain(warning);
+    expect(block.firstElementChild?.getAttribute("role")).toBe("status");
+  });
+});
