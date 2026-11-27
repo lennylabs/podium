@@ -36,13 +36,13 @@ func TestWriteChecksums_Format(t *testing.T) {
 func TestWriteStatement_Format(t *testing.T) {
 	t.Parallel()
 	var b bytes.Buffer
-	if err := WriteStatement(&b, []Subject{sub(".podium/layer", 'a'), sub("team/a<b&c@1.0.0", 'b')}); err != nil {
+	if err := (Output{Format: FormatStatement}).Write(&b, []Subject{sub(".podium/layer", 'a'), sub("team/a<b&c@1.0.0", 'b')}); err != nil {
 		t.Fatalf("WriteStatement: %v", err)
 	}
 	want := `{"_type":"https://in-toto.io/Statement/v1","subject":[` +
 		`{"name":".podium/layer","digest":{"sha256":"` + hexOf('a') + `"}},` +
 		`{"name":"team/a<b&c@1.0.0","digest":{"sha256":"` + hexOf('b') + `"}}],` +
-		`"predicateType":"https://slsa.dev/provenance/v1","predicate":{}}` + "\n"
+		`"predicateType":"https://lennylabs.github.io/podium/attestation/subjects/v1","predicate":{}}` + "\n"
 	if b.String() != want {
 		t.Errorf("statement =\n%s\nwant\n%s", b.String(), want)
 	}
@@ -73,7 +73,7 @@ func TestWriters_RefuseBadSubjects(t *testing.T) {
 	for _, s := range bad {
 		for _, f := range []Format{FormatChecksums, FormatStatement} {
 			var b bytes.Buffer
-			if err := f.Write(&b, []Subject{sub(".podium/layer", 'a'), s}); err == nil {
+			if err := (Output{Format: f}).Write(&b, []Subject{sub(".podium/layer", 'a'), s}); err == nil {
 				t.Errorf("%s writer accepted %+v", f, s)
 			}
 			if b.Len() != 0 {
@@ -95,7 +95,7 @@ func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("disk ful
 func TestWriters_ReportWriteFailure(t *testing.T) {
 	t.Parallel()
 	for _, f := range []Format{FormatChecksums, FormatStatement} {
-		if err := f.Write(failingWriter{}, []Subject{sub(".podium/layer", 'a')}); err == nil {
+		if err := (Output{Format: f}).Write(failingWriter{}, []Subject{sub(".podium/layer", 'a')}); err == nil {
 			t.Errorf("%s writer ignored a failed write", f)
 		}
 	}
@@ -167,15 +167,68 @@ func TestFormat_NamesAndParse(t *testing.T) {
 	if got := FormatStatement.FileName(12); got != "podium-statement-12.json" {
 		t.Errorf("statement file name = %q", got)
 	}
-	for _, n := range []string{"podium-subjects-1.sha256", "podium-subjects-007.sha256", "podium-statement-3.json"} {
-		if !IsOutputFileName(n) {
-			t.Errorf("IsOutputFileName(%q) = false", n)
+	for n, want := range map[string]Format{"podium-subjects-1.sha256": FormatChecksums, "podium-subjects-007.sha256": FormatChecksums, "podium-statement-3.json": FormatStatement} {
+		if f, ok := OutputFileFormat(n); !ok || f != want {
+			t.Errorf("OutputFileFormat(%q) = %q, %v, want %q", n, f, ok, want)
 		}
 	}
 	for _, n := range []string{"podium-subjects-.sha256", "podium-subjects-1.sha256.bak", "podium-subjects-a.sha256", "subjects-1.sha256", "podium-statement-1.sha256", "podium-subjects-1.json", "notes.md"} {
-		if IsOutputFileName(n) {
-			t.Errorf("IsOutputFileName(%q) = true", n)
+		if _, ok := OutputFileFormat(n); ok {
+			t.Errorf("OutputFileFormat(%q) matched", n)
 		}
+	}
+}
+
+// Spec: §7.3.5 — the first subject of a file each format writes is read
+// back, and a file that does not read as one gives none.
+func TestFirstSubjectName(t *testing.T) {
+	t.Parallel()
+	subjects := []Subject{sub(".podium/layer/a", '1'), sub("team/x@1.0.0", '2')}
+	for _, f := range []Format{FormatChecksums, FormatStatement} {
+		var b bytes.Buffer
+		if err := (Output{Format: f}).Write(&b, subjects); err != nil {
+			t.Fatal(err)
+		}
+		if name, ok := FirstSubjectName(f, b.Bytes()); !ok || name != ".podium/layer/a" {
+			t.Errorf("%s: FirstSubjectName = %q, %v", f, name, ok)
+		}
+	}
+	for f, b := range map[Format]string{
+		FormatChecksums: "stale\n",
+		FormatStatement: `{"subject":[]}`,
+	} {
+		if name, ok := FirstSubjectName(f, []byte(b)); ok {
+			t.Errorf("%s: FirstSubjectName(%q) = %q, want none", f, b, name)
+		}
+	}
+	if _, ok := FirstSubjectName(FormatStatement, []byte("not json")); ok {
+		t.Error("a statement file that is not JSON gave a subject")
+	}
+}
+
+// Spec: §7.3.5 — the statement format writes the default Podium predicate
+// type or the one given, which must be an absolute URI with no white space or
+// control character; a refused type writes nothing.
+func TestOutput_PredicateType(t *testing.T) {
+	t.Parallel()
+	subjects := []Subject{sub(".podium/layer", '1')}
+	for _, pt := range []string{"https://slsa.dev/provenance/v1", "urn:example:subjects"} {
+		var b bytes.Buffer
+		if err := (Output{Format: FormatStatement, PredicateType: pt}).Write(&b, subjects); err != nil {
+			t.Fatalf("predicate type %q: %v", pt, err)
+		}
+		if !strings.Contains(b.String(), `"predicateType":"`+pt+`","predicate":{}}`) {
+			t.Errorf("statement = %s, want predicateType %q and an empty predicate", b.String(), pt)
+		}
+	}
+	for _, pt := range []string{"subjects/v1", "https:", "https://x/a b", "https://x/\nb", "://x", "%zz"} {
+		var b bytes.Buffer
+		if err := (Output{Format: FormatStatement, PredicateType: pt}).Write(&b, subjects); !errors.Is(err, ErrPredicateType) || b.Len() != 0 {
+			t.Errorf("predicate type %q = %v, wrote %q, want ErrPredicateType and nothing", pt, err, b.String())
+		}
+	}
+	if err := CheckPredicateType(DefaultPredicateType); err != nil {
+		t.Errorf("the default predicate type is refused: %v", err)
 	}
 }
 

@@ -77,6 +77,9 @@ func TestAttest_UsageErrors(t *testing.T) {
 		{"--root", "skills/../x"},
 		{"--root", "a//b"},
 		{"--root", "a b"},
+		{"--predicate-type", "https://acme.com/subjects/v1"},
+		{"--format", "statement", "--predicate-type", "subjects/v1"},
+		{"--format", "statement", "--predicate-type", "https://acme.com/a b"},
 		{"--bogus"},
 	} {
 		code, _, stderr := runAttestT(t, append(args, "--out", out)...)
@@ -104,9 +107,15 @@ func TestAttest_WritesChecksums(t *testing.T) {
 		"skills/team/DOMAIN.md":     "---\ndescription: Team.\n---\n",
 	})
 	out := filepath.Join(t.TempDir(), "out")
+	hexA := strings.Repeat("a", 64)
 	writeAttestLayer(t, out, map[string]string{
+		// An earlier run for this layer, in each format: removed.
+		"podium-subjects-1.sha256": hexA + "  .podium/layer/skills\n",
+		"podium-statement-2.json":  `{"subject":[{"name":".podium/layer/skills","digest":{"sha256":"` + hexA + `"}}]}` + "\n",
+		// Another layer's file and one that names no subject: kept, and the
+		// new file takes no number they hold.
+		"podium-subjects-2.sha256": hexA + "  .podium/layer/other\n",
 		"podium-subjects-7.sha256": "stale\n",
-		"podium-statement-2.json":  "stale\n",
 		"notes.md":                 "keep\n",
 	})
 	code, stdout, stderr := runAttestT(t, dir, "--root", "/skills/", "--out", out)
@@ -134,8 +143,37 @@ func TestAttest_WritesChecksums(t *testing.T) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	if strings.Join(names, ",") != "notes.md,podium-subjects-1.sha256" {
-		t.Errorf("out holds %v, want notes.md and this run's file", names)
+	if strings.Join(names, ",") != "notes.md,podium-subjects-1.sha256,podium-subjects-2.sha256,podium-subjects-7.sha256" {
+		t.Errorf("out holds %v, want notes.md, this run's file, and the files of no or another layer", names)
+	}
+}
+
+// Spec: §7.3.5 — runs for two layer roots that share --out keep each other's
+// files: the second run takes the next free number, and a rerun for the first
+// root replaces its own file alone.
+func TestAttest_LayerRootsShareOut(t *testing.T) {
+	dir := t.TempDir()
+	writeAttestLayer(t, dir, map[string]string{
+		"a/team/x/ARTIFACT.md": attestRuleMD,
+		"b/team/y/ARTIFACT.md": attestRuleMD,
+	})
+	out := t.TempDir()
+	for _, root := range []string{"a", "b", "a"} {
+		if code, _, stderr := runAttestT(t, dir, "--root", root, "--out", out); code != 0 {
+			t.Fatalf("--root %s = %d, stderr %s", root, code, stderr)
+		}
+	}
+	for name, layer := range map[string]string{"podium-subjects-1.sha256": ".podium/layer/a", "podium-subjects-2.sha256": ".podium/layer/b"} {
+		b, err := os.ReadFile(filepath.Join(out, name))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if first, _ := attest.FirstSubjectName(attest.FormatChecksums, b); first != layer {
+			t.Errorf("%s names %q, want %q", name, first, layer)
+		}
+	}
+	if entries, _ := os.ReadDir(out); len(entries) != 2 {
+		t.Errorf("out holds %d files, want one per layer root", len(entries))
 	}
 }
 
@@ -162,9 +200,20 @@ func TestAttest_StatementFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := string(b)
-		if !strings.Contains(s, `"subject":[{"name":".podium/layer",`) || !strings.Contains(s, `{"name":"`+id+`@1.0.0",`) {
-			t.Errorf("statement %d = %s, want the layer subject then %s", i+1, s, id)
+		if !strings.Contains(s, `"subject":[{"name":".podium/layer",`) || !strings.Contains(s, `{"name":"`+id+`@1.0.0",`) ||
+			!strings.Contains(s, `"predicateType":"`+attest.DefaultPredicateType+`","predicate":{}`) {
+			t.Errorf("statement %d = %s, want the layer subject then %s, under the default predicate type", i+1, s, id)
 		}
+	}
+
+	// --predicate-type sets the type deliberately; the predicate stays empty.
+	code, _, stderr = runAttestT(t, dir, "--out", out, "--format", "statement", "--predicate-type", "https://slsa.dev/provenance/v1")
+	if code != 0 {
+		t.Fatalf("--predicate-type = %d, stderr %s", code, stderr)
+	}
+	b, err := os.ReadFile(filepath.Join(out, attest.FormatStatement.FileName(1)))
+	if err != nil || !strings.Contains(string(b), `"predicateType":"https://slsa.dev/provenance/v1","predicate":{}`) {
+		t.Errorf("statement with --predicate-type = %s, %v", b, err)
 	}
 }
 

@@ -259,9 +259,9 @@ func TestCollidingDescriptions_PeerOrderAndCap(t *testing.T) {
 }
 
 // Spec: §4.2, §7.3.1 — AllRules() excludes the catalog advisories and the
-// portable-name warning, and AdvisoryRules() returns them. Registry ingest runs AdvisoryRules() over
-// the ingested layer, and `podium lint` adds them to its pass through
-// IncludeAdvisories.
+// portable-name warning, and AdvisoryRules() returns them. Registry ingest
+// runs AdvisoryRules() over the ingested layer, and `podium lint` adds them
+// to its pass through IncludeAdvisories.
 func TestDescriptionAdvisories_NotInAllRules(t *testing.T) {
 	t.Parallel()
 	advisories := map[string]bool{

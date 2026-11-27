@@ -35,7 +35,9 @@ type attestOptions struct {
 	commit      string
 	out         string
 	maxSubjects int
-	format      attest.Format
+	output      attest.Output
+	// layerName is the layer subject name built from root.
+	layerName string
 }
 
 // runAttest is attestCmd with its streams and context injected. It exits 2 on
@@ -77,6 +79,7 @@ func parseAttestArgs(args []string, stderr io.Writer) (attestOptions, int) {
 	out := flags.String("out", ".", "directory the subject files are written to")
 	maxSubjects := flags.Int("max-subjects", attest.DefaultMaxSubjects, "most subjects in one file, the layer subject included")
 	format := flags.String("format", string(attest.FormatChecksums), "checksums|statement")
+	predicateType := flags.String("predicate-type", "", "predicateType of the statement format (default "+attest.DefaultPredicateType+")")
 	ops, err := parseOperands(flags, args)
 	if err != nil {
 		return attestOptions{}, parseExit(err)
@@ -89,7 +92,7 @@ func parseAttestArgs(args []string, stderr io.Writer) (attestOptions, int) {
 	if len(ops) == 1 {
 		opts.dir = ops[0]
 	}
-	if opts.format, err = attest.ParseFormat(*format); err != nil {
+	if opts.output.Format, err = attest.ParseFormat(*format); err != nil {
 		_, _ = fmt.Fprintf(stderr, "error: --format: %s\n", oneLine(err.Error()))
 		return opts, 2
 	}
@@ -97,11 +100,39 @@ func parseAttestArgs(args []string, stderr io.Writer) (attestOptions, int) {
 		_, _ = fmt.Fprintf(stderr, "error: --max-subjects %d: %v\n", opts.maxSubjects, attest.ErrMaxSubjects)
 		return opts, 2
 	}
-	if opts.root, err = attest.CheckLayerRoot(*root); err != nil {
+	if opts.root, err = attest.CheckLayerRoot(*root); err == nil {
+		opts.layerName, err = attest.LayerSubjectName(opts.root)
+	}
+	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "error: --root: %s\n", oneLine(err.Error()))
 		return opts, 2
 	}
+	if code := parsePredicateType(&opts, *predicateType, stderr); code >= 0 {
+		return opts, code
+	}
 	return opts, -1
+}
+
+// parsePredicateType sets the predicate type of the statement format. It
+// returns -1 when the value is usable, and 2, having written the reason, for a
+// value that is not an absolute URI or one given with the checksums format,
+// whose signing tool chooses the type.
+//
+// Spec: §7.3.5
+func parsePredicateType(opts *attestOptions, value string, stderr io.Writer) int {
+	if value == "" {
+		return -1
+	}
+	if opts.output.Format != attest.FormatStatement {
+		_, _ = fmt.Fprintln(stderr, "error: --predicate-type applies to --format statement; the tool that signs a checksums file chooses the predicate type")
+		return 2
+	}
+	if err := attest.CheckPredicateType(value); err != nil {
+		_, _ = fmt.Fprintf(stderr, "error: --predicate-type: %s\n", oneLine(err.Error()))
+		return 2
+	}
+	opts.output.PredicateType = value
+	return -1
 }
 
 // readAttestLayer walks the layer with the walk the registry applies to its
@@ -164,11 +195,7 @@ func renderAttestFiles(ctx context.Context, opts attestOptions, records []filesy
 	if err != nil {
 		return nil, err
 	}
-	layerName, err := attest.LayerSubjectName(opts.root)
-	if err != nil {
-		return nil, err
-	}
-	layer := attest.Subject{Name: layerName, Digest: attest.LayerDigest(content)}
+	layer := attest.Subject{Name: opts.layerName, Digest: attest.LayerDigest(content)}
 	groups, err := attest.SubjectFiles(layer, content.Subjects, opts.maxSubjects)
 	if err != nil {
 		return nil, err
@@ -176,7 +203,7 @@ func renderAttestFiles(ctx context.Context, opts attestOptions, records []filesy
 	rendered := make([][]byte, 0, len(groups))
 	for _, g := range groups {
 		var b bytes.Buffer
-		if err := opts.format.Write(&b, g); err != nil {
+		if err := opts.output.Write(&b, g); err != nil {
 			return nil, err
 		}
 		rendered = append(rendered, b.Bytes())
@@ -185,33 +212,64 @@ func renderAttestFiles(ctx context.Context, opts attestOptions, records []filesy
 }
 
 // writeAttestFiles creates --out, removes the subject files an earlier run
-// left there, writes each rendered file, and prints each path it wrote.
+// left there for the same layer subject, writes each rendered file under the
+// lowest file number no remaining entry takes, and prints each path it wrote.
 //
 // Spec: §7.3.5
 func writeAttestFiles(opts attestOptions, rendered [][]byte, stdout io.Writer) error {
 	if err := os.MkdirAll(opts.out, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", opts.out, err)
 	}
-	entries, err := os.ReadDir(opts.out)
+	taken, err := removeEarlierAttestFiles(opts.out, opts.layerName)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", opts.out, err)
+		return err
 	}
-	for _, e := range entries {
-		if e.IsDir() || !attest.IsOutputFileName(e.Name()) {
-			continue
+	n := 0
+	for _, b := range rendered {
+		name := ""
+		for name == "" || taken[name] {
+			n++
+			name = opts.output.Format.FileName(n)
 		}
-		if err := os.Remove(filepath.Join(opts.out, e.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("remove an earlier subject file: %w", err)
-		}
-	}
-	for i, b := range rendered {
-		p := filepath.Join(opts.out, opts.format.FileName(i+1))
+		p := filepath.Join(opts.out, name)
 		if err := os.WriteFile(p, b, 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", p, err)
 		}
 		_, _ = fmt.Fprintln(stdout, p)
 	}
 	return nil
+}
+
+// removeEarlierAttestFiles removes each subject file in out whose first
+// subject is layerName, which an earlier run for the same layer wrote, and
+// returns the names of the subject-file entries it leaves. A file for another
+// layer subject, such as the files of another layer root that shares out,
+// stays, and so does an entry it cannot read or attribute, because removing it
+// could drop another run's subjects.
+//
+// Spec: §7.3.5
+func removeEarlierAttestFiles(out, layerName string) (map[string]bool, error) {
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", out, err)
+	}
+	taken := map[string]bool{}
+	for _, e := range entries {
+		f, ok := attest.OutputFileFormat(e.Name())
+		if !ok {
+			continue
+		}
+		p := filepath.Join(out, e.Name())
+		b, readErr := os.ReadFile(p)
+		if name, ok := attest.FirstSubjectName(f, b); readErr != nil || !ok || name != layerName {
+			taken[e.Name()] = true
+			continue
+		}
+		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("remove an earlier subject file: %w", err)
+		}
+	}
+	return taken, nil
 }
 
 // oneLine writes each control character and line or paragraph separator of s
@@ -235,5 +293,5 @@ func oneLine(s string) string {
 // breaksLine reports whether r is a control character or a Unicode line or
 // paragraph separator.
 func breaksLine(r rune) bool {
-	return unicode.IsControl(r) || r == ' ' || r == ' '
+	return unicode.IsControl(r) || r == '\u2028' || r == '\u2029'
 }

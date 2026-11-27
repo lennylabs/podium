@@ -5,19 +5,45 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
-// In-toto statement constants of the §7.3.5 statement format. The predicate
-// type is the one GitHub's attestation action signs, so a requirement that
-// names a predicate type accepts a statement whichever recipe signed it, and
-// the predicate is empty because Podium reads predicateType alone.
+// In-toto statement constants of the §7.3.5 statement format.
+//
+// DefaultPredicateType is the type §7.3.5 defines, whose predicate is the
+// empty object: it states that the signer attests the listed subjects and
+// nothing else. A well-known type such as SLSA provenance would be wrong here,
+// because its schema requires members an empty predicate lacks, so a tool
+// that checks the predicate refuses or misreads the statement. Podium reads
+// predicateType and never predicate, so the type adds nothing to verification.
 const (
-	StatementType          = "https://in-toto.io/Statement/v1"
-	StatementPredicateType = "https://slsa.dev/provenance/v1"
+	StatementType        = "https://in-toto.io/Statement/v1"
+	DefaultPredicateType = "https://lennylabs.github.io/podium/attestation/subjects/v1"
 )
+
+// ErrPredicateType reports a --predicate-type that is not an absolute URI,
+// or that holds white space or a control character.
+var ErrPredicateType = errors.New("attest: the predicate type is not an absolute URI")
+
+// CheckPredicateType returns nil when s is an absolute URI with a scheme that
+// holds no white space and no control character, and an error wrapping
+// ErrPredicateType otherwise.
+//
+// Spec: §7.3.5
+func CheckPredicateType(s string) error {
+	if strings.ContainsFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+		return fmt.Errorf("%w: %q holds white space or a control character", ErrPredicateType, s)
+	}
+	u, err := url.Parse(s)
+	if err != nil || !u.IsAbs() || (u.Host == "" && u.Opaque == "") {
+		return fmt.Errorf("%w: %q", ErrPredicateType, s)
+	}
+	return nil
+}
 
 // DefaultMaxSubjects is the §7.3.5 default bound on the subjects of one
 // file, the layer subject included: the most subjects GitHub's attestation
@@ -68,12 +94,40 @@ func (f Format) FileName(n int) string {
 	return checksumsPrefix + strconv.Itoa(n) + checksumsSuffix
 }
 
-// IsOutputFileName reports whether name is the name of a file that either
-// format writes, so a run removes the files an earlier run left.
+// OutputFileFormat returns the format whose file name name has, and false
+// when name is the name of no file either format writes.
 //
 // Spec: §7.3.5
-func IsOutputFileName(name string) bool {
-	return numbered(name, checksumsPrefix, checksumsSuffix) || numbered(name, statementPrefix, statementSuffix)
+func OutputFileFormat(name string) (Format, bool) {
+	switch {
+	case numbered(name, checksumsPrefix, checksumsSuffix):
+		return FormatChecksums, true
+	case numbered(name, statementPrefix, statementSuffix):
+		return FormatStatement, true
+	}
+	return "", false
+}
+
+// FirstSubjectName returns the name of the first subject of a file of format
+// f, which is the layer subject in every file `podium attest` writes, and
+// false when b does not read as such a file. A run reads it to remove only the
+// files an earlier run wrote for the same layer, so runs for several layer
+// roots can share one output directory.
+//
+// Spec: §7.3.5
+func FirstSubjectName(f Format, b []byte) (string, bool) {
+	if f == FormatStatement {
+		var st struct {
+			Subject []statementSubject `json:"subject"`
+		}
+		if err := json.Unmarshal(b, &st); err != nil || len(st.Subject) == 0 {
+			return "", false
+		}
+		return st.Subject[0].Name, true
+	}
+	line, _, _ := strings.Cut(string(b), "\n")
+	_, name, ok := strings.Cut(line, "  ")
+	return name, ok
 }
 
 // numbered reports whether name is prefix, one or more ASCII digits, and
@@ -90,12 +144,23 @@ func numbered(name, prefix, suffix string) bool {
 	return strings.Trim(mid, "0123456789") == ""
 }
 
-// Write writes subjects in the format to w.
+// Output is the §7.3.5 output of one run: its format and, for the statement
+// format, the predicate type, which defaults to DefaultPredicateType.
+type Output struct {
+	Format        Format
+	PredicateType string
+}
+
+// Write writes subjects to w in o's format.
 //
 // Spec: §7.3.5
-func (f Format) Write(w io.Writer, subjects []Subject) error {
-	if f == FormatStatement {
-		return WriteStatement(w, subjects)
+func (o Output) Write(w io.Writer, subjects []Subject) error {
+	if o.Format == FormatStatement {
+		pt := o.PredicateType
+		if pt == "" {
+			pt = DefaultPredicateType
+		}
+		return WriteStatement(w, pt, subjects)
 	}
 	return WriteChecksums(w, subjects)
 }
@@ -161,13 +226,16 @@ type statementSubject struct {
 }
 
 // WriteStatement writes subjects as one in-toto Statement v1 document with
-// the StatementPredicateType and an empty predicate, followed by a line feed.
-// It refuses the subjects WriteChecksums refuses, so both formats list one
-// set, and writes nothing when it refuses.
+// predicateType and an empty predicate, followed by a line feed. It refuses a
+// predicate type CheckPredicateType refuses and the subjects WriteChecksums
+// refuses, so both formats list one set, and writes nothing when it refuses.
 //
 // Spec: §7.3.5
-func WriteStatement(w io.Writer, subjects []Subject) error {
-	st := statement{Type: StatementType, Subject: make([]statementSubject, 0, len(subjects)), PredicateType: StatementPredicateType}
+func WriteStatement(w io.Writer, predicateType string, subjects []Subject) error {
+	if err := CheckPredicateType(predicateType); err != nil {
+		return err
+	}
+	st := statement{Type: StatementType, Subject: make([]statementSubject, 0, len(subjects)), PredicateType: predicateType}
 	for _, s := range subjects {
 		hexDigest, err := checkSubject(s)
 		if err != nil {
