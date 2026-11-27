@@ -265,24 +265,41 @@ func TestTUFRoot_RefreshDeadline(t *testing.T) {
 	}
 }
 
-// schedule drives Run through an injected After that reports each delay.
+// schedule drives Run through an injected After that reports each delay
+// and then holds Run until the test releases it. Between reading a delay
+// and the next read, Run is held with its previous refresh complete, so a
+// repository mode the test sets then applies to the next refresh.
 type schedule struct {
-	t      *testing.T
-	delays chan time.Duration
-	cancel context.CancelFunc
-	done   chan struct{}
+	t       *testing.T
+	delays  chan time.Duration
+	release chan struct{}
+	quit    chan struct{}
+	cancel  context.CancelFunc
+	done    chan struct{}
+	pending bool
+	once    sync.Once
 }
 
-// newSchedule starts Run over cfg with an After that blocks until the
-// test reads the delay, and a fixed jitter value.
+// newSchedule starts Run over cfg with the held After and a fixed jitter.
 func newSchedule(t *testing.T, cfg *sign.TUFRootConfig, f *tufFixture, jitter float64) *schedule {
 	t.Helper()
-	s := &schedule{t: t, delays: make(chan time.Duration), done: make(chan struct{})}
+	s := &schedule{
+		t: t, delays: make(chan time.Duration), release: make(chan struct{}),
+		quit: make(chan struct{}), done: make(chan struct{}),
+	}
 	cfg.Jitter = func() float64 { return jitter }
 	cfg.After = func(d time.Duration) <-chan time.Time {
-		s.delays <- d
 		c := make(chan time.Time, 1)
 		c <- time.Time{}
+		select {
+		case s.delays <- d:
+		case <-s.quit:
+			return c
+		}
+		select {
+		case <-s.release:
+		case <-s.quit:
+		}
 		return c
 	}
 	src := f.source(t, *cfg)
@@ -296,30 +313,45 @@ func newSchedule(t *testing.T, cfg *sign.TUFRootConfig, f *tufFixture, jitter fl
 	return s
 }
 
-// want reads the next delay Run asks for.
-func (s *schedule) want(d time.Duration) {
+// next releases the delay read before, if any, and reads the next one.
+func (s *schedule) next() time.Duration {
 	s.t.Helper()
+	if s.pending {
+		s.release <- struct{}{}
+	}
 	select {
 	case got := <-s.delays:
-		if got != d {
-			s.t.Fatalf("delay = %v, want %v", got, d)
-		}
+		s.pending = true
+		return got
 	case <-time.After(30 * time.Second):
-		s.t.Fatalf("Run asked for no delay, want %v", d)
+		s.t.Fatal("Run asked for no further delay")
+		return 0
 	}
 }
 
-// stop cancels Run and waits for it to return, reading any delay it asks
-// for meanwhile.
-func (s *schedule) stop() {
-	s.cancel()
-	for {
-		select {
-		case <-s.done:
-			return
-		case <-s.delays:
-		}
+// want reads the next delay Run asks for and checks it.
+func (s *schedule) want(d time.Duration) {
+	s.t.Helper()
+	if got := s.next(); got != d {
+		s.t.Fatalf("delay = %v, want %v", got, d)
 	}
+}
+
+// wantNear reads the next delay and checks it within a millisecond.
+func (s *schedule) wantNear(d time.Duration) {
+	s.t.Helper()
+	if diff := s.next() - d; diff < -time.Millisecond || diff > time.Millisecond {
+		s.t.Fatalf("delay off %v by %v", d, diff)
+	}
+}
+
+// stop cancels Run, unblocks the held After, and waits for Run to return.
+func (s *schedule) stop() {
+	s.once.Do(func() {
+		s.cancel()
+		close(s.quit)
+		<-s.done
+	})
 }
 
 // Spec: §4.7.11 — Run refreshes at once, then after a failure waits 1
@@ -335,14 +367,15 @@ func TestTUFRoot_RetrySchedule(t *testing.T) {
 	f.repo.SetMode(tufharness.Fail)
 	s := newSchedule(t, &cfg, f, 0.5)
 	s.want(0)
+	// Failures 1 to 5: the delay doubles from 1 minute and stops at the
+	// 10-minute interval.
 	for _, d := range []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 10 * time.Minute} {
 		s.want(d)
 	}
 	f.repo.SetMode(tufharness.Serve)
-	s.want(10 * time.Minute) // the refresh before this read failed; the next succeeds
 	s.want(10 * time.Minute) // after the success: the interval, with no factor
 	f.repo.SetMode(tufharness.Fail)
-	s.want(time.Minute)
+	s.want(time.Minute) // the next failure starts again at 1 minute
 	s.stop()
 	if !f.logs.contains("refreshed the public-good trusted root") {
 		t.Errorf("logs = %q, want the successful refresh", f.logs.lines)
@@ -364,15 +397,6 @@ func TestTUFRoot_RetryDelayJitter(t *testing.T) {
 		s.want(0)
 		s.wantNear(tc.want)
 		s.stop()
-	}
-}
-
-// wantNear reads the next delay and checks it within a millisecond.
-func (s *schedule) wantNear(d time.Duration) {
-	s.t.Helper()
-	got := <-s.delays
-	if diff := got - d; diff < -time.Millisecond || diff > time.Millisecond {
-		s.t.Fatalf("delay = %v, want %v", got, d)
 	}
 }
 
