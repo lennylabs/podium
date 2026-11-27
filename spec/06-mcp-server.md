@@ -552,6 +552,25 @@ Two admin endpoints depend on configuration the operator may leave off, and each
 
 A `config.*` code that refuses a registry start is reported on the process's standard error before the registry serves any request, rather than in a response envelope. `config.identity_provider_removed` is one: a start that installs no request-time identity verifier over a metadata store that records an earlier start with one is refused, and the message names the remedies, restoring the identity provider or acknowledging the removal with `--allow-identity-provider-removal` (`PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL`). §13.10 states the condition. `config.invalid_layer_trust` is another: a layer declared in `registry.yaml` whose trust policy breaks a §4.7.11 policy rule, and a `PODIUM_LAYER_TRUST_DEFAULT` other than `none`, `warn`, or `require`, refuse the start, and the message names the layer and the rule or the setting (§4.7.11, §7.3.1, §13.12).
 
+Author attestation verification (§4.7.11) adds `ingest.*` codes, which the layer step, the artifact step, and the policy check of an ingest cycle raise. A cycle under `require`, and a cycle whose trust policy is invalid, is refused with one of them, and `POST /v1/layers/reingest` answers the refusal with `422` and the refusal's `details`. Each also appears as the `attestation_status` of the layer's attestation record (§7.3.1), with its `details` as `attestation_details`.
+
+- `ingest.attestation_missing`: no accepted bundle lists the layer subject (`no_bundle`, `no_accepted_bundle`, `no_layer_subject`), the accepted bundles of the covering requirement list no subject for an artifact of the layer (`incomplete`), or no accepted bundle of a requirement lists an artifact (`details.scope: "artifact"`).
+- `ingest.attestation_mismatch`: no accepted bundle carries the snapshot's layer digest (`layer_digest`), or an artifact's version or package digest differs from its subject (`version`, `digest`).
+- `ingest.attestation_stale`: the layer subject's attested time is earlier than the attestation mark (`mark`), its attested commit is outside the history of the tracked ref (`not_in_history`), or that commit does not descend from the recorded one (`not_descendant`).
+- `ingest.attestation_invalid`: the attestation directory exceeds the limits (`limits`), or a package ID of the snapshot breaks the subject name rule (`subject_name`).
+- `ingest.attestation_policy_invalid`: the layer's resolved trust policy has no requirement (`no_requirements`), names an instance that is not configured (`unknown_instance`), or breaks another policy rule (`policy_rule`).
+- `ingest.attestation_root_stale`: the policy names the `public-good` instance, and that instance's trusted root is past its maximum age. Its envelope carries `retryable: true`, because the condition clears once a refresh of the root succeeds.
+
+```json
+{
+  "code": "ingest.attestation_stale",
+  "message": "ingest.attestation_stale: the newest layer subject is older than the layer's attestation mark",
+  "details": { "constraint": "mark", "attested_at": "2026-11-20T09:14:02Z", "attestation_mark": "2026-11-21T08:00:00Z", "digest": "sha256:5d1f..." },
+  "retryable": false,
+  "suggested_action": "Run the signing workflow on the current tip of the main branch; after a rewrite or a change of the layer's source, reset the mark with `podium layer reingest <id> --reset-attestation-mark`."
+}
+```
+
 Codes are namespaced (`auth.*`, `config.*`, `ingest.*`, `materialize.*`, `quota.*`, `mcp.*`, `network.*`, `registry.*`, `domain.*`). Mapped to MCP error payloads per the MCP spec. A meta-tool error envelope is returned from `tools/call` as the `CallToolResult` carrying `isError: true`, with the envelope under `structuredContent` (§6.1.1).
 
 ## 6.11 Host Configuration Recipes
