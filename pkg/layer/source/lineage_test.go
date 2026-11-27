@@ -199,6 +199,22 @@ func TestNewFetchDeadlineError(t *testing.T) {
 	}
 }
 
+// Spec: §9.1 (Lineage query: No state) — a lineage evaluation whose call
+// context already ended stops with the source-unreachable failure of an ended
+// context and decides no answer.
+func TestLineageQuery_EvaluateStopsWhenTheCallEnds(t *testing.T) {
+	t.Parallel()
+	repo, head := longHistory(t)
+	q := newLineageQuery("", []string{head.String()})
+	ended, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err := q.evaluate(ended, newWalkCache(repo), head, head)
+	wantCallEnded(t, err, "evaluate under an ended context")
+	if q.answers[0] != "" {
+		t.Errorf("answer = %q, want undecided", q.answers[0])
+	}
+}
+
 // Spec: §7.3.1 (Git fetch: Lineage query) — a commit that is not a full
 // hexadecimal object name is not_in_history at once, and only such a request
 // is decided with no fetch. Upper-case hexadecimal names the same commit.
