@@ -604,7 +604,7 @@ A value of either variable that does not parse, or that is outside its range, re
 
 ### Layers
 
-Layer-list bootstrap and visibility default for the §13.10 standalone deployment, the default layer trust mode (§4.7.11), and the deadline of a `git` source snapshot (§7.3.1).
+Layer-list bootstrap and visibility default for the §13.10 standalone deployment, the default layer trust mode (§4.7.11), and the starting depth and the deadline of each call of a `git` source (§7.3.1).
 
 | Var                              | Description                                                                                                                                                              | Default                                                                |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
