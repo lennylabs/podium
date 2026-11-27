@@ -399,7 +399,8 @@ GET /v1/load_artifact?id={id}&version={v}&session_id={uuid}&as_admin={bool}
   },
   "delivery_hash": "sha256:...",
   "delivery_signature": "...",
-  "artifact_revision": "2025-01-01T00:00:00.000000Z"
+  "artifact_revision": "2025-01-01T00:00:00.000000Z",
+  "package_digest": "sha256:..."
 }
 ```
 
@@ -420,6 +421,7 @@ The response carries these integrity and reference fields:
 - `delivery_hash` is a SHA-256 digest over the record this response delivers. The record covers the identity, version, type, content hash, sensitivity, ingest time, served `ARTIFACT.md` document, manifest body, `SKILL.md`, and each bundled resource's path and content hash. It is present on every response, for every artifact. The record is framed under the tag `podium/delivery-record/2`, so every verifying consumer and the registry must run matching releases, or every load fails with `materialize.content_hash_mismatch`.
 - `delivery_signature` is the registry's signature over `delivery_hash`, minted per response with the registry-managed key. It is absent when the registry runs without a signing key. It is a registry-managed envelope whatever key model signed the artifact at ingest, so a consumer verifies it with the registry-managed verifier under its verification key set.
 - `artifact_revision` is the time the registry stored the served version, an RFC 3339 UTC timestamp with six fractional digits, such as `2025-01-01T00:00:00.000000Z`. `delivery_hash` covers it. It is present on every response and on every `ok` batch item, and it does not enter the entity tag.
+- `package_digest` is the package digest that the registry stored for the served version, written `sha256:` followed by 64 lowercase hexadecimal digits. It covers the path and SHA-256 digest of every file of the package and the `type`, `sensitivity`, `deprecated`, and `replaced_by` values that the package's documents declare. Ingest stores it, and a registry start fills it once for each version stored before the registry computed it. It is absent for a version the registry holds no digest for, such as one a 0.7.0 process stored after that fill. `delivery_hash` does not cover it, and no consumer check reads it. A batch item does not carry it.
 
 **Deprecation members.** The response carries the artifact's lifecycle signal in three members that `delivery_hash` does not cover:
 

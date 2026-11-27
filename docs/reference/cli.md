@@ -711,6 +711,8 @@ podium artifact show <id> [--version <semver>]
 
 When the registry returns a deprecation warning, the command prints it on standard error as `warning: <text>`, in both output modes. Under `--json`, the object also carries the `deprecated`, `replaced_by`, and `deprecation_warning` members, each omitted when the registry omits it. [Deprecation members](http-api#load_artifact) describes them.
 
+When the response carries the registry's `package_digest` member, the command prints it on standard error as `package_digest: <digest>`, in both output modes, and the `--json` object carries it as `package_digest`. Standard output keeps the manifest document alone. The registry asserts the value, and the command checks nothing about it.
+
 To write an artifact's files to disk, use `podium sync --include <id>`.
 
 ### `podium artifact scaffold`
