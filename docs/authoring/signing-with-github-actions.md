@@ -39,6 +39,7 @@ podium layer register --id finance --repo https://github.com/acme/finance-skills
 - The command refuses to replace an existing workflow file. `--force` replaces it.
 - `GH_TOKEN` or `GITHUB_TOKEN` supplies a token for the request. A public repository needs none. `PODIUM_GITHUB_API_TIMEOUT` sets the deadline of the request, 30 seconds by default.
 - When the request fails, the command writes the workflow and states that it could not read the repository's visibility.
+- The workflow installs the `podium` release whose version wrote it. The release binaries carry build provenance attestations from 0.8.0 on, and the workflow verifies them, so a workflow written by an earlier version, such as a build from source, installs 0.8.0. Releases before 0.8.0 cannot be installed by the workflow.
 
 ### The registration preset
 
@@ -74,7 +75,7 @@ After a rename, register the layer again under its ID with the new URL and the p
 # Signs the Podium layers of this repository on each push to main and
 # publishes the signed state to the podium/signed branch. A registry
 # tracks that branch.
-# Written by `podium attest init` (podium v0.7.0).
+# Written by `podium attest init` (podium v0.8.0).
 name: podium-attest
 
 on:
@@ -90,13 +91,13 @@ on:
         default: false
 
 concurrency:
-  group: podium-attest
+  group: podium-attest-${{ github.ref }}
   cancel-in-progress: false
 
 permissions: {}
 
 env:
-  PODIUM_VERSION: v0.7.0
+  PODIUM_VERSION: v0.8.0
   PODIUM_ROOTS: skills
   PODIUM_MAIN_BRANCH: main
   PODIUM_RECOVER: ${{ github.event_name == 'workflow_dispatch' && inputs.recover }}
@@ -125,7 +126,7 @@ jobs:
           if [ -z "$PODIUM_MAIN_BRANCH" ] || [ "$GITHUB_REF" != "refs/heads/$PODIUM_MAIN_BRANCH" ]; then
             stop "the run is on $GITHUB_REF, and only the branch ${PODIUM_MAIN_BRANCH:-(unknown)} is signed"
           fi
-          tip=$(git ls-remote origin "refs/heads/$PODIUM_MAIN_BRANCH" | cut -f1)
+          tip=$(git ls-remote origin "refs/heads/$PODIUM_MAIN_BRANCH" | awk -v ref="refs/heads/$PODIUM_MAIN_BRANCH" '$2 == ref { print $1 }')
           if [ "$tip" != "$GITHUB_SHA" ]; then
             stop "commit $GITHUB_SHA is not the tip of $PODIUM_MAIN_BRANCH (${tip:-none}); the run for the tip signs the current state"
           fi
@@ -144,6 +145,8 @@ jobs:
           dir="$RUNNER_TEMP/podium-bin"
           mkdir -p "$dir"
           gh release download "$PODIUM_VERSION" --repo lennylabs/podium --pattern "podium-linux-$arch" --dir "$dir"
+          gh attestation verify "$dir/podium-linux-$arch" --repo lennylabs/podium \
+            --signer-workflow lennylabs/podium/.github/workflows/release.yml
           mv "$dir/podium-linux-$arch" "$dir/podium"
           chmod +x "$dir/podium"
           echo "$dir" >> "$GITHUB_PATH"
@@ -233,6 +236,8 @@ jobs:
           dir="$RUNNER_TEMP/podium-bin"
           mkdir -p "$dir"
           gh release download "$PODIUM_VERSION" --repo lennylabs/podium --pattern "podium-linux-$arch" --dir "$dir"
+          gh attestation verify "$dir/podium-linux-$arch" --repo lennylabs/podium \
+            --signer-workflow lennylabs/podium/.github/workflows/release.yml
           mv "$dir/podium-linux-$arch" "$dir/podium"
           chmod +x "$dir/podium"
           echo "$dir" >> "$GITHUB_PATH"
@@ -258,16 +263,11 @@ jobs:
             git read-tree "$main"
             rm -rf -- "${dirs[@]}"
             prev=""
-            rc=0
-            git ls-remote --exit-code origin "refs/heads/$PODIUM_SIGNED_REF" > /dev/null || rc=$?
-            case "$rc" in
-              0)
-                git fetch --no-tags --depth=1 origin "+refs/heads/$PODIUM_SIGNED_REF:refs/podium/signed-tip"
-                prev=$(git rev-parse refs/podium/signed-tip)
-                ;;
-              2) ;;
-              *) exit "$rc" ;;
-            esac
+            listed=$(git ls-remote origin "refs/heads/$PODIUM_SIGNED_REF")
+            if [ -n "$(printf '%s\n' "$listed" | awk -v ref="refs/heads/$PODIUM_SIGNED_REF" '$2 == ref { print $1 }')" ]; then
+              git fetch --no-tags --depth=1 origin "+refs/heads/$PODIUM_SIGNED_REF:refs/podium/signed-tip"
+              prev=$(git rev-parse refs/podium/signed-tip)
+            fi
             if [ -n "$prev" ] && [ "$PODIUM_RECOVER" != "true" ]; then
               for d in "${dirs[@]}"; do
                 if git cat-file -e "$prev:$d" 2> /dev/null; then
@@ -287,6 +287,12 @@ jobs:
             else
               commit=$(git commit-tree "$tree" -p "$main" -m "podium-attest: sign $main")
             fi
+            tip=$(git ls-remote origin "refs/heads/$PODIUM_MAIN_BRANCH" | awk -v ref="refs/heads/$PODIUM_MAIN_BRANCH" '$2 == ref { print $1 }')
+            if [ "$tip" != "$main" ]; then
+              echo "::notice::podium-attest did not publish: commit $main is no longer the tip of $PODIUM_MAIN_BRANCH (${tip:-none}); the run for the tip publishes the current state"
+              echo "podium-attest did not publish: $main is no longer the tip of $PODIUM_MAIN_BRANCH" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
             if git push origin "$commit:refs/heads/$PODIUM_SIGNED_REF"; then
               echo "podium-attest signed $main and pushed $commit to $PODIUM_SIGNED_REF" >> "$GITHUB_STEP_SUMMARY"
               exit 0
@@ -299,12 +305,12 @@ jobs:
 
 The workflow runs these steps:
 
-1. A push to `main` starts a run. The path filter ignores the attestation directory, and the concurrency group keeps runs from overlapping. A manual run takes a `recover` input.
-2. The guard stops the run without signing unless its commit is the current tip of `main` on the remote. A re-run of an old workflow run therefore signs nothing, and the run for the tip signs the current state. A stopped run ends successfully with a notice.
-3. The `subjects` job installs the `podium` release that wrote the file and runs `podium attest --commit HEAD` for each root. Reading the commit gives the digests the registry computes, whatever line-ending or Git LFS filters a checkout applies.
+1. A push to `main` starts a run. The path filter ignores the attestation directory. The concurrency group, one per ref, keeps two runs of `main` from overlapping, and a run on another ref cannot displace a pending run of `main`. A manual run takes a `recover` input.
+2. The guard stops the run without signing unless its commit is the current tip of `main` on the remote. A full re-run of an old workflow run stops here, and the run for the tip signs the current state. A stopped run ends successfully with a notice.
+3. The `subjects` job downloads the `podium` release that wrote the file, verifies the binary's build provenance attestation with `gh attestation verify --signer-workflow lennylabs/podium/.github/workflows/release.yml`, and runs `podium attest --commit HEAD` for each root. A binary that does not verify fails the job. Reading the commit gives the digests the registry computes, whatever line-ending or Git LFS filters a checkout applies.
 4. The `sign` job runs `actions/attest-build-provenance` once for each subjects file. Each file holds at most 1024 subjects, the limit of the action.
 5. The `publish` job fetches the tip of `podium/signed` and restores each attestation directory from it, so the bundles of another signer stay. It runs `podium attest import` on the new bundles, which prunes the bundles they replace.
-6. It commits the tree of the signed commit with the attestation directories, with the tip of `podium/signed` and the signed commit as parents, and pushes the commit to `podium/signed`. The push is a fast-forward, so the branch is append-only. When another writer moved the branch first, the job repeats the fetch, the restore, and the commit, up to 5 attempts.
+6. It commits the tree of the signed commit with the attestation directories, with the tip of `podium/signed` and the signed commit as parents. Before it pushes, it checks again that the signed commit is the tip of `main`, and otherwise publishes nothing and ends with a notice. A re-run of the `publish` job alone of an old run reuses the guard's earlier result, and this check keeps it from moving `podium/signed` back to an older state. It pushes the commit to `podium/signed`. The push is a fast-forward, so the branch is append-only. When another writer moved the branch first, the job repeats the fetch, the restore, and the commit, up to 5 attempts.
 
 Each action is pinned to a commit hash, and only the `sign` job holds the `id-token: write` and `attestations: write` permissions. Only the `publish` job can write to the repository.
 

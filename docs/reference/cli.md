@@ -399,7 +399,7 @@ podium attest init [<dir>] [--root <subpath>]... [--shared-workflow <owner>/<rep
 | `--reusable` | Write the shared workflow that layer repositories call. Takes no `--root` and no `--shared-workflow`, and sends no request. |
 | `--force` | Replace an existing workflow file. |
 
-The command reads the `origin` remote and requests the repository's record from the GitHub API, as [`--trust-preset`](#trust-preset) does, for its visibility, its current name, and its default branch. When the request fails, the command writes the workflow for the branch that `refs/remotes/origin/HEAD` names and states that it could not read the visibility. For a private or internal repository, it prints the `gh attestation trusted-root` step and the registration with the explicit trust flags.
+The command reads the `origin` remote and requests the repository's record from the GitHub API, as [`--trust-preset`](#trust-preset) does, for its visibility, its current name, and its default branch. When the request fails, the command writes the workflow for the branch that `refs/remotes/origin/HEAD` names and states that it could not read the visibility. For a private or internal repository, it prints the `gh attestation trusted-root` step and the registration with the explicit trust flags. Each value the printed commands interpolate is shell-quoted when it holds a character a shell gives a meaning. The workflow installs the `podium` release that wrote it, or 0.8.0 when that version is older, and verifies the binary's build provenance attestation before it runs it.
 
 ```
 $ podium attest init --root skills
