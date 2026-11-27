@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -346,6 +347,51 @@ func TestStartAttestationRoots_StaticPublicGoodFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "sigstore")); !os.IsNotExist(err) {
 		t.Fatalf("the root directory exists (%v), want none under a static root file", err)
+	}
+	var row Setting
+	for _, s := range c.Settings() {
+		if s.Name == sigstoreInstancesKey+"."+sign.PublicGoodInstance {
+			row = s
+		}
+	}
+	if row.Source != attestationRootFileEnv || !strings.Contains(row.Value, "transparency_log=true certificate_transparency=true") {
+		t.Fatalf("public-good row = %+v, want the file from %s", row, attestationRootFileEnv)
+	}
+}
+
+// Spec: §4.7.11 — the start logs the digest and the root time of each
+// root and a warning for each timestamp authority whose chain holds a
+// SHA-1 signature.
+func TestLoadAttestationRoots_LogsRootsAndSHA1Authorities(t *testing.T) {
+	dir := t.TempDir()
+	h := sh.New(t)
+	ghRoot := h.TrustedRootJSON(append(sh.GitHubStyleRoot(), sh.WithTimestampAuthorities(sh.TSASHA1))...)
+	writeRoot(t, dir, "github.json", ghRoot)
+	cfgPath := writeRoot(t, dir, "registry.yaml", []byte("registry:\n  sigstore:\n    instances:\n      - name: github\n        trusted_root: github.json\n"))
+	t.Setenv("HOME", dir)
+	t.Setenv("PODIUM_CONFIG_FILE", cfgPath)
+	t.Setenv("PODIUM_SQLITE_PATH", filepath.Join(dir, "podium.db"))
+	c := LoadConfig()
+	if err := c.validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	var buf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prev) })
+	if err := c.loadAttestationRoots(); err != nil {
+		t.Fatalf("loadAttestationRoots: %v", err)
+	}
+	log.SetOutput(prev)
+	out := buf.String()
+	for _, want := range []string{
+		"attestation: instance public-good: trusted root " + mustDigest(t, sign.EmbeddedPublicGoodRoot()) + " from embedded (TUF refresh), root time unknown",
+		"attestation: instance github: trusted root " + mustDigest(t, ghRoot) + " from file",
+		"warning: attestation: instance github: the chain of timestamp authority",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log lacks %q:\n%s", want, out)
+		}
 	}
 }
 

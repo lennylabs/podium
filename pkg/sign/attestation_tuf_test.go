@@ -609,3 +609,57 @@ func TestEmbeddedPublicGoodRoot(t *testing.T) {
 		t.Fatalf("ListsLogs = %v, %v, want both", tlog, ctlog)
 	}
 }
+
+// Spec: §13.12 — a directory that stops being writable after the start
+// keeps the refreshed root in memory: the refresh succeeds, logs that the
+// copy was not written, and the copy on disk stays the earlier one.
+func TestTUFRoot_CopyWriteFailureKeepsRootInMemory(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("permission bits do not stop this user from writing")
+	}
+	f := newTUFFixture(t)
+	src := f.source(t, f.config(time.Time{}))
+	if err := src.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	first := src.Status().Digest
+	other := sh.New(t)
+	f.repo.Publish(pgRootJSON(other))
+	// The TUF cache lives in a subdirectory that stays writable; only the
+	// directory that holds the copy is closed.
+	if err := os.Chmod(f.dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(f.dir, 0o700) })
+	if err := src.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if src.Status().Digest != digestOf(t, pgRootJSON(other)) {
+		t.Fatal("the refreshed root is not in use")
+	}
+	if !f.logs.contains("keeping the refreshed public-good root in memory") {
+		t.Errorf("logs = %q, want the in-memory notice", f.logs.lines)
+	}
+	copyRaw, _ := os.ReadFile(filepath.Join(f.dir, "trusted_root.json"))
+	if digestOf(t, copyRaw) != first {
+		t.Fatal("the copy on disk changed")
+	}
+}
+
+// Spec: §4.7.11 — with the maximum age at 0 a failed refresh logs no
+// half-age warning, whatever the age of the root.
+func TestTUFRoot_NoHalfAgeWarningWithoutLimit(t *testing.T) {
+	t.Parallel()
+	f := newTUFFixture(t)
+	f.repo.SetMode(tufharness.Fail)
+	cfg := f.config(time.Time{})
+	cfg.MaxAge = 0
+	s := newSchedule(t, &cfg, f, 0.5)
+	s.want(0)
+	s.want(time.Minute)
+	s.stop()
+	if f.logs.contains("past half of PODIUM_SIGSTORE_ROOT_MAX_AGE") {
+		t.Errorf("logs = %q, want no half-age warning", f.logs.lines)
+	}
+}

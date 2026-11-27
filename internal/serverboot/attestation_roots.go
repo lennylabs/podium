@@ -259,6 +259,9 @@ func (c *Config) loadAttestationRoots() error {
 			Timeout:      a.timeout.value,
 			MaxAge:       a.maxAge.value,
 		})
+		// Only an embedded root that fails the load rules errs here, as
+		// validate has already checked the durations; TestEmbeddedPublicGoodRoot
+		// keeps the embedded root valid.
 		if err != nil {
 			return err
 		}
