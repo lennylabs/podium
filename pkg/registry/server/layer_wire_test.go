@@ -396,6 +396,9 @@ func TestLayerEndpoint_RequestAndResponseAgreeOnNames(t *testing.T) {
 	responseOnly := map[string]bool{
 		"order": true, "last_ingested_ref": true, "created_at": true,
 		"deleted_at": true, "last_ingested_at": true, "repo_credential": true,
+		// Spec: §4.7.11 (Attestation record) — read-only members ingest writes.
+		"attestation_mark": true, "attested_commit": true, "attestation_status": true,
+		"attestation_details": true, "attestation_dropped": true, "attestation_checked_at": true,
 	}
 
 	req := jsonTagNames(reflect.TypeOf(server.LayerRegisterRequest{}))

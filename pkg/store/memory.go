@@ -512,19 +512,39 @@ func layerKey(tenantID, id string) string { return tenantID + "/" + id }
 //
 // Spec: §7.3.1 (Repository credentials)
 func (s *Memory) PutLayerConfig(_ context.Context, cfg LayerConfig) error {
-	repo, err := registeredLayerRepo(cfg)
+	cfg, err := storedLayerForm(cfg)
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.putLayerLocked(cfg)
+	return nil
+}
+
+// storedLayerForm applies the write rules to cfg and returns the form the map
+// holds.
+func storedLayerForm(cfg LayerConfig) (LayerConfig, error) {
+	repo, err := registeredLayerRepo(cfg)
+	if err != nil {
+		return LayerConfig{}, err
+	}
 	if err := checkLayerLists(cfg); err != nil {
-		return err
+		return LayerConfig{}, err
 	}
 	cfg.Repo, cfg.RegisteredRepo = repo, ""
 	cfg.TrustRequirements = cloneTrustRequirements(cfg.TrustRequirements)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.layers[layerKey(cfg.TenantID, cfg.ID)] = cfg
-	return nil
+	return cfg, nil
+}
+
+// putLayerLocked stores cfg. The caller holds s.mu.
+//
+// Spec: §4.7.11 (Attestation record) — the write keeps the stored record, of
+// a live row or a soft-deleted one, whatever the caller passes.
+func (s *Memory) putLayerLocked(cfg LayerConfig) {
+	key := layerKey(cfg.TenantID, cfg.ID)
+	cfg.AttestationRecord = s.layers[key].AttestationRecord
+	s.layers[key] = cfg
 }
 
 // GetLayerConfig returns the layer or ErrNotFound.
@@ -548,6 +568,7 @@ func (s *Memory) GetLayerConfig(_ context.Context, tenantID, id string) (LayerCo
 func splitStoredLayer(cfg LayerConfig) LayerConfig {
 	cfg.Repo, cfg.RegisteredRepo = SplitLayerRepo(cfg.Repo, sql.NullString{})
 	cfg.TrustRequirements = cloneTrustRequirements(cfg.TrustRequirements)
+	cfg.AttestationRecord = copyAttestationRecord(cfg.AttestationRecord)
 	return cfg
 }
 

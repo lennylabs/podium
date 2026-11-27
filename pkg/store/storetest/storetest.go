@@ -63,6 +63,8 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
 	t.Run("LayerRepoCredential", func(t *testing.T) { layerRepoCredential(t, factory(t)) })
 	t.Run("LayerTrustPolicy", func(t *testing.T) { layerTrustPolicy(t, factory(t)) })
+	t.Run("LayerAttestationRecord", func(t *testing.T) { layerAttestationRecord(t, factory(t)) })
+	t.Run("LayerAttestationMigration", func(t *testing.T) { layerAttestationMigration(t, factory(t)) })
 	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
 	t.Run("LayerVisibilityEntries", func(t *testing.T) { layerVisibilityEntries(t, factory(t)) })
 	t.Run("DeprecatedAtStampedAndPurged", func(t *testing.T) { deprecatedAtStampedAndPurged(t, factory(t)) })
