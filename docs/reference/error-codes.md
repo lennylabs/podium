@@ -155,6 +155,14 @@ The browser flow requires every condition below:
 
 The registry refuses to start with `config.invalid` when `PODIUM_LINT_SEMANTIC_OVERLAP` is `on` and it has no embedding source: `PODIUM_EMBEDDING_PROVIDER` is the empty string or `none`, which `PODIUM_NO_EMBEDDINGS` also selects, and the vector backend does not embed text with its own hosted model. The message names `PODIUM_LINT_SEMANTIC_OVERLAP` and the configured `PODIUM_EMBEDDING_PROVIDER` value, such as `PODIUM_EMBEDDING_PROVIDER is "none"`. Set `PODIUM_EMBEDDING_PROVIDER`, select a self-embedding backend, or set `PODIUM_LINT_SEMANTIC_OVERLAP=off`.
 
+The registry also refuses to start with `config.invalid` on the author attestation settings, with a message that names the instance and the file or the variable (spec §4.7.11, [Configuration](configuration#author-attestation)):
+
+- A trusted root file of a `sigstore.instances` entry, or the file `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` names, cannot be read or parsed, or holds more than one trusted root, as the output of `gh attestation trusted-root` does.
+- A trusted root has a timestamp authority entry that begins with a CA certificate.
+- The `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` root lists no transparency log or no certificate transparency log.
+- A `sigstore.instances` entry has no name, an invalid or repeated name, the name `public-good`, or no `trusted_root`, a `github` entry sets `transparency_log` or `certificate_transparency` to `true`, or an operator-defined entry omits `transparency_log`.
+- `PODIUM_SIGSTORE_ROOT_REFRESH` or `PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT` is not a duration above zero, or `PODIUM_SIGSTORE_ROOT_MAX_AGE` is not a duration of zero or more.
+
 #### config.signature_provider_unavailable causes
 
 | Process | When it refuses |

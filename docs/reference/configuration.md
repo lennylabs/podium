@@ -312,6 +312,43 @@ These settings are environment variables only. [Signing keys](../deployment/oper
 | `PODIUM_SIGN` | string | `registry-key` | Ingest signing mode: `registry-key` or `none`. Any other value refuses startup with `config.invalid_sign_mode`. Flag `--sign`. |
 | `PODIUM_SIGN_KEY_PATH` | string | `~/.podium/standalone/registry-signing.key` | Registry signing key file. The registry generates it on first run. A registry on Postgres, or on a SQLite file outside `~/.podium/standalone/`, refuses to start with signing on and this variable unset. Client processes read the same file, as the [CLI reference](cli#signing-and-verification) lists. |
 
+## Author attestation
+
+These settings name the Sigstore instances and the trusted roots that author attestations are verified against (spec §4.7.11). The registry reads them at its start and reports the digest and root time of each root in its log. No ingest step verifies attestations yet, so a layer's served content does not depend on them.
+
+| Key | Variable | Type | Default | Description |
+|:--|:--|:--|:--|:--|
+| `sigstore.instances` | (none) | list | `public-good` only | Sigstore instances besides `public-good`. See the table below. |
+| (none) | `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` | string | (unset) | Trusted root of the `public-good` instance for an air-gapped registry. When it is set, the registry makes no refresh and the root has no age limit. The file holds one trusted root that lists a transparency log and a certificate transparency log. |
+| (none) | `PODIUM_SIGSTORE_ROOT_REFRESH` | duration | `24h` | Interval between refreshes of the `public-good` trusted root through the Sigstore TUF repository. |
+| (none) | `PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT` | duration | `30s` | Deadline of one refresh, covering all of its requests. A failed refresh is retried after 1 minute, then after 2, 4, and so on up to the refresh interval, each delay multiplied by a random factor between 0.5 and 1.5. |
+| (none) | `PODIUM_SIGSTORE_ROOT_MAX_AGE` | duration | `2160h` (90 days) | Age past which the `public-good` root in use is refused. `0` removes the limit. |
+
+Each entry of `sigstore.instances` takes these keys:
+
+| Key | Type | Description |
+|:--|:--|:--|
+| `name` | string | Instance name, 1 to 64 characters from `a` to `z`, `0` to `9`, `.`, `_`, and `-`, beginning with a letter or a digit. `github` is GitHub's instance for private repositories. `public-good` is built in and cannot be listed. |
+| `trusted_root` | string | Path to the instance's trusted root, a `trusted_root.json` document. A relative path resolves against the directory of `registry.yaml`. |
+| `transparency_log` | boolean | Whether the instance requires a transparency log entry. Required for an operator-defined instance. The `github` instance has none, so the key is omitted or `false`. |
+| `certificate_transparency` | boolean | Whether the instance requires a signed certificate timestamp. Defaults to `false`. A root that lists certificate transparency logs requires one whatever the key states. |
+
+```yaml
+registry:
+  sigstore:
+    instances:
+      - name: github
+        trusted_root: /etc/podium/github-trusted-root.json
+```
+
+`gh attestation trusted-root` writes one trusted root per line, one for the Sigstore public-good instance and one for GitHub's instance. The registry refuses a file that holds more than one root, so keep only the line for GitHub's instance in the file of the `github` instance. That line lists `fulcio.githubapp.com` among its certificate authorities and no transparency logs.
+
+The registry refreshes the `public-good` root through the Sigstore TUF repository at its start and every `PODIUM_SIGSTORE_ROOT_REFRESH`, in the background, so the start does not wait for the network. It keeps the TUF metadata and the last verified copy in `sigstore/public-good/` beside the SQLite store file, by default `~/.podium/standalone/sigstore/public-good/`, and uses that copy when a refresh fails. Each binary embeds the `public-good` root that was current when it was built, which serves until the first refresh completes when no copy is on disk. A release binary counts the age of its embedded root from its build date. A binary built from source records no build date, so its embedded root counts as older than any limit, and verification on `public-good` waits for a refresh unless `PODIUM_SIGSTORE_ROOT_MAX_AGE` is `0`.
+
+`PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` is a separate setting of `podium sign` and `podium verify` for the signature envelope, and author attestation verification does not read it.
+
+A start refuses with `config.invalid` when a trusted root file cannot be read or parsed, holds several roots, or has a timestamp authority entry that begins with a CA certificate, when the `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` root lists no transparency log or no certificate transparency log, when a `sigstore.instances` entry breaks a rule above, and when one of the three durations is not a Go duration in its range. `podium config show --server` lists the instances and these settings and prints each refusal as a warning.
+
 ## Audit
 
 These settings are environment variables only. [Audit and observability](../deployment/operations/observability#audit-destinations) covers destination setup, and [Audit events](audit-events) is the format reference. `PODIUM_AUDIT_LOG_PATH` configures the registry stream. `podium-mcp` writes a separate local stream that `PODIUM_AUDIT_SINK` configures, as the [CLI reference](cli#local-audit-stream) describes.

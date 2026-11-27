@@ -21,6 +21,15 @@ From 0.8.0, every ingest of a `git` layer clones under the deadline that `PODIUM
 - A value that is not a duration above zero, such as `0s` or `600`, refuses startup with `config.invalid`.
 - A rollback to 0.7.0 needs no step. 0.7.0 does not read the variable and ignores the key.
 
+### Sigstore trusted roots for author attestation
+
+From 0.8.0, the registry loads the Sigstore instances and trusted roots of author attestation verification at its start (spec §4.7.11). No ingest step verifies attestations yet. [Configuration](../../reference/configuration#author-attestation) lists the settings.
+
+- The registry refreshes the Sigstore public-good trusted root in the background at its start and every 24 hours, with a request to `https://tuf-repo-cdn.sigstore.dev`. It writes the TUF metadata and the last verified root to `sigstore/public-good/` beside the SQLite store file, by default `~/.podium/standalone/sigstore/public-good/`. A registry that cannot reach the repository logs each failed refresh and keeps starting and serving. An air-gapped registry sets `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` to a trusted root file, which turns the refresh off.
+- A start refuses with `config.invalid` when `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE`, `PODIUM_SIGSTORE_ROOT_REFRESH`, `PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT`, `PODIUM_SIGSTORE_ROOT_MAX_AGE`, or a `sigstore.instances` entry of `registry.yaml` holds a value the registry cannot use, such as a trusted root file that cannot be read. 0.7.0 read none of them. Before the upgrade, check that any of them a deployment already sets holds a valid value.
+- `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` keeps its meaning for `podium sign` and `podium verify`. The registry does not read it for attestations.
+- A rollback to 0.7.0 needs no step. 0.7.0 ignores the settings and the `sigstore/` directory, which can be deleted.
+
 ### Workspace `.podium` that is a symbolic link
 
 From 0.8.0, `podium sync` reads and writes its lock and `sync.yaml` only when the target's `.podium` is a directory rather than a symbolic link. A target whose `.podium` is a symbolic link, such as one that shares `sync.yaml` across Git worktrees, or whose `.podium` is not a directory, fails these commands before they write anything: `podium sync`, `podium sync override`, `podium sync save-as`, `podium profile edit`, and `podium init` in that workspace. The error names `.podium` and states that it must be a directory. 0.7.0 read and wrote through the link.
