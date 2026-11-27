@@ -1418,11 +1418,21 @@ func packageFiles(fsys fs.FS, dir string) (map[string][]byte, error) {
 //
 // Spec: §4.7.6
 func LayerContent(fsys fs.FS) (attest.Layer, error) {
-	records, err := walkLayer(fsys, "")
+	records, err := LayerRecords(fsys)
 	if err != nil {
 		return attest.Layer{}, err
 	}
 	return filesystem.LayerDigestInput(records, fsys)
+}
+
+// LayerRecords walks the snapshot fsys with the registry ingest walk and
+// returns every package discovery finds, before the §4.1 and §4.6 refusals
+// that Ingest applies. `podium attest --commit` reads a commit's tree through
+// it, so the packages it lists are the ones ingest lists for that commit.
+//
+// Spec: §4.2, §4.7.6, §7.3.5
+func LayerRecords(fsys fs.FS) ([]filesystem.ArtifactRecord, error) {
+	return walkLayer(fsys, "")
 }
 
 // manifestRecordFor canonicalizes one ArtifactRecord into a ManifestRecord

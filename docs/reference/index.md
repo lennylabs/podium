@@ -15,6 +15,7 @@ The reference pages describe each surface of the Podium registry for lookup: com
 | [Configuration](configuration) | The `registry.yaml` file layout, every server configuration key, and the environment variable that sets each one. |
 | [Error codes](error-codes) | The structured error envelope and the full namespace catalog. |
 | [Audit events](audit-events) | The audit record format; the file, HTTP, OTLP, and stdout destinations; delivery and loss accounting; receiver checks; and the OTLP and ECS field mappings. |
+| [Attestation subjects predicate](attestation-subjects) | The in-toto predicate type that `podium attest --format statement` writes by default. |
 | [Glossary](glossary) | The vocabulary used across the docs, with a link from each term to the page that covers it. |
 
 The field-by-field frontmatter schema for `ARTIFACT.md` and `SKILL.md` lives in the Authoring section as the [frontmatter reference](../authoring/frontmatter-reference), and [Domains](../authoring/domains) lists the `DOMAIN.md` fields.
