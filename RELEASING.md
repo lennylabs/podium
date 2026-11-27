@@ -44,6 +44,8 @@ The two SDKs are fully tag-driven; only `buildinfo.go` and `Chart.yaml` require 
 
    On a MINOR or MAJOR bump, re-verify the product comparison in spec §1.5 and in `docs/getting-started/why-podium.md` first: each listed product's name, availability, and stated capabilities, plus new products in the covered categories. A correction to §1.5 goes through the proposal pipeline and merges before the prep PR. `.claude/rules/release-process.md` states the full check.
 
+   Run `go run ./tools/sigstoreroot -check` as well. When it reports that the embedded public-good Sigstore trusted root is not current, run `go run ./tools/sigstoreroot` and land the changed `pkg/sign/embedded/public-good.trusted_root.json` in its own pull request before the prep PR. A release binary counts the age of that root from its build date (§4.7.11), so the release workflow refuses a tag whose embedded root differs from the current TUF target. The `sigstore-root` workflow runs the same check on each prep PR whose head branch is `release/*` and weekly against `main`, and `.claude/rules/release-process.md` carries the same step.
+
 2. **Bump the Go default version and the chart** (drop the `-dev` suffix):
    - `internal/buildinfo/buildinfo.go`: `Version = "0.2.0"`.
    - `deploy/helm/podium/Chart.yaml`: `version: 0.2.0` and `appVersion: 0.2.0`.
@@ -87,6 +89,8 @@ git push origin v0.2.1
 
 The `main` line continues toward `0.3.0` independently. Merge the fix back into `main` if it isn't already there.
 
+The patch branch carries the embedded Sigstore trusted root of the old tag, and the release workflow refuses a tag whose embedded root is not current. Run `go run ./tools/sigstoreroot -check` on `release/0.2.x`, and when it fails, cherry-pick the commit that refreshed `pkg/sign/embedded/public-good.trusted_root.json` on `main` onto `release/0.2.x` before the prep commit, or run `go run ./tools/sigstoreroot` there and commit the result on its own. The `sigstore-root` workflow checks each pull request into a `release/*` branch.
+
 ## What CI does on a tag
 
 A push of `vX.Y.Z` triggers the release workflow. A `validate-tag` job runs first and rejects tags whose commit is not reachable from `main` or any `release/*` branch — a safety net that prevents publishing from a feature branch or stale fork.
@@ -95,7 +99,7 @@ Once that gate passes, five test jobs run in parallel and every publish job list
 
 | Job | Covers |
 |:--|:--|
-| `go` | Full Go suite: `make lint`, `make speccov-drift`, `make matrix-audit`, `make test`, `make coverage-budget`. |
+| `go` | Full Go suite: `make lint`, `make speccov-drift`, `make matrix-audit`, `make test`, `make coverage-budget`. It first runs `go run ./tools/sigstoreroot -check`, which fails when the embedded public-good Sigstore trusted root differs from the current target of the Sigstore TUF repository. |
 | `python` | `pytest` against `sdks/podium-py`. |
 | `typescript` | `vitest` against `sdks/podium-ts`. |
 | `postgres` | Live `pkg/store` and `pkg/vector` against a `pgvector/pgvector:pg16` service container. |
@@ -146,7 +150,7 @@ When the failure requires a change to the package contents rather than a credent
 
 ### Sigstore live tests are manual
 
-`pkg/sign/sigstore_live_test.go` is a Tier 2 suite the release gate does not run. The single test in it is `TestSigstoreKeyless_LiveSmoke`. The release gate runs the mocked `pkg/sign/sigstore_test.go` suite (round-trip, tampered hash, foreign trust root, Fulcio and timestamp-authority outage, identity and issuer mismatch, a timestamp, inclusion proof, or checkpoint that does not verify, an entry that does not bind the envelope, and certificate validity at the timestamp time), and the release gate also runs `pkg/sign/sigstore_fixture_test.go`, which verifies the recorded staging envelope offline, so the signing logic is covered between manual runs; the live smoke adds end-to-end coverage of a Fulcio certificate, an RFC 3161 timestamp from the staging timestamp authority, and a Rekor v2 inclusion proof and checkpoint from a running Sigstore instance, and of the entry-binding check against that log's entry body.
+`pkg/sign/sigstore_live_test.go` is a Tier 2 suite the release gate does not run. The single test in it is `TestSigstoreKeyless_LiveSmoke`. The release gate runs the mocked `pkg/sign/sigstore_test.go` suite over bundles that `internal/testharness/sigstoreharness` generates (round-trip, tampered hash, foreign trust root, Fulcio and timestamp-authority outage, identity and issuer mismatch, a timestamp, inclusion proof, or checkpoint that does not verify, an entry that does not bind the bundle, and certificate validity at the timestamp time), and the release gate also runs `pkg/sign/keyless_samples_test.go`, which verifies a real staging signature offline, so the signing logic is covered between manual runs; the live smoke adds end-to-end coverage of a Fulcio certificate, an RFC 3161 timestamp from the staging timestamp authority, and a Rekor v2 inclusion proof and checkpoint from a running Sigstore instance.
 
 **Decision: keep the live smoke manual and documented.** A credentialed CI lane is not wired. The live test gates on an ambient OIDC token (`PODIUM_SIGSTORE_OIDC_TOKEN`) that the configured Fulcio issuer accepts. A CI lane would have to mint a GitHub Actions OIDC token and bind it as a trusted issuer on the Fulcio instance, and even the staging instance writes each signed artifact into a public transparency log. The staging-lane option is recorded below as a follow-up the maintainer can opt into.
 
@@ -169,7 +173,7 @@ go test ./pkg/sign/... -count=1 -v -run TestSigstoreKeyless_LiveSmoke
 
 The `-run` pattern must name the test exactly. A pattern that matches nothing (for example an outdated `TestSigstore_Live`) reports `PASS` while running zero tests, so the manual smoke would be skipped while appearing to succeed.
 
-`PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` is the `trusted_root.json` target of the staging Sigstore TUF repository. The Rekor endpoint must be a v2 log; a Rekor v1 URL fails `Sign` with `rekor: HTTP 404`. Running the smoke with `export PODIUM_SIGSTORE_RECORD_DIR=$PWD/pkg/sign/testdata/sigstore-staging` from the repository root refreshes the committed fixture: after `Verify` passes, the test writes `envelope.json`, a copy of the trusted root as `trusted_root.json`, and `meta.json` into that directory. The value is absolute because `go test` runs the test with `pkg/sign` as its working directory, so a relative value resolves under `pkg/sign/`. Record with a non-personal OIDC identity, because the committed leaf certificate carries its subject alternative name.
+`PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` is the `trusted_root.json` target of the staging Sigstore TUF repository. The Rekor endpoint must be a v2 log; a Rekor v1 URL fails `Sign` with `rekor: HTTP 404`. Running the smoke with `PODIUM_SIGSTORE_RECORD_DIR` set to an absolute directory writes the verified bundle as `bundle.json`, a copy of the trusted root as `trusted_root.json`, and `meta.json` into that directory after `Verify` passes. The value is absolute because `go test` runs the test with `pkg/sign` as its working directory, so a relative value resolves under `pkg/sign/`. A recording replaces the sample under `pkg/sign/testdata/keyless` only by a deliberate change: copy `bundle.json` to `staging.sigstore.json`, `trusted_root.json` to `staging.trusted_root.json`, and `meta.json` to `staging.meta.json`. Record with a non-personal OIDC identity, because a committed leaf certificate carries its subject alternative name.
 
 #### Staging-Sigstore release lane (future option)
 

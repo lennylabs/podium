@@ -65,6 +65,14 @@ jobs:
             ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
       - run: make tools
+      # §4.7.11: a release binary counts the age of its embedded public-good
+      # Sigstore root from its build date, which holds only when the
+      # embedded root is the current TUF target. A stale copy fails the
+      # release; refresh it with `go run ./tools/sigstoreroot`. The script
+      # retries a failed fetch twice with a growing delay, and the
+      # sigstore-root workflow runs the same check on each release prep PR.
+      - name: Embedded Sigstore root is current
+        run: bash tools/sigstoreroot/check.sh
       - run: make lint
       - run: make speccov-drift
       - run: make matrix-audit
@@ -290,7 +298,8 @@ jobs:
           LDFLAGS="-s -w ${EXTLDFLAGS} \
             -X github.com/lennylabs/podium/internal/buildinfo.Version=${VERSION} \
             -X github.com/lennylabs/podium/internal/buildinfo.Commit=${COMMIT:0:7} \
-            -X github.com/lennylabs/podium/internal/buildinfo.Date=${DATE}"
+            -X github.com/lennylabs/podium/internal/buildinfo.Date=${DATE} \
+            -X github.com/lennylabs/podium/internal/buildinfo.ReleaseDate=${DATE}"
           mkdir -p dist
           for cmd in podium podium-server podium-mcp; do
             out="dist/${cmd}-${GOOS}-${GOARCH}${{ matrix.suffix }}"
@@ -448,7 +457,9 @@ jobs:
       # leading v, so the image is also tagged with the bare version.
       - if: steps.dockerfile.outputs.exists == 'true'
         id: bare
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - if: steps.dockerfile.outputs.exists == 'true'
         uses: docker/build-push-action@v7
         with:
@@ -459,8 +470,11 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/podium-server:${{ github.ref_name }}
             ghcr.io/${{ github.repository_owner }}/podium-server:${{ steps.bare.outputs.version }}
             ghcr.io/${{ github.repository_owner }}/podium-server:latest
+          # RELEASE_DATE starts the age of the embedded Sigstore root
+          # (§4.7.11); a local docker build leaves it empty.
           build-args: |
             VERSION=${{ github.ref_name }}
+            RELEASE_DATE=${{ steps.bare.outputs.date }}
 
   # Update the Homebrew tap (lennylabs/homebrew-tap) and Scoop bucket
   # (lennylabs/scoop-bucket) so `brew install podium` / `scoop install

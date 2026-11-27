@@ -1498,13 +1498,13 @@ The `sigstore-keyless` provider signs in three steps:
 2. It obtains an RFC 3161 timestamp over the signature from `PODIUM_SIGSTORE_TSA_URL`.
 3. It records the signature in the Rekor v2 transparency log at `PODIUM_SIGSTORE_REKOR_URL`.
 
-The three endpoints default to the Sigstore public-good instances. A Rekor v1 URL fails the signing. The envelope carries the log entry, its inclusion proof, the signed checkpoint, and the timestamp, so `podium verify` can check them without contacting any service.
+The three endpoints default to the Sigstore public-good instances. A Rekor v1 URL fails the signing. The command prints a Sigstore bundle of version 0.3, the format `cosign` and the other Sigstore clients read. The bundle carries the leaf certificate, the message signature over the content hash, the log entry with its inclusion proof and signed checkpoint, and the timestamp, so `podium verify` can check them without contacting any service.
 
 Notes:
 
 - `podium sign` sends each request once and waits for each no longer than `PODIUM_SIGSTORE_REQUEST_TIMEOUT` (60 seconds by default).
 - A request that does not complete within that time fails the command with `sign failed:` followed by the service (`fulcio:`, `tsa:`, or `rekor:`), the endpoint URL, and `no response within <deadline>`.
-- A request that misses its deadline can still have reached the service. A certificate or a log entry can therefore exist for a signing that printed no envelope, and running `podium sign` again records new ones.
+- A request that misses its deadline can still have reached the service. A certificate or a log entry can therefore exist for a signing that printed no bundle, and running `podium sign` again records new ones.
 - When `PODIUM_SIGSTORE_OIDC_TOKEN` is unset, `podium sign` exits non-zero with `sign failed: sign: sigstore-keyless not configured` before it contacts any service. The message names no error code.
 
 ### `podium verify`
@@ -1545,21 +1545,23 @@ podium verify --content-hash sha256:<hex> --signature <envelope> [--provider <na
 
 #### Sigstore keyless verification
 
-Under `--provider sigstore-keyless`, `podium verify` checks the following against `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE`:
+Under `--provider sigstore-keyless`, `podium verify` checks the bundle with `sigstore-go` against `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE`:
 
-- The timestamp verifies under a timestamp authority in the file, is signed by a certificate whose extended key usage lists time stamping, and covers the signature.
-- The inclusion proof leads from the log entry to a checkpoint signed by a transparency-log key in the file.
-- The log entry records the content hash, the signature, and the envelope's certificate.
-- The certificate chains to a certificate authority in the file, lists code signing in its extended key usage, and was valid at the timestamp's time.
+- The bundle is a Sigstore bundle of version 0.3 that carries a message signature over the content hash.
+- Each timestamp verifies under a timestamp authority in the file and covers the signature, no two timestamps come from one authority, and the bundle carries at least one.
+- The certificate chains to a certificate authority in the file through the intermediates the file lists, lists code signing in its extended key usage, and was valid at each timestamp's time. Its key is an ECDSA P-256 key.
+- When the file lists a certificate transparency log, the certificate carries a signed certificate timestamp from one of them.
+- The bundle carries one log entry of a log in the file, and the entry body is a Rekor v2 `hashedrekord` entry. Its inclusion proof leads to a checkpoint that names the log's host and that the log's key signed, so a Rekor v1 entry is refused. The command computes the entry from the content hash, the signature, and the certificate, so an entry body that records anything else fails the inclusion proof.
 - The signature verifies.
-- One of the certificate's email or URI subject alternative names appears in `PODIUM_SIGSTORE_CERT_IDENTITY`, and the certificate's OIDC issuer equals `PODIUM_SIGSTORE_CERT_OIDC_ISSUER`.
+- The certificate's subject alternative name holds one email address or URI, and it appears in `PODIUM_SIGSTORE_CERT_IDENTITY`. The issuer in the certificate's Issuer (V2) extension equals `PODIUM_SIGSTORE_CERT_OIDC_ISSUER`.
 
 Notes:
 
-- With either policy variable unset, every envelope is refused.
-- Validity is checked at the timestamp's time, so an envelope keeps verifying after its certificate expires.
+- With either policy variable unset, every bundle is refused.
+- Validity is checked at each timestamp's time, so a bundle keeps verifying after its certificate expires.
 - The command checks no witness cosignature or consistency proof, and it makes no network call.
-- An envelope that carries no log entry or no timestamp, including every envelope produced before this format, is refused.
+- A bundle that carries no log entry or no timestamp is refused. A keyless envelope that `podium sign` printed in 0.7.0 or earlier is refused as well; sign the content hash again. See the [upgrade notes](../deployment/operations/upgrade-notes#sigstore-keyless-signatures-as-sigstore-bundles).
+- A certificate with several subject alternative names, or with only the older Issuer extension, is refused.
 - A certificate whose identity is compromised after it signed keeps verifying, because Sigstore-keyless certificates carry no revocation.
 
 #### Verification elsewhere
@@ -1685,9 +1687,9 @@ The tables below list the variables that client processes read: the CLI, `podium
 
 | Variable | Purpose |
 |:--|:--|
-| `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` | Trust root for the `sigstore-keyless` provider: a Sigstore `trusted_root.json` carrying the certificate authorities, the transparency-log keys, and the timestamp authorities. Sigstore publishes the file through its TUF repository. Podium does not fetch the file or verify TUF metadata. Verification uses each entry only within its `validFor` window. `podium sign` and `podium verify` read it under `--provider sigstore-keyless` whatever the policy. An unset or unreadable value does not refuse the command. `podium verify` then refuses each envelope as `materialize.signature_invalid`. It does the same when the file does not parse or lacks a certificate authority, a usable ECDSA P-256 or Ed25519 log key, or a timestamp authority. |
-| `PODIUM_SIGSTORE_CERT_IDENTITY` | The signer identities `podium verify --provider sigstore-keyless` accepts: one or more email addresses or URIs, separated by commas. Each is compared byte for byte with the certificate's email and URI subject alternative names. A certificate whose only subject alternative name is an otherName, such as a Fulcio username identity, is refused: Fulcio marks that extension critical, so the chain check refuses it with `cert chain`. Unset, every keyless envelope is refused. `podium-mcp` does not read it. |
-| `PODIUM_SIGSTORE_CERT_OIDC_ISSUER` | The OIDC issuer URL `podium verify --provider sigstore-keyless` accepts. It is compared byte for byte with the issuer the certificate records, after surrounding whitespace is removed from the value. Unset or blank, every keyless envelope is refused. `podium-mcp` does not read it. |
+| `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` | Trust root for the `sigstore-keyless` provider: a Sigstore `trusted_root.json` carrying the certificate authorities, the transparency logs, the timestamp authorities, and the certificate transparency logs. Sigstore publishes the file through its TUF repository. Podium does not fetch the file or verify TUF metadata. Verification uses each authority only within its `validFor` window, and a log only when its key's window covers the timestamp's time. When the file lists a certificate transparency log, a certificate must carry a signed certificate timestamp from one of them. `podium sign` and `podium verify` read it under `--provider sigstore-keyless` whatever the policy. An unset or unreadable value does not refuse the command. `podium verify` then refuses each bundle as `materialize.signature_invalid`. It does the same when `sigstore-go` cannot load the file, such as when it does not parse, lists a log key type the library does not read, or lists a timestamp authority whose chain begins with a CA certificate. |
+| `PODIUM_SIGSTORE_CERT_IDENTITY` | The signer identities `podium verify --provider sigstore-keyless` accepts: one or more email addresses or URIs, separated by commas. Each is compared byte for byte with the one email address or URI that the certificate's subject alternative name holds. A certificate whose subject alternative name holds several names, or only an otherName such as a Fulcio username identity, is refused. Unset, every keyless bundle is refused. `podium-mcp` does not read it. |
+| `PODIUM_SIGSTORE_CERT_OIDC_ISSUER` | The OIDC issuer URL `podium verify --provider sigstore-keyless` accepts. It is compared byte for byte with the issuer the certificate's Issuer (V2) extension records, after surrounding whitespace is removed from the value. A certificate with only the older Issuer extension is refused. Unset or blank, every keyless bundle is refused. `podium-mcp` does not read it. |
 | `PODIUM_SIGSTORE_FULCIO_URL` | Fulcio endpoint `podium sign --provider sigstore-keyless` requests the signing certificate from. Unset or empty, it takes `https://fulcio.sigstore.dev`. |
 | `PODIUM_SIGSTORE_REKOR_URL` | Rekor v2 log `podium sign --provider sigstore-keyless` records the entry in. Unset or empty, it takes `https://log2025-1.rekor.sigstore.dev`. A Rekor v1 URL fails the signing. |
 | `PODIUM_SIGSTORE_TSA_URL` | RFC 3161 timestamp authority `podium sign --provider sigstore-keyless` requests the timestamp from. Unset or empty, it takes `https://timestamp.sigstore.dev/api/v1/timestamp`. |

@@ -143,15 +143,19 @@ func otherNameSAN(t *testing.T) pkix.Extension {
 	return pkix.Extension{Id: asn1.ObjectIdentifier{2, 5, 29, 17}, Value: san}
 }
 
-// Spec: §4.7.9 — a leaf matches when an email or URI SAN equals a list
-// entry byte for byte and its Fulcio issuer equals the policy issuer;
-// .1.8 takes precedence over .1.1, and a malformed .1.8 never falls back.
+// Spec: §4.7.9 — a leaf matches when its one email or URI name equals a
+// list entry byte for byte and its Issuer (V2) extension equals the policy
+// issuer. The older Issuer extension is not read, a malformed Issuer (V2)
+// extension never falls back to it, and a leaf with several names or an
+// OtherName identifies no signer.
 func TestIdentityPolicy_Match(t *testing.T) {
 	t.Parallel()
 	const issuer = "https://accounts.acme.com"
 	const workflow = "https://github.com/acme/repo/.github/workflows/release.yml@refs/heads/main"
 	policy := NewIdentityPolicy("alice@acme.com, "+workflow, issuer)
-	v1 := func(s string) pkix.Extension { return pkix.Extension{Id: oidFulcioIssuerV1, Value: []byte(s)} }
+	v1 := func(s string) pkix.Extension {
+		return pkix.Extension{Id: asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 1}, Value: []byte(s)}
+	}
 	trailing := issuerExt(t, issuer)
 	trailing.Value = append(trailing.Value, 0x00)
 	cases := []struct {
@@ -161,20 +165,22 @@ func TestIdentityPolicy_Match(t *testing.T) {
 	}{
 		{"email SAN", testLeaf{emails: []string{"alice@acme.com"}, exts: []pkix.Extension{issuerExt(t, issuer)}}, ""},
 		{"URI SAN", testLeaf{uris: []string{workflow}, exts: []pkix.Extension{issuerExt(t, issuer)}}, ""},
-		{".1.1 only", testLeaf{emails: []string{"alice@acme.com"}, exts: []pkix.Extension{v1(issuer)}}, ""},
+		{".1.1 only", testLeaf{emails: []string{"alice@acme.com"}, exts: []pkix.Extension{v1(issuer)}}, "no Issuer (V2) extension"},
 		{".1.8 over a disagreeing .1.1", testLeaf{emails: []string{"alice@acme.com"}, exts: []pkix.Extension{v1("https://evil.example"), issuerExt(t, issuer)}}, ""},
-		{".1.8 disagreeing over a matching .1.1", testLeaf{emails: []string{"alice@acme.com"}, exts: []pkix.Extension{issuerExt(t, "https://evil.example"), v1(issuer)}}, "OIDC issuer mismatch: certificate carries https://evil.example"},
-		{".1.8 with trailing bytes", testLeaf{emails: []string{"alice@acme.com"}, exts: []pkix.Extension{trailing, v1(issuer)}}, "malformed OIDC issuer extension"},
-		{".1.8 not a UTF8String", testLeaf{emails: []string{"alice@acme.com"}, exts: []pkix.Extension{{Id: oidFulcioIssuerV2, Value: []byte{0x04, 0x01, 'a'}}}}, "malformed OIDC issuer extension"},
-		{"no issuer extension", testLeaf{emails: []string{"alice@acme.com"}}, "certificate carries no OIDC issuer extension"},
-		{"otherName SAN only", testLeaf{exts: []pkix.Extension{otherNameSAN(t), issuerExt(t, issuer)}}, "certificate identity mismatch"},
-		{"email SAN differs in case", testLeaf{emails: []string{"Alice@acme.com"}, exts: []pkix.Extension{issuerExt(t, issuer)}}, "certificate identity mismatch: certificate carries Alice@acme.com"},
-		{"email outside, URI inside", testLeaf{emails: []string{"carol@acme.com"}, uris: []string{workflow}, exts: []pkix.Extension{issuerExt(t, issuer)}}, ""},
-		{"URI outside, email inside", testLeaf{emails: []string{"alice@acme.com"}, uris: []string{"https://github.com/acme/other"}, exts: []pkix.Extension{issuerExt(t, issuer)}}, ""},
-		{"both outside", testLeaf{emails: []string{"carol@acme.com"}, uris: []string{"https://github.com/acme/other"}, exts: []pkix.Extension{issuerExt(t, issuer)}}, "certificate identity mismatch: certificate carries carol@acme.com, https://github.com/acme/other"},
+		{".1.8 disagreeing over a matching .1.1", testLeaf{emails: []string{"alice@acme.com"}, exts: []pkix.Extension{issuerExt(t, "https://evil.example"), v1(issuer)}}, `OIDC issuer mismatch: certificate carries "https://evil.example"`},
+		{".1.8 with trailing bytes", testLeaf{emails: []string{"alice@acme.com"}, exts: []pkix.Extension{trailing, v1(issuer)}}, "issuer extension is malformed"},
+		{".1.8 not a UTF8String", testLeaf{emails: []string{"alice@acme.com"}, exts: []pkix.Extension{{Id: oidFulcioIssuerV2, Value: []byte{0x04, 0x01, 'a'}}}}, "issuer extension is malformed"},
+		{"no issuer extension", testLeaf{emails: []string{"alice@acme.com"}}, "no Issuer (V2) extension"},
+		{"otherName SAN only", testLeaf{exts: []pkix.Extension{otherNameSAN(t), issuerExt(t, issuer)}}, "a certificate field is malformed"},
+		{"email SAN differs in case", testLeaf{emails: []string{"Alice@acme.com"}, exts: []pkix.Extension{issuerExt(t, issuer)}}, `certificate identity mismatch: certificate carries "Alice@acme.com"`},
+		{"email outside, URI inside", testLeaf{emails: []string{"carol@acme.com"}, uris: []string{workflow}, exts: []pkix.Extension{issuerExt(t, issuer)}}, "a certificate field is malformed"},
+		{"URI outside, email inside", testLeaf{emails: []string{"alice@acme.com"}, uris: []string{"https://github.com/acme/other"}, exts: []pkix.Extension{issuerExt(t, issuer)}}, "a certificate field is malformed"},
 	}
 	for _, c := range cases {
-		err := policy.match(c.leaf.build(t))
+		fields, err := readCertificateFields(c.leaf.build(t))
+		if err == nil {
+			err = policy.match(fields)
+		}
 		if c.want == "" {
 			if err != nil {
 				t.Errorf("%s: %v", c.name, err)
@@ -184,5 +190,20 @@ func TestIdentityPolicy_Match(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: err = %v, want %q", c.name, err, c.want)
 		}
+	}
+}
+
+// Spec: §4.7.9 — an empty identity or issuer matches nothing, even under
+// a policy that lists an empty entry or names an empty issuer.
+func TestIdentityPolicy_MatchRefusesEmptyValues(t *testing.T) {
+	t.Parallel()
+	open := IdentityPolicy{Identities: []string{""}}
+	if err := open.match(CertificateFields{}); err == nil || !strings.Contains(err.Error(), "certificate identity mismatch") {
+		t.Fatalf("empty identity: err = %v", err)
+	}
+	open.Identities = []string{"alice@acme.com"}
+	fields := CertificateFields{Identity: CertField{Value: "alice@acme.com", Present: true}}
+	if err := open.match(fields); err == nil || !strings.Contains(err.Error(), "OIDC issuer mismatch") {
+		t.Fatalf("empty issuer: err = %v", err)
 	}
 }

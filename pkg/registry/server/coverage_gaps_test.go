@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/objectstore"
@@ -315,6 +316,36 @@ func TestWriteReingestError_SentinelMapping(t *testing.T) {
 		}
 		if rec.Code != http.StatusUnprocessableEntity || body.Code != "ingest.lint_failed" || len(body.Details.Removed) != 1 || body.Details.Removed[0] != "ops/gone" {
 			t.Errorf("status=%d body=%s, want 422 ingest.lint_failed with details.removed [ops/gone]", rec.Code, rec.Body.String())
+		}
+	})
+	// Spec: §7.3.1 (Git fetch: Deadline) — a Git snapshot that reached
+	// PODIUM_GIT_FETCH_TIMEOUT answers with the details that name the
+	// constraint, the setting, the operation, and the depth of the round.
+	t.Run("source_unreachable_fetch_deadline", func(t *testing.T) {
+		t.Parallel()
+		stop := make(chan struct{})
+		remote := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			select {
+			case <-r.Context().Done():
+			case <-stop:
+			}
+		}))
+		t.Cleanup(remote.Close)
+		t.Cleanup(func() { close(stop) })
+		_, err := source.Git{FetchTimeout: 100 * time.Millisecond, FetchDepth: 8}.Snapshot(context.Background(),
+			source.LayerConfig{Repo: remote.URL + "/acme/layer.git", Ref: "main"})
+		rec := httptest.NewRecorder()
+		writeReingestError(rec, err, nil)
+		var body struct {
+			Code    string         `json:"code"`
+			Details map[string]any `json:"details"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]any{"constraint": "fetch_deadline", "setting": "PODIUM_GIT_FETCH_TIMEOUT", "operation": "snapshot", "depth": float64(8)}
+		if rec.Code != http.StatusBadGateway || body.Code != "ingest.source_unreachable" || fmt.Sprint(body.Details) != fmt.Sprint(want) {
+			t.Errorf("status=%d body=%s, want 502 ingest.source_unreachable with details %v", rec.Code, rec.Body.String(), want)
 		}
 	})
 }

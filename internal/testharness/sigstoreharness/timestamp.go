@@ -10,6 +10,9 @@ import (
 	"fmt"
 	"math/big"
 	"time"
+
+	// Register SHA-384 for crypto.Hash.New in hashOf.
+	_ "crypto/sha512"
 )
 
 var (
@@ -18,8 +21,12 @@ var (
 	oidAttrContentType   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 3}
 	oidAttrMessageDigest = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4}
 	oidSHA256            = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
+	oidSHA384            = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 2}
 	oidECDSAWithSHA256   = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
-	oidTSAPolicy         = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 2, 1}
+	// oidTSAPolicy is the Sigstore timestamp authority's baseline policy.
+	// The timestamp-authority verifier reserves 1.3.6.1.4.1.57264.2.1 for
+	// ML-DSA chains and refuses it for an ECDSA or RSA signer.
+	oidTSAPolicy = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 2}
 )
 
 // TSOpt adjusts one RFC 3161 token built by TimestampToken.
@@ -38,6 +45,40 @@ type tsConfig struct {
 	digestMismatch bool
 	flipSignature  bool
 	skid           bool
+	// hash is the SignerInfo digest algorithm: it digests the TSTInfo for
+	// the messageDigest attribute and the signed attributes for the
+	// signature. The message imprint stays SHA-256 whatever it is.
+	hash      crypto.Hash
+	digestOID asn1.ObjectIdentifier
+	// embedChain embeds the signer and the authority root, set by
+	// WithEmbeddedChain and applied by the bundle builder.
+	embedChain bool
+	// bare writes the token itself in a bundle, without the
+	// TimeStampResp around it.
+	bare bool
+}
+
+// WithBareToken writes the token in a bundle without the TimeStampResp
+// that a bundle's signedTimestamp member holds.
+func WithBareToken() TSOpt { return func(c *tsConfig) { c.bare = true } }
+
+// WithGenTime sets the token's genTime.
+func WithGenTime(t time.Time) TSOpt { return func(c *tsConfig) { c.genTime = t } }
+
+// WithEmbeddedChain embeds the signer certificate and the authority's
+// root, two certificates, in the token of a bundle.
+func WithEmbeddedChain() TSOpt { return func(c *tsConfig) { c.embedChain = true } }
+
+// WithCorruptTimestamp flips a bit of the token's signature, so the token
+// verifies under no authority.
+func WithCorruptTimestamp() TSOpt { return func(c *tsConfig) { c.flipSignature = true } }
+
+// digestOIDOf returns the algorithm identifier of h, SHA-256 or SHA-384.
+func digestOIDOf(h crypto.Hash) asn1.ObjectIdentifier {
+	if h == crypto.SHA384 {
+		return oidSHA384
+	}
+	return oidSHA256
 }
 
 // WithTwoSigners writes the SignerInfo twice.
@@ -81,6 +122,8 @@ func (h *Harness) defaultTSConfig(imprint []byte) tsConfig {
 		embed:       []*x509.Certificate{h.tsaLeaf.cert},
 		contentType: oidTSTInfo,
 		sigAlg:      oidECDSAWithSHA256,
+		hash:        crypto.SHA256,
+		digestOID:   oidSHA256,
 	}
 }
 
@@ -114,7 +157,7 @@ func buildToken(c tsConfig) ([]byte, error) {
 	if c.twoSigners {
 		infos = append(infos, si)
 	}
-	parts := [][]byte{w.marshal(3, ""), setOf(seq(w.marshal(oidSHA256, ""))), eci}
+	parts := [][]byte{w.marshal(3, ""), setOf(seq(w.marshal(c.digestOID, ""))), eci}
 	if len(c.embed) > 0 {
 		var raw []byte
 		for _, cert := range c.embed {
@@ -147,7 +190,7 @@ func tstInfo(w *derWriter, c tsConfig) []byte {
 // tag, so the signature covers the SET form while the token carries the
 // [0] form.
 func signerInfo(w *derWriter, c tsConfig, tst []byte) ([]byte, error) {
-	md := sha256.Sum256(tst)
+	md := hashOf(c.hash, tst)
 	if c.digestMismatch {
 		md[0] ^= 0xff
 	}
@@ -159,8 +202,8 @@ func signerInfo(w *derWriter, c tsConfig, tst []byte) ([]byte, error) {
 	if c.noSignedAttrs {
 		signed = tst
 	}
-	digest := sha256.Sum256(signed)
-	sig, err := c.signer.key.Sign(rand.Reader, digest[:], crypto.SHA256)
+	digest := hashOf(c.hash, signed)
+	sig, err := c.signer.key.Sign(rand.Reader, digest, c.hash)
 	if err != nil {
 		return nil, fmt.Errorf("sign timestamp: %w", err)
 	}
@@ -171,12 +214,19 @@ func signerInfo(w *derWriter, c tsConfig, tst []byte) ([]byte, error) {
 	if c.skid {
 		version, sid = 3, tlv(tagContext0Raw, c.signer.cert.SubjectKeyId)
 	}
-	parts := [][]byte{w.marshal(version, ""), sid, seq(w.marshal(oidSHA256, ""))}
+	parts := [][]byte{w.marshal(version, ""), sid, seq(w.marshal(c.digestOID, ""))}
 	if !c.noSignedAttrs {
 		parts = append(parts, append([]byte{tagContext0}, attrs[1:]...))
 	}
 	parts = append(parts, seq(w.marshal(c.sigAlg, "")), octets(sig))
 	return seq(parts...), nil
+}
+
+// hashOf returns the digest of b under h, which is SHA-256 or SHA-384.
+func hashOf(h crypto.Hash, b []byte) []byte {
+	d := h.New()
+	d.Write(b)
+	return d.Sum(nil)
 }
 
 // timeStampResp encodes a TimeStampResp with status and, when token is

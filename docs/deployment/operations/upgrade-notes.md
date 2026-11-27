@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the unreadable files of an unparseable package, an ARTIFACT.md below a dot-prefixed directory, symbolic-link layer paths, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, the refusal of a start without the identity provider a registry ran with, and the package digest of stored versions, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and bounded Git fetch, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the unreadable files of an unparseable package, an ARTIFACT.md below a dot-prefixed directory, symbolic-link layer paths, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, the refusal of a start without the identity provider a registry ran with, the Sigstore keyless signature as a Sigstore bundle, and the package digest of stored versions, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -17,8 +17,26 @@ The current release is 0.7.0. The notes in this section describe behavior on `ma
 From 0.8.0, every ingest of a `git` layer clones under the deadline that `PODIUM_GIT_FETCH_TIMEOUT` or the `registry.yaml` key `git_fetch_timeout` sets, 10 minutes by default. 0.7.0 set no deadline.
 
 - A clone that takes longer than the deadline fails that ingest with `ingest.source_unreachable`, and the message names the setting. The layer keeps serving the artifacts of its last completed ingest.
-- The longest clone of a layer is the full-history clone that each ingest makes once the layer has a recorded reference, which the force-push check needs. Before the upgrade, compare that clone time for the largest `git` layer with the default, and set `PODIUM_GIT_FETCH_TIMEOUT` above it where it is longer.
+- The deadline covers the clone and every deeper fetch of one ingest (*Bounded Git fetch* below). The longest ingest of a layer is one that fetches the complete history: after a force push, or when the last ingested commit lies far behind the tip. Before the upgrade, compare the full clone time of the largest `git` layer with the default, and set `PODIUM_GIT_FETCH_TIMEOUT` above it where it is longer.
 - A value that is not a duration above zero, such as `0s` or `600`, refuses startup with `config.invalid`.
+- A rollback to 0.7.0 needs no step. 0.7.0 does not read the variable and ignores the key.
+
+### Sigstore trusted roots for author attestation
+
+From 0.8.0, the registry loads the Sigstore instances and trusted roots of author attestation verification at its start (spec §4.7.11). No ingest step verifies attestations yet. [Configuration](../../reference/configuration#author-attestation) lists the settings.
+
+- The refresh of the Sigstore public-good trusted root, a request to `https://tuf-repo-cdn.sigstore.dev` every 24 hours that writes `sigstore/public-good/` beside the SQLite store file, runs only on a registry that verifies attestations on the public-good instance. 0.8.0 verifies none at ingest, so a 0.8.0 registry makes no such request and creates no such directory. When verification arrives, an air-gapped registry sets `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` to a trusted root file, which turns the refresh off, and a registry deployed with the Helm chart, whose root filesystem is read-only, points `PODIUM_SQLITE_PATH` at a mounted writable volume to keep the root copy across restarts.
+- A start refuses with `config.invalid` when `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE`, `PODIUM_SIGSTORE_ROOT_REFRESH`, `PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT`, `PODIUM_SIGSTORE_ROOT_MAX_AGE`, or a `sigstore.instances` entry of `registry.yaml` holds a value the registry cannot use, such as a trusted root file that cannot be read or a refresh interval below `1m`. 0.7.0 read none of them. Before the upgrade, check that any of them a deployment already sets holds a valid value.
+- `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` keeps its meaning for `podium sign` and `podium verify`. The registry does not read it for attestations.
+- A rollback to 0.7.0 needs no step. 0.7.0 ignores the settings and the `sigstore/` directory, which can be deleted.
+
+### Bounded Git fetch
+
+From 0.8.0, each ingest of a `git` layer clones the tracked ref alone, with no tags, at the depth that `PODIUM_GIT_FETCH_DEPTH` or the `registry.yaml` key `git_fetch_depth` sets, 16 commits by default, and fetches again at four times the depth while the force-push check cannot decide from the history it holds. 0.7.0 cloned the complete history once a layer had a last ingested commit.
+
+- A remote that cannot serve the history the check needs fails the ingest with `ingest.source_unreachable`. Such a remote is a shallow mirror whose history does not reach the layer's last ingested commit. 0.7.0 reported such an ingest as a rewritten history, which emitted `layer.history_rewritten` and, under `force_push_policy: strict`, refused the ingest. Before the upgrade, point each layer that tracks a shallow mirror at a repository with the full history, or deepen the mirror so that it holds the last ingested commit.
+- A value of `PODIUM_GIT_FETCH_DEPTH` or `git_fetch_depth` that is not an integer from 1 to 2147483646 refuses startup with `config.invalid`.
+- An ingest that reaches `PODIUM_GIT_FETCH_TIMEOUT` reports `details.constraint: "fetch_deadline"` in the reingest response, with the depth of the fetch that was running.
 - A rollback to 0.7.0 needs no step. 0.7.0 does not read the variable and ignores the key.
 
 ### Workspace `.podium` that is a symbolic link
@@ -140,6 +158,16 @@ From 0.8.0, the registry stores the package digest of each version it ingests an
 - When the write of one version's digest fails, the start logs it and continues, and the next start computes the digests again. A version whose content hash another replica rewrites during the computation is read again and computed from its current bytes. When its hash changes a second time, the next start computes the digests again.
 - `podium admin migrate-to-standard` copies each version's digest and removes the target's completion record, so the target's next start computes the digest of each version that the source stored without one.
 - A rollback to 0.7.0 needs no step. 0.7.0 ignores the `package_digest` column.
+
+### Sigstore keyless signatures as Sigstore bundles
+
+From 0.8.0, `podium sign --provider sigstore-keyless` prints a Sigstore bundle of version 0.3, and `podium verify --provider sigstore-keyless` verifies the bundle with `sigstore-go`. 0.7.0 printed a keyless envelope with `cert`, `signature`, `tlog`, and `timestamp` members. 0.8.0 refuses such an envelope with `materialize.signature_invalid`, and the message states that a keyless envelope from 0.7.0 or earlier is not accepted. 0.8.0 converts no envelope.
+
+- The registry stores no keyless signature. It signs at ingest under its registry-managed key, `podium admin sign-stored-rows` re-signs stored rows under that key, and every delivery signature is registry-managed, so stored rows, delivery signatures, `podium-mcp`, server-source `podium sync`, and the language SDKs need no step.
+- Sign again, with `podium sign --provider sigstore-keyless` under 0.8.0, each content hash whose 0.7.0 keyless envelope is kept outside Podium, and replace the envelope with the bundle.
+- `podium verify` reads `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` with `sigstore-go`. When the file lists a certificate transparency log, the certificate must carry a signed certificate timestamp, which certificates from the public-good and staging Fulcio instances carry. A file whose `tlogs` entry has no `validFor.start`, or whose `tlogs` or `ctlogs` entry carries a key type the library does not read, no longer loads. The `trusted_root.json` that the Sigstore TUF repository publishes loads.
+- The certificate checks are narrower. The subject alternative name holds exactly one email address or URI, which `PODIUM_SIGSTORE_CERT_IDENTITY` lists; the issuer comes from the Issuer (V2) extension alone; and the key is an ECDSA P-256 key. The certificates Fulcio issues to `podium sign` meet these rules.
+- A rollback to 0.7.0 needs a step for each bundle that 0.8.0 printed and 0.7.0 must verify: 0.7.0 refuses the bundle, so sign the content hash again under 0.7.0.
 
 ## 0.7.0
 
