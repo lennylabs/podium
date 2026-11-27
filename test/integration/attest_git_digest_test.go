@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"crypto/sha256"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -48,6 +49,12 @@ func writeGitTree(t *testing.T, st storage.Storer, files map[string]gitEntry) pl
 	}
 	var entries []object.TreeEntry
 	for name, e := range blobs {
+		if e.mode == filemode.Submodule {
+			// A gitlink records a commit of another repository; no object
+			// of this repository backs it.
+			entries = append(entries, object.TreeEntry{Name: name, Mode: e.mode, Hash: plumbing.NewHash(e.data)})
+			continue
+		}
 		obj := st.NewEncodedObject()
 		obj.SetType(plumbing.BlobObject)
 		w, err := obj.Writer()
@@ -87,6 +94,71 @@ func writeGitTree(t *testing.T, st storage.Storer, files map[string]gitEntry) pl
 	return h
 }
 
+// gitSnapshotFS commits tree as the only commit of a bare repository's main
+// branch and returns the snapshot the git layer source takes of it.
+func gitSnapshotFS(t *testing.T, tree map[string]gitEntry) fs.FS {
+	t.Helper()
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, true)
+	if err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	treeHash := writeGitTree(t, repo.Storer, tree)
+	sig := object.Signature{Name: "alice", Email: "alice@acme.com", When: time.Unix(0, 0).UTC()}
+	commit := repo.Storer.NewEncodedObject()
+	if err := (&object.Commit{Author: sig, Committer: sig, Message: "c", TreeHash: treeHash}).Encode(commit); err != nil {
+		t.Fatalf("encode commit: %v", err)
+	}
+	head, err := repo.Storer.SetEncodedObject(commit)
+	if err != nil {
+		t.Fatalf("store commit: %v", err)
+	}
+	if err := repo.Storer.SetReference(plumbing.NewHashReference("refs/heads/main", head)); err != nil {
+		t.Fatalf("set main: %v", err)
+	}
+	if err := repo.Storer.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, "refs/heads/main")); err != nil {
+		t.Fatalf("set HEAD: %v", err)
+	}
+	snap, err := (source.Git{}).Snapshot(context.Background(), source.LayerConfig{Repo: "file://" + dir, Ref: "main"})
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	return snap.Files
+}
+
+// Spec: §4.7.6, §4.4, §11 (Package and layer digest tests) — a Git
+// submodule inside an artifact package of a git layer is a gitlink entry,
+// which the snapshot holds no files for, so it fails the walk with an error
+// that names the gitlink and the layer has no digest. A gitlink outside every
+// package is never read, and a gitlink that only shares a manifest's name is
+// no manifest.
+func TestAttestDigest_GitlinkInAPackageFailsTheWalk(t *testing.T) {
+	t.Parallel()
+	const manifestMD = "---\ntype: rule\nversion: 1.0.0\ndescription: Apply the rule.\nrule_mode: always\n---\n\nBody.\n"
+	const sub = "0123456789abcdef0123456789abcdef01234567"
+	inPackage := map[string]gitEntry{
+		"team/pkg/ARTIFACT.md": {data: manifestMD, mode: filemode.Regular},
+		"team/pkg/vendor":      {data: sub, mode: filemode.Submodule},
+	}
+	_, err := ingest.LayerContent(gitSnapshotFS(t, inPackage))
+	if err == nil || !strings.Contains(err.Error(), "team/pkg/vendor") || !strings.Contains(err.Error(), "gitlink") {
+		t.Errorf("a gitlink inside a package = %v, want a failed walk that names the gitlink", err)
+	}
+
+	outside := map[string]gitEntry{
+		"team/pkg/ARTIFACT.md": {data: manifestMD, mode: filemode.Regular},
+		"team/vendor":          {data: sub, mode: filemode.Submodule},
+		"other/ARTIFACT.md":    {data: sub, mode: filemode.Submodule},
+	}
+	got, err := ingest.LayerContent(gitSnapshotFS(t, outside))
+	if err != nil {
+		t.Fatalf("gitlinks outside every package = %v, want the layer walked", err)
+	}
+	if len(got.Subjects) != 1 || got.Subjects[0].Name != "team/pkg@1.0.0" {
+		t.Errorf("subjects = %+v, want team/pkg@1.0.0 alone", got.Subjects)
+	}
+}
+
 // Spec: §4.7.6, §11 (Package and layer digest tests) — the package digest of
 // a git layer covers the blob bytes and tree paths of the snapshot commit,
 // which are the bytes ingest reads, stores, and serves. A symbolic-link entry
@@ -115,33 +187,7 @@ func TestAttestDigest_GitSnapshotDigestsTheBlobBytes(t *testing.T) {
 		"team/pkg/.cache/blob.json": {data: "{}\n", mode: filemode.Regular},
 	}
 
-	dir := t.TempDir()
-	repo, err := git.PlainInit(dir, true)
-	if err != nil {
-		t.Fatalf("PlainInit: %v", err)
-	}
-	treeHash := writeGitTree(t, repo.Storer, tree)
-	sig := object.Signature{Name: "alice", Email: "alice@acme.com", When: time.Unix(0, 0).UTC()}
-	commit := repo.Storer.NewEncodedObject()
-	if err := (&object.Commit{Author: sig, Committer: sig, Message: "c", TreeHash: treeHash}).Encode(commit); err != nil {
-		t.Fatalf("encode commit: %v", err)
-	}
-	head, err := repo.Storer.SetEncodedObject(commit)
-	if err != nil {
-		t.Fatalf("store commit: %v", err)
-	}
-	if err := repo.Storer.SetReference(plumbing.NewHashReference("refs/heads/main", head)); err != nil {
-		t.Fatalf("set main: %v", err)
-	}
-	if err := repo.Storer.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, "refs/heads/main")); err != nil {
-		t.Fatalf("set HEAD: %v", err)
-	}
-
-	snap, err := (source.Git{}).Snapshot(context.Background(), source.LayerConfig{Repo: "file://" + dir, Ref: "main"})
-	if err != nil {
-		t.Fatalf("Snapshot: %v", err)
-	}
-	got, err := ingest.LayerContent(snap.Files)
+	got, err := ingest.LayerContent(gitSnapshotFS(t, tree))
 	if err != nil {
 		t.Fatalf("ingest.LayerContent: %v", err)
 	}

@@ -397,6 +397,60 @@ func TestAttestDigest_WalksAgreeOnEveryLayout(t *testing.T) {
 	}
 }
 
+// Spec: §4.7.6, §11 (Package and layer digest tests) — a symbolic link to a
+// file inside a package is read as its target's bytes, and a symbolic link to
+// a directory inside a package fails both walks, so the layer has no digest.
+func TestAttestDigest_SymbolicLinksInsideAPackage(t *testing.T) {
+	t.Parallel()
+	const manifestMD = "---\ntype: rule\nversion: 1.0.0\ndescription: Apply the rule.\nrule_mode: always\n---\n\nBody.\n"
+	build := func(t *testing.T, target, link string) string {
+		t.Helper()
+		root := t.TempDir()
+		for p, b := range map[string]string{"team/pkg/ARTIFACT.md": manifestMD, "shared/refs/common.md": "Shared.\n"} {
+			full := filepath.Join(root, filepath.FromSlash(p))
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
+			if err := os.WriteFile(full, []byte(b), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+		}
+		if err := os.Symlink(target, filepath.Join(root, "team", "pkg", link)); err != nil {
+			t.Fatalf("Symlink: %v", err)
+		}
+		return root
+	}
+
+	fileLink := build(t, "../../shared/refs/common.md", "common.md")
+	fsLayer, err := filesystem.LayerContent(filesystem.Layer{ID: "L", Path: fileLink})
+	if err != nil {
+		t.Fatalf("filesystem.LayerContent with a file link: %v", err)
+	}
+	ingLayer, err := ingest.LayerContent(os.DirFS(fileLink))
+	if err != nil {
+		t.Fatalf("ingest.LayerContent with a file link: %v", err)
+	}
+	want := attest.PackageDigest(attest.Package{
+		Resolved: true,
+		Fields:   manifest.ResolvedFields{Type: manifest.TypeRule},
+		Entries: map[string]attest.Sum{
+			"ARTIFACT.md": sha256.Sum256([]byte(manifestMD)),
+			"common.md":   sha256.Sum256([]byte("Shared.\n")),
+		},
+	})
+	if fsLayer.Subjects[0].Digest != want || ingLayer.Subjects[0].Digest != want {
+		t.Errorf("file link digests = %s (filesystem), %s (ingest), want the target's bytes %s", fsLayer.Subjects[0].Digest, ingLayer.Subjects[0].Digest, want)
+	}
+
+	dirLink := build(t, "../../shared/refs", "refs")
+	if _, err := filesystem.LayerContent(filesystem.Layer{ID: "L", Path: dirLink}); err == nil {
+		t.Errorf("filesystem.LayerContent with a directory link = nil, want a failed walk")
+	}
+	if _, err := ingest.LayerContent(os.DirFS(dirLink)); err == nil {
+		t.Errorf("ingest.LayerContent with a directory link = nil, want a failed walk")
+	}
+}
+
 // Spec: §4.7.6, §11 (Package and layer digest tests) — a layer path that is
 // a symbolic link to the corpus is walked as the directory it names, so the
 // filesystem-source walk, the ingest walk over the same path, and Walk agree
@@ -422,6 +476,24 @@ func TestAttestDigest_SymlinkedLayerRoot(t *testing.T) {
 	records, err := reg.Walk(filesystem.WalkOptions{OnDrop: func(layer.Drop) {}})
 	if err != nil || len(records) == 0 {
 		t.Errorf("Walk through the link = %d records, %v, want the corpus records", len(records), err)
+	}
+	direct := &filesystem.Registry{Layers: []filesystem.Layer{{ID: "corpus", Path: corpusDir(t)}}}
+	want, err := direct.WalkDomains()
+	if err != nil || len(want) == 0 {
+		t.Fatalf("WalkDomains of the corpus = %d, %v", len(want), err)
+	}
+	linked, err := reg.WalkDomains()
+	if err != nil || len(linked) != len(want) {
+		t.Errorf("WalkDomains through the link = %d domains, %v, want the corpus's %d", len(linked), err, len(want))
+	}
+	for i := range linked {
+		if i < len(want) && linked[i].Path != want[i].Path {
+			t.Errorf("domain %d through the link = %q, want %q", i, linked[i].Path, want[i].Path)
+		}
+	}
+	gone := &filesystem.Registry{Layers: []filesystem.Layer{{ID: "gone", Path: filepath.Join(t.TempDir(), "absent")}}}
+	if _, err := gone.WalkDomains(); err == nil {
+		t.Errorf("WalkDomains of an absent path = nil, want the resolve error")
 	}
 	if _, err := filesystem.LayerContent(filesystem.Layer{ID: "gone", Path: filepath.Join(t.TempDir(), "absent")}); err == nil {
 		t.Errorf("LayerContent of an absent path = nil, want the resolve error")
