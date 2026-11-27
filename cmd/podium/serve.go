@@ -22,6 +22,9 @@ func serveCmd(args []string) int {
 	bind := fs.String("bind", "", "address to listen on (overrides PODIUM_BIND)")
 	publicMode := fs.Bool("public-mode", false, "run in public mode (overrides PODIUM_PUBLIC_MODE)")
 	allowPublicBind := fs.Bool("allow-public-bind", false, "allow a registry that authenticates no caller (public mode, no identity provider, or PODIUM_IDENTITY_PROVIDER=external), or one under trusted-headers, to bind a non-loopback address (overrides PODIUM_ALLOW_PUBLIC_BIND)")
+	// §13.10: acknowledges, for one start, that a registry which ran with
+	// verified identity now starts without a request-time verifier.
+	allowIdentityProviderRemoval := fs.Bool("allow-identity-provider-removal", false, "start without a request-time identity verifier on a store an earlier verified start recorded, clearing that record; remove it after this start (overrides PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL)")
 	standalone := fs.Bool("standalone", false, "alias for the zero-flag standalone bootstrap")
 	// §13.10: --strict refuses to start without explicit configuration instead
 	// of auto-entering standalone mode (the same effect as PODIUM_NO_AUTOSTANDALONE).
@@ -63,6 +66,9 @@ func serveCmd(args []string) int {
 	}
 	if *allowPublicBind {
 		_ = os.Setenv("PODIUM_ALLOW_PUBLIC_BIND", "true")
+	}
+	if *allowIdentityProviderRemoval {
+		_ = os.Setenv("PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL", "true")
 	}
 	if *configFile != "" {
 		_ = os.Setenv("PODIUM_CONFIG_FILE", *configFile)

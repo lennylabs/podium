@@ -158,6 +158,7 @@ podium serve [--standalone] [--strict]
              [--config <path>] [--bind <addr>]
              [--layer-path <path>]
              [--public-mode] [--allow-public-bind]
+             [--allow-identity-provider-removal]
              [--no-embeddings] [--presign-ttl-seconds <n>]
              [--sign registry-key|none]
              [--web-ui] [--web-ui-allow-public-bind]
@@ -175,6 +176,7 @@ Each flag overrides the matching `PODIUM_*` environment variable for the lifetim
 | `--layer-path <path>` | Standalone: register layers rooted at this path, as described in the notes. Equivalent to `PODIUM_LAYER_PATH` and to the `layer_path` key under the top-level `registry:` mapping in `registry.yaml`. Precedence: CLI flag, then environment variable, then config file. |
 | `--public-mode` | Bypass authentication and visibility filtering. Mutually exclusive with an identity provider. Overrides `PODIUM_PUBLIC_MODE`. |
 | `--allow-public-bind` | Allow a non-loopback bind in public mode, with no identity provider configured, with `PODIUM_IDENTITY_PROVIDER=external`, or with trusted headers, typically behind an authenticated reverse proxy. Without it, a registry in public mode, with no identity provider, or with `PODIUM_IDENTITY_PROVIDER=external` refuses a non-loopback bind with `config.public_bind_refused`. Overrides `PODIUM_ALLOW_PUBLIC_BIND`. |
+| `--allow-identity-provider-removal` | Start without a request-time identity verifier on a registry whose store records that an earlier start ran with one. Without it, such a start exits with `config.identity_provider_removed`. The start clears that record, so pass the flag for one start only. A flag left in place disables the refusal for every later removal, and a start on which it has no effect logs a warning. Overrides `PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL`. |
 | `--no-embeddings` | Disable embeddings and fall back to BM25-only search. Overrides `PODIUM_NO_EMBEDDINGS`. |
 | `--presign-ttl-seconds <n>` | Presigned-URL TTL in seconds. Overrides `PODIUM_PRESIGN_TTL_SECONDS` and the `object_store.presign_ttl_seconds` key in `registry.yaml`. |
 | `--sign <mode>` | Ingest signing mode: `registry-key` (the default) or `none`. Overrides `PODIUM_SIGN`. The notes describe each mode. |

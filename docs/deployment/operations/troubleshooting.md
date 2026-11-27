@@ -40,6 +40,7 @@ This page indexes registry problems by symptom and by error code, and links each
 | `config.audit_anchor_key_shared` | [Audit and observability](observability#the-registry-refuses-to-start-with-configaudit_anchor_key_shared) |
 | `config.scim_store_unavailable` | [Startup refusals](#the-registry-refuses-to-start-with-configscim_store_unavailable) |
 | `config.multitenant_no_verifier` | [Multi-tenant startup refusals](../modes/helm-chart#multi-tenant-startup-refusals) |
+| `config.identity_provider_removed` | [Removing an identity provider](../identity/#removing-an-identity-provider) |
 | `config.public_bind_refused` | [Running without a provider](../identity/#running-without-a-provider) for a registry with no identity provider, [External authentication](../identity/#external-authentication) for a registry with `PODIUM_IDENTITY_PROVIDER=external`, and [Public mode](../modes/single-node#public-mode) for a registry in public mode |
 | `config.identity_provider_unverified` | [Identity providers](../identity/#identity-providers) lists the values the registry starts with |
 | `materialize.signature_missing` | [Signing keys](signing-keys#loads-fail-with-materializesignature_missing) |

@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the removal of mcp-server artifacts from the MCP server, and the refusal of an unrecognized identity provider value, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, and the refusal of a start without the identity provider a registry ran with, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -81,6 +81,17 @@ From 0.8.0, the registry starts only with a `PODIUM_IDENTITY_PROVIDER` or `ident
 - A registry that set a mistyped provider name served with visibility unenforced. Correct the name; the registry then applies layer visibility, so a caller that saw every layer under 0.7.0 sees only the layers its identity admits.
 - A multi-tenant registry with an unrecognized value now fails with `config.identity_provider_unverified` rather than `config.multitenant_no_verifier`.
 - A rollback to 0.7.0 needs no step. 0.7.0 starts with `external` as it started with any free-form label.
+
+### Start without the identity provider a registry ran with
+
+From 0.8.0, each start under `oidc-jwt`, `trusted-headers`, or `injected-session-token` records in the metadata store that the registry runs with verified identity. A later start with no identity provider, with `PODIUM_IDENTITY_PROVIDER=external`, or in public mode exits with `config.identity_provider_removed` while the store holds the record. 0.7.0 started such a registry and showed every layer to every caller.
+
+- The first 0.8.0 start under a verified provider writes the record. A registry that has never started under one, such as a standalone registry or a `--layer-path` bootstrap without a provider, or the Docker Compose evaluation stack, holds no record and starts as before.
+- A deployment that intentionally drops its identity provider sets `PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL=true`, or passes `--allow-identity-provider-removal` to `podium serve`, for one start. That start deletes the record and logs a warning that names the removal. Remove the setting after that start, because while it stays set every later start without a verifier proceeds without the refusal. A Helm install sets the variable through `extraEnv`, and a later start on which the entry has no effect logs a warning to remove it.
+- The refused start writes nothing to the metadata store, so during a rolling update the pods that still run with the identity provider keep serving with their layer visibility unchanged.
+- `podium admin migrate-to-standard` copies the record from its source to its target.
+- A start that exits with the code after an upgrade, where no removal was intended, has lost an identity-provider setting. Restore it, as [Removing an identity provider](../identity/#removing-an-identity-provider) describes.
+- A rollback to 0.7.0 needs no step. 0.7.0 ignores the record and the variable.
 
 ## 0.7.0
 

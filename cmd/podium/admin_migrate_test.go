@@ -1125,3 +1125,61 @@ func TestAdminMigrateToStandard_SameIDTenantOnTarget(t *testing.T) {
 		}
 	})
 }
+
+// Spec: §13.10 (Identity provider removed between starts) — the migration
+// copies the source's verified-identity record to the target, so the target
+// refuses a start that drops the identity provider the source ran with, and a
+// source without the record leaves the target without one.
+func TestAdminMigrateToStandard_CopiesVerifiedIdentityRecord(t *testing.T) {
+	ctx := context.Background()
+	recorded := func(t *testing.T, path string) bool {
+		t.Helper()
+		st, err := store.OpenSQLite(path)
+		if err != nil {
+			t.Fatalf("open %s: %v", path, err)
+		}
+		defer func() { _ = st.Close() }()
+		ok, err := st.DataMigrationApplied(ctx, store.DeploymentMarkerVerifiedIdentity)
+		if err != nil {
+			t.Fatalf("read record: %v", err)
+		}
+		return ok
+	}
+	got := map[bool]bool{}
+	for _, withRecord := range []bool{true, false} {
+		dir := t.TempDir()
+		srcDB, dstDB := filepath.Join(dir, "src.db"), filepath.Join(dir, "dst.db")
+		src, err := store.OpenSQLite(srcDB)
+		if err != nil {
+			t.Fatalf("open source: %v", err)
+		}
+		if err := src.CreateTenant(ctx, store.Tenant{ID: "default", Name: "default"}); err != nil {
+			t.Fatalf("CreateTenant: %v", err)
+		}
+		if err := src.SetDataMigrationApplied(ctx, store.DeploymentMarkerVerifiedIdentity, withRecord); err != nil {
+			t.Fatalf("set record: %v", err)
+		}
+		_ = src.Close()
+		if rc := adminMigrateToStandard([]string{"--source-sqlite", srcDB, "--target-store", "sqlite", "--target-sqlite", dstDB}); rc != 0 {
+			t.Fatalf("source record %v: rc = %d, want 0", withRecord, rc)
+		}
+		got[withRecord] = recorded(t, dstDB)
+	}
+	if !got[true] || got[false] {
+		t.Errorf("target record = %v for a source with it and %v for one without; want true, false", got[true], got[false])
+	}
+}
+
+// Spec: §13.10 (Identity provider removed between starts) — a failed write of
+// the verified-identity record stops the pump before any tenant is copied.
+func TestPumpStore_FailedVerifiedIdentityCopyStopsThePump(t *testing.T) {
+	plan := &migrationPlan{
+		tenants:          []tenantPlan{{tenant: store.Tenant{ID: "default", Name: "default"}}},
+		identityVerified: true,
+	}
+	target := &markerRecorder{Store: store.NewMemory(), markerErr: errors.New("connection refused")}
+	err := pumpStore(context.Background(), plan, target)
+	if err == nil || !strings.Contains(err.Error(), "copy verified-identity record") || target.firstCallIndex("tenant:") >= 0 {
+		t.Errorf("pumpStore = %v with calls %v, want the copy error and no tenant write", err, target.calls)
+	}
+}

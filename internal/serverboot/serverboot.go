@@ -1038,6 +1038,17 @@ func run(ctx context.Context, stop func()) error {
 		defer func() { _ = closer.Close() }()
 	}
 
+	// §13.10 Identity provider removed between starts: refuse a start without
+	// a request-time verifier over a store that recorded verified identity
+	// before the bootstrap below writes anything. A verified replica still
+	// serving this store reads the layer rows the bootstrap writes, so a start
+	// refused after writing them would already have widened that replica's
+	// visibility. The record itself is written once the verifier is installed.
+	identityCheck, err := refuseIdentityProviderRemoval(ctx, st, cfg)
+	if err != nil {
+		return err
+	}
+
 	// Standalone bootstrap: ensure the bootstrapped org exists so initial
 	// requests don't fail on missing-tenant lookups (§13.10 auto-bootstrap).
 	// spec: §4.7.1 — the org ID is a UUID while "default" stays the
@@ -1673,6 +1684,14 @@ func run(ctx context.Context, stop func()) error {
 		logUnappliedVisibility(ctx, st, tenantID, cfg.publicMode, log.Printf)
 	}
 
+	// §13.10 Identity provider removed between starts: a start whose
+	// verifier is installed records verified identity, and an acknowledged
+	// removal clears the record. It runs before server.New, and it checks
+	// verifierInstalled against the prediction the removal check used.
+	if err := recordVerifiedIdentity(ctx, st, cfg, verifierInstalled, identityCheck); err != nil {
+		return err
+	}
+
 	srv := server.New(registry, bootOpts...)
 
 	// §7.3.1 layer-management endpoint: mounted alongside the meta-
@@ -2098,6 +2117,13 @@ type Config struct {
 	// PODIUM_ALLOW_PUBLIC_BIND). Public mode refuses a non-loopback bind
 	// unless this is set.
 	allowPublicBind bool
+	// allowIdentityProviderRemoval is the §13.10 acknowledgement
+	// (--allow-identity-provider-removal /
+	// PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL) that a registry which ran with
+	// verified identity now starts without a request-time verifier. It is
+	// meant for one start, which clears the record; it has no registry.yaml
+	// key for that reason.
+	allowIdentityProviderRemoval bool
 	// webUI mounts the §13.10 single-page web UI at /app/ and redirects the
 	// root to it (--web-ui /
 	// PODIUM_WEB_UI). webUIAllowPublicBind (--web-ui-allow-public-bind /
@@ -2472,6 +2498,7 @@ func (c *Config) Settings() []Setting {
 		{"bind", c.bind, envOrSrc("PODIUM_BIND", defaultSrc)},
 		{"public_mode", boolStr(c.publicMode), envOrSrc("PODIUM_PUBLIC_MODE", defaultSrc)},
 		{"allow_public_bind", boolStr(c.allowPublicBind), envOrSrc("PODIUM_ALLOW_PUBLIC_BIND", defaultSrc)},
+		{"allow_identity_provider_removal", boolStr(c.allowIdentityProviderRemoval), envOrSrc("PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL", defaultSrc)},
 		{"identity_provider", c.identityProvider, envOrSrc("PODIUM_IDENTITY_PROVIDER", yamlSrc)},
 		{"oauth_audience", strings.Join(c.oauthAudiences, ","), envOrSrc("PODIUM_OAUTH_AUDIENCE", yamlSrc)},
 		{"identity_provider.authorization_endpoint", c.oauthAuthorizationEndpoint, envOrSrc("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT", yamlSrc)},
@@ -2558,6 +2585,7 @@ func LoadConfig() *Config {
 		webUIOAuthExchangeTimeout:       envPositiveDuration("PODIUM_WEB_UI_OAUTH_EXCHANGE_TIMEOUT", defaultWebUIOAuthExchangeTimeout),
 		migrationObjectReadTimeout:      envPositiveDuration("PODIUM_MIGRATION_OBJECT_READ_TIMEOUT", objectstore.DefaultReadTimeout),
 		signMode:                        os.Getenv("PODIUM_SIGN"),
+		allowIdentityProviderRemoval:    isTrue(os.Getenv("PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL")),
 		identityProvider:                os.Getenv("PODIUM_IDENTITY_PROVIDER"),
 		oauthAudiences:                  identity.NormalizeAudiences(splitCSVTrim(os.Getenv("PODIUM_OAUTH_AUDIENCE"))),
 		oauthAuthorizationEndpoint:      os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
