@@ -50,6 +50,18 @@ From 0.8.0, Podium refuses a `.git` path segment, and a segment that a filesyste
 - The Python and TypeScript SDKs skip a workspace overlay that holds such a package, with a warning, and `materialize()` raises `MaterializeError` for a canonical ID or a resource path with a segment that names `.git`.
 - A rollback to 0.7.0 needs no step.
 
+### `mcp-server` artifacts through the MCP server
+
+From 0.8.0, `mcp-server` artifacts are left out of the MCP server's results, as the specification states. The registry applies the filter to every request whose `X-Podium-Client` name is `mcp`, and the MCP server applies it again to workspace-overlay artifacts, to records its content cache serves, and to a registry that does not filter. `search_artifacts` and the `load_domain` notable list leave them out, and `load_artifact` refuses one with `registry.not_found` and writes nothing. 0.7.0 listed them and wrote each loaded server's entry into the harness configuration, such as `.mcp.json` or `.codex/config.toml`.
+
+- A host or script that loads `mcp-server` artifacts through the MCP server receives `registry.not_found` after the upgrade. Deliver them with `podium sync`, which writes them into the harness configuration for the next session, or load them through an SDK.
+- The registry records the refusal as it records a load of an ID that does not exist: an `artifact.loaded` audit event of result size 0 and no load count in the usage report. The MCP server records no local `artifact.loaded` event for it. A search from the MCP server ranks only the other artifacts, so its `total_matched`, its `artifacts.searched` `context.results`, and its usage-report search hits name no `mcp-server` artifact.
+- The registry judges an artifact by the version a request resolves to. An artifact whose latest version is an `mcp-server` is left out of the MCP server's search and domain map even when an earlier version has another type, and a `load_artifact` pinned to that earlier version still loads it.
+- `search_artifacts`, `load_domain`, and `load_artifact` responses carry `Vary: X-Podium-Client`. A caching proxy in front of the registry keys its entries on that header.
+- The filter keys on the self-reported client name and is not access control. A program that sends `X-Podium-Client: name=mcp` loses `mcp-server` artifacts from its own results; send another name, such as `sdk`, to receive them.
+- An entry that an earlier `load_artifact` wrote stays in the harness configuration file. A `podium sync` that writes into the same file rewrites Podium's entries there and keeps the entry only when the synced selection includes that artifact. Otherwise, delete the entry by hand.
+- A rollback to 0.7.0 needs no step.
+
 ### Visibility entries that are empty or hold a control character
 
 From 0.8.0, a layer's `users` and `groups` entries are non-empty strings that contain no control character, such as a line feed, a carriage return, or a tab. 0.7.0 accepted any string, and the SQLite and Postgres stores read an entry containing a line feed back as several entries.

@@ -1981,7 +1981,7 @@ func destFromArgs(args map[string]any) string {
 // absolute regardless of the caller's working directory, so a host that
 // resolves the paths against its own CWD (which can differ from the MCP server
 // process CWD) lands on the correct location. The on-disk write absolutizes
-// internally (materialize.Write -> filepath.Abs), so this only aligns the
+// internally (materialize.WriteKeeping -> filepath.Abs), so this only aligns the
 // reported paths with where the files actually land. A filepath.Abs failure
 // (it only fails when the working directory is unknowable) leaves root
 // unchanged so materialization still proceeds.
@@ -1993,6 +1993,20 @@ func absMaterializeRoot(root string) string {
 		return abs
 	}
 	return root
+}
+
+// writeLoadedArtifact writes the output of one load_artifact under root. A
+// load carries one artifact, so the §6.7 reconciliation of a shared inject or
+// config-merge file is limited to that artifact: its earlier block or entry is
+// replaced, and the blocks and entries every other artifact wrote stay in
+// place. Write would strip them all, so each load would remove what the
+// previous loads added to AGENTS.md, GEMINI.md, or a harness settings file.
+// podium sync writes its whole selection in one batch and reconciles every
+// Podium-owned block and entry instead.
+//
+// Spec: §6.6 step 5, §6.7
+func writeLoadedArtifact(root, id string, out []adapter.File) error {
+	return materialize.WriteKeeping(root, out, func(owner string) bool { return owner != id })
 }
 
 // deliverLoadArtifact runs §6.6 verification and materialization against an
@@ -2018,6 +2032,16 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	}
 	if err := s.verifyServedArtifact(&resp, o); err != nil {
 		return errorResult(err.Error())
+	}
+	// §5: the bridge serves no mcp-server artifact. The registry refuses a
+	// load the bridge sends for one (§7.2.2), so this check covers a record
+	// the content cache holds and a registry that does not apply the filter.
+	// The served type is read after the verification, which binds it to the
+	// record, and the refusal comes before the freshness check, the local
+	// audit event, the cache, and any write, so a refused load leaves nothing
+	// behind on the host.
+	if hiddenFromBridge(resp.Type) {
+		return bridgeNotFound(resp.ID)
 	}
 	// §6.5: a fresh `latest` answer is compared with the session reference or
 	// the revision mark before the audit event, the gates, or any write.
@@ -2131,7 +2155,7 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 			out = hookedOut
 			// §13.8: child span for the §6.6 materialization write stage.
 			_, matSpan := tracing.Tracer().Start(s.reqCtx(), "materialize")
-			werr := materialize.Write(root, out)
+			werr := writeLoadedArtifact(root, resp.ID, out)
 			matSpan.End()
 			if werr != nil {
 				return materializeFailure(werr)
@@ -2292,6 +2316,11 @@ func argString(args map[string]any, key string) string {
 // populates no §6.5 content cache, so the registry-served path stays the
 // single writer of a bucket under that key.
 func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args map[string]any) any {
+	// §5: an overlay mcp-server artifact is refused as a registry-served one
+	// is, before the audit event or any write.
+	if rec.Artifact != nil && hiddenFromBridge(string(rec.Artifact.Type)) {
+		return bridgeNotFound(rec.ID)
+	}
 	// §4.7.6: the overlay's served content_hash is the canonical serialization
 	// of the whole package, the same value the registry would store for it, so
 	// it moves when SKILL.md or a bundled resource changes and a promoted
@@ -2371,7 +2400,7 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 			}
 			warnings = append(warnings, hookWarnings...)
 			out = hookedOut
-			if err := materialize.Write(root, out); err != nil {
+			if err := writeLoadedArtifact(root, rec.ID, out); err != nil {
 				return materializeFailure(err)
 			}
 			for _, f := range out {
