@@ -36,7 +36,7 @@ Flags:
         filesystem registry path (required)
 ```
 
-A dispatcher group prints its subcommand list. The dispatcher groups are `admin`, `cache`, `config`, `domain`, `artifact`, `layer`, `profile`, `admin runtime`, `admin signing-key`, and `admin tenant`. `podium attest` dispatches the `import` and `check` subcommands when one of them is the first argument, so a `<dir>` of either name is written `./import` or `./check`. `podium sync` dispatches the `override` and `save-as` subcommands when one of them is the first argument, and otherwise runs materialization directly:
+A dispatcher group prints its subcommand list. The dispatcher groups are `admin`, `cache`, `config`, `domain`, `artifact`, `layer`, `profile`, `admin runtime`, `admin signing-key`, and `admin tenant`. `podium attest` dispatches the `init`, `import`, and `check` subcommands when one of them is the first argument, so a `<dir>` of such a name is written `./init`, `./import`, or `./check`. `podium sync` dispatches the `override` and `save-as` subcommands when one of them is the first argument, and otherwise runs materialization directly:
 
 ```
 $ podium admin --help
@@ -382,6 +382,39 @@ A package whose ID holds a control character, a white space character, or a back
 | `0` | The files were written. |
 | `1` | The layer root does not exist or is not a directory, `--commit` names no commit, `<dir>` lies below the top of its working tree under `--commit`, the commit holds no directory at the layer's path, the walk of the layer failed, a package has no subject name, or a file could not be removed or written. |
 | `2` | Usage error: an unknown `--format`, a `--max-subjects` below 2, a `--root` the rule above refuses, a `--predicate-type` that is not an absolute URI or that comes with `--format checksums`, or more than one `<dir>`. |
+
+### `podium attest init`
+
+Writes `.github/workflows/podium-attest.yml`, a GitHub Actions workflow that signs the layers of the repository on each push to its default branch and publishes the signed state to the `podium/signed` branch, and prints the command that registers each layer.
+
+```
+podium attest init [<dir>] [--root <subpath>]... [--shared-workflow <owner>/<repo>] [--reusable] [--force]
+```
+
+| Flag | Effect |
+|:--|:--|
+| `<dir>` | Top of the repository's working tree. Default: the current directory. |
+| `--root <subpath>` | A layer root of the repository. Repeatable. Each segment holds only ASCII letters, digits, `.`, `_`, and `-`. Default: the top of the repository. |
+| `--shared-workflow <owner>/<repo>` | Write a workflow that calls `.github/workflows/podium-attest.yml` of that repository at `main`. |
+| `--reusable` | Write the shared workflow that layer repositories call. Takes no `--root` and no `--shared-workflow`, and sends no request. |
+| `--force` | Replace an existing workflow file. |
+
+The command reads the `origin` remote and requests the repository's record from the GitHub API, as [`--trust-preset`](#trust-preset) does, for its visibility, its current name, and its default branch. When the request fails, the command writes the workflow for the branch that `refs/remotes/origin/HEAD` names and states that it could not read the visibility. For a private or internal repository, it prints the `gh attestation trusted-root` step and the registration with the explicit trust flags.
+
+```
+$ podium attest init --root skills
+Wrote .github/workflows/podium-attest.yml
+Commit the file and push it to main. Then register the layer:
+  podium layer register --id <id> --repo https://github.com/acme/finance-skills --root skills --trust-preset github-actions
+```
+
+| Exit | Meaning |
+|:--|:--|
+| `0` | The file was written. |
+| `1` | No file was written: `<dir>` is not the top of a working tree, the repository has no `origin`, the `origin` is not on `github.com`, the default branch is unknown, the file exists without `--force`, a symbolic link or no directory sits at `.github` or `.github/workflows`, or the write failed. |
+| `2` | Usage error: more than one `<dir>`, a refused or repeated `--root`, a `--shared-workflow` that is not `<owner>/<repo>`, `--reusable` with `--root` or `--shared-workflow`, or an invalid `PODIUM_GITHUB_API_TIMEOUT`. |
+
+[Signing with GitHub Actions](../authoring/signing-with-github-actions) shows the workflow and explains each step.
 
 ### `podium attest import`
 
@@ -1005,6 +1038,8 @@ podium layer register --id <id> --local <path>
                       [--public | --organization]
                       [--group <oidc-group>]... [--user <oidc-sub-or-email>]...
                       [<trust flags>]
+podium layer register --id <id> --repo <git-url> [--ref <ref>] [--root <subpath>] --trust-preset github-actions
+                      [--trust <mode>] [--trust-signer <issuer>=<identity>]...
 ```
 
 | Flag | Effect |
@@ -1025,6 +1060,7 @@ podium layer register --id <id> --local <path>
 | `--group <oidc-group>` | Grant visibility to an OIDC group. Repeatable. |
 | `--user <oidc-sub-or-email>` | Grant visibility to an OIDC subject or email. Repeatable. |
 | Trust flags | Set the layer's trust policy. See [Trust policy flags](#trust-policy-flags). |
+| `--trust-preset github-actions` | Resolve the trust policy from the repository's record on GitHub. See [Trust preset](#trust-preset). |
 
 No flag takes the token as an argument value. The force-push policy is also settable with `podium layer update --force-push-policy` and through the `registry.yaml` key `source.git.force_push_policy`.
 
@@ -1059,6 +1095,31 @@ podium layer register --id finance --repo https://github.com/acme/finance --ref 
 ```
 
 A policy that breaks a rule is refused with `400 registry.invalid_argument` and a message that names the member and the rule, and the command exits 1. While `PODIUM_LAYER_TRUST_DEFAULT` is `warn` or `require`, a registration without `--trust` and `--trust-signer` leaves the layer with no requirement and is refused; `--trust none` registers it with no policy.
+
+#### Trust preset
+
+`--trust-preset github-actions` resolves the policy that the workflow of [`podium attest init`](#podium-attest-init) satisfies, from one request to `https://api.github.com/repos/<owner>/<repo>`, and sends it as explicit members. The request carries the token in `GH_TOKEN`, or in `GITHUB_TOKEN`, when one is set, runs under `PODIUM_GITHUB_API_TIMEOUT` (default `30s`), and is not retried.
+
+| Member | Value |
+|:--|:--|
+| `ref` | `podium/signed`, unless `--ref` names another |
+| `trust_mode` | `require`, unless `--trust` names another |
+| Signer `issuer` and `identity` | `https://token.actions.githubusercontent.com` and `https://github.com/<owner>/<repo>/.github/workflows/podium-attest.yml@refs/heads/<default branch>`. Each `--trust-signer` replaces both. |
+| `source_repository` | `https://github.com/<owner>/<repo>` |
+| `source_repository_id`, `source_repository_owner_id` | The numeric identifiers from the record |
+| `source_repository_ref` | `refs/heads/<default branch>` |
+
+The command writes the resolved members on standard error before it registers.
+
+| Case | Exit |
+|:--|:--|
+| A preset other than `github-actions`, the preset without `--repo`, the preset with `--trust-layer-root`, a binding flag, or `--trust-instance`, or an invalid `PODIUM_GITHUB_API_TIMEOUT` | `2`, with no request |
+| A `--repo` that is not `https://github.com/<owner>/<repo>`, `git@github.com:<owner>/<repo>`, or `ssh://git@github.com/<owner>/<repo>`, each optionally ending in `.git` | `1`, with no request |
+| A request that fails, reaches its deadline, or receives a status other than 200 | `1` |
+| A record whose name differs from the name in `--repo`, as for a renamed repository | `1`, naming the current name |
+| A private or internal repository | `1`, with the explicit flags and `--trust-instance github` |
+
+In each exit-1 case the command registers nothing and writes the explicit trust flags that register the layer without the preset. [Signing with GitHub Actions](../authoring/signing-with-github-actions#the-registration-preset) describes the setup.
 
 #### Webhooks
 

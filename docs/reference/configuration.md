@@ -331,6 +331,7 @@ These settings name the Sigstore instances and the trusted roots that author att
 | (none) | `PODIUM_SIGSTORE_ROOT_MAX_AGE` | duration | `2160h` (90 days) | Age past which the `public-good` root in use is refused. `0` removes the limit. |
 | (none) | `PODIUM_ATTESTATION_MAX_BYTES` | integer | `1048576` (1 MiB) | Most bytes of one bundle file of a layer's attestation directory, from 1 to `1073741824` (1 GiB). `podium attest import` refuses a larger bundle and removes a larger file, and `podium attest check` fails on one. |
 | (none) | `PODIUM_ATTESTATION_MAX_BUNDLES` | integer | `64` | Most bundle files of a layer's attestation directory, from 1 to `4096`. `podium attest import` warns above it, and `podium attest check` fails above it. |
+| (none) | `PODIUM_GITHUB_API_TIMEOUT` | duration | `30s` | Deadline of the one GitHub API request of `podium layer register --trust-preset github-actions` and `podium attest init`, above zero. An invalid value is a usage error of those commands. |
 
 Each entry of `sigstore.instances` takes these keys:
 

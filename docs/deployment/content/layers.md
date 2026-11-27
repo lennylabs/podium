@@ -179,7 +179,7 @@ registry:
               source_repository_ref: refs/heads/main
 ```
 
-A layer registered at runtime takes the policy from the [trust policy flags](../../reference/cli#trust-policy-flags) of `podium layer register` and `podium layer update`, or from the `trust_mode`, `trust_requirements`, and `trust_layer_root` members of the [layer endpoints](../../reference/http-api#layer-management).
+A layer registered at runtime takes the policy from the [trust policy flags](../../reference/cli#trust-policy-flags) of `podium layer register` and `podium layer update`, or from the `trust_mode`, `trust_requirements`, and `trust_layer_root` members of the [layer endpoints](../../reference/http-api#layer-management). For a public repository on GitHub, `podium layer register --trust-preset github-actions` resolves the policy from the repository's record, and [Signing with GitHub Actions](../../authoring/signing-with-github-actions) covers the workflow that the policy accepts.
 
 ### Checking bundles against the policy
 
