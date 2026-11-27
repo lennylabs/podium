@@ -30,11 +30,11 @@ import (
 // a Fulcio SAN for a CI issuer is a workflow URI rather than the token's
 // subject.
 //
-// When PODIUM_SIGSTORE_RECORD_DIR is set, the test writes envelope.json,
+// When PODIUM_SIGSTORE_RECORD_DIR is set, the test writes bundle.json,
 // a copy of the trusted root as trusted_root.json, and meta.json into
-// that directory after Verify passes. Pointing it at the absolute path of
-// pkg/sign/testdata/sigstore-staging refreshes the fixture that
-// TestSigstoreKeyless_VerifiesRecordedStagingEnvelope verifies offline.
+// that directory after Verify passes, for an investigation that needs a
+// real staging bundle. The offline §4.7.9 tests use bundles the
+// sigstoreharness package generates and commit no recorded fixture.
 func TestSigstoreKeyless_LiveSmoke(t *testing.T) {
 	fulcio := os.Getenv("PODIUM_SIGSTORE_FULCIO_URL")
 	rekor := os.Getenv("PODIUM_SIGSTORE_REKOR_URL")
@@ -64,15 +64,15 @@ func TestSigstoreKeyless_LiveSmoke(t *testing.T) {
 	body := []byte("podium live smoke")
 	h := sha256.Sum256(body)
 	contentHash := "sha256:" + hex.EncodeToString(h[:])
-	envelopeStr, err := provider.Sign(context.Background(), contentHash)
+	bundle, err := provider.Sign(context.Background(), contentHash)
 	if err != nil {
 		t.Fatalf("Sign live: %v", err)
 	}
-	if err := provider.Verify(context.Background(), contentHash, envelopeStr); err != nil {
+	if err := provider.Verify(context.Background(), contentHash, bundle); err != nil {
 		t.Fatalf("Verify live: %v", err)
 	}
 	if dir := os.Getenv("PODIUM_SIGSTORE_RECORD_DIR"); dir != "" {
-		recordFixture(t, dir, envelopeStr, trustedRoot, stagingMeta{
+		recordFixture(t, dir, bundle, trustedRoot, stagingMeta{
 			ContentHash: contentHash,
 			Identity:    identity,
 			Issuer:      issuer,
@@ -80,17 +80,17 @@ func TestSigstoreKeyless_LiveSmoke(t *testing.T) {
 	}
 }
 
-// stagingMeta is meta.json of the recorded staging fixture: the content
-// hash the envelope signs and the identity policy it verifies under.
+// stagingMeta is meta.json of a recorded staging bundle: the content
+// hash the bundle signs and the identity policy it verifies under.
 type stagingMeta struct {
 	ContentHash string `json:"content_hash"`
 	Identity    string `json:"identity"`
 	Issuer      string `json:"issuer"`
 }
 
-// recordFixture writes the verified envelope, the trusted root, and the
+// recordFixture writes the verified bundle, the trusted root, and the
 // metadata into dir.
-func recordFixture(t *testing.T, dir, envelopeStr string, trustedRoot []byte, meta stagingMeta) {
+func recordFixture(t *testing.T, dir, bundle string, trustedRoot []byte, meta stagingMeta) {
 	t.Helper()
 	metaJSON, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
@@ -100,7 +100,7 @@ func recordFixture(t *testing.T, dir, envelopeStr string, trustedRoot []byte, me
 		t.Fatalf("create record dir: %v", err)
 	}
 	files := map[string][]byte{
-		"envelope.json":     []byte(strings.TrimSpace(envelopeStr) + "\n"),
+		"bundle.json":       []byte(strings.TrimSpace(bundle) + "\n"),
 		"trusted_root.json": trustedRoot,
 		"meta.json":         append(metaJSON, '\n'),
 	}
@@ -109,5 +109,5 @@ func recordFixture(t *testing.T, dir, envelopeStr string, trustedRoot []byte, me
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	t.Logf("recorded staging fixture in %s", dir)
+	t.Logf("recorded staging bundle in %s", dir)
 }

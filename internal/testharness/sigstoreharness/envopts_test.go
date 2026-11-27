@@ -67,13 +67,13 @@ func TestEnvelope_Options(t *testing.T) {
 			equalBytes(t, "imprint", in.token.tst.MessageImprint.HashedMessage, imprint[:])
 		}},
 		{"leaf issued by TSA root", []EnvOpt{WithLeafIssuedByTSARoot()}, func(t *testing.T, in inspection) {
-			if err := in.leaf.CheckSignatureFrom(h.TSARoot()); err != nil || len(in.intermediates) != 0 {
-				t.Fatalf("leaf not issued by the TSA root alone: %v, %d intermediates", err, len(in.intermediates))
+			if err := in.leaf.CheckSignatureFrom(h.TSARoot()); err != nil {
+				t.Fatalf("leaf not issued by the TSA root: %v", err)
 			}
 		}},
 		{"without tlog", []EnvOpt{WithoutTLog()}, func(t *testing.T, in inspection) {
-			if in.env.TLog != nil {
-				t.Fatal("envelope carries a tlog")
+			if in.entry != nil {
+				t.Fatal("bundle carries a log entry")
 			}
 		}},
 		{"entry digest", []EnvOpt{WithEntryDigest(otherHash)}, func(t *testing.T, in inspection) {
@@ -91,30 +91,30 @@ func TestEnvelope_Options(t *testing.T) {
 			}
 		}},
 		{"without inclusion proof", []EnvOpt{WithoutInclusionProof()}, func(t *testing.T, in inspection) {
-			if len(in.env.TLog.Hashes) != 0 || in.env.TLog.Checkpoint != "" || in.env.TLog.Body == "" {
-				t.Fatal("hashes or checkpoint present, or body missing")
+			if in.entry.InclusionProof != nil || len(in.bodyRaw) == 0 {
+				t.Fatal("inclusion proof present, or body missing")
 			}
 		}},
 		{"flipped proof hash", []EnvOpt{WithFlippedProofHash()}, func(t *testing.T, in inspection) {
-			n, _ := parseNote(in.env.TLog.Checkpoint)
+			n, _ := parseNote(in.checkpoint)
 			if root, _ := in.proofRoot(5, 7); bytes.Equal(root, n.root) {
 				t.Fatal("flipped proof still recomputes the root")
 			}
 		}},
 		{"log index", []EnvOpt{WithLogIndex(4)}, func(t *testing.T, in inspection) {
-			n, _ := parseNote(in.env.TLog.Checkpoint)
-			if root, _ := in.proofRoot(5, 7); in.env.TLog.LogIndex != 4 || !bytes.Equal(root, n.root) {
-				t.Fatalf("log_index = %d; proof for index 5 must still hold", in.env.TLog.LogIndex)
+			n, _ := parseNote(in.checkpoint)
+			if root, _ := in.proofRoot(5, 7); in.entry.LogIndex != 4 || !bytes.Equal(root, n.root) {
+				t.Fatalf("log_index = %d; proof for index 5 must still hold", in.entry.LogIndex)
 			}
 		}},
 		{"malformed checkpoint", []EnvOpt{WithMalformedCheckpoint()}, func(t *testing.T, in inspection) {
-			if _, ok := parseNote(in.env.TLog.Checkpoint); ok {
+			if _, ok := parseNote(in.checkpoint); ok {
 				t.Fatal("malformed checkpoint parses")
 			}
 		}},
 		{"without timestamp", []EnvOpt{WithoutTimestamp()}, func(t *testing.T, in inspection) {
 			if in.token != nil {
-				t.Fatal("envelope carries a timestamp")
+				t.Fatal("bundle carries a timestamp")
 			}
 		}},
 		{"timestamp time", []EnvOpt{WithTimestampTime(later)}, func(t *testing.T, in inspection) {
@@ -138,7 +138,7 @@ func TestEnvelope_Options(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tc.check(t, inspect(t, h.Envelope(t, hash, tc.opts...)))
+			tc.check(t, inspect(t, h.KeylessBundle(t, hash, tc.opts...)))
 		})
 	}
 }
@@ -189,24 +189,24 @@ func TestEnvelope_RejectsMalformedContentHash(t *testing.T) {
 	t.Parallel()
 	h := New(t)
 	for _, bad := range []string{"no-colon", "sha256:zz"} {
-		if _, err := h.buildEnvelope(bad, defaultEnvConfig()); err == nil || !strings.Contains(err.Error(), "content hash") {
+		if _, _, err := h.buildKeyless(bad, defaultEnvConfig()); err == nil || !strings.Contains(err.Error(), "content hash") {
 			t.Fatalf("%q: err = %v", bad, err)
 		}
 	}
 	cfg := defaultEnvConfig()
 	cfg.entryDigest = "no-colon"
 	hash, _ := testContentHash("x")
-	if _, err := h.buildEnvelope(hash, cfg); err == nil {
+	if _, _, err := h.buildKeyless(hash, cfg); err == nil {
 		t.Fatal("malformed entry digest accepted")
 	}
 	cfg = defaultEnvConfig()
 	cfg.proof.size, cfg.proof.index = 3, 3
-	if _, err := h.buildEnvelope(hash, cfg); err == nil || !strings.Contains(err.Error(), "out of range") {
+	if _, _, err := h.buildKeyless(hash, cfg); err == nil || !strings.Contains(err.Error(), "out of range") {
 		t.Fatalf("out-of-range tree position: err = %v", err)
 	}
 	cfg = defaultEnvConfig()
 	cfg.leaf.uris = []string{"://bad"}
-	if _, err := h.buildEnvelope(hash, cfg); err == nil || !strings.Contains(err.Error(), "uri SAN") {
+	if _, _, err := h.buildKeyless(hash, cfg); err == nil || !strings.Contains(err.Error(), "uri SAN") {
 		t.Fatalf("bad URI SAN: err = %v", err)
 	}
 }

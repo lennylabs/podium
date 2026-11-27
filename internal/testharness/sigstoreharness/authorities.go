@@ -20,7 +20,7 @@ type TSA int
 
 const (
 	// TSAPrimary is the ECDSA P-256 authority at https://tsa.acme.test
-	// that signs the §4.7.9 envelope timestamps.
+	// that signs the §4.7.9 keyless bundle timestamps.
 	TSAPrimary TSA = iota
 	// TSASecond is a second ECDSA P-256 authority at
 	// https://tsa2.acme.test.
