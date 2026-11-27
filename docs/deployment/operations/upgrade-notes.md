@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, and the refusal of names that resolve to .git or .podium, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and bounded Git fetch, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, and the refusal of names that resolve to .git or .podium, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -17,8 +17,17 @@ The current release is 0.7.0. The notes in this section describe behavior on `ma
 From 0.8.0, every ingest of a `git` layer clones under the deadline that `PODIUM_GIT_FETCH_TIMEOUT` or the `registry.yaml` key `git_fetch_timeout` sets, 10 minutes by default. 0.7.0 set no deadline.
 
 - A clone that takes longer than the deadline fails that ingest with `ingest.source_unreachable`, and the message names the setting. The layer keeps serving the artifacts of its last completed ingest.
-- The longest clone of a layer is the full-history clone that each ingest makes once the layer has a recorded reference, which the force-push check needs. Before the upgrade, compare that clone time for the largest `git` layer with the default, and set `PODIUM_GIT_FETCH_TIMEOUT` above it where it is longer.
+- The deadline covers the clone and every deeper fetch of one ingest (*Bounded Git fetch* below). The longest ingest of a layer is one that fetches the complete history: after a force push, or when the last ingested commit lies far behind the tip. Before the upgrade, compare the full clone time of the largest `git` layer with the default, and set `PODIUM_GIT_FETCH_TIMEOUT` above it where it is longer.
 - A value that is not a duration above zero, such as `0s` or `600`, refuses startup with `config.invalid`.
+- A rollback to 0.7.0 needs no step. 0.7.0 does not read the variable and ignores the key.
+
+### Bounded Git fetch
+
+From 0.8.0, each ingest of a `git` layer clones the tracked ref alone, with no tags, at the depth that `PODIUM_GIT_FETCH_DEPTH` or the `registry.yaml` key `git_fetch_depth` sets, 16 commits by default, and fetches again at four times the depth while the force-push check cannot decide from the history it holds. 0.7.0 cloned the complete history once a layer had a last ingested commit.
+
+- A remote that cannot serve the history the check needs fails the ingest with `ingest.source_unreachable`. Such a remote is a shallow mirror whose history does not reach the layer's last ingested commit. 0.7.0 reported such an ingest as a rewritten history, which emitted `layer.history_rewritten` and, under `force_push_policy: strict`, refused the ingest. Before the upgrade, point each layer that tracks a shallow mirror at a repository with the full history, or deepen the mirror so that it holds the last ingested commit.
+- A value of `PODIUM_GIT_FETCH_DEPTH` or `git_fetch_depth` that is not an integer from 1 to 2147483646 refuses startup with `config.invalid`.
+- An ingest that reaches `PODIUM_GIT_FETCH_TIMEOUT` reports `details.constraint: "fetch_deadline"` in the reingest response, with the depth of the fetch that was running.
 - A rollback to 0.7.0 needs no step. 0.7.0 does not read the variable and ignores the key.
 
 ### Workspace `.podium` that is a symbolic link

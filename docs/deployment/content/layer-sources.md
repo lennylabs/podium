@@ -226,7 +226,9 @@ Each layer refreshes from its source independently. A webhook needs a Git host t
 
 Each registered layer reports `last_ingested_at` in `podium layer list` once it has completed an ingest, so a monitor can detect a stale layer.
 
-Every ingest of a `git` layer clones the repository under a deadline that `PODIUM_GIT_FETCH_TIMEOUT` or the `registry.yaml` key `git_fetch_timeout` sets, 10 minutes by default. A remote that does not complete the clone within it fails that ingest with `ingest.source_unreachable`, and the message names the setting. The artifacts served before the failure stay in place. Raise the value for a repository whose clone takes longer. The [configuration reference](../../reference/configuration#ingest) lists the setting.
+Every ingest of a `git` layer clones the tracked ref alone, with no tags, at a depth of 16 commits, which `PODIUM_GIT_FETCH_DEPTH` or the `registry.yaml` key `git_fetch_depth` sets. When the layer's last ingested commit lies further behind the tip, the ingest fetches again at four times the depth until the history it holds shows whether the last ingested commit is still in the history of the ref. A remote that cannot serve that much history, such as a shallow mirror that lacks the last ingested commit, fails the ingest with `ingest.source_unreachable` rather than report a force push.
+
+The clone and every deeper fetch of one ingest run under a deadline that `PODIUM_GIT_FETCH_TIMEOUT` or the `registry.yaml` key `git_fetch_timeout` sets, 10 minutes by default. A remote that does not complete them within it fails that ingest with `ingest.source_unreachable`, the message names the setting, and the error's `details` hold `constraint: "fetch_deadline"` with the depth of the fetch that was running. The artifacts served before the failure stay in place. Raise the value for a repository whose clone takes longer. The [configuration reference](../../reference/configuration#ingest) lists the settings.
 
 ### Webhooks
 

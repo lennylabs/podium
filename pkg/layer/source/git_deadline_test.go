@@ -5,11 +5,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/layer/source"
+	"github.com/lennylabs/podium/pkg/spi"
 )
 
 // stalledRemote starts an HTTP git remote whose handler stalls every request
@@ -62,11 +64,12 @@ func tricklingAdvertisement(w http.ResponseWriter, r *http.Request, stop <-chan 
 	}
 }
 
-// Spec: §7.3.1 (Source unreachable), §13.12 — a Git snapshot runs under the
-// PODIUM_GIT_FETCH_TIMEOUT deadline: a remote that never answers the
-// handshake, or that trickles data, fails the snapshot as
-// ingest.source_unreachable once the deadline passes, and the error names the
-// setting.
+// Spec: §7.3.1 (Source unreachable, Git fetch: Deadline), §13.12 — a Git
+// snapshot runs under the PODIUM_GIT_FETCH_TIMEOUT deadline: a remote that
+// never answers the handshake, or that trickles data, fails the snapshot as
+// ingest.source_unreachable once the deadline passes, the error names the
+// setting, and its details name the constraint, the setting, the operation,
+// and the depth of the clone that was running.
 // Matrix: §6.10 (ingest.source_unreachable)
 func TestGit_SnapshotDeadline(t *testing.T) {
 	t.Parallel()
@@ -92,6 +95,10 @@ func TestGit_SnapshotDeadline(t *testing.T) {
 			if !strings.Contains(err.Error(), "PODIUM_GIT_FETCH_TIMEOUT (300ms)") {
 				t.Errorf("error %q does not name PODIUM_GIT_FETCH_TIMEOUT and its value", err)
 			}
+			want := map[string]any{"constraint": "fetch_deadline", "setting": "PODIUM_GIT_FETCH_TIMEOUT", "operation": "snapshot", "depth": 16}
+			if e, ok := spi.AsError(err); !ok || !reflect.DeepEqual(e.Details, want) {
+				t.Errorf("details = %+v, want %v", e, want)
+			}
 			if elapsed > 10*time.Second {
 				t.Errorf("Snapshot returned after %v, want shortly after the 300ms deadline", elapsed)
 			}
@@ -99,9 +106,10 @@ func TestGit_SnapshotDeadline(t *testing.T) {
 	}
 }
 
-// Spec: §7.3.1 (Source unreachable) — a snapshot that ends because the
-// caller's context ended, before the PODIUM_GIT_FETCH_TIMEOUT deadline,
-// fails as ingest.source_unreachable and does not blame the setting. A zero
+// Spec: §7.3.1 (Source unreachable, Git fetch: Deadline) — a snapshot that
+// ends because the caller's context ended, before the
+// PODIUM_GIT_FETCH_TIMEOUT deadline, fails as ingest.source_unreachable, does
+// not blame the setting, and carries no fetch_deadline details. A zero
 // FetchTimeout selects the default deadline rather than none.
 func TestGit_SnapshotCallerDeadlineDoesNotNameTheSetting(t *testing.T) {
 	t.Parallel()
@@ -114,5 +122,8 @@ func TestGit_SnapshotCallerDeadlineDoesNotNameTheSetting(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), source.FetchTimeoutSetting) {
 		t.Errorf("error %q names %s, but the caller's deadline ended the snapshot", err, source.FetchTimeoutSetting)
+	}
+	if e, ok := spi.AsError(err); !ok || len(e.Details) != 0 {
+		t.Errorf("envelope = %+v, want one with no details", e)
 	}
 }
