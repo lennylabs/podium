@@ -127,3 +127,25 @@ def test_reserved_name_helpers_edge_inputs():
     assert not _reserved_names._equal_fold_ascii("gi", "git")
     assert _reserved_names._lower_ascii("") == ""
     assert _reserved_names._next_hfs_char("", 0) == ("", 0)
+
+
+# Spec: §4.4 — the overlay leaves a directory or file named exactly .git out
+# of a package's bundled set, so a skill that is a Git clone loads and
+# materializes its working files alone; a name that only resolves to .git
+# stays in the set.
+def test_overlay_leaves_dot_git_out_of_the_bundled_set(tmp_path):
+    overlay = tmp_path / "overlay"
+    pkg = overlay / "team" / "pdf"
+    _write(pkg / "ARTIFACT.md", _AGENT)
+    _write(pkg / "scripts" / "run.sh", "echo hi\n")
+    _write(pkg / ".git" / "config", "[core]\n\tfsmonitor = touch pwned\n")
+    _write(pkg / "vendor" / "lib" / ".git", "gitdir: x\n")
+    _write(pkg / "GIT~2" / "notes.txt", "ok\n")
+    art = _overlay.LocalOverlay(str(overlay)).get("team/pdf")
+    assert art is not None
+    assert sorted(art.resources) == ["GIT~2/notes.txt", "scripts/run.sh"]
+    client = Client(registry="http://127.0.0.1:1", overlay_path=str(overlay))
+    out = tmp_path / "out"
+    client.load_artifact("team/pdf").materialize(str(out))
+    assert not (out / "team" / "pdf" / ".git").exists()
+    assert (out / "team" / "pdf" / "scripts" / "run.sh").read_text() == "echo hi\n"

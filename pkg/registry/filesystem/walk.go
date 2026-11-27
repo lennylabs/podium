@@ -505,14 +505,37 @@ func loadPlainSkillRecord(layer Layer, dir string) (ArtifactRecord, error) {
 	return rec, nil
 }
 
+// VersionControlName is the name of the version-control data a package can
+// hold: a Git repository directory, or the .git file of a submodule or a
+// linked worktree.
+const VersionControlName = ".git"
+
+// SkipVersionControl reports whether the walk entry name below a package root
+// is version-control data, which §4.4 leaves out of the bundled resource set
+// together with every file below it. Only the exact name counts: a Git
+// working tree lists its repository directory as exactly .git on its own
+// platform, and every other name that resolves to .git stays in the set,
+// where lint.resource_path_reserved refuses it.
+//
+// Spec: §4.4
+func SkipVersionControl(name string) bool {
+	return name == VersionControlName
+}
+
 // captureResources records every file under dir, the package directory
 // below layerRoot, as a bundled resource of rec, except the package root's
-// manifests and the files of a nested package.
+// manifests, the files of a nested package, and version-control data.
 func captureResources(rec *ArtifactRecord, layerRoot, dir string) error {
 	fsys := os.DirFS(layerRoot)
 	return filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
+		}
+		if path != dir && SkipVersionControl(d.Name()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if d.IsDir() {
 			if path == dir {

@@ -167,6 +167,28 @@ describe("overlay and the aliasing rule", () => {
     await expect(c.loadArtifact("team/draft")).rejects.toBe(err);
   });
 
+  // Spec: §4.4 — the overlay leaves a directory or file named exactly .git out
+  // of a package's bundled set, so a skill that is a Git clone loads and
+  // materializes its working files alone; a name that only resolves to .git
+  // stays in the set.
+  it("leaves .git out of the bundled set", async () => {
+    await put("team/pdf/ARTIFACT.md", AGENT);
+    await put("team/pdf/scripts/run.sh", "echo hi\n");
+    await put("team/pdf/.git/config", "[core]\n\tfsmonitor = touch pwned\n");
+    await put("team/pdf/vendor/lib/.git", "gitdir: x\n");
+    await put("team/pdf/GIT~2/notes.txt", "ok\n");
+    const overlay = await LocalOverlay.load(join(dir, "overlay"));
+    expect(Object.keys(overlay.artifacts.get("team/pdf")?.resources ?? {}).sort()).toEqual([
+      "GIT~2/notes.txt",
+      "scripts/run.sh",
+    ]);
+    const c = new Client({ registry: "http://reg", overlayPath: join(dir, "overlay"), fetcher: async () => new Response("{}") });
+    const out = join(dir, "out");
+    await (await c.loadArtifact("team/pdf")).materialize(out);
+    await expect(readdir(join(out, "team", "pdf", ".git"))).rejects.toBeDefined();
+    expect(await readFile(join(out, "team", "pdf", "scripts", "run.sh"), "utf8")).toBe("echo hi\n");
+  });
+
   // Spec: §4.2, §6.4 — a directory that only resembles .git is an ordinary
   // domain.
   it("loads an overlay without an aliased package", async () => {

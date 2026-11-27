@@ -21,6 +21,9 @@ from dataclasses import dataclass, field
 from . import _reserved_names, _skill_document
 
 _OVERLAY_SUBDIR = os.path.join(".podium", "overlay")
+# The version-control data a package can hold (§4.4): a Git repository
+# directory, or the .git file of a submodule or a linked worktree.
+_VERSION_CONTROL_NAME = ".git"
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
@@ -947,8 +950,15 @@ def _collect_resources(dirpath: str, skip: set[str]) -> dict[str, object]:
         # spec §4.4 — the files of a nested package are not resources of the
         # enclosing one, so the walk stops at a subdirectory that directly
         # contains an ARTIFACT.md.
-        dirs[:] = [d for d in dirs if not _has_artifact_manifest(os.path.join(sub, d))]
+        # spec §4.4 — a directory or file named exactly .git is
+        # version-control data, left out of the set and never read, as
+        # filesystem.SkipVersionControl leaves it out in the Go walks.
+        dirs[:] = [
+            d for d in dirs if d != _VERSION_CONTROL_NAME and not _has_artifact_manifest(os.path.join(sub, d))
+        ]
         for name in files:
+            if name == _VERSION_CONTROL_NAME:
+                continue
             full = os.path.join(sub, name)
             relname = os.path.relpath(full, dirpath).replace(os.sep, "/")
             if relname in skip:

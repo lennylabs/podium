@@ -527,12 +527,50 @@ func TestIngest_ReservedNameAliasSegmentRejected(t *testing.T) {
 	}
 }
 
-// Spec: §4.4, §7.5.3 — a package that bundles a resource under .git, or under
-// a name a filesystem resolves to .git, is refused with ingest.lint_failed
+// Spec: §4.4 — a directory or file named exactly .git below a package root is
+// version-control data: ingest stores the package without it, and the content
+// hash equals the hash of the same package with no .git at all.
+func TestIngest_DotGitLeftOutOfBundledSet(t *testing.T) {
+	t.Parallel()
+	base := fstest.MapFS{
+		"skills/pdf/SKILL.md":       &fstest.MapFile{Data: []byte("---\nname: pdf\ndescription: Read PDFs.\nmetadata:\n  version: 1.0.0\n---\n\nRead the PDF.\n")},
+		"skills/pdf/scripts/run.sh": &fstest.MapFile{Data: []byte("echo hi\n")},
+	}
+	clone := fstest.MapFS{
+		"skills/pdf/.git/config":          &fstest.MapFile{Data: []byte("[core]\n\tfsmonitor = touch pwned\n")},
+		"skills/pdf/.git/HEAD":            &fstest.MapFile{Data: []byte("ref: refs/heads/main\n")},
+		"skills/pdf/.git/objects/ab/cdef": &fstest.MapFile{Data: []byte("x")},
+		"skills/pdf/vendor/lib/.git":      &fstest.MapFile{Data: []byte("gitdir: ../../.git/modules/lib\n")},
+	}
+	for k, v := range base {
+		clone[k] = v
+	}
+	hashes := map[string]string{}
+	for name, fsys := range map[string]fstest.MapFS{"base": base, "clone": clone} {
+		st := newStore(t)
+		if _, err := ingest.Ingest(context.Background(), st, ingest.Request{TenantID: "tenant-1", LayerID: "team-shared", Files: fsys}); err != nil {
+			t.Fatalf("Ingest(%s) = %v", name, err)
+		}
+		got, err := st.GetManifest(context.Background(), "tenant-1", "skills/pdf", "1.0.0")
+		if err != nil {
+			t.Fatalf("GetManifest(%s): %v", name, err)
+		}
+		if len(got.Resources) != 1 || got.Resources[0].Path != "scripts/run.sh" {
+			t.Errorf("%s resources = %+v, want scripts/run.sh alone", name, got.Resources)
+		}
+		hashes[name] = got.ContentHash
+	}
+	if hashes["base"] != hashes["clone"] {
+		t.Errorf("content hash with .git = %s, without = %s; want equal", hashes["clone"], hashes["base"])
+	}
+}
+
+// Spec: §4.4, §7.5.3 — a package that bundles a resource under a name a
+// filesystem resolves to .git is refused with ingest.lint_failed
 // (lint.resource_path_reserved), and the layer's other packages are stored.
 func TestIngest_ResourceUnderDotGitRefused(t *testing.T) {
 	t.Parallel()
-	for _, res := range []string{".git/config", "GIT~1/config", "\u200c.git/config", "scripts/.Git/hooks/pre-commit"} {
+	for _, res := range []string{".GIT/config", "GIT~1/config", "\u200c.git/config", "scripts/.Git/hooks/pre-commit"} {
 		fsys := fstest.MapFS{
 			"team/hooks/ARTIFACT.md": &fstest.MapFile{Data: []byte(agentArtifact("Hooks"))},
 			"team/hooks/" + res:      &fstest.MapFile{Data: []byte("[core]\n\tfsmonitor = touch pwned\n")},

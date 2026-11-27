@@ -11,8 +11,12 @@ import (
 )
 
 // ruleResourcePathReserved refuses a bundled resource whose path has a
-// segment that names .git, the literal name or a form a filesystem resolves
-// to it under the §7.5.3 aliasing rule. Every consumer writes a resource
+// segment that names .git under the §7.5.3 aliasing rule, such as .GIT,
+// GIT~1, or .git preceded by U+200C. Discovery leaves a directory or file
+// named exactly .git out of the set as version-control data (§4.4), so a
+// walked record carries only the other forms; the rule still refuses the
+// literal name in a record that holds it. It reports one diagnostic per
+// artifact, naming the first offending path. Every consumer writes a resource
 // below the artifact's directory, so such a resource writes into a .git
 // directory there; a .git/config can set a core.fsmonitor command that Git
 // runs. The §6.6 writer refuses the path at write time, and this rule closes
@@ -32,6 +36,8 @@ func (r ruleResourcePathReserved) Check(_ context.Context, _ *filesystem.Registr
 			paths = append(paths, p)
 		}
 		sort.Strings(paths)
+		// One diagnostic per artifact: a directory with such a name holds
+		// many files, and naming the first is enough to locate it.
 		for _, p := range paths {
 			seg, ok := dotGitSegment(p)
 			if !ok {
@@ -43,6 +49,7 @@ func (r ruleResourcePathReserved) Check(_ context.Context, _ *filesystem.Registr
 				Severity:   SeverityError,
 				Message:    fmt.Sprintf("bundled resource %q has the segment %q, which names .git; rename or remove it", p, seg),
 			})
+			break
 		}
 	}
 	return out

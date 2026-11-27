@@ -11,6 +11,9 @@ import { namesDotGit, namesDotPodium } from "./reserved_names.js";
 import { resolveSkillVersion, synthesizedSkillDocument } from "./skill_document.js";
 
 const OVERLAY_SUBDIR = ".podium/overlay";
+// The version-control data a package can hold (§4.4): a Git repository
+// directory, or the .git file of a submodule or a linked worktree.
+const VERSION_CONTROL_NAME = ".git";
 const WORD_RE = /[a-z0-9]+/g;
 
 function tokenize(text: string): string[] {
@@ -742,6 +745,10 @@ async function collectResources(
     // SKILL.md stays part of this package.
     if (sub !== dir && (await holdsManifest(fs, path, sub, entries, "ARTIFACT.md"))) return;
     for (const e of entries) {
+      // spec §4.4 — a directory or file named exactly .git is
+      // version-control data, left out of the set and never read, as
+      // filesystem.SkipVersionControl leaves it out in the Go walks.
+      if (e.name === VERSION_CONTROL_NAME) continue;
       const full = path.join(sub, e.name);
       if (e.isDirectory()) {
         await collect(full);

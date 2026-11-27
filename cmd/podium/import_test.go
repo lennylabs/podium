@@ -245,6 +245,47 @@ func TestImport_RefusesReservedNameAlias(t *testing.T) {
 	}
 }
 
+// Spec: §4.4 — a source skill that is a Git clone is imported without its
+// .git directory, and a nested .git file is left out too, so no repository
+// with the source's .git/config reaches the target layer.
+func TestImport_LeavesOutDotGit(t *testing.T) {
+	source := t.TempDir()
+	mustWrite(t, filepath.Join(source, "pdf", "SKILL.md"), "---\nname: pdf\n---\nbody\n")
+	mustWrite(t, filepath.Join(source, "pdf", "scripts", "run.sh"), "echo hi\n")
+	mustWrite(t, filepath.Join(source, "pdf", ".git", "config"), "[core]\n\tfsmonitor = touch pwned\n")
+	mustWrite(t, filepath.Join(source, "pdf", ".git", "HEAD"), "ref: refs/heads/main\n")
+	mustWrite(t, filepath.Join(source, "pdf", "vendor", ".git"), "gitdir: x\n")
+	target := t.TempDir()
+	if rc, stderr := runImport(t, "--source", source, "--target", target); rc != 0 {
+		t.Fatalf("rc = %d, stderr=%s", rc, stderr)
+	}
+	for _, rel := range []string{".git", filepath.Join("vendor", ".git")} {
+		if _, err := os.Lstat(filepath.Join(target, "pdf", rel)); !os.IsNotExist(err) {
+			t.Errorf("import copied %s: lstat err = %v", rel, err)
+		}
+	}
+	if got, err := os.ReadFile(filepath.Join(target, "pdf", "scripts", "run.sh")); err != nil || string(got) != "echo hi\n" {
+		t.Errorf("scripts/run.sh = (%q, %v), want it copied", got, err)
+	}
+}
+
+// Spec: §4.4, §7.5.3 — a resource below a source skill whose name a
+// filesystem resolves to .git is refused at any depth, and nothing is
+// written.
+func TestImport_RefusesNestedDotGitAlias(t *testing.T) {
+	for _, rel := range []string{filepath.Join("GIT~1", "config"), filepath.Join("scripts", ".GIT", "config"), filepath.Join("scripts", ".git.")} {
+		source := t.TempDir()
+		mustWrite(t, filepath.Join(source, "pdf", "SKILL.md"), "---\nname: pdf\n---\nbody\n")
+		mustWrite(t, filepath.Join(source, "pdf", rel), "[core]\n")
+		target := t.TempDir()
+		rc, stderr := runImport(t, "--source", source, "--target", target)
+		if rc != 1 || !strings.Contains(stderr, "resolves to .git") {
+			t.Errorf("import with %s = (%d, %q), want 1 and the .git refusal", rel, rc, stderr)
+		}
+		assertEmptyDir(t, target)
+	}
+}
+
 // Spec: §4.3.4, §4.7.6 — a metadata that is not a mapping, or a
 // metadata.version that is not a string, fails with exit 1 naming the file.
 func TestImport_MalformedMetadataFails(t *testing.T) {

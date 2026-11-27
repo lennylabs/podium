@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -760,6 +761,39 @@ func TestValidateCanonicalID_RefusesReservedNameAliases(t *testing.T) {
 		if err := ValidateCanonicalID(id); err != nil {
 			t.Errorf("ValidateCanonicalID(%q) = %v, want nil", id, err)
 		}
+	}
+}
+
+// Spec: §4.4 — the filesystem walk leaves a directory or file named exactly
+// .git below a package root out of the bundled set, so a skill directory
+// that is a Git clone bundles its working files alone. A name that only
+// resolves to .git stays in the set for lint to refuse.
+func TestWalk_DotGitLeftOutOfBundledSet(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{Path: "team/pdf/ARTIFACT.md", Content: stringf(agentArtifact, "Pdf", "pdf")},
+		testharness.WriteTreeOption{Path: "team/pdf/scripts/run.sh", Content: "echo hi\n"},
+		testharness.WriteTreeOption{Path: "team/pdf/.git/config", Content: "[core]\n"},
+		testharness.WriteTreeOption{Path: "team/pdf/.git/objects/ab/cdef", Content: "x"},
+		testharness.WriteTreeOption{Path: "team/pdf/vendor/lib/.git", Content: "gitdir: x\n"},
+		testharness.WriteTreeOption{Path: "team/pdf/GIT~1/config", Content: "[core]\n"},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	recs, err := reg.Walk(WalkOptions{})
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("Walk = (%d records, %v), want one", len(recs), err)
+	}
+	var got []string
+	for p := range recs[0].Resources {
+		got = append(got, p)
+	}
+	sort.Strings(got)
+	if strings.Join(got, ",") != "GIT~1/config,scripts/run.sh" {
+		t.Errorf("resources = %v, want GIT~1/config and scripts/run.sh", got)
 	}
 }
 

@@ -604,6 +604,49 @@ func TestFilesystemSync_SyncUnknownHarnessFails(t *testing.T) {
 	}
 }
 
+// Spec: §4.4, §7.5.3 — `podium lint` reports a bundled resource under a name
+// a filesystem resolves to .git as one lint.resource_path_reserved error for
+// the artifact and exits 1, and it reports nothing for a skill directory that
+// is a Git clone, because the .git directory is left out of the set.
+func TestFilesystemSync_LintResourcePathReserved(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"personal/hello/greet/ARTIFACT.md":       greetSkillArtifact,
+		"personal/hello/greet/SKILL.md":          greetSkillBody,
+		"personal/hello/greet/GIT~1/config":      "[core]\n",
+		"personal/hello/greet/GIT~1/HEAD":        "ref: refs/heads/main\n",
+		"personal/hello/greet/GIT~1/objects/a/b": "x",
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1; stdout=%s stderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	out := res.Stdout + res.Stderr
+	if n := strings.Count(out, "lint.resource_path_reserved"); n != 1 || !strings.Contains(out, `"GIT~1"`) {
+		t.Errorf("lint output names lint.resource_path_reserved %d times, want once with the GIT~1 segment:\n%s", n, out)
+	}
+
+	clone := writeRegistry(t, map[string]string{
+		"personal/hello/greet/ARTIFACT.md":           greetSkillArtifact,
+		"personal/hello/greet/SKILL.md":              greetSkillBody,
+		"personal/hello/greet/.git/config":           "[core]\n\tfsmonitor = touch pwned\n",
+		"personal/hello/greet/.git/HEAD":             "ref: refs/heads/main\n",
+		"personal/hello/greet/.git/objects/ab/cdef":  "x",
+		"personal/hello/greet/vendor/lib/.git":       "gitdir: x\n",
+		"personal/hello/greet/vendor/lib/README.txt": "lib\n",
+	})
+	if res := runPodium(t, "", nil, "lint", "--registry", clone); res.Exit != 0 || strings.Contains(res.Stdout+res.Stderr, "resource_path_reserved") {
+		t.Errorf("lint over a Git clone exit=%d; stdout=%s stderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	target := t.TempDir()
+	res = runPodium(t, "", nil, "sync", "--registry", clone, "--target", target, "--harness", "none")
+	if res.Exit != 0 || strings.Contains(res.Stderr, "refusing to write") {
+		t.Errorf("sync over a Git clone exit=%d; stderr=%s", res.Exit, res.Stderr)
+	}
+	mustNotExist(t, filepath.Join(target, "personal", "hello", "greet", ".git"))
+	mustExist(t, filepath.Join(target, "personal", "hello", "greet", "vendor", "lib", "README.txt"))
+}
+
 func TestFilesystemSync_LintCleanRegistryExits0(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
