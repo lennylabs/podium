@@ -386,7 +386,19 @@ func TestSigstoreKeyless_VerifyLogEntryRefusals(t *testing.T) {
 		{name: "kind version 0.0.1", bundle: mutate(t, valid, func(m map[string]any) {
 			entries := member(m, "verificationMaterial")["tlogEntries"].([]any)
 			member(entries[0].(map[string]any), "kindVersion")["version"] = "0.0.1"
-		}), want: "not a hashedrekord 0.0.2 entry"},
+		}), want: "kindVersion label differs from the signed body"},
+		// The two review reproductions: the bundle's kindVersion label is
+		// unsigned, and a Rekor v1 checkpoint sends the library down the
+		// path that neither rebuilds the entry nor compares a v2 body.
+		{name: "Rekor v1 hashedrekord 0.0.1 entry labelled 0.0.2", env: []sh.EnvOpt{sh.WithKeylessV1Body(), sh.WithKeylessV1Checkpoint()},
+			want: "not a Rekor v2 hashedrekord 0.0.2 entry"},
+		{name: "Rekor v1 hashedrekord 0.0.1 entry with its own label", env: []sh.EnvOpt{sh.WithKeylessV1Body(), sh.WithKeylessV1Checkpoint(), sh.WithKeylessKindVersionLabel("hashedrekord", "0.0.1")},
+			want: "not a Rekor v2 hashedrekord 0.0.2 entry"},
+		{name: "v2 body for another digest under a Rekor v1 checkpoint", env: []sh.EnvOpt{
+			sh.WithEntryDigest(hashOf([]byte("acme other"))), sh.WithEntrySignature([]byte("acme other signature")), sh.WithKeylessV1Checkpoint()},
+			want: "checkpoint whose origin is not the log's host"},
+		{name: "bound v2 body under a Rekor v1 checkpoint", env: []sh.EnvOpt{sh.WithKeylessV1Checkpoint()},
+			want: "checkpoint whose origin is not the log's host"},
 		{name: "log ID of an unlisted key", env: []sh.EnvOpt{sh.WithForeignLogID()}, want: "names no transparency log"},
 		{name: "no inclusion proof", env: []sh.EnvOpt{sh.WithoutInclusionProof()}, want: "(parse)"},
 		{name: "flipped proof hash", env: []sh.EnvOpt{sh.WithFlippedProofHash()}, want: "log entry does not verify"},
@@ -394,7 +406,7 @@ func TestSigstoreKeyless_VerifyLogEntryRefusals(t *testing.T) {
 		{name: "log index at the tree size", env: []sh.EnvOpt{sh.WithLogIndex(7)}, want: "log entry does not verify"},
 		{name: "negative log index", env: []sh.EnvOpt{sh.WithLogIndex(-1)}, want: "(parse)"},
 		{name: "checkpoint signed by a foreign key", env: []sh.EnvOpt{sh.WithCheckpointSignedByForeignKey()}, want: "log entry does not verify"},
-		{name: "malformed checkpoint", env: []sh.EnvOpt{sh.WithMalformedCheckpoint()}, want: "log entry does not verify"},
+		{name: "malformed checkpoint", env: []sh.EnvOpt{sh.WithMalformedCheckpoint()}, want: "checkpoint whose origin is not the log's host"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

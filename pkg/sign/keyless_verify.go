@@ -13,13 +13,6 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/bundle"
 )
 
-// The kind and version of the Rekor v2 entry a §4.7.9 keyless bundle
-// carries.
-const (
-	keylessEntryKind    = "hashedrekord"
-	keylessEntryVersion = "0.0.2"
-)
-
 // keylessInstance describes the §4.7.9 trust requirements to the shared
 // bundle checks: a transparency log is required, and the trusted root's
 // certificate transparency logs, when it lists any, require an SCT.
@@ -91,13 +84,19 @@ func parseKeylessBundle(raw, digest []byte) (*bundle.Bundle, *protobundle.Bundle
 	return b, pb, nil
 }
 
-// checkKeylessEntry requires the bundle's log entry to be a Rekor v2
-// hashedrekord 0.0.2 entry of a log the trusted root lists, whose key
-// window contains each verified time. sigstore-go selects the log by the
-// entry's log ID and does not read the window for an inclusion proof, so
-// the window is checked here, as §4.7.9 requires of every trust-root
-// entry. A log listed more than once under one log ID is known to the
-// library by its last listing, and that listing's window applies.
+// checkKeylessEntry requires the bundle's log entry to have a Rekor v2
+// body, of a log the trusted root lists, whose key window contains each
+// verified time. The entry form is a §4.7.11 rule, which checkLog applies
+// through checkLogEntryForm: the kind and version come from the signed
+// body, and a Rekor v2 body is a hashedrekord 0.0.2 body under a
+// checkpoint whose origin is the log's host, where the library rebuilds
+// the entry from the bundle. §4.7.9 admits the Rekor v2 form alone, so a
+// Rekor v1 body, which that rule accepts under a v1 checkpoint, is refused
+// here. sigstore-go selects the log by the entry's log ID and does not
+// read the window for an inclusion proof, so the window is checked here,
+// as §4.7.9 requires of every trust-root entry. A log listed more than
+// once under one log ID is known to the library by its last listing, and
+// that listing's window applies.
 //
 // Spec: §4.7.9.
 func (v *bundleVerification) checkKeylessEntry() error {
@@ -105,9 +104,8 @@ func (v *bundleVerification) checkKeylessEntry() error {
 	if err != nil || len(entries) != 1 {
 		return refuse(ReasonLogEntry, "the bundle carries no log entry", err)
 	}
-	kv := entries[0].TransparencyLogEntry().GetKindVersion()
-	if kv.GetKind() != keylessEntryKind || kv.GetVersion() != keylessEntryVersion {
-		return refuse(ReasonLogEntry, "the log entry is not a hashedrekord 0.0.2 entry", nil)
+	if !entries[0].IsRekorV2() {
+		return refuse(ReasonLogEntry, "the log entry body is not a Rekor v2 hashedrekord 0.0.2 entry", nil)
 	}
 	log, ok := v.root.RekorLogs()[hex.EncodeToString([]byte(entries[0].LogKeyID()))]
 	if !ok {

@@ -19,6 +19,22 @@ func WithP384Leaf() EnvOpt { return func(c *envConfig) { c.p384Leaf = true } }
 // the entry, while the checkpoint stays signed by the harness log key.
 func WithForeignLogID() EnvOpt { return func(c *envConfig) { c.foreignLogID = true } }
 
+// WithKeylessV1Body writes a Rekor v1 hashedrekord 0.0.1 body that binds
+// the bundle's digest, signature, and leaf in place of the Rekor v2 body.
+// The kindVersion label stays hashedrekord 0.0.2 unless
+// WithKeylessKindVersionLabel sets it.
+func WithKeylessV1Body() EnvOpt { return func(c *envConfig) { c.v1Body = true } }
+
+// WithKeylessV1Checkpoint proves the entry under a Rekor v1 checkpoint,
+// whose origin ends in a tree ID, signed by the P-256 log key.
+func WithKeylessV1Checkpoint() EnvOpt { return func(c *envConfig) { c.v1Checkpoint = true } }
+
+// WithKeylessKindVersionLabel sets the entry's kindVersion label, which is
+// unsigned bundle metadata, without changing the body.
+func WithKeylessKindVersionLabel(kind, version string) EnvOpt {
+	return func(c *envConfig) { c.label = &kindVersionJSON{Kind: kind, Version: version} }
+}
+
 // WithKeylessMediaType sets the bundle's media type.
 func WithKeylessMediaType(mt string) EnvOpt { return func(c *envConfig) { c.mediaType = mt } }
 

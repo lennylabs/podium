@@ -1549,7 +1549,7 @@ Under `--provider sigstore-keyless`, `podium verify` checks the bundle with `sig
 - Each timestamp verifies under a timestamp authority in the file and covers the signature, no two timestamps come from one authority, and the bundle carries at least one.
 - The certificate chains to a certificate authority in the file through the intermediates the file lists, lists code signing in its extended key usage, and was valid at each timestamp's time. Its key is an ECDSA P-256 key.
 - When the file lists a certificate transparency log, the certificate carries a signed certificate timestamp from one of them.
-- The bundle carries one Rekor v2 `hashedrekord` entry of a log in the file, and its inclusion proof leads to a checkpoint signed by that log's key. The entry is rebuilt from the content hash, the signature, and the certificate, so an entry that records anything else fails.
+- The bundle carries one log entry of a log in the file, and the entry body is a Rekor v2 `hashedrekord` entry. Its inclusion proof leads to a checkpoint that names the log's host and that the log's key signed, so a Rekor v1 entry is refused. The command computes the entry from the content hash, the signature, and the certificate, so an entry body that records anything else fails the inclusion proof.
 - The signature verifies.
 - The certificate's subject alternative name holds one email address or URI, and it appears in `PODIUM_SIGSTORE_CERT_IDENTITY`. The issuer in the certificate's Issuer (V2) extension equals `PODIUM_SIGSTORE_CERT_OIDC_ISSUER`.
 

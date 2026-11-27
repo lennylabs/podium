@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -37,6 +38,9 @@ type envConfig struct {
 	kind          string
 	apiVersion    string
 	foreignLogID  bool
+	v1Body        bool
+	v1Checkpoint  bool
+	label         *kindVersionJSON
 	mediaType     string
 	digestAlg     string
 	ts            []func(*Harness, *tsConfig) error
@@ -201,11 +205,48 @@ func (h *Harness) keylessEntry(cfg envConfig, digest []byte, leaf signedLeaf) (*
 	if cfg.entryCert != nil {
 		fields.certDER = cfg.entryCert
 	}
-	body, err := hashedRekordBody(fields)
+	encode := hashedRekordBody
+	if cfg.v1Body {
+		encode = hashedRekordV1Body
+	}
+	body, err := encode(fields)
 	if err != nil {
 		return nil, err
 	}
 	return h.proofFor(cfg, body)
+}
+
+// hashedRekordV1Entry is the canonicalized hashedrekord 0.0.1 body Rekor
+// v1 stores, with its members in lexical order.
+type hashedRekordV1Entry struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+	Spec       struct {
+		Data struct {
+			Hash struct {
+				Algorithm string `json:"algorithm"`
+				Value     string `json:"value"`
+			} `json:"hash"`
+		} `json:"data"`
+		Signature struct {
+			Content   []byte `json:"content"`
+			PublicKey struct {
+				Content []byte `json:"content"`
+			} `json:"publicKey"`
+		} `json:"signature"`
+	} `json:"spec"`
+}
+
+// hashedRekordV1Body encodes a Rekor v1 hashedrekord 0.0.1 body that
+// binds the digest, the signature, and the PEM leaf.
+func hashedRekordV1Body(f entryFields) ([]byte, error) {
+	var e hashedRekordV1Entry
+	e.APIVersion, e.Kind = "0.0.1", "hashedrekord"
+	e.Spec.Data.Hash.Algorithm = "sha256"
+	e.Spec.Data.Hash.Value = hex.EncodeToString(f.digest)
+	e.Spec.Signature.Content = f.sig
+	e.Spec.Signature.PublicKey.Content = []byte(pemCert(&x509.Certificate{Raw: f.certDER}))
+	return json.Marshal(e)
 }
 
 // proofFor proves body as cfg describes and returns the bundle entry.
@@ -255,6 +296,14 @@ func (h *Harness) proofFor(cfg envConfig, body []byte) (*tlogEntryJSON, error) {
 	}
 	if p.malformed {
 		out.InclusionProof.Checkpoint.Envelope = "acme checkpoint without a tree size\n"
+	}
+	if cfg.v1Checkpoint {
+		if out.InclusionProof, err = rekorV1Proof(body, index, h.logKey); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.label != nil {
+		out.KindVersion = *cfg.label
 	}
 	if p.omit {
 		out.InclusionProof = nil
