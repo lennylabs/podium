@@ -16,7 +16,9 @@ require (
 	github.com/minio/minio-go/v7 v7.4.1
 	github.com/prometheus/client_golang v1.25.0
 	github.com/sigstore/protobuf-specs v0.5.2
+	github.com/sigstore/sigstore v1.11.1
 	github.com/sigstore/sigstore-go v1.4.0
+	github.com/theupdateframework/go-tuf/v2 v2.4.2
 	github.com/xanzy/ssh-agent v0.3.3
 	github.com/yuin/goldmark v1.7.13
 	github.com/zalando/go-keyring v0.2.8
@@ -104,10 +106,8 @@ require (
 	github.com/shibumi/go-pathspec v1.3.0 // indirect
 	github.com/sigstore/rekor v1.5.5 // indirect
 	github.com/sigstore/rekor-tiles/v2 v2.4.0 // indirect
-	github.com/sigstore/sigstore v1.11.1 // indirect
 	github.com/sigstore/timestamp-authority/v2 v2.2.0 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
-	github.com/theupdateframework/go-tuf/v2 v2.4.2 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/transparency-dev/formats v0.1.1 // indirect
 	github.com/transparency-dev/merkle v0.0.2 // indirect

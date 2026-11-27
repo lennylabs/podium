@@ -1,8 +1,12 @@
 package sign
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -32,6 +36,24 @@ type AttestationRootSource interface {
 type AttestationRoot struct {
 	material *root.TrustedRoot
 	sha1TSAs []string
+	digest   [sha256.Size]byte
+}
+
+// Digest is the §4.7.11 digest of the root: "sha256:" and the hexadecimal
+// SHA-256 digest of the document bytes as read.
+//
+// Spec: §4.7.11.
+func (r *AttestationRoot) Digest() string {
+	return "sha256:" + hex.EncodeToString(r.digest[:])
+}
+
+// ListsLogs reports whether the root lists at least one transparency log
+// and at least one certificate transparency log.
+func (r *AttestationRoot) ListsLogs() (transparency, certificateTransparency bool) {
+	if r.material == nil {
+		return false, false
+	}
+	return len(r.material.RekorLogs()) > 0, len(r.material.CTLogs()) > 0
 }
 
 // AttestationRoot returns r, so a loaded root serves as its own source.
@@ -71,13 +93,21 @@ func LoadAttestationRootFile(path string) (*AttestationRoot, error) {
 // include expired, rotated-out entries loads, because each entry's chain is
 // checked at the time of each timestamp it verifies.
 //
+// A document that holds several JSON values, such as the one trusted root
+// per line that `gh attestation trusted-root` writes, is refused: choosing
+// one of them would choose the root a bundle verifies against, so the
+// operator keeps the line of the instance.
+//
 // Spec: §4.7.11.
 func ParseAttestationRoot(raw []byte) (*AttestationRoot, error) {
+	if n := countJSONValues(raw); n > 1 {
+		return nil, fmt.Errorf("%w: the document holds %d trusted roots, one per line; keep only the line of the instance", ErrAttestationRootInvalid, n)
+	}
 	pb, err := root.NewTrustedRootProtobuf(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrAttestationRootInvalid, err)
 	}
-	out := &AttestationRoot{}
+	out := &AttestationRoot{digest: sha256.Sum256(raw)}
 	for i, tsa := range pb.GetTimestampAuthorities() {
 		sha1, err := checkTimestampAuthorityEntry(tsa.GetCertChain().GetCertificates())
 		if err != nil {
@@ -91,6 +121,23 @@ func ParseAttestationRoot(raw []byte) (*AttestationRoot, error) {
 		return nil, fmt.Errorf("%w: %w", ErrAttestationRootInvalid, err)
 	}
 	return out, nil
+}
+
+// countJSONValues counts the JSON values in raw, stopping at the first
+// syntax error, so a single document counts as one and a JSON Lines
+// document counts its lines. A document that does not parse counts the
+// values before the error, and protojson then reports the error. The end
+// of the input is such an error, so the loop ends on it.
+func countJSONValues(raw []byte) int {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	n := 0
+	for {
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			return n
+		}
+		n++
+	}
 }
 
 // checkTimestampAuthorityEntry refuses a chain whose first certificate is a
