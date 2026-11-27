@@ -105,6 +105,8 @@ podium layer register --id alice-personal \
 
 The command prints the registry's response. For a `git` layer, the response carries `webhook_url` and `webhook_secret`, which [Webhooks](#webhooks) uses.
 
+On a registry that verifies no caller, which is a registry with no identity provider configured and a registry in public mode, the registry applies no layer visibility, and every caller sees every layer. A registration whose layer sets no `public` grant succeeds there, and its response carries a `warnings` array that states so. `podium layer register` writes each warning to standard error with a `warning: ` prefix. [When visibility is not enforced](access-control#when-visibility-is-not-enforced) lists the cases.
+
 An authenticated caller without the tenant `admin` role registers a user-defined layer whether or not it passes `--user-defined`. The registration must assert none of `owner`, `public`, `organization`, `groups`, and `users`. The registry resolves the layer class from the caller's identity. A registration that asserts one of those fields is refused with `auth.forbidden` carrying `details.constraint: "admin_only_fields"`, as [Who may set a layer's owner and visibility](#who-may-set-a-layers-owner-and-visibility) states.
 
 ### Git source options
@@ -400,7 +402,7 @@ The registry reads `owner`, `public`, `organization`, `groups`, and `users` on a
 
 - Any other caller that asserts one of these fields is refused with `auth.forbidden` carrying `details.constraint: "admin_only_fields"`, and the refusal names the asserted fields.
 - A field is asserted by its value rather than by its presence. A false `public` or `organization`, an empty `groups` or `users`, an empty `owner`, and an `owner` naming the caller's own verified subject assert nothing.
-- A deployment with no identity provider configured admits every caller on the admin arm, so the rule refuses nothing there. On such a deployment, `podium layer register --user-defined --owner` names a layer's owner. A deployment in public mode admits a request that carries the operator token on the same arm, and it refuses a registration without the token with a bare `auth.forbidden` before this rule is evaluated.
+- A deployment with no identity provider configured admits every caller on the admin arm, so the rule refuses nothing there. On such a deployment, `podium layer register --user-defined --owner alice@acme.com` stores the owner and `users: [alice@acme.com]`, but the layer is visible to every caller, and every caller can update or unregister it. The stored visibility takes effect once an identity provider is configured, and the command writes a warning to standard error that says so. A deployment in public mode admits a request that carries the operator token on the same arm, and it refuses a registration without the token with a bare `auth.forbidden` before this rule is evaluated.
 - The registry evaluates this rule after the layer write authorization rule and after the local-source rule. A registration the layer write rule refuses keeps its bare `auth.forbidden` with no `details.constraint`. A registration also on the local-source arm keeps `details.constraint: "local_source"`. The `admin_only_fields` refusal is returned only where neither earlier rule refuses.
 
 A user-defined layer's owner and visibility are fixed at the registration that created it. On `podium layer update` against such a layer, the registry compares the value each flag would store with the value the layer holds:

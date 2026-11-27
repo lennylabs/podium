@@ -65,8 +65,11 @@ func (s *mcpServer) loadDomain(args map[string]any) any {
 	domains := s.overlayDomainsSnapshot()
 	records := s.overlaySnapshot()
 	if len(domains) == 0 && len(records) == 0 {
-		// No overlay to merge: identical to the pre-merge dispatch.
-		return s.proxyGet("/v1/load_domain", args, nil)
+		// No overlay to merge: the pre-merge dispatch, with the §5 mcp-server
+		// entries dropped from the notable list.
+		out := s.proxyGet("/v1/load_domain", args, nil)
+		dropHiddenDescriptors(out, "notable")
+		return out
 	}
 
 	// §7.4 offline-only: discovery tools keep no registry tree to merge onto,
@@ -108,9 +111,15 @@ func (s *mcpServer) finishDomainMerge(reg ldResponse, path string, args map[stri
 	if merged.Subdomains == nil {
 		merged.Subdomains = []ldSubdomain{}
 	}
-	if merged.Notable == nil {
-		merged.Notable = []ldArtifact{}
+	// Spec: §5 — the bridge lists no mcp-server artifact, whichever layer
+	// contributed the notable entry.
+	notable := make([]ldArtifact, 0, len(merged.Notable))
+	for _, a := range merged.Notable {
+		if !hiddenFromBridge(a.Type) {
+			notable = append(notable, a)
+		}
 	}
+	merged.Notable = notable
 	out, merr := json.Marshal(merged)
 	if merr != nil {
 		return errorResult("encode load_domain: " + merr.Error())
