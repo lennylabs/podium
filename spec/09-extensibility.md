@@ -30,7 +30,7 @@ Podium is extensible at two layers. **In-process plugins** swap or augment the r
 | Member | In | Type and limit | Meaning |
 |:--|:--|:--|:--|
 | Layer source configuration | Request | The value the snapshot operation receives, with no added member | Locates the source |
-| `reference` | Request | String of at most 128 bytes | The reference of the snapshot. The answers describe this commit, whatever the tracked ref points to when the request arrives |
+| `reference` | Request | String of 1 to 128 bytes | The reference of the snapshot. The answers describe this commit, whatever the tracked ref points to when the request arrives |
 | `base` | Request | String of at most 128 bytes, or empty | The commit the lineage starts from. Empty when the request names none |
 | `commits` | Request | List of 1 to 64 strings of at most 128 bytes each | The commits to answer for |
 | `answers` | Response | List with one string for each entry of `commits`, in the same order | `in_lineage`, `not_in_history`, or `not_descendant` for that commit |

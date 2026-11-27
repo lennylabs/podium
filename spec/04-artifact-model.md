@@ -656,7 +656,7 @@ The checks the registry applies to a snapshot's content run in the registry core
 
 - **Snapshot tree.** The registry reads, digests, and stores the file tree that the provider's snapshot exposes, as it does for the built-in sources. A provider needs no digest logic.
 - **Consistency.** The files of one snapshot come from one state of the source. A provider that reads parts of the tree at different moments can pair the content of one state with files of another.
-- **Lineage, optional.** A provider declares whether it answers lineage queries (§9.1 *Lineage query*), and the declaration is a constant of the provider, as its trigger model is. The `git` provider answers them, and the `local` provider does not. A provider answers them only when its references name the commits of a Git history. A source that a CI job publishes from a Git repository, such as a bucket or an archive, has no such history of its own.
+- **Lineage, optional.** A provider declares whether it answers lineage queries (§9.1 *Lineage query*), and the declaration is a constant of the provider, as its trigger model is. The `git` provider answers them, and the `local` provider does not. A provider gains from answering them only when the commits a query names identify states of its own source, as the commits of a Git history do. A source that a CI job publishes from a Git repository, such as a bucket or an archive, has no such history of its own, and its layers do without the query.
 
 The `git` provider clones a bounded depth of history and deepens it while an answer it needs is undecided (§7.3.1 *Git fetch*).
 
