@@ -67,6 +67,8 @@ func TestResolveAttestation_Durations(t *testing.T) {
 		{sigstoreRootTimeoutEnv, "-1s", "PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT must be a duration above zero"},
 		{sigstoreRootMaxAgeEnv, "-1h", "PODIUM_SIGSTORE_ROOT_MAX_AGE must be a duration of zero or more"},
 		{sigstoreRootMaxAgeEnv, "90d", "PODIUM_SIGSTORE_ROOT_MAX_AGE must be a duration of zero or more"},
+		{sigstoreRootRefreshEnv, "1ms", "PODIUM_SIGSTORE_ROOT_REFRESH must be at least 1m0s and at least PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT"},
+		{sigstoreRootRefreshEnv, "59s", "PODIUM_SIGSTORE_ROOT_REFRESH must be at least 1m0s"},
 	} {
 		a := resolveAttestation(envMap(map[string]string{tc.env: tc.value}), yamlSigstore{}, "", now)
 		err := a.err()
@@ -78,6 +80,24 @@ func TestResolveAttestation_Durations(t *testing.T) {
 				t.Errorf("%s=%q: display %q", tc.env, tc.value, s.display())
 			}
 		}
+	}
+}
+
+// Spec: §13.12 — the refresh interval is at least the refresh deadline, so
+// a deadline raised above the default interval refuses the start too, and
+// the interval is shown as invalid.
+func TestResolveAttestation_RefreshBelowDeadline(t *testing.T) {
+	t.Parallel()
+	a := resolveAttestation(envMap(map[string]string{sigstoreRootRefreshEnv: "2m", sigstoreRootTimeoutEnv: "3m"}), yamlSigstore{}, "", time.Now())
+	if err := a.err(); err == nil || !strings.Contains(err.Error(), "at least PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT (3m0s), got 2m0s") {
+		t.Fatalf("err = %v", err)
+	}
+	if a.refresh.display() != "2m (invalid)" {
+		t.Errorf("display = %q", a.refresh.display())
+	}
+	d := resolveAttestation(envMap(map[string]string{sigstoreRootTimeoutEnv: "25h"}), yamlSigstore{}, "", time.Now())
+	if err := d.err(); err == nil || d.refresh.display() != "24h0m0s (invalid)" {
+		t.Fatalf("default interval below a 25h deadline: err %v display %q", err, d.refresh.display())
 	}
 }
 
@@ -102,6 +122,8 @@ func TestResolveAttestation_InstanceRules(t *testing.T) {
 		{"github CT", yamlSigstoreInstance{Name: "github", TrustedRoot: gh, CertificateTransparency: boolPtr(true)}, "the github instance has no transparency log"},
 		{"no log statement", yamlSigstoreInstance{Name: "acme", TrustedRoot: gh}, "must state transparency_log"},
 		{"unreadable root", yamlSigstoreInstance{Name: "acme", TrustedRoot: filepath.Join(dir, "absent.json"), TransparencyLog: boolPtr(false)}, `Sigstore instance "acme" (sigstore.instances)`},
+		{"log the root lacks", yamlSigstoreInstance{Name: "acme", TrustedRoot: gh, TransparencyLog: boolPtr(true)}, "transparency_log is true and the trusted root " + gh + " lists no transparency log"},
+		{"CT the root lacks", yamlSigstoreInstance{Name: "acme", TrustedRoot: gh, TransparencyLog: boolPtr(false), CertificateTransparency: boolPtr(true)}, "lists no certificate transparency log"},
 	} {
 		a := resolveAttestation(envMap(nil), yamlSigstore{Instances: []yamlSigstoreInstance{tc.entry}}, dir, time.Now())
 		err := a.err()
@@ -282,7 +304,7 @@ func TestStartAttestationRoots_RefreshesPublicGood(t *testing.T) {
 	if err := c.loadAttestationRoots(); err != nil {
 		t.Fatalf("loadAttestationRoots: %v", err)
 	}
-	stopRefresh := c.runAttestationRefresh(ctx)
+	stopRefresh := c.StartAttestationRefresh(ctx)
 	defer stopRefresh()
 	inst := c.AttestationInstances()
 	pg, ok := inst[sign.PublicGoodInstance]
@@ -333,7 +355,7 @@ func TestStartAttestationRoots_StaticPublicGoodFile(t *testing.T) {
 	if err := c.loadAttestationRoots(); err != nil {
 		t.Fatalf("loadAttestationRoots: %v", err)
 	}
-	c.runAttestationRefresh(context.Background())()
+	c.StartAttestationRefresh(context.Background())()
 	if c.attestation.publicGood != nil {
 		t.Fatal("a refreshed source was built beside the static root file")
 	}
@@ -383,6 +405,9 @@ func TestLoadAttestationRoots_LogsRootsAndSHA1Authorities(t *testing.T) {
 		t.Fatalf("loadAttestationRoots: %v", err)
 	}
 	log.SetOutput(prev)
+	if _, err := os.Stat(filepath.Join(dir, "sigstore")); !os.IsNotExist(err) {
+		t.Errorf("the start created the root directory (%v), want none before a refresh", err)
+	}
 	out := buf.String()
 	for _, want := range []string{
 		"attestation: instance public-good: trusted root " + mustDigest(t, sign.EmbeddedPublicGoodRoot()) + " from embedded (TUF refresh), root time unknown",

@@ -63,6 +63,9 @@ func TestAttestationRoots_StartupRefusals(t *testing.T) {
 	noCT := writeE2EFile(t, dir, "noct.json", h.TrustedRootJSON())
 	missingInstanceRoot := writeE2EFile(t, dir, "missing-root.yaml",
 		[]byte("registry:\n  sigstore:\n    instances:\n      - name: github\n        trusted_root: absent-github.json\n"))
+	ghRoot := writeE2EFile(t, dir, "github.json", readSignTestdata(t, "github.trusted_root.json"))
+	logLess := writeE2EFile(t, dir, "logless.yaml",
+		[]byte("registry:\n  sigstore:\n    instances:\n      - name: acme\n        trusted_root: "+ghRoot+"\n        transparency_log: true\n"))
 	publicGoodEntry := writeE2EFile(t, dir, "public-good.yaml",
 		[]byte("registry:\n  sigstore:\n    instances:\n      - name: public-good\n        trusted_root: "+noCT+"\n"))
 
@@ -83,6 +86,10 @@ func TestAttestationRoots_StartupRefusals(t *testing.T) {
 			[]string{"config.invalid: PODIUM_SIGSTORE_ROOT_REFRESH must be a duration above zero"}},
 		{"refresh interval without a unit", []string{"PODIUM_SIGSTORE_ROOT_REFRESH=24"},
 			[]string{"config.invalid: PODIUM_SIGSTORE_ROOT_REFRESH must be a duration above zero"}},
+		{"refresh interval below the floor", []string{"PODIUM_SIGSTORE_ROOT_REFRESH=1ms"},
+			[]string{"config.invalid: PODIUM_SIGSTORE_ROOT_REFRESH must be at least 1m0s"}},
+		{"instance log the root lacks", []string{"PODIUM_CONFIG_FILE=" + logLess},
+			[]string{"config.invalid", `Sigstore instance "acme"`, "lists no transparency log"}},
 		{"refresh deadline", []string{"PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT=-1s"},
 			[]string{"config.invalid: PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT must be a duration above zero"}},
 		{"maximum age", []string{"PODIUM_SIGSTORE_ROOT_MAX_AGE=90d"},
@@ -112,7 +119,9 @@ func TestAttestationRoots_StartupRefusals(t *testing.T) {
 // Spec: §4.7.11, §6.2 — through the binary, the attestation path does not
 // read PODIUM_SIGSTORE_TRUSTED_ROOT_FILE: a start with it naming an
 // unreadable file starts, and a start with it naming the root of another
-// instance reports the embedded public-good root and never that file's.
+// instance reports the embedded public-good root and never that file's. A
+// registry that cannot verify on public-good starts no refresh, so the
+// start creates no root directory.
 func TestAttestationRoots_IgnoresKeylessTrustedRootFile(t *testing.T) {
 	t.Parallel()
 	ghRoot := readSignTestdata(t, "github.trusted_root.json")
@@ -124,10 +133,14 @@ func TestAttestationRoots_IgnoresKeylessTrustedRootFile(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+			home := t.TempDir()
 			srv := startServerArgs(t, []string{
-				"HOME=" + t.TempDir(), "PODIUM_SIGN=none",
+				"HOME=" + home, "PODIUM_SIGN=none",
 				"PODIUM_SIGSTORE_TRUSTED_ROOT_FILE=" + value,
 			}, "serve", "--standalone")
+			if _, err := os.Stat(filepath.Join(home, ".podium", "standalone", "sigstore")); !os.IsNotExist(err) {
+				t.Errorf("the start created the root directory (%v), want none", err)
+			}
 			log := srv.log()
 			want := "attestation: instance public-good: trusted root " + embedded + " from embedded"
 			if !strings.Contains(log, want) {

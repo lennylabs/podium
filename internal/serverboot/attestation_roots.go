@@ -110,6 +110,9 @@ func resolveAttestation(getenv func(string) string, y yamlSigstore, configDir st
 			a.errs = append(a.errs, d.err)
 		}
 	}
+	if err := a.refreshFloor(); err != nil {
+		a.errs = append(a.errs, err)
+	}
 	if a.rootFile != "" {
 		a.addPublicGoodFile(now)
 	}
@@ -121,6 +124,10 @@ func resolveAttestation(getenv func(string) string, y yamlSigstore, configDir st
 			continue
 		}
 		if err := fi.load(now); err != nil {
+			a.errs = append(a.errs, err)
+			continue
+		}
+		if err := fi.checkLogs(); err != nil {
 			a.errs = append(a.errs, err)
 			continue
 		}
@@ -148,6 +155,27 @@ func resolveDuration(raw, name string, def time.Duration, allowZero bool) durati
 		return durationSetting{value: def, raw: raw, source: name,
 			err: fmt.Errorf("config.invalid: %s must be a duration above zero, such as 24h, got %q", name, raw)}
 	}
+}
+
+// refreshFloor refuses a refresh interval below sign.MinRootRefresh or
+// below the refresh deadline: an interval shorter than its own deadline
+// would overlap refreshes, and one of a few milliseconds sends a request
+// burst to the Sigstore TUF repository.
+//
+// Spec: §13.12
+func (a *attestationConfig) refreshFloor() error {
+	if a.refresh.err != nil || a.timeout.err != nil {
+		return nil
+	}
+	if a.refresh.value >= sign.MinRootRefresh && a.refresh.value >= a.timeout.value {
+		return nil
+	}
+	a.refresh.err = fmt.Errorf("config.invalid: %s must be at least %s and at least %s (%s), got %s",
+		sigstoreRootRefreshEnv, sign.MinRootRefresh, sigstoreRootTimeoutEnv, a.timeout.value, a.refresh.value)
+	if a.refresh.raw == "" {
+		a.refresh.raw = a.refresh.value.String()
+	}
+	return a.refresh.err
 }
 
 // addPublicGoodFile loads the static public-good root, which must also list
@@ -224,6 +252,22 @@ func (fi *fileInstance) load(now time.Time) error {
 	return nil
 }
 
+// checkLogs refuses an instance that requires a log of a kind its root does
+// not list: every bundle of it would be refused, so the start reports the
+// configuration instead.
+//
+// Spec: §13.12
+func (fi *fileInstance) checkLogs() error {
+	tlog, ctlog := fi.root.ListsLogs()
+	switch {
+	case fi.tlog && !tlog:
+		return fmt.Errorf("config.invalid: Sigstore instance %q (%s): transparency_log is true and the trusted root %s lists no transparency log", fi.name, sigstoreInstancesKey, fi.file)
+	case fi.ct && !ctlog:
+		return fmt.Errorf("config.invalid: Sigstore instance %q (%s): certificate_transparency is true and the trusted root %s lists no certificate transparency log", fi.name, sigstoreInstancesKey, fi.file)
+	}
+	return nil
+}
+
 // err is the first refusal, which validate returns.
 func (a attestationConfig) err() error {
 	if len(a.errs) == 0 {
@@ -240,8 +284,9 @@ func publicGoodRootDir(sqlitePath string) string {
 }
 
 // loadAttestationRoots builds every configured instance with no network
-// call: the public-good instance serves the copy on disk or the embedded
-// copy until runAttestationRefresh completes a refresh. It logs the root of
+// call and no write: the public-good instance serves the copy on disk or
+// the embedded copy until a refresh that StartAttestationRefresh starts
+// completes. It logs the root of
 // each instance and the SHA-1 timestamp authorities of each root.
 //
 // Spec: §4.7.11
@@ -280,14 +325,20 @@ func (c *Config) loadAttestationRoots() error {
 	return nil
 }
 
-// runAttestationRefresh starts the background refresh of the public-good
+// StartAttestationRefresh starts the background refresh of the public-good
 // root and returns the function that stops it: the stop cancels the
 // refresh and waits for it to return, so a shutdown leaves no request or
-// write to the root directory behind. Under a static root file it starts
-// nothing.
+// write to the root directory behind. Under a static root file, or before
+// loadAttestationRoots, it starts nothing.
+//
+// §4.7.11 runs the refresh only on a registry that can verify on
+// public-good: a trust default, tenant floor, or layer policy above none
+// that names a public-good signer. Ingest verification decides that and
+// calls this, so the registry start does not; a registry that never
+// verifies on public-good makes no TUF request and creates no directory.
 //
 // Spec: §4.7.11
-func (c *Config) runAttestationRefresh(ctx context.Context) (stop func()) {
+func (c *Config) StartAttestationRefresh(ctx context.Context) (stop func()) {
 	src := c.attestation.publicGood
 	if src == nil {
 		return func() {}
