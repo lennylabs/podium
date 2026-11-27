@@ -1,12 +1,12 @@
 ---
 title: Security review checklist
 nav_order: 7
-description: "The checks to run before a tenant that handles sensitive content goes live: the review checklist, signature enforcement, tamper checks, and the limits of stored-row admission."
+description: "The checks to run before a tenant that handles sensitive content goes live: the review checklist, signature enforcement, tamper checks, the limits of stored-row admission, and removal of the identity provider."
 ---
 
 # Security review checklist
 
-This page lists the checks to run before a tenant that handles sensitive content goes live. Re-run the checklist after every major release and after any change to the layer configuration, the identity provider, or the sandbox enforcement settings. The sections after the checklist describe how signature enforcement works, how to test it by tampering, and what stored-row admission does not protect against.
+This page lists the checks to run before a tenant that handles sensitive content goes live. Re-run the checklist after every major release and after any change to the layer configuration, the identity provider, or the sandbox enforcement settings. The sections after the checklist describe how signature enforcement works, how to test it by tampering, what stored-row admission does not protect against, and what removing the identity provider exposes.
 
 ## Checklist
 
@@ -15,6 +15,7 @@ This page lists the checks to run before a tenant that handles sensitive content
 | OAuth identity flow | Test the device-code flow for every identity provider in production use. Set token lifetimes to 15 minutes or less. Confirm that revocation propagates within 60 seconds. |
 | OIDC group claim mapping | Confirm that the group claims the identity provider issues arrive in the registry's audit log. Test with a non-admin user. [Groups](../identity/groups) describes how the registry reads them. |
 | Per-layer visibility | Confirm that each layer's `visibility:` declaration is correct. Test with a non-member identity, for example a session token signed for the `injected-session-token` provider. [Access control](../content/access-control) describes layer visibility. |
+| Identity configuration control | Confirm that only the operators who may expose every layer can change the registry's environment, `registry.yaml`, Helm values, and secrets, or restart it. Alert on the signals [Removing the identity provider](#removing-the-identity-provider) lists. |
 | Signature enforcement | Confirm that every consumer resolves its signature policy to `always` and that every SDK client has a verification key configured, as [Signature enforcement](#signature-enforcement) describes. Test tampering as [Tamper checks](#tamper-checks) describes. |
 | Audit hash chain | Set `PODIUM_AUDIT_VERIFY_INTERVAL_SECONDS` to a non-zero value with a file destination in `PODIUM_AUDIT_LOG_PATH`, so the registry re-verifies the chain on a schedule. Without a file destination, the receiving system applies the `prev_hash` check to the shipped stream, as the [audit events reference](../../reference/audit-events#receiver-checks) describes. Alert on the `audit.gap_detected` event and on the "audit integrity ALERT" log line. [Hash chain](observability#hash-chain) describes both checks. |
 | Webhook signing | Use a unique Git provider webhook HMAC secret per layer. Test with an invalid signature, and expect `ingest.webhook_invalid`. |
@@ -68,3 +69,19 @@ Admission checks a row's content. It does not attest which row answers a request
 - A `sign-stored-rows` run also re-signs rows signed under a `verify:` key. While a compromised key stays on a `verify:` line, a run re-signs rows its holder stored. [Compromised keys](signing-keys#compromised-keys) gives the response.
 
 Restrict write access to the metadata store and to its backups.
+
+## Removing the identity provider
+
+Whoever can change the registry's configuration or restart it can remove its identity provider. A registry restarted with no request-time identity verifier, or in public mode, resolves every caller as anonymous and applies no layer visibility. Every caller that can reach it then sees every layer, whatever the layer's `visibility:` declares. On a registry with no identity provider and not in public mode, every caller also passes the admin rule, so every caller can register, update, and unregister layers and request erasure. The stored declarations stay in place and take effect again once a provider is configured.
+
+The registry reads its identity configuration at startup and has no record of who changed it, so it cannot tell an intended removal from an unintended one. The defence is control over who can change the deployment's configuration and secrets: the environment variables, `registry.yaml`, the Helm values, the container or service definition, and the secret store that feeds them. Treat write access to any of them as equivalent to read access to every layer.
+
+Alert on the signals that report a registry running without verified identity:
+
+- `/healthz` returns `mode: public` when the registry runs in public mode. A registry restarted with no identity provider and not in public mode returns `mode: ready`, so this signal does not cover that case.
+- The startup log carries the public-mode banner, `⚠  PUBLIC MODE: all artifacts visible to all callers without authentication.`
+- The startup log carries the warning that lists the stored layers with no `public` grant. The registry logs it whenever it verifies no caller and stores such a layer, in public mode and without an identity provider alike. [Restricted layers on a registry that verifies no caller](../content/access-control#restricted-layers-on-a-registry-that-verifies-no-caller) gives its text.
+- The startup line `podium-server listening on <address> (mode=<mode>)` reports `mode=standalone` for a registry with no identity provider and `mode=public` for public mode, in place of the provider's name.
+- Audit records for calls from clients that normally authenticate carry `caller.identity: "system:public"` and `caller.public_mode: true`. An anonymous call to a registry that verifies identity records the same values, so alert on a change in their volume rather than on a single record.
+
+[Public-mode misconfiguration](troubleshooting#public-mode-misconfiguration) gives the recovery steps for public mode. For a registry restarted without its provider, restore the provider's configuration and restart the registry.

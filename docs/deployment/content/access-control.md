@@ -34,7 +34,7 @@ Each `groups` and `users` entry is a non-empty string with no control character,
 The registry enforces visibility on every call. A call that visibility rejects returns the `visibility.denied` outcome, which mirrors a not-found result, so the rejection does not reveal that a hidden artifact exists. The [audit log](../operations/observability#audit-log) records each denial, and the `podium_visibility_denied_total` metric counts them.
 
 > [!IMPORTANT]
-> A registry with no identity provider, a catalog read from a filesystem source, and a registry in public mode do not enforce visibility. [When visibility is not enforced](#when-visibility-is-not-enforced) lists each case.
+> A registry with no identity provider, a catalog read from a filesystem source, and a registry in public mode do not enforce visibility, so every caller sees every layer whatever its declaration. [When visibility is not enforced](#when-visibility-is-not-enforced) lists each case.
 
 ### Where group membership comes from
 
@@ -192,9 +192,22 @@ The registry skips visibility enforcement in these cases:
 
 | Case | Behavior |
 |:--|:--|
-| No identity provider | A registry that boots without `PODIUM_IDENTITY_PROVIDER` treats every caller as anonymous, and the evaluator admits every layer. Configure an identity provider to make visibility meaningful. See [Identity](../identity/). |
+| No request-time identity verifier | A registry that boots without an identity provider, or with a `PODIUM_IDENTITY_PROVIDER` label it resolves to no configured provider, verifies no caller. It treats every caller as anonymous, and the evaluator admits every layer for every caller. See [Identity](../identity/). |
 | Filesystem-source catalog | `podium sync` reading a directory has no registry process to enforce anything, so the evaluator returns `true` for every layer. The declarations stay in layer config, so the same catalog is portable to a server-backed deployment mode. |
 | Public mode | [Public mode](../modes/single-node#public-mode) bypasses both authentication and the visibility model. It refuses ingest of `sensitivity: medium` and `sensitivity: high` artifacts. It records `caller.identity = "system:public"` in the [audit log](../operations/observability#audit-log), so the audit trail shows that anonymous access was intended. |
+
+### Restricted layers on a registry that verifies no caller
+
+A registry without a request-time identity verifier, and a registry in public mode, store every `visibility:` declaration and apply none of them. A layer that declares `organization`, `groups`, or `users`, a user-defined layer with its implicit `users: [<owner>]`, and a layer with no visibility filters are each visible to every caller that can reach the registry. Such a layer is hidden from other callers only once an identity provider is configured and the registry restarts with it. The stored declarations then take effect without being registered again.
+
+The registry reports this in two places:
+
+- A `podium layer register`, `podium layer update`, or `podium layer restore` that stores a layer with no `public` grant succeeds, and its response carries a `warnings` array. The CLI writes each warning to standard error with a `warning: ` prefix and keeps the response body on standard output. A layer with no visibility filters, which `PODIUM_DEFAULT_LAYER_VISIBILITY=private` stores, is reported as private, and the warning states that the private declaration applies once an identity provider is added.
+- At startup, after it seeds the layers declared in `registry.yaml` and the `--layer-path` layers, the registry logs one warning line. The line counts the stored layers that have no `public` grant and lists up to 20 of their IDs, followed by `and N more` when there are more. On a store that holds more than one tenant, each ID names its tenant. A registry in public mode logs the line after its public-mode banner.
+
+```text
+warning: 1 stored layer(s) declare visibility other than public, but this registry applies no layer visibility because it verifies no caller, so every caller sees them; their declarations take effect once an identity provider is configured: alice-personal
+```
 
 ---
 

@@ -1034,6 +1034,21 @@ When `repo_credential` is present:
 - It is true while that `repo` carries a credential, including one stored inside `repo` by an earlier release, and false otherwise.
 - It is true exactly when `clear_repo_credential` on an update would change the stored `repo`.
 
+#### Unapplied-visibility warning
+
+A registry with no request-time identity verifier, and a registry in public mode, verify no caller and apply no layer visibility. On such a registry, a successful registration, update, or restore whose layer sets no `public` grant carries a `warnings` array of strings beside its other members. Each string names the layer and its declared visibility, states that every caller sees the layer, and states that the declaration takes effect once an identity provider is configured. A layer with no visibility filters is reported as private. The member is absent from every other response, so a client that does not read it is unaffected:
+
+```json
+{
+  "layer": { "id": "alice-personal", "user_defined": true, "owner": "alice@acme.com", "users": ["alice@acme.com"] },
+  "warnings": [
+    "layer \"alice-personal\" declares visibility users: [alice@acme.com], but this registry applies no layer visibility because it verifies no caller, so every caller sees the layer; the declaration takes effect once an identity provider is configured"
+  ]
+}
+```
+
+The example abbreviates the layer object. The warning changes neither the status nor what the request stores.
+
 ### Register a layer
 
 Registers a layer in the caller's tenant, or replaces the stored record of an existing layer ID.
@@ -1107,7 +1122,7 @@ On a multi-tenant registry, `webhook_url` carries the layer's tenant ID before t
 "webhook_url": "https://registry.acme.com/v1/ingest/webhook/<tenant-id>/team-finance"
 ```
 
-The registration in the example has not ingested yet, so `last_ingested_at` is absent. It sets no force-push policy, so `force_push_policy` is absent. A `local` registration, and an update that requests no secret rotation, return the layer alone without `webhook_url` and `webhook_secret`.
+The registration in the example has not ingested yet, so `last_ingested_at` is absent. It sets no force-push policy, so `force_push_policy` is absent. A `local` registration, and an update that requests no secret rotation, return the layer alone without `webhook_url` and `webhook_secret`. On a registry that verifies no caller, a registration whose layer sets no `public` grant also carries the [unapplied-visibility warning](#unapplied-visibility-warning).
 
 **Errors.**
 
@@ -1349,7 +1364,7 @@ PUT  /v1/layers/update?id={id}
 | `repo_token`, `repo_username`, `clear_repo_credential` | See [Repository credential on update](#repository-credential-on-update). |
 | `rotate_webhook_secret` | Requests a webhook-secret rotation. The response then carries the new secret in `webhook_secret`. |
 
-**Response.** The layer. An update that requests no secret rotation returns the layer alone, without `webhook_url` and `webhook_secret`.
+**Response.** The layer. An update that requests no secret rotation returns the layer alone, without `webhook_url` and `webhook_secret`. On a registry that verifies no caller, the response carries the [unapplied-visibility warning](#unapplied-visibility-warning) when the layer sets no `public` grant.
 
 **Errors.**
 
@@ -1450,7 +1465,7 @@ POST /v1/layers/restore?id={id}
 
 `GET /v1/layers?deleted=true` lists the soft-deleted layers still inside the recovery window. It filters them on the terms of the [layer read visibility](#layer-read-visibility) rule.
 
-`POST /v1/layers/restore?id={id}` clears the tombstone and recovers the layer and the artifacts the unregister soft-deleted. An artifact an ingest removed before the unregister stays soft-deleted.
+`POST /v1/layers/restore?id={id}` clears the tombstone and recovers the layer and the artifacts the unregister soft-deleted. An artifact an ingest removed before the unregister stays soft-deleted. The response is `{"restored": "<id>"}`. On a registry that verifies no caller, it also carries the [unapplied-visibility warning](#unapplied-visibility-warning) when the restored layer sets no `public` grant.
 
 **Authorization for restore.** [Layer write authorization](#layer-write-authorization): a tenant admin for an admin-defined layer, and the owner or a tenant admin for a user-defined layer. A caller authorized by neither arm is rejected with `auth.forbidden`. On a layer that names a filesystem path on the registry host, [local-source authorization](#local-source-authorization) additionally requires the `admin` role. Any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
 
