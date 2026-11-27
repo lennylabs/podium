@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -412,7 +413,7 @@ func TestRecipeScript_PublishRerunOfAnOlderRunPublishesNothing(t *testing.T) {
 	t.Parallel()
 	r := newRecipe(t)
 	oldCheckout := r.checkout()
-	r.pushMain("v2")
+	main2 := r.pushMain("v2")
 	r.bundle("build", "run B")
 	newer := r.publishRun()
 
@@ -429,7 +430,103 @@ func TestRecipeScript_PublishRerunOfAnOlderRunPublishesNothing(t *testing.T) {
 		t.Error("podium/signed no longer holds the newest main")
 	}
 	notes, _ := os.ReadFile(summary)
-	if !strings.Contains(out, "::notice::podium-attest did not publish") || !strings.Contains(string(notes), "no longer the tip") {
+	if !strings.Contains(out, "::notice::podium-attest did not publish") || !strings.Contains(string(notes), "which is now "+main2) ||
+		!strings.Contains(string(notes), "a manual run of this workflow on main, signs the tip") {
 		t.Errorf("no notice:\n%s\n%s", out, notes)
+	}
+}
+
+// stubGH records each call's arguments, one per line after a "gh" line, in
+// $GH_LOG. `release download` creates the file it names; `attestation
+// verify` exits with $GH_VERIFY_EXIT.
+const stubGH = `#!/usr/bin/env bash
+set -euo pipefail
+{ echo gh; printf '%s\n' "$@"; } >> "$GH_LOG"
+if [ "$1 $2" = "release download" ]; then
+  dir="" pattern=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) dir="$2"; shift 2 ;;
+      --pattern) pattern="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  printf 'binary' > "$dir/$pattern"
+  exit 0
+fi
+exit "${GH_VERIFY_EXIT:-0}"
+`
+
+// Spec: §7.3.5 (Writing the signing workflow) — the install step downloads
+// the release and verifies it against the exact identity of the release
+// workflow at the release tag, the GitHub Actions issuer, and hosted
+// runners, before the binary is put on the path; the golden file pins the
+// argument lists. A binary that does not verify fails the step and is not
+// installed.
+func TestRecipeScript_InstallVerifiesTheExactIdentity(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("the recipe's scripts run under bash on a Linux runner")
+	}
+	doc := parseWorkflow(t, Workflow{Kind: KindRepository, Version: "0.8.0", Branch: "main"})
+	script := stringOf(step(t, doc, "subjects", "Install podium")["run"])
+	if publish := stringOf(step(t, doc, "publish", "Install podium")["run"]); publish != script {
+		t.Fatal("the two install steps differ")
+	}
+	base := t.TempDir()
+	bin := filepath.Join(base, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(stubGH), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(verifyExit string) (int, string, string, string) {
+		runner := filepath.Join(base, "runner-"+verifyExit)
+		if err := os.MkdirAll(runner, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		logFile, pathFile := filepath.Join(runner, "gh.log"), filepath.Join(runner, "path")
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Env = []string{
+			"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"), "RUNNER_TEMP=" + runner,
+			"GITHUB_PATH=" + pathFile, "PODIUM_VERSION=v0.8.0", "GH_LOG=" + logFile, "GH_VERIFY_EXIT=" + verifyExit,
+		}
+		out, err := cmd.CombinedOutput()
+		code := 0
+		if exit, ok := err.(*exec.ExitError); ok {
+			code = exit.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		calls, _ := os.ReadFile(logFile)
+		path, _ := os.ReadFile(pathFile)
+		norm := strings.ReplaceAll(string(calls), runner, "<RUNNER_TEMP>")
+		norm = regexp.MustCompile(`podium-linux-(amd64|arm64)`).ReplaceAllString(norm, "podium-linux-<arch>")
+		return code, string(out), norm, string(path)
+	}
+
+	code, out, calls, path := run("0")
+	if code != 0 || strings.TrimSpace(path) == "" {
+		t.Fatalf("install exited %d, path %q:\n%s", code, path, out)
+	}
+	golden := filepath.Join("testdata", "install-gh-calls.golden")
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		if err := os.WriteFile(golden, []byte(calls), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	} else if want, err := os.ReadFile(golden); err != nil || string(want) != calls {
+		t.Errorf("gh calls differ from %s (%v); regenerate with UPDATE_GOLDEN=1\n%s", golden, err, calls)
+	}
+	if !strings.Contains(calls, "--cert-identity\nhttps://github.com/lennylabs/podium/.github/workflows/release.yml@refs/tags/v0.8.0\n") {
+		t.Errorf("the verification names no exact identity:\n%s", calls)
+	}
+
+	code, out, _, path = run("1")
+	if code == 0 || strings.TrimSpace(path) != "" {
+		t.Errorf("a binary that does not verify was installed: exit %d, path %q\n%s", code, path, out)
+	}
+	if _, err := os.Stat(filepath.Join(base, "runner-1", "podium-bin", "podium")); err == nil {
+		t.Error("the unverified binary was moved into place")
 	}
 }

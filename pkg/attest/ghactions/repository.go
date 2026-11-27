@@ -315,7 +315,8 @@ var shellSafe = regexp.MustCompile(`\A[A-Za-z0-9@%+=:,./_-]+\z`)
 // interpolates goes through it, so pasting the command runs nothing the
 // value holds.
 func ShellQuote(s string) string {
-	if shellSafe.MatchString(s) {
+	// A leading "=" is safe in bash and expands to a command path in zsh.
+	if shellSafe.MatchString(s) && !strings.HasPrefix(s, "=") {
 		return s
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"

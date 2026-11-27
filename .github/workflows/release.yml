@@ -14,10 +14,12 @@ on:
     tags:
       - 'v*'
 
+# Each job reads the repository; a job that writes holds its permission
+# itself: release (contents), container (packages), publish-py and
+# publish-ts (id-token for trusted publishing and provenance), and build
+# (id-token and attestations for the binary attestations).
 permissions:
-  contents: write   # create the GitHub Release
-  packages: write   # push container images to ghcr.io
-  id-token: write   # PyPI trusted publishing + npm provenance
+  contents: read
 
 jobs:
   # Hard gate: a tag push only releases when the tagged commit is
@@ -207,8 +209,11 @@ jobs:
   build:
     needs: [go, python, typescript, postgres, s3]
     runs-on: ${{ matrix.os }}
-    # The attestation step below is the only one that needs id-token and
-    # attestations; this job holds them and no other job does.
+    # The attestation step below is the step of this job that needs
+    # id-token and attestations. No other job holds attestations: write;
+    # publish-py and publish-ts hold id-token: write for their own
+    # publishing. The actions of this job are pinned to commits because the
+    # job holds these permissions.
     permissions:
       contents: read
       id-token: write
@@ -257,8 +262,8 @@ jobs:
             apt: ''
             static: 'true'
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: Install cross-compiler
@@ -352,9 +357,12 @@ jobs:
       - name: Attest the binaries
         # The workflow that `podium attest init` writes verifies the build
         # provenance of the podium binary it installs with `gh attestation
-        # verify --signer-workflow lennylabs/podium/.github/workflows/release.yml`
+        # verify --cert-identity
+        # https://github.com/lennylabs/podium/.github/workflows/release.yml@refs/tags/<tag>`
         # before it runs it (spec §7.3.5), so every published binary carries
-        # an attestation signed by this workflow.
+        # an attestation signed by this workflow at the release tag. The
+        # identity trusts whoever can push a v* tag, which a tag ruleset
+        # restricts (RELEASING.md).
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
@@ -389,7 +397,7 @@ jobs:
               podium podium-server podium-mcp
           fi
           ls -la dist/
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/
@@ -398,9 +406,11 @@ jobs:
   release:
     needs: [build, go, python, typescript, postgres, s3]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the GitHub Release
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
@@ -418,7 +428,7 @@ jobs:
             echo "No CHANGELOG entry for ${VERSION}; falling back to tag name." >&2
             echo "Release ${TAG}" > release-notes.md
           fi
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           files: dist/*
           body_path: release-notes.md
@@ -434,14 +444,17 @@ jobs:
   publish-py:
     needs: [go, python, typescript, postgres, s3]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # PyPI trusted publishing
     environment: pypi
     steps:
       # setuptools-scm derives the version from `git describe --tags`.
       # The default shallow clone hides tags, so request a full clone.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: Build wheel + sdist
@@ -449,7 +462,7 @@ jobs:
         run: |
           python -m pip install --upgrade build
           python -m build
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: sdks/podium-py/dist
 
@@ -459,9 +472,12 @@ jobs:
   publish-ts:
     needs: [go, python, typescript, postgres, s3]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # npm provenance
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
@@ -487,8 +503,11 @@ jobs:
   container:
     needs: [go, python, typescript, postgres, s3]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # push container images to ghcr.io
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: dockerfile
         run: |
           if [ -f Dockerfile ]; then
@@ -498,11 +517,11 @@ jobs:
             echo "::notice::Skipping container build; no Dockerfile at repo root."
           fi
       - if: steps.dockerfile.outputs.exists == 'true'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
       - if: steps.dockerfile.outputs.exists == 'true'
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - if: steps.dockerfile.outputs.exists == 'true'
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -515,7 +534,7 @@ jobs:
           echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - if: steps.dockerfile.outputs.exists == 'true'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64

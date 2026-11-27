@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -262,9 +263,23 @@ func TestShellQuote(t *testing.T) {
 		"x$(touch /tmp/p)":          "'x$(touch /tmp/p)'",
 		"it's":                      `'it'\''s'`,
 		"a b":                       "'a b'",
+		"=ls":                       "'=ls'",
 	} {
 		if got := ShellQuote(in); got != want {
 			t.Errorf("ShellQuote(%q) = %s, want %s", in, got, want)
+		}
+	}
+	// Each value comes back unchanged from every shell installed here; zsh
+	// expands an unquoted leading "=".
+	for _, shell := range []string{"bash", "zsh", "sh"} {
+		if _, err := exec.LookPath(shell); err != nil {
+			continue
+		}
+		for _, v := range []string{"", "a b", "it's", "x$(id)", "a\nb", "`id`", "!x", "~/x", "*", "release/1.x", "-n", "a'\"b\\c", "=ls"} {
+			out, err := exec.Command(shell, "-c", "printf '%s' "+ShellQuote(v)).Output()
+			if err != nil || string(out) != v {
+				t.Errorf("%s: ShellQuote(%q) = %s printed %q, %v", shell, v, ShellQuote(v), out, err)
+			}
 		}
 	}
 }

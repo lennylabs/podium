@@ -55,7 +55,7 @@ jobs:
           fi
           tip=$(git ls-remote origin "refs/heads/$PODIUM_MAIN_BRANCH" | awk -v ref="refs/heads/$PODIUM_MAIN_BRANCH" '$2 == ref { print $1 }')
           if [ "$tip" != "$GITHUB_SHA" ]; then
-            stop "commit $GITHUB_SHA is not the tip of $PODIUM_MAIN_BRANCH (${tip:-none}); the run for the tip signs the current state"
+            stop "commit $GITHUB_SHA is not the tip of $PODIUM_MAIN_BRANCH, which is ${tip:-unknown}; a later run, or a manual run of this workflow on $PODIUM_MAIN_BRANCH, signs the tip"
           fi
           echo "sign=true" >> "$GITHUB_OUTPUT"
       - name: Install podium
@@ -73,7 +73,9 @@ jobs:
           mkdir -p "$dir"
           gh release download "$PODIUM_VERSION" --repo lennylabs/podium --pattern "podium-linux-$arch" --dir "$dir"
           gh attestation verify "$dir/podium-linux-$arch" --repo lennylabs/podium \
-            --signer-workflow lennylabs/podium/.github/workflows/release.yml
+            --cert-identity "https://github.com/lennylabs/podium/.github/workflows/release.yml@refs/tags/$PODIUM_VERSION" \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com \
+            --deny-self-hosted-runners
           mv "$dir/podium-linux-$arch" "$dir/podium"
           chmod +x "$dir/podium"
           echo "$dir" >> "$GITHUB_PATH"
@@ -164,7 +166,9 @@ jobs:
           mkdir -p "$dir"
           gh release download "$PODIUM_VERSION" --repo lennylabs/podium --pattern "podium-linux-$arch" --dir "$dir"
           gh attestation verify "$dir/podium-linux-$arch" --repo lennylabs/podium \
-            --signer-workflow lennylabs/podium/.github/workflows/release.yml
+            --cert-identity "https://github.com/lennylabs/podium/.github/workflows/release.yml@refs/tags/$PODIUM_VERSION" \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com \
+            --deny-self-hosted-runners
           mv "$dir/podium-linux-$arch" "$dir/podium"
           chmod +x "$dir/podium"
           echo "$dir" >> "$GITHUB_PATH"
@@ -216,8 +220,8 @@ jobs:
             fi
             tip=$(git ls-remote origin "refs/heads/$PODIUM_MAIN_BRANCH" | awk -v ref="refs/heads/$PODIUM_MAIN_BRANCH" '$2 == ref { print $1 }')
             if [ "$tip" != "$main" ]; then
-              echo "::notice::podium-attest did not publish: commit $main is no longer the tip of $PODIUM_MAIN_BRANCH (${tip:-none}); the run for the tip publishes the current state"
-              echo "podium-attest did not publish: $main is no longer the tip of $PODIUM_MAIN_BRANCH" >> "$GITHUB_STEP_SUMMARY"
+              echo "::notice::podium-attest did not publish: commit $main is no longer the tip of $PODIUM_MAIN_BRANCH, which is now ${tip:-unknown}; a later run, or a manual run of this workflow on $PODIUM_MAIN_BRANCH, signs the tip"
+              echo "podium-attest did not publish: $main is no longer the tip of $PODIUM_MAIN_BRANCH, which is now ${tip:-unknown}; a later run, or a manual run of this workflow on $PODIUM_MAIN_BRANCH, signs the tip" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             if git push origin "$commit:refs/heads/$PODIUM_SIGNED_REF"; then

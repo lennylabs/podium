@@ -177,7 +177,8 @@ func TestRender_RepositoryStructure(t *testing.T) {
 		run := stringOf(step(t, doc, job, "Install podium")["run"])
 		verify := strings.Index(run, "gh attestation verify")
 		if verify < 0 || verify > strings.Index(run, `mv "$dir/podium-linux-$arch"`) ||
-			!strings.Contains(run, "--signer-workflow lennylabs/podium/.github/workflows/release.yml") {
+			!strings.Contains(run, `--cert-identity "https://github.com/lennylabs/podium/.github/workflows/release.yml@refs/tags/$PODIUM_VERSION"`) ||
+			!strings.Contains(run, "--deny-self-hosted-runners") || strings.Contains(run, "--signer-workflow") {
 			t.Errorf("the %s job installs podium without verifying its attestation first:\n%s", job, run)
 		}
 	}
