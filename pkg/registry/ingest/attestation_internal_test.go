@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -190,8 +191,9 @@ func (failingRoot) AttestationRoot(context.Context) (*sign.AttestationRoot, erro
 }
 
 // Spec: §4.7.11 (Layer step) — a trusted root that fails for a reason other
-// than its age fails the cycle outside the attestation steps, and a
-// directory entry that is no file is not a bundle file.
+// than its age fails the cycle outside the attestation steps, and an entry
+// with the bundle suffix that is a directory, and an attestation directory
+// path that is a file, fail step 1 with the constraint unreadable.
 func TestLayerStep_RootErrorAndDirectoryEntries(t *testing.T) {
 	t.Parallel()
 	a := &AttestationCycle{cfg: &AttestationConfig{Instances: map[string]sign.AttestationInstance{
@@ -200,12 +202,36 @@ func TestLayerStep_RootErrorAndDirectoryEntries(t *testing.T) {
 	if f, err := a.checkRoots(context.Background()); f != nil || err == nil {
 		t.Fatalf("failure %v, err %v", f, err)
 	}
-	files := fstest.MapFS{".podium/attestations/x.sigstore.json/inner": {Data: []byte("{}")}}
-	if bundles, f, err := a.readBundles(files); len(bundles) != 0 || f != nil || err != nil {
-		t.Fatalf("bundles %d, failure %v, err %v", len(bundles), f, err)
+	for name, files := range map[string]fstest.MapFS{
+		"directory entry": {".podium/attestations/x.sigstore.json/inner": {Data: []byte("{}")}},
+		"file path":       {".podium/attestations": {Data: []byte("a file")}},
+	} {
+		if bundles, f, err := a.readBundles(files); len(bundles) != 0 || err != nil || f == nil || f.Constraint() != "unreadable" {
+			t.Errorf("%s: bundles %d, failure %v, err %v", name, len(bundles), f, err)
+		}
 	}
-	if _, _, err := a.readBundles(fstest.MapFS{".podium/attestations": {Data: []byte("a file")}}); err == nil {
-		t.Fatal("a directory that is a file read as empty")
+}
+
+// Spec: §4.7.11 (Reported strings) — a details object whose lists encode to
+// 32 KiB or more, with <, >, and & escaped, loses list entries from its
+// longest list until it fits, and is marked truncated; a small one is kept.
+func TestBoundDetails(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("<", 256)
+	var ids []string
+	for range 40 {
+		ids = append(ids, long)
+	}
+	d := boundDetails(map[string]any{"constraint": "x", "ids": ids, "other": []string{"a"}})
+	b, _ := json.Marshal(d)
+	if len(b) >= maxDetailsBytes || d["truncated"] != true || len(d["other"].([]string)) != 1 {
+		t.Fatalf("bounded to %d bytes, details %v", len(b), d["truncated"])
+	}
+	if small := boundDetails(map[string]any{"constraint": "x"}); small["truncated"] != nil {
+		t.Fatalf("small details marked truncated")
+	}
+	if n := listLen(1); n != 0 || dropLast(1) != 1 || listLen([]map[string]string{{}}) != 1 || len(dropLast([]map[string]string{{}}).([]map[string]string)) != 0 {
+		t.Fatal("list helpers")
 	}
 }
 

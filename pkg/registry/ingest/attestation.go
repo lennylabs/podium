@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -75,7 +76,64 @@ func attestFailure(code, constraint, message string, kv ...any) *AttestationErro
 	for i := 0; i+1 < len(kv); i += 2 {
 		d[kv[i].(string)] = kv[i+1]
 	}
-	return &AttestationError{Code: code, Details: d, Message: code + ": " + message}
+	return &AttestationError{Code: code, Details: boundDetails(d), Message: code + ": " + message}
+}
+
+// maxDetailsBytes is the bound of the JSON encoding of a details object.
+const maxDetailsBytes = 32 * 1024
+
+// boundDetails keeps the JSON encoding of d below maxDetailsBytes. It
+// measures the encoding with <, >, and & escaped as six bytes each, which is
+// the longest form any reader writes, and while it is too long it drops the
+// last entry of the longest list member and sets truncated. The members a
+// cycle writes besides its lists are bounded reported strings and numbers,
+// so dropping list entries always reaches the bound.
+//
+// Spec: §4.7.11 (Reported strings)
+func boundDetails(d map[string]any) map[string]any {
+	for {
+		b, err := json.Marshal(d)
+		if err != nil || len(b) < maxDetailsBytes {
+			return d
+		}
+		key, n := "", 0
+		for k, v := range d {
+			if l := listLen(v); l > n || l == n && l > 0 && k < key {
+				key, n = k, l
+			}
+		}
+		if n == 0 {
+			return d
+		}
+		d[key] = dropLast(d[key])
+		d["truncated"] = true
+	}
+}
+
+// listLen returns the number of entries of a list member, 0 for any other.
+func listLen(v any) int {
+	switch l := v.(type) {
+	case []string:
+		return len(l)
+	case []map[string]any:
+		return len(l)
+	case []map[string]string:
+		return len(l)
+	}
+	return 0
+}
+
+// dropLast returns a list member without its last entry.
+func dropLast(v any) any {
+	switch l := v.(type) {
+	case []string:
+		return l[:len(l)-1]
+	case []map[string]any:
+		return l[:len(l)-1]
+	case []map[string]string:
+		return l[:len(l)-1]
+	}
+	return v
 }
 
 // AttestationConfig is the registry's §4.7.11 ingest verification setup,
@@ -125,16 +183,23 @@ type AttestationCycle struct {
 }
 
 // Cycle returns the attestation steps of a cycle that claimed lc with claim,
-// or nil when the layer's resolved mode is none or no configuration is set,
-// in which case the cycle runs no attestation step and writes no record.
+// or nil when the layer's resolved mode is none, in which case the cycle runs
+// no attestation step and writes no record. Every other resolved mode yields
+// a cycle, so a stored mode the registry cannot read, such as REQUIRE, is
+// refused by the policy check rather than read as none.
 //
-// Spec: §4.7.11 (Ingest verification)
+// A nil configuration fails closed as well: it configures no Sigstore
+// instance and no trust default, so a layer whose own mode is above none
+// gets a cycle whose policy check refuses it (unknown_instance or
+// no_requirements) instead of an ingest that verifies nothing.
+//
+// Spec: §4.7.11 (Ingest verification, Policy that became invalid)
 func (c *AttestationConfig) Cycle(lc store.LayerConfig, claim string) *AttestationCycle {
 	if c == nil {
-		return nil
+		c = &AttestationConfig{}
 	}
 	mode := layer.ResolveTrustMode(lc.TrustMode, c.DefaultMode)
-	if mode != layer.TrustModeWarn && mode != layer.TrustModeRequire {
+	if mode == layer.TrustModeNone {
 		return nil
 	}
 	return &AttestationCycle{cfg: c, layer: lc, claim: claim, mode: mode, clock: clock.Real{}}
@@ -189,6 +254,11 @@ func (a *AttestationCycle) CheckPolicy(ctx context.Context, st store.Store, onWr
 // longer configures. Any other rule a stored policy breaks, which the layer
 // endpoints refuse, fails closed under the constraint policy_rule.
 func (a *AttestationCycle) policyFailure() *AttestationError {
+	if !layer.ValidTrustMode(a.mode) {
+		return attestFailure(CodeAttestationPolicyInvalid, "policy_rule",
+			fmt.Sprintf("layer %s has the trust mode %q, which is not none, warn, or require", a.layer.ID, a.mode),
+			"trust_mode", attest.ReportString(a.mode))
+	}
 	if len(a.layer.TrustRequirements) == 0 {
 		return attestFailure(CodeAttestationPolicyInvalid, "no_requirements",
 			fmt.Sprintf("layer %s resolves to trust mode %s and has no requirement", a.layer.ID, a.mode))

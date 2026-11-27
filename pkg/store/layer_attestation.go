@@ -1,9 +1,11 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -157,11 +159,15 @@ func attestationDetailsColumn(d map[string]any) (string, error) {
 	if len(d) == 0 {
 		return "", nil
 	}
-	b, err := json.Marshal(d)
-	if err != nil {
+	// The column stores <, >, and & as written; the HTML escaping of
+	// json.Marshal would make a bounded object up to six times longer.
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(d); err != nil {
 		return "", fmt.Errorf("store: encode attestation details: %w", err)
 	}
-	return string(b), nil
+	return strings.TrimSuffix(b.String(), "\n"), nil
 }
 
 // parseAttestationDetails decodes the details column.

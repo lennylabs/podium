@@ -43,11 +43,15 @@ func (b *snapshotBundle) acceptedByAny() bool {
 }
 
 // readBundles applies layer step 1 to the attestation directory of the
-// snapshot: it reads every *.sigstore.json file, refuses more files than
+// snapshot: it reads every *.sigstore.json entry, refuses more entries than
 // MaxBundles and a file over MaxBundleBytes with the constraint limits, and
-// returns the bundles in file name order. A missing directory holds no
-// bundle. Each bundle's attestation digest is computed over the bytes the
-// cycle read, which are the bytes it verifies.
+// returns the bundles in name order. A missing directory holds no bundle. A
+// directory path the cycle cannot list, and an entry it cannot read as a
+// regular file (a directory, a dangling link, a link to a directory), fail
+// the step with the constraint unreadable rather than the cycle, so the
+// layer's record states why and a start continues. Each bundle's attestation
+// digest is computed over the bytes the cycle read, which are the bytes it
+// verifies.
 //
 // Spec: §4.7.11 (Layer step)
 func (a *AttestationCycle) readBundles(files fs.FS) ([]*snapshotBundle, *AttestationError, error) {
@@ -56,11 +60,11 @@ func (a *AttestationCycle) readBundles(files fs.FS) ([]*snapshotBundle, *Attesta
 		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("ingest: read the attestation directory: %w", err)
+		return nil, unreadable(attest.AttestationDir, "the attestation directory cannot be listed"), nil
 	}
 	var names []string
 	for _, e := range entries {
-		if !e.IsDir() && attest.IsBundleFileName(e.Name()) {
+		if attest.IsBundleFileName(e.Name()) {
 			names = append(names, e.Name())
 		}
 	}
@@ -74,12 +78,16 @@ func (a *AttestationCycle) readBundles(files fs.FS) ([]*snapshotBundle, *Attesta
 	out := make([]*snapshotBundle, 0, len(names))
 	for _, name := range names {
 		p := path.Join(attest.AttestationDir, name)
-		if info, err := fs.Stat(files, p); err == nil && info.Size() > maxBytes {
+		info, err := fs.Stat(files, p)
+		if err != nil || !info.Mode().IsRegular() {
+			return nil, unreadable(name, "the bundle entry is not a regular file the cycle can read"), nil
+		}
+		if info.Size() > maxBytes {
 			return nil, oversized(name, info.Size(), maxBytes), nil
 		}
 		raw, err := fs.ReadFile(files, p)
 		if err != nil {
-			return nil, nil, fmt.Errorf("ingest: read bundle %s: %w", attest.ReportString(name), err)
+			return nil, unreadable(name, "the bundle file cannot be read"), nil
 		}
 		if int64(len(raw)) > maxBytes {
 			return nil, oversized(name, int64(len(raw)), maxBytes), nil
@@ -87,6 +95,13 @@ func (a *AttestationCycle) readBundles(files fs.FS) ([]*snapshotBundle, *Attesta
 		out = append(out, &snapshotBundle{raw: raw, digest: attest.AttestationDigest(raw)})
 	}
 	return out, nil, nil
+}
+
+// unreadable is the step 1 failure of an attestation directory path or a
+// bundle entry that the cycle cannot read.
+func unreadable(name, why string) *AttestationError {
+	return attestFailure(CodeAttestationInvalid, "unreadable", why+": "+attest.ReportString(name),
+		"file", attest.ReportString(name))
 }
 
 // oversized is the limits failure of one bundle file.

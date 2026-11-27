@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/clock"
+	"github.com/lennylabs/podium/pkg/attest"
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/lint"
@@ -392,7 +393,7 @@ func claimForCycle(ctx context.Context, st store.Store, cfg store.LayerConfig, o
 		}
 		opts.AuditEmit(string(audit.EventLayerAttestationMarkReset), cfg.ID, map[string]string{
 			"previous_mark":   mark,
-			"previous_commit": prior.Commit,
+			"previous_commit": attest.ReportString(prior.Commit),
 			"to_commit":       opts.MarkReset.ToCommit,
 			"caller":          opts.CallerID,
 		})

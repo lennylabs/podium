@@ -2,8 +2,11 @@ package ingest_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -346,6 +349,11 @@ func TestAttestation_SupersededCycleWritesNothing(t *testing.T) {
 // when its cycle fails.
 func TestAttestation_MarkResetWithTheClaim(t *testing.T) {
 	f := newAttestFixture(t, "require")
+	// A recorded commit with a line feed, as an earlier reset in a store
+	// edited by hand could hold, reaches the event as a reported string.
+	if _, _, _, err := f.st.ClaimLayerIngestWithReset(context.Background(), "tenant-1", "team", "seed", "bad\ncommit"); err != nil {
+		t.Fatal(err)
+	}
 	f.signLayer(3 * time.Minute)
 	if _, err := f.cycle(); err != nil {
 		t.Fatal(err)
@@ -371,7 +379,8 @@ func TestAttestation_MarkResetWithTheClaim(t *testing.T) {
 		t.Fatalf("record %+v", rec)
 	}
 	i := slices.IndexFunc(events, func(e auditRecord) bool { return e.typ == "layer.attestation_mark_reset" })
-	if i < 0 || events[i].fields["to_commit"] != commit || events[i].fields["previous_mark"] == "" || events[i].fields["caller"] != "alice@acme.com" {
+	if i < 0 || events[i].fields["to_commit"] != commit || events[i].fields["previous_mark"] == "" || events[i].fields["caller"] != "alice@acme.com" ||
+		events[i].fields["previous_commit"] != "bad\ufffdcommit" {
 		t.Fatalf("events %+v", events)
 	}
 }
@@ -442,5 +451,87 @@ func TestAttestation_OrchestratedCycle(t *testing.T) {
 	src.snapErr = &spi.Error{Code: "ingest.source_unreachable", Message: "deadline", Details: map[string]any{"constraint": "fetch_deadline"}}
 	if _, err := f.runSource(src); err == nil || f.record().Status != "ingest.source_unreachable" {
 		t.Fatalf("deadline: err %v, record %+v", err, f.record())
+	}
+}
+
+// Spec: §4.7.11 (Policy that became invalid) — a stored trust_mode the
+// registry cannot read, in any letter case or with white space, does not read
+// as none: the cycle is refused with policy_rule, stores nothing, and writes
+// the refusal to the record. A nil configuration refuses a layer whose own
+// mode is above none, because it configures no instance.
+func TestAttestation_UnreadableModeFailsClosed(t *testing.T) {
+	for _, mode := range []string{"REQUIRE", "required", "Require", " require"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newAttestFixture(t, mode)
+			_, err := f.cycle()
+			if code, d := refusal(t, err); code != ingest.CodeAttestationPolicyInvalid || d["constraint"] != "policy_rule" {
+				t.Fatalf("refusal %s %v", code, d)
+			}
+			if f.record().Status != ingest.CodeAttestationPolicyInvalid || len(f.stored()) != 0 {
+				t.Fatalf("record %+v, stored %v", f.record(), f.stored())
+			}
+		})
+	}
+	f := newAttestFixture(t, "require")
+	f.cfg = nil
+	f.signLayer(time.Minute)
+	_, err := f.cycle()
+	if code, d := refusal(t, err); code != ingest.CodeAttestationPolicyInvalid || d["constraint"] != "unknown_instance" || len(f.stored()) != 0 {
+		t.Fatalf("nil configuration: %s %v, stored %v", code, d, f.stored())
+	}
+}
+
+// Spec: §4.7.11 (Reported strings) — a replayed signed state beside packages
+// whose IDs and fields a sender chose to be escaped by HTML-safe encoders
+// gives a layer_digest failure whose stored attestation_details stays below
+// 32 KiB, measured with <, >, and & escaped, and is marked truncated.
+func TestAttestation_DetailsStayBelow32KiB(t *testing.T) {
+	f := newAttestFixture(t, "require")
+	f.signLayer(time.Minute)
+	seg := strings.Repeat("<", 200)
+	for i := range 25 {
+		f.write(map[string]string{fmt.Sprintf("%s/%s%02d/ARTIFACT.md", seg, strings.Repeat(">", 120), i): agentArtifact("x")})
+	}
+	rb := strings.Repeat("&", 300)
+	for _, id := range []string{"finance/pay", "finance/close"} {
+		f.write(map[string]string{id + "/ARTIFACT.md": "---\ntype: agent\nversion: 1.0.0\ndescription: d\nsensitivity: low\ndeprecated: true\nreplaced_by: \"" + rb + "\"\n---\n\nbody\n"})
+	}
+	_, err := f.cycle()
+	if code, d := refusal(t, err); code != ingest.CodeAttestationMismatch || d["constraint"] != "layer_digest" {
+		t.Fatalf("refusal %s %v", code, d)
+	}
+	rec := f.record()
+	b, _ := json.Marshal(rec.Details)
+	if len(b) >= 32*1024 || rec.Details["truncated"] != true {
+		t.Fatalf("attestation_details is %d bytes, truncated %v", len(b), rec.Details["truncated"])
+	}
+}
+
+// Spec: §4.7.11 (Layer step) — a bundle entry the cycle cannot read, a
+// dangling link or a link to a directory, fails the layer step with
+// ingest.attestation_invalid and the constraint unreadable under require, is
+// recorded, and under warn the cycle stores the layer with that status.
+func TestAttestation_UnreadableBundleEntry(t *testing.T) {
+	for _, tc := range []struct{ name, target string }{{"dangling", "missing-target"}, {"directory link", "."}} {
+		for _, mode := range []string{"require", "warn"} {
+			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				f := newAttestFixture(t, mode)
+				f.signLayer(time.Minute)
+				if err := os.Symlink(tc.target, filepath.Join(f.dir, ".podium", "attestations", "zz.sigstore.json")); err != nil {
+					t.Fatal(err)
+				}
+				res, err := f.cycle()
+				if mode == "require" {
+					if code, d := refusal(t, err); code != ingest.CodeAttestationInvalid || d["constraint"] != "unreadable" || d["file"] != "zz.sigstore.json" {
+						t.Fatalf("refusal %s %v", code, d)
+					}
+				} else if err != nil || res.Accepted != 2 {
+					t.Fatalf("warn: err %v, result %+v", err, res)
+				}
+				if rec := f.record(); rec.Status != ingest.CodeAttestationInvalid || rec.Details["constraint"] != "unreadable" {
+					t.Fatalf("record %+v", rec)
+				}
+			})
+		}
 	}
 }

@@ -1,11 +1,13 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/attest"
@@ -216,9 +218,11 @@ func unacceptedBundles(bundles []*snapshotBundle) []map[string]string {
 
 // jsonText encodes v for a string member of an audit event.
 func jsonText(v any) string {
-	b, err := json.Marshal(v)
-	if err != nil {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
 		return ""
 	}
-	return string(b)
+	return strings.TrimSuffix(b.String(), "\n")
 }
