@@ -14,6 +14,7 @@ func TestStripCoverageNoise(t *testing.T) {
 		{"noise alone", noise, ""},
 		{"noise without trailing newline", "first\n" + noise[:len(noise)-1], "first\n"},
 		{"blank line kept when not after noise", "a\n\nb\n", "a\n\nb\n"},
+		{"blank line after a non-writing failure belongs to the program", "error: coverage meta-data emit failed: output directory /x inaccessible\n\nUsage: podium\n", "\nUsage: podium\n"},
 		{"noise mid-stream", "a\n" + noise + "b\n", "a\nb\n"},
 	}
 	for _, c := range cases {

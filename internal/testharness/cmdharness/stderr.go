@@ -6,8 +6,9 @@ import "strings"
 // instrumented binary fails to write its meta-data file at startup.
 const coverageMetaFailure = "error: coverage meta-data emit failed: "
 
-// StripCoverageNoise removes the coverage runtime's meta-data failure line,
-// and the blank line that follows it, from a subprocess's stderr.
+// StripCoverageNoise removes the coverage runtime's meta-data failure line
+// from a subprocess's stderr, with the blank line that follows a failure to
+// write the file.
 //
 // A binary built with -cover writes its meta-data file at startup through a
 // temporary file named after the meta hash and time.Now().UnixNano(), with no
@@ -17,6 +18,11 @@ const coverageMetaFailure = "error: coverage meta-data emit failed: "
 // and the program runs on. The meta-data file the other process wrote is
 // byte-identical, so no coverage is lost, but the line breaks a test that
 // asserts what stderr begins with or that it is empty.
+//
+// The runtime's errors for writing the file end in a newline of their own
+// ("writing %s: ...\n" in internal/coverage/cfile/emit.go), and the runtime
+// adds another, so those leave a blank line. The other meta-data errors do
+// not, and a blank line after them belongs to the program.
 func StripCoverageNoise(stderr string) string {
 	if !strings.Contains(stderr, coverageMetaFailure) {
 		return stderr
@@ -28,7 +34,7 @@ func StripCoverageNoise(stderr string) string {
 			out = append(out, lines[i])
 			continue
 		}
-		if i+1 < len(lines) && lines[i+1] == "\n" {
+		if strings.HasPrefix(lines[i], coverageMetaFailure+"writing ") && i+1 < len(lines) && lines[i+1] == "\n" {
 			i++
 		}
 	}
